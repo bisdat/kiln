@@ -5712,6 +5712,19 @@
         "duration": "Czas trwania",
         "durationPh": "jak w grze",
         "seconds": "sekund",
+        "water": "Woda ze zbiornika",
+        "waterTip": "Własna woda receptury, w ładunkach na wytworzenie (po 64 jednostki wody), tak jak pokazuje ją wiersz Woda na ekranie receptur. Gra pobiera ją na początku wytwarzania.",
+        "waterPh": "brak",
+        "waterPhBase": "jak w bazowej",
+        "waterPhGame": "jak w grze",
+        "waterUnit": "ładunków na wytworzenie",
+        "waterTank": "Zbiornik stanowiska {station} mieści {max} ładunków: utrzymuj go pełnym, aby wytwarzać.",
+        "waterOver": "Więcej, niż mieści zbiornik stanowiska {station} ({max}): stanowisko nigdy nie zacznie tej receptury.",
+        "waterNoTank": "Stanowisko {station} nie ma zbiornika na wodę: nigdy nie zacznie receptury, która potrzebuje wody.",
+        "waterMenu": "Wytwarzane z menu: gra pobiera wodę z pojemników gracza oraz ze studni i beczek w bazie.",
+        "oldWater": "Jednym ze składników jest stary przedmiot Woda z gry, manierka: każde wytworzenie zabiera {count} tego przedmiotu, a nie wodę ze zbiornika stanowiska.",
+        "useTank": "Użyj wody ze zbiornika",
+        "useTankTip": "Usuwa składniki z przedmiotem Woda i wymaga tej samej ilości wody ze zbiornika",
         "itemAria": "Przedmiot",
         "countAria": "Liczba",
         "category": "dowolny przedmiot z kategorii {id}",
@@ -5800,7 +5813,8 @@
         "toggle": "Pokaż ukryte wpisy gry",
         "tag": "ukryty",
         "tip": "Stare, testowe lub nieużywane wpisy gry: w grze mogą nic nie robić.",
-        "tankWater": "woda ze zbiornika stanowiska"
+        "oldWater": "stara manierka, nie woda ze zbiornika",
+        "oldWaterTip": "Stary przedmiot Woda z gry. Ekran receptur używa jego nazwy dla wody receptury, ale jako składnik jest to sam przedmiot. Dla wody ze zbiornika użyj opcji Woda ze zbiornika w recepturze."
       }
     },
     "order": {

@@ -44,6 +44,7 @@
 #include "barber.h"
 #include "content.h"
 #include "nlohmann/json.hpp"
+#include "recipe_water.h"
 #include "refs.h"
 #include "services/kiln_assets.h"
 #include "services/kiln_caps.h"  // the row content.text
@@ -651,6 +652,7 @@ struct Def {
     json distribution = json::object();  // items: loot / drops / knowledge (distribution.cpp)
     std::vector<StackSpec> inputs, outputs;
     double duration = -1;  // recipes: seconds, < 0 = the template's
+    int64_t water = -1;    // recipes: "water", RecipeInfo.waterCharges (charges per craft, recipe_water.h), < 0 = the template's
     std::vector<std::pair<uint32_t, int>> props;  // recipes: "props": crafting props that must be near, {id, place (the bit of requiredPropsMask)}, besides the base recipe's
     bool unlock_base = false;
     KilnOwner owner = 0;
@@ -1355,6 +1357,11 @@ uintptr_t build_recipe(Def& d, WorldState& ws, std::string* why) {
     if (d.duration >= 0) {
         const int64_t ns = static_cast<int64_t>(d.duration * 1e9);
         std::memcpy(p + L.r_dur, &ns, 8);
+    }
+    // "water": after the station template's requirements were cleared (zero_without_base), so a recipe without a base can ask it
+    {
+        const Field* wf = L.recipe.find("waterCharges");
+        if (!recipe_water::write(p, d.water, wf ? static_cast<int64_t>(wf->offset) : -1, wf ? wf->bytes : 0, why)) return 0;
     }
     if (!d.unlock_base) std::memset(p + L.r_know, 0, L.know_size);  // no knowledge needed (docs: "Unlock")
     std::memset(p + L.r_done, 0, L.know_size);                       // no "crafted once" tracking
@@ -4183,6 +4190,7 @@ KilnResult nc_define(KilnOwner owner, uint32_t kind, const std::string& text, bo
                 return fail("\"duration\" must be seconds (0..1e6)");
             d->duration = j["duration"].get<double>();
         }
+        if (std::string werr; !recipe_water::parse(j, &d->water, &werr)) return fail(werr);
         const std::string u = lower(str_of(j, "unlock"));
         if (!u.empty() && u != "always" && u != "base") return fail("\"unlock\" must be \"always\" or \"base\"");
         d->unlock_base = u == "base";

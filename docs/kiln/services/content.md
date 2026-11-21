@@ -401,7 +401,7 @@ public override void OnLoad()   // register early: the registries take them when
 - Recipe definitions: `BaseOn` (a recipe to copy: station, level, comfort, props, cooking, …) and/or `Station` (a
   recipe whose station to use, `"0x<workshop id>"`, `"hand"`: the player's own crafting menu, or `"workshop:<guid>"`: a
   workshop of the mod's own, id FNV-1a of the GUID, given a recipe list of its own when nothing has one yet; without
-  `BaseOn` the recipe has no level / comfort / prop / water requirement), `Menu` (`"menu"` in a pack: the `"0x…"`
+  `BaseOn` the recipe has no level / comfort / prop / water requirement; a pack's `"water"` gives it its water), `Menu` (`"menu"` in a pack: the `"0x…"`
   workshop whose crafting menu lists it, when that is not its own; a station opens the menu of its
   `CraftingInteraction.workshopId` and runs the recipes of its `Crafting.workshopId`. At a `"workshop:<guid>"`, a
   player's game gives that workshop a menu of its own instead, listing only its recipes, under the tabs and subcategories
@@ -493,7 +493,7 @@ Delete `kiln/data/craftmatch-test/` for a fresh run.
 ### Data packs: "add"
 The same definitions in `content/*.json`, as `"add"` lists in the `items` / `recipes` sections (fields as in the C#
 form: `guid`, `name`, `base`, `displayName`, `description`, `lore`, `fields`, `rolledLoot`; recipes `station`, `inputs`,
-`outputs`, `duration`, `unlock`). Rules after the list (in the same pack, or later packs) can change the new entries
+`outputs`, `duration`, `unlock`, and in a pack also `water`, which the C# form sets through `Fields["waterCharges"]`). Rules after the list (in the same pack, or later packs) can change the new entries
 like any game entry:
 ```json
 { "format": 1,
@@ -505,6 +505,22 @@ like any game entry:
     "add": [ { "guid": "84d38550-b3df-426d-a42d-5b1259156447", "name": "Kiln_Sample_FrostLantern_Recipe",
                "station": "hand", "inputs": [ { "item": "Kiln_Sample_FrostShard", "count": 1 } ],
                "outputs": [ { "item": "Kiln_Sample_FrostLantern", "count": 1 } ] } ] } }
+```
+
+**A recipe's water** (`"water"`, 0.2.0-dev.30.3): the game's own recipe water, `RecipeInfo.waterCharges`, in charges a craft
+(1 charge = 64 water units; the recipe screen shows it as its "Water" row, e.g. "Water 92 / 2"). The game takes it when a
+craft starts: a station with a tank (Seedbed 150 charges, Oven, Cooking Station, Laboratory, Coffee Brewer 100, Beehive 50)
+from its own tank, filled with a watering can or the station's Fill; a crafting menu (`"hand"`, the Workbench, the
+Kitchen, the NPCs) from the crafter's water containers and the base's wells and barrels. A whole number 0..1023; without
+it a recipe has its base's water, or none with only a `station`; `0` clears a base's. A change to a game recipe sets
+`"waterCharges"`. kiln lint KL408 warns about water at a factory station without a tank (it never starts the recipe) or
+above its tank. **Not the "Water" item**: `Food_T1_raw_hydration_Water_Pouch_Filled_DEPRECATED` is the game's old canteen;
+as an input a craft takes that item, never tank water (KL408 says so). Evidence: docs/re/stations.md section 3.6.
+```json
+{ "format": 1, "recipes": { "add": [ {
+    "guid": "1f0c8a52-3b7e-4d21-9a6c-2e5d8b4f7a10", "name": "MyMod_Herb_Tea", "station": "0x6b8247d6", "water": 5,
+    "inputs": [ { "item": "Food_T7_raw_herb_Thyme", "count": 2 } ], "outputs": [ { "item": "Food_T7_dish_hydration_ThymeTea", "count": 1 } ] } ],
+  "Food_T3_Meat_Chicken_Soup": { "waterCharges": 3 } } }
 ```
 A pack's definitions belong to the pack (they follow its mod's load state like the pack's rules).
 
