@@ -29,6 +29,20 @@ it grows when a try right after a Post finds the engine still in its update (`po
 mod makes no try, since the latch would only answer busy again. Results of r1 are not comparable with r2's:
 `analyze.py` shows r1 runs apart, as `<platform> kit 1`.
 
+**Kit 3 and where a hold ends (2026-11-21, files say kit 3).** bisdat's r2 runs on Proton (0.2.0-dev.30.1) showed the
+raise on idle at a median hold of 12.6 µs against 2.5 µs off, and under load 1,437 holds of 1 ms or more against 2.
+That Kiln read the hold's clock at the end of the gate's release: after the Scene word, the registry word, Kiln's holder
+flag and the priority restore (`SetThreadPriority`, a wineserver round trip under Proton). The 10 µs were the restore,
+and the long holds a thread preempted right after it dropped back to its own priority, before it read the clock. The
+Scene word was free in both. Kiln now ends a hold at the Scene word's release and times the restore apart
+([engine.md](services/engine.md#the-engines-write-gate-kilninternalengine)): `hold_ns` is the time the engine was kept
+out, `restore_ns` what the raise costs after it. Kit 3 is kit 2's loop with that second number: `restore_ns` in
+`writes.csv`, the restore counters in `gate.csv`, and `hold=scene-release` in every file's header and `run.json`
+(`hold_ends`). On a Kiln without the restore counters (one from before this change, such as 0.2.0-dev.30.1) kit 3
+writes `hold=release-end` and leaves the restore columns empty. `analyze.py` labels those runs, and every kit 1 and 2
+run, "hold includes the release and restore": compare their holds with kit 3's hold plus restore, not with its hold
+alone.
+
 ## What you need
 
 - A Windows 10 or 11 PC with Enshrouded on Steam, playing natively (not through Proton). A Linux PC with Proton is
@@ -168,12 +182,16 @@ decide whether Wine passes thread priorities on.
 - `kiln\logs\tick-stats.jsonl` and `kiln\state\capabilities.json`.
 - The test mod's runs (`kiln\logs\gate-priority-test\run-*`):
   - `run.json`: the target, the mode, the raise and a summary;
-  - `writes.csv`: every compare-exchange: its outcome, the gate's hold time, the calling thread's priority, the
-    server step, and the step and time since the last Post (`post_step`, `since_post_ns`, kit 2);
+  - `writes.csv`: every compare-exchange: its outcome, the gate's hold time (`hold_ns`), the calling thread's
+    priority, the server step, the step and time since the last Post (`post_step`, `since_post_ns`, kit 2), and the
+    priority restore after the gate's release (`restore_ns`, kit 3; empty where Kiln does not time it);
   - `steps.csv`: every server step's Pre and Post times;
-  - `gate.csv`: `kiln.engine`'s gate counters every 10 seconds.
+  - `gate.csv`: `kiln.engine`'s gate counters every 10 seconds (kit 3 adds `restores`, `restore_ns_total`,
+    `restore_ns_max`, empty on a Kiln without them).
 
-  Each CSV's first line says whether the raise was on or off.
+  Each CSV's first line says whether the raise was on or off, and (kit 3) where this Kiln ends a hold:
+  `hold=scene-release` (at the Scene word's release, the restore apart) or `hold=release-end` (after the release and
+  the restore).
 - The CPU-load helper's phase files (`cpu-load-*.csv`) and `fault-test.txt`.
 - `system.json`: Windows version or Linux distribution and kernel, Proton version, CPU, cores, memory, power plan or
   CPU governor, the time-zone offset, and whether the switch was set.
@@ -193,7 +211,7 @@ Look for `gate-priority-test:` lines in `<game>\kiln\logs\kiln.log`:
 | `this world is ..., the run file names ...` | Another world is loaded; `kit.ps1 world` names the newest one logged |
 | `kiln.world's compare-exchange writes are off on this build` | The game has updated past the builds Kiln knows; say so in #58 with the line `kiln.engine: ...` above it |
 | `... it runs no-op exchanges instead` | No component of your character has a usable padding byte. The run still takes the gate (no write) and is still useful |
-| `done (...)` | The summary: outcome counts, hold times, whether the byte is back |
+| `done (...)` | The summary: outcome counts, hold times, restore times (or `restore not measured` on a Kiln whose hold includes it), whether the byte is back |
 | `done (the restore stayed busy: ...)` | The gate stayed busy for 300 server steps or 10 s; the line says how many tries, steps and seconds, and how many waits saw no server step at all. Attach the zip in #58 |
 | `done (...)` with `the last change could not be put back` | A write could not be proven, or the world stopped between a change and its restore. The changed bit is in a padding byte of an untracked component, so it is only in memory and never saved: quit the game, and it's gone. Say so in #58 |
 
@@ -224,16 +242,23 @@ The CPU-load phase files sort every row into idle or loaded. Two seconds around 
 (`--margin`). Each table has one row per platform (`windows`, `proton`), raise (`on`, `off`) and load (`idle`,
 `loaded`):
 
-- **Hold time:** every call that took the gate. The percentiles, the maximum, how many held 1 ms or more, and the
-  busy share, with a histogram from 10 µs to over 20 ms. Kit 2 tries only between updates, so its busy share counts
-  calls that met the end of an update or another holder, not tries inside one (kit 1's were mostly those).
+- **Hold time:** every call that took the gate: how long the engine's Scene word was held (`hold_ns`). The
+  percentiles, the maximum, how many held 1 ms or more, and the busy share, with a histogram from 10 µs to over 20 ms.
+  Kit 2 tries only between updates, so its busy share counts calls that met the end of an update or another holder, not
+  tries inside one (kit 1's were mostly those). Runs whose Kiln timed a hold to the end of the release (kit 1 and 2, and
+  kit 3 on a Kiln from before this change, such as 0.2.0-dev.30.1) are rows of their own, labelled "hold includes the
+  release and restore".
+- **Priority restore:** the same calls' `restore_ns` (kit 3 on a Kiln that times it): how long putting the thread's
+  priority back took after the Scene word was free, a preemption right after it included. 0 with the raise off.
 - **Server step from the mod's rows:** Pre to Pre is the step's interval. A spin at the start of a frame lengthens it,
   so "late" counts intervals over 1.5 times the idle median. Pre to Post is the step itself.
 - **Server step from tick-stats.jsonl:** Kiln's own minute windows that lie inside one phase.
 - **Outcomes**, and **runs**: what each run targeted and whether its byte is back.
 
 What to look for: the raise matters if, under load, "off" shows long holds (milliseconds, a scheduler quantum) and
-late steps while "on" does not. Windows and Proton differ if "on" under load looks like "off" on one of them.
+late steps while "on" does not. Windows and Proton differ if "on" under load looks like "off" on one of them. The
+raise's own cost is the restore table: long restores under load are the holder's thread preempted after the engine
+was let go, a cost to that task, not to the server's step.
 
 ## Building and testing the kit (maintainers)
 
@@ -253,11 +278,14 @@ KILN_OUT=<out> tools/priority-kit/tests/run.sh                              # th
   latch keys on, and the word stays held a little past Post. One scenario per process: the run on time, a 60 Hz server
   with 3 ms updates (GitHub #58's, where kit 1 got stuck), the same with the word held 3 ms past Post, an update that
   hangs for 12 s right after a change (no step: the restore gives up after 10 s, the final restore puts the byte
-  back), the raise off, no-op mode, a named component and byte, a component without explained padding, a tracked one,
-  no padding anywhere, another world, no world, no run file, a bad run file, and a world that stops mid-run. They
-  check the target, every outcome, that every byte of every component ends as it was (the game's own changes kept),
-  the raise (every hold above normal, or none), the files and their headers, and that a retry after a busy answer
-  always comes in a later server step and almost never meets the latch. Scenario `padding` checks the padding rule
+  back), the raise off, every priority restore 3 ms slow (`slow-restore`, host only: in `restore_ns` on every row,
+  not in `hold_ns`), a Kiln whose gate counters end at v1's 96 bytes (`v1-stats`: `hold=release-end`, the restore
+  columns empty), no-op mode, a named component and byte, a component without explained padding, a tracked one, no
+  padding anywhere, another world, no world, no run file, a bad run file, and a world that stops mid-run. They check
+  the target, every outcome, that every byte of every component ends as it was (the game's own changes kept), the
+  raise (every hold above normal, or none), the files, their columns and headers, and that a retry after a busy answer
+  always comes in a later server step and almost never meets the latch. `tests/mutate.py <scratch dir>` breaks each
+  of the mod's checks alone and expects a scenario to fail. Scenario `padding` checks the padding rule
   against an independent walk of sigdb's reflection of both exact builds: 687 components each, 201 with padding the
   reflection explains.
 - **The Wine host** (`tests/host_win.cpp`) loads the real DLL and runs the same scenarios over kiln.engine's real

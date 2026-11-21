@@ -670,7 +670,7 @@ from the engine at run time, and the in-game check below lists them.
   the entity found once more. A write that does not read back is rolled back in the same hold, and the rollback is read
   back too: after the release the next frame may already have written the component, and a rollback then would undo
   the game's write.
-- After the release: `confirmed`, the latch, the event, and the reply with the hold's time.
+- After the release: `confirmed`, the latch, the event, and the reply with the gate's two times (below).
 
 **Outcomes** (`KilnMutationReply.status`; the `KilnResult` says the same):
 
@@ -717,6 +717,19 @@ holder runs above normal priority. On a heavily loaded host (load average about 
 priority, three runs under Wine) the medians stayed the same (15 to 18 µs for 4,328 bytes, 68 to 72 µs for 64 KiB) and
 the worst holds reached 0.5 to 2.5 ms: the host's scheduler preempting the holder inside the hold. How long a hold can
 last on native Windows under load, with the priority raise, is measured by the tester kit (#58). The 64 KiB cap stays.
+
+**What the reply's times mean.** `KilnMutationReply.hold_ns` is the Scene word's exclusive interval: from the moment
+the gate's CAS on it won to the moment it was released, the clock read right after that release and before the rest of
+the gate's release (the thread-registry word, Kiln's holder flag, the priority restore). That is the time the engine was
+kept out of its next update. `restore_ns` (appended to the reply: 56 bytes; a caller built before it passes 48 and gets
+the fields it knows, nothing written past them) is how long putting the calling thread's priority back took after the
+Scene word was free (`SetThreadPriority`, under Proton a wineserver round trip), with any preemption of the thread right
+after it dropped back to its own priority; it is also filled for a gate refusal after the raise, and 0 when the priority
+was not raised (the measurement switch, a thread already above normal, a refusal before the raise). Both come from the
+gate's own record (`EcsGate.hold_ns`, `restore_ns`). Before GitHub #58's fix (0.2.0-dev.30.1, for one)
+`hold_ns` was read after the whole release, the restore included: on Proton with the raise on that added about 10 µs to
+every hold and, under CPU load, a preemption of up to milliseconds right after the restore, while the Scene word was long
+free. The Wine figures above were measured that way.
 
 **Relies on, per build.** For the components the policy admits, the engine's change recorder only reads and returns on
 both exact builds (docs/re/world.md, "The change recorder for untracked components"), so the write does not call it and
@@ -785,7 +798,7 @@ var task = Context.Tasks.Run("recharge", async ctx =>
 |---|---|---|
 | `CanWrite` | `capabilities` (`KILN_WORLD_CAP_ECS_WRITE`) | the members are here and on for this build. Any thread |
 | `WritePolicy(component, world)` | `ecs_write_policy` | a `ComponentWritePolicy`: `IsWritable`, `Status`, `Size`, `Budget`, `TrackingKnown`, `IsTracked`, `IsPlain`, `Reason`, `Text`. Any thread |
-| `TryCompareExchange<T>(entity, component, expected, desired)` | `ecs_compare_exchange` | `T` is the whole component (its size is the registered size, else `NotWritable` with `Reason.Size`), and every byte of it is compared and written, padding too: give `T` a field for every byte, or use the byte form; an `ExchangeResult<T>` with `Status`, `Flags`, `Reason`, `Current` (the value the write saw) and `HoldTime` |
+| `TryCompareExchange<T>(entity, component, expected, desired)` | `ecs_compare_exchange` | `T` is the whole component (its size is the registered size, else `NotWritable` with `Reason.Size`), and every byte of it is compared and written, padding too: give `T` a field for every byte, or use the byte form; an `ExchangeResult<T>` with `Status`, `Flags`, `Reason`, `Current` (the value the write saw) and `HoldTime` (`hold_ns`: the Scene word's exclusive interval) |
 | `TryCompareExchangeBytes(entity, component, expected, desired, mask, current)` | `ecs_compare_exchange` | the same with bytes and an optional per-byte mask; `current` (optional) gets the bytes the write saw |
 | `ComponentExchangedEvent` | `ecs_write_subscribe` | on the server tick after each committed write: `Entity`, `Generation`, `ComponentHash` (`Is("Charge")`), `Session`, `Step`, `Mod` (the mod that wrote, null for a native service). Kiln's service tick posts them; should it stop for many steps, events beyond 65,536 waiting are dropped and kiln.log says how many |
 
