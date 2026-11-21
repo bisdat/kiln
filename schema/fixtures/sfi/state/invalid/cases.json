@@ -1,0 +1,178 @@
+{
+  "unknown-top-level-field.json": {
+    "path": "",
+    "why": "closed: unknown field"
+  },
+  "format-2.json": {
+    "path": "/format",
+    "why": "format is 1"
+  },
+  "committed-not-applied.json": {
+    "path": "/packages/1",
+    "why": "committed data stays present: not-applied with archivePresent false"
+  },
+  "not-applied-on-unknown.json": {
+    "path": "/packages/1",
+    "why": "unknown presence said as not applied"
+  },
+  "late-loss-runtime-active.json": {
+    "path": "/packages/1",
+    "why": "data-applied-runtime-stopped with the runtime active"
+  },
+  "uncertain-data-present.json": {
+    "path": "/packages/1",
+    "why": "uncertain data must stay null"
+  },
+  "active-runtime-false.json": {
+    "path": "/packages/0",
+    "why": "lua active means runtimeActive true"
+  },
+  "skip-without-warning.json": {
+    "path": "/packages/1",
+    "why": "every unintended skip warns"
+  },
+  "disabled-row-skip-warning.json": {
+    "path": "/packages/1",
+    "why": "disabled rows are not skips"
+  },
+  "other-side-save-sensitive-off.json": {
+    "path": "/packages/0",
+    "why": "other-side rows never trigger"
+  },
+  "save-sensitive-off-not-sensitive.json": {
+    "path": "/packages/1",
+    "why": "save-sensitive-off needs a save-sensitive package"
+  },
+  "warning-sensitivity-mismatch.json": {
+    "path": "/packages/1",
+    "why": "warning.saveSensitive equals the package's"
+  },
+  "policy-basis-without-row.json": {
+    "path": "/packages/1/saveSensitive",
+    "why": "basis policy names its row"
+  },
+  "ended-incomplete.json": {
+    "path": "/incomplete",
+    "why": "ended is written only after the final flush"
+  },
+  "running-complete.json": {
+    "path": "/incomplete",
+    "why": "running stays incomplete"
+  },
+  "aside-kiln-backend.json": {
+    "path": "/launch/backend/selected",
+    "why": "aside means another backend runs"
+  },
+  "aside-with-packages.json": {
+    "path": "/packages",
+    "why": "aside lists no packages"
+  },
+  "aside-without-reason.json": {
+    "path": "",
+    "why": "aside says why"
+  },
+  "absent-source-kiln.json": {
+    "path": "/launch/backend",
+    "why": "no kiln.launch means backend none"
+  },
+  "bad-launch-id.json": {
+    "path": "/launch/launchId",
+    "why": "upper-case hex: kiln.launch ids are written in lower case, as launch.json writes them"
+  },
+  "package-id-81.json": {
+    "path": "/packages/0/id",
+    "why": "SF identifier <= 80 bytes"
+  },
+  "package-id-space.json": {
+    "path": "/packages/0/id",
+    "why": "SF identifier charset"
+  },
+  "d2a-foreign-surface.json": {
+    "path": "/delivery/0/surface",
+    "why": "kiln-sfi records only its own native surface"
+  },
+  "shown-without-time.json": {
+    "path": "/delivery/0",
+    "why": "shown has a time"
+  },
+  "none-previous-with-id.json": {
+    "path": "/previousStart",
+    "why": "no previous start has no id"
+  },
+  "warning-revision-zero.json": {
+    "path": "/packages/1/warning/revision",
+    "why": "revisions start at 1"
+  },
+  "unknown-package-field.json": {
+    "path": "/packages/0",
+    "why": "closed package"
+  },
+  "unknown-presence-archive-known.json": {
+    "path": "/packages/1/archivePresent",
+    "why": "unknown presence keeps archivePresent null, even when the data step failed"
+  },
+  "warning-sensitive-on-plain-package.json": {
+    "path": "/packages/1/warning",
+    "why": "a warning on a package that is not save-sensitive has no save-sensitive line"
+  },
+  "running-hosted-backend.json": {
+    "path": "/launch/backend/selected",
+    "why": "kiln-sfi runs only when the frozen backend is kiln"
+  },
+  "runtime-active-lua-stopped.json": {
+    "path": "/packages/0/lua",
+    "why": "runtimeActive true means lua active"
+  },
+  "launch-id-uuid.json": {
+    "path": "/launch/launchId",
+    "why": "a uuid: kiln.launch ids are a u64 as 16 lower-case hex digits (launch.json)"
+  },
+  "kiln-launch-without-launch-id.json": {
+    "path": "/launch/launchId",
+    "why": "a record from kiln.launch always has its launch id"
+  },
+  "previous-launch-id-uuid.json": {
+    "path": "/previousStart/launchId",
+    "why": "the previous start id has the same 16-hex form"
+  },
+  "absent-source-with-launch-id.json": {
+    "path": "/launch/launchId",
+    "why": "no kiln.launch table, so no launch id"
+  },
+  "carried-on-running.json": {
+    "path": "",
+    "why": "only aside and refused records carry a list; a kiln record lists its own packages"
+  },
+  "carried-on-ended.json": {
+    "path": "",
+    "why": "an ended record is a kiln record: it lists its own packages and carries nothing"
+  },
+  "carried-basis-none.json": {
+    "path": "/carriedSaveSensitive/1/basis",
+    "why": "a carried package is save-sensitive: basis none is not carried"
+  },
+  "carried-policy-without-row.json": {
+    "path": "/carriedSaveSensitive/0",
+    "why": "basis policy names its row"
+  },
+  "carried-unknown-field.json": {
+    "path": "/carriedSaveSensitive/0",
+    "why": "closed: a carried entry has five fields"
+  },
+  "carried-bad-from-launch-id.json": {
+    "path": "/carriedSaveSensitive/0/fromLaunchId",
+    "why": "fromLaunchId is 16 lower-case hex digits or null"
+  },
+  "owner-epoch-zero.json": {
+    "path": "/packages/0/ownerEpoch",
+    "why": "an owner epoch is 1 or more"
+  },
+  "owner-epoch-runtime-stopped.json": {
+    "path": "/packages/1",
+    "why": "only a row whose runtime is active holds an owner epoch"
+  },
+  "owner-epoch-after-end.json": {
+    "path": "/packages/0",
+    "why": "no owner epoch is current after the end"
+  }
+}

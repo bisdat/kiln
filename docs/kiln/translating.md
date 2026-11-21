@@ -33,7 +33,8 @@ issue says what to look at first, and a comment there or a pull request is all i
 Name the file by its language tag: `zh-CN.json` (Simplified Chinese), `zh-TW.json`, `de.json`, `pt-BR.json`, `es-419.json`.
 A main language (`de.json`) serves all its regions; a regional file (`pt-BR.json`) wins over it for that region.
 
-The save editor inside the launcher (Saves, Edit) has its own texts and is not covered here.
+The save editor inside the launcher (Saves, Edit; the Deck's Editor tab) is covered: its texts are the `editor` keys of the
+same files. Item and skill names in it are the game's own and are not translated here.
 
 ## The format
 

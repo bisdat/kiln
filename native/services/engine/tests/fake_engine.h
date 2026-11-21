@@ -2,6 +2,8 @@
 // A fake engine laid out from a real ported profile's offsets (host tests): the thread registry with its "GameServer"
 // row, the registered Scene (thread object, ready-entry list, Scene word, state byte), the world context, execution
 // owners with their component registry and entity manager, and on a client the root/client/controller owner chain.
+// add_content_worker() also registers the resource content worker: its service object with the worker thread
+// inside it, a reader and a bulk payload; without it the registry is the gate tests' (MainThread, GameServer).
 // Every region is anonymous mmap memory, so untouched pages cost nothing (an execution owner spans 14 MB).
 #pragma once
 #ifdef _WIN32
@@ -67,7 +69,23 @@ struct Engine {
     Region image, scene, entries, context, exec, table{4096}, names{4096};
     Region client{L.dedicated_server ? 4096 : L.controller_offset + 4096}, controller{4096}, main_world{4096},
         main_exec{L.dedicated_server ? 4096 : L.entity_manager_offset + 4096}, main_table{4096};
-    std::uintptr_t thread = 0, handle = 0x1234;
+    // the resource content worker: the service (worker thread at resource_write.service_thread), its reader, its payload
+    Region content{content_bytes(L)}, reader_object{4096}, payload{65536};
+    std::uintptr_t thread = 0, handle = 0x1234, content_handle = 0x5678;
+    int content_rows = 0;  // registry rows of the content worker that set_rows writes: 0 (not registered), 1, or 2
+
+    static std::size_t content_bytes(const kiln::engine::Layout& layout) {
+        const auto& r = layout.resource_write;
+        const auto& w = layout.write;
+        std::size_t end = r.service_thread + w.inline_name + 64;
+        for (std::size_t field : {r.initialized + 4, r.reader + 8, r.payload_pointer + 8, r.payload_size + 8,
+                                  r.service_thread + w.name_pointer + 8, r.service_thread + w.name_length + 8,
+                                  r.service_thread + w.name_capacity + 8, r.service_thread + w.thread_handle + 8,
+                                  r.service_thread + w.thread_context + 8, r.service_thread + w.thread_stop + 4,
+                                  r.service_thread + w.thread_callback + 8})
+            end = field > end ? field : end;
+        return end;
+    }
 
     explicit Engine(const kiln::engine::Layout& layout)
         : L(layout), image(layout.image_size), scene(8192), entries(layout.entry_stride * 4), context(4096),
@@ -133,6 +151,8 @@ struct Engine {
         row(names.at(), 10, 0x99);
         if (server_row) row(thread + w.inline_name, w.name_size, handle);
         if (twice) row(thread + w.inline_name, w.name_size, handle);
+        for (int i = 0; i < content_rows; ++i)
+            row(content_thread() + w.inline_name, L.resource_write.name_size, content_handle);
         put<std::uint16_t>(image.at(w.registry_count), count);
     }
 
@@ -143,6 +163,30 @@ struct Engine {
         put<std::uint8_t>(e + L.entry_state_offset, state);
     }
 
+    // Registers the content worker (`rows` registry rows; 2 makes it ambiguous) with a valid thread and service.
+    void add_content_worker(int rows = 1) {
+        const auto& w = L.write;
+        const auto& r = L.resource_write;
+        const std::uintptr_t t = content_thread();
+        put<std::uint64_t>(t + w.name_pointer, t + w.inline_name);
+        put<std::uint64_t>(t + w.name_length, r.name_size);
+        put<std::uint64_t>(t + w.name_capacity, w.name_capacity_value);
+        std::memcpy(reinterpret_cast<void*>(t + w.inline_name), r.name.data(), r.name_size);
+        put<std::uint64_t>(t + w.thread_handle, content_handle);
+        put<std::uint64_t>(t + w.thread_context, t);  // the content worker's context is its own thread object
+        put<std::uint32_t>(t + w.thread_stop, 0);
+        put<std::uint64_t>(t + w.thread_callback, image.at(r.callback));
+        put<std::uint32_t>(service() + r.initialized, r.initialized_value);
+        put<std::uint64_t>(service() + r.reader, reader());
+        put<std::uint64_t>(service() + r.payload_pointer, payload.at());
+        put<std::uint64_t>(service() + r.payload_size, payload.size);
+        content_rows = rows;
+        set_rows(true);
+    }
+    std::uintptr_t service() const { return content.at(); }
+    std::uintptr_t content_thread() const { return content.at(L.resource_write.service_thread); }
+    std::uintptr_t reader() const { return reader_object.at(); }
+    std::uintptr_t row(std::size_t index) const { return image.at(L.write.registry_entries) + index * L.write.stride; }
     std::uintptr_t registry_word() const { return image.at(L.write.registry_lock); }
     std::uintptr_t scene_word() const { return scene.at(L.write.scene_lock); }
     std::uintptr_t registry_owner() const { return exec.at(L.registry_owner_offset); }

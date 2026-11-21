@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "eml-values/length.schema.json",
+  "$comment": "SPDX-License-Identifier: MIT",
+  "description": "value_read LENGTH: Source's # of a struct or array, always an integer.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "packet": {
+      "const": "length"
+    },
+    "value": {
+      "$ref": "common.schema.json#/$defs/i64"
+    }
+  },
+  "required": [
+    "schema_version",
+    "packet",
+    "value"
+  ],
+  "additionalProperties": false
+}

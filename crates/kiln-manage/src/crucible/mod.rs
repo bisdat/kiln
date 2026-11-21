@@ -18,6 +18,8 @@
 
 pub mod dev;
 pub mod links;
+/// Pack Studio's publish: a version of a pack source, its credits, link-only or public.
+pub mod publish;
 pub mod sign;
 
 use crate::game::GameInstall;
@@ -44,7 +46,7 @@ pub const UPLOAD_SUFFIX: &str = ".r2.cloudflarestorage.com";
 /// Public keys of Crucible's index signer (raw Ed25519, base64). The pair is made on the server at the first deploy
 /// and its public key goes here once the owner approves it (DESIGN.md section 13.6). Until then this is empty and the
 /// launcher shows no Crucible surface ([`Endpoints::enabled`]).
-pub const KEYS: &[&str] = &[];
+pub const KEYS: &[&str] = &["3wedy1u9hKuyGh6UcRGBe1X8YvAiPyeALoIpVaBXK/s="];
 /// The largest pack Crucible takes (2 GiB) and the largest file (512 MiB).
 pub const MAX_PACK: u64 = 2 * 1024 * 1024 * 1024;
 
@@ -289,6 +291,8 @@ fn refusal(status: u16, body: &[u8]) -> Error {
         (401, _) => ErrorCode::AuthFailed,
         (404, _) => ErrorCode::NotFound,
         (409, "uploading") => ErrorCode::Busy,
+        // not ready to go public (credits, summary, checks) or hidden while reports are looked at: the message says why
+        (409, "not-ready" | "under-review") => ErrorCode::Refused,
         (410, _) | (451, _) | (403, _) => ErrorCode::Refused,
         (413, _) => ErrorCode::Refused,
         (422, _) | (400, _) => ErrorCode::InvalidArgument,
@@ -426,9 +430,7 @@ impl<'a> Crucible<'a> {
             r.body
         };
         let (ix, raw) = sign::open(&body, &self.ep.keys)?;
-        if let Some(c) = &ix.crucible
-            && c.version.as_deref().is_some_and(|v| v != version_id)
-        {
+        if ix.crucible.as_ref().and_then(|c| c.version.as_deref()) != Some(version_id) {
             return Err(err(ErrorCode::HashMismatch, "This pack's index names another version. Nothing was installed."));
         }
         Ok((ix, raw))
@@ -456,6 +458,9 @@ impl<'a> Crucible<'a> {
     pub fn download(&self, given_url: Option<&str>, role: &str, f: &StoredFile, dest: &Path, progress: &mut dyn FnMut(u64)) -> Result<()> {
         use sha2::Digest;
         use std::io::Write;
+        if f.sha256.len() != 64 || !f.sha256.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+            return Err(err(ErrorCode::HashMismatch, "A pack file is named by something that is no sha256. Nothing was downloaded."));
+        }
         let url = self.file_url(given_url, role, &f.sha256)?;
         if let Some(d) = dest.parent() {
             std::fs::create_dir_all(d).map_err(crate::util::io_at(d, "creating"))?;
@@ -763,7 +768,7 @@ pub fn preview(dirs: &DataDirs, c: &Crucible, target: &str, game: Option<&GameIn
     let Some(version) = at.version.clone() else {
         if let Some((vid, p)) = at.uploading.clone() {
             let owner = at.pack.owner.as_ref().map(|o| o.name.clone()).unwrap_or_else(|| "The creator".into());
-            return Err(err(ErrorCode::Busy, format!("{owner}'s pack is still uploading ({}%). Kiln will install it when it's ready.", (p * 100.0).round() as u64))
+            return Err(err(ErrorCode::Busy, format!("{owner}'s pack is still uploading ({}%). Try again when it's ready.", (p * 100.0).round() as u64))
                 .with_detail(serde_json::json!({ "uploading": { "version": vid, "progress": p }, "pack": at.pack })));
         }
         return Err(err(ErrorCode::NotFound, "This pack is no longer on Crucible."));
@@ -774,17 +779,18 @@ pub fn preview(dirs: &DataDirs, c: &Crucible, target: &str, game: Option<&GameIn
 
 /// [`preview`] for an index already opened.
 pub fn preview_of(dirs: &DataDirs, pack: CruciblePack, version: CrucibleVersion, index: PackIndex, game: Option<&GameInstall>) -> Result<Preview> {
-    let lacking: BTreeMap<String, StoredFile> = pack::lacking(dirs, &index)?.into_iter().collect();
+    let lacking: BTreeMap<String, StoredFile> = pack::lacking_for(dirs, &index, &pack::client_skips)?.into_iter().collect();
     let mut missing = Vec::new();
     let mut present = Vec::new();
     let mut size = 0u64;
     let mut download = 0u64;
     let mut code = Vec::new();
-    for m in &index.mods {
-        size += part_size(m.file.as_ref());
+    // what this game client takes: a server-only mod is neither downloaded nor installed here
+    for m in index.mods.iter().filter(|m| !pack::client_skips(m)) {
+        size = size.saturating_add(part_size(m.file.as_ref()));
         let lr = LibraryRef { kind: m.kind, id: m.id.clone(), version: m.version.clone(), hash: m.hash.clone() };
         if let Some(f) = lacking.get(&m.id) {
-            download += f.size;
+            download = download.saturating_add(f.size);
             missing.push(lr.clone());
         } else {
             present.push(lr.clone());
@@ -799,10 +805,10 @@ pub fn preview_of(dirs: &DataDirs, pack: CruciblePack, version: CrucibleVersion,
         }
     }
     if let Some(l) = &index.layer {
-        size += part_size(l.file.as_ref());
+        size = size.saturating_add(part_size(l.file.as_ref()));
         let lr = LibraryRef { kind: ModKind::Kiln, id: l.id.clone(), version: l.version.clone(), hash: l.hash.clone() };
         if let Some(f) = lacking.get(&l.id) {
-            download += f.size;
+            download = download.saturating_add(f.size);
             missing.push(lr);
         } else {
             present.push(lr);
@@ -810,29 +816,39 @@ pub fn preview_of(dirs: &DataDirs, pack: CruciblePack, version: CrucibleVersion,
     }
     for o in &index.overrides {
         let n = o.size.unwrap_or(0);
-        size += n;
-        download += n;
+        size = size.saturating_add(n);
+        download = download.saturating_add(n);
     }
     let optional = index.mods.iter().filter(|m| m.dep == pack::Dep::Optional).map(|m| (m.id.clone(), m.default.unwrap_or(true))).collect();
-    let instance = pack::instances(dirs)?.into_iter().find(|(_, i)| i.pack == index.id || (i.crucible.as_ref().and_then(|x| x.pack.as_deref()).is_some_and(|p| p == pack.id))).map(|(p, _)| p);
+    // a Crucible instance is this pack's when it came from this Crucible pack (another creator may use the same index id);
+    // a pack installed from a file is matched by its index id
+    let instance = pack::instances(dirs)?
+        .into_iter()
+        .find(|(_, i)| match i.crucible.as_ref().and_then(|x| x.pack.as_deref()) {
+            Some(p) => p == pack.id,
+            None => i.pack == index.id,
+        })
+        .map(|(p, _)| p);
     let trusted = pack.owner.as_ref().is_some_and(|o| trusted(dirs).iter().any(|t| t.id == o.id));
     Ok(Preview { game: game_fit(&index, game), kiln: kiln_fit(&index), pack, version, index, size, download, missing, present, code, optional, instance, trusted })
 }
 
-/// Downloads what the Library lacks of a version and puts the .kilnpack together (`<data>/crucible/packs/<vid>.kilnpack`;
-/// reused while it is there). Progress 0..1 over the bytes to download.
+/// Downloads what the Library lacks of a version and puts the .kilnpack together for this game client
+/// (`<data>/crucible/packs/<vid>.client.kilnpack`; reused while it is there): mods only a server uses are neither
+/// downloaded nor put in (`pack::client_skips`). Progress 0..1 over the bytes to download.
 pub fn fetch(dirs: &DataDirs, c: &Crucible, version_id: &str, progress: &mut dyn Progress) -> Result<(PackIndex, pack::Assembled, u64)> {
     progress.report(Some(0.0), "reading the pack");
     let (ix, raw) = c.index(version_id)?;
-    let out = root(dirs).join("packs").join(format!("{version_id}.{}", pack::EXTENSION));
+    let out = root(dirs).join("packs").join(format!("{version_id}.client.{}", pack::EXTENSION));
     if out.is_file()
-        && let Ok(r) = pack::read(&out, None, None)
+        && let Ok(r) = pack::read_partial(&out, None, None, &pack::client_skips)
         && r.index == ix
     {
         return Ok((ix, pack::Assembled { file: out, sha256: r.sha256, size: r.size, ..Default::default() }, 0));
     }
-    let lacking = pack::lacking(dirs, &ix)?;
-    let total: u64 = lacking.iter().map(|(_, f)| f.size).sum::<u64>() + ix.overrides.iter().map(|o| o.size.unwrap_or(0)).sum::<u64>();
+    let lacking = pack::lacking_for(dirs, &ix, &pack::client_skips)?;
+    // saturating: sizes come from the index, and a wrapped sum would pass the limit
+    let total: u64 = lacking.iter().map(|(_, f)| f.size).chain(ix.overrides.iter().map(|o| o.size.unwrap_or(0))).fold(0u64, u64::saturating_add);
     if total > MAX_PACK {
         return Err(err(ErrorCode::Refused, "This pack is larger than Crucible allows (2 GB)."));
     }
@@ -883,7 +899,7 @@ pub fn fetch(dirs: &DataDirs, c: &Crucible, version_id: &str, progress: &mut dyn
         blobs.insert(o.sha256.clone(), std::fs::read(&dest).map_err(crate::util::io_at(&dest, "reading"))?);
     }
     progress.report(Some(0.85), "checking the pack");
-    let done = pack::assemble(dirs, &ix, &archives, &blobs, &out)?;
+    let done = pack::assemble_for(dirs, &ix, &pack::client_skips, &archives, &blobs, &out)?;
     progress.report(Some(0.9), "pack checked");
     Ok((ix, done, got))
 }
@@ -899,9 +915,12 @@ pub struct InstallRequest {
     pub trust_always: bool,
     #[serde(default)]
     pub optional: BTreeMap<String, bool>,
+    /// The new profile's name (the preview's name field). Default "<pack> (<creator>'s pack)"; either way a name a
+    /// profile has already gets " (2)" (profile::unique_name).
     #[serde(default)]
     pub name: Option<String>,
-    /// Activate the instance for the game (the launcher then starts it). Default true.
+    /// Activate the instance for the game (the launcher then starts it). Default true. False: "Install" (no save
+    /// backup, no activation, nothing written in the game folder: allowed while the game runs).
     #[serde(default)]
     pub play: Option<bool>,
 }
@@ -952,8 +971,12 @@ pub fn install(dirs: &DataDirs, c: &Crucible, game: Option<&GameInstall>, req: &
             source: ModpackSource::Path { path: done.file.clone(), sha256: Some(done.sha256.clone()) },
             consent: true,
             allow_http: false,
-            name: req.name.clone(),
+            // named after the pack and its creator ("My mods (Felup's pack)"), and never a name a profile has already
+            // (pack::install): the sharer's profile name alone is often the player's own ("My mods")
+            name: req.name.clone().filter(|n| !n.trim().is_empty()).or_else(|| owner.filter(|o| !o.name.trim().is_empty()).map(|o| format!("{} ({}'s pack)", ix.name, o.name.trim()))),
             optional: req.optional.clone(),
+            // false: Install without playing. Only the data folder changes (Library, the new profile): no save backup,
+            // no activation, nothing in the game folder, so it may run while the game does
             activate: Some(game.is_some() && req.play != Some(false)),
         },
         &mut Scaled { inner: progress, from: 0.6, to: 1.0 },
@@ -1055,7 +1078,8 @@ pub fn update_plan(dirs: &DataDirs, c: &Crucible, pid: &str, progress: &mut dyn 
     let pack_id = inst.crucible.as_ref().and_then(|x| x.pack.clone()).ok_or_else(|| Error::not_found("this pack was not installed from Crucible"))?;
     let head = c.head(&pack_id)?;
     let v = head.version.ok_or_else(|| err(ErrorCode::NotFound, "This pack is no longer on Crucible."))?;
-    let (_, done, download) = fetch(dirs, c, &v.id, progress)?;
+    let (ix, done, download) = fetch(dirs, c, &v.id, progress)?;
+    same_crucible_pack(&inst, &ix)?;
     let plan = pack::plan_update(dirs, pid, &done.file, Some(&done.sha256), &BTreeMap::new())?;
     Ok(CrucibleUpdatePlan { version_id: v.id, download, plan })
 }
@@ -1072,6 +1096,20 @@ pub struct UpdateRequest {
     pub resolve: BTreeMap<String, crate::modpack::merge::Pick>,
     #[serde(default)]
     pub all: Option<crate::modpack::merge::Pick>,
+    /// Player-layer fields to let go ("Drop my change"): `plan.local.overlaps[].key`.
+    #[serde(default)]
+    pub drop: Vec<String>,
+}
+
+/// A version may update an instance only when it is of the same pack: the same index id and, for an instance installed
+/// from Crucible, the same Crucible pack (the index id is the creator's choice; two creators can pick the same one).
+fn same_crucible_pack(inst: &pack::Instance, ix: &PackIndex) -> Result<()> {
+    let want = inst.crucible.as_ref().and_then(|x| x.pack.as_deref());
+    let got = ix.crucible.as_ref().and_then(|x| x.pack.as_deref());
+    if ix.id != inst.pack || (want.is_some() && got != want) {
+        return Err(err(ErrorCode::Refused, "That version belongs to another pack."));
+    }
+    Ok(())
 }
 
 pub fn update(dirs: &DataDirs, c: &Crucible, req: &UpdateRequest, progress: &mut dyn Progress) -> Result<pack::UpdateResult> {
@@ -1080,9 +1118,7 @@ pub fn update(dirs: &DataDirs, c: &Crucible, req: &UpdateRequest, progress: &mut
     }
     let inst = pack::instance(dirs, &req.profile)?.ok_or_else(|| Error::not_found(format!("profile {} is no Crucible pack", req.profile)))?;
     let (ix, done, _) = fetch(dirs, c, &req.version_id, &mut Scaled { inner: progress, from: 0.0, to: 0.6 })?;
-    if ix.id != inst.pack {
-        return Err(err(ErrorCode::Refused, "That version belongs to another pack."));
-    }
+    same_crucible_pack(&inst, &ix)?;
     pack::update(
         dirs,
         &pack::UpdateRequest {
@@ -1093,6 +1129,7 @@ pub fn update(dirs: &DataDirs, c: &Crucible, req: &UpdateRequest, progress: &mut
             optional: req.optional.clone(),
             resolve: req.resolve.clone(),
             all: req.all,
+            drop: req.drop.clone(),
         },
         &mut Scaled { inner: progress, from: 0.6, to: 1.0 },
     )
@@ -1128,10 +1165,10 @@ pub struct ShareResult {
 }
 
 /// A local file for each (role, sha256) of an upload index.
-struct ShareFiles {
-    index: PackIndex,
-    paths: BTreeMap<String, PathBuf>,
-    total: u64,
+pub(crate) struct ShareFiles {
+    pub(crate) index: PackIndex,
+    pub(crate) paths: BTreeMap<String, PathBuf>,
+    pub(crate) total: u64,
 }
 
 fn next_version(prev: Option<&str>) -> String {
@@ -1161,7 +1198,16 @@ fn prepare(dirs: &DataDirs, req: &ShareRequest, rec: Option<&SharedPack>, game: 
         &out,
         &mut Scaled { inner: progress, from: 0.0, to: 0.2 },
     )?;
-    let result = (|| -> Result<ShareFiles> {
+    let result = archives(dirs, &built, progress);
+    let _ = std::fs::remove_file(&built.file);
+    result
+}
+
+/// The archives Crucible stores for a built pack (one per mod, the layer, each override), cached by sha256, and the
+/// upload index naming them.
+pub(crate) fn archives(dirs: &DataDirs, built: &pack::BuiltPack, progress: &mut dyn Progress) -> Result<ShareFiles> {
+    let out = root(dirs).join("out");
+    (|| -> Result<ShareFiles> {
         let mut ix = built.index.clone();
         let mut paths = BTreeMap::new();
         let mut total = 0u64;
@@ -1209,9 +1255,22 @@ fn prepare(dirs: &DataDirs, req: &ShareRequest, rec: Option<&SharedPack>, game: 
             paths.insert(format!("blob:{}", o.sha256), dest);
         }
         Ok(ShareFiles { index: ix, paths, total })
-    })();
-    let _ = std::fs::remove_file(&built.file);
-    result
+    })()
+}
+
+/// Sends what Crucible asked for (progress 0.35..0.95); the bytes it asked for.
+pub(crate) fn send(c: &Crucible, uploads: &[Upload], files: &ShareFiles, canceled: &str, progress: &mut dyn Progress) -> Result<u64> {
+    let to_send: u64 = uploads.iter().map(|u| u.size).sum();
+    let mut sent = 0u64;
+    for u in uploads {
+        if progress.canceled() {
+            return Err(err(ErrorCode::Canceled, canceled));
+        }
+        let path = files.paths.get(&format!("{}:{}", u.role, u.sha256)).ok_or_else(|| err(ErrorCode::Internal, format!("Crucible asked for a file this pack does not have ({})", u.sha256)))?;
+        progress.report(Some(0.35 + sent as f32 / to_send.max(1) as f32 * 0.6), &format!("uploading {} of {}", crate::util::human_size(sent), crate::util::human_size(to_send)));
+        c.upload(u, path, &mut |n| sent += n)?;
+    }
+    Ok(to_send)
 }
 
 /// Every file of an upload index for `POST /uploads`.
@@ -1270,16 +1329,7 @@ pub fn share(dirs: &DataDirs, c: &Crucible, req: &ShareRequest, game: Option<&Ga
     // remember it at once: the link works when the upload finishes, and a stopped upload resumes from here
     all.profiles.insert(req.profile.clone(), SharedPack { pack: pack_view.clone(), version: answer.version.clone(), index: files.index.clone(), shared: crate::util::now_rfc3339(), pending: !answer.uploads.is_empty() });
     shared_save(dirs, &all)?;
-    let to_send: u64 = answer.uploads.iter().map(|u| u.size).sum();
-    let mut sent = 0u64;
-    for u in &answer.uploads {
-        if progress.canceled() {
-            return Err(err(ErrorCode::Canceled, "canceled: the share continues the next time you press Share"));
-        }
-        let path = files.paths.get(&format!("{}:{}", u.role, u.sha256)).ok_or_else(|| err(ErrorCode::Internal, format!("Crucible asked for a file this pack does not have ({})", u.sha256)))?;
-        progress.report(Some(0.35 + sent as f32 / to_send.max(1) as f32 * 0.6), &format!("uploading {} of {}", crate::util::human_size(sent), crate::util::human_size(to_send)));
-        c.upload(u, path, &mut |n| sent += n)?;
-    }
+    let to_send = send(c, &answer.uploads, &files, "canceled: the share continues the next time you press Share", progress)?;
     let version = c.call(Method::Get, &format!("/versions/{}", answer.version.id), None, true)
         .ok()
         .and_then(|v| v.get("version").cloned())

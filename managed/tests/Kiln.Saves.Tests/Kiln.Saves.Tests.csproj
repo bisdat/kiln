@@ -16,4 +16,8 @@
          Kiln.Saves itself has no reference to it. -->
     <ProjectReference Include="../../services/Kiln.Chat/Kiln.Chat.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- Kiln's task pool with no core (the test kit's lease table over real threads): Kiln.Saves' writer runs on it. -->
+    <Compile Include="../../Kiln.TestKit/Shared/KitTaskPool.cs" Link="Shared/KitTaskPool.cs" />
+  </ItemGroup>
 </Project>

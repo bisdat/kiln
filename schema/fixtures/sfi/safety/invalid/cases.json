@@ -1,0 +1,46 @@
+{
+  "name-substring-matcher.json": {
+    "path": "/packages/0",
+    "why": "no display-name matching"
+  },
+  "wildcard-version.json": {
+    "path": "/packages/0/version",
+    "why": "exact version only"
+  },
+  "version-range.json": {
+    "path": "/packages/0/version",
+    "why": "exact version only"
+  },
+  "wildcard-id.json": {
+    "path": "/packages/0/id",
+    "why": "exact id only"
+  },
+  "variant-without-manifest.json": {
+    "path": "/packages/0/variants/0/files",
+    "why": "every variant pins mod.json"
+  },
+  "upper-case-hash.json": {
+    "path": "/packages/0/variants/0/files/1/sha256",
+    "why": "lower-case sha256"
+  },
+  "no-variants.json": {
+    "path": "/packages/0/variants",
+    "why": "a row without hashes matches nothing"
+  },
+  "path-escape.json": {
+    "path": "/packages/0/variants/0/files/1/path",
+    "why": "package-relative paths"
+  },
+  "unknown-scope.json": {
+    "path": "/scope",
+    "why": "D4 is one of two values"
+  },
+  "unknown-mixed-value.json": {
+    "path": "/unknownMixedDataNative",
+    "why": "D7 is one of two values"
+  },
+  "missing-text.json": {
+    "path": "/packages/0",
+    "why": "every row has its warning line"
+  }
+}

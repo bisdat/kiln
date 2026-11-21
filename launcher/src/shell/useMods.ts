@@ -3,7 +3,7 @@
 // through its save queue (pages/profiles/useProfileEdit.ts). The backend writes the game's profile.json again after each
 // save where the profile is loaded (profile_save), so the next Play, and Steam's own Play button, use it.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import * as api from "../api/commands";
 import type { GameInstall, Profile, ProfileMod } from "../api/commands";
 import { qk, useActiveProfile, useGameStatus, useLaunchState, useLibrary, useProfiles } from "../api/hooks";
@@ -61,14 +61,22 @@ export function useMods(game: GameInstall | null) {
   const found = useFound(installed ? gameId : null, pid);
   const launch = useLaunchState(gameId);
   const hasXhl = (lib.data ?? []).some((e) => e.kind === "xhl");
-  const engines = useQuery({ queryKey: engineStatusKey(gameId ?? ""), queryFn: () => api.engineStatus(gameId!), enabled: !!gameId && installed && hasXhl });
+  // EMF mods: kiln/state/emf.json says what kiln-emf decided at the last start (a mod it rejected)
+  const hasEmf = (lib.data ?? []).some((e) => e.kind === "emf") || !!profile?.mods.emf?.length;
+  const engines = useQuery({ queryKey: engineStatusKey(gameId ?? ""), queryFn: () => api.engineStatus(gameId!), enabled: !!gameId && installed && (hasXhl || hasEmf) });
   const xhl = engines.data?.find((s) => s.kind === "xhl")?.prerequisite;
+  const emfState = engines.data?.find((s) => s.kind === "emf")?.state ?? null;
+  // a new start wrote boot.json: read the engines' state files again (kiln-emf writes emf.json in the same run)
+  const bootWritten = launch.data?.boot?.written;
+  const refetchEngines = engines.refetch;
+  const enginesOn = !!gameId && installed && hasEmf;
+  useEffect(() => { if (bootWritten && enginesOn) void refetchEngines(); }, [bootWritten, enginesOn, refetchEngines]);
   const retained = useRetained((s) => (gameId ? s.byGame[gameId] : undefined));
   // an unreadable Library is said as such: never rows that call every mod gone (the profile's entries without it)
   const rows = useMemo(() => lib.error ? [] : buildRows({
     library: lib.data ?? [], profile, preview: preview.data ?? null, found: found.data?.mods ?? [], launch: launch.data ?? null,
-    retained: retained ?? [], xhlHost: xhl ? xhl.available : null,
-  }), [lib.error, lib.data, profile, preview.data, found.data, launch.data, retained, xhl]);
+    retained: retained ?? [], xhlHost: xhl ? xhl.available : null, emfState,
+  }), [lib.error, lib.data, profile, preview.data, found.data, launch.data, retained, xhl, emfState]);
   const count = useMemo(() => countLine(rows), [rows]);
   const summary = profiles.data?.find((p) => p.id === pid) ?? null;
 

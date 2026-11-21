@@ -33,20 +33,19 @@ public sealed partial class ClientPassMod
         });
         c.OnEnd(() => reg.Dispose());
         c.Expect(reg.Ok, $"the lines provider registered ({reg.Reason})");
-        c.Instruct("Host a world, open the backpack and select a sword so its detail view shows. Press continue.");
-        await c.Verdict();
-        c.Expect(await c.Until(() => Volatile.Read(ref calls) > 0 && Ui.Tooltip.InGame, TimeSpan.FromSeconds(60),
+        c.Instruct("Host a world, open the backpack and select a sword so its detail view shows. The check goes on by itself once it shows.");
+        c.Expect(await c.Until(() => Volatile.Read(ref calls) > 0 && Ui.Tooltip.InGame, TimeSpan.FromMinutes(3),
             "the game drew the sword's detail view through the provider"), "the provider was called and lines are drawn in the game's view");
         c.Instruct("Under the last line of the sword's detail view there should be one line TOOLTIP-SHORT, inside the panel, " +
-                   "covering nothing. Is that what you see?");
-        await c.Verdict();
+                   "covering nothing. Remember whether that is what you see. In 15 seconds the check switches to 16 lines by itself.");
+        await c.Delay(TimeSpan.FromSeconds(15));
         many = true;
-        c.Instruct("Select another item and the sword again: now 16 lines TOOLTIP-LINE-01 .. TOOLTIP-LINE-16 follow the " +
-                   "vanilla lines. Scroll the panel with the wheel to the top and to the bottom: are the vanilla stats, the " +
-                   "description and all 16 lines readable and reachable, and does the scrollbar follow?");
-        await c.Verdict();
-        c.Instruct("Select an item with a long description (a legendary weapon). Are its whole description and the 16 lines " +
-                   "reachable by scrolling?");
+        c.Instruct("Select another item and the sword again: now 16 lines TOOLTIP-LINE-01 .. TOOLTIP-LINE-16 follow the vanilla lines. " +
+                   "Scroll the panel with the wheel to the top and to the bottom. Then select an item with a long description (a " +
+                   "legendary weapon) and scroll it too. Pass only if all held: (1) TOOLTIP-SHORT sat under the last line, inside the " +
+                   "panel, covering nothing; (2) the vanilla stats, the description and all 16 lines were readable and reachable, and " +
+                   "the scrollbar followed; (3) the legendary's whole description and the 16 lines were reachable by scrolling. " +
+                   "Otherwise Fail with a note naming which part.");
         await c.Verdict();
     }
 
@@ -65,16 +64,15 @@ public sealed partial class ClientPassMod
             return UiTooltipLines.With(new TooltipLine(english), new TooltipLine(german));
         });
         c.OnEnd(() => reg.Dispose());
-        c.Instruct("Host a world, open the backpack and select a sword so its detail view shows. Press continue.");
-        await c.Verdict();
-        c.Expect(await c.Until(() => Volatile.Read(ref calls) > 0, TimeSpan.FromSeconds(60), "the provider was called"),
+        c.Instruct("Host a world, open the backpack and select a sword so its detail view shows. The check goes on by itself once it shows.");
+        c.Expect(await c.Until(() => Volatile.Read(ref calls) > 0, TimeSpan.FromMinutes(3), "the provider was called"),
             "the provider was called");
         c.Instruct("Two long lines (WRAP-EN-BEGIN .. WRAP-EN-END and WRAP-DE-BEGIN .. WRAP-DE-END) should wrap at the panel's " +
-                   "width, no text past the border, the German letters drawn. Move between two items and back quickly: is " +
-                   "there never a frame with a line running out of the panel?");
-        await c.Verdict();
-        c.Instruct("Settings > Interface: change the UI scale (or the resolution) once, come back to the sword. Do both lines " +
-                   "still wrap inside the panel and scroll to their end?");
+                   "width. Move between two items and back quickly a few times. Then in Settings > Interface change the UI scale (or " +
+                   "the resolution) once and come back to the sword. Pass only if all held: (1) both lines wrapped at the panel's " +
+                   "width, no text past the border, the German letters drawn; (2) moving quickly never showed a frame with a line " +
+                   "running out of the panel; (3) after the scale change both lines still wrap inside the panel and scroll to their " +
+                   "end. Otherwise Fail with a note naming which part.");
         await c.Verdict();
     }
 
@@ -96,9 +94,8 @@ public sealed partial class ClientPassMod
                 new TooltipLine("COLOUR Muted", TooltipColor.Muted), new TooltipLine("COLOUR small text", Small: true));
         });
         c.OnEnd(() => reg.Dispose());
-        c.Instruct("Host a world, open the backpack and select a sword so its detail view shows. Press continue.");
-        await c.Verdict();
-        c.Expect(await c.Until(() => Volatile.Read(ref calls) > 0, TimeSpan.FromSeconds(60), "the provider was called"),
+        c.Instruct("Host a world, open the backpack and select a sword so its detail view shows. The check goes on by itself once it shows.");
+        c.Expect(await c.Until(() => Volatile.Read(ref calls) > 0, TimeSpan.FromMinutes(3), "the provider was called"),
             "the provider was called");
         c.Instruct("Do the lines COLOUR Common .. COLOUR Unique have the game's own rarity colours (compare with items of each " +
                    "rarity)? Is COLOUR Positive green and COLOUR Negative in the text's own colour? Is COLOUR small text smaller?");
@@ -123,13 +120,14 @@ public sealed partial class ClientPassMod
             end.Dispose();
             after.Dispose();
         });
-        c.Instruct("Host a world, open the backpack and select a sword. PLACE-AFTER-STATS should sit between the stats and the " +
-                   "description (the description moves down), PLACE-END after the last line, nothing overlapping. Is that so?");
-        await c.Verdict();
-        c.Expect(Volatile.Read(ref calls) > 0, "the providers were called");
-        c.Instruct("Select a chest piece, a ring, a stack of wood and a potion; at a crafting station a recipe's output; in a " +
-                   "chest an item; at a trader an item. Where the two lines are missing, they are in Kiln's Item details window " +
-                   "(pause menu). Say on which screens the lines show in the game's own panel.");
+        c.Instruct("Host a world, open the backpack and select a sword. The check goes on by itself once its detail view shows.");
+        c.Expect(await c.Until(() => Volatile.Read(ref calls) > 0, TimeSpan.FromMinutes(3), "the providers were called"),
+            "the providers were called");
+        c.Instruct("On the sword, PLACE-AFTER-STATS should sit between the stats and the description (the description moves down), " +
+                   "PLACE-END after the last line, nothing overlapping. Then select a chest piece, a ring, a stack of wood and a " +
+                   "potion; at a crafting station a recipe's output; in a chest an item; at a trader an item. Where the two lines are " +
+                   "missing, they are in Kiln's Item details window (pause menu). Pass if the sword's two lines sat as described; " +
+                   "otherwise Fail. Either way, in the note say on which screens the lines show in the game's own panel.");
         await c.Verdict();
     }
 
@@ -138,23 +136,36 @@ public sealed partial class ClientPassMod
     public async Task TooltipValuesScaled(CheckContext c)
     {
         if (!await NeedOpen(c, Ui.Tooltip.ValuesCapability)) return;
-        int calls = 0;
+        int plain = 0, calls = 0;
+        var doubling = false;
         var reg = Ui.Tooltip.AddValues((in UiValueContext x, in UiItemView v) =>
         {
             if (!IsGear(v)) return UiTooltipScale.None;
+            if (!Volatile.Read(ref doubling))
+            {
+                Interlocked.Increment(ref plain);
+                return UiTooltipScale.None;
+            }
             Interlocked.Increment(ref calls);
             return UiTooltipScale.By(2f);
         });
         c.OnEnd(() => reg.Dispose());
-        c.Instruct("Host a world, open the backpack and select a weapon. Note its damage number, then press continue.");
-        await c.Verdict();
-        c.Expect(await c.Until(() => Volatile.Read(ref calls) > 0, TimeSpan.FromSeconds(60), "the values provider was called"),
+        c.Instruct("Host a world, open the backpack and select a weapon. Note its damage number: the check starts doubling the " +
+                   "numbers by itself ten seconds after the weapon's detail view first shows.");
+        c.Expect(await c.Until(() => Volatile.Read(ref plain) > 0, TimeSpan.FromMinutes(3), "the weapon's detail view shown"),
+            "the values provider was asked while still answering 1");
+        await c.Delay(TimeSpan.FromSeconds(10));
+        Volatile.Write(ref doubling, true);
+        c.Instruct("The numbers are doubled now. Select another item and the weapon again: its damage number (and the other numbers " +
+                   "of its stats block) should show doubled, and the better/worse styling should still make sense. Remember whether " +
+                   "that is so. The check goes on by itself 20 seconds after the doubled view is drawn.");
+        c.Expect(await c.Until(() => Volatile.Read(ref calls) > 0, TimeSpan.FromMinutes(3), "the values provider was called"),
             "the values provider was called");
-        c.Instruct("Select another item and the weapon again: its damage number (and the other numbers of its stats block) " +
-                   "should show doubled, and the better/worse styling should still make sense. Is that so?");
-        await c.Verdict();
+        await c.Delay(TimeSpan.FromSeconds(20));
         reg.Dispose();
-        c.Instruct("The provider is gone. Select another item and the weapon again: is the number back to the game's own?");
+        c.Instruct("The provider is gone. Select another item and the weapon again. Pass only if both held: (1) with the provider, " +
+                   "the numbers showed doubled with styling that made sense; (2) now the number is back to the game's own. Otherwise " +
+                   "Fail with a note naming which part.");
         await c.Verdict();
     }
 }

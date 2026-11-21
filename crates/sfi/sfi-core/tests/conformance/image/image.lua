@@ -1,0 +1,110 @@
+-- SPDX-License-Identifier: MIT
+-- Generated game-free pixels only. Both pinned implementations are the oracle.
+local function hex(s)
+    return (s:gsub('.', function(c) return string.format('%02x',string.byte(c)) end))
+end
+local function pixels(i)
+    local result = {}
+    for y=0,i.height-1 do
+        for x=0,i.width-1 do
+            local r,g,b,a=i:get_pixel(x,y)
+            result[#result+1]=string.char(r,g,b,a)
+        end
+    end
+    return i.width,i.height,hex(table.concat(result))
+end
+local i=image.create(3,2)
+T.call('initial',function() return pixels(i) end)
+T.call('set',function() return i:set_pixel(2,1,1,2,3,4) end)
+T.call('get',function() return i:get_pixel(2,1) end)
+T.call('get-packed',function() return i:get_pixel_packed(2,1) end)
+T.call('set-packed',function() return i:set_pixel_packed(0,0,0xff804020) end)
+T.call('packed-bytes',function() return i:get_pixel(0,0) end)
+T.call('get-oob-x',function() return i:get_pixel(3,0) end)
+T.call('get-oob-y',function() return i:get_pixel(0,2) end)
+T.call('get-packed-oob',function() return i:get_pixel_packed(3,2) end)
+T.call('set-oob-x',function() return i:set_pixel(3,2,1,2,3,4) end)
+T.call('set-oob-y',function() return i:set_pixel(0,2,1,2,3,4) end)
+T.call('packed-oob',function() return i:set_pixel_packed(3,2,1) end)
+T.call('width-assignment',function() i.width=8 end)
+T.call('height-assignment',function() i.height=8 end)
+T.call('unknown-assignment',function() i.other=8 end)
+T.call('unknown-get',function() return i.other end)
+T.call('width-call',function() return i:width() end)
+T.call('height-call',function() return i:height() end)
+T.call('dimensions-unchanged',function() return i.width,i.height end)
+T.call('receiver',function() return i.get_pixel(false,0,0) end)
+T.call('getter-missing-x',function() return i:get_pixel() end)
+T.call('getter-missing-y',function() return i:get_pixel(0) end)
+T.call('getter-negative-int',function() return i:get_pixel(-1,0) end)
+T.call('getter-negative-float',function() return i:get_pixel(-1.0,0) end)
+T.call('getter-fraction',function() return i:get_pixel(0.5,0) end)
+T.call('getter-string',function() return i:get_pixel('0','0') end)
+T.call('getter-float-string',function() return i:get_pixel('0.0',0) end)
+T.call('getter-overflow',function() return i:get_pixel(4294967296,0) end)
+T.call('getter-nan',function() return i:get_pixel(0/0,0) end)
+T.call('getter-infinity',function() return i:get_pixel(math.huge,0) end)
+T.call('setter-conversion-before-bounds',function() return i:set_pixel(9,9,false,2,3,4) end)
+T.call('setter-channel-overflow',function() return i:set_pixel(0,0,256,2,3,4) end)
+T.call('setter-channel-negative',function() return i:set_pixel(0,0,-1,2,3,4) end)
+T.call('setter-channel-float',function() return i:set_pixel(0.0,0.0,-1.0,'2',3.0,4) end)
+T.call('setter-channel-result',function() return i:get_pixel(0,0) end)
+T.call('setter-missing-alpha',function() return i:set_pixel(0,0,1,2,3) end)
+T.call('packed-overflow',function() return i:set_pixel_packed(0,0,4294967296) end)
+T.call('packed-max',function() i:set_pixel_packed(0,0,'4294967295'); return i:get_pixel_packed(0,0) end)
+T.call('create-missing',function() return image.create() end)
+T.call('create-missing-height',function() return image.create(1) end)
+T.call('create-fraction',function() return image.create(1.5,2) end)
+T.call('create-negative',function() return image.create(-1,2) end)
+T.call('create-strings',function() local v=image.create('2','1'); return pixels(v) end)
+T.call('create-zero',function() local v=image.create(0,2); return v.width,v.height,v:get_pixel(0,0) end)
+T.call('create-negative-float',function() local v=image.create(-1.0,2); return v.width,v.height end)
+T.call('zero-set',function() return image.create(0,1):set_pixel(0,0,1,2,3,4) end)
+T.call('zero-set-packed',function() return image.create(1,0):set_pixel_packed(0,0,0) end)
+T.call('identity',function()
+    local v=image
+    local alias=builtin.image
+    v.marker=17
+    image={}
+    local same=alias==v and alias.marker==17
+    image=v
+    return same,rawequal(image,builtin.image)
+end)
+local source=image.create(3,2)
+for y=0,1 do for x=0,2 do source:set_pixel(x,y,x*80,y*160,255-x*80,({0,128,255})[x+1]) end end
+local before=select(3,pixels(source))
+for _,format in ipairs({'png','jpeg','jpg','gif','webp','pnm','tiff','tga','dds','bmp','ico','hdr','openexr','farbfeld','avif','qoi','pcx'}) do
+    local encoded
+    T.call('encode-'..format,function()
+        encoded=image.encode(source,format)
+        return hex(encoded:to_string()),encoded:head(),encoded:tail(),encoded:order()
+    end)
+    T.expect('source-unchanged-'..format,before==select(3,pixels(source)),true)
+    if encoded then
+        T.call('decode-explicit-'..format,function() return pixels(image.decode(encoded,format)) end)
+        T.call('decode-sniff-'..format,function() return pixels(image.decode(encoded)) end)
+        T.call('decode-head-'..format,function() return encoded:head() end)
+        T.call('decode-truncated-'..format,function() return image.decode(encoded:to_string():sub(1,4),format) end)
+    end
+    T.call('malformed-'..format,function() return image.decode('not an image',format) end)
+end
+T.call('default-encode',function() return hex(image.encode(source):to_string()) end)
+T.call('nil-encode',function() return hex(image.encode(source,nil):to_string()) end)
+local png=image.encode(source,'png'):to_string()
+local buffer_input=buffer.wrap('prefix'..png..'suffix')
+buffer_input:head(6)
+buffer_input:tail(6+#png)
+T.call('buffer-decode',function() return pixels(image.decode(buffer_input)) end)
+T.call('buffer-unchanged',function() return buffer_input:head(),buffer_input:tail() end)
+T.call('string-decode',function() return pixels(image.decode(png,nil)) end)
+T.call('decode-type',function() return image.decode(false,'bad') end)
+T.call('decode-number',function() return image.decode(12) end)
+T.call('encode-type',function() return image.encode(buffer_input,'bad') end)
+T.call('decode-format',function() return image.decode(png,'PNG') end)
+T.call('encode-format',function() return image.encode(source,'PNG') end)
+T.call('decode-binary-format',function() return image.decode(png,'\255') end)
+T.call('decode-format-number',function() return image.decode(png,1) end)
+T.call('decode-empty',function() return image.decode('') end)
+T.call('decode-unknown',function() return image.decode('unknown') end)
+buffer_input:close()
+T.call('closed-before-format',function() return image.decode(buffer_input,'bad') end)

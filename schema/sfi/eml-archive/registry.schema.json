@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "eml-archive/registry.schema.json",
+  "$comment": "SPDX-License-Identifier: MIT",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "pin": {
+      "$ref": "common.schema.json#/$defs/pin"
+    },
+    "game_version": {
+      "type": "string",
+      "description": "Original selected archive version text, without parsing or normalization."
+    },
+    "registry_version": {
+      "type": "string",
+      "description": "Original registry version text, independently preserved without parsing or normalization."
+    },
+    "count": {
+      "type": "string",
+      "pattern": "^u64:[0-9a-f]{16}$"
+    },
+    "first": {
+      "type": "string",
+      "pattern": "^u64:[0-9a-f]{16}$"
+    },
+    "types": {
+      "type": "array",
+      "items": {
+        "$ref": "common.schema.json#/$defs/type"
+      }
+    }
+  },
+  "required": [
+    "schema_version",
+    "pin",
+    "game_version",
+    "registry_version",
+    "count",
+    "first",
+    "types"
+  ],
+  "additionalProperties": false
+}

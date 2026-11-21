@@ -1,0 +1,7 @@
+{
+  "format": 1,
+  "revision": 1,
+  "scope": "interpreter-only",
+  "unknownMixedDataNative": "save-sensitive",
+  "packages": []
+}

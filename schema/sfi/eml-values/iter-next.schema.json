@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "eml-values/iter-next.schema.json",
+  "$comment": "SPDX-License-Identifier: MIT",
+  "description": "value_read ITER_NEXT: the key and the value; {\"tag\":\"item\"} is the reply's item lease (a typed value). The end is key nil and value nil; a non-nil key with a nil value is not the end.",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "packet": {
+      "const": "iter_next"
+    },
+    "key": {
+      "$ref": "common.schema.json#/$defs/lua_value"
+    },
+    "value": {
+      "oneOf": [
+        {
+          "$ref": "common.schema.json#/$defs/lua_value"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "tag": {
+              "const": "item"
+            }
+          },
+          "required": [
+            "tag"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "packet",
+    "key",
+    "value"
+  ],
+  "additionalProperties": false
+}

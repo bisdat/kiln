@@ -1,0 +1,266 @@
+// SPDX-License-Identifier: MIT
+// Adapted from ShroudForge (MIT, Copyright (c) 2026 bonsaibauer)
+// Sources (both pins): modules/modloader/check_mod_conflicts.rs:8-45 and
+// mod_profiles.rs:78-147 (copied below with their ModEnvironment lookups replaced); the
+// "rules-file" mode calls check_mod_conflicts.rs:5-45 and plan_mod_load_order.rs:142-227
+// unchanged, through SF's own ModEnvironment over a scratch game directory.
+// The package-model differential harness: runs ShroudForge's own package reader over the case files.
+// Kept as text, never built into Kiln: build it against a scratch copy of each pin (see
+// ../goldens.toml). It is a local test tool only and is never shipped.
+use serde_json::{Value, json};
+use shroudforge_package as sf;
+use std::{fs, path::Path};
+fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    let cases: Vec<Value> = serde_json::from_slice(&fs::read(&args[1]).unwrap()).unwrap();
+    let work = Path::new(&args[2]);
+    let mut out = vec![];
+    if args.get(4).map(String::as_str) == Some("profiles") {
+        for (i, case) in cases.iter().enumerate() {
+            out.push(profiles(case, &work.join(format!("p{i}")), &args[3]));
+        }
+        println!("{}", serde_json::to_string_pretty(&out).unwrap());
+        return;
+    }
+    if args.get(4).map(String::as_str) == Some("rules-file") {
+        for (i, case) in cases.iter().enumerate() {
+            out.push(rules_file(case, &work.join(format!("r{i}"))));
+        }
+        println!("{}", serde_json::to_string_pretty(&out).unwrap());
+        return;
+    }
+    if args.get(4).map(String::as_str) == Some("rules") {
+        for case in &cases {
+            out.push(json!({"id": case["id"], "result": rules(&case["rules"], &case["mods"])}));
+        }
+        println!("{}", serde_json::to_string_pretty(&out).unwrap());
+        return;
+    }
+    for (i, case) in cases.iter().enumerate() {
+        let root = work.join(format!("c{i}"));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        if case["strict"] == true {
+            let cfg = sf::paths::loader_config(&root);
+            fs::create_dir_all(cfg.parent().unwrap()).unwrap();
+            let mut d: Value = serde_json::from_str(&fs::read_to_string(&args[3]).unwrap()).unwrap();
+            d["modules"]["modDetection"]["tolerateUnknownManifestFields"] = json!(false);
+            fs::write(&cfg, serde_json::to_vec(&d).unwrap()).unwrap();
+        }
+        let pkg = root.join("mods").join("pkg");
+        for (name, text) in case["files"].as_object().unwrap() {
+            let p = pkg.join(name);
+            fs::create_dir_all(p.parent().unwrap()).unwrap();
+            fs::write(&p, text.as_str().unwrap()).unwrap();
+        }
+        if let Some(h) = case.get("files_hex").and_then(Value::as_object) { for (name, hex) in h { let s = hex.as_str().unwrap(); let b: Vec<u8> = (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i+2], 16).unwrap()).collect(); let p = pkg.join(name); fs::create_dir_all(p.parent().unwrap()).unwrap(); fs::write(p, b).unwrap(); } }
+        let r = sf::config::read_manifest_path(&root, &pkg);
+        let mut o = json!({"id": case["id"]});
+        match r {
+            Ok(m) => {
+                o["ok"] = serde_json::to_value(&m).unwrap();
+                // read_mod_config_revision.rs / calculate_mod_config_revision.rs; start_ingame_runtime.rs
+                // loaded[id] = revision(to_vec(manifest)); calculate_manifest_revision.rs.
+                o["rev"] = json!({
+                    "config": sf::config_revision(&json!({"enabled": m.enabled, "settings": m.setting_values})),
+                    "loaded": sf::config::revision(&serde_json::to_vec(&m).unwrap()),
+                    "manifest": sf::config::manifest_revision(&pkg).unwrap_or_else(|e| e.replace(&pkg.display().to_string(), "<package>")),
+                });
+                let mut en = serde_json::Map::new();
+                let values = case.get("enabled_values").cloned().unwrap_or_else(|| m.setting_values.clone());
+                for s in &m.settings {
+                    en.insert(s.key.clone(), json!(sf::setting_is_enabled(&s.key, &m.settings, &values)));
+                }
+                o["enabled"] = Value::Object(en);
+            }
+            Err(e) => { o["err"] = json!(e); }
+        }
+        if let Some(s) = case.get("save") {
+            // validate_settings against the parsed definitions (save path validator)
+            if let Ok(m) = sf::config::read_manifest_path(&root, &pkg) {
+                o["save"] = match sf::config::validate_settings(&m.settings, s) { Ok(()) => json!(null), Err(e) => json!(e) };
+            }
+        }
+        if let Ok(m) = sf::config::read_manifest_path(&root, &pkg) {
+            if let Some(ls) = case.get("resolve").and_then(Value::as_array) {
+                o["resolve"] = Value::Array(ls.iter().map(|l| serde_json::to_value(sf::localized_manifest(&m, l.as_str().unwrap())).unwrap()).collect());
+            }
+            if let Some(ss) = case.get("strings").and_then(Value::as_array) {
+                o["strings"] = Value::Array(ss.iter().map(|s| json!(sf::localized_string(&m.locales, s[0].as_str().unwrap(), s[1].as_str().unwrap(), s[2].as_str()))).collect());
+            }
+        }
+        out.push(o);
+    }
+    println!("{}", serde_json::to_string_pretty(&out).unwrap());
+}
+
+// Copy of check_mod_conflicts.rs:8-45 (both pins) with the ModEnvironment lookups replaced
+// by an explicit {id: [enabled, version]} table.
+fn rules(text: &Value, mods: &Value) -> Value {
+    let run = || -> Result<Value, String> {
+        let value: Value = serde_json::from_slice(text.as_str().unwrap().as_bytes()).map_err(|e| e.to_string())?;
+        sf::config::validate_document(Path::new("."), sf::documents::RULES, &value)?;
+        let mut blocked = std::collections::BTreeMap::new();
+        for rule in value["conflicts"].as_array().ok_or("conflicts must be an array")? {
+            let first = &rule["first"];
+            let second = &rule["second"];
+            let matches = |constraint: &Value| -> Result<bool, String> {
+                let id = constraint["id"].as_str().ok_or("missing conflict id")?;
+                let version = semver::VersionReq::parse(constraint["version"].as_str().ok_or("missing version range")?).map_err(|e| e.to_string())?;
+                Ok(mods.get(id).is_some_and(|m| m[0] == true && version.matches(&semver::Version::parse(m[1].as_str().unwrap()).unwrap())))
+            };
+            let a = matches(first)?;
+            let b = matches(second)?;
+            if a && b {
+                let reason = rule["reason"].as_str().ok_or("missing conflict reason")?;
+                blocked.insert(first["id"].as_str().unwrap().to_owned(), json!(reason));
+                blocked.insert(second["id"].as_str().unwrap().to_owned(), json!(reason));
+            }
+        }
+        Ok(json!(blocked))
+    };
+    match run() { Ok(v) => json!({"blocked": v}), Err(e) => json!({"err": e}) }
+}
+
+// SF's own reader for config/compatibility/rules.json (documents.rs:17-21): the file at
+// document_path(root, RULES) is set up as the case says, then sf::compatibility::conflicts
+// and ModEnvironment::plan_report_detailed run unchanged (client process, API 1.0.0).
+// Packages are real directories under <root>/mods, one per {id: [enabled, version]}.
+fn rules_file(case: &Value, root: &Path) -> Value {
+    use std::os::unix::fs::PermissionsExt;
+    let _ = fs::remove_dir_all(root);
+    fs::create_dir_all(root).unwrap();
+    for (id, m) in case["mods"].as_object().unwrap() {
+        let pkg = root.join("mods").join(id);
+        fs::create_dir_all(&pkg).unwrap();
+        fs::write(pkg.join("mod.json"), json!({"id": id, "name": id, "version": m[1]}).to_string()).unwrap();
+        fs::write(pkg.join("extended.mod.json"), json!({"schemaVersion": 1, "enabled": m[0], "targets": ["client", "server"]}).to_string()).unwrap();
+    }
+    let path = sf::config::document_path(root, sf::documents::RULES);
+    let parent = path.parent().unwrap();
+    let bytes = || -> Vec<u8> {
+        match case.get("hex").and_then(Value::as_str) {
+            Some(s) => (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect(),
+            None => case["text"].as_str().unwrap().as_bytes().to_vec(),
+        }
+    };
+    match case["kind"].as_str().unwrap() {
+        "missing" => fs::create_dir_all(parent).unwrap(),
+        "missing-parent" => fs::create_dir_all(parent.parent().unwrap()).unwrap(),
+        "directory" => fs::create_dir_all(&path).unwrap(),
+        "parent-is-file" => {
+            fs::create_dir_all(parent.parent().unwrap()).unwrap();
+            fs::write(parent, b"x").unwrap();
+        }
+        "dangling-symlink" => {
+            fs::create_dir_all(parent).unwrap();
+            std::os::unix::fs::symlink(parent.join("absent.json"), &path).unwrap();
+        }
+        "unreadable" => {
+            fs::create_dir_all(parent).unwrap();
+            fs::write(&path, bytes()).unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).unwrap();
+            assert!(fs::read(&path).is_err(), "run as a user that mode 000 locks out");
+        }
+        "file" => {
+            fs::create_dir_all(parent).unwrap();
+            fs::write(&path, bytes()).unwrap();
+        }
+        other => panic!("unknown kind {other}"),
+    }
+    let env = sf::ModEnvironment::load(root.to_str().unwrap()).unwrap_or_else(|_| panic!("ModEnvironment::load"));
+    let result = match sf::compatibility::conflicts(&env) {
+        Ok(blocked) => json!({"blocked": blocked.into_iter().collect::<std::collections::BTreeMap<_, _>>()}),
+        Err(e) => json!({"err": e}),
+    };
+    let (plan, issues) = env.plan_report_detailed(false, "1.0.0");
+    let ids: Vec<String> = plan.iter().map(|m| m.info().id.clone()).collect();
+    if case["kind"] == "unreadable" {
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+    }
+    json!({"id": case["id"], "result": result, "plan": {"ids": ids, "issues": issues}})
+}
+
+fn profiles(case: &Value, root: &Path, defaults: &str) -> Value {
+    let _ = fs::remove_dir_all(root);
+    let dir = sf::paths::mod_profiles_dir(root);
+    fs::create_dir_all(&dir).unwrap();
+    for (name, text) in case["profiles"].as_object().unwrap() {
+        fs::write(dir.join(name), expand(text)).unwrap();
+    }
+    if let Some(selections) = case.get("selections") {
+        let cfg = sf::paths::loader_config(root);
+        fs::create_dir_all(cfg.parent().unwrap()).unwrap();
+        let mut d: Value = serde_json::from_str(&fs::read_to_string(defaults).unwrap()).unwrap();
+        d["modules"]["dllManager"]["profiles"] = selections.clone();
+        fs::write(&cfg, serde_json::to_vec(&d).unwrap()).unwrap();
+    }
+    let accepted = sf::mod_profiles::read_profiles(root).map_err(|e| json!(e)).map(|p| serde_json::to_value(p).unwrap());
+    let mut reasons = serde_json::Map::new();
+    for name in case["profiles"].as_object().unwrap().keys() {
+        let owned = expand(&case["profiles"][name]);
+        let bytes = owned.as_bytes();
+        let r = serde_json::from_slice::<sf::mod_profiles::ModCompatibilityProfile>(bytes).map_err(|e| e.to_string()).and_then(|p| validate_profile(&p));
+        reasons.insert(name.clone(), match r { Ok(()) => Value::Null, Err(e) => json!(e) });
+    }
+    let mut o = json!({"id": case["id"], "accepted": accepted.unwrap_or_else(|e| e), "reasons": reasons});
+    if let Some(files) = case.get("package").and_then(Value::as_object) {
+        let pkg = root.join("mods").join(case["directory"].as_str().unwrap_or("pkg"));
+        for (name, text) in files {
+            let p = pkg.join(name);
+            fs::create_dir_all(p.parent().unwrap()).unwrap();
+            fs::write(&p, text.as_str().unwrap()).unwrap();
+        }
+        o["manifest"] = match sf::config::read_manifest_path(root, &pkg) { Ok(m) => json!({"ok": m}), Err(e) => json!({"err": e}) };
+        o["revision"] = json!(sf::config::manifest_revision(&pkg).map_err(|e| e.replace(&pkg.display().to_string(), "<package>")));
+    }
+    o
+}
+// Copy of mod_profiles.rs:78-147 (private in SF, identical at both pins), used only to name
+// the reason a file is skipped; acceptance itself comes from SF's read_profiles above.
+fn validate_profile(profile: &sf::mod_profiles::ModCompatibilityProfile) -> Result<(), String> {
+    use std::path::Component;
+    fn relative_file(value: &str) -> bool { !value.is_empty() && !value.contains(['\\', ':']) && Path::new(value).components().all(|part| matches!(part, Component::Normal(_))) }
+    fn single_folder(value: &str) -> bool { relative_file(value) && Path::new(value).components().count() == 1 }
+    if profile.schema_version != 1 || profile.id.trim().is_empty() || profile.id == "none" || profile.id.len() > 128 || profile.name.trim().is_empty() || profile.name.len() > 160 || !single_folder(&profile.package_directory) {
+        return Err("invalid compatibility profile identity".into());
+    }
+    for value in [&profile.mod_json, &profile.extended_mod_json].into_iter().flatten() {
+        if !value.is_object() { return Err("manifest additions must be JSON objects".into()); }
+    }
+    if profile.mod_json.as_ref().and_then(Value::as_object).is_some_and(|value| value.contains_key("id") || value.contains_key("version")) {
+        return Err("a profile cannot replace the mod ID or version".into());
+    }
+    if let Some(capabilities) = profile.mod_json.as_ref().and_then(|value| value.get("capabilities")) {
+        serde_json::from_value::<Vec<sf::Capability>>(capabilities.clone()).map_err(|error| format!("invalid profile capabilities: {error}"))?;
+    }
+    if profile.files.len() > 16 || profile.package_files.len() > 64 || profile.import_files.len() > 64 {
+        return Err("compatibility profile has too many files".into());
+    }
+    let mut seen = std::collections::HashSet::new();
+    for file in &profile.files {
+        if !relative_file(&file.path) || !file.path.to_ascii_lowercase().ends_with(".dll") || !seen.insert(file.path.to_ascii_lowercase()) {
+            return Err(format!("invalid or duplicate DLL path: {}", file.path));
+        }
+    }
+    let mut bytes = 0usize;
+    for (path, contents) in &profile.package_files {
+        bytes = bytes.saturating_add(contents.len());
+        if !relative_file(path) || matches!(path.as_str(), "mod.json" | "extended.mod.json") || contents.len() > 1024 * 1024 {
+            return Err(format!("invalid virtual package file: {path}"));
+        }
+    }
+    if bytes > 4 * 1024 * 1024 { return Err("virtual package files exceed 4 MiB".into()); }
+    for (source, destination) in &profile.import_files {
+        if !relative_file(source) || !relative_file(destination) { return Err("invalid installation file mapping".into()); }
+    }
+    Ok(())
+}
+
+// A profile is literal text, or {"template": "...@@...", "fill": "x", "count": n}.
+fn expand(v: &Value) -> String {
+    match v.as_str() {
+        Some(s) => s.to_owned(),
+        None => v["template"].as_str().unwrap().replace("@@", &v["fill"].as_str().unwrap().repeat(v["count"].as_u64().unwrap() as usize)),
+    }
+}

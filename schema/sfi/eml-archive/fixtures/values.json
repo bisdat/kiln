@@ -1,0 +1,84 @@
+[
+  {
+    "tag": "nil"
+  },
+  {
+    "tag": "bool",
+    "value": true
+  },
+  {
+    "tag": "i64",
+    "value": "i64:8000000000000000"
+  },
+  {
+    "tag": "u64",
+    "value": "u64:ffffffffffffffff"
+  },
+  {
+    "tag": "f32",
+    "value": "f32:80000000"
+  },
+  {
+    "tag": "f64",
+    "value": "f64:7ff8000000000001"
+  },
+  {
+    "tag": "guid",
+    "value": "guid:00000000000000000000000000000000"
+  },
+  {
+    "tag": "bytes",
+    "value": "bytes:00ff00"
+  },
+  {
+    "tag": "string",
+    "value": "string:610062ff"
+  },
+  {
+    "tag": "array",
+    "items": [
+      {
+        "tag": "nil"
+      }
+    ]
+  },
+  {
+    "tag": "map",
+    "entries": [
+      {
+        "key": {
+          "tag": "string",
+          "value": "string:78"
+        },
+        "value": {
+          "tag": "bool",
+          "value": false
+        }
+      }
+    ]
+  },
+  {
+    "tag": "variant",
+    "discriminant": "u64:0000000000000002",
+    "value": {
+      "tag": "nil",
+      "type": "example::None"
+    }
+  },
+  {
+    "tag": "optional",
+    "present": false
+  },
+  {
+    "tag": "optional",
+    "present": true,
+    "value": {
+      "tag": "nil"
+    }
+  },
+  {
+    "tag": "reference",
+    "value": "guid:ffffffffffffffffffffffffffffffff",
+    "type": "example::Object"
+  }
+]

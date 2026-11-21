@@ -541,6 +541,35 @@ pub fn write_profile_plan(game_dir: &Path, plan: &ProfilePlan) -> Result<bool> {
     })
 }
 
+/// What [`write_profile_plan_staged`] calls with chain.ini's bytes as they are (None: no file) and the bytes about to be
+/// written.
+#[cfg(feature = "sfi-scan")]
+pub type Stage<'a> = dyn FnMut(Option<&[u8]>, &[u8]) -> Result<()> + 'a;
+
+/// [`write_profile_plan`] with a stage: `stage` gets chain.ini's bytes as they are and the bytes about to be written,
+/// under this file's lock and before anything is written; an error from it writes nothing. The activation journal of a
+/// kiln-mode activation records them there (crate::sfi_activation, `Staging::chain`). Returns false when the file
+/// already says that (nothing staged, nothing written).
+#[cfg(feature = "sfi-scan")]
+pub fn write_profile_plan_staged(game_dir: &Path, plan: &ProfilePlan, stage: &mut Stage<'_>) -> Result<bool> {
+    let path = game_dir.join(crate::paths::game::CHAIN);
+    locked(|| {
+        let raw = match std::fs::read(&path) {
+            Ok(b) => Some(b),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => return Err(crate::util::io_at(&path, "reading")(e)),
+        };
+        let text = raw.as_deref().map(decode).unwrap_or_default();
+        let out = render_plan(&text, plan, true);
+        if out == text {
+            return Ok(false);
+        }
+        stage(raw.as_deref(), out.as_bytes())?;
+        store(&path, &text, &out)?;
+        Ok(true)
+    })
+}
+
 /// chain.ini as text ("" when there is none).
 pub fn read_raw(game_dir: &Path) -> Result<String> {
     read_text(&game_dir.join(crate::paths::game::CHAIN))

@@ -342,6 +342,7 @@ public static class Screens
             Crafting.ScreenChanged(prev, cur);
             UiInventoryScreens.ScreenChanged(cur);
             RefusalNotice.ScreenChanged(prev, cur);
+            SfiSafetyNotice.ScreenChanged(prev, cur);  // entering a world shows the do-not-save banner again
             foreach (var (h, owner) in Handlers.Snapshot()) UiModCalls.Invoke(owner, x => h(x.prev, x.cur), (prev, cur), "Ui.Screens.Changed");
             if (Events.HasSubscribers<ScreenChangedEvent>()) Events.Enqueue(new ScreenChangedEvent(prev, cur));
         }
@@ -485,9 +486,20 @@ public static class Menus
     /// <summary>Kiln's own "Mods" entry (both menus; opens the Kiln menu).</summary>
     public static bool KilnEntryVisible
     {
-        set
+        set => SetKilnEntryFlag(1u, !value);  // KILN_UI_ENTRY_HIDDEN
+    }
+
+    private static readonly object KilnEntryLock = new();
+    private static uint _kilnEntryFlags;
+
+    /// <summary>Sets or clears one KILN_UI_ENTRY_* flag of Kiln's own entry and sends them all: menu_set replaces every
+    /// flag, so hiding the entry and its attention marker keep each other. Any thread.</summary>
+    internal static void SetKilnEntryFlag(uint flag, bool on)
+    {
+        lock (KilnEntryLock)
         {
-            if (UiNative.HasGameUi) UiNative.T->MenuSet(0, Utf8.Of(KilnText.T("native.menu.mods")), value ? 0u : 1u);
+            _kilnEntryFlags = on ? _kilnEntryFlags | flag : _kilnEntryFlags & ~flag;
+            if (UiNative.HasGameUi) UiNative.T->MenuSet(0, Utf8.Of(KilnText.T("native.menu.mods")), _kilnEntryFlags);
         }
     }
 

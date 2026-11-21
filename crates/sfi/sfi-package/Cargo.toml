@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: MIT
+[package]
+name = "sfi-package"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Pure ShroudForge package model, sources, discovery, planning, profiles and revisions (no Lua)."
+
+[dependencies]
+# Not preserve_order: cargo would unify it into every dependent (kiln-manage's JSON writers).
+# Document order lives in json::Value (an IndexMap, already in the lock).
+serde_json.workspace = true
+indexmap = { version = "2", features = ["serde"] }
+serde = { version = "1.0", features = ["derive"] }
+semver = { version = "=1.0.28", features = ["serde"] }
+regex = "=1.13.1"

@@ -21,7 +21,7 @@ export const openInDiscord = (url: string, fallback?: string) => { api.appOpenDi
 export const PRIVACY_URL = "https://frostdev.io/kiln/privacy";
 export const TERMS_URL = "https://frostdev.io/kiln/terms";
 export const LINKS = {
-  docs: "https://frostdev.io/kiln/docs",
+  docs: "https://frostdev.io/kiln/wiki",
   issues: "https://github.com/frostdev-ops/kiln/issues",
   nexus: "https://www.nexusmods.com/enshrouded/mods/301",
   download: "https://frostdev.io/kiln/download",

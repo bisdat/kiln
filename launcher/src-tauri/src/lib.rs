@@ -13,6 +13,7 @@ pub mod deck;
 /// The launcher's own messages when its page cannot start (Linux: GTK, else the desktop's tools).
 #[cfg(target_os = "linux")]
 pub mod dialog;
+pub mod dialog_folder;
 /// The window's app id and icon on Linux, the AppImage's app menu entry.
 pub mod desktop;
 pub mod distribution;
@@ -56,6 +57,11 @@ pub fn link_entry(url: &str) -> bool {
 }
 
 pub fn run() {
+    panic_to_log();
+    // (feature sfi: kiln-mode activations run the archive inspector the Kiln installed in each game
+    // folder brought, its version and SHA-256 from that install: kiln_manage::sfi_inspection::Installed)
+    #[cfg(feature = "sfi")]
+    kiln_manage::profile::sfi::use_installed_inspector();
     let builder = tauri::Builder::default().plugin(tauri_plugin_dialog::init());
     #[cfg(feature = "self-update")]
     let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
@@ -120,6 +126,7 @@ pub fn run() {
             commands::library::library_import,
             commands::library::library_remove,
             commands::library::library_remove_many,
+            commands::library::library_remove_settings,
             commands::library::library_unused,
             commands::library::library_users,
             commands::library::library_lint,
@@ -196,6 +203,10 @@ pub fn run() {
             commands::config::config_kiln_read,
             commands::config::config_kiln_set,
             commands::config::config_kiln_reset,
+            // Settings' ShroudForge card
+            commands::sfi_backend::sfi_backend_read,
+            commands::sfi_backend::sfi_backend_preview,
+            commands::sfi_backend::sfi_backend_set,
             commands::app::app_assets_status,
             commands::app::app_assets_import,
             commands::server::server_console_open,
@@ -249,6 +260,7 @@ pub fn run() {
             commands::logs::report_save,
             commands::logs::report_summary,
             commands::logs::report_preview,
+            commands::logs::report_note,
             commands::data_folder::data_folder_get,
             commands::data_folder::data_folder_size,
             commands::data_folder::data_folder_check,
@@ -259,11 +271,14 @@ pub fn run() {
             commands::data_folder::data_folder_restart,
             commands::app::app_started,
             commands::app::app_render_set,
+            commands::app::app_render_x11_set,
             commands::app::app_render_report,
             commands::updates::updates_check,
             commands::app::app_desktop_set,
             commands::app::app_locales,
             commands::app::app_sandbox_set,
+            commands::app::app_dialog_default,
+            commands::app::app_dialog_remember,
             commands::vendor::vendor_status,
             commands::vendor::vendor_license,
             commands::vendor::vendor_download,
@@ -303,6 +318,10 @@ pub fn run() {
             commands::pack::pack_diff,
             commands::pack::pack_secret_scan,
             commands::pack::pack_peek_format,
+            commands::pack::pack_local_files,
+            commands::pack::pack_local_write,
+            commands::pack::pack_local_save,
+            commands::pack::pack_check,
             commands::crucible::crucible_status,
             commands::crucible::crucible_open,
             commands::crucible::crucible_install,
@@ -313,7 +332,43 @@ pub fn run() {
             commands::crucible::crucible_shared,
             commands::crucible::crucible_trust,
             commands::crucible::crucible_trust_set,
-            commands::crucible::crucible_links
+            commands::crucible::crucible_links,
+            commands::crucible::crucible_resume,
+            commands::crucible::crucible_clipboard,
+            commands::studio::studio_list,
+            commands::studio::studio_create,
+            commands::studio::studio_get,
+            commands::studio::studio_save,
+            commands::studio::studio_delete,
+            commands::studio::studio_credits_set,
+            commands::studio::studio_capture,
+            commands::studio::studio_capture_set,
+            commands::studio::studio_order,
+            commands::studio::studio_layer_files,
+            commands::studio::studio_layer_read,
+            commands::studio::studio_layer_write,
+            commands::studio::studio_layer_delete,
+            commands::studio::studio_layer_set,
+            commands::studio::studio_layer_lint,
+            commands::studio::studio_pick,
+            commands::studio::studio_fields,
+            commands::studio::studio_categories,
+            commands::studio::studio_catalog_status,
+            commands::studio::studio_catalog_ensure,
+            commands::studio::studio_analyze,
+            commands::studio::studio_test,
+            commands::studio::studio_test_report,
+            commands::studio::studio_test_end,
+            commands::studio::studio_build,
+            commands::studio::studio_publish_check,
+            commands::studio::studio_publish,
+            commands::studio::studio_set_visibility,
+            commands::studio::studio_server_pack,
+            // the check before Play
+            commands::sfi::launch_prepare,
+            commands::sfi::launch_confirm,
+            commands::sfi::launch_cancel,
+            commands::sfi::eml_data_base
         ]))
         .build(tauri::generate_context!())
         .expect("error while building the Kiln Launcher")
@@ -388,6 +443,26 @@ pub(crate) fn after_snapshot(app: &tauri::AppHandle) {
 /// Every command passes the data folder's gate first (folder.rs): while the pointer is broken, another launcher moves
 /// the folder, or this one moves it, only the commands that do not reach the folder answer; the others are refused
 /// with the reason before they run.
+/// A panic in any of the launcher's threads goes into launcher.log too (a support report holds it), after the default
+/// hook's stderr line. Once per thread at a time: a panic while logging one is not logged again.
+fn panic_to_log() {
+    let prev = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        prev(info);
+        thread_local! { static LOGGING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
+        if LOGGING.with(|l| l.replace(true)) {
+            return;
+        }
+        let thread = std::thread::current();
+        let msg = info.payload().downcast_ref::<&str>().map(|s| s.to_string())
+            .or_else(|| info.payload().downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "(no message)".into());
+        let at = info.location().map(|l| format!("{}:{}", l.file(), l.line())).unwrap_or_else(|| "?".into());
+        commands::app::launcher_log("panic", &format!("thread '{}' panicked at {at}: {msg}", thread.name().unwrap_or("unnamed")));
+        LOGGING.with(|l| l.set(false));
+    }));
+}
+
 fn gated<R: tauri::Runtime>(handler: impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static) -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
     move |invoke| {
         if let Some(e) = folder::current().command_refusal(invoke.message.command()) {
