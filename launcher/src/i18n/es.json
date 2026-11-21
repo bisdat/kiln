@@ -4965,7 +4965,9 @@
     "code": {
       "link": "¿Tienes un código?",
       "title": "Abrir un pack con su código",
-      "hint": "Pega el código o el enlace que te mandó tu amigo."
+      "hint": "Pega el código o el enlace que te mandó tu amigo.",
+      "paste": "Pegar",
+      "pasteNone": "No hay ningún código de pack en el portapapeles."
     },
     "err": {
       "notFound": "No encontramos ese código. Los códigos se ven así: H7QK-3MZP.",

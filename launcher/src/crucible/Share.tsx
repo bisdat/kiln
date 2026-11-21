@@ -2,7 +2,8 @@
 // copies its link; the popover shows the upload, then "Link copied. Paste it to your friends." with the link and the code.
 // Not signed in: "Sign in with Discord to share. Your friends don't need to." with the community sign-in, or Save as
 // file. A profile that changed since it was shared carries a "Pack changed" pill, and the popover offers Update link
-// (same link, a new version). "Got a code?" opens a pack by its code (the clipboard's code is filled in).
+// (same link, a new version). "Got a code?" opens a pack by its code (the clipboard's code is filled in when it opens,
+// and by its Paste button; the backend reads the clipboard: ./prefill.ts).
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import * as api from "../api/commands";
@@ -13,7 +14,8 @@ import { Button, ProgressBar, Spinner, TextInput, pickPaths, runTask, toast, use
 import { create } from "zustand";
 import MARK from "../assets/crucible/mark-64.png";
 import { useCommunityUi } from "../community/state";
-import { anyChange, codeInput, codeOf, countsOf, crucibleTarget } from "./code";
+import { anyChange, codeInput, countsOf, crucibleTarget } from "./code";
+import { clipboardPrefill } from "./prefill";
 import { openCrucible } from "./Preview";
 import { copyText, crk, crucibleError, readClipboard, shortLink, useCrucibleStatus, useCrucibleUi, useShareRun, useShared } from "./state";
 
@@ -235,10 +237,19 @@ function CodePanel({ onDone }: { onDone: () => void }) {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const typed = useRef(false);
-  // the clipboard's code (or link) is filled in when it holds one
+  // the clipboard's code (or link) is filled in when it holds one; Paste does it again (copied after the box opened)
   useEffect(() => {
-    void readClipboard().then((c) => { const x = crucibleTarget(c); if (x && !typed.current) setValue(codeOf(x) ?? x); });
+    let live = true;
+    void clipboardPrefill(readClipboard).then((v) => { if (live && v && !typed.current) setValue(v); });
+    return () => { live = false; };
   }, []);
+  const paste = async () => {
+    const v = await clipboardPrefill(readClipboard);
+    if (!v) { toast.info(t("crucible.code.pasteNone")); return; }
+    typed.current = true;
+    setValue(v);
+    setErr(null);
+  };
   const open = async () => {
     const target = crucibleTarget(value);
     if (!target) { setErr(t("crucible.err.notFound")); return; }
@@ -256,6 +267,7 @@ function CodePanel({ onDone }: { onDone: () => void }) {
       <form className="kcr-code-form" onSubmit={(e) => { e.preventDefault(); void open(); }}>
         <TextInput mono autoFocus value={value} placeholder="H7QK-3MZP" aria-label={t("crucible.code.title")} data-testid="crucible-code-input"
           onChange={(e) => { typed.current = true; const v = e.target.value; setValue(/[:/]/.test(v) ? v.trim() : codeInput(v)); setErr(null); }} />
+        <Button type="button" size="s" onClick={() => void paste()} data-testid="crucible-code-paste">{t("crucible.code.paste")}</Button>
         <Button type="submit" variant="primary" size="s" loading={busy} disabled={!value.trim()} data-testid="crucible-code-open">{t("common.open")}</Button>
       </form>
       {err ? <p className="k-hint k-tone-err" role="alert" data-testid="crucible-code-error">{err}</p> : <p className="k-hint">{t("crucible.code.hint")}</p>}

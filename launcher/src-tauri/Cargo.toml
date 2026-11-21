@@ -45,6 +45,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Deck UI (src/deck/browse.rs): a zip's file list before the library unpacks it (the same zip kiln-manage builds)
 zip = { version = "9", default-features = false }
+# commands/crucible.rs crucible_clipboard: "Got a code?" reads the clipboard here, not through navigator.clipboard
+# (WebView2 asks the player for clipboard access on every read); text only (no image-data)
+arboard = { version = "3.7", default-features = false }
 
 # Deck UI (src/deck/gamepad.rs): the native gamepad reader (pure Rust evdev; no libudev)
 [target.'cfg(target_os = "linux")'.dependencies]

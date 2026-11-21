@@ -4965,7 +4965,9 @@
     "code": {
       "link": "Got a code?",
       "title": "Open a pack by its code",
-      "hint": "Paste the code or link your friend sent."
+      "hint": "Paste the code or link your friend sent.",
+      "paste": "Paste",
+      "pasteNone": "There's no pack code on the clipboard."
     },
     "err": {
       "notFound": "We couldn't find that code. Codes look like H7QK-3MZP.",

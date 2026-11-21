@@ -4965,7 +4965,9 @@
     "code": {
       "link": "Tem um código?",
       "title": "Abrir um pacote pelo código",
-      "hint": "Cole o código ou o link que seu amigo mandou."
+      "hint": "Cole o código ou o link que seu amigo mandou.",
+      "paste": "Colar",
+      "pasteNone": "Não há código de pacote na área de transferência."
     },
     "err": {
       "notFound": "Não encontramos esse código. Os códigos são assim: H7QK-3MZP.",

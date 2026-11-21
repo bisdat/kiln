@@ -232,6 +232,33 @@ pub async fn crucible_resume() -> Result<links::Resume, Error> {
     blocking(|| Ok(links::resume(&dirs()?, launcher_exe().ok().as_deref()))).await
 }
 
+/// "Got a code?" and its Paste button, and the start's pack link when `crucible_resume` says a pack waits: the
+/// clipboard's text, read here (the OS clipboard through arboard) and not by the webview, so WebView2 never asks the
+/// player for clipboard access. Only text that may be a Crucible code or link crosses into the UI (the field's own
+/// check, `crucibleTarget`, decides); anything else is None. Never logged, never kept.
+#[tauri::command]
+pub async fn crucible_clipboard() -> Result<Option<String>, Error> {
+    blocking(|| Ok(clipboard_target(read_clipboard_text()))).await
+}
+
+fn read_clipboard_text() -> Option<String> {
+    arboard::Clipboard::new().ok()?.get_text().ok()
+}
+
+/// The clipboard's text when it may be a Crucible code or link (a superset of the UI's `crucibleTarget`: a code with
+/// any separators, a share, pack or kiln:// link, with or without https://, a version id), trimmed; None otherwise.
+fn clipboard_target(text: Option<String>) -> Option<String> {
+    let t = text?.trim().to_string();
+    if t.is_empty() || t.chars().count() > 200 {
+        return None;
+    }
+    let code: String = t.chars().filter(|c| !c.is_whitespace() && !matches!(c, '-' | '_' | '.')).collect();
+    let ok = crucible::parse_code(&code).is_some()
+        || crucible::parse_target(&t).is_some()
+        || (!t.contains("://") && crucible::parse_target(&format!("https://{t}")).is_some());
+    ok.then_some(t)
+}
+
 // ---------------------------------------------------------------- links arriving
 
 /// `main` calls this for `--link <url>` (or a bare kiln:// argument). True: start the window (the link waits in the
@@ -313,6 +340,34 @@ fn launcher_exe() -> Result<std::path::PathBuf, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_clipboard_reaches_the_ui_only_when_it_may_be_a_pack() {
+        let some = |s: &str| clipboard_target(Some(s.to_string()));
+        // codes, as players copy them
+        assert_eq!(some(" H7QK-3MZP\n").as_deref(), Some("H7QK-3MZP"));
+        assert_eq!(some("h7qk3mzp").as_deref(), Some("h7qk3mzp"));
+        assert_eq!(some("h7qk 3mzp").as_deref(), Some("h7qk 3mzp"));
+        assert_eq!(some("H7QK.3MZP").as_deref(), Some("H7QK.3MZP"));
+        // links: share, public pack, kiln://, without the scheme; a version id
+        for t in [
+            "https://frostdev.io/kiln/crucible/p/H7QK-3MZP",
+            "frostdev.io/kiln/crucible/p/H7QK-3MZP",
+            "https://frostdev.io/kiln/crucible/ember-run",
+            "kiln://crucible/H7QK-3MZP",
+            "kiln://crucible/pack/ember-run",
+            "pv_abc123",
+        ] {
+            assert_eq!(some(t).as_deref(), Some(t), "{t}");
+        }
+        // anything else stays out of the webview
+        for t in ["", "   ", "a shopping list", "hunter2", "https://example.com/p/H7QK-3MZP", "H7QK-3MZ0", "https://frostdev.io/kiln"] {
+            assert_eq!(some(t), None, "{t:?}");
+        }
+        assert_eq!(some(&format!("H7QK-3MZP{}", " ".repeat(200))).as_deref(), Some("H7QK-3MZP"), "trimmed first");
+        assert_eq!(some(&"x".repeat(201)), None);
+        assert_eq!(clipboard_target(None), None, "an empty or unreadable clipboard");
+    }
 
     /// End to end against a Crucible running on this machine (MinIO for R2 and the CDN, the fake relay for the
     /// sign-in), the way the launcher's commands drive it: share a profile, open its code without a sign-in, install

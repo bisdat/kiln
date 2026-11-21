@@ -281,6 +281,7 @@ pub const NAMES: &[&str] = &[
     "crucible_trust_set",
     "crucible_links",
     "crucible_resume",
+    "crucible_clipboard",
     "studio_list",
     "studio_create",
     "studio_get",

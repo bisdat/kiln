@@ -4965,7 +4965,9 @@
     "code": {
       "link": "Du hast einen Code?",
       "title": "Ein Pack mit seinem Code öffnen",
-      "hint": "Füge den Code oder Link ein, den dein Freund dir geschickt hat."
+      "hint": "Füge den Code oder Link ein, den dein Freund dir geschickt hat.",
+      "paste": "Einfügen",
+      "pasteNone": "In der Zwischenablage ist kein Pack-Code."
     },
     "err": {
       "notFound": "Diesen Code haben wir nicht gefunden. Codes sehen so aus: H7QK-3MZP.",

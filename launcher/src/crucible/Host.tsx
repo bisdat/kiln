@@ -9,7 +9,7 @@ import { useCommunityUi, useShown } from "../community/state";
 import { PreviewModal } from "./Preview";
 import { startShare } from "./Share";
 import { UpdateModal } from "./Update";
-import { crucibleTarget } from "./code";
+import { resumeTarget } from "./prefill";
 import { crk, readClipboard, useCrucibleOn, useCrucibleStatus, useCrucibleUi, useShareRun, useStatusFollowsSignIn } from "./state";
 import "./crucible.css";
 
@@ -31,8 +31,9 @@ export function useCrucibleLinks(open: (target: string) => void) {
 }
 
 /** "Come back after installing Kiln" (DESIGN 1.3): once per start, the code the download carried (the installer's note,
- *  the AppImage's name), else at the very first start the pack link the pack page copied to the clipboard, opens the
- *  preview ("Ready to install ..."). Nothing installs without the preview's own clicks. */
+ *  the AppImage's name) opens the preview ("Ready to install ..."); the clipboard (the pack link the pack page copied)
+ *  only when the start says a pack page's download left a pack waiting without its code, never because the launcher
+ *  started or updated (./prefill.ts). Nothing installs without the preview's own clicks. */
 export function useCrucibleResume(open: (target: string) => void) {
   const on = useCrucibleOn();
   useEffect(() => {
@@ -41,8 +42,7 @@ export function useCrucibleResume(open: (target: string) => void) {
     void (async () => {
       let r: api.CrucibleResume;
       try { r = await api.crucibleResume(); } catch { return; }
-      let target = r.code;
-      if (!target && r.firstStart) target = crucibleTarget(await readClipboard());
+      const target = await resumeTarget(r, readClipboard);
       if (live && target) open(target);
     })();
     return () => { live = false; };

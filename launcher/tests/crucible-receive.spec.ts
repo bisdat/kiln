@@ -70,6 +70,19 @@ test("the clipboard's code is filled in", async ({ page }) => {
   await expect(page.getByTestId("crucible-code-input")).toHaveValue("K4TW-9XRB");
 });
 
+test("Paste fills in a code copied after the box opened; other text is not pasted", async ({ page }) => {
+  await open(page);
+  await page.evaluate(() => navigator.clipboard.writeText("a shopping list"));
+  await page.getByTestId("crucible-got-code").click();
+  await expect(page.getByTestId("crucible-code-input")).toHaveValue("");
+  await page.getByTestId("crucible-code-paste").click();
+  await expect(page.locator(".k-toast").filter({ hasText: "There's no pack code on the clipboard." })).toBeVisible();
+  await expect(page.getByTestId("crucible-code-input")).toHaveValue("");
+  await page.evaluate(() => navigator.clipboard.writeText("h7qk 3mzp"));
+  await page.getByTestId("crucible-code-paste").click();
+  await expect(page.getByTestId("crucible-code-input")).toHaveValue("H7QK-3MZP");
+});
+
 test("a kiln:// link opens the preview; a trusted creator's pack already installed offers its update", async ({ page }) => {
   await open(page, "/?mock=1&crucible=packs#/");
   await crucible(page, (h) => h.link("kiln://crucible/R7MX-2HNQ"));

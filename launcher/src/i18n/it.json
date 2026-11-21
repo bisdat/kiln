@@ -4965,7 +4965,9 @@
     "code": {
       "link": "Hai un codice?",
       "title": "Apri un pack con il suo codice",
-      "hint": "Incolla il codice o il link che ti ha mandato il tuo amico."
+      "hint": "Incolla il codice o il link che ti ha mandato il tuo amico.",
+      "paste": "Incolla",
+      "pasteNone": "Negli appunti non c'è un codice pack."
     },
     "err": {
       "notFound": "Non abbiamo trovato quel codice. I codici sono fatti così: H7QK-3MZP.",

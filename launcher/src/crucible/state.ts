@@ -97,9 +97,11 @@ export async function copyText(text: string): Promise<boolean> {
   } catch { return false; }
 }
 
-/** What the clipboard holds now, if it can be read (a Got a code? prefill; never an error). */
+/** The clipboard's text when it may be a Crucible code or link (./prefill.ts says when it is read); null otherwise,
+ *  never an error. Read by the backend (crucible_clipboard), never navigator.clipboard: WebView2 asks the player for
+ *  clipboard access on every read ("tauri.localhost wants to see text and images in the clipboard"). */
 export async function readClipboard(): Promise<string | null> {
-  try { return navigator.clipboard?.readText ? await navigator.clipboard.readText() : null; } catch { return null; }
+  try { return await api.crucibleClipboard(); } catch { return null; }
 }
 
 /** The share link without its scheme, as the popover shows it. */
