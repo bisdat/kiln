@@ -385,9 +385,13 @@ the game gets the click as without Kiln. A click still waiting for its UI frame 
 **Marks** are drawn by Kiln's overlay over the game's slots, on the same screens and on the play view's hotbar, in this
 player's game only. Two mods marking one item: one of the marks shows (no layering in this version).
 
-**Coordinates.** Kiln maps the game's UI units to pixels from the game's own canvas, viewport and pixels per unit, scaled
-to the window when their sizes differ. This mapping is read from the game's code, not yet confirmed in a running game: the
-client checks `ui-hooks.c1` (marks on the slots at two resolutions and UI scales) and `ui-hooks.c2` (clicks on the right
+**Coordinates.** Kiln maps the game's UI units to pixels from the game's own viewport and pixels per unit
+(pixel = viewport + unit * pixels per unit), then scales the game's picture (the viewport's size in pixels) to the window
+or the overlay when their sizes differ. The canvas size is in UI units (1920x1080 times the UI scale, wider or taller to
+fit the window), never pixels: the mapping does not use it. Through 0.2.0-dev.30.2 Kiln scaled by the canvas instead, so
+marks, clicks, `Hovered` and docked panels landed at twice the slot's position at 3840x2160 (pixels per unit times
+the right place at any resolution or UI scale above 1 pixel per unit; GitHub issue 107). This mapping is read from the
+game's code, not yet confirmed in a running game: the client checks `ui-hooks.c1` (marks on the slots at two resolutions and UI scales) and `ui-hooks.c2` (clicks on the right
 slot) do that (`tools/client-checks`). Until they pass both rows say "game test pending".
 
 **Multiplayer and vanilla.** Everything happens in one player's game: the server and other players see nothing unless your

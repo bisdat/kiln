@@ -2105,8 +2105,8 @@ KilnUiPointerPress press(float x, float y, uint32_t button = 1, uint32_t mods = 
     p.mods = mods;
     p.x = x;
     p.y = y;
-    p.client_width = 1920;
-    p.client_height = 1080;
+    p.client_width = 2560;  // the fixture's picture (prime_slots: a 2560x1440 viewport)
+    p.client_height = 1440;
     return p;
 }
 uint32_t do_press(const KilnUiPointerPress& p) { return fake::pointer_fn ? fake::pointer_fn(&p, fake::pointer_user) : 99; }
@@ -2157,7 +2157,7 @@ void clicks_basics() {
 
     CHECK(do_press(press(50, 50, 1, KILN_UI_MOD_CTRL)) == KILN_UI_POINTER_PASS,
           "press: no slot frame yet -> PASS (the game gets it)");
-    FakeSlot a;  // outer {10, 20, 80, 80} units; ppu 1.3333, canvas = client 1920x1080: pixels 13.3..120, 26.7..133
+    FakeSlot a;  // outer {10, 20, 80, 80} units; ppu 1.3333, client = the 2560x1440 picture: pixels 13.3..120, 26.7..133
     g_frame_script = {desc(&a, 0x5000, 2, 0xAA, 900)};
     ui_frame(1000);
     CHECK(do_press(press(50, 50, 1, KILN_UI_MOD_CTRL)) == KILN_UI_POINTER_TAKE && ctrl_take.got.empty(),
@@ -2229,22 +2229,31 @@ void clicks_mapping_and_slot_at() {
     b.outer[0] = 100;  // pixels 146.7..253.3
     g_frame_script = {desc(&a, 0x5000, 0, 0xAA, 900), desc(&b, 0x5000, 1, 0xBB, 901)};
     ui_frame(2000);
-    CHECK(I()->mapping(o, 1920, 1080, &m) == KILN_OK && m.ok == 1 && m.scale_x == 1.3333f && m.offset_x == 0 &&
+    CHECK(I()->mapping(o, 2560, 1440, &m) == KILN_OK && m.ok == 1 && m.scale_x == 1.3333f && m.offset_x == 0 &&
               !(m.flags & KUI_MAP_SCALED) && !(m.flags & KUI_MAP_VERIFIED) && m.frame == 2000,
-          "mapping: a client of the canvas's size -> pixels = units * ppu; never VERIFIED in v1");
-    CHECK(I()->mapping(o, 3840, 2160, &m) == KILN_OK && m.ok == 1 && std::fabs(m.scale_x - 2.6666f) < 1e-3f &&
+          "mapping: a client of the picture's (viewport's) size -> pixels = units * ppu; never VERIFIED in v1");
+    CHECK(I()->mapping(o, 0, 0, &m) == KILN_OK && m.ok == 1 && m.scale_x == 1.3333f && !(m.flags & KUI_MAP_SCALED),
+          "mapping: target 0 -> the picture's own pixels, not SCALED");
+    CHECK(I()->mapping(o, 5120, 2880, &m) == KILN_OK && m.ok == 1 && std::fabs(m.scale_x - 2.6666f) < 1e-3f &&
               (m.flags & KUI_MAP_SCALED),
-          "mapping: a target twice the canvas -> scaled twice, flagged SCALED");
+          "mapping: a target twice the picture -> scaled twice, flagged SCALED");
+    CHECK(I()->mapping(o, 1920, 1080, &m) == KILN_OK && m.ok == 1 && std::fabs(m.scale_x - 1.0f) < 1e-3f &&
+              (m.flags & KUI_MAP_SCALED),
+          "mapping: a 1920x1080 target of the canvas's size in units is still scaled from the picture (issue 107)");
     KilnUiSlotHit h{};
     h.size = sizeof h;
-    CHECK(I()->slot_at(o, 200, 50, 1920, 1080, &h) == KILN_OK && h.ok == 1 && h.slot.item == 0xBB &&
+    CHECK(I()->slot_at(o, 200, 50, 2560, 1440, &h) == KILN_OK && h.ok == 1 && h.slot.item == 0xBB &&
               h.slot.slot_index == 1 && h.pointer_screen == 1,
           "slot_at: the slot under a point, and whether the screen takes clicks");
-    CHECK(I()->slot_at(o, 400, 50, 1920, 1080, &h) == KILN_OK && h.ok == 0 && h.reason == KUI_NO_SLOT,
+    CHECK(I()->slot_at(o, 400, 50, 2560, 1440, &h) == KILN_OK && h.ok == 0 && h.reason == KUI_NO_SLOT,
           "slot_at: between slots -> KUI_NO_SLOT");
     fake::cursor[0] = 60;
+    fake::cursor[2] = 2560;
+    fake::cursor[3] = 1440;
     CHECK(I()->slot_at(o, -1, -1, 0, 0, &h) == KILN_OK && h.ok == 1 && h.slot.item == 0xAA,
           "slot_at: x < 0 -> the cursor in the game window");
+    fake::cursor[2] = 1920;
+    fake::cursor[3] = 1080;
     fake::cursor_ok = false;
     CHECK(I()->slot_at(o, -1, -1, 0, 0, &h) == KILN_OK && h.ok == 0 && h.reason == KUI_NO_SLOT,
           "slot_at: no game window in front -> KUI_NO_SLOT");
@@ -2318,12 +2327,12 @@ void screen_view_chest_and_backpack() {
     CHECK(I()->screen_view(o, 1920, 1080, &v) == KILN_OK && v.ok == 0 && v.reason == KUI_NO_FRAME && v.kind == 0,
           "view: no frame yet -> KUI_NO_FRAME (the slot sites went in)");
     arm_slots();
-    FakeSlot mine, chest;           // outer {10, 20, 80, 80} units; ppu 1.3333 on a 1920x1080 canvas
+    FakeSlot mine, chest;           // outer {10, 20, 80, 80} units; ppu 1.3333 on a 2560x1440 picture
     chest.outer[0] = 200;           // the chest's slot further right: pixels 266.7..373.3
     g_frame_script = {desc(&mine, 0x5000, 0, 0xAA, 900), desc(&chest, 0x6000, 0, 0xBB, 0)};
     ui_frame(4000);
     v = view_record();
-    CHECK(I()->screen_view(o, 1920, 1080, &v) == KILN_OK && v.ok == 1 && v.kind == KUI_VIEW_CHEST && v.hud_screen == 22 &&
+    CHECK(I()->screen_view(o, 2560, 1440, &v) == KILN_OK && v.ok == 1 && v.kind == KUI_VIEW_CHEST && v.hud_screen == 22 &&
               v.container == 99 && v.local_player == 77 && v.frame == 4000 && v.session == 5 && v.slot_count == 2 &&
               v.player_slots == 1 && v.container_slots == 1 && (v.flags & KUI_VIEW_HOLDER_MATCH) &&
               !(v.flags & KUI_VIEW_SCALED) && v.size == sizeof v,
@@ -2333,9 +2342,9 @@ void screen_view_chest_and_backpack() {
               near(v.container_px.x, 266.66f) && near(v.container_px.width, 106.66f),
           "chest: the rectangles of all slots, the player's and the chest's, in pixels");
     v = view_record();
-    CHECK(I()->screen_view(o, 3840, 2160, &v) == KILN_OK && v.ok == 1 && (v.flags & KUI_VIEW_SCALED) &&
+    CHECK(I()->screen_view(o, 5120, 2880, &v) == KILN_OK && v.ok == 1 && (v.flags & KUI_VIEW_SCALED) &&
               near(v.all_px.x, 26.66f) && near(v.container_px.width, 213.33f),
-          "chest: a target twice the canvas -> rectangles twice as large, SCALED");
+          "chest: a target twice the picture -> rectangles twice as large, SCALED");
     fake::target = 123;  // play.target names another entity than the drawn slots' holder (a frame late)
     v = view_record();
     CHECK(I()->screen_view(o, 1920, 1080, &v) == KILN_OK && v.ok == 1 && v.container == 123 && v.container_slots == 0 &&
@@ -2402,6 +2411,119 @@ void screen_view_chest_and_backpack() {
     fake::client_side = false;
     const KilnOwner o2 = fake::owner("mod:server");
     CHECK(I()->screen_view(o2, 1920, 1080, &v) == KILN_ERR_UNAVAILABLE, "view: a server -> UNAVAILABLE");
+}
+
+
+// GitHub issue 107: the mapping at real resolutions, UI scales and boxed viewports. The UI system as the game computes it
+// (client 26430625, 0xa4fb40): canvas = 1920x1080 units times the UI scale, grown along the longer side; pixels per unit
+// = min(w / 1920s, h / 1080s), so canvas * ppu is the viewport's size; the viewport is the picture's pixels
+void set_game_canvas(float vx, float vy, float w, float h, float scale) {
+    const float a = (w / h) / (1920.0f / 1080.0f);
+    put(g_system, 0x30, 1920.0f * scale * std::max(a, 1.0f));
+    put(g_system, 0x34, 1080.0f * scale * std::max(1.0f / a, 1.0f));
+    put(g_system, 0x38, vx);
+    put(g_system, 0x3c, vy);
+    put(g_system, 0x40, w);
+    put(g_system, 0x44, h);
+    put(g_system, 0x48, std::min(w / (1920.0f * scale), h / (1080.0f * scale)));
+}
+
+void mapping_across_resolutions() {
+    prime_clicks();
+    fake::rows.insert("ui.inventory.panels");
+    const KilnOwner o = fake::owner("mod:resolutions");
+    ClicksSeen seen;
+    auto r = reg_record();
+    auto filter = click_filter(1, 0, 0);
+    CHECK(I()->subscribe_clicks(o, &filter, &on_click, &seen, &r) == KILN_OK && r.ok == 1 && arm_slots(),
+          "resolutions: a click subscriber, the slot sites armed");
+    FakeSlot first, second;  // outer {10, 20, 80, 80} and {100, 20, 80, 80} units: two backpack slots side by side
+    second.outer[0] = 100;
+    g_frame_script = {desc(&first, 0x5000, 0, 0xAA, 900), desc(&second, 0x5000, 1, 0xBB, 901)};
+    struct Case {
+        const char* name;
+        float vx, vy, w, h, scale;  // the game's viewport (pixels) and UI scale
+        float tw, th;               // the target (0: the picture's own pixels)
+        float ppu, canvas_w;        // what the game computes (checked: the fixture is the game's formula)
+    };
+    const Case cases[] = {
+        {"1920x1080", 0, 0, 1920, 1080, 1, 1920, 1080, 1, 1920},
+        {"2560x1440", 0, 0, 2560, 1440, 1, 2560, 1440, 1.3333f, 1920},
+        {"3840x2160 (the report)", 0, 0, 3840, 2160, 1, 3840, 2160, 2, 1920},
+        {"3440x1440 ultrawide", 0, 0, 3440, 1440, 1, 3440, 1440, 1.3333f, 2580},
+        {"3840x2160 at UI scale 1.25", 0, 0, 3840, 2160, 1.25f, 3840, 2160, 1.6f, 2400},
+        {"2560x1440 at UI scale 0.8", 0, 0, 2560, 1440, 0.8f, 2560, 1440, 1.6667f, 1536},
+        {"a 4:3 viewport pillarboxed in 1920x1080", 240, 0, 1440, 1080, 1, 1920, 1080, 0.75f, 1920},
+        {"a 21:9 viewport letterboxed in 1920x1080", 0, 135, 1920, 810, 1, 1920, 1080, 0.75f, 2560},
+        {"pillarboxed, on an overlay twice the picture", 240, 0, 1440, 1080, 1, 3840, 2160, 0.75f, 1920},
+        {"3840x2160 drawn into a 1920x1080 client area", 0, 0, 3840, 2160, 1, 1920, 1080, 2, 1920},
+        {"3840x2160, target 0 (the picture's pixels)", 0, 0, 3840, 2160, 1, 0, 0, 2, 1920},
+    };
+    uint64_t frame = 5000;
+    for (const Case& c : cases) {
+        set_game_canvas(c.vx, c.vy, c.w, c.h, c.scale);
+        ui_frame(++frame);
+        const float pw = c.w + 2 * c.vx, ph = c.h + 2 * c.vy;
+        const float kx = c.tw > 0 ? c.tw / pw : 1, ky = c.th > 0 ? c.th / ph : 1;
+        const float sx = c.ppu * kx, sy = c.ppu * ky, ox = c.vx * kx, oy = c.vy * ky;
+        const bool scaled = c.tw > 0 && (c.tw != pw || c.th != ph);
+        std::string what = std::string("resolutions, ") + c.name + ": ";
+        float canvas_w = 0, ppu = 0;
+        std::memcpy(&canvas_w, g_system + 0x30, 4);
+        std::memcpy(&ppu, g_system + 0x48, 4);
+        CHECK(near(canvas_w, c.canvas_w) && std::fabs(ppu - c.ppu) < 1e-3f &&
+                  std::fabs(canvas_w * ppu - c.w) < 0.5f,
+              "%s%s", what.c_str(), "the game's canvas (units) times ppu is the viewport (pixels)");
+        KilnUiSlotMapping m{};
+        m.size = sizeof m;
+        CHECK(I()->mapping(o, c.tw, c.th, &m) == KILN_OK && m.ok == 1 && std::fabs(m.scale_x - sx) < 1e-3f &&
+                  std::fabs(m.scale_y - sy) < 1e-3f && near(m.offset_x, ox) && near(m.offset_y, oy) &&
+                  ((m.flags & KUI_MAP_SCALED) != 0) == scaled,
+              "%s%s", what.c_str(), "mapping: ppu times target / picture, the viewport's offset, SCALED only for another size");
+        // the second slot's centre, units (140, 60), in the target's pixels; and where the canvas-based mapping put it
+        const float px = ox + 140 * sx, py = oy + 60 * sy;
+        KilnUiSlotHit h{};
+        h.size = sizeof h;
+        CHECK(I()->slot_at(o, px, py, c.tw, c.th, &h) == KILN_OK && h.ok == 1 && h.slot.slot_index == 1 &&
+                  h.slot.item == 0xBB,
+              "%s%s", what.c_str(), "slot_at: the slot under its own centre");
+        CHECK(I()->slot_at(o, ox + 50 * sx, oy + 60 * sy, c.tw, c.th, &h) == KILN_OK && h.ok == 1 &&
+                  h.slot.slot_index == 0 &&
+                  I()->slot_at(o, ox + 95 * sx, py, c.tw, c.th, &h) == KILN_OK && h.ok == 0 && h.reason == KUI_NO_SLOT,
+              "%s%s", what.c_str(), "slot_at: the first slot left of it, nothing in the gap between");
+        auto v = view_record();
+        CHECK(I()->screen_view(o, c.tw, c.th, &v) == KILN_OK && v.ok == 1 && v.player_slots == 2 &&
+                  near(v.player_px.x, ox + 10 * sx) && near(v.player_px.y, oy + 20 * sy) &&
+                  near(v.player_px.width, 170 * sx) && near(v.player_px.height, 80 * sy) &&
+                  ((v.flags & KUI_VIEW_SCALED) != 0) == scaled,
+              "%s%s", what.c_str(), "screen_view: the slots' rectangle in the target's pixels");
+        if (c.tw > 0) {  // a press carries its client area's size
+            seen.got.clear();
+            KilnUiPointerPress p = press(px, py);
+            p.client_width = c.tw;
+            p.client_height = c.th;
+            do_press(p);
+            ui_frame(++frame);
+            CHECK(seen.got.size() == 1 && seen.got[0].slot.slot_index == 1 && seen.got[0].slot.item == 0xBB,
+                  "%s%s", what.c_str(), "a press on the second slot reaches its subscriber with that slot");
+        }
+    }
+    // the report's own numbers: 4K, 2 px per unit. The second slot spans 200..360 x 40..200 pixels; the canvas-based
+    // mapping drew it at 400..720 x 80..400 (twice), and a press at its real place found nothing
+    set_game_canvas(0, 0, 3840, 2160, 1);
+    ui_frame(++frame);
+    KilnUiSlotHit h{};
+    h.size = sizeof h;
+    CHECK(I()->slot_at(o, 280, 120, 3840, 2160, &h) == KILN_OK && h.ok == 1 && h.slot.slot_index == 1 &&
+              I()->slot_at(o, 560, 240, 3840, 2160, &h) == KILN_OK && h.ok == 0,
+          "issue 107: at 3840x2160 the slot is at unit * 2 px, not at twice that");
+    // a viewport the frame cannot place (a box offset that leaves no picture) -> no mapping
+    put(g_system, 0x38, -2000.0f);
+    ui_frame(++frame);
+    KilnUiSlotMapping m{};
+    m.size = sizeof m;
+    CHECK(I()->mapping(o, 1920, 1080, &m) == KILN_OK && m.ok == 0 && m.reason == KUI_NO_VIEWPORT,
+          "resolutions: a viewport offset leaving no picture -> KUI_NO_VIEWPORT");
 }
 
 // ========================================================================== S6: tooltip lines and the details window
@@ -2840,6 +2962,7 @@ int main() {
     clicks_across_a_session_change();
     clicks_without_kiln_ui();
     screen_view_chest_and_backpack();
+    mapping_across_resolutions();
     lines_collect();
     lines_window();
     retire_during_dispatch();
