@@ -22,7 +22,7 @@ std::string matcher_text(const Matcher& m);        // `module xhl*.dll`, for log
 struct Rule {
     std::string id;
     std::vector<Matcher> when;     // empty: the rule always fires
-    std::string action;            // warn | late | disable | before | defer | original-code
+    std::string action;            // warn | late | disable | before | defer | original-code | known
     bool has_subject = false;      // required for every action except warn
     Matcher subject;               // defer also sees exact package-relative companion paths
     // before (dev.29): the DLL that loads after the subject. The launcher orders the two in chain.ini
