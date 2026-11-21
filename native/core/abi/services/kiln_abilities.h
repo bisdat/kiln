@@ -299,6 +299,32 @@ enum {
     KILN_NATIVE_COUNTERS_NATIVES = 1u << 0, /* the RegisterNative hook is in: Kiln natives can be registered */
 };
 
+/* item_use() (since 0.2.0-dev.30.3): one use of an item from a player's slot. */
+typedef struct KilnItemUse {
+    uint32_t size;          /* in: sizeof(KilnItemUse) */
+    KilnEntity entity;      /* in: the player character */
+    uint64_t slot;          /* in: InventorySlotId as kiln.items names it: inventory entity | index << 32 */
+    uint32_t item;          /* in: the item expected in the slot */
+    uint32_t sequence;      /* in: the item's own sequence for the use (FNV-1a of its ActorSequenceResource GUID) */
+    uint32_t flags;         /* in: 0 */
+    uint32_t status;        /* out: KILN_ITEM_USE_* */
+    uint32_t count;         /* out: the stack in the slot at the call (before the use) */
+    uint32_t reserved;
+    int64_t trigger_time;   /* out, STARTED: the start's ECS time (sequence_state's trigger_time once it runs) */
+} KilnItemUse;
+
+/* KilnItemUse.status */
+enum {
+    KILN_ITEM_USE_STARTED = 0,      /* the sequence is triggered; the game starts it in this step */
+    KILN_ITEM_USE_NOT_OWN_SLOT = 1, /* the slot is not in the entity's own inventories (or it has none) */
+    KILN_ITEM_USE_EMPTY_SLOT = 2,   /* the slot holds nothing */
+    KILN_ITEM_USE_OTHER_ITEM = 3,   /* the slot holds another item than use->item */
+    KILN_ITEM_USE_NOT_A_PLAYER = 4, /* the entity's inventories are not a player's, or it has no Actor / ActorInput */
+    KILN_ITEM_USE_DEAD = 5,         /* StateFlag.Dead */
+    KILN_ITEM_USE_NOT_READY = 6,    /* not StateFlag.IsReadyForGameplay (joining, loading, respawning) */
+    KILN_ITEM_USE_BUSY = 7,         /* a sequence plays (an attack, another use, an emote) or a state no use starts from */
+};
+
 typedef struct KilnAbilitiesApi {
     KilnServiceHeader header; /* { sizeof(KilnAbilitiesApi), KILN_ABILITIES_VERSION } */
 
@@ -448,6 +474,32 @@ typedef struct KilnAbilitiesApi {
      * `after` (optional) gets the bytes after. KILN_ERR_NOT_FOUND also for a component only in other_read. */
     KilnResult(KILN_CALL* native_ecs_write)(KilnNativeCall* call, KilnStr component, uint32_t entity, const void* value,
                                             uint32_t size, uint32_t flags, void* before, void* after);
+
+    /* ---- since 0.2.0-dev.30.3 (mod API 0.2.13): an item used from a player's slot, check header.size (a table
+     * without it ends at 312) ----
+     * tick, in a process with a server world (KILN_ERR_WRONG_THREAD on a joined client, or before a world started). What the game does when a player uses an item from the
+     * hotbar: the item's own sequence starts through the helper player actions use (ActorInput.triggerContext, trigger
+     * ActionSequenceTrigger.Primary), with the slot and the item as the trigger context's used item. From then on the
+     * game's own code runs as for a hand use: the sequence's consume event takes one item from that slot in its
+     * transaction (actor_apply_buff, the spawn path), the buff is applied with the used item (so with the item's own
+     * impactValues and time), and NetworkActor and the buff entity replicate as they do for a hand use. Nothing is
+     * consumed here: the item goes when the sequence's consume event runs (0.05 to 0.6 s later for the game's
+     * consumables), and anything that stops a hand use (a cancel, a rule, death) stops this one.
+     * Checked first, in this order (use->status; KILN_OK either way): the slot is in the entity's own inventories
+     * (kiln.items read: NOT_OWN_SLOT), holds something (EMPTY_SLOT) and holds use->item (OTHER_ITEM); the inventories
+     * are a player's (InventorySetup IsPlayer) and the entity has an Actor and an ActorInput (NOT_A_PLAYER); the player is not dead (StateFlag.Dead: DEAD), is ready
+     * for gameplay (StateFlag.IsReadyForGameplay: NOT_READY), and runs no sequence and none of the states a hand use
+     * does not start from (sleeping, sitting, climbing, gliding and others: BUSY). The game has no cooldown for
+     * consumables: what plays as one is the sequence itself, reported as BUSY.
+     * use->sequence must be the item's own sequence for this use (ItemInfo.sequences[] with triggeredBy Primary;
+     * FNV-1a of its GUID): Kiln.Abilities reads it from the game's data and checks that it consumes the item. A
+     * sequence whose consume event runs with no item in the trigger context takes the server down
+     * (docs/re/abilities.md), so the item is checked against the slot here, at the call.
+     * KILN_ERR_INVALID_ARGUMENT: NULL, size, entity, slot, item or sequence 0, flags not 0. KILN_ERR_NOT_FOUND: a
+     * sequence the game does not have. KILN_ERR_UNAVAILABLE: sequences off on this build (abilities.sequences), the
+     * trigger context's used item or the state flags not in this build's reflection (kiln.types), or kiln.items not
+     * here (kiln.log says which, once). */
+    KilnResult(KILN_CALL* item_use)(KilnItemUse* use);
 } KilnAbilitiesApi;
 enum { KILN_NATIVE_ECS_ATTRIBUTE = 1u << 0 };
 

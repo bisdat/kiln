@@ -28,14 +28,17 @@
 #include "engine.h"
 #include "kiln_api.h"
 #include "impact_watch.h"
+#include "item_use.h"
 #include "nlohmann/json.hpp"
 #include "kiln_hook.hpp"
 #include "natives_core.h"
 #include "natives_json.h"
 #include "services/kiln_abilities.h"
 #include "services/kiln_assets.h"
+#include "services/kiln_items.h"
 #include "services/kiln_profile.h"
 #include "services/kiln_spawn.h"
+#include "services/kiln_types.h"
 #include "services/kiln_world.h"
 #include "verify.h"
 
@@ -50,8 +53,12 @@ static_assert(offsetof(KilnAbilitiesApi, sequence_play) == 232 && offsetof(KilnA
               offsetof(KilnAbilitiesApi, native_detach) == 264 && offsetof(KilnAbilitiesApi, native_declare_typed) == 272 &&
               offsetof(KilnAbilitiesApi, native_state) == 280 && offsetof(KilnAbilitiesApi, native_attach_state) == 288 &&
               offsetof(KilnAbilitiesApi, native_ecs_read) == 296 && offsetof(KilnAbilitiesApi, native_ecs_write) == 304 &&
-              sizeof(KilnAbilitiesApi) == 312 && sizeof(KilnNativeCounters) == 128 && sizeof(KilnNativeFilter) == 16 &&
-              sizeof(KilnNativeArg) == 8);
+              sizeof(KilnNativeCounters) == 128 && sizeof(KilnNativeFilter) == 16 && sizeof(KilnNativeArg) == 8);
+// since 0.2.0-dev.30.3 (mod API 0.2.13): item_use appended
+static_assert(offsetof(KilnAbilitiesApi, item_use) == 312 && sizeof(KilnAbilitiesApi) == 320 && sizeof(KilnItemUse) == 48 &&
+              offsetof(KilnItemUse, slot) == 8 && offsetof(KilnItemUse, item) == 16 && offsetof(KilnItemUse, sequence) == 20 &&
+              offsetof(KilnItemUse, flags) == 24 && offsetof(KilnItemUse, status) == 28 && offsetof(KilnItemUse, count) == 32 &&
+              offsetof(KilnItemUse, trigger_time) == 40);
 
 namespace {
 
@@ -2975,6 +2982,106 @@ KilnResult KILN_CALL t_sequence_play(KilnEntity e, uint32_t sequence, uint32_t t
     return KILN_OK;
 }
 
+// ---- item_use (since 0.2.0-dev.30.3; item_use.h, docs/kiln/services/abilities.md "Using an item") ----
+// An item used from a player's slot the way the game does it for a hand use: TriggerSequence with the item's own
+// sequence and trigger Primary, then the slot and the item into the trigger context's used item, which the sequence's
+// consume event reads (actor_apply_buff takes the item from that slot and applies the buff with it). kiln.playerstate's
+// lab_use_item is the same call on lab characters. The slot is read through kiln.items (the player's inventory tree),
+// the states through this build's reflection (kiln.types); both are resolved at the first call.
+kab::use::Layout g_use;               // tick thread
+int g_use_state = 0;                  // 0 not resolved yet, 1 on, -1 off for this process (logged once)
+const KilnItemsApi* g_use_items = nullptr;
+
+bool use_ready() {
+    if (g_use_state != 0) return g_use_state > 0;
+    char why[200] = {};
+    const auto* types = static_cast<const KilnTypesApi*>(g_api->service(KilnStr{KILN_TYPES_SERVICE, sizeof(KILN_TYPES_SERVICE) - 1}, 1));
+    if (types && types->header.size < sizeof(KilnTypesApi)) types = nullptr;
+    g_use_items = static_cast<const KilnItemsApi*>(g_api->service(KilnStr{KILN_ITEMS_SERVICE, sizeof(KILN_ITEMS_SERVICE) - 1}, 1));
+    bool ok = false;
+    if (!g_use_items || !g_use_items->read) std::snprintf(why, sizeof why, "kiln.items is not here");
+    else ok = kab::use::resolve(types, &g_use, why, sizeof why);
+    g_use_state = ok ? 1 : -1;
+    if (ok)
+        logi("kiln.abilities: item_use on (used item at ActorInput+0x%llx/+0x%llx, Actor.currentState +0x%llx, trigger Primary %lld)",
+             static_cast<unsigned long long>(g_use.used_slot), static_cast<unsigned long long>(g_use.used_item),
+             static_cast<unsigned long long>(g_use.state), static_cast<long long>(g_use.primary));
+    else
+        logw("kiln.abilities: item_use is off: %s", why);
+    return ok;
+}
+
+// TriggerSequence, then the used item. A fault in the second write would leave a consuming sequence with no item (the
+// server's spawn path reads one without a check): the component was just written by the game through the same pointer
+// and its size checked against the offsets, so the write is not expected to fault; it is guarded all the same.
+bool guarded_used(void* ai, uint64_t slot, uint32_t item) {
+    __try {
+        kab::use::write_used(static_cast<uint8_t*>(ai), g_use, slot, item);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+KilnResult KILN_CALL t_item_use(KilnItemUse* u) {
+    if (const KilnResult rc = kab::use::check_request(u); rc != KILN_OK) return rc;
+    if (!on_tick()) return KILN_ERR_WRONG_THREAD;
+    const uintptr_t world = g_api->server_world();
+    if (!world) return KILN_ERR_WRONG_THREAD;  // no server world in this process: a joined client, or none started yet
+    if (!g_have_sequences || !use_ready()) return KILN_ERR_UNAVAILABLE;
+    if (!sequence_key(u->sequence) && !g_sequence_keys.empty()) return KILN_ERR_NOT_FOUND;
+    const KilnEntity e = u->entity;
+    uint64_t ai_size = 0, a_size = 0;
+    void* ai = component(world, kActorInput, e, &ai_size);
+    auto* a = static_cast<const uint8_t*>(component(world, kActor, e, &a_size));
+    const uint64_t ai_need = static_cast<uint64_t>(std::max({g_use.used_slot + 8, g_use.used_item + 4, E.trigger_counter + 1}));
+    const uint64_t a_need = static_cast<uint64_t>(std::max<int64_t>(g_use.state + 8, Engine::actor_sequence + 4));
+    if (!ai || !a || ai_size < ai_need || a_size < a_need) {
+        u->status = KILN_ITEM_USE_NOT_A_PLAYER;  // not a character the game can trigger a sequence on
+        return KILN_OK;
+    }
+
+    kab::use::Facts f;
+    f.expected = u->item;
+    KilnItemsInventory info{};
+    info.size = sizeof info;
+    KilnItemsSlot slots[KILN_ITEMS_MAX_INVENTORIES * 8];
+    uint32_t n = 0;
+    const KilnResult rr = g_use_items->read(e, &info, slots, KILN_ITEMS_MAX_INVENTORIES * 8, &n);
+    if (rr == KILN_OK || rr == KILN_ERR_BUFFER_TOO_SMALL) {
+        f.player = (info.setup_flags & 0x01) != 0;  // InventorySetup IsPlayer
+        for (uint32_t i = 0; i < n; ++i)
+            if (slots[i].slot == u->slot) {
+                f.own_slot = true;
+                f.item = slots[i].item;
+                f.count = slots[i].count;
+                break;
+            }
+    } else if (rr != KILN_ERR_NOT_FOUND) {
+        return rr;  // kiln.items off or not on its thread: the slot cannot be checked
+    }
+    if (!read_bytes(a + g_use.state, &f.state, 8) || !read_bytes(a + Engine::actor_sequence, &f.running, 4))
+        return KILN_ERR_INTERNAL;
+    u->count = f.count;
+    u->status = kab::use::verdict(f, g_use);
+    if (u->status != KILN_ITEM_USE_STARTED) return KILN_OK;
+
+    const int64_t now = ecs_now(world);
+    if (!trigger_sequence(ai, e, u->sequence, now, static_cast<uint16_t>(g_use.primary))) return KILN_ERR_INTERNAL;
+    if (!guarded_used(ai, u->slot, u->item)) {
+        logw("kiln.abilities: item_use: writing the used item faulted after the trigger (entity %u, sequence 0x%08x)", e,
+             u->sequence);
+        return KILN_ERR_INTERNAL;
+    }
+    // a new sequence replaces a held one (sequence_play's rule); the game's consumables have no keep-alive gates
+    g_seq_holds.erase(std::remove_if(g_seq_holds.begin(), g_seq_holds.end(), [&](const SeqHold& h) { return h.entity == e; }),
+                      g_seq_holds.end());
+    u->trigger_time = now;
+    logi("kiln.abilities: item 0x%08x used from slot %u:%u by %u (sequence 0x%08x, %u in the stack, time %lld)", u->item,
+         KILN_SLOT_INVENTORY(u->slot), KILN_SLOT_INDEX(u->slot), e, u->sequence, f.count, static_cast<long long>(now));
+    return KILN_OK;
+}
+
 const KilnAbilitiesApi kTable = {
     {sizeof(KilnAbilitiesApi), KILN_ABILITIES_VERSION},
     &t_status,
@@ -3015,6 +3122,7 @@ const KilnAbilitiesApi kTable = {
     &t_native_attach_state,
     &t_native_ecs_read,
     &t_native_ecs_write,
+    &t_item_use,
 };
 
 // ------------------------------------------------------------------------------------------- boot --------------
