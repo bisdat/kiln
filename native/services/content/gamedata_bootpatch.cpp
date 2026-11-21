@@ -55,6 +55,7 @@
 #include "kiln_blocks_json.hpp"
 #include "kiln_boot_collector.hpp"
 #include "refs.h"
+#include "registry/boot_hooks.h"
 #include "services/kiln_assets.h"
 #include "services/kiln_caps.h"
 
@@ -1256,16 +1257,52 @@ bool build(const ResPatch& rp, const gd::TType* type, const uint8_t* data, size_
     return true;
 }
 
+// ---- the registry stage (registry P1 slices S10, S11; registry/boot_hooks.h) ----
+// The registry stage runs here, at resources-ready, before any patch of this start is written: it reads the base (the bytes
+// kiln.assets serves now) and composes the mods' registry edits over the old documents below them (D1: a registry edit
+// layers on every earlier writer and wins, reported). Its boot-routed fields (restart) are written in the same copy as the
+// old documents, after them: one copy and one override per resource. Without the hooks (a host test) nothing of it runs.
+std::vector<registry::boothook::OldDoc> old_docs(const BootPlan* plan) {
+    std::vector<registry::boothook::OldDoc> out;
+    if (!plan) return out;
+    for (const ResPatch& rp : plan->resources)
+        for (const DocPatch& d : rp.docs) {
+            registry::boothook::OldDoc o;
+            o.mod = d.mod, o.key = d.key, o.res = rp.res, o.type = rp.type;
+            for (const Set& s : d.sets) o.sets.emplace_back(s.path, s.value);
+            for (const StructOp& op : d.ops) {
+                if (op.op != 'x' && op.op != 'r' && op.op != 'a') continue;
+                registry::boothook::OldDoc::List l;
+                l.op = op.op, l.path = op.path;
+                for (const gjson& v : op.values) l.values.push_back(nlohmann::json::parse(v.dump()));
+                o.lists.push_back(std::move(l));
+            }
+            out.push_back(std::move(o));
+        }
+    return out;
+}
+
 // kiln.assets when_resources_ready: the game's resource service is up, nothing has read through it yet.
 void KILN_CALL apply(void*) {
     const auto* plan = static_cast<const BootPlan*>(kiln::boot::published(g_api, "patches"));
-    if (!plan) {
-        g_ready_before_publication.store(true);
-        bootview::finished();  // no prepare after this one may write anything: no check needs the base view any more
-        return;
-    }
-    bootview::finished();  // the generation is published and the resources are up: no check reads the base view any more
-    if (plan->resources.empty()) return;
+    if (!plan && g_bound) g_ready_before_publication.store(true);  // no prepare after this one may write anything
+    bootview::finished();  // the generation is published (or none comes) and the resources are up: no check reads the base view any more
+    // the registry stage: the base as kiln.assets serves it now, before any patch of this start is written, composed over
+    // the old documents (they lie below it); its boot fields are written below, after the old documents, in the same copy
+    const registry::boothook::Hooks* H = registry::boothook::get();
+    const std::vector<registry::stage::BootResource> reg = H && H->run ? H->run(old_docs(plan)) : std::vector<registry::stage::BootResource>();
+    std::vector<registry::stage::BootOutcome> outcomes;
+    std::vector<char> reg_done(reg.size(), 0);
+    auto reg_of = [&](const KilnAssetKey& k) -> const registry::stage::BootResource* {
+        for (size_t i = 0; i < reg.size(); ++i)
+            if (std::memcmp(&reg[i].key, &k, sizeof k) == 0) return reg_done[i] = 1, &reg[i];
+        return nullptr;
+    };
+    auto reg_fail = [&](const registry::stage::BootResource& rb, const std::string& why) {
+        for (const auto& f : rb.fields) outcomes.push_back({f.field, false, {}, why});
+    };
+    const KilnAssetsApi* A = assets();
+    if (plan && !plan->resources.empty()) {
     LOGI("boot: the game's resource service is up: resource patches of %zu resource(s) are written into copies of the bytes kiln.assets serves now", plan->resources.size());
     // a plan checked before the start against a base view: a fault now comes from the bytes served now (another provider's
     // override, a change after the check, or what only the bytes say); the game's data is not changed back
@@ -1275,7 +1312,6 @@ void KILN_CALL apply(void*) {
                                           plan->base_digest.substr(0, 16) + " of this start's game data, and the bytes served now decide";
     if (!checked.empty())
         LOGI("boot: the plan was checked before the start against the %s base view %s", plan->base_source.c_str(), plan->base_digest.c_str());
-    const KilnAssetsApi* A = assets();
     size_t written = 0, failed = 0;
     // one fault per document, naming its mod and key: for a required mod kiln.boot ends the process inside the call
     auto fault = [&](const DocPatch& d, const std::string& why) {
@@ -1311,8 +1347,10 @@ void KILN_CALL apply(void*) {
         else if (A->resource_data(&rp.res, &data, &len) != KILN_OK || !data) whole = "MissingResource: this game build has no " + what;
         else if (len < type->resolved()->size || len > kMaxResource)
             whole = "the resource " + what + " is " + std::to_string(len) + " bytes, which is not a " + rp.type;
+        const registry::stage::BootResource* rb = reg_of(rp.res);
         if (!whole.empty()) {
             for (const DocPatch& d : rp.docs) fault(d, whole);
+            if (rb) reg_fail(*rb, whole);
             continue;
         }
         // a document that fails is left out and the copy is built again from the game's bytes: the resource is then what
@@ -1328,12 +1366,19 @@ void KILN_CALL apply(void*) {
             left_out[bad] = 1;
             fault(rp.docs[bad], why);
         }
+        if (rb && H && H->write) here += H->write(rp.res, rp.type, &copy, *rb, &outcomes, &notes);
         for (const std::string& n : notes) LOGI("%s", n.c_str());
         if (!here) continue;
         const KilnResult rc = A->resource_put(g_owner, &rp.res, copy.data(), copy.size(), KILN_ASSET_PUT_OVERRIDE);
         if (rc != KILN_OK) {
             for (size_t i = 0; i < rp.docs.size(); ++i)
                 if (!left_out[i]) fault(rp.docs[i], "kiln.assets refused the patched " + what + " (" + std::to_string(rc) + ")");
+            if (rb) {
+                std::erase_if(outcomes, [&](const registry::stage::BootOutcome& o) {
+                    return std::any_of(rb->fields.begin(), rb->fields.end(), [&](const auto& f) { return f.field == o.field; });
+                });
+                reg_fail(*rb, "kiln.assets refused the patched " + what + " (" + std::to_string(rc) + ")");
+            }
             continue;
         }
         written += here;
@@ -1341,6 +1386,36 @@ void KILN_CALL apply(void*) {
     LOGI("boot: resource patches applied before the game read its resources: %zu value(s) in %zu resource(s)%s", written, plan->resources.size(),
          failed ? (", " + std::to_string(failed) + " patch(es) not applied (boot.json)").c_str() : "");
     if (failed) row(KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE, std::to_string(failed) + " resource patch(es) of this start were not applied (state/boot.json)");
+    }
+    // the registry's boot fields on resources no old document touches: one copy each, the same way
+    for (size_t i = 0; i < reg.size(); ++i) {
+        if (reg_done[i]) continue;
+        const registry::stage::BootResource& rb = reg[i];
+        ResPatch rp;
+        rp.res = rb.key;
+        rp.type = rb.type;
+        rp.tmpl = rb.type == "keen::ecs::TemplateResource";
+        const std::string what = rp.type + " " + guid_text(rp.res.guid);
+        const gd::TType* type = gd::type_named(rp.type);
+        const void* data = nullptr;
+        size_t len = 0;
+        if (!A || !type || !type->resolved() || A->resource_data(&rp.res, &data, &len) != KILN_OK || !data || len < type->resolved()->size || len > kMaxResource) {
+            reg_fail(rb, "the resource " + what + " cannot be read here");
+            continue;
+        }
+        std::vector<uint8_t> copy(static_cast<const uint8_t*>(data), static_cast<const uint8_t*>(data) + len);
+        std::vector<std::string> notes;
+        const size_t before = outcomes.size();
+        const size_t here = H && H->write ? H->write(rp.res, rp.type, &copy, rb, &outcomes, &notes) : 0;
+        for (const std::string& n : notes) LOGI("%s", n.c_str());
+        if (!here) continue;
+        const KilnResult rc = A->resource_put(g_owner, &rp.res, copy.data(), copy.size(), KILN_ASSET_PUT_OVERRIDE);
+        if (rc != KILN_OK) {
+            outcomes.resize(before);
+            reg_fail(rb, "kiln.assets refused the patched " + what + " (" + std::to_string(rc) + ")");
+        }
+    }
+    if (H && H->finish) H->finish(outcomes);
 }
 
 }  // namespace
@@ -1352,7 +1427,8 @@ void gd_boot_patches_bind() {
     if (!A) g_off = "kiln.assets' resources are off on this build";
     else if (kiln_caps_held(caps, KilnStr{kRow, sizeof(kRow) - 1})) g_off = "mods.boot.resource_patches is held until the client checks pass";
     g_bound = kiln::boot::collect(g_api, g_owner, "patches", &prepare_boot, nullptr);
-    if (g_bound && !g_off) g_ready_asked = A->when_resources_ready(&apply, nullptr) == KILN_OK;
+    // resources-ready runs the registry stage in every start with kiln.assets' resources (the patches only with a boot phase)
+    if (A) g_ready_asked = A->when_resources_ready(&apply, nullptr) == KILN_OK;
     if (g_bound && !g_off && !g_ready_asked) g_off = "kiln.assets' resources are off on this build";
     if (g_off && !kiln_caps_held(caps, KilnStr{kRow, sizeof(kRow) - 1}))
         row(KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SERVICE_MISSING, g_off);
