@@ -425,6 +425,21 @@ void measure_cases(Env& v) {
                       KILN_ERR_INVALID_ARGUMENT &&
                   shorter.status == 77 && u64_at(at) == 23,
               k + "a reply below 48 bytes: refused, untouched");
+        // between the two: the first release's fields, then the caller's own bytes; nothing written past its 52
+        unsigned char mid[sizeof(KilnMutationReply)];
+        std::memset(mid, 0xa5, sizeof mid);
+        uint32_t mid_size = 52;
+        std::memcpy(mid, &mid_size, sizeof mid_size);
+        auto* const mid_reply = reinterpret_cast<KilnMutationReply*>(mid);
+        const KilnResult mid_rc =
+            v.wr.compare_exchange(kOwner, &r, counter, d23.data(), nullptr, d24.data(), 8, nullptr, mid_reply);
+        KilnMutationReply mid_view{};
+        std::memcpy(&mid_view, mid, offsetof(KilnMutationReply, restore_ns));
+        const bool tail_kept = std::all_of(mid + 52, mid + sizeof mid, [](unsigned char b) { return b == 0xa5; });
+        check(mid_rc == KILN_OK && mid_view.size == 52 && mid_view.status == KILN_ECS_OK && mid_view.hold_ns > 0 &&
+                  tail_kept && u64_at(at) == 24,
+              k + "a 52-byte reply: the first release's fields, size 52, nothing written past it");
+        put<uint64_t>(at, 23);
         struct {
             KilnMutationReply r;
             uint64_t tail[2];
@@ -432,9 +447,9 @@ void measure_cases(Env& v) {
         big.r.size = sizeof big;
         big.tail[0] = big.tail[1] = kUntouched;
         check(v.wr.compare_exchange(kOwner, &r, counter, d23.data(), nullptr, d24.data(), 8, nullptr, &big.r) == KILN_OK &&
-                  big.r.size == sizeof big && big.r.restore_ns >= 1'000'000 && big.tail[0] == kUntouched &&
-                  big.tail[1] == kUntouched && u64_at(at) == 24,
-              k + "a larger reply: restore_ns filled, nothing written past this build's record");
+                  big.r.size == sizeof(KilnMutationReply) && big.r.restore_ns >= 1'000'000 &&
+                  big.tail[0] == kUntouched && big.tail[1] == kUntouched && u64_at(at) == 24,
+              k + "a larger reply: restore_ns filled, size says this build's record, nothing written past it");
     }
     {
         // the update holds the Scene word: busy after the raise; no hold, the restore of the refusal timed

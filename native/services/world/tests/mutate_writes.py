@@ -36,6 +36,8 @@ MUTANTS = [
      "the reply's hold includes the priority restore (GitHub #58)"),
     ('ecs_writes.cpp', 'hold_ns = scope.gate().hold_ns;\n        if (reply_has_restore(reply_size)) reply->restore_ns = scope.gate().restore_ns;',
      'hold_ns = scope.gate().hold_ns;', "the reply's restore_ns is not filled"),
+    ('ecs_writes.cpp', 'reply->size = static_cast<uint32_t>(std::min<size_t>(reply_size, sizeof *reply));',
+     'reply->size = reply_size;', "the reply's size does not say what this Kiln filled"),
     ('ecs_writes.cpp', 'if (latch_.latched(target))', 'if (false)', 'the latch is not consulted'),
     ('ecs_writes.cpp', 'if (state == 2 && s.session.load(std::memory_order_relaxed) == t.session &&', 'if (state == 2 &&',
      "the latch matches an earlier session's target"),

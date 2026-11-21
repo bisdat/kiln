@@ -780,8 +780,10 @@ enum {
     KILN_MUTATION_EVENT_QUEUED = 1u << 5   /* a KilnEcsWriteEvent will be delivered after this write */
 };
 typedef struct KilnMutationReply {
-    uint32_t size;          /* set to sizeof(KilnMutationReply) before calling; a caller built before restore_ns passes
-                               48 and gets the fields before it (nothing is written past its size) */
+    uint32_t size;          /* set to sizeof(KilnMutationReply) before calling (48 or more); nothing is written past it.
+                               On return: the bytes this Kiln filled, the smaller of yours and its own (a caller built
+                               before restore_ns passes 48 and gets the fields before it). A Kiln before restore_ns
+                               (0.2.0-dev.30.2 and earlier) gives back the size passed */
     uint32_t status;        /* KILN_ECS_*: the outcome */
     uint32_t flags;         /* KILN_MUTATION_* */
     uint32_t why_code;      /* KILN_ECS_WRITE_WHY_* */
@@ -797,7 +799,9 @@ typedef struct KilnMutationReply {
     uint64_t restore_ns;    /* how long putting the calling thread's priority back took when this call's gate was
                                released, after the Scene word was free (SetThreadPriority; under Proton a wineserver
                                round trip). 0: the priority was not raised (the raise is off, the thread was above
-                               normal already, or the gate refused before raising it), or a Kiln without this field */
+                               normal already, or the call was refused before the raise). A Kiln without this field
+                               (0.2.0-dev.30.2 and earlier) leaves it as the caller set it and still gives back size 56:
+                               zero the record; kiln.engine's gate_stats tells such a Kiln (its size comes back 96) */
 } KilnMutationReply;
 
 /* One committed write, delivered on the server tick (kiln.world's Pre) after its gate was released, exactly once per

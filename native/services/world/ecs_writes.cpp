@@ -261,7 +261,8 @@ KilnResult Writer::compare_exchange(KilnOwner owner, const KilnObjectRef* ref, u
         return KILN_ERR_INVALID_ARGUMENT;
     const uint32_t reply_size = reply->size;
     std::memset(reply, 0, std::min<size_t>(reply_size, sizeof *reply));  // never past the caller's record
-    reply->size = reply_size;
+    // what this Kiln fills, as kiln.engine's gate_stats says it: a caller with a longer record learns it was not filled
+    reply->size = static_cast<uint32_t>(std::min<size_t>(reply_size, sizeof *reply));
     reply->generation = ref->generation;
     reply->session = ref->session;
     auto finish = [&](uint32_t status, uint32_t why, uint32_t flags = 0) -> KilnResult {
