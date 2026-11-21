@@ -27,23 +27,23 @@ public sealed class GameTextureKitTests
         // BC1, 8x8 with 4 levels: 8x8 (4 blocks), then 4x4, 2x2 and 1x1 (a block each, the small ones padded)
         var chain = kiln.As(mod, () =>
         {
-            var level0 = GameTexture.Encode(Solid(8, 8, 255, 0, 0), 8, 8, GamePixelFormat.BC1_RGBA_unorm_block);
-            var block = GameTexture.Encode(Solid(4, 4, 0, 0, 255), 4, 4, GamePixelFormat.BC1_RGBA_unorm_block);
+            var level0 = GameTexture.Encode(Solid(8, 8, 255, 0, 0), 8, 8, GamePixelFormat.BC1RgbaUnormBlock);
+            var block = GameTexture.Encode(Solid(4, 4, 0, 0, 255), 4, 4, GamePixelFormat.BC1RgbaUnormBlock);
             return level0.Concat(block).Concat(block).Concat(block).ToArray();
         });
         Assert.Equal(32 + 8 + 8 + 8, chain.Length);
-        Assert.Equal(48, GameTexture.MipOffset(GamePixelFormat.BC1_RGBA_unorm_block, 8, 8, 3));
+        Assert.Equal(48, GameTexture.MipOffset(GamePixelFormat.BC1RgbaUnormBlock, 8, 8, 3));
 
         var hash = kiln.As(mod, () => Assets.AddBlob(chain));
         var levels = kiln.As(mod, () =>
         {
             var data = Assets.ReadBlob(hash)!;
-            return Enumerable.Range(0, 4).Select(mip => GameTexture.DecodeMip(data, GamePixelFormat.BC1_RGBA_unorm_block, 8, 8, mip)).ToArray();
+            return Enumerable.Range(0, 4).Select(mip => GameTexture.DecodeMip(data, GamePixelFormat.BC1RgbaUnormBlock, 8, 8, mip)).ToArray();
         });
         Assert.Equal(Solid(8, 8, 255, 0, 0), levels[0]);
         Assert.Equal(Solid(4, 4, 0, 0, 255), levels[1]);
         Assert.Equal(Solid(2, 2, 0, 0, 255), levels[2]);
         Assert.Equal(Solid(1, 1, 0, 0, 255), levels[3]);
-        Assert.Throws<ArgumentOutOfRangeException>(() => GameTexture.DecodeMip(chain, GamePixelFormat.BC1_RGBA_unorm_block, 8, 8, 4));
+        Assert.Throws<ArgumentOutOfRangeException>(() => GameTexture.DecodeMip(chain, GamePixelFormat.BC1RgbaUnormBlock, 8, 8, 4));
     }
 }

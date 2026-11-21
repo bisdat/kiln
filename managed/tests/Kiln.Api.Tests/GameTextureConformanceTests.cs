@@ -15,7 +15,8 @@ namespace Kiln.Api.Tests;
 /// </summary>
 public sealed class GameTextureConformanceTests
 {
-    private static readonly string[] Names = Enum.GetNames<GamePixelFormat>();
+    // the game's own names, the fixtures' (the members' names are their .NET forms)
+    private static readonly string[] Names = Enum.GetValues<GamePixelFormat>().Select(PixelCodec.GameName).ToArray();
 
     private sealed class Golden
     {
@@ -130,7 +131,7 @@ public sealed class GameTextureConformanceTests
 
     private static string[] Digest(byte[] s) => [s.Length.ToString(), Crc64(s).ToString(), Hex(s.AsSpan(0, Math.Min(24, s.Length)))];
 
-    private static GamePixelFormat F(string name) => Enum.Parse<GamePixelFormat>(name);
+    private static GamePixelFormat F(string name) => Enum.GetValues<GamePixelFormat>().Single(f => PixelCodec.GameName(f) == name);
 
     private static string[] Dec(byte[] data, string n, int w, int h) => Digest(GameTexture.Decode(data, F(n), w, h));
 
@@ -340,17 +341,17 @@ public sealed class GameTextureConformanceTests
             v.GetProperty("t").GetString() == "string" ? JsonSerializer.Deserialize<string>(v.GetProperty("v").GetString()!)! : v.GetProperty("v").ToString()));
 
         // The Lua function ignores its mip argument: the first level is what Decode gives.
-        Assert.Equal(Expected("mip.nil"), Px(GameTexture.Decode(rgba, GamePixelFormat.R8G8B8A8_unorm, 2, 1), 2, 1));
-        Assert.Equal(Expected("mip.7"), Px(GameTexture.Decode(rgba, GamePixelFormat.R8G8B8A8_unorm, 2, 1), 2, 1));
+        Assert.Equal(Expected("mip.nil"), Px(GameTexture.Decode(rgba, GamePixelFormat.R8G8B8A8Unorm, 2, 1), 2, 1));
+        Assert.Equal(Expected("mip.7"), Px(GameTexture.Decode(rgba, GamePixelFormat.R8G8B8A8Unorm, 2, 1), 2, 1));
         Assert.True(records["dim.wrap.fails"].GetProperty("values")[0].GetProperty("v").GetBoolean());
-        Assert.Throws<ArgumentOutOfRangeException>(() => GameTexture.Decode(rgba, GamePixelFormat.R8G8B8A8_unorm, 65536, 65536));
-        Assert.Throws<ArgumentOutOfRangeException>(() => GameTexture.Decode(rgba, GamePixelFormat.R8G8B8A8_unorm, 1073741825, 1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => GameTexture.Decode(rgba, GamePixelFormat.R8G8B8A8Unorm, 65536, 65536));
+        Assert.Throws<ArgumentOutOfRangeException>(() => GameTexture.Decode(rgba, GamePixelFormat.R8G8B8A8Unorm, 1073741825, 1));
         Assert.True(records["dim.empty.fails"].GetProperty("values")[0].GetProperty("v").GetBoolean());
-        Assert.Throws<ArgumentException>(() => GameTexture.Decode([], GamePixelFormat.R8G8B8A8_unorm, 1, 1));
-        Assert.Equal(Expected("dim.zero_w"), Px(GameTexture.Decode(rgba, GamePixelFormat.R8G8B8A8_unorm, 0, 5), 0, 5));
-        Assert.Equal(Expected("dim.zero_h"), Px(GameTexture.Decode(rgba, GamePixelFormat.R8G8B8A8_unorm, 5, 0), 5, 0));
-        var encoded = GameTexture.Encode(rgba, 2, 1, GamePixelFormat.R8G8B8A8_unorm);
+        Assert.Throws<ArgumentException>(() => GameTexture.Decode([], GamePixelFormat.R8G8B8A8Unorm, 1, 1));
+        Assert.Equal(Expected("dim.zero_w"), Px(GameTexture.Decode(rgba, GamePixelFormat.R8G8B8A8Unorm, 0, 5), 0, 5));
+        Assert.Equal(Expected("dim.zero_h"), Px(GameTexture.Decode(rgba, GamePixelFormat.R8G8B8A8Unorm, 5, 0), 5, 0));
+        var encoded = GameTexture.Encode(rgba, 2, 1, GamePixelFormat.R8G8B8A8Unorm);
         Assert.Equal(Expected("enc.extra"), $"Buffer {encoded.Length} 0 {Hex(encoded)}");
-        Assert.Equal(Expected("roundtrip"), Px(GameTexture.Decode(GameTexture.Encode(rgba, 2, 1, GamePixelFormat.B8G8R8A8_unorm), GamePixelFormat.B8G8R8A8_unorm, 2, 1), 2, 1));
+        Assert.Equal(Expected("roundtrip"), Px(GameTexture.Decode(GameTexture.Encode(rgba, 2, 1, GamePixelFormat.B8G8R8A8Unorm), GamePixelFormat.B8G8R8A8Unorm, 2, 1), 2, 1));
     }
 }
