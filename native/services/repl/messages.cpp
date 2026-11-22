@@ -282,6 +282,9 @@ uint32_t messages_caps() {
 }
 
 void messages_pre() {
+    // the server world's Pre and a client world's Pre (a joined client has no server world; a hosted world has both,
+    // on two threads): one at a time with registration (review should 4)
+    std::lock_guard lock(g_mu);
     bool changed = false;
     for (auto& h : g_hooks) {
         if (!h.handle.load(std::memory_order_acquire)) continue;

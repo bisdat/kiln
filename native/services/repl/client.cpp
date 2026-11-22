@@ -345,6 +345,7 @@ void read_client_registry() {
 
 void KILN_CALL on_client_pre(const KilnTickInfo*, void*) {
     if (g_dirty.exchange(false, std::memory_order_relaxed)) apply();
+    messages_pre();  // kiln.repl.net's message hooks: removed and faulted ones go, the hooks follow (a joined client too)
     track_client_pre();  // kiln.repl.net's receive tracks: the last frame's creates and destroy lists
     if (!g_hooked && !g_ring.ready()) return;
     read_client_registry();
