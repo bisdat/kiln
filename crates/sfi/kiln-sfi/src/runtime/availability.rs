@@ -113,6 +113,12 @@ impl RuntimeFacts {
     pub fn catalog(&self) -> &'static Catalog {
         self.catalog
     }
+    pub(crate) fn for_reload(&self) -> Self {
+        Self {
+            latch: self.latch.for_reload(),
+            ..Self::new(self.services.clone(), self.catalog, self.config.clone())
+        }
+    }
     pub fn config(&self) -> &FactsConfig {
         &self.config
     }
@@ -300,14 +306,11 @@ impl RuntimeFacts {
     fn ecs_ready(&self) -> bool {
         super::ecs::ready(&self.services, self.ecs_world_kind())
     }
-    /// ShroudForge's `runtime_provider::can_write()` (behind the `CanWrite` row): the ECS world is the server world
-    /// (the local authority's: a dedicated server's, or the one a client hosts) and it is ready. A joined client's
-    /// client world is never written.
     /// ShroudForge's resource `can_write()` (behind the `ResourceCanWrite` row): the ECS world is the server world (a
     /// dedicated server's, or the one a client hosts); a joined client's resources are never written. Each write still
     /// answers its own refusal outside a world (kiln.assets' compare-exchange needs the live server session).
     fn resource_can_write(&self) -> bool {
-        self.ecs_world_kind() == super::ecs::SERVER_WORLD
+        !self.latch.resource_latched() && self.ecs_world_kind() == super::ecs::SERVER_WORLD
     }
     fn ecs_can_write(&self) -> bool {
         self.ecs_world_kind() == super::ecs::SERVER_WORLD && self.ecs_ready()

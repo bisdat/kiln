@@ -226,6 +226,49 @@ fn set(name: &str, row: Row) {
     );
 }
 
+#[test]
+fn runtime_has_reports_the_loaded_resource_latch_across_sessions() {
+    use kiln_sfi::runtime::assets::WRITE_CAPABILITY;
+
+    let _caps = caps();
+    let owner = next_owner();
+    fake_services::bind_thread(owner);
+    fake_services::set_world_session(owner, SERVER, 4);
+    set(WRITE_CAPABILITY, Row::Available);
+    let facts = facts(&CATALOG, false, false);
+    let package = package(
+        &facts,
+        "alpha",
+        &["runtime"],
+        Phase::Runtime,
+        Side::Server,
+        true,
+    );
+
+    let before = package.has("runtime.assets.write");
+    facts
+        .write_faults()
+        .report(SERVER, 4, WriteOutcome::EcsWriteUncertain);
+    let after_ecs_fault = package.has("runtime.assets.write");
+    facts
+        .write_faults()
+        .report(SERVER, 4, WriteOutcome::ResourceWriteUncertain);
+    let after_resource_fault = package.has("runtime.assets.write");
+    fake_services::set_world_session(owner, SERVER, 5);
+    let in_new_session = package.has("runtime.assets.write");
+    set(WRITE_CAPABILITY, Row::Missing);
+
+    assert_eq!(
+        [
+            before,
+            after_ecs_fault,
+            after_resource_fault,
+            in_new_session
+        ],
+        [true, true, false, false]
+    );
+}
+
 // ---- packages, hosts and Lua ----
 
 struct Active(Cell<bool>);
