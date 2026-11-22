@@ -79,8 +79,8 @@ supplies. An unavailable producer returns `false`; Kiln does not invent counts o
 **Not yet established by game execution:** selector held-tool admission, brush-query family context, and a per-actor
 producer that separates backpack and magic-chest observations. Their capability must remain unavailable until those
 mappings are qualified. Filtering helpers, registry fixtures and native runner tests do not establish menu rendering,
-network behavior or the complete real-game tool. The generic inventory constructor also runs for hovered/non-held
-items; its last item must never be cached as evidence of what the player holds.
+network behavior or the complete real-game tool. The item-presentation constructor's traced caller uses the selected hotbar model, which need not be the
+running action's item; its last item must never be cached as evidence of what the player holds.
 
 Only the player runs the real-game check: confirm root/brush names, independent vanilla Overgrowth choices, all pool
 entries with backpack-only and magic-chest-only supplies, empty stock, switching between tools, inventory changes,

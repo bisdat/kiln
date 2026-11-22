@@ -1,0 +1,14 @@
+{
+  "format": 1,
+  "side": "client",
+  "extends": "server.d/tools-presentation.json",
+  "comment": "Client26430625: the generic inventory constructor swaps its temporary SmallDynamicArray<24B,64> into out+0x40 while its view at out+0x28 can still name the old stack buffer. Only explicitly owned tool items receive the bounded filter/owned-view repair. RootIdentity returns16B {item,nameTag,descriptionTag,present}. Selector and brush-query held-item context is not qualified and is deliberately not advertised as installed.",
+  "symbols": {
+    "tools/MaterialPreview": {"find":[{"pattern":"48 89 5C 24 20 4C 89 44 24 18 48 89 4C 24 08 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 B0 F9 FF FF 48 81 EC 50 07 00 00"}]},
+    "tools/RootIdentity": {"find":[{"pattern":"48 89 5C 24 20 56 48 83 EC 20 48 8B F1 48 85 D2 0F 84 ?? ?? ?? ?? 8B 82 D8 05 00 00 A8 08 74 ?? BB 8D DA 50 29 EB ?? A8 10 74 ?? BB 50 07 8B BE"}]}
+  },
+  "features": {
+    "tools.preview":{"symbols":["tools/MaterialPreview"]},
+    "tools.identity":{"symbols":["tools/RootIdentity"]}
+  }
+}

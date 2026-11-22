@@ -1,0 +1,11 @@
+{
+  "format": 1,
+  "side": "server",
+  "comment": "Terrain config lookup, independently disassembled/decompiled on server26430253 and client26430625. The +0xb8 stride distinguishes terrain from the adjacent building lookup (+0xb4). UI layouts remain client-only. See docs/re/building.md.",
+  "symbols": {
+    "tools/TerrainConfigLookup": {
+      "find": [{"pattern":"4C 8B 51 38 4D 85 D2 74 ?? 45 8B 5A 04 33 C9 4D 85 DB 74 ?? 4D 63 0A 45 33 C0 66 0F 1F 44 00 00 45 85 C9 75 ?? 33 C0 EB ?? 4B 8D 04 0A 49 03 C0 38 10 74 ?? 48 FF C1 49 81 C0 B8 00 00 00"}]
+    }
+  },
+  "features": {"tools.material_lookup":{"symbols":["tools/TerrainConfigLookup"]}}
+}

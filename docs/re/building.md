@@ -122,6 +122,42 @@ were independently rechecked; no callable PoolBuilder ABI or complete cache-read
 The dossier contains pool-partitioning/format-expansion designs, not evidence that the byte namespace or native
 selector has already been widened.
 
+### 1.2.2 Tool-specific presentation seams (client 26430625) **[dec]**
+
+Independently re-read from the read-only client `5d9ef2f1…` with targeted Ghidra decompilation (`-noanalysis`,
+function-local disassembly) and LLVM disassembly. No client execution was performed.
+
+- `0x40e5d0` is `void(selectorState, access, bool currentOnly)`. It gathers inventory records, then building-stock
+  records. Its seven selector groups have stride **0x648**, not the separate player-ui pool cache's 0x610. Each group
+  has data/count/capacity at +0/+8/+0x10, 24-byte rows with item +0 and aggregate stock +0x10, selected index +0x628,
+  has-selection byte +0x630, and mode +0x638. Finalizer `0x40dfe0` restores a selection by item identity. Filtering a
+  group must remap the selected index or clear it; retaining an index after compaction selects another material.
+- `0xb1a230` is an **item presentation constructor**:
+  `out = constructor(out, ItemInfo*, selectorGroup*)`. The traced direct caller obtains its item from the selected
+  hotbar model (`0xd43f40`), not necessarily the running action's `actionItem`. Hover provenance is not established.
+  Its row view is +0x28/+0x30. A separate owned
+  `SmallDynamicArray<24-byte row,64>` starts at +0x40 (data/count +0x40/+0x48, inline rows +0x68). Preview rows hold
+  item/count at +0x10/+0x14. It swaps its local array into that destination with `0xd90570`, but the view may still
+  name the old stack buffer. Rebind the view to the destination's owned data after the original returns, then bound
+  and filter that owned data. Never cache this constructor's item as evidence of what an in-flight action holds.
+- `0xd25b50` scans the item registry and applies GUID-tag filters to the item's tag BlobArray at +0x5e0 (24-byte rows:
+  GUID and two 32-bit fractions), producing 72-byte presentation rows. The owning-tool context of its callers is
+  **not yet qualified**. Keeping new brush tags out of vanilla queries does not prove a new root's picker draws.
+- `0xd3e130` writes a 16-byte root identity `{itemId,nameTag,descriptionTag,present}`. It substitutes vanilla root IDs
+  based on ItemInfo flags +0x5d8 (bits 3/4/5/6/8). A Kiln root can instead use its own identity and content text tags:
+  the existing `kiln.item.name` / `kiln.item.description` GUID derivation, verified in the content writer. No game
+  text pointer needs to escape this helper.
+- `0xe9f270` is **terrain-config lookup**, not player material selection: it scans the registry's +0x38 resource,
+  comparing the cell byte in **184-byte** rows. Its server equivalent is `0x9464b0`. The adjacent building lookup
+  (`C 0xe9f210`, `S 0x946450`) shares its short prologue but has a 180-byte stride: a signature must distinguish them.
+- Equipped-stack helper `C 0x3853c0` / `S 0x1444a0` has matching unique normalized prologues. The client decompile
+  returns a 20-byte inventory binding/item/count/flags value, but replacing it from a current tool selection remains
+  **unqualified**. No guessed equipment or MaterialSelection component offset is used.
+
+The qualified material lookup may refuse a non-pool cell only while an Add policy is scoped around the native call.
+Outside that scope it must call the vanilla continuation unchanged. The selector's genuine held-item admission and
+per-player/source snapshot producer remain missing; pure filtering fixtures are not runtime qualification.
+
 ### 1.3 Hardness **[dec] [data] [rt]**
 ```
 config   = registry lookup by id               0x9464b0 terrain, 0x933af0 building: a linear scan over the resident resource, stride 184 / 180
