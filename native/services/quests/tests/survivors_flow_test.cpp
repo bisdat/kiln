@@ -6,8 +6,12 @@
 // the write).
 #include "../survivors.cpp"
 
+#include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <map>
+#include <thread>
+#include <unistd.h>
 
 using namespace kiln::survivors;
 
@@ -303,6 +307,41 @@ void bed_changed_in_step() {
     check(done(ia, &ra) && (ra.status != KILN_SURV_DONE || (bed_field(2001) == 0 && beds[3001] == roster[0].npc.npc_id)),
           "S3: either refused (ChangedByGame) or B was displaced at the write (status " + std::to_string(ra.status) + ": " + ra.reason + ")");
 }
+// Recheck (6c04c6c6): a bed request whose bed program never runs within the 30 s budget must end TimedOut without
+// deadlocking the tick thread (step_bed_post failed while holding g_op_mu; finish -> release_bed_slot locks it again).
+void bed_deadline_no_deadlock() {
+    bed_field(2000) = 0, bed_field(2001) = 0, beds[3000] = 0, beds[3001] = 0;
+    KilnSurvivorRequest a = req(KILN_SURV_OP_ASSIGN_BED, 1);
+    a.bed = 3000;
+    uint64_t id = 0;
+    check(t_submit(1, &a, &id) == KILN_OK, "deadline: accepted");
+    KilnTickInfo t{};
+    t.size = sizeof t;
+    t.step = t_step;
+    on_pre(&t, nullptr);   // Pre takes it (the bed slot and g_op)
+    on_post(&t, nullptr);  // the bed program did not run in this step
+    ++t_step, t_ms += 31000;  // past the 30 s budget
+    t.step = t_step;
+    std::atomic<bool> back{false};
+    std::thread th([&] { on_pre(&t, nullptr); on_post(&t, nullptr); back = true; });
+    for (int i = 0; i < 30 && !back; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    if (!back) {
+        std::printf("FAIL deadline: Post did not return (deadlock on g_op_mu)\n");
+        std::fflush(stdout);
+        _exit(1);
+    }
+    th.join();
+    ++t_step, t_ms += 41;
+    KilnSurvivorResult r{};
+    check(done(id, &r) && r.status == KILN_SURV_TIMED_OUT, "deadline: the request ends TimedOut (status " + std::to_string(r.status) + ")");
+    KilnSurvivorRequest b = req(KILN_SURV_OP_ASSIGN_BED, 0);
+    b.bed = 3001;
+    uint64_t ib = 0;
+    check(t_submit(1, &b, &ib) == KILN_OK, "deadline: the bed slot is free for the next request");
+    KilnSurvivorResult rb{};
+    for (int i = 0; i < 10 && !done(ib, &rb); ++i) step();
+    check(done(ib, &rb) && rb.status == KILN_SURV_DONE, "deadline: the next request completes (status " + std::to_string(rb.status) + ": " + rb.reason + ")");
+}
 }  // namespace
 
 int main() {
@@ -311,6 +350,7 @@ int main() {
     recruit_indeterminate();
     beds_one_at_a_time();
     bed_changed_in_step();
+    bed_deadline_no_deadlock();
     // N4: the world refused the bed program after on_ready: survivors.assign is no longer advertised
     prog_state = KILN_PROGRAM_REFUSED;
     publish_caps();

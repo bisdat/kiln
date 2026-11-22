@@ -938,21 +938,22 @@ std::unordered_map<uint32_t, KilnSurvivorState> g_seen;  // the observer's last 
 void step_bed_post(Req& r, uint64_t now, uint64_t step) {
     if (r.stage == 20) {
         std::unique_ptr<BedOp> op;
+        bool deadline = false;
         {
             std::lock_guard lock(g_op_mu);
             if (!g_op || g_op->req != r.id) return;
             if (!g_op->ran) {
                 if (now - r.accepted_ms > 5000 && !past(r, now)) r.waiting = "the bed program has not run yet";
-                if (past(r, now)) {
-                    g_op.reset();
-                    r.in_flight = 0;
-                    return fail(r, KILN_SURV_TIMED_OUT, "Deadline: the bed program did not run (survivors.assign)");
-                }
-                return;
+                if (!past(r, now)) return;
+                g_op.reset();
+                deadline = true;
+            } else {
+                op = std::move(g_op);
             }
-            op = std::move(g_op);
         }
         r.in_flight = 0;
+        // fail outside g_op_mu: finish -> release_bed_slot takes it (18 recheck: a deadlock on the tick thread)
+        if (deadline) return fail(r, KILN_SURV_TIMED_OUT, "Deadline: the bed program did not run (survivors.assign)");
         if (!op->written) return fail(r, KILN_SURV_REFUSED, op->why.empty() ? "Refused: the write did not happen" : op->why);
         r.effects |= KILN_SURV_BED_CHANGED;
         r.write_step = step;
