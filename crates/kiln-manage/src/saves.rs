@@ -1001,8 +1001,9 @@ pub mod editor {
             let f = Fixture::new();
             let (result, events) = crate::durable::recording(|| f.write());
             result.unwrap();
-            assert!(events.iter().any(|e| matches!(e, crate::durable::Event::File(p) if p.parent() == f.target.parent())), "no staged save flush: {events:?}");
-            assert!(events.iter().any(|e| matches!(e, crate::durable::Event::Dir(p) if Some(p.as_path()) == f.target.parent())), "no save directory flush: {events:?}");
+            let target = target_path(&f.target).unwrap();
+            assert!(events.iter().any(|e| matches!(e, crate::durable::Event::File(p) if p.parent() == target.parent())), "no staged save flush: {events:?}");
+            assert!(events.iter().any(|e| matches!(e, crate::durable::Event::Dir(p) if Some(p.as_path()) == target.parent())), "no save directory flush: {events:?}");
             assert_eq!(std::fs::read(&f.target).unwrap(), Fixture::bytes(3));
             f.assert_no_staging();
         }
@@ -1021,7 +1022,8 @@ pub mod editor {
             let matching = entries.iter().find(|e| Path::new(e["path"].as_str().unwrap()).starts_with(&a)).unwrap();
             assert_eq!(matching["group"], "matching");
             assert_eq!(matching["source"]["file"], "character0.ksd");
-            let legacy = entries.iter().find(|e| e["path"] == f.src.to_str().unwrap()).unwrap();
+            let legacy_path = std::fs::canonicalize(&f.src).unwrap();
+            let legacy = entries.iter().find(|e| std::fs::canonicalize(e["path"].as_str().unwrap()).is_ok_and(|p| p == legacy_path)).unwrap();
             assert_eq!(legacy["group"], "legacy");
             assert!(legacy.get("groupLabel").is_none(), "headings are translated by the launcher");
             assert!(legacy["source"].is_null());
