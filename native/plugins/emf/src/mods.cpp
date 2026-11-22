@@ -534,6 +534,46 @@ void discover_mods() {
     if (legacy) scan_legacy(P.emf / L"mods", profile_ids);
 }
 
+namespace {
+
+// A profile entry that is only in Kiln's Library while the real EMF runs: a folder of emf\mods that is not Kiln's copy
+// but holds the same mod (its mod.json id is the entry's) is what EMF loads, so the entry runs from there (PepegaJedi,
+// 21 Nov 2026: Lua Scripts copied into emf\mods by hand read "in Kiln's Library, so it does not load" while EMF ran it).
+// A folder named like the entry that holds another mod keeps Kiln from copying the entry there: the reason says so.
+void hand_copy(const Mod& m, kcompat::AsideReport* rep) {
+    const auto dir = P.emf / L"mods";
+    if (!kcompat::exists(dir)) return;
+    std::error_code ec;
+    std::vector<std::filesystem::path> dirs;
+    for (const auto& d : std::filesystem::directory_iterator(dir, ec))
+        if (d.is_directory(ec) && d.path().filename().wstring()[0] != L'.') dirs.push_back(d.path());
+    std::sort(dirs.begin(), dirs.end());
+    for (const auto& d : dirs) {
+        std::string kind, marker_id;
+        if (kcompat::read_library_marker(d, &kind, &marker_id) && kind == "emf") continue;  // Kiln's copy of an entry
+        Mod copy;
+        // a linked folder is refused before anything in it is read
+        if (!kcompat::contained_path(dir, d) || !std::filesystem::exists(d / L"mod.json", ec)) continue;
+        read_manifest(d, &copy);
+        const std::string name = to_utf8(d.filename().wstring());
+        if (!copy.id.empty() && lower(copy.id) == lower(m.id)) {
+            const std::string version = copy.version.empty() ? "?" : copy.version;
+            rep->state = kcompat::Aside::OwnLoader;
+            rep->copy = d;
+            rep->reason = "runs under EMF's own loader from emf\\mods\\" + name + ", a copy that is not Kiln's (put there by hand), " +
+                          "version " + version + (m.version.empty() || version == m.version ? "" : " (the profile has " + m.version + ")") +
+                          "; EMF loads that copy, and the profile's Library copy is not used while that folder is there";
+            return;
+        }
+        if (!m.profile_id.empty() && lower(name) == lower(m.profile_id))
+            rep->reason = "EMF's own loader runs this start and reads only <game>\\emf\\mods, and emf\\mods\\" + name +
+                          " is a folder that is not Kiln's holding another mod (" + copy.id + "), so Kiln cannot copy this one " +
+                          "there: rename or remove that folder, then activate the profile again in the Kiln launcher";
+    }
+}
+
+}  // namespace
+
 // The real EMF reads only <game>/emf/mods and switches each mod by <game>/emf/config/<id>.ini (enabled=0/1).
 void aside_mods() {
     std::lock_guard lock(g_mods_mutex);
@@ -555,6 +595,7 @@ void aside_mods() {
         if (m->id.empty()) m->id = lower(m->profile_id.empty() ? to_utf8(folder.filename().wstring()) : m->profile_id);
         m->enabled = e.enabled != 0;
         auto rep = kcompat::aside_report(m->profile_id, folder, e.enabled != 0, "emf", P.emf / L"mods", "EMF", "emf\\mods");
+        if (rep.state == kcompat::Aside::NotLoaded) hand_copy(*m, &rep);
         if (rep.state == kcompat::Aside::Off) {
             m->status = EMF_MOD_DISABLED;
         } else {

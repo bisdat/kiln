@@ -70,6 +70,15 @@ std::string overlap_key(const ojson& overlap);
 // Pure: no process state is read.
 ojson compute_overlaps(const ojson& map, const std::vector<ChainRow>& chain, const std::vector<Refused>& refused);
 
+// dev.30.3, `known` rules: an overlap whose foreign module a fired `known` rule's subject names (a module pattern) is a
+// known, harmless one. It gets "known": <rule id> and "fix": "none", and its message says so with the rule's message; kiln.log
+// logs it as info, not a warning. Returns how many were marked. Pure.
+size_t mark_known(ojson& overlaps, const std::vector<const Rule*>& fired);
+
+// Whether `bytes` holds `text` as 8-bit or UTF-16LE text, ASCII case ignored (as crates/kiln-manage/src/pe.rs
+// contains_text, which the launcher's engine table reads DLLs with). Pure.
+bool contains_text(std::string_view bytes, std::string_view text);
+
 // What a rule became in this start (the "rules" section of hooks.json): applied, and a note saying what was done or why not.
 struct Outcome {
     bool applied = true;

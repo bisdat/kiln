@@ -92,6 +92,9 @@ pub enum RuleAction {
     /// The Shroudtopia host exposes original entry bytes to this mod's imported memcmp.
     #[serde(rename = "original-code")]
     OriginalCode,
+    /// dev.30.3: the subject module's hook overlaps are known and harmless (Live Map's IPHLPAPI.DLL): kiln-core logs them as
+    /// info and marks them `known` in hooks.json. No chain changes.
+    Known,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -201,6 +204,9 @@ fn check_rule(r: &Rule) -> std::result::Result<(), String> {
         && !matches!(&r.subject, Some(Matcher::Mod(s)) if s.starts_with("shroudtopia:") && s.len() > 12)
     {
         return Err("original-code needs a shroudtopia:<id> subject".into());
+    }
+    if r.action == RuleAction::Known && !matches!(&r.subject, Some(Matcher::Module(_))) {
+        return Err("known needs a module subject".into());
     }
     if r.action == RuleAction::Defer {
         if !matches!(&r.target, Some(Matcher::Mod(s)) if s.starts_with("shroudtopia:") && s.len() > 12)
@@ -475,7 +481,7 @@ pub fn evaluate(rules: &[SourcedRule], facts: &Facts, entries: &[PlanEntry]) -> 
 pub fn evaluate_with(rules: &[SourcedRule], facts: &Facts, entries: &[PlanEntry], never_late: &dyn Fn(&PlanEntry) -> bool) -> Vec<RuleResult> {
     let mut results: Vec<RuleResult> = rules
         .iter()
-        .filter(|sr| !matches!(sr.rule.action, RuleAction::Defer | RuleAction::OriginalCode)) // host-only actions do not change the chain
+        .filter(|sr| !matches!(sr.rule.action, RuleAction::Defer | RuleAction::OriginalCode | RuleAction::Known)) // host-only actions do not change the chain
         .map(|sr| {
             let r = &sr.rule;
             let fired = r.when.iter().all(|m| facts.holds(m));

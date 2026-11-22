@@ -1,5 +1,1 @@
 #nullable enable
-const Kiln.Items.ContainerNameMaxBytes = 64 -> int
-const Kiln.Items.ContainerNameMaxChars = 48 -> int
-static Kiln.Items.ContainerRenameAvailable.get -> bool
-static Kiln.Items.SetContainerName(Kiln.EntityId entity, string! name) -> System.Threading.Tasks.Task<bool>!

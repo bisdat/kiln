@@ -20,16 +20,23 @@ public sealed class UiContractTests : ContractTest
         foreach (var name in (string[])["ui.screens", "ui.main_menu", "ui.menu_page", "ui.crafting", "ui.language"])
             AssertOffOffline(name, "needs kiln.ui");
         AssertOffOffline("render.camera", "needs kiln.render");
+        // Ui.World.Outline (0.2.0-dev.30.3): kiln.render v2's; the one Kiln.Ui member that throws for its row
+        AssertOffOffline(Ui.World.OutlineCapability, "needs kiln.render");
+        Assert.False(Ui.World.OutlinesAvailable);
+        AssertUnavailable(Ui.World.OutlineCapability, () => Ui.World.Outline(new EntityId(5)));
+        Ui.World.ClearOutlines();  // never throws
     }
 
     [Fact]
     public void Types_carry_their_side_and_thread()
     {
-        foreach (var type in (Type[])[typeof(Ui), typeof(Ui.Screens), typeof(Ui.Menus), typeof(Ui.Crafting), typeof(Hud), typeof(Render), typeof(KeyBindings), typeof(UiDraw), typeof(RenderDraw), typeof(WorldDraw)])
+        foreach (var type in (Type[])[typeof(Ui), typeof(Ui.Screens), typeof(Ui.Menus), typeof(Ui.Crafting), typeof(Hud), typeof(Render), typeof(KeyBindings), typeof(UiDraw), typeof(RenderDraw), typeof(WorldDraw), typeof(WorldOutline)])
             AssertHas<ClientOnlyAttribute>(type);
         AssertHas<RenderThreadAttribute>(typeof(UiDraw));
         AssertHas<AnyThreadAttribute>(Property(typeof(Ui.Screens), "Current"));
         AssertHas<AnyThreadAttribute>(Property(typeof(Render), "Camera"));
+        AssertHas<AnyThreadAttribute>(Method(typeof(Ui.World), "Outline", typeof(EntityId), typeof(OutlineOptions)));
+        AssertHas<AnyThreadAttribute>(Property(typeof(WorldOutline), "State"));
         AssertHas<AnyThreadAttribute>(Method(typeof(Hud), "Toast", typeof(string), typeof(ToastKind), typeof(double)));
         AssertHas<AnyThreadAttribute>(Method(typeof(StatusLines), "Set", typeof(string), typeof(string)));
     }

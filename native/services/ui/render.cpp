@@ -306,7 +306,10 @@ const KilnRenderApi kTable = {
     {sizeof(KilnRenderApi), KILN_RENDER_VERSION},
     &t_status, &t_acquire, &t_release, &t_camera, &t_world_to_screen,
     &t_line, &t_rect, &t_circle, &t_triangle, &t_polyline, &t_text, &t_text_size, &t_image,
+    // v2 (0.2.0-dev.30.3): outlines, outline.cpp
+    &kui::outline_add, &kui::outline_info, &kui::outline_remove, &kui::outline_clear, &kui::outline_status,
 };
+static_assert(sizeof(kTable) == 152 && offsetof(KilnRenderApi, outline_status) == 144, "kiln.render v2: 152 bytes");
 
 bool sym(const char* n, uintptr_t* out) { return g_api->symbol(KilnStr{n, std::strlen(n)}, out) == KILN_OK && *out; }
 bool cst(const char* n, int64_t* out) { return g_api->constant(KilnStr{n, std::strlen(n)}, out) == KILN_OK; }

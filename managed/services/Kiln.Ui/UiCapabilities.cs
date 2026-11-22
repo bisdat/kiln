@@ -4,7 +4,8 @@
 // kiln.render and the client's sigdb features answer. Ui.Values (dev.28) throws by the error rule and answers with
 // kiln.ui.values' seven sigdb features, lowered here when its table is missing. Reported at the service's start (the first service tick) and at its first use.
 // The tables are published also when single hooks failed (kiln.ui and kiln.render install them at their start, before
-// they publish): the features those hooks carry are lowered then.
+// they publish): the features those hooks carry are lowered then. ui.world_outline (Ui.World.Outline, 0.2.0-dev.30.3) is
+// lowered here without kiln.render, and as service_older with a v1 kiln.render table.
 namespace Kiln;
 
 internal static unsafe class UiCaps
@@ -56,9 +57,16 @@ internal static unsafe class UiCaps
                 "kiln.ui.inventory has no screen_view (v2: an older kiln-core)");
         // Collected lines have one production consumer: the overlay's Item details window.
         ServiceCaps.LowerFeatures(Service, "ui.values.tooltip_lines");
-        if (!RenderNative.Available) ServiceCaps.LowerFeatures(Render, "render.camera");
-        else if (RenderNative.ReadStatus() is { Camera: 0 })
-            ServiceCaps.LowerOff("render.camera", CapabilityReason.Faulted, "kiln.render's camera hook is off (see kiln.log)");
+        if (!RenderNative.Available) ServiceCaps.LowerFeatures(Render, "render.camera", Ui.World.OutlineCapability);
+        else
+        {
+            if (RenderNative.ReadStatus() is { Camera: 0 })
+                ServiceCaps.LowerOff("render.camera", CapabilityReason.Faulted, "kiln.render's camera hook is off (see kiln.log)");
+            // outlines (0.2.0-dev.30.3) are kiln.render v2's; kiln.render itself lowers the feature when its hooks fail
+            if (RenderNative.T2 == null)
+                ServiceCaps.LowerOff(Ui.World.OutlineCapability, CapabilityReason.ServiceOlder,
+                    "kiln.render has no outlines (v1: an older kiln-core)");
+        }
     }
 
     // kiln.ui's screen answers "unavailable" exactly when the game-UI integration is off (feature or frame hook)

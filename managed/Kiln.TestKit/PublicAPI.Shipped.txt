@@ -212,6 +212,35 @@ Kiln.TestKit.FakeItemsCall.ModId.get -> string?
 Kiln.TestKit.FakeItemsCall.Requested.get -> int
 Kiln.TestKit.FakeItemsCall.Status.get -> Kiln.ItemsStatus
 Kiln.TestKit.FakeItemsCall.Step.get -> ulong
+Kiln.TestKit.FakeOutline
+Kiln.TestKit.FakeOutline.<Clone>$() -> Kiln.TestKit.FakeOutline!
+Kiln.TestKit.FakeOutline.Color.get -> Kiln.Color
+Kiln.TestKit.FakeOutline.Color.init -> void
+Kiln.TestKit.FakeOutline.ColorShared.get -> bool
+Kiln.TestKit.FakeOutline.ColorShared.init -> void
+Kiln.TestKit.FakeOutline.Deconstruct(out Kiln.EntityId Entity, out Kiln.Color Color, out bool Pulse, out int Priority, out System.TimeSpan? Duration, out Kiln.OutlineState State, out Kiln.OutlineReason Reason, out int Group, out bool ColorShared, out string! Owner) -> void
+Kiln.TestKit.FakeOutline.Duration.get -> System.TimeSpan?
+Kiln.TestKit.FakeOutline.Duration.init -> void
+Kiln.TestKit.FakeOutline.Entity.get -> Kiln.EntityId
+Kiln.TestKit.FakeOutline.Entity.init -> void
+Kiln.TestKit.FakeOutline.Equals(Kiln.TestKit.FakeOutline? other) -> bool
+Kiln.TestKit.FakeOutline.FakeOutline(Kiln.EntityId Entity, Kiln.Color Color, bool Pulse, int Priority, System.TimeSpan? Duration, Kiln.OutlineState State, Kiln.OutlineReason Reason, int Group, bool ColorShared, string! Owner) -> void
+Kiln.TestKit.FakeOutline.Group.get -> int
+Kiln.TestKit.FakeOutline.Group.init -> void
+Kiln.TestKit.FakeOutline.Owner.get -> string!
+Kiln.TestKit.FakeOutline.Owner.init -> void
+Kiln.TestKit.FakeOutline.Priority.get -> int
+Kiln.TestKit.FakeOutline.Priority.init -> void
+Kiln.TestKit.FakeOutline.Pulse.get -> bool
+Kiln.TestKit.FakeOutline.Pulse.init -> void
+Kiln.TestKit.FakeOutline.Reason.get -> Kiln.OutlineReason
+Kiln.TestKit.FakeOutline.Reason.init -> void
+Kiln.TestKit.FakeOutline.State.get -> Kiln.OutlineState
+Kiln.TestKit.FakeOutline.State.init -> void
+Kiln.TestKit.FakeOutlineSetting
+Kiln.TestKit.FakeOutlineSetting.GameFirst = 0 -> Kiln.TestKit.FakeOutlineSetting
+Kiln.TestKit.FakeOutlineSetting.ModsFirst = 1 -> Kiln.TestKit.FakeOutlineSetting
+Kiln.TestKit.FakeOutlineSetting.Off = 2 -> Kiln.TestKit.FakeOutlineSetting
 Kiln.TestKit.FakePathAnswer
 Kiln.TestKit.FakePathAnswer.FakePathAnswer() -> void
 Kiln.TestKit.FakePathRequest
@@ -534,6 +563,7 @@ Kiln.TestKit.HarnessItems
 Kiln.TestKit.HarnessItems.AddContainer(Kiln.EntityId entity, int inventories = 1) -> Kiln.TestKit.FakeInventory!
 Kiln.TestKit.HarnessItems.AddItem(string! name, int maxStack, Kiln.ItemCategory category = Kiln.ItemCategory.Materials, bool gear = false, Kiln.ItemRarity rarity = Kiln.ItemRarity.Common, int levelMin = 0, int levelMax = 0, System.Guid id = default(System.Guid)) -> Kiln.ItemId
 Kiln.TestKit.HarnessItems.Calls.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.FakeItemsCall!>!
+Kiln.TestKit.HarnessItems.ContainerName(Kiln.EntityId entity) -> string?
 Kiln.TestKit.HarnessItems.IdOf(string! name) -> Kiln.ItemId
 Kiln.TestKit.HarnessItems.Of(Kiln.EntityId entity) -> Kiln.TestKit.FakeInventory?
 Kiln.TestKit.HarnessItems.PlayerInventories.get -> int
@@ -541,6 +571,18 @@ Kiln.TestKit.HarnessItems.PlayerInventories.set -> void
 Kiln.TestKit.HarnessItems.SetGear(Kiln.ItemInstanceRef item, int? enhancements = null, int? unlocked = null, int? level = null, int? durability = null) -> void
 Kiln.TestKit.HarnessItems.SetPerkSlots(Kiln.ItemId item, int slots) -> void
 Kiln.TestKit.HarnessItems.SetUpgradeRolls(params double[]! rolls) -> void
+Kiln.TestKit.HarnessOutlines
+Kiln.TestKit.HarnessOutlines.All.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.FakeOutline!>!
+Kiln.TestKit.HarnessOutlines.Despawn(Kiln.EntityId entity) -> int
+Kiln.TestKit.HarnessOutlines.EndWorld() -> void
+Kiln.TestKit.HarnessOutlines.GameHighlight(Kiln.EntityId entity, bool on = true) -> void
+Kiln.TestKit.HarnessOutlines.HideModel(Kiln.EntityId entity, bool hidden = true) -> void
+Kiln.TestKit.HarnessOutlines.Live.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.FakeOutline!>!
+Kiln.TestKit.HarnessOutlines.Of(Kiln.WorldOutline! outline) -> Kiln.TestKit.FakeOutline?
+Kiln.TestKit.HarnessOutlines.SetState(Kiln.WorldOutline! outline, Kiln.OutlineState state, Kiln.OutlineReason reason = Kiln.OutlineReason.None) -> void
+Kiln.TestKit.HarnessOutlines.Setting.get -> Kiln.TestKit.FakeOutlineSetting
+Kiln.TestKit.HarnessOutlines.Setting.set -> void
+Kiln.TestKit.HarnessOutlines.Showing(Kiln.EntityId entity) -> Kiln.TestKit.FakeOutline?
 Kiln.TestKit.HarnessPlayers
 Kiln.TestKit.HarnessPlayers.All.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.FakePlayer!>!
 Kiln.TestKit.HarnessPlayers.Join(string! name, ulong steamId = 0, Kiln.PlayerPermissions rights = Kiln.PlayerPermissions.None, bool isAdmin = false, Kiln.WorldPosition? position = null, uint userGroupId = 0) -> Kiln.TestKit.FakePlayer!
@@ -688,6 +730,7 @@ Kiln.TestKit.KilnHarness.MenuFrame() -> int
 Kiln.TestKit.KilnHarness.Mod(string! id) -> Kiln.TestKit.ModHandle!
 Kiln.TestKit.KilnHarness.ModsDirectory.get -> string!
 Kiln.TestKit.KilnHarness.OnMainThread(System.Action! work) -> void
+Kiln.TestKit.KilnHarness.Outlines.get -> Kiln.TestKit.HarnessOutlines!
 Kiln.TestKit.KilnHarness.Players.get -> Kiln.TestKit.HarnessPlayers!
 Kiln.TestKit.KilnHarness.Programs.get -> Kiln.TestKit.HarnessPrograms!
 Kiln.TestKit.KilnHarness.Queries.get -> Kiln.TestKit.HarnessQueries!
@@ -840,6 +883,8 @@ Kiln.TestKit.ModManifest.Requires(params string![]! features) -> Kiln.TestKit.Mo
 Kiln.TestKit.ModManifest.Set(string! key, System.Text.Json.Nodes.JsonNode? value) -> Kiln.TestKit.ModManifest!
 Kiln.TestKit.ModManifest.Side.get -> Kiln.ModSide
 Kiln.TestKit.ModManifest.Side.set -> void
+Kiln.TestKit.ModManifest.SteamMessages.get -> bool
+Kiln.TestKit.ModManifest.SteamMessages.set -> void
 Kiln.TestKit.ModManifest.ToJson(string! entryAssembly, string? entryType) -> string!
 Kiln.TestKit.ModManifest.Version.get -> string!
 Kiln.TestKit.ModManifest.Version.set -> void
@@ -883,6 +928,9 @@ override Kiln.TestKit.FakeImpactCallRecord.ToString() -> string!
 override Kiln.TestKit.FakeInventory.ToString() -> string!
 override Kiln.TestKit.FakeInventorySlot.GetHashCode() -> int
 override Kiln.TestKit.FakeItemsCall.ToString() -> string!
+override Kiln.TestKit.FakeOutline.Equals(object? obj) -> bool
+override Kiln.TestKit.FakeOutline.GetHashCode() -> int
+override Kiln.TestKit.FakeOutline.ToString() -> string!
 override Kiln.TestKit.FakePathRequest.Equals(object? obj) -> bool
 override Kiln.TestKit.FakePathRequest.GetHashCode() -> int
 override Kiln.TestKit.FakePathRequest.ToString() -> string!
@@ -945,6 +993,8 @@ static Kiln.TestKit.FakeImpactCallRecord.operator !=(Kiln.TestKit.FakeImpactCall
 static Kiln.TestKit.FakeImpactCallRecord.operator ==(Kiln.TestKit.FakeImpactCallRecord? left, Kiln.TestKit.FakeImpactCallRecord? right) -> bool
 static Kiln.TestKit.FakeInventorySlot.operator !=(Kiln.TestKit.FakeInventorySlot left, Kiln.TestKit.FakeInventorySlot right) -> bool
 static Kiln.TestKit.FakeInventorySlot.operator ==(Kiln.TestKit.FakeInventorySlot left, Kiln.TestKit.FakeInventorySlot right) -> bool
+static Kiln.TestKit.FakeOutline.operator !=(Kiln.TestKit.FakeOutline? left, Kiln.TestKit.FakeOutline? right) -> bool
+static Kiln.TestKit.FakeOutline.operator ==(Kiln.TestKit.FakeOutline? left, Kiln.TestKit.FakeOutline? right) -> bool
 static Kiln.TestKit.FakePathAnswer.IterationLimit.get -> Kiln.TestKit.FakePathAnswer!
 static Kiln.TestKit.FakePathAnswer.NoPath.get -> Kiln.TestKit.FakePathAnswer!
 static Kiln.TestKit.FakePathAnswer.NoStartNode.get -> Kiln.TestKit.FakePathAnswer!

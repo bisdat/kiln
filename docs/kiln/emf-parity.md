@@ -11,8 +11,9 @@ API (`docs/modding/lua.md`), with the Kiln service behind it, the nearest Kiln C
 - **tested**: `probe` = the conformance probe (`mods/tests/emf-test/probe`, lab server), `host` = host test
   (`native/plugins/emf/tests/run.sh`), `client` = only a joined player can show it (client checklist in
   [emf.md](emf.md)), `lab-mod` = a shipped EMF mod uses it in the lab check (`tools/emf/lab-check.py`).
-- Counts: **76 full, 17 partial, 49 not yet out of 142.** The v27 prefix has 90 slots (75 full, 15 partial). v28 to
-  v40 append 45: one full (`world_to_screen`), two partial (`chat_tell_ex`, `chat_broadcast_ex`) and 42 not yet
+- Counts: **76 full, 18 partial, 48 not yet out of 142.** The v27 prefix has 90 slots (75 full, 15 partial). v28 to
+  v40 append 45: one full (`world_to_screen`), three partial (`chat_tell_ex`, `chat_broadcast_ex`, `on_hit` since
+  0.2.0-dev.30.3) and 41 not yet
   ([the table below](#v28-to-v40-emf-063-to-068)). v43 to v46 append 7, all not yet
   ([their table](#v43-to-v46-emf-0613-to-0614)). Counts are C table slots, not grouped rows or attribute constants.
   The two attribute slots remain partial because the XP/level ids use the queued progression path below. The four
@@ -124,7 +125,8 @@ dedicated server.
 | `on_player` (28) | Answer: `false`. No join, leave or death callback comes. | not yet | host, probe |
 | `item_name`, `game_language` (29) | Answer: 0 and an empty buffer ("use the debug name"). | not yet | host, probe |
 | `player_character_name` (30) | Answer: `false` and an empty buffer. | not yet | host, probe |
-| `on_hit`, `on_hit_before`, `hit_rule_add`, `hit_rule_remove` (31) | Answer: `false` / 0. Hits are not observed or changed; fall, shroud, cold and drowning damage are not reported. | not yet | host, probe |
+| `on_hit` (31) | Since 0.2.0-dev.30.3. The game's HitEvents of the server world, as EMF's core takes them: kiln-emf's own relay program for HitEvent (the one `on_event` uses: a `kiln.world` SYSTEM program, host only) copies them in the step, and after the step, on the tick thread, each becomes EMF's `EmfHit`: attacker = root source, part, target = root target (else the part), amount and stamina (positive = damage), the game's flags (`EMF_HIT_KILLED` on the killing blow), damage types, attack kinds, weapon category, program, impact, reaction, target faction, position; `health_before` -1; `health_after` = `kiln.combat` `health()` of the part, else of the target; `weapon_item` = the weapon entity's ItemState item; `from_mod` = a `damage()` hit (kiln.combat's impact ids, so a Kiln mod's damage counts too). Terrain and building hits are never passed. At most 16 callbacks, null refused; a faulting callback is switched off. A call before the worlds are set up is kept (EMF: any time). | partial: entity hits only: fall, shroud, cold and drowning damage (`EMF_HIT_KIND_FALL` to `_DROWNING`, which EMF reads from its own hooks on four game programs) never arrive; `health_after` of a placed object whose Health is gone is -1 (EMF: the object's maximum). The mod's log says so once, at its first `on_hit`. | host (`tests/hits_test.cpp`); probe (lab: passed 2026-11-21, the Vukah killing blow reached `on_hit` with `EMF_HIT_KILLED`) |
+| `on_hit_before`, `hit_rule_add`, `hit_rule_remove` (31) | Answer: `false` / 0. Hits are not changed. | not yet | host, probe |
 | `buff_types`, `buff_type`, `buff_text`, `buffs_of`, `buff_apply`, `buff_remove`, `on_buff` (32) | Answer: 0 / `false`; `done` is not called. | not yet | host, probe |
 | `marker_set`, `marker_remove`, `marker_clear`, `marker_types`, `marker_send`, `marker_unsend` (33) | Answer: `false` / 0. No marker is drawn or sent. | not yet | host, probe |
 | `map_cursor`, `on_map_click`, `map_action`, `ground_at` (34) | Answer: `false`; no callback. | not yet | host, probe |
@@ -137,6 +139,53 @@ dedicated server.
 
 A mod that registers a callback through a function that is not carried and ignores the `false` runs without that
 feature and without an error of its own: the one log line and `state/emf.json` `unsupported` are where it shows.
+
+### Hits on Kiln (v31)
+
+`on_hit` observes; it cannot change a hit (`const EmfHit*`, as in EMF). What it costs: the HitEvent relay is
+registered only when an EMF mod is loaded, and while no `on_hit` callback is on it does not read the game's event
+queue (one call per server step). A game without EMF mods registers nothing. A joined player's game sees no hits, as
+on EMF (the relay is a host-only program).
+
+The record is read at EMF's offsets. At start kiln-emf checks them against the game build: the reflected size of
+`HitEvent` (248 bytes) and kiln.combat's sigdb captures `combat/hit.flags` and `combat/hit.health_change`. On a build
+where one differs, `on_hit` answers `false`, as on EMF where HitEvent is not usable. `kiln.log` says
+`on_hit: the HitEvent layout differs: ...`, and a mod that registered earlier gets `on_hit: no hits will arrive (...)`.
+
+Changing a hit before it lands (`on_hit_before`, the hit rules, and with them `emf.hit_rule`) stays "not yet".
+EMF does it inline in the game's applyHitToEntity, on the impact thread, before the health change. Kiln has two
+places near it, neither of which fits: `kiln.combat` holds hits for one listener (the managed `Kiln.Combat`; a second
+`set_listener` replaces the first) and decides on them a step later, not inline; and its applyHitToEntity link is
+kiln.combat's own. Carrying them means a second link on applyHitToEntity through `kiln.hooks` (kiln-emf already owns
+raw links for `hook_pattern`), EMF's rule matcher (MIT, `src/core/hits.cpp`, `hit_hook.cpp`) and its once-per-hit walk up a
+target's parts, write-back into the HitCandidate (kiln.combat's `HitOffsets`), and a lab check that a cancelled hit
+leaves no number, reaction, aggro or credit. Best estimate: 2 to 3 days with host tests and one lab run. Fall, shroud,
+cold and drowning damage for `on_hit` would come with it (EMF reads them around four game programs), about 1 more day.
+
+### Buffs (v32): plan
+
+Not carried yet (the answers above). Best estimate for all seven: 4 to 6 days, in this order:
+
+1. `buffs_of` and `on_buff` (about 1 day): `kiln.playerstate` `buffs()` already reads any entity's BuffContainer
+   and each buff entity's BuffNetworkData on the server world (type, entity, slot, cleansed, lifetime, end, level).
+   `on_buff` = a per-step comparison of each player's buffs (APPLIED, REFRESHED when the same buff entity's end moves
+   on, REMOVED with `cleansed`/`replaced`), the first sight saying nothing, as EMF. Open points for the lab:
+   `EmfBuff.index` (kiln.playerstate skips empty slots, so the place in the slot group needs one more field), the
+   time base of `remaining_ns` (BuffNetworkData's end against the world's ECS time), and client worlds (BuffContainer
+   is server only: EMF answers there from replicated data, Kiln would answer 0 at first).
+2. `buff_types` and `buff_type` (about 1 day): the BuffRegistry's collection, which `kiln.content`'s buff clones
+   already find (`gamedata/GetBuffType`, `gamedata/buffreg.collection`), read for id, slot, apply type, faction
+   mask, flags, default time and follow-up; server sigdb entries to add where only the client has them.
+3. `buff_remove` (about half a day): the cleansed byte of the target's slot through a kiln.world program's tracked
+   write (the game's own cleanse ends it the next step), with `done` after that step.
+4. `buff_apply` (2 to 3 days, the risky part): the game's applyBuffCore with a 0xE8-byte ApplyBuffCtx built inside a
+   kiln.world program that has the buff programs' access (BuffContainer and LifeTime writes, the buff and balancing
+   registries, AppliedBuffEvent out), new signatures on both executables, and a lab check of the effect, HUD icon,
+   saving and faction refusals.
+5. `buff_text` (half a day to a day): the game's text lookup, shared with v29's `item_name` (not carried either).
+
+Not built in 0.2.0-dev.30.3: step 1 alone is moderate, but its numbers need a lab run first, and steps 2 to 5 call
+into the engine.
 
 ## v43 to v46 (EMF 0.6.13 to 0.6.14)
 
@@ -195,7 +244,8 @@ Kiln the functions of the last rows below return what EMF's Lua guide documents 
 | `emf.player_data`, `emf.save_player_data` | the Lua host's own files under `emf/config` | full |
 | `emf.on_player_joined`, `emf.on_player_left`, `emf.on_player_died` (1.20) | `on_player` | not yet |
 | `emf.item_name`, `emf.language` (1.21) | `item_name`, `game_language` | not yet (`emf.item_name` gives the debug name and `false`, `emf.language` `nil`, as on a dedicated server) |
-| `emf.on_hit`, `emf.hit_rule`, `emf.hit_rule_remove` | v31 | not yet |
+| `emf.on_hit` (1.23) | v31 `on_hit` | partial (since 0.2.0-dev.30.3): entity hits, the default, arrive after the server step with every field of EMF's hit table; `{kinds = ...}` with fall, shroud, cold or drowning gets none of those |
+| `emf.hit_rule`, `emf.hit_rule_remove` | v31 `hit_rule_add`, `hit_rule_remove` | not yet (`nil` / `false`) |
 | `emf.buff_types`, `emf.buff_type`, `emf.buffs`, `emf.apply_buff`, `emf.remove_buff`, `emf.on_buff` | v32 | not yet |
 | `emf.marker`, `emf.remove_marker`, `emf.clear_markers`, `emf.marker_types`, `emf.send_marker`, `emf.unsend_marker` | v33 | not yet |
 | `emf.map_cursor`, `emf.on_map_click`, `emf.map_action`, `emf.remove_map_action`, `emf.ground_at` | v34 | not yet |
