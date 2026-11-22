@@ -9,6 +9,7 @@ import { create } from "zustand";
 import * as api from "../../api/commands";
 import type { ServerId, ServerInstance, ServerMod, ServerSettings, ServerSpec, ServerStatus } from "../../api/commands";
 import { t } from "../../i18n";
+import { flowRunning } from "./serverActions";
 
 export type ServerRunner = "kilnctl" | "steam" | "windows" | "remote";
 
@@ -65,8 +66,15 @@ export const sk = {
 export const useServers = () => useQuery({ queryKey: sk.list, queryFn: () => api.serverList() as Promise<ServerInstanceX[]> });
 export const useServer = (id: ServerId) =>
   useQuery({ queryKey: sk.get(id), queryFn: () => api.serverGet(id) as Promise<ServerInstanceX>, enabled: !!id });
+/** A server's status: every second while it starts or stops or one of its actions runs (serverActions.ts), else every 5 s. */
 export const useServerStatus = (id: ServerId) =>
-  useQuery({ queryKey: sk.status(id), queryFn: () => api.serverStatus(id), enabled: !!id, refetchInterval: 5000 });
+  useQuery({
+    queryKey: sk.status(id), queryFn: () => api.serverStatus(id), enabled: !!id,
+    refetchInterval: (q) => {
+      const s = q.state.data?.state;
+      return s === "starting" || s === "stopping" || flowRunning(id) ? 1000 : 5000;
+    },
+  });
 
 /** Refreshes a server's queries when the backend reports a status change (kiln://server). */
 export function useServerEvents() {

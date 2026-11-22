@@ -27,8 +27,8 @@ export default function ServerOverviewPage() {
     <>
       {noKiln && (
         <Banner tone="idle" title={t("servers.overview.noKiln")}
-          actions={<Button size="s" disabled={!!status?.pid} onClick={() => showDeploy(true)}>{t("servers.head.installKiln")}</Button>}>
-          {status?.pid ? t("servers.overview.stopToInstall") : null}
+          actions={<Button size="s" onClick={() => showDeploy(true)}>{t("servers.head.installKiln")}</Button>}>
+          {status?.pid ? t("servers.activity.installStopsFirst") : null}
         </Banner>
       )}
       <div className="k-overview">

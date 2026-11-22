@@ -393,3 +393,41 @@ html[data-covered] .k-app ::-webkit-scrollbar, html[data-covered] [data-deck-scr
 .k-server-page > .k-banner { flex: none; margin-bottom: 14px; }
 .k-overview-aside { flex: none; width: 208px; display: flex; flex-direction: column; gap: 10px; overflow: auto; }
 .k-overview-aside .k-kv { margin-top: 6px; gap: 1px 10px; }
+
+/* the server's activity panel (pages/servers/ServerActivity.tsx): the flow that runs or just ended */
+.k-sact { flex: none; margin-top: 10px; padding: 10px 14px 10px 12px; border-radius: var(--k-radius-s); background: var(--k-bg-3);
+  border-left: 3px solid var(--k-ember-300); display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.k-sact.ok { border-left-color: var(--k-ok, #7bc47f); }
+.k-sact.err { border-left-color: var(--k-err, #e5675a); }
+.k-sact.idle { border-left-color: var(--k-text-3, #777); }
+.k-sact-head { display: flex; align-items: center; gap: 10px; min-width: 0; font-size: 16.5px; color: var(--k-text-0); }
+.k-sact-head .k-cones-s, .k-sact-cell .k-cones-s { transform: scale(.42); transform-origin: left center; width: 30px; flex: none; }
+.k-sact-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.k-sact-time { font-family: var(--k-font-mono); font-stretch: 90%; font-size: 14px; color: var(--k-text-2); }
+.k-sact-mark { display: inline-flex; align-items: center; justify-content: center; width: 30px; flex: none; }
+.k-sact-step .k-sact-mark { width: 18px; }
+.k-sact-mark svg { width: 16px; height: 16px; }
+.k-sact-mark.ok { color: var(--k-ok, #7bc47f); }
+.k-sact-mark.err { color: var(--k-err, #e5675a); }
+.k-sact-mark.idle { color: var(--k-text-3, #777); }
+.k-sact-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 15px; color: var(--k-text-2); }
+.k-sact-step { display: inline-flex; align-items: center; gap: 4px; }
+.k-sact-step.running { color: var(--k-text-0); }
+.k-sact-step.done { color: var(--k-text-1); }
+.k-sact-step.failed { color: var(--k-err, #e5675a); }
+.k-sact-step.skipped, .k-sact-step.pending { opacity: .7; }
+.k-sact-step-time { font-family: var(--k-font-mono); font-size: 13.5px; color: var(--k-text-2); }
+.k-sact-line { font-family: var(--k-font-mono); font-stretch: 90%; font-size: 14px; color: var(--k-text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.k-sact-result { font-size: 15.5px; color: var(--k-text-1); }
+.k-sact-error p { margin: 0 0 8px; font-size: 15.5px; color: var(--k-text-0); white-space: pre-wrap; overflow-wrap: anywhere; }
+.k-sact-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.k-sact-more { align-self: flex-start; display: inline-flex; align-items: center; gap: 4px; font-size: 14.5px; }
+.k-sact-more svg { width: 14px; height: 14px; }
+.k-sact-lines { list-style: none; margin: 0; padding: 8px 10px; max-height: 220px; overflow: auto; border-radius: var(--k-radius-s); background: var(--k-bg-1);
+  font-family: var(--k-font-mono); font-stretch: 90%; font-size: 13.5px; color: var(--k-text-1); }
+.k-sact-lines li { display: flex; gap: 10px; min-width: 0; }
+.k-sact-lines li > span:last-child { overflow-wrap: anywhere; }
+.k-sact-at { flex: none; width: 44px; text-align: right; color: var(--k-text-3, #777); }
+.k-sact-of { flex: none; color: var(--k-text-2); }
+.k-sact-plan { margin: 0; padding-left: 22px; font-size: 15px; color: var(--k-text-1); }
+.k-sact-cell { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; font-size: 15px; }

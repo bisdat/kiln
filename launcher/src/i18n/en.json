@@ -2342,6 +2342,50 @@
       "from": "{description} From {owner}.",
       "noDescription": "No description.",
       "needs": "Needs {node} {permission}"
+    },
+    "activity": {
+      "done": "Done",
+      "failed": "Failed",
+      "canceled": "Canceled",
+      "timeTitle": "Time taken",
+      "dismiss": "Dismiss",
+      "step": {
+        "pending": "waiting",
+        "running": "running",
+        "done": "done",
+        "failed": "failed",
+        "canceled": "canceled",
+        "skipped": "skipped"
+      },
+      "waiting": "Waiting for the first line from the server…",
+      "noReason": "It stopped without saying why. The console may show more.",
+      "tryAgain": "Try again",
+      "console": "Open the console",
+      "hideDetails": "Hide details",
+      "showDetails": {
+        "one": "Show details ({count} line)",
+        "other": "Show details ({count} lines)"
+      },
+      "startTitle": "Starting {name}",
+      "stopTitle": "Stopping {name}",
+      "restartTitle": "Restarting {name}",
+      "updateGameTitle": "Updating {name}'s game files",
+      "deployTitle": "Installing Kiln {version} on {name}",
+      "updateKilnTitle": "Updating {name} to Kiln {version}",
+      "stepStop": "Stop the server",
+      "stepStart": "Start the server",
+      "stepStartAgain": "Start it again",
+      "stepRestart": "Restart the server",
+      "stepUpdateGame": "Update the game files (SteamCMD)",
+      "stepDeploy": "Install Kiln {version}",
+      "stoppingButton": "Stopping…",
+      "installedNow": "Installed now: Kiln {version}.",
+      "notInstalled": "Kiln is not installed on this server yet.",
+      "bundleHint": "The Kiln version to install.",
+      "runningNote": "The server is running: it is stopped (the world is saved), Kiln is installed, then it starts again.",
+      "startAfter": "Start the server afterwards",
+      "planLabel": "What happens",
+      "installStopsFirst": "The server is running: installing stops it first and starts it again afterwards."
     }
   },
   "play": {
