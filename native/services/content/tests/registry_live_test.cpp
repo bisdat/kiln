@@ -15,6 +15,7 @@
 #include <string>
 #include "../content.h"
 #include "../registry/formulas.h"
+#include "../registry/report.h"
 #include "../registry/schema_ir.h"
 #include "../registry_live.h"
 #include "../store.cpp"
@@ -200,6 +201,7 @@ void world() {
     add_field(I.schema, rar);
     add_field(I.schema, fld("damageSetup.dmgMod", 0x08, 4, KILN_CV_FLOAT));
     add_field(I.schema, fld("damageSetup.speedMod", 0x0C, 4, KILN_CV_FLOAT));
+    add_field(I.schema, fld("armorSetup.distribution.physical", 0x90, 4, KILN_CV_FLOAT));
     add_field(I.schema, fld("itemLevelRange.minLevel", 0x10, 4, KILN_CV_INT));
     add_field(I.schema, fld("itemLevelRange.maxLevel", 0x14, 4, KILN_CV_INT));
     for (int i = 0; i < 5; ++i) {
@@ -222,6 +224,7 @@ void world() {
     mem<uint32_t>(0x40000, 1), mem<uint32_t>(0x40004, 5);
     mem<uint32_t>(STONE_AT, 50);
     mem<float>(SWORD_AT + 0x08, 1.0f), mem<float>(SWORD_AT + 0x0C, 1.0f), mem<uint32_t>(SWORD_AT + 0x10, 10), mem<uint32_t>(SWORD_AT + 0x14, 15);
+    mem<float>(SWORD_AT + 0x90, 1.0f);
     Registry& R = g_regs[KILN_CONTENT_RECIPES];
     R.kind = KILN_CONTENT_RECIPES, R.label = "recipes", R.available = true;
     add_field(R.schema, fld("craftingDuration", 0x00, 8, KILN_CV_TIME));
@@ -262,6 +265,8 @@ registry::BaseModel base() {
     double power = 0;
     registry::formulas::read("gear.power", {1.0, 1.0, 10}, registry::formulas::constants_of({}), &power);
     s.fields["power"] = registry::Value::integer(std::llround(power));
+    s.fields["armor.physical"] = registry::Value::integer(
+        registry::formulas::armor_read(1, 10, registry::formulas::constants_of({})));
     s.fields["maxStack"] = registry::Value::integer(1);
     s.fields["manaCost"] = registry::Value::number(10);
     items.push_back(s);
@@ -332,7 +337,7 @@ void stage(const std::vector<PackFile>& files) {
                {"recipes|game:plank_recipe", PLANK}, {"drops|game:dt_wolf", 0x444},
                {"loot|game:material_t1_wood_logs", WOOD}, {"perks|game:perk_a", 0x901}, {"perks|game:perk_b", 0x902}};
     in.decoded = {"items.perks", "items.manaCost", "items.staminaCost", "recipes.unlock", "loot.stack.max", "items.maxStack", "items.rarity", "items.power", "recipes.duration", "recipes.inputs", "recipes.outputs", "drops.entries"};
-    in.report = [](const registry::Result& r) {
+    in.report = [](const registry::Result& r, bool) {
         g_last_report = r;
         ++g_reports;
     };
@@ -350,6 +355,121 @@ void put_pack(size_t off, uint32_t v) {
     std::memcpy(b, &v, 4);
     set_owner_label(PACK, "pack oldstacks");
     store_put(PACK, kPackSeq, KILN_CONTENT_ITEMS, WOOD, 0, -1, A(off), 4, b, "oldstacks: content/a.json");
+}
+
+registry::json json_field(const registry::FieldRef& ref) {
+    const auto doc = registry::report_json(registry_schema(), g_last_report, {});
+    for (const auto& row : doc.at("fields"))
+        if (row.at("registry") == ref.registry && row.at("id") == ref.id && row.at("field") == ref.field) return row;
+    throw std::runtime_error("missing report row for " + ref.text());
+}
+
+bool conflict(const registry::FieldRef& ref, registry::LineKind kind, const std::string& pack) {
+    return std::any_of(g_last_report.lines.begin(), g_last_report.lines.end(), [&](const registry::Line& line) {
+        return line.field == ref && line.kind == kind && line.winner == "m" && line.loser == pack;
+    });
+}
+
+void live_recipe_report() {
+    world();
+    g_files = {{"m/content/a.json", R"({"registry": {"alter": [
+        {"registry": "recipes", "select": {"id": "game:plank_recipe"}, "field": "inputs[0].count", "op": {"add": 1}},
+        {"registry": "recipes", "select": {"id": "game:plank_recipe"}, "field": "outputs", "list": {"replace": [{"item": "game:sword_t2", "count": 3}]}}
+    ]}})"}};
+    const auto files = files_of({{"m", "m/content/a.json"}});
+    stage(files);
+    const Entry& recipe = *reg(KILN_CONTENT_RECIPES).get(PLANK);
+    const std::string source = "oldrecipes: content/a.json";
+    set_owner_label(PACK, "pack oldrecipes");
+    auto pack_lists = [&](uint32_t count) {
+        std::string why;
+        KilnContentStack input{}, output{};
+        input.item = WOOD, input.count = count;
+        output.item = SWORD, output.count = 7;
+        check(set_recipe_stacks(PACK, kPackSeq, recipe, KILN_CONTENT_INPUTS, {input}, source, &why) == KILN_OK, "old recipe inputs: " + why);
+        check(set_recipe_stacks(PACK, kPackSeq, recipe, KILN_CONTENT_OUTPUTS, {output}, source, &why) == KILN_OK, "old recipe outputs: " + why);
+    };
+    const registry::FieldRef inputs{"recipes", "game:plank_recipe", "inputs"}, outputs{"recipes", "game:plank_recipe", "outputs"};
+    pack_lists(5);
+    apply_registry_files(files);
+    auto row = json_field(inputs);
+    check(row["result"].at(0)["count"] == 6, "recipe input report uses the old pack's live count");
+    check(row["writers"].size() == 2 && row["writers"][0]["kind"] == "oldPack" &&
+              row["writers"][0]["who"] == source && row["writers"][0]["list"]["replace"][0]["count"] == 5 &&
+              row["writers"][1]["value"][0]["count"] == 6, "recipe input writers use the live list");
+    check(conflict(inputs, registry::LineKind::ComposedOn, source), "recipe input composedOn names the old pack");
+    row = json_field(outputs);
+    check(row["result"][0]["count"] == 3 && row["writers"][0]["value"][0]["count"] == 7, "recipe output replacement shows both lists");
+    check(conflict(outputs, registry::LineKind::Overridden, source), "recipe output overridden names the old pack");
+    store_drop_owner(PACK);
+    pack_lists(9);
+    apply_registry_files(files);
+    check(json_field(inputs)["result"][0]["count"] == 10, "recipe input report follows an old pack reload");
+    KilnContentStack code{};
+    code.item = WOOD, code.count = 12;
+    std::string why;
+    check(set_recipe_stacks(CODE, next_code_seq(), recipe, KILN_CONTENT_INPUTS, {code}, "code recipe", &why) == KILN_OK,
+          "code recipe input writer: " + why);
+    apply_registry_files(files);
+    row = json_field(inputs);
+    check(row["result"][0]["count"] == 12 && row["winner"] == "code recipe" && row["writers"].back()["kind"] == "code" &&
+              row["writers"][1]["value"][0]["count"] == 10, "code above the registry wins and both live list values are shown");
+    check(!row.contains("resultEntriesLeftOut"), "a short result list has no omission count");
+}
+
+void live_formula_report() {
+    world();
+    g_files = {{"m/content/a.json", R"({"registry": {"alter": [
+        {"registry": "items", "select": {"id": "game:sword_t2"}, "field": "power", "op": {"mul": 2}},
+        {"registry": "items", "select": {"id": "game:sword_t2"}, "field": "armor.physical", "op": {"add": 4}}
+    ]}})"}};
+    const auto files = files_of({{"m", "m/content/a.json"}});
+    stage(files);
+    const std::string source = "oldgear: content/a.json";
+    set_owner_label(PACK, "pack oldgear");
+    const uint32_t level = 20;
+    store_put(PACK, kPackSeq, KILN_CONTENT_ITEMS, SWORD, -1, -1, A(SWORD_AT + 0x10), 4,
+              reinterpret_cast<const uint8_t*>(&level), source);
+    apply_registry_files(files);
+    const auto c = registry::formulas::constants_of({});
+    for (const auto& field : {"power", "armor.physical"}) {
+        const bool power = std::string(field) == "power";
+        const registry::FieldRef ref{"items", "game:sword_t2", field};
+        const auto row = json_field(ref);
+        const int below = power ? registry::formulas::power_read(1, 1, level, c) : registry::formulas::armor_read(1, level, c);
+        const int expected = power ? below * 2 : below + 4;
+        check(row["result"] == expected, std::string(field) + " report uses the live formula result");
+        const registry::json inputs = power ? registry::json::array({at<float>(SWORD_AT + 8), 1, level})
+                                            : registry::json::array({at<float>(SWORD_AT + 0x90), level});
+        check(row["formulaInputs"] == inputs, std::string(field) + " report includes the effective inputs");
+        check(row["writers"].size() == 2 && row["writers"][0]["who"] == source && row["writers"][0]["value"] == below &&
+                  row["writers"][1]["value"] == expected, std::string(field) + " writers use live formula values");
+        check(conflict(ref, registry::LineKind::ComposedOn, source), std::string(field) + " composedOn names the old pack");
+    }
+}
+
+void report_caps_lists() {
+    registry::Result result;
+    auto& field = result.fields[{"drops", "game:dt_wolf", "entries"}];
+    std::vector<registry::Value> entries;
+    for (int i = 0; i < 70; ++i) entries.push_back(registry::Value::integer(i));
+    field.base = field.result = registry::Value::of_list(entries);
+    auto& writer = field.chain.emplace_back();
+    writer.after = field.result;
+    writer.list = registry::ListOp::Replace;
+    writer.list_values = entries;
+    auto& set_writer = field.chain.emplace_back();
+    set_writer.after = field.result;
+    set_writer.op.set = true;
+    set_writer.op.value = field.result;
+    const auto doc = registry::report_json(registry_schema(), result, {});
+    const auto& row = doc["fields"][0];
+    check(row["result"].size() == 64 && row["result"][63] == 63 && row["resultEntriesLeftOut"] == 6,
+          "long result list keeps its first 64 entries and counts the rest");
+    check(row["base"]["value"].size() == 64 && row["base"]["entriesLeftOut"] == 6, "long base list is capped");
+    check(row["writers"][0]["value"].size() == 64 && row["writers"][0]["valueEntriesLeftOut"] == 6, "long writer value is capped");
+    check(row["writers"][0]["list"]["replace"].size() == 64 && row["writers"][0]["listEntriesLeftOut"] == 6, "long list operand is capped");
+    check(row["writers"][1]["op"].size() == 64 && row["writers"][1]["opEntriesLeftOut"] == 6, "long list passed to op is capped");
 }
 
 // a relative registry edit over the game's value, over a pack's value, re-evaluated when the pack is applied again
@@ -446,6 +566,11 @@ void perks_costs_unlock_loot() {
     ]}})"}};
     const auto files = files_of({{"m", "m/content/a.json"}});
     stage(files);
+    const std::string source = "oldperks: content/a.json";
+    set_owner_label(PACK, "pack oldperks");
+    const uint8_t empty[16] = {};
+    store_put(PACK, kPackSeq, KILN_CONTENT_ITEMS, WOOD, -1, -1, A(WOOD_AT + 0x30), 16, empty, source);
+    store_put(PACK, kPackSeq, KILN_CONTENT_ITEMS, WOOD, -1, -1, A(WOOD_AT + 0x40), 16, P1, source);
     apply_registry_files(files);
     for (const auto& r : g_last_report.refused) std::fprintf(stderr, "  refused: %s\n", r.reason.c_str());
     check(std::memcmp(g_arena + WOOD_AT + 0x30, P1, 16) == 0 && at<uint32_t>(WOOD_AT + 0x80) == 0x901, "perk slot 0 kept");
@@ -455,6 +580,12 @@ void perks_costs_unlock_loot() {
     check(reported("items[game:material_t1_wood_logs].staminaCost: the item has no such configuration"), "staminaCost on an item without the config: refused, loud");
     check(at<uint32_t>(PLANK_AT + 0x50) == 0 && at<uint32_t>(PLANK_AT + 0x58) == 0, "unlock always: the knowledge requirement cleared");
     check(at<uint32_t>(0x40004) == 10, "loot stack.max x2: 10");
+    const registry::FieldRef perks{"items", "game:material_t1_wood_logs", "perks"};
+    const auto row = json_field(perks);
+    check(row["result"] == registry::json::array({"game:perk_a", "game:perk_b"}) &&
+              row["writers"].size() == 2 && row["writers"][0]["who"] == source &&
+              row["writers"][0]["value"] == registry::json::array({"game:perk_a"}), "perk reference slots report one writer and one list");
+    store_drop_owner(PACK);
     // back to the game's: the section removed on a reload
     g_files["m/content/a.json"] = R"({"registry": {"alter": [{"registry": "recipes", "select": {"id": "game:plank_recipe"}, "field": "unlock", "op": "game"}]}})";
     apply_registry_files(files);
@@ -524,6 +655,7 @@ void another_writer_in_the_report() {
     apply_registry_files(files);   // a pack reload
     check(at<uint32_t>(WOOD_AT) == 777, "the other writer's value stays");
     check(reported("was written by another writer after Kiln's layer: Kiln's edit not applied"), "and registry.json says so");
+    check(json_field({"items", "game:material_t1_wood_logs", "maxStack"})["result"] == 777, "the report shows the other writer's effective value");
 }
 }  // namespace
 
@@ -536,6 +668,9 @@ int main() {
     }
     const std::pair<const char*, void (*)()> tests[] = {
         {"relative_over_packs_and_reload", relative_over_packs_and_reload},
+        {"live_recipe_report", live_recipe_report},
+        {"live_formula_report", live_formula_report},
+        {"report_caps_lists", report_caps_lists},
         {"every_live_kind", every_live_kind},
         {"perks_costs_unlock_loot", perks_costs_unlock_loot},
         {"refusals_and_restart_fields", refusals_and_restart_fields},

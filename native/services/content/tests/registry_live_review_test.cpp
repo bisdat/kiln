@@ -165,6 +165,7 @@ void add_entry(Registry& r, uint32_t id, const char* name, size_t at_off, const 
 std::shared_ptr<registry::map::RegMap> g_regmap;
 registry::Result g_last_report;
 int g_reports = 0;
+bool g_report_application = false;
 
 void world() {
     std::string e;
@@ -325,8 +326,9 @@ void stage(const std::vector<PackFile>& files) {
                {"recipes|game:plank_recipe", PLANK}, {"drops|game:dt_wolf", 0x444},
                {"loot|game:material_t1_wood_logs", WOOD}, {"perks|game:perk_a", 0x901}, {"perks|game:perk_b", 0x902}};
     in.decoded = {"items.perks", "items.manaCost", "items.staminaCost", "recipes.unlock", "loot.stack.max", "items.maxStack", "items.rarity", "items.power", "recipes.duration", "recipes.inputs", "recipes.outputs", "drops.entries"};
-    in.report = [](const registry::Result& r) {
+    in.report = [](const registry::Result& r, bool application) {
         g_last_report = r;
+        g_report_application = application;
         ++g_reports;
     };
     registry_live_install(std::move(in));
@@ -390,10 +392,34 @@ void drop_table_without_old_rules() {
     const auto files = files_of({{"m", "m/content/a.json"}});
     stage(files);
     apply_registry_files(files);
+    check(g_report_application, "the world load publishes a new application");
     check(at<uint32_t>(0x31018) == 3, "no table yet");
     add_drop_table();
-    note_table_as_content_cpp(g_regs[KILN_CONTENT_DROPS].entries.back());
-    check(at<uint32_t>(0x31018) == 6, "count.max x2 once the table is acquired (now " + std::to_string(at<uint32_t>(0x31018)) + ")");
+    const auto& table = g_regs[KILN_CONTENT_DROPS].entries.back();
+    const std::string source = "olddrops: content/a.json";
+    const uint32_t counts[] = {4, 7};
+    set_owner_label(PACK, "pack olddrops");
+    for (int i = 0; i < 2; ++i)
+        store_put(PACK, kPackSeq, KILN_CONTENT_DROPS, table.id, 1, i, A(0x31018 + 0x40 * i), 4,
+                  reinterpret_cast<const uint8_t*>(&counts[i]), source);
+    note_table_as_content_cpp(table);
+    check(at<uint32_t>(0x31018) == 8 && at<uint32_t>(0x31058) == 14, "count.max x2 over the old layers once acquired");
+    const int reports = g_reports;
+    registry_live_publish();
+    check(g_reports == reports + 1, "the acquired table refreshes the published report");
+    check(!g_report_application, "the drop-table refresh keeps the world-load application");
+    const registry::FieldRef ref{"drops", "game:dt_wolf", "entries"};
+    const auto& outcome = g_last_report.fields.at(ref);
+    check(outcome.result.list[0].leaf("count.max")->as_double() == 8 && outcome.result.list[1].leaf("count.max")->as_double() == 14,
+          "the live drop result contains both updated stacks");
+    check(outcome.chain.size() == 2 && outcome.chain[0].kind == registry::WriterKind::OldPack && outcome.chain[0].who == source &&
+              outcome.chain[0].after.list[0].leaf("count.max")->as_double() == 4 && outcome.chain[0].after.list[1].leaf("count.max")->as_double() == 7,
+          "one old writer row captures both stack writes");
+    check(std::any_of(g_last_report.lines.begin(), g_last_report.lines.end(), [&](const registry::Line& line) {
+        return line.field == ref && line.kind == registry::LineKind::ComposedOn && line.loser == source && line.winner == "m";
+    }), "the drop-list composedOn line names the old pack");
+    registry_live_publish();
+    check(g_reports == reports + 1, "the next publish has no duplicate report");
 }
 
 // L1b: newcontent repoints the table's stacks when the table loads: the registry's layers follow them to the new stacks.
@@ -485,7 +511,7 @@ void report_written_outside_the_store_lock() {
     bool free = false, called = false;
     {
         std::lock_guard lock(store_mutex());
-        g.in->report = [&](const registry::Result&) {
+        g.in->report = [&](const registry::Result&, bool) {
             called = true;
             std::thread t([&] {
                 free = store_mutex().try_lock();

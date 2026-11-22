@@ -3,10 +3,12 @@
 #include "registry_live.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <optional>
+#include <tuple>
 #include <unordered_map>
 
 #include "registry/formulas.h"
@@ -22,6 +24,17 @@ using registry::FieldSpec;
 using registry::FieldType;
 using registry::Value;
 namespace rmap = registry::map;
+
+using SlotBytes = std::array<uint8_t, kSlotBytes>;
+struct LiveSlot {
+    uintptr_t addr;
+    uint8_t size;
+};
+struct LiveField {
+    FieldSpec spec;
+    std::vector<LiveSlot> slots;
+    std::function<std::optional<Value>(const std::vector<SlotBytes>&, std::vector<double>*)> decode;
+};
 
 struct LiveState {
     std::shared_ptr<RegistryLive> in;
@@ -41,15 +54,8 @@ struct LiveState {
     // newcontent repoints (selector stacks copied to near memory) is bound again over the stacks the game reads now
     std::map<std::string, std::vector<registry::FieldRef>> table_fields;
     std::map<std::string, std::vector<uintptr_t>> table_addrs;
-    // scalar fields put this application: registry.json at world load shows the packs and code around them and the live result
-    struct Scalar {
-        registry::FieldRef ref;
-        uintptr_t addr = 0;
-        Field f;
-        std::optional<registry::map::Row> row;
-        registry::FieldSpec spec;
-    };
-    std::vector<Scalar> scalars;
+    std::map<registry::FieldRef, LiveField> fields;  // bound world fields and their report readers
+    bool tables_changed = false;
     registry::Result pending;  // the last application's report, waiting for registry_live_publish
     bool pending_set = false;
     size_t skipped_logged = 0;  // store_skipped rows already in kiln.log
@@ -214,6 +220,13 @@ bool put_at(const std::shared_ptr<Binding>& b, uint32_t kind, uint32_t id, int32
 
 int32_t index_of(uint32_t kind, const Field* f) { return static_cast<int32_t>(f - reg(kind).schema.fields.data()); }
 
+void track_scalar(const std::shared_ptr<Binding>& b, uintptr_t addr, const Field& f) {
+    g.fields.insert_or_assign(b->ref, LiveField{b->spec, {{addr, f.bytes}},
+        [b, f](const std::vector<SlotBytes>& bytes, std::vector<double>*) {
+            return to_kiln(f, b->row ? &*b->row : nullptr, b->spec, bytes[0].data());
+        }});
+}
+
 // ---- scalars: int, float, bool, time, enum; raw members ----
 void bind_scalar(const std::shared_ptr<Binding>& b, const Field* f) {
     const Field fc = *f;
@@ -224,7 +237,7 @@ void bind_scalar(const std::shared_ptr<Binding>& b, const Field* f) {
         return true;
     };
     if (!put(b, index_of(b->kind, f), -1, b->entry.addr + f->offset, f->bytes, std::move(ev))) fail(b, "the field is not readable");
-    else g.scalars.push_back({b->ref, b->entry.addr + f->offset, *f, b->row, b->spec});
+    else track_scalar(b, b->entry.addr + f->offset, *f);
 }
 
 // ---- formulas: power, armor ----
@@ -252,7 +265,19 @@ void bind_formula(const std::shared_ptr<Binding>& b, const std::vector<const Fie
         if (!encode(fs[0], kv, out, why)) return fail(b, *why);
         return true;
     };
-    if (!put(b, index_of(b->kind, inputs[0]), -1, base + inputs[0]->offset, inputs[0]->bytes, std::move(ev))) fail(b, "the field is not readable");
+    if (!put(b, index_of(b->kind, inputs[0]), -1, base + fs[0].offset, fs[0].bytes, std::move(ev)))
+        return (void)fail(b, "the field is not readable");
+    std::vector<LiveSlot> slots;
+    for (const Field& f : fs) slots.push_back({base + f.offset, f.bytes});
+    g.fields.insert_or_assign(b->ref, LiveField{b->spec, std::move(slots),
+        [fs, formula = b->row->formula, c = constants()](const std::vector<SlotBytes>& bytes, std::vector<double>* effective) -> std::optional<Value> {
+            std::vector<double> in;
+            for (size_t i = 0; i < fs.size(); ++i) in.push_back(as_double(decode(fs[i], bytes[i].data())));
+            double result = 0;
+            if (!registry::formulas::read(formula, in, c, &result)) return std::nullopt;
+            if (effective) *effective = std::move(in);
+            return Value::integer(std::llround(result));
+        }});
 }
 
 // ---- recipe lists: inputs, outputs ----
@@ -368,7 +393,14 @@ void bind_recipe_list(const std::shared_ptr<Binding>& b, uint32_t which) {
         std::memcpy(cache->hb, out, 8);
         return true;
     };
-    if (!put(b, -1, static_cast<int32_t>(which), header, 8, std::move(ev))) fail(b, "the recipe is not readable");
+    if (!put(b, -1, static_cast<int32_t>(which), header, 8, std::move(ev)))
+        return (void)fail(b, "the recipe is not readable");
+    g.fields.insert_or_assign(b->ref, LiveField{b->spec, {{header, 8}},
+        [header, which](const std::vector<SlotBytes>& bytes, std::vector<double>*) -> std::optional<Value> {
+            std::vector<KilnContentStack> stacks;
+            if (!read_list(header, bytes[0].data(), which, &stacks)) return std::nullopt;
+            return list_value(stacks, which == KILN_CONTENT_INPUTS);
+        }});
 }
 
 // ---- drop tables: the leaves of each stack (entries[i].count.min, ...); a table keeps its stacks ----
@@ -377,6 +409,23 @@ struct DropLeaf {
     const char* field;  // kiln.content's drops field
 };
 constexpr DropLeaf kDropLeaves[] = {{"chance", "spawnProbability"}, {"count.max", "countMax"}, {"count.min", "countMin"}, {"weight", "weight"}};
+
+template <class ReadLeaf>
+Value drop_value(const std::vector<DropStackRef>& refs, const std::vector<Field>& fields, ReadLeaf read_leaf) {
+    std::vector<Value> list;
+    for (size_t i = 0; i < refs.size(); ++i) {
+        uint32_t item = 0;
+        rdv(refs[i].addr + DL.s_item, item);
+        std::vector<std::pair<std::string, Value>> entry{{"item", id_value("items", item)}};
+        for (size_t k = 0; k < fields.size(); ++k) {
+            const Field& f = fields[k];
+            const KilnContentValue cv = decode(f, read_leaf(i, k).data());
+            entry.emplace_back(kDropLeaves[k].leaf, f.vt == KILN_CV_FLOAT ? Value::number(cv.f) : Value::integer(cv.i));
+        }
+        list.push_back(make_struct(std::move(entry)));
+    }
+    return Value::of_list(std::move(list));
+}
 
 void bind_drops(const std::shared_ptr<Binding>& b) {
     const Schema& sc = reg(KILN_CONTENT_DROPS).schema;
@@ -392,21 +441,12 @@ void bind_drops(const std::shared_ptr<Binding>& b) {
     for (const Field* f : fields) fs.push_back(*f);
     // the whole list's value, the slot being evaluated taken from its own value below
     auto list_at = [refs, fs](size_t mine_stack, size_t mine_leaf, const uint8_t* below) {
-        std::vector<Value> l;
-        for (size_t j = 0; j < refs.size(); ++j) {
-            uint32_t item = 0;
-            rdv(refs[j].addr + DL.s_item, item);
-            std::vector<std::pair<std::string, Value>> kv{{"item", id_value("items", item)}};
-            for (size_t k = 0; k < fs.size(); ++k) {
-                uint8_t x[kSlotBytes] = {};
-                if (j == mine_stack && k == mine_leaf) std::memcpy(x, below, fs[k].bytes);
-                else store_below_registry(refs[j].addr + fs[k].offset, fs[k].bytes, x);  // every leaf over the same list below
-                const KilnContentValue cv = decode(fs[k], x);
-                kv.emplace_back(kDropLeaves[k].leaf, fs[k].vt == KILN_CV_FLOAT ? Value::number(cv.f) : Value::integer(cv.i));
-            }
-            l.push_back(make_struct(std::move(kv)));
-        }
-        return Value::of_list(std::move(l));
+        return drop_value(refs, fs, [&](size_t j, size_t k) {
+            SlotBytes bytes{};
+            if (j == mine_stack && k == mine_leaf) std::memcpy(bytes.data(), below, fs[k].bytes);
+            else store_below_registry(refs[j].addr + fs[k].offset, fs[k].bytes, bytes.data());
+            return bytes;
+        });
     };
     const registry::RegistrySpec* drops = g.in->schema->registry("drops");
     for (size_t i = 0; i < refs.size(); ++i)
@@ -437,6 +477,13 @@ void bind_drops(const std::shared_ptr<Binding>& b) {
     const std::string tg = lower(guid_text(b->entry.guid));
     auto& tf = g.table_fields[tg];
     if (std::find(tf.begin(), tf.end(), b->ref) == tf.end()) tf.push_back(b->ref);
+    std::vector<LiveSlot> slots;
+    for (const DropStackRef& ref : refs)
+        for (const Field& f : fs) slots.push_back({ref.addr + f.offset, f.bytes});
+    g.fields.insert_or_assign(b->ref, LiveField{b->spec, std::move(slots),
+        [refs, fs](const std::vector<SlotBytes>& bytes, std::vector<double>*) {
+            return drop_value(refs, fs, [&](size_t i, size_t k) -> const SlotBytes& { return bytes[i * fs.size() + k]; });
+        }});
 }
 
 // ---- perks (refList): five slots of a reference and an id, kept in step ----
@@ -510,6 +557,15 @@ void bind_perks(const std::shared_ptr<Binding>& b) {
         put(b, index_of(KILN_CONTENT_ITEMS, sc.find(refs[i].path)), -1, base + refs[i].offset, 16, std::move(ref_ev));
         put(b, index_of(KILN_CONTENT_ITEMS, sc.find(ids[i].path)), -1, base + ids[i].offset, 4, std::move(id_ev));
     }
+    std::vector<LiveSlot> slots;
+    for (const Field& f : refs) slots.push_back({base + f.offset, f.bytes});
+    g.fields.insert_or_assign(b->ref, LiveField{b->spec, std::move(slots),
+        [](const std::vector<SlotBytes>& bytes, std::vector<double>*) {
+            std::vector<Value> list;
+            for (const SlotBytes& ref : bytes)
+                if (!zero_bytes(ref.data(), 16)) list.push_back(perk_value(ref.data()));
+            return Value::of_list(std::move(list));
+        }});
 }
 
 // ---- impactConfig (staminaCost, manaCost): kiln.gamedata's item config value, its tooltip row following ----
@@ -530,7 +586,7 @@ void bind_impact(const std::shared_ptr<Binding>& b, const std::string& path) {
         return true;
     };
     if (!put_at(b, s.kind, s.id, s.field, -1, s.addr, vf.bytes, std::move(ev))) return (void)fail(b, "the config value is not readable");
-    g.scalars.push_back({b->ref, s.addr, vf, std::nullopt, b->spec});
+    track_scalar(b, s.addr, vf);
     if (!s.tip) return;
     const uintptr_t at = s.addr;
     const uint8_t format = s.tip_format;
@@ -639,12 +695,14 @@ void put_all() {
     store_drop_owner(registry_owner());
     g.pending_tables.clear();
     g.table_fields.clear(), g.table_addrs.clear();
-    g.scalars.clear();
+    g.fields.clear();
     g.ordinal = 0;
     for (const auto& [fr, fo] : g.in->result.fields) bind(fr, fo);
 }
 
-bool absolute_row(const ChainRow& r) { return !r.element.on && (r.list == registry::ListOp::None ? r.op.set : r.list == registry::ListOp::Clear || r.list == registry::ListOp::Replace); }
+bool absolute_row(const ChainRow& r) {
+    return r.list == registry::ListOp::None ? r.op.set : r.list == registry::ListOp::Clear || r.list == registry::ListOp::Replace;
+}
 
 std::string layer_mod_of(const Layer& l) {
     if (!l.mod.empty()) return l.mod;
@@ -654,70 +712,124 @@ std::string layer_mod_of(const Layer& l) {
     return {};
 }
 
-// A scalar field's row as the world has it: the old packs below the registry and code above it (store layers), the
-// registry's rows evaluated over the pack's value, the live result, and a conflict line where another mod's pack lies below.
-void live_row(registry::Result& r, const LiveState::Scalar& sc) {
-    auto it = r.fields.find(sc.ref);
-    Slot s;
-    if (it == r.fields.end() || !store_slot_copy(sc.addr, &s)) return;
-    registry::FieldOutcome& fo = it->second;
-    const rmap::Row* row = sc.row ? &*sc.row : nullptr;
-    auto layer_row = [&](const Layer& l, registry::WriterKind kind) {
-        ChainRow c;
-        c.kind = kind, c.mod = layer_mod_of(l), c.who = l.source;
-        c.op.set = true, c.op.value = to_kiln(sc.f, row, sc.spec, l.bytes), c.after = c.op.value;
-        return c;
+// Replay the store's writes as whole field values. A pack or code call can write several slots
+// of the same list or formula, so apply all its slots before decoding that writer's row.
+void live_row(registry::Result& r, const registry::FieldRef& ref, const LiveField& field) {
+    std::vector<SlotBytes> bytes(field.slots.size()), effective(field.slots.size());
+    struct Write {
+        size_t slot;
+        SlotBytes bytes;
     };
-    std::vector<ChainRow> below, above;
-    for (const Layer& l : s.layers) {
-        if (s.foreign && is_registry_seq(l.seq)) continue;
-        if (l.seq < kRegistrySeq) below.push_back(layer_row(l, registry::WriterKind::OldPack));
-        else if (l.seq >= kCodeSeq) above.push_back(layer_row(l, registry::WriterKind::Code));
+    struct Writer {
+        ChainRow row;
+        std::vector<Write> writes;
+    };
+    std::map<std::tuple<uint64_t, KilnOwner, std::string>, Writer> writers;
+    std::vector<Write> applied;
+    bool blocked = false;
+    for (size_t i = 0; i < field.slots.size(); ++i) {
+        const auto [addr, size] = field.slots[i];
+        if (!rd(addr, effective[i].data(), size)) return;
+        Slot slot;
+        if (!store_slot_copy(addr, &slot) || slot.n != size) {
+            bytes[i] = effective[i];
+            continue;
+        }
+        std::memcpy(bytes[i].data(), slot.original, size);
+        for (const Layer& layer : slot.layers) {
+            Write write{i, {}};
+            std::memcpy(write.bytes.data(), layer.bytes, size);
+            if (is_registry_seq(layer.seq)) {
+                if (slot.foreign) blocked = true;
+                else applied.push_back(write);
+                continue;
+            }
+            auto [it, added] = writers.try_emplace({layer.seq, layer.owner, layer.source});
+            Writer& writer = it->second;
+            if (added) {
+                writer.row.kind = layer.seq < kRegistrySeq ? registry::WriterKind::OldPack : registry::WriterKind::Code;
+                writer.row.mod = layer_mod_of(layer);
+                writer.row.who = layer.source;
+            }
+            writer.writes.push_back(write);
+        }
     }
-    uint8_t under[kSlotBytes] = {}, eff[kSlotBytes] = {};
-    store_below_registry(sc.addr, sc.f.bytes, under);
-    store_effective(sc.addr, sc.f.bytes, eff);
-    const Value vb = to_kiln(sc.f, row, sc.spec, under), ve = to_kiln(sc.f, row, sc.spec, eff);
+    std::vector<double> formula_inputs;
+    auto result = field.decode(effective, &formula_inputs);
+    if (!result) return;
+    auto record = [&](Writer& writer) {
+        for (const Write& write : writer.writes) bytes[write.slot] = write.bytes;
+        auto value = field.decode(bytes, nullptr);
+        if (!value) return false;
+        ChainRow& row = writer.row;
+        row.after = std::move(*value);
+        if (row.after.kind == Value::List) {
+            row.list = registry::ListOp::Replace;
+            row.list_values = row.after.list;
+        } else {
+            row.op.set = true;
+            row.op.value = row.after;
+        }
+        return true;
+    };
+    registry::FieldOutcome& fo = r.fields.at(ref);
     std::vector<ChainRow> chain;
     for (const ChainRow& c : fo.chain)
         if (c.kind != registry::WriterKind::Registry && c.kind != registry::WriterKind::OldPack && c.kind != registry::WriterKind::Code) chain.push_back(c);
-    for (const ChainRow& c : below) chain.push_back(c);
-    Value v = vb;
-    bool first = false;
-    ChainRow first_reg;
-    for (const ChainRow& c : fo.chain)
-        if (c.kind == registry::WriterKind::Registry) {
-            ChainRow x = c;
-            v = registry::evaluate({x}, v, sc.spec);
-            x.after = v;
-            if (!first) first = true, first_reg = x;
-            chain.push_back(std::move(x));
-        }
-    for (ChainRow& c : above) chain.push_back(std::move(c));
-    fo.chain = std::move(chain);
-    fo.result = ve;
-    if (!above.empty()) fo.winner = fo.chain.back().who;
-    if (first && !below.empty()) {
-        const ChainRow& pack = below.back();
-        if (pack.mod != first_reg.mod && !(vb == fo.base)) {
-            registry::Line l;
-            l.field = sc.ref, l.winner = first_reg.mod, l.loser = pack.who;
-            const std::string place = sc.ref.text();
-            if (absolute_row(first_reg)) {
-                l.kind = registry::LineKind::Overridden;
-                l.text = place + ": " + first_reg.mod + " sets " + v.text_of() + " over " + pack.who + "'s " + vb.text_of() + " (the later one wins)";
-            } else {
-                l.kind = registry::LineKind::ComposedOn;
-                l.text = place + ": " + first_reg.mod + "'s change composed on " + pack.who + "'s value: " + vb.text_of() + " -> " + v.text_of();
-            }
-            r.lines.push_back(std::move(l));
+    auto next = writers.begin();
+    const ChainRow* pack = nullptr;
+    for (; next != writers.end() && next->second.row.kind == registry::WriterKind::OldPack; ++next) {
+        if (record(next->second)) {
+            pack = &next->second.row;
+            chain.push_back(*pack);
         }
     }
+    auto below = field.decode(bytes, nullptr);
+    const bool skipped = blocked && applied.empty();
+    const ChainRow* first_reg = nullptr;
+    if (!skipped && below) {
+        Value v = *below;
+        for (const ChainRow& c : fo.chain)
+            if (c.kind == registry::WriterKind::Registry) {
+                if (!first_reg) first_reg = &c;
+                v = registry::evaluate({c}, v, field.spec);
+                chain.push_back(c);
+                chain.back().after = v;
+            }
+        for (const Write& write : applied) bytes[write.slot] = write.bytes;
+        if (first_reg) {
+            if (auto after = field.decode(bytes, nullptr)) chain.back().after = std::move(*after);
+            if (pack && pack->mod != first_reg->mod && !(*below == fo.base)) {
+                const std::string place = ref.text(), was = registry::report_value_text(*below), now = registry::report_value_text(chain.back().after);
+                registry::Line line;
+                line.field = ref, line.winner = first_reg->mod, line.loser = pack->who;
+                if (absolute_row(*first_reg)) {
+                    line.kind = registry::LineKind::Overridden;
+                    line.text = place + ": " + first_reg->mod + " sets " + now + " over " + pack->who + "'s " + was + " (the later one wins)";
+                } else {
+                    line.kind = registry::LineKind::ComposedOn;
+                    line.text = place + ": " + first_reg->mod + "'s change composed on " + pack->who + "'s value: " + was + " -> " + now;
+                }
+                r.lines.push_back(std::move(line));
+            }
+        }
+    }
+    if (skipped) fo.winner = pack && below && *result == *below ? pack->who : "";
+    for (; next != writers.end(); ++next) {
+        if (record(next->second)) {
+            fo.winner = next->second.row.who;
+            chain.push_back(std::move(next->second.row));
+        }
+    }
+    fo.chain = std::move(chain);
+    fo.result = std::move(*result);
+    fo.formula_inputs = std::move(formula_inputs);
 }
 
 void report() {
+    g.tables_changed = false;
     registry::Result r = g.in->result;
-    for (const LiveState::Scalar& sc : g.scalars) live_row(r, sc);
+    for (const auto& [ref, field] : g.fields) live_row(r, ref, field);
     const size_t first = r.refused.size();
     for (const registry::Refusal& x : g.refused) r.refused.push_back(x);
     const size_t live_end = r.refused.size();
@@ -870,6 +982,7 @@ void registry_live_install(RegistryLive in) {
     g.applied = false;
     g.have_report = false;
     g.pending_set = false;
+    g.tables_changed = false;
     g.skipped_logged = 0;
 }
 
@@ -899,16 +1012,19 @@ void registry_live_apply(const std::vector<RegistrySection>& sections, const reg
 }
 
 void registry_live_publish() {
-    std::function<void(const registry::Result&)> fn;
+    decltype(RegistryLive::report) fn;
     registry::Result r;
+    bool application;
     {
         std::lock_guard lock(store_mutex());
+        application = g.pending_set;
+        if (g.tables_changed && g.have_report) report();
         if (!g.in || !g.pending_set) return;
         r = std::move(g.pending);
         g.pending_set = false;
         fn = g.in->report;
     }
-    if (fn) fn(r);  // registry.json: the stage runner writes it, with no lock of kiln.content's held
+    if (fn) fn(r, application);  // registry.json: the stage runner writes it, with no lock of kiln.content's held
 }
 
 void registry_live_table(const Entry& table) {
@@ -931,8 +1047,11 @@ void registry_live_table(const Entry& table) {
         for (uintptr_t a : it->second) store_drop(registry_owner(), a);
         g.table_addrs.erase(it);
     }
-    for (const registry::FieldRef& f : fields)
+    for (const registry::FieldRef& f : fields) {
+        g.fields.erase(f);
         if (auto it = g.in->result.fields.find(f); it != g.in->result.fields.end()) bind(f, it->second);
+    }
+    g.tables_changed |= !fields.empty();
 }
 
 void drops_table_loaded(const Entry& table) {

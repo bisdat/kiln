@@ -2,6 +2,7 @@
 // kiln.content registry stage: registry.json (report.h).
 #include "report.h"
 
+#include <algorithm>
 #include <set>
 
 namespace kc::registry {
@@ -10,18 +11,22 @@ namespace {
 
 const char* applies_name(Applies a) { return a == Applies::Now ? "now" : a == Applies::WorldLoad ? "worldLoad" : "restart"; }
 
-json list_op_json(const ChainRow& r) {
+json list_json(const std::vector<Value>& list, size_t cap) {
     json values = json::array();
-    for (const Value& v : r.list_values) values.push_back(v.to_json());
-    switch (r.list) {
-        case ListOp::Clear: return {{"clear", true}};
-        case ListOp::Append: return {{"append", values}};
-        case ListOp::Remove: return {{"remove", values}};
-        default: return {{"replace", values}};
+    for (size_t i = 0; i < std::min(list.size(), cap); ++i) values.push_back(list[i].to_json());
+    return values;
+}
+
+void write_value(json& row, const char* key, const Value& value, const char* omitted_key, size_t cap) {
+    if (value.kind == Value::List) {
+        row[key] = list_json(value.list, cap);
+        if (value.list.size() > cap) row[omitted_key] = value.list.size() - cap;
+    } else {
+        row[key] = value.to_json();
     }
 }
 
-json writer_json(const ChainRow& r) {
+json writer_json(const ChainRow& r, size_t list_cap) {
     json w = {{"kind", writer_kind_name(r.kind)}};
     if (!r.mod.empty()) w["mod"] = r.mod;
     if (r.who != r.mod) w["who"] = r.who;
@@ -35,9 +40,17 @@ json writer_json(const ChainRow& r) {
     if (r.element.on)
         w["element"] = r.element.list + "[" + (r.element.all ? std::string("*") : std::to_string(r.element.index)) + "]" +
                        (r.element.leaf.empty() ? "" : "." + r.element.leaf);
-    if (r.list == ListOp::None) w["op"] = r.op.to_json();
-    else w["list"] = list_op_json(r);
-    w["value"] = r.after.to_json();
+    if (r.list == ListOp::None) {
+        if (r.op.set) write_value(w, "op", r.op.value, "opEntriesLeftOut", list_cap);
+        else w["op"] = r.op.to_json();
+    } else if (r.list == ListOp::Clear) {
+        w["list"] = {{"clear", true}};
+    } else {
+        const char* op = r.list == ListOp::Append ? "append" : r.list == ListOp::Remove ? "remove" : "replace";
+        w["list"] = {{op, list_json(r.list_values, list_cap)}};
+        if (r.list_values.size() > list_cap) w["listEntriesLeftOut"] = r.list_values.size() - list_cap;
+    }
+    write_value(w, "value", r.after, "valueEntriesLeftOut", list_cap);
     w["certainty"] = r.kind == WriterKind::ArchiveWriter ? "named" : "certain";  // the check's own rows too: Kiln's
     return w;
 }
@@ -88,14 +101,16 @@ json report_json(const Schema& schema, const Result& r, const ReportMeta& meta, 
         if (is_raw_field(ref.field)) row["raw"] = true;
         row["applies"] = applies_name(spec ? spec->applies : Applies::Restart);
         const std::string origin = added.count({ref.registry, ref.id}) ? "added" : meta.origin ? meta.origin(ref) : "archive";
-        row["base"] = {{"value", fo.base.to_json()}, {"origin", origin}};
+        row["base"] = {{"origin", origin}};
+        write_value(row["base"], "value", fo.base, "entriesLeftOut", caps.list_entries);
         json writers = json::array();
         const size_t skip = fo.chain.size() > caps.writers ? fo.chain.size() - caps.writers : 0;  // the last ones decide the result
-        for (size_t k = skip; k < fo.chain.size(); ++k) writers.push_back(writer_json(fo.chain[k]));
+        for (size_t k = skip; k < fo.chain.size(); ++k) writers.push_back(writer_json(fo.chain[k], caps.list_entries));
         row["writers"] = std::move(writers);
         if (skip) row["writersLeftOut"] = skip;
         writers_cut += skip;
-        row["result"] = fo.result.to_json();
+        write_value(row, "result", fo.result, "resultEntriesLeftOut", caps.list_entries);
+        if (!fo.formula_inputs.empty()) row["formulaInputs"] = fo.formula_inputs;
         row["winner"] = fo.winner.empty() ? json(nullptr) : json(fo.winner);
         fields.push_back(std::move(row));
     }

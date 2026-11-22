@@ -239,7 +239,7 @@ void worldload_ready_event(const std::string& dir) {
     TreeView view = world();
     Files files;
     stage::Runner r(env_of(&view, &files, dir, &sections));
-    std::function<void(const Result&)> live_report;
+    std::function<void(const Result&, bool)> live_report;
     const Result* live_result = nullptr;
     r.set_live([&](const stage::LiveHandoff& h) { live_report = h.report, live_result = h.result; });
     std::vector<stage::Phase> seen;
@@ -247,9 +247,16 @@ void worldload_ready_event(const std::string& dir) {
     check(r.subscribe_ready(5, [&](stage::Phase p, uint64_t) { seen.push_back(p); }, &h) == KILN_OK, "subscribe_ready");
     r.run({});
     r.finish({});
-    live_report(*live_result);  // the live back-end applied the live fields at a world load
+    live_report(*live_result, true);  // the live back-end applied the live fields at a world load
     check(r.phase() == stage::Phase::WorldLoad, "phase worldLoad");
     check(seen.size() == 2 && seen[1] == stage::Phase::WorldLoad, "the ready callback saw START and WORLDLOAD (saw " + std::to_string(seen.size()) + " event(s))");
+    const auto generation = r.generation();
+    Result late = *live_result;
+    late.fields.at({"items", "game:plank", "maxStack"}).result = Value::integer(42);
+    live_report(late, false);
+    std::string value;
+    check(r.read(2, "items", "game:plank", "maxStack", &value) == KILN_OK && value == "42", "a late refresh updates the resolved view");
+    check(r.generation() == generation && seen.size() == 2, "a late refresh keeps the generation and sends no ready event");
 }
 // R6: the live handoff keeps what a hot reload must not lose (review finding 6): the refusals made outside compose, the restart
 // fields as the boot back-end wrote them, and the stage's mapping check

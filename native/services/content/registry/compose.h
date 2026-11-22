@@ -117,10 +117,12 @@ struct FieldOutcome {
     struct Summary {
         int last = -1, prev_other = -1, last_excl = -1, prev_excl_other = -1;
     } summary;
+    std::vector<double> formula_inputs;  // effective inputs when the live back-end read a formula
 };
 
 enum class LineKind : uint8_t { Overridden, Composed, ComposedOn, Exclusive, Dropped, Yielded };
 const char* line_kind_name(LineKind k);
+std::string report_value_text(const Value& v);
 // How sure a conflict line is (registry.json "certainty"): Kiln's own writers are seen for certain; an archive-writer package
 // is named from its journal (sfi R1); other loaders' DLLs and hooks (P4's drift probe) are best effort.
 enum class Certainty : uint8_t { Certain, Named, BestEffort };
