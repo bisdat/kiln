@@ -147,6 +147,15 @@ bool seh_counts(const uint8_t* s, const uint8_t* msg) {
 
 }  // namespace
 
+bool schema_check(const char* name, const uint8_t* data, uint32_t length) {
+    if (!g_resolved || !name || !data || !length) return false;
+    uint32_t size = 0;
+    uint64_t schema = 0;
+    if (t_schema_find(KilnStr{name, std::strlen(name)}, &size, &schema) != KILN_OK || !size) return false;
+    std::vector<uint8_t> out(size + 16, 0);
+    return t_schema_decode(schema, data, length, out.data(), size) == KILN_OK;
+}
+
 void schema_start() {
     auto sym = [](const char* name, uintptr_t* out) { return g_api->symbol(KilnStr{name, std::strlen(name)}, out) == KILN_OK; };
     g_resolved = g_api->feature(KilnStr{"repl.schema", 11}) && sym("repl/SchemaEncode", &f_encode) && sym("repl/SchemaDecode", &f_decode);

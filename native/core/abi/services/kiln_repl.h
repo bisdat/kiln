@@ -456,8 +456,10 @@ typedef struct KilnReplNetApi {
      * Tick thread (server) / main thread (client). KILN_ERR_UNAVAILABLE: that direction is off here. */
     KilnResult(KILN_CALL* message_hook)(KilnOwner owner, uint8_t channel, uint32_t directions, KilnReplMessageFn fn, void* user,
                                         KilnHandle* out);
-    /* Sends data to peer on channel as a game message (schema channels 1, 15, 19, 20, 21 only). Tick thread.
-     * KILN_ERR_INVALID_ARGUMENT: another channel, a peer that is not connected; KILN_ERR_UNAVAILABLE: the session refused. */
+    /* Sends data to peer on channel as a game message: the schema channels a peer's machine socket carries (1, 15, 19, 20;
+     * 21 goes on the player socket: refused). The bytes must decode as the channel's server message with the game's own
+     * decoder (a vanilla client runs the same code). Tick thread. KILN_ERR_INVALID_ARGUMENT: another channel, bytes that
+     * do not decode; KILN_ERR_NOT_FOUND: not a connected game peer; KILN_ERR_UNAVAILABLE: the session refused. */
     KilnResult(KILN_CALL* message_inject)(uint32_t peer, uint8_t channel, const void* data, uint32_t length);
 
     /* The game's message codec. schema_find: a message schema by its name (*out_size its struct's bytes).

@@ -93,6 +93,13 @@ bool any_hook(uint32_t dir, uint8_t side_mask) {
     return false;
 }
 
+std::atomic<uint32_t> g_refused_rewrites{0};  // bit per channel: logged once
+void refused_rewrite(uint32_t channel) {
+    if (channel < 32 && !(g_refused_rewrites.fetch_or(1u << channel) & (1u << channel)))
+        logf(KILN_LOG_WARN, "repl: a send hook's rewrite on channel %u was refused: it does not decode as the channel's message "
+             "(or the channel has no schema Kiln knows); the original was sent", channel);
+}
+
 AllocRes* d_alloc(AllocRes* out, uintptr_t session, uintptr_t socket, const AllocSpec* spec) {
     AllocRes* r = h_alloc.original<AllocFn>()(out, session, socket, spec);
     if (r) t_open.record(r, r->data, r->status, socket);
@@ -125,11 +132,26 @@ void d_commit(uintptr_t session, uint64_t* handle) {
         // the peer: a machine socket names its machine as index + 16, a player socket its player slot; on a client: the server (0)
         uint32_t peer = 0;
         if (sides & msg::kSideServer) peer = player ? peer_index : peer_of(peer_index >= 16 ? peer_index - 16 : peer_index, nullptr);
-        uint8_t* scratch = scratch_push();
-        const msg::ChainResult cr = scratch ? msg::run_chain(g_hooks, kMaxHooks, sides, KILN_REPL_SEND, static_cast<uint8_t>(channel), peer,
-                                                             player, res->data, res->size, scratch, msg::kMaxMessage)
-                                            : msg::ChainResult{KILN_REPL_PASS, res->size, 0};  // too deep: the message goes on
-        scratch_pop();
+        uint8_t* original = scratch_push();
+        uint8_t* scratch = original ? scratch_push() : nullptr;
+        msg::ChainResult cr{KILN_REPL_PASS, res->size, 0};  // too deep: the message goes on as it is
+        if (scratch) {
+            std::memcpy(original, res->data, res->size);
+            cr = msg::run_chain(g_hooks, kMaxHooks, sides, KILN_REPL_SEND, static_cast<uint8_t>(channel), peer, player, res->data, res->size,
+                                scratch, msg::kMaxMessage);
+            // review should 7: rewritten bytes leave only when the game's own decoder takes them as the channel's message
+            // (a vanilla client decodes them with the same code); otherwise the original goes out
+            if (cr.action == KILN_REPL_REWRITE) {
+                const char* schema = msg::send_schema(channel, sides);
+                if (!schema || !schema_check(schema, res->data, cr.length)) {
+                    std::memcpy(res->data, original, res->size);
+                    cr = msg::ChainResult{KILN_REPL_PASS, res->size, cr.calls};
+                    refused_rewrite(channel);
+                }
+            }
+        }
+        if (scratch) scratch_pop();
+        if (original) scratch_pop();
         if (cr.action == KILN_REPL_DROP) {
             reinterpret_cast<CommitFn>(f_abort)(session, handle);  // the message is not sent
             return;
@@ -375,10 +397,16 @@ KilnResult KILN_CALL t_message_inject(uint32_t peer, uint8_t channel, const void
         uint8_t flags = 0;
         connected = peer_of(m, &flags) == peer && !(flags & KILN_REPL_PEER_FAKE) && (m != 0 || (flags & KILN_REPL_PEER_LOCAL));
     }
-    if (!connected) return KILN_ERR_INVALID_ARGUMENT;
+    if (!connected) return KILN_ERR_NOT_FOUND;
+    // review should 7: only bytes the game's own decoder takes as the channel's message (a vanilla client decodes them)
+    const char* schema = msg::send_schema(channel, msg::kSideServer);
+    if (!schema || !schema_check(schema, static_cast<const uint8_t*>(data), length)) {
+        logf(KILN_LOG_WARN, "repl: inject on channel %u refused: the bytes do not decode as %s", channel, schema ? schema : "a known message");
+        return KILN_ERR_INVALID_ARGUMENT;
+    }
     uintptr_t session = 0;
     const uintptr_t socket = machine_socket(g_gs.load(std::memory_order_relaxed), peer, channel, &session);
-    if (!socket || !session) return KILN_ERR_INVALID_ARGUMENT;  // not a connected peer (a lab fake has no session)
+    if (!socket || !session) return KILN_ERR_NOT_FOUND;  // not a connected peer (a lab fake has no session)
     uint32_t status = 0;
     if (!seh_send(session, socket, data, length, &status)) {
         logf(KILN_LOG_WARN, "repl: inject on channel %u to peer 0x%x: the session refused it (status %u)", channel, peer, status);

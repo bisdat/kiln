@@ -246,6 +246,9 @@ KilnResult KILN_CALL t_message_hook(KilnOwner owner, uint8_t channel, uint32_t d
 KilnResult KILN_CALL t_message_inject(uint32_t peer, uint8_t channel, const void* data, uint32_t length);
 void schema_start();
 uint32_t schema_caps();
+// Whether bytes decode as the named message schema with the game's own decoder (review should 7: bytes Kiln lets a mod
+// send or rewrite go out only when they do). false also when the schema is not known. Tick or main thread (allocates).
+bool schema_check(const char* name, const uint8_t* data, uint32_t length);
 KilnResult KILN_CALL t_schema_find(KilnStr name, uint32_t* out_size, uint64_t* out_schema);
 KilnResult KILN_CALL t_schema_fields(uint64_t schema, KilnReplSchemaField* out, uint32_t cap, uint32_t* count);
 KilnResult KILN_CALL t_schema_decode(uint64_t schema, const void* bytes, uint32_t length, void* out, uint32_t out_size);

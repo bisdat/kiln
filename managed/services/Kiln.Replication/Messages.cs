@@ -184,7 +184,9 @@ public static partial class Replication
     /// <summary>
     /// Sends <paramref name="bytes"/> to <paramref name="peer"/> as a game message on <paramref name="channel"/>: the schema
     /// channels the peer's machine socket carries (<see cref="GameChannel.ServerInfo"/>, <see cref="GameChannel.CustomPlayerStrings"/>,
-    /// <see cref="GameChannel.ChatMessages"/>, <see cref="GameChannel.BaseSharing"/>). Code the bytes with <see cref="Encode{T}"/>.
+    /// <see cref="GameChannel.ChatMessages"/>, <see cref="GameChannel.BaseSharing"/>). Code the bytes with <see cref="Encode{T}"/>: bytes
+    /// that the game's own decoder does not take as the channel's message are refused (<c>Ok = false</c>). A send hook's
+    /// rewrite is checked the same way; one that does not decode is dropped and the original message goes out.
     /// </summary>
     /// <exception cref="ArgumentException">Another channel (<see cref="GameChannel.AdminInfo"/> goes on the player socket: not
     /// supported yet), empty or too long bytes.</exception>
@@ -207,7 +209,8 @@ public static partial class Replication
         var result = rc switch
         {
             ReplNative.Ok => new InjectResult(true, null),
-            ReplNative.InvalidArgument => new InjectResult(false, "peer gone (not a connected game peer)"),
+            ReplNative.NotFound => new InjectResult(false, "peer gone (not a connected game peer)"),
+            ReplNative.InvalidArgument => new InjectResult(false, "the bytes do not decode as the channel's message (use Encode)"),
             ReplNative.Unavailable => new InjectResult(false, "the session refused it"),
             _ => new InjectResult(false, $"kiln.repl.net refused it ({rc})"),
         } with { Channel = channel, Peer = peer };
