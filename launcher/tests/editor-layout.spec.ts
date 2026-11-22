@@ -71,17 +71,13 @@ test("Russian Deck Save, inspector and footer containment", async ({ page }) => 
   for (const hint of await page.locator(".deck-hint").all()) await contained(hint, page.locator(".deck-hints"));
 });
 
-for (const deck of [false, true]) for (const locale of deck ? LOCALES : ["ru"]) test(`toolbar contains two additional history actions ${deck ? "Deck" : "desktop"} ${locale}`, async ({ page }) => {
+for (const deck of [false, true]) for (const locale of deck ? LOCALES : ["ru"]) test(`toolbar contains history actions ${deck ? "Deck" : "desktop"} ${locale}`, async ({ page }) => {
   await page.setViewportSize(deck ? { width: 1280, height: 800 } : SIZES[0]); await open(page, deck, locale);
-  await page.evaluate(async (isDeck) => {
-    const { useSession } = await import("/src/editor/kiln/session.js"); useSession.setState({ dirty: true });
-    const toolbar = document.querySelector(isDeck ? ".dke-buttons" : ".k-page-actions")!;
-    for (const label of ["↶ Отменить", "↷ Повторить"]) {
-      const button = document.createElement("button"); button.className = isDeck ? "deck-btn" : "k-btn";
-      button.textContent = label; toolbar.insertBefore(button, toolbar.firstChild);
-      if (isDeck) { const hint = document.createElement("button"); hint.className = "deck-hint"; hint.textContent = label; document.querySelector(".deck-hints-right")!.append(hint); }
-    }
-  }, deck);
+  await page.evaluate(async () => {
+    const { useSession, setModel } = await import("/src/editor/kiln/session.js");
+    const model = useSession.getState().model; setModel({ ...model, xp: model.xp + 1 });
+  });
+  await expect(page.locator(deck ? '[data-deck-id="ed-undo"], [data-deck-id="ed-redo"]' : '[data-testid="editor-undo"], [data-testid="editor-redo"]')).toHaveCount(2);
   await shot(page, `history-actions-${deck ? "deck" : "desktop"}-${locale}`);
   const toolbar = page.locator(deck ? ".dke-buttons" : ".k-page-actions"); await contained(toolbar);
   for (const button of await toolbar.locator("button").all()) await contained(button, toolbar);
@@ -127,7 +123,7 @@ test("long character name keeps its chevron beside the title", async ({ page }) 
 
 test("backup filename is readable rather than clipped in its cell", async ({ page }) => {
   await open(page);
-  await page.locator(".k-page-actions button").first().click();
+  await page.locator('.k-page-actions button[title="B"]').click();
   await expect(page.locator(".ke-bk-row").first()).toBeVisible();
   await shot(page, "backup-filenames");
   for (const row of await page.locator(".ke-bk-row").all()) {
@@ -189,7 +185,7 @@ for (const locale of LOCALES) {
     await page.getByRole("tab").nth(0).click(); await contained(page.locator(".ke-gear"), page.locator(".ke-main"), false);
     await page.getByRole("tab").nth(2).click(); await contained(page.locator(".ke-tree-points"), page.locator(".ke-tree"));
     await page.getByRole("tab").nth(3).click(); await contained(page.locator(".ke-know-bar"), page.locator(".ke-know"));
-    await page.locator(".k-page-actions button").first().click();
+    await page.locator('.k-page-actions button[title="B"]').click();
     await expect(page.locator(".ke-bk-row").first()).toBeVisible();
     await page.locator(".ke-bk-row button").first().click();
     for (const row of await page.locator(".ke-bk-row").all()) for (const cell of await row.locator(":scope > span").all()) await contained(cell, row);
