@@ -41,6 +41,37 @@ public sealed class ToolBlocksTests
         Assert.Throws<ArgumentException>(()=>ToolBlockValidation.Brush(new() {Name="x",Radius=9}));
     }
     [Fact]
+    public void Real_root_has_no_action_slots_and_only_brush_clones_receive_actions()
+    {
+        var rootPath=Environment.GetEnvironmentVariable("KILN_TOOL_ROOT_JSON");
+        var brushPath=Environment.GetEnvironmentVariable("KILN_TOOL_BRUSH_JSON");
+        Assert.SkipUnless(File.Exists(rootPath)&&File.Exists(brushPath),"Requires independently decoded game root/brush JSON fixtures.");
+        using var root=System.Text.Json.JsonDocument.Parse(File.ReadAllText(rootPath!));
+        using var brush=System.Text.Json.JsonDocument.Parse(File.ReadAllText(brushPath!));
+        Assert.Equal("76650084-337b-44ad-966c-29d8617ac746",root.RootElement.GetProperty("objectId").GetString());
+        Assert.Empty(root.RootElement.GetProperty("sequences").EnumerateArray());
+        Assert.False(root.RootElement.GetProperty("equipment").GetProperty("repeatActionWhenPressed").GetBoolean());
+        var slots=brush.RootElement.GetProperty("sequences");Assert.Equal(2,slots.GetArrayLength());
+        Assert.Equal("Secondary",slots[0].GetProperty("triggeredBy").GetString());Assert.Equal("Primary",slots[1].GetProperty("triggeredBy").GetString());
+        var mod=new ModBlocks("tool-root-shape-test",1) {ManifestClients="mod"};
+        Compiler.Define(mod,"small",new TerrainBrushBlock {Name="Own small brush",Radius=0.5});
+        WorldTablesNative.TestDefine=document=>{
+            var parsed=System.Text.Json.Nodes.JsonNode.Parse(document)!;
+            var name=parsed["toolBrushShapes"]!.AsObject().First().Key;
+            return new System.Text.Json.Nodes.JsonObject {["blocks"]=new System.Text.Json.Nodes.JsonArray(new System.Text.Json.Nodes.JsonObject {["name"]=name,["kind"]="terrainBrush",["status"]="registered"})}.ToJsonString();
+        };
+        try {
+            var lowered=Compiler.Lower(mod,"root",new BuildingToolBlock {Name="Own root",Description="Own description",Brushes=["small"],
+                Primary=new() {Mode=TerrainToolMode.Remove,RemoveMaterials=[8]},Secondary=new() {Mode=TerrainToolMode.Remove,RemoveMaterials=[8]}});
+            var items=lowered.Low.Json["items"]!.AsArray();Assert.Equal(2,items.Count);
+            var rootItem=items.Single(i=>(string?)i!["base"]=="Tool_Building_Overgrowth")!;
+            Assert.DoesNotContain(rootItem["fields"]!.AsObject(),p=>p.Key.StartsWith("sequences[",StringComparison.Ordinal));
+            Assert.DoesNotContain(rootItem["refs"]!.AsObject(),p=>p.Key.StartsWith("sequences[",StringComparison.Ordinal));
+            var brushItem=items.Single(i=>(string?)i!["base"]=="Building_Overgrowth_Shape_Small")!;
+            Assert.True(brushItem["fields"]!.AsObject().ContainsKey("equipment.repeatActionWhenPressed"));
+        } finally {WorldTablesNative.TestDefine=null;}
+    }
+    [Fact]
     public void Bake_keeps_tool_pool_and_brush_descriptors_pending_not_live()
     {
         WorldTablesNative.ForgetBaked("tool-bake"); WorldTablesNative.Baking=true;

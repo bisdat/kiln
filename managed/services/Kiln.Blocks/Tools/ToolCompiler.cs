@@ -63,7 +63,9 @@ internal static partial class Compiler
             var refs=new Dictionary<string,string>();if(pool!=null)refs["equipment.voxelBlueprintMaterialPool"]=pool.Guid.ToString();
             var root=new ItemDefinition {Guid=guid,Name=ctx.Mod.Id+"."+name,BaseOn="Tool_Building_Overgrowth",DisplayName=block.Name,Description=block.Description??"",Refs=refs,
                 Icon=block.Icon is {} icon?BlockIcons.ItemIcon(ctx,icon,"icon"):null};
-            low.Item(ApplyToolActions(root,actions));
+            // The root launches building mode; the decoded root has no sequence slots. Only brush
+            // starters carry Secondary/Primary sequence entries that an action plan can replace.
+            low.Item(root);
             foreach(var brush in brushes) {
                 var item=new ItemDefinition {Guid=brush.Guid,Name=brush.GameName,BaseOn="Building_Overgrowth_Shape_Small",DisplayName=brush.Block.Name,Description=brush.Block.Description??"",
                     Refs=new Dictionary<string,string>(refs) {["equipment.terrainVoxelObject"]=brush.Guid.ToString()}};
