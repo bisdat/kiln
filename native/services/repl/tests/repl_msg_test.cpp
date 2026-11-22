@@ -396,7 +396,35 @@ void chain() {
 
 }  // namespace
 
+void helpers() {
+    // socket_index: Kiln's channel 12 at composed 22 -> game channel 19 at 29; outside the array -> -1
+    CHECK(socket_index(19, 22, 40) == 29);
+    CHECK(socket_index(1, 22, 40) == 11);
+    CHECK(socket_index(19, 22, 25) == -1);
+    CHECK(socket_index(25, 22, 64) == -1);
+    CHECK(socket_index(1, 0, 64) == -1);
+    // cursor_bytes: whole words
+    CHECK(cursor_bytes(0) == 0 && cursor_bytes(1) == 4 && cursor_bytes(32) == 4 && cursor_bytes(33) == 8);
+    // schema_record_shape
+    alignas(8) uint8_t rec[0x28] = {};
+    auto put64 = [&](size_t o, uint64_t v) { std::memcpy(rec + o, &v, 8); };
+    auto put32 = [&](size_t o, uint32_t v) { std::memcpy(rec + o, &v, 4); };
+    put64(0, 0x140100000); put32(8, 0x108); put32(12, 0); put64(16, 0x140200000); put64(24, 3); put64(32, 0);
+    CHECK(schema_record_shape(rec, 0x140000000, 0x150000000));
+    put32(12, 1);
+    CHECK(!schema_record_shape(rec, 0x140000000, 0x150000000));  // flags must be 0
+    put32(12, 0); put64(32, 7);
+    CHECK(!schema_record_shape(rec, 0x140000000, 0x150000000));  // the tail qword is 0
+    put64(32, 0); put64(24, 0);
+    CHECK(!schema_record_shape(rec, 0x140000000, 0x150000000));  // no fields
+    put64(24, 3); put64(0, 0x100);
+    CHECK(!schema_record_shape(rec, 0x140000000, 0x150000000));  // name outside the image
+    CHECK(schema_name_ok("ChatMessageServerMessage", 128) && schema_name_ok("keen::Foo", 128));
+    CHECK(!schema_name_ok("ab", 128) && !schema_name_ok("9Lives", 128) && !schema_name_ok("bad name", 128));
+}
+
 int main() {
+    helpers();
     abi();
     channels();
     schemas();

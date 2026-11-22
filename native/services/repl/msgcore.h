@@ -314,4 +314,33 @@ inline ChainResult run_chain(HookEntry* hooks, uint32_t n, uint8_t side, uint8_t
     return res;
 }
 
+
+// ---- since package 15's C2 (schema.cpp, messages.cpp): small plain helpers ----
+// A game channel's slot in a machine's socket array: the array is indexed by the session's composed channel, which is
+// the game channel plus a fixed offset; kiln.net knows it for Kiln's channel 12 (net/channel). -1: outside the array.
+inline int socket_index(uint32_t game_channel, int64_t kiln_composed, uint64_t count) {
+    if (kiln_composed < 12 || game_channel >= 25) return -1;
+    const int64_t i = kiln_composed - 12 + game_channel;
+    return i >= 0 && static_cast<uint64_t>(i) < count && count <= 64 ? static_cast<int>(i) : -1;
+}
+// A bit cursor's message size in bytes: whole 32-bit words.
+inline uint32_t cursor_bytes(uint64_t bits) { return static_cast<uint32_t>((bits + 31) / 32 * 4); }
+// Whether 0x28 bytes look like a message schema record {name; u32 size; u32 flags 0; fields; u64 count; u64 0}: the
+// pointers inside [lo, hi), a size and count in range. The name is checked separately (readable, a C identifier).
+inline bool schema_record_shape(const uint8_t* rec, uintptr_t lo, uintptr_t hi) {
+    const auto name = at<uintptr_t>(rec, kSchemaName), fields = at<uintptr_t>(rec, kSchemaFields);
+    const auto size = at<uint32_t>(rec, kSchemaSize), flags = at<uint32_t>(rec, kSchemaFlags);
+    const auto count = at<uint64_t>(rec, kSchemaCount), tail = at<uint64_t>(rec, 0x20);
+    return name >= lo && name < hi && fields >= lo && fields < hi && size >= 1 && size <= kMaxSchemaSize && flags == 0 &&
+           count >= 1 && count <= kMaxFields && tail == 0;
+}
+inline bool schema_name_ok(const char* s, size_t max) {
+    size_t n = 0;
+    for (; n < max && s[n]; ++n) {
+        const char c = s[n];
+        if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == ':')) return false;
+    }
+    return n >= 3 && n < max && ((s[0] >= 'A' && s[0] <= 'Z') || (s[0] >= 'a' && s[0] <= 'z'));
+}
+
 }  // namespace repl::msg
