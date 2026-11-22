@@ -168,6 +168,9 @@ internal static partial class Compiler
             MaterialTweakBlock t => DefineMaterialTweak(ctx, low, name, t),
             BuildingMaterialBlock m => DefineBuildingMaterial(ctx, low, name, m),
             BuildingMaterialPoolBlock p => DefineMaterialPool(ctx, low, name, p),
+            ToolMaterialPoolBlock p => DefineToolPool(ctx, low, name, p),
+            TerrainBrushBlock b => DefineTerrainBrush(ctx, low, name, b),
+            BuildingToolBlock t => DefineBuildingTool(ctx, low, name, t),
             StrengthBlock s => DefineStrength(ctx, low, name, s),
             SurfaceBlock s => DefineSurface(ctx, low, name, s),
             SoundBlock s => DefineSound(ctx, low, name, s),
@@ -468,6 +471,8 @@ internal sealed class Lowered(ModBlocks mod)
             ["inputs"] = new JsonArray(d.Inputs.Select(x => (JsonNode)new JsonObject { ["item"] = x.Item, ["count"] = x.Count }).ToArray()),
             ["outputs"] = new JsonArray(d.Outputs.Select(x => (JsonNode)new JsonObject { ["item"] = x.Item, ["count"] = x.Count }).ToArray()) };
         if (d.Props is { Count: > 0 }) json["props"] = new JsonArray(d.Props.Select(x => (JsonNode)new JsonObject { ["id"] = $"0x{x.Id:x8}", ["index"] = x.Index }).ToArray());
+        if (d.MenuGroup is { } group) json["menuGroup"] = group.ToString();
+        if (d.TrackCrafted) json["trackCrafted"] = true;
         Arr("recipes").Add(json);
     }
 

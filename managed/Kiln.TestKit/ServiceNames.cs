@@ -61,6 +61,7 @@ internal static class ServiceNames
         "kiln.surfaces",
         "kiln.tasks",
         "kiln.time",
+        "kiln.tools",
         "kiln.toolwear",
         "kiln.types",
         "kiln.ui",

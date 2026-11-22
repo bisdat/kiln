@@ -30,6 +30,7 @@ A mod's blocks: spells, weapons, wands, armor, items, stations, statuses, effect
 | `bodies` | object |  | Bodies, for creatures and NPCs to name. |
 | `buildingMaterialPools` | object |  |  |
 | `buildingMaterials` | object |  | New building materials: an id and a GUID in the game's tables, and a block item. 49 fit across all mods. Needs "clients": "mod". |
+| `buildingTools` | object |  |  |
 | `comforts` | object |  | Parts: what the game's comfort counts. |
 | `containers` | object |  | Things that hold items, as the game's chests do: a lid, sounds and upgrades from the game's small chest. |
 | `cosmetics` | object |  | Pieces for the vanity slots: shown over what is worn there, with no stats. A look with files of the mod's own needs "clients": "mod". |
@@ -43,6 +44,7 @@ A mod's blocks: spells, weapons, wands, armor, items, stations, statuses, effect
 | `interactions` | object |  | Parts: what happens when a player uses a placed thing. Use one by name in onInteract. |
 | `items` | object |  | Anything else that goes in a bag: a material, a potion, food, an arrow, a tool. Its kind follows from what you fill in, or say it. |
 | `keyBindings` | object |  | Keys that run an action (open a window, toggle a config value, run a command, cast an ability), rebindable in the Kiln menu. Needs "clients": "mod". |
+| `knowledge` | object |  | The game's tracking of the mod's items (found) and recipes (crafted once), as it tracks its own: built into the game's knowledge table at start, from the next start or the first when Kiln.Sdk baked it. Needs "clients": "mod" (since 0.2.0-dev.30.5). |
 | `looks` | object |  | Parts: what an item looks like. Use one by name wherever a field takes a look. |
 | `lootTables` | object |  | Tables of what drops, rolled by Kiln: a creature's drops name one, and so does code (LootTableHandle.Roll/Drop/Give). Server only. |
 | `materialTweaks` | object |  | Changes to game materials: what it takes to dig them. Read at boot by kiln.worldtables; a strength change asks nothing of players' games. |
@@ -70,7 +72,9 @@ A mod's blocks: spells, weapons, wands, armor, items, stations, statuses, effect
 | `surfaces` | object |  | Parts: how building materials look, defined once for materials of this mod to name. |
 | `talentTrees` | object |  | Whole trees of their own, on Kiln's screen. Needs "clients": "mod". |
 | `talents` | object |  | Nodes of a skill tree: in the game's own tree with game, else parts for a talent tree. Needs "clients": "mod". |
+| `terrainBrushes` | object |  |  |
 | `terrainMaterials` | object |  | New terrain materials: ground, rock or ore, an id and a GUID in the game's tables. 11 fit across all mods, apart from the building materials. Needs "clients": "mod". |
+| `toolMaterialPools` | object |  |  |
 | `triggers` | object |  | What a player does or is, any of the game's states and actions, driving effects. |
 | `vfx` | `kiln-vfx.schema.json section` |  | Effects written from nothing: particles and a light. No compiler, no game data. Built by the game client at start. |
 | `wands` | object |  | One-handed casters whose attacks are spells of their own: no spell item, no charges. |
@@ -492,6 +496,20 @@ A building surface, inline or by the name of one in this mod's surfaces sections
 
 Type: string or [buildingSurface](#buildingsurface)
 
+## buildingTool
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `brushes` | array of [ref](#ref) | yes | min items 1 max items 64 |
+| `description` | string |  | max length 16384 |
+| `icon` | string |  | min length 1 |
+| `identity` | [identity](#identity) |  |  |
+| `materialPool` | [ref](#ref) |  |  |
+| `name` | string | yes | min length 1 max length 1024 |
+| `primary` | [terrainToolAction](#terraintoolaction) | yes |  |
+| `secondary` | [terrainToolAction](#terraintoolaction) | yes |  |
+| `was` | [name](#name) |  |  |
+
 ## cast
 
 How a spell or an ability is cast: animation, timing, costs.
@@ -817,6 +835,15 @@ A PNG icon in the mod's folder. Portable data files and lint require a relative 
 
 Type: string
 
+## identity
+
+A fixed GUID (and so game id) in place of the one Kiln derives, for an item or recipe another loader made: one of legacy and legacyId (since 0.2.0-dev.30.5).
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `legacy` | string |  | The GUID the other loader gave it; the game id is FNV-1a of it. |
+| `legacyId` | integer or string |  | Only the game id, when the GUID is not known. |
+
 ## interaction
 
 What happens when a player uses a placed thing. A field left out is what its starter does. verb, plays, toggle and the game's lock in requires are the game's own; effects and requires' when, unless are Kiln's, on the server.
@@ -853,6 +880,7 @@ Its kind follows from what you fill in: tool, ammo, feeds, heals or onUse, else 
 | `fuel` | number |  | Seconds it burns in a fire. |
 | `heals` | integer |  | Health using it gives at once; the tooltip's number. |
 | `holds` | integer |  | A water container's capacity, in charges: the game's watering can holds 100, its pouch 20 sips. At most 1023: players' games are sent the water as charges x 64 in 16 bits. Default: the kind's own. min 1 max 1023 |
+| `identity` | [identity](#identity) |  |  |
 | `kind` | `"material"` \| `"consumable"` \| `"food"` \| `"ammo"` \| `"tool"` \| `"watering-can"` \| `"water-pouch"` |  | watering-can and water-pouch: the game's water containers; holds and flow are theirs. |
 | `level` | [level](#level) |  |  |
 | `loot` | [loot](#loot) |  |  |
@@ -895,6 +923,17 @@ A key that runs an action. The player can rebind it in the Kiln menu's Keys tab;
 How far the hit pushes the target.
 
 Type: `"none"` \| `"small"` \| `"normal"` \| `"big"` \| `"veryBig"` \| `"verySmall"` \| `"pullSmall"` \| `"pullNormal"`
+
+## knowledge
+
+The game's tracking of one of the mod's items or recipes. One of of and identity.
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `identity` | [identity](#identity) |  | The tracked item's or recipe's identity, in place of of. |
+| `of` | string |  | An item block of this mod (pickup: the item; craft: its own recipe), or a recipe block (craft). The recipe says trackCrafted. min length 1 |
+| `scope` | `"player"` \| `"world"` \| `"both"` |  | Whose knowledge. Default: both for an item, player for a recipe (always player). |
+| `trigger` | `"pickup"` \| `"craft"` | yes | pickup: an item found (the world's and each player's knowledge); craft: a recipe crafted once (each player's). |
 
 ## level
 
@@ -1353,13 +1392,16 @@ How something is crafted.
 |---|---|---|---|
 | `burns` | object |  | Fuel each cycle burns, item -> count. An input, as in the game's data: with none left the station stops. |
 | `comfort` | integer |  | The comfort level it asks of whoever makes it. min 0 |
+| `identity` | [identity](#identity) |  |  |
 | `makes` | integer |  | How many one craft gives. For a spell: charges. min 1 max 65535 |
+| `menuGroup` | string |  | The tab of the game's crafting menu that lists it, one the game has (CraftingGroups in C#): "0x<workshop>/<tab GUID>", or with "/<subcategory GUID>". Its workshop is the station's ("hand": 0x00000000). Default: Kiln picks the place (since 0.2.0-dev.30.5). |
 | `needs` | object |  | Item -> count: a game item, an item of this mod by its block name, or "other-mod:name". |
 | `needsProps` | array of string |  | Props that have to stand near a manual station: blocks with provides, by name ("other-mod:name" for another mod's). The game's automated factory path has no nearby-prop context, so factory block recipes refuse this field. max items 8 |
 | `output` | [itemRef](#itemref) |  | What it makes: in a station's list of recipes, and in a recipes block of its own, where it is needed. Elsewhere a recipe makes the block it is on. |
 | `seconds` | number |  | Seconds at a station that works on its own. Needed at one with a workshop of its own. |
 | `sheltered` | boolean |  | A player crafts it only under a roof. A station that works on its own never checks a roof, so its recipes refuse it. |
 | `station` | string |  | "hand" (the default): the player's own menu; a workshop's 0x id; or a station block by name. In a station's list of recipes: that station, so leave it out. |
+| `trackCrafted` | boolean |  | Keeps the game's "crafted once" mark of the recipe; a knowledge block with trigger craft puts it in the game's knowledge table (since 0.2.0-dev.30.5). |
 
 ## ref
 
@@ -1666,6 +1708,17 @@ A whole tree on Kiln's screen in the game's look. Kiln keeps each character's un
 | `respec` | boolean |  | Everything can be given back for free (default). |
 | `was` | [name](#name) |  |  |
 
+## terrainBrush
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `description` | string |  | max length 16384 |
+| `identity` | [identity](#identity) |  |  |
+| `name` | string | yes | min length 1 max length 1024 |
+| `radius` | number | yes | min 0.25 max 8 |
+| `shape` | `"sphere"` |  |  |
+| `was` | [name](#name) |  |  |
+
 ## terrainMaterial
 
 A new terrain material: it starts from a game terrain material and looks like one.
@@ -1684,6 +1737,14 @@ A new terrain material: it starts from a game terrain material and looks like on
 | `sliding` | boolean |  | Feet slide on it, as on ice. Default: like's. |
 | `strength` | [strengthRef](#strengthref) |  |  |
 | `was` | string |  | The block's old name, after a rename: the material's id comes from it, so its cells stay in every world. |
+
+## terrainToolAction
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `mode` | `"remove"` \| `"add"` | yes |  |
+| `removeMaterials` | array of integer |  |  |
+| `terrainOnly` | `true` |  |  |
 
 ## texts
 
@@ -1705,6 +1766,14 @@ What a tool does: what it is for, and how well. Each class takes the fields it h
 | `range` | number |  | Metres: how far a rake flattens around where it aims (3), how far a grappling hook reaches (13.5). max 32 |
 | `staminaCost` | integer |  | Stamina each use costs; the tooltip follows. Not for a fishing rod or a torch. min 0 |
 | `wearPerDebit` | integer |  | What each of the game's wear debits costs the tool's durability (1: the game's own; 0: it does not wear). Per debit, not per swing. A tool with enhancement slots (an axe, a pickaxe, a sieve). Set where the world runs. Needs items.tool_wear_debit. min 0 max 32767 |
+
+## toolMaterialPool
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `entries` | array of object | yes | min items 1 max items 64 |
+| `name` | string | yes | min length 1 max length 1024 |
+| `was` | [name](#name) |  |  |
 
 ## trigger
 

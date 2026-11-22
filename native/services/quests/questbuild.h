@@ -68,6 +68,11 @@ struct KnowledgeDef {
     uint32_t experience_id = 0;   // player objects: a BalancingRegistry XP id paid on unlock
     uint8_t skill_points = 0;     // player objects
     std::string name;             // for messages
+    // A tracked item or recipe (since 0.2.0-dev.30.5, "track"): the world and the player object are separate, as the game's own are (no
+    // hasOptionalPlayerProgression twin), and the player object has flags of its own and, for an item, one knowledge per flag.
+    bool separate = false;
+    uint32_t player_flags = 0;
+    uint8_t per_flag = 0;  // isAdditionalPlayerKnowledgePerFlag
 };
 // A copy of `res` with `defs` added to the world and player static maps (bucket count kept, or doubled when the map
 // would hold more than the bucket count). An id the game already has in that map is an error: nothing is built.

@@ -1090,8 +1090,9 @@ fn contents(m: &LMod) -> Contents {
                         c.block_talents.get_or_insert((f.display.clone(), t.key_span));
                     }
                 }
-                // a quest block is in the game's journal and a dialogue block in its NPC menu, both built by every client from the mod's files
-                for section in ["quests", "dialogues"] {
+                // a quest block is in the game's journal, a dialogue block in its NPC menu and a knowledge block in its knowledge table, all built by
+                // every client from the mod's files
+                for section in ["quests", "dialogues", "knowledge"] {
                     if c.native_journal.is_none()
                         && let Some(b) = r.get(section).and_then(Node::as_object).and_then(|o| o.first())
                     {
@@ -1975,7 +1976,7 @@ fn blocks(out: &mut Out, m: &LMod, code: &Code, cat: Option<&Catalog>) {
         ("perks", "perk"), ("abilities", "ability"), ("talents", "talent"), ("talentTrees", "talent tree"), ("triggers", "trigger"),
         ("creatures", "creature"), ("npcs", "NPC"), ("bodies", "body"), ("animations", "animation"), ("ais", "AI"), ("behaviours", "behaviour"), ("attacks", "attack"), ("rules", "rule"),
         ("lootTables", "loot table"), ("recipes", "recipe"),
-        ("quests", "quest"), ("dialogues", "dialogue"),
+        ("quests", "quest"), ("dialogues", "dialogue"), ("knowledge", "tracked item or recipe"),
         ("windows", "window"), ("hudLines", "HUD line"), ("keyBindings", "key binding"),
         ("affixes", "affix"), ("affixPools", "affix pool"), ("rarityRolls", "rarity roll"), ("rarityUpgrades", "rarity upgrade"),
         ("buildingMaterialPools", "building material pool"),

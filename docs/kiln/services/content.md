@@ -405,7 +405,11 @@ public override void OnLoad()   // register early: the registries take them when
   workshop whose crafting menu lists it, when that is not its own; a station opens the menu of its
   `CraftingInteraction.workshopId` and runs the recipes of its `Crafting.workshopId`. At a `"workshop:<guid>"`, a
   player's game gives that workshop a menu of its own instead, listing only its recipes, under the tabs and subcategories
-  of this menu where they would go), `StationItem` (`"stationItem"`, with a `"workshop:<guid>"` only: the item that
+  of this menu where they would go), `MenuGroup` (`"menuGroup"`, since 0.2.0-dev.30.5, mod API 0.2.14: a tab of the game's crafting menu that
+  lists it, a `CraftingGroups` constant, `"0x<workshop>/<tab GUID>[/<subcategory GUID>]"`; its workshop must be the menu the recipe shows in;
+  a menu without that tab lists it where the rules below put it, with a warning on the definition), `TrackCrafted` (`"trackCrafted"`, since
+  0.2.0-dev.30.5: keep the game's "crafted once" completion query, on the recipe's own id, instead of clearing it; the player knowledge object of
+  that id comes from a Kiln.Blocks `KnowledgeBlock`), `StationItem` (`"stationItem"`, with a `"workshop:<guid>"` only: the item that
   places its station; a player's game names the workshop after it, as the title over the station's recipe list),
   `Inputs` (1..32: item names, including new items, or
   `RecipeIngredient.OfCategory(id, n)`), `Outputs` (1..32 items), `Duration`, `DisplayName` (a recipe name; most
@@ -645,7 +649,8 @@ With `content.loca`, `content.ui_texture`, `content.recipe_ui`, `content.recipe_
   the registry maps; the service's getter hook returns the array plus the new recipes, and resets the UI's cached
   knowledge version so the lists are rebuilt after recipes are added or removed.
 - **Crafting menu**: the menu shows only recipes named in its UI configuration (per workshop: categories →
-  subcategories → recipe ids). The service adds each new recipe to the subcategory that holds its base recipe; else
+  subcategories → recipe ids). A recipe whose definition names a `menuGroup` goes into that tab's list (the tab's
+  `groupId` and the list's `recipeSetId`, read with the game's reflection; since 0.2.0-dev.30.5). Otherwise the service adds each new recipe to the subcategory that holds its base recipe; else
   the one that lists the game's recipe for the item its result was cloned from; else, for a result placed with the
   build cursor (a prop, a station, furniture), the first subcategory in the menu's order that lists placed things of
   the same item category; else the one with the most recipes making items of the same item category; else the

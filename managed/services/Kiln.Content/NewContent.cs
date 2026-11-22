@@ -193,6 +193,17 @@ public sealed record RecipeDefinition
     /// workshop after it: the title over the station's recipe list and its screen. Null: the <see cref="Menu"/> workshop's name.</summary>
     public string? StationItem { get; init; }
 
+    /// <summary>The tab (and subcategory) of the game's crafting menu that lists it, one the game already has: a <see cref="CraftingGroups"/> constant
+    /// (<c>CraftingGroups.Carpenter.Essentials</c>). Its workshop must be the menu the recipe shows in: its station's, or <see cref="Menu"/>.
+    /// Null: kiln.content picks the place (beside its base recipe, or recipes making the same kind of item). When a player's menu has no such tab
+    /// the recipe is listed where kiln.content would put it, and the definition says so in its warnings. Since 0.2.0-dev.30.5 (mod API 0.2.14).</summary>
+    public CraftingGroupRef? MenuGroup { get; init; }
+
+    /// <summary>Keeps the game's "crafted once" tracking of the recipe: its completion query reads flag 2 of the player's knowledge of the recipe id,
+    /// as the game's own recipes do. That knowledge has to be in the game's knowledge table (a Kiln.Blocks <c>KnowledgeBlock</c> with
+    /// <c>Trigger = KnowledgeTrigger.Craft</c> puts it there). False (the default): no tracking, the query is cleared. Since 0.2.0-dev.30.5 (mod API 0.2.14).</summary>
+    public bool TrackCrafted { get; init; }
+
     public required IReadOnlyList<RecipeIngredient> Inputs { get; init; }
     public required IReadOnlyList<RecipeIngredient> Outputs { get; init; }
 
@@ -291,6 +302,17 @@ public static unsafe class NewContent
         return h;
     }
 
+    /// <summary>The workshop whose crafting menu a recipe shows in, when its definition says it: its <see cref="RecipeDefinition.Menu"/>, a station
+    /// <c>"0x…"</c>, or <c>"hand"</c> (0). Null: a station by name or a recipe's, which only the game knows.</summary>
+    internal static uint? MenuWorkshop(RecipeDefinition def)
+    {
+        static uint? Hex(string? s) => s is { Length: > 2 } && s.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+                                       && uint.TryParse(s.AsSpan(2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var v) ? v : null;
+        if (Hex(def.Menu) is { } menu) return menu;
+        if (string.Equals(def.Station, "hand", StringComparison.OrdinalIgnoreCase)) return 0;
+        return def.Station?.StartsWith("workshop:", StringComparison.Ordinal) == true ? null : Hex(def.Station);
+    }
+
     /// <summary>Registers a new item as the calling mod's (see <see cref="ItemDefinition"/>).</summary>
     /// <exception cref="ArgumentException">The definition is invalid (the message says why).</exception>
     [RequiresCapability("content.new")]
@@ -381,6 +403,14 @@ public static unsafe class NewContent
         if (def.Station != null) j["station"] = def.Station;
         if (def.Menu != null) j["menu"] = def.Menu;
         if (def.StationItem != null) j["stationItem"] = def.StationItem;
+        if (def.TrackCrafted) j["trackCrafted"] = true;
+        if (def.MenuGroup is { } group)
+        {
+            if (group.Group == Guid.Empty) throw new ArgumentException($"recipe {def.Name}: MenuGroup names no tab: use a CraftingGroups constant");
+            if (MenuWorkshop(def) is { } shown && shown != group.Workshop)
+                throw new ArgumentException($"recipe {def.Name}: MenuGroup {group} is a tab of workshop 0x{group.Workshop:x8}'s menu, and the recipe shows in 0x{shown:x8}'s");
+            j["menuGroup"] = group.ToString();
+        }
         j["inputs"] = Stacks(def.Inputs);
         j["outputs"] = Stacks(def.Outputs);
         if (def.Duration is { } d) j["duration"] = d.TotalSeconds;

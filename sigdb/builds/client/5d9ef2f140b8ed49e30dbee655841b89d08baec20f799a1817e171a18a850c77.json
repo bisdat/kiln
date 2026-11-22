@@ -9,9 +9,9 @@
   "verified": true,
   "note": "runtime-verified through Steam (GE-Proton11-11), policy any, core + every service + kiln-emf + probe + ui-test + menubuttons: side client, sigdb 306/306 symbols, 434/434 constants (client.d composed), SimStep + WorldDestroy hooked, boot complete, 0 errors; main menu entries Kiln / ui-test / Mods (the Kiln sample screen opened); hosted a LOCAL world offline (saves: world loaded: slot 0x0002 (world1.ksd)): server world 60 steps/s on the GameServer thread, client and prediction worlds on the main thread, local player 1; ui-test all checks PASS (screens MainMenu/Loading/InGame/PauseMenu/Map/Crafting, menu entries chosen, crafting state), Kiln crafting tabs and subcategories shown, Insert overlay; tick cost as on ce6fdba6 (server step p50 2.5 ms, Kiln Pre 0.037 ms; client 1.2 ms); back to the menu (worlds stopping, shutdown save), clean quit (Shutdown 'Steam'). Not covered: joining a remote server, service write paths on the client. Added in dev.22 from static analysis only (resolved offline with sigdb_check.py, not yet seen running): ui.menu_page, ui.menu_page_sound, ui.error_popup (ui/PreGameCredits, ui/PreGameCreditsRet, ui/UiPlaySound and their constants). Levels (record 2, refreshed offline on 2026-11-11, no client run): lab = the names the boot above resolved, as its record listed them (199 named symbols, 434 constants, 106 features), each resolving to the same value today; every service loaded in that boot, but only ui-test ran, so lab here means loaded with Kiln's checks passing, not that the service test mods ran on the client. static = everything else, resolved offline only: the 186 @ probes (the boot's record did not list probes), the dev.22 ui names above, and every name declared since (the services audio, characters, emf-net, npcai, pacing, progression, quests, render, rules, skills, types and vfx, and new names of combat, creatures, gamedata, items, net, players, time and ui): 158 symbols, 210 constants and 70 features. sigdb now declares 543 symbols (441 defined, 102 captured), 644 constants (595 defined, 49 captured) and 176 features; all of them resolve offline on this exe.",
   "declared": {
-    "symbols": 863,
-    "constants": 969,
-    "features": 245
+    "symbols": 884,
+    "constants": 977,
+    "features": 253
   },
   "features": {
     "abilities.attributes": true,
@@ -215,6 +215,14 @@
     "time.sync_probe": true,
     "time.weather": true,
     "time.weather_choose": true,
+    "tools.brush_families": true,
+    "tools.build_area": true,
+    "tools.history": true,
+    "tools.identity": true,
+    "tools.material_lookup": true,
+    "tools.material_picker": true,
+    "tools.paid_terrain": true,
+    "tools.preview": true,
     "types.events": true,
     "types.systems": true,
     "ui.crafting": true,
@@ -710,6 +718,21 @@
     "time/WeatherStartPhenomenon": "0xaab220",
     "time/WeatherUpdate": "0xaac680",
     "time/WeatherUpdateLayers": "0xaac250",
+    "tools/BrushQuery": "0xd25b50",
+    "tools/BrushQueryFrame": "0xc3fe18",
+    "tools/BuildAreaIntersects": "0xea3cd0",
+    "tools/HistoryBegin": "0x498a40",
+    "tools/HistoryDiscard": "0x4993e0",
+    "tools/MaterialListAppend": "0x4970d0",
+    "tools/MaterialPreview": "0xb1a230",
+    "tools/MaterialSelector": "0x40e5d0",
+    "tools/RemoveBuildingVoxels": "0x4906a0",
+    "tools/RootIdentity": "0xd3e130",
+    "tools/TerrainCarveDispatch": "0xa88350",
+    "tools/TerrainCarveKernel": "0xa8f880",
+    "tools/TerrainConfigLookup": "0xe9f270",
+    "tools/TerrainCostBuild": "0x491960",
+    "tools/TerrainCostScale": "0x491fe0",
     "types/ProgramRunner": "0x9aed70",
     "ui/CraftingMenu": "0xb80130",
     "ui/DetailAfterStats": "0xc1193e",
@@ -1553,6 +1576,14 @@
     "time/weather.res_layers": "0x5c",
     "time/weather.res_phenomena": "0x6c",
     "time/weather.res_phenomenon_stride": "0xb0",
+    "tools/area.abandoned": "0x46",
+    "tools/area.access_zones": "0x88",
+    "tools/area.bases": "0x10",
+    "tools/area.count": "0x18",
+    "tools/area.owner_kind": "0x45",
+    "tools/area.shape": "0x44",
+    "tools/cost.cell": "0x28",
+    "tools/history.materials": "0x110",
     "types/events.map": "0xe16db8",
     "types/events.streams": "0x7b9e58",
     "ui/balancing.rootData": "0x20",
@@ -4170,6 +4201,95 @@
         "time.weather": "lab",
         "time.weather_choose": "static"
       }
+    },
+    "tool-payment": {
+      "level": "static",
+      "date": "2026-11-22",
+      "evidence": "resolved offline (tools/sigport/build_record.py)",
+      "symbols": {
+        "@tools/MaterialListAppend.layout": "static",
+        "@tools/TerrainCostBuild.list": "static",
+        "@tools/TerrainCostScale.rebuild": "static",
+        "tools/MaterialListAppend": "static",
+        "tools/TerrainCostBuild": "static",
+        "tools/TerrainCostScale": "static"
+      },
+      "constants": {
+        "tools/cost.cell": "static"
+      },
+      "features": {
+        "tools.paid_terrain": "static"
+      }
+    },
+    "tools-presentation": {
+      "level": "static",
+      "date": "2026-11-22",
+      "evidence": "resolved offline (tools/sigport/build_record.py)",
+      "symbols": {
+        "tools/BrushQuery": "static",
+        "tools/BrushQueryFrame": "static",
+        "tools/MaterialPreview": "static",
+        "tools/MaterialSelector": "static",
+        "tools/RootIdentity": "static",
+        "tools/TerrainConfigLookup": "static"
+      },
+      "constants": {},
+      "features": {
+        "tools.brush_families": "static",
+        "tools.identity": "static",
+        "tools.material_lookup": "static",
+        "tools.material_picker": "static",
+        "tools.preview": "static"
+      }
+    },
+    "tools_area": {
+      "level": "static",
+      "date": "2026-11-22",
+      "evidence": "resolved offline (tools/sigport/build_record.py)",
+      "symbols": {
+        "@tools/BuildArea.access": "static",
+        "@tools/BuildArea.fields": "static",
+        "tools/BuildAreaIntersects": "static"
+      },
+      "constants": {
+        "tools/area.abandoned": "static",
+        "tools/area.access_zones": "static",
+        "tools/area.bases": "static",
+        "tools/area.count": "static",
+        "tools/area.owner_kind": "static",
+        "tools/area.shape": "static"
+      },
+      "features": {
+        "tools.build_area": "static"
+      }
+    },
+    "tools_history": {
+      "level": "static",
+      "date": "2026-11-22",
+      "evidence": "resolved offline (tools/sigport/build_record.py)",
+      "symbols": {
+        "@tools/HistoryBegin.materials": "static",
+        "tools/HistoryBegin": "static",
+        "tools/HistoryDiscard": "static"
+      },
+      "constants": {
+        "tools/history.materials": "static"
+      },
+      "features": {
+        "tools.history": "static"
+      }
+    },
+    "tools_terrain": {
+      "level": "static",
+      "date": "2026-11-22",
+      "evidence": "resolved offline (tools/sigport/build_record.py)",
+      "symbols": {
+        "tools/RemoveBuildingVoxels": "static",
+        "tools/TerrainCarveDispatch": "static",
+        "tools/TerrainCarveKernel": "static"
+      },
+      "constants": {},
+      "features": {}
     },
     "types": {
       "level": "static",

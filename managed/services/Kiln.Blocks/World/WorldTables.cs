@@ -160,6 +160,7 @@ internal static unsafe partial class WorldTablesNative
     // What define_json reports as a block's kind, by section; parts (strengths, surfaces) are kept and not reported.
     private static readonly Dictionary<string,string> BakeKinds=new(StringComparer.Ordinal) {
         ["buildingMaterials"]="buildingMaterial",["buildingMaterialPools"]="buildingMaterialPool",["blueprints"]="blueprint",
+        ["toolMaterialPools"]="toolMaterialPool",["toolBrushShapes"]="terrainBrush",
         ["terrainMaterials"]="terrainMaterial",["materialTweaks"]="materialTweak",["craftingProps"]="craftingProp"};
     private static readonly HashSet<string> NotSections=new(StringComparer.Ordinal) {"format","mod","dir","clients","comment"};
     private static string RecordBake(string document)

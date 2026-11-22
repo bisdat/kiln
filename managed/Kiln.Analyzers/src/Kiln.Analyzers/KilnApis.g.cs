@@ -904,6 +904,7 @@ internal static partial class KilnApis
         "P:Kiln.Time.Available=kiln.time", // T != null: Services.Get("kiln.time")
         "P:Kiln.Time.CanSetSpeed=kiln.time", // via Kiln.Time.HasScale
         "P:Kiln.Time.WeatherChoiceAvailable=kiln.time,time.weather_choose", // T3 != null: Services.Get("kiln.time"); Is("time.weather_choose")
+        "P:Kiln.ToolMaterials.Available=tools.material_snapshot", // Is("tools.material_snapshot")
         "P:Kiln.Ui.Available=kiln.ui", // via Kiln.UiNative.Available
         "P:Kiln.Ui.Crafting.MenuAvailable=kiln.craftmenu", // UiNative.Craft != null: Services.Get("kiln.craftmenu")
         "P:Kiln.Ui.ItemIconsAvailable=kiln.assets", // via Kiln.ResourceStore.HasTextureRgba
@@ -956,6 +957,7 @@ internal static partial class KilnApis
         "Systems",
         "Terrain",
         "Time",
+        "Tools",
         "Ui",
         "Vfx",
         "World",

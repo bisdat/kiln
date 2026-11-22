@@ -11,3 +11,6 @@ Kiln.TestKit.HarnessUiItemDetail
 Kiln.TestKit.HarnessUiItemDetail.Capture(Kiln.ItemId item, Kiln.EntityId entity, int level, Kiln.ItemRarity? rarity, params Kiln.UiItemDetailLine![]! lines) -> void
 Kiln.TestKit.HarnessUiItemDetail.Clear() -> void
 Kiln.TestKit.KilnHarness.UiItemDetail.get -> Kiln.TestKit.HarnessUiItemDetail!
+Kiln.TestKit.HarnessWorldTables.PendingToolDefinitionsJson(string! mod) -> string!
+Kiln.TestKit.HarnessWorldTables.TerrainBrushCells(string! mod, string! key) -> byte[]?
+Kiln.TestKit.HarnessWorldTables.TerrainItem(string! name, uint item, byte cell) -> void

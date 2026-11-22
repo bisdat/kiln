@@ -1,0 +1,29 @@
+{
+  "format": 1,
+  "side": "client",
+  "comment": "Native player building history identity for exact tool payments and yield takeback. Qualified on client 26430625 and server 26430253; docs/re/gameplay.md.",
+  "symbols": {
+    "tools/HistoryBegin": {
+      "find": [{
+        "pattern": "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 48 89 7C 24 20 41 56 48 83 EC 20 48 8B 82 00 0A 00 00 48 8B FA 48 2B 82 08 0A 00 00 48 8B E9 48 83 F8 05"
+      }]
+    },
+    "tools/HistoryDiscard": {
+      "find": [{
+        "pattern": "48 89 5C 24 10 48 89 6C 24 18 57 41 56 41 57 48 83 EC 30 48 8B B9 00 0A 00 00 49 BF CD CC CC CC CC CC CC CC 48 83 C7 04"
+      }]
+    },
+    "@tools/HistoryBegin.materials": {
+      "find": [{
+        "scope": {"symbol": "tools/HistoryBegin", "size": 320},
+        "pattern": "48 8D B3 {tools/history.materials:d32} 45 33 C0 48 8B CE 33 D2 E8 ?? ?? ?? ??"
+      }]
+    }
+  },
+  "features": {
+    "tools.history": {
+      "symbols": ["tools/HistoryBegin", "tools/HistoryDiscard"],
+      "constants": ["tools/history.materials"]
+    }
+  }
+}

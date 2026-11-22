@@ -122,6 +122,62 @@ were independently rechecked; no callable PoolBuilder ABI or complete cache-read
 The dossier contains pool-partitioning/format-expansion designs, not evidence that the byte namespace or native
 selector has already been widened.
 
+### 1.2.2 Tool-specific presentation seams (client 26430625) **[dec]**
+
+Independently re-read from the read-only client `5d9ef2f1…` with targeted Ghidra decompilation (`-noanalysis`,
+function-local disassembly) and LLVM disassembly. No client execution was performed.
+
+- `0x40e5d0` is `void(selectorState, access, bool currentOnly)`. It gathers inventory records, then building-stock
+  records. Its seven selector groups have stride **0x648**, not the separate player-ui pool cache's 0x610. Each group
+  has data/count/capacity at +0/+8/+0x10, 24-byte rows with item +0 and aggregate stock +0x10, selected index +0x628,
+  has-selection byte +0x630, and mode +0x638. Finalizer `0x40dfe0` restores a selection by item identity. Filtering a
+  group must remap the selected index or clear it; retaining an index after compaction selects another material.
+  Only terrain group2 is filtered. Root/brush category `Blueprints` (10), equipment `BuildTool` (3) and vanilla terrain
+  pool GUID `256c43ba-dd20-4369-b3bf-f49c671a59ec` select group2 before Overgrowth flags. The runtime map is keyed by
+  pool ID, not equipment slot; a second row repeating terrain items adds magic stock again even with vanilla held.
+  Tool pools therefore stay policy metadata and leave the game-visible pool resource unchanged. The parent
+  `0x40e2b0` reads this call's resolved held ItemInfo from `access+0x78` for category routing; its caller publishes
+  that pointer alongside SlotSelection. Guarded root agreement with this per-call item prevents a prior Post sample
+  from filtering a newly selected vanilla tool in the same client step.
+- `0xb1a230` is an **item presentation constructor**:
+  `out = constructor(out, ItemInfo*, selectorGroup*)`. The traced direct caller obtains its item from the selected
+  hotbar model (`0xd43f40`), not necessarily the running action's `actionItem`. Hover provenance is not established.
+  Its row view is +0x28/+0x30. A separate owned
+  `SmallDynamicArray<24-byte row,64>` starts at +0x40 (data/count +0x40/+0x48, inline rows +0x68). Preview rows hold
+  item/count at +0x10/+0x14. It swaps its local array into that destination with `0xd90570`, but the view may still
+  name the old stack buffer. Rebind the view to the destination's owned data after the original returns, then bound
+  and filter that owned data. Never cache this constructor's item as evidence of what an in-flight action holds.
+- `0xd25b50` scans the item registry and applies GUID-tag filters to the item's tag BlobArray at +0x5e0 (24-byte rows:
+  GUID and two 32-bit fractions), producing 72-byte presentation rows. Its four callers use fixed tags or a zero include,
+  so a unique family tag alone does not admit a tool. Only the `0xc3f210` frame drawer's call at **0xc3fe18** is adapted:
+  a unique pattern qualifies the instruction and its rel32 target. A checked MID requires the current held family root
+  to match selected hotbar ID `[RBP+0x118]` and resolved ItemInfo `[RBP+0xe0]`. The Overgrowth branch has
+  `RBP=RSP+0x100`, output `RCX=RBP+0x690` (fresh empty capacity16 array), include `R9=RSP+0x30`, ratio
+  `R8=RBP+0x100`, exclude `RDX=RSP+0x40`. Only include/ratio GUID **values** in these distinct caller-owned
+  temporaries are replaced. Other three query sites, the Decay tuple and persistent callback outputs stay untouched.
+  There is no inherited TLS admission. `RawHook::caller()` alone is insufficient: its per-target caller record is not
+  restored after a recursive predecessor. A write fault skips this one empty-output query, never a half-patched query.
+- `0xd3e130` writes a 16-byte root identity `{itemId,nameTag,descriptionTag,present}`. It substitutes vanilla root IDs
+  based on ItemInfo flags +0x5d8 (bits 3/4/5/6/8). A Kiln root can instead use its own identity and content text tags:
+  the existing `kiln.item.name` / `kiln.item.description` GUID derivation, verified in the content writer. No game
+  text pointer needs to escape this helper.
+- `0xe9f270` is **terrain-config lookup**, not player material selection: it scans the registry's +0x38 resource,
+  comparing the cell byte in **184-byte** rows. Its server equivalent is `0x9464b0`. The adjacent lookup
+  (`C 0xe9f210`, `S 0x946450`) is a value/default helper over the same terrain rows, not the building lookup.
+  It shares the 184-byte loop prefix; discovery must extend through the pointer/null return to distinguish them.
+- Equipped-stack helper `C 0x3853c0` / `S 0x1444a0` has matching unique normalized prologues. The client decompile
+  returns a 20-byte inventory binding/item/count/flags value. Its MainHand path first uses nonzero cached action item
+  at SlotSelection+0xb0, otherwise selected hotbar index+0xc0 (<16), inventory entity+0xa0/+0xa4 and a 12-byte stack
+  whose count+4 must be nonzero. The native client-Post producer copies complete 216-byte SlotSelection and 96-byte
+  Inventory components through the shipped GetComponent ABI, resamples selection/session, then publishes only owned
+  scalar values tagged by owner, actor, generation, session and step. Selector hooks accept at most one step of age;
+  world events and missing or changed state clear the observation. No preview identity becomes held state.
+
+The qualified material lookup may refuse a non-pool cell only while an Add policy is scoped around the native call.
+Outside that scope it must call the vanilla continuation unchanged. The per-player producer separating backpack and
+magic-chest observations remains missing: aggregate selector counts must not be represented as separate-source data.
+Static qualification and portable fixtures do not establish actual menu rendering or real-game behavior.
+
 ### 1.3 Hardness **[dec] [data] [rt]**
 ```
 config   = registry lookup by id               0x9464b0 terrain, 0x933af0 building: a linear scan over the resident resource, stride 184 / 180

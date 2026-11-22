@@ -5920,6 +5920,172 @@
       },
       "sha256": "31ec32f36ce6fc7e33ff0ede5931f1aa9f5d6490e19cad430fb816dae5037c23"
     },
+    "native/core/abi/services/kiln_tools.h": {
+      "function_macros": [],
+      "inline_helpers": [],
+      "layouts": {
+        "KilnToolActionCommand": {
+          "align": 4,
+          "fields": {
+            "kind": 4,
+            "size": 0
+          },
+          "size": 8
+        },
+        "KilnToolActionContext": {
+          "align": 8,
+          "fields": {
+            "action": 4,
+            "actor": 24,
+            "brush": 32,
+            "hit": 48,
+            "invocation": 16,
+            "radius": 72,
+            "reserved": 44,
+            "selected_item": 36,
+            "selected_material": 40,
+            "session": 8,
+            "size": 0,
+            "tool": 28
+          },
+          "size": 80
+        },
+        "KilnToolActionDef": {
+          "align": 8,
+          "fields": {
+            "action": 8,
+            "flags": 12,
+            "handler": 24,
+            "program": 16,
+            "sequence": 20,
+            "size": 0,
+            "tool": 4,
+            "user": 32
+          },
+          "size": 40
+        },
+        "KilnToolBrush": {
+          "align": 8,
+          "fields": {
+            "item": 0,
+            "radius": 8,
+            "shape": 4
+          },
+          "size": 16
+        },
+        "KilnToolFamilyAction": {
+          "align": 4,
+          "fields": {
+            "flags": 40,
+            "mode": 0,
+            "program": 4,
+            "remove_cells": 8,
+            "reserved": 44
+          },
+          "size": 48
+        },
+        "KilnToolFamilyDef": {
+          "align": 8,
+          "fields": {
+            "brush_count": 168,
+            "brushes": 160,
+            "description": 128,
+            "identity": 176,
+            "material_count": 152,
+            "materials": 144,
+            "name": 112,
+            "pool": 8,
+            "primary": 16,
+            "reserved": 12,
+            "reserved2": 156,
+            "reserved3": 172,
+            "secondary": 64,
+            "size": 0,
+            "tool": 4
+          },
+          "size": 192
+        },
+        "KilnToolMaterialRow": {
+          "align": 8,
+          "fields": {
+            "backpack": 16,
+            "item": 0,
+            "magic_chests": 24,
+            "reserved": 12,
+            "terrain_material": 4,
+            "voxels_per_item": 8
+          },
+          "size": 32
+        },
+        "KilnToolMaterialSnapshot": {
+          "align": 8,
+          "fields": {
+            "actor": 24,
+            "count": 4,
+            "revision": 16,
+            "rows": 40,
+            "selected_item": 32,
+            "selected_material": 36,
+            "session": 8,
+            "size": 0,
+            "tool": 28
+          },
+          "size": 2088
+        },
+        "KilnToolPoolMaterial": {
+          "align": 4,
+          "fields": {
+            "item": 0,
+            "reserved": 12,
+            "terrain_material": 4,
+            "voxels_per_item": 8
+          },
+          "size": 16
+        },
+        "KilnToolPresentationStatus": {
+          "align": 4,
+          "fields": {
+            "brushes": 6,
+            "identity": 7,
+            "picker": 4,
+            "preview": 5,
+            "reason": 8,
+            "reserved": 12,
+            "size": 0
+          },
+          "size": 16
+        },
+        "KilnToolsApi": {
+          "align": 8,
+          "fields": {
+            "define_family": 32,
+            "header": 0,
+            "material_snapshot": 48,
+            "presentation_status": 56,
+            "register_action": 16,
+            "remove_family": 40,
+            "status": 8,
+            "unregister_action": 24
+          },
+          "size": 64
+        },
+        "KilnToolsStatus": {
+          "align": 8,
+          "fields": {
+            "actions": 4,
+            "dispatched": 16,
+            "reason": 8,
+            "refused": 24,
+            "registrations": 12,
+            "reserved": 6,
+            "session": 5,
+            "size": 0
+          },
+          "size": 32
+        }
+      },
+      "sha256": "4d80fe03ee6933c79a1a5a97d30196044b549235c24bd6045d4fb79fcae23e58"
+    },
     "native/core/abi/services/kiln_toolwear.h": {
       "function_macros": [],
       "inline_helpers": [],
@@ -8289,7 +8455,7 @@
   },
   "outputs": {
     "src/bindings.rs": "134028a6a9914076cab3f71f98d356141d4fe36c4d7f51bac6a11819501ed935",
-    "src/layout.rs": "8a7fefcdee8d71db55bafc62194b890cc73339d65b293ac7409b0b33084b9e2a",
+    "src/layout.rs": "393345758a01a237fcd89653300ca707425afae32e94f74f6848a69ff9c7d78a",
     "src/services/kiln_abilities.rs": "06a43042e5c96d6261a17b02eab35463b07a8ad83f63b2bb168bca5ff34e582e",
     "src/services/kiln_assets.rs": "e7fe4eb1c4d53ad31eeaf05be06f41c551a49362ad5bd4174465ec18a03effe0",
     "src/services/kiln_assets_vfx.rs": "90ed8ce5ad512bbf4f002db3277bc3b439d648ca437a58d4477eac4ce46c3b81",
@@ -8340,6 +8506,7 @@
     "src/services/kiln_surfaces.rs": "d4d991aef0a14f4be7246227b95a0f34161ca23fe04561e9c94d6d2aba0db4a0",
     "src/services/kiln_tasks.rs": "da41943b4ac01aaa77cfb43091e8c209f0e55707c3a3105dd9070313750a6f79",
     "src/services/kiln_time.rs": "879eaed84cd42ab057cc5c6aa452aef7e0d6636205431e9ef54d1daf8dd4bf93",
+    "src/services/kiln_tools.rs": "29589637b553d897c23d3ab438dabb493f4ebe359dba5cc1cec5d5f978b341c9",
     "src/services/kiln_toolwear.rs": "bfb7c79cc8ddea86236700983a4deac4d08826a8f4d3ac5648c2fc9e346dcbcb",
     "src/services/kiln_types.rs": "e6eaf5e97d0c284ec9fb98e78e9b2d3c1fb129d0cac1a899009730e2641942eb",
     "src/services/kiln_ui.rs": "c5552e5fe6bf0400ef939eeeefa479a0ef827cb15467694a341f0e612be61451",
@@ -8352,7 +8519,7 @@
     "src/services/kiln_world.rs": "3cb0272179db9c198f154ce6c008837e4bb95245a2ec62993be78879c4b330b8",
     "src/services/kiln_world_budget.rs": "b196426492d0525df1317c08e4927f3f3ff35817990bed8f2b58c02d174bab98",
     "src/services/kiln_worldtables.rs": "3d423bb8cfd5235f82230a1942bbc334d86b55d343e5e5880c671a57d1469fce",
-    "src/services/mod.rs": "f24ab5a6ade869b99cba2a1541eb0fefa334137051dc7a8573b63146a0ad8ef4"
+    "src/services/mod.rs": "f65ab67bd407904be2f23d9e1596ad78fc31e9d1961b57e736f2be326f62bc86"
   },
   "schema": 1,
   "target": "x86_64-pc-windows-msvc"

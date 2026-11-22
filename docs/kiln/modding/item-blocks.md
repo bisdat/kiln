@@ -288,6 +288,57 @@ The fields are the recipe's as everywhere: `Station`, `Makes`, `Needs`, `Burns`,
 - `clients` is `kiln`: Kiln clients get the recipe from the server.
 - Mistakes are refused at load by field: no `Output`, nothing in `Needs`, `Makes` outside 1 to 65535, a `Station` that is no station, an `Output` that is not an item.
 
+### A tab of the game's menu (since 0.2.0-dev.30.5, mod API 0.2.14)
+Kiln lists a new recipe beside the recipes that make the same kind of thing. `MenuGroup` names the tab instead, one of the game's: the
+`CraftingGroups` constants are every tab of every workshop menu (`CraftingGroups.Carpenter.Essentials`, `CraftingGroups.Hand.Weapons`, ...). The
+recipe goes into the tab's first list, the one without a header; `new CraftingGroupRef(workshop, tab, subcategory)` names another list.
+
+```csharp
+Blocks.Define("make-staff", new RecipeBlock
+{
+    Output = "staff", Station = "0xbddd74e6",  // the Carpenter
+    Needs = { [GameItems.Build_TerrainMaterial_T1_Rubble] = 20, [GameItems.Material_T1_Wood_Logs] = 1 },
+    MenuGroup = CraftingGroups.Carpenter.Essentials,
+});
+```
+```jsonc
+"recipes": { "make-staff": { "output": "staff", "station": "0xbddd74e6", "needs": { "Material_T1_Wood_Logs": 1 },
+    "menuGroup": "0xbddd74e6/8c91ca52-be38-468c-ae74-bc6a5ffab28e" } }
+```
+- The tab's workshop is the recipe's station: a tab of another menu is refused by field (`"hand"` is workshop `0x00000000`, `CraftingGroups.Hand`). A
+  station of your own has a menu of its own, without the game's tabs, so its recipes refuse `MenuGroup`.
+- When a player's game has no such tab (a game update moved it), the recipe is listed where Kiln would put it, and its definition says why in its
+  warnings (`NewContent.Definitions`) and in kiln.log.
+
+### Ids of another loader (since 0.2.0-dev.30.5, mod API 0.2.14)
+An item or recipe takes its GUID from the mod id and the block's name. A mod that takes over items another loader made keeps that loader's GUID
+instead, so the stacks and the recipe players have are this block's: `Identity = BlockIdentity.Legacy(new Guid("…"))`
+(`"identity": { "legacy": "<guid>" }`). The game id is FNV-1a of the GUID (`BlockIdentity.Id`). With only the game id known,
+`BlockIdentity.Legacy(3205570361)` (`{ "legacyId": 3205570361 }`) gives the block a GUID with that id, the same on every machine.
+
+- `ItemBlock.Identity` and `RecipeBlock.Identity` (on an item's own recipe too). The block's name in the game stays `<mod id>.<name>`.
+- Refused by field: an empty GUID or id 0, an id another block of the mod already has, an id another mod defines. Items and recipes are separate:
+  one GUID may be an item's and a recipe's. An id the game itself has is refused when the definition is registered (its error says so).
+- Never change it once released: saves keep the id.
+
+### Tracking (since 0.2.0-dev.30.5, mod API 0.2.14)
+Kiln's new items count as known and its recipes are listed without anything more. The game also tracks its own items (found: picked up, in the
+world's and each player's knowledge) and recipes ("crafted once", each player's), but only for ids in its knowledge table, which it builds at start.
+A `KnowledgeBlock` (`"knowledge"` in blocks/*.json) puts one of the mod's items or recipes there, the way the game's own are:
+
+```csharp
+Blocks.Define("staff-found", new KnowledgeBlock { Trigger = KnowledgeTrigger.Pickup, Of = "staff" });
+Blocks.Define("staff-made", new KnowledgeBlock { Trigger = KnowledgeTrigger.Craft, Of = "make-staff" });  // make-staff says TrackCrafted = true
+```
+- `Of` is an item block of this mod (Pickup: the item; Craft: its own recipe) or a recipe block (Craft); or `Identity`, the id of an item or recipe
+  by its identity. `Scope`: `Both` (default) or `World` / `Player` for an item; a recipe is always `Player`.
+- A tracked recipe says `TrackCrafted = true` (`"trackCrafted": true`): its "crafted once" mark reads flag 2 of the player's knowledge of the
+  recipe id, as the game's recipes do. Without it Kiln clears that mark.
+- The table is built at start, before any mod runs: what a block adds is there from the next start, or from the first one when the mod is built
+  with Kiln.Sdk (its build bakes it into `quests/generated/<mod>.json`). Until then the mod's report says so.
+- Players need the mod (`clients` `mod`): every player's game builds its own table. Refused when it is built: an id the game's table already has,
+  one another mod tracks.
+
 ## Water containers
 ```csharp
 Blocks.Define("big-can", new ItemBlock
