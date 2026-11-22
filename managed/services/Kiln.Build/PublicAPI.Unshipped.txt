@@ -17,8 +17,14 @@ Kiln.BlockBreakOptions.Flags.get -> Kiln.BlockBreakFlags
 Kiln.BlockBreakOptions.Flags.init -> void
 Kiln.BlockBreakOptions.Materials.get -> byte[]!
 Kiln.BlockBreakOptions.Materials.init -> void
+Kiln.BlockBreakOptions.ProtectedSphere.get -> Kiln.BlockBreakSphere?
+Kiln.BlockBreakOptions.ProtectedSphere.init -> void
 Kiln.BlockBreakOptions.Selection.get -> bool[]?
 Kiln.BlockBreakOptions.Selection.init -> void
+Kiln.BlockBreakOptions.TerrainHealAfter.get -> System.TimeSpan
+Kiln.BlockBreakOptions.TerrainHealAfter.init -> void
+Kiln.BlockBreakOptions.TerrainHealthScale.get -> double
+Kiln.BlockBreakOptions.TerrainHealthScale.init -> void
 Kiln.BlockBreakResult
 Kiln.BlockBreakResult.<Clone>$() -> Kiln.BlockBreakResult!
 Kiln.BlockBreakResult.BlockBreakResult(Kiln.BlockRefusal Refusal, ulong Considered, ulong Damaged, ulong Removed, ulong Dropped, ulong ProtectedCells, ulong UnknownCells, ulong UnbreakableCells, ulong ExcludedCells, bool MayHaveChanged, bool Verified, uint BlocksWritten, bool Kept) -> void
@@ -52,6 +58,19 @@ Kiln.BlockBreakResult.UnknownCells.get -> ulong
 Kiln.BlockBreakResult.UnknownCells.init -> void
 Kiln.BlockBreakResult.Verified.get -> bool
 Kiln.BlockBreakResult.Verified.init -> void
+Kiln.BlockBreakSphere
+Kiln.BlockBreakSphere.<Clone>$() -> Kiln.BlockBreakSphere!
+Kiln.BlockBreakSphere.BlockBreakSphere(Kiln.WorldPosition Center, double Radius, double Margin = 0, double MinimumRadius = 0) -> void
+Kiln.BlockBreakSphere.Center.get -> Kiln.WorldPosition
+Kiln.BlockBreakSphere.Center.init -> void
+Kiln.BlockBreakSphere.Deconstruct(out Kiln.WorldPosition Center, out double Radius, out double Margin, out double MinimumRadius) -> void
+Kiln.BlockBreakSphere.Equals(Kiln.BlockBreakSphere? other) -> bool
+Kiln.BlockBreakSphere.Margin.get -> double
+Kiln.BlockBreakSphere.Margin.init -> void
+Kiln.BlockBreakSphere.MinimumRadius.get -> double
+Kiln.BlockBreakSphere.MinimumRadius.init -> void
+Kiln.BlockBreakSphere.Radius.get -> double
+Kiln.BlockBreakSphere.Radius.init -> void
 Kiln.BlockHardness
 Kiln.BlockHardness.Hard = 3 -> Kiln.BlockHardness
 Kiln.BlockHardness.ModeratelyHard = 2 -> Kiln.BlockHardness
@@ -61,12 +80,12 @@ Kiln.BlockHardness.Unbreakable = 5 -> Kiln.BlockHardness
 Kiln.BlockHardness.VeryHard = 4 -> Kiln.BlockHardness
 Kiln.BlockInfo
 Kiln.BlockInfo.<Clone>$() -> Kiln.BlockInfo!
-Kiln.BlockInfo.BlockInfo(Kiln.BlockKind Kind, byte Material, byte Fill, Kiln.BlockProvenance Provenance, Kiln.BlockHardness? Hardness, int? Health, int? Damage, Kiln.WorldPosition Center) -> void
+Kiln.BlockInfo.BlockInfo(Kiln.BuildBlockKind Kind, byte Material, byte Fill, Kiln.BlockProvenance Provenance, Kiln.BlockHardness? Hardness, int? Health, int? Damage, Kiln.WorldPosition Center) -> void
 Kiln.BlockInfo.Center.get -> Kiln.WorldPosition
 Kiln.BlockInfo.Center.init -> void
 Kiln.BlockInfo.Damage.get -> int?
 Kiln.BlockInfo.Damage.init -> void
-Kiln.BlockInfo.Deconstruct(out Kiln.BlockKind Kind, out byte Material, out byte Fill, out Kiln.BlockProvenance Provenance, out Kiln.BlockHardness? Hardness, out int? Health, out int? Damage, out Kiln.WorldPosition Center) -> void
+Kiln.BlockInfo.Deconstruct(out Kiln.BuildBlockKind Kind, out byte Material, out byte Fill, out Kiln.BlockProvenance Provenance, out Kiln.BlockHardness? Hardness, out int? Health, out int? Damage, out Kiln.WorldPosition Center) -> void
 Kiln.BlockInfo.Equals(Kiln.BlockInfo? other) -> bool
 Kiln.BlockInfo.Fill.get -> byte
 Kiln.BlockInfo.Fill.init -> void
@@ -74,16 +93,16 @@ Kiln.BlockInfo.Hardness.get -> Kiln.BlockHardness?
 Kiln.BlockInfo.Hardness.init -> void
 Kiln.BlockInfo.Health.get -> int?
 Kiln.BlockInfo.Health.init -> void
-Kiln.BlockInfo.Kind.get -> Kiln.BlockKind
+Kiln.BlockInfo.Kind.get -> Kiln.BuildBlockKind
 Kiln.BlockInfo.Kind.init -> void
 Kiln.BlockInfo.Material.get -> byte
 Kiln.BlockInfo.Material.init -> void
 Kiln.BlockInfo.Provenance.get -> Kiln.BlockProvenance
 Kiln.BlockInfo.Provenance.init -> void
-Kiln.BlockKind
-Kiln.BlockKind.Air = 0 -> Kiln.BlockKind
-Kiln.BlockKind.Building = 2 -> Kiln.BlockKind
-Kiln.BlockKind.Terrain = 1 -> Kiln.BlockKind
+Kiln.BuildBlockKind
+Kiln.BuildBlockKind.Air = 0 -> Kiln.BuildBlockKind
+Kiln.BuildBlockKind.Building = 2 -> Kiln.BuildBlockKind
+Kiln.BuildBlockKind.Terrain = 1 -> Kiln.BuildBlockKind
 Kiln.BlockProvenance
 Kiln.BlockProvenance.Natural = 1 -> Kiln.BlockProvenance
 Kiln.BlockProvenance.PlayerPlaced = 0 -> Kiln.BlockProvenance
@@ -126,6 +145,9 @@ override Kiln.BlockBreakOptions.ToString() -> string!
 override Kiln.BlockBreakResult.Equals(object? obj) -> bool
 override Kiln.BlockBreakResult.GetHashCode() -> int
 override Kiln.BlockBreakResult.ToString() -> string!
+override Kiln.BlockBreakSphere.Equals(object? obj) -> bool
+override Kiln.BlockBreakSphere.GetHashCode() -> int
+override Kiln.BlockBreakSphere.ToString() -> string!
 override Kiln.BlockInfo.Equals(object? obj) -> bool
 override Kiln.BlockInfo.GetHashCode() -> int
 override Kiln.BlockInfo.ToString() -> string!
@@ -136,6 +158,8 @@ static Kiln.BlockBreakOptions.operator !=(Kiln.BlockBreakOptions? left, Kiln.Blo
 static Kiln.BlockBreakOptions.operator ==(Kiln.BlockBreakOptions? left, Kiln.BlockBreakOptions? right) -> bool
 static Kiln.BlockBreakResult.operator !=(Kiln.BlockBreakResult? left, Kiln.BlockBreakResult? right) -> bool
 static Kiln.BlockBreakResult.operator ==(Kiln.BlockBreakResult? left, Kiln.BlockBreakResult? right) -> bool
+static Kiln.BlockBreakSphere.operator !=(Kiln.BlockBreakSphere? left, Kiln.BlockBreakSphere? right) -> bool
+static Kiln.BlockBreakSphere.operator ==(Kiln.BlockBreakSphere? left, Kiln.BlockBreakSphere? right) -> bool
 static Kiln.BlockInfo.operator !=(Kiln.BlockInfo? left, Kiln.BlockInfo? right) -> bool
 static Kiln.BlockInfo.operator ==(Kiln.BlockInfo? left, Kiln.BlockInfo? right) -> bool
 static Kiln.BlockQueryResult.operator !=(Kiln.BlockQueryResult? left, Kiln.BlockQueryResult? right) -> bool

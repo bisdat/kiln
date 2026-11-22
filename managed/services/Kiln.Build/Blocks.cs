@@ -2,7 +2,7 @@
 namespace Kiln;
 
 /// <summary>What occupies a voxel cell. Since 0.2.0-dev.30.6.</summary>
-public enum BlockKind { Air, Terrain, Building }
+public enum BuildBlockKind { Air, Terrain, Building }
 /// <summary>Comparison with the shipped world, not ownership or execution side. Since 0.2.0-dev.30.6.</summary>
 public enum BlockProvenance { Unknown = -1, PlayerPlaced, Natural }
 /// <summary>The material's mining hardness class. Since 0.2.0-dev.30.6.</summary>
@@ -41,7 +41,7 @@ public enum BlockBreakFlags
 /// <summary>Loaded cell facts. Material is the raw voxel id (building 128..255); Fill is paint for buildings, not
 /// occupancy or provenance. Null mining facts mean unknown. Health is raw config health, not damage-scaled.
 /// Since 0.2.0-dev.30.6.</summary>
-public sealed record BlockInfo(BlockKind Kind, byte Material, byte Fill, BlockProvenance Provenance,
+public sealed record BlockInfo(BuildBlockKind Kind, byte Material, byte Fill, BlockProvenance Provenance,
     BlockHardness? Hardness, int? Health, int? Damage, WorldPosition Center);
 /// <summary>A successful query may have no hit. Refusal is distinct from a clear line. Since 0.2.0-dev.30.6.</summary>
 public sealed record BlockQueryResult(BlockInfo? Info, BlockRefusal Refusal) : IKilnResult
@@ -50,6 +50,9 @@ public sealed record BlockQueryResult(BlockInfo? Info, BlockRefusal Refusal) : I
     public bool Ok => Refusal == BlockRefusal.None;
     public string? Reason => BlockReasons.Text(Refusal);
 }
+/// <summary>Sphere selection with a caller-controlled protection margin and minimum radius. Only the building radius
+/// shrinks away from Natural/Unknown buildings; terrain keeps the original radius. Since 0.2.0-dev.30.6.</summary>
+public sealed record BlockBreakSphere(WorldPosition Center, double Radius, double Margin = 0, double MinimumRadius = 0);
 /// <summary>One exact, loaded cell box, optionally selected by a cell mask. Since 0.2.0-dev.30.6.</summary>
 public sealed record BlockBreakOptions
 {
@@ -62,6 +65,16 @@ public sealed record BlockBreakOptions
     public bool[]? Selection { get; init; }
     /// <summary>The existing build permissions, actor, journal and label. Unloaded and AllowAltars are refused.</summary>
     public BuildOptions Build { get; init; } = new();
+    /// <summary>Terrain damage threshold as a multiple of material health. Default 1; finite, greater than zero,
+    /// at most one million. Terrain has no native visual crack state.</summary>
+    public double TerrainHealthScale { get; init; } = 1;
+    /// <summary>Forget terrain damage after this inactivity. Default 20 seconds; greater than zero, at most one day.
+    /// Building crack healing follows the game's native 20-second lifetime instead.</summary>
+    public TimeSpan TerrainHealAfter { get; init; } = TimeSpan.FromSeconds(20);
+    /// <summary>Optional sphere. Scan Radius+Margin for eligible protected buildings, shrink the building radius to
+    /// the nearest protected center minus Margin, skipping buildings below MinimumRadius. Terrain keeps the full sphere.
+    /// WorldBuildings bypasses shrink; an additional Selection mask still restricts edited cells.</summary>
+    public BlockBreakSphere? ProtectedSphere { get; init; }
 }
 /// <summary>Counts and refusal of a controlled break. A fault may leave partial commits; never assume compensation.
 /// Removed counts cells proven air by readback. Without Verified it is only a lower bound. BlocksWritten can be
@@ -103,6 +116,7 @@ public static partial class Build
     public static unsafe BlockQueryResult BlockAt(WorldPosition position)
     {
         Services.RequireTickThread("Build.BlockAt");
+        Rows.Ensure();
         var t = T;
         if (t == null) return new(null, BlockRefusal.ServiceMissing);
         if (t->Header.Size < 168 || t->BlockAt == null) return new(null, BlockRefusal.ServiceOlder);
@@ -116,6 +130,7 @@ public static partial class Build
     public static unsafe BlockQueryResult FindWall(WorldPosition from, WorldPosition to, FindWallFlags flags = FindWallFlags.None)
     {
         Services.RequireTickThread("Build.FindWall");
+        Rows.Ensure();
         var t = T;
         if (t == null) return new(null, BlockRefusal.ServiceMissing);
         if (t->Header.Size < 176 || t->FindWall == null) return new(null, BlockRefusal.ServiceOlder);
@@ -127,7 +142,7 @@ public static partial class Build
     {
         if (rc == BuildNative.NotFound && b.Refusal == 0) return new(null, BlockRefusal.None);
         if (rc != 0) return new(null, b.Refusal == 0 ? BlockRefusal.Faulted : (BlockRefusal)b.Refusal);
-        return new(new((BlockKind)b.Kind, (byte)b.Material, (byte)b.Fill, (BlockProvenance)b.Provenance,
+        return new(new((BuildBlockKind)b.Kind, (byte)b.Material, (byte)b.Fill, (BlockProvenance)b.Provenance,
             b.Hardness < 0 ? null : (BlockHardness)b.Hardness, b.Health < 0 ? null : b.Health,
             b.Damage < 0 ? null : b.Damage, b.Center.ToPosition()), BlockRefusal.None);
     }
@@ -139,6 +154,7 @@ public static partial class Build
     public static unsafe BlockBreakResult BreakBox(CellBox box, BlockBreakOptions? options = null)
     {
         Services.RequireTickThread("Build.BreakBox");
+        Rows.Ensure();
         var t = T;
         if (t == null) return BreakRefused(BlockRefusal.ServiceMissing);
         if (t->Header.Size < 184 || t->BreakBox == null) return BreakRefused(BlockRefusal.ServiceOlder);
@@ -154,6 +170,16 @@ public static partial class Build
         for (var i = 0; i < o.Damage.Length; i++) q.Damage[i] = o.Damage[i];
         foreach (var m in o.Materials) q.Materials[m / 8] |= (byte)(1 << (m % 8));
         q.Actor = build.Actor.Value; q.BuildFlags = (uint)build.Flags;
+        if (!double.IsFinite(o.TerrainHealthScale) || o.TerrainHealthScale <= 0 || o.TerrainHealthScale > 1e6 ||
+            o.TerrainHealAfter <= TimeSpan.Zero || o.TerrainHealAfter > TimeSpan.FromDays(1))
+            throw new ArgumentOutOfRangeException(nameof(options), "invalid terrain health threshold or expiry");
+        q.TerrainHealthScale = o.TerrainHealthScale; q.TerrainHealSeconds = o.TerrainHealAfter.TotalSeconds;
+        if (o.ProtectedSphere is { } sphere)
+        {
+            q.Flags |= 16;
+            q.SphereCenter = new(sphere.Center); q.SphereRadius = sphere.Radius;
+            q.SphereMargin = sphere.Margin; q.SphereMinimum = sphere.MinimumRadius;
+        }
         var mask = o.Selection?.Select(b => b ? (byte)1 : (byte)0).ToArray();
         var origin = System.Text.Encoding.UTF8.GetBytes(Caller);
         Voxel[]? before = null;
