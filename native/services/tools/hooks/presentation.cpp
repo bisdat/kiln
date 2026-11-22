@@ -193,7 +193,8 @@ void kiln_tools_presentation_install(const KilnApi* value,KilnOwner parent) {
     const bool client=build.side==KILN_SIDE_CLIENT&&std::strcmp(build.exe_sha256,"5d9ef2f140b8ed49e30dbee655841b89d08baec20f799a1817e171a18a850c77")==0;
     const bool server=build.side==KILN_SIDE_SERVER&&std::strcmp(build.exe_sha256,"f0d824be7fcd48ebfe2458ff5c28da26060c2074e3ec1fcac587e5a1d508aeb2")==0;
     if(!client&&!server)return;
-    child=api->owner_create({"kiln.tools.presentation",23});if(!child)return;
+    child=api->owner_create({"kiln.tools.presentation",23});
+    if(!child||child==parent){child=0;return;} // Never hook or revoke under the service's parent owner.
     if(hooks->subscribe_owner_retiring(child,&owner_retiring,nullptr,&retiring)!=KILN_OK){api->owner_revoke(child);child=0;return;}
     const bool lookup_ok=install(lookup_hook,"tools/TerrainConfigLookup","4C 8B 51 38 4D 85 D2 74 ?? 45 8B 5A 04 33 C9 4D 85 DB 74 ?? 4D 63 0A 45 33 C0 66 0F 1F 44 00 00 45 85 C9 75 ?? 33 C0 EB ?? 4B 8D 04 0A 49 03 C0 38 10 74 ?? 48 FF C1 49 81 C0 B8 00 00 00",reinterpret_cast<void*>(&lookup));
     kiln_tools_report_hook(KILN_TOOL_HOOK_MATERIAL_LOOKUP,lookup_ok);

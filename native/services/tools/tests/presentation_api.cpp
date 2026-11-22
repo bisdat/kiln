@@ -12,7 +12,14 @@ static RootIdentity* vanilla_identity(RootIdentity* out,const uint32_t*) {*out={
 static KilnHooksApi fake_hooks{};
 static KilnOwner revoked_owner{};
 static bool statuses_closed{};
-static const void* KILN_CALL service(KilnStr,uint32_t) {return &fake_hooks;}
+static const void* KILN_CALL service(KilnStr name,uint32_t) {return std::string(name.ptr,name.len)==KILN_HOOKS_SERVICE?&fake_hooks:nullptr;}
+static unsigned retiring_attempts;
+static KilnOwner KILN_CALL parent_returned(KilnStr) {return 66;}
+static KilnResult KILN_CALL retire_refused(KilnOwner,KilnOwnerRetiringFn,void*,KilnHandle*) {++retiring_attempts;return KILN_ERR_UNAVAILABLE;}
+static KilnResult KILN_CALL client_build(KilnBuildInfo* out) {
+    *out={};out->size=sizeof(*out);out->side=KILN_SIDE_CLIENT;out->verified=1;out->hooks_enabled=1;
+    std::strcpy(out->exe_sha256,"5d9ef2f140b8ed49e30dbee655841b89d08baec20f799a1817e171a18a850c77");return KILN_OK;
+}
 static KilnResult KILN_CALL raw(KilnOwner,uintptr_t,const KilnHookOrder*,void*,void** original,KilnHandle* handle) {*original=reinterpret_cast<void*>(&vanilla_identity);*handle=1;return KILN_OK;}
 static KilnResult KILN_CALL revoke(KilnHandle) {return KILN_OK;}
 static KilnResult KILN_CALL revoke_owner(KilnOwner owner) {revoked_owner=owner;statuses_closed=!kiln_tools_hook_installed(KILN_TOOL_HOOK_IDENTITY);return KILN_OK;}
@@ -67,5 +74,8 @@ int main() {
     CHECK(snapshot.size==sizeof snapshot&&snapshot.count==0&&snapshot.selected_item==0&&snapshot.session==0);
     CHECK(std::all_of(reinterpret_cast<const uint8_t*>(snapshot.rows),reinterpret_cast<const uint8_t*>(snapshot.rows)+sizeof snapshot.rows,[](uint8_t b){return b==0;}));
     kiln_tools_presentation_uninstall();CHECK(revoked_owner==88&&statuses_closed);
+    fake.owner_create=&parent_returned;fake.build_info=&client_build;fake_hooks.subscribe_owner_retiring=&retire_refused;
+    revoked_owner=0;retiring_attempts=0;kiln_tools_presentation_install(&fake,66);
+    CHECK(child==0&&revoked_owner==0&&retiring_attempts==0); // Never revoke the parent when child creation aliases it.
     std::cout<<"presentation API: "<<checks<<" checks passed\n";
 }
