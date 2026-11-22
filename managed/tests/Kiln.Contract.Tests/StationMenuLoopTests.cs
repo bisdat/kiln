@@ -10,7 +10,7 @@ using Xunit;
 namespace Kiln.Contract.Tests;
 
 [Collection("kiln.network engine")]
-public sealed class StationMenuLoopTests : IDisposable
+public sealed class StationMenuLoopTests : ContractTest
 {
     private const uint P = 0xC1, Q = 0xC2;
     private static readonly BindingFlags SF = BindingFlags.Static | BindingFlags.NonPublic;
@@ -50,7 +50,7 @@ public sealed class StationMenuLoopTests : IDisposable
         StationMenuSync.TestDeclared = () => true;
     }
 
-    public void Dispose()
+    public override void Dispose()
     {
         var ch = typeof(StationMenuSync).GetField("_channel", SF)!;
         (ch.GetValue(null) as IDisposable)?.Dispose();
@@ -65,6 +65,7 @@ public sealed class StationMenuLoopTests : IDisposable
         StationMenuSync.ResetForTests();
         StationMenuStore.ResetForTests();
         StationMenuStore.TestBackend = null;
+        base.Dispose();
     }
 
     private static void Call(string method, params object[] args) => typeof(StationMenuSync).GetMethod(method, SF)!.Invoke(null, args);
@@ -158,6 +159,84 @@ public sealed class StationMenuLoopTests : IDisposable
     }
 
     private static void Part(StationMenuSync.MenuPartMsg m, NetContext ctx) => Call("OnPart", m, ctx);
+
+    private sealed class ManualClock : TimeProvider
+    {
+        public TimeSpan Elapsed;
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+        public override long GetTimestamp() => Elapsed.Ticks;
+    }
+
+    [Fact]
+    public void No_snapshot_parts_for_120_seconds_ends_the_hold_once_and_a_late_snapshot_still_applies()
+    {
+        Call("EnsureChannel");
+        var clock = new ManualClock();
+        StationMenuSync.ClientClock = clock;
+        StationMenuSync.BeginHold();
+
+        clock.Elapsed = TimeSpan.FromSeconds(119);
+        Call("ClientTick");
+        Assert.True(_store.Pending);
+
+        clock.Elapsed = TimeSpan.FromSeconds(120);
+        Call("ClientTick");
+        Assert.False(_store.Pending);
+        Assert.Null(_store.LastRemote);
+
+        clock.Elapsed = TimeSpan.FromSeconds(121);
+        Call("ClientTick");
+        Assert.Empty(_net.Sent);  // there is no snapshot to acknowledge
+        Assert.Single(Backend.Lines, line => line.StartsWith("Warn: station menus:") &&
+                                              line.EndsWith("own workshops show this game's own menus"));
+
+        Part(Parts(0)[0], FromServer());
+        Assert.NotNull(_store.LastRemote);
+        Assert.False(_store.Pending);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void A_first_part_disarms_the_join_deadline(bool snapshotComplete)
+    {
+        Call("EnsureChannel");
+        var clock = new ManualClock();
+        StationMenuSync.ClientClock = clock;
+        StationMenuSync.BeginHold();
+        StationMenuSync.TestContentReady = _ => false;
+
+        clock.Elapsed = TimeSpan.FromSeconds(119);
+        var parts = Parts(0x77, partBytes: snapshotComplete ? 4096 : 64);
+        Assert.Equal(snapshotComplete, parts.Length == 1);
+        Part(parts[0], FromServer());
+
+        clock.Elapsed = TimeSpan.FromSeconds(121);
+        Call("ClientTick");
+        Assert.True(_store.Pending);
+        Assert.Null(_store.LastRemote);
+    }
+
+    [Fact]
+    public void A_late_first_part_delivered_before_the_deadline_tick_does_not_extend_the_hold()
+    {
+        Call("EnsureChannel");
+        var clock = new ManualClock { Elapsed = TimeSpan.FromMinutes(10) };
+        StationMenuSync.ClientClock = clock;
+        StationMenuSync.BeginHold();
+
+        clock.Elapsed += TimeSpan.FromSeconds(121);
+        var parts = Parts(0, partBytes: 64);
+        Assert.True(parts.Length > 1);
+        var server = FromServer();
+        Part(parts[0], server);
+        Call("ClientTick");
+        Assert.False(_store.Pending);
+        Assert.Null(_store.LastRemote);
+
+        foreach (var part in parts.Skip(1)) Part(part, server);
+        Assert.NotNull(_store.LastRemote);
+    }
 
     [Fact]
     public void A_refused_snapshot_ends_the_hold()
