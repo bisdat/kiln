@@ -18,6 +18,14 @@
         }
       ]
     },
+    "@dyes/TintSetup": {
+      "find": [
+        {
+          "scope": { "symbol": "dyes/TintAction", "size": 416 },
+          "pattern": "49 8B 86 {dyes/it.setup:d32} 48 89 45 98 49 8B 86 {dyes/it.inventory:d32} 48 89 45 A0 49 8B 86 {dyes/it.selection:d32} 48 89 45 A8 49 8B 86 {dyes/it.item_state:d32} 48 89 45 B0 49 8B 86 {dyes/it.owner:d32} 48 89 45 B8 49 8B 86 {dyes/it.empty:d32} 48 89 45 C8 49 8B 86 {dyes/it.bases_server:d32} 48 89 45 48 66 C7 44 24 70 00 00 E8 {items/InventoryTxCtor:rel32} 48 8D 54 24 70 48 8D 8D 80 00 00 00 E8 {items/InventoryTxInit:rel32}"
+        }
+      ]
+    },
     "@dyes/TintPaletteCheck": {
       "find": [
         {

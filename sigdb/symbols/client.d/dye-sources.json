@@ -1,0 +1,73 @@
+{
+  "format": 1,
+  "side": "client",
+  "extends": "server.d/dye-sources.json",
+  "comment": "Static palette-screen qualification on client 26430625 only. PaletteBuild fills a dynamic array of 72-byte item views from the local player's and station's models plus unlocked palettes. PaletteGrid takes the tint state, whose palette array is at +0x90b80; it overwrites every row's +0x10 count from the two models' Generic-index views at RowCount (eax=count, rbx=row, r15d=item). DetailCount consumes a separate sum in eax for the selected palette (r15d=item). TintCommand emits command 0x6e, storing the target InventorySlotId at +4 and the selected palette's key at +0xc. These are locations only, not a qualified external-source request protocol, and enable no capability.",
+  "symbols": {
+    "dyes/client.PaletteGrid": {
+      "find": [
+        {
+          "pattern": "40 55 56 57 41 56 48 8D AC 24 18 F7 FF FF 48 81 EC E8 09 00 00 48 8B 05 {ui/UiApp:rel32} 33 FF 48 8B F1"
+        }
+      ]
+    },
+    "dyes/client.PaletteBuild": {
+      "find": [
+        {
+          "pattern": "40 55 53 57 41 54 41 56 48 8D 6C 24 C9 48 81 EC C0 00 00 00 48 8B 05 {ui/UiApp:rel32} 45 33 E4 4C 89 61 08 48 8B F9"
+        }
+      ]
+    },
+    "dyes/client.TintCommand": {
+      "find": [
+        {
+          "pattern": "40 57 48 83 EC 30 48 83 39 00 48 8B F9 0F 84 1D 01 00 00 48 83 79 08 00 0F 84 12 01 00 00 48 8B 0D {ui/UiApp:rel32}"
+        }
+      ]
+    },
+    "@dyes/client.PaletteFields": {
+      "find": [
+        {
+          "scope": { "symbol": "dyes/client.PaletteGrid", "size": 1536 },
+          "pattern": "48 39 BE {dyes/ui.palette_count:d32} 0F 84 ?? ?? ?? ?? 4C 89 A4 24 E0 09 00 00"
+        },
+        {
+          "scope": { "symbol": "dyes/client.PaletteGrid", "size": 1536 },
+          "pattern": "48 8B 9E {dyes/ui.palettes:d32} 49 03 DD 48 8B 88 D0 00 00 00"
+        }
+      ]
+    },
+    "dyes/client.RowCount": {
+      "find": [
+        {
+          "scope": { "symbol": "dyes/client.PaletteGrid", "size": 3072 },
+          "pattern": "43 8D 04 02 48 8D 4D 70 89 43 10 E8 ?? ?? ?? ?? 48 8B 0E 48 89 5D 70 8B 43 08",
+          "offset": 8
+        }
+      ]
+    },
+    "dyes/client.DetailCount": {
+      "find": [
+        {
+          "scope": { "symbol": "dyes/client.PaletteGrid", "size": 3072 },
+          "pattern": "42 8D 04 07 C7 45 E8 01 00 00 00 83 F8 01 89 45 EC 48 8D 4D C0 0F 93 45 F0",
+          "offset": 4
+        }
+      ]
+    },
+    "@dyes/client.TintCommandSlots": {
+      "find": [
+        {
+          "scope": { "symbol": "dyes/client.TintCommand", "size": 320 },
+          "pattern": "41 C6 06 6E 89 46 40 48 8B 56 10 48 FF C2"
+        },
+        {
+          "scope": { "symbol": "dyes/client.TintCommand", "size": 320 },
+          "pattern": "4D 85 F6 74 08 49 89 7E 04 49 89 5E 0C"
+        }
+      ]
+    }
+  },
+  "constants": {},
+  "features": {}
+}
