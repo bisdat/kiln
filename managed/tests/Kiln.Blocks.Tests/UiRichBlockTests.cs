@@ -554,6 +554,28 @@ public sealed class UiRichBlockTests : IDisposable
     }
 
     [Fact]
+    public void A_selected_tab_hidden_a_second_time_moves_again()
+    {
+        // review S6: the first hide moved Map to Bag; the player picks Map again and it is hidden again: it moves again
+        _world = new UiWorldReadResult(true, null, Snap());
+        Define("w", Json<WindowBlock>(RichJson));
+        var w = Open();
+        Frame(w);
+        for (var round = 1; round <= 2; round++)
+        {
+            _world = new UiWorldReadResult(true, null, Snap());
+            Frame(w);
+            Frame(w, new Canvas { ShowTab = "map" }, refresh: false);
+            UiRuntime.Pump();
+            Assert.Equal("map", w.State.Snapshot.Controls["tabs"].Selected);
+            _world = new UiWorldReadResult(false, "NoWorld", null);
+            Frame(w);
+            UiRuntime.Pump();
+            Assert.True(w.State.Snapshot.Controls["tabs"].Selected == "bag", $"round {round}: {w.State.Snapshot.Controls["tabs"].Selected}");
+        }
+    }
+
+    [Fact]
     public void Tree_scopes_balance_even_when_a_node_row_throws()
     {
         var state = new Dictionary<string, UiStateDefinition> { ["open"] = new UiStringSetState(["a"]) };

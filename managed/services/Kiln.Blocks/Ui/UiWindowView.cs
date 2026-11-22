@@ -765,7 +765,12 @@ internal sealed class WindowRuntime : IDisposable
             if (p.Selected != null) Domains[p.Selected.Key!] = visibleIds;
             var selected = SelectedOf(p, ctx);
             var first = tabs.FirstOrDefault(t => t.Visible)?.Id;
-            if (selected is { Length: > 0 } && visibleIds.Contains(selected)) v.SelectedKey = selected;
+            if (selected is { Length: > 0 } && visibleIds.Contains(selected))
+            {
+                v.SelectedKey = selected;
+                // valid again: the next time this tab is hidden it moves again (the cache only stops repeats of one hide)
+                w.ForgetInvalidation(p.Selected != null ? p.Selected.Key! : "#" + p.Id);
+            }
             else
             {
                 v.SelectedKey = first;
@@ -833,6 +838,11 @@ internal sealed class WindowRuntime : IDisposable
         v.SelectedKey = now.Length == 0 ? null : now;
         State.Enqueue(UiWindowState.WriteKind.Value, stateKey, new UiStateValue.String(now), null, null, UiStateChangeCause.SelectionInvalidated,
             cur => cur.Values.TryGetValue(stateKey, out var x) && x is UiStateValue.String s && s.Value == was ? null : "Moved", wantResult: false);
+    }
+
+    private void ForgetInvalidation(string key)
+    {
+        lock (_invalidated) _invalidated.Remove(key);
     }
 
     private void InvalidateControl(string rowId, string was, string? now)
