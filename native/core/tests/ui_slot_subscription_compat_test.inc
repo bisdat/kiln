@@ -43,6 +43,7 @@ void slot_subscription_compat_tests() {
     CHECK(slots_table()->subscribe(owner, 120, &expanded_slots_callback, nullptr, &expanded) == KILN_OK && expanded.ok,
           "expanded slots: 120-byte subscription negotiated");
     put(g_frame_script[1]->view_bytes, 0x24, uint32_t{7});
+    put(g_frame_script[1]->view_bytes, 0x2c, uint8_t{0}); // this fixture tests Common, not the shared default Rare
     ui_frame(1001);
     CHECK(expanded_level == 7, "expanded slots: correct second row and level at negotiated stride");
     CHECK(expanded_size == 120 && expanded_rarity == 0 && (expanded_available & KUI_ITEM_VALUES),
