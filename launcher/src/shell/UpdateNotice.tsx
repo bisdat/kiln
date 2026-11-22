@@ -7,7 +7,7 @@
 //                                          (closing the notice stops it), unless the game runs or Pack Studio or an editor
 //                                          has unsaved work: then it says why it waited and the player restarts. A start of
 //                                          the game under way and a running task are waited for (shell/updateApply.ts);
-//                                          Restart is held while the game runs or starts (the backend refuses it too).
+//                                          Restart is held while the game starts (the backend refuses it too); a running game does not hold it.
 //   just updated  "Updated to <version>"   The Kiln runtime the launcher ships goes into the game by itself while the
 //                                          game is closed, once per update (the ordinary install: its backup, its
 //                                          refusals; a toast says so), then the notice goes. While the game runs: Later,
@@ -96,7 +96,8 @@ interface RestartPlan {
   left: number | null;
   /** Why it waits, in words; null when it does not. */
   why: string | null;
-  /** Why Restart is held (its tooltip): a task runs, the game runs or starts. Null: it can restart now. */
+  /** Why Restart is held (its tooltip): a task runs, the game starts. Null: it can restart now (also under a running game:
+   *  the next launcher's own install waits for the game to close). */
   blocked: string | null;
   /** No restart by itself for this update (Later, the notice closed). */
   stop: () => void;
@@ -104,7 +105,7 @@ interface RestartPlan {
 
 /** The ready update the player started (not a channel switch: its dialog restarts): counts down and restarts, unless the
  *  game runs or there is unsaved work, which holds it for good (the player restarts); a start of the game under way and a
- *  running task are waited for. The backend's update_restart refuses under a running or starting game too. */
+ *  running task are waited for. The backend's update_restart refuses under a starting game too. */
 function useRestartAfterUpdate(s: UpdateStatus | null): RestartPlan {
   const tasks = useTasks((x) => x.tasks);
   const order = useTasks((x) => x.order);
@@ -153,7 +154,7 @@ function useRestartAfterUpdate(s: UpdateStatus | null): RestartPlan {
   return {
     left: deadline !== null ? Math.max(0, Math.ceil((deadline - now) / 1000)) : null,
     why,
-    blocked: running ? t("shell.updateNotice.closeGame") : launching ? t("shell.updateNotice.holdLaunch")
+    blocked: launching ? t("shell.updateNotice.holdLaunch")
       : blocking ? t("shell.updateNotice.waitingFor", { task: blocking.title }) : null,
     stop: () => { if (version) setDecided((d) => ({ ...d, [version]: "stopped" })); },
   };

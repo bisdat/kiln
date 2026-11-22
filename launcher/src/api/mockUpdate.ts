@@ -10,7 +10,7 @@
 //   channelOffer("dev", "0.2.0-dev.42")   (dev.29) what a switch to that channel installs (null: it has nothing else)
 //   switches()                            (dev.29) the update_switch calls so far ({channel, restore})
 // `shippedRuntime` is the mock's bundle 0.2.0-dev+20261104.0f1ffa6 (the runtime this launcher ships, 30.5). update_restart
-// refuses while `gameBusy` says a game runs or starts (selfupdate.rs restart_refusal).
+// refuses while `gameBusy` says a game starts (selfupdate.rs restart_refusal; a running game does not hold it).
 // `?dist=nexus` (the Nexus Mods build): like the backend without the self-update feature (commands/update.rs): the
 // status is "disabled", update_check changes nothing, update_install and update_restart reject with `unsupported`.
 import { parseBuild } from "./channel";
@@ -24,7 +24,7 @@ type Args = Record<string, unknown>;
 export const MOCK_SHIPPED_RUNTIME = "0.2.0-dev+20261104.0f1ffa6";
 
 /** `channelSetting`: the mock settings' `updateChannel` (the backend reads settings.json for the channel each time).
- *  `gameBusy`: why the restart waits (a game runs or starts), null when it does not. */
+ *  `gameBusy`: why the restart waits (a game starts), null when it does not. */
 export function updateMockHandlers(emit: Emit, distribution: Distribution = "direct", channelSetting: () => string | null | undefined = () => null,
   gameBusy: () => KilnError | null = () => null): Record<string, (a: Args) => unknown> {
   const now = () => new Date().toISOString();

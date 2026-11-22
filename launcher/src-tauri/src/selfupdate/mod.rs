@@ -941,8 +941,9 @@ pub fn restart(app: &AppHandle) -> Result<(), Error> {
     let Some(ready) = ready.filter(|_| phase == Phase::Ready) else {
         return Err(Error::new(ErrorCode::Conflict, "No update is ready."));
     };
-    // never under a game: the next launcher would put its Kiln into a game that is starting
-    if let Some(e) = restart_refusal(game_running(), crate::commands::launch::start_tracked()) {
+    // never under a game that is starting: the next launcher would not know the start and could put its Kiln into the
+    // game while it loads (a running game is fine: the next launcher's own install waits for it to close)
+    if let Some(e) = restart_refusal(crate::commands::launch::start_tracked()) {
         log(&format!("restart refused: {}", e.message));
         return Err(e);
     }
@@ -973,24 +974,10 @@ pub fn restart(app: &AppHandle) -> Result<(), Error> {
     Err(Error::new(ErrorCode::Io, format!("The installer could not start: {e}")))
 }
 
-/// A known client game's process runs.
-fn game_running() -> bool {
-    let Ok(d) = crate::state::dirs() else { return false };
-    kiln_manage::game::known(&d).unwrap_or_default().iter()
-        .filter(|g| g.kind == kiln_manage::game::GameKind::Client)
-        .any(|g| kiln_manage::proc::find_game(g).ok().flatten().is_some())
-}
-
-/// Why the restart into an update waits: the game runs, or a start of this launcher is under way (Play pressed, the
-/// warning before Play, Steam asked and no game yet: commands::launch).
-fn restart_refusal(running: bool, starting: bool) -> Option<Error> {
-    if running {
-        return Some(Error::new(ErrorCode::GameRunning, "Close the game first: the launcher restarts into the update once the game is closed."));
-    }
-    if starting {
-        return Some(Error::new(ErrorCode::Busy, "The game is starting: restart into the update once it runs and is closed again, or the start is over."));
-    }
-    None
+/// Why the restart into an update waits: a start of this launcher is under way and the game's process is not there yet
+/// (Play pressed, the cook, the warning before Play, Steam asked: commands::launch). A game that runs does not hold it.
+fn restart_refusal(starting: bool) -> Option<Error> {
+    starting.then(|| Error::new(ErrorCode::Busy, "The game is starting: restart into the update once it runs, or once the start is over."))
 }
 
 /// Skips `version` (None: un-skips).

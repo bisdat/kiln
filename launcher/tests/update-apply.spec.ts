@@ -64,21 +64,18 @@ test("while the game runs the launcher does not restart by itself and says why",
   await page.locator(".k-door").click();
   await expect(page.locator(".k-head-state")).toHaveText(/^Running/, { timeout: 8000 });
   const ready = await updateNow(page);
-  await expect(ready.getByTestId("update-restart-why")).toHaveText("The game is running, so the launcher waits. Restart when you are done playing.");
+  await expect(ready.getByTestId("update-restart-why")).toHaveText("The game is running, so the launcher does not restart by itself. Restart when you like: the new Kiln goes into the game once it closes.");
   await expect(ready.getByTestId("update-restart-in")).toHaveCount(0);
-  // Restart waits for the game too, and so does the backend's update_restart
+  // the player may still restart: a running game does not hold Restart (the next launcher's install waits for it)
   const restart = ready.getByRole("button", { name: "Restart", exact: true });
-  await expect(restart).toBeDisabled();
-  await expect(restart).toHaveAttribute("title", "Close the game first");
-  const refused = await page.evaluate(async () => (await import("/src/api/commands.ts")).updateRestart().then(() => "restarted", (e: { code: string }) => e.code));
-  expect(refused).toBe("game_running");
+  await expect(restart).toBeEnabled();
   await page.waitForTimeout(2500);
-  expect(await restarts(page)).toBe(1); // only the refused call above
+  expect(await restarts(page)).toBe(0);
   // held for good: the game closing does not start it either (today's buttons; the player restarts)
   await game(page, "stopGame");
   await expect(ready.getByTestId("update-restart-why")).toHaveCount(0, { timeout: 6000 });
   await page.waitForTimeout(2500);
-  expect(await restarts(page)).toBe(1);
+  expect(await restarts(page)).toBe(0);
   await restart.click();
   await expect(page.getByRole("dialog", { name: "Updated to 0.2.0-dev.43" })).toBeVisible();
 });
@@ -95,13 +92,21 @@ test("a start of the game during the countdown holds it: Play pressed, then the 
   const why = ready.getByTestId("update-restart-why");
   await expect(why).toHaveText("The game is starting, so the launcher waits.");
   await expect(ready.getByTestId("update-restart-in")).toHaveCount(0);
-  await expect(ready.getByRole("button", { name: "Restart", exact: true })).toBeDisabled();
+  const restart = ready.getByRole("button", { name: "Restart", exact: true });
+  await expect(restart).toBeDisabled();
+  await expect(restart).toHaveAttribute("title", "The game is starting, so the launcher waits.");
+  // the backend refuses it too while the start has no game process yet
+  const refused = await page.evaluate(async () => (await import("/src/api/commands.ts")).updateRestart().then(() => "restarted", (e: { code: string }) => e.code));
+  expect(refused).toBe("busy");
   await page.waitForTimeout(5000);
-  expect(await restarts(page)).toBe(0);
-  // the game comes: held for good
+  expect(await restarts(page)).toBe(1); // only the refused call above
+  // the game comes: the countdown is held for good, and a manual Restart is allowed again
   await game(page, "openGate", "launch");
-  await expect(why).toHaveText("The game is running, so the launcher waits. Restart when you are done playing.", { timeout: 8000 });
-  expect(await restarts(page)).toBe(0);
+  await expect(why).toHaveText("The game is running, so the launcher does not restart by itself. Restart when you like: the new Kiln goes into the game once it closes.", { timeout: 8000 });
+  await expect(restart).toBeEnabled();
+  expect(await restarts(page)).toBe(1);
+  await restart.click();
+  await expect(page.getByRole("dialog", { name: "Updated to 0.2.0-dev.43" })).toBeVisible();
 });
 
 test("Escape or the header word closes the notice and stops the restart by itself", async ({ page }) => {

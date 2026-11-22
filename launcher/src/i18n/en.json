@@ -4093,7 +4093,7 @@
       "closeGame": "Close the game first",
       "updateGame": "Update game",
       "restartingIn": "Restarting by itself in {seconds} s",
-      "holdGame": "The game is running, so the launcher waits. Restart when you are done playing.",
+      "holdGame": "The game is running, so the launcher does not restart by itself. Restart when you like: the new Kiln goes into the game once it closes.",
       "holdLaunch": "The game is starting, so the launcher waits.",
       "holdStudio": "Pack Studio has unsaved changes, so the launcher waits. Save them, then restart.",
       "holdEditor": "An editor has unsaved changes, so the launcher waits. Save them, then restart.",

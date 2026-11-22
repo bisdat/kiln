@@ -512,11 +512,10 @@ fn when_the_start_never_comes_only_the_first_status_waits() {
 }
 
 #[test]
-fn the_restart_waits_for_a_running_or_starting_game() {
-    assert_eq!(restart_refusal(true, false).unwrap().code, ErrorCode::GameRunning);
-    assert_eq!(restart_refusal(true, true).unwrap().code, ErrorCode::GameRunning);
-    assert_eq!(restart_refusal(false, true).unwrap().code, ErrorCode::Busy);
-    assert!(restart_refusal(false, false).is_none());
+fn the_restart_waits_only_for_a_starting_game() {
+    // a running game does not hold it (the next launcher's own install waits for the game to close)
+    assert_eq!(restart_refusal(true).unwrap().code, ErrorCode::Busy);
+    assert!(restart_refusal(false).is_none());
 }
 
 #[test]

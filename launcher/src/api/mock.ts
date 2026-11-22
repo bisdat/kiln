@@ -121,6 +121,8 @@ const running: Record<string, { pid: number; mode: LaunchRequest["mode"]; nonce:
 /** The fake game's process as the status sees it: a scripted start's exists only once Steam has started it. */
 const live = (gameId: string) => { const r = running[gameId]; return r && (!r.from || Date.now() >= r.from) ? r : null; };
 let pidSeq = 4100;
+/** Starts launch_begin began whose game process has not come yet (the update's restart waits for them). */
+const startsBegun = new Set<string>();
 /** How long profile_activate takes to answer. */
 const ACTIVATE_MS = 1500;
 /** The next runtime install fails with this message as an `io` error, or with this whole error (a `permission` error with
@@ -739,6 +741,8 @@ function launch(gameId: string, req: LaunchRequest): LaunchResult {
   let backup: SaveBackup | null = null;
   if (!req.skipBackup && req.mode !== "vanilla") backup = makeBackup(gameId, "launch", null, profile);
   running[gameId] = { pid, mode: req.mode, nonce, at: Date.now(), profile };
+  // the start's process is the game's now (a scripted one's comes at its `from`: still starting until then)
+  startsBegun.delete(gameId);
   launched.add(gameId);
   if (stop) setTimeout(() => {
     const ended = Date.now();
@@ -786,6 +790,7 @@ function mockCrash(gameId = "client-steam") {
 export function mockStopGame(gameId = "client-steam") {
   if (!running[gameId]) return;
   running[gameId] = null;
+  startsBegun.delete(gameId);
   mockStartEnded(gameId);
   emitGame(gameId, "stopped");
 }
@@ -1672,7 +1677,12 @@ const handlers: Record<string, Handler> = {
   // launch
   launch_play: (a) => launch(S(a.gameId), a.request as LaunchRequest),
   // what a start is doing (mockProgress.ts): only a scripted start has a timeline; a plain one is a dev.26 runtime's
-  launch_begin: (a) => { gameOf(S(a.gameId)); mockBegin(S(a.gameId), S(a.mode)); return null; },
+  launch_begin: (a) => {
+    gameOf(S(a.gameId)); mockBegin(S(a.gameId), S(a.mode));
+    // a start the backend tracks until the game's process is there (commands/launch.rs start_tracked)
+    if (S(a.mode) === "vanilla") startsBegun.delete(S(a.gameId)); else startsBegun.add(S(a.gameId));
+    return null;
+  },
   launch_progress: (a) => {
     const g = S(a.gameId);
     const t = mockProgress(g);
@@ -1680,7 +1690,7 @@ const handlers: Record<string, Handler> = {
     if (t && noProxy && t.phase === "legacy") t.phase = "waiting";
     return t;
   },
-  launch_end: (a) => { mockStartEnded(S(a.gameId)); return null; },
+  launch_end: (a) => { mockStartEnded(S(a.gameId)); startsBegun.delete(S(a.gameId)); return null; },
   // the check before Play
   launch_prepare: (a) => sfPrepare(S(a.gameId), a.request as LaunchRequest),
   launch_confirm: (a) => sfConfirm(S(a.gameId), S(a.token), a.request as LaunchRequest),
@@ -1808,12 +1818,12 @@ const handlers: Record<string, Handler> = {
   modpack_dismiss: (a) => { if (lastServer && (lastServer.server.id ?? "") === S(a.serverId)) dismissedOffers[S(a.serverId)] = dismissKey(lastServer); return null; },
 };
 Object.assign(handlers, adminMockHandlers(mockEmit));
-// the update's restart waits while a game runs, or starts (a scripted start before its process exists)
+// the update's restart waits while a game starts (launch_begin and no process yet, a scripted start before its process
+// exists), not while one runs (selfupdate.rs restart_refusal)
 Object.assign(handlers, updateMockHandlers(mockEmit, MOCK_DISTRIBUTION, () => settings.updateChannel, () => {
-  const ids = Object.keys(running).filter((g) => !!running[g]);
-  if (ids.some((g) => !!live(g))) return { code: "game_running", message: "Close the game first: the launcher restarts into the update once the game is closed." };
-  if (ids.length) return { code: "busy", message: "The game is starting: restart into the update once it runs and is closed again, or the start is over." };
-  return null;
+  for (const g of [...startsBegun]) if (live(g)) startsBegun.delete(g);
+  const starting = startsBegun.size > 0 || Object.keys(running).some((g) => !!running[g] && !live(g));
+  return starting ? { code: "busy", message: "The game is starting: restart into the update once it runs, or once the start is over." } : null;
 }));
 Object.assign(handlers, deckMockHandlers(handlers));
 // the Discord features: the relay, Discord and the Discord app, faked (./mockCommunity.ts, `?discord=` flags)

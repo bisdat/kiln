@@ -183,9 +183,10 @@ Direct builds only (the Nexus Mods build has none, above).
   Pack Studio or an editor (the save editor, a mod's settings file, a server's settings) has unsaved work: the notice
   says why it waited and the player restarts (`shell/updateApply.ts`, `shell/unsaved.ts`). A start of the game under
   way (Play pressed, the warning before Play, Steam asked and no game yet) and a running task are waited for, then the
-  countdown starts. Restart is held while the game runs or starts, and `update_restart` refuses then too (a known
-  client's process, or a start this launcher tracks that has no process yet). A channel switch keeps its own dialog and
-  its Restart now.
+  countdown starts. Restart is held while the game starts, and `update_restart` refuses then too (a start this launcher
+  tracks that has no game process yet), also for a channel switch's Restart now and the Deck's. A running game does not
+  hold a manual Restart: the next launcher's own install waits for the game to close. A channel switch keeps its own
+  dialog and its Restart now.
 - **After an update:** `<data>/update.json` remembers it, and the next start shows "Updated to <version>". The
   launcher ships a runtime: when it is newer than the game's, it goes into the game by itself while the game is closed
   (0.2.0-dev.30.5; the ordinary install with its backup and refusals, the parts the game has, a toast "Kiln <x>
