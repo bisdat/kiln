@@ -525,6 +525,23 @@ fn containers_hold(dir: &Path, stem: &str, header: &KFCFile) -> Result<(), Strin
     Ok(())
 }
 
+/// kiln-eml: a stage's refusal, with what the player does when its read-back found other bytes than the working baseline
+/// lists (a baseline that no longer describes the game's data files, which its header alone cannot show: one the live
+/// header itself was built over, by a start that did not read the game's containers back). After Steam's file check
+/// `create_backup` takes such a backup for what it is. Any other error is passed on as it is.
+pub(crate) fn stage_refusal(stem: &str) -> impl FnOnce(kfc::container::KFCWriteError) -> anyhow::Error + '_ {
+    move |error| {
+        let mismatch = error.to_string().contains("staged content hash mismatch");
+        let error = anyhow::Error::from(error);
+        if !mismatch { return error; }
+        error.context(format!(
+            "the prepared game data does not match the game's data files (the vanilla backup {stem}.kfc.bak no longer \
+             describes them: verify the game files in Steam, then start through Kiln again; if this comes back, move \
+             {stem}.kfc.bak, {stem}.kfc_resources.bak and {stem}.kfc.bak.integrity out of the game folder)"
+        ))
+    }
+}
+
 /// kiln-eml: what `create_backup` does with a backup of this game build that is not the BASE of the live game data.
 enum Stale {
     /// Take a new backup of the live files instead (why the old one is not theirs, in words).
@@ -1173,7 +1190,7 @@ mod kiln_tests {
         // three containers the header lists at their sizes (each one content, a byte short of 2 MiB, then its padding)
         for name in ["g.kfc", "g.kfc_resources"] { File::create(dir.join(name)).unwrap(); }
         let mut vanilla: crate::transaction::Writer = KFCWriter::new_with_options(&dir, "g", Rc::new(TypeRegistry::default()), "fixture",
-            kfc::container::KFCWriteOptions { max_container_size: 1, ..Default::default() }).unwrap();
+            kfc::container::KFCWriteOptions { max_container_size: 1, overwrite_containers: true, truncate_containers: true, ..Default::default() }).unwrap();
         for i in 0..3 {
             let content = vec![i as u8 + 1; 2 * MIB - 1];
             vanilla.write_content(&kfc::guid::ContentHash::from_data(&content), &content).unwrap();

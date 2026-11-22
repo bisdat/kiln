@@ -190,7 +190,12 @@ fn a_stale_backup_the_live_header_was_built_over_is_refused_by_the_stages_read_b
     let text = format!("{out:?}");
     assert!(text.contains("staged content hash mismatch"), "{text}");
     assert!(!text.contains("does not describe this game build's data files"), "not found before staging: {text}");
-    assert_eq!(read(&f, &name("kfc")), live, "nothing is published");
+    for part in ["the vanilla backup enshrouded.kfc.bak no longer describes them", "verify the game files in Steam", "out of the game folder"] {
+        assert!(text.contains(part), "the refusal says what to do: {part:?} in {text}");
+    }
+    // nothing new is published: the live header is as it was, or the backup the failed start put back over its own output
+    let now = read(&f, &name("kfc"));
+    assert!(now == live || now == read(&f, &name("kfc.bak")), "nothing new is published");
 }
 
 // The archive inspector (a kiln-mode start) agrees: a backup built over the live header is not the base, the live set is

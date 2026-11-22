@@ -534,11 +534,13 @@ Each is marked `kiln-eml:` in the source.
     lists has its size; else refused. `restore_backup_as` puts back only a backup whose containers are at their sizes. The
     inspector agrees for kiln mode: Over is the live set as a new baseline (note `baseline-stale`, origin
     `rebaselined-unclassified`; the boot witness takes it through `create_backup`), unless a live file is still Kiln's
-    output; a backup that is neither is `baseline-corrupt`. Tests: load.rs
+    output; a backup that is neither is `baseline-corrupt`. A backup the live header itself was built over (a start without
+    the read-back published from it) passes the headers' comparison; the stage's sampled read-back (item 39) refuses it,
+    and that refusal now says what to do (`load::stage_refusal`, EML mode and kiln mode's prepared stages). Tests: load.rs
     `base_relation_follows_how_a_writer_builds_over_a_baseline`,
     `a_backup_whose_containers_are_not_at_their_size_is_neither_built_from_nor_restored`,
     `a_header_only_backup_built_over_the_game_files_is_replaced`, and `m6_stale_backup.rs` (the field's game folder
-    through the production runner and the inspector).
+    through the production runner and the inspector, and the read-back as the second layer).
 
 The plugin validates paths from each authorized root down (root included), leaving linked Steam/Wine layout
 ancestors alone; it also checks final resolved containment. Profile paths resolve against `<game>/kiln`.
