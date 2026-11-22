@@ -90,6 +90,33 @@ public sealed unsafe class UiInventoryFakeTests
     }
 
     [Fact]
+    public void APadPressOnTheSelectedSlotIsAClick()
+    {
+        // 0.2.0-dev.31 (GitHub issue 119 c): SlotClickOptions.Pad, the press kept from the game
+        using var kiln = new KilnHarness();
+        kiln.Step();
+        var got = new List<SlotClick>();
+        var watched = new List<SlotClick>();
+        using var a = kiln.Run(() => Ui.Inventory.OnClick(new SlotClickOptions { Pad = KeyChord.Parse("Pad:LS") }, got.Add));
+        using var b = kiln.Run(() => Ui.Inventory.OnClick(new SlotClickOptions { Pad = KeyChord.Parse("Pad:LB+A"), Take = false }, watched.Add));
+        kiln.UiInventory.OpenChest(new EntityId(99), Sword, Wood);
+        Assert.Equal(new FakeSlotClickResult(0, false), kiln.UiInventory.PressPad("Pad:LS"));  // nothing selected yet
+        kiln.UiInventory.Select(0);
+        Assert.Equal(new FakeSlotClickResult(1, true), kiln.UiInventory.PressPad("Pad:LS"));
+        var c = Assert.Single(got);
+        Assert.Equal((SlotButton.Pad, (KeyChord?)KeyChord.Parse("Pad:LS"), new ItemId(0xAA), new EntityId(900), true, HudScreen.StorageChest),
+            (c.Button, c.Pad, c.Item, c.ItemEntity, c.Taken, c.Screen.Hud));
+        Assert.Null(c.Pointer);
+        Assert.Equal(new FakeSlotClickResult(0, false), kiln.UiInventory.PressPad("Pad:RS"));
+        Assert.Equal(new FakeSlotClickResult(1, false), kiln.UiInventory.PressPad("Pad:LB+A"));  // watched: the game keeps it
+        Assert.Equal(new ItemId(0xAA), Assert.Single(watched).Item);
+        Assert.Throws<ArgumentException>(() => kiln.Run(() => Ui.Inventory.OnClick(new SlotClickOptions { Pad = KeyChord.Parse("F8") }, _ => { })));
+        kiln.UiInventory.Draw(HudScreen.InGame, Sword);
+        kiln.UiInventory.Select(0);
+        Assert.Equal(new FakeSlotClickResult(0, false), kiln.UiInventory.PressPad("Pad:LS"));  // the play view: never
+    }
+
+    [Fact]
     public void SelectedIsTheSlotTheGamesSelectionIsOn()
     {
         using var kiln = new KilnHarness();

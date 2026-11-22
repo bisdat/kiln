@@ -200,6 +200,19 @@ public sealed class HarnessUiInventory
         return new FakeSlotClickResult(n, taken);
     }
 
+    /// <summary>The player presses a controller chord (<c>"Pad:LS"</c>, <c>"Pad:LB+A"</c>) while the game's selection rests on a
+    /// drawn slot (<see cref="Select"/>): every <c>SlotClickOptions.Pad</c> handler of that chord gets it as a click on that
+    /// slot (<c>SlotButton.Pad</c>), in subscription order, at once on the calling thread. Nothing (Delivered 0, the game
+    /// gets the press) without a selected slot, on a screen without a pointer, or while a row is off. Since
+    /// 0.2.0-dev.31.</summary>
+    public FakeSlotClickResult PressPad(string chord)
+    {
+        var c = KeyChord.Parse(chord);
+        if (!c.IsPad) throw new ArgumentException($"{chord} is not a controller chord (Pad:LS, Pad:LB+A)", nameof(chord));
+        var taken = UiInventoryBridge.PadPress(c, out var n);
+        return new FakeSlotClickResult(n, taken);
+    }
+
     /// <summary>The mark drawn slot <paramref name="index"/> would show (null: none): an item mark of any mod first, then
     /// the MarkWhen rules in order, as Kiln.Ui decides each overlay frame.</summary>
     public SlotMark? MarkOf(int index)

@@ -16,6 +16,9 @@ public enum SlotButton
 {
     Left = 1,
     Right = 3,
+    /// <summary>A game controller's button on the selected slot (<see cref="SlotClickOptions.Pad"/>, <see cref="SlotClick.Pad"/>).
+    /// Since 0.2.0-dev.31.</summary>
+    Pad = 16,
 }
 
 /// <summary>Modifier keys held with a click (exact: Ctrl alone is not Ctrl+Shift).</summary>
@@ -50,6 +53,17 @@ public sealed record SlotClickOptions
     public SlotModifiers Modifiers { get; init; }
     /// <summary>The game never sees the press (no pick-up, no move). False: the game acts on it too and you only watch.</summary>
     public bool Take { get; init; } = true;
+
+    /// <summary>A game controller's button or combination instead of a mouse click (<c>KeyChord.Parse("Pad:LS")</c>,
+    /// <c>"Pad:LB+A"</c>; <see cref="KeyChord.IsPad"/>): the click is that press on the slot the game's selection is on
+    /// (<see cref="Ui.Inventory.Selected"/>), on a screen with a pointer. <see cref="Button"/> and <see cref="Modifiers"/>
+    /// are not used then; <see cref="Take"/> keeps the button from the game until it is let go, as the game would have seen
+    /// it (its own action on that button does not happen; the buttons held for a combination still reach it). The
+    /// handler runs at once on the thread the game polls the pad from, with <see cref="SlotClick.Button"/>
+    /// <see cref="SlotButton.Pad"/> and <see cref="SlotClick.Pad"/> set. No selected slot, a Kiln screen with the input or
+    /// a stale frame: no click, the game gets the press. Next to a kiln-ui.dll older than 0.2.0-dev.31 it never fires. Since
+    /// 0.2.0-dev.31 (mod API 0.2.14).</summary>
+    public KeyChord? Pad { get; init; }
 }
 
 /// <summary>A click on a slot the game drew. <see cref="ItemEntity"/> is the item's entity in this game's world: for an
@@ -63,6 +77,9 @@ public sealed record SlotClick(SlotButton Button, SlotModifiers Modifiers, Visib
     public EntityId ItemEntity => Slot.ClientEntity;
     /// <summary>The entity whose inventory holds the slot (the player, a chest), when the game's models said.</summary>
     public EntityId Holder => Slot.Holder;
+    /// <summary>The controller chord pressed, for a <see cref="SlotClickOptions.Pad"/> click (<see cref="SlotButton.Pad"/>);
+    /// null for a mouse click. Since 0.2.0-dev.31.</summary>
+    public KeyChord? Pad { get; init; }
     /// <summary>The item's rarity as the game drew the slot (<see cref="VisibleSlot.Rarity"/>). Since 0.2.0-dev.31.</summary>
     public ItemRarity? Rarity => Slot.Rarity;
     /// <summary>The item's level as the game drew the slot (<see cref="VisibleSlot.Level"/>). Since 0.2.0-dev.31.</summary>
@@ -260,6 +277,7 @@ internal static unsafe class UiInventoryBridge
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(handler);
+        if (options.Pad is { } pad) return SubscribePad(pad, options.Take, handler);
         if (options.Button is not (SlotButton.Left or SlotButton.Right)) throw new ArgumentException("Button must be Left or Right");
         if ((options.Modifiers & ~(SlotModifiers.Ctrl | SlotModifiers.Shift | SlotModifiers.Alt)) != 0)
             throw new ArgumentException("Modifiers: Ctrl, Shift and Alt only");
@@ -364,13 +382,80 @@ internal static unsafe class UiInventoryBridge
             : null;
     }
 
+    // ---- a controller's press on the selected slot (SlotClickOptions.Pad, 0.2.0-dev.31) ----
+    private sealed class PadSub
+    {
+        public KeyChord Chord;
+        public bool Take;
+        public Action<SlotClick> Handler = null!;
+        public ModContext? Mod;
+    }
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<long, PadSub> PadSubs = new();
+
+    private static IDisposable SubscribePad(KeyChord pad, bool take, Action<SlotClick> handler)
+    {
+        if (!pad.IsPad) throw new ArgumentException($"Pad must be a controller button or combination (Pad:LS, Pad:LB+A), not {pad}");
+        UiValueBridge.RequireCapability(Ui.Inventory.ClickCapability);
+        UiValueBridge.RequireCapability(Ui.Values.SlotsCapability);
+        if (UiValuesNative.T == null) throw new KilnUnavailableException(Ui.Values.SlotsCapability, Capabilities.Why(UiValuesNative.Service));
+        UiEngine.EnsureStarted();  // Kiln.Ui's key subscription brings the pad's presses
+        var mod = UiModCalls.Caller ?? ModContext.OwnerOf(handler);
+        UiModCalls.RequireAlive(mod);
+        var id = Interlocked.Increment(ref _next);
+        PadSubs[id] = new PadSub { Chord = pad, Take = take, Handler = handler, Mod = mod };
+        var reg = new PadRegistration(id, mod);
+        if (mod is not null)
+        {
+            mod.Retiring += reg.Dispose;
+            if (!mod.Alive) reg.Dispose();
+        }
+        return reg;
+    }
+
+    private sealed class PadRegistration(long id, ModContext? mod) : IDisposable
+    {
+        private int _done;
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _done, 1) != 0) return;
+            if (mod is not null) mod.Retiring -= Dispose;
+            PadSubs.TryRemove(id, out _);
+        }
+    }
+
+    internal static int PadSubscriptions => PadSubs.Count;
+
+    /// <summary>A pad press during play or on a game screen (UiEngine.Key, the pad's poll thread): the handlers whose chord
+    /// it is get it as a click on the selected slot. True: one of them takes it (the game must not see the button).</summary>
+    internal static bool PadPress(KeyChord chord) => PadPress(chord, out _);
+
+    internal static bool PadPress(KeyChord chord, out int delivered)
+    {
+        delivered = 0;
+        if (PadSubs.IsEmpty) return false;
+        var matched = PadSubs.Where(kv => kv.Value.Chord == chord).OrderBy(kv => kv.Key).ToArray();
+        if (matched.Length == 0 || SelectedWithScreen() is not { } sel) return false;
+        var take = matched.Any(kv => kv.Value.Take);
+        var click = new SlotClick(SlotButton.Pad, SlotModifiers.None, sel.Slot, sel.Screen, take) { Pad = chord };
+        foreach (var (id, sub) in matched)
+        {
+            if (!PadSubs.ContainsKey(id)) continue;  // an earlier handler disposed this one
+            UiModCalls.Invoke(sub.Mod, sub.Handler, click, "slot pad press handler");
+            delivered++;
+        }
+        return take;
+    }
+
     // ---- selected (0.2.0-dev.31) ----
     internal const long SelectedMaxAgeMs = 250;  // as fresh as a click's frame must be (kiln_ui_inventory.h)
 
     /// <summary>The screens on which a slot can be pressed or selected (kiln_ui_inventory.h "Clicks").</summary>
     internal static bool PointerScreen(GameScreen s) => s.State == GameUiState.Play && (byte)s.Hud is 4 or 8 or 9 or 22 or 25 or 27 or 28 or 41;
 
-    internal static VisibleSlot? Selected()
+    internal static VisibleSlot? Selected() => SelectedWithScreen()?.Slot;
+
+    internal static (VisibleSlot Slot, GameScreen Screen)? SelectedWithScreen()
     {
         if (UiValuesNative.T == null) return null;
         VisibleSlotsResult r;
@@ -378,12 +463,12 @@ internal static unsafe class UiInventoryBridge
         {
             r = UiSlotsBridge.Read();
         }
-        catch (KilnUnavailableException)
+        catch (Exception e) when (e is KilnUnavailableException or InvalidOperationException)
         {
-            return null;
+            return null;  // the row is off, kiln.ui.values refused, or the mod is unloading: not known
         }
         if (!r.Ok || r.Snapshot is not { } s) return null;
-        return SelectedIn(s, UiSlotsBridge.Now());
+        return SelectedIn(s, UiSlotsBridge.Now()) is { } v ? (v, s.Screen) : null;
     }
 
     /// <summary>The first slot draw of a fresh frame on a pointer screen whose focus byte is set.</summary>

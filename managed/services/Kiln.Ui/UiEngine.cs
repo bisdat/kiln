@@ -648,6 +648,9 @@ internal static unsafe class UiEngine
         }
         var consumed = false;
         var wheel = MouseKeys.IsWheel(k.Vk);
+        // a controller's press on the game's selected slot (SlotClickOptions.Pad, 0.2.0-dev.31): during play and on the
+        // game's screens, never while a Kiln screen has the input
+        if (pad && down && k.Repeat == 0 && k.Captured == 0) consumed |= UiInventoryBridge.PadPress(new KeyChord(k.Vk, mods));
         // a Kiln screen has the mouse (the Keys page had its chance above): the wheel scrolls it, and no mouse press fires
         // a binding there; a button's release still ends a hold that began in play
         // a pad's button there navigates the screen (0.2.0-dev.31): no pad binding fires while a Kiln screen has the input

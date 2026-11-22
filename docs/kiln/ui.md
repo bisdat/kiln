@@ -360,7 +360,7 @@ var under = Ui.Inventory.Hovered;                      // the slot under the cur
 
 | Member | What | Row |
 |---|---|---|
-| `OnClick(options, handler)` | clicks matching `Button` (Left, Right) and `Modifiers` (exactly: Ctrl alone is not Ctrl+Shift); `Take` (default) keeps the press from the game, its release still reaches it. The handler runs on the client's main thread after the next UI frame. Dispose to stop | `ui.slots.click` |
+| `OnClick(options, handler)` | clicks matching `Button` (Left, Right) and `Modifiers` (exactly: Ctrl alone is not Ctrl+Shift); `Take` (default) keeps the press from the game, its release still reaches it. The handler runs on the client's main thread after the next UI frame. Dispose to stop. Since 0.2.0-dev.31 `Pad = KeyChord.Parse("Pad:LS")` (or `"Pad:LB+A"`) makes it a controller press on the `Selected` slot instead: `SlotClick.Button` is `SlotButton.Pad` and `SlotClick.Pad` the chord; `Take` keeps that button from the game until it is let go (the buttons held for a combination still reach it); the handler runs at once on the thread the game polls the pad from; no selected slot, or a Kiln screen with the input: no click | `ui.slots.click` |
 | `Mark(item, mark)`, `Unmark(item)`, `ClearMarks()` | a mark on the item's slot wherever the game draws it (it follows the item: move it and the mark moves); `SlotMark(Color, Style = Border/Fill/Corner, Thickness = 3)` | `ui.slots.inspect` |
 | `MarkWhen(rule)` | a mark from a rule asked for each drawn slot (an item mark wins) | `ui.slots.inspect` |
 | `Hovered` | the slot under the cursor in the game's latest UI frame (the mouse's only) | `ui.slots.inspect` |
