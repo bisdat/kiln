@@ -64,7 +64,9 @@ void logf(int level, const char* fmt, ...) {
 #define SI(...) logf(KILN_LOG_INFO, "survivors: " __VA_ARGS__)
 #define SW(...) logf(KILN_LOG_WARN, "survivors: " __VA_ARGS__)
 
-uint64_t now_ms() { return GetTickCount64(); }
+// the monotonic clock (the host test steps its own)
+uint64_t (*g_clock)() = [] { return static_cast<uint64_t>(GetTickCount64()); };
+uint64_t now_ms() { return g_clock(); }
 uint64_t step_now() {
     KilnTickInfo t{};
     t.size = sizeof t;

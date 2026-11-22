@@ -25,3 +25,7 @@ ASAN_OPTIONS=detect_leaks=0 "$out/survivors_test"
 ${CXX:-g++} -std=c++20 -O1 -g -pthread -Wall -Wextra -fsanitize=thread \
   -I"$here/.." -I"$here/../../../core/abi" "$here/survivors_test.cpp" -o "$out/survivors_test_tsan"
 "$out/survivors_test_tsan"
+# kiln.survivors' request handling (survivors.cpp) with fake services: review findings S1-S3
+${CXX:-g++} -std=c++20 -O1 -g -pthread -Wall -Wextra -Wno-unused-function -Wno-missing-field-initializers -fsanitize=address,undefined \
+  -I"$here/host" -I"$here/.." -I"$here/../../../core/abi" "$here/survivors_flow_test.cpp" -o "$out/survivors_flow_test"
+ASAN_OPTIONS=detect_leaks=0 "$out/survivors_flow_test"
