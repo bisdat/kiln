@@ -5881,7 +5881,8 @@
         "materials": "Materials",
         "tools": "Tools",
         "building": "Building",
-        "cosmetics": "Cosmetics and collectibles"
+        "cosmetics": "Cosmetics and collectibles",
+        "dyes": "Dyes"
       }
     },
     "knowledge": {
