@@ -161,7 +161,7 @@ block and say `was`, or the rebinding is lost.
 
 ## Richer windows (since 0.2.0-dev.31)
 
-Window blocks also have text fields, tables, tabs, trees and pictures, a typed state of their own, a mod's own data,
+Mod API 0.2.16. Window blocks also have text fields, tables, tabs, trees and pictures, a typed state of their own, a mod's own data,
 live values of the player's game, and buttons that run a command on the joined server. `mods/samples/UiBlocks`'s
 `blocks/camp.json` uses every one of them (Ctrl+F9, or "Camp" in the pause menu).
 

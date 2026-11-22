@@ -404,7 +404,7 @@ public void FilledChestsPulseGreen()
 }
 ```
 
-- **Live game values** (`kiln.UiSnapshot`, since 0.2.0-dev.31) <a id="live-game-values"></a>. Kiln.Blocks'
+- **Live game values** (`kiln.UiSnapshot`, since 0.2.0-dev.31, mod API 0.2.16) <a id="live-game-values"></a>. Kiln.Blocks'
   `BlockUi.ReadWorld` and `DemandWorld` (and a window's `world.*` bindings) run on the kit's kiln.ui.snapshot, so a mod
   that reads the local player's health, position or inventory is tested offline. The test is the game's collector:
   `kiln.UiSnapshot.Publish(new FakeWorldSample { Vitals = new FakeVitals(413, 500), Position = new FakeWorldPosition(1.5,
