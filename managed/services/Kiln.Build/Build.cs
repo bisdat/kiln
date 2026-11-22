@@ -35,7 +35,9 @@ public static partial class Build
         public const string Service = "kiln.build";
 
         /// <summary>The sigdb features kiln.build serves.</summary>
-        public static readonly string[] Features = ["build.read", "build.write", "build.persist", "build.items", "build.zones"];
+        public static readonly string[] Features = ["build.read", "build.write", "build.persist", "build.items", "build.zones",
+            "build.block_info", "build.block_metadata", "build.block_provenance", "build.find_wall", "build.break_building",
+            "build.break_damage", "build.break_drops", "build.break_terrain"];
     }
 
     // Kiln.Build in the capability registry: reported at the service's first use, fixed from then on. It has no row of

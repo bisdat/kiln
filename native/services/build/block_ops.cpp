@@ -103,9 +103,11 @@ KilnResult break_box(const Source& s,const KilnBuildBreak* q,KilnBuildBreakResul
     }
     if(count>4096)return fail(KILN_ERR_INVALID_ARGUMENT,KILN_BUILD_BLOCK_INVALID);
     for(auto d:q->damage)if(d<0 || d>100000)return fail(KILN_ERR_INVALID_ARGUMENT,KILN_BUILD_BLOCK_INVALID);
-    // Unqualified damage/crack, drop and exact terrain-clear seams are never simulated by raw writes.
-    if(!(q->flags&KILN_BUILD_BREAK_INSTANT) || (q->flags&(KILN_BUILD_BREAK_DROPS|KILN_BUILD_BREAK_TERRAIN)) ||
-       !s.metadata || !s.read || !s.write || (!(q->flags&KILN_BUILD_BREAK_WORLD) && !s.provenance))
+    // Unqualified damage/crack and drop seams are never simulated by raw writes. Terrain uses the same guarded
+    // exact-cell writer as buildings, but always needs qualified baked-world provenance, even with WORLD.
+    if(!(q->flags&KILN_BUILD_BREAK_INSTANT) || (q->flags&KILN_BUILD_BREAK_DROPS) ||
+       !s.metadata || !s.read || !s.write ||
+       ((!(q->flags&KILN_BUILD_BREAK_WORLD) || (q->flags&KILN_BUILD_BREAK_TERRAIN)) && !s.provenance))
         return fail(KILN_ERR_UNAVAILABLE,KILN_BUILD_BLOCK_SYMBOL_MISSING);
     std::vector<KilnVoxel> before(count),after(count),back(count);std::vector<uint8_t> mask(count,0);
     auto rc=s.read(s.context,q->origin,q->dims,before.data(),before.size());
@@ -115,11 +117,11 @@ KilnResult break_box(const Source& s,const KilnBuildBreak* q,KilnBuildBreakResul
     for(uint32_t z=0;z<q->dims[2];++z)for(uint32_t y=0;y<q->dims[1];++y)for(uint32_t x=0;x<q->dims[0];++x,++i) {
         if((q->selection && !q->selection[i]) || kind(before[i])==KILN_BUILD_BLOCK_AIR)continue;
         ++r.considered;const uint8_t m=KILN_VOXEL_MATERIAL(before[i]);
-        if(m<128 || (filtered && !(q->materials[m/8]&(1u<<(m%8))))) {++r.excluded_cells;continue;}
+        if((m<128 && !(q->flags&KILN_BUILD_BREAK_TERRAIN)) || (filtered && !(q->materials[m/8]&(1u<<(m%8))))) {++r.excluded_cells;continue;}
         int32_t h=-1,hp=-1;
         if(!s.metadata(s.context,m,&h,&hp) || h<0 || h>5 || hp<0){++r.unknown_cells;continue;}
         if(h==5){++r.unbreakable_cells;continue;}
-        if(!(q->flags&KILN_BUILD_BREAK_WORLD)) {
+        if(m<128 || !(q->flags&KILN_BUILD_BREAK_WORLD)) {
             const int32_t c[3]={q->origin[0]+static_cast<int32_t>(x),q->origin[1]+static_cast<int32_t>(y),q->origin[2]+static_cast<int32_t>(z)};
             const auto p=s.provenance(s.context,c,before[i]);
             if(p!=0){if(p==1)++r.protected_cells;else ++r.unknown_cells;continue;}

@@ -63,6 +63,12 @@ result** and the game's save keeps it. Plus WorldEdit-style schematics (`.kschem
   player bases, an edit touching a base's build zone (the game's own BuildZoneSystem list) is refused unless
   `BuildFlags.InBases`, and props that would found a base (flame altars) need `BuildFlags.AllowAltars`.
 
+## Block facts, wall searches and controlled breaking
+
+Since 0.2.0-dev.30.6: `Build.BlockAt`, `Build.FindWall` and `Build.BreakBox` expose loaded cell facts, typed
+shipped-world provenance, cell-stepped wall hits and guarded, selective breaking. See [the block API](build-blocks.md)
+for capabilities, refusal reasons, damage/drop availability and partial-commit semantics.
+
 ## Using it from a mod
 Reference `Kiln.Build` (`Private="false" ExcludeAssets="runtime"`). Everything runs on the tick thread (handlers,
 `OnLoad`, continuations after `await`).

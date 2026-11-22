@@ -67,8 +67,11 @@ int main() {
     check(break_box(s,&q,&r)==KILN_ERR_UNAVAILABLE && r.refusal==KILN_BUILD_BLOCK_SYMBOL_MISSING && writes==before,"drops refuse all without qualified seam");q.flags&=~KILN_BUILD_BREAK_DROPS;
     q.flags&=~KILN_BUILD_BREAK_INSTANT;
     check(break_box(s,&q,&r)==KILN_ERR_UNAVAILABLE && writes==before,"damage refuses all without qualified seam");q.flags|=KILN_BUILD_BREAK_INSTANT;
-    q.flags|=KILN_BUILD_BREAK_TERRAIN;
-    check(break_box(s,&q,&r)==KILN_ERR_UNAVAILABLE && writes==before,"terrain refuses all without exact clear seam");q.flags&=~KILN_BUILD_BREAK_TERRAIN;
+    q.flags|=KILN_BUILD_BREAK_TERRAIN;s.provenance=nullptr;
+    check(break_box(s,&q,&r)==KILN_ERR_UNAVAILABLE && writes==before,"terrain refuses all without provenance");s.provenance=&provenance;
+    cells[{0,0,0}]=cells[{3,0,0}]=KILN_VOXEL_MAKE(2,255);
+    check(break_box(s,&q,&r)==KILN_OK && r.removed==1 && r.protected_cells==1,"qualified exact terrain clear spares natural ground even with WORLD");q.flags&=~KILN_BUILD_BREAK_TERRAIN;
+    cells[{0,0,0}]=KILN_VOXEL_MAKE(143,0);cells.erase({3,0,0});before=writes;
     s.metadata=nullptr;
     check(break_box(s,&q,&r)==KILN_ERR_UNAVAILABLE && writes==before,"missing metadata never bypasses Unbreakable");s.metadata=&facts;
     s.provenance=nullptr;q.flags&=~KILN_BUILD_BREAK_WORLD;
