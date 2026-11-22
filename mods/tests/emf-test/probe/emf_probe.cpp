@@ -321,7 +321,7 @@ void v40_checks(EmfWorld* w) {
               A->enemy_move(w, &mo, [](EmfWorld*, uint32_t, uint32_t, void*) { ++g_v40_callbacks; }, nullptr) == 0 && mo.why[0] != 0 &&
               !A->enemy_move_cancel(1) && A->enemy_moving(w, F.villager) == 0,
           "enemy orders and moves answer 0 / false, with a reason in the order", std::string(eo.why));
-    // v43 (EMF 0.6.13) to v47 (0.6.14)
+    // v43 (EMF 0.6.13) to v47 (0.6.19)
     uint32_t perms = 0x3F;
     check(!A->player_permissions(w, F.villager, &perms) && perms == 0, "player_permissions answers false with *perms 0");
     // Non-destructive terrain-family checks: never assume the family is an unavailable stub.
