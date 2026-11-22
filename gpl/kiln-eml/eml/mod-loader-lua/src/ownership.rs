@@ -79,7 +79,10 @@ thread_local! { static DISPLACED: std::cell::RefCell<Vec<String>> = const { std:
 /// `reset_read`: kiln-eml builds from the vanilla backup, so this start's game data does not have their patches. (It
 /// publishes only in a start where ShroudForge does not run: hosted ShroudForge makes it stand aside.)
 pub(crate) fn displaced() -> Vec<String> { DISPLACED.with(|d| d.borrow().clone()) }
-fn count(n: usize) { READ.with(|r| r.set(r.get() + n as u64)); }
+fn count(n: usize) {
+    READ.with(|r| r.set(r.get() + n as u64));
+    crate::progress::archive_work::add(n as u64);
+}
 
 pub(crate) fn digest(root: &Path, path: &Path) -> io::Result<Digest> {
     checked_path(root, path)?;
@@ -628,7 +631,9 @@ pub(crate) fn prepare_from(root: &Path, from: &Path, stem: &str, files: &[PathBu
                 collisions.insert(name.to_owned(), current.unwrap());
             }
         }
-        if live.size(name)? != Some(expected.size) || live.digest(name)?.as_ref() != Some(&expected) { changed = true; }
+        // kiln-eml: whether the live file is already this one only matters to ShroudForge's handoff (Live); a Deferred
+        // publication hands nothing over, so it does not hash the live resource file to find out
+        if !deferred && (live.size(name)? != Some(expected.size) || live.digest(name)?.as_ref() != Some(&expected)) { changed = true; }
         output.insert(name.to_owned(), expected);
     }
     if !output.contains_key(&format!("{stem}.kfc")) || !output.contains_key(&format!("{stem}.kfc_resources")) {

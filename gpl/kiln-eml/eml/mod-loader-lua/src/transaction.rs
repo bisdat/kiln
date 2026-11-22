@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // kiln-eml: build privately, then publish the header last. While installing data the live header is vanilla,
 // whose containers and resource prefix are immutable. A crash at any publication boundary leaves a usable game.
-use std::{collections::BTreeMap, fs::{self, File, OpenOptions}, io::{self, Read, Seek, SeekFrom}, path::{Path, PathBuf}, rc::Rc};
+use std::{collections::BTreeMap, fs::{self, File, OpenOptions}, io::{self, Read, Seek, SeekFrom}, path::{Path, PathBuf}, rc::Rc, time::{Duration, Instant}};
+use crate::progress::archive_work::{self, Note};
 use kfc::{container::{KFCFile, KFCReader, KFCWriter, KFCWriteError}, guid::{ContentHash, ResourceId}, reflection::TypeRegistry};
 
 pub type Writer = KFCWriter<Rc<KFCFile>, Rc<TypeRegistry>>;
@@ -47,15 +48,36 @@ pub(crate) fn attributes_by_name(path: &Path) -> io::Result<u32> {
     Ok(attributes)
 }
 
+/// kiln-eml: a flush to the drive that takes longer than this gets a kiln.log line: a drive busy with another
+/// program's writes makes a start slow, and the line says where the time went.
+const SLOW_SYNC: Duration = Duration::from_secs(2);
+
+/// kiln-eml: `file.sync_all()`, with that line (`what`: the file, for the line).
+pub(crate) fn sync_file(file: &File, what: &Path) -> io::Result<()> {
+    let began = Instant::now();
+    file.sync_all()?;
+    slow_sync(began, what);
+    Ok(())
+}
+
+fn slow_sync(began: Instant, what: &Path) {
+    let took = began.elapsed();
+    if took >= SLOW_SYNC {
+        let name = what.file_name().map_or_else(|| what.display().to_string(), |n| n.to_string_lossy().into_owned());
+        tracing::warn!("Flushing {name} to the drive took {:.1} s: the drive is busy or slow, which makes this start slow", took.as_secs_f64());
+    }
+}
+
 pub(crate) fn sync_dir(dir: &Path) -> io::Result<()> {
-    #[cfg(unix)] { File::open(dir)?.sync_all()?; }
+    #[cfg(unix)] { sync_file(&File::open(dir)?, dir)?; }
     #[cfg(windows)] {
         if under_wine() {
             use std::os::windows::fs::OpenOptionsExt;
             // Wine's MoveFileEx ignores WRITE_THROUGH. A writable directory handle maps FlushFileBuffers to
             // fsync(dirfd), making the vanilla-header barrier and each subsequent rename durable on Unix too.
-            OpenOptions::new().read(true).write(true).custom_flags(0x02000000) // FILE_FLAG_BACKUP_SEMANTICS
-                .open(dir)?.sync_all()?;
+            let handle = OpenOptions::new().read(true).write(true).custom_flags(0x02000000) // FILE_FLAG_BACKUP_SEMANTICS
+                .open(dir)?;
+            sync_file(&handle, dir)?;
         }
     }
     #[cfg(not(any(unix, windows)))] { let _ = dir; }
@@ -109,7 +131,7 @@ pub fn replace(src: &Path, dst: &Path) -> io::Result<()> {
 /// A same-volume rename that can never replace an existing recovery file.
 pub(crate) fn move_new(src: &Path, dst: &Path) -> io::Result<()> {
     regular(src)?;
-    OpenOptions::new().read(true).write(true).open(src)?.sync_all()?;
+    sync_file(&OpenOptions::new().read(true).write(true).open(src)?, src)?;
     #[cfg(target_os = "linux")] {
         use std::{ffi::CString, os::unix::ffi::OsStrExt};
         unsafe extern "C" { fn renameat2(a: i32, src: *const std::ffi::c_char, b: i32, dst: *const std::ffi::c_char, flags: u32) -> i32; }
@@ -150,8 +172,8 @@ fn copy_via_temp(src: &Path, dst: &Path, own_record: bool) -> io::Result<()> {
         let mut f = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
         #[cfg(test)]
         TEMP_OPEN.with(|check| { if let Some(check) = check.take() { check(&tmp); } });
-        io::copy(&mut File::open(src)?, &mut f)?;
-        f.sync_all()?;
+        copy_counted(&mut File::open(src)?, &mut f)?;
+        sync_file(&f, dst)?;
         drop(f);
         failpoint!("temp.written", dst);
         replace(&tmp, dst)?;
@@ -170,6 +192,26 @@ fn copy_via_temp(src: &Path, dst: &Path, own_record: bool) -> io::Result<()> {
     result
 }
 
+/// kiln-eml: `io::copy` in 1 MiB steps, each counted for the startup pass's progress (`archive_work`). Windows' std
+/// copies 8 KiB at a time, a system call each way (and through Wine's file layer under Proton): the resource backup
+/// alone is over 200 MiB on a client.
+fn copy_counted(src: &mut File, dst: &mut File) -> io::Result<u64> {
+    use std::io::Write;
+    let mut buffer = vec![0u8; 1 << 20];
+    let mut copied = 0u64;
+    loop {
+        let n = match src.read(&mut buffer) {
+            Ok(0) => return Ok(copied),
+            Ok(n) => n,
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(e),
+        };
+        dst.write_all(&buffer[..n])?;
+        archive_work::add(n as u64);
+        copied += n as u64;
+    }
+}
+
 pub fn atomic_write(dst: &Path, bytes: &[u8]) -> io::Result<()> {
     use std::io::Write;
     let tmp = dst.with_extension(format!("kiln-{}", uuid::Uuid::new_v4()));
@@ -178,7 +220,7 @@ pub fn atomic_write(dst: &Path, bytes: &[u8]) -> io::Result<()> {
     let result = (|| {
         let mut f = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
         f.write_all(bytes)?;
-        f.sync_all()?;
+        sync_file(&f, dst)?;
         drop(f);
         failpoint!("temp.written", dst);
         replace(&tmp, dst)?;
@@ -755,12 +797,13 @@ impl PatchWriter {
 
     /// kiln-eml: finalize/close/flush/read-validate only. No ownership::prepare, SF access, or live replace.
     pub(crate) fn prepare(mut self) -> Result<PreparedArchive, KFCWriteError> {
+        archive_work::mark(Note::Checking);
         self.writer.take().ok_or_else(|| io::Error::other("archive writer already finalized"))?.finalize()?;
         failpoint!("prepare.finalized", self.stage);
         let target = self.target.as_ref().ok_or_else(|| io::Error::other("no captured archive target"))?;
         target.check(&self.game, &self.stage, self.held.as_ref())?;
         let files = self.stage_files()?;
-        for path in &files { OpenOptions::new().read(true).write(true).open(path)?.sync_all()?; }
+        for path in &files { sync_file(&OpenOptions::new().read(true).write(true).open(path)?, path)?; }
         sync_dir(self.at())?;
         failpoint!("prepare.synced", self.stage);
         // Bind validation to the SAME bytes, not a new digest taken only after the reader passed.
@@ -800,11 +843,12 @@ impl PatchWriter {
     }
     /// kiln-eml: the publication in a ShroudForge handoff mode, recording a BASE origin (`Publication`).
     fn publish_as(&self, publication: &crate::ownership::Publication, mut boundary: impl FnMut(usize) -> io::Result<()>) -> io::Result<()> {
+        archive_work::mark(Note::Publishing);
         let header = format!("{}.kfc", self.name);
         let mut data = self.children()?;
         data.retain(|p| p.file_name() != Some(std::ffi::OsStr::new(VANILLA_HEADER)));
         data.sort();
-        for p in &data { regular(p)?; OpenOptions::new().read(true).write(true).open(p)?.sync_all()?; }
+        for p in &data { regular(p)?; sync_file(&OpenOptions::new().read(true).write(true).open(p)?, p)?; }
         // SF's locks (when its prepared-output state was handed over) stay held until the patched header is live
         let mut prepared = crate::ownership::prepare_from(&self.game, self.at(), &self.name, &data, publication)?;
         // No old patched header may refer to the containers we are about to replace.
@@ -953,6 +997,7 @@ fn read_content(patch: &PatchWriter, index: &KFCFile, id: &ContentHash) -> io::R
     f.seek(SeekFrom::Start(entry.offset))?;
     let mut bytes = vec![0; id.size() as usize];
     f.read_exact(&mut bytes)?;
+    archive_work::add(bytes.len() as u64);
     if ContentHash::from_data(&bytes) != *id { return Err(io::Error::other("staged content hash mismatch")); }
     Ok(Some(bytes))
 }
@@ -963,6 +1008,7 @@ fn same_prefix(a: &Path, b: &Path, len: u64) -> io::Result<()> {
     loop {
         let n = a.read(&mut x)?;
         b.read_exact(&mut y[..n])?;
+        archive_work::add(2 * n as u64);
         if x[..n] != y[..n] { return Err(io::Error::other("staged resources changed the immutable baseline prefix")); }
         if n == 0 { return Ok(()); }
     }
@@ -1018,8 +1064,25 @@ fn validate_stage(patch: &PatchWriter, base: &KFCFile) -> io::Result<KFCFile> {
         let bytes = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| reader.read_resource(id)))
             .map_err(|_| io::Error::other("invalid staged resource data"))??.ok_or_else(|| io::Error::other("resource has no chunk"))?;
         if bytes.len() as u64 != size { return Err(io::Error::other("staged resource decoded size mismatch")); }
+        archive_work::add(size);
     }
-    for id in file.contents().keys() { read_content(patch, &file, id)?; }
+    // kiln-eml: every content of the stage's own containers is read back and its hash checked. A content of one of the
+    // baseline's containers that the baseline index lists at the same place is the game's own: the writer only appends
+    // containers (`container_path` refuses a stage file over a baseline one), and those files are held by the input
+    // witness, by identity, change time and length, from the capture until the publication (`TargetSnapshot::check`
+    // before and after this validation, and again before publishing). Reading them back would read the whole game
+    // install (48 GiB on a client) at every publication that is not cached, for no proof the witness does not give: such
+    // a content keeps its range check only. Any other content in a baseline container is read and checked.
+    for (id, entry) in file.contents().iter() {
+        let baseline = entry.container_index < base.containers().len()
+            && base.contents().get(id).is_some_and(|b| (b.offset, b.flags, b.container_index) == (entry.offset, entry.flags, entry.container_index));
+        if baseline {
+            let info = file.containers().get(entry.container_index).ok_or_else(|| io::Error::other("content container missing"))?;
+            range(entry.offset, id.size() as u64, info.size)?;
+        } else {
+            read_content(patch, &file, id)?;
+        }
+    }
     Ok(file)
 }
 
@@ -1193,6 +1256,44 @@ pub(crate) mod tests {
         assert!(w.publish(|_| panic!("busy SF allowed an archive write")).is_err());
         assert_eq!(fs::read(game.join("g.kfc")).unwrap(), b"old");
         drop((w, lock));
+        fs::remove_dir_all(game).unwrap();
+    }
+    // kiln-eml: validation reads the stage's own containers back and checks every content's hash there; a content of one
+    // of the baseline's containers that the baseline lists at the same place is the game's own, held by the witness, and
+    // is not read again (a client's containers hold 48 GiB).
+    #[test]
+    fn validation_reads_the_stages_own_containers_back_and_not_the_baselines() {
+        use kfc::guid::ContentHash;
+        let game = std::env::temp_dir().join(format!("kiln-validate-reads-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&game).unwrap();
+        File::create(game.join("g.kfc")).unwrap();
+        File::create(game.join("g.kfc_resources")).unwrap();
+        let types = Rc::new(TypeRegistry::default());
+        let mut vanilla = Writer::new(&game, "g", types.clone(), "fixture").unwrap();
+        vanilla.write_content(&ContentHash::from_data(b"original"), b"original").unwrap();
+        vanilla.finalize().unwrap();
+        // a byte of the game's own container that its index does not vouch for (never so in a real install: here it
+        // shows whether validation reads that container back)
+        let dat = game.join("g_000.dat");
+        let mut bytes = fs::read(&dat).unwrap();
+        bytes[0] ^= 0xff;
+        fs::write(&dat, &bytes).unwrap();
+        let dir = camino::Utf8Path::from_path(&game).unwrap();
+        crate::load::create_backup(dir.join("g.kfc")).unwrap();
+        let base = Rc::new(KFCFile::from_path(game.join("g.kfc.bak"), false).unwrap());
+        let mut patch = crate::load::create_writer(dir, "g", &types, &base).unwrap();
+        patch.write_content(&ContentHash::from_data(b"new content"), b"new content").unwrap();
+        patch.writer.take().unwrap().finalize().unwrap();
+        let index = validate_stage(&patch, &base).expect("the baseline's container is not read back");
+        assert_eq!(index.contents().len(), 2);
+        // the stage's own container is read back: a byte changed there is refused
+        let own = patch.at().join("g_001.dat");
+        let mut staged = fs::read(&own).unwrap();
+        staged[0] ^= 0xff;
+        fs::write(&own, &staged).unwrap();
+        let error = validate_stage(&patch, &base).unwrap_err();
+        assert!(error.to_string().contains("staged content hash mismatch"), "{error}");
+        drop(patch);
         fs::remove_dir_all(game).unwrap();
     }
     #[test]

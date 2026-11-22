@@ -495,6 +495,20 @@ Each is marked `kiln-eml:` in the source.
     `startup-grant-missing` reason quotes it (`base-not-restored` first, else the first attempt's error, else the
     warning that ended the start). EML mode (Live) is unchanged. Tests: `m6_hosted_restore.rs`, ownership.rs
     `hosted_shroudforge_output_is_proven_by_its_whole_record_only`.
+39. `mod-loader-lua` `transaction.rs` (`validate_stage`, `sync_file`, `copy_counted`) and `ownership.rs` (`prepare_from`)
+    (kiln-eml's own code): a publication that is not cached no longer reads the game's containers back. The check of a
+    staged archive read every content of every container the header lists, the game's own included: 48 GiB on a client,
+    at every first kiln-mode start, every start whose packages or settings changed, and every EML run that was not cached
+    (a first kiln-mode start took 160 s for one small package; an 8 GiB synthetic archive took 30 s, 26 s of them in that
+    read). It still reads back and hashes every content of the stage's own containers and decodes every resource; a
+    content of one of the baseline's containers that the baseline index lists at the same place keeps its range check only:
+    the writer only appends containers, and the input witness holds the baseline's container files (identity, change
+    time, length) from the capture to the publication, checked before and after the validation and again before
+    publishing. Any other content in a baseline container is read and checked as before. A Deferred publication no longer
+    hashes the live resource file just to tell ShroudForge's handoff whether it changed (it hands nothing over). Staging
+    copies move 1 MiB at a time. A flush to the drive that takes two seconds or more logs which file and how long. Tests:
+    transaction.rs `validation_reads_the_stages_own_containers_back_and_not_the_baselines`, and `m6_startup_timing.rs`
+    (ignored: a client-sized archive, run by hand).
 
 The plugin validates paths from each authorized root down (root included), leaving linked Steam/Wine layout
 ancestors alone; it also checks final resolved containment. Profile paths resolve against `<game>/kiln`.

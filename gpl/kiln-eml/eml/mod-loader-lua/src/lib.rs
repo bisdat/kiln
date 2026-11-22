@@ -23,6 +23,8 @@ macro_rules! failpoint {
 pub use cache::FingerprintStats;
 // kiln-eml: what a run is doing, for the people waiting for it (progress.rs).
 pub use progress::{Event, Progress, ProgressGuard, Sink, Stage, Timing};
+// kiln-eml: the startup pass's progress from the archive work itself (progress.rs)
+pub use progress::archive_work;
 
 mod runner;
 mod definition;
