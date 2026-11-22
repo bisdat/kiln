@@ -217,6 +217,7 @@ internal static unsafe class MarkerAnchors
         public bool TryClaim() => Interlocked.CompareExchange(ref _state, 1, 0) == 0;
         public bool TryEnd() => Interlocked.CompareExchange(ref _state, 2, 0) == 0;  // only a waiting ticket ends from outside
         public void Ended() => Volatile.Write(ref _state, 2);
+        public bool IsEnded => Volatile.Read(ref _state) == 2;
     }
 
     /// <summary>kiln.markers' epoch of a world kind now (any thread); 0 without a world or the table.</summary>
@@ -243,7 +244,13 @@ internal static unsafe class MarkerAnchors
             WatchLocked(mod);
             _timer ??= new Timer(_ => CheckEpochs(), null, TimerPeriod, TimerPeriod);
         }
-        if (cancel.CanBeCanceled) ticket.Registration = cancel.Register(() => Canceled(ticket));
+        if (cancel.CanBeCanceled)
+        {
+            ticket.Registration = cancel.Register(() => Canceled(ticket));
+            // the 100 ms epoch check can end the ticket before the registration above was stored; End then disposed an
+            // empty registration, so this one goes here (disposing twice is harmless) (review N2)
+            if (ticket.IsEnded) ticket.Registration.Dispose();
+        }
         PostToClient(() => Run(ticket));
         return ticket.Done.Task;
     }
