@@ -184,7 +184,7 @@ if (_found is { State: OutlineState.Waiting, Reason: OutlineReason.NoModel }) Hu
 | `Pulse` | the colour breathes (1.2 s period, 40 % to 100 % brightness) |
 | `Priority` | among mods' outlines on the same entity: the highest wins; on a tie, the newest. When more than two colours are in use, the colours of the highest-priority outlines keep the two groups |
 | `Duration` | null (the default): until disposed. Otherwise above zero and at most `uint.MaxValue` ms (`ArgumentOutOfRangeException`) |
-| `ThroughWalls` | (0.2.0-dev.30.5, mod API 0.2.14) also seen through walls: Kiln draws its own screen-space silhouette on its UI layer every frame, a hull of a box about 1.2 m wide and high at the entity's position, projected with the camera world labels use, as an outline plus a soft fill in `Color`, breathing with `Pulse`, ending with the outline. Row `ui.world_outline.through_walls` (`Ui.World.ThroughWallsAvailable`); while it is off the outline shows without the silhouette |
+| `ThroughWalls` | (0.2.0-dev.30.5, mod API 0.2.14) also seen through walls: Kiln draws its own screen-space silhouette on its UI layer every frame, a hull of a box about 1.2 m wide and high at the entity's position, projected with the camera world labels use, as an outline plus a soft fill in `Color`, breathing with `Pulse`, ending with the outline. Row `ui.world_outline.through_walls` (`Ui.World.ThroughWallsAvailable`); asking while it is off throws `KilnUnavailableException` with that row's reason. Only a `Shown` outline draws a silhouette; suppression and priority follow the normal outline |
 
 ### States
 `WorldOutline.State` and `Reason` ask kiln.render at each read. `Active` is `State != Ended`. `ColorShared`: a
@@ -215,7 +215,16 @@ A waiting outline takes over when the reason goes away (the winner ends, the mod
   position, `KILN_RENDER_OUTLINE_THROUGH_WALLS`), Kiln.Ui projects a box at it and draws the hull over everything. It is a
   box, not the model's shape (a mesh-shaped silhouette needs a pass inside the game's renderer: not planned), and it shows
   where the model is in view too, next to the game's highlight. Nothing is drawn while the camera or the position is not
-  known, or a corner is behind the camera.
+  known, or a corner is behind the camera. The silhouette follows the native outline's suppression and winner: only
+  `Shown` draws, never `Waiting` or `GameHighlight`. Turning outlines off hides it too. New requests are refused with
+  the `ui.world_outline.through_walls` capability's reason when that row is unavailable; existing requests draw no
+  silhouette until it returns. Expiry, despawn, leaving the world and mod unload retire the silhouette automatically,
+  without the mod reading `State` or disposing an ended handle.
+- **Client check:** outline an entity behind a wall with `ThroughWalls = true`: its box silhouette should show. Turn
+  outlines off: it should disappear. With two requests on that entity, only the highest-priority/newest winner should
+  draw; remove the winner and the waiting request should take over. Let a short duration expire, despawn the entity,
+  or unload the mod: the silhouette should disappear without a state read. A missing through-walls capability should
+  refuse the request with its reason, while a normal outline can still be requested if its own capability is available.
 - **Many at once.** Kiln reads up to 64 entities' models per client step, so a batch of hundreds lights up over a few
   steps. A model that is remade (or hidden) is noticed at the next step; one that appears later (streamed in, shown
   again) is found within 16 steps.

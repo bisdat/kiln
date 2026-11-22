@@ -274,18 +274,28 @@ internal sealed unsafe class RenderFake : IKitFake
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int OutlineInfo(ulong handle, RenderNative.OutlineInfo* o)
     {
-        if (o == null || o->Size < (uint)sizeof(RenderNative.OutlineInfo)) return FakeTables.InvalidArgument;
-        if (State is not { } st) return FakeTables.NotFound;
-        lock (st.Lock)
-        {
-            if (Find(st, handle) is not { } r) return FakeTables.NotFound;
-            o->State = r.State;
-            o->Reason = r.Reason;
-            o->Entity = r.Entity;
-            o->Group = r.Group;
-            o->Merged = r.Merged;
-        }
-        return FakeTables.Ok;
+        // v3's position tail is optional: native outline_info still accepts the v2 24-byte prefix, and never writes a
+        // partial position record. Unmodelled positions stay zero even when the caller's buffer contained old data.
+        const uint oldSize = 24;
+        if (o == null || o->Size < oldSize) return FakeTables.InvalidArgument;
+        var size = o->Size >= (uint)sizeof(RenderNative.OutlineInfo) ? (uint)sizeof(RenderNative.OutlineInfo) : oldSize;
+        RenderNative.OutlineInfo full = new() { Size = size };
+        var rc = FakeTables.NotFound;
+        if (State is { } st)
+            lock (st.Lock)
+            {
+                if (Find(st, handle) is { } r)
+                {
+                    full.State = r.State;
+                    full.Reason = r.Reason;
+                    full.Entity = r.Entity;
+                    full.Group = r.Group;
+                    full.Merged = r.Merged;
+                    rc = FakeTables.Ok;
+                }
+            }
+        Buffer.MemoryCopy(&full, o, size, size);
+        return rc;
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]

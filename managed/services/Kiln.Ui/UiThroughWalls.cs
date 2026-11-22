@@ -15,27 +15,36 @@ internal static unsafe class ThroughWalls
     internal const double HalfWidth = 0.6, Height = 1.2;
     internal const float FillShare = 0.28f, Thickness = 2f;
 
+    private static readonly object Gate = new();
     private static int _drawing;
     private static readonly Action<UiDraw> DrawFn = Draw;
 
     /// <summary>A through-walls outline was added: draw from the next overlay frame on.</summary>
     internal static void Started()
     {
-        if (Interlocked.CompareExchange(ref _drawing, 1, 0) != 0) return;
         UiEngine.EnsureStarted();
-        var prev = ModContext.CurrentMod;
-        ModContext.CurrentMod = null;  // Kiln's own handler: a mod's unload must not take it
-        try { UiEngine.FrameHandlers.Add(DrawFn); }
-        finally { ModContext.CurrentMod = prev; }
+        lock (Gate)
+        {
+            // Dispose/unload may have removed the request before its registration reached here.
+            if (_drawing != 0 || WorldOutlines.LiveThroughWalls().Count == 0) return;
+            var prev = ModContext.CurrentMod;
+            ModContext.CurrentMod = null;  // Kiln's own handler: a mod's unload must not take it
+            try { UiEngine.FrameHandlers.Add(DrawFn); }
+            finally { ModContext.CurrentMod = prev; }
+            Volatile.Write(ref _drawing, 1);
+        }
         UiEngine.Recount();
     }
 
-    private static void StopIfIdle()
+    internal static void StopIfIdle()
     {
-        if (WorldOutlines.LiveThroughWalls().Count != 0 || Interlocked.CompareExchange(ref _drawing, 0, 1) != 1) return;
-        UiEngine.FrameHandlers.Remove(DrawFn);
+        lock (Gate)
+        {
+            if (_drawing == 0 || WorldOutlines.LiveThroughWalls().Count != 0) return;
+            UiEngine.FrameHandlers.Remove(DrawFn);
+            Volatile.Write(ref _drawing, 0);
+        }
         UiEngine.Recount();
-        if (WorldOutlines.LiveThroughWalls().Count != 0) Started();  // one came in between
     }
 
     internal static bool Drawing => Volatile.Read(ref _drawing) != 0;
@@ -50,14 +59,27 @@ internal static unsafe class ThroughWalls
             return;
         }
         var t = RenderNative.T;
-        if (t == null || !Render.CameraAvailable) return;
-        var cam = Render.Camera;
+        var canDraw = Ui.World.ThroughWallsAvailable && Ui.World.OutlinesAvailable && t != null && Render.CameraAvailable;
+        var cam = canDraw ? Render.Camera : default;
         Span<Vector2> corners = stackalloc Vector2[8];
         Span<Vector2> hull = stackalloc Vector2[9];
         var now = Environment.TickCount64;
         foreach (var o in live)
         {
-            if (WorldOutlines.Info(o.Handle) is not { } i || i.State == RenderNative.OutlineEnded || i.PositionOk == 0) continue;
+            // Retire before checking drawing dependencies: a missing camera/capability must not keep ended handles alive.
+            if (WorldOutlines.Info(o.Handle) is not { } i)
+            {
+                WorldOutlines.Forget(o, o.Mod is { Alive: false } ? OutlineReason.ModUnloaded : OutlineReason.Removed);
+                continue;
+            }
+            if (i.State == RenderNative.OutlineEnded)
+            {
+                WorldOutlines.Forget(o, (OutlineReason)i.Reason);
+                continue;
+            }
+            // Only the native winner that actually shows may add a silhouette. Waiting (including off/outshone/no
+            // model) and the game's/another tool's highlight follow exactly the normal outline's suppression rules.
+            if (!canDraw || i.State != RenderNative.OutlineShown || i.PositionOk == 0) continue;
             var n = Silhouette(cam, new WorldPosition(i.X, i.Y, i.Z), ui.Width, ui.Height, corners, hull);
             if (n < 3) continue;
             var a = Alpha(o.Options.Pulse, now);
@@ -68,6 +90,7 @@ internal static unsafe class ThroughWalls
                 t->Polyline((float*)p, (uint)n, c.WithAlpha((byte)Math.Clamp(c.A * a, 0, 255)).Rgba, Thickness * ui.Scale, 1, 0);
             }
         }
+        StopIfIdle();
     }
 
     /// <summary>The breathing of <see cref="OutlineOptions.Pulse"/> as kiln.render's palette does it: a 1.2 s period, 40 % to
