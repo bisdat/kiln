@@ -160,7 +160,7 @@ internal sealed class UiWindowState
         return done?.Task ?? Task.FromResult(new UiStateResult(true, null, null));
     }
 
-    /// <summary>Commits the queued writes in order. Pump (client main).</summary>
+    /// <summary>Commits the queued writes in order. Pump (the service tick); the events go to the client's main thread.</summary>
     public void Commit()
     {
         while (_queue.TryDequeue(out var w))
@@ -180,7 +180,7 @@ internal sealed class UiWindowState
             w.Done?.TrySetResult(result);
             if (!result.Ok && w.Done == null && w.Cause is UiStateChangeCause.Widget or UiStateChangeCause.Action && result.Reason?.StartsWith(UiStateReasons.Budget, StringComparison.Ordinal) == true && _refusedLogged.Add(w.Key))
                 BlocksBridge.Log(LogLevel.Warn, $"blocks: {Mod}: ui: window {Window}: a widget's write was refused: {result.Reason} (declare a larger entry)");
-            if (events != null) foreach (var e in events) Events.Post(e);
+            if (events != null) foreach (var e in events) UiRuntime.PostEvent(e);
         }
     }
 
@@ -247,7 +247,7 @@ internal sealed class UiWindowState
             _bytes = size;
         }
         Commit();  // the old session's writes answer StaleSession
-        Events.Post(new UiWindowStateResetEvent(Window, old.Version, now.Version));
+        UiRuntime.PostEvent(new UiWindowStateResetEvent(Window, old.Version, now.Version));
     }
 
     /// <summary>The window is gone (its mod unloaded or it was defined again): queued writes answer Unloaded.</summary>

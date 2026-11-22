@@ -645,6 +645,37 @@ public sealed class UiRichBlockTests : IDisposable
         Assert.Empty(_events);
     }
 
+    [Fact]
+    public void State_and_data_events_go_to_the_clients_main_thread_queue()
+    {
+        // review S3: the Pump commits on the service tick (the server's thread on a host); the state and data events are handed
+        // to the client event queue (the game's main thread in the client world's next step), not posted from the Pump's thread
+        var queued = new List<KilnEvent>();
+        var before = UiRuntime.PostEvent;
+        UiRuntime.PostEvent = queued.Add;
+        try
+        {
+            Define("w", Json<WindowBlock>(RichJson));
+            var w = Open();
+            var c = new Canvas();
+            c.Typing["Note###in"] = ("hi", UiItemState.Active | UiItemState.Deactivated, true);
+            Frame(w, c);
+            UiRuntime.Pump();
+            using var reg = UiDataRegistry.Define(Mod, "s3", new UiDataSchema(UiDataShape.Scalar, ScalarType: UiScalarType.String));
+            _ = UiDataRegistry.Publish(Mod, "s3", new UiDataSnapshot.Scalar(new UiScalar.String("x")));
+            UiRuntime.Pump();
+            w.State.Reset();
+        }
+        finally
+        {
+            UiRuntime.PostEvent = before;
+        }
+        Assert.Contains(queued, e => e is UiWindowStateChangedEvent);
+        Assert.Contains(queued, e => e is UiBindingValueChangedEvent);
+        Assert.Contains(queued, e => e is UiWindowStateResetEvent);
+        Assert.Empty(_events);
+    }
+
     // ---- live values: demand -----------------------------------------------------------------------------------------
 
     [Fact]

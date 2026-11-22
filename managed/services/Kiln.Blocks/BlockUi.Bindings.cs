@@ -31,7 +31,8 @@ public static partial class BlockUi
             return UiDataRegistry.Define(mod, id, schema);
         }
 
-        /// <summary>Publishes a snapshot of a source: copied and checked at once, committed on the client's main thread. A
+        /// <summary>Publishes a snapshot of a source: copied and checked at once, committed at Kiln's next service tick
+        /// (UiBindingValueChangedEvent then comes on the game's main thread). A
         /// tree with a repeated key, a missing parent or a loop, or rows with a repeated key, are refused whole (the last
         /// publication stays); a newer publication before the commit makes this one Superseded.</summary>
         /// <exception cref="ArgumentException">The snapshot does not fit the schema (shape, a missing field, a field's type).</exception>

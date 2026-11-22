@@ -133,8 +133,8 @@ public enum UiStateChangeCause
     Pruned = 4,
 }
 
-/// <summary>A window's declared state entry changed (one event per changed entry, all at the new version). Client main
-/// thread, after the write was committed.</summary>
+/// <summary>A window's declared state entry changed (one event per changed entry, all at the new version). On the game's
+/// main thread in the client world's next step after the write was committed (at once in a menu, with no client world).</summary>
 public sealed class UiWindowStateChangedEvent(WindowRef window, string key, UiStateValue? before, UiStateValue? after,
     UiStateVersion version, UiStateChangeCause cause) : KilnEvent
 {
@@ -146,7 +146,8 @@ public sealed class UiWindowStateChangedEvent(WindowRef window, string key, UiSt
     public UiStateChangeCause Cause { get; } = cause;
 }
 
-/// <summary>An unbound tab bar or tree of a window changed what it holds (the row's id in <see cref="RowId"/>).</summary>
+/// <summary>An unbound tab bar or tree of a window changed what it holds (the row's id in <see cref="RowId"/>). On the
+/// game's main thread, as <see cref="UiWindowStateChangedEvent"/>.</summary>
 public sealed class UiControlStateChangedEvent(WindowRef window, string rowId, UiControlState? before, UiControlState after,
     UiStateVersion version, UiStateChangeCause cause) : KilnEvent
 {
@@ -158,7 +159,8 @@ public sealed class UiControlStateChangedEvent(WindowRef window, string rowId, U
     public UiStateChangeCause Cause { get; } = cause;
 }
 
-/// <summary>A window's state went back to its initial values with a new session token: a new world.</summary>
+/// <summary>A window's state went back to its initial values with a new session token: a new world. On the game's main
+/// thread, as <see cref="UiWindowStateChangedEvent"/>.</summary>
 public sealed class UiWindowStateResetEvent(WindowRef window, UiStateVersion oldVersion, UiStateVersion newVersion) : KilnEvent
 {
     public WindowRef Window { get; } = window;
@@ -248,7 +250,7 @@ public sealed class UiDataRegistration : IKilnResult, IDisposable
     public void Dispose() => Interlocked.Exchange(ref _remove, null)?.Invoke();
 }
 
-/// <summary>A data source's publication was committed.</summary>
+/// <summary>A data source's publication was committed. On the game's main thread, as <see cref="UiWindowStateChangedEvent"/>.</summary>
 public sealed class UiBindingValueChangedEvent(string mod, string id, ulong oldVersion, ulong newVersion) : KilnEvent
 {
     public string Mod { get; } = mod;

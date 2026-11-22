@@ -20,8 +20,8 @@ public static partial class BlockUi
     }
 
     /// <summary>
-    /// Sets one state entry of one of this mod's windows. The write is queued and committed on the client's main thread; the
-    /// task ends then with the snapshot after it (a write of the value the entry has is accepted and changes nothing). With
+    /// Sets one state entry of one of this mod's windows. The write is queued and committed at Kiln's next service tick
+    /// (the server's thread on a host); the task ends then with the snapshot after it (a write of the value the entry has is accepted and changes nothing). With
     /// <paramref name="expected"/> it is refused (StaleVersion) unless the window is still at that version; without it, it is
     /// still refused (StaleSession) when the world changes first. A selection entry (a table's, tree's or tabs' Selected)
     /// takes only a key the row shows now, or "".

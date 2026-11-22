@@ -193,10 +193,12 @@ write past `maxBytes`, `maxItems` or a range (a long table row key, a third expa
 with one warning in the log.
 
 From C#: `BlockUi.State(window)` reads one of the mod's own windows at one version, `BlockUi.SetState(window, key, value,
-expected)` writes one entry. Writes commit in order on the client's main thread; a changed write advances the revision
-once and posts `UiWindowStateChangedEvent` (a tab bar or tree that keeps its own state: `UiControlStateChangedEvent`);
-writing the value an entry has is accepted and changes nothing. A new world posts `UiWindowStateResetEvent` with a new
-session token, and writes asked for before it are refused `StaleSession`.
+expected)` writes one entry. Writes commit in order at Kiln's next service tick (the server's thread on a host); a
+changed write advances the revision once and posts `UiWindowStateChangedEvent` (a tab bar or tree that keeps its own
+state: `UiControlStateChangedEvent`); writing the value an entry has is accepted and changes nothing. A new world posts
+`UiWindowStateResetEvent` with a new session token, and writes asked for before it are refused `StaleSession`. These
+events, and `UiBindingValueChangedEvent`, come on the game's main thread in the client world's next step (at once in a
+menu, where there is no client world), so a handler may touch the client's own state.
 
 ### A mod's own data
 
@@ -204,7 +206,7 @@ session token, and writes asked for before it are refused `StaleSession`.
 and for trees `parent`, `label`, `depth` are built in), before the blocks that bind it as `mod.<id>`. Define it on every
 side: a dedicated server has no overlay, but it checks and keeps the windows that bind it. `Publish` needs an overlay
 (`ui.blocks.bindings`; guard it with `Ui.Available`).
-`BlockUi.Bindings.Publish(id, snapshot)` copies a snapshot at once and commits it on the client's main thread
+`BlockUi.Bindings.Publish(id, snapshot)` copies a snapshot at once and commits it at Kiln's next service tick
 (`UiBindingValueChangedEvent`); a newer publication before the commit makes the older one `Superseded`. Rows with a
 repeated key, and a tree with a repeated key, a missing parent, a loop or more than 8 levels are refused whole: the last
 publication stays. 64 sources, 512 rows or nodes and 64 KiB a publication, 256 KiB per mod. A mod reads only its own

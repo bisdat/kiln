@@ -149,6 +149,15 @@ internal static class UiRuntime
     /// <summary>Milliseconds, for refresh rates and edits. Tests replace it.</summary>
     internal static Func<long> Clock = static () => Environment.TickCount64;
 
+    /// <summary>Where the windows' state and data events go (UiWindowStateChangedEvent, UiControlStateChangedEvent,
+    /// UiWindowStateResetEvent, UiBindingValueChangedEvent): the game's main thread in the client world's next step, as
+    /// Kiln's other client events (the Pump commits on the service tick, which is the server's thread on a host). With no
+    /// client world (a menu) they are posted at once. Tests replace it.</summary>
+    internal static Action<KilnEvent> PostEvent = static e =>
+    {
+        if (ClientEvents.Session == 0 || !ClientEvents.Enqueue(e)) Events.Post(e);
+    };
+
     internal static Func<Action<ulong>, IDisposable> SubscribeTick = static tick => BlocksBridge.AddTick("kiln blocks ui", tick);
 
     /// <summary>Whether blocks are drawn here: a client with an overlay.</summary>

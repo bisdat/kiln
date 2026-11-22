@@ -161,7 +161,7 @@ internal static partial class UiDataRegistry
         foreach (var (s, old, now, done) in committed)
         {
             done.TrySetResult(new UiDataPublishResult(true, null, now));
-            if (Events.HasSubscribers<UiBindingValueChangedEvent>()) Events.Post(new UiBindingValueChangedEvent(s.Mod, s.Id, old, now));
+            if (Events.HasSubscribers<UiBindingValueChangedEvent>()) UiRuntime.PostEvent(new UiBindingValueChangedEvent(s.Mod, s.Id, old, now));
         }
     }
 
