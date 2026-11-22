@@ -194,7 +194,8 @@ internal sealed class UiServerCommands
         }
         if (m.Nonce != p.Nonce)
         {
-            if (p.Requests.Take(Clock())) Reply(p, m.Nonce, id, UiCommandState.Final, false, UiCommandCode.AssociationChanged, "not this connection's current hello: nothing was run", [], false);
+            // echo it only when it has a nonce's form (the client matches its replies on it); never up to 32 KiB of anything
+            if (p.Requests.Take(Clock())) Reply(p, UiCommandWire.NonceOk(m.Nonce) ? m.Nonce : "", id, UiCommandState.Final, false, UiCommandCode.AssociationChanged, "not this connection's current hello: nothing was run", [], false);
             return;
         }
         var line = m.Line ?? "";

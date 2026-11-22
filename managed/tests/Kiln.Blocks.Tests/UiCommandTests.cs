@@ -473,6 +473,22 @@ public sealed class UiCommandTests : IDisposable
         Assert.Equal("permissionDenied", UiCommandWire.CodeName(UiCommandCode.PermissionDenied));
     }
 
+    [Fact]
+    public void A_request_under_a_bad_nonce_gets_no_echo_of_it()
+    {
+        // review nit: the reply to a request under another nonce echoes it only when it has the nonce's form
+        var a = new Conn("a");
+        Join(a, 7);
+        var junk = new string('x', 4000);
+        Req(a, junk, 1, "x");
+        var r = Assert.Single(Replies(a, 1));
+        Final(r, UiCommandCode.AssociationChanged);
+        Assert.Equal("", r.Nonce);
+        Req(a, "ffffffffffffffffffffffffffffffff", 2, "x");
+        Assert.Equal("ffffffffffffffffffffffffffffffff", Last(a, 2).Nonce);  // a well-formed one is echoed (the client matches on it)
+        Assert.Equal(0, Ran("x"));
+    }
+
     // ---- the client ---------------------------------------------------------------------------------------------------
 
     private readonly List<object> _out = new();
