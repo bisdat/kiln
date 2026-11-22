@@ -1332,6 +1332,7 @@ void bind_shape_pools(std::vector<Shape>* shapes, const std::vector<PoolDefiniti
         const std::string head="block blueprint "+sh.block+" (mod "+sh.mod+"): refused: its materialPool \""+sh.material_pool+"\"";
         std::string why;
         if(!d) why=head+" names no pool of this mod or of a declared dependency";
+        else if(d->tool) why=head+" names a tool policy, not a game-visible building material pool";
         else if(d->mod!=sh.mod && !sh.dependencies.count(d->mod)) why=head+" belongs to mod "+d->mod+", which mod "+sh.mod+" does not declare as a dependency";
         else if(d->roof!=sh.roof) why=head+(sh.roof?": the shape is a roof shape and the pool a wall pool; Roof must agree":": the shape is a wall shape and the pool a roof pool; Roof must agree");
         else if(std::none_of(pools.begin(),pools.end(),[&](const auto& p){return p.guid==d->guid;})) why=head+" was refused (its own line says why)";

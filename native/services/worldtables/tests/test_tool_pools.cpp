@@ -31,6 +31,11 @@ int main() {
     auto resolved=resolve_pools(file.pools,{},game);
     CHECK(resolved.errors.empty() && resolved.pools.size()==1);
     CHECK(resolved.pools[0].items==std::vector<uint32_t>{100});
+    Shape wall;wall.mod=file.mod;wall.block="bad-wall";wall.material_pool="rubble";
+    std::vector<Shape> walls{wall};std::vector<std::string> shape_errors;
+    bind_shape_pools(&walls,file.pools,resolved.pools,&shape_errors);
+    CHECK(walls.empty()&&!shape_errors.empty()); // A policy-only pool cannot back an ordinary building blueprint.
+    CHECK(shape_errors[0].find("not a game-visible building material pool")!=std::string::npos);
     Bytes untouched;
     CHECK(merge_pools(pools,l,{},resolved.pools,&untouched,&why));
     CHECK(untouched==pools); // Policy registration must not alter vanilla map/rows or enumerate magic stock twice.
