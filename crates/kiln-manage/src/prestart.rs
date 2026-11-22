@@ -115,7 +115,8 @@ fn size(bytes: u64) -> String {
 
 fn message(p: &Progress) -> String {
     if p.stage == "startup" {
-        let head = "Preparing ShroudForge mods for Kiln's interpreter";
+        let head = if p.label == "Preparing the game data for EML mods" { p.label.as_str() }
+            else { "Preparing ShroudForge mods for Kiln's interpreter" };
         return match p.step.as_deref().and_then(step_label) {
             Some(label) if p.step_number > 0 && p.steps >= p.step_number => format!("{head}: {label} ({} of {}).", p.step_number, p.steps),
             Some(label) => format!("{head}: {label}."),
@@ -265,6 +266,22 @@ mod tests {
     }
 
     #[test]
+    fn an_eml_startup_pass_keeps_its_own_wording() {
+        let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../schema/examples/state-eml-startup.json")).unwrap()
+            .replace("Preparing ShroudForge mods for Kiln's interpreter", "Preparing the game data for EML mods");
+        assert_eq!(parse(&text).unwrap().message, "Preparing the game data for EML mods: checking the prepared game data (3 of 5).");
+    }
+
+    #[test]
+    fn size_formatting_uses_binary_units() {
+        assert_eq!(size(0), "0 B");
+        assert_eq!(size(1023), "1023 B");
+        assert_eq!(size(1024), "1.0 KiB");
+        assert_eq!(size(1536), "1.5 KiB");
+        assert_eq!(size(48 << 30), "48.0 GiB");
+    }
+
+    #[test]
     fn only_a_running_format_1_file_with_progress_counts() {
         assert!(parse(r#"{"format":1,"phase":"done","mods":[]}"#).is_none());
         assert!(parse(r#"{"format":1,"phase":"running","mods":[]}"#).is_none(), "no progress object");
@@ -302,6 +319,8 @@ mod tests {
         let now = SystemTime::now();
         let ago = |s: u64| now - Duration::from_secs(s);
         assert!(is_current_within(Some(ago(40)), Some(ago(60)), now, stale_after("startup")));
+        assert_eq!(STARTUP_STALE, Duration::from_secs(120));
+        assert!(is_current_within(Some(ago(120)), Some(ago(200)), now, stale_after("startup")));
         // the EML stages keep theirs: that writer touches the file every second
         assert_eq!(stale_after("mods"), STALE);
         assert!(!is_current_within(Some(ago(40)), Some(ago(60)), now, stale_after("checking")));

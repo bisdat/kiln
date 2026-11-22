@@ -384,31 +384,37 @@ pub mod archive_work {
     }
 
     thread_local! {
-        static HOOK: Cell<Option<fn(Note)>> = const { Cell::new(None) };
+        static HOOK: Cell<Option<(u64, fn(Note))>> = const { Cell::new(None) };
+        static NEXT: Cell<u64> = const { Cell::new(0) };
         static MOVED: Cell<u64> = const { Cell::new(0) };
         static TOLD: Cell<Option<Instant>> = const { Cell::new(None) };
     }
 
-    /// While it lives, this thread's archive work reports to the installed function. Not `Send`: it is this thread's.
-    pub struct Installed(PhantomData<*const ()>);
+    /// While it lives and has not been replaced, this thread reports to the installed function. Not `Send`.
+    pub struct Installed(u64, PhantomData<*const ()>);
     impl Drop for Installed {
         fn drop(&mut self) {
-            HOOK.set(None);
+            if HOOK.get().is_some_and(|(id, _)| id == self.0) { HOOK.set(None); }
         }
     }
 
     /// Installs `hook` for this thread (in place of one installed before) and starts the count at zero.
     pub fn install(hook: fn(Note)) -> Installed {
+        let id = NEXT.get().wrapping_add(1);
+        NEXT.set(id);
         MOVED.set(0);
         TOLD.set(Some(Instant::now()));
-        HOOK.set(Some(hook));
-        Installed(PhantomData)
+        HOOK.set(Some((id, hook)));
+        Installed(id, PhantomData)
     }
+
+    /// Bytes moved since the latest `install`, including work the throttled hook has not reported yet.
+    pub fn moved() -> u64 { MOVED.get() }
 
     /// `bytes` more bytes were read or written by this thread's archive work.
     #[inline]
     pub fn add(bytes: u64) {
-        let Some(hook) = HOOK.get() else { return };
+        let Some((_, hook)) = HOOK.get() else { return };
         let moved = MOVED.get().saturating_add(bytes);
         MOVED.set(moved);
         let now = Instant::now();
@@ -420,7 +426,7 @@ pub mod archive_work {
 
     /// A step of the archive work begins: the installed function hears it now.
     pub fn mark(note: Note) {
-        if let Some(hook) = HOOK.get() {
+        if let Some((_, hook)) = HOOK.get() {
             hook(note);
         }
     }
@@ -566,6 +572,28 @@ mod tests {
         }
         add(1); // after the guard: nothing
         assert_eq!(HEARD.with(|h| h.borrow().clone()), [Note::Checking, Note::Moved(12), Note::Publishing]);
+    }
+
+    #[test]
+    fn replacing_archive_work_keeps_the_new_guard_in_charge() {
+        use archive_work::{Note, install, mark};
+        thread_local! { static HEARD: std::cell::RefCell<Vec<Note>> = const { std::cell::RefCell::new(Vec::new()) }; }
+        fn hook(note: Note) { HEARD.with(|h| h.borrow_mut().push(note)); }
+        let old = install(hook);
+        let new = install(hook);
+        drop(old);
+        mark(Note::Checking);
+        assert_eq!(HEARD.with(|h| h.borrow().clone()), [Note::Checking]);
+        drop(new);
+        mark(Note::Publishing);
+        assert_eq!(HEARD.with(|h| h.borrow().clone()), [Note::Checking]);
+        // Dropping the replacement first must not restore its predecessor either.
+        let old = install(hook);
+        let new = install(hook);
+        drop(new);
+        drop(old);
+        mark(Note::Publishing);
+        assert_eq!(HEARD.with(|h| h.borrow().clone()), [Note::Checking]);
     }
 
     #[test]

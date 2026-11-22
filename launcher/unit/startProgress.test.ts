@@ -36,11 +36,20 @@ test("a kiln-mode start's startup pass is said by its step, in the launcher's wo
   expect(preStartLine(prep({ step: "save" }))).toBe("Preparing ShroudForge mods for Kiln's interpreter: saving the result.");
   // a step this launcher does not know (a newer kiln-eml): the sentence without it
   expect(preStartLine(prep({ step: "later", stepNumber: 6, steps: 6 }))).toBe("Preparing ShroudForge mods for Kiln's interpreter.");
+  for (const step of ["constructor", "toString", "hasOwnProperty", "__proto__"]) {
+    expect(preStartLine(prep({ step }))).toBe("Preparing ShroudForge mods for Kiln's interpreter.");
+  }
   // the EML stages keep kiln-manage's sentence
   expect(preStartLine(prep({ stage: "checking" }))).toBe("(kiln-manage's English)");
   // as the early plugins' detail
   expect(stepLine(step({ id: "early-plugins", label: "Starting ShroudForge" }), prep({ step: "write", stepNumber: 4, steps: 5 })))
     .toBe("Preparing ShroudForge mods for Kiln's interpreter: writing the game data (4 of 5)");
+});
+
+test("an EML startup pass keeps its own wording", () => {
+  const prep = { stage: "startup", label: "Preparing the game data for EML mods", step: "mods", stepNumber: 2, steps: 5,
+    message: "Preparing the game data for EML mods: running the mods (2 of 5)." } as never;
+  expect(preStartLine(prep)).toBe("Preparing the game data for EML mods: running the mods (2 of 5).");
 });
 
 function play(at: number): StartTimeline {

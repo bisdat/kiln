@@ -657,7 +657,7 @@ fn run_kiln(cfg: &RunConfig, kiln: &KilnMode, mods: Vec<Utf8PathBuf>, entries: V
     use crate::startup_seam::{self as seam, Barriered};
     // the launcher's start bar and kiln.log follow the pass step by step (progress.rs `PassSteps`): a slow drive makes a
     // slow start, never one that looks hung
-    let steps = kiln.plan().is_ok().then(|| crate::progress::PassSteps::begin(cfg.progress.clone(), &out));
+    let steps = kiln.plan().ok().map(|plan| crate::progress::PassSteps::begin(cfg.progress.clone(), &out, plan.dialect()));
     let observe = |point: crate::startup::Point<'_>| {
         if let Some(steps) = &steps {
             steps.observe(&point);
