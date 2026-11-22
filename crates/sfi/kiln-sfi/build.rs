@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 fn main() {
+    build_stamp();
     println!("cargo:rerun-if-changed=shim/fault.c");
     println!("cargo:rerun-if-changed=shim/fault.h");
     println!("cargo:rerun-if-changed=shim/monitor.c");
@@ -60,4 +61,36 @@ fn main() {
         .file("shim/copy_window.c")
         .warnings_into_errors(true)
         .compile("sfi_fault");
+}
+
+/// kiln_build_stamp() (src/lib.rs): "<VERSION><KILN_BUILD>", byte for byte the stamp native/cmake/kiln_build_stamp.cpp
+/// gives the native DLLs of the same build: the repository's VERSION (its first line, as native/CMakeLists.txt reads it)
+/// and KILN_BUILD, the build metadata that build's native/cmake/kiln_build_stamp.sh generated ("+<yyyymmdd>.<git>" or
+/// "+nogit.<nonce>"; build.sh and tools/package/stage.sh pass it). Without KILN_BUILD the DLL exports the version only,
+/// like a native DLL built without build metadata: no core trusts it.
+fn build_stamp() {
+    let manifest = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR");
+    let version_file = std::path::Path::new(&manifest).join("../../../VERSION");
+    println!("cargo:rerun-if-changed={}", version_file.display());
+    println!("cargo:rerun-if-env-changed=KILN_BUILD");
+    let build = std::env::var("KILN_BUILD").unwrap_or_default();
+    let stamp_char = |c: char| c.is_ascii_alphanumeric() || c == '.' || c == '-';
+    assert!(
+        build.is_empty() || (build.len() > 1 && build.starts_with('+') && build[1..].chars().all(stamp_char)),
+        "KILN_BUILD must be empty or +[0-9A-Za-z.-]+ (native/cmake/kiln_build_stamp.sh), found {build:?}"
+    );
+    // A checkout without VERSION (a scratch copy of the crate) builds an unstamped DLL; a stamped build needs it.
+    let version = match std::fs::read_to_string(&version_file) {
+        Ok(text) => text.lines().next().unwrap_or("").trim().to_string(),
+        Err(e) if build.is_empty() => {
+            println!("cargo:warning=kiln_build_stamp: no {} ({e}): the DLL exports no version", version_file.display());
+            String::new()
+        }
+        Err(e) => panic!("KILN_BUILD is set but {} cannot be read: {e}", version_file.display()),
+    };
+    assert!(
+        version.chars().all(|c| stamp_char(c) || c == '+'),
+        "VERSION must hold a semantic version, found {version:?}"
+    );
+    println!("cargo:rustc-env=KILN_SFI_BUILD_STAMP={version}{build}");
 }

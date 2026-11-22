@@ -239,6 +239,9 @@ Kiln-made "busy" never latches it for the rest of a server step. `kiln.internal.
   `<game>/kiln/plugins/kiln-sfi.dll`, and only when kiln.launch froze backend `kiln` and that DLL's
   `kiln_build_stamp()` is this core's build identity (the test that gives a service DLL Kiln-internal tables). A DLL
   of that name elsewhere (a profile entry), another name, or a DLL of another build is never designated.
+  kiln-sfi.dll is Rust, built apart from the native DLLs, and carries the same stamp: `crates/sfi/kiln-sfi/build.sh`
+  builds it with the build metadata of the native build it ships with (`tools/package/stage.sh` passes it), and
+  `tools/sfi/sfi_stage.py check` refuses a stage whose kiln-sfi.dll does not export the core's stamp.
 - It is set before that `kiln_plugin_main` runs, so before the first tick, and never changes or moves to another
   owner, also when that plugin's main fails. No member sets it and no flag opts out of it.
 - kiln.log says which owner was designated, or why kiln-sfi.dll was not.
