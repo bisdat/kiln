@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
-// UiDraw's calls over kiln.ui.blocks (kiln_ui_blocks.h, 0.2.0-dev.31): a tab selected from code, a tree node's open state
-// set from code, the edit state of the widget drawn last and a text field with Kiln's own flags. The richer UI blocks
-// (Kiln.Blocks) draw with them; mods may too. On a Kiln without the table they fall back to the plain calls.
+// UiDraw's calls over kiln.ui.blocks (kiln_ui_blocks.h, 0.2.0-dev.31): a tab selected from code (BeginControlledTab), a
+// tree node's open state set from code, the edit state of the widget drawn last and a text field with Kiln's own flags
+// (TextField). New names, not overloads: BeginTab and InputText keep their dev.26 shapes (Kiln.Contract.Tests). The
+// richer UI blocks (Kiln.Blocks) draw with them; mods may too. On a Kiln without the table they fall back to the plain calls.
 using System.Text;
 
 namespace Kiln;
@@ -22,7 +23,7 @@ public enum UiItemState : uint
     Edited = 8,
 }
 
-/// <summary>How <see cref="UiDraw.InputText(string, ref string, int, UiTextFieldFlags, float, float)"/> behaves.</summary>
+/// <summary>How <see cref="UiDraw.TextField"/> behaves.</summary>
 [Flags]
 public enum UiTextFieldFlags : uint
 {
@@ -45,9 +46,11 @@ public sealed unsafe partial class UiDraw
     /// tab or tree node cannot be selected or opened from code.</summary>
     public bool HasBlockWidgets => UiNative.Blocks != null;
 
-    /// <summary>A tab of a tab bar (<see cref="BeginTabBar"/>); with <paramref name="select"/> it becomes the selected tab
-    /// this frame. True while it is the selected tab: draw its content, then call <see cref="EndTab"/>.</summary>
-    public bool BeginTab(string label, bool select)
+    /// <summary>A tab of a tab bar (<see cref="BeginTabBar"/>) that code can select: with <paramref name="select"/> it
+    /// becomes the selected tab (from this frame or the next); without, the player's pick stays. True while it is the
+    /// selected tab: draw its content, then call <see cref="EndTab"/>. On a Kiln without kiln.ui.blocks it is
+    /// <see cref="BeginTab"/>.</summary>
+    public bool BeginControlledTab(string label, bool select)
     {
         var b = UiNative.Blocks;
         if (b == null) return BeginTab(label);
@@ -78,7 +81,7 @@ public sealed unsafe partial class UiDraw
     /// shown cut and read-only, and <paramref name="value"/> stays as it is. Use <see cref="LastItemState"/> right after it to
     /// see whether the field lost the keyboard.
     /// </summary>
-    public bool InputText(string label, ref string value, int maxBytes, UiTextFieldFlags flags, float width = 0, float height = 0)
+    public bool TextField(string label, ref string value, int maxBytes, UiTextFieldFlags flags = UiTextFieldFlags.None, float width = 0, float height = 0)
     {
         ArgumentNullException.ThrowIfNull(value);
         var b = UiNative.Blocks;

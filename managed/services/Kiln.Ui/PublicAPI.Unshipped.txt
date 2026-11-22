@@ -1,7 +1,7 @@
 #nullable enable
-Kiln.UiDraw.BeginTab(string! label, bool select) -> bool
+Kiln.UiDraw.BeginControlledTab(string! label, bool select) -> bool
 Kiln.UiDraw.HasBlockWidgets.get -> bool
-Kiln.UiDraw.InputText(string! label, ref string! value, int maxBytes, Kiln.UiTextFieldFlags flags, float width = 0, float height = 0) -> bool
+Kiln.UiDraw.TextField(string! label, ref string! value, int maxBytes, Kiln.UiTextFieldFlags flags = Kiln.UiTextFieldFlags.None, float width = 0, float height = 0) -> bool
 Kiln.UiDraw.LastItemState.get -> Kiln.UiItemState
 Kiln.UiDraw.SetNextItemOpen(bool open) -> void
 Kiln.UiItemState

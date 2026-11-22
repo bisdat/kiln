@@ -92,7 +92,7 @@ internal sealed class UiDrawCanvas : IUiCanvas
     public bool TextField(string label, ref string text, int maxBytes, bool enterCommits, bool multiline, out UiItemState state)
     {
         var flags = (enterCommits ? UiTextFieldFlags.EnterReturns : 0) | (multiline ? UiTextFieldFlags.Multiline : 0);
-        var r = Ui.InputText(label, ref text, maxBytes, flags, 0, multiline ? 80 * Ui.Scale : 0);
+        var r = Ui.TextField(label, ref text, maxBytes, flags, 0, multiline ? 80 * Ui.Scale : 0);
         state = Ui.LastItemState;
         return r;
     }
@@ -115,7 +115,7 @@ internal sealed class UiDrawCanvas : IUiCanvas
 
     public void EndTable() => Ui.EndTable();
     public bool BeginTabBar(string id) => Ui.BeginTabBar(id);
-    public bool BeginTab(string label, bool select) => Ui.BeginTab(label, select);
+    public bool BeginTab(string label, bool select) => Ui.BeginControlledTab(label, select);
     public void EndTab() => Ui.EndTab();
     public void EndTabBar() => Ui.EndTabBar();
 
