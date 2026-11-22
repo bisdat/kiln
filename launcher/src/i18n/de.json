@@ -5829,6 +5829,8 @@
       },
       "aboveItemMax": "über dem Maximum dieses Gegenstands ({max}): Der Server begrenzt es beim Laden, außer eine Mod hat den Bereich erweitert",
       "upgradesHint": "Die Seltenheit legt fest, wie viele Verbesserungen der Gegenstand annimmt: Höchststufe = Basisstufe + Seltenheit.",
+      "levelLimit": "Beim Bearbeiten gilt die Höchststufe {max}. Gespeicherte Werte bleiben bis zur Bearbeitung unverändert.",
+      "invalidLevels": "Gegenstandsstufen und Verbesserungen müssen ganze Zahlen von 0 bis 255 sein.",
       "gem": "Eingesetzter Edelstein",
       "gemUnknown": "id {id} ist nicht im Katalog",
       "noGem": "— kein Edelstein —",

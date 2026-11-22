@@ -11,6 +11,8 @@ import * as know from '../shared/knowledge.mjs';
 import items from '../data/items.json';
 import skills from '../data/skills.json';
 import { t } from './i18n.js';
+import { t as launcherT } from '../../i18n';
+import { itemLevelsFit } from '../kiln/levels.js';
 
 // Kiln: commands reject with a KilnError {code, message}; the editor shows e.message, so wrap it in an Error.
 const wrap = (p) => p.catch((e) => {
@@ -90,6 +92,7 @@ function checkModel(m) {
     for (const e of list) {
       if (!isItem(e.itemId)) throw new Error(t('Item desconhecido: {id}', { id: e.itemId }));
       if (!ints(e.slot, 255) || !ints(e.count, 65535)) throw new Error(t('Slot ou quantidade inválidos'));
+      if (!itemLevelsFit(e)) throw new Error(launcherT('editor.inspector.invalidLevels'));
     }
   }
   const slots = m.main.map((e) => e.slot);
