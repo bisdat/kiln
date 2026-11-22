@@ -32,7 +32,10 @@ export default function Inventory({ model, setModel }) {
   const entry = sel !== null ? bySlot.get(sel) : null;
   const firstFree = layout.all.find((k) => !bySlot.has(k)) ?? null;
   const slotEl = (key) => document.querySelector(`.ke-grid [data-deck-id="slot-${CSS.escape(key)}"]`);
-  const focusSlot = (key) => requestAnimationFrame(() => slotEl(key)?.focus());
+  const focusSlot = (key) => {
+    const focus = () => slotEl(key)?.focus();
+    if (env.deck) requestAnimationFrame(focus); else focus();
+  };
   const change = (edits) => { if (!disabled) setModel(replaceSlots(model, edits)); };
   const remove = () => { if (entry && !disabled) { change([[sel, null]]); focusSlot(sel); } };
   const target = sel !== null && !bySlot.has(sel) ? sel : firstFree;

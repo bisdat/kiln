@@ -79,7 +79,7 @@ export default function Equipment({ model, setModel }) {
                         label={`${slotWord(i)}: ${e ? itemName(e.itemId) : t('editor.common.empty')}`} deckId={`worn-${i}`} deckA={e ? t('editor.common.change') : '-'}
                         onFocus={() => { setSel(i); setInPanel(false); }}
                         onClick={() => { setSel(i); if (env.deck && e) requestAnimationFrame(() => insp.current?.querySelector('button:not(:disabled)')?.focus()); }}
-                        onKeyDown={env.deck ? undefined : (ev) => { if (ev.key === 'Enter' && e) { ev.preventDefault(); setSel(i); requestAnimationFrame(() => insp.current?.querySelector('button:not(:disabled), input:not(:disabled), select:not(:disabled)')?.focus()); } }} />
+                        onKeyDown={env.deck ? undefined : (ev) => { if (ev.key === 'Enter' && e) { ev.preventDefault(); setSel(i); insp.current?.querySelector('button:not(:disabled), input:not(:disabled), select:not(:disabled)')?.focus(); } }} />
                       <span className="ke-gear-text">
                         <span className="k-label">{slotShort(i)}</span>
                         <span className={'ke-gear-name' + (e ? '' : ' none')}>{e ? itemName(e.itemId) : t('editor.common.empty')}</span>
@@ -94,7 +94,7 @@ export default function Equipment({ model, setModel }) {
       </div>
       <div ref={insp} className="ke-insp-wrap" onFocus={env.deck ? () => setInPanel(true) : undefined} onBlur={env.deck ? (e) => { if (!e.currentTarget.contains(e.relatedTarget)) setInPanel(false); } : undefined}>
       <Inspector disabled={disabled} entry={entry} caption={slotWord(sel)} warn={warn} onChange={update}
-        onRemove={entry ? () => { remove(entry); requestAnimationFrame(() => slotEl(sel)?.focus()); } : null}
+        onRemove={entry ? () => { remove(entry); if (env.deck) requestAnimationFrame(() => slotEl(sel)?.focus()); else slotEl(sel)?.focus(); } : null}
         empty={<div className="ke-empty"><span className="ke-empty-word">{t('editor.common.empty')}</span><span className="ke-note">{t('editor.equipment.emptyHint')}</span></div>} />
       </div>
     </div>
