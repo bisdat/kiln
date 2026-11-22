@@ -69,7 +69,7 @@ async function readSave(path) {
   const request = ++openRequest;
   set({ opening: true });
   try {
-    const m = await api.openSave(path);
+    const m = await api.openSave(path, () => request === openRequest);
     if (request !== openRequest) return false;
     const json = JSON.stringify(m);
     set({ model: m, orig: clone(m), origJson: json, dirty: false, readAt: m.modified ?? 0,

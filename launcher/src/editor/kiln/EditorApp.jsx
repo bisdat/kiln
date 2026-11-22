@@ -35,11 +35,39 @@ export function sayOf(s) {
           : t('editor.page.levelBackup', { n: model.level });
 }
 
+/** Catalogs live in portals, outside the inert editor body; Deck number/choice dialogs do too. Keep their drafts
+ *  intact while a session operation excludes changes, and return focus when the operation releases them. */
+export function useBusyEditorDialogs(blocked) {
+  useEffect(() => {
+    if (!blocked) return;
+    // Character choices stay usable during an open so a later selection can supersede it.
+    const selector = '.ke-cat, [data-deck-dialog^="editor-"]:not([data-deck-dialog="editor-characters"]) [role="dialog"]';
+    const dialogs = [...new Set([...document.querySelectorAll(selector)].map((el) => el.closest('[role="dialog"]')))]
+      .filter((el) => el && !el.hasAttribute('inert'));
+    const focused = document.activeElement;
+    const previous = dialogs.map((el) => [el, el.getAttribute('aria-busy')]);
+    dialogs.forEach((el) => { el.setAttribute('inert', ''); el.setAttribute('aria-busy', 'true'); });
+    const guard = (event) => {
+      if (!event.target.closest?.(selector)) return;
+      event.preventDefault(); event.stopPropagation();
+    };
+    document.addEventListener('click', guard, true);
+    document.addEventListener('dblclick', guard, true);
+    return () => {
+      document.removeEventListener('click', guard, true);
+      document.removeEventListener('dblclick', guard, true);
+      previous.forEach(([el, busy]) => { el.removeAttribute('inert'); if (busy === null) el.removeAttribute('aria-busy'); else el.setAttribute('aria-busy', busy); });
+      if (focused instanceof HTMLElement && dialogs.some((el) => el.contains(focused)) && focused.isConnected && !focused.closest('[inert]')) focused.focus({ preventScroll: true });
+    };
+  }, [blocked]);
+}
+
 export default function EditorApp() {
   useLanguage();
   const s = useSession();
   const { saves, model, status, running, saving, restoring, dirty } = s;
   const blocked = mutationsBlocked(s);
+  useBusyEditorDialogs(blocked);
   const [tab, setTab] = useState('inv');
   const [backups, setBackups] = useState(false);
   const [pick, setPick] = useState(false);
@@ -64,7 +92,14 @@ export default function EditorApp() {
   const ok = canSave(s);
   useEffect(() => {
     const k = (e) => {
-      if (e.ctrlKey && e.key.toLowerCase() === 's') { e.preventDefault(); save(); return; }
+      const key = e.key.toLowerCase();
+      if (mutationsBlocked(useSession.getState())) {
+        if ((e.ctrlKey && ['s', 'd'].includes(key)) || (!e.ctrlKey && !e.altKey && !e.metaKey && !e.target.closest?.('input, select, textarea') && ['i', 'delete', 'b', 'z', 'q', 'e'].includes(key))) {
+          e.preventDefault(); e.stopPropagation();
+        }
+        return;
+      }
+      if (e.ctrlKey && key === 's') { e.preventDefault(); save(); return; }
       if (e.ctrlKey || e.altKey || e.metaKey || e.target.closest?.('input, select, textarea, [role="dialog"]')) return;
       if (blocked) return;
       if ((e.key === 'b' || e.key === 'B') && model) setBackups((v) => !v);
@@ -73,8 +108,8 @@ export default function EditorApp() {
       if (e.key === 'q' || e.key === 'Q') setTab(TABS[(at + TABS.length - 1) % TABS.length][0]);
       if (e.key === 'e' || e.key === 'E') setTab(TABS[(at + 1) % TABS.length][0]);
     };
-    window.addEventListener('keydown', k);
-    return () => window.removeEventListener('keydown', k);
+    window.addEventListener('keydown', k, true);
+    return () => window.removeEventListener('keydown', k, true);
   });
 
   const file = model?.path?.split(/[\\/]/).pop();

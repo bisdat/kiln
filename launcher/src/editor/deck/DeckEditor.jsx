@@ -17,7 +17,7 @@ import { dataHora } from '../src/i18n.js';
 import { EditorEnv } from '../kiln/env.jsx';
 import { useEditorArt } from '../kiln/art.js';
 import { canSave, discard, mutationsBlocked, openSave, readOnly, restoreBackup, saveModel, setModel, startSession, useSession } from '../kiln/session.js';
-import { BACKUP_KIND, TABS, backupGroups, backupName, sayOf } from '../kiln/EditorApp.jsx';
+import { BACKUP_KIND, TABS, backupGroups, backupName, sayOf, useBusyEditorDialogs } from '../kiln/EditorApp.jsx';
 import Equipment from '../kiln/Equipment.jsx';
 import Inventory from '../kiln/Inventory.jsx';
 import Skills from '../kiln/Skills.jsx';
@@ -32,6 +32,7 @@ export default function DeckEditor() {
   const s = useSession();
   const { model, saves, status, dirty, saving, restoring } = s;
   const blocked = mutationsBlocked(s);
+  useBusyEditorDialogs(blocked);
   const [tab, setTab] = useState('inv');
   const [view, setView] = useState(null); // the open view's actions and back (env.setActions)
   const [pad, setPad] = useState(null);
@@ -89,7 +90,7 @@ export default function DeckEditor() {
   const open = (path, reread = false) => {
     if (saving || restoring) return;
     if (dirty && (reread || path !== model?.path)) setDialog({ open: path });
-    else { setDialog(null); if (reread || path !== model?.path) void openSave(path); }
+    else { setDialog(null); if (reread || s.opening || path !== model?.path) void openSave(path); }
   };
   const browse = async () => { const path = await api.browseSave(); if (path) open(path); };
 
