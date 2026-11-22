@@ -78,13 +78,42 @@ internal static unsafe class ItemRemap
         _required = true;
         try
         {
-            _admission = NetAdmission.Require("repl.itemremap", static () => _kilnOnly == 0 || _active,
+            _admission = NetAdmission.Require("repl.itemremap", static () => _kilnOnly == 0 || _active || AllowWithoutRemap(),
                 "this server has items only Kiln has and cannot hide them from clients without Kiln");
         }
         catch (Exception e)
         {
             ReplNetLog.Warn($"repl: the item remap could not register its admission rule: {e.Message}");
         }
+    }
+
+    // kiln/config/replication.json {"vanillaWithoutRemap": "refuse" | "allow"}: what happens to a client without Kiln while
+    // Kiln-only items exist and the remap cannot run on this game build. Default "refuse" (it could crash on an id it does
+    // not know); "allow" lets it in anyway, at the server owner's risk. Read again when the file changes.
+    private static DateTime _cfgStamp;
+    private static bool _allow;
+    internal static bool AllowWithoutRemap()
+    {
+        try
+        {
+            var file = Path.Combine(KilnPaths.Config, "replication.json");
+            var stamp = File.Exists(file) ? File.GetLastWriteTimeUtc(file) : DateTime.MinValue;
+            if (stamp == _cfgStamp) return _allow;
+            _cfgStamp = stamp;
+            var was = _allow;
+            _allow = stamp != DateTime.MinValue &&
+                     System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(file))?["vanillaWithoutRemap"]?.GetValue<string>() is "allow";
+            if (_allow != was)
+                ReplNetLog.Warn(_allow
+                    ? "repl: replication.json vanillaWithoutRemap \"allow\": clients without Kiln are let in even when Kiln-only items cannot be hidden from them"
+                    : "repl: replication.json vanillaWithoutRemap \"refuse\" (the default)");
+        }
+        catch (Exception e)
+        {
+            ReplNetLog.WarnOnce($"repl: replication.json could not be read ({e.Message}); vanillaWithoutRemap stays \"refuse\"");
+            _allow = false;
+        }
+        return _allow;
     }
 
     private static void RefreshTable(ReplNetNative.Table* t)
