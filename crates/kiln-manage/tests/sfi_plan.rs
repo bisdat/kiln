@@ -8,7 +8,7 @@ use kiln_manage::manifest::RunSide;
 use kiln_manage::sfi_backend::{self, Env};
 use kiln_manage::sfi_inspection::{self, Inspect, ORIGINS};
 use kiln_manage::sfi_plan::{self, Mode, Outcome, ProfileIdentity, Reason, Request, Written};
-use kiln_manage::sfi_scan::{native::NativeConfig, parity::CatalogInput};
+use kiln_manage::sfi_scan::{Presence, native::NativeConfig, parity::CatalogInput};
 use serde_json::{Value, json};
 use sfi_policy::digest;
 use sfi_policy::launch_plan::{Decision, LaunchPlan, Permission, Severity, ValidationContext};
@@ -1262,6 +1262,234 @@ fn sf18_packages_and_their_dependents_never_run() {
     let err = sfi_plan::validate(&serde_json::to_vec(&forged).unwrap(), EXE, RunSide::Client)
         .unwrap_err();
     assert!(err.contains("1.8"), "{err}");
+}
+
+/// The shape of a ShroudForge 1.8 package the player switched off: both manifests on the 1.8 schemas, a 1.8-only
+/// extension field, enabled false, and a DLL whose native-plugin.ini is renamed away.
+fn off_18(g: &Game, folder: &str, caps: &[&str]) {
+    g.sf(
+        folder,
+        json!({"$schema":"https://shroudforge.net/schemas/1.8.0/manifest.schema.json","id":folder,"name":folder,
+            "version":"2.1.2","authors":["a"],"license":null,"dependencies":[],"capabilities":caps}),
+        json!({"$schema":"https://shroudforge.net/schemas/1.8.0/extended.mod.schema.json","schemaVersion":1,
+            "enabled":false,"targets":["client","server"],"groups":[{"label":"g","tab":true}]}),
+    );
+    g.file(
+        folder,
+        "native-plugin.ini.kiln-off",
+        "[Plugin]\nEnabled=1\nDll=bin/native.dll\n",
+    );
+    g.file(folder, "bin/native.dll", pe());
+}
+
+#[test]
+fn switched_off_packages_are_disabled_whatever_else_blocks_them() {
+    let g = kiln_game("off", KILN);
+    let off = json!({"schemaVersion":1,"enabled":false,"targets":["client","server"]});
+    let sf = |folder: &str, id: &str, deps: Value, ext: &Value| {
+        g.sf(
+            folder,
+            json!({"id":id,"name":id,"version":"1.0.0","capabilities":["runtime"],"dependencies":deps}),
+            ext.clone(),
+        );
+    };
+    // needs ShroudForge 1.8 (startup data, and runtime with a DLL)
+    off_18(&g, "off-18-data", &["patch", "export"]);
+    off_18(&g, "off-18-live", &["runtime", "export"]);
+    // a missing dependency, a cycle, a version range its dependency does not meet
+    sf(
+        "off-missing",
+        "off-missing",
+        json!([{"id":"nowhere","version":"^1"}]),
+        &off,
+    );
+    sf(
+        "off-cycle-a",
+        "off-cycle-a",
+        json!([{"id":"off-cycle-b","version":"^1"}]),
+        &off,
+    );
+    sf(
+        "off-cycle-b",
+        "off-cycle-b",
+        json!([{"id":"off-cycle-a","version":"^1"}]),
+        &off,
+    );
+    sf(
+        "off-version",
+        "off-version",
+        json!([{"id":"plain","version":"^2"}]),
+        &off,
+    );
+    // a DLL the import gate refuses, through an enabled native-plugin.ini
+    sf("off-native", "off-native", json!([]), &off);
+    g.file(
+        "off-native",
+        "native-plugin.ini",
+        "[Plugin]\nEnabled=true\nDll=entry.dll\n",
+    );
+    g.file("off-native", "entry.dll", b"not a DLL");
+    // the other side only
+    sf(
+        "off-server",
+        "off-server",
+        json!([]),
+        &json!({"schemaVersion":1,"enabled":false,"targets":["server"]}),
+    );
+    // a duplicate mod ID, both copies switched off (neither is listed, and neither is a warning)
+    sf("off-dup-a", "off-dup", json!([]), &off);
+    sf("off-dup-b", "off-dup", json!([]), &off);
+    // switched on: one that needs a switched-off package does not run, the other runs
+    g.simple(
+        "needs-off",
+        "needs-off",
+        &["runtime"],
+        json!([{"id":"off-18-data","version":"^2"}]),
+    );
+    g.simple("plain", "plain", &["runtime"], json!([]));
+    // an optional dependency that is switched off (and needs 1.8) leaves its dependent running
+    g.simple(
+        "opt-off",
+        "opt-off",
+        &["runtime"],
+        json!([{"id":"off-18-data","version":"^2","optional":true}]),
+    );
+
+    let inv = client(&g);
+    for dir in ["off-18-data", "off-18-live"] {
+        let p = pkg(&inv, dir);
+        assert_eq!(
+            (p.presence, p.enabled, p.requires180),
+            (Presence::Disabled, false, true),
+            "{dir}"
+        );
+        assert_eq!(p.targets, ["client", "server"], "{dir}");
+    }
+    let off_ids = [
+        "off-18-data",
+        "off-18-live",
+        "off-missing",
+        "off-cycle-a",
+        "off-cycle-b",
+        "off-version",
+        "off-native",
+        "off-server",
+    ];
+    let compat = g.0.join(sfi_plan::RULES_FILE);
+    for (case, kiln_json, rules) in [
+        ("plain", KILN, None),
+        (
+            "native never",
+            r#"{"preview": true, "native": {"policy": "never"}, "shroudforge": {"backend": "kiln"}}"#,
+            None,
+        ),
+        ("unreadable rules", KILN, Some("{")),
+    ] {
+        fs::write(g.0.join("kiln/kiln.json"), kiln_json).unwrap();
+        match rules {
+            Some(text) => {
+                fs::create_dir_all(compat.parent().unwrap()).unwrap();
+                fs::write(&compat, text).unwrap();
+            }
+            None => {
+                let _ = fs::remove_file(&compat);
+            }
+        }
+        let w = written(produce(&g, &Fake::new(&first_managed())));
+        let bytes = fs::read(plan_file(&g, &w)).unwrap();
+        let plan = LaunchPlan::parse(&bytes, &context()).unwrap();
+        sfi_plan::validate(&bytes, EXE, RunSide::Client).unwrap();
+        let v = plan_json(&g, &w);
+        for id in off_ids {
+            let p = package(&v, id);
+            assert_eq!(
+                (
+                    p["decision"].as_str(),
+                    p["enabled"].as_bool(),
+                    &p["reasons"]
+                ),
+                (Some("disabled"), Some(false), &json!([])),
+                "{case}: {id}: {p}"
+            );
+            assert_eq!(w.decisions[id], "disabled", "{case}: {id}");
+            assert_eq!(
+                plan.package(id).map(|p| p.decision),
+                Some(Decision::Disabled),
+                "{case}: {id}"
+            );
+        }
+        assert_eq!(package(&v, "off-18-live")["requires180"], true, "{case}");
+        assert!(
+            v["packages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|p| p["id"] != "off-dup"),
+            "{case}: a duplicate ID is not listed"
+        );
+        // no top-level warning names a switched-off package
+        for r in &w.warnings {
+            let text = format!("{} {:?}", r.message, r.caused_by);
+            assert!(
+                !text.contains("off-"),
+                "{case}: warns about a switched-off package: {r:?}"
+            );
+        }
+        // a switched-on dependent does not run, and says why
+        let needs = package(&v, "needs-off");
+        assert_eq!(needs["decision"], "skip", "{case}: {needs}");
+        assert!(
+            !needs["reasons"].as_array().unwrap().is_empty(),
+            "{case}: {needs}"
+        );
+        let mut order = w.load_order.clone();
+        order.sort();
+        let expect: &[&str] = if rules.is_some() {
+            &[]
+        } else {
+            &["opt-off", "plain"]
+        };
+        assert_eq!(order, expect, "{case}");
+    }
+}
+
+#[test]
+fn a_dependency_chain_never_runs_through_a_switched_off_package() {
+    let g = kiln_game("off-chain", KILN);
+    // switched on, needs ShroudForge 1.8: skipped
+    g.sf(
+        "held",
+        json!({"id":"held","name":"H","version":"1.0.0"}),
+        json!({"schemaVersion":1,"enabled":true,"groups":[{"label":"g","tab":true}]}),
+    );
+    // switched off, and needs the skipped package
+    g.sf(
+        "off-link",
+        json!({"id":"off-link","name":"L","version":"1.0.0","capabilities":["runtime"],
+            "dependencies":[{"id":"held","version":"^1"}]}),
+        json!({"schemaVersion":1,"enabled":false,"targets":["client","server"]}),
+    );
+    // switched on, the switched-off package an optional dependency: ShroudForge never visits it, nor what it needs
+    g.simple(
+        "opt-link",
+        "opt-link",
+        &["runtime"],
+        json!([{"id":"off-link","version":"^1","optional":true}]),
+    );
+    let inv = client(&g);
+    let p = pkg(&inv, "opt-link");
+    assert!(p.planned && p.blockers.is_empty(), "{p:?}");
+    let w = written(produce(&g, &Fake::new(&first_managed())));
+    let v = plan_json(&g, &w);
+    assert_eq!(package(&v, "held")["decision"], "skip");
+    assert_eq!(package(&v, "off-link")["decision"], "disabled");
+    let opt = package(&v, "opt-link");
+    assert_eq!(
+        (opt["decision"].as_str(), &opt["reasons"]),
+        (Some("candidate"), &json!([])),
+        "{opt}"
+    );
+    assert_eq!(w.load_order, ["opt-link"]);
 }
 
 fn put(b: &mut [u8], at: usize, value: u64, n: usize) {

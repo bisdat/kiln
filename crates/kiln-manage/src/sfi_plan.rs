@@ -812,6 +812,7 @@ pub fn decide(
             .or_default() += 1;
     }
     let mut unplanned: Vec<(String, String)> = Vec::new();
+    let mut off: BTreeSet<String> = BTreeSet::new();
     let mut listed: Vec<(&PackageEntry, String)> = Vec::new();
     for p in &inv.packages {
         let why = match (&p.id, &p.version) {
@@ -840,10 +841,17 @@ pub fn decide(
         };
         match content {
             Ok(content) => listed.push((p, content)),
-            Err(why) => unplanned.push((format!("mods/{}", p.directory), why)),
+            Err(why) => {
+                let folder = format!("mods/{}", p.directory);
+                // a switched-off package is a status, not a warning: nothing of it runs this start either way
+                if p.presence == Presence::Disabled {
+                    off.insert(folder.clone());
+                }
+                unplanned.push((folder, why));
+            }
         }
     }
-    for (folder, why) in &unplanned {
+    for (folder, why) in unplanned.iter().filter(|(f, _)| !off.contains(f)) {
         warnings.push(Reason::new(
             "package-not-planned",
             format!("{folder}: {why}; nothing of it runs this start"),
