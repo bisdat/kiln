@@ -1,1 +1,19 @@
 #nullable enable
+Kiln.TerrainToolAction
+Kiln.TerrainToolAction.<Clone>$() -> Kiln.TerrainToolAction!
+Kiln.TerrainToolAction.Equals(Kiln.TerrainToolAction? other) -> bool
+Kiln.TerrainToolAction.Mode.get -> Kiln.TerrainToolMode
+Kiln.TerrainToolAction.Mode.init -> void
+Kiln.TerrainToolAction.RemoveMaterials.get -> System.Collections.Generic.IReadOnlyList<byte>!
+Kiln.TerrainToolAction.RemoveMaterials.init -> void
+Kiln.TerrainToolAction.TerrainOnly.get -> bool
+Kiln.TerrainToolAction.TerrainOnly.init -> void
+Kiln.TerrainToolAction.TerrainToolAction() -> void
+Kiln.TerrainToolMode
+Kiln.TerrainToolMode.Add = 2 -> Kiln.TerrainToolMode
+Kiln.TerrainToolMode.Remove = 1 -> Kiln.TerrainToolMode
+override Kiln.TerrainToolAction.Equals(object? obj) -> bool
+override Kiln.TerrainToolAction.GetHashCode() -> int
+override Kiln.TerrainToolAction.ToString() -> string!
+static Kiln.TerrainToolAction.operator !=(Kiln.TerrainToolAction? left, Kiln.TerrainToolAction? right) -> bool
+static Kiln.TerrainToolAction.operator ==(Kiln.TerrainToolAction? left, Kiln.TerrainToolAction? right) -> bool
