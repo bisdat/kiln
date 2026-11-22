@@ -815,25 +815,23 @@ pub mod editor {
         Ok(None)
     }
 
-    fn collect(dir: &Path, home: &Path, base: &str, source: &EditorBackupSource, depth: u32, out: &mut Vec<EditorBackup>) -> Result<()> {
-        let rd = match std::fs::read_dir(dir) {
-            Ok(rd) => rd,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-            Err(e) => return Err(e.into()),
-        };
-        for e in rd {
-            let e = e?;
+    /// A backup that cannot be read or identified (a damaged manifest, a file its manifest does not list, a folder that
+    /// cannot be read) is left out of the list: it never hides the others, as the list did before origins were read
+    /// (restore_backup still refuses such a file on its own).
+    fn collect(dir: &Path, home: &Path, base: &str, source: &EditorBackupSource, depth: u32, out: &mut Vec<EditorBackup>) {
+        let Ok(rd) = std::fs::read_dir(dir) else { return };
+        for e in rd.flatten() {
             let p = e.path();
             // Do not follow links out of the backup tree or offer an incomplete new backup as legacy.
-            let ft = e.file_type()?;
+            let Ok(ft) = e.file_type() else { continue };
             if ft.is_dir() {
                 if depth > 0 && !e.file_name().to_string_lossy().ends_with(".partial") {
-                    collect(&p, home, base, source, depth - 1, out)?;
+                    collect(&p, home, base, source, depth - 1, out);
                 }
             } else if ft.is_file() && e.file_name().to_string_lossy().eq_ignore_ascii_case(base) {
-                let identity = backup_source(&p, home)?;
+                let Ok(identity) = backup_source(&p, home) else { continue };
                 if let Some(identity) = &identity {
-                    if !same_source(identity, source)? { continue; }
+                    if !same_source(identity, source).unwrap_or(false) { continue; }
                 }
                 let label = p.parent().and_then(|d| d.strip_prefix(home).ok()).map(|r| r.display().to_string()).unwrap_or_default();
                 out.push(EditorBackup {
@@ -842,7 +840,6 @@ pub mod editor {
                 });
             }
         }
-        Ok(())
     }
 
     /// Existing array shape; matching backups first, then older backups (origin unknown), never mixed together.
@@ -864,7 +861,7 @@ pub mod editor {
         }
         let home = backups_home()?;
         // Includes a launcher's backups/saves/<install>/<backup>/<source>/<file> layout.
-        collect(&home, &home, &base, &source, 4, &mut out)?;
+        collect(&home, &home, &base, &source, 4, &mut out);
         out.sort_by(|a, b| (a.group == "legacy").cmp(&(b.group == "legacy"))
             .then_with(|| b.modified.partial_cmp(&a.modified).unwrap_or(std::cmp::Ordering::Equal)));
         Ok(out)
@@ -1143,6 +1140,33 @@ pub mod editor {
             let result = restore_backup(copied.to_str().unwrap(), f.target.to_str().unwrap());
             f.assert_original();
             assert_eq!(result.unwrap_err().code, ErrorCode::Refused);
+        }
+
+        /// One backup whose origin cannot be read (a damaged launcher manifest, a manifest that does not list the file)
+        /// is left out; the list still shows every other backup of this save.
+        #[test]
+        fn an_unreadable_backup_origin_does_not_hide_the_other_backups() {
+            let f = Fixture::new();
+            let own = backup_file(f.target.to_str().unwrap()).unwrap();
+            let put = |install: &str, manifest: &[u8]| {
+                let dir = f.root.join("backups/saves").join(install).join("stamp");
+                let path = dir.join("steam-1/character0.ksd");
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(&path, Fixture::bytes(4)).unwrap();
+                std::fs::write(dir.join("backup.json"), manifest).unwrap();
+                path
+            };
+            let damaged = put("damaged", b"");
+            let unlisted = put("unlisted", br#"{"format":1,"gameId":"unlisted","id":"stamp","created":"2026-11-22T00:00:00Z","reason":"manual","files":0,"bytes":0,"entries":[]}"#);
+            let list = list_backups(f.target.to_str().unwrap()).expect("a damaged backup must not hide this save's backups");
+            assert!(list.iter().any(|b| Path::new(&b.path).starts_with(&own) && b.group == "matching"), "{list:?}");
+            let legacy = std::fs::canonicalize(&f.src).unwrap();
+            assert!(list.iter().any(|b| std::fs::canonicalize(&b.path).is_ok_and(|p| p == legacy) && b.group == "legacy"), "{list:?}");
+            for gone in [&damaged, &unlisted] {
+                assert!(!list.iter().any(|b| Path::new(&b.path) == gone.as_path()), "{} listed: {list:?}", gone.display());
+                assert!(restore_backup(gone.to_str().unwrap(), f.target.to_str().unwrap()).is_err(), "{} restored", gone.display());
+            }
+            f.assert_original();
         }
 
         #[cfg(windows)]
