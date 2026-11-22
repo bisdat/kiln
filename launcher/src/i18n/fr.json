@@ -5829,6 +5829,7 @@
       },
       "aboveItemMax": "au-dessus du maximum de cet objet ({max}) : le serveur le ramène dans la limite au chargement, sauf si un mod a élargi sa plage",
       "upgradesHint": "La rareté fixe le nombre d'améliorations de l'objet : niveau max = niveau de base + rareté.",
+      "invalidLevels": "Les niveaux des objets et les améliorations doivent être des nombres entiers de 0 à 255.",
       "gem": "Gemme sertie",
       "gemUnknown": "l'id {id} n'est pas dans le catalogue",
       "noGem": "— aucune gemme —",

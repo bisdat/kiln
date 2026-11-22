@@ -2,8 +2,8 @@
 //
 // The game's stack size of an item (items.json `maxStack`) is the vanilla one. A mod can raise it (stack-size mods of
 // any loader change the game's item data, or the item in memory), and the editor cannot know: so it does not refuse an
-// amount above the stack size, it says so, as it does for a level above an item's range. What it does refuse is what
-// the save cannot hold: an amount is 16 bits there (shared/character.mjs).
+// amount above the stack size, it says so. What it does refuse is what the save cannot hold: an amount is 16 bits
+// there (shared/character.mjs).
 export const MAX_AMOUNT = 65535;
 
 /** The largest amount offered for an item: what the save holds for an item that stacks; an item that does not stack

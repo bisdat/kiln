@@ -6115,6 +6115,7 @@
       },
       "aboveItemMax": "powyżej maksimum tego przedmiotu ({max}): serwer obetnie to przy wczytaniu, chyba że mod poszerzył jego zakres",
       "upgradesHint": "Rzadkość określa, ile ulepszeń przyjmuje przedmiot: maks. poziom = poziom bazowy + rzadkość.",
+      "invalidLevels": "Poziomy przedmiotów i ulepszenia muszą być liczbami całkowitymi od 0 do 255.",
       "gem": "Osadzony klejnot",
       "gemUnknown": "id {id} nie ma w katalogu",
       "noGem": "— brak klejnotu —",

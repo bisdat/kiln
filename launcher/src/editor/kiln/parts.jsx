@@ -88,7 +88,7 @@ export function RarityPick({ value, onChange }) {
         <button key={r} type="button" role="radio" aria-checked={value === r} title={rarityWord(r)} className={'ke-dia' + (r <= value ? ' on' : '')}
           style={{ '--r': rarityColor(r) }} onClick={() => onChange(r)}><i /></button>
       ))}
-      <span className="ke-dias-word" style={{ color: rarityColor(value) }}>{rarityWord(value)}</span>
+      <span className="ke-dias-word" style={{ color: rarityColor(value) }}>{value >= 1 && value <= 5 ? rarityWord(value) : value}</span>
     </span>
   );
 }
