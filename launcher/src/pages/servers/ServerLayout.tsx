@@ -9,12 +9,12 @@ import { NavLink, Outlet, useLocation, useNavigate, useParams } from "react-rout
 import { AdminProvider, reconnectAdmin, useAdminState } from "../../api/admin";
 import * as api from "../../api/commands";
 import type { AdminTransport } from "../../api/commands";
-import { Button, ConfirmDanger, Field, Menu, Modal, Select, Skeleton, Toggle, installNote, toast, type MenuItem } from "../../ui";
+import { Button, ConfirmDanger, Field, Menu, Modal, Select, Skeleton, Toggle, toast, type MenuItem } from "../../ui";
 import { SERVER_SECTIONS, serverPlace } from "../../shell/serverNav";
-import { notifyInstall } from "../../shell/notices";
 import { ConfirmHost } from "../../admin/ui";
 import { hasKiln, runnerLabel, sk, useDeployDialog, useServer, useServerEvents, useServers, useServerStatus } from "./serverApi";
-import { cancelStep, flowPhase, runFlow, useServerFlow, type StepSpec } from "./serverActions";
+import { flowPhase, runFlow, useServerFlow } from "./serverActions";
+import { kilnFlow, restartFlow, startFlow, stepStart, stepStop, stopServer } from "./serverFlows";
 import { ServerActivity } from "./ServerActivity";
 import { rich, t, useT } from "../../i18n";
 
@@ -137,27 +137,17 @@ function ServerHead({ id, live }: { id: string; live: boolean }) {
   const state = st.data?.state;
   const s = srv.data;
   const name = s?.name ?? id;
-  const stepStop: StepSpec = { key: "stop", label: t("servers.activity.stepStop"), run: () => api.serverStop(id), phase: "stopping" };
-  const stepStart = (again: boolean): StepSpec => ({ key: "start", label: again ? t("servers.activity.stepStartAgain") : t("servers.activity.stepStart"), run: () => api.serverStart(id), phase: "starting", cancel: "stopWaiting" });
-  const start = () => void runFlow(qc, id, { kind: "start", title: t("servers.activity.startTitle", { name }), steps: [stepStart(false)], done: t("servers.head.runningToast") });
+  const start = () => void runFlow(qc, id, startFlow(id, name));
   // Stop also ends a start that is still waiting for the world: the start's wait ends, the stop takes over
-  const stop = () => {
-    const starting = busy === "start";
-    if (starting) void cancelStep(id).catch(() => {});
-    void runFlow(qc, id, { kind: "stop", title: t("servers.activity.stopTitle", { name }), steps: [stepStop], done: t("servers.head.stoppedToast") }, { supersede: starting });
-  };
-  const restart = () => void runFlow(qc, id, { kind: "restart", title: t("servers.activity.restartTitle", { name }),
-    steps: [{ key: "restart", label: t("servers.activity.stepRestart"), run: () => api.serverRestart(id), phase: "stopping" }], done: t("servers.head.restarted") });
+  const stop = () => void stopServer(qc, id, name);
+  const restart = () => void runFlow(qc, id, restartFlow(id, name));
   const pid = !!st.data?.pid;
   const updateGame = () => void runFlow(qc, id, { kind: "update", title: t("servers.activity.updateGameTitle", { name }),
-    steps: [...(pid ? [stepStop] : []), { key: "update", label: t("servers.activity.stepUpdateGame"), run: () => api.serverUpdate(id), phase: "updating", cancel: "cancel" }, ...(pid ? [stepStart(true)] : [])],
+    steps: [...(pid ? [stepStop(id)] : []), { key: "update", label: t("servers.activity.stepUpdateGame"), run: () => api.serverUpdate(id), phase: "updating", cancel: "cancel" }, ...(pid ? [stepStart(id, true)] : [])],
     done: t("servers.head.upToDate") });
-  const deployKiln = (version: string, startAfter: boolean) => void runFlow<api.InstallResult>(qc, id, {
-    kind: "deploy",
-    title: kilnInstalledNow ? t("servers.activity.updateKilnTitle", { version, name }) : t("servers.activity.deployTitle", { version, name }),
-    steps: [...(pid ? [stepStop] : []), { key: "deploy", label: t("servers.activity.stepDeploy", { version }), run: () => api.serverDeploy(id, version), result: true, phase: "updating", cancel: "cancel" }, ...(startAfter ? [stepStart(pid)] : [])],
-    done: t("servers.head.kilnInstalled", { version }), detail: installNote, after: notifyInstall,
-  });
+  // through the shared flow, so Recent says "updated from X to Y"
+  const deployKiln = (version: string, startAfter: boolean) =>
+    void runFlow<api.InstallResult>(qc, id, kilnFlow({ id, name, version, running: pid, startAfter, from: kilnInstalledNow ? (st.data?.installed ?? st.data?.kiln ?? null) : null }));
   // the dialog belongs to this server: leaving it closes the dialog
   useEffect(() => () => setDeploy(false), [id, setDeploy]);
   const kiln = hasKiln(s, st.data);

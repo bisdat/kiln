@@ -13,7 +13,8 @@ import { Banner, Button, Cone, KeyValue, Sparkline, fmtAgo, useTasks } from "../
 import { useTicks } from "../ticks";
 import { ServerConsole } from "./ServerConsole";
 import { elapsed, useServerFlow, type Flow } from "./serverActions";
-import { hasKiln, kilnUpdateFor, runnerLabel, sk, useDeployDialog, useServer, useServerStatus, type ServerModX } from "./serverApi";
+import { hasKiln, runnerLabel, sk, useDeployDialog, useServer, useServerStatus, type ServerModX } from "./serverApi";
+import { kilnUpdateFor, shortKiln } from "./kilnUpdate";
 import { useT } from "../../i18n";
 
 export const START_STAGES = ["preparing", "wine", "process", "world", "running"] as const;
@@ -125,7 +126,8 @@ function Steady({ id }: { id: string }) {
   const busy = flow?.state === "running" || status?.state === "stopping";
   const noKiln = !!status && !hasKiln(s, status);
   const remote = s?.runner === "remote" || s?.kind === "remote";
-  const update = !remote && status ? kilnUpdateFor(status.installed ?? null, bundles.data ?? []) : null;
+  const latest = status ? kilnUpdateFor(status.installed, bundles.data, remote) : null;
+  const update = latest ? { latest: shortKiln(latest)!, current: shortKiln(status?.installed) ?? "" } : null;
   const recent = ticks.slice(-16);
   const last = recent[recent.length - 1];
   const players = status?.players ?? query.data?.players ?? null;

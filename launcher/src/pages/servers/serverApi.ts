@@ -104,30 +104,6 @@ export function stateTone(s: ServerStatus["state"] | undefined): "ok" | "warn" |
   }
 }
 
-/** The parts of a Kiln runtime version that order it: "0.2.0-dev.30.4+20261122.d1ccf4d" -> [0, 2, 0, 30, 4] (a build
- *  without a dev number orders after every dev build of its base version). Build metadata (+...) is ignored. */
-export function versionKey(v: string): number[] {
-  const [core] = v.split("+");
-  const [base, pre] = core.split("-");
-  const nums = base.split(".").map((n) => Number.parseInt(n, 10) || 0);
-  const dev = pre?.startsWith("dev") ? pre.slice(3).split(".").filter(Boolean).map((n) => Number.parseInt(n, 10) || 0) : [Number.MAX_SAFE_INTEGER];
-  return [...nums, ...dev];
-}
-export function compareVersions(a: string, b: string): number {
-  const x = versionKey(a), y = versionKey(b);
-  for (let i = 0; i < Math.max(x.length, y.length); i++) {
-    const d = (x[i] ?? 0) - (y[i] ?? 0);
-    if (d) return d < 0 ? -1 : 1;
-  }
-  return 0;
-}
-/** A newer Kiln runtime the launcher has than the one in the server folder (null: none, or Kiln is not installed). */
-export function kilnUpdateFor(installed: string | null, bundles: { version: string }[]): { current: string; latest: string } | null {
-  if (!installed || installed === "unknown" || !bundles.length) return null;
-  const latest = [...bundles].sort((a, b) => compareVersions(b.version, a.version))[0].version;
-  return compareVersions(latest, installed) > 0 ? { current: installed.split("+")[0], latest: latest.split("+")[0] } : null;
-}
-
 /** Kiln is in the server folder (installed, or running with it). Unknown (remote, no status yet) counts as yes. */
 export function hasKiln(srv: ServerInstanceX | undefined, st: ServerStatus | undefined): boolean {
   if (!srv || !st || srv.runner === "remote" || srv.kind === "remote") return true;

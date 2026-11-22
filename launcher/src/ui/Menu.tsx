@@ -1,7 +1,7 @@
 // A small dropdown menu: a trigger button and a list of actions. Right-click anywhere on a row that holds a menu opens
 // that menu at the pointer (useRowContextMenu, mounted once in the shell): every row with a "More" menu has the same
 // actions on its right click.
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { IconButton, type ButtonSize, type ButtonVariant } from "./Button";
 import { COVERED } from "./Modal";
@@ -12,6 +12,8 @@ export interface MenuItem {
   onSelect: () => void;
   danger?: boolean;
   disabled?: boolean;
+  /** A rule above this item (a group of its own: the danger at the end). */
+  sep?: boolean;
 }
 
 export function Menu({ label, icon, items, align = "right", variant, size }: { label: string; icon: ReactNode; items: MenuItem[]; align?: "left" | "right"; variant?: ButtonVariant; size?: ButtonSize }) {
@@ -86,10 +88,13 @@ export function Menu({ label, icon, items, align = "right", variant, size }: { l
       {open && createPortal(
         <div ref={list} className="k-popover" role="menu" style={place}>
           {items.map((it, i) => (
-            <button key={i} type="button" role="menuitem" className={"k-menu-item" + (it.danger ? " danger" : "")} disabled={it.disabled}
-              onClick={() => { setOpen(false); it.onSelect(); }}>
-              {it.icon}{it.label}
-            </button>
+            <Fragment key={i}>
+              {it.sep && i > 0 && <div className="k-menu-sep" role="separator" />}
+              <button type="button" role="menuitem" className={"k-menu-item" + (it.danger ? " danger" : "")} disabled={it.disabled}
+                onClick={() => { setOpen(false); it.onSelect(); }}>
+                {it.icon}{it.label}
+              </button>
+            </Fragment>
           ))}
         </div>,
         document.body,

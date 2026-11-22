@@ -1,0 +1,73 @@
+/* The Servers list (pages/servers/ServersPage.tsx, servers revamp mockup A): the rows' live state and quick actions,
+   the update banner, "Recent", and the new-server wizard (NewServerWizard.tsx). Tokens and components: ui/ui.css. */
+.k-servers > .k-table { flex: none; }
+.k-servers > .k-banner { flex: none; }
+.k-servers .k-table-cell > .k-sact-cell { vertical-align: middle; }
+.k-srow-sub { font-size: 15.5px; white-space: nowrap; }
+/* a flow that runs on the server: the word, the cones and the step's time, the step under them */
+.k-sact-cell.k-srow-live { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 1px; line-height: 1.15; }
+.k-srow-live-top { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.k-srow-time { font-size: 14px; }
+/* the small cones at 42%, laid out at the size they show (ui.css' .k-cones-s keeps its full width and leans right) */
+.k-srow-cones { position: relative; flex: none; display: inline-block; width: calc(var(--n, 3) * 9.7px); height: 20px; }
+.k-sact-cell .k-srow-cones .k-cones-s { position: absolute; left: 0; bottom: 0; width: max-content; height: 46px; justify-content: flex-start;
+  transform: scale(.42); transform-origin: left bottom; }
+.k-srow-live-step { display: block; max-width: 100%; font-size: 14.5px; color: var(--k-text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.k-srow-num { font-size: 16px; }
+.k-srow-health { display: inline-flex; align-items: center; gap: 8px; }
+.k-srow-health .k-mono { font-size: 14.5px; }
+.k-srow-kiln { display: inline-flex; align-items: baseline; gap: 8px; min-width: 0; max-width: 100%; }
+.k-srow-kiln > .k-mono { font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; }
+.k-srow-runs { font-size: 15.5px; }
+.k-srow-actions { display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px; }
+
+/* Recent: when, which server, what happened */
+.k-recent { flex: 1 1 auto; min-height: 120px; max-width: 860px; padding-bottom: 18px; }
+.k-recent > .k-card-body { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.k-recent-list { list-style: none; margin: 0; padding: 0; }
+.k-recent-list li { display: grid; grid-template-columns: 62px minmax(0, 150px) minmax(0, 1fr); gap: 14px; align-items: baseline; padding: 7px 2px 8px;
+  box-shadow: inset 0 -1px 0 var(--k-line); font-size: 16.5px; }
+.k-recent-at { font-size: 14px; color: var(--k-text-2); }
+.k-recent-who { color: var(--k-text-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.k-recent-what { color: var(--k-text-0); overflow-wrap: anywhere; }
+.k-recent-list li.err .k-recent-what { color: var(--k-err); }
+
+/* the wizard */
+.k-wiz-stepper { list-style: none; display: flex; flex-wrap: wrap; gap: 6px 22px; margin: 0 0 16px; padding: 0 0 10px; box-shadow: inset 0 -1px 0 var(--k-line);
+  font-family: var(--k-font-label); font-weight: 500; font-size: 16px; letter-spacing: .012em; color: var(--k-text-2); }
+.k-wiz-stepper li { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+.k-wiz-stepper li i { width: 7px; height: 7px; transform: rotate(45deg); background: var(--k-line-strong); flex: none; }
+.k-wiz-stepper li.on { color: var(--k-text-0); }
+.k-wiz-stepper li.on i { background: var(--k-ember-400); }
+.k-wiz-stepper li.done { color: var(--k-text-1); }
+.k-wiz-stepper li.done i { background: var(--k-gold-400); }
+.k-wiz-stepper li.failed { color: var(--k-err); }
+.k-wiz-stepper li.failed i { background: var(--k-err); }
+.k-wiz-stepper li.off { opacity: .62; }
+.k-wiz-stepper small { font-family: var(--k-font-ui); font-size: 14px; }
+.k-wiz-form { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px 18px; }
+.k-wiz-form > .full { grid-column: 1 / -1; }
+.k-wiz-form .k-sact-plan { margin-top: 2px; }
+.k-wiz-progress { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.k-wiz-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.k-wiz-step { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 7px 8px 8px 4px;
+  box-shadow: inset 0 -1px 0 var(--k-line); border-radius: var(--k-radius-s); }
+.k-wiz-step.running { background: var(--k-warm-1); }
+.k-wiz-step.pending, .k-wiz-step.skipped { opacity: .66; }
+.k-wiz-cone { display: flex; justify-content: center; align-items: flex-end; height: 34px; }
+.k-wiz-cone .k-cone { transform-origin: 50% 100%; scale: .7; }
+.k-wiz-step.failed .k-cone i, .k-wiz-step.canceled .k-cone i { background: var(--k-err); }
+.k-wiz-step-name { display: flex; flex-direction: column; min-width: 0; font-size: 17px; color: var(--k-text-0); }
+.k-wiz-step-name small { font-size: 14.5px; color: var(--k-text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.k-wiz-step.running .k-wiz-step-name small { font-family: var(--k-font-mono); font-stretch: 90%; font-size: 14px; }
+.k-wiz-step.failed .k-wiz-step-name small { color: var(--k-err); }
+.k-wiz-step-time { font-size: 14px; color: var(--k-text-2); }
+.k-wiz-step.running .k-wiz-step-time { color: var(--k-ember-300); }
+.k-wiz-clock { display: flex; align-items: center; gap: 16px; min-width: 0; }
+.k-wiz-clock-n { flex: none; font-family: var(--k-font-mono); font-stretch: 90%; font-size: 36px; line-height: 1; color: var(--k-ember-300); font-variant-numeric: tabular-nums; }
+.k-wiz-clock-l { display: flex; flex-direction: column; min-width: 0; }
+.k-wiz-clock-l b { font-family: var(--k-font-label); font-weight: 500; font-size: 15.5px; color: var(--k-text-2); letter-spacing: .012em; }
+.k-wiz-result { margin: 0; font-size: 17px; color: var(--k-text-0); }
+.k-wiz-error { padding: 10px 12px 2px; border-radius: var(--k-radius-s); background: var(--k-bg-3); }
+.k-wiz-error-at { color: var(--k-err) !important; font-weight: 500; }
+.k-wiz-foot-note { margin-right: auto; font-size: 15px; color: var(--k-text-2); }
