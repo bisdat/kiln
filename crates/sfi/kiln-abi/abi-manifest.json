@@ -5987,6 +5987,7 @@
             "brush_count": 168,
             "brushes": 160,
             "description": 128,
+            "identity": 176,
             "material_count": 152,
             "materials": 144,
             "name": 112,
@@ -5999,7 +6000,7 @@
             "size": 0,
             "tool": 4
           },
-          "size": 176
+          "size": 192
         },
         "KilnToolMaterialRow": {
           "align": 8,
@@ -6080,7 +6081,7 @@
           "size": 32
         }
       },
-      "sha256": "29cf7c677effd3630299b9131620f5c53eea648994850aae318d57a797ff581b"
+      "sha256": "a3c46ebc4b7a8c482d384153950ba75e7641df5d657253a6d577cbfc291051d8"
     },
     "native/core/abi/services/kiln_toolwear.h": {
       "function_macros": [],
@@ -8356,7 +8357,7 @@
   },
   "outputs": {
     "src/bindings.rs": "134028a6a9914076cab3f71f98d356141d4fe36c4d7f51bac6a11819501ed935",
-    "src/layout.rs": "306ba5190e8c4e5f9fa097b8f12a84e05cf7e1d596940df39ed6c41cf8cdd4c5",
+    "src/layout.rs": "9711a3162403a3bd5cd157af4e6cab625d3d8ff4a670aa97c47310410a6fae70",
     "src/services/kiln_abilities.rs": "06a43042e5c96d6261a17b02eab35463b07a8ad83f63b2bb168bca5ff34e582e",
     "src/services/kiln_assets.rs": "e7fe4eb1c4d53ad31eeaf05be06f41c551a49362ad5bd4174465ec18a03effe0",
     "src/services/kiln_assets_vfx.rs": "90ed8ce5ad512bbf4f002db3277bc3b439d648ca437a58d4477eac4ce46c3b81",
@@ -8407,7 +8408,7 @@
     "src/services/kiln_surfaces.rs": "d4d991aef0a14f4be7246227b95a0f34161ca23fe04561e9c94d6d2aba0db4a0",
     "src/services/kiln_tasks.rs": "da41943b4ac01aaa77cfb43091e8c209f0e55707c3a3105dd9070313750a6f79",
     "src/services/kiln_time.rs": "879eaed84cd42ab057cc5c6aa452aef7e0d6636205431e9ef54d1daf8dd4bf93",
-    "src/services/kiln_tools.rs": "ab2f114dadad690b229019d6b0ef74ff0e60d70478d7622c9b864d32ab358cc1",
+    "src/services/kiln_tools.rs": "29589637b553d897c23d3ab438dabb493f4ebe359dba5cc1cec5d5f978b341c9",
     "src/services/kiln_toolwear.rs": "bfb7c79cc8ddea86236700983a4deac4d08826a8f4d3ac5648c2fc9e346dcbcb",
     "src/services/kiln_types.rs": "e6eaf5e97d0c284ec9fb98e78e9b2d3c1fb129d0cac1a899009730e2641942eb",
     "src/services/kiln_ui.rs": "4db7e7f14a1ec7cdef1281a947b4abfa968686f070696e45c9a2f0a3a1127e09",

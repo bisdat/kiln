@@ -2,7 +2,8 @@
 #include "services/kiln_tools.h"
 #include <cstddef>
 static_assert(sizeof(KilnToolsApi) == 64);
-static_assert(sizeof(KilnToolFamilyDef) == 176);
+static_assert(sizeof(KilnToolFamilyDef) == 192);
+static_assert(offsetof(KilnToolFamilyDef, identity) == 176);
 static_assert(sizeof(KilnToolFamilyAction) == 48);
 static_assert(sizeof(KilnToolPoolMaterial) == 16);
 static_assert(sizeof(KilnToolBrush) == 16);

@@ -4281,7 +4281,7 @@ const _: () = {
     assert!(core::mem::offset_of!(crate::services::kiln_tools::KilnToolFamilyAction, remove_cells) == 8);
     assert!(core::mem::offset_of!(crate::services::kiln_tools::KilnToolFamilyAction, flags) == 40);
     assert!(core::mem::offset_of!(crate::services::kiln_tools::KilnToolFamilyAction, reserved) == 44);
-    assert!(core::mem::size_of::<crate::services::kiln_tools::KilnToolFamilyDef>() == 176);
+    assert!(core::mem::size_of::<crate::services::kiln_tools::KilnToolFamilyDef>() == 192);
     assert!(core::mem::align_of::<crate::services::kiln_tools::KilnToolFamilyDef>() == 8);
     assert!(core::mem::offset_of!(crate::services::kiln_tools::KilnToolFamilyDef, size) == 0);
     assert!(core::mem::offset_of!(crate::services::kiln_tools::KilnToolFamilyDef, tool) == 4);
@@ -4297,6 +4297,7 @@ const _: () = {
     assert!(core::mem::offset_of!(crate::services::kiln_tools::KilnToolFamilyDef, brushes) == 160);
     assert!(core::mem::offset_of!(crate::services::kiln_tools::KilnToolFamilyDef, brush_count) == 168);
     assert!(core::mem::offset_of!(crate::services::kiln_tools::KilnToolFamilyDef, reserved3) == 172);
+    assert!(core::mem::offset_of!(crate::services::kiln_tools::KilnToolFamilyDef, identity) == 176);
     assert!(core::mem::size_of::<crate::services::kiln_tools::KilnToolMaterialRow>() == 32);
     assert!(core::mem::align_of::<crate::services::kiln_tools::KilnToolMaterialRow>() == 8);
     assert!(core::mem::offset_of!(crate::services::kiln_tools::KilnToolMaterialRow, item) == 0);

@@ -113,6 +113,7 @@ pub struct KilnToolFamilyDef {
     pub brushes: *const KilnToolBrush,
     pub brush_count: u32,
     pub reserved3: u32,
+    pub identity: [u8; 16],
 }
 
 #[repr(C)]

@@ -111,6 +111,7 @@ typedef struct KilnToolFamilyDef {
     const KilnToolBrush* brushes;
     uint32_t brush_count;
     uint32_t reserved3;
+    uint8_t identity[16];        /* root item GUID in game/.NET byte order; FNV-1a must equal tool */
 } KilnToolFamilyDef;
 typedef struct KilnToolMaterialRow {
     uint32_t item;
