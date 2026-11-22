@@ -5927,7 +5927,7 @@
       "available": "Verfügbar",
       "enterTotal": "Gesamt eingeben…",
       "changeTotal": "Klicken, um die Gesamtpunkte zu ändern",
-      "totalFromGame": "Gesamt {total}, berechnet wie im Spiel: 2 Punkte pro Stufe über 1, dazu die Schleierwurzeln und Elixierbrunnen, die diese Figur zerstört hat. Das Spiel speichert den Wert nicht, daher wird er hier nicht bearbeitet.",
+      "totalFromGame": "Gesamt {total}: 2 pro Stufe über 1 + zerstörte Schleierwurzeln und Elixierbrunnen. Berechnet, nicht im Spielstand gespeichert.",
       "totalHint": "Gesamtpunkte (verwendet + verfügbar, wie das Spiel sie zeigt):",
       "zoomIn": "Vergrößern",
       "zoomOut": "Verkleinern",

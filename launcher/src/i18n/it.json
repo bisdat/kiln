@@ -5927,7 +5927,7 @@
       "available": "Disponibili",
       "enterTotal": "inserisci il totale…",
       "changeTotal": "Clicca per cambiare il totale",
-      "totalFromGame": "Totale {total}, calcolato come fa il gioco: 2 punti per livello oltre l'1, più le radici del Velo e i pozzi d'elisir che questo personaggio ha distrutto. Il gioco non lo salva, quindi qui non si modifica.",
+      "totalFromGame": "Totale {total}: 2 per livello oltre 1 + radici del Velo e pozzi d’elisir distrutti. Calcolato, non salvato nel file.",
       "totalHint": "Totale dei punti (in uso + disponibili, come lo mostra il gioco):",
       "zoomIn": "Ingrandisci",
       "zoomOut": "Rimpicciolisci",
