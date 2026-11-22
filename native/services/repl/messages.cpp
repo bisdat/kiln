@@ -64,13 +64,9 @@ kiln::RawHook h_alloc, h_commit;
 bool g_send_in = false;
 int64_t c_channel = -1, c_gs_sockets = -1, c_sockets_machines = -1, c_machine_stride = -1, c_machine_sockets = -1;
 
-// The socket of each open allocation of this thread (sends of one thread are sequential: alloc, copy, commit).
-struct Open {
-    AllocRes* res;
-    uintptr_t socket;
-};
-thread_local Open t_open[8];
-thread_local uint32_t t_open_n = 0;
+// The open allocations of this thread (review should 6): only successful ones, matched by result address and buffer, the
+// oldest overwritten when full, so a refused or aborted allocation never stops the recording or tags another message.
+thread_local msg::OpenAllocs t_open;
 // A scratch per nesting depth (review should 5): a receive handler that injects runs the send chain inside the receive
 // chain; one shared scratch let the inner chain overwrite the outer handler's rewrite. Made at a thread's first message.
 thread_local msg::ScratchStack* t_stack = nullptr;
@@ -99,7 +95,7 @@ bool any_hook(uint32_t dir, uint8_t side_mask) {
 
 AllocRes* d_alloc(AllocRes* out, uintptr_t session, uintptr_t socket, const AllocSpec* spec) {
     AllocRes* r = h_alloc.original<AllocFn>()(out, session, socket, spec);
-    if (r && t_open_n < 8) t_open[t_open_n++] = Open{r, socket};
+    if (r) t_open.record(r, r->data, r->status, socket);
     return r;
 }
 
@@ -120,13 +116,7 @@ bool socket_info(uintptr_t socket, uint32_t* channel, uint8_t* player, uint32_t*
 
 void d_commit(uintptr_t session, uint64_t* handle) {
     AllocRes* res = handle ? reinterpret_cast<AllocRes*>(reinterpret_cast<uint8_t*>(handle) - offsetof(AllocRes, handle)) : nullptr;
-    uintptr_t socket = 0;
-    for (uint32_t i = t_open_n; i-- > 0;)
-        if (t_open[i].res == res) {
-            socket = t_open[i].socket;
-            t_open[i] = t_open[--t_open_n];
-            break;
-        }
+    const uintptr_t socket = res ? t_open.take(res, res->data) : 0;
     uint32_t channel = 0, peer_index = 0;
     uint8_t player = 0;
     const uint8_t sides = socket ? side_here() : 0;
@@ -239,9 +229,13 @@ bool seh_send(uintptr_t session, uintptr_t socket, const void* data, uint32_t le
         AllocRes res{};
         const AllocSpec spec{length, length, 1, {}};
         AllocRes* r = reinterpret_cast<AllocFn>(f_alloc)(&res, session, socket, &spec);
-        if (!r || r->status != 0 || !r->data || r->capacity < length) {
+        if (!r || r->status != 0 || !r->data) {  // refused: nothing to abort (review should 6)
             *status = r ? r->status : 0xff;
-            if (r && r->handle) reinterpret_cast<CommitFn>(f_abort)(session, &r->handle);
+            return false;
+        }
+        if (r->capacity < length) {  // given, but too small: give it back
+            *status = 0xfd;
+            reinterpret_cast<CommitFn>(f_abort)(session, &r->handle);
             return false;
         }
         std::memcpy(r->data, data, length);
