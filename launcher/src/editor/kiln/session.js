@@ -1,8 +1,8 @@
 // The editor's session, shared by the desktop page (EditorApp.jsx) and the Deck screen (../deck/DeckEditor.jsx): the
 // character saves, the open one (`model`) and what it was when read (`orig`), the live state line, the game running,
-// and the steps: open, change, discard, save, restore. It lives outside the page, so changes survive leaving the page
-// or the Deck tab and coming back; they are lost only by Discard, by opening another character (the UIs ask first) or
-// by closing the launcher. Reading, checking and writing are upstream's (src/tauri-api.js, src/treecheck.js).
+// and the steps: open, change, undo, redo, discard, save, restore. It lives outside the page, so changes and history
+// survive leaving the page or Deck tab. Open/read, restore and successful Save start a fresh history; Discard itself
+// is undoable. Reading, checking and writing are upstream's (src/tauri-api.js, src/treecheck.js).
 import { create } from 'zustand';
 import { api } from '../src/platform.js';
 import { editorFileInfo } from '../../api/commands';
@@ -10,8 +10,8 @@ import { checkTree, pointsUsed } from '../src/treecheck.js';
 import { t } from '../../i18n';
 import { t as tv } from '../src/i18n.js';
 import { usePendingEdits } from './pending.ts';
+import { createHistory, recordHistory, undoHistory, redoHistory, saveHistory, historyDirty, canUndoHistory, canRedoHistory, describeChange, endHistoryGroup, historyShortcut } from './history.js';
 
-const clone = (o) => JSON.parse(JSON.stringify(o));
 // upstream's own messages for a save it cannot read are Portuguese keys; the launcher's tables word them
 // (src/i18n/launcher-keys.json), an unknown one stays as it came
 const said = (msg) => tv(msg);
@@ -21,8 +21,8 @@ export const useSession = create(() => ({
   saves: null,
   model: null,
   orig: null,
-  /** the model as JSON when read: `dirty` compares with it once per change, not on every render */
-  origJson: '',
+  /** Immutable edit snapshots and the last saved checkpoint, shared by both editor shells. */
+  history: null,
   dirty: false,
   /** {tone: 'warn' | 'err', text, again}; `again`: the save changed on disk, the UIs offer "Read again" */
   status: null,
@@ -37,7 +37,7 @@ export const useSession = create(() => ({
 const set = (p) => {
   useSession.setState(p);
   const s = useSession.getState();
-  usePendingEdits.setState({ dirty: s.dirty, busy: s.saving || s.restoring, name: s.model?.name ?? null });
+  usePendingEdits.setState({ dirty: s.dirty, busy: mutationsBlocked(s), name: s.model?.name ?? null });
 };
 
 export const setStatus = (status) => set({ status });
@@ -71,8 +71,7 @@ async function readSave(path) {
   try {
     const m = await api.openSave(path, () => request === openRequest);
     if (request !== openRequest) return false;
-    const json = JSON.stringify(m);
-    set({ model: m, orig: clone(m), origJson: json, dirty: false, readAt: m.modified ?? 0,
+    set({ model: m, orig: m, history: createHistory(m), dirty: false, readAt: m.modified ?? 0,
       // a save read with unknown items says "read-only" by itself; one that could not be read at all gets the word
       status: m.error ? { tone: 'warn', text: m.readOnly ? t('editor.page.readOnlyError', { erro: said(m.error) }) : said(m.error) } : null });
     return true;
@@ -91,21 +90,66 @@ export const readOnly = (m) => !!(m && (m.readOnly || m.error));
  *  takes no change: nothing of it could be written. */
 export function setModel(m) {
   const s = useSession.getState();
-  if (mutationsBlocked(s) || readOnly(s.model) || m?.path !== s.model?.path) return false;
+  if (!s.model || !m || mutationsBlocked(s) || readOnly(s.model) || m.path !== s.model.path) return false;
   applyModel(m);
   return true;
 }
 
-// One commit path for user changes (including Discard), so edit history can hook in without changing the views.
-function applyModel(m) {
+// One commit path for user changes (including Discard). Components keep passing immutable whole models.
+let typingGesture = null;
+function applyModel(m, action) {
   const s = useSession.getState();
-  set({ model: m, dirty: !!s.orig && JSON.stringify(m) !== s.origJson });
+  const history = recordHistory(s.history, m, { ...(action ?? describeChange(s.model, m)), gesture: typingGesture });
+  set({ model: history.present, history, dirty: historyDirty(history) });
+}
+
+export const canUndo = (s) => !readOnly(s.model) && canUndoHistory(s.history, s);
+export const canRedo = (s) => !readOnly(s.model) && canRedoHistory(s.history, s);
+export const historyLabel = (s, direction) => {
+  const step = s.history?.[direction === 'undo' ? 'past' : 'future'].at(-1);
+  return step ? t(`editor.page.history.${step.label.key}`, { count: step.label.count }) : '';
+};
+export const historyTitle = (s, direction) => {
+  const action = historyLabel(s, direction);
+  return action ? t(`editor.page.history.${direction}Action`, { action }) : t(`editor.page.history.${direction === 'undo' ? 'emptyUndo' : 'emptyRedo'}`);
+};
+function travel(direction) {
+  const s = useSession.getState();
+  if (!(direction === 'undo' ? canUndo(s) : canRedo(s))) return false;
+  const history = direction === 'undo' ? undoHistory(s.history, s) : redoHistory(s.history, s);
+  set({ history, model: history.present, dirty: historyDirty(history) });
+  return true;
+}
+export const undo = () => travel('undo');
+export const redo = () => travel('redo');
+
+/** Shell-level listeners keep typing (even across pauses) in one gesture. Blur/navigation ends the group. */
+export function startHistoryControls() {
+  const boundary = () => {
+    typingGesture = null;
+    const s = useSession.getState();
+    if (s.history?.group) set({ history: endHistoryGroup(s.history) });
+  };
+  const focus = (e) => {
+    boundary();
+    if (e.target.matches?.('input, textarea, [contenteditable="true"]')) typingGesture = {};
+  };
+  const key = (e) => historyShortcut(e, undo, redo);
+  window.addEventListener('focusin', focus);
+  window.addEventListener('focusout', boundary);
+  window.addEventListener('keydown', key);
+  return () => {
+    boundary();
+    window.removeEventListener('focusin', focus);
+    window.removeEventListener('focusout', boundary);
+    window.removeEventListener('keydown', key);
+  };
 }
 
 export function discard() {
   const s = useSession.getState();
   if (mutationsBlocked(s)) return;
-  if (s.dirty) { applyModel(clone(s.orig)); set({ status: null }); }
+  if (s.dirty) { applyModel(s.orig, { label: { key: 'discard' } }); set({ status: null }); }
 }
 
 /** Reads the open character again when its save was written since it was read (the player went to play and came
@@ -176,7 +220,8 @@ export async function saveModel() {
       return 'changed';
     }
     const { model: m } = await api.writeSave(model.path, model);
-    set({ model: m, orig: clone(m), origJson: JSON.stringify(m), dirty: false, readAt: m.modified ?? 0, status: null, saving: false });
+    // Adopt the writer's normalized slots and mask. History starts afresh at this serialization boundary.
+    set({ model: m, orig: m, history: saveHistory(s.history, m), dirty: false, readAt: m.modified ?? 0, status: null, saving: false });
     refreshSaves();
     return 'saved';
   } catch (e) {
@@ -193,6 +238,9 @@ export async function restoreBackup(b) {
   set({ restoring: true });
   try {
     await api.restoreBackup(b.path, target);
+    // The file has been replaced, even if the follow-up read fails. Never leave snapshots from the old
+    // container editable or replayable against the restored one; a failed restore itself still preserves them.
+    set({ model: null, orig: null, history: null, dirty: false, readAt: 0 });
     return await readSave(target);
   } finally {
     set({ restoring: false });
