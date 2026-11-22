@@ -321,10 +321,15 @@ impl RuntimeFacts {
                 .ecs_scene()
                 .is_ok_and(|(kind, _)| kind == super::ecs::SERVER_WORLD)
     }
+    /// ShroudForge's `runtime_provider::can_write()` (behind the `CanWrite` row): the ECS world is the server world and
+    /// it is ready, and its session has no uncertain write (write_entity_components.cpp:166-168: the native session
+    /// fault, which an uncertain ECS write and an uncertain resource write with a session both set, lasts until the
+    /// next session, as [`Self::write_fault`] does).
     fn ecs_can_write(&self) -> bool {
-        self.ecs_scene().is_ok_and(|(kind, _)| {
-            kind == super::ecs::SERVER_WORLD && super::ecs::ready(&self.services, kind)
-        })
+        self.write_fault().is_none()
+            && self.ecs_scene().is_ok_and(|(kind, _)| {
+                kind == super::ecs::SERVER_WORLD && super::ecs::ready(&self.services, kind)
+            })
     }
 
     /// ShroudForge's world session marker for world `world_kind` (its `world_session_id`, which claims and
