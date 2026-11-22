@@ -189,6 +189,15 @@ void read_drop_stack(uintptr_t addr, uint32_t group, KilnContentStack* out);
 
 // ============================================================================================= store ==========
 constexpr uint64_t kCodeSeq = 1ull << 63;  // code layers sort after every data-pack layer
+// Registry layers (registry_live.cpp, registry P1 S9): a band above every data-pack layer and below code, so code still wins
+// over packs and the registry, and the registry over packs (owner decision D1).
+constexpr uint64_t kRegistrySeq = 1ull << 62;
+inline uint64_t registry_seq(uint32_t ordinal) { return kRegistrySeq | ordinal; }
+inline bool is_registry_seq(uint64_t seq) { return (seq & (kCodeSeq | kRegistrySeq)) == kRegistrySeq; }
+// An evaluated layer's value, computed from the value below it (the layers under it, else the original) whenever the slot
+// is flushed: a relative registry edit over whatever a pack or the game gives. false (+ *why): no value, the layer holds
+// the value below unchanged.
+using LayerEval = std::function<bool(const uint8_t* below, uint8_t n, uint8_t* out, std::string* why)>;
 constexpr uint8_t kSlotBytes = 16;  // the widest slot: a GUID reference
 constexpr int32_t kSubBlob = 100;    // Slot.sub of an item list header (kitbash: per-body / pickup models)
 struct Layer {
@@ -197,6 +206,7 @@ struct Layer {
     uint8_t bytes[kSlotBytes];
     std::string source;
     std::string mod;  // the mod a shared owner put it for (a gamedata definition's layer); empty: the owner's label says ("mod <id>", "pack <id>")
+    std::shared_ptr<const LayerEval> eval;  // an evaluated layer (store_put_eval): bytes hold its last value
 };
 struct Slot {
     uint32_t kind = 0, id = 0;
@@ -206,6 +216,9 @@ struct Slot {
     uint8_t original[kSlotBytes] = {};
     uint8_t current[kSlotBytes] = {};
     bool dirty = false;
+    bool registry = false;  // a registry layer was on it at the last flush or since (its revert is compared too)
+    bool foreign = false;   // another writer wrote it after Kiln's registry layer: registry layers left out for this world
+    bool old_changed = false;  // a layer of an older path (not the registry) was put or dropped since the last flush
     std::vector<Layer> layers;
 };
 struct Conflict {
@@ -263,6 +276,28 @@ private:
 // Adds or replaces `owner`'s layer of the slot at addr (the slot remembers the original bytes on first touch).
 bool store_put(KilnOwner owner, uint64_t seq, uint32_t kind, uint32_t id, int32_t field, int32_t sub, uintptr_t addr,
                uint8_t n, const uint8_t* bytes, const std::string& source);
+// The same with an evaluated layer: its value is eval(value below) at every flush of the slot.
+bool store_put_eval(KilnOwner owner, uint64_t seq, uint32_t kind, uint32_t id, int32_t field, int32_t sub, uintptr_t addr,
+                    uint8_t n, LayerEval eval, const std::string& source);
+// The bytes the slot's layers give now (evaluated layers computed, registry layers of a foreign slot left out), before any
+// flush; memory when there is no slot. false: unreadable, or a slot of another size.
+bool store_effective(uintptr_t addr, uint8_t n, uint8_t* out);
+// The same, with only the layers below the registry band (packs, the original): the value registry layers are computed over.
+bool store_below_registry(uintptr_t addr, uint8_t n, uint8_t* out);
+uint32_t store_mark_evals();  // every slot holding an evaluated layer is flushed (evaluated) again; returns how many
+bool store_slot_copy(uintptr_t addr, Slot* out);  // a snapshot of the slot and its last evaluated layer bytes; false: none
+// Compare-before-write (sfi R3, owner decision D1): a registry write, or a registry layer's revert, on a slot whose memory is
+// not what Kiln last wrote there is not made: another writer (a ShroudForge run-time write in kiln mode, or any other) wrote
+// it since. Each such slot once per world (store_reset forgets them).
+struct StoreSkipped {
+    uintptr_t addr = 0;
+    uint32_t kind = 0, id = 0;
+    std::string what;  // "items Material_T1_Wood_Logs.maxStackSize"
+    std::string mod, source;  // the registry layer's
+    bool revert = false;      // the revert of a dropped registry layer
+    std::string text;         // the report line
+};
+std::vector<StoreSkipped> store_skipped();
 bool store_drop(KilnOwner owner, uintptr_t addr);  // removes one layer
 uint32_t store_drop_owner(KilnOwner owner);         // removes every layer of owner; returns slots affected
 bool store_original(uintptr_t addr, uint8_t n, uint8_t* out);  // original bytes if the slot exists
@@ -297,10 +332,29 @@ KilnResult set_field(KilnOwner owner, uint64_t seq, uint32_t kind, const Entry& 
                      const KilnContentValue& v, const std::string& source, std::string* why, int32_t sub = -1);
 KilnResult set_recipe_stacks(KilnOwner owner, uint64_t seq, const Entry& e, uint32_t which,
                              const std::vector<KilnContentStack>& stacks, const std::string& source, std::string* why);
+// The 8 bytes of a recipe list header pointing at a new list holding stacks (near memory, never freed): what set_recipe_stacks puts.
+KilnResult recipe_list_header(const Entry& e, uint32_t which, const std::vector<KilnContentStack>& stacks, uint8_t* hb,
+                              std::string* why);
 KilnResult set_drop_stacks(KilnOwner owner, uint64_t seq, const Entry& e, const std::vector<KilnContentStack>& stacks,
                            const std::string& source, std::string* why);
 KilnContentValue original_value(const Entry& e, const Field& f);
 KilnContentValue current_value(const Entry& e, const Field& f);
+
+// ============================================================================================= registry hooks ===
+// The registry's live back-end (registry_live.cpp) and kiln.gamedata (gamedata_packs.cpp): one item config value
+// ("impactValues.0x727d7f78", StaminaCost) as a store slot, and the tooltip row that shows it when the item has one. false
+// + *why: the item has no such config (the live back-end never adds one) or the path is no value.
+struct GdValueSlot {
+    uintptr_t addr = 0;
+    Field f;
+    uint32_t kind = 0, id = 0;
+    int32_t field = -1;
+    uintptr_t tip = 0;  // the tooltip row's value (sint32), 0: none
+    uint8_t tip_format = 0;
+};
+bool gd_item_config_slot(const Entry& e, const std::string& path, GdValueSlot* out, std::string* why);
+bool gd_ui_scale(uint8_t format, double v, int64_t* out);  // a config value as its tooltip row shows it
+constexpr int32_t kSubUnlock = 101;  // Slot.sub of a recipe's knowledgeRequirement (registry recipes.unlock)
 
 // ============================================================================================= stack guard =====
 bool guard_on();
@@ -319,11 +373,16 @@ bool apply_pack(KilnOwner owner, uint64_t seq_base, const std::string& text, con
 // Drop-table rules: (re)apply every rule to one table (hook / reload).
 void drops_apply_rules(const Entry& table);
 void drops_drop_owner(KilnOwner owner);
+// content.cpp's drop-table acquire path (registry_live.cpp; store_mutex held): the old packs' rules when there are any,
+// newcontent's stacks, then the registry's layers over the stacks the table has now, whether or not a pack has rules.
+void drops_table_loaded(const Entry& table);
 bool drops_have_rules();
 void drops_clear_rules();  // every owner's drop rules (world reset)
 // Data packs on disk.
 struct PackFile {
     std::string mod, path, rel, dir;  // dir: the mod's folder
+    std::string version;               // kiln.mod.json's (the registry stage names it)
+    std::string side;                  // kiln.mod.json's "side" (default "server"): the registry stage skips another side's mods
     uint64_t size = 0, mtime = 0;
 };
 std::vector<PackFile> discover_packs(std::string* signature);  // kiln.profile's mods when there is one (A6), else kiln/mods

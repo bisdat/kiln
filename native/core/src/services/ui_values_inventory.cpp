@@ -165,11 +165,12 @@ KilnResult KILN_CALL t_mapping(KilnOwner owner, float tw, float th, KilnUiSlotMa
         out->session = f->meta.session;
         out->frame = f->meta.frame;
         out->screen = f->meta.screen;
-        if (!map_frame(f->meta, tw, th, &out->scale_x, &out->scale_y, &out->offset_x, &out->offset_y)) {
+        bool scaled = false;
+        if (!map_frame(f->meta, tw, th, &out->scale_x, &out->scale_y, &out->offset_x, &out->offset_y, &scaled)) {
             out->reason = KUI_NO_VIEWPORT;
             return KILN_OK;
         }
-        if (tw > 0 && th > 0 && (tw != f->meta.canvas_width || th != f->meta.canvas_height)) out->flags |= KUI_MAP_SCALED;
+        if (scaled) out->flags |= KUI_MAP_SCALED;
         out->ok = 1;
         return KILN_OK;
     } catch (...) {
@@ -226,11 +227,12 @@ KilnResult KILN_CALL t_screen_view(KilnOwner owner, float tw, float th, KilnUiSc
                 out->container = env().screen_target();
         }
         float sx, sy, ox, oy;
-        if (!map_frame(f->meta, tw, th, &sx, &sy, &ox, &oy)) {
+        bool scaled = false;
+        if (!map_frame(f->meta, tw, th, &sx, &sy, &ox, &oy, &scaled)) {
             out->reason = KUI_NO_VIEWPORT;
             return KILN_OK;
         }
-        if (tw > 0 && th > 0 && (tw != f->meta.canvas_width || th != f->meta.canvas_height)) out->flags |= KUI_VIEW_SCALED;
+        if (scaled) out->flags |= KUI_VIEW_SCALED;
         Bounds all, mine, theirs;
         for (const KilnUiVisibleSlot& v : f->slots) {
             if (!(v.available & KUI_OUTER_RECT)) continue;
@@ -313,13 +315,25 @@ uint32_t panel_screen(const KilnUiScreen& s) {
     }
 }
 
-bool map_frame(const KilnUiSlotsFrame& m, float tw, float th, float* sx, float* sy, float* ox, float* oy) {
-    if (!(m.transform_flags & KUI_VIEWPORT) || !(m.canvas_width > 0) || !(m.canvas_height > 0)) return false;
-    const float kx = tw > 0 ? tw / m.canvas_width : 1.0f, ky = th > 0 ? th / m.canvas_height : 1.0f;
+// The units-to-pixels mapping, the one place every user of it (slot_at, mapping, screen_view, the click hit test) goes
+// through. The game's UI system (client 26430625, 0xa4fb40) lays its canvas out in units, 1920x1080 times the UI scale,
+// grown along the longer side, and puts it on its viewport in pixels: pixel = viewport.xy + unit * pixels_per_unit,
+// where canvas * pixels_per_unit is the viewport's size exactly. The viewport is the size the game draws its UI at:
+// {0, 0, w, h} (its writers: 0xa44357 at init, 1920x1080; 0xa4df13, the size the UI is drawn at). So the game's picture is the viewport's size in pixels, never the canvas's
+// (units: at 3840x2160 the canvas is 1920 wide, issue 107). Were x or y ever not 0 (a letter- or pillarbox), the
+// viewport is taken as centred in the picture: w + 2x by h + 2y. A target of another size (the window's client area, the
+// overlay's display) scales the picture to it; target 0 = the picture's own pixels. *scaled: the target differs.
+bool map_frame(const KilnUiSlotsFrame& m, float tw, float th, float* sx, float* sy, float* ox, float* oy, bool* scaled) {
+    if (scaled) *scaled = false;
+    if (!(m.transform_flags & KUI_VIEWPORT)) return false;
+    const float pw = m.viewport_px.width + 2 * m.viewport_px.x, ph = m.viewport_px.height + 2 * m.viewport_px.y;
+    if (!(pw > 0) || !(ph > 0) || !std::isfinite(pw) || !std::isfinite(ph)) return false;
+    const float kx = tw > 0 ? tw / pw : 1.0f, ky = th > 0 ? th / ph : 1.0f;
     *sx = m.pixels_per_unit * kx;
     *sy = m.pixels_per_unit * ky;
     *ox = m.viewport_px.x * kx;
     *oy = m.viewport_px.y * ky;
+    if (scaled) *scaled = tw > 0 && th > 0 && (tw != pw || th != ph);
     return std::isfinite(*sx) && std::isfinite(*sy) && std::isfinite(*ox) && std::isfinite(*oy) && *sx > 0 && *sy > 0;
 }
 

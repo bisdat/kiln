@@ -27,7 +27,7 @@ public sealed class SigsGeneratorTests
     }
 
     [Fact]
-    public void TheCoresTenDescriptorsParseWithoutAProblem()
+    public void TheCoresDescriptorsParseWithoutAProblem()
     {
         var m = SigsModel.Parse(CoreFiles());
         Assert.Empty(m.BadFiles);
@@ -35,6 +35,9 @@ public sealed class SigsGeneratorTests
         Assert.Equal(new[]
         {
             "GetComponent", "abilities/RegisterNative", "items/AttrChanged", "items/AttrFind", "items/GetItemVolume",
+            // kiln.routines' seven (dev.31: the villager worker, its chooser, the setters, the sleep check, the commands)
+            "routines/DecideTask", "routines/FinishState", "routines/ProcessCommands", "routines/SetDecision", "routines/SetState",
+            "routines/SleepCheck", "routines/VillagerWorker",
             "rules/QuatRotate", "time/GetGameTime", "time/SetTimeScale", "weather/SampleAt", "world/ReadOther",
         }, m.Sigs.Keys);
         Assert.Equal(new[] { "AttrRef", "OptS32", "WeatherSample" }, m.Structs.Keys.OrderBy(k => k, StringComparer.Ordinal));

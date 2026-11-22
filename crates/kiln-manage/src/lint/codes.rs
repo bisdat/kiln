@@ -88,6 +88,7 @@ rules! {
     MOD_VALUE_SIZE = "KL353", "mod-value-size", Error, "a mod value's label, number format or whole definition over its size limit";
     MOD_VALUE_DUPLICATE = "KL354", "mod-value-duplicate", Error, "a mod value id defined in two of a mod's mod-values files";
     MOD_VALUE_COUNT = "KL355", "mod-value-count", Error, "more than 128 mod values in one mod";
+    MOD_VALUE_CARRIED_MAX = "KL356", "mod-value-carried-max", Warning, "a carried mod value with no max: a player's own copy can raise it to the 64-bit limit";
 
     // KL4xx: references to the game's data (needs the game-data catalog)
     UNKNOWN_REF = "KL401", "unknown-reference", Warning, "a name, id or GUID the game (and the mods) do not have";
@@ -97,6 +98,7 @@ rules! {
     ASSET_MODE = "KL405", "asset-mode", Error, "a resource \"override\" the game lacks, or a \"new\" one it has";
     CRAFTED_ROLLED = "KL406", "crafted-rolled", Warning, "a recipe makes an item that rolls its rarity or level, unlike its tooltip";
     HIDDEN_ENTRY = "KL407", "hidden-entry", Info, "a game entry whose name marks it old, test or unused (DEPRECATED, DONOTPLACE, TEST...)";
+    RECIPE_WATER = "KL408", "recipe-water", Warning, "a recipe input that is the game's old Water canteen item, not tank water, or water at a station whose tank cannot give it";
 
     // KL5xx: files, assets and cook recipes
     FILE_MISSING = "KL501", "file-missing", Error, "a file the mod names is not there";

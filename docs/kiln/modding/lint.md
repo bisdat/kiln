@@ -444,8 +444,12 @@ Error. The real manifest reader refuses the file for a reason the schema cannot 
 schema found no error in the file.
 ```text
 kiln.mod.json:6:3: error KL209: Kiln.Host refuses this manifest: kiln.mod.json: 'other' is in both loadBefore and loadAfter
+kiln.mod.json:2:3: error KL209: Kiln.Host refuses this manifest: kiln.mod.json: id 'native.tools' is reserved: an id that starts with "native." is a native owner's mod-values namespace
 ```
-Fix: follow the reader's message.
+Among the refusals: an `id` that starts with `native.` (since dev.31). [Mod values](../services/mod-values.md) give every
+native owner the namespace `native.` plus a hash of its name, and a mod's id is its own namespace, so the two must never
+meet.
+Fix: follow the reader's message (for an id: pick one that does not start with `native.`).
 
 ## KL3xx: ids, GUIDs and names
 
@@ -689,7 +693,8 @@ binds; declare the native through `[ImpactNative]` (the build writes `"sync": tr
 
 ## KL35x: mod values (mod-values/*.json)
 What [Kiln.ModValues](schemas/kiln-mod-values.md) refuses when it loads a mod's value definitions, beyond what the schema says.
-A refused definition is not made: code that reads or changes that value gets a definition error.
+A refused definition is not made: code that reads or changes that value gets a definition error. KL356 is a warning about
+a definition Kiln accepts.
 
 ### KL350 mod-value-number
 Error. `min`, `max`, `initial` or a threshold that has the right form (a base-10 string, the schema's [KL106](#kl106-pattern))
@@ -742,6 +747,17 @@ One file with more than 128 is the schema's [KL108](#kl108-size).
 mod-values/more.json:32:5: error KL355: value extra-29 is this mod's value number 129 of 130: Kiln takes at most 128 per mod, across all its mod-values files
 ```
 Fix: drop values the mod does not use, or fold related ones into one counter.
+
+### KL356 mod-value-carried-max
+Warning. A carried value (`"persistence": "carried"` with `"trustClientImports": true`, a counter or an experience value)
+with no `max`. Carried progress merges by maximum: when a player joins, Kiln keeps the higher of the world's value and the
+copy their client brings, so a carried value is only as safe as its bound. Without a `max` of its own the bound is the
+default, 9223372036854775807, and an edited client can raise the value that far. Kiln accepts the definition.
+```text
+mod-values/a.json:12:5: warning KL356: value open-carried: a carried value without "max" can be raised as far as 9223372036854775807 by a player's own copy (Kiln keeps the higher of the world's value and the copy a client brings); give it a real max
+```
+Fix: give `max` the highest value the mod can really reach (for an experience value, its last threshold or a little
+above: past it no level is gained). An explicit `max`, also the default written out, ends the warning.
 
 ## KL4xx: references to the game's data
 
@@ -811,6 +827,26 @@ pickers leave these entries out unless "Show hidden game entries" is on.
 content/items.json:3:5: info KL407: "Z_Material_Sand_DEPRECATED" is one of the game's old, test or unused item entries (its name says so): it may do nothing in the game
 ```
 Fix: pick the entry the game uses now, or keep it if you meant it.
+
+### KL408 recipe-water
+Warning. A recipe's water that does not do what it looks like:
+- **An input naming `Food_T1_raw_hydration_Water_Pouch_Filled_DEPRECATED`**, the game's old "Water" item. It is a canteen
+  item like any other: a craft takes that item from the crafter, never water from the station's tank. The recipe screen
+  borrows its name and icon for the recipe's water row, which is why it looks like tank water. Give the recipe its
+  water instead: `"water": n` on a new recipe, `"waterCharges": n` in a change to a game recipe.
+- **Water at a factory station without a tank** (the Smelter, the Forge, the Kiln, the Loom...). A factory station takes a
+  recipe's water from its own tank only, so it never starts that recipe. The stations with a tank: Seedbed (150 charges),
+  Oven, Cooking Station, Laboratory, Coffee Brewer (100 each) and Beehive (50).
+- **More water a craft than the station's tank holds**: it never fills enough to start.
+
+The station is the definition's `"0x<workshop id>"`, or the workshop of the game recipe it names as its `station` or
+`base` (with the catalog), or the game recipe a change names. Crafting menus (`"hand"`, the Workbench, the Kitchen, the
+NPCs) take a recipe's water from the crafter and the base's wells and barrels, as the game's own Kitchen recipes do: no
+warning there. How the game pays it: [docs/re/stations.md](../../re/stations.md) section 3.6.
+```text
+content/recipes.json:5:9: warning KL408: recipe "MyMod_Tea" takes "Food_T1_raw_hydration_Water_Pouch_Filled_DEPRECATED", the game's old Water canteen item, as an ingredient: a craft takes 2 of that item, never water from the station's tank. For the station's tank water, remove this input and give the recipe "water": 2 (water charges a craft)
+```
+Fix: remove the input and set the recipe's water; pick a station with a tank, or leave the water out.
 
 ## KL5xx: files, assets and cook recipes
 

@@ -19,6 +19,7 @@ pub const KILN_CRAFTMENU_VERSION: u32 = 1;
 pub const KILN_UI_AMD_UPSCALER_AUTO: i32 = 0;
 pub const KILN_UI_AMD_UPSCALER_FSR3: i32 = 1;
 pub const KILN_UI_AMD_UPSCALER_FSR4: i32 = 2;
+pub const KILN_UI_CHAT_SEARCH_ROWS: i32 = 10;
 pub const KILN_UI_CHILD_ALWAYS_PADDING: i32 = 2;
 pub const KILN_UI_CHILD_AUTO_RESIZE_Y: i32 = 32;
 pub const KILN_UI_CHILD_BORDERS: i32 = 1;
@@ -63,6 +64,8 @@ pub const KILN_UI_CRAFTING_NONE: i32 = 0;
 pub const KILN_UI_DLSS_SCALE_CUSTOM: i32 = 2;
 pub const KILN_UI_DLSS_SCALE_GAME: i32 = 0;
 pub const KILN_UI_DLSS_SCALE_PER_MODE: i32 = 1;
+pub const KILN_UI_DRAG_KIND_MAX: i32 = 32;
+pub const KILN_UI_DRAG_PAYLOAD_MAX: i32 = 4096;
 pub const KILN_UI_ENTRY_ATTENTION: i32 = 2;
 pub const KILN_UI_ENTRY_HIDDEN: i32 = 1;
 pub const KILN_UI_FONT_DEFAULT: i32 = 0;
@@ -165,8 +168,10 @@ pub const KILN_UI_PAGE_BY_KEY: i32 = 2;
 pub const KILN_UI_PAGE_HIDDEN: i32 = 0;
 pub const KILN_UI_PAGE_OPENING: i32 = 1;
 pub const KILN_UI_PAGE_SHOWN: i32 = 2;
+pub const KILN_UI_POINTER_DRAGGING: i32 = 2;
 pub const KILN_UI_POINTER_PASS: i32 = 0;
 pub const KILN_UI_POINTER_TAKE: i32 = 1;
+pub const KILN_UI_POINTER_VALID: i32 = 1;
 pub const KILN_UI_ROLE_ACCENT: i32 = 6;
 pub const KILN_UI_ROLE_ATTENTION: i32 = 9;
 pub const KILN_UI_ROLE_BORDER: i32 = 5;
@@ -622,6 +627,40 @@ pub struct KilnUiPointerPress {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
+pub struct KilnUiChatSearch {
+    pub size: u32,
+    pub operation: u32,
+    pub active: u32,
+    pub suppressed: u32,
+    pub field: u32,
+    pub revision: u32,
+    pub query_len: u32,
+    pub selected: u32,
+    pub first: u32,
+    pub count: u32,
+    pub total: u32,
+    pub index: u32,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub query: [core::ffi::c_char; 257],
+    pub lines: [[core::ffi::c_char; 1025]; 10],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct KilnUiPointer {
+    pub size: u32,
+    pub flags: u32,
+    pub x: f32,
+    pub y: f32,
+    pub held: u32,
+    pub reserved: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
 pub struct KilnUiApi {
     pub header: KilnServiceHeader,
     pub status: Option<unsafe extern "C" fn(*mut KilnUiStatus) -> KilnResult>,
@@ -754,6 +793,10 @@ pub struct KilnUiApi {
     pub graphics_status: Option<unsafe extern "C" fn(*mut KilnUiGraphicsStatus) -> KilnResult>,
     pub chat_completion: Option<unsafe extern "C" fn(*mut KilnUiChatCompletion) -> KilnResult>,
     pub subscribe_pointer_press: Option<unsafe extern "C" fn(KilnOwner, KilnUiPointerFn, *mut core::ffi::c_void, *mut KilnHandle) -> KilnResult>,
+    pub chat_search: Option<unsafe extern "C" fn(*mut KilnUiChatSearch) -> KilnResult>,
+    pub pointer: Option<unsafe extern "C" fn(*mut KilnUiPointer) -> bool>,
+    pub drag_source: Option<unsafe extern "C" fn(KilnStr, *const core::ffi::c_void, usize, KilnStr) -> bool>,
+    pub drop_target: Option<unsafe extern "C" fn(KilnStr, *mut core::ffi::c_void, usize, *mut usize) -> bool>,
 }
 
 #[repr(C)]

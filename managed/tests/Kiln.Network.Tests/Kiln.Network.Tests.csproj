@@ -5,6 +5,8 @@
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
     <OutputType>Exe</OutputType>
+    <!-- SteamMessagesTests: a fake kiln.net table ([UnmanagedCallersOnly] functions, its layout) -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <NoWarn>$(NoWarn);CS1591;KILNX002</NoWarn>
   </PropertyGroup>
   <ItemGroup>

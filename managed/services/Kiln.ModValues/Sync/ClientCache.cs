@@ -91,7 +91,8 @@ internal sealed class ClientStream(Func<DateTime> clock, Action<object> send, IS
         var s = _state;
         if (s.Nonce is null || m.Nonce != s.Nonce) return;  // another stream's message: dropped
         var now = clock();
-        if (!ModValuesWire.TryU64(m.Seq, out var seq) || !ModValuesWire.TryU64(m.BaseSeq, out var baseSeq) || m.Transfer != m.Seq ||
+        if (m.PayloadB64 is null || m.Sha256 is null || m.Transfer is null ||
+            !ModValuesWire.TryU64(m.Seq, out var seq) || !ModValuesWire.TryU64(m.BaseSeq, out var baseSeq) || m.Transfer != m.Seq ||
             m.Parts is < 1 or > ModValuesWire.MaxParts || m.TotalBytes is < 0 or > ModValuesWire.MaxStateBytes || m.Part < 0 || m.Part >= m.Parts ||
             m.Full != (baseSeq == 0) || seq == 0)
         {

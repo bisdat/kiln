@@ -408,6 +408,141 @@ pub fn owns_output(root: &Path, stem: &str) -> io::Result<bool> {
     Ok(Live::new(root).owned(stem, &receipt)?.is_some())
 }
 
+/// kiln-eml: the record Kiln's bundled ShroudForge (Kiln's fork, modules/game-files/record_prepared_game_files.rs)
+/// writes beside the working backup after a successful startup asset pass (`<stem>.kfc.prepared.json`), and removes
+/// before a pass changes anything: its scheme, and the part of the resource file it hashes at each end.
+const SF_PREPARED_SCHEME: &str = "kiln-sf-prepared 1";
+const SF_PREPARED_EDGE: u64 = 1 << 20;
+
+/// kiln-eml: what Kiln's bundled ShroudForge's record of its last startup asset pass proves about the live pair
+/// (`hosted_shroudforge_output`). Never ownership: it only says whose output is live and over which backups.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HostedShroudForge {
+    /// No record, one Kiln cannot read, one of another scheme or archive, or a live header that is not the one it
+    /// records: nothing is proven.
+    NotProven,
+    /// The live header is the one the pass left (its whole SHA-256), but something else is not as the pass left it
+    /// (why, in words): Kiln cannot prove the backups present are what it built from.
+    Stale(String),
+    /// The live pair is the pass's output over the backups present: the header by its whole SHA-256, the resource file by
+    /// its length, last-write time and the SHA-256 of its first and last MiB (the fork's own rule), each backup by its
+    /// length and last-write time, and Steam's build id the same where the record and Steam's manifest both name one.
+    Output,
+}
+
+/// kiln-eml: reads `<stem>.kfc.prepared.json` (at most 16 MiB) and checks it against the live files (the header is
+/// hashed in full, the resource file at its ends). Nothing is written. Err only when a live file cannot be read.
+pub fn hosted_shroudforge_output(root: &Path, stem: &str) -> io::Result<HostedShroudForge> {
+    use HostedShroudForge::{NotProven, Output, Stale};
+    check_stem(stem)?;
+    let path = root.join(format!("{stem}.kfc.prepared.json"));
+    checked_path(root, &path)?;
+    match fs::symlink_metadata(&path) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(NotProven),
+        Err(e) => return Err(e),
+        Ok(m) if !m.is_file() => return Ok(NotProven),
+        Ok(_) => {}
+    }
+    let Ok(bytes) = bounded(root, &path) else { return Ok(NotProven) };
+    let Ok(record) = serde_json::from_slice::<serde_json::Value>(&bytes) else { return Ok(NotProven) };
+    if record["scheme"].as_str() != Some(SF_PREPARED_SCHEME) || record["target"].as_str() != Some(stem) {
+        return Ok(NotProven);
+    }
+    let files = &record["files"];
+    let header = digest(root, &root.join(format!("{stem}.kfc")))?;
+    if files["kfc"]["size"].as_u64() != Some(header.size) || files["kfc"]["sha256"].as_str() != Some(header.sha256()) {
+        return Ok(NotProven);
+    }
+    let recorded = |value: &serde_json::Value, hashed: bool| -> Option<(u64, String, Option<String>)> {
+        Some((value["size"].as_u64()?, value["modified"].as_str()?.to_owned(),
+            if hashed { Some(value["sha256"].as_str()?.to_owned()) } else { None }))
+    };
+    let resources = root.join(format!("{stem}.kfc_resources"));
+    if recorded(&files["kfcResources"], true) != Some(sf_resources(root, &resources)?) {
+        return Ok(Stale("the game's resource file changed since then".into()));
+    }
+    for (key, ext) in [("kfcBackup", "kfc.bak"), ("kfcResourcesBackup", "kfc_resources.bak")] {
+        let now = sf_identity(root, &root.join(format!("{stem}.{ext}")))?.map(|(size, modified)| (size, modified, None));
+        // null: the pass found no such backup; None: a value that is not one (proves nothing)
+        let then = if files[key].is_null() { Some(None) } else { recorded(&files[key], false).map(Some) };
+        if then != Some(now) {
+            return Ok(Stale("the backup files changed since then".into()));
+        }
+    }
+    if let (Some(then), Some(now)) = (record["build"].as_str(), steam_build(root, stem))
+        && then != now
+    {
+        return Ok(Stale(format!("the game was updated since then (Steam build {then}, now {now})")));
+    }
+    Ok(Output)
+}
+
+/// A file's last-write time as the fork records it: nanoseconds since the Unix epoch, in decimal.
+fn sf_modified(metadata: &fs::Metadata) -> io::Result<String> {
+    let since = metadata.modified()?.duration_since(std::time::UNIX_EPOCH).map_err(io::Error::other)?;
+    Ok(since.as_nanos().to_string())
+}
+
+/// Length and last-write time of a regular file, None when there is none (the fork's `identity`).
+fn sf_identity(root: &Path, path: &Path) -> io::Result<Option<(u64, String)>> {
+    checked_path(root, path)?;
+    match fs::symlink_metadata(path) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e),
+        Ok(m) if m.is_file() => Ok(Some((m.len(), sf_modified(&m)?))),
+        Ok(_) => Err(invalid(&format!("{} is not a regular file", path.display()))),
+    }
+}
+
+/// The resource file as the fork records it: length, last-write time and the SHA-256 of its first and last MiB (of all
+/// of it when it is at most 2 MiB), refused when it changed while it was read.
+fn sf_resources(root: &Path, path: &Path) -> io::Result<(u64, String, Option<String>)> {
+    use io::Seek;
+    checked_path(root, path)?;
+    super::transaction::regular(path)?;
+    let before = fs::symlink_metadata(path)?;
+    let mut file = fs::File::open(path)?;
+    let mut hash = Sha256::new();
+    let mut take = |file: &mut fs::File, mut left: u64| -> io::Result<()> {
+        let mut buffer = vec![0u8; 1 << 16];
+        while left > 0 {
+            let want = buffer.len().min(usize::try_from(left).unwrap_or(usize::MAX));
+            let n = file.read(&mut buffer[..want])?;
+            if n == 0 { break; }
+            count(n);
+            hash.update(&buffer[..n]);
+            left -= n as u64;
+        }
+        Ok(())
+    };
+    let length = before.len();
+    if length > SF_PREPARED_EDGE * 2 {
+        take(&mut file, SF_PREPARED_EDGE)?;
+        file.seek(io::SeekFrom::End(-(SF_PREPARED_EDGE as i64)))?;
+        take(&mut file, SF_PREPARED_EDGE)?;
+    } else {
+        take(&mut file, length)?;
+    }
+    let after = fs::metadata(path)?;
+    if after.len() != length || sf_modified(&after)? != sf_modified(&before)? {
+        return Err(invalid(&format!("{} changed while it was read", path.display())));
+    }
+    Ok((length, sf_modified(&before)?, Some(format!("{:x}", hash.finalize()))))
+}
+
+/// Steam's build id of the installation as the fork reads it (`buildid` in `steamapps/appmanifest_<app>.acf`, two
+/// folders above the game folder), None where it cannot be read.
+fn steam_build(root: &Path, stem: &str) -> Option<String> {
+    let app = if stem == "enshrouded_server" { "2278520" } else { "1203620" };
+    let manifest = root.parent()?.parent()?.join(format!("appmanifest_{app}.acf"));
+    if !fs::metadata(&manifest).is_ok_and(|m| m.is_file() && m.len() <= 1 << 20) { return None; }
+    let text = fs::read_to_string(manifest).ok()?;
+    text.lines().find_map(|line| {
+        let mut parts = line.split('"').filter(|part| !part.trim().is_empty());
+        parts.next()?.eq_ignore_ascii_case("buildid").then(|| parts.next().map(str::to_owned)).flatten()
+    })
+}
+
 /// SHA-256 of the receipt's bytes: what the change cache keeps as `owner` (cache/mod.rs) once its fingerprints of the
 /// game files are known to be that receipt's live output. None: no receipt.
 pub(crate) fn marker(root: &Path, stem: &str) -> io::Result<Option<String>> {
@@ -771,16 +906,39 @@ pub(crate) fn before_baseline(root: &Path, stem: &str, mode: SfHandoff) -> io::R
     Ok(guard)
 }
 
+/// kiln-eml: what proves that a restore may replace the live pair with the working baseline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RestoreProof {
+    /// kiln-eml's ownership receipt lists the live output and the backups present (`owns_output`).
+    Receipt,
+    /// Kiln mode only (Deferred): the live pair is Kiln's bundled ShroudForge's output over the backups present, as
+    /// its record proves (`hosted_shroudforge_output`).
+    HostedShroudForge,
+}
+
+// The tests' form: the receipt's proof.
+#[cfg(test)]
+pub(crate) fn before_restore(root: &Path, stem: &str, mode: SfHandoff) -> io::Result<Option<SfGuard>> {
+    before_restore_as(root, stem, mode, RestoreProof::Receipt)
+}
+
 /// Recheck ownership and hand the archives over from SF while locked; retain the guard through restore cleanup.
 /// kiln-eml: Deferred takes no SF lock and, when the restore changes the live pair, records the handoff it
-/// owes before any change; Live also makes a handoff an earlier kiln-mode write owes.
-pub(crate) fn before_restore(root: &Path, stem: &str, mode: SfHandoff) -> io::Result<Option<SfGuard>> {
+/// owes before any change; Live also makes a handoff an earlier kiln-mode write owes. `proof`: what may replace the
+/// live pair, checked again here (after ShroudForge's unfinished publication).
+pub(crate) fn before_restore_as(root: &Path, stem: &str, mode: SfHandoff, proof: RestoreProof) -> io::Result<Option<SfGuard>> {
     check_stem(stem)?;
     let deferred = mode == SfHandoff::Deferred;
     let guard = if deferred { None } else { sf_lock(root)? };
     if deferred { sf_publication_pending(root, stem)?; } else { handoff_locked(root, stem, false, false, &guard)?; }
-    if !owns_output(root, stem)? {
-        return Err(invalid("the live archives or backups no longer match kiln-eml's ownership receipt; retained without restoring"));
+    match proof {
+        RestoreProof::Receipt if !owns_output(root, stem)? => {
+            return Err(invalid("the live archives or backups no longer match kiln-eml's ownership receipt; retained without restoring"));
+        }
+        RestoreProof::HostedShroudForge if !deferred || hosted_shroudforge_output(root, stem)? != HostedShroudForge::Output => {
+            return Err(invalid("the live archives or backups are no longer the output Kiln's bundled ShroudForge recorded; retained without restoring"));
+        }
+        _ => {}
     }
     // kiln-eml: the change journal names the generation this restore takes away (EML's own no-mod restore too): it
     // goes before any live file changes (one that cannot be removed refuses the restore with nothing changed)
@@ -2189,5 +2347,132 @@ pub(crate) mod tests {
         fs::write(root.join("kiln/eml/ownership/g.json"), &big).unwrap();
         assert!(read_receipt(&root, "g").unwrap().is_some() && readonly::receipt("g", &big).is_some());
         fs::remove_dir_all(root).unwrap();
+    }
+
+    // kiln-eml: Kiln's bundled ShroudForge's record of its last asset pass (the fork's record_prepared_game_files.rs
+    // shape) proves its output only as a whole: the header by its whole SHA-256 (else nothing is proven), then the
+    // resource file at its ends, both backups and Steam's build id where both sides name one (else stale).
+    #[test]
+    fn hosted_shroudforge_output_is_proven_by_its_whole_record_only() {
+        use std::time::UNIX_EPOCH;
+        let base = std::env::temp_dir().join(format!("kiln-hosted-sf-{}", uuid::Uuid::new_v4()));
+        let root = base.join("steamapps/common/Enshrouded");
+        fs::create_dir_all(&root).unwrap();
+        let manifest = base.join("steamapps/appmanifest_1203620.acf");
+        let file = |ext: &str| root.join(format!("enshrouded.{ext}"));
+        let modified = |p: &Path| fs::metadata(p).unwrap().modified().unwrap().duration_since(UNIX_EPOCH).unwrap().as_nanos().to_string();
+        let edges = |p: &Path| {
+            let bytes = fs::read(p).unwrap();
+            let edge = SF_PREPARED_EDGE as usize;
+            let mut h = Sha256::new();
+            if bytes.len() > 2 * edge { h.update(&bytes[..edge]); h.update(&bytes[bytes.len() - edge..]); } else { h.update(&bytes); }
+            format!("{:x}", h.finalize())
+        };
+        let record = |build: serde_json::Value| -> serde_json::Value {
+            serde_json::json!({
+                "scheme": "kiln-sf-prepared 1", "target": "enshrouded", "fingerprint": "f".repeat(64), "exportsEnabled": true,
+                "build": build,
+                "files": {
+                    "kfc": {"size": fs::metadata(file("kfc")).unwrap().len(), "modified": modified(&file("kfc")),
+                        "sha256": format!("{:x}", Sha256::digest(fs::read(file("kfc")).unwrap()))},
+                    "kfcResources": {"size": fs::metadata(file("kfc_resources")).unwrap().len(),
+                        "modified": modified(&file("kfc_resources")), "sha256": edges(&file("kfc_resources"))},
+                    "kfcBackup": {"size": fs::metadata(file("kfc.bak")).unwrap().len(), "modified": modified(&file("kfc.bak"))},
+                    "kfcResourcesBackup": {"size": fs::metadata(file("kfc_resources.bak")).unwrap().len(),
+                        "modified": modified(&file("kfc_resources.bak"))},
+                },
+                "exports": null,
+            })
+        };
+        let put = |value: &serde_json::Value| fs::write(file("kfc.prepared.json"), serde_json::to_vec(value).unwrap()).unwrap();
+        let keep_time = |p: &Path, change: &dyn Fn(&mut Vec<u8>)| {
+            let time = fs::metadata(p).unwrap().modified().unwrap();
+            let mut bytes = fs::read(p).unwrap();
+            change(&mut bytes);
+            fs::write(p, &bytes).unwrap();
+            fs::File::options().write(true).open(p).unwrap().set_modified(time).unwrap();
+        };
+        let reset = || {
+            fs::write(file("kfc"), b"ShroudForge's prepared header").unwrap();
+            fs::write(file("kfc_resources"), vec![7u8; 3 << 20]).unwrap();
+            fs::write(file("kfc.bak"), b"the game's own header").unwrap();
+            fs::write(file("kfc_resources.bak"), vec![5u8; 2 << 20]).unwrap();
+            fs::write(&manifest, "\"AppState\"\n{\n\t\"appid\"\t\t\"1203620\"\n\t\"buildid\"\t\t\"26430625\"\n}\n").unwrap();
+            let _ = fs::remove_file(file("kfc.prepared.json"));
+        };
+        let check = || hosted_shroudforge_output(&root, "enshrouded").unwrap();
+        use HostedShroudForge::{NotProven, Output, Stale};
+        let stale = |what: &str| match check() { Stale(why) => assert!(why.contains(what), "{why}"), other => panic!("{what}: {other:?}") };
+
+        reset();
+        assert_eq!(check(), NotProven, "no record");
+        put(&record("26430625".into()));
+        assert_eq!(check(), Output);
+        // the build is compared only where both sides name one
+        put(&record(serde_json::Value::Null));
+        assert_eq!(check(), Output);
+        fs::remove_file(&manifest).unwrap();
+        put(&record("26430625".into()));
+        assert_eq!(check(), Output);
+        reset();
+        put(&record("26400000".into()));
+        stale("the game was updated since then (Steam build 26400000, now 26430625)");
+
+        // nothing is proven: another scheme, archive or a damaged record, or a live header the record does not name
+        type Edit = fn(&mut serde_json::Value);
+        let unproven: [(&str, Edit); 5] = [
+            ("another scheme", |v| v["scheme"] = "kiln-sf-prepared 0".into()),
+            ("another archive", |v| v["target"] = "enshrouded_server".into()),
+            ("another header", |v| v["files"]["kfc"]["sha256"] = "0".repeat(64).into()),
+            ("another header length", |v| v["files"]["kfc"]["size"] = 1.into()),
+            ("no files", |v| { v.as_object_mut().unwrap().remove("files"); }),
+        ];
+        for (what, change) in unproven {
+            reset();
+            let mut value = record("26430625".into());
+            change(&mut value);
+            put(&value);
+            assert_eq!(check(), NotProven, "{what}");
+        }
+        reset();
+        fs::write(file("kfc.prepared.json"), b"{ not json").unwrap();
+        assert_eq!(check(), NotProven, "damaged");
+        reset();
+        put(&record("26430625".into()));
+        keep_time(&file("kfc"), &|b| b[0] ^= 1);
+        assert_eq!(check(), NotProven, "the header rewritten with its time kept");
+
+        // stale: the header is the pass's, something else is not
+        type Change = fn(&Path);
+        let changes: [(&str, &str, Change); 6] = [
+            ("resources start rewritten, time kept", "resource file", |r| {
+                let p = r.join("enshrouded.kfc_resources");
+                let time = fs::metadata(&p).unwrap().modified().unwrap();
+                let mut bytes = fs::read(&p).unwrap();
+                bytes[0] ^= 1;
+                fs::write(&p, &bytes).unwrap();
+                fs::File::options().write(true).open(&p).unwrap().set_modified(time).unwrap();
+            }),
+            ("resources touched", "resource file", |r| {
+                let p = r.join("enshrouded.kfc_resources");
+                let time = fs::metadata(&p).unwrap().modified().unwrap() + std::time::Duration::from_secs(5);
+                fs::File::options().write(true).open(&p).unwrap().set_modified(time).unwrap();
+            }),
+            ("header backup touched", "backup files", |r| {
+                let p = r.join("enshrouded.kfc.bak");
+                let time = fs::metadata(&p).unwrap().modified().unwrap() + std::time::Duration::from_secs(5);
+                fs::File::options().write(true).open(&p).unwrap().set_modified(time).unwrap();
+            }),
+            ("resource backup replaced", "backup files", |r| fs::write(r.join("enshrouded.kfc_resources.bak"), b"another").unwrap()),
+            ("resource backup gone", "backup files", |r| fs::remove_file(r.join("enshrouded.kfc_resources.bak")).unwrap()),
+            ("header backup gone", "backup files", |r| fs::remove_file(r.join("enshrouded.kfc.bak")).unwrap()),
+        ];
+        for (what, said, change) in changes {
+            reset();
+            put(&record("26430625".into()));
+            change(&root);
+            match check() { Stale(why) => assert!(why.contains(said), "{what}: {why}"), other => panic!("{what}: {other:?}") }
+        }
+        fs::remove_dir_all(base).unwrap();
     }
 }

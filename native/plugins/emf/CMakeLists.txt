@@ -19,6 +19,8 @@ kiln_plugin(emf
     src/api_net_client.cpp
     src/api_portraits.cpp
     src/api_v40.cpp
+    src/api_hits.cpp
+    src/hits_model.cpp
     src/net/net_service.cpp
     src/net/net_link.cpp
     src/net/net_line.cpp

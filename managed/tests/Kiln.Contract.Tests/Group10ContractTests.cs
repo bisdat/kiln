@@ -69,6 +69,7 @@ public sealed unsafe class ItemsOlderTableTests : FakeTableTest
     public void Names_and_transfers_name_their_own_row_not_moves()
     {
         AssertUnavailable("items.names", () => Items.ContainerName(new EntityId(5000)));
+        AssertUnavailable("items.rename", () => Items.SetContainerName(new EntityId(5000), "Ores"));  // v9 (0.2.0-dev.30.3)
         AssertUnavailable("items.transfer", () => Items.Transfers.Deny(new EntityId(5000)));
         AssertUnavailable("items.move", () => Items.QuickStack(new EntityId(5000), new EntityId(5001)));
     }

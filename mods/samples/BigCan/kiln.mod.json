@@ -1,0 +1,9 @@
+{
+  "id": "bigcan",
+  "name": "Big watering can sample",
+  "version": "1.0.0",
+  "apiVersion": "0.2",
+  "entryAssembly": "BigCan.dll",
+  "side": "both",
+  "description": "Replicated extension sample (Replication.Extension): the game's Watering Can holds 2,000 charges; Kiln clients with this mod get the true water on Kiln's channel (bigcan:water@1) while a can holds more than 1,023 charges, which the game's own 16-bit number cannot show, and their HUD shows it. Players without the mod never get a frame."
+}

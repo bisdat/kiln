@@ -46,7 +46,9 @@ public static class ModValues
     }
 
     /// <summary>Activates the calling mod's value <paramref name="id"/> on the server (describes it too). Characters in
-    /// game get it at its initial value now, others when they are next in game. Its saved values come back with it: a
+    /// game get it at its initial value now, others when they are next in game. Call it in OnLoad: on a game client that
+    /// runs no world yet (a both-side mod in the main menu) the value is described now and activated when the client
+    /// hosts a world, so a single-player or co-op host gets it without a hook of its own. Its saved values come back with it: a
     /// higher <see cref="ModValueOptions.Version"/> converts them (scale, bounds, levels), a changed definition at the
     /// same version holds them (<see cref="ModValueReasons.MigrationRequired"/>).</summary>
     /// <exception cref="ArgumentException">The options break a rule.</exception>
@@ -55,9 +57,14 @@ public static class ModValues
     [RequiresCapability("stats.own")]
     public static ModValueDefinitionResult Define(string id, ModValueOptions options)
     {
-        ModValuesService.NeedLedger("ModValues.Define");
+        ModValuesService.EnsureStarted();
+        Services.RequireTickThread("ModValues.Define");
         var owner = ModValuesService.CallerOwner("ModValues.Define");
-        return ModValuesService.Define(Def.FromOptions(owner, id, options), ModContext.CurrentMod);
+        var def = Def.FromOptions(owner, id, options);
+        // a game client in its main menu (a both-side mod's OnLoad): kept, and active when this client hosts a world
+        if (!ModValuesCaps.ServerRole && Mods.Side == ModSide.Client) return ModValuesService.DeferDefine(def, ModContext.CurrentMod);
+        ModValuesService.NeedLedger("ModValues.Define");
+        return ModValuesService.Define(def, ModContext.CurrentMod);
     }
 
     /// <summary>A character's value, also of a character that is offline. Refused: <see cref="ModValueReasons.NotReady"/>

@@ -8,5 +8,5 @@ out=$KILN_OUT/content-tests
 mkdir -p "$out"
 g++ -std=c++20 -O1 -g -Wall -Wextra -Wno-unused-function -D__fastcall= -ffunction-sections -fdata-sections \
     -fsanitize=address,undefined -I"$here/host" -I"$here/../../../core/abi" -I"$here/../../../third_party" \
-    "$here/bootpatch_test.cpp" "$here/../gear.cpp" -Wl,--gc-sections -o "$out/bootpatch-test"
+    "$here/bootpatch_test.cpp" "$here/../gear.cpp" "$here/../registry/claims.cpp" -Wl,--gc-sections -o "$out/bootpatch-test"
 "$out/bootpatch-test"

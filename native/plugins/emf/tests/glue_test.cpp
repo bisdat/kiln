@@ -914,16 +914,17 @@ static void test_v40(KilnApi &api) {
         for (auto &th : threads) th.join();
         CHECK(good == 8 && render_lookups == 1);
     }
-    // the two chat functions come from fill_game (api_game.cpp, not built into this test)
+    // the two chat functions come from fill_game (api_game.cpp, not built into this test), on_hit from fill_hits
+    // (api_hits.cpp: tests/hits_test.cpp)
     const size_t first = offsetof(EmfApi, on_player) / sizeof(void *), n = sizeof(EmfApi) / sizeof(void *);
     const auto *slots = reinterpret_cast<void *const *>(&t);
     int empty = 0;
     for (size_t i = first; i < n; ++i)
         if (!slots[i] && i != offsetof(EmfApi, chat_tell_ex) / sizeof(void *) &&
-            i != offsetof(EmfApi, chat_broadcast_ex) / sizeof(void *))
+            i != offsetof(EmfApi, chat_broadcast_ex) / sizeof(void *) && i != offsetof(EmfApi, on_hit) / sizeof(void *))
             ++empty;
     CHECK(n - first == 52 && empty == 0);  // v28-v40: 45; v43: 1, v44: 3, v46: 3
-    CHECK(!t.chat_tell_ex && !t.chat_broadcast_ex && !t.net_peer);
+    CHECK(!t.chat_tell_ex && !t.chat_broadcast_ex && !t.net_peer && !t.on_hit);
 
     auto *w = reinterpret_cast<EmfWorld *>(worlds[0]);
     const int before = unsupported_calls, refused_before = refusals;
@@ -938,7 +939,6 @@ static void test_v40(KilnApi &api) {
     CHECK(t.game_language(nullptr, 0) == 0);
     dirty();
     CHECK(!t.player_character_name(w, 1, buf, sizeof buf) && buf[0] == 0);
-    CHECK(!t.on_hit([](EmfWorld *, const EmfHit *, void *) { ++v40_callbacks; }, nullptr));
     CHECK(!t.on_hit_before([](EmfWorld *, EmfHit *, void *) { ++v40_callbacks; }, nullptr));
     EmfHitRule rule{};
     rule.size = sizeof rule;

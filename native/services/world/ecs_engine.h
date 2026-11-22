@@ -12,7 +12,8 @@
 //   modules/game-runtime/native/ecs/resolve_component_storage.cpp:4-38 (component presence from the layout's bits,
 //     offset and stride from its tables, the stride equal to the registered size, the row's address);
 //   modules/game-runtime/native/ecs/registry/read_component_registry.h:44-160 (the registration catalog: its owner's
-//     records, count and size array, each row's name, hash and size);
+//     records, count and size array, each row's name, hash and size; for ecs_registration its storage and template
+//     type descriptors, their checks and the identity rule);
 //   modules/game-runtime/native/ecs/read_building_prop.cpp:4-19 (the template UUID through the definition pointer).
 // Every engine byte goes through KilnEngineNativeApi::copy; a fault is a refusal (unreadable), never a crash.
 #pragma once
@@ -113,6 +114,12 @@ public:
     // `offset_b` (the profile's write.tracking_registry_a/_b: the words the engine's recorder and its write gate test),
     // each read twice with the registered count around them. false: unreadable or `index` beyond the count.
     bool tracking(uintptr_t registry, uint16_t index, size_t offset_a, size_t offset_b, bool* a, bool* b) const noexcept;
+
+    // ---- kiln.world's ecs_registration (since 0.2.0-dev.30.3) ----
+    // The registration of `hash` in the catalog of `kind`'s world with its storage and template type descriptors
+    // (registration record +40 and +48, ShroudForge's read_component_registry.h:56-73,128-145), validated as there.
+    // Arguments are the caller's to check (ecs_prod.cpp). Takes the catalog lock and may allocate.
+    KilnResult registration_detail(uint32_t kind, uint32_t hash, KilnEcsRegistrationDetail* out);
 
 private:
     struct Table {

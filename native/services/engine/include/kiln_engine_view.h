@@ -34,11 +34,20 @@ struct EcsView {
 
 // The engine's original write gate as one caller-owned record (ShroudForge's EcsWriteGuard state,
 // lock_scene_access.h:20-40, without its allocation). Before acquiring: `size = sizeof(EcsGate)`, `owner` = the
-// calling KilnOwner, `step` = the server step the caller observed (KilnTickInfo.step), both nonzero, the rest zero;
-// release keeps size, owner and step, so a record can be reused at a later step. Never edit it while held.
+// calling KilnOwner, `step` = the server step the caller observed (KilnTickInfo.step), both nonzero, the rest zero
+// (`hold_ns` and `restore_ns` may hold a previous release's: acquire resets them); release keeps size, owner, step,
+// admission and its own two measurements, so a record can be reused at a later step. Never edit it while held.
 // `maximum_bytes` is the profile's write budget per component (the member refuses larger writes with
 // ecs-write-size-exceeds-gate-budget). `holder`, `boosted` and `saved_priority` are the gate's own. `admission` is
 // the caller's admission mode (GateAdmission, set before acquiring, kept by release).
+// The release's measurements (GitHub #58), read after release, kept until the next acquire; a release of a record that
+// holds nothing (a second release, after a refusal before any word) measures nothing and keeps them:
+// - `hold_ns`: the Scene word's exclusive interval, from the moment its CAS won (`acquired_ns`, before revalidation) to
+//   the moment it was released, read before the registry word, the holder flag and the priority restore; 0 when the
+//   Scene word was not taken;
+// - `restore_ns`: how long putting the thread's priority back took (SetThreadPriority; under Proton a wineserver round
+//   trip), with any preemption right after it; 0 when the priority was not raised (the raise off, the thread above
+//   normal already, a refusal before the raise).
 struct EcsGate {
     std::uint32_t size, held;
     std::uint64_t owner, step;
@@ -53,7 +62,13 @@ struct EcsGate {
     std::uint64_t acquired_ns;
     EcsView expected;
     std::array<std::uint8_t, 33> tracker_bytes;
+    std::uint64_t hold_ns, restore_ns;
 };
+// Both sides of kiln.internal.engine are built from one tree and check size == sizeof(EcsGate); x64 only.
+static_assert(offsetof(EcsGate, acquired_ns) == 136 && offsetof(EcsGate, expected) == 144 &&
+                  offsetof(EcsGate, tracker_bytes) == 304 && offsetof(EcsGate, hold_ns) == 344 &&
+                  offsetof(EcsGate, restore_ns) == 352 && sizeof(EcsGate) == 360,
+              "EcsGate");
 
 // The content worker's lifetime guard as one caller-owned record (Kiln-internal; ShroudForge's
 // ResourceLifeGuard state, engine-context/hold_resource_lifetime.cpp:6-12, without its allocation). Before acquiring:

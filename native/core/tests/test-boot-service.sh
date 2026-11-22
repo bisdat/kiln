@@ -13,5 +13,5 @@ flags=(-std=c++20 -O0 -g0 -Wall -Wextra -Wno-unused-function -pthread -ffunction
        -fsanitize=address,undefined -fno-sanitize-recover=undefined
        -I"$here/stubs" -I"$here/../abi" -I"$here/../src" -I"$here/../../third_party")
 "$cxx" "${flags[@]}" -o "$out/boot_service_test" "$here/boot_service_test.cpp" \
-       "$here/../../services/content/gear.cpp"
+       "$here/../../services/content/gear.cpp" "$here/../../services/content/registry/claims.cpp"
 timeout 120 "$out/boot_service_test" "$out"

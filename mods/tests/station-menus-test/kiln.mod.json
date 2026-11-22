@@ -1,0 +1,10 @@
+{
+  "id": "station-menus-test",
+  "name": "Kiln station menus test",
+  "version": "0.1.0",
+  "apiVersion": "0.2",
+  "entryAssembly": "StationMenusTest.dll",
+  "side": "both",
+  "clients": "kiln",
+  "description": "Lab test of station menus with tabs of their own (chapter 16a): inline menus, a layer of code, the store checks, and the control channel for mods/tests/station-menus-test/menutest.py."
+}

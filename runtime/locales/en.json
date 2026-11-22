@@ -3,6 +3,12 @@
     "completion": {
       "title": "Command suggestions",
       "hint": "Tab: complete · Esc: close"
+    },
+    "search": {
+      "title": "Chat history search",
+      "hint": "Ctrl+R: older · Ctrl+Shift+R: newer · Enter/Tab: use · Esc: cancel",
+      "query": "Search",
+      "none": "No matching history"
     }
   },
   "language": {
@@ -548,6 +554,11 @@
       "caption": "Channels ({count})",
       "line": "{name} v{version}: in {in}, out {out}",
       "required": "{name} v{version} (required): in {in}, out {out}"
+    },
+    "repl": {
+      "caption": "Replication",
+      "count": "Count what this game sends each peer",
+      "off": "Off. Counting costs a little on the game's network jobs. In a hosted world your own client is the local peer; a client that joined a server sends nothing here (the server shows its own with the repl commands)."
     }
   },
   "overlay": {

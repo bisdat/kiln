@@ -1,23 +1,30 @@
 // SPDX-License-Identifier: MIT
 // The managed side of the native facade kiln.mod-values (native/core/abi/services/kiln_mod_values.h; dossier chapter
 // 05b section 5): at its start Kiln.ModValues hands the core its process-lifetime backend functions through the
-// host-only table kiln.mod-values.backend v1 (bind), and forwards the ledger's events to native subscribers (dispatch)
-// while the core says one is there (wanted). The core has checked the caller (owner, namespace, argument shapes); here
-// the explicit namespace goes to the same ledger, registry and synced copy managed mods use. Nothing here throws across
-// the boundary: an exception becomes a KilnResult (ArgumentException INVALID_ARGUMENT, KilnUnavailableException
-// UNAVAILABLE, the tick-thread check WRONG_THREAD, anything else INTERNAL, logged).
+// Kiln-internal table kiln.internal.mod-values.backend v1 (native/core/src/mod_values_host.h; only the managed host's
+// KilnApi resolves it, and it is taken only at exactly its version and size), and forwards the ledger's events to native
+// subscribers (dispatch) while the core says one is there (wanted). The core has checked the caller (owner, namespace,
+// argument shapes); here the explicit namespace goes to the same ledger, registry and synced copy managed mods use, and
+// what a native owner describes or defines is registered with its owner handle as the token, so its revoke retires
+// exactly that. Nothing here throws across the boundary: an exception becomes a KilnResult (ArgumentException
+// INVALID_ARGUMENT, KilnUnavailableException UNAVAILABLE, the tick-thread check WRONG_THREAD, anything else INTERNAL,
+// logged).
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 
 namespace Kiln;
 
-/// <summary>Mirrors of kiln_mod_values.h v1, field by field. Sizes: character 24, version 24, definition 144, value 72,
-/// result 184, definition result 16, change 248, export 24, backend functions 56, backend table 32 (x64; pinned by
-/// Kiln.ModValues.Tests' NativeBackendTests against the header's static asserts).</summary>
+/// <summary>Mirrors of kiln_mod_values.h v1 and of the Kiln-internal mod_values_host.h, field by field. Sizes: character
+/// 24, version 24, definition 144, value 72, result 184, definition result 16, change 248, export 24, backend functions
+/// 56, backend table 32 (x64; pinned by Kiln.ModValues.Tests' NativeBackendTests against both headers' static
+/// asserts).</summary>
 internal static unsafe class ModValuesAbi
 {
-    public const string BackendService = "kiln.mod-values.backend";
+    /// <summary>KILN_MOD_VALUES_BACKEND_SERVICE: Kiln-internal, resolved only through the managed host's KilnApi.</summary>
+    public const string BackendService = "kiln.internal.mod-values.backend";
+
+    /// <summary>KILN_MOD_VALUES_BACKEND_VERSION: taken only at exactly this version (and exactly its size).</summary>
     public const uint BackendVersion = 1;
 
     // KilnResult
@@ -50,12 +57,13 @@ internal static unsafe class ModValuesAbi
     public struct DefinitionRec
     {
         public uint Size, Kind, Persistence, Scale, Flags, Version, CarryEpoch, ReadPolicy, SyncPolicy;
+        public uint Reserved0;  // the padding before LocalId, named in the header: 0
         public NativeStr LocalId, LabelJson, NumberFormatJson;
         public long Minimum, Maximum, Initial;
         public long* Thresholds;
-        public uint ThresholdCount, Reserved0;
+        public uint ThresholdCount, Reserved1;
         public NativeStr* ReadMods;
-        public uint ReadModCount, Reserved1;
+        public uint ReadModCount, Reserved2;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -98,20 +106,21 @@ internal static unsafe class ModValuesAbi
         public NativeStr* ReadMods;
     }
 
-    /// <summary>KilnModValuesBackend: what bind hands the core.</summary>
+    /// <summary>KilnModValuesBackend: what bind hands the core. describe, define and retire get the native owner's
+    /// handle (the definitions' token).</summary>
     [StructLayout(LayoutKind.Sequential)]
     public struct BackendFns
     {
         public uint Size, Reserved;
-        public delegate* unmanaged[Cdecl]<NativeStr, DefinitionRec*, DefinitionResultRec*, int> Describe;
-        public delegate* unmanaged[Cdecl]<NativeStr, DefinitionRec*, DefinitionResultRec*, int> Define;
+        public delegate* unmanaged[Cdecl]<NativeStr, ulong, DefinitionRec*, DefinitionResultRec*, int> Describe;
+        public delegate* unmanaged[Cdecl]<NativeStr, ulong, DefinitionRec*, DefinitionResultRec*, int> Define;
         public delegate* unmanaged[Cdecl]<NativeStr, CharacterRec*, NativeStr, ResultRec*, int> Read;
         public delegate* unmanaged[Cdecl]<NativeStr, CharacterRec*, NativeStr, uint, long, VersionRec*, ulong, ResultRec*, int> Change;
         public delegate* unmanaged[Cdecl]<NativeStr, NativeStr, ResultRec*, int> ReadSynced;
-        public delegate* unmanaged[Cdecl]<NativeStr, void> Retire;
+        public delegate* unmanaged[Cdecl]<NativeStr, ulong, void> Retire;
     }
 
-    /// <summary>KilnModValuesBackendApi: the core's host-only table.</summary>
+    /// <summary>KilnModValuesBackendApi: the core's Kiln-internal table for the managed host.</summary>
     [StructLayout(LayoutKind.Sequential)]
     public struct BackendTable
     {
@@ -136,7 +145,8 @@ internal static unsafe class ModValuesNative
     private static readonly UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
 
     /// <summary>Binds the backend once per process (Kiln.ModValues' start, the first service tick): without
-    /// kiln.mod-values.backend (an older core, no core) native callers get UNAVAILABLE and nothing else changes.</summary>
+    /// kiln.internal.mod-values.backend (no core, another build's, kiln.mod-values not running) native callers get
+    /// UNAVAILABLE and nothing else changes.</summary>
     internal static void Bind()
     {
         lock (Gate)
@@ -149,10 +159,10 @@ internal static unsafe class ModValuesNative
         try
         {
             var t = (ModValuesAbi.BackendTable*)Backend.Current.Service(ModValuesAbi.BackendService, ModValuesAbi.BackendVersion);
-            if (t == null) return;  // no core, or one without the native facade
-            if (t->Header.Size < (uint)sizeof(ModValuesAbi.BackendTable))
+            if (t == null) return;  // no core, one without the native facade, or kiln.mod-values not running
+            if (Refusal(t) is { } why)
             {
-                ModValuesService.Log(LogLevel.Warn, $"Kiln.ModValues: {ModValuesAbi.BackendService} has a {t->Header.Size}-byte table; native callers stay unavailable");
+                ModValuesService.Log(LogLevel.Warn, $"Kiln.ModValues: {why}; native callers stay unavailable");
                 return;
             }
             var fns = Functions();
@@ -176,6 +186,21 @@ internal static unsafe class ModValuesNative
         }
     }
 
+    /// <summary>Why the backend table is not this build's (null: it is). A Kiln-internal table is taken at exactly its
+    /// version and size: a later version is another layout, not a superset.</summary>
+    internal static string? Refusal(ModValuesAbi.BackendTable* t)
+    {
+        if (t->Header.Version != ModValuesAbi.BackendVersion)
+            return $"{ModValuesAbi.BackendService} is version {t->Header.Version}, this Kiln.ModValues takes exactly {ModValuesAbi.BackendVersion}";
+        if (t->Header.Size != (uint)sizeof(ModValuesAbi.BackendTable))
+            return $"{ModValuesAbi.BackendService} has a {t->Header.Size}-byte table, this Kiln.ModValues takes exactly {sizeof(ModValuesAbi.BackendTable)} bytes";
+        return null;
+    }
+
+    /// <summary>A native owner's token in the registry: its boxed owner handle (the registry compares with Equals, so the
+    /// box made at the revoke matches the one made at describe).</summary>
+    internal static object TokenOf(ulong owner) => owner;
+
     /// <summary>The functions bind hands over (process lifetime: static methods).</summary>
     internal static ModValuesAbi.BackendFns Functions() => new()
     {
@@ -191,20 +216,20 @@ internal static unsafe class ModValuesNative
     // ------------------------------------------------------------------------------------------- entry points ----
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
-    private static int DescribeEntry(NativeStr ns, ModValuesAbi.DefinitionRec* def, ModValuesAbi.DefinitionResultRec* o) =>
-        Describe(d =>
+    private static int DescribeEntry(NativeStr ns, ulong owner, ModValuesAbi.DefinitionRec* def, ModValuesAbi.DefinitionResultRec* o) =>
+        Describe((d, token) =>
         {
             ModValuesCaps.Require(ModValuesCaps.Definitions);
-            return ModValuesService.Describe(d, token: null);
-        }, ns, def, o);
+            return ModValuesService.Describe(d, token);
+        }, ns, owner, def, o);
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
-    private static int DefineEntry(NativeStr ns, ModValuesAbi.DefinitionRec* def, ModValuesAbi.DefinitionResultRec* o) =>
-        Describe(d =>
+    private static int DefineEntry(NativeStr ns, ulong owner, ModValuesAbi.DefinitionRec* def, ModValuesAbi.DefinitionResultRec* o) =>
+        Describe((d, token) =>
         {
             TickLedger("kiln.mod-values define");
-            return ModValuesService.Define(d, token: null);
-        }, ns, def, o, "define");
+            return ModValuesService.Define(d, token);
+        }, ns, owner, def, o, "define");
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int ReadEntry(NativeStr ns, ModValuesAbi.CharacterRec* c, NativeStr key, ModValuesAbi.ResultRec* o) =>
@@ -223,27 +248,10 @@ internal static unsafe class ModValuesNative
             return ModValuesClient.Read(reader, k);
         }, () => ModValuesClient.State.Character, ns, key, o);
 
+    /// <summary>A native owner was revoked (on the revoking thread, which need not be the tick thread): only the
+    /// definitions it registered leave (ModValuesService.Retire is safe on any thread; it sends its events at the tick).</summary>
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
-    private static void RetireEntry(NativeStr ns)
-    {
-        try
-        {
-            var owner = OwnerOf(ns);
-            if (Backend.Current.IsTickThread)
-            {
-                ModValuesService.Retire(owner, token: null);
-                return;
-            }
-            // a revoke off the tick thread: the definitions leave now, their events go out at the next step
-            foreach (var d in ModValuesService.Registry.Retire(owner, token: null))
-                if (Events.HasSubscribers<ModValueDefinitionChangedEvent>()) Events.Enqueue(new ModValueDefinitionChangedEvent(d.Key, null, "retired"));
-            ModValuesStream.DefinitionsChanged();
-        }
-        catch (Exception e)
-        {
-            Fail("retire", e);
-        }
-    }
+    private static void RetireEntry(NativeStr ns, ulong owner) => Retire(ModValuesService.Retire, ns, owner);
 
     /// <summary>The ledger for a tick-thread call: stats.own on (else UNAVAILABLE), the tick thread (else WRONG_THREAD).</summary>
     private static Ledger TickLedger(string api)
@@ -263,14 +271,14 @@ internal static unsafe class ModValuesNative
     // ------------------------------------------------------------------- the calls (tests pass their own seams) ----
 
     /// <summary>describe or define: the definition from its record, then <paramref name="apply"/> (which checks the
-    /// capability and thread). Arguments are checked first, as the core's order says.</summary>
-    internal static int Describe(Func<Def, ModValueDefinitionResult> apply, NativeStr ns, ModValuesAbi.DefinitionRec* def,
+    /// capability and thread) with the native owner's token. Arguments are checked first, as the core's order says.</summary>
+    internal static int Describe(Func<Def, object, ModValueDefinitionResult> apply, NativeStr ns, ulong owner, ModValuesAbi.DefinitionRec* def,
         ModValuesAbi.DefinitionResultRec* o, string what = "describe")
     {
         try
         {
             if (def == null || o == null) return ModValuesAbi.InvalidArgument;
-            var r = apply(DefOf(OwnerOf(ns), def));
+            var r = apply(DefOf(OwnerOf(ns), def), TokenOf(owner));
             o->Ok = r.Ok ? 1u : 0u;
             o->Reason = r.Ok ? 0u : ModValueReasons.Code(r.Reason);
             return ModValuesAbi.Ok;
@@ -278,6 +286,24 @@ internal static unsafe class ModValuesNative
         catch (Exception e)
         {
             return Fail(what, e);
+        }
+    }
+
+    /// <summary>describe or define without an owner's token (tests: the record's checks).</summary>
+    internal static int Describe(Func<Def, ModValueDefinitionResult> apply, NativeStr ns, ModValuesAbi.DefinitionRec* def,
+        ModValuesAbi.DefinitionResultRec* o, string what = "describe") =>
+        Describe((d, _) => apply(d), ns, 0, def, o, what);
+
+    /// <summary>retire: the owner's namespace and its token to <paramref name="retire"/>; nothing crosses back.</summary>
+    internal static void Retire(Action<string, object?> retire, NativeStr ns, ulong owner)
+    {
+        try
+        {
+            retire(OwnerOf(ns), TokenOf(owner));
+        }
+        catch (Exception e)
+        {
+            Fail("retire", e);
         }
     }
 
@@ -418,6 +444,7 @@ internal static unsafe class ModValuesNative
         if (d->ThresholdCount > ModValueRules.MaxThresholds) throw new ArgumentException($"at most {ModValueRules.MaxThresholds} thresholds");
         if (d->ReadModCount > ModValueRules.MaxReadMods) throw new ArgumentException($"at most {ModValueRules.MaxReadMods} read_mods");
         if (d->ThresholdCount > 0 && d->Thresholds == null || d->ReadModCount > 0 && d->ReadMods == null) throw new ArgumentException("a count without its array");
+        if ((d->Reserved0 | d->Reserved1 | d->Reserved2) != 0) throw new ArgumentException("a reserved field of the definition record is not 0");
         var id = Utf8(d->LocalId, "local_id");
         var name = $"mod value {owner}:{id}";
         var label = ModValueRules.MapOfJson(Utf8(d->LabelJson, $"{name}: label_json"), $"{name}: label");

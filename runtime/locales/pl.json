@@ -3,6 +3,12 @@
     "completion": {
       "title": "Podpowiedzi poleceń",
       "hint": "Tab: uzupełnij · Esc: zamknij"
+    },
+    "search": {
+      "title": "Wyszukiwanie w historii czatu",
+      "hint": "Ctrl+R: starsze · Ctrl+Shift+R: nowsze · Enter/Tab: użyj · Esc: anuluj",
+      "query": "Szukaj",
+      "none": "Brak pasujących wpisów w historii"
     }
   },
   "language": {

@@ -280,7 +280,8 @@
    "packages": [
     "04-markers"
    ],
-   "state": "open"
+   "state": "open",
+   "deferred": "manual in dev.31 (out/04-markers/CLIENT-CHECKS.md, M11): losing, duplicating and resnapshotting marker packets needs a network fault on a real link; the protocol half (dropped chunk, duplicate end, late ACK, stale tuple, resync) is covered by kiln.markers' host tests"
   },
   {
    "id": "04-m12",
@@ -289,7 +290,8 @@
    "packages": [
     "04-markers"
    ],
-   "state": "open"
+   "state": "open",
+   "deferred": "manual in dev.31 (out/04-markers/CLIENT-CHECKS.md, M12): leaving and rejoining a world and unloading the publisher end a check's own run, so the steps are guided by hand with mods/samples/MarkersSample and mods/tests/markers-send-test"
   },
   {
    "id": "04-markers.capacity_restore",
@@ -316,7 +318,8 @@
    "packages": [
     "04-markers"
    ],
-   "state": "open"
+   "state": "open",
+   "deferred": "optional research of chapter 04 §8.1 (the vanilla template route's range); Kiln.Markers v1 sends nothing to players without Kiln and has no vanilla-template layer"
   },
   {
    "id": "04-map-text",
@@ -325,7 +328,8 @@
    "packages": [
     "04-markers"
    ],
-   "state": "open"
+   "state": "open",
+   "deferred": "optional research of chapter 04 §8.2: markers.map_text stays off in v1 (no native map tooltip is built)"
   },
   {
    "id": "04-native-compass",
@@ -334,7 +338,8 @@
    "packages": [
     "04-markers"
    ],
-   "state": "open"
+   "state": "open",
+   "deferred": "optional research of chapter 04 §8.4: v1 draws its own compass (04-m07); the game's compass is not used"
   },
   {
    "id": "04-waypoint-restore",
@@ -343,7 +348,8 @@
    "packages": [
     "04-markers"
    ],
-   "state": "open"
+   "state": "open",
+   "deferred": "optional research of chapter 04 §8.5: v1 does not write the game's waypoint"
   },
   {
    "id": "04-boss-name",
@@ -352,7 +358,8 @@
    "packages": [
     "04-markers"
    ],
-   "state": "open"
+   "state": "open",
+   "deferred": "optional research of chapter 04 §8.6: boss and NPC renaming is not built in v1"
   },
   {
    "id": "04-pin-ownership",
@@ -361,7 +368,8 @@
    "packages": [
     "04-markers"
    ],
-   "state": "open"
+   "state": "open",
+   "deferred": "optional research of chapter 04 §8.7: v1 neither reads nor writes the player's own map pins"
   },
   {
    "id": "04-discovery-mask",
@@ -370,7 +378,8 @@
    "packages": [
     "04-markers"
    ],
-   "state": "open"
+   "state": "open",
+   "deferred": "optional research of chapter 04 §8.8: v1 has no explored-map query or override"
   },
   {
    "id": "05a-c1",
@@ -702,6 +711,16 @@
     "11-replication-observe"
    ],
    "state": "open"
+  },
+  {
+   "id": "11-repl.stats-real-peer",
+   "title": "The server's counters for a real player",
+   "chapter": "11",
+   "packages": [
+    "11-replication-observe"
+   ],
+   "state": "open",
+   "added": "11-replication-observe (dev.31: the network inspector's counters with a real player; the content of the settled 11-M1)"
   },
   {
    "id": "11-transform-interpolation",
@@ -1888,6 +1907,46 @@
    ],
    "state": "open",
    "added": "dev30-ui-hooks slice 3"
+  },
+  {
+   "id": "ui-outline.c1",
+   "title": "A chest lights up with the game's outline in gold, and goes back when the mod lets go",
+   "chapter": "dev30-api-outline",
+   "packages": [
+    "dev30-api-outline"
+   ],
+   "state": "open",
+   "added": "0.2.0-dev.30.3 (issue #111)"
+  },
+  {
+   "id": "ui-outline.c2",
+   "title": "Two colours at once, one pulsing; a higher priority on the same chest wins, then hands back",
+   "chapter": "dev30-api-outline",
+   "packages": [
+    "dev30-api-outline"
+   ],
+   "state": "open",
+   "added": "0.2.0-dev.30.3 (issue #111)"
+  },
+  {
+   "id": "ui-outline.c3",
+   "title": "The game's building highlight goes first, Kiln's outline comes back after it",
+   "chapter": "dev30-api-outline",
+   "packages": [
+    "dev30-api-outline"
+   ],
+   "state": "open",
+   "added": "0.2.0-dev.30.3 (issue #111)"
+  },
+  {
+   "id": "ui-outline.c4",
+   "title": "Leaving the world ends every outline; nothing stays on the chest in the next game",
+   "chapter": "dev30-api-outline",
+   "packages": [
+    "dev30-api-outline"
+   ],
+   "state": "open",
+   "added": "0.2.0-dev.30.3 (issue #111)"
   }
  ]
 }

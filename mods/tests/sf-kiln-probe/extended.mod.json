@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "enabled": true,
+  "targets": ["client"],
+  "settings": {
+    "probeKey": {
+      "value": "SDL:62",
+      "control": "keybind",
+      "label": "Run probes shortcut",
+      "description": "Each press runs every probe once and logs its lines. Default F5."
+    },
+    "intervalSeconds": {
+      "value": 30,
+      "control": "number",
+      "min": 5,
+      "max": 600,
+      "step": 1,
+      "label": "Seconds between runs",
+      "description": "How often every probe runs on its own."
+    },
+    "cursorSeconds": {
+      "value": 1,
+      "control": "number",
+      "min": 0,
+      "max": 60,
+      "step": 1,
+      "label": "Seconds between cursor lines",
+      "description": "How often the building cursor is logged between runs. 0 logs it only with the other probes."
+    },
+    "boxHalfSize": {
+      "value": 12,
+      "control": "number",
+      "min": 1,
+      "max": 200,
+      "step": 1,
+      "label": "Prop box half size (metres)",
+      "description": "The props probe asks for the props in a box this far from you on every axis."
+    },
+    "allowWrites": {
+      "value": false,
+      "control": "toggle",
+      "label": "Allow writes (copied world only)",
+      "description": "Off: the probe only reads. On: each run you start with the shortcut or the button writes one field of one component the game lets mods write, then writes the old value back. Use a copied world."
+    },
+    "writeComponent": {
+      "value": "",
+      "control": "text",
+      "maxLength": 120,
+      "label": "Component to write",
+      "description": "Empty: the first component the catalog marks writable that has an entity. Or a name such as keen::ecs::Health.",
+      "enabledWhen": {"setting": "allowWrites", "equals": true}
+    }
+  },
+  "groups": [
+    {
+      "label": "Probe",
+      "settings": ["probeKey", "intervalSeconds", "cursorSeconds", "boxHalfSize"],
+      "actions": [{"id": "runProbes", "label": "Run probes now", "style": "primary"}]
+    },
+    {
+      "label": "Writes",
+      "settings": ["allowWrites", "writeComponent"]
+    }
+  ]
+}

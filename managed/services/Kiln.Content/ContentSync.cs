@@ -171,6 +171,13 @@ public static unsafe class ContentSync
     public static ContentSyncStatus Status => _status;
 
     /// <summary>Server side: the content state being served (id, fields, document bytes), or null.</summary>
+    /// <summary>The content state id a peer acknowledged last, or null (Kiln.Replication's item remap: a peer that has not
+    /// acked the state served now lacks its Kiln-only items).</summary>
+    internal static uint? AckedStateOf(uint peer)
+    {
+        lock (Sent) return Acked.TryGetValue(peer, out var s) ? s : null;
+    }
+
     public static (uint StateId, uint Fields, int Bytes, int Parts)? Serving =>
         _export is { } e && ServerRole ? (e.StateId, e.Fields, e.RawLength, e.Parts.Length) : null;
 

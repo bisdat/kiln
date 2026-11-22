@@ -28,6 +28,10 @@ public static unsafe partial class Items
         /// <summary>sigdb: container names.</summary>
         public const string Names = "items.names";
 
+        /// <summary>sigdb: renaming a container through the game's rename (kiln.items v9, <see cref="Items.SetContainerName"/>);
+        /// Kiln.Items lowers it when the table is older or kiln.items turned renames off.</summary>
+        public const string Rename = "items.rename";
+
         /// <summary>sigdb: the quick-stack and move-all hooks (<see cref="Items.Transfers"/>).</summary>
         public const string Transfer = "items.transfer";
 
@@ -115,7 +119,7 @@ public static unsafe partial class Items
             var (reason, text) = Cause(CapabilityReason.ServiceMissing, "kiln.items is not loaded", Caps.Service);
             Capabilities.Report(Caps.ResultPeek, CapabilityState.Unavailable, reason, text);
             foreach (var name in (string[])[Caps.Fuel, Caps.Move, Caps.Names, Caps.Transfer, Caps.Moves, Caps.Instances, Caps.Equip, Caps.EquipSets, Caps.GearOptions, Caps.ToolWear,
-                         Caps.GearPower, Caps.GearArmor]) Lower(name, reason, text);
+                         Caps.GearPower, Caps.GearArmor, Caps.Rename]) Lower(name, reason, text);
             foreach (var name in (string[])[Caps.GearRead, Caps.GearWrite, Caps.GearDurability, Caps.GearUpgrade]) Capabilities.Report(name, CapabilityState.Unavailable, reason, text);
             return;
         }
@@ -188,6 +192,11 @@ public static unsafe partial class Items
         // per-instance values (v8, package P7): sigdb rows of their own, lowered here only by a table without the scales
         if (t->Header.Size < ItemsNative.V8ScaleEnd)
             foreach (var name in (string[])[Caps.GearPower, Caps.GearArmor]) Lower(name, CapabilityReason.ServiceOlder, string.Format(older, "per-instance values"));
+        // container renames (v9): the sigdb row stands unless the table is older or kiln.items turned renames off when it
+        // resolved (the session part, a server world in this process, is ContainerRenameAvailable's)
+        var v9 = V9;
+        if (v9 == null) Lower(Caps.Rename, CapabilityReason.ServiceOlder, string.Format(older, "container renames"));
+        else if (RenameStatusOf(v9) is { Feature: false } renames) Off(Caps.Rename, renames.Detail, Caps.Names, Caps.Read);
         // tool wear (dev.28): its own table, published by the same DLL
         if (ToolWear.Current == null) Lower(Caps.ToolWear, CapabilityReason.ServiceOlder, "kiln.items here has no kiln.toolwear table (update Kiln)");
         // give, take, moves and water all run through the game's inventory transaction

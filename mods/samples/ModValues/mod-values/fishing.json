@@ -13,6 +13,7 @@
       "kind": "experience",
       "label": {"en": "Fishing mastery", "de": "Angelmeisterschaft"},
       "thresholds": ["0", "250", "1000"],
+      "max": "1000000000",
       "persistence": "carried",
       "trustClientImports": true,
       "readPolicy": "public",
@@ -24,9 +25,7 @@
       "numberFormat": "N0",
       "min": "0",
       "max": "1000000",
-      "initial": "10",
-      "readPolicy": "public",
-      "sync": "readers"
+      "initial": "10"
     }
   }
 }

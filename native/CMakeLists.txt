@@ -110,9 +110,31 @@ target_sources(kiln-core PRIVATE core/src/launch.cpp core/src/launch_boot.cpp)  
 target_sources(kiln-core PRIVATE core/src/sfi_release_policy.cpp)
 target_sources(kiln-core PRIVATE core/src/tasks_model.cpp core/src/tasks.cpp core/src/tasks_stats.cpp core/src/tasks_win.cpp core/src/tasks_seh.cpp)  # kiln.tasks' pool
 target_sources(kiln-core PRIVATE core/src/compat.cpp core/src/compat_overlaps.cpp core/src/compat_rules.cpp)  # closed-DLL report and rules
+target_sources(kiln-core PRIVATE core/src/debug_descriptor.cpp)  # developer debugging: descriptor + control pipe (12a)
 target_include_directories(kiln-core PRIVATE core/abi core/src third_party "${KILN_GENERATED_DIR}")
 target_link_libraries(kiln-core PRIVATE kiln-safetyhook bcrypt)
 add_dependencies(kiln-core kiln-build-stamp)
+
+# Windows check of a staged runtime (core/tests/sfi_stamp_win.cpp, core/tests/test-sfi-stamp.sh): the core's real
+# build-stamp test (core/src/api.cpp's "service lookup" and "service stamp" blocks, extracted here at configure time)
+# against the stage's kiln-sfi.dll and services. Built explicitly into bin/tests/ (never staged), with the core it checks.
+set(KILN_CORE_BLOCKS_DIR "${CMAKE_BINARY_DIR}/core_blocks")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/core/src/api.cpp")
+file(READ "${CMAKE_SOURCE_DIR}/core/src/api.cpp" KILN_CORE_API_TEXT)
+foreach(block lookup stamp)
+    string(FIND "${KILN_CORE_API_TEXT}" "// ---- service ${block} (begin)" begin)
+    string(FIND "${KILN_CORE_API_TEXT}" "// ---- service ${block} (end)" end)
+    if(begin EQUAL -1 OR end EQUAL -1)
+        message(FATAL_ERROR "core/src/api.cpp has no 'service ${block}' markers")
+    endif()
+    math(EXPR length "${end} - ${begin}")
+    string(SUBSTRING "${KILN_CORE_API_TEXT}" ${begin} ${length} body)
+    file(WRITE "${KILN_CORE_BLOCKS_DIR}/service_${block}.inc" "${body}")
+endforeach()
+add_executable(sfi-stamp-check EXCLUDE_FROM_ALL core/tests/sfi_stamp_win.cpp)
+target_include_directories(sfi-stamp-check PRIVATE core/abi "${KILN_GENERATED_DIR}" "${KILN_CORE_BLOCKS_DIR}")
+set_target_properties(sfi-stamp-check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/tests")
+add_dependencies(sfi-stamp-check kiln-build-stamp)
 
 # Service modules: native/services/<name>/CMakeLists.txt, each calling kiln_service(<name> <sources...>) to build
 # bin/services/kiln-<name>.dll. One directory per service, so services build and fail independently.

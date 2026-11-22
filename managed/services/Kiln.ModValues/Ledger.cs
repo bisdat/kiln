@@ -158,7 +158,7 @@ internal sealed class Ledger(Registry defs, IValueStore store, Func<CharacterKey
             if (d.Version <= o.DefinitionVersion || !d.AllowPartitionMove) return State.Held;
             if (rec.PartitionRevision == ulong.MaxValue || other.PartitionRevision == ulong.MaxValue || o.ValueRevision == ulong.MaxValue) return State.Budget;
             var before = Snapshot(d, c, o, other, otherP);
-            var moved = Convert(d, o, out var held);
+            var moved = Convert(d, o, fromCarried: otherP == Partition.CarriedAuthority, out var held);
             if (held) return State.Held;
             other.Entries.Remove(d.Id);
             other.PartitionRevision++;
@@ -209,7 +209,7 @@ internal sealed class Ledger(Registry defs, IValueStore store, Func<CharacterKey
     private State Migrate(Def d, CharacterKey c, Partition p, ValueRecord rec, Entry e, ulong requestId)
     {
         if (e.ValueRevision == ulong.MaxValue || rec.PartitionRevision == ulong.MaxValue) return State.Budget;
-        var next = Convert(d, e, out var held);
+        var next = Convert(d, e, fromCarried: p == Partition.CarriedAuthority, out var held);
         if (held) return State.Held;
         if (p == Partition.CarriedAuthority && e.CarryEpoch > d.CarryEpoch) return State.Held;
         var before = Snapshot(d, c, e, rec, p);
@@ -225,8 +225,9 @@ internal sealed class Ledger(Registry defs, IValueStore store, Func<CharacterKey
     }
 
     /// <summary>The entry under the definition's current metadata (section 4.3): same kind rescales and clamps, a kind
-    /// change resets only with resetOnKindChange, a higher carry epoch resets carried progress.</summary>
-    private Entry Convert(Def d, Entry e, out bool held)
+    /// change resets only with resetOnKindChange, a higher carry epoch resets carried progress. A World value moved into
+    /// Carried has no carry epoch of its own: it keeps its value and takes the definition's epoch.</summary>
+    private Entry Convert(Def d, Entry e, bool fromCarried, out bool held)
     {
         held = false;
         var next = Fresh(d);
@@ -235,7 +236,7 @@ internal sealed class Ledger(Registry defs, IValueStore store, Func<CharacterKey
             if (!d.ResetOnKindChange) held = true;
             return next;
         }
-        if (d.Persistence == ModValuePersistence.Carried && e.CarryEpoch < d.CarryEpoch) return next;
+        if (fromCarried && d.Persistence == ModValuePersistence.Carried && e.CarryEpoch < d.CarryEpoch) return next;
         next.Raw = Clamp(Rescale(e.Raw, e.Scale, d.Scale), d.Min, d.Max);
         next.PriorLevel = d.LevelOf(next.Raw);
         return next;
@@ -360,27 +361,57 @@ internal sealed class Ledger(Registry defs, IValueStore store, Func<CharacterKey
 
     // ---------------------------------------------------------------------------------------- carried (4.2) ----
 
-    /// <summary>Writes the projection of (character, owner) from its canonical carried record: forged or stale entries
-    /// a client put there are gone after this.</summary>
+    /// <summary>Writes the carried copy of (character, owner) that travels with the character, from this world's canonical
+    /// carried record. Only where this world has such a record: a copy of a mod this world does not hold, of a world that
+    /// has not taken the player's offer, or of a refused offer passes through untouched (CharacterSync's promise). Where it
+    /// has one, the player's own copy keeps what it has that is higher (same kind, scale and epoch): a freshly initialized
+    /// record never lowers progress the player brought before its stats offer is merged. Entries naming a World value of
+    /// this world are dropped (they never travel); entries this world does not know pass through.</summary>
     public void Project(CharacterKey c, string owner)
     {
-        var rec = Load(Partition.CarriedAuthority, c, owner);
-        if (rec is null) return;
-        Save(Partition.Projection, c, owner, rec);
+        if (Store.Read(Partition.CarriedAuthority, c, owner) is null) return;
+        var auth = Load(Partition.CarriedAuthority, c, owner);
+        if (auth is null) return;
+        var copy = LoadLenient(Store.Read(Partition.Projection, c, owner));
+        if (copy is not null)
+            foreach (var (id, e) in copy.Entries)
+            {
+                if (e is null || !ModValueRules.IsId(id)) continue;
+                if (auth.Entries.TryGetValue(id, out var a))
+                {
+                    if (e.Kind == a.Kind && e.Scale == a.Scale && e.CarryEpoch == a.CarryEpoch && e.Raw > a.Raw) auth.Entries[id] = e;
+                    continue;
+                }
+                var key = new ModValueKey(owner, id);
+                var def = Definitions.Active(key) ?? Definitions.Described(key);
+                if (def is { Persistence: ModValuePersistence.World }) continue;  // a World value never travels
+                auth.Entries[id] = e;
+            }
+        var json = JsonSerializer.Serialize(auth, Json);
+        if (Store.Read(Partition.Projection, c, owner) != json) Store.Write(Partition.Projection, c, owner, json);
     }
 
-    /// <summary>Every projection again (start, before a save is staged): from the canonical records only.</summary>
+    private static ValueRecord? LoadLenient(string? json)
+    {
+        if (json is null) return null;
+        try
+        {
+            var r = JsonSerializer.Deserialize<ValueRecord>(json, Json);
+            return r is { Schema: 1 } ? WithEntries(r) : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Every copy again (start, before a save is staged, after a carried import): where this world has a
+    /// canonical carried record only.</summary>
     public void ProjectAll()
     {
         if (Store.World == Guid.Empty) return;
         foreach (var (c, owner) in Store.Find(Partition.CarriedAuthority)) Project(c, owner);
-        // projections without a canonical record (forged, or a record from another world's import): emptied
-        foreach (var (c, owner) in Store.Find(Partition.Projection))
-            if (Store.Read(Partition.CarriedAuthority, c, owner) is null && Store.Read(Partition.Projection, c, owner) is { } j && j != EmptyJson)
-                Store.Write(Partition.Projection, c, owner, EmptyJson);
     }
-
-    private static readonly string EmptyJson = JsonSerializer.Serialize(new ValueRecord { Schema = 1 }, Json);
 
     /// <summary>A client's carried offer for a live character: per entry, rescale, clamp, then the exact maximum of
     /// the canonical value and the offered one (never a sum). Valid entries commit together; the rest are rejected

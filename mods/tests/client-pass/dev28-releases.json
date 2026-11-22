@@ -5,7 +5,7 @@
   "01-world-queries": "0.2.0-dev.28",
   "02-pathfinding": "0.2.0-dev.28",
   "03-camera": "0.2.0-dev.32",
-  "04-markers": "0.2.0-dev.30",
+  "04-markers": "0.2.0-dev.31",
   "05a-value-providers": "0.2.0-dev.28",
   "05b-mod-stats": "0.2.0-dev.30",
   "06a-program-wraps": "0.2.0-dev.29",
@@ -16,7 +16,7 @@
   "09-ui-blocks": "0.2.0-dev.30",
   "10-equipment-sets": "0.2.0-dev.29",
   "11-replication-observe": "0.2.0-dev.31",
-  "12a-debugger": "0.2.0-dev.30",
+  "12a-debugger": "0.2.0-dev.31",
   "12b-publish": "0.2.0-dev.28",
   "12c-update-check": "0.2.0-dev.28",
   "13a-set": "0.2.0-dev.30",
@@ -47,7 +47,8 @@
   "19d-pets": "0.2.0-dev.32",
   "19e-taming": "0.2.0-dev.32",
   "19f-terrain": "0.2.0-dev.28",
-  "dev30-ui-hooks": "0.2.0-dev.30"
+  "dev30-ui-hooks": "0.2.0-dev.30",
+  "dev30-api-outline": "0.2.0-dev.30"
  },
  "owners": {
   "12-debug.client-windows": "12a-debugger",

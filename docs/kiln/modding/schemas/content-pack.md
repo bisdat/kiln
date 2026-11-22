@@ -27,6 +27,7 @@ kiln.content's and kiln.gamedata's data packs: rules over the game's registries 
 | `options` | [options](#options) |  |  |
 | `perks` | [perksSection](#perkssection) |  |  |
 | `recipes` | [recipesSection](#recipessection) |  |  |
+| `registry` | `registry-section.schema.json` |  | Edits of Kiln registries (experimental, KILNX031): every mod's add, then alter, then final, by Kiln ids and Kiln fields (docs/kiln/modding/registries/README.md). Read by the registry stage at start, not applied with the pack's other sections; fields that apply now or at world load follow a pack's hot reload. |
 | `sequences` | [sequencesSection](#sequencessection) |  |  |
 | `skills` | [skillsSection](#skillssection) |  |  |
 | `templates` | [templatesSection](#templatessection) |  |  |
@@ -332,6 +333,7 @@ A new recipe: base (a recipe to copy) and/or station (hand, 0x<workshop id>, or 
 | `placeholder` |  |  | "placeholder" is written by Kiln for missing content Kiln warns (not refused). |
 | `station` | string |  | min length 1 |
 | `unlock` | `"always"` \| `"base"` |  | always (default): no knowledge requirement; base: the base recipe's requirement. |
+| `water` | integer |  | Water charges a craft (RecipeInfo.waterCharges; 1 charge = 64 water units), as the recipe screen's Water row shows it. A station with a tank (Seedbed, Oven, Cooking Station, Laboratory, Coffee Brewer, Beehive) takes it from its own tank at the start of each craft; a crafting menu (hand, Workbench, Kitchen, NPCs) from the crafter and the base's wells and barrels. Default: the base recipe's water, none for a recipe with only a station. kiln lint KL408 warns at a station without a tank or above its tank. min 0 max 1023 |
 
 ## recipeRule
 

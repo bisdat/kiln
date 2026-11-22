@@ -39,6 +39,9 @@ struct EventReg {
     void* user;
     std::atomic<bool> dead{false};
     bool size_ok = true;
+    // kiln-emf's own gated listeners (on_hit, api_hits.cpp): false = nobody needs this step's copies; when every live
+    // registration of a type says so, the relay skips the game's queue (no copy, no delivery)
+    bool (*wanted)() = nullptr;
 };
 struct EventType {
     std::string name;
@@ -113,9 +116,16 @@ bool walk_queue(uintptr_t q, uint32_t stride, std::vector<uint8_t>* out) {
     return true;
 }
 
+// Whether any live registration wants this step's copies (a mod's always does). The list is fixed once on_ready ran.
+bool event_wanted(const EventType* t) {
+    for (const auto& r : t->regs)
+        if (!r->dead.load(std::memory_order_relaxed) && (!r->wanted || r->wanted())) return true;
+    return false;
+}
+
 void KILN_CALL event_each(KilnProgramCtx*, uint64_t* iter, KilnEntity, void* user) {
     auto* t = static_cast<EventType*>(user);
-    if (t->broken || t->slot < 0) return;
+    if (t->broken || t->slot < 0 || !event_wanted(t)) return;
     if (!t->stride) {
         const uint32_t real = type_size(fnv1a("keen::ecs::" + t->name));
         uint32_t expected = 0;
@@ -190,8 +200,10 @@ bool api_on_event(uint8_t kind, const char* name, uint32_t expected_size, EmfWor
     return true;
 }
 
-// kiln-emf's own listeners (E prompts, v25): a registration without a mod, registered before events_on_ready.
-bool add_internal_event(const char* name, uint32_t expected_size, EmfWorldEventCallback cb, void* user) {
+// kiln-emf's own listeners (E prompts, v25; on_hit, v31): a registration without a mod, registered before
+// events_on_ready. `wanted` (may be null: always) gates the queue walk, see EventReg.
+bool add_internal_event(const char* name, uint32_t expected_size, EmfWorldEventCallback cb, void* user,
+                        bool (*wanted)() = nullptr) {
     if (g_ready_done || !S.world || !name || !cb) return false;
     std::lock_guard lock(g_ev_mutex);
     if (g_ready_done) return false;
@@ -205,6 +217,7 @@ bool add_internal_event(const char* name, uint32_t expected_size, EmfWorldEventC
     r->expected = expected_size;
     r->cb = cb;
     r->user = user;
+    r->wanted = wanted;
     t->regs.push_back(std::move(r));
     return true;
 }
@@ -461,6 +474,17 @@ std::vector<KilnStr> kstrs(const std::vector<std::string>& v) {
 
 bool events_add_internal(const char* name, uint32_t expected_size, EmfWorldEventCallback cb, void* user) {
     return add_internal_event(name, expected_size, cb, user);
+}
+
+bool events_add_internal_gated(const char* name, uint32_t expected_size, EmfWorldEventCallback cb, void* user,
+                               bool (*wanted)()) {
+    return add_internal_event(name, expected_size, cb, user, wanted);
+}
+
+bool events_relay_registered(const char* name) {
+    std::lock_guard lock(g_ev_mutex);
+    const auto it = g_events.find(name);
+    return it != g_events.end() && it->second->program && it->second->slot >= 0;
 }
 
 void events_on_ready() {

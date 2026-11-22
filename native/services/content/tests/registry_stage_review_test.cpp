@@ -1,0 +1,335 @@
+// SPDX-License-Identifier: MIT
+// kiln.content registry stage, host test: the registry line review's findings on the stage runner (out/registry-review,
+// R1-R5, moved here). Harness as registry_stage_test.cpp. registry_stage_review_test.sh builds and runs it.
+#include <cstdio>
+#include <cstring>
+#include <stdexcept>
+
+#include "../registry/boot_hooks.h"
+#include "../registry/schema_ir.h"
+#include "../registry/stage.h"
+
+namespace kc {
+std::string guid_text(const uint8_t g[16]);
+bool guid_parse(const std::string& s, uint8_t out[16]);
+namespace rbtest {
+void balance_type();  // keen::BalancingTable {playerLevelCap u32 +0, skillPointsPerLevel u32 +4}, 8 bytes
+}
+}  // namespace kc
+
+namespace {
+using namespace kc::registry;
+int checks = 0;
+void check(bool ok, const std::string& why) {
+    if (!ok) throw std::runtime_error(why);
+    ++checks;
+}
+std::string g(int n) {
+    char b[40];
+    std::snprintf(b, sizeof b, "%08x-0000-4000-8000-%012x", n, n);
+    return b;
+}
+KilnAssetKey key_of(const std::string& guid, const std::string& type) {
+    KilnAssetKey k{};
+    kc::guid_parse(guid, k.guid);
+    k.type = kiln::boot_gd::fnv1a32(type);
+    return k;
+}
+const char* kBalance = "82706b40-61b1-4b8f-8b23-dcec6971bda1";
+const std::string kExe = "f0d824be7fcd48ebfe2458ff5c28da26060c2074e3ec1fcac587e5a1d508aeb2";
+
+struct TreeView final : kiln::boot_view::BaseView {
+    std::map<std::string, json> values;
+    std::map<std::string, std::vector<std::string>> types;
+    std::set<std::string> served;
+    bool released = false;
+    const char* source() const override { return "live"; }
+    bool ready(std::string*) override { return true; }
+    std::string digest() override {
+        std::string d;
+        for (const std::string& s : served) d += s + values[s].dump();
+        return kiln::boot_gd::hex_of(kiln::boot_gd::sha256(d));
+    }
+    KilnResult tree(std::string_view q, size_t cap, size_t, uint64_t, std::string* out, size_t* req, size_t*, std::string* why) override {
+        const std::string guid(q.substr(9, 36));
+        const auto it = values.find(guid);
+        if (it == values.end()) return *why = "none", KILN_ERR_NOT_FOUND;
+        const std::string text = json{{"value", it->second}}.dump();
+        if (text.size() + 1 > cap) return *req = text.size() + 1, KILN_ERR_BUFFER_TOO_SMALL;
+        served.insert(guid);
+        *out = text;
+        return KILN_OK;
+    }
+    KilnResult bytes(const KilnAssetKey&, size_t, std::string*, std::string* why) override { return *why = "trees", KILN_ERR_UNAVAILABLE; }
+    void release() override { released = true; }
+    void add(const std::string& type, const std::string& guid, json v) {
+        types[type].push_back(guid);
+        values[guid] = std::move(v);
+    }
+};
+
+TreeView world() {
+    TreeView v;
+    auto item = [&](int n, const std::string& name, int stack) {
+        v.add("keen::ItemInfo", g(n), {{"itemId", 1000 + n}, {"objectId", g(n)}, {"debugName", name}, {"maxStackSize", stack}, {"rarity", "Common"},
+                                       {"damageSetup", {{"dmgMod", 0.0}, {"speedMod", 1.0}, {"isSet", false}}}, {"itemLevelRange", {{"minLevel", 1}, {"maxLevel", 1}}}});
+    };
+    item(1, "Material_T1_Wood_Logs", 10);
+    item(2, "Plank", 20);
+    json in = {{"itemStack", {{"item", 1001}, {"itemRef", g(1)}, {"count", 3}}}, {"inputItemCategory", {{"category", 0}, {"categoryRef", "none"}, {"count", 0}}}};
+    v.add("keen::RecipeRegistryResource", g(100),
+          {{"recipes", json::array({{{"debugName", "Craft_Planks"}, {"recipeGuid", g(101)}, {"recipeId", 5001}, {"input", json::array({in})},
+                                     {"output", json::array({{{"item", 1002}, {"itemRef", g(2)}, {"count", 1}}})}, {"craftingDuration", 2.0}}})},
+           {"inputCategories", json::array()}});
+    v.add("keen::LootableItemsResource", g(200), {{"items", json::array({{{"itemId", 1002}, {"stackSizeMin", 1}, {"stackSizeMax", 2}}})}});
+    v.add("keen::ecs::DefaultInventoryResource", g(300), {{"rootGroup", {{"stacks", json::array({{{"item", 1002}, {"itemRef", g(2)}, {"countMin", 1}, {"countMax", 1}, {"spawnProbability", 1.0}, {"weight", 1.0}}})}}}});
+    v.add("keen::ecs::TemplateResource", g(400), {{"name", "Chest_A"}, {"components", json::array({{{"$type", "DefaultInventory"}, {"defaultInventory", g(300)}}})}});
+    v.add("keen::BalancingTable", kBalance, {{"playerLevelCap", 50}, {"skillPointsPerLevel", 2}, {"genericWeaponSeed", 10.0}, {"powerCreepWeapon", 0.15},
+                                             {"armorSetup", {{"offset", 23.0}, {"gradient", 15.0}}}});
+    return v;
+}
+
+struct Files {
+    std::map<std::string, std::string> data;
+    std::string report;
+    std::vector<std::string> log;
+};
+
+stage::Env env_of(TreeView* view, Files* files, const std::string& regmap_dir, std::vector<stage::Env::DataFile> (*data)(const Schema&)) {
+    stage::Env e;
+    e.side = "server", e.exe_sha256 = kExe, e.kiln_version = "0.2.0-test", e.pid = 7;
+    e.now = [] { return std::string("2026-11-21T00:00:00Z"); };
+    e.source = [view](std::string*) {
+        return model::tree_source(*view, [view](const std::string& type, std::vector<KilnAssetKey>* out, std::string*) {
+            for (const std::string& gu : view->types[type]) out->push_back(key_of(gu, type));
+            return true;
+        });
+    };
+    e.regmap = [regmap_dir](map::RegMap* out, std::vector<std::string>* errs) { return map::load_dir(regmap_dir, "server", kExe, out, errs); };
+    e.data = data;
+    e.folders = [] { return std::vector<std::pair<std::string, std::string>>{{"oldmod", "1.0.0"}, {"bigmod", "2.0.0"}, {"late", "1.0.0"}}; };
+    e.write_report = [files](const std::string& t) { return files->report = t, true; };
+    e.write_data = [files](const std::string& rel, const std::string& t) { return files->data[rel] = t, true; };
+    e.read_data = [files](const std::string& rel) -> std::optional<std::string> {
+        const auto it = files->data.find(rel);
+        if (it == files->data.end()) return std::nullopt;
+        return it->second;
+    };
+    e.log = [files](int level, const std::string& l) { files->log.push_back(std::to_string(level) + " " + l); };
+    return e;
+}
+
+std::vector<stage::Env::DataFile> sections(const Schema& schema) {
+    const std::string big = R"({"registry": {"alter": [
+        {"registry": "items", "select": {"id": "game:plank"}, "field": "maxStack", "op": {"mul": 4}},
+        {"registry": "items", "select": {"id": "game:plank"}, "field": "block", "op": 0.5},
+        {"registry": "balance", "select": {"id": "game:balance"}, "field": "levelCap", "op": 60},
+        {"registry": "items", "entry": "remove", "select": {"id": "game:material_t1_wood_logs"}}]}})";
+    const std::string late = R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:plank"}, "field": "maxStack", "op": {"mul": 2}}]}})";
+    auto out = stage::read_sections("bigmod", "2.0.0", {{"content/b.json", big}, {"content/a.json", "{\"items\": {}}"}}, schema);
+    auto l = stage::read_sections("late", "1.0.0", {{"content/x.json", late}}, schema);
+    out.insert(out.end(), l.begin(), l.end());
+    return out;
+}
+
+std::vector<boothook::OldDoc> old_patch() {
+    boothook::OldDoc d;
+    d.mod = "oldmod", d.key = "cap";
+    d.res = key_of(kBalance, "keen::BalancingTable");
+    d.type = "keen::BalancingTable";
+    d.sets = {{"playerLevelCap", 55}, {"skillPointsPerLevel", {{"mul", 2}}}};
+    return {d};
+}
+
+std::vector<stage::Env::DataFile> no_sections(const Schema&) { return {}; }
+std::vector<stage::Env::DataFile> items_only(const Schema& schema) {
+    return stage::read_sections("late", "1.0.0", {{"content/x.json", R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:plank"}, "field": "maxStack", "op": {"mul": 2}}]}})"}}, schema);
+}
+
+// R1: a mod folder with a data section that Kiln.Host's load order does not name (Kiln.Host did not load it: wrong side,
+// a missing dependency, an incompatible version) still has its registry edits applied. Data packs skip such a mod
+// (content.cpp apply_packs -> order_packs); the stage runs it last instead.
+void skipped_mod_data_applied(const std::string& dir) {
+    TreeView view = world();
+    Files files;
+    stage::Runner r(env_of(&view, &files, dir, &sections));
+    check(r.set_order(R"([{"mod":"bigmod","version":"2.0.0"}])") == KILN_OK, "set_order (Kiln.Host loaded bigmod only)");
+    r.run({});
+    r.finish({});
+    const json rep = json::parse(files.report);
+    bool late = false;
+    for (const auto& o : rep["order"]) late = late || o["mod"] == "late";
+    check(!late, "a mod Kiln.Host did not load is not in the stage: order = " + rep["order"].dump());
+    check(rep.dump().find("\"result\":80") != std::string::npos, "maxStack is bigmod's x4 only (80), not x4 then late's x2 (160)");
+    check(rep.dump().find("Kiln.Host did not load the mod on this side") != std::string::npos, "the skipped mod's file is named with the reason");
+}
+
+std::vector<stage::Env::DataFile> client_side(const Schema& schema) {
+    auto out = items_only(schema);
+    for (auto& f : out) f.side = "client";
+    return out;
+}
+// R1b: without Kiln.Host's order (the folders'), a data mod for the other side is skipped and named
+void other_side_mod_skipped(const std::string& dir) {
+    TreeView view = world();
+    Files files;
+    stage::Runner r(env_of(&view, &files, dir, &client_side));
+    r.run({});
+    r.finish({});
+    const json rep = json::parse(files.report);
+    check(rep.dump().find("the mod is for the client side, this is the server") != std::string::npos, "the client mod is skipped with its reason");
+    check(rep.dump().find("\"result\":40") == std::string::npos, "its maxStack edit is not applied");
+}
+
+std::vector<stage::Env::DataFile> server_side(const Schema& schema) {
+    auto out = sections(schema);
+    for (auto& f : out) f.side = "server";
+    return out;
+}
+// R1c (recheck N1): on a game client Kiln.Host's registry order includes side "server" mods (RegistryHost's order resolves
+// with hosted server mods on by default), because a hosted world's server runs in the client process. With Kiln.Host's
+// order the stage decides by membership in that order only; the side check is for the folders' order (no .NET).
+void hosting_client_keeps_ordered_server_mods(const std::string& dir) {
+    TreeView view = world();
+    Files files;
+    stage::Env env = env_of(&view, &files, dir, &server_side);
+    env.side = "client";
+    stage::Runner r(std::move(env));
+    check(r.set_order(R"([{"mod":"bigmod","version":"2.0.0"},{"mod":"late","version":"1.0.0"}])") == KILN_OK, "set_order: Kiln.Host's order on a client with hosted server mods");
+    r.run({});
+    r.finish({});
+    const json rep = json::parse(files.report);
+    check(rep.dump().find("\"result\":160") != std::string::npos,
+          "the server mods Kiln.Host ordered apply on the client (maxStack x4 then x2 = 160); refused: " + rep["refused"].dump().substr(0, 400));
+}
+
+// R2: the id table of a build is written once, when it is missing; a later start with registry content (cache miss)
+// overwrites it with only the registries that start decoded.
+void id_table_overwritten(const std::string& dir) {
+    TreeView view = world();
+    Files files;
+    { stage::Runner r(env_of(&view, &files, dir, &no_sections)); r.run({}); r.finish({}); }
+    const std::string rel = "ids-server-" + kExe + ".json";
+    const json first = json::parse(files.data.at(rel));
+    check(first["registries"].contains("recipes") && first["registries"].contains("items"), "the first start writes the full table: " + first["registries"].dump().substr(0, 200));
+    TreeView view2 = world();
+    Files files2;
+    files2.data = files.data;
+    { stage::Runner r(env_of(&view2, &files2, dir, &items_only)); r.run({}); r.finish({}); }
+    const json second = json::parse(files2.data.at(rel));
+    std::string regs;
+    for (auto it = second["registries"].begin(); it != second["registries"].end(); ++it) regs += it.key() + " ";
+    check(second["registries"].contains("recipes"), "a later start keeps the full id table (registries now: " + regs + ")");
+}
+
+// R3: a submit whose owner Kiln cannot bind (t_submit passes bound_mod(owner) == "" for a revoked or unknown owner, or an
+// owner whose id is no mod id) is accepted under whatever mod the batch names.
+void submit_unbound_owner(const std::string& dir) {
+    TreeView view = world();
+    Files files;
+    stage::Runner r(env_of(&view, &files, dir, &no_sections));
+    uint32_t a = 0, b = 0;
+    std::string rep;
+    const KilnResult rc = r.submit(77, "", R"({"ir":1,"mod":"bigmod","stage":"alter","edits":[{"registry":"items","select":{"id":"game:plank"},"field":"maxStack","op":1}]})", &a, &b, &rep);
+    check(rc != KILN_OK, "a batch from an owner with no bound mod is refused (rc " + std::to_string(rc) + ", accepted " + std::to_string(a) + ")");
+}
+
+// R4: kiln_registry.h: subscribe_ready's fn "runs at START ... and at each WORLDLOAD". Only START is delivered.
+void worldload_ready_event(const std::string& dir) {
+    TreeView view = world();
+    Files files;
+    stage::Runner r(env_of(&view, &files, dir, &sections));
+    std::function<void(const Result&, bool)> live_report;
+    const Result* live_result = nullptr;
+    r.set_live([&](const stage::LiveHandoff& h) { live_report = h.report, live_result = h.result; });
+    std::vector<stage::Phase> seen;
+    uint64_t h = 0;
+    check(r.subscribe_ready(5, [&](stage::Phase p, uint64_t) { seen.push_back(p); }, &h) == KILN_OK, "subscribe_ready");
+    r.run({});
+    r.finish({});
+    live_report(*live_result, true);  // the live back-end applied the live fields at a world load
+    check(r.phase() == stage::Phase::WorldLoad, "phase worldLoad");
+    check(seen.size() == 2 && seen[1] == stage::Phase::WorldLoad, "the ready callback saw START and WORLDLOAD (saw " + std::to_string(seen.size()) + " event(s))");
+    const auto generation = r.generation();
+    Result late = *live_result;
+    late.fields.at({"items", "game:plank", "maxStack"}).result = Value::integer(42);
+    live_report(late, false);
+    std::string value;
+    check(r.read(2, "items", "game:plank", "maxStack", &value) == KILN_OK && value == "42", "a late refresh updates the resolved view");
+    check(r.generation() == generation && seen.size() == 2, "a late refresh keeps the generation and sends no ready event");
+}
+// R6: the live handoff keeps what a hot reload must not lose (review finding 6): the refusals made outside compose, the restart
+// fields as the boot back-end wrote them, and the stage's mapping check
+void handoff_keeps_outside_refusals(const std::string& dir) {
+    TreeView view = world();
+    Files files;
+    stage::Runner r(env_of(&view, &files, dir, &sections));
+    stage::LiveHandoff got;
+    r.set_live([&](const stage::LiveHandoff& h) { got = h; });
+    const auto boot = r.run({});
+    r.finish({{boot.at(0).fields.at(0).field, true, Value::integer(60), ""}});
+    check(got.pre_refused && !got.pre_refused->empty(), "the handoff names the refusals made outside compose");
+    bool unproven = false;
+    for (const Refusal& x : *got.pre_refused) unproven = unproven || x.reason.find("Unproven") != std::string::npos;
+    check(unproven, "among them the unproven field's");
+    check(got.boot_fields && got.boot_fields->count({"balance", "game:balance", "levelCap"}) &&
+              got.boot_fields->at({"balance", "game:balance", "levelCap"}).result == Value::integer(60), "the handoff has levelCap as the boot back-end wrote it");
+    check(static_cast<bool>(got.check), "and the mapping check");
+    Batch b;
+    std::vector<Refusal> rf;
+    std::string err;
+    parse_batch(std::string(R"({"ir":1,"mod":"bigmod","stage":"alter","edits":[{"registry":"items","select":{"id":"game:plank"},"field":"block","op":0.5}]})"), generated_schema(), &b, &rf, &err);
+    got.check(&b, &rf);
+    check(b.edits.empty() && !rf.empty(), "the check refuses a reloaded unproven edit");
+}
+
+// R5: the base cache's check touches only the resources the first decode read and compares their digest; the type
+// listings (one resource per item, template, drop table) are in neither. A resource added to a listed type with the same
+// exe, Kiln and regmap (another archive writer's new item) is a cache hit, and the stage's base, ids and globs miss it.
+void cache_misses_added_resource(const std::string& dir) {
+    TreeView view = world();
+    Files files;
+    { stage::Runner r(env_of(&view, &files, dir, &items_only)); r.run({}); r.finish({}); }
+    bool cached = false;
+    for (const auto& [k, v] : files.data) cached = cached || k.rfind("cache/", 0) == 0;
+    check(cached, "the first start wrote the base cache");
+    TreeView view2 = world();
+    view2.add("keen::ItemInfo", g(3), {{"itemId", 1003}, {"objectId", g(3)}, {"debugName", "Hammer"}, {"maxStackSize", 5}, {"rarity", "Common"},
+                                       {"damageSetup", {{"dmgMod", 0.0}, {"speedMod", 1.0}, {"isSet", false}}}, {"itemLevelRange", {{"minLevel", 1}, {"maxLevel", 1}}}});
+    Files files2;
+    files2.data = files.data;
+    stage::Runner r2(env_of(&view2, &files2, dir, &items_only));
+    r2.run({});
+    r2.finish({});
+    bool hit = false;
+    for (const std::string& l : files2.log) hit = hit || l.find("the cache holds") != std::string::npos;
+    std::string out;
+    r2.select(0, "items", "\"game:*\"", &out);
+    check(out.find("game:hammer") != std::string::npos, std::string("a new item resource is in the base (cache ") + (hit ? "hit" : "miss") + "; base items: " + out + ")");
+}
+}  // namespace
+
+int main(int argc, char** argv) {
+    const std::string dir = argc > 1 ? argv[1] : "regmap";
+    int failed = 0;
+    const std::pair<const char*, std::function<void()>> groups[] = {
+        {"R1 skipped_mod_data_applied", [&] { skipped_mod_data_applied(dir); }},
+        {"R1b other_side_mod_skipped", [&] { other_side_mod_skipped(dir); }},
+        {"R1c hosting_client_keeps_ordered_server_mods", [&] { hosting_client_keeps_ordered_server_mods(dir); }},
+        {"R2 id_table_overwritten", [&] { id_table_overwritten(dir); }},
+        {"R3 submit_unbound_owner", [&] { submit_unbound_owner(dir); }},
+        {"R4 worldload_ready_event", [&] { worldload_ready_event(dir); }},
+        {"R6 handoff_keeps_outside_refusals", [&] { handoff_keeps_outside_refusals(dir); }},
+        {"R5 cache_misses_added_resource", [&] { cache_misses_added_resource(dir); }}};
+    for (const auto& [name, fn] : groups) {
+        try {
+            fn();
+            std::printf("registry-stage-review: PASS %s\n", name);
+        } catch (const std::exception& e) {
+            ++failed;
+            std::printf("registry-stage-review: FAIL %s: %s\n", name, e.what());
+        }
+    }
+    std::printf("registry-stage-review: %d check(s), %d failed group(s)\n", checks, failed);
+    return failed ? 1 : 0;
+}

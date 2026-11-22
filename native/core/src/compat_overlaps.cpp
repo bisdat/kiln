@@ -169,6 +169,53 @@ std::vector<Refused> parse_sf_status(std::string_view text) {
     return out;
 }
 
+size_t mark_known(ojson& overlaps, const std::vector<const Rule*>& fired) {
+    size_t n = 0;
+    if (!overlaps.is_array()) return n;
+    for (auto& o : overlaps) {
+        if (!o.is_object() || !o.contains("foreign") || !o["foreign"].is_object()) continue;
+        const std::string module = json_text(o["foreign"], "module");
+        if (module.empty()) continue;
+        for (const Rule* r : fired) {
+            if (!r || r->action != "known" || r->subject.kind != Matcher::Kind::Module || !glob_match(r->subject.value, module)) continue;
+            // what happened stays (who hooked what, Kiln chained over it); the advice gives way to the rule's words
+            std::string msg = json_text(o, "message");
+            for (const char* end : {" chained over it.", " stays armed behind their jump;"}) {
+                const size_t at = msg.find(end);
+                if (at != std::string::npos) {
+                    msg.resize(at + std::string_view(end).size());
+                    if (msg.back() == ';') msg.back() = '.';
+                    break;
+                }
+            }
+            o["known"] = r->id;
+            o["fix"] = "none";
+            o["message"] = msg + " Known: " + (r->message.empty() ? std::string("nothing to fix") : r->message) + " (compat rule " + r->id + ")";
+            ++n;
+            break;
+        }
+    }
+    return n;
+}
+
+bool contains_text(std::string_view bytes, std::string_view text) {
+    if (text.empty()) return false;
+    auto low = [](unsigned char c) { return static_cast<unsigned char>(c >= 'A' && c <= 'Z' ? c + 32 : c); };
+    for (const size_t step : {size_t{1}, size_t{2}}) {
+        const size_t len = text.size() * step;
+        if (bytes.size() < len) continue;
+        for (size_t i = 0; i + len <= bytes.size(); ++i) {
+            size_t k = 0;
+            for (; k < text.size(); ++k) {
+                if (low(static_cast<unsigned char>(bytes[i + k * step])) != low(static_cast<unsigned char>(text[k]))) break;
+                if (step == 2 && bytes[i + k * 2 + 1] != 0) break;
+            }
+            if (k == text.size()) return true;
+        }
+    }
+    return false;
+}
+
 ojson compute_overlaps(const ojson& map, const std::vector<ChainRow>& chain, const std::vector<Refused>& refused) {
     ojson out = ojson::array();
     const ojson no_array = ojson::array();
@@ -353,6 +400,10 @@ Outcome before_outcome(const Rule& r, const std::vector<ChainRow>& rows) {
 Outcome outcome_of(const Rule& r, const std::vector<ChainRow>& rows, const Facts& facts, const RuleContext& ctx) {
     Outcome o;
     if (r.action == "warn") return o;
+    if (r.action == "known") {
+        o.note = "overlaps of " + r.subject.value + " are known; kiln.log says so as info";
+        return o;
+    }
     if (r.action == "before") return before_outcome(r, rows);
     if (r.action == "defer") {
         // The native loader does the wait and logs it (info, or a warning on its timeout); this report only points

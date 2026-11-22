@@ -2262,6 +2262,8 @@
       "byHand": "Put there by hand",
       "folder": "Folder",
       "advanced": "Advanced (hooks or patches)",
+      "steam": "Steam",
+      "steamMessages": "Talks to other players over Steam",
       "role": "Role",
       "servesLive": "Serves the live pages",
       "also": "Also {list}",
@@ -5446,6 +5448,19 @@
         "duration": "Duration",
         "durationPh": "game's",
         "seconds": "seconds",
+        "water": "Water from the tank",
+        "waterTip": "The recipe's own water, in charges a craft (64 water units each), as the recipe screen's Water row shows it. The game takes it when a craft starts.",
+        "waterPh": "none",
+        "waterPhBase": "base's",
+        "waterPhGame": "game's",
+        "waterUnit": "charges a craft",
+        "waterTank": "The {station}'s tank holds {max} charges: keep it filled to craft.",
+        "waterOver": "More than the {station}'s tank holds ({max}): the station never starts this recipe.",
+        "waterNoTank": "The {station} has no water tank: it never starts a recipe that needs water.",
+        "waterMenu": "Crafted from a menu: the game takes the water from the player's water containers and the base's wells and barrels.",
+        "oldWater": "An input is the game's old Water item, a canteen: each craft takes {count} of that item, not water from the station's tank.",
+        "useTank": "Use tank water instead",
+        "useTankTip": "Removes the Water item inputs and asks for the same amount of tank water",
         "itemAria": "Item",
         "countAria": "Count",
         "category": "any item of category {id}",
@@ -5530,7 +5545,8 @@
         "toggle": "Show hidden game entries",
         "tag": "hidden",
         "tip": "Old, test or unused game entries: they may do nothing in the game.",
-        "tankWater": "station tank water"
+        "oldWater": "old canteen item, not tank water",
+        "oldWaterTip": "The game's old Water item. The recipe screen uses its name for a recipe's water, but as an ingredient it is the item itself. For tank water, use Water from the tank on the recipe."
       }
     },
     "order": {

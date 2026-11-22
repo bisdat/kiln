@@ -1,0 +1,92 @@
+{
+  "ir": 1,
+  "mod": "bigstacks",
+  "modVersion": "1.2.0",
+  "stage": "alter",
+  "source": "content/stacks.json",
+  "edits": [
+    {
+      "n": 0,
+      "registry": "items",
+      "select": {
+        "id": "game:material_*",
+        "where": {
+          "maxStack": ">1"
+        },
+        "hasNot": [
+          "quest"
+        ]
+      },
+      "field": "maxStack",
+      "op": {
+        "mul": 4,
+        "max": 9999
+      }
+    },
+    {
+      "n": 1,
+      "registry": "items",
+      "select": {
+        "id": "game:weapon_t1_sword"
+      },
+      "field": "rarity",
+      "op": "Legendary",
+      "exclusive": true
+    },
+    {
+      "n": 2,
+      "registry": "items",
+      "select": "game:weapon_t1_sword",
+      "field": "perks",
+      "list": {
+        "append": [
+          "game:perk_sharp"
+        ]
+      }
+    },
+    {
+      "n": 3,
+      "registry": "recipes",
+      "select": {
+        "id": "game:ammo_arrow_t1_flint"
+      },
+      "field": "duration",
+      "op": {
+        "set": 2.5
+      },
+      "yield": true
+    },
+    {
+      "n": 4,
+      "registry": "balance",
+      "select": {
+        "id": "game:balance"
+      },
+      "field": "levelCap",
+      "op": {
+        "add": 5,
+        "raiseOnly": true
+      }
+    },
+    {
+      "n": 5,
+      "registry": "items",
+      "entry": "remove",
+      "select": {
+        "id": "game:weapon_t1_junk"
+      }
+    },
+    {
+      "n": 6,
+      "registry": "items",
+      "select": {
+        "id": "game:weapon_t1_*"
+      },
+      "raw": {
+        "damageSetup.dmgMod": {
+          "mul": 1.5
+        }
+      }
+    }
+  ]
+}

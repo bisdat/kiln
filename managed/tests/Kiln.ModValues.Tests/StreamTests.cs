@@ -298,4 +298,40 @@ public sealed class StreamTests
         Assert.False(ModValuesWire.TryI64("+1", out _));
         Assert.False(ModValuesWire.TryI64("1e3", out _));
     }
+
+    // ---- review round 1: malformed offers (12) and Resync pacing on the server (13) ----
+
+    [Fact]
+    public void AnOfferPartWithoutPayloadIsRefusedCleanly()
+    {
+        var p = new Pair(r => r.Define("fish", "coins", Coins));
+        p.Pump();
+        var sent = new List<object>();
+        var bad = new ModValuesWire.CarryOfferPart(p.Server.Nonce, "1", 0, 1, 10, new string('0', 64), null!);
+        Assert.Null(p.Server.OnOfferPart(bad, p.Now, sent.Add));
+        Assert.False(Assert.IsType<ModValuesWire.CarryResult>(Assert.Single(sent)).Ok);
+        Assert.Null(p.Server.OnOfferPart(bad with { Transfer = null!, Sha256 = null! }, p.Now, sent.Add));
+        p.Client.OnPart(new ModValuesWire.StatePart(p.Client.State.Nonce!, "2", "2", "1", false, 0, 1, 10, new string('0', 64), null!));
+        Assert.Equal(0, p.Raw("fish:coins"));
+    }
+
+    [Fact]
+    public void ResyncsAreRateLimitedOnTheServer()
+    {
+        var p = new Pair(r => r.Define("fish", "coins", Coins)) { AutoDeliver = false };
+        p.Pump();
+        p.ToClient.Clear();
+        var resync = new ModValuesWire.Resync(p.Server.Nonce, "0", "test");
+        p.Server.OnResync(resync);
+        p.Pump();
+        Assert.Equal("2", Assert.IsType<ModValuesWire.StatePart>(Assert.Single(p.ToClient)).Seq);
+        p.ToClient.Clear();
+        for (var i = 0; i < 3; i++)
+        {
+            p.Server.OnResync(resync);  // a flood within 2 s: ignored, the transfer in flight stays
+            p.Pump();
+        }
+        Assert.Empty(p.ToClient);
+        Assert.True(p.Server.InFlight);
+    }
 }

@@ -3,6 +3,12 @@
     "completion": {
       "title": "コマンド候補",
       "hint": "Tab: 補完 · Esc: 閉じる"
+    },
+    "search": {
+      "title": "チャット履歴の検索",
+      "hint": "Ctrl+R: 古い方へ · Ctrl+Shift+R: 新しい方へ · Enter/Tab: 使う · Esc: キャンセル",
+      "query": "検索",
+      "none": "一致する履歴はありません"
     }
   },
   "language": {

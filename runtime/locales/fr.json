@@ -3,6 +3,12 @@
     "completion": {
       "title": "Suggestions de commandes",
       "hint": "Tab : compléter · Échap : fermer"
+    },
+    "search": {
+      "title": "Recherche dans l'historique du chat",
+      "hint": "Ctrl+R : plus ancien · Ctrl+Maj+R : plus récent · Entrée/Tab : utiliser · Échap : annuler",
+      "query": "Recherche",
+      "none": "Aucune correspondance dans l'historique"
     }
   },
   "language": {

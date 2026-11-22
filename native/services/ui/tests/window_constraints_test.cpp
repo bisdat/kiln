@@ -40,7 +40,13 @@ static_assert(offsetof(KilnUiApi, chat_completion) == 1032);
 // subscribe_pointer_press (0.2.0-dev.30, presses on the game's own UI) after it
 static_assert(offsetof(KilnUiApi, subscribe_pointer_press) == offsetof(KilnUiApi, chat_completion) + sizeof(void*));
 static_assert(offsetof(KilnUiApi, subscribe_pointer_press) == 1040);
-static_assert(sizeof(KilnUiApi) == offsetof(KilnUiApi, subscribe_pointer_press) + sizeof(void*));
+static_assert(offsetof(KilnUiApi, chat_search) == offsetof(KilnUiApi, subscribe_pointer_press) + sizeof(void*));
+static_assert(offsetof(KilnUiApi, chat_search) == 1048);
+// pointer, drag_source and drop_target (0.2.0-dev.30.3) after it
+static_assert(offsetof(KilnUiApi, pointer) == offsetof(KilnUiApi, chat_search) + sizeof(void*));
+static_assert(offsetof(KilnUiApi, pointer) == 1056);
+static_assert(offsetof(KilnUiApi, drop_target) == 1072);
+static_assert(sizeof(KilnUiApi) == offsetof(KilnUiApi, drop_target) + sizeof(void*));
 int main() {
     // Drawing off: no frame/context, just as KILN_UI_OVERLAY=0. Must not enter ImGui.
     kui_draw::t_set_next_window_size_constraints(300, 0, 300, 918);

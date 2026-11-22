@@ -83,7 +83,10 @@ internal static class ModValuesStream
             {
                 if (l.Key.IsAccountOnly || l.Key.IsNone) continue;
                 if (l.Local) want[(LocalPeer, l.Key)] = (null, true);
-                else if (l.Peer is { State: NetPeerState.Ready } p && p.HasChannel(ModValuesWire.Channel)) want[(p.Id, l.Key)] = (p, false);
+                // a player's peer must still be that player's (an entity id can be reused by the next player); a lab
+                // peer has no player and is bound to its session
+                else if (l.Peer is { State: NetPeerState.Ready } p && p.HasChannel(ModValuesWire.Channel) && (l.Lab || p.Player == l.Entity))
+                    want[(p.Id, l.Key)] = (p, false);
             }
         foreach (var k in Sessions.Keys.ToArray())
             if (!want.ContainsKey(k) || Sessions[k].S.World != world)
@@ -154,6 +157,8 @@ internal static class ModValuesStream
     internal static ImportSummary Import(CharacterKey c, byte[] doc)
     {
         var entries = ServerSession.ParseOffer(doc);
+        var sidecarRevision = ServerSession.ParseOfferRevision(doc);
+        var entity = CharacterSync.Live().FirstOrDefault(l => l.Key == c).Entity;
         static ImportSummary Refused(string why, int n) => new(false, why, 0, 0, n, new Dictionary<string, int>());
         if (entries is null) return Refused("malformed", 0);
         if (_ledger is null || !ModValuesService.IsLive(c)) return Refused(ModValueReasons.CharacterUnavailable, entries.Count);
@@ -163,7 +168,7 @@ internal static class ModValuesStream
         {
             var mods = keys.Select(k => k.Mod).Distinct(StringComparer.Ordinal)
                 .ToDictionary(m => m, _ => (IReadOnlyList<string>)[SavesValueStore.ProjectionKey], StringComparer.Ordinal);
-            var ev = Events.Post(new CharacterImportingEvent(c, EntityId.None, 0, CharacterStore.RevisionOf(c), mods));
+            var ev = Events.Post(new CharacterImportingEvent(c, entity, sidecarRevision, CharacterStore.RevisionOf(c), mods));
             if (ev.Canceled) return Refused(ModValueReasons.ImportRefused, entries.Count);
         }
         if (new BusValueEvents().Importing(new ModValueImportingEvent(c, keys)) is not null) return Refused(ModValueReasons.ImportRefused, entries.Count);
@@ -221,7 +226,14 @@ internal static class ModValuesClient
     /// <summary>The client's step: leaving the server's world clears the copy before anything can show it again.</summary>
     internal static void ClientTick()
     {
-        if (_local || Stream.State.Nonce is null) return;
+        if (Stream.State.Nonce is null) return;
+        if (_local)
+        {
+            // the host's own copy: this process runs no world any more (back in the menu), so nothing of it stays readable
+            Stream.Clear();
+            _local = false;
+            return;
+        }
         if (_server is null || Network.Server is null || !ReferenceEquals(Network.Server, _server) && Network.Server.Id != _server.Id) Stream.Clear();
     }
 

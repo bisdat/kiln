@@ -228,7 +228,7 @@ ShroudForge installation detection classifies `dbghelp.dll` and `winmm.dll` befo
 Self-hosting is one of the ways a ShroudForge mod runs next to hosted (Kiln starts ShroudForge's bundled runtime, the
 default), installed (Kiln starts your own ShroudForge copy) and kiln mode (Kiln's own interpreter, no ShroudForge
 runtime; [kiln mode](shroudforge-kiln-mode.md)). An own loader in the game folder sets both Kiln backends aside. Kiln
-mode is chosen per game on Settings' ShroudForge card; its seven guided checks are in the
+mode is chosen per game on Settings' ShroudForge card; its guided checks are in the
 [client pass](client-pass.md#kilns-interpreter). In a kiln start Engines shows the interpreter's row,
 read from `kiln/state/sfi.json`.
 

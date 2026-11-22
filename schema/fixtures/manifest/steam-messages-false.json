@@ -1,0 +1,31 @@
+{
+  "raw": "{\"id\":\"quiet\",\"version\":\"1.0.0\",\"apiVersion\":\"0.2\",\"entryAssembly\":\"Quiet.dll\",\"steamMessages\":false}",
+  "expect": {
+    "ok": true,
+    "manifest": {
+      "id": "quiet",
+      "name": "quiet",
+      "version": "1.0.0",
+      "parsedVersion": "1.0.0",
+      "apiVersion": "0.2",
+      "entryAssembly": "Quiet.dll",
+      "entryType": null,
+      "side": "server",
+      "clients": "none",
+      "authors": [],
+      "description": "",
+      "license": null,
+      "url": null,
+      "dependencies": [],
+      "loadBefore": [],
+      "loadAfter": [],
+      "incompatible": [],
+      "features": [],
+      "exports": [],
+      "advanced": false,
+      "tests": null,
+      "kilnBuild": null,
+      "warnings": []
+    }
+  }
+}

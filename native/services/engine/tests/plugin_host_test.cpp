@@ -700,9 +700,36 @@ void exact_build(const Profile& p) {
               id.sections == p.sections, std::string(p.id) + ": identity exact");
     KilnEngineGateStats st{}; st.size = sizeof st;
     check(t && t->gate_stats(&st) == KILN_OK && st.size == sizeof st, "stats copy (process-wide counters)");
+    {
+        // A caller built against v1's 96 bytes gets those and nothing past them (the restore counters were appended);
+        // one with a larger record gets this build's record and its size; one below v1's is refused.
+        constexpr std::uint64_t kUntouched = 0xa5a5a5a5a5a5a5a5ull;
+        KilnEngineGateStats v1{};
+        v1.size = 96;
+        v1.view_failures = v1.restores = v1.restore_ns_total = v1.restore_ns_max = kUntouched;
+        check(t && t->gate_stats(&v1) == KILN_OK && v1.size == 96 && v1.view_failures != kUntouched && v1.restores == kUntouched &&
+                  v1.restore_ns_total == kUntouched && v1.restore_ns_max == kUntouched,
+              "stats: a v1-sized record gets its 96 bytes, nothing written past them");
+        struct {
+            KilnEngineGateStats s;
+            std::uint64_t tail[4];
+        } big{};
+        big.s.size = sizeof big;
+        for (auto& v : big.tail) v = kUntouched;
+        check(t && t->gate_stats(&big.s) == KILN_OK && big.s.size == sizeof(KilnEngineGateStats) &&
+                  big.tail[0] == kUntouched && big.tail[3] == kUntouched,
+              "stats: a larger record gets this build's record, size says how much");
+        KilnEngineGateStats shorter{};
+        shorter.size = 95;
+        check(t && t->gate_stats(&shorter) == KILN_ERR_INVALID_ARGUMENT, "stats: a record below v1's refused");
+    }
     check(g_rows["engine.profile"].state == KILN_CAP_AVAILABLE && g_rows["engine.profile"].text == p.id, "engine.profile row");
     check(g_rows["engine.ecs_read"].state == KILN_CAP_AVAILABLE && g_rows["engine.ecs_write"].state == KILN_CAP_AVAILABLE,
           "ecs rows available on the exact build");
+    check(g_rows["engine.attribute_model"].state == KILN_CAP_AVAILABLE &&
+              g_rows["engine.attribute_model"].text == p.attribute_calculation_model &&
+              g_rows["engine.attribute_model"].text == "attribute-command-v1",
+          std::string(p.id) + ": engine.attribute_model names the profile's published model");
     char why[160]{};
     const KilnEngineNativeApi* native = kiln_engine_native(&api, 7, sizeof(KilnEngineNativeApi), why, sizeof why);
     check(native && native->layout && native->layout() == &p.layout, "internal table hands out the selected layout");
@@ -759,7 +786,7 @@ void unknown_build() {
     KilnEngineIdentity id{}; id.size = sizeof id;
     check(t && t->identity(&id) == KILN_OK && id.status == KILN_ENGINE_UNKNOWN_BUILD && !id.profile_id[0] && !id.sections,
           "identity unknown build");
-    for (const char* row : {"engine.profile", "engine.ecs_read", "engine.ecs_write"})
+    for (const char* row : {"engine.profile", "engine.ecs_read", "engine.ecs_write", "engine.attribute_model"})
         check(g_rows[row].state == KILN_CAP_UNAVAILABLE && g_rows[row].reason == KILN_CAP_REASON_SYMBOL_MISSING &&
                   !g_rows[row].text.empty(), std::string(row) + " unavailable with a reason");
     check(g_last_log.find("unavailable on this build") != std::string::npos, "unknown build logged");

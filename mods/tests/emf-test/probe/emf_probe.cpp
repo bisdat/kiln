@@ -227,6 +227,7 @@ void ws_cb(const char* key, double, void*) {
 
 // ---- v28-v46 (EMF 0.6.3 to 0.6.14) on a dedicated server, inside a server world callback ----
 int g_v40_callbacks = 0;
+uint32_t g_on_hits = 0, g_on_hit_kills = 0;  // on_hit deliveries (v31, carried since 0.2.0-dev.30.3), killing blows
 void v40_checks(EmfWorld* w) {
     // carried: chat lines with flags (kiln.chat's server lines have no speaker), world_to_screen (a server has no screen)
     check(A->chat_broadcast_ex("[probe] a system line for everyone", EMF_CHAT_SYSTEM) && A->chat_broadcast_ex("[probe] flags 0", 0),
@@ -251,10 +252,19 @@ void v40_checks(EmfWorld* w) {
     check(!A->player_character_name(w, 1, buf, sizeof buf) && buf[0] == 0, "player_character_name answers false with an empty buffer");
     EmfHitRule rule{};
     rule.size = sizeof rule;
-    check(!A->on_hit([](EmfWorld*, const EmfHit*, void*) { ++g_v40_callbacks; }, nullptr) &&
-              !A->on_hit_before([](EmfWorld*, EmfHit*, void*) { ++g_v40_callbacks; }, nullptr) && A->hit_rule_add(&rule) == 0 &&
+    // on_hit is carried since 0.2.0-dev.30.3 (the server world's HitEvents after its step); changing hits is not yet
+    check(A->on_hit(
+              [](EmfWorld*, const EmfHit* h, void*) {
+                  if (!h || h->size != sizeof(EmfHit)) return;
+                  ++g_on_hits;
+                  if (h->flags & EMF_HIT_KILLED) ++g_on_hit_kills;
+              },
+              nullptr) &&
+              !A->on_hit(nullptr, nullptr),
+          "hits: on_hit takes a callback and refuses none");
+    check(!A->on_hit_before([](EmfWorld*, EmfHit*, void*) { ++g_v40_callbacks; }, nullptr) && A->hit_rule_add(&rule) == 0 &&
               !A->hit_rule_remove(1),
-          "hits: on_hit, on_hit_before, hit_rule_add, hit_rule_remove answer false / 0");
+          "hits: on_hit_before, hit_rule_add, hit_rule_remove answer false / 0");
     EmfBuffType bt{};
     EmfBuff bf{};
     auto buff_cb = [](EmfWorld*, const EmfBuffEvent*, void*) { ++g_v40_callbacks; };
@@ -780,6 +790,8 @@ void on_tick(EmfWorld* w, void*) {
     char b[64];
     std::snprintf(b, sizeof b, "%u HitEvent(s) seen", g_hits);
     check(!F.vukah || g_hits >= 1, "on_event HitEvent: the killing hit's HitEvent (248 bytes on this build) reached the callback", b);
+    std::snprintf(b, sizeof b, "%u hit(s), %u killing blow(s)", g_on_hits, g_on_hit_kills);
+    check(!F.vukah || (g_on_hits >= 1 && g_on_hit_kills >= 1), "on_hit: the killing hit reached the callback with EMF_HIT_KILLED", b);
     A->log(kMod, "emf-probe done: %d PASS, %d FAIL", g_pass, g_fail);
     F.done = true;
 }

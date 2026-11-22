@@ -67,11 +67,16 @@ internal sealed class Manifest
     // "native" and "permissions" would collide with <configDir>/native.json and permissions.json.
     private static readonly HashSet<string> Reserved = ["kiln", "kiln.api", "game", "enshrouded", "native", "permissions"];
 
+    /// <summary>Ids starting with this are refused: Kiln's mod values give every native owner the namespace "native." plus
+    /// a hash of its name (kiln.mod-values), and a mod's manifest id is its namespace, so the two never meet.</summary>
+    public const string NativeNamespacePrefix = "native.";
+
     private static readonly HashSet<string> Known =
     [
         "$schema", "id", "name", "version", "authors", "author", "description", "license", "url", "apiVersion", "side",
         "clients", "dependencies", "loadBefore", "loadAfter", "incompatible", "features", "entryAssembly", "entryType", "exports",
         "advanced", "tests", "kilnBuild", "writes", "boot", "updates",
+        "steamMessages",  // 0.2.0-dev.30.3: the mod opens its own Steam peer message leases (Kiln.Network's SteamMessages)
         "systems",  // dev.29 06a: {"replaces": [program names]}, a declaration for tools (Kiln.Systems); the host only accepts it
     ];
 
@@ -111,6 +116,10 @@ internal sealed class Manifest
     public IReadOnlyList<string> Features { get; init; } = [];
     public IReadOnlyList<string> Exports { get; init; } = [];
     public bool Advanced { get; init; }
+
+    /// <summary><c>"steamMessages": true</c>: the mod talks to Steam users directly (its own Steam peer message leases,
+    /// Kiln.Network's SteamMessages). The host admits the mod's native owner to kiln.net's leases when it makes it.</summary>
+    public bool SteamMessages { get; init; }
 
     /// <summary><c>"boot"</c>: the mod's Mod.OnBoot runs before the game is entered (chapter 08).</summary>
     public ManifestBoot Boot { get; init; }
@@ -165,6 +174,8 @@ internal sealed class Manifest
             var id = Str(root, "id") ?? throw Bad("'id' is required");
             if (!IdPattern.IsMatch(id)) throw Bad($"id '{id}' must match {IdPattern}");
             if (Reserved.Contains(id)) throw Bad($"id '{id}' is reserved");
+            if (id.StartsWith(NativeNamespacePrefix, StringComparison.Ordinal))
+                throw Bad($"id '{id}' is reserved: an id that starts with \"{NativeNamespacePrefix}\" is a native owner's mod-values namespace");
 
             var version = Str(root, "version") ?? throw Bad("'version' is required");
             if (!SemVersion.TryParse(version, out var parsed))
@@ -234,6 +245,15 @@ internal sealed class Manifest
                     _ => throw Bad("advanced must be true or false"),
                 };
 
+            var steamMessages = false;
+            if (root.TryGetProperty("steamMessages", out var sm))
+                steamMessages = sm.ValueKind switch
+                {
+                    JsonValueKind.True => true,
+                    JsonValueKind.False => false,
+                    _ => throw Bad("steamMessages must be true or false"),
+                };
+
             // "boot": the mod's Mod.OnBoot runs before the game is entered (chapter 08); "required": a failure of its boot content stops the
             // start, true: it drops only that mod's boot contribution
             var boot = ManifestBoot.None;
@@ -274,6 +294,7 @@ internal sealed class Manifest
                 Features = Strings(root, "features"),
                 Exports = exports,
                 Advanced = advanced,
+                SteamMessages = steamMessages,
                 Tests = ParseTests(root),
                 BuiltWith = builtWith,
                 Writes = writes,

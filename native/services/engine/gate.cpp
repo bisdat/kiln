@@ -8,7 +8,8 @@
 // - a caller on a world thread is refused before any word is touched: the server world thread already holds the Scene
 //   word Shared for its whole update, so an exclusive try there can never win; a client or prediction world thread is
 //   the game's main thread;
-// - acquisition/hold counters for kiln.engine gate_stats;
+// - acquisition/hold/priority-restore counters for kiln.engine gate_stats, and the release's own two measurements in
+//   the record (EcsGate.hold_ns, restore_ns: GitHub #58);
 // - Kiln's own admission before any engine word:
 //   one Kiln holder at a time (kiln-gate-busy), a per-owner busy latch for the rest of a server step
 //   (kiln-gate-busy-this-step), closing at a stopping server world and at process exit (kiln-gate-closed), and the
@@ -164,19 +165,34 @@ void gate_reset_for_tests() noexcept {
 
 void gate_release(GateState& gate) noexcept {
     // The Scene exclusive interval, measured on every release path (acquired_ns is set the moment the Scene CAS wins,
-    // before revalidation), so the hold stats cover holds that then refuse too, not only fully validated ones.
+    // before revalidation), so the hold stats cover holds that then refuse too, not only fully validated ones. It ends
+    // the moment the Scene word is released: the clock is read right after that release, before the registry word, the
+    // holder flag and the priority restore (a syscall; under Proton a wineserver round trip, after which a thread back
+    // at its own priority can be preempted for a while), none of which keeps the engine out (GitHub #58). The restore is
+    // timed on its own. A release of a record that holds nothing measures nothing and keeps the earlier measurements.
     const bool held_scene = gate.scene_lock && gate.acquired_ns;
+    const bool releases = gate.scene_lock || gate.registry_lock || gate.holder || gate.boosted;
+    std::uint64_t hold_ns = releases ? 0 : gate.hold_ns, restore_ns = releases ? 0 : gate.restore_ns;
     KILN_GATE_RELEASE_POINT(true);
     // Scene first, then the registry word (lock_scene_access.cpp:93-96): the registry pins the Scene's lifetime.
-    if (gate.scene_lock) mem::release_exclusive(gate.scene_lock);
+    if (gate.scene_lock) {
+        mem::release_exclusive(gate.scene_lock);
+        if (held_scene) hold_ns = now_ns() - gate.acquired_ns;
+    }
     if (gate.registry_lock) mem::release_shared(gate.registry_lock);
     if (gate.holder) g_holder.store(0, std::memory_order_seq_cst);  // after the engine words
     KILN_GATE_RELEASE_POINT(false);
-    if (gate.boosted) mem::restore_priority(gate.saved_priority);
+    if (gate.boosted) {
+        const std::uint64_t before = now_ns();
+        mem::restore_priority(gate.saved_priority);
+        restore_ns = now_ns() - before;
+        stats().restores.fetch_add(1, std::memory_order_relaxed);
+        stats().restore_ns_total.fetch_add(restore_ns, std::memory_order_relaxed);
+        max_into(stats().restore_ns_max, restore_ns);
+    }
     if (held_scene) {
-        const std::uint64_t held = now_ns() - gate.acquired_ns;
-        stats().hold_ns_total.fetch_add(held, std::memory_order_relaxed);
-        max_into(stats().hold_ns_max, held);
+        stats().hold_ns_total.fetch_add(hold_ns, std::memory_order_relaxed);
+        max_into(stats().hold_ns_max, hold_ns);
     }
     const std::uint32_t size = gate.size;
     const std::uint64_t owner = gate.owner, step = gate.step;
@@ -186,6 +202,8 @@ void gate_release(GateState& gate) noexcept {
     gate.owner = owner;
     gate.step = step;
     gate.admission = admission;
+    gate.hold_ns = hold_ns;
+    gate.restore_ns = restore_ns;
 }
 
 Reason gate_acquire(const Layout* layout, const EcsView& expected, GateState& gate, CallerThread caller, std::uintptr_t image) {
@@ -195,6 +213,7 @@ Reason gate_acquire(const Layout* layout, const EcsView& expected, GateState& ga
         s.refused_other.fetch_add(1, std::memory_order_relaxed);
         return Reason::EcsWriteGuardAlreadyHeld;
     }
+    gate.hold_ns = gate.restore_ns = 0;  // an earlier release's; this attempt's release measures its own
     if (caller != CallerThread::Other) {
         (caller == CallerThread::ServerWorld ? s.refused_in_frame : s.refused_world_thread).fetch_add(1, std::memory_order_relaxed);
         return caller == CallerThread::ServerWorld   ? Reason::InFrame

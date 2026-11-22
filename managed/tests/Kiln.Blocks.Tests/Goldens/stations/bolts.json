@@ -1,0 +1,36 @@
+{
+  "items": [
+    {
+      "guid": "4d17da53-ac53-5b13-a175-bd625920fcf5",
+      "name": "golden-stations.bolts",
+      "base": "Material_T1_Bones",
+      "displayName": "Bolts",
+      "description": "",
+      "fields": {},
+      "refs": {}
+    }
+  ],
+  "itemRules": {},
+  "recipes": [
+    {
+      "guid": "77023e63-72d3-57ba-9a66-01d26f37b67c",
+      "name": "golden-stations.bolts.recipe",
+      "station": "workshop:ca1597eb-0350-5938-a37f-edec5ba4b010",
+      "menu": "0x4da88f73",
+      "seconds": 4,
+      "fields": null,
+      "inputs": [
+        {
+          "item": "Material_T1_Metal_Scraps",
+          "count": 2
+        }
+      ],
+      "outputs": [
+        {
+          "item": "golden-stations.bolts",
+          "count": 1
+        }
+      ]
+    }
+  ]
+}

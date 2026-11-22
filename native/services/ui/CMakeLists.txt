@@ -15,7 +15,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/upscale_xess.cpp")
 else()
     list(APPEND KILN_UI_UPSCALE upscale_xess_none.cpp)
 endif()
-kiln_service(ui ui.cpp overlay_guard.cpp vk.cpp graphics.cpp input.cpp keys.cpp game.cpp menu_page.cpp menu_scroll.cpp menu_footer.cpp style.cpp render.cpp wheel.cpp chat_input_probe.cpp ${KILN_UI_UPSCALE})
+kiln_service(ui ui.cpp overlay_guard.cpp vk.cpp graphics.cpp input.cpp keys.cpp game.cpp menu_page.cpp menu_scroll.cpp menu_footer.cpp style.cpp render.cpp outline.cpp wheel.cpp chat_input_probe.cpp ${KILN_UI_UPSCALE})
 target_link_libraries(kiln-ui PRIVATE kiln-imgui user32 imm32 dwmapi gdi32)
 target_include_directories(kiln-ui PRIVATE ${CMAKE_SOURCE_DIR}/third_party/ffx)  # AMD's FSR API headers (MIT)
 

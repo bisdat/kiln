@@ -27,6 +27,7 @@
 pub mod claims;
 pub mod store;
 pub mod target;
+pub mod targets;
 pub mod tracker;
 
 pub use claims::{

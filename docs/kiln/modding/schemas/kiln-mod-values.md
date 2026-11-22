@@ -2,7 +2,7 @@
 
 <!-- Generated from schema/kiln-mod-values.schema.json by kiln_manage::lint::docs (cargo test -p kiln-manage --test lint with KILN_LINT_WRITE=1). Do not edit. -->
 
-A mod's own character values: counters, currencies and experience values with levels (dossier chapter 05b, section 4.1). Kiln.ModValues reads every mod-values/*.json of a mod when the mod loads: both sides describe the definitions (their names, labels and number formats are known before any handshake, and before the mod's UI blocks), and the server defines them, which makes the values live for each character. Strict JSON: no comments, no trailing commas, unknown keys and a key given twice are refused. Every 64-bit number (min, max, initial, thresholds) is a base-10 string, so no JSON reader rounds it. The same fields, in C#, are the options of Kiln.ModValues' Describe and Define. Beyond the schema, kiln lint checks the 64-bit range, min <= max, initial within [min, max], thresholds that strictly increase, the size limits of labels, number formats and a definition, and ids across all of a mod's mod-values files (at most 128).
+A mod's own character values: counters, currencies and experience values with levels (dossier chapter 05b, section 4.1). Kiln.ModValues reads every mod-values/*.json of a mod when the mod loads: both sides describe the definitions (their names, labels and number formats are known before any handshake, and before the mod's UI blocks), and the server defines them, which makes the values live for each character. Strict JSON: no comments, no trailing commas, unknown keys and a key given twice are refused. Every 64-bit number (min, max, initial, thresholds) is a base-10 string, so no JSON reader rounds it. The same fields, in C#, are the options of Kiln.ModValues' Describe and Define. Beyond the schema, kiln lint checks the 64-bit range, min <= max, initial within [min, max], thresholds that strictly increase, the size limits of labels, number formats and a definition, and ids across all of a mod's mod-values files (at most 128), and it warns about a carried value with no max of its own.
 
 - Files: `**/mod-values/*.json`
 - JSON: comments **not allowed**, trailing commas **not allowed**
@@ -69,6 +69,7 @@ What kiln lint checks that the schema cannot say:
 - [KL353](../lint.md#kl353-mod-value-size): a definition's label is at most 1024 bytes, its numberFormat at most 256 bytes and the whole definition at most 4096 bytes, each as compact JSON in UTF-8.
 - [KL354](../lint.md#kl354-mod-value-duplicate): an id is defined once per mod, across all its mod-values/*.json files (inside one file a key given twice is [KL004](../lint.md#kl004-duplicate-key), an error here).
 - [KL355](../lint.md#kl355-mod-value-count): at most 128 values per mod, across all its mod-values/*.json files (one file over 128 is [KL108](../lint.md#kl108-size)).
+- [KL356](../lint.md#kl356-mod-value-carried-max) (a warning): a carried value (persistence carried, trustClientImports true) has a max of its own. Carried progress merges by maximum, so without one a player's own copy can raise it as far as 9223372036854775807.
 
 ## Top level
 
@@ -89,10 +90,10 @@ One value. Defaults: min "0", max "9223372036854775807", initial = min, scale 0,
 | `initial` | [int64](#int64) |  | A character's first value. Default: min. Must be within [min, max]: Kiln refuses it otherwise, it never clamps. |
 | `kind` | `"counter"` \| `"currency"` \| `"experience"` | yes | counter: any whole number in [min, max]. currency: spent and earned, never below 0. experience: points with levels ("thresholds"), never below 0, scale 0. |
 | `label` | [text](#text) | yes | The name players see. |
-| `max` | [int64](#int64) |  | The highest value. Default "9223372036854775807". |
+| `max` | [int64](#int64) |  | The highest value. Default "9223372036854775807". Give a carried value a real max: carried progress merges by maximum (Kiln keeps the higher of the world's value and the copy a player's client brings), so its max is as far as a player's own copy can raise it; kiln lint warns without one (KL356). |
 | `min` | [int64](#int64) |  | The lowest value. Default "0"; at least "0" for a currency, an experience value and a carried value. |
 | `numberFormat` | [numberFormat](#numberformat) |  |  |
-| `persistence` | `"world"` \| `"carried"` |  | world: kept in the world's save. carried: travels with the character to other worlds, taken from the player's client when they join; needs trustClientImports true, and only for a counter or an experience value with min at least 0 (a currency is never carried). Default `"world"`. |
+| `persistence` | `"world"` \| `"carried"` |  | world: kept in the world's save. carried: travels with the character to other worlds, taken from the player's client when they join; needs trustClientImports true, and only for a counter or an experience value with min at least 0 (a currency is never carried). Give it a real "max" (kiln lint KL356). Default `"world"`. |
 | `readMods` | array of `common.schema.json modId` |  | The mod ids allowed to read the value, with readPolicy allowList only (empty otherwise). max items 32 |
 | `readPolicy` | `"ownerOnly"` \| `"public"` \| `"allowList"` |  | Which mods may read the value: the defining mod only, every loaded mod, or the mods of readMods. No other mod can ever write it. Default `"ownerOnly"`. |
 | `resetOnKindChange` | boolean |  | When kind changes between versions, reset stored values to initial instead of refusing the definition. Default `false`. |

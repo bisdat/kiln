@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Lab test of kiln.markers' anchors on a dedicated server (chapter 04 §4.2; M05/M06 server mechanics, no player): the
+       research probe's 11-check run through the product API (Markers.CaptureServerAnchor, the follow read, destroy ->
+       AnchorEnded, the same id recreated without SpawnTime -> a new incarnation), then the observers on the game's worker
+       threads with 06a's lab parallel switch. Lines "markers-test: PASS/FAIL/INFO ..." in kiln.log. The lab needs
+       kiln/control/markers.lab (kiln.markers.lab) and kiln/control/systems.parallel (the worker run). -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <GenerateRuntimeConfigurationFiles>false</GenerateRuntimeConfigurationFiles>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <AssemblyName>MarkersTest</AssemblyName>
+    <!-- MarkersLab and LabSystems are lab members (KILNX001) -->
+    <NoWarn>$(NoWarn);KILNX001</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../managed/Kiln.Api/Kiln.Api.csproj" Private="false" ExcludeAssets="runtime" />
+    <ProjectReference Include="../../../managed/Kiln.Testing/Kiln.Testing.csproj" Private="false" ExcludeAssets="runtime" />
+    <ProjectReference Include="../../../managed/services/Kiln.Markers/Kiln.Markers.csproj" Private="false" ExcludeAssets="runtime" />
+    <ProjectReference Include="../../../managed/services/Kiln.Client/Kiln.Client.csproj" Private="false" ExcludeAssets="runtime" />
+    <ProjectReference Include="../../../managed/services/Kiln.Spawn/Kiln.Spawn.csproj" Private="false" ExcludeAssets="runtime" />
+    <None Include="kiln.mod.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

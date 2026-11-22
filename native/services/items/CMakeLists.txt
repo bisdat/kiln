@@ -1,5 +1,5 @@
 kiln_service(items items.cpp engine.cpp pide.cpp moves.cpp xfer.cpp names.cpp stamps.cpp instances.cpp equip.cpp wear.cpp toolwear.cpp toolwear_table.cpp
-             setsnap.cpp sets.cpp setexec.cpp gems.cpp stations.cpp gear.cpp scale.cpp)
+             setsnap.cpp sets.cpp setexec.cpp gems.cpp stations.cpp gear.cpp scale.cpp rename.cpp)
 # gems.cpp: the offered gems' tokens come from the system's random generator
 target_link_libraries(kiln-items PRIVATE bcrypt)
 
@@ -51,6 +51,9 @@ set_target_properties(items-gems-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMA
 add_executable(items-gear-test tests/gear_test.cpp)
 target_include_directories(items-gear-test PRIVATE "${CMAKE_SOURCE_DIR}/core/abi")
 set_target_properties(items-gear-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/items-tests")
+add_executable(items-rename-test tests/rename_test.cpp)
+target_include_directories(items-rename-test PRIVATE "${CMAKE_SOURCE_DIR}/core/abi")
+set_target_properties(items-rename-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/items-tests")
 add_executable(items-stations-test tests/stations_test.cpp)
 target_include_directories(items-stations-test PRIVATE "${CMAKE_SOURCE_DIR}/core/abi")
 set_target_properties(items-stations-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/items-tests")

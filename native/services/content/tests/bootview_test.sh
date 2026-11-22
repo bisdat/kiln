@@ -11,6 +11,6 @@ for san in address,undefined thread; do
     bin=$out/bootview-test-${san%%,*}
     g++ -std=c++20 -O1 -g -Wall -Wextra -Wno-unused-function -Wno-missing-field-initializers -D__fastcall= -pthread \
         -ffunction-sections -fdata-sections -fsanitize=$san -I"$here/host" -I"$here/../../../core/abi" -I"$here/../../../third_party" \
-        "$here/bootview_test.cpp" "$here/../gear.cpp" -Wl,--gc-sections -o "$bin"
+        "$here/bootview_test.cpp" "$here/../gear.cpp" "$here/../registry/claims.cpp" -Wl,--gc-sections -o "$bin"
     "$bin"
 done

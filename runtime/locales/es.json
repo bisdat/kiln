@@ -3,6 +3,12 @@
     "completion": {
       "title": "Sugerencias de comandos",
       "hint": "Tab: completar · Esc: cerrar"
+    },
+    "search": {
+      "title": "Buscar en el historial del chat",
+      "hint": "Ctrl+R: anterior · Ctrl+Shift+R: más reciente · Enter/Tab: usar · Esc: cancelar",
+      "query": "Buscar",
+      "none": "Nada coincide en el historial"
     }
   },
   "language": {

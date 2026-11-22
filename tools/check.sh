@@ -8,6 +8,13 @@
 #           in <Assembly>)" line (a type moved, recorded by <Assembly>), and no merge conflict marker in a PublicAPI file
 #   records tools/sigport/build_record.py check: the newest build record of each side lists every name sigdb declares,
 #           once, with a level (sigdb/builds/README.md); a sigdb name added without a refresh fails here
+#   registry tools/registrygen/registrygen.py --check: the registry schemas (schema/registry/*.json) are valid, every name
+#           is in ids.lock.json, and the files made from them (Kiln.Registry's Generated/*.g.cs, schema.g.h, the data
+#           section's schema, docs/kiln/modding/registries/*.md) are current; tools/registrygen/regmap_check.py: regmap/
+#           rows keep the routing rule (the schemas' "applies") and give reasons in Kiln words. Routing only in CI: the
+#           committed type dumps hold none of the registries' resource types, so no row resolves against them here; the
+#           full proof is regmap_check.py --exe against a copy of each game exe (regmap/README.md)
+#   pytests the Python rule tests of tools/replinspect (python3 -m unittest)
 #   build   every managed project with a PublicAPI.Shipped.txt (found by that file, so gate 1, the PublicApiAnalyzers
 #           record, runs), Kiln.Host and the unit test projects: one Release build of one generated solution
 #           ($KILN_OUT/check/check.slnx), so each project is built once
@@ -93,6 +100,27 @@ else
   result records FAILED $((SECONDS - t)) "a build record does not list what sigdb declares:"
   grep -vE '^ +(server|client) [0-9a-f]+… .*superseded' "$work/records.log" | head -40
   failed+=(records)
+fi
+
+# registry
+t=$SECONDS
+if python3 -I "$repo/tools/registrygen/registrygen.py" --check >"$work/registry.log" 2>&1 &&
+   python3 -I "$repo/tools/registrygen/regmap_check.py" >>"$work/registry.log" 2>&1; then
+  result registry OK $((SECONDS - t)) "$(grep '^registrygen: ' "$work/registry.log" | tail -1 | sed 's/^registrygen: //'); regmap routing checked"
+else
+  result registry FAILED $((SECONDS - t)) "the registry schemas or the files made from them:"
+  head -40 "$work/registry.log"
+  failed+=(registry)
+fi
+
+# pytests
+t=$SECONDS
+if python3 -m unittest discover -s "$repo/tools/replinspect" -p 'test_*.py' >"$work/pytests.log" 2>&1; then
+  result pytests OK $((SECONDS - t)) "tools/replinspect: $(grep -oE '^Ran [0-9]+ tests' "$work/pytests.log" | sed 's/^Ran //')"
+else
+  result pytests FAILED $((SECONDS - t)) "tools/replinspect rule tests:"
+  grep -E -A8 '^(FAIL|ERROR):' "$work/pytests.log" | head -40
+  failed+=(pytests)
 fi
 
 # build

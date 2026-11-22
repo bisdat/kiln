@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// mod-values/*.json (chapter 05b section 4.1; schema/kiln-mod-values.schema.json, lint KL350-KL355): read for every
+// mod-values/*.json (chapter 05b section 4.1; schema/kiln-mod-values.schema.json, lint KL350-KL356): read for every
 // loaded mod at Kiln.ModValues' start and whenever a mod loads again. Both sides describe the values (their names,
 // kinds and formats are known before any server answers); the side that runs the world defines them. Strict JSON (no
 // comments, no trailing commas), camelCase, lowercase enum names, 64-bit numbers as base-10 strings; an unknown field,
@@ -20,8 +20,6 @@ internal static class ModValuesAuthoring
         "carryEpoch", "readPolicy", "readMods", "sync", "allowPartitionMove", "resetOnKindChange",
     };
 
-    // owner -> the mod directory its JSON came from (a mod seen unloaded retires its JSON values)
-    private static readonly Dictionary<string, string> Loaded = new(StringComparer.Ordinal);
 
     /// <summary>Reads one file into definitions of <paramref name="owner"/>. Throws <see cref="ArgumentException"/> with
     /// the file's error.</summary>
@@ -153,33 +151,69 @@ internal static class ModValuesAuthoring
         return list;
     }
 
-    /// <summary>Loaded mods' JSON in, unloaded mods' JSON values retired. At the start and every 25 service steps.</summary>
+    private sealed class Loaded
+    {
+        public required object? Generation;  // the mod's live ModContext when it was read (a reload brings another)
+        public required string Directory;
+        public required IReadOnlyList<Def> Defs;
+        public readonly HashSet<string> Refused = new(StringComparer.Ordinal);  // logged once per read
+    }
+
+    private static readonly Dictionary<string, Loaded> Mods_ = new(StringComparer.Ordinal);
+
+    /// <summary>Loaded mods' JSON in, unloaded mods' JSON values retired. At the start, at every world load and every 25
+    /// service steps. Each pass also makes sure every value of a loaded mod is described here and, where this process
+    /// runs the world (a dedicated server, a client that hosts), active: a client that starts hosting after the main menu
+    /// defines what it only described there, and a mod reloaded between passes (a new load generation) is read again.</summary>
     internal static void Poll()
     {
         var seen = new HashSet<string>(StringComparer.Ordinal);
+        var server = ModValuesCaps.ServerRole;
         foreach (var m in Mods.All)
         {
             if (!m.IsLoaded || m.Directory.Length == 0) continue;
             var owner = m.Id.ToLowerInvariant();
             if (!ModValueRules.IsOwner(owner)) continue;
+            if (!Directory.Exists(Path.Combine(m.Directory, Folder))) continue;
             seen.Add(owner);
-            if (Loaded.ContainsKey(owner) || !Directory.Exists(Path.Combine(m.Directory, Folder))) continue;
-            Loaded[owner] = m.Directory;
-            var server = ModValuesCaps.ServerRole;
-            var defs = ReadMod(owner, m.Directory, e => ModValuesService.Log(LogLevel.Error, $"mod-values: {e}"));
-            var ok = 0;
-            foreach (var d in defs)
+            var generation = m.Info is { } info ? ModContext.FindLive(info) : null;
+            if (!Mods_.TryGetValue(owner, out var l) || !ReferenceEquals(l.Generation, generation) || l.Directory != m.Directory)
             {
-                var r = server ? ModValuesService.Define(d, null) : ModValuesService.Describe(d, null);
-                if (r.Ok) ok++;
-                else ModValuesService.Log(LogLevel.Error, $"mod-values: {owner}/{Folder}: {d.Id}: {r.Reason}");
+                if (l is not null) ModValuesService.Retire(owner, l.Generation);
+                var defs = ReadMod(owner, m.Directory, e => ModValuesService.Log(LogLevel.Error, $"mod-values: {e}"));
+                Mods_[owner] = l = new Loaded { Generation = generation, Directory = m.Directory, Defs = defs };
+                if (defs.Count > 0) ModValuesService.Log(LogLevel.Info, $"mod-values: {owner}: {defs.Count} value(s) read from {Folder}/*.json");
             }
-            if (defs.Count > 0) ModValuesService.Log(LogLevel.Info, $"mod-values: {owner}: {ok} value(s) {(server ? "defined" : "described")} from {Folder}/*.json");
+            Ensure(owner, l, server);
         }
-        foreach (var owner in Loaded.Keys.Where(o => !seen.Contains(o)).ToArray())
+        foreach (var owner in Mods_.Keys.Where(o => !seen.Contains(o)).ToArray())
         {
-            Loaded.Remove(owner);
-            ModValuesService.Retire(owner, null);
+            ModValuesService.Retire(owner, Mods_[owner].Generation);
+            Mods_.Remove(owner);
         }
+    }
+
+    /// <summary>Describes what is not described, and defines what is not active when <paramref name="server"/>.</summary>
+    private static void Ensure(string owner, Loaded l, bool server)
+    {
+        foreach (var d in l.Defs)
+        {
+            var key = d.Key;
+            var reg = ModValuesService.Registry;
+            if (server ? reg.Active(key) is not null : reg.Described(key) is not null) continue;
+            var r = server ? ModValuesService.Define(d, l.Generation) : ModValuesService.Describe(d, l.Generation);
+            if (!r.Ok && l.Refused.Add(d.Id)) ModValuesService.Log(LogLevel.Error, $"mod-values: {owner}/{Folder}: {d.Id}: {r.Reason}");
+        }
+    }
+
+    /// <summary>Tests: what Poll does for one mod, without Mods.All.</summary>
+    internal static void EnsureForTests(string owner, IReadOnlyList<Def> defs, object? generation, bool server)
+    {
+        if (!Mods_.TryGetValue(owner, out var l) || !ReferenceEquals(l.Generation, generation))
+        {
+            if (l is not null) ModValuesService.Retire(owner, l.Generation);
+            Mods_[owner] = l = new Loaded { Generation = generation, Directory = "", Defs = defs };
+        }
+        Ensure(owner, l, server);
     }
 }

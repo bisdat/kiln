@@ -160,27 +160,29 @@ internal static unsafe class BootPhase
         "GenerationAborted", "MissedPhase", "ActivationFault"];
 
     /// <summary>In a boot profile: runs the authors and commits the generation. Never throws (a failure leaves kiln.boot collecting, and the
-    /// core stops the start with its own diagnostics).</summary>
-    public static void Run(Func<string, uint, nint> service, ulong host, ModManager mods, Action<LogLevel, string> log)
+    /// core stops the start with its own diagnostics). Returns the order the authors ran in (empty: no boot phase).</summary>
+    public static IReadOnlyList<string> Run(Func<string, uint, nint> service, ulong host, ModManager mods, Action<LogLevel, string> log)
     {
         try
         {
             var t = (KilnBootApi*)service("kiln.boot", 1);
-            if (t == null || t->Size < (uint)sizeof(KilnBootApi)) return;
+            if (t == null || t->Size < (uint)sizeof(KilnBootApi)) return [];
             var st = new KilnBootCommitResultV1 { Size = (uint)sizeof(KilnBootCommitResultV1) };
-            if (t->Status(&st) != KilnAbi.Ok) return;  // not a boot profile: nothing to do
+            if (t->Status(&st) != KilnAbi.Ok) return [];  // not a boot profile: nothing to do
             if (st.Status != StatusCollecting)
             {
                 log(LogLevel.Warn, $"boot: the generation is {Name(st.Status)} already; Kiln.Host does not commit it");
-                return;
+                return [];
             }
             var session = new BootSession(t, host, st.Generation, mods, log);
             session.RunAuthors();
             session.Commit();
+            return session.Order;
         }
         catch (Exception e)
         {
             log(LogLevel.Error, $"boot: the boot phase failed: {e}");
+            return [];
         }
     }
 
@@ -193,6 +195,7 @@ internal static unsafe class BootPhase
     {
         private readonly Dictionary<string, Author> _authors = new(StringComparer.Ordinal);
         private readonly List<string> _order = [];
+        public IReadOnlyList<string> Order => _order;
         private readonly JsonObject _collectors = new();
 
         private sealed class Author

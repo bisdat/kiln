@@ -103,6 +103,10 @@ pub fn deploy(a: DeployArgs, json: bool) -> Result<i32> {
     if !srv.dir.join("kiln").is_dir() {
         return Err(CliError::new("not_found", format!("{} has no kiln/ folder: install Kiln there first", srv.dir.display())).into());
     }
+    // a reload under an attached debugger leaves its breakpoints on the old copy (kiln reload refuses the same way)
+    if a.reload {
+        crate::control::refuse_while_attached(&srv.dir)?;
+    }
     let (ok, id) = match p.kind {
         Kind::Dotnet => {
             let mut cmd = Command::new("dotnet");
@@ -343,5 +347,43 @@ mod tests {
         std::fs::write(dir.join("blocks/sounds.json"), r#"{"sounds":{"ping":{"clips":[]}}}"#).unwrap();
         assert!(write_sound_blocks(&p, false, false, false).is_err());
         std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod debug_attached_tests {
+    use super::*;
+
+    /// `kiln deploy --reload` refuses while `kiln debug --dap` holds a session on that server, before anything builds.
+    #[test]
+    fn deploy_reload_is_refused_while_a_debugger_is_attached() {
+        let t = std::env::temp_dir().join(format!("kiln-cli-deploy-attached-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&t);
+        let (proj, srv) = (t.join("Mod"), t.join("server"));
+        std::fs::create_dir_all(&proj).unwrap();
+        std::fs::create_dir_all(srv.join("kiln")).unwrap();
+        std::fs::write(proj.join("Mod.csproj"), "<Project/>").unwrap();
+        let state = kiln_manage::debug::DebugSessionState {
+            identity: kiln_manage::debug::DebugIdentity {
+                install_id: "i".into(),
+                prefix_identity: None,
+                runner_sha256: None,
+                windows_pid: 32,
+                creation_time_100ns: "5".into(),
+                image_sha256: "a".repeat(64),
+                session_nonce: "n".repeat(32),
+            },
+            state: kiln_manage::debug::SessionState::Running,
+            session_mode: kiln_manage::debug::SessionMode::Hosted,
+            reason: None,
+            paused_since: None,
+            max_pause_ms: None,
+        };
+        kiln_manage::debug::write_session(&srv, &state).unwrap();
+        let args = |reload: bool| DeployArgs { project: Some(proj.join("Mod.csproj")), server: Some(srv.display().to_string()), reload, config: None, extra: vec![] };
+        let e = deploy(args(true), true).unwrap_err();
+        let c = e.downcast_ref::<CliError>().expect("the refusal, before any build");
+        assert_eq!((c.code.as_str(), &c.detail.as_ref().unwrap()["reason"]), ("refused", &serde_json::json!("debugger_attached")));
+        std::fs::remove_dir_all(&t).unwrap();
     }
 }

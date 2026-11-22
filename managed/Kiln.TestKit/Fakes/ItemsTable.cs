@@ -13,9 +13,10 @@ namespace Kiln.TestKit;
 internal static unsafe class ItemsAbi
 {
     public const string Service = "kiln.items";
-    // the whole v8 table: v1 and the gear functions (v8) are modelled; water (v2), instances (v4), equip (v5), equipment sets
-    // (v6) and socket rolls (v7) answer unavailable; v3 (moves, names, transfers, the result peek) is left null
-    public const uint Version = 8;
+    // the whole v9 table: v1, the gear functions (v8) and container renames (v9) are modelled; water (v2), instances (v4),
+    // equip (v5), equipment sets (v6) and socket rolls (v7) answer unavailable; v3 (moves, names, transfers, the result peek)
+    // is left null
+    public const uint Version = 9;
     public const int MaxChanges = 16, MaxInventories = 32, MessageMax = 160;
 
     // KilnItemsRequest.flags
@@ -289,6 +290,42 @@ internal static unsafe class ItemsAbi
         public delegate* unmanaged[Cdecl]<GearScale*, int> GearScaleSet;
         public delegate* unmanaged[Cdecl]<uint, uint, GearScale*, int> GearScaleRead;
         public delegate* unmanaged[Cdecl]<ScaleStatus*, int> ScaleStatusOf;
+        // v9 (0.2.0-dev.30.3): container_rename, rename_status
+        public delegate* unmanaged[Cdecl]<ulong, RenameRequest*, delegate* unmanaged[Cdecl]<RenameResult*, void*, void>, void*, ulong*, RenameResult*, int> ContainerRename;
+        public delegate* unmanaged[Cdecl]<RenameStatus*, int> RenameStatusOf;
+    }
+
+    // ---- v9: renaming a container (KilnItemsRenameRequest, -Result, -Status; KILN_ITEMS_NAME_*, KILN_ITEMS_RENAME_*) ----
+    public const int NameCapacity = 256, NameMaxBytes = 64, NameMaxChars = 48;
+    public const int RenameDone = 0, RenameGone = 1, RenameNotContainer = 2, RenameTooLong = 3, RenameBadText = 4, RenameNotServer = 5,
+        RenameFull = 6, RenameUnavailable = 7, RenameDropped = 8;
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RenameRequest
+    {
+        public uint Size, Entity, Len, Reserved;
+        public fixed byte Text[NameCapacity];
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RenameResult
+    {
+        public uint Size;
+        public int Status;
+        public ulong Ticket;
+        public uint Entity, GameError, Steps;
+        public byte Changed, Cleared;
+        public ushort Reserved;
+        public fixed byte Message[MessageMax];
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RenameStatus
+    {
+        public uint Size;
+        public byte Available, Feature, Server, Reserved0;
+        public uint Pending, Done, Refused, Reserved1;
+        public fixed byte Detail[MessageMax];
     }
 
     /// <summary>The game's ItemId: FNV-1a-32 over the item GUID's 16 bytes.</summary>
@@ -351,6 +388,8 @@ internal static unsafe class ItemsTable
         full->GearScaleSet = &GearScaleSet;  // package P7
         full->GearScaleRead = &GearScaleRead;
         full->ScaleStatusOf = &ScaleStatusOf;
+        full->ContainerRename = &ContainerRename;  // v9
+        full->RenameStatusOf = &RenameStatusOf;
         _table = t;
         return (nint)t;
     }
@@ -519,6 +558,47 @@ internal static unsafe class ItemsTable
             if (out_ == null || out_->Size < (uint)sizeof(ItemsAbi.ScaleStatus)) return FakeTables.InvalidArgument;
             var s = new ItemsAbi.ScaleStatus { Size = out_->Size, Capacity = ItemsAbi.ScaleCapacity };
             if (Fake is { } f) f.FillScale(ref s);
+            *out_ = s;
+            return FakeTables.Ok;
+        }
+        catch
+        {
+            return FakeTables.Internal;
+        }
+    }
+
+    // ---- v9: container renames ----
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int ContainerRename(ulong owner, ItemsAbi.RenameRequest* request, delegate* unmanaged[Cdecl]<ItemsAbi.RenameResult*, void*, void> done,
+        void* user, ulong* ticket, ItemsAbi.RenameResult* refusal)
+    {
+        try
+        {
+            if (ticket != null) *ticket = 0;
+            if (Fake is not { } f)
+            {
+                if (refusal != null) *refusal = new ItemsAbi.RenameResult { Size = (uint)sizeof(ItemsAbi.RenameResult), Status = ItemsAbi.RenameUnavailable };
+                return FakeTables.Unavailable;
+            }
+            return f.Rename(owner, request, (nint)done, (nint)user, ticket, refusal);
+        }
+        catch
+        {
+            return FakeTables.Internal;
+        }
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int RenameStatusOf(ItemsAbi.RenameStatus* out_)
+    {
+        try
+        {
+            if (out_ == null || out_->Size < (uint)sizeof(ItemsAbi.RenameStatus)) return FakeTables.InvalidArgument;
+            // feature: what kiln.items decided when it resolved, fixed for the process (the kit models it); a test's switch
+            // (HarnessCapabilities.Override) is the row's, and makes renames unavailable now
+            var on = FakeTables.Off(ItemsFake.RenameFeature) ? (byte)0 : (byte)1;
+            var s = new ItemsAbi.RenameStatus { Size = (uint)sizeof(ItemsAbi.RenameStatus), Feature = 1, Server = 1, Available = on };
+            if (Fake is { } f) f.FillRename(ref s);
             *out_ = s;
             return FakeTables.Ok;
         }
@@ -750,7 +830,7 @@ internal sealed unsafe partial class ItemsFake
     // The sigdb features of the v1 table the kit models, and those of the later tables it does not.
     public const string TransactionFeature = "items.transaction", ReadFeature = "items.read", ProgramFeature = "items.program";
 
-    public static readonly string[] Features = [TransactionFeature, ReadFeature, ProgramFeature, GearFeature, PowerFeature, ArmorFeature];
+    public static readonly string[] Features = [TransactionFeature, ReadFeature, ProgramFeature, GearFeature, PowerFeature, ArmorFeature, RenameFeature];
 
     public static readonly string[] OfflineRows = ["items.fuel", "items.move", "items.names", "items.transfer", "items.moves", "items.instances",
         "items.equip", "items.equip_sets", "items.pide_options", "items.result_peek", "items.recipe"];
@@ -844,6 +924,8 @@ internal sealed unsafe partial class ItemsFake
             _gear.Clear();
             _gearPending.Clear();
             _scales.Clear();
+            _names.Clear();
+            _renamePending.Clear();
         }
     }
 
@@ -1078,7 +1160,7 @@ internal sealed unsafe partial class ItemsFake
         lock (_lock)
         {
             var job = _pending.FirstOrDefault(j => j.Ticket == ticket && j.Done != 0);
-            if (job is null) return CancelGear(ticket) || CancelUpgrade(ticket);
+            if (job is null) return CancelGear(ticket) || CancelUpgrade(ticket) || CancelRename(ticket);
             job.Done = 0;
             return true;
         }
@@ -1090,6 +1172,7 @@ internal sealed unsafe partial class ItemsFake
             foreach (var job in _pending.Where(j => j.Owner == owner)) job.Done = 0;
         CancelGearOwner(owner);
         CancelUpgradeOwner(owner);
+        CancelRenameOwner(owner);
     }
 
     private const int MaxPending = 1024;  // items.cpp kMaxPending
@@ -1172,6 +1255,7 @@ internal sealed unsafe partial class ItemsFake
         }
         RunGear(step);
         RunUpgrades(step);
+        RunRenames(step);
     }
 
     private const uint ErrorNoItem = 0x15, ErrorNoSetup = 0x16;

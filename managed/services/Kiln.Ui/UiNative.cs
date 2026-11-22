@@ -682,6 +682,127 @@ internal static unsafe class UiNative
         return System.Text.Encoding.UTF8.GetString(copy.Text, (int)copy.TextLen);
     }
 
+    /// <summary>Phase 1c: private read-only reverse-search snapshot.
+    /// No pointers to the game's editor or persisted history cross this ABI.
+    /// Native layout: twelve uint32, four floats, 257-byte query and
+    /// ten UTF-8 match buffers of 1025 bytes (10572 bytes total).</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct ChatSearch
+    {
+        public uint Size, Operation, Active, Suppressed, Field, Revision;
+        public uint QueryLen, Selected, First, Count, Total, Index;
+        public float X, Y, Width, Height;
+        public fixed byte Query[257];
+        public fixed byte Lines[10 * 1025];
+    }
+
+    /// <summary>The issue #44 search slot follows subscribe_pointer_press at offset 1048.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct TableSearch
+    {
+        public TablePointer Base;
+        public delegate* unmanaged[Cdecl]<ChatSearch*, int> ChatSearchFn;
+    }
+
+    private static delegate* unmanaged[Cdecl]<ChatSearch*, int> ChatSearchSlot
+    {
+        get
+        {
+            var t = T;
+            if (t == null || t->Header.Size < (uint)sizeof(TableSearch)) return null;
+            return ((TableSearch*)t)->ChatSearchFn;
+        }
+    }
+
+    // Only new managed Kiln.Ui explicitly enables search key interception.
+    // Without this handshake (e.g. a partial DLL overlay), Ctrl+R remains native.
+    internal static bool ChatSearchEnable()
+    {
+        var slot = ChatSearchSlot;
+        if (slot == null) return false;
+        var request = new ChatSearch { Size = (uint)sizeof(ChatSearch), Operation = 3 };
+        return slot(&request) == Ok;
+    }
+
+    internal static ChatSearch? ChatSearchInput()
+    {
+        var slot = ChatSearchSlot;
+        if (slot == null) return null;
+        var value = new ChatSearch { Size = (uint)sizeof(ChatSearch), Operation = 1 };
+        return slot(&value) == Ok ? value : null;
+    }
+
+    internal static bool ChatSearchSelect(in ChatSearch snapshot, uint index)
+    {
+        var slot = ChatSearchSlot;
+        if (slot == null || snapshot.Active == 0 || index >= snapshot.Total) return false;
+        var request = new ChatSearch {
+            Size = (uint)sizeof(ChatSearch), Operation = 2,
+            // Op 1 returns the result-list generation in Index. Op 2 echoes
+            // it in Selected; Index is now the clicked row. Same ABI layout.
+            Field = snapshot.Field, Revision = snapshot.Revision,
+            Selected = snapshot.Index, Index = index,
+        };
+        return slot(&request) == Ok;
+    }
+
+    internal static string ChatSearchQuery(in ChatSearch snapshot)
+    {
+        if (snapshot.QueryLen > 256) return "";
+        var value = snapshot;
+        return System.Text.Encoding.UTF8.GetString(value.Query, (int)value.QueryLen);
+    }
+
+    internal static string ChatSearchLine(in ChatSearch snapshot, int row)
+    {
+        if (snapshot.Count > 10 || row < 0 || row >= (int)snapshot.Count) return "";
+        var value = snapshot;
+        var p = value.Lines + row * 1025;
+        var n = 0;
+        while (n < 1025 && p[n] != 0) n++;
+        return System.Text.Encoding.UTF8.GetString(p, n);
+    }
+
+    /// <summary>KilnUiPointer (kiln_ui.h, 0.2.0-dev.30.3): the pointer in the overlay's pixels and the held mouse buttons.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct Pointer
+    {
+        public uint Size, Flags;
+        public float X, Y;
+        public uint Held, Reserved;
+    }
+
+    /// <summary>KILN_UI_POINTER_VALID / _DRAGGING, KILN_UI_DRAG_KIND_MAX / _PAYLOAD_MAX (kiln_ui.h, 0.2.0-dev.30.3).</summary>
+    public const uint PointerValid = 1, PointerDragging = 2;
+    public const int DragKindMax = 32, DragPayloadMax = 4096;
+
+    /// <summary>The tail after chat_search (0.2.0-dev.30.3, GitHub issue 113): pointer, drag_source, drop_target, at
+    /// 1056, 1064 and 1072 (the table is 1080 bytes).</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct TableDrag
+    {
+        public TableSearch Base;
+        public delegate* unmanaged[Cdecl]<Pointer*, byte> PointerFn;
+        public delegate* unmanaged[Cdecl]<NativeStr, byte*, nuint, NativeStr, byte> DragSource;
+        public delegate* unmanaged[Cdecl]<NativeStr, byte*, nuint, nuint*, byte> DropTarget;
+    }
+
+    /// <summary>kiln.ui's pointer and drag and drop tail, or null on a table without it (a kiln-ui.dll older than
+    /// 0.2.0-dev.30.3). Each slot is still checked for null by its caller. Tests: <see cref="DragOverride"/>.</summary>
+    internal static TableDrag* Drag
+    {
+        get
+        {
+            if (DragOverride != null) return DragOverride;
+            var t = T;
+            if (t == null || t->Header.Size < (uint)sizeof(TableDrag)) return null;
+            return (TableDrag*)t;
+        }
+    }
+
+    /// <summary>Tests: a table of the pointer tail in place of kiln.ui's.</summary>
+    internal static TableDrag* DragOverride;
+
     /// <summary>KILN_UI_GLYPHS_* (kiln_ui.h look_info): the overlay's glyphs of a Chinese, Japanese, Korean or Cyrillic language.</summary>
     public const byte GlyphsLatin = 0, GlyphsLoading = 1, GlyphsReady = 2, GlyphsFailed = 3;
 

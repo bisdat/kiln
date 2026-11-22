@@ -446,7 +446,9 @@ the FNV-1a 64 of the UTF-8 text. The text is in the world's `CustomPlayerStrings
 |---|---|---|
 | `items/SetString` (shroudlink `set_string`) | `0x915b80` (26404334: `0x915b90`) | `(out, strings, u64 oldId, {char*, u64 len}* text)`: hashes the text, looks the id up, inserts the record when new; the id at `out+8`. Callers: `0x1e97fc` (the logic-graph program) and `0x7bde90` (the message dispatcher's rename handler) |
 | rename handler | `0x7bdb20` (dispatcher), call at `0x7bde90` | after `set_string`: if the entity has the component (`0x64edb0`, the tick-thread WriteOther of section 12), writes the id; else `0x5fc570` AddComponent `(world, entity, hash, {ptr, 8}*)` adds it |
-| `items/AddComponent` | `0x5fc570` | wrapper of `0x5fc340` on `world+0xE179C0`; lab use only |
+| `items/AddComponent` | `0x5fc570` | wrapper of `0x5fc340` on `world+0xE179C0`; the lab's self-test and, since 0.2.0-dev.30.3, `container_rename` |
+| `items/WriteComponentTick` | `0x64edb0` (client 26430625: `0x9b2f20`) | `(PtrSize* out, world, hash, entity)`: WriteOther with the world's own tracker (`world+0x15d39f0`, flag 0); captured at the handler's own call (`@items/RenameHandler.site`, both sides) |
+| `items/StringsInsert` | `0x915700` (client `0xe6e6d0`) | set_string's insert of a new text `(out, strings, id, text, refs 1)`; captured at set_string's call `0x916031` |
 
 The table is a `HashMap<u64, record*>` of the same type as the item registry's (section 6): bitmap pointer at `strings+0x198`,
 capacity `+0x1a0`, keys `+0x1b8`, values `+0x1d0`, count `+0x1e4` (sigdb captures all five from `set_string` and kiln.items checks them
@@ -465,6 +467,39 @@ PASS persistence: the chest named "Kiln Lab Ores" before the restart is read bac
 items selftest: PASS a container from the save is already named: entity 1026 is "Kiln Lab Ores"
 ```
 The save (`world0.ksd`) carries both the component and the table: a restarted lab reads the name without anything naming it again.
+
+**The rename, step by step (0.2.0-dev.30.3, GitHub issue #112) [dis]** (server 26430253 `f0d824be…`, client 26430625 `5d9ef2f1…`,
+whose own dispatcher at `0xe6190c` has the same case for a hosted world):
+- **The message.** `CustomPlayerStringClientMessage` (reflection at `0x1414ad7e8`: 0x108 bytes, fields `entityId` and
+  `customString` with a capacity of 0x100 bytes); deserialized into `{u32 entity; u32 len; char text[256]}` at `rbp+0x100`.
+  The handler checks nothing else: no player, distance or ownership test, no entity check before the write.
+- **The steps** (`0x7bde3e`..`0x7bdefe`): `0x64edb0(out, world, CustomPlayerString, entity)`: the component, marked
+  written; its id (or 0) is the old id; `set_string(out, strings = server+0x58, old id, {text, len})`; on error nothing more;
+  else the id into the component, or `AddComponent` with `{&id, 8}` when the entity had none.
+- **set_string** (`0x915b80`): the id is the FNV-1a 64 of the text; an id equal to the old id returns at once (no
+  change); otherwise the old record's reference count (`record+0x138`) drops and the record is freed at 0, with
+  per-client byte counters (`record+0x13c` a per-client bitmask); an empty text then returns id 0 (**an empty rename
+  clears the name**); a text already in the table gets one more reference (`0x947670`); a new one goes through the insert
+  (`0x915700`) with one reference, and the record joins the list of records to send (`strings+0x228`..`+0x238`), the
+  `CustomPlayerStringServerMessage` path to the clients.
+- **The insert's limits** (`0x915700`): `cmp dword [strings+0x200], 0x400` (at most 1024 records), then the record
+  pool's count against its capacity (`[map+0x70]` vs `[map+0x80]`, map = `strings+0x190`); either refuses with error
+  0x27 after the old name was already released. A record holds 0x100 bytes of text: a longer text calls the record's
+  growth function, which is null, and the server stops (`0x915b57`: error 0x2a, abort). The client never sends more
+  than 0x100 bytes (`0x863efb`: `min(len, 0x100)`).
+- **The Rename field** (client 26430625): the chest window's Rename (`0xb9ed12` -> dialog `0xba9670`, title
+  `hudStrings.renameHeader`) opens the generic text input (`0xcdda10`) with `maxLength` =
+  `FbUiBundle.maxInputLengthForLabelledEntities` (`0xba975f`; 48 in the game data, decoded with `tools/kfc`), counted in
+  code points per insert (`0x11baa80`), into a 64-byte UTF-8 buffer (`0xba96bc`, no growth: the rest is dropped, so a
+  three-byte character can be cut). Typing and pasting drop every code point below 0x20 but TAB, and 0x7F
+  (`0x11b6cb0`, `0x119b820`); a paste that is not UTF-8 is refused whole; nothing else is filtered or trimmed. Confirm
+  is never disabled, but an empty text is not sent (`0xba9788`): a player cannot clear a name. No profanity filter on
+  the way out; the display side runs names through Steam's filter (`0xd28af0` -> `SteamProfanityFilter::filterText`).
+  The Steam Deck keyboard gets the same 48 (`0xa4ee00` -> `ShowGamepadTextInput` `unCharMax`).
+- **What Kiln does with it**: `container_rename` (kiln.items v9) makes the handler's three calls in Pre, checks the field's
+  rules (48 code points, 64 bytes, no control character but TAB, well-formed UTF-8) before queueing, checks the entity is a
+  container, and refuses a full table before `set_string` (`items/strings.used`, `.limit`, `.pool_cap`), so the old name
+  is never lost. Not known: how a client that has the window open shows a name changed under it.
 The user's world copy in `~/Work/ew-lab` has no named chest, which is why the lab names one. Not known: how clients get the text (the
 `CustomPlayerStringServerMessage` path: `next_pending` `0x92fad0`, `mark_sent` `0x94ec70`), and what the string table's limit of 256 bytes does
 to a longer name (the game's own text field refuses it).

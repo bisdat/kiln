@@ -3,6 +3,9 @@
 #![allow(non_camel_case_types, non_snake_case, non_upper_case_globals, unused_imports)]
 use crate::*;
 pub type KilnReplWatchFn = Option<unsafe extern "C" fn(*const KilnReplWatchEvent, *mut core::ffi::c_void)>;
+pub type KilnReplTrackFn = Option<unsafe extern "C" fn(*const KilnReplTrackEvent, u32, *mut core::ffi::c_void)>;
+pub type KilnReplFilterFn = Option<unsafe extern "C" fn(*mut u8, u32, *const KilnReplFilterCtx, *mut core::ffi::c_void)>;
+pub type KilnReplMessageFn = Option<unsafe extern "C" fn(*const KilnReplMessage, *mut core::ffi::c_void) -> i32>;
 pub const KILN_REPL_ALL_MACHINES: u32 = 4294967295;
 pub const KILN_REPL_CAP_CLIENT: i32 = 2;
 pub const KILN_REPL_CAP_FILTER: i32 = 8;
@@ -11,18 +14,59 @@ pub const KILN_REPL_CAP_MESSAGES: i32 = 32;
 pub const KILN_REPL_CAP_OBSERVE: i32 = 1;
 pub const KILN_REPL_CAP_SCHEMA: i32 = 64;
 pub const KILN_REPL_CAP_TOUCH: i32 = 16;
+pub const KILN_REPL_CLIENT_CHANNEL: i32 = 1;
 pub const KILN_REPL_COMPONENT_CLIENT: i32 = 8;
 pub const KILN_REPL_COMPONENT_CUSTOM_CODEC: i32 = 4;
 pub const KILN_REPL_COMPONENT_PREDICTION: i32 = 16;
 pub const KILN_REPL_COMPONENT_REPLICATED: i32 = 1;
 pub const KILN_REPL_COMPONENT_VERSIONED: i32 = 2;
+pub const KILN_REPL_DROP: i32 = 1;
+pub const KILN_REPL_END_DESTROYED: i32 = 1;
+pub const KILN_REPL_END_ID_REUSED: i32 = 2;
+pub const KILN_REPL_END_PEER_LEFT: i32 = 3;
+pub const KILN_REPL_END_WORLD_STOPPED: i32 = 4;
 pub const KILN_REPL_FAKE_PEER: u32 = 2147483648;
+pub const KILN_REPL_KIND_CREATE: i32 = 2;
+pub const KILN_REPL_KIND_DESTROYED: i32 = 4;
+pub const KILN_REPL_KIND_ENDED: i32 = 5;
+pub const KILN_REPL_KIND_UPDATE: i32 = 3;
+pub const KILN_REPL_LAB_SERVICE: &[u8] = b"kiln.repl.lab\0";
+pub const KILN_REPL_LAB_VERSION: u32 = 1;
 pub const KILN_REPL_MACHINES: u32 = 17;
+pub const KILN_REPL_MSG_PEER_UNKNOWN: i32 = 1;
+pub const KILN_REPL_NET_CAP_CLIENT_TRACK: i32 = 2;
+pub const KILN_REPL_NET_CAP_FILTER: i32 = 4;
+pub const KILN_REPL_NET_CAP_MESSAGES_RECEIVE: i32 = 64;
+pub const KILN_REPL_NET_CAP_MESSAGES_SEND: i32 = 32;
+pub const KILN_REPL_NET_CAP_REMAP: i32 = 16;
+pub const KILN_REPL_NET_CAP_SCHEMA: i32 = 128;
+pub const KILN_REPL_NET_CAP_TOUCH: i32 = 8;
+pub const KILN_REPL_NET_CAP_TRACK: i32 = 1;
+pub const KILN_REPL_NET_SERVICE: &[u8] = b"kiln.repl.net\0";
+pub const KILN_REPL_NET_VERSION: u32 = 1;
+pub const KILN_REPL_PASS: i32 = 0;
 pub const KILN_REPL_PEER_BOUND: i32 = 2;
 pub const KILN_REPL_PEER_FAKE: i32 = 1;
+pub const KILN_REPL_PEER_LOCAL: i32 = 4;
+pub const KILN_REPL_PEER_RECEIVED: i32 = 8;
+pub const KILN_REPL_PREDICTION_CHANNEL: i32 = 2;
 pub const KILN_REPL_RECEIVE: i32 = 2;
+pub const KILN_REPL_REMAP_FAULTED: i32 = 2;
+pub const KILN_REPL_REMAP_HOOK_REFUSED: i32 = 1;
+pub const KILN_REPL_REMAP_OFF: i32 = 4;
+pub const KILN_REPL_REMAP_OK: i32 = 0;
+pub const KILN_REPL_REMAP_UNPLACED: i32 = 3;
+pub const KILN_REPL_REWRITE: i32 = 2;
 pub const KILN_REPL_SEND: i32 = 1;
 pub const KILN_REPL_SERVICE: &[u8] = b"kiln.repl\0";
+pub const KILN_REPL_TOUCH_GONE: i32 = 2;
+pub const KILN_REPL_TOUCH_NO_CARRIER: i32 = 1;
+pub const KILN_REPL_TOUCH_QUEUED: i32 = 0;
+pub const KILN_REPL_TRACK_CREATED: i32 = 1;
+pub const KILN_REPL_TRACK_DESTROYED: i32 = 2;
+pub const KILN_REPL_TRACK_GAP: i32 = 5;
+pub const KILN_REPL_TRACK_LEFT: i32 = 3;
+pub const KILN_REPL_TRACK_PEER_GONE: i32 = 4;
 pub const KILN_REPL_VERSION: u32 = 1;
 
 #[repr(C)]
@@ -74,8 +118,9 @@ pub struct KilnReplWatchEvent {
     pub baseline_tick: u32,
     pub payload_bytes: u32,
     pub count: u16,
-    pub pad: u16,
-    pub pad2: u32,
+    pub peer_flags: u8,
+    pub pad: u8,
+    pub reason: u32,
     pub components: *const KilnReplComponent,
 }
 
@@ -118,6 +163,29 @@ pub struct KilnReplLoopbackStats {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
+pub struct KilnReplHookCost {
+    pub size: u32,
+    pub frames: u32,
+    pub window_ns: u64,
+    pub send_step_mean_ns: u64,
+    pub send_step_p50_ns: u64,
+    pub frame_interval_mean_ns: u64,
+    pub frame_interval_p50_ns: u64,
+    pub callback_calls: u64,
+    pub callback_ns: u64,
+    pub writer_calls: u64,
+    pub writer_ns: u64,
+    pub delta_calls: u64,
+    pub delta_ns: u64,
+    pub tick_calls: u64,
+    pub tick_ns: u64,
+    pub allocations: u64,
+    pub watch_records: u64,
+    pub watch_dropped: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
 pub struct KilnReplApi {
     pub header: KilnServiceHeader,
     pub capabilities: Option<unsafe extern "C" fn() -> u32>,
@@ -132,4 +200,133 @@ pub struct KilnReplApi {
     pub lab_remove_fakes: Option<unsafe extern "C" fn() -> KilnResult>,
     pub lab_stats: Option<unsafe extern "C" fn(*mut KilnReplLoopbackStats) -> KilnResult>,
     pub lab_decoded: Option<unsafe extern "C" fn(u32, KilnEntity, u32, *mut u8, u32, *mut u32, *mut u32) -> KilnResult>,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct KilnReplLabApi {
+    pub header: KilnServiceHeader,
+    pub payload: Option<unsafe extern "C" fn(u32, KilnEntity, u32, *mut u8, u32, *mut u32, *mut u32) -> KilnResult>,
+    pub hook_cost: Option<unsafe extern "C" fn(*mut KilnReplHookCost, bool) -> KilnResult>,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct KilnReplTrackEvent {
+    pub peer: u32,
+    pub entity: u32,
+    pub tick: u32,
+    pub kind: u8,
+    pub peer_flags: u8,
+    pub machine: u8,
+    pub pad: u8,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct KilnReplPeerEntity {
+    pub entity: u32,
+    pub create_tick: u32,
+    pub acked: u8,
+    pub pad: [u8; 3],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct KilnReplFilterCtx {
+    pub size: u32,
+    pub peer: u32,
+    pub channel: u8,
+    pub peer_flags: u8,
+    pub machine: u8,
+    pub pad: u8,
+    pub entity: u32,
+    pub tick: u32,
+    pub component_hash: u32,
+    pub read: Option<unsafe extern "C" fn(*const KilnReplFilterCtx, u32, u32, *mut u32) -> *const core::ffi::c_void>,
+    pub failed: *mut u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct KilnReplItemSite {
+    pub component_hash: u32,
+    pub offset: u16,
+    pub count: u16,
+    pub stride: u16,
+    pub pad: u16,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct KilnReplItemMap {
+    pub from: u32,
+    pub to: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct KilnReplRemapStats {
+    pub size: u32,
+    pub sites: u32,
+    pub snapshots: u64,
+    pub remapped: u64,
+    pub zeroed: u64,
+    pub faults: u64,
+    pub blanked: u64,
+    pub running: u32,
+    pub reason: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct KilnReplMessage {
+    pub size: u32,
+    pub peer: u32,
+    pub channel: u8,
+    pub direction: u8,
+    pub player_socket: u8,
+    pub peer_flags: u8,
+    pub length: u32,
+    pub data: *const u8,
+    pub rewrite: *mut u8,
+    pub rewrite_cap: u32,
+    pub pad2: u32,
+    pub rewrite_length: *mut u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct KilnReplSchemaField {
+    pub name: KilnStr,
+    pub r#type: u32,
+    pub element: u32,
+    pub shape: u32,
+    pub offset: u32,
+    pub count_offset: u32,
+    pub fixed_count: u32,
+    pub nested: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct KilnReplNetApi {
+    pub header: KilnServiceHeader,
+    pub capabilities: Option<unsafe extern "C" fn() -> u32>,
+    pub remove: Option<unsafe extern "C" fn(KilnHandle) -> KilnResult>,
+    pub track: Option<unsafe extern "C" fn(KilnOwner, u32, KilnReplTrackFn, *mut core::ffi::c_void, *mut KilnHandle) -> KilnResult>,
+    pub peer_entities: Option<unsafe extern "C" fn(u32, *mut KilnReplPeerEntity, u32, *mut u32) -> KilnResult>,
+    pub filter_add: Option<unsafe extern "C" fn(KilnOwner, u32, *const u32, u32, u32, i32, *const u32, u32, KilnReplFilterFn, *mut core::ffi::c_void, *mut KilnHandle) -> KilnResult>,
+    pub filter_set_peers: Option<unsafe extern "C" fn(KilnHandle, *const u32, u32) -> KilnResult>,
+    pub touch: Option<unsafe extern "C" fn(KilnEntity, *mut u32) -> KilnResult>,
+    pub remap_set: Option<unsafe extern "C" fn(*const KilnReplItemSite, u32, *const u32, u32, *const KilnReplItemMap, u32) -> KilnResult>,
+    pub remap_peers: Option<unsafe extern "C" fn(*const u32, u32) -> KilnResult>,
+    pub remap_stats: Option<unsafe extern "C" fn(*mut KilnReplRemapStats) -> KilnResult>,
+    pub message_hook: Option<unsafe extern "C" fn(KilnOwner, u8, u32, KilnReplMessageFn, *mut core::ffi::c_void, *mut KilnHandle) -> KilnResult>,
+    pub message_inject: Option<unsafe extern "C" fn(u32, u8, *const core::ffi::c_void, u32) -> KilnResult>,
+    pub schema_find: Option<unsafe extern "C" fn(KilnStr, *mut u32, *mut u64) -> KilnResult>,
+    pub schema_fields: Option<unsafe extern "C" fn(u64, *mut KilnReplSchemaField, u32, *mut u32) -> KilnResult>,
+    pub schema_decode: Option<unsafe extern "C" fn(u64, *const core::ffi::c_void, u32, *mut core::ffi::c_void, u32) -> KilnResult>,
+    pub schema_encode: Option<unsafe extern "C" fn(u64, *const core::ffi::c_void, u32, *mut core::ffi::c_void, u32, *mut u32) -> KilnResult>,
+    pub peers: Option<unsafe extern "C" fn(*mut u32, *mut u8, u32, *mut u32) -> KilnResult>,
 }

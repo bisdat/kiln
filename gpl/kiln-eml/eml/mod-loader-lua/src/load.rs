@@ -255,6 +255,16 @@ pub fn restore_backup_with(
     kfc_path: impl AsRef<Path>,
     mode: crate::ownership::SfHandoff,
 ) -> Result<(), ()> {
+    restore_backup_as(kfc_path, mode, crate::ownership::RestoreProof::Receipt)
+}
+
+/// kiln-eml: `restore_backup_with` over the proof `proof` that the live pair may be replaced (kiln mode's verified
+/// BASE also restores Kiln's bundled ShroudForge's recorded output: `StartupHost::restore_base`).
+pub(crate) fn restore_backup_as(
+    kfc_path: impl AsRef<Path>,
+    mode: crate::ownership::SfHandoff,
+    proof: crate::ownership::RestoreProof,
+) -> Result<(), ()> {
     let path = kfc_path.as_ref();
     let mut bak_path = path.to_string();
     bak_path.push_str(".bak");
@@ -289,7 +299,7 @@ pub fn restore_backup_with(
     let stem = path.file_stem().ok_or(())?;
     // Proof is rechecked under SF's lock. Hold it through both copies AND container cleanup: SF must not append
     // new containers between reading the restored header's range and removing the old generation's extras.
-    let _sf = crate::ownership::before_restore(root.as_std_path(), stem, mode).map_err(|error| {
+    let _sf = crate::ownership::before_restore_as(root.as_std_path(), stem, mode, proof).map_err(|error| {
         error!(%error, "Refusing archive restore: ownership or ShroudForge prepared-output state could not be safely checked");
     })?;
     let added = crate::ownership::live_containers(root.as_std_path(), stem).unwrap_or_else(|error| {

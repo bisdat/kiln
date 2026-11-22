@@ -993,6 +993,7 @@ internal static class QuestsStartup
         {
             QuestsCaps.Rows.Ensure();
             Quests.EnsureStarted();
+            SurvivorsPump.Start();  // kiln.survivors: results and events from the first tick (dev.31)
             var n = 0;
             foreach (var m in Mods.All)
             {

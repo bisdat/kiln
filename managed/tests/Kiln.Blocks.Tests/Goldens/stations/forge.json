@@ -1,0 +1,77 @@
+{
+  "templates": [
+    {
+      "guid": "493ef5f3-a747-57bd-a0a7-3b5512cbd29a",
+      "name": "golden-stations.forge.station",
+      "base": "T1_Forge_Factory",
+      "fields": {
+        "Crafting.workshopId": 1469892090,
+        "CraftingInteraction.workshopId": 1469892090,
+        "InventorySetup.genericSlotCount": 6,
+        "InventorySetup.availableSlotCount": 6
+      }
+    }
+  ],
+  "items": [
+    {
+      "guid": "1e2208cb-5cf3-50b0-9698-6f65b893355b",
+      "name": "golden-stations.forge",
+      "base": "Prop_Production_T1_Forge",
+      "displayName": "Rune Forge",
+      "description": "",
+      "fields": {},
+      "refs": {
+        "equipment.placedEntity": "493ef5f3-a747-57bd-a0a7-3b5512cbd29a"
+      }
+    }
+  ],
+  "itemRules": {},
+  "recipes": [
+    {
+      "guid": "afcb5dd1-afa1-5ce6-be65-9776eb922a8e",
+      "name": "golden-stations.forge.makes.Material_T1_Metal_Scraps",
+      "station": "workshop:ca1597eb-0350-5938-a37f-edec5ba4b010",
+      "menu": "0x4da88f73",
+      "seconds": 6,
+      "fields": null,
+      "inputs": [
+        {
+          "item": "Material_T1_Wood_Logs",
+          "count": 1
+        }
+      ],
+      "outputs": [
+        {
+          "item": "Material_T1_Metal_Scraps",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "guid": "dc3a332f-3f28-5545-9bf3-b64d72f9d20d",
+      "name": "golden-stations.forge.makes.Material_T1_Metal_Scraps.2",
+      "station": "workshop:ca1597eb-0350-5938-a37f-edec5ba4b010",
+      "menu": "0x4da88f73",
+      "seconds": 8,
+      "fields": null,
+      "inputs": [
+        {
+          "item": "Material_T1_Wood_Logs",
+          "count": 2
+        }
+      ],
+      "outputs": [
+        {
+          "item": "Material_T1_Metal_Scraps",
+          "count": 1
+        }
+      ]
+    }
+  ],
+  "workshop": {
+    "id": "0x579cc5fa",
+    "station": "workshop:ca1597eb-0350-5938-a37f-edec5ba4b010",
+    "menu": "0x4da88f73",
+    "own": true
+  }
+}

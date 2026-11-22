@@ -1,0 +1,705 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "state-registry.schema.json",
+  "title": "Kiln's registry stage (<game>/kiln/state/registry.json), format 1",
+  "description": "What a start's registry stage did: for every field a mod's registry edit (or one of Kiln's older paths under it) touched, the base value and where it came from, every writer in the order they apply (Kiln's older paths and archive-writer packages below, then the registry's edits by stage and load order), the result and who decided it; every conflict line with its certainty; every refused edit with its reason. Written by kiln.content (the registry stage: native/services/content/registry/report.cpp report_json) at phase start (restart fields final) and again at worldLoad (every field applied; the generation grows), atomically (a temporary file, then a rename). Readers: the launcher (the Conflicts view, registry P2), kilnctl, support reports. A file whose pid is not a live process is the last start's. Large mod sets: rows past a cap (20,000 fields, 2,000 conflicts, 2,000 refused edits, 20,000 added or removed entries) are left out and counted under truncated; counts always has the totals. kiln.log carries at most 50 of the lines per start and a total. Within format 1 Kiln only adds members: a reader ignores members it does not know.",
+  "type": "object",
+  "required": [
+    "format",
+    "pid",
+    "written",
+    "generation",
+    "phase",
+    "schema",
+    "regmap",
+    "base",
+    "order",
+    "orderSource",
+    "plan",
+    "fields",
+    "conflicts",
+    "refused",
+    "added",
+    "removed",
+    "counts",
+    "truncated"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "format": {
+      "const": 1
+    },
+    "pid": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "The game's process id as the game sees it (under Proton, the Windows pid)."
+    },
+    "written": {
+      "$ref": "common.schema.json#/$defs/time"
+    },
+    "kiln": {
+      "type": "string",
+      "description": "Kiln version of the runtime that wrote it."
+    },
+    "generation": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "kiln.registry's generation (kiln_registry.h KilnRegistryStatus.generation): 1 at start, then +1 at each world load, re-application and live change."
+    },
+    "phase": {
+      "enum": [
+        "start",
+        "worldLoad"
+      ],
+      "description": "At start, restart fields are final and live fields have been composed. At worldLoad, the report includes live values after world load or a pack reload. Late drop tables refresh within the current generation."
+    },
+    "schema": {
+      "type": "object",
+      "required": [
+        "registrySchema",
+        "registries"
+      ],
+      "properties": {
+        "registrySchema": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The registry schema format (schema/registry/*.json \"registrySchema\")."
+        },
+        "registries": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Each registry's schema version (\"items\": \"1.0.0\")."
+        }
+      },
+      "additionalProperties": false
+    },
+    "regmap": {
+      "type": "object",
+      "description": "Kiln's map of the registries onto this game build (regmap/<side>/<exe sha256>.json). Without a verified record every field is unproven and every edit of it refused.",
+      "required": [
+        "side",
+        "exeSha256",
+        "record",
+        "verified"
+      ],
+      "properties": {
+        "side": {
+          "enum": [
+            "server",
+            "client"
+          ]
+        },
+        "exeSha256": {
+          "type": "string",
+          "pattern": "^([0-9a-f]{64})?$"
+        },
+        "record": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The record used, relative to Kiln's folder; null when this build has none."
+        },
+        "verified": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "base": {
+      "type": "object",
+      "description": "What the stage read as its base.",
+      "required": [
+        "origin",
+        "writer"
+      ],
+      "properties": {
+        "origin": {
+          "type": "string",
+          "description": "live: kiln.assets' bytes at resources-ready (the game's data as the archive writer published it). Later releases may add origins."
+        },
+        "writer": {
+          "type": "string",
+          "description": "This start's archive writer: kiln-eml, shroudforge-hosted, external or none."
+        },
+        "token": {
+          "type": "string",
+          "description": "The archive writer's publication token, when it has one."
+        }
+      },
+      "additionalProperties": false
+    },
+    "order": {
+      "type": "array",
+      "description": "The mods with registry edits, in the order the stage ran them (later wins).",
+      "items": {
+        "type": "object",
+        "required": [
+          "mod",
+          "version"
+        ],
+        "properties": {
+          "mod": {
+            "$ref": "common.schema.json#/$defs/modId"
+          },
+          "version": {
+            "type": "string"
+          },
+          "editsHash": {
+            "type": "string",
+            "description": "A hash of the mod's registry inputs (data files and code batches)."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "orderSource": {
+      "enum": [
+        "kiln.host",
+        "folders"
+      ],
+      "description": "kiln.host: Kiln.Host's runtime load order (the launcher profile's order). folders: no .NET this start, kiln.content's mod folder order."
+    },
+    "plan": {
+      "description": "The lowered plan the stage wrote (kiln/data/registry/plans/<hash>.json), and the one before it for rollback; null when none was written.",
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "required": [
+            "hash",
+            "file",
+            "previous"
+          ],
+          "properties": {
+            "hash": {
+              "type": "string"
+            },
+            "file": {
+              "type": "string"
+            },
+            "previous": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "fields": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/field"
+      }
+    },
+    "conflicts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/conflict"
+      }
+    },
+    "refused": {
+      "type": "array",
+      "description": "Edits that were not applied, each with its reason (a malformed edit, an unmapped or unproven field, an entry that is not there or was removed by the game build, a conflict with an exclusive edit, a raw path that does not resolve on this build).",
+      "items": {
+        "type": "object",
+        "required": [
+          "mod",
+          "source",
+          "stage",
+          "n",
+          "reason"
+        ],
+        "properties": {
+          "mod": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "stage": {
+            "enum": [
+              "add",
+              "alter",
+              "final"
+            ]
+          },
+          "n": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The edit's ordinal in its batch."
+          },
+          "reason": {
+            "type": "string"
+          },
+          "registry": {
+            "type": "string",
+            "description": "The registry the edit named."
+          },
+          "id": {
+            "type": "string",
+            "description": "The entry it was refused on (the one that failed, an exact selector's, an add's), when there is one."
+          },
+          "field": {
+            "type": "string",
+            "description": "The Kiln field (or element path, or raw path) it named."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "added": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/entry"
+      },
+      "description": "Entries mods added (\"<mod>:<name>\")."
+    },
+    "removed": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/entry"
+      },
+      "description": "Entries mods removed."
+    },
+    "counts": {
+      "type": "object",
+      "required": [
+        "fields",
+        "conflicts",
+        "refused",
+        "added",
+        "removed"
+      ],
+      "properties": {
+        "fields": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "conflicts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "refused": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "added": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "removed": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "truncated": {
+      "type": "object",
+      "description": "Rows left out of each list because of its cap (0: none).",
+      "required": [
+        "fields",
+        "conflicts",
+        "refused",
+        "added",
+        "removed"
+      ],
+      "properties": {
+        "fields": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "conflicts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "refused": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "added": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "removed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "writers": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Writers left out of field rows (each row keeps its last 64; writersLeftOut counts the rest per row)."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "value": {
+      "description": "A field's value can be a number, boolean, name, id, or array of list entries. A missing value is null.",
+      "type": [
+        "number",
+        "boolean",
+        "string",
+        "array",
+        "null"
+      ]
+    },
+    "entry": {
+      "type": "object",
+      "required": [
+        "registry",
+        "id"
+      ],
+      "properties": {
+        "registry": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "field": {
+      "type": "object",
+      "required": [
+        "registry",
+        "id",
+        "field",
+        "applies",
+        "base",
+        "writers",
+        "result",
+        "winner"
+      ],
+      "properties": {
+        "registry": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string",
+          "description": "The entry's Kiln id."
+        },
+        "field": {
+          "type": "string",
+          "description": "The Kiln field, or (raw: true) the game member path as the first edit wrote it."
+        },
+        "raw": {
+          "const": true,
+          "description": "An Advanced-tier raw member path (owner decision D5): works while the game's names hold."
+        },
+        "applies": {
+          "enum": [
+            "now",
+            "worldLoad",
+            "restart"
+          ],
+          "description": "When a change of the field takes effect (the schema's applies)."
+        },
+        "base": {
+          "type": "object",
+          "required": [
+            "value",
+            "origin"
+          ],
+          "properties": {
+            "value": {
+              "$ref": "#/$defs/value"
+            },
+            "entriesLeftOut": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Entries omitted after the first 64 in a base list."
+            },
+            "origin": {
+              "type": "string",
+              "description": "archive: the game's data as the archive writer published it; added: an entry a mod added (its base is its like entry's). Later releases may name more origins; show an unknown one as it is."
+            }
+          },
+          "additionalProperties": false
+        },
+        "writers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/writer"
+          },
+          "description": "In the order they apply; the last one decided the result."
+        },
+        "result": {
+          "$ref": "#/$defs/value"
+        },
+        "resultEntriesLeftOut": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Entries omitted after the first 64 in the result list."
+        },
+        "formulaInputs": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "minItems": 2,
+          "maxItems": 3,
+          "description": "Effective formula inputs corresponding to the numeric live result. Power uses damage factor, attack speed factor, minimum level. Armor uses armor share, minimum level."
+        },
+        "winner": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The writer whose row decided the result last; null: the base."
+        },
+        "writersLeftOut": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The earliest writers of this field left out of writers (only its last 64 are listed: the ones that decide the result)."
+        }
+      },
+      "additionalProperties": false
+    },
+    "writer": {
+      "type": "object",
+      "required": [
+        "kind",
+        "value",
+        "certainty"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "archiveWriter",
+            "oldPatch",
+            "oldPack",
+            "code",
+            "registry",
+            "check"
+          ],
+          "description": "archiveWriter: a ShroudForge or EML package's pregame value (named from the archive writer's journal); oldPatch: an older Kiln boot resource patch; oldPack: an older Kiln data pack; code: a Content.* change made by code; registry: a registry edit. check: the stage's reference check (list elements naming an entry the stage removed, taken out of an entry of a registry whose entries are not removed)."
+        },
+        "mod": {
+          "type": "string",
+          "description": "The Kiln mod behind it (absent for an archive-writer package)."
+        },
+        "who": {
+          "type": "string",
+          "description": "What the writer is called when that is not just the mod: \"<mod>: content/<file>\", \"<mod>/<key>\", \"shroudforge:<package>\"."
+        },
+        "stage": {
+          "enum": [
+            "add",
+            "alter",
+            "final"
+          ]
+        },
+        "source": {
+          "type": "string"
+        },
+        "n": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "exclusive": {
+          "const": true
+        },
+        "raw": {
+          "type": "string",
+          "description": "The raw member path, when the row came from an Advanced-tier edit."
+        },
+        "element": {
+          "type": "string",
+          "description": "An element edit of this list: the element path (\"inputs[2].count\", \"inputs[*].count\", \"perks[1]\"); op applies to that element or its leaf."
+        },
+        "op": {
+          "description": "An absolute write supplies a plain value or array. A relative write supplies an object with mul, add, min, max, raiseOnly, or lowerOnly.",
+          "anyOf": [
+            {
+              "type": [
+                "number",
+                "boolean",
+                "string",
+                "array"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "mul": {
+                  "type": "number"
+                },
+                "add": {
+                  "type": "number"
+                },
+                "min": {
+                  "type": "number"
+                },
+                "max": {
+                  "type": "number"
+                },
+                "raiseOnly": {
+                  "type": "boolean"
+                },
+                "lowerOnly": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "list": {
+          "description": "A list change.",
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "clear"
+              ],
+              "properties": {
+                "clear": {
+                  "const": true
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "append"
+              ],
+              "properties": {
+                "append": {
+                  "type": "array"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "remove"
+              ],
+              "properties": {
+                "remove": {
+                  "type": "array"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "replace"
+              ],
+              "properties": {
+                "replace": {
+                  "type": "array"
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "value": {
+          "$ref": "#/$defs/value",
+          "description": "The field's value after this writer."
+        },
+        "valueEntriesLeftOut": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Entries omitted after the first 64 in the writer's list value."
+        },
+        "opEntriesLeftOut": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Entries omitted after the first 64 in a list assigned by op."
+        },
+        "listEntriesLeftOut": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Entries omitted after the first 64 in a list operation's operand."
+        },
+        "certainty": {
+          "enum": [
+            "certain",
+            "named",
+            "bestEffort"
+          ],
+          "description": "certain: Kiln's own writers; named: an archive-writer package, from its journal; bestEffort: other loaders' DLLs and hooks."
+        }
+      },
+      "additionalProperties": false
+    },
+    "conflict": {
+      "type": "object",
+      "required": [
+        "field",
+        "registry",
+        "id",
+        "kind",
+        "winner",
+        "loser",
+        "certainty",
+        "text"
+      ],
+      "properties": {
+        "field": {
+          "type": "string",
+          "description": "\"<registry>[<id>].<field>\"."
+        },
+        "registry": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "overridden",
+            "composed",
+            "composedOn",
+            "exclusive",
+            "dropped",
+            "yielded"
+          ],
+          "description": "overridden: a later absolute value replaced another writer's; composed: relative changes stacked; composedOn: a relative change applied on another writer's value; exclusive: an exclusive conflict (or one place on two scales) refused the later edit; dropped: an edit into an entry another mod removed; yielded: a yield edit skipped a field an earlier writer set."
+        },
+        "winner": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "loser": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "certainty": {
+          "enum": [
+            "certain",
+            "named",
+            "bestEffort"
+          ]
+        },
+        "text": {
+          "type": "string",
+          "description": "One English sentence, as kiln.log has it."
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

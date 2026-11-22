@@ -32,8 +32,26 @@ item entity is the same, `ItemState.containedInSlotId` and `OwnerRelationship` n
 players and the save follow, as after a drag and drop.
 
 - `Move(from, slot, to, count = 0, options, toSlot)`: `from` and `to` are inventory owners (a player, a chest, a villager);
-  `slot` is a slot of `from` as `Items.Read` lists it. `count` 0 is the whole stack, and gear is always 1. The game picks
+  `slot` is a slot of `from` as `Items.Read` lists it. `count` 0 is the whole stack, and gear is always 1. Kiln picks
   the destination unless you give `toSlot`: partial stacks of the item first, then the first empty slot.
+- **Where a move into a player lands** (issue #109). A player's inventory links its equipment pages first, and before this
+  fix a move without `toSlot` could put a stack into an empty equipment slot, where the player never sees it. Now, for a
+  player or an NPC (`InventorySetup` flags), the search only uses the **backpack**: the Generic pages of the player's own
+  inventory and the pages of the worn backpack (behind its Virtual link), in the order `Items.Read` lists them. It never
+  uses equipment, currency or customization pages, nor the action bar unless you pass `MoveOptions.ActionBar`. A backpack
+  that is not worn adds no pages. When nothing fits, the result is `NoRoom` ("no room in entity N's backpack") and nothing
+  moves.
+- **`toSlot` into a player** must be a slot the item may enter: a backpack slot (an action-bar slot only with
+  `MoveOptions.ActionBar`), a currency-page slot for a currency item, or a worn equipment slot (`SlotSelection`) whose
+  equipment type is the item's, to top up the worn stack (arrows onto the worn arrows, bait onto the worn bait). Anything
+  else is `Refused` with the reason in `Message`, and nothing moves: an **empty** equipment slot (a move is no equip: use
+  `Items.Equip`, the game's own path, which also marks the slot worn and moves a replaced backpack's contents), the
+  backpack slot, a material into a ring slot, an equipment-page slot no equipment slot shows, a slot that is not the
+  player's. A `toSlot` the item may enter but that is full or holds another item gives way to the backpack search.
+- **Checked after the move.** A stack move is rolled back and `Refused` when any of it arrived outside the slots above, or
+  left the slot without arriving anywhere, so `Done` always means the items are where the player can take them.
+- Chests and other containers keep the old rule: every page, and a `toSlot` that is not theirs or does not fit gives way to
+  the search.
 - `QuickStack(from, to)` moves the stacks of `from` that `to` already holds a stack of. `MoveAll(from, to)` moves every stack
   that fits. Both run the game's own function, so everything it does for a player, it does here.
 - **The ledger.** `MoveResult.Changes` says who gave what to whom (`From`, `To`, `Item`, `Amount`, and the `ItemEntity` of
@@ -49,6 +67,27 @@ players and the save follow, as after a drag and drop.
 - It runs in the next sim step, in kiln.items' program, like give and take; the task completes on the tick thread one step
   later. A mod that unloads drops its callbacks. `Items.MovesAvailable` says whether this game build has it.
 
+## Using a consumable for a player (0.2.0-dev.30.3)
+
+To make a player eat, drink or use a potion from code, put the item in one of their own slots and call
+`Abilities.UseItem(player, slot)` (Kiln.Abilities, server, tick thread). The game then does what it does for a hotbar
+use: the item's own sequence plays, one item is taken from that slot at the sequence's consume event, and the buff is
+applied with the item's own values and time, so the player sees the same effect lines and timer as when eating by hand.
+A remote chest list moves the stack in first:
+
+```csharp
+var moved = await Items.Move(chest, chestSlot, player, count: 1);
+if (moved.Succeeded && moved.Changes.Count > 0)
+    Log.Info($"eat: {Abilities.UseItem(player, moved.Changes[0].To)}");
+```
+
+The answer is an `ItemUseResult`: `Started`, or why nothing happened (`NotConsumable`, `NotOwnSlot`, `EmptySlot`,
+`SlotChanged`, `NotAPlayer`, `Dead`, `NotReady`, `Busy` while another action or use plays, `ServerOnly` on a
+joined client). The item is not gone at the call: `PlayerConsumedEvent` says when it went, and a `PlayerConsumeEvent`
+handler or a block's `CanEat` can still refuse it, as for a hand use. Use it rather than `ApplyBuff` for food: a food's
+buff type holds no numbers (148 foods share 16 buff types). Details, the checks and what a real game still has to
+confirm: [kiln.abilities, Using an item](../services/abilities.md#using-an-item-since-020-dev303-mod-api-0213).
+
 ## Container names
 
 ```csharp
@@ -61,7 +100,36 @@ the game's string table, the `CustomPlayerStringsSystem` singleton, and checks e
 id a chest carries is the FNV-1a 64 of the name). `Items.ContainerNamesAvailable` says whether the build has it; the
 call throws `NotSupportedException` if not. It reads game memory: tick thread.
 
-A name replicates and saves the way the game's own rename does. Kiln does not rename.
+A name replicates and saves the way the game's own rename does.
+
+### Renaming (since 0.2.0-dev.30.3)
+
+```csharp
+foreach (var chest in Items.FindInventories(InventoryKinds.Containers))
+    if (Items.ContainerName(chest) is null) await Items.SetContainerName(chest, "Unsorted");
+```
+
+`Items.SetContainerName(entity, name)` does what a player's Rename button does, on the server and through the game's own
+rename: the name replicates to every player, is in the next save, and shows in the game's Rename screen and in
+`ContainerName` (GitHub issue #112, thanks Fuzen777). Mod API 0.2.13; capability `items.rename`;
+`Items.ContainerRenameAvailable` is true where the server world runs (a dedicated server, or the game client hosting).
+
+- **The name** is checked like the game's Rename field: at most 48 characters and 64 bytes of UTF-8
+  (`Items.ContainerNameMaxChars`, `Items.ContainerNameMaxBytes`), no control character but tab, any script and emoji,
+  kept as given (no trimming), no profanity filter. `""` clears the name (the server's rename does; the game's own field
+  never sends an empty name).
+- **Only a container**: an entity with an inventory of its own that is neither a player's nor an NPC's. A Flame Altar or
+  another renameable object without an inventory is refused.
+- **Refusals throw at the call**: `ArgumentException` (no entity, it does not exist, not a container, a name the field
+  would not take; the message says which), `InvalidOperationException` on a game client joined to another machine's
+  world, `KilnUnavailableException("items.rename")` on an older Kiln or an unknown game build.
+- **The task** completes on the tick thread in the next step: `true` when the game took the name (also when the chest
+  already had it), `false` when the rename could not run there (the chest went away, the game's table of 1024 different
+  names was full, the world closed); the reason is in kiln.log. A mod that unloads drops its callbacks; the rename still
+  runs.
+- Names are set where the world runs: on a joined game client, let the server side of your mod do the rename.
+
+Details and the native side: [services/items.md](../services/items.md#renaming-a-container-v9-since-020-dev303).
 
 ## Transfer rules and events
 
@@ -193,7 +261,7 @@ count this way.
 
 **Showing it on the item's slot (0.2.0-dev.30):** `Ui.Inventory.Mark(item, mark)` draws a mark over the slot the
 game draws for that item (backpack, chest, hotbar), and `Ui.Inventory.OnClick` gives your mod a click on a slot with the
-item's entity id (the server's id of it), for example to mark it on the server: see [../ui.md](../ui.md#the-games-inventory-slots-0200-dev30).
+item's entity id (the server's id of it), for example to mark it on the server: see [../ui.md](../ui.md#the-games-inventory-slots-020-dev30).
 Lines in the game's own item tooltip come with `Ui.Tooltip` (the equipment work); until then a mod shows a synced value in
 Kiln's Item details window, a screen of its own, a HUD line or a notice.
 
@@ -316,6 +384,7 @@ Lab `dev20-wp13` (a copy of the user's world, no player, game build 26430253, Wi
 | Gear keeps its state | `items-test`: the item entity is the same, `Level`, `PerkContainerNew`, `Durability`, `WeaponGemSlot` byte for byte, `ItemState.containedInSlotId` and `OwnerRelationship` updated |
 | Quick stack and move all by the game's functions, with the ledger | `items-test`: the ledger puts both containers back slot for slot |
 | Container names | The lab's self-test names a placed chest through the game's own rename path (`set_string` + `AddComponent`); `items-test` reads it back, checks the component against the FNV-1a 64 of the text, and after a save and restart reads it from the save |
+| Container renames | `items-test` (since 0.2.0-dev.30.3, to run in the release's lab gate): renames a second container through `SetContainerName`, reads it back and checks the component against the text's id, shares the self-test chest's name and clears it again (the other keeps its name), and the refusals at the call. Offline: `native/services/items/tests/rename_test.cpp` (the text rules, the rename handler's steps against a fake string table), `managed/tests/Kiln.Items.Tests/ContainerRenameTests.cs` (the test kit) |
 | A moved piece of gear survives a save | `items-test` phase 2 after a restart |
 | Item attachment identity is safe | `items-test` tags two same-template swords before a restart: both are explicitly session-only, neither receives a positional tag afterwards; a saved chest restores its own attachment as a positive control. This is not persistent per-item data |
 | Rules, reports | `items-test`: keep slot, keep item, deny, silent, the event's counts |
@@ -351,6 +420,22 @@ items themselves (`InstanceData`), and build a fresh set from what the player ha
 5. `Items.Move` from a player's backpack to a chest, with the player's window open: the slot empties on the player's screen and the gear is in the chest with its level and upgrades.
 6. A move of equipped or held gear is refused (`Refused`) by default. With `MoveOptions.Equipped`, check the game's
    unequip behaviour and the resulting equipment and inventory on the player.
-7. `Items.Move` into a player's backpack never lands on the action bar.
+7. `Items.Move` into a player's backpack never lands on the action bar. With no `toSlot` and empty equipment slots (no
+   rings worn), the stack shows in the backpack, never in a ring or other equipment slot (issue #109); with the backpack's
+   own pages full and a backpack worn, in the worn backpack's pages; with no backpack worn and the backpack full, the
+   result is `NoRoom` and the chest keeps the stack. A ring moved with `toSlot` an empty ring slot is `Refused` ("use
+   Items.Equip") and stays in the chest; arrows with `toSlot` the worn arrow slot top up the worn arrows.
 8. Rename a chest "Ores" in the game; `Items.ContainerName` returns it within a step of the rename reaching the server.
 9. A player and kiln-shroudlink's own addon (`dinput8.dll`, MODS tab, slot locks) together: R still honours the addon's locks and Kiln's rules.
+
+Container renames (`Items.SetContainerName`, since 0.2.0-dev.30.3), on a dedicated server with two players joined:
+
+10. A mod renames a chest both players can see: each player sees the new name where the game shows it (looking at the
+    chest, its window title, the Rename screen's text), without reopening the game. A player who joins afterwards sees it too.
+11. Save, stop the server, start it again: the chest still has the name, for the players and for `Items.ContainerName`.
+12. Rename the same chest with the game's own Rename button: the player's name replaces Kiln's, and `Items.ContainerName`
+    returns it; rename it again from the mod: the mod's name shows.
+13. A 48-character name and one with accents, CJK and an emoji show whole in the game; a mod's `""` clears the name in
+    the players' view (the Rename screen opens empty).
+14. Two chests renamed to the same text both show it; clearing one keeps the other's name.
+15. In a hosted game (single player or co-op host), the same as 10 and 11 from the host's own mod.

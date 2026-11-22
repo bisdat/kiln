@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Kiln.Markers: session-only markers by key on the game's map, Kiln's drawn compass strip and world labels, set by a
+       client mod or sent by a server mod to Kiln clients; the icon catalog; change events. Wrapper for the native
+       kiln.markers service (native/core/abi/services/kiln_markers.h). Deployed to kiln/host/ on both sides and shared by
+       every mod. -->
+  <PropertyGroup>
+    <RootNamespace>Kiln</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../Kiln.Api/Kiln.Api.csproj" Private="false" />
+    <!-- a client capture runs at the client world's next quiet step (Client.Post) -->
+    <!-- the built-in receiver's transport (kiln:markers) and the hosting state; both are in kiln/host -->
+    <ProjectReference Include="../Kiln.Network/Kiln.Network.csproj" Private="false" />
+    <ProjectReference Include="../Kiln.Client/Kiln.Client.csproj" Private="false" />
+    <InternalsVisibleTo Include="Kiln.Markers.Tests" />
+  </ItemGroup>
+</Project>

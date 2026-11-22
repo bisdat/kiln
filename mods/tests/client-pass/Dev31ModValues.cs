@@ -21,21 +21,20 @@ public sealed partial class ClientPassMod
         if (!await Need(c, "fishing") || !await NeedOpen(c, "stats.sync", "stats.ui")) return;
         c.Instruct("Host a world (or join one whose server runs Kiln with the fishing sample). Wait until you are in the world. Press continue.");
         await c.Verdict();
-        c.Expect(await c.Until(() => ModValues.Synced(FishXp).Ok && ModValues.Synced(FishTokens).Ok, TimeSpan.FromSeconds(60),
+        c.Expect(await c.Until(() => ModValues.Synced(FishXp).Ok, TimeSpan.FromSeconds(60),
             "the server's stream brought the fishing values"), "the synced copy arrived");
-        var before = ModValues.Synced(FishTokens).Value;
+        // the tokens have the default policies (OwnerOnly, OwnerMod): only the fishing mod itself reads them, this mod is refused
+        c.Expect(ModValues.Synced(FishTokens).Reason == ModValueReasons.AccessDenied, "another mod cannot read the sample's tokens",
+            ModValues.Synced(FishTokens).Reason);
         c.Instruct("Press F9: the Fishing window opens. The HUD (top right) shows a line \"Fishing Lv ... | ... XP | ... tokens\". " +
                    "Type /fishing-catch in chat twice. Press continue.");
         await c.Verdict();
         c.Expect(await c.Until(() => ModValues.Synced(FishXp) is { Ok: true, Value.Value: >= 50 }, TimeSpan.FromSeconds(30), "two catches"),
             "the XP went up by 25 per catch on the client's copy");
-        var xp = ModValues.Synced(FishXp).Value;
-        var tokens = ModValues.Synced(FishTokens).Value;
-        if (xp is not null && tokens is not null)
+        if (ModValues.Synced(FishXp).Value is { } xp)
         {
-            c.Expect(before is null || tokens.ValueRevision > before.ValueRevision, "the tokens' revision advanced", $"{before?.ValueRevision} -> {tokens.ValueRevision}");
-            c.Instruct($"The HUD line and the window should read exactly: \"Fishing Lv {xp.Level} | {ModValues.Format(xp)} XP | {ModValues.Format(tokens)} tokens\" " +
-                       $"(revision {tokens.ValueRevision}). Is that what you see?");
+            c.Instruct($"The HUD line and the window should start with exactly \"Fishing Lv {xp.Level} | {ModValues.Format(xp)} XP | \" and show " +
+                       "your tokens after it (the HUD line is drawn as the fishing mod: its tokens are visible to it alone). Is that what you see?");
             await c.Verdict();
         }
         c.Instruct("Click \"Buy bait\" in the Fishing window (or type /fishing-buy-bait). You get a message; if the bait item " +

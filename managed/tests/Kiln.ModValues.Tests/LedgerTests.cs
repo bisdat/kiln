@@ -349,7 +349,8 @@ public sealed class LedgerTests
         r.Ledger.ProjectAll();
         Assert.Equal(world, r.Store.Read(Partition.World, a, "fish"));
         Assert.Equal(500, r.Ledger.Read("fish", a, K("fish:cx")).Value!.Value);
-        Assert.Equal(r.Store.Read(Partition.CarriedAuthority, a, "fish"), r.Store.Read(Partition.Projection, a, "fish"));
+        // the forged entry has no carry epoch of this definition: the authority's value replaces it; the World id is gone
+        Assert.DoesNotContain("\"99999\"", r.Store.Read(Partition.Projection, a, "fish")!);
         Assert.DoesNotContain("coins", r.Store.Read(Partition.Projection, a, "fish")!);
         r.Ledger.Import(a, [new OfferEntry("fish:cx", 800, ModValueKind.Experience, 0, 1, 1)]);
         r.Store.Write(Partition.Projection, a, "fish", "{}");  // and a replace after the merge
@@ -380,6 +381,73 @@ public sealed class LedgerTests
         Assert.Equal(0, r.Ledger.Read("hunt", a, K("hunt:coins")).Value!.Value);
         Assert.NotNull(r.Store.Read(Partition.World, a, "fish"));
         Assert.NotNull(r.Store.Read(Partition.World, a, "hunt"));
+    }
+    // ---- review round 1: the carried copy (blocker 1), the epoch of a World value moved into Carried (14) ----
+
+    private const string Copy900 = "{\"schema\":1,\"partitionRevision\":\"4\",\"entries\":{\"cx\":{\"raw\":\"900\",\"valueRevision\":\"4\",\"definitionVersion\":1,\"kind\":\"experience\",\"scale\":0,\"carryEpoch\":1,\"definitionFingerprint\":\"\",\"priorLevel\":2}}}";
+    private static readonly ModValueOptions CarriedXp = new(ModValueKind.Experience, "XP", Thresholds: [0, 10], Persistence: ModValuePersistence.Carried, TrustClientImports: true);
+
+    [Fact]
+    public void ACopyWithoutAnAuthorityRecordHereIsLeftAsItIs()
+    {
+        var r = new Rig();
+        r.Define("fish", "cx", CarriedXp);
+        var a = new CharacterKey(0x1111222233334444, Guid.NewGuid());   // offline: no authority record in this world
+        r.Store.Write(Partition.Projection, a, "fish", Copy900);
+        r.Store.Write(Partition.Projection, a, "gone-mod", Copy900);     // a mod this world does not hold
+        r.Ledger.ProjectAll();
+        Assert.Equal(Copy900, r.Store.Read(Partition.Projection, a, "fish"));
+        Assert.Equal(Copy900, r.Store.Read(Partition.Projection, a, "gone-mod"));
+    }
+
+    [Fact]
+    public void AFreshAuthorityRecordNeverLowersTheImportedCopy()
+    {
+        var r = new Rig();
+        r.Define("fish", "cx", CarriedXp);
+        var a = new CharacterKey(0x1111222233334444, new Guid(9, 0, 0x4000, 0x80, 0, 0, 0, 0, 0, 0, 9));
+        r.Store.Write(Partition.Projection, a, "fish", Copy900);  // the player's copy came in (generic import) before its stats offer
+        r.Live.Add(a);
+        r.Ledger.Touch(a);                                         // its first ready step: the authority starts at 0
+        Assert.Equal(0, r.Ledger.Read("fish", a, K("fish:cx")).Value!.Value);
+        Assert.Contains("\"900\"", r.Store.Read(Partition.Projection, a, "fish")!);
+        // the stats offer was refused (or never came): later writes still do not lower the player's copy
+        r.Ledger.Change("fish", a, K("fish:cx"), ChangeOp.Add, 5, null, 0);
+        r.Ledger.ProjectAll();
+        Assert.Equal(5, r.Ledger.Read("fish", a, K("fish:cx")).Value!.Value);
+        Assert.Contains("\"900\"", r.Store.Read(Partition.Projection, a, "fish")!);
+        // an accepted offer raises the authority, and the copy follows the higher of the two
+        r.Ledger.Import(a, [new OfferEntry("fish:cx", 900, ModValueKind.Experience, 0, 1, 1)]);
+        Assert.Equal(900, r.Ledger.Read("fish", a, K("fish:cx")).Value!.Value);
+    }
+
+    [Fact]
+    public void TheCopyDropsWorldIdsAndPassesUnknownOnesThrough()
+    {
+        var r = new Rig();
+        r.Define("fish", "cx", CarriedXp);
+        r.Define("fish", "coins", Coins);
+        var a = r.Join(1);
+        r.Store.Write(Partition.Projection, a, "fish", Copy900.Replace("\"entries\":{", "\"entries\":{\"coins\":{\"raw\":\"5000\",\"kind\":\"currency\"},\"legacy\":{\"raw\":\"7\",\"kind\":\"counter\"},"));
+        r.Ledger.ProjectAll();
+        var copy = r.Store.Read(Partition.Projection, a, "fish")!;
+        Assert.DoesNotContain("coins", copy);
+        Assert.Contains("legacy", copy);
+        Assert.Equal(0, r.Ledger.Read("fish", a, K("fish:coins")).Value!.Value);
+    }
+
+    [Fact]
+    public void AWorldValueMovedIntoCarriedKeepsItsValueUnderAHigherEpoch()
+    {
+        var r = new Rig();
+        r.Define("fish", "p", new ModValueOptions(ModValueKind.Counter, "P"));
+        var a = r.Join(1);
+        r.Ledger.Change("fish", a, K("fish:p"), ChangeOp.Add, 40, null, 0);
+        r.Defs.Retire("fish");
+        r.Define("fish", "p", new ModValueOptions(ModValueKind.Counter, "P", Persistence: ModValuePersistence.Carried, TrustClientImports: true,
+            Version: 2, CarryEpoch: 3, AllowPartitionMove: true));
+        var v = r.Ledger.Read("fish", a, K("fish:p"));
+        Assert.Equal((true, 40L, 3u), (v.Ok, v.Value!.Value, v.Value.CarryEpoch));
     }
 }
 

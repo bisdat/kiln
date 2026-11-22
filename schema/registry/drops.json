@@ -1,0 +1,74 @@
+{
+  "$schema": "../registry-schema.schema.json",
+  "registrySchema": 1,
+  "registry": "drops",
+  "typeName": "DropTable",
+  "version": "0.1.0",
+  "stability": "experimental",
+  "experimentalId": "KILNX031",
+  "doc": "The game's drop tables (default inventories): what a container, an enemy or a plant gives, with counts and chances.",
+  "ids": {
+    "game": "game:<stable name>",
+    "mod": "<mod id>:<name>",
+    "rule": "Drop tables have no names in the game. A table that templates use is named after the first of them in name order, in lower case (game:lootcontainer_enemy_scavenger_melee01); a table no template uses is game:drops_<first 8 hex digits of its GUID>. When two tables would get the same name, the one that held it first keeps it and the other is game:<name>~<first 8 hex digits of its GUID>. A table's GUID also selects it (as data packs' drops section does today)."
+  },
+  "traits": {},
+  "fields": {
+    "entries": {
+      "type": "list",
+      "maxItems": 4096,
+      "applies": "now",
+      "ops": "list",
+      "doc": "The table's stacks in walk order (root group first, then its groups). Index i in a field path (entries[3].chance) is that order.",
+      "of": {
+        "type": "struct",
+        "fields": {
+          "item": {
+            "type": "ref",
+            "registry": "items",
+            "readOnly": true,
+            "doc": "The item. Given when an entry is appended; read-only afterwards."
+          },
+          "count": {
+            "type": "struct",
+            "fields": {
+              "min": {
+                "type": "int",
+                "min": 0,
+                "max": 1000000,
+                "ops": "number"
+              },
+              "max": {
+                "type": "int",
+                "min": 0,
+                "max": 1000000,
+                "ops": "number"
+              }
+            },
+            "typeName": "DropEntryCount"
+          },
+          "chance": {
+            "type": "float",
+            "min": 0,
+            "max": 1,
+            "ops": "number",
+            "doc": "The chance the entry drops."
+          },
+          "weight": {
+            "type": "float",
+            "min": 0,
+            "max": 1000000,
+            "ops": "number",
+            "doc": "The weight of the entry in a group that picks one."
+          }
+        },
+        "typeName": "DropEntry"
+      }
+    }
+  },
+  "entry": {
+    "add": false,
+    "remove": false
+  },
+  "raw": "allowed"
+}

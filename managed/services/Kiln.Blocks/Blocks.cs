@@ -343,6 +343,7 @@ internal sealed class ModBlocks(string id, ulong owner)
         PlayerTriggers.Forget(Id);
         LootRuntime.Forget(Id);
         AffixRuntime.Forget(Id);
+        RoutineRegistry.Forget(Id);
         RarityRollRuntime.Forget(Id);
         ItemUpgrades.Forget(Id);
         MoveApplications.Forget(Id);

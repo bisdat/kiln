@@ -10,23 +10,30 @@
 
 namespace kc::gear {
 
-int base_power(int level) {
-    const float x = kSeed * kCreep * static_cast<float>(level) + kSeed;  // float, as the game (and Kiln.Blocks) computes it
+int base_power(int level, const Constants& c) {
+    const float x = c.seed * c.creep * static_cast<float>(level) + c.seed;  // float, as the game (and Kiln.Blocks) computes it
     return static_cast<int>(static_cast<long long>(x));
 }
+int base_power(int level) { return base_power(level, Constants{}); }
 
-int power_of(double dmg_mod, double speed_mod, int level) {
-    const float x = static_cast<float>(base_power(level)) * static_cast<float>(dmg_mod) * static_cast<float>(speed_mod);
+int power_of(double dmg_mod, double speed_mod, int level, const Constants& c) {
+    const float x = static_cast<float>(base_power(level, c)) * static_cast<float>(dmg_mod) * static_cast<float>(speed_mod);
     return x <= 0 ? 0 : static_cast<int>(x);
 }
+int power_of(double dmg_mod, double speed_mod, int level) { return power_of(dmg_mod, speed_mod, level, Constants{}); }
 
-double dmg_mod_for(int power, int level, double speed_mod) { return (power + 0.5) / (base_power(level) * speed_mod); }
+double dmg_mod_for(int power, int level, double speed_mod, const Constants& c) { return (power + 0.5) / (base_power(level, c) * speed_mod); }
+double dmg_mod_for(int power, int level, double speed_mod) { return dmg_mod_for(power, level, speed_mod, Constants{}); }
 
-int armor_of(double share, int level) {
-    return static_cast<int>(std::lround((kArmorGradient * static_cast<float>(level) + kArmorOffset) * static_cast<float>(share)));
+int armor_of(double share, int level, const Constants& c) {
+    return static_cast<int>(std::lround((c.armor_gradient * static_cast<float>(level) + c.armor_offset) * static_cast<float>(share)));
 }
+int armor_of(double share, int level) { return armor_of(share, level, Constants{}); }
 
-double armor_share_for(int armor, int level) { return armor / (static_cast<double>(kArmorGradient) * level + kArmorOffset); }
+double armor_share_for(int armor, int level, const Constants& c) {
+    return armor / (static_cast<double>(c.armor_gradient) * level + c.armor_offset);
+}
+double armor_share_for(int armor, int level) { return armor_share_for(armor, level, Constants{}); }
 
 namespace {
 
