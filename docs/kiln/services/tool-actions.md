@@ -72,7 +72,10 @@ are loaded. Global shutdown first closes action admission and drains in-flight p
 packages in reverse order. A bounded drain timeout leaves their storage resident and admission closed.
 Normal tool-mod removal does not tear down shared hooks. The native build uses `/EHa`; native Windows tests
 also inject a structured exception in a continuation and verify that the policy and original arguments restore.
-A failed continuation is not replayed by the binding.
+A failed continuation is not replayed by the binding. An unexpected continuation fault latches `tools.actions`,
+`tools.actions.remove` and `tools.actions.add` unavailable with reason `Faulted` until the process restarts. Further
+strokes, including held repeats, are refused because the failed call may have partially committed. Existing undo
+guards stay installed; normal engine refusals do not latch this fault.
 
 ## Real-game checks
 

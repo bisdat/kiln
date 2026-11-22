@@ -14,6 +14,8 @@ void kiln_tools_impact_world(uintptr_t authoritative_world) noexcept;
 bool kiln_tools_impact_close() noexcept;
 void kiln_tools_impact_uninstall() noexcept;
 bool kiln_tools_actions_ready(uint32_t mode) noexcept;
+// An unexpected continuation fault permanently closes tool admission, without removing existing undo guards.
+bool kiln_tools_actions_faulted() noexcept;
 uint64_t kiln_tools_actions_dispatched() noexcept;
 uint64_t kiln_tools_actions_refused() noexcept;
 // Production callback exposed privately for native host tests; it never invokes managed code.

@@ -217,7 +217,8 @@ extern "C" bool kiln_tools_payment_install(const KilnApi* api, KilnOwner owner) 
         return false;
     }
     hook_owner = api->owner_create(text("kiln.tools.payment"));
-    if (!hook_owner) {
+    if (!hook_owner || hook_owner == owner) {
+        hook_owner = 0; // A bad owner factory must never let this package hook or retire the parent.
         report(api, owner, false, "terrain payment hook owner could not be created");
         return false;
     }

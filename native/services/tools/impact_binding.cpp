@@ -7,6 +7,7 @@
 #include "impact_binding.h"
 #include "impact_args.h"
 #include "internal.h"
+#include "qualified_entry.h"
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -29,7 +30,7 @@ const KilnHooksApi* hooks=nullptr;
 KilnToolAreaCheck area_check=nullptr;
 int64_t area_offset=-1;
 std::atomic<uintptr_t> server_world{};
-std::atomic<bool> installed{}, accepting{};
+std::atomic<bool> installed{}, accepting{}, continuation_faulted{};
 std::atomic<uint32_t> inflight{};
 std::mutex drain_gate;
 std::condition_variable drained;
@@ -79,10 +80,14 @@ bool prepare(const kab::NativeCtx* ctx,const kab::ArgSlice* args,uint32_t mode,k
 bool continue_guarded(KilnHookCall2* call,uintptr_t* result) {
 #ifdef _WIN32
     __try {
+#else
+    try {
 #endif
         *result=hooks->call_original2(call); return true;
 #ifdef _WIN32
     } __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
+#else
+    } catch (...) { return false; }
 #endif
 }
 struct RestoreArgs {
@@ -143,8 +148,9 @@ void kiln_tools_unbind_programs(KilnOwner owner,uint32_t tool) noexcept {
         installed.store(false,std::memory_order_release);
     }
 }
+bool kiln_tools_actions_faulted() noexcept {return continuation_faulted.load(std::memory_order_acquire);}
 bool kiln_tools_actions_ready(uint32_t mode) noexcept {
-    if(!installed.load(std::memory_order_acquire) || !area_check || !kiln_tools_hook_installed(KILN_TOOL_HOOK_EDGE_CHECK) ||
+    if(kiln_tools_actions_faulted() || !installed.load(std::memory_order_acquire) || !area_check || !kiln_tools_hook_installed(KILN_TOOL_HOOK_EDGE_CHECK) ||
        !kiln_tools_hook_installed(KILN_TOOL_HOOK_HISTORY_COST))return false;
     if(mode==KILN_TOOL_POLICY_REMOVE)return kiln_tools_hook_installed(KILN_TOOL_HOOK_KERNEL_FILTER) &&
         kiln_tools_hook_installed(KILN_TOOL_HOOK_BUILDING_SUPPRESS);
@@ -194,7 +200,7 @@ uintptr_t KILN_CALL kiln_tools_impact_detour(KilnHookCall2* call,void*) {
             if((brush.item==copy.used_item || binding->tool==copy.used_item) &&
                static_cast<double>(static_cast<float>(brush.radius))==copy.radius)brush_ok=true;
         if(!brush_ok || !area_check(zones,copy.actor,copy.hit,copy.radius) ||
-           !binding->live.load(std::memory_order_acquire))return refuse(call);
+           !binding->live.load(std::memory_order_acquire) || kiln_tools_actions_faulted())return refuse(call);
         kt::ToolPolicyScope scope(binding->policy);
         if(!kiln_tools_active_policy())return refuse(call); // allocation failed: never unscoped generic terraform
         RestoreArgs restore{call,call->args[1],call->args[2]};
@@ -202,19 +208,29 @@ uintptr_t KILN_CALL kiln_tools_impact_detour(KilnHookCall2* call,void*) {
         call->args[2]=reinterpret_cast<uintptr_t>(&copy.context);
         uintptr_t result=0;
         // Catch native faults before returning through RAII. Never replay the continuation after a partial edit.
-        if(!continue_guarded(call,&result))return refuse(call);
+        if(!continue_guarded(call,&result)) {
+            // The engine may have committed part of this stroke. Keep undo/history resident, but never admit another
+            // tool action in this process, including held repeats or a later family/impact reinstallation.
+            continuation_faulted.store(true,std::memory_order_release);
+            accepting.store(false,std::memory_order_release);
+            return refuse(call);
+        }
         dispatched.fetch_add(1,std::memory_order_relaxed);
         return result;
     } catch (...) {return refuse(call);}
 }
 bool kiln_tools_impact_install(const KilnApi* api,KilnOwner owner,KilnToolAreaCheck check) noexcept {
-    if(!api || !owner || !check)return false;
+    if(!api || !owner || !check || kiln_tools_actions_faulted())return false;
     auto* h=static_cast<const KilnHooksApi*>(api->service({KILN_HOOKS_SERVICE,sizeof(KILN_HOOKS_SERVICE)-1},2));
     uintptr_t address=0;int64_t offset=-1;
     if(!h || h->header.size<offsetof(KilnHooksApi,unsubscribe_owner_retiring)+sizeof(h->unsubscribe_owner_retiring) ||
        !h->detour2 || !h->call_original2 || !h->subscribe_owner_retiring || !h->unsubscribe_owner_retiring ||
        api->symbol({"gameplay/TerraformImpact",24},&address)!=KILN_OK ||
        api->constant({"tools/area.access_zones",23},&offset)!=KILN_OK || offset<0 || offset>0x1000)return false;
+    // Common fixed prefix on the qualified client/server entries; never inspect the registry-patched live bytes.
+    constexpr uint8_t entry[]={0x4c,0x89,0x44,0x24,0x18,0x48,0x89,0x4c,0x24,0x08,
+        0x55,0x53,0x56,0x41,0x55,0x41,0x56,0x41,0x57};
+    if(!kt::qualified_entry(h,address,entry))return false;
     hooks=h;area_check=check;area_offset=offset;
     if(h->subscribe_owner_retiring(owner,&owner_retired,nullptr,&owner_watch)!=KILN_OK)return false;
     // Run outside gameplay/rules: both see the copied generic arguments and retain their normal protections.

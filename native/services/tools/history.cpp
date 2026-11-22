@@ -3,6 +3,7 @@
 #include <cstring>
 #include "history.h"
 #include "history_create.h"
+#include "qualified_entry.h"
 #include "kiln_hook.hpp"
 #include "include/kiln_tools_policy.h"
 
@@ -72,6 +73,10 @@ bool kiln_tools_history_install(const KilnApi* api, KilnOwner owner) {
     if (api->symbol(str("tools/HistoryBegin"), &begin) != KILN_OK || !begin ||
         api->symbol(str("tools/HistoryDiscard"), &discard) != KILN_OK || !discard ||
         api->constant(str("tools/history.materials"), &materials) != KILN_OK || materials != 0x110) return false;
+    // Both the hooked allocator and the direct discard call must retain qualified executable entries.
+    constexpr uint8_t begin_entry[]={0x48,0x89,0x5c,0x24,0x08,0x48,0x89,0x6c,0x24,0x10,0x48,0x89,0x74,0x24,0x18};
+    constexpr uint8_t discard_entry[]={0x48,0x89,0x5c,0x24,0x10,0x48,0x89,0x6c,0x24,0x18,0x57,0x41,0x56,0x41,0x57};
+    if(!kt::qualified_entry(hooks,begin,begin_entry) || !kt::qualified_entry(hooks,discard,discard_entry))return false;
     // Rules can be absent; then there are no building multipliers to suppress. If it is present, require the exact
     // bridge on this build instead of silently allowing a doubled refund or waived yield takeback.
     const HMODULE rules = GetModuleHandleW(L"kiln-rules.dll");

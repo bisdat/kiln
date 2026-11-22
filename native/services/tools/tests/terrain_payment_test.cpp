@@ -35,10 +35,11 @@ KilnHandle next_handle = 0, builder_handle = 0, wrapper_handle = 0;
 std::string revoke_order;
 KilnOwner created_owner = 100;
 int owners_created = 0, owners_retired = 0;
-bool fail_owner_create = false, lifecycle_ok = true;
+bool fail_owner_create = false, parent_owner = false, lifecycle_ok = true;
 KilnOwner KILN_CALL owner_create(KilnStr name) {
     lifecycle_ok &= std::string_view(name.ptr, name.len) == "kiln.tools.payment";
     if (fail_owner_create) return 0;
+    if (parent_owner) return 1;
     ++owners_created; return ++created_owner;
 }
 void KILN_CALL owner_revoke(KilnOwner owner) {
@@ -233,6 +234,10 @@ int main() {
     api.owner_revoke = &owner_revoke; hooks.revoke_owner = nullptr;
     check(!kiln_tools_payment_install(&api, 1) && !reported, "missing hook-owner retirement refuses");
     hooks.revoke_owner = &revoke_owner;
+    parent_owner = true;
+    check(!kiln_tools_payment_install(&api, 1) && !reported && lifecycle_ok,
+          "a parent returned as child is refused without hooking or revoking it");
+    parent_owner = false;
     check(kiln_tools_payment_install(&api, 1) && reported, "both detours install before cost is available");
     mapped = false;
     check(!kiln_tools_payment_install(&api, 1) && !reported && builder == &vanilla_builder && wrapper == &vanilla_wrapper,

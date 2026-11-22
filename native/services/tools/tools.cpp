@@ -56,7 +56,7 @@ uint32_t session_state() {
 }
 kt::ActionAvailability availability(uint32_t mode) {
     return kt::action_availability(api!=nullptr,lifecycle.load() && kiln_tools_actions_ready(mode),
-        session_state(),world.load()!=0);
+        session_state(),world.load()!=0,kiln_tools_actions_faulted());
 }
 void report_caps() {
     const auto remove=availability(KILN_TOOL_POLICY_REMOVE),add=availability(KILN_TOOL_POLICY_ADD);

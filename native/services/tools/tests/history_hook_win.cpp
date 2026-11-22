@@ -5,6 +5,7 @@
 #include "services/kiln_hooks.h"
 #include <windows.h>
 #include <limits>
+#include <initializer_list>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -20,6 +21,23 @@ using BeginFn = uintptr_t (*)(uintptr_t, uintptr_t);
 BeginFn hooked = nullptr;
 KilnWorldEventFn world_callback = nullptr;
 KilnHooksApi hooks{};
+uint32_t live_code = KILN_CODE_ORIGINAL;
+bool wrong_original = false, original_unreadable = false, state_unreadable = false;
+uintptr_t bad_target = 0;
+void discard_original(uintptr_t storage);
+KilnResult KILN_CALL read_original(uintptr_t target, void* out, size_t size) {
+    constexpr uint8_t begin[] = {0x48,0x89,0x5c,0x24,0x08,0x48,0x89,0x6c,0x24,0x10,0x48,0x89,0x74,0x24,0x18};
+    constexpr uint8_t discard[] = {0x48,0x89,0x5c,0x24,0x10,0x48,0x89,0x6c,0x24,0x18,0x57,0x41,0x56,0x41,0x57};
+    if (original_unreadable || size != sizeof(begin)) return KILN_ERR_UNAVAILABLE;
+    std::memcpy(out, target == reinterpret_cast<uintptr_t>(&discard_original) ? discard : begin, size);
+    if (wrong_original) static_cast<uint8_t*>(out)[0] ^= 1;
+    return KILN_OK;
+}
+KilnResult KILN_CALL code_state(uintptr_t target, size_t, uint32_t* state, uint64_t* generation) {
+    if (state_unreadable) return KILN_ERR_UNAVAILABLE;
+    *state = target == bad_target ? KILN_CODE_FOREIGN : live_code; *generation = 1;
+    return KILN_OK;
+}
 
 void check(bool value, const char* message) {
     if (!value) { std::fprintf(stderr, "FAIL: %s\n", message); std::exit(1); }
@@ -113,6 +131,27 @@ int main(int argc, char** argv) {
     api.subscribe_world = &subscribe_world; api.owner_create = &owner_create; api.owner_revoke = &owner_revoke;
     api.service = &service;
     hooks.header = {sizeof hooks, 2}; hooks.raw_detour = &detour; hooks.revoke = &revoke; hooks.revoke_owner = &revoke_owner;
+    hooks.read_original = &read_original; hooks.code_state = &code_state;
+    for (auto state : {KILN_CODE_FOREIGN, KILN_CODE_UNKNOWN}) {
+        live_code = state;
+        check(!kiln_tools_history_install(&api, 99), "unqualified history code refuses");
+    }
+    live_code = KILN_CODE_ORIGINAL;
+    for (auto target : {reinterpret_cast<uintptr_t>(&begin_original), reinterpret_cast<uintptr_t>(&discard_original)}) {
+        bad_target = target;
+        check(!kiln_tools_history_install(&api, 99), "each history seam independently refuses foreign code");
+    }
+    bad_target = 0; wrong_original = true;
+    check(!kiln_tools_history_install(&api, 99), "wrong history prologue refuses"); wrong_original = false;
+    original_unreadable = true;
+    check(!kiln_tools_history_install(&api, 99), "unreadable original history code refuses"); original_unreadable = false;
+    state_unreadable = true;
+    check(!kiln_tools_history_install(&api, 99), "unknown history provenance refuses"); state_unreadable = false;
+    hooks.read_original = nullptr;
+    check(!kiln_tools_history_install(&api, 99), "missing original code API refuses"); hooks.read_original = &read_original;
+    hooks.code_state = nullptr;
+    check(!kiln_tools_history_install(&api, 99), "missing provenance API refuses"); hooks.code_state = &code_state;
+    live_code = KILN_CODE_MANAGED;
     check(!kiln_tools_history_install(nullptr, 99), "missing core refuses");
     feature_on = false;
     check(!kiln_tools_history_install(&api, 99), "missing history capability refuses");
