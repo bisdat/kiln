@@ -1528,6 +1528,10 @@ export interface UpdateStatus {
   skipped: string | null;
   /** This start follows an update the launcher installed (until updateAck). */
   justUpdated: { from: string; to: string; at: string; source: string; notes: string | null } | null;
+  /** (0.2.0-dev.30.5) The Kiln runtime this launcher ships, once the backend read it: the only one that goes into the
+   *  game by itself after an update (shell/updateApply.ts). Null before that, in a build without one, and in the Nexus
+   *  build; absent from older backends. */
+  shippedRuntime?: string | null;
   taskId: TaskId | null;
   error: KilnError | null;
   /** (dev.29) The channel this build belongs to: a test build's is "beta" (baked in when it was built), else the

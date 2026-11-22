@@ -109,8 +109,11 @@ const NO_STEAM = MODE === "no-steam";
 const games: GameInstall[] = FRESH ? [] : [steamGame];
 const baseReceipt = receiptExample as unknown as InstallReceipt;
 const kilnProxy: ProxyClass = { kind: "kiln", version: "0.2.0-dev", abi: 2, sha256: hex("proxy"), size: 98304, detail: "export KilnProxyInfo" };
+/** `?upgrade=<bundle version>`: the game's Kiln is older than that bundle from the start (InstallState.upgradeAvailable), as
+ *  on the first start after a launcher update that brought a newer runtime. */
+const UPGRADE_SEED = typeof location !== "undefined" ? new URLSearchParams(location.search).get("upgrade") : null;
 const runtime: Record<string, InstallState> = FRESH ? {} : {
-  "client-steam": { installed: true, receipt: baseReceipt, proxy: kilnProxy, modified: [], upgradeAvailable: null },
+  "client-steam": { installed: true, receipt: baseReceipt, proxy: kilnProxy, modified: [], upgradeAvailable: UPGRADE_SEED },
 };
 const running: Record<string, { pid: number; mode: LaunchRequest["mode"]; nonce: string | null; at: number; profile: string | null;
   /** A scripted start (mockProgress.ts): the process exists from then, boot.json is written at `bootAt`. */
@@ -118,6 +121,8 @@ const running: Record<string, { pid: number; mode: LaunchRequest["mode"]; nonce:
 /** The fake game's process as the status sees it: a scripted start's exists only once Steam has started it. */
 const live = (gameId: string) => { const r = running[gameId]; return r && (!r.from || Date.now() >= r.from) ? r : null; };
 let pidSeq = 4100;
+/** Starts launch_begin began whose game process has not come yet (the update's restart waits for them). */
+const startsBegun = new Set<string>();
 /** How long profile_activate takes to answer. */
 const ACTIVATE_MS = 1500;
 /** The next runtime install fails with this message as an `io` error, or with this whole error (a `permission` error with
@@ -736,6 +741,8 @@ function launch(gameId: string, req: LaunchRequest): LaunchResult {
   let backup: SaveBackup | null = null;
   if (!req.skipBackup && req.mode !== "vanilla") backup = makeBackup(gameId, "launch", null, profile);
   running[gameId] = { pid, mode: req.mode, nonce, at: Date.now(), profile };
+  // the start's process is the game's now (a scripted one's comes at its `from`: still starting until then)
+  startsBegun.delete(gameId);
   launched.add(gameId);
   if (stop) setTimeout(() => {
     const ended = Date.now();
@@ -783,6 +790,7 @@ function mockCrash(gameId = "client-steam") {
 export function mockStopGame(gameId = "client-steam") {
   if (!running[gameId]) return;
   running[gameId] = null;
+  startsBegun.delete(gameId);
   mockStartEnded(gameId);
   emitGame(gameId, "stopped");
 }
@@ -1671,7 +1679,12 @@ const handlers: Record<string, Handler> = {
   // launch
   launch_play: (a) => launch(S(a.gameId), a.request as LaunchRequest),
   // what a start is doing (mockProgress.ts): only a scripted start has a timeline; a plain one is a dev.26 runtime's
-  launch_begin: (a) => { gameOf(S(a.gameId)); mockBegin(S(a.gameId), S(a.mode)); return null; },
+  launch_begin: (a) => {
+    gameOf(S(a.gameId)); mockBegin(S(a.gameId), S(a.mode));
+    // a start the backend tracks until the game's process is there (commands/launch.rs start_tracked)
+    if (S(a.mode) === "vanilla") startsBegun.delete(S(a.gameId)); else startsBegun.add(S(a.gameId));
+    return null;
+  },
   launch_progress: (a) => {
     const g = S(a.gameId);
     const t = mockProgress(g);
@@ -1679,7 +1692,7 @@ const handlers: Record<string, Handler> = {
     if (t && noProxy && t.phase === "legacy") t.phase = "waiting";
     return t;
   },
-  launch_end: (a) => { mockStartEnded(S(a.gameId)); return null; },
+  launch_end: (a) => { mockStartEnded(S(a.gameId)); startsBegun.delete(S(a.gameId)); return null; },
   // the check before Play
   launch_prepare: (a) => sfPrepare(S(a.gameId), a.request as LaunchRequest),
   launch_confirm: (a) => sfConfirm(S(a.gameId), S(a.token), a.request as LaunchRequest),
@@ -1848,7 +1861,13 @@ const handlers: Record<string, Handler> = {
   modpack_dismiss: (a) => { if (lastServer && (lastServer.server.id ?? "") === S(a.serverId)) dismissedOffers[S(a.serverId)] = dismissKey(lastServer); return null; },
 };
 Object.assign(handlers, adminMockHandlers(mockEmit));
-Object.assign(handlers, updateMockHandlers(mockEmit, MOCK_DISTRIBUTION, () => settings.updateChannel));
+// the update's restart waits while a game starts (launch_begin and no process yet, a scripted start before its process
+// exists), not while one runs (selfupdate.rs restart_refusal)
+Object.assign(handlers, updateMockHandlers(mockEmit, MOCK_DISTRIBUTION, () => settings.updateChannel, () => {
+  for (const g of [...startsBegun]) if (live(g)) startsBegun.delete(g);
+  const starting = startsBegun.size > 0 || Object.keys(running).some((g) => !!running[g] && !live(g));
+  return starting ? { code: "busy", message: "The game is starting: restart into the update once it runs, or once the start is over." } : null;
+}));
 Object.assign(handlers, deckMockHandlers(handlers));
 // the Discord features: the relay, Discord and the Discord app, faked (./mockCommunity.ts, `?discord=` flags)
 Object.assign(handlers, communityMockHandlers({ emit: mockEmit, gameRunning: () => Object.keys(running).some((g) => !!live(g)) }));

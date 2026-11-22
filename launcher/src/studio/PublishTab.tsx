@@ -13,6 +13,7 @@ import { useCommunityUi } from "../community/state";
 import { copyText, crucibleError, shortLink, useCrucibleStatus } from "../crucible/state";
 import { Banner, Button, Field, Modal, Select, TextArea, TextInput, fmtAgo, pickPaths, runTask, toast } from "../ui";
 import { analyze, refreshStudio, sk, toneWord, useAnalysisOf } from "./state";
+import { useMarkUnsaved } from "../shell/unsaved";
 
 export default function PublishTab({ studio: st, gameId }: { studio: Studio; gameId: GameId | null }) {
   const t = useT();
@@ -40,6 +41,8 @@ export default function PublishTab({ studio: st, gameId }: { studio: Studio; gam
   const request = { version, changes: changes.trim() || null, visibility: vis, attest, gameBuilds: tested && build ? [build] : [], fresh: gone };
   const needs = useQuery({ queryKey: ["studio_publish_check", s.id, request, s.updated], queryFn: () => api.studioPublishCheck(s.id, request), retry: false });
   const summaryDirty = (summary.trim() || null) !== (s.summary ?? null);
+  // typed and not saved or published yet: the launcher update's own restart waits (shell/unsaved.ts)
+  useMarkUnsaved("studio", summaryDirty || changes !== (s.changes ?? ""));
   const publish = async () => {
     setBusy(true);
     setDone(null);
@@ -48,6 +51,8 @@ export default function PublishTab({ studio: st, gameId }: { studio: Studio; gam
       const r = await runTask<StudioPublishResult>(() => api.studioPublish(s.id, request, gameId), { quiet: true });
       setDone(r);
       setGone(false);
+      // published: the backend cleared the source's notes, and the typed ones are no unsaved work any more
+      setChanges("");
       setVisNeeds(r.needs);
       refreshStudio(qc, s.id);
       const copied = await copyText(r.pack.url);
