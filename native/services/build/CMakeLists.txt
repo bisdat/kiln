@@ -1,5 +1,5 @@
 kiln_service(build build.cpp voxel.cpp shapes.cpp props.cpp policy.cpp regions.cpp transient.cpp transient_journal.cpp debug.cpp seh.cpp
-              voxel_tasks.cpp voxel_tasks_hold.cpp)
+              voxel_tasks.cpp voxel_tasks_hold.cpp block_ops.cpp block_runtime.cpp block_engine_win.cpp)
 # The task-thread voxel members use kiln.internal.engine's write gate (Kiln-internal, same tree).
 target_include_directories(kiln-build PRIVATE "${CMAKE_SOURCE_DIR}/services/engine/include")
 # Windows test of the task-thread voxel grid's fault paths (native on a Windows runner, or headless Wine), built explicitly

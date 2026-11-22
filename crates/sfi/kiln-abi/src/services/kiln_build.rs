@@ -4,6 +4,29 @@
 use crate::*;
 pub use super::kiln_spawn::*;
 pub type KilnVoxel = u16;
+pub const KILN_BUILD_BLOCK_AIR: i32 = 0;
+pub const KILN_BUILD_BLOCK_BASE: i32 = 20;
+pub const KILN_BUILD_BLOCK_BUILDING: i32 = 2;
+pub const KILN_BUILD_BLOCK_FAULTED: i32 = 21;
+pub const KILN_BUILD_BLOCK_INVALID: i32 = 16;
+pub const KILN_BUILD_BLOCK_NONE: i32 = 0;
+pub const KILN_BUILD_BLOCK_NOT_LOADED: i32 = 18;
+pub const KILN_BUILD_BLOCK_NO_SESSION: i32 = 9;
+pub const KILN_BUILD_BLOCK_OFFLINE: i32 = 8;
+pub const KILN_BUILD_BLOCK_SYMBOL_MISSING: i32 = 1;
+pub const KILN_BUILD_BLOCK_TERRAIN: i32 = 1;
+pub const KILN_BUILD_BLOCK_UNVERIFIED: i32 = 22;
+pub const KILN_BUILD_BLOCK_WRONG_SIDE: i32 = 4;
+pub const KILN_BUILD_BLOCK_WRONG_THREAD: i32 = 17;
+pub const KILN_BUILD_BLOCK_ZONE: i32 = 19;
+pub const KILN_BUILD_BREAK_DROPS: i32 = 2;
+pub const KILN_BUILD_BREAK_INSTANT: i32 = 1;
+pub const KILN_BUILD_BREAK_R_MAY_HAVE_CHANGED: i32 = 1;
+pub const KILN_BUILD_BREAK_R_VERIFIED: i32 = 2;
+pub const KILN_BUILD_BREAK_TERRAIN: i32 = 8;
+pub const KILN_BUILD_BREAK_WORLD: i32 = 4;
+pub const KILN_BUILD_FIND_PLAYER_TERRAIN: i32 = 1;
+pub const KILN_BUILD_FIND_TERRAIN: i32 = 2;
 pub const KILN_BUILD_F_ALLOW_ALTARS: i32 = 4;
 pub const KILN_BUILD_F_DRY_RUN: i32 = 16;
 pub const KILN_BUILD_F_IN_BASES: i32 = 2;
@@ -22,6 +45,9 @@ pub const KILN_BUILD_PROPS_SAVED: i32 = 2;
 pub const KILN_BUILD_PROP_ALTAR: i32 = 2;
 pub const KILN_BUILD_PROP_PLACED: i32 = 1;
 pub const KILN_BUILD_PROP_SAVED: i32 = 4;
+pub const KILN_BUILD_PROVENANCE_NATURAL: i32 = 1;
+pub const KILN_BUILD_PROVENANCE_PLAYER: i32 = 0;
+pub const KILN_BUILD_PROVENANCE_UNKNOWN: i32 = -1;
 pub const KILN_BUILD_R_BASE: i32 = 8;
 pub const KILN_BUILD_R_CHANGED: i32 = 1;
 pub const KILN_BUILD_R_DRY_RUN: i32 = 32;
@@ -174,6 +200,56 @@ pub struct KilnBuildGridSpec {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
+pub struct KilnBuildBlockInfo {
+    pub size: u32,
+    pub refusal: u32,
+    pub kind: u32,
+    pub material: u32,
+    pub fill: u32,
+    pub provenance: i32,
+    pub hardness: i32,
+    pub health: i32,
+    pub damage: i32,
+    pub reserved: u32,
+    pub center: KilnVec3,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct KilnBuildBreak {
+    pub size: u32,
+    pub flags: u32,
+    pub origin: [i32; 3],
+    pub dims: [u32; 3],
+    pub damage: [i32; 5],
+    pub reserved: u32,
+    pub materials: [u8; 32],
+    pub selection: *const u8,
+    pub actor: KilnEntity,
+    pub build_flags: u32,
+    pub origin_mod: KilnStr,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct KilnBuildBreakResult {
+    pub size: u32,
+    pub refusal: u32,
+    pub flags: u32,
+    pub reserved: u32,
+    pub considered: u64,
+    pub damaged: u64,
+    pub removed: u64,
+    pub dropped: u64,
+    pub protected_cells: u64,
+    pub unknown_cells: u64,
+    pub unbreakable_cells: u64,
+    pub excluded_cells: u64,
+    pub write: KilnBuildResult,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
 pub struct KilnBuildApi {
     pub header: KilnServiceHeader,
     pub status: Option<unsafe extern "C" fn(*mut KilnBuildStatus) -> KilnResult>,
@@ -195,4 +271,7 @@ pub struct KilnBuildApi {
     pub terrain_budget_reserve: Option<unsafe extern "C" fn(u32, u32) -> KilnResult>,
     pub terrain_budget_charge: Option<unsafe extern "C" fn(f64)>,
     pub grid_for_session: Option<unsafe extern "C" fn(KilnOwner, u64, KilnStr, *mut KilnBuildGridSpec) -> KilnResult>,
+    pub block_at: Option<unsafe extern "C" fn(KilnVec3, *mut KilnBuildBlockInfo) -> KilnResult>,
+    pub find_wall: Option<unsafe extern "C" fn(KilnVec3, KilnVec3, u32, *mut KilnBuildBlockInfo) -> KilnResult>,
+    pub break_box: Option<unsafe extern "C" fn(*const KilnBuildBreak, *mut KilnBuildBreakResult) -> KilnResult>,
 }
