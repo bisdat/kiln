@@ -240,7 +240,7 @@ internal static partial class Compiler
             throw new BlockError(ctx.Block, f["recipe.".Length..], e.Problem);
         }
         low.Json["recipeOf"] = item;
-        return new BlockHandle<RecipeBlock>(ctx.Mod.Id, name, BlockIds.Derive(ctx.Mod.Id, "recipe", key), $"{ctx.Mod.Id}.{name}", r);
+        return new BlockHandle<RecipeBlock>(ctx.Mod.Id, name, r.Identity?.Guid ?? BlockIds.Derive(ctx.Mod.Id, "recipe", key), $"{ctx.Mod.Id}.{name}", r);
     }
 }
 

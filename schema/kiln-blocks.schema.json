@@ -816,8 +816,20 @@
         "output": { "$ref": "#/$defs/itemRef", "description": "What it makes: in a station's list of recipes, and in a recipes block of its own, where it is needed. Elsewhere a recipe makes the block it is on." },
         "sheltered": { "type": "boolean", "description": "A player crafts it only under a roof. A station that works on its own never checks a roof, so its recipes refuse it." },
         "comfort": { "type": "integer", "minimum": 0, "description": "The comfort level it asks of whoever makes it." },
-        "needsProps": { "type": "array", "maxItems": 8, "items": { "type": "string", "minLength": 1 }, "description": "Props that have to stand near a manual station: blocks with provides, by name (\"other-mod:name\" for another mod's). The game's automated factory path has no nearby-prop context, so factory block recipes refuse this field." }
+        "needsProps": { "type": "array", "maxItems": 8, "items": { "type": "string", "minLength": 1 }, "description": "Props that have to stand near a manual station: blocks with provides, by name (\"other-mod:name\" for another mod's). The game's automated factory path has no nearby-prop context, so factory block recipes refuse this field." },
+        "identity": { "$ref": "#/$defs/identity" }
       },
+      "additionalProperties": false
+    },
+    "identity": {
+      "type": "object",
+      "description": "A fixed GUID (and so game id) in place of the one Kiln derives, for an item or recipe another loader made: one of legacy and legacyId (since 0.2.0-dev.30.5).",
+      "properties": {
+        "legacy": { "type": "string", "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", "description": "The GUID the other loader gave it; the game id is FNV-1a of it." },
+        "legacyId": { "anyOf": [{ "type": "integer", "minimum": 1, "maximum": 4294967295 }, { "type": "string", "pattern": "^0[xX][0-9a-fA-F]{1,8}$" }], "description": "Only the game id, when the GUID is not known." }
+      },
+      "minProperties": 1,
+      "maxProperties": 1,
       "additionalProperties": false
     },
     "spell": {
@@ -1236,7 +1248,8 @@
         "flow": { "type": "number", "minimum": 0.25, "maximum": 8, "description": "How fast a water container fills and pours (at a lake, a well or a barrel, onto crops and soil), as a multiple of the game's own: what one step moves, 32 for the can, 16 for the pouch, about 20 steps a second. The game has no rate for filling alone. Default: 1." },
         "recipe": { "$ref": "#/$defs/recipe" },
         "loot": { "$ref": "#/$defs/loot" },
-        "was": { "$ref": "#/$defs/name" }
+        "was": { "$ref": "#/$defs/name" },
+        "identity": { "$ref": "#/$defs/identity" }
       },
       "additionalProperties": false
     },

@@ -424,6 +424,9 @@ public sealed record ItemBlock : IBlock, ITweakable
     public LootBlock? Loot { get; init; }
     /// <inheritdoc cref="WeaponBlock.Was"/>
     public string? Was { get; init; }
+    /// <summary>A fixed GUID (and so game id) in place of the one Kiln derives from the mod and the name: <c>BlockIdentity.Legacy(guid)</c>, for an item another loader
+    /// made, so the stacks players have are this item. Null: derived. Since 0.2.0-dev.30.5 (mod API 0.2.14).</summary>
+    public BlockIdentity? Identity { get; init; }
 
     /// <summary>Game fields this block does not cover, set on the item it makes: <c>Tweak = { { GameFields.Items.MaxStackSize, 5 } }</c>. It wins over what the block sets.</summary>
     [JsonConverter(typeof(ItemTweakConverter))]
@@ -574,6 +577,9 @@ public sealed record RecipeBlock : IBlock
     /// the prop is not near is refused. This is for manual stations: the game's automated factory craft path has no nearby-prop context, so factory recipes refuse this field.
     /// The prop's block has to be in the game's table first: see <see cref="PropBlock.Provides"/>.</summary>
     public IReadOnlyList<PropRef>? NeedsProps { get; init; }
+    /// <summary>A fixed GUID (and so recipe id) in place of the one Kiln derives: <c>BlockIdentity.Legacy(guid)</c>, for a recipe another loader made. Null: derived.
+    /// Since 0.2.0-dev.30.5 (mod API 0.2.14).</summary>
+    public BlockIdentity? Identity { get; init; }
 }
 
 public static partial class Stations

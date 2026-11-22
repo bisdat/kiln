@@ -270,6 +270,8 @@ internal sealed class ModBlocks(string id, ulong owner)
     public readonly ConcurrentDictionary<Guid, (string Key, byte[] Blob, string Listing)> Programs = new();
     public readonly List<string> Errors = new();
     public readonly List<string> Warnings = new();
+    /// <summary>The legacy ids this mod's blocks hold (kind "item" / "recipe", id) -> the block's label (Items/BlockIdentity.cs).</summary>
+    public readonly ConcurrentDictionary<(string Kind, uint Id), string> Identities = new();
     /// <summary>The text of VFX blocks read from data files, by name, until each is compiled: what the boot build read.</summary>
     public readonly Dictionary<string, string> VfxRaw = new();
     /// <summary>Templates carrying a VFX, defined once for the mod however many blocks play it.</summary>

@@ -464,6 +464,10 @@ internal static partial class Compiler
 
     // ---- recipes ------------------------------------------------------------------------------------------------
 
+    /// <summary>A recipe's GUID: its legacy identity (claimed), or the one derived from its key.</summary>
+    private static Guid RecipeGuid(BlockContext ctx, string key, RecipeBlock r, string path) =>
+        LegacyIdentities.Claim(ctx, "recipe", r.Identity, $"{path}.identity", BlockIds.Derive(ctx.Mod.Id, "recipe", key));
+
     /// <summary>A recipe that makes <paramref name="item"/>. <paramref name="at"/>: the station, when the block's list says it, not the recipe; with a workshop of its own, the item that
     /// places it, which names that workshop in a player's game. <paramref name="needsTime"/>: a workshop of its own has no recipes of the game to take a time from, and a cycle of no
     /// time would run every step. Burns are inputs: fuel is an input in the game's data too.</summary>
@@ -512,7 +516,7 @@ internal static partial class Compiler
         if (props.Count > 0) low.Json["needsProps"] = new JsonArray(props.Select(x => (JsonNode)new JsonObject { ["id"] = $"0x{x.Id:x8}", ["index"] = x.Index }).ToArray());
         low.Recipe(new RecipeDefinition
         {
-            Guid = BlockIds.Derive(ctx.Mod.Id, "recipe", key), Name = name, Station = station, Menu = menu, StationItem = stationItem, Inputs = inputs,
+            Guid = RecipeGuid(ctx, key, r, path), Name = name, Station = station, Menu = menu, StationItem = stationItem, Inputs = inputs,
             Outputs = [new RecipeIngredient(item, r.Makes)], Duration = r.Seconds is { } d ? TimeSpan.FromSeconds(d) : null, Fields = fields.Count > 0 ? fields : null,
             Props = props.Count > 0 ? props : null,
         });

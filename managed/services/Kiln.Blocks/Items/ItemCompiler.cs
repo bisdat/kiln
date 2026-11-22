@@ -66,7 +66,8 @@ internal static partial class Compiler
         public readonly Lowered Low = low;
         public readonly string Key = key, Name = name, Starter = starter;
         public readonly string Game = $"{ctx.Mod.Id}.{name}";
-        public readonly Guid Guid = BlockIds.Derive(ctx.Mod.Id, "item", key);
+        /// <summary>The derived GUID, or the block's legacy identity (set right after the draft is made).</summary>
+        public Guid Guid = BlockIds.Derive(ctx.Mod.Id, "item", key);
         public readonly Dictionary<string, object> Fields = new();
         public readonly Dictionary<string, string> Refs = new();
         public readonly JsonObject Rules = new();
@@ -729,6 +730,7 @@ internal static partial class Compiler
         var healPotion = kind == ItemKind.Consumable && b.Heals != null;
         var starter = kind == ItemKind.Tool ? b.Tool!.Harvests.Starter : healPotion ? "Consumable_Potion_Health_T1" : kind.Starter;
         var d = new Draft(ctx, low, key, name, starter) { Texts = b.Texts, Held = kind == ItemKind.Tool ? HeldIn.OneHand : HeldIn.None };
+        d.Guid = LegacyIdentities.Claim(ctx, "item", b.Identity, "identity", d.Guid);
         if (b.Stack is { } stack) d.Fields["maxStackSize"] = stack;
         ApplyVisual(d, b.Visual, "visual");
         ApplyLoot(d, b.Loot);

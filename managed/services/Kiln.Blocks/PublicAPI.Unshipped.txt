@@ -1,1 +1,17 @@
 #nullable enable
+Kiln.BlockIdentity
+Kiln.BlockIdentity.<Clone>$() -> Kiln.BlockIdentity!
+Kiln.BlockIdentity.Equals(Kiln.BlockIdentity? other) -> bool
+Kiln.BlockIdentity.Guid.get -> System.Guid
+Kiln.BlockIdentity.Id.get -> uint
+Kiln.ItemBlock.Identity.get -> Kiln.BlockIdentity?
+Kiln.ItemBlock.Identity.init -> void
+Kiln.RecipeBlock.Identity.get -> Kiln.BlockIdentity?
+Kiln.RecipeBlock.Identity.init -> void
+override Kiln.BlockIdentity.GetHashCode() -> int
+override Kiln.BlockIdentity.ToString() -> string!
+override Kiln.BlockIdentity.Equals(object? obj) -> bool
+static Kiln.BlockIdentity.Legacy(System.Guid guid) -> Kiln.BlockIdentity!
+static Kiln.BlockIdentity.Legacy(uint id) -> Kiln.BlockIdentity!
+static Kiln.BlockIdentity.operator !=(Kiln.BlockIdentity? left, Kiln.BlockIdentity? right) -> bool
+static Kiln.BlockIdentity.operator ==(Kiln.BlockIdentity? left, Kiln.BlockIdentity? right) -> bool
