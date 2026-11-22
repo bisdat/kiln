@@ -13,7 +13,8 @@ namespace Kiln;
 internal static unsafe class ItemRemap
 {
     private static readonly object Gate = new();
-    private static readonly List<PeerSelector> Selectors = [];
+    private static readonly List<Selection> Selectors = [];
+    internal static Func<(int KilnOnly, int WithoutLook)>? OfflineItems;
     private static bool _started, _required;
     private static IDisposable? _admission;
     private static int _tick;
@@ -41,14 +42,26 @@ internal static unsafe class ItemRemap
     /// <summary>Kiln's own rule plus the mods' (RemapItems).</summary>
     internal static IDisposable AddSelector(PeerSelector peers)
     {
-        lock (Gate) Selectors.Add(peers);
-        return new Unregister(() => { lock (Gate) Selectors.Remove(peers); });
+        var selection = new Selection(peers);
+        lock (Gate) Selectors.Add(selection);
+        if (ModContext.CurrentMod is { } mod) mod.Retiring += selection.Dispose;
+        return selection;
     }
 
-    private sealed class Unregister(Action a) : IDisposable
+    private sealed class Selection(PeerSelector peers) : IDisposable
     {
-        private Action? _a = a;
-        public void Dispose() => Interlocked.Exchange(ref _a, null)?.Invoke();
+        public PeerSelector Peers { get; } = peers;
+
+        public void Dispose()
+        {
+            lock (Gate) Selectors.Remove(this);
+        }
+    }
+
+    internal static void EndOfflineSession()
+    {
+        OfflineItems = null;
+        lock (Gate) Selectors.Clear();
     }
 
     internal static ReplRemapStats Stats()
@@ -56,6 +69,9 @@ internal static unsafe class ItemRemap
         var s = new ReplNetNative.RemapStats { Size = (uint)sizeof(ReplNetNative.RemapStats) };
         var t = ReplNetNative.T;
         if (t != null) t->RemapStatsFn(&s);
+        if (OfflineItems?.Invoke() is { } items)
+            return new ReplRemapStats(s.Sites != 0 && s.Running != 0, (int)s.Sites, items.KilnOnly, items.WithoutLook,
+                (long)s.Snapshots, (long)s.Remapped, (long)s.Zeroed, (long)s.Faults);
         return new ReplRemapStats(_active && s.Running != 0, _sites, _kilnOnly, _withoutLook, (long)s.Snapshots, (long)s.Remapped, (long)s.Zeroed,
             (long)s.Faults);
     }
@@ -156,24 +172,40 @@ internal static unsafe class ItemRemap
     /// <summary>Every step (tick thread): the table every 2 s (content can grow at any time), the peers every step.</summary>
     internal static void Tick()
     {
-        if (!_required) Require();  // also when the remap cannot run: then it refuses (a no-op where nobody joins)
         var t = ReplNetNative.T;
+        if (OfflineItems is not null)
+        {
+            // The harness scripts the remap inputs. It still uses the mod selectors and the vanilla peer rule.
+            if (t != null && (t->Capabilities() & ReplNetNative.CapRemap) != 0)
+                PublishPeers(t, SelectedPeers());
+            return;
+        }
+        if (!_required) Require();  // also when the remap cannot run: then it refuses (a no-op where nobody joins)
         if (_tick++ % 120 == 0 || ItemsChanged()) RefreshTable(t);
         if (t != null && _active) Watch(t);
         KickVanilla();
         if (!_active || t == null) return;
-        // peers: Kiln's rule and the mods'
+        var now = SelectedPeers();
+        if (now.AsSpan().SequenceEqual(_lastPeers)) return;
+        _lastPeers = now;
+        PublishPeers(t, now);
+    }
+
+    private static uint[] SelectedPeers()
+    {
         List<PeerSelector> selectors;
-        lock (Gate) selectors = [Peers.LackingContent, .. Selectors];
+        lock (Gate) selectors = [Peers.LackingContent, .. Selectors.Select(s => s.Peers)];
         var set = new SortedSet<uint>();
         var machines = MachinePeers();
         foreach (var sel in selectors)
             foreach (var id in ExpandAll(FilterHost.PeersOf(sel), machines))
                 set.Add(id);
-        var now = set.Count == 0 ? new uint[] { 0 } : set.ToArray();
-        if (now.AsSpan().SequenceEqual(_lastPeers)) return;
-        _lastPeers = now;
-        fixed (uint* p = now) t->RemapPeers(p, (uint)now.Length);
+        return set.Count == 0 ? [0] : set.ToArray();
+    }
+
+    private static void PublishPeers(ReplNetNative.Table* t, uint[] peers)
+    {
+        fixed (uint* p = peers) t->RemapPeers(p, (uint)peers.Length);
     }
 
     /// <summary>A client without Kiln is let in only while no Kiln-only item exists or the remap works.</summary>

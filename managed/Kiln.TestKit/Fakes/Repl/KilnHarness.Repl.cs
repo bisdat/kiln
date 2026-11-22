@@ -93,11 +93,13 @@ public sealed class HarnessRepl
     /// <paramref name="peer"/> (kiln.net's peer id).</summary>
     /// <exception cref="ArgumentException">A bad machine or peer, or the peer is connected already.</exception>
     /// <exception cref="InvalidOperationException">The slot is taken.</exception>
-    public void Connect(uint machine, uint peer)
+    public void Connect(uint machine, uint peer) => Connect(machine, peer, null);
+
+    internal void Connect(uint machine, uint peer, NetPeer? net)
     {
         if (machine is < 1 or > 16) throw new ArgumentException("machine is 1 to 16 (0 is the server, or a hosted world's own client)", nameof(machine));
         if (peer == 0 || peer == ReplAbi.AllMachines) throw new ArgumentException("not a peer handle", nameof(peer));
-        Put(machine, peer, 0);
+        Put(machine, peer, 0, net);
     }
 
     /// <summary>A lab's loopback fake on machine slot <paramref name="machine"/>: its peer is
@@ -119,14 +121,14 @@ public sealed class HarnessRepl
         Put(0, peer, ReplAbi.PeerLocal);
     }
 
-    private void Put(uint machine, uint peer, byte flags)
+    private void Put(uint machine, uint peer, byte flags, NetPeer? net = null)
     {
         var st = State;
         lock (st.Lock)
         {
             if (st.MachineOf(peer) >= 0) throw new ArgumentException($"peer 0x{peer:x} is connected already", nameof(peer));
             if (st.Machines[machine] is not null) throw new InvalidOperationException($"machine {machine} has a peer (Leave it first)");
-            st.Machines[machine] = new ReplFakeState.Machine { Peer = peer, Flags = flags };
+            st.Machines[machine] = new ReplFakeState.Machine { Peer = peer, Flags = flags, Net = net };
             st.ClearRows((int)machine);
         }
     }
@@ -174,17 +176,31 @@ public sealed class HarnessRepl
 
     /// <summary>The server sends <paramref name="peer"/> a create or update message about an entity in this frame. The
     /// counters count it while some owner holds them; a watch of the entity on that peer (or every peer) gets it at the
-    /// start of the next step.</summary>
+    /// start of the next step, with any filters and item remap applied.</summary>
     /// <exception cref="ArgumentException">The peer is not connected, a bad channel, or a component not in the registry.</exception>
     public void Send(uint peer, FakeReplMessage message)
     {
         ArgumentNullException.ThrowIfNull(message);
+        _harness.Call(() => SendSnapshot(peer, message));
+    }
+
+    private void SendSnapshot(uint peer, FakeReplMessage message)
+    {
         var st = State;
+        var ch = ChannelIndex(message.Channel);
+        int m;
+        ReplFakeState.Machine mach;
+        IReadOnlyList<(FakeReplComponent Component, byte[] Bytes)> comps;
         lock (st.Lock)
         {
-            var m = MachineOf(st, peer);
-            var ch = ChannelIndex(message.Channel);
-            var comps = Resolve(st, message);
+            m = MachineOf(st, peer);
+            mach = st.Machines[m]!;
+            comps = Resolve(st, message);
+        }
+        ReplNetFake.ApplySnapshot(_harness, st, m, mach, message, comps);
+        lock (st.Lock)
+        {
+            if (!ReferenceEquals(st.Machines[m], mach)) return;
             var row = Frame(st, m, ch);
             if (row is not null)
             {
@@ -193,7 +209,6 @@ public sealed class HarnessRepl
                 if (message.Kind == FakeReplKind.Create) row.Creates++;
                 else row.Updates++;
             }
-            var mach = st.Machines[m]!;
             if (!Watched(st, message.Entity.Value, ReplAbi.Send, (uint)m)) return;  // the watch hooks copy only a watched entity
             var gap = message.Gap || st.GapNext[m, ch];
             st.GapNext[m, ch] = false;

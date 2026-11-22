@@ -26,6 +26,8 @@
     <InternalsVisibleTo Include="Kiln.Blocks" />
     <InternalsVisibleTo Include="Kiln.Build" />
     <InternalsVisibleTo Include="Kiln.Replication" />
+    <!-- Scripted peer identities for the kiln.repl.net recording fake. -->
+    <InternalsVisibleTo Include="Kiln.TestKit" />
     <InternalsVisibleTo Include="AdmissionHoldTest" />
     <!-- the contract tests: the rows' names -->
     <InternalsVisibleTo Include="Kiln.Contract.Tests" />

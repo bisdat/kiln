@@ -412,6 +412,36 @@ public void FilledChestsPulseGreen()
   offline: the game's journal and knowledge (`kiln.knowledge`), quest markers (`kiln.questmark`), the game's own skill
   tree (`kiln.skills`, `GameTree`) and the game's levels and points (`kiln.progression`).
 
+### Replication filters, touches, item remap and message hooks
+
+Register fixture components with `kiln.Repl.AddComponent` and connect the peers your mod should see.
+`kiln.Repl.ConnectFake` adds a vanilla loopback peer, and `kiln.Repl.ConnectLocal` adds a hosted world's own client.
+`kiln.ReplNet.Connect` returns a `NetPeer` for message hooks and `Replication.Inject`. Pass `vanilla: false` to
+stand in for a ready Kiln peer with current content.
+
+- **Filters.** Register `Replication.Filter<T>` from the mod or with `kiln.Run`. Step to refresh selector membership,
+  then call `kiln.Repl.Send(peerId, message)` for each peer. The next step delivers the resulting component bytes
+  through `Replication.Watch`. Filters run in priority order on each peer's own copy of the scripted snapshot.
+  `FilterContext.TryRead` reads components that the test put in `kiln.Entities`.
+- **Touch.** Assert the result of `Replication.Touch` and inspect `kiln.ReplNet.Touches` for the requested entity
+  IDs in call order. Script another `Send` to test what a fresh snapshot would contain.
+- **Item remap.** Call `kiln.ReplNet.ConfigureItemRemap` with the fixture's item ID fields, game item IDs and
+  look-alikes, then step to resolve the peers. Vanilla peers receive look-alikes or zero for non-game IDs.
+  A mod can select additional peers with `Replication.RemapItems`. Remapping runs after filters, and
+  `Replication.RemapStats()` reports the sites and counters from the fixture.
+- **Messages.** Register `Replication.OnMessage` on the tick thread, then call
+  `kiln.ReplNet.DriveMessage(peerId, channel, direction, bytes)`. It returns the resulting bytes or `null` for a
+  dropped message. A joined-client harness uses peer ID zero for the server. `kiln.ReplNet.Injections` records copies
+  of the bytes requested through `Replication.Inject`, including refused requests. Set `kiln.ReplNet.ValidateSend`
+  to supply a scripted verdict for injects and send rewrites. Without a verdict, an inject returns a refusal and a
+  send rewrite falls back to the original bytes. Use `DriveMessage` to exercise the hooks independently of an inject.
+
+Scripted sends run synchronously on the harness tick thread and cover byte transformations. The game controls
+worker-thread execution, relevance, baselines, transport and automatic re-sends, so those require a game test.
+Filter registrations that request automatic source-change invalidation on the client channel are unavailable
+offline. Sidecars need the game transport and relevance tracking, and `Encode`, `Decode` and schema inspection
+need the game's codec. For a hosted harness, message hooks model the server half.
+
 ## One test body, two runners
 ```csharp
 public sealed class MeterTests
@@ -520,7 +550,7 @@ time with them sees almost none pass between steps, and an `await Task.Delay(...
 | Outlines in the world | recording fake | `kiln.render`, `ui.world_outline` | Ui.World.Outline's own code on the kit's kiln.render v2: each request is recorded with its entity, colour, pulse, priority and duration (KilnHarness.Outlines.All, Live, Of, Showing); at the start of the next step the native rules decide its state: on one entity the highest priority, then the newest, shows and the others wait (Outshone); the game's own highlight shows instead (GameHighlight) unless the player's setting is mods-first; off keeps every request waiting; an entity without a model waits (HideModel); two colours at once and a third shares the nearest (ColorShared); a duration ends on the harness's virtual time. Despawn and EndWorld end requests, SetState pins one. Offline: the game's highlight itself, RenderFrameEvent's drawing (the draw functions do nothing; Render.Available is false without kiln.ui) and the camera (render.camera). |
 | Network inspector (Replication) | recording fake | `kiln.repl`, `repl.observe`, `repl.client`, `repl.loopback` | Kiln.Replication's own code on the kit's kiln.repl: the test connects peers to machine slots (KilnHarness.Repl.Connect, ConnectFake, ConnectLocal) and scripts what the server sends them (Send, Destroy, Drop, Count) and what a client receives (Receive, ReceiveDestroy). Replication.Stats holds the counters per owner (the first hold of all starts them from 0, a mod's unload lets go) and reads one row per peer and channel; Replication.Watch and the receive side's watches get one event per message at the start of the next step with the full component values by name (the registry the test adds, AddComponent; names from kiln.types where the kit has it, else #index), Gap after Drop, DESTROYED then ENDED, and ENDED 'id reused' (ReuseId), 'peer left' (Leave) and 'world stopped' (StopWorld, the harness's end) as the last event; Replication.Component reads the registry from the first step. NetPeer stays null on events and rows (the kit has no kiln.net peers): PeerId, Local and Fake say who. The kit's mods run on the server side, so Replication.WatchReceived reports repl.client off (wrong side); the receive watches are faked on a client-side harness only. Offline: the game's send path, codecs and sizes, the capture file (repl capture), the loopback harness (repl.loopback, kiln.repl.lab) |
 | kiln.repl.lab | unavailable | `kiln.repl.lab` | no fake: the loopback harness's payloads and hook cost exist only on a lab server running the game |
-| kiln.repl.net | unavailable | `kiln.repl.net` | no fake yet: sidecar tracking, per-peer filters, touch, the item remap, message hooks and the game's codec answer unavailable in the kit (repl.sidecar, repl.filter, repl.touch, repl.itemremap, repl.messages, repl.schema report off); they run on a lab server with the loopback harness (mods/tests/repl-test) |
+| kiln.repl.net | recording fake | `kiln.repl.net`, `repl.filter`, `repl.touch`, `repl.itemremap`, `repl.messages`, `repl.sidecar`, `repl.schema` | KilnHarness.Repl.Send runs per-peer component filters and scripted item remapping. Watches see the resulting bytes. KilnHarness.ReplNet records touch and inject requests and drives message hooks. Sidecars, the game codec and the simulation that schedules and transports replication are unavailable offline. |
 | Villager routines | recording fake | `kiln.routines`, `routines.decisions` | Kiln.Blocks' Routines (Assign, Remove, Resume, Inspect) and both routine events on the kit's kiln.routines: one owner per villager (named by NpcId), changes queued and committed at the start of the next step, each completed once in that step, 256 queued changes and then QueueFull, revisions per world, OwnedBy/NotAssigned/Revoked/WorldStopped as the service answers them; the harness's end stops the world (teardown events). The villager's decisions are the test's (KilnHarness.Routines: SetClock, Decide, Finish, SetSleepAllowed); within one step assignment events come before task events. Offline: the game's villager worker, its chooser and sleep check (nothing chooses by itself), manual suspension (S5), restore after a restart |
 | Terrain | recording fake | `kiln.terrain`, `terrain.overlays`, `terrain.baked`, `terrain.biomes` | Kiln.Terrain's own code on an in-memory world (KilnHarness.Terrain): flat ground, the cells a test sets, base boxes, one ledger per mod and world id, and Kiln's witness of the kept plans with the world file's revision (SaveWorld, LoseLedger: a lost ledger is refused, a first install over matching ground is not). Inspect, Apply, Forget and Applied run as in the game: batches, the ledger's rules, conflicts, Terrain.Changed. Not modelled: streaming (tiles are loaded unless the test says not), the game's save itself (the ledger lives in the harness, not in the fake kiln.saves), kiln.build's own events (its transient journal is modelled: Restart puts transient cells back), and time: from code that is not a mod's, every batch runs in the same step. terrain.baked and terrain.biomes are off, as in the game. |
 | The game's inventory slots | recording fake | `kiln.ui.inventory`, `ui.slots.click`, `ui.slots.inspect`, `ui.inventory.panels` | Ui.Inventory's own code on the kit's kiln.ui.inventory: OnClick handlers subscribe with their button, exact modifiers and Take; a test draws a screen's slots (KilnHarness.UiInventory.Draw), hovers one (Hovered) and clicks it (Click): only on a screen with a pointer, the matching handlers get the click with the slot's item and entity, Taken when one asked for it. Marks and MarkWhen rules are Kiln.Ui's (MarkOf: what a drawn slot would show); Ui.Values.Slots reads the drawn frame. The screen a Draw draws on is the open one: Ui.Inventory.Screen and ScreenChanged follow it (OpenBackpack, OpenChest with the chest's entity, CloseScreen), and PanelsShown names the AddPanel panels that would show there (their screens and When). Offline: the game's drawing and hooks, the pixel mapping (no panel is drawn or placed), the 250 ms frame age. |

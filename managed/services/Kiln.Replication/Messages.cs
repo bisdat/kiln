@@ -311,6 +311,18 @@ internal static unsafe class MessageHost
     private static readonly List<(Box Box, long At)> Retiring = [];
     private static IDisposable? _tick;
 
+    internal static void EndOfflineSession(bool tickStopped)
+    {
+        lock (Gate)
+        {
+            foreach (var box in Live.ToArray()) box.Dispose();
+            if (!tickStopped) return;
+            foreach (var (box, _) in Retiring)
+                if (box.Self.IsAllocated) box.Self.Free();
+            Retiring.Clear();
+        }
+    }
+
     internal static void Track(Box box)
     {
         lock (Gate)
@@ -371,7 +383,7 @@ internal static unsafe class MessageHost
     {
         try
         {
-            foreach (var p in Network.Peers)
+            foreach (var p in FilterHost.ReadNetPeers())
                 if (p.Id == id) return p;
         }
         catch (Exception)

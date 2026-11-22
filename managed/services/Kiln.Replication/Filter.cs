@@ -149,6 +149,23 @@ internal static unsafe class FilterHost
     private static IDisposable? _tick;
     internal const int Machines = 17;  // KILN_REPL_MACHINES
     private static NetPeer?[] _byMachine = new NetPeer?[Machines];
+    internal static Func<IReadOnlyList<NetPeer>>? OfflinePeers;
+
+    internal static IReadOnlyList<NetPeer> ReadNetPeers() => OfflinePeers?.Invoke() ?? Network.Peers;
+
+    internal static void EndOfflineSession(bool tickStopped)
+    {
+        OfflinePeers = null;
+        Volatile.Write(ref _byMachine, new NetPeer?[Machines]);
+        lock (Gate)
+        {
+            foreach (var box in Live.ToArray()) box.Dispose();
+            if (!tickStopped) return;
+            foreach (var (box, _) in Retiring)
+                if (box.Self.IsAllocated) box.Self.Free();
+            Retiring.Clear();
+        }
+    }
 
     public static Invoker InvokerOf<T>() where T : unmanaged => Invoke<T>;
 
@@ -220,7 +237,11 @@ internal static unsafe class FilterHost
         {
             box.Self.Free();
             if (rc == ReplNative.Unavailable)
+            {
+                if (OfflinePeers is not null && sources.Length > 0 && (channels & ReplNetNative.ClientChannel) != 0)
+                    throw ReplicationCaps.Off(ReplicationCaps.Touch, "the test kit does not schedule sends when filter sources change");
                 throw ReplicationCaps.Off(sources.Length > 0 ? ReplicationCaps.Touch : ReplicationCaps.Filter, "kiln.repl.net refused the filter");
+            }
             throw new ArgumentException($"kiln.repl.net refused a filter on {component} ({rc}): the component does not travel on " +
                 "the selected channels, or 256 filters (16 on one component) are in place");
         }
@@ -264,7 +285,7 @@ internal static unsafe class FilterHost
         var d = new Dictionary<uint, NetPeer>();
         try
         {
-            foreach (var p in Network.Peers) d[p.Id] = p;
+            foreach (var p in ReadNetPeers()) d[p.Id] = p;
         }
         catch (Exception)
         {
@@ -314,10 +335,11 @@ internal static unsafe class FilterHost
             }
             var now = PeersOf(box.Peers);
             if (now.AsSpan().SequenceEqual(box.Last)) continue;
-            box.Last = now;
             var t = ReplNetNative.T;
             if (t == null) continue;
-            fixed (uint* p = now) t->FilterSetPeers(box.Handle, now.Length == 0 ? null : p, (uint)now.Length);
+            fixed (uint* p = now)
+                if (t->FilterSetPeers(box.Handle, now.Length == 0 ? null : p, (uint)now.Length) == ReplNative.Ok)
+                    box.Last = now;
         }
         ItemRemap.Tick();
     }
