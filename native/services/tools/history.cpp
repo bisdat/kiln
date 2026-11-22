@@ -13,6 +13,10 @@ using RegisterExactFn = void(KILN_CALL*)(ExactFn);
 kiln::tools::HistoryTags<> g_tags;
 kiln::RawHook g_begin;
 DiscardFn g_discard = nullptr;
+RegisterExactFn g_register_exact = nullptr;
+const KilnApi* g_api = nullptr;
+const KilnHooksApi* g_hooks = nullptr;
+KilnOwner g_child = 0;
 KilnHandle g_world = 0;
 bool g_installed = false;
 
@@ -33,14 +37,33 @@ void KILN_CALL world_changed(const KilnWorldEvent* event, void*) {
 KilnStr str(const char* text) { return {text, std::strlen(text)}; }
 }
 
+void kiln_tools_history_uninstall() {
+    // The caller has closed/drained policy admission AND quiesced native undo/world jobs. Do not use this for a
+    // mod unregister: its already-recorded native history must keep exact refunds until the world has ended.
+    kiln_tools_report_hook(KILN_TOOL_HOOK_HISTORY_COST, 0);
+    if (g_register_exact) g_register_exact(nullptr);
+    g_register_exact = nullptr;
+    if (g_child && g_hooks) g_hooks->revoke_owner(g_child);
+    if (g_child && g_api) g_api->owner_revoke(g_child);
+    g_child = 0;
+    g_world = 0;
+    g_tags.reset();
+    g_discard = nullptr;
+    g_hooks = nullptr;
+    g_api = nullptr;
+    g_installed = false;
+}
+
 extern "C" KILN_EXPORT bool KILN_CALL kiln_tools_history_exact(const void* materials) {
     return g_tags.exact(reinterpret_cast<uintptr_t>(materials));
 }
 
 bool kiln_tools_history_install(const KilnApi* api, KilnOwner owner) {
     if (g_installed) return true;
-    if (!api || !api->feature || !api->symbol || !api->constant || !api->session || !api->subscribe_world ||
-        !api->feature(str("tools.history"))) return false;
+    if (!api || !owner || !api->feature || !api->symbol || !api->constant || !api->session ||
+        !api->subscribe_world || !api->owner_create || !api->owner_revoke || !api->feature(str("tools.history"))) return false;
+    const auto* hooks = kiln::hooks_v2(api);
+    if (!hooks || !hooks->revoke_owner) return false;
     KilnSessionInfo session{};
     session.size = sizeof session;
     if (api->session(&session) != KILN_OK || !session.lifecycle) return false;
@@ -57,10 +80,22 @@ bool kiln_tools_history_install(const KilnApi* api, KilnOwner owner) {
         register_exact = reinterpret_cast<RegisterExactFn>(GetProcAddress(rules, "kiln_rules_exact_history"));
         if (!register_exact) return false;
     }
-    if (api->subscribe_world(owner, &world_changed, nullptr, &g_world) != KILN_OK) return false;
+    const KilnOwner child = api->owner_create(str("kiln.tools.history"));
+    if (!child || child == owner) return false;
+    g_api = api;
+    g_hooks = hooks;
+    g_child = child;
+    if (api->subscribe_world(child, &world_changed, nullptr, &g_world) != KILN_OK) {
+        kiln_tools_history_uninstall();
+        return false;
+    }
     g_tags.reset();
     g_discard = reinterpret_cast<DiscardFn>(discard);
-    if (!g_begin.install(api, owner, begin, reinterpret_cast<void*>(&history_begin), "tools/HistoryBegin")) return false;
+    if (!g_begin.install(api, child, begin, reinterpret_cast<void*>(&history_begin), "tools/HistoryBegin")) {
+        kiln_tools_history_uninstall();
+        return false;
+    }
+    g_register_exact = register_exact;
     if (register_exact) register_exact(&kiln_tools_history_exact);
     g_installed = true;
     return true;

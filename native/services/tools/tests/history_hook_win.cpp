@@ -8,7 +8,9 @@
 #include <cstring>
 
 namespace {
-int checks = 0, discarded = 0, begins = 0;
+int checks = 0, discarded = 0, begins = 0, owners_retired = 0, revoked = 0;
+bool history_reported = true;
+KilnOwner child_owner = 99;
 bool policy = false, feature_on = true, symbols_on = true, lifecycle = true, hooks_on = true;
 int64_t materials_offset = 0x110;
 uintptr_t next_entry = 0x1000;
@@ -35,7 +37,8 @@ void discard_original(uintptr_t storage) {
 }
 KilnResult KILN_CALL detour(KilnOwner owner, uintptr_t target, const KilnHookOrder*, void* handler,
                             void** original, KilnHandle* out) {
-    check(owner == 99 && target == reinterpret_cast<uintptr_t>(&begin_original), "resolved target and owner reach hook registry");
+    check(owner == child_owner && owner != 99 && target == reinterpret_cast<uintptr_t>(&begin_original),
+          "resolved target and child owner reach hook registry");
     if (!hooks_on) return KILN_ERR_UNAVAILABLE;
     hooked = reinterpret_cast<BeginFn>(handler);
     *original = reinterpret_cast<void*>(&begin_original);
@@ -60,11 +63,27 @@ KilnResult KILN_CALL constant(KilnStr name, int64_t* out) {
 }
 KilnResult KILN_CALL session(KilnSessionInfo* out) { out->lifecycle = lifecycle; return KILN_OK; }
 KilnResult KILN_CALL subscribe_world(KilnOwner owner, KilnWorldEventFn callback, void*, KilnHandle* out) {
-    check(owner == 99, "world reset subscription uses the tools service owner");
+    check(owner == child_owner && owner != 99, "world reset subscription uses only the history child owner");
     world_callback = callback;
     *out = 2;
     return KILN_OK;
 }
+KilnOwner KILN_CALL owner_create(KilnStr name) {
+    check(named(name, "kiln.tools.history"), "history gets a dedicated child owner");
+    return ++child_owner;
+}
+void KILN_CALL owner_revoke(KilnOwner owner) {
+    check(owner == child_owner && owner != 99, "teardown retires only the history child, never the tools parent");
+    ++owners_retired;
+    world_callback = nullptr;
+}
+KilnResult KILN_CALL revoke_owner(KilnOwner owner) {
+    check(owner == child_owner && owner != 99 && !history_reported,
+          "teardown clears capability before revoking only the child owner's hooks");
+    ++revoked;
+    return KILN_OK;
+}
+KilnResult KILN_CALL revoke(KilnHandle) { return KILN_OK; }
 void world(uint32_t kind, uint32_t event) {
     KilnWorldEvent ev{};
     ev.size = sizeof ev; ev.kind = kind; ev.event = event;
@@ -79,12 +98,18 @@ const KilnToolPolicyView* kiln_tools_active_policy() {
     return policy ? reinterpret_cast<const KilnToolPolicyView*>(1) : nullptr;
 }
 
+void kiln_tools_report_hook(uint32_t hook, int installed) {
+    check(hook == KILN_TOOL_HOOK_HISTORY_COST, "teardown reports only the native history hook");
+    history_reported = installed != 0;
+}
+
 int main() {
     KilnApi api{};
     api.size = sizeof api; api.abi_version = KILN_ABI_VERSION;
     api.feature = &feature; api.symbol = &symbol; api.constant = &constant; api.session = &session;
-    api.subscribe_world = &subscribe_world; api.service = &service;
-    hooks.header = {sizeof hooks, 2}; hooks.raw_detour = &detour;
+    api.subscribe_world = &subscribe_world; api.owner_create = &owner_create; api.owner_revoke = &owner_revoke;
+    api.service = &service;
+    hooks.header = {sizeof hooks, 2}; hooks.raw_detour = &detour; hooks.revoke = &revoke; hooks.revoke_owner = &revoke_owner;
     check(!kiln_tools_history_install(nullptr, 99), "missing core refuses");
     feature_on = false;
     check(!kiln_tools_history_install(&api, 99), "missing history capability refuses");
@@ -96,8 +121,10 @@ int main() {
     check(!kiln_tools_history_install(&api, 99), "unobservable world teardown refuses");
     lifecycle = true; hooks_on = false;
     check(!kiln_tools_history_install(&api, 99), "hook installation failure refuses");
+    check(owners_retired == 1, "failed hook installation releases its world subscription");
     hooks_on = true;
     check(kiln_tools_history_install(&api, 99) && hooked && world_callback, "native history hook installs");
+    history_reported = true;  // the parent reports successful installation
     check(kiln_tools_history_install(&api, 99), "history installation is idempotent");
     policy = true;
     check(hooked(0xabc, 0xdef) == 0x1000 && kiln_tools_history_exact(list(0x1000)), "tool add native history is exact");
@@ -124,5 +151,18 @@ int main() {
     check(!kiln_tools_history_exact(list(next_entry)), "refused history cannot create an exact refund identity");
     world(KILN_WORLD_SERVER, KILN_WORLD_STARTED);
     check(!kiln_tools_history_exact(list(0x200)), "new server session cannot inherit old identities");
+    next_entry = 0x1000;
+    check(hooked(0xabc, 0xdef) == next_entry && kiln_tools_history_exact(list(next_entry)),
+          "remaining tool history stays exact before global teardown");
+    kiln_tools_history_uninstall();
+    check(!kiln_tools_history_exact(list(next_entry)) && !history_reported && revoked == 2 && owners_retired == 2,
+          "global quiesced teardown revokes hook, subscription, tags and capability");
+    kiln_tools_history_uninstall();
+    check(revoked == 2 && owners_retired == 2, "global teardown is idempotent");
+    policy = false;
+    check(hooked(0xabc, 0xdef) == next_entry, "a retained vanilla continuation remains safe after revoke");
+    check(kiln_tools_history_install(&api, 99), "history can install again after complete global teardown");
+    kiln_tools_history_uninstall();
+    check(revoked == 3 && owners_retired == 3, "reinstalled history owns only its new hook and subscription");
     std::printf("%d checks passed; %d native continuation calls; %d pending-entry discards\n", checks, begins, discarded);
 }
