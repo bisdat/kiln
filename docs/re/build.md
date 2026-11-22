@@ -149,6 +149,32 @@ column (3800, 1430) = a player's house:       column (3024, 1552) = an empty pla
 - **[rt]** `altar 1025 at (3800.0, 832.5, 1434.0) zone half (60.0, 60.0, 60.0)` (the altar's own BaseIdComponent has
   buildZoneSize 0 on the server; the zone list is the authority). List 1 held 300 no-build boxes, list 2 six NPC boxes.
 
+### Whole-stroke building-tool guard (since 0.2.0-dev.30.5)
+
+The guard in `native/services/tools/hooks/build_area.cpp` is an additional restriction **inside an existing engine
+impact**, not a replacement permission check and not a direct voxel-write authorisation. A sphere must fit inside
+**one** current, non-abandoned base box on all three axes. Exact tangency is accepted, crossing is refused; overlapping
+boxes are not merged. Unknown shape kinds, missing geometry, unreadable memory or missing mappings refuse. Fixed-point
+bounds are rounded inward, and error-free addition residuals catch crossings smaller than one double ULP.
+
+Independently checked on server 26430253 (`f0d824be…`) and client 26430625 (`5d9ef2f1…`), using read-only disassembly
+and the offline resolver, not the third-party mod implementation [dis] [cap `tools.build_area`]:
+
+- `TerraformImpact` S `0x18e0b0` / C `0x3ece10` gets its current program Access from impact context `+0x30`.
+- S `0x18e870` / C `0x3ed5d0` loads `BuildZoneSystem*` from that Access `+0x88`, immediately before calling the
+  game's base-area intersection helper, S `0x94af20` / C `0xea3cd0`, with the brush's float AABB.
+- That helper reads base data `+0x10`, count `+0x18`, skips entry `+0x46` (abandoned), and dispatches shape `+0x44`
+  (`0` box, `1` sphere). Owner kind is `+0x45`. The existing build captures qualify stride `0x48` and altar `+0x40`.
+- `sigdb/symbols/server.d/tools_area.json` captures those fields from the impact's own call path on both binaries.
+  Boot accepts only this exact layout. The guard reads under the caller's live program Access at execution, before
+  the impact switch; it never calls the tick-only singleton API or remembers an earlier successful preview.
+
+The original impact must still run unchanged after this guard: it owns the actor's permissions, server cursor/range
+and forbidden-area checks. This guard does **not** grant visitor rights. Do not invoke its helper to authorise an
+unrelated `Build.Write`. Client input, a stale altar preview or an earlier successful containment result is not authority.
+The engine's Access contract must remain held through the guarded impact. Real player visitor/protected/range behaviour
+and a live altar change remain owner-guided game checks; unit tests of geometry do not establish those outcomes.
+
 ## 8. Not done / open
 
 - Calling the game's blueprint shape builder (`0x22a2a0`) and `VoxelWorld_placeBlueprint` `0xa3cbd0` directly (block
