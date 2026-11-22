@@ -27,11 +27,14 @@ std::vector<std::shared_ptr<KeySub>> g_subs;
 // Unsubscribed, a call may still be in flight: kept findable while another thread drains it (also self-unsubscribe).
 std::unordered_map<KilnHandle, std::shared_ptr<KeySub>> g_retiring;
 std::atomic<uint32_t> g_mouse_subs{0};  // subscribers with KILN_UI_KEYS_MOUSE (any thread reads it)
+std::atomic<uint32_t> g_pad_subs{0};    // subscribers with KILN_UI_KEYS_PAD (0.2.0-dev.31; any thread reads it)
 
 // Under g_mu, after every change of g_subs.
 void count_mouse_locked() {
     const auto n = std::count_if(g_subs.begin(), g_subs.end(), [](const auto& s) { return (s->flags & KILN_UI_KEYS_MOUSE) != 0; });
     g_mouse_subs.store(static_cast<uint32_t>(n), std::memory_order_release);
+    const auto p = std::count_if(g_subs.begin(), g_subs.end(), [](const auto& s) { return (s->flags & KILN_UI_KEYS_PAD) != 0; });
+    g_pad_subs.store(static_cast<uint32_t>(p), std::memory_order_release);
 }
 
 bool guarded_key(KilnUiKeyFn fn, const KilnUiKey* k, void* user, bool* consumed) {
@@ -46,7 +49,7 @@ bool guarded_key(KilnUiKeyFn fn, const KilnUiKey* k, void* user, bool* consumed)
 }  // namespace
 
 KilnResult keys_subscribe(KilnOwner owner, KilnUiKeyFn fn, void* user, uint32_t flags, KilnHandle* out) {
-    if (!fn || (flags & ~static_cast<uint32_t>(KILN_UI_KEYS_MOUSE)) != 0) return KILN_ERR_INVALID_ARGUMENT;
+    if (!fn || (flags & ~static_cast<uint32_t>(KILN_UI_KEYS_MOUSE | KILN_UI_KEYS_PAD)) != 0) return KILN_ERR_INVALID_ARGUMENT;
     auto sub = std::make_shared<KeySub>();
     sub->owner = owner;
     sub->fn = fn;
@@ -85,7 +88,9 @@ KilnResult keys_unsubscribe(KilnHandle h) {
     return KILN_OK;
 }
 
-bool keys_dispatch(const KilnUiKey& key, bool mouse) {
+bool keys_dispatch(const KilnUiKey& key, bool mouse) { return keys_dispatch_to(key, mouse ? KILN_UI_KEYS_MOUSE : 0u); }
+
+bool keys_dispatch_to(const KilnUiKey& key, uint32_t need) {
     std::vector<std::shared_ptr<KeySub>> subs;
     {
         std::lock_guard lk(g_mu);
@@ -93,7 +98,7 @@ bool keys_dispatch(const KilnUiKey& key, bool mouse) {
     }
     bool consumed = false;
     for (const auto& s : subs) {
-        if (mouse && !(s->flags & KILN_UI_KEYS_MOUSE)) continue;  // subscribe_key: keyboard keys only
+        if (need && !(s->flags & need)) continue;  // subscribe_key: keyboard keys only; the mouse and the pad by flag
         std::lock_guard call(s->gate);
         if (!s->active.load(std::memory_order_acquire)) continue;
         bool c = false;
@@ -116,6 +121,7 @@ bool keys_dispatch(const KilnUiKey& key, bool mouse) {
 }
 
 bool keys_mouse_wanted() { return g_mouse_subs.load(std::memory_order_acquire) != 0; }
+bool keys_pad_wanted() { return g_pad_subs.load(std::memory_order_acquire) != 0; }
 
 size_t keys_count() {
     std::lock_guard lk(g_mu);

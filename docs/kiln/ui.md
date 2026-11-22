@@ -883,6 +883,23 @@ b.OnRelease = …;  b.IsDown;  b.TakePresses();  b.Consume = false;  b.WhileCapt
   - The mouse needs the kiln-ui.dll of the same release (kiln.ui v7). Next to an older kiln-ui.dll, which only a hand-mixed
     install has, the names still parse and `Register` works, but mouse bindings never fire and the Keys page takes keys
     only; kiln.log says so once ("this kiln-ui.dll is older than Kiln.Ui").
+- **A game controller** (0.2.0-dev.31, mod API 0.2.14, GitHub issue 119, thanks Fuzen777): `Pad:A`, `Pad:B`, `Pad:X`,
+  `Pad:Y`, `Pad:LB`, `Pad:RB`, `Pad:LT`, `Pad:RT` (the triggers), `Pad:LS`, `Pad:RS` (a stick pressed: L3, R3),
+  `Pad:Start`, `Pad:Back`, `Pad:Up`, `Pad:Down`, `Pad:Left`, `Pad:Right` (the d-pad), and combinations with the
+  shoulder buttons and triggers held: `Pad:LB+A`, `Pad:LT+RS`, `Pad:LB+RB+Y`. `KeyBindings.Register("fav.mark", "Pad:LS", …)`
+  works like a key; the player can put any binding on the pad on the Keys page.
+  - Kiln reads the pad where the game does (XInput: an Xbox pad, or any pad Steam Input presents as one), every
+    controller, at each poll of the game. A binding fires on the thread the game polls the pad from, during play and on
+    the game's own screens (the inventory too), never while a Kiln screen has the input (the pad navigates the screen).
+  - A matching binding keeps the button from the game (`Consume`) until it is let go: the game reads it as not pressed (a
+    trigger as not pulled). The buttons held for a combination (LB, RB, LT, RT) reach the game: `Pad:LB+A` keeps A, not LB.
+  - `KeyChord.IsPad`; pad chords use `KeyMods.PadLB`, `PadRB`, `PadLT`, `PadRT` and never mix with Ctrl, Shift or Alt
+    (`"Ctrl+Pad:A"` is refused with the reason). Codes: 0x200 and up (`KILN_UI_VK_PAD_*` in `kiln_ui.h`).
+  - The Kiln menu's own key is never a pad button (it is opened from the keyboard or a mouse button).
+  - On the Keys page: click the key, then press a pad button, or hold LB, RB, LT or RT and press another for a
+    combination; let go of LB, RB, LT or RT alone to bind that button.
+  - A Kiln older than 0.2.0-dev.31 does not know these names (`KeyChord.TryParse` says false; `Register` throws). Next to
+    an older kiln-ui.dll (a hand-mixed install) pad bindings register but never fire.
 - The player's choice is kept in `kiln/config/keybinds.json` (`{"bindings": {"mymod.toggle": "F9"}}`). The Kiln menu's
   **Keys** tab remaps keys by press: click the key, press the new one (a key, the middle or a side mouse button, or a
   notch of the wheel, with the modifiers held); a second click cancels. Left and right click keep working the page.
@@ -924,6 +941,9 @@ listener.Dispose();                           // or let the mod's unload end it
 - `Listen` is kiln.ui's key subscription (`subscribe_key_ex` in `kiln_ui.h`). With `KeyListenFlags.Mouse` (the default)
   it gets the middle and side mouse buttons and the wheel's notches too, as key bindings do; `KeyListenFlags.None` gets
   keyboard keys only. Next to an older kiln-ui.dll (a hand-mixed install) it gets keys only and `listener.Mouse` is false.
+  `KeyListenFlags.Pad` (0.2.0-dev.31) adds a game controller's buttons (`KeyPress.IsPad`, the pad's modifiers in
+  `KeyPress.Mods`), on the thread the game polls the pad from; true for a press keeps the button from the game until it is
+  let go. `listener.Pad` says whether it gets them.
 - It runs on the game's window thread while the message is handled, before the game gets the press: keep it short.
   Returning true keeps the press from the game. Every listener and Kiln's own key bindings get every press whatever
   another returned; kiln.ui keeps a press from the game when any of them asked.

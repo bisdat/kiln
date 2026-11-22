@@ -490,6 +490,7 @@
   },
   "keys": {
     "help_mouse": "Click a key, then press the new one: a key, the middle or a side mouse button, or a turn of the wheel, with Ctrl, Shift or Alt if you like (left and right click can't be bound). Click it again to cancel; Escape cancels and closes the menu. Unbind leaves an action without a key. Saved to kiln/config/keybinds.json.",
+    "help_pad": "A controller works too: on a key, press a pad button, or hold LB, RB, LT or RT and press another for a combination (Pad:LB+A); let go of LB, RB, LT or RT alone to bind that button.",
     "help": "Click a key, then press the new one. Click it again to cancel; Escape cancels and closes the menu. Unbind leaves an action without a key. Saved to kiln/config/keybinds.json.",
     "col_action": "Action",
     "col_key": "Key",
@@ -499,7 +500,8 @@
     "reset": "Reset",
     "unbind": "Unbind",
     "toast": {
-      "wheel_menu": "The Kiln menu's key can't be on the wheel ({key}): it would close the menu as you scroll it"
+      "wheel_menu": "The Kiln menu's key can't be on the wheel ({key}): it would close the menu as you scroll it",
+      "pad_menu": "The Kiln menu's key can't be a controller button ({key}): the menu is opened from the keyboard or a mouse button"
     }
   },
   "network": {

@@ -833,6 +833,7 @@ internal static unsafe class UiNative
 
     /// <summary>KILN_UI_KEYS_MOUSE (kiln_ui.h v7).</summary>
     public const uint KeysMouse = 1;
+    public const uint KeysPad = 2;  // 0.2.0-dev.31: KILN_UI_KEYS_PAD
 
     /// <summary>kiln.ui's subscribe_key_ex, or null on a table without it (a kiln-ui.dll older than 0.2.0-dev.27).</summary>
     public static delegate* unmanaged[Cdecl]<ulong, delegate* unmanaged[Cdecl]<Key*, void*, byte>, void*, uint, ulong*, int> SubscribeKeyExSlot
@@ -847,6 +848,8 @@ internal static unsafe class UiNative
 
     /// <summary>The key subscription gets mouse presses (kiln.ui v7): key bindings on the mouse can fire.</summary>
     public static bool MouseKeysAvailable { get; private set; }
+    /// <summary>kiln.ui hands Kiln.Ui a game controller's buttons (KILN_UI_KEYS_PAD, 0.2.0-dev.31).</summary>
+    public static bool PadKeysAvailable { get; internal set; }
 
     /// <summary>KilnCraftMenuApi (kiln_ui.h): kiln.content's crafting-menu extension point.</summary>
     [StructLayout(LayoutKind.Sequential)]
@@ -922,6 +925,7 @@ internal static unsafe class UiNative
         SetTextsOverride = null;
         GraphicsOverride = null;
         MouseKeysAvailable = false;
+        PadKeysAvailable = false;
     }
 
     public static bool Available => T != null;
@@ -938,8 +942,11 @@ internal static unsafe class UiNative
             if (T->SubscribeFrame(0, &OnFrame, null, &f) != Ok) return false;
             // keys and, from kiln.ui v7, the mouse buttons and the wheel (subscribe_key gets keyboard keys only)
             var ex = SubscribeKeyExSlot;
-            if (ex != null ? ex(0, &OnKey, null, KeysMouse, &k) != Ok : T->SubscribeKey(0, &OnKey, null, &k) != Ok) return false;
+            // and, from 0.2.0-dev.31, a game controller's buttons (an older kiln-ui.dll refuses KeysPad: mouse and keys then)
+            var pad = ex != null && ex(0, &OnKey, null, KeysMouse | KeysPad, &k) == Ok;
+            if (!pad && (ex != null ? ex(0, &OnKey, null, KeysMouse, &k) != Ok : T->SubscribeKey(0, &OnKey, null, &k) != Ok)) return false;
             MouseKeysAvailable = ex != null;
+            PadKeysAvailable = pad;
             if (ex == null)
                 UiEngine.Log(LogLevel.Warn, "this kiln-ui.dll is older than Kiln.Ui (no subscribe_key_ex): key bindings on the mouse " +
                                             "(Mouse4, Ctrl+WheelUp, ...) register but do not fire, and the Keys page takes keys only");

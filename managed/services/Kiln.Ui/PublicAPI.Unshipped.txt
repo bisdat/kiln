@@ -5,3 +5,11 @@ Kiln.VisibleSlot.Level.get -> int
 Kiln.VisibleSlot.Level.init -> void
 Kiln.VisibleSlot.Rarity.get -> Kiln.ItemRarity?
 Kiln.VisibleSlot.Rarity.init -> void
+Kiln.KeyChord.IsPad.get -> bool
+Kiln.KeyListener.Pad.get -> bool
+Kiln.KeyListenFlags.Pad = 2 -> Kiln.KeyListenFlags
+Kiln.KeyMods.PadLB = 8 -> Kiln.KeyMods
+Kiln.KeyMods.PadLT = 32 -> Kiln.KeyMods
+Kiln.KeyMods.PadRB = 16 -> Kiln.KeyMods
+Kiln.KeyMods.PadRT = 64 -> Kiln.KeyMods
+Kiln.KeyPress.IsPad.get -> bool

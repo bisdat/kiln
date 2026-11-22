@@ -137,9 +137,48 @@ enum {
     KILN_UI_VK_WHEEL_RIGHT = 0x103u,
 };
 
+/* KilnUiKey.vk of a game controller's button (0.2.0-dev.31, mod API 0.2.14). A pad has no Windows virtual key: these are
+ * above every key and the wheel. Pad presses go only to a callback made with subscribe_key_ex and KILN_UI_KEYS_PAD; a
+ * kiln-ui.dll older than 0.2.0-dev.31 answers that flag KILN_ERR_INVALID_ARGUMENT (subscribe again without it). kiln.ui
+ * reads the pad where the game does (its XInputGetState, every controller 0..3), on the thread the game polls it from,
+ * and hands each button's press and release over at the poll that first sees it (scan 0, repeat 0). LT and RT count as
+ * pressed from a pull of 30 of 255 (XINPUT_GAMEPAD_TRIGGER_THRESHOLD). mods holds KILN_UI_MOD_PAD_* for the shoulder
+ * buttons and triggers held at that moment (the button itself excluded), never Ctrl, Shift or Alt: "Pad:LB+A" is A
+ * pressed while LB is held. Returning true for a press keeps that button from the game until its release (the game
+ * reads it as not pressed, a trigger as not pulled); the release always comes and keeps nothing. The buttons held as
+ * modifiers reach the game. While Kiln captures input (captured 1) the game gets an idle pad anyway and a kept press is
+ * also kept from Kiln's own screens' navigation (the Keys page takes it for a binding); a kept B is not Escape then.
+ * With no such callback the pad reaches the game and Kiln's screens as before. */
+enum {
+    KILN_UI_VK_PAD_UP = 0x200u,    /* d-pad (XINPUT_GAMEPAD_DPAD_UP; the code is 0x200 + the button's XInput bit) */
+    KILN_UI_VK_PAD_DOWN = 0x201u,
+    KILN_UI_VK_PAD_LEFT = 0x202u,
+    KILN_UI_VK_PAD_RIGHT = 0x203u,
+    KILN_UI_VK_PAD_START = 0x204u, /* Menu */
+    KILN_UI_VK_PAD_BACK = 0x205u,  /* View */
+    KILN_UI_VK_PAD_LS = 0x206u,    /* left stick pressed (L3) */
+    KILN_UI_VK_PAD_RS = 0x207u,    /* right stick pressed (R3) */
+    KILN_UI_VK_PAD_LB = 0x208u,
+    KILN_UI_VK_PAD_RB = 0x209u,
+    KILN_UI_VK_PAD_A = 0x20Cu,
+    KILN_UI_VK_PAD_B = 0x20Du,
+    KILN_UI_VK_PAD_X = 0x20Eu,
+    KILN_UI_VK_PAD_Y = 0x20Fu,
+    KILN_UI_VK_PAD_LT = 0x210u,    /* left trigger pulled */
+    KILN_UI_VK_PAD_RT = 0x211u,
+};
+/* KilnUiKey.mods of a pad press (0.2.0-dev.31): the shoulder buttons and triggers held */
+enum {
+    KILN_UI_MOD_PAD_LB = 8u,
+    KILN_UI_MOD_PAD_RB = 16u,
+    KILN_UI_MOD_PAD_LT = 32u,
+    KILN_UI_MOD_PAD_RT = 64u,
+};
+
 /* subscribe_key_ex flags (v7) */
 enum {
     KILN_UI_KEYS_MOUSE = 1u, /* also the middle and side buttons and the wheel's notches (above) */
+    KILN_UI_KEYS_PAD = 2u,   /* also a game controller's buttons (KILN_UI_VK_PAD_*, 0.2.0-dev.31) */
 };
 
 typedef struct KilnUiKey {
@@ -1199,7 +1238,8 @@ typedef struct KilnUiApi {
 
     /* ---- v7 (0.2.0-dev.27; check header.size >= offsetof(KilnUiApi, subscribe_key_ex) + sizeof(void*)) ----
      * subscribe_key_ex: subscribe_key with flags. 0 is subscribe_key (keyboard keys only); KILN_UI_KEYS_MOUSE adds the
-     * mouse presses described at KILN_UI_VK_WHEEL_UP. Other bits: KILN_ERR_INVALID_ARGUMENT. Remove it with
+     * mouse presses described at KILN_UI_VK_WHEEL_UP, KILN_UI_KEYS_PAD (0.2.0-dev.31) the pad's buttons described at
+     * KILN_UI_VK_PAD_UP. Other bits (and KILN_UI_KEYS_PAD before 0.2.0-dev.31): KILN_ERR_INVALID_ARGUMENT. Remove it with
      * unsubscribe. */
     KilnResult(KILN_CALL* subscribe_key_ex)(KilnOwner owner, KilnUiKeyFn fn, void* user, uint32_t flags, KilnHandle* out);
     /* Additive size-guarded tail: inside a frame callback, constrain the next window in screen pixels.

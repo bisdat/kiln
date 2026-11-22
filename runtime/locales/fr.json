@@ -490,6 +490,7 @@
   },
   "keys": {
     "help_mouse": "Cliquez sur une touche, puis appuyez sur la nouvelle : une touche, le bouton du milieu ou un bouton latéral de la souris, ou un cran de molette, avec Ctrl, Maj ou Alt si vous voulez (les clics gauche et droit ne peuvent pas être attribués). Cliquez de nouveau pour annuler ; Échap annule et ferme le menu. « Retirer » laisse une action sans touche. Enregistré dans kiln/config/keybinds.json.",
+    "help_pad": "Une manette fonctionne aussi : sur une touche, appuyez sur un bouton de la manette, ou maintenez LB, RB, LT ou RT et appuyez sur un autre pour une combinaison (Pad:LB+A) ; relâchez LB, RB, LT ou RT seul pour attribuer ce bouton.",
     "help": "Cliquez sur une touche, puis appuyez sur la nouvelle. Cliquez de nouveau pour annuler ; Échap annule et ferme le menu. « Retirer » laisse une action sans touche. Enregistré dans kiln/config/keybinds.json.",
     "col_action": "Action",
     "col_key": "Touche",
@@ -499,7 +500,8 @@
     "reset": "Réinitialiser",
     "unbind": "Retirer",
     "toast": {
-      "wheel_menu": "La touche du menu Kiln ne peut pas être sur la molette ({key}) : elle fermerait le menu pendant que vous le faites défiler"
+      "wheel_menu": "La touche du menu Kiln ne peut pas être sur la molette ({key}) : elle fermerait le menu pendant que vous le faites défiler",
+      "pad_menu": "La touche du menu Kiln ne peut pas être un bouton de manette ({key}) : le menu s'ouvre au clavier ou avec un bouton de la souris"
     }
   },
   "network": {

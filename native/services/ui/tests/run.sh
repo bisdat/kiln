@@ -77,6 +77,9 @@ bash "$here/run-menu-scroll-host.sh"
 # the middle and side mouse buttons and the wheel as key presses: twins of raw records and messages, notches (mouse_press.h)
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/mouse_press_test.cpp" -o "$out/mouse_press_test"
 "$out/mouse_press_test"
+# a game controller's buttons as key presses (0.2.0-dev.31): codes, pad modifiers, order, what the game keeps (pad_keys.h)
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/pad_keys_test.cpp" -o "$out/pad_keys_test"
+"$out/pad_keys_test"
 # Issue 44: scoped chat Up/Down and UI-thread queue must never steal gameplay or releases.
 g++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=address,undefined "$here/chat_keys_test.cpp" -o "$out/chat_keys_test"
 "$out/chat_keys_test"

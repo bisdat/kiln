@@ -87,6 +87,7 @@ internal static unsafe class UiEngine
     private static readonly UiDraw Draw = new();
     private static uint _lastDemand = uint.MaxValue, _lastCapture = uint.MaxValue, _lastHover = uint.MaxValue;
     private static volatile string? _remapping;  // binding id waiting for "press a key"
+    private static uint _remapPadHeld;  // a pad's LB/RB/LT/RT went down while waiting (0.2.0-dev.31): alone on its release
     private static bool _keysDrawn;               // the Keys tab was drawn this frame
     private static long _keysDrawnAtMs;           // ... and when it was drawn last
     private static bool _pageHost;      // this Kiln.Ui draws the Kiln menu inside the game's main menu (kiln.ui v4)
@@ -599,22 +600,38 @@ internal static unsafe class UiEngine
     public static bool Key(in UiNative.Key k)
     {
         if (k.Vk == 0) return false;
-        var mods = (KeyMods)(k.Mods & 7);
+        var pad = PadKeys.IsPad(k.Vk);  // a game controller's button (0.2.0-dev.31): its modifiers are the pad's
+        var mods = (KeyMods)(k.Mods & (pad ? (uint)PadKeys.Mods : 7u));
         var down = k.Down != 0;
         // "press a key" in the Keys tab; the menu closed since (Escape: kiln.ui keeps that key) drops it, and the key is the game's
         if (_remapping is not null && down && k.Repeat == 0 && !Ui.MenuOpen) _remapping = null;
+        // a pad's LB, RB, LT or RT let go with no other button pressed meanwhile: that button alone ("Pad:LB")
+        if (_remapping is { } padId && !down && pad && k.Vk == _remapPadHeld)
+        {
+            _remapping = null;
+            _remapPadHeld = 0;
+            RemapTo(padId, new KeyChord(k.Vk, mods & ~PadKeys.ModOf(k.Vk)));
+            return true;
+        }
         if (_remapping is { } id && down && k.Repeat == 0)
         {
             if (k.Vk is 0x10 or 0x11 or 0x12 or 0xA0 or 0xA1 or 0xA2 or 0xA3 or 0xA4 or 0xA5) return true;  // wait for a non-modifier
+            if (pad && PadKeys.ModOf(k.Vk) != KeyMods.None)
+            {
+                _remapPadHeld = k.Vk;  // LB, RB, LT, RT: held for a combination, or let go for the button alone
+                return true;
+            }
             _remapping = null;
+            _remapPadHeld = 0;
+            if (pad)
+            {
+                RemapTo(id, new KeyChord(k.Vk, mods));
+                return true;
+            }
             if (k.Vk == 0x1B) return true;  // Escape cancels
             // a key, or (since 0.2.0-dev.27) the middle or a side button or a wheel notch; never the left or right click
             // a punctuation key is saved by its place (Backquote is the key left of 1 on any layout: key_names.h)
-            var chord = new KeyChord(KeyNames.PressCode(k.Vk, k.Scan), mods);
-            if (KeyBindings.Rebind(id, chord) || id != KeyBindings.MenuId)
-                Hud.Toast($"{id}: {chord}", ToastKind.Success, 2.5);
-            else
-                Hud.Toast(KilnText.T("keys.toast.wheel_menu", ("key", chord)), ToastKind.Warning, 4);
+            RemapTo(id, new KeyChord(KeyNames.PressCode(k.Vk, k.Scan), mods));
             return true;
         }
         // A text field blocks presses, but a hold that started before it still needs its release.
@@ -633,7 +650,8 @@ internal static unsafe class UiEngine
         var wheel = MouseKeys.IsWheel(k.Vk);
         // a Kiln screen has the mouse (the Keys page had its chance above): the wheel scrolls it, and no mouse press fires
         // a binding there; a button's release still ends a hold that began in play
-        if ((wheel || MouseKeys.IsButton(k.Vk)) && k.Captured != 0 && down) return false;
+        // a pad's button there navigates the screen (0.2.0-dev.31): no pad binding fires while a Kiln screen has the input
+        if ((wheel || MouseKeys.IsButton(k.Vk) || pad) && k.Captured != 0 && down) return false;
         foreach (var b in KeyBindings.All)
         {
             if (!b.Enabled || b.Disposed || b.Key.IsNone || !KeyNames.Matches(b.Key.VirtualKey, k.Vk, k.Scan)) continue;
@@ -660,6 +678,18 @@ internal static unsafe class UiEngine
             consumed |= b.Consume;
         }
         return consumed;
+    }
+
+    /// <summary>The Keys page's "press a key" ends on <paramref name="chord"/>: saved, or (the menu's key on the wheel or a pad's
+    /// button) refused with the reason.</summary>
+    private static void RemapTo(string id, KeyChord chord)
+    {
+        if (KeyBindings.Rebind(id, chord) || id != KeyBindings.MenuId)
+            Hud.Toast($"{id}: {chord}", ToastKind.Success, 2.5);
+        else if (chord.IsPad)
+            Hud.Toast(KilnText.T("keys.toast.pad_menu", ("key", chord)), ToastKind.Warning, 4);
+        else
+            Hud.Toast(KilnText.T("keys.toast.wheel_menu", ("key", chord)), ToastKind.Warning, 4);
     }
 
     /// <summary>The binding fires only during play or while a Kiln screen is open (unless <see cref="KeyBinding.OnGameScreens"/>):
@@ -893,6 +923,7 @@ internal static unsafe class UiEngine
         _keysDrawnAtMs = now;
         // wrapped: a single line was cut off at the menu's width in the game (inbox 40)
         ui.TextWrapped(UiNative.MouseKeysAvailable ? KilnText.T("keys.help_mouse") : KilnText.T("keys.help"));
+        if (UiNative.PadKeysAvailable) ui.TextWrapped(KilnText.T("keys.help_pad"));
         if (!ui.BeginTable("kiln.keys", KilnText.T("keys.col_action"), KilnText.T("keys.col_key"), KilnText.T("keys.col_default"), "")) return;
         KeyLine(ui, KeyBindings.MenuId, KilnText.T("keys.menu"), KeyBindings.MenuKey, KeyBindings.MenuDefault);
         foreach (var g in KeyBindings.All.GroupBy(b => b.Category))

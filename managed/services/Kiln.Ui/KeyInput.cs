@@ -33,6 +33,9 @@ public readonly record struct KeyPress(uint VirtualKey, uint ScanCode, KeyMods M
 
     /// <summary>A mouse input: the middle or a side button, or a notch of the wheel.</summary>
     public bool IsMouse => MouseKeys.IsButton(VirtualKey) || MouseKeys.IsWheel(VirtualKey);
+
+    /// <summary>A game controller's button (<see cref="KeyListenFlags.Pad"/>). Since 0.2.0-dev.31.</summary>
+    public bool IsPad => PadKeys.IsPad(VirtualKey);
 }
 
 /// <summary>What a key listener gets besides keyboard keys. Since 0.2.0-dev.29.19.</summary>
@@ -46,14 +49,22 @@ public enum KeyListenFlags
     /// kiln-ui.dll of the same release; next to an older one the listener gets keys only (<see cref="KeyListener.Mouse"/>
     /// false).</summary>
     Mouse = 1,
+
+    /// <summary>A game controller's buttons too (codes 0x200 and up, <see cref="KeyPress.IsPad"/>; their
+    /// <see cref="KeyPress.Mods"/> are the pad's shoulder buttons and triggers held, <see cref="KeyMods.PadLB"/> ..
+    /// <see cref="KeyMods.PadRT"/>). They come on the thread the game reads the pad from, at the poll that sees the
+    /// change; true for a press keeps that button from the game until it is let go. Needs the kiln-ui.dll of the same
+    /// release (<see cref="KeyListener.Pad"/> false next to an older one). Since 0.2.0-dev.31 (mod API 0.2.14).</summary>
+    Pad = 2,
 }
 
 /// <summary>A listener made by <see cref="KeyInput.Listen"/>. Dispose it to stop; a mod's listeners also stop when the mod
 /// unloads. Since 0.2.0-dev.29.19.</summary>
 public sealed class KeyListener : IDisposable, IKilnResult
 {
-    internal KeyListener(bool ok, string? reason, bool mouse, ModContext? owner, Func<KeyPress, bool>? onKey)
+    internal KeyListener(bool ok, string? reason, bool mouse, ModContext? owner, Func<KeyPress, bool>? onKey, bool pad = false)
     {
+        Pad = pad;
         Ok = ok;
         Reason = reason;
         Mouse = mouse;
@@ -70,6 +81,9 @@ public sealed class KeyListener : IDisposable, IKilnResult
 
     /// <summary>It gets the mouse inputs of <see cref="KeyListenFlags.Mouse"/> as well.</summary>
     public bool Mouse { get; }
+
+    /// <summary>It gets a game controller's buttons (<see cref="KeyListenFlags.Pad"/>) as well. Since 0.2.0-dev.31.</summary>
+    public bool Pad { get; }
 
     internal ModContext? Owner { get; }
     internal Func<KeyPress, bool>? OnKey { get; }
@@ -101,20 +115,33 @@ public static unsafe class KeyInput
     public static KeyListener Listen(Func<KeyPress, bool> onKey, KeyListenFlags flags = KeyListenFlags.Mouse)
     {
         ArgumentNullException.ThrowIfNull(onKey);
-        if ((flags & ~KeyListenFlags.Mouse) != 0) throw new ArgumentOutOfRangeException(nameof(flags), flags, "unknown key listener flags");
+        if ((flags & ~(KeyListenFlags.Mouse | KeyListenFlags.Pad)) != 0) throw new ArgumentOutOfRangeException(nameof(flags), flags, "unknown key listener flags");
         var owner = UiModCalls.Caller;
         UiModCalls.RequireAlive(owner);
         var t = UiNative.T;
         if (t == null) return new KeyListener(false, "no Kiln overlay here (kiln.ui is not loaded: a dedicated server, or kiln-ui.dll did not start)", false, owner, null);
         var ex = UiNative.SubscribeKeyExSlot;
         var mouse = ex != null && (flags & KeyListenFlags.Mouse) != 0;
-        var l = new KeyListener(true, null, mouse, owner, onKey) { Id = Interlocked.Increment(ref _next) };
-        Listeners[l.Id] = l;
+        var pad = ex != null && (flags & KeyListenFlags.Pad) != 0;
+        var id = Interlocked.Increment(ref _next);
         ulong handle = 0;
-        var user = (void*)(nint)l.Id;
-        var rc = ex != null
-            ? ex(UiModCalls.OwnerId(owner), &OnNativeKey, user, mouse ? UiNative.KeysMouse : 0u, &handle)
-            : t->SubscribeKey(UiModCalls.OwnerId(owner), &OnNativeKey, user, &handle);
+        var user = (void*)(nint)id;
+        var native = (mouse ? UiNative.KeysMouse : 0u) | (pad ? UiNative.KeysPad : 0u);
+        KeyListener l = null!;
+        int rc;
+        // registered before the subscription goes in (a press may come at once); a kiln-ui.dll older than 0.2.0-dev.31
+        // refuses KeysPad: then without the pad
+        for (var attempt = 0; ; attempt++)
+        {
+            l = new KeyListener(true, null, mouse, owner, onKey, pad) { Id = id };
+            Listeners[id] = l;
+            rc = ex != null
+                ? ex(UiModCalls.OwnerId(owner), &OnNativeKey, user, native, &handle)
+                : t->SubscribeKey(UiModCalls.OwnerId(owner), &OnNativeKey, user, &handle);
+            if (rc == UiNative.Ok || !pad || attempt > 0) break;
+            pad = false;
+            native &= ~UiNative.KeysPad;
+        }
         if (rc != UiNative.Ok)
         {
             Listeners.TryRemove(l.Id, out _);
@@ -162,7 +189,8 @@ public static unsafe class KeyInput
     {
         if (!Listeners.TryGetValue(id, out var l) || l.OnKey is not { } fn) return false;
         if (l.Owner is { Alive: false }) return false;
-        var press = new KeyPress(k.Vk, k.Scan, (KeyMods)(k.Mods & 7), k.Down != 0, k.Repeat != 0, k.TextInput != 0, k.Captured != 0);
+        var press = new KeyPress(k.Vk, k.Scan, (KeyMods)(k.Mods & (PadKeys.IsPad(k.Vk) ? (uint)PadKeys.Mods : 7u)), k.Down != 0, k.Repeat != 0,
+            k.TextInput != 0, k.Captured != 0);
         var keep = false;
         UiModCalls.Invoke(l.Owner, p => keep = fn(p), press, "a key listener (KeyInput.Listen)");
         return keep;
