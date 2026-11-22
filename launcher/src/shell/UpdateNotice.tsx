@@ -4,18 +4,20 @@
 //   available     "Kiln <version>"        Skip, Update (or Download for a .deb or development build)
 //   downloading   "Updating…" and a bar
 //   ready         "Ready to restart"       Later, Restart. The launcher restarts by itself after a short countdown
-//                                          (Later stops it), unless the game runs or Pack Studio or an editor has unsaved
-//                                          work: then it says why it waited and the player restarts. A running task is
-//                                          waited for first (shell/updateApply.ts).
-//   just updated  "Updated to <version>"   The Kiln runtime the update brought goes into the game by itself while the game
-//                                          is closed (the ordinary install: its backup, its refusals; a toast says so),
-//                                          then the notice goes. While the game runs: Later, Update game (held) and why.
-//                                          A switch back's older Kiln keeps Update game (and Play puts it in).
+//                                          (closing the notice stops it), unless the game runs or Pack Studio or an editor
+//                                          has unsaved work: then it says why it waited and the player restarts. A start of
+//                                          the game under way and a running task are waited for (shell/updateApply.ts);
+//                                          Restart is held while the game runs or starts (the backend refuses it too).
+//   just updated  "Updated to <version>"   The Kiln runtime the launcher ships goes into the game by itself while the
+//                                          game is closed, once per update (the ordinary install: its backup, its
+//                                          refusals; a toast says so), then the notice goes. While the game runs: Later,
+//                                          Update game (held) and why. Any other runtime (a newer Library bundle, a switch
+//                                          back's older Kiln) keeps Update game (and Play puts a switch back's in).
 // Only in builds that update themselves: the Nexus Mods build (app_info.distribution "nexus") has no word, no notice
 // and no update feed (api/distribution.ts).
-import { useQueryClient } from "@tanstack/react-query";
+import { useIsMutating, useQueryClient } from "@tanstack/react-query";
 import { X } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import * as api from "../api/commands";
 import type { UpdateStatus } from "../api/commands";
 import { useDistribution, useGame, useGameStatus, useRuntimeChanges } from "../api/hooks";
@@ -24,7 +26,9 @@ import { buildLabel } from "../api/channel";
 import { Button, IconButton, ProgressBar, toast, useTasks, waitTask } from "../ui";
 import { useKilnInstall } from "./firstRun";
 import { runRuntimeChange } from "./runtimeChange";
-import { applyWait, restartHold, runtimeToApply, type ApplyWait } from "./updateApply";
+import { useLaunchMemo } from "./play";
+import { useStartWarnings } from "./sfiWarnings";
+import { applyKey, applyWait, restartHold, runtimeToApply, type ApplyWait } from "./updateApply";
 import { useUnsavedKind } from "./unsaved";
 import { t, useT } from "../i18n";
 import "./update.css";
@@ -58,21 +62,29 @@ function SelfUpdateTray() {
   // both run whether the notice is open or not: closing it (Later) does not stop them
   const plan = useRestartAfterUpdate(s);
   const apply = useApplyAfterUpdate(s);
+  // closing the notice while an update is ready (Escape, the header word, Later, dismiss) stops the restart by itself:
+  // no countdown runs out of sight
+  const stop = useRef(plan.stop);
+  stop.current = plan.stop;
+  const close = useCallback(() => {
+    if (useUpdateStore.getState().status?.phase === "ready") stop.current();
+    setOpen(false);
+  }, [setOpen]);
   useEffect(() => {
     if (!open) return;
-    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
     document.addEventListener("keydown", esc);
     return () => document.removeEventListener("keydown", esc);
-  }, [open, setOpen]);
+  }, [open, close]);
   const word = s && wordFor(s);
   if (!s || !word) return null;
   return (
     <div className="k-upd">
-      <button type="button" className={`k-upd-btn k-tone-${word.tone}`} onClick={() => setOpen(!open)} aria-expanded={open} aria-haspopup="dialog"
+      <button type="button" className={`k-upd-btn k-tone-${word.tone}`} onClick={() => (open ? close() : setOpen(true))} aria-expanded={open} aria-haspopup="dialog"
         aria-label={t("shell.updateNotice.trayAria", { word: word.text })}>
         <span className="k-sc">{word.text}</span>
       </button>
-      {open && <UpdateCard s={s} plan={plan} apply={apply} onClose={() => setOpen(false)} />}
+      {open && <UpdateCard s={s} plan={plan} apply={apply} onClose={close} />}
     </div>
   );
 }
@@ -84,14 +96,15 @@ interface RestartPlan {
   left: number | null;
   /** Why it waits, in words; null when it does not. */
   why: string | null;
-  /** The task Restart waits for (the button is held while it runs). */
-  task: string | null;
-  /** No restart by itself for this update (Later, the notice dismissed). */
+  /** Why Restart is held (its tooltip): a task runs, the game runs or starts. Null: it can restart now. */
+  blocked: string | null;
+  /** No restart by itself for this update (Later, the notice closed). */
   stop: () => void;
 }
 
 /** The ready update the player started (not a channel switch: its dialog restarts): counts down and restarts, unless the
- *  game runs or there is unsaved work, which holds it for good (the player restarts); a running task is waited for. */
+ *  game runs or there is unsaved work, which holds it for good (the player restarts); a start of the game under way and a
+ *  running task are waited for. The backend's update_restart refuses under a running or starting game too. */
 function useRestartAfterUpdate(s: UpdateStatus | null): RestartPlan {
   const tasks = useTasks((x) => x.tasks);
   const order = useTasks((x) => x.order);
@@ -99,7 +112,14 @@ function useRestartAfterUpdate(s: UpdateStatus | null): RestartPlan {
   const { game } = useGame();
   const gs = useGameStatus(game?.id);
   const unsaved = useUnsavedKind();
-  const hold = restartHold({ running: !!gs.data?.running, unsaved, task: blocking?.title ?? null });
+  const running = !!gs.data?.running;
+  // a start under way: Play pressed (to the end of launch_play, the warning before Play included), its dialog open, or
+  // Steam asked and the game not there yet (the Play control forgets that launch once Steam's wait is over)
+  const playing = useIsMutating({ mutationKey: ["launch_play"] }) > 0;
+  const asking = useStartWarnings((x) => x.asks.length > 0);
+  const asked = useLaunchMemo((m) => (game ? m.at[game.id] !== undefined : false));
+  const launching = playing || asking || (asked && !running);
+  const hold = restartHold({ running, launching, unsaved, task: blocking?.title ?? null });
   // a game whose status is not known yet: no countdown until it is (never a restart under a game that may run)
   const unknown = !!game && !gs.data;
   const version = s?.phase === "ready" && s.ready && !s.switching ? s.ready.version : null;
@@ -118,8 +138,8 @@ function useRestartAfterUpdate(s: UpdateStatus | null): RestartPlan {
     if (deadline === null || !version) return;
     const tick = setInterval(() => setNow(Date.now()), 250);
     const go = setTimeout(() => {
-      api.updateRestart().catch(() => {
-        failed(t("shell.channelSwitch.restartFailed"));
+      api.updateRestart().catch((e) => {
+        toast.error(e, t("shell.channelSwitch.restartFailed"));
         setDecided((d) => ({ ...d, [version]: "stopped" }));
       });
     }, Math.max(0, deadline - Date.now()));
@@ -127,12 +147,14 @@ function useRestartAfterUpdate(s: UpdateStatus | null): RestartPlan {
   }, [deadline, version]);
   const why = !version || mode === "stopped" ? null
     : hold?.kind === "game" ? t("shell.updateNotice.holdGame")
+    : hold?.kind === "launch" ? t("shell.updateNotice.holdLaunch")
     : hold?.kind === "unsaved" ? (hold.who === "studio" ? t("shell.updateNotice.holdStudio") : t("shell.updateNotice.holdEditor"))
     : hold?.kind === "task" ? t("shell.updateNotice.waitingFor", { task: hold.title }) : null;
   return {
     left: deadline !== null ? Math.max(0, Math.ceil((deadline - now) / 1000)) : null,
     why,
-    task: blocking?.title ?? null,
+    blocked: running ? t("shell.updateNotice.closeGame") : launching ? t("shell.updateNotice.holdLaunch")
+      : blocking ? t("shell.updateNotice.waitingFor", { task: blocking.title }) : null,
     stop: () => { if (version) setDecided((d) => ({ ...d, [version]: "stopped" })); },
   };
 }
@@ -148,7 +170,8 @@ interface ApplyPlan {
   applying: boolean;
 }
 
-/** One try per update, game and runtime in this session: a failure keeps Update game (and its toast says why). */
+/** One automatic install per update and game in this session: a failure keeps Update game (and its toast says why), and
+ *  after it no second runtime follows by itself (the cache's next offer after an install can be a Library bundle). */
 const applied = new Set<string>();
 
 /** After the restart into an update: the runtime it brought into the game, while the game is closed. */
@@ -159,13 +182,13 @@ function useApplyAfterUpdate(s: UpdateStatus | null): ApplyPlan {
   const gs = useGameStatus(game?.id);
   const k = useKilnInstall(to ? game : null);
   const change = useRuntimeChanges((x) => (game ? x.last[game.id] : undefined));
-  const next = to ? runtimeToApply(gs.data) : null;
+  const next = to ? runtimeToApply(gs.data, s?.shippedRuntime) : null;
   const wait = to && game ? applyWait(gs.data) : null;
   const applying = change?.state === "running";
   const bundles = k.bundles;
   useEffect(() => {
     if (!to || !game || !next || wait || applying) return;
-    const key = `${to}|${game.id}|${next}`;
+    const key = applyKey(to, game.id);
     if (applied.has(key)) return;
     applied.add(key);
     void runRuntimeChange(qc, game, bundles, t("shell.runtimeChange.updateTo", { version: next }), next, t("shell.play.kilnInstalled", { version: next }),
@@ -239,7 +262,7 @@ function ReadyCard({ plan, onClose }: { plan: RestartPlan; onClose: () => void }
   const later = () => { plan.stop(); onClose(); };
   const restart = async () => {
     setBusy(true);
-    try { await api.updateRestart(); } catch { failed(t("shell.channelSwitch.restartFailed")); setBusy(false); }
+    try { await api.updateRestart(); } catch (e) { toast.error(e, t("shell.channelSwitch.restartFailed")); setBusy(false); }
   };
   return (
     <Card title={t("shell.updateNotice.readyTitle")} onDismiss={later}>
@@ -247,7 +270,7 @@ function ReadyCard({ plan, onClose }: { plan: RestartPlan; onClose: () => void }
       {plan.why && <span className="k-hint" data-testid="update-restart-why">{plan.why}</span>}
       <div className="k-upd-actions">
         <Button variant="ghost" onClick={later}>{t("shell.channelSwitch.later")}</Button>
-        <Button variant="primary" loading={busy} disabled={!!plan.task} title={plan.task ? t("shell.updateNotice.waitingFor", { task: plan.task }) : undefined} onClick={restart}>{t("shell.updateNotice.restart")}</Button>
+        <Button variant="primary" loading={busy} disabled={!!plan.blocked} title={plan.blocked ?? undefined} onClick={restart}>{t("shell.updateNotice.restart")}</Button>
       </div>
     </Card>
   );

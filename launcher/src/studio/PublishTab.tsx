@@ -51,6 +51,8 @@ export default function PublishTab({ studio: st, gameId }: { studio: Studio; gam
       const r = await runTask<StudioPublishResult>(() => api.studioPublish(s.id, request, gameId), { quiet: true });
       setDone(r);
       setGone(false);
+      // published: the backend cleared the source's notes, and the typed ones are no unsaved work any more
+      setChanges("");
       setVisNeeds(r.needs);
       refreshStudio(qc, s.id);
       const copied = await copyText(r.pack.url);

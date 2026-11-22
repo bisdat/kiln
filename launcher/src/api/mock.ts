@@ -1808,7 +1808,13 @@ const handlers: Record<string, Handler> = {
   modpack_dismiss: (a) => { if (lastServer && (lastServer.server.id ?? "") === S(a.serverId)) dismissedOffers[S(a.serverId)] = dismissKey(lastServer); return null; },
 };
 Object.assign(handlers, adminMockHandlers(mockEmit));
-Object.assign(handlers, updateMockHandlers(mockEmit, MOCK_DISTRIBUTION, () => settings.updateChannel));
+// the update's restart waits while a game runs, or starts (a scripted start before its process exists)
+Object.assign(handlers, updateMockHandlers(mockEmit, MOCK_DISTRIBUTION, () => settings.updateChannel, () => {
+  const ids = Object.keys(running).filter((g) => !!running[g]);
+  if (ids.some((g) => !!live(g))) return { code: "game_running", message: "Close the game first: the launcher restarts into the update once the game is closed." };
+  if (ids.length) return { code: "busy", message: "The game is starting: restart into the update once it runs and is closed again, or the start is over." };
+  return null;
+}));
 Object.assign(handlers, deckMockHandlers(handlers));
 // the Discord features: the relay, Discord and the Discord app, faked (./mockCommunity.ts, `?discord=` flags)
 Object.assign(handlers, communityMockHandlers({ emit: mockEmit, gameRunning: () => Object.keys(running).some((g) => !!live(g)) }));

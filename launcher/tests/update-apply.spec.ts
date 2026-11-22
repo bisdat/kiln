@@ -1,7 +1,8 @@
 // The launcher update in one click (browser mock; shell/UpdateNotice.tsx, shell/updateApply.ts): Update, then the
-// launcher restarts by itself after a short countdown (Later stops it), unless the game runs or Pack Studio or an editor
-// has unsaved work (it says why and the player restarts); after the restart the Kiln runtime it brought goes into the
-// closed game by itself (the ordinary install, a toast). And the "Updated to" notice from the first status on, also
+// launcher restarts by itself after a short countdown (Later, Escape or the header word stop it), unless the game runs
+// or starts or Pack Studio or an editor has unsaved work (it says why and the player restarts); after the restart the
+// Kiln runtime it ships goes into the closed game by itself, once (the ordinary install, a toast); any other runtime
+// stays a manual offer. And the "Updated to" notice from the first status on, also
 // before the game's status has loaded (a player's report on 30.3: the notice had no Update game until a poll the
 // unfocused window never sent).
 import { expect, test, type Page } from "@playwright/test";
@@ -65,16 +66,66 @@ test("while the game runs the launcher does not restart by itself and says why",
   const ready = await updateNow(page);
   await expect(ready.getByTestId("update-restart-why")).toHaveText("The game is running, so the launcher waits. Restart when you are done playing.");
   await expect(ready.getByTestId("update-restart-in")).toHaveCount(0);
-  await expect(ready.getByRole("button", { name: "Restart", exact: true })).toBeEnabled();
+  // Restart waits for the game too, and so does the backend's update_restart
+  const restart = ready.getByRole("button", { name: "Restart", exact: true });
+  await expect(restart).toBeDisabled();
+  await expect(restart).toHaveAttribute("title", "Close the game first");
+  const refused = await page.evaluate(async () => (await import("/src/api/commands.ts")).updateRestart().then(() => "restarted", (e: { code: string }) => e.code));
+  expect(refused).toBe("game_running");
   await page.waitForTimeout(2500);
-  expect(await restarts(page)).toBe(0);
+  expect(await restarts(page)).toBe(1); // only the refused call above
   // held for good: the game closing does not start it either (today's buttons; the player restarts)
   await game(page, "stopGame");
   await expect(ready.getByTestId("update-restart-why")).toHaveCount(0, { timeout: 6000 });
   await page.waitForTimeout(2500);
-  expect(await restarts(page)).toBe(0);
-  await ready.getByRole("button", { name: "Restart", exact: true }).click();
+  expect(await restarts(page)).toBe(1);
+  await restart.click();
   await expect(page.getByRole("dialog", { name: "Updated to 0.2.0-dev.43" })).toBeVisible();
+});
+
+test("a start of the game during the countdown holds it: Play pressed, then the game runs", async ({ page }) => {
+  // launch_play waits until the test opens its gate: Play is pressed and the game not there yet
+  await page.addInitScript(() => {
+    (window as unknown as { __kilnMockPlans: Record<string, unknown[]> }).__kilnMockPlans = { launch_play: [{ gate: "launch" }] };
+  });
+  await open(page, "", 4000);
+  const ready = await updateNow(page);
+  await expect(ready.getByTestId("update-restart-in")).toBeVisible();
+  await page.locator(".k-door").click();
+  const why = ready.getByTestId("update-restart-why");
+  await expect(why).toHaveText("The game is starting, so the launcher waits.");
+  await expect(ready.getByTestId("update-restart-in")).toHaveCount(0);
+  await expect(ready.getByRole("button", { name: "Restart", exact: true })).toBeDisabled();
+  await page.waitForTimeout(5000);
+  expect(await restarts(page)).toBe(0);
+  // the game comes: held for good
+  await game(page, "openGate", "launch");
+  await expect(why).toHaveText("The game is running, so the launcher waits. Restart when you are done playing.", { timeout: 8000 });
+  expect(await restarts(page)).toBe(0);
+});
+
+test("Escape or the header word closes the notice and stops the restart by itself", async ({ page }) => {
+  await open(page, "", 4000);
+  let ready = await updateNow(page);
+  await expect(ready.getByTestId("update-restart-in")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(ready).toHaveCount(0);
+  await page.waitForTimeout(5000);
+  expect(await restarts(page)).toBe(0);
+  const word = page.getByRole("button", { name: "Launcher update: Restart", exact: true });
+  await word.click();
+  await expect(ready.getByTestId("update-restart-in")).toHaveCount(0);
+  await expect(ready.getByRole("button", { name: "Restart", exact: true })).toBeEnabled();
+
+  // the header word, on a fresh page
+  await page.reload();
+  await page.locator(".k-splash").waitFor({ state: "detached" });
+  ready = await updateNow(page);
+  await expect(ready.getByTestId("update-restart-in")).toBeVisible();
+  await page.getByRole("button", { name: "Launcher update: Restart", exact: true }).click();
+  await expect(ready).toHaveCount(0);
+  await page.waitForTimeout(5000);
+  expect(await restarts(page)).toBe(0);
 });
 
 test("unsaved work in Pack Studio or an editor holds the restart, and the notice says whose", async ({ page }) => {
@@ -119,6 +170,34 @@ test("the Updated card shows before the game's status has loaded, then its Kiln 
   await expect(updated).toHaveCount(0);
   expect(await game(page, "installs")).toEqual([BUNDLE]);
   expect(await calls(page)).toContain("update_ack");
+});
+
+test("only the launcher's own Kiln goes in by itself, once: a newer bundle in the Library never follows", async ({ page }) => {
+  // the runtime list and the game's status wait for their gates: a newer bundle (a test build's) is in the Library first
+  await page.addInitScript(() => {
+    (window as unknown as { __kilnMockPlans: Record<string, unknown[]> }).__kilnMockPlans = {
+      runtime_list: Array.from({ length: 20 }, () => ({ gate: "bundles" })),
+      game_status: Array.from({ length: 40 }, () => ({ gate: "status" })),
+    };
+  });
+  await open(page, `?justUpdated=0.2.0-dev.41&upgrade=${encodeURIComponent(BUNDLE)}`);
+  await page.evaluate(async () => { await (await import("/src/api/commands.ts")).runtimeImport("/home/player/Downloads/kiln-runtime-0.2.1-dev+20261120.beef001.zip"); });
+  await game(page, "openGate", "bundles");
+  await page.waitForTimeout(500);
+  await game(page, "openGate", "status");
+  await expect(toastOk(page)).toBeVisible({ timeout: 15_000 });
+  await page.waitForTimeout(3000);
+  expect(await game(page, "installs")).toEqual([BUNDLE]);
+});
+
+test("a Kiln that is not the launcher's own stays a manual offer after an update", async ({ page }) => {
+  await open(page, "?justUpdated=0.2.0-dev.41");
+  await game(page, "setUpgradeAvailable", "0.1.9+20261101.a41c2d0"); // a bundle the mock has, not the one it ships
+  const updated = page.getByRole("dialog", { name: "Updated to 0.2.0-dev.42" });
+  await expect(updated.getByRole("button", { name: "Update game" })).toBeEnabled();
+  await page.waitForTimeout(2500);
+  expect(await game(page, "installs")).toEqual([]);
+  await expect(updated).toBeVisible();
 });
 
 test("just updated with a newer Kiln while the game runs: the card holds Update game and says why, then installs when the game closes", async ({ page }) => {

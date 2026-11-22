@@ -151,6 +151,8 @@ mod imp {
         pub ready: Option<()>,
         pub skipped: Option<String>,
         pub just_updated: Option<()>,
+        /// Always null: nothing goes into the game by itself after an update (there is none).
+        pub shipped_runtime: Option<()>,
         pub task_id: Option<String>,
         pub error: Option<Error>,
     }
@@ -191,6 +193,7 @@ mod imp {
             ready: None,
             skipped: None,
             just_updated: None,
+            shipped_runtime: None,
             task_id: None,
             error: None,
         }

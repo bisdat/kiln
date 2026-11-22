@@ -8,23 +8,31 @@
 import type { GameStatus } from "../api/commands";
 import type { UnsavedKind } from "./unsaved";
 
-/** What holds the restart: the game, unsaved work (both hold it for good: the player restarts), or a task (waited for). */
-export type RestartHold = { kind: "game" } | { kind: "unsaved"; who: UnsavedKind } | { kind: "task"; title: string } | null;
+/** What holds the restart: the game, unsaved work (both hold it for good: the player restarts), a start of the game
+ *  under way or a task (both waited for; a start that brings the game holds it for good then). */
+export type RestartHold = { kind: "game" } | { kind: "launch" } | { kind: "unsaved"; who: UnsavedKind } | { kind: "task"; title: string } | null;
 
-/** `running`: the game runs, or its status is not known yet (an update is never ready before it is). */
-export function restartHold(o: { running: boolean; unsaved: UnsavedKind | null; task: string | null }): RestartHold {
+/** `running`: the game runs. `launching`: Play was pressed, the warning before Play is open, or Steam was asked and the
+ *  game's process is not there yet (the backend's update_restart refuses then too). */
+export function restartHold(o: { running: boolean; launching?: boolean; unsaved: UnsavedKind | null; task: string | null }): RestartHold {
   if (o.running) return { kind: "game" };
+  if (o.launching) return { kind: "launch" };
   if (o.unsaved) return { kind: "unsaved", who: o.unsaved };
   if (o.task) return { kind: "task", title: o.task };
   return null;
 }
 
-/** The runtime the update brought, to put into the game by itself: the launcher's newer Kiln (upgradeAvailable) for a
- *  game that has Kiln. The older one of a switch back from a test build is not (Update game and Play put it in). */
-export function runtimeToApply(status: GameStatus | undefined): string | null {
+/** The runtime the update brought, to put into the game by itself: the launcher's own (`shipped`, the update status's
+ *  shippedRuntime) when the game's Kiln is older (upgradeAvailable) and the game has Kiln. Any other runtime (a newer one
+ *  in the Library, the older one of a switch back from a test build) stays a manual offer. */
+export function runtimeToApply(status: GameStatus | undefined, shipped: string | null | undefined): string | null {
   const rt = status?.runtime;
-  return rt?.installed ? rt.upgradeAvailable ?? null : null;
+  const next = rt?.installed ? rt.upgradeAvailable ?? null : null;
+  return next && shipped && next === shipped ? next : null;
 }
+
+/** One automatic install per update and game (a second runtime never follows by itself). */
+export const applyKey = (to: string, gameId: string) => `${to}|${gameId}`;
 
 /** Why it is not put in yet: the game's status has not loaded, the game runs, Steam is updating it. */
 export type ApplyWait = "loading" | "running" | "steam" | null;

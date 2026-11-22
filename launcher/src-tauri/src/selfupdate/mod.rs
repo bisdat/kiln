@@ -163,6 +163,9 @@ pub struct UpdateStatus {
     pub skipped: Option<String>,
     /// This start follows an update this launcher installed (until `update_ack`).
     pub just_updated: Option<Updated>,
+    /// (0.2.0-dev.30.5) The Kiln runtime this launcher ships, once read at the start: the only one that goes into the
+    /// game by itself after an update (the window's "Updated to" notice); null before it is read, or in a build without one.
+    pub shipped_runtime: Option<String>,
     pub task_id: Option<String>,
     /// Why the last download or install failed.
     pub error: Option<Error>,
@@ -224,19 +227,48 @@ static STATE: OnceLock<Mutex<Inner>> = OnceLock::new();
 /// folder is free, after the window is up, so the window's first `update_status` can come before them: it waits for this
 /// ([`wait_started`]) instead of answering with the placeholder, which has no `just_updated` (the "Updated to" notice then
 /// never opened when automatic checks were off, and waited for the first check when they were on).
-static STARTED: Mutex<bool> = Mutex::new(false);
-static STARTED_CV: Condvar = Condvar::new();
-
-fn mark_started() {
-    *STARTED.lock().unwrap_or_else(|e| e.into_inner()) = true;
-    STARTED_CV.notify_all();
+/// When the start-up steps never run (the beta copy blocked, a broken data-folder pointer, another launcher's move), the
+/// first wait gives up and every later one answers at once.
+struct StartGate {
+    /// (start ran, a wait gave up)
+    state: Mutex<(bool, bool)>,
+    cv: Condvar,
 }
 
-/// Waits up to `max` for [`start`]; true once it ran.
+impl StartGate {
+    const fn new() -> StartGate {
+        StartGate { state: Mutex::new((false, false)), cv: Condvar::new() }
+    }
+
+    fn open(&self) {
+        self.state.lock().unwrap_or_else(|e| e.into_inner()).0 = true;
+        self.cv.notify_all();
+    }
+
+    fn is_open(&self) -> bool {
+        self.state.lock().unwrap_or_else(|e| e.into_inner()).0
+    }
+
+    /// Waits up to `max` for [`open`](Self::open) (not at all once a wait gave up); true once it is open.
+    fn wait(&self, max: Duration) -> bool {
+        let g = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let (mut g, timeout) = self.cv.wait_timeout_while(g, max, |(started, gave_up)| !*started && !*gave_up).unwrap_or_else(|e| e.into_inner());
+        if timeout.timed_out() && !g.0 {
+            g.1 = true;
+        }
+        g.0
+    }
+}
+
+static STARTED: StartGate = StartGate::new();
+
+fn mark_started() {
+    STARTED.open();
+}
+
+/// Waits up to `max` for [`start`]; true once it ran. After one wait timed out, no later one waits.
 pub fn wait_started(max: Duration) -> bool {
-    let g = STARTED.lock().unwrap_or_else(|e| e.into_inner());
-    let (g, _) = STARTED_CV.wait_timeout_while(g, max, |started| !*started).unwrap_or_else(|e| e.into_inner());
-    *g
+    STARTED.wait(max)
 }
 
 fn state() -> std::sync::MutexGuard<'static, Inner> {
@@ -267,6 +299,7 @@ fn initial_status(current: &str, install: InstallInfo) -> UpdateStatus {
         ready: None,
         skipped: None,
         just_updated: None,
+        shipped_runtime: None,
         task_id: None,
         error: None,
     }
@@ -290,6 +323,7 @@ pub fn status() -> UpdateStatus {
     g.status.auto = auto;
     g.status.channel = channel;
     g.status.before_beta = before;
+    g.status.shipped_runtime = crate::commands::runtime::shipped_version();
     g.status.clone()
 }
 
@@ -318,6 +352,14 @@ fn prepare_switch_restart(root: &std::path::Path, version: &str, target: Channel
     }
     let to = feed::Build::parse(version).map(|b| { let mut v = b.version; v.build.clear(); v.to_string() }).unwrap_or_else(|| version.into());
     crate::snapshot::plan_leave_beta(root, &to, target.as_str())
+}
+
+/// After the shipped runtime's import (its version is known now): the status goes out again, unless [`start`] has not
+/// run yet (it sends the status itself, with the version).
+pub(crate) fn emit_if_started<R: Runtime>(app: &AppHandle<R>) {
+    if STARTED.is_open() {
+        emit(app);
+    }
 }
 
 fn emit<R: Runtime>(app: &AppHandle<R>) {
@@ -899,6 +941,11 @@ pub fn restart(app: &AppHandle) -> Result<(), Error> {
     let Some(ready) = ready.filter(|_| phase == Phase::Ready) else {
         return Err(Error::new(ErrorCode::Conflict, "No update is ready."));
     };
+    // never under a game: the next launcher would put its Kiln into a game that is starting
+    if let Some(e) = restart_refusal(game_running(), crate::commands::launch::start_tracked()) {
+        log(&format!("restart refused: {}", e.message));
+        return Err(e);
+    }
     if !ready.installed {
         let current = state().status.current.clone();
         let notes = state().pending.as_ref().and_then(|(u, _)| u.body.as_deref().map(|n| feed::short_notes(n, NOTES_MAX)));
@@ -924,6 +971,26 @@ pub fn restart(app: &AppHandle) -> Result<(), Error> {
     log(&format!("installer of {} failed: {e}", update.version));
     state().pending = Some((update, bytes));
     Err(Error::new(ErrorCode::Io, format!("The installer could not start: {e}")))
+}
+
+/// A known client game's process runs.
+fn game_running() -> bool {
+    let Ok(d) = crate::state::dirs() else { return false };
+    kiln_manage::game::known(&d).unwrap_or_default().iter()
+        .filter(|g| g.kind == kiln_manage::game::GameKind::Client)
+        .any(|g| kiln_manage::proc::find_game(g).ok().flatten().is_some())
+}
+
+/// Why the restart into an update waits: the game runs, or a start of this launcher is under way (Play pressed, the
+/// warning before Play, Steam asked and no game yet: commands::launch).
+fn restart_refusal(running: bool, starting: bool) -> Option<Error> {
+    if running {
+        return Some(Error::new(ErrorCode::GameRunning, "Close the game first: the launcher restarts into the update once the game is closed."));
+    }
+    if starting {
+        return Some(Error::new(ErrorCode::Busy, "The game is starting: restart into the update once it runs and is closed again, or the start is over."));
+    }
+    None
 }
 
 /// Skips `version` (None: un-skips).

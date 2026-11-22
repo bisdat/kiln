@@ -4094,6 +4094,7 @@
       "updateGame": "Update game",
       "restartingIn": "Restarting by itself in {seconds} s",
       "holdGame": "The game is running, so the launcher waits. Restart when you are done playing.",
+      "holdLaunch": "The game is starting, so the launcher waits.",
       "holdStudio": "Pack Studio has unsaved changes, so the launcher waits. Save them, then restart.",
       "holdEditor": "An editor has unsaved changes, so the launcher waits. Save them, then restart.",
       "lookingAtGame": "Looking at the game's Kiln…",

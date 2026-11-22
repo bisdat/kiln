@@ -241,6 +241,14 @@ pub(crate) fn track(game_id: &str, f: impl FnOnce(&mut kiln_manage::start_progre
     }
 }
 
+/// A start of this launcher is under way for some game and its process is not there yet (Play pressed, the cook, the
+/// warning before Play, Steam asked): the update's restart waits (crate::selfupdate::restart; a running game is its own
+/// check). Such a start is given up by its deadlines (LauncherStart::keep_tracking), so this never holds for long.
+#[cfg_attr(not(feature = "self-update"), allow(dead_code))]
+pub(crate) fn start_tracked() -> bool {
+    STARTS.lock().unwrap_or_else(|e| e.into_inner()).values().any(|t| !t.seen)
+}
+
 pub(crate) fn forget(game_id: &str) {
     STARTS.lock().unwrap_or_else(|e| e.into_inner()).remove(game_id);
 }

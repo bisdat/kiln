@@ -43,23 +43,24 @@ pub fn import_shipped(app: &AppHandle) {
     // it writes `runtime/` (also from setup's own thread): a writer a move waits for
     let _writing = crate::state::writing();
     match dirs().and_then(|d| bundle::import_shipped(&d, &zip)) {
-        Ok(Some(b)) => {
-            eprintln!("shipped Kiln runtime {} added", b.version);
-            // a game status made while the copy ran said "nothing to update" (the bundle was not there yet): after a
-            // launcher update the "Updated to" notice and Play's note waited for the next poll, which an unfocused
-            // window never sends. Fresh statuses go out now.
-            crate::state::forget_install_states();
-            let app = app.clone();
-            std::thread::spawn(move || {
-                let games = dirs().and_then(|d| kiln_manage::game::known(&d)).unwrap_or_default();
-                for g in games {
-                    crate::watch::emit_status(&app, &g.id);
-                }
-            });
-        }
+        Ok(Some(b)) => eprintln!("shipped Kiln runtime {} added", b.version),
         Ok(None) => {}
         Err(e) => eprintln!("shipped Kiln runtime {}: {e}", zip.display()),
     }
+    // a game status made before the shipped runtime was known or copied in said "nothing to update": after a launcher
+    // update the "Updated to" notice and Play's note waited for the next poll, which an unfocused window never sends.
+    // Fresh game statuses go out now, and the update status with the shipped runtime's version (the only one the window
+    // installs by itself after an update).
+    crate::state::forget_install_states();
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let games = dirs().and_then(|d| kiln_manage::game::known(&d)).unwrap_or_default();
+        for g in games {
+            crate::watch::emit_status(&app, &g.id);
+        }
+        #[cfg(feature = "self-update")]
+        crate::selfupdate::emit_if_started(&app);
+    });
 }
 
 #[tauri::command]
