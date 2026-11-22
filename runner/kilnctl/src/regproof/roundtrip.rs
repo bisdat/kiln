@@ -104,7 +104,10 @@ pub struct FieldResult {
     pub samples: usize,
     pub passed: usize,
     pub raw: Raw,
+    /// a step that failed: the mapping is wrong on this build
     pub problems: Vec<String>,
+    /// evidence the lab did not give (no sample in the field's generation): the field is unproven, not wrong
+    pub missing: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -302,12 +305,13 @@ pub fn check(map: &RegMap, side: &str, exe_sha256: &str, suites: &[Suite]) -> Re
             }
         }
         let where_ = want.map(|g| format!(" in a {g} generation")).unwrap_or_default();
+        let mut missing = Vec::new();
         if samples == 0 {
-            problems.push(format!("no round-trip sample{where_}: the field is not proven on this build"));
+            missing.push(format!("no round-trip sample{where_}: the field is not proven on this build"));
         } else if !in_generation && problems.is_empty() {
-            problems.push(format!("no passing sample{where_}"));
+            missing.push(format!("no round-trip sample{where_} (only in another generation): the field is not proven on this build"));
         }
-        r.fields.insert(q, FieldResult { ok: problems.is_empty(), samples, passed, raw, problems });
+        r.fields.insert(q, FieldResult { ok: problems.is_empty() && missing.is_empty(), samples, passed, raw, problems, missing });
     }
     r
 }
@@ -415,7 +419,8 @@ pub(crate) mod tests {
         assert!(!r.complete);
         assert_eq!(r.missing, ["boot"]);
         assert!(!r.fields["plans.cap"].ok);
-        assert!(r.fields["plans.cap"].problems.iter().any(|p| p.contains("boot generation")), "{:?}", r.fields["plans.cap"]);
+        assert!(r.fields["plans.cap"].missing.iter().any(|p| p.contains("boot generation")), "{:?}", r.fields["plans.cap"]);
+        assert!(r.fields["plans.cap"].problems.is_empty(), "missing evidence is not a failed step: {:?}", r.fields["plans.cap"]);
         // the boot field proven in a live generation proves nothing about the boot back-end
         let mut wrong = full();
         wrong[1].generation = "live".into();
@@ -432,7 +437,8 @@ pub(crate) mod tests {
         thin[0].samples.retain(|s| s.field != "gadgets.tier");
         let r3 = check(&map_with_float_cap(), "server", SHA, &thin);
         assert!(r3.complete);
-        assert!(r3.fields["gadgets.tier"].problems.iter().any(|p| p.contains("no round-trip sample")));
+        assert!(r3.fields["gadgets.tier"].missing.iter().any(|p| p.contains("no round-trip sample")));
+        assert!(!r3.fields["gadgets.tier"].ok && r3.fields["gadgets.tier"].problems.is_empty());
     }
 
     #[test]

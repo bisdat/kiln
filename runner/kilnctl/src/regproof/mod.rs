@@ -10,7 +10,9 @@
 //! 5. the alias check and the per-build id tables ([`ids`]);
 //! 6. the fail-closed mark: the record is `verified` only when every step ran with its inputs; a row is `ok` only when
 //!    regmap_check.py resolved it, the reflection carried it over (or a human reviewed the change), its round trip passed
-//!    in its generation and (a formula row) the formula check passed. Everything else is refused per entry at run time.
+//!    in its generation and (a formula row) the formula check passed. A row whose only gap is evidence the lab did not
+//!    give (no sample in its generation, no formula constants) is `unproven`, with its reason in the record's `reasons`;
+//!    a row the build changed or a lab step disproved is `changed`. Both are refused per entry at run time.
 //!
 //! Inputs kilnctl makes itself with the tools of the Kiln tree (the exe is only read, never run): the reflection dumps
 //! (`tools/kfc/kfc.py types --closure`), the build's entries (`tools/registrygen/regmap_entries.py`) and the candidate
@@ -61,10 +63,13 @@ pub struct Inputs {
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct RowVerdict {
-    /// ok | changed | unmapped (regmap/README.md)
+    /// ok | changed | unproven | unmapped (regmap/README.md)
     pub state: String,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub why: Vec<String>,
+    /// an unproven row's reason, in Kiln words (the record's `reasons`: players and mod authors read it)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -211,36 +216,55 @@ pub fn prove(inp: &Inputs, when: &str) -> Proof {
     let accepted: BTreeSet<&String> = inp.accepted.iter().collect();
     for (q, _, _, row) in regmap::qualified(&inp.map) {
         let mut why = Vec::new();
+        let mut reason = None;
         let state = if !row.has_mapping() {
             "unmapped"
         } else {
             match cand_rows.get(&q).map(String::as_str) {
                 Some("ok") => {
+                    // hard: the mapping is wrong on this build (Changed); missing: the lab gave no evidence (Unproven)
+                    let (mut hard, mut missing) = (Vec::new(), Vec::new());
                     match p.refl.as_ref().map(|r| r.rows.get(&q)) {
                         Some(Some(d)) if d.status == refl::Status::Changed => {
                             if accepted.contains(&q) {
                                 p.notes.push(format!("{q}: its reflection change was reviewed (--accept)"));
                             } else {
-                                why.extend(d.changes.iter().map(|c| format!("reflection: {c}")));
-                                why.extend(d.proposals.iter().map(|x| format!("proposal: {} -> {} ({})", x.was, x.now, x.why)));
+                                hard.extend(d.changes.iter().map(|c| format!("reflection: {c}")));
+                                hard.extend(d.proposals.iter().map(|x| format!("proposal: {} -> {} ({})", x.was, x.now, x.why)));
                             }
                         }
-                        Some(None) => why.push("reflection: not diffed".into()),
+                        Some(None) => hard.push("reflection: not diffed".into()),
                         _ => {}
                     }
                     match p.roundtrip.fields.get(&q) {
                         Some(f) if f.ok => {}
-                        Some(f) => why.extend(f.problems.iter().map(|x| format!("round trip: {x}"))),
-                        None => why.push("round trip: not checked".into()),
+                        Some(f) => {
+                            hard.extend(f.problems.iter().map(|x| format!("round trip: {x}")));
+                            missing.extend(f.missing.iter().map(|x| format!("round trip: {x}")));
+                        }
+                        None => hard.push("round trip: not checked".into()),
                     }
                     if row.conv == "formula" {
                         match p.formula.rows.get(&q) {
                             Some(f) if f.ok => {}
-                            Some(f) => why.extend(f.problems.iter().map(|x| format!("formula: {x}"))),
-                            None => why.push("formula: not checked".into()),
+                            Some(f) => {
+                                hard.extend(f.problems.iter().map(|x| format!("formula: {x}")));
+                                missing.extend(f.missing.iter().map(|x| format!("formula: {x}")));
+                            }
+                            None => hard.push("formula: not checked".into()),
                         }
                     }
-                    if why.is_empty() { "ok" } else { "changed" }
+                    if !hard.is_empty() {
+                        why = hard;
+                        why.extend(missing);
+                        "changed"
+                    } else if !missing.is_empty() {
+                        reason = Some(unproven_reason(&missing));
+                        why = missing;
+                        "unproven"
+                    } else {
+                        "ok"
+                    }
                 }
                 Some(s @ ("changed" | "unmapped")) => {
                     why.push(format!("regmap_check.py: {s} on this build (its log names why)"));
@@ -257,11 +281,22 @@ pub fn prove(inp: &Inputs, when: &str) -> Proof {
             why.truncate(MAX_WHY);
             why.push(format!("... {more} more (proof.json)"));
         }
-        p.rows.insert(q, RowVerdict { state: state.into(), why });
+        p.rows.insert(q, RowVerdict { state: state.into(), why, reason });
     }
     p.accepted = accepted.into_iter().cloned().collect();
     p.verified = p.blockers.is_empty();
     p
+}
+
+/// An unproven row's reason as players and mod authors read it (kiln.content: "Unproven: <field> is not proven for game
+/// build <b> (<reason>)"): Kiln words, no game names.
+fn unproven_reason(missing: &[String]) -> String {
+    let no_sample = missing.iter().any(|m| m.contains("no round-trip sample"));
+    if !no_sample && missing.iter().any(|m| m.contains("constants")) {
+        "its formula's constants were not read on this build yet".into()
+    } else {
+        "no lab round trip of it on this build yet".into()
+    }
 }
 
 impl Proof {
@@ -296,7 +331,8 @@ impl Proof {
             parts.push(format!("ids {} kept, {} added, {} removed, {} GUID changes", a.kept, a.added.len(), a.removed.len(), a.guid_changes.len()));
         }
         let (ok, n) = self.ok_rows();
-        parts.push(format!("rows ok {ok}/{n}"));
+        let unproven = self.rows.values().filter(|r| r.state == "unproven").count();
+        parts.push(format!("rows ok {ok}/{n}{}", if unproven > 0 { format!(" ({unproven} unproven)") } else { String::new() }));
         if !self.accepted.is_empty() {
             parts.push(format!("reviewed: {}", self.accepted.join(", ")));
         }
@@ -313,6 +349,14 @@ pub fn record(p: &Proof, candidate: &Value) -> Value {
     let mut r = candidate.clone();
     if let Some(o) = r.as_object_mut() {
         o.insert("rows".into(), Value::Object(p.rows.iter().map(|(q, v)| (q.clone(), Value::String(v.state.clone()))).collect()));
+        let reasons: serde_json::Map<String, Value> = p.rows.iter()
+            .filter_map(|(q, v)| Some((q.clone(), Value::String(v.reason.clone().filter(|_| v.state == "unproven")?))))
+            .collect();
+        if reasons.is_empty() {
+            o.remove("reasons");
+        } else {
+            o.insert("reasons".into(), Value::Object(reasons));
+        }
         o.insert("verified".into(), Value::Bool(p.verified));
         o.insert("proof".into(), Value::String(p.summary()));
     }
@@ -330,7 +374,7 @@ pub fn report_text(p: &Proof) -> String {
     let bad: Vec<(&String, &RowVerdict)> = p.rows.iter().filter(|(_, r)| r.state != "ok").collect();
     t.push_str(&format!("\nrows not ok ({}; each is refused per entry at run time):\n", bad.len()));
     for (q, r) in bad {
-        t.push_str(&format!("  {q}: {}\n", r.state));
+        t.push_str(&format!("  {q}: {}{}\n", r.state, r.reason.as_ref().map(|x| format!(" ({x})")).unwrap_or_default()));
         for w in &r.why {
             t.push_str(&format!("      {w}\n"));
         }
@@ -349,6 +393,9 @@ pub fn next_text(p: &Proof) -> String {
     let mut v = Vec::new();
     for b in &p.blockers {
         v.push(format!("- {b}"));
+    }
+    for (q, r) in p.rows.iter().filter(|(_, r)| r.state == "unproven") {
+        v.push(format!("- {q}: unproven: {} (kept off; the lab's proof producer has to sample it)", r.reason.as_deref().unwrap_or("no lab evidence")));
     }
     for (q, r) in p.rows.iter().filter(|(_, r)| r.state == "changed") {
         if r.why.iter().any(|w| w.starts_with("reflection") || w.starts_with("proposal")) {
@@ -984,12 +1031,59 @@ mod tests {
         let mut inp = with_power_samples(inputs());
         inp.candidate.as_mut().unwrap()["rows"]["gadgets.tier"] = json!("unmapped");
         assert_eq!(prove(&inp, "T").rows["gadgets.tier"].state, "unmapped");
-        // a failed round trip
+        // a failed round trip (the value read back is not the probe)
         let mut rt = with_power_samples(inputs());
-        rt.suites[0].samples.retain(|s| s.field != "gadgets.size");
+        for x in rt.suites[0].samples.iter_mut().filter(|x| x.field == "gadgets.size") {
+            x.read_back = Some(json!(20));
+        }
         let p2 = prove(&rt, "T");
         assert_eq!(p2.rows["gadgets.size"].state, "changed");
         assert!(p2.rows["gadgets.size"].why[0].starts_with("round trip:"), "{:?}", p2.rows["gadgets.size"]);
+        assert_eq!(p2.rows["gadgets.size"].reason, None);
+    }
+
+    /// Owner ruling (coordinator, 2026-11-22): a row that only lacks lab evidence is Unproven with its reason and stays
+    /// off; Changed ("Unmapped: ... a Kiln update is needed") is for a mapping that is wrong on the build.
+    #[test]
+    fn a_row_only_lacking_lab_samples_is_unproven_not_changed() {
+        let mut inp = with_power_samples(inputs());
+        for s in &mut inp.suites {
+            s.samples.retain(|x| x.field != "gadgets.size" && x.field != "gadgets.power");
+        }
+        let p = prove(&inp, "T");
+        assert!(p.verified, "the suite is complete; two fields have no sample: {:?}", p.blockers);
+        for q in ["gadgets.size", "gadgets.power"] {
+            let r = &p.rows[q];
+            assert_eq!(r.state, "unproven", "{q}: {r:?}");
+            assert!(r.reason.as_deref().is_some_and(|x| x.contains("lab round trip")), "{q}: {r:?}");
+            assert!(r.why.iter().any(|w| w.contains("no round-trip sample")), "{q}: {r:?}");
+        }
+        let rec = record(&p, &candidate());
+        assert_eq!(rec["rows"]["gadgets.size"], "unproven");
+        assert_eq!(rec["rows"]["gadgets.tier"], "ok");
+        assert!(rec["reasons"]["gadgets.power"].as_str().is_some_and(|x| x.contains("lab round trip")), "{rec}");
+        assert!(rec["reasons"].get("gadgets.tier").is_none(), "only unproven rows carry a reason");
+        assert!(p.summary().contains("2 unproven"), "{}", p.summary());
+        assert!(next_text(&p).contains("gadgets.size: unproven"), "{}", next_text(&p));
+        assert!(report_text(&p).contains("gadgets.power: unproven"), "{}", report_text(&p));
+        // the formula's constants missing as well: still evidence, still unproven
+        let mut nc = inp.clone();
+        nc.values_new.as_mut().unwrap().registries.remove("balance");
+        for s in &mut nc.suites {
+            s.constants.clear();
+        }
+        assert_eq!(prove(&nc, "T").rows["gadgets.power"].state, "unproven");
+        // a reflection change wins over missing samples: that mapping is wrong, not just unproven
+        let mut n = old_types();
+        let at = n.iter().position(|t| t["name"] == "demo::Gadget").unwrap();
+        n[at]["fields"][0]["name"] = json!("maxStack");
+        inp.new_refl = Some(db(n, SHA));
+        let p2 = prove(&inp, "T");
+        assert_eq!(p2.rows["gadgets.size"].state, "changed");
+        assert_eq!(record(&p2, &candidate())["rows"]["gadgets.size"], "changed");
+        // a record without unproven rows has no reasons member
+        let all = prove(&with_power_samples(inputs()), "T");
+        assert!(record(&all, &candidate()).get("reasons").is_none());
     }
 
     #[test]

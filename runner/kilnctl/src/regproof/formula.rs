@@ -121,7 +121,10 @@ pub struct RowCheck {
     pub formula: String,
     pub ok: bool,
     pub samples: usize,
+    /// a check that failed
     pub problems: Vec<String>,
+    /// evidence that is not there (no lab sample, no constants): the formula is unproven, not wrong
+    pub missing: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -155,14 +158,14 @@ pub fn check(rows: &[(String, &Row)], now: Option<Constants>, before: Option<Con
             continue;
         }
         let name = row.formula.clone().unwrap_or_default();
-        let mut problems = Vec::new();
+        let (mut problems, mut missing) = (Vec::new(), Vec::new());
         match arity(&name) {
             None => problems.push(format!("the formula {name:?} is not one kilnctl knows (gear.power, gear.armor)")),
             Some(n) if n != row.paths.len() => problems.push(format!("{name} takes {n} members, the row names {}", row.paths.len())),
             _ => {}
         }
         match now {
-            None => problems.push("this build's gear constants are not known (the values export or the round-trip suite must \
+            None => missing.push("this build's gear constants are not known (the values export or the round-trip suite must \
                                    carry all four): the formula cannot be checked".to_string()),
             Some(c) => {
                 if let Some(level) = (LEVEL_MIN..=LEVEL_MAX).find(|l| !answers(&name, *l, &c)) {
@@ -172,15 +175,15 @@ pub fn check(rows: &[(String, &Row)], now: Option<Constants>, before: Option<Con
         }
         let ss = samples.get(q).map(Vec::as_slice).unwrap_or(&[]);
         if ss.is_empty() {
-            problems.push("no round-trip sample: the formula is not proven on this build".into());
+            missing.push("no round-trip sample: the formula is not proven on this build".into());
         }
-        if problems.is_empty() {
+        if problems.is_empty() && missing.is_empty() {
             let c = now.expect("checked above");
             for s in ss {
                 problems.extend(sample_problems(&name, s, row.writable(), &c));
             }
         }
-        r.rows.insert(q.clone(), RowCheck { formula: name, ok: problems.is_empty(), samples: ss.len(), problems });
+        r.rows.insert(q.clone(), RowCheck { formula: name, ok: problems.is_empty() && missing.is_empty(), samples: ss.len(), problems, missing });
     }
     r
 }
@@ -364,9 +367,11 @@ mod tests {
         let rows = vec![("gadgets.power".to_string(), &row)];
         let no_samples = check(&rows, Some(g), Some(g), &BTreeMap::new());
         assert!(!no_samples.rows["gadgets.power"].ok);
-        assert!(no_samples.rows["gadgets.power"].problems.iter().any(|p| p.contains("no round-trip sample")));
+        assert!(no_samples.rows["gadgets.power"].missing.iter().any(|p| p.contains("no round-trip sample")));
+        assert!(no_samples.rows["gadgets.power"].problems.is_empty(), "{:?}", no_samples.rows["gadgets.power"]);
         let no_constants = check(&rows, None, Some(g), &one("gadgets.power", vec![good(&g)]));
         assert!(!no_constants.rows["gadgets.power"].ok);
+        assert!(no_constants.rows["gadgets.power"].missing.iter().any(|p| p.contains("constants")), "{:?}", no_constants.rows["gadgets.power"]);
         let mut unknown = power_row();
         unknown.formula = Some("gear.other".into());
         let rows_u = vec![("gadgets.power".to_string(), &unknown)];

@@ -147,7 +147,9 @@ fn a_missing_boot_generation_leaves_the_record_unverified() {
     assert_eq!(o.status.code(), Some(1), "{}", text(&o));
     let rec: Value = serde_json::from_str(&std::fs::read_to_string(out.join(format!("regmap-server-{NEW}.json"))).unwrap()).unwrap();
     assert_eq!(rec["verified"], false);
-    assert_eq!(rec["rows"]["gadgets.cap"], "changed");
+    // no sample in a boot generation: unproven (kept off, with its reason), not "changed"
+    assert_eq!(rec["rows"]["gadgets.cap"], "unproven");
+    assert!(rec["reasons"]["gadgets.cap"].as_str().is_some_and(|r| r.contains("lab round trip")), "{rec}");
     assert_eq!(rec["rows"]["gadgets.size"], "ok");
     let next = std::fs::read_to_string(out.join("NEXT.txt")).unwrap();
     assert!(next.contains("boot generation"), "{next}");
