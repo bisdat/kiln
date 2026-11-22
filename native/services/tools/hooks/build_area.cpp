@@ -16,18 +16,15 @@ double sum_error(double a, double b, double sum) noexcept {
     const double z = sum - a;
     return (a - (sum - z)) + (b - z);
 }
-double inward_bound(int64_t fixed, bool lower) noexcept {
+struct Bound { double rounded, residual; };
+Bound exact_bound(int64_t fixed) noexcept {
     constexpr int64_t unit = INT64_C(4294967296);
     // Intentional integer quotient/remainder: both parts are exactly representable before the error-free sum.
     const int64_t integral = fixed / unit;
     const double whole = static_cast<double>(integral);
     const double fraction = std::ldexp(static_cast<double>(fixed % unit), -32);
-    const double bound = whole + fraction;
-    const double error = sum_error(whole, fraction, bound);
-    if ((lower && error > 0) || (!lower && error < 0))
-        return std::nextafter(bound, lower ? std::numeric_limits<double>::infinity() :
-                                           -std::numeric_limits<double>::infinity());
-    return bound;
+    const double rounded = whole + fraction;
+    return {rounded, sum_error(whole, fraction, rounded)};
 }
 bool add_address(uintptr_t base, size_t offset, uintptr_t& out) noexcept {
     if (!base || offset > std::numeric_limits<uintptr_t>::max() - base) return false;
@@ -41,10 +38,12 @@ bool contains(const Base& b, const Sphere& s) noexcept {
         if (b.min[a] > b.max[a]) return false;
         const double low = s.center[a] - s.radius, high = s.center[a] + s.radius;
         if (!std::isfinite(low) || !std::isfinite(high)) return false;
-        const double min = inward_bound(b.min[a], true), max = inward_bound(b.max[a], false);
-        if (low < min || high > max) return false;
-        if (low == min && sum_error(s.center[a], -s.radius, low) < 0) return false;
-        if (high == max && sum_error(s.center[a], s.radius, high) > 0) return false;
+        const Bound min = exact_bound(b.min[a]), max = exact_bound(b.max[a]);
+        // Rounded sums order the exact values; when equal, compare their exact residuals. Keeping the bound's
+        // residual too preserves tangency to fixed-point values that do not fit in one double.
+        if (low < min.rounded || high > max.rounded) return false;
+        if (low == min.rounded && sum_error(s.center[a], -s.radius, low) < min.residual) return false;
+        if (high == max.rounded && sum_error(s.center[a], s.radius, high) > max.residual) return false;
     }
     return true;
 }

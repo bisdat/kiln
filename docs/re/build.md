@@ -154,8 +154,8 @@ column (3800, 1430) = a player's house:       column (3024, 1552) = an empty pla
 The guard in `native/services/tools/hooks/build_area.cpp` is an additional restriction **inside an existing engine
 impact**, not a replacement permission check and not a direct voxel-write authorisation. A sphere must fit inside
 **one** current, non-abandoned base box on all three axes. Exact tangency is accepted, crossing is refused; overlapping
-boxes are not merged. Unknown shape kinds, missing geometry, unreadable memory or missing mappings refuse. Fixed-point
-bounds are rounded inward, and error-free addition residuals catch crossings smaller than one double ULP.
+boxes are not merged. Unknown shape kinds, missing geometry, unreadable memory or missing mappings refuse. Exact
+fixed-point bound residuals preserve tangency, and error-free addition residuals catch crossings smaller than one double ULP.
 
 Independently checked on server 26430253 (`f0d824be…`) and client 26430625 (`5d9ef2f1…`), using read-only disassembly
 and the offline resolver, not the third-party mod implementation [dis] [cap `tools.build_area`]:

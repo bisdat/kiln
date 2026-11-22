@@ -79,6 +79,14 @@ int main() {
     check(!allowed({{NAN, 0, 0}, 1}), "nonfinite center refused");
     check(!allowed({{0, 0, 0}, NAN}), "nan radius refused");
     check(!allowed({{std::numeric_limits<double>::max(), 0, 0}, 1}), "extreme center refused");
+    bases[0].min[0] = (INT64_C(1) << 62) - 4096;
+    bases[0].max[0] = (INT64_C(1) << 62) + 1;
+    check(allowed({{1073741824.0, 0, 0}, 0x1p-32}), "exact fixed-point upper tangent beyond double precision");
+    check(!allowed({{1073741824.0, 0, 0}, 0x1p-31}), "crossing fractional upper bound refused");
+    bases[0].min[0] = -(INT64_C(1) << 62) - 1;
+    bases[0].max[0] = -(INT64_C(1) << 62) + 4096;
+    check(allowed({{-1073741824.0, 0, 0}, 0x1p-32}), "exact fixed-point lower tangent beyond double precision");
+    check(!allowed({{-1073741824.0, 0, 0}, 0x1p-31}), "crossing fractional lower bound refused");
     publish(0); check(!allowed({{0, 0, 0}, 1}), "no bases refused");
     publish(4097); check(!allowed({{0, 0, 0}, 1}), "unbounded count refused");
     publish(1);
