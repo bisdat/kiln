@@ -92,7 +92,8 @@ KilnResult KILN_CALL w_position(KilnEntity e, KilnVec3* p) {
 }
 KilnResult KILN_CALL w_register(KilnOwner, const KilnProgramDesc*, KilnHandle* h) { return *h = 77, KILN_OK; }
 int32_t KILN_CALL w_slot(KilnHandle, int32_t, KilnStr n) { return std::string(n.ptr, n.len) == "NpcCommon" ? 0 : 1; }
-KilnResult KILN_CALL w_info(KilnHandle, KilnWorldProgramInfo* i) { i->state = KILN_PROGRAM_ACTIVE; return KILN_OK; }
+uint32_t prog_state = KILN_PROGRAM_ACTIVE;
+KilnResult KILN_CALL w_info(KilnHandle, KilnWorldProgramInfo* i) { i->state = prog_state; return KILN_OK; }
 void* KILN_CALL w_write_other(KilnProgramCtx*, uint64_t acc, KilnEntity e, uint32_t* size) {
     if (acc == 0 && npcs.count(e)) return *size = 1688, npcs[e].common.data();
     if (acc == 1 && beds.count(e)) return *size = 4, &beds[e];
@@ -310,6 +311,13 @@ int main() {
     recruit_indeterminate();
     beds_one_at_a_time();
     bed_changed_in_step();
+    // N4: the world refused the bed program after on_ready: survivors.assign is no longer advertised
+    prog_state = KILN_PROGRAM_REFUSED;
+    publish_caps();
+    KilnSurvivorsStatus st{};
+    st.size = sizeof st;
+    check(t_status(&st) == KILN_OK && st.assign == 0, "N4: a refused bed program takes survivors.assign down");
+    prog_state = KILN_PROGRAM_ACTIVE;
     std::printf("survivors_flow_test: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }

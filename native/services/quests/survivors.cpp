@@ -311,7 +311,15 @@ void row(const char* name, bool on, uint32_t reason, const std::string& text) {
 bool has_npc_command() {
     return C && C->header.size >= offsetof(KilnCreaturesApi, npc_command) + sizeof(void*) && C->npc_command;
 }
+KilnHandle g_prog = 0;  // the bed program (register_program)
 void publish_caps() {
+    // the world can refuse or disable the bed program after on_ready (review N4): survivors.assign follows its state
+    if (g_prog && W && W->program_info) {
+        KilnWorldProgramInfo info{};
+        info.size = sizeof info;
+        if (W->program_info(g_prog, &info) == KILN_OK)
+            g_program_active.store(info.state == KILN_PROGRAM_ACTIVE || info.state == KILN_PROGRAM_PENDING);
+    }
     KilnKnowledgeStatus ks_{};
     ks_.size = sizeof ks_;
     const bool know = K && K->status(&ks_) == KILN_OK && ks_.knowledge && ks_.npc;
@@ -723,7 +731,6 @@ void release_bed_slot(uint64_t id) {
     std::lock_guard lock(g_op_mu);
     if (g_op && g_op->req == id) g_op.reset();
 }
-KilnHandle g_prog = 0;
 int g_slot_common = -1, g_slot_bed = -1;
 std::atomic<bool> g_tpl_warned{false};
 
