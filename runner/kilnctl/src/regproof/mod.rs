@@ -41,6 +41,8 @@ pub struct Inputs {
     pub new_exe_sha: String,
     pub old_exe_sha: Option<String>,
     pub map: regmap::RegMap,
+    /// [`regmap::digest`] of the regmap/common judged: lab files of another mapping prove nothing here
+    pub regmap_digest: String,
     pub old_refl: Option<refl::TypeDb>,
     pub new_refl: Option<refl::TypeDb>,
     /// regmap_check.py's record of the new build (its rows, layouts and aliases)
@@ -143,7 +145,7 @@ pub fn prove(inp: &Inputs, when: &str) -> Proof {
         _ => {}
     }
     // 3. round trip (before the formulas: they use its samples)
-    p.roundtrip = roundtrip::check(&inp.map, &inp.side, &inp.new_exe_sha, &inp.suites);
+    p.roundtrip = roundtrip::check(&inp.map, &inp.side, &inp.new_exe_sha, &inp.regmap_digest, &inp.suites);
     if !p.roundtrip.complete {
         p.blockers.push(format!("the round-trip suite is incomplete: no {} generation of this build (the lab's proof producer writes one per generation)",
                                 p.roundtrip.missing.join(" and no ")));
@@ -151,7 +153,7 @@ pub fn prove(inp: &Inputs, when: &str) -> Proof {
     p.notes.extend(p.roundtrip.problems.iter().map(|x| format!("round trip: {x}")));
     // 2. formulas
     let mut set_aside = Vec::new();
-    let usable = roundtrip::usable(&inp.side, &inp.new_exe_sha, &inp.suites, &mut set_aside);
+    let usable = roundtrip::usable(&inp.side, &inp.new_exe_sha, &inp.regmap_digest, &inp.suites, &mut set_aside);
     let formula_rows: Vec<(String, &regmap::Row)> = regmap::qualified(&inp.map)
         .into_iter()
         .filter(|(_, _, _, row)| row.has_mapping() && row.conv == "formula")
@@ -173,6 +175,14 @@ pub fn prove(inp: &Inputs, when: &str) -> Proof {
             }
             if let Some(old) = old.as_ref().or(first.then_some(new)) {
                 let old_sha = if first { inp.new_exe_sha.clone() } else { inp.old_exe_sha.clone().unwrap_or_else(|| old.exe_sha256.clone()) };
+                if !new.regmap_digest.eq_ignore_ascii_case(&inp.regmap_digest) {
+                    p.blockers.push(format!("values: the new export was read through another mapping (regmapDigest {:?}, this proof's \
+                                             regmap/common is {})", new.regmap_digest.get(..12).unwrap_or(&new.regmap_digest), short(&inp.regmap_digest)));
+                }
+                if !first && !old.regmap_digest.eq_ignore_ascii_case(&inp.regmap_digest) {
+                    p.notes.push("values: the old export was read through another regmap/common (rows that changed between the two can \
+                                  differ for that reason)".into());
+                }
                 let d = values::diff(old, new, &inp.side, &old_sha, &inp.new_exe_sha);
                 p.blockers.extend(d.problems.iter().map(|x| format!("values: {x}")));
                 p.notes.extend(d.notes.iter().map(|x| format!("values: {x}")));
@@ -463,6 +473,8 @@ pub struct Gather {
     pub side: String,
     /// the Kiln tree: regmap/common, schema/, tools/
     pub tree: PathBuf,
+    /// the Kiln folder the game runs (`<game>/kiln`): its regmap/common must be the tree's
+    pub deployed: Option<PathBuf>,
     pub out: PathBuf,
     pub store: Option<ids::Store>,
     pub new_exe: Option<PathBuf>,
@@ -637,6 +649,16 @@ pub fn gather(g: &Gather) -> Result<Inputs> {
     std::fs::create_dir_all(&g.out).with_context(|| format!("creating {}", g.out.display()))?;
     let map = regmap::load(&g.tree)?;
     let mut inp = Inputs { side: g.side.clone(), map, first_build: g.first_build, accepted: g.accept.clone(), ..Default::default() };
+    inp.regmap_digest = regmap::digest(&g.tree)?;
+    // the game runs its deployed regmap/common: the tree's must be the same, or the proof judges a mapping no lab ran
+    if let Some(k) = &g.deployed {
+        match regmap::differences(&g.tree, k) {
+            Ok(d) if d.is_empty() => {}
+            Ok(d) => inp.problems.push(format!("the tree's regmap/common differs from the deployed {} ({}): redeploy Kiln, or prove \
+                                                with --tree set to the Kiln the game runs", k.join("regmap/common").display(), d.join(", "))),
+            Err(e) => inp.problems.push(format!("the deployed regmap/common cannot be compared with the tree's: {e:#}")),
+        }
+    }
     // which builds
     let sha_of = |exe: &Option<PathBuf>, dump: &Option<PathBuf>| -> Result<Option<String>> {
         if let Some(e) = exe {
@@ -837,7 +859,7 @@ pub fn cli(a: CliArgs) -> Result<i32> {
     }
     let tree = a.tree.clone().or_else(|| inst.as_ref().map(|i| i.kiln.source.clone())).context("which Kiln tree? pass --tree (or an instance)")?;
     let mut g = Gather {
-        side: a.side.clone(), tree, out: PathBuf::new(), store: None, new_exe: a.new_exe, old_exe: a.old_exe, new_refl: a.new_refl,
+        side: a.side.clone(), tree, deployed: inst.as_ref().map(crate::kiln::kiln_dir), out: PathBuf::new(), store: None, new_exe: a.new_exe, old_exe: a.old_exe, new_refl: a.new_refl,
         old_refl: a.old_refl, record: a.record, ids: a.ids, prev_ids: a.prev_ids, evidence: a.evidence, game_build: a.game_build,
         steam_build: a.steam_build, first_build: a.first_build, accept: a.accept,
     };
@@ -878,7 +900,8 @@ pub fn flow(inst: &crate::config::Instance, old: Option<&Path>, new: &Path, mark
         return ("no regmap in the Kiln tree; skipped".into(), Vec::new());
     }
     let g = Gather {
-        side: "server".into(), tree: inst.kiln.source.clone(), out: default_out(&inst.name, Some(new)), new_exe: Some(new.to_path_buf()),
+        side: "server".into(), tree: inst.kiln.source.clone(), deployed: Some(crate::kiln::kiln_dir(inst)),
+        out: default_out(&inst.name, Some(new)), new_exe: Some(new.to_path_buf()),
         old_exe: old.map(Path::to_path_buf), evidence: instance_evidence(inst), steam_build: crate::steam::buildid(&inst.dir),
         ..Default::default()
     };
@@ -933,6 +956,7 @@ mod tests {
             new_exe_sha: SHA.into(),
             old_exe_sha: Some(OLD.into()),
             map: map(),
+            regmap_digest: crate::regproof::regmap::tests::DIGEST.into(),
             old_refl: Some(db(old_types(), OLD)),
             new_refl: Some(db(old_types(), SHA)),
             candidate: Some(candidate()),
@@ -1087,6 +1111,15 @@ mod tests {
     }
 
     #[test]
+    fn a_values_export_of_another_mapping_proves_nothing() {
+        let mut inp = with_power_samples(inputs());
+        inp.values_new.as_mut().unwrap().regmap_digest = "e2".repeat(32);
+        let p = prove(&inp, "T");
+        assert!(!p.verified);
+        assert!(p.blockers.iter().any(|b| b.contains("another mapping")), "{:?}", p.blockers);
+    }
+
+    #[test]
     fn a_reflection_change_needs_a_review() {
         let mut inp = with_power_samples(inputs());
         let mut n = old_types();
@@ -1203,7 +1236,8 @@ mod tests {
         let data = root.join("gate/kiln/data");
         ids::deploy(&table(SHA, &[("g1", "game:a")]), &data).unwrap();
         ids::deploy(&table(OLD, &[("g1", "game:a")]), &data).unwrap();
-        let suite = json!({"format": 1, "kind": "registry-roundtrip", "side": "server", "exeSha256": SHA, "generation": "live", "samples": []});
+        let suite = json!({"format": 1, "kind": "registry-roundtrip", "side": "server", "exeSha256": SHA, "generation": "live",
+                           "regmapDigest": regmap::digest(&tree).unwrap(), "samples": []});
         w(&data.join("content/registry/proof/rt-live.json"), &suite);
         w(&data.join("content/registry/proof/values.json"),
           &json!({"format": 1, "kind": "registry-values", "side": "server", "exeSha256": SHA, "base": {"origin": "live", "writer": "none"}, "registries": {}}));
@@ -1217,12 +1251,21 @@ mod tests {
         };
         let inp = gather(&g).unwrap();
         assert_eq!((inp.new_exe_sha.as_str(), inp.old_exe_sha.as_deref()), (SHA, Some(OLD)));
+        assert_eq!(inp.regmap_digest, regmap::digest(&tree).unwrap());
         assert_eq!(inp.suites.len(), 1);
         assert!(inp.values_new.is_some() && inp.values_old.is_some(), "the old export from the store");
         assert_eq!(inp.native_ids.as_ref().unwrap().exe_sha256, SHA);
         assert_eq!(inp.prev_ids.as_ref().unwrap().exe_sha256, OLD);
         assert!(store.get("server", OLD).is_some(), "the data folder's tables were harvested into the store");
         assert!(inp.problems.is_empty(), "{:?}", inp.problems);
+        // the game runs another regmap/common than the tree's: the proof would judge a mapping no lab ran
+        let kiln = root.join("game/kiln");
+        std::fs::create_dir_all(kiln.join("regmap/common")).unwrap();
+        std::fs::copy(tree.join("regmap/common/gadgets.json"), kiln.join("regmap/common/gadgets.json")).unwrap();
+        assert!(gather(&Gather { deployed: Some(kiln.clone()), ..g.clone() }).unwrap().problems.is_empty());
+        std::fs::write(kiln.join("regmap/common/gadgets.json"), "{}").unwrap();
+        let stale = gather(&Gather { deployed: Some(kiln.clone()), ..g.clone() }).unwrap();
+        assert!(stale.problems.iter().any(|p| p.contains("deployed") && p.contains("gadgets.json")), "{:?}", stale.problems);
         // outputs inside the tree are refused
         let bad = Gather { out: tree.join("out"), ..g.clone() };
         assert!(gather(&bad).is_err());

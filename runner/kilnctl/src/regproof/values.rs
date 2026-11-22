@@ -8,6 +8,7 @@
 //! The export (`"kind": "registry-values"`, format 1; written by the lab's proof producer, which is not part of kilnctl):
 //! ```jsonc
 //! { "format": 1, "kind": "registry-values", "side": "server", "exeSha256": "<sha256>", "gameBuild": "1287369",
+//!   "regmapDigest": "<sha256>",                       // the regmap/common it was read through (regmap::digest)
 //!   "base": { "origin": "live", "writer": "none" },     // as state/registry.json "base": origin, writer, token
 //!   "registries": { "items": { "game:...": { "maxStack": 20, "power": 31 } } } }
 //! ```
@@ -45,6 +46,9 @@ pub struct Export {
     pub exe_sha256: String,
     #[serde(default)]
     pub game_build: String,
+    /// the mapping the export was read through ([`super::regmap::digest`])
+    #[serde(default)]
+    pub regmap_digest: String,
     #[serde(default)]
     pub base: Base,
     #[serde(default)]
@@ -211,7 +215,7 @@ pub(crate) mod tests {
 
     pub(crate) fn export(sha: &str, build: &str, writer: &str, registries: Value) -> Export {
         parse(&json!({"format": 1, "kind": KIND, "side": "server", "exeSha256": sha, "gameBuild": build,
-                      "base": {"origin": "live", "writer": writer}, "registries": registries}).to_string()).unwrap()
+                      "regmapDigest": crate::regproof::regmap::tests::DIGEST, "base": {"origin": "live", "writer": writer}, "registries": registries}).to_string()).unwrap()
     }
 
     pub(crate) fn old_values() -> Value {

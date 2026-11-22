@@ -12,6 +12,7 @@
 //! ```jsonc
 //! { "format": 1, "kind": "registry-roundtrip", "side": "server", "exeSha256": "<the exe's sha256>",
 //!   "generation": "live",                       // live | boot
+//!   "regmapDigest": "<sha256>",                 // the regmap/common the run used (regmap::digest); another one is set aside
 //!   "constants": { "gear.seed": 10, "gear.creep": 0.15, "gear.armorOffset": 23, "gear.armorGradient": 15 },
 //!   "samples": [ { "field": "items.maxStack", "entry": "game:...", "element": null,   // element: a list element's index
 //!                  "read": 20, "probe": 21, "readBack": 21,                          // through the schema
@@ -43,6 +44,9 @@ pub struct Suite {
     pub exe_sha256: String,
     #[serde(default)]
     pub generation: String,
+    /// the mapping the lab ran with ([`super::regmap::digest`] of its regmap/common)
+    #[serde(default)]
+    pub regmap_digest: String,
     #[serde(default)]
     pub constants: BTreeMap<String, f64>,
     #[serde(default)]
@@ -122,10 +126,14 @@ pub struct Report {
 }
 
 /// The suites of this side and exe with a known generation; the others are named in `problems`.
-pub fn usable<'a>(side: &str, exe_sha256: &str, suites: &'a [Suite], problems: &mut Vec<String>) -> Vec<&'a Suite> {
+pub fn usable<'a>(side: &str, exe_sha256: &str, regmap_digest: &str, suites: &'a [Suite], problems: &mut Vec<String>) -> Vec<&'a Suite> {
     let mut out = Vec::new();
     for s in suites {
-        if s.side != side {
+        if s.regmap_digest.is_empty() || !s.regmap_digest.eq_ignore_ascii_case(regmap_digest) {
+            problems.push(format!("a {} suite of another mapping (regmapDigest {:?}, this proof's regmap/common is {}) was set aside: \
+                                   it proves a mapping this proof does not judge", s.generation,
+                                  s.regmap_digest.get(..12).unwrap_or(&s.regmap_digest), regmap_digest.get(..12).unwrap_or(regmap_digest)));
+        } else if s.side != side {
             problems.push(format!("a {} suite of the {} side was set aside (this is the {side} side's proof)", s.generation, s.side));
         } else if !s.exe_sha256.eq_ignore_ascii_case(exe_sha256) {
             problems.push(format!("a {} suite of another exe ({}) was set aside", s.generation, s.exe_sha256.get(..12).unwrap_or(&s.exe_sha256)));
@@ -274,9 +282,9 @@ fn sample_problems(row: &Row, x: &Sample, raw: Raw) -> Vec<String> {
 }
 
 /// Every mapped row of the regmap against the suites of this side and exe.
-pub fn check(map: &RegMap, side: &str, exe_sha256: &str, suites: &[Suite]) -> Report {
+pub fn check(map: &RegMap, side: &str, exe_sha256: &str, regmap_digest: &str, suites: &[Suite]) -> Report {
     let mut r = Report::default();
-    let good = usable(side, exe_sha256, suites, &mut r.problems);
+    let good = usable(side, exe_sha256, regmap_digest, suites, &mut r.problems);
     let rows: Vec<(String, &Row)> = super::regmap::qualified(map).into_iter().filter(|(_, _, _, row)| row.has_mapping()).map(|(q, _, _, row)| (q, row)).collect();
     let needs_boot = rows.iter().any(|(_, row)| row.backend == "boot");
     for g in ["live", "boot"] {
@@ -336,7 +344,7 @@ pub fn formula_samples(suites: &[&Suite], field: &str) -> Vec<formula::Sample> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::regproof::regmap::tests::sample;
+    use crate::regproof::regmap::tests::{DIGEST, sample};
     use serde_json::json;
 
     pub(crate) const SHA: &str = "1111111111111111111111111111111111111111111111111111111111111111";
@@ -364,7 +372,7 @@ pub(crate) mod tests {
 
     pub(crate) fn suite(generation: &str, fields: &[&str]) -> Suite {
         let samples: Vec<Value> = fields.iter().map(|f| good_sample(f)).collect();
-        parse(&json!({"format": 1, "kind": KIND, "side": "server", "exeSha256": SHA, "generation": generation,
+        parse(&json!({"format": 1, "kind": KIND, "side": "server", "exeSha256": SHA, "generation": generation, "regmapDigest": DIGEST,
                       "constants": {"gear.seed": 10, "gear.creep": 0.15, "gear.armorOffset": 23, "gear.armorGradient": 15},
                       "samples": samples}).to_string()).unwrap()
     }
@@ -391,6 +399,19 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn a_suite_of_another_mapping_is_set_aside() {
+        // a lab run with another regmap/common (an older deploy, a row fixed since) proves nothing about this one
+        let mut other = full();
+        other[0].regmap_digest = "e2".repeat(32);
+        other[1].regmap_digest.clear();
+        let r = check(&map_with_float_cap(), "server", SHA, DIGEST, &other);
+        assert!(!r.complete, "{r:?}");
+        assert_eq!(r.problems.len(), 2, "{:?}", r.problems);
+        assert!(r.problems.iter().all(|p| p.contains("another mapping")), "{:?}", r.problems);
+        assert!(r.fields.values().all(|f| !f.ok));
+    }
+
+    #[test]
     fn parses_only_round_trip_suites() {
         assert!(parse(r#"{"format": 1, "kind": "registry-values"}"#).is_err());
         assert!(parse(r#"{"format": 2, "kind": "registry-roundtrip"}"#).is_err());
@@ -400,7 +421,7 @@ pub(crate) mod tests {
 
     #[test]
     fn a_complete_suite_proves_every_mapped_field() {
-        let r = check(&map_with_float_cap(), "server", SHA, &full());
+        let r = check(&map_with_float_cap(), "server", SHA, DIGEST, &full());
         assert!(r.complete, "{r:?}");
         for (q, f) in &r.fields {
             assert!(f.ok, "{q}: {f:?}");
@@ -415,7 +436,7 @@ pub(crate) mod tests {
     #[test]
     fn a_missing_generation_or_another_build_fails_closed() {
         let only_live = vec![full().remove(0)];
-        let r = check(&map_with_float_cap(), "server", SHA, &only_live);
+        let r = check(&map_with_float_cap(), "server", SHA, DIGEST, &only_live);
         assert!(!r.complete);
         assert_eq!(r.missing, ["boot"]);
         assert!(!r.fields["plans.cap"].ok);
@@ -424,18 +445,18 @@ pub(crate) mod tests {
         // the boot field proven in a live generation proves nothing about the boot back-end
         let mut wrong = full();
         wrong[1].generation = "live".into();
-        assert!(!check(&map_with_float_cap(), "server", SHA, &wrong).fields["plans.cap"].ok);
+        assert!(!check(&map_with_float_cap(), "server", SHA, DIGEST, &wrong).fields["plans.cap"].ok);
         // a suite of another exe or side is set aside
         let mut other = full();
         other[0].exe_sha256 = "22".repeat(32);
         other[1].side = "client".into();
-        let r2 = check(&map_with_float_cap(), "server", SHA, &other);
+        let r2 = check(&map_with_float_cap(), "server", SHA, DIGEST, &other);
         assert!(!r2.complete && r2.problems.len() == 2, "{:?}", r2.problems);
         assert!(r2.fields.values().all(|f| !f.ok));
         // a field without a sample
         let mut thin = full();
         thin[0].samples.retain(|s| s.field != "gadgets.tier");
-        let r3 = check(&map_with_float_cap(), "server", SHA, &thin);
+        let r3 = check(&map_with_float_cap(), "server", SHA, DIGEST, &thin);
         assert!(r3.complete);
         assert!(r3.fields["gadgets.tier"].missing.iter().any(|p| p.contains("no round-trip sample")));
         assert!(!r3.fields["gadgets.tier"].ok && r3.fields["gadgets.tier"].problems.is_empty());
@@ -461,7 +482,7 @@ pub(crate) mod tests {
         for (field, f, word) in cases {
             let mut suites = full();
             edit(&mut suites, field, f);
-            let r = check(&map_with_float_cap(), "server", SHA, &suites);
+            let r = check(&map_with_float_cap(), "server", SHA, DIGEST, &suites);
             let x = &r.fields[field];
             assert!(!x.ok, "{field} ({word}) should fail: {x:?}");
             assert!(x.problems.iter().any(|p| p.contains(word)), "{field}: {word:?} not in {:?}", x.problems);
@@ -473,12 +494,12 @@ pub(crate) mod tests {
     fn floats_compare_within_float_precision_and_formulas_go_to_formula_rs() {
         let mut suites = full();
         edit(&mut suites, "plans.cap", |s| s.raw_after = Some(vec![json!(2.25f32 as f64 + 1e-8)]));
-        assert!(check(&map_with_float_cap(), "server", SHA, &suites).fields["plans.cap"].ok);
+        assert!(check(&map_with_float_cap(), "server", SHA, DIGEST, &suites).fields["plans.cap"].ok);
         edit(&mut suites, "plans.cap", |s| s.raw_after = Some(vec![json!(2.3)]));
-        assert!(!check(&map_with_float_cap(), "server", SHA, &suites).fields["plans.cap"].ok);
+        assert!(!check(&map_with_float_cap(), "server", SHA, DIGEST, &suites).fields["plans.cap"].ok);
         let owned = full();
         let mut why = Vec::new();
-        let all = usable("server", SHA, &owned, &mut why);
+        let all = usable("server", SHA, DIGEST, &owned, &mut why);
         assert_eq!((all.len(), why.len()), (2, 0));
         assert_eq!(constants(&all)["gear.creep"], 0.15);
         let fs = formula_samples(&all, "gadgets.power");
@@ -497,12 +518,13 @@ pub(crate) mod tests {
         let mut map = RegMap::new();
         map.insert("kit".into(), crate::regproof::regmap::parse(rows, "kit").unwrap());
         let b = "ab".repeat(32);
-        let mk = |samples: Value| parse(&json!({"format": 1, "kind": KIND, "side": "server", "exeSha256": SHA, "generation": "live", "samples": samples}).to_string()).unwrap();
+        let mk = |samples: Value| parse(&json!({"format": 1, "kind": KIND, "side": "server", "exeSha256": SHA, "generation": "live",
+                                                "regmapDigest": DIGEST, "samples": samples}).to_string()).unwrap();
         let ok = mk(json!([
             {"field": "kit.burn", "read": 1.5, "probe": 2, "readBack": 2, "rawBefore": [1500000000i64], "rawAfter": [2000000000i64], "reverted": true, "bytesBefore": b, "bytesAfter": b},
             {"field": "kit.kinds", "read": ["a"], "probe": ["a", "b"], "readBack": ["b", "a"], "rawBefore": [["A"]], "rawAfter": [["B", "A"]], "reverted": true, "bytesBefore": b, "bytesAfter": b},
             {"field": "kit.fixed", "read": "none", "probe": "b", "readBack": "b", "rawBefore": [false, "A"], "rawAfter": [true, "B"], "reverted": true, "bytesBefore": b, "bytesAfter": b}]));
-        let r = check(&map, "server", SHA, &[ok]);
+        let r = check(&map, "server", SHA, DIGEST, &[ok]);
         assert_eq!(r.fields.len(), 3);
         for (q, f) in &r.fields {
             assert!(f.ok, "{q}: {f:?}");
@@ -511,7 +533,7 @@ pub(crate) mod tests {
             {"field": "kit.burn", "read": 1.5, "probe": 2, "readBack": 2, "rawBefore": [1500000000], "rawAfter": [2000000001000i64], "reverted": true, "bytesBefore": b, "bytesAfter": b},
             {"field": "kit.kinds", "read": ["a"], "probe": ["a", "b"], "readBack": ["a", "b"], "rawBefore": [["A"]], "rawAfter": [["A"]], "reverted": true, "bytesBefore": b, "bytesAfter": b},
             {"field": "kit.fixed", "read": "none", "probe": "b", "readBack": "b", "rawBefore": [true, "A"], "rawAfter": [true, "B"], "reverted": true, "bytesBefore": b, "bytesAfter": b}]));
-        let r2 = check(&map, "server", SHA, &[bad]);
+        let r2 = check(&map, "server", SHA, DIGEST, &[bad]);
         assert_eq!(r2.fields.len(), 3);
         for (q, f) in &r2.fields {
             assert!(!f.ok, "{q} should fail: {f:?}");

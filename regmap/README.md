@@ -119,9 +119,16 @@ A row is `ok` when every step proved it, `unproven` when only lab evidence is mi
 its files into `<game>/kiln/data/content/registry/proof/`; kilnctl finds them (and kiln.content's id tables) by content.
 Both formats are format 1; kilnctl refuses another kind or format.
 
+`regmapDigest` ties a lab file to the mapping the run used: sha256 (lower-case hex) over `<file name>\n<sha256 of its
+bytes>\n` for each `regmap/common/*.json` of the game's Kiln folder, in name order (build records are left out: they are
+what the proof writes). kilnctl sets aside every suite whose digest is not the tree's, refuses a new build's values export
+of another mapping, and with an instance refuses to judge a tree whose regmap/common differs from the deployed
+`<game>/kiln/regmap/common`. The lab gate's copy starts with an empty `content/registry/proof/`.
+
 `registry-roundtrip`, one file per side and generation:
 ```jsonc
 { "format": 1, "kind": "registry-roundtrip", "side": "server", "exeSha256": "<sha256>", "generation": "live",  // live | boot
+  "regmapDigest": "<sha256>",                                        // the regmap/common the run used (below)
   "constants": { "gear.seed": 10, "gear.creep": 0.15, "gear.armorOffset": 23, "gear.armorGradient": 15 },
   "samples": [ { "field": "items.maxStack", "entry": "game:...", "element": null,     // element: a list element's index
                  "read": 20, "probe": 21, "readBack": 21,                            // through the schema
@@ -136,6 +143,7 @@ read-only field is read, never written; the bytes are the entry's resource befor
 state/registry.json names it:
 ```jsonc
 { "format": 1, "kind": "registry-values", "side": "server", "exeSha256": "<sha256>", "gameBuild": "1287369",
+  "regmapDigest": "<sha256>",
   "base": { "origin": "live", "writer": "none" },                    // + "token" when the archive writer has one
   "registries": { "items": { "game:...": { "maxStack": 20, "power": 31 } } } }
 ```

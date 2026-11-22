@@ -90,9 +90,9 @@ pub fn parse(text: &str, fallback_name: &str) -> Result<RegFile> {
     Ok(f)
 }
 
-/// `<tree>/regmap/common/*.json`, by registry.
-pub fn load(tree: &Path) -> Result<RegMap> {
-    let dir = tree.join("regmap/common");
+/// The JSON files of `<tree or kiln folder>/regmap/common`, in name order.
+fn common_files(root: &Path) -> Result<Vec<std::path::PathBuf>> {
+    let dir = root.join("regmap/common");
     let mut files: Vec<_> = std::fs::read_dir(&dir)
         .with_context(|| format!("reading {}", dir.display()))?
         .flatten()
@@ -100,6 +100,43 @@ pub fn load(tree: &Path) -> Result<RegMap> {
         .filter(|p| p.extension().is_some_and(|x| x == "json"))
         .collect();
     files.sort();
+    Ok(files)
+}
+
+/// `regmapDigest` of the proof's lab files: the mapping a run used, `<root>/regmap/common/*.json` (root: a Kiln tree or a
+/// game's Kiln folder) as sha256 over "<file name>\n<sha256 of its bytes>\n" per file in name order. The build records
+/// are left out: they are what the proof writes.
+pub fn digest(root: &Path) -> Result<String> {
+    let mut text = String::new();
+    for f in common_files(root)? {
+        let bytes = std::fs::read(&f).with_context(|| format!("reading {}", f.display()))?;
+        let name = f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        text.push_str(&format!("{name}\n{}\n", kiln_manage::hash::sha256_hex(&bytes)));
+    }
+    Ok(kiln_manage::hash::sha256_hex(text.as_bytes()))
+}
+
+/// How two regmap/common folders differ (file names only in one, files whose bytes differ); empty when equal.
+pub fn differences(a: &Path, b: &Path) -> Result<Vec<String>> {
+    let names = |root: &Path| -> Result<BTreeMap<String, std::path::PathBuf>> {
+        Ok(common_files(root)?.into_iter().map(|p| (p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), p)).collect())
+    };
+    let (x, y) = (names(a)?, names(b)?);
+    let mut out = Vec::new();
+    for n in x.keys().chain(y.keys()).collect::<std::collections::BTreeSet<_>>() {
+        match (x.get(n), y.get(n)) {
+            (Some(_), None) => out.push(format!("{n} (only in the first)")),
+            (None, Some(_)) => out.push(format!("{n} (only in the second)")),
+            (Some(p), Some(q)) if std::fs::read(p)? != std::fs::read(q)? => out.push(format!("{n} (different bytes)")),
+            _ => {}
+        }
+    }
+    Ok(out)
+}
+
+/// `<tree>/regmap/common/*.json`, by registry.
+pub fn load(tree: &Path) -> Result<RegMap> {
+    let files = common_files(tree)?;
     let mut out = RegMap::new();
     for p in files {
         let stem = p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
@@ -124,6 +161,33 @@ pub fn qualified(map: &RegMap) -> Vec<(String, &RegFile, &str, &Row)> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    /// The regmapDigest the synthetic lab files carry (the proof's mapping in unit tests).
+    pub(crate) const DIGEST: &str = "d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1";
+
+    #[test]
+    fn the_digest_and_the_differences_cover_the_common_files_only() {
+        let root = std::env::temp_dir().join(format!("kilnctl-regmap-digest-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let (a, b) = (root.join("tree"), root.join("game/kiln"));
+        for d in [&a, &b] {
+            std::fs::create_dir_all(d.join("regmap/common")).unwrap();
+            std::fs::create_dir_all(d.join("regmap/server")).unwrap();
+            std::fs::write(d.join("regmap/common/items.json"), "{\"rows\": {}}").unwrap();
+            std::fs::write(d.join("regmap/common/loot.json"), "{}").unwrap();
+        }
+        std::fs::write(a.join("regmap/server/x.json"), "a record").unwrap();
+        let want = kiln_manage::hash::sha256_hex(format!("items.json\n{}\nloot.json\n{}\n",
+            kiln_manage::hash::sha256_hex(b"{\"rows\": {}}"), kiln_manage::hash::sha256_hex(b"{}")).as_bytes());
+        assert_eq!(digest(&a).unwrap(), want, "records are not part of it");
+        assert_eq!(digest(&b).unwrap(), want);
+        assert!(differences(&a, &b).unwrap().is_empty());
+        std::fs::write(b.join("regmap/common/loot.json"), "{ }").unwrap();
+        std::fs::write(b.join("regmap/common/drops.json"), "{}").unwrap();
+        assert_ne!(digest(&b).unwrap(), want);
+        assert_eq!(differences(&a, &b).unwrap(), ["drops.json (only in the second)", "loot.json (different bytes)"]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     /// A synthetic regmap (invented types and members, the shapes of the real files): a resource registry with a
     /// scalar, an enum, a formula and an unmapped row, and an array registry with a list and a field of its elements.

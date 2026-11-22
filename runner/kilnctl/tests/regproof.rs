@@ -34,8 +34,19 @@ fn table(sha: &str) -> Value {
     json!({"format": 1, "side": "server", "exeSha256": sha, "registries": {"gadgets": {"g1": "game:a", "g2": "game:b"}}})
 }
 
-fn values(sha: &str, size: u32) -> Value {
-    json!({"format": 1, "kind": "registry-values", "side": "server", "exeSha256": sha, "gameBuild": "100",
+/// The regmapDigest contract (regmap/README.md): sha256 over "<file name>\n<sha256 of its bytes>\n" per regmap/common file.
+fn digest(tree: &Path) -> String {
+    let mut files: Vec<PathBuf> = std::fs::read_dir(tree.join("regmap/common")).unwrap().flatten().map(|e| e.path()).collect();
+    files.sort();
+    let mut text = String::new();
+    for f in files {
+        text.push_str(&format!("{}\n{}\n", f.file_name().unwrap().to_string_lossy(), kiln_manage::hash::sha256_hex(&std::fs::read(&f).unwrap())));
+    }
+    kiln_manage::hash::sha256_hex(text.as_bytes())
+}
+
+fn values(sha: &str, size: u32, digest: &str) -> Value {
+    json!({"format": 1, "kind": "registry-values", "side": "server", "exeSha256": sha, "gameBuild": "100", "regmapDigest": digest,
            "base": {"origin": "live", "writer": "none"}, "registries": {"gadgets": {"game:a": {"size": size, "cap": 1.5, "label": true}}}})
 }
 
@@ -68,15 +79,16 @@ fn setup(t: &Path) -> (PathBuf, PathBuf) {
     let data = t.join("gate/kiln/data");
     put(&data.join(format!("content/registry/ids-server-{NEW}.json")), &table(NEW));
     put(&data.join(format!("content/registry/ids-server-{OLD}.json")), &table(OLD));
+    let d = digest(&tree);
     let suite = |generation: &str, samples: Value| json!({"format": 1, "kind": "registry-roundtrip", "side": "server", "exeSha256": NEW,
-                                                          "generation": generation, "samples": samples});
+                                                          "generation": generation, "regmapDigest": d, "samples": samples});
     put(&data.join("content/registry/proof/live.json"), &suite("live", json!([
         sample("gadgets.size", json!({"read": 20, "probe": 21, "readBack": 21, "rawBefore": [20], "rawAfter": [21]})),
         sample("gadgets.label", json!({"read": true, "rawBefore": [1]}))])));
     put(&data.join("content/registry/proof/boot.json"), &suite("boot", json!([
         sample("gadgets.cap", json!({"read": 1.5, "probe": 2.5, "readBack": 2.5, "rawBefore": [1.5], "rawAfter": [2.5]}))])));
-    put(&data.join("content/registry/proof/values-new.json"), &values(NEW, 40));
-    put(&inp.join("values-old.json"), &values(OLD, 20));
+    put(&data.join("content/registry/proof/values-new.json"), &values(NEW, 40, &d));
+    put(&inp.join("values-old.json"), &values(OLD, 20, &d));
     (tree, data)
 }
 
