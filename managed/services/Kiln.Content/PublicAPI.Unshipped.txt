@@ -1,5 +1,1 @@
 #nullable enable
-Kiln.ContentEntry.CraftingWater.get -> int
-Kiln.ContentEntry.CraftingWater.set -> void
-Kiln.RecipeDefinition.Water.get -> int?
-Kiln.RecipeDefinition.Water.init -> void

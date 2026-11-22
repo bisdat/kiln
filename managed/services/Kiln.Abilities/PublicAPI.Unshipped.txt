@@ -1,13 +1,1 @@
 #nullable enable
-Kiln.ItemUseResult
-Kiln.ItemUseResult.Busy = 8 -> Kiln.ItemUseResult
-Kiln.ItemUseResult.Dead = 6 -> Kiln.ItemUseResult
-Kiln.ItemUseResult.EmptySlot = 3 -> Kiln.ItemUseResult
-Kiln.ItemUseResult.NotAPlayer = 5 -> Kiln.ItemUseResult
-Kiln.ItemUseResult.NotConsumable = 1 -> Kiln.ItemUseResult
-Kiln.ItemUseResult.NotOwnSlot = 2 -> Kiln.ItemUseResult
-Kiln.ItemUseResult.NotReady = 7 -> Kiln.ItemUseResult
-Kiln.ItemUseResult.ServerOnly = 9 -> Kiln.ItemUseResult
-Kiln.ItemUseResult.SlotChanged = 4 -> Kiln.ItemUseResult
-Kiln.ItemUseResult.Started = 0 -> Kiln.ItemUseResult
-static Kiln.Abilities.UseItem(Kiln.EntityId player, Kiln.SlotId slot) -> Kiln.ItemUseResult
