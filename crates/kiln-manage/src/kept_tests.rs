@@ -32,14 +32,20 @@ fn install(root: &Path, name: &str, dirs: &DataDirs) -> GameInstall {
     let game = root.join(name);
     put(&game, "enshrouded.exe", b"MZ");
     std::fs::create_dir_all(game.join("kiln")).unwrap();
-    let pfx = root.join(format!("{name}-pfx"));
-    std::fs::create_dir_all(pfx.join("dosdevices")).unwrap();
-    #[cfg(unix)]
-    std::os::unix::fs::symlink("/", pfx.join("dosdevices/z:")).unwrap();
+    #[cfg(windows)]
+    let (platform, prefix, path_mode) = (Platform::Windows, None, PathMode::Native);
+    #[cfg(not(windows))]
+    let (platform, prefix, path_mode) = {
+        let pfx = root.join(format!("{name}-pfx"));
+        std::fs::create_dir_all(pfx.join("dosdevices")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("/", pfx.join("dosdevices/z:")).unwrap();
+        (Platform::Proton, Some(pfx), PathMode::Z)
+    };
     let g = GameInstall {
         id: format!("g-{name}"), kind: GameKind::Client, path: game, exe: "enshrouded.exe".into(),
-        app_id: crate::CLIENT_APP_ID, library: None, platform: Platform::Proton, prefix: Some(pfx), build_id: None,
-        exe_sha256: None, steam_flavor: None, path_mode: PathMode::Z, source: "manual".into(),
+        app_id: crate::CLIENT_APP_ID, library: None, platform, prefix, build_id: None,
+        exe_sha256: None, steam_flavor: None, path_mode, source: "manual".into(),
     };
     crate::game::write_record(dirs, &g, None).unwrap();
     g
@@ -87,9 +93,11 @@ impl World {
     /// v1 with settings 1, then the update to v2, whose settings are 9.
     fn updated(tag: &str) -> World {
         let w = world(tag);
-        w.drop_in(&w.g, "1.0.0");
+        let add = w.drop_in(&w.g, "1.0.0");
+        assert_eq!(w.settings(&w.g).0, "1.0.0", "initial copy placed: {add:?}");
         w.write(&w.g, "1");
-        w.drop_in(&w.g, "2.0.0");
+        let add = w.drop_in(&w.g, "2.0.0");
+        assert_eq!(w.settings(&w.g).0, "2.0.0", "updated copy placed: {add:?}");
         w.write(&w.g, "9");
         w
     }
@@ -145,8 +153,8 @@ impl World {
 fn crash_at(step: Step, f: impl FnOnce()) {
     hooks::STOP_AT.with(|s| s.set(Some(step)));
     let stopped = catch_unwind(AssertUnwindSafe(f)).is_err();
-    hooks::STOP_AT.with(|s| s.set(None));
-    assert!(stopped, "the change did not reach {step:?}");
+    let armed = hooks::STOP_AT.with(|s| s.replace(None));
+    assert!(stopped && armed.is_none(), "the change did not stop at {step:?}");
 }
 
 fn fail_nth_save(n: u32) {

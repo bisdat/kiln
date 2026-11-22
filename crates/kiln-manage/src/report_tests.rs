@@ -1082,6 +1082,7 @@ fn greeneye_logs_come_only_from_greeneyes_folders() {
     // a folder in greeneye/ that is a link to the same place
     std::fs::create_dir_all(f.game.join("greeneye")).unwrap();
     #[cfg(unix)] std::os::unix::fs::symlink(&outside, f.game.join("greeneye/linked")).unwrap();
+    #[cfg(windows)] crate::util::test_junction(&f.game.join("greeneye/linked"), &outside);
     // and a Library path that climbs out of the Library
     std::fs::create_dir_all(f.root.join("data/library/greeneye")).unwrap();
     let climb = f.root.join("data/library/greeneye/../../../elsewhere/private");
@@ -1129,7 +1130,9 @@ fn a_linked_game_file_is_not_followed() {
     let target = f.root.join("elsewhere/private.txt");
     std::fs::create_dir_all(target.parent().unwrap()).unwrap();
     std::fs::write(&target, "[Chain]\nnot the game's chain file, private text\n").unwrap();
-    #[cfg(unix)] std::os::unix::fs::symlink(&target, f.game.join("dinput8-chain.ini")).unwrap();
+    let link = f.game.join("dinput8-chain.ini");
+    #[cfg(unix)] std::os::unix::fs::symlink(&target, &link).unwrap();
+    #[cfg(windows)] crate::util::test_junction(&link, target.parent().unwrap());
     let r = build(&f.input());
     assert!(!r.files.iter().any(|(_, b)| String::from_utf8_lossy(b).contains("private text")), "the target is not in the report");
     assert!(r.errors.iter().any(|e| e.contains("dinput8-chain.ini") && e.contains("link")), "{:?}", r.errors);
