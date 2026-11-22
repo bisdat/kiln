@@ -54,6 +54,7 @@ public sealed class UiRichBlockTests : IDisposable
     /// <summary>Records the widgets of a frame; what the "player" does is set up before it.</summary>
     private sealed class Canvas : IUiCanvas
     {
+        public bool CanEditText { get; set; } = true;
         public List<string> Calls { get; } = new();
         public Dictionary<string, (string Text, UiItemState State, bool Enter)> Typing { get; } = new();
         public HashSet<string> Clicks { get; } = new();
@@ -630,6 +631,24 @@ public sealed class UiRichBlockTests : IDisposable
         Assert.Equal("Grü", WindowRuntime.Utf8Cut("Grüße", 4));
         Assert.Equal("ab", WindowRuntime.Utf8Cut("a\0b", 8));
         Assert.Equal("", WindowRuntime.Utf8Cut("\U0001F600", 3));
+    }
+
+    [Fact]
+    public void Without_kiln_ui_blocks_a_text_field_is_off_and_shown_read_only()
+    {
+        // review S5: without kiln.ui.blocks a field cannot tell when it loses the keyboard, so it would commit every keystroke
+        // (and never on blur): ui.blocks.input is reported off like tabs and trees, and the field shows its text read-only
+        UiBlocksCaps.Report();
+        Assert.False(Capabilities.Is("ui.blocks.input"));
+        Assert.Equal(CapabilityReason.ServiceOlder, Capabilities.Get("ui.blocks.input").Reason);
+        Define("w", Json<WindowBlock>(RichJson));
+        var w = Open();
+        var c = new Canvas { CanEditText = false };
+        c.Typing["Note###in"] = ("G", UiItemState.None, true);
+        Frame(w, c);
+        UiRuntime.Pump();
+        Assert.Equal(new UiStateValue.String(""), w.State.Snapshot.Values["note"]);
+        Assert.DoesNotContain(c.Calls, x => x.StartsWith("field:Note", StringComparison.Ordinal));
     }
 
     [Fact]

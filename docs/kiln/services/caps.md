@@ -538,8 +538,8 @@ Richer UI blocks ([../modding/ui-blocks.md](../modding/ui-blocks.md#richer-windo
 
 | Row | Kind | Reported by | What it says |
 |---|---|---|---|
-| `ui.blocks.input`, `ui.blocks.tables`, `ui.blocks.images`, `ui.blocks.state`, `ui.blocks.bindings` | managed, static | Kiln.Blocks | text fields, tables, pictures, window state and mods' own data: a player's game with an overlay (`wrong-side` on a dedicated server, `service-missing` without kiln.ui) |
-| `ui.blocks.tabs`, `ui.blocks.trees` | managed, static | Kiln.Blocks | as above, and kiln.ui.blocks (`service-older` on a Kiln without it) |
+| `ui.blocks.tables`, `ui.blocks.images`, `ui.blocks.state`, `ui.blocks.bindings` | managed, static | Kiln.Blocks | tables, pictures, window state and mods' own data: a player's game with an overlay (`wrong-side` on a dedicated server, `service-missing` without kiln.ui) |
+| `ui.blocks.input`, `ui.blocks.tabs`, `ui.blocks.trees` | managed, static | Kiln.Blocks | as above, and kiln.ui.blocks (`service-older` on a Kiln without it: a text field shows its value read-only) |
 | `ui.blocks.world` | managed | Kiln.Blocks (kiln.ui.snapshot) | `BlockUi.ReadWorld`/`DemandWorld` and `world.*` bindings: kiln.ui.snapshot is here (client only) |
 | `world.vitals`, `world.inventory` | managed | Kiln.Blocks (kiln.ui.snapshot) | the local player's vitals / own inventory: also needs `ui.values.hud` (05a's player-UI update) |
 | `world.position` | managed | Kiln.Blocks (kiln.ui.snapshot) | the local player's position: the core's GetEntityTransform on the client world |

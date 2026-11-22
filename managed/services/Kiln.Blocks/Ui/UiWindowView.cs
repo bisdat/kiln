@@ -27,6 +27,10 @@ internal interface IUiCanvas
     void PushId(string id);
     void PopId();
 
+    /// <summary>Whether <see cref="TextField"/> can tell when a field loses the keyboard (kiln.ui.blocks): without it a field
+    /// would commit every keystroke and never on blur, so it is shown read-only.</summary>
+    bool CanEditText => true;
+
     /// <summary>A text field over <paramref name="text"/>; true when Enter was pressed (with <paramref name="enterCommits"/>) or
     /// the text changed; <paramref name="state"/> says whether it has the keyboard or just lost it.</summary>
     bool TextField(string label, ref string text, int maxBytes, bool enterCommits, bool multiline, out UiItemState state)
@@ -88,6 +92,8 @@ internal sealed class UiDrawCanvas : IUiCanvas
     public void Tooltip(string text) => Ui.Tooltip(text);
     public void PushId(string id) => _ids.Push(Ui.Id(id));
     public void PopId() => _ids.Pop().Dispose();
+
+    public bool CanEditText => Ui.HasBlockWidgets;
 
     public bool TextField(string label, ref string text, int maxBytes, bool enterCommits, bool multiline, out UiItemState state)
     {
@@ -455,6 +461,12 @@ internal sealed class WindowRuntime : IDisposable
     private void DrawInput(IUiCanvas c, RowView v, string scope)
     {
         var p = v.Plan;
+        if (!c.CanEditText)
+        {
+            // an older Kiln without kiln.ui.blocks: the field could not keep a draft (ui.blocks.input is off), so it shows the value
+            c.Disabled($"{v.Label}: {v.Committed}");
+            return;
+        }
         var w = WidgetOf(scope);
         if (!w.Active || w.Session != v.Session)
         {
