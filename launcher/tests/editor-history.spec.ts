@@ -212,3 +212,60 @@ for (const deck of [false, true]) test(`${deck ? "Deck" : "desktop"} history but
   }
   await context.close();
 });
+
+const draftHistoryState = (page: Page) => page.evaluate(() => {
+  const s = (window as any).editorSession.useSession.getState();
+  return { count: s.model.main[0].count, dirty: s.dirty, past: s.history.past.length, future: s.history.future.length };
+});
+const pressHistoryStick = async (page: Page, button: string) => {
+  for (const pressed of [true, false]) await page.evaluate(([button, pressed]) => (window as any).__kilnMock.emit("kiln://gamepad", { kind: "button", button, pressed, repeat: false, device: "event9" }), [button, pressed]);
+};
+
+test("empty numeric drafts keep native undo and do not swallow editor history on blur", async ({ page }) => {
+  await open(page);
+  await page.locator('.ke-grid [data-deck-id="slot-main:0"]').click();
+  await page.locator('.ke-insp [aria-label="+1"]').first().click();
+  const field = page.locator('.ke-insp input[aria-label="Amount"]');
+  await field.fill("");
+  expect(await draftHistoryState(page)).toEqual({ count: 121, dirty: true, past: 1, future: 0 });
+  // Synthetic shortcut events test routing without depending on Chromium's separate native text undo stack.
+  for (const [key, shift] of [["z", false], ["y", false], ["z", true]] as const) {
+    expect(await field.evaluate((element, [key, shift]) => element.dispatchEvent(new KeyboardEvent("keydown", { key, shiftKey: shift, ctrlKey: true, bubbles: true, cancelable: true })), [key, shift] as const)).toBe(true);
+    expect(await draftHistoryState(page)).toEqual({ count: 121, dirty: true, past: 1, future: 0 });
+  }
+  await page.getByTestId("editor-undo").click();
+  await expect(field).toHaveValue("120");
+  expect(await draftHistoryState(page)).toEqual({ count: 120, dirty: false, past: 0, future: 1 });
+  await page.getByTestId("editor-redo").click();
+  await expect(field).toHaveValue("121");
+});
+
+test("a typed numeric gesture and its explicit draft commit make exactly one history entry", async ({ page }) => {
+  await open(page);
+  await page.locator('.ke-grid [data-deck-id="slot-main:0"]').click();
+  const field = page.locator('.ke-insp input[aria-label="Amount"]');
+  await field.fill("12"); await field.fill("125"); await field.press("Enter");
+  expect(await draftHistoryState(page)).toEqual({ count: 125, dirty: true, past: 1, future: 0 });
+  await page.getByTestId("editor-undo").click();
+  await expect(field).toHaveValue("120");
+  expect(await draftHistoryState(page)).toEqual({ count: 120, dirty: false, past: 0, future: 1 });
+});
+
+test("Deck stick presses undo and redo; an open number-pad draft cannot consume history", async ({ page }) => {
+  await open(page, true);
+  await page.locator('.ke-grid [data-deck-id="slot-main:0"]').click();
+  await page.locator('.ke-insp [aria-label="+1"]').first().click();
+  await pressHistoryStick(page, "ls");
+  await expect.poll(() => draftHistoryState(page)).toEqual({ count: 120, dirty: false, past: 0, future: 1 });
+  await pressHistoryStick(page, "rs");
+  await expect.poll(() => draftHistoryState(page)).toEqual({ count: 121, dirty: true, past: 1, future: 0 });
+  await page.locator('[data-deck-id="value-Amount"]').click();
+  const dialog = page.locator('[data-deck-dialog="editor-number"]');
+  await expect(dialog).toBeVisible();
+  await page.locator('[data-deck-id="pad-5"]').click();
+  await pressHistoryStick(page, "ls"); await pressHistoryStick(page, "rs");
+  expect(await draftHistoryState(page)).toEqual({ count: 121, dirty: true, past: 1, future: 0 });
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+  await pressHistoryStick(page, "ls");
+  await expect.poll(() => draftHistoryState(page)).toEqual({ count: 120, dirty: false, past: 0, future: 1 });
+});
