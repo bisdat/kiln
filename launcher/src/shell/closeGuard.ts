@@ -37,7 +37,7 @@ export function installCloseGuard(): void {
     // with a listener here the window no longer closes by itself: the listener closes it (destroy) unless it is stopped
     await win.onCloseRequested(async (e) => {
       const by = useUnsaved.getState().by;
-      const edits = usePendingEdits.getState() as { dirty: boolean; busy?: boolean; name: string | null };
+      const edits = usePendingEdits.getState();
       const loss = closeLoss(by, edits);
       if (!loss) return;
       e.preventDefault();
