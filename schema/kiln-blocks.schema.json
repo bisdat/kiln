@@ -4233,8 +4233,8 @@
         },
         "id": {
           "type": "string",
-          "pattern": "^[a-z][a-z0-9_-]{0,63}$",
-          "description": "The row's id, unique in the window (nested rows included)."
+          "pattern": "^(?!r[0-9]+$)[a-z][a-z0-9_-]{0,63}$",
+          "description": "The row's id, unique in the window (nested rows included); not r followed by digits (an older row's place)."
         },
         "label": {
           "$ref": "#/$defs/uiText"
@@ -4311,8 +4311,8 @@
         },
         "id": {
           "type": "string",
-          "pattern": "^[a-z][a-z0-9_-]{0,63}$",
-          "description": "The row's id, unique in the window (nested rows included)."
+          "pattern": "^(?!r[0-9]+$)[a-z][a-z0-9_-]{0,63}$",
+          "description": "The row's id, unique in the window (nested rows included); not r followed by digits (an older row's place)."
         },
         "items": {
           "type": "string",
@@ -4394,8 +4394,8 @@
         },
         "id": {
           "type": "string",
-          "pattern": "^[a-z][a-z0-9_-]{0,63}$",
-          "description": "The row's id, unique in the window (nested rows included)."
+          "pattern": "^(?!r[0-9]+$)[a-z][a-z0-9_-]{0,63}$",
+          "description": "The row's id, unique in the window (nested rows included); not r followed by digits (an older row's place)."
         },
         "tabs": {
           "type": "array",
@@ -4505,8 +4505,8 @@
         },
         "id": {
           "type": "string",
-          "pattern": "^[a-z][a-z0-9_-]{0,63}$",
-          "description": "The row's id, unique in the window (nested rows included)."
+          "pattern": "^(?!r[0-9]+$)[a-z][a-z0-9_-]{0,63}$",
+          "description": "The row's id, unique in the window (nested rows included); not r followed by digits (an older row's place)."
         },
         "nodes": {
           "type": "string",
@@ -4590,8 +4590,8 @@
         },
         "id": {
           "type": "string",
-          "pattern": "^[a-z][a-z0-9_-]{0,63}$",
-          "description": "The row's id, unique in the window (nested rows included)."
+          "pattern": "^(?!r[0-9]+$)[a-z][a-z0-9_-]{0,63}$",
+          "description": "The row's id, unique in the window (nested rows included); not r followed by digits (an older row's place)."
         },
         "asset": {
           "type": "string",

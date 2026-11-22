@@ -575,6 +575,9 @@ internal static class UiCompile
     private static string AuthoredId(BlockContext ctx, WindowCompile wc, string? id, string path)
     {
         if (!UiTypedNames.IsId(id)) throw Fail(ctx, $"{path}.id", $"\"{id}\" is not a row id: [a-z][a-z0-9_-]{{0,63}} (input, table, tabs, tree and image rows need one)");
+        // the older rows' ids are r0, r1, ... (their place): an authored id of that form would share an ImGui id with one
+        if (id!.Length > 1 && id[0] == 'r' && id.AsSpan(1).IndexOfAnyExceptInRange('0', '9') < 0)
+            throw Fail(ctx, $"{path}.id", $"\"{id}\" has the form of an older row's place (r0, r1, ...): give the row another id");
         if (!wc.Ids.Add(id!)) throw Fail(ctx, $"{path}.id", $"\"{id}\" is the id of another row of this window: ids are unique in a window, nested rows included");
         return id!;
     }

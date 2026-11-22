@@ -176,7 +176,7 @@ live values of the player's game, and buttons that run a command on the joined s
 | `tree` | Nodes of a mod's own tree source (`nodes`) or written in the block (`roots`, with `fields`). Under an open branch and each leaf, `nodeRows` (up to 8 text or value rows) show `{node.<field>}`. | `id`, `nodes` or `roots`, `fields`, `nodeRows`, `selected`, `expanded` (a stringSet entry) |
 | `image` | A PNG of the mod's folder. | `id`, `asset` (relative, no `..`, no URL), `width`, `height` (0: the picture's own), `does` |
 
-New rows need an `id` (`[a-z][a-z0-9_-]{0,63}`), unique in the window with nested rows counted. Limits: 200 rows in
+New rows need an `id` (`[a-z][a-z0-9_-]{0,63}`, not `r` followed by digits: the older rows use those), unique in the window with nested rows counted. Limits: 200 rows in
 all, 8 levels of nesting, 16 columns, 16 tabs, 512 table rows or tree nodes. Every limit, a repeated id and a wrong name is
 a compile error naming the field.
 

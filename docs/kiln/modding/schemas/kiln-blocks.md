@@ -1957,7 +1957,7 @@ A PNG of the mod's folder (since 0.2.0-dev.31): at most 8 MiB and 2048 x 2048; 8
 | `asset` | string | yes | A relative path in the mod's folder, no "..". A file that must exist. |
 | `does` | [uiAction](#uiaction) |  |  |
 | `height` | number |  | min 0 max 4096 |
-| `id` | string | yes | The row's id, unique in the window (nested rows included). Pattern `^[a-z][a-z0-9_-]{0,63}$`. |
+| `id` | string | yes | The row's id, unique in the window (nested rows included); not r followed by digits (an older row's place). Pattern `^(?!r[0-9]+$)[a-z][a-z0-9_-]{0,63}$`. |
 | `sameLine` | boolean |  | On the same line as the row before it. |
 | `tooltip` | [uiText](#uitext) |  | Shown while the pointer rests on the row's widget. May show values like a text row does. |
 | `type` | `"image"` | yes |  |
@@ -1972,7 +1972,7 @@ A text field (since 0.2.0-dev.31) on a text config entry or a string state entry
 |---|---|---|---|
 | `bind` | [uiBind](#uibind) | yes |  |
 | `commit` | `"blur"` \| `"enter"` |  | blur (default): Enter or leaving the field writes it. enter: only Enter. |
-| `id` | string | yes | The row's id, unique in the window (nested rows included). Pattern `^[a-z][a-z0-9_-]{0,63}$`. |
+| `id` | string | yes | The row's id, unique in the window (nested rows included); not r followed by digits (an older row's place). Pattern `^(?!r[0-9]+$)[a-z][a-z0-9_-]{0,63}$`. |
 | `label` | [uiText](#uitext) | yes |  |
 | `maxBytes` | integer |  | At most this many UTF-8 bytes. Default 256. min 2 max 4096 |
 | `multiline` | boolean |  | Several lines; Enter is a new line (commit blur). |
@@ -2015,7 +2015,7 @@ A table (since 0.2.0-dev.31) of world.local.inventory or a mod's own rows source
 | Key | Type | Required | Notes |
 |---|---|---|---|
 | `columns` | array of [uiColumn](#uicolumn) | yes | min items 1 max items 16 |
-| `id` | string | yes | The row's id, unique in the window (nested rows included). Pattern `^[a-z][a-z0-9_-]{0,63}$`. |
+| `id` | string | yes | The row's id, unique in the window (nested rows included); not r followed by digits (an older row's place). Pattern `^(?!r[0-9]+$)[a-z][a-z0-9_-]{0,63}$`. |
 | `items` | string | yes | Pattern `^(world\.local\.inventory\|mod\.[a-z][a-z0-9_-]{0,63})$`. |
 | `maxRows` | integer |  | Default 128; a source with more shows a notice. min 1 max 512 |
 | `sameLine` | boolean |  | On the same line as the row before it. |
@@ -2030,7 +2030,7 @@ Tabs (since 0.2.0-dev.31), each with its own rows.
 
 | Key | Type | Required | Notes |
 |---|---|---|---|
-| `id` | string | yes | The row's id, unique in the window (nested rows included). Pattern `^[a-z][a-z0-9_-]{0,63}$`. |
+| `id` | string | yes | The row's id, unique in the window (nested rows included); not r followed by digits (an older row's place). Pattern `^(?!r[0-9]+$)[a-z][a-z0-9_-]{0,63}$`. |
 | `sameLine` | boolean |  | On the same line as the row before it. |
 | `selected` | string |  | A string state entry that holds the selected tab's id. Pattern `^state\.[a-z][a-z0-9_-]{0,63}$`. |
 | `tabs` | array of [uiTab](#uitab) | yes | min items 1 max items 16 |
@@ -2073,7 +2073,7 @@ A tree (since 0.2.0-dev.31): a mod's own tree source (nodes) or one written here
 |---|---|---|---|
 | `expanded` | string |  | A stringSet state entry that holds the open branches. Pattern `^state\.[a-z][a-z0-9_-]{0,63}$`. |
 | `fields` | array of [uiField](#uifield) |  | max items 16 |
-| `id` | string | yes | The row's id, unique in the window (nested rows included). Pattern `^[a-z][a-z0-9_-]{0,63}$`. |
+| `id` | string | yes | The row's id, unique in the window (nested rows included); not r followed by digits (an older row's place). Pattern `^(?!r[0-9]+$)[a-z][a-z0-9_-]{0,63}$`. |
 | `nodeRows` | array of [uiRowText](#uirowtext) or [uiRowValue](#uirowvalue) |  | max items 8 |
 | `nodes` | string |  | Pattern `^mod\.[a-z][a-z0-9_-]{0,63}$`. |
 | `roots` | array of [uiTreeNode](#uitreenode) |  | min items 1 |

@@ -598,6 +598,15 @@ public sealed class UiRichBlockTests : IDisposable
     }
 
     [Fact]
+    public void An_id_like_an_old_rows_ordinal_is_refused()
+    {
+        // review nit: old rows get the ids r0, r1, ...; an authored id of that form would push the same ImGui id
+        var tabs = new TabsRow { Id = "r1", Tabs = [new UiTab("a", "A", [new TextRow { Text = "x" }])] };
+        Assert.Contains("r1", Refused(W(null, new TextRow { Text = "first" }, tabs)).Problem);
+        Define("w", W(null, new TextRow { Text = "first" }, tabs with { Id = "r1x" }));
+    }
+
+    [Fact]
     public void A_selection_entry_too_small_for_a_tab_id_is_a_compile_error()
     {
         // review S2: a tabs row writes its tab ids into the entry; a 4-byte entry cannot hold "quests"
