@@ -73,10 +73,12 @@ internal static partial class UiTypedNames
 
     private static readonly Dictionary<string, (UiValueType Type, UiWorldFields Fields)> Local = new(StringComparer.Ordinal)
     {
-        ["available"] = (UiValueType.Bool, UiWorldFields.None),
-        ["player"] = (UiValueType.UInt64, UiWorldFields.None),
-        ["session"] = (UiValueType.UInt64, UiWorldFields.None),
-        ["step"] = (UiValueType.UInt64, UiWorldFields.None),
+        // header names: they come with any publication, and the collector publishes only what is demanded, so on their own
+        // they ask for the cheapest group (the vitals, read from the player-UI update the game runs anyway)
+        ["available"] = (UiValueType.Bool, UiWorldFields.LocalVitals),
+        ["player"] = (UiValueType.UInt64, UiWorldFields.LocalVitals),
+        ["session"] = (UiValueType.UInt64, UiWorldFields.LocalVitals),
+        ["step"] = (UiValueType.UInt64, UiWorldFields.LocalVitals),
         ["health"] = (UiValueType.UInt64, UiWorldFields.LocalVitals),
         ["healthMax"] = (UiValueType.UInt64, UiWorldFields.LocalVitals),
         ["stamina"] = (UiValueType.UInt64, UiWorldFields.LocalVitals),

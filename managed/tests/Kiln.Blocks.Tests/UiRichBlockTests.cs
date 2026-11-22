@@ -639,6 +639,27 @@ public sealed class UiRichBlockTests : IDisposable
         Assert.Equal("HP 413", Assert.Single(_game.Huds).Text);
     }
 
+    [Fact]
+    public void A_line_that_only_asks_whether_there_is_a_world_still_gets_a_publication()
+    {
+        // world.local.available, player, session and step come with any publication, and the collector publishes only
+        // what is demanded (review S1): on their own they ask for the cheapest group, the vitals, and so get a value.
+        Define("here", new HudLineBlock { Text = "In a world, step {world.local.step}", When = "world.local.available", Refresh = 0.1 });
+        _now += 1000;
+        UiRuntime.Pump();
+        Assert.Contains(_demands, d => d.Fields != UiWorldFields.None);
+        Assert.Empty(_game.Huds);
+        _world = new UiWorldReadResult(true, null, Snap());
+        _now += 1000;
+        UiRuntime.Pump();
+        Assert.Equal("In a world, step 3", Assert.Single(_game.Huds).Text);
+        // a window whose only live name is world.local.player asks too
+        Define("w", W(null, new TextRow { Text = "player {world.local.player}" }));
+        var w = Open();
+        UiRuntime.Pump();
+        Assert.True(w.HasDemand);
+    }
+
     // ---- pictures --------------------------------------------------------------------------------------------------
 
     private static byte[] Png(uint w, uint h)

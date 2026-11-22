@@ -213,7 +213,7 @@ sources.
 |---|---|---|
 | `state.<key>`, `state.<key>/count` | the declared type; count of a stringSet | the window's state |
 | `mod.<id>` | the source's schema | the mod's last committed publication |
-| `world.local.available`, `player`, `session`, `step` | bool, whole numbers | this game's client world |
+| `world.local.available`, `player`, `session`, `step` | bool, whole numbers | this game's client world (they come with any publication; on their own they ask for the vitals group, the cheapest one) |
 | `world.local.health`, `healthMax`, `stamina`, `staminaMax`, `mana`, `manaMax` | whole numbers | the values the game itself computed, before any mod's HUD change |
 | `world.local.position.x`, `.y`, `.z` | decimal metres (6 places) | the local player's position in this game's world |
 | `world.local.inventory`, `inventoryCount` | rows (`key`, `item`, `itemId`, `count`, `pide`, `inventoryPage`, `slotIndex`), a count | the local player's own nonempty slots |
