@@ -33,8 +33,9 @@ var tool = Blocks.Define("stone-tool", new BuildingToolBlock {
 
 A pool contains **1–64 distinct items and distinct terrain cells** (1–127). `VoxelsPerItem` is 1–1,000,000;
 placement pays the ceiling of actual added volume divided by that rate. It is not inferred from the material's mining
-drop. Native admission checks that each item actually places its declared terrain cell. A tool without an Add action
-may omit its material pool.
+drop. Native compilation checks that each item actually places its declared terrain cell **and belongs to the
+qualified vanilla `TerrainMaterials` pool**. A non-member is a compiler error, not a fallback to a broader pool.
+A tool without an Add action may omit its material pool.
 
 A brush is a sphere of radius **0.25–8 metres**. Its own item identity, name and description are separate from the
 root tool. The tool owns its brush membership; declaring a brush part alone does not publish an orphan item into
@@ -42,10 +43,15 @@ vanilla Overgrowth's family. A family has at most 64 distinct brushes. `Identity
 `Legacy(itemId)` preserves an existing saved item; `Was` preserves the derived identity after a Kiln key rename.
 `Icon` on the root accepts a PNG in the mod's folder.
 
-The compiler emits a separate terrain-only material pool, raw-fill brush entries in the game's blueprint registry,
-item definitions, and per-action Impact programs and action sequences. It does not add terrain entries to
-`BuildingMaterialPoolBlock`. New table definitions can be pending until the next game start. A pending definition is
-not proof that the game has ingested or drawn it.
+The pool is an immutable **Kiln policy subset**, not a new game-visible pool row. Root and brush items reference the
+existing vanilla terrain pool; the held tool's picker filters its rows to the policy subset. Registering a policy leaves
+vanilla pool bytes, rows and magic-stock enumeration unchanged. Adding a second row of the same items would count
+magic-chest stock twice, even with a vanilla tool held, so that lowering is forbidden.
+
+The compiler also emits raw-fill brush entries in the game's blueprint registry, item definitions, and per-action
+Impact programs and action sequences. It does not add terrain entries to `BuildingMaterialPoolBlock`. New table
+metadata and brush definitions can be pending until the next game start. A pending definition is not proof that the
+game has ingested or drawn it.
 
 ## Execution and safety
 

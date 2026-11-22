@@ -60,7 +60,9 @@ internal static partial class Compiler
         low.Json["status"]=status==TableBlockStatus.Registered?"registered":status==TableBlockStatus.Pending?"pending":"off";
         if(status==TableBlockStatus.Registered) {
             var actions=LowerToolActions(ctx,low,block.Was??name,name,block.Primary,block.Secondary);
-            var refs=new Dictionary<string,string>();if(pool!=null)refs["equipment.voxelBlueprintMaterialPool"]=pool.Guid.ToString();
+            // This is the qualified vanilla TerrainMaterials GUID, not the policy's private identity. A second
+            // game-visible row repeats magic-chest enumeration even while a vanilla tool is held.
+            var refs=new Dictionary<string,string> {["equipment.voxelBlueprintMaterialPool"]="256c43ba-dd20-4369-b3bf-f49c671a59ec"};
             var root=new ItemDefinition {Guid=guid,Name=ctx.Mod.Id+"."+name,BaseOn="Tool_Building_Overgrowth",DisplayName=block.Name,Description=block.Description??"",Refs=refs,
                 Icon=block.Icon is {} icon?BlockIcons.ItemIcon(ctx,icon,"icon"):null};
             // The root launches building mode; the decoded root has no sequence slots. Only brush

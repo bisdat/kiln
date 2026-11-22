@@ -69,6 +69,9 @@ public sealed class ToolBlocksTests
             Assert.DoesNotContain(rootItem["refs"]!.AsObject(),p=>p.Key.StartsWith("sequences[",StringComparison.Ordinal));
             var brushItem=items.Single(i=>(string?)i!["base"]=="Building_Overgrowth_Shape_Small")!;
             Assert.True(brushItem["fields"]!.AsObject().ContainsKey("equipment.repeatActionWhenPressed"));
+            // Root and brush use the existing terrain row; the tool's separate pool identity is policy-only.
+            Assert.Equal("256c43ba-dd20-4369-b3bf-f49c671a59ec",(string?)rootItem["refs"]!["equipment.voxelBlueprintMaterialPool"]);
+            Assert.Equal("256c43ba-dd20-4369-b3bf-f49c671a59ec",(string?)brushItem["refs"]!["equipment.voxelBlueprintMaterialPool"]);
         } finally {WorldTablesNative.TestDefine=null;}
     }
     [Fact]

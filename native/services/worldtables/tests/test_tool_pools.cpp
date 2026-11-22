@@ -17,10 +17,34 @@ int main() {
     put<int32_t>(registry,8,192); put<uint32_t>(registry,12,1);
     RegistryInfo info; std::string why;
     CHECK(read_registry(registry,l,&info,&why));
-    const auto game=pool_game_materials({{"RubbleItem",100,8}},registry,info,l,true);
+    l.pools=0;l.pool_stride=24;l.pool_slot=0;l.pool_id=4;l.pool_materials=8;l.pool_name=16;
+    const std::string terrain_name="TerrainMaterials";
+    Bytes pools(8+24+4+terrain_name.size()+1,0);
+    put<int32_t>(pools,0,8);put<uint32_t>(pools,4,1);
+    put<uint32_t>(pools,8,9);put<uint32_t>(pools,12,851579436);
+    put<int32_t>(pools,16,16);put<uint32_t>(pools,20,1);put<uint32_t>(pools,32,100);
+    put<int32_t>(pools,24,12);put<uint32_t>(pools,28,uint32_t(terrain_name.size()));
+    std::memcpy(pools.data()+36,terrain_name.data(),terrain_name.size());
+    std::set<uint32_t> vanilla;CHECK(terrain_pool_items(pools,l,&vanilla,&why));
+    CHECK(vanilla==std::set<uint32_t>{100});
+    const auto game=pool_game_materials({{"RubbleItem",100,8},{"NonVanillaItem",101,8}},registry,info,l,true,vanilla);
     auto resolved=resolve_pools(file.pools,{},game);
     CHECK(resolved.errors.empty() && resolved.pools.size()==1);
     CHECK(resolved.pools[0].items==std::vector<uint32_t>{100});
+    Bytes untouched;
+    CHECK(merge_pools(pools,l,{},resolved.pools,&untouched,&why));
+    CHECK(untouched==pools); // Policy registration must not alter vanilla map/rows or enumerate magic stock twice.
+    ArrayView original_rows,new_rows;
+    CHECK(array_at(pools,0,24,&original_rows)&&array_at(untouched,0,24,&new_rows)&&original_rows.count==new_rows.count);
+    auto nonvanilla=file.pools[0];nonvanilla.entries[0].item="NonVanillaItem";
+    const auto refused_pool=resolve_pools({nonvanilla},{},game);
+    CHECK(refused_pool.arguments_invalid&&refused_pool.pools.empty());
+    CHECK(refused_pool.argument_reason.find("not a member of the qualified vanilla TerrainMaterials pool")!=std::string::npos);
+    auto forged=resolved.pools;forged[0].items[0]=101;
+    const Bytes sentinel{1,2,3};untouched=sentinel;
+    CHECK(!merge_pools(pools,l,{},forged,&untouched,&why)&&untouched==sentinel); // Writer rechecks; no partial mutation.
+    auto changed=pools;put<uint32_t>(changed,12,123);
+    CHECK(!terrain_pool_items(changed,l,&vanilla,&why)&&vanilla.empty());
     auto too_many=file.pools[0]; too_many.entries.resize(65,too_many.entries[0]);
     CHECK(resolve_pools({too_many},{},game).arguments_invalid);
     auto duplicate=file.pools[0]; duplicate.entries.push_back(duplicate.entries[0]);

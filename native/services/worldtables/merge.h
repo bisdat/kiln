@@ -137,7 +137,7 @@ struct PoolDefinition {
     std::set<std::string> dependencies;
     bool tool = false;
 };
-struct PoolGameMaterial { uint32_t item = 0; bool roof = false; bool ambiguous = false; int cell = -1; };
+struct PoolGameMaterial { uint32_t item = 0; bool roof = false; bool ambiguous = false; int cell = -1; bool vanilla_terrain = false; };
 // An item of the game that places a voxel material (its voxel reference is set): its debug name, its ItemId and the
 // cell it places (building cells 128..255).
 struct GameBlockItem { std::string debug_name; uint32_t item_id = 0; int cell = -1; };
@@ -242,7 +242,7 @@ struct MaterialPool {
     std::string name;  // canonical mod:key, never the localized display name
     bool roof = false;
     std::vector<uint32_t> items;  // declared UI order, 1..64 distinct nonzero item ids
-    bool tool = false;           // a terrain-only tool pool, never a building material pool
+    bool tool = false;           // immutable policy subset of vanilla terrain items; NEVER a game-visible pool row
     std::vector<uint32_t> terrain_materials, voxels_per_item; // tool entries in the same order
 };
 std::string handshake_hash(const std::vector<Placed>& placed, const std::vector<CraftingProp>& props,
@@ -257,8 +257,12 @@ struct PoolResolution {
 };
 // What a pool entry's "gameMaterial" names: a game building material (the material_name of the item that places it)
 // -> that block item, with the material's roof flag from its registry config.
+// Read the original TerrainMaterials membership. The ID must match the qualified vanilla pool GUID used by tool items.
+// Tool policies never append a second row: the selector enumerates every row's magic stock even with vanilla held.
+bool terrain_pool_items(const Bytes& pools, const Layouts& L, std::set<uint32_t>* items, std::string* why);
 std::map<std::string, PoolGameMaterial> pool_game_materials(const std::vector<GameBlockItem>& items, const Bytes& registry,
-                                                              const RegistryInfo& info, const Layouts& L, bool include_tools = false);
+                                                              const RegistryInfo& info, const Layouts& L, bool include_tools = false,
+                                                              const std::set<uint32_t>& vanilla_terrain = {});
 PoolResolution resolve_pools(const std::vector<PoolDefinition>& definitions, const std::vector<Material>& materials,
                              const std::map<std::string, PoolGameMaterial>& game);
 void bind_shape_pools(std::vector<Shape>* shapes, const std::vector<PoolDefinition>& definitions,

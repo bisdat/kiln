@@ -726,9 +726,11 @@ void go_off(const std::string& why) {
 }
 
 // Only a custom pool needs this catalog. A first late definition builds it lazily.
-void read_pool_catalog(const Bytes& registry,const RegistryInfo& info) {
+void read_pool_catalog(const Bytes& registry,const RegistryInfo& info,const Bytes& pools) {
     read_names();
-    g_game_pool_materials=pool_game_materials(g_names.blocks,registry,info,g_layouts,true);
+    std::set<uint32_t> vanilla;std::string why;
+    terrain_pool_items(pools,g_layouts,&vanilla,&why); // A missing/changed terrain pool marks no item eligible for tool policies.
+    g_game_pool_materials=pool_game_materials(g_names.blocks,registry,info,g_layouts,true,vanilla);
     g_game_pool_materials_read=true;
 }
 bool ensure_pool_catalog() {
@@ -747,9 +749,9 @@ bool ensure_pool_catalog() {
         }
     }
     if(g_game_pool_materials_read)return true;
-    Output registry;RegistryInfo info;std::string why;
-    if(!one(kTypeRegistry,"registry",&registry) || !read_registry(registry.game,g_layouts,&info,&why))return false;
-    read_pool_catalog(registry.game,info);return true;
+    Output registry,pools;RegistryInfo info;std::string why;
+    if(!one(kTypeRegistry,"registry",&registry) || !one(kTypePools,"pools",&pools) || !read_registry(registry.game,g_layouts,&info,&why))return false;
+    read_pool_catalog(registry.game,info,pools.game);return true;
 }
 void merge_locked() {
     if (!g_layouts_ok) {
@@ -878,7 +880,7 @@ void merge_locked() {
     // fitting from the original inputs after removing such a pool (the accepted set only shrinks).
     PoolResolution resolution;
     if(!g_pool_defs.empty()) {
-        read_pool_catalog(reg.game,info);
+        read_pool_catalog(reg.game,info,pools.game);
         resolution=resolve_pools(g_pool_defs,g_live,g_game_pool_materials);
         if(g_pool_layout_ok)admit_custom_pools(pools.game,L,&resolution);
         else refuse_custom_pools(&resolution,g_pool_reason);

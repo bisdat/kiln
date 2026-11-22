@@ -1188,8 +1188,36 @@ bool pool_ref(const std::string& text, const std::string& owner, const std::stri
     return text==(mod==owner?key:mod+":"+key) || text==mod+":"+key;
 }
 }
+bool terrain_pool_items(const Bytes& pools, const Layouts& L, std::set<uint32_t>* items, std::string* why) {
+    items->clear();
+    const auto fail=[&](const char* reason){*why=reason;return false;};
+    if(L.pool_stride!=24 || L.pool_id!=4 || L.pool_materials!=8 || L.pool_name!=16)
+        return fail("vanilla terrain pool: reflected row layout is unavailable or unsupported");
+    ArrayView rows;if(!array_at(pools,L.pools,L.pool_stride,&rows))return fail("vanilla terrain pool: registry does not read");
+    bool found=false;std::set<uint32_t> members;
+    for(uint32_t i=0;i<rows.count;++i) {
+        const size_t rec=size_t(rows.base-pools.data())+size_t(i)*L.pool_stride;
+        const int32_t rel=rd<int32_t>(pools.data()+rec+L.pool_name);
+        const uint32_t len=rd<uint32_t>(pools.data()+rec+L.pool_name+4);
+        const int64_t at=int64_t(rec+L.pool_name)+rel;
+        if(!rel || at<=0 || uint64_t(at)+len>pools.size())return fail("vanilla terrain pool: unreadable pool name");
+        if(std::string(reinterpret_cast<const char*>(pools.data()+at),len)!="TerrainMaterials")continue;
+        // FNV of 256c43ba-dd20-4369-b3bf-f49c671a59ec, qualified against three shipped terrain blueprints.
+        if(found || rd<uint32_t>(pools.data()+rec+L.pool_id)!=851579436u)return fail("vanilla terrain pool: duplicate row or changed pool identity");
+        found=true;ArrayView list;
+        if(!array_at(pools,uint32_t(rec+L.pool_materials),4,&list) || !list.count || list.count>kPoolCapacity)
+            return fail("vanilla terrain pool: unreadable or oversized material list");
+        for(uint32_t n=0;n<list.count;++n) {
+            const auto item=rd<uint32_t>(list.base+size_t(n)*4);
+            if(!item || !members.insert(item).second)return fail("vanilla terrain pool: null or duplicate material item");
+        }
+    }
+    if(!found)return fail("vanilla terrain pool: TerrainMaterials is unavailable");
+    *items=std::move(members);return true;
+}
 std::map<std::string, PoolGameMaterial> pool_game_materials(const std::vector<GameBlockItem>& items, const Bytes& registry,
-                                                              const RegistryInfo& info, const Layouts& L, bool include_tools) {
+                                                              const RegistryInfo& info, const Layouts& L, bool include_tools,
+                                                              const std::set<uint32_t>& vanilla_terrain) {
     // The member is the item that places the material: the one the game's own build-menu pools list. Not the config's
     // materialItem: that is the material's loot (Wood Logs for Rough Wood, the Stone terrain item for Rough Stone), and
     // materials share it.
@@ -1200,7 +1228,7 @@ std::map<std::string, PoolGameMaterial> pool_game_materials(const std::vector<Ga
         if (terrain == info.terrain_at.end() && building == info.building_at.end()) continue;
         if (building == info.building_at.end() && !include_tools) continue;
         const bool roof = building != info.building_at.end() && L.building.roof != UINT32_MAX && registry[building->second + L.building.roof] != 0;
-        const PoolGameMaterial m{it.item_id, roof, false, it.cell};
+        const PoolGameMaterial m{it.item_id, roof, false, it.cell, vanilla_terrain.count(it.item_id)!=0};
         auto add = [&](const std::string& key) {
             if (key.empty()) return;
             const auto [have, fresh] = out.emplace(key, m);
@@ -1229,7 +1257,7 @@ PoolResolution resolve_pools(const std::vector<PoolDefinition>& definitions, con
         };
         const auto argument=[&](const std::string& text){
             fail(text);
-            if(!r.arguments_invalid) r.argument_reason="block buildingMaterialPool "+d.block+" (mod "+d.mod+"): "+text;
+            if(!r.arguments_invalid) r.argument_reason=std::string(d.tool?"block toolMaterialPool ":"block buildingMaterialPool ")+d.block+" (mod "+d.mod+"): "+text;
             r.arguments_invalid=true;
         };
         if(!d.valid) fail("its definition has errors (each named on its own line)");
@@ -1246,6 +1274,8 @@ PoolResolution resolve_pools(const std::vector<PoolDefinition>& definitions, con
                     fail("entries[" + std::to_string(i) + "]: no unambiguous placeable terrain item " + e.item);
                 else if (found->second.cell < 1 || found->second.cell >= 128 || uint32_t(found->second.cell) != e.terrain_material)
                     fail("entries[" + std::to_string(i) + "]: item does not place the declared terrain material");
+                else if (!found->second.vanilla_terrain)
+                    argument("entries[" + std::to_string(i) + "].item: " + e.item + " is not a member of the qualified vanilla TerrainMaterials pool; tool pools are policy subsets, not new game rows");
                 else if (!e.voxels_per_item || e.voxels_per_item > 1000000)
                     argument("entries[" + std::to_string(i) + "]: voxelsPerItem must be 1..1000000");
                 else item = found->second.item;
@@ -1287,7 +1317,7 @@ PoolResolution resolve_pools(const std::vector<PoolDefinition>& definitions, con
         } else {
             std::string why;
             for(size_t i=0;i<problems.size();++i) why+=(i?"; ":"")+problems[i];
-            r.errors.push_back("block buildingMaterialPool "+d.block+" (mod "+d.mod+"): refused: "+why);
+            r.errors.push_back(std::string(d.tool?"block toolMaterialPool ":"block buildingMaterialPool ")+d.block+" (mod "+d.mod+"): refused: "+why);
         }
     }
     return r;
@@ -1413,8 +1443,16 @@ std::string pool_rows(const Bytes& game, const Layouts& L, const std::vector<Mat
         std::set<uint32_t> unique(g.items.begin(), g.items.end());
         if (unique.count(0) || unique.size() != g.items.size()) return "custom material pools: null or duplicate item id";
         if (!(g.tool ? out->terrain : g.roof ? out->roof : out->wall)) return "custom material pools: equipment slot unavailable";
-        if (g.tool && (g.terrain_materials.size() != g.items.size() || g.voxels_per_item.size() != g.items.size()))
-            return "custom material pools: tool entry metadata mismatch";
+        if (g.tool) {
+            if(g.terrain_materials.size()!=g.items.size() || g.voxels_per_item.size()!=g.items.size())
+                return "tool material policy: entry metadata mismatch";
+            std::set<uint32_t> vanilla;std::string why;
+            if(!terrain_pool_items(game,L,&vanilla,&why))return why;
+            for(size_t i=0;i<g.items.size();++i)
+                if(!vanilla.count(g.items[i]) || !g.terrain_materials[i] || g.terrain_materials[i]>=128 || !g.voxels_per_item[i] || g.voxels_per_item[i]>1000000)
+                    return "tool material policy: entry is not a valid vanilla TerrainMaterials member";
+            continue; // Policy metadata only. Never append a row or repeat the game's magic-stock enumeration.
+        }
         projected += 24 + 3 + 4 * uint64_t(g.items.size()) + 3 + g.name.size() + 1;
     }
     if (projected > INT32_MAX) return "custom material pools: resource exceeds relative-offset range";
@@ -1494,7 +1532,8 @@ bool merge_pools(const Bytes& game, const Layouts& L, const std::vector<Placed>&
     for (const auto& p : placed)
         if (p.m.terrain || !grouped.count(p.m.guid)) vanilla.push_back(p);
     Bytes next;
-    if (groups.empty()) {
+    if (const auto bad=check_custom_pools(game,L,groups);!bad.empty()) {*why=bad;return false;}
+    if (std::none_of(groups.begin(),groups.end(),[](const auto& g){return !g.tool;})) {
         if (!merge_pools(game, L, vanilla, &next, why)) return false;
         *out = std::move(next);
         return true;
@@ -1505,7 +1544,8 @@ bool merge_pools(const Bytes& game, const Layouts& L, const std::vector<Placed>&
     const ArrayView& rows = table.rows;
     const std::optional<uint32_t>& wall_slot = table.wall;
     const std::optional<uint32_t>& roof_slot = table.roof;
-    std::vector<MaterialPool> sorted = groups;
+    std::vector<MaterialPool> sorted;
+    for(const auto& group:groups)if(!group.tool)sorted.push_back(group);
     std::sort(sorted.begin(), sorted.end(), [](const auto& a, const auto& b) { return a.guid.text() < b.guid.text(); });
     if (!merge_pools(game, L, vanilla, &next, why)) return false;
     // Keep the original payload in place; clone the row array and rebase both inner pointers.
@@ -1531,7 +1571,7 @@ bool merge_pools(const Bytes& game, const Layouts& L, const std::vector<Placed>&
     }
     for (size_t i=0; i<sorted.size(); ++i) {
         const auto& g=sorted[i]; const size_t rec=at+(rows.count+i)*24;
-        wr<uint32_t>(next.data()+rec+L.pool_slot,*(g.tool?table.terrain:g.roof?roof_slot:wall_slot));
+        wr<uint32_t>(next.data()+rec+L.pool_slot,*(g.roof?roof_slot:wall_slot));
         wr<uint32_t>(next.data()+rec+L.pool_id,item_id_of(g.guid));
         pad4(&next); size_t list=next.size();
         next.resize(list+g.items.size()*4);
