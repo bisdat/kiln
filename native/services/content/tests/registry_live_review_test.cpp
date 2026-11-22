@@ -4,13 +4,18 @@
 #include <windows.h>
 #include <cstdarg>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <map>
 #include <set>
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <sys/stat.h>
 #include "../content.h"
+#include "../refs.h"
 #include "../registry/formulas.h"
 #include "../registry/schema_ir.h"
 #include "../registry_live.h"
@@ -28,6 +33,7 @@ alignas(16) uint8_t g_arena[1 << 20];  // the made-up game memory (real addresse
 size_t g_near = 1 << 19;
 Registry g_regs[5];
 std::map<std::string, std::string> g_files;  // pack file rel -> its text
+std::filesystem::path g_pack_root;
 }  // namespace
 uintptr_t A(size_t off) { return reinterpret_cast<uintptr_t>(g_arena) + off; }
 void logf(int, const char* fmt, ...) {
@@ -103,23 +109,12 @@ bool gd_item_config_slot(const Entry& e, const std::string& path, GdValueSlot* o
     return true;
 }
 bool gd_ui_scale(uint8_t, double v, int64_t* out) { return *out = std::llround(v), true; }
-const registry::Schema& registry_schema() {
-    static const registry::Schema s = registry::generated_schema();
-    return s;
-}
-std::vector<RegistrySection> registry_sections(const std::vector<PackFile>& files, const registry::Schema& schema) {
-    std::vector<RegistrySection> out;
-    for (const PackFile& f : files) {
-        const registry::json doc = registry::json::parse(g_files[f.rel], nullptr, false, true);
-        if (doc.is_discarded() || !doc.contains("registry")) continue;
-        RegistrySection s;
-        s.mod = f.mod, s.version = f.version, s.rel = f.rel, s.source = f.rel.substr(f.rel.find("/content/") + 1);
-        s.hash = std::hash<std::string>{}(doc["registry"].dump());
-        registry::lower_section(doc["registry"], f.mod, f.version, s.source, schema, &s.batches, &s.refused, &s.error);
-        out.push_back(std::move(s));
-    }
-    return out;
-}
+bool read_recipe_stacks(const Entry&, uint32_t, std::vector<KilnContentStack>*) { return false; }
+bool nc_is_new(uint32_t, uint32_t) { return false; }
+void nc_pack_add(KilnOwner, uint32_t, const std::string&, const std::string&, ApplyResult*) {}
+bool is_kitbash_key(const Schema&, const std::string&) { return false; }
+void kitbash(const Schema&, const std::string&, const nlohmann::ordered_json&, const ItemFind&,
+             const std::vector<uintptr_t>&, KitbashOut*, uintptr_t) {}
 }  // namespace kc
 
 namespace {
@@ -291,13 +286,24 @@ std::vector<PackFile> files_of(const std::vector<std::pair<std::string, std::str
     for (auto& [mod, rel] : mods_files) {
         PackFile f;
         f.mod = mod, f.rel = rel, f.version = "1.0.0";
+        f.path = (g_pack_root / rel).string();
         out.push_back(f);
     }
     return out;
 }
 
+void write_pack(const std::string& rel, const std::string& text) {
+    const auto path = g_pack_root / rel;
+    std::filesystem::create_directories(path.parent_path());
+    std::ofstream file(path, std::ios::binary | std::ios::trunc);
+    file << text;
+    file.close();
+    if (!file) throw std::runtime_error("cannot write pack fixture " + path.string());
+}
+
 // What S11 does at resources-ready: lower the sections, compose, install.
 void stage(const std::vector<PackFile>& files) {
+    for (const auto& [rel, text] : g_files) write_pack(rel, text);
     const registry::Schema& sc = registry_schema();
     std::vector<registry::ModInput> mods;
     for (const RegistrySection& s : registry_sections(files, sc)) {
@@ -326,6 +332,16 @@ void stage(const std::vector<PackFile>& files) {
     registry_live_install(std::move(in));
 }
 
+void apply_registry_files(const std::vector<PackFile>& files) {
+    const auto schema = registry_live_schema();
+    const auto sections = registry_sections(files, *schema);
+    {
+        std::lock_guard lock(store_mutex());
+        registry_live_apply(sections, schema.get());
+    }
+    registry_live_publish();
+}
+
 bool reported(const std::string& needle) {
     for (const registry::Refusal& r : g_last_report.refused)
         if (r.reason.find(needle) != std::string::npos) return true;
@@ -341,17 +357,9 @@ void put_pack(size_t off, uint32_t v) {
 
 }  // namespace
 
-// packs.cpp's drop rules (not linked in the host test) and newcontent.cpp's stacks, as they behave: with no old data pack
-// holding drop rules g_rules is empty; drops_apply_rules ends in registry_live_table (packs.cpp); nc_drops_table, when new
-// content adds to a selector group, copies the group's stacks to near memory, repoints them and applies the rules again.
+// When new content adds to a selector group, it copies the group's stacks to near memory, repoints them and applies the rules again.
 namespace kc {
-std::vector<int> g_rules_stub;
 bool g_repoint = false;
-bool drops_have_rules() { return !g_rules_stub.empty(); }
-void drops_apply_rules(const Entry& table) {
-    /* the old packs' rules: none */
-    registry_live_table(table);
-}
 void nc_drops_table(const Entry& table) {
     if (!g_repoint) return;
     g_repoint = false;
@@ -381,7 +389,7 @@ void drop_table_without_old_rules() {
     g_files = {{"m/content/a.json", R"({"registry": {"alter": [{"registry": "drops", "select": {"id": "game:dt_wolf"}, "field": "entries[*].count.max", "op": {"mul": 2}}]}})"}};
     const auto files = files_of({{"m", "m/content/a.json"}});
     stage(files);
-    registry_live_apply(files);
+    apply_registry_files(files);
     check(at<uint32_t>(0x31018) == 3, "no table yet");
     add_drop_table();
     note_table_as_content_cpp(g_regs[KILN_CONTENT_DROPS].entries.back());
@@ -395,7 +403,7 @@ void drop_table_repointed_by_newcontent() {
     g_files = {{"m/content/a.json", R"({"registry": {"alter": [{"registry": "drops", "select": {"id": "game:dt_wolf"}, "field": "entries[*].count.max", "op": {"mul": 2}}]}})"}};
     const auto files = files_of({{"m", "m/content/a.json"}});
     stage(files);
-    registry_live_apply(files);
+    apply_registry_files(files);
     add_drop_table();
     note_table_as_content_cpp(g_regs[KILN_CONTENT_DROPS].entries.back());
     check(at<uint32_t>(0x31018) == 6, "bound when the table loads");
@@ -427,10 +435,11 @@ void reload_loses_stage_refusals() {
         g.in->result.refused.insert(g.in->result.refused.begin(), x);
         g.in->pre_refused.push_back(x);  // the stage's handoff (stage_service: LiveHandoff.pre_refused)
     }
-    registry_live_apply(files);
+    apply_registry_files(files);
     check(reported("Unproven"), "the world-load report has the stage's refusal");
     g_files["b/content/b.json"] = R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "maxStack", "op": {"mul": 3}}]}})";
-    registry_live_apply(files);
+    write_pack(files.back().rel, g_files[files.back().rel]);
+    apply_registry_files(files);
     check(at<uint32_t>(WOOD_AT) == 120, "recomposed: x4 then x3");
     check(reported("Unproven"), "after b's section is reloaded registry.json still names a's refused edit");
 }
@@ -456,18 +465,18 @@ void reload_keeps_boot_outcomes_and_checks_sections() {
             });
         };
     }
-    registry_live_apply(files);
+    apply_registry_files(files);
     g_files["a/content/a.json"] = R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "maxStack", "op": {"mul": 3}},
         {"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "rarity", "op": "epic"}]}})";
-    registry_live_apply(files);
+    write_pack(files.front().rel, g_files[files.front().rel]);
+    apply_registry_files(files);
     check(at<uint32_t>(WOOD_AT) == 30, "recomposed: x3");
     check(g_last_report.fields.count(cap) && g_last_report.fields.at(cap).result == registry::Value::integer(60), "the boot back-end's levelCap 60 stays in registry.json");
     check(reported("Unproven: items.rarity"), "the reloaded section's unproven edit is refused by the stage's check");
     check(at<uint32_t>(WOOD_AT + 4) == 0, "and not written");
 }
 
-// L4 (review finding 10): registry.json is written with no lock of kiln.content's held: apply_all_packs applies under the
-// store's lock (registry_live_apply(files, false)) and publishes after it released the lock.
+// L4 (review finding 10): registry.json is written with no lock of kiln.content's held.
 void report_written_outside_the_store_lock() {
     world();
     g_files = {{"a/content/a.json", R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "maxStack", "op": {"mul": 4}}]}})"}};
@@ -485,13 +494,58 @@ void report_written_outside_the_store_lock() {
             t.join();
         };
     }
+    const auto schema = registry_live_schema();
+    const auto sections = registry_sections(files, *schema);
     {
         std::lock_guard lock(store_mutex());  // apply_all_packs's hold
-        registry_live_apply(files, false);
+        registry_live_apply(sections, schema.get());
         check(!called, "not published under the store's lock");
     }
     registry_live_publish();
     check(called && free, "published with the store's lock free (another thread took it)");
+}
+
+void pack_read_outside_the_store_lock() {
+    world();
+    const std::string rel = "lock-probe/content/pack.json";
+    std::filesystem::remove(g_pack_root / rel);  // discard a FIFO left by an interrupted run
+    g_files = {{rel, R"({"items":{"Material_T1_Wood_Logs":{"maxStackSize":20}},"registry":{"alter":[{"registry":"items","select":{"id":"game:material_t1_wood_logs"},"field":"maxStack","op":{"mul":2}}]}})"}};
+    const auto files = files_of({{"lock-probe", rel}});
+    stage(files);
+    KilnApi api{};
+    api.owner_create = [](KilnStr) -> KilnOwner { return 31; };
+    g_api = &api;
+    apply_all_packs(files);
+    g_api = nullptr;
+    check(at<uint32_t>(WOOD_AT) == 40, "world load applies the registry over the legacy pack layer");
+
+    const auto& path = files.front().path;
+    const auto replacement = path + ".next";
+    write_pack(rel + ".next", "{}");
+    std::filesystem::remove(path);
+    check(mkfifo(path.c_str(), 0600) == 0, "create the pack read probe");
+    bool free = false;
+    bool written = false;
+    // The writer can only open the FIFO once the real pack reader reaches it. Probe the recursive mutex from this thread
+    // before delivering bytes. Replace the path before EOF so any second open would see a different registry section.
+    std::jthread writer([&] {
+        std::ofstream pipe(path, std::ios::binary);
+        free = store_mutex().try_lock();
+        if (free) store_mutex().unlock();
+        pipe << R"({"items":{"Material_T1_Wood_Logs":{"maxStackSize":30}},"registry":{"alter":[{"registry":"items","select":{"id":"game:material_t1_wood_logs"},"field":"maxStack","op":{"mul":3}}]}})";
+        std::error_code err;
+        std::filesystem::rename(replacement, path, err);
+        pipe.close();
+        written = pipe && !err;
+    });
+    const auto loaded = apply_all_packs(files);
+    writer.join();
+    check(written && loaded.files.size() == 1 && loaded.files.front().second.errors.empty(), "read the pack fixture");
+    check(free, "another thread can take store_mutex during the pack file read");
+    check(at<uint32_t>(WOOD_AT) == 90, "reload composes legacy and registry layers from the same file contents");
+    std::filesystem::remove(path);
+    apply_all_packs({});
+    check(at<uint32_t>(WOOD_AT) == 10, "removing the pack drops both of its layers");
 }
 
 // L3: store.cpp store_flush: when compare-before-write fires on a slot in the same flush as an old pack's layer change
@@ -505,19 +559,20 @@ void pack_write_lost_on_detection() {
     const auto files = files_of({{"bigstacks", "bigstacks/content/a.json"}});
     stage(files);
     put_pack(WOOD_AT, 30);
-    registry_live_apply(files);
+    apply_registry_files(files);
     check(at<uint32_t>(WOOD_AT) == 120, "x4 over the pack's 30");
     mem<uint32_t>(WOOD_AT, 777);  // another writer (a ShroudForge run-time write in kiln mode)
     // a pack reload as apply_all_packs does it: the pack's layer dropped and put again with its new value, then the registry
     store_drop_owner(PACK);
     put_pack(WOOD_AT, 50);
-    registry_live_apply(files);
+    apply_registry_files(files);
     check(reported("another writer"), "the registry's edit is skipped and reported");
     check(at<uint32_t>(WOOD_AT) == 50, "the old pack's new value is written as today (memory " + std::to_string(at<uint32_t>(WOOD_AT)) + ")");
 }
 }  // namespace
 
 int main() {
+    g_pack_root = std::filesystem::path(std::getenv("KILN_OUT")) / "content-tests/registry-live-review-packs";
     std::vector<std::string> errs;
     g_regmap = std::make_shared<registry::map::RegMap>();
     if (!registry::map::load_dir(KILN_REGMAP_DIR, "server", "f0d824be7fcd48ebfe2458ff5c28da26060c2074e3ec1fcac587e5a1d508aeb2", g_regmap.get(), &errs) || !g_regmap->has_build) {
@@ -530,7 +585,8 @@ int main() {
                                                          {"L2 reload_loses_stage_refusals", &reload_loses_stage_refusals},
                                                          {"L2b reload_keeps_boot_outcomes_and_checks_sections", &reload_keeps_boot_outcomes_and_checks_sections},
                                                          {"L3 pack_write_lost_on_detection", &pack_write_lost_on_detection},
-                                                         {"L4 report_written_outside_the_store_lock", &report_written_outside_the_store_lock}};
+                                                         {"L4 report_written_outside_the_store_lock", &report_written_outside_the_store_lock},
+                                                         {"L4 pack_read_outside_the_store_lock", &pack_read_outside_the_store_lock}};
     for (const auto& [name, fn] : groups) {
         try {
             fn();
