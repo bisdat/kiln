@@ -352,8 +352,9 @@ public sealed class StationMenuTests : IDisposable
     }
 
     [Fact]
-    public void An_empty_menu_is_legal_and_needs_no_recipe()
+    public void A_menu_of_no_tab_or_a_tab_of_no_set_is_refused_and_one_empty_set_is_legal()
     {
+        // review S2 (ruling): a menu needs a tab and a tab needs a set; the game's own data never has either shape empty
         var m = Ledger("empty-menu");
         Station(m, "forge", new StationBlock
         {
@@ -361,15 +362,18 @@ public sealed class StationMenuTests : IDisposable
             Menu = new MenuBlock { Tabs = [] },
         });
         _host.Apply();
-        Assert.EndsWith("\"tabs\":[]}", Assert.Single(_store.Layers.Values).Record);
-        // a tab with no sets, a set with no recipes
+        Assert.Empty(_store.Layers);
+        Assert.Contains(m.Errors, x => x.Contains("at least one tab"));
         var forge = Station(Ledger("empty-sets"), "forge", new StationBlock { Name = "Forge", Kind = StationKind.Forge, Processing = new ProcessingBlock() });
         ModContext.CurrentMod = Context("empty-sets", 7);
-        var r = StationMenus.Define(forge, new StationMenuDefinition { Key = "m", Tabs = [Tab("a"), Tab("b", Set("s"))] });
+        var none = Assert.Throws<ArgumentException>(() => StationMenus.Define(forge, new StationMenuDefinition { Key = "m", Tabs = [] }));
+        Assert.Contains("at least one tab", none.Message);
+        var noSet = Assert.Throws<ArgumentException>(() => StationMenus.Define(forge, new StationMenuDefinition { Key = "m", Tabs = [Tab("a"), Tab("b", Set("s"))] }));
+        Assert.Contains("at least one set", noSet.Message);
+        // one tab with one empty set: a menu that lists nothing (client check 16a-c4)
+        var r = StationMenus.Define(forge, new StationMenuDefinition { Key = "m", Tabs = [Tab("b", Set("s"))] });
         Assert.True(r.Ok, r.Reason);
-        var record = _store.Layers[r.Registration!.Handle].Record;
-        Assert.Contains("\"key\":\"a\",\"name\":{\"de\":\"Metall\",\"en\":\"Metal\"},\"sets\":[]}", record);
-        Assert.Contains("\"key\":\"s\",\"recipes\":[]}", record);
+        Assert.Contains("\"key\":\"s\",\"recipes\":[]}", _store.Layers[r.Registration!.Handle].Record);
     }
 
     [Fact]

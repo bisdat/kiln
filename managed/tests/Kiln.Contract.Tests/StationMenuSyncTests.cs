@@ -44,7 +44,8 @@ internal sealed class FakeMenuBackend : IStationMenuBackend
     }
 
     public string? Export() => $"{{\"format\":1,\"generation\":{Gen},\"menus\":[{string.Join(",", Layers.Values.Select(l => l.Record))}]}}";
-    public (int Rc, string Error) RemoteReplace(ulong owner, string snapshot) { LastRemote = snapshot; return (0, ""); }
+    public int RemoteRc;
+    public (int Rc, string Error) RemoteReplace(ulong owner, string snapshot) { if (RemoteRc != 0) return (RemoteRc, "refused by the test"); LastRemote = snapshot; return (0, ""); }
     public int RemoteClear(ulong owner) { LastRemote = null; return 0; }
     public int SetPending(bool on) { Pending = on; return 0; }
     public string? DrainApplied() => "[]";

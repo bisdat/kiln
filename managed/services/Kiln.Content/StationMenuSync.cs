@@ -23,7 +23,9 @@ internal static class StationMenuSync
     internal const int PartBytes = 96 * 1024;
     internal const int MaxParts = 4096;
     internal const long MaxCompressed = 65L << 20, MaxRaw = 64L << 20;
-    internal static readonly TimeSpan ReceiptDeadline = TimeSpan.FromSeconds(30), ContentDeadline = TimeSpan.FromSeconds(120);
+    internal static readonly TimeSpan DefaultReceiptDeadline = TimeSpan.FromSeconds(30), DefaultContentDeadline = TimeSpan.FromSeconds(120);
+    // tests shorten them
+    internal static TimeSpan ReceiptDeadline = DefaultReceiptDeadline, ContentDeadline = DefaultContentDeadline;
     internal const byte StageStored = 0, StageApplied = 1, StageRefused = 2;
     /// <summary>What an older Kiln client is told (chapter 16a).</summary>
     internal const string RefusalText = "station-menu protocol1 required";
@@ -452,11 +454,14 @@ internal static class StationMenuSync
     {
         ClientLeave(null);
         // a Kiln server with the channel: a mod's own workshops list nothing until its first snapshot is in
-        if (Kiln.Client.IsClient && !Kiln.Client.IsHosting && _channel is not null && server.HasChannel(ChannelName))
-        {
-            StationMenuStore.Backend.SetPending(true);
-            Log(LogLevel.Info, "joined a server with station menus: own workshops wait for its snapshot");
-        }
+        if (Kiln.Client.IsClient && !Kiln.Client.IsHosting && _channel is not null && server.HasChannel(ChannelName)) BeginHold();
+    }
+
+    /// <summary>A mod's own workshops list nothing until the server's first snapshot is in (tests call it directly).</summary>
+    internal static void BeginHold()
+    {
+        StationMenuStore.Backend.SetPending(true);
+        Log(LogLevel.Info, "joined a server with station menus: own workshops wait for its snapshot");
     }
 
     private static void OnPart(MenuPartMsg m, NetContext ctx)
@@ -793,5 +798,7 @@ internal static class StationMenuSync
         TestPublishCheck = null;
         TestContentReady = null;
         TestChannelOpen = false;
+        ReceiptDeadline = DefaultReceiptDeadline;
+        ContentDeadline = DefaultContentDeadline;
     }
 }
