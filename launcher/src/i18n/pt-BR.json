@@ -5943,7 +5943,7 @@
       "available": "Disponíveis",
       "enterTotal": "informe o total…",
       "changeTotal": "Clique para alterar o total",
-      "totalFromGame": "Total {total}, calculado como o jogo faz: 2 pontos por nível acima de 1, mais as Raízes da Névoa e os Poços de Elixir que este personagem destruiu. O jogo não guarda esse valor, então ele não é editado aqui.",
+      "totalFromGame": "Total {total}: 2 por nível acima de 1 + Raízes da Névoa e Poços de Elixir destruídos. Calculado, não gravado no save.",
       "totalHint": "Total de pontos (em uso + disponíveis, como o jogo mostra):",
       "zoomIn": "Aproximar",
       "zoomOut": "Afastar",
