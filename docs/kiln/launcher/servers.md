@@ -16,6 +16,27 @@ admin transport: [admin-protocol.md](admin-protocol.md).
 A start returns when the game log says `LoadEcsScene to Run` (or fails: the process vanished, 10 min timeout). kilnctl
 and the launcher manage the same kilnctl instances; `kilnctl status <id>` and the launcher agree.
 
+## Start stages
+
+`kiln://task` carries an optional `stage` alongside `progress` and `message`. A local start reports these stages in order.
+
+| Stage | What happens |
+|---|---|
+| `preparing` | Check the instance and prepare its active profile when required. |
+| `wine` | Resolve the Wine or Proton runner and prepare its prefix as needed. On native Windows this stage covers launch setup. |
+| `process` | The runner has spawned and the start message includes its PID. |
+| `world` | Wait for the readiness line while reporting game-log progress. |
+| `running` | The server has reported that its world is ready. |
+
+A restart starts with `stopping` and then follows the start stages. An SSH start reports `preparing` before the
+command and `running` when remote `kilnctl start` succeeds.
+
+`ServerStatus.lastStartS` is the last successful local start's elapsed time from spawn to readiness in whole seconds.
+The launcher writes it atomically to `<state>/<id>.run.start.json` beside the capture log, using the same instance
+name as the log. Failed and canceled starts preserve the previous value. The field is available while the server is
+stopped and can seed a time estimate during the next world load. It is `null` before a measurement is available and
+for remote servers.
+
 **No window, ever**: the server's output shows only in the launcher. Every
 local start sends the server's stdout and stderr into its capture file and gives it no terminal, so Wine gives it a
 console without a window; the server runs in its own session and outlives the launcher. No Wine process the launcher

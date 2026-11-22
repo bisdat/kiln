@@ -567,11 +567,19 @@ function emitTask(t: Task) { tasks.set(t.id, t); mockEmit("kiln://task", clone(t
  *  activation of that kind. `fail`: the task then fails with this message instead of finishing. */
 const taskHolds = new Map<string, { gate: string; fail?: string }>();
 
-/** A fake long task: `steps` progress messages, then `finish()` gives the result (or throws a KilnError). */
-function startTask(kind: string, title: string, steps: string[], finish: () => unknown, stepMs = 450): string {
+type TaskStep = string | { stage: string; message: string };
+
+/** A fake long task: `steps` progress messages and optional stage IDs, then `finish()` gives the result. */
+function startTask(kind: string, title: string, steps: readonly TaskStep[], finish: () => unknown, stepMs = 450): string {
   const id = `t${++taskSeq}-${kind}`;
-  const t: Task = { id, kind, title, state: "running", progress: 0, message: steps[0] ?? null, started: now(), finished: null };
-  emitTask(t);
+  let t: Task = { id, kind, title, state: "running", progress: 0, message: null, started: now(), finished: null };
+  const emitStep = (step: TaskStep, progress: number) => {
+    const fields = typeof step === "string" ? { message: step } : step;
+    t = { ...t, ...fields, progress };
+    emitTask(t);
+  };
+  if (steps.length) emitStep(steps[0], 0);
+  else emitTask(t);
   const hold = taskHolds.get(kind);
   let i = 0;
   const end = () => {
@@ -587,7 +595,11 @@ function startTask(kind: string, title: string, steps: string[], finish: () => u
   const tick = () => {
     if (cancels.has(id)) { emitTask({ ...t, state: "canceled", message: "Canceled", finished: now(), error: { code: "canceled", message: "Canceled." } }); return; }
     i++;
-    if (i < steps.length) { emitTask({ ...t, progress: i / steps.length, message: steps[i] }); setTimeout(tick, stepMs); return; }
+    if (i < steps.length) {
+      emitStep(steps[i], i / steps.length);
+      setTimeout(tick, stepMs);
+      return;
+    }
     if (hold && !gateOf(hold.gate).open) { gateOf(hold.gate).waiters.push(() => setTimeout(end, 0)); return; }
     end();
   };
@@ -1121,7 +1133,7 @@ const server: ServerInstance = {
   wine: "ge:GE-Proton10-3", policy: "any", source: "kilnctl", remote: null,
 };
 const runningServer: ServerStatus = {
-  id: server.id, state: "running", pid: 5120, uptimeS: 3600, players: 0, kiln: "0.2.0-dev", installed: "0.2.0-dev+20261104.0f1ffa6",
+  id: server.id, state: "running", pid: 5120, uptimeS: 3600, lastStartS: 1, players: 0, kiln: "0.2.0-dev", installed: "0.2.0-dev+20261104.0f1ffa6",
   boot: { ...(bootExample as unknown as BootJson), side: "server" }, endpoint: endpointExample as unknown as AdminEndpoint,
 };
 let serverStatus: ServerStatus = runningServer;
@@ -1132,6 +1144,36 @@ function mockSetServer(o: { running?: boolean; installed?: string | null }) {
     ? { ...runningServer, state: "stopped", pid: null, uptimeS: null, players: null, kiln: null, boot: null, endpoint: null, installed }
     : installed ? { ...runningServer, installed } : { ...runningServer, installed: null, kiln: null, boot: null, endpoint: null };
   mockEmit("kiln://server", { serverId: server.id, status: serverStatus });
+}
+
+const serverStartSteps = [
+  { stage: "preparing", message: "Preparing the server" },
+  { stage: "wine", message: "Resolving the Wine runner and prefix" },
+  { stage: "process", message: `Started Wine (pid ${runningServer.pid})` },
+  { stage: "world", message: "Loading the world" },
+  { stage: "running", message: "The world is ready" },
+];
+
+function mockServerRun(serverId: string, operation: "start" | "restart" | "stop"): string {
+  if (serverId !== server.id) reject("not_found", `No server '${serverId}'.`);
+  if (operation === "start" && serverStatus.pid) reject("conflict", `${serverId} is running already.`);
+  const stopping = { stage: "stopping", message: "Stopping the server" };
+  const steps = operation === "start" ? serverStartSteps
+    : operation === "restart" ? [stopping, ...serverStartSteps]
+    : [stopping.message];
+  const stepMs = 600;
+  const title = { start: "Starting", restart: "Restarting", stop: "Stopping" }[operation];
+  return startTask(`server_${operation}`, `${title} ${serverId}`, steps, () => {
+    if (operation === "stop") {
+      serverStatus = { ...serverStatus, state: "stopped", pid: null, uptimeS: null, players: null, kiln: null, boot: null, endpoint: null };
+    } else {
+      const installed = serverStatus.installed;
+      serverStatus = { ...runningServer, uptimeS: 0, lastStartS: Math.floor(2 * stepMs / 1000), installed,
+        kiln: installed ?? null, boot: installed ? runningServer.boot : null, endpoint: installed ? runningServer.endpoint : null };
+    }
+    mockEmit("kiln://server", { serverId, status: serverStatus });
+    return serverStatus;
+  }, stepMs);
 }
 
 // ---------------------------------------------------------------- handlers
@@ -1765,6 +1807,9 @@ const handlers: Record<string, Handler> = {
   server_list: () => [server],
   server_get: () => server,
   server_status: () => serverStatus,
+  server_start: (a) => mockServerRun(S(a.serverId), "start"),
+  server_restart: (a) => mockServerRun(S(a.serverId), "restart"),
+  server_stop: (a) => mockServerRun(S(a.serverId), "stop"),
   server_deploy: (a) => {
     const version = S(a.version);
     const b = bundles.find((x) => x.version === version) ?? reject("not_found", `No runtime bundle ${version}.`);
