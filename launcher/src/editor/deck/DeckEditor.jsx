@@ -110,12 +110,12 @@ export default function DeckEditor() {
               </p>
             </div>
             <div className="dke-buttons">
-              <DeckButton id="ed-undo" aria-label={t('editor.page.history.undo')} a={t('editor.page.history.undo')} disabled={!canUndo(s)} onClick={undo}><span title={historyTitle(s, 'undo')}><Undo2 size={22} aria-hidden="true" /></span></DeckButton>
-              <DeckButton id="ed-redo" aria-label={t('editor.page.history.redo')} a={t('editor.page.history.redo')} disabled={!canRedo(s)} onClick={redo}><span title={historyTitle(s, 'redo')}><Redo2 size={22} aria-hidden="true" /></span></DeckButton>
               <DeckButton id="ed-characters" disabled={saving || restoring} a={t('editor.page.open')} onClick={() => setDialog('characters')}>{t('editor.page.characters')}</DeckButton>
               <DeckButton id="ed-backups" a={t('editor.page.open')} disabled={!model || blocked} onClick={() => setDialog('backups')}>{t('editor.page.backups')}</DeckButton>
               {dirty && <DeckButton id="ed-discard" disabled={blocked} onClick={() => setDialog('discard')}>{t('editor.page.discard')}</DeckButton>}
               <DeckButton id="ed-save" primary disabled={!canSave(s)} onClick={() => void save()}>{saving ? t('editor.page.saving') : t('editor.page.save')}</DeckButton>
+              <DeckButton id="ed-undo" aria-label={t('editor.page.history.undo')} a={t('editor.page.history.undo')} disabled={!canUndo(s)} onClick={undo}><span title={historyTitle(s, 'undo')}><Undo2 size={22} aria-hidden="true" /></span></DeckButton>
+              <DeckButton id="ed-redo" aria-label={t('editor.page.history.redo')} a={t('editor.page.history.redo')} disabled={!canRedo(s)} onClick={redo}><span title={historyTitle(s, 'redo')}><Redo2 size={22} aria-hidden="true" /></span></DeckButton>
             </div>
           </header>
           {(status || art.hint) && (
