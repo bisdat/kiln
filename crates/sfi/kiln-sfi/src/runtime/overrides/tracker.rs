@@ -23,9 +23,7 @@
 //! cleanup keeps the mod active (its permissions and claims) and is retried by later turns; the fast
 //! leave never calls it.
 //!
-//! The live session is `kiln.world.game_world_session` of [`session_world_kind`]
-//! (the server world on the server side, the client world otherwise), read once
-//! per tracker operation that needs it.
+//! The tracker reads the active ECS world kind and session once per operation that needs them.
 
 use crate::runtime::install::Family;
 use kiln_abi::{KILN_WORLD_CLIENT, KILN_WORLD_SERVER};
@@ -72,9 +70,8 @@ impl OverrideTrackers {
         Rc::new(Self::default())
     }
 
-    /// The runtime family that installs `runtime.overrides.new` for each package, its live
-    /// session read from the runtime-create's facts on world `world_kind`.
-    pub fn family(self: &Rc<Self>, world_kind: u32) -> Family {
+    /// The runtime family that installs `runtime.overrides.new` for each package on the active ECS world.
+    pub fn family(self: &Rc<Self>) -> Family {
         let trackers = self.clone();
         Family::new(
             "overrides.tracker",
@@ -85,11 +82,18 @@ impl OverrideTrackers {
                 };
                 let overrides: Table = runtime.raw_get("overrides")?;
                 let facts = cx.facts().clone();
-                trackers.install(
+                trackers.install_world(
                     lua,
                     &overrides,
                     package.id(),
-                    Rc::new(move || facts.world_session(world_kind)),
+                    Rc::new(move || {
+                        if facts.world().is_none() {
+                            let server = KILN_WORLD_SERVER as u32;
+                            (server, facts.world_session(server))
+                        } else {
+                            facts.ecs_world()
+                        }
+                    }),
                 )
             },
         )
@@ -104,6 +108,21 @@ impl OverrideTrackers {
         overrides: &Table,
         owner: &str,
         session: Rc<dyn Fn() -> u64>,
+    ) -> mlua::Result<()> {
+        self.install_world(
+            lua,
+            overrides,
+            owner,
+            Rc::new(move || (KILN_WORLD_SERVER as u32, session())),
+        )
+    }
+
+    fn install_world(
+        &self,
+        lua: &Lua,
+        overrides: &Table,
+        owner: &str,
+        session: Rc<dyn Fn() -> (u32, u64)>,
     ) -> mlua::Result<()> {
         {
             let mut bound = self.lua.borrow_mut();
@@ -176,7 +195,11 @@ impl Cleanup for OverrideTrackers {
 
 /// The mod's `new` (cached in the VM's registry): a new tracker on `session`, appended to the
 /// mod's tracker registry. Extra arguments are ignored, as ShroudForge's unit closure does.
-fn factory_new(lua: &Lua, owner: &str, session: Rc<dyn Fn() -> u64>) -> mlua::Result<Function> {
+fn factory_new(
+    lua: &Lua,
+    owner: &str,
+    session: Rc<dyn Fn() -> (u32, u64)>,
+) -> mlua::Result<Function> {
     let key = registry_key(owner);
     let factory_key = factory_key(owner);
     if let Some(new) = lua.named_registry_value::<Option<Function>>(&factory_key)? {

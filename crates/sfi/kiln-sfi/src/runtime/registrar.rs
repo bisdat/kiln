@@ -43,7 +43,7 @@ pub struct Parts {
     pub network: Family,
     /// The UI family over this start's transport.
     pub ui: Family,
-    /// The override tracker family on the plan side's world.
+    /// The override tracker family on the active ECS world.
     pub trackers: Option<Family>,
 }
 
