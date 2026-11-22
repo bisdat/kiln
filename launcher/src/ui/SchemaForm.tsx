@@ -28,6 +28,8 @@ export interface SchemaFormProps {
   /** Field labels by path, for a card whose key names do not read as words ("graphics.fpsCap": "Frame cap"); an entry
    *  without one is named from its key. */
   labels?: Record<string, string>;
+  /** A long comment shows its first clause, with More for the rest (Settings: one line of help per row). */
+  clamp?: boolean;
 }
 
 const DURATION = /^(\d+(\.\d+)?(ms|s|m|h|d))+$/;
@@ -78,7 +80,7 @@ const label = (path: string) => {
   return words.charAt(0).toUpperCase() + words.slice(1);
 };
 
-export function SchemaForm({ schema, values, onChange, onReset, errors = [], pending = [], disabled, filter, labels }: SchemaFormProps) {
+export function SchemaForm({ schema, values, onChange, onReset, errors = [], pending = [], disabled, filter, labels, clamp }: SchemaFormProps) {
   const t = useT();
   const groups = useMemo(() => {
     const secs = [...(schema.sections ?? [])].sort((a, b) => b.path.length - a.path.length);
@@ -107,7 +109,7 @@ export function SchemaForm({ schema, values, onChange, onReset, errors = [], pen
           )}
           {g.entries.map((e) => (
             <EntryRow key={e.path} entry={e} value={getPath(values, e.path)} onChange={onChange} onReset={onReset} disabled={disabled}
-              error={errors.find((x) => x.path === e.path)?.message} pending={pending.includes(e.path)} name={labels?.[e.path]} />
+              error={errors.find((x) => x.path === e.path)?.message} pending={pending.includes(e.path)} name={labels?.[e.path]} clamp={clamp} />
           ))}
         </div>
       ))}
@@ -125,9 +127,10 @@ interface RowProps {
   disabled?: boolean;
   /** The field's label (SchemaFormProps.labels); else from its key. */
   name?: string;
+  clamp?: boolean;
 }
 
-function EntryRow({ entry: e, value, onChange, onReset, error, pending, disabled, name: given }: RowProps) {
+function EntryRow({ entry: e, value, onChange, onReset, error, pending, disabled, name: given, clamp }: RowProps) {
   const t = useT();
   const name = given ?? label(e.path);
   const v = value === undefined ? e.default : value;
@@ -145,7 +148,7 @@ function EntryRow({ entry: e, value, onChange, onReset, error, pending, disabled
           {e.synced && <span className="k-word-sm k-tone-info" title={t("ui.schemaForm.syncedTitle")}>{t("ui.schemaForm.synced")}</span>}
           {pending && <span className="k-word-sm k-tone-ember" title={t("ui.schemaForm.pendingTitle")}>{t("ui.schemaForm.pending")}</span>}
         </div>
-        {e.comment && <span className="k-hint">{e.comment}</span>}
+        {e.comment && <Comment text={e.comment} clamp={clamp} />}
         <span className="k-sform-key">{e.path}</span>
       </div>
       <div className="k-sform-control">
@@ -159,6 +162,33 @@ function EntryRow({ entry: e, value, onChange, onReset, error, pending, disabled
         )}
       </div>
     </div>
+  );
+}
+
+/** A comment's first clause, when the comment runs longer than a line (null: it is short enough). */
+export function commentHead(text: string): string | null {
+  if (text.length <= 90) return null;
+  let at = -1;
+  for (const sep of [": ", ". ", "; ", " ("]) {
+    const i = text.indexOf(sep);
+    if (i >= 12 && i <= 90 && (at < 0 || i < at)) at = i;
+  }
+  if (at > 0) return text.slice(0, at) + (text[at] === "." ? "." : "");
+  const cut = text.lastIndexOf(" ", 80);
+  return `${text.slice(0, cut > 20 ? cut : 80)}…`;
+}
+
+/** An entry's comment; with `clamp`, a long one shows its first clause and More. */
+function Comment({ text, clamp }: { text: string; clamp?: boolean }) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const head = clamp ? commentHead(text) : null;
+  if (!head) return <span className="k-hint">{text}</span>;
+  return (
+    <span className="k-hint">
+      {open ? text : head}
+      <button type="button" className="k-link k-sform-more" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? t("ui.schemaForm.less") : t("ui.schemaForm.more")}</button>
+    </span>
   );
 }
 

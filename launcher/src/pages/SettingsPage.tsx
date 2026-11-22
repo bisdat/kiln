@@ -1,377 +1,272 @@
-// /settings: profiles (a background feature: components/ProfilesSettings.tsx), the library's storage, launcher settings,
-// games, and Kiln's kiln.json for the selected game (its "graphics" section on the Graphics card, with the upscaler
-// behind the game's FSR 3 and the vendor upscaler files: components/GraphicsSettings.tsx, UpscalerSettings.tsx).
-// `#profiles` (Play's profile line, the old /profiles) scrolls there; `#graphics` and `#upscalers` too.
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FolderPlus, Plus, RefreshCw, Trash2, X } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
-import { useLocation } from "react-router-dom";
+// /settings (mockup A, "Section list"): the title, a search box (Ctrl+F; Esc clears it) and six sections down the left,
+// each with a live line (pages/settings/summary.ts) and the open section's groups as links under it; the launcher's
+// version at the bottom. The right side shows one section at a time (pages/settings/sections/*), or the search's hits as
+// working controls under their place, with "Open in <section>" and the hits per section counted in the list.
+// Routes: /settings opens General (or the section last shown in this run), /settings/<section> that section. A hash is
+// a group's anchor (pages/settings/model.ts: #profiles, #crucible, #library, #nexus, #graphics, #upscalers,
+// #shroudforge, ...): it opens the group's section, scrolls to it and flushes it with ember; a search's Enter or "Open in"
+// does the same for the row it found.
+import { useQuery } from "@tanstack/react-query";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import * as api from "../api/commands";
-import { KEEP_MAX, type ConfigDocument, type DesktopInfo, type Json, type LauncherSettings, type RenderInfo, type SandboxInfo, type X11Info } from "../api/commands";
-import { qk, useAppInfo, useGame, useGameStatus, useNexusEnabled, useSettings } from "../api/hooks";
-import { fallbackEnabled } from "../api/fallback";
-import { useAssetsStatus, useExtractTask } from "../components/GameArt";
-import { UpdatesCard } from "../components/UpdateSettings";
-import { DeckModeCard, saveSettings } from "../deck/mode";
-import { NexusCard } from "../components/NexusSettings";
-import { ProfilesCard } from "../components/ProfilesSettings";
-import { LibraryCard } from "../components/LibrarySettings";
-import { LanguageCard } from "../components/LanguageSettings";
-import { GraphicsCard, isGraphicsPath } from "../components/GraphicsSettings";
-// Settings' ShroudForge card
-import { ShroudForgeCard, isShroudForgePath } from "../components/ShroudForgeSettings";
-import { StartModal, UnknownBuild, useStartWord } from "../components/GameStart";
-import { rich, t, useT } from "../i18n";
-import { CommunityToggle } from "../community/parts";
+import { qk, useAppInfo, useDistribution, useGame, useGameSel, useNexusEnabled, useSettings } from "../api/hooks";
 import { useCrucibleOn } from "../crucible/state";
-import {
-  Badge, Button, Card, ConfirmDanger, EmptyState, Field, IconButton, NumberInput, Page, PageHeader, PathPicker, SchemaForm, Select, Skeleton,
-  Toggle, errorText, fmtAgo, fmtBytes, setTypeToConfirm, toast, typeToConfirm,
-} from "../ui";
+import { useLanguage, useT } from "../i18n";
+import { Kbd, Page, Select, WellInput } from "../ui";
+import { SECTIONS, bestHit, countBySection, groupById, queryWords, resolveAnchor, search, sectionFor, sectionTitle, type SectionId, type SettingsCtx } from "./settings/model";
+import { SettingsViewProvider, type SettingsView } from "./settings/parts";
+import { buildIndex } from "./settings/searchIndex";
+import { useSummaries } from "./settings/summary";
+import { AdvancedSection } from "./settings/sections/Advanced";
+import { GameSection } from "./settings/sections/GameKiln";
+import { GeneralSection } from "./settings/sections/General";
+import { GraphicsSection } from "./settings/sections/Graphics";
+import { ModsSection } from "./settings/sections/Mods";
+import { OnlineSection } from "./settings/sections/Online";
+import "./settings/settings.css";
 
-/** Windows (WebView2): path examples in Windows form. */
-const WIN = /Windows/i.test(navigator.userAgent);
+/** The section last shown in this run (sessionStorage: a new start opens General). */
+const LAST = "kiln.settings.section";
+const lastSection = () => { try { return sessionStorage.getItem(LAST); } catch { return null; } };
+/** How long a row or group found by a jump stays flushed with ember. */
+const FLUSH_MS = 2000;
+
+const BODIES: Record<SectionId, () => JSX.Element> = {
+  general: GeneralSection, mods: ModsSection, game: GameSection, graphics: GraphicsSection, online: OnlineSection, advanced: AdvancedSection,
+};
+
+/** What decides which groups and rows exist, and what search reads. */
+function useSettingsCtx(): SettingsCtx {
+  const info = useAppInfo();
+  const settings = useSettings();
+  const dist = useDistribution();
+  const nexus = useNexusEnabled();
+  const crucible = useCrucibleOn();
+  const { game } = useGame();
+  const doc = useQuery({ queryKey: qk.kilnJson(game?.id ?? ""), queryFn: () => api.configKilnRead(game!.id), enabled: !!game });
+  return useMemo(() => ({
+    info: info.data, settings: settings.data, dist, nexus, crucible, tauri: api.isTauri(), client: game?.kind === "client",
+    schema: doc.data?.schema, values: doc.data?.values,
+  }), [info.data, settings.data, dist, nexus, crucible, game?.kind, doc.data]);
+}
 
 export default function SettingsPage() {
   const t = useT();
-  const nexusEnabled = useNexusEnabled();
-  const { hash } = useLocation();
+  const lang = useLanguage();
+  const nav = useNavigate();
+  const loc = useLocation();
+  const { section: param } = useParams();
+  const section = sectionFor(param, loc.hash, lastSection());
+  useEffect(() => { try { sessionStorage.setItem(LAST, section); } catch { /* private mode */ } }, [section]);
+
+  const ctx = useSettingsCtx();
+  // the index in the launcher's language: built again when the language changes
+  const items = useMemo(() => buildIndex(ctx), [ctx, lang]); // eslint-disable-line react-hooks/exhaustive-deps
+  const byId = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
+  const [q, setQ] = useState("");
+  const words = useMemo(() => queryWords(q), [q]);
+  const hits = useMemo(() => search(items, q), [items, q]);
+  const counts = useMemo(() => countBySection(hits), [hits]);
+  const searching = words.length > 0;
+  const sums = useSummaries(ctx.values);
+  const info = useAppInfo();
+
+  const main = useRef<HTMLDivElement>(null);
+  const box = useRef<HTMLInputElement>(null);
+  // a jump: the row or group to find, scroll to and flush (n: a new jump to the same target flushes again)
+  const [flash, setFlash] = useState<{ target: string; n: number } | null>(null);
+  const jump = useCallback((s: SectionId, target: string) => {
+    setQ("");
+    if (s !== section || loc.hash) nav(`/settings/${s}`);
+    setFlash((f) => ({ target, n: (f?.n ?? 0) + 1 }));
+  }, [section, loc.hash, nav]);
+
+  // a deep link (a hash): its section is open (sectionFor); its group is found and flushed
   useEffect(() => {
-    if (!hash) return;
-    const timer = setTimeout(() => document.getElementById(hash.slice(1))?.scrollIntoView({ block: "start" }), 60);
-    return () => clearTimeout(timer);
-  }, [hash]);
+    const a = loc.hash.length > 1 ? resolveAnchor(loc.hash.slice(1)) : null;
+    if (!a) return;
+    setQ("");
+    setFlash((f) => ({ target: a.group ?? "", n: (f?.n ?? 0) + 1 }));
+  }, [loc.hash, loc.key]);
+
+  // a new section starts at its top
+  useLayoutEffect(() => { if (main.current) main.current.scrollTop = 0; }, [section, searching]);
+
+  // find the jump's target (it may still be loading), scroll to it, flush it
+  useEffect(() => {
+    if (!flash || searching) return;
+    const root = main.current;
+    if (!root) return;
+    let tries = 0, done = false;
+    let timer = 0, unflush = 0;
+    const find = () => {
+      if (!flash.target) return root.querySelector<HTMLElement>(".k-st-head");
+      // a kiln.json entry: SchemaForm's row of the control sf-<path>
+      if (flash.target.startsWith("kj:")) return root.querySelector<HTMLElement>(`#sf-${flash.target.slice(3).replace(/[^a-z0-9]/gi, "-")}`)?.closest<HTMLElement>(".k-sform-row") ?? null;
+      const id = CSS.escape(flash.target);
+      return root.querySelector<HTMLElement>(`[data-setting="${id}"]`) ?? root.querySelector<HTMLElement>(`[data-group="${id}"]`);
+    };
+    const place = (el: HTMLElement) => {
+      const r = el.getBoundingClientRect(), box = root.getBoundingClientRect();
+      const row = !!el.dataset.setting || el.classList.contains("k-sform-row");
+      // a row: in the middle when it fits; a group: its head at the top
+      const off = row && r.height < box.height * 0.6 ? (box.height - r.height) / 2 : 16;
+      root.scrollTop += r.top - box.top - off;
+    };
+    const go = () => {
+      if (done) return;
+      const el = find();
+      if (!el) { if (tries++ < 60) timer = window.setTimeout(go, 50); return; }
+      done = true;
+      place(el);
+      if (!flash.target) return;
+      el.classList.remove("k-st-flush");
+      void el.offsetWidth;
+      el.classList.add("k-st-flush");
+      // what loads above it can push it down: place it once more
+      timer = window.setTimeout(() => place(el), 350);
+      unflush = window.setTimeout(() => el.classList.remove("k-st-flush"), FLUSH_MS);
+    };
+    go();
+    return () => { done = true; clearTimeout(timer); clearTimeout(unflush); };
+  }, [flash, searching, section]);
+
+  // Ctrl+F (Cmd+F) finds a setting while Settings is open
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        box.current?.focus();
+        box.current?.select();
+      }
+    };
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, []);
+
+  // the open section's groups as they are on the page, and the one at the top while it scrolls
+  const [groups, setGroups] = useState<string[]>([]);
+  const [current, setCurrent] = useState<string | null>(null);
+  useLayoutEffect(() => {
+    const root = main.current;
+    if (!root || searching) { setGroups([]); return; }
+    const read = () => {
+      const ids = [...root.querySelectorAll<HTMLElement>("[data-group]")].map((el) => el.dataset.group!).filter((id, i, all) => all.indexOf(id) === i);
+      setGroups((old) => (old.join() === ids.join() ? old : ids));
+    };
+    read();
+    const mo = new MutationObserver(read);
+    mo.observe(root, { childList: true, subtree: true });
+    return () => mo.disconnect();
+  }, [section, searching]);
+  useEffect(() => {
+    const root = main.current;
+    if (!root || searching) return;
+    const spy = () => {
+      const top = root.getBoundingClientRect().top + 48;
+      let at: string | null = null;
+      for (const el of root.querySelectorAll<HTMLElement>("[data-group]")) if (el.getBoundingClientRect().top <= top) at = el.dataset.group!;
+      // at the very end, the last group is the one being read
+      if (root.scrollHeight > root.clientHeight + 2 && root.scrollTop + root.clientHeight >= root.scrollHeight - 2 && groups.length) at = groups[groups.length - 1];
+      setCurrent(at ?? groups[0] ?? null);
+    };
+    spy();
+    root.addEventListener("scroll", spy, { passive: true });
+    return () => root.removeEventListener("scroll", spy);
+  }, [groups, searching]);
+  const toGroup = (id: string) => {
+    const root = main.current;
+    const el = root?.querySelector<HTMLElement>(`[data-group="${CSS.escape(id)}"]`);
+    if (!root || !el) return;
+    root.scrollTo({ top: root.scrollTop + el.getBoundingClientRect().top - root.getBoundingClientRect().top - 16, behavior: "smooth" });
+  };
+
+  const view: SettingsView = useMemo(() => ({ ctx, hits: searching ? new Set(hits.map((h) => h.id)) : null, words, items: byId, jump }),
+    [ctx, searching, hits, words, byId, jump]);
+  const Body = BODIES[section];
+  const hitSections = SECTIONS.filter((s) => counts[s]);
+  const say = !searching ? sums.say[section]
+    : hits.length ? [t("settings.search.found", { count: hits.length, query: q.trim() }), hitSections.length === 1 && t("settings.search.allIn", { section: sectionTitle(hitSections[0]) }),
+      t("settings.search.change", { count: hits.length })].filter(Boolean).join(" ")
+    : t("settings.search.none", { query: q.trim() });
+
   return (
-    <Page>
-      <PageHeader title={t("settings.title")} sub={t("settings.sub")} />
-      <div className="k-grid k-grid-2" style={{ alignItems: "start" }}>
-        <ProfilesCard />
-        <LibraryCard />
-        <LauncherCard />
-        <LanguageCard />
-        <GamesCard />
-        <AppearanceCard />
-        <UpdatesCard />
-        <DeckModeCard />
-        {nexusEnabled && <NexusCard />}
-      </div>
-      <KilnJsonCard />
-      <ShroudForgeCard />
-      <GraphicsCard />
-      <AssetsCard />
+    <Page fill className="k-settings">
+      <SettingsViewProvider value={view}>
+        <div className="k-st">
+          <aside className="k-st-rail">
+            <h1 className="k-page-title k-st-pagename">{t("settings.title")}</h1>
+            <WellInput ref={box} label={t("settings.search.label")} value={q} compact
+              onChange={(e) => setQ(e.target.value)} onClear={() => setQ("")} clearLabel={t("settings.search.clear")}
+              note={q ? undefined : <Kbd>{t("settings.search.key")}</Kbd>}
+              onKeyDown={(e) => { const best = e.key === "Enter" ? bestHit(hits, q) : null; if (best) { e.preventDefault(); jump(best.section, best.id); } }} />
+            <nav className="k-st-nav" aria-label={t("settings.nav.label")}>
+              <ul>
+                {SECTIONS.map((s) => {
+                  const on = !searching && s === section;
+                  const n = counts[s] ?? 0;
+                  const line = searching ? (n ? [...new Set(hits.filter((h) => h.section === s).map((h) => groupById(h.group)?.title() ?? ""))].join(", ") : "") : sums.line[s];
+                  return (
+                    <li key={s} className={["k-st-sec", on && "on", searching && !n && "dim", s === "advanced" && "last"].filter(Boolean).join(" ")}>
+                      <Link to={`/settings/${s}`} aria-current={on ? "page" : undefined} onClick={() => setQ("")} data-section={s}
+                        aria-label={searching && n ? t("settings.nav.hits", { section: sectionTitle(s), count: n }) : sectionTitle(s)}>
+                        <span className="k-st-sec-name">{sectionTitle(s)}</span>
+                        {line && <span className="k-st-sec-line">{line}</span>}
+                        {searching && n > 0 && <span className="k-st-count" aria-hidden>{n}</span>}
+                      </Link>
+                      {on && groups.length > 1 && (
+                        <ul className="k-st-subs" aria-label={t("settings.nav.groups", { section: sectionTitle(s) })}>
+                          {groups.map((g) => (
+                            <li key={g}>
+                              <button type="button" className={g === current ? "on" : undefined} aria-current={g === current ? "true" : undefined}
+                                onClick={() => toGroup(g)}>{groupById(g)?.title()}</button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </nav>
+            <p className="k-st-foot" title={t("settings.version", { version: info.data?.version ?? "" })}><span className="k-mono">{info.data?.version ?? ""}</span></p>
+          </aside>
+          <div className="k-st-main" ref={main}>
+            <header className="k-st-head">
+              <div className="k-st-head-text">
+                <h2 className="k-st-title">{searching ? t("settings.search.title") : sectionTitle(section)}</h2>
+                {say && <p className="k-st-say" role={searching ? "status" : undefined}>{say}</p>}
+              </div>
+              {!searching && (section === "game" || section === "graphics") && <GamePicker />}
+            </header>
+            <div className="k-st-body">
+              {searching ? (
+                <>
+                  {hitSections.map((s) => { const B = BODIES[s]; return <B key={s} />; })}
+                  <p className="k-st-searchfoot">{t("settings.search.foot")}</p>
+                </>
+              ) : <Body />}
+            </div>
+          </div>
+        </div>
+      </SettingsViewProvider>
     </Page>
   );
 }
 
-/** (dev.30) Crucible's anonymous install counts; only where this build has Crucible. */
-function CrucibleStatsToggle({ value, onChange }: { value: boolean; onChange: (on: boolean) => void }) {
+/** "For <game>": which game the per-game sections show (the same choice as Play's game). */
+function GamePicker() {
   const t = useT();
-  if (!useCrucibleOn()) return null;
-  return <Toggle checked={value} onChange={onChange} label={t("crucible.settings.stats")} hint={t("crucible.settings.statsHint")} />;
-}
-
-function LauncherCard() {
-  const t = useT();
-  const qc = useQueryClient();
-  const s = useSettings();
-  const { games } = useGame();
-  const nexusEnabled = useNexusEnabled();
-  const [root, setRoot] = useState("");
-  if (s.isLoading) return <Card title={t("settings.launcher.title")}><Skeleton /></Card>;
-  if (!s.data) return <Card title={t("settings.launcher.title")}><EmptyState title={t("settings.launcher.unavailable")} hint={errorText(s.error)} /></Card>;
-  const v = s.data;
-  const set = (patch: Partial<LauncherSettings>) => void saveSettings(qc, () => patch);
+  const { game, games } = useGame();
+  const setGameId = useGameSel((s) => s.setGameId);
+  const clients = games.filter((g) => g.kind === "client");
+  if (!game || clients.length < 2) return null;
   return (
-    <Card title={t("settings.launcher.title")}>
-      <Field label={t("settings.launcher.defaultGame")} htmlFor="st-game">
-        <Select id="st-game" value={v.defaultGameId ?? ""} onChange={(id) => set({ defaultGameId: id || null })}
-          options={[{ value: "", label: t("settings.launcher.firstFound") }, ...games.filter((g) => g.kind === "client").map((g) => ({ value: g.id, label: g.path.split(/[\\/]/).pop() ?? g.id }))]} />
-      </Field>
-      <Field label={t("settings.launcher.savesKeep")} hint={t("settings.launcher.savesKeepHint")} htmlFor="st-keep">
-        <NumberInput id="st-keep" integer min={1} max={100} value={v.savesKeep} onCommit={(n) => set({ savesKeep: n })} style={{ width: 120 }} />
-      </Field>
-      <Field label={t("settings.launcher.keepVersions")} hint={t("settings.launcher.keepVersionsHint")} htmlFor="st-keep-versions">
-        <NumberInput id="st-keep-versions" integer min={0} max={KEEP_MAX} value={v.keepVersions ?? 1} onCommit={(n) => set({ keepVersions: n })} style={{ width: 120 }} />
-      </Field>
-      <Toggle checked={v.addToActiveProfile !== false} onChange={(on) => set({ addToActiveProfile: on })} label={t("settings.launcher.addToActive")}
-        hint={t("settings.launcher.addToActiveHint")} />
-      <Toggle checked={v.modFolderNotes !== false} onChange={(on) => set({ modFolderNotes: on })} label={t("settings.launcher.folderNotes")}
-        hint={t("settings.launcher.folderNotesHint")} />
-      <Toggle checked={v.allowHttpModpacks} onChange={(on) => set({ allowHttpModpacks: on })} label={t("settings.launcher.httpModpacks")} hint={t("settings.launcher.httpModpacksHint")} />
-      <CommunityToggle />
-      <Toggle checked={v.modUpdatesDaily === true} onChange={(on) => set({ modUpdatesDaily: on })} label={t("settings.launcher.dailyUpdates")}
-        hint={t(nexusEnabled ? "settings.launcher.dailyUpdatesHint" : "settings.launcher.dailyUpdatesHintNoNexus")} />
-      <CrucibleStatsToggle value={v.crucibleStats !== false} onChange={(on) => set({ crucibleStats: on })} />
-      <TypeToConfirmToggle />
-      <Field label={t("settings.launcher.steamRoots")} hint={t("settings.launcher.steamRootsHint")}>
-        <div className="k-stack">
-          {v.steamRoots.map((r) => (
-            <div key={r} className="k-input-group">
-              <span className="k-mono k-ellipsis" style={{ flex: 1 }}>{r}</span>
-              <IconButton label={t("common.remove")} size="s" icon={<X />} onClick={() => set({ steamRoots: v.steamRoots.filter((x) => x !== r) })} />
-            </div>
-          ))}
-          <div className="k-input-group">
-            <div style={{ flex: 1 }}><PathPicker value={root} onChange={setRoot} directory placeholder={WIN ? "D:\\SteamLibrary" : "/mnt/games/SteamLibrary"} /></div>
-            <IconButton label={t("common.add")} variant="secondary" icon={<Plus />} disabled={!root.trim()} onClick={() => { set({ steamRoots: [...v.steamRoots, root.trim()] }); setRoot(""); }} />
-          </div>
-        </div>
-      </Field>
-      <DevCard />
-    </Card>
-  );
-}
-
-/** Appearance: the fire on Play. Off (or KILN_LAUNCHER_NO_WEBGL=1 for one start) draws the plain Play button, the same
- *  one a machine without WebGL gets. On Linux also "Draw the launcher without the GPU" (the render marker, render.rs), on Wayland
- *  "Switch to X11 when drawing is slow on Wayland" (render.rs' X11 switch),
- *  "WebKit's sandbox" (the sandbox marker, sandbox.rs) and, in the AppImage, "Kiln Launcher in the app menu"
- *  (desktop.rs). */
-function AppearanceCard() {
-  const t = useT();
-  const qc = useQueryClient();
-  const s = useSettings();
-  const info = useAppInfo();
-  if (!s.data) return null;
-  const forced = !!info.data?.noWebgl;
-  const render = info.data?.render;
-  const desktop = info.data?.desktop;
-  const setDesktop = (on: boolean) => api.appDesktopSet(on).then((next) => {
-    qc.setQueryData(qk.appInfo, (cur: api.AppInfo | undefined) => (cur ? { ...cur, desktop: next } : cur));
-    toast.ok(on ? t("settings.appearance.desktopOn") : t("settings.appearance.desktopOff"));
-  }).catch((e) => toast.error(e));
-  const setRender = (on: boolean) => api.appRenderSet(on).then((next) => {
-    qc.setQueryData(qk.appInfo, (cur: api.AppInfo | undefined) => (cur ? { ...cur, render: next } : cur));
-    toast.ok(on ? t("settings.appearance.nextNoGpu") : t("settings.appearance.nextGpu"));
-  }).catch((e) => toast.error(e));
-  const setX11 = (on: boolean) => api.appRenderX11Set(on).then((next) => {
-    qc.setQueryData(qk.appInfo, (cur: api.AppInfo | undefined) => (cur ? { ...cur, render: next } : cur));
-    toast.ok(on ? t("settings.render.x11NextOn") : t("settings.render.x11NextOff"));
-  }).catch((e) => toast.error(e));
-  const sandbox = info.data?.sandbox;
-  const setSandbox = (on: boolean) => api.appSandboxSet(on).then((next) => {
-    qc.setQueryData(qk.appInfo, (cur: api.AppInfo | undefined) => (cur ? { ...cur, sandbox: next } : cur));
-    toast.ok(on ? t("settings.sandbox.nextOn") : t("settings.sandbox.nextOff"));
-  }).catch((e) => toast.error(e));
-  return (
-    <Card title={t("settings.appearance.title")}>
-      <Toggle checked={!forced && s.data.animatedFire !== false} disabled={forced} onChange={(on) => void saveSettings(qc, () => ({ animatedFire: on }))}
-        label={t("settings.appearance.fire")} hint={forced ? fireOff(info.data) : t("settings.appearance.fireHint")} />
-      {render && <Toggle checked={render.marker} onChange={(on) => void setRender(on)} label={t("settings.appearance.noGpu")} hint={renderHint(render)} />}
-      {render?.x11 && <Toggle checked={render.x11.auto} disabled={render.x11.why === "yours"} onChange={(on) => void setX11(on)}
-        label={t("settings.render.x11")} hint={x11Hint(render.x11)} />}
-      {sandbox && <Toggle checked={!sandbox.marker} onChange={(on) => void setSandbox(on)} label={t("settings.sandbox.label")} hint={sandboxHint(sandbox)} />}
-      {desktop && <Toggle checked={desktop.on && desktop.installed} onChange={(on) => void setDesktop(on)} label={t("settings.appearance.desktop")} hint={desktopHint(desktop)} />}
-    </Card>
-  );
-}
-
-/** The AppImage's app menu entry: what it does, where it is, what is in the way. */
-function desktopHint(d: DesktopInfo): string {
-  if (d.foreign) return t("settings.appearance.desktopHintForeign", { file: d.file });
-  return d.on && d.installed ? t("settings.appearance.desktopHintFile", { file: d.file }) : t("settings.appearance.desktopHint");
-}
-
-/** Why the fire is off for this start (app_info.noWebgl). */
-const fireOff = (info: api.AppInfo | undefined) =>
-  info?.render?.mode === "software" ? t("settings.appearance.fireOffSoftware") : t("settings.appearance.fireOffEnv");
-
-/** What the render switch says: when it applies, how this start draws and why, who turned it on. */
-function renderHint(r: RenderInfo): string {
-  const sw = r.mode === "software";
-  const now = r.why === "restart" ? (sw ? t("settings.render.noGpuRestart") : t("settings.render.gpuRestart"))
-    : r.why === "environment" ? (sw ? t("settings.render.noGpuEnv") : t("settings.render.gpuEnv"))
-    : r.why === "argument" ? (sw ? t("settings.render.noGpuArg", { flag: "--software-render" }) : t("settings.render.gpuArg", { flag: "--gpu-render" }))
-    : r.why === "marker" && sw && r.marker ? t("settings.render.noGpuMarker")
-    : sw ? t("settings.render.noGpu") : t("settings.render.gpu");
-  // markerWhy: the backend's sentence, as it is
-  return `${t("settings.render.intro")} ${now}${r.marker && r.markerWhy ? ` ${r.markerWhy}.` : ""}`;
-}
-
-/** What the X11 switch says (Linux, a Wayland session with XWayland): what it does, and how this start draws. */
-function x11Hint(x: X11Info): string {
-  const now = x.why === "yours" ? t("settings.render.x11Yours", { value: x.yours ?? "" })
-    : x.on ? t("settings.render.x11On")
-    : x.why === "tried" ? t("settings.render.x11Tried")
-    : x.why === "software" ? t("settings.render.x11Software")
-    : t("settings.render.x11Wayland");
-  return `${t("settings.render.x11Intro")} ${now}`;
-}
-
-/** What the sandbox switch says: what off means and when it applies, what WebKit does in this start and why, who turned
- *  it off, what the probe of bwrap found when it failed. */
-function sandboxHint(sb: SandboxInfo): string {
-  const now = sb.yours !== undefined ? t("settings.sandbox.yours", { value: sb.yours })
-    : sb.why === "argument" ? (sb.want === "off" ? t("settings.sandbox.argOff", { flag: "--no-webkit-sandbox" }) : t("settings.sandbox.argOn", { flag: "--webkit-sandbox" }))
-    : sb.why === "environment" ? t("settings.sandbox.env")
-    : sb.webkit === "unused" ? t("settings.sandbox.unused")
-    : sb.webkit === "on" ? t("settings.sandbox.on")
-    : t("settings.sandbox.off");
-  const probe = sb.probeFailed ? ` ${t("settings.sandbox.probe", { says: sb.probeSays })}` : "";
-  // markerWhy: the backend's sentence, as it is
-  return `${t("settings.sandbox.intro")} ${now}${sb.marker && sb.markerWhy ? ` ${sb.markerWhy}.` : ""}${probe}`;
-}
-
-function DevCard() {
-  const t = useT();
-  const [on, setOn] = useState(fallbackEnabled());
-  if (!api.isTauri()) return null;
-  return (
-    <Toggle checked={on} onChange={(v) => { localStorage.setItem("kiln.mockFallback", v ? "1" : "0"); setOn(v); }}
-      label={t("settings.dev.mock")} hint={t("settings.dev.mockHint")} />
-  );
-}
-
-function GamesCard() {
-  const t = useT();
-  const qc = useQueryClient();
-  const { games } = useGame();
-  const [path, setPath] = useState("");
-  const [rm, setRm] = useState<api.GameInstall | null>(null);
-  const detect = useMutation({ mutationFn: api.gameDetect, onSuccess: (g) => { qc.setQueryData(qk.games, g); toast.ok(t("settings.games.found", { count: g.length })); }, onError: (e) => toast.error(e) });
-  const [startFor, setStartFor] = useState<{ game: api.GameInstall; added: boolean } | null>(null);
-  const add = useMutation({ mutationFn: () => api.gameAdd(path.trim()), onSuccess: (g) => {
-    setPath(""); qc.invalidateQueries({ queryKey: qk.games });
-    // a folder no Steam library knows: how it starts is asked right away (directly by default)
-    const custom = g.kind === "client" && g.source === "manual" && !g.library;
-    toast.ok(custom ? t("play.addGame.addedCustom") : t("settings.games.added"));
-    if (custom) setStartFor({ game: g, added: true });
-  }, onError: (e) => toast.error(e) });
-  return (
-    <Card title={t("settings.games.title")} actions={<Button size="s" icon={<RefreshCw />} loading={detect.isPending} onClick={() => detect.mutate()}>{t("settings.games.detect")}</Button>}>
-      {games.length === 0 ? <span className="k-hint">{t("settings.games.none")}</span> : (
-        <div className="k-list" style={{ margin: "0 -8px" }}>
-          {games.map((g) => <GameRow key={g.id} game={g} onForget={() => setRm(g)} onStart={() => setStartFor({ game: g, added: false })} />)}
-        </div>
-      )}
-      <Field label={t("settings.games.addFolder")}>
-        <div className="k-input-group">
-          <div style={{ flex: 1 }}><PathPicker value={path} onChange={setPath} directory placeholder={WIN ? "D:\\SteamLibrary\\steamapps\\common\\Enshrouded" : "…/common/Enshrouded"} /></div>
-          <IconButton label={t("common.add")} variant="secondary" icon={<FolderPlus />} disabled={!path.trim()} loading={add.isPending} onClick={() => add.mutate()} />
-        </div>
-      </Field>
-      {startFor && <StartModal game={startFor.game} added={startFor.added} open onClose={() => setStartFor(null)} />}
-      <ConfirmDanger open={!!rm} onClose={() => setRm(null)} title={t("settings.games.forgetAsk")} word={t("common.confirmWord.forget")} action={t("settings.games.forget")} message={t("settings.games.forgetMessage")}
-        onConfirm={async () => { try { await api.gameRemove(rm!.id); qc.invalidateQueries({ queryKey: qk.games }); } catch (e) { toast.error(e); throw e; } }} />
-    </Card>
-  );
-}
-
-/** One install in Settings' game list: its folder, kind, where it came from (a custom folder says so), how it starts,
- *  and a build Kiln does not know (dev.29.17). */
-function GameRow({ game: g, onForget, onStart }: { game: api.GameInstall; onForget: () => void; onStart: () => void }) {
-  const t = useT();
-  const status = useGameStatus(g.kind === "client" ? g.id : null);
-  const word = useStartWord();
-  const custom = g.kind === "client" && g.source === "manual" && !g.library;
-  const s = status.data;
-  return (
-    <div className="k-list-item" style={{ padding: "8px" }} data-testid={`game-row-${g.id}`}>
-      <span className="k-stack" style={{ gap: 1, flex: 1, minWidth: 0 }}>
-        <span className="k-row" style={{ gap: 6 }}>
-          <span className="k-item-title">{g.path.split(/[\\/]/).pop()}</span><Badge>{g.kind}</Badge>
-          {custom ? <Badge tone="ember">{t("play.source.custom")}</Badge> : <Badge>{g.source}</Badge>}
-          {s?.start && <button type="button" className="k-link" onClick={onStart} title={t("settings.games.startTip")}>{t("play.startsVia", { how: word(s.start) })}</button>}
-        </span>
-        <span className="k-item-sub k-mono k-ellipsis" title={g.path}>{g.path}</span>
-        <UnknownBuild build={s?.build} compact />
-      </span>
-      <IconButton label={t("settings.games.forget")} size="s" icon={<Trash2 />} onClick={onForget} />
-    </div>
-  );
-}
-
-function KilnJsonCard() {
-  const t = useT();
-  const qc = useQueryClient();
-  const { game } = useGame();
-  const status = useGameStatus(game?.id);
-  const key = qk.kilnJson(game?.id ?? "");
-  const doc = useQuery({ queryKey: key, queryFn: () => api.configKilnRead(game!.id), enabled: !!game });
-  const onDoc = (d: ConfigDocument) => qc.setQueryData(key, d);
-  const set = useMutation({ mutationFn: (v: { path: string; value: Json }) => api.configKilnSet(game!.id, v.path, v.value), onSuccess: onDoc, onError: (e) => toast.error(e) });
-  const reset = useMutation({ mutationFn: (path: string) => api.configKilnReset(game!.id, path), onSuccess: onDoc, onError: (e) => toast.error(e) });
-  if (!game) return null;
-  const installed = status.data?.runtime.installed;
-  // entries with a card of their own
-  const own = (path: string) => path === "ui.language" || isGraphicsPath(path)
-    // shroudforge.* is the ShroudForge card's
-    || isShroudForgePath(path)
-    ;
-  return (
-    <Card title={t("settings.kilnJson.title")} sub={rich("settings.kilnJson.sub", { file: <span className="k-mono">kiln/kiln.json</span> })}>
-      {status.data && !installed ? <EmptyState title={t("settings.kilnJson.notInstalled")} hint={t("settings.kilnJson.notInstalledHint")} /> :
-        doc.isLoading ? <Skeleton lines={5} /> : doc.error ? <EmptyState title={t("settings.kilnJson.unavailable")} hint={errorText(doc.error)} /> : doc.data?.schema && (
-          // ui.language has its own control (Language: components/LanguageSettings.tsx), graphics.* its own card (Graphics:
-          // components/GraphicsSettings.tsx)
-          <SchemaForm schema={{ ...doc.data.schema, entries: doc.data.schema.entries.filter((e) => !own(e.path)) }} values={doc.data.values} errors={doc.data.errors} disabled={set.isPending}
-            onChange={(path, value) => set.mutate({ path, value })} onReset={(path) => reset.mutate(path)} />
-        )}
-      {doc.data && <span className="k-hint">{t("settings.kilnJson.overrides")}</span>}
-    </Card>
-  );
-}
-
-function AssetsCard() {
-  // status only: the launcher makes the art on its own (components/GameArt.tsx, docs/kiln/launcher/gameart.md)
-  const t = useT();
-  const st = useAssetsStatus();
-  const editorTask = useExtractTask(st.data, "editor");
-  const adminTask = useExtractTask(st.data, "admin");
-  const d = st.data;
-  const e = d?.editor;
-  const a = d?.admin;
-  const when = (at?: string | null) => (at ? fmtAgo(at) : null);
-  // a count from the art's counts, in words ("1,234 icons"); null when there is none
-  const n = (c: Record<string, number> | undefined, k: "icons" | "ui" | "tiles") => {
-    const count = c?.[k];
-    if (!count) return null;
-    return k === "icons" ? t("settings.art.icons", { count }) : k === "ui" ? t("settings.art.ui", { count }) : t("settings.art.tiles", { count });
-  };
-  const join = (...xs: (string | null | false | undefined)[]) => xs.filter(Boolean).join(" · ");
-  const badge = (present: boolean, current: boolean | null | undefined, task: unknown) =>
-    task ? <Badge tone="ember">{t("settings.art.preparing")}</Badge> : !present ? <Badge tone="idle">{t("settings.art.missing")}</Badge>
-      : current === false ? <Badge tone="warn">{t("settings.art.updating")}</Badge> : <Badge tone="ok">{t("settings.art.ready")}</Badge>;
-  const row = (label: string, b: ReactNode, lines: string[]) => (
-    <div className="k-list-item" style={{ padding: "10px 0" }}>
-      <span className="k-stack" style={{ gap: 1, flex: 1 }}>
-        <span className="k-row" style={{ gap: 8 }}><span className="k-item-title">{label}</span>{b}</span>
-        {lines.filter(Boolean).map((l) => <span key={l} className="k-item-sub">{l}</span>)}
-      </span>
-    </div>
-  );
-  return (
-    <Card title={t("settings.art.title")} sub={t("settings.art.sub")}>
-      {st.error ? <EmptyState title={t("settings.art.unavailable")} hint={errorText(st.error)} /> : !d || !e || !a ? <Skeleton /> : (
-        <div className="k-list">
-          {row(t("settings.art.editor"), badge(e.present, e.current, editorTask), [
-            !e.canExtract && !e.present ? t("settings.art.noClient") : join(
-              e.source === "game" ? t("settings.art.fromGame", { build: e.build ?? "?" }) : e.source === "copy" ? t("settings.art.fromFolder") : null,
-              n(e.counts, "icons"), n(e.counts, "ui"), e.bytes ? fmtBytes(e.bytes) : null, when(e.extracted)),
-            e.modded ? join(e.modded.icons ? t("settings.art.modItemsIcons", { items: e.modded.items, icons: e.modded.icons }) : t("settings.art.modItems", { items: e.modded.items }),
-              e.modded.mods.length ? e.modded.mods.join(", ") : t("settings.art.noMods"), when(e.modded.generated)) : "",
-          ])}
-          {row(t("settings.art.admin"), badge(a.map, a.current, adminTask), [
-            !a.canExtract && !a.map ? t("settings.art.noClient") : join(
-              a.source === "game" ? t("settings.art.reliefFromGame", { build: a.build ?? "?" }) : a.map ? t("settings.art.fromLocalFolder") : null,
-              n(a.counts, "tiles"), a.counts?.markers ? t("settings.art.markers", { count: a.counts.markers }) : a.markers ? t("settings.art.markersLocal") : a.map ? t("settings.art.noMarkers") : null,
-              a.bytes ? fmtBytes(a.bytes) : null, when(a.extracted)),
-          ])}
-        </div>
-      )}
-    </Card>
-  );
-}
-
-
-
-/** "Type a mod's name to remove it" (off unless the player turns it on): off = a mod's Remove has a plain button. The
- * dialogs that uninstall Kiln, delete a profile or a server, or restore a backup always ask for the word. */
-function TypeToConfirmToggle() {
-  const t = useT();
-  const [on, setOn] = useState(typeToConfirm());
-  return (
-    <Toggle checked={on} onChange={(v) => { setTypeToConfirm(v); setOn(v); }} label={t("settings.typeToConfirm")}
-      hint={t("settings.typeToConfirmHint")} />
+    <label className="k-st-for">
+      <span className="k-sc">{t("settings.for")}</span>
+      <Select aria-label={t("play.game")} value={game.id} onChange={setGameId} style={{ width: 220 }}
+        options={clients.map((g) => ({ value: g.id, label: g.path.split(/[\\/]/).pop() ?? g.id }))} />
+    </label>
   );
 }

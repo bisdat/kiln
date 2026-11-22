@@ -85,7 +85,8 @@ export default function App() {
         <Route path="studio" element={<StudioPage />} />
         <Route path="studio/:packId" element={<StudioPage />} />
         <Route path="studio/:packId/:tab" element={<StudioPage />} />
-        <Route path="settings" element={<SettingsPage />} />
+        {/* /settings/<section>: one section of Settings (pages/settings/model.ts); /settings#<group> opens a group's section */}
+        <Route path="settings/:section?" element={<SettingsPage />} />
         <Route path="about" element={<AboutPage />} />
         <Route path="community" element={<CommunityRoute />} />
         <Route path="servers" element={<ServersPage />} />

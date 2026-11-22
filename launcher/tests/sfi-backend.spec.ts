@@ -23,14 +23,14 @@ const sf = async (page: Page, gameId = "client-steam") =>
 const sets = async (page: Page) => (await mock<string[]>(page, "calls")).filter((c) => c === "sfi_backend_set").length;
 
 async function open(page: Page) {
-  await page.goto("/#/settings");
+  await page.goto("/#/settings/game");
   await page.locator(".k-splash").waitFor({ state: "detached" });
 }
 /** Leaves the page and comes back (the mock keeps its state): the page reads again. */
 async function again(page: Page) {
   await page.evaluate(() => { location.hash = "/about"; });
   await page.waitForTimeout(150);
-  await page.evaluate(() => { location.hash = "/settings"; });
+  await page.evaluate(() => { location.hash = "/settings/game"; });
   await expect(card(page)).toBeVisible();
 }
 const card = (page: Page) => page.getByRole("region", { name: "ShroudForge", exact: true });

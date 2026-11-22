@@ -62,7 +62,7 @@ test("dismissing the banner keeps it away for that version", async ({ page }) =>
 });
 
 test("Settings > Profiles: the instance's pack line, Update, Undo, then Uninstall", async ({ page }) => {
-  await open(page, "/?mock=1&crucible=packs#/settings");
+  await open(page, "/?mock=1&crucible=packs#/settings/mods");
   const row = page.locator(".k-profiles li").filter({ hasText: "Ashen Frontier" });
   await expect(row.getByTestId("crucible-tag")).toHaveText("Crucible pack");
   await expect(row.getByTestId("crucible-pack-line")).toContainText("Ashen Frontier 1.0.0");
@@ -88,16 +88,18 @@ test("Settings > Profiles: the instance's pack line, Update, Undo, then Uninstal
 });
 
 test("Settings: the shared packs list with its link and code", async ({ page }) => {
-  await open(page, "/?mock=1&crucible=shared&discord=in#/settings");
+  await open(page, "/?mock=1&crucible=shared&discord=in#/settings/mods");
   const row = page.getByTestId("crucible-shared-row");
   await expect(row).toContainText("Ember run");
   await expect(row.getByTestId("crucible-code")).toHaveText("H7QK-3MZP");
   await expect(row).toContainText("Pack changed");
-  await expect(page.getByText("Count my installs (anonymous)")).toBeVisible();
+  // the install counts it sends: Updates & online, What Kiln sends
+  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("link", { name: "Updates & online", exact: true }).click();
+  await expect(page.getByRole("region", { name: "What Kiln sends" }).getByText("Count my installs (anonymous)")).toBeVisible();
 });
 
 test("the player's data changes: still winning, Drop my change sends drop, a player layer survives the update", async ({ page }) => {
-  await open(page, "/?mock=1&crucible=packs#/settings");
+  await open(page, "/?mock=1&crucible=packs#/settings/mods");
   const row = page.locator(".k-profiles li").filter({ hasText: "Ashen Frontier" });
   await row.getByTestId("crucible-profile-update").click();
   const overlaps = page.getByTestId("crucible-overlaps");
@@ -115,7 +117,7 @@ test("the player's data changes: still winning, Drop my change sends drop, a pla
 });
 
 test("unticking Drop my change sends no drop", async ({ page }) => {
-  await open(page, "/?mock=1&crucible=packs#/settings");
+  await open(page, "/?mock=1&crucible=packs#/settings/mods");
   await page.locator(".k-profiles li").filter({ hasText: "Ashen Frontier" }).getByTestId("crucible-profile-update").click();
   await page.getByTestId("crucible-drop-mine").check();
   await page.getByTestId("crucible-drop-mine").uncheck();

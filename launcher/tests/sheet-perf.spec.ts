@@ -73,7 +73,7 @@ const hasGl = (page: Page) => page.evaluate(() => !!document.createElement("canv
 
 test("the flicker and the torch write only onto leaves, never onto an element with the page under it", async ({ page }) => {
   await countWrites(page);
-  await open(page, "/settings");
+  await open(page, "/settings/game");
   test.skip(!(await hasGl(page)), "no WebGL in this browser: the fire, the flicker and the torch never start");
   await expect(page.locator(".k-app")).toHaveAttribute("data-gl", "1");
   await wander(page);
@@ -143,7 +143,7 @@ test("the sheet looks as it did: the lit top edge and the torch's light are wher
 test("with reduced motion nothing is written while the pointer moves and the page stands", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await countWrites(page);
-  await open(page, "/settings");
+  await open(page, "/settings/game");
   await page.waitForTimeout(600);
   await writes(page); // the mouth placed once on the way in
   await wander(page);
@@ -169,6 +169,9 @@ test("Animated fire turned off while the launcher runs: no flicker, no torch, no
   await expect.poll(async () => (await counts(page)).moves).toBe(0);
   expect((await counts(page)).motion).toBe(1);
   expect(await rimFire(page)).toBe("");
+  // the save backups box is in Game & Kiln (the fire in General)
+  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("link", { name: "Game & Kiln", exact: true }).click();
+  await expect(page.locator("#st-keep")).toBeVisible();
   await page.waitForTimeout(300);
   await writes(page);
   const before = (await counts(page)).frames;
@@ -181,6 +184,7 @@ test("Animated fire turned off while the launcher runs: no flicker, no torch, no
   expect((await counts(page)).frames - before).toBeLessThan(10);
   // on again: the flicker, the torch and its listener come back where there is WebGL
   await page.locator(".k-head-link", { hasText: "Settings" }).click();
+  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("link", { name: "General", exact: true }).click();
   await page.getByText("Animated fire", { exact: true }).click();
   await expect(fire).toBeChecked();
   if (!gl) return;
@@ -209,7 +213,7 @@ test("with Animated fire off nothing is written whatever the system says about m
 
 test("reduced motion turned on while the launcher runs: the flicker and the torch stop at once, the still fire asks for no frames", async ({ page }) => {
   await countWrites(page);
-  await open(page, "/settings");
+  await open(page, "/settings/game");
   test.skip(!(await hasGl(page)), "no WebGL in this browser: the fire, the flicker and the torch never start");
   await expect(page.locator(".k-app")).toHaveAttribute("data-gl", "1");
   await wander(page);
@@ -245,7 +249,7 @@ test("reduced motion turned on while the launcher runs: the flicker and the torc
 
 test("drawing without the GPU: no fire loop, no flicker, no torch, and lit flames stand still", async ({ page }) => {
   await countWrites(page);
-  await page.goto("/?render=software#/settings");
+  await page.goto("/?render=software#/settings/game");
   await page.locator(".k-splash").waitFor({ state: "detached" });
   await expect(page.locator(".k-app")).not.toHaveAttribute("data-gl");
   await wander(page);
@@ -382,7 +386,7 @@ test("WebKit: typing into a sheet page stays quick while the fire burns and the 
   }
   try {
     const page = await browser.newPage({ viewport: { width: 1360, height: 860 } });
-    await page.goto(`${baseURL}/#/settings`);
+    await page.goto(`${baseURL}/#/settings/game`);
     await page.locator(".k-splash").waitFor({ state: "detached" });
     await page.waitForTimeout(800);
     await page.locator("#st-keep").click();
