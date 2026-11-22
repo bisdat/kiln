@@ -17,3 +17,4 @@ for test in bootstrap capabilities; do
     "$cxx" -std=c++20 -Wall -Wextra -Werror -I"$abi" "$here/${test}_test.cpp" -o "$out/${test}-test"
     "$out/${test}-test"
 done
+bash "$here/test-service-presentation.sh" "$out"
