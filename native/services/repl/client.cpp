@@ -134,7 +134,7 @@ void store_before(void* p) {
     t_cur.active = false;
     if (!c->msg || !c->msg->ptr || c->msg->size < 4) return;
     if (g_rx_counting.load(std::memory_order_relaxed)) count_received(c->msg->ptr, c->msg->size, (c->pred & 0xff) ? 1 : 0);
-    if ((c->pred & 0xff) != 0 || !g_hot_n.load(std::memory_order_relaxed)) return;  // the watches: the client channel only
+    if ((c->pred & 0xff) != 0) return;  // tracks and watches: the client channel only
     const uint8_t* d = c->msg->ptr;
     if (track_client_active()) track_client_store(d, c->msg->size);  // kiln.repl.net's receive tracking (track.cpp)
     if (!g_hot_n.load(std::memory_order_acquire)) return;

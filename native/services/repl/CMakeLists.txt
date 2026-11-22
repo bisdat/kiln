@@ -37,3 +37,9 @@ set_target_properties(repl-client-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CM
 add_executable(repl-msg-test tests/repl_msg_test.cpp)
 target_include_directories(repl-msg-test PRIVATE "${CMAKE_SOURCE_DIR}/core/abi" "${CMAKE_SOURCE_DIR}/third_party")
 set_target_properties(repl-msg-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/repl-tests")
+
+# - repl-rxtrack-test: a joined client's receive track without a receive watch; client message hooks reclaimed (review must 1, should 4)
+add_executable(repl-rxtrack-test tests/repl_rxtrack_test.cpp repl.cpp loopback.cpp stats.cpp watch.cpp client.cpp net.cpp track.cpp
+               filter.cpp touch.cpp remap.cpp messages.cpp schema.cpp)
+target_include_directories(repl-rxtrack-test PRIVATE "${CMAKE_SOURCE_DIR}/core/abi" "${CMAKE_SOURCE_DIR}/third_party")
+set_target_properties(repl-rxtrack-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/repl-tests")
