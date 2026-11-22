@@ -16,6 +16,11 @@
 
 namespace kc::registry {
 
+std::string report_value_text(const Value& v) {
+    if (v.kind != Value::List) return v.text_of();
+    return "list (" + std::to_string(v.list.size()) + " entries)";
+}
+
 const char* writer_kind_name(WriterKind k) {
     switch (k) {
         case WriterKind::ArchiveWriter: return "archiveWriter";
@@ -628,7 +633,7 @@ bool apply_targets(Ctx& c, State& s, const Who& w, const Edit& e, const std::vec
         if (st.supersede) {  // the other scale's writers are overridden: their chain goes, the line says it
             if (report)
                 c.out.lines.push_back({LineKind::Overridden, t.ref, w.mod, st.over_who,
-                                       cat({place_text(t), ": ", w.mod, " sets ", st.next.text_of(), " over ", st.over_who, "'s ", st.over_place,
+                                       cat({place_text(t), ": ", w.mod, " sets ", report_value_text(st.next), " over ", st.over_who, "'s ", st.over_place,
                                             " (one place in the game on two scales; the later value wins)"}),
                                        st.over_cert});
             s.fields.erase(*st.supersede);
@@ -657,7 +662,7 @@ bool apply_targets(Ctx& c, State& s, const Who& w, const Edit& e, const std::vec
         fo.result = st.next;
         fo.winner = w.mod;
         if (report && st.line) {
-            const std::string place = place_text(t), was = before.text_of(), now = st.next.text_of();
+            const std::string place = place_text(t), was = report_value_text(before), now = report_value_text(st.next);
             std::string text = st.kind == LineKind::Overridden ? cat({place, ": ", w.mod, " sets ", now, " over ", st.other, "'s ", was, " (the later one wins)"})
                                : st.kind == LineKind::ComposedOn ? cat({place, ": ", w.mod, "'s change composed on ", st.other, "'s value: ", was, " -> ", now})
                                                                  : cat({place, ": ", w.mod, "'s change stacks on ", st.other, "'s: ", was, " -> ", now});

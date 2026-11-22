@@ -331,8 +331,6 @@ bool store_slot_copy(uintptr_t addr, Slot* out) {
     std::lock_guard lock(g_mu);
     auto it = g_slots.find(addr);
     if (it == g_slots.end()) return false;
-    uint8_t scratch[kSlotBytes];
-    fold(it->second, scratch);
     *out = it->second;
     return true;
 }

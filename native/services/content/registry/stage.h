@@ -96,7 +96,7 @@ struct LiveHandoff {
     const std::vector<OldWrite>* old = nullptr;
     const std::vector<ModInput>* inputs = nullptr;  // code batches recorded, code unset
     const std::set<std::string>* decoded = nullptr; // "<registry>.<field>" the base holds values for
-    std::function<void(const Result&)> report;      // registry.json again (generation + 1), after a recompose
+    std::function<void(const Result&, bool application)> report;  // registry.json again, generation + 1 for an application
     // kept across a recompose (review finding 6): the refusals made outside compose, the restart fields as the boot back-end
     // wrote them, and the mapping check for a reloaded batch
     const std::vector<Refusal>* pre_refused = nullptr;

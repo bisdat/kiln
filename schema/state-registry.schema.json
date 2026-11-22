@@ -53,7 +53,7 @@
         "start",
         "worldLoad"
       ],
-      "description": "start: the stage ended, restart fields are final (live fields are composed but not applied yet). worldLoad: a world loaded with every field applied."
+      "description": "At start, restart fields are final and live fields have been composed. At worldLoad, the report includes live values after world load or a pack reload. Late drop tables refresh within the current generation."
     },
     "schema": {
       "type": "object",
@@ -347,7 +347,7 @@
   "additionalProperties": false,
   "$defs": {
     "value": {
-      "description": "A field's value: a number, true/false, a name, an id, a list of these; null when there is none.",
+      "description": "A field's value can be a number, boolean, name, id, or array of list entries. A missing value is null.",
       "type": [
         "number",
         "boolean",
@@ -418,6 +418,11 @@
             "value": {
               "$ref": "#/$defs/value"
             },
+            "entriesLeftOut": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Entries omitted after the first 64 in a base list."
+            },
             "origin": {
               "type": "string",
               "description": "archive: the game's data as the archive writer published it; added: an entry a mod added (its base is its like entry's). Later releases may name more origins; show an unknown one as it is."
@@ -434,6 +439,20 @@
         },
         "result": {
           "$ref": "#/$defs/value"
+        },
+        "resultEntriesLeftOut": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Entries omitted after the first 64 in the result list."
+        },
+        "formulaInputs": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "minItems": 2,
+          "maxItems": 3,
+          "description": "Effective formula inputs corresponding to the numeric live result. Power uses damage factor, attack speed factor, minimum level. Armor uses armor share, minimum level."
         },
         "winner": {
           "type": [
@@ -503,13 +522,14 @@
           "description": "An element edit of this list: the element path (\"inputs[2].count\", \"inputs[*].count\", \"perks[1]\"); op applies to that element or its leaf."
         },
         "op": {
-          "description": "The writer's change: a plain value (absolute), or {mul, add, min, max, raiseOnly, lowerOnly} (relative).",
+          "description": "An absolute write supplies a plain value or array. A relative write supplies an object with mul, add, min, max, raiseOnly, or lowerOnly.",
           "anyOf": [
             {
               "type": [
                 "number",
                 "boolean",
-                "string"
+                "string",
+                "array"
               ]
             },
             {
@@ -594,6 +614,21 @@
         "value": {
           "$ref": "#/$defs/value",
           "description": "The field's value after this writer."
+        },
+        "valueEntriesLeftOut": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Entries omitted after the first 64 in the writer's list value."
+        },
+        "opEntriesLeftOut": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Entries omitted after the first 64 in a list assigned by op."
+        },
+        "listEntriesLeftOut": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Entries omitted after the first 64 in a list operation's operand."
         },
         "certainty": {
           "enum": [

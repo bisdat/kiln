@@ -52,9 +52,9 @@ struct RegistryLive {
     std::function<void(registry::Batch*, std::vector<registry::Refusal>*)> check;
     // The GUID of an entry a mod added (S11 sets registry::model::added_guid: UUIDv5 of "registry:<registry>:<kiln id>").
     std::function<std::string(const std::string& registry, const std::string& kiln_id)> added_guid;
-    // registry.json (S11 writes it): called after every application of the live layers (world load, pack reload) with the
-    // stage's result plus the live back-end's refusals and skipped writes as refused rows.
-    std::function<void(const registry::Result&)> report;
+    // registry.json (S11 writes it): a world load or pack reload passes true for a new application.
+    // A refresh for late drop tables passes false so it does not send another WORLDLOAD event.
+    std::function<void(const registry::Result&, bool application)> report;
 };
 
 // One pack file's "registry" section, lowered (packs.cpp registry_sections).
@@ -78,8 +78,8 @@ std::shared_ptr<const registry::Schema> registry_live_schema();
 // With store_mutex held and the legacy pack layers applied, compare the lowered sections to the last application and
 // put the live layers over them. Publish the resulting report separately after unlocking.
 void registry_live_apply(const std::vector<RegistrySection>& sections, const registry::Schema* schema);
-// The last application's registry.json, through the stage's report callback, with no lock of kiln.content's held (review
-// finding 10: game job threads wait on the store's lock for drop tables). Call it with no store lock held.
+// Publish registry.json after applying packs or binding drop tables, through the stage's report callback.
+// Call on the world thread with no store lock held.
 void registry_live_publish();
 // A drop table seen for the first time, or whose stacks moved (drops_apply_rules after newcontent repointed them): its
 // registry layers come off the stacks they were on and go on the stacks the table has now.

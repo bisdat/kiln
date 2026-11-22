@@ -233,7 +233,7 @@ void one_start(const std::string& dir) {
     TreeView view = world();
     Files files;
     stage::Runner r(env_of(&view, &files, dir, &sections));
-    std::function<void(const Result&)> live_report;
+    std::function<void(const Result&, bool)> live_report;
     const Result* live_result = nullptr;
     r.set_live([&](const stage::LiveHandoff& h) { live_report = h.report, live_result = h.result; });
     check(r.phase() == stage::Phase::None, "phase none before the stage");
@@ -283,7 +283,7 @@ void one_start(const std::string& dir) {
     check(r.submit(1, "x", R"({"ir":1,"mod":"x","stage":"alter","edits":[]})", &a, &b, &rp) == KILN_ERR_UNAVAILABLE, "no submit after the stage");
     check(live_report != nullptr, "the live back-end got its handoff with a report callback");
     const std::string start_report = files.report;
-    live_report(*live_result);
+    live_report(*live_result, true);
     check(r.phase() == stage::Phase::WorldLoad && r.generation() == 2 && json::parse(files.report)["phase"] == "worldLoad",
           "the live back-end's report: phase worldLoad, generation 2");
 

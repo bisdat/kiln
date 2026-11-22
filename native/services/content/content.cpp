@@ -453,6 +453,7 @@ void pre(const KilnTickInfo* tick, uint32_t kind, uintptr_t world) {
 #if KC_GAMEDATA
     gd_tick(tick->step);
 #endif
+    registry_live_publish();  // drop tables acquired since the last application, outside the acquire hook
     deliver_ready();
 }
 

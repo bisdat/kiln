@@ -100,6 +100,18 @@ At each start Kiln runs three stages, each across **all** mods (in the load orde
   registry edit. Conflicts inside the registry and with Kiln's older paths are found for certain; other loaders' DLL
   patches and hooks are best-effort and labelled so.
 
+### Live values in the report
+
+After world load or a pack reload, `kiln/state/registry.json` shows the live `result` and writer chain for recipe inputs
+and outputs, drop-table entries, item perks, and power and armor. The chain shows older packs below the registry edit.
+`composedOn` names the pack whose value a relative edit used, and `overridden` names the pack an absolute edit replaced.
+Drop-table rows refresh within the current generation when the world acquires their tables.
+
+List values are arrays of entries in game order. The report keeps the first 64 entries per array and includes the omitted
+count in `resultEntriesLeftOut`, `base.entriesLeftOut`, or the writer's `valueEntriesLeftOut`, `listEntriesLeftOut`, or
+`opEntriesLeftOut` as applicable. Formula rows keep the numeric `result` and include `formulaInputs` in evaluation order.
+Power lists the damage factor, attack speed factor, and minimum level. Armor lists the armor share and minimum level.
+
 ## Ids
 
 Every entry has a Kiln id: `game:<stable name>` for the game's entries, `<mod id>:<name>` for a mod's. The grammar is
