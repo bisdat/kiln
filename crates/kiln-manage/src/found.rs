@@ -613,7 +613,7 @@ pub fn scan(dirs: &DataDirs, install: &GameInstall, profile: &Profile) -> FoundR
                 continue;
             }
         };
-        let mut names = Vec::new();
+        let mut names: Vec<(String, PathBuf, std::fs::FileType)> = Vec::new();
         for e in rd {
             if names.len() >= MAX_ENTRIES {
                 rep.truncated = true;
@@ -627,23 +627,19 @@ pub fn scan(dirs: &DataDirs, install: &GameInstall, profile: &Profile) -> FoundR
                 }
             };
             let name = e.file_name().to_string_lossy().into_owned();
-            #[cfg(windows)]
-            let kind = e.metadata().map(|m| (m.file_type(), crate::quick::import_is_link(&m)));
-            #[cfg(not(windows))]
-            let kind = e.file_type().map(|t| (t, t.is_symlink()));
-            match kind {
-                Ok((t, link)) => names.push((name, e.path(), t, link)),
+            match e.file_type() {
+                Ok(t) => names.push((name, e.path(), t)),
                 Err(err) => rep.unreadable.push(Unreadable { path: format!("{}/{name}", root.rel), reason: err.to_string() }),
             }
         }
         names.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
-        for (name, abs, t, link) in names {
+        for (name, abs, t) in names {
             if name.starts_with('.') || name.eq_ignore_ascii_case("__MACOSX") || seen.contains(&abs) {
                 continue;
             }
             let lower = name.to_ascii_lowercase();
             let rel = rel_of(game, &abs);
-            if link {
+            if t.is_symlink() {
                 if root.folders || lower.ends_with(".dll") {
                     rep.mods.push(found(name, rel, FoundState::CannotRun, "A link. The loaders do not follow links in the game folder.".into()));
                 }
