@@ -619,6 +619,7 @@ internal static partial class KilnApis
         "M:Kiln.ReflectedValue.get_Item(System.String)", // ReflectedValue.this[string].get: via ReflectedValue.Span()
         "M:Kiln.ReflectedValue.set_Item(System.String,System.Object)", // ReflectedValue.this[string].set: via ReflectedValue.Span()
         "M:Kiln.Replication.Filter``1(Kiln.PeerSelector,Kiln.ComponentFilter{``0},Kiln.FilterOptions)", // Replication.Filter<TComponent>(PeerSelector, ComponentFilter<TComponent>, FilterOptions?): Services.RequireTickThread
+        "M:Kiln.Replication.Inject(Kiln.NetPeer,Kiln.GameChannel,System.ReadOnlySpan{System.Byte})", // Replication.Inject(NetPeer, GameChannel, ReadOnlySpan<byte>): Services.RequireTickThread
         "M:Kiln.Replication.RemapItems(Kiln.PeerSelector)", // Replication.RemapItems(PeerSelector): Services.RequireTickThread
         "M:Kiln.Replication.Stats", // Replication.Stats(): Services.RequireTickThread
         "M:Kiln.Replication.Touch(Kiln.EntityId)", // Replication.Touch(EntityId): Services.RequireTickThread

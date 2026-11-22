@@ -29,6 +29,14 @@ public struct NetworkFuelView : IGameComponent<NetworkFuelView>
     public static ulong Layout => 0;
 }
 
+/// <summary>The game's ServerInfoMessage as raw bytes (0x108 bytes on f0d824be): the codec's round trip.</summary>
+[StructLayout(LayoutKind.Sequential, Size = 0x108)]
+public struct ServerInfoRaw : IGameMessage
+{
+    private byte _first;
+    public static string SchemaName => "ServerInfoMessage";
+}
+
 internal static class ReplNetTest
 {
     internal static readonly uint FuelHash = Fnv("keen::ecs::NetworkFuel");
@@ -126,6 +134,65 @@ public sealed partial class ReplTestMod
         if (Part("filter")) await FilterPart(can, fakes, vanilla, max);
         if (Part("touch")) await TouchPart(can, fakes, vanilla, max);
         if (Part("remap")) await RemapPart(chest, fakes, vanilla);
+        if (Part("messages")) await MessagesPart(fakes);
+    }
+
+    // The game's codec and the message hooks: a lab has no game session, so no real traffic: the codec's round trip, the
+    // hooks going in and out, an inject to a peer without a game session refused cleanly.
+    private async Task MessagesPart(IReadOnlyList<(int Machine, int Slot)> fakes)
+    {
+        var info = Replication.Schema("ServerInfoMessage");
+        var chat = Replication.Schema("ChatMessageServerMessage") ?? Replication.Schema("ChatMessageClientMessage");
+        Info($"messages: schemas ServerInfoMessage {(info == null ? "none" : $"{info.Size} B, {info.Fields.Count} fields")}, chat " +
+             $"{(chat == null ? "none" : $"{chat.Name} {chat.Size} B: {string.Join(", ", chat.Fields.Select(f => $"{f.Name}:{f.Type}/{f.Shape}@{f.Offset}"))}")}");
+        try
+        {
+            var zero = default(ServerInfoRaw);
+            var bytes = Replication.Encode(zero);
+            var back = Replication.Decode<ServerInfoRaw>(bytes);
+            var again = Replication.Encode(back);
+            Result(info != null && bytes.Length > 0 && bytes.AsSpan().SequenceEqual(again), "messages codec",
+                $"ServerInfoMessage ({info?.Size} B) encoded to {bytes.Length} B, decoded and encoded again to the same {again.Length} B");
+        }
+        catch (Exception e)
+        {
+            Result(false, "messages codec", $"{e.GetType().Name}: {e.Message}");
+        }
+        try
+        {
+            Replication.Decode<ServerInfoRaw>(new byte[] { 0xff, 0xff, 0xff });
+            Result(false, "messages codec refusal", "3 bytes of 0xff decoded as a ServerInfoMessage");
+        }
+        catch (FormatException e)
+        {
+            Result(true, "messages codec refusal", $"3 bytes of 0xff refused: {e.Message}");
+        }
+        catch (Exception e)
+        {
+            Result(false, "messages codec refusal", $"{e.GetType().Name}: {e.Message}");
+        }
+        var seen = 0;
+        IDisposable? hook = null;
+        try
+        {
+            hook = Replication.OnMessage(GameChannel.ChatMessages, MessageDirection.Send | MessageDirection.Receive, (NetPeer? p, ReadOnlySpan<byte> d, ref MessageRewrite r) =>
+            {
+                seen++;
+                return MessageAction.Pass;
+            });
+            await Steps(30);
+            hook.Dispose();
+            await Steps(3);
+            var refused = Network.Peers.FirstOrDefault() is { } lab ? Replication.Inject(lab, GameChannel.ChatMessages, [1, 2, 3, 4]) : null;
+            Result(refused is null || !refused.Ok, "messages hooks",
+                $"a chat hook (send and receive) went in and out ({seen} messages seen: a lab has no game session); inject to a lab peer: " +
+                $"{(refused == null ? "no lab peer" : $"Ok {refused.Ok}, {refused.Reason}")}");
+        }
+        catch (Exception e)
+        {
+            hook?.Dispose();
+            Result(false, "messages hooks", $"{e.GetType().Name}: {e.Message}");
+        }
     }
 
     // Steps until every fake's newest decode of the can's NetworkFuel matches (vanilla: want, else live); the steps used.

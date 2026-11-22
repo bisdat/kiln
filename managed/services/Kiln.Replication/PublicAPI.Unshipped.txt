@@ -20,6 +20,90 @@ Kiln.FilterOptions.Priority.get -> int
 Kiln.FilterOptions.Priority.init -> void
 Kiln.FilterOptions.Sources.get -> System.Collections.Generic.IReadOnlyList<string!>!
 Kiln.FilterOptions.Sources.init -> void
+Kiln.GameChannel
+Kiln.GameChannel.AdminInfo = 21 -> Kiln.GameChannel
+Kiln.GameChannel.BaseSharing = 20 -> Kiln.GameChannel
+Kiln.GameChannel.ChatMessages = 19 -> Kiln.GameChannel
+Kiln.GameChannel.Commerce = 22 -> Kiln.GameChannel
+Kiln.GameChannel.CustomPlayerStrings = 15 -> Kiln.GameChannel
+Kiln.GameChannel.Debug = 12 -> Kiln.GameChannel
+Kiln.GameChannel.EcsClient = 4 -> Kiln.GameChannel
+Kiln.GameChannel.EcsPrediction = 5 -> Kiln.GameChannel
+Kiln.GameChannel.EcsReset = 13 -> Kiln.GameChannel
+Kiln.GameChannel.EcsSnapping = 6 -> Kiln.GameChannel
+Kiln.GameChannel.EntityProxies = 7 -> Kiln.GameChannel
+Kiln.GameChannel.FactoryInfo = 24 -> Kiln.GameChannel
+Kiln.GameChannel.FogVoxelData = 3 -> Kiln.GameChannel
+Kiln.GameChannel.Input = 8 -> Kiln.GameChannel
+Kiln.GameChannel.Knowledge = 10 -> Kiln.GameChannel
+Kiln.GameChannel.LogicGraph = 11 -> Kiln.GameChannel
+Kiln.GameChannel.Login = 0 -> Kiln.GameChannel
+Kiln.GameChannel.SaveGame = 9 -> Kiln.GameChannel
+Kiln.GameChannel.ServerInfo = 1 -> Kiln.GameChannel
+Kiln.GameChannel.TwitchDrop = 17 -> Kiln.GameChannel
+Kiln.GameChannel.VoiceChat = 14 -> Kiln.GameChannel
+Kiln.GameChannel.VoxelDamageSystem = 23 -> Kiln.GameChannel
+Kiln.GameChannel.VoxelData = 2 -> Kiln.GameChannel
+Kiln.GameChannel.Water = 16 -> Kiln.GameChannel
+Kiln.GameChannel.Weather = 18 -> Kiln.GameChannel
+Kiln.IGameMessage
+Kiln.IGameMessage.SchemaName.get -> string!
+Kiln.InjectResult
+Kiln.InjectResult.<Clone>$() -> Kiln.InjectResult!
+Kiln.InjectResult.Channel.get -> Kiln.GameChannel
+Kiln.InjectResult.Channel.init -> void
+Kiln.InjectResult.Deconstruct(out bool Ok, out string? Reason) -> void
+Kiln.InjectResult.Equals(Kiln.InjectResult? other) -> bool
+Kiln.InjectResult.InjectResult(bool Ok, string? Reason) -> void
+Kiln.InjectResult.Ok.get -> bool
+Kiln.InjectResult.Ok.init -> void
+Kiln.InjectResult.Peer.get -> Kiln.NetPeer?
+Kiln.InjectResult.Peer.init -> void
+Kiln.InjectResult.Reason.get -> string?
+Kiln.InjectResult.Reason.init -> void
+Kiln.MessageAction
+Kiln.MessageAction.Drop = 1 -> Kiln.MessageAction
+Kiln.MessageAction.Pass = 0 -> Kiln.MessageAction
+Kiln.MessageAction.Rewrite = 2 -> Kiln.MessageAction
+Kiln.MessageDirection
+Kiln.MessageDirection.Receive = 2 -> Kiln.MessageDirection
+Kiln.MessageDirection.Send = 1 -> Kiln.MessageDirection
+Kiln.MessageField
+Kiln.MessageField.<Clone>$() -> Kiln.MessageField!
+Kiln.MessageField.CountOffset.get -> int
+Kiln.MessageField.CountOffset.init -> void
+Kiln.MessageField.Deconstruct(out string! Name, out int Type, out int Element, out int Shape, out int Offset, out int CountOffset, out int FixedCount) -> void
+Kiln.MessageField.Element.get -> int
+Kiln.MessageField.Element.init -> void
+Kiln.MessageField.Equals(Kiln.MessageField? other) -> bool
+Kiln.MessageField.FixedCount.get -> int
+Kiln.MessageField.FixedCount.init -> void
+Kiln.MessageField.MessageField(string! Name, int Type, int Element, int Shape, int Offset, int CountOffset, int FixedCount) -> void
+Kiln.MessageField.Name.get -> string!
+Kiln.MessageField.Name.init -> void
+Kiln.MessageField.Offset.get -> int
+Kiln.MessageField.Offset.init -> void
+Kiln.MessageField.Shape.get -> int
+Kiln.MessageField.Shape.init -> void
+Kiln.MessageField.Type.get -> int
+Kiln.MessageField.Type.init -> void
+Kiln.MessageHandler
+Kiln.MessageRewrite
+Kiln.MessageRewrite.Buffer.get -> System.Span<byte>
+Kiln.MessageRewrite.Length.get -> int
+Kiln.MessageRewrite.Length.set -> void
+Kiln.MessageRewrite.MessageRewrite() -> void
+Kiln.MessageSchema
+Kiln.MessageSchema.<Clone>$() -> Kiln.MessageSchema!
+Kiln.MessageSchema.Deconstruct(out string! Name, out int Size, out System.Collections.Generic.IReadOnlyList<Kiln.MessageField!>! Fields) -> void
+Kiln.MessageSchema.Equals(Kiln.MessageSchema? other) -> bool
+Kiln.MessageSchema.Fields.get -> System.Collections.Generic.IReadOnlyList<Kiln.MessageField!>!
+Kiln.MessageSchema.Fields.init -> void
+Kiln.MessageSchema.MessageSchema(string! Name, int Size, System.Collections.Generic.IReadOnlyList<Kiln.MessageField!>! Fields) -> void
+Kiln.MessageSchema.Name.get -> string!
+Kiln.MessageSchema.Name.init -> void
+Kiln.MessageSchema.Size.get -> int
+Kiln.MessageSchema.Size.init -> void
 Kiln.ReceiveFilter<T>
 Kiln.ReplChannel
 Kiln.ReplChannel.Client = 4 -> Kiln.ReplChannel
@@ -197,6 +281,15 @@ Kiln.TouchResult.TouchResult(bool Ok, string? Reason) -> void
 override Kiln.FilterOptions.Equals(object? obj) -> bool
 override Kiln.FilterOptions.GetHashCode() -> int
 override Kiln.FilterOptions.ToString() -> string!
+override Kiln.InjectResult.Equals(object? obj) -> bool
+override Kiln.InjectResult.GetHashCode() -> int
+override Kiln.InjectResult.ToString() -> string!
+override Kiln.MessageField.Equals(object? obj) -> bool
+override Kiln.MessageField.GetHashCode() -> int
+override Kiln.MessageField.ToString() -> string!
+override Kiln.MessageSchema.Equals(object? obj) -> bool
+override Kiln.MessageSchema.GetHashCode() -> int
+override Kiln.MessageSchema.ToString() -> string!
 override Kiln.ReplComponentInfo.Equals(object? obj) -> bool
 override Kiln.ReplComponentInfo.GetHashCode() -> int
 override Kiln.ReplComponentInfo.ToString() -> string!
@@ -220,12 +313,24 @@ override Kiln.TouchResult.GetHashCode() -> int
 override Kiln.TouchResult.ToString() -> string!
 static Kiln.FilterOptions.operator !=(Kiln.FilterOptions? left, Kiln.FilterOptions? right) -> bool
 static Kiln.FilterOptions.operator ==(Kiln.FilterOptions? left, Kiln.FilterOptions? right) -> bool
+static Kiln.InjectResult.operator !=(Kiln.InjectResult? left, Kiln.InjectResult? right) -> bool
+static Kiln.InjectResult.operator ==(Kiln.InjectResult? left, Kiln.InjectResult? right) -> bool
+static Kiln.MessageField.operator !=(Kiln.MessageField? left, Kiln.MessageField? right) -> bool
+static Kiln.MessageField.operator ==(Kiln.MessageField? left, Kiln.MessageField? right) -> bool
+static Kiln.MessageSchema.operator !=(Kiln.MessageSchema? left, Kiln.MessageSchema? right) -> bool
+static Kiln.MessageSchema.operator ==(Kiln.MessageSchema? left, Kiln.MessageSchema? right) -> bool
 static Kiln.ReplComponentInfo.operator !=(Kiln.ReplComponentInfo? left, Kiln.ReplComponentInfo? right) -> bool
 static Kiln.ReplComponentInfo.operator ==(Kiln.ReplComponentInfo? left, Kiln.ReplComponentInfo? right) -> bool
 static Kiln.Replication.Component(string! name) -> Kiln.ReplComponentInfo?
+static Kiln.Replication.Decode<T>(System.ReadOnlySpan<byte> bytes) -> T
+static Kiln.Replication.Encode<T>(in T message) -> byte[]!
 static Kiln.Replication.Filter<TComponent>(Kiln.PeerSelector! peers, Kiln.ComponentFilter<TComponent>! filter, Kiln.FilterOptions? options = null) -> System.IDisposable!
+static Kiln.Replication.Inject(Kiln.NetPeer! peer, Kiln.GameChannel channel, System.ReadOnlySpan<byte> bytes) -> Kiln.InjectResult!
+static Kiln.Replication.Injected -> System.Action<Kiln.InjectResult!>?
+static Kiln.Replication.OnMessage(Kiln.GameChannel channel, Kiln.MessageDirection direction, Kiln.MessageHandler! handler) -> System.IDisposable!
 static Kiln.Replication.RemapItems(Kiln.PeerSelector! peers) -> System.IDisposable!
 static Kiln.Replication.RemapStats() -> Kiln.ReplRemapStats!
+static Kiln.Replication.Schema(string! name) -> Kiln.MessageSchema?
 static Kiln.Replication.Stats() -> System.Collections.Generic.IReadOnlyList<Kiln.ReplPeerStats!>!
 static Kiln.Replication.Touch(Kiln.EntityId entity) -> Kiln.TouchResult!
 static Kiln.Replication.Touched -> System.Action<Kiln.TouchResult!>?
@@ -262,6 +367,7 @@ override Kiln.ReplicatedExtension.ToString() -> string!
 static Kiln.TouchResult.operator !=(Kiln.TouchResult? left, Kiln.TouchResult? right) -> bool
 static Kiln.TouchResult.operator ==(Kiln.TouchResult? left, Kiln.TouchResult? right) -> bool
 virtual Kiln.ComponentFilter<T>.Invoke(ref T value, in Kiln.FilterContext context) -> void
+virtual Kiln.MessageHandler.Invoke(Kiln.NetPeer? peer, System.ReadOnlySpan<byte> data, ref Kiln.MessageRewrite rewrite) -> Kiln.MessageAction
 virtual Kiln.ReceiveFilter<T>.Invoke(ref T value, Kiln.EntityId entity) -> void
 Kiln.ExtensionProvider<T>
 Kiln.ReplExtensionChanged<T>

@@ -5111,6 +5111,23 @@
           },
           "size": 8
         },
+        "KilnReplFilterCtx": {
+          "align": 8,
+          "fields": {
+            "channel": 8,
+            "component_hash": 20,
+            "entity": 12,
+            "failed": 32,
+            "machine": 10,
+            "pad": 11,
+            "peer": 4,
+            "peer_flags": 9,
+            "read": 24,
+            "size": 0,
+            "tick": 16
+          },
+          "size": 40
+        },
         "KilnReplHookCost": {
           "align": 8,
           "fields": {
@@ -5134,6 +5151,25 @@
             "writer_ns": 72
           },
           "size": 136
+        },
+        "KilnReplItemMap": {
+          "align": 4,
+          "fields": {
+            "from": 0,
+            "to": 4
+          },
+          "size": 8
+        },
+        "KilnReplItemSite": {
+          "align": 4,
+          "fields": {
+            "component_hash": 0,
+            "count": 6,
+            "offset": 4,
+            "pad": 10,
+            "stride": 8
+          },
+          "size": 12
         },
         "KilnReplLabApi": {
           "align": 8,
@@ -5165,6 +5201,58 @@
           },
           "size": 104
         },
+        "KilnReplMessage": {
+          "align": 8,
+          "fields": {
+            "channel": 8,
+            "data": 16,
+            "direction": 9,
+            "length": 12,
+            "pad": 11,
+            "pad2": 36,
+            "peer": 4,
+            "player_socket": 10,
+            "rewrite": 24,
+            "rewrite_cap": 32,
+            "rewrite_length": 40,
+            "size": 0
+          },
+          "size": 48
+        },
+        "KilnReplNetApi": {
+          "align": 8,
+          "fields": {
+            "capabilities": 8,
+            "filter_add": 40,
+            "filter_set_peers": 48,
+            "header": 0,
+            "message_hook": 88,
+            "message_inject": 96,
+            "peer_entities": 32,
+            "peers": 136,
+            "remap_peers": 72,
+            "remap_set": 64,
+            "remap_stats": 80,
+            "remove": 16,
+            "schema_decode": 120,
+            "schema_encode": 128,
+            "schema_fields": 112,
+            "schema_find": 104,
+            "touch": 56,
+            "track": 24
+          },
+          "size": 144
+        },
+        "KilnReplPeerEntity": {
+          "align": 4,
+          "fields": {
+            "acked": 8,
+            "create_tick": 4,
+            "entity": 0,
+            "pad": 9
+          },
+          "size": 12
+        },
         "KilnReplPeerStats": {
           "align": 8,
           "fields": {
@@ -5189,6 +5277,45 @@
           },
           "size": 120
         },
+        "KilnReplRemapStats": {
+          "align": 8,
+          "fields": {
+            "faults": 32,
+            "remapped": 16,
+            "sites": 4,
+            "size": 0,
+            "snapshots": 8,
+            "zeroed": 24
+          },
+          "size": 40
+        },
+        "KilnReplSchemaField": {
+          "align": 8,
+          "fields": {
+            "count_offset": 32,
+            "element": 20,
+            "fixed_count": 36,
+            "name": 0,
+            "nested": 40,
+            "offset": 28,
+            "shape": 24,
+            "type": 16
+          },
+          "size": 48
+        },
+        "KilnReplTrackEvent": {
+          "align": 4,
+          "fields": {
+            "entity": 4,
+            "kind": 12,
+            "machine": 14,
+            "pad": 15,
+            "peer": 0,
+            "peer_flags": 13,
+            "tick": 8
+          },
+          "size": 16
+        },
         "KilnReplWatchEvent": {
           "align": 8,
           "fields": {
@@ -5212,7 +5339,7 @@
           "size": 48
         }
       },
-      "sha256": "2321d119e8434d3d238ad1a5242e31bb8f31469ff1d693100c3492d4e103006b"
+      "sha256": "bd437d4323c04c46215316eabd9e9260f056d537864c699237014019bcf38df6"
     },
     "native/core/abi/services/kiln_routines.h": {
       "function_macros": [],
@@ -8645,7 +8772,7 @@
   },
   "outputs": {
     "src/bindings.rs": "134028a6a9914076cab3f71f98d356141d4fe36c4d7f51bac6a11819501ed935",
-    "src/layout.rs": "8d18b09193130f409e221340a0fa24059a93ede11d2120b329f9082903eb3eb6",
+    "src/layout.rs": "31ad4255a0033cba06758d8cb13911b8727f739d71f14386705016dde2e8f24e",
     "src/services/kiln_abilities.rs": "06a43042e5c96d6261a17b02eab35463b07a8ad83f63b2bb168bca5ff34e582e",
     "src/services/kiln_assets.rs": "e7fe4eb1c4d53ad31eeaf05be06f41c551a49362ad5bd4174465ec18a03effe0",
     "src/services/kiln_assets_vfx.rs": "90ed8ce5ad512bbf4f002db3277bc3b439d648ca437a58d4477eac4ce46c3b81",
@@ -8688,7 +8815,7 @@
     "src/services/kiln_queries.rs": "c4888b701b298033d8b9ad525a22b3eba46ceec57a77f900fa1d0ff9002ace19",
     "src/services/kiln_registry.rs": "034e3e2035ab96e710860efd46b427b4c555d99916c7e8ae36ba8b36a250bd48",
     "src/services/kiln_render.rs": "f0ecd0d1c1af455626438c8e0c40244b07621ce63cfc707856ee158716d54fd0",
-    "src/services/kiln_repl.rs": "7dae242863f97f710da29b767327fd5032e8b38336789c87d79cfeaaab177a6a",
+    "src/services/kiln_repl.rs": "4a1fd000ce347302e21a55e5773763effc9ab5e1114382146193f58b5cc8c97f",
     "src/services/kiln_routines.rs": "c8465a921ab6157d0e176802cfb3e6fa09c2ea2ecd23220ef2643309561b148b",
     "src/services/kiln_rules.rs": "074b85bf024b8c53bfa21e7744ff4005fe6ebfa78c7aa5ccb3bc077cff3bc37b",
     "src/services/kiln_saves.rs": "0922e2870dc677c62608ab13147e609e5ea9d5109c34ea271e2e569874a1576b",

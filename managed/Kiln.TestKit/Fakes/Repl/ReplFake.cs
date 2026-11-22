@@ -241,6 +241,10 @@ internal sealed unsafe class ReplFake : IKitFake
             "send path, codecs and sizes, the capture file (repl capture), the loopback harness (repl.loopback, kiln.repl.lab)"));
         rows.Add(new CoverageRow("kiln.repl.lab", CoverageKind.Unavailable, [ReplAbi.LabService],
             "no fake: the loopback harness's payloads and hook cost exist only on a lab server running the game"));
+        rows.Add(new CoverageRow("kiln.repl.net", CoverageKind.Unavailable, ["kiln.repl.net"],
+            "no fake yet: sidecar tracking, per-peer filters, touch, the item remap, message hooks and the game's codec answer " +
+            "unavailable in the kit (repl.sidecar, repl.filter, repl.touch, repl.itemremap, repl.messages, repl.schema report off); " +
+            "they run on a lab server with the loopback harness (mods/tests/repl-test)"));
     }
 
     // ---- what a test scripts (KilnHarness.Repl) ----
