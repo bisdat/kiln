@@ -193,6 +193,22 @@ public sealed unsafe class InventoryTests : IDisposable
     }
 
     [Fact]
+    public void Selected_is_the_focused_slot_of_a_fresh_frame_on_a_pointer_screen()
+    {
+        // 0.2.0-dev.31 (GitHub issue 119 b): the slot draw's state byte 0 is the game's focus test (docs/re/game-ui.md)
+        static VisibleSlot Slot(uint item, byte focus) => new(0, new EntityId(0x5000), 0, new ItemId(item), 1, EntityId.None,
+            EntityId.None, 4, new UiRect(0, 0, 80, 80), null, new byte[] { focus, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+            UiValuesNative.OuterRect | UiValuesNative.NativeState, null, null);
+        var backpack = new GameScreen(GameUiState.Play, HudScreen.Backpack, default, 0, null, 0, 9);
+        var snap = new VisibleSlotsSnapshot(1, 9, 1000, new EntityId(77), backpack, default, 1, 0, [Slot(0xAA, 0), Slot(0xBB, 1), Slot(0xCC, 1)]);
+        Assert.Equal(new ItemId(0xBB), UiInventoryBridge.SelectedIn(snap, 1100)!.Item);
+        Assert.Null(UiInventoryBridge.SelectedIn(snap, 1000 + UiInventoryBridge.SelectedMaxAgeMs + 1));  // stale
+        Assert.Null(UiInventoryBridge.SelectedIn(snap with { Screen = backpack with { Hud = HudScreen.InGame } }, 1100));
+        Assert.Null(UiInventoryBridge.SelectedIn(snap with { Screen = backpack with { State = GameUiState.Load } }, 1100));
+        Assert.Null(UiInventoryBridge.SelectedIn(snap with { Slots = [Slot(0xAA, 0)] }, 1100));
+    }
+
+    [Fact]
     public void A_click_carries_the_press_position_in_the_overlays_pixels()
     {
         // 0.2.0-dev.30.3 (GitHub issue 107): the native record's x, y (the window's client pixels, which are the overlay's)

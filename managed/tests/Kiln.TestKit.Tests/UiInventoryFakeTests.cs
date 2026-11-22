@@ -90,6 +90,25 @@ public sealed unsafe class UiInventoryFakeTests
     }
 
     [Fact]
+    public void SelectedIsTheSlotTheGamesSelectionIsOn()
+    {
+        using var kiln = new KilnHarness();
+        kiln.Step();
+        kiln.UiInventory.OpenBackpack(Sword, Wood);
+        Assert.Null(kiln.Run(() => Ui.Inventory.Selected));
+        kiln.UiInventory.Select(1);
+        Assert.Equal(new ItemId(0xBB), kiln.Run(() => Ui.Inventory.Selected)!.Item);
+        kiln.UiInventory.Hover(0);  // the mouse elsewhere: Hovered and Selected are apart
+        Assert.Equal(new ItemId(0xAA), kiln.Run(() => Ui.Inventory.Hovered)!.Item);
+        Assert.Equal(new ItemId(0xBB), kiln.Run(() => Ui.Inventory.Selected)!.Item);
+        kiln.UiInventory.Select(null);
+        Assert.Null(kiln.Run(() => Ui.Inventory.Selected));
+        kiln.UiInventory.Draw(HudScreen.InGame, Sword);  // the hotbar in the play view: no selection there
+        kiln.UiInventory.Select(0);
+        Assert.Null(kiln.Run(() => Ui.Inventory.Selected));
+    }
+
+    [Fact]
     public void AClickReachesTheMatchingHandlersWithTheItemsIdentity()
     {
         using var kiln = new KilnHarness();

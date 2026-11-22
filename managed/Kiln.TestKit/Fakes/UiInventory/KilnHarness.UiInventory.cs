@@ -152,6 +152,28 @@ public sealed class HarnessUiInventory
     /// in the order they were added).</summary>
     public IReadOnlyList<string> PanelsShown => UiInventoryScreens.Showing();
 
+    /// <summary>The game's own selection (a controller's: what Ui.Inventory.Selected reads, since 0.2.0-dev.31) rests on
+    /// drawn slot <paramref name="index"/> (null: on none), as the game marks it in the slot draw's state byte 0. A
+    /// <see cref="Draw"/> starts with none.</summary>
+    public unsafe void Select(int? index)
+    {
+        var st = State;
+        lock (st.Lock)
+        {
+            var slots = st.Slots ?? [];
+            if (index is { } i)
+            {
+                ArgumentOutOfRangeException.ThrowIfNegative(i);
+                ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(i, slots.Length);
+            }
+            for (var k = 0; k < slots.Length; k++)
+            {
+                slots[k].Available |= UiValuesNative.NativeState;
+                slots[k].NativeState[0] = k == index ? (byte)1 : (byte)0;
+            }
+        }
+    }
+
     /// <summary>The cursor rests on drawn slot <paramref name="index"/> (null: on none): what Ui.Inventory.Hovered reads.</summary>
     public void Hover(int? index)
     {

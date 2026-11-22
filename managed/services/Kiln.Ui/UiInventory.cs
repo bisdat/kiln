@@ -115,9 +115,20 @@ public static partial class Ui
         public static IDisposable OnClick(SlotClickOptions options, Action<SlotClick> handler) =>
             UiInventoryBridge.Subscribe(options, handler);
 
-        /// <summary>The slot under the cursor in the game's latest UI frame (null: none, or not known).</summary>
+        /// <summary>The slot under the cursor in the game's latest UI frame (null: none, or not known). The mouse's only: a
+        /// controller's selection is <see cref="Selected"/>.</summary>
         [ClientOnly, AnyThread]
         public static VisibleSlot? Hovered => UiInventoryBridge.Hovered();
+
+        /// <summary>The slot the game's own selection is on in its latest UI frame, on a screen with a pointer (the
+        /// backpack and inventory menu, a chest, a station or factory, an NPC's crafting): the slot a controller has
+        /// selected (null: none, a stale frame, another screen, or not known). It is the slot whose frame holds the focus
+        /// of the game's UI navigation, which the d-pad and stick move (the slot draw's state byte 0, which the game sets
+        /// from its focus test). With a mouse the game may move that focus with the pointer too, so for a mouse player
+        /// <see cref="Selected"/> can follow <see cref="Hovered"/>. Not checked in a game yet (client check
+        /// ui-fuzen.c2). Since 0.2.0-dev.31 (mod API 0.2.14).</summary>
+        [ClientOnly, AnyThread]
+        public static VisibleSlot? Selected => UiInventoryBridge.Selected();
     }
 }
 
@@ -351,6 +362,37 @@ internal static unsafe class UiInventoryBridge
         return t->SlotAt(UiValueBridge.OwnerOf(UiModCalls.Caller), -1, -1, 0, 0, &h) == UiValuesNative.Ok && h.Ok != 0
             ? ToVisible(h.Slot)
             : null;
+    }
+
+    // ---- selected (0.2.0-dev.31) ----
+    internal const long SelectedMaxAgeMs = 250;  // as fresh as a click's frame must be (kiln_ui_inventory.h)
+
+    /// <summary>The screens on which a slot can be pressed or selected (kiln_ui_inventory.h "Clicks").</summary>
+    internal static bool PointerScreen(GameScreen s) => s.State == GameUiState.Play && (byte)s.Hud is 4 or 8 or 9 or 22 or 25 or 27 or 28 or 41;
+
+    internal static VisibleSlot? Selected()
+    {
+        if (UiValuesNative.T == null) return null;
+        VisibleSlotsResult r;
+        try
+        {
+            r = UiSlotsBridge.Read();
+        }
+        catch (KilnUnavailableException)
+        {
+            return null;
+        }
+        if (!r.Ok || r.Snapshot is not { } s) return null;
+        return SelectedIn(s, UiSlotsBridge.Now());
+    }
+
+    /// <summary>The first slot draw of a fresh frame on a pointer screen whose focus byte is set.</summary>
+    internal static VisibleSlot? SelectedIn(VisibleSlotsSnapshot s, long nowMs)
+    {
+        if (nowMs - (long)s.CaptureMs > SelectedMaxAgeMs || !PointerScreen(s.Screen)) return null;
+        foreach (var v in s.Slots)
+            if ((v.Availability & UiValuesNative.NativeState) != 0 && v.NativeState.Count > 0 && v.NativeState[0] != 0) return v;
+        return null;
     }
 
     // ---- marks ----

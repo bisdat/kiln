@@ -13,3 +13,4 @@ Kiln.KeyMods.PadLT = 32 -> Kiln.KeyMods
 Kiln.KeyMods.PadRB = 16 -> Kiln.KeyMods
 Kiln.KeyMods.PadRT = 64 -> Kiln.KeyMods
 Kiln.KeyPress.IsPad.get -> bool
+static Kiln.Ui.Inventory.Selected.get -> Kiln.VisibleSlot?

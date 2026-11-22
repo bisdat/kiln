@@ -363,7 +363,8 @@ var under = Ui.Inventory.Hovered;                      // the slot under the cur
 | `OnClick(options, handler)` | clicks matching `Button` (Left, Right) and `Modifiers` (exactly: Ctrl alone is not Ctrl+Shift); `Take` (default) keeps the press from the game, its release still reaches it. The handler runs on the client's main thread after the next UI frame. Dispose to stop | `ui.slots.click` |
 | `Mark(item, mark)`, `Unmark(item)`, `ClearMarks()` | a mark on the item's slot wherever the game draws it (it follows the item: move it and the mark moves); `SlotMark(Color, Style = Border/Fill/Corner, Thickness = 3)` | `ui.slots.inspect` |
 | `MarkWhen(rule)` | a mark from a rule asked for each drawn slot (an item mark wins) | `ui.slots.inspect` |
-| `Hovered` | the slot under the cursor in the game's latest UI frame | `ui.slots.inspect` |
+| `Hovered` | the slot under the cursor in the game's latest UI frame (the mouse's only) | `ui.slots.inspect` |
+| `Selected` (0.2.0-dev.31) | the slot the game's own selection is on (a controller's: the focus of the game's UI navigation, which the d-pad and stick move), on a screen with a pointer, in a frame at most 250 ms old; with a mouse the game may move that focus with the pointer, so it can follow `Hovered` there. Not checked in a game yet (`ui-fuzen.c2`) | `ui.slots.inspect` |
 
 **The item's identity.** `SlotClick.ItemEntity` (and `VisibleSlot.ClientEntity`) is the item's entity in this game's
 world. Only items with an item entity of their own have one: weapons, tools, armour, cans (the items `Items.Read` also
