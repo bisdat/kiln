@@ -111,29 +111,46 @@ public static class Peers
 
     private static bool HasContent(in PeerFacts p) => p.Kiln && ContentCurrent(p.Peer!);
 
-    /// <summary>A Kiln client is current when it acknowledged the content state served now (kiln.net cleared it for every
-    /// Kiln-only template there is: Kiln.Network's PeerHasDefinitions), or when the server serves no content state and has
-    /// no Kiln-only template: then there is nothing it could lack and nothing to acknowledge.</summary>
+    /// <summary>A Kiln client is current when it acknowledged the content state the server serves now (review should 9:
+    /// the state id, not the count of Kiln-only templates, so a hot-loaded item without a template makes every client
+    /// lack it until it acks the new state). Without a served content state: when kiln.net cleared it for every Kiln-only
+    /// template, or when there is none (then there is nothing it could lack).</summary>
     private static bool DefaultContentCurrent(NetPeer peer)
     {
+        if (ServedState() is { } served) return AckedState(peer) == served;
         var templates = NetNative.ReadGate().KilnTemplates;
-        if (peer.Cleared && peer.ClearedTemplates >= templates) return true;
-        return templates == 0 && !ServingContent();
+        return (peer.Cleared && peer.ClearedTemplates >= templates) || templates == 0;
     }
 
-    /// <summary>Whether this server serves a content state (Kiln.Content's export); replaced by tests.</summary>
-    internal static Func<bool> ServingContent = static () =>
+    /// <summary>The content state id this server serves now, or null (none, or no Kiln.Content): replaced by tests.</summary>
+    internal static Func<uint?> ServedState = static () =>
     {
         try
         {
-            return Serving();
+            return Served();
         }
         catch (Exception e) when (e is TypeLoadException or FileNotFoundException or TypeInitializationException)
         {
-            return false;  // no Kiln.Content: no content state either
+            return null;  // no Kiln.Content: no content state either
+        }
+    };
+
+    /// <summary>The content state id a peer acknowledged last, or null: replaced by tests.</summary>
+    internal static Func<NetPeer, uint?> AckedState = static p =>
+    {
+        try
+        {
+            return Acked(p.Id);
+        }
+        catch (Exception e) when (e is TypeLoadException or FileNotFoundException or TypeInitializationException)
+        {
+            return null;
         }
     };
 
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-    private static bool Serving() => ContentSync.Serving is not null;
+    private static uint? Served() => ContentSync.Serving?.StateId;
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static uint? Acked(uint peer) => ContentSync.AckedStateOf(peer);
 }
