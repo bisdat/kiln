@@ -51,4 +51,4 @@ launcher, the in-game texts).
 
 | Language | Translator | Translated |
 |---|---|---|
-| Simplified Chinese (简体中文, `zh-CN`) | XiaoHuLi666 (XHL) | The whole launcher (`launcher/src/i18n/zh-CN.json`) and all of Kiln's in-game texts (`runtime/locales/zh-CN.json`), from 0.2.0-dev.29.18. |
+| Simplified Chinese (简体中文, `zh-CN`) | MagicFox (XHL), also known as XiaoHuLi666 | The whole launcher (`launcher/src/i18n/zh-CN.json`) and all of Kiln's in-game texts (`runtime/locales/zh-CN.json`), from 0.2.0-dev.29.18; updated for 0.2.0-dev.30.5. |
