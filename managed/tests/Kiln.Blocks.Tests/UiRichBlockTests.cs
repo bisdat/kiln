@@ -683,6 +683,55 @@ public sealed class UiRichBlockTests : IDisposable
     }
 
     [Fact]
+    public void A_blur_field_commits_when_it_loses_the_keyboard_after_an_edit()
+    {
+        // review S8: commit "blur" (the default) writes when ImGui says the field was deactivated after an edit, not before
+        var state = new Dictionary<string, UiStateDefinition> { ["n"] = new UiStringState() };
+        Define("w", W(state, new InputRow { Id = "n", Label = "N", Bind = "state.n", Commit = UiInputCommit.Blur }));
+        var w = Open();
+        var typing = new Canvas();
+        typing.Typing["N###in"] = ("hi", UiItemState.Active | UiItemState.Edited, false);  // typing: the draft only
+        Frame(w, typing);
+        UiRuntime.Pump();
+        Assert.Equal(new UiStateValue.String(""), w.State.Snapshot.Values["n"]);
+        var blur = new Canvas();
+        blur.Typing["N###in"] = ("hi", UiItemState.Deactivated | UiItemState.DeactivatedAfterEdit, false);
+        Frame(w, blur, refresh: false);
+        UiRuntime.Pump();
+        Assert.Equal(new UiStateValue.String("hi"), w.State.Snapshot.Values["n"]);
+    }
+
+    [Fact]
+    public void State_is_kept_when_the_window_closes_and_opens_again()
+    {
+        // review S8: the note, the selected tab, the table selection and the open branches stay through a close and an open
+        _world = new UiWorldReadResult(true, null, Snap(inv: [Slot(0, 1)]));
+        Define("w", Json<WindowBlock>(RichJson));
+        var w = Open();
+        var c = new Canvas();
+        c.Typing["Note###in"] = ("kept", UiItemState.Active | UiItemState.Deactivated, true);
+        Frame(w, c);
+        Frame(w, new Canvas { ShowTab = "map" }, refresh: false);
+        UiRuntime.Pump();
+        var open = new Canvas { ShowTab = "map" };
+        open.Toggle.Add("A###n");
+        Frame(w, open);
+        UiRuntime.Pump();
+        var before = w.State.Snapshot;
+        w.Close();
+        UiRuntime.Pump();
+        w.Open();
+        var again = Frame(w, new Canvas { ShowTab = "map" });
+        UiRuntime.Pump();
+        Assert.Equal(before.Version, w.State.Snapshot.Version);
+        Assert.Equal(new UiStateValue.String("kept"), w.State.Snapshot.Values["note"]);
+        Assert.Equal("map", w.State.Snapshot.Controls["tabs"].Selected);
+        Assert.Equal(new[] { "a" }, ((UiStateValue.StringSet)w.State.Snapshot.Values["open"]).Value);
+        Assert.Contains("field:Note###in=kept", again.Calls);
+        Assert.Contains("node:A###n+", again.Calls);
+    }
+
+    [Fact]
     public void Escape_restores_the_text_and_writes_nothing()
     {
         Define("w", Json<WindowBlock>(RichJson) with { Rows = [new InputRow { Id = "note", Label = "Note", Bind = "state.note", MaxBytes = 64 }] });
