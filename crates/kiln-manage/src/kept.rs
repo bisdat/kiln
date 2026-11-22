@@ -295,6 +295,8 @@ pub(crate) enum Step {
     Published,
     /// Placement: the receipt is written, the parked copy not deleted yet.
     ReceiptSaved,
+    /// Placement: the parked copy's files are gone, but its marker is still there.
+    ParkedContentsRemoved,
     /// Activation (`profile`): the game's `kiln/profile.json` is written, the activation record not yet.
     GameProfileWritten,
     /// Placement: its staging folder is named in the staging record, not made yet.
