@@ -615,7 +615,7 @@ void filter_pre(uintptr_t) {
         if (!f.handle.load(std::memory_order_relaxed) || !f.active) continue;
         const uint32_t m = machines_of(f);
         if (m != f.machines) {
-            if (f.channels & KILN_REPL_CLIENT_CHANNEL) invalidate(m & ~f.machines, f.hash);  // its new peers: re-send
+            if (f.channels & KILN_REPL_CLIENT_CHANNEL) invalidate(m ^ f.machines, f.hash);  // peers in and out of it: re-send
             g_dirty.store(true, std::memory_order_relaxed);
         }
     }

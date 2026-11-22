@@ -104,9 +104,11 @@ bool remap_resolve_peers() {
                 if (g_peers[i] == p) m |= 1u << k;
         }
     if (m == g_machines) return false;
-    const uint32_t added = m & ~g_machines;
+    const uint32_t changed = m ^ g_machines;
     g_machines = m;
-    touch_sites(g_table, added);  // newly remapped machines get their entities again, remapped
+    // both ways (review should 3): a machine that joins the set gets its entities again, remapped; one that leaves it
+    // (a Kiln client's content ack) gets the real ids back instead of keeping remapped baselines
+    touch_sites(g_table, changed);
     return true;
 }
 
