@@ -17,6 +17,7 @@ Kiln.TestKit.FakeCraftSourceRegistration.Owner.init -> void
 Kiln.TestKit.FakeCraftSourceRegistration.Player.get -> Kiln.EntityId
 Kiln.TestKit.FakeCraftSourceRegistration.Player.init -> void
 Kiln.TestKit.HarnessCrafting
+Kiln.TestKit.HarnessCrafting.Dyes(Kiln.EntityId player) -> System.Collections.Generic.IReadOnlyDictionary<Kiln.ItemId, long>!
 Kiln.TestKit.HarnessCrafting.Sources.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.FakeCraftSourceRegistration!>!
 Kiln.TestKit.HarnessCrafting.Stock(Kiln.EntityId player) -> System.Collections.Generic.IReadOnlyDictionary<Kiln.ItemId, long>!
 Kiln.TestKit.KilnHarness.Crafting.get -> Kiln.TestKit.HarnessCrafting!

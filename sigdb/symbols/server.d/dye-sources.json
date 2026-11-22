@@ -1,8 +1,14 @@
 {
   "format": 1,
   "side": "server",
-  "comment": "Tint path qualification for GitHub #125, Fuzen777. Static only, exact server 26430253 (f0d824be...) and client 26430625 (5d9ef2f1...). TintAction(action*, inventory_actions iterator*) resolves the target and secondary InventorySlotIds before constructing its own inventory transaction. The dye is the secondary slot's live item, whose itemColorCombinationSetup.isSet must be nonzero. TintPayRet follows InventoryRemoveItems(out, tx, player, dye, preferred secondary slot, 1). Payment error or remainder reaches InventoryRollback; success writes/adds ColorPaletteItem before InventoryCommit. This is not InventoryPay/RecipePaid. These records qualify code locations only: they do not enable dye sources or claim fault-atomic palette mutation. docs/re/gameplay.md section 10 and docs/re/items.md sections 3-4 describe the existing action and transaction layouts.",
+  "comment": "Tint path qualification for GitHub #125, Fuzen777. Static only, exact server 26430253 (f0d824be...) and client 26430625 (5d9ef2f1...). TintAction(action*, inventory_actions iterator*) resolves the target and secondary InventorySlotIds before constructing its own inventory transaction. The dye is the secondary slot's live item, whose itemColorCombinationSetup.isSet must be nonzero. TintPayRet follows InventoryRemoveItems(out, tx, player, dye, preferred secondary slot, 1). Payment error or remainder reaches InventoryRollback; success writes/adds ColorPaletteItem before InventoryCommit. This is not InventoryPay/RecipePaid. crafting.dye_sources requires the entry, payment, sparse setup and commit guards together. A reserved secondary key (item id, slot index 0xff) is re-resolved by the entry; only its scoped payment borrows from registered sources, before a palette write. The input wire schema is also validated at runtime: secondarySlotId.slotIndex must remain a full u8, never a narrowed bitfield. docs/re/gameplay.md section 10 and docs/re/items.md sections 3-4 describe the existing action and transaction layouts.",
   "symbols": {
+    "@dyes/WireRoot": {
+      "find": [{ "pattern": "48 8D 54 24 30 4C 8B 05 {dyes/WireRoot:rel32} 48 8D 8D 60 0B 00 00 45 33 E4 48 89 44 24 38 48 8B 43 08 48 C1 E0 03" }]
+    },
+    "@dyes/TintActor": {
+      "find": [{ "scope": { "symbol": "dyes/TintAction", "size": 480 }, "pattern": "49 8B 0E 48 8D 95 50 72 00 00 49 8B 5F 08 E8 {dyes/ProgramEntity:rel32} C7 44 24 28 01 00 00 00" }]
+    },
     "dyes/TintAction": {
       "find": [
         {
@@ -63,5 +69,10 @@
     }
   },
   "constants": {},
-  "features": {}
+  "features": {
+    "crafting.dye_sources": {
+      "symbols": ["dyes/TintAction", "dyes/TintPayRet", "dyes/TintRollbackRet", "dyes/TintCommitRet", "@dyes/TintActor", "dyes/ProgramEntity", "@dyes/TintSetup", "@dyes/TintSlotReads", "@dyes/TintPaletteCheck", "@dyes/WireRoot", "dyes/WireRoot", "items/InventoryRemoveItems", "items/InventoryRollback", "items/InventoryCommit", "items/ReadOther", "items/JobStorage", "items/ComponentMapFind", "@items/CommitGuards"],
+      "constants": ["dyes/action.secondary", "dyes/item.palette_set", "dyes/it.setup", "dyes/it.inventory", "dyes/it.selection", "dyes/it.item_state", "dyes/it.owner", "dyes/it.empty", "dyes/it.bases_server", "items/tx.guard_flags", "items/tx.empty_state", "items/tx.touched_count", "items/item.category"]
+    }
+  }
 }

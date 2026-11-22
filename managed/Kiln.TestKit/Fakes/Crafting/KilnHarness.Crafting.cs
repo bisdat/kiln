@@ -37,4 +37,11 @@ public sealed class HarnessCrafting
     public IReadOnlyDictionary<ItemId, long> Stock(EntityId player) => _harness.Run(() =>
         (IReadOnlyDictionary<ItemId, long>)CraftingFake.Counts(KitFakes.State<CraftingState>(_harness), player.Value)
             .ToDictionary(x => new ItemId(x.Key), x => x.Value));
+
+    /// <summary>The same registered counts restricted to ColorPalette items (dyes), with current filters, player-session
+    /// generation and inventory permission. No tint screen or game transaction is simulated. Since 0.2.0-dev.30.6.</summary>
+    public IReadOnlyDictionary<ItemId, long> Dyes(EntityId player) => _harness.Run(() =>
+        (IReadOnlyDictionary<ItemId, long>)CraftingFake.Counts(KitFakes.State<CraftingState>(_harness), player.Value)
+            .Where(x => Items.Get(new ItemId(x.Key))?.Category == ItemCategory.ColorPalette)
+            .ToDictionary(x => new ItemId(x.Key), x => x.Value));
 }

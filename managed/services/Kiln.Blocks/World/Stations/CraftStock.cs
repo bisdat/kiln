@@ -230,6 +230,7 @@ internal static class CraftStock
                 .Register<CraftStockFillAnswers>(CraftStockFillAnswers.Id, static (m, w) => CraftStockFillAnswers.Encode(m, w),
                     static (ref NetReader r) => CraftStockFillAnswers.Decode(ref r), static (m, _) => { if (!Client.IsHosting) ClientFill(m); },
                     NetDirection.ToClient);
+            DyeStock.Attach(_channel);
         }
         catch (Exception e)
         {

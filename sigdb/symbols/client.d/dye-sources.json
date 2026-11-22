@@ -2,8 +2,11 @@
   "format": 1,
   "side": "client",
   "extends": "server.d/dye-sources.json",
-  "comment": "Static palette-screen qualification on client 26430625 only. PaletteBuild fills a dynamic array of 72-byte item views from the local player's and station's models plus unlocked palettes. PaletteGrid takes the tint state, whose palette array is at +0x90b80; it overwrites every row's +0x10 count from the two models' Generic-index views at RowCount (eax=count, rbx=row, r15d=item). DetailCount consumes a separate sum in eax for the selected palette (r15d=item). TintCommand emits command 0x6e, storing the target InventorySlotId at +4 and the selected palette's key at +0xc. These are locations only, not a qualified external-source request protocol, and enable no capability.",
+  "comment": "Static palette-screen qualification on client 26430625 only. PaletteBuild fills a dynamic array of 72-byte item views from the local player's and station's models plus unlocked palettes. PaletteGrid takes the tint state, whose palette array is at +0x90b80; it overwrites every row's +0x10 count from the two models' Generic-index views at RowCount (eax=count, rbx=row, r15d=item). DetailCount consumes a separate sum in eax for the selected palette (r15d=item). TintCommand emits command 0x6e, storing the target InventorySlotId at +4 and the selected palette's key at +0xc. crafting.dye_ui uses a copy rebuilt through PaletteBuild, adds source counts at the two count sites, and gives a source palette a reserved key (its item id, slot index 0xff), never a chest slot. A Kiln server must announce support before any source row is offered. Both exact input schemas preserve the full-u8 index; the runtime validates the schema path before enabling the hooks.",
   "symbols": {
+    "@dyes/WireRoot": {
+      "find": [{ "pattern": "4C 8B 05 {dyes/WireRoot:rel32} 89 8D 78 05 00 00 48 8B 8D 78 0E 00 00 89 9D 7C 05 00 00 49 8B 85 98 05 00 00" }]
+    },
     "dyes/client.PaletteGrid": {
       "find": [
         {
@@ -69,5 +72,10 @@
     }
   },
   "constants": {},
-  "features": {}
+  "features": {
+    "crafting.dye_ui": {
+      "symbols": ["dyes/client.PaletteGrid", "dyes/client.PaletteBuild", "dyes/client.RowCount", "dyes/client.DetailCount", "dyes/client.TintCommand", "@dyes/client.PaletteFields", "@dyes/client.TintCommandSlots", "@dyes/WireRoot", "dyes/WireRoot", "ui/UiApp"],
+      "constants": ["dyes/ui.palettes", "dyes/ui.palette_count"]
+    }
+  }
 }

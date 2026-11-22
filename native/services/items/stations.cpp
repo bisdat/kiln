@@ -21,6 +21,7 @@
 //    ordinary chests does the same for those chests in between: player and Magic chests first, then the chests, then
 //    the station outputs. docs/re/stations.md §8 and §9.
 #include "stations.h"
+#include "dyes.h"
 
 #include <windows.h>
 
@@ -3357,8 +3358,13 @@ const KilnStationsApi kTable = {
     &t_status, &t_base_count, &t_base_at, &t_base_of, &t_base_at_position, &t_base_storage, &t_base_water, &t_base_stock,
     &t_stations, &t_station_read, &t_recipe, &t_recipe_inputs, &t_category, &t_category_at, &t_workshop_recipes, &t_plan,
     &t_submit, &t_cancel, &t_watch, &t_events, &t_last_seq, &t_set_output_source, &t_output_sources, &t_max_chests,
-    &t_collect, &t_base_stock_with_stations, &t_set_craft_stock, &t_craft_items, &t_set_fill_answers, &t_fill_asks, &t_add_source, &t_remove_source, &t_cancel_sources, &t_source_stock,
+    &t_collect, &t_base_stock_with_stations, &t_set_craft_stock, &t_craft_items, &t_set_fill_answers, &t_fill_asks, &t_add_source, &t_remove_source, &t_cancel_sources, &t_source_stock, &dyes_set_stock,
 };
+
+bool sym(const char* name, uintptr_t* out) {
+    *out = 0;
+    return g_api->symbol(str(name), out) == KILN_OK && *out;
+}
 
 template <typename F>
 bool sym(const char* name, F* out) {

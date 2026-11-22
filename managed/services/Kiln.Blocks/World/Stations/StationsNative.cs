@@ -218,6 +218,7 @@ internal static unsafe class StationsNative
         public delegate* unmanaged[Cdecl]<ulong, ulong, int> RemoveSource;
         public delegate* unmanaged[Cdecl]<ulong, void> CancelSources;
         public delegate* unmanaged[Cdecl]<uint, uint, Stack*, uint, uint*, int> SourceStock;
+        public delegate* unmanaged[Cdecl]<uint, Stack*, uint, int> SetDyeStock;
     }
 
     [StructLayout(LayoutKind.Sequential)]

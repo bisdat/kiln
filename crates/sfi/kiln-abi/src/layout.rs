@@ -4053,7 +4053,7 @@ const _: () = {
     assert!(core::mem::offset_of!(crate::services::kiln_stations::KilnCraftSourceRequest, filter) == 16);
     assert!(core::mem::offset_of!(crate::services::kiln_stations::KilnCraftSourceRequest, item_count) == 20);
     assert!(core::mem::offset_of!(crate::services::kiln_stations::KilnCraftSourceRequest, items) == 24);
-    assert!(core::mem::size_of::<crate::services::kiln_stations::KilnStationsApi>() == 280);
+    assert!(core::mem::size_of::<crate::services::kiln_stations::KilnStationsApi>() == 288);
     assert!(core::mem::align_of::<crate::services::kiln_stations::KilnStationsApi>() == 8);
     assert!(core::mem::offset_of!(crate::services::kiln_stations::KilnStationsApi, header) == 0);
     assert!(core::mem::offset_of!(crate::services::kiln_stations::KilnStationsApi, status) == 8);
@@ -4090,6 +4090,7 @@ const _: () = {
     assert!(core::mem::offset_of!(crate::services::kiln_stations::KilnStationsApi, remove_source) == 256);
     assert!(core::mem::offset_of!(crate::services::kiln_stations::KilnStationsApi, cancel_sources) == 264);
     assert!(core::mem::offset_of!(crate::services::kiln_stations::KilnStationsApi, source_stock) == 272);
+    assert!(core::mem::offset_of!(crate::services::kiln_stations::KilnStationsApi, set_dye_stock) == 280);
     assert!(core::mem::size_of::<crate::services::kiln_stations::KilnStationCollect>() == 24);
     assert!(core::mem::align_of::<crate::services::kiln_stations::KilnStationCollect>() == 4);
     assert!(core::mem::offset_of!(crate::services::kiln_stations::KilnStationCollect, size) == 0);

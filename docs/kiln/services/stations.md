@@ -320,6 +320,36 @@ not the game payment hook, bases, station outputs or screen drawing. Native host
 all-or-nothing preflight; Windows tests exercise the actual guarded `RecipePaid` adapter on fake engine transactions.
 The real-game scenarios below are still required.
 
+### Dyes from the same links
+
+**Since 0.2.0-dev.30.6**, the same registrations and copied item filters also supply dyes (`ColorPalette` items).
+There is no second registry or dye opt-in. In a Kiln client's tinting screen, linked dyes appear as available even when
+none is in the bag. On confirmation the server pays **one dye from the bag first**, otherwise from an accessible linked
+container, in registration order. The crafting-specific station-output order does not add station outputs to tinting.
+Registered Magic chests count too; dyes do not require the player to stand in their base.
+
+The client receives only filtered **item ids and counts**, never chest slots. It offers source dyes only after this
+server explicitly announces dye-source support over `kiln:craftstock`; an older or vanilla server offers none. Closing
+the screen, losing the session, or 15 seconds without a refresh removes the offer. Counts are not permission or payment.
+
+The server's Tint action resolves the requested dye afresh, then rechecks this player's registration/login generation,
+the item filter, inventory permission and the source's live inventory at payment. Both the bag debit and any source
+debit use **the game's own Tint inventory transaction**. A missing dye, revoked access, disposed link or a fault in the
+source payment produces the game's failure **before the palette write**, so its rollback restores the inventory.
+No temporary dye is transferred to the bag and no separate inventory transaction is committed.
+
+| Capability | Side and refusal |
+| --- | --- |
+| `crafting.dye_sources` | Server/host Tint entry and payment hooks. Missing tint/transaction/access symbols, changed sparse layouts, a narrowed slot-index wire field or a failed hook refuses source tint requests. |
+| `crafting.dye_sources_session` | Needs a running server world and available hooks; no session is pending. A joined client has no server world. |
+| `crafting.dye_ui` | Client palette/availability hooks and the full-byte slot-index wire contract. Wrong side, missing symbols/layouts or a failed hook leaves the game's own list. |
+| `crafting.dye_ui_session` | Needs this local player's live support/count announcement from a Kiln server. No server, older server, no client world or expired announcement means no source rows. |
+
+The TestKit's `h.Crafting.Dyes(player)` records filtered dye counts from the shared fake registrations, with the same
+permission and player-session checks. Native Tint transactions and screen hooks are **offline**, not simulated; their
+capability rows say so. Windows tests exercise the production entry/payment callbacks and palette mids on fake engine
+transactions; a real client is still the final check.
+
 ### Guided check for linked sources
 
 Use a small test mod that can register/dispose one link and change its filter/order. Use a Kiln client and server.
@@ -338,6 +368,18 @@ Use a small test mod that can register/dispose one link and change its filter/or
 6. Join **two players**. Register for only one: the other must neither count nor pay from the chest. Remove that player's
    `CanAccessInventories` permission and check that a new craft cannot use the link. Restore it and retry. Registering
    either player's bag as a container must be refused.
+
+### Guided dye check
+
+1. Put a dye **only in a linked chest**, with none in the bag. Open tinting, select the colour and confirm. The palette
+   must list it; exactly one dye must leave that chest, the item must change colour, and nothing must be moved into the bag.
+2. Put the **same dye in the bag too**. Tint again. Exactly one bag dye must be consumed and the chest must be unchanged.
+3. Register a chest for **only another player**. The first player must neither see nor consume its dyes. Also revoke
+   inventory permission or dispose a link after opening the palette but before confirming: no dye must leave and no
+   colour change may occur. Explicitly linking a permitted ordinary chest in another base remains the mod's choice,
+   not an ownership-based refusal. Check an allow/deny filter, reconnect into a reused player slot, and reopen the screen.
+4. Join a **vanilla or older server** with a Kiln client. No linked-source dyes should be offered. Close/reopen tinting
+   and leave/rejoin a Kiln server: no previous session's source rows should remain.
 
 ## Station outputs in a craft
 The same opt-in (`Stations.SetOutputSource`) is the last source when a **player** crafts: at a crafting station, by hand,
@@ -724,4 +766,4 @@ native slot for them.
 
 - **0.2.0-dev.30.6:** player crafting sources (`Crafting.AddSource`), filtered linked containers in any base or none,
   ordered around opted-in station outputs, disposable/mod-owned lifetime, atomic recipe payment and Kiln-client crafting
-  counts. Thanks Fuzen777 (#125).
+  counts, plus the tinting screen and server-authoritative dye payment from the same player sources. Thanks Fuzen777 (#125).

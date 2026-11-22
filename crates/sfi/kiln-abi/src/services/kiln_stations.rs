@@ -357,6 +357,7 @@ pub struct KilnStationsApi {
     pub remove_source: Option<unsafe extern "C" fn(KilnOwner, u64) -> KilnResult>,
     pub cancel_sources: Option<unsafe extern "C" fn(KilnOwner)>,
     pub source_stock: Option<unsafe extern "C" fn(KilnEntity, u32, *mut KilnStationStack, u32, *mut u32) -> KilnResult>,
+    pub set_dye_stock: Option<unsafe extern "C" fn(KilnEntity, *const KilnStationStack, u32) -> KilnResult>,
 }
 
 #[repr(C)]

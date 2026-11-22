@@ -14,6 +14,7 @@ bool wrong_tx=false;
 }
 namespace kitems {
 Engine E{};
+KilnResult KILN_CALL dyes_set_stock(KilnEntity,const KilnStationStack*,uint32_t) { return KILN_ERR_UNAVAILABLE; }
 const char* const kAccNames[A_COUNT] = {};
 bool verify_access(const uint64_t*,const int*,const int*,const int*,void*,Access*,bool*,char*,unsigned long*) { std::abort(); }
 void abandon_tx(uint8_t*) { std::abort(); }

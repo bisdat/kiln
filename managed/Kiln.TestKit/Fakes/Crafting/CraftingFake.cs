@@ -35,6 +35,10 @@ internal sealed unsafe class CraftingFake : IKitFake
         KitBackend.Instance.RegisterTable(Service,(nint)_table);
         FakeTables.Features([Crafting.SourcesCapability]);
         FakeTables.Offline(Crafting.SourceUiCapability,"the test kit has no game client crafting screens");
+        FakeTables.Offline("crafting.dye_sources", "the test kit records dye source counts but does not run the game's Tint transaction");
+        FakeTables.Offline("crafting.dye_ui", "the test kit has no game client tinting screen");
+        FakeTables.Offline("crafting.dye_sources_session", "the test kit has no native Tint transaction session");
+        FakeTables.Offline("crafting.dye_ui_session", "the test kit has no native tinting-screen session");
     }
     public void Start(KilnHarness harness) { }
     public void BeforeStep(KilnHarness harness,ulong step) { }

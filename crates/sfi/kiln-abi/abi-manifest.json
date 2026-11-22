@@ -5679,6 +5679,7 @@
             "recipe_inputs": 96,
             "remove_source": 256,
             "set_craft_stock": 216,
+            "set_dye_stock": 280,
             "set_fill_answers": 232,
             "set_output_source": 176,
             "source_stock": 272,
@@ -5689,7 +5690,7 @@
             "watch": 152,
             "workshop_recipes": 120
           },
-          "size": 280
+          "size": 288
         },
         "KilnStationsStatus": {
           "align": 4,
@@ -5712,7 +5713,7 @@
           "size": 188
         }
       },
-      "sha256": "778b88b2902d061a12bc6f109f1a52da84d529e4c99438ff413ea24b9e67f7cf"
+      "sha256": "96ceb783c2b4d054d00be9c10cb01b006cec9c124c9cbe047ecdaabf938175a9"
     },
     "native/core/abi/services/kiln_steamguard.h": {
       "function_macros": [],
@@ -8472,7 +8473,7 @@
   },
   "outputs": {
     "src/bindings.rs": "134028a6a9914076cab3f71f98d356141d4fe36c4d7f51bac6a11819501ed935",
-    "src/layout.rs": "5f7a3d8a4919810c8d75eb3a00c44e8fa723b49eb10567232819ee85590b2c68",
+    "src/layout.rs": "aa838698638ce517225f6a820436b623e3034da004cca8b22137ae1857ac9b90",
     "src/services/kiln_abilities.rs": "06a43042e5c96d6261a17b02eab35463b07a8ad83f63b2bb168bca5ff34e582e",
     "src/services/kiln_assets.rs": "e7fe4eb1c4d53ad31eeaf05be06f41c551a49362ad5bd4174465ec18a03effe0",
     "src/services/kiln_assets_vfx.rs": "90ed8ce5ad512bbf4f002db3277bc3b439d648ca437a58d4477eac4ce46c3b81",
@@ -8518,7 +8519,7 @@
     "src/services/kiln_screen.rs": "16e368975e8826d818a3647791e26b2d35443263f8044e3e482f3eb97a49299e",
     "src/services/kiln_settings.rs": "c88c9e2771d5f520cfe37a07feab6eaa0a9d6aa8b6abb8a7b0efcaf0eeee68c7",
     "src/services/kiln_spawn.rs": "b6ced999b7a1ecd93684a0a7c138081547ccec6f496aee7c69c0f807d1bb83dc",
-    "src/services/kiln_stations.rs": "bc4b45800f45df67612a322e34e8aa852f3a5cfc2844024af14ec07f0c359c19",
+    "src/services/kiln_stations.rs": "a9d80849d6104e4b1858c99e2aaa2a680a23164ea3182d6737d4ad56af3e5827",
     "src/services/kiln_steamguard.rs": "f14ecec92f945c2b34f4682c216940187797b8db81a8de652fcba6ddb61f072c",
     "src/services/kiln_surfaces.rs": "d4d991aef0a14f4be7246227b95a0f34161ca23fe04561e9c94d6d2aba0db4a0",
     "src/services/kiln_tasks.rs": "da41943b4ac01aaa77cfb43091e8c209f0e55707c3a3105dd9070313750a6f79",

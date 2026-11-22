@@ -512,6 +512,13 @@ typedef struct KilnStationsApi {
      * flags 0: crafting extras; KILN_CRAFT_SOURCE_STOCK_ALL: all registered counts (e.g. for dyes). Unknown bits: INVALID_ARGUMENT.
      * BUFFER_TOO_SMALL reports the whole needed count: never send a truncated crafting snapshot. */
     KilnResult(KILN_CALL* source_stock)(KilnEntity player, uint32_t flags, KilnStationStack* out, uint32_t capacity, uint32_t* out_count);
+    /* Since 0.2.0-dev.30.6: a Kiln server's supported dye-source announcement for the local player. Client only,
+     * any thread; at most 256 distinct item/count rows, copied. player 0 or count 0 clears. The client shows these
+     * only in its tinting screen, for at most 15 seconds without a refresh. Counts are not authority: the server's
+     * Tint entry and payment re-resolve/recheck the shared per-player registrations, access and filters at use time.
+     * UNAVAILABLE: wrong side, no client world, unqualified wire/palette hooks. INVALID_ARGUMENT: malformed rows.
+     * This is Kiln's own transport bridge, not a way for a mod to grant access to a source. */
+    KilnResult(KILN_CALL* set_dye_stock)(KilnEntity player, const KilnStationStack* rows, uint32_t count);
 } KilnStationsApi;
 
 /* KilnStationCollect.flags. Bits 16 and up, so a result's flags never read as a request flag (KILN_STATION_DRY_RUN). */

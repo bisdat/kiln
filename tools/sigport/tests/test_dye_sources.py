@@ -25,6 +25,36 @@ BUILDS = {
 
 
 class DyeSignatures(unittest.TestCase):
+    def test_reserved_index_is_a_full_wire_byte_on_both_builds(self):
+        for side, (env, sha, _) in BUILDS.items():
+            if not os.environ.get(env):
+                self.skipTest("set both KILN_DYE_SERVER_EXE and KILN_DYE_CLIENT_EXE")
+            with self.subTest(side=side):
+                image = Image(os.environ[env])
+                self.assertEqual(sha, hashlib.sha256(Path(os.environ[env]).read_bytes()).hexdigest())
+                syms, _, _ = Resolver(image, merged(ROOT / f"sigdb/symbols/{side}.json")).run()
+                cell = syms["dyes/WireRoot"]["rva"]
+                def q(at): return struct.unpack_from("<Q", image.img, at)[0]
+                def find(schema, name):
+                    data, n = q(schema + 16) - image.base, q(schema + 24)
+                    self.assertLessEqual(n, 64)
+                    for i in range(n):
+                        at = data + 64 * i
+                        string = q(at) - image.base
+                        if image.img[string:string + len(name) + 1] == name.encode() + b"\0":
+                            return at
+                    self.fail(name)
+                root = q(cell) - image.base
+                for name in ("newestEntry", "data", "versionedActions", "itemAction", "secondarySlotId"):
+                    at = find(root, name)
+                    self.assertEqual(12, struct.unpack_from("<I", image.img, at + 8)[0])
+                    root = q(at + 56) - image.base
+                at = find(root, "slotIndex")
+                self.assertEqual((4, 4, 1), struct.unpack_from("<III", image.img, at + 8))
+                self.assertEqual(4, q(at + 24))
+                self.assertEqual(1, q(at + 40))
+                self.assertEqual(0, q(at + 48))
+
     def test_client_palette_candidates_counts_and_command(self):
         definitions = json.loads((ROOT / "sigdb/symbols/client.d/dye-sources.json").read_text())
         exe = os.environ.get("KILN_DYE_CLIENT_EXE")
@@ -32,7 +62,8 @@ class DyeSignatures(unittest.TestCase):
             self.skipTest("set KILN_DYE_CLIENT_EXE")
         image = Image(exe)
         resolver = Resolver(image, merged(ROOT / "sigdb/symbols/client.json"))
-        syms, consts, _ = resolver.run()
+        syms, consts, features = resolver.run()
+        self.assertTrue(features.get("crafting.dye_ui"))
         for name, rva in {"PaletteGrid": 0xc0b930, "PaletteBuild": 0xd14ce0, "TintCommand": 0xb2ceb0,
                           "RowCount": 0xc0bf14, "DetailCount": 0xc0c302}.items():
             self.assertTrue(syms["dyes/client." + name]["ok"], name)
@@ -60,7 +91,8 @@ class DyeSignatures(unittest.TestCase):
                 self.assertEqual(sha, hashlib.sha256(exe.read_bytes()).hexdigest())
                 image = Image(exe)
                 resolver = Resolver(image, merged(ROOT / f"sigdb/symbols/{side}.json"))
-                syms, consts, _ = resolver.run()
+                syms, consts, features = resolver.run()
+                self.assertTrue(features.get("crafting.dye_sources"))
                 for name, rva in expected.items():
                     self.assertTrue(syms["dyes/" + name]["ok"], name)
                     self.assertEqual(rva, syms["dyes/" + name]["rva"], name)
