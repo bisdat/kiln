@@ -355,6 +355,14 @@ KilnResult KILN_CALL t_message_inject(uint32_t peer, uint8_t channel, const void
     if (!g_api->on_tick_thread()) return KILN_ERR_WRONG_THREAD;
     if (!peer || !data || !length || length > msg::kMaxMessage || !msg::injectable(channel)) return KILN_ERR_INVALID_ARGUMENT;
     if (msg::inject_socket(channel) != msg::kMachineSocket) return KILN_ERR_INVALID_ARGUMENT;  // channel 21: the player socket, not mapped
+    // a connected game peer only: the machine whose slot holds it now (kiln.repl's per-Pre snapshot), never a lab fake,
+    // never a dedicated server's machine 0 (itself)
+    bool connected = false;
+    for (uint32_t m = 0; m < KILN_REPL_MACHINES && !connected; ++m) {
+        uint8_t flags = 0;
+        connected = peer_of(m, &flags) == peer && !(flags & KILN_REPL_PEER_FAKE) && (m != 0 || (flags & KILN_REPL_PEER_LOCAL));
+    }
+    if (!connected) return KILN_ERR_INVALID_ARGUMENT;
     uintptr_t session = 0;
     const uintptr_t socket = machine_socket(g_gs.load(std::memory_order_relaxed), peer, channel, &session);
     if (!socket || !session) return KILN_ERR_INVALID_ARGUMENT;  // not a connected peer (a lab fake has no session)
