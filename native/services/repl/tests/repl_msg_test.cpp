@@ -493,7 +493,47 @@ void review_fixes() {
     CHECK(send_schema(1, kSideClient) == nullptr);   // a client never sends ServerInfo
 }
 
+const FakeField kNameFields[] = {
+    {"id", U32, EU32, Scalar, 0, 0, 1, 0, nullptr},
+    {"name", String, EChar, Scalar, 4, 0, 8, 0, nullptr},
+};
+const FakeSchema kNamed{"Named", 12, 0, kNameFields, 2, 0};
+const FakeField kListFields[] = {
+    {"count", U8, EU8, Scalar, 0, 0, 1, 0, nullptr},
+    {"items", Struct, EStruct, Dynamic, 8, 4, 2, 0, &kNamed},
+};
+const FakeSchema kList{"NamedList", 32, 0, kListFields, 2, 0};
+
+void strings() {
+    alignas(8) uint8_t m[12] = {};
+    std::memcpy(m + 4, "abc", 3);
+    CHECK(strings_terminated(S(kNamed), m));
+    std::memcpy(m + 4, "abcdefgh", 8);           // 8 chars in a char[8]: the game would write a NUL at m[12]
+    CHECK(!strings_terminated(S(kNamed), m));
+    // inside a list of structs: only the elements in use count
+    alignas(8) uint8_t l[32] = {};
+    uint32_t n = 1;
+    std::memcpy(l + 4, &n, 4);
+    std::memcpy(l + 8 + 4, "ok", 2);
+    std::memcpy(l + 20 + 4, "12345678", 8);      // element 2: not in use (count 1)
+    CHECK(strings_terminated(S(kList), l));
+    n = 2;
+    std::memcpy(l + 4, &n, 4);
+    CHECK(!strings_terminated(S(kList), l));
+}
+
+void frees() {
+    CHECK(may_free(kSideServer, kSideServer));
+    CHECK(!may_free(kSideClient, kSideServer));  // a hosted world: the client world's hook, the server's Pre
+    CHECK(!may_free(kSideServer, kSideClient));
+    CHECK(may_free(kSideServer | kSideClient, kSideServer | kSideClient));
+    CHECK(!may_free(kSideServer | kSideClient, kSideServer));
+    CHECK(!may_free(kSideServer, 0));
+}
+
 int main() {
+    strings();
+    frees();
     review_fixes();
     helpers();
     abi();

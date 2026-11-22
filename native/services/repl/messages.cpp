@@ -317,6 +317,7 @@ void messages_pre() {
     // the server world's Pre and a client world's Pre (a joined client has no server world; a hosted world has both,
     // on two threads): one at a time with registration (review should 4)
     std::lock_guard lock(g_mu);
+    const uint8_t here = side_here();
     bool changed = false;
     for (auto& h : g_hooks) {
         if (!h.handle.load(std::memory_order_acquire)) continue;
@@ -327,7 +328,8 @@ void messages_pre() {
                  static_cast<unsigned long long>(h.owner), h.channel, where);
             h.removed.store(true, std::memory_order_release);
         }
-        if (h.removed.load(std::memory_order_acquire)) {
+        // only the hook's own side frees it (recheck D): the other side's chain may be running it right now
+        if (h.removed.load(std::memory_order_acquire) && msg::may_free(h.side, here)) {
             h.handle.store(0, std::memory_order_release);
             h.removed.store(false, std::memory_order_relaxed);
             h.faulted.store(false, std::memory_order_relaxed);

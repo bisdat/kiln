@@ -157,6 +157,7 @@ KilnResult client_peer_stats(KilnReplPeerStats* out, uint32_t cap, uint32_t* cou
 bool lab_init();                    // kiln_plugin_main, after the features resolved: what the harness needs
 void lab_ready(uint32_t side);      // on_ready: may the lab functions answer (policy "any" + kiln.net's lab port)
 bool lab_allowed();
+extern std::atomic<bool> g_lab_force_blank;  // lab servers: kiln/config/repl-lab.json forceBlank (recheck F; lab_pre reads it)
 void lab_pre(uintptr_t world);      // tick thread, every Pre: the fakes' last frame decoded, compared, acknowledged
 void lab_world_stopping();          // the server world goes: the fakes and Kiln's states with it
 uint32_t lab_fake_mask();           // bit per machine

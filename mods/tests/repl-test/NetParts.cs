@@ -10,7 +10,9 @@
 //               chest: a vanilla fake decodes the can's id in place of the first, 0 in place of the second, and every
 //               other item id unchanged, in Inventory and in the items' own entities (ItemState, UsedItem); a bound fake
 //               (Kiln, content acknowledged) decodes the real ids
-// The parts to run: kiln/config/repl-test.json {"parts": ["filter", "touch", "remap"]}; without the file, all.
+//   blank       the part sets kiln/config/repl-lab.json {"forceBlank": true} (kiln.repl's lab-only switch): a vanilla
+//               fake's state of the chest is blanked and still decodes with the game's decoder, all zero
+// The parts to run: kiln/config/repl-test.json {"parts": ["filter", "touch", "remap", "blank"]}; without the file, all.
 using System.Runtime.InteropServices;
 using System.Text.Json.Nodes;
 using Kiln;
@@ -134,6 +136,7 @@ public sealed partial class ReplTestMod
         if (Part("filter")) await FilterPart(can, fakes, vanilla, max);
         if (Part("touch")) await TouchPart(can, fakes, vanilla, max);
         if (Part("remap")) await RemapPart(chest, fakes, vanilla);
+        if (Part("blank")) await BlankPart(chest, fakes, vanilla);
         if (Part("messages")) await MessagesPart(fakes);
     }
 
@@ -365,5 +368,86 @@ public sealed partial class ReplTestMod
         {
             Peers.ContentCurrent = was;
         }
+    }
+
+    // Recheck F: a blanked state (every data byte 0, the lists kept) on game data. kiln/config/repl-lab.json
+    // {"forceBlank": true} makes kiln.repl blank every remapped fake's states on a lab server, as a state that cannot be
+    // placed. A blanked state of an entity differs from the fake's baseline, so it goes out (the next ones equal it and
+    // send nothing; the game snapshots an entity again only when it changes, so the part touches them); the
+    // game's own decoder (the loopback) must take it: no decode fault, the components all zero (the remap part's Kiln-only
+    // item entities, whose ItemState holds the item id).
+    private async Task BlankPart(EntityId chest, IReadOnlyList<(int Machine, int Slot)> fakes, List<int> vanilla)
+    {
+        var look = Items.Lookup("repl_test_lookalike");
+        var none = Items.Lookup("repl_test_nolook");
+        var entities = Items.Read(chest)?.Slots.Where(s => s.Item == look?.Id || s.Item == none?.Id).Select(s => s.ItemEntity)
+            .Where(e => !e.IsNone).ToList() ?? [];
+        if (!Result(entities.Count > 0 && vanilla.Count > 0, "blank setup", $"Kiln-only item entities in the chest {entities.Count}, vanilla fakes {vanilla.Count}")) return;
+        var file = Path.Combine(Path.GetFullPath(Path.Combine(Context.DataDirectory, "..", "..")), "config", "repl-lab.json");
+        var was = Peers.ContentCurrent;
+        Peers.ContentCurrent = _ => true;
+        try
+        {
+            foreach (var f in fakes)
+                foreach (var e in entities)
+                    ReplicationLab.ForceRelevant(f.Machine, e);
+            for (var i = 0; i < 300 && !Replication.RemapStats().Active; i++) await Steps(1);
+            await Steps(10);
+            var b0 = ReplicationLabInternals.RemapBlanked();
+            var l0 = ReplicationLab.LoopbackStats();
+            var t0 = new Dictionary<(int, EntityId), uint>();
+            foreach (var f in fakes)
+                foreach (var e in entities)
+                    t0[(f.Machine, e)] = ReplicationLab.Decoded(f.Machine, e, "ItemState")?.Tick ?? 0;
+            File.WriteAllText(file, "{\"forceBlank\": true}");
+            await Steps(90);  // kiln.repl reads the switch about once a second
+            // the game snapshots an entity again only when it changes: a touch re-sends the item entities, now blanked
+            var touched = entities.Count(e => Replication.Touch(e).Ok);
+            await Steps(10);
+            var b1 = ReplicationLabInternals.RemapBlanked();
+            var l1 = ReplicationLab.LoopbackStats();
+            var stats = Replication.RemapStats();
+            var problems = new List<string>();
+            var zeroed = 0;
+            var kept = 0;
+            foreach (var f in fakes)
+                foreach (var e in entities)
+                {
+                    var d = ReplicationLab.Decoded(f.Machine, e, "ItemState");
+                    if (d is null || d.Tick == t0[(f.Machine, e)])
+                    {
+                        problems.Add($"fake {f.Machine} {e}: no new ItemState decoded");
+                        continue;
+                    }
+                    if (vanilla.Contains(f.Machine))
+                    {
+                        var nonZero = 0;
+                        foreach (var b in d.Bytes.Span) if (b != 0) nonZero++;
+                        if (nonZero == 0) zeroed++;
+                        else problems.Add($"fake {f.Machine} (vanilla) {e} tick {d.Tick}: {nonZero} of {d.Bytes.Length} decoded bytes not 0");
+                    }
+                    else if (World.ReadBytes(e, "ItemState") is { } live && d.Bytes.Span.SequenceEqual(live)) kept++;
+                    else problems.Add($"fake {f.Machine} (Kiln) {e}: decoded differs from live");
+                }
+            var want = vanilla.Count * entities.Count;
+            Result(problems.Count == 0 && zeroed == want && b1 > b0 && l1.DecodeFaults == l0.DecodeFaults && l1.Decoded > l0.Decoded &&
+                   l1.ComponentsDiffer == l0.ComponentsDiffer && stats.Active, "blank",
+                $"touched {touched}; blanked {b1 - b0} states; ItemState decoded all zero {zeroed} of {want} times ({entities.Count} Kiln-only item entities x {vanilla.Count} vanilla fakes), " +
+                $"live {kept}x on Kiln fakes; the game's decoder took {l1.Decoded - l0.Decoded} messages: decode faults {l1.DecodeFaults - l0.DecodeFaults}, " +
+                $"components equal to what was sent +{l1.ComponentsEqual - l0.ComponentsEqual}, differ +{l1.ComponentsDiffer - l0.ComponentsDiffer}; stats {stats}" +
+                (problems.Count > 0 ? "; " + string.Join("; ", problems.Take(6)) : ""));
+        }
+        finally
+        {
+            try
+            {
+                File.Delete(file);
+            }
+            catch (Exception)
+            {
+            }
+            Peers.ContentCurrent = was;
+        }
+        await Steps(90);  // the switch goes off before the next part
     }
 }

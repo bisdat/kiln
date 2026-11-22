@@ -187,4 +187,26 @@ public sealed class PeersTests
         Assert.Equal(new uint[] { 0x10002 }, ItemRemap.ExpandAll([0x10002], [0, 0, 0x10002, 0, 0, 0x10005]));
         Assert.Empty(ItemRemap.ExpandAll([0], [0, 0, 0x10002]));  // [0]: the selector picked none
     }
+    [Fact]
+    public void A_stopped_remap_disconnects_only_known_vanilla_peers()
+    {
+        var vanilla = Peer(1, NetPeerState.Vanilla);
+        var connecting = Peer(2, NetPeerState.Connecting);  // a Kiln client still in its handshake: never
+        var kiln = Peer(3, NetPeerState.Ready);
+        NetPeer[] all = [vanilla, connecting, kiln];
+        Assert.Equal([vanilla], ItemRemap.ToKick(all, kilnOnly: 2, working: false, active: true, allow: false));
+        // no table yet (an item mod hot-loaded after they joined, or a build without the remap): still disconnected
+        Assert.Equal([vanilla], ItemRemap.ToKick(all, kilnOnly: 2, working: false, active: false, allow: false));
+        Assert.Empty(ItemRemap.ToKick(all, kilnOnly: 2, working: false, active: false, allow: true));
+        Assert.Empty(ItemRemap.ToKick(all, kilnOnly: 0, working: false, active: false, allow: false));
+        Assert.Empty(ItemRemap.ToKick(all, kilnOnly: 2, working: true, active: true, allow: false));
+    }
+
+    [Fact]
+    public void The_remap_never_covers_machine_0()
+    {
+        // a dedicated server's machine 0 is itself; a hosted world's machine 0 is the host's own client (it has its content)
+        Assert.Equal(new uint[] { 0x20002 }, ItemRemap.Remappable([0x10000, 0, 0x20002], [ReplNative.PeerLocal, 0, 0]));
+        Assert.Equal(new uint[] { 0x20002 }, ItemRemap.Remappable([0x10000, 0, 0x20002], [0, 0, 0]));
+    }
 }

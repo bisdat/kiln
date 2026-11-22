@@ -368,8 +368,10 @@ typedef struct KilnReplRemapStats {
     uint64_t zeroed;               /* ids replaced by 0 (no look-alike, or neither a game item nor mapped) */
     uint64_t faults;               /* remap faults (every site of that component was zeroed) */
     uint64_t blanked;              /* states that could not be placed and were blanked for a remapped peer (all data 0) */
-    uint32_t running;              /* 1: the remap works now (its hook is in when needed, it never faulted outside a
-                                    * component, every state was placed or blanked); 0: see reason */
+    uint32_t running;              /* 1: the remap works now (its hook is in when needed, the snapshot step has not
+                                    * faulted outside a component's own guard since the world started, every remapped
+                                    * state could be placed or blanked); 0: see reason. A fault stops it even when the
+                                    * peer's state was blanked (vanillaWithoutRemap then applies) */
     uint32_t reason;               /* KILN_REPL_REMAP_* */
 } KilnReplRemapStats;
 /* KilnReplRemapStats.reason */

@@ -237,6 +237,9 @@ struct HookEntry {
     std::atomic<uintptr_t> fault_where{0};
     std::atomic<uint32_t> bad{0};         // answers that were neither pass, drop nor a rewrite that fits
 };
+// Whether a Pre on a thread of sides 'here' may free a removed hook (recheck D): only when every side the hook runs on is
+// this thread's, so the other side's lock-free chain never calls a freed slot.
+inline bool may_free(uint8_t hook_side, uint8_t here) { return here && (hook_side & static_cast<uint8_t>(~here)) == 0; }
 struct ChainResult {
     int32_t action;   // KILN_REPL_PASS, _DROP, or _REWRITE (data holds the new bytes)
     uint32_t length;  // the message's length now
@@ -421,4 +424,32 @@ inline const char* send_schema(uint32_t channel, uint8_t side) {
     }
 }
 
+
+// After a decode (review recheck C): every NUL-terminated string field (type 11) of msg, and of the structs in use
+// inside it, has its NUL within its first 'fixed' bytes. The game's decoder takes a full-length string and writes its
+// NUL one byte past the field (server 0x1409a7eac..0x1409a7ed7): bytes that decode to one must never be sent.
+inline bool strings_terminated(const uint8_t* s, const uint8_t* msg, uint32_t depth = 0) {
+    if (depth > kMaxDepth) return false;
+    const uint8_t* fields = at<const uint8_t*>(s, kSchemaFields);
+    const uint64_t count = at<uint64_t>(s, kSchemaCount);
+    for (uint64_t i = 0; i < count; ++i) {
+        const uint8_t* f = fields + i * kFieldStride;
+        const uint32_t type = at<uint32_t>(f, kFieldType), shape = at<uint32_t>(f, kFieldShape);
+        const uint64_t off = at<uint64_t>(f, kFieldOffset), coff = at<uint64_t>(f, kFieldCountOff), fixed = at<uint64_t>(f, kFieldFixed);
+        if (type == String) {
+            if (shape == Optional && !msg[coff]) continue;
+            if (!fixed || !std::memchr(msg + off, 0, fixed)) return false;
+            continue;
+        }
+        if (type != Struct) continue;
+        uint64_t n = fixed;
+        if (shape == Dynamic) n = at<uint32_t>(msg, coff) < fixed ? at<uint32_t>(msg, coff) : fixed;
+        else if (shape == Optional) n = msg[coff] ? fixed : 0;
+        const uint8_t* nested = at<const uint8_t*>(f, kFieldNested);
+        const uint64_t esize = element_size(EStruct, nested);
+        for (uint64_t k = 0; k < n; ++k)
+            if (!strings_terminated(nested, msg + off + k * esize, depth + 1)) return false;
+    }
+    return true;
+}
 }  // namespace repl::msg

@@ -770,9 +770,38 @@ void lab_ready(uint32_t side) {
 
 bool lab_allowed() { return g_allowed; }
 
+std::atomic<bool> g_lab_force_blank{false};
+
+namespace {
+// kiln/config/repl-lab.json {"forceBlank": true}: read about once a second, on lab servers only (recheck F)
+bool force_blank_from_config() {
+    try {
+        char b[1024];
+        size_t n = 0;
+        if (g_api->path(KILN_PATH_KILN, b, sizeof b, &n) != KILN_OK) return false;
+        const std::string dir(b, n);
+        const std::filesystem::path p = std::filesystem::path(std::u8string(dir.begin(), dir.end())) / "config" / "repl-lab.json";
+        std::error_code ec;
+        if (!std::filesystem::exists(p, ec)) return false;
+        std::ifstream f(p);
+        if (!f) return false;
+        const auto j = nlohmann::json::parse(f, nullptr, false, true);
+        return j.is_object() && j.contains("forceBlank") && j["forceBlank"].is_boolean() && j["forceBlank"].get<bool>();
+    } catch (...) {
+        return false;
+    }
+}
+uint32_t g_switch_pres = 0;
+}  // namespace
+
 void lab_pre(uintptr_t world) {
     if (!g_allowed) return;
     drain(world);
+    if (++g_switch_pres % 60 == 1) {
+        const bool on = force_blank_from_config();
+        if (g_lab_force_blank.exchange(on, std::memory_order_relaxed) != on)
+            logf(KILN_LOG_WARN, "repl: lab: forced blanking of remapped fakes' states %s (kiln/config/repl-lab.json)", on ? "on" : "off");
+    }
     if (g_fakes.load() && ++g_pres == 120) {
         // does a fake put the sim's programs on the workers? The world steps them in parallel only while its mask of
         // live player entities is not 0 (chapter 06a §2.4), and a fake has no player entity.

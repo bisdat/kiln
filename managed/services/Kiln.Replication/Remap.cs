@@ -35,11 +35,7 @@ internal static unsafe class ItemRemap
     {
         Span<uint> ids = stackalloc uint[FilterHost.Machines];
         Span<byte> flags = stackalloc byte[FilterHost.Machines];
-        if (ReplNetNative.MachinePeers(ids, flags) != ReplNative.Ok) return [];
-        var list = new List<uint>();
-        for (var m = 0; m < ids.Length; m++)
-            if (ids[m] != 0 && (m != 0 || (flags[m] & ReplNative.PeerLocal) != 0)) list.Add(ids[m]);  // a dedicated server's machine 0 is itself
-        return [.. list];
+        return ReplNetNative.MachinePeers(ids, flags) == ReplNative.Ok ? Remappable(ids, flags) : [];
     }
 
     /// <summary>Kiln's own rule plus the mods' (RemapItems).</summary>
@@ -103,9 +99,43 @@ internal static unsafe class ItemRemap
         ReplNetLog.Warn($"repl: item remap stopped ({why}): clients without Kiln are {(AllowWithoutRemap() ? "kept (vanillaWithoutRemap allow)" : "refused and disconnected")}");
     }
 
+    /// <summary>The peers to disconnect when Kiln-only items exist and the remap does not work, with or without its table
+    /// (recheck B: also a server whose first Kiln-only item came after vanilla players joined): only peers kiln.net decided
+    /// are vanilla, never a Kiln client still in its handshake.</summary>
+    internal static IEnumerable<NetPeer> ToKick(IEnumerable<NetPeer> peers, int kilnOnly, bool working, bool active, bool allow) =>
+        working || kilnOnly == 0 || allow ? [] : peers.Where(p => p.State == NetPeerState.Vanilla);
+
+    /// <summary>The machines' peers RemapItems(Peers.All) covers (recheck E): never machine 0 (a dedicated server itself, a
+    /// hosted world's own client, which has its content) nor the local client, as LackingContent.</summary>
+    internal static uint[] Remappable(ReadOnlySpan<uint> ids, ReadOnlySpan<byte> flags)
+    {
+        var list = new List<uint>();
+        for (var m = 1; m < ids.Length; m++)
+            if (ids[m] != 0 && (flags[m] & ReplNative.PeerLocal) == 0) list.Add(ids[m]);
+        return [.. list];
+    }
+
+    // The item registry's size, read every step (cheap): a hot-loaded item mod refreshes the table at once, not up to
+    // 120 steps later (recheck B's window).
+    private static int _items = -1;
+    private static bool ItemsChanged()
+    {
+        try
+        {
+            var n = Content.Status()?.Items ?? -1;
+            if (n == _items) return false;
+            _items = n;
+            return true;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
     private static void KickVanilla()
     {
-        if (Working || _kilnOnly == 0 || !_active || AllowWithoutRemap()) return;
+        if (Working || _kilnOnly == 0) return;
         IReadOnlyList<NetPeer> peers;
         try
         {
@@ -115,9 +145,9 @@ internal static unsafe class ItemRemap
         {
             return;
         }
-        foreach (var p in peers)
+        foreach (var p in ToKick(peers, _kilnOnly, Working, _active, AllowWithoutRemap()))
         {
-            if (!Peers.Vanilla.Matches(p) || !Kicked.Add(p.Id)) continue;
+            if (!Kicked.Add(p.Id)) continue;
             ReplNetLog.Warn($"repl: disconnecting {p.Name} (0x{p.Id:x}): this server has items only Kiln has and cannot hide them from clients without Kiln right now");
             _ = Network.Kick(p, "This server has items only Kiln has and cannot hide them from your game right now. Join with Kiln.");
         }
@@ -128,7 +158,7 @@ internal static unsafe class ItemRemap
     {
         if (!_required) Require();  // also when the remap cannot run: then it refuses (a no-op where nobody joins)
         var t = ReplNetNative.T;
-        if (_tick++ % 120 == 0) RefreshTable(t);
+        if (_tick++ % 120 == 0 || ItemsChanged()) RefreshTable(t);
         if (t != null && _active) Watch(t);
         KickVanilla();
         if (!_active || t == null) return;

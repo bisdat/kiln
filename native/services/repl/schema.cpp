@@ -145,6 +145,13 @@ size_t seh_strnlen(const char* p, size_t max) {
         return 0;  // a bogus handle from a native caller: no name
     }
 }
+bool seh_strings(const uint8_t* s, const uint8_t* msg) {
+    __try {
+        return msg::strings_terminated(s, msg);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
 bool seh_counts(const uint8_t* s, const uint8_t* msg) {
     __try {
         return msg::counts_ok(s, msg);
@@ -161,7 +168,10 @@ bool schema_check(const char* name, const uint8_t* data, uint32_t length) {
     uint64_t schema = 0;
     if (t_schema_find(KilnStr{name, std::strlen(name)}, &size, &schema) != KILN_OK || !size) return false;
     std::vector<uint8_t> out(size + 16, 0);
-    return t_schema_decode(schema, data, length, out.data(), size) == KILN_OK;
+    if (t_schema_decode(schema, data, length, out.data(), size) != KILN_OK) return false;
+    // recheck C: the game's decoder takes a full-length string and writes its NUL one byte past the field (server
+    // 0x1409a7eac..0x1409a7ed7); a vanilla client would do that write too: such bytes are refused
+    return seh_strings(reinterpret_cast<const uint8_t*>(schema), out.data());
 }
 
 void schema_start() {
