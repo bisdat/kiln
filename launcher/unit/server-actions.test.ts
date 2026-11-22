@@ -6,7 +6,8 @@
 import { QueryClient } from "@tanstack/react-query";
 import { beforeEach, expect, test } from "bun:test";
 import type { ServerStatus, Task } from "../src/api/commands";
-import { elapsed, flowPhase, retryFlow, runFlow, useServerFlows, type FlowPhase, type StepSpec } from "../src/pages/servers/serverActions";
+import { elapsed, flowPhase, isShown, markShown, retryFlow, runFlow, useServerFlows, type Flow, type FlowPhase, type StepSpec } from "../src/pages/servers/serverActions";
+import { useToasts } from "../src/ui/Toast";
 import { sk } from "../src/pages/servers/serverApi";
 import { useTasks } from "../src/ui/TaskProgress";
 
@@ -163,4 +164,31 @@ test("elapsed time reads as seconds, then minutes", () => {
   expect(elapsed(59_900)).toBe("59 s");
   expect(elapsed(72_000)).toBe("1:12");
   expect(elapsed(3_600_000)).toBe("60:00");
+});
+
+test("a page counts as showing a flow only when it does: Overview's panel leaves a running start to the start view, not its failure", async () => {
+  const leavesStarts = (f: Flow) => !(f.state === "running" && (f.kind === "start" || f.kind === "restart"));
+  const off = markShown("lab", leavesStarts);
+  const running: Flow = { seq: 1, kind: "start", serverId: "lab", title: "Starting Lab", steps: [], state: "running", startedAt: 0 };
+  expect(isShown("lab", running)).toBe(false);
+  expect(isShown("lab", { ...running, state: "failed" })).toBe(true);
+  expect(isShown("lab", { ...running, kind: "backup" })).toBe(true);
+  expect(isShown("other", { ...running, state: "failed" })).toBe(false);
+  // a failed start with that panel: the panel shows the reason and Try again, no toast besides
+  useToasts.setState({ items: [] });
+  const qc = new QueryClient();
+  expect(await runFlow(qc, "lab", { kind: "start", title: "Starting Lab", steps: [fakeStep("start", ["started wine"], { fail: "exited during the start" })], done: "Running" })).toBe(false);
+  expect(useServerFlows.getState().flows.lab?.state).toBe("failed");
+  expect(useToasts.getState().items).toHaveLength(0);
+  off();
+  expect(isShown("lab", { ...running, state: "failed" })).toBe(false);
+  // no page shows it: the failure is a toast
+  expect(await runFlow(qc, "lab", { kind: "start", title: "Starting Lab", steps: [fakeStep("start", [], { fail: "exited during the start" })], done: "Running" })).toBe(false);
+  expect(useToasts.getState().items.length).toBeGreaterThan(0);
+  // two pages, one leaving it: the other one shows it
+  const a = markShown("lab", leavesStarts), b = markShown("lab");
+  expect(isShown("lab", running)).toBe(true);
+  b();
+  expect(isShown("lab", running)).toBe(false);
+  a();
 });

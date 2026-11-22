@@ -4,17 +4,18 @@
 // labelled menu beside the buttons.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { MoreHorizontal } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { NavLink, Outlet, useLocation, useNavigate, useParams } from "react-router-dom";
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { Link, NavLink, Outlet, useLocation, useNavigate, useParams } from "react-router-dom";
 import { AdminProvider, reconnectAdmin, useAdminState } from "../../api/admin";
 import * as api from "../../api/commands";
 import type { AdminTransport } from "../../api/commands";
-import { Button, ConfirmDanger, Field, Menu, Modal, Select, Skeleton, Toggle, installNote, toast, type MenuItem } from "../../ui";
-import { SERVER_NAV, serverNavFor } from "../../shell/serverNav";
-import { notifyInstall } from "../../shell/notices";
+import { Button, ConfirmDanger, Field, Menu, Modal, Select, Skeleton, Toggle, toast, type MenuItem } from "../../ui";
+import { SERVER_SECTIONS, serverPlace } from "../../shell/serverNav";
 import { ConfirmHost } from "../../admin/ui";
 import { hasKiln, runnerLabel, sk, useDeployDialog, useServer, useServerEvents, useServers, useServerStatus } from "./serverApi";
-import { cancelStep, flowPhase, runFlow, useServerFlow, type StepSpec } from "./serverActions";
+import { flowPhase, runFlow, useServerFlow } from "./serverActions";
+import { flowWord } from "./serverListCells";
+import { kilnFlow, restartFlow, startFlow, stepStart, stepStop, stopServer } from "./serverFlows";
 import { ServerActivity } from "./ServerActivity";
 import { rich, t, useT } from "../../i18n";
 
@@ -28,34 +29,93 @@ export default function ServerLayout() {
   return live ? <AdminProvider serverId={id}>{body}</AdminProvider> : body;
 }
 
+/** The server's frame (mockup A): the way back and the other servers, the head (name, state word, one sentence,
+ *  actions), the seven section tabs and a section's own pages, the activity panel, then the page. */
 function ServerFrame({ id, live }: { id: string; live: boolean }) {
   const t = useT();
   const loc = useLocation();
   const rest = loc.pathname.replace(/^\/servers\/[^/]+\/?/, "");
-  const cur = serverNavFor(rest);
+  const place = serverPlace(rest);
+  const st = useServerStatus(id);
+  const base = `/servers/${encodeURIComponent(id)}`;
+  const badge = (sec: string) => {
+    if (sec === "console" && (st.data?.state === "running" || st.data?.state === "starting")) return <small className="hot">{t("servers.frame.live")}</small>;
+    if (sec === "players" && st.data?.players) return <small className="hot">{st.data.players}</small>;
+    return null;
+  };
   return (
     <div className="k-page k-page-fill k-server">
-      <nav className="k-snav" aria-label={t("servers.head.navLabel")}>
-        {SERVER_NAV.map((g) => (
-          <div key={g.group} className="k-snav-group" role="group" aria-label={g.group}>
-            <span className="k-snav-head">{g.group}</span>
-            {g.items.map((i) => (
-              <NavLink key={i.to} to={`/servers/${encodeURIComponent(id)}/${i.to}`} className={"k-sub" + (cur?.to === i.to ? " on" : "")} aria-current={cur?.to === i.to ? "page" : undefined}>
-                <i aria-hidden />{i.label}
-              </NavLink>
-            ))}
-          </div>
-        ))}
+      <ServerTop id={id} />
+      <ServerHead id={id} live={live} />
+      {/* plain links with the state worked out here: a NavLink drops aria-current on a section's other pages (its own
+          link is not the page then), and the section tab must keep it there */}
+      <nav className="k-stabs" aria-label={t("servers.head.navLabel")}>
+        {SERVER_SECTIONS.map((sec) => {
+          const on = place?.section.id === sec.id;
+          return (
+            <Link key={sec.id} to={`${base}/${sec.tabs[0].to}`} className={"k-stab" + (on ? " on" : "")} aria-current={on ? "page" : undefined}>
+              {sec.label}{badge(sec.id)}
+            </Link>
+          );
+        })}
       </nav>
-      <div className="k-server-main">
-        <ServerHead id={id} live={live} />
-        <ServerActivity id={id} />
-        <div className="k-server-page">
-          <Outlet />
-        </div>
+      {place && place.section.tabs.length > 1 && (
+        <nav className="k-stabs-sub" aria-label={place.section.label}>
+          {place.section.tabs.map((i) => (
+            <Link key={i.to} to={`${base}/${i.to}`} className={"k-stab-sub" + (place.tab.to === i.to ? " on" : "")} aria-current={place.tab.to === i.to ? "page" : undefined}>
+              {i.label}
+            </Link>
+          ))}
+        </nav>
+      )}
+      {/* a running start shows its stages on Overview itself; every other action, a start that ended (failed: its reason
+          and Try again) and a start seen from another page show here */}
+      <ServerActivity id={id} hideKinds={place?.section.id === "overview" ? ["start", "restart"] : undefined} />
+      <div className="k-server-page">
+        <Outlet />
       </div>
       <ConfirmHost />
     </div>
+  );
+}
+
+/** "‹ All servers" and every server with its state's dot and word (a click opens it, on the same section). */
+function ServerTop({ id }: { id: string }) {
+  const t = useT();
+  const servers = useServers();
+  const loc = useLocation();
+  const rest = loc.pathname.replace(/^\/servers\/[^/]+\/?/, "") || "overview";
+  const list = servers.data ?? [];
+  return (
+    <div className="k-stop">
+      <NavLink className="k-link k-scrumb" to="/servers">{t("servers.frame.allServers")}</NavLink>
+      {list.length > 1 && (
+        <nav className="k-sswitch" aria-label={t("servers.frame.switch")}>
+          {list.map((s) => <SwitchDot key={s.id} id={s.id} name={s.name} current={s.id === id} to={`/servers/${encodeURIComponent(s.id)}/${rest}`} />)}
+        </nav>
+      )}
+    </div>
+  );
+}
+
+/** How often the switcher reads the other servers' status: a dot is no page (the current server's is the page's own). */
+const OTHERS_EVERY = 30_000;
+
+function SwitchDot({ id, name, current, to }: { id: string; name: string; current: boolean; to: string }) {
+  const t = useT();
+  const st = useServerStatus(id, current ? undefined : OTHERS_EVERY);
+  const flow = useServerFlow(id);
+  const s = st.data?.state;
+  const tone = flow?.state === "running" || s === "starting" || s === "stopping" ? "busy" : s === "running" ? "ok" : "idle";
+  // the dot's meaning in words, for screen readers (and a pointer's tooltip)
+  const word = flow?.state === "running" ? flowWord(flow, flow.steps.find((x) => x.state === "running"), t)
+    : s === "running" ? t("servers.list.running") : s === "starting" ? t("servers.list.starting") : s === "stopping" ? t("servers.list.stopping")
+    : s === "stopped" ? t("servers.list.stopped") : s ? t("servers.frame.unknown") : "…";
+  return (
+    <Link to={to} className={"k-sswitch-item" + (current ? " on" : "")} aria-current={current ? "page" : undefined}
+      aria-label={t("servers.frame.switchItem", { name, state: word })} title={word}>
+      <i className={tone} aria-hidden />{name}
+    </Link>
   );
 }
 
@@ -90,27 +150,17 @@ function ServerHead({ id, live }: { id: string; live: boolean }) {
   const state = st.data?.state;
   const s = srv.data;
   const name = s?.name ?? id;
-  const stepStop: StepSpec = { key: "stop", label: t("servers.activity.stepStop"), run: () => api.serverStop(id), phase: "stopping" };
-  const stepStart = (again: boolean): StepSpec => ({ key: "start", label: again ? t("servers.activity.stepStartAgain") : t("servers.activity.stepStart"), run: () => api.serverStart(id), phase: "starting", cancel: "stopWaiting" });
-  const start = () => void runFlow(qc, id, { kind: "start", title: t("servers.activity.startTitle", { name }), steps: [stepStart(false)], done: t("servers.head.runningToast") });
+  const start = () => void runFlow(qc, id, startFlow(id, name));
   // Stop also ends a start that is still waiting for the world: the start's wait ends, the stop takes over
-  const stop = () => {
-    const starting = busy === "start";
-    if (starting) void cancelStep(id).catch(() => {});
-    void runFlow(qc, id, { kind: "stop", title: t("servers.activity.stopTitle", { name }), steps: [stepStop], done: t("servers.head.stoppedToast") }, { supersede: starting });
-  };
-  const restart = () => void runFlow(qc, id, { kind: "restart", title: t("servers.activity.restartTitle", { name }),
-    steps: [{ key: "restart", label: t("servers.activity.stepRestart"), run: () => api.serverRestart(id), phase: "stopping" }], done: t("servers.head.restarted") });
+  const stop = () => void stopServer(qc, id, name);
+  const restart = () => void runFlow(qc, id, restartFlow(id, name));
   const pid = !!st.data?.pid;
   const updateGame = () => void runFlow(qc, id, { kind: "update", title: t("servers.activity.updateGameTitle", { name }),
-    steps: [...(pid ? [stepStop] : []), { key: "update", label: t("servers.activity.stepUpdateGame"), run: () => api.serverUpdate(id), phase: "updating", cancel: "cancel" }, ...(pid ? [stepStart(true)] : [])],
+    steps: [...(pid ? [stepStop(id)] : []), { key: "update", label: t("servers.activity.stepUpdateGame"), run: () => api.serverUpdate(id), phase: "updating", cancel: "cancel" }, ...(pid ? [stepStart(id, true)] : [])],
     done: t("servers.head.upToDate") });
-  const deployKiln = (version: string, startAfter: boolean) => void runFlow<api.InstallResult>(qc, id, {
-    kind: "deploy",
-    title: kilnInstalledNow ? t("servers.activity.updateKilnTitle", { version, name }) : t("servers.activity.deployTitle", { version, name }),
-    steps: [...(pid ? [stepStop] : []), { key: "deploy", label: t("servers.activity.stepDeploy", { version }), run: () => api.serverDeploy(id, version), result: true, phase: "updating", cancel: "cancel" }, ...(startAfter ? [stepStart(pid)] : [])],
-    done: t("servers.head.kilnInstalled", { version }), detail: installNote, after: notifyInstall,
-  });
+  // through the shared flow, so Recent says "updated from X to Y"
+  const deployKiln = (version: string, startAfter: boolean) =>
+    void runFlow<api.InstallResult>(qc, id, kilnFlow({ id, name, version, running: pid, startAfter, from: kilnInstalledNow ? (st.data?.installed ?? st.data?.kiln ?? null) : null }));
   // the dialog belongs to this server: leaving it closes the dialog
   useEffect(() => () => setDeploy(false), [id, setDeploy]);
   const kiln = hasKiln(s, st.data);
@@ -133,11 +183,22 @@ function ServerHead({ id, live }: { id: string; live: boolean }) {
     say = runner && kilnV ? t("servers.head.stoppedWithKiln", { runner, kiln: kilnV }) : runner ? t("servers.head.stoppedWith", { runner })
       : kilnV ? t("servers.head.stoppedKiln", { kiln: kilnV }) : t("servers.head.stopped");
   }
+  // the state word beside the name: the running step's first, then the backend's
+  const shown = phase ?? state;
+  const stateWord = !st.data && !phase ? null
+    : shown === "starting" ? { word: t("servers.list.starting"), tone: "ember" }
+    : shown === "stopping" ? { word: t("servers.list.stopping"), tone: "warn" }
+    : shown === "updating" ? { word: t("servers.frame.updating"), tone: "warn" }
+    : shown === "running" ? { word: t("servers.list.running"), tone: "ok" }
+    : { word: t("servers.list.stopped"), tone: "idle" };
   // the buttons follow the running step first: Stop stays usable while a start waits for the world
-  const running = phase ? phase === "starting" || (phase === "stopping" && busy !== "stop" && !!st.data?.pid) : state === "running" || state === "starting";
-  const canStop = busy === "start" || (!busy && !!st.data?.pid);
+  // a process here, or a remote server that answers (its status has no pid: kilnctl runs it over there)
+  const up = !!st.data?.pid || (remote && state === "running");
+  const running = phase ? phase === "starting" || (phase === "stopping" && busy !== "stop" && up) : state === "running" || state === "starting";
+  const canStop = busy === "start" || (!busy && up);
   const items: MenuItem[] = [
-    ...(s?.runner !== "steam" ? [{ label: t("servers.head.updateGame"), disabled: !!busy || state === "starting" || state === "stopping", onSelect: updateGame }] : []),
+    // SteamCMD updates a folder on this PC: not a Steam library install (Steam does), not a remote server
+    ...(s?.runner !== "steam" && !remote ? [{ label: t("servers.head.updateGame"), disabled: !!busy || state === "starting" || state === "stopping", onSelect: updateGame }] : []),
     ...(!remote ? [{ label: kiln ? t("servers.head.updateKilnMenu") : t("servers.head.installKilnMenu"), disabled: !!busy || state === "starting" || state === "stopping", onSelect: () => setDeploy(true) }] : []),
     ...(live ? transportItems(id) : []),
     { label: t("servers.head.removeMenu"), danger: true, disabled: !!st.data?.pid || !!busy, onSelect: () => setRemoving(true) },
@@ -145,13 +206,14 @@ function ServerHead({ id, live }: { id: string; live: boolean }) {
   return (
     <header className="k-page-head k-server-head">
       <div className="k-server-name" style={{ minWidth: 0 }}>
-        <h1 className="k-page-title" style={{ fontSize: 52 }}>
+        <h1 className="k-page-title k-server-title">
           {s ? (
             <button type="button" className="k-name-btn" aria-haspopup="listbox" aria-expanded={pick} onClick={() => setPick((p) => !p)} aria-label={t("servers.head.changeServer", { name: s.name })}>
               {s.name}<svg viewBox="0 0 24 24" aria-hidden><path d="M5 9l7 7 7-7" /></svg>
             </button>
           ) : <Skeleton lines={1} width={260} height={46} />}
         </h1>
+        {stateWord && <span className={`k-word k-tone-${stateWord.tone} k-server-word`}>{stateWord.word}</span>}
         {pick && <ServerPicker current={id} servers={servers.data ?? []} onClose={() => setPick(false)} onPick={(sid) => { setPick(false); nav(`/servers/${encodeURIComponent(sid)}/overview`); }} />}
         <p className="k-page-sub" style={{ marginTop: 1 }}>{say}</p>
       </div>
@@ -221,11 +283,22 @@ function ServerPicker({ current, servers, onClose, onPick }: { current: string; 
     const esc = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     document.addEventListener("mousedown", close);
     document.addEventListener("keydown", esc);
-    ref.current?.querySelector<HTMLElement>(".k-menu-item")?.focus();
+    // the current server first, as a list box does
+    (ref.current?.querySelector<HTMLElement>('.k-menu-item[aria-selected="true"]') ?? ref.current?.querySelector<HTMLElement>(".k-menu-item"))?.focus();
     return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", esc); };
   }, [onClose]);
+  // the arrows (and Home, End) move between the servers and "All servers"
+  const keys = (e: ReactKeyboardEvent) => {
+    const items = [...(ref.current?.querySelectorAll<HTMLElement>(".k-menu-item") ?? [])];
+    const at = items.indexOf(document.activeElement as HTMLElement);
+    const to = e.key === "ArrowDown" ? (at + 1) % items.length : e.key === "ArrowUp" ? (at - 1 + items.length) % items.length
+      : e.key === "Home" ? 0 : e.key === "End" ? items.length - 1 : -1;
+    if (to < 0 || !items.length) return;
+    e.preventDefault();
+    items[to].focus();
+  };
   return (
-    <div ref={ref} className="k-popover" role="listbox" aria-label={t("servers.list.title")} style={{ left: 0, top: 60, width: 320 }}>
+    <div ref={ref} className="k-popover" role="listbox" aria-label={t("servers.list.title")} style={{ left: 0, top: 60, width: 320 }} onKeyDown={keys}>
       {servers.map((s) => (
         <button key={s.id} type="button" role="option" aria-selected={s.id === current} className="k-menu-item" onClick={() => onPick(s.id)}>
           <span style={{ fontWeight: s.id === current ? 700 : 400 }}>{s.name}</span><span className="k-mono">{s.id}</span>

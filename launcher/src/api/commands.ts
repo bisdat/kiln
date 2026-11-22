@@ -229,6 +229,7 @@ export interface Task<R = unknown> {
   kind: string;
   title: string;
   state: TaskState;
+  stage?: string | null;
   progress: number | null;
   message: string | null;
   started: string;
@@ -1308,6 +1309,7 @@ export interface ServerStatus {
   state: "stopped" | "starting" | "running" | "stopping" | "unknown";
   pid: number | null;
   uptimeS: number | null;
+  lastStartS?: number | null;
   players: number | null;
   kiln: string | null;
   /** Kiln in the server folder, running or not: the installed runtime version ("unknown" for a Kiln put there by

@@ -376,7 +376,7 @@ test("a server without Kiln offers Install Kiln on Overview; one with Kiln offer
   const more = page.getByRole("button", { name: "More server actions" });
   const banner = page.locator(".k-banner").filter({ hasText: "Kiln isn't installed" });
   // running with Kiln: no banner, the menu updates it
-  await expect(page.locator(".k-overview")).toBeVisible();
+  await expect(page.locator(".k-sov")).toBeVisible();
   await expect(banner).toHaveCount(0);
   await more.click();
   await expect(page.getByRole("menuitem", { name: "Update Kiln…" })).toBeVisible();
@@ -617,29 +617,34 @@ test("a state push from the Emberwatch Lua mod (empty lists as {}) does not brea
 // element, capped by this instead.
 const LOAD = { timeout: 30_000 };
 
-test("one grouped list per server: Run, World, Data, Files", async ({ page }) => {
+test("seven section tabs per server, and a section's pages as a second row", async ({ page }) => {
   await open(page, "/servers/lab/admin/players");
-  const list = page.getByRole("navigation", { name: "Server" });
-  await expect(list).toBeVisible(LOAD);
-  for (const g of ["Run", "World", "Data", "Files"]) await expect(list.getByRole("group", { name: g })).toBeVisible();
-  await expect(list.getByRole("link")).toHaveCount(21);
-  await expect(list.getByRole("link", { name: "Players" })).toHaveAttribute("aria-current", "page");
-  await list.getByRole("link", { name: "Map", exact: true }).click();
+  const tabs = page.getByRole("navigation", { name: "Server" });
+  await expect(tabs).toBeVisible(LOAD);
+  await expect(tabs.getByRole("link")).toHaveText([/^Overview/, /^Console/, /^Players/, /^World/, /^Mods/, /^Backups/, /^Settings/]);
+  await expect(tabs.getByRole("link", { name: /^Players/ })).toHaveAttribute("aria-current", "page");
+  const sub = page.getByRole("navigation", { name: "Players" });
+  await expect(sub.getByRole("link")).toHaveText(["Players", "Permissions", "Combat"]);
+  await tabs.getByRole("link", { name: /^World/ }).click();
   await expect(page).toHaveURL(/#\/servers\/lab\/admin\/map$/);
-  await expect(list.getByRole("link", { name: "Map", exact: true })).toHaveAttribute("aria-current", "page");
-  // server pages and admin pages share the list
-  await list.getByRole("link", { name: "Backups", exact: true }).click();
+  await page.getByRole("navigation", { name: "World" }).getByRole("link", { name: "Zones" }).click();
+  await expect(page).toHaveURL(/#\/servers\/lab\/admin\/zones$/);
+  // on a section's other page its tab is still the current one (and the page's own in the second row)
+  await expect(tabs.getByRole("link", { name: /^World/ })).toHaveAttribute("aria-current", "page");
+  await expect(tabs.locator("[aria-current]")).toHaveCount(1);
+  await expect(page.getByRole("navigation", { name: "World" }).getByRole("link", { name: "Zones" })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("navigation", { name: "World" }).getByRole("link", { name: "Map" })).not.toHaveAttribute("aria-current", /./);
+  await tabs.getByRole("link", { name: /^Backups/ }).click();
   await expect(page).toHaveURL(/#\/servers\/lab\/backups$/);
-  // the merged pages: the old admin routes land on them (the router redirects them; the admin pages' bundle is not
-  // waited for), then the page loads
+  // old links still land: the merged admin routes redirect; the console has its own page now
   await open(page, "/servers/lab/admin/console");
-  await expect(page).toHaveURL(/#\/servers\/lab\/overview$/);
+  await expect(page).toHaveURL(/#\/servers\/lab\/console$/);
   await expect(page.getByRole("log", { name: "Server console" })).toBeVisible(LOAD);
   await open(page, "/servers/lab/admin/mods");
   await expect(page).toHaveURL(/#\/servers\/lab\/mods$/);
-  // the list fits 800 high without scrolling
-  const box = await list.evaluate((el) => ({ scroll: el.scrollHeight, client: el.clientHeight }));
-  expect(box.scroll).toBeLessThanOrEqual(box.client + 1);
+  await open(page, "/servers/lab/ticks");
+  await expect(page.getByRole("navigation", { name: "Console" }).getByRole("link", { name: "Tick stats" })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("navigation", { name: "Server" }).getByRole("link", { name: /^Console/ })).toHaveAttribute("aria-current", "page");
 });
 
 test("schema form edits a config value", async ({ page }) => {

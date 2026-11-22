@@ -9,10 +9,11 @@ import { create } from "zustand";
 import { taskCancel, type KilnError, type ServerId, type Task, type TaskId } from "../../api/commands";
 import { toast, useTasks, waitTask } from "../../ui";
 import { sk } from "./serverApi";
+import { recordFlowEnd } from "./activityLog";
 
 export type StepState = "pending" | "running" | "done" | "failed" | "canceled" | "skipped";
 export type FlowState = "running" | "done" | "failed" | "canceled";
-export type FlowKind = "start" | "stop" | "restart" | "update" | "deploy";
+export type FlowKind = "start" | "stop" | "restart" | "update" | "deploy" | "create" | "backup";
 /** What the head says while a step runs. */
 export type FlowPhase = "starting" | "stopping" | "updating";
 /** How a running step can be ended early: "cancel" ends the task (an install, an update); "stopWaiting" ends a start's
@@ -34,10 +35,15 @@ export interface FlowStep {
   progress: number | null;
   /** the distinct progress lines the step's task reported, oldest first (at most MAX_LINES) */
   lines: FlowLine[];
+  /** the stages the step's task named (Task.stage: a start's "preparing", "world"...), each with when it began (ms since
+   *  the flow started), oldest first */
+  stages?: { id: string; at: number }[];
   startedAt?: number;
   endedAt?: number;
   phase?: FlowPhase;
   cancel?: StepCancel;
+  /** the step's task result once it is done (the activity log reads a start's status, an install's receipt) */
+  result?: unknown;
 }
 
 export interface Flow {
@@ -60,6 +66,8 @@ export interface Flow {
   open?: boolean;
   /** a later flow (Stop during a start) took over */
   superseded?: boolean;
+  /** what the flow's caller knew before it ran (an update's previous Kiln: "from"), for the activity log */
+  meta?: Record<string, string | null | undefined>;
 }
 
 /** What a step does: starts a TaskId command. `phase`: what the head says while it runs. */
@@ -83,6 +91,8 @@ export interface FlowSpec<R = unknown> {
   detail?: (result: R) => string | undefined;
   /** called with the flow's result */
   after?: (result: R) => void;
+  /** kept on the flow for the activity log (Flow.meta) */
+  meta?: Record<string, string | null | undefined>;
 }
 
 const MAX_LINES = 400;
@@ -132,15 +142,24 @@ export const useServerFlow = (id: ServerId) => useServerFlows((s) => s.flows[id]
 
 export const flowRunning = (id: ServerId) => useServerFlows.getState().flows[id]?.state === "running";
 
-/** Server pages showing a flow's panel: a flow that ends while none shows it ends with a toast instead. */
-const shown = new Map<ServerId, number>();
-export function markShown(id: ServerId): () => void {
-  shown.set(id, (shown.get(id) ?? 0) + 1);
+/** Server pages showing a flow's panel, each with which flows it shows (Overview's panel leaves a running start to the
+ *  start's own view): a flow that ends while no page shows it, as it ended, ends with a toast instead. */
+const shown = new Map<ServerId, Set<{ shows: (f: Flow) => boolean }>>();
+export function markShown(id: ServerId, shows: (f: Flow) => boolean = () => true): () => void {
+  const mark = { shows };
+  const set = shown.get(id) ?? new Set();
+  set.add(mark);
+  shown.set(id, set);
   return () => {
-    const n = (shown.get(id) ?? 1) - 1;
-    if (n <= 0) shown.delete(id);
-    else shown.set(id, n);
+    set.delete(mark);
+    if (!set.size && shown.get(id) === set) shown.delete(id);
   };
+}
+
+/** A page shows this flow of the server (as it is now). */
+export function isShown(id: ServerId, f: Flow): boolean {
+  for (const m of shown.get(id) ?? []) if (m.shows(f)) return true;
+  return false;
 }
 
 function update(id: ServerId, s: number, f: (flow: Flow) => Flow) {
@@ -156,14 +175,17 @@ function patchStep(id: ServerId, s: number, i: number, p: Partial<FlowStep> | ((
   }));
 }
 
-/** Adds the task's current message to the step's lines (when it is new) and takes its progress. */
+/** Adds the task's current message to the step's lines (when it is new), its stage to the step's stages (when it
+ *  changed) and takes its progress. */
 function follow(id: ServerId, s: number, i: number, t: Task | undefined, t0: number) {
   if (!t) return;
   patchStep(id, s, i, (st) => {
     const msg = (t.state === "failed" ? t.error?.message ?? t.message : t.message)?.trim();
     const last = st.lines[st.lines.length - 1]?.text;
     const lines = msg && msg !== last ? [...st.lines, { at: Date.now() - t0, text: msg }].slice(-MAX_LINES) : st.lines;
-    return lines === st.lines && st.progress === t.progress ? {} : { lines, progress: t.progress };
+    const stage = t.stage ?? null;
+    const stages = stage && stage !== st.stages?.[st.stages.length - 1]?.id ? [...(st.stages ?? []), { id: stage, at: Date.now() - t0 }] : st.stages;
+    return lines === st.lines && stages === st.stages && st.progress === t.progress ? {} : { lines, stages, progress: t.progress };
   });
 }
 
@@ -190,7 +212,7 @@ export async function runFlow<R = unknown>(qc: QueryClient, id: ServerId, spec: 
   const t0 = Date.now();
   useServerFlows.setState((st) => ({ specs: { ...st.specs, [id]: spec } }));
   useServerFlows.getState().put({
-    seq: s, kind: spec.kind, serverId: id, title: spec.title, state: "running", startedAt: t0,
+    seq: s, kind: spec.kind, serverId: id, title: spec.title, state: "running", startedAt: t0, meta: spec.meta,
     steps: spec.steps.map((x) => ({ key: x.key, label: x.label, state: "pending", progress: null, lines: [], phase: x.phase, cancel: x.cancel })),
   });
   const resultAt = spec.steps.some((x) => x.result) ? spec.steps.findIndex((x) => x.result) : spec.steps.length - 1;
@@ -209,7 +231,7 @@ export async function runFlow<R = unknown>(qc: QueryClient, id: ServerId, spec: 
       });
       const r = await waitTask(taskId);
       follow(id, s, i, useTasks.getState().tasks[taskId], t0);
-      patchStep(id, s, i, { state: "done", endedAt: Date.now(), progress: 1 });
+      patchStep(id, s, i, { state: "done", endedAt: Date.now(), progress: 1, result: r });
       // the result step's note and notice at once: a later step's failure must not lose them
       if (i === resultAt && useServerFlows.getState().flows[id]?.seq === s) {
         const detail = spec.detail?.(r as R);
@@ -238,8 +260,11 @@ export async function runFlow<R = unknown>(qc: QueryClient, id: ServerId, spec: 
     error: failed,
     doneText: ok ? spec.done : undefined,
   }));
-  if (mine && !shown.has(id)) {
-    const detail = useServerFlows.getState().flows[id]?.detail;
+  // the Servers list's "Recent" (activityLog.ts): every flow of this launcher that ends, whoever started it
+  if (mine) recordFlowEnd(qc, useServerFlows.getState().flows[id]);
+  const ended = useServerFlows.getState().flows[id];
+  if (mine && ended && !isShown(id, ended)) {
+    const detail = ended.detail;
     if (ok) toast.ok(spec.done, detail);
     else if (failed) toast.error(failed, spec.title);
   }

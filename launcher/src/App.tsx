@@ -28,6 +28,7 @@ import { CommunityRoute } from "./community/CommunityPage";
 // Server and admin pages load lazily: a page that is mid-edit (or broken) fails alone, inside the shell's error
 // boundary, instead of blanking the launcher.
 const ServerOverviewPage = lazy(() => import("./pages/servers/ServerOverviewPage"));
+const ServerConsolePage = lazy(() => import("./pages/servers/ServerConsolePage"));
 const ServerSettingsPage = lazy(() => import("./pages/servers/ServerSettingsPage"));
 const ServerModsPage = lazy(() => import("./pages/servers/ServerModsPage"));
 const ServerConfigsPage = lazy(() => import("./pages/servers/ServerConfigsPage"));
@@ -94,6 +95,7 @@ export default function App() {
         <Route path="servers/:id" element={<ServerLayout />}>
           <Route index element={<Navigate to="overview" replace />} />
           <Route path="overview" element={<ServerOverviewPage />} />
+          <Route path="console" element={<ServerConsolePage />} />
           <Route path="settings" element={<ServerSettingsPage />} />
           <Route path="mods" element={<ServerModsPage />} />
           <Route path="configs" element={<ServerConfigsPage />} />

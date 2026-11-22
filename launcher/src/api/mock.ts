@@ -9,7 +9,7 @@ import type {
   FoundMod, FoundReport, GameInstall, GameStatus, ImportReport, InstallReceipt, InstallResult, InstallState, Json, KilnError, LastServer, LaunchRequest, NewerKilnMod, GraphicsToolNote, GraphicsStepAside, GraphicsStateFile,
   LaunchResult, LauncherSettings, RenderInfo, SandboxInfo, DesktopInfo, LibraryEntry, LibraryRef, LibraryVersion, RollbackReport, VersionRef, TakenOver, LogFile, LogTarget, ModKind, ModpackInstallRequest, ModpackInstallResult, ModsJson,
   NativeJson, NativePlanEntry, NativeUserState, PreStart, Profile, ProfileChange, ProfileMod, ProfileSummary, ProxyClass, Rejection, RemoveReport, ResolvePreview, SettingsRemoval, RuntimeBundle, SaveBackup, SaveSlot,
-  SchemaSnapshot, ServerInstance, ServerStatus, Task, TaskState, StartMode, StartSettings, StartSetup, RunnerInfo, BuildCheck,
+  SchemaSnapshot, ServerInstance, ServerSpec, ServerStatus, Task, TaskState, StartMode, StartSettings, StartSetup, RunnerInfo, BuildCheck,
 } from "./commands";
 import type { SfBackend, SfBackendCard, SfBackendPreview, SfResolution, SfSetting } from "./commands";
 import type { Preflight, StartWarning } from "./commands";
@@ -572,11 +572,20 @@ function emitTask(t: Task) { tasks.set(t.id, t); mockEmit("kiln://task", clone(t
  *  activation of that kind. `fail`: the task then fails with this message instead of finishing. */
 const taskHolds = new Map<string, { gate: string; fail?: string }>();
 
-/** A fake long task: `steps` progress messages, then `finish()` gives the result (or throws a KilnError). */
-function startTask(kind: string, title: string, steps: string[], finish: () => unknown, stepMs = 450): string {
+type TaskStep = string | { stage: string; message: string };
+
+/** A fake long task: `steps` progress messages and optional stage IDs, then `finish()` gives the result. `failed`:
+ *  called when it fails instead (a held task's `fail`, or `finish` throwing). */
+function startTask(kind: string, title: string, steps: readonly TaskStep[], finish: () => unknown, stepMs = 450, failed?: () => void): string {
   const id = `t${++taskSeq}-${kind}`;
-  const t: Task = { id, kind, title, state: "running", progress: 0, message: steps[0] ?? null, started: now(), finished: null };
-  emitTask(t);
+  let t: Task = { id, kind, title, state: "running", progress: 0, message: null, started: now(), finished: null };
+  const emitStep = (step: TaskStep, progress: number) => {
+    const fields = typeof step === "string" ? { message: step } : step;
+    t = { ...t, ...fields, progress };
+    emitTask(t);
+  };
+  if (steps.length) emitStep(steps[0], 0);
+  else emitTask(t);
   const hold = taskHolds.get(kind);
   let i = 0;
   const end = () => {
@@ -586,13 +595,17 @@ function startTask(kind: string, title: string, steps: string[], finish: () => u
     try {
       if (hold?.fail) reject("io", hold.fail);
       result = finish();
-    } catch (e) { state = "failed"; error = e as KilnError; }
+    } catch (e) { state = "failed"; error = e as KilnError; failed?.(); }
     emitTask({ ...t, state, progress: 1, message: error ? error.message : "Done", finished: now(), result, error });
   };
   const tick = () => {
     if (cancels.has(id)) { emitTask({ ...t, state: "canceled", message: "Canceled", finished: now(), error: { code: "canceled", message: "Canceled." } }); return; }
     i++;
-    if (i < steps.length) { emitTask({ ...t, progress: i / steps.length, message: steps[i] }); setTimeout(tick, stepMs); return; }
+    if (i < steps.length) {
+      emitStep(steps[i], i / steps.length);
+      setTimeout(tick, stepMs);
+      return;
+    }
     if (hold && !gateOf(hold.gate).open) { gateOf(hold.gate).waiters.push(() => setTimeout(end, 0)); return; }
     end();
   };
@@ -1130,19 +1143,96 @@ const server: ServerInstance = {
   wine: "ge:GE-Proton10-3", policy: "any", source: "kilnctl", remote: null,
 };
 const runningServer: ServerStatus = {
-  id: server.id, state: "running", pid: 5120, uptimeS: 3600, players: 0, kiln: "0.2.0-dev", installed: "0.2.0-dev+20261104.0f1ffa6",
+  id: server.id, state: "running", pid: 5120, uptimeS: 3600, lastStartS: 1, players: 0, kiln: "0.2.0-dev", installed: "0.2.0-dev+20261104.0f1ffa6",
   boot: { ...(bootExample as unknown as BootJson), side: "server" }, endpoint: endpointExample as unknown as AdminEndpoint,
 };
-let serverStatus: ServerStatus = runningServer;
-/** Each server_start's number; a stop moves it on, so a start it interrupted fails as the real one does. */
-let serverStartSeq = 0;
+/** One server the mock knows: its instance, its status, the status a start gives it (`running`), and the pids it uses. */
+interface MockServer {
+  inst: ServerInstance;
+  status: ServerStatus;
+  running: ServerStatus;
+  /** Each server_start's number; a stop moves it on, so a start it interrupted fails as the real one does. */
+  startSeq: number;
+  maxPlayers: number;
+  /** its running pid; a start gives it basePid + 1, a restart basePid + 2 */
+  basePid: number;
+  world: string;
+}
+const mockServers = new Map<string, MockServer>();
+/** `?servers=3` (the servers-revamp story, mockup A): Ember Isles runs with 3 players and Kiln 0.2.0-dev.30.4, Hollow Lab
+ *  is stopped with Kiln 0.2.0-dev.30.2 (an update: the runtime list gets 30.4 and 30.2), Frostwood runs on vps-01 over
+ *  SSH. Without it: the one "lab" server the other tests know. */
+const SERVERS3 = typeof location !== "undefined" && new URLSearchParams(location.search).get("servers") === "3";
+const stopped = (s: ServerStatus): ServerStatus => ({ ...s, state: "stopped", pid: null, uptimeS: null, players: null, kiln: null, boot: null, endpoint: null });
+/** What run::remote_status can tell over SSH: running when the admin endpoint answers (else unknown), the Kiln it
+ *  names; never a pid, uptime, players, last start, installed Kiln or boot. */
+const remoteStatus = (s: ServerStatus): ServerStatus => {
+  const up = s.state === "running" || s.state === "stopping";
+  return { ...s, state: up ? "running" : "unknown", pid: null, uptimeS: null, lastStartS: null, players: null, installed: null, boot: null,
+    kiln: up ? s.kiln : null, endpoint: up ? s.endpoint : null };
+};
+/** `__kilnMock.namedStages(false)`: start tasks name no stage (a backend before Task.stage): Overview reads the lines. */
+let namedStages = true;
+const unnamed = (steps: TaskStep[]): TaskStep[] => (namedStages ? steps : steps.map((s) => (typeof s === "string" ? s : s.message)));
+if (!SERVERS3) {
+  mockServers.set(server.id, { inst: server, status: runningServer, running: runningServer, startSeq: 0, maxPlayers: 4, basePid: 5120, world: "Lab" });
+} else {
+  const part = (b: RuntimeBundle) => b.parts;
+  bundles.unshift(
+    { version: "0.2.0-dev.30.4", kiln: "0.2.0-dev.30.4", file: "runtime/kiln-runtime-0.2.0-dev.30.4.zip", sha256: hex("rt304"), created: "2026-11-22T02:30:00Z",
+      sides: ["server", "client"], components: bundles[0].components, parts: part(bundles[0]) },
+    { version: "0.2.0-dev.30.2", kiln: "0.2.0-dev.30.2", file: "runtime/kiln-runtime-0.2.0-dev.30.2.zip", sha256: hex("rt302"), created: "2026-11-21T01:10:00Z",
+      sides: ["server", "client"], components: bundles[0].components, parts: part(bundles[0]) },
+  );
+  const local = (id: string, name: string, port: number): ServerInstance => ({
+    id, name, kind: "local", dir: `/home/player/srv/enshrouded/${id}`, port, queryPort: port + 1, wine: "ge:GE-Proton10-3", policy: "verified-only", source: "kilnctl", remote: null, runner: "kilnctl",
+  });
+  const ember: ServerStatus = { ...runningServer, id: "ember-isles", pid: 6120, uptimeS: 8040, players: 3, kiln: "0.2.0-dev.30.4", installed: "0.2.0-dev.30.4" };
+  mockServers.set("ember-isles", { inst: local("ember-isles", "Ember Isles", 15636), status: ember, running: ember, startSeq: 0, maxPlayers: 16, basePid: 6120, world: "Ember Isles" });
+  const hollow: ServerStatus = { ...runningServer, id: "hollow-lab", pid: 6220, uptimeS: 0, players: 0, kiln: "0.2.0-dev.30.2", installed: "0.2.0-dev.30.2" };
+  mockServers.set("hollow-lab", { inst: local("hollow-lab", "Hollow Lab", 15638), status: { ...stopped(hollow), installed: hollow.installed }, running: hollow, startSeq: 0, maxPlayers: 8, basePid: 6220, world: "Hollow" });
+  // a remote server's status as run::remote_status gives it: running from its admin endpoint, no pid, uptime, players,
+  // last start or folder here
+  const frost: ServerStatus = remoteStatus({ ...runningServer, id: "frostwood", kiln: "0.2.0-dev.30.4" });
+  mockServers.set("frostwood", {
+    inst: { id: "frostwood", name: "Frostwood", kind: "remote", dir: null, port: 15636, queryPort: 15637, wine: null, policy: "verified-only", source: "remote",
+      remote: { host: "vps-01", port: 22, dir: "/srv/enshrouded/frostwood", instance: "frostwood" }, runner: "remote" },
+    status: frost, running: frost, startSeq: 0, maxPlayers: 8, basePid: 2210, world: "Frostwood",
+  });
+}
+/** The server a command names (`serverId`; none: the lab server, as the mock always answered). */
+function srvOf(a: Record<string, unknown>): MockServer {
+  const id = a.serverId === undefined || a.serverId === null ? server.id : S(a.serverId);
+  return mockServers.get(id) ?? reject("not_found", `no server '${id}'`);
+}
+function setServerStatus(rec: MockServer, status: ServerStatus) {
+  if (rec.inst.kind === "remote") status = remoteStatus(status);
+  rec.status = status;
+  mockEmit("kiln://server", { serverId: rec.inst.id, status });
+}
 /** Tests (`__kilnMock.setServer`): the lab server stopped and with or without Kiln in its folder, or back to running. */
 function mockSetServer(o: { running?: boolean; installed?: string | null }) {
+  const rec = mockServers.get(server.id);
+  if (!rec) return;
   const installed = o.installed === undefined ? runningServer.installed : o.installed;
-  serverStatus = !(o.running ?? true)
-    ? { ...runningServer, state: "stopped", pid: null, uptimeS: null, players: null, kiln: null, boot: null, endpoint: null, installed }
-    : installed ? { ...runningServer, installed } : { ...runningServer, installed: null, kiln: null, boot: null, endpoint: null };
-  mockEmit("kiln://server", { serverId: server.id, status: serverStatus });
+  setServerStatus(rec, !(o.running ?? true)
+    ? { ...stopped(runningServer), installed }
+    : installed ? { ...runningServer, installed } : { ...runningServer, installed: null, kiln: null, boot: null, endpoint: null });
+}
+
+/** A start's lines with its named stages (Task.stage), as kiln_manage::server::run reports them; a remote start only
+ *  prepares (`kilnctl start` over SSH) and runs. */
+function startStages(id: string, pid: number, world: string, remote?: MockServer["inst"]["remote"]): TaskStep[] {
+  if (remote) return unnamed([{ stage: "preparing", message: `ssh ${remote.host} kilnctl start ${remote.instance ?? id}` }, { stage: "running", message: `${id} started` }]);
+  return unnamed([
+    { stage: "preparing", message: "checking the server folder and Kiln's setup" },
+    { stage: "wine", message: "GE-Proton10-3, prefix ready" },
+    { stage: "process", message: `started GE-Proton10-3 ./enshrouded_server.exe (wine pid ${pid}), output in /home/player/.local/state/kiln/${id}.run.log` },
+    { stage: "world", message: `[server] Loading world '${world}' (seed 1847)` },
+    { stage: "world", message: "[ecs] LoadEcsScene to Load" },
+    { stage: "world", message: "[streaming] 812 of 1490 chunks" },
+    { stage: "running", message: "[ecs] LoadEcsScene to Run" },
+  ]);
 }
 
 // ---------------------------------------------------------------- handlers
@@ -1778,63 +1868,123 @@ const handlers: Record<string, Handler> = {
 
   // modpack (the refusal banner on Play); servers: the server mock handlers below override these
   modpack_pending: () => pendingLastServer(),
-  server_list: () => [server],
-  server_get: () => server,
-  server_status: () => serverStatus,
+  server_list: () => [...mockServers.values()].map((r) => r.inst),
+  server_get: (a) => srvOf(a).inst,
+  server_status: (a) => srvOf(a).status,
   server_deploy: (a) => {
+    const rec = srvOf(a);
     const version = S(a.version);
     const b = bundles.find((x) => x.version === version) ?? reject("not_found", `No runtime bundle ${version}.`);
-    if (serverStatus.pid) reject("conflict", "Stop the server before installing Kiln.");
-    return startTask("server_deploy", `Installing Kiln ${version} on ${server.id}`, ["Verifying the bundle", "Staging", "Placing files", "Writing receipt"], () => {
-      serverStatus = { ...serverStatus, installed: b.version };
-      mockEmit("kiln://server", { serverId: server.id, status: serverStatus });
+    if (rec.inst.kind === "remote") reject("unsupported", "A remote server has no folder on this PC.");
+    if (rec.status.pid) reject("conflict", "Stop the server before installing Kiln.");
+    return startTask("server_deploy", `Installing Kiln ${version} on ${rec.inst.id}`, ["Verifying the bundle", "Staging", "Placing files", "Writing receipt"], () => {
+      rec.running = { ...rec.running, installed: b.version, kiln: b.kiln };
+      setServerStatus(rec, { ...rec.status, installed: b.version });
       const receipt: InstallReceipt = { ...baseReceipt, side: "server", installed: now(), runtime: { version: b.version, sha256: b.sha256, components: resolveParts(b, "server", null), deselected: [] } };
       return { ...receipt, changedBackedUp: [], backup: null } satisfies InstallResult;
     });
   },
   // a start, stop, restart and game update with the real tasks' progress lines (kiln_manage::server::run)
-  server_start: () => {
-    if (serverStatus.pid) reject("conflict", `${server.id} is running already (pid ${serverStatus.pid})`);
-    const mine = ++serverStartSeq;
+  server_start: (a) => {
+    const rec = srvOf(a);
+    const id = rec.inst.id;
+    if (rec.status.pid) reject("conflict", `${id} is running already (pid ${rec.status.pid})`);
+    const mine = ++rec.startSeq;
+    const pid = rec.basePid + 1;
     // the status says starting once the process is there (the real status reads the pid), not at the click
     setTimeout(() => {
-      if (mine !== serverStartSeq || serverStatus.pid) return;
-      serverStatus = { ...serverStatus, state: "starting", pid: 5121, uptimeS: 0 };
-      mockEmit("kiln://server", { serverId: server.id, status: serverStatus });
+      if (mine !== rec.startSeq || rec.status.pid) return;
+      setServerStatus(rec, { ...rec.status, state: "starting", pid, uptimeS: 0 });
     }, 1500);
-    return startTask("server_start", `Starting ${server.id}`, [
-      `started GE-Proton10-3 ./enshrouded_server.exe (wine pid 5121), output in /home/player/.local/state/kiln/${server.id}.run.log`,
-      "[Session] 'HostOnline' (up)!", "[server] Loading world 'Lab' (seed 1847)", "[ecs] LoadEcsScene to Load", "[streaming] 812 of 1490 chunks",
-    ], () => {
+    const t0 = Date.now();
+    return startTask("server_start", `Starting ${id}`, startStages(id, pid, rec.world, rec.inst.remote), () => {
       // stopped while it started: the process is gone before its world ran (run::wait_ready)
-      if (mine !== serverStartSeq) reject("io", "the server exited before its world ran (exit code 0)");
-      serverStatus = { ...runningServer, pid: 5121, uptimeS: 0 };
-      mockEmit("kiln://server", { serverId: server.id, status: serverStatus });
-      return serverStatus;
-    }, 700);
-  },
-  server_stop: () => {
-    serverStartSeq++;
-    const p = serverStatus.pid;
-    serverStatus = { ...serverStatus, state: "stopping" };
-    mockEmit("kiln://server", { serverId: server.id, status: serverStatus });
-    return startTask("server_stop", `Stopping ${server.id}`, [`SIGINT -> pid ${p ?? "-"}; waiting up to 60 s for the save`, "waiting for wineserver"], () => {
-      serverStatus = { ...runningServer, state: "stopped", pid: null, uptimeS: null, players: null, kiln: null, boot: null, endpoint: null };
-      mockEmit("kiln://server", { serverId: server.id, status: serverStatus });
-      return serverStatus;
+      if (mine !== rec.startSeq) reject("io", "the server exited before its world ran (exit code 0)");
+      setServerStatus(rec, { ...rec.running, pid, uptimeS: 0, lastStartS: Math.max(1, Math.round((Date.now() - t0) / 1000)) });
+      return rec.status;
+    }, 700, () => {
+      // a failed start: its process is gone (a later start or stop has moved on: that one's status stands)
+      if (mine === rec.startSeq) { rec.startSeq++; setServerStatus(rec, stopped(rec.status)); }
     });
   },
-  server_restart: () => startTask("server_restart", `Restarting ${server.id}`, ["SIGINT -> pid 5120; waiting up to 60 s for the save", "started GE-Proton10-3 ./enshrouded_server.exe (wine pid 5122)", "[ecs] LoadEcsScene to Load"], () => {
-    serverStatus = { ...runningServer, pid: 5122, uptimeS: 0 };
-    mockEmit("kiln://server", { serverId: server.id, status: serverStatus });
-    return serverStatus;
-  }),
-  server_update: () => {
-    if (serverStatus.pid) reject("conflict", "Stop the server before updating it.");
-    return startTask("server_update", `Updating ${server.id} (SteamCMD)`, ["Logging in to Steam anonymously", "Update state (0x61) downloading, progress: 42.10", "Success! App '2278520' fully installed."], () => ({ updated: true }));
+  server_stop: (a) => {
+    const rec = srvOf(a);
+    rec.startSeq++;
+    const p = rec.status.pid;
+    setServerStatus(rec, { ...rec.status, state: "stopping" });
+    return startTask("server_stop", `Stopping ${rec.inst.id}`, [`SIGINT -> pid ${p ?? "-"}; waiting up to 60 s for the save`, "waiting for wineserver"], () => {
+      setServerStatus(rec, stopped(rec.running));
+      return rec.status;
+    });
+  },
+  server_restart: (a) => {
+    const rec = srvOf(a);
+    const t0 = Date.now();
+    const remote = rec.inst.remote;
+    return startTask("server_restart", `Restarting ${rec.inst.id}`, [
+      ...unnamed(remote ? [{ stage: "stopping", message: `ssh ${remote.host} kilnctl stop ${remote.instance ?? rec.inst.id}` }] : [
+        { stage: "stopping", message: `SIGINT -> pid ${rec.status.pid ?? rec.basePid}; waiting up to 60 s for the save` },
+        { stage: "stopping", message: "waiting for wineserver" },
+        { stage: "stopping", message: `${rec.inst.id} stopped, world saved` },
+      ]),
+      ...startStages(rec.inst.id, rec.basePid + 2, rec.world, remote),
+    ], () => {
+      setServerStatus(rec, { ...rec.running, pid: rec.basePid + 2, uptimeS: 0, lastStartS: Math.max(1, Math.round((Date.now() - t0) / 1000)) });
+      return rec.status;
+    }, 300);
+  },
+  server_update: (a) => {
+    const rec = srvOf(a);
+    if (rec.status.pid) reject("conflict", "Stop the server before updating it.");
+    return startTask("server_update", `Updating ${rec.inst.id} (SteamCMD)`, ["Logging in to Steam anonymously", "Update state (0x61) downloading, progress: 42.10", "Success! App '2278520' fully installed."], () => ({ updated: true }));
+  },
+  // the new-server wizard's install (kiln_manage::server::instance::create): the instance file first (the server is in
+  // the list from then on, also when a later step fails), the reflink copy, SteamCMD, the config and the Wine prefix
+  server_create: (a) => {
+    const spec = a.spec as ServerSpec;
+    if (!/^[a-z0-9][a-z0-9_-]{0,47}$/.test(spec.id)) reject("invalid_argument", `'${spec.id}' is not a valid server name`);
+    if (!spec.name?.trim() || new TextEncoder().encode(spec.name).length > 64) reject("invalid_argument", "server name: 1 to 64 characters");
+    if (spec.port < 1024) reject("invalid_argument", `port ${spec.port} is below 1024`);
+    if (!spec.dir.startsWith("/")) reject("invalid_argument", `${spec.dir} must be an absolute path`);
+    const half = mockServers.get(spec.id);
+    const resume = !!(spec as ServerSpec & { resume?: boolean }).resume;
+    // Try again after a failed create: the half-made server in the same folder is finished (instance::resumable)
+    if (half && !(resume && half.inst.dir === spec.dir && half.inst.runner === "kilnctl" && !half.status.pid))
+      reject("already_exists", resume && half.inst.dir !== spec.dir ? `a server '${spec.id}' exists in ${half.inst.dir}; trying again finishes one in the same folder only`
+        : `a server '${spec.id}' exists`);
+    const inst: ServerInstance = { id: spec.id, name: spec.name.trim(), kind: "local", dir: spec.dir, port: spec.port, queryPort: spec.port + 1, wine: "ge:GE-Proton10-3",
+      policy: spec.policy ?? "verified-only", source: "kilnctl", remote: null, runner: "kilnctl" };
+    const running: ServerStatus = { ...runningServer, id: spec.id, pid: null, uptimeS: 0, players: 0, kiln: null, installed: null };
+    const basePid = 7000 + mockServers.size * 100;
+    if (!half) mockServers.set(spec.id, { inst, status: { ...stopped(running), installed: null }, running: { ...running, pid: basePid }, startSeq: 0, maxPlayers: 16, basePid, world: inst.name });
+    return startTask("server_create", `Creating server ${inst.name}`, [
+      `instance file /home/player/.config/kiln/instances/${spec.id}.toml${half ? " (kept from the first try)" : ""}`,
+      ...(spec.reflinkFrom ? [`copying the game files from ${spec.reflinkFrom} (reflink)`] : []),
+      ...(spec.skipSteamcmd ? [] : ["steamcmd: Logging in to Steam anonymously", "steamcmd: Update state (0x61) downloading, progress: 38.20 (1205 / 3155 MB)",
+        "steamcmd: Update state (0x81) verifying update, progress: 61.24 (1932 / 3155 MB)", "steamcmd: Success! App '2278520' fully installed."]),
+      "writing enshrouded_server.json", "creating the Wine prefix (wineboot)",
+    ], () => inst, 500);
+  },
+  server_remove: (a) => {
+    const rec = srvOf(a);
+    if (rec.status.pid) reject("conflict", `${rec.inst.id} is running: stop it first`);
+    mockServers.delete(rec.inst.id);
+    return null;
+  },
+  server_backup_create: (a) => {
+    const rec = srvOf(a);
+    const name = `${rec.inst.id}-savegame-${now().replace(/[-:]/g, "").slice(0, 15)}Z.tar.gz`;
+    return startTask("server_backup_create", `Backing up ${rec.inst.id}`, [
+      rec.status.pid ? "asking Kiln.Admin for a save" : `tar -czf ${name} savegame`, "12 files, 412 KB",
+    ], () => ({ name, created: now(), bytes: 412_000, source: "kilnctl" }));
   },
   admin_sessions: () => [],
   ...serverMockHandlers,
+  // the server's own name and slots (?servers=3: each server's)
+  server_query: (a) => {
+    const rec = srvOf(a);
+    return { name: rec.inst.name, players: rec.status.players ?? 0, maxPlayers: rec.maxPlayers, version: "0.0.15.0", pingMs: 2 };
+  },
   // the consent flow's install (Play's offer, or a modpack zip dropped on the window): a profile bound to the server
   modpack_install: (a) => {
     const gameId = S(a.gameId);
@@ -2270,6 +2420,8 @@ if (typeof window !== "undefined") (window as unknown as { __kilnMock?: unknown 
   /** Tasks of `kind` started from now on wait before their last step until `openGate(gate)`; with `fail`, they then
    *  fail with that message. null clears it. */
   holdTasks: (kind: string, hold: { gate: string; fail?: string } | null) => { if (hold) taskHolds.set(kind, hold); else taskHolds.delete(kind); },
+  /** Start and restart tasks from now on name their stages (Task.stage), or not (`false`: a backend before stages). */
+  namedStages: (on: boolean) => { namedStages = on; },
   setOnceBootSnapshot: (profileId: string, s: BootSnapshot | null) => { if (s) onceBootSnapshots.set(profileId, s); else onceBootSnapshots.delete(profileId); },
   setCook: (id: string, cook: { reason?: CookReason | null; fails?: string | null } | null) => {
     if (!cook) { cookMods.delete(id); return; }

@@ -22,8 +22,129 @@ async function open(page: Page, route = "/") {
 const mock = (page: Page, f: string, ...args: unknown[]) =>
   page.evaluate(([f, args]) => (window as unknown as { __kilnMock: Record<string, (...a: unknown[]) => unknown> }).__kilnMock[f as string](...(args as unknown[])), [f, args] as const);
 
-test("Start shows its progress at once and the result when the world runs", async ({ page }) => {
+/** Records what Overview's start view says while it shows, each time it changes: the current stage's name and the
+ *  screen readers' status line (a stage can be current for well under a second in the mock). */
+const recordStart = (page: Page) => page.evaluate(() => {
+  const w = window as unknown as { __seen: { stages: string[]; status: string[] } };
+  w.__seen = { stages: [], status: [] };
+  const push = (list: string[], v: string | null | undefined) => { if (v && list[list.length - 1] !== v) list.push(v); };
+  new MutationObserver(() => {
+    push(w.__seen.stages, document.querySelector(".k-strack li.now b")?.textContent);
+    push(w.__seen.status, document.querySelector(".k-sov-start > [role=status]")?.textContent);
+  }).observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true });
+});
+const seen = (page: Page) => page.evaluate(() => (window as unknown as { __seen: { stages: string[]; status: string[] } }).__seen);
+
+test("Overview shows the start's five stages, the clock and the newest line while it starts", async ({ page }) => {
   await open(page, "/servers/lab/overview");
+  await mock(page, "setServer", { running: false });
+  const head = page.locator(".k-server-head");
+  await expect(head.locator(".k-server-word")).toHaveText("Stopped");
+  await recordStart(page);
+  await head.getByRole("button", { name: "Start", exact: true }).click();
+  const track = page.getByRole("list", { name: "Start stages" });
+  await expect(track.getByRole("listitem")).toHaveText([/Preparing/, /Wine/, /Server process/, /Loading the world/, /Running/]);
+  await expect(head.locator(".k-server-word")).toHaveText("Starting");
+  await expect(page.locator(".k-sclock")).toBeVisible();
+  // the mock's start names its stages as the backend does: the stage moves to loading the world
+  await expect(track.locator("li.now")).toContainText("Loading the world", { timeout: 10_000 });
+  await expect(page.locator(".k-slastline")).not.toBeEmpty();
+  // screen readers hear which stages are done, which one runs, which wait
+  await expect(track.getByRole("listitem").first()).toContainText("(done)");
+  await expect(track.locator("li.now")).toContainText("(running)");
+  await expect(track.getByRole("listitem").last()).toContainText(/\((waiting|running)\)/);
+  await shot(page, "8-overview-starting");
+  // the activity panel is not shown twice on Overview
+  await expect(page.locator(".k-sact")).toHaveCount(0);
+  await expect(head.locator(".k-server-word")).toHaveText("Running", { timeout: 20_000 });
+  // every stage was current in turn ("Server process" too: spawned, no log yet), and the status line said each
+  const s = await seen(page);
+  expect(s.stages).toEqual(["Preparing", "Wine", "Server process", "Loading the world", "Running"]);
+  expect(s.status[0]).toBe("Lab server is starting: Preparing.");
+  expect(s.status).toContain("Lab server is starting: Loading the world.");
+  // the start that ended shows in the panel now: its result, for a while
+  await expect(page.locator(".k-sact")).toHaveAttribute("data-state", "done");
+  await expect(page.locator(".k-sstats")).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Sections" }).getByRole("link")).toHaveCount(5);
+  await shot(page, "9-overview-running");
+});
+
+test("Overview reads the stages from the start's lines when the backend names none", async ({ page }) => {
+  await open(page, "/servers/lab/overview");
+  await mock(page, "setServer", { running: false });
+  await mock(page, "namedStages", false);
+  await recordStart(page);
+  const head = page.locator(".k-server-head");
+  await head.getByRole("button", { name: "Start", exact: true }).click();
+  await expect(page.getByRole("list", { name: "Start stages" }).locator("li.now")).toContainText("Loading the world", { timeout: 10_000 });
+  await expect(head.locator(".k-server-word")).toHaveText("Running", { timeout: 20_000 });
+  // "started ... (wine pid N)" as the newest line: the process; the game's lines after it: the world
+  expect((await seen(page)).stages).toEqual(["Preparing", "Server process", "Loading the world"]);
+});
+
+test("a restart on Overview stops first (no start stage is current then), and the start's clock is the start's own", async ({ page }) => {
+  await open(page, "/servers/lab/overview");
+  const head = page.locator(".k-server-head");
+  await expect(head.locator(".k-server-word")).toHaveText("Running");
+  await recordStart(page);
+  await head.getByRole("button", { name: "Restart", exact: true }).click();
+  const track = page.getByRole("list", { name: "Start stages" });
+  await expect(track.getByRole("listitem")).toHaveText([/Stopping/, /Preparing/, /Wine/, /Server process/, /Loading the world/, /Running/]);
+  await expect(head.locator(".k-server-word")).toHaveText("Running", { timeout: 20_000 });
+  const s = await seen(page);
+  expect(s.stages).toEqual(["Stopping", "Preparing", "Wine", "Server process", "Loading the world", "Running"]);
+  expect(s.status[0]).toBe("Lab server is restarting: it stops first.");
+  await expect(page.locator(".k-sact")).toHaveAttribute("data-flow", "restart");
+});
+
+test("a start that fails on Overview says why, with Try again, in the panel (no stage view left, no silence)", async ({ page }) => {
+  await open(page, "/servers/lab/overview");
+  await mock(page, "setServer", { running: false });
+  const why = "lab exited during the start: exit code 3; see the Console";
+  await mock(page, "holdTasks", "server_start", { gate: "start-fail", fail: why });
+  await mock(page, "openGate", "start-fail");
+  const head = page.locator(".k-server-head");
+  await head.getByRole("button", { name: "Start", exact: true }).click();
+  await expect(page.getByRole("list", { name: "Start stages" })).toBeVisible();
+  // the running start is the stage view's; the panel waits
+  await expect(page.locator(".k-sact")).toHaveCount(0);
+  const panel = page.locator(".k-sact");
+  await expect(panel).toHaveAttribute("data-state", "failed", { timeout: 20_000 });
+  await expect(panel.locator(".k-sact-error")).toContainText(why);
+  await expect(panel.getByRole("status")).toHaveText(`Starting Lab server failed: ${why}`);
+  await expect(page.getByRole("list", { name: "Start stages" })).toHaveCount(0);
+  await expect(head.locator(".k-server-word")).toHaveText("Stopped");
+  await shot(page, "11-overview-start-failed");
+  await mock(page, "holdTasks", "server_start", null);
+  await panel.getByRole("button", { name: "Try again" }).click();
+  await expect(page.getByRole("list", { name: "Start stages" })).toBeVisible();
+  await expect(head.locator(".k-server-word")).toHaveText("Running", { timeout: 20_000 });
+  await expect(panel).toHaveAttribute("data-state", "done");
+});
+
+test.describe("at 1024x640", () => {
+  test.use({ viewport: { width: 1024, height: 640 } });
+  test("the start view stacks: the stages, the clock and the console keep their height above the aside", async ({ page }) => {
+    await open(page, "/servers/lab/overview");
+    await mock(page, "setServer", { running: false });
+    await mock(page, "holdTasks", "server_start", { gate: "small-start" });
+    await page.locator(".k-server-head").getByRole("button", { name: "Start", exact: true }).click();
+    await expect(page.getByRole("list", { name: "Start stages" })).toBeVisible();
+    await expect(page.locator(".k-sov-live .k-console-log")).toBeVisible();
+    const live = (await page.locator(".k-sov-live").boundingBox())!;
+    const aside = (await page.locator(".k-sov-aside").boundingBox())!;
+    const log = (await page.locator(".k-sov-live .k-console-log").boundingBox())!;
+    expect(live.height).toBeGreaterThan(300);
+    expect(aside.y).toBeGreaterThanOrEqual(live.y + live.height - 1);
+    expect(log.height).toBeGreaterThanOrEqual(199);
+    await shot(page, "12-overview-starting-1024x640");
+    await mock(page, "openGate", "small-start");
+  });
+});
+
+test("Start shows its progress at once and the result when the world runs", async ({ page }) => {
+  // the activity panel shows on every section but Overview (Overview shows the start's stages)
+  await open(page, "/servers/lab/backups");
   await mock(page, "setServer", { running: false });
   const head = page.locator(".k-server-head");
   await head.getByRole("button", { name: "Start", exact: true }).click();
@@ -42,11 +163,12 @@ test("Start shows its progress at once and the result when the world runs", asyn
   await expect(panel).toHaveAttribute("data-state", "done", { timeout: 20_000 });
   await expect(panel.locator(".k-sact-result")).toHaveText("Server running");
   await expect(panel.locator(".k-sact-lines")).toBeVisible();
-  // the task's five progress lines and its last one, oldest first
+  // the task's lines, oldest first: its named stages' lines (preparing ... running) and its last one
   const lines = panel.locator(".k-sact-lines li");
-  await expect(lines).toHaveCount(6);
-  await expect(lines.first()).toContainText("started GE-Proton10-3 ./enshrouded_server.exe");
-  await expect(lines.nth(4)).toContainText("812 of 1490 chunks");
+  await expect(lines).toHaveCount(8);
+  await expect(lines.first()).toContainText("checking the server folder");
+  await expect(panel.locator(".k-sact-lines")).toContainText("started GE-Proton10-3 ./enshrouded_server.exe");
+  await expect(panel.locator(".k-sact-lines")).toContainText("812 of 1490 chunks");
   await shot(page, "2-started");
 });
 
@@ -94,10 +216,14 @@ test("a failed install says why, skips the start, and offers Try again and the c
   await expect(panel.getByRole("button", { name: "Try again" })).toBeVisible();
   await expect(panel.getByRole("button", { name: "Open the console" })).toBeVisible();
   await shot(page, "6-update-failed");
+  // the console page, not Overview
+  await panel.getByRole("button", { name: "Open the console" }).click();
+  await expect(page).toHaveURL(/#\/servers\/lab\/console$/);
 });
 
 test("Stop during a start takes over: the start stops waiting and the server stops", async ({ page }) => {
-  await open(page, "/servers/lab/overview");
+  // the activity panel (with Stop waiting) shows on every section but Overview
+  await open(page, "/servers/lab/backups");
   await mock(page, "setServer", { running: false });
   const head = page.locator(".k-server-head");
   await head.getByRole("button", { name: "Start", exact: true }).click();

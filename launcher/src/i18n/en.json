@@ -2055,7 +2055,78 @@
       "off": "Off",
       "policy": "Policy",
       "game": "Game",
-      "process": "Process"
+      "process": "Process",
+      "stages": "Start stages",
+      "stage": {
+        "stopping": "Stopping",
+        "preparing": "Preparing",
+        "wine": "Wine",
+        "process": "Server process",
+        "world": "Loading the world",
+        "running": "Running"
+      },
+      "stageHint": {
+        "stopping": "The world is saved first",
+        "remote": "kilnctl starts it over SSH",
+        "preparing": "Checks the folder and Kiln's setup",
+        "wine": "The runner and its prefix",
+        "process": "enshrouded_server.exe starts",
+        "world": "The game loads the world",
+        "running": "Players can join"
+      },
+      "elapsed": "Elapsed",
+      "left": "About {left} left. The last start took {last}.",
+      "longer": "Taking longer than the last start ({last}). The console shows what it is doing.",
+      "stoppingFirst": "Stopping first",
+      "stoppingHint": "The restart saves the world and stops the server, then starts it again.",
+      "srStage": "{name} is starting: {stage}.",
+      "srStopping": "{name} is restarting: it stops first.",
+      "stageState": "({state})",
+      "noLast": "The first start the launcher times; players can join when it says Running.",
+      "whileStarts": "While it starts",
+      "can": {
+        "watch": "Watch every line",
+        "watchHint": "The console follows the start as it happens.",
+        "leave": "Leave this page",
+        "leaveHint": "The start keeps going; the server's dot shows it, and a toast says when it runs.",
+        "stop": "Stop",
+        "stopHint": "Ends the start and shuts the server down.",
+        "join": "Players join at Running",
+        "joinHint": "The world is still loading."
+      },
+      "kilnUpdate": "Kiln update",
+      "kilnUpdateRunning": "{latest} is here; this server runs {current}. Update stops it, installs and starts it again; players online are disconnected meanwhile.",
+      "kilnUpdateStopped": "{latest} is here; this server has {current}. The server is stopped, so the update only installs.",
+      "stat": {
+        "players": "Players",
+        "notRunning": "Not running",
+        "health": "Health",
+        "stepsPerS": "steps/s",
+        "p99": "Step p99 {ms} ms",
+        "noTicks": "No step times yet",
+        "uptime": "Uptime",
+        "startedIn": "Started in {time}",
+        "versions": "Kiln",
+        "noKiln": "Not installed",
+        "isOut": "{latest} is here.",
+        "game": "Game {version}."
+      },
+      "sections": "Sections",
+      "link": {
+        "consoleLive": "Live, with Kiln commands",
+        "consoleLast": "The last run's output",
+        "playersOff": "When it runs",
+        "mods": {
+          "one": "{count} mod",
+          "other": "{count} mods"
+        },
+        "backups": {
+          "one": "{count} backup, last {ago}",
+          "other": "{count} backups, last {ago}"
+        },
+        "noBackups": "No backup yet",
+        "settings": "UDP {port}, difficulty, groups"
+      }
     },
     "head": {
       "installKiln": "Install Kiln",
@@ -2161,7 +2232,82 @@
       "newServer": "New server",
       "noServers": "No servers",
       "noServersHint": "Install one with SteamCMD, or import a folder.",
-      "namePlaceholder": "Ember Isles"
+      "namePlaceholder": "Ember Isles",
+      "durD": "{d} d {h} h",
+      "backupTitle": "Backing up {name}",
+      "stepBackup": "Back up the save",
+      "health": "Health",
+      "kiln": "Kiln",
+      "runsOn": "Runs on",
+      "actions": "Quick actions",
+      "overSsh": "{host} over SSH",
+      "since": "since {time}",
+      "updateWord": "Update",
+      "updateTitle": "Kiln {version} is out",
+      "perSecond": "{rate}/s",
+      "healthTitle": "Steps per second: {rate} in the last minute",
+      "healthLabel": {
+        "one": "Steps per second over the last minute: {rate}",
+        "other": "Steps per second over the last {count} minutes, {rate} now"
+      },
+      "console": "Console",
+      "moreFor": "More actions for {name}",
+      "startNamed": "Start {name}",
+      "stopNamed": "Stop {name}",
+      "consoleNamed": "Open the console of {name}",
+      "updateNamed": "Update Kiln on {name}",
+      "stepOf": "{n} of {count}: {step}",
+      "word": {
+        "starting": "Starting",
+        "stopping": "Stopping",
+        "restarting": "Restarting",
+        "updating": "Updating",
+        "installing": "Installing",
+        "backingUp": "Backing up"
+      },
+      "say": {
+        "count": {
+          "one": "{count} server.",
+          "other": "{count} servers."
+        },
+        "full": "{count} {rest}",
+        "join1": "{a}.",
+        "join2": "{a}; {b}.",
+        "join3": "{a}; {b}; {c}.",
+        "busyStart": "{name} is starting",
+        "busyStop": "{name} is stopping",
+        "busyRestart": "{name} is restarting",
+        "busyUpdate": "{name} is updating its game files",
+        "busyDeploy": "{name} is updating Kiln",
+        "busyCreate": "{name} is being installed",
+        "busyBackup": "{name} is being backed up",
+        "busyMany": "{count} servers are busy",
+        "runningPlayers": {
+          "one": "{name} is running with {count} player",
+          "other": "{name} is running with {count} players"
+        },
+        "runningNobody": "{name} is running with nobody on it",
+        "runningMany": {
+          "one": "{servers} are running with {count} player in all",
+          "other": "{servers} are running with {count} players in all"
+        },
+        "runningManyNobody": "{servers} are running with nobody on them",
+        "noneRunning": "None is running",
+        "updateOne": "{name} has a Kiln update",
+        "updateMany": "{count} have a Kiln update"
+      },
+      "banner": {
+        "title": "Update",
+        "updatingTitle": "Updating",
+        "failedTitle": "Failed",
+        "single": "Kiln {version} is out. {name} runs {current}; it is stopped, so only Kiln changes.",
+        "oneRunning": "Kiln {version} is out. {name} runs {current}; it is running, so it stops, updates and starts again.",
+        "several": "Kiln {version} is out. {names} run an older Kiln.",
+        "updateOne": "Update {name}",
+        "updateAll": "Update all {count}",
+        "running": "Updating {name}, step {n} of {count}: {step}.",
+        "failed": "The Kiln update of {name} failed: {reason}"
+      }
     },
     "modpackOffer": {
       "thisServer": "this server",
@@ -2397,6 +2543,93 @@
       "srCanceled": "{title}: canceled.",
       "linesLabel": "Every line of this action",
       "failedMarker": "The last action failed: {reason}"
+    },
+    "frame": {
+      "live": "live",
+      "allServers": "‹ All servers",
+      "switch": "Other servers",
+      "switchItem": "{name}, {state}",
+      "unknown": "State unknown",
+      "updating": "Updating"
+    },
+    "recent": {
+      "title": "Recent",
+      "hint": "What this launcher did on any server, newest first",
+      "label": "Recent actions",
+      "none": "Nothing yet. Starts, stops, Kiln updates and backups show here.",
+      "noReason": "no reason given",
+      "what": {
+        "start": "Start",
+        "stop": "Stop",
+        "restart": "Restart",
+        "update": "Game update",
+        "deploy": "Kiln install",
+        "create": "Install",
+        "backup": "Backup",
+        "remove": "Remove"
+      },
+      "step": {
+        "stop": "stop",
+        "deploy": "install",
+        "start": "start",
+        "update": "update",
+        "create": "install"
+      },
+      "started": "Started in {time}.",
+      "startedKiln": "Started in {time}, Kiln {kiln}.",
+      "stopped": "Stopped by you. Saved in {time}.",
+      "restarted": "Restarted in {time}.",
+      "gameUpdated": "Game files updated in {time}.",
+      "kilnUpdated": "Kiln updated from {from} to {kiln} ({steps}: {time}).",
+      "kilnInstalled": "Kiln {kiln} installed in {time}.",
+      "kilnInstalledSteps": "Kiln {kiln} installed ({steps}: {time}).",
+      "created": "Installed in {time}.",
+      "createdKiln": "Installed with Kiln {kiln} in {time}.",
+      "createdStarted": "Installed and started in {time}.",
+      "createdKilnStarted": "Installed with Kiln {kiln} and started in {time}.",
+      "backedUp": "Backed up in {time}.",
+      "removed": "Removed from the launcher. Its files stay on disk.",
+      "failed": "{what} failed after {time}: {reason}",
+      "canceled": "{what} canceled after {time}."
+    },
+    "wizard": {
+      "title": "New server",
+      "flowTitle": "Installing {name}",
+      "stepper": "Steps",
+      "s1": "Where and what",
+      "s2": "Install",
+      "s3": "Install Kiln",
+      "s4": "Start",
+      "notChosen": "(not chosen)",
+      "stepCreate": "Install the server files (SteamCMD)",
+      "stepCopy": "Copy the game files and check them (SteamCMD)",
+      "stepCopyOnly": "Copy the game files",
+      "idTaken": "{name} has this id already.",
+      "nameLongBytes": "Too long: a name has at most 64 bytes (letters beyond A to Z take 2 to 4 each).",
+      "idMadeUp": "The name has no letters an id can use, so this one is made up. Type your own if you like.",
+      "folderBad": "An absolute folder: it starts with / (or a drive letter on Windows).",
+      "portBad": "A port from 1024 to 65535.",
+      "portFree": "Free",
+      "portTakenWord": "Taken",
+      "portTaken": "{name} uses this port too: the two cannot run at the same time.",
+      "copyNone": "Nothing: SteamCMD downloads the files",
+      "copyServer": "{name}: {dir}",
+      "copyOther": "Another folder…",
+      "copyFolder": "Folder to copy from",
+      "kilnToggle": "Install Kiln {version} when the files are in",
+      "kilnHint": "Recommended. You can add it later from the server's ··· menu.",
+      "kilnNone": "Install Kiln when the files are in",
+      "kilnNoneHint": "No Kiln runtime bundle yet: import one on the Runtime page first.",
+      "startToggle": "Start the server when it is ready",
+      "keepsGoing": "Close this and it keeps going: its row in the list shows it.",
+      "cancelInstall": "Cancel install",
+      "elapsed": "Elapsed",
+      "ready": "The server is ready.",
+      "readyRunning": "The server is ready and running.",
+      "readyHint": "All done in {time}. Its page has the console, the settings and the mods.",
+      "open": "Open the server",
+      "failedAt": "It stopped at: {step}.",
+      "halfMadeRetry": "The launcher now lists {id}, half made. Try again finishes it in the same folder; or remove it from its ··· menu (its files stay) and install again."
     }
   },
   "play": {
@@ -3541,7 +3774,9 @@
       "backups": "Backups",
       "saves": "Saves",
       "modpack": "Modpack",
-      "crashes": "Crashes"
+      "crashes": "Crashes",
+      "console": "Console",
+      "worldRules": "World rules"
     },
     "notices": {
       "keptTitle": "Some mod folders were kept",
