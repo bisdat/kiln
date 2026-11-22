@@ -155,7 +155,7 @@ public sealed record MenuBlock : IBlock
     /// <summary>The menu in tabs of its own: each tab a name, the icon of a tab of the menu it is <see cref="Like"/>, and sets of recipes named by their
     /// <see cref="RecipeBlock.MenuKey"/> (this station's list, an item's recipe at it, another mod's as <c>"other-mod:key"</c>). At most 15 tabs. Only a station with a
     /// workshop of its own takes it: the game's stations keep the game's tabs. A recipe of the station that no tab lists is still made there, but not shown.
-    /// Shown from content ready on, once every recipe it names is in the game; a layer of a mod's own goes over it: <see cref="StationMenus.Define"/>.</summary>
+    /// Shown from content ready on, once every recipe it names is in the game; a layer of a mod's own goes over it: <see cref="StationMenus.Define"/>. At least one tab, each with at least one set (an empty set lists nothing).</summary>
     [RequiresCapability("stationmenus.store")]
     public IReadOnlyList<StationMenuTabBlock>? Tabs { get; init; }
 }

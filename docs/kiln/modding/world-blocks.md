@@ -134,8 +134,8 @@ Blocks.Define("bolts", new ItemBlock { Name = "Bolts", Recipe = new RecipeBlock 
   exactly what it names, once each: a recipe it doesn't name stays valid but is not shown. A name that matches no recipe
   at this workshop, or two, is a mistake.
 - **Tabs, sets, headings.** At most 15 tabs, 28 sets in a tab and 512 recipes in a tab. The first set of a tab has no
-  heading (the game shows the tab's name there). Empty tabs and sets are allowed: whether the game hides an empty tab is
-  for the game to say. Texts are a string (every language) or a map of languages (at most 35, `"en"`, `"de"`, ...), 1 to
+  heading (the game shows the tab's name there). A menu needs at least one tab and a tab at least one set: a menu that lists
+  nothing is one tab with one empty set (an empty set is fine; whether the game shows such a tab is for the game to say). Texts are a string (every language) or a map of languages (at most 35, `"en"`, `"de"`, ...), 1 to
   4,096 bytes each.
 - **Icons.** `IconFromTab`: the icon of that tab (from 0) of the menu it is `Like`, as the game has it; -1 (the default)
   is its first. A tab the game's menu does not have is refused when a player's game builds the menu: the menu is then

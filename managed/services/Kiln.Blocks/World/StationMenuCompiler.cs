@@ -97,7 +97,8 @@ internal static class StationMenuCompiler
     internal static Menu Check(string definingMod, string definitionKey, string stationMod, IReadOnlyList<StationMenuTabBlock>? tabs, string path)
     {
         if (KeyProblem(definitionKey, "the definition's key") is { } kp) throw new MenuError(path + "key", kp);
-        if (tabs == null) throw new MenuError(path + "tabs", "tabs are needed: an empty list for a menu that lists nothing");
+        if (tabs == null || tabs.Count == 0)
+            throw new MenuError(path + "tabs", "a menu needs at least one tab: for a menu that lists nothing, give one tab with one empty set");
         if (tabs.Count > MaxTabs) throw new MenuError(path + "tabs", $"{tabs.Count} tabs: at most {MaxTabs}");
         var tabKeys = new HashSet<string>(StringComparer.Ordinal);
         var listed = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -115,7 +116,8 @@ internal static class StationMenuCompiler
             var name = Text(t.Name, tp + ".name");
             if (t.IconFromTab is < -1 or > MaxIcon)
                 throw new MenuError(tp + ".iconFromTab", $"{t.IconFromTab} is outside -1..{MaxIcon}: the n-th tab (0 the first) of the menu the station is like, -1 for its first");
-            if (t.Sets == null) throw new MenuError(tp + ".sets", "sets are needed: an empty list for a tab that lists nothing");
+            if (t.Sets == null || t.Sets.Count == 0)
+                throw new MenuError(tp + ".sets", $"tab \"{t.Key}\" needs at least one set: for a tab that lists nothing, give one set with no recipes");
             if (t.Sets.Count > MaxSets) throw new MenuError(tp + ".sets", $"{t.Sets.Count} sets: at most {MaxSets} in a tab");
             var setKeys = new HashSet<string>(StringComparer.Ordinal);
             var count = 0;

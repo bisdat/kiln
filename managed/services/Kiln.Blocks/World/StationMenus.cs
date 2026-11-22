@@ -34,7 +34,7 @@ public sealed record StationMenuTabBlock
     /// <summary>The icon of the n-th tab (0 the first) of the menu the station is like (<see cref="MenuBlock.Like"/>, else its kind's),
     /// as the game shipped it. -1: the first. At most 14.</summary>
     public int IconFromTab { get; init; } = -1;
-    /// <summary>Its sets of recipes, at most 28. The first set has no heading: the tab's name heads it.</summary>
+    /// <summary>Its sets of recipes, 1 to 28 (a tab that lists nothing has one set with no recipes). The first set has no heading: the tab's name heads it.</summary>
     public required IReadOnlyList<StationMenuSetBlock> Sets { get; init; }
 }
 
@@ -57,7 +57,7 @@ public sealed record StationMenuDefinition
     /// <summary>The layout's key in your mod: letters, digits, '.', '_' and '-', at most 64. The same key again replaces your layout.
     /// A station's own tabs (<see cref="MenuBlock.Tabs"/>) are <c>"&lt;station&gt;.menu"</c> of its mod.</summary>
     public required string Key { get; init; }
-    /// <summary>The tabs, at most 15. None: the menu lists nothing.</summary>
+    /// <summary>The tabs, 1 to 15. A menu that lists nothing has one tab with one empty set.</summary>
     public required IReadOnlyList<StationMenuTabBlock> Tabs { get; init; }
 }
 
