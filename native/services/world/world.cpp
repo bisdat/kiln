@@ -386,12 +386,23 @@ const KilnWorldApi kTable = {
     &t_ecs_compare_exchange,
     &t_ecs_write_subscribe,
     &t_ecs_write_unsubscribe,
+    // since 0.2.0-dev.30.3: named services from task threads, at 616..640
+    &t_named_service_open,
+    &t_named_service_snapshot,
+    &t_named_service_close,
+    &t_named_service_compare_exchange,
+    // since 0.2.0-dev.30.3: one registration of a world's component catalog, at 648
+    &t_ecs_registration,
 };
-static_assert(sizeof(KilnWorldApi) == 616 && offsetof(KilnWorldApi, foreign_attr_changed) == 488 &&
+static_assert(sizeof(KilnWorldApi) == 656 && offsetof(KilnWorldApi, ecs_registration) == 648 &&
+                  offsetof(KilnWorldApi, named_service_open) == 616 &&
+                  offsetof(KilnWorldApi, named_service_compare_exchange) == 640 &&
+                  offsetof(KilnWorldApi, foreign_attr_changed) == 488 &&
                   offsetof(KilnWorldApi, register_program_world) == 496 && offsetof(KilnWorldApi, unbind_program_world) == 520 &&
                   offsetof(KilnWorldApi, entity_open) == 528 && offsetof(KilnWorldApi, ecs_template_uuid) == 576 &&
                   offsetof(KilnWorldApi, ecs_write_policy) == 584 && offsetof(KilnWorldApi, ecs_write_unsubscribe) == 608,
-              "kiln.world's table: the client-world members append at 496, the ECS reads at 528, the writes at 584");
+              "kiln.world's table: the client-world members append at 496, the ECS reads at 528, the writes at 584, the "
+              "named services at 616, ecs_registration at 648");
 
 void KILN_CALL on_client_pre(const KilnTickInfo* tick, void*) {
     game_programs_pre(KILN_WORLD_CLIENT, tick);
@@ -415,6 +426,7 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     if (info->size >= offsetof(KilnPluginInfo, on_ready) + sizeof(info->on_ready))
         info->on_ready = [](void*) {
             ecs_prod_ready();
+            named_services_ready();
             ecs_check_init();
             ecs_write_check_init();
             boot_programs_init();
@@ -424,6 +436,7 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     info->version = KilnStr{"4", 1};
     resolve();
     ecs_prod_init();
+    named_services_init();
     game_programs_resolve();
     wraps_init();
     const bool hooked = programs_init();

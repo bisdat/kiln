@@ -87,6 +87,28 @@ struct World {
         put<uint64_t>(registry + 16, comps.size());
         put<uint64_t>(registry + 240, comps.size());
     }
+    // A reflected type descriptor in the image (kiln.types' td layout: the qualified name {ptr, len} at +0x20, the size
+    // at +0x40, the FNV-1a hash at +0x50), its name without a terminator as reflection keeps it. Placed from the end of
+    // the image down, away from the registration names.
+    size_t descs_used = 0;
+    uintptr_t descriptor(const std::string& qualified, uint32_t size, uint32_t hash = 0) {
+        descs_used += 0x100;
+        const uintptr_t d = image.at(image.size - descs_used);
+        const uintptr_t text = d + 0x90;
+        std::memcpy(reinterpret_cast<void*>(text), qualified.data(), qualified.size());
+        put<uint64_t>(d + 0x20, text);
+        put<uint64_t>(d + 0x28, qualified.size());
+        put<uint32_t>(d + 0x40, size);
+        put<uint32_t>(d + 0x50, hash ? hash : fnv1a(qualified));
+        return d;
+    }
+    // A registration's storage (+40) and template (+48) type descriptors, 0 for none, and its flags word (+60).
+    void reg_types(const std::string& short_name, uintptr_t storage, uintptr_t configuration, uint32_t flags = 0) {
+        const uintptr_t row = catalog.at(comp("keen::ecs::" + short_name).index * 256);
+        put<uint64_t>(row + 40, storage);
+        put<uint64_t>(row + 48, configuration);
+        put<uint32_t>(row + 60, flags);
+    }
     // An archetype holding these components; component k of the chunk sits at k * 4096 (rows of its stride).
     uintptr_t archetype(const std::vector<std::string>& names) {
         const uintptr_t lay = layouts.at(n_layouts * kLayout);

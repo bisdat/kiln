@@ -100,6 +100,11 @@ public sealed record ModInfo(string Id, string Name, string Version, string Dire
     /// <summary>The mod opted into the advanced tier (raw hooks, symbols, coremod-style patches). Kiln may refuse or
     /// sandbox advanced mods by configuration; services gate their unstable entry points on it.</summary>
     public bool Advanced { get; init; }
+
+    /// <summary>The mod talks to Steam users directly: its kiln.mod.json says <c>"steamMessages": true</c>, so it may open
+    /// its own Steam peer message leases (<c>SteamMessages.Open</c> in Kiln.Network refuses every other mod). Since
+    /// 0.2.0-dev.30.3.</summary>
+    public bool SteamMessages { get; init; }
 }
 
 /// <summary>Everything a mod gets from Kiln. One per loaded mod instance.</summary>

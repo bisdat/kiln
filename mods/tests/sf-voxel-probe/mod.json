@@ -1,0 +1,10 @@
+{
+  "id": "kiln-sf-voxel-probe",
+  "name": "Kiln voxel probe",
+  "version": "0.1.0",
+  "description": "Test probe for runtime.world.voxel of ShroudForge-format mods in kiln mode: logs the voxel grid's geometry when it changes and the answer of a one-cell read. Client-pass check sfi.voxel-grid. Test only.",
+  "authors": ["Kiln contributors"],
+  "license": "MIT",
+  "dependencies": [],
+  "capabilities": ["runtime"]
+}

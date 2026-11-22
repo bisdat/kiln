@@ -11,8 +11,10 @@ it costs you after a game update. The mechanics (descriptors, handlers, faults, 
 Kiln's rule for mods (the owner, 2026-11-20): a mod should not need to know the game's functions or memory. Kiln names
 things, keeps a registry of them, and translates to the game; when the game updates, Kiln is updated once and every mod
 that used the API keeps working. For the game's own UI that is `Ui.Screens`, `Ui.Menus`, `Ui.Crafting`, `Ui.Values`,
-`Ui.Tooltip`, and `Ui.Inventory` (marks and clicks on the game's slots, panels beside the backpack and chests, the chest's
-entity: [../ui.md](../ui.md#the-games-inventory-slots-0200-dev30)); for game data the registries and blocks.
+`Ui.Tooltip`, `Ui.Inventory` (marks and clicks on the game's slots, panels beside the backpack and chests, the chest's
+entity: [../ui.md](../ui.md#the-games-inventory-slots-020-dev30)), and `Ui.World.Outline` (an entity's model outlined
+with the game's own highlight, since 0.2.0-dev.30.3: [../render.md](../render.md#outlines-since-020-dev303)); for game
+data the registries and blocks.
 
 Hooks are the **advanced tier**: for what no Kiln API covers yet. Your manifest says `"advanced": true` (Kiln.Sdk:
 `<KilnAdvanced>true</KilnAdvanced>`). **They may stop working after a game

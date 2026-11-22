@@ -34,6 +34,8 @@ available is generated from a boot's `capabilities.json`: [../status.generated.m
 | [hooks.md](hooks.md) | kiln.hooks v2: one registry for every hook |
 | [items.md](items.md) | kiln.items: items in inventories |
 | [knowledge.md](knowledge.md) | kiln.knowledge: the game's knowledge, the vanilla journal, dialogue events, the client veto |
+| [client-building-input.md](client-building-input.md) | kiln.client / BuildingInput: the local player's building input (select, place, remove, undo, dismantle) on game client 26430625, hooked at the first request (since 0.2.0-dev.30.3) |
+| [net-steam-messages.md](net-steam-messages.md) | kiln.net / SteamMessages: Steam peer-to-peer messages on leased Steam channels, each lease its owner's (since 0.2.0-dev.30.3; C# mods opt in with `"steamMessages": true`) |
 | [npcs.md](npcs.md) | Friendly NPCs and quests in the game's own UI |
 | [pacing.md](pacing.md) | kiln.pacing: where the game waits, and its task pools |
 | [player-state.md](player-state.md) | Player state and actions |
@@ -144,11 +146,15 @@ them. Owners the managed host creates through that `KilnApi` are marked as the h
 named `mod:<manifest id>` that id as its namespace only then. Two more are the core's own and resolve through the
 services' `KilnApi` only, and nobody may publish them either: `kiln.internal.launch` ([launch.md](launch.md)) and
 `kiln.internal.hooks`, the code ranges Kiln's services protect for their engine calls
-([hooks.md](hooks.md#protected-code-ranges-kilninternalhooks-kiln-internal)), and `kiln.internal.owners`
-(`native/core/src/owners_internal.h`): `owner_id(owner, buf, cap, out_len)` gives an owner's id as the core keeps it
-(`mod:<manifest id>` for a Kiln mod's owner from Kiln.Host, a native mod's or a plugin's own id); kiln.registry binds a
-caller to its mod with it (the id without its kind prefix, lower case). A revoked owner is `KILN_ERR_NOT_FOUND`, a buffer
-too small `KILN_ERR_BUFFER_TOO_SMALL` with the needed length.
+([hooks.md](hooks.md#protected-code-ranges-kilninternalhooks-kiln-internal)).
+One more is the core's own and resolves through the services' `KilnApi` and the managed host's `KilnApi`, and nobody may
+publish it: `kiln.internal.owners` (`native/core/src/owners_internal.h`), what the managed host admitted an owner to. Kiln.Host
+grants the owner of a C# mod whose kiln.mod.json says `"steamMessages": true`, and kiln.net's `steam_open` admits it
+([net-steam-messages.md](net-steam-messages.md#who-opens-a-lease)); the grant goes with the owner. Since dev.31 the same table (v2, appended at offset 24) also has
+`owner_id(owner, buf, cap, out_len)`: an owner's id as the core keeps it (`mod:<manifest id>` for a Kiln mod's owner from
+Kiln.Host, a native mod's or a plugin's own id); kiln.registry resolves it with min_version 2 and binds a caller to its mod
+with it (the id without its kind prefix, lower case). An owner that is not alive is `KILN_ERR_REVOKED`, a buffer too small
+`KILN_ERR_BUFFER_TOO_SMALL` with the needed length.
 
 One table is a service's and has one consumer, the managed host: `kiln.internal.registry`
 (`native/services/content/include/kiln_registry_host.h`), published by kiln-content.dll. Kiln.Host calls

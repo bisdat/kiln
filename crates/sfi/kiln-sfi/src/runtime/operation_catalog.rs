@@ -168,6 +168,39 @@ static NETWORK: [Need; 1] = [Need {
     capability: super::network::CAPABILITY,
 }];
 
+/// The ECS queries and reads need kiln.world's ECS-read members (`ecs::probe_reads`) and the core's `world.ecs_read`
+/// row: an exact engine profile whose entity table checks out on the running exe.
+static ECS_READ: [Need; 1] = [Need {
+    member: super::ecs::probe_reads,
+    capability: super::ecs::READ_CAPABILITY,
+}];
+
+/// The plain component writes need the reads and kiln.world's compare-exchange members with the core's
+/// `world.ecs_write` row (the exact profile's write gate).
+static ECS_WRITE: [Need; 2] = [
+    Need {
+        member: super::ecs::probe_reads,
+        capability: super::ecs::READ_CAPABILITY,
+    },
+    Need {
+        member: super::ecs::probe_writes,
+        capability: super::ecs::WRITE_CAPABILITY,
+    },
+];
+
+/// The loaded-resource writes need kiln.assets' loaded reads and its scalar compare-exchange with its
+/// `assets.loaded_write` row (the exact profile's write gate and content-worker lifetime layout).
+static ASSETS_WRITE: [Need; 1] = [Need {
+    member: super::assets::probe_writes,
+    capability: super::assets::WRITE_CAPABILITY,
+}];
+
+/// The voxel grid needs kiln.build's task-thread grid member (`grid_for_session`) and its row `build.voxel_grid_tasks`.
+static VOXEL_GRID: [Need; 1] = [Need {
+    member: super::world::voxels::probe,
+    capability: super::world::voxels::GRID_CAPABILITY,
+}];
+
 /// The live world context needs kiln.world's `game_world_session` and the core's `session`
 /// record (`world::context::probe`), and the core's `world.lifecycle` row: without the world-destroy
 /// hook a stop is not seen.
@@ -175,6 +208,37 @@ static CONTEXT: [Need; 1] = [Need {
     member: super::world::context::probe,
     capability: super::world::context::CAPABILITY,
 }];
+
+/// The world cursor needs kiln.world's ECS reads and kiln.client's `state` (the local player), with `world.ecs_read`.
+static CURSOR: [Need; 1] = [Need {
+    member: super::world::cursor::probe,
+    capability: super::ecs::READ_CAPABILITY,
+}];
+
+/// Building input needs kiln.client's building input members and the core's `client.building_input` row, which says
+/// unavailable until an input producer is bound on the running build.
+static BUILDING: [Need; 1] = [Need {
+    member: super::world::building_input::probe,
+    capability: super::world::building_input::CAPABILITY,
+}];
+
+/// The prop reads need kiln.world's ECS reads and `ecs_snapshot_many`, with `world.ecs_read`.
+static PROPS: [Need; 1] = [Need {
+    member: super::world::props::probe,
+    capability: super::ecs::READ_CAPABILITY,
+}];
+
+/// `set_scale` needs the prop reads and the compare-exchange writes with `world.ecs_write`.
+static PROPS_WRITE: [Need; 2] = [
+    Need {
+        member: super::world::props::probe,
+        capability: super::ecs::READ_CAPABILITY,
+    },
+    Need {
+        member: super::world::props::probe_scale,
+        capability: super::ecs::WRITE_CAPABILITY,
+    },
+];
 
 /// Production: what this interpreter implements today. `runtime.lifecycle` needs nothing
 /// from Kiln; nor do the refusal-only operations (`place`, `finish_building`,
@@ -185,10 +249,18 @@ static CONTEXT: [Need; 1] = [Need {
 /// finish_building, and `GameplayPatchAvailable`). The network core, the mod messages
 /// and `connected_peers` need kiln.net's lease. `runtime.world.context.active`
 /// and its two facts (the live context, and `world_operation_available` of that operation,
-/// which is the live context too) need the world context's members and `world.lifecycle`. ECS readiness
-/// (`Ready`) waits for the ECS queries: it needs `ecs_context_snapshot`'s view of the engine's entity table (ECS
-/// memory, held with the ECS reads), so it stays that seam. Every other family lands with its
-/// own rows.
+/// which is the live context too) need the world context's members and `world.lifecycle`. The ECS queries, the
+/// entity resolve and the component reads, and ECS readiness (`Ready`, which also needs `ecs_context_snapshot`'s view
+/// of the family's world: an exact profile and a live session, `RuntimeFacts::provider_facts`), need kiln.world's
+/// ECS-read members and `world.ecs_read`; the component writes and `CanWrite` (also the server world's ECS context:
+/// only the local authority's world is written) those and kiln.world's compare-exchange members with
+/// `world.ecs_write`. The cursor and its world-operation fact (a live client world kiln.world reads and a known local
+/// player) need the ECS reads and kiln.client's `state`; building input and its fact kiln.client's building input
+/// members and `client.building_input`; the prop reads, the recipe catalog and `WorldEntityQueryPropsReady` (ECS
+/// readiness, read after `Ready`) the ECS reads and `ecs_snapshot_many`; `set_scale` and `CanWriteCurrentTransform`
+/// (`CanWrite`, read after it, and `CurrentTransform`'s write policy) those and the compare-exchange writes. The voxel grid spec and
+/// its readiness fact (the read operation's world fact) need kiln.build's grid member and `build.voxel_grid_tasks`.
+/// Every other family lands with its own rows.
 pub static CATALOG: Catalog = Catalog {
     operations: &[
         op(Op::Lifecycle, Backing::Interpreter),
@@ -207,38 +279,23 @@ pub static CATALOG: Catalog = Catalog {
         op(Op::NetworkReceiveMod, Backing::Kiln(&NETWORK)),
         op(Op::NetworkAccept, Backing::Kiln(&NETWORK)),
         op(Op::NetworkConnectedPeers, Backing::Kiln(&NETWORK)),
-        op(Op::EcsQuery, later("ECS queries (ecs_context_snapshot)")),
-        op(Op::EcsResolve, later("ECS queries (ecs_context_snapshot)")),
-        op(Op::EcsRead, later("ECS component reads and writes")),
-        op(Op::EcsWrite, later("ECS component reads and writes")),
-        op(Op::AssetsWrite, later("asset writes")),
+        op(Op::EcsQuery, Backing::Kiln(&ECS_READ)),
+        op(Op::EcsResolve, Backing::Kiln(&ECS_READ)),
+        op(Op::EcsRead, Backing::Kiln(&ECS_READ)),
+        op(Op::EcsWrite, Backing::Kiln(&ECS_WRITE)),
+        op(Op::AssetsWrite, Backing::Kiln(&ASSETS_WRITE)),
         op(Op::WorldContextActive, Backing::Kiln(&CONTEXT)),
-        op(Op::WorldCursorGet, later("the world cursor")),
-        op(Op::WorldBuildingInput, later("building input")),
-        op(Op::WorldVoxelRead, later("voxel reads and writes")),
-        op(Op::WorldVoxelWrite, later("voxel reads and writes")),
-        op(Op::WorldVoxelGridSpec, later("voxel reads and writes")),
+        op(Op::WorldCursorGet, Backing::Kiln(&CURSOR)),
+        op(Op::WorldBuildingInput, Backing::Kiln(&BUILDING)),
+        op(Op::WorldVoxelRead, later("voxel reads (read_for_session)")),
+        op(Op::WorldVoxelWrite, later("voxel writes")),
+        op(Op::WorldVoxelGridSpec, Backing::Kiln(&VOXEL_GRID)),
         op(Op::WorldEntitySpawn, later("entity spawn and destroy")),
-        op(
-            Op::WorldEntityQueryProps,
-            later("entity props and transforms"),
-        ),
-        op(
-            Op::WorldEntityQueryPropsInBounds,
-            later("entity props and transforms"),
-        ),
-        op(
-            Op::WorldEntityRegisterPropRecipes,
-            later("entity props and transforms"),
-        ),
-        op(
-            Op::WorldEntityGetTransform,
-            later("entity props and transforms"),
-        ),
-        op(
-            Op::WorldEntitySetScale,
-            later("entity props and transforms"),
-        ),
+        op(Op::WorldEntityQueryProps, Backing::Kiln(&PROPS)),
+        op(Op::WorldEntityQueryPropsInBounds, Backing::Kiln(&PROPS)),
+        op(Op::WorldEntityRegisterPropRecipes, Backing::Kiln(&PROPS)),
+        op(Op::WorldEntityGetTransform, Backing::Kiln(&PROPS)),
+        op(Op::WorldEntitySetScale, Backing::Kiln(&PROPS_WRITE)),
         op(Op::WorldEntityPlace, Backing::Interpreter),
         op(Op::WorldEntityDestroy, later("entity spawn and destroy")),
         op(Op::WorldEntityFinishBuilding, Backing::Interpreter),
@@ -247,17 +304,17 @@ pub static CATALOG: Catalog = Catalog {
     facts: &[
         FactRow {
             fact: Fact::Ready,
-            backing: later("ECS queries (ecs_context_snapshot, held with the ECS reads)"),
+            backing: Backing::Kiln(&ECS_READ),
             read: None,
         },
         FactRow {
             fact: Fact::CanWrite,
-            backing: later("the CAS write core"),
+            backing: Backing::Kiln(&ECS_WRITE),
             read: None,
         },
         FactRow {
             fact: Fact::ResourceCanWrite,
-            backing: later("asset writes"),
+            backing: Backing::Kiln(&ASSETS_WRITE),
             read: None,
         },
         FactRow {
@@ -280,15 +337,38 @@ pub static CATALOG: Catalog = Catalog {
             backing: Backing::Kiln(&CONTEXT),
             read: None,
         },
+        // ShroudForge's grid_spec readiness is `world_operation_available("runtime.world.voxel.read")`, its registered
+        // grid's availability (track_world_context.cpp:182-184): here the grid member and its row.
         FactRow {
-            fact: Fact::WorldEntityQueryPropsReady,
-            backing: later("entity props and transforms"),
+            fact: Fact::WorldOperation(Op::WorldVoxelRead),
+            backing: Backing::Kiln(&VOXEL_GRID),
+            read: None,
+        },
+        // ...and so is `world_operation_available("runtime.world.voxel.grid_spec")` (track_world_context.cpp:182-184).
+        FactRow {
+            fact: Fact::WorldOperation(Op::WorldVoxelGridSpec),
+            backing: Backing::Kiln(&VOXEL_GRID),
             read: None,
         },
         FactRow {
-            fact: Fact::CanWriteCurrentTransform,
-            backing: later("entity props and transforms"),
+            fact: Fact::WorldOperation(Op::WorldCursorGet),
+            backing: Backing::Kiln(&CURSOR),
+            read: Some(super::world::cursor::read_available),
+        },
+        FactRow {
+            fact: Fact::WorldOperation(Op::WorldBuildingInput),
+            backing: Backing::Kiln(&BUILDING),
             read: None,
+        },
+        FactRow {
+            fact: Fact::WorldEntityQueryPropsReady,
+            backing: Backing::Kiln(&PROPS),
+            read: Some(super::world::props::read_ready),
+        },
+        FactRow {
+            fact: Fact::CanWriteCurrentTransform,
+            backing: Backing::Kiln(&PROPS_WRITE),
+            read: Some(super::world::props::read_can_write_transform),
         },
         FactRow {
             fact: Fact::MainMenu,

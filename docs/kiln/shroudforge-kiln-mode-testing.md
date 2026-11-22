@@ -27,8 +27,44 @@ Background: [ShroudForge mods in kiln mode](shroudforge-kiln-mode.md).
    Mods entry say the same. Do not save that world while the mod is off.
 6. **The dialog with the keyboard.** In the dialog before Play, Cancel has the focus; Tab reaches the list and
    Continue; Enter on Cancel, Escape and a click beside the dialog all cancel. Check it at a large text size too.
-7. **Switching back and forth.** Choose Kiln's bundled ShroudForge, play, then Kiln's interpreter again: every mod
+7. **World reads.** Take the kiln-mode probe from Kiln's repository (`mods/tests/sf-kiln-probe`, copied into
+   `<game>/mods`): in a world it writes one line per read to `kiln/logs/kiln.log` (lines with `sf-kiln-probe:`) every
+   30 seconds, and again when you press its shortcut (F5) or its **Run probes now** button on Kiln's ShroudForge page.
+   Aim with a building tool and move the cursor: its `world.cursor` lines follow you. In your base, its
+   `world.props.query` count is the number of props around you (one more when you place one nearby), and its `ecs.query`
+   and `ecs.read_bytes` lines answer `ok=true`. Send the lines that say `ok=false`.
+8. **Switching back and forth.** Choose Kiln's bundled ShroudForge, play, then Kiln's interpreter again: every mod
    runs each time, your mod settings are kept, and no mod shows up twice.
+9. **Mod shortcuts.** Take a mod with a keyboard shortcut, or the keys probe from Kiln's repository
+   (`mods/tests/sf-keys-probe`, copied into `<game>/mods`; its shortcut is F4 and each press shows a notice). In the
+   world, each press works once, holding the key works once, and with Kiln's menu open the key does nothing. Its
+   settings on Kiln's ShroudForge page show the shortcut; change it there, restart, and the new key works.
+10. **Building input.** Mods that build for you through `runtime.world.building` use Kiln's building input (game client
+   26430625, no setting needed). Use a copied world: a selected block, a placed and removed block, an undo and a dismantle should each happen once, as
+   if you did them, and nothing should happen while you hold your own build button. The checks are in
+   [the client pass](client-pass.md#building-input).
+11. **Attributes.** Switch sf-unlimited-flight on with only "Unlimited Glider Stamina" on and start again. On a copied
+   world you host, gliding should not drain stamina. If the mod's line on Kiln's ShroudForge page shows a reason
+   instead, send it. With the kiln-mode probe on too, its `attributes.list` and `attributes.read` lines show what the
+   attribute reads answer.
+12. **World settings changed by a mod.** On a copied world, switch on SF Survival's "Infinite Weapon Durability" on Kiln's
+   ShroudForge page and restart (settings apply at the next start): a weapon's durability no longer drops. Switch it off
+   and restart again: it drops as before, because the mod puts the world's own setting back. With the kiln-mode probe
+   on too, its `services.get` and `services.read_fields` lines show the setting (`enableDurability`).
+13. **Mods that read the game's resources.** On a copied world, host a game in kiln mode with sf-crafting-essentials,
+   sf-unlimited-flight, sf-survival or skeleton-commander on, play for a minute, go back to the main menu and enter the
+   world again. Nothing freezes or crashes, no mod says the ResourceService is missing (what they still cannot do, they
+   name with another reason), and what the mods change (sf-crafting-essentials: its recipe changes) shows in the game
+   and is gone again after you switch the mod off and restart. With the kiln-mode probe on too, its
+   `resources.by_type` and `resources.get` lines answer `ok=true` in a world.
+14. **The voxel grid.** Host a copied world with the voxel probe from Kiln's repository (`mods/tests/sf-voxel-probe`,
+   copied into `<game>/mods`; it only reads). Within a few seconds `kiln/logs/kiln.log` has a line
+   `probe grid: voxel origin ... cell 0.5,0.5,0.5 maximum 20480,2147483640,20480`, a line `probe read: refused: ...`
+   (reading cells is not in kiln mode yet), and the game runs as usual while the probe is on. The kiln-mode probe's
+   `voxel.grid_spec` line shows the same grid.
+15. **Template components changed by a mod.** On a copied world, switch on SF Survival's "No Fall Damage" on Kiln's
+   ShroudForge page and restart: a fall from a height that normally costs health costs none. Switch it off and restart
+   again: the same fall costs health as before, because the mod puts the template's own values back.
 
 ## What to send
 

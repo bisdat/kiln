@@ -1,0 +1,10 @@
+{
+  "id": "kiln-sf-kiln-probe",
+  "name": "Kiln kiln-mode probe",
+  "version": "0.1.0",
+  "description": "Test probe for kiln mode's world and data reads of ShroudForge-format mods: in a world it calls the entity, cursor, prop, attribute, named service, loaded resource, voxel grid and building members once each and logs one line per call to kiln.log, every 30 seconds, on its shortcut and on its button. Writes only with its Allow writes setting on, on a copied world. Test only.",
+  "authors": ["Kiln contributors"],
+  "license": "MIT",
+  "dependencies": [],
+  "capabilities": ["runtime"]
+}

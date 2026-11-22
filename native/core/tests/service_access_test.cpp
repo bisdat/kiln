@@ -19,6 +19,7 @@
 #include "services/kiln_launch.h"
 #include "../src/launch_internal.h"
 #include "../src/hooks_protect_internal.h"
+#include "../src/owners_internal.h"
 #include "services/kiln_profile.h"
 #include "services/kiln_progress.h"
 #include "../../plugins/compat/original_code_service.h"
@@ -48,6 +49,9 @@ KilnOwner owner_create_managed_host(std::string_view id) {
     host_created.emplace_back(id);
     return 42;
 }
+const KilnOwnersInternalApi owners_internal_own{{sizeof(KilnOwnersInternalApi), KILN_OWNERS_INTERNAL_VERSION}, nullptr,
+                                                nullptr, nullptr};
+const KilnOwnersInternalApi* owners_internal_table() { return &owners_internal_own; }  // stands for registry.cpp's table
 }  // namespace reg
 namespace svc {
 const void* find(std::string_view, uint32_t) { return nullptr; }
@@ -239,35 +243,36 @@ void internal_hooks_views() {
     alive.erase(7);
 }
 
-// kiln.internal.owners (owners_internal.h): an owner's id for Kiln's services (kiln.registry binds its callers with it);
-// the core's own, through the services' view only; nobody publishes it.
+// kiln.internal.owners (owners_internal.h): the core's own, through the services' view and the managed host's view only;
+// nobody publishes it.
 void internal_owners_views() {
     using namespace kiln;
     const KilnStr name{KILN_OWNERS_INTERNAL_SERVICE, std::strlen(KILN_OWNERS_INTERNAL_SERVICE)};
-    const auto* t = static_cast<const KilnOwnersInternalApi*>(api_service_services(name, 1));
-    check(t && t->header.version == 1 && t->header.size == sizeof(KilnOwnersInternalApi) && t->owner_id, "the services' view resolves kiln.internal.owners");
-    check(api_service(name, 1) == nullptr, "the plugins' view never resolves it (an unstamped or foreign DLL gets that view)");
-    check(api_service_managed_host(name, 1) == nullptr, "nor the managed host's view");
-    check(api_service_services(name, 2) == nullptr, "...not for a later version");
-    if (!t) return;
-    char buf[64];
-    size_t len = 0;
-    check(t->owner_id(3, buf, sizeof buf, &len) == KILN_OK && std::string(buf) == "mod:Fishing-Plus" && len == 16, "owner_id: the core's id of a live owner");
-    check(t->owner_id(3, buf, 4, &len) == KILN_ERR_BUFFER_TOO_SMALL && len == 16 && std::string(buf) == "mod", "a buffer too small: cut, NUL-terminated, the needed length");
-    check(t->owner_id(3, nullptr, 0, &len) == KILN_ERR_BUFFER_TOO_SMALL && len == 16, "a size query");
-    check(t->owner_id(99, buf, sizeof buf, &len) == KILN_ERR_NOT_FOUND, "an owner never created: not found");
-    alive.insert(8);
-    alive.erase(8);
-    check(t->owner_id(8, buf, sizeof buf, &len) == KILN_ERR_NOT_FOUND, "a revoked owner: not found");
-    check(t->owner_id(0, buf, sizeof buf, &len) == KILN_ERR_INVALID_ARGUMENT && t->owner_id(3, nullptr, 8, &len) == KILN_ERR_INVALID_ARGUMENT,
-          "owner 0 and a NULL buffer with a capacity: invalid");
-    const KilnOwnersInternalApi spoof{{sizeof(KilnOwnersInternalApi), 1}, nullptr};
+    for (const bool hooks : {true, false}) {
+        g_hooks = hooks;
+        const char* mode = hooks ? " (hooks on)" : " (safe idle)";
+        check(api_service_services(name, 1) == &reg::owners_internal_own,
+              std::string("the services' view resolves kiln.internal.owners").append(mode).c_str());
+        check(api_service_managed_host(name, 1) == &reg::owners_internal_own,
+              std::string("the managed host's view resolves it").append(mode).c_str());
+        check(api_service(name, 1) == nullptr, std::string("the plugins' view never resolves it").append(mode).c_str());
+        check(api_service_services(name, 2) == &reg::owners_internal_own && api_service_managed_host(name, 2) == &reg::owners_internal_own,
+              std::string("v2 (owner_id, kiln.registry's min_version) resolves the same table in both views").append(mode).c_str());
+        check(api_service_services(name, 3) == nullptr && api_service_managed_host(name, 3) == nullptr,
+              std::string("...not a later version").append(mode).c_str());
+    }
+    g_hooks = true;
+    const KilnOwnersInternalApi spoof{{sizeof(KilnOwnersInternalApi), 1}, nullptr, nullptr, nullptr};
     alive.insert(7);
     service_owner_add(7);
+    const int before = caps::published;
     last_log.clear();
-    check(api_register_service_services(7, name, &spoof) == KILN_ERR_INVALID_ARGUMENT && last_log == "warn" && api_register_service(2, name, &spoof) == KILN_ERR_INVALID_ARGUMENT,
-          "nobody publishes kiln.internal.owners, not even a Kiln service");
-    check(api_service_services(name, 1) == t, "the services' view still resolves the core's table");
+    check(api_register_service_services(7, name, &spoof) == KILN_ERR_INVALID_ARGUMENT && last_log == "warn",
+          "not even a Kiln service publishes kiln.internal.owners (refused with a warning)");
+    check(api_register_service(2, name, &spoof) == KILN_ERR_INVALID_ARGUMENT, "nor a plugin");
+    check(caps::published == before && api_service_services(name, 1) == &reg::owners_internal_own &&
+              api_service_managed_host(name, 1) == &reg::owners_internal_own && api_service(name, 1) == nullptr,
+          "and the services' and the host's views still resolve the core's table, the plugins' view still nothing");
     alive.erase(7);
 }
 

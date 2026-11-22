@@ -66,6 +66,21 @@ for kind in asan tsan; do
   TSAN_OPTIONS=halt_on_error=1:exitcode=66 "$out/ecs_writes_test_$kind" "$here/../../../../sigdb/types"
 done
 
+# named_services_test: the named services (named_services.cpp, named_service_hold.cpp) over the same real kiln.engine
+# (its write gate) and fake engine, with the game's named-service registry laid out from each profile's typed
+# serviceLayout: every outcome, the gate hold, sessions, owners, the binding's checks, racing writers against a simulated
+# frame; under ASan/UBSan and ThreadSanitizer (lint_hold.py above covers named_service_hold.cpp too).
+for kind in asan tsan; do
+  if [[ $kind == asan ]]; then san=(-fsanitize=address,undefined -fno-sanitize-recover=undefined); else san=(-fsanitize=thread); fi
+  g++ -std=c++20 -O1 -g -pthread -Wall -Wextra -Werror -Wno-mismatched-new-delete "${san[@]}" -DKILN_ENGINE_GATE_TEST_POINTS \
+      -DKILN_WORLD_HOLD_TEST_POINTS -I"$engine" -I"$engine/include" -I"$engine/tests" -I"$here/../../../core/abi" \
+      -I"$here/../../../third_party" "$here/named_services_test.cpp" "$here/../named_services.cpp" \
+      "$here/../named_service_hold.cpp" "$engine/engine.cpp" "$engine/identity.cpp" "$engine/resolve.cpp" "$engine/gate.cpp" \
+      "$engine/resource_guard.cpp" "$engine/invoke.cpp" "$engine/tests/host/memory_host.cpp" \
+      "$engine/tests/host/invoke_host.cpp" -o "$out/named_services_test_$kind"
+  TSAN_OPTIONS=halt_on_error=1:exitcode=66 "$out/named_services_test_$kind"
+done
+
 # ecs_prod_test: the production wiring of the write events (ecs_prod.cpp) over a fake core with kiln.hooks' owner-retiring
 # observer: a subscription before on_ready carries over, one of an owner revoked before on_ready ends.
 for kind in asan tsan; do

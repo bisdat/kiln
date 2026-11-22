@@ -59,6 +59,8 @@ Kiln.ContentDefinition.Worlds.init -> void
 Kiln.ContentEntry
 Kiln.ContentEntry.CraftingDuration.get -> System.TimeSpan
 Kiln.ContentEntry.CraftingDuration.set -> void
+Kiln.ContentEntry.CraftingWater.get -> int
+Kiln.ContentEntry.CraftingWater.set -> void
 Kiln.ContentEntry.Get(string! path) -> Kiln.ContentValue
 Kiln.ContentEntry.GetNumber(string! path) -> double
 Kiln.ContentEntry.GetRef(string! path) -> System.Guid
@@ -657,6 +659,8 @@ Kiln.RecipeDefinition.StationItem.get -> string?
 Kiln.RecipeDefinition.StationItem.init -> void
 Kiln.RecipeDefinition.Unlock.get -> Kiln.RecipeUnlock
 Kiln.RecipeDefinition.Unlock.init -> void
+Kiln.RecipeDefinition.Water.get -> int?
+Kiln.RecipeDefinition.Water.init -> void
 Kiln.RecipeIngredient
 Kiln.RecipeIngredient.Category.get -> uint
 Kiln.RecipeIngredient.Category.init -> void

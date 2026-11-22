@@ -252,9 +252,10 @@ class TypedResourceLayout(unittest.TestCase):
         self.assertEqual(len(rows), len(PROFILES))
         for side, p in PROFILES.items():
             row = next(line for line in rows if '"%s"' % TARGET[side] in line)
-            # the Layout initializer ends with ResourceWriteLayout{...}, ResourceLayout{..., ItemMapLayout{...}}, CallRecipes{}}
+            # the Layout initializer ends with ResourceWriteLayout{...}, ResourceLayout{..., ItemMapLayout{...}}, CallRecipes{},
+            # ServiceLayout{...}}
             found = re.search(r'ResourceWriteLayout\{[^{}]*\{[^{}]*\}\}, ResourceLayout\{([^{}]*), ItemMapLayout\{([^{}]*)\}\}, '
-                              r'CallRecipes\{\}\}', row)
+                              r'CallRecipes\{\}, ServiceLayout\{', row)
             self.assertIsNotNone(found, side)
             numbers = [int(v.strip().rstrip('u')) if v.strip() not in ('true', 'false') else int(v.strip() == 'true')
                        for v in (found.group(1) + ', ' + found.group(2)).split(',')]
@@ -323,8 +324,14 @@ class TypedResourceLayout(unittest.TestCase):
         self.assertEqual(members('ResourceLayout'), [f for f, _ in self.FIELDS] + ['item_map'])
         self.assertEqual(members('ItemMapLayout'), ['enabled'] + [f for f, _ in g.ITEM_MAP_FIELDS])
         self.assertEqual(members('ItemMapLayout'), ['enabled'] + [f for f, _ in self.ITEM_FIELDS])
-        # The Layout ends with the typed resource record, then the engine-call recipes, the generator's last two
-        self.assertEqual(members('Layout')[-2:], ['resource', 'calls'])
+        # The Layout ends with the typed resource record, the engine-call recipes and the typed service layout, the
+        # generator's last three
+        self.assertEqual(members('Layout')[-3:], ['resource', 'calls', 'services'])
+        self.assertEqual(members('ServiceLayout'),
+                         ['enabled'] + [f for f, _ in g.SERVICE_BINDING_FIELDS + g.SERVICE_SYSTEM_FIELDS] +
+                         ['contract_count', 'contracts'])
+        self.assertEqual(members('ServiceContract'), ['key', 'key_size', 'key_hash', 'type_hash', 'size', 'descriptor',
+                                                      'function', 'metadata', 'metadata_slot'])
 
 
 class CallRecipes(unittest.TestCase):
@@ -337,7 +344,7 @@ class CallRecipes(unittest.TestCase):
         self.assertEqual(len(rows), len(PROFILES))
         for row in rows:
             self.assertEqual(row.count('CallRecipes{'), 1, row[:60])
-            self.assertIn('}}, CallRecipes{}}, kLeaves', row, row[:60])
+            self.assertIn('}}, CallRecipes{}, ServiceLayout{true, ', row, row[:60])
 
     def test_generated_text_has_no_recipe_data(self):
         generated = (ROOT / g.OUTPUT).read_text(encoding='utf-8')
@@ -554,9 +561,9 @@ class EngineCalls(unittest.TestCase):
         calls = {'ImpactSameEntity': self.recipe(3, ((0x1000, 64), (0x2000, 32), (0x5000, 1)))}
         text = g.generate(self.root_with({'server': calls}))
         self.assertIn(', CallRecipes{{CallRecipe{}, CallRecipe{}, CallRecipe{3u, 2u, 32u, 3u, {64u, 0u, 0u, 0u, 0u, 0u, '
-                      '0u, 0u}, {CallRange{0x1000u, 64u}, CallRange{0x2000u, 32u}, CallRange{0x5000u, 1u}}}}}}, kLeaves1',
+                      '0u, 0u}, {CallRange{0x1000u, 64u}, CallRange{0x2000u, 32u}, CallRange{0x5000u, 1u}}}}}, ServiceLayout{true, ',
                       text)
-        self.assertIn('}}, CallRecipes{}}, kLeaves0', text)
+        self.assertIn('}}, CallRecipes{}, ServiceLayout{true, ', text)
         self.assertNotIn('engineCalls', text)  # the leaves stay the ShroudForge profile's
         self.assertEqual(len(self.rows(text)), len(self.rows((ROOT / g.OUTPUT).read_text(encoding='utf-8'))))
         cxx = shutil.which('g++') or shutil.which('c++') or shutil.which('clang++')
@@ -581,6 +588,119 @@ class EngineCalls(unittest.TestCase):
         done = subprocess.run([cxx, '-std=c++20', '-fsyntax-only', '-Wall', '-Wextra', '-Werror',
                                '-I' + str(ROOT / 'native/services/engine'), '-I' + str(ROOT / 'native/core/abi'),
                                '-I' + str(tmp), str(tmp / 'check.cpp')], capture_output=True, text=True)
+        self.assertEqual(done.returncode, 0, done.stderr[-3000:])
+
+
+class ServiceLayouts(unittest.TestCase):
+    """The typed serviceLayout: ShroudForge's prepare_binding and contract rules (resolve_named_service.cpp), checked at
+    generation time, and Kiln's own (every contract once, printable keys, RVAs in the image, the hash of the type)."""
+
+    def parsed(self, side, edit=None):
+        p = copy.deepcopy(PROFILES[side])
+        if edit:
+            edit(p)
+        layout, _ = run(p, side)
+        return g.parse_service_layout(p, p['image']['size'], layout['write']['enabled'])
+
+    def refuses(self, side, edit, message):
+        with self.assertRaises(g.ProfileError) as caught:
+            self.parsed(side, edit)
+        self.assertIn(message, str(caught.exception))
+
+    def test_ported_profiles_type_their_contract(self):
+        for side, p in PROFILES.items():
+            s = self.parsed(side)
+            model = p['serviceLayout']
+            for field, key in g.SERVICE_BINDING_FIELDS + g.SERVICE_SYSTEM_FIELDS:
+                self.assertEqual(s[field], model[key], '%s %s' % (side, field))
+            self.assertEqual(len(s['contracts']), 1, side)
+            c = s['contracts'][0]
+            self.assertEqual((c['key'], c['size'], c['type_hash'], c['key_hash']),
+                             (b'ecs::GameSettings', 144, 2298714128, g.fnv1a32(b'ecs::GameSettings')), side)
+            raw = model['contracts'][0]
+            self.assertEqual((c['descriptor'], c['function'], c['metadata'], c['metadata_slot']),
+                             (raw['mutableSystemDescriptorRva'], raw['mutableSystemFunctionRva'], raw['metadataRva'],
+                              raw['registrySlotRva']), side)
+
+    def test_without_one_the_record_is_empty(self):
+        for side in PROFILES:
+            self.assertIsNone(self.parsed(side, lambda q: q.pop('serviceLayout')))
+        self.assertEqual(g.service_layout(None), 'ServiceLayout{}')
+
+    def test_shroudforge_rules(self):
+        def model(**values):
+            return lambda q: q['serviceLayout'].update(values)
+
+        def contract(**values):
+            return lambda q: q['serviceLayout']['contracts'][0].update(values)
+        for side in PROFILES:
+            self.refuses(side, model(id='engine-named-plain-services-v2'), 'named services unavailable')
+            self.refuses(side, model(recordStride=0x10000001), 'invalid named service offset')
+            self.refuses(side, lambda q: q['serviceLayout'].pop('mapKeysOffset'), "key 'mapKeysOffset' not found")
+            self.refuses(side, model(maximumRecords=0), 'invalid named service record layout')
+            self.refuses(side, model(maximumRecords=1025), 'invalid named service record layout')
+            self.refuses(side, model(maximumMapCapacity=4097), 'invalid named service record layout')
+            self.refuses(side, model(recordStride=0xb7), 'invalid named service record layout')
+            self.refuses(side, model(recordHashOffset=232 - 3), 'invalid named service record layout')
+            self.refuses(side, model(recordNormalPointerOffset=232 - 7), 'invalid named service record layout')
+            self.refuses(side, model(maximumSystems=2049), 'invalid named service record layout')
+            self.refuses(side, model(systemStride=511), 'invalid named service record layout')
+            self.refuses(side, model(systemAlternateBindingsOffset=7976 - 511), 'invalid named service record layout')
+            self.refuses(side, model(systemNormalCountOffset=7976), 'invalid named service record layout')
+            self.refuses(side, contract(key=''), 'invalid service selector')
+            self.refuses(side, contract(key='x' * 128), 'invalid service selector')
+            self.refuses(side, contract(key='ecs::Game\0Settings'), 'invalid service selector')
+            self.refuses(side, contract(qualifiedType='keen::ecs::Other'), 'no matching original plain-data service contract')
+            self.refuses(side, contract(plainData=False), 'no matching original plain-data service contract')
+            self.refuses(side, lambda q: q['serviceLayout']['contracts'][0].pop('plainData'),
+                         'no matching original plain-data service contract')
+            self.refuses(side, contract(scope='client-local'), 'no matching original plain-data service contract')
+            self.refuses(side, contract(size=0), 'no matching original plain-data service contract')
+            self.refuses(side, contract(size=65537), 'no matching original plain-data service contract')
+            self.refuses(side, lambda q: q['serviceLayout']['contracts'].append(
+                copy.deepcopy(q['serviceLayout']['contracts'][0])), 'ambiguous service contract')
+
+    def test_kiln_rules(self):
+        size = {side: p['image']['size'] for side, p in PROFILES.items()}
+        for side in PROFILES:
+            self.refuses(side, lambda q: q['serviceLayout']['contracts'][0].update(qualifiedHash=1),
+                         'no matching original plain-data service contract')
+            self.refuses(side, lambda q: q['serviceLayout']['contracts'][0].update(metadataRva=size[side]),
+                         'named service contract RVA out of the image')
+            self.refuses(side, lambda q: q['serviceLayout']['contracts'][0].update(mutableSystemFunctionRva=0),
+                         'named service contract RVA out of the image')
+            self.refuses(side, lambda q: q['serviceLayout']['contracts'][0].update(
+                key='ecs::Game Settings', qualifiedType='keen::ecs::Game Settings',
+                qualifiedHash=g.fnv1a32(b'keen::ecs::Game Settings')), 'named service key must be printable ASCII')
+            self.refuses(side, lambda q: q['serviceLayout'].update(
+                contracts=[dict(q['serviceLayout']['contracts'][0], key='k%d' % i, qualifiedType='keen::k%d' % i,
+                                qualifiedHash=g.fnv1a32(b'keen::k%d' % i)) for i in range(9)]),
+                         'named service contracts must be a list of at most 8')
+            with self.assertRaises(g.ProfileError) as caught:  # without the ECS write gate the services have no hold
+                g.parse_service_layout(PROFILES[side], size[side], False)
+            self.assertIn('named service data lacks original mutable/lifetime validation', str(caught.exception))
+
+    def test_the_record_compiles_as_emitted(self):
+        cxx = shutil.which('g++') or shutil.which('c++') or shutil.which('clang++')
+        if not cxx:
+            self.skipTest('no C++ compiler on PATH')
+        tmp = Path(tempfile.mkdtemp(prefix='engine-services-cxx-'))
+        self.addCleanup(shutil.rmtree, tmp)
+        (tmp / 'check.cpp').write_text(
+            '#include "profiles.g.h"\n'
+            'using namespace kiln::engine;\n'
+            'constexpr bool check(const Profile& p) {\n'
+            '    const ServiceLayout& s = p.layout.services;\n'
+            '    const ServiceContract& c = s.contracts[0];\n'
+            '    return s.enabled && s.contract_count == 1 && s.stride == 232 && s.maximum_systems == 2048 &&\n'
+            '           c.key[0] == \'e\' && c.key[16] == \'s\' && c.key[17] == 0 && c.key_size == 17 && c.size == 144 &&\n'
+            '           c.type_hash == 2298714128u && s.contracts[1].size == 0;\n'
+            '}\n'
+            'static_assert(check(generated::kProfiles[0]) && check(generated::kProfiles[1]));\n'
+            'int main() { return 0; }\n')
+        done = subprocess.run([cxx, '-std=c++20', '-fsyntax-only', '-Wall', '-Wextra', '-Werror',
+                               '-I' + str(ROOT / 'native/services/engine'), '-I' + str(ROOT / 'native/core/abi'),
+                               str(tmp / 'check.cpp')], capture_output=True, text=True)
         self.assertEqual(done.returncode, 0, done.stderr[-3000:])
 
 

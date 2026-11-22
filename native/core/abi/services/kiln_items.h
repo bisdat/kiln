@@ -34,12 +34,12 @@ extern "C" {
 #endif
 
 #define KILN_ITEMS_SERVICE "kiln.items"
-#define KILN_ITEMS_VERSION 8u  /* v2 appends the fuel functions, v3 the move, name and transfer functions, v4 the item
+#define KILN_ITEMS_VERSION 9u  /* v2 appends the fuel functions, v3 the move, name and transfer functions, v4 the item
                                   instances (stamps, locations, records), v5 (0.2.0-dev.27) equip and unequip, v6
                                   (0.2.0-dev.29) equipment sets, v7 (0.2.0-dev.30, the gem wave) gem sockets on any gear:
                                   KILN_ITEMS_GEM_SLOT_ANY, REPLACE, DYE, DURABILITY and socket_roll, v8 (0.2.0-dev.29.19,
                                   the equipment wave) gear_write, gear_read and gear_status, then rarity_rolls and
-                                  roll_status; check header.size */
+                                  roll_status, v9 (0.2.0-dev.30.3) container_rename and rename_status; check header.size */
 
 typedef uint32_t KilnItemId;  /* 0 = none */
 typedef uint64_t KilnSlotId;  /* 0 = none / let the game choose */
@@ -358,8 +358,15 @@ typedef struct KilnItemsMoveRequest {
     KilnEntity to;       /* the inventory they enter; not the same entity as `from` */
     uint32_t count;      /* STACK: items to move, 0 = the whole stack; must not exceed the stack. Otherwise 0 */
     KilnSlotId slot;     /* STACK: the slot of `from` (KILN_SLOT_ID(inventory, index)) */
-    KilnSlotId to_slot;  /* STACK: a slot of `to` to fill first (0 = the game's choice: partial stacks of the item,
-                            then the first empty slot) */
+    KilnSlotId to_slot;  /* STACK: a slot of `to` to fill first (0 = Kiln's choice: partial stacks of the item,
+                            then the first empty slot). Into a player or an NPC (issue #109) the choice uses only the
+                            Generic pages (the backpack, the worn backpack's too), never equipment, currency or
+                            customization pages nor the action bar without KILN_ITEMS_MOVE_ACTIONBAR; a to_slot the
+                            item may not enter (an empty equipment slot: a move is no equip, use equip; an equipment
+                            slot of another type or one no SlotSelection entry shows, the backpack slot, a currency page
+                            for a non-currency, not a slot of `to`) is KILN_ITEMS_REFUSED; a worn equipment slot of the
+                            item's type tops up the worn stack; one it may enter that is full gives way to the choice. A stack that
+                            arrived anywhere else, or items lost on the way, roll the move back as REFUSED. */
 } KilnItemsMoveRequest;
 
 /* One piece of the ledger: `amount` of `item` left `from_slot` and arrived in `to_slot`. Gear (a stack with an item
@@ -1233,6 +1240,78 @@ typedef struct KilnItemsScaleStatus {
     char detail[160];     /* why a scale is off; NUL-terminated */
 } KilnItemsScaleStatus;
 
+/* ---------------------------------------------------------------------------------------- renaming a container ---- */
+
+/* v9, since 0.2.0-dev.30.3 (GitHub issue #112; feature items.rename; check header.size: a table without it ends at 368).
+ *
+ * What a player's Rename button does, run by Kiln on the server: the game's own rename (docs/re/items.md section 14)
+ * stores the text in the world's string table (which queues it for every client) and puts its id into the object's name
+ * component through the world's tracked write (replication and the save) or, for an object never named before, adds the
+ * component. So the name shows for other players, is in the next save and is read back by container_name and by the
+ * game's own Rename screen, like one a player typed.
+ *
+ * The text is checked like the game's Rename field: at most KILN_ITEMS_NAME_MAX_CHARS characters (code points) and
+ * KILN_ITEMS_NAME_MAX_BYTES bytes of well-formed UTF-8, no control character other than TAB (the field drops them), no
+ * trimming and no other filter (the game has no profanity filter on names; a client's display may filter them). An empty
+ * text clears the name, as the server's rename does for one (the Rename field itself never sends it). Only a
+ * container may be renamed: an entity with an initialized inventory that is neither a player's nor an NPC's (a chest, a
+ * storage station). Only where the server world runs (a dedicated server, or the game client hosting the world); a game
+ * client joined to another machine's world is refused (KILN_ITEMS_RENAME_NOT_SERVER). */
+
+#define KILN_ITEMS_NAME_CAPACITY 256u /* bytes: the game's rename message and its string records (the request's buffer) */
+#define KILN_ITEMS_NAME_MAX_BYTES 64u /* bytes of UTF-8 the game's Rename field holds */
+#define KILN_ITEMS_NAME_MAX_CHARS 48u /* code points it takes (FbUiBundle.maxInputLengthForLabelledEntities in the game data) */
+
+/* KilnItemsRenameResult.status */
+enum {
+    KILN_ITEMS_RENAME_DONE = 0,          /* the game took the name (changed = 0: the object already had it) */
+    KILN_ITEMS_RENAME_GONE = 1,          /* no such entity (any more) */
+    KILN_ITEMS_RENAME_NOT_CONTAINER = 2, /* the entity has no container inventory (a player, an NPC, a prop, an altar) */
+    KILN_ITEMS_RENAME_TOO_LONG = 3,      /* more than KILN_ITEMS_NAME_MAX_CHARS characters or _MAX_BYTES bytes */
+    KILN_ITEMS_RENAME_BAD_TEXT = 4,      /* not well-formed UTF-8, or a control character the Rename field drops */
+    KILN_ITEMS_RENAME_NOT_SERVER = 5,    /* no server world in this process (a joined game client, the main menu) */
+    KILN_ITEMS_RENAME_FULL = 6,          /* the game's string table holds its maximum of different names (game_error) */
+    KILN_ITEMS_RENAME_UNAVAILABLE = 7,   /* feature items.rename off, or switched off after a fault; nothing changed */
+    KILN_ITEMS_RENAME_DROPPED = 8,       /* not run: the server world went away or did not step for 10 s */
+};
+
+typedef struct KilnItemsRenameRequest {
+    uint32_t size;                   /* sizeof(KilnItemsRenameRequest) */
+    KilnEntity entity;               /* the container */
+    uint32_t len;                    /* bytes of text; 0 clears the name */
+    uint32_t reserved;               /* 0 */
+    char text[KILN_ITEMS_NAME_CAPACITY]; /* UTF-8, not NUL-terminated (bytes past len are ignored) */
+} KilnItemsRenameRequest;
+
+typedef struct KilnItemsRenameResult {
+    uint32_t size;        /* sizeof(KilnItemsRenameResult) */
+    int32_t status;       /* KILN_ITEMS_RENAME_* */
+    uint64_t ticket;      /* 0 for a refusal at the call */
+    KilnEntity entity;
+    uint32_t game_error;  /* FULL: the game's error code */
+    uint32_t steps;       /* sim steps from the call to the run */
+    uint8_t changed;      /* DONE: 1 the stored name changed, 0 it was already this name */
+    uint8_t cleared;      /* DONE: 1 the object has no name now (an empty text) */
+    uint16_t reserved;
+    char message[160];    /* what happened, in words; NUL-terminated */
+} KilnItemsRenameResult;
+
+/* Tick thread, in Pre, once per accepted rename. */
+typedef void(KILN_CALL* KilnItemsRenameDoneFn)(const KilnItemsRenameResult* result, void* user);
+
+typedef struct KilnItemsRenameStatus {
+    uint32_t size;        /* in: sizeof(KilnItemsRenameStatus) */
+    uint8_t available;    /* 1: renames can be queued here now (feature on, a server world in this process) */
+    uint8_t feature;      /* 1: feature items.rename resolved and kiln.items' checks passed */
+    uint8_t server;       /* 1: a server world runs in this process (a dedicated server or a hosting client) */
+    uint8_t reserved0;
+    uint32_t pending;     /* renames waiting for the next Pre */
+    uint32_t done;        /* renames the game took since the start */
+    uint32_t refused;     /* renames refused at the tick (gone, not a container, full, unavailable, dropped) */
+    uint32_t reserved1;
+    char detail[160];     /* why renames are off; NUL-terminated */
+} KilnItemsRenameStatus;
+
 /* ---------------------------------------------------------------------------------------------- the table ---- */
 
 typedef struct KilnItemsApi {
@@ -1471,6 +1550,22 @@ typedef struct KilnItemsApi {
      * armor; 1 for a scale it has none of). stamp 0 = any. KILN_ERR_NOT_FOUND: not that stamped item entity. Any thread. */
     KilnResult(KILN_CALL* gear_scale_read)(KilnEntity entity, uint32_t stamp, KilnItemsGearScale* out);
     KilnResult(KILN_CALL* scale_status)(KilnItemsScaleStatus* out); /* any thread */
+
+    /* ---- v9, since 0.2.0-dev.30.3: renaming a container (see "renaming a container"; check header.size: a table
+     * without these ends at 368) ---- */
+
+    /* Checks the request now and queues the rename for the next Pre, where it runs through the game's own rename.
+     * Refused at once (nothing queued, *out_refusal filled when not NULL; no callback) with KILN_ERR_INVALID_ARGUMENT
+     * (no request or a short one, reserved not 0: status BAD_TEXT; entity 0: GONE; a text longer than the Rename field
+     * takes: TOO_LONG; one it would not take: BAD_TEXT), KILN_ERR_NOT_FOUND (called on the tick thread: no such
+     * entity, GONE, or not a container, NOT_CONTAINER) or KILN_ERR_UNAVAILABLE (feature off: UNAVAILABLE; no server world
+     * in this process: NOT_SERVER; 1024 renames waiting: UNAVAILABLE). Otherwise KILN_OK, *out_ticket (optional) = its
+     * ticket, and `done` (it may be NULL) runs once on the tick thread in Pre with the result: the entity is checked again
+     * there (GONE, NOT_CONTAINER), and renames of one entity run in the order they were made. cancel(ticket) and
+     * cancel_owner(owner) drop the callback (the rename itself still runs). Any thread. */
+    KilnResult(KILN_CALL* container_rename)(KilnOwner owner, const KilnItemsRenameRequest* request, KilnItemsRenameDoneFn done,
+                                            void* user, uint64_t* out_ticket, KilnItemsRenameResult* out_refusal);
+    KilnResult(KILN_CALL* rename_status)(KilnItemsRenameStatus* out); /* any thread */
 } KilnItemsApi;
 
 #ifdef __cplusplus

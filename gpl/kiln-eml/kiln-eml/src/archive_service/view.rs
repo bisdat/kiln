@@ -15,11 +15,12 @@
 //! source kiln.eml.values' `arena_create` copies once per arena. Only the snapshot ever answers here.
 //!
 //! A generation authorized with its archive (`authorize_with_archive`, the archive table's read group) also serves the read group
-//! (`super::read`): it keeps the registry, the `ArchiveBacking` and the resource_json replies materialized for it.
+//! (`super::read`): it keeps the registry, the `ArchiveBacking` and the resource_json replies materialized for it, and
+//! serves the attribute group (`super::attributes`) from the attribute catalog built once from that archive.
 use std::{
     collections::{BTreeMap, HashMap},
     ffi::c_char,
-    sync::{Arc, Mutex, MutexGuard},
+    sync::{Arc, Mutex, MutexGuard, OnceLock},
 };
 
 use kfc::reflection::TypeRegistry;
@@ -80,6 +81,8 @@ pub(super) struct Generation {
     /// resource_json's replies, materialized once per resource for this generation and kept with it: a size probe and
     /// the copy after it read the same bytes, and no reply is built twice from a file that may have changed.
     pub(super) replies: Mutex<HashMap<ResourceId, Arc<Reply>>>,
+    /// The attribute group's catalog, built from the archive once, on its first call (`super::attributes`).
+    pub(super) attributes: OnceLock<Arc<super::attributes::Materialized>>,
 }
 
 impl Generation {
@@ -246,6 +249,7 @@ fn authorize_generation(
         pin_json,
         archive,
         replies: Mutex::new(HashMap::new()),
+        attributes: OnceLock::new(),
     });
     state.generations.insert(
         pins.generation,

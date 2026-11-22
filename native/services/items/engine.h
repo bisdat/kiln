@@ -116,7 +116,8 @@ struct Engine {
     MoveAllFn move_all = nullptr;
     uintptr_t area_deposit = 0;        // feature items.transfer: only checked, never called or hooked
     uintptr_t set_string = 0;          // feature items.names
-    uintptr_t add_component = 0;       // feature items.names (lab only: the rename handler's AddComponent)
+    uintptr_t add_component = 0;       // features items.names (the lab's self-test) and items.rename: the rename handler's AddComponent
+    uintptr_t write_component_tick = 0;  // feature items.rename: the rename handler's tracked write (WriteOther, the world's tracker)
     EquipFn equip_item = nullptr;      // feature items.equip (v5)
     EquipFn unequip_item = nullptr;
     // feature items.equip_sets (v6): the commit's own rollback conditions, captured from InventoryCommit's first bytes
@@ -138,6 +139,8 @@ struct Engine {
     int64_t hmap_bits = 0, hmap_capacity = 0, hmap_keys = 0, hmap_values = 0, hmap_count = 0;
     int64_t program_count = 0;      // world: u16 registered programs
     int64_t strings_bitmap = 0;     // CustomPlayerStringsSystem: its HashMap's bitmap pointer (the map starts hmap_bits before it)
+    // feature items.rename (v9): the string table's record count, the insert's fixed limit, its record pool's capacity
+    int64_t strings_used = 0, strings_limit = 0, strings_pool_cap = 0;
     int64_t storage_next_id = 0;    // feature items.instances: entity storage: the u32 counter new entity ids come from
     // feature items.instances: the attribute ids the save record builder reads (durability, fuel, level)
     uint32_t attr_durability = 0, attr_durability_max = 0, attr_fuel = 0, attr_fuel_max = 0, attr_level = 0;
@@ -151,6 +154,7 @@ struct Engine {
     bool move_ok = false;     // feature items.move: moves by the game's slot transfer, inside the program
     bool transfer_ok = false; // feature items.transfer: the quick-stack / move-all hooks can be installed
     bool names_ok = false;    // feature items.names: container names
+    bool rename_ok = false;   // feature items.rename (v9): renaming a container through the game's rename
     bool instances_ok = false;  // feature items.instances: stamps, locations, records (v4)
     bool equip_ok = false;      // feature items.equip: the game's equip / unequip resolved (v5; also needs kiln.world)
     bool sets_ok = false;       // feature items.equip_sets: equip plus the commit's guards (v6; also needs kiln.decisions)
@@ -276,6 +280,8 @@ constexpr uint32_t kHashCustomPlayerString = 0x0e699564u;  // keen::ecs::CustomP
 struct PageSet {
     Page p[KILN_ITEMS_MAX_INVENTORIES];
     uint32_t n = 0;
+    uint8_t cat[KILN_ITEMS_MAX_INVENTORIES] = {};  // each page's InventoryCategory (its link's; Virtual links expanded)
+    uint8_t flags = 0;                             // the root InventorySetup's flags (bit 0 a player's, bit 1 an NPC's)
 };
 bool read_pages(const Access& a, KilnEntity e, PageSet* out, bool* initialized);
 // Upgrades (v8, package P3, gear.cpp): opens a transaction of ours on `tx` (E.tx_size bytes, 16-aligned) with the
@@ -305,13 +311,20 @@ void player_guard(const Access& a, KilnEntity e, PlayerGuard* g);
 // Moves `count` items (0 = all) of the stack in `slot` of `from` into `to` through the game's slot transfer in the
 // transaction `tx` (the caller owns it: program side, a transaction of ours; hook side, the game's own). Never takes
 // a player's equipped or held stack unless `allow_equipped`, never fills a player's action bar unless `actionbar`.
+// Into a person (a player or an NPC) it lands only where choose_destination (moves.h) allows: the Generic pages, the
+// worn backpack's included, or a named `to_slot` the item may enter (issue #109).
 // Returns the items moved; *status is KILN_ITEMS_DONE, PARTIAL, NO_ROOM, NOT_ENOUGH, SLOT_CHANGED or REFUSED, *error the
 // game's error code of the last failing transfer, why a reason in words.
 struct MoveOutcome {
     int32_t status = KILN_ITEMS_DONE;
     uint32_t error = 0;
     char why[96] = "";
+    uint64_t named = 0;  // the caller's to_slot when choose_destination accepted it and something went there
 };
+
+// The destination rules for a stack of the item `info` (an ItemInfo, or null) moving into `to`, whose pages are `tp`
+// (moves.h DestRules): a person or not, the action bars, SlotSelection.equipment. Not guarded.
+void dest_rules_for(const Access& a, KilnEntity to, const PageSet& tp, bool actionbar, const uint8_t* info, DestRules* r);
 uint32_t move_stack_in(const Access& a, void* tx, KilnEntity from, uint64_t slot, KilnEntity to, uint32_t count,
                        uint64_t to_slot, bool allow_equipped, bool actionbar, MoveOutcome* out);
 

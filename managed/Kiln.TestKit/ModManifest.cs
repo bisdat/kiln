@@ -44,6 +44,10 @@ public sealed class ModManifest
     /// <summary>The <c>advanced</c> tier flag.</summary>
     public bool Advanced { get; set; }
 
+    /// <summary>The <c>steamMessages</c> opt-in: the mod opens its own Steam peer message leases (Kiln.Network's
+    /// <c>SteamMessages</c>). Since 0.2.0-dev.30.3.</summary>
+    public bool SteamMessages { get; set; }
+
     /// <summary>A folder whose files become the mod's <c>locales/</c> (not written to the manifest).</summary>
     public string? LocalesDirectory { get; set; }
 
@@ -110,6 +114,7 @@ public sealed class ModManifest
         if (_exports.Count > 0) o["exports"] = new JsonArray([.. _exports.Select(f => (JsonNode)f)]);
         if (_writes.Count > 0) o["writes"] = new JsonArray([.. _writes.Distinct(StringComparer.Ordinal).Select(f => (JsonNode)f)]);
         if (Advanced) o["advanced"] = true;
+        if (SteamMessages) o["steamMessages"] = true;
         foreach (var (key, value) in _extra) o[key] = value?.DeepClone();
         return o.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
     }

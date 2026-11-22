@@ -98,6 +98,7 @@ rules! {
     ASSET_MODE = "KL405", "asset-mode", Error, "a resource \"override\" the game lacks, or a \"new\" one it has";
     CRAFTED_ROLLED = "KL406", "crafted-rolled", Warning, "a recipe makes an item that rolls its rarity or level, unlike its tooltip";
     HIDDEN_ENTRY = "KL407", "hidden-entry", Info, "a game entry whose name marks it old, test or unused (DEPRECATED, DONOTPLACE, TEST...)";
+    RECIPE_WATER = "KL408", "recipe-water", Warning, "a recipe input that is the game's old Water canteen item, not tank water, or water at a station whose tank cannot give it";
 
     // KL5xx: files, assets and cook recipes
     FILE_MISSING = "KL501", "file-missing", Error, "a file the mod names is not there";

@@ -73,16 +73,130 @@ class PlanError(Exception):
 
 
 # Mask comments and C# literals before looking for code. Keep offsets and line numbers intact.
-NON_CODE = re.compile(r'//[^\n]*|/\*.*?\*/|(?P<raw>"{3,}).*?(?P=raw)|@"(?:[^"]|"")*"|'
-                      r'"(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\'', re.S)
+# A literal starts with optional $ and @ prefixes and one or more quotes, or is a character literal.
+LITERAL_START = re.compile(r"(\$*)(@?)(\$*)(\"+)|'")
+
+
+def _comment_end(s: str, i: int) -> int | None:
+    """The end of a comment that starts at i, or None."""
+    if s.startswith("//", i):
+        j = s.find("\n", i)
+        return len(s) if j < 0 else j
+    if s.startswith("/*", i):
+        j = s.find("*/", i + 2)
+        return len(s) if j < 0 else j + 2
+    return None
+
+
+def _literal_end(s: str, i: int) -> int | None:
+    """The end of a C# string or character literal that starts at i, or None. Interpolated strings (regular, verbatim
+    and raw, with one or more $) end where C# ends them: a hole's own strings, characters and comments are skipped
+    whole, so an apostrophe or a quote inside a hole cannot end the literal early or run on past it."""
+    m = LITERAL_START.match(s, i)
+    if not m:
+        return None
+    n = len(s)
+    if m.group() == "'":
+        j = i + 1
+        while j < n and s[j] not in "'\n":
+            j += 2 if s[j] == "\\" else 1
+        return min(j + 1, n)
+    dollars = len(m.group(1)) + len(m.group(3))
+    verbatim = bool(m.group(2))
+    quotes = 1 if verbatim else len(m.group(4))
+    j = m.start(4) + quotes
+    if quotes == 2:                              # "" : an empty string
+        return j
+    raw = quotes if quotes >= 3 else 0
+    while j < n:
+        c = s[j]
+        if raw:
+            if s.startswith('"' * raw, j):
+                return j + raw
+        elif c == '"':
+            if verbatim and s.startswith('""', j):
+                j += 2
+                continue
+            return j + 1
+        elif c == "\\" and not verbatim:
+            j += 2
+            continue
+        elif c == "\n" and not verbatim:
+            return j                             # an unterminated literal ends with its line
+        if dollars and c == "{":
+            run = len(s[j:]) - len(s[j:].lstrip("{"))
+            if not raw:
+                if run >= 2:                     # {{ is a brace of the text
+                    j += 2
+                    continue
+                j = _hole_end(s, j + 1, raw)
+                continue
+            if run >= dollars:                   # a raw string's hole opens with as many braces as it has $
+                j = _hole_end(s, j + run, raw)
+                continue
+            j += run
+            continue
+        j += 1
+    return n
+
+
+def _hole_end(s: str, i: int, raw: int) -> int:
+    """The end of an interpolation hole whose code starts at i: just after its closing brace(s)."""
+    depth, j, n = 0, i, len(s)
+    while j < n:
+        end = _comment_end(s, j)
+        if end is None:
+            end = _literal_end(s, j)
+        if end is not None:
+            j = end
+            continue
+        c = s[j]
+        if c in "([{":
+            depth += 1
+        elif c in ")]":
+            depth -= 1
+        elif c == "}":
+            if depth == 0:
+                return j + len(s[j:]) - len(s[j:].lstrip("}")) if raw else j + 1
+            depth -= 1
+        elif c == ":" and depth == 0 and not raw:
+            k = s.find("}", j)                    # a format part: text up to the hole's closing brace
+            return n if k < 0 else k + 1
+        elif c == "\n" and not raw:
+            return j
+        j += 1
+    return n
+
+
+def _non_code(source: str):
+    """(start, end, is comment) of every comment and literal of a C# source, in order."""
+    i, n = 0, len(source)
+    while i < n:
+        c = source[i]
+        if c in "/\"'$@":
+            end = _comment_end(source, i)
+            if end is not None:
+                yield i, end, True
+                i = end
+                continue
+            end = _literal_end(source, i)
+            if end is not None:
+                yield i, end, False
+                i = end
+                continue
+        i += 1
 
 
 def _masked(source: str, comments_only: bool = False) -> str:
-    def mask(m):
-        if comments_only and not m.group().startswith(("//", "/*")):
-            return m.group()
-        return re.sub(r"[^\n]", " ", m.group())
-    return NON_CODE.sub(mask, source)
+    out, last = [], 0
+    for start, end, comment in _non_code(source):
+        if comments_only and not comment:
+            continue
+        out.append(source[last:start])
+        out.append(re.sub(r"[^\n]", " ", source[start:end]))
+        last = end
+    out.append(source[last:])
+    return "".join(out)
 
 
 def _split_args(text: str) -> list[str]:

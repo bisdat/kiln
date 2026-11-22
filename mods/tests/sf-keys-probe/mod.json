@@ -1,0 +1,10 @@
+{
+  "id": "kiln-sf-keys-probe",
+  "name": "Kiln keys probe",
+  "version": "0.1.0",
+  "description": "Test probe for the keyboard shortcuts of ShroudForge-format mods in kiln mode: logs each press, hold and release of its shortcut setting and posts a notice for each press. Client-pass check sfi-keybinds. Test only.",
+  "authors": ["Kiln contributors"],
+  "license": "MIT",
+  "dependencies": [],
+  "capabilities": ["runtime"]
+}

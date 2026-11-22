@@ -691,10 +691,14 @@ static_assert(offsetof(KilnUiApi, chat_completion) == 1032,
               "chat completion appends after graphics_status (internal, Kiln.Ui only; UiNative.TableChat)");
 static_assert(offsetof(KilnUiApi, subscribe_pointer_press) == 1040 && sizeof(KilnUiPointerPress) == 32,
               "kiln.ui appends subscribe_pointer_press after chat_completion (0.2.0-dev.30; UiNative.TablePointer)");
-static_assert(offsetof(KilnUiApi, chat_search) == 1048 && sizeof(KilnUiApi) == 1056 &&
+static_assert(offsetof(KilnUiApi, chat_search) == 1048 && offsetof(KilnUiApi, pointer) == 1056 &&
               offsetof(KilnUiChatSearch, query) == 64 && offsetof(KilnUiChatSearch, lines) == 321 &&
               sizeof(KilnUiChatSearch) == 10572,
               "internal chat search appends after native pointer subscription (managed TableSearch)");
+static_assert(offsetof(KilnUiApi, pointer) == 1056 && offsetof(KilnUiApi, drag_source) == 1064 &&
+                  offsetof(KilnUiApi, drop_target) == 1072 && sizeof(KilnUiApi) == 1080 &&
+                  sizeof(KilnUiPointer) == 24 && offsetof(KilnUiPointer, x) == 8 && offsetof(KilnUiPointer, held) == 16,
+              "kiln.ui appends pointer, drag_source and drop_target after chat_search (0.2.0-dev.30.3; UiNative.TableDrag)");
 static_assert(offsetof(KilnUiChatCompletion, text) == 60 &&
               offsetof(KilnUiChatCompletion, replacement) == 317 &&
               sizeof(KilnUiChatCompletion) == 576,
@@ -771,6 +775,7 @@ const KilnUiApi kTable = {
     &t_chat_completion,  // issue #44 internal managed completion
     &t_subscribe_pointer_press,  // presses on the game's own UI (0.2.0-dev.30)
     &t_chat_search,  // issue #44 internal reverse-history search
+    &t_pointer, &t_drag_source, &t_drop_target,  // the pointer, held buttons, drag and drop (0.2.0-dev.30.3, issue 113)
 };
 
 std::string api_path(int kind) {
@@ -834,6 +839,7 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     // the game's own UI (screens, menu entries, crafting): independent of the overlay's Vulkan hooks
     const bool game = game_install();
     render_install();  // kiln.render's camera (screen drawing works without it)
+    outline_init();    // kiln.render's outlines: what sigdb found; hooks only with the first request
     info->on_ready = [](void*) { game_ready(); };
     // the process exits with code 0 (kiln_api.h on_unload: under Wine, and on Windows where kiln.json turns it on): the
     // scrolling pause menu's crash guard knows the game did not end in its calls (menu_scroll.cpp), and the overlay's

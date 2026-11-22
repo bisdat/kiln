@@ -228,6 +228,51 @@ Since 0.2.0-dev.28 (check `header.size` before each): `blob_add_ex` / `blob_over
 statuses, reasons and result codes in the header). `blob_add` and `blob_override` tag `NATIVE_API`, `load_manifest`
 tags `MANIFEST`.
 
+### Loaded resources from tasks
+Since 0.2.0-dev.30.3 (check `header.size >= offsetof(KilnAssetsApi, loaded_list) + sizeof(void*)`; capability
+`assets.loaded`): `loaded_snapshot(owner, key, bytes, capacity, &required, &info)` and `loaded_list(owner, type, out,
+capacity, &required, &info)` read the resources the game has loaded **now**, from any thread, on the exact game builds
+only (kiln.engine's profile of the running exe and its resource layout; client 26430625 and dedicated server 26430253).
+They are what kiln mode's `game.assets.get_loaded_resource` and `get_loaded_resources_by_type` stand on.
+- **In a world only.** The game's resource service must be bound to the running world's item registry. In the main menu,
+  and while a world loads or unloads, both answer `KILN_ERR_UNAVAILABLE` with `KilnLoadedInfo.status`
+  `KILN_LOADED_NOT_READY`.
+- **A copy, never a pointer.** A snapshot is copied twice and compared, then its key is looked up again: if anything
+  moved meanwhile the answer is `KILN_LOADED_CHANGED` (ask again), never a torn or partial copy. A listing copies the
+  game's resource index twice and compares the copies. Nothing is written and no engine gate is taken.
+- **What the game reads.** A key kiln.assets serves (an override of a game resource, a mod's new resource) answers its
+  served bytes with `KILN_LOADED_SERVED` in `info.flags`; a listing has the mods' new keys after the game's own, each
+  once. `info.handle` is the game's 1-based handle of the key (0 for a mod's new resource).
+- **Missing is not unavailable.** `KILN_ERR_NOT_FOUND` (`KILN_LOADED_MISSING`) means the service is ready and has no such
+  key; a key looked up while the index changed is `KILN_LOADED_CHANGED`.
+- **Buffers.** `KILN_ERR_BUFFER_TOO_SMALL` sets `*required` and `info.bytes` and copies nothing; sizes can change between
+  calls, so ask again with the larger buffer. `KilnLoadedInfo` is 24 bytes; set `info.size` first.
+- Bounds: a resource of at most 256 MiB (the profile's limit), a listing of at most the profile's 1,048,576 index entries
+  plus the mods' new keys. A listing leaves out a key whose bytes are not committed, readable memory.
+
+**Writing one scalar** (since 0.2.0-dev.30.3, after `loaded_list`; capability `assets.loaded_write`):
+`loaded_scalar_compare_exchange(owner, key, expected_session, expected_full, resource_size, offset, desired, width, &reply)`
+writes one naturally aligned 1, 2, 4 or 8-byte scalar of a loaded resource, only while the whole resource is still exactly
+`expected_full` (a `loaded_snapshot`'s bytes) and the server world's session is still `expected_session`. One hold of
+kiln.engine's write gate (the server world of a host or a dedicated server, between frames, as kiln.world's ECS writes)
+with the content worker's lifetime guard borrowed from it: the resource looked up again, compared in full, its page made
+writable for the one scalar, the scalar compare-exchanged, the whole resource compared again and the page protection put
+back. `reply` is kiln.world's `KilnMutationReply` (set `reply.size`): `KILN_ECS_OK` written, `CONFLICT` the resource or the
+scalar changed (nothing written), `STALE` another session (also one that began during the call), the resource moved or is
+not `resource_size` bytes now, `BUSY` the gate was busy (try at a later step), `NOT_WRITABLE` a key kiln.assets serves (an
+override or a mod's new resource: the game reads that copy, so change the mod's copy instead) or a `resource_size` over the
+profile's limit, `UNAVAILABLE` no exact profile, a joined client, no world, the gate or guard refused, or the scalar's page
+is not one Kiln makes writable (a private committed read-only or read-write page of the content worker's data).
+`UNCERTAIN` (the page protection could not be put back, the exchange faulted, or the resource changed during it) latches
+every later write of the process: those answer `UNCERTAIN` with `KILN_ECS_WRITE_WHY_TARGET_LATCHED` and attempt nothing. Not a transaction: one scalar per call. Every committed write
+is recorded with its owner, key, offset, width, session and a write id (the last 256 in `status`'s `"loadedWrites"`) and
+logged in kiln.log.
+
+Adapted from ShroudForge by bonsaibauer, MIT (its loaded ResourceService reads and its guarded resource scalar update).
+The portable part is
+`native/services/assets/loaded.{h,cpp}`, host-tested over a fake engine by `tests/test_loaded.cpp` (`tests/run.sh`,
+ASan and TSan; the CMake target `assets-loaded-test` builds the same test as a Windows program).
+
 ## Icons for model overrides
 The game's icons are baked: a `keen::UiTextureResource` per item GUID (BC7 256×256 with mips on client 26430625),
 never drawn from the model at run time. So a mod that changes a model ships the matching icon:

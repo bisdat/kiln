@@ -209,13 +209,13 @@ bool guarded_ready(KilnRegistryReadyFn fn, const KilnRegistryReady* r, void* use
 // kind prefix ("mod:", "native:", ...), folded to lower case. Empty: no such owner, or an id that is no mod id.
 std::string bound_mod(KilnOwner owner, bool* revoked = nullptr) {
     if (revoked) *revoked = false;
-    static const auto* t = g_api ? static_cast<const KilnOwnersInternalApi*>(g_api->service(KilnStr{KILN_OWNERS_INTERNAL_SERVICE, sizeof(KILN_OWNERS_INTERNAL_SERVICE) - 1}, 1))
+    static const auto* t = g_api ? static_cast<const KilnOwnersInternalApi*>(g_api->service(KilnStr{KILN_OWNERS_INTERNAL_SERVICE, sizeof(KILN_OWNERS_INTERNAL_SERVICE) - 1}, 2))
                                  : nullptr;
-    if (!t || t->header.size < sizeof(KilnOwnersInternalApi) || !t->owner_id) return {};
+    if (!t || t->header.version < 2 || t->header.size < offsetof(KilnOwnersInternalApi, owner_id) + sizeof(void*) || !t->owner_id) return {};  // v2: owner_id
     char buf[256];
     size_t len = 0;
     const KilnResult rc = t->owner_id(owner, buf, sizeof buf, &len);
-    if (rc == KILN_ERR_NOT_FOUND && revoked) *revoked = true;  // never created, or revoked
+    if ((rc == KILN_ERR_REVOKED || rc == KILN_ERR_NOT_FOUND) && revoked) *revoked = true;  // revoked, or never made
     if (rc != KILN_OK) return {};
     std::string id(buf, len);
     if (const size_t colon = id.find(':'); colon != std::string::npos) id = id.substr(colon + 1);

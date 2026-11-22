@@ -464,6 +464,19 @@ Each is marked `kiln-eml:` in the source.
     progress stays): the core's first `begin` asks user32 for the screen size, which can load Wine's display driver
     while a package DLL's initializer holds the loader lock. The early phase also asks sfi-core's export-root check its
     Wine lookup (`sfi_core::eml::io::prime_export_checks`). No new write boundary, no new Mutex.
+37. `kiln-eml/src/archive_service/attributes.rs` (new), `archive_service.rs`, `archive_service/{read,view}.rs` (kiln-eml's own
+    code over the attribute catalog of item 28): kiln.eml.archive's attribute group, `attribute_catalog`,
+    `attribute_resolve` and `attribute_evaluate`, now in the table and reported as `eml.archive.attributes` with its three
+    member rows. A generation authorized with its archive builds ShroudForge's catalog once, on its first attribute
+    call, from its REFERENCE catalog only (the reference index and reader, never staged records) with a copy of its
+    registry, and keeps it (a failure too) for its life: the catalog reply and each entry's JSON are materialized with
+    it, so a size probe and the copy answer the same bytes. Replies follow schema/sfi/eml-archive/attribute-*.schema.json:
+    each descriptor and layout as the neutral tagged tree of ShroudForge's JSON (key order kept), an entry's
+    `definition_guid` from its one associated component. Failures keep ShroudForge's own text behind an error token
+    (catalog failures UNAVAILABLE; resolve's missing ID or name NOT_FOUND, an ambiguous name UNAVAILABLE; evaluate's
+    incomplete root NOT_FOUND, a short or long input INVALID_ARGUMENT, an unverified operation enum or unsupported scalar
+    UNAVAILABLE, a program failing on the given bits INVALID_ARGUMENT); a short trace buffer leaves the output bits
+    untouched. No engine memory, no Lua, no new write boundary; the catalog's lock is held only around its own lookups.
 
 The plugin validates paths from each authorized root down (root included), leaving linked Steam/Wine layout
 ancestors alone; it also checks final resolved containment. Profile paths resolve against `<game>/kiln`.

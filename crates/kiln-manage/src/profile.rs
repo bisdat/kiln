@@ -957,6 +957,7 @@ fn native_as_manifest(n: &NativeManifest) -> KilnManifest {
         features: Vec::new(),
         exports: Vec::new(),
         advanced: false,
+        steam_messages: false,
         tests: None,
         kiln_build: None,
         boot: false,

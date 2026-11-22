@@ -7,7 +7,10 @@
 #include <cstdio>
 
 #include "internal.h"
+#include "services/kiln_caps.h"
+#include "services/kiln_engine.h"
 #include "terrain_budget.h"
+#include "voxel_tasks.h"
 
 namespace kb {
 
@@ -201,6 +204,101 @@ KilnResult KILN_CALL t_release(const int32_t o[3], const uint32_t d[3], uint64_t
     });
 }
 
+// ---- voxels from task threads (voxel_tasks.h) ----
+std::atomic<bool> g_tasks_on{false};
+
+// The live server world and its session, sampled twice (as kiln.world's own world facts): a session or a world that
+// moved between the samples is unreadable now, and a live world with session 0 would alias "no session".
+bool server_fact(void*, uintptr_t* world, uint64_t* session) {
+    if (!g_api || !g_api->session || !g_world ||
+        g_world->header.size < offsetof(KilnWorldApi, game_world_session) + sizeof(void*) || !g_world->game_world_session)
+        return false;
+    KilnSessionInfo first{}, second{};
+    first.size = second.size = sizeof first;
+    const uint64_t before = g_world->game_world_session(KILN_WORLD_SERVER);
+    if (g_api->session(&first) != KILN_OK || g_api->session(&second) != KILN_OK) return false;
+    const uint64_t after = g_world->game_world_session(KILN_WORLD_SERVER);
+    if (before != after || first.worlds[KILN_WORLD_SERVER] != second.worlds[KILN_WORLD_SERVER] ||
+        first.sessions[KILN_WORLD_SERVER] != second.sessions[KILN_WORLD_SERVER])
+        return false;
+    if (first.worlds[KILN_WORLD_SERVER] && !before) return false;
+    *world = first.worlds[KILN_WORLD_SERVER];
+    *session = before;
+    return true;
+}
+uint64_t server_step(void*) {
+    KilnSessionInfo s{};
+    s.size = sizeof s;
+    return g_api && g_api->session && g_api->session(&s) == KILN_OK ? s.steps[KILN_WORLD_SERVER] : 0;
+}
+
+// on_ready: the gate members, an exact engine profile with its write gate, kiln.world's session, kiln.build's layout.
+void tasks_ready() {
+    tasks::Source src;
+    src.server = &server_fact;
+    src.server_step = &server_step;
+    tasks::Offsets off;
+    off.grid_iface = L.grid_iface, off.wrapper_world = L.wrapper_world, off.world_init = L.world_init;
+    off.world_origin = L.world_origin, off.world_levels = L.world_levels, off.level = L.level;
+    off.level_stride = L.level_stride, off.world_store = L.world_store, off.store_unavailable = L.store_unavailable;
+    off.world_resources = L.world_resources, off.read = fn.grid_read, off.ready = fn.grid_ready;
+    off.cell = L.level >= 0 && L.level < 12 ? static_cast<double>(L.base_size) / static_cast<double>(1u << L.level) : 0;
+    std::string profile;
+    const char* off_reason = nullptr;
+    char refused[160] = {};
+    if (!F.read) {
+        off_reason = "kiln.build's voxel reads are off on this build (build.read)";
+    } else if (!g_world || g_world->header.size < offsetof(KilnWorldApi, game_world_session) + sizeof(void*) ||
+               !g_world->game_world_session) {
+        off_reason = "kiln.world's game_world_session is not here";
+    } else {
+        const auto* engine = static_cast<const KilnEngineApi*>(g_api->service(kstr(KILN_ENGINE_SERVICE), KILN_ENGINE_VERSION));
+        KilnEngineIdentity id{};
+        id.size = sizeof id;
+        if (!engine || !engine->identity || engine->identity(&id) != KILN_OK || id.status != KILN_ENGINE_EXACT) {
+            off_reason = "no exact engine profile for this build";
+        } else if (!(src.engine = kiln_engine_native(g_api, g_owner, offsetof(KilnEngineNativeApi, ecs_gate_release) +
+                                                                       sizeof(void*), refused, sizeof refused))) {
+            off_reason = refused;
+        } else if (!src.engine->layout() || !src.engine->layout()->write.enabled) {
+            off_reason = "the engine profile has no write gate";
+        } else {
+            profile = id.profile_id;
+        }
+    }
+    tasks::grid().configure(src, off, off_reason);
+    const std::string why = tasks::grid().unavailable_reason();
+    const bool on = why.empty();
+    g_tasks_on.store(on, std::memory_order_release);
+    const std::string text = on ? "the voxel grid's geometry from task threads, between frames, under the engine's write "
+                                  "gate on " + profile + "; the server world on a dedicated server or a hosting client"
+                                : why + "; grid_for_session reports unavailable";
+    if (const auto* caps = static_cast<const KilnCapsApi*>(g_api->service(kstr(KILN_CAPS_SERVICE), KILN_CAPS_VERSION));
+        caps && caps->header.size >= offsetof(KilnCapsApi, report) + sizeof(void*) && caps->report)
+        caps->report(g_owner, kstr("build.voxel_grid_tasks"), on ? KILN_CAP_AVAILABLE : KILN_CAP_UNAVAILABLE,
+                     on ? KILN_CAP_REASON_NONE : KILN_CAP_REASON_SYMBOL_MISSING, kstr(text));
+    KB_I("build.voxel_grid_tasks: %s", on ? ("on (" + profile + ")").c_str() : ("off (" + why + ")").c_str());
+}
+
+// Pre: the voxel world found for the live server session, for the task-thread members.
+void tasks_pre() {
+    if (!g_tasks_on.load(std::memory_order_acquire)) return;
+    tasks::Published p;
+    if (const VoxelWorld* v = vox()) {
+        p.session = g_world->game_world_session(KILN_WORLD_SERVER);
+        p.world = v->world, p.grid = v->grid, p.wrapper = v->wrapper, p.voxels = v->voxels;
+    }
+    tasks::grid().publish(p);
+}
+
+KilnResult KILN_CALL t_grid_for_session(KilnOwner owner, uint64_t expected_session, KilnStr id, KilnBuildGridSpec* out) {
+    try {
+        return tasks::grid().grid_for_session(owner, expected_session, id, out);
+    } catch (...) {
+        return KILN_ERR_INTERNAL;
+    }
+}
+
 KilnResult KILN_CALL t_terrain_budget_reserve(uint32_t read, uint32_t write) {
     if (read > 32768 || write > 4096) return KILN_ERR_INVALID_ARGUMENT;
     if (!tick_thread()) return KILN_ERR_WRONG_THREAD;
@@ -231,6 +329,7 @@ const KilnBuildApi kTable = {
     &t_release,
     &t_terrain_budget_reserve,
     &t_terrain_budget_charge,
+    &t_grid_for_session,
 };
 
 void KILN_CALL on_pre(const KilnTickInfo* tick, void*) {
@@ -241,6 +340,7 @@ void KILN_CALL on_pre(const KilnTickInfo* tick, void*) {
         selftest_pre(tick ? tick->step : g_steps);
         if (g_steps % 24 == 0) regions_flush();
         transient_pre(tick ? tick->step : g_steps);
+        tasks_pre();
     } catch (...) {
     }
 }
@@ -307,6 +407,7 @@ void KILN_CALL on_ready(void*) {
     g_gameplay = static_cast<const KilnGameplayApi*>(g_api->service(kstr(KILN_GAMEPLAY_SERVICE), 1));
     props_resolve();
     regions_ready();
+    tasks_ready();
     if (!g_spawn) KB_W("kiln.spawn is unavailable: voxel writes require core lifecycle and kiln.saves confirmed load state");
     if (!g_world) KB_W("kiln.world is unavailable: base protection and prop details are off");
     if (!g_gameplay) KB_W("kiln.gameplay is unavailable: KILN_BUILD_F_RESPECT_ZONES cannot check zones");

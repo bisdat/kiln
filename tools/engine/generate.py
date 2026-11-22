@@ -655,6 +655,101 @@ def parse_engine_calls(profile, image_size, write_enabled):
     return slots
 
 
+# kiln::engine::ServiceLayout (kiln_engine_layout.h) in its field order: (C++ field, key in serviceLayout). Adapted from
+# ShroudForge (MIT, Copyright (c) 2026 bonsaibauer), modules/game-runtime/native/named-services/resolve_named_service.cpp
+# (prepare_binding: the record fields; contract: the system fields).
+SERVICE_BINDING_FIELDS = (
+    ('records', 'recordsPointerOffset'), ('record_count', 'recordCountOffset'), ('stride', 'recordStride'),
+    ('record_hash', 'recordHashOffset'), ('normal', 'recordNormalPointerOffset'),
+    ('alternate', 'recordAlternatePointerOffset'), ('map_bits', 'mapBitsOffset'), ('map_capacity', 'mapCapacityOffset'),
+    ('map_keys', 'mapKeysOffset'), ('map_values', 'mapValuesOffset'), ('map_count', 'mapCountOffset'),
+    ('maximum_records', 'maximumRecords'), ('maximum_capacity', 'maximumMapCapacity'))
+SERVICE_SYSTEM_FIELDS = (
+    ('systems', 'systemsOffset'), ('system_count', 'systemCountOffset'), ('system_stride', 'systemStride'),
+    ('normal_bindings', 'systemNormalBindingsOffset'), ('alternate_bindings', 'systemAlternateBindingsOffset'),
+    ('normal_count', 'systemNormalCountOffset'), ('alternate_count', 'systemAlternateCountOffset'),
+    ('maximum_systems', 'maximumSystems'))
+SERVICE_CONTRACTS, SERVICE_KEY_BYTES = 8, 128  # kServiceContracts, kServiceKeyBytes
+
+
+def fnv1a32(data):
+    value = 0x811c9dc5
+    for byte in data:
+        value = ((value ^ byte) * 0x1000193) & 0xffffffff
+    return value
+
+
+def parse_service_layout(profile, image_size, write_enabled):
+    """The profile's serviceLayout -> kiln::engine::ServiceLayout (None without one). ShroudForge checks these when a
+    service is first asked for (resolve_named_service.cpp prepare_binding and contract; any failure refuses that
+    service); here every rule runs on the immutable profile and a profile that breaks one is refused. Kiln's own rules on
+    top: the profile names every contract once, each key is printable ASCII, each RVA lies in the image, and each
+    qualifiedHash is the FNV-1a-32 of its qualifiedType (what the type's metadata carries at run time)."""
+    model = profile.get('serviceLayout')
+    if model is None:
+        return None
+    if not write_enabled:
+        raise ProfileError('named service data lacks original mutable/lifetime validation')
+    if not isinstance(model, dict) or model.get('id') != 'engine-named-plain-services-v1':
+        raise ProfileError('named services unavailable')
+
+    def layout_offset(key):
+        value = get_size(model, key)
+        if value > 0x10000000:
+            raise ProfileError('invalid named service offset')
+        return value
+    s = {field: layout_offset(key) for field, key in SERVICE_BINDING_FIELDS + SERVICE_SYSTEM_FIELDS}
+    if (not s['maximum_records'] or s['maximum_records'] > 1024 or not s['maximum_capacity'] or
+            s['maximum_capacity'] > 4096 or s['stride'] < 0xb8 or s['normal'] > s['stride'] - 8 or
+            s['alternate'] > s['stride'] - 8 or s['record_hash'] > s['stride'] - 4):
+        raise ProfileError('invalid named service record layout')
+    window = 64 * 8
+    if (not s['maximum_systems'] or s['maximum_systems'] > 2048 or s['system_stride'] < window or
+            s['normal_bindings'] > s['system_stride'] - window or s['alternate_bindings'] > s['system_stride'] - window or
+            s['normal_count'] >= s['system_stride'] or s['alternate_count'] >= s['system_stride']):
+        raise ProfileError('invalid named service record layout')
+    contracts = at(model, 'contracts')
+    if not isinstance(contracts, list) or len(contracts) > SERVICE_CONTRACTS:
+        raise ProfileError('named service contracts must be a list of at most %d' % SERVICE_CONTRACTS)
+    typed, keys = [], set()
+    for candidate in contracts:
+        key = text(candidate, 'key')
+        data = key.encode('utf-8')
+        if not data or len(data) > 127 or '\0' in key:
+            raise ProfileError('invalid service selector')
+        if any(b < 0x21 or b > 0x7e for b in data):
+            raise ProfileError('named service key must be printable ASCII: %r' % key)
+        if key in keys:
+            raise ProfileError('ambiguous service contract')
+        keys.add(key)
+        size = get_size(candidate, 'size')
+        if (text(candidate, 'qualifiedType') != 'keen::' + key or not value_bool(candidate, 'plainData') or
+                text(candidate, 'scope') != 'host-world-shared' or not size or size > 65536 or
+                get_size(candidate, 'qualifiedHash') != fnv1a32(('keen::' + key).encode('utf-8'))):
+            raise ProfileError('no matching original plain-data service contract')
+        rvas = {field: get_size(candidate, name) for field, name in (
+            ('descriptor', 'mutableSystemDescriptorRva'), ('function', 'mutableSystemFunctionRva'),
+            ('metadata', 'metadataRva'), ('metadata_slot', 'registrySlotRva'))}
+        if any(not value or value >= image_size or value >= 1 << 32 for value in rvas.values()):
+            raise ProfileError('named service contract RVA out of the image: ' + key)
+        typed.append({'key': data, 'key_hash': fnv1a32(data), 'type_hash': fnv1a32(('keen::' + key).encode('utf-8')),
+                      'size': size, **rvas})
+    s['contracts'] = typed
+    return s
+
+
+def service_layout(s):
+    """The ServiceLayout initializer: 'ServiceLayout{}' without a serviceLayout."""
+    if s is None:
+        return 'ServiceLayout{}'
+    contracts = ', '.join('ServiceContract{%s, %du, %du, %du, %du, %du, %du, %du, %du}' % (
+        c_bytes(c['key'], SERVICE_KEY_BYTES), len(c['key']), c['key_hash'], c['type_hash'], c['size'], c['descriptor'],
+        c['function'], c['metadata'], c['metadata_slot']) for c in s['contracts'])
+    return 'ServiceLayout{true, %s, %du, {%s}}' % (
+        ', '.join('%du' % s[field] for field, _ in SERVICE_BINDING_FIELDS + SERVICE_SYSTEM_FIELDS), len(s['contracts']),
+        contracts)
+
+
 def load(path):
     raw = path.read_bytes()
     profile = json.loads(raw, object_pairs_hook=_object)
@@ -676,6 +771,7 @@ def load(path):
         resource = parse_resource_layout(profile, size)
         layout, sections = configure(profile, size, target)
         calls = parse_engine_calls(profile, size, layout['write'].get('enabled', False))
+        services = parse_service_layout(profile, size, layout['write'].get('enabled', False))
     except ProfileError as error:
         raise ProfileError('%s: %s' % (path, error)) from None
     sections |= SECTION_BITS['resource_read']
@@ -683,7 +779,7 @@ def load(path):
         sections |= SECTION_BITS['item_id_map']
     return {'path': path, 'raw': raw, 'profile': profile, 'target': target, 'sha256': sha, 'timestamp': timestamp,
             'size': size, 'layout': layout, 'sections': sections, 'attribute_model': attribute_model(profile),
-            'resource': resource['typed'], 'calls': calls}
+            'resource': resource['typed'], 'calls': calls, 'services': services}
 
 
 def attribute_model(profile):
@@ -817,7 +913,7 @@ def emit(profiles, root):
             'true' if rt['item_map']['enabled'] else 'false',
             ', '.join('%du' % rt['item_map'][field] for field, _ in ITEM_MAP_FIELDS))
         layout = ('Layout{%s, %d, %d, %d, %d, %d, %d, %d, %d, %d, %s, %d, %d, %d, %d, %s, %d, %d, %d, %d, %d, %d, %d, %d, '
-                  '%d, %d, %s, %s, %s, %s, %s, %s, %s}' % (
+                  '%d, %d, %s, %s, %s, %s, %s, %s, %s, %s}' % (
                       'true' if lay['dedicated_server'] else 'false', lay['image_size'], lay['root_rva'],
                       lay['root_vtable'], lay['client_vtable'], lay['controller_vtable'], lay['client_offset'],
                       lay['controller_offset'], lay['controller_back_pointer'], lay['main_owner_offset'],
@@ -827,7 +923,7 @@ def emit(profiles, root):
                       lay['scene_count_offset'], lay['scene_capacity_offset'], lay['entry_stride'],
                       lay['entry_context_offset'], lay['entry_uuid_offset'], lay['entry_state_offset'],
                       lay['maximum_scenes'], lay['entry_ready_state'], entity, write, queue, spawn, resource, typed,
-                      call_recipes(p['calls'])))
+                      call_recipes(p['calls']), service_layout(p.get('services'))))
         lines.append('    {%s, %s, %s, %du, %du, %du, %du, 0x%xu, %s, kLeaves%d, sizeof kLeaves%d / sizeof kLeaves%d[0], %s},' % (
             c_string(text(p['profile'], 'id')), c_string(p['target']), c_string(p['sha256']), p['timestamp'],
             p['size'], 4, p['profile']['schemaVersion'], p['sections'], layout, index, index, index,

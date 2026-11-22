@@ -26,7 +26,7 @@ public readonly record struct FakeSlotClickResult(int Delivered, bool Taken);
 /// <para><b>Modelled.</b> OnClick's subscriptions (button, exact modifiers, Take; 128 per mod; the rows
 /// <c>ui.slots.click</c> and <c>ui.slots.inspect</c> a test can switch off), the press rules (a drawn frame, a screen with a
 /// pointer: the in-game menu, player crafting, the backpack, a chest, a station, NPC crafting, a factory; never the play
-/// view), delivery to every matching handler with the slot's item and entity, <c>Hovered</c>, and the marks: Mark, Unmark,
+/// view), delivery to every matching handler with the slot's item and entity (and, since 0.2.0-dev.30.3, the press at the slot's centre, one pixel per UI unit), <c>Hovered</c>, and the marks: Mark, Unmark,
 /// ClearMarks and MarkWhen rules are Kiln.Ui's own, <see cref="MarkOf"/> asks it. Ui.Values.Slots reads the drawn frame.</para>
 /// <para><b>Not modelled.</b> The game's drawing and hooks, pixels (marks are not drawn; the mapping answers no viewport),
 /// the 250 ms frame age, client sessions. Clicks are delivered at once on the calling thread (in a game: on the client's
@@ -149,7 +149,8 @@ public sealed class HarnessUiInventory
     /// <summary>The player presses <paramref name="button"/> with <paramref name="modifiers"/> on drawn slot
     /// <paramref name="index"/>. Nothing reaches the handlers (Delivered 0, the game gets the press) on a screen without a
     /// pointer, before a Draw, or while a row is off; otherwise every handler whose button and exact modifiers match gets
-    /// the click, in subscription order.</summary>
+    /// the click, in subscription order. The click's <c>SlotClick.Pointer</c> (since 0.2.0-dev.30.3) is the centre of the
+    /// slot's outer rectangle, as a 1920x1080 game at UI scale 1 draws it (one pixel per UI unit).</summary>
     public FakeSlotClickResult Click(int index, SlotButton button = SlotButton.Left, SlotModifiers modifiers = SlotModifiers.None)
     {
         var (n, taken) = UiInventoryFake.Press(State, index, (uint)button, (uint)modifiers);

@@ -45,7 +45,7 @@ internal sealed class AbilitiesFake : IKitFake
         "the first Kiln native call while the simulated serial condition holds (ImpactNatives.Serial); an unknown pin or " +
         "lost serial condition closes it for the world. KilnHarness.ImpactNatives.Calls records each call. Offline: the Impact programs " +
         "themselves (nothing runs a program's code: a test makes the calls), program registration, instances, attributes " +
-        "(no formulas: a written attribute is stored as written), sequences, buffs, the suspending natives of Register, " +
+        "(no formulas: a written attribute is stored as written), sequences and item uses (Abilities.UseItem), buffs, the suspending natives of Register, " +
         "the watchdog and the 0.2 ms budget"));
 
     public static AbilitiesModel ModelOf(KilnHarness harness) => KitFakes.State<AbilitiesModel>(harness);

@@ -440,6 +440,12 @@
           "items": { "$ref": "#/$defs/definitionStack", "not": { "type": "object", "required": ["category"] }, "x-kiln-message": "outputs cannot be categories" }
         },
         "duration": { "type": "number", "minimum": 0, "maximum": 1000000, "description": "Crafting time in seconds (default: the template's)." },
+        "water": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1023,
+          "description": "Water charges a craft (RecipeInfo.waterCharges; 1 charge = 64 water units), as the recipe screen's Water row shows it. A station with a tank (Seedbed, Oven, Cooking Station, Laboratory, Coffee Brewer, Beehive) takes it from its own tank at the start of each craft; a crafting menu (hand, Workbench, Kitchen, NPCs) from the crafter and the base's wells and barrels. Default: the base recipe's water, none for a recipe with only a station. kiln lint KL408 warns at a station without a tank or above its tank."
+        },
         "unlock": { "enum": ["always", "base"], "x-kiln-caseInsensitive": true, "description": "always (default): no knowledge requirement; base: the base recipe's requirement." },
         "fields": { "$ref": "#/$defs/fields", "x-kiln-fields": "recipes" },
         "placeholder": { "x-kiln-severity": "warning", "not": {}, "x-kiln-message": "\"placeholder\" is written by Kiln for missing content" }

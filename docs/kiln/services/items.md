@@ -7,7 +7,7 @@ entity, and the change is replicated and saved like a vanilla one. Evidence and 
 
 | Layer | Where |
 |---|---|
-| Symbols | `sigdb/symbols/server.d/items.json` (features `items.transaction`, `items.program`, `items.read`, `items.catalog`, `items.scan`, `items.recipe`, `items.fuel`, `items.pide_options`, `items.move`, `items.transfer`, `items.names`, `items.instances`, `items.equip`, `items.gear`, `items.gear.rolls`); `sigdb/symbols/server.d/dev29-10-equipment-sets.json` (`items.equip_sets`, used by the client unchanged) |
+| Symbols | `sigdb/symbols/server.d/items.json` (features `items.transaction`, `items.program`, `items.read`, `items.catalog`, `items.scan`, `items.recipe`, `items.fuel`, `items.pide_options`, `items.move`, `items.transfer`, `items.names`, `items.rename`, `items.instances`, `items.equip`, `items.gear`, `items.gear.rolls`); `sigdb/symbols/server.d/dev29-10-equipment-sets.json` (`items.equip_sets`, used by the client unchanged) |
 | C table | `native/core/abi/services/kiln_items.h` (`kiln.items` v6: v1 + water + moves, container names, transfer rules and events + item instances + equip and unequip + equipment sets) |
 | Native | `native/services/items/` → `kiln/services/kiln-items.dll` |
 | Managed | `managed/services/Kiln.Items/` → `kiln/host/Kiln.Items.dll` (namespace `Kiln`, class `Items`) |
@@ -147,8 +147,17 @@ Evidence: `docs/re/items.md` sections 13 and 14.
 ```csharp
 MoveResult r = await Items.Move(player, sword.Slot, chest);     // same item entity, ledger in r.Changes
 string? name = Items.ContainerName(chest);                      // the Rename button's text, or null
+bool renamed = await Items.SetContainerName(chest, "Ores");     // v9 (0.2.0-dev.30.3): the game's own rename
 using var lockSlot = Items.Transfers.Keep(slot);                // R leaves this stack alone
 ```
+Where a stack move lands in a player's or an NPC's inventory (issue #109): only the Generic pages (the backpack, the worn
+backpack's pages included), never equipment, currency or customization pages, nor the action bar without `ActionBar`; a
+named `toSlot` must be one the item may enter (an equipment slot only to top up the worn stack of the same type, never an
+empty one: `Items.Equip`), else `Refused`; a move that put
+anything elsewhere, or lost items, is rolled back and `Refused`. The rules: `native/services/items/moves.h`
+(`choose_destination`, `may_land`); the tests: `native/services/items/tests/move_test.cpp` (`issue109_logic`,
+`issue109_engine`); the guide: [modding/inventory.md](../modding/inventory.md#moving-items).
+
 C (header size >= `sizeof(KilnItemsApi)` of v3): `move` (a `KilnItemsMoveRequest`: STACK, QUICK_STACK or MOVE_ALL; callback with a
 `KilnItemsMoveResult` and its ledger, tick thread Pre), `container_name` (tick thread), `transfer_rule` / `transfer_listen` /
 `transfer_report` / `transfer_end` (the first registration installs the hooks), `status2`. A transfer handler runs inside the game's
@@ -157,6 +166,59 @@ handlers and reports too.
 
 Lab switches: `kiln/data/kiln.items/selftest` (a marker file) makes the service name a container through the game's own rename path and
 run a native handler scenario when the test mod asks; `KILN_ITEMS_HOOKS=early` installs the transfer hooks at load.
+
+## Renaming a container (v9, since 0.2.0-dev.30.3)
+`Items.SetContainerName(entity, name)` renames a chest or other container the way a player's Rename button does: on the
+server, through the game's own rename, so the name replicates to every player, is in the next save, and shows in the
+game's Rename screen and in `Items.ContainerName` like one a player typed (GitHub issue #112, thanks Fuzen777). Capability
+`items.rename` (sigdb feature of the same name); `Items.ContainerRenameAvailable` adds the session: true only where the
+server world runs. Since mod API 0.2.13. The guide: [modding/inventory.md](../modding/inventory.md#container-names).
+
+```csharp
+if (Items.ContainerRenameAvailable && await Items.SetContainerName(chest, "Ores")) Log.Info("renamed");
+await Items.SetContainerName(chest, "");                        // clears the name
+```
+
+**Name rules**: the game's Rename field's (client 26430625, docs/re/items.md section 14): at most 48 characters (Unicode
+code points: `Items.ContainerNameMaxChars`, the game data's `FbUiBundle.maxInputLengthForLabelledEntities`) and 64 bytes
+of UTF-8 (`Items.ContainerNameMaxBytes`, the field's buffer); no control character but tab (U+0000-U+001F other than
+U+0009, and U+007F: the field drops them); any script and emoji; kept as given, no trimming, whitespace-only allowed; no
+profanity filter (the game has none on names; a player's client may filter what it shows). Kiln refuses where the field
+would cut or drop instead of storing something a player could not have typed, and refuses text that is not well-formed
+(a lone UTF-16 surrogate). "" clears the name: the server's rename does that, though the Rename field never sends an
+empty name.
+
+**What it does**, the steps of the game's rename handler (the message dispatcher's case for
+`CustomPlayerStringClientMessage`), in the next Pre on the tick thread: the entity is checked again (it exists, it has an
+initialized inventory that is neither a player's nor an NPC's); the world's tracked write of the object's
+`CustomPlayerString` (replication, the save) marks it written and gives its old id, as the handler's first call does;
+`set_string(old id, text)` stores the text in the world's string table, which releases the old name's record and queues
+the new one for every client; the id (FNV-1a 64 of the text) then goes into the component or, for an object never named
+before, a new component (`AddComponent`). Nothing that can fail runs between `set_string` and storing the id. A name the
+object already has changes nothing. The string table holds at most 1024 different names (its record pool, and its map
+when that is smaller); a rename that would need a new record past that is refused before `set_string`, which would
+otherwise release the old name first.
+
+**Outcomes**: refusals at the call throw: `ArgumentNullException` (null), `ArgumentException` (no entity, an entity that
+does not exist or is not a container, a name too long, not valid text or with a control character; the message names the
+rule), `InvalidOperationException` (a game client joined to another machine's world, or in its menu: no server world in
+this process), `KilnUnavailableException("items.rename")` (an older Kiln, a game build whose rename is not known). The task
+completes on the tick thread in the next step: `true` when the game took the name (also when the container already had
+it), `false` when it could not run there (the entity went away or stopped being a container before the step, the string
+table was full, the server world closed or did not step for 10 s); the reason is in kiln.log (`rename ticket ...`).
+
+C (header size >= `sizeof(KilnItemsApi)` of v9, 384; feature `items.rename`): `container_rename(owner,
+KilnItemsRenameRequest*, done, user, &ticket, &refusal)` checks the request (and on the tick thread the entity), fills
+`refusal` (`KILN_ITEMS_RENAME_*` and a message) when it refuses, and queues the rename; `done` gets a
+`KilnItemsRenameResult` in the next Pre (status, `changed`, `cleared`, `game_error`, steps, message). `rename_status`
+(any thread): available, the feature, a server world here, counters. Renames run up to 64 per step, in order;
+`cancel` / `cancel_owner` drop the callback, not the rename. The rules without game memory:
+`native/services/items/rename_logic.h` (host test `tests/rename_test.cpp`: the text check and the steps against a fake
+string table); the queue: `rename.cpp`; the game calls: `names.cpp`.
+
+Symbols: `items/WriteComponentTick` (captured at the rename handler's own call, `@items/RenameHandler.site`),
+`items/StringsInsert` and its two limits (`@items/StringsInsert.site`, `.fields`), with items.names' `items/SetString`
+and `items/AddComponent` (`sigdb/symbols/server.d/items.json`; both exact builds, client and server).
 
 ## Item instances (v4): one particular item
 Capability `items.instances` (sigdb feature of the same name: kiln.items v4 is there and its reads resolved). When it is
@@ -893,7 +955,8 @@ order (the player, or containers) and `expect_available` (the enhancement slots 
 counts the costs, takes them on one inventory transaction of its own, counts again after the commit, and only then makes
 the write, all or nothing. `DRY_RUN` plans without paying. The callback gets a `KilnItemsUpgradeResult` (status, what
 each cost took, what the payers held, the gear result). kiln.items never rolls: a failed roll is the caller's request
-without `WRITE`. Managed: `Items.UpgradeRarity` ("Upgrading rarity" above).
+without `WRITE`. Managed: `Items.UpgradeRarity` ("Upgrading rarity" above). v9 (since 0.2.0-dev.30.3; feature
+`items.rename`): `container_rename` and `rename_status` ("Renaming a container" above).
 Details and every field: the header.
 
 ## How it runs
@@ -930,6 +993,7 @@ Details and every field: the header.
 6. `Items.Read(player)`: backpack, action bars, equipment links and categories look as in the client.
 7. Disconnect while a request is queued: the result is `NoInventory` (or `Done` if it ran first); no crash.
 8. Give to a player still loading in: `NoInventory` "not initialized yet".
+9. Container renames (v9): the list in [modding/inventory.md](../modding/inventory.md#client-checklist-needs-a-player) (items 10 to 15).
 
 ## Lab results: water (a lab with a copied world, no player)
 `mods/tests/fuel-test`, three boots: boot 1 30 PASS, boot 2 5 PASS, boot 3 6 PASS, 0 FAIL.
@@ -1011,6 +1075,7 @@ Kiln.Items followed [the API contract](../modding/contract.md) since dev.26; dev
 - `[TickThreadOnly]` on every member that reaches a tick-thread check (`Read`, `Give`, `Take`, `Move`, the `Fuel`
   calls, ...).
 - Tested offline: `managed/tests/Kiln.Contract.Tests/Group10ContractTests.cs` and the conformance rules.
+- Since 0.2.0-dev.30.3: `items.rename` (`SetContainerName`, an older kiln.items without v9).
 
 ## Typed equipment decisions (since 0.2.0-dev.29)
 `PlayerEquippingEvent`: a player's equipment input, one slot (`SingleEquipmentChange` with `InstanceEquipment`,

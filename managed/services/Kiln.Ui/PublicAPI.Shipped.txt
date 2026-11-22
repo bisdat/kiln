@@ -367,6 +367,35 @@ Kiln.ModStatus.Name.get -> string!
 Kiln.ModStatus.Name.init -> void
 Kiln.ModStatus.Version.get -> string!
 Kiln.ModStatus.Version.init -> void
+Kiln.OutlineOptions
+Kiln.OutlineOptions.<Clone>$() -> Kiln.OutlineOptions!
+Kiln.OutlineOptions.Color.get -> Kiln.Color
+Kiln.OutlineOptions.Color.init -> void
+Kiln.OutlineOptions.Duration.get -> System.TimeSpan?
+Kiln.OutlineOptions.Duration.init -> void
+Kiln.OutlineOptions.Equals(Kiln.OutlineOptions? other) -> bool
+Kiln.OutlineOptions.OutlineOptions() -> void
+Kiln.OutlineOptions.Priority.get -> int
+Kiln.OutlineOptions.Priority.init -> void
+Kiln.OutlineOptions.Pulse.get -> bool
+Kiln.OutlineOptions.Pulse.init -> void
+Kiln.OutlineReason
+Kiln.OutlineReason.Despawned = 17 -> Kiln.OutlineReason
+Kiln.OutlineReason.Expired = 19 -> Kiln.OutlineReason
+Kiln.OutlineReason.Failed = 21 -> Kiln.OutlineReason
+Kiln.OutlineReason.ModUnloaded = 20 -> Kiln.OutlineReason
+Kiln.OutlineReason.NoModel = 3 -> Kiln.OutlineReason
+Kiln.OutlineReason.None = 0 -> Kiln.OutlineReason
+Kiln.OutlineReason.Outshone = 2 -> Kiln.OutlineReason
+Kiln.OutlineReason.Pending = 1 -> Kiln.OutlineReason
+Kiln.OutlineReason.Removed = 16 -> Kiln.OutlineReason
+Kiln.OutlineReason.SwitchedOff = 4 -> Kiln.OutlineReason
+Kiln.OutlineReason.WorldEnded = 18 -> Kiln.OutlineReason
+Kiln.OutlineState
+Kiln.OutlineState.Ended = 3 -> Kiln.OutlineState
+Kiln.OutlineState.GameHighlight = 2 -> Kiln.OutlineState
+Kiln.OutlineState.Shown = 1 -> Kiln.OutlineState
+Kiln.OutlineState.Waiting = 0 -> Kiln.OutlineState
 Kiln.Render
 Kiln.RenderCamera
 Kiln.RenderCamera.AgeMs.get -> uint
@@ -480,6 +509,8 @@ Kiln.SlotClick.Item.get -> Kiln.ItemId
 Kiln.SlotClick.ItemEntity.get -> Kiln.EntityId
 Kiln.SlotClick.Modifiers.get -> Kiln.SlotModifiers
 Kiln.SlotClick.Modifiers.init -> void
+Kiln.SlotClick.Pointer.get -> System.Numerics.Vector2?
+Kiln.SlotClick.Pointer.init -> void
 Kiln.SlotClick.Screen.get -> Kiln.GameScreen
 Kiln.SlotClick.Screen.init -> void
 Kiln.SlotClick.Slot.get -> Kiln.VisibleSlot!
@@ -569,6 +600,7 @@ Kiln.Ui.Screens
 Kiln.Ui.Themes
 Kiln.Ui.Tooltip
 Kiln.Ui.Values
+Kiln.Ui.World
 Kiln.UiBarEdit
 Kiln.UiBarEdit.<Clone>$() -> Kiln.UiBarEdit!
 Kiln.UiBarEdit.Current.get -> uint?
@@ -672,6 +704,7 @@ Kiln.UiDraw.BeginTab(string! label) -> bool
 Kiln.UiDraw.BeginTabBar(string! id) -> bool
 Kiln.UiDraw.BeginTable(string! id, params string![]! columns) -> bool
 Kiln.UiDraw.Button(string! label, float width = 0, float height = 0) -> bool
+Kiln.UiDraw.ButtonHeld(Kiln.UiMouseButton button = Kiln.UiMouseButton.Left) -> bool
 Kiln.UiDraw.Capturing.get -> bool
 Kiln.UiDraw.Checkbox(string! label, ref bool value) -> bool
 Kiln.UiDraw.CloseScreen() -> void
@@ -681,10 +714,12 @@ Kiln.UiDraw.CurrentScreen.get -> Kiln.UiScreen?
 Kiln.UiDraw.Cursor.get -> Kiln.UiCursor
 Kiln.UiDraw.DefaultFocus() -> void
 Kiln.UiDraw.DeltaSeconds.get -> float
+Kiln.UiDraw.DragSource(string! kind, string! payload, string? preview = null) -> bool
 Kiln.UiDraw.DrawRect(Kiln.UiLayer layer, float x0, float y0, float x1, float y1, Kiln.Color color, float rounding = 0, float thickness = 0) -> void
 Kiln.UiDraw.DrawRect(float x0, float y0, float x1, float y1, Kiln.Color color, float rounding = 0, bool filled = true) -> void
 Kiln.UiDraw.DrawText(Kiln.UiLayer layer, float x, float y, string! text, Kiln.Color color, float size = 0, float wrap = 0) -> void
 Kiln.UiDraw.DrawText(float x, float y, string! text, Kiln.Color? color = null, float size = 0) -> void
+Kiln.UiDraw.DropTarget(string! kind) -> string?
 Kiln.UiDraw.EndChild() -> void
 Kiln.UiDraw.EndTab() -> void
 Kiln.UiDraw.EndTabBar() -> void
@@ -734,6 +769,7 @@ Kiln.UiDraw.NextColumn() -> bool
 Kiln.UiDraw.NextItemWidth(float width) -> void
 Kiln.UiDraw.NextRow() -> void
 Kiln.UiDraw.Palette.get -> Kiln.UiPalette
+Kiln.UiDraw.Pointer.get -> System.Numerics.Vector2?
 Kiln.UiDraw.PopScope
 Kiln.UiDraw.PopScope.Dispose() -> void
 Kiln.UiDraw.PopScope.PopScope() -> void
@@ -1394,6 +1430,14 @@ Kiln.WorldDraw.Marker(Kiln.WorldPosition p, Kiln.Color color, float size = 10, K
 Kiln.WorldDraw.Ready.get -> bool
 Kiln.WorldDraw.ToScreen(Kiln.WorldPosition p, out System.Numerics.Vector2 screen) -> bool
 Kiln.WorldDraw.ToScreenClamped(Kiln.WorldPosition p, float margin, out System.Numerics.Vector2 screen, out float angle) -> bool
+Kiln.WorldOutline
+Kiln.WorldOutline.Active.get -> bool
+Kiln.WorldOutline.ColorShared.get -> bool
+Kiln.WorldOutline.Dispose() -> void
+Kiln.WorldOutline.Entity.get -> Kiln.EntityId
+Kiln.WorldOutline.Options.get -> Kiln.OutlineOptions!
+Kiln.WorldOutline.Reason.get -> Kiln.OutlineReason
+Kiln.WorldOutline.State.get -> Kiln.OutlineState
 const Kiln.Ui.Inventory.ClickCapability = "ui.slots.click" -> string!
 const Kiln.Ui.Inventory.MarkCapability = "ui.slots.inspect" -> string!
 const Kiln.Ui.Inventory.PanelCapability = "ui.inventory.panels" -> string!
@@ -1406,6 +1450,7 @@ const Kiln.Ui.Values.HudCapability = "ui.values.hud" -> string!
 const Kiln.Ui.Values.SlotCapability = "ui.values.slot" -> string!
 const Kiln.Ui.Values.SlotsCapability = "ui.slots.inspect" -> string!
 const Kiln.Ui.Values.TooltipCapability = "ui.values.tooltip_lines" -> string!
+const Kiln.Ui.World.OutlineCapability = "ui.world_outline" -> string!
 const Kiln.UiWheel.Cancelled = -1 -> int
 const Kiln.UiWheel.HoldAlt = 18 -> uint
 const Kiln.UiWheel.HoldCtrl = 17 -> uint
@@ -1438,6 +1483,9 @@ override Kiln.KeyPress.GetHashCode() -> int
 override Kiln.ModStatus.Equals(object? obj) -> bool
 override Kiln.ModStatus.GetHashCode() -> int
 override Kiln.ModStatus.ToString() -> string!
+override Kiln.OutlineOptions.Equals(object? obj) -> bool
+override Kiln.OutlineOptions.GetHashCode() -> int
+override Kiln.OutlineOptions.ToString() -> string!
 override Kiln.RenderStats.GetHashCode() -> int
 override Kiln.SlotClick.Equals(object? obj) -> bool
 override Kiln.SlotClick.GetHashCode() -> int
@@ -1547,6 +1595,8 @@ static Kiln.KeyPress.operator !=(Kiln.KeyPress left, Kiln.KeyPress right) -> boo
 static Kiln.KeyPress.operator ==(Kiln.KeyPress left, Kiln.KeyPress right) -> bool
 static Kiln.ModStatus.operator !=(Kiln.ModStatus? left, Kiln.ModStatus? right) -> bool
 static Kiln.ModStatus.operator ==(Kiln.ModStatus? left, Kiln.ModStatus? right) -> bool
+static Kiln.OutlineOptions.operator !=(Kiln.OutlineOptions? left, Kiln.OutlineOptions? right) -> bool
+static Kiln.OutlineOptions.operator ==(Kiln.OutlineOptions? left, Kiln.OutlineOptions? right) -> bool
 static Kiln.Render.Available.get -> bool
 static Kiln.Render.Camera.get -> Kiln.RenderCamera
 static Kiln.Render.CameraAvailable.get -> bool
@@ -1630,6 +1680,10 @@ static Kiln.Ui.Values.SubscribeGemForgeCandidates(System.Action<Kiln.GemForgeCan
 static Kiln.Ui.Values.SubscribeSlots(System.Action<Kiln.VisibleSlotsResult!>! onFrame) -> Kiln.UiValueRegistration!
 static Kiln.Ui.Values.TooltipLines(Kiln.ItemId item, Kiln.UiTooltipProvider! provider) -> Kiln.UiValueRegistration!
 static Kiln.Ui.Window(string! title, System.Action<Kiln.UiDraw!>! draw, Kiln.UiWindowOptions? options = null) -> Kiln.UiWindow!
+static Kiln.Ui.World.ClearOutlines() -> void
+static Kiln.Ui.World.DefaultOutlineColor.get -> Kiln.Color
+static Kiln.Ui.World.Outline(Kiln.EntityId entity, Kiln.OutlineOptions? options = null) -> Kiln.WorldOutline!
+static Kiln.Ui.World.OutlinesAvailable.get -> bool
 static Kiln.UiBarEdit.operator !=(Kiln.UiBarEdit? left, Kiln.UiBarEdit? right) -> bool
 static Kiln.UiBarEdit.operator ==(Kiln.UiBarEdit? left, Kiln.UiBarEdit? right) -> bool
 static Kiln.UiBarValue.operator !=(Kiln.UiBarValue? left, Kiln.UiBarValue? right) -> bool

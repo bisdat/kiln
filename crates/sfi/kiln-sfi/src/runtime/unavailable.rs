@@ -21,9 +21,11 @@
 //! **What each member answers.** Its ShroudForge return shape ([`Answer`]), with the reason of its first check:
 //! - a member gated by a runtime operation ([`Gate::Ops`]): `runtime_denial_reason` for that operation, in
 //!   ShroudForge's order (phase, the `runtime` capability, the package's lifecycle, the write fault, then the
-//!   operation's static support). The operations behind these members have no landed row in Kiln's catalog, so
-//!   once the lifecycle is active the reason is ShroudForge's `operation <op> has not been verified for game build
-//!   <build>`;
+//!   operation's static support). Until that operation lands, its static support refuses with ShroudForge's
+//!   `operation <op> has not been verified for game build <build>` once the lifecycle is active; a member whose
+//!   operation has landed (the attribute reads, `runtime.impact.call`,
+//!   `runtime.services.get` and the loaded-resource lookups, the ECS writes the attribute writes) is still missing
+//!   itself, so with no denial left it answers that text for its own name;
 //! - a member ShroudForge does not gate ([`Gate::Contract`]): the same text for the member's own name, the reason
 //!   ShroudForge gives for an operation outside its contract.
 //!

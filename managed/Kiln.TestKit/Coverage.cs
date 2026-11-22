@@ -91,6 +91,10 @@ public static partial class Coverage
         Row("Game log lines", CoverageKind.Real,
             "ModContext.GameLog handlers and the lifecycle's watch run as in the game, on lines the test writes " +
             "(KilnHarness.GameLog): the game writes none");
+        Row("Game textures (GameTexture)", CoverageKind.Real,
+            "Kiln.Api's GameTexture decodes and encodes game pixel formats (BC1 to BC7, packed, 8 to 64-bit) as in the game: " +
+            "pure code on the test's bytes, with the same answers as kiln mode's image.decode_texture and image.encode_texture; " +
+            "the game's own textures are offline (read texture data from a blob the test adds)");
         Row("Game features", CoverageKind.Unavailable,
             "Game.HasFeature is false for every game feature (sigdb) unless the test overrides it; an override changes the " +
             "answer only, nothing behind the feature is faked");

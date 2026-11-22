@@ -16,6 +16,11 @@ interpreter for ShroudForge mods has no row: it is a normal choice in Settings >
 `shroudforge.backend: "kiln"`), and hosted ShroudForge stays the default. A `kiln-sfi.interpreter` row on both sides
 would hold it as a preview until kiln.json `"preview"` lifts it; a row on one side only holds it on both.
 
+**0.2.0-dev.30.3 holds nothing more:** `client.building_input` (kiln.client's building input) was held in this
+release's test builds and ships on (owner, 2026-11-21: a supported public API). Its five guided checks stay in the
+client pass as what a real game has not confirmed yet, and its producer is hooked only at a mod's first request
+([docs/kiln/services/client-building-input.md](../../../docs/kiln/services/client-building-input.md)).
+
 Kiln ships some capabilities switched off because only a real game client can confirm them: nobody but a player
 can say that a camera does not clip, that a marker shows on the compass, that a joined vanilla player still sees a
 sane world. Such a capability is **held** until its guided client checks (`mods/tests/client-pass/`,
