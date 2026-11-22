@@ -24,6 +24,7 @@
 #include "../../../core/src/owners_internal.h"
 #include "kiln_boot_collector.hpp"
 #include "services/kiln_assets.h"
+#include "services/kiln_caps.h"
 #include "services/kiln_launch.h"
 #include "services/kiln_registry.h"
 #include "boot_hooks.h"
@@ -132,6 +133,13 @@ Env make_env() {
     e.regmap = [side, exe](map::RegMap* out, std::vector<std::string>* errs) {
         return map::load_dir(api_path(KILN_PATH_KILN) + "\\regmap", side, exe, out, errs);
     };
+    const auto* caps = g_api && g_api->service ? static_cast<const KilnCapsApi*>(
+        g_api->service(KilnStr{KILN_CAPS_SERVICE, sizeof(KILN_CAPS_SERVICE) - 1}, KILN_CAPS_VERSION)) : nullptr;
+    if (caps && caps->header.size >= offsetof(KilnCapsApi, report) + sizeof(caps->report) && caps->report) {
+        e.report_cap = [caps, owner = g_owner](const std::string& name, uint32_t state, uint32_t reason, const std::string& detail) {
+            return caps->report(owner, KilnStr{name.data(), name.size()}, state, reason, KilnStr{detail.data(), detail.size()});
+        };
+    }
     e.folders = [] {
         std::vector<std::pair<std::string, std::string>> out;
         for (const fs::path& dir : mod_folder_list()) {

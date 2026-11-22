@@ -331,6 +331,8 @@ def walk(reg, fields, prefix, applies, list_path, read_only, errors, known):
             a = "restart"
         elif a not in APPLIES:
             errors.append(f"{q}: applies {a!r} is not one of now, worldLoad, restart")
+        if spec.get("side", "both") not in ("both", "server", "client"):
+            errors.append(f"{q}: side is one of both, server, client")
         ro = bool(spec.get("readOnly", read_only))
         if spec.get("optional") is not None and (t != "ref" or not isinstance(spec.get("optional"), bool)):
             errors.append(f"{q}: optional (true or false) is for ref fields only")
@@ -779,6 +781,7 @@ def render_native(model, lock):
            "enum class Kind : uint8_t { Int, Float, Bool, Enum, Flags, Ref, Time, List, Struct };",
            "enum class Applies : uint8_t { Now = 1, WorldLoad = 2, Restart = 3 };  // KILN_REGISTRY_APPLIES_*",
            "enum class Ops : uint8_t { None, Set, Number, List, Indexed };  // Indexed: a list of fixed length, edited per element",
+           "enum class Side : uint8_t { Both, Server, Client };",
            "",
            "struct Field {",
            "    uint32_t id;           // permanent: (registry id << 16) | field id (schema/registry/ids.lock.json)",
@@ -801,6 +804,7 @@ def render_native(model, lock):
            "    uint32_t fixed_length; // a list of exactly this many elements (0: see length_field, or not fixed)",
            "    const char* length_field;  // a list as long as this field's value + length_offset (\"\": none)",
            "    int32_t length_offset;",
+           "    Side side = Side::Both;  // which game process reads the field",
            "};",
            "",
            "struct Registry {",
@@ -832,6 +836,8 @@ def render_native(model, lock):
         s, el = r.spec, scalar_spec(r)
         values = "|".join(el.get("values", [])) if el.get("type") in ("enum", "flags") else ""
         ref = el.get("registry", "") if el.get("type") == "ref" else ""
+        side = s.get("side", "both")
+        side_init = f", Side::{pascal(side)}" if side != "both" else ""
         out.append(f"    {{0x{field_id(lock, r):08x}u, {cstr(r.registry)}, {cstr(r.path)}, Kind::{NATIVE_KIND[r.kind]}, "
                    f"Kind::{NATIVE_KIND[r.element or r.kind]}, "
                    f"{'true' if el.get('min') is not None else 'false'}, {'true' if el.get('max') is not None else 'false'}, "
@@ -839,7 +845,7 @@ def render_native(model, lock):
                    f"{cstr(r.list_path)}, {'true' if r.read_only else 'false'}, Applies::{pascal(r.applies)}, "
                    f"Ops::{pascal(r.ops)}, {cstr(el.get('unit'))}, {cstr(s.get('formula') or inherited_formula(reg, r))}, "
                    f"{'true' if s.get('optional') else 'false'}, {int(s.get('fixedLength') or 0)}u, {cstr(s.get('lengthField'))}, "
-                   f"{int(s.get('lengthOffset') or 0)}}},")
+                   f"{int(s.get('lengthOffset') or 0)}{side_init}}},")
     out += ["};", "", "// Field ids by name: <registry>_<path> with '.' as '_' and '[]' left out.", "namespace field {"]
     for reg, r in rows:
         out.append(f"inline constexpr uint32_t {r.registry}_{ident(r.path)} = 0x{field_id(lock, r):08x}u;")

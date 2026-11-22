@@ -41,6 +41,7 @@ struct Env {
     std::function<std::unique_ptr<model::Source>(std::string* why)> source;
     // The regmap of the running build (regmap.h load_dir over <game>/kiln/regmap); *errs: rows loaded as unproven.
     std::function<bool(map::RegMap* out, std::vector<std::string>* errs)> regmap;
+    std::function<KilnResult(const std::string& name, uint32_t state, uint32_t reason, const std::string& detail)> report_cap;
     // A mod's data sections: one row per pack file in load order (the files of mods the order does not name come after).
     struct DataFile {
         std::string mod, version, rel;  // rel: "content/<file>.json"

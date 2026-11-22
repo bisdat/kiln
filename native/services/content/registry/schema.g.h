@@ -12,6 +12,7 @@ namespace kc::registry::gen {
 enum class Kind : uint8_t { Int, Float, Bool, Enum, Flags, Ref, Time, List, Struct };
 enum class Applies : uint8_t { Now = 1, WorldLoad = 2, Restart = 3 };  // KILN_REGISTRY_APPLIES_*
 enum class Ops : uint8_t { None, Set, Number, List, Indexed };  // Indexed: a list of fixed length, edited per element
+enum class Side : uint8_t { Both, Server, Client };
 
 struct Field {
     uint32_t id;           // permanent: (registry id << 16) | field id (schema/registry/ids.lock.json)
@@ -34,6 +35,7 @@ struct Field {
     uint32_t fixed_length; // a list of exactly this many elements (0: see length_field, or not fixed)
     const char* length_field;  // a list as long as this field's value + length_offset ("": none)
     int32_t length_offset;
+    Side side = Side::Both;  // which game process reads the field
 };
 
 struct Registry {
@@ -104,7 +106,7 @@ inline constexpr Field kFields[] = {
     {0x00020006u, "recipes", "outputs[].item", Kind::Ref, Kind::Ref, false, false, 0.0, 0.0, 0u, "", "items", "outputs", false, Applies::Now, Ops::Set, "", "", false, 0u, "", 0},
     {0x00020007u, "recipes", "outputs[].count", Kind::Int, Kind::Int, true, true, 1.0, 65535.0, 0u, "", "", "outputs", false, Applies::Now, Ops::Number, "", "", false, 0u, "", 0},
     {0x00020008u, "recipes", "duration", Kind::Time, Kind::Time, true, true, 0.0, 86400.0, 0u, "", "", "", false, Applies::Now, Ops::Number, "s", "", false, 0u, "", 0},
-    {0x00020009u, "recipes", "unlock", Kind::Enum, Kind::Enum, false, false, 0.0, 0.0, 0u, "game|always", "", "", false, Applies::Now, Ops::Set, "", "", false, 0u, "", 0},
+    {0x00020009u, "recipes", "unlock", Kind::Enum, Kind::Enum, false, false, 0.0, 0.0, 0u, "game|always", "", "", false, Applies::Now, Ops::Set, "", "", false, 0u, "", 0, Side::Client},
     {0x0002000au, "recipes", "station", Kind::Ref, Kind::Ref, false, false, 0.0, 0.0, 0u, "", "stations", "", true, Applies::Restart, Ops::None, "", "", false, 0u, "", 0},
     {0x00030001u, "loot", "stack.min", Kind::Int, Kind::Int, true, true, 0.0, 65535.0, 0u, "", "", "", false, Applies::Now, Ops::Number, "", "", false, 0u, "", 0},
     {0x00030002u, "loot", "stack.max", Kind::Int, Kind::Int, true, true, 0.0, 65535.0, 0u, "", "", "", false, Applies::Now, Ops::Number, "", "", false, 0u, "", 0},
