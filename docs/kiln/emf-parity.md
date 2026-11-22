@@ -227,6 +227,8 @@ EMF's unchanged MIT header below Kiln's licence preface. No earlier slot or stru
   `BreakBox`. Results are delivered at server Post, before mod tick subscribers. Reset cancels waiting requests;
   like EMF's `Dispatcher.post(server)`, their callbacks wait for the next server Post, not the destroying thread.
   A 3-second watchdog cancels waiting work if the runner has not run. Callback faults do not suppress later results.
+  A clean unloaded sphere is skipped (DONE with no contribution to counts), as in EMF's `block_glue.cpp:475-478,519`
+  and `block_service.cpp:88,115`; a refusal after possible mutation is never treated as that no-op.
 - Damage is per hardness class, default 100/100/95/60/50, with the world's mining factor and native building cracks.
   Terrain policy is explicitly supplied by the adapter: material health ×250, healing 20 seconds after the last hit
   (EMF 0.6.19 `src/core/block_rules.h:110,121`, `block_rules.cpp:185-198,201-214`). Queries return **raw** health,

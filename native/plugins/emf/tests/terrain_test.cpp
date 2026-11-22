@@ -280,6 +280,13 @@ int main() {
     // Watchdog cancels after 3 seconds without a runner; it delivers on Post, never the caller's thread.
     r = request(); CHECK(t.break_blocks(w, &r, &callback, nullptr)); clock_ms += 3001;
     terrain_after_step(w, EMF_WORLD_SERVER); CHECK(answers.back().result.status == EMF_BREAK_CANCELLED);
+    // EMF skips an unloaded sphere without damage, rather than failing the accepted request.
+    r = request(); CHECK(t.break_blocks(w, &r, &callback, nullptr));
+    break_rc = KILN_ERR_UNAVAILABLE; break_refusal = KILN_BUILD_BLOCK_NOT_LOADED; break_result_flags = 0;
+    terrain_server_pre(); terrain_after_step(w, EMF_WORLD_SERVER);
+    CHECK(answers.back().result.status == EMF_BREAK_DONE);
+    CHECK(answers.back().result.damaged == 0 && answers.back().result.removed == 0 && answers.back().result.dropped == 0);
+    break_rc = KILN_OK; break_refusal = 0; break_result_flags = KILN_BUILD_BREAK_R_VERIFIED;
     // Failure after admission: no retries; later requests in the batch fail without running.
     r = request(); auto failed = t.break_blocks(w, &r, &callback, nullptr); auto skipped = t.break_blocks(w, &r, &callback, nullptr);
     break_rc = KILN_ERR_UNAVAILABLE; break_refusal = KILN_BUILD_BLOCK_SYMBOL_MISSING; before = break_calls;
@@ -293,7 +300,7 @@ int main() {
     // Partial writer faults retain verified/lower-bound counts, explicitly log uncertainty and latch breaks off.
     for (int i = 0; i < 9; ++i) CHECK(t.break_blocks(w, &r, &callback, nullptr));
     before = break_calls;
-    break_rc = KILN_ERR_INTERNAL; break_refusal = KILN_BUILD_BLOCK_FAULTED; break_result_flags = KILN_BUILD_BREAK_R_MAY_HAVE_CHANGED;
+    break_rc = KILN_ERR_UNAVAILABLE; break_refusal = KILN_BUILD_BLOCK_NOT_LOADED; break_result_flags = KILN_BUILD_BREAK_R_MAY_HAVE_CHANGED;
     terrain_server_pre(); terrain_after_step(w, EMF_WORLD_SERVER);
     CHECK(answers[answers.size()-8].result.status == EMF_BREAK_FAILED && answers[answers.size()-8].result.removed == 2);
     terrain_server_pre(); terrain_after_step(w, EMF_WORLD_SERVER);

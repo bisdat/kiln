@@ -260,6 +260,13 @@ void terrain_server_pre() {
                 if (!raster(s, grid, r, mask)) { ok = false; break; }
                 KilnBuildBreakResult result{}; result.size = sizeof result;
                 const auto rc = S.build->break_box(&r, &result);
+                // EMF's unreadable/unloaded sphere and a kernel that did no work are successful no-ops.
+                // This is safe only before any damage mutator/writer ran; never hide a possibly partial edit.
+                if (rc != KILN_OK && result.refusal == KILN_BUILD_BLOCK_NOT_LOADED &&
+                    !(result.flags & KILN_BUILD_BREAK_R_MAY_HAVE_CHANGED)) {
+                    refuse(d.request.mod, "break_blocks sphere", "that place is not loaded; the sphere spares everything", true);
+                    continue;
+                }
                 d.result.damaged += static_cast<uint32_t>(result.damaged);
                 d.result.removed += static_cast<uint32_t>(result.removed);
                 d.result.dropped += static_cast<uint32_t>(result.dropped);
