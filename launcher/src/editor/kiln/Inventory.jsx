@@ -144,8 +144,8 @@ export default function Inventory({ model, setModel }) {
             <span className="k-spacer" />
             {/* the Deck: Y moves; A on an empty slot adds (buttons above the grid sit in the D-pad's way) */}
             {!env.deck && <>
-              <Button size="s" onClick={moving !== null ? cancelMove : startMove} disabled={disabled || (moving === null && !entry)} title={moving !== null ? 'Escape' : 'M'}>{moving !== null ? t('editor.page.cancel') : t('editor.inventory.move')}</Button>
               <Button size="s" onClick={openCatalog} disabled={disabled || moving !== null} title={t('editor.inventory.addItem') + ' (I)'}>{t('editor.inventory.addItem')}</Button>
+              <Button size="s" onClick={moving !== null ? cancelMove : startMove} disabled={disabled || (moving === null && !entry)} title={moving !== null ? 'Escape' : 'M'}>{moving !== null ? t('editor.page.cancel') : t('editor.inventory.move')}</Button>
             </>}
           </header>
           <div className={'ke-grid-scroll' + (more ? ' more' : '')} ref={scroller} onScroll={look}><div className="ke-grid" data-editor-grid="">{layout.bag.map((k) => cell(k))}</div></div>
