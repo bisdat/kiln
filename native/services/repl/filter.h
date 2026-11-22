@@ -23,11 +23,17 @@ struct RemapTable {
     uint32_t site_count = 0;                   // as given (sites of components this world has)
 };
 struct RemapCounters {
-    std::atomic<uint64_t> snapshots{0}, remapped{0}, zeroed{0}, faults{0};
+    std::atomic<uint64_t> snapshots{0}, remapped{0}, zeroed{0}, faults{0}, blanked{0};
 };
 extern RemapCounters g_remap_counters;
 
 // remap.cpp
+// The remap fails closed (review must 2): it works only while its hook is in when needed, the snapshot step never faulted
+// outside a component's own guard, and every remapped state was placed or blanked. KILN_REPL_REMAP_* (0 = working).
+void remap_set_stopped(uint32_t reason);       // any thread (first reason wins until cleared)
+void remap_hook_refused(bool refused);         // tick thread (rebuild)
+uint32_t remap_reason();
+void remap_world_stopping();                   // clears a stop (the next world starts over)
 const RemapTable* remap_table();               // tick thread: the published table, or nullptr
 uint32_t remap_machines();                     // tick thread: the machines it applies to now (peers resolved in Pre)
 bool remap_resolve_peers();                    // tick thread (Pre): the remap's peers -> machines; true when it changed

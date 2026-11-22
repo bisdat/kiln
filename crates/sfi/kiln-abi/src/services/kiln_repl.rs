@@ -50,6 +50,11 @@ pub const KILN_REPL_PEER_LOCAL: i32 = 4;
 pub const KILN_REPL_PEER_RECEIVED: i32 = 8;
 pub const KILN_REPL_PREDICTION_CHANNEL: i32 = 2;
 pub const KILN_REPL_RECEIVE: i32 = 2;
+pub const KILN_REPL_REMAP_FAULTED: i32 = 2;
+pub const KILN_REPL_REMAP_HOOK_REFUSED: i32 = 1;
+pub const KILN_REPL_REMAP_OFF: i32 = 4;
+pub const KILN_REPL_REMAP_OK: i32 = 0;
+pub const KILN_REPL_REMAP_UNPLACED: i32 = 3;
 pub const KILN_REPL_REWRITE: i32 = 2;
 pub const KILN_REPL_SEND: i32 = 1;
 pub const KILN_REPL_SERVICE: &[u8] = b"kiln.repl\0";
@@ -267,6 +272,9 @@ pub struct KilnReplRemapStats {
     pub remapped: u64,
     pub zeroed: u64,
     pub faults: u64,
+    pub blanked: u64,
+    pub running: u32,
+    pub reason: u32,
 }
 
 #[repr(C)]

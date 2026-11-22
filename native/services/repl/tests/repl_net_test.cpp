@@ -150,7 +150,39 @@ void filter_calls() {
 
 }  // namespace
 
+void blanking() {
+    // a state: header, list 1 {3 (versioned), 9}, whole set small form {u8 0, u8 2, u16 3, u16 9}, data 12 bytes
+    std::vector<bool> versioned(640, false);
+    versioned[3] = true;
+    auto ver = [&](uint32_t i) { return static_cast<bool>(versioned[i]); };
+    std::vector<uint8_t> s = {0, 0, 2, 0, 0, 0, 0, 0, 3, 0, 7, 9, 0, 0, 2, 3, 0, 9, 0};
+    const size_t data_at = s.size();
+    for (int i = 0; i < 12; ++i) s.push_back(static_cast<uint8_t>(0xa0 + i));
+    const uint16_t total = static_cast<uint16_t>(s.size());
+    std::memcpy(s.data(), &total, 2);
+    const std::vector<uint8_t> before = s;
+    CHECK(repl::blank_state(s.data(), 640, ver));
+    CHECK(std::memcmp(s.data(), before.data(), data_at) == 0);  // header and lists intact
+    bool zero = true;
+    for (size_t i = data_at; i < s.size(); ++i) zero = zero && s[i] == 0;
+    CHECK(zero);
+    // the mask form (40+ components): u8 1 + 80 bytes of mask
+    std::vector<uint8_t> m = {0, 0, 1, 0, 0, 0, 0, 0, 9, 0, 1};
+    m.resize(m.size() + 80, 0x11);
+    const size_t mdata = m.size();
+    m.resize(m.size() + 8, 0xee);
+    const uint16_t mt = static_cast<uint16_t>(m.size());
+    std::memcpy(m.data(), &mt, 2);
+    CHECK(repl::blank_state(m.data(), 640, ver));
+    CHECK(m[mdata - 1] == 0x11 && m[mdata] == 0 && m[m.size() - 1] == 0);
+    // malformed (a count past the blob): refused, nothing written
+    std::vector<uint8_t> bad = {12, 0, 40, 0, 0, 0, 0, 0, 1, 0, 2, 0};
+    const std::vector<uint8_t> bad0 = bad;
+    CHECK(!repl::blank_state(bad.data(), 640, ver) && bad == bad0);
+}
+
 int main() {
+    blanking();
     abi();
     remap();
     mask_test();

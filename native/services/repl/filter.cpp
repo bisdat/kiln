@@ -175,14 +175,22 @@ void filter_after(void* p) {
     }
     if (!any) return;
     const bool remap_here = hot->remap && ((hot->remap_machines >> m) & 1);
-    // 3. offsets of the components with data, from the game's pure StateIndex
-    Part parts[kMaxComponents / 4];
+    // 3. offsets of the components with data, from the game's pure StateIndex (room for every component: a state with
+    // many is still placed, never sent past the remap)
+    Part parts[kMaxComponents];
     uint32_t n = 0;
     const uintptr_t registry = *reinterpret_cast<const uintptr_t*>(c->args + kSnapRegistry);
     if (!state_parts(*reg, s, [&](uint8_t* index, const uint8_t* st) { return state_index(index, st, registry); }, parts,
                      static_cast<uint32_t>(std::size(parts)), &n)) {
-        cost.unplaced.fetch_add(1, std::memory_order_relaxed);  // the game's own state did not parse: nothing was edited
-        if (remap_here) g_remap_counters.faults.fetch_add(1, std::memory_order_relaxed);
+        cost.unplaced.fetch_add(1, std::memory_order_relaxed);  // the game's own state did not parse: no filter ran
+        if (remap_here) {
+            // fails closed: a remapped peer never gets this state's item ids raw; every data byte goes to 0 (the lists
+            // stay, so the client reads a well-formed state), or the remap stops (Kiln.Replication then acts per peer)
+            if (blank_state(s, reg->count, [reg](uint32_t i) { return (reg->at[i].flags & KILN_REPL_COMPONENT_VERSIONED) != 0; }))
+                g_remap_counters.blanked.fetch_add(1, std::memory_order_relaxed);
+            else
+                remap_set_stopped(KILN_REPL_REMAP_UNPLACED);
+        }
         return;
     }
     KilnReplFilterCtx ctx{};
@@ -242,11 +250,50 @@ void filter_after(void* p) {
     }
 }
 
+// After a fault in the step: a remapped peer's state is blanked when its machine can still be told; else the remap stops.
+void emergency(const SnapCall* c) {
+    const Hot* hot = g_hot.load(std::memory_order_acquire);
+    if (!hot || !hot->remap || !hot->remap_machines || !c->result || !c->result->state) return;
+    const Registry* reg = registry_hot();
+    const uintptr_t pool = *reinterpret_cast<const uintptr_t*>(c->args + kSnapPool);
+    uint8_t pred = 0;
+    const int m = pool > kCtxPool ? machine_of_ctx(g_world.load(std::memory_order_relaxed), pool - kCtxPool, &pred) : -1;
+    if (m < 0 || !reg) {
+        remap_set_stopped(KILN_REPL_REMAP_FAULTED);
+        return;
+    }
+    if (!((hot->remap_machines >> m) & 1)) return;
+    if (blank_state(c->result->state, reg->count, [reg](uint32_t i) { return (reg->at[i].flags & KILN_REPL_COMPONENT_VERSIONED) != 0; }))
+        g_remap_counters.blanked.fetch_add(1, std::memory_order_relaxed);
+    else
+        remap_set_stopped(KILN_REPL_REMAP_FAULTED);
+}
+std::atomic<uint64_t> g_step_faults{0};
+std::atomic<uintptr_t> g_step_fault_at{0};
+void seh_step(SnapCall* c) {
+    uintptr_t where = 0;
+    __try {
+        filter_after(c);
+        return;
+    } __except (snap_detail::note(GetExceptionInformation(), &where)) {
+    }
+    uintptr_t none = 0;
+    g_step_fault_at.compare_exchange_strong(none, where ? where : 1, std::memory_order_relaxed);
+    g_step_faults.fetch_add(1, std::memory_order_relaxed);
+    __try {
+        emergency(c);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        remap_set_stopped(KILN_REPL_REMAP_FAULTED);
+    }
+}
+
 StateRef* d_snapshot(StateRef* out, uint8_t* args) {
     SnapCall c{nullptr, args};
     StateRef* r = h_snapshot.original<SnapshotFn>()(out, args);  // exactly once, outside any guard
     c.result = r;
-    observe(g_guard, &filter_after, &c);
+    ++t_in_observer;
+    seh_step(&c);  // never turns itself off: the remap must keep failing closed
+    --t_in_observer;
     return r;
 }
 
@@ -338,11 +385,15 @@ void rebuild() {
     if (hot->any && !g_hooked) {
         if (h_snapshot.install(g_api, g_owner, f_snapshot, reinterpret_cast<void*>(&d_snapshot), "repl/filter Snapshot")) {
             g_hooked = true;
+            remap_hook_refused(false);
             logf(KILN_LOG_INFO, "repl: snapshot hook installed (%u filters, remap %s)", hot->n, hot->remap_machines ? "on" : "off");
-        } else if (!g_hook_failed_logged) {
-            g_hook_failed_logged = true;
-            logf(KILN_LOG_WARN, "repl: the snapshot hook could not be installed (%s): filters and the remap do nothing",
-                 h_snapshot.error() ? h_snapshot.error() : "?");
+        } else {
+            if (hot->remap_machines) remap_hook_refused(true);  // the remap stops (fails closed), reported to Kiln.Replication
+            if (!g_hook_failed_logged) {
+                g_hook_failed_logged = true;
+                logf(KILN_LOG_WARN, "repl: the snapshot hook could not be installed (%s): filters do nothing and the item remap stops",
+                     h_snapshot.error() ? h_snapshot.error() : "?");
+            }
         }
     } else if (!hot->any && g_hooked) {
         h_snapshot.revoke();
@@ -536,6 +587,13 @@ void lab_report() {
 void filter_pre(uintptr_t) {
     if (!g_resolved) return;
     lab_report();
+    static uint64_t logged_faults = 0;
+    if (const uint64_t n = g_step_faults.load(std::memory_order_relaxed); n != logged_faults) {
+        char where[160];
+        describe(g_step_fault_at.load(std::memory_order_relaxed), where, sizeof where);
+        if (!logged_faults) logf(KILN_LOG_WARN, "repl: the snapshot step faulted at %s (%llu times so far); a remapped peer's state is blanked, else the remap stops", where, static_cast<unsigned long long>(n));
+        logged_faults = n;
+    }
     for (const Hot* h : g_retired) delete h;
     g_retired.clear();
     remap_retire_pre();
@@ -569,7 +627,10 @@ void filter_pre(uintptr_t) {
 
 void filter_peer_changed(uint32_t, uint32_t) { g_dirty.store(true, std::memory_order_relaxed); }
 
-void filter_world_stopping() { g_dirty.store(true, std::memory_order_relaxed); }
+void filter_world_stopping() {
+    g_dirty.store(true, std::memory_order_relaxed);
+    remap_world_stopping();
+}
 
 void filter_owner_retiring(KilnOwner owner) {
     for (Filter& f : g_f)

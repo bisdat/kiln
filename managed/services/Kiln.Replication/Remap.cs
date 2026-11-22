@@ -23,6 +23,9 @@ internal static unsafe class ItemRemap
     private static uint[] _lastPeers = [uint.MaxValue];
     private static ReplNetNative.ItemSite[]? _siteCache;
 
+    /// <summary>A selector's peers as ids: [] (every peer) becomes every machine's peer; [0] (none) becomes none. RED STUB.</summary>
+    internal static uint[] ExpandAll(uint[] picked, uint[] machinePeers) => picked;
+
     /// <summary>Kiln's own rule plus the mods' (RemapItems).</summary>
     internal static IDisposable AddSelector(PeerSelector peers)
     {
@@ -41,7 +44,8 @@ internal static unsafe class ItemRemap
         var s = new ReplNetNative.RemapStats { Size = (uint)sizeof(ReplNetNative.RemapStats) };
         var t = ReplNetNative.T;
         if (t != null) t->RemapStatsFn(&s);
-        return new ReplRemapStats(_active, _sites, _kilnOnly, _withoutLook, (long)s.Snapshots, (long)s.Remapped, (long)s.Zeroed, (long)s.Faults);
+        return new ReplRemapStats(_active && s.Running != 0, _sites, _kilnOnly, _withoutLook, (long)s.Snapshots, (long)s.Remapped, (long)s.Zeroed,
+            (long)s.Faults);
     }
 
     /// <summary>Started with the filters' service tick (ReplicationStartup starts it on servers and hosts).</summary>
@@ -52,12 +56,65 @@ internal static unsafe class ItemRemap
         FilterHost.EnsureTick();
     }
 
+    // The remap works: its table is in and kiln.repl.net says it runs (its hook in when needed, never faulted, every remapped
+    // state placed or blanked). Read every step.
+    private static bool _running = true;
+    private static uint _reason;
+    private static bool Working => _active && _running;
+    private static readonly HashSet<uint> Kicked = [];
+
+    private static readonly string[] Reasons =
+        ["", "the game refused Kiln's snapshot hook", "the snapshot step faulted", "a state could not be placed or blanked", "this game build has no remap"];
+
+    // Review must 2 (fail closed): when the remap stops while Kiln-only items exist, players without Kiln never get them
+    // raw. New joins follow vanillaWithoutRemap (the admission rule); under "refuse" connected vanilla players are
+    // disconnected with a reason, under "allow" they stay (kiln.repl.net blanks what it cannot remap, or it stopped).
+    private static void Watch(ReplNetNative.Table* t)
+    {
+        var s = new ReplNetNative.RemapStats { Size = (uint)sizeof(ReplNetNative.RemapStats) };
+        if (t->RemapStatsFn(&s) != ReplNative.Ok) return;
+        var running = s.Running != 0;
+        if (running == _running && s.Reason == _reason) return;
+        _running = running;
+        _reason = s.Reason;
+        if (running)
+        {
+            Kicked.Clear();
+            ReplNetLog.Info("repl: item remap works again");
+            return;
+        }
+        var why = s.Reason < Reasons.Length ? Reasons[s.Reason] : $"reason {s.Reason}";
+        ReplNetLog.Warn($"repl: item remap stopped ({why}): clients without Kiln are {(AllowWithoutRemap() ? "kept (vanillaWithoutRemap allow)" : "refused and disconnected")}");
+    }
+
+    private static void KickVanilla()
+    {
+        if (Working || _kilnOnly == 0 || !_active || AllowWithoutRemap()) return;
+        IReadOnlyList<NetPeer> peers;
+        try
+        {
+            peers = Network.Peers;
+        }
+        catch (Exception)
+        {
+            return;
+        }
+        foreach (var p in peers)
+        {
+            if (!Peers.Vanilla.Matches(p) || !Kicked.Add(p.Id)) continue;
+            ReplNetLog.Warn($"repl: disconnecting {p.Name} (0x{p.Id:x}): this server has items only Kiln has and cannot hide them from clients without Kiln right now");
+            _ = Network.Kick(p, "This server has items only Kiln has and cannot hide them from your game right now. Join with Kiln.");
+        }
+    }
+
     /// <summary>Every step (tick thread): the table every 2 s (content can grow at any time), the peers every step.</summary>
     internal static void Tick()
     {
         if (!_required) Require();  // also when the remap cannot run: then it refuses (a no-op where nobody joins)
         var t = ReplNetNative.T;
         if (_tick++ % 120 == 0) RefreshTable(t);
+        if (t != null && _active) Watch(t);
+        KickVanilla();
         if (!_active || t == null) return;
         // peers: Kiln's rule and the mods'
         List<PeerSelector> selectors;
@@ -78,13 +135,19 @@ internal static unsafe class ItemRemap
         _required = true;
         try
         {
-            _admission = NetAdmission.Require("repl.itemremap", static () => _kilnOnly == 0 || _active || AllowWithoutRemap(),
+            _admission = NetAdmission.Require("repl.itemremap", static () => _kilnOnly == 0 || Working || AllowWithoutRemap(),
                 "this server has items only Kiln has and cannot hide them from clients without Kiln");
         }
         catch (Exception e)
         {
             ReplNetLog.Warn($"repl: the item remap could not register its admission rule: {e.Message}");
         }
+    }
+
+    private static bool ReadInstalled(ReplNetNative.Table* t)
+    {
+        var s = new ReplNetNative.RemapStats { Size = (uint)sizeof(ReplNetNative.RemapStats) };
+        return t->RemapStatsFn(&s) == ReplNative.Ok && s.Sites > 0;
     }
 
     // kiln/config/replication.json {"vanillaWithoutRemap": "refuse" | "allow"}: what happens to a client without Kiln while
@@ -190,9 +253,10 @@ internal static unsafe class ItemRemap
         fixed (uint* g = gameIds)
         fixed (ReplNetNative.ItemMap* m = mapArr)
             rc = t->RemapSet(s, (uint)sites.Length, g, (uint)gameIds.Length, m, (uint)mapArr.Length);
-        _active = rc == ReplNative.Ok;
+        // the table is in (OK, or UNAVAILABLE = installed but the remap does not run now: Watch reads why); not refused
+        _active = rc is ReplNative.Ok or ReplNative.Unavailable && t->RemapStatsFn != null && ReadInstalled(t);
         _tableKey = _active ? key : 0;
-        if (rc == ReplNative.Unavailable) return;  // no server world here (a game client that does not host)
+        if (!_active && rc == ReplNative.Unavailable) return;  // no server world here (a game client that does not host)
         _sites = sites.Length;
         _withoutLook = without;
         _lastPeers = [uint.MaxValue];  // the peers go again with the new table

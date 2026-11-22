@@ -367,7 +367,19 @@ typedef struct KilnReplRemapStats {
     uint64_t remapped;             /* ids replaced by their look-alike */
     uint64_t zeroed;               /* ids replaced by 0 (no look-alike, or neither a game item nor mapped) */
     uint64_t faults;               /* remap faults (every site of that component was zeroed) */
+    uint64_t blanked;              /* states that could not be placed and were blanked for a remapped peer (all data 0) */
+    uint32_t running;              /* 1: the remap works now (its hook is in when needed, it never faulted outside a
+                                    * component, every state was placed or blanked); 0: see reason */
+    uint32_t reason;               /* KILN_REPL_REMAP_* */
 } KilnReplRemapStats;
+/* KilnReplRemapStats.reason */
+enum {
+    KILN_REPL_REMAP_OK = 0,
+    KILN_REPL_REMAP_HOOK_REFUSED = 1, /* kiln.hooks refused the snapshot hook while a peer needed the remap */
+    KILN_REPL_REMAP_FAULTED = 2,      /* the snapshot step faulted outside a component's own guard */
+    KILN_REPL_REMAP_UNPLACED = 3,     /* a remapped peer's state could neither be placed nor blanked */
+    KILN_REPL_REMAP_OFF = 4,          /* repl.filter is off on this build */
+};
 
 /* ---- message hooks ---- */
 enum { KILN_REPL_PASS = 0, KILN_REPL_DROP = 1, KILN_REPL_REWRITE = 2 };
@@ -432,7 +444,8 @@ typedef struct KilnReplNetApi {
 
     /* The item remap. Replaces the whole table: item-id sites, the game's own item ids (game_ids, sorted), and the
      * Kiln-only ids' look-alikes (map, sorted by from). For a remapped peer every id at a site that is not a game
-     * item becomes its look-alike or 0. Touches what changes. Tick thread. */
+     * item becomes its look-alike or 0. Touches what changes. Tick thread. KILN_ERR_UNAVAILABLE also when the remap
+     * does not work now (remap_stats' running and reason say why): it fails closed and never reports otherwise. */
     KilnResult(KILN_CALL* remap_set)(const KilnReplItemSite* sites, uint32_t site_count, const uint32_t* game_ids,
                                      uint32_t game_id_count, const KilnReplItemMap* map, uint32_t map_count);
     /* The peers the remap applies to (vanilla peers, Kiln peers without the content); touches what changes. Tick thread. */
@@ -468,7 +481,7 @@ static_assert(sizeof(KilnReplTrackEvent) == 16, "KilnReplTrackEvent is 16 bytes"
 static_assert(sizeof(KilnReplPeerEntity) == 12, "KilnReplPeerEntity is 12 bytes");
 static_assert(sizeof(KilnReplFilterCtx) == 40 && offsetof(KilnReplFilterCtx, read) == 24, "KilnReplFilterCtx is 40 bytes");
 static_assert(sizeof(KilnReplItemSite) == 12 && sizeof(KilnReplItemMap) == 8, "remap records");
-static_assert(sizeof(KilnReplRemapStats) == 40, "KilnReplRemapStats is 40 bytes");
+static_assert(sizeof(KilnReplRemapStats) == 56, "KilnReplRemapStats is 56 bytes");
 static_assert(sizeof(KilnReplMessage) == 48 && offsetof(KilnReplMessage, data) == 16 && offsetof(KilnReplMessage, rewrite_length) == 40,
               "KilnReplMessage is 48 bytes");
 static_assert(sizeof(KilnReplSchemaField) == 48, "KilnReplSchemaField is 48 bytes");

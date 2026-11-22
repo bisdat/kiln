@@ -96,4 +96,37 @@ inline bool call_filter(KilnReplFilterFn fn, uint8_t* scratch, uint32_t size, Ki
     return failed == 0;
 }
 
+
+// Fails closed for a remapped peer when a state cannot be placed (StateIndex faulted): every byte of the state's
+// component data (after the header, list 1 and the whole-set part) becomes 0; the lists stay intact so the client still
+// reads a well-formed state. false when even that walk is malformed (the caller then reports the remap broken).
+template <class Versioned>
+inline bool blank_state(uint8_t* s, uint32_t reg_count, Versioned&& versioned) {
+    uint16_t total, count;
+    std::memcpy(&total, s, 2);
+    std::memcpy(&count, s + 2, 2);
+    uint32_t o = 8;
+    for (uint32_t k = 0; k < count; ++k) {
+        if (o + 2 > total) return false;
+        uint16_t i;
+        std::memcpy(&i, s + o, 2);
+        o += 2;
+        if (i >= reg_count) return false;
+        if (versioned(i)) o += 1;
+    }
+    if (o + 1 > total) return false;
+    const uint8_t form = s[o++];
+    if (form == 0) {
+        if (o + 1 > total) return false;
+        o += 1 + 2u * s[o];
+    } else if (form == 1) {
+        o += 80;
+    } else {
+        return false;
+    }
+    if (o > total) return false;
+    std::memset(s + o, 0, total - o);
+    return true;
+}
+
 }  // namespace repl

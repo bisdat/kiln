@@ -29,6 +29,9 @@ RemapCounters g_remap_counters;
 
 namespace {
 
+std::atomic<uint32_t> g_stopped{0};      // KILN_REPL_REMAP_FAULTED / _UNPLACED (first wins; cleared at world stop)
+std::atomic<bool> g_hook_refused{false};
+
 constexpr uint32_t kMaxSites = 4096, kMaxMap = 65536, kMaxGameIds = 1u << 20;
 
 const RemapTable* g_table = nullptr;           // tick thread
@@ -74,6 +77,18 @@ void touch_sites(const RemapTable* t, uint32_t machines) {
 }
 
 }  // namespace
+
+void remap_set_stopped(uint32_t reason) {
+    uint32_t none = 0;
+    g_stopped.compare_exchange_strong(none, reason, std::memory_order_acq_rel);
+}
+void remap_hook_refused(bool refused) { g_hook_refused.store(refused, std::memory_order_release); }
+uint32_t remap_reason() {
+    if (!(filter_caps() & KILN_REPL_NET_CAP_REMAP)) return KILN_REPL_REMAP_OFF;
+    if (g_hook_refused.load(std::memory_order_acquire)) return KILN_REPL_REMAP_HOOK_REFUSED;
+    return g_stopped.load(std::memory_order_acquire);
+}
+void remap_world_stopping() { g_stopped.store(0, std::memory_order_release); }
 
 const RemapTable* remap_table() { return g_table; }
 uint32_t remap_machines() { return g_table ? g_machines : 0; }
@@ -177,7 +192,8 @@ KilnResult KILN_CALL t_remap_set(const KilnReplItemSite* sites, uint32_t site_co
     touch_sites(t, g_machines);
     logf(KILN_LOG_INFO, "repl: remap table: %u sites (%u of components this world lacks), %u game items, %u Kiln-only items mapped",
          t->site_count, unknown, game_id_count, map_count);
-    return KILN_OK;
+    filter_pre(0);  // the hot set (and the hook, when a peer needs it) now, so the answer says whether the remap works
+    return remap_reason() == KILN_REPL_REMAP_OK ? KILN_OK : KILN_ERR_UNAVAILABLE;
 }
 
 KilnResult KILN_CALL t_remap_peers(const uint32_t* peers, uint32_t peer_count) {
@@ -192,16 +208,21 @@ KilnResult KILN_CALL t_remap_peers(const uint32_t* peers, uint32_t peer_count) {
 }
 
 KilnResult KILN_CALL t_remap_stats(KilnReplRemapStats* out) {
-    if (!out || out->size < sizeof(KilnReplRemapStats)) return KILN_ERR_INVALID_ARGUMENT;
+    if (!out || out->size < offsetof(KilnReplRemapStats, blanked)) return KILN_ERR_INVALID_ARGUMENT;  // a 40-byte caller gets the counters
     if (!(filter_caps() & KILN_REPL_NET_CAP_REMAP)) return KILN_ERR_UNAVAILABLE;
     const uint32_t size = out->size;
-    std::memset(out, 0, sizeof *out);
+    std::memset(out, 0, size < sizeof *out ? size : sizeof *out);
     out->size = size;
     out->sites = g_table ? g_table->site_count : 0;
     out->snapshots = g_remap_counters.snapshots.load(std::memory_order_relaxed);
     out->remapped = g_remap_counters.remapped.load(std::memory_order_relaxed);
     out->zeroed = g_remap_counters.zeroed.load(std::memory_order_relaxed);
     out->faults = g_remap_counters.faults.load(std::memory_order_relaxed);
+    if (size >= sizeof(KilnReplRemapStats)) {
+        out->blanked = g_remap_counters.blanked.load(std::memory_order_relaxed);
+        out->reason = remap_reason();
+        out->running = out->reason == KILN_REPL_REMAP_OK ? 1u : 0u;
+    }
     return KILN_OK;
 }
 

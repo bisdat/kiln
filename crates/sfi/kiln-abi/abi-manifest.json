@@ -5280,14 +5280,17 @@
         "KilnReplRemapStats": {
           "align": 8,
           "fields": {
+            "blanked": 40,
             "faults": 32,
+            "reason": 52,
             "remapped": 16,
+            "running": 48,
             "sites": 4,
             "size": 0,
             "snapshots": 8,
             "zeroed": 24
           },
-          "size": 40
+          "size": 56
         },
         "KilnReplSchemaField": {
           "align": 8,
@@ -5339,7 +5342,7 @@
           "size": 48
         }
       },
-      "sha256": "bd437d4323c04c46215316eabd9e9260f056d537864c699237014019bcf38df6"
+      "sha256": "87839438feb188d9d6be1d030cface56b08e1956867aaf87aadf5eafbc9e1ebb"
     },
     "native/core/abi/services/kiln_routines.h": {
       "function_macros": [],
@@ -8772,7 +8775,7 @@
   },
   "outputs": {
     "src/bindings.rs": "134028a6a9914076cab3f71f98d356141d4fe36c4d7f51bac6a11819501ed935",
-    "src/layout.rs": "31ad4255a0033cba06758d8cb13911b8727f739d71f14386705016dde2e8f24e",
+    "src/layout.rs": "a3fcc459746df5639b4d35b14a49d59421a166ab46c8da524e53d16de995e875",
     "src/services/kiln_abilities.rs": "06a43042e5c96d6261a17b02eab35463b07a8ad83f63b2bb168bca5ff34e582e",
     "src/services/kiln_assets.rs": "e7fe4eb1c4d53ad31eeaf05be06f41c551a49362ad5bd4174465ec18a03effe0",
     "src/services/kiln_assets_vfx.rs": "90ed8ce5ad512bbf4f002db3277bc3b439d648ca437a58d4477eac4ce46c3b81",
@@ -8815,7 +8818,7 @@
     "src/services/kiln_queries.rs": "c4888b701b298033d8b9ad525a22b3eba46ceec57a77f900fa1d0ff9002ace19",
     "src/services/kiln_registry.rs": "034e3e2035ab96e710860efd46b427b4c555d99916c7e8ae36ba8b36a250bd48",
     "src/services/kiln_render.rs": "f0ecd0d1c1af455626438c8e0c40244b07621ce63cfc707856ee158716d54fd0",
-    "src/services/kiln_repl.rs": "4a1fd000ce347302e21a55e5773763effc9ab5e1114382146193f58b5cc8c97f",
+    "src/services/kiln_repl.rs": "abe4377186c93758841dfec1aefc993c0ee73a33212e3834fe7593c90350b07a",
     "src/services/kiln_routines.rs": "c8465a921ab6157d0e176802cfb3e6fa09c2ea2ecd23220ef2643309561b148b",
     "src/services/kiln_rules.rs": "074b85bf024b8c53bfa21e7744ff4005fe6ebfa78c7aa5ccb3bc077cff3bc37b",
     "src/services/kiln_saves.rs": "0922e2870dc677c62608ab13147e609e5ea9d5109c34ea271e2e569874a1576b",

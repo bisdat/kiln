@@ -64,7 +64,8 @@ internal static unsafe class ReplNetNative
     public struct RemapStats
     {
         public uint Size, Sites;
-        public ulong Snapshots, Remapped, Zeroed, Faults;
+        public ulong Snapshots, Remapped, Zeroed, Faults, Blanked;
+        public uint Running, Reason;
     }
 
     /// <summary>KilnReplMessage (48 bytes).</summary>

@@ -3752,7 +3752,7 @@ const _: () = {
     assert!(core::mem::align_of::<crate::services::kiln_repl::KilnReplItemMap>() == 4);
     assert!(core::mem::offset_of!(crate::services::kiln_repl::KilnReplItemMap, from) == 0);
     assert!(core::mem::offset_of!(crate::services::kiln_repl::KilnReplItemMap, to) == 4);
-    assert!(core::mem::size_of::<crate::services::kiln_repl::KilnReplRemapStats>() == 40);
+    assert!(core::mem::size_of::<crate::services::kiln_repl::KilnReplRemapStats>() == 56);
     assert!(core::mem::align_of::<crate::services::kiln_repl::KilnReplRemapStats>() == 8);
     assert!(core::mem::offset_of!(crate::services::kiln_repl::KilnReplRemapStats, size) == 0);
     assert!(core::mem::offset_of!(crate::services::kiln_repl::KilnReplRemapStats, sites) == 4);
@@ -3760,6 +3760,9 @@ const _: () = {
     assert!(core::mem::offset_of!(crate::services::kiln_repl::KilnReplRemapStats, remapped) == 16);
     assert!(core::mem::offset_of!(crate::services::kiln_repl::KilnReplRemapStats, zeroed) == 24);
     assert!(core::mem::offset_of!(crate::services::kiln_repl::KilnReplRemapStats, faults) == 32);
+    assert!(core::mem::offset_of!(crate::services::kiln_repl::KilnReplRemapStats, blanked) == 40);
+    assert!(core::mem::offset_of!(crate::services::kiln_repl::KilnReplRemapStats, running) == 48);
+    assert!(core::mem::offset_of!(crate::services::kiln_repl::KilnReplRemapStats, reason) == 52);
     assert!(core::mem::size_of::<crate::services::kiln_repl::KilnReplMessage>() == 48);
     assert!(core::mem::align_of::<crate::services::kiln_repl::KilnReplMessage>() == 8);
     assert!(core::mem::offset_of!(crate::services::kiln_repl::KilnReplMessage, size) == 0);
