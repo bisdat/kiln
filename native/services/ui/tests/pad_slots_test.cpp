@@ -73,6 +73,17 @@ int main() {
         p.update(0, pad(0, 0, 0x0001));  // pad 0's d-pad up
         CHECK(p.active() == 0 && p.followed().buttons == 0x0001);
     }
+    // a pad pulled out while tilted: its failed poll clears it, nothing stays held
+    {
+        PadSlots p;
+        p.update(0, pad(0, 30000, 0x1000));
+        p.clear(0);
+        CHECK(p.followed().ly == 0 && p.followed().buttons == 0);
+        // a reset (capture ends) forgets everything
+        p.update(1, pad(0, -30000));
+        p.reset();
+        CHECK(!p.seen() && p.followed().ly == 0);
+    }
     // nothing before the first poll; users past 3 are ignored
     {
         PadSlots p;

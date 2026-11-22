@@ -51,6 +51,13 @@ public:
         seen_[user] = true;
         if (active_ < 0 || (changed && !idle(s))) active_ = static_cast<int>(user);
     }
+    /** `user`'s poll failed (unplugged, or no pad there): its slot goes idle, so a pad pulled out while tilted or
+     *  holding a button leaves nothing held behind. */
+    void clear(unsigned user) {
+        if (user >= 4) return;
+        pads_[user] = PadState{};
+        seen_[user] = false;
+    }
     /** The followed pad's state (idle before any poll). */
     PadState followed() const { return active_ < 0 ? PadState{} : pads_[active_]; }
     bool seen() const { return active_ >= 0; }

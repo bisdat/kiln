@@ -935,7 +935,15 @@ void synth_escape() {
 
 DWORD WINAPI hk_xinput_get_state(DWORD user, XState* st) {
     const DWORD r = g_xinput_hook.call<DWORD>(user, st);
-    if (r != ERROR_SUCCESS || !st || user >= 4) return r;
+    if (user >= 4) return r;
+    if (r != ERROR_SUCCESS || !st) {
+        // unplugged (or no pad there): nothing of it may stay held in Kiln's screens
+        if (capturing()) {
+            std::lock_guard<std::mutex> lk(g_pad_mu);
+            g_pads.clear(user);
+        }
+        return r;
+    }
     if (!capturing()) {
         g_pad_prev[user] = st->pad.buttons;
         return r;
@@ -1261,6 +1269,9 @@ void input_capture_changed() {
         if (!cap) {
             io.ClearInputKeys();
             g_pad_fed_any = false;
+            // the next screen starts from what the pads do then, not from the press that closed this one
+            std::lock_guard<std::mutex> lk(g_pad_mu);
+            g_pads.reset();
         }
     }
     if (g_real_clip_cursor) {
