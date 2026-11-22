@@ -8,6 +8,7 @@ import { Banner, Button, KeyValue } from "../../ui";
 import { StepChart, useTicks } from "../ticks";
 import { ServerConsole } from "./ServerConsole";
 import { hasKiln, runnerLabel, sk, useDeployDialog, useServer, useServerStatus } from "./serverApi";
+import { useServerFlow } from "./serverActions";
 import { useT } from "../../i18n";
 
 export default function ServerOverviewPage() {
@@ -23,12 +24,14 @@ export default function ServerOverviewPage() {
   const T: Record<string, string> = { tcp: "KAP/1 TCP", file: t("servers.overview.fileBridge"), ssh: t("servers.overview.sshTunnel") };
   const showDeploy = useDeployDialog((d) => d.show);
   const noKiln = !!status && !hasKiln(s, status);
+  const flow = useServerFlow(id);
+  const busy = flow?.state === "running" || status?.state === "starting" || status?.state === "stopping";
   return (
     <>
       {noKiln && (
         <Banner tone="idle" title={t("servers.overview.noKiln")}
-          actions={<Button size="s" disabled={!!status?.pid} onClick={() => showDeploy(true)}>{t("servers.head.installKiln")}</Button>}>
-          {status?.pid ? t("servers.overview.stopToInstall") : null}
+          actions={<Button size="s" disabled={busy} onClick={() => showDeploy(true)}>{t("servers.head.installKiln")}</Button>}>
+          {status?.pid ? t("servers.activity.installStopsFirst") : null}
         </Banner>
       )}
       <div className="k-overview">

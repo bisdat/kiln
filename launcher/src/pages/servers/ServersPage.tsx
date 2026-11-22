@@ -1,14 +1,15 @@
 // /servers: every dedicated server the launcher knows, one line each: kilnctl instances, Steam installs, Windows and
 // remote servers. New server (SteamCMD install, optionally reflinked from another install) and import.
 import { useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState, type MouseEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import * as api from "../../api/commands";
 import {
-  Button, EmptyState, Field, Modal, NameId, NumberInput, Page, PageHeader, PathPicker, Select, Skeleton, Table,
+  Button, EmptyState, Field, Spinner, Modal, NameId, NumberInput, Page, PageHeader, PathPicker, Select, Skeleton, Table,
   TextInput, Toggle, errorText, runTask, toast, type Column,
 } from "../../ui";
 import { runnerLabel, sk, useServerEvents, useServers, useServerStatus, type ServerInstanceX, type ServerSpecX } from "./serverApi";
+import { elapsed, runFlow, useServerFlow } from "./serverActions";
 import { useT } from "../../i18n";
 
 /** Windows (WebView2): path examples in Windows form. */
@@ -17,12 +18,59 @@ const WIN = /Windows/i.test(navigator.userAgent);
 function StateCell({ id }: { id: string }) {
   const t = useT();
   const st = useServerStatus(id);
+  const flow = useServerFlow(id);
+  const [, tick] = useState(0);
+  const running = flow?.state === "running";
+  useEffect(() => {
+    if (!running) return;
+    const h = setInterval(() => tick((n) => n + 1), 1000);
+    return () => clearInterval(h);
+  }, [running]);
+  if (running && flow) {
+    const step = flow.steps.find((s) => s.state === "running");
+    const line = step?.lines[step.lines.length - 1]?.text;
+    return (
+      <span className="k-sact-cell" title={line ?? flow.title}>
+        <Spinner size={14} />
+        <span className="k-ellipsis">{step?.label ?? flow.title}</span>
+        <span className="k-mono k-muted">{elapsed(Date.now() - flow.startedAt)}</span>
+      </span>
+    );
+  }
   const state = st.data?.state;
+  // a failed action: the server's own state, and a marker naming the failure
+  const failed = flow?.state === "failed" ? (
+    <span className="k-badge k-tone-err" title={flow.error?.message ?? ""} aria-label={t("servers.activity.failedMarker", { reason: flow.error?.message ?? "" })}>!</span>
+  ) : null;
   const tone = state === "running" ? "ok" : state === "starting" || state === "stopping" ? "warn" : "idle";
   const word = state === "running" ? t("servers.list.running") : state === "starting" ? t("servers.list.starting") : state === "stopping" ? t("servers.list.stopping")
     : state === "stopped" ? t("servers.list.stopped") : state ? state.charAt(0).toUpperCase() + state.slice(1) : "…";
-  return <span className={`k-badge k-tone-${tone}`}>{word}</span>;
+  return <span className="k-sact-cell"><span className={`k-badge k-tone-${tone}`}>{word}</span>{failed}</span>;
 }
+/** Start or Stop from the list, with the same feedback as the server's page. */
+function ActionCell({ srv }: { srv: ServerInstanceX }) {
+  const t = useT();
+  const qc = useQueryClient();
+  const st = useServerStatus(srv.id);
+  const flow = useServerFlow(srv.id);
+  const state = st.data?.state;
+  const busy = flow?.state === "running" || state === "starting" || state === "stopping";
+  const name = srv.name;
+  const up = state === "running";
+  const go = (e: MouseEvent) => {
+    e.stopPropagation();
+    void (up
+      ? runFlow(qc, srv.id, { kind: "stop", title: t("servers.activity.stopTitle", { name }), steps: [{ key: "stop", label: t("servers.activity.stepStop"), run: () => api.serverStop(srv.id), phase: "stopping" }], done: t("servers.head.stoppedToast") })
+      : runFlow(qc, srv.id, { kind: "start", title: t("servers.activity.startTitle", { name }), steps: [{ key: "start", label: t("servers.activity.stepStart"), run: () => api.serverStart(srv.id), phase: "starting", cancel: "stopWaiting" }], done: t("servers.head.runningToast") }));
+  };
+  if (!st.data) return null;
+  return (
+    <Button size="s" variant={up ? "ghost" : "primary"} disabled={busy} onClick={go} aria-label={(up ? t("servers.head.stop") : t("servers.head.start")) + " " + name}>
+      {up ? t("servers.head.stop") : t("servers.head.start")}
+    </Button>
+  );
+}
+
 function PlayersCell({ id }: { id: string }) {
   const st = useServerStatus(id);
   return <span className="k-mono">{st.data?.players ?? "-"}</span>;
@@ -129,7 +177,8 @@ export default function ServersPage() {
     { key: "port", header: t("servers.list.portCol"), width: "90px", align: "right", render: (s) => <span className="k-mono">{s.queryPort}</span> },
     { key: "players", header: t("servers.list.online"), width: "64px", align: "right", render: (s) => <PlayersCell id={s.id} /> },
     { key: "kiln", header: "Kiln", width: "minmax(0, 150px)", render: (s) => <KilnCell id={s.id} /> },
-    { key: "state", header: t("servers.list.state"), width: "86px", render: (s) => <StateCell id={s.id} /> },
+    { key: "state", header: t("servers.list.state"), width: "minmax(0, 220px)", render: (s) => <StateCell id={s.id} /> },
+    { key: "act", header: "", width: "96px", align: "right", render: (s) => <ActionCell srv={s} /> },
   ];
   const say = q.isLoading ? t("servers.list.reading") : q.error ? errorText(q.error) : !list.length ? t("servers.list.noneYet") : t("servers.list.count", { count: list.length });
   return (

@@ -1125,6 +1125,8 @@ const runningServer: ServerStatus = {
   boot: { ...(bootExample as unknown as BootJson), side: "server" }, endpoint: endpointExample as unknown as AdminEndpoint,
 };
 let serverStatus: ServerStatus = runningServer;
+/** Each server_start's number; a stop moves it on, so a start it interrupted fails as the real one does. */
+let serverStartSeq = 0;
 /** Tests (`__kilnMock.setServer`): the lab server stopped and with or without Kiln in its folder, or back to running. */
 function mockSetServer(o: { running?: boolean; installed?: string | null }) {
   const installed = o.installed === undefined ? runningServer.installed : o.installed;
@@ -1775,6 +1777,47 @@ const handlers: Record<string, Handler> = {
       const receipt: InstallReceipt = { ...baseReceipt, side: "server", installed: now(), runtime: { version: b.version, sha256: b.sha256, components: resolveParts(b, "server", null), deselected: [] } };
       return { ...receipt, changedBackedUp: [], backup: null } satisfies InstallResult;
     });
+  },
+  // a start, stop, restart and game update with the real tasks' progress lines (kiln_manage::server::run)
+  server_start: () => {
+    if (serverStatus.pid) reject("conflict", `${server.id} is running already (pid ${serverStatus.pid})`);
+    const mine = ++serverStartSeq;
+    // the status says starting once the process is there (the real status reads the pid), not at the click
+    setTimeout(() => {
+      if (mine !== serverStartSeq || serverStatus.pid) return;
+      serverStatus = { ...serverStatus, state: "starting", pid: 5121, uptimeS: 0 };
+      mockEmit("kiln://server", { serverId: server.id, status: serverStatus });
+    }, 1500);
+    return startTask("server_start", `Starting ${server.id}`, [
+      `started GE-Proton10-3 ./enshrouded_server.exe (wine pid 5121), output in /home/player/.local/state/kiln/${server.id}.run.log`,
+      "[Session] 'HostOnline' (up)!", "[server] Loading world 'Lab' (seed 1847)", "[ecs] LoadEcsScene to Load", "[streaming] 812 of 1490 chunks",
+    ], () => {
+      // stopped while it started: the process is gone before its world ran (run::wait_ready)
+      if (mine !== serverStartSeq) reject("io", "the server exited before its world ran (exit code 0)");
+      serverStatus = { ...runningServer, pid: 5121, uptimeS: 0 };
+      mockEmit("kiln://server", { serverId: server.id, status: serverStatus });
+      return serverStatus;
+    }, 700);
+  },
+  server_stop: () => {
+    serverStartSeq++;
+    const p = serverStatus.pid;
+    serverStatus = { ...serverStatus, state: "stopping" };
+    mockEmit("kiln://server", { serverId: server.id, status: serverStatus });
+    return startTask("server_stop", `Stopping ${server.id}`, [`SIGINT -> pid ${p ?? "-"}; waiting up to 60 s for the save`, "waiting for wineserver"], () => {
+      serverStatus = { ...runningServer, state: "stopped", pid: null, uptimeS: null, players: null, kiln: null, boot: null, endpoint: null };
+      mockEmit("kiln://server", { serverId: server.id, status: serverStatus });
+      return serverStatus;
+    });
+  },
+  server_restart: () => startTask("server_restart", `Restarting ${server.id}`, ["SIGINT -> pid 5120; waiting up to 60 s for the save", "started GE-Proton10-3 ./enshrouded_server.exe (wine pid 5122)", "[ecs] LoadEcsScene to Load"], () => {
+    serverStatus = { ...runningServer, pid: 5122, uptimeS: 0 };
+    mockEmit("kiln://server", { serverId: server.id, status: serverStatus });
+    return serverStatus;
+  }),
+  server_update: () => {
+    if (serverStatus.pid) reject("conflict", "Stop the server before updating it.");
+    return startTask("server_update", `Updating ${server.id} (SteamCMD)`, ["Logging in to Steam anonymously", "Update state (0x61) downloading, progress: 42.10", "Success! App '2278520' fully installed."], () => ({ updated: true }));
   },
   admin_sessions: () => [],
   ...serverMockHandlers,
