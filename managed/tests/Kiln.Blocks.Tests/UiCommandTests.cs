@@ -521,6 +521,21 @@ public sealed class UiCommandTests : IDisposable
     }
 
     [Fact]
+    public void The_same_hello_again_keeps_counting_request_ids()
+    {
+        // review nit: only a new nonce starts the ids at 1 again; the same hello again must not reuse old ids
+        var c = NewClient();
+        _ = c.Execute("a", default);
+        c.OnHello(Nonce);
+        _ = c.Execute("b", default);
+        var ids = _out.OfType<UiCommandWire.Request>().Select(r => r.Id).ToList();
+        Assert.Equal(["1", "2"], ids);
+        c.OnHello("fedcba9876543210fedcba9876543210");
+        _ = c.Execute("c", default);
+        Assert.Equal("1", _out.OfType<UiCommandWire.Request>().Last().Id);
+    }
+
+    [Fact]
     public void A_cancel_before_the_send_sends_nothing()
     {
         var c = NewClient();

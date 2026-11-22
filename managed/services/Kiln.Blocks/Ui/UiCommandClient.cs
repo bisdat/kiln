@@ -71,8 +71,9 @@ internal sealed class UiCommandClient
         lock (_gate)
         {
             was = _nonce is not null;
+            // ids start at 1 for a new nonce only: the same hello again must not reuse ids the server has records of
+            if (_nonce != nonce) _nextId = 1;
             _nonce = nonce;
-            _nextId = 1;
         }
         if (!was) AvailabilityChanged(true);
     }
