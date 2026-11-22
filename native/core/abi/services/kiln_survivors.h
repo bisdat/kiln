@@ -44,6 +44,8 @@
  *
  * Docs: docs/kiln/services/survivors.md. Engine facts: dossier chapter 18, docs/re/quests.md. */
 #pragma once
+#include <stddef.h>
+
 #include "../kiln_api.h"
 
 #ifdef __cplusplus
@@ -204,4 +206,28 @@ static_assert(sizeof(KilnSurvivorProgress) == 192, "KilnSurvivorProgress layout"
 static_assert(sizeof(KilnSurvivorEvent) == 368, "KilnSurvivorEvent layout");
 static_assert(sizeof(KilnSurvivorsStatus) == 200, "KilnSurvivorsStatus layout");
 static_assert(sizeof(KilnSurvivorsApi) == 8 + 11 * sizeof(void*), "KilnSurvivorsApi layout");
+static_assert(offsetof(KilnSurvivorRequest, npc_id) == 8 && offsetof(KilnSurvivorRequest, authorization) == 16 &&
+                  offsetof(KilnSurvivorRequest, actor) == 24 && offsetof(KilnSurvivorRequest, bed) == 32 &&
+                  offsetof(KilnSurvivorRequest, base_id) == 40 && offsetof(KilnSurvivorRequest, position) == 56 &&
+                  offsetof(KilnSurvivorRequest, yaw_degrees) == 80,
+              "KilnSurvivorRequest field order");
+static_assert(offsetof(KilnSurvivorState, entity) == 8 && offsetof(KilnSurvivorState, summon_item) == 16 && offsetof(KilnSurvivorState, flags) == 24 &&
+                  offsetof(KilnSurvivorState, base_id) == 32 && offsetof(KilnSurvivorState, home) == 48 && offsetof(KilnSurvivorState, name) == 72,
+              "KilnSurvivorState field order");
+static_assert(offsetof(KilnSurvivorResult, request) == 8 && offsetof(KilnSurvivorResult, committed_effects) == 24 &&
+                  offsetof(KilnSurvivorResult, displaced_entity) == 32 && offsetof(KilnSurvivorResult, op) == 40 &&
+                  offsetof(KilnSurvivorResult, before) == 48 && offsetof(KilnSurvivorResult, after) == 216 && offsetof(KilnSurvivorResult, reason) == 384,
+              "KilnSurvivorResult field order");
+static_assert(offsetof(KilnSurvivorProgress, request) == 8 && offsetof(KilnSurvivorProgress, committed_effects) == 24 &&
+                  offsetof(KilnSurvivorProgress, reason) == 32,
+              "KilnSurvivorProgress field order");
+static_assert(offsetof(KilnSurvivorEvent, sequence) == 8 && offsetof(KilnSurvivorEvent, step) == 24 && offsetof(KilnSurvivorEvent, before) == 32 &&
+                  offsetof(KilnSurvivorEvent, after) == 200,
+              "KilnSurvivorEvent field order");
+static_assert(offsetof(KilnSurvivorsStatus, read) == 4 && offsetof(KilnSurvivorsStatus, pending) == 8 && offsetof(KilnSurvivorsStatus, submitted) == 16 &&
+                  offsetof(KilnSurvivorsStatus, detail) == 40,
+              "KilnSurvivorsStatus field order");
+static_assert(offsetof(KilnSurvivorsApi, status) == 8 && offsetof(KilnSurvivorsApi, base_at) == 8 + 6 * sizeof(void*) &&
+                  offsetof(KilnSurvivorsApi, events) == 8 + 10 * sizeof(void*),
+              "KilnSurvivorsApi member order");
 #endif
