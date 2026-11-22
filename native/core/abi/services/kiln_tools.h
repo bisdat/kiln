@@ -70,6 +70,78 @@ typedef struct KilnToolActionDef {
     void* user;
 } KilnToolActionDef;
 
+/* Declarative family values. Every pointer/string is copied before define_family returns. */
+#define KILN_TOOL_MAX_MATERIALS 64u
+#define KILN_TOOL_SHAPE_SPHERE 0u
+#define KILN_TOOL_MODE_NONE 0u
+#define KILN_TOOL_MODE_REMOVE 1u
+#define KILN_TOOL_MODE_ADD 2u
+#define KILN_TOOL_TERRAIN_ONLY 1u
+
+typedef struct KilnToolPoolMaterial {
+    uint32_t item;
+    uint32_t terrain_material;   /* 1..127; never a building cell */
+    uint32_t voxels_per_item;    /* 1..1000000 */
+    uint32_t reserved;
+} KilnToolPoolMaterial;
+typedef struct KilnToolBrush {
+    uint32_t item;
+    uint32_t shape;              /* KILN_TOOL_SHAPE_SPHERE */
+    double radius;              /* metres, finite 0.25..8 */
+} KilnToolBrush;
+typedef struct KilnToolFamilyAction {
+    uint32_t mode;               /* KILN_TOOL_MODE_* */
+    uint32_t program;            /* Kiln-owned, unique per tool/action */
+    uint8_t remove_cells[32];    /* removal only; terrain cells 1..127 */
+    uint32_t flags;              /* KILN_TOOL_TERRAIN_ONLY */
+    uint32_t reserved;
+} KilnToolFamilyAction;
+typedef struct KilnToolFamilyDef {
+    uint32_t size;
+    uint32_t tool;
+    uint32_t pool;
+    uint32_t reserved;
+    KilnToolFamilyAction primary;
+    KilnToolFamilyAction secondary;
+    KilnStr name;
+    KilnStr description;
+    const KilnToolPoolMaterial* materials;
+    uint32_t material_count;
+    uint32_t reserved2;
+    const KilnToolBrush* brushes;
+    uint32_t brush_count;
+    uint32_t reserved3;
+} KilnToolFamilyDef;
+typedef struct KilnToolMaterialRow {
+    uint32_t item;
+    uint32_t terrain_material;
+    uint32_t voxels_per_item;
+    uint32_t reserved;
+    uint64_t backpack;
+    uint64_t magic_chests;       /* connected game building stock, never ordinary chests */
+} KilnToolMaterialRow;
+/* Caller-owned, bounded snapshot. No pointer into game data or an internal/stack array escapes. */
+typedef struct KilnToolMaterialSnapshot {
+    uint32_t size;
+    uint32_t count;
+    uint64_t session;
+    uint64_t revision;
+    KilnEntity actor;
+    uint32_t tool;
+    uint32_t selected_item;      /* 0 when stale, out of pool or empty stock */
+    uint32_t selected_material;
+    KilnToolMaterialRow rows[64];
+} KilnToolMaterialSnapshot;
+typedef struct KilnToolPresentationStatus {
+    uint32_t size;
+    uint8_t picker;
+    uint8_t preview;
+    uint8_t brushes;
+    uint8_t identity;
+    uint32_t reason;             /* KILN_CAP_REASON_* */
+    uint32_t reserved;
+} KilnToolPresentationStatus;
+
 typedef struct KilnToolsApi {
     KilnServiceHeader header;    /* { sizeof(KilnToolsApi), KILN_TOOLS_VERSION } */
     /* Any thread. Set out->size first. */
@@ -80,6 +152,15 @@ typedef struct KilnToolsApi {
     /* Any thread. Closes admission. An already admitted callback remains pinned until it returns; the caller must
      * not free handler/user storage until its owning mod's unload barrier has drained. */
     KilnResult(KILN_CALL* unregister_action)(KilnOwner owner, KilnHandle handle);
+    /* Tick thread/before first tick. Publishes one immutable declarative family and its two policies. Copies all
+     * inputs. Refuses if the complete required engine path is unavailable. No partial publication or generic fallback. */
+    KilnResult(KILN_CALL* define_family)(KilnOwner owner, const KilnToolFamilyDef* definition, KilnHandle* out);
+    /* Tick thread/before first tick. Stops new family admissions; already pinned invocations finish safely. */
+    KilnResult(KILN_CALL* remove_family)(KilnOwner owner, KilnHandle handle);
+    /* Any thread; observation only, never payment/edit authority. Set out->size. Unavailable clears all values. */
+    KilnResult(KILN_CALL* material_snapshot)(KilnEntity actor, uint32_t tool, KilnToolMaterialSnapshot* out);
+    /* Any thread. Set out->size. Installed hooks do not imply an active session or available stock. */
+    KilnResult(KILN_CALL* presentation_status)(KilnToolPresentationStatus* out);
     /* Append new rows here. */
 } KilnToolsApi;
 #ifdef __cplusplus

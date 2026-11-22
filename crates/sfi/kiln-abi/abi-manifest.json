@@ -5961,15 +5961,109 @@
           },
           "size": 40
         },
+        "KilnToolBrush": {
+          "align": 8,
+          "fields": {
+            "item": 0,
+            "radius": 8,
+            "shape": 4
+          },
+          "size": 16
+        },
+        "KilnToolFamilyAction": {
+          "align": 4,
+          "fields": {
+            "flags": 40,
+            "mode": 0,
+            "program": 4,
+            "remove_cells": 8,
+            "reserved": 44
+          },
+          "size": 48
+        },
+        "KilnToolFamilyDef": {
+          "align": 8,
+          "fields": {
+            "brush_count": 168,
+            "brushes": 160,
+            "description": 128,
+            "material_count": 152,
+            "materials": 144,
+            "name": 112,
+            "pool": 8,
+            "primary": 16,
+            "reserved": 12,
+            "reserved2": 156,
+            "reserved3": 172,
+            "secondary": 64,
+            "size": 0,
+            "tool": 4
+          },
+          "size": 176
+        },
+        "KilnToolMaterialRow": {
+          "align": 8,
+          "fields": {
+            "backpack": 16,
+            "item": 0,
+            "magic_chests": 24,
+            "reserved": 12,
+            "terrain_material": 4,
+            "voxels_per_item": 8
+          },
+          "size": 32
+        },
+        "KilnToolMaterialSnapshot": {
+          "align": 8,
+          "fields": {
+            "actor": 24,
+            "count": 4,
+            "revision": 16,
+            "rows": 40,
+            "selected_item": 32,
+            "selected_material": 36,
+            "session": 8,
+            "size": 0,
+            "tool": 28
+          },
+          "size": 2088
+        },
+        "KilnToolPoolMaterial": {
+          "align": 4,
+          "fields": {
+            "item": 0,
+            "reserved": 12,
+            "terrain_material": 4,
+            "voxels_per_item": 8
+          },
+          "size": 16
+        },
+        "KilnToolPresentationStatus": {
+          "align": 4,
+          "fields": {
+            "brushes": 6,
+            "identity": 7,
+            "picker": 4,
+            "preview": 5,
+            "reason": 8,
+            "reserved": 12,
+            "size": 0
+          },
+          "size": 16
+        },
         "KilnToolsApi": {
           "align": 8,
           "fields": {
+            "define_family": 32,
             "header": 0,
+            "material_snapshot": 48,
+            "presentation_status": 56,
             "register_action": 16,
+            "remove_family": 40,
             "status": 8,
             "unregister_action": 24
           },
-          "size": 32
+          "size": 64
         },
         "KilnToolsStatus": {
           "align": 8,
@@ -5986,7 +6080,7 @@
           "size": 32
         }
       },
-      "sha256": "87d01b5317ebb5bb2f665a0883900224b3d7b2bd74c15e7135a8f8ea0921236e"
+      "sha256": "29cf7c677effd3630299b9131620f5c53eea648994850aae318d57a797ff581b"
     },
     "native/core/abi/services/kiln_toolwear.h": {
       "function_macros": [],
@@ -8262,7 +8356,7 @@
   },
   "outputs": {
     "src/bindings.rs": "134028a6a9914076cab3f71f98d356141d4fe36c4d7f51bac6a11819501ed935",
-    "src/layout.rs": "cc058d3f56d8a9f53235ef69c4846f6cf1f95b1d387fea16c10acd454ff5deb8",
+    "src/layout.rs": "306ba5190e8c4e5f9fa097b8f12a84e05cf7e1d596940df39ed6c41cf8cdd4c5",
     "src/services/kiln_abilities.rs": "06a43042e5c96d6261a17b02eab35463b07a8ad83f63b2bb168bca5ff34e582e",
     "src/services/kiln_assets.rs": "e7fe4eb1c4d53ad31eeaf05be06f41c551a49362ad5bd4174465ec18a03effe0",
     "src/services/kiln_assets_vfx.rs": "90ed8ce5ad512bbf4f002db3277bc3b439d648ca437a58d4477eac4ce46c3b81",
@@ -8313,7 +8407,7 @@
     "src/services/kiln_surfaces.rs": "d4d991aef0a14f4be7246227b95a0f34161ca23fe04561e9c94d6d2aba0db4a0",
     "src/services/kiln_tasks.rs": "da41943b4ac01aaa77cfb43091e8c209f0e55707c3a3105dd9070313750a6f79",
     "src/services/kiln_time.rs": "879eaed84cd42ab057cc5c6aa452aef7e0d6636205431e9ef54d1daf8dd4bf93",
-    "src/services/kiln_tools.rs": "2ab087990abf5b6956245b5da73942985c6882e1b427b6c21f88f2299e56c500",
+    "src/services/kiln_tools.rs": "ab2f114dadad690b229019d6b0ef74ff0e60d70478d7622c9b864d32ab358cc1",
     "src/services/kiln_toolwear.rs": "bfb7c79cc8ddea86236700983a4deac4d08826a8f4d3ac5648c2fc9e346dcbcb",
     "src/services/kiln_types.rs": "e6eaf5e97d0c284ec9fb98e78e9b2d3c1fb129d0cac1a899009730e2641942eb",
     "src/services/kiln_ui.rs": "4db7e7f14a1ec7cdef1281a947b4abfa968686f070696e45c9a2f0a3a1127e09",
