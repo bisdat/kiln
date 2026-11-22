@@ -394,6 +394,20 @@ typedef struct KilnStationsStatus {
 
 typedef struct KilnStationCollect KilnStationCollect;
 
+/* Player-specific linked storage (since 0.2.0-dev.30.6). The mod chooses the containers; the server enforces the
+ * player's own CanAccessInventories permission and a readable initialized container, not membership of a base.
+ * order: 0 before station outputs, 1 after. filter: 0 deny set, 1 allow set. Empty deny set allows every item.
+ * items is copied at registration; no callbacks run during native payment. All reserved fields must be zero. */
+typedef struct KilnCraftSourceRequest {
+    uint32_t size;
+    KilnEntity player;
+    KilnEntity container;
+    uint32_t order;
+    uint32_t filter;
+    uint32_t item_count;
+    const KilnItemId* items;
+} KilnCraftSourceRequest;
+
 typedef struct KilnStationsApi {
     KilnServiceHeader header; /* { sizeof(KilnStationsApi), KILN_STATIONS_VERSION } */
 
@@ -483,6 +497,19 @@ typedef struct KilnStationsApi {
      * materials and that no answer names: at most KILN_STATIONS_MAX_FILL_KEYS, oldest first. They stay until an answer
      * names them or the snapshot goes. Any thread. KILN_ERR_BUFFER_TOO_SMALL: *out_count = needed. */
     KilnResult(KILN_CALL* fill_asks)(KilnStationFillKey* out, uint32_t capacity, uint32_t* out_count);
+    /* ---- player crafting sources, since 0.2.0-dev.30.6; capability crafting.sources ---- */
+    /* Tick thread, server world. Rejects non-containers, players/NPCs and inventory links without a container setup.
+     * Up to 4096 registrations and 65536 filter items per registration. Returns an owner-bound disposable handle.
+     * Registrations are session-only: after restart the mod must register them again. */
+    KilnResult(KILN_CALL* add_source)(KilnOwner owner, const KilnCraftSourceRequest* request, uint64_t* out_handle);
+    /* Any thread. NOT_FOUND for a removed handle or another owner's handle. In-flight payments may finish. */
+    KilnResult(KILN_CALL* remove_source)(KilnOwner owner, uint64_t handle);
+    /* Any thread: remove this owner's registrations (also called by kiln.items.cancel_owner). */
+    void(KILN_CALL* cancel_sources)(KilnOwner owner);
+    /* Tick thread: the registered sources' filtered extra counts, beyond the bag, current base stock and opted-in
+     * station outputs. No base required. Access is checked again, never inferred from a client's message.
+     * BUFFER_TOO_SMALL reports the whole needed count: never send a truncated crafting snapshot. */
+    KilnResult(KILN_CALL* source_stock)(KilnEntity player, KilnStationStack* out, uint32_t capacity, uint32_t* out_count);
 } KilnStationsApi;
 
 /* KilnStationCollect.flags. Bits 16 and up, so a result's flags never read as a request flag (KILN_STATION_DRY_RUN). */

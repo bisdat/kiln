@@ -1467,6 +1467,7 @@ void KILN_CALL t_cancel_owner(KilnOwner owner) {
     pide_rarity_rolls(owner, nullptr, 0, 0);  // v8 (P5): the owner's rarity rolls
     // Draining a running transfer callback must not hold the request mutex: that callback may queue a request.
     xfer_end_owner(owner);
+    craft_sources_cancel_owner(owner);
 }
 
 KilnResult KILN_CALL t_read(KilnEntity entity, KilnItemsInventory* info, KilnItemsSlot* slots, uint32_t capacity,

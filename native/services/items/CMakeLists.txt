@@ -57,3 +57,11 @@ set_target_properties(items-rename-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${C
 add_executable(items-stations-test tests/stations_test.cpp)
 target_include_directories(items-stations-test PRIVATE "${CMAKE_SOURCE_DIR}/core/abi")
 set_target_properties(items-stations-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/items-tests")
+
+add_executable(items-craft-sources-test tests/craft_sources_test.cpp)
+target_include_directories(items-craft-sources-test PRIVATE "${CMAKE_SOURCE_DIR}/core/abi")
+set_target_properties(items-craft-sources-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/items-tests")
+
+add_executable(items-craft-payment-test tests/craft_payment_test.cpp)
+target_include_directories(items-craft-payment-test PRIVATE "${CMAKE_SOURCE_DIR}/core/abi" "${CMAKE_SOURCE_DIR}/third_party")
+set_target_properties(items-craft-payment-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/items-tests")

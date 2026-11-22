@@ -43,6 +43,7 @@ public:
         std::lock_guard lock(mutex_);
         sources_.erase(std::remove_if(sources_.begin(),sources_.end(),[&](const CraftSource& s) { return s.owner == owner; }),sources_.end());
     }
+    bool empty() const { std::lock_guard lock(mutex_); return sources_.empty(); }
     void clear() { std::lock_guard lock(mutex_); sources_.clear(); }
     std::vector<CraftSource> copy(uint32_t player) const {
         std::lock_guard lock(mutex_);

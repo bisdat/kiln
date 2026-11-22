@@ -62,11 +62,14 @@ int main() {
     static_assert(sizeof(KilnStationEvent) == 112 && offsetof(KilnStationEvent, by) == 64 && offsetof(KilnStationEvent, position) == 72 &&
                   offsetof(KilnStationEvent, base) == 96);
     static_assert(sizeof(KilnStationsStatus) == 188);
-    static_assert(sizeof(KilnStationsApi) == 8 + 30 * 8 && offsetof(KilnStationsApi, set_output_source) == 8 + 21 * 8 &&
+    static_assert(sizeof(KilnStationsApi) == 8 + 34 * 8 && offsetof(KilnStationsApi, set_output_source) == 8 + 21 * 8 &&
                   offsetof(KilnStationsApi, max_chests) == 8 + 23 * 8 && offsetof(KilnStationsApi, collect) == 8 + 24 * 8 &&
                   offsetof(KilnStationsApi, base_stock_with_stations) == 8 + 25 * 8 &&
                   offsetof(KilnStationsApi, set_craft_stock) == 8 + 26 * 8 && offsetof(KilnStationsApi, craft_items) == 8 + 27 * 8 &&
                   offsetof(KilnStationsApi, set_fill_answers) == 8 + 28 * 8 && offsetof(KilnStationsApi, fill_asks) == 8 + 29 * 8);
+    static_assert(sizeof(KilnCraftSourceRequest) == 32 && offsetof(KilnStationsApi, add_source) == 248 &&
+                  offsetof(KilnStationsApi, remove_source) == 256 && offsetof(KilnStationsApi, cancel_sources) == 264 &&
+                  offsetof(KilnStationsApi, source_stock) == 272);
     static_assert(KILN_STATIONS_MAX_CRAFT_STOCK == 1024 && KILN_STATIONS_MAX_FILL_KEYS == 16);
     static_assert(sizeof(KilnStationCollect) == 24 && offsetof(KilnStationCollect, flags) == 16);
     // a collect's flags travel in KilnStationResult.flags: they share no bit with a request flag (DRY_RUN above all)
@@ -763,7 +766,7 @@ int main() {
         CHECK(craft_order(1, P, list, 3, &order) && order == std::vector<uint32_t>({C1, P, C2}));  // list first
         const uint32_t chests[2] = {C1, C2};
         CHECK(craft_order(1, P, chests, 2, &order) && order == std::vector<uint32_t>({C1, C2, P}));
-        CHECK(!craft_order(0, P, chests, 2, &order) && order.empty());  // mode 0: the owner only, the game's own
+        CHECK(craft_order(0, P, chests, 2, &order) && order == std::vector<uint32_t>({P}));  // mode 0: owner only
         CHECK(!craft_order(3, P, chests, 2, &order));
         CHECK(!craft_order(2, P, nullptr, 2, &order));
         std::vector<uint32_t> big(kMaxCraftStock + 1, C1);

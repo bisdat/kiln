@@ -1,0 +1,16 @@
+{
+  "format": 1,
+  "side": "server",
+  "comment": "Player-bound crafting sources, since 0.2.0-dev.30.6 (#125). Access is the BasicPlayerInfos id and CanAccessInventories test inside BaseStockForPlayer (server 26430253), docs/re/stations.md section 10.1. The mod chooses containers, independent of bases.",
+  "constants": {
+    "crafting/bases.players": "0x10",
+    "crafting/player.stride": "0xa0",
+    "crafting/player.permissions": "0x9d"
+  },
+  "features": {
+    "crafting.sources": {
+      "symbols": ["rules/InventoryPay", "rules/RecipePaid", "gems/PayMaterial", "stations/BaseStockForPlayer", "stations/BaseAtPosition"],
+      "constants": ["crafting/bases.players", "crafting/player.stride", "crafting/player.permissions"]
+    }
+  }
+}
