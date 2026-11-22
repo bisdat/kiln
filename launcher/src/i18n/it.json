@@ -5837,6 +5837,7 @@
       },
       "aboveItemMax": "oltre il massimo di questo oggetto ({max}): il server lo riduce al caricamento, a meno che una mod non ne abbia allargato l'intervallo",
       "upgradesHint": "La rarità decide quanti potenziamenti prende l'oggetto: livello massimo = livello base + rarità.",
+      "invalidLevels": "I livelli degli oggetti e i potenziamenti devono essere numeri interi da 0 a 255.",
       "gem": "Gemma incastonata",
       "gemUnknown": "l'id {id} non è nel catalogo",
       "noGem": "— nessuna gemma —",

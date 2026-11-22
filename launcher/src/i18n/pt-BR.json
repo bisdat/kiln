@@ -5837,6 +5837,7 @@
       },
       "aboveItemMax": "acima do máximo deste item ({max}): o servidor corrige ao carregar, a menos que um mod tenha ampliado o limite",
       "upgradesHint": "A raridade define quantas melhorias o item aceita: nível máximo = nível base + raridade.",
+      "invalidLevels": "Os níveis dos itens e as melhorias devem ser números inteiros de 0 a 255.",
       "gem": "Gema encaixada",
       "gemUnknown": "o id {id} não está no catálogo",
       "noGem": "— sem gema —",

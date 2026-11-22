@@ -10,6 +10,7 @@ import { t } from '../../i18n';
 import { localeAtual } from '../src/i18n.js';
 import { Meter, RarityPick, Row, Stepper, UpgradePick, categoryWord, iconOf, rarityWord, tierOf } from './parts.jsx';
 import { aboveStack, amountLimit, MAX_AMOUNT } from './amounts.js';
+import { clampItemLevel, MAX_ITEM_LEVEL, setItemUpgrades, upgradeLimit } from './levels.js';
 import { useEditorEnv } from './env.jsx';
 
 const NO_GEM = '0000000000';
@@ -47,23 +48,23 @@ function ItemForm({ entry, onChange, onRemove, onDuplicate }) {
   // the item's level includes its upgrades (a Fitted Bow: base 11 + 5 = 16): changing upgrades moves the level too,
   // or the game drops the change
   const baseLevel = entry.level !== undefined ? entry.level - (entry.upgrades ?? 0) : undefined;
-  // the item's maxLevel bounds the base level: the game itself writes a level-10 hat with 5 upgrades as 15
-  const over = it?.maxLevel > 0 && baseLevel > it.maxLevel;
-  const setUpgrades = (u, rarity) => onChange({
-    ...entry, upgrades: u, ...(rarity !== undefined ? { maxUpgrades: rarity } : {}),
-    ...(entry.level !== undefined ? { level: Math.max(0, baseLevel + u) } : {}),
-  });
+  const upgradesMax = upgradeLimit(entry);
+  const setUpgrades = (u, rarity) => onChange(setItemUpgrades(entry, u, rarity));
   const tier = tierOf(entry.itemId);
   const stack = it?.maxStack > 1;
   const gem = entry.socket !== undefined ? readSocket(entry.socket) : null;
-  const setGem = (c) => set('socket', writeSocket({ ...gem, ...c }));
+  const setGem = (c) => {
+    const next = { ...gem, ...c };
+    next.level = clampItemLevel({}, next.level);
+    set('socket', writeSocket(next));
+  };
   const kind = [categoryWord(it?.category), tier && t('editor.common.tierN', { n: tier }), stack && t('editor.inspector.stacksTo', { n: it.maxStack })].filter(Boolean).join(' · ');
   return (
     <>
       <header className="ke-insp-head">
         <span className="ke-insp-icon" style={{ '--r': rarityColor(r) }}><img src={iconOf(entry.itemId)} alt="" /></span>
         <div className="ke-insp-titles">
-          {r > 0 && <span className="k-sc ke-insp-rar" style={{ color: rarityColor(r) }}>{rarityWord(r)}</span>}
+          {r >= 1 && r <= 5 && <span className="k-sc ke-insp-rar" style={{ color: rarityColor(r) }}>{rarityWord(r)}</span>}
           <h2 className="ke-insp-name">{itemName(entry.itemId)}</h2>
           <span className="ke-insp-kind">{kind}</span>
         </div>
@@ -86,21 +87,17 @@ function ItemForm({ entry, onChange, onRemove, onDuplicate }) {
             </span>
           </Row>
         )}
-        {/* the level fits a byte; the server clamps past the item's maxLevel on load unless a mod opened its range,
-            which the editor cannot know: it warns instead of refusing */}
+        {/* Limits apply to edits, not the saved value shown here. The total level includes applied upgrades. */}
         {entry.level !== undefined && (
-          <Row label={t('editor.common.level')} note={(
-            <>
-              {entry.upgrades !== undefined && <span className="ke-note">{t('editor.inspector.levelSplit', { base: baseLevel, count: entry.upgrades })}</span>}
-              {over && <span className="ke-note warn">{t('editor.inspector.aboveItemMax', { max: it.maxLevel })}</span>}
-            </>
+          <Row label={t('editor.common.level')} note={entry.upgrades !== undefined && (
+            <span className="ke-note">{t('editor.inspector.levelSplit', { base: baseLevel, count: entry.upgrades })}</span>
           )}>
-            <Stepper value={entry.level} min={entry.upgrades ?? 0} max={255} label={t('editor.common.level')} onChange={(v) => set('level', v)} />
+            <Stepper value={entry.level} min={Math.min(entry.upgrades ?? 0, upgradesMax)} max={MAX_ITEM_LEVEL} label={t('editor.common.level')} onChange={(v) => set('level', clampItemLevel(entry, v))} />
           </Row>
         )}
         {entry.upgrades !== undefined && entry.maxUpgrades !== undefined && (
           <Row label={t('editor.common.upgrades')} note={<span className="ke-note">{t('editor.inspector.upgradesHint')}</span>}>
-            <UpgradePick value={entry.upgrades} max={Math.max(entry.maxUpgrades, entry.upgrades)} onChange={(v) => setUpgrades(v)} />
+            <UpgradePick value={entry.upgrades} max={upgradesMax} onChange={(v) => setUpgrades(v)} />
           </Row>
         )}
         {gem && (
@@ -121,10 +118,8 @@ function ItemForm({ entry, onChange, onRemove, onDuplicate }) {
           </Row>
         )}
         {gem && gem.itemId > 0 && (
-          <Row label={t('editor.inspector.gemLevel')} note={items[gem.itemId]?.maxLevel > 0 && gem.level > items[gem.itemId].maxLevel && (
-            <span className="ke-note warn">{t('editor.inspector.aboveGemMax', { max: items[gem.itemId].maxLevel })}</span>
-          )}>
-            <Stepper value={gem.level} min={1} max={255} label={t('editor.inspector.gemLevel')} onChange={(v) => setGem({ level: v })} />
+          <Row label={t('editor.inspector.gemLevel')}>
+            <Stepper value={gem.level} min={1} max={MAX_ITEM_LEVEL} label={t('editor.inspector.gemLevel')} onChange={(v) => setGem({ level: v })} />
           </Row>
         )}
         {entry.durability !== undefined && (

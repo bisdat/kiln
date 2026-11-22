@@ -5837,6 +5837,7 @@
       },
       "aboveItemMax": "por encima del máximo de este objeto ({max}): el servidor lo limita al cargar, salvo que un mod haya ampliado su rango",
       "upgradesHint": "La rareza fija cuántas mejoras admite el objeto: nivel máximo = nivel base + rareza.",
+      "invalidLevels": "Los niveles de objeto y las mejoras deben ser números enteros de 0 a 255.",
       "gem": "Gema engastada",
       "gemUnknown": "el id {id} no está en el catálogo",
       "noGem": "— sin gema —",
