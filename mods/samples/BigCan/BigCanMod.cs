@@ -13,7 +13,8 @@ public struct Water
 }
 
 /// <summary>
-/// Sidecar sample (docs/kiln/services/replication.md "Sidecars"): the game's Watering Can holds 2,000 charges. The server
+/// Sidecar sample (docs/kiln/services/replication.md "Sidecars"): a Big Watering Can of this mod's own (an item block of
+/// kind watering-can, <c>Holds = 2000</c> with <c>LargeHolds</c>) holds 2,000 charges. The server
 /// keeps the real water, but the game sends players a container's water as two 16-bit numbers, which stop at 1,023
 /// charges (65,535 units): above that every player's game would show a full can. So the server also sends Kiln clients
 /// that have this mod the true value on Kiln's own channel (a replicated extension, bigcan:water@1), and their HUD shows
@@ -24,7 +25,7 @@ public struct Water
 /// </summary>
 public sealed class BigCanMod : Mod
 {
-    private const string Can = "Tool_T1_WateringCan", CanTemplate = "Pide_Fuel_Watering_Can";
+    private const string GameCan = "Tool_T1_WateringCan", BigCanName = "bigcan.big-can";
     private const int Charges = 2000, Exact = 1023;
     private static readonly UiText Label = UiText.Of(("en", "Charges"), ("de", "Ladungen"));
     private ReplicatedExtension<Water>? _water;
@@ -34,6 +35,16 @@ public sealed class BigCanMod : Mod
     {
         // both sides, in OnLoad: Kiln advertises it in the join handshake and opens its channel before anyone joins
         _water = Replication.Extension<Water>("bigcan:water", 1);
+        // the can itself: a typed item block (Kiln names only); players without this mod see the game's own can in its place
+        Blocks.Define("big-can", new ItemBlock
+        {
+            Name = "Big Watering Can",
+            Description = "Holds 2,000 charges of water. Players without Kiln see the game's watering can, shown full until it is down to 1,023.",
+            Kind = ItemKind.WateringCan,
+            Holds = Charges,
+            LargeHolds = true,
+            VanillaLook = GameCan,
+        });
         // the server: the can holds 2,000 charges (cans made from now on), and its water travels while it holds more than 1,023
         if (Mods.Side == ModSide.Server || Capabilities.Is("repl.sidecar"))
         {
@@ -45,10 +56,9 @@ public sealed class BigCanMod : Mod
             {
                 Log.Warn($"bigcan: {e.Message}: Kiln clients see the game's 16-bit water");
             }
-            Content.OnReady(_ => Content.Templates.Get(CanTemplate)?.Set("FuelSetup.maxFuelCharges", Charges));
         }
         // the client: the can's detail number and slot bar from the true value
-        _can = Items.Lookup(Can)?.Id ?? default;
+        _can = Items.Lookup(BigCanName)?.Id ?? default;
         Try(Ui.Values.DetailCapability, () => Ui.Values.ItemBar(_can, Detail));
         Try(Ui.Values.SlotCapability, () => Ui.Values.SlotBar(_can, Slot));
         _water.Changed += e => Log.Debug($"bigcan: can {e.Entity}: {(e.Value is { } v ? $"{v.Units / 64}/{v.Max / 64} charges" : "the game's own value")}");

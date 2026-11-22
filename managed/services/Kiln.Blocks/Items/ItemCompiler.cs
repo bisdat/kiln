@@ -546,6 +546,8 @@ internal static partial class Compiler
     /// <summary>The most charges a water container can hold and still show players what it has: the game sends them charges × 64 as a 16-bit number,
     /// which stops at 65,535 (1,023 × 64 = 65,472). Lab: a can of 1,024 has 65,536 on the server and shows 65,535.</summary>
     internal const int MaxHolds = 1023;
+    /// <summary>With <see cref="ItemBlock.LargeHolds"/>: the game keeps a container's water as charges × 64 in a u32 on the server.</summary>
+    internal const int MaxLargeHolds = 65535;
     /// <summary><see cref="ItemBlock.Flow"/>'s range. At 8 a can moves 256 a step (4 charges), the fill and pour programs' own default.</summary>
     internal const double MinFlow = 0.25, MaxFlow = 8;
     /// <summary>Volume (0xd8f493f3), read from the used item: what one step moves, filling or pouring, at open water (programs ac68f1d4, 408ae9a0) and at a prop
@@ -720,9 +722,13 @@ internal static partial class Compiler
         if (b.Comfort is < 0) throw new BlockError(ctx.Block, "comfort", $"{b.Comfort} is less than 0");
         if (b.Stack is < 1 or > 65535) throw new BlockError(ctx.Block, "stack", $"{b.Stack} is outside 1..65535");
         if ((kind == ItemKind.Tool || kind.HoldsWater) && b.Stack is > 1) throw new BlockError(ctx.Block, "stack", $"a {kind.Key} has an item entity of its own: it does not stack");
-        if (b.Holds is < 1 or > MaxHolds)
-            throw new BlockError(ctx.Block, "holds", $"{b.Holds} is outside 1..{MaxHolds}: a player's game is sent a container's water as charges × 64 in 16 bits, which stop at 65,535, " +
-                                                   $"so above {MaxHolds} charges it would show the container full until it is down to {MaxHolds}");
+        if (b.LargeHolds && b.Holds == null) throw new BlockError(ctx.Block, "largeHolds", "largeHolds says holds may go past 1,023: give holds");
+        if (b.LargeHolds ? b.Holds is < 1 or > MaxLargeHolds : b.Holds is < 1 or > MaxHolds)
+            throw new BlockError(ctx.Block, "holds", b.LargeHolds
+                ? $"{b.Holds} is outside 1..{MaxLargeHolds}"
+                : $"{b.Holds} is outside 1..{MaxHolds}: a player's game is sent a container's water as charges × 64 in 16 bits, which stop at 65,535, " +
+                  $"so above {MaxHolds} charges it would show the container full until it is down to {MaxHolds} (largeHolds lifts the limit for a mod " +
+                  "that sends Kiln players the true value)");
         if (b.Flow is { } fl && (double.IsNaN(fl) || fl < MinFlow || fl > MaxFlow))
             throw new BlockError(ctx.Block, "flow", $"{fl} is outside {MinFlow}..{MaxFlow}: a multiple of the game's own rate");
         if (b.Level is { } level) CheckLevel(ctx, level, "level");

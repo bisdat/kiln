@@ -76,6 +76,30 @@ public sealed class WaterContainerTests
         Assert.Contains("charges × 64 in 16 bits", e.Problem);
     }
 
+    [Theory]
+    [InlineData(1024)]
+    [InlineData(2000)]
+    [InlineData(65535)]
+    public void LargeHolds_lifts_the_limit(int holds) =>
+        Assert.Equal(holds, (int)Lower(new ItemBlock { Name = "Can", Kind = ItemKind.WateringCan, Holds = holds, LargeHolds = true })["templates"]![0]!["fields"]!["FuelSetup.maxFuelCharges"]!);
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(65536)]
+    public void LargeHolds_still_refuses_outside_1_to_65535(int holds)
+    {
+        var e = Refused(new ItemBlock { Name = "Can", Kind = ItemKind.WateringCan, Holds = holds, LargeHolds = true });
+        Assert.Equal("holds", e.Field);
+        Assert.Contains("outside 1..65535", e.Problem);
+    }
+
+    [Fact]
+    public void LargeHolds_needs_holds()
+    {
+        var e = Refused(new ItemBlock { Name = "Can", Kind = ItemKind.WateringCan, LargeHolds = true });
+        Assert.Equal("largeHolds", e.Field);
+    }
+
     [Fact]
     public void Holds_is_only_for_water_containers()
     {

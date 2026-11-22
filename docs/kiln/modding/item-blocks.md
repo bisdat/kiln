@@ -65,7 +65,7 @@ Visual = new VisualBlock { Model = emberModel, Animated = new AnimatedModel { Mo
 ## Blocks
 | Block | Fields |
 |---|---|
-| `ItemBlock` | `Kind`, `Visual`, `Stack`, `Rarity`, `Level`, `Texts`, `Heals`, `OnUse`, `Feeds`, `Fuel`, `Comfort`, `Tool`, `Ammo`, `Holds`, `Flow`, `Recipe`, `Loot` |
+| `ItemBlock` | `Kind`, `Visual`, `Stack`, `Rarity`, `Level`, `Texts`, `Heals`, `OnUse`, `Feeds`, `Fuel`, `Comfort`, `Tool`, `Ammo`, `Holds`, `LargeHolds` (since 0.2.0-dev.31: `Holds` up to 65,535; every player's game shows the container full until it is down to 1,023, unless a mod sends the true value, see the BigCan sample), `Flow`, `Recipe`, `Loot`, `VanillaLook` (since 0.2.0-dev.31: the game item players without the mod see in its place; none: an empty slot) |
 | `WeaponBlock` | `Class`, `Visual`, `Stats`, `Perks`, `OnHit`, `OnKill`, `Recipe`, `Loot`, `Moves` ([Moves](#moves)) |
 | `WandBlock` | `Primary`, `Heavy`, `Special`, `Class`, `Visual`, `Stats`, `Perks`, `OnHit`, `OnKill`, `Recipe`, `Loot` |
 | `ArmorBlock` | `Slot`, `Set`, `Visual`, `Look`, `Stats`, `Perks`, `OnHitTaken`, `Recipe`, `Loot` |
