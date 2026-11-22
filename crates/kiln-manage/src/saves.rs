@@ -559,11 +559,51 @@ pub mod editor {
         };
         let folder = p.parent().ok_or_else(|| Error::invalid("save has no parent folder"))?.to_string_lossy().into_owned();
         let file = p.file_name().ok_or_else(|| Error::invalid("save has no file name"))?.to_string_lossy().into_owned();
-        // NTFS is normally case-insensitive, including when the caller uses a different spelling.
-        Ok(EditorBackupSource {
-            folder: if cfg!(windows) { folder.to_lowercase() } else { folder },
-            file: if cfg!(windows) { file.to_lowercase() } else { file },
-        })
+        // Canonicalization expands short names and resolves case. Do not lowercase: Windows also supports
+        // case-sensitive folders. Reuse the common verbatim-path rules for the persisted spelling.
+        let folder = if cfg!(windows) { crate::winpath::plain_path(&folder).into_owned() } else { folder };
+        Ok(EditorBackupSource { folder, file })
+    }
+
+    fn live_source(source: EditorBackupSource) -> Result<Option<EditorBackupSource>> {
+        let path = Path::new(&source.folder).join(&source.file);
+        match std::fs::metadata(&path) {
+            Ok(md) if md.is_file() => source_identity(&path).map(Some),
+            Ok(_) => Ok(None),
+            // A move or rename loses the absolute origin, not the recovery copy. Never infer a new match.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    fn same_source(a: &EditorBackupSource, b: &EditorBackupSource) -> Result<bool> {
+        if a == b { return Ok(true); }
+        #[cfg(windows)]
+        {
+            use std::os::windows::io::AsRawHandle;
+            use windows_sys::Win32::Storage::FileSystem::{BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle};
+            let identity = |source: &EditorBackupSource| -> Result<Option<(u32, u64)>> {
+                let path = Path::new(&source.folder).join(&source.file);
+                let file = match std::fs::File::open(&path) {
+                    Ok(file) => file,
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+                    Err(e) => return Err(e.into()),
+                };
+                let mut info = std::mem::MaybeUninit::<BY_HANDLE_FILE_INFORMATION>::uninit();
+                // SAFETY: the handle is open and info has the required size.
+                if unsafe { GetFileInformationByHandle(file.as_raw_handle(), info.as_mut_ptr()) } == 0 {
+                    return Err(std::io::Error::last_os_error().into());
+                }
+                // SAFETY: the successful call initialized info.
+                let info = unsafe { info.assume_init() };
+                Ok(Some((info.dwVolumeSerialNumber, u64::from(info.nFileIndexHigh) << 32 | u64::from(info.nFileIndexLow))))
+            };
+            // Canonical UNC and drive names can still name the very same file. Compare live filesystem
+            // identity, never contents (two different characters can have identical save bytes).
+            return Ok(matches!((identity(a)?, identity(b)?), (Some(a), Some(b)) if a == b));
+        }
+        #[cfg(not(windows))]
+        Ok(false)
     }
 
     /// The sidecar stays after unlocking: deleting it would let a third caller lock a different inode.
@@ -752,13 +792,21 @@ pub mod editor {
     fn backup_source(path: &Path, home: &Path) -> Result<Option<EditorBackupSource>> {
         for dir in path.ancestors().skip(1).take_while(|d| d.starts_with(home)) {
             if let Some(m) = crate::util::read_json::<EditorBackupManifest>(&dir.join(EDITOR_BACKUP_JSON))? {
-                return Ok(Some(m.source));
+                // This manifest describes only the top-level save, not every other slot copied from backup/.
+                if path.parent() != Some(dir) || !path.file_name().is_some_and(|file| crate::winpath::same_folder(Path::new(file), Path::new(&m.source.file))) {
+                    return Err(Error::new(ErrorCode::Refused, "this file is not the save identified by its backup manifest"));
+                }
+                return live_source(m.source);
             }
             if let Some(m) = crate::util::read_json::<super::BackupManifest>(&dir.join(super::BACKUP_JSON))? {
                 let rel = path.strip_prefix(dir).map_err(|_| Error::invalid("backup path outside its manifest"))?;
                 for entry in m.entries {
                     if Path::new(&entry.dir).join(&entry.rel) == rel {
-                        return source_identity(Path::new(&entry.source)).map(Some);
+                        let path = Path::new(&entry.source);
+                        return live_source(EditorBackupSource {
+                            folder: path.parent().unwrap_or_else(|| Path::new("")).to_string_lossy().into_owned(),
+                            file: path.file_name().unwrap_or_default().to_string_lossy().into_owned(),
+                        });
                     }
                 }
                 return Err(Error::new(ErrorCode::Refused, "backup has no source entry in its manifest"));
@@ -784,7 +832,9 @@ pub mod editor {
                 }
             } else if ft.is_file() && e.file_name().to_string_lossy().eq_ignore_ascii_case(base) {
                 let identity = backup_source(&p, home)?;
-                if identity.as_ref().is_some_and(|s| s != source) { continue; }
+                if let Some(identity) = &identity {
+                    if !same_source(identity, source)? { continue; }
+                }
                 let label = p.parent().and_then(|d| d.strip_prefix(home).ok()).map(|r| r.display().to_string()).unwrap_or_default();
                 out.push(EditorBackup {
                     kind: "folder".into(), label, path: p.display().to_string(), modified: modified_ms(&p),
@@ -899,8 +949,10 @@ pub mod editor {
             }
             Some(target_source.clone())
         };
-        if origin.is_some_and(|source| source != target_source) {
-            return Err(Error::new(ErrorCode::Refused, "this backup belongs to a different save folder or file"));
+        if let Some(origin) = origin {
+            if !same_source(&origin, &target_source)? {
+                return Err(Error::new(ErrorCode::Refused, "this backup belongs to a different save folder or file"));
+            }
         }
         let data = std::fs::read(&s)?;
         if data.len() < 4 || &data[..4] != b"SV2C" {
@@ -1004,6 +1056,10 @@ pub mod editor {
             let target = target_path(&f.target).unwrap();
             assert!(events.iter().any(|e| matches!(e, crate::durable::Event::File(p) if p.parent() == target.parent())), "no staged save flush: {events:?}");
             assert!(events.iter().any(|e| matches!(e, crate::durable::Event::Dir(p) if Some(p.as_path()) == target.parent())), "no save directory flush: {events:?}");
+            let published = events.iter().position(|e| matches!(e, crate::durable::Event::Rename { to, .. } if to.parent() == backup_dir().as_deref())).unwrap();
+            let staged = events.iter().position(|e| matches!(e, crate::durable::Event::File(p) if p.parent() == target.parent())).unwrap();
+            assert!(published < staged, "save staged before its durable backup: {events:?}");
+            assert!(events[..published].iter().any(|e| matches!(e, crate::durable::Event::File(p) if p.file_name() == target.file_name())), "backup contents not flushed before publication: {events:?}");
             assert_eq!(std::fs::read(&f.target).unwrap(), Fixture::bytes(3));
             f.assert_no_staging();
         }
@@ -1014,7 +1070,8 @@ pub mod editor {
             let a = backup_file(f.target.to_str().unwrap()).unwrap();
             let other = f.root.join("account-b/remote/character0.ksd");
             std::fs::create_dir_all(other.parent().unwrap()).unwrap();
-            std::fs::write(&other, Fixture::bytes(4)).unwrap();
+            // Equal bytes are not proof of the same save or account.
+            std::fs::write(&other, Fixture::bytes(1)).unwrap();
             let b = backup_file(other.to_str().unwrap()).unwrap();
             let list = serde_json::to_value(f.backups()).unwrap();
             let entries = list.as_array().unwrap();
@@ -1036,7 +1093,7 @@ pub mod editor {
         }
 
         #[test]
-        fn launcher_backups_keep_identity_when_another_install_is_gone() {
+        fn launcher_backups_keep_known_origins_and_recover_missing_ones() {
             let f = Fixture::new();
             let add = |install: &str, source: &Path| {
                 let dir = f.root.join("backups/saves").join(install).join("stamp");
@@ -1055,7 +1112,114 @@ pub mod editor {
             let foreign = add("removed-install", &f.root.join("removed-install/remote/character0.ksd"));
             let backups = list_backups(f.target.to_str().unwrap()).expect("a removed installation must not break this save's backup list");
             assert!(backups.iter().any(|b| Path::new(&b.path) == own && b.group == "matching"));
-            assert!(!backups.iter().any(|b| Path::new(&b.path) == foreign));
+            assert!(backups.iter().any(|b| Path::new(&b.path) == foreign && b.group == "legacy" && b.source.is_none()));
+            restore_backup(foreign.to_str().unwrap(), f.target.to_str().unwrap()).unwrap();
+            assert_eq!(std::fs::read(&f.target).unwrap(), Fixture::bytes(4));
+        }
+
+        #[test]
+        fn moved_save_keeps_its_backups_as_legacy_recovery() {
+            let f = Fixture::new();
+            let backup = backup_file(f.target.to_str().unwrap()).unwrap();
+            let copied = Path::new(&backup).join("character0.ksd");
+            let moved = f.root.join("moved-remote");
+            std::fs::rename(f.target.parent().unwrap(), &moved).unwrap();
+            let target = moved.join("character0.ksd");
+            std::fs::write(&target, Fixture::bytes(3)).unwrap();
+            let list = list_backups(target.to_str().unwrap()).unwrap();
+            assert!(list.iter().any(|b| Path::new(&b.path) == copied && b.group == "legacy" && b.source.is_none()), "moved save lost its recovery backup: {list:?}");
+            restore_backup(copied.to_str().unwrap(), target.to_str().unwrap()).unwrap();
+            assert_eq!(std::fs::read(&target).unwrap(), Fixture::bytes(1));
+        }
+
+        #[test]
+        fn copied_game_backup_of_another_file_is_refused() {
+            let f = Fixture::new();
+            let rolling = f.target.parent().unwrap().join("backup/character1.ksd.backup-1");
+            std::fs::create_dir_all(rolling.parent().unwrap()).unwrap();
+            std::fs::write(&rolling, Fixture::bytes(4)).unwrap();
+            let backup = backup_file(f.target.to_str().unwrap()).unwrap();
+            let copied = Path::new(&backup).join("backup/character1.ksd.backup-1");
+            let result = restore_backup(copied.to_str().unwrap(), f.target.to_str().unwrap());
+            f.assert_original();
+            assert_eq!(result.unwrap_err().code, ErrorCode::Refused);
+        }
+
+        #[cfg(windows)]
+        #[test]
+        fn windows_drive_and_unc_aliases_share_backup_identity() {
+            let f = Fixture::new();
+            let plain = crate::winpath::plain_path(f.target.to_str().unwrap()).replace('/', "\\");
+            let bytes = plain.as_bytes();
+            assert_eq!(bytes.get(1), Some(&b':'), "test fixture must be on a drive: {plain}");
+            let unc = format!(r"\\localhost\{}${}", &plain[..1], &plain[2..]);
+            if !Path::new(&unc).is_file() {
+                eprintln!("UNC alias unavailable; native runner must provide its existing administrative share");
+                return;
+            }
+            let backup = backup_file(&plain).unwrap();
+            let backed_up = Path::new(&backup).join("character0.ksd");
+            let aliases = [plain.to_uppercase(), plain.replace('\\', "/"), format!(r"\\?\{plain}"), unc.clone(), format!(r"\\?\UNC\{}", &unc[2..])];
+            for alias in aliases {
+                let list = list_backups(&alias).unwrap();
+                assert!(list.iter().any(|b| Path::new(&b.path) == backed_up && b.group == "matching"), "same save hidden for {alias}: {list:?}");
+                restore_backup(backed_up.to_str().unwrap(), &alias).unwrap();
+                f.assert_original();
+            }
+            let _lock = lock_target(&target_path(&f.target).unwrap()).unwrap();
+            assert_eq!(write_save(&unc, &Fixture::bytes(3)).unwrap_err().code, ErrorCode::Busy);
+        }
+
+        #[cfg(windows)]
+        #[test]
+        fn windows_case_sensitive_saves_do_not_share_backups() {
+            let f = Fixture::new();
+            let root = f.root.join("case-sensitive");
+            std::fs::create_dir(&root).unwrap();
+            let enabled = std::process::Command::new("fsutil").args(["file", "setCaseSensitiveInfo"])
+                .arg(&root).arg("enable").output().unwrap();
+            if !enabled.status.success() {
+                eprintln!("case-sensitive directory unavailable: {} {}", String::from_utf8_lossy(&enabled.stdout), String::from_utf8_lossy(&enabled.stderr));
+                return;
+            }
+            let a = root.join("Account/character0.ksd");
+            let b = root.join("account/character0.ksd");
+            for (path, value) in [(&a, 4), (&b, 5)] {
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(path, Fixture::bytes(value)).unwrap();
+            }
+            assert_ne!(std::fs::read(&a).unwrap(), std::fs::read(&b).unwrap());
+            let backup = backup_file(a.to_str().unwrap()).unwrap();
+            let copied = Path::new(&backup).join("character0.ksd");
+            let list = list_backups(b.to_str().unwrap()).unwrap();
+            assert!(!list.iter().any(|entry| Path::new(&entry.path) == copied), "distinct case-sensitive save was treated as matching: {list:?}");
+            assert_eq!(restore_backup(copied.to_str().unwrap(), b.to_str().unwrap()).unwrap_err().code, ErrorCode::Refused);
+            assert_eq!(std::fs::read(&b).unwrap(), Fixture::bytes(5));
+        }
+
+        #[cfg(windows)]
+        #[test]
+        fn windows_short_names_share_backup_identity_and_lock() {
+            use std::os::windows::ffi::{OsStrExt, OsStringExt};
+            use windows_sys::Win32::Storage::FileSystem::GetShortPathNameW;
+            let f = Fixture::new();
+            let name: Vec<u16> = f.target.as_os_str().encode_wide().chain(Some(0)).collect();
+            let mut short = vec![0u16; 32768];
+            // SAFETY: input is terminated and output has the advertised capacity.
+            let size = unsafe { GetShortPathNameW(name.as_ptr(), short.as_mut_ptr(), short.len() as u32) };
+            assert!(size > 0 && size < short.len() as u32, "{}", std::io::Error::last_os_error());
+            let short = PathBuf::from(std::ffi::OsString::from_wide(&short[..size as usize]));
+            if !short.to_string_lossy().contains('~') {
+                eprintln!("8.3 names are disabled for the fixture; no short alias was available");
+                return;
+            }
+            eprintln!("8.3 alias exercised");
+            let backup = backup_file(f.target.to_str().unwrap()).unwrap();
+            let copied = Path::new(&backup).join("character0.ksd");
+            assert!(list_backups(short.to_str().unwrap()).unwrap().iter().any(|b| Path::new(&b.path) == copied && b.group == "matching"));
+            restore_backup(copied.to_str().unwrap(), short.to_str().unwrap()).unwrap();
+            let _lock = lock_target(&target_path(&f.target).unwrap()).unwrap();
+            assert_eq!(write_save(short.to_str().unwrap(), &Fixture::bytes(3)).unwrap_err().code, ErrorCode::Busy);
         }
 
         #[test]
@@ -1092,6 +1256,30 @@ pub mod editor {
             let saves = crate::saves::list_in(&[dir]).unwrap();
             assert_eq!(saves.len(), 1);
             assert_eq!(saves[0].file, "character0.ksd");
+        }
+
+        #[test]
+        fn lock_crash_child() {
+            let Some(path) = std::env::var_os("KILN_EDITOR_LOCK_CRASH_TARGET") else { return; };
+            let _lock = lock_target(Path::new(&path)).unwrap();
+            // Exit without running destructors, as with a process crash.
+            std::process::exit(0);
+        }
+
+        #[test]
+        fn stale_lock_after_process_exit_does_not_block_editor_or_game_writes() {
+            let f = Fixture::new();
+            let target = target_path(&f.target).unwrap();
+            let child = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "saves::editor::tests::lock_crash_child", "--nocapture"])
+                .env("KILN_EDITOR_LOCK_CRASH_TARGET", &target).output().unwrap();
+            assert!(child.status.success(), "{}", String::from_utf8_lossy(&child.stderr));
+            assert!(target.with_file_name(".character0.ksd.kiln-editor-lock").is_file());
+            f.write().unwrap();
+            let _lock = lock_target(&target).unwrap();
+            // The editor never locks the game's save handle, only its own sidecar.
+            std::fs::write(&target, Fixture::bytes(4)).unwrap();
+            assert_eq!(std::fs::read(&target).unwrap(), Fixture::bytes(4));
         }
 
         #[test]
