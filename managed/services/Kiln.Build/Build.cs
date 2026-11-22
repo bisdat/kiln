@@ -45,10 +45,12 @@ public static partial class Build
     // so it does not start at the first service tick.
     internal static readonly ServiceCapRows Rows = new(Caps.Service, ReportCapabilities);
 
-    private static void ReportCapabilities()
+    private static unsafe void ReportCapabilities()
     {
-        if (Available) return;
-        ServiceCaps.LowerFeatures(Caps.Service, Caps.Features);
+        if (!Available) { ServiceCaps.LowerFeatures(Caps.Service, Caps.Features); return; }
+        if (T->Header.Size < 184)
+            foreach (var name in Caps.Features.AsSpan(5))
+                ServiceCaps.LowerOff(name, CapabilityReason.ServiceOlder, "kiln.build is older than the block API");
     }
 
     private static KilnUnavailableException Unavailable()

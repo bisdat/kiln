@@ -27,7 +27,8 @@ else if (!q.Ok) Log.Info(q.Reason);
 `Provenance`, nullable `Hardness`, `Health` and `Damage`. Building material ids are **128–255**, not EMF's 0–127.
 Terrain ids are 1–127. Building fill is paint (zero paint is still a building block); terrain with zero fill is air.
 Hardness is Soft through VeryHard (0–4), or Unbreakable (5). Health is the material config's raw health points.
-Unknown mining facts are null, not guessed. Damage is currently unknown because its native getter is not yet bound.
+Unknown mining facts are null, not guessed. Building damage reads the game's native crack state; terrain damage
+reports Kiln's accumulated policy value when its session clock is available (no native terrain crack visuals).
 
 Provenance means **comparison with the shipped world**, not an owner id, a paint bit or server/client side:
 
@@ -73,11 +74,26 @@ values 100,100,95,60,50. Default flags request damage mode, **not** unrestricted
 - `PlayerTerrain` includes only PlayerPlaced terrain. **Natural and Unknown terrain are never removed**, even with
   `WorldBuildings`. Without it all terrain stays.
 - Unknown material facts and Unbreakable materials are always spared, including in Instant mode.
-- Any requested mode without a qualified implementation refuses the **entire call before mutation**. In this
-  implementation damage/cracks and drops remain unavailable (`SymbolMissing`). No private substitute health state,
-  guessed drops or unrestricted edit is used. Damage's intended contract is the game's mining scale and
-  `floor(255 * damage / health)` hits, 20-second healing and native building cracks; terrain uses its x250 mining
-  health scale. Drops require each material's item/rate and per-session remainder, not item refunds.
+- Any requested mode without a qualified implementation refuses the **entire call before mutation**. Drops remain
+  unavailable (`SymbolMissing`): no guessed item refunds or unrestricted edit is used.
+- Building damage uses native Get/Add crack state, `floor(255 * damage * miningDamageFactor / health)` per hit,
+  capped at 255. The game owns its 20-second healing and crack replication. A required setting/clock/symbol that
+  cannot be read refuses damage mode, never assumes a mining factor of one.
+- Terrain has no native crack state. Kiln maintains a bounded (65536-cell), per-session accumulated damage map, with
+  `TerrainHealthScale` (default **1**) multiplying material health and `TerrainHealAfter` (default **20 seconds**)
+  controlling inactivity expiry. The caller chooses both; an adapter requiring a 250-fold health scale passes 250
+  explicitly. Values expire, clear on world unload/session change/material change, and are forgotten after verified
+  removal. There are no terrain crack visuals. Full-map admission can fail; no rollback of prior hits is promised.
+- Before any damage mutation, the whole candidate mask is dry-run through the guarded writer's policies. A refused
+  preflight damages nothing. Once damage starts, a later failure may leave both damage state and committed cells.
+
+`ProtectedSphere = new BlockBreakSphere(center, radius, margin, minimumRadius)` selects a sphere and protects nearby
+ruins by shrinking the **whole building radius** away from the nearest eligible Natural/Unknown building cell within
+radius+margin. The reduced radius is min(original, distance-margin); below minimumRadius no buildings are hit.
+The margin and minimum default to zero; callers choose their policy. The scan ignores the selection mask but respects
+material/hardness/damage filters. Terrain retains the original sphere, even when buildings are skipped. WorldBuildings
+bypasses shrinking, not the original sphere selection. The protection scan must fit 4096 loaded cells. This follows
+EMF's `block_rules.cpp:71-92` policy, with caller-controlled parameters rather than compatibility constants in core.
 
 Removal uses kiln.build's guarded exact-cell writer, not `VoxelBoxFillAir`. Both reach the game's block writer and
 store commit, but the guarded writer preserves Kiln's base/zone checks, transient journal and save regions, requests
@@ -97,7 +113,7 @@ writer's report. `Refusal` distinguishes wrong side, missing symbol, offline, no
 unloaded tiles, zones, bases, faults and failed verification.
 
 **No rollback or compensation is promised.** A writer may commit earlier blocks before a fault, and its void engine
-commit can return without storing the requested cells. `MayHaveChanged` means the writer was entered and partial
+commit can return without storing the requested cells. `MayHaveChanged` means the writer or damage mutator was entered and partial
 changes may remain; never automatically repeat the whole operation or give drops from planned counts.
 `Removed` counts only selected cells read back as air; `Verified` says that readback completed, not that every planned
 removal succeeded. Without Verified, Removed is only a lower bound. Failed readback or incomplete removal returns
@@ -114,7 +130,7 @@ partially committed blocks after a fault acquired save-region bookkeeping.
 | `build.block_provenance` | qualified baked-world reader and balanced lifetime |
 | `build.find_wall` | cell-stepped first-wall query, server-session row |
 | `build.break_building` | instant building removal with qualified metadata and guarded writer; default protection also needs provenance |
-| `build.break_damage` | qualified damage/crack mutation; currently SymbolMissing |
+| `build.break_damage` | native building damage/cracks, caller-policy terrain accumulation and mining settings; server-session row |
 | `build.break_drops` | qualified material drops; currently SymbolMissing |
 | `build.break_terrain` | instant player-terrain removal with provenance, metadata and guarded writer |
 
@@ -124,7 +140,7 @@ fault reports Faulted/restart-required. Optional flags can need more capabilitie
 Missing/older native tables refuse without reading beyond their header.
 
 Native layout: `block_at` at 160, `find_wall` at 168, `break_box` at 176; table 184 bytes, version still 1. Check header
-size before each row. Records: `KilnBuildBlockInfo` 64 bytes, `KilnBuildBreak` 120, `KilnBuildBreakResult` 136 (Windows
+size before each row. Records: `KilnBuildBlockInfo` 64 bytes, `KilnBuildBreak` 184, `KilnBuildBreakResult` 136 (Windows
 x64). No mod API version stamps are set by these additions.
 
 ## Guided game check
@@ -140,6 +156,10 @@ The owner runs these checks in a disposable copied world; these APIs have not be
    a denying RespectZones actor: the complete edit must be refused.
 4. Observe removal from a second vanilla client, save/restart and verify kept changes. Confirm surrounding cells and
    props remain; a failed/partial result must never claim rollback. Session undo restores only unchanged journal cells.
-5. Damage or Drops requests must currently refuse before changing any cell. Do not infer support from static symbol
-   records alone. A remote joined client must refuse server operations; stopping/rehosting a world must not reuse old
-   provenance copies.
+5. Hit a player building repeatedly: byte damage floors per hit, native cracks replicate, incomplete damage heals
+   after about 20 seconds, and removal occurs only at 255. Repeat with a changed miningDamageFactor. Protected zones
+   must refuse before cracks change. For placed terrain use two different health scales/expiries: accumulation differs,
+   heals at the chosen interval, has no crack visuals and resets on world unload. Drops requests must still refuse
+   before any hit/removal. A remote joined client must refuse server operations; stopping/rehosting a world must not
+   reuse old provenance copies or terrain damage. ProtectedSphere must spare player buildings beyond a ruin while
+   terrain still receives the full original sphere.

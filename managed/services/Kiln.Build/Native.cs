@@ -146,6 +146,9 @@ internal static unsafe class BuildNative
         public byte* Selection;
         public uint Actor, BuildFlags;
         public NativeStr OriginMod;
+        public double TerrainHealthScale, TerrainHealSeconds;
+        public Vec3 SphereCenter;
+        public double SphereRadius, SphereMargin, SphereMinimum;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -204,7 +207,7 @@ internal static unsafe class BuildNative
             _checked = true;
             if (sizeof(Grid) != 88 || sizeof(Result) != 56 || sizeof(Write) != 72 || sizeof(Shape) != 104 ||
                 sizeof(Prop) != 104 || sizeof(PropInfo) != 216 || sizeof(Base) != 64 || sizeof(Status) != 264 ||
-                sizeof(BlockInfo) != 64 || sizeof(Break) != 120 || sizeof(BreakResult) != 136 || sizeof(Table) != 184)
+                sizeof(BlockInfo) != 64 || sizeof(Break) != 184 || sizeof(BreakResult) != 136 || sizeof(Table) != 184)
                 throw new InvalidOperationException("Kiln.Build: native layout mismatch (kiln_build.h changed)");
             _table = (Table*)Services.Get<Prefix>("kiln.build", 1);
             return _table;
