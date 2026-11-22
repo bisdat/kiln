@@ -226,6 +226,49 @@ fn set(name: &str, row: Row) {
     );
 }
 
+#[test]
+fn runtime_has_reports_the_loaded_resource_latch_across_sessions() {
+    use kiln_sfi::runtime::assets::WRITE_CAPABILITY;
+
+    let _caps = caps();
+    let owner = next_owner();
+    fake_services::bind_thread(owner);
+    fake_services::set_world_session(owner, SERVER, 4);
+    set(WRITE_CAPABILITY, Row::Available);
+    let facts = facts(&CATALOG, false, false);
+    let package = package(
+        &facts,
+        "alpha",
+        &["runtime"],
+        Phase::Runtime,
+        Side::Server,
+        true,
+    );
+
+    let before = package.has("runtime.assets.write");
+    facts
+        .write_faults()
+        .report(SERVER, 4, WriteOutcome::EcsWriteUncertain);
+    let after_ecs_fault = package.has("runtime.assets.write");
+    facts
+        .write_faults()
+        .report(SERVER, 4, WriteOutcome::ResourceWriteUncertain);
+    let after_resource_fault = package.has("runtime.assets.write");
+    fake_services::set_world_session(owner, SERVER, 5);
+    let in_new_session = package.has("runtime.assets.write");
+    set(WRITE_CAPABILITY, Row::Missing);
+
+    assert_eq!(
+        [
+            before,
+            after_ecs_fault,
+            after_resource_fault,
+            in_new_session
+        ],
+        [true, true, false, false]
+    );
+}
+
 // ---- packages, hosts and Lua ----
 
 struct Active(Cell<bool>);
@@ -622,9 +665,11 @@ fn expected(
         Op::EcsWrite => decided(write),
         _ => decided(assets),
     };
+    // The ECS write context is off while the live session has an uncertain write (KfcRuntimeEcsCanWrite's native
+    // session fault); the resource write context is the provider's own.
     let (ready, can_write, resource) = (
         read == Row::Available,
-        write == Row::Available,
+        write == Row::Available && !matches!(fault, Fault::Live),
         assets == Row::Available,
     );
     let fact = match op {
@@ -1061,10 +1106,17 @@ fn a_latched_session_denies_only_the_writes_and_only_while_it_is_live() {
         (false, Some(UNCERTAIN.to_owned())),
     );
     assert_eq!(writes(&p), denied);
-    // Reads, has() and status() never read the latch.
+    // Reads never read the latch; the ECS write context is off for the session (has() and status() too), resource
+    // writes stay on (their latch is the provider's).
     assert_eq!(p.catalog("runtime.ecs.query"), (true, None));
-    assert!(p.has("runtime.ecs.write") && p.has("runtime.assets.write"));
-    assert_eq!(p.status("runtime.ecs.write"), (true, None));
+    assert!(!p.has("runtime.ecs.write") && p.has("runtime.assets.write"));
+    assert_eq!(
+        p.status("runtime.ecs.write"),
+        (
+            false,
+            Some(concat!("K", "FC Runtime has no writable live component context").into())
+        )
+    );
     // The next session ends it; the same session again would still be the latched one.
     fake_services::set_world_session(owner, SERVER, session + 1);
     assert_eq!(writes(&p), open);
@@ -1080,6 +1132,58 @@ fn a_latched_session_denies_only_the_writes_and_only_while_it_is_live() {
     for name in [READ, WRITE, ASSETS] {
         set(name, Row::Missing);
     }
+}
+
+/// ShroudForge's ECS write context is off while its session has an uncertain write (KfcRuntimeEcsCanWrite,
+/// write_entity_components.cpp:166-168, bind_world_entities.cpp:57-69; a resource write with a session marks it too,
+/// compare_exchange_resource_scalar.cpp:130-133): runtime.has("runtime.ecs.write") is false for the rest of that
+/// session and true again in the next. Resource writes stay on after an ECS fault (their latch is the provider's).
+#[test]
+fn an_uncertain_write_turns_ecs_writes_off_for_the_rest_of_its_session() {
+    let _caps = caps();
+    let owner = next_owner();
+    fake_services::bind_thread(owner);
+    for name in [READ, WRITE, ASSETS] {
+        set(name, Row::Available);
+    }
+    let facts = facts(&TEST_CATALOG, false, false);
+    let p = package(
+        &facts,
+        "alpha",
+        &["runtime"],
+        Phase::Runtime,
+        Side::Server,
+        true,
+    );
+    let no_context: String =
+        concat!("K", "FC Runtime has no writable live component context").into();
+    let session = facts.world_session(SERVER);
+    let before = p.has("runtime.ecs.write");
+    facts
+        .write_faults()
+        .report(SERVER, session, WriteOutcome::EcsWriteUncertain);
+    let after_ecs_fault = (
+        p.has("runtime.ecs.write"),
+        p.status("runtime.ecs.write"),
+        p.has("runtime.assets.write"),
+    );
+    fake_services::set_world_session(owner, SERVER, session + 1);
+    let next_session = p.has("runtime.ecs.write");
+    facts
+        .write_faults()
+        .report(SERVER, session + 1, WriteOutcome::ResourceWriteUncertain);
+    let after_resource_fault = p.has("runtime.ecs.write");
+    fake_services::set_world_session(owner, SERVER, session + 2);
+    let after_that = p.has("runtime.ecs.write");
+    fake_services::set_world_session(owner, SERVER, session);
+    for name in [READ, WRITE, ASSETS] {
+        set(name, Row::Missing);
+    }
+    assert!(before);
+    assert_eq!(after_ecs_fault, (false, (false, Some(no_context)), true));
+    assert!(next_session);
+    assert!(!after_resource_fault);
+    assert!(after_that);
 }
 
 // ---- permissions bound at registration ----

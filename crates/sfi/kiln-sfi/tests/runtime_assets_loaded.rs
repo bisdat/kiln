@@ -776,7 +776,7 @@ fn an_uncertain_write_stops_the_resource_and_latches_the_session() {
 }
 
 #[test]
-fn a_refused_or_process_latched_compare_exchange_is_a_failed_write_and_latches_nothing() {
+fn a_process_latched_compare_exchange_records_the_latch_without_a_session_fault() {
     let v = health_vm();
     v.eval::<()>(&format!(
         "res = g_alpha.assets.get_loaded_resource('{GUID}', '{HEALTH}')"
@@ -786,6 +786,11 @@ fn a_refused_or_process_latched_compare_exchange_is_a_failed_write_and_latches_n
             "local r, why = {code}; assert(r == nil); return why"
         ))
     };
+    let _cap = support::session_lock();
+    fs::set_cap(
+        assets::WRITE_CAPABILITY,
+        Some((kiln_abi::services::kiln_caps::KILN_CAP_AVAILABLE, 0)),
+    );
     // the member refused without a reply: nothing was written, so no proven resource
     fs::loaded(v.owner, |f| f.cas_refuse = Some(KILN_ERR_INVALID_ARGUMENT));
     assert_eq!(
@@ -793,6 +798,7 @@ fn a_refused_or_process_latched_compare_exchange_is_a_failed_write_and_latches_n
         t::WRITE_FAILED
     );
     assert_eq!(stored(&v, GUID), words(&[10, 50]));
+    let can_write_before_latch = v.facts.provider_facts().resource_can_write;
     // kiln.assets' writes latched by an earlier uncertain write (WHY_TARGET_LATCHED): this one attempted nothing, so it
     // fails as ShroudForge's latched provider does and latches neither the session nor the object
     fs::loaded(v.owner, |f| {
@@ -804,6 +810,10 @@ fn a_refused_or_process_latched_compare_exchange_is_a_failed_write_and_latches_n
         t::WRITE_FAILED
     );
     assert_eq!(v.facts.write_faults().fault(), None);
+    let can_write = v.facts.provider_facts().resource_can_write;
+    fs::set_cap(assets::WRITE_CAPABILITY, None);
+    assert!(can_write_before_latch);
+    assert!(!can_write);
     let ok: bool = v.eval("return g_alpha.assets.write_loaded_field(res, 'hp', 2) ~= nil");
     assert!(ok);
     assert_eq!(stored(&v, GUID), words(&[2, 50]));

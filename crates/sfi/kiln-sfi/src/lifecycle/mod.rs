@@ -89,14 +89,11 @@ impl LuaPorts {
     /// The ports of a live reload's VM. The same watchdog and hops, and a runtime context over the same owner,
     /// services, hops and watchdog with new runtime facts: ShroudForge's reload builds a new `AppState`
     /// (reload_runtime_packages.rs:44, start_ingame_runtime.rs:38-58), so the old runtime's write-fault latch,
-    /// effect records and ownership records do not reach the new VM.
+    /// effect records and ownership records do not reach the new VM. Known native resource write
+    /// availability survives the VM reload.
     fn for_reload(&self) -> Self {
         let boot = &self.runtime;
-        let facts = Rc::new(crate::runtime::RuntimeFacts::new(
-            boot.services().clone(),
-            boot.facts().catalog(),
-            boot.facts().config().clone(),
-        ));
+        let facts = Rc::new(boot.facts().for_reload());
         Self {
             watchdog: self.watchdog.clone(),
             hops: self.hops.clone(),
