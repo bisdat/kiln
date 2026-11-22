@@ -1,6 +1,6 @@
 // State words (glaze colours, always with a word: no pills, no chips), the banner strip, a keyboard hint.
 // StatusPill and Badge keep their names and the tone prop; both render a word in its tone.
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useT } from "../i18n";
 
 export type Tone = "ok" | "warn" | "err" | "info" | "idle" | "ember";
@@ -56,6 +56,8 @@ function readFolded(id: string | undefined): boolean {
 export function Banner({ tone = "info", title, actions, children, fold }: BannerProps) {
   const t = useT();
   const [folded, setFolded] = useState(() => readFolded(fold));
+  // a notice that says something new (a new fold id on a mounted strip) opens again
+  useEffect(() => setFolded(readFolded(fold)), [fold]);
   const toggle = () => {
     const next = !folded;
     setFolded(next);
