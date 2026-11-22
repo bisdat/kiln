@@ -341,6 +341,59 @@ void state() {
     check(s["patchedBy"].size() == 1 && s["patchedBy"][0] == "more-flame-altars", "the mods whose own patches changed the table");
 }
 
+// Ruling D1 (2026-11-21): the base rules lie below the registry stage. A registry edit on altarsPerFlameLevel[1] wins over a
+// rule that raised it, the rule enters the registry stage as a named writer beneath it, and kiln.base_rules says the
+// registry changed the rule's value.
+void with_registry() {
+    namespace bh = kc::registry::boothook;
+    namespace rs = kc::registry::stage;
+    std::vector<bh::OldDoc> below;
+    std::vector<uint8_t> at_write;  // the copy as the registry's write sees it
+    bh::Hooks h;
+    h.run = [&](const std::vector<bh::OldDoc>& d) {
+        below = d;
+        std::vector<rs::BootResource> out;
+        for (const auto& o : d)
+            if (o.type == "keen::BalancingTable") {
+                rs::BootResource b;
+                b.key = o.res, b.type = o.type;
+                rs::BootField f;
+                f.field.field = "altarsPerFlameLevel";
+                b.fields.push_back(f);
+                out.push_back(b);
+                break;
+            }
+        return out;
+    };
+    h.write = [&](const KilnAssetKey&, const std::string&, std::vector<uint8_t>* copy, const rs::BootResource& rb, std::vector<rs::BootOutcome>* outcomes,
+                  std::vector<std::string>*) -> size_t {
+        at_write = *copy;
+        (*copy)[1] = 2;  // the registry sets altarsPerFlameLevel[1] = 2
+        outcomes->push_back({rb.fields[0].field, true, {}, ""});
+        return 1;
+    };
+    h.finish = [](const std::vector<rs::BootOutcome>&) {};
+    bh::set(&h);
+    run(envelope({{"rules-a", "baseRules@roomy", roomy()}}));
+    bh::set(nullptr);
+    check(faults.empty() && put_count == 1, "one copy served: the rules and the registry's write in it");
+    bool named = false;
+    for (const auto& o : below)
+        if (o.mod == "rules-a" && o.key == "baseRules/roomy")
+            for (const auto& [p, v] : o.sets) named = named || (p == "altarsPerFlameLevel[1]" && v == json{{"min", 8}, {"raiseOnly", true}});
+    check(named, "the base rule enters the registry stage as an earlier writer of altarsPerFlameLevel[1] (min 8, raise only)");
+    check(at_write.size() >= sizeof(Table) && at_write[1] == 8, "the registry writes over the rule's result (8 at flame level 1)");
+    check(served.altars[1] == 2 && served.altars[0] == 8 && served.altars[2] == 8, "the registry's edit wins at level 1; the rule holds elsewhere");
+    have_served = true;
+    char buf[16384];
+    size_t n = 0;
+    check(base_state(buf, sizeof buf, &n) == KILN_OK, "state answers");
+    const json s = json::parse(std::string(buf, n));
+    check(s["effective"]["altars"][1] == 2 && s["registryChanged"].size() == 1 && s["registryChanged"][0]["field"] == "altarsPerFlameLevel[1]" &&
+              s["registryChanged"][0]["afterRules"] == 8 && s["registryChanged"][0]["effective"] == 2 && s["registryChanged"][0]["rules"][0] == "rules-a:roomy",
+          "kiln.base_rules: the effective value after the registry, and that a registry edit changed the rule's value: " + s.dump());
+}
+
 // A blocks file's "baseRules" section: read by the collector as a staged rule is; a name both have stays the file's.
 void rule_files() {
     namespace fs = std::filesystem;
@@ -414,6 +467,7 @@ int main() {
         rules_alone();
         refusals();
         state();
+        with_registry();
         rule_files();
     } catch (const std::exception& e) {
         std::printf("baserules-test: FAIL %s (after %d checks)\n", e.what(), checks);

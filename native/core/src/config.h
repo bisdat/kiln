@@ -12,6 +12,7 @@
 // (only on a verified build), never.
 // preview: lifts the client gate (gates.h): true (or "all") for every capability that is held until its game test, or
 // a list of their names. A side section's "preview" replaces the top-level one.
+// developer_debugging: true writes kiln/state/debug/<pid>.json and serves the debugger's control pipe (debug_descriptor.h); default false, a side section's value replaces the top-level one.
 // "tasks": { "workers": 1..8, "long_running_global": 1..16, "watchdog_running_s": 5..600, "watchdog_queued_s": 5..600 }:
 // kiln.tasks' pool (TasksConfig below); also in a side section.
 // "tooltipProbe": true | "<key>": the tooltip probe of the guided client session (kiln.ui.values, a client test build's
@@ -52,6 +53,7 @@ struct Config {
     NativePolicy native_policy = NativePolicy::Always;
     bool preview_all = false;           // "preview": true
     std::vector<std::string> preview;   // "preview": [names]
+    bool developer_debugging = false;   // "developer_debugging": true
     std::map<std::string, std::string> boot_test_refuse;  // "boot": {"testRefuse": {mod: collector}} (labs, policy any)
     std::map<std::string, std::string> boot_test_fault;   // "boot": {"testFault": {mod: collector}} (labs, policy any)
     TasksConfig tasks;                                    // "tasks": {...} (a side section overrides key by key)

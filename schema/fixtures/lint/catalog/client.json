@@ -35,6 +35,12 @@
         "id": "0x0a0000f1",
         "guid": "0000a001-0000-4000-8000-0000000000f1",
         "generateRarity": true
+      },
+      {
+        "name": "Food_T1_raw_hydration_Water_Pouch_Filled_DEPRECATED",
+        "id": "0xf262a2a9",
+        "guid": "0000a001-0000-4000-8000-0000000000f2",
+        "displayName": "Water"
       }
     ],
     "recipes": [
@@ -42,6 +48,20 @@
         "name": "Weapon_Fixture_Sword",
         "id": "0x0b000001",
         "guid": "0000b001-0000-4000-8000-000000000001"
+      },
+      {
+        "name": "Recipe_Fixture_Oven_Bread",
+        "id": "0x0b000002",
+        "guid": "0000b001-0000-4000-8000-000000000002",
+        "workshop": "0x1ee9f0bf",
+        "workshopName": "Prop_Production_T3_Oven"
+      },
+      {
+        "name": "Recipe_Fixture_Smelter_Bar",
+        "id": "0x0b000003",
+        "guid": "0000b001-0000-4000-8000-000000000003",
+        "workshop": "0xf5aab50a",
+        "workshopName": "Prop_Production_T2_Smelter"
       }
     ],
     "loot": [

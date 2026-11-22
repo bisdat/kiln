@@ -147,6 +147,7 @@ function ModDetail({ id, row, live, onEnable, onDone }: { id: string; row: Row; 
         d && [t("servers.mods.from"), d.source ? <span className="k-mono" title={d.source.hash}>{t("servers.mods.fromLibrary", { hash: shortHash(d.source.hash) })}</span> : t("servers.mods.byHand")],
         row.folder && [t("servers.mods.folder"), <span className="k-mono">{row.folder}</span>],
         m?.advanced && [t("servers.modpack.kind"), <span className="k-tone-warn">{t("servers.mods.advanced")}</span>],
+        d?.steamMessages && [t("servers.mods.steam"), t("servers.mods.steamMessages")],
         self && [t("servers.mods.role"), <span className="k-tone-ember">{t("servers.mods.servesLive")}</span>],
       ]} />
     </div>

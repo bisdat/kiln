@@ -807,6 +807,63 @@ internal static unsafe class ItemsNative
         public delegate* unmanaged[Cdecl]<ScaleStatus*, int> ScaleStatusOf;
     }
 
+    // ---- v9 (0.2.0-dev.30.3, GitHub issue #112): renaming a container (KilnItemsRenameRequest, -Result, -Status) ----
+
+    /// <summary>Where the renames end: a table this long has container_rename and rename_status.</summary>
+    public const uint V9RenameEnd = 384;
+
+    /// <summary>KILN_ITEMS_NAME_CAPACITY, KILN_ITEMS_NAME_MAX_BYTES, KILN_ITEMS_NAME_MAX_CHARS.</summary>
+    public const int NameCapacity = 256, NameMaxBytes = 64, NameMaxChars = 48;
+
+    // KilnItemsRenameResult.status
+    public const int RenameDone = 0, RenameGone = 1, RenameNotContainer = 2, RenameTooLong = 3, RenameBadText = 4, RenameNotServer = 5,
+        RenameFull = 6, RenameUnavailable = 7, RenameDropped = 8;
+
+    /// <summary><c>KilnItemsRenameRequest</c>, 272 bytes.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RenameRequest
+    {
+        public uint Size;
+        public uint Entity;
+        public uint Len;
+        public uint Reserved;
+        public fixed byte Text[NameCapacity];
+    }
+
+    /// <summary><c>KilnItemsRenameResult</c>, 192 bytes.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RenameResult
+    {
+        public uint Size;
+        public int Status;
+        public ulong Ticket;
+        public uint Entity;
+        public uint GameError;
+        public uint Steps;
+        public byte Changed, Cleared;
+        public ushort Reserved;
+        public fixed byte Message[160];
+    }
+
+    /// <summary><c>KilnItemsRenameStatus</c>, 184 bytes.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RenameStatus
+    {
+        public uint Size;
+        public byte Available, Feature, Server, Reserved0;
+        public uint Pending, Done, Refused, Reserved1;
+        public fixed byte Detail[160];
+    }
+
+    /// <summary>The v9 table: v8 followed by container_rename and rename_status.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct TableV9
+    {
+        public TableV8 V8;
+        public delegate* unmanaged[Cdecl]<ulong, RenameRequest*, delegate* unmanaged[Cdecl]<RenameResult*, void*, void>, void*, ulong*, RenameResult*, int> ContainerRename;
+        public delegate* unmanaged[Cdecl]<RenameStatus*, int> RenameStatusOf;
+    }
+
     /// <summary>True when a table of <paramref name="size"/> bytes has the v6 member that ends at <paramref name="end"/>.</summary>
     public static bool HasV6(uint size, int end) => size >= (uint)end;
 

@@ -78,6 +78,10 @@ Never deploy to a server players are using. Use a separate local test server.
   `Capabilities.Is(name)` / `Why(name)`; an off capability throws `KilnUnavailableException`. dev.27+: every service
   does, and KILN121 warns when a `[RequiresCapability]` member is used with nothing asking first. A mod that cannot work
   without a row names it in `KilnFeatures` (`tasks.pool`), so Kiln does not load it where the row is off.
+- **Player input and Steam (dev.30.3+).** `BuildingInput` sends the local player's own building input (the server
+  still checks permissions, resources and range; game client 26430625, not checked in a real game yet). `SteamMessages` is Steam
+  peer-to-peer outside the game's connection (`Open` needs `"steamMessages": true` in kiln.mod.json); prefer Kiln.Network
+  channels. Ask `Available` first. [references/api.md](references/api.md#client).
 - **Read every result (dev.27+).** A refusal by the game is a result with `Ok = false` and a `Reason`, not an exception.
   KILN120 warns when nobody reads one; pass the reason on to the player or the log.
 - **Never ship Kiln assemblies.** Kiln.Sdk references them with `ExcludeAssets=runtime`.

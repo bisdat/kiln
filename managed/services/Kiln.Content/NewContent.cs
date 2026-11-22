@@ -199,6 +199,30 @@ public sealed record RecipeDefinition
     /// <summary>The crafting duration (timed stations). Null: the template's.</summary>
     public TimeSpan? Duration { get; init; }
 
+    /// <summary>
+    /// The recipe's tank water, in water charges per craft (the game's own <c>waterCharges</c>; one charge is 64 of the game's
+    /// water units), what the recipe screen shows as its "Water" row: "Water 92 / 2" is 92 charges at hand and 2 a craft.
+    /// The game takes it when a craft starts, after the ingredients. At one of the six stations with a tank (Seedbed, 150
+    /// charges; Oven, Cooking Station, Laboratory and Coffee Brewer, 100; Beehive, 50) it comes from the station's own
+    /// tank, which the player fills with a watering can or the station's Fill; a recipe there that asks more than the tank
+    /// holds never starts. In a crafting menu (<c>"hand"</c>, the Workbench, the Kitchen, an NPC's) it comes from the
+    /// player and the base: the crafter's water containers, then the base's wells and barrels. A factory station without
+    /// a tank never starts a recipe that asks water. A whole number 0..1023. Null: the template's water (the
+    /// <see cref="BaseOn"/> recipe's; none for a recipe with only a <see cref="Station"/>); 0 clears a base's. Not the
+    /// game's old "Water" canteen item: as an ingredient a craft takes that item, never tank water. Sent as the
+    /// definition's <c>"water"</c>, the key a data pack's recipe uses. Code mods used <c>Fields["waterCharges"]</c> for it
+    /// before; give one or the other (both, or a value outside 0..1023: <see cref="ArgumentException"/> at
+    /// <c>Register</c>). Since 0.2.0-dev.30.3 (mod API 0.2.13).
+    /// </summary>
+    /// <example><code>
+    /// Content.Recipes.Register(new RecipeDefinition
+    /// {
+    ///     Guid = new("1f0c8a52-3b7e-4d21-9a6c-2e5d8b4f7a10"), Name = "MyMod_Herb_Tea", Station = "0x6b8247d6", Water = 5,
+    ///     Inputs = [("Food_T7_raw_herb_Thyme", 2)], Outputs = [("Food_T7_dish_hydration_ThymeTea", 1)],
+    /// });
+    /// </code></example>
+    public int? Water { get; init; }
+
     public RecipeUnlock Unlock { get; init; } = RecipeUnlock.Always;
 
     /// <summary>A recipe name (most recipes show their result's name). Null: none.</summary>
@@ -360,6 +384,7 @@ public static unsafe class NewContent
         j["inputs"] = Stacks(def.Inputs);
         j["outputs"] = Stacks(def.Outputs);
         if (def.Duration is { } d) j["duration"] = d.TotalSeconds;
+        if (def.Water is { } water) j["water"] = WaterOf(def, water);
         j["unlock"] = def.Unlock == RecipeUnlock.LikeBase ? "base" : "always";
         if (def.DisplayName != null) j["displayName"] = def.DisplayName;
         (def.Fields as FieldValues)?.Require("recipes", $"recipe {def.Name}");
@@ -495,6 +520,23 @@ public static unsafe class NewContent
             a.Add(o);
         }
         return a;
+    }
+
+    /// <summary>The most water a recipe asks (kiln.content's recipe_water.h: 1,023 charges is the most a container shows
+    /// exactly; the game's own recipes ask 1 to 10, its tanks hold 50 to 150).</summary>
+    internal const int MaxWater = 1023;
+
+    // RecipeDefinition.Water: the definition's "water", as a data pack's recipe gives it (kiln.content's recipe_water.h parses
+    // it and writes RecipeInfo.waterCharges after a station-only recipe's requirements are cleared). Checked here as well,
+    // so the mod gets the error at Register. Fields["waterCharges"] beside it is refused: kiln.content applies "fields"
+    // after "water", so one would silently win over the other.
+    private static long WaterOf(RecipeDefinition def, int water)
+    {
+        if (water is < 0 or > MaxWater)
+            throw new ArgumentException($"recipe {def.Name}: Water must be a whole number of water charges per craft, 0..{MaxWater} (it is {water})");
+        if (def.Fields is { } f && f.ContainsKey("waterCharges"))
+            throw new ArgumentException($"recipe {def.Name}: give Water or Fields[\"waterCharges\"], not both");
+        return water;
     }
 
     private static JsonObject FieldsJson(IReadOnlyDictionary<string, object> fields)

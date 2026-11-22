@@ -603,14 +603,14 @@ fn admission_follows_the_plan_and_removes_what_cannot_run_whole() {
         "{lines:?}"
     );
     assert!(
-        lines
-            .iter()
-            .any(|l| l.contains("'native' will not run: Kiln's native manager is not wired yet")),
+        lines.iter().any(|l| l
+            .contains("'native' will not run: Kiln's native manager made no run for this start")),
         "{lines:?}"
     );
     assert!(
-        lines.iter().any(|l| l
-            .contains("'patch' will not run: Kiln's ShroudForge startup pass is not built yet")),
+        lines.iter().any(|l| l.contains(
+            "'patch' will not run: Kiln's EML loader (kiln-eml) offers no startup pass this start"
+        )),
         "{lines:?}"
     );
 

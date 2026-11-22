@@ -41,6 +41,7 @@
 #             pack: the server components as a flat zip to unzip into a server folder, lib/serverpack.py), and the
 #             systemd units for kilnctl (kiln@.service, kiln-backup@.service, kiln-backup@.timer)
 #   sdk/      Kiln.Sdk, Kiln.Api, Kiln.Templates nupkgs, kiln, kiln.exe (the CLI), the VS Code extension .vsix;
+#             tools/debug-inspect/ (kiln debug's Windows helper + manifest, next to kiln) and kiln-debug-inspect-VERSION.zip;
 #             feed/: the nupkgs as a static NuGet v3 feed (lib/feed.py; its URLs: KILN_FEED_URL, default this folder on
 #             frostdev.io); api/: the modding site and API reference (tools/docs-site/build.sh, when the export has it).
 #             Both are built only: publish.sh uploads them with --sdk-site, github-draft.sh never
@@ -817,6 +818,9 @@ fi
 if ((!launcher_only)); then
 install -m 755 "$lin_target/release/kiln" "$out/sdk/kiln"
 ((skip_windows)) || install -m 644 "$CARGO_TARGET_DIR/$win/release/kiln.exe" "$out/sdk/kiln.exe"
+# kiln debug's Windows side (the signed kiln.exe as tools/debug-inspect/win-x64/kiln.exe with its manifest, next to
+# sdk/kiln; and the same as kiln-debug-inspect-VERSION.zip for a kiln downloaded on its own): lib/debug-inspect.sh
+((skip_windows)) || quiet "$lib/debug-inspect.sh" "$CARGO_TARGET_DIR/$win/release/kiln.exe" "$out/sdk" "$version"
 for f in "$KILN_OUT"/nuget/*."$sdk_version".nupkg; do cp "$f" "$out/sdk/"; done
 cp "$vsix" "$out/sdk/"
 # the modding site (guide + API reference, DocFX) in sdk/api/, when the export has its build script

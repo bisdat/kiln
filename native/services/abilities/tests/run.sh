@@ -11,6 +11,19 @@ flags=(-std=c++20 -O1 -g -pthread -Wall -Wextra -fsanitize=address,undefined -fn
 g++ "${flags[@]}" "$here/natives_test.cpp" "$here/../verify.cpp" -o "$out/natives_test"
 "$out/natives_test"
 
+# item_use (since 0.2.0-dev.30.3): item_use.h's layout and verdicts against a fake kiln.types, and abilities.cpp's own
+# t_item_use against a fake kiln.items, fake Actor / ActorInput components and a fake TriggerSequence.
+python3 - "$here/../abilities.cpp" "$out/item_use_under_test.h" <<'PYCODE'
+from pathlib import Path
+import sys
+s = Path(sys.argv[1]).read_text()
+start = s.index("kab::use::Layout g_use;")
+end = s.index("const KilnAbilitiesApi kTable = {", start)
+Path(sys.argv[2]).write_text(s[start:end])
+PYCODE
+g++ "${flags[@]}" -I"$out" "$here/item_use_test.cpp" -o "$out/item_use_test"
+"$out/item_use_test"
+
 # The impact pool watch's pure parts (impact_watch.h): layout check, thresholds, top programs, age table, control words.
 g++ "${flags[@]}" "$here/impact_watch_test.cpp" -o "$out/impact_watch_test"
 "$out/impact_watch_test"
@@ -85,3 +98,21 @@ Path(sys.argv[2]).write_text(queue + "\nvoid deliver(uintptr_t world) {\n" + del
 PYCODE
 g++ "${flags[@]}" -I"$out" "$here/events_test.cpp" -o "$out/events_test"
 "$out/events_test"
+
+# #108: the program lifecycle across world changes (add_program, refresh_programs, check_programs_ready, on_world)
+# against a fake ImpactRegistry: the same registry address again, another one, a stop that is never seen. Twice: with
+# ASan/UBSan, and with TSan for the stop on the destroying thread against the tick thread's registrations.
+python3 - "$here/../abilities.cpp" "$out/programs_under_test.h" <<'PYCODE'
+from pathlib import Path
+import sys
+s = Path(sys.argv[1]).read_text()
+programs = s[s.index("// ---- programs ----"):s.index("// ------------------------------------------------------------------------------------------- Pre")]
+ready = s[s.index("void check_programs_ready()"):s.index("\nvoid expire()")]
+stop = s[s.index("void KILN_CALL on_world("):s.index("// ------------------------------------------------------------------------------------------- table")]
+Path(sys.argv[2]).write_text(programs + "\n" + ready + "\n" + stop)
+PYCODE
+g++ "${flags[@]}" -I"$out" "$here/programs_test.cpp" "$here/../verify.cpp" -o "$out/programs_test"
+"$out/programs_test"
+tsan=("${flags[@]/-fsanitize=address,undefined/-fsanitize=thread}")
+g++ "${tsan[@]}" -I"$out" "$here/programs_test.cpp" "$here/../verify.cpp" -o "$out/programs_test_tsan"
+TSAN_OPTIONS=halt_on_error=1 "$out/programs_test_tsan"

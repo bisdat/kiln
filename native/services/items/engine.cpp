@@ -800,9 +800,11 @@ bool read_pages_impl(const Access& a, KilnEntity e, PageSet* out, bool* initiali
     const auto* setup = static_cast<const uint8_t*>(other_sized(a, A_SETUP, e, kSetupSize));
     if (!setup) return false;
     if (initialized) *initialized = setup[E.setup_initialized] != 0;
+    out->flags = setup[kSetupFlags];
     Tree t{};
     walk(setup, &setup_via_access, &a, &t, 0, -1);
     for (uint32_t i = 0; i < t.n; ++i) {
+        out->cat[out->n] = t.cats[i];
         Page& pg = out->p[out->n++];
         pg = Page{};
         pg.entity = t.ids[i];
@@ -897,9 +899,8 @@ uint32_t move_stack_impl(const Access& a, void* tx, KilnEntity from, uint64_t sl
     if (!src) return move_why(mo, KILN_ITEMS_SLOT_CHANGED, "the slot (inventory %u) is not one of entity %u's slots", inv, from), 0;
     if (is_empty(*src)) return move_why(mo, KILN_ITEMS_SLOT_CHANGED, "the slot holds nothing"), 0;
     const Stack first = *src;
-    PlayerGuard gf, gt;
+    PlayerGuard gf;
     player_guard_impl(a, from, &gf);
-    player_guard_impl(a, to, &gt);
     if (gf.is_player && !allow_equipped && gf.protects(slot))
         return move_why(mo, KILN_ITEMS_REFUSED, "the slot is equipped or held by player %u", from), 0;
     if (gf.is_player && !actionbar && (inv == gf.actionbar[0] || inv == gf.actionbar[1]))
@@ -910,7 +911,10 @@ uint32_t move_stack_impl(const Access& a, void* tx, KilnEntity from, uint64_t sl
     const bool gear = pide_of(first) != 0 || (rd<uint32_t>(info, E.item_flags) & 2u) != 0;
     const uint32_t want = count ? count : first.count;
     if (want > first.count) return move_why(mo, KILN_ITEMS_NOT_ENOUGH, "the slot holds %u, not %u", first.count, want), 0;
-    const uint32_t skip[2] = {gt.is_player && !actionbar ? gt.actionbar[0] : 0u, gt.is_player && !actionbar ? gt.actionbar[1] : 0u};
+    // where it may land (issue #109): a person's Generic pages, the worn backpack's included, never an equipment,
+    // currency or customization page nor the action bar unless named and allowed (moves.h choose_destination)
+    DestRules rules;
+    dest_rules_for(a, to, tp, actionbar, info, &rules);
     const bool whole = want == first.count;
     uint32_t moved = 0;
     bool placed_first = false;
@@ -919,7 +923,18 @@ uint32_t move_stack_impl(const Access& a, void* tx, KilnEntity from, uint64_t sl
         const uint8_t* cur = live_stack(a, slot);
         if (!cur || rd<uint32_t>(cur, 0) != first.item || rd<uint32_t>(cur, 4) == 0) break;
         uint64_t dst = 0;
-        if (!find_destination(tp.p, tp.n, first.item, max_stack, gear, skip, 2, placed_first ? 0 : to_slot, &dst)) break;
+        const char* refusal = "";
+        const uint64_t named = placed_first ? 0 : to_slot;
+        const DestKind where = choose_destination(tp.p, tp.cat, tp.n, first.item, max_stack, gear, rules, named, &dst, &refusal);
+        if (where == DestKind::Refused) {
+            if (moved == 0) {
+                mo->status = KILN_ITEMS_REFUSED;
+                std::snprintf(mo->why, sizeof mo->why, "%s", refusal);
+                return 0;
+            }
+            break;
+        }
+        if (where != DestKind::Found) break;
         alignas(8) Result12 r[3] = {};
         E.slot_transfer(&r[0], tx, dst, slot, whole ? 0 : 2);
         if (r[0].error != 0) {
@@ -927,12 +942,14 @@ uint32_t move_stack_impl(const Access& a, void* tx, KilnEntity from, uint64_t sl
             break;
         }
         if (r[0].value == 0) break;
+        if (named != 0 && dst == named) mo->named = named;
         moved += r[0].value;
         placed_first = true;
     }
     if (moved >= want) return mo->status = KILN_ITEMS_DONE, moved;
     if (moved > 0) return move_why(mo, KILN_ITEMS_PARTIAL, "only %u of %u fit", moved, want), moved;
     if (mo->error) return move_why(mo, KILN_ITEMS_REFUSED, "the game refused the transfer (error 0x%02x)", mo->error), 0;
+    if (rules.person) return move_why(mo, KILN_ITEMS_NO_ROOM, "no room in entity %u's backpack for item 0x%08x", to, first.item), 0;
     return move_why(mo, KILN_ITEMS_NO_ROOM, "no room in entity %u for item 0x%08x", to, first.item), 0;
 }
 
@@ -941,11 +958,12 @@ void move_fail(KilnItemsMoveResult* res, int32_t status, const char* fmt, uint32
     std::snprintf(res->message, sizeof res->message, fmt, a, b);
 }
 
-void fill_changes(KilnItemsMoveResult* res, const std::vector<PageSet>& v) {
+LedgerTotals fill_changes(KilnItemsMoveResult* res, const std::vector<PageSet>& v, std::vector<Change>* all = nullptr) {
     // v: from before, from after, to before, to after
     std::vector<Change> ch(512);
     LedgerTotals t{};
     const size_t n = build_ledger(v[0].p, v[1].p, v[0].n, v[2].p, v[3].p, v[2].n, ch.data(), ch.size(), &t);
+    if (all) all->assign(ch.begin(), ch.begin() + static_cast<std::ptrdiff_t>(n));
     res->done = t.done;
     res->stacks = t.stacks;
     for (size_t i = 0; i < n && res->change_count < KILN_ITEMS_MAX_MOVE_CHANGES; ++i) {
@@ -957,6 +975,7 @@ void fill_changes(KilnItemsMoveResult* res, const std::vector<PageSet>& v) {
         c.pide = ch[i].pide;
         c.reserved = stamp_for(c.pide, c.item);  // v4: the item entity moves whole, stamp and all
     }
+    return t;
 }
 
 void run_move_impl(const Access& a, const KilnItemsMoveRequest& r, uint8_t* tx, KilnItemsMoveResult* res) {
@@ -975,6 +994,7 @@ void run_move_impl(const Access& a, const KilnItemsMoveRequest& r, uint8_t* tx, 
     E.tx_init(tx, s);
     bool canceled = false;
     uint32_t game_error = 0;
+    uint64_t named = 0;
     if (r.kind == KILN_MOVE_STACK) {
         MoveOutcome mo;
         const uint32_t moved = move_stack_impl(a, tx, r.from, r.slot, r.to, r.count, r.to_slot,
@@ -988,6 +1008,7 @@ void run_move_impl(const Access& a, const KilnItemsMoveRequest& r, uint8_t* tx, 
             if (v[0].p[i].entity == KILN_SLOT_INVENTORY(r.slot) && KILN_SLOT_INDEX(r.slot) < kSlotsPerPage)
                 st = &v[0].p[i].s[KILN_SLOT_INDEX(r.slot)];
         res->requested = r.count ? r.count : (st ? st->count : 0);
+        named = mo.named;
         (void)moved;
     } else {
         Result12 out[3] = {};
@@ -1008,7 +1029,26 @@ void run_move_impl(const Access& a, const KilnItemsMoveRequest& r, uint8_t* tx, 
     // what changed, from the inventories themselves (the writes are in place before the commit)
     read_pages_impl(a, r.from, &v[1], nullptr);
     read_pages_impl(a, r.to, &v[3], nullptr);
-    fill_changes(res, v);
+    std::vector<Change> landed;
+    const LedgerTotals totals = fill_changes(res, v, &landed);
+    if (r.kind == KILN_MOVE_STACK && (res->status == KILN_ITEMS_DONE || res->status == KILN_ITEMS_PARTIAL)) {
+        // Never Done for a stack the target cannot reach (issue #109): every piece must have arrived on a page the
+        // destination rules allow (or in the accepted to_slot), and nothing may have left the slot without arriving.
+        DestRules rules;
+        dest_rules_for(a, r.to, v[3], (r.flags & KILN_ITEMS_MOVE_ACTIONBAR) != 0, nullptr, &rules);
+        uint32_t astray = 0;
+        for (const Change& c : landed)
+            if (!may_land(rules, v[3].p, v[3].cat, v[3].n, c.to_slot, named)) astray += c.amount;
+        if (astray || totals.lost) {
+            res->status = KILN_ITEMS_REFUSED;
+            if (astray)
+                std::snprintf(res->message, sizeof res->message,
+                              "rolled back: %u item(s) would have landed in a slot of entity %u that it cannot use", astray, r.to);
+            else
+                std::snprintf(res->message, sizeof res->message,
+                              "rolled back: %u item(s) left the slot without arriving in entity %u", totals.lost, r.to);
+        }
+    }
     const bool ok = res->status == KILN_ITEMS_DONE || res->status == KILN_ITEMS_PARTIAL;
     // A canceled quick stack / move all still commits what a handler moved itself first (shroudlink's `on_transfer`
     // moves are the mods' own, whatever the game's transfer then does); nothing moved: nothing to commit.
@@ -1202,6 +1242,28 @@ bool tx_takes_plain_only(const uint8_t* tx) {
         if (!upgrade::plain_take(op[0x26], op[0x30], rd<uint32_t>(op, 0x20))) return false;
     }
     return true;
+}
+
+void dest_rules_for(const Access& a, KilnEntity to, const PageSet& tp, bool actionbar, const uint8_t* info, DestRules* r) {
+    *r = DestRules{};
+    PlayerGuard g;
+    player_guard_impl(a, to, &g);
+    r->person = g.is_player || (tp.flags & 0x03) != 0;
+    r->actionbar = actionbar;
+    if (g.is_player) {
+        r->actionbar_pages[0] = g.actionbar[0];
+        r->actionbar_pages[1] = g.actionbar[1];
+    }
+    if (const auto* sel = static_cast<const uint8_t*>(other_sized(a, A_SLOTSEL, to, kSelectionSize)))
+        for (uint32_t i = 0; i < kSelectionEquipment; ++i) {
+            const uint32_t inv = rd<uint32_t>(sel, i * 8);
+            const uint8_t index = sel[i * 8 + 4];
+            r->equipment[i] = inv != 0 && index < kSlotsPerPage ? KILN_SLOT_ID(inv, index) : 0;
+        }
+    if (info) {
+        r->item_equip_type = info[0x104];  // ItemInfo EquipmentSlotType (equip.cpp, the catalog)
+        r->item_category = info[0xCC];     // ItemInfo category
+    }
 }
 
 bool read_pages(const Access& a, KilnEntity e, PageSet* out, bool* initialized) {

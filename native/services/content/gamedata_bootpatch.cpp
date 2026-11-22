@@ -51,6 +51,7 @@
 #include <mutex>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "gamedata.h"
@@ -60,6 +61,8 @@
 #include "kiln_blocks_json.hpp"
 #include "kiln_boot_collector.hpp"
 #include "refs.h"
+#include "registry/boot_hooks.h"
+#include "registry/claims.h"
 #include "services/kiln_assets.h"
 #include "services/kiln_base_rules.h"
 #include "services/kiln_caps.h"
@@ -794,7 +797,15 @@ KilnResult KILN_CALL prepare_boot(void*, const KilnBootPrepareInputV1* in, KilnB
     // the mod, the value), components added or removed ("|<component, lower-case>": "+" / "-"), paths that start at a
     // component ("|<component>": the path, "set" / "append"), documents that add or remove components ("": which), paths
     // that name a component by its place in the list ("": the path)
-    std::map<std::string, std::vector<Claim>> fields, components, uses, structure, by_place;
+    std::map<std::string, std::vector<Claim>> components, uses, structure, by_place;
+    // fields set, by "<resource key>|<normalised path without indices>": per index the claims in order, and the claims with a
+    // "*" (they meet every index): a set asks its own index and the starred ones, not every earlier claim on those members
+    struct FieldClaims {
+        std::map<std::string, std::vector<std::pair<uint64_t, Claim>>> exact;
+        std::vector<std::pair<uint64_t, Claim>> starred, all;
+    };
+    std::unordered_map<std::string, FieldClaims> fields;
+    uint64_t field_order = 0;
     struct ListClaim {
         std::string res, mod, path;
         std::vector<Seg> place;  // normalised
@@ -802,6 +813,27 @@ KilnResult KILN_CALL prepare_boot(void*, const KilnBootPrepareInputV1* in, KilnB
     };
     // lists appended to; lists set with [*] (the list's place); lists cleared or replaced; every set's place
     std::vector<ListClaim> appended, starred, reshaped, set_places;
+    // The same claims in the registry's claim index (registry/claims.h, P1-PLAN 5.3): per resource a trie of the places, so a
+    // question walks one path instead of every earlier claim. Its answer is the earliest claim that meets (the lowest seq,
+    // the order the vectors hold them in), so every refusal names the mod and path the scans named. A place deeper than the
+    // index keeps (kMaxSegs segments) turns the index off for this prepare: the vectors are scanned as before.
+    registry::ClaimIndex index;
+    bool deep = false;
+    using RClaim = registry::Claim;
+    using RKind = registry::ClaimKind;
+    auto rsegs = [&](const std::vector<Seg>& v) {
+        std::vector<registry::Seg> out;
+        out.reserve(v.size());
+        for (const Seg& s : v) out.push_back({s.s, s.index});
+        if (v.size() > registry::kMaxSegs) deep = true;
+        return out;
+    };
+    auto claim = [&](const std::string& res, const std::vector<Seg>& place, RKind kind, const std::string& mod, const std::string& path, const std::string& value) {
+        index.add(res, rsegs(place), RClaim{0, mod, kind, path, value});
+    };
+    auto what_of = [](const RClaim& c) { return std::string(c.kind == RKind::Clear ? "clear" : "replace"); };
+    // where each resource's patch is in plan->resources (the vector keeps the envelope's order)
+    std::unordered_map<std::string, size_t> res_at;
     // each mod's files first, then what its OnBoot staged; a key both have stays the file's
     std::vector<kiln::boot::Doc> docs, rule_docs;
     try {
@@ -1095,6 +1127,50 @@ KilnResult KILN_CALL prepare_boot(void*, const KilnBootPrepareInputV1* in, KilnB
                 // two mods on one list
                 const std::vector<Seg> place = normalised(segs, rp.tmpl);
                 const std::string dump = clear ? std::string() : spec["values"].dump();
+                const std::vector<registry::Seg> P = rsegs(place);
+                if (!deep) {
+                    const std::string owner = d.owner;
+                    auto other = [&](std::initializer_list<RKind> kinds) {
+                        return [owner, kinds = std::vector<RKind>(kinds)](const RClaim& c) {
+                            return c.mod != owner && std::find(kinds.begin(), kinds.end(), c.kind) != kinds.end();
+                        };
+                    };
+                    const auto reshaping = other({RKind::Clear, RKind::Replace});
+                    const RClaim* best = nullptr;
+                    bool at_same = false;
+                    auto take = [&](const RClaim* c, bool same) {
+                        if (c && (!best || c->seq < best->seq)) best = c, at_same = same;
+                    };
+                    take(index.same_place(res_key, P, [&](const RClaim& c) {
+                        return reshaping(c) && (append || what_of(c) != w || (c.value != dump && nlohmann::json::parse(c.value) != spec["values"]));
+                    }), true);
+                    take(index.list_through(res_key, P, reshaping), false);
+                    if (!append) take(index.below_list(res_key, P, reshaping), false);
+                    if (best && at_same)
+                        return refused(path, "Conflict: mod " + best->mod + " " + verb_of(what_of(*best)) + " this list of " + res_key + " (\"" + best->path +
+                                                 "\"); two mods on one list are not combined (the same " + what_of(*best) + " from both is)");
+                    if (best)
+                        return refused(path, "Conflict: mod " + best->mod + " " + verb_of(what_of(*best)) + " \"" + best->path + "\" of " + res_key +
+                                                 ", which this path goes through or holds; the later mod is refused");
+                    if (append) {
+                        if (const RClaim* a = index.same_place(res_key, P, other({RKind::Append})))
+                            return refused(path, "Conflict: mod " + a->mod + " appends to this list of " + res_key + " too (\"" + a->path +
+                                                     "\"); two mods on one list are not combined");
+                        if (const RClaim* s = index.same_place(res_key, P, other({RKind::Starred})))
+                            return refused(path, "Conflict: mod " + s->mod + " sets every element of this list of " + res_key + " (\"" + s->path +
+                                                     "\"), which would change what is appended here too; the later mod is refused");
+                    } else {
+                        for (const RKind k : {RKind::Append, RKind::Set}) {
+                            best = nullptr;
+                            take(index.same_place(res_key, P, other({k})), true);
+                            take(index.below_list(res_key, P, other({k})), false);
+                            if (best)
+                                return refused(path, "Conflict: mod " + best->mod + (k == RKind::Append ? " appends to \"" : " sets \"") + best->path + "\" of " +
+                                                         res_key + ", and this patch " + verb_of(w) + " that list; the later mod is refused");
+                        }
+                    }
+                }
+                if (deep)
                 for (const ListClaim& r : reshaped) {
                     if (r.res != res_key || r.mod == d.owner) continue;
                     // the same values are the same replace however they are written (1 and 1.0)
@@ -1106,22 +1182,24 @@ KilnResult KILN_CALL prepare_boot(void*, const KilnBootPrepareInputV1* in, KilnB
                                                  ", which this path goes through or holds; the later mod is refused");
                 }
                 if (append) {
-                    for (const ListClaim& a : appended)
+                    for (const ListClaim& a : deep ? appended : std::vector<ListClaim>())
                         if (a.res == res_key && a.mod != d.owner && same_place(a.place, place))
                             return refused(path, "Conflict: mod " + a.mod + " appends to this list of " + res_key + " too (\"" + a.path +
                                                      "\"); two mods on one list are not combined");
-                    for (const ListClaim& s : starred)
+                    for (const ListClaim& s : deep ? starred : std::vector<ListClaim>())
                         if (s.res == res_key && s.mod != d.owner && same_place(s.place, place))
                             return refused(path, "Conflict: mod " + s.mod + " sets every element of this list of " + res_key + " (\"" + s.path +
                                                      "\"), which would change what is appended here too; the later mod is refused");
                     appended.push_back({res_key, d.owner, path, place, "", ""});
+                    claim(res_key, place, RKind::Append, d.owner, path, "");
                 } else {
                     for (const auto* claims : {&appended, &set_places})
-                        for (const ListClaim& o : *claims)
+                        for (const ListClaim& o : deep ? *claims : std::vector<ListClaim>())
                             if (o.res == res_key && o.mod != d.owner && (same_place(o.place, place) || through(place, o.place)))
                                 return refused(path, "Conflict: mod " + o.mod + (claims == &appended ? " appends to \"" : " sets \"") + o.path + "\" of " +
                                                          res_key + ", and this patch " + verb_of(w) + " that list; the later mod is refused");
                     reshaped.push_back({res_key, d.owner, path, place, w, dump});
+                    claim(res_key, place, clear ? RKind::Clear : RKind::Replace, d.owner, path, dump);
                 }
                 dp.ops.push_back(std::move(op));
             }
@@ -1146,41 +1224,78 @@ KilnResult KILN_CALL prepare_boot(void*, const KilnBootPrepareInputV1* in, KilnB
             if (unknown && is_op(value) && value.empty()) return refused(path, "an empty operation object");
             const std::vector<Seg> place = normalised(segs, rp.tmpl);
             const std::string norm = text_of(place);
-            // two mods, one field
-            auto& list = fields[res_key + "|" + base_of(norm)];
+            // two mods, one field: the earliest earlier claim on the same members whose indices meet this one's
+            FieldClaims& fc = fields[res_key + "|" + base_of(norm)];
             const std::string ix = index_of(norm), dump = value.dump();
-            for (const Claim& c : list)
-                if (c.mod != d.owner && overlap(c.index, ix) && (c.value != dump || c.index != ix || is_op(value)))
-                    return refused(path, "Conflict: mod " + c.mod + " sets this field of " + res_key + " too (" + c.value +
-                                             "); two mods on one field are not combined");
-            list.push_back({ix, d.owner, dump});
+            auto meets = [&](const Claim& c) { return c.mod != d.owner && overlap(c.index, ix) && (c.value != dump || c.index != ix || is_op(value)); };
+            const Claim* hit = nullptr;
+            uint64_t hit_at = 0;
+            if (ix.find('*') != std::string::npos) {  // a "*" meets every index: every claim on these members, in order
+                for (const auto& [at, c] : fc.all)
+                    if (meets(c)) {
+                        hit = &c;
+                        break;
+                    }
+            } else {
+                if (const auto ex = fc.exact.find(ix); ex != fc.exact.end())
+                    for (const auto& [at, c] : ex->second)
+                        if (meets(c)) {
+                            hit = &c, hit_at = at;
+                            break;
+                        }
+                for (const auto& [at, c] : fc.starred)
+                    if (meets(c)) {
+                        if (!hit || at < hit_at) hit = &c, hit_at = at;
+                        break;
+                    }
+            }
+            if (hit)
+                return refused(path, "Conflict: mod " + hit->mod + " sets this field of " + res_key + " too (" + hit->value +
+                                         "); two mods on one field are not combined");
+            fc.all.emplace_back(field_order, Claim{ix, d.owner, dump});
+            (ix.find('*') != std::string::npos ? fc.starred : fc.exact[ix]).emplace_back(field_order, Claim{ix, d.owner, dump});
+            ++field_order;
             // a list another mod clears or replaces: its elements are not the game's any more
-            for (const ListClaim& r : reshaped)
+            const std::vector<registry::Seg> P = rsegs(place);
+            if (!deep) {
+                const std::string owner = d.owner;
+                if (const RClaim* r = index.list_through(res_key, P, [&](const RClaim& c) { return c.mod != owner && (c.kind == RKind::Clear || c.kind == RKind::Replace); }))
+                    return refused(path, "Conflict: mod " + r->mod + " " + verb_of(what_of(*r)) + " the list \"" + r->path + "\" of " + res_key +
+                                             " this path goes through; the later mod is refused");
+            }
+            for (const ListClaim& r : deep ? reshaped : std::vector<ListClaim>())
                 if (r.res == res_key && r.mod != d.owner && through(r.place, place))
                     return refused(path, "Conflict: mod " + r.mod + " " + verb_of(r.what) + " the list \"" + r.path + "\" of " + res_key +
                                              " this path goes through; the later mod is refused");
             set_places.push_back({res_key, d.owner, path, place, "set", ""});
+            claim(res_key, place, RKind::Set, d.owner, path, "");
             // [*] over a list another mod appends to would change the appended values too: the later mod is refused
             // ([i] names the same element either way, and is not)
             for (size_t j = 0; j < place.size(); ++j) {
                 if (!place[j].index || place[j].s != "*") continue;
                 const std::vector<Seg> listp(place.begin(), place.begin() + static_cast<std::ptrdiff_t>(j));
-                for (const ListClaim& a : appended)
-                    if (a.res == res_key && a.mod != d.owner && same_place(a.place, listp))
-                        return refused(path, "Conflict: mod " + a.mod + " appends to this list of " + res_key + " (\"" + a.path +
+                const std::vector<registry::Seg> LP = rsegs(listp);
+                const std::string owner = d.owner;
+                const RClaim* a = deep ? nullptr : index.same_place(res_key, LP, [&](const RClaim& c) { return c.mod != owner && c.kind == RKind::Append; });
+                if (a)
+                    return refused(path, "Conflict: mod " + a->mod + " appends to this list of " + res_key + " (\"" + a->path +
+                                             "\"), and [*] would change the appended values too; the later mod is refused (name elements by index)");
+                for (const ListClaim& x : deep ? appended : std::vector<ListClaim>())
+                    if (x.res == res_key && x.mod != d.owner && same_place(x.place, listp))
+                        return refused(path, "Conflict: mod " + x.mod + " appends to this list of " + res_key + " (\"" + x.path +
                                                  "\"), and [*] would change the appended values too; the later mod is refused (name elements by index)");
                 starred.push_back({res_key, d.owner, path, listp, "", ""});
+                claim(res_key, listp, RKind::Starred, d.owner, path, "");
             }
             dp.sets.push_back({path, value});
         }
-        auto same = std::find_if(plan->resources.begin(), plan->resources.end(), [&](const ResPatch& o) {
-            return std::memcmp(&o.res, &rp.res, sizeof rp.res) == 0;
-        });
-        if (same == plan->resources.end()) {
+        const std::string res_bytes(reinterpret_cast<const char*>(&rp.res), sizeof rp.res);
+        if (const auto at = res_at.find(res_bytes); at != res_at.end()) {
+            plan->resources[at->second].docs.push_back(std::move(dp));
+        } else {
+            res_at.emplace(res_bytes, plan->resources.size());
             rp.docs.push_back(std::move(dp));
             plan->resources.push_back(std::move(rp));
-        } else {
-            same->docs.push_back(std::move(dp));
         }
     }
     // what only the game's data can say, against the base view of this start's data when it has one (none: the bytes say it)
@@ -1342,6 +1457,8 @@ struct BaseRecord {
     bool applied = false;               // Kiln's pass is in the served table
     std::string fault;                  // why not, when there are rules
     std::vector<std::string> patched_by;  // mods whose own patches of the table were served
+    baserules::Lists after_rules;       // the table after the old documents and the base rules, before the registry's writes
+    bool have_after = false;
 };
 std::mutex g_base_mutex;
 BaseRecord g_base;
@@ -1358,16 +1475,110 @@ bool table_key(const KilnAssetsApi* A, KilnAssetKey* key, std::string* why) {
     return true;
 }
 
+// ---- the registry stage (registry P1 slices S10, S11; registry/boot_hooks.h) ----
+// The registry stage runs here, at resources-ready, before any patch of this start is written: it reads the base (the bytes
+// kiln.assets serves now) and composes the mods' registry edits over the old documents below them (D1: a registry edit
+// layers on every earlier writer and wins, reported). Its boot-routed fields (restart) are written in the same copy as the
+// old documents, after them: one copy and one override per resource. Without the hooks (a host test) nothing of it runs.
+std::vector<registry::boothook::OldDoc> old_docs(const BootPlan* plan) {
+    std::vector<registry::boothook::OldDoc> out;
+    if (!plan) return out;
+    for (const ResPatch& rp : plan->resources)
+        for (const DocPatch& d : rp.docs) {
+            registry::boothook::OldDoc o;
+            o.mod = d.mod, o.key = d.key, o.res = rp.res, o.type = rp.type;
+            for (const Set& s : d.sets) o.sets.emplace_back(s.path, s.value);
+            for (const StructOp& op : d.ops) {
+                if (op.op != 'x' && op.op != 'r' && op.op != 'a') continue;
+                registry::boothook::OldDoc::List l;
+                l.op = op.op, l.path = op.path;
+                for (const gjson& v : op.values) l.values.push_back(nlohmann::json::parse(v.dump()));
+                o.lists.push_back(std::move(l));
+            }
+            out.push_back(std::move(o));
+        }
+    return out;
+}
+
+// Kiln's base rules as writers below the registry (ruling D1, 2026-11-21): each rule is an earlier writer of the balancing
+// table, like an old boot patch. The registry stage composes on their result and names them (composedOn, overridden) through
+// these documents: per rule, its own raise-only target at every index it raises over the game's value. The values written
+// are the composed pass's (apply below); these documents only tell the registry who wrote what beneath it.
+std::vector<registry::boothook::OldDoc> rule_docs(const BootPlan* plan, const KilnAssetKey& key, const baserules::Lists& game) {
+    std::vector<registry::boothook::OldDoc> out;
+    if (!plan) return out;
+    static const char* const kAxis[3] = {"x", "y", "z"};
+    for (const baserules::Rule& r : plan->rules) {
+        const baserules::Composed c = baserules::compose({r});
+        registry::boothook::OldDoc o;
+        o.mod = r.mod, o.key = std::string(baserules::kKind) + "/" + r.name, o.res = key, o.type = baserules::kTable;
+        for (size_t i = 0; i < game.altars.size(); ++i) {
+            const int g = static_cast<int>(game.altars[i]);
+            const int t = baserules::altars(g, c);
+            if (t > g) o.sets.emplace_back("altarsPerFlameLevel[" + std::to_string(i) + "]", nlohmann::json{{"min", t}, {"raiseOnly", true}});
+        }
+        for (size_t l = 0; l < game.sizes.size(); ++l)
+            for (int a = 0; a < 3; ++a) {
+                const double g = game.sizes[l][a];
+                const double t = baserules::size(g, static_cast<int>(l), a, c);
+                if (t > g)
+                    o.sets.emplace_back("buildzoneSizesPerAltarLevel[" + std::to_string(l) + "]." + kAxis[a], nlohmann::json{{"min", t}, {"raiseOnly", true}});
+            }
+        if (!o.sets.empty()) out.push_back(std::move(o));
+    }
+    return out;
+}
+
 // kiln.assets when_resources_ready: the game's resource service is up, nothing has read through it yet.
 void KILN_CALL apply(void*) {
     const auto* plan = static_cast<const BootPlan*>(kiln::boot::published(g_api, "patches"));
-    if (!plan) {
-        g_ready_before_publication.store(true);
-        bootview::finished();  // no prepare after this one may write anything: no check needs the base view any more
-        return;
+    if (!plan) g_ready_before_publication.store(true);  // no prepare after this one may write anything
+    bootview::finished();  // the generation is published (or none comes) and the resources are up: no check reads the base view any more
+    const KilnAssetsApi* A = assets();
+    // Kiln's base rules: one composed pass over the balancing table, after every patch of it and before the registry's writes
+    BaseRecord record;
+    std::string table_why;
+    const bool rules_here = plan && !plan->rules.empty();
+    if (rules_here) {
+        record.rules = plan->rules;
+        record.rule_applied.assign(plan->rules.size(), 0);
+        record.composed = baserules::compose(plan->rules);
+        // the game's own values, before any patch of this start (the rules' targets are computed on them)
+        const gd::TType* tt = gd::type_named(baserules::kTable);
+        const void* data = nullptr;
+        size_t len = 0;
+        if (!table_key(A, &record.key, &table_why)) {
+        } else if (!tt || !tt->resolved() || tt->resolved()->kind != gd::K_STRUCT) {
+            table_why = std::string("UnknownType: this game build has no struct type ") + baserules::kTable;
+        } else if (A->resource_data(&record.key, &data, &len) != KILN_OK || !data || len < tt->resolved()->size) {
+            table_why = std::string("the ") + baserules::kTable + " is not loaded";
+        } else if (!(record.have = baserules::read(tt->resolved(), reinterpret_cast<uintptr_t>(data), &record.original, &table_why))) {
+            LOGW("boot: %s: the game's own altar counts and build-zone sizes cannot be read (%s)", baserules::kTable, table_why.c_str());
+        }
     }
-    bootview::finished();  // the generation is published and the resources are up: no check reads the base view any more
-    if (plan->resources.empty() && plan->rules.empty()) return;
+    // the registry stage: the base as kiln.assets serves it now, before any patch of this start is written, composed over
+    // the old documents and the base rules (they lie below it); its boot fields are written below, after them, in the same copy
+    const registry::boothook::Hooks* H = registry::boothook::get();
+    std::vector<registry::stage::BootResource> reg;
+    if (H && H->run) {
+        std::vector<registry::boothook::OldDoc> below = old_docs(plan);
+        if (record.have) {
+            std::vector<registry::boothook::OldDoc> rd = rule_docs(plan, record.key, record.original);
+            below.insert(below.end(), std::make_move_iterator(rd.begin()), std::make_move_iterator(rd.end()));
+        }
+        reg = H->run(below);
+    }
+    std::vector<registry::stage::BootOutcome> outcomes;
+    std::vector<char> reg_done(reg.size(), 0);
+    auto reg_of = [&](const KilnAssetKey& k) -> const registry::stage::BootResource* {
+        for (size_t i = 0; i < reg.size(); ++i)
+            if (std::memcmp(&reg[i].key, &k, sizeof k) == 0) return reg_done[i] = 1, &reg[i];
+        return nullptr;
+    };
+    auto reg_fail = [&](const registry::stage::BootResource& rb, const std::string& why) {
+        for (const auto& f : rb.fields) outcomes.push_back({f.field, false, {}, why});
+    };
+    if (plan && (!plan->resources.empty() || rules_here)) {
     LOGI("boot: the game's resource service is up: resource patches of %zu resource(s)%s are written into copies of the bytes kiln.assets serves now",
          plan->resources.size(), plan->rules.empty() ? "" : (" and " + std::to_string(plan->rules.size()) + " base rule(s)").c_str());
     // a plan checked before the start against a base view: a fault now comes from the bytes served now (another provider's
@@ -1378,7 +1589,6 @@ void KILN_CALL apply(void*) {
                                           plan->base_digest.substr(0, 16) + " of this start's game data, and the bytes served now decide";
     if (!checked.empty())
         LOGI("boot: the plan was checked before the start against the %s base view %s", plan->base_source.c_str(), plan->base_digest.c_str());
-    const KilnAssetsApi* A = assets();
     size_t written = 0, failed = 0;
     // one fault per document, naming its mod and key: for a required mod kiln.boot ends the process inside the call
     auto fault = [&](const DocPatch& d, const std::string& why) {
@@ -1386,12 +1596,6 @@ void KILN_CALL apply(void*) {
         LOGE("boot: resource patch %s/%s: %s; nothing of this patch was applied%s", d.mod.c_str(), d.key.c_str(), why.c_str(), checked.c_str());
         kiln::boot::activation_fault(g_api, g_owner, d.mod, kKind, d.key, why + "; nothing of this patch was applied" + checked);
     };
-    // Kiln's base rules: one composed pass over the balancing table, after every patch of it
-    const baserules::Composed composed = baserules::compose(plan->rules);
-    BaseRecord record;
-    record.rules = plan->rules;
-    record.rule_applied.assign(plan->rules.size(), 0);
-    record.composed = composed;
     auto fault_rules = [&](const std::string& why) {
         record.fault = why;
         for (const baserules::Rule& r : plan->rules) {
@@ -1405,14 +1609,14 @@ void KILN_CALL apply(void*) {
     for (const ResPatch& rp : plan->resources)
         if (!table && rp.type == baserules::kTable) table = &rp;
     ResPatch alone;
-    if (!plan->rules.empty() && !table) {
-        std::string why;
-        if (table_key(A, &alone.res, &why)) {
+    if (rules_here && !table) {
+        if (!table_why.empty() && !record.have) {
+            fault_rules(table_why);
+        } else {
+            alone.res = record.key;
             alone.type = baserules::kTable;
             alone.guid = guid_text(alone.res.guid);
             table = &alone;
-        } else {
-            fault_rules(why);
         }
     }
     // the templates copyComponents copies from, read before any patched copy is served
@@ -1435,7 +1639,7 @@ void KILN_CALL apply(void*) {
     auto one = [&](const ResPatch& rp) {
         const std::string what = rp.type + " " + guid_text(rp.res.guid);
         const bool is_table = &rp == table;
-        const baserules::Composed* rules = is_table && !plan->rules.empty() ? &composed : nullptr;
+        const baserules::Composed* rules = is_table && rules_here ? &record.composed : nullptr;
         const void* data = nullptr;
         size_t len = 0;
         const gd::TType* type = gd::type_named(rp.type);
@@ -1445,9 +1649,11 @@ void KILN_CALL apply(void*) {
         else if (A->resource_data(&rp.res, &data, &len) != KILN_OK || !data) whole = "MissingResource: this game build has no " + what;
         else if (len < type->resolved()->size || len > kMaxResource)
             whole = "the resource " + what + " is " + std::to_string(len) + " bytes, which is not a " + rp.type;
+        const registry::stage::BootResource* rb = reg_of(rp.res);
         if (!whole.empty()) {
             for (const DocPatch& d : rp.docs) fault(d, whole);
             if (rules) fault_rules(whole);
+            if (rb) reg_fail(*rb, whole);
             return;
         }
         if (rp.type == baserules::kTable && !record.have) {
@@ -1475,6 +1681,12 @@ void KILN_CALL apply(void*) {
             left_out[bad] = 1;
             fault(rp.docs[bad], why);
         }
+        // what the table holds after the old documents and the base rules, before the registry writes over it
+        if (rules && copy.size() >= type->resolved()->size) {
+            std::string e;
+            record.have_after = baserules::read(type->resolved(), reinterpret_cast<uintptr_t>(copy.data()), &record.after_rules, &e);
+        }
+        if (rb && H && H->write) here += H->write(rp.res, rp.type, &copy, *rb, &outcomes, &notes);
         for (const std::string& n : notes) LOGI("%s", n.c_str());
         if (!here) {
             // nothing to serve: the table already holds what the rules ask for (or nothing changed at all)
@@ -1483,9 +1695,16 @@ void KILN_CALL apply(void*) {
         }
         const KilnResult rc = A->resource_put(g_owner, &rp.res, copy.data(), copy.size(), KILN_ASSET_PUT_OVERRIDE);
         if (rc != KILN_OK) {
+            const std::string why = "kiln.assets refused the patched " + what + " (" + std::to_string(rc) + ")";
             for (size_t i = 0; i < rp.docs.size(); ++i)
-                if (!left_out[i]) fault(rp.docs[i], "kiln.assets refused the patched " + what + " (" + std::to_string(rc) + ")");
-            if (rules) fault_rules("kiln.assets refused the patched " + what + " (" + std::to_string(rc) + ")");
+                if (!left_out[i]) fault(rp.docs[i], why);
+            if (rules) fault_rules(why), record.have_after = false;
+            if (rb) {
+                std::erase_if(outcomes, [&](const registry::stage::BootOutcome& o) {
+                    return std::any_of(rb->fields.begin(), rb->fields.end(), [&](const auto& f) { return f.field == o.field; });
+                });
+                reg_fail(*rb, why);
+            }
             return;
         }
         written += here;
@@ -1501,13 +1720,72 @@ void KILN_CALL apply(void*) {
     };
     for (const ResPatch& rp : plan->resources) one(rp);
     if (table == &alone) one(alone);
+    LOGI("boot: resource patches applied before the game read its resources: %zu value(s) in %zu resource(s)%s", written, plan->resources.size(),
+         failed ? (", " + std::to_string(failed) + " patch(es) not applied (boot.json)").c_str() : "");
+    if (failed) row(KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE, std::to_string(failed) + " resource patch(es) of this start were not applied (state/boot.json)");
+    }
     {
         std::lock_guard lock(g_base_mutex);
         g_base = std::move(record);
     }
-    LOGI("boot: resource patches applied before the game read its resources: %zu value(s) in %zu resource(s)%s", written, plan->resources.size(),
-         failed ? (", " + std::to_string(failed) + " patch(es) not applied (boot.json)").c_str() : "");
-    if (failed) row(KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE, std::to_string(failed) + " resource patch(es) of this start were not applied (state/boot.json)");
+    // the registry's boot fields on resources no old document touches: one copy each, the same way
+    for (size_t i = 0; i < reg.size(); ++i) {
+        if (reg_done[i]) continue;
+        const registry::stage::BootResource& rb = reg[i];
+        ResPatch rp;
+        rp.res = rb.key;
+        rp.type = rb.type;
+        rp.tmpl = rb.type == "keen::ecs::TemplateResource";
+        const std::string what = rp.type + " " + guid_text(rp.res.guid);
+        const gd::TType* type = gd::type_named(rp.type);
+        const void* data = nullptr;
+        size_t len = 0;
+        if (!A || !type || !type->resolved() || A->resource_data(&rp.res, &data, &len) != KILN_OK || !data || len < type->resolved()->size || len > kMaxResource) {
+            reg_fail(rb, "the resource " + what + " cannot be read here");
+            continue;
+        }
+        std::vector<uint8_t> copy(static_cast<const uint8_t*>(data), static_cast<const uint8_t*>(data) + len);
+        std::vector<std::string> notes;
+        const size_t before = outcomes.size();
+        const size_t here = H && H->write ? H->write(rp.res, rp.type, &copy, rb, &outcomes, &notes) : 0;
+        for (const std::string& n : notes) LOGI("%s", n.c_str());
+        if (!here) continue;
+        const KilnResult rc = A->resource_put(g_owner, &rp.res, copy.data(), copy.size(), KILN_ASSET_PUT_OVERRIDE);
+        if (rc != KILN_OK) {
+            outcomes.resize(before);
+            reg_fail(rb, "kiln.assets refused the patched " + what + " (" + std::to_string(rc) + ")");
+        }
+    }
+    if (H && H->finish) H->finish(outcomes);
+}
+
+// The fields a registry edit changed after the base rules: {field, afterRules, effective, rules: ["mod:name", ...]}.
+nlohmann::json registry_changes(const BaseRecord& r, const baserules::Lists& now) {
+    nlohmann::json out = nlohmann::json::array();
+    static const char* const kAxis[3] = {"x", "y", "z"};
+    auto raisers = [&](auto raised) {
+        nlohmann::json names = nlohmann::json::array();
+        for (const baserules::Rule& rule : r.rules)
+            if (raised(baserules::compose({rule}))) names.push_back(rule.mod + ":" + rule.name);
+        return names;
+    };
+    for (size_t i = 0; i < now.altars.size() && i < r.after_rules.altars.size() && i < r.original.altars.size(); ++i) {
+        if (now.altars[i] == r.after_rules.altars[i]) continue;
+        const int g = static_cast<int>(r.original.altars[i]);
+        nlohmann::json names = raisers([&](const baserules::Composed& c) { return baserules::altars(g, c) > g; });
+        if (names.empty()) continue;  // no rule raised it: an old patch's value the registry changed, not a rule's
+        out.push_back({{"field", "altarsPerFlameLevel[" + std::to_string(i) + "]"}, {"afterRules", r.after_rules.altars[i]}, {"effective", now.altars[i]}, {"rules", names}});
+    }
+    for (size_t l = 0; l < now.sizes.size() && l < r.after_rules.sizes.size() && l < r.original.sizes.size(); ++l)
+        for (int a = 0; a < 3; ++a) {
+            if (now.sizes[l][a] == r.after_rules.sizes[l][a]) continue;
+            const double g = r.original.sizes[l][a];
+            nlohmann::json names = raisers([&](const baserules::Composed& c) { return baserules::size(g, static_cast<int>(l), a, c) > g; });
+            if (names.empty()) continue;
+            out.push_back({{"field", "buildzoneSizesPerAltarLevel[" + std::to_string(l) + "]." + kAxis[a]}, {"afterRules", r.after_rules.sizes[l][a]},
+                           {"effective", now.sizes[l][a]}, {"rules", names}});
+        }
+    return out;
 }
 
 // kiln.base_rules v1 (kiln_base_rules.h): this process's table and the rules that made it. Tick thread.
@@ -1541,6 +1819,9 @@ KilnResult KILN_CALL base_state(char* buf, size_t cap, size_t* out_len) {
         j["table"] = true;
         j["effective"] = baserules::lists_json(now);
         j["original"] = baserules::lists_json(r.have ? r.original : now);
+        // the registry stage writes after the base rules (ruling D1): where the served value is not what the rules left, a
+        // registry edit changed it; name the rules that raised that field
+        if (r.have_after && r.have) j["registryChanged"] = registry_changes(r, now);
     }
     if (!why.empty() && j["table"] == false) j["reason"] = why;
     const std::string text = j.dump();
@@ -1562,7 +1843,8 @@ void gd_boot_patches_bind() {
     if (!A) g_off = "kiln.assets' resources are off on this build";
     else if (kiln_caps_held(caps, KilnStr{kRow, sizeof(kRow) - 1})) g_off = "mods.boot.resource_patches is held until the client checks pass";
     g_bound = kiln::boot::collect(g_api, g_owner, "patches", &prepare_boot, nullptr);
-    if (g_bound && !g_off) g_ready_asked = A->when_resources_ready(&apply, nullptr) == KILN_OK;
+    // resources-ready runs the registry stage in every start with kiln.assets' resources (the patches only with a boot phase)
+    if (A) g_ready_asked = A->when_resources_ready(&apply, nullptr) == KILN_OK;
     if (g_bound && !g_off && !g_ready_asked) g_off = "kiln.assets' resources are off on this build";
     if (g_off && !kiln_caps_held(caps, KilnStr{kRow, sizeof(kRow) - 1}))
         row(KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SERVICE_MISSING, g_off);

@@ -35,6 +35,7 @@ void writes_before_world(uintptr_t) {}
 void writes_after_world() {}
 uint32_t writes_capability() { return KILN_WORLD_CAP_TRACKED_WRITES; }
 uint32_t ecs_capability() { return KILN_WORLD_CAP_ECS_READ; }
+uint32_t named_capability() { return KILN_WORLD_CAP_NAMED_READ; }
 std::vector<std::string> pruned_names;
 bool seh_each(KilnProgramEachFn f,KilnProgramCtx* ctx,uint64_t* iter,KilnEntity e,void* user,unsigned long*) { f(ctx,iter,e,user);return true; }
 bool seh_update(KilnProgramUpdateFn f,KilnProgramCtx* ctx,void* user,unsigned long*) { f(ctx,user);return true; }
@@ -137,6 +138,7 @@ int main() {
 
     // The write program is registered without the names the world does not know; every other program is refused whole.
     check((program_capabilities()&KILN_WORLD_CAP_TRACKED_WRITES)!=0,"the capability word carries tracked writes");
+    check((program_capabilities()&KILN_WORLD_CAP_NAMED_READ)!=0,"the capability word carries the named services");
     static uintptr_t fake_world[4]{};
     static uintptr_t fake_registry[64]{};
     fake_world[0]=reinterpret_cast<uintptr_t>(fake_registry);

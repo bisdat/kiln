@@ -367,6 +367,12 @@ class DocumentationTests(unittest.TestCase):
             self.assertIn("kiln/control/console/", text)
         schema = json.loads((root / "schema/kiln.mod.schema.json").read_text())
         self.assertEqual(schema["properties"]["clients"]["enum"], ["none", "kiln", "mod"])
+        # the extended.mod.json a server's EML mods need under ShroudForge: the one kiln-eml's warning names
+        discover = (root / "gpl/kiln-eml/kiln-eml/src/discover.rs").read_text()
+        switch = re.search(r'pub const SERVER_SWITCH_FILE: &str = r#"(.*?)"#;', discover)[1]
+        self.assertTrue(json.loads(switch)["enabled"])
+        for text in (guide, TEMPLATE):
+            self.assertIn(switch, text)
         for value in schema["properties"]["clients"]["enum"]:
             self.assertIn(f"| `{value}` |", guide)
 

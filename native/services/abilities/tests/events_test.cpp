@@ -22,6 +22,8 @@ std::atomic<bool> g_programs_ready{false};
 uintptr_t g_cap_registry = 0, g_setup_world = 0, g_setup_registry = 0;
 struct Slot { uintptr_t registered_in = 0; };
 std::vector<Slot> g_slots;
+struct KProgram { uintptr_t inserted_in = 0; };
+std::vector<KProgram> g_programs;
 std::unordered_set<uint32_t> g_held;
 std::unordered_map<uint32_t, uint64_t> g_canceled;
 std::unordered_map<uint32_t, int> g_impact_ovr, g_entity_ovr;
@@ -93,6 +95,19 @@ int main() {
     CHECK(received == 1);
     CHECK(destroyed == std::vector<uint32_t>{2048});
     CHECK(g_canceled.count(27) == 1);
+    // #108: a server world that starts while the last one's state is here (its stop was not seen) clears it as a stop
+    // does; a start after a stop clears nothing (events of the new world stay)
+    g_setup_world = 0xB;
+    g_prog_registry = 0x300;
+    g_programs.push_back(KProgram{0x300});
+    push_event(ev);
+    world.event = KILN_WORLD_STARTED;
+    world.session = 2;
+    on_world(&world, nullptr);
+    CHECK(g_events.empty() && g_setup_world == 0 && g_prog_registry == 0 && g_programs[0].inserted_in == 0);
+    push_event(ev);
+    on_world(&world, nullptr);
+    CHECK(g_events.size() == 1);
     std::printf("events_test: %d failures\n", failed);
     return failed ? 1 : 0;
 }

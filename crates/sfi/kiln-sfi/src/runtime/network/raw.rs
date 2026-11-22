@@ -71,6 +71,7 @@ impl Network {
             self.services().call(
                 send,
                 (
+                    self.owner,
                     lease,
                     peer,
                     payload.as_ptr().cast(),
@@ -114,6 +115,7 @@ impl Network {
             self.services().call(
                 receive,
                 (
+                    self.owner,
                     lease,
                     channel,
                     buffer.as_mut_ptr().cast(),
@@ -150,7 +152,7 @@ impl Network {
         // SAFETY: kiln_net.h steam_accept: a live out.
         let result = unsafe {
             self.services()
-                .call(accept, (lease, peer, &raw mut accepted))
+                .call(accept, (self.owner, lease, peer, &raw mut accepted))
         };
         if result != KILN_OK {
             return Err(text::INTERFACE_UNAVAILABLE.into());

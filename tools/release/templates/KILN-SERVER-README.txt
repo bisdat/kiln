@@ -80,6 +80,12 @@ Mods on the server
 ------------------
 - Kiln mods: one folder per mod in kiln/mods/ (kiln/mods/<mod>/ with its kiln.mod.json inside).
 - Native mods: kiln/native/<mod>/.
+- EML mods: mods/<mod>/ (the folder with its mod.json). When ShroudForge runs on the server (a ShroudForge mod is in
+  mods/, or ShroudForge ran there before), it runs an EML mod only while the mod's extended.mod.json says
+  "enabled": true, and a mod you unzip yourself has none. Put this into each EML mod's folder as extended.mod.json
+  (a mod that has one already: set "enabled" to true):
+    {"schemaVersion":1,"launcher":"EML","enabled":true,"targets":["client","server"],"settings":{}}
+  kiln/logs/kiln.log names the EML mods ShroudForge has off.
 - Restart the server after adding or removing a mod.
 What players need depends on the mod (the "clients" value in its kiln.mod.json):
   none   anyone can join, with or without Kiln

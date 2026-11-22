@@ -244,6 +244,17 @@ Altars' exact patch and two mods' rules in every load order, no refusal, the lar
 `mods/tests/base-rules-test` (dedicated server, two starts). Not covered: changing the rules while the game runs, more
 than 16 Flame Altars, per-base sizes, merging bases; a player's build zone on screen is a guided client check.
 
+
+### Base rules and the registry
+
+Base rules are an earlier writer of the balancing table, as resource patches are: they are written into the table before
+the registry stage, and the registry stage composes on their result (ruling D1). A registry edit of
+`balance.altarsPerFlameLevel` or `balance.buildzoneSizesPerAltarLevel` therefore wins over a base rule. The registry
+report names the rule as the writer below (`composedOn` or `overridden`, writer `<mod>/baseRules/<name>`; for the
+counts: the registry models the size list's members only from its own edits). `Build.BaseLimits` reports the values the
+game runs with, after the registry, and `BaseLimits.RegistryChanged` lists every value a registry edit changed after a rule
+had raised it (`"altarsPerFlameLevel[1]: 8 -> 2 (rules-a:roomy)"`).
+
 ## The `.kschem` format (version 1)
 Little-endian binary:
 
@@ -321,10 +332,52 @@ Admin edits by hand may touch bases (`InBases` is set: the admin asked for it by
 `status`, `grid`, `ready` (asks for missing tiles), `read`, `write` (`KilnBuildWrite`: box, cells, optional mask,
 flags, actor), `shape_box`, `shape` (`KilnBuildShape`: op, shape, centre, half, level, strength, passes, material),
 `prop_place` (`KilnBuildProp`), `prop_remove`, `props_in_box`, `prop_info`, `bases`, `item_material`, `item_template`,
-`keep`, `release`. Results in `KilnBuildResult` (`R_CHANGED`, `R_VERIFIED`, `R_KEPT`, `R_ZONE`, `R_BASE`,
+`keep`, `release`, `terrain_budget_reserve`, `terrain_budget_charge`, and from task threads `grid_for_session`
+([below](#voxels-from-tasks-since-020-dev303)). Results in `KilnBuildResult` (`R_CHANGED`, `R_VERIFIED`, `R_KEPT`, `R_ZONE`, `R_BASE`,
 `R_NOT_LOADED`, `R_DRY_RUN`). Tick thread except `status`. Lab-only debug channel: create `kiln/data/kiln.build/debug`
 before boot, then write commands (`info`, `column x z`, `dump`, `surface`, `tiles`, `load`, `bases`, `props`, `item`,
 `shape`, `sing`, `vw`) to `kiln/data/kiln.build/cmd` (see `native/services/build/debug.cpp`).
+
+## Voxels from tasks (since 0.2.0-dev.30.3)
+
+Kiln's own task threads (`kiln.tasks`, and the interpreter that runs mods in the ShroudForge format in kiln mode) can
+read the voxel grid's geometry without waiting for the server tick: `grid_for_session`, appended to the table at offset
+152 (the table is 160 bytes with it; the version stays 1, so check `header.size`). It is **experimental**: its
+kiln.caps row is `build.voxel_grid_tasks`.
+
+```c
+KilnBuildGridSpec spec = { sizeof spec };
+uint64_t session = world->game_world_session(KILN_WORLD_SERVER);
+KilnResult rc = build->grid_for_session(owner, session, (KilnStr){ "voxel", 5 }, &spec);  /* owner: your plugin's */
+/* KILN_OK: spec.origin (metres of cell (0, 0, 0)), spec.cell_size (0.5), spec.maximum (cells per axis) */
+```
+
+- **What it reads.** The server world's voxel grid (a dedicated server, or a game client while it hosts): its id
+  (`"voxel"`, the only grid), the origin of cell (0, 0, 0), the cell size per axis and the extent in cells per axis
+  (`[0, maximum)`: x and z the streaming grid, 20480 cells on the current builds; y 2^31 - 8, since the engine has no y
+  bound). `KilnBuildGrid`'s 8192 cells of height is Kiln's own limit for the tick members, not the engine's.
+- **Threads.** Any thread but a world's own. Kiln takes the engine's own write gate without waiting (between frames;
+  every frame holds it), copies the grid's fields twice and compares them, releases the gate and checks the session
+  again. It calls no game code, allocates nothing and never posts work to a tick. On the server tick it answers
+  `KILN_ECS_ERR_BUSY` at once: use `grid` there.
+- **The caller.** The first argument is the caller's own `KilnOwner` (the one its plugin got): a busy refusal from
+  the engine's gate holds back only that owner for the rest of the server step, never other mods.
+- **The session.** The caller names the server world session it expects: kiln.world's
+  `game_world_session(KILN_WORLD_SERVER)`. Another session is `KILN_ECS_ERR_STALE`, and so is a session that ends
+  during the call.
+- **Results.** `KILN_OK`; `KILN_ERR_INVALID_ARGUMENT` (a NULL or short record, owner 0, session 0, an empty id, a NUL
+  in it, or over 15 bytes); `KILN_ERR_NOT_FOUND` (another id); `KILN_ERR_UNAVAILABLE` (off on this build, no server world in this
+  process, a client joined to another machine's world, or the server world is stopping); `KILN_ECS_ERR_STALE`;
+  `KILN_ECS_ERR_BUSY` (a frame holds the gate, another Kiln thread does, this owner's busy refusal earlier in the same
+  server step, a call on the server tick, or the grid is not ready yet: the world is starting, or it moved between the
+  two copies; try again at a later step); `KILN_ECS_ERR_UNREADABLE` (a copy faulted). The record is written on
+  `KILN_OK` only.
+- **On this build.** `build.voxel_grid_tasks` is available when kiln.build's voxel reads are (`build.read`), the
+  running game matches one of Kiln's exact engine profiles (dedicated server 26430253, client 26430625) with its write
+  gate, and kiln.world's `game_world_session` is there; its text names the profile. Otherwise it is unavailable,
+  `symbol-missing`, with the check that failed, and the member answers `KILN_ERR_UNAVAILABLE`.
+- **Not yet.** Reading and writing cells from task threads are not in this release: use `read` and `write` on the
+  tick. Nothing here keeps Kiln save regions.
 
 ## Lab results (lab `build`, a copied world, no player)
 `build-test: done, 79 PASS, 0 FAIL over all phases` (four boots):

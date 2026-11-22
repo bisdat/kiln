@@ -21,6 +21,7 @@
 #include <unordered_set>
 
 #include "content.h"
+#include "registry/stage.h"
 #include "refs.h"
 #if KC_GAMEDATA
 #include "gamedata.h"
@@ -469,8 +470,7 @@ void note_table(const uint8_t guid[16], uintptr_t data) {
     e.name = guid_text(guid);
     if (D.get(e.id)) return;
     D.add(e);
-    if (drops_have_rules()) drops_apply_rules(D.entries.back());
-    nc_drops_table(D.entries.back());  // new items' stacks (definitions with "drops")
+    drops_table_loaded(D.entries.back());  // old packs' drop rules, new items' stacks, the registry's layers (registry_live.cpp)
     std::string err;
     store_flush(&err);
     g_modified_stale = true;
@@ -1246,6 +1246,7 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
         LOGI("boot profile: the boot generation's content definitions are prepared before the game's entry point");
 #if KC_GAMEDATA
     gd_boot_patches_bind();  // the seventh collector: fields of game resources, written when the resource service is up
+    registry::stage::bind_service();  // kiln.registry and kiln.internal.registry; the stage runs in the patches' resources-ready apply
 #endif
     if (!E.items || !E.reflection) {
         set_detail("the item registry or the game's reflection is not available on this build");

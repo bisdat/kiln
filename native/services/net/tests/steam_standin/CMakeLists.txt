@@ -17,5 +17,6 @@ add_dependencies(steam-standin-test steam-standin)
 add_executable(steam-lease-test EXCLUDE_FROM_ALL ../steam_lease_test.cpp ../../steam_messages.cpp)
 target_include_directories(steam-lease-test PRIVATE "${CMAKE_SOURCE_DIR}/core/abi")
 set_target_properties(steam-lease-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/tests/steam-standin")
+target_link_libraries(steam-lease-test PRIVATE bcrypt)  # random lease handles (steam_messages.cpp)
 add_dependencies(steam-lease-test steam-standin)
 

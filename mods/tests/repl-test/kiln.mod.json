@@ -6,5 +6,8 @@
   "entryAssembly": "ReplTest.dll",
   "side": "server",
   "advanced": true,
-  "description": "PASS/FAIL lines 'repl-test: ...': kiln.repl's loopback harness on a lab server with no player (4 fake players, a watering can in a chest, 10,000+ NetworkFuel checks of what each fake decoded against the can's live bytes; release). Without policy any or without a lab port it checks that every ReplicationLab member is refused."
+  "description": "PASS/FAIL lines 'repl-test: ...': kiln.repl's loopback harness on a lab server with no player (4 fake players, a watering can in a chest, 10,000+ NetworkFuel checks of what each fake decoded against the can's live bytes; release) and the network inspector on those fakes (stats, watch, bind, hook removal, cost with 16 fakes, destroy). Without policy any or without a lab port it checks that every ReplicationLab member is refused.",
+  "writes": [
+    "ItemState"
+  ]
 }

@@ -316,6 +316,15 @@ KilnResult op_resource_read(const KilnAssetKey* key, void* buffer, size_t cap, s
 KilnResult op_resource_data(const KilnAssetKey* key, const void** ptr, size_t* len);
 KilnResult op_when_resources_ready(void(KILN_CALL* fn)(void*), void* user);
 KilnResult op_resource_list(uint32_t type, KilnAssetKey* out, size_t cap, size_t* out_count);
+// loaded_prod.cpp: the loaded-resource reads (kiln_assets.h loaded_snapshot, loaded_list) and their capability row.
+KilnResult op_loaded_snapshot(KilnOwner owner, const KilnAssetKey* key, void* bytes, size_t capacity, size_t* required,
+                              KilnLoadedInfo* info);
+KilnResult op_loaded_list(KilnOwner owner, uint32_t type, KilnAssetKey* out, size_t capacity, size_t* required,
+                          KilnLoadedInfo* info);
+KilnResult op_loaded_scalar_cas(KilnOwner owner, const KilnAssetKey* key, uint64_t expected_session, const void* expected_full,
+                               size_t resource_size, size_t offset, const void* desired, uint32_t width, KilnMutationReply* reply);
+std::string loaded_writes_json();  // the committed loaded-resource writes, for status
+void loaded_report_capability();
 int32_t op_resource_is_new(const KilnAssetKey* key);
 size_t op_resource_new_count(uint32_t type);
 KilnResult op_blob_add(KilnOwner owner, const void* data, size_t len, KilnContentHash* out);

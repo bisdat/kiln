@@ -1,0 +1,9 @@
+{
+  "id": "registry-stage-test",
+  "name": "registry stage lab test (data only)",
+  "version": "0.1.0",
+  "apiVersion": "0.2",
+  "side": "server",
+  "clients": "none",
+  "description": "Registry P1 lab fixture: one data file's registry section (content/registry.json) edits items, recipes, loot, drops and balance, removes an item a game recipe needs, and edits a field this build has not proven (refused). The lab (out/registry-c/lab-run.sh) checks state/registry.json, kiln.log and, through boot-patches-test, the experience the game reads."
+}

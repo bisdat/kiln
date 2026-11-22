@@ -56,9 +56,10 @@ public sealed partial class ClientPassMod : Mod
         var n = ClientChecks.Register(this);
         Log.Info($"client-pass: {n} guided check(s) registered; open the list with Ctrl+Shift+F5");
         _ = WatchProbe();  // 07-watch.joined
+        _ = BuildingInputKey();  // building-input.joined
     }
 
-    public override void OnUnload() => _watchProbeStop = true;
+    public override void OnUnload() => _watchProbeStop = _buildingKeyStop = true;
 
     // ------------------------------------------------------------------------------------------------ helpers ---
 

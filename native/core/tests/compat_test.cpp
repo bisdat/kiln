@@ -530,6 +530,59 @@ void module_place_cases() {
           "no path: the line as before");
 }
 
+// dev.30.3 `known` (sidelia's server, 21 Nov 2026): Live Map, IPHLPAPI.DLL in the game folder, hooks
+// players/RegisterSingleton before Kiln. The shipped rule names it; its overlaps say so and are info, others stay as they were.
+void known_cases() {
+    json doc = {{"format", 1}, {"rules", json::array({
+        {{"id", "livemap-known-hooks"}, {"when", json::array({{{"engine", "livemap"}}})}, {"action", "known"},
+         {"subject", {{"module", "iphlpapi.dll"}}}, {"message", "Live Map hooks a few game functions before Kiln."}},
+        {{"id", "bad-known"}, {"action", "known"}, {"subject", {{"mod", "native:x"}}}}})}};
+    const ParseResult pr = parse_rules(doc.dump(), "test");
+    check(pr.ok && pr.rules.size() == 1 && pr.dropped == 1 && pr.problems.size() == 1 &&
+              pr.problems[0].find("known needs a module subject") != std::string::npos,
+          "known: a module subject parses, a mod subject is dropped");
+    if (pr.rules.size() != 1) return;
+    const Rule& rule = pr.rules[0];
+    Facts facts;
+    facts.modules = {"IPHLPAPI.DLL"};
+    facts.engines = {"kiln"};
+    check(evaluate(pr.rules, facts).empty(), "known: the DLL name alone is not Live Map");
+    facts.engines.push_back("livemap");
+    const auto fired = evaluate(pr.rules, facts);
+    check(fired.size() == 1, "known: fires with the livemap engine");
+    RuleContext ctx;
+    const Outcome oc = outcome_of(rule, {}, facts, ctx);
+    check(oc.applied && oc.note.find("known") != std::string::npos, "known: applied, " + oc.note);
+
+    json lm = dest("IPHLPAPI.DLL", "0x171d0");
+    lm["path"] = "IPHLPAPI.DLL";
+    json map = {{"targets", json::array({target("0x1000", "players/RegisterSingleton", {"kiln"}, lm),
+                                         target("0x2000", "time.daytime_update", {"service:kiln-time.dll"}, nullptr, dest("iphlpapi.dll", "0x9a0")),
+                                         target("0x3000", "chat/ChatLogAdd", {"service:kiln-chat.dll"}, dest("xhl-core.dll", "0x2a0"))})}};
+    json o = compute_overlaps(map, {row("xhl-core.dll", "loaded")}, {});
+    check(o.size() == 3, "known: three overlaps");
+    if (o.size() != 3) return;
+    const std::string before0 = o[0]["message"].get<std::string>(), xhl = o[2]["message"].get<std::string>();
+    check(before0.find("Add a rule to compat-rules.json") != std::string::npos, "known: unmarked, the advice is there: " + before0);
+    check(mark_known(o, fired) == 2, "known: the two Live Map overlaps are marked");
+    const std::string m0 = o[0]["message"].get<std::string>(), m1 = o[1]["message"].get<std::string>();
+    check(o[0]["known"] == "livemap-known-hooks" && o[0]["fix"] == "none" &&
+              m0.rfind("IPHLPAPI.DLL+0x171d0 [game folder] hooked the function before Kiln did; Kiln's ", 0) == 0 &&
+              m0.find("chained over it. Known: Live Map hooks a few game functions before Kiln. (compat rule livemap-known-hooks)") != std::string::npos &&
+              m0.find("Add a rule") == std::string::npos,
+          "known: foreign-before says what happened and that it is known: " + m0);
+    check(o[1]["known"] == "livemap-known-hooks" && m1.find("stays armed behind their jump. Known: Live Map") != std::string::npos,
+          "known: foreign-over, the same: " + m1);
+    check(!o[2].contains("known") && o[2]["fix"] == "late" && o[2]["message"] == xhl, "known: another module's overlap is untouched");
+    json none = o;
+    check(mark_known(none, {}) == 0, "known: no fired rule, nothing marked");
+
+    check(contains_text("..\\LiveMap.INI..", "livemap.ini"), "contains_text: 8-bit, case ignored");
+    const std::string wide("\\\0l\0i\0v\0e\0m\0a\0p\0.\0i\0n\0i\0", 24);
+    check(contains_text(wide, "livemap.ini"), "contains_text: UTF-16LE");
+    check(!contains_text("livemap.in", "livemap.ini") && !contains_text("", "livemap.ini"), "contains_text: no partial match");
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -541,6 +594,7 @@ int main(int argc, char** argv) {
     late_limit_cases();
     before_cases();
     module_place_cases();
+    known_cases();
     std::printf("compat_test: %d checks, %d failed\n", g_checks, g_failed);
     return g_failed ? 1 : 0;
 }

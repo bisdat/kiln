@@ -199,6 +199,7 @@ fn every_file_lock_and_process_of_kiln_eml_goes_through_the_gate() {
         ("kiln-eml/src/archive_service/view.rs", "STATE"),
         ("kiln-eml/src/archive_service/view.rs", "self.replies"),
         ("kiln-eml/src/archive_service/errors.rs", "STORE"),
+        ("kiln-eml/src/archive_service/attributes.rs", "self.catalog"),
         ("kiln-eml/src/archive_values/arena.rs", "TABLE"),
         ("kiln-eml/src/archive_values/arena.rs", "self.queue"),
         ("kiln-eml/src/runner.rs", "GAME_LOCKS"),

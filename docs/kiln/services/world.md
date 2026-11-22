@@ -469,6 +469,7 @@ through `kiln.internal.engine`'s guarded copy, so a page the game freed or prote
 | `ecs_snapshot` | one component's bytes, checked before and after the copy |
 | `ecs_snapshot_many` | several components, each with its own presence. Not one atomic read across components |
 | `ecs_template_uuid` | the template the entity was spawned from, 16 bytes, checked before and after |
+| `ecs_registration(world_kind, component, &detail)` | since 0.2.0-dev.30.3 (at 648; the table is 656 bytes with it, check `header.size`): the one registration whose hash is `component` in the catalog of `world_kind`'s world, as a 56-byte `KilnEcsRegistrationDetail` (index, registered size, flags, the entity storage type's and the template type's hash and size, the catalog's `layout_stamp`). It works wherever the reads above do (the `world.ecs_read` row) and needs a world of that kind; any thread, never waits. `KILN_OK`; `KILN_ERR_NOT_FOUND` (no registration has that hash); `KILN_ERR_UNAVAILABLE` (no reads on this build, no world of the kind, or a row that does not validate); `KILN_ECS_ERR_UNREADABLE` (the catalog moved during the read: read again); `KILN_ERR_INVALID_ARGUMENT` |
 | `kiln.types` `ecs_registry` | the component catalog: index, hash, size, type identity, and tracking flags only when they were actually read |
 
 **What works where.** Entity and component reads work on the two exact builds Kiln has profiles for, dedicated server
@@ -670,7 +671,7 @@ from the engine at run time, and the in-game check below lists them.
   the entity found once more. A write that does not read back is rolled back in the same hold, and the rollback is read
   back too: after the release the next frame may already have written the component, and a rollback then would undo
   the game's write.
-- After the release: `confirmed`, the latch, the event, and the reply with the hold's time.
+- After the release: `confirmed`, the latch, the event, and the reply with the gate's two times (below).
 
 **Outcomes** (`KilnMutationReply.status`; the `KilnResult` says the same):
 
@@ -715,8 +716,24 @@ profile, 1,000 writes each, three runs): the largest plain component (4,328 byte
 median and 24 to 92 µs at worst; a 64 KiB component 44 to 48 µs at the median and 93 to 176 µs at worst. The GameServer thread that wants its next frame meanwhile spins (pause, then `SwitchToThread`); the
 holder runs above normal priority. On a heavily loaded host (load average about 45, the test at the lowest CPU
 priority, three runs under Wine) the medians stayed the same (15 to 18 µs for 4,328 bytes, 68 to 72 µs for 64 KiB) and
-the worst holds reached 0.5 to 2.5 ms: the host's scheduler preempting the holder inside the hold. How long a hold can
+the worst holds reached 0.5 to 2.5 ms: the host's scheduler preempting the holder inside the hold or, since these were
+timed to the end of the release (below), right after the priority restore. How long a hold can
 last on native Windows under load, with the priority raise, is measured by the tester kit (#58). The 64 KiB cap stays.
+
+**What the reply's times mean.** `KilnMutationReply.hold_ns` is the Scene word's exclusive interval: from the moment the
+gate's CAS on it won to the moment it was released, the clock read right after that release and before the rest of the
+gate's release (the thread-registry word, Kiln's holder flag, the priority restore). That is the time the engine was
+kept out of its next update. `restore_ns` (appended to the reply: 56 bytes; a caller built before it passes 48 and gets
+the fields it knows, nothing written past them; on return `size` is the bytes this Kiln filled) is how long putting the
+calling thread's priority back took after the Scene word was free (`SetThreadPriority`, under Proton a wineserver round
+trip), with any preemption of the thread right after it dropped back to its own priority; it is also filled for a gate
+refusal after the raise, and 0 when the priority was not raised (the measurement switch, a thread already above normal,
+a refusal before the raise). Both come from the gate's own record (`EcsGate.hold_ns`, `restore_ns`). A Kiln before
+`restore_ns` (0.2.0-dev.30.2 and earlier) gives back the size passed and leaves `restore_ns` as the caller set it: zero
+the reply, and tell such a Kiln by kiln.engine's `gate_stats` (its `size` comes back 96, not 120). Before GitHub #58's
+fix `hold_ns` was read after the whole release, the restore included: on Proton with the raise on that added about 10 µs
+to every hold and, under CPU load, a preemption of up to milliseconds right after the restore, while the Scene word was
+long free. The Wine figures above were measured that way.
 
 **Relies on, per build.** For the components the policy admits, the engine's change recorder only reads and returns on
 both exact builds (docs/re/world.md, "The change recorder for untracked components"), so the write does not call it and
@@ -785,7 +802,7 @@ var task = Context.Tasks.Run("recharge", async ctx =>
 |---|---|---|
 | `CanWrite` | `capabilities` (`KILN_WORLD_CAP_ECS_WRITE`) | the members are here and on for this build. Any thread |
 | `WritePolicy(component, world)` | `ecs_write_policy` | a `ComponentWritePolicy`: `IsWritable`, `Status`, `Size`, `Budget`, `TrackingKnown`, `IsTracked`, `IsPlain`, `Reason`, `Text`. Any thread |
-| `TryCompareExchange<T>(entity, component, expected, desired)` | `ecs_compare_exchange` | `T` is the whole component (its size is the registered size, else `NotWritable` with `Reason.Size`), and every byte of it is compared and written, padding too: give `T` a field for every byte, or use the byte form; an `ExchangeResult<T>` with `Status`, `Flags`, `Reason`, `Current` (the value the write saw) and `HoldTime` |
+| `TryCompareExchange<T>(entity, component, expected, desired)` | `ecs_compare_exchange` | `T` is the whole component (its size is the registered size, else `NotWritable` with `Reason.Size`), and every byte of it is compared and written, padding too: give `T` a field for every byte, or use the byte form; an `ExchangeResult<T>` with `Status`, `Flags`, `Reason`, `Current` (the value the write saw) and `HoldTime` (`hold_ns`: the Scene word's exclusive interval) |
 | `TryCompareExchangeBytes(entity, component, expected, desired, mask, current)` | `ecs_compare_exchange` | the same with bytes and an optional per-byte mask; `current` (optional) gets the bytes the write saw |
 | `ComponentExchangedEvent` | `ecs_write_subscribe` | on the server tick after each committed write: `Entity`, `Generation`, `ComponentHash` (`Is("Charge")`), `Session`, `Step`, `Mod` (the mod that wrote, null for a native service). Kiln's service tick posts them; should it stop for many steps, events beyond 65,536 waiting are dropped and kiln.log says how many |
 
@@ -803,6 +820,56 @@ itself: a ref another mod opened is `Stale`, as is every ref after the mod reloa
 tracking bits, so a component is writable there only after the test says it is untracked:
 `kiln.Entities.Track("Charge", save: false, replication: false)`. `kiln.Entities.BusyWrites = 1` makes the next write meet
 a busy gate, for the retry loop; the event comes at the next `kiln.Step()`.
+
+### Named services from tasks
+
+Since 0.2.0-dev.30.3, four more members, appended after the compare-exchange writes (offsets 616 to 640; the table is 648
+bytes; version stays 4, so check `header.size` and `KILN_WORLD_CAP_NAMED_READ` / `KILN_WORLD_CAP_NAMED_WRITE`), read and
+change one of the game's **named services** from a task thread. A named service is one of the game's own plain-data
+services that the server world's service registry holds under its original name, for example `ecs::GameSettings` (the
+world's settings: durability on or off, production speed, and so on). The game's systems read such a service every time
+they need it, so a change takes effect at the next use. Kiln's interpreter for ShroudForge-format mods uses these members
+for `runtime.services.get` and the `service` override target.
+
+| Member | What it does |
+|---|---|
+| `named_service_open(owner, name, expected_session, &view, &type)` | a view of the service `name` ("ecs::GameSettings", without "keen::") in the live server session; `type` (optional) its kiln.types type |
+| `named_service_snapshot(owner, view, out, capacity, &required)` | the service's whole bytes, copied under the gate between frames |
+| `named_service_close(owner, view)` | ends the view |
+| `named_service_compare_exchange(owner, view, expected, mask, desired, bytes, confirmed, &reply)` | compare the whole service with `expected`; when equal, write `desired` under `mask` |
+
+**Which services.** Only those the build's exact engine profile names, each with its size, its type's hash, the one game
+system that writes it and where the registry keeps it; on both exact builds today that is `ecs::GameSettings` (144 bytes).
+Any other name answers `KILN_ERR_NOT_FOUND`. On a build without an exact profile, or whose profile names none, every member
+answers unavailable and the rows `world.named_read` and `world.named_write` say why.
+
+**A view holds no pointer.** It is the caller's own handle, bound to the service and the server session it was opened in.
+Every snapshot and compare-exchange finds the service again inside one hold of the engine's write gate, with the checks the
+game's own lookup does not make: the record by name through the registry's name map, no second record of that name, the
+record's two pointers equal, the type's size and hash at its metadata, exactly one system that writes the service, and both
+of that system's binding tables pointing at the same bytes, which must be committed private read-write memory. The copy,
+the compare and the write happen in that same hold, and the service is found again before the gate is released. A frame
+never sees a half-written service, and nothing waits: a call that cannot take the gate now answers busy at once.
+
+**The compare-exchange** follows the protocol and the outcomes of `ecs_compare_exchange` above (`KilnMutationReply`,
+`KILN_ECS_*`, the masked merge, the readback, the rollback that is read back too), with these differences:
+
+- `bytes` is the service's size; there is no write policy and no event.
+- `STALE`: the view's session or world is no longer the live one (open a new view), or the calling owner is unloading or
+  unloaded.
+- `ABSENT` (`KILN_ERR_NOT_FOUND`): no such view of the calling owner: never opened, closed, or another owner's
+  (`why_code` `NOT_OWNERS_REF`). Another owner's view can neither be read, written nor closed.
+- `UNREADABLE`: the service could not be found again or read (a changed binding, a fault) before any write, or a write was
+  rolled back and proven.
+- `UNCERTAIN` latches the service for the rest of its server session: every later compare-exchange of it answers uncertain
+  without taking the gate. Snapshots go on. A new session clears it.
+- `UNAVAILABLE`: off on this build, no server world now (a joined client has none), not the local authority, or the gate
+  closed while the server world stops.
+
+**Limits.** At most `KILN_NAMED_SERVICE_VIEWS` (64) views per owner are open at once (`open` answers
+`KILN_ERR_BUFFER_TOO_SMALL`); an owner's views end when it unloads or reloads. Any thread but a world's own: on the server
+tick every member that takes the gate answers busy (`IN_FRAME`). Only the gate's own busy refusal latches the owner for the
+rest of the server step, as for the compare-exchange writes. There is no C# layer for these members yet.
 
 ### Entities and teleport from native code
 Tick thread (Pre/Post) or inside your program: `component(e, hash, &size)`, `exists`, `transform`, `position`,

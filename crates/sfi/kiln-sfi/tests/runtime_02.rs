@@ -13,7 +13,6 @@ mod support;
 
 use kiln_abi::services::kiln_assets::*;
 use kiln_abi::services::kiln_caps::*;
-use kiln_abi::services::kiln_world::*;
 use kiln_abi::*;
 use kiln_sfi::lifecycle::*;
 use kiln_sfi::runtime::availability::{
@@ -422,7 +421,7 @@ fn the_catalog_check_refuses_a_malformed_catalog() {
 }
 
 #[test]
-fn production_supports_lifecycle_and_the_refusal_only_operations_and_probes_only_the_network_and_context_rows()
+fn production_supports_lifecycle_and_the_refusal_only_operations_and_probes_only_the_network_context_and_grid_rows()
  {
     let owner = next_owner();
     fake_services::bind_thread(owner);
@@ -431,8 +430,10 @@ fn production_supports_lifecycle_and_the_refusal_only_operations_and_probes_only
     // Every fake service is here and no kiln.caps row is set. The refusal-only operations
     // are in the contract and need no member. The network core, the mod messages and
     // connected_peers are backed by kiln.net's lease and its row, the world context
-    // by its members and the world.lifecycle row (unknown here, so unsupported); the other
-    // families have not landed, so no member of theirs is read.
+    // by its members and the world.lifecycle row, the ECS queries and reads by kiln.world's
+    // ECS-read members and the world.ecs_read row (both unknown here, so unsupported), the voxel grid spec by
+    // kiln.build's grid member and build.voxel_grid_tasks (unknown, so unsupported); the other families have not
+    // landed, so no member of theirs is read.
     let network = [
         Op::NetworkStatus,
         Op::NetworkSend,
@@ -454,10 +455,17 @@ fn production_supports_lifecycle_and_the_refusal_only_operations_and_probes_only
     }
     assert_eq!(facts.provider_facts(), RuntimeProviderFacts::default());
     // Only the capability rows were asked: once per network operation and network fact, once for
-    // runtime.world.context.active and once per context fact; the members are copied, never
-    // called (no session record and no world generation read either).
+    // runtime.world.context.active and once per context fact, once per ECS operation (the write's
+    // first row, the reads', decides) and for the Ready and CanWrite facts, once per world cursor, building input and
+    // prop operation and once per fact of theirs (their first row decides), once for the loaded-resource writes'
+    // operation and its ResourceCanWrite fact, once for runtime.world.voxel.grid_spec and once per grid fact; the
+    // members are copied, never called (no session record, no world generation and no ECS context read
+    // either).
     let counters = fake_services::counters(owner);
-    assert_eq!(counters.calls("caps.find"), network.len() as u64 + 2 + 3);
+    assert_eq!(
+        counters.calls("caps.find"),
+        network.len() as u64 + 2 + 3 + 4 + 2 + 7 + 4 + 2 + 3
+    );
     assert_eq!(counters.total_calls(), counters.calls("caps.find"));
 }
 
@@ -934,11 +942,18 @@ fn outcomes() -> Vec<WriteOutcome> {
     let all = vec![
         WriteOutcome::EcsWriteUncertain,
         WriteOutcome::EcsWriteConflictExhausted,
+        WriteOutcome::EcsWriteBusy,
+        WriteOutcome::ServiceWriteUncertain,
+        WriteOutcome::ResourceWriteUncertain,
     ];
     // A new outcome must be listed here (and given its row).
     for outcome in &all {
         match outcome {
-            WriteOutcome::EcsWriteUncertain | WriteOutcome::EcsWriteConflictExhausted => {}
+            WriteOutcome::EcsWriteUncertain
+            | WriteOutcome::EcsWriteConflictExhausted
+            | WriteOutcome::EcsWriteBusy
+            | WriteOutcome::ServiceWriteUncertain
+            | WriteOutcome::ResourceWriteUncertain => {}
         }
     }
     all
@@ -966,6 +981,14 @@ fn every_kiln_outcome_has_one_row_and_latches_by_sf_s_own_rule() {
     assert_eq!(
         reason(WriteOutcome::EcsWriteConflictExhausted).reason,
         "ecs-scene-frame-busy"
+    );
+    assert_eq!(
+        reason(WriteOutcome::EcsWriteBusy).reason,
+        "ecs-scene-frame-busy"
+    );
+    assert_eq!(
+        reason(WriteOutcome::ServiceWriteUncertain).reason,
+        "Service write outcome is uncertain. Stop writes and do not retry blindly"
     );
 }
 

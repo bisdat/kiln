@@ -22,7 +22,11 @@
 // The plain modes check that the Release DLL has neither test export (KILN_ENGINE_TEST_RECIPES is compiled out).
 #include <windows.h>
 
+#include <algorithm>
 #include <atomic>
+#include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <cstdio>
 #include <cstring>
 #include <map>
@@ -722,8 +726,203 @@ int gate_mode(const wchar_t* dll_path, bool server) {
     return failures ? 1 : 0;
 }
 
+// ---- gate-bench: the real gate's two release measurements on real Windows (GitHub #58) ----
+// engine-host.exe <kiln-engine-test.dll> gate-bench <on|off> <cycles> <load threads> <data dir> [<seconds cap>]
+// Turns the raise on or off through kiln.engine's own measurement switch (<data dir>/kiln.engine/gate-priority-raise,
+// read once at boot through KilnApi.path), then runs <cycles> server-side gate holds (acquire, validate, one 8-byte
+// guarded write, release) on a below-normal thread, as a Kiln worker's, while <load threads> normal-priority threads
+// spin. Prints hold_ns, restore_ns and the release call's own time as percentiles, the gate_stats counters, and writes
+// every cycle to <data dir>/gate-bench-<on|off>.csv. Test-only; never shipped.
+namespace {
+std::string g_data_dir;
+KilnResult KILN_CALL data_path(int32_t kind, char* buffer, size_t capacity, size_t* out_len) {
+    if (kind != KILN_PATH_DATA || !out_len) return KILN_ERR_INVALID_ARGUMENT;
+    *out_len = g_data_dir.size();
+    if (!buffer || capacity < g_data_dir.size()) return KILN_ERR_BUFFER_TOO_SMALL;
+    std::memcpy(buffer, g_data_dir.data(), g_data_dir.size());
+    return KILN_OK;
+}
+std::uint64_t percentile(std::vector<std::uint64_t> v, double p) {
+    if (v.empty()) return 0;
+    std::sort(v.begin(), v.end());
+    const std::size_t at = static_cast<std::size_t>(p / 100.0 * static_cast<double>(v.size() - 1) + 0.5);
+    return v[at < v.size() ? at : v.size() - 1];
+}
+void print_dist(const char* name, const std::vector<std::uint64_t>& v) {
+    long double sum = 0;
+    for (auto x : v) sum += x;
+    std::printf("%-12s n=%zu mean=%.0f p50=%llu p90=%llu p99=%llu p99.9=%llu max=%llu (ns)\n", name, v.size(),
+                v.empty() ? 0.0 : static_cast<double>(sum / v.size()), (unsigned long long)percentile(v, 50),
+                (unsigned long long)percentile(v, 90), (unsigned long long)percentile(v, 99),
+                (unsigned long long)percentile(v, 99.9), (unsigned long long)(v.empty() ? 0 : *std::max_element(v.begin(), v.end())));
+}
+std::uint64_t mono_ns() {
+    return static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+}  // namespace
+
+int bench_mode(const wchar_t* dll_path, bool raise_on, std::uint64_t cycles, unsigned load_threads, const std::wstring& data_dir,
+               double cap_seconds) {
+    using namespace kiln::engine;
+    namespace fs = std::filesystem;
+    const fs::path data(data_dir);
+    const fs::path sw = data / "kiln.engine" / "gate-priority-raise";
+    std::error_code ec;
+    fs::create_directories(sw.parent_path(), ec);
+    fs::remove(sw, ec);
+    if (!raise_on) {
+        std::ofstream(sw, std::ios::binary) << "off\n";
+    }
+    const auto u8 = data.u8string();
+    g_data_dir.assign(reinterpret_cast<const char*>(u8.data()), u8.size());
+    const Profile* profile = nullptr;
+    for (const auto& p : generated::kProfiles)
+        if (std::strcmp(p.target, "enshrouded_server.exe") == 0) profile = &p;
+    check(profile != nullptr, "bench: a ported server profile");
+    if (!profile) return 1;
+    fake::Engine e(profile->layout);
+    const HMODULE dll = LoadLibraryW(dll_path);
+    check(dll != nullptr, "bench: kiln-engine-test.dll loads");
+    if (!dll) return 1;
+    auto set = reinterpret_cast<TestSet>(GetProcAddress(dll, "kiln_engine_test_set"));
+    auto main_fn = reinterpret_cast<KilnPluginMainFn>(GetProcAddress(dll, "kiln_plugin_main"));
+    if (!set || !main_fn) return 1;
+    set(profile->target, profile->sha256, profile->timestamp, profile->size_of_image, e.image.at());
+    caps.header = {sizeof caps, KILN_CAPS_VERSION};
+    caps.report = &report;
+    KilnApi api{};
+    api.size = sizeof api;
+    api.abi_version = KILN_ABI_VERSION;
+    api.service = &service;
+    api.register_service = &publish;
+    api.log = &log;
+    api.build_info = &build;
+    api.on_world_thread = &on_world;
+    api.subscribe_world = &subscribe_world;
+    api.path = &data_path;
+    tables[KILN_LAUNCH_INTERNAL_SERVICE] = &launch_table;
+    KilnPluginInfo info{};
+    info.size = sizeof info;
+    check(main_fn(&api, 5, &info) == KILN_OK, "bench: kiln_plugin_main OK");
+    const auto* n = static_cast<const KilnEngineNativeApi*>(tables["kiln.internal.engine"]);
+    const auto* t = static_cast<const KilnEngineApi*>(tables[KILN_ENGINE_SERVICE]);
+    if (!n || !n->profile() || !t) return 1;
+    const auto raise_row = rows.find("engine.gate_priority_raise");
+    std::printf("bench: raise switch %s; caps row engine.gate_priority_raise %s\n", raise_on ? "absent (on)" : "\"off\"",
+                raise_row == rows.end() ? "not reported" : (raise_row->second == KILN_CAP_AVAILABLE ? "AVAILABLE" : "not available"));
+    check(raise_row == rows.end() || (raise_row->second == KILN_CAP_AVAILABLE) == raise_on,
+          "bench: kiln.engine read the switch as asked");
+    EcsView view{};
+    std::uint32_t reason = 0;
+    check(n->ecs_view(0, &view, &reason) == KILN_OK && view.role == Role::LocalAuthority, "bench: authority view");
+    KilnEngineGateStats before{};
+    before.size = sizeof before;
+    t->gate_stats(&before);
+    check(before.size == sizeof(KilnEngineGateStats), "bench: gate_stats fills the 120-byte record (restore counters)");
+
+    std::atomic<bool> stop{false};
+    std::vector<std::thread> load;
+    for (unsigned i = 0; i < load_threads; ++i)
+        load.emplace_back([&stop] {
+            SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_NORMAL);
+            volatile std::uint64_t x = 0;
+            while (!stop.load(std::memory_order_relaxed)) x = x + 1;
+        });
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+    std::vector<std::uint64_t> hold, restore, release_call, outer;
+    hold.reserve(cycles);
+    restore.reserve(cycles);
+    release_call.reserve(cycles);
+    outer.reserve(cycles);
+    std::uint64_t refused = 0, wrong_inside = 0, wrong_after = 0, restore_zero = 0, sum_over_outer = 0;
+    const std::uintptr_t slot = e.table.at(512);
+    std::ofstream csvf(data / (std::string("gate-bench-") + (raise_on ? "on" : "off") + ".csv"));
+    csvf << "cycle,hold_ns,restore_ns,release_call_ns,outer_ns,priority_in_hold,priority_after\n";
+    const std::uint64_t begin = mono_ns(), cap_ns = static_cast<std::uint64_t>(cap_seconds * 1e9);
+    std::uint64_t i = 0;
+    for (; i < cycles && mono_ns() - begin < cap_ns; ++i) {
+        EcsGate g{};
+        g.size = sizeof g;
+        g.owner = 1;
+        g.step = i + 1;
+        g.admission = static_cast<std::uint32_t>(GateAdmission::KilnMod);
+        const std::uint64_t t0 = mono_ns();
+        const KilnResult rc = n->ecs_gate_acquire(&view, &g, &reason);
+        int inside = THREAD_PRIORITY_ERROR_RETURN;
+        if (rc == KILN_OK && g.held) {
+            inside = GetThreadPriority(GetCurrentThread());
+            const std::uint64_t value = i;
+            n->ecs_gate_validate(&g);
+            n->ecs_gate_write(&g, slot, &value, sizeof value);
+        } else {
+            ++refused;
+        }
+        const std::uint64_t t1 = mono_ns();
+        n->ecs_gate_release(&g);
+        const std::uint64_t t2 = mono_ns();
+        const int after = GetThreadPriority(GetCurrentThread());
+        if (inside != (raise_on ? THREAD_PRIORITY_ABOVE_NORMAL : THREAD_PRIORITY_BELOW_NORMAL)) ++wrong_inside;
+        if (after != THREAD_PRIORITY_BELOW_NORMAL) ++wrong_after;
+        if (raise_on && g.restore_ns == 0) ++restore_zero;
+        if (g.hold_ns + g.restore_ns > t2 - t0) ++sum_over_outer;
+        hold.push_back(g.hold_ns);
+        restore.push_back(g.restore_ns);
+        release_call.push_back(t2 - t1);
+        outer.push_back(t2 - t0);
+        csvf << i << ',' << g.hold_ns << ',' << g.restore_ns << ',' << (t2 - t1) << ',' << (t2 - t0) << ',' << inside << ','
+             << after << '\n';
+    }
+    const double took = static_cast<double>(mono_ns() - begin) / 1e9;
+    stop = true;
+    for (auto& th : load) th.join();
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_NORMAL);
+    KilnEngineGateStats st{};
+    st.size = sizeof st;
+    t->gate_stats(&st);
+    std::printf("bench: raise %s, %llu of %llu cycles in %.2f s, %u load thread(s) of %u logical CPUs\n", raise_on ? "ON" : "OFF",
+                (unsigned long long)i, (unsigned long long)cycles, took, load_threads, std::thread::hardware_concurrency());
+    print_dist("hold_ns", hold);
+    print_dist("restore_ns", restore);
+    print_dist("release_call", release_call);
+    print_dist("outer", outer);
+    std::printf("gate_stats: size=%u attempts=%llu acquired=%llu busy_registry=%llu busy_scene=%llu refused_other=%llu "
+                "hold_ns_total=%llu hold_ns_max=%llu restores=%llu restore_ns_total=%llu restore_ns_max=%llu\n",
+                st.size, (unsigned long long)st.attempts, (unsigned long long)st.acquired, (unsigned long long)st.busy_registry,
+                (unsigned long long)st.busy_scene, (unsigned long long)st.refused_other, (unsigned long long)st.hold_ns_total,
+                (unsigned long long)st.hold_ns_max, (unsigned long long)st.restores, (unsigned long long)st.restore_ns_total,
+                (unsigned long long)st.restore_ns_max);
+    std::printf("bench: refused=%llu priority-in-hold wrong=%llu priority-after wrong=%llu restore_ns==0 with raise on=%llu "
+                "hold+restore over outer=%llu\n",
+                (unsigned long long)refused, (unsigned long long)wrong_inside, (unsigned long long)wrong_after,
+                (unsigned long long)restore_zero, (unsigned long long)sum_over_outer);
+    const std::uint64_t held = st.acquired - before.acquired, restores = st.restores - before.restores;
+    check(refused == 0 && held == i, "bench: every cycle held the gate");
+    check(wrong_inside == 0, raise_on ? "bench: the holder ran ABOVE_NORMAL inside every hold (the real SetThreadPriority)"
+                                      : "bench: the holder kept BELOW_NORMAL inside every hold (raise off)");
+    check(wrong_after == 0, "bench: BELOW_NORMAL again after every release");
+    if (raise_on)
+        check(restores == i && st.restore_ns_total - before.restore_ns_total > 0 && st.restore_ns_max > 0,
+              "bench: raise on: one restore counted per hold, restore time above 0");
+    else
+        check(restores == 0 && st.restore_ns_total == before.restore_ns_total &&
+                  std::all_of(restore.begin(), restore.end(), [](std::uint64_t x) { return x == 0; }),
+              "bench: raise off: no restore counted, restore_ns 0 on every cycle");
+    check(sum_over_outer == 0, "bench: hold_ns + restore_ns never exceeds the cycle's own outer time");
+    std::printf("engine Windows gate bench (raise %s): %d failure(s)\n", raise_on ? "on" : "off", failures);
+    return failures ? 1 : 0;
+}
+
 int wmain(int argc, wchar_t** argv) {
     if (argc < 3) return 2;
+    if (std::wstring(argv[2]) == L"gate-bench") {
+        if (argc < 7) {
+            std::printf("usage: engine-host <kiln-engine-test.dll> gate-bench <on|off> <cycles> <load threads> <data dir> [<seconds cap>]\n");
+            return 2;
+        }
+        return bench_mode(argv[1], std::wstring(argv[3]) == L"on", std::wcstoull(argv[4], nullptr, 10),
+                          static_cast<unsigned>(std::wcstoul(argv[5], nullptr, 10)), argv[6], argc > 7 ? std::wcstod(argv[7], nullptr) : 120.0);
+    }
     if (std::wstring(argv[2]) == L"gate-server" || std::wstring(argv[2]) == L"gate-client")
         return gate_mode(argv[1], std::wstring(argv[2]) == L"gate-server");
     const std::wstring kfc_mode = argv[2];  // "kfc4": write <exe>.kfc with KFC4 first; "none": remove it
@@ -770,7 +969,9 @@ int wmain(int argc, wchar_t** argv) {
           "TimeDateStamp and SizeOfImage come from the loaded image");
     check(std::strcmp(id.target, "engine-host.exe") == 0, "target is the exe file name");
     check(id.archive_format == (kfc_mode == L"kfc4" ? 4u : 0u), "KFC header read from <exe>.kfc");
-    check(rows["engine.profile"] == KILN_CAP_UNAVAILABLE && rows["engine.ecs_write"] == KILN_CAP_UNAVAILABLE, "rows unavailable");
+    check(rows["engine.profile"] == KILN_CAP_UNAVAILABLE && rows["engine.ecs_write"] == KILN_CAP_UNAVAILABLE &&
+              rows["engine.attribute_model"] == KILN_CAP_UNAVAILABLE,
+          "rows unavailable");
     const auto* n = static_cast<const KilnEngineNativeApi*>(tables["kiln.internal.engine"]);
     check(n && n->header.size == sizeof(KilnEngineNativeApi) && !n->layout() && !n->profile(), "internal table, no profile");
     check(!GetProcAddress(dll, "kiln_engine_test_set_recipes") && !GetProcAddress(dll, "kiln_engine_test_invoke_filter") &&

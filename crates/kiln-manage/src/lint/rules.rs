@@ -145,6 +145,7 @@ pub(crate) fn run(l: &mut Linter) {
             }
         }
         crafted_rolled(&mut out, m, cat);
+        recipe_water(&mut out, m, cat);
         quests(&mut out, m);
         blocks(&mut out, m, &code, cat);
         run_bindings(&mut out, m);
@@ -417,6 +418,64 @@ fn crafted_rolled(out: &mut Out, m: &LMod, cat: Option<&Catalog>) {
                     continue;
                 };
                 out.push(Diagnostic::new(&f.display, codes::CRAFTED_ROLLED, item.span, &msg));
+            }
+        }
+    }
+}
+
+/// KL408: a recipe's water. An input naming the game's old Water canteen item ([`crate::catalog::STATION_WATER`]) takes
+/// that item, never the station's tank: the recipe's water is `"water"` (a definition) or `"waterCharges"` (a change
+/// to a recipe). Water at a factory station without a tank, or more than its tank holds, never lets a craft start
+/// (docs/re/stations.md section 3.6). The station: a definition's `"0x<workshop id>"`, or the workshop of the game
+/// recipe it names as its station or base (needs the catalog); a crafting menu takes water from the crafter and the base.
+fn recipe_water(out: &mut Out, m: &LMod, cat: Option<&Catalog>) {
+    use crate::catalog::{STATION_WATER, StationWater, station_water};
+    let workshop_of = |recipe: &str| cat.and_then(|c| c.recipe_workshops.get(&recipe.to_ascii_lowercase()).copied());
+    for f in m.files.iter().filter(|f| f.kind == "content") {
+        let Some(r) = &f.root else { continue };
+        // (recipe, its inputs, its water node, the key that holds the water, its workshop)
+        let mut recipes: Vec<(String, Option<&[Node]>, Option<&Node>, &str, Option<u32>)> = vec![];
+        for rec in r.pointer("/recipes/add").and_then(Node::as_array).into_iter().flatten() {
+            let station = rec.str_of("station").unwrap_or("");
+            let ws = if station.starts_with("0x") || station.starts_with("0X") {
+                parse_id(station)
+            } else if station.is_empty() || station.eq_ignore_ascii_case("hand") || station.eq_ignore_ascii_case("player") || station.starts_with("workshop:") {
+                if station.is_empty() { rec.str_of("base").and_then(workshop_of) } else { None }
+            } else {
+                workshop_of(station)
+            };
+            recipes.push((rec.str_of("name").unwrap_or("?").to_string(), rec.get("inputs").and_then(Node::as_array), rec.get("water"), "water", ws));
+        }
+        for mem in r.get("recipes").and_then(Node::as_object).into_iter().flatten() {
+            if mem.key == "add" {
+                continue;
+            }
+            let ws = if mem.key.contains(['*', '?']) { None } else { workshop_of(&mem.key) };
+            recipes.push((mem.key.clone(), mem.value.get("inputs").and_then(Node::as_array), mem.value.get("waterCharges"), "waterCharges", ws));
+        }
+        for (recipe, inputs, water, key, ws) in recipes {
+            for s in inputs.into_iter().flatten() {
+                // an item names it in any case (as crafted_rolled reads names); an item with a category picks the category, not the item
+                let Some(item) = s.get("item").filter(|i| i.as_str().is_some_and(|n| n.eq_ignore_ascii_case(STATION_WATER))) else { continue };
+                if s.get("category").is_some() {
+                    continue;
+                }
+                let count = s.get("count").and_then(Node::as_f64).unwrap_or(1.0);
+                out.push(Diagnostic::new(&f.display, codes::RECIPE_WATER, item.span, &format!(
+                    "recipe \"{recipe}\" takes \"{STATION_WATER}\", the game's old Water canteen item, as an ingredient: a craft takes {count} of that item, never water from the station's tank. For the station's tank water, remove this input and give the recipe \"{key}\": {count} (water charges a craft)"
+                )));
+            }
+            let Some(w) = water else { continue };
+            let Some(n) = w.as_f64().filter(|n| *n > 0.0) else { continue };
+            match ws.map(station_water) {
+                Some(StationWater::NoTank { name }) => out.push(Diagnostic::new(&f.display, codes::RECIPE_WATER, w.span, &format!(
+                    "recipe \"{recipe}\" needs {n} water a craft at the {name}, which has no water tank: the station never starts it (it takes a recipe's water from its own tank only). Stations with a tank: {}; or leave the water out",
+                    crate::catalog::TANK_STATIONS.iter().map(|s| s.2).collect::<Vec<_>>().join(", ")
+                ))),
+                Some(StationWater::Tank { charges, name }) if n > f64::from(charges) => out.push(Diagnostic::new(&f.display, codes::RECIPE_WATER, w.span, &format!(
+                    "recipe \"{recipe}\" needs {n} water a craft, more than the {name}'s tank holds ({charges}): the station never starts it"
+                ))),
+                _ => {}
             }
         }
     }
@@ -1361,7 +1420,7 @@ fn manifest_reader(out: &mut Out, m: &LMod, schema_errors: &HashSet<String>) {
     let known: Vec<&str> = vec![
         "$schema", "id", "name", "version", "authors", "author", "description", "license", "url", "apiVersion", "side", "clients",
         "dependencies", "loadBefore", "loadAfter", "incompatible", "features", "entryAssembly", "entryType", "exports", "advanced", "tests",
-        "kilnBuild", "writes", "boot", "updates", "systems",
+        "kilnBuild", "writes", "boot", "updates", "steamMessages", "systems",
     ];
     for mem in root.as_object().into_iter().flatten().filter(|x| !known.contains(&x.key.as_str())) {
         let key = mem.key.as_str();

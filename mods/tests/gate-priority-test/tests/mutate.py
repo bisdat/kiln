@@ -47,6 +47,12 @@ MUTANTS = [
      ['named-field']),
     ('restored judged by the replies, not by a read', 'restored = verified = snap[offset] == original;',
      'restored = !flipped; verified = restored && snap[offset] == original;', ['uncertain-change', 'uncertain-restore']),
+    ('a Kiln that measures the restore taken for an older one (GitHub #58)', 'hold_ends = hold_end();',
+     'hold_ends = "release-end";', ['write', 'slow-restore']),
+    ('an older Kiln taken for one that measures the restore', 'return has_restore_stats(s) ? "scene-release" : "release-end";',
+     'return "scene-release";', ['v1-stats']),
+    ('restore_ns not written', 'std::snprintf(restore, sizeof restore, "%llu", static_cast<unsigned long long>(r.restore_ns));',
+     'std::snprintf(restore, sizeof restore, "0");', ['slow-restore']),
 ]
 
 

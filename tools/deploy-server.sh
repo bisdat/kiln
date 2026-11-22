@@ -3,6 +3,7 @@
 #   <server>/dinput8.dll            Kiln proxy (entry gate)
 #   <server>/kiln/kiln-core.dll     native core
 #   <server>/kiln/sigdb/            symbol definitions + verified build records
+#   <server>/kiln/regmap/           Kiln's registries mapped onto the game (common rows + the server build records)
 #   <server>/kiln/dotnet/           private .NET runtime (win-x64)
 #   <server>/kiln/host/             Kiln.Host + Kiln.Api (+ the services, Kiln.Game, and game/<side>-<sha12>/Kiln.Game.dll
 #                                   per verified game build: tools/typegen/build-game.sh)
@@ -123,6 +124,9 @@ install -m 644 "$repo/sigdb/symbols/server.json" "$k/sigdb/server.json"
 rm -rf "$k/sigdb/server.d" && mkdir -p "$k/sigdb/server.d"
 cp "$repo"/sigdb/symbols/server.d/*.json "$k/sigdb/server.d/" 2>/dev/null || true
 cp "$repo"/sigdb/builds/server/*.json "$k/sigdb/builds/server/" 2>/dev/null || true
+rm -rf "$k/regmap" && mkdir -p "$k/regmap/common" "$k/regmap/server"
+install -m 644 "$repo"/regmap/common/*.json "$k/regmap/common/"
+cp "$repo"/regmap/server/*.json "$k/regmap/server/" 2>/dev/null || true
 rsync -a --delete "$repo/.cache/dotnet-win-x64/root/" "$k/dotnet/"
 rsync -a --delete --include='Kiln.*' --include='game/***' --exclude='*' "$out/host/" "$k/host/"
 if ((samples)); then

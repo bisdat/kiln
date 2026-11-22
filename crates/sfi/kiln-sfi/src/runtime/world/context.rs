@@ -14,8 +14,8 @@
 //! Each answers as ShroudForge's does, its denial first (the registrar's `runtime_denial_reason`: phase, permission,
 //! lifecycle activity, the contract):
 //! - `session_id()`: 0 when the denial of `runtime.ecs.query` refuses, else the live session ([`Snapshot`]), 0
-//!   without one. `runtime.ecs.query` is outside the contract until its family lands, so until then every
-//!   package gets 0 and ShroudForge's own mods report "waiting" instead of failing.
+//!   without one. `runtime.ecs.query` is in the contract where kiln.world's ECS reads are (`world.ecs_read`);
+//!   elsewhere every package gets 0 and ShroudForge's own mods report "waiting" instead of failing.
 //! - `context_active()`: `(false, denial)`; `(true, nil)` while a context is live; else
 //!   `(false, "active voxel world context is not available")`.
 //! - `context_kind()`: "unknown" on the denial of `runtime.world.context.active` or without a live context; else
@@ -46,10 +46,9 @@
 //! kiln-sfi's; a read between the two sees the advanced value for a world that is about to go. kiln.world's own
 //! world facts accept that same value then, and every session-bound member validates its session per call.
 //!
-//! **Seam for the ECS queries** (held with the ECS reads): ShroudForge's ECS readiness (`runtime_provider::ready`, the catalog's
-//! `Ready` fact) needs the engine's view of the world's entity table and registry, which only kiln.world's
-//! `ecs_context_snapshot` reads (ECS memory, held with the ECS reads). It stays the ECS queries' row; nothing here calls
-//! `ecs_context_snapshot` or any other ECS member.
+//! **Not ECS readiness**: ShroudForge's ECS readiness (`runtime_provider::ready`, the catalog's `Ready` fact) needs the
+//! engine's view of the world's entity table, which only kiln.world's `ecs_context_snapshot` reads; the ECS family
+//! asks it (`crate::runtime::ecs::ready`). Nothing here calls `ecs_context_snapshot` or any other ECS member.
 //!
 //! The family ([`family`]) claims the four names ([`CLAIMS`]) inside the installer's `runtime.world` container.
 //! Its runtime hook builds the runtime-create's [`WorldContext`] (attached to the runtime facts, so the registrar's
@@ -66,7 +65,10 @@ use crate::runtime::services::{ServiceAdapter, ServiceError, Unavailable};
 use crate::service_member;
 use crate::worker::{WorkerCommand, WorkerContext, WorldLifecycle};
 use kiln_abi::services::kiln_world::{KILN_WORLD_SERVICE, KILN_WORLD_VERSION, KilnWorldApi};
-use kiln_abi::{KILN_SESSION_DEDICATED, KILN_SESSION_HOST, KILN_SESSION_REMOTE};
+use kiln_abi::{
+    KILN_SESSION_DEDICATED, KILN_SESSION_HOST, KILN_SESSION_REMOTE, KILN_WORLD_CLIENT,
+    KILN_WORLD_SERVER,
+};
 use mlua::{Lua, Table};
 use sfi_core::bindings::runtime::{RuntimeHost, RuntimeOperation as Op, runtime_denial_reason};
 use sfi_core::host::Side;
@@ -167,7 +169,30 @@ impl WorldContext {
 
     /// The live context now (see the module docs), or [`Snapshot::NONE`].
     pub fn read(&self) -> Snapshot {
-        let world = session_world_kind(self.side);
+        self.read_world(session_world_kind(self.side))
+    }
+
+    /// The world ShroudForge's ECS binds now, its local authority's when there is one (1.7.9
+    /// engine-context/resolve_engine_owners.cpp:65,133): on a server the server world; on a client the hosted server
+    /// world while it hosts (single player included), else the client world (a joined client's replicated copies).
+    /// With that world's live session ([`Self::read_world`]'s checks), 0 without one.
+    pub fn ecs_world(&self) -> (u32, u64) {
+        let server = KILN_WORLD_SERVER as u32;
+        if self.side == Side::Client {
+            let hosted = self.read_world(server);
+            if hosted.active() {
+                return (server, hosted.session);
+            }
+            let client = KILN_WORLD_CLIENT as u32;
+            return (client, self.read_world(client).session);
+        }
+        (server, self.read_world(server).session)
+    }
+
+    /// The live context of world kind `world` of this process, with every check of [`Self::read`] (a dedicated
+    /// server's world and a host's worlds are direct, a joined client's client world read-only), or
+    /// [`Snapshot::NONE`].
+    pub fn read_world(&self, world: u32) -> Snapshot {
         let Ok(table) = self
             .services
             .bind::<KilnWorldApi>(KILN_WORLD_SERVICE, KILN_WORLD_VERSION)

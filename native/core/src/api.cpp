@@ -33,6 +33,7 @@
 #include "services/service.h"
 #include "tasks_host.h"
 #include "hooks_protect_internal.h"
+#include "owners_internal.h"
 #include "mod_values_host.h"
 
 // kiln.caps, the capability registry (services/caps.cpp)
@@ -230,6 +231,10 @@ const void* lookup_service(KilnStr name, uint32_t min_version, bool services) {
     // kiln.internal.hooks (hooks_protect_internal.h): the core's own, for Kiln's services only, like the one above.
     if (sv(name) == KILN_HOOKS_INTERNAL_SERVICE)
         return min_version <= KILN_HOOKS_INTERNAL_VERSION ? hooks::internal_table() : nullptr;
+    // kiln.internal.owners (owners_internal.h): the core's own, for Kiln's services (and the managed host's view,
+    // api_service_managed_host); nobody publishes the name. v1 grants (dev.30), v2 owner_id (kiln.registry, dev.31).
+    if (sv(name) == KILN_OWNERS_INTERNAL_SERVICE)
+        return min_version <= KILN_OWNERS_INTERNAL_VERSION ? reg::owners_internal_table() : nullptr;
 
     // kiln.profile works in safe idle too: early native mods and the managed host read it to find their mods/configs.
     if (sv(name) == KILN_PROFILE_SERVICE) return min_version <= KILN_PROFILE_VERSION ? profile::table() : nullptr;
@@ -271,10 +276,10 @@ bool managed_host_name(std::string_view name) {
 // kiln/services DLL.
 KilnResult register_published(KilnOwner owner, KilnStr name, const void* table, bool services) {
     if (!table || !name.ptr || name.len == 0) return KILN_ERR_INVALID_ARGUMENT;
-    // The managed host's tables (the task lease table, the mod-values backend), kiln.launch, kiln.internal.launch and
-    // kiln.internal.hooks are the core's own: nobody publishes those names, not even a Kiln service.
+    // The managed host's tables (the task lease table, the mod-values backend), kiln.launch, kiln.internal.launch,
+    // kiln.internal.hooks and kiln.internal.owners are the core's own: nobody publishes those names, not even a Kiln service.
     if (managed_host_name(sv(name)) || sv(name) == KILN_LAUNCH_SERVICE || sv(name) == KILN_LAUNCH_INTERNAL_SERVICE ||
-        sv(name) == KILN_HOOKS_INTERNAL_SERVICE) {
+        sv(name) == KILN_HOOKS_INTERNAL_SERVICE || sv(name) == KILN_OWNERS_INTERNAL_SERVICE) {
         KLOG_W("service %.*s: reserved for the core, refused for %s", static_cast<int>(name.len), name.ptr,
                reg::owner_name(owner).c_str());
         return KILN_ERR_INVALID_ARGUMENT;
@@ -309,14 +314,20 @@ KilnResult KILN_CALL api_register_service_services(KilnOwner owner, KilnStr name
 }
 
 // The managed host's KilnApi (api_for_managed_host, tasks_host.h): the plugins' lookup, plus exactly the core's own
-// kiln.internal.tasks.host and kiln.internal.mod-values.backend tables (never published ones: nobody may publish those
-// names); every other internal name stays unresolved, and registration is the plugins' (the host publishes no internal
-// table either).
+// kiln.internal.tasks.host, kiln.internal.mod-values.backend and kiln.internal.owners tables (never published ones: nobody
+// may publish those names) and the published kiln.internal.registry of kiln-content.dll; every other internal name stays
+// unresolved, and registration is the plugins' (the host publishes no internal table either).
+// kiln.internal.registry (native/services/content/include/kiln_registry_host.h): kiln-content.dll publishes it as a Kiln
+// service of this build; Kiln.Host hands the registry stage its load order through it. The managed host is its one consumer.
+constexpr std::string_view kRegistryHostService = "kiln.internal.registry";
 const void* KILN_CALL api_service_managed_host(KilnStr name, uint32_t min_version) {
+    if (sv(name) == kRegistryHostService) return lookup_service(name, min_version, true);  // a published one only (its owner a Kiln service)
     if (sv(name) == KILN_TASKS_HOST_SERVICE)
         return min_version <= KILN_TASKS_HOST_VERSION ? tasks_svc::host_table() : nullptr;
     if (sv(name) == KILN_MOD_VALUES_BACKEND_SERVICE)
         return min_version <= KILN_MOD_VALUES_BACKEND_VERSION ? mod_values::backend_table() : nullptr;
+    if (sv(name) == KILN_OWNERS_INTERNAL_SERVICE)  // the managed host grants a mod's owner what its manifest opts into
+        return min_version <= KILN_OWNERS_INTERNAL_VERSION ? reg::owners_internal_table() : nullptr;
     return lookup_service(name, min_version, false);
 }
 // Its owner_create marks the owner as the managed host's (reg::owner_managed_host): kiln.mod-values gives an owner named

@@ -1,0 +1,84 @@
+{
+  "$schema": "../registry-schema.schema.json",
+  "registrySchema": 1,
+  "registry": "loot",
+  "typeName": "ItemLoot",
+  "version": "0.1.0",
+  "stability": "experimental",
+  "experimentalId": "KILNX031",
+  "doc": "How an item drops as random loot: its stack size and its rarities. One entry per item that can drop.",
+  "ids": {
+    "game": "game:<the item's stable name>",
+    "mod": "<mod id>:<the item's name>",
+    "rule": "A loot entry has the id of its item (items registry). An entry whose item has no name is game:item_<its 32-bit item id as 8 hex digits>."
+  },
+  "traits": {},
+  "fields": {
+    "stack": {
+      "type": "struct",
+      "applies": "now",
+      "doc": "The stack size of a drop.",
+      "fields": {
+        "min": {
+          "type": "int",
+          "min": 0,
+          "max": 65535,
+          "ops": "number"
+        },
+        "max": {
+          "type": "int",
+          "min": 0,
+          "max": 65535,
+          "ops": "number"
+        },
+        "scalable": {
+          "type": "bool",
+          "ops": "set",
+          "doc": "The stack grows with the world's loot amount, up to maxScaled."
+        },
+        "maxScaled": {
+          "type": "int",
+          "min": 0,
+          "max": 65535,
+          "ops": "number"
+        }
+      },
+      "typeName": "ItemLootStack"
+    },
+    "rarities": {
+      "type": "flags",
+      "values": [
+        "common",
+        "uncommon",
+        "rare",
+        "epic",
+        "legendary"
+      ],
+      "applies": "now",
+      "ops": "set",
+      "doc": "The rarities a drop may roll.",
+      "typeName": "RegistryRarities"
+    },
+    "fixedRarity": {
+      "type": "enum",
+      "values": [
+        "none",
+        "common",
+        "uncommon",
+        "rare",
+        "epic",
+        "legendary"
+      ],
+      "applies": "now",
+      "ops": "set",
+      "doc": "A rarity every drop gets (none: rolled from rarities).",
+      "typeName": "ItemLootRarity"
+    }
+  },
+  "entry": {
+    "add": false,
+    "remove": "disabled",
+    "removeDoc": "A removed loot entry never drops as random loot (the item itself stays)."
+  },
+  "raw": "allowed"
+}

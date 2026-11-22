@@ -831,7 +831,7 @@ KilnResult KILN_CALL t_dump(KilnStr spec, char* rep, size_t cap, size_t* out) {
     return rc;
 }
 KilnResult KILN_CALL t_status(char* json_out, size_t cap, size_t* out) {
-    std::string s = "{" + store_status_json() + ",\"hooks\":" + hooks_status_json() + "}";
+    std::string s = "{" + store_status_json() + ",\"hooks\":" + hooks_status_json() + ",\"loadedWrites\":" + loaded_writes_json() + "}";
     if (out) *out = s.size();
     if (json_out && cap) std::snprintf(json_out, cap, "%s", s.c_str());
     return cap > s.size() ? KILN_OK : KILN_ERR_BUFFER_TOO_SMALL;
@@ -907,6 +907,19 @@ KilnResult KILN_CALL t_blob_read_resident(const KilnContentHash* h, void* b, siz
     return op_blob_read(h, b, c, n, /*resident=*/true);
 }
 
+// loaded_snapshot, loaded_list (0.2.0-dev.30.3): the resources the game has loaded now, from any thread (loaded_prod.cpp).
+KilnResult KILN_CALL t_loaded_snapshot(KilnOwner o, const KilnAssetKey* k, void* b, size_t c, size_t* n, KilnLoadedInfo* i) {
+    return op_loaded_snapshot(o, k, b, c, n, i);
+}
+KilnResult KILN_CALL t_loaded_list(KilnOwner o, uint32_t t, KilnAssetKey* out, size_t c, size_t* n, KilnLoadedInfo* i) {
+    return op_loaded_list(o, t, out, c, n, i);
+}
+
+KilnResult KILN_CALL t_loaded_cas(KilnOwner o, const KilnAssetKey* k, uint64_t session, const void* expected, size_t size,
+                                  size_t offset, const void* desired, uint32_t width, KilnMutationReply* reply) {
+    return op_loaded_scalar_cas(o, k, session, expected, size, offset, desired, width, reply);
+}
+
 const KilnAssetsApi kTable = {
     {sizeof(KilnAssetsApi), KILN_ASSETS_VERSION},
     &t_icon_png, &t_icon_file, &t_icon_remove, &t_icon_state,
@@ -922,6 +935,7 @@ const KilnAssetsApi kTable = {
     &t_cat_open, &t_cat_read, &t_cat_close,
     &t_tex_rgba,  // since 0.2.0-dev.29.15
     &t_blob_read_resident,
+    &t_loaded_snapshot, &t_loaded_list, &t_loaded_cas,  // since 0.2.0-dev.30.3
 };
 
 const KilnAssetsVfxApi kVfxTable = {
@@ -947,6 +961,7 @@ void KILN_CALL on_ready(void*) {
     if (content_on()) {
         if (!verify_content_map(&why)) LOGW("assets: content map check: %s (blob reads may be unreliable)", why.c_str());
     }
+    loaded_report_capability();
     LOGI("assets: ready; %s", (std::string("{") + store_status_json() + "}").c_str());
 }
 

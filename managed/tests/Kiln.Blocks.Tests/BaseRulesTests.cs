@@ -106,5 +106,22 @@ public sealed class BaseRulesTests
         Assert.Equal(16, BaseLimitsReader.From(state, 40, 0)!.EffectiveCount);
         Assert.Null(BaseLimitsReader.From("""{"table": false, "reason": "UnknownType"}""", 1, 0));
         Assert.Null(BaseLimitsReader.From(null, 1, 0));
+        Assert.Empty(l.RegistryChanged);
+    }
+
+    // Ruling D1: the registry stage composes on the base rules' result and wins; the read side says so per value.
+    [Fact]
+    public void A_registry_edit_over_a_rule_is_named()
+    {
+        const string state = """
+            {"table": true, "applied": true, "patchedBy": [],
+             "original": {"altars": [1, 2, 4], "sizes": [[0,0,0],[40,40,40]]},
+             "effective": {"altars": [8, 2, 8], "sizes": [[0,0,0],[60,60,60]]},
+             "rules": [{"mod": "rules-a", "name": "roomy", "applied": true}],
+             "registryChanged": [{"field": "altarsPerFlameLevel[1]", "afterRules": 8, "effective": 2, "rules": ["rules-a:roomy"]}]}
+            """;
+        var l = BaseLimitsReader.From(state, 1, 0)!;
+        Assert.Equal(2, l.EffectiveCount);
+        Assert.Equal(["altarsPerFlameLevel[1]: 8 -> 2 (rules-a:roomy)"], l.RegistryChanged);
     }
 }

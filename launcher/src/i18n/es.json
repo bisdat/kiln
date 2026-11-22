@@ -2262,6 +2262,8 @@
       "byHand": "Puesto a mano",
       "folder": "Carpeta",
       "advanced": "Avanzado (hooks o parches)",
+      "steam": "Steam",
+      "steamMessages": "Habla con otros jugadores a través de Steam",
       "role": "Función",
       "servesLive": "Sirve las páginas en vivo",
       "also": "También {list}",
@@ -5446,6 +5448,19 @@
         "duration": "Duración",
         "durationPh": "del juego",
         "seconds": "segundos",
+        "water": "Agua del depósito",
+        "waterTip": "El agua propia de la receta, en cargas por fabricación (64 unidades de agua cada una), como la muestra la fila Agua de la pantalla de recetas. El juego la toma cuando empieza una fabricación.",
+        "waterPh": "ninguna",
+        "waterPhBase": "la de la base",
+        "waterPhGame": "la del juego",
+        "waterUnit": "cargas por fabricación",
+        "waterTank": "El depósito de {station} contiene {max} cargas: mantenlo lleno para fabricar.",
+        "waterOver": "Más de lo que contiene el depósito de {station} ({max}): la estación nunca empieza esta receta.",
+        "waterNoTank": "{station} no tiene depósito de agua: nunca empieza una receta que necesite agua.",
+        "waterMenu": "Se fabrica desde un menú: el juego toma el agua de los recipientes del jugador y de los pozos y barriles de la base.",
+        "oldWater": "Un ingrediente es el antiguo objeto Agua del juego, una cantimplora: cada fabricación consume {count} de ese objeto, no agua del depósito de la estación.",
+        "useTank": "Usar agua del depósito",
+        "useTankTip": "Quita los ingredientes de objeto Agua y pide la misma cantidad de agua del depósito",
         "itemAria": "Objeto",
         "countAria": "Cantidad",
         "category": "cualquier objeto de la categoría {id}",
@@ -5530,7 +5545,8 @@
         "toggle": "Mostrar entradas ocultas del juego",
         "tag": "oculta",
         "tip": "Entradas antiguas, de prueba o sin uso del juego: puede que no hagan nada en el juego.",
-        "tankWater": "agua del depósito de la estación"
+        "oldWater": "cantimplora antigua, no agua del depósito",
+        "oldWaterTip": "El antiguo objeto Agua del juego. La pantalla de recetas usa su nombre para el agua de una receta, pero como ingrediente es el propio objeto. Para agua del depósito, usa Agua del depósito en la receta."
       }
     },
     "order": {

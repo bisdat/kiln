@@ -29,6 +29,8 @@ const WARNING_MAX: usize = 8192;
 const NAME_MAX: usize = 200;
 const VERSION_MAX: usize = 64;
 const MENU_KEY_MAX: usize = 64;
+/// `delivery`: at most this many rows (the schema's bound); the oldest revision's row goes first.
+pub const MAX_DELIVERY: usize = 64;
 
 /// The sentence a warning about a save-sensitive package that is off ends with (sfi PLAN §4); a package that is not
 /// save-sensitive is safe to save without, so its warning does not say it.
@@ -125,6 +127,10 @@ words!(
 words!(
     /// `menu.by`.
     MenuBy { Kiln = "kiln", Off = "off", Unavailable = "unavailable" }
+);
+words!(
+    /// `delivery[].state`.
+    DeliveryState { Pending = "pending", Shown = "shown", NotShown = "not-shown" }
 );
 
 /// A stable machine word (`code` in the schema); anything else is `unknown`.
@@ -433,6 +439,19 @@ pub struct Warning {
     pub text: String,
 }
 
+/// One `delivery[]` row: what kiln-sfi's own native banner did with one warning revision.
+/// kiln-sfi records only its own surface (`surface: native`); Kiln.Ui and the launcher keep their own
+/// records.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Delivery {
+    pub revision: u64,
+    pub state: DeliveryState,
+    /// The world session it was shown in; `None` at the main menu, and always for pending and not-shown.
+    pub world_session: Option<u64>,
+    /// When it was shown (required for shown), or when it was found that it cannot show.
+    pub at_ms: Option<u64>,
+}
+
 /// One `packages[]` row.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Package {
@@ -580,6 +599,8 @@ pub struct Reducer {
     /// The previous start's active save-sensitive packages, written as `carriedSaveSensitive` on aside and refused:
     /// this start runs none of them, so the next kiln start must still compare against them.
     carried: Vec<PreviouslyActive>,
+    /// The native banner's rows, by rising revision.
+    delivery: Vec<Delivery>,
     /// Raised by every change: a later snapshot always has a higher number.
     seq: u64,
 }
@@ -609,6 +630,7 @@ impl Reducer {
             packages: Vec::new(),
             dropped: 0,
             carried: Vec::new(),
+            delivery: Vec::new(),
             seq: 1,
         };
         if !phase.incomplete() {
@@ -1073,6 +1095,63 @@ impl Reducer {
         change
     }
 
+    /// The native banner's rows, by rising revision.
+    pub fn deliveries(&self) -> &[Delivery] {
+        &self.delivery
+    }
+
+    /// What kiln-sfi's native banner did with warning revision `row.revision`: one row per revision, written like a
+    /// warning. A revision this record never had (0, or above `warningRevision`) is refused. Shown is final: a later
+    /// pending or not-shown for the same revision changes nothing, a later shown (a showing again, on entering a world)
+    /// updates where and when; not-shown is replaced only by shown. Pending and not-shown carry no world session, shown
+    /// always has a time. Past [`MAX_DELIVERY`] rows the oldest revision's goes.
+    pub fn set_delivery(&mut self, row: Delivery) -> Change {
+        if self.sealed() || row.revision == 0 || row.revision > self.warning_revision {
+            return Change::None;
+        }
+        let shown = row.state == DeliveryState::Shown;
+        let row = Delivery {
+            world_session: row.world_session.filter(|_| shown),
+            at_ms: if shown {
+                Some(row.at_ms.unwrap_or(0))
+            } else {
+                row.at_ms
+            },
+            ..row
+        };
+        match self
+            .delivery
+            .iter_mut()
+            .find(|d| d.revision == row.revision)
+        {
+            Some(old) => {
+                let keep = matches!(
+                    (old.state, row.state),
+                    (
+                        DeliveryState::Shown,
+                        DeliveryState::Pending | DeliveryState::NotShown
+                    ) | (DeliveryState::NotShown, DeliveryState::Pending)
+                );
+                if keep || *old == row {
+                    return Change::None;
+                }
+                *old = row;
+            }
+            None => {
+                let at = self.delivery.partition_point(|d| d.revision < row.revision);
+                if self.delivery.len() >= MAX_DELIVERY && at == 0 {
+                    // older than every row a full table keeps
+                    return Change::None;
+                }
+                self.delivery.insert(at, row);
+                if self.delivery.len() > MAX_DELIVERY {
+                    self.delivery.remove(0);
+                }
+            }
+        }
+        self.changed(Change::Warning)
+    }
+
     /// Recomputes row `at`'s warning from its skip, intent and presence; a new or changed warning raises
     /// `warningRevision`. A warning is never removed.
     fn refresh(&mut self, at: usize) -> Change {
@@ -1152,6 +1231,13 @@ impl Reducer {
                 Value::Array(self.carried.iter().map(carried_value).collect()),
             );
         }
+        // only once the native banner did something (absent otherwise, as before)
+        if !self.delivery.is_empty() && self.phase != Phase::Aside {
+            doc.insert(
+                "delivery".into(),
+                Value::Array(self.delivery.iter().map(delivery_value).collect()),
+            );
+        }
         Value::Object(doc)
     }
 
@@ -1200,6 +1286,16 @@ fn carried_value(p: &PreviouslyActive) -> Value {
         "basis": p.basis,
         "policyRow": p.policy_row.as_ref().map(|(id, version)| json!({ "id": id, "version": version })),
         "fromLaunchId": p.from_launch_id.map(launch_id),
+    })
+}
+
+fn delivery_value(d: &Delivery) -> Value {
+    json!({
+        "surface": "native",
+        "revision": d.revision,
+        "state": d.state.word(),
+        "worldSession": d.world_session,
+        "atMs": d.at_ms,
     })
 }
 

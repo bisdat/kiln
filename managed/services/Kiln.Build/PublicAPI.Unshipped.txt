@@ -44,3 +44,5 @@ static Kiln.AltarSize.operator ==(Kiln.AltarSize? left, Kiln.AltarSize? right) -
 static Kiln.BaseLimits.operator !=(Kiln.BaseLimits? left, Kiln.BaseLimits? right) -> bool
 static Kiln.BaseLimits.operator ==(Kiln.BaseLimits? left, Kiln.BaseLimits? right) -> bool
 static Kiln.Build.BaseLimits.get -> Kiln.BaseLimits?
+Kiln.BaseLimits.RegistryChanged.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Kiln.BaseLimits.RegistryChanged.init -> void

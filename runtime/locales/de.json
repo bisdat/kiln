@@ -3,6 +3,12 @@
     "completion": {
       "title": "Befehlsvorschläge",
       "hint": "Tab: vervollständigen · Esc: schließen"
+    },
+    "search": {
+      "title": "Chatverlauf durchsuchen",
+      "hint": "Ctrl+R: älter · Ctrl+Shift+R: neuer · Enter/Tab: übernehmen · Esc: abbrechen",
+      "query": "Suche",
+      "none": "Kein passender Eintrag im Verlauf"
     }
   },
   "language": {

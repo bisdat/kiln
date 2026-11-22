@@ -389,8 +389,11 @@ public sealed unsafe class ContentChangeTests : FakeTableTest
     private static int FakeSet(ulong owner, uint kind, uint id, NativeStr path, ContentNative.Value* v)
     {
         _sets++;
+        _lastSet = (kind, id, path.ToString(), v->I);
         return _setRc;
     }
+
+    private static (uint Kind, uint Id, string Path, long Value) _lastSet;
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int FakeReset(ulong owner, uint kind, uint id, NativeStr path) => _resetRc;
@@ -438,6 +441,22 @@ public sealed unsafe class ContentChangeTests : FakeTableTest
         Swap(typeof(Content), "_table", Box(t));
         var e = new ContentNative.Entry { Size = (uint)sizeof(ContentNative.Entry), Kind = (uint)ContentKind.Items, Id = 0x1234 };
         _entry = new ContentEntry(Content.Items, in e);
+    }
+
+    [Fact]
+    public void A_recipes_CraftingWater_writes_its_waterCharges_in_range()
+    {
+        // 0.2.0-dev.30.3 (thanks netjunk): the typed property for Set("waterCharges", n), charges per craft, 0..1023
+        var e = new ContentNative.Entry { Size = (uint)sizeof(ContentNative.Entry), Kind = (uint)ContentKind.Recipes, Id = 0x77 };
+        var recipe = new ContentEntry(Content.Recipes, in e);
+        recipe.CraftingWater = 5;
+        Assert.Equal(((uint)ContentKind.Recipes, 0x77u, "waterCharges", 5L), _lastSet);
+        recipe.CraftingWater = 1023;
+        Assert.Equal(1023L, _lastSet.Value);
+        var sets = _sets;
+        Assert.Throws<ArgumentOutOfRangeException>(() => recipe.CraftingWater = -1);
+        Assert.Throws<ArgumentOutOfRangeException>(() => recipe.CraftingWater = 1024);
+        Assert.Equal(sets, _sets);  // refused before kiln.content is asked
     }
 
     [Fact]

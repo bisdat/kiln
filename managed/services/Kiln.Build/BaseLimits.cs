@@ -41,6 +41,12 @@ public sealed record BaseLimits(int FlameLevel, int CurrentAltars, int OriginalC
     /// <summary>Mods whose own resource patches of the game's balancing table are in this start's table (a mod that
     /// changes the counts or sizes by the game's names, as More Flame Altars does).</summary>
     public IReadOnlyList<string> PatchedBy { get; init; } = [];
+
+    /// <summary>Values a registry edit changed after the base rules (the registry stage composes on the rules' result and
+    /// wins), one line each: <c>"altarsPerFlameLevel[1]: 8 -> 2 (rules-a:roomy)"</c>, the value the rules left, the value the
+    /// game runs with, and the rules that had raised it. The counts and sizes above are already the values after the
+    /// registry. Empty when no registry edit touched a value a rule raised. Since 0.2.0-dev.31.</summary>
+    public IReadOnlyList<string> RegistryChanged { get; init; } = [];
 }
 
 public static partial class Build
@@ -109,10 +115,19 @@ internal static class BaseLimitsReader
         if (root.TryGetProperty("patchedBy", out var pb) && pb.ValueKind == JsonValueKind.Array)
             foreach (var m in pb.EnumerateArray())
                 if (m.GetString() is { } s) patchedBy.Add(s);
+        var registry = new List<string>();
+        if (root.TryGetProperty("registryChanged", out var rc) && rc.ValueKind == JsonValueKind.Array)
+            foreach (var c in rc.EnumerateArray())
+            {
+                var names = c.TryGetProperty("rules", out var rn) && rn.ValueKind == JsonValueKind.Array
+                    ? string.Join(", ", rn.EnumerateArray().Select(x => x.GetString())) : "";
+                registry.Add($"{c.GetProperty("field").GetString()}: {c.GetProperty("afterRules").GetDouble()} -> {c.GetProperty("effective").GetDouble()} ({names})");
+            }
         return new BaseLimits(flameLevel, currentAltars, At(originalCounts, flameLevel), At(effectiveCounts, flameLevel),
             Sizes(root.GetProperty("original")), Sizes(root.GetProperty("effective")))
         {
             OriginalCounts = originalCounts, EffectiveCounts = effectiveCounts, AppliedRules = applied, PatchedBy = patchedBy,
+            RegistryChanged = registry,
         };
     }
 
