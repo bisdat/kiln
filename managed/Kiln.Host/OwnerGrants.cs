@@ -13,7 +13,7 @@ internal static unsafe class OwnerGrants
     public const uint Version1 = 1;
     public const uint SteamMessagesGrant = 1;  // KILN_OWNER_GRANT_STEAM_MESSAGES
 
-    /// <summary>KilnOwnersInternalApi (24 bytes): field order is the table's.</summary>
+    /// <summary>KilnOwnersInternalApi v1 (24 bytes; v2 appends owner_id at 24, which Kiln.Host does not use): field order is the table's.</summary>
     [StructLayout(LayoutKind.Sequential)]
     internal struct Table
     {
@@ -33,7 +33,7 @@ internal static unsafe class OwnerGrants
             var t = (Table*)host.Service(Name, Version1);
             if (t == null)
                 why = "this Kiln core does not admit mods to Steam peer messages (no kiln.internal.owners table)";
-            else if (t->Version != Version1 || t->Size < (uint)sizeof(Table) || t->Grant == null)
+            else if (t->Version < Version1 || t->Size < (uint)sizeof(Table) || t->Grant == null)  // a later version keeps v1's members
                 why = $"the core's kiln.internal.owners table is v{t->Version} with {t->Size} bytes: the core and Kiln.Host are different builds";
             else
             {
