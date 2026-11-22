@@ -10,6 +10,8 @@ g++ -std=c++20 -Wall -Wextra -I"$here/../include" "$here/abi_test.cpp" -o "$out/
 g++ -std=c++20 -Wall -Wextra -I"$here/../src" "$here/compat_ticks_test.cpp" -o "$out/compat_ticks_test"
 "$out/compat_ticks_test"
 "$out/abi_test"
+g++ -std=c++20 -Wall -Wextra -I"$here/host" -I"$here/../include" "$here/client_probe_test.cpp" -o "$out/client_probe_test"
+"$out/client_probe_test"
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -I"$here/../include" -I"$here/../src" \
     "$here/v26_model_test.cpp" "$here/../src/v26_model.cpp" -o "$out/v26_model_test"
 "$out/v26_model_test"

@@ -77,7 +77,25 @@ int main() {
     CHECK(t.spawn(w, guid, 1, 2, 3) == 5000 && captured.yaw_degrees == 0);
     CHECK(t.spawn_ex(w, guid, 1, 2, 3, &init, 1) == 5000 && captured.yaw_degrees == 0 && components.size() == 1);
     CHECK(spawn_for(&mod, w, guid, 1, 2, 3, "spawn_offer") == 5000 && captured.yaw_degrees == 0);
+    // EMF permits 15 extra components, and never a replacement for its creation-time transform.
+    EmfComponentInit many[16];
+    for (uint32_t i = 0; i < 16; ++i) many[i] = {i + 1, sizeof bytes, &bytes};
+    CHECK(t.spawn_ex(w, guid, 1, 2, 3, many, 15) == 5000 && captured.component_count == 15);
+    CHECK(t.spawn_facing(w, guid, 1, 2, 3, 90, many, 15) == 5000 && captured.component_count == 15);
     const auto before = calls;
+    CHECK(t.spawn_ex(w, guid, 1, 2, 3, many, 16) == 0);
+    CHECK(t.spawn_facing(w, guid, 1, 2, 3, 90, many, 16) == 0);
+    EmfComponentInit transform{0x027ac564, sizeof bytes, &bytes};
+    CHECK(t.spawn_ex(w, guid, 1, 2, 3, &transform, 1) == 0);
+    CHECK(t.spawn_facing(w, guid, 1, 2, 3, 90, &transform, 1) == 0);
+    // A callback on a different world cannot borrow the current server world's pointer.
+    for (auto* other : {reinterpret_cast<EmfWorld*>(0x2000), static_cast<EmfWorld*>(nullptr)}) {
+        ContextScope wrong_world(&mod, other, true);
+        CHECK(t.spawn(w, guid, 1, 2, 3) == 0);
+        CHECK(t.spawn_ex(w, guid, 1, 2, 3, &init, 1) == 0);
+        CHECK(t.spawn_facing(w, guid, 1, 2, 3, 90, &init, 1) == 0);
+    }
+    CHECK(calls == before);
     for (float yaw : {std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity()})
         CHECK(t.spawn_facing(w, guid, 1, 2, 3, yaw, nullptr, 0) == 0 && last_function == "spawn_facing");
     CHECK(t.spawn_facing(w, nullptr, 1, 2, 3, 0, nullptr, 0) == 0);

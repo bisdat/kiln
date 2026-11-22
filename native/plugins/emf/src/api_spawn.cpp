@@ -10,7 +10,8 @@
 namespace kemf {
 namespace {
 bool in_server_cb(EmfWorld* w) {
-    return w && reinterpret_cast<uintptr_t>(w) == g_api->world(KILN_WORLD_SERVER) && g_api->on_tick_thread();
+    return w && w == t_ctx.world && reinterpret_cast<uintptr_t>(w) == g_api->world(KILN_WORLD_SERVER) &&
+           g_api->on_tick_thread();
 }
 
 uint32_t do_spawn(Mod* m, EmfWorld* w, const uint8_t guid[16], double x, double y, double z, const char* fn,
@@ -58,7 +59,8 @@ uint32_t api_spawn(EmfWorld* w, const uint8_t guid[16], double x, double y, doub
 uint32_t spawn_with_components(Mod* m, EmfWorld* w, const uint8_t guid[16], double x, double y, double z,
                                const EmfComponentInit* comps, uint32_t count, float yaw_deg, const char* fn) {
     if (count == 0) return do_spawn(m, w, guid, x, y, z, fn, nullptr, 0, yaw_deg);
-    if (!comps || count > KILN_SPAWN_MAX_COMPONENTS) return refuse(m, fn, "bad component list"), 0;
+    // EMF's spawn_ex/spawn_facing limit is 15, independently of kiln.spawn's larger capacity.
+    if (!comps || count > 15) return refuse(m, fn, "at most 15 extra components"), 0;
     if (!S.spawn || S.spawn->header.size < offsetof(KilnSpawnApi, capabilities) + sizeof(S.spawn->capabilities) ||
         !S.spawn->capabilities || !(S.spawn->capabilities() & KILN_SPAWN_CAP_COMPONENTS))
         return unsupported(m, fn, "kiln.spawn spawn-time components are unavailable"), 0;
@@ -67,6 +69,9 @@ uint32_t spawn_with_components(Mod* m, EmfWorld* w, const uint8_t guid[16], doub
     for (uint32_t i = 0; i < count; ++i) {
         if (!comps[i].hash || !comps[i].data || !comps[i].size || comps[i].size > (1u << 20))
             return refuse(m, fn, "invalid component bytes"), 0;
+        // CurrentTransform is supplied by x/y/z and yaw, never by the extra component list (EMF's rule).
+        if (comps[i].hash == 0x027ac564u)
+            return refuse(m, fn, "the CurrentTransform comes from x, y, z; do not pass it again"), 0;
         values.push_back({comps[i].hash, 0, comps[i].data, comps[i].size});
     }
     return do_spawn(m, w, guid, x, y, z, fn, values.data(), count, yaw_deg);
