@@ -153,6 +153,7 @@ test("item level input and upgrades fit the save byte and round-trip through Sav
   const level = page.locator('.ke-insp input[aria-label="Level"]');
   await expect(level).toHaveAttribute("max", "255");
   await level.fill("256");
+  await level.press("Enter"); // complete values are committed while typing; blur/Enter normalize the text draft
   await expect(level).toHaveValue("255");
   await level.press("ArrowUp");
   await expect(level).toHaveValue("255");

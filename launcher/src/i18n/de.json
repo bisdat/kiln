@@ -5899,6 +5899,8 @@
         "everything": "Alles"
       },
       "removeN": "{n} entfernen",
+      "removeTitle": "{n} Wissenseinträge entfernen?",
+      "removeBody": "Rezepte, die von diesen Einträgen abhängen, können ebenfalls gesperrt werden. Änderungen werden erst beim Speichern geschrieben.",
       "kind": "Art",
       "name": "Name",
       "state": "Status",

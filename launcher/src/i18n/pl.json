@@ -6189,6 +6189,8 @@
         "everything": "Wszystko"
       },
       "removeN": "Usuń ({n})",
+      "removeTitle": "Usunąć wybrane wpisy wiedzy ({n})?",
+      "removeBody": "Przepisy zależne od tych wpisów również mogą zostać zamknięte. Zmiany zostaną zapisane dopiero po zapisaniu gry.",
       "kind": "Rodzaj",
       "name": "Nazwa",
       "state": "Stan",

@@ -1,6 +1,6 @@
 // Small pieces of the Kiln editor UI (Hearth): the item slot, the stepper, rarity and upgrade diamonds, the meter.
 // Game art appears only as content (item icons); every frame, fill and word is the launcher's.
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { items, CATEGORY_PT } from '../src/gamedata.js';
 import { itemIcon, rarityColor, rarityOf, RARITY_PT } from '../src/ui.js';
 import { t } from '../../i18n';
@@ -59,33 +59,49 @@ export function Slot({ entry, selected, onClick, onDoubleClick, drag, drop, n, s
 
 /** − value + (and ±10 when `big`), clamped; the value is typed in the middle (on the Deck: A on it opens the number
  *  pad, with `presets` beside the digits). */
-export function Stepper({ value, onChange, min = 0, max = 65535, big, label, presets, id }) {
+export function Stepper({ value, onChange, min = 0, max = 65535, big, label, presets, id, disabled = false }) {
   const env = useEditorEnv();
+  // Keep the exact text while typing. Complete numbers reach the model immediately (including Ctrl+S without blur),
+  // but empty/partial drafts never become a minimum that gets prepended to the next digit.
+  const [draft, setDraft] = useState(null);
+  useEffect(() => { if (disabled) setDraft(null); }, [disabled]);
   const clamp = (v) => Math.max(min, Math.min(max, v));
-  const step = (d) => onChange(clamp(value + d));
+  const valid = (text) => text !== null && text.trim() !== '' && Number.isFinite(Number(text));
+  const number = (text) => valid(text) ? Math.floor(Number(text)) : value;
+  const commit = (text, delta = 0) => {
+    setDraft(null);
+    if (!disabled) onChange(clamp(clamp(number(text)) + delta));
+  };
+  // Complete drafts are already committed and byte-clamped: step from that value, not out-of-range text.
+  const step = (d) => { setDraft(null); if (!disabled) onChange(clamp(value + d)); };
   return (
     <span className="ke-step" role="group" aria-label={label}>
-      {big && <button type="button" className="ke-step-b" onClick={() => step(-big)} disabled={value <= min} aria-label={`−${big}`}>−{big}</button>}
-      <button type="button" className="ke-step-b" onClick={() => step(-1)} disabled={value <= min} aria-label="−1">−</button>
+      {big && <button type="button" className="ke-step-b" onClick={() => step(-big)} disabled={disabled || value <= min} aria-label={`−${big}`}>−{big}</button>}
+      <button type="button" className="ke-step-b" onClick={() => step(-1)} disabled={disabled || value <= min} aria-label="−1">−</button>
       {env.deck ? (
-        <button type="button" className="ke-step-v" aria-label={`${label}: ${value}`} data-deck-a={t('editor.common.change')} data-deck-id={id ?? `value-${label}`}
-          onClick={() => env.askNumber({ title: label, value, min, max, presets, onDone: (v) => onChange(clamp(v)) })}>{value}</button>
+        <button type="button" className="ke-step-v" disabled={disabled} aria-label={`${label}: ${value}`} data-deck-a={t('editor.common.change')} data-deck-id={id ?? `value-${label}`}
+          onClick={() => env.askNumber({ title: label, value, min, max, presets, onDone: (v) => { if (!disabled) onChange(clamp(v)); } })}>{value}</button>
       ) : (
-        <input className="ke-step-v" type="number" inputMode="numeric" value={value} min={min} max={max} aria-label={label}
-          onChange={(e) => onChange(clamp(Math.floor(Number(e.target.value)) || 0))} />
+        <input className="ke-step-v" type="number" inputMode="numeric" value={draft ?? value} min={min} max={max} aria-label={label} disabled={disabled}
+          onChange={(e) => { const text = e.target.value; setDraft(text); if (!disabled && valid(text)) onChange(clamp(number(text))); }}
+          onBlur={() => setDraft(null)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') { e.preventDefault(); commit(e.currentTarget.value); }
+            if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); commit(e.currentTarget.value, e.key === 'ArrowUp' ? 1 : -1); }
+          }} />
       )}
-      <button type="button" className="ke-step-b" onClick={() => step(1)} disabled={value >= max} aria-label="+1">+</button>
-      {big && <button type="button" className="ke-step-b" onClick={() => step(big)} disabled={value >= max} aria-label={`+${big}`}>+{big}</button>}
+      <button type="button" className="ke-step-b" onClick={() => step(1)} disabled={disabled || value >= max} aria-label="+1">+</button>
+      {big && <button type="button" className="ke-step-b" onClick={() => step(big)} disabled={disabled || value >= max} aria-label={`+${big}`}>+{big}</button>}
     </span>
   );
 }
 
 /** Five diamonds in the rarity glazes; the chosen one and those below it are lit. */
-export function RarityPick({ value, onChange }) {
+export function RarityPick({ value, onChange, disabled = false }) {
   return (
     <span className="ke-dias" role="radiogroup" aria-label={t('editor.common.rarity')}>
       {[1, 2, 3, 4, 5].map((r) => (
-        <button key={r} type="button" role="radio" aria-checked={value === r} title={rarityWord(r)} className={'ke-dia' + (r <= value ? ' on' : '')}
+        <button key={r} type="button" role="radio" disabled={disabled} aria-checked={value === r} title={rarityWord(r)} className={'ke-dia' + (r <= value ? ' on' : '')}
           style={{ '--r': rarityColor(r) }} onClick={() => onChange(r)}><i /></button>
       ))}
       <span className="ke-dias-word" style={{ color: rarityColor(value) }}>{value >= 1 && value <= 5 ? rarityWord(value) : value}</span>
@@ -94,11 +110,11 @@ export function RarityPick({ value, onChange }) {
 }
 
 /** Upgrade diamonds: `value` of `max` lit (gold); a click sets the count, a click on the last lit one takes it back. */
-export function UpgradePick({ value, max, onChange }) {
+export function UpgradePick({ value, max, onChange, disabled = false }) {
   return (
     <span className="ke-dias" role="group" aria-label={t('editor.common.upgrades')}>
       {Array.from({ length: max }, (_, i) => (
-        <button key={i} type="button" className={'ke-dia gold' + (i < value ? ' on' : '')} aria-label={`${i + 1}`}
+        <button key={i} type="button" disabled={disabled} className={'ke-dia gold' + (i < value ? ' on' : '')} aria-label={`${i + 1}`}
           onClick={() => onChange(i + 1 === value ? i : i + 1)}><i /></button>
       ))}
       <span className="ke-dias-word k-num">{value}/{max}</span>
@@ -106,23 +122,33 @@ export function UpgradePick({ value, max, onChange }) {
   );
 }
 
-/** A thin bar to click on (durability, water) with the numbers beside it; on the Deck the bar is a button that opens
- *  the number pad. */
-export function Meter({ value, max, tone, onChange, label }) {
+/** A thin slider (durability, water) with the numbers beside it. Arrows change one, Page keys ten percent,
+ *  Home/End empty/fill; on the Deck the bar opens the number pad. */
+export function Meter({ value, max, tone, onChange, label, disabled = false }) {
   const env = useEditorEnv();
   const pct = max ? Math.max(0, Math.min(1, value / max)) : 0;
+  const change = (n) => { if (!disabled) onChange(Math.max(0, Math.min(max, n))); };
   const set = (e) => {
+    if (!e.detail) return; // Enter/Space do not turn a keyboard click at clientX=0 into an empty meter.
     const r = e.currentTarget.getBoundingClientRect();
-    onChange(Math.round(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * max));
+    change(Math.round(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * max));
+  };
+  const key = (e) => {
+    const page = Math.max(1, Math.round(max / 10));
+    const next = { ArrowRight: value + 1, ArrowUp: value + 1, ArrowLeft: value - 1, ArrowDown: value - 1,
+      PageUp: value + page, PageDown: value - page, Home: 0, End: max }[e.key];
+    if (next !== undefined) { e.preventDefault(); change(next); }
   };
   const bar = <i style={{ width: `${pct * 100}%` }} />;
   return (
     <span className="ke-meter">
       {env.deck ? (
-        <button type="button" className={`ke-meter-bar ${tone || ''}`} aria-label={`${label}: ${value}/${max}`} data-deck-a={t('editor.common.change')} data-deck-id={`value-${label}`}
-          onClick={() => env.askNumber({ title: label, value, min: 0, max, presets: [{ label: t('editor.parts.full'), value: max }], onDone: onChange })}>{bar}</button>
+        <button type="button" disabled={disabled} className={`ke-meter-bar ${tone || ''}`} aria-label={`${label}: ${value}/${max}`} data-deck-a={t('editor.common.change')} data-deck-id={`value-${label}`}
+          onClick={() => env.askNumber({ title: label, value, min: 0, max, presets: [{ label: t('editor.parts.full'), value: max }], onDone: change })}>{bar}</button>
       ) : (
-        <span className={`ke-meter-bar ${tone || ''}`} onClick={set} title={t('editor.parts.clickToSet')} role="presentation">{bar}</span>
+        <button type="button" className={`ke-meter-bar ${tone || ''}`} style={{ padding: 0, border: 0 }} disabled={disabled}
+          onClick={set} onKeyDown={key} title={t('editor.parts.clickToSet')} role="slider" aria-label={label}
+          aria-valuemin={0} aria-valuemax={max} aria-valuenow={value} aria-disabled={disabled || undefined}>{bar}</button>
       )}
       <span className="k-mono ke-meter-n">{value}/{max}</span>
     </span>
