@@ -73,7 +73,7 @@ export default function Inventory({ model, setModel }) {
     if (env.deck || gridKey(ev) || ev.ctrlKey || ev.altKey || ev.metaKey) return;
     if (ev.key === 'Enter' && moving === null) {
       ev.preventDefault(); setSel(key);
-      if (e) requestAnimationFrame(intoPanel); else openCatalog();
+      if (e) intoPanel(); else openCatalog();
     }
   };
 
