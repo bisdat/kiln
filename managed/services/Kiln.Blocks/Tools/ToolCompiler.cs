@@ -69,7 +69,7 @@ internal static partial class Compiler
             foreach(var brush in brushes) {
                 var item=new ItemDefinition {Guid=brush.Guid,Name=brush.GameName,BaseOn="Building_Overgrowth_Shape_Small",DisplayName=brush.Block.Name,Description=brush.Block.Description??"",
                     Refs=new Dictionary<string,string>(refs) {["equipment.terrainVoxelObject"]=brush.Guid.ToString()}};
-                low.Item(ApplyToolActions(item,actions));
+                low.Item(ApplyToolActions(ctx,low,item,actions));
                 low.ItemRules(brush.GameName,new JsonObject {["0x5258131e"]=brush.Block.Radius});
                 low.AfterCommit(()=>BlockRuntime.AddRules(ctx.Mod,"itemdata",brush.GameName,new JsonObject {["tags[0].tag"]=guid.ToString()}));
             }
