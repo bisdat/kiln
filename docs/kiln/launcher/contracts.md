@@ -501,20 +501,22 @@ unchanged. Every record's destination, receipt path, marker identity, and parked
 recovery mutates anything. A publication replacing a currently receipted copy gets its new receipt only while the
 published marker and Library file hashes match `to`; first publications without an old receipt remain unowned.
 A stop after parking puts the old copy back with a directory rename. Parked trees are removed only after receipt
-publication and verification that the replacement still exists and matches; a missing replacement with an old copy
-is preserved and reported. Completed records for a moved game's old root are retained without accessing those paths.
+publication and verification that the replacement still exists and matches. Kiln records the old marker in the
+staging record before deleting the parked contents, then removes the marker and the empty folders. If the journal
+still names the old copy and the replacement is missing, the old copy is preserved and reported. Completed records
+for a moved game's old root are retained without accessing those paths.
 A receipt that moved on or a changed published copy is not adopted. A launcher before dev.29 ignores the file.
 **Staging record (0.2.0-dev.30.3):** a placement stages its copy in a hidden folder beside it (`.kiln-place-<12 hex>`:
 the staged copy in `new`, a parked old copy in `old`). Before that folder is made, `kiln/state/placement-staging.json`
-names it durably (`{format: 1, folders: [{folder, path, marker, gameFolder?}]}`); its entry goes once the folder's
+names it durably (`{format: 1, folders: [{folder, path, marker, gameFolder?, parked?}]}`); its entry goes once the folder's
 removal is on disk (its parent folder flushed on Unix) at the end of the placement, and the file goes with its last
 entry. A record Kiln cannot read, or larger than 1 MiB (never read whole), names no folder. Every placement and
 uninstall, after the journal's recovery, removes only a folder the record names: one of that name, directly beside the
-copy it stages in that copy's engine mod folder, no link, holding nothing but a staged copy without links and with no
-marker or the recorded one. That `new` goes, then the empty folder. A folder that holds `old` or anything else stays as
-it is with its entry, and so does every folder the record does not name; one Windows does not let Kiln remove yet (a
-file held open) stays for the next time, with a note. The journal's format is unchanged: an older launcher reads it as
-before and ignores this file.
+copy it stages in that copy's engine mod folder, with no links. The sweep can remove a `new` with the recorded marker
+or no marker yet. Once the journal no longer names an `old`, the sweep can remove it if its marker matches `parked`,
+or finish removing its empty directory if cleanup already removed the marker. Extra entries in the staging folder
+keep it in place. If Windows holds a file open, the record stays for the next attempt, with a note. Older launchers
+can still read the publication journal and ignore the staging record.
 **Durability order:** an imported Library tree is flushed (files, then directories), durably renamed, then its
 import record is replaced durably. A staged game copy (including carried settings) is flushed before its intent,
 park, publish and receipt; both source and destination directory entries of these renames are flushed on Unix,

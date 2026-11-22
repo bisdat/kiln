@@ -191,7 +191,7 @@ fn a_staging_folder_not_in_the_record_or_not_kilns_is_never_touched() {
     let mods = game.join("emf/mods");
     let copy = mods.join("beastmaster");
     let m = marker(&copy).unwrap();
-    let at = |folder: PathBuf, path: &Path| Staging { folder, path: path.to_path_buf(), marker: m.clone(), game_folder: false };
+    let at = |folder: PathBuf, path: &Path| Staging { folder, path: path.to_path_buf(), marker: m.clone(), game_folder: false, parked: None };
     // not in the record, though of Kiln's shape and holding a staged copy of this mod
     let unlisted = mods.join(".kiln-place-0123456789ab");
     staged_like(&copy, &unlisted.join("new"));
@@ -283,7 +283,7 @@ fn a_record_names_only_what_is_there_and_an_unreadable_one_is_left_alone() {
     let (_tmp, dirs, game, p) = world("staging-record");
     place(&dirs, &p, &game).unwrap();
     let copy = game.join("emf/mods/beastmaster");
-    let gone = Staging { folder: game.join("emf/mods/.kiln-place-abcdefabcdef"), path: copy.clone(), marker: marker(&copy).unwrap(), game_folder: false };
+    let gone = Staging { folder: game.join("emf/mods/.kiln-place-abcdefabcdef"), path: copy.clone(), marker: marker(&copy).unwrap(), game_folder: false, parked: None };
     save_stagings(&game, &[gone]).unwrap();
     place(&dirs, &p, &game).unwrap();
     assert!(!staging_file(&game).exists());
@@ -306,7 +306,7 @@ fn an_entry_ends_only_after_its_folders_removal_is_flushed() {
     let copy = mods.join("beastmaster");
     let m = marker(&copy).unwrap();
     // an entry that stays (its folder is not of Kiln's shape), so the end of the next one rewrites the record
-    let stays = Staging { folder: mods.join(".kiln-place-player"), path: copy.clone(), marker: m.clone(), game_folder: false };
+    let stays = Staging { folder: mods.join(".kiln-place-player"), path: copy.clone(), marker: m.clone(), game_folder: false, parked: None };
     std::fs::create_dir_all(stays.folder.join("new")).unwrap();
     save_stagings(&game, std::slice::from_ref(&stays)).unwrap();
     let (folder, events) = crate::durable::recording(|| {
@@ -335,7 +335,7 @@ fn an_oversized_record_names_nothing_and_never_stops_a_placement() {
     let stray = game.join("emf/mods/.kiln-place-abcdefabcdef");
     staged_like(&copy, &stray.join("new"));
     // a valid record naming a folder Kiln would take out, padded past the bound
-    let entry = Staging { folder: stray.clone(), path: copy.clone(), marker: marker(&copy).unwrap(), game_folder: false };
+    let entry = Staging { folder: stray.clone(), path: copy.clone(), marker: marker(&copy).unwrap(), game_folder: false, parked: None };
     let mut text = serde_json::to_vec(&StagingRecord { format: 1, folders: vec![entry] }).unwrap();
     text.resize(usize::try_from(MAX_STAGING_RECORD).unwrap() + 1, b' ');
     std::fs::write(staging_file(&game), &text).unwrap();
@@ -376,8 +376,85 @@ fn a_staging_folder_windows_holds_stays_until_it_is_free() {
     assert!(leftovers(&game).is_empty() && !staging_file(&game).exists(), "{:?}", leftovers(&game));
 }
 
-/// Windows (NTFS): an update whose old copy has a file held open without delete sharing. However the park of the old
-/// copy goes (refused, or allowed), once the file is free the next start ends with the new version and no staging folder.
+#[test]
+fn placement_recovery_removes_parked_contents_before_the_marker() {
+    let (tmp, dirs, game, mut p) = world("staging-marker-last");
+    place(&dirs, &p, &game).unwrap();
+    let copy = game.join("emf/mods/beastmaster");
+    let old_marker = marker(&copy).unwrap();
+    p.mods.emf = vec![super::tests::emf_lua_mod(&dirs, tmp.path(), "2.0.0")];
+    assert!(stopped(Step::Published, || { place(&dirs, &p, &game).unwrap(); }));
+    let s = the_recorded_folder(&game, "published");
+    let old = s.folder.join("old");
+    assert!(old.join("main.lua").is_file());
+    assert_eq!(placements(&game).unwrap()[0].marker, old_marker);
+
+    assert!(stopped(Step::ParkedContentsRemoved, || { place(&dirs, &p, &game).unwrap(); }));
+    assert_eq!(placements(&game).unwrap()[0].marker, s.marker);
+    assert_eq!(marker(&old).as_ref(), Some(&old_marker));
+    let remaining: Vec<_> = std::fs::read_dir(&old).unwrap().map(|e| e.unwrap().file_name()).collect();
+    assert_eq!(remaining, [std::ffi::OsString::from(MARKER)]);
+    assert_eq!(the_recorded_folder(&game, "cleanup started").parked, Some(old_marker));
+
+    // A second interruption after the marker was unlinked leaves an empty directory in the record.
+    std::fs::remove_file(old.join(MARKER)).unwrap();
+    place(&dirs, &p, &game).unwrap();
+    assert!(!s.folder.exists() && !staging_file(&game).exists());
+}
+
+#[test]
+fn placement_sweep_preserves_unverified_parked_copies() {
+    let (tmp, dirs, game, p) = world("staging-unverified-old");
+    place(&dirs, &p, &game).unwrap();
+    let copy = game.join("emf/mods/beastmaster");
+    let m = marker(&copy).unwrap();
+    let wrong_marker = Marker { version: "0.0.0".into(), ..m.clone() };
+    let mods = copy.parent().unwrap();
+    let mut entries = vec![
+        (mods.join(".kiln-place-000000000001"), Some(&wrong_marker)),
+        (mods.join(".kiln-place-000000000002"), None),
+        (mods.join(".kiln-place-player"), Some(&m)),
+        (tmp.path().join(".kiln-place-000000000003"), Some(&m)),
+    ];
+    #[cfg(unix)]
+    {
+        let linked = mods.join(".kiln-place-000000000004");
+        std::fs::create_dir_all(linked.join("old")).unwrap();
+        std::os::unix::fs::symlink(&copy, linked.join("old/link")).unwrap();
+        entries.push((linked, Some(&m)));
+    }
+    let mut record = Vec::new();
+    for (folder, found_marker) in &entries {
+        let old = folder.join("old");
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::write(old.join("main.lua"), b"keep these bytes").unwrap();
+        if let Some(found) = found_marker { crate::util::write_json_atomic(&old.join(MARKER), found).unwrap(); }
+        record.push(Staging { folder: folder.clone(), path: copy.clone(), marker: m.clone(), game_folder: false, parked: Some(m.clone()) });
+    }
+    save_stagings(&game, &record).unwrap();
+    place(&dirs, &p, &game).unwrap();
+    assert_eq!(stagings(&game).unwrap(), record);
+    for (folder, expected) in entries {
+        let old = folder.join("old");
+        assert_eq!(std::fs::read(old.join("main.lua")).unwrap(), b"keep these bytes");
+        assert_eq!(marker(&old).as_ref(), expected);
+    }
+}
+
+#[cfg(windows)]
+type AfterPark = Box<dyn FnOnce(&Path)>;
+
+#[cfg(windows)]
+thread_local! {
+    static AFTER_PARK: std::cell::RefCell<Option<AfterPark>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(windows)]
+pub(super) fn after_park(old: &Path) {
+    if let Some(f) = AFTER_PARK.with(|hook| hook.take()) { f(old); }
+}
+
+/// Hold the file only after the park succeeded, through receipt publication and both cleanup paths.
 #[cfg(windows)]
 #[test]
 fn an_update_with_a_held_old_copy_leaves_no_staging_folder_once_free() {
@@ -386,9 +463,31 @@ fn an_update_with_a_held_old_copy_leaves_no_staging_folder_once_free() {
     place(&dirs, &p, &game).unwrap();
     p.mods.emf = vec![super::tests::emf_lua_mod(&dirs, tmp.path(), "2.0.0")];
     let copy = game.join("emf/mods/beastmaster");
-    let held = std::fs::OpenOptions::new().read(true).share_mode(1).open(copy.join("main.lua")).unwrap();
-    let first = place(&dirs, &p, &game);
-    eprintln!("with the old copy held: {first:?}; staging folders {:?}", leftovers(&game));
+    let original = marker(&copy).unwrap();
+    let handle = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let parked_handle = handle.clone();
+    AFTER_PARK.with(|hook| hook.replace(Some(Box::new(move |old| {
+        // FILE_SHARE_READ only: no FILE_SHARE_DELETE.
+        let file = std::fs::OpenOptions::new().read(true).share_mode(1).open(old.join("main.lua")).unwrap();
+        parked_handle.replace(Some(file));
+    }))));
+    let rep = place(&dirs, &p, &game).unwrap();
+    let held = handle.take().expect("the update parked the old copy before opening the file");
+    let s = the_recorded_folder(&game, "locked old copy");
+    let old = s.folder.join("old");
+    assert_eq!(s.marker.version, "2.0.0");
+    let saved = placements(&game).unwrap().into_iter().find(|r| r.path == copy).unwrap();
+    assert_eq!(saved.marker, s.marker);
+    assert_eq!(marker(&copy).as_ref(), Some(&saved.marker));
+    assert_eq!(marker(&old).as_ref(), Some(&original));
+    assert_eq!(s.parked.as_ref(), Some(&original));
+    assert!(rep.warnings.iter().any(|w| w.contains("could not be removed yet")), "{rep:?}");
+
+    // The uninstall retries cleanup while the file is still held and advances the placement receipt.
+    let removed = unplace(&dirs, &game).unwrap();
+    assert!(removed.removed.contains(&copy), "{removed:?}");
+    assert!(placements(&game).unwrap().is_empty());
+    assert_eq!(marker(&old).as_ref(), Some(&original));
     drop(held);
     let rep = place(&dirs, &p, &game).unwrap();
     assert_eq!(marker(&copy).map(|m| m.version).as_deref(), Some("2.0.0"), "{rep:?}");
@@ -408,7 +507,7 @@ fn a_recorded_staging_folder_that_is_a_junction_is_never_followed() {
     let win = |p: &Path| p.to_string_lossy().replace('/', "\\");
     let made = std::process::Command::new("cmd").args(["/C", "mklink", "/J"]).arg(win(&folder)).arg(win(&outside)).output().unwrap();
     assert!(made.status.success(), "{made:?}");
-    save_stagings(&game, &[Staging { folder: folder.clone(), path: copy.clone(), marker: marker(&copy).unwrap(), game_folder: false }]).unwrap();
+    save_stagings(&game, &[Staging { folder: folder.clone(), path: copy.clone(), marker: marker(&copy).unwrap(), game_folder: false, parked: None }]).unwrap();
     place(&dirs, &p, &game).unwrap();
     unplace(&dirs, &game).unwrap();
     assert!(outside.join("new/main.lua").is_file(), "the junction's target was removed");
