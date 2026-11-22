@@ -24,7 +24,7 @@ test("clearing 120 and typing 250 persists 250, not 1250", async ({ page }) => {
   await page.locator(".ke-grid .ke-slot.full").first().click();
   const amount = page.getByRole("spinbutton", { name: "Amount", exact: true });
   await amount.focus();
-  await page.keyboard.press("Control+a");
+  await page.keyboard.press("ControlOrMeta+a");
   await page.keyboard.press("Backspace");
   await page.keyboard.type("250");
   await amount.press("Enter");
