@@ -327,8 +327,12 @@ yours with the same `id` replaces Kiln's. Plain JSON, no comments.
   pattern with wildcards has at most 64 characters and 4 `*`.
 - `action`: `warn` (log the message), `late` (the `subject` module loads late), `disable` (the `subject` module, mod or
   engine does not load), `before` (dev.29: the `subject` loads before the `target`, below), `defer` (since
-  0.2.0-dev.29.4: the `subject` native mod waits for the Shroudtopia host's first pass, below) and `original-code`
-  (since 0.2.0-dev.29.6: the `subject` Shroudtopia mod compares against the game's original code, below). Every action
+  0.2.0-dev.29.4: the `subject` native mod waits for the Shroudtopia host's first pass, below), `original-code`
+  (since 0.2.0-dev.29.6: the `subject` Shroudtopia mod compares against the game's original code, below) and `known`
+  (since 0.2.0-dev.30.3: the `subject` module's hook overlaps are known and harmless; kiln-core logs them as info, not a
+  warning, marks them `known` in `hooks.json` `overlaps`, and changes nothing; the subject is a `module`). Kiln ships
+  one for Live Map: `{"engine": "livemap"}` holds only when the IPHLPAPI.DLL loaded from the game folder holds the text
+  `livemap.ini` in its image, since the name alone is a Windows DLL's. Every action
   but `warn` needs a `subject`; `before` and `defer` also need a `target`, and only they take one; only `defer` takes
   `max_wait_ms` (required for it).
 - Who applies what: the launcher writes `chain.ini` and the profile, so it applies `late` and `disable` of chain entries

@@ -904,6 +904,33 @@ fn a_modified_eml_loader_in_the_folder_is_named_with_its_own_code() {
         neither EML nor its own code runs from it, and Kiln runs the EML mods' data part itself."), "{l}");
 }
 
+/// PepegaJedi's report of 21 Nov 2026: EMF's own loader chained on purpose (kiln/chain.ini [chain] names it), kiln-emf
+/// stood aside, and EMF's core ran the EMF mods. The finding said "problem", which read as a failure: it is info, that is
+/// how the setup works. A problem stays a problem: a profile mod EMF cannot see, or EMF's core gone idle.
+#[test]
+fn emf_running_its_own_mods_through_its_chained_loader_is_info() {
+    let state = |idle: &str, lua: &str| format!(r#"{{"format":1,"plugin":"kiln-emf","steppedAside":true,"emfIdle":"{idle}",
+        "steppedAsideReason":"EMF's loader is loaded (E:\\Enshrouded\\kiln\\chain\\emf-dinput8.dll), it starts EMF and its mods",
+        "mods":[{{"id":"mage_skills","status":"own-loader","reason":"runs under EMF's own loader"}},
+                {{"id":"lua","status":"{lua}","reason":"..."}},
+                {{"id":"clock","status":"disabled","reason":"switched off in the profile"}}]}}"#);
+    let f = Fx::healthy("emf-own-loader");
+    f.w("kiln/state/emf.json", state("", "own-loader").as_bytes());
+    let o = finding(&build(&f.input()), "own-loader").clone();
+    assert_eq!(o.level, Level::Info, "{}", o.text);
+    assert!(o.text.starts_with("EMF runs its own mods; that's how this setup works.") && o.text.contains("emf-dinput8.dll"), "{}", o.text);
+    // a profile mod EMF does not see: a problem, named
+    f.w("kiln/state/emf.json", state("", "not-loaded").as_bytes());
+    let o = finding(&build(&f.input()), "own-loader").clone();
+    assert_eq!(o.level, Level::Problem, "{}", o.text);
+    assert!(o.text.contains("1 EMF mod of the profile is not in emf\\mods") && o.text.contains(": lua.") && !o.text.contains("mage_skills"), "{}", o.text);
+    // EMF's core idle: no EMF mod ran at all
+    f.w("kiln/state/emf.json", state("EMF's core went idle on this game build: no EMF mod runs", "own-loader").as_bytes());
+    let o = finding(&build(&f.input()), "own-loader").clone();
+    assert_eq!(o.level, Level::Problem, "{}", o.text);
+    assert!(o.text.contains("went idle") && o.text.contains("kiln/chain.ini"), "{}", o.text);
+}
+
 /// A player's report of 16 Nov 2026 (Steam Deck, shroudlink's singleplayer package 0.8.1): its client addon, chained
 /// from the Library, loaded the `shroudlink_core.dll` an older hand installation had left next to the game, and
 /// kiln-shroudlink stood aside for it. The finding names that file and keeps the addon, which draws the MODS tab.
