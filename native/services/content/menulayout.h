@@ -99,6 +99,7 @@ struct Effective {
 std::vector<Effective> effective();  // sorted by workshop
 bool has_layout(uint32_t workshop);
 uint64_t version();                  // changes whenever effective() may answer otherwise
+uint64_t remote_epoch();             // +1 whenever the remote collection is cleared (left the server, another server)
 
 // One materialization (or refusal) for drain_applied.
 struct Applied {
@@ -151,6 +152,7 @@ struct OwnState {
     std::map<uint32_t, uint32_t> built;                      // workshop -> layout trees built
     std::map<uint32_t, std::string> said;                    // workshop -> the last applied entry (no repeats)
     size_t backing = 0;           // near memory taken in all (never reset: never freed)
+    uint64_t remote_epoch = 0;    // remote_epoch() when good was last valid: a new server forgets the last good menus
     void new_config() {
         orig[0] = orig[1] = 0;
         shown[0] = shown[1] = 0;
@@ -176,7 +178,7 @@ struct OwnResult {
 // allocation fails.
 OwnResult own_publish(uintptr_t coll, const std::vector<OwnWorkshop>& menus, const Geometry& g, MenuIo& io, OwnState& st);
 // The tree of one layout (tabs = groups copied from the base tree's tab iconFromTab, with the layout's ids and labels).
-enum class TreeOutcome { Ok, IconSourceMissing, LayoutUnknown, NoMemory, OutOfReach };
+enum class TreeOutcome { Ok, IconSourceMissing, LayoutUnknown, NoMemory, OutOfReach, EmptyLayout };
 TreeOutcome layout_tree(const Record& r, uintptr_t base_groups, uint32_t base_count, bool base_found, const Geometry& g,
                         MenuIo& io, uintptr_t anchor, TreeRef* out, size_t* bytes, std::string* why);
 // The pending hold: the workshop id to ask the game's lookup for instead of `workshop` (one the live list proves absent),

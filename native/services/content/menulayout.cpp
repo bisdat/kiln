@@ -323,6 +323,7 @@ struct Store {
     std::function<bool(KilnOwner)> revoked;
     std::atomic<bool (*)(uint32_t*, std::string*)> render{nullptr};
     std::atomic<uint64_t> version{1};
+    std::atomic<uint64_t> remote_epoch{0};  // +1 per remote_clear: the materializer forgets its last good menus
     std::atomic<bool> pending{false};
     std::atomic<uint32_t> materialized{0};
 };
@@ -584,17 +585,21 @@ KilnResult remote_clear(KilnOwner owner) {
     s.has_remote = false;
     s.remote = Remote{};
     s.version.fetch_add(1);
+    s.remote_epoch.fetch_add(1);
     return KILN_OK;
 }
 
 void set_pending(bool on) { S().pending.store(on); }
 bool pending() { return S().pending.load(); }
 
-KilnResult info(KilnStationMenusInfo* out) {
-    if (!out || out->size < sizeof *out) return KILN_ERR_INVALID_ARGUMENT;
+KilnResult info(KilnStationMenusInfo* caller) {
+    // a caller built against an older (shorter) struct gets what fits; it must hold at least size and store
+    if (!caller || caller->size < offsetof(KilnStationMenusInfo, render)) return KILN_ERR_INVALID_ARGUMENT;
+    const size_t room = std::min<size_t>(caller->size, sizeof(KilnStationMenusInfo));
+    KilnStationMenusInfo full{};
+    KilnStationMenusInfo* out = &full;
     probe_owners();
     Store& s = S();
-    std::memset(out, 0, sizeof *out);
     out->size = sizeof *out;
     out->store = 1;
     uint32_t reason = KILN_CAP_REASON_SYMBOL_MISSING;
@@ -615,6 +620,8 @@ KilnResult info(KilnStationMenusInfo* out) {
     out->remote = s.has_remote ? 1 : 0;
     out->pending = s.pending.load() ? 1 : 0;
     out->materialized = s.materialized.load();
+    full.size = static_cast<uint32_t>(room);
+    std::memcpy(caller, &full, room);
     return KILN_OK;
 }
 
@@ -639,6 +646,7 @@ void applied_push(Applied a) {
     if (s.applied.size() >= kMaxApplied) s.applied.pop_front();
     s.applied.push_back(std::move(a));
 }
+uint64_t remote_epoch() { return S().remote_epoch.load(); }
 std::string drain_applied_text(bool clear) {
     Store& s = S();
     std::lock_guard lock(s.mu);
@@ -811,6 +819,7 @@ const char* word(TreeOutcome o) {
     case TreeOutcome::LayoutUnknown: return "LayoutUnknown";
     case TreeOutcome::NoMemory: return "NoMemory";
     case TreeOutcome::OutOfReach: return "OutOfReach";
+    case TreeOutcome::EmptyLayout: return "EmptyLayout";
     }
     return "?";
 }
@@ -887,6 +896,11 @@ TreeOutcome layout_tree(const Record& r, uintptr_t base_groups, uint32_t base_co
         *why = "the crafting menu's tab and set layout (labels, ids) is not known on this game build";
         return TreeOutcome::LayoutUnknown;
     }
+    // a menu of no tab, or a tab of no set, is a shape the game's own data never has: refused, never handed to the game
+    // (Kiln.Blocks refuses both when a menu is written; a record from elsewhere stops here)
+    if (r.tabs.empty()) return *why = "the layout has no tab", TreeOutcome::EmptyLayout;
+    for (const MenuTab& t : r.tabs)
+        if (t.sets.empty()) return *why = "tab \"" + t.key + "\" has no set", TreeOutcome::EmptyLayout;
     for (const MenuTab& t : r.tabs) {
         if (!base_found || !base_groups) {
             std::snprintf(b, sizeof b, "the menu it is like (workshop 0x%08x) is not in the game's crafting menu", r.base);
@@ -953,6 +967,11 @@ TreeOutcome layout_tree(const Record& r, uintptr_t base_groups, uint32_t base_co
 
 OwnResult own_publish(uintptr_t coll, const std::vector<OwnWorkshop>& menus, const Geometry& g, MenuIo& io, OwnState& st) {
     OwnResult res;
+    // another server (or none): the last good menus were of its content; a refused layout falls back to placements then
+    if (st.remote_epoch != remote_epoch()) {
+        st.good.clear();
+        st.remote_epoch = remote_epoch();
+    }
     // per layout workshop: its tree, or why not; reported once per change when the build ends
     struct Status {
         const OwnWorkshop* m;
@@ -1060,6 +1079,11 @@ OwnResult own_publish(uintptr_t coll, const std::vector<OwnWorkshop>& menus, con
         TreeRef tree;
         bool have = false;
         std::string what;
+        if (index_of(m.workshop) != UINT32_MAX) {
+            // a game workshop: its menu stays the game's (Kiln.Blocks never writes one; a server's record could name one)
+            if (m.layout.rec) status[si++].reason = "GameWorkshop: workshop is one of the game's own; its menu stays the game's";
+            continue;
+        }
         if (m.layout.rec) {
             Status& s = status[si++];
             const Record& r = *m.layout.rec;

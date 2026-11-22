@@ -4,6 +4,7 @@
 // a made-up crafting-menu collection in one arena: the bytes of a layout's tree, every allocation and every header write
 // failed in turn with both collection headers back as the game's, icons, the 16-per-workshop cap, the pending hold).
 // menulayout_test.sh builds and runs it.
+#include <algorithm>
 #include "../menulayout.cpp"
 
 #include <cstdio>
@@ -457,8 +458,11 @@ void store_tests() {
         buf.assign(len + 1, 'x');
         check(T()->export_layouts(buf.data(), len + 1, &len) == KILN_OK && buf[len] == '\0', "export: length + 1 fits, NUL");
         KilnStationMenusInfo i{};
-        i.size = sizeof i - 8;
-        check(T()->info(&i) == KILN_ERR_INVALID_ARGUMENT, "info: a short struct refused");
+        i.size = sizeof i - 8;  // an older caller's shorter struct (review N2): filled as far as it reaches
+        check(T()->info(&i) == KILN_OK && i.size == sizeof i - 8 && i.store == 1, "info: a shorter struct gets what fits");
+        i = KilnStationMenusInfo{};
+        i.size = 4;
+        check(T()->info(&i) == KILN_ERR_INVALID_ARGUMENT, "info: a struct without store refused");
         i = info();
         check(i.size == sizeof i && i.store == 1 && i.render == 0 && i.detail[0] != 0, "info: store 1, render 0 with a reason (no probe)");
         kc::ml::set_render_probe([](uint32_t* reason, std::string* detail) {
@@ -612,7 +616,7 @@ std::shared_ptr<const kc::ml::Record> parse(const ojson& j) {
     return r;
 }
 // The test layout of the own workshop: tab "metal" (icon of base tab 1; sets: main [11,12], fine with a heading [13], empty),
-// tab "wood" (icon of base tab 0, no sets).
+// tab "wood" (icon of base tab 0, one empty set).
 ojson layout_json(uint32_t metal_icon = 1, const std::string& metal_en = "Metal") {
     ojson sets = ojson::array({{{"key", "main"}, {"id", gid(1, 0x5)}, {"heading", nullptr},
                                 {"recipes", ojson::array({{{"key", "m:a"}, {"recipeId", 11}}, {{"key", "m:b"}, {"recipeId", 12}}})}},
@@ -620,7 +624,8 @@ ojson layout_json(uint32_t metal_icon = 1, const std::string& metal_en = "Metal"
                                 {"recipes", ojson::array({{{"key", "m:c"}, {"recipeId", 13}}})}},
                                {{"key", "empty"}, {"id", gid(3, 0x5)}, {"heading", nullptr}, {"recipes", ojson::array()}}});
     ojson tabs = ojson::array({{{"key", "metal"}, {"id", gid(1, 0x4)}, {"name", {{"en", metal_en}, {"de", "Metall"}}}, {"iconFromTab", metal_icon}, {"sets", sets}},
-                               {{"key", "wood"}, {"id", gid(2, 0x4)}, {"name", {{"*", "Wood"}}}, {"iconFromTab", 0}, {"sets", ojson::array()}}});
+                               {{"key", "wood"}, {"id", gid(2, 0x4)}, {"name", {{"*", "Wood"}}}, {"iconFromTab", 0},
+                                 {"sets", ojson::array({{{"key", "main"}, {"id", gid(4, 0x5)}, {"heading", nullptr}, {"recipes", ojson::array()}}})}}});
     return record_for(1, kWorkshopGuid, tabs);
 }
 kc::ml::OwnWorkshop own(std::shared_ptr<const kc::ml::Record> rec, uint64_t generation = 1) {
@@ -690,10 +695,12 @@ void tree_bytes() {
               ids_at(S + 0x28 + 0x20) == std::vector<uint32_t>{13},
           "set 1 (stride 0x28): heading label, id, [13]");
     check(zero16(S + 0x50) && guid_at(S + 0x50 + 0x10, t0.sets[2].id) && raw8(S + 0x50 + 0x20) == 0, "set 2: no label, no entries (header 0)");
-    // tab 1 (stride 0x38): icon of base tab 0, no sets
+    // tab 1 (stride 0x38): icon of base tab 0, one empty set
     bool icon1 = true;
     for (int i = 0; i < 16; ++i) icon1 = icon1 && reinterpret_cast<uint8_t*>(G + 0x38)[0x10 + i] == icon_byte(0, i);
-    check(icon1 && guid_at(G + 0x38, rec->tabs[1].id) && raw8(G + 0x38 + 0x30) == 0, "tab 1 at +0x38: icon of base tab 0, id, no sets");
+    const auto [S1, sn1] = header_at(G + 0x38 + 0x30);
+    check(icon1 && guid_at(G + 0x38, rec->tabs[1].id) && sn1 == 1 && zero16(S1) && raw8(S1 + 0x20) == 0,
+          "tab 1 at +0x38: icon of base tab 0, id, one set without label or entries");
     check(io.texts_set[label_tag(G + 0x38 + 0x20)] == TextMap{{"*", "Wood"}}, "tab 1: label answers its name");
     // the game's data: only the two headers changed
     std::vector<uint8_t> now(g_arena, g_arena + kGame);
@@ -712,13 +719,22 @@ void tree_bytes() {
     // no own workshop left: both headers back
     const auto res3 = kc::ml::own_publish(kColl, {}, geo(), io, st);
     check(res3.ok && res3.restored && headers_original() && !st.on, "none left: both headers back to the game's");
-    // zero tabs: a tree of nothing, still listed
+    // zero tabs, or a tab of no set (review S2): never handed to the game; the workshop is not listed (no placements here)
+    drain();
     restore_game();
     auto st2 = fresh_state();
     const auto empty = parse(record_for(2, kWorkshopGuid));
     const auto res4 = kc::ml::own_publish(kColl, {own(empty)}, geo(), io, st2);
-    check(res4.ok && tree_of(kWorkshop) == std::make_pair(uintptr_t(0), 0u), "zero tabs: listed with an empty tree");
-    drain();
+    check(tree_of(kWorkshop).second == ~0u && res4.own == 0, "zero tabs: refused, not listed");
+    restore_game();
+    auto st3 = fresh_state();
+    const auto nosets = parse(record_for(3, kWorkshopGuid, ojson::array({{{"key", "t"}, {"id", gid(6, 0x7)}, {"name", {{"*", "T"}}}, {"iconFromTab", 0}, {"sets", ojson::array()}}})));
+    kc::ml::own_publish(kColl, {own(nosets)}, geo(), io, st3);
+    check(tree_of(kWorkshop).second == ~0u, "a tab of no set: refused, not listed");
+    const json dz = json::parse(drain());
+    bool emptyWord = dz.size() == 2;
+    for (const auto& e : dz) emptyWord = emptyWord && e["ok"] == false && e["reason"].get<std::string>().rfind("EmptyLayout", 0) == 0;
+    check(emptyWord, "applied: EmptyLayout for both");
 }
 
 void faults() {
@@ -732,7 +748,7 @@ void faults() {
         kc::ml::own_publish(kColl, {own(rec)}, geo(), io, st);
         total = io.allocs;
     }
-    check(total == 6, "the layout build allocates 6 times (lists 2, tabs 1, sets 1, entries 2)");
+    check(total == 7, "the layout build allocates 7 times (lists 2, tabs 1, sets 2, entries 2)");
     for (long i = 0; i < total; ++i) {
         restore_game();
         FakeIo io;
@@ -908,8 +924,36 @@ void run(const char* name, void (*fn)()) {
     }
 }
 
+// review N1 and N3: a new server forgets the last good menus; a game workshop id never gets a second entry
+void review_fixes() {
+    setup_game();
+    kc::ml::reset_for_tests();
+    FakeIo io;
+    auto st = fresh_state();
+    const auto rec = parse(layout_json());
+    kc::ml::own_publish(kColl, {own(rec)}, geo(), io, st);
+    const auto bad = parse(layout_json(14));  // a base tab the game's menu does not have: IconSourceMissing
+    kc::ml::own_publish(kColl, {own(bad)}, geo(), io, st);
+    check(tree_of(kWorkshop).second == 2, "N1: a refused layout keeps the last good one (same server)");
+    check(remote(900, R"({"format":1,"generation":1,"menus":[]})") == KILN_OK &&
+              T()->remote_clear(900) == KILN_OK, "N1: remote collection set and cleared");
+    kc::ml::own_publish(kColl, {own(bad)}, geo(), io, st);
+    check(tree_of(kWorkshop).second == ~0u, "N1: after another server, the old good menu is not shown");
+    drain();
+    restore_game();
+    auto st2 = fresh_state();
+    auto o = own(rec);
+    o.workshop = kIds[0];
+    kc::ml::own_publish(kColl, {o}, geo(), io, st2);
+    const auto ids = ids_at(kColl);
+    check(std::count(ids.begin(), ids.end(), kIds[0]) == 1, "N3: a game workshop id is listed once (the game's)");
+    const json d = json::parse(drain());
+    check(d.size() == 1 && d[0]["ok"] == false && d[0]["reason"].get<std::string>().rfind("GameWorkshop", 0) == 0, "N3: applied says GameWorkshop");
+}
+
 int main() {
     run("store", &store_tests);
+    run("review fixes", &review_fixes);
     run("tree bytes", &tree_bytes);
     run("faults", &faults);
     run("icons and caps", &icons_and_caps);
