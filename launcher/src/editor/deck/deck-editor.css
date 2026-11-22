@@ -33,7 +33,7 @@
 .deck-editor .ke-step { height: 2.75rem; }
 .deck-editor .ke-step-b { min-width: 2.75rem; font-size: 1.125rem; }
 .deck-editor button.ke-step-v { width: 6rem; padding: 0; border: 0; background: none; cursor: pointer; font-size: 1.125rem; }
-.deck-editor .ke-step-v:focus { outline: .1875rem solid var(--k-gold-400); outline-offset: .1875rem; }
+.deck-editor .ke-step-v:focus, .deck-veil[data-deck-dialog="editor-catalog"] .ke-step-v:focus { outline: .1875rem solid var(--k-gold-400); outline-offset: .1875rem; }
 .deck-editor .ke-dia { width: 2.25rem; height: 2.5rem; }
 .deck-editor .ke-dia i { width: .875rem; height: .875rem; }
 .deck-editor .ke-dias-word { font-size: 1.0625rem; }
