@@ -1,0 +1,188 @@
+// SPDX-License-Identifier: MIT
+//! Kiln's regmap rows as the registry proof reads them: `regmap/common/<registry>.json` of a Kiln tree (the format is
+//! regmap/README.md's; tools/registrygen/regmap_check.py checks it against the schema). Only what the proof needs: where a
+//! registry's entries come from, and per Kiln field the game's member paths, the conversion, the back-end and the state.
+use anyhow::{Context, Result};
+use serde::Deserialize;
+use std::collections::BTreeMap;
+use std::path::Path;
+
+/// Where a registry's entries come from (`entries` of a common file).
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Entries {
+    /// resource | array | single
+    #[serde(default)]
+    pub kind: String,
+    #[serde(default)]
+    pub resource_type: String,
+    /// kind array: the member holding the entries
+    #[serde(default)]
+    pub array: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub guid: String,
+    #[serde(default)]
+    pub id: String,
+    /// drop tables: "<component type>.<member>" (the templates that use the entry name it)
+    #[serde(default)]
+    pub name_from: String,
+}
+
+/// One Kiln field's row.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Row {
+    #[serde(default)]
+    pub paths: Vec<String>,
+    #[serde(default)]
+    pub conv: String,
+    #[serde(default)]
+    pub read: String,
+    /// live | boot | none
+    #[serde(default)]
+    pub backend: String,
+    #[serde(default)]
+    pub formula: Option<String>,
+    /// enum, flags, optionalEnum: Kiln name -> the game's name
+    #[serde(default)]
+    pub values: BTreeMap<String, String>,
+    /// mapped (default) | unproven | unmapped
+    #[serde(default)]
+    pub state: Option<String>,
+    #[serde(default)]
+    pub client_needs: bool,
+}
+
+impl Row {
+    /// The row maps the field onto members (mapped or unproven); an unmapped row has nothing to prove.
+    pub fn has_mapping(&self) -> bool {
+        self.state.as_deref() != Some("unmapped") && !self.paths.is_empty()
+    }
+
+    /// A write goes through a back-end (live: kiln.content's store at world load; boot: the boot generation).
+    pub fn writable(&self) -> bool {
+        self.backend == "live" || self.backend == "boot"
+    }
+}
+
+/// One `regmap/common/<registry>.json`.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct RegFile {
+    #[serde(default)]
+    pub registry: String,
+    #[serde(default)]
+    pub entries: Entries,
+    #[serde(default)]
+    pub rows: BTreeMap<String, Row>,
+}
+
+/// Every registry by name.
+pub type RegMap = BTreeMap<String, RegFile>;
+
+/// The list a field of list elements belongs to: `inputs[].count` -> `inputs`.
+pub fn list_of(field: &str) -> Option<&str> {
+    field.find("[]").map(|i| &field[..i])
+}
+
+pub fn parse(text: &str, fallback_name: &str) -> Result<RegFile> {
+    let mut f: RegFile = serde_json::from_str(text)?;
+    if f.registry.is_empty() {
+        f.registry = fallback_name.to_string();
+    }
+    Ok(f)
+}
+
+/// `<tree>/regmap/common/*.json`, by registry.
+pub fn load(tree: &Path) -> Result<RegMap> {
+    let dir = tree.join("regmap/common");
+    let mut files: Vec<_> = std::fs::read_dir(&dir)
+        .with_context(|| format!("reading {}", dir.display()))?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "json"))
+        .collect();
+    files.sort();
+    let mut out = RegMap::new();
+    for p in files {
+        let stem = p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        let text = std::fs::read_to_string(&p).with_context(|| format!("reading {}", p.display()))?;
+        let f = parse(&text, &stem).with_context(|| format!("{} is not a regmap file", p.display()))?;
+        out.insert(f.registry.clone(), f);
+    }
+    Ok(out)
+}
+
+/// Every `<registry>.<field>` with its row, in name order.
+pub fn qualified(map: &RegMap) -> Vec<(String, &RegFile, &str, &Row)> {
+    let mut v = Vec::new();
+    for (name, f) in map {
+        for (field, row) in &f.rows {
+            v.push((format!("{name}.{field}"), f, field.as_str(), row));
+        }
+    }
+    v
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+
+    /// A synthetic regmap (invented types and members, the shapes of the real files): a resource registry with a
+    /// scalar, an enum, a formula and an unmapped row, and an array registry with a list and a field of its elements.
+    pub(crate) fn sample() -> RegMap {
+        let gadgets = r#"{"regmap": 1, "registry": "gadgets",
+            "entries": {"kind": "resource", "resourceType": "demo::Gadget", "name": "label", "guid": "uid", "id": "num"},
+            "rows": {
+              "size":  {"paths": ["stackLimit"], "conv": "int", "read": "now", "backend": "live"},
+              "tier":  {"paths": ["grade"], "conv": "enum", "read": "now", "backend": "live",
+                        "values": {"low": "Low", "high": "High"}},
+              "power": {"paths": ["hit.mod", "hit.pace", "range.min"], "conv": "formula", "formula": "gear.power",
+                        "read": "now", "backend": "live"},
+              "label": {"paths": ["hit.isSet"], "conv": "bool", "read": "now", "backend": "none"},
+              "glow":  {"state": "unmapped", "reason": "not found yet"}}}"#;
+        let plans = r#"{"regmap": 1, "registry": "plans",
+            "entries": {"kind": "array", "resourceType": "demo::PlanBook", "array": "plans", "id": "planId"},
+            "rows": {
+              "parts":         {"paths": ["parts"], "conv": "list", "read": "now", "backend": "live"},
+              "parts[].count": {"paths": ["amount"], "conv": "int", "read": "now", "backend": "live"},
+              "cap":           {"paths": ["limit"], "conv": "int", "read": "restart", "backend": "boot"}}}"#;
+        let mut m = RegMap::new();
+        m.insert("gadgets".into(), parse(gadgets, "gadgets").unwrap());
+        m.insert("plans".into(), parse(plans, "plans").unwrap());
+        m
+    }
+
+    #[test]
+    fn reads_rows_and_entries() {
+        let m = sample();
+        let g = &m["gadgets"];
+        assert_eq!(g.entries.resource_type, "demo::Gadget");
+        assert_eq!(g.rows["power"].formula.as_deref(), Some("gear.power"));
+        assert_eq!(g.rows["tier"].values["high"], "High");
+        assert!(g.rows["size"].writable() && !g.rows["label"].writable());
+        assert!(!g.rows["glow"].has_mapping());
+        assert_eq!(m["plans"].entries.array, "plans");
+        assert_eq!(list_of("parts[].count"), Some("parts"));
+        assert_eq!(list_of("cap"), None);
+        let q: Vec<String> = qualified(&m).into_iter().map(|(q, ..)| q).collect();
+        assert_eq!(q.first().map(String::as_str), Some("gadgets.glow"));
+        assert_eq!(q.len(), 8);
+    }
+
+    #[test]
+    fn loads_a_tree_and_names_a_file_by_its_stem() {
+        let root = std::env::temp_dir().join(format!("kilnctl-regmap-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("regmap/common")).unwrap();
+        std::fs::write(root.join("regmap/common/things.json"), r#"{"regmap": 1, "rows": {"a": {"paths": ["x"], "conv": "int"}}}"#).unwrap();
+        std::fs::write(root.join("regmap/common/notes.txt"), "not json").unwrap();
+        let m = load(&root).unwrap();
+        assert_eq!(m.keys().collect::<Vec<_>>(), ["things"]);
+        assert_eq!(m["things"].rows["a"].paths, ["x"]);
+        std::fs::write(root.join("regmap/common/bad.json"), "{").unwrap();
+        assert!(load(&root).is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+}

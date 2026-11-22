@@ -13,6 +13,7 @@ mod pack;
 mod preflight;
 mod profiles;
 mod procs;
+mod regproof;
 mod report;
 mod run;
 mod server;
