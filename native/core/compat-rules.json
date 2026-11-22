@@ -18,6 +18,15 @@
       "subject": { "mod": "native:auto-loot-plus" },
       "target": { "engine": "ultimate-asi-loader" },
       "message": "Ultimate ASI Loader loads after Kiln so that Auto Loot Plus can hook the game first; Auto Loot Plus's F8 menu needs that."
+    },
+    {
+      "id": "livemap-known-hooks",
+      "when": [
+        { "engine": "livemap" }
+      ],
+      "action": "known",
+      "subject": { "module": "iphlpapi.dll" },
+      "message": "Live Map (IPHLPAPI.DLL in the game folder, a stand-alone server map) hooks a few game functions before Kiln (players/RegisterSingleton, time.daytime_update); Kiln chains over its hooks and both run. Nothing to fix."
     }
   ]
 }

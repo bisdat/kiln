@@ -1159,6 +1159,38 @@ def emf_aside_profile():
     return g
 
 
+def emf_aside_hand_copy():
+    # PepegaJedi (21 Nov 2026): EMF's own loader chained on purpose, Lua Scripts in the profile from the Library and the
+    # same mod copied into emf\mods by hand (no marker). EMF loads the hand copy; the state file and kiln.log must say so,
+    # not "in Kiln's Library, so it does not load".
+    g = Game("emf-aside-hand-copy")
+    g.put("library/lua/mod.json", {"id": "lua", "version": "1.39.0"})
+    g.put("emf/mods/lua/mod.json", {"id": "lua", "version": "1.38.0"})  # by hand, no marker
+    g.put("library/other-lib/mod.json", {"id": "other", "version": "1.0.0"})
+    g.put("emf/mods/other-lib/mod.json", {"id": "squatter", "version": "1.0.0"})  # the entry's folder name, another mod
+    g.put("library/nowhere/mod.json", {"id": "nowhere", "version": "1.0.0"})  # only in the Library: really not loaded
+    g.dll("dummy.dll", "emf_core.dll")
+    g.profile({"emf": [{"id": "lua", "path": winpath(g.p("library/lua"))},
+                       {"id": "other-lib", "path": winpath(g.p("library/other-lib"))},
+                       {"id": "nowhere", "path": winpath(g.p("library/nowhere"))}]})
+    g.run(g.plugin("kiln-emf.dll"), 300, "--load", "emf_core.dll")
+    g.has("kiln-emf steps aside")
+    m = mods_by(g, "emf", "profileId", "lua")
+    g.expect(len(m) == 1 and m[0].get("status") == "own-loader", f"lua: own-loader: {m}")
+    g.expect(m and "emf\\mods\\lua" in m[0].get("reason", "") and "not Kiln's" in m[0].get("reason", "")
+             and "EMF loads that copy" in m[0].get("reason", "") and "the profile has 1.39.0" in m[0].get("reason", ""),
+             f"lua: the reason names the hand copy: {m}")
+    g.expect(m and m[0].get("folder", "").endswith("emf\\mods\\lua"), f"lua: folder is the copy that runs: {m}")
+    g.expect("[I] [emf] profile mod lua: own-loader" in g.log, "lua: an info line")
+    g.lacks("profile mod lua: not-loaded")
+    o = mods_by(g, "emf", "profileId", "other-lib")
+    g.expect(len(o) == 1 and o[0].get("status") == "not-loaded" and "holding another mod (squatter)" in o[0].get("reason", ""),
+             f"other-lib: the folder in the way is named: {o}")
+    n = mods_by(g, "emf", "profileId", "nowhere")
+    g.expect(len(n) == 1 and n[0].get("status") == "not-loaded" and "Kiln's Library" in n[0].get("reason", ""), f"nowhere: not-loaded: {n}")
+    return g
+
+
 def copy_dedupe():
     """No own loader, drop-ins on: Kiln's marked copy in the engine folder (folder = Library id, manifest id differs) is
     the profile entry: it loads once and is listed once. A marker naming an id the profile does not list is an
@@ -1307,7 +1339,7 @@ SCENARIOS = {f.__name__.replace("_", "-"): f for f in [
     shroudtopia_config_replacements, shroudtopia_faults, profile_id_precedence,
     greeneye_chaining, greeneye_lifetime, ancestor_symlinks, greeneye_hot_callback_faults,
     greeneye_manifest_bounds, shroudtopia_loader_named_mod, greeneye_default_dll_profile,
-    greeneye_aside_profile, greeneye_aside_player_copy, flame_aside_profile, shroudtopia_aside_profile, emf_aside_profile, copy_dedupe,
+    greeneye_aside_profile, greeneye_aside_player_copy, flame_aside_profile, shroudtopia_aside_profile, emf_aside_profile, emf_aside_hand_copy, copy_dedupe,
     wine_builtin_not_a_loader, dropins_rule, kiln_files_not_a_loader, shroudtopia_preloaded_by_other_loader,
     shroudtopia_copy_preloaded_by_other_loader, shroudtopia_original_code]}
 

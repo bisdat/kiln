@@ -338,6 +338,36 @@ pub fn aside_dropins_log(entries: &[Entry], root: &Utf8Path, server: bool) -> Op
     Some(format!("kiln-eml: {} (kiln/state/eml.json)", parts.join("; ")))
 }
 
+/// The EML packages of ShroudForge's mods folder `root` (Kiln's copies and the player's own; ShroudForge's own packages,
+/// Kiln mods and other folders are not EML packages): the ids of those ShroudForge runs in this process (`server`: a
+/// dedicated server), its switch on for this side ([`shroudforge_switch`]), in folder order, and how many there are.
+/// The aside start says so in kiln.log ([`shroudforge_runs_log`]): sidelia's server (Nexus, 2026-11-21) ran its mods
+/// fine, but the log only warned about the ones nothing ran. Listing only.
+pub fn shroudforge_runs(root: &Utf8Path, server: bool) -> (Vec<String>, usize) {
+    let (mut runs, mut total) = (Vec::new(), 0);
+    for c in folder_candidates(root, "game-mods") {
+        let Ok(m) = classify(&c.path) else { continue };
+        total += 1;
+        if shroudforge_switch(&c.path, server).is_ok() { runs.push(m.id); }
+    }
+    (runs, total)
+}
+
+/// The info line of [`shroudforge_runs`]: "kiln-eml: 3 of 5 EML packages in <root> run under ShroudForge: a, b, c";
+/// nothing when the folder holds no EML package. At most 40 ids are named, then how many more.
+pub fn shroudforge_runs_log(runs: &[String], total: usize, root: &Utf8Path) -> Option<String> {
+    if total == 0 { return None; }
+    const NAMED: usize = 40;
+    let mut line = format!("kiln-eml: {} of {total} EML package{} in {root} run{} under ShroudForge", runs.len(),
+        if total == 1 { "" } else { "s" }, if total == 1 { "s" } else { "" });
+    if !runs.is_empty() {
+        line.push_str(": ");
+        line.push_str(&runs.iter().take(NAMED).map(String::as_str).collect::<Vec<_>>().join(", "));
+        if runs.len() > NAMED { line.push_str(&format!(" and {} more", runs.len() - NAMED)); }
+    }
+    Some(line)
+}
+
 /// Is `dir` the loader's folder `root`, as the game's process names folders? On Windows (the game, also under Wine)
 /// by Windows' rules ([`windows_same_folder`]), elsewhere (kiln-eml-run on Linux) part by part.
 fn is_root(dir: &Utf8Path, root: &Utf8Path) -> bool {
@@ -1120,6 +1150,38 @@ mod tests {
         assert!(aside_dropins_log(&rows, &d.join("mods"), false).unwrap().contains("switch them on in Kiln's in-game menu"));
         // nothing off: nothing to say
         assert!(aside_dropins_log(&[], &d.join("mods"), true).is_none());
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    /// sidelia's server (Nexus, 2026-11-21): ShroudForge hosted, its mods ran, and kiln.log said nothing about them. The
+    /// aside start counts the EML packages of ShroudForge's folder and names the ones ShroudForge runs on this side.
+    #[test]
+    fn the_aside_start_names_the_eml_packages_shroudforge_runs() {
+        let d = tmp("sf-runs");
+        let root = d.join("mods");
+        for (dir, ext) in [("both", Some(SERVER_SWITCH_FILE)), ("bare", None),
+            ("client", Some(r#"{"schemaVersion":1,"launcher":"EML","enabled":true,"targets":["client"]}"#)),
+            ("off", Some(r#"{"schemaVersion":1,"launcher":"EML","enabled":false}"#)),
+            ("legacy", Some(r#"{"schemaVersion":1,"launcher":"EML","enabled":true}"#)),
+            ("sf", Some(r#"{"schemaVersion":1,"launcher":"SF","enabled":true}"#))] {
+            let p = eml_mod(&d, &format!("mods/{dir}"), dir);
+            if let Some(ext) = ext { std::fs::write(p.join("extended.mod.json"), ext).unwrap(); }
+        }
+        std::fs::create_dir_all(root.join("not-a-mod")).unwrap();
+        let (runs, total) = shroudforge_runs(&root, true);
+        // a server: "legacy" (an EML package without targets) runs on both sides, "client" only on the client
+        assert_eq!((runs.as_slice(), total), (["both".to_string(), "legacy".to_string()].as_slice(), 5), "server");
+        let line = shroudforge_runs_log(&runs, total, &root).unwrap();
+        assert_eq!(line, format!("kiln-eml: 2 of 5 EML packages in {root} run under ShroudForge: both, legacy"));
+        let (runs, total) = shroudforge_runs(&root, false);
+        assert_eq!((runs.as_slice(), total), (["both".to_string(), "client".to_string(), "legacy".to_string()].as_slice(), 5), "client");
+        // none running: the count alone; one package: singular; an empty folder: nothing to say
+        assert_eq!(shroudforge_runs_log(&[], 5, &root).unwrap(), format!("kiln-eml: 0 of 5 EML packages in {root} run under ShroudForge"));
+        assert_eq!(shroudforge_runs_log(&["a".into()], 1, &root).unwrap(), format!("kiln-eml: 1 of 1 EML package in {root} runs under ShroudForge: a"));
+        assert!(shroudforge_runs_log(&[], 0, &root).is_none());
+        assert!(shroudforge_runs(&d.join("missing"), true) == (Vec::new(), 0));
+        let many: Vec<String> = (0..45).map(|i| format!("m{i}")).collect();
+        assert!(shroudforge_runs_log(&many, 45, &root).unwrap().ends_with("m39 and 5 more"));
         std::fs::remove_dir_all(d).unwrap();
     }
 
