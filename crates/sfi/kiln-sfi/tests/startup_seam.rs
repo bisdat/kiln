@@ -1209,6 +1209,54 @@ fn without_a_grant_the_runtime_create_is_refused_before_any_lua() {
         "startup-grant-missing",
         "granted no archive generation this start (state failed)",
     );
+    // the game's own data could not be put back: that warning's text (it says what the player does) is the reason
+    // the launcher shows, over any other warning
+    alpha_plan();
+    let b = boot(Case {
+        config: Some(
+            Config::granting_current().with_outcome(OutcomeAnswer::Record {
+                state: "failed",
+                dialect: "none".into(),
+                rows: vec![],
+                edit: Some(|v, _| {
+                    v["attempt"] = json!("none");
+                    v["warnings"] = json!([
+                        {"code": "base-not-restored", "text": "Kiln could not put the game's own data back: left as it is. Verify the game files in Steam\nsecond line"},
+                        {"code": "later-note", "text": "a later note"},
+                    ]);
+                }),
+            }),
+        ),
+        ..Case::default()
+    });
+    create_refused(
+        &b,
+        "startup-grant-missing",
+        "(state failed: Kiln could not put the game's own data back: left as it is. Verify the game files in Steam), so",
+    );
+    // a refused witness (no attempt, no error): the warning that ended the start is the reason
+    alpha_plan();
+    let b = boot(Case {
+        config: Some(
+            Config::granting_current().with_outcome(OutcomeAnswer::Record {
+                state: "refused",
+                dialect: "none".into(),
+                rows: vec![],
+                edit: Some(|v, _| {
+                    v["attempt"] = json!("none");
+                    v["warnings"] = json!([
+                        {"code": "baseline-shroudforge-output", "text": "the live enshrouded.kfc is what Kiln's bundled ShroudForge prepared. Verify the game files in Steam"},
+                    ]);
+                }),
+            }),
+        ),
+        ..Case::default()
+    });
+    create_refused(
+        &b,
+        "startup-grant-missing",
+        "(state refused: the live enshrouded.kfc is what Kiln's bundled ShroudForge prepared. Verify the game files in Steam)",
+    );
     // the early phase never ran: no attach
     alpha_plan();
     let b = boot(Case {

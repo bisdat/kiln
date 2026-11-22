@@ -1192,8 +1192,19 @@ fn parse_outcome(
         }
     }
     let refusal = (!grant).then(|| {
-        let why = error
-            .as_deref()
+        // the reason a player reads (the launcher's ShroudForge row): the game's own data that could not be put back (its
+        // text says what to do), else the first attempt's error, else the warning that ended the start (a refused
+        // witness's)
+        let text = |code: Option<&str>| {
+            warnings
+                .iter()
+                .rev()
+                .find(|w| code.is_none_or(|code| w["code"] == code))
+                .and_then(|w| w["text"].as_str())
+        };
+        let why = text(Some("base-not-restored"))
+            .or(error.as_deref())
+            .or(text(None))
             .map(|e| format!(": {}", clamp(e.lines().next().unwrap_or(e), 400)))
             .unwrap_or_default();
         (
