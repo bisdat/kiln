@@ -91,8 +91,11 @@ internal static unsafe class FakeBuildTable
     public static uint BlockRequestSize, BlockFlags, FindFlags;
     public static double TerrainScale, TerrainExpiry, SphereRadius, SphereMargin, SphereMinimum;
     public static byte SelectionFirst;
+    public static uint BreakRefusalCode;
+    public static bool BreakWriterVerified = true;
     public static void BlockRows(bool enabled)
     {
+        BreakRefusalCode = 0; BreakWriterVerified = true;
         Use(); _table->Size = enabled ? 184u : 136u;
         *((nint*)((byte*)_table + 160)) = (nint)(delegate* unmanaged[Cdecl]<Vec, byte*, int>)&BlockAtFn;
         *((nint*)((byte*)_table + 168)) = (nint)(delegate* unmanaged[Cdecl]<Vec, Vec, uint, byte*, int>)&FindWallFn;
@@ -118,8 +121,9 @@ internal static unsafe class FakeBuildTable
         var selection = *(byte**)(q + 88); SelectionFirst = selection == null ? (byte)0 : selection[0];
         new Span<byte>(r + 4, 132).Clear(); *(uint*)(r + 8) = 3;
         *(ulong*)(r + 16) = 1; *(ulong*)(r + 24) = 1; *(ulong*)(r + 32) = 1;
-        *(uint*)(r + 80) = 56; *(uint*)(r + 84) = 67; *(uint*)(r + 96) = 1;
-        return 0;
+        *(uint*)(r + 4) = BreakRefusalCode;
+        *(uint*)(r + 80) = 56; *(uint*)(r + 84) = BreakWriterVerified ? 67u : 65u; *(uint*)(r + 96) = 1;
+        return BreakRefusalCode == 0 ? 0 : 7;
     }
 
     /// <summary>Flat ground again, tiles loaded, no commits counted.</summary>

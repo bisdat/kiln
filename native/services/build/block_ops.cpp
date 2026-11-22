@@ -27,11 +27,15 @@ bool cell(const Source& s, KilnVec3 p, int32_t out[3]) {
 KilnBuildBlockInfo empty(uint32_t size) {
     KilnBuildBlockInfo b{}; b.size=size;b.provenance=-1;b.hardness=b.health=b.damage=-1;return b;
 }
+uint32_t read_refusal(KilnResult rc) {
+    return rc==KILN_ERR_INTERNAL?KILN_BUILD_BLOCK_FAULTED:
+        rc==KILN_ERR_INVALID_ARGUMENT?KILN_BUILD_BLOCK_INVALID:KILN_BUILD_BLOCK_NOT_LOADED;
+}
 KilnResult read_info(const Source& s,const int32_t c[3],KilnBuildBlockInfo& b) {
     if (!s.read) { b.refusal=KILN_BUILD_BLOCK_SYMBOL_MISSING;return KILN_ERR_UNAVAILABLE; }
     KilnVoxel v=0;const uint32_t d[3]={1,1,1};
     const KilnResult rc=s.read(s.context,c,d,&v,1);
-    if (rc!=KILN_OK) { b.refusal=rc==KILN_ERR_INTERNAL?KILN_BUILD_BLOCK_FAULTED:KILN_BUILD_BLOCK_NOT_LOADED;return rc; }
+    if (rc!=KILN_OK) { b.refusal=read_refusal(rc);return rc; }
     b.kind=kind(v);b.material=KILN_VOXEL_MATERIAL(v);b.fill=KILN_VOXEL_FILL(v);
     b.center={s.origin[0]+(c[0]+.5)*s.cell_size,s.origin[1]+(c[1]+.5)*s.cell_size,s.origin[2]+(c[2]+.5)*s.cell_size};
     if (b.kind!=KILN_BUILD_BLOCK_AIR) {
@@ -84,8 +88,14 @@ KilnResult find_wall(const Source& s,KilnVec3 from,KilnVec3 to,uint32_t flags,Ki
         }
         if(c[0]==end[0] && c[1]==end[1] && c[2]==end[2]) { *out=empty(out->size);return KILN_ERR_NOT_FOUND; }
         // Deterministic x,y,z tie order, like EMF: visit the boundary cells rather than leaping diagonally.
-        int a=next[0]<=next[1] && next[0]<=next[2]?0:next[1]<=next[2]?1:2;
-        if(next[a]>1) { *out=empty(out->size);return KILN_ERR_NOT_FOUND; }
+        int a=-1;
+        for(int axis=0;axis<3;++axis)
+            if(c[axis]!=end[axis] && (a<0 || next[axis]<next[a]))a=axis;
+        // A negative-going axis can reach its endpoint cell before t=1: do not cross its low face
+        // at an endpoint tie while another axis still has its final cell to visit.
+        // The endpoint cell bounds each axis. Accumulated t values may round just above one
+        // at its last boundary, so a floating t cutoff must not discard that endpoint.
+        if(a<0) { *out=empty(out->size);return KILN_ERR_NOT_FOUND; }
         c[a]+=step[a];next[a]+=step_time[a];
     }
     return fail(KILN_ERR_INVALID_ARGUMENT,KILN_BUILD_BLOCK_INVALID);
@@ -119,7 +129,7 @@ KilnResult break_box(const Source& s,const KilnBuildBreak* q,KilnBuildBreakResul
         return fail(KILN_ERR_UNAVAILABLE,KILN_BUILD_BLOCK_SYMBOL_MISSING);
     std::vector<KilnVoxel> before(count),after(count),back(count);std::vector<uint8_t> mask(count,0);
     auto rc=s.read(s.context,q->origin,q->dims,before.data(),before.size());
-    if(rc!=KILN_OK)return fail(rc,rc==KILN_ERR_INTERNAL?KILN_BUILD_BLOCK_FAULTED:KILN_BUILD_BLOCK_NOT_LOADED);
+    if(rc!=KILN_OK)return fail(rc,read_refusal(rc));
     after=before;bool filtered=false;for(auto m:q->materials)filtered|=m!=0;
     bool default_damage=true;for(auto d:q->damage)default_damage&=d==0;
     const int32_t defaults[5]={100,100,95,60,50};
@@ -144,8 +154,8 @@ KilnResult break_box(const Source& s,const KilnBuildBreak* q,KilnBuildBreakResul
                 if(n>4096)return fail(KILN_ERR_INVALID_ARGUMENT,KILN_BUILD_BLOCK_INVALID);
             }
             std::vector<KilnVoxel> nearby(n);
-            if(s.read(s.context,lo,dims,nearby.data(),nearby.size())!=KILN_OK)
-                return fail(KILN_ERR_UNAVAILABLE,KILN_BUILD_BLOCK_NOT_LOADED);
+            rc=s.read(s.context,lo,dims,nearby.data(),nearby.size());
+            if(rc!=KILN_OK)return fail(rc,read_refusal(rc));
             double nearest=reach+1;size_t j=0;
             // EMF's shrink_off_world, block_rules.cpp:71-92: protection sees the full r+margin sphere, independent
             // of the edit mask; only configured/material-selected breakable buildings participate.
@@ -233,7 +243,11 @@ KilnResult break_box(const Source& s,const KilnBuildBreak* q,KilnBuildBreakResul
     if(rc!=KILN_OK && rc!=KILN_ERR_INTERNAL)return fail(rc,KILN_BUILD_BLOCK_INVALID);
     r.flags|=KILN_BUILD_BREAK_R_MAY_HAVE_CHANGED;
     // Count only what really became air, even after a fault. A writer's cells_changed may be merely planned.
+    // Also preserve the writer's wider 8-cube verification and check every unselected cell in our own box.
+    bool exact=(r.write.flags&KILN_BUILD_R_VERIFIED)!=0;
     if(s.read(s.context,q->origin,q->dims,back.data(),back.size())==KILN_OK) {
+        for(size_t j=0;j<count;++j)
+            if(back[j]!=(mask[j]?KILN_VOXEL_AIR:before[j]))exact=false;
         for(size_t j=0;j<count;++j)if(mask[j] && kind(back[j])==KILN_BUILD_BLOCK_AIR) {
             ++r.removed;
             if(s.damage_forget) {
@@ -245,7 +259,7 @@ KilnResult break_box(const Source& s,const KilnBuildBreak* q,KilnBuildBreakResul
         r.flags|=KILN_BUILD_BREAK_R_VERIFIED;
     }
     if(rc!=KILN_OK)return fail(rc,KILN_BUILD_BLOCK_FAULTED);
-    if(!(r.flags&KILN_BUILD_BREAK_R_VERIFIED) || r.removed!=selected)return fail(KILN_ERR_INTERNAL,KILN_BUILD_BLOCK_UNVERIFIED);
+    if(!(r.flags&KILN_BUILD_BREAK_R_VERIFIED) || !exact || r.removed!=selected)return fail(KILN_ERR_INTERNAL,KILN_BUILD_BLOCK_UNVERIFIED);
     if(instant)r.damaged=r.removed;
     *out=r;return KILN_OK;
 }

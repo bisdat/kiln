@@ -8,3 +8,6 @@ mkdir -p "$out"
 "${CXX:-g++}" -std=c++20 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sanitize-recover=undefined \
     -I"$here/../../../core/abi" "$here/block_ops_test.cpp" "$here/../block_ops.cpp" -o "$out/block-ops"
 "$out/block-ops"
+"${CXX:-g++}" -std=c++20 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sanitize-recover=undefined \
+    -I"$here/../../../core/abi" "$here/block_policy_test.cpp" "$here/../policy.cpp" -o "$out/block-policy"
+"$out/block-policy"

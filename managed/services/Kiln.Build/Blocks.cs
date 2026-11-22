@@ -102,7 +102,7 @@ internal static class BlockReasons
         BlockRefusal.Zone => "a protection zone denies this edit",
         BlockRefusal.Base => "the box touches a protected player base",
         BlockRefusal.Faulted => "the operation faulted; partial changes may remain; restart required before retrying",
-        BlockRefusal.Unverified => "the requested removals did not all read back as air; partial changes may remain",
+        BlockRefusal.Unverified => "the requested edit could not be verified; partial or neighbouring changes may remain",
         BlockRefusal.Canceled => "a BuildEditingEvent handler canceled the edit",
         _ => r.ToString(),
     };
@@ -199,7 +199,9 @@ public static partial class Build
         // Publish only observed removals, never the writer's planned cells_changed after a partial fault.
         var editRefusal = refusal switch { BlockRefusal.Zone => BuildRefusal.Zone, BlockRefusal.Base => BuildRefusal.Base,
             BlockRefusal.NotLoaded => BuildRefusal.NotLoaded, _ => BuildRefusal.None };
-        var edit = new BuildResult((long)r.Removed, (int)r.Write.BlocksWritten, (r.Flags & 2) != 0,
+        // Count readback is weaker than BuildResult.Verified's exact-write contract.
+        var editVerified = refusal == BlockRefusal.None && (r.Write.Flags & BuildNative.RVerified) != 0;
+        var edit = new BuildResult((long)r.Removed, (int)r.Write.BlocksWritten, editVerified,
             (r.Write.Flags & BuildNative.RKept) != 0, box, r.Write.Milliseconds, editRefusal, r.Write.Zone);
         Finish(BuildEditKind.Write, box, build, edit, entry);
         return new(refusal, r.Considered, r.Damaged, r.Removed, r.Dropped, r.ProtectedCells, r.UnknownCells,

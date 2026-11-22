@@ -22,6 +22,7 @@ blocks::TerrainDamage terrain_damage;
 const KilnSettingsApi* settings=nullptr;
 struct Context {
     uintptr_t registry=0,editor=0,damage_store=0;
+    std::array<uint64_t,3> maximum{};
     std::map<std::array<int32_t,3>,std::pair<bool,std::array<KilnVoxel,512>>> baked;
 };
 int32_t provenance(void* p,const int32_t* c,KilnVoxel current) {
@@ -54,7 +55,14 @@ uint32_t session_reason() {
     if(!s.worlds[KILN_WORLD_SERVER] || !s.lifecycle || !world_running())return KILN_BUILD_BLOCK_NO_SESSION;
     return KILN_BUILD_BLOCK_NONE;
 }
-KilnResult read(void*,const int32_t* o,const uint32_t* d,KilnVoxel* out,size_t count) { return vox_read(o,d,out,count); }
+KilnResult read(void* p,const int32_t* o,const uint32_t* d,KilnVoxel* out,size_t count) {
+    const auto& ctx=*static_cast<const Context*>(p);
+    // The merged reader can report loaded air outside its horizontal grid (and solid below zero).
+    // Those sentinels are not usable world cells: preserve the public Build.Grid bounds explicitly.
+    for(int a=0;a<3;++a)
+        if(o[a]<0 || static_cast<uint64_t>(o[a])+d[a]>ctx.maximum[a])return KILN_ERR_INVALID_ARGUMENT;
+    return vox_read(o,d,out,count);
+}
 KilnResult write(void*,const KilnBuildWrite* q,KilnBuildResult* r) {
     return vox_write(q,r,KILN_GAMEPLAY_DENY_BUILD|KILN_GAMEPLAY_DENY_TERRAFORM);
 }
@@ -86,6 +94,7 @@ KilnResult prepare(blocks::Source& src,Context& c,uint32_t& why) {
     if(!F.read){why=KILN_BUILD_BLOCK_SYMBOL_MISSING;return KILN_ERR_UNAVAILABLE;}
     const auto* v=vox();if(!v){why=KILN_BUILD_BLOCK_NO_SESSION;return KILN_ERR_UNAVAILABLE;}
     src.context=&c;src.cell_size=v->cell;std::memcpy(src.origin,v->origin,sizeof src.origin);
+    c.maximum={static_cast<uint64_t>(v->tile[0])*v->tiles[0],8192,static_cast<uint64_t>(v->tile[1])*v->tiles[1]};
     src.read=&read;src.write=F.write?&write:nullptr;
     if(metadata_on) {
         c.registry=g_api->singleton(server_world(),kstr("TerraformingEfficiencyRegistry"));
@@ -127,7 +136,7 @@ void block_world_closed() {
 void block_tick(const KilnTickInfo* tick) {
     clock_valid=false;
     if(!tick || tick->clock_period<=0 || tick->clock==UINT32_MAX ||
-       tick->clock>static_cast<uint64_t>(INT64_MAX/tick->clock_period))return;
+       tick->clock>static_cast<uint64_t>((INT64_MAX-20000000000LL)/tick->clock_period))return;
     KilnSessionInfo s{};s.size=sizeof s;
     if(!g_api->session || g_api->session(&s)!=KILN_OK || !s.worlds[KILN_WORLD_SERVER] || !s.sessions[KILN_WORLD_SERVER]) {
         block_world_closed();return;
