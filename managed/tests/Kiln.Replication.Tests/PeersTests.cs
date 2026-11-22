@@ -156,4 +156,34 @@ public sealed class PeersTests
         Assert.Throws<ArgumentNullException>(() => Peers.All.Matches((NetPeer)null!));
         Assert.Throws<ArgumentNullException>(() => Water.IsAvailableFor(null!));
     }
+    [Fact]
+    public void LackingContent_follows_the_acked_content_state_not_the_template_count()
+    {
+        var current = Peer(3, NetPeerState.Ready, cleared: true);
+        var (served, acked) = (Peers.ServedState, Peers.AckedState);
+        try
+        {
+            Peers.ServedState = () => 7u;
+            Peers.AckedState = _ => 7u;
+            Assert.False(Peers.LackingContent.Matches(current));
+            // a hot-loaded mod adds a Kiln-only item without a template: the served state moves on, the peer's ack does not
+            Peers.ServedState = () => 8u;
+            Assert.True(Peers.LackingContent.Matches(current));
+            Peers.AckedState = _ => null;  // never acked
+            Assert.True(Peers.LackingContent.Matches(current));
+        }
+        finally
+        {
+            (Peers.ServedState, Peers.AckedState) = (served, acked);
+        }
+    }
+
+    [Fact]
+    public void RemapItems_of_all_peers_covers_every_machine_peer()
+    {
+        // FilterHost.PeersOf(Peers.All) answers [] (every peer, for filter_add); the remap's peer list needs the ids
+        Assert.Equal(new uint[] { 0x10002, 0x10005 }, ItemRemap.ExpandAll([], [0, 0, 0x10002, 0, 0, 0x10005]));
+        Assert.Equal(new uint[] { 0x10002 }, ItemRemap.ExpandAll([0x10002], [0, 0, 0x10002, 0, 0, 0x10005]));
+        Assert.Empty(ItemRemap.ExpandAll([0], [0, 0, 0x10002]));  // [0]: the selector picked none
+    }
 }

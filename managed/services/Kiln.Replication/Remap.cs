@@ -23,8 +23,24 @@ internal static unsafe class ItemRemap
     private static uint[] _lastPeers = [uint.MaxValue];
     private static ReplNetNative.ItemSite[]? _siteCache;
 
-    /// <summary>A selector's peers as ids: [] (every peer) becomes every machine's peer; [0] (none) becomes none. RED STUB.</summary>
-    internal static uint[] ExpandAll(uint[] picked, uint[] machinePeers) => picked;
+    /// <summary>A selector's peers as ids (review should 8): [] (every peer) becomes every machine's peer; [0] (none) becomes none.</summary>
+    internal static uint[] ExpandAll(uint[] picked, uint[] machinePeers)
+    {
+        if (picked.Length == 1 && picked[0] == 0) return [];
+        if (picked.Length > 0) return picked;
+        return machinePeers.Where(p => p != 0).ToArray();
+    }
+
+    private static uint[] MachinePeers()
+    {
+        Span<uint> ids = stackalloc uint[FilterHost.Machines];
+        Span<byte> flags = stackalloc byte[FilterHost.Machines];
+        if (ReplNetNative.MachinePeers(ids, flags) != ReplNative.Ok) return [];
+        var list = new List<uint>();
+        for (var m = 0; m < ids.Length; m++)
+            if (ids[m] != 0 && (m != 0 || (flags[m] & ReplNative.PeerLocal) != 0)) list.Add(ids[m]);  // a dedicated server's machine 0 is itself
+        return [.. list];
+    }
 
     /// <summary>Kiln's own rule plus the mods' (RemapItems).</summary>
     internal static IDisposable AddSelector(PeerSelector peers)
@@ -120,9 +136,10 @@ internal static unsafe class ItemRemap
         List<PeerSelector> selectors;
         lock (Gate) selectors = [Peers.LackingContent, .. Selectors];
         var set = new SortedSet<uint>();
+        var machines = MachinePeers();
         foreach (var sel in selectors)
-            foreach (var id in FilterHost.PeersOf(sel))
-                if (id != 0) set.Add(id);
+            foreach (var id in ExpandAll(FilterHost.PeersOf(sel), machines))
+                set.Add(id);
         var now = set.Count == 0 ? new uint[] { 0 } : set.ToArray();
         if (now.AsSpan().SequenceEqual(_lastPeers)) return;
         _lastPeers = now;
