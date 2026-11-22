@@ -100,7 +100,8 @@ internal static class KnowledgeBlocks
         var handle = ctx.Find(of, "of") ?? throw new BlockError(ctx.Block, "of", $"no block \"{of}\" in this mod");
         switch (handle)
         {
-            case BlockHandle<ItemBlock> or BlockHandle<WeaponBlock> or BlockHandle<WandBlock> or BlockHandle<ArmorBlock> when k.Trigger == KnowledgeTrigger.Pickup:
+            case BlockHandle<ItemBlock> or BlockHandle<WeaponBlock> or BlockHandle<WandBlock> or BlockHandle<ArmorBlock>
+                or BlockHandle<BuildingToolBlock> or BlockHandle<TerrainBrushBlock> when k.Trigger == KnowledgeTrigger.Pickup:
                 return BlockIds.Fnv(handle.Guid);
             case BlockHandle<ItemBlock> item:
                 if (item.Block.Recipe is not { } recipe) throw new BlockError(ctx.Block, "of", $"item {of} has no recipe of its own to track: name a recipe block, or track its pickup");
