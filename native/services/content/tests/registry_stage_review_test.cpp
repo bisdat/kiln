@@ -8,6 +8,7 @@
 #include "../registry/boot_hooks.h"
 #include "../registry/schema_ir.h"
 #include "../registry/stage.h"
+#include "../registry/stage_owner.h"
 
 namespace kc {
 std::string guid_text(const uint8_t g[16]);
@@ -244,7 +245,7 @@ void worldload_ready_event(const std::string& dir) {
     r.set_live([&](const stage::LiveHandoff& h) { live_report = h.report, live_result = h.result; });
     std::vector<stage::Phase> seen;
     uint64_t h = 0;
-    check(r.subscribe_ready(5, [&](stage::Phase p, uint64_t) { seen.push_back(p); }, &h) == KILN_OK, "subscribe_ready");
+    check(r.subscribe_ready(5, [&](stage::Phase p, uint64_t) { seen.push_back(p); return true; }, &h) == KILN_OK, "subscribe_ready");
     r.run({});
     r.finish({});
     live_report(*live_result, true);  // the live back-end applied the live fields at a world load
@@ -307,6 +308,157 @@ void cache_misses_added_resource(const std::string& dir) {
     r2.select(0, "items", "\"game:*\"", &out);
     check(out.find("game:hammer") != std::string::npos, std::string("a new item resource is in the base (cache ") + (hit ? "hit" : "miss") + "; base items: " + out + ")");
 }
+// P2 lifecycle: revocation removes only that owner's queued work, even without a stage subscription.
+void revoked_queue(const std::string& dir) {
+    TreeView view = world();
+    Files files;
+    stage::Runner r(env_of(&view, &files, dir, &no_sections));
+    const std::string gone = R"({"ir":1,"mod":"bigmod","stage":"alter","source":"gone-queue","edits":[
+        {"registry":"items","select":"game:plank","field":"maxStack","op":99},
+        {"registry":"items","select":"game:plank","field":"notAField","op":1}]})";
+    const std::string kept = R"({"ir":1,"mod":"bigmod","stage":"alter","source":"kept-queue","edits":[
+        {"registry":"items","select":"game:plank","field":"maxStack","op":{"mul":2}}]})";
+    check(r.submit(77, "bigmod", gone, nullptr, nullptr, nullptr) == KILN_OK, "queue gone owner");
+    check(r.submit(78, "bigmod", kept, nullptr, nullptr, nullptr) == KILN_OK, "queue live owner of the same mod");
+    r.owner_gone(77);
+    r.owner_gone(77);  // idempotent
+    r.run({}); r.finish({});
+    std::string value;
+    const KilnResult rc = r.read(2, "items", "game:plank", "maxStack", &value);
+    check(rc == KILN_OK && value == "40", "revocation drops the dead owner's queue, not the live owner's (got " + value + ")");
+    check(r.counts().refused == 0, "the dead owner's parse refusals go with its queued batch");
+}
+
+void revoked_registration(const std::string& dir) {
+    TreeView view = world(); Files files;
+    stage::Runner r(env_of(&view, &files, dir, &no_sections));
+    r.owner_gone(77);
+    uint64_t h = 0;
+    check(r.subscribe_stage(77, "bigmod", [](Stage, const View&) { return true; }, &h) == KILN_ERR_REVOKED, "a revoked stage subscriber is refused");
+    check(r.subscribe_ready(77, [](stage::Phase, uint64_t) { return true; }, &h) == KILN_ERR_REVOKED, "a revoked ready subscriber is refused");
+    uint32_t a = 99;
+    check(r.submit(77, "bigmod", R"({"ir":1,"mod":"bigmod","stage":"alter","edits":[]})", &a, nullptr, nullptr) == KILN_ERR_REVOKED && a == 0,
+          "a revoked submit returns REVOKED and takes no edits");
+}
+
+void ready_snapshot_revoke(const std::string& dir) {
+    TreeView view = world(); Files files;
+    stage::Runner r(env_of(&view, &files, dir, &no_sections));
+    uint64_t first = 0, second = 0; int calls = 0;
+    r.subscribe_ready(1, [&](stage::Phase, uint64_t) { r.owner_gone(2); return true; }, &first);
+    r.subscribe_ready(2, [&](stage::Phase, uint64_t) { ++calls; return true; }, &second);
+    r.run({}); r.finish({});
+    check(calls == 0, "a ready dispatch snapshot must not call an owner revoked by an earlier callback");
+    check(r.unsubscribe(second) == KILN_ERR_NOT_FOUND, "revocation removes the ready subscription");
+}
+
+void ready_snapshot_unsubscribe(const std::string& dir) {
+    TreeView view = world(); Files files;
+    stage::Runner r(env_of(&view, &files, dir, &no_sections));
+    uint64_t first = 0, second = 0; int calls = 0;
+    r.subscribe_ready(1, [&](stage::Phase, uint64_t) { r.unsubscribe(second); return true; }, &first);
+    r.subscribe_ready(2, [&](stage::Phase, uint64_t) { ++calls; return true; }, &second);
+    r.run({}); r.finish({});
+    check(calls == 0, "a ready snapshot rechecks unsubscribe before dispatch");
+}
+
+void stage_self_revoke(const std::string& dir, Stage turn) {
+    TreeView view = world(); Files files;
+    stage::Runner r(env_of(&view, &files, dir, &no_sections));
+    uint64_t h = 0; int calls = 0;
+    r.subscribe_stage(77, "bigmod", [&](Stage s, const View&) {
+        if (s != turn) return true;
+        ++calls;
+        const std::string ir = std::string(R"({"ir":1,"mod":"bigmod","stage":")") + stage_name(s) + R"(","edits":[
+            {"registry":"items","select":"game:plank","field":"maxStack","op":99}]})";
+        check(r.submit(77, "bigmod", ir, nullptr, nullptr, nullptr) == KILN_OK, "in-flight submit before revocation");
+        r.owner_gone(77);
+        return true;
+    }, &h);
+    r.run({}); r.finish({});
+    std::string value;
+    const KilnResult rc = r.read(2, "items", "game:plank", "maxStack", &value);
+    check(rc == KILN_OK && value == "20", "self-revoke drops the uncommitted callback turn (got " + value + ")");
+    check(calls == 1, "no later stage calls the revoked owner");
+    check(files.report.find("revoked") != std::string::npos, "the dropped turn is reported");
+}
+
+void ready_fault_removed(const std::string& dir) {
+    TreeView view = world(); Files files;
+    stage::Runner r(env_of(&view, &files, dir, &sections));
+    std::function<void(const Result&, bool)> publish;
+    Result result;
+    r.set_live([&](const stage::LiveHandoff& h) { publish = h.report; result = *h.result; });
+    int calls = 0; uint64_t h = 0;
+    r.subscribe_ready(77, [&](stage::Phase, uint64_t) { ++calls; return false; }, &h);
+    r.run({}); r.finish({});
+    publish(result, true);
+    check(calls == 1, "a faulted ready callback is removed, not called at world load");
+    check(r.unsubscribe(h) == KILN_ERR_NOT_FOUND, "the faulted ready handle is gone");
+}
+KilnOwnerRetiringFn retiring_fn = nullptr;
+void* retiring_user = nullptr;
+KilnResult KILN_CALL fake_retiring(KilnOwner observer, KilnOwnerRetiringFn fn, void* user, KilnHandle* out) {
+    check(observer == 42, "the observer belongs to the content service");
+    retiring_fn = fn; retiring_user = user; *out = 7;
+    return KILN_OK;
+}
+KilnResult KILN_CALL refuse_retiring(KilnOwner, KilnOwnerRetiringFn, void*, KilnHandle*) { return KILN_ERR_REVOKED; }
+
+void owner_notification_bridge(const std::string& dir) {
+    TreeView view = world(); Files files;
+    stage::Runner r(env_of(&view, &files, dir, &no_sections));
+    KilnHooksApi hooks{};
+    check(stage::bind_owner_cleanup(nullptr, 42, &r) == KILN_ERR_UNAVAILABLE, "no lifecycle service fails closed");
+    hooks.header.size = offsetof(KilnHooksApi, subscribe_owner_retiring);
+    hooks.subscribe_owner_retiring = &fake_retiring;
+    check(stage::bind_owner_cleanup(&hooks, 42, &r) == KILN_ERR_UNAVAILABLE, "an older table is never called past its size");
+    hooks.header.size = sizeof hooks;
+    hooks.subscribe_owner_retiring = &refuse_retiring;
+    check(stage::bind_owner_cleanup(&hooks, 42, &r) == KILN_ERR_REVOKED, "lifecycle registration refusal is propagated");
+    hooks.subscribe_owner_retiring = &fake_retiring;
+    check(stage::bind_owner_cleanup(&hooks, 42, &r) == KILN_OK && retiring_fn && retiring_user == &r, "the real binding keeps the runner as its user");
+    uint64_t h = 0; int calls = 0;
+    r.subscribe_stage(77, "bigmod", [&](Stage, const View&) { ++calls; return true; }, &h);
+    r.subscribe_ready(77, [&](stage::Phase, uint64_t) { ++calls; return true; }, &h);
+    r.submit(77, "bigmod", R"({"ir":1,"mod":"bigmod","stage":"alter","edits":[{"registry":"items","select":"game:plank","field":"maxStack","op":99}]})", nullptr, nullptr, nullptr);
+    retiring_fn(77, retiring_user);  // the callback the core receives, not a direct call to owner_gone
+    r.run({}); r.finish({});
+    check(calls == 0 && r.counts().edits == 0, "the core notification drops queued work and both callback kinds");
+}
+
+void core_dead_before_notification(const std::string& dir) {
+    TreeView view = world(); Files files;
+    bool alive = true;
+    auto env = env_of(&view, &files, dir, &no_sections);
+    env.owner_alive = [&](uint64_t) { return alive; };
+    stage::Runner r(std::move(env));
+    uint64_t h = 0; int calls = 0;
+    r.subscribe_stage(77, "bigmod", [&](Stage, const View&) { ++calls; return true; }, &h);
+    r.subscribe_ready(77, [&](stage::Phase, uint64_t) { ++calls; return true; }, &h);
+    r.submit(77, "bigmod", R"({"ir":1,"mod":"bigmod","stage":"alter","edits":[{"registry":"items","select":"game:plank","field":"maxStack","op":99}]})", nullptr, nullptr, nullptr);
+    alive = false;  // core marked dead; another retiring observer can still be running before ours
+    check(r.subscribe_ready(77, [](stage::Phase, uint64_t) { return true; }, &h) == KILN_ERR_REVOKED, "core liveness is checked on admission");
+    r.run({}); r.finish({});
+    check(calls == 0 && r.counts().edits == 0, "dead owners are not dispatched or drained while notification is pending");
+}
+
+void worldload_snapshot_revoke(const std::string& dir) {
+    TreeView view = world(); Files files;
+    stage::Runner r(env_of(&view, &files, dir, &sections));
+    Result result; std::function<void(const Result&, bool)> publish;
+    r.set_live([&](const stage::LiveHandoff& h) { result = *h.result; publish = h.report; });
+    uint64_t h = 0; int calls = 0;
+    r.subscribe_ready(1, [&](stage::Phase p, uint64_t) { if (p == stage::Phase::WorldLoad) r.owner_gone(2); return true; }, &h);
+    r.subscribe_ready(2, [&](stage::Phase, uint64_t) { ++calls; return true; }, &h);
+    r.run({}); r.finish({});
+    check(calls == 1, "both owners see START while alive");
+    publish(result, true);
+    check(calls == 1, "WORLDLOAD rechecks owner revocation in its dispatch snapshot too");
+    r.owner_gone(1);
+    publish(result, true);  // revocation does not discard already committed stage edits
+    check(r.counts().edits != 0, "committed registry edits remain after subscriber revocation");
+}
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -320,7 +472,17 @@ int main(int argc, char** argv) {
         {"R3 submit_unbound_owner", [&] { submit_unbound_owner(dir); }},
         {"R4 worldload_ready_event", [&] { worldload_ready_event(dir); }},
         {"R6 handoff_keeps_outside_refusals", [&] { handoff_keeps_outside_refusals(dir); }},
-        {"R5 cache_misses_added_resource", [&] { cache_misses_added_resource(dir); }}};
+        {"R5 cache_misses_added_resource", [&] { cache_misses_added_resource(dir); }},
+        {"P2 revoked_queue", [&] { revoked_queue(dir); }},
+        {"P2 revoked_registration", [&] { revoked_registration(dir); }},
+        {"P2 ready_snapshot_revoke", [&] { ready_snapshot_revoke(dir); }},
+        {"P2 ready_snapshot_unsubscribe", [&] { ready_snapshot_unsubscribe(dir); }},
+        {"P2 stage_self_revoke", [&] { stage_self_revoke(dir, Stage::Add); }},
+        {"P2 stage_self_revoke_valid_edit", [&] { stage_self_revoke(dir, Stage::Alter); }},
+        {"P2 ready_fault_removed", [&] { ready_fault_removed(dir); }},
+        {"P2 owner_notification_bridge", [&] { owner_notification_bridge(dir); }},
+        {"P2 core_dead_before_notification", [&] { core_dead_before_notification(dir); }},
+        {"P2 worldload_snapshot_revoke", [&] { worldload_snapshot_revoke(dir); }}};
     for (const auto& [name, fn] : groups) {
         try {
             fn();

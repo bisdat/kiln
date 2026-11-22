@@ -8,7 +8,9 @@
 //     balance levelCap 60 (over the old patch's 55);
 //   - OnBoot: a C# registry edit through kiln.registry's submit (the native form of P2's Mod.OnRegistry; this test reaches it
 //     through Kiln.Content's internal service lookup, which no mod should do): items plant fibre maxStack 500, balance
-//     xpPerLevel[0] 2222 (over the old patch's 1500).
+//     xpPerLevel[0] 2222 (over the old patch's 1500). Its copied IR uses a process-lived test owner, not the transient
+//     boot-author owner that Host revokes before the registry stage. No callbacks into the boot assembly are retained.
+//     Real mods get their retained owner through P2's OnRegistry integration, not this test-only bridge.
 // After the world load: the live values read back, registry.json's rows. Then three pack hot reloads: the section's x4 made
 // x3 (x6), the section removed (the old pack's x2 alone: no residue), the section back (x8). The C# edit stays throughout.
 // With <data>/old-only present (the compat runner's baseline session) the mod does nothing of the registry's and checks
@@ -59,14 +61,17 @@ public sealed unsafe class RegistryMixedTestMod : Mod
         Log.Info($"registry-mixed-test: OnBoot submit rc={rc}: {report}");
     }
 
-    // kiln.registry v1's submit (offset 40) with this mod's owner (Kiln binds the batch's mod to it)
+    // kiln.registry v1's submit (offset 40) with a process-lived fixture owner bound to this mod.
+    // Only copied IR survives OnBoot; never retain a delegate or a pointer into that collectible assembly.
     private (int, string) Submit(string json)
     {
         var bridge = typeof(Content).Assembly.GetType("Kiln.BlocksBridge");
         var table = (nint)(bridge?.GetMethod("ServiceTable", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)?.Invoke(null, new object[] { "kiln.registry", 1u }) ?? (nint)0);
         if (table == 0) return (-1, "kiln.registry is not here");
         if (*(uint*)table < 48) return (-1, "kiln.registry has no submit");
-        var owner = (ulong)(typeof(ModContext).GetProperty("Owner", BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(Context) ?? 0UL);
+        var owner = (ulong)(bridge?.GetMethod("ServiceOwner", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)?
+            .Invoke(null, new object[] { "registry-test:registry-mixed-test" }) ?? 0UL);
+        if (owner == 0) return (-1, "the process-lived registry test owner could not be created");
         var submit = *(delegate* unmanaged[Cdecl]<ulong, KilnStr, void*, byte*, nuint, nuint*, int>*)(table + 40);
         var bytes = Encoding.UTF8.GetBytes(json);
         var rep = new byte[4096];

@@ -19,7 +19,7 @@
 #endif
 
 KILN_TEST_ASSERT(KILN_REGISTRY_VERSION == 1u, "kiln.registry v1");
-KILN_TEST_ASSERT(sizeof(KilnRegistryApi) == 88, "KilnRegistryApi: header + 10 pointers (registry P2 appends its live members later)");
+KILN_TEST_ASSERT(sizeof(KilnRegistryApi) == 88, "KilnRegistryApi: header + 10 pointers (registry P2 live API uses a separate table)");
 KILN_TEST_ASSERT(offsetof(KilnRegistryApi, header) == 0, "header");
 KILN_TEST_ASSERT(offsetof(KilnRegistryApi, status) == 8, "status");
 KILN_TEST_ASSERT(offsetof(KilnRegistryApi, schema_json) == 16, "schema_json");

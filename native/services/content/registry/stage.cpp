@@ -283,12 +283,18 @@ struct Runner::Impl {
     std::map<uint64_t, Sub> stage_subs;
     struct Ready {
         uint64_t owner = 0;
-        std::function<void(Phase, uint64_t)> fn;
+        ReadyFn fn;
     };
     std::map<uint64_t, Ready> ready_subs;
     uint64_t next_handle = 1;
-    std::map<std::string, std::vector<Batch>> queued;            // mod -> its submits before the stage
-    std::map<std::string, std::vector<Refusal>> queued_refused;
+    struct Queued {
+        uint64_t owner = 0;
+        Batch batch;
+        std::vector<Refusal> refused;
+    };
+    std::map<std::string, std::vector<Queued>> queued;  // mod -> its submits, retaining each caller's owner
+    std::set<uint64_t> gone;  // owner ids are never reused
+    bool alive(uint64_t owner) const { return !gone.count(owner) && (!env.owner_alive || env.owner_alive(owner)); }
     std::thread::id stage_thread;
     bool stage_thread_set = false;
     struct Turn {
@@ -415,6 +421,7 @@ KilnResult Runner::subscribe_stage(uint64_t owner, const std::string& mod, Stage
     std::string err;
     if (!owner || !fn || !handle || !mod_id_ok(mod, &err)) return KILN_ERR_INVALID_ARGUMENT;
     std::lock_guard lk(d_->mu);
+    if (!d_->alive(owner)) return KILN_ERR_REVOKED;
     if (phase_.load() != Phase::None) return KILN_ERR_UNAVAILABLE;
     for (const auto& [h, s] : d_->stage_subs)
         if (s.mod == mod) return KILN_ERR_INVALID_ARGUMENT;
@@ -423,9 +430,10 @@ KilnResult Runner::subscribe_stage(uint64_t owner, const std::string& mod, Stage
     return KILN_OK;
 }
 
-KilnResult Runner::subscribe_ready(uint64_t owner, std::function<void(Phase, uint64_t)> fn, uint64_t* handle) {
+KilnResult Runner::subscribe_ready(uint64_t owner, ReadyFn fn, uint64_t* handle) {
     if (!owner || !fn || !handle) return KILN_ERR_INVALID_ARGUMENT;
     std::lock_guard lk(d_->mu);
+    if (!d_->alive(owner)) return KILN_ERR_REVOKED;
     *handle = d_->next_handle++;
     d_->ready_subs[*handle] = {owner, std::move(fn)};
     return KILN_OK;
@@ -438,12 +446,39 @@ KilnResult Runner::unsubscribe(uint64_t handle) {
 }
 
 void Runner::owner_gone(uint64_t owner) {
+    if (!owner) return;
     std::lock_guard lk(d_->mu);
-    std::set<std::string> mods;
+    d_->gone.insert(owner);
     for (auto it = d_->stage_subs.begin(); it != d_->stage_subs.end();)
-        if (it->second.owner == owner) mods.insert(it->second.mod), it = d_->stage_subs.erase(it);
-        else ++it;
-    for (auto it = d_->ready_subs.begin(); it != d_->ready_subs.end();) it = it->second.owner == owner ? d_->ready_subs.erase(it) : std::next(it);
+        it = it->second.owner == owner ? d_->stage_subs.erase(it) : std::next(it);
+    for (auto it = d_->ready_subs.begin(); it != d_->ready_subs.end();)
+        it = it->second.owner == owner ? d_->ready_subs.erase(it) : std::next(it);
+    for (auto it = d_->queued.begin(); it != d_->queued.end();) {
+        std::erase_if(it->second, [owner](const Impl::Queued& q) { return q.owner == owner; });
+        it = it->second.empty() ? d_->queued.erase(it) : std::next(it);
+    }
+}
+
+void Runner::notify_ready(const std::vector<uint64_t>& handles, Phase phase, uint64_t generation) {
+    for (const uint64_t h : handles) {
+        ReadyFn fn;
+        {
+            std::lock_guard lk(d_->mu);
+            const auto it = d_->ready_subs.find(h);
+            if (it == d_->ready_subs.end()) continue;  // removed by an earlier callback in this same snapshot
+            if (!d_->alive(it->second.owner)) {
+                d_->ready_subs.erase(it);
+                continue;
+            }
+            fn = it->second.fn;  // dispatch starts here; revoke/unsubscribe do not wait for an in-flight callback
+        }
+        if (fn(phase, generation)) continue;
+        {
+            std::lock_guard lk(d_->mu);
+            d_->ready_subs.erase(h);
+        }
+        d_->log(2, "registry: a ready callback faulted and was removed");
+    }
 }
 
 bool Runner::on_stage_thread() const {
@@ -469,6 +504,10 @@ KilnResult Runner::submit(uint64_t owner, const std::string& owner_mod, const st
     };
     {
         std::lock_guard lk(d_->mu);
+        if (!d_->alive(owner)) {
+            err = "the caller's owner is revoked: the batch is refused";
+            return say(KILN_ERR_REVOKED);
+        }
         if (!parse_batch(ir, d_->schema, &b, &refused, &err)) return say(KILN_ERR_INVALID_ARGUMENT);
     }
     if (owner_mod.empty()) {  // review finding 8: Kiln binds every batch to its owner's mod; an owner it cannot bind has none
@@ -482,12 +521,15 @@ KilnResult Runner::submit(uint64_t owner, const std::string& owner_mod, const st
         return say(KILN_ERR_INVALID_ARGUMENT);
     }
     std::lock_guard lk(d_->mu);
+    if (!d_->alive(owner)) {
+        err = "the caller's owner is revoked: the batch is refused";
+        b.edits.clear();
+        return say(KILN_ERR_REVOKED);
+    }
     const Phase ph = phase_.load();
     if (ph == Phase::None) {
         if (b.source.empty()) b.source = "code:" + b.mod;
-        d_->queued[b.mod].push_back(b);
-        auto& q = d_->queued_refused[b.mod];
-        q.insert(q.end(), refused.begin(), refused.end());
+        d_->queued[b.mod].push_back({owner, b, refused});
         return say(KILN_OK);
     }
     if (ph == Phase::Start || ph == Phase::WorldLoad) {
@@ -577,13 +619,17 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn) {
     }
     {
         std::lock_guard lk(d.mu);
-        for (auto& [mod, bs] : d.queued) {
-            ModInput& in = by_mod[mod];
-            in.id = mod;
-            for (Batch& b : bs) in.batches.push_back(std::move(b));
+        // The stage takes the surviving queue here. Already-taken stage edits stay until the next start on revoke.
+        for (auto& [mod, qs] : d.queued) {
+            for (Impl::Queued& q : qs) {
+                if (!d.alive(q.owner)) continue;
+                ModInput& in = by_mod[mod];
+                in.id = mod;
+                in.batches.push_back(std::move(q.batch));
+                in.refused.insert(in.refused.end(), q.refused.begin(), q.refused.end());
+            }
         }
-        for (auto& [mod, rs] : d.queued_refused) by_mod[mod].refused.insert(by_mod[mod].refused.end(), rs.begin(), rs.end());
-        d.queued.clear(), d.queued_refused.clear();
+        d.queued.clear();
         d.pre_refused.insert(d.pre_refused.end(), skipped.begin(), skipped.end());
         for (const auto& [h, s] : d.stage_subs) {
             ModInput& in = by_mod[s.mod];
@@ -592,11 +638,19 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn) {
             const uint64_t handle = h;
             in.code = [this, mod, handle](Stage st, const View& v, Batch* out) {
                 StageFn fn;
+                uint64_t owner = 0;
+                size_t refused_before = 0;
                 {
                     std::lock_guard l2(d_->mu);
                     const auto it = d_->stage_subs.find(handle);
                     if (it == d_->stage_subs.end()) return;
+                    if (!d_->alive(it->second.owner)) {
+                        d_->stage_subs.erase(it);
+                        return;
+                    }
+                    owner = it->second.owner;
                     fn = it->second.fn;
+                    refused_before = d_->pre_refused.size();
                     d_->turn = Impl::Turn{mod, st, &v, out};
                     out->mod = mod;
                     out->stage = st;
@@ -606,7 +660,14 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn) {
                 const bool clean = fn(st, v);
                 std::lock_guard l2(d_->mu);
                 d_->turn.reset();
-                if (!clean) {
+                if (!d_->alive(owner)) {
+                    const size_t dropped = out->edits.size() - before;
+                    out->edits.resize(before);
+                    d_->pre_refused.resize(refused_before);
+                    d_->stage_subs.erase(handle);
+                    d_->pre_refused.push_back({mod, "code:" + mod, st, 0,
+                        "the stage callback's owner was revoked; its " + std::to_string(dropped) + " edit(s) of this turn were dropped", ""});
+                } else if (!clean) {
                     const size_t dropped = out->edits.size() - before;
                     out->edits.resize(before);
                     d_->stage_subs.erase(handle);
@@ -801,7 +862,7 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn) {
 
 void Runner::finish(const std::vector<BootOutcome>& outcomes) {
     Impl& d = *d_;
-    std::vector<std::function<void(Phase, uint64_t)>> ready;
+    std::vector<uint64_t> ready;
     LiveHandoff live;
     uint64_t gen = 0;
     std::string plan_rel, plan_text, report_text;  // written after the runner's lock is released (review finding 10)
@@ -877,14 +938,14 @@ void Runner::finish(const std::vector<BootOutcome>& outcomes) {
                      " conflict line(s); restart fields are final (phase start)");
         phase_.store(Phase::Start);
         gen = d.generation;
-        for (const auto& [h, s] : d.ready_subs) ready.push_back(s.fn);
+        for (const auto& [h, s] : d.ready_subs) ready.push_back(h);
         live = {&d.schema, &d.rm, &d.result, &d.ids, &d.nums, &d.base, &d.old, &d.inputs, &d.decoded, nullptr, &d.outside, &d.boot_fields, nullptr};
         live.check = [this](Batch* b, std::vector<Refusal>* refused) {
             std::lock_guard l2(d_->mu);
             refuse_unmapped(d_->rm, d_->schema, b, refused);
         };
         live.report = [this](const Result& r, bool application) {
-            std::vector<std::function<void(Phase, uint64_t)>> fns;
+            std::vector<uint64_t> handles;
             uint64_t g2 = 0;
             std::string text;
             {
@@ -895,7 +956,7 @@ void Runner::finish(const std::vector<BootOutcome>& outcomes) {
                     d_->meta.world_load = true;
                     phase_.store(Phase::WorldLoad);
                     g2 = d_->generation;
-                    for (const auto& [h, s] : d_->ready_subs) fns.push_back(s.fn);
+                    for (const auto& [h, s] : d_->ready_subs) handles.push_back(h);
                 }
                 d_->meta.written = d_->env.now ? d_->env.now() : "";
                 const json doc2 = ::kc::registry::report_json(d_->schema, d_->result, d_->meta);
@@ -904,7 +965,7 @@ void Runner::finish(const std::vector<BootOutcome>& outcomes) {
             }
             // outside the runner's lock (review finding 10): the file, then kiln_registry.h's WORLDLOAD event (finding 9)
             if (d_->env.write_report) d_->env.write_report(text);
-            for (const auto& fn : fns) fn(Phase::WorldLoad, g2);
+            notify_ready(handles, Phase::WorldLoad, g2);
         };
     }
     if (!plan_rel.empty() && !d.env.write_data(plan_rel, plan_text)) d.log(1, "registry: the plan could not be written");
@@ -919,7 +980,7 @@ void Runner::finish(const std::vector<BootOutcome>& outcomes) {
         }
         if (any) d.log(1, "registry: this build of kiln.content has no live back-end: now and worldLoad fields are composed and reported, not applied");
     }
-    for (const auto& fn : ready) fn(Phase::Start, gen);
+    notify_ready(ready, Phase::Start, gen);
 }
 
 uint64_t Runner::generation() const {

@@ -100,6 +100,24 @@ At each start Kiln runs three stages, each across **all** mods (in the load orde
   registry edit. Conflicts inside the registry and with Kiln's older paths are found for certain; other loaders' DLL
   patches and hooks are best-effort and labelled so.
 
+### Native callback and owner lifetime
+
+`kiln.registry` keeps submitted batches and callbacks under their caller's owner. Revoking that owner removes its queued
+batches (including parse refusals) and its stage/ready subscriptions, even before any world exists. Another live owner of
+the same mod keeps its own batches. Admission and dispatch also check the core's current owner state, so a retiring
+notification still being delivered cannot admit or start another callback into the dead owner.
+
+The stage takes the surviving queued batches at startup. Edits it already took remain until the next process start;
+revocation is not a rollback of committed registry layers. A stage callback already in flight may finish, but if its
+owner was revoked, that turn's uncommitted edits are dropped and the report names the reason. A fault in either kind of
+native callback removes that subscription; a faulted stage turn is dropped as well.
+
+Unsubscribe and revoke never wait for callback quiescence. A callback whose dispatch already started on another thread
+may still finish, so its native function and user state must stay valid until that dispatch has completed. Ready dispatch
+rechecks each subscription, including when an earlier callback in the same START or WORLDLOAD event unsubscribes or
+revokes a later one. These lifetime rules add no ABI members: `kiln.registry` stays 88 bytes. P2's live transactions will
+use a separate `kiln.registry.live` table (not yet implemented).
+
 ### Live values in the report
 
 After world load or a pack reload, `kiln/state/registry.json` shows the live `result` and writer chain for recipe inputs

@@ -3,8 +3,8 @@
  * loot, drops and balance in the first release), changed by mods in one data stage per start and reported in one place
  * (<game>/kiln/state/registry.json, schema/state-registry.schema.json). Mods name only Kiln ids ("game:<stable name>",
  * "<mod id>:<name>") and Kiln fields ("maxStack", "damage.fire"); Kiln maps them onto this game build and refuses, per
- * edit, what it cannot map there. This table's layout and the meaning of its members are kept from now on (append-only,
- * as every table: the live-change members of registry P2 will be appended at its tail, check header.size); the registry
+ * edit, what it cannot map there. This table's layout and the meaning of its members are kept from now on (check
+ * header.size). Registry P2's live-change API belongs to a separate kiln.registry.live table, not this table's tail; the registry
  * schemas themselves (registries, fields, ids) are experimental until API 1.0.0 (C#: KILNX031) and change only with an id
  * migration.
  *
@@ -51,13 +51,15 @@
  *  - Records: size is the caller's sizeof on the way in. A size below v1's is refused (KILN_ERR_INVALID_ARGUMENT); a
  *    larger one is accepted, Kiln fills the members it knows and sets size to the bytes it filled (a newer caller on an
  *    older Kiln sees which members are v1's). A record Kiln passes to a callback has size set to what Kiln filled.
- *  - Owners: owner 0 (the core) is refused (KILN_ERR_INVALID_ARGUMENT); submit and subscribe_stage refuse a revoked owner
- *    with KILN_ERR_REVOKED, and an owner Kiln cannot bind to a mod with KILN_ERR_INVALID_ARGUMENT. v1 does not take a
- *    revoked owner's queued batches or subscriptions away: unsubscribe before the owner goes; edits the stage already took
- *    stay until the next start.
- *  - Callbacks: the record pointer is valid only during the call. fn and user stay valid until unsubscribe returned. A
- *    native fault inside a stage callback is caught (kiln.log), the subscription is removed, and that turn's edits are
- *    dropped and reported; a fault inside a ready callback is caught and logged (v1 keeps that subscription).
+ *  - Owners: owner 0 (the core) is refused (KILN_ERR_INVALID_ARGUMENT); submit, subscribe_stage and subscribe_ready refuse
+ *    a revoked owner with KILN_ERR_REVOKED. submit and subscribe_stage refuse an owner Kiln cannot bind to a mod with
+ *    KILN_ERR_INVALID_ARGUMENT. Revoking an owner drops its queued batches (including parse refusals) and subscriptions.
+ *    The stage takes the surviving queue when it starts; already-taken edits stay until the next start. An in-flight
+ *    stage callback may finish, but its uncommitted turn's edits are dropped and reported if its owner was revoked.
+ *  - Callbacks: the record pointer is valid only during the call. fn and user stay valid until unsubscribe returned,
+ *    except a dispatch already in flight on another thread (unsubscribe and revoke never wait for it). A native fault
+ *    inside a stage callback is caught (kiln.log), the subscription is removed, and that turn's edits are dropped and
+ *    reported; a fault inside a ready callback is caught and logged and that subscription is removed too.
  *  - Results: KILN_OK; KILN_ERR_INVALID_ARGUMENT (a NULL required pointer, a bad size, owner 0, a malformed document,
  *    an unknown registry, field or view); KILN_ERR_NOT_FOUND (no such entry or handle); KILN_ERR_UNAVAILABLE (not now:
  *    the phase does not allow it, the field is not mapped on this game build); KILN_ERR_WRONG_THREAD;
@@ -214,7 +216,7 @@ typedef struct KilnRegistryApi {
      *    the stage that runs: taken at once (applied when the callback returns). Anywhere else during the stage:
      *    KILN_ERR_WRONG_THREAD on another thread, KILN_ERR_UNAVAILABLE on the stage thread; a batch of another stage or
      *    mod: KILN_ERR_INVALID_ARGUMENT;
-     *  - after the stage: KILN_ERR_UNAVAILABLE (a change at run time is a live change: registry P2's members, appended later).
+     *  - after the stage: KILN_ERR_UNAVAILABLE (a change at run time is a live change: registry P2's separate table).
      * KILN_OK: the document was read; out (optional) counts the edits taken and those refused by their own checks, the
      * report (optional) is {"accepted": n, "refused": [{"n", "reason"}]}. KILN_ERR_INVALID_ARGUMENT: the document is
      * unusable (not JSON, "ir" is not 1, no mod or stage, over KILN_REGISTRY_MAX_IR_BYTES): nothing of it is taken, the
@@ -290,7 +292,7 @@ KILN_REGISTRY_ASSERT(sizeof(KilnRegistryApi) == 88 && offsetof(KilnRegistryApi, 
                          offsetof(KilnRegistryApi, read) == 48 && offsetof(KilnRegistryApi, select) == 56 &&
                          offsetof(KilnRegistryApi, report_json) == 64 && offsetof(KilnRegistryApi, subscribe_ready) == 72 &&
                          offsetof(KilnRegistryApi, unsubscribe) == 80,
-                     "KilnRegistryApi v1 layout (88 bytes, x64; P2 appends at the tail)");
+                     "KilnRegistryApi v1 layout (88 bytes, x64)");
 #undef KILN_REGISTRY_ASSERT
 
 #endif /* KILN_REGISTRY_H */

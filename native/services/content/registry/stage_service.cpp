@@ -29,10 +29,17 @@
 #include "services/kiln_registry.h"
 #include "boot_hooks.h"
 #include "stage.h"
+#include "stage_owner.h"
 
 namespace kc::registry::stage {
 
 namespace {
+
+const KilnOwnersInternalApi* owners() {
+    static const auto* table = g_api ? static_cast<const KilnOwnersInternalApi*>(g_api->service(
+        KilnStr{KILN_OWNERS_INTERNAL_SERVICE, sizeof(KILN_OWNERS_INTERNAL_SERVICE) - 1}, 2)) : nullptr;
+    return table;
+}
 
 std::string api_path(int kind) {
     char b[1024];
@@ -111,6 +118,12 @@ Env make_env() {
         e.side = bi.side == KILN_SIDE_CLIENT ? "client" : "server";
         if (bi.kiln_version.ptr) e.kiln_version.assign(bi.kiln_version.ptr, bi.kiln_version.len);
     }
+    e.owner_alive = [](uint64_t owner) {
+        const auto* table = owners();
+        uint32_t grants = 0;
+        return table && table->header.size >= offsetof(KilnOwnersInternalApi, grants) + sizeof(table->grants) &&
+               table->grants && table->grants(owner, &grants) == KILN_OK;
+    };
     e.pid = GetCurrentProcessId();
     e.now = &utc_now;
     e.writer = writer_of();
@@ -217,8 +230,7 @@ bool guarded_ready(KilnRegistryReadyFn fn, const KilnRegistryReady* r, void* use
 // kind prefix ("mod:", "native:", ...), folded to lower case. Empty: no such owner, or an id that is no mod id.
 std::string bound_mod(KilnOwner owner, bool* revoked = nullptr) {
     if (revoked) *revoked = false;
-    static const auto* t = g_api ? static_cast<const KilnOwnersInternalApi*>(g_api->service(KilnStr{KILN_OWNERS_INTERNAL_SERVICE, sizeof(KILN_OWNERS_INTERNAL_SERVICE) - 1}, 2))
-                                 : nullptr;
+    const auto* t = owners();
     if (!t || t->header.version < 2 || t->header.size < offsetof(KilnOwnersInternalApi, owner_id) + sizeof(void*) || !t->owner_id) return {};  // v2: owner_id
     char buf[256];
     size_t len = 0;
@@ -317,7 +329,7 @@ KilnResult KILN_CALL t_subscribe_ready(KilnOwner owner, KilnRegistryReadyFn fn, 
         r.phase = static_cast<uint32_t>(p);
         r.generation = gen;
         r.world = KILN_WORLD_KINDS;
-        if (!guarded_ready(fn, &r, user)) LOGE("registry: a ready callback faulted");
+        return guarded_ready(fn, &r, user);
     }, out);
 }
 KilnResult KILN_CALL t_unsubscribe(KilnHandle h) { return runner().unsubscribe(h); }
@@ -345,6 +357,13 @@ Runner& runner() {
 
 void bind_service() {
     if (!g_api) return;
+    const auto* owner_hooks = static_cast<const KilnHooksApi*>(g_api->service(
+        KilnStr{KILN_HOOKS_SERVICE, sizeof(KILN_HOOKS_SERVICE) - 1}, 1));
+    const KilnResult cleanup = bind_owner_cleanup(owner_hooks, g_owner, &runner());
+    if (cleanup != KILN_OK) {
+        LOGE("registry: owner-retiring notification unavailable (rc %d): the registry service was not registered", cleanup);
+        return;  // never retain callbacks into mods without their owner's cleanup
+    }
     static const boothook::Hooks hooks{
         [](const std::vector<boothook::OldDoc>& docs) { return runner().run([&docs](model::Model& m) { return boothook::old_writes(docs, m); }); },
         &boothook::write, [](const std::vector<BootOutcome>& o) { runner().finish(o); }};

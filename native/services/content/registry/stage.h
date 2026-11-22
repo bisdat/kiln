@@ -57,6 +57,9 @@ struct Env {
     std::function<bool(const std::string& text)> write_report;
     std::function<bool(const std::string& rel, const std::string& text)> write_data;
     std::function<std::optional<std::string>(const std::string& rel)> read_data;
+    // The core's current owner state, checked under the runner lock at admission/dispatch (no callbacks into the runner).
+    // Closes the interval between the core marking an owner dead and delivering its retiring notification.
+    std::function<bool(uint64_t owner)> owner_alive;
     std::function<void(int level, const std::string& line)> log;  // 0 info, 1 warn, 2 error
     std::function<std::string()> now;                              // RFC 3339 UTC
     uint32_t pid = 0;
@@ -117,7 +120,8 @@ class Runner {
     // that turn are dropped, the subscription removed, reported).
     using StageFn = std::function<bool(Stage, const View&)>;
     KilnResult subscribe_stage(uint64_t owner, const std::string& mod, StageFn fn, uint64_t* handle);
-    KilnResult subscribe_ready(uint64_t owner, std::function<void(Phase, uint64_t)> fn, uint64_t* handle);
+    using ReadyFn = std::function<bool(Phase, uint64_t)>;  // false: guarded native callback faulted; remove it
+    KilnResult subscribe_ready(uint64_t owner, ReadyFn fn, uint64_t* handle);
     KilnResult unsubscribe(uint64_t handle);
     // One IR document. Before the stage: queued for its mod; inside that mod's stage callback (stage thread, the running
     // stage): taken into its batch. report: {"accepted", "refused": [{"n", "reason"}]}.
@@ -155,6 +159,7 @@ class Runner {
     bool on_stage_thread() const;
 
    private:
+    void notify_ready(const std::vector<uint64_t>& handles, Phase phase, uint64_t generation);
     struct Impl;
     std::unique_ptr<Impl> d_;
     std::atomic<Phase> phase_{Phase::None};
