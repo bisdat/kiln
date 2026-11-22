@@ -416,7 +416,7 @@ function Banners({ game, ctl, pending, onOffer, boot }: { game: GameInstall; ctl
   // (dev.29.18) a graphics tool next to the game that changes what Kiln's overlay does (OptiScaler): what to expect
   for (const g of s?.runtime.installed ? s.graphicsTools ?? [] : []) {
     out.push(
-      <Banner key={`gfx-${g.engine}`} tone="info" title={t("play.banner.graphicsTool", { name: g.engine === "optiscaler" ? "OptiScaler" : g.engine, file: g.file })}>
+      <Banner key={`gfx-${g.engine}`} tone="info" fold={`graphics-tool:${g.engine}:${g.file}`} title={t("play.banner.graphicsTool", { name: g.engine === "optiscaler" ? "OptiScaler" : g.engine, file: g.file })}>
         <span data-testid="graphics-tool-note">{g.text}</span>
       </Banner>,
     );

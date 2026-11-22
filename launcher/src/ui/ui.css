@@ -164,6 +164,8 @@
 .k-banner-text { color: var(--k-text-1); min-width: 0; }
 .k-banner-text > .k-stack { gap: 4px; }
 .k-banner-actions { display: flex; gap: 8px; align-items: center; flex: none; margin-left: auto; }
+.k-banner-fold { font-size: 15px; white-space: nowrap; }
+.k-banner.folded { padding-top: 6px; padding-bottom: 6px; }
 
 /* ---------------------------------------------------------------- tabs: small caps with an ember line */
 .k-tabs { display: flex; flex-wrap: wrap; gap: 0 22px; box-shadow: inset 0 -1px 0 var(--k-line); min-width: 0; flex: none; }

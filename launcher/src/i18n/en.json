@@ -4213,6 +4213,10 @@
       "keptFoldersDetail": "{detail}. These mods may still run through Kiln or another loader. With the game closed, review or move the listed folders to stop them; your settings have not been deleted.",
       "showLess": "Show less",
       "showAll": "Show all"
+    },
+    "banner": {
+      "hide": "Hide",
+      "show": "Show"
     }
   },
   "api": {
