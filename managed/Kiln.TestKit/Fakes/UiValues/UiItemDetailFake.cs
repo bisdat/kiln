@@ -30,10 +30,11 @@ internal sealed unsafe class UiItemDetailFake : IKitFake
     public void Start(KilnHarness harness) { }
     public void BeforeStep(KilnHarness harness, ulong step) { }
     public void End(KilnHarness harness) { }
-    public void AddCoverage(List<CoverageRow> rows) => rows.Add(new CoverageRow("Captured item detail", CoverageKind.RecordingFake,
+    public void AddCoverage(List<CoverageRow> rows) => rows.Add(new CoverageRow("Captured item detail (Since 0.2.0-dev.30.5)", CoverageKind.RecordingFake,
         [UiItemDetailNative.Service, Ui.Values.ItemDetailCapability],
-        "Owned game-panel text/value recordings, exact instance/variant lookup and 64-entry eviction. UiItemDetail.Capture/Clear " +
-        "supply captures and model a world change. Not modelled: game text construction, hooks, fonts or drawing."));
+        "Owned text/stat-float recordings, exact client identity or item+level+rarity lookup, strict UTF-8 byte budgets, worker reads " +
+        "and 64-entry capture-order eviction. UiItemDetail.Capture/Clear supply captures and model a world change. " +
+        "Not modelled: game text construction, native capture failures, session lifecycle, hooks or drawing."));
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int Copy(ulong owner, UiItemDetailNative.Query* q, UiItemDetailNative.Snapshot* output,
