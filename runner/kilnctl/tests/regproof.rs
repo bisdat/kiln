@@ -172,3 +172,21 @@ fn outputs_inside_the_kiln_tree_are_refused() {
     assert!(!out.exists());
     let _ = std::fs::remove_dir_all(&t);
 }
+
+/// The maintainers' guide names the command, the maintainer folder, the statuses and both lab file contracts.
+#[test]
+fn the_docs_describe_regproof_and_its_contracts() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let read = |p: &str| std::fs::read_to_string(root.join(p)).unwrap();
+    let check = |file: &str, words: &[&str]| {
+        let text = read(file);
+        for w in words {
+            assert!(text.contains(w), "{file} does not mention {w:?}");
+        }
+    };
+    check("docs/kiln/kilnctl.md", &["`regproof", "KILN_REGMAP_IDS", "registry-roundtrip", "registry-values", "--accept", "--first-build",
+                                    "regmap-ids", "regproof/<name>"]);
+    check("docs/kiln/sigport.md", &["kilnctl regproof", "registry proof", "unproven", "boot generation", "content/registry/proof"]);
+    check("regmap/README.md", &["kilnctl regproof", "KILN_REGMAP_IDS", "registry-roundtrip", "registry-values", "unproven", "\"reasons\"",
+                                "rawBefore", "bytesBefore", "\"base\"", "content/registry/proof"]);
+}

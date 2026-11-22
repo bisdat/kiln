@@ -83,9 +83,10 @@ runtime opens assemblies through it, and every managed load then fails with `0x8
 | `status <name>` | Install/build id, prefix, wine version, pid, uptime, world state (last `Switching state` line), UDP bound, ntsync in use (an fd on `/dev/ntsync`), unit state, Kiln policy and its build line from `kiln.log`, save, backups. Exit 0 running, 3 stopped |
 | `logs <name> [-n N] [-f] [--kiln\|--run]` | Game log (CRs stripped), `kiln/logs/kiln.log`, or the detached runner's output |
 | `backup <name>` | `tar -czf <backup_dir>/<name>-savegame-<UTC stamp>.tar.gz` of the save folder (`saveDirectory`). While the server runs, a tar that sees the save change (GNU tar exit 1) is retried up to 3 times |
-| `update <name> [--no-start] [--timeout S]` | Stop (if running; remembers whether systemd ran it), back up, `steamcmd ... validate`, then `tools/sigport/sigdb_check.py` on the new exe with the deployed definitions: build id and exe sha256 before/after, symbols/constants that fail, features on and OFF, and what the policy does with this build. Starts again the same way it was running. On a new build without a verified record (Kiln deployed): `sigport port` from the cached old exe, the lab gate, and the verified record only when the port is complete, the definitions need no change and the gate is green (docs/kiln/sigport.md). `--dry-run [--new-exe E] [--old E]`, `--no-port`, `--no-gate`, `--no-mark` |
+| `update <name> [--no-start] [--timeout S]` | Stop (if running; remembers whether systemd ran it), back up, `steamcmd ... validate`, then `tools/sigport/sigdb_check.py` on the new exe with the deployed definitions: build id and exe sha256 before/after, symbols/constants that fail, features on and OFF, and what the policy does with this build. Starts again the same way it was running. On a new build without a verified record (Kiln deployed): `sigport port` from the cached old exe, the lab gate, and the verified record only when the port is complete, the definitions need no change and the gate is green, then the registry proof (docs/kiln/sigport.md). `--dry-run [--new-exe E] [--old E]`, `--no-port`, `--no-gate`, `--no-mark` |
 | `port <name> [--old E] [--new E] [--defs T] [--no-gate] [--mark]` | Port the symbols to the instance's exe and boot the lab gate; `--mark` writes the record on green |
 | `gate <name> [--baseline] [--tests a,b] [--gate-port N]` | Boot `<name>-gate` (copy of the instance, policy any, self tests) and compare with the baseline |
+| `regproof [<name>] [--side server\|client] [--tree T] [--new-exe E] [--old-exe E] [--evidence P]... [--out D] [--accept ROW]... [--first-build] [--mark]` | The registry proof of a game build: reflection diff, formula checks, the lab's round trip, values diff, alias check; writes the regmap record candidate (verified only when every step is green) into `--out`, keeps the id table and values export, and with `--mark` puts a verified record into the instance's `kiln/regmap/<side>/`. Exit 0 = verified. Without an instance: `--tree` and the files (`--new-refl`, `--old-refl`, `--record`, `--ids`, `--prev-ids`) ([sigport.md](sigport.md#the-registry-proof-kilnctl-regproof), [regmap/README.md](../../regmap/README.md)) |
 | `list` | Instances, ports, running or not |
 | `report [<name>] [--dir D] [--out FILE] [--print]` | A support report of an instance, a server or client folder, or (neither) the client Steam knows: one zip (`./kiln-report-<date>.zip`) with kiln.log, proxy.log, the state files, the profile, chain.ini, the receipt, listings of the folder and `summary.txt` with findings; home folder, user and machine names, Steam ids and IP addresses replaced. Prints the short summary. `--print`: summary.txt to the terminal, no zip. Only reads ([launcher/support-report.md](launcher/support-report.md)) |
 | `deploy <name> --bundle ZIP [--samples]` | Installs a runtime bundle instead of running deploy-server.sh: `kiln_manage::install` with the server components (`core`, `sigdb-server`, `admin`; `--samples` adds `samples`), receipt `kiln/.install.json`, then the instance's policy in `kiln/kiln.json` (in place). The tree equals deploy-server.sh's (tools/package/parity.sh) |
@@ -233,6 +234,17 @@ descriptor the core would refuse there. They do not stop a mark, and a review li
 a descriptor the core refuses on the new build keeps that function's typed hooks and calls off (its `sig/<symbol>`
 row) until it is fixed; review the others before relying on them ([sigport.md](sigport.md#descriptors-across-a-port)).
 
+### The registry proof
+After the gate, `update` and `port` prove the registry mapping on the new build (`kilnctl regproof` runs it on its own):
+the old and new exe's reflection diffed per regmap row, the gear formulas checked against the lab, the lab's round-trip
+suites (`registry-roundtrip`, live and boot generations) and values exports (`registry-values`) found by content in the
+gate copy's and the instance's `kiln/data/content/registry/proof/`, the values diffed with each base's origin, the ids
+checked against the previous build's. The regmap record is verified only when every step ran green; a field the lab gave
+no evidence for is `unproven` (kept off, with its reason), one the build changed is `changed`. Id tables and values
+exports are kept per build in `$KILN_REGMAP_IDS` (default `~/.local/state/kiln/regmap-ids/`), never in the repository
+(kilnctl refuses an output or maintainer folder inside a Kiln checkout). `--first-build` waives the previous build;
+`--accept <registry.field>` takes a reflection change a human reviewed. Formats: [regmap/README.md](../../regmap/README.md).
+
 ## Files kilnctl writes
 | Path | What |
 |---|---|
@@ -244,6 +256,9 @@ row) until it is fixed; review the others before relying on them ([sigport.md](s
 | `<client>/kiln/profile.json`, `play-once.ini`, `profile.once.json`, `chain.ini`, `chain/once.ini` | `client activate`, `client play-once` |
 | `<backup_dir>/<name>-savegame-*.tar.gz` | `backup`, `update` (never pruned) |
 | `~/.local/state/kiln/<name>.run.log`, `<name>.sigdb.json` | `start` (detached runner output), `update` |
+| `~/.local/state/kiln/regproof/<name>/<sha12>-<time>/` | `regproof`, `update`, `port`: the proof's report, `NEXT.txt`, step reports, values changelog, the record candidate (`--out` instead) |
+| `~/.local/state/kiln/regmap-ids/<side>/ids-*.json`, `values-*.json` (`$KILN_REGMAP_IDS`) | `regproof`, `update`, `port`: id tables and values exports per game build (game names: outside any repository) |
+| `<dir>/kiln/regmap/server/<sha>.json`, `<dir>/kiln/data/content/registry/ids-server-<sha>.json` | `regproof --mark` / `update` (a verified record), the new build's id table when the instance runs it |
 
 Restore a backup with the server stopped: `tar -xzf <backup> -C <dir>` (replaces `savegame/`).
 
