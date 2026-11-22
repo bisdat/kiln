@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
-# kiln.content: the game's own texts (text_test.cpp, host: the loca hook, text() and text_info() over a fake lookup); content transactions (txn_test.cpp, host: store.cpp over a made-up memory with failing writes); the hook on the
+# kiln.content: resource patches and Kiln's base rules (bootpatch_test.cpp, baserules_test.cpp, host); the game's own texts (text_test.cpp, host: the loca hook, text() and text_info() over a fake lookup); content transactions (txn_test.cpp, host: store.cpp over a made-up memory with failing writes); the hook on the
 # game's item lookup only when it is needed (itemfind_test.cpp, host: newcontent.cpp over a fake kiln.hooks table); a sequence clone's names in a later world of the process (seqnames_test.cpp, host); the buff room (buffroom_test.cpp, host: the 4,096 reservation, its fallback, checked sizes, the map the game reads); near memory
 # (nearmem.cpp): the policy against simulated address spaces on the host (near_test.cpp: the layout of GitHub issue 14,
 # the Wine layout, no free hole, budget, top and bottom of the address space), then the Windows side (nearwin.h) on a
@@ -14,6 +14,7 @@ export KILN_OUT
 out=$KILN_OUT/content-tests
 mkdir -p "$out"
 bash "$here/bootpatch_test.sh"
+bash "$here/baserules_test.sh"
 bash "$here/bootpatch_equiv_test.sh"
 bash "$here/bootstruct_test.sh"
 bash "$here/bootview_test.sh"

@@ -2085,6 +2085,15 @@ void gamedata_cases() {
 std::vector<fs::path> t_patch_mods;
 std::vector<std::filesystem::path> kc::mod_folder_list() { return t_patch_mods; }
 void kc::logf(int, const char*, ...) {}  // gamedata_bootpatch.cpp's gearRules warnings (content.h)
+// kiln.base_rules' table (gamedata_bootpatch.cpp, baserules.hpp) is a global ASan keeps: what its state call reaches, never
+// called here
+const KilnApi* kc::g_api = nullptr;
+uint32_t kc::fnv1a(const void*, size_t) { return 0; }
+const kc::gd::TType* kc::gd::type_named(const std::string&) { return nullptr; }
+const kc::gd::TType* kc::gd::TType::resolved() const { return this; }
+bool kc::gd::resolve(Root, Node, const std::string&, std::vector<Resolved>*, std::string* err, bool*) { return *err = "no types here", false; }
+bool kc::gd::leaf_of(const TType*, Field*) { return false; }
+kc::gjson kc::gd::leaf_json(const Field&, const uint8_t*, bool) { return nullptr; }
 
 kiln::boot::Input input_of(const json& owners) {
     const std::string s = json{{"schema", 1}, {"owners", owners}, {"excluded", json::array()}}.dump();

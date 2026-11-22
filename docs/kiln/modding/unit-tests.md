@@ -534,6 +534,7 @@ time with them sees almost none pass between steps, and an `await Task.Delay(...
 | [KilnTest] tests | real |  | Kiln.Testing's own runner, started test by test through Kiln.Host (KilnHarness.RunTest, KilnTestSession, the xunit KilnTestSuite): same order, timeouts and results as in a server. Offline a passing body that asked for an unfaked service or a feature that is off is skipped with the names; failed bodies and timeouts remain failures with the names. A test that blocks the tick thread is stopped by the watchdog and reported as a timeout with the stack where it blocked |
 | kiln.assets.vfx | unavailable | `kiln.assets.vfx` | no fake: the service finds no native table, so its own Available is false and its row says offline |
 | kiln.audio | unavailable | `kiln.audio` | no fake: the service finds no native table, so its own Available is false and its row says offline |
+| kiln.base_rules | unavailable | `kiln.base_rules` | no fake: the service finds no native table, so its own Available is false and its row says offline |
 | kiln.build | unavailable | `kiln.build` | no fake: the service finds no native table, so its own Available is false and its row says offline |
 | kiln.caps | unavailable | `kiln.caps` | no fake: the service finds no native table, so its own Available is false and its row says offline |
 | kiln.characters | unavailable | `kiln.characters` | no fake: the service finds no native table, so its own Available is false and its row says offline |
@@ -567,6 +568,7 @@ time with them sees almost none pass between steps, and an `await Task.Delay(...
 | kiln.stations | unavailable | `kiln.stations` | no fake: the service finds no native table, so its own Available is false and its row says offline |
 | kiln.steamguard | unavailable | `kiln.steamguard` | no fake: the service finds no native table, so its own Available is false and its row says offline |
 | kiln.surfaces | unavailable | `kiln.surfaces` | no fake: the service finds no native table, so its own Available is false and its row says offline |
+| kiln.survivors | unavailable | `kiln.survivors` | no fake: the service finds no native table, so its own Available is false and its row says offline |
 | kiln.tasks | unavailable | `kiln.tasks` | no fake: the service finds no native table, so its own Available is false and its row says offline |
 | kiln.toolwear | unavailable | `kiln.toolwear` | no fake: the service finds no native table, so its own Available is false and its row says offline |
 | kiln.ui | unavailable | `kiln.ui` | no fake: the service finds no native table, so its own Available is false and its row says offline |

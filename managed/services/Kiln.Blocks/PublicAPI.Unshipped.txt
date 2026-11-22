@@ -101,6 +101,24 @@ static Kiln.ModelClothBlock.operator ==(Kiln.ModelClothBlock? left, Kiln.ModelCl
 virtual Kiln.ClothColliderBlock.EqualityContract.get -> System.Type!
 virtual Kiln.ClothColliderBlock.Equals(Kiln.ClothColliderBlock? other) -> bool
 virtual Kiln.ClothColliderBlock.PrintMembers(System.Text.StringBuilder! builder) -> bool
+const Kiln.BaseRulesBlock.MaxAltars = 16 -> int
+Kiln.BaseRulesBlock
+Kiln.BaseRulesBlock.<Clone>$() -> Kiln.BaseRulesBlock!
+Kiln.BaseRulesBlock.BaseRulesBlock() -> void
+Kiln.BaseRulesBlock.BuildAreaPercent.get -> int?
+Kiln.BaseRulesBlock.BuildAreaPercent.init -> void
+Kiln.BaseRulesBlock.Equals(Kiln.BaseRulesBlock? other) -> bool
+Kiln.BaseRulesBlock.ExtraAltars.get -> int
+Kiln.BaseRulesBlock.ExtraAltars.init -> void
+Kiln.BaseRulesBlock.MinimumAltars.get -> int?
+Kiln.BaseRulesBlock.MinimumAltars.init -> void
+Kiln.BaseRulesBlock.Sizes.get -> System.Collections.Generic.IReadOnlyList<Kiln.AltarSize!>?
+Kiln.BaseRulesBlock.Sizes.init -> void
+override Kiln.BaseRulesBlock.Equals(object? obj) -> bool
+override Kiln.BaseRulesBlock.GetHashCode() -> int
+override Kiln.BaseRulesBlock.ToString() -> string!
+static Kiln.BaseRulesBlock.operator !=(Kiln.BaseRulesBlock? left, Kiln.BaseRulesBlock? right) -> bool
+static Kiln.BaseRulesBlock.operator ==(Kiln.BaseRulesBlock? left, Kiln.BaseRulesBlock? right) -> bool
 Kiln.IdleTask
 Kiln.IdleTask.Equals(Kiln.IdleTask? other) -> bool
 Kiln.IdleTask.IdleTask() -> void

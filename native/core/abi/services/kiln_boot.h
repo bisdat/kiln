@@ -204,7 +204,7 @@ typedef struct KilnBootApiV1 {
     /* Stages one definition: kind is one of the boot kinds (statuses, effects, items, spells, talents, talentTrees,
      * npcs, creatures, materialTweaks, buildingMaterials, terrainMaterials, blueprints, props, stations, vfx,
      * materials, quests, dialogues, bodies, animations, ais, behaviours, perks, abilities, looks, strengths,
-     * surfaces, resourcePatches), key matches ^[a-z][a-z0-9_.-]{0,95}$ without "..", canonical_json is one JSON object of
+     * surfaces, resourcePatches, baseRules (since 0.2.0-dev.31)), key matches ^[a-z][a-z0-9_.-]{0,95}$ without "..", canonical_json is one JSON object of
      * at most
      * KILN_BOOT_DEFINITION_MAX bytes. From the host (an owner that is not an author) kind "ir", key "envelope" stages
      * the IR envelope, once. From an open author frame kind "ir", key "refusal", {"reason": "<text>"} says why the frame

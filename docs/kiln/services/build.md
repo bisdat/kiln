@@ -114,6 +114,7 @@ PlaceOnceResult once = await Build.PlaceOnce("my-outpost", s, new WorldPosition(
 | `await Dig / Add / Flatten / Smooth / Paint / Replace(shape, …)`, `ShapeBox(op, shape)` | `BuildShape.Box/Sphere/Cylinder` in metres; a one-cell smooth edge like the game's brushes |
 | `PlaceProp(template|guid, pos, rotation, itemId)`, `RemoveProp(e)`, `Prop(e)`, `Props(min, max | box, filter)` | `PropFilter.Placed` (default: what players placed), `Saved`, `All`, `Static`. A template is a game template, a clone (kiln.gamedata), or the item that places one |
 | `Bases` | `PlayerBase` (altar, build-zone centre and half size) |
+| `BaseLimits` | `BaseLimits`: the Flame Altar count and build-zone sizes, the game's own and this start's, and the base rules in them (since 0.2.0-dev.31, [below](#base-rules-and-base-limits-since-020-dev31)) |
 | `MaterialOf(itemId)`, `TemplateOf(itemId)` | the voxel material a block item places; the template a prop item places |
 | `Keep(box)`, `Release(box)` | Kiln's save regions |
 | `History(owner)`, `JournalOwner(options)`, `await Undo(owner)`, `await UndoEntry(id)` | the session journal |
@@ -160,6 +161,100 @@ same store; `docs/re/build.md` §3) run inside the world's step, so they cannot 
 dedicated server runs that step's programs on worker threads. Not established: whether any other caller of the store's
 commit runs outside the world's jobs (the store commit's other callers and the streaming threads were not traced).
 The tiles must be loaded: a missing tile is `NotLoaded`, also with `BuildFlags.Unloaded`.
+
+## Base rules and base limits (since 0.2.0-dev.31)
+
+How many Flame Altars a world may have at each Flame level, and how large an altar's build zone is at each altar level,
+are numbers the game reads once, when it starts. **Base rules** change them in Kiln's own names: a mod names no game
+type, field or GUID, and two mods with base rules never conflict.
+
+| Member | JSON | Range | Means |
+|---|---|---|---|
+| `MinimumAltars` | `minimumAltars` | 1 to 16, or left out | at least this many Flame Altars at every Flame level |
+| `ExtraAltars` | `extraAltars` | 0 to 15 | this many more than the game's number at every Flame level, at most 16 |
+| `BuildAreaPercent` | `buildAreaPercent` | 100 to 200, or left out | every altar level's build zone at this share of the game's, at most 256 m an axis |
+| `Sizes` | `sizes` | altar levels 1 to 5, one entry each | at least this full size (`AltarSize(level, Vector3)`, `{"altarLevel": 1, "size": [x, y, z]}`): each axis finite, 0.5 to 256 m, a multiple of 0.5 |
+
+A rule never lowers the game's numbers. A value out of range (17 altars, a size of 300 m, altar level 0) throws
+`ArgumentException` when it is staged; in a blocks file it refuses the mod before the game starts, naming the rule and
+the member. Above 16 Flame Altars is not a base rule: the game counts no more than 16.
+
+```csharp
+// in Mod.OnBoot (kiln.mod.json: "boot": true)
+BootDefinitions.For(boot).Define("roomy", new BaseRulesBlock
+{
+    MinimumAltars = 6, ExtraAltars = 2, BuildAreaPercent = 150,
+    Sizes = [new AltarSize(1, new Vector3(64, 64, 64))],
+});
+```
+
+```json
+{ "format": 1, "baseRules": { "roomy": { "minimumAltars": 6, "extraAltars": 2, "buildAreaPercent": 150,
+                                        "sizes": [{ "altarLevel": 1, "size": [64, 64, 64] }] } } }
+```
+
+The JSON is a blocks file's `baseRules` section (`blocks/*.json`; a data-only mod needs nothing else, see
+`mods/samples/RoomyBases`). A name the blocks file and `OnBoot` both stage stays the file's.
+
+**How Kiln combines them.** kiln.content reads every mod's rules before the game starts and makes one change of the
+game's balancing table when the game's resource service comes up, before the game reads it:
+
+- at each Flame level the count is the largest any rule asks for: `max(game, min(16, max(minimumAltars, game + extraAltars)))`
+  over every rule;
+- at each altar level, on each axis, the size is the largest any rule asks for (`buildAreaPercent` of the game's size,
+  held at 256 m, or a `sizes` entry);
+- this is written **after every mod's own resource patches** and only raises: each number ends at the larger of what the
+  patches left and what the rules ask of the game's own value. A mod that patches the same fields by the game's names
+  (More Flame Altars 0.4.0: `altarsPerFlameLevel[*]`, `buildzoneSizesPerAltarLevel[*].x/y/z`) is not refused because of
+  base rules, in either load order, and the result is never lower than what it or any rule asked for. Base rules claim
+  no field, so the rules of [Two mods on one resource](../modding/resource-patches.md#two-mods-on-one-resource) never
+  see them.
+
+If Kiln cannot write the change (a game build whose table has another shape), every mod with a rule gets a fault in
+`kiln.log` and `state/boot.json` naming its rule, and the start goes on with the game's table (a mod that says
+`"boot": "required"` stops it). The change holds until the process ends: a rule changed in a config applies at the next
+start, where it is applied again.
+
+**Reading it back: `Build.BaseLimits`** (`[TickThreadOnly]`, server side as the rest of `Build`; capability
+`build.base_limits`; null before the world runs) is a `BaseLimits`:
+
+| Member | |
+|---|---|
+| `FlameLevel`, `CurrentAltars` | the world's Flame level and its altar count now (its progress entity) |
+| `OriginalCount`, `EffectiveCount` | the game's own count and the count the game runs with, at `FlameLevel` |
+| `OriginalCounts`, `EffectiveCounts` | the same at every Flame level (index = level, from 0) |
+| `OriginalSizes`, `EffectiveSizes` | `AltarSize` per altar level 1 to 5: full sizes in metres; `PlayerBase.Half` of an altar of that level is half of it |
+| `AppliedRules` | the rules in this start's table, as `mod:name`, in load order |
+| `PatchedBy` | mods whose own resource patches of the table are in it |
+
+"Original" is the game's own table, read before any boot patch of this start; "effective" is the table the game runs
+with (as kiln.assets serves it). On a game that joins a server, the server's numbers decide what may be placed; the
+player's own game draws zones and counts altars by its own table, which has the rules only when it runs the mod too
+(so a mod with base rules says `"side": "both"`, `"clients": "mod"`). `BaseLimits` reads the server's.
+
+| Capability | Kind | Says |
+|---|---|---|
+| `build.base_rules` | native (kiln.content), static | base rules can be staged and are written in this process: as `mods.boot.resource_patches` (`policy` without a boot phase, `service-missing` without kiln.assets' resources) |
+| `build.base_limits` | managed (Kiln.Build), static, reported at Kiln.Build's first use | `Build.BaseLimits` can read: kiln.base_rules is here (kiln.content of 0.2.0-dev.31 or later) and kiln.world runs (`service-missing` otherwise) |
+
+Native: `kiln.base_rules` v1 (`native/core/abi/services/kiln_base_rules.h`, published by kiln-content.dll) answers
+the same as JSON (`state`, tick thread). Tests: `native/services/content/tests/baserules_test.sh` (host: More Flame
+Altars' exact patch and two mods' rules in every load order, no refusal, the largest result; bounds; the read side),
+`managed/tests/Kiln.Blocks.Tests/BaseRulesTests.cs` (staging, JSON, lowering, the reader), lab
+`mods/tests/base-rules-test` (dedicated server, two starts). Not covered: changing the rules while the game runs, more
+than 16 Flame Altars, per-base sizes, merging bases; a player's build zone on screen is a guided client check.
+
+
+### Base rules and the registry
+
+Base rules are an earlier writer of the balancing table, as resource patches are: they are written into the table before
+the registry stage, and the registry stage composes on their result (ruling D1). A registry edit of
+`balance.altarsPerFlameLevel` or `balance.buildzoneSizesPerAltarLevel` therefore wins over a base rule. The registry
+report names the rule as the writer below for the counts (`composedOn` or `overridden`, writer `<mod>/baseRules/<name>`);
+for the sizes the registry stage still composes on the rules' values, but names no writer below it (it models the members
+of the size list only from its own edits). `Build.BaseLimits` reports the values the
+game runs with, after the registry, and `BaseLimits.RegistryChanged` lists every value a registry edit changed after a rule
+had raised it (`"altarsPerFlameLevel[1]: 8 -> 2 (rules-a:roomy)"`).
 
 ## The `.kschem` format (version 1)
 Little-endian binary:

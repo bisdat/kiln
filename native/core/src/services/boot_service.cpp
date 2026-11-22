@@ -64,7 +64,8 @@ constexpr const char* kKinds[] = {"statuses",     "effects",          "items",  
                                   "buildingMaterials", "terrainMaterials", "blueprints", "props",      "stations",
                                   "vfx",          "materials",        "quests",           "dialogues",  "bodies",
                                   "animations",   "ais",              "behaviours",       "perks",      "abilities",
-                                  "looks",        "strengths",        "surfaces",         "resourcePatches"};
+                                  "looks",        "strengths",        "surfaces",         "resourcePatches",
+                                  "baseRules"};  // baseRules (since 0.2.0-dev.31): Kiln's base rules, kiln.content's patches collector
 constexpr uint64_t kGeneration = 1;  // one generation per process
 constexpr uint32_t kRoleBits = KILN_BOOT_ROLE_DEDICATED | KILN_BOOT_ROLE_HOSTED | KILN_BOOT_ROLE_CLIENT;
 constexpr size_t kManifestMax = 1u << 20;

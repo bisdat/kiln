@@ -1,0 +1,81 @@
+{
+  "format": 1,
+  "side": "client",
+  "comment": "kiln.survivors (dev.31 package 18): the bed relation's layout. npc_common.bed is captured from the game's own assign program (NpcCommon.bedId); the plain values are the reflected layout of game data 1287369 (dossier chapter 18 section 2) and are checked against the live component sizes at run time. AssignNpcProgram is an anchor for the capture only, never called.",
+  "symbols": {
+    "survivors/AssignNpcProgram": {
+      "find": [
+        {
+          "pattern": "40 55 41 55 48 8D 6C 24 98 48 81 EC 68 01 00 00 41 B8 40 00 00 00 48 8D 54 24 30 4C 8B E9 E8 ?? ?? ?? ?? 41 B8 40 00 00 00 48 8D 54 24 30 49 8B CD E8 ?? ?? ?? ?? 84 C0 0F 84 ?? ?? ?? ??"
+        }
+      ]
+    },
+    "@survivors/Assign.fields": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "survivors/AssignNpcProgram",
+            "size": 640
+          },
+          "pattern": "C7 40 {survivors/npc_common.bed:d8} 00 00 00 00 41 89 7C 24 {survivors/npc_common.bed:d8} 8B 85 88 00 00 00 89 03"
+        }
+      ]
+    }
+  },
+  "constants": {
+    "survivors/npc_common.bed": {
+      "min_votes": 2
+    },
+    "survivors/npc_common.size": {
+      "value": 1688,
+      "comment": "sizeof NpcCommon"
+    },
+    "survivors/npc_bed.npc": {
+      "value": 0,
+      "comment": "NpcBed.associatedNpc"
+    },
+    "survivors/npc_bed.size": {
+      "value": 4,
+      "comment": "sizeof NpcBed"
+    },
+    "survivors/npc_saved.home": {
+      "value": 0,
+      "comment": "ActiveNpcStateSaved.spawnPosition (float3)"
+    },
+    "survivors/npc_saved.size": {
+      "value": 48,
+      "comment": "sizeof ActiveNpcStateSaved"
+    },
+    "survivors/npc_tpl.bed_radius": {
+      "value": 188,
+      "comment": "ActiveNpcState.searchTargetSetup (+0xb8) .bedRadius (+4), template data"
+    },
+    "survivors/base_id.size": {
+      "value": 48,
+      "comment": "sizeof BaseIdComponent (baseId GUID at +0)"
+    },
+    "survivors/base_id.abandoned": {
+      "value": 40,
+      "comment": "BaseIdComponent.wasAbandoned"
+    }
+  },
+  "features": {
+    "survivors.assignment.layout": {
+      "symbols": [
+        "survivors/AssignNpcProgram"
+      ],
+      "constants": [
+        "survivors/npc_common.bed",
+        "survivors/npc_common.size",
+        "survivors/npc_bed.npc",
+        "survivors/npc_bed.size",
+        "survivors/npc_saved.home",
+        "survivors/npc_saved.size",
+        "survivors/npc_tpl.bed_radius",
+        "survivors/base_id.size",
+        "survivors/base_id.abandoned"
+      ],
+      "comment": "The bed relation of kiln.survivors (survivors.assign). Signature and layout prerequisite only."
+    }
+  }
+}

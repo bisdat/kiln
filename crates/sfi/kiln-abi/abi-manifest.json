@@ -640,6 +640,21 @@
       },
       "sha256": "17d2ae6d3c9b818eadd97ae9682f6a53e0b581d0c6055ffdfde649ec9ddfb8d9"
     },
+    "native/core/abi/services/kiln_base_rules.h": {
+      "function_macros": [],
+      "inline_helpers": [],
+      "layouts": {
+        "KilnBaseRulesApi": {
+          "align": 8,
+          "fields": {
+            "header": 0,
+            "state": 8
+          },
+          "size": 16
+        }
+      },
+      "sha256": "fa88a713be3b77ba1ebeeb3ac3225387fc3a2b9b0364c268631cd58f2eb9ef97"
+    },
     "native/core/abi/services/kiln_boot.h": {
       "function_macros": [],
       "inline_helpers": [],
@@ -729,7 +744,7 @@
           "size": 264
         }
       },
-      "sha256": "0624b23d70e35660d5af587f4461c0cee25c2f6d6992e528711fb27744e976ce"
+      "sha256": "a7bb57c0874e5d6b77df298e0555e7466ce7761248e86d7f86603ecc7276cf3e"
     },
     "native/core/abi/services/kiln_build.h": {
       "function_macros": [
@@ -6015,6 +6030,130 @@
       },
       "sha256": "22ed56a4abe149fb118c29c794f6cb59975eb624950984dd504a61a194a20f2e"
     },
+    "native/core/abi/services/kiln_survivors.h": {
+      "function_macros": [],
+      "inline_helpers": [],
+      "layouts": {
+        "KilnSurvivorEvent": {
+          "align": 8,
+          "fields": {
+            "after": 200,
+            "before": 32,
+            "kind": 4,
+            "request": 16,
+            "sequence": 8,
+            "size": 0,
+            "step": 24
+          },
+          "size": 368
+        },
+        "KilnSurvivorProgress": {
+          "align": 8,
+          "fields": {
+            "committed_effects": 24,
+            "elapsed_ms": 16,
+            "in_flight": 28,
+            "reason": 32,
+            "request": 8,
+            "size": 0,
+            "state": 4
+          },
+          "size": 192
+        },
+        "KilnSurvivorRequest": {
+          "align": 8,
+          "fields": {
+            "actor": 24,
+            "authorization": 16,
+            "base_id": 40,
+            "bed": 32,
+            "flags": 12,
+            "npc_id": 8,
+            "op": 4,
+            "position": 56,
+            "recipient": 28,
+            "reserved": 20,
+            "reserved1": 36,
+            "reserved2": 84,
+            "size": 0,
+            "yaw_degrees": 80
+          },
+          "size": 88
+        },
+        "KilnSurvivorResult": {
+          "align": 8,
+          "fields": {
+            "after": 216,
+            "after_known": 28,
+            "before": 48,
+            "committed_effects": 24,
+            "displaced_entity": 32,
+            "displaced_npc": 36,
+            "op": 40,
+            "reason": 384,
+            "request": 8,
+            "size": 0,
+            "status": 4,
+            "step": 16,
+            "steps": 44
+          },
+          "size": 544
+        },
+        "KilnSurvivorState": {
+          "align": 8,
+          "fields": {
+            "base_id": 32,
+            "bed": 12,
+            "entity": 8,
+            "flags": 24,
+            "home": 48,
+            "index": 28,
+            "name": 72,
+            "npc_id": 4,
+            "size": 0,
+            "summon_item": 16,
+            "unlocked": 20
+          },
+          "size": 168
+        },
+        "KilnSurvivorsApi": {
+          "align": 8,
+          "fields": {
+            "at": 24,
+            "base_at": 56,
+            "bed_occupant": 48,
+            "count": 16,
+            "events": 88,
+            "get": 32,
+            "header": 0,
+            "of_entity": 40,
+            "progress": 80,
+            "result": 72,
+            "status": 8,
+            "submit": 64
+          },
+          "size": 96
+        },
+        "KilnSurvivorsStatus": {
+          "align": 8,
+          "fields": {
+            "assign": 7,
+            "detail": 40,
+            "ended": 24,
+            "events": 32,
+            "pending": 8,
+            "read": 4,
+            "recruit": 5,
+            "reserved": 12,
+            "size": 0,
+            "submitted": 16,
+            "summon": 6
+          },
+          "size": 200
+        }
+      },
+      "sha256": "91819667898b0377263df2a73871a8ca66f7dc46f1b8b4ec12328c7a60515d35"
+    },
     "native/core/abi/services/kiln_tasks.h": {
       "function_macros": [],
       "inline_helpers": [],
@@ -8465,11 +8604,12 @@
   },
   "outputs": {
     "src/bindings.rs": "134028a6a9914076cab3f71f98d356141d4fe36c4d7f51bac6a11819501ed935",
-    "src/layout.rs": "d8bdb302e5f0618ce43d8f530a800d59f86c417fb0ab7b10efda3dd7067092a9",
+    "src/layout.rs": "e96ec5361819783e025a396449bae46774509241f45f10e61754c87935684636",
     "src/services/kiln_abilities.rs": "06a43042e5c96d6261a17b02eab35463b07a8ad83f63b2bb168bca5ff34e582e",
     "src/services/kiln_assets.rs": "e7fe4eb1c4d53ad31eeaf05be06f41c551a49362ad5bd4174465ec18a03effe0",
     "src/services/kiln_assets_vfx.rs": "90ed8ce5ad512bbf4f002db3277bc3b439d648ca437a58d4477eac4ce46c3b81",
     "src/services/kiln_audio.rs": "52a49e9a14975f3abecbe7200bb2dce40c0af7fd54f50faf7890befe559d8d7c",
+    "src/services/kiln_base_rules.rs": "051981ceeb97a78f02f625d8fb573289c0b388bd10a2dd303fa99a20fd53c53a",
     "src/services/kiln_boot.rs": "0b39658851db27fcdc6b7b5345ebd269fedaed2e7f837df0dd00be2e17ef501d",
     "src/services/kiln_build.rs": "4000679e75af5be05920724a38d66b93233777e6b5f09604b040a76f018718d4",
     "src/services/kiln_capacity.rs": "1fce521cbd490bd4f58c65e527a9c668067d9f909420b7f3d8713b3216af92f5",
@@ -8517,6 +8657,7 @@
     "src/services/kiln_stations.rs": "852f4cf5ce119928eb4f954a21bfa496a3c60052e0ec3496be71ea272a6aba34",
     "src/services/kiln_steamguard.rs": "f14ecec92f945c2b34f4682c216940187797b8db81a8de652fcba6ddb61f072c",
     "src/services/kiln_surfaces.rs": "d4d991aef0a14f4be7246227b95a0f34161ca23fe04561e9c94d6d2aba0db4a0",
+    "src/services/kiln_survivors.rs": "ed6f377e897d0236e33196f19d1be825b230e5d6575129a676ff32da08df2722",
     "src/services/kiln_tasks.rs": "da41943b4ac01aaa77cfb43091e8c209f0e55707c3a3105dd9070313750a6f79",
     "src/services/kiln_time.rs": "879eaed84cd42ab057cc5c6aa452aef7e0d6636205431e9ef54d1daf8dd4bf93",
     "src/services/kiln_toolwear.rs": "bfb7c79cc8ddea86236700983a4deac4d08826a8f4d3ac5648c2fc9e346dcbcb",
@@ -8529,7 +8670,7 @@
     "src/services/kiln_world.rs": "3cb0272179db9c198f154ce6c008837e4bb95245a2ec62993be78879c4b330b8",
     "src/services/kiln_world_budget.rs": "b196426492d0525df1317c08e4927f3f3ff35817990bed8f2b58c02d174bab98",
     "src/services/kiln_worldtables.rs": "3d423bb8cfd5235f82230a1942bbc334d86b55d343e5e5880c671a57d1469fce",
-    "src/services/mod.rs": "2314077aa35cb6be4e1bceea8c646e286df291278061e35083722c1ede594627"
+    "src/services/mod.rs": "8d7239e59fd886c2d9a5d513e1603305aed1c8411ba79e08e9d54cf3f5782274"
   },
   "schema": 1,
   "target": "x86_64-pc-windows-msvc"

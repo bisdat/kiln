@@ -490,6 +490,20 @@ kiln.world rows above).
 | `build.voxel_grid_tasks` | native, static | kiln.build, in its `on_ready` | the voxel grid's geometry from task threads (`grid_for_session`, experimental; [build.md](build.md#voxels-from-tasks-since-020-dev303)). Available when kiln.build's voxel reads are on (`build.read`), the running game matches an exact engine profile with its write gate (dedicated server 26430253, client 26430625) and kiln.world's `game_world_session` is there; the text names the profile. Unavailable, `symbol-missing`, otherwise, the text naming the check that failed |
 
 ## Rows added in dev.31
+
+Rows a dev.31 package adds, by service. None is held: the "Unconfirmed" column names the guided check a real game has
+not passed yet for a row that is on.
+
+| Row | Kind | Reported by | Unconfirmed | What it says |
+|---|---|---|---|---|
+| `survivors.assignment.layout` | sigdb feature (`{server,client}.d/dev31-18-survivors.json`) | core (sigdb) | - | the bed relation's layout (NpcCommon's bed, NpcBed's NPC, the NPC's home and bed radius, the base id) on this build |
+| `survivors.read` | native, static | kiln-quests.dll (kiln.survivors), at on_ready and when a server world starts | - | `Survivors.Find`, `List`, `Of`, `BaseAt`: needs kiln.knowledge's roster (`quests.knowledge`, `quests.npc`), kiln.world and kiln.spawn (`service-missing` otherwise) |
+| `survivors.recruit` | native, static | kiln.survivors | `18-c18.1` | `Survivors.RecruitWorld`: `survivors.read` plus world grants (`quests.changes`) and kiln.items |
+| `survivors.summon` | native, static | kiln.survivors | `18-c18.1` | `Survivors.Summon`: `survivors.recruit` plus kiln.creatures' npc_command and kiln.build's base zones |
+| `survivors.assign` | native, session | kiln.survivors | `18-c18.4` | `Survivors.AssignBed`, `UnassignBed`, `BedOccupant`: `survivors.read` plus `survivors.assignment.layout` (`symbol-missing`), the bed program `kiln_survivors_beds` registered for the server world (`session`), kiln.players, kiln.gameplay and kiln.build |
+| `build.base_rules` | native, static (since 0.2.0-dev.31) | kiln.content, at its start, with `mods.boot.resource_patches` | — (a player's build zone on screen: package 18's client checks) | Kiln's base rules (`BaseRulesBlock`, a blocks file's `baseRules`; [build.md](build.md#base-rules-and-base-limits-since-020-dev31)) can be staged and are written in this process. Unavailable as `mods.boot.resource_patches` is: `policy` without a boot phase (no enabled mod says `"boot"`) or while that row is held, `service-missing` without kiln.assets' resources |
+| `build.base_limits` | managed, static (since 0.2.0-dev.31) | Kiln.Build, at its first use | — | `Build.BaseLimits` reads the Flame Altar counts and build-zone sizes (the game's own and this start's) and the world's Flame level: `service-missing` without kiln.base_rules (kiln.content older than 0.2.0-dev.31) or without kiln.world |
+
 Kiln.ModValues ([mod-values.md](mod-values.md)), managed rows reported at its start (the first service tick) and every 25
 steps.
 
