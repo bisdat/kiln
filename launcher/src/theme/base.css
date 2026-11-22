@@ -335,17 +335,80 @@ html[data-covered] .k-app ::-webkit-scrollbar, html[data-covered] [data-deck-scr
 .k-kicker-select:focus-visible { outline: 2px solid var(--k-gold-400); outline-offset: 2px; }
 .k-kicker-select option { background: var(--k-bg-2); }
 
-/* ---------------------------------------------------------------- a server: the grouped list beside its pages */
-.k-server { flex-direction: row; gap: 24px; padding: 20px 26px 0 32px; }
-.k-snav { flex: none; width: 130px; display: flex; flex-direction: column; gap: 8px; overflow: auto; padding-bottom: 12px; }
-.k-snav-group { display: flex; flex-direction: column; }
-.k-snav-head { font-family: var(--k-font-label); font-weight: 500; letter-spacing: .012em; font-size: 15px; color: var(--k-text-2); }
-.k-sub { display: flex; align-items: center; gap: 8px; width: 100%; padding: 1px 0; font-size: 16.5px; line-height: 1.35; color: #d0beac; text-decoration: none;
-  white-space: nowrap; transition: color .12s, transform .2s var(--k-spring); }
-.k-sub:hover { color: var(--k-bright); transform: translateX(3px); }
-.k-sub.on { color: var(--k-bright); font-weight: 700; }
-.k-sub i { display: block; flex: none; width: 6px; height: 6px; transform: rotate(45deg); background: transparent; }
-.k-sub.on i { background: var(--k-gold-400); }
+/* ---------------------------------------------------------------- a server (the Servers redesign, mockup A): the way back
+   and the other servers, the head, seven section tabs and a section's pages, then the page */
+.k-server { flex-direction: column; gap: 0; padding: 16px 32px 0; }
+.k-stop { flex: none; display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
+.k-scrumb { font-family: var(--k-font-label); font-weight: 500; letter-spacing: .02em; font-size: 15px; color: var(--k-gold-300); }
+.k-sswitch { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.k-sswitch-item { display: inline-flex; align-items: center; gap: 6px; font-size: 15px; color: var(--k-text-2); text-decoration: none; }
+.k-sswitch-item:hover, .k-sswitch-item.on { color: var(--k-text-0); }
+.k-sswitch-item i { width: 7px; height: 7px; border-radius: 50%; background: var(--k-text-3); flex: none; }
+.k-sswitch-item i.ok { background: var(--k-ok); }
+.k-sswitch-item i.busy { background: var(--k-ember-400); box-shadow: 0 0 6px var(--k-ember-400); }
+.k-server-head { flex: none; }
+.k-server-title { font-size: clamp(38px, 4.4vw, 52px); display: inline; }
+.k-server-word { margin-left: 16px; vertical-align: .55em; }
+.k-stabs { flex: none; display: flex; gap: 4px 26px; flex-wrap: wrap; margin-top: 10px; border-bottom: 1px solid var(--k-line); }
+.k-stab { position: relative; padding: 6px 0 9px; font-family: var(--k-font-label); font-weight: 500; letter-spacing: .03em; font-size: 18px; color: var(--k-text-2);
+  text-decoration: none; transition: color .12s; }
+.k-stab:hover { color: var(--k-text-0); }
+.k-stab.on { color: var(--k-bright); }
+.k-stab.on::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; border-radius: 2px; background: var(--k-ember-400); }
+.k-stab small { margin-left: 6px; font-family: var(--k-font-mono); font-size: 12.5px; letter-spacing: 0; color: var(--k-text-2); }
+.k-stab small.hot { color: var(--k-ok); }
+.k-stabs-sub { flex: none; display: flex; gap: 4px 18px; flex-wrap: wrap; padding: 8px 0 2px; }
+.k-stab-sub { font-size: 16px; color: var(--k-text-2); text-decoration: none; padding: 2px 0; border-bottom: 2px solid transparent; }
+.k-stab-sub:hover { color: var(--k-text-0); }
+.k-stab-sub.on { color: var(--k-bright); border-bottom-color: var(--k-gold-400); }
+/* Overview */
+.k-sov { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 14px; padding-bottom: 16px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.k-sov > * { flex-shrink: 0; }
+.k-sov > .k-sov-console, .k-sov-start > .k-sov-live { flex-shrink: 1; }
+.k-sov-start { flex-direction: row; gap: 26px; }
+.k-sov-live { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 12px; }
+.k-sov-aside { flex: none; width: 250px; display: flex; flex-direction: column; gap: 12px; overflow: auto; border-left: 1px solid var(--k-line); padding-left: 22px; }
+.k-strack { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+.k-strack li { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding-top: 4px; border-top: 2px solid var(--k-line); color: var(--k-text-2); }
+.k-strack li.done { border-top-color: var(--k-ember-500); color: var(--k-text-1); }
+.k-strack li.now { border-top-color: var(--k-ember-300); color: var(--k-text-0); }
+.k-strack li b { font-family: var(--k-font-label); font-weight: 500; letter-spacing: .02em; font-size: 16px; }
+.k-strack li .d { font-size: 14px; color: var(--k-text-2); overflow-wrap: anywhere; }
+.k-strack .k-cone { margin-bottom: 4px; }
+.k-sclockrow { display: flex; align-items: center; gap: 16px; }
+.k-sclock { font-family: var(--k-font-mono); font-size: 44px; line-height: 1; color: var(--k-ember-300); font-variant-numeric: tabular-nums; }
+.k-sclock-lab { display: flex; flex-direction: column; gap: 2px; font-size: 15.5px; color: var(--k-text-1); }
+.k-sclock-lab b { font-family: var(--k-font-label); font-weight: 500; letter-spacing: .03em; font-size: 14px; color: var(--k-text-2); }
+.k-slastline { padding: 7px 12px; border-radius: var(--k-radius-s); background: var(--k-bg-1); font-family: var(--k-font-mono); font-stretch: 90%; font-size: 14px;
+  color: var(--k-ember-300); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.k-scan { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.k-scan li { display: flex; flex-direction: column; gap: 1px; padding-left: 14px; position: relative; }
+.k-scan li::before { content: ""; position: absolute; left: 0; top: 7px; width: 6px; height: 6px; transform: rotate(45deg); background: var(--k-gold-400); }
+.k-scan li.no::before { background: transparent; box-shadow: inset 0 0 0 1px var(--k-text-3); }
+.k-scan b { font-weight: 600; color: var(--k-text-0); font-size: 15.5px; }
+.k-scan li.no b { color: var(--k-text-2); }
+.k-scan span { font-size: 14.5px; color: var(--k-text-2); }
+.k-sstats { margin: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.k-sstat { padding: 10px 14px; border-radius: var(--k-radius-s); background: var(--k-bg-3); min-width: 0; }
+.k-sstat dt { font-family: var(--k-font-label); font-weight: 500; letter-spacing: .03em; font-size: 14.5px; color: var(--k-text-2); }
+.k-sstat dd { margin: 2px 0; display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; font-size: 28px; color: var(--k-text-0); font-variant-numeric: tabular-nums; }
+.k-sstat dd.mono { font-family: var(--k-font-mono); font-size: 17px; overflow-wrap: anywhere; }
+.k-sstat dd small { font-size: 15px; color: var(--k-text-2); }
+.k-sstat dd .k-spark { align-self: center; }
+.k-sstat p { margin: 0; font-size: 14.5px; color: var(--k-text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.k-slinks { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+.k-slink { display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; border-radius: var(--k-radius-s); box-shadow: inset 0 0 0 1px var(--k-line); text-decoration: none; min-width: 0; }
+.k-slink:hover { box-shadow: inset 0 0 0 1px var(--k-line-strong); background: var(--k-bg-3); }
+.k-slink b { font-family: var(--k-font-label); font-weight: 500; letter-spacing: .02em; font-size: 16px; color: var(--k-text-0); }
+.k-slink span { font-size: 14.5px; color: var(--k-text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.k-sov-console { flex: 1; min-height: 220px; display: flex; flex-direction: column; }
+.k-sconsole-page { flex: 1; min-height: 0; display: flex; flex-direction: column; padding-bottom: 16px; }
+@media (max-width: 1100px) {
+  .k-sstats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .k-slinks { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .k-sov-start { flex-direction: column; }
+  .k-sov-aside { width: auto; border-left: 0; padding-left: 0; }
+}
 .k-server-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .k-server-name { position: relative; }
 .k-name-btn { all: unset; cursor: pointer; display: inline; }

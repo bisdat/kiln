@@ -10,7 +10,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button, Cones, IconButton, Spinner, toast } from "../../ui";
 import { useT } from "../../i18n";
-import { cancelStep, elapsed, markShown, retryFlow, useServerFlow, useServerFlows, type FlowStep } from "./serverActions";
+import { cancelStep, elapsed, markShown, retryFlow, useServerFlow, useServerFlows, type FlowKind, type FlowStep } from "./serverActions";
 
 const CLOSE_AFTER_MS = 15_000;
 
@@ -32,7 +32,7 @@ function StepMark({ step }: { step: FlowStep }) {
   return <span className="k-sact-mark idle" aria-hidden><Minus /></span>;
 }
 
-export function ServerActivity({ id }: { id: string }) {
+export function ServerActivity({ id, hideKinds }: { id: string; /** flows another view shows (Overview shows a start's stages) */ hideKinds?: FlowKind[] }) {
   const t = useT();
   const qc = useQueryClient();
   const nav = useNavigate();
@@ -64,7 +64,7 @@ export function ServerActivity({ id }: { id: string }) {
     }
     seen.current = all.length;
   }, [all.length, open]);
-  if (!flow) return null;
+  if (!flow || hideKinds?.includes(flow.kind)) return null;
   const took = (flow.endedAt ?? now) - flow.startedAt;
   const step = flow.steps.find((s) => s.state === "running");
   const cur = step ?? [...flow.steps].reverse().find((s) => s.lines.length);

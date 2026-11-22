@@ -2054,7 +2054,69 @@
       "off": "Off",
       "policy": "Policy",
       "game": "Game",
-      "process": "Process"
+      "process": "Process",
+      "stages": "Start stages",
+      "stage": {
+        "preparing": "Preparing",
+        "wine": "Wine",
+        "process": "Server process",
+        "world": "Loading the world",
+        "running": "Running"
+      },
+      "stageHint": {
+        "preparing": "Checks the folder and Kiln's setup",
+        "wine": "The runner and its prefix",
+        "process": "enshrouded_server.exe starts",
+        "world": "The game loads the world",
+        "running": "Players can join"
+      },
+      "elapsed": "Elapsed",
+      "left": "About {left} left. The last start took {last}.",
+      "noLast": "The first start the launcher times; players can join when it says Running.",
+      "whileStarts": "While it starts",
+      "can": {
+        "watch": "Watch every line",
+        "watchHint": "The console follows the start as it happens.",
+        "leave": "Leave this page",
+        "leaveHint": "The start keeps going; the server's dot shows it, and a toast says when it runs.",
+        "stop": "Stop",
+        "stopHint": "Ends the start and shuts the server down.",
+        "join": "Players join at Running",
+        "joinHint": "The world is still loading."
+      },
+      "kilnUpdate": "Kiln update",
+      "kilnUpdateRunning": "{latest} is here; this server runs {current}. Update stops it, installs and starts it again; players online are disconnected meanwhile.",
+      "kilnUpdateStopped": "{latest} is here; this server has {current}. The server is stopped, so the update only installs.",
+      "stat": {
+        "players": "Players",
+        "notRunning": "Not running",
+        "health": "Health",
+        "stepsPerS": "steps/s",
+        "p99": "Step p99 {ms} ms",
+        "noTicks": "No step times yet",
+        "uptime": "Uptime",
+        "startedIn": "Started in {time}",
+        "versions": "Kiln",
+        "noKiln": "Not installed",
+        "isOut": "{latest} is here.",
+        "game": "Game {version}."
+      },
+      "sections": "Sections",
+      "link": {
+        "consoleLive": "Live, with Kiln commands",
+        "consoleLast": "The last run's output",
+        "playersOff": "When it runs",
+        "mods": {
+          "one": "{count} mod",
+          "other": "{count} mods"
+        },
+        "backups": {
+          "one": "{count} backup, last {ago}",
+          "other": "{count} backups, last {ago}"
+        },
+        "noBackups": "No backup yet",
+        "settings": "UDP {port}, difficulty, groups"
+      }
     },
     "head": {
       "installKiln": "Install Kiln",
@@ -2396,6 +2458,12 @@
       "srCanceled": "{title}: canceled.",
       "linesLabel": "Every line of this action",
       "failedMarker": "The last action failed: {reason}"
+    },
+    "frame": {
+      "live": "live",
+      "allServers": "‹ All servers",
+      "switch": "Other servers",
+      "updating": "Updating"
     }
   },
   "play": {
@@ -3535,7 +3603,9 @@
       "backups": "Backups",
       "saves": "Saves",
       "modpack": "Modpack",
-      "crashes": "Crashes"
+      "crashes": "Crashes",
+      "console": "Console",
+      "worldRules": "World rules"
     },
     "notices": {
       "keptTitle": "Some mod folders were kept",

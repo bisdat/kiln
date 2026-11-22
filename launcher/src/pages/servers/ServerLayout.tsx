@@ -10,7 +10,7 @@ import { AdminProvider, reconnectAdmin, useAdminState } from "../../api/admin";
 import * as api from "../../api/commands";
 import type { AdminTransport } from "../../api/commands";
 import { Button, ConfirmDanger, Field, Menu, Modal, Select, Skeleton, Toggle, installNote, toast, type MenuItem } from "../../ui";
-import { SERVER_NAV, serverNavFor } from "../../shell/serverNav";
+import { SERVER_SECTIONS, serverPlace } from "../../shell/serverNav";
 import { notifyInstall } from "../../shell/notices";
 import { ConfirmHost } from "../../admin/ui";
 import { hasKiln, runnerLabel, sk, useDeployDialog, useServer, useServerEvents, useServers, useServerStatus } from "./serverApi";
@@ -28,34 +28,81 @@ export default function ServerLayout() {
   return live ? <AdminProvider serverId={id}>{body}</AdminProvider> : body;
 }
 
+/** The server's frame (mockup A): the way back and the other servers, the head (name, state word, one sentence,
+ *  actions), the seven section tabs and a section's own pages, the activity panel, then the page. */
 function ServerFrame({ id, live }: { id: string; live: boolean }) {
   const t = useT();
   const loc = useLocation();
   const rest = loc.pathname.replace(/^\/servers\/[^/]+\/?/, "");
-  const cur = serverNavFor(rest);
+  const place = serverPlace(rest);
+  const st = useServerStatus(id);
+  const base = `/servers/${encodeURIComponent(id)}`;
+  const badge = (sec: string) => {
+    if (sec === "console" && (st.data?.state === "running" || st.data?.state === "starting")) return <small className="hot">{t("servers.frame.live")}</small>;
+    if (sec === "players" && st.data?.players) return <small className="hot">{st.data.players}</small>;
+    return null;
+  };
   return (
     <div className="k-page k-page-fill k-server">
-      <nav className="k-snav" aria-label={t("servers.head.navLabel")}>
-        {SERVER_NAV.map((g) => (
-          <div key={g.group} className="k-snav-group" role="group" aria-label={g.group}>
-            <span className="k-snav-head">{g.group}</span>
-            {g.items.map((i) => (
-              <NavLink key={i.to} to={`/servers/${encodeURIComponent(id)}/${i.to}`} className={"k-sub" + (cur?.to === i.to ? " on" : "")} aria-current={cur?.to === i.to ? "page" : undefined}>
-                <i aria-hidden />{i.label}
-              </NavLink>
-            ))}
-          </div>
-        ))}
+      <ServerTop id={id} />
+      <ServerHead id={id} live={live} />
+      <nav className="k-stabs" aria-label={t("servers.head.navLabel")}>
+        {SERVER_SECTIONS.map((sec) => {
+          const on = place?.section.id === sec.id;
+          return (
+            <NavLink key={sec.id} to={`${base}/${sec.tabs[0].to}`} className={"k-stab" + (on ? " on" : "")} aria-current={on ? "page" : undefined}>
+              {sec.label}{badge(sec.id)}
+            </NavLink>
+          );
+        })}
       </nav>
-      <div className="k-server-main">
-        <ServerHead id={id} live={live} />
-        <ServerActivity id={id} />
-        <div className="k-server-page">
-          <Outlet />
-        </div>
+      {place && place.section.tabs.length > 1 && (
+        <nav className="k-stabs-sub" aria-label={place.section.label}>
+          {place.section.tabs.map((i) => (
+            <NavLink key={i.to} to={`${base}/${i.to}`} className={"k-stab-sub" + (place.tab.to === i.to ? " on" : "")} aria-current={place.tab.to === i.to ? "page" : undefined}>
+              {i.label}
+            </NavLink>
+          ))}
+        </nav>
+      )}
+      {/* a start shows its stages on Overview itself; every other action (and a start seen from another page) here */}
+      <ServerActivity id={id} hideKinds={place?.section.id === "overview" ? ["start", "restart"] : undefined} />
+      <div className="k-server-page">
+        <Outlet />
       </div>
       <ConfirmHost />
     </div>
+  );
+}
+
+/** "‹ All servers" and every server with its state's dot (a click opens it, on the same section). */
+function ServerTop({ id }: { id: string }) {
+  const t = useT();
+  const servers = useServers();
+  const loc = useLocation();
+  const rest = loc.pathname.replace(/^\/servers\/[^/]+\/?/, "") || "overview";
+  const list = servers.data ?? [];
+  return (
+    <div className="k-stop">
+      <NavLink className="k-link k-scrumb" to="/servers">{t("servers.frame.allServers")}</NavLink>
+      {list.length > 1 && (
+        <nav className="k-sswitch" aria-label={t("servers.frame.switch")}>
+          {list.map((s) => <SwitchDot key={s.id} id={s.id} name={s.name} current={s.id === id} to={`/servers/${encodeURIComponent(s.id)}/${rest}`} />)}
+        </nav>
+      )}
+    </div>
+  );
+}
+
+function SwitchDot({ id, name, current, to }: { id: string; name: string; current: boolean; to: string }) {
+  const st = useServerStatus(id);
+  const flow = useServerFlow(id);
+  const s = st.data?.state;
+  const tone = flow?.state === "running" || s === "starting" || s === "stopping" ? "busy" : s === "running" ? "ok" : "idle";
+  return (
+    <NavLink to={to} className={"k-sswitch-item" + (current ? " on" : "")} aria-current={current ? "page" : undefined}>
+      <i className={tone} aria-hidden />{name}
+    </NavLink>
   );
 }
 
@@ -133,6 +180,14 @@ function ServerHead({ id, live }: { id: string; live: boolean }) {
     say = runner && kilnV ? t("servers.head.stoppedWithKiln", { runner, kiln: kilnV }) : runner ? t("servers.head.stoppedWith", { runner })
       : kilnV ? t("servers.head.stoppedKiln", { kiln: kilnV }) : t("servers.head.stopped");
   }
+  // the state word beside the name: the running step's first, then the backend's
+  const shown = phase ?? state;
+  const stateWord = !st.data && !phase ? null
+    : shown === "starting" ? { word: t("servers.list.starting"), tone: "ember" }
+    : shown === "stopping" ? { word: t("servers.list.stopping"), tone: "warn" }
+    : shown === "updating" ? { word: t("servers.frame.updating"), tone: "warn" }
+    : shown === "running" ? { word: t("servers.list.running"), tone: "ok" }
+    : { word: t("servers.list.stopped"), tone: "idle" };
   // the buttons follow the running step first: Stop stays usable while a start waits for the world
   const running = phase ? phase === "starting" || (phase === "stopping" && busy !== "stop" && !!st.data?.pid) : state === "running" || state === "starting";
   const canStop = busy === "start" || (!busy && !!st.data?.pid);
@@ -145,13 +200,14 @@ function ServerHead({ id, live }: { id: string; live: boolean }) {
   return (
     <header className="k-page-head k-server-head">
       <div className="k-server-name" style={{ minWidth: 0 }}>
-        <h1 className="k-page-title" style={{ fontSize: 52 }}>
+        <h1 className="k-page-title k-server-title">
           {s ? (
             <button type="button" className="k-name-btn" aria-haspopup="listbox" aria-expanded={pick} onClick={() => setPick((p) => !p)} aria-label={t("servers.head.changeServer", { name: s.name })}>
               {s.name}<svg viewBox="0 0 24 24" aria-hidden><path d="M5 9l7 7 7-7" /></svg>
             </button>
           ) : <Skeleton lines={1} width={260} height={46} />}
         </h1>
+        {stateWord && <span className={`k-word k-tone-${stateWord.tone} k-server-word`}>{stateWord.word}</span>}
         {pick && <ServerPicker current={id} servers={servers.data ?? []} onClose={() => setPick(false)} onPick={(sid) => { setPick(false); nav(`/servers/${encodeURIComponent(sid)}/overview`); }} />}
         <p className="k-page-sub" style={{ marginTop: 1 }}>{say}</p>
       </div>
