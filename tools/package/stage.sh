@@ -331,6 +331,14 @@ mkdir -p "$s/builds/client"
 install -m 644 "$repo/sigdb/symbols/client.json" "$s/client.json"
 python3 "$repo/tools/sigport/sides.py" compose client "$s/client.d" >/dev/null
 cp "$repo"/sigdb/builds/client/*.json "$s/builds/client/" 2>/dev/null || true
+# the regmap per side, beside the sigdb (regmap/README.md: Kiln's registries mapped onto each game build; kiln.content reads
+# <game>/kiln/regmap/common/*.json and <side>/<exe sha256>.json)
+for side in server client; do
+  r=$stage/sigdb-$side/kiln/regmap
+  mkdir -p "$r/common" "$r/$side"
+  install -m 644 "$repo"/regmap/common/*.json "$r/common/"
+  cp "$repo"/regmap/$side/*.json "$r/$side/" 2>/dev/null || true
+done
 # a mod folder the way deploy-server.sh copies it: without the shared Kiln.* assemblies, *.deps.json and
 # *.runtimeconfig.json, except the entry assembly and the manifest's exports (+ their pdbs)
 stage_mod() {  # <built mod folder> <component> <id>

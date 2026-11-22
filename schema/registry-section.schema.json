@@ -1,0 +1,539 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "registry-section.schema.json",
+  "title": "Kiln data pack \"registry\" section (generated)",
+  "description": "Generated from schema/registry/*.json by tools/registrygen/registrygen.py. Do not edit. Edits of Kiln registries by stage: every mod's add, then every mod's alter, then every mod's final (later in load order wins and is reported; relative operations stack; exclusive keeps the strict rule; yield applies only where no earlier writer set the field). Experimental (KILNX031): read by the registry stage from the release that wires it (docs/kiln/modding/registries/README.md).",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "add": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/edit"
+      }
+    },
+    "alter": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/edit"
+      }
+    },
+    "final": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/edit"
+      }
+    }
+  },
+  "$defs": {
+    "select": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ],
+      "description": "Which entries: an id, a case-insensitive glob over ids (game:material_*), or an old debug-name selector; where: conditions on the entry's fields; has / hasNot: traits.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "where": {
+          "type": "object"
+        },
+        "has": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "hasNot": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "op": {
+      "description": "A value (set), or relative operations evaluated as data packs evaluate them: r = clamp(v * mul + add, min, max), then raiseOnly / lowerOnly against v.",
+      "anyOf": [
+        {
+          "type": [
+            "number",
+            "boolean",
+            "string",
+            "array"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "set": {},
+            "mul": {
+              "type": "number"
+            },
+            "add": {
+              "type": "number"
+            },
+            "min": {
+              "type": "number"
+            },
+            "max": {
+              "type": "number"
+            },
+            "raiseOnly": {
+              "type": "boolean"
+            },
+            "lowerOnly": {
+              "type": "boolean"
+            }
+          }
+        }
+      ]
+    },
+    "list": {
+      "description": "A list operation: clear, append, remove (values to take out), replace (the whole list).",
+      "anyOf": [
+        {
+          "const": "clear"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "maxProperties": 1,
+          "properties": {
+            "clear": {
+              "const": true
+            },
+            "append": {
+              "type": "array",
+              "minItems": 1
+            },
+            "remove": {
+              "type": "array",
+              "minItems": 1
+            },
+            "replace": {
+              "type": "array"
+            }
+          }
+        }
+      ]
+    },
+    "items": {
+      "$defs": {
+        "field": {
+          "enum": [
+            "maxStack",
+            "rarity",
+            "rolled",
+            "levels.min",
+            "levels.max",
+            "socket",
+            "perks",
+            "power",
+            "speed",
+            "damage.cut",
+            "damage.pierce",
+            "damage.blunt",
+            "damage.fire",
+            "damage.ice",
+            "damage.shroud",
+            "damage.lightning",
+            "damage.poison",
+            "damage.healing",
+            "damage.wood",
+            "damage.stone",
+            "damage.metal",
+            "damage.explosion",
+            "armor.physical",
+            "armor.magical",
+            "armor.cut",
+            "armor.pierce",
+            "armor.blunt",
+            "armor.fire",
+            "armor.ice",
+            "armor.shroud",
+            "armor.lightning",
+            "block",
+            "staminaCost",
+            "manaCost",
+            "fuel.burnTime",
+            "comfort"
+          ]
+        },
+        "fieldIndexed": {
+          "type": "string",
+          "pattern": "^(perks\\[([0-9]+|\\*)\\])$"
+        },
+        "edit": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "registry"
+          ],
+          "description": "An edit of the items registry (docs/kiln/modding/registries/items.md).",
+          "properties": {
+            "registry": {
+              "const": "items"
+            },
+            "select": {
+              "$ref": "#/$defs/select"
+            },
+            "field": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/items/$defs/field"
+                },
+                {
+                  "$ref": "#/$defs/items/$defs/fieldIndexed"
+                }
+              ]
+            },
+            "op": {
+              "$ref": "#/$defs/op"
+            },
+            "list": {
+              "$ref": "#/$defs/list"
+            },
+            "exclusive": {
+              "type": "boolean"
+            },
+            "yield": {
+              "type": "boolean"
+            },
+            "raw": {
+              "type": "object",
+              "description": "Advanced tier: raw game paths; refused per entry where the game's names changed."
+            },
+            "entry": {
+              "enum": [
+                "add",
+                "remove"
+              ]
+            },
+            "id": {
+              "type": "string",
+              "pattern": "^(?!(game|kiln):)[a-z0-9][a-z0-9_.-]*:[a-z0-9_.-]+$"
+            },
+            "like": {
+              "type": "string",
+              "minLength": 1
+            },
+            "fields": {
+              "type": "object",
+              "propertyNames": {
+                "$ref": "#/$defs/items/$defs/field"
+              }
+            }
+          }
+        }
+      }
+    },
+    "recipes": {
+      "$defs": {
+        "field": {
+          "enum": [
+            "inputs",
+            "inputs[].item",
+            "inputs[].category",
+            "inputs[].count",
+            "outputs",
+            "outputs[].item",
+            "outputs[].count",
+            "duration",
+            "unlock"
+          ]
+        },
+        "fieldIndexed": {
+          "type": "string",
+          "pattern": "^(inputs\\[([0-9]+|\\*)\\]\\.item|inputs\\[([0-9]+|\\*)\\]\\.category|inputs\\[([0-9]+|\\*)\\]\\.count|outputs\\[([0-9]+|\\*)\\]\\.item|outputs\\[([0-9]+|\\*)\\]\\.count|inputs\\[([0-9]+|\\*)\\]|outputs\\[([0-9]+|\\*)\\])$"
+        },
+        "edit": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "registry"
+          ],
+          "description": "An edit of the recipes registry (docs/kiln/modding/registries/recipes.md).",
+          "properties": {
+            "registry": {
+              "const": "recipes"
+            },
+            "select": {
+              "$ref": "#/$defs/select"
+            },
+            "field": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/recipes/$defs/field"
+                },
+                {
+                  "$ref": "#/$defs/recipes/$defs/fieldIndexed"
+                }
+              ]
+            },
+            "op": {
+              "$ref": "#/$defs/op"
+            },
+            "list": {
+              "$ref": "#/$defs/list"
+            },
+            "exclusive": {
+              "type": "boolean"
+            },
+            "yield": {
+              "type": "boolean"
+            },
+            "raw": {
+              "type": "object",
+              "description": "Advanced tier: raw game paths; refused per entry where the game's names changed."
+            },
+            "entry": {
+              "enum": [
+                "add",
+                "remove"
+              ]
+            },
+            "id": {
+              "type": "string",
+              "pattern": "^(?!(game|kiln):)[a-z0-9][a-z0-9_.-]*:[a-z0-9_.-]+$"
+            },
+            "like": {
+              "type": "string",
+              "minLength": 1
+            },
+            "fields": {
+              "type": "object",
+              "propertyNames": {
+                "$ref": "#/$defs/recipes/$defs/field"
+              }
+            }
+          }
+        }
+      }
+    },
+    "loot": {
+      "$defs": {
+        "field": {
+          "enum": [
+            "stack.min",
+            "stack.max",
+            "stack.scalable",
+            "stack.maxScaled",
+            "rarities",
+            "fixedRarity"
+          ]
+        },
+        "edit": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "registry"
+          ],
+          "description": "An edit of the loot registry (docs/kiln/modding/registries/loot.md).",
+          "properties": {
+            "registry": {
+              "const": "loot"
+            },
+            "select": {
+              "$ref": "#/$defs/select"
+            },
+            "field": {
+              "$ref": "#/$defs/loot/$defs/field"
+            },
+            "op": {
+              "$ref": "#/$defs/op"
+            },
+            "list": {
+              "$ref": "#/$defs/list"
+            },
+            "exclusive": {
+              "type": "boolean"
+            },
+            "yield": {
+              "type": "boolean"
+            },
+            "raw": {
+              "type": "object",
+              "description": "Advanced tier: raw game paths; refused per entry where the game's names changed."
+            },
+            "entry": {
+              "enum": [
+                "remove"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "drops": {
+      "$defs": {
+        "field": {
+          "enum": [
+            "entries",
+            "entries[].count.min",
+            "entries[].count.max",
+            "entries[].chance",
+            "entries[].weight"
+          ]
+        },
+        "fieldIndexed": {
+          "type": "string",
+          "pattern": "^(entries\\[([0-9]+|\\*)\\]\\.count\\.min|entries\\[([0-9]+|\\*)\\]\\.count\\.max|entries\\[([0-9]+|\\*)\\]\\.chance|entries\\[([0-9]+|\\*)\\]\\.weight|entries\\[([0-9]+|\\*)\\])$"
+        },
+        "edit": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "registry"
+          ],
+          "description": "An edit of the drops registry (docs/kiln/modding/registries/drops.md).",
+          "properties": {
+            "registry": {
+              "const": "drops"
+            },
+            "select": {
+              "$ref": "#/$defs/select"
+            },
+            "field": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/drops/$defs/field"
+                },
+                {
+                  "$ref": "#/$defs/drops/$defs/fieldIndexed"
+                }
+              ]
+            },
+            "op": {
+              "$ref": "#/$defs/op"
+            },
+            "list": {
+              "$ref": "#/$defs/list"
+            },
+            "exclusive": {
+              "type": "boolean"
+            },
+            "yield": {
+              "type": "boolean"
+            },
+            "raw": {
+              "type": "object",
+              "description": "Advanced tier: raw game paths; refused per entry where the game's names changed."
+            }
+          }
+        }
+      }
+    },
+    "balance": {
+      "$defs": {
+        "field": {
+          "enum": [
+            "xpCurve.start",
+            "xpCurve.end",
+            "xpCurve.levelMax",
+            "xpCurve.seed",
+            "xpCurve.fromKnowledge",
+            "levelCap",
+            "skillPointsPerLevel",
+            "buildzoneSizesPerAltarLevel",
+            "buildzoneSizesPerAltarLevel[].x",
+            "buildzoneSizesPerAltarLevel[].y",
+            "buildzoneSizesPerAltarLevel[].z",
+            "fogResistance.base",
+            "fogResistance.perFlameLevel",
+            "durability.start",
+            "durability.growth",
+            "rarityDurability.common",
+            "rarityDurability.uncommon",
+            "rarityDurability.rare",
+            "rarityDurability.epic",
+            "rarityDurability.legendary",
+            "socketChance.common",
+            "socketChance.uncommon",
+            "socketChance.rare",
+            "socketChance.epic",
+            "socketChance.legendary",
+            "unlockCost.seed",
+            "unlockCost.creep",
+            "unlockCost.weapons",
+            "unlockCost.armor",
+            "unlockCost.rings",
+            "unlockCost.advanced",
+            "unlockCost.advancedFrom"
+          ]
+        },
+        "fieldIndexed": {
+          "type": "string",
+          "pattern": "^(buildzoneSizesPerAltarLevel\\[([0-9]+|\\*)\\]\\.x|buildzoneSizesPerAltarLevel\\[([0-9]+|\\*)\\]\\.y|buildzoneSizesPerAltarLevel\\[([0-9]+|\\*)\\]\\.z|xpPerLevel\\[([0-9]+|\\*)\\]|altarsPerFlameLevel\\[([0-9]+|\\*)\\]|waterSourcesPerFlameLevel\\[([0-9]+|\\*)\\]|buildzoneSizesPerAltarLevel\\[([0-9]+|\\*)\\])$"
+        },
+        "edit": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "registry"
+          ],
+          "description": "An edit of the balance registry (docs/kiln/modding/registries/balance.md).",
+          "properties": {
+            "registry": {
+              "const": "balance"
+            },
+            "select": {
+              "$ref": "#/$defs/select"
+            },
+            "field": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/balance/$defs/field"
+                },
+                {
+                  "$ref": "#/$defs/balance/$defs/fieldIndexed"
+                }
+              ]
+            },
+            "op": {
+              "$ref": "#/$defs/op"
+            },
+            "list": {
+              "$ref": "#/$defs/list"
+            },
+            "exclusive": {
+              "type": "boolean"
+            },
+            "yield": {
+              "type": "boolean"
+            },
+            "raw": {
+              "type": "object",
+              "description": "Advanced tier: raw game paths; refused per entry where the game's names changed."
+            }
+          }
+        }
+      }
+    },
+    "edit": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/items/$defs/edit"
+        },
+        {
+          "$ref": "#/$defs/recipes/$defs/edit"
+        },
+        {
+          "$ref": "#/$defs/loot/$defs/edit"
+        },
+        {
+          "$ref": "#/$defs/drops/$defs/edit"
+        },
+        {
+          "$ref": "#/$defs/balance/$defs/edit"
+        }
+      ]
+    }
+  }
+}

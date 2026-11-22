@@ -39,6 +39,7 @@ pub mod kiln_playerstate;
 pub mod kiln_profile;
 pub mod kiln_progress;
 pub mod kiln_queries;
+pub mod kiln_registry;
 pub mod kiln_render;
 pub mod kiln_repl;
 pub mod kiln_routines;

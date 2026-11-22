@@ -53,7 +53,7 @@
         "comments": true,
         "trailingCommas": false
       },
-      "reader": "native/services/content/packs.cpp apply_pack (nlohmann::json, ignore_comments)",
+      "reader": "native/services/content/packs.cpp apply_pack (nlohmann::json, ignore_comments); its \"registry\" section (registry-section.schema.json): packs.cpp registry_sections and the registry stage",
       "docs": "docs/kiln/services/content.md#data-packs"
     },
     {

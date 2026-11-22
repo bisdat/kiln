@@ -1,0 +1,227 @@
+// SPDX-License-Identifier: MIT
+// kiln.content registry stage: the boot back-end's bridge (boot_hooks.h) between gamedata_bootpatch.cpp's resources-ready
+// apply and the stage: the old documents as the stage's old-path rows, and the registry's writes on a copy.
+#include "boot_hooks.h"
+
+#include <algorithm>
+#include <cstring>
+#include <map>
+
+#include "../gamedata.h"
+#include "model.h"
+
+namespace kc::registry::boothook {
+
+namespace {
+std::string folded(std::string s) {
+    for (char& c : s)
+        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+    return s;
+}
+}  // namespace
+
+// The old documents' writes on places the registries map, as the stage's old-path rows (they lie below every registry
+// edit). Only what a Kiln field's row covers: a scalar member (int, float, bool, time, enum), an element of a list of
+// scalars ([i] or [*]), and a list's clear, replace or append.
+std::vector<OldWrite> old_writes(const std::vector<OldDoc>& docs, model::Model& m) {
+    std::vector<OldWrite> out;
+    const map::RegMap& rm = m.regmap();
+    const Schema& schema = m.schema();
+    std::map<FieldRef, Value> lists;  // a list's value as the old documents leave it so far
+    for (const OldDoc& d : docs) {
+        for (const auto& [regname, rmap] : rm.registries) {
+            if (rmap.entries.resource_type != d.type) continue;
+            std::string why;
+            const std::vector<model::Entry>* es = m.entries(regname, &why);
+            if (!es) continue;
+            const RegistrySpec* rs = schema.registry(regname);
+            if (!rs) continue;
+            const bool array = rmap.entries.kind == map::EntryKind::Array;
+            {
+                // (path as written) -> (entry index, the path below the entry)
+                auto locate = [&](const std::string& path, size_t* idx, std::string* rest) {
+                    std::string p = folded(path);
+                    if (!array) {
+                        for (size_t i = 0; i < es->size(); ++i)
+                            if (std::memcmp(&(*es)[i].place.key, &d.res, sizeof d.res) == 0) return *idx = i, *rest = p, true;
+                        return false;
+                    }
+                    const std::string head = folded(rmap.entries.array) + "[";
+                    if (p.rfind(head, 0) != 0) return false;
+                    const size_t close = p.find(']');
+                    if (close == std::string::npos || close + 1 >= p.size() || p[close + 1] != '.') return false;
+                    const std::string n = p.substr(head.size(), close - head.size());
+                    if (n.empty() || n.size() > 9 || !std::all_of(n.begin(), n.end(), [](char c) { return c >= '0' && c <= '9'; })) return false;
+                    const size_t el = std::stoul(n);
+                    for (size_t i = 0; i < es->size(); ++i)
+                        if ((*es)[i].place.element == static_cast<int32_t>(el)) return *idx = i, *rest = p.substr(close + 2), true;
+                    return false;
+                };
+                auto value_for = [&](const map::Row& row, const FieldSpec& spec, FieldType type, const nlohmann::json& v, Value* x) {
+                    if (row.conv == "enum") {
+                        if (!v.is_string()) return false;
+                        for (const auto& [k, g] : row.values)
+                            if (folded(g) == folded(v.get<std::string>())) return *x = Value::text(k), true;
+                        return false;
+                    }
+                    FieldSpec f = spec;
+                    f.type = type;
+                    std::string err;
+                    return value_of(json::parse(v.dump()), f, false, x, &err);
+                };
+                auto op_for = [&](const map::Row& row, const FieldSpec& spec, FieldType type, const nlohmann::json& v, Op* op) {
+                    if (!v.is_object()) return op->set = true, value_for(row, spec, type, v, &op->value);
+                    if (v.contains("set")) return op->set = true, value_for(row, spec, type, v["set"], &op->value);
+                    if (v.contains("mul")) op->mul = v["mul"].get<double>();
+                    if (v.contains("add")) op->add = v["add"].get<double>();
+                    if (v.contains("min")) op->min = v["min"].get<double>();
+                    if (v.contains("max")) op->max = v["max"].get<double>();
+                    op->raise_only = v.value("raiseOnly", false);
+                    op->lower_only = v.value("lowerOnly", false);
+                    return true;
+                };
+                auto push = [&](const FieldRef& ref, Op op, ListOp lop, std::vector<Value> vals) {
+                    OldWrite w;
+                    w.kind = WriterKind::OldPatch;
+                    w.mod = d.mod;
+                    w.who = d.mod + "/" + d.key;
+                    w.field = ref;
+                    w.op = std::move(op);
+                    w.list = lop;
+                    w.list_values = std::move(vals);
+                    out.push_back(std::move(w));
+                };
+                for (const auto& [spath, svalue] : d.sets) {
+                    size_t i = 0;
+                    std::string rest;
+                    if (!locate(spath, &i, &rest)) continue;
+                    for (const auto& [fname, row] : rmap.rows) {
+                        if (row.paths.empty() || fname.find("[]") != std::string::npos) continue;
+                        const FieldSpec* f = rs->field(fname);
+                        if (!f) continue;
+                        const std::string p0 = folded(row.paths[0]);
+                        const FieldRef ref{regname, (*es)[i].id, fname};
+                        if ((row.conv == "int" || row.conv == "float" || row.conv == "bool" || row.conv == "time" || row.conv == "enum") && p0 == rest) {
+                            Op op;
+                            if (op_for(row, *f, f->type, svalue, &op)) push(ref, std::move(op), ListOp::None, {});
+                        } else if (row.conv == "list" && f->element != FieldType::Struct && rest.rfind(p0 + "[", 0) == 0 && rest.back() == ']') {
+                            const std::string ix = rest.substr(p0.size() + 1, rest.size() - p0.size() - 2);
+                            auto cur = lists.find(ref);
+                            if (cur == lists.end()) {
+                                auto base = m.value(regname, i, fname, &why);
+                                if (!base || base->kind != Value::List) continue;
+                                cur = lists.emplace(ref, *base).first;
+                            }
+                            Op op;
+                            FieldSpec el = *f;
+                            el.type = f->element;
+                            if (!op_for(row, *f, f->element, svalue, &op)) continue;
+                            Value next = cur->second;
+                            for (size_t k = 0; k < next.list.size(); ++k) {
+                                if (ix != "*" && ix != std::to_string(k)) continue;
+                                next.list[k] = apply_op(op, next.list[k], el);
+                            }
+                            cur->second = next;
+                            Op whole;
+                            whole.set = true;
+                            whole.value = next;
+                            push(ref, std::move(whole), ListOp::None, {});
+                        }
+                    }
+                }
+                for (const OldDoc::List& o : d.lists) {
+                    size_t i = 0;
+                    std::string rest;
+                    if (!locate(o.path, &i, &rest)) continue;
+                    for (const auto& [fname, row] : rmap.rows) {
+                        const FieldSpec* f = rs->field(fname);
+                        if (!f || row.conv != "list" || row.paths.empty() || folded(row.paths[0]) != rest || f->element == FieldType::Struct) continue;
+                        std::vector<Value> vals;
+                        for (const auto& v : o.values) {
+                            Value x;
+                            if (value_for(row, *f, f->element, v, &x)) vals.push_back(std::move(x));
+                        }
+                        lists.erase(FieldRef{regname, (*es)[i].id, fname});
+                        push({regname, (*es)[i].id, fname}, Op{}, o.op == 'x' ? ListOp::Clear : o.op == 'r' ? ListOp::Replace : ListOp::Append, std::move(vals));
+                    }
+                }
+            }
+        }
+    }
+    return out;
+}
+
+// The registry's boot writes on one copy, after the old documents: each field's registry rows evaluated over the value the
+// copy holds now, written where it differs. *outcomes: what each field became (or why it was not written).
+size_t write(const KilnAssetKey& key, const std::string& type_name, std::vector<uint8_t>* copy, const stage::BootResource& rb,
+             std::vector<stage::BootOutcome>* outcomes, std::vector<std::string>* notes) {
+    const gd::TType* type = gd::type_named(type_name);
+    if (!type || !type->resolved()) {
+        for (const auto& f : rb.fields) outcomes->push_back({f.field, false, {}, "this game build has no type " + type_name});
+        return 0;
+    }
+    size_t written = 0;
+    const gd::Root root_kind = type_name == "keen::ecs::TemplateResource" ? gd::Root::Template : gd::Root::Plain;
+    for (const stage::BootField& f : rb.fields) {
+        stage::BootOutcome o;
+        o.field = f.field;
+        model::MemberFn get = [&](const std::string& path, json* out, std::string* why) {
+            return model::bytes_member(copy->data(), copy->size(), type_name, path, out, why);
+        };
+        std::string why;
+        const auto below = model::decode(*f.reg, *f.row, f.spec, get, nullptr, {}, &why);
+        if (!below) {
+            o.why = "the value in the resource cannot be read (" + why + ")";
+            outcomes->push_back(std::move(o));
+            continue;
+        }
+        const Value v = evaluate(f.rows, *below, f.spec);
+        std::vector<std::pair<std::string, json>> writes;
+        if (!model::encode(*f.reg, *f.row, f.spec, v, *below, &writes, &why)) {
+            o.why = why;
+            outcomes->push_back(std::move(o));
+            continue;
+        }
+        // every write is computed before any is made: a field is written whole or not at all
+        const uintptr_t lo = reinterpret_cast<uintptr_t>(copy->data()), hi = lo + copy->size();
+        std::vector<std::pair<uintptr_t, std::vector<uint8_t>>> bytes;
+        for (const auto& [path, value] : writes) {
+            std::vector<gd::Resolved> found;
+            std::string err;
+            if (!gd::resolve(root_kind, gd::Node{type->resolved(), lo}, path, &found, &err) || found.size() != 1) {
+                why = "\"" + path + "\": " + (err.empty() ? "no such member" : err);
+                break;
+            }
+            Field leaf;
+            const gd::Resolved& r = found[0];
+            if (!r.node.t || !gd::leaf_of(r.node.t, &leaf) || leaf.ref || leaf.vt == KILN_CV_GUID || r.node.addr < lo || r.node.addr + leaf.bytes > hi) {
+                why = "\"" + path + "\" is not a scalar member of the resource";
+                break;
+            }
+            uint8_t b[16] = {};
+            bool reset = false;
+            if (!gd::parse_leaf(leaf, gjson::parse(value.dump()), reinterpret_cast<const uint8_t*>(r.node.addr), b, &reset, &err)) {
+                why = "\"" + path + "\": " + err;
+                break;
+            }
+            bytes.emplace_back(r.node.addr, std::vector<uint8_t>(b, b + leaf.bytes));
+        }
+        if (bytes.size() != writes.size()) {
+            o.why = why;
+            outcomes->push_back(std::move(o));
+            continue;
+        }
+        for (const auto& [addr, b] : bytes) std::memcpy(reinterpret_cast<void*>(addr), b.data(), b.size());
+        written += bytes.size();
+        o.ok = true;
+        o.written = v;
+        if (!bytes.empty())
+            notes->push_back("registry: " + type_name + " " + guid_text(key.guid) + ": " + f.field.text() + " = " + v.text_of() + " (" +
+                             std::to_string(bytes.size()) + " value(s), after the resource patches)");
+        outcomes->push_back(std::move(o));
+    }
+    return written;
+}
+
+
+}  // namespace kc::registry::boothook

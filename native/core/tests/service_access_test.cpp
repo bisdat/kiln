@@ -24,6 +24,7 @@
 #include "services/kiln_progress.h"
 #include "../../plugins/compat/original_code_service.h"
 #include "../src/mod_values_host.h"  // KILN_MOD_VALUES_BACKEND_SERVICE (Kiln-internal)
+#include "../src/owners_internal.h"  // KILN_OWNERS_INTERNAL_SERVICE (Kiln-internal)
 
 namespace {
 int checks = 0, failures = 0;
@@ -42,14 +43,14 @@ bool g_hooks = true;
 std::set<KilnOwner> alive{1, 2, 3, 4, 5, 6};
 namespace reg {
 bool owner_alive(KilnOwner o) { return o == 0 || alive.count(o); }
-std::string owner_name(KilnOwner o) { return "owner:" + std::to_string(o); }
+std::string owner_name(KilnOwner o) { return o == 3 ? std::string("mod:Fishing-Plus") : "owner:" + std::to_string(o); }
 std::vector<std::string> host_created;  // the names owner_create_managed_host was given
 KilnOwner owner_create_managed_host(std::string_view id) {
     host_created.emplace_back(id);
     return 42;
 }
 const KilnOwnersInternalApi owners_internal_own{{sizeof(KilnOwnersInternalApi), KILN_OWNERS_INTERNAL_VERSION}, nullptr,
-                                                nullptr};
+                                                nullptr, nullptr};
 const KilnOwnersInternalApi* owners_internal_table() { return &owners_internal_own; }  // stands for registry.cpp's table
 }  // namespace reg
 namespace svc {
@@ -255,11 +256,13 @@ void internal_owners_views() {
         check(api_service_managed_host(name, 1) == &reg::owners_internal_own,
               std::string("the managed host's view resolves it").append(mode).c_str());
         check(api_service(name, 1) == nullptr, std::string("the plugins' view never resolves it").append(mode).c_str());
-        check(api_service_services(name, 2) == nullptr && api_service_managed_host(name, 2) == nullptr,
-              std::string("...not for a later version").append(mode).c_str());
+        check(api_service_services(name, 2) == &reg::owners_internal_own && api_service_managed_host(name, 2) == &reg::owners_internal_own,
+              std::string("v2 (owner_id, kiln.registry's min_version) resolves the same table in both views").append(mode).c_str());
+        check(api_service_services(name, 3) == nullptr && api_service_managed_host(name, 3) == nullptr,
+              std::string("...not a later version").append(mode).c_str());
     }
     g_hooks = true;
-    const KilnOwnersInternalApi spoof{{sizeof(KilnOwnersInternalApi), 1}, nullptr, nullptr};
+    const KilnOwnersInternalApi spoof{{sizeof(KilnOwnersInternalApi), 1}, nullptr, nullptr, nullptr};
     alive.insert(7);
     service_owner_add(7);
     const int before = caps::published;
@@ -273,13 +276,36 @@ void internal_owners_views() {
     alive.erase(7);
 }
 
+// kiln.internal.registry: kiln-content.dll (a Kiln service owner) publishes it; the managed host's view resolves exactly that
+// published table, the plugins' never; a plugin cannot publish the name.
+void registry_host_view() {
+    using namespace kiln;
+    const KilnStr name{"kiln.internal.registry", 22};
+    const KilnServiceHeader table{sizeof(KilnServiceHeader), 1};
+    check(api_service_managed_host(name, 1) == nullptr, "nothing before kiln-content.dll publishes it");
+    check(api_register_service(2, name, &table) == KILN_ERR_INVALID_ARGUMENT, "a plugin cannot publish kiln.internal.registry");
+    check(api_service_managed_host(name, 1) == nullptr, "...and the host view still resolves nothing");
+    alive.insert(9);
+    service_owner_add(9);
+    check(api_register_service_services(9, name, &table) == KILN_OK, "a Kiln service publishes it");
+    check(api_service_managed_host(name, 1) == &table, "the managed host's view resolves the published table");
+    check(api_service_managed_host(name, 2) == nullptr, "...not for a later version");
+    check(api_service(name, 1) == nullptr, "the plugins' view never resolves it");
+    const KilnStr other{"kiln.internal.example2", 22};
+    check(api_register_service_services(9, other, &table) == KILN_OK && api_service_managed_host(other, 1) == nullptr,
+          "another published internal table stays out of the host view");
+    alive.erase(9);
+    check(api_service_managed_host(name, 1) == nullptr, "its owner revoked: gone");
+}
+
 int main() {
     using namespace kiln;
+    internal_owners_views();
+    registry_host_view();
     managed_host_view();
     launch_views();
     internal_launch_views();
     internal_hooks_views();
-    internal_owners_views();
     const KilnServiceHeader table{sizeof(KilnServiceHeader), 1};
     const KilnStr internal{"kiln.internal.example", 21}, open{"kiln.example", 12};
     // owner 1 = a service loaded from kiln/services, owner 2 = a plugin, owner 3 = a plugin-made owner

@@ -1,0 +1,80 @@
+# The `items` registry
+
+<!-- Generated from schema/registry/items.json by tools/registrygen/registrygen.py. Do not edit. -->
+
+Every item the game or a mod defines: stack sizes, rarity, levels, the gear numbers a tooltip shows (power, speed, damage, armour), costs, perks and sockets.
+
+Schema version 0.1.0, experimental (KILNX031: may change in any release until it is marked stable). C# entry type `Kiln.Registry.ItemEntry`. What registries are, the stages, the conflict rules and how ids are made: [README](README.md).
+
+## Ids
+
+- Game entries: `game:<stable name>`. Mod entries: `<mod id>:<name>`. All ids are lower case. The mod ids `game` and `kiln` are reserved: no mod's entries use them.
+- The stable name starts as the item's debug name in lower case (Material_T1_Wood_Logs is game:material_t1_wood_logs). An item without a debug name is game:item_<its 32-bit item id as 8 hex digits>. When two items would get the same name, the one that held it first keeps it and the other is game:<name>~<first 8 hex digits of its GUID>.
+
+## Fields
+
+Applies: `now` = takes effect at the next use; `worldLoad` = takes effect when a world loads; `restart` = takes effect after a game restart. Ops: `number` = a value or the relative operations (mul, add, min, max, raiseOnly, lowerOnly); `set` = a value; `list` = clear, append, remove, replace; `indexed` = a list of fixed length, edited one element at a time (`xpPerLevel[2]`) with a value or a number operation. A field of a list's elements is named with [] in this table and with the element's index in an edit (`entries[3].chance`, or [*] for every element). Mapping: whether this Kiln maps the field onto the game; an unproven or unmapped field is refused per entry, with the reason, until a Kiln update maps it.
+
+Groups of fields:
+
+- `levels`: The item's level range. New copies are made inside it; a save load clamps existing copies into it.
+- `damage`: The kinds of damage a hit deals. The hit kinds (cut to poison) are shares that should add up to 1; wood, stone, metal and explosion are whole numbers.
+- `armor`: The armour of each kind the tooltip shows at levels.min. Kiln solves the game's share for it with the balance table's constants.
+- `fuel`: What the item gives as fuel. When the game reads it is not traced yet: unproven until a Kiln update maps it.
+
+| Field | Type | Applies | Ops | Since | Mapping | About |
+|---|---|---|---|---|---|---|
+| `maxStack` | int 1..65535 | worldLoad | number | 0.1.0 | mapped | The largest stack. In place before the world's save is read: a lower value cuts stacks in that save. |
+| `rarity` | enum (common, uncommon, rare, epic, legendary) | now | set | 0.1.0 | mapped | The rarity a new copy gets when it does not roll one. Copies that exist keep theirs. |
+| `rolled` | bool | now | set | 0.1.0 | mapped | New copies roll their rarity (and perks) instead of taking rarity. Copies that exist keep theirs. |
+| `levels.min` | int 1..105 | now | number | 0.1.0 | mapped | The lowest level (also the level power and armour are shown at). |
+| `levels.max` | int 1..105 | now | number | 0.1.0 | mapped | The highest level. |
+| `socket` | bool | now | set | 0.1.0 | mapped | New copies get a gem socket. |
+| `perks` | list of ref perks, at most 5 | now | list | 0.1.0 | mapped | The perk of each rarity slot, common first. A copy fills rarity + 1 slots. New copies only. |
+| `power` | int 0..100000 | now | number | 0.1.0 | mapped | The damage the tooltip shows at levels.min. Kiln solves the game's damage factor for it with the balance table's constants. Formula: `gear.power`. |
+| `speed` | float 0.01..100 | now | number | 0.1.0 | mapped | The speed factor of the weapon's damage (multiplies power). |
+| `hasDamage` | bool | now | read-only | 0.1.0 | mapped | The item deals damage (power, speed and damage apply). |
+| `damage.cut` | float 0..10 | now | number | 0.1.0 | mapped |  |
+| `damage.pierce` | float 0..10 | now | number | 0.1.0 | mapped |  |
+| `damage.blunt` | float 0..10 | now | number | 0.1.0 | mapped |  |
+| `damage.fire` | float 0..10 | now | number | 0.1.0 | mapped |  |
+| `damage.ice` | float 0..10 | now | number | 0.1.0 | mapped |  |
+| `damage.shroud` | float 0..10 | now | number | 0.1.0 | mapped |  |
+| `damage.lightning` | float 0..10 | now | number | 0.1.0 | mapped |  |
+| `damage.poison` | float 0..10 | now | number | 0.1.0 | mapped |  |
+| `damage.healing` | float 0..10 | now | number | 0.1.0 | mapped |  |
+| `damage.wood` | int 0..1000000 | now | number | 0.1.0 | mapped |  |
+| `damage.stone` | int 0..1000000 | now | number | 0.1.0 | mapped |  |
+| `damage.metal` | int 0..1000000 | now | number | 0.1.0 | mapped |  |
+| `damage.explosion` | int 0..1000000 | now | number | 0.1.0 | mapped |  |
+| `hasArmor` | bool | now | read-only | 0.1.0 | mapped | The item gives armour (armor applies). |
+| `armor.physical` | int 0..100000 | now | number | 0.1.0 | mapped | Formula: `gear.armor`. |
+| `armor.magical` | int 0..100000 | now | number | 0.1.0 | mapped | Formula: `gear.armor`. |
+| `armor.cut` | int 0..100000 | now | number | 0.1.0 | mapped | Formula: `gear.armor`. |
+| `armor.pierce` | int 0..100000 | now | number | 0.1.0 | mapped | Formula: `gear.armor`. |
+| `armor.blunt` | int 0..100000 | now | number | 0.1.0 | mapped | Formula: `gear.armor`. |
+| `armor.fire` | int 0..100000 | now | number | 0.1.0 | mapped | Formula: `gear.armor`. |
+| `armor.ice` | int 0..100000 | now | number | 0.1.0 | mapped | Formula: `gear.armor`. |
+| `armor.shroud` | int 0..100000 | now | number | 0.1.0 | mapped | Formula: `gear.armor`. |
+| `armor.lightning` | int 0..100000 | now | number | 0.1.0 | mapped | Formula: `gear.armor`. |
+| `block` | float 0..1 | worldLoad | number | 0.1.0 | unproven: when the game reads the block value is not traced yet | How well the item blocks (0 to 1). When the game reads it is not traced yet: unproven until a Kiln update maps it. |
+| `staminaCost` | float 0..100000 | now | number | 0.1.0 | mapped | The stamina a use costs, at the next payment. |
+| `manaCost` | float 0..100000 | now | number | 0.1.0 | mapped | The mana a use costs, at the next cast. |
+| `fuel.burnTime` | time s 0..86400 | worldLoad | number | 0.1.0 | unproven: when the game reads the fuel burn time is not traced yet | How long one item burns. |
+| `comfort` | int 0..1000 | worldLoad | number | 0.1.0 | unproven: when the game reads the comfort value is not traced yet | The comfort the item gives when placed. When the game reads it is not traced yet: unproven until a Kiln update maps it. |
+
+## Traits
+
+Selectors ask for these with `has` / `hasNot`.
+
+| Trait | Means |
+|---|---|
+| `weapon` | deals damage (hasDamage) |
+| `armor` | gives armour (hasArmor) |
+| `stackable` | maxStack above 1 |
+
+## Entries
+
+- Add (stage add, id `<your mod id>:<name>`): yes.
+- Remove (hidden): A removed item stays in the game's tables (saves keep their copies) but is hidden from loot, drops and recipes.
+- Raw game paths in edits (the Advanced tier): allowed.

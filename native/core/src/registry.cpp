@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 #include "registry.h"
 
+#include <cstring>
 #include <mutex>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -151,8 +153,20 @@ KilnResult owner_grants(KilnOwner owner, uint32_t* out) {
 namespace {
 KilnResult KILN_CALL api_owner_grant(KilnOwner owner, uint32_t grants) { return owner_grant(owner, grants); }
 KilnResult KILN_CALL api_owner_grants(KilnOwner owner, uint32_t* out) { return owner_grants(owner, out); }
+KilnResult KILN_CALL api_owner_id(KilnOwner owner, char* buf, size_t cap, size_t* out_len) {
+    if (owner == 0 || (!buf && cap)) return KILN_ERR_INVALID_ARGUMENT;
+    if (!owner_alive(owner)) return KILN_ERR_REVOKED;
+    const std::string id = owner_name(owner);
+    if (out_len) *out_len = id.size();
+    if (cap) {
+        const size_t n = id.size() < cap - 1 ? id.size() : cap - 1;
+        std::memcpy(buf, id.data(), n);
+        buf[n] = 0;
+    }
+    return id.size() + 1 > cap ? KILN_ERR_BUFFER_TOO_SMALL : KILN_OK;
+}
 const KilnOwnersInternalApi g_owners_internal = {
-    {sizeof(KilnOwnersInternalApi), KILN_OWNERS_INTERNAL_VERSION}, &api_owner_grant, &api_owner_grants};
+    {sizeof(KilnOwnersInternalApi), KILN_OWNERS_INTERNAL_VERSION}, &api_owner_grant, &api_owner_grants, &api_owner_id};
 }  // namespace
 
 const KilnOwnersInternalApi* owners_internal_table() { return &g_owners_internal; }

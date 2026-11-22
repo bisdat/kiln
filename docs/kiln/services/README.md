@@ -150,7 +150,20 @@ services' `KilnApi` only, and nobody may publish them either: `kiln.internal.lau
 One more is the core's own and resolves through the services' `KilnApi` and the managed host's `KilnApi`, and nobody may
 publish it: `kiln.internal.owners` (`native/core/src/owners_internal.h`), what the managed host admitted an owner to. Kiln.Host
 grants the owner of a C# mod whose kiln.mod.json says `"steamMessages": true`, and kiln.net's `steam_open` admits it
-([net-steam-messages.md](net-steam-messages.md#who-opens-a-lease)); the grant goes with the owner.
+([net-steam-messages.md](net-steam-messages.md#who-opens-a-lease)); the grant goes with the owner. Since dev.31 the same table (v2, appended at offset 24) also has
+`owner_id(owner, buf, cap, out_len)`: an owner's id as the core keeps it (`mod:<manifest id>` for a Kiln mod's owner from
+Kiln.Host, a native mod's or a plugin's own id); kiln.registry resolves it with min_version 2 and binds a caller to its mod
+with it (the id without its kind prefix, lower case). An owner that is not alive is `KILN_ERR_REVOKED`, a buffer too small
+`KILN_ERR_BUFFER_TOO_SMALL` with the needed length.
+
+One table is a service's and has one consumer, the managed host: `kiln.internal.registry`
+(`native/services/content/include/kiln_registry_host.h`), published by kiln-content.dll. Kiln.Host calls
+`set_order` with its runtime load order (`[{"mod", "version"}]`, the order players see in the launcher profile) before the
+boot phase, and `set_mode` when kiln.json says `"registry": {"stage": "onBoot"}` (`managed/Kiln.Host/RegistryHost.cs`). The
+registry stage runs every mod's registry edits in that order; without the table (an older kiln-content.dll) it runs in the mod
+folders' order and registry.json says `"orderSource": "folders"`. Kiln.Host checks `header.version == 1` and
+`header.size == 24` and logs a mismatch. Besides the core's own two, it is the one internal name the managed host's
+`KilnApi` resolves, and only the published table of a Kiln service owner.
 
 This is a reach rule, not a sandbox: it keeps tables that hand out game addresses or Kiln's own lock primitives away from
 plugins and from stale or foreign service DLLs. It is no defence against arbitrary native code already in the process,

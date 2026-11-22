@@ -49,6 +49,7 @@ internal static class ServiceNames
         "kiln.progression",
         "kiln.queries",
         "kiln.questmark",
+        "kiln.registry",
         "kiln.render",
         "kiln.routines",
         "kiln.repl",

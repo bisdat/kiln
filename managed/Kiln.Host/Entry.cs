@@ -318,7 +318,10 @@ internal sealed unsafe class HostRuntime : IHostServices, IKilnBackend
         // Mod.OnBoot's generation (kiln.boot, chapter 08): in a boot profile Kiln.Host commits it here, on the boot thread, before the tick
         // subscriptions and the game's entry point (BootPhase.cs)
         host._mods.PrepareGameplayHooks();
-        BootPhase.Run(host.Service, host._owner, host._mods, host.Log);
+        // the registry stage's order: Kiln.Host's runtime load order, handed to kiln.registry before the boot phase (RegistryHost.cs)
+        RegistryHost.Run(host.Service, host._mods, RegistryHost.ModeOf(Path.Combine(KilnPaths.Root, "kiln.json")), host.Log);
+        var onBoot = BootPhase.Run(host.Service, host._owner, host._mods, host.Log);
+        RegistryHost.CompareWithOnBoot(host._mods, onBoot, host.Log);
         // the files the first mod load and the first service tick read on the game's thread, read now on another one (a
         // hard disk the game loads from made them slow there: ModPrefetch.cs)
         ModPrefetch.Start(host._mods.PrefetchFiles, host.Log);

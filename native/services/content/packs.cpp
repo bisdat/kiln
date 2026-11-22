@@ -6,7 +6,10 @@
 //     "loot":    { "<item selector>": { "stackSizeMin": 5, ... } },
 //     "drops":   { "<table GUID | glob>": { "count": {op}, "chance": {op}, "items": { "<item>": { "countMin": ... } } } },
 //     "gear":    { "<item selector>": { "@where": {...}, "power": 30, "armor": {"physical": 20}, "levels": [5, 5], ... } },
-//     "options": { "stackGuard": true } }
+//     "options": { "stackGuard": true },
+//     "registry": { "add": [edits], "alter": [edits], "final": [edits] } }
+// "registry" (schema/registry-section.schema.json) is read by the registry stage at start (registry_sections, registry_live.h),
+// not applied here: a pack file's section is checked here only so that its pack report names a section that cannot be used.
 // "gear" is a typed face over "items" (gear.h); "gearRules" are boot values (gamedata_bootpatch.cpp), not applied here.
 //
 // Selectors: a debug name, "0x1234abcd" / decimal id, or a case-insensitive glob ("Material_*", "*"). Values: numbers,
@@ -29,6 +32,8 @@
 #include "gear.h"
 #include "nlohmann/json.hpp"
 #include "refs.h"
+#include "registry/schema_ir.h"
+#include "registry_live.h"
 #include "services/kiln_profile.h"
 #if KC_GAMEDATA
 #include "gamedata.h"
@@ -405,6 +410,12 @@ std::string api_path(int kind) {
 
 std::unordered_map<std::string, KilnOwner> g_pack_owners;  // mod id -> owner
 uint64_t g_generation = 0;
+thread_local bool t_pack_file = false;  // apply_all_packs is applying a mod's pack file (its registry section is the stage's)
+
+std::string section_source(const std::string& rel) {
+    const size_t at = rel.find("/content/");
+    return at == std::string::npos ? rel : rel.substr(at + 1);
+}
 
 }  // namespace
 
@@ -423,6 +434,7 @@ void drops_apply_rules(const Entry& table) {
         if (rule_matches(r, table)) rs.push_back(&r);
     std::sort(rs.begin(), rs.end(), [](const DropRule* a, const DropRule* b) { return a->seq < b->seq; });
     for (const DropRule* r : rs) apply_rule(*r, table, nullptr);
+    registry_live_table(table);  // the registry's live layers of a table the world just loaded
 }
 
 void drops_drop_owner(KilnOwner owner) {
@@ -729,6 +741,21 @@ bool apply_pack(KilnOwner owner, uint64_t seq_base, const std::string& text, con
 #if KC_GAMEDATA
     gd_pack_sections(owner, seq_base, doc, source, out);  // templates, arsenals, sequences, buffs, perks, skills
 #endif
+    if (doc.contains("registry")) {
+        if (!t_pack_file) {
+            out->warnings.push_back("registry: a registry section is read from a mod's content/*.json at start (the registry stage), "
+                                    "not from text applied at run time; ignored");
+        } else {
+            std::vector<registry::Batch> batches;
+            std::vector<registry::Refusal> refused;
+            std::string err;
+            const registry::json section = registry::json::parse(doc["registry"].dump(), nullptr, false);
+            if (!registry::lower_section(section, "pack", "", section_source(source), registry_schema(), &batches, &refused, &err))
+                out->errors.push_back("registry: " + err);
+            else if (!refused.empty())
+                out->warnings.push_back("registry: " + std::to_string(refused.size()) + " edit(s) refused (state/registry.json says why)");
+        }
+    }
     if (doc.contains("options") && doc["options"].is_object()) {
         const json& o = doc["options"];
         for (auto& [k, v] : o.items())
@@ -741,6 +768,7 @@ bool apply_pack(KilnOwner owner, uint64_t seq_base, const std::string& text, con
     for (auto& [k, v] : doc.items())
         if (k != "items" && k != "recipes" && k != "loot" && k != "drops" && k != "options" && k != "format" &&
             k != "gear" && k != "gearRules" &&  // gearRules: boot values, read before the game starts (gamedata_bootpatch.cpp)
+            k != "registry" &&                  // the registry stage's (registry_sections)
             k[0] != '@' && k != "comment"
 #if KC_GAMEDATA
             && !gd_is_section(k)
@@ -832,6 +860,9 @@ std::vector<PackFile> discover_packs(std::string* signature) {
         const std::string mt = read_file(d / "kiln.mod.json", &ok);
         json m = json::parse(mt, nullptr, false, true);
         if (!m.is_discarded() && m.is_object() && m.contains("id") && m["id"].is_string()) id = m["id"].get<std::string>();
+        std::string version, side = "server";
+        if (!m.is_discarded() && m.is_object() && m.contains("version") && m["version"].is_string()) version = m["version"].get<std::string>();
+        if (!m.is_discarded() && m.is_object() && m.contains("side") && m["side"].is_string()) side = m["side"].get<std::string>();
         if (std::any_of(out.begin(), out.end(), [&](const PackFile& f) { return f.mod == id && f.dir != reinterpret_cast<const char*>(d.u8string().c_str()); }))
             continue;  // the same mod id twice (profile + drop-in): the first wins, as in Kiln.Host
         std::vector<fs::path> files;
@@ -844,6 +875,8 @@ std::vector<PackFile> discover_packs(std::string* signature) {
         for (const fs::path& f : files) {
             PackFile p;
             p.mod = id;
+            p.version = version;
+            p.side = side;
             p.dir = reinterpret_cast<const char*>(d.u8string().c_str());
             p.path = reinterpret_cast<const char*>(f.u8string().c_str());
             p.rel = folder + "/content/" + reinterpret_cast<const char*>(f.filename().u8string().c_str());
@@ -871,8 +904,9 @@ std::vector<PackFile> order_packs(const std::vector<PackFile>& files, const std:
 }
 
 PacksReport apply_all_packs(const std::vector<PackFile>& files) {
-    std::lock_guard lock(store_mutex());
     PacksReport rep;
+    {
+    std::lock_guard lock(store_mutex());
     rep.generation = ++g_generation;
     for (auto& [id, owner] : g_pack_owners) {
         store_drop_owner(owner);
@@ -899,15 +933,43 @@ PacksReport apply_all_packs(const std::vector<PackFile>& files) {
         if (!ok) r.errors.push_back("cannot read the file");
         else {
             PhaseTimer ft(PH_PACK_FILE);
+            t_pack_file = true;
             apply_pack(it->second, base, text, p.rel, &r);
+            t_pack_file = false;
         }
         t_pack_dir.clear();
         rep.files.emplace_back(p.rel, std::move(r));
     }
+    registry_live_apply(files, false);  // the registry's live layers over the packs (re-evaluated, or recomposed when a section changed)
     std::string ferr;
     store_flush(&ferr);
     rep.conflicts = store_conflicts();
+    }
+    registry_live_publish();  // registry.json with the store's lock released (review finding 10)
     return rep;
+}
+
+const registry::Schema& registry_schema() {
+    static const registry::Schema s = registry::generated_schema();
+    return s;
+}
+
+std::vector<RegistrySection> registry_sections(const std::vector<PackFile>& files, const registry::Schema& schema) {
+    std::vector<RegistrySection> out;
+    for (const PackFile& f : files) {
+        bool ok = false;
+        const std::string text = read_file(upath(f.path), &ok);
+        if (!ok) continue;
+        const registry::json doc = registry::json::parse(text, nullptr, false, true);
+        if (doc.is_discarded() || !doc.is_object() || !doc.contains("registry")) continue;
+        RegistrySection s;
+        s.mod = f.mod, s.version = f.version, s.rel = f.rel, s.source = section_source(f.rel), s.side = f.side;
+        const std::string dumped = doc["registry"].dump();
+        s.hash = std::hash<std::string>{}(dumped);
+        if (!registry::lower_section(doc["registry"], f.mod, f.version, s.source, schema, &s.batches, &s.refused, &s.error)) s.batches.clear();
+        out.push_back(std::move(s));
+    }
+    return out;
 }
 
 std::string apply_result_json(const ApplyResult& r) {

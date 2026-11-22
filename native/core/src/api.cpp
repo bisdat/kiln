@@ -33,6 +33,7 @@
 #include "services/service.h"
 #include "tasks_host.h"
 #include "hooks_protect_internal.h"
+#include "owners_internal.h"
 #include "mod_values_host.h"
 
 // kiln.caps, the capability registry (services/caps.cpp)
@@ -231,7 +232,7 @@ const void* lookup_service(KilnStr name, uint32_t min_version, bool services) {
     if (sv(name) == KILN_HOOKS_INTERNAL_SERVICE)
         return min_version <= KILN_HOOKS_INTERNAL_VERSION ? hooks::internal_table() : nullptr;
     // kiln.internal.owners (owners_internal.h): the core's own, for Kiln's services (and the managed host's view,
-    // api_service_managed_host); nobody publishes the name.
+    // api_service_managed_host); nobody publishes the name. v1 grants (dev.30), v2 owner_id (kiln.registry, dev.31).
     if (sv(name) == KILN_OWNERS_INTERNAL_SERVICE)
         return min_version <= KILN_OWNERS_INTERNAL_VERSION ? reg::owners_internal_table() : nullptr;
 
@@ -314,9 +315,13 @@ KilnResult KILN_CALL api_register_service_services(KilnOwner owner, KilnStr name
 
 // The managed host's KilnApi (api_for_managed_host, tasks_host.h): the plugins' lookup, plus exactly the core's own
 // kiln.internal.tasks.host, kiln.internal.mod-values.backend and kiln.internal.owners tables (never published ones: nobody
-// may publish those names); every other internal name stays unresolved, and registration is the plugins' (the host
-// publishes no internal table either).
+// may publish those names) and the published kiln.internal.registry of kiln-content.dll; every other internal name stays
+// unresolved, and registration is the plugins' (the host publishes no internal table either).
+// kiln.internal.registry (native/services/content/include/kiln_registry_host.h): kiln-content.dll publishes it as a Kiln
+// service of this build; Kiln.Host hands the registry stage its load order through it. The managed host is its one consumer.
+constexpr std::string_view kRegistryHostService = "kiln.internal.registry";
 const void* KILN_CALL api_service_managed_host(KilnStr name, uint32_t min_version) {
+    if (sv(name) == kRegistryHostService) return lookup_service(name, min_version, true);  // a published one only (its owner a Kiln service)
     if (sv(name) == KILN_TASKS_HOST_SERVICE)
         return min_version <= KILN_TASKS_HOST_VERSION ? tasks_svc::host_table() : nullptr;
     if (sv(name) == KILN_MOD_VALUES_BACKEND_SERVICE)

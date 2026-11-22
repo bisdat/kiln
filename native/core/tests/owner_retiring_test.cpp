@@ -156,9 +156,21 @@ int main() {
     // kiln.internal.owners: grants live with the owner and go when it is revoked
     {
         const KilnOwnersInternalApi* t = reg::owners_internal_table();
-        check(t && t->header.size == sizeof(KilnOwnersInternalApi) && t->header.version == KILN_OWNERS_INTERNAL_VERSION &&
-                  t->grant && t->grants,
-              "kiln.internal.owners: the table is v1 and complete");
+        check(t && t->header.size == 32 && t->header.version == 2 && t->grant && t->grants && t->owner_id,
+              "kiln.internal.owners: the table is v2 (owner_id appended at 24) and complete");
+        {  // v2 owner_id: the core's id of a live owner (kiln.registry binds its callers with it)
+            const KilnOwner m = reg::owner_create("mod:Fishing-Plus");
+            char buf[64];
+            size_t len = 0;
+            check(t->owner_id(m, buf, sizeof buf, &len) == KILN_OK && std::string(buf) == "mod:Fishing-Plus" && len == 16, "owner_id: a live owner's id");
+            check(t->owner_id(m, buf, 4, &len) == KILN_ERR_BUFFER_TOO_SMALL && len == 16 && std::string(buf) == "mod", "a buffer too small: cut, NUL-terminated, the needed length");
+            check(t->owner_id(m, nullptr, 0, &len) == KILN_ERR_BUFFER_TOO_SMALL && len == 16, "a size query");
+            check(t->owner_id(0, buf, sizeof buf, &len) == KILN_ERR_INVALID_ARGUMENT && t->owner_id(m, nullptr, 8, &len) == KILN_ERR_INVALID_ARGUMENT,
+                  "owner 0 and a NULL buffer with a capacity: invalid");
+            check(t->owner_id(424244, buf, sizeof buf, &len) == KILN_ERR_REVOKED, "an owner never made: revoked");
+            reg::owner_revoke(m);
+            check(t->owner_id(m, buf, sizeof buf, &len) == KILN_ERR_REVOKED, "a revoked owner: revoked");
+        }
         const KilnOwner mod_h = reg::owner_create("mod:h"), mod_i = reg::owner_create("mod:i");
         uint32_t bits = 99;
         check(t->grants(mod_h, &bits) == KILN_OK && bits == 0, "a new owner holds no grant");

@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Kiln.Registry: Kiln's registries (items, recipes, loot, drops, balance) as typed C# entries over Kiln-owned field names,
+       generated from schema/registry/*.json by tools/registrygen/registrygen.py (Generated/*.g.cs; never edit those by
+       hand). Experimental (KILNX031) until the registry stage is wired and proven: this release ships the types and the
+       field catalog; reading and editing through them comes with Mod.OnRegistry (docs/kiln/modding/registries/README.md).
+       Deployed to kiln/host/ and shared by every mod. -->
+  <PropertyGroup>
+    <RootNamespace>Kiln.Registry</RootNamespace>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- its own types are KILNX031: using them inside the assembly is not an opt-in -->
+    <NoWarn>$(NoWarn);CS1591;KILNX031</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../Kiln.Api/Kiln.Api.csproj" Private="false" />
+    <!-- the generated types over a fake store of cells, and the catalog against schema/registry/*.json -->
+    <InternalsVisibleTo Include="Kiln.Registry.Tests" />
+  </ItemGroup>
+</Project>

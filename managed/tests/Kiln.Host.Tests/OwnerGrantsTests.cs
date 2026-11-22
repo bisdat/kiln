@@ -21,11 +21,13 @@ public sealed unsafe class OwnerGrantsTests : ModsFixture
         return _grantRc;
     }
 
-    private static nint Table()
+    private static nint Table(uint version = 1)
     {
-        var t = (OwnerGrants.Table*)NativeMemory.AllocZeroed((nuint)sizeof(OwnerGrants.Table));
-        t->Size = (uint)sizeof(OwnerGrants.Table);
-        t->Version = 1;
+        // v2 (dev.31) appends owner_id at offset 24: 32 bytes, v1's members unchanged
+        var size = version >= 2 ? 32u : (uint)sizeof(OwnerGrants.Table);
+        var t = (OwnerGrants.Table*)NativeMemory.AllocZeroed(size);
+        t->Size = size;
+        t->Version = version;
         t->Grant = &Grant;
         return (nint)t;
     }
@@ -57,6 +59,29 @@ public sealed unsafe class OwnerGrantsTests : ModsFixture
             Assert.True(hello.ModContext.Info.SteamMessages);
             lock (Granted) Assert.Equal(new List<(ulong, uint)> { (hello.Owner, OwnerGrants.SteamMessagesGrant) }, Granted);
             Assert.False(host.Has("steamMessages"), host.Dump());
+        }
+        finally
+        {
+            NativeMemory.Free((void*)table);
+        }
+    }
+
+    [Fact]
+    public void The_core_s_v2_table_still_grants_Steam_messages()
+    {
+        InstallHello(steamMessages: true);
+        var host = new FakeHost();
+        var table = Table(version: 2);
+        host.Services[OwnerGrants.Name] = table;
+        lock (Granted) Granted.Clear();
+        _grantRc = 0;
+        try
+        {
+            using var mods = NewManager(host);
+            mods.LoadAll();
+            var hello = Assert.Single(mods.Mods);
+            lock (Granted) Assert.Equal(new List<(ulong, uint)> { (hello.Owner, OwnerGrants.SteamMessagesGrant) }, Granted);
+            Assert.False(host.Has("different builds"), host.Dump());
         }
         finally
         {
