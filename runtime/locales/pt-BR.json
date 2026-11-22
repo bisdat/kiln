@@ -490,7 +490,7 @@
   },
   "keys": {
     "help_mouse": "Clique numa tecla e depois aperte a nova: uma tecla, o botão do meio ou um botão lateral do mouse, ou um giro da roda, com Ctrl, Shift ou Alt se quiser (o clique esquerdo e o direito não podem ser atribuídos). Clique de novo para cancelar; Esc cancela e fecha o menu. Desatribuir deixa uma ação sem tecla. Salvo em kiln/config/keybinds.json.",
-    "help_pad": "Um controle também funciona: em uma tecla, aperte um botão do controle, ou segure LB, RB, LT ou RT e aperte outro para uma combinação (Pad:LB+A); solte LB, RB, LT ou RT sozinho para atribuir esse botão.",
+    "help_pad": "Um controle também funciona: clique em uma tecla e aperte um botão do controle, ou segure LB, RB, LT ou RT e aperte outro para uma combinação (Pad:LB+A); aperte e solte LB, RB, LT ou RT sozinho para atribuir esse botão.",
     "help": "Clique numa tecla e depois aperte a nova. Clique de novo para cancelar; Esc cancela e fecha o menu. Desatribuir deixa uma ação sem tecla. Salvo em kiln/config/keybinds.json.",
     "col_action": "Ação",
     "col_key": "Tecla",

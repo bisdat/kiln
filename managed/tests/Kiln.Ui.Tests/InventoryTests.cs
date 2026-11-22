@@ -115,6 +115,7 @@ public sealed unsafe class InventoryTests : IDisposable
     private static void Use(IKilnBackend b)
     {
         Backend.Current = b;
+        UiNative.ResetForTests();
         UiValuesNative.ResetForTests();
         UiInventoryBridge.ResetForTests();
         Events.Reset();
@@ -123,6 +124,7 @@ public sealed unsafe class InventoryTests : IDisposable
     public void Dispose()
     {
         UiInventoryBridge.ResetForTests();
+        UiNative.ResetForTests();
         Backend.Current = _previous;
         UiValuesNative.ResetForTests();
         FakeInventory.Free();
@@ -172,6 +174,32 @@ public sealed unsafe class InventoryTests : IDisposable
         Assert.Equal(SlotModifiers.Ctrl, c.Modifiers);
         Assert.True(c.Taken);
         Assert.Equal(HudScreen.StorageChest, c.Screen.Hud);
+    }
+
+    [Fact]
+    public void Worker_pad_polls_do_not_run_slot_click_handlers()
+    {
+        var slot = Slot(0xAA, 900);
+        slot.Available |= UiValuesNative.NativeState;
+        slot.NativeState[0] = 1;
+        FakeUiValues.SlotList = [slot];
+        FakeUiValues.SlotsMeta = new()
+        {
+            Size = (uint)sizeof(UiValuesNative.SlotsFrame), Ok = 1, Count = 1, Session = 1, Frame = 9,
+            CaptureMs = (ulong)Environment.TickCount64,
+            Screen = new() { Size = (uint)sizeof(UiNative.Screen), UiState = (byte)GameUiState.Play, HudScreen = (byte)HudScreen.Backpack, Available = 1 },
+        };
+        var seen = new List<int>();
+        using var reg = Ui.Inventory.OnClick(new SlotClickOptions { Pad = KeyChord.Parse("Pad:LS") },
+            _ => seen.Add(Environment.CurrentManagedThreadId));
+        var taken = false;
+        var worker = new Thread(() => taken = UiInventoryBridge.PadPress(KeyChord.Parse("Pad:LS")));
+        worker.Start(); worker.Join();
+        Assert.True(taken);
+        Assert.Empty(seen);
+        var main = Environment.CurrentManagedThreadId;
+        UiKeyDispatch.Drain();
+        Assert.Equal(new[] { main }, seen);
     }
 
     [Fact]

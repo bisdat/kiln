@@ -1,17 +1,19 @@
 // SPDX-License-Identifier: MIT
-// Key bindings on a game controller (GitHub issue 119 (a), since 0.2.0-dev.31): "Pad:LS", "Pad:LB+A". The names in
+// Key bindings on a game controller (GitHub issue 119 (a), since 0.2.0-dev.30.5): "Pad:LS", "Pad:LB+A". The names in
 // KeyChord (parse, print, refusals), keybinds.json, the Kiln menu's key (never a pad button), UiEngine.Key (a pad press
 // fires its binding with the pad's modifiers, never while a Kiln screen has the input) and the Keys page's "press a key"
 // (a combination, or LB alone on its release). kiln.ui's half (the presses from XInput, what the game keeps seeing) is
 // native/services/ui/tests/pad_keys_test.cpp. No game: a fake kiln.ui table.
 using System.Reflection;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Kiln.FakeUi;
 using Xunit;
 
 namespace Kiln.PadBindingTests;
 
 [Collection(UiSerial.Name)]
-public sealed class PadBindingTests : IDisposable
+public sealed unsafe class PadBindingTests : IDisposable
 {
     private const BindingFlags Static = BindingFlags.NonPublic | BindingFlags.Static;
     private static readonly FieldInfo Remapping = typeof(UiEngine).GetField("_remapping", Static)!;
@@ -23,6 +25,8 @@ public sealed class PadBindingTests : IDisposable
     public PadBindingTests()
     {
         FakeUiTable.Install();
+        _uiTick = 0;
+        FakeUiTable.Table->Base.Base.Base.SubscribeUiTick = &SubscribeTick;
         Backend.Current = new FakeUiTable.Backend();
         UiNative.ResetForTests();
         Directory.CreateDirectory(Path.Combine(_root, "config"));
@@ -61,8 +65,26 @@ public sealed class PadBindingTests : IDisposable
     // kiln_ui.h KILN_UI_VK_PAD_* and KILN_UI_MOD_PAD_*
     private const uint LS = 0x206, LB = 0x208, RB = 0x209, A = 0x20C, B = 0x20D, X = 0x20E, Start = 0x204, LT = 0x210;
 
-    private static bool Send(uint vk, KeyMods mods = KeyMods.None, bool down = true, bool captured = false) =>
-        UiEngine.Key(new UiNative.Key { Size = 20, Vk = vk, Mods = (uint)mods, Down = down ? (byte)1 : (byte)0, Captured = captured ? (byte)1 : (byte)0 });
+    private static nint _uiTick;
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int SubscribeTick(ulong owner, delegate* unmanaged[Cdecl]<UiNative.Screen*, void*, void> fn, void* user, ulong* handle)
+    {
+        _uiTick = (nint)fn;
+        *handle = 731;
+        return 0;
+    }
+    private static void Tick()
+    {
+        if (_uiTick == 0) return;
+        UiNative.Screen screen = default;
+        ((delegate* unmanaged[Cdecl]<UiNative.Screen*, void*, void>)_uiTick)(&screen, null);
+    }
+    private static bool Send(uint vk, KeyMods mods = KeyMods.None, bool down = true, bool captured = false)
+    {
+        var kept = UiEngine.Key(new UiNative.Key { Size = 20, Vk = vk, Mods = (uint)mods, Down = down ? (byte)1 : (byte)0, Captured = captured ? (byte)1 : (byte)0 });
+        Tick();
+        return kept;
+    }
 
     [Theory]
     [InlineData("Pad:LS", 0x206u, KeyMods.None, "Pad:LS")]
@@ -177,5 +199,27 @@ public sealed class PadBindingTests : IDisposable
         Assert.Equal(new KeyChord(X, KeyMods.PadRB), y.Key);
         Assert.Equal(Start, KeyChord.Parse("Pad:Start").VirtualKey);
         Assert.Equal(RB, KeyChord.Parse("Pad:RB").VirtualKey);
+    }
+    [Fact]
+    public void Worker_pad_polls_only_decide_consumption_not_run_binding_callbacks()
+    {
+        var seen = new List<int>();
+        var binding = Register("t.worker", "Pad:LS", () => seen.Add(Environment.CurrentManagedThreadId));
+        binding.OnRelease = () => seen.Add(Environment.CurrentManagedThreadId);
+        var worker = new Thread(() =>
+        {
+            UiEngine.Key(new UiNative.Key { Vk = LS, Down = 1 });
+            UiEngine.Key(new UiNative.Key { Vk = LS, Down = 0 });
+        });
+        worker.Start(); worker.Join();
+        Assert.Empty(seen); // callbacks belong to the next main/UI frame, not the polling worker
+        Assert.NotEqual(0, _uiTick); // production subscribed to the game UI tick, not the render Frame callback
+        var main = Environment.CurrentManagedThreadId;
+        Tick();
+        Assert.Equal(new[] { main, main }, seen);
+        Tick();
+        Assert.Equal(2, seen.Count);
+        Assert.False(binding.IsDown);
+        Assert.Equal(1, binding.TakePresses());
     }
 }

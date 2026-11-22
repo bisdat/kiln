@@ -490,7 +490,7 @@
   },
   "keys": {
     "help_mouse": "Clicca un tasto, poi premi quello nuovo: un tasto, il pulsante centrale o laterale del mouse, o uno scatto della rotellina, con Ctrl, Shift o Alt se vuoi (il clic sinistro e destro non si possono assegnare). Cliccalo di nuovo per annullare; Esc annulla e chiude il menu. Rimuovi lascia un'azione senza tasto. Salvato in kiln/config/keybinds.json.",
-    "help_pad": "Funziona anche un controller: su un tasto, premi un pulsante del controller, oppure tieni LB, RB, LT o RT e premine un altro per una combinazione (Pad:LB+A); rilascia LB, RB, LT o RT da solo per assegnare quel pulsante.",
+    "help_pad": "Funziona anche un controller: fai clic su un'assegnazione di tasto e premi un pulsante del controller, oppure tieni LB, RB, LT o RT e premine un altro per una combinazione (Pad:LB+A); premi e rilascia LB, RB, LT o RT da solo per assegnare quel pulsante.",
     "help": "Clicca un tasto, poi premi quello nuovo. Cliccalo di nuovo per annullare; Esc annulla e chiude il menu. Rimuovi lascia un'azione senza tasto. Salvato in kiln/config/keybinds.json.",
     "col_action": "Azione",
     "col_key": "Tasto",

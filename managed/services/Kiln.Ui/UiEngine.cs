@@ -662,7 +662,11 @@ internal static unsafe class UiEngine
             {
                 if (!b.IsDown) continue;
                 b.IsDown = false;
-                if (b.OnRelease is { } r) UiModCalls.Invoke(b.Owner, static a => a(), r, $"key {b.Id} release");
+                if (b.OnRelease is { } r)
+                {
+                    if (pad) UiKeyDispatch.Post(() => { if (!b.Disposed) UiModCalls.Invoke(b.Owner, static a => a(), r, $"key {b.Id} release"); }, release: true);
+                    else UiModCalls.Invoke(b.Owner, static a => a(), r, $"key {b.Id} release");
+                }
                 continue;
             }
             if (b.Key.Mods != mods) continue;
@@ -677,7 +681,19 @@ internal static unsafe class UiEngine
             }
             b.IsDown = !wheel;  // a notch has no release
             Interlocked.Increment(ref b._presses);
-            if (b.OnPress is { } p) UiModCalls.Invoke(b.Owner, static a => a(), p, $"key {b.Id}");
+            if (b.OnPress is { } p)
+            {
+                if (pad)
+                {
+                    if (!UiKeyDispatch.Post(() => { if (!b.Disposed) UiModCalls.Invoke(b.Owner, static a => a(), p, $"key {b.Id}"); }))
+                    {
+                        b.IsDown = false;
+                        Interlocked.Decrement(ref b._presses);
+                        continue; // a full queue must not take a press it cannot deliver
+                    }
+                }
+                else UiModCalls.Invoke(b.Owner, static a => a(), p, $"key {b.Id}");
+            }
             consumed |= b.Consume;
         }
         return consumed;

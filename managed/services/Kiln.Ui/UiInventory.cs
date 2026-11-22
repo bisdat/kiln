@@ -59,7 +59,7 @@ public sealed record SlotClickOptions
     /// (<see cref="Ui.Inventory.Selected"/>), on a screen with a pointer. <see cref="Button"/> and <see cref="Modifiers"/>
     /// are not used then; <see cref="Take"/> keeps the button from the game until it is let go, as the game would have seen
     /// it (its own action on that button does not happen; the buttons held for a combination still reach it). The
-    /// handler runs at once on the thread the game polls the pad from, with <see cref="SlotClick.Button"/>
+    /// handler runs on the client's main thread after the next game UI frame, with <see cref="SlotClick.Button"/>
     /// <see cref="SlotButton.Pad"/> and <see cref="SlotClick.Pad"/> set. No selected slot, a Kiln screen with the input or
     /// a stale frame: no click, the game gets the press. Next to a kiln-ui.dll older than 0.2.0-dev.30.5 it never fires. Since
     /// 0.2.0-dev.30.5 (mod API 0.2.14).</summary>
@@ -142,8 +142,7 @@ public static partial class Ui
         /// selected (null: none, a stale frame, another screen, or not known). It is the slot whose frame holds the focus
         /// of the game's UI navigation, which the d-pad and stick move (the slot draw's state byte 0, which the game sets
         /// from its focus test). With a mouse the game may move that focus with the pointer too, so for a mouse player
-        /// <see cref="Selected"/> can follow <see cref="Hovered"/>. Not checked in a game yet (client check
-        /// ui-fuzen.c2). Since 0.2.0-dev.30.5 (mod API 0.2.14).</summary>
+        /// <see cref="Selected"/> can follow <see cref="Hovered"/>. Not checked in a game yet: move focus between slots with the d-pad and confirm this follows it. Since 0.2.0-dev.30.5 (mod API 0.2.14).</summary>
         [ClientOnly, AnyThread]
         public static VisibleSlot? Selected => UiInventoryBridge.Selected();
     }
@@ -438,12 +437,15 @@ internal static unsafe class UiInventoryBridge
         if (matched.Length == 0 || SelectedWithScreen() is not { } sel) return false;
         var take = matched.Any(kv => kv.Value.Take);
         var click = new SlotClick(SlotButton.Pad, SlotModifiers.None, sel.Slot, sel.Screen, take) { Pad = chord };
-        foreach (var (id, sub) in matched)
+        if (!UiKeyDispatch.Post(() =>
         {
-            if (!PadSubs.ContainsKey(id)) continue;  // an earlier handler disposed this one
-            UiModCalls.Invoke(sub.Mod, sub.Handler, click, "slot pad press handler");
-            delivered++;
-        }
+            foreach (var (id, sub) in matched)
+            {
+                if (!PadSubs.ContainsKey(id)) continue; // disposed or retired before delivery, possibly by an earlier handler
+                UiModCalls.Invoke(sub.Mod, sub.Handler, click, "slot pad press handler");
+            }
+        })) return false;
+        delivered = matched.Length;
         return take;
     }
 

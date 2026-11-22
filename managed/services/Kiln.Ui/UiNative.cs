@@ -926,6 +926,7 @@ internal static unsafe class UiNative
         GraphicsOverride = null;
         MouseKeysAvailable = false;
         PadKeysAvailable = false;
+        UiKeyDispatch.ResetForTests();
     }
 
     public static bool Available => T != null;
