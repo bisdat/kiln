@@ -61,6 +61,8 @@ pub struct Inputs {
     pub accepted: Vec<String>,
     /// what went wrong while the inputs were made or read
     pub problems: Vec<String>,
+    /// what the reader should know about how the inputs were made
+    pub notes: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -115,6 +117,7 @@ pub fn prove(inp: &Inputs, when: &str) -> Proof {
         ..Default::default()
     };
     p.blockers.extend(inp.problems.iter().cloned());
+    p.notes.extend(inp.notes.iter().cloned());
     // the candidate record
     let mut cand_rows = BTreeMap::new();
     match &inp.candidate {
@@ -498,6 +501,11 @@ fn read_json(p: &Path) -> Result<Value> {
     serde_json::from_str(&t).with_context(|| format!("{} is not JSON", p.display()))
 }
 
+/// How long one tool may run (a reflection dump or an archive read takes seconds to a few minutes).
+const PYTHON_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
+
+/// Runs a tool of the Kiln tree: isolated (`-I`), writing no bytecode into the tree (`-B`), its output into `out/<log>`,
+/// stopped (by its own pid) after [`PYTHON_TIMEOUT`].
 fn python(tree: &Path, script: &str, args: &[&std::ffi::OsStr], out: &Path, log: &str) -> Result<std::process::ExitStatus> {
     let tool = tree.join(script);
     if !tool.is_file() {
@@ -505,15 +513,28 @@ fn python(tree: &Path, script: &str, args: &[&std::ffi::OsStr], out: &Path, log:
     }
     let logf = std::fs::File::create(out.join(log)).with_context(|| format!("creating {}", out.join(log).display()))?;
     let err = logf.try_clone()?;
-    Command::new("python3")
-        .arg("-I")
+    let mut child = Command::new("python3")
+        .args(["-I", "-B"])
         .arg(&tool)
         .args(args)
         .env("KILN_OUT", out.join("kfc"))
+        .env("PYTHONDONTWRITEBYTECODE", "1")
         .stdout(logf)
         .stderr(err)
-        .status()
-        .with_context(|| format!("running python3 {script}"))
+        .spawn()
+        .with_context(|| format!("running python3 {script}"))?;
+    let t0 = std::time::Instant::now();
+    loop {
+        if let Some(st) = child.try_wait()? {
+            return Ok(st);
+        }
+        if t0.elapsed() > PYTHON_TIMEOUT {
+            let _ = child.kill();
+            let _ = child.wait();
+            bail!("python3 {script} ran longer than {} minutes and was stopped", PYTHON_TIMEOUT.as_secs() / 60);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
 }
 
 /// The registries' root types (and a drop table's naming component): the closure kilnctl dumps.
@@ -556,13 +577,14 @@ fn copy_tree(from: &Path, to: &Path) -> Result<()> {
     Ok(())
 }
 
-/// The candidate record and the new build's id table from regmap_check.py --record (in a scratch copy of the tree's
-/// regmap/ and schema/, so nothing is written into the tree).
-fn run_record(g: &Gather, exe: &Path, new_sha: &str, old_sha: Option<&str>, prev_ids: Option<&ids::IdTable>, problems: &mut Vec<String>)
-    -> Result<(Option<Value>, Option<ids::IdTable>)> {
+/// The candidate record and the new build's id table from regmap_check.py --record, in a scratch copy of the tree's
+/// regmap/common and schema/ (nothing is written into the tree). No build record is copied: only the record this run
+/// writes can be the candidate.
+fn run_record(g: &Gather, exe: &Path, new_sha: &str, old_sha: Option<&str>, prev_ids: Option<&ids::IdTable>, problems: &mut Vec<String>,
+              notes: &mut Vec<String>) -> Result<(Option<Value>, Option<ids::IdTable>)> {
     let root = g.out.join("root");
     let _ = std::fs::remove_dir_all(&root);
-    copy_tree(&g.tree.join("regmap"), &root.join("regmap"))?;
+    copy_tree(&g.tree.join("regmap/common"), &root.join("regmap/common"))?;
     copy_tree(&g.tree.join("schema"), &root.join("schema"))?;
     let entries = g.out.join("entries.json");
     let st = python(&g.tree, "tools/registrygen/regmap_entries.py", &["--exe".as_ref(), exe.as_os_str(), "--out".as_ref(), entries.as_os_str()],
@@ -593,9 +615,19 @@ fn run_record(g: &Gather, exe: &Path, new_sha: &str, old_sha: Option<&str>, prev
     let refs: Vec<&std::ffi::OsStr> = args.iter().map(|a| a.as_os_str()).collect();
     let st = python(&g.tree, "tools/registrygen/regmap_check.py", &refs, &g.out, "regmap_check.log")?;
     let rec = root.join("regmap").join(&g.side).join(format!("{new_sha}.json"));
+    let log = g.out.join("regmap_check.log");
     if !rec.is_file() {
-        problems.push(format!("regmap_check.py --record wrote no record ({st}; {})", g.out.join("regmap_check.log").display()));
+        problems.push(format!("regmap_check.py --record wrote no record ({st}; {})", log.display()));
         return Ok((None, None));
+    }
+    match st.code() {
+        Some(0) => {}
+        // exit 1 after the record: rows with errors, listed unmapped in it
+        Some(1) => notes.push(format!("regmap_check.py reported errors in rows (they are unmapped in the candidate; {})", log.display())),
+        _ => {
+            problems.push(format!("regmap_check.py --record failed ({st}; {}): its record is not taken", log.display()));
+            return Ok((None, None));
+        }
     }
     let table = if have_entries && ids_out.is_file() {
         Some(ids::IdTable::parse(&std::fs::read_to_string(&ids_out)?, &g.side, new_sha)?)
@@ -733,7 +765,8 @@ pub fn gather(g: &Gather) -> Result<Inputs> {
     match (&g.record, &g.new_exe) {
         (Some(r), _) => inp.candidate = Some(read_json(r)?),
         (None, Some(exe)) => {
-            let (rec, table) = run_record(g, exe, &inp.new_exe_sha, inp.old_exe_sha.as_deref(), inp.prev_ids.as_ref(), &mut inp.problems)?;
+            let (rec, table) = run_record(g, exe, &inp.new_exe_sha, inp.old_exe_sha.as_deref(), inp.prev_ids.as_ref(), &mut inp.problems,
+                                          &mut inp.notes)?;
             inp.candidate = rec;
             inp.new_ids = table;
         }
@@ -1213,6 +1246,65 @@ mod tests {
         let data2 = root.join("game2/kiln/data");
         keep(&pb, &bad, &store, Some(&data2)).unwrap();
         assert!(!data2.exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A Kiln tree with fake python tools (regmap_entries.py exits 1; regmap_check.py as `check` says) and a verified
+    /// record of the build already in it, as the shipped build has; returns (gather, exe sha).
+    fn fake_tools(root: &Path, check: &str) -> (Gather, String) {
+        let tree = root.join("kiln");
+        let w = |p: &Path, t: &str| {
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, t).unwrap();
+        };
+        w(&tree.join("regmap/common/gadgets.json"), r#"{"regmap": 1, "registry": "gadgets",
+            "entries": {"kind": "resource", "resourceType": "demo::Gadget"}, "rows": {"size": {"paths": ["stackLimit"], "conv": "int", "backend": "live"}}}"#);
+        w(&tree.join("schema/registry/gadgets.json"), "{}");
+        let exe = root.join("game/server.bin");
+        w(&exe, "MZ synthetic");
+        let sha = crate::util::sha256(&exe).unwrap();
+        w(&tree.join(format!("regmap/server/{sha}.json")), &json!({"regmap": 1, "side": "server", "exeSha256": sha, "verified": true,
+            "rows": {"gadgets.size": "ok"}, "stale": true}).to_string());
+        w(&tree.join("tools/registrygen/regmap_entries.py"), "import sys\nsys.exit(1)\n");
+        w(&tree.join("tools/registrygen/regmap_check.py"), check);
+        w(&root.join("dumps/new.json"), &json!({"exe_sha256": sha, "types": []}).to_string());
+        w(&root.join("dumps/old.json"), &json!({"exe_sha256": OLD, "types": []}).to_string());
+        let g = Gather {
+            side: "server".into(), tree, out: root.join("out"), store: Some(ids::Store { dir: root.join("store") }), new_exe: Some(exe),
+            new_refl: Some(root.join("dumps/new.json")), old_refl: Some(root.join("dumps/old.json")), ..Default::default()
+        };
+        (g, sha)
+    }
+
+    /// regmap_check.py writing this run's record (`fresh`) into --root, then exiting with `code`.
+    fn writing_check(code: u8) -> String {
+        format!("import sys, json, hashlib, pathlib\na = sys.argv\nroot = pathlib.Path(a[a.index('--root') + 1])\n\
+                 side = a[a.index('--side') + 1]\nsha = hashlib.sha256(open(a[a.index('--exe') + 1], 'rb').read()).hexdigest()\n\
+                 p = root / 'regmap' / side / (sha + '.json')\np.parent.mkdir(parents=True, exist_ok=True)\n\
+                 p.write_text(json.dumps({{'regmap': 1, 'side': side, 'exeSha256': sha, 'verified': True, 'rows': {{'gadgets.size': 'ok'}}, 'fresh': True}}))\n\
+                 sys.exit({code})\n")
+    }
+
+    #[test]
+    fn a_failed_regmap_check_never_leaves_an_old_record_as_the_candidate() {
+        let root = scratch("m2");
+        // exits 1 and writes nothing: the tree's old record must not stand in
+        let (g, _) = fake_tools(&root, "import sys\nsys.exit(1)\n");
+        let inp = gather(&g).unwrap();
+        assert!(inp.candidate.is_none(), "{:?}", inp.candidate);
+        assert!(inp.problems.iter().any(|p| p.contains("wrote no record")), "{:?}", inp.problems);
+        // writes a record but fails: not a candidate either
+        let (g, _) = fake_tools(&root, &writing_check(3));
+        let inp = gather(&g).unwrap();
+        assert!(inp.candidate.is_none(), "{:?}", inp.candidate);
+        assert!(inp.problems.iter().any(|p| p.contains("failed") && p.contains("3")), "{:?}", inp.problems);
+        // exit 1 with this run's record: errors in rows (listed unmapped); the fresh record is the candidate
+        let (g, _) = fake_tools(&root, &writing_check(1));
+        let inp = gather(&g).unwrap();
+        assert_eq!(inp.candidate.as_ref().and_then(|c| c.get("fresh")), Some(&json!(true)), "{:?}", inp.candidate);
+        assert!(inp.notes.iter().any(|n| n.contains("errors")), "{:?}", inp.notes);
+        // nothing of python lands in the tree (python3 -B)
+        assert!(!g.tree.join("tools/registrygen/__pycache__").exists());
         let _ = std::fs::remove_dir_all(&root);
     }
 
