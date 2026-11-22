@@ -8,26 +8,54 @@ static unsigned checks;
 static bool bind_ok=true;
 bool kiln_tools_bind_programs(KilnOwner,const KilnToolFamilyDef&) noexcept {return bind_ok;}
 void kiln_tools_unbind_programs(KilnOwner,uint32_t) noexcept {}
-static RootIdentity* vanilla_identity(RootIdentity* out,const uint32_t*) {*out={123,456,789,1,{}};return out;}
+static bool identity_has_policy;
+static RootIdentity* vanilla_identity(RootIdentity* out,const uint32_t*) {identity_has_policy=kiln_tools_active_policy()!=nullptr;*out={123,456,789,1,{}};return out;}
 static unsigned lookup_calls;
 static const uint8_t* KILN_CALL vanilla_lookup(void*,uint8_t) {static uint8_t config; ++lookup_calls;return &config;}
 static KilnHooksApi fake_hooks{};
 static KilnOwner revoked_owner{};
 static bool statuses_closed{};
-static const void* KILN_CALL service(KilnStr name,uint32_t) {return std::string(name.ptr,name.len)==KILN_HOOKS_SERVICE?&fake_hooks:nullptr;}
+static KilnCapsApi fake_caps{};
+struct Capability {uint32_t state,reason;};
+static std::map<std::string,Capability> capabilities;
+static KilnResult KILN_CALL report_cap(KilnOwner,KilnStr name,uint32_t state,uint32_t reason,KilnStr) {
+    capabilities[std::string(name.ptr,name.len)]={state,reason};return KILN_OK;
+}
+static const void* KILN_CALL service(KilnStr name,uint32_t) {
+    const std::string id(name.ptr,name.len);
+    return id==KILN_HOOKS_SERVICE?static_cast<const void*>(&fake_hooks):id==KILN_CAPS_SERVICE?&fake_caps:nullptr;
+}
 static unsigned retiring_attempts;
 static KilnOwner KILN_CALL parent_returned(KilnStr) {return 66;}
 static KilnResult KILN_CALL retire_refused(KilnOwner,KilnOwnerRetiringFn,void*,KilnHandle*) {++retiring_attempts;return KILN_ERR_UNAVAILABLE;}
+static uint32_t reported_side=KILN_SIDE_CLIENT;
+static bool reported_online=true,reported_hooks=true;
 static KilnResult KILN_CALL client_build(KilnBuildInfo* out) {
-    *out={};out->size=sizeof(*out);out->side=KILN_SIDE_CLIENT;out->verified=1;out->hooks_enabled=1;
+    if(!reported_online)return KILN_ERR_UNAVAILABLE;
+    *out={};out->size=sizeof(*out);out->side=reported_side;out->verified=1;out->hooks_enabled=reported_hooks;
     std::strcpy(out->exe_sha256,"5d9ef2f140b8ed49e30dbee655841b89d08baec20f799a1817e171a18a850c77");return KILN_OK;
 }
 static KilnResult KILN_CALL raw(KilnOwner,uintptr_t target,const KilnHookOrder*,void*,void** original,KilnHandle* handle) {*original=target==2?reinterpret_cast<void*>(&vanilla_lookup):reinterpret_cast<void*>(&vanilla_identity);*handle=target;return KILN_OK;}
 static KilnResult KILN_CALL revoke(KilnHandle) {return KILN_OK;}
-static KilnResult KILN_CALL revoke_owner(KilnOwner owner) {revoked_owner=owner;statuses_closed=!kiln_tools_hook_installed(KILN_TOOL_HOOK_IDENTITY);return KILN_OK;}
+static KilnResult KILN_CALL revoke_owner(KilnOwner owner) {
+    revoked_owner=owner;statuses_closed=!kiln_tools_hook_installed(KILN_TOOL_HOOK_IDENTITY)&&
+        (!fake_caps.report||capabilities["tools.identity"].state==KILN_CAP_UNAVAILABLE);return KILN_OK;
+}
 static void KILN_CALL owner_revoke(KilnOwner owner) {revoked_owner=owner;}
-static KilnResult KILN_CALL tick(KilnOwner,int32_t,KilnTickFn,void*,KilnHandle* out) {*out=9;return KILN_OK;}
+static bool teardown_on_lease,retire_on_lease,lease_owner_gone;
+static KilnResult KILN_CALL tick(KilnOwner owner,int32_t,KilnTickFn,void*,KilnHandle* out) {
+    if(lease_owner_gone)return KILN_ERR_REVOKED;
+    if(teardown_on_lease) {teardown_on_lease=false;kiln_tools_presentation_uninstall();}
+    if(retire_on_lease) {retire_on_lease=false;owner_retiring(owner,nullptr);lease_owner_gone=true;}
+    *out=9;return KILN_OK;
+}
 static KilnResult KILN_CALL unsubscribe(KilnHandle) {return KILN_OK;}
+static uint32_t qualification_state=KILN_CODE_ORIGINAL;
+static KilnResult KILN_CALL original_bytes(uintptr_t,void* out,size_t size) {
+    static const uint8_t bytes[]={0x55,0x48,0x89,0xe5};if(size>sizeof bytes)return KILN_ERR_INVALID_ARGUMENT;
+    std::memcpy(out,bytes,size);return KILN_OK;
+}
+static KilnResult KILN_CALL code_state(uintptr_t,size_t,uint32_t* state,uint64_t* generation) {*state=qualification_state;*generation=1;return KILN_OK;}
 static uint32_t hash_guid(const uint8_t* guid) {return fnv(guid,16);}
 static KilnToolFamilyDef definition(uint8_t last=1) {
     static KilnToolPoolMaterial materials[]={{1257792166u,8,16,0}};
@@ -84,10 +112,42 @@ int main() {
     CHECK(kiln_tools_material_snapshot(1,first.tool,&snapshot)==KILN_ERR_UNAVAILABLE);
     CHECK(snapshot.size==sizeof snapshot&&snapshot.count==0&&snapshot.selected_item==0&&snapshot.session==0);
     CHECK(std::all_of(reinterpret_cast<const uint8_t*>(snapshot.rows),reinterpret_cast<const uint8_t*>(snapshot.rows)+sizeof snapshot.rows,[](uint8_t b){return b==0;}));
+    fake.build_info=&client_build;parent_owner=66;fake_caps.report=&report_cap;report_caps();
+    CHECK(capabilities["tools.identity"].state==KILN_CAP_AVAILABLE);
     kiln_tools_presentation_uninstall();CHECK(revoked_owner==88&&statuses_closed);
+    CHECK(capabilities["tools.identity"].state==KILN_CAP_UNAVAILABLE);
     fake.owner_create=&parent_returned;fake.build_info=&client_build;fake_hooks.subscribe_owner_retiring=&retire_refused;
     revoked_owner=0;retiring_attempts=0;kiln_tools_presentation_install(&fake,66);
     CHECK(child==0&&revoked_owner==0&&retiring_attempts==0); // Never revoke the parent when child creation aliases it.
+    KilnToolPresentationStatus status{};status.size=sizeof status;
+    reported_online=false;CHECK(kiln_tools_presentation_status(&status)==KILN_OK&&status.reason==KILN_CAP_REASON_OFFLINE);
+    reported_online=true;reported_side=KILN_SIDE_SERVER;
+    CHECK(kiln_tools_presentation_status(&status)==KILN_OK&&status.reason==KILN_CAP_REASON_WRONG_SIDE);
+    kiln_tools_report_hook(KILN_TOOL_HOOK_MATERIAL_LOOKUP,1);report_caps();
+    CHECK(capabilities.contains("tools.material_lookup")&&capabilities["tools.material_lookup"].state==KILN_CAP_AVAILABLE);
+    kiln_tools_report_hook(KILN_TOOL_HOOK_MATERIAL_LOOKUP,0);report_caps();
+    CHECK(capabilities["tools.material_lookup"].state==KILN_CAP_UNAVAILABLE);
+    reported_side=KILN_SIDE_CLIENT;reported_hooks=false;
+    CHECK(kiln_tools_presentation_status(&status)==KILN_OK&&status.reason==KILN_CAP_REASON_POLICY);
+    reported_hooks=true;report_caps();fake_caps.report=nullptr;
+    api=&fake;hooks=&fake_hooks;child=88;retiring=99;
+    for(uint32_t i=0;i<KILN_TOOL_HOOK_COUNT;++i)kiln_tools_report_hook(i,1);
+    auto racing=definition();teardown_on_lease=true;
+    CHECK(kiln_tools_define_family(7,&racing,&one)==KILN_ERR_UNAVAILABLE&&one==0);
+    CHECK(!families.family(racing.tool)&&!kt::policy_for_tool(racing.tool,0));
+    child=88;retiring=99;
+    for(uint32_t i=0;i<KILN_TOOL_HOOK_COUNT;++i)kiln_tools_report_hook(i,1);
+    retire_on_lease=true;
+    CHECK(kiln_tools_define_family(7,&racing,&one)==KILN_ERR_REVOKED&&one==0);
+    CHECK(!families.family(racing.tool)&&!kt::policy_for_tool(racing.tool,0));
+    lease_owner_gone=false;kiln_tools_presentation_uninstall();
+    fake_hooks.read_original=&original_bytes;fake_hooks.code_state=&code_state;
+    qualification_state=KILN_CODE_ORIGINAL;CHECK(qualify(1,"55 48 ?? E5"));
+    qualification_state=KILN_CODE_MANAGED;CHECK(qualify(1,"55 48 ?? E5"));
+    qualification_state=KILN_CODE_FOREIGN;CHECK(!qualify(1,"55 48 ?? E5"));
+    qualification_state=KILN_CODE_UNKNOWN;CHECK(!qualify(1,"55 48 ?? E5"));
+    qualification_state=KILN_CODE_ORIGINAL;CHECK(!qualify(1,"55 48 88 E5"));
+    fake_hooks.read_original=nullptr;CHECK(!qualify(1,"55 48 ?? E5"));
     std::cout<<"presentation API: "<<checks<<" checks passed\n";
     return 0;
 }

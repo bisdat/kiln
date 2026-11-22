@@ -77,7 +77,8 @@ supplies. An unavailable producer returns `false`; Kiln does not invent counts o
 | Capability | Meaning | Refusal |
 |---|---|---|
 | `tools.actions` | The complete authoritative action pipeline is qualified. | Missing required hook/context, offline or no session. |
-| `tools.material_picker` | Terrain group2 is filtered using an owned native held-tool observation; the game's aggregate supply counts are retained. | Missing selector/held-tool mapping; client-only presentation on a server. |
+| `tools.material_lookup` | The installed invocation-scoped lookup refuses terrain cells outside an Add policy's material pool. | Missing lookup hook, offline or hooks disabled; supported on client and server. |
+| `tools.material_picker` | Terrain group2 is filtered only when the owned held-tool observation and the current call's resolved item agree; the game's aggregate supply counts are retained. | Missing selector/held-tool mapping; client-only presentation on a server. |
 | `tools.material_snapshot` | A separate per-player backpack/magic-chest observation producer is qualified. | Currently unavailable: aggregate selector counts are never fabricated into two sources. |
 | `tools.preview` | The explicit-item preview has an owned bounded row adapter. | Missing constructor mapping, wrong side or hooks disabled. |
 | `tools.brush_families` | A checked call-site adapter changes only the current tool frame's owned brush-query GUIDs. | Missing exact frame/query/held-tool context, checked-hook refusal or wrong side. |
@@ -85,8 +86,12 @@ supplies. An unavailable producer returns `false`; Kiln does not invent counts o
 
 The native client-Post observer copies the actual main-hand/action selection into an owned scalar snapshot tagged by
 actor, owner, generation, session and step. A missing, changed or older-than-one-step sample does not admit a tool.
-It filters only terrain group2, leaving all six other categories unchanged. The qualified preview uses each call's
-explicit item, independently of that held observation.
+Admission also checks the current selector call's resolved held item with guarded reads: a switch to a vanilla item
+within that step, a missing pointer, a failed read or a root mismatch leaves every group untouched. It filters only
+terrain group2, leaving all six other categories unchanged. The qualified preview uses each call's explicit item,
+independently of that held observation. Presentation calls mask any outer impact policy for their full duration and
+restore it on return, including nested vanilla calls. Failed owned-row reads leave an empty presentation, not an
+unchecked pointer or an inherited selection.
 
 The brush adapter is confined to the qualified frame drawer's call instruction. It requires the selected hotbar root
 and resolved item to match the registered held family, then rewrites only that call's owned include/ratio GUID values.

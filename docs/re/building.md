@@ -135,7 +135,10 @@ function-local disassembly) and LLVM disassembly. No client execution was perfor
   Only terrain group2 is filtered. Root/brush category `Blueprints` (10), equipment `BuildTool` (3) and vanilla terrain
   pool GUID `256c43ba-dd20-4369-b3bf-f49c671a59ec` select group2 before Overgrowth flags. The runtime map is keyed by
   pool ID, not equipment slot; a second row repeating terrain items adds magic stock again even with vanilla held.
-  Tool pools therefore stay policy metadata and leave the game-visible pool resource unchanged.
+  Tool pools therefore stay policy metadata and leave the game-visible pool resource unchanged. The parent
+  `0x40e2b0` reads this call's resolved held ItemInfo from `access+0x78` for category routing; its caller publishes
+  that pointer alongside SlotSelection. Guarded root agreement with this per-call item prevents a prior Post sample
+  from filtering a newly selected vanilla tool in the same client step.
 - `0xb1a230` is an **item presentation constructor**:
   `out = constructor(out, ItemInfo*, selectorGroup*)`. The traced direct caller obtains its item from the selected
   hotbar model (`0xd43f40`), not necessarily the running action's `actionItem`. Hover provenance is not established.

@@ -66,11 +66,19 @@ class MaterialLookupSignatureTest(unittest.TestCase):
         image = Image(self.args.client)
         doc = next(doc for name, doc, _ in compose("client") if name == "tools-presentation.json")
         resolver = Resolver(image, doc)
-        expected = {"tools/MaterialSelector": 0x40e5d0, "tools/BrushQueryFrame": 0xc3fe18, "tools/BrushQuery": 0xd25b50}
+        expected = {"tools/MaterialSelector": 0x40e5d0, "tools/MaterialPreview": 0xb1a230,
+                    "tools/RootIdentity": 0xd3e130, "tools/BrushQueryFrame": 0xc3fe18, "tools/BrushQuery": 0xd25b50}
         for symbol, rva in expected.items():
             for strategy in doc["symbols"][symbol]["find"]:
                 hits = resolver.scan(parse(strategy["pattern"])[0], resolver.text_lo, resolver.text_hi, limit=100)
                 self.assertEqual([hit + strategy.get("offset", 0) for hit in hits], [rva], symbol)
+                print(f"client 26430625: {symbol} has one match at {rva:#x}", flush=True)
+        core = json.loads((ROOT / "sigdb/symbols/client.json").read_text())
+        core_resolver = Resolver(image, core)
+        for strategy in core["symbols"]["GetComponent"]["find"]:
+            hits = core_resolver.scan(parse(strategy["pattern"])[0], core_resolver.text_lo, core_resolver.text_hi, limit=100)
+            self.assertEqual(hits, [0x9b2ec0])
+            print("client 26430625: GetComponent has one match at 0x9b2ec0", flush=True)
         site = expected["tools/BrushQueryFrame"]
         self.assertEqual(image.img[site], 0xe8)
         relative = int.from_bytes(image.img[site+1:site+5], "little", signed=True)

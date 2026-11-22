@@ -67,6 +67,55 @@ void KILN_CALL owner_retiring(KilnOwner owner,void*) {
     }
 }
 void KILN_CALL noop_tick(const KilnTickInfo*,void*) {}
+bool copy_game_value(void* out,const void* source,size_t size) noexcept {
+    if(!source)return false;
+#ifdef _WIN32
+    __try {
+#endif
+        std::memcpy(out,source,size);return true;
+#ifdef _WIN32
+    } __except(EXCEPTION_EXECUTE_HANDLER) {return false;}
+#endif
+}
+uint32_t presentation_item(const uint32_t* item) noexcept {
+    uint32_t value=0;return copy_game_value(&value,item,sizeof value)?value:0;
+}
+bool filter_selector_view(SelectorGroup* group,const std::vector<Material>& pool) noexcept {
+#ifdef _WIN32
+    __try {
+#endif
+        return filter_selector(*group,pool);
+#ifdef _WIN32
+    } __except(EXCEPTION_EXECUTE_HANDLER) {return false;}
+#endif
+}
+bool filter_preview_view(PreviewOwner* out,const std::vector<Material>& pool) noexcept {
+#ifdef _WIN32
+    __try {
+#endif
+        return filter_preview(*out,pool);
+#ifdef _WIN32
+    } __except(EXCEPTION_EXECUTE_HANDLER) {return false;}
+#endif
+}
+void clear_selector_view(SelectorGroup* group) noexcept {
+#ifdef _WIN32
+    __try {
+#endif
+        group->count=0;group->selected=0;group->has_selected=0;
+#ifdef _WIN32
+    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+#endif
+}
+void clear_preview_view(PreviewOwner* out) noexcept {
+#ifdef _WIN32
+    __try {
+#endif
+        out->view=nullptr;out->view_count=0;out->owned.count=0;out->selected_item=0;out->selected_count=0;
+#ifdef _WIN32
+    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+#endif
+}
 
 const uint8_t* KILN_CALL lookup(void* registry,uint8_t cell) {
     const auto* policy=kiln_tools_active_policy();
@@ -78,12 +127,18 @@ const uint8_t* KILN_CALL lookup(void* registry,uint8_t cell) {
     return lookup_hook.call<const uint8_t*>(registry,cell);
 }
 void KILN_CALL selector(SelectorGroup* groups,void* access,uint8_t current_only) {
+    kt::ToolPolicyScope no_impact_policy(nullptr);
     // A quiet-tick owned observation, sampled once per entry. Never borrow another preview's identity or policy TLS.
-    const auto family=held_family();
+    auto family=held_family();
+    // Access[15] is this update's resolved held ItemInfo, also used by the native category routing.
+    // A previous Post sample must not filter a vanilla item selected later in the same client step.
+    const uint32_t* item=nullptr;
+    if(family&&(!access||!copy_game_value(&item,static_cast<const uint8_t*>(access)+0x78,sizeof item)||
+        families.root(presentation_item(item))!=family->tool))family.reset();
     selector_hook.call<void>(groups,access,current_only);
     // Blueprint category10 + BuildTool3 + vanilla TerrainMaterials selects group2 before Overgrowth flags.
     // The other six groups (arrows, spells, wall, roof, vanilla Overgrowth, bait) remain untouched.
-    if(groups&&family)filter_selector(groups[2],family->materials);
+    if(groups&&family&&!filter_selector_view(groups+2,family->materials))clear_selector_view(groups+2);
 }
 void report_caps();
 void brush_query_frame(KilnRegisters& regs) {
@@ -99,22 +154,27 @@ void brush_query_frame(KilnRegisters& regs) {
     }
 }
 PreviewOwner* KILN_CALL preview(PreviewOwner* out,const uint32_t* item,SelectorGroup* group) {
+    kt::ToolPolicyScope no_impact_policy(nullptr);
     // Capture this invocation's explicit item identity before the original runs. A nested item-presentation
     // constructor cannot lend its family to this call; only the owned immutable metadata stays pinned.
-    auto family=item?families.family(families.root(*item)):nullptr;
+    auto family=families.family(families.root(presentation_item(item)));
     auto* result=preview_hook.call<PreviewOwner*>(out,item,group);
-    if(result&&family)filter_preview(*result,family->materials);
+    if(result&&family&&!filter_preview_view(result,family->materials))clear_preview_view(result);
     return result;
 }
 struct RootIdentity {uint32_t item,name,description;uint8_t present,reserved[3];};
 static_assert(sizeof(RootIdentity)==16);
 RootIdentity* KILN_CALL identity(RootIdentity* out,const uint32_t* item) {
+    kt::ToolPolicyScope no_impact_policy(nullptr);
     if(out&&item) {
-        const auto root=families.root(*item);
+        const auto root=families.root(presentation_item(item));
         if(root) {
             std::array<uint8_t,16> guid{};
             {std::lock_guard lock(gate);auto i=identities.find(root);if(i!=identities.end())guid=i->second;}
-            if(fnv(guid.data(),guid.size())==root) {*out={root,text_tag(guid,"kiln.item.name"),text_tag(guid,"kiln.item.description"),1,{}};return out;}
+            if(fnv(guid.data(),guid.size())==root) {
+                const RootIdentity value{root,text_tag(guid,"kiln.item.name"),text_tag(guid,"kiln.item.description"),1,{}};
+                if(copy_game_value(out,&value,sizeof value))return out;
+            }
         }
     }
     return identity_hook.call<RootIdentity*>(out,item);
@@ -141,11 +201,15 @@ void report_caps() {
     if(!caps||!caps->report)return;
     KilnBuildInfo build{};build.size=sizeof build;
     const bool online=api->build_info&&api->build_info(&build)==KILN_OK;
-    const uint32_t reason=!online?KILN_CAP_REASON_OFFLINE:build.side!=KILN_SIDE_CLIENT?KILN_CAP_REASON_WRONG_SIDE:!build.hooks_enabled?KILN_CAP_REASON_POLICY:KILN_CAP_REASON_SYMBOL_MISSING;
-    auto report=[&](const char* name,bool ready,const char* missing) {
-        const char* why=ready?"qualified native tool presentation adapter installed":!online?"no game in this process":build.side!=KILN_SIDE_CLIENT?"tool presentation is client-only":!build.hooks_enabled?"hooks are disabled by the build policy":missing;
+    const bool enabled=online&&build.verified&&build.hooks_enabled;
+    auto report=[&](const char* name,bool installed,const char* missing,bool client_only=true) {
+        const bool wrong_side=client_only&&build.side!=KILN_SIDE_CLIENT;
+        const bool ready=enabled&&!wrong_side&&installed;
+        const uint32_t reason=!online?KILN_CAP_REASON_OFFLINE:wrong_side?KILN_CAP_REASON_WRONG_SIDE:!enabled?KILN_CAP_REASON_POLICY:KILN_CAP_REASON_SYMBOL_MISSING;
+        const char* why=ready?"qualified native tool presentation adapter installed":!online?"no game in this process":wrong_side?"tool presentation is client-only":!enabled?"hooks are disabled by the build policy":missing;
         caps->report(parent_owner,{name,std::strlen(name)},ready?KILN_CAP_AVAILABLE:KILN_CAP_UNAVAILABLE,ready?KILN_CAP_REASON_NONE:reason,{why,std::strlen(why)});
     };
+    report("tools.material_lookup",kiln_tools_hook_installed(KILN_TOOL_HOOK_MATERIAL_LOOKUP),"scoped terrain material lookup mapping is unavailable or its hook was refused",false);
     report("tools.material_picker",online&&build.side==KILN_SIDE_CLIENT&&kiln_tools_hook_installed(KILN_TOOL_HOOK_SELECTOR_BUILDER),"selector or owned held-tool observer is unavailable");
     report("tools.material_snapshot",false,"separate per-player backpack/magic-chest observations are not qualified; aggregate selector counts are not split or fabricated");
     report("tools.preview",online&&build.side==KILN_SIDE_CLIENT&&kiln_tools_hook_installed(KILN_TOOL_HOOK_PREVIEW),"owned preview constructor mapping is unavailable or its hook was refused");
@@ -182,7 +246,8 @@ KilnResult KILN_CALL kiln_tools_define_family(KilnOwner owner,const KilnToolFami
         definition->material_count>64||definition->brush_count<1||definition->brush_count>64||(!definition->materials&&definition->material_count)||!definition->brushes||
         !definition->name.ptr||definition->name.len<1||definition->name.len>1024||definition->description.len>16384||(!definition->description.ptr&&definition->description.len)||
         !valid_action(definition->primary)||!valid_action(definition->secondary)||fnv(definition->identity,16)!=definition->tool)return KILN_ERR_INVALID_ARGUMENT;
-    if(!api||!hooks||!child||!retiring||!required_hooks(definition->primary)||!required_hooks(definition->secondary))return KILN_ERR_UNAVAILABLE;
+    if(!api||!hooks||!required_hooks(definition->primary)||!required_hooks(definition->secondary))return KILN_ERR_UNAVAILABLE;
+    {std::lock_guard lock(gate);if(!child||!retiring)return KILN_ERR_UNAVAILABLE;}
     KilnHandle lease=0;auto alive=api->subscribe_tick(owner,KILN_TICK_PRE,&noop_tick,nullptr,&lease);if(alive!=KILN_OK)return alive;api->unsubscribe(lease);
     try {
         Family family{definition->tool,std::string(definition->name.ptr,definition->name.len),std::string(definition->description.ptr?definition->description.ptr:"",definition->description.len),{}, {}};
@@ -197,6 +262,12 @@ KilnResult KILN_CALL kiln_tools_define_family(KilnOwner owner,const KilnToolFami
         for(uint32_t i=0;i<definition->brush_count;++i)registration.ids.push_back(definition->brushes[i].item);
         std::array<uint8_t,16> guid;std::memcpy(guid.data(),definition->identity,16);
         std::lock_guard lock(gate);
+        // The owner lease can race teardown; validate admission again at the publication boundary.
+        if(!child||!retiring||!required_hooks(definition->primary)||!required_hooks(definition->secondary))return KILN_ERR_UNAVAILABLE;
+        // Retirement marks an owner dead before its callback takes this gate. A last live-owner check under
+        // the same gate ensures either refusal now or cleanup of this publication by that pending callback.
+        lease=0;alive=api->subscribe_tick(owner,KILN_TICK_PRE,&noop_tick,nullptr,&lease);
+        if(alive!=KILN_OK)return alive;api->unsubscribe(lease);
         if(registrations.size()>=4096||!next_handle)return KILN_ERR_UNAVAILABLE;
         if(!families.add(owner,std::move(family)))return KILN_ERR_INVALID_ARGUMENT;
         const auto handle=next_handle++;
@@ -231,9 +302,16 @@ KilnResult KILN_CALL kiln_tools_material_snapshot(KilnEntity,uint32_t,KilnToolMa
 }
 KilnResult KILN_CALL kiln_tools_presentation_status(KilnToolPresentationStatus* out) {
     if(!out||out->size<sizeof(*out))return KILN_ERR_INVALID_ARGUMENT;
-    *out={};out->size=sizeof(*out);out->picker=kiln_tools_hook_installed(KILN_TOOL_HOOK_SELECTOR_BUILDER)!=0;
-    out->preview=kiln_tools_hook_installed(KILN_TOOL_HOOK_PREVIEW)!=0;out->brushes=kiln_tools_hook_installed(KILN_TOOL_HOOK_BRUSH_PICKER)!=0;
-    out->identity=kiln_tools_hook_installed(KILN_TOOL_HOOK_IDENTITY)!=0;out->reason=out->picker&&out->preview&&out->brushes&&out->identity?KILN_CAP_REASON_NONE:KILN_CAP_REASON_SYMBOL_MISSING;return KILN_OK;
+    *out={};out->size=sizeof(*out);
+    KilnBuildInfo build{};build.size=sizeof build;
+    const bool online=api&&api->build_info&&api->build_info(&build)==KILN_OK;
+    const bool ready=online&&build.side==KILN_SIDE_CLIENT&&build.verified&&build.hooks_enabled;
+    out->picker=ready&&kiln_tools_hook_installed(KILN_TOOL_HOOK_SELECTOR_BUILDER);
+    out->preview=ready&&kiln_tools_hook_installed(KILN_TOOL_HOOK_PREVIEW);out->brushes=ready&&kiln_tools_hook_installed(KILN_TOOL_HOOK_BRUSH_PICKER);
+    out->identity=ready&&kiln_tools_hook_installed(KILN_TOOL_HOOK_IDENTITY);
+    out->reason=!online?KILN_CAP_REASON_OFFLINE:build.side!=KILN_SIDE_CLIENT?KILN_CAP_REASON_WRONG_SIDE:
+        !build.verified||!build.hooks_enabled?KILN_CAP_REASON_POLICY:out->picker&&out->preview&&out->brushes&&out->identity?KILN_CAP_REASON_NONE:KILN_CAP_REASON_SYMBOL_MISSING;
+    return KILN_OK;
 }
 void kiln_tools_presentation_install(const KilnApi* value,KilnOwner parent) {
     api=value;parent_owner=parent;struct Report {~Report(){report_caps();}} report;
@@ -259,9 +337,12 @@ void kiln_tools_presentation_install(const KilnApi* value,KilnOwner parent) {
     if(!client) {kiln_tools_report_hook(KILN_TOOL_HOOK_SELECTOR_BUILDER,0);kiln_tools_report_hook(KILN_TOOL_HOOK_BRUSH_PICKER,0);}
 }
 void kiln_tools_presentation_uninstall() {
+    KilnOwner retiring_child=0;
+    {std::lock_guard lock(gate);retiring_child=child;child=0;retiring=0;} // Close family admission before stopping producers.
     held_provider.store(nullptr,std::memory_order_release);held_observer.stop();
     for(auto id:{KILN_TOOL_HOOK_MATERIAL_LOOKUP,KILN_TOOL_HOOK_SELECTOR_BUILDER,KILN_TOOL_HOOK_PREVIEW,KILN_TOOL_HOOK_BRUSH_PICKER,KILN_TOOL_HOOK_IDENTITY})kiln_tools_report_hook(id,0);
+    report_caps(); // Parent-owned capability reports must close before the child hooks are revoked.
     {std::lock_guard lock(gate);for(const auto& [_,registration]:registrations)remove_locked(registration);registrations.clear();}
-    if(child&&hooks)hooks->revoke_owner(child);if(child&&api)api->owner_revoke(child);child=0;retiring=0;
+    if(retiring_child&&hooks)hooks->revoke_owner(retiring_child);if(retiring_child&&api)api->owner_revoke(retiring_child);
     brush_query_resume.store(0,std::memory_order_release);
 }
