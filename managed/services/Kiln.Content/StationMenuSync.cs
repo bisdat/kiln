@@ -450,6 +450,16 @@ internal static class StationMenuSync
     private static string? _appliedState;      // state id of the remote collection in place
     private static Guid _appliedSession;
     private static bool _contentRefused;
+    private static bool _holding;              // set_pending(1) is on: own workshops wait for the server's snapshot
+
+    /// <summary>The server's menus cannot be used (refused, timed out): own workshops show this game's own menus again. Once.</summary>
+    private static void EndHold(string why)
+    {
+        if (!_holding) return;
+        _holding = false;
+        StationMenuStore.Backend.SetPending(false);
+        Log(LogLevel.Warn, $"{why}: own workshops show this game's own menus");
+    }
     private static volatile bool _leavePending;
 
     private static void OnServerReady(NetPeer server)
@@ -462,6 +472,7 @@ internal static class StationMenuSync
     /// <summary>A mod's own workshops list nothing until the server's first snapshot is in (tests call it directly).</summary>
     internal static void BeginHold()
     {
+        _holding = true;
         StationMenuStore.Backend.SetPending(true);
         Log(LogLevel.Info, "joined a server with station menus: own workshops wait for its snapshot");
     }
@@ -479,6 +490,7 @@ internal static class StationMenuSync
         {
             Log(LogLevel.Warn, $"snapshot {Short(m.StateId)} refused: {refuse}");
             SendAck(m.StateId, m.Session, m.Generation, StageRefused, refuse);
+            EndHold("the server's station menus were refused");
             return;
         }
         if (done is null) return;
@@ -487,6 +499,7 @@ internal static class StationMenuSync
         {
             Log(LogLevel.Warn, $"snapshot {Short(m.StateId)} refused: {bad}");
             SendAck(m.StateId, m.Session, m.Generation, StageRefused, bad);
+            EndHold("the server's station menus were refused");
             return;
         }
         if (_appliedState == m.StateId && _appliedSession.ToString("D") == m.Session)
@@ -505,22 +518,27 @@ internal static class StationMenuSync
     {
         if (!Game.IsTickThread) return;
         Ready? r;
+        var timedOut = false;
         lock (Lock)
         {
             if (_staging is { } s && DateTime.UtcNow - s.Started > ReceiptDeadline)
             {
                 Log(LogLevel.Warn, $"snapshot {Short(s.StateId)}: {s.Have}/{s.Parts.Length} part(s) in {ReceiptDeadline.TotalSeconds:0} s; dropped");
+                SendAck(s.StateId, s.Session, s.Generation, StageRefused, $"PartsTimedOut: {s.Have}/{s.Parts.Length} part(s) in {ReceiptDeadline.TotalSeconds:0} s");
                 _staging = null;
+                timedOut = true;
             }
             r = _ready;
         }
+        if (timedOut) EndHold("the server's station menus did not arrive whole");
         if (r is null) return;
         if (!ContentReadyFor(r.ContentStateId))
         {
             if (!_contentRefused && DateTime.UtcNow - r.Since > ContentDeadline)
             {
-                _contentRefused = true;  // kept: tried again when the matching content state arrives
-                SendAck(r.StateId, r.Session, r.Generation, StageRefused, "ContentNotReady: the server's content state did not arrive in 120 s");
+                _contentRefused = true;  // kept: applied if the matching content state still arrives
+                SendAck(r.StateId, r.Session, r.Generation, StageRefused, $"ContentNotReady: the server's content state did not arrive in {ContentDeadline.TotalSeconds:0} s");
+                EndHold("the content the server's station menus list did not arrive");
             }
             return;
         }
@@ -531,10 +549,12 @@ internal static class StationMenuSync
             var why = error.Length > 0 ? error : StationMenuNative.Message(rc);
             Log(LogLevel.Warn, $"snapshot {Short(r.StateId)} not applied: {why}");
             SendAck(r.StateId, r.Session, r.Generation, StageRefused, why);
+            EndHold("this game could not use the server's station menus");
             return;
         }
         _appliedState = r.StateId;
         _appliedSession = Guid.TryParse(r.Session, out var g) ? g : Guid.Empty;
+        _holding = false;
         StationMenuStore.Backend.SetPending(false);
         SendAck(r.StateId, r.Session, r.Generation, StageApplied, "");
         Log(LogLevel.Info, $"snapshot {Short(r.StateId)} applied: {r.Menus} menu(s) from the server, generation {r.Generation}");
@@ -566,6 +586,7 @@ internal static class StationMenuSync
             _ready = null;
         }
         var had = _appliedState != null;
+        _holding = false;
         _appliedState = null;
         _appliedSession = Guid.Empty;
         if (!StationMenuStore.Available || !Kiln.Client.IsClient) return;
@@ -800,6 +821,7 @@ internal static class StationMenuSync
         TestPublishCheck = null;
         TestContentReady = null;
         TestChannelOpen = false;
+        _holding = false;
         ReceiptDeadline = DefaultReceiptDeadline;
         ContentDeadline = DefaultContentDeadline;
     }

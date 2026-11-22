@@ -221,9 +221,13 @@ follow. What authors write: [modding/world-blocks.md](modding/world-blocks.md#me
   A first menu defined while a Kiln client without the channel is in the world is refused (`PeersLackStationMenus`).
 - **Client.** It keeps the parts of one snapshot (another state, session or generation starts over; 30 s to get them
   all), checks the hash and the envelope (no definition or workshop twice), acks `stored`, waits until its content sync
-  applied the named content state (at most 120 s, then `refused ContentNotReady`, and tried again when that state
-  arrives), then swaps the server's collection in one call and acks `applied`. Until then a mod's own workshops list
-  nothing. Leaving the server takes the server's menus off. The same snapshot again changes nothing.
+  applied the named content state (at most 120 s), then swaps the server's collection in one call and acks `applied`.
+  Until then a mod's own workshops list nothing. When the server's menus cannot be used (a refused snapshot, a record
+  this game refuses, parts that do not all arrive in 30 s, a content state that does not arrive in 120 s) it acks
+  `refused` with the reason and stops waiting: own workshops show this game's own menus (its local layouts, else the
+  menus their recipes are placed in), and kiln.log says so once. The server sends a refused snapshot once; the next menu
+  or content change sends a new one. A snapshot whose content state arrives late is still applied. Leaving the server
+  takes the server's menus off. The same snapshot again changes nothing.
 
 ## Tests
 Lab, without a client (`lab.sh new sync 25900 --save …`, `kiln/config/network.json` `{"labPort": 25901}`,
