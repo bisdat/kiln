@@ -70,7 +70,7 @@ export function Stepper({ value, onChange, min = 0, max = 65535, big, label, pre
   const number = (text) => valid(text) ? Math.floor(Number(text)) : value;
   const commit = (text, delta = 0) => {
     setDraft(null);
-    if (!disabled) onChange(clamp(number(text) + delta));
+    if (!disabled) onChange(clamp(clamp(number(text)) + delta));
   };
   // Complete drafts are already committed and byte-clamped: step from that value, not out-of-range text.
   const step = (d) => { setDraft(null); if (!disabled) onChange(clamp(value + d)); };

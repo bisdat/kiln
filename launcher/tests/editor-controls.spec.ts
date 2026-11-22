@@ -75,6 +75,48 @@ test("numeric drafts normalize on blur, Enter and step through the existing byte
   expect((await disk(page)).main.find((e: { slot: number }) => e.slot === 0).count).toBe(250);
 });
 
+for (const control of [
+  { label: "Amount", slot: 0, key: "count", min: 1, max: 65535 },
+  { label: "Level", slot: 24, key: "level", min: 2, max: 255 },
+  { label: "Gem level", slot: 24, key: "gemLevel", min: 1, max: 255 },
+]) {
+  test(`${control.label} keyboard steps use the byte-clamped draft and never publish out-of-range values`, async ({ page }) => {
+    await open(page);
+    await page.locator(`[data-deck-id="slot-main:${control.slot}"]`).click();
+    await page.evaluate(async ({ slot, key }) => {
+      const path = "/src/editor/kiln/session.js";
+      const { useSession } = await import(path);
+      (window as any).__controlValues = [];
+      useSession.subscribe((s: any) => {
+        const entry = s.model.main.find((e: any) => e.slot === slot);
+        (window as any).__controlValues.push(key === "gemLevel" ? parseInt(entry.socket.slice(8), 16) : entry[key]);
+      });
+    }, control);
+    const input = page.getByRole("spinbutton", { name: control.label, exact: true });
+    // Like the minus button, ArrowDown must step from the committed maximum, not from the unclamped text.
+    await input.fill(String(control.max + 1));
+    await input.press("ArrowDown");
+    await expect(input).toHaveValue(String(control.max - 1));
+    await input.press("Control+s");
+    await expect.poll(async () => {
+      const entry = (await disk(page)).main.find((e: { slot: number }) => e.slot === control.slot);
+      return control.key === "gemLevel" ? parseInt(entry.socket.slice(8), 16) : entry[control.key];
+    }).toBe(control.max - 1);
+    // The same rule applies at the lower boundary; keyboard and pointer steps must agree.
+    await input.fill(String(control.min - 1));
+    await input.press("ArrowUp");
+    await expect(input).toHaveValue(String(control.min + 1));
+    await input.press("Control+s");
+    await expect.poll(async () => {
+      const entry = (await disk(page)).main.find((e: { slot: number }) => e.slot === control.slot);
+      return control.key === "gemLevel" ? parseInt(entry.socket.slice(8), 16) : entry[control.key];
+    }).toBe(control.min + 1);
+    const values: number[] = await page.evaluate(() => (window as any).__controlValues);
+    expect(values.length).toBeGreaterThan(0);
+    expect(values.every((v) => Number.isInteger(v) && v >= control.min && v <= control.max)).toBe(true);
+  });
+}
+
 for (const filter of ["search", "level", "kind"]) {
   test(`Knowledge selection hidden by ${filter} cannot delete persisted entries`, async ({ page }) => {
     await open(page);
