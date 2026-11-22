@@ -6,6 +6,8 @@
 // Private tools-service guard, not an independent permission API. The game's original impact must still run its
 // own actor, cursor, range and forbidden-area checks. The caller must hold the engine's program Access while reading
 // BuildZoneSystem and must call this immediately before switching the impact, never cache a successful answer.
+// Admission rechecks the containing record and list header and refuses observed changes. These reads are not a lock
+// or a proven atomic snapshot; BZS reader/writer scheduling and changes after validation remain unqualified.
 namespace kiln::tools::area {
 struct Sphere {
     double center[3];

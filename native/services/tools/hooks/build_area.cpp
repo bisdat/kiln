@@ -31,6 +31,10 @@ bool add_address(uintptr_t base, size_t offset, uintptr_t& out) noexcept {
     out = base + offset;
     return true;
 }
+bool read_bounded(Reader read, void* destination, uintptr_t source, size_t size) noexcept {
+    return source && size && size - 1 <= std::numeric_limits<uintptr_t>::max() - source &&
+           read(destination, source, size);
+}
 }
 bool contains(const Base& b, const Sphere& s) noexcept {
     if (!valid(s) || !b.altar || b.abandoned || b.shape != 0 || b.owner_kind > 7) return false;
@@ -53,15 +57,25 @@ bool check_current(uintptr_t zones, uint32_t actor, const Sphere& sphere, Reader
     // singleton calls or retained pointers. A stale client-side preview can never authorise the impact.
     uintptr_t list = 0;
     if (!add_address(zones, 0x10, list)) return false;
-    struct { uintptr_t data; uint64_t count; } entries{};
-    if (!read(&entries, list, sizeof entries) || !entries.data || entries.count == 0 || entries.count > 4096) return false;
+    struct Entries { uintptr_t data; uint64_t count; } entries{};
+    if (!read_bounded(read, &entries, list, sizeof entries) || !entries.data ||
+        entries.count == 0 || entries.count > 4096) return false;
     for (uint64_t i = 0; i < entries.count; ++i) {
         uintptr_t address = 0;
-        if (!add_address(entries.data, static_cast<size_t>(i) * sizeof(Base), address) ||
-            sizeof(Base) - 1 > std::numeric_limits<uintptr_t>::max() - address) return false;
+        if (!add_address(entries.data, static_cast<size_t>(i) * sizeof(Base), address)) return false;
         Base base{};
-        if (!read(&base, address, sizeof base)) return false;
-        if (contains(base, sphere)) return true;
+        if (!read_bounded(read, &base, address, sizeof base)) return false;
+        if (contains(base, sphere)) {
+            // Refuse an observed rebuild, including in-place changes that leave the list header intact.
+            // This is conservative validation, not a replacement for the engine's Access lifetime: no qualified
+            // version/lock is available to exclude ABA or writes after our final read.
+            Base current{};
+            Entries after{};
+            return read_bounded(read, &current, address, sizeof current) &&
+                   read_bounded(read, &after, list, sizeof after) &&
+                   after.data == entries.data && after.count == entries.count &&
+                   std::memcmp(&base, &current, sizeof base) == 0;
+        }
     }
     return false;
 }

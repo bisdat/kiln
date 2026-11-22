@@ -172,8 +172,20 @@ and the offline resolver, not the third-party mod implementation [dis] [cap `too
 The original impact must still run unchanged after this guard: it owns the actor's permissions, server cursor/range
 and forbidden-area checks. This guard does **not** grant visitor rights. Do not invoke its helper to authorise an
 unrelated `Build.Write`. Client input, a stale altar preview or an earlier successful containment result is not authority.
-The engine's Access contract must remain held through the guarded impact. Real player visitor/protected/range behaviour
-and a live altar change remain owner-guided game checks; unit tests of geometry do not establish those outcomes.
+The engine's Access contract must remain held through the guarded impact. Before accepting, the guard re-reads the
+containing record byte-for-byte (including altar, identity, bounds and abandonment) and the list's data/count header;
+any change or unreadable validation read refuses the whole stroke. All header and record address ranges are checked
+for overflow and the production reader guards every copy with SEH. Only a containing record can admit a stroke, so
+non-containing records do not need to be retained for validation.
+
+The guard runs at the impact binder's entry, **before** the original impact's own base-intersection read at
+S `0x18e870` / C `0x3ed5d0`; it is not a hook at that exact instruction. Both use the same invocation's Access and BZS
+source. The vanilla helper also walks this live array without a visible local lock or version check [dis], but this
+alone does not prove reader/writer exclusion by the engine scheduler. No qualified BZS version counter or lock has
+been established. Re-reads conservatively detect observed changes; full concurrency, ABA and changes after the last
+validation read are **not proven safe**. Do not describe the Access pointer itself as a synchronization primitive.
+Real player visitor/protected/range behaviour and a live altar change remain owner-guided game checks; unit tests of
+geometry and deterministic mid-read changes do not establish those outcomes.
 
 ## 8. Not done / open
 
