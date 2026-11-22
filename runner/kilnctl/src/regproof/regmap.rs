@@ -38,8 +38,6 @@ pub struct Row {
     pub paths: Vec<String>,
     #[serde(default)]
     pub conv: String,
-    #[serde(default)]
-    pub read: String,
     /// live | boot | none
     #[serde(default)]
     pub backend: String,
@@ -51,8 +49,6 @@ pub struct Row {
     /// mapped (default) | unproven | unmapped
     #[serde(default)]
     pub state: Option<String>,
-    #[serde(default)]
-    pub client_needs: bool,
 }
 
 impl Row {

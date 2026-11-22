@@ -69,10 +69,6 @@ impl IdTable {
         o.insert("registries".into(), serde_json::to_value(&self.registries).unwrap_or_default());
         Value::Object(o).to_string()
     }
-
-    pub fn file_name(&self) -> String {
-        file_name(&self.side, &self.exe_sha256)
-    }
 }
 
 pub fn file_name(side: &str, exe_sha256: &str) -> String {
@@ -365,7 +361,7 @@ pub(crate) mod tests {
         assert_eq!(IdTable::parse(&bare.to_json(), "x", "y").unwrap(), bare);
         assert!(IdTable::parse("[1]", "server", NEW).is_err());
         assert!(IdTable::parse(r#"{"gadgets": {"g1": 3}}"#, "server", NEW).is_err());
-        assert_eq!(bare.file_name(), format!("ids-server-{NEW}.json"));
+        assert_eq!(file_name(&bare.side, &bare.exe_sha256), format!("ids-server-{NEW}.json"));
     }
 
     #[test]

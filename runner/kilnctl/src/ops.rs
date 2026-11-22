@@ -8,7 +8,7 @@ use crate::server;
 use crate::server::LogWatch;
 use crate::util::{self, fmt_utc, human_duration, human_size};
 use crate::wine::{self, WineSpec};
-use crate::{gate, kiln, procs, sigport, steam};
+use crate::{gate, kiln, procs, regproof, sigport, steam};
 use anyhow::{Context, Result, bail};
 use std::io::{BufRead, BufReader, Write};
 #[cfg(unix)]
@@ -659,6 +659,11 @@ pub fn update(inst: &Instance, a: UpdateArgs) -> Result<()> {
         }
         verified = kiln::verified(inst, &new_sha);
     }
+    if deployed && outcome.is_none() && !regproof::record_verified(&kiln::kiln_dir(inst), "server", &new_sha)
+        && inst.kiln.source.join("regmap/common").is_dir() {
+        println!("registry  no verified regmap record for {}: every registry field is refused on this build until \
+                  `kilnctl regproof {} --mark` proves it (after a lab run with the registry proof producer)", &new_sha[..12], inst.name);
+    }
     println!("== summary for {}", inst.name);
     let b = |o: &Option<String>| o.clone().unwrap_or_else(|| "?".into());
     println!("build     {} -> {} ({}), exe sha256 {}", b(&old_build), b(&new_build), if changed { "CHANGED" } else { "unchanged" }, new_sha);
@@ -752,6 +757,12 @@ pub fn port_flow(inst: &Instance, old: Option<PathBuf>, new: &Path, f: &FlowArgs
         }
     }
     let ok = green && rep.complete && rep.defs_unchanged;
+    // the registry proof (registry P2): the regmap record of the new build, from the lab the gate just ran; marked under
+    // the same conditions as the build record, and only when every step of it is green (otherwise every registry field
+    // stays refused on the new build)
+    let (reg, reg_next) = regproof::flow(inst, Some(&old), new, ok && f.mark && !dry);
+    println!("registry  {reg}");
+    next.extend(reg_next);
     let mut marked = None;
     let summary;
     if ok && f.mark && !dry {

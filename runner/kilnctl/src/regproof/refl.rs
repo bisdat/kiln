@@ -158,13 +158,6 @@ pub enum Status {
     Changed,
 }
 
-impl Status {
-    /// Carried over, or new: the round-trip suite decides.
-    pub fn provable(self) -> bool {
-        self != Status::Changed
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Change {
@@ -216,6 +209,7 @@ pub struct ReflDiff {
 }
 
 impl ReflDiff {
+    #[cfg(test)]
     pub fn status(&self, q: &str) -> Option<Status> {
         self.rows.get(q).map(|r| r.status)
     }
