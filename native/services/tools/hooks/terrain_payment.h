@@ -18,5 +18,7 @@ using WrapperFn = float (*)(void* list, void* operation, void* actor, void* inve
 using AppendFn = Material* (*)(void* list, const Material* record);
 }
 
-// Called once by the tools service after service discovery. COST is reported only when both hooks are installed.
+// Service lifecycle only: install before policy dispatch; stop and drain dispatch before uninstall/reinstall.
+// COST is reported only when both hooks are installed. The service DLL and continuations stay process-resident.
 extern "C" bool kiln_tools_payment_install(const KilnApi* api, KilnOwner owner);
+extern "C" void kiln_tools_payment_uninstall();

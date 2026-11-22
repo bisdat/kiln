@@ -12,12 +12,16 @@ The selection is not a caller-supplied price. An absent, stale, ambiguous or non
 The game's own building operation supplies the terrain volume, in voxels. Kiln replaces only the material-cost list:
 
 ```text
-zero volume: 0 items
-positive volume: max(1, ceil(double(volume) / VoxelsPerItem - 0.000001)) items
+quotient = double(floatVolume) / VoxelsPerItem
+tolerance = max(0.000001, abs(quotient) * 4 * FLT_EPSILON)
+zero volume: refuse without calling the cost builder
+positive volume: max(1, ceil(quotient - tolerance)) items
 ```
 
-The tolerance is one millionth of an item. It absorbs floating-point noise at exact multiples of the placement rate;
-a positive amount never becomes free. Invalid volumes, zero rates and counts beyond the supported integer range refuse.
+The engine supplies a single-precision float volume; division is performed in double precision. The tolerance is at
+least one millionth of an item and scales with the quotient to absorb a few float ULPs near exact multiples, including
+larger strokes. Excess within that tolerance is treated as rounding noise; excess beyond it charges the next item.
+A positive amount never becomes free. Invalid volumes, zero rates and counts beyond the supported integer range refuse.
 The rate belongs to the placement item, not the material's mining drop.
 
 The game pays that list **once**, from the player's normal building sources: backpack first, then connected magic-chest
@@ -53,7 +57,16 @@ world/session, permissions, selection and the other required tool/history hooks.
 count is never payment authority.
 
 The native hooks read the invocation's immutable policy on the game's worker thread. They do not call managed mod code,
-retain borrowed game views or keep game pointers after the operation returns.
+retain borrowed game views or keep game pointers after the operation returns. The action binding must supply the selected
+cell in its authoritative, invocation-local operation description; the payment hook only accepts a unique entry for that
+cell in the immutable server policy, never an item, rate or count supplied by a client.
+
+Installation checks the original executable prologues and accepts only original or Kiln-managed code state across the
+qualified cost and append routines. Foreign, unknown or unreadable code refuses; retained Kiln detours do not prevent a
+retry after a partial installation or a reinstall. Both links belong to a dedicated payment owner, not the tools service
+owner. Teardown runs only after policy dispatch has stopped and drained: it clears the cost capability, revokes the
+wrapper then builder, removes the payment owner's hooks, and retires that owner. The tools DLL stays resident and saved
+hook continuations remain valid. This teardown is not a promise that revoking an owner drains worker-thread callbacks.
 
 ## Verification in a game
 
