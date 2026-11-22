@@ -20,6 +20,13 @@ Kiln.TestKit.FakeReplComponent.Size.get -> ushort
 Kiln.TestKit.FakeReplComponent.Size.init -> void
 Kiln.TestKit.FakeReplComponent.Versioned.get -> bool
 Kiln.TestKit.FakeReplComponent.Versioned.init -> void
+Kiln.TestKit.FakeReplItemSite
+Kiln.TestKit.FakeReplItemSite.Component.get -> string!
+Kiln.TestKit.FakeReplItemSite.Count.get -> ushort
+Kiln.TestKit.FakeReplItemSite.FakeReplItemSite() -> void
+Kiln.TestKit.FakeReplItemSite.FakeReplItemSite(string! component, ushort offset, ushort count = 1, ushort stride = 0) -> void
+Kiln.TestKit.FakeReplItemSite.Offset.get -> ushort
+Kiln.TestKit.FakeReplItemSite.Stride.get -> ushort
 Kiln.TestKit.FakeReplKind
 Kiln.TestKit.FakeReplKind.Create = 2 -> Kiln.TestKit.FakeReplKind
 Kiln.TestKit.FakeReplKind.Update = 3 -> Kiln.TestKit.FakeReplKind
@@ -63,7 +70,16 @@ Kiln.TestKit.HarnessRepl.Send(uint peer, Kiln.TestKit.FakeReplMessage! message) 
 Kiln.TestKit.HarnessRepl.StatsCalls.get -> System.Collections.Generic.IReadOnlyList<(string! Owner, bool On)>!
 Kiln.TestKit.HarnessRepl.StopWorld() -> void
 Kiln.TestKit.HarnessRepl.WatchSlots.get -> int
+Kiln.TestKit.HarnessReplNet
+Kiln.TestKit.HarnessReplNet.ConfigureItemRemap(System.Collections.Generic.IReadOnlyList<Kiln.TestKit.FakeReplItemSite>! sites, System.Collections.Generic.IReadOnlyCollection<Kiln.ItemId>! gameItems, System.Collections.Generic.IReadOnlyDictionary<Kiln.ItemId, Kiln.ItemId>! lookAlikes) -> void
+Kiln.TestKit.HarnessReplNet.Connect(uint machine, uint peer, bool vanilla = true) -> Kiln.NetPeer!
+Kiln.TestKit.HarnessReplNet.DriveMessage(uint peer, Kiln.GameChannel channel, Kiln.MessageDirection direction, System.ReadOnlySpan<byte> bytes) -> byte[]?
+Kiln.TestKit.HarnessReplNet.Injections.get -> System.Collections.Generic.IReadOnlyList<(uint Peer, Kiln.GameChannel Channel, byte[]! Bytes)>!
+Kiln.TestKit.HarnessReplNet.Touches.get -> System.Collections.Generic.IReadOnlyList<Kiln.EntityId>!
+Kiln.TestKit.HarnessReplNet.ValidateSend.get -> System.Func<Kiln.GameChannel, System.ReadOnlyMemory<byte>, bool>?
+Kiln.TestKit.HarnessReplNet.ValidateSend.set -> void
 Kiln.TestKit.KilnHarness.Repl.get -> Kiln.TestKit.HarnessRepl!
+Kiln.TestKit.KilnHarness.ReplNet.get -> Kiln.TestKit.HarnessReplNet!
 override Kiln.TestKit.FakeReplComponent.Equals(object? obj) -> bool
 override Kiln.TestKit.FakeReplComponent.GetHashCode() -> int
 override Kiln.TestKit.FakeReplComponent.ToString() -> string!
