@@ -1,0 +1,127 @@
+{
+  "format": 1,
+  "side": "client",
+  "comment": "kiln.render's outlines (0.2.0-dev.30.3, issue #111): the game's own highlight on an entity's model instance. docs/re/client-render.md 'Highlight groups (outlines)', found on client 26430625 (5d9ef2f1...); the approach follows GreeneyeDS' Quick Deposit and Find (MIT). The renderer's setter SetGroups(renderer, Span<u32 model handle>*, Span<u8 group>*) writes the group byte of each instance (Instance(renderer, handle, 1): null for a stale handle) when it differs and marks the instance dirty; the game's render programs call it through RenderScene (scene + scene.renderer is the renderer). The two palette functions convert each group's colour (RenderSystemResource.highlightColorPalette) with ColorConvert(out, u32 colour) every frame; Kiln mid-hooks the conversion calls of Group1 and Group2 (pal.group1/2 = the resource offsets of their colours) to give them its colours. The client world's dynamic_render_model program, where Kiln applies the groups, is found by name through kiln.world, not here.",
+  "symbols": {
+    "outline/SetGroups": {
+      "comment": "void SetGroups(Renderer*, const Span<u32>* handles, const Span<u8>* groups): per handle, Instance(renderer, handle, 1); when the instance's group byte (+inst.group) differs it is written and the instance marked dirty (flag 2)",
+      "find": [
+        {
+          "pattern": "48 89 5C 24 08 48 89 74 24 10 48 89 7C 24 18 41 56 48 83 EC 20 33 DB 4D 8B F0 48 8B FA 48 8B F1 48 39 5A 08 76 ?? 66 66 0F 1F 84 00 00 00 00 00 48 8B 07 41 B0 01 48 8B CE 8B 14 98 E8 {outline/Instance:rel32} 48 85 C0 74 ?? 49 8B 0E 0F B6 14 0B 38 50 {outline/inst.group:d8} 74 ?? 88 50 {outline/inst.group:d8} 41 B0 02 48 8B D0 48 8B CE E8",
+          "offset": 0
+        }
+      ]
+    },
+    "outline/Instance": {
+      "comment": "u8* Instance(Renderer*, u32 handle, bool checked): handle = generation << 24 | index; null for 0 or a generation that does not match (the instance was destroyed); else the instance record. Also captured by SetGroups' call",
+      "find": [
+        {
+          "pattern": "85 D2 74 ?? 48 8B 81 ?? ?? ?? ?? 44 8B C2 41 81 E0 FF FF FF 00 C1 EA 18 41 38 14 00 75 ?? 49 69 C0 ?? ?? ?? ?? 48 03 81 ?? ?? ?? ?? C3",
+          "offset": 0
+        }
+      ]
+    },
+    "outline/StaticModelReset": {
+      "comment": "static_render_model gives every model it makes group 0: SceneSetGroups(scene, {handle}, {0}) (the call is at +35). Captures SceneSetGroups, RenderScene's forwarder of SetGroups",
+      "find": [
+        {
+          "pattern": "C6 85 ?? ?? ?? ?? 00 8B 1B 89 9D ?? ?? ?? ?? 48 C7 45 ?? 01 00 00 00 48 89 45 ?? 48 C7 45 ?? 01 00 00 00 E8 {outline/SceneSetGroups:rel32}",
+          "offset": 35
+        }
+      ]
+    },
+    "outline/DynamicModelSet": {
+      "comment": "dynamic_render_model gives a model the entity's HighlightColor index (0 when it has none) when it makes the model or the index is set: SceneSetGroups(scene, {handle}, {index}) (the call is at +55). A second capture of SceneSetGroups",
+      "find": [
+        {
+          "pattern": "88 8D ?? ?? ?? ?? 48 8B 4D ?? 4C 8D 45 ?? 48 89 45 ?? 48 8D 55 ?? 48 8D 85 ?? ?? ?? ?? 89 9D ?? ?? ?? ?? 48 89 45 ?? 48 C7 45 ?? 01 00 00 00 48 C7 45 ?? 01 00 00 00 E8 {outline/SceneSetGroups:rel32}",
+          "offset": 55
+        }
+      ]
+    },
+    "outline/SceneForward": {
+      "comment": "the forwarder itself (= SceneSetGroups): mov rcx, [rcx + scene.renderer]; jmp SetGroups. Gives the RenderScene -> renderer offset Kiln reads in the render program",
+      "find": [
+        {
+          "scope": {
+            "symbol": "outline/SceneSetGroups",
+            "size": 16
+          },
+          "pattern": "48 8B 89 {outline/scene.renderer:d32} E9 {outline/SetGroups:rel32}",
+          "offset": 0
+        }
+      ]
+    },
+    "outline/Palette0.Group1": {
+      "comment": "the first palette function's call that converts Group1's colour (edx = [rbx + pal.group1], rbx = the RenderSystemResource); Kiln's mid hook replaces edx",
+      "find": [
+        {
+          "pattern": "8B 53 {outline/pal.group1:d8} E8 {outline/ColorConvert:rel32} 0F 28 C6 48 8D 4C 24 70 0F 28 CE 0F 28 D6 0F 10 18 F3 0F 59 C3 F3 0F 11 85 ?? ?? ?? ?? 0F 28 C3 0F C6 C3 55 F3 0F 59 C8 0F 28 C3 0F C6 C3 AA 0F C6 DB FF F3 0F 11 8D ?? ?? ?? ?? 0F 28 CE F3 0F 59 CB F3 0F 59 D0 F3 0F 11 8D ?? ?? ?? ?? F3 0F 11 95 ?? ?? ?? ?? 8B 53 {outline/pal.group2:d8} E8 {outline/ColorConvert:rel32} 0F 28 C6 48 8D 4C 24 70 0F 28 CE 0F 28 D6 0F 10 18 F3 0F 59 C3 F3 0F 11 85 ?? ?? ?? ?? 0F 28 C3 0F C6 C3 55 F3 0F 59 C8 0F 28 C3 0F C6 C3 AA 0F C6 DB FF F3 0F 11 8D ?? ?? ?? ?? 0F 28 CE F3 0F 59 CB F3 0F 59 D0 F3 0F 11 8D ?? ?? ?? ?? F3 0F 11 95 ?? ?? ?? ?? 8B 53 ?? E8 ?? ?? ?? ?? 0F 10 18 48 8D 4C 24 70",
+          "offset": 3
+        }
+      ]
+    },
+    "outline/Palette0.Group2": {
+      "comment": "the same function's call for Group2 (edx = [rbx + pal.group2])",
+      "find": [
+        {
+          "pattern": "8B 53 {outline/pal.group1:d8} E8 {outline/ColorConvert:rel32} 0F 28 C6 48 8D 4C 24 70 0F 28 CE 0F 28 D6 0F 10 18 F3 0F 59 C3 F3 0F 11 85 ?? ?? ?? ?? 0F 28 C3 0F C6 C3 55 F3 0F 59 C8 0F 28 C3 0F C6 C3 AA 0F C6 DB FF F3 0F 11 8D ?? ?? ?? ?? 0F 28 CE F3 0F 59 CB F3 0F 59 D0 F3 0F 11 8D ?? ?? ?? ?? F3 0F 11 95 ?? ?? ?? ?? 8B 53 {outline/pal.group2:d8} E8 {outline/ColorConvert:rel32} 0F 28 C6 48 8D 4C 24 70 0F 28 CE 0F 28 D6 0F 10 18 F3 0F 59 C3 F3 0F 11 85 ?? ?? ?? ?? 0F 28 C3 0F C6 C3 55 F3 0F 59 C8 0F 28 C3 0F C6 C3 AA 0F C6 DB FF F3 0F 11 8D ?? ?? ?? ?? 0F 28 CE F3 0F 59 CB F3 0F 59 D0 F3 0F 11 8D ?? ?? ?? ?? F3 0F 11 95 ?? ?? ?? ?? 8B 53 ?? E8 ?? ?? ?? ?? 0F 10 18 48 8D 4C 24 70",
+          "offset": 97
+        }
+      ]
+    },
+    "outline/Palette1.Group1": {
+      "comment": "the second palette function's call for Group1",
+      "find": [
+        {
+          "pattern": "8B 53 {outline/pal.group1:d8} E8 {outline/ColorConvert:rel32} 0F 28 C6 0F 28 CE 0F 10 18 F3 0F 59 C3 F3 0F 11 85 ?? ?? ?? ?? 0F 28 C3 0F C6 C3 55 F3 0F 59 C8 48 8D 8D ?? ?? ?? ?? 0F 28 C3 0F 28 D6 0F C6 C3 AA F3 0F 11 8D ?? ?? ?? ?? 0F 28 CE 0F C6 DB FF F3 0F 59 CB F3 0F 59 D0 F3 0F 11 8D ?? ?? ?? ?? F3 0F 11 95 ?? ?? ?? ?? 8B 53 {outline/pal.group2:d8} E8 {outline/ColorConvert:rel32} 0F 28 C6 48 8D 8D ?? ?? ?? ?? 0F 28 CE 0F 28 D6 0F 10 18",
+          "offset": 3
+        }
+      ]
+    },
+    "outline/Palette1.Group2": {
+      "comment": "the second palette function's call for Group2",
+      "find": [
+        {
+          "pattern": "8B 53 {outline/pal.group1:d8} E8 {outline/ColorConvert:rel32} 0F 28 C6 0F 28 CE 0F 10 18 F3 0F 59 C3 F3 0F 11 85 ?? ?? ?? ?? 0F 28 C3 0F C6 C3 55 F3 0F 59 C8 48 8D 8D ?? ?? ?? ?? 0F 28 C3 0F 28 D6 0F C6 C3 AA F3 0F 11 8D ?? ?? ?? ?? 0F 28 CE 0F C6 DB FF F3 0F 59 CB F3 0F 59 D0 F3 0F 11 8D ?? ?? ?? ?? F3 0F 11 95 ?? ?? ?? ?? 8B 53 {outline/pal.group2:d8} E8 {outline/ColorConvert:rel32} 0F 28 C6 48 8D 8D ?? ?? ?? ?? 0F 28 CE 0F 28 D6 0F 10 18",
+          "offset": 99
+        }
+      ]
+    }
+  },
+  "constants": {
+    "outline/inst.group": {
+      "value": 120
+    },
+    "outline/scene.renderer": {
+      "value": 152
+    },
+    "outline/pal.group1": {
+      "value": 88
+    },
+    "outline/pal.group2": {
+      "value": 92
+    }
+  },
+  "features": {
+    "ui.world_outline": {
+      "symbols": [
+        "outline/SetGroups",
+        "outline/Instance",
+        "outline/StaticModelReset",
+        "outline/DynamicModelSet",
+        "outline/SceneForward",
+        "outline/Palette0.Group1",
+        "outline/Palette0.Group2",
+        "outline/Palette1.Group1",
+        "outline/Palette1.Group2"
+      ],
+      "constants": [
+        "outline/inst.group",
+        "outline/scene.renderer",
+        "outline/pal.group1",
+        "outline/pal.group2"
+      ]
+    }
+  }
+}

@@ -464,6 +464,15 @@ two chest screens (before 0.2.0-dev.30: factories only).
 **Not in this version:** a button inside the game's chest screen where Enlarge sits (drawn by the game's own button
 renderer), the game's own slot colours (marks are drawn over the slot), the gamepad's focused slot.
 
+## Outlines on entities in the world (0.2.0-dev.30.3)
+
+`Ui.World.Outline(entity, options)` (client only, any thread) lights an entity's model with the game's own highlight:
+a chest that just received items, the place of a searched item. Options: colour, pulse, priority, duration; the
+returned `WorldOutline` reads its state and is disposed to end it. Two colours show at once, the game's highlight wins
+unless the player's kiln.json says `"ui": {"outlines": "mods-first"}`, and there is no through-walls outline. Members,
+states, limits and the C table: [render.md](render.md#outlines-since-020-dev303). Native: kiln.render v2
+(`kiln_render.h`), capability `ui.world_outline`.
+
 ## Windows (immediate mode)
 ```csharp
 var w = Ui.Window("My mod", ui =>

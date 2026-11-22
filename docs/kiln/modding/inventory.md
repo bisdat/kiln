@@ -261,7 +261,7 @@ count this way.
 
 **Showing it on the item's slot (0.2.0-dev.30):** `Ui.Inventory.Mark(item, mark)` draws a mark over the slot the
 game draws for that item (backpack, chest, hotbar), and `Ui.Inventory.OnClick` gives your mod a click on a slot with the
-item's entity id (the server's id of it), for example to mark it on the server: see [../ui.md](../ui.md#the-games-inventory-slots-0200-dev30).
+item's entity id (the server's id of it), for example to mark it on the server: see [../ui.md](../ui.md#the-games-inventory-slots-020-dev30).
 Lines in the game's own item tooltip come with `Ui.Tooltip` (the equipment work); until then a mod shows a synced value in
 Kiln's Item details window, a screen of its own, a HUD line or a notice.
 

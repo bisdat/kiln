@@ -1,7 +1,55 @@
 #nullable enable
+Kiln.OutlineOptions
+Kiln.OutlineOptions.<Clone>$() -> Kiln.OutlineOptions!
+Kiln.OutlineOptions.Color.get -> Kiln.Color
+Kiln.OutlineOptions.Color.init -> void
+Kiln.OutlineOptions.Duration.get -> System.TimeSpan?
+Kiln.OutlineOptions.Duration.init -> void
+Kiln.OutlineOptions.Equals(Kiln.OutlineOptions? other) -> bool
+Kiln.OutlineOptions.OutlineOptions() -> void
+Kiln.OutlineOptions.Priority.get -> int
+Kiln.OutlineOptions.Priority.init -> void
+Kiln.OutlineOptions.Pulse.get -> bool
+Kiln.OutlineOptions.Pulse.init -> void
+Kiln.OutlineReason
+Kiln.OutlineReason.Despawned = 17 -> Kiln.OutlineReason
+Kiln.OutlineReason.Expired = 19 -> Kiln.OutlineReason
+Kiln.OutlineReason.Failed = 21 -> Kiln.OutlineReason
+Kiln.OutlineReason.ModUnloaded = 20 -> Kiln.OutlineReason
+Kiln.OutlineReason.NoModel = 3 -> Kiln.OutlineReason
+Kiln.OutlineReason.None = 0 -> Kiln.OutlineReason
+Kiln.OutlineReason.Outshone = 2 -> Kiln.OutlineReason
+Kiln.OutlineReason.Pending = 1 -> Kiln.OutlineReason
+Kiln.OutlineReason.Removed = 16 -> Kiln.OutlineReason
+Kiln.OutlineReason.SwitchedOff = 4 -> Kiln.OutlineReason
+Kiln.OutlineReason.WorldEnded = 18 -> Kiln.OutlineReason
+Kiln.OutlineState
+Kiln.OutlineState.Ended = 3 -> Kiln.OutlineState
+Kiln.OutlineState.GameHighlight = 2 -> Kiln.OutlineState
+Kiln.OutlineState.Shown = 1 -> Kiln.OutlineState
+Kiln.OutlineState.Waiting = 0 -> Kiln.OutlineState
 Kiln.SlotClick.Pointer.get -> System.Numerics.Vector2?
 Kiln.SlotClick.Pointer.init -> void
+Kiln.Ui.World
 Kiln.UiDraw.ButtonHeld(Kiln.UiMouseButton button = Kiln.UiMouseButton.Left) -> bool
 Kiln.UiDraw.DragSource(string! kind, string! payload, string? preview = null) -> bool
 Kiln.UiDraw.DropTarget(string! kind) -> string?
 Kiln.UiDraw.Pointer.get -> System.Numerics.Vector2?
+Kiln.WorldOutline
+Kiln.WorldOutline.Active.get -> bool
+Kiln.WorldOutline.ColorShared.get -> bool
+Kiln.WorldOutline.Dispose() -> void
+Kiln.WorldOutline.Entity.get -> Kiln.EntityId
+Kiln.WorldOutline.Options.get -> Kiln.OutlineOptions!
+Kiln.WorldOutline.Reason.get -> Kiln.OutlineReason
+Kiln.WorldOutline.State.get -> Kiln.OutlineState
+const Kiln.Ui.World.OutlineCapability = "ui.world_outline" -> string!
+override Kiln.OutlineOptions.Equals(object? obj) -> bool
+override Kiln.OutlineOptions.GetHashCode() -> int
+override Kiln.OutlineOptions.ToString() -> string!
+static Kiln.OutlineOptions.operator !=(Kiln.OutlineOptions? left, Kiln.OutlineOptions? right) -> bool
+static Kiln.OutlineOptions.operator ==(Kiln.OutlineOptions? left, Kiln.OutlineOptions? right) -> bool
+static Kiln.Ui.World.ClearOutlines() -> void
+static Kiln.Ui.World.DefaultOutlineColor.get -> Kiln.Color
+static Kiln.Ui.World.Outline(Kiln.EntityId entity, Kiln.OutlineOptions? options = null) -> Kiln.WorldOutline!
+static Kiln.Ui.World.OutlinesAvailable.get -> bool
