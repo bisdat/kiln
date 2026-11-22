@@ -708,6 +708,8 @@ struct BedOp {
     std::vector<KilnEntity> clear_beds;     // beds naming this NPC (old bed, stale links), not the target
     std::vector<KilnEntity> clear_commons;  // other NPCs naming the target bed (displaced)
     double distance = -1;                   // bed to home, -1 unknown
+    uint32_t expect_occupant = 0;           // what Pre read: the target bed's NPC and this NPC's bed (review S3)
+    KilnEntity expect_bed = 0;
     bool ran = false, written = false;
     float radius = -1;
     std::string why;
@@ -751,6 +753,17 @@ void KILN_CALL bed_program(KilnProgramCtx* ctx, uint64_t* it, KilnEntity, void*)
         bed = static_cast<uint8_t*>(W->write_other(ctx, it[g_slot_bed], op.bed, &size));
         if (!bed || int64_t(size) != L.bed_size) {
             op.why = "NotABed: the bed cannot be written";
+            return;
+        }
+    }
+    // The plan was made in Pre; the game's own programs ran since (a player's summon tool assigns in this step too). Write
+    // only onto the relation the plan was made for, else nothing (review S3): no one-sided link is ever left behind.
+    {
+        uint32_t now_bed = 0, now_occupant = 0;
+        std::memcpy(&now_bed, common + L.common_bed, 4);
+        if (bed) std::memcpy(&now_occupant, bed + L.bed_npc, 4);
+        if (now_bed != op.expect_bed || (bed && now_occupant != op.expect_occupant)) {
+            op.why = "ChangedByGame: the bed or the survivor's bed changed in this step before Kiln's write; nothing was written";
             return;
         }
     }
@@ -823,6 +836,7 @@ void take_bed(Req& r) {
     op->npc_id = r.in.npc_id;
     op->npc = r.npc;
     op->bed = r.in.bed;
+    op->expect_bed = r.old_bed;
     std::vector<KilnEntity> touched;
     if (r.in.op == KILN_SURV_OP_ASSIGN_BED) {
         uint32_t occupant = 0;
@@ -838,6 +852,7 @@ void take_bed(Req& r) {
             std::snprintf(b, sizeof b, "BedOutOfHomeRange: the bed is %.1f m from its home, its bed radius is %.1f m", op->distance, op->radius);
             return finish(r, KILN_SURV_REFUSED, b);
         }
+        op->expect_occupant = occupant;
         if (occupant && occupant != r.in.npc_id) {
             r.displaced_npc = occupant;
             const auto d = entities_of(occupant);
