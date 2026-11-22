@@ -1,0 +1,128 @@
+// SPDX-License-Identifier: MIT
+// Native Windows execution of the actual history hook with a fake engine continuation and hook registry.
+#include "../history.h"
+#include "../include/kiln_tools_policy.h"
+#include "services/kiln_hooks.h"
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+
+namespace {
+int checks = 0, discarded = 0, begins = 0;
+bool policy = false, feature_on = true, symbols_on = true, lifecycle = true, hooks_on = true;
+int64_t materials_offset = 0x110;
+uintptr_t next_entry = 0x1000;
+using BeginFn = uintptr_t (*)(uintptr_t, uintptr_t);
+BeginFn hooked = nullptr;
+KilnWorldEventFn world_callback = nullptr;
+KilnHooksApi hooks{};
+
+void check(bool value, const char* message) {
+    if (!value) { std::fprintf(stderr, "FAIL: %s\n", message); std::exit(1); }
+    ++checks;
+}
+bool named(KilnStr value, const char* name) {
+    return value.len == std::strlen(name) && std::memcmp(value.ptr, name, value.len) == 0;
+}
+uintptr_t begin_original(uintptr_t allocator, uintptr_t storage) {
+    check(allocator == 0xabc && storage == 0xdef, "Win64 continuation preserves allocator and player history");
+    ++begins;
+    return next_entry;
+}
+void discard_original(uintptr_t storage) {
+    check(storage == 0xdef, "history failure discards only the native player's new entry");
+    ++discarded;
+}
+KilnResult KILN_CALL detour(KilnOwner owner, uintptr_t target, const KilnHookOrder*, void* handler,
+                            void** original, KilnHandle* out) {
+    check(owner == 99 && target == reinterpret_cast<uintptr_t>(&begin_original), "resolved target and owner reach hook registry");
+    if (!hooks_on) return KILN_ERR_UNAVAILABLE;
+    hooked = reinterpret_cast<BeginFn>(handler);
+    *original = reinterpret_cast<void*>(&begin_original);
+    *out = 1;
+    return KILN_OK;
+}
+const void* KILN_CALL service(KilnStr name, uint32_t version) {
+    return named(name, "kiln.hooks") && version == 2 ? &hooks : nullptr;
+}
+bool KILN_CALL feature(KilnStr name) { return feature_on && named(name, "tools.history"); }
+KilnResult KILN_CALL symbol(KilnStr name, uintptr_t* out) {
+    if (!symbols_on) return KILN_ERR_NOT_FOUND;
+    if (named(name, "tools/HistoryBegin")) *out = reinterpret_cast<uintptr_t>(&begin_original);
+    else if (named(name, "tools/HistoryDiscard")) *out = reinterpret_cast<uintptr_t>(&discard_original);
+    else return KILN_ERR_NOT_FOUND;
+    return KILN_OK;
+}
+KilnResult KILN_CALL constant(KilnStr name, int64_t* out) {
+    if (!named(name, "tools/history.materials")) return KILN_ERR_NOT_FOUND;
+    *out = materials_offset;
+    return KILN_OK;
+}
+KilnResult KILN_CALL session(KilnSessionInfo* out) { out->lifecycle = lifecycle; return KILN_OK; }
+KilnResult KILN_CALL subscribe_world(KilnOwner owner, KilnWorldEventFn callback, void*, KilnHandle* out) {
+    check(owner == 99, "world reset subscription uses the tools service owner");
+    world_callback = callback;
+    *out = 2;
+    return KILN_OK;
+}
+void world(uint32_t kind, uint32_t event) {
+    KilnWorldEvent ev{};
+    ev.size = sizeof ev; ev.kind = kind; ev.event = event;
+    world_callback(&ev, nullptr);
+}
+const void* list(uintptr_t entry) { return reinterpret_cast<const void*>(entry + 0x110); }
+}
+
+// The real tools DLL provides this single scoped TLS reader. The test substitutes only its boolean availability;
+// history.cpp never dereferences this sentinel or keeps the policy view.
+const KilnToolPolicyView* kiln_tools_active_policy() {
+    return policy ? reinterpret_cast<const KilnToolPolicyView*>(1) : nullptr;
+}
+
+int main() {
+    KilnApi api{};
+    api.size = sizeof api; api.abi_version = KILN_ABI_VERSION;
+    api.feature = &feature; api.symbol = &symbol; api.constant = &constant; api.session = &session;
+    api.subscribe_world = &subscribe_world; api.service = &service;
+    hooks.header = {sizeof hooks, 2}; hooks.raw_detour = &detour;
+    check(!kiln_tools_history_install(nullptr, 99), "missing core refuses");
+    feature_on = false;
+    check(!kiln_tools_history_install(&api, 99), "missing history capability refuses");
+    feature_on = true; symbols_on = false;
+    check(!kiln_tools_history_install(&api, 99), "missing native mapping refuses");
+    symbols_on = true; materials_offset = 0x118;
+    check(!kiln_tools_history_install(&api, 99), "mismatched history layout refuses");
+    materials_offset = 0x110; lifecycle = false;
+    check(!kiln_tools_history_install(&api, 99), "unobservable world teardown refuses");
+    lifecycle = true; hooks_on = false;
+    check(!kiln_tools_history_install(&api, 99), "hook installation failure refuses");
+    hooks_on = true;
+    check(kiln_tools_history_install(&api, 99) && hooked && world_callback, "native history hook installs");
+    check(kiln_tools_history_install(&api, 99), "history installation is idempotent");
+    policy = true;
+    check(hooked(0xabc, 0xdef) == 0x1000 && kiln_tools_history_exact(list(0x1000)), "tool add native history is exact");
+    policy = false; next_entry = 0x2000;
+    check(hooked(0xabc, 0xdef) == 0x2000 && !kiln_tools_history_exact(list(0x2000)), "interleaved vanilla history is not tagged");
+    check(kiln_tools_history_exact(list(0x1000)), "vanilla interleaving preserves preceding tool tag");
+    policy = true; next_entry = 0x3000;
+    check(hooked(0xabc, 0xdef) == 0x3000 && kiln_tools_history_exact(list(0x3000)), "another player's remove history is exact");
+    policy = false; next_entry = 0x1000;
+    check(hooked(0xabc, 0xdef) == 0x1000 && !kiln_tools_history_exact(list(0x1000)), "native ring reuse by vanilla clears old tool identity");
+    check(kiln_tools_history_exact(list(0x3000)) && kiln_tools_history_exact(list(0x3000)), "repeated undo list queries never mint another receipt");
+    world(KILN_WORLD_CLIENT, KILN_WORLD_STOPPING);
+    check(kiln_tools_history_exact(list(0x3000)), "client teardown cannot erase hosted server history");
+    world(KILN_WORLD_SERVER, KILN_WORLD_STOPPING);
+    check(!kiln_tools_history_exact(list(0x3000)), "server teardown invalidates descriptor identities");
+    policy = true; next_entry = 0;
+    check(hooked(0xabc, 0xdef) == 0 && discarded == 0, "native begin failure does not discard preceding history");
+    for (uintptr_t i = 1; i <= 2048; ++i) {
+        next_entry = i * 0x200;
+        check(hooked(0xabc, 0xdef) == next_entry, "bounded native tool history identity is retained");
+    }
+    next_entry = 2049 * 0x200;
+    check(hooked(0xabc, 0xdef) == 0 && discarded == 1, "full sidecar discards pending entry and refuses before terrain writes");
+    check(!kiln_tools_history_exact(list(next_entry)), "refused history cannot create an exact refund identity");
+    world(KILN_WORLD_SERVER, KILN_WORLD_STARTED);
+    check(!kiln_tools_history_exact(list(0x200)), "new server session cannot inherit old identities");
+    std::printf("%d checks passed; %d native continuation calls; %d pending-entry discards\n", checks, begins, discarded);
+}

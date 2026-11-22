@@ -248,6 +248,43 @@ hold/replay. No genuine player build attempt was generated; capture/reconstructi
 unproved. Kiln BuildEditingEvent covers Kiln edits, not this player route. TerraformImpact's early failure shape is
 `u8 0x18 @0,u32 0 @4,u8 0 @8`, before kernels; no managed terraforming replay was established.
 
+### Player building history and exact tool refunds [static only, since 0.2.0-dev.30.5]
+
+Independently traced on the read-only server 26430253 (`f0d824be…`) with bounded Ghidra decompiles and instruction
+checks; history creation/discard signatures and the material-list offset also resolve on client 26430625
+(`5d9ef2f1…`). No player action or game process was run for this qualification.
+
+- History lookup S `0x230fb0` selects the actor's storage. HistoryBegin S/C `0x230260/0x498a40` appends to its five-entry
+  ring (entry stride `0x200`, head/tail at storage `+0xa00/+0xa08`). Each entry holds a 32-handle operation ring
+  (`+0x100/+0x108` counters), and an owned material list at `+0x110` (24-byte records, item/count `+0x10/+0x14`).
+  Native discard S/C `0x230c00/0x4993e0` releases the newest entry, including terrain-snapshot allocations.
+- Paid add S `0x17b8d0` builds its final material list through S `0x229500` (cost builder S/C
+  `0x228e80/0x491960`, including affordability recomputation), pays that list through ApplyMaterials(take=1), then
+  hands the **same list** and flag 1 to S/C `0x17b610/0x3da450`. That helper creates the player's pending entry,
+  writes entry `+0x1f8 = 1`, and clones the supplied list into entry `+0x110`. Therefore a policy cost-builder change
+  reaches both payment and history; replacing the history with mining drops is neither necessary nor correct.
+- Removal's TerraformImpact path creates an entry with `+0x1f8 = 0`, builds its actual mining-yield list, gives it
+  through ApplyMaterials(take=0), and only on success copies that same list into the entry. Undo consequently takes
+  back the yields actually recorded, not an independently recomputed material/drop mapping.
+- `player_building_undo` S `0xc6dd0` looks up that player's newest entry, calls ApplyMaterials on entry `+0x110`
+  with **take = !entry[0x1f8]**, then replays the recorded operations through S `0x228920`, and calls BuildFinish.
+  This is the ordinary building-undo action, so native ordering with vanilla actions and remapped input is retained.
+  Kiln's separate managed `Build.Undo` journal is not involved, and no second key binding is installed.
+- Rules' ordinary BuildCost/BuildRefund multipliers must not scale this exact list again during tool undo. The tools
+  DLL tags the descriptor identity returned by HistoryBegin only under an active tool policy, invalidates old tags
+  on **every** new entry (including vanilla reuse), and clears tags at server-world start/stop. Rules consults this
+  private predicate before scaling; vanilla entries keep their ordinary rule behaviour. If the bounded tag storage
+  fills, the new pending native entry is discarded and creation refuses before later terrain mutation. Missing
+  mappings, a layout mismatch, an unavailable rules bridge or unobservable world teardown refuse this integration.
+
+Vanilla limitations remain vanilla. ApplyMaterials returns false when an inventory add reports a shortfall; undo then
+skips terrain replay and BuildFinish rolls the inventory transaction back **and discards the pending history entry**.
+Terrain replay kind 9 writes its stored snapshot through S `0xa47fa0 -> 0xa35b30`; that helper unconditionally returns
+success and does not compare current cells with the recorded after-state. It can overwrite cells changed since the
+original action, and its voxel-writer failure is not propagated. BuildFinish cannot compensate partially written
+voxels. The policy hooks add no separate replay, refund, compensation or retry path; native Windows fakes verify
+identity/refusal logic, not actual in-game streaming faults, inventory overflow, or multiplayer replay.
+
 ### Threads and dirty marks [static], bounded thread result [lab]
 
 See [world.md](world.md), Scheduler and threads. A spawned player id>1023 did not select live-player scheduling.
