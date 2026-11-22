@@ -109,8 +109,11 @@ const NO_STEAM = MODE === "no-steam";
 const games: GameInstall[] = FRESH ? [] : [steamGame];
 const baseReceipt = receiptExample as unknown as InstallReceipt;
 const kilnProxy: ProxyClass = { kind: "kiln", version: "0.2.0-dev", abi: 2, sha256: hex("proxy"), size: 98304, detail: "export KilnProxyInfo" };
+/** `?upgrade=<bundle version>`: the game's Kiln is older than that bundle from the start (InstallState.upgradeAvailable), as
+ *  on the first start after a launcher update that brought a newer runtime. */
+const UPGRADE_SEED = typeof location !== "undefined" ? new URLSearchParams(location.search).get("upgrade") : null;
 const runtime: Record<string, InstallState> = FRESH ? {} : {
-  "client-steam": { installed: true, receipt: baseReceipt, proxy: kilnProxy, modified: [], upgradeAvailable: null },
+  "client-steam": { installed: true, receipt: baseReceipt, proxy: kilnProxy, modified: [], upgradeAvailable: UPGRADE_SEED },
 };
 const running: Record<string, { pid: number; mode: LaunchRequest["mode"]; nonce: string | null; at: number; profile: string | null;
   /** A scripted start (mockProgress.ts): the process exists from then, boot.json is written at `bootAt`. */

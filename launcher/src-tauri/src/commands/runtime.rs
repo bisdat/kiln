@@ -43,7 +43,20 @@ pub fn import_shipped(app: &AppHandle) {
     // it writes `runtime/` (also from setup's own thread): a writer a move waits for
     let _writing = crate::state::writing();
     match dirs().and_then(|d| bundle::import_shipped(&d, &zip)) {
-        Ok(Some(b)) => eprintln!("shipped Kiln runtime {} added", b.version),
+        Ok(Some(b)) => {
+            eprintln!("shipped Kiln runtime {} added", b.version);
+            // a game status made while the copy ran said "nothing to update" (the bundle was not there yet): after a
+            // launcher update the "Updated to" notice and Play's note waited for the next poll, which an unfocused
+            // window never sends. Fresh statuses go out now.
+            crate::state::forget_install_states();
+            let app = app.clone();
+            std::thread::spawn(move || {
+                let games = dirs().and_then(|d| kiln_manage::game::known(&d)).unwrap_or_default();
+                for g in games {
+                    crate::watch::emit_status(&app, &g.id);
+                }
+            });
+        }
         Ok(None) => {}
         Err(e) => eprintln!("shipped Kiln runtime {}: {e}", zip.display()),
     }

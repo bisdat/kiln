@@ -11,6 +11,7 @@ import type { GameId, Json, PackSide, Studio, StudioCaptureChoice, StudioCapture
 import { useT } from "../i18n";
 import { Badge, Button, Select, Spinner, toast } from "../ui";
 import { sk } from "./state";
+import { useMarkUnsaved } from "../shell/unsaved";
 
 const show = (v: Json | undefined) => (v === undefined ? "" : typeof v === "string" ? JSON.stringify(v) : JSON.stringify(v));
 
@@ -21,6 +22,7 @@ export default function SettingsTab({ studio: st, gameId }: { studio: Studio; ga
   const [files, setFiles] = useState<StudioCaptureFile[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [dirty, setDirty] = useState(false);
+  useMarkUnsaved("studio", dirty);
   const capture = async () => {
     setBusy(true);
     try { setFiles(await api.studioCapture(id, gameId)); setDirty(false); } catch (e) { toast.error(e, t("studio.settings.captureFailed")); } finally { setBusy(false); }

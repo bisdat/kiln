@@ -1,7 +1,8 @@
 // Mock answers for the self-update commands (update.rs), merged into ./mock.ts's handlers. Up to date by default;
 // tests and the dev console change it through window.__kilnUpdateMock:
 //   offer("0.2.0-dev.43", "notes")        the next check finds this version (and the notice opens)
-//   justUpdated("0.2.0-dev.42")           as after a restart into an update this launcher installed
+//   justUpdated("0.2.0-dev.42")           as after a restart into an update this launcher installed (`?justUpdated=<from>`:
+//                                         from the first status on, as the backend's start says it)
 //   failNextInstall([{source, step, message}])  the next download fails at these sources
 //   set({...})                            any part of the status, then kiln://update
 //   calls()                               the update_* commands called so far (the Nexus build's UI calls none)
@@ -32,6 +33,8 @@ export function updateMockHandlers(emit: Emit, distribution: Distribution = "dir
     ready: null, skipped: null, justUpdated: null, taskId: null, error: null, buildChannel: "dev", beta: null, switching: null, beforeBeta: null,
   };
   // what a switch to each channel installs (update_switch); the release line has the build before this one
+  const fromQuery = typeof location !== "undefined" && !nexus ? new URLSearchParams(location.search).get("justUpdated") : null;
+  if (fromQuery) status.justUpdated = { from: fromQuery, to: status.current, at: now(), source: "frostdev.io", notes: null };
   const channelOffers: Partial<Record<UpdateChannel, string | null>> = { dev: "0.2.0-dev.41", beta: "0.2.0-dev.43+beta.1" };
   const switchCalls: { channel: UpdateChannel; restore: boolean }[] = [];
   let restoreOnRestart = false;

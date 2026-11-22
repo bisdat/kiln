@@ -36,7 +36,7 @@ use feed::{Channel, Source};
 use kind::InstallInfo;
 use kiln_manage::{Error, ErrorCode};
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Runtime};
 use tauri_plugin_updater::{Update, UpdaterExt};
@@ -220,6 +220,25 @@ struct Inner {
 
 static STATE: OnceLock<Mutex<Inner>> = OnceLock::new();
 
+/// [`start`] has set up this start's state (update.json read, `just_updated` known). The start-up steps run once the data
+/// folder is free, after the window is up, so the window's first `update_status` can come before them: it waits for this
+/// ([`wait_started`]) instead of answering with the placeholder, which has no `just_updated` (the "Updated to" notice then
+/// never opened when automatic checks were off, and waited for the first check when they were on).
+static STARTED: Mutex<bool> = Mutex::new(false);
+static STARTED_CV: Condvar = Condvar::new();
+
+fn mark_started() {
+    *STARTED.lock().unwrap_or_else(|e| e.into_inner()) = true;
+    STARTED_CV.notify_all();
+}
+
+/// Waits up to `max` for [`start`]; true once it ran.
+pub fn wait_started(max: Duration) -> bool {
+    let g = STARTED.lock().unwrap_or_else(|e| e.into_inner());
+    let (g, _) = STARTED_CV.wait_timeout_while(g, max, |started| !*started).unwrap_or_else(|e| e.into_inner());
+    *g
+}
+
 fn state() -> std::sync::MutexGuard<'static, Inner> {
     STATE.get_or_init(|| Mutex::new(Inner { status: initial_status("0.0.0", kind::classify("", None, None)), pending: None, busy: false, restore: false }))
         .lock()
@@ -328,6 +347,9 @@ pub fn start<R: Runtime>(app: AppHandle<R>) {
         g.status.auto = auto;
         g.status.channel = channel;
     }
+    mark_started();
+    // a window that is already up hears it at once (the "Updated to" notice and the runtime it brought)
+    emit(&app);
     log(&format!(
         "Kiln Launcher {current} (pid {}, {:?}, {}), channel {}{}, automatic checks {}",
         std::process::id(),

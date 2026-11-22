@@ -484,3 +484,13 @@ fn accepted_restore_choice_is_in_every_status_after_reopening() {
         assert_eq!(serde_json::to_value(status()).unwrap()["restoreRequested"], true);
     }
 }
+
+#[test]
+fn the_first_status_waits_for_the_start() {
+    // the window's first update_status can come before start() read update.json: it waits for it (bounded)
+    let t = std::thread::spawn(|| wait_started(Duration::from_secs(5)));
+    std::thread::sleep(Duration::from_millis(50));
+    mark_started();
+    assert!(t.join().unwrap(), "update_status answers once start() has the state");
+    assert!(wait_started(Duration::from_millis(1)), "and at once after that");
+}

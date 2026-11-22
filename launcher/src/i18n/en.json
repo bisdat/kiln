@@ -4091,7 +4091,16 @@
       "updatedTo": "Updated to {build}",
       "switchBack": "This game has Kiln {from} from the test build; this installs Kiln {to}.",
       "closeGame": "Close the game first",
-      "updateGame": "Update game"
+      "updateGame": "Update game",
+      "restartingIn": "Restarting by itself in {seconds} s",
+      "holdGame": "The game is running, so the launcher waits. Restart when you are done playing.",
+      "holdStudio": "Pack Studio has unsaved changes, so the launcher waits. Save them, then restart.",
+      "holdEditor": "An editor has unsaved changes, so the launcher waits. Save them, then restart.",
+      "lookingAtGame": "Looking at the game's Kiln…",
+      "applying": "Putting Kiln {version} into the game…",
+      "afterGame": "The game is running: Kiln {version} goes into the game when it closes.",
+      "afterSteam": "Steam is updating the game: Kiln {version} goes in when it is done.",
+      "appliedLead": "It came with the launcher update to {build}."
     },
     "useMods": {
       "notLoadedNow": "{name} is not the loaded profile now",

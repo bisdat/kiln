@@ -1,6 +1,8 @@
 // Smoke (browser mock): the launcher update notice, one line and its buttons per state. Found → the notice opens
-// under the header → Update → Updating… → Ready to restart → Restart → Updated to … → Update game (the runtime).
-// Also: Skip, a .deb install (Download), the game running, a failed download (a short toast), Settings and About.
+// under the header → Update → Updating… → Ready to restart (it restarts by itself after a countdown; Restart now) →
+// Updated to … → its Kiln goes into the game by itself (the runtime). Also: Skip, a .deb install (Download), the game
+// running (Update game held, Kiln goes in when it closes), a failed download (a short toast), Settings and About.
+// The restart by itself, its holds and the card before the game's status are in update-apply.spec.ts.
 // Screenshots go to $SHOTS_DIR, default .out/launcher/shots/ (SHOTS=0 skips).
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
@@ -9,6 +11,8 @@ import { join } from "node:path";
 const SHOTS = process.env.SHOTS_DIR || join(import.meta.dirname, "..", "..", ".out", "launcher", "shots");
 
 async function open(page: Page, route = "/") {
+  // these tests click Restart themselves: the countdown to the restart by itself is long here (update-apply.spec.ts)
+  await page.addInitScript(() => { (window as unknown as { __kilnRestartDelayMs: number }).__kilnRestartDelayMs = 120_000; });
   await page.goto(`/#${route}`);
   await page.locator(".k-splash").waitFor({ state: "detached" });
 }
@@ -26,7 +30,7 @@ const game = (page: Page, fn: string, ...args: unknown[]) =>
   page.evaluate(([f, a]) => (window as unknown as { __kilnMock: Record<string, (...x: unknown[]) => unknown> }).__kilnMock[f as string](...(a as unknown[])), [fn, args] as const);
 const word = (page: Page, w: string) => page.getByRole("button", { name: `Launcher update: ${w}`, exact: true });
 
-test("an update: notice, Update, Restart, then Update game", async ({ page }) => {
+test("an update: notice, Update, Restart, then its Kiln goes into the game by itself", async ({ page }) => {
   await open(page);
   await expect(page.locator(".k-upd")).toHaveCount(0);
   await mock(page, "offer", "0.2.0-dev.43", "Notes that the notice does not show.", "0.2.0-dev+20261106.f3e65ec");
@@ -45,23 +49,24 @@ test("an update: notice, Update, Restart, then Update game", async ({ page }) =>
   const ready = page.getByRole("dialog", { name: "Ready to restart" });
   await expect(ready).toBeVisible({ timeout: 8000 });
   await expect(ready.getByRole("button")).toHaveText(["", "Later", "Restart"]);
+  await expect(ready.getByTestId("update-restart-in")).toHaveText(/^Restarting by itself in \d+ s$/);
   await expect(word(page, "Restart")).toBeVisible();
   await shot(page, "update-ready");
 
   await game(page, "setUpgradeAvailable", "0.2.0-dev+20261104.0f1ffa6"); // a bundle the mock has
-  await ready.getByRole("button", { name: "Restart", exact: true }).click();
-  const updated = page.getByRole("dialog", { name: "Updated to 0.2.0-dev.43" });
-  await expect(updated).toBeVisible();
-  await expect(updated.getByRole("button", { name: "Update game" })).toBeEnabled({ timeout: 6000 });
-  await expect(word(page, "Updated")).toBeVisible();
-  await shot(page, "update-installed-runtime-next");
   // the update writes the active profile again for the new runtime: what that kept is shown (shell/notices.ts)
   await page.evaluate(() => (window as unknown as { __kilnMock: { planActivation: (r: unknown) => void } }).__kilnMock.planActivation({
     retained: [{ path: "mods/XHL-Vein-Mining", reason: "files Kiln placed were changed. It is on in the profile; this changed copy stays as it is, and its loader may still use it.", mayRun: true }] }));
-  await updated.getByRole("button", { name: "Update game" }).click();
-  await expect(page.locator(".k-toast", { hasText: "Kiln 0.2.0-dev+20261104.0f1ffa6 installed" })).toBeVisible({ timeout: 8000 });
+  await ready.getByRole("button", { name: "Restart", exact: true }).click();
+  // after the restart the runtime it brought goes into the closed game by itself, through the ordinary install
+  const toastOk = page.locator(".k-toast", { hasText: "Kiln 0.2.0-dev+20261104.0f1ffa6 installed" });
+  await expect(toastOk).toBeVisible({ timeout: 15_000 });
+  await expect(toastOk).toContainText("It came with the launcher update to 0.2.0-dev.43.");
   await expect(page.locator(".k-toast", { hasText: "Some mod folders were kept" })).toContainText("this changed copy stays as it is");
+  await shot(page, "update-installed-runtime");
   await expect(page.locator(".k-upd")).toHaveCount(0);
+  expect(await game(page, "installs")).toEqual(["0.2.0-dev+20261104.0f1ffa6"]);
+  expect(await mock(page, "calls")).toContain("update_ack");
 });
 
 test("Skip hides the version until a newer one; Settings can undo", async ({ page }) => {
@@ -93,7 +98,7 @@ test("a .deb install offers Download; dismiss keeps the header word", async ({ p
   await expect(offer).toBeVisible();
 });
 
-test("a failed download is a short toast; Update game waits for the game to close", async ({ page }) => {
+test("a failed download is a short toast; while the game runs Update game waits, and Kiln goes in when it closes", async ({ page }) => {
   await open(page);
   await mock(page, "failNextInstall", [
     { source: "frostdev.io", step: "signature", message: "the signature does not match the file" },
@@ -109,15 +114,19 @@ test("a failed download is a short toast; Update game waits for the game to clos
 
   await page.locator(".k-door").click();
   await expect(page.locator(".k-head-state")).toHaveText(/^Running/, { timeout: 8000 });
-  await game(page, "setUpgradeAvailable", "0.2.0-dev+20261106.f3e65ec");
+  await game(page, "setUpgradeAvailable", "0.2.0-dev+20261104.0f1ffa6"); // a bundle the mock has
   await mock(page, "justUpdated", "0.2.0-dev.41");
   const updated = page.getByRole("dialog", { name: "Updated to 0.2.0-dev.42" });
   const button = updated.getByRole("button", { name: "Update game" });
   await expect(button).toBeDisabled();
   await expect(button).toHaveAttribute("title", "Close the game first");
+  await expect(updated.getByTestId("update-game-waiting")).toHaveText("The game is running: Kiln 0.2.0-dev+20261104.0f1ffa6 goes into the game when it closes.");
   await shot(page, "update-game-running");
+  expect(await game(page, "installs")).toEqual([]);
   await game(page, "stopGame");
-  await expect(button).toBeEnabled({ timeout: 6000 });
+  await expect(page.locator(".k-toast", { hasText: "Kiln 0.2.0-dev+20261104.0f1ffa6 installed" })).toBeVisible({ timeout: 15_000 });
+  await expect(updated).toHaveCount(0);
+  expect(await game(page, "installs")).toEqual(["0.2.0-dev+20261104.0f1ffa6"]);
 });
 
 test("About shows the state with Check now", async ({ page }) => {
