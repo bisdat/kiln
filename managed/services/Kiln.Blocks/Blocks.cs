@@ -349,6 +349,7 @@ internal sealed class ModBlocks(string id, ulong owner)
         ItemUpgrades.Forget(Id);
         MoveApplications.Forget(Id);
         ToolWearRuntime.Forget(this);
+        ToolFamilyRuntime.Forget(Id);
         UiRuntime.Forget(Id);
         ContainerRuntime.Forget(Id);
         InteractRuntime.Forget(Id);

@@ -4,6 +4,28 @@ Kiln.BlockIdentity.<Clone>$() -> Kiln.BlockIdentity!
 Kiln.BlockIdentity.Equals(Kiln.BlockIdentity? other) -> bool
 Kiln.BlockIdentity.Guid.get -> System.Guid
 Kiln.BlockIdentity.Id.get -> uint
+Kiln.BuildingToolBlock
+Kiln.BuildingToolBlock.<Clone>$() -> Kiln.BuildingToolBlock!
+Kiln.BuildingToolBlock.Brushes.get -> System.Collections.Generic.IReadOnlyList<Kiln.PartRef<Kiln.TerrainBrushBlock!>!>!
+Kiln.BuildingToolBlock.Brushes.init -> void
+Kiln.BuildingToolBlock.BuildingToolBlock() -> void
+Kiln.BuildingToolBlock.Description.get -> string?
+Kiln.BuildingToolBlock.Description.init -> void
+Kiln.BuildingToolBlock.Equals(Kiln.BuildingToolBlock? other) -> bool
+Kiln.BuildingToolBlock.Icon.get -> string?
+Kiln.BuildingToolBlock.Icon.init -> void
+Kiln.BuildingToolBlock.Identity.get -> Kiln.BlockIdentity?
+Kiln.BuildingToolBlock.Identity.init -> void
+Kiln.BuildingToolBlock.MaterialPool.get -> Kiln.PartRef<Kiln.ToolMaterialPoolBlock!>?
+Kiln.BuildingToolBlock.MaterialPool.init -> void
+Kiln.BuildingToolBlock.Name.get -> string!
+Kiln.BuildingToolBlock.Name.init -> void
+Kiln.BuildingToolBlock.Primary.get -> Kiln.TerrainToolAction!
+Kiln.BuildingToolBlock.Primary.init -> void
+Kiln.BuildingToolBlock.Secondary.get -> Kiln.TerrainToolAction!
+Kiln.BuildingToolBlock.Secondary.init -> void
+Kiln.BuildingToolBlock.Was.get -> string?
+Kiln.BuildingToolBlock.Was.init -> void
 Kiln.ItemBlock.Identity.get -> Kiln.BlockIdentity?
 Kiln.ItemBlock.Identity.init -> void
 Kiln.KnowledgeBlock
@@ -27,19 +49,78 @@ Kiln.RecipeBlock.MenuGroup.get -> Kiln.CraftingGroupRef?
 Kiln.RecipeBlock.MenuGroup.init -> void
 Kiln.RecipeBlock.TrackCrafted.get -> bool
 Kiln.RecipeBlock.TrackCrafted.init -> void
+Kiln.TerrainBrushBlock
+Kiln.TerrainBrushBlock.<Clone>$() -> Kiln.TerrainBrushBlock!
+Kiln.TerrainBrushBlock.Description.get -> string?
+Kiln.TerrainBrushBlock.Description.init -> void
+Kiln.TerrainBrushBlock.Equals(Kiln.TerrainBrushBlock? other) -> bool
+Kiln.TerrainBrushBlock.Identity.get -> Kiln.BlockIdentity?
+Kiln.TerrainBrushBlock.Identity.init -> void
+Kiln.TerrainBrushBlock.Name.get -> string!
+Kiln.TerrainBrushBlock.Name.init -> void
+Kiln.TerrainBrushBlock.Radius.get -> double
+Kiln.TerrainBrushBlock.Radius.init -> void
+Kiln.TerrainBrushBlock.Shape.get -> Kiln.TerrainBrushShape
+Kiln.TerrainBrushBlock.Shape.init -> void
+Kiln.TerrainBrushBlock.TerrainBrushBlock() -> void
+Kiln.TerrainBrushBlock.Was.get -> string?
+Kiln.TerrainBrushBlock.Was.init -> void
+Kiln.TerrainBrushShape
+Kiln.TerrainBrushShape.Sphere = 0 -> Kiln.TerrainBrushShape
+Kiln.ToolMaterialPoolBlock
+Kiln.ToolMaterialPoolBlock.<Clone>$() -> Kiln.ToolMaterialPoolBlock!
+Kiln.ToolMaterialPoolBlock.Entries.get -> System.Collections.Generic.IReadOnlyList<Kiln.ToolMaterialPoolEntry!>!
+Kiln.ToolMaterialPoolBlock.Entries.init -> void
+Kiln.ToolMaterialPoolBlock.Equals(Kiln.ToolMaterialPoolBlock? other) -> bool
+Kiln.ToolMaterialPoolBlock.Name.get -> string!
+Kiln.ToolMaterialPoolBlock.Name.init -> void
+Kiln.ToolMaterialPoolBlock.ToolMaterialPoolBlock() -> void
+Kiln.ToolMaterialPoolBlock.Was.get -> string?
+Kiln.ToolMaterialPoolBlock.Was.init -> void
+Kiln.ToolMaterialPoolEntry
+Kiln.ToolMaterialPoolEntry.<Clone>$() -> Kiln.ToolMaterialPoolEntry!
+Kiln.ToolMaterialPoolEntry.Deconstruct(out Kiln.ItemRef Item, out byte TerrainMaterial, out int VoxelsPerItem) -> void
+Kiln.ToolMaterialPoolEntry.Equals(Kiln.ToolMaterialPoolEntry? other) -> bool
+Kiln.ToolMaterialPoolEntry.Item.get -> Kiln.ItemRef
+Kiln.ToolMaterialPoolEntry.Item.init -> void
+Kiln.ToolMaterialPoolEntry.TerrainMaterial.get -> byte
+Kiln.ToolMaterialPoolEntry.TerrainMaterial.init -> void
+Kiln.ToolMaterialPoolEntry.ToolMaterialPoolEntry(Kiln.ItemRef Item, byte TerrainMaterial, int VoxelsPerItem) -> void
+Kiln.ToolMaterialPoolEntry.VoxelsPerItem.get -> int
+Kiln.ToolMaterialPoolEntry.VoxelsPerItem.init -> void
 Kiln.TrackingScope
 Kiln.TrackingScope.Both = 2 -> Kiln.TrackingScope
 Kiln.TrackingScope.Player = 0 -> Kiln.TrackingScope
 Kiln.TrackingScope.World = 1 -> Kiln.TrackingScope
+override Kiln.BlockIdentity.Equals(object? obj) -> bool
 override Kiln.BlockIdentity.GetHashCode() -> int
 override Kiln.BlockIdentity.ToString() -> string!
+override Kiln.BuildingToolBlock.Equals(object? obj) -> bool
+override Kiln.BuildingToolBlock.GetHashCode() -> int
+override Kiln.BuildingToolBlock.ToString() -> string!
 override Kiln.KnowledgeBlock.Equals(object? obj) -> bool
 override Kiln.KnowledgeBlock.GetHashCode() -> int
 override Kiln.KnowledgeBlock.ToString() -> string!
-override Kiln.BlockIdentity.Equals(object? obj) -> bool
+override Kiln.TerrainBrushBlock.Equals(object? obj) -> bool
+override Kiln.TerrainBrushBlock.GetHashCode() -> int
+override Kiln.TerrainBrushBlock.ToString() -> string!
+override Kiln.ToolMaterialPoolBlock.Equals(object? obj) -> bool
+override Kiln.ToolMaterialPoolBlock.GetHashCode() -> int
+override Kiln.ToolMaterialPoolBlock.ToString() -> string!
+override Kiln.ToolMaterialPoolEntry.Equals(object? obj) -> bool
+override Kiln.ToolMaterialPoolEntry.GetHashCode() -> int
+override Kiln.ToolMaterialPoolEntry.ToString() -> string!
 static Kiln.BlockIdentity.Legacy(System.Guid guid) -> Kiln.BlockIdentity!
 static Kiln.BlockIdentity.Legacy(uint id) -> Kiln.BlockIdentity!
 static Kiln.BlockIdentity.operator !=(Kiln.BlockIdentity? left, Kiln.BlockIdentity? right) -> bool
 static Kiln.BlockIdentity.operator ==(Kiln.BlockIdentity? left, Kiln.BlockIdentity? right) -> bool
+static Kiln.BuildingToolBlock.operator !=(Kiln.BuildingToolBlock? left, Kiln.BuildingToolBlock? right) -> bool
+static Kiln.BuildingToolBlock.operator ==(Kiln.BuildingToolBlock? left, Kiln.BuildingToolBlock? right) -> bool
 static Kiln.KnowledgeBlock.operator !=(Kiln.KnowledgeBlock? left, Kiln.KnowledgeBlock? right) -> bool
 static Kiln.KnowledgeBlock.operator ==(Kiln.KnowledgeBlock? left, Kiln.KnowledgeBlock? right) -> bool
+static Kiln.TerrainBrushBlock.operator !=(Kiln.TerrainBrushBlock? left, Kiln.TerrainBrushBlock? right) -> bool
+static Kiln.TerrainBrushBlock.operator ==(Kiln.TerrainBrushBlock? left, Kiln.TerrainBrushBlock? right) -> bool
+static Kiln.ToolMaterialPoolBlock.operator !=(Kiln.ToolMaterialPoolBlock? left, Kiln.ToolMaterialPoolBlock? right) -> bool
+static Kiln.ToolMaterialPoolBlock.operator ==(Kiln.ToolMaterialPoolBlock? left, Kiln.ToolMaterialPoolBlock? right) -> bool
+static Kiln.ToolMaterialPoolEntry.operator !=(Kiln.ToolMaterialPoolEntry? left, Kiln.ToolMaterialPoolEntry? right) -> bool
+static Kiln.ToolMaterialPoolEntry.operator ==(Kiln.ToolMaterialPoolEntry? left, Kiln.ToolMaterialPoolEntry? right) -> bool
