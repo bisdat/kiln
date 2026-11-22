@@ -187,7 +187,10 @@ never rounded), `string` (`maxBytes`), `stringSet` (what a tree's `expanded` hol
 numbers are strings (`"initial": "9007199254740993"`), so no tool rounds them. State is kept while the player stays in
 one world (closing and opening the window keeps it), starts again in the next world and is never saved: a config is the
 place for what must last. A toggle, a slider (int64 within the slider's range, decimal within ±1,000,000), a text field
-and `toggle` / `set` actions write it. At most 64 entries and 256 KiB per window, 2 MiB per mod.
+and `toggle` / `set` actions write it. At most 64 entries and 256 KiB per window, 2 MiB per mod. Every write keeps the
+entry's declaration: a tabs row's `selected` entry must hold its longest tab id (a compile error otherwise), and a widget's
+write past `maxBytes`, `maxItems` or a range (a long table row key, a third expanded branch with `maxItems: 2`) is refused,
+with one warning in the log.
 
 From C#: `BlockUi.State(window)` reads one of the mod's own windows at one version, `BlockUi.SetState(window, key, value,
 expected)` writes one entry. Writes commit in order on the client's main thread; a changed write advances the revision

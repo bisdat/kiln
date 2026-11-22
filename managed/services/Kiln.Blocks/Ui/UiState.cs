@@ -30,6 +30,7 @@ internal sealed class UiWindowState
     private volatile UiStateSnapshot _snapshot;
     private long _bytes;
     private bool _gone;
+    private readonly HashSet<string> _refusedLogged = new(StringComparer.Ordinal);  // Pump only
 
     public UiWindowState(string mod, string window, IReadOnlyDictionary<string, UiStateDefinition>? definitions)
     {
@@ -177,6 +178,8 @@ internal sealed class UiWindowState
                 }
             }
             w.Done?.TrySetResult(result);
+            if (!result.Ok && w.Done == null && w.Cause is UiStateChangeCause.Widget or UiStateChangeCause.Action && result.Reason?.StartsWith(UiStateReasons.Budget, StringComparison.Ordinal) == true && _refusedLogged.Add(w.Key))
+                BlocksBridge.Log(LogLevel.Warn, $"blocks: {Mod}: ui: window {Window}: a widget's write was refused: {result.Reason} (declare a larger entry)");
             if (events != null) foreach (var e in events) Events.Post(e);
         }
     }
@@ -195,6 +198,9 @@ internal sealed class UiWindowState
             var value = Normalize(w.Value!);
             var before = cur.Values.TryGetValue(w.Key, out var b) ? b : null;
             if (Equals(before, value)) return new UiStateResult(true, null, cur);
+            // every write keeps the entry's declaration (a widget's too: a table row's key, a tree's expanded set)
+            if (Definitions.TryGetValue(w.Key, out var def) && Problem(def, value) is { } bad)
+                return new UiStateResult(false, $"{UiStateReasons.Budget}: state.{w.Key}: {bad}", cur);
             next = cur with { Values = ((ImmutableDictionary<string, UiStateValue>)cur.Values).SetItem(w.Key, value), Version = cur.Version with { Revision = cur.Version.Revision + 1 } };
             if (Budget(next) is { } over) return new UiStateResult(false, over, cur);
             (events ??= new()).Add(new UiWindowStateChangedEvent(Window, w.Key, before, value, next.Version, w.Cause));

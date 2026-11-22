@@ -695,7 +695,14 @@ internal static class UiCompile
                     tabs.Add(new TabPlan(tab.Id, label, when, inner));
                 }
                 plan.Tabs = tabs;
-                if (t.Selected != null) plan.Selected = StateString(ctx, t.Selected, $"{path}.selected");
+                if (t.Selected != null)
+                {
+                    plan.Selected = StateString(ctx, t.Selected, $"{path}.selected");
+                    // the row writes its tab ids into the entry: each must fit, or a click would break the declaration
+                    if (plan.Selected.State is UiStringState { MaxBytes: var room } &&
+                        tabs.FirstOrDefault(x => System.Text.Encoding.UTF8.GetByteCount(x.Id) > room) is { } wide)
+                        throw Fail(ctx, $"{path}.selected", $"{plan.Selected.Name} holds at most {room} UTF-8 bytes and the tab id \"{wide.Id}\" has {System.Text.Encoding.UTF8.GetByteCount(wide.Id)}: give the entry a maxBytes of at least {tabs.Max(x => System.Text.Encoding.UTF8.GetByteCount(x.Id))}");
+                }
                 break;
             case TreeRow t:
                 CompileTree(ctx, low, owner, plan, t, path, wc, depth);

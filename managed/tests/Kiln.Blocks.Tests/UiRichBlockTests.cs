@@ -575,6 +575,42 @@ public sealed class UiRichBlockTests : IDisposable
     }
 
     [Fact]
+    public void A_selection_entry_too_small_for_a_tab_id_is_a_compile_error()
+    {
+        // review S2: a tabs row writes its tab ids into the entry; a 4-byte entry cannot hold "quests"
+        var state = new Dictionary<string, UiStateDefinition> { ["tab"] = new UiStringState("", MaxBytes: 4) };
+        var row = new TabsRow
+        {
+            Id = "t", Selected = "state.tab",
+            Tabs = [new UiTab("bag", "Bag", [new TextRow { Text = "x" }]), new UiTab("quests", "Quests", [new TextRow { Text = "y" }])],
+        };
+        Assert.Contains("quests", Refused(W(state, row)).Problem);
+        var fits = new Dictionary<string, UiStateDefinition> { ["tab"] = new UiStringState("", MaxBytes: 6) };
+        Define("w", W(fits, row));
+    }
+
+    [Fact]
+    public void A_widget_never_writes_past_its_state_entrys_limits()
+    {
+        // review S2: a tree's expanded set with maxItems 2 does not take a third branch; the state keeps its declaration
+        var state = new Dictionary<string, UiStateDefinition> { ["open"] = new UiStringSetState([], MaxItems: 2) };
+        Define("w", W(state, new TreeRow { Id = "t", Expanded = "state.open", Roots = [new("a", "A", [new("a1", "A1")]), new("b", "B", [new("b1", "B1")]), new("c", "C", [new("c1", "C1")])] }));
+        var w = Open();
+        Frame(w);
+        foreach (var node in (string[])["A###n", "B###n", "C###n"])
+        {
+            var c = new Canvas();
+            c.Toggle.Add(node);
+            Frame(w, c, refresh: false);
+            UiRuntime.Pump();
+            Frame(w);
+        }
+        var open = ((UiStateValue.StringSet)w.State.Snapshot.Values["open"]).Value;
+        Assert.True(open.Count <= 2, string.Join(",", open));
+        Assert.Null(UiWindowState.Problem(w.State.Definitions["open"], w.State.Snapshot.Values["open"]));
+    }
+
+    [Fact]
     public void A_text_field_keeps_its_draft_commits_on_Enter_and_cuts_at_a_character()
     {
         Define("w", Json<WindowBlock>(RichJson));
