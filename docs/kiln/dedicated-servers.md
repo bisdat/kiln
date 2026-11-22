@@ -223,6 +223,23 @@ then rename it to `test.cmd`: Kiln then never reads a half-uploaded file. Detail
 
 Restart the server after adding or removing mods.
 
+**EML mods on a server that runs ShroudForge.** EML mods go into `mods/<mod>/` (the folder with the mod's `mod.json`).
+Without a profile, Kiln hosts ShroudForge on a server when `mods/` holds a switched-on ShroudForge mod, or when
+ShroudForge ran there before (its `shroudforge/state.json` records prepared asset mods). ShroudForge then runs the EML
+mods instead of Kiln, and it runs one only while the mod's `extended.mod.json` says `"enabled": true`. An EML mod you
+unzip yourself has no such file, so ShroudForge keeps it off, and a server has no in-game menu to switch it on. Put this
+file into each EML mod's folder as `extended.mod.json` (a mod that already has one: set its `"enabled"` to `true`):
+
+```json
+{"schemaVersion":1,"launcher":"EML","enabled":true,"targets":["client","server"],"settings":{}}
+```
+
+Restart the server. Since 0.2.0-dev.30.3, `kiln/logs/kiln.log` warns at the start when ShroudForge has EML mods off
+(`kiln-eml: 2 EML package(s) in … are switched off in ShroudForge or refused by it, so nothing runs them (…)`), and
+`kiln/state/eml.json` lists each one as `off-in-shroudforge` with what to do. In such a start EML mods in
+`kiln/eml/mods` do not run either (ShroudForge reads only its own folder): move them to `mods/`. Without ShroudForge,
+Kiln runs the EML mods in `mods/` and `kiln/eml/mods` itself; the file does no harm there.
+
 **Mods with a cook recipe** (`assets/cook.json`: player animations, models, sounds) are made from the game's files on each
 machine; a mod archive doesn't carry them. A mod with player animation states needs its cooked clips on the server too:
 without them the server refuses those states, and then refuses every player whose game has them. Cook it on the server:

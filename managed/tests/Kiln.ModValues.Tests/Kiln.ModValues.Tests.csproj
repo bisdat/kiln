@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Unit tests of Kiln.ModValues with no game: the ledger on an in-memory store, the stream's reducers on a fake
+       clock and transport, the formatter, the JSON authoring and the facade on the test kit's fake. -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>ModValuesTests</RootNamespace>
+    <IsTestProject>true</IsTestProject>
+    <OutputType>Exe</OutputType>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <!-- NativeBackendTests reads the native facade's records through pointers -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit.v3" Version="3.1.0" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../services/Kiln.ModValues/Kiln.ModValues.csproj" />
+    <ProjectReference Include="../../Kiln.TestKit/Kiln.TestKit.csproj" />
+  </ItemGroup>
+</Project>

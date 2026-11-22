@@ -31,12 +31,14 @@ generated [../status.generated.md](../status.generated.md); what has no API yet 
 | [impact.md](impact.md) | Impact programs: tools/impact (dis/asm/lint/clone/cook), Kiln natives, packaging into kiln.assets |
 | [ecs-programs.md](ecs-programs.md) | ECS programs in the game's scheduler (`kiln.programs.json`, `EcsPrograms.Bind`) and hooks on the game's systems |
 | [client-hooks.md](client-hooks.md) | Client hooks for mods (advanced tier, may break on game updates): typed hooks of the game client from a mod's own `sigdb/client.json`, what is allowed, what Kiln refuses; `mods/samples/ClientHookSample` |
+| [../render.md](../render.md) | Client drawing and the world: render events (pixels, markers and labels at world positions, the camera) and `Ui.World.Outline`, an entity's model outlined with the game's own highlight (since 0.2.0-dev.30.3) |
 | [sounds.md](sounds.md) | Sounds, cues, music, voice-over: tools/soundcook, cook.json sound steps, SoundSample |
 | [vfx.md](vfx.md) | Effects: particles, lights and the game's VFX by name, in `blocks/*.json` or C#, the budget, VfxSample |
 | [shaders.md](shaders.md) | Particle shaders (advanced): your own HLSL hooks for a particle, linked into Kiln's sprite; `kiln-vfxcook shader` |
 | [screen-effects.md](screen-effects.md) | Full-screen effects: colour grading, tint, vignette, fades and flashes, on a status, an effect or from code |
 | [models.md](models.md) | Weapons and creature bodies from glTF, rigid or skinned: tools/modelcook, cook.json model steps |
 | [cooking.md](cooking.md) | Cooking: the files a mod makes from each player's game (models, animations, sounds, Impact programs), who cooks and when (the launcher, `kiln cook`, a server), and why only what this PC cooked is loaded |
+| [textures.md](textures.md) | Textures in code: game texture data (BC1 to BC7, packed, 8 to 64-bit formats, mip chains) to RGBA8 pixels and back, `GameTexture` (since 0.2.0-dev.30.3) |
 | [materials.md](materials.md) | New surfaces for models from PNGs and numbers, on the game's own shaders: no base to name, or made from a glTF's materials |
 | [animations.md](animations.md) | Clips, skeletons and state-machine graphs from glTF: tools/animcook, cook.json animation steps, clips reworked from other clips (`from`); states of a mod's own in the player's animation graph (`assets/player-states.json`) |
 | [quests.md](quests.md) | Quest chains, conversations and NPCs: QuestBlock/DialogueBlock, quests/*.json, Quests.Define, rewards and client requirements |
@@ -53,10 +55,14 @@ generated [../status.generated.md](../status.generated.md); what has no API yet 
 | [../services/queries.md](../services/queries.md) | `Kiln.Queries`: what is on a line through the terrain, the ground below a point, voxel line of sight, the entities in a sphere or a box; the ray budget all mods share |
 | [../typegen.md](../typegen.md) | Typed reads of the game's ECS components: `Kiln.Ecs` (`TryGet`, `Get`, `Has`, `All`, `Supports`), generated per game build; example in §4.3 |
 | [typed-fields.md](typed-fields.md) | The game's data as typed C# structures, for what blocks don't cover: `GameFields`, `GameEnums`, checked string paths |
+| [registries/README.md](registries/README.md) | Kiln's registries (items, recipes, loot, drops, balance): the game's data under Kiln-owned names and ids, with when each field takes effect. Experimental (KILNX031) |
 | [resource-patches.md](resource-patches.md) | Change a field of the game's data before the game reads it (the balancing table and the like): `resourcePatches` in a boot mod |
 | [player-states.md](player-states.md) | Every state and action a player can be in: `player.Is(...)`, `PlayerStateChangedEvent`, `PlayerActionEvent`, and what is left out |
+| [../services/client-building-input.md](../services/client-building-input.md) | Building input (0.2.0-dev.30.3, game client only): select, place, remove, undo and dismantle through the local player's own input (`kiln.client`); the server still checks permissions, resources and range; one request at a time; game client 26430625 (`client.building_input`), not checked in a real game yet. Guide: [building-input.md](building-input.md) |
+| [../services/net-steam-messages.md](../services/net-steam-messages.md) | Steam messages (0.2.0-dev.30.3): a mod's own Steam peer-to-peer messages on leased Steam channels, beside the game's connection (`kiln.net`): status, open, close, maintain (who may start a session), send, receive, accept (`net.steam_messages`); a mod opts in with `"steamMessages": true` in kiln.mod.json |
 | [../services/steamguard.md](../services/steamguard.md) | The achievement guard (experimental, game client only): keep tests and admin commands from unlocking Steam achievements |
-| [debugging.md](debugging.md) | Breakpoints in a running server: `kiln debug` and netcoredbg |
+| [debugging.md](debugging.md) | Breakpoints in a running server or game client: `kiln debug` and netcoredbg |
+| [debugging-windows-matrix.md](debugging-windows-matrix.md) | The debugger's acceptance matrix for Windows servers, Windows and Proton clients |
 | [../native-mods.md](../native-mods.md) | Native mods (DLL mods): `native.json`, load phases, `kiln_native_init` and the Kiln API from C or C++ |
 | [native-asi.md](native-asi.md) | One DLL that runs as a Kiln native mod and as an `.asi` under Ultimate ASI Loader, and starts once |
 
@@ -95,6 +101,7 @@ first). `mods/samples/build.sh` builds the loader samples (`SampleLib`, `SampleC
 | `Schematics` | kiln.build: `/build` admin commands (selection, capture, paste with rotation, shapes, props, undo) and outposts placed once per world |
 | `RulesSample` | Kiln.Rules: `/flight` for 60 s of the building fly mode, no stamina drain inside bases, a half-cost building weekend from a config switch |
 | `NetSample` | Kiln.Network: F9 on a client pings the server over `netsample:main`; the server answers and announces Kiln clients |
+| `ReplWatch` | The network inspector (`Kiln.Replication`, since 0.2.0-dev.31): `/replwatch` watches the chest nearest to you with `Replication.Watch` and logs, per player, the size of its Inventory component as sent and its used slots when they change; `Local` and `Fake` peers; `/replwatch stop` and the unload dispose the watch ([services/replication.md](../services/replication.md)) |
 | `BigStacks` | a server config (x4 stack sizes, at most 9999) that Kiln clients get through the content sync |
 | `NewItems` | kiln.content's new items and recipes from code and a data pack, plus a perk and a buff of its own (kiln.gamedata clones) |
 | `AffixSword` | Affix blocks: a sword that rolls one of three affixes defined in `blocks/affixes.json` (`/affix-sword`); the bonus acts while it is in hand; `/affixes` lists what the held item carries; in the player's game a notice shows the roll |

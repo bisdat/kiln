@@ -133,12 +133,13 @@ bool parse_rule(const json& j, const char* source, Rule* r, std::string* why) {
         }
     }
     if (!j.contains("action") || !j["action"].is_string()) {
-        *why = "\"action\" must be warn, late, disable, before, defer or original-code";
+        *why = "\"action\" must be warn, late, disable, before, defer, original-code or known";
         return false;
     }
     r->action = j["action"].get<std::string>();
-    if (r->action != "warn" && r->action != "late" && r->action != "disable" && r->action != "before" && r->action != "defer" && r->action != "original-code") {
-        *why = "\"action\" must be warn, late, disable, before, defer or original-code";
+    if (r->action != "warn" && r->action != "late" && r->action != "disable" && r->action != "before" && r->action != "defer" && r->action != "original-code" &&
+        r->action != "known") {
+        *why = "\"action\" must be warn, late, disable, before, defer, original-code or known";
         return false;
     }
     if (j.contains("message")) {
@@ -176,6 +177,10 @@ bool parse_rule(const json& j, const char* source, Rule* r, std::string* why) {
         (r->subject.kind != Matcher::Kind::Mod || r->subject.value.rfind("shroudtopia:", 0) != 0 ||
          r->subject.value.size() == 12)) {
         *why = "original-code needs a shroudtopia:<id> subject";
+        return false;
+    }
+    if (r->action == "known" && r->subject.kind != Matcher::Kind::Module) {
+        *why = "known needs a module subject";
         return false;
     }
     if (r->action == "defer") {

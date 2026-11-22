@@ -53,7 +53,7 @@
         "comments": true,
         "trailingCommas": false
       },
-      "reader": "native/services/content/packs.cpp apply_pack (nlohmann::json, ignore_comments)",
+      "reader": "native/services/content/packs.cpp apply_pack (nlohmann::json, ignore_comments); its \"registry\" section (registry-section.schema.json): packs.cpp registry_sections and the registry stage",
       "docs": "docs/kiln/services/content.md#data-packs"
     },
     {
@@ -225,6 +225,21 @@
       },
       "reader": "kiln_manage::publish::config (comments and trailing commas allowed, duplicate and unknown keys refused, 256 KiB limit)",
       "docs": "docs/kiln/modding/publishing.md"
+    },
+    {
+      "schema": "kiln-mod-values.schema.json",
+      "name": "Kiln mod values",
+      "kind": "mod-values",
+      "fileMatch": [
+        "**/mod-values/*.json"
+      ],
+      "dialect": {
+        "comments": false,
+        "trailingCommas": false,
+        "bom": false
+      },
+      "reader": "Kiln.ModValues at mod load (strict JSON: duplicate and unknown keys refused; dossier 05b section 4.1)",
+      "docs": "docs/kiln/modding/schemas/kiln-mod-values.md"
     }
   ]
 }

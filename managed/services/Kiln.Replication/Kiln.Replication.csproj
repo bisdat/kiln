@@ -1,7 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- Managed face of native/services/repl (kiln.repl): the game's replication, read only, and on lab servers the
-       loopback harness (ReplicationLab). Deployed to kiln/host/ and shared by every mod (mods reference it with
-       Private="false" ExcludeAssets="runtime"). -->
+  <!-- Managed face of native/services/repl (kiln.repl): the network inspector (Replication: counters per peer and
+       channel, watches on single entities, the repl commands, the Kiln menu's Replication section), read only, and on
+       lab servers the loopback harness (ReplicationLab). Deployed to kiln/host/ and shared by every mod (mods reference
+       it with Private="false" ExcludeAssets="runtime"). -->
   <PropertyGroup>
     <RootNamespace>Kiln</RootNamespace>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
@@ -9,8 +10,27 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../Kiln.Api/Kiln.Api.csproj" Private="false" />
+    <!-- NetPeer in the records; kiln.net's lab binding of a fake (NetNative, internal) -->
+    <ProjectReference Include="../Kiln.Network/Kiln.Network.csproj" Private="false" />
+    <!-- the repl commands -->
+    <ProjectReference Include="../Kiln.Chat/Kiln.Chat.csproj" Private="false" />
+    <!-- the item remap: Kiln-only items and their look-alikes (Kiln.Content), the game's items (Kiln.Items) -->
+    <ProjectReference Include="../Kiln.Content/Kiln.Content.csproj" Private="false" />
+    <ProjectReference Include="../Kiln.Items/Kiln.Items.csproj" Private="false" />
+    <!-- the sidecars: the providers' component test and the safety net (Kiln.World), the client's main-thread tick and
+         Changed posted to a hosted world's client thread (Kiln.Client) -->
+    <ProjectReference Include="../Kiln.World/Kiln.World.csproj" Private="false" />
+    <ProjectReference Include="../Kiln.Client/Kiln.Client.csproj" Private="false" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Kiln.Replication.Tests" />
+    <!-- the Network page's Replication section (ReplicationView) -->
+    <InternalsVisibleTo Include="Kiln.Ui" />
+    <!-- the repl ops (Replication's own owner, the capture) -->
+    <InternalsVisibleTo Include="Kiln.Admin" />
+    <!-- the lab test's payloads, hook cost and lab-peer binding (ReplicationLabInternals) -->
+    <InternalsVisibleTo Include="ReplTest" />
+    <!-- the test kit's fake kiln.repl table -->
+    <InternalsVisibleTo Include="Kiln.TestKit" />
   </ItemGroup>
 </Project>

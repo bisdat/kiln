@@ -11,7 +11,8 @@ namespace kiln::engine {
 
 struct Stats {
     std::atomic<std::uint64_t> attempts{0}, acquired{0}, busy_registry{0}, busy_scene{0}, refused_in_frame{0},
-        refused_world_thread{0}, refused_other{0}, hold_ns_total{0}, hold_ns_max{0}, views{0}, view_failures{0};
+        refused_world_thread{0}, refused_other{0}, hold_ns_total{0}, hold_ns_max{0}, views{0}, view_failures{0},
+        restores{0}, restore_ns_total{0}, restore_ns_max{0};
 };
 Stats& stats();
 

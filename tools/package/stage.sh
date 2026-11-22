@@ -15,7 +15,11 @@
 # as in release.sh) warns and leaves such a part out instead.
 # KILN_SF_CACHE=DIR: keep ShroudForge's built runtime by the hash of its inputs and reuse it (verified by sha256).
 # KILN_NATIVE_PREBUILT=DIR: the native CMake targets' bin/ built elsewhere with the same toolchain (release.sh,
-# KILN_BUILD_REMOTE=win1): copied in, and only what it lacks builds here.
+# KILN_BUILD_REMOTE=win1), with that build's generated kiln_build.h (its build stamp): copied in, and only what it lacks
+# builds here.
+# kiln-sfi.dll is built with the native build's stamp (its generated kiln_build.h: KILN_BUILD for
+# crates/sfi/kiln-sfi/build.sh), so it exports the stamp of the core it ships with: the core makes it the
+# ShroudForge-dialect owner only then. tools/sfi/sfi_stage.py check refuses a stage where the two differ.
 # KILN_OUT (default <repo>/.out/package) holds the build; the .NET runtime comes from tools/package/fetch-dotnet.sh.
 set -euo pipefail
 repo=$(cd "$(dirname "$0")/../.." && pwd)
@@ -142,13 +146,18 @@ if ((build)); then
   for dir in "$repo"/native/services/*/ "$repo"/native/plugins/*/; do
     [[ -f $dir/CMakeLists.txt ]] && targets+=("kiln-$(basename "$dir")")
   done
+  # the native build's stamp: native/cmake/kiln_build_stamp.sh writes it there before the core and its DLLs build
+  native_build_h=$out/cmake/generated/kiln_build.h
   if [[ -n ${KILN_NATIVE_PREBUILT:-} ]]; then
     # KILN_NATIVE_PREBUILT (tools/release/release.sh with KILN_BUILD_REMOTE=win1): the native targets' bin/ as
     # tools/release/lib/remote-win1-native.sh built it on kiln-win1 with this toolchain; a target it does not hold
     # (kiln-shroudlink: Rust, cargo xwin) builds here, alone.
     [[ -s $KILN_NATIVE_PREBUILT/kiln-core.dll && -s $KILN_NATIVE_PREBUILT/dinput8.dll ]] || die "KILN_NATIVE_PREBUILT=$KILN_NATIVE_PREBUILT holds no native build"
+    [[ -s $KILN_NATIVE_PREBUILT/kiln_build.h ]] || die "KILN_NATIVE_PREBUILT=$KILN_NATIVE_PREBUILT holds no kiln_build.h (its build's stamp)"
+    native_build_h=$KILN_NATIVE_PREBUILT/kiln_build.h
     mkdir -p "$out/cmake/bin"
     cp -a "$KILN_NATIVE_PREBUILT"/. "$out/cmake/bin"/
+    rm -f -- "$out/cmake/bin/kiln_build.h"
     for dir in "$repo"/native/plugins/*/; do
       p=$(basename "$dir"); [[ -f $dir/CMakeLists.txt ]] || continue
       grep -q "Builds no plugin" "$dir/CMakeLists.txt" && continue
@@ -183,9 +192,16 @@ if ((build)); then
   bg_eml=""
   # kiln-sfi.dll (crates/sfi, its own workspace and lock) into bin/plugins, and kiln-eml's archive
   # inspector for Linux (build.sh --host; its Windows .exe came with the build above)
+  # kiln-sfi.dll exports this build's stamp: the KILN_BUILD the native build generated, passed to its cargo build (one
+  # computation per build, also when kiln-win1 built the native part)
   if [[ -f $repo/crates/sfi/kiln-sfi/Cargo.toml ]]; then
-    built kiln-sfi env CARGO_TARGET_DIR="$out/cargo-sfi" "$repo/crates/sfi/kiln-sfi/build.sh" \
-      || miss "plugin kiln-sfi failed to build (log: $logs/kiln-sfi.log)"
+    sfi_build=$(sed -n 's/^#define KILN_BUILD "\(.*\)"$/\1/p' "$native_build_h" 2>/dev/null || true)
+    if [[ -z $sfi_build ]]; then
+      miss "plugin kiln-sfi: the native build left no build stamp in $native_build_h"
+    else
+      built kiln-sfi env KILN_BUILD="$sfi_build" CARGO_TARGET_DIR="$out/cargo-sfi" "$repo/crates/sfi/kiln-sfi/build.sh" \
+        || miss "plugin kiln-sfi failed to build (log: $logs/kiln-sfi.log)"
+    fi
   fi
   # KILN_EML_INSPECT_LINUX=FILE: that Linux inspector instead (tools/release/release.sh builds it where the other
   # Linux files are built, for their glibc)
@@ -331,6 +347,14 @@ mkdir -p "$s/builds/client"
 install -m 644 "$repo/sigdb/symbols/client.json" "$s/client.json"
 python3 "$repo/tools/sigport/sides.py" compose client "$s/client.d" >/dev/null
 cp "$repo"/sigdb/builds/client/*.json "$s/builds/client/" 2>/dev/null || true
+# the regmap per side, beside the sigdb (regmap/README.md: Kiln's registries mapped onto each game build; kiln.content reads
+# <game>/kiln/regmap/common/*.json and <side>/<exe sha256>.json)
+for side in server client; do
+  r=$stage/sigdb-$side/kiln/regmap
+  mkdir -p "$r/common" "$r/$side"
+  install -m 644 "$repo"/regmap/common/*.json "$r/common/"
+  cp "$repo"/regmap/$side/*.json "$r/$side/" 2>/dev/null || true
+done
 # a mod folder the way deploy-server.sh copies it: without the shared Kiln.* assemblies, *.deps.json and
 # *.runtimeconfig.json, except the entry assembly and the manifest's exports (+ their pdbs)
 stage_mod() {  # <built mod folder> <component> <id>

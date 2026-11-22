@@ -138,7 +138,8 @@ internal static class GameDataSectionStarter
 
     private static void Tick(ulong step)
     {
-        if (step % 250 == 17) StartBlocks();
+        // the 250-step poll, and as soon as the mods' OnLoad pass is done (station menus hold joins until the blocks pass ran)
+        if (step % 250 == 17 || (!_blocksStarted && step < 2000 && step % 10 == 7 && Lifecycle.ModsLoaded)) StartBlocks();
         if (step % 50 != 13 || Tried.Count == Known.Length || !Content.GameDataAvailable) return;
         JsonNode? st;
         try

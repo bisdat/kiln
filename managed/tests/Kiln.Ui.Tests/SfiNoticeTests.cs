@@ -515,6 +515,40 @@ public sealed class SfiNoticeTests : IDisposable
         Assert.True(Exists(pid));
     }
 
+    [Fact]
+    public void A_ready_event_someone_made_unsignalled_is_kept_and_signalled()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var pid = Environment.ProcessId;
+        var squatter = CreateEventW(0, true, false, SfiSafetyNotice.ReadyEventName(pid));
+        Assert.NotEqual(0, squatter);
+        try
+        {
+            Assert.Equal(WaitTimeout, WaitForSingleObject(squatter, 0));  // unsignalled
+            Assert.True(SfiSafetyNotice.EnsureReady(pid, true, true));
+            Assert.Equal(0u, WaitForSingleObject(squatter, 0));  // signalled now, as Kiln.Ui's own event starts
+            Assert.Contains(_log, l => l.Contains("already existed") && l.Contains("signalled it"));
+        }
+        finally { CloseHandle(squatter); }
+    }
+
+    [Fact]
+    public void A_ready_event_that_cannot_be_made_is_logged_once_and_tried_again()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var pid = Environment.ProcessId;
+        var mutex = CreateMutexW(0, false, SfiSafetyNotice.ReadyEventName(pid));  // the name held by another object type
+        Assert.NotEqual(0, mutex);
+        try
+        {
+            for (var i = 0; i < 5; i++) Assert.False(SfiSafetyNotice.EnsureReady(pid, true, true));  // Apply: every 2 s
+            Assert.Single(_log, l => l.Contains("not created"));
+        }
+        finally { CloseHandle(mutex); }
+        Assert.True(SfiSafetyNotice.EnsureReady(pid, true, true));  // the name is free again: made now
+        Assert.True(Exists(pid));
+    }
+
     private static bool Exists(int pid)
     {
         var h = OpenEventW(Synchronize, false, SfiSafetyNotice.ReadyEventName(pid));
@@ -528,6 +562,13 @@ public sealed class SfiNoticeTests : IDisposable
     }
 
     private const uint Synchronize = 0x00100000;
+    private const uint WaitTimeout = 0x102;
+
+    [DllImport("kernel32", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern nint CreateEventW(nint attributes, bool manualReset, bool initialState, string name);
+
+    [DllImport("kernel32", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern nint CreateMutexW(nint attributes, bool initialOwner, string name);
 
     [DllImport("kernel32", SetLastError = true, CharSet = CharSet.Unicode)]
     private static extern nint OpenEventW(uint access, bool inherit, string name);

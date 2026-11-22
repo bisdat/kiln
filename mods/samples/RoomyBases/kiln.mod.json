@@ -1,0 +1,10 @@
+{
+  "id": "roomy-bases-sample",
+  "name": "Roomy bases",
+  "version": "1.0.0",
+  "apiVersion": "0.2",
+  "side": "both",
+  "clients": "mod",
+  "boot": true,
+  "description": "A data-only mod: at least 6 Flame Altars from the first Flame level and 2 more than the game allows at every level (at most 16), build zones at 150% of the game's, and a 64 m zone for a new altar. blocks/bases.json, no code. Kiln's base rules: no game names, and no conflict with another mod's base rules."
+}

@@ -239,3 +239,50 @@ public sealed record ReplLoopbackStats(long Decoded, long ComponentsEqual, long 
 [Experimental("KILNX001", UrlFormat = "https://github.com/frostdev-ops/kiln/blob/main/docs/kiln/modding/analyzers.md#kilnx001")]
 [EditorBrowsable(EditorBrowsableState.Never)]
 public sealed record ReplLabDecoded(uint Tick, ReadOnlyMemory<byte> Bytes);
+
+
+/// <summary>Lab only, for mods/tests/repl-test (InternalsVisibleTo): kiln.repl.lab and kiln.net's lab binding, without
+/// public API.</summary>
+internal static class ReplicationLabInternals
+{
+    /// <summary>The remap's blanked-state count (kiln.repl.net remap_stats), for repl-test's blank part.</summary>
+    internal static unsafe ulong RemapBlanked()
+    {
+        var t = ReplNetNative.T;
+        var s = new ReplNetNative.RemapStats { Size = (uint)sizeof(ReplNetNative.RemapStats) };
+        return t != null && t->RemapStatsFn != null && t->RemapStatsFn(&s) == ReplNative.Ok ? s.Blanked : 0;
+    }
+
+    /// <summary>The newest create or update payload fake <paramref name="machine"/> was sent for <paramref name="entity"/>
+    /// on its client channel; null when none.</summary>
+    internal static (byte[] Bytes, uint Tick)? Payload(int machine, EntityId entity, ReplKind kind)
+    {
+        Services.RequireTickThread("ReplicationLab payload");
+        var rc = ReplNative.Payload((uint)machine, entity.Value, (uint)kind, out var bytes, out var tick);
+        return rc switch
+        {
+            ReplNative.Ok => (bytes, tick),
+            ReplNative.NotFound => null,
+            _ => throw new InvalidOperationException($"kiln.repl.lab refused the payload ({rc})"),
+        };
+    }
+
+    /// <summary>What kiln.repl's own hook code cost since the last call with <paramref name="reset"/> (lab servers).</summary>
+    internal static ReplNative.HookCost HookCost(bool reset)
+    {
+        Services.RequireTickThread("ReplicationLab hook cost");
+        var rc = ReplNative.HookCostOf(reset, out var cost);
+        if (rc != ReplNative.Ok) throw new InvalidOperationException($"kiln.repl.lab refused the hook cost ({rc})");
+        return cost;
+    }
+
+    /// <summary>kiln.net's lab op BIND_MACHINE: lab peer <paramref name="labPeer"/> stands for the fake on
+    /// <paramref name="machine"/> (0: only asks). Returns the lab peer bound to that machine now (0: none).</summary>
+    internal static uint BindMachine(uint labPeer, int machine)
+    {
+        Services.RequireTickThread("ReplicationLab bind");
+        var rc = NetNative.LabSelftest(NetNative.SelftestBindMachine, labPeer, (ulong)(uint)machine, out var bound);
+        if (rc != 0) throw new InvalidOperationException($"kiln.net refused the lab binding ({rc})");
+        return (uint)bound;
+    }
+}

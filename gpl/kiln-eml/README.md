@@ -464,6 +464,37 @@ Each is marked `kiln-eml:` in the source.
     progress stays): the core's first `begin` asks user32 for the screen size, which can load Wine's display driver
     while a package DLL's initializer holds the loader lock. The early phase also asks sfi-core's export-root check its
     Wine lookup (`sfi_core::eml::io::prime_export_checks`). No new write boundary, no new Mutex.
+37. `kiln-eml/src/archive_service/attributes.rs` (new), `archive_service.rs`, `archive_service/{read,view}.rs` (kiln-eml's own
+    code over the attribute catalog of item 28): kiln.eml.archive's attribute group, `attribute_catalog`,
+    `attribute_resolve` and `attribute_evaluate`, now in the table and reported as `eml.archive.attributes` with its three
+    member rows. A generation authorized with its archive builds ShroudForge's catalog once, on its first attribute
+    call, from its REFERENCE catalog only (the reference index and reader, never staged records) with a copy of its
+    registry, and keeps it (a failure too) for its life: the catalog reply and each entry's JSON are materialized with
+    it, so a size probe and the copy answer the same bytes. Replies follow schema/sfi/eml-archive/attribute-*.schema.json:
+    each descriptor and layout as the neutral tagged tree of ShroudForge's JSON (key order kept), an entry's
+    `definition_guid` from its one associated component. Failures keep ShroudForge's own text behind an error token
+    (catalog failures UNAVAILABLE; resolve's missing ID or name NOT_FOUND, an ambiguous name UNAVAILABLE; evaluate's
+    incomplete root NOT_FOUND, a short or long input INVALID_ARGUMENT, an unverified operation enum or unsupported scalar
+    UNAVAILABLE, a program failing on the given bits INVALID_ARGUMENT); a short trace buffer leaves the output bits
+    untouched. No engine memory, no Lua, no new write boundary; the catalog's lock is held only around its own lookups.
+38. `mod-loader-lua` `ownership.rs` (`hosted_shroudforge_output`, `RestoreProof`, `before_restore_as`), `load.rs`
+    (`restore_backup_as`), `startup_host.rs` (`restore_base`, `VERIFY_GAME_FILES`) and `kiln-eml/src/startup.rs` (the
+    witness) (kiln-eml's own code): a kiln-mode start over Kiln's bundled ShroudForge's output. That ShroudForge's fork
+    records its last startup asset pass beside the backup (`<stem>.kfc.prepared.json`, scheme `kiln-sf-prepared 1`,
+    record_prepared_game_files.rs): the header's size and whole SHA-256, the resource file's size, last-write time and
+    the SHA-256 of its first and last MiB, both backups' size and last-write time, Steam's build id. No receipt lists that
+    output, so the verified BASE used to refuse it (`neither the BASE nor output Kiln can prove it published`) and Kiln's
+    interpreter did not start for a player who switched from Kiln's bundled ShroudForge. Now, in kiln mode only
+    (Deferred), output whose record matches it in all of that (the build only where the record and Steam's manifest
+    both name one) is restored from the backups present as owned output is: the backups pass `validate_backup` (this
+    build's version, the seal), the proof is checked again in `before_restore_as`, the owed ShroudForge handoff is
+    recorded, Kiln's older receipt goes. A record naming the live header but not the rest (stale) and output nothing
+    proves stay refused and change nothing. The witness never takes that output as a new working baseline (backups
+    gone or of another game build: `baseline-shroudforge-output`). Every such refusal ends with what the player does
+    (`VERIFY_GAME_FILES`: verify the game files in Steam, then start again from the Kiln launcher), and kiln-sfi's
+    `startup-grant-missing` reason quotes it (`base-not-restored` first, else the first attempt's error, else the
+    warning that ended the start). EML mode (Live) is unchanged. Tests: `m6_hosted_restore.rs`, ownership.rs
+    `hosted_shroudforge_output_is_proven_by_its_whole_record_only`.
 
 The plugin validates paths from each authorized root down (root included), leaving linked Steam/Wine layout
 ancestors alone; it also checks final resolved containment. Profile paths resolve against `<game>/kiln`.

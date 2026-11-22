@@ -245,7 +245,7 @@ level, upgrades, gem slot and durability. A take followed by a give makes new ge
 bounded `Changes` ledger. Check `Items.MovesAvailable`; run on the tick thread and await completion there.
 
 `MoveOptions.DryRun` rolls back and emits no transfer event; `Equipped` and `ActionBar` opt into those slots; `Silent` skips
-transfer rules/events. `Items.ContainerName(chest)` reads a player's name, never renames; check `ContainerNamesAvailable`.
+transfer rules/events. `Items.ContainerName(chest)` reads a player's name; check `ContainerNamesAvailable`. `await Items.SetContainerName(chest, "Ores")` (since 0.2.0-dev.30.3, mod API 0.2.13, capability `items.rename`) renames through the game's own rename on the server (replicates, saves; "" clears; at most 48 characters / 64 bytes, no control characters; throws `ArgumentException` for a bad name or a non-container, `InvalidOperationException` on a joined client); check `ContainerRenameAvailable`.
 `Items.Transfers.Keep(slot)`, `KeepItem(item, owner)`, `Deny(container, TransferKinds.QuickStack)` return disposable rules.
 `InventoryTransferEvent` is a report after quick stack/move all, not cancelable. To cancel an incoming player request,
 first require `e.Name == "inventoryTransferAction"` and `e.CanCancel` on `PlayerClientActionEvent`; then parse `e.Payload`
@@ -325,6 +325,10 @@ Content.Items.Register(new ItemDefinition { Guid = ..., Name = "MyMod_FrostEdge"
 Content.Recipes.Register(new RecipeDefinition { Guid = ..., Name = "MyMod_FrostEdge_Recipe", Station = "hand",
     Inputs = [("Material_T1_Twigs", 2)], Outputs = [("MyMod_FrostEdge", 1)] });
 ```
+dev.30.3+ **a recipe's tank water:** `RecipeDefinition.Water` (new recipes) and `entry.CraftingWater` (game recipes) are
+`waterCharges`, charges per craft (1 charge = 64 water units), 0..1023: the six tank stations (Seedbed, Oven, Cooking
+Station, Laboratory, Coffee Brewer, Beehive) take it from their own tank, crafting menus (hand, Workbench, Kitchen, NPCs)
+from the player and the base's wells and barrels. Not the old "Water" canteen item. Replaces `Fields["waterCharges"]` (`Water` sends a pack's `"water"`; never both).
 Registries: `Content.Items`, `Recipes`, `Loot`, `Drops`; game data: `Content.Templates`, `Arsenals`, `Sequences`,
 `Buffs`, `Perks`, `Skills`. `entry.Get(path)`, `Original(path)`, `Set(path, value)`, `Reset(path)`.
 `Content.Dump()` writes every registry with its fields to `kiln/data/content/dump.json`: look names and paths up
@@ -472,6 +476,12 @@ server) the listener is not `Ok`, with a `Reason`; it never throws for that. `Ke
 `p.Chord.ToString()` are what the Keys page stores. Don't read Kiln's internals (`KilnText`, `UiNative`, `KeyNames`) by
 reflection: `KilnLanguage` and `KeyInput` are the public members for them (`docs/kiln/ui.md`, the XHL-Core table).
 
+**The pointer and drag and drop (dev.30.3+, Kiln.Ui; not yet seen in a real game).** In a draw callback: `ui.Pointer`
+(`Vector2?`, overlay pixels, `DrawRect`'s space), `ui.ButtonHeld(UiMouseButton.Left)`, and ImGui's drag and drop:
+`ui.DragSource("stack", payload, preview)` right after a widget, `ui.DropTarget("stack")` right after another (the payload
+text once, on release; else null). Kinds are the mod's own; payloads are text up to 4096 bytes. `SlotClick.Pointer` is
+the press position in the same pixels (`Ui.Inventory.OnClick`). Page `docs/kiln/ui.md`.
+
 **Looks and themes (dev.29.16+; not yet seen in a real game).** `UiStyle.Player` (the look the player chose) is the
 default for `Ui.Window`, `Ui.Screen` and crafting panels; before, windows had Kiln's ember look. `ui.Palette` reads the
 look's colours by role. `Ui.Themes.Define(name, new UiThemeSpec { ... })` makes a theme for your own windows
@@ -535,6 +545,19 @@ thread. Content changes reach Kiln clients without any code (content sync); conf
 dev.28+: `NetPeer.FramesIn` / `FramesOut` count Kiln-channel frames per player. A refused player whose refusal fails is
 kicked (`net.disconnect`). dev.29+: the join compares each `side: both` boot mod's committed content
 (`docs/kiln/network.md`).
+dev.30.3+ (mod API 0.2.13): `SteamMessages` (Kiln.Network, any thread, never waits): a mod's own Steam peer-to-peer
+messages, outside the game's connection. `SteamMessages.Open(first, last, answerSessions)` → `SteamLeaseResult`
+(`Lease`: a `SteamMessageLease` on Steam channels `first..last`, 0..65535, no overlap, at most 16 in the process; closed
+at `Dispose()` or the mod's unload). `lease.Send(steamId, channel, data, SteamSendFlags.Reliable)` (≤ 524,288 bytes;
+`SteamResult` = Steam's EResult), `lease.Receive(channel, buffer)` (one message or `NoMessage`; too big for the buffer:
+taken and `Dropped`), `lease.Accept(steamId)`, `lease.SetAcceptPolicy(SteamAcceptMode.None | Any | Listed, ids)` (the
+session lease only, ≤ 256 ids; `Any`/`Listed` need Steam ready), `SteamMessages.Status` (never throws), `Available`.
+Results carry `Refusal` (`SteamMessagesRefusal`: `NotPermitted`, `Taken`, `SteamNotReady`, `LeaseClosed`,
+`ClosedForExit`, `SteamRefused`, `Dropped`, `NoMessage`, `Fault`). Capability `net.steam_messages` (`pending` until
+Steam is ready; `Open` works then). **A mod opts in with `"steamMessages": true` in its kiln.mod.json
+(`ModInfo.SteamMessages`); without it `Open` throws `InvalidOperationException`. A lease is the mod's own: kiln.net
+checks the mod's owner on every lease call and closes its leases when it unloads.** Prefer channels. Treat every message as untrusted. Page:
+`docs/kiln/services/net-steam-messages.md`; wiki `steam-messages`.
 
 ## Client
 `Client.State` (`Menu`, `DedicatedServer`, `Hosting`, `Remote`), `Client.IsClient`, `IsHosting`, `LocalPlayer`,
@@ -544,6 +567,19 @@ the game client reporting achievements to Steam. `SteamGuard.Hold(reason)` (an `
 `KilnUnavailableException` when it cannot protect), `TryHold(reason, out hold)`, `Latch(reason)` (until the game exits),
 `Status` (`SteamGuardStatus`), `Protecting`. Call `Hold`/`TryHold`/`Latch` on the game's tick thread. Not covered: the game's
 own stat reset, other mods' Steam calls, a player without Kiln.
+dev.30.3+ (mod API 0.2.13): `BuildingInput` (Kiln.Client, client only, any thread, never waits): the local player's
+ordinary building input, as if the player pressed it; the server still checks permissions, resources, range and
+placement. `BuildingInput.Select(item, slot, material)`, `Place(position, rotation, scale)`, `Remove(...)`, `Undo()`,
+`Dismantle(prop, position, rotation, scale)` (each with `expectedSession = 0`, or `Client.ClientWorldSession`) →
+`BuildingInputResult` (`Ok` = queued, never "built"; `Refusal`: `Busy`, `Stale`, `NoLocalPlayer`, `ModUnloaded`,
+`Rejected`; `Request`). `BuildingInputRequest.State` (`Queued`, `Pressed`, `Dispatched` = sent as input, not the
+server's answer, `TimedOut` after 5 s, `Cancelled`, `Unknown` = not your latest), `Cancel()`. One request slot for the
+whole client. Bad arguments throw `ArgumentException` (scale each in (0, 1024], a finite non-zero rotation).
+Capability `client.building_input`: a supported API on game client 26430625 (available; Kiln hooks the input path at
+the first request), `symbol-missing` on other builds, where every call throws `KilnUnavailableException`; ask
+`BuildingInput.Available` first. **Not checked in a real game yet.** Native: kiln.client `building_input_submit`,
+`_status`, `_cancel` and `KilnBuildingInput` are in the SDK's `kiln_client.h` (table 80 bytes; check `header.size`). Page:
+`docs/kiln/services/client-building-input.md`; wiki `building-input`.
 
 ## Hooks (advanced tier only) and other DLL mods
 Only when no service does the job, and only with `"advanced": true`. dev.26+: the gate reads the manifest's `advanced`

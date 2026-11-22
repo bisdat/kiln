@@ -258,9 +258,28 @@
       ]
     },
     "items/AddComponent": {
-      "comment": "adds a component to an existing entity outside a program: (world*, u32 entity, u32 hash, {void*, u64 size}* data). The rename handler calls it for a chest's first name. Lab use only (docs/re/items.md section 14). Server 26430253 0x5fc570",
+      "comment": "adds a component to an existing entity outside a program: (world*, u32 entity, u32 hash, {void*, u64 size}* data). The rename handler calls it for a chest's first name; so do kiln.items' container_rename (feature items.rename) and the lab's self-test (docs/re/items.md section 14). Server 26430253 0x5fc570",
       "find": [
         { "pattern": "48 83 EC 38 41 0F 10 01 48 81 C1 ?? ?? ?? ?? 4C 8D 4C 24 20 0F 29 44 24 20 E8 ?? ?? ?? ?? 48 83 C4 38 C3" }
+      ]
+    },
+    "@items/RenameHandler.site": {
+      "comment": "the message dispatcher's case for CustomPlayerStringClientMessage (a player's Rename, docs/re/items.md section 14): the tick-thread tracked write of the CustomPlayerString component, WriteOther with the world's own tracker (replication and the save), (PtrSize* out, world*, u32 hash, u32 entity). kiln.items' container_rename makes the same call (feature items.rename). Server 26430253 call 0x7bde57 -> 0x64edb0; client 26430625 call 0xe61973 -> 0x9b2f20",
+      "find": [
+        { "pattern": "44 8B 8D 00 01 00 00 48 8D 4D ?? 44 8B 05 ?? ?? ?? ?? 49 8B ?? D0 01 00 00 E8 {items/WriteComponentTick:rel32} 48 8B 18 48 85 DB 75" }
+      ]
+    },
+    "@items/StringsInsert.site": {
+      "comment": "set_string inserts a text it does not hold yet through the string table's insert (out, strings, id, text, refs 1). Server 26430253 call 0x916031 -> 0x915700; client 26430625 call 0xe6f001 -> 0xe6e6d0",
+      "find": [
+        { "scope": { "symbol": "items/SetString", "size": 1536 }, "pattern": "4D 8B CF C7 44 24 20 01 00 00 00 4C 8B C3 48 8D 4C 24 70 48 8B D5 E8 {items/StringsInsert:rel32}" }
+      ]
+    },
+    "@items/StringsInsert.fields": {
+      "comment": "the insert's two refusals (error 0x27): the record count against a fixed limit (cmp [strings+used], limit), and the record pool's count against its capacity, relative to the table's map (lea rsi,[strings+map]). container_rename refuses before set_string when the table is full, because set_string releases the old name before it inserts",
+      "find": [
+        { "scope": { "symbol": "items/StringsInsert", "size": 256 }, "pattern": "81 BA {items/strings.used:d32} {items/strings.limit:d32} 49 8B D8 48 8B FA 4C 8B F9 0F 83 ?? ?? ?? ?? 48 8D B2 {items/strings.map:d32}" },
+        { "scope": { "symbol": "items/StringsInsert", "size": 256 }, "pattern": "8B 86 {items/strings.pool_cap:d32} 39 46 {items/strings.pool_used:d8} 0F 85" }
       ]
     },
     "@items/CreateEntity.next_id": {
@@ -361,6 +380,11 @@
     "items/strings.count": { "min_votes": 1 },
     "items/strings.keys": { "min_votes": 1 },
     "items/strings.values": { "min_votes": 1 },
+    "items/strings.used": { "min_votes": 1 },
+    "items/strings.limit": { "min_votes": 1 },
+    "items/strings.map": { "min_votes": 1 },
+    "items/strings.pool_cap": { "min_votes": 1 },
+    "items/strings.pool_used": { "min_votes": 1 },
     "items/storage.next_id": { "min_votes": 2 },
     "items/queue.next_id": { "min_votes": 2 },
     "items/attr.durability": { "min_votes": 1 },
@@ -416,6 +440,13 @@
     "items.names": {
       "symbols": ["GetComponent", "items/SetString", "@items/SetString.fields"],
       "constants": ["items/strings.capacity", "items/strings.bitmap", "items/strings.count", "items/strings.keys", "items/strings.values",
+                    "items/hmap.capacity", "items/hmap.count", "items/hmap.bits", "items/hmap.keys", "items/hmap.values", "world.storage"]
+    },
+    "items.rename": {
+      "symbols": ["GetComponent", "items/SetString", "@items/SetString.fields", "items/AddComponent", "@items/RenameHandler.site",
+                  "items/WriteComponentTick", "@items/StringsInsert.site", "items/StringsInsert", "@items/StringsInsert.fields"],
+      "constants": ["items/strings.capacity", "items/strings.bitmap", "items/strings.count", "items/strings.keys", "items/strings.values",
+                    "items/strings.used", "items/strings.limit", "items/strings.map", "items/strings.pool_cap", "items/strings.pool_used",
                     "items/hmap.capacity", "items/hmap.count", "items/hmap.bits", "items/hmap.keys", "items/hmap.values", "world.storage"]
     },
     "items.instances": {

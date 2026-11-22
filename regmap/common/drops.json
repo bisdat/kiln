@@ -1,0 +1,62 @@
+{
+  "regmap": 1,
+  "registry": "drops",
+  "entries": {
+    "kind": "resource",
+    "resourceType": "keen::ecs::DefaultInventoryResource",
+    "nameFrom": "keen::ecs::DefaultInventory.defaultInventory",
+    "unnamed": "drops_%.8s"
+  },
+  "rows": {
+    "entries": {
+      "paths": [
+        "rootGroup"
+      ],
+      "conv": "inventoryWalk",
+      "read": "now",
+      "backend": "live",
+      "evidence": "docs/re/content.md: applyDefaultInventory walks the table at each application, nothing cached"
+    },
+    "entries[].item": {
+      "paths": [
+        "item",
+        "itemRef"
+      ],
+      "conv": "ref",
+      "read": "now",
+      "backend": "none"
+    },
+    "entries[].count.min": {
+      "paths": [
+        "countMin"
+      ],
+      "conv": "int",
+      "read": "now",
+      "backend": "live"
+    },
+    "entries[].count.max": {
+      "paths": [
+        "countMax"
+      ],
+      "conv": "int",
+      "read": "now",
+      "backend": "live"
+    },
+    "entries[].chance": {
+      "paths": [
+        "spawnProbability"
+      ],
+      "conv": "float",
+      "read": "now",
+      "backend": "live"
+    },
+    "entries[].weight": {
+      "paths": [
+        "weight"
+      ],
+      "conv": "float",
+      "read": "now",
+      "backend": "live"
+    }
+  }
+}

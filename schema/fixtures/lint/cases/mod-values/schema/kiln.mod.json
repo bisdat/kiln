@@ -1,0 +1,9 @@
+{
+  "id": "fixture-values-schema",
+  "name": "Fixture: fixture-values-schema",
+  "version": "1.0.0",
+  "apiVersion": "0.2",
+  "side": "both",
+  "clients": "mod",
+  "license": "MIT"
+}

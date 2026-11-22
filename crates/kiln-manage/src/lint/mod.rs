@@ -295,6 +295,7 @@ const EMBEDDED: &[(&str, &str)] = &[
     ("native.schema.json", include_str!("../../../../schema/native.schema.json")),
     ("kiln-modpack.schema.json", include_str!("../../../../schema/kiln-modpack.schema.json")),
     ("content-pack.schema.json", include_str!("../../../../schema/content-pack.schema.json")),
+    ("registry-section.schema.json", include_str!("../../../../schema/registry-section.schema.json")),
     ("assets.schema.json", include_str!("../../../../schema/assets.schema.json")),
     ("cook.schema.json", include_str!("../../../../schema/cook.schema.json")),
     ("physics.schema.json", include_str!("../../../../schema/physics.schema.json")),
@@ -308,6 +309,7 @@ const EMBEDDED: &[(&str, &str)] = &[
     ("kiln-programs.schema.json", include_str!("../../../../schema/kiln-programs.schema.json")),
     ("kiln-release.schema.json", include_str!("../../../../schema/kiln-release.schema.json")),
     ("kiln-publish.schema.json", include_str!("../../../../schema/kiln-publish.schema.json")),
+    ("kiln-mod-values.schema.json", include_str!("../../../../schema/kiln-mod-values.schema.json")),
 ];
 const INDEX: &str = include_str!("../../../../schema/schemas.json");
 
@@ -675,6 +677,12 @@ impl<'o> Linter<'o> {
             v.sort();
             want.extend(v.into_iter().map(|p| (p, "blocks".to_string())));
         }
+        // mod-values/*.json (Kiln.ModValues: every file of the folder, by name, at mod load)
+        if let Ok(rd) = std::fs::read_dir(root.join("mod-values")) {
+            let mut v: Vec<PathBuf> = rd.flatten().map(|e| e.path()).filter(|p| p.is_file() && p.extension().is_some_and(|x| x.eq_ignore_ascii_case("json"))).collect();
+            v.sort();
+            want.extend(v.into_iter().map(|p| (p, "mod-values".to_string())));
+        }
         for (rel, kind) in [("assets/assets.json", "assets"), ("assets/cook.json", "cook"), ("assets/physics.json", "physics"), ("assets/player-states.json", "playerstates"), ("impact/cook.json", "cook"), ("impact/natives.json", "natives"), ("kiln-modpack.json", "modpack")] {
             if root.join(rel).is_file() {
                 want.push((root.join(rel), kind.into()));
@@ -736,6 +744,11 @@ impl<'o> Linter<'o> {
         let syntax_ok = parsed.root.is_some();
         for mut x in parsed.diagnostics {
             if e.kind == "programs" && x.code == codes::DUPLICATE_KEY { x.severity = Severity::Error; }
+            if e.kind == "mod-values" && x.code == codes::DUPLICATE_KEY {
+                // Kiln.ModValues refuses a key given twice (a value id twice is a definition error, not last-writer-wins)
+                x.severity = Severity::Error;
+                x.message = x.message.replace("the later value is the one Kiln reads", "Kiln.ModValues refuses it (an id defined twice is an error, not the later one winning)");
+            }
             if e.kind == "playerstates" && x.code == codes::DUPLICATE_KEY {
                 // animcook's and kiln.playeranim's readers refuse a key given twice: the whole file at the top, else the state it is in
                 x.severity = Severity::Error;
@@ -900,6 +913,7 @@ fn reader_note(e: &SchemaEntry) -> String {
         "cook" | "natives" | "physics" => "the cook tools read this file with Python's json module (plain JSON)".into(),
         "playerstates" => "animcook and kiln.playeranim read this file as strict JSON (no comments, no trailing commas)".into(),
         "modpack" => "the launcher reads this file as plain JSON".into(),
+        "mod-values" => "Kiln.ModValues reads this file as strict JSON (no comments, no trailing commas)".into(),
         "schematic" => "the schematic header is plain JSON".into(),
         "content" | "assets" => "kiln.content / kiln.assets read this file with nlohmann::json, which allows comments but not trailing commas".into(),
         _ => "its reader refuses it".into(),

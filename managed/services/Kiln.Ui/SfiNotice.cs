@@ -220,6 +220,7 @@ internal static unsafe class SfiSafetyNotice
     internal static SfiNoticeModel Model = new();
     private static int _started;
     private static nint _ready;
+    private static bool _readyRefusedLogged;  // a failed CreateEventW was logged (once: Apply calls EnsureReady every 2 s)
     private static bool _attention;
     private static int _faults;
     private static ulong _saveSeq;
@@ -429,7 +430,9 @@ internal static unsafe class SfiSafetyNotice
     internal static string ReadyEventName(int pid) => $"Local\\Kiln.Sfi.UiReady.{pid}";
 
     /// <summary>Creates Local\Kiln.Sfi.UiReady.&lt;pid&gt; (manual reset, signalled, held for the process) once Kiln.Ui is up
-    /// and can draw in a kiln start. Hosted, installed or drawing off: none (kiln-sfi's fallback decides then).</summary>
+    /// and can draw in a kiln start. Hosted, installed or drawing off: none (kiln-sfi's fallback decides then). A name
+    /// someone else made first (perhaps unsignalled) is kept and signalled, as ours starts signalled; a CreateEventW that
+    /// fails (the name held by another object type, say) is logged once, and later calls try again quietly.</summary>
     internal static bool EnsureReady(int pid, bool kilnStart, bool drawingOn)
     {
         if (!kilnStart || !drawingOn || !OperatingSystem.IsWindows()) return false;
@@ -440,10 +443,18 @@ internal static unsafe class SfiSafetyNotice
             var error = Marshal.GetLastPInvokeError();
             if (h == 0)
             {
-                Log(LogLevel.Warn, $"{ReadyEventName(pid)} not created (error {error}): kiln-sfi may draw its own banner too");
+                if (!_readyRefusedLogged)
+                    Log(LogLevel.Warn, $"{ReadyEventName(pid)} not created (error {error}): kiln-sfi may draw its own banner too");
+                _readyRefusedLogged = true;
                 return false;
             }
-            if (error == ErrorAlreadyExists) Log(LogLevel.Warn, $"{ReadyEventName(pid)} already existed (another holder)");
+            if (error == ErrorAlreadyExists)
+            {
+                // CreateEventW ignores the initial state of an event that exists: a squatter's may be unsignalled
+                var signalled = SetEvent(h);
+                Log(LogLevel.Warn, $"{ReadyEventName(pid)} already existed (another holder); " +
+                                   (signalled ? "signalled it" : $"SetEvent failed (error {Marshal.GetLastPInvokeError()})"));
+            }
             _ready = h;
             Log(LogLevel.Info, $"Kiln.Ui shows the do-not-save notice ({ReadyEventName(pid)})");
             return true;
@@ -605,6 +616,7 @@ internal static unsafe class SfiSafetyNotice
         {
             if (_ready != 0) CloseHandle(_ready);
             _ready = 0;
+            _readyRefusedLogged = false;
         }
         _attention = false;
         _faults = 0;
@@ -623,4 +635,7 @@ internal static unsafe class SfiSafetyNotice
 
     [DllImport("kernel32")]
     private static extern bool CloseHandle(nint h);
+
+    [DllImport("kernel32", SetLastError = true)]
+    private static extern bool SetEvent(nint h);
 }

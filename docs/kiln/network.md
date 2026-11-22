@@ -236,9 +236,10 @@ registered, the gate behaves exactly as before: the three built-in rules of [Cli
 
 | Requirement | Registered by | What it does |
 |---|---|---|
-| mandatory protocol (`SetMandatoryProtocol(name, version, …)`) | a service whose clients must speak a channel (16a's `kiln:station-menu`) | a client without that channel at that version is refused in its hello, before Welcome, under every `modSync`; a Ready client that announces its channels again without it is refused; a vanilla client is refused. Enabling it answers `Ok=false` (not installed) while a connected peer lacks it (`PeersLacking`) |
-| join hold (`HoldJoins`) | a service that must finish something before anyone enters (18's policy change, 16a's menu latch) | no peer is let in while it lives; at its deadline it ends with an error line |
+| mandatory protocol (`SetMandatoryProtocol(name, version, …)`) | a service whose clients, Kiln or not, must speak a channel | a client without that channel at that version is refused in its hello, before Welcome, under every `modSync`; a Ready client that announces its channels again without it is refused; a vanilla client is refused. Enabling it answers `Ok=false` (not installed) while a connected peer lacks it (`PeersLacking`) |
+| join hold (`HoldJoins`) | a service that must finish something before anyone enters (18's policy change) | no peer is let in while it lives; at its deadline it ends with an error line |
 | peer hold (`HoldPeer`, from an `OnJoin` decider) | a service that needs one client's acknowledgement first (18's late join) | that peer stays out until the hold ends; at its deadline the peer is refused with the holder's reason |
+| `OnJoin` decider `kiln.stationmenus` (since 0.2.0-dev.31) | Kiln.Content while a station menu exists or the mods' menus are not declared yet ([sync.md](sync.md#station-menus)) | a Kiln client without `kiln:station-menu` v1 is refused after its hello, before the world, under every `modSync` ("station-menu protocol1 required"), and one in the world that announces its channels again without it; until the mods' OnLoad and blocks pass are done each joining Kiln client is held (25 s at most). A client without Kiln is not concerned (not a mandatory protocol: it never gets a mod's own station) |
 | vanilla condition (`Require`) | a service that keeps vanilla clients safe only while something holds (15's item remap) | while it answers false, vanilla clients are refused |
 
 **Order for a joining peer:** hello → built-in checks (mods, channels, world tables, player graph) → mandatory protocols →
@@ -303,6 +304,51 @@ Kiln.Network follows [the API contract](modding/contract.md).
 - **Results and events.** No result record here (`KickResult` is Kiln.Players'); Kiln.Network writes no world state,
   so it has no change event of its own.
 - Tested offline: `managed/tests/Kiln.Contract.Tests/NetworkContractTests.cs` and the conformance rules.
+
+## Steam peer messages (`SteamMessages`)
+Since 0.2.0-dev.30.3 (mod API 0.2.13). A mod's own Steam networking messages between game processes, by Steam id:
+separate from the game connection and from the channels above. It works on a game client (the player's Steam user) and on
+a dedicated server (the GameServer interfaces); the game pumps Steam's callbacks, Kiln never initialises or pumps Steam.
+Native side and every rule: [services/net-steam-messages.md](services/net-steam-messages.md). Prefer channels when the
+players are on the same server: Steam messages reach anyone by Steam id, outside the game's admission, so treat every
+message as untrusted.
+
+```csharp
+// kiln.mod.json: "steamMessages": true (Kiln.Sdk: <KilnSteamMessages>true</KilnSteamMessages>)
+var open = SteamMessages.Open(4100, 4103, answerSessions: true);   // a lease on Steam channels 4100..4103
+if (!open.Ok) { Log.Info(open.Reason!); return; }                   // Taken, NotPermitted, ClosedForExit, Fault
+using var lease = open.Lease!;                                       // closes at Dispose or the mod's unload
+lease.SetAcceptPolicy(SteamAcceptMode.Listed, [friendSteamId]);     // who may start a session with this process
+lease.Send(friendSteamId, 4100, Encoding.UTF8.GetBytes("hello"));    // SteamSendFlags.Reliable by default
+var buffer = new byte[SteamMessages.MaxMessageBytes];
+for (var r = lease.Receive(4100, buffer); r.Ok; r = lease.Receive(4100, buffer))
+    Log.Info($"{r.Message.Sender}: {Encoding.UTF8.GetString(buffer, 0, r.Message.Length)}");
+```
+- **Opt-in.** Only a mod whose kiln.mod.json says `"steamMessages": true` (`ModInfo.SteamMessages`) opens a lease;
+  `Open` throws `InvalidOperationException` for any other mod, outside mod code and in `OnBoot` (open leases from
+  `OnLoad` on), before anything is called.
+- **A lease is the mod's own.** It belongs to the mod that opened it: kiln.net checks the mod's owner on every lease call,
+  closes the mod's leases when it unloads, and `SteamMessageLease` never shows its handle. A closed lease answers
+  `LeaseClosed` and never calls Steam; `Dispose` is idempotent, any thread.
+- **Channels.** Leases own inclusive ranges of Steam message channels (0..65535), never overlap (across every mod and
+  Kiln's own runtimes), and at most 16 are open in the process (`Taken` otherwise; an overlap with another mod's lease
+  names it).
+- **Sessions.** Steam accepts a session with a peer this process sent to first. To hear from a peer that writes first,
+  open one lease with `answerSessions` and set its accept policy (`None`, `Any`, `Listed` with up to 256 Steam ids), or
+  accept a pending request with `lease.Accept(steamId)`. One session-answering lease at most; closing it sets `None`.
+- **Sizes.** Send 0..524,288 bytes (`MaxMessageBytes`; more throws). `Receive` takes at most one message per call into
+  your buffer; one bigger than the buffer is taken and `Dropped`, so a `MaxMessageBytes` buffer never drops for size.
+  Nothing is buffered by Kiln: a message waits in Steam's queue until a `Receive` on its channel takes it.
+- **Results.** `SteamLeaseResult`, `SteamSendResult` (with Steam's EResult), `SteamReceiveResult`, `SteamAcceptResult`,
+  `SteamPolicyResult`, each with `Ok`, `Reason` and `Refusal` (`SteamMessagesRefusal`); the per-message results are
+  structs, so sending and receiving allocate nothing. Bad arguments throw `ArgumentException` before any call.
+- **Availability.** Capability `net.steam_messages`: `pending` until a call first finds Steam ready, then `available`.
+  `SteamMessages.Available` says whether it works now; `SteamMessages.Status` never throws. `Open` throws
+  `KilnUnavailableException` only when the row is unavailable (safe idle, kiln-net.dll not started, steam_api64.dll or an
+  export missing) or this Kiln has no Steam messages; while it is pending a lease opens and answers `SteamNotReady`.
+- **Threads.** Every member: any thread, never waits.
+- Tested: `managed/tests/Kiln.Network.Tests/SteamMessagesTests.cs` over a fake kiln.net; the native side's host tests and
+  a two-process test over a stand-in Steam library. Not run with real Steam yet.
 
 ## Limits
 - Game frames are zero-padded to 4 bytes; Kiln trims the padding in fragments and JSON messages.

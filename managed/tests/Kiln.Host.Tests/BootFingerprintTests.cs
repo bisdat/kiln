@@ -289,6 +289,23 @@ public sealed class BootFingerprintTests : ModsFixture
     }
 
     [Fact]
+    public void A_blocks_files_baseRules_are_boot_content_keyed_as_a_staged_rule()
+    {
+        // kiln.content reads a blocks file's "baseRules" in prepare (gamedata_bootpatch.cpp file_docs), keyed "baseRules@<name>" as a staged
+        // BaseRulesBlock is: the file's wins a name both have, and a changed value changes the hash
+        const string rules = """{ "format": 1, "baseRules": { "roomy": { "minimumAltars": 6, }, }, }""";
+        var dir = Mod("bases", ("blocks/bases.json", rules));
+        Assert.Equal("baseRules@roomy", Assert.Single(BootFingerprint.FilePatches(dir)).Key);
+        var changed = Mod("bases-changed", ("blocks/bases.json", rules.Replace("6", "7")));
+        Assert.NotEqual(BootFingerprint.Of("m", dir, new JsonObject()), BootFingerprint.Of("m", changed, new JsonObject()));
+        var staged = new JsonObject
+        {
+            ["patches"] = new JsonArray(new JsonObject { ["owner"] = "m", ["key"] = "baseRules@roomy", ["document"] = new JsonObject { ["minimumAltars"] = 2 } }),
+        };
+        Assert.Equal(BootFingerprint.Of("m", dir, new JsonObject()), BootFingerprint.Of("m", dir, staged));
+    }
+
+    [Fact]
     public void A_data_packs_gearRules_are_boot_content_and_change_the_hash()
     {
         // kiln.content's prepare lowers content/*.json's "gearRules" to a BalancingTable patch (gamedata_bootpatch.cpp gear_rule_docs):

@@ -88,6 +88,7 @@ A `"server"` or `"client"` section overrides the top-level keys on that side (`c
 `"preview"`: lifts the client gate ([services/caps.md](services/caps.md#the-client-gate-dev28)) for capabilities that
 are held until their game test (the list is empty in 0.2.0-dev.29): `true` for all of them, or a list of capability names. In a side section it
 replaces the top-level value.
+`"developer_debugging"`: `true` writes `kiln/state/debug/<pid>.json` and serves a local control pipe, so `kiln debug` can prove which process it attaches to ([modding/debugging.md](modding/debugging.md)); default `false`, and a side section's value replaces the top-level one.
 `"cooked"`: what kiln.assets does with a mod's cooked file no cook of this game made (no receipt lists it,
 [modding/cooking.md](modding/cooking.md)): `"warn"` (the default, `kCookedDefault` in `native/services/assets/cooktrust.h`)
 loads it with one warning per mod, `"local"` does not load it, `"any"` loads it (development servers); read by
@@ -100,6 +101,12 @@ default, read by kiln.ui at start (top level only), shown in the launcher's Sett
 `"ui": {"overlay": "off"}` (0.2.0-dev.29.18): Kiln's overlay drawing off, as `KILN_UI_OVERLAY=0` (which wins where it
 is set); `"auto"` by default; read by kiln.ui at start (top level only), shown in the launcher's Settings
 ([ui.md](ui.md#frame-generation-mods-and-drawing-off)).
+`"ui": {"outlines": "game-first"}` (0.2.0-dev.30.3): mods' outlines on entities (`Ui.World.Outline`) against the game's
+own highlight (the building cursor's). `"game-first"` (the default; also for a missing or unknown value): the game's
+highlight wins. `"mods-first"`: mods' outlines win over the game's highlight (never over another tool's, such as Quick
+Deposit's or Find's). `"off"`: mods' outlines are accepted and wait (state `Waiting`,
+reason `SwitchedOff`). Read by kiln-ui.dll at the first outline request of the game's run (top level only), so a change
+applies at the next start ([render.md](render.md#outlines-since-020-dev303)).
 
 ## Symbol database per side
 - `sigdb/symbols/client.json` is the core set. It is the server's core set unchanged (all of its patterns match the

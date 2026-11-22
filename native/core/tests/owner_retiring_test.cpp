@@ -153,6 +153,51 @@ int main() {
     reg::owner_revoke(mod_g);
     check(seen.owners.size() == before, "nothing is called after the observer's owner is gone");
 
+    // kiln.internal.owners: grants live with the owner and go when it is revoked
+    {
+        const KilnOwnersInternalApi* t = reg::owners_internal_table();
+        check(t && t->header.size == 32 && t->header.version == 2 && t->grant && t->grants && t->owner_id,
+              "kiln.internal.owners: the table is v2 (owner_id appended at 24) and complete");
+        {  // v2 owner_id: the core's id of a live owner (kiln.registry binds its callers with it)
+            const KilnOwner m = reg::owner_create("mod:Fishing-Plus");
+            char buf[64];
+            size_t len = 0;
+            check(t->owner_id(m, buf, sizeof buf, &len) == KILN_OK && std::string(buf) == "mod:Fishing-Plus" && len == 16, "owner_id: a live owner's id");
+            check(t->owner_id(m, buf, 4, &len) == KILN_ERR_BUFFER_TOO_SMALL && len == 16 && std::string(buf) == "mod", "a buffer too small: cut, NUL-terminated, the needed length");
+            check(t->owner_id(m, nullptr, 0, &len) == KILN_ERR_BUFFER_TOO_SMALL && len == 16, "a size query");
+            check(t->owner_id(0, buf, sizeof buf, &len) == KILN_ERR_INVALID_ARGUMENT && t->owner_id(m, nullptr, 8, &len) == KILN_ERR_INVALID_ARGUMENT,
+                  "owner 0 and a NULL buffer with a capacity: invalid");
+            check(t->owner_id(424244, buf, sizeof buf, &len) == KILN_ERR_REVOKED, "an owner never made: revoked");
+            reg::owner_revoke(m);
+            check(t->owner_id(m, buf, sizeof buf, &len) == KILN_ERR_REVOKED, "a revoked owner: revoked");
+        }
+        const KilnOwner mod_h = reg::owner_create("mod:h"), mod_i = reg::owner_create("mod:i");
+        uint32_t bits = 99;
+        check(t->grants(mod_h, &bits) == KILN_OK && bits == 0, "a new owner holds no grant");
+        check(t->grant(mod_h, KILN_OWNER_GRANT_STEAM_MESSAGES) == KILN_OK && t->grants(mod_h, &bits) == KILN_OK &&
+                  bits == KILN_OWNER_GRANT_STEAM_MESSAGES,
+              "a granted owner holds the Steam messages grant");
+        check(t->grant(mod_h, KILN_OWNER_GRANT_STEAM_MESSAGES) == KILN_OK && t->grants(mod_h, &bits) == KILN_OK &&
+                  bits == KILN_OWNER_GRANT_STEAM_MESSAGES,
+              "granting it again changes nothing");
+        bits = 99;
+        check(t->grants(mod_i, &bits) == KILN_OK && bits == 0, "another owner's grant is its own");
+        check(t->grant(0, KILN_OWNER_GRANT_STEAM_MESSAGES) == KILN_ERR_INVALID_ARGUMENT &&
+                  t->grant(mod_i, 0) == KILN_ERR_INVALID_ARGUMENT && t->grant(mod_i, 2) == KILN_ERR_INVALID_ARGUMENT &&
+                  t->grants(0, &bits) == KILN_ERR_INVALID_ARGUMENT && t->grants(mod_i, nullptr) == KILN_ERR_INVALID_ARGUMENT,
+              "owner 0, no bit, an unknown bit and no out pointer are refused");
+        check(t->grant(424243, KILN_OWNER_GRANT_STEAM_MESSAGES) == KILN_ERR_REVOKED &&
+                  t->grants(424243, &bits) == KILN_ERR_REVOKED,
+              "an owner that never existed is not alive: neither granted nor read");
+        reg::owner_revoke(mod_h);
+        check(t->grants(mod_h, &bits) == KILN_ERR_REVOKED && t->grant(mod_h, KILN_OWNER_GRANT_STEAM_MESSAGES) == KILN_ERR_REVOKED,
+              "a revoked owner's grant is gone, and it cannot be granted again");
+        const KilnOwner mod_h2 = reg::owner_create("mod:h");
+        check(t->grants(mod_h2, &bits) == KILN_OK && bits == 0, "a reloaded mod's new owner starts with no grant");
+        reg::owner_revoke(mod_h2);
+        reg::owner_revoke(mod_i);
+    }
+
     std::printf("%d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }

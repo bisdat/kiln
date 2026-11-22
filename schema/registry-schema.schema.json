@@ -1,0 +1,269 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "registry-schema.schema.json",
+  "title": "Kiln registry schema (schema/registry/<registry>.json), registrySchema 1",
+  "description": "One registry of Kiln's registry stage: its Kiln fields, their types and ranges, and when an edit of each takes effect (applies). tools/registrygen/registrygen.py reads these files and writes the C# types (Kiln.Registry), the native descriptor (schema.g.h), the data section's schema and the docs pages; schema/registry/ids.lock.json keeps every published name so that none is reused. Kiln names only: no game type, member or offset appears here (those are in regmap/).",
+  "type": "object",
+  "required": [
+    "registrySchema",
+    "registry",
+    "version",
+    "stability",
+    "doc",
+    "ids",
+    "fields",
+    "entry",
+    "raw"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "registrySchema": {
+      "const": 1
+    },
+    "registry": {
+      "$ref": "#/$defs/name",
+      "description": "The registry's name: the first part of a qualified field (items.maxStack)."
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "description": "The registry's schema version: 0.x while experimental (0.<minor> is the breaking line), from 1.0.0 frozen with API 1.0.0 (<major> is the breaking line). A breaking step ships schema/registry/migrations/<registry>-<from>-<to>.json."
+    },
+    "stability": {
+      "enum": [
+        "experimental",
+        "stable"
+      ],
+      "description": "experimental: the C# types carry [Experimental(experimentalId)] and may change in any release; stable: frozen by the API 1.0.0 contract (additive only)."
+    },
+    "experimentalId": {
+      "type": "string",
+      "pattern": "^KILNX[0-9]{3}$"
+    },
+    "doc": {
+      "type": "string",
+      "minLength": 1
+    },
+    "ids": {
+      "type": "object",
+      "required": [
+        "game",
+        "mod",
+        "rule"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "game": {
+          "type": "string"
+        },
+        "mod": {
+          "type": "string"
+        },
+        "rule": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "traits": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "propertyNames": {
+        "$ref": "#/$defs/name"
+      }
+    },
+    "fields": {
+      "$ref": "#/$defs/fields"
+    },
+    "entry": {
+      "type": "object",
+      "required": [
+        "add",
+        "remove"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "add": {
+          "type": "boolean",
+          "description": "Mods may add entries (stage add)."
+        },
+        "remove": {
+          "enum": [
+            false,
+            "hidden",
+            "disabled"
+          ],
+          "description": "What removing an entry means; false: entries cannot be removed."
+        },
+        "removeDoc": {
+          "type": "string"
+        }
+      }
+    },
+    "raw": {
+      "enum": [
+        "allowed",
+        "refused"
+      ],
+      "description": "Whether edits may name raw game paths (the Advanced tier)."
+    },
+    "typeName": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Za-z0-9]*$",
+      "description": "The C# name of an entry (ItemEntry is typeName Item + Entry); default: the registry's name in Pascal case."
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "stability": {
+            "const": "experimental"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "experimentalId"
+        ]
+      }
+    }
+  ],
+  "$defs": {
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][A-Za-z0-9]*$"
+    },
+    "fields": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "$ref": "#/$defs/name"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/field"
+      }
+    },
+    "applies": {
+      "enum": [
+        "now",
+        "worldLoad",
+        "restart"
+      ],
+      "description": "now: takes effect at the next use; worldLoad: needs a world (re)load; restart: needs a game restart. Every leaf field has one (its own or its parent's)."
+    },
+    "field": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "enum": [
+            "int",
+            "float",
+            "bool",
+            "enum",
+            "flags",
+            "ref",
+            "time",
+            "struct",
+            "list"
+          ]
+        },
+        "doc": {
+          "type": "string"
+        },
+        "applies": {
+          "$ref": "#/$defs/applies"
+        },
+        "ops": {
+          "enum": [
+            "number",
+            "set",
+            "list",
+            "indexed",
+            "none"
+          ],
+          "description": "number: set and the relative ops (mul, add, min, max, raiseOnly, lowerOnly); set: a value only; list: clear, append, remove, replace; indexed: a list of fixed length, one element at a time; none: read-only."
+        },
+        "readOnly": {
+          "type": "boolean"
+        },
+        "min": {
+          "type": "number"
+        },
+        "max": {
+          "type": "number"
+        },
+        "unit": {
+          "type": "string"
+        },
+        "values": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/name"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "registry": {
+          "$ref": "#/$defs/name",
+          "description": "ref: the registry whose ids the field holds."
+        },
+        "fields": {
+          "$ref": "#/$defs/fields"
+        },
+        "of": {
+          "$ref": "#/$defs/field"
+        },
+        "maxItems": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "formula": {
+          "type": "string",
+          "description": "The Kiln formula between this field and the game's numbers (regmap and formulas.h)."
+        },
+        "side": {
+          "enum": [
+            "both",
+            "server",
+            "client"
+          ],
+          "description": "Who reads the field (default both)."
+        },
+        "since": {
+          "type": "string"
+        },
+        "typeName": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Za-z0-9]*$",
+          "description": "The C# name of this field's struct, list element or enum type (default: the entry's typeName + the field's name)."
+        },
+        "optional": {
+          "type": "boolean",
+          "description": "A ref that may be absent (cleared)."
+        },
+        "fixedLength": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "A list of exactly this many elements (ops indexed)."
+        },
+        "lengthField": {
+          "type": "string",
+          "description": "A list as long as this read-only whole-number field of the registry, plus lengthOffset (ops indexed)."
+        },
+        "lengthOffset": {
+          "type": "integer"
+        }
+      }
+    }
+  }
+}

@@ -35,6 +35,7 @@
 #include "instances.h"
 #include "moves.h"
 #include "names.h"
+#include "rename.h"
 #include "pide.h"
 #include "sets.h"
 #include "setsvc.h"
@@ -89,7 +90,15 @@ static_assert(offsetof(KilnItemsApi, rarity_rolls) == 320 && offsetof(KilnItemsA
 static_assert(offsetof(KilnItemsApi, gear_upgrade) == 336);
 // v8 (package P7) then appends gear_scale, gear_scale_read and scale_status: a reader built before them sees 344.
 static_assert(offsetof(KilnItemsApi, gear_scale) == 344 && offsetof(KilnItemsApi, gear_scale_read) == 352 &&
-              offsetof(KilnItemsApi, scale_status) == 360 && sizeof(KilnItemsApi) == 368);
+              offsetof(KilnItemsApi, scale_status) == 360);
+// v9 (0.2.0-dev.30.3): renaming a container, appended after the scales (a v8 table ends at 368)
+static_assert(offsetof(KilnItemsApi, container_rename) == 368 && offsetof(KilnItemsApi, rename_status) == 376 &&
+              sizeof(KilnItemsApi) == 384);
+static_assert(sizeof(KilnItemsRenameRequest) == 272 && offsetof(KilnItemsRenameRequest, text) == 16);
+static_assert(sizeof(KilnItemsRenameResult) == 192 && offsetof(KilnItemsRenameResult, game_error) == 20 &&
+              offsetof(KilnItemsRenameResult, changed) == 28 && offsetof(KilnItemsRenameResult, message) == 32);
+static_assert(sizeof(KilnItemsRenameStatus) == 184 && offsetof(KilnItemsRenameStatus, pending) == 8 &&
+              offsetof(KilnItemsRenameStatus, detail) == 24);
 static_assert(sizeof(KilnItemsGearScale) == 32 && offsetof(KilnItemsGearScale, power) == 16 &&
               sizeof(KilnItemsScaleStatus) == 208 && offsetof(KilnItemsScaleStatus, powered) == 24 &&
               offsetof(KilnItemsScaleStatus, detail) == 48);
@@ -1130,6 +1139,7 @@ void drop_world(const char* why) {
     gems_world_closed();      // gem wave G3: waiting forge actions end as dropped
     stations_world_closed();  // kiln.stations: waiting station actions end as dropped, watches restart
     gear_world_closed();      // v8: waiting gear writes end as dropped
+    rename_world_closed();    // v9: waiting renames end as dropped
     scale_world_reset();      // v8 (P7): power and armour scales named entities of the world that went
     sets_world_closed();      // v6: every set snapshot named this world
     int expected = KILN_ITEMS_PROGRAM_RUNNING;
@@ -1172,6 +1182,7 @@ void KILN_CALL on_pre(const KilnTickInfo* tick, void*) {
     gems_pre(tick->step);  // gem wave G3: forge actions' layout check, results, held players' actions
     stations_pre(tick->step);  // kiln.stations: unlock checks, results, the watch
     gear_pre(tick->step);      // v8: the gear program's state, timeouts, results
+    rename_pre(tick->step);    // v9: container renames through the game's rename, results
     scale_pre();               // v8 (P7): the stamps were forgotten (the id counter went down): so are the scales
     xfer_deliver();
     selftest_pre(tick->step);
@@ -1431,6 +1442,7 @@ KilnResult KILN_CALL t_status2(KilnItemsStatus2* out) {
 KilnResult KILN_CALL t_cancel(uint64_t ticket) {
     if (equip_cancel(ticket)) return KILN_OK;
     if (gear_cancel(ticket)) return KILN_OK;  // v8
+    if (rename_cancel(ticket)) return KILN_OK;  // v9
     std::lock_guard lock(g_mu);
     return g_callbacks.erase(ticket) ? KILN_OK : KILN_ERR_NOT_FOUND;
 }
@@ -1451,6 +1463,7 @@ void KILN_CALL t_cancel_owner(KilnOwner owner) {
     sets_cancel_owner(owner);  // v6: the owner's snapshots
     pide_socket_roll(owner, nullptr);  // v7: the owner's socket rolls
     gear_cancel_owner(owner);          // v8: the owner's gear write callbacks
+    rename_cancel_owner(owner);        // v9: the owner's rename callbacks
     pide_rarity_rolls(owner, nullptr, 0, 0);  // v8 (P5): the owner's rarity rolls
     // Draining a running transfer callback must not hold the request mutex: that callback may queue a request.
     xfer_end_owner(owner);
@@ -1705,6 +1718,13 @@ KilnResult KILN_CALL t_gear_scale_read(KilnEntity entity, uint32_t stamp, KilnIt
 }
 KilnResult KILN_CALL t_scale_status(KilnItemsScaleStatus* out) { return scale_status(out); }
 
+// ---- v9 (0.2.0-dev.30.3): renaming a container (rename.cpp) ----
+KilnResult KILN_CALL t_container_rename(KilnOwner owner, const KilnItemsRenameRequest* r, KilnItemsRenameDoneFn done, void* user,
+                                        uint64_t* out_ticket, KilnItemsRenameResult* out_refusal) {
+    return rename_submit(owner, r, done, user, out_ticket, out_refusal);
+}
+KilnResult KILN_CALL t_rename_status(KilnItemsRenameStatus* out) { return rename_status(out); }
+
 const KilnItemsApi kTable = {
     {sizeof(KilnItemsApi), KILN_ITEMS_VERSION},
     &t_give, &t_take, &t_cancel, &t_cancel_owner, &t_read, &t_find,
@@ -1720,6 +1740,7 @@ const KilnItemsApi kTable = {
     &t_rarity_rolls, &t_roll_status,
     &t_gear_upgrade,
     &t_gear_scale, &t_gear_scale_read, &t_scale_status,
+    &t_container_rename, &t_rename_status,
 };
 
 // ============================================================================================= self-test =======
@@ -2090,6 +2111,30 @@ void resolve() {
             E.names_ok = false;
             LOGW("container names off: the string table's map layout differs from the item registry's");
         }
+        // v9 (0.2.0-dev.30.3): renames make the rename handler's calls: set_string with the old id, the tracked write of
+        // the name component (captured at the handler's call), AddComponent; and refuse before the string table is full
+        // (the insert's fixed limit and its record pool, captured from the insert; both offsets must agree with the map)
+        {
+            uintptr_t wt = 0;
+            sym("items/WriteComponentTick", &wt);
+            E.write_component_tick = wt;
+            int64_t used = 0, limit = 0, map = 0, pool_cap = 0, pool_used = 0;
+            E.rename_ok = E.names_ok && add != 0 && wt != 0 && feat("items.rename") && cst("items/strings.used", &used) &&
+                          cst("items/strings.limit", &limit) && cst("items/strings.map", &map) &&
+                          cst("items/strings.pool_cap", &pool_cap) && cst("items/strings.pool_used", &pool_used) &&
+                          map == E.strings_bitmap - E.hmap_bits && map + pool_used == used && limit > 0 && limit <= (1 << 20) &&
+                          pool_cap > 0 && pool_cap < 0x1000;
+            if (E.rename_ok) {
+                E.strings_used = used;
+                E.strings_limit = limit;
+                E.strings_pool_cap = map + pool_cap;
+            } else if (E.names_ok && feat("items.rename")) {
+                LOGW("container renames off: the string table's insert does not match (used 0x%llx, map 0x%llx, pool 0x%llx/0x%llx)",
+                     static_cast<unsigned long long>(used), static_cast<unsigned long long>(map),
+                     static_cast<unsigned long long>(pool_used), static_cast<unsigned long long>(pool_cap));
+            }
+            rename_resolved();
+        }
         // a mod's move is only ever as good as what the game's functions return: refuse a transaction layout whose result
         // bytes do not fit the 12-byte results the code reads
         gate_features();
@@ -2140,11 +2185,12 @@ void resolve() {
         if (!g_tx) E.tx_ok = false;
     }
     LOGI("resolved: transaction %s (tx %lld bytes), read %s, catalog %s, scan %s, own program registration %s, recipe path %s, "
-         "tracked Fuel writes %s, moves %s, transfer hooks %s, container names %s, item instances %s, equip %s, equipment sets %s",
+         "tracked Fuel writes %s, moves %s, transfer hooks %s, container names %s (renames %s), item instances %s, equip %s, equipment sets %s",
          E.tx_ok ? "on" : "OFF", static_cast<long long>(E.tx_size), E.read_ok ? "on" : "OFF",
          E.catalog_ok ? "on" : "OFF", E.scan_ok ? "on" : "OFF", E.program_ok ? "possible" : "OFF",
          E.recipe_apply ? "on" : "OFF", E.fuel_ok ? "on" : "OFF", E.move_ok ? "on" : "OFF", E.transfer_ok ? "possible" : "OFF",
-         E.names_ok ? "on" : "OFF", E.instances_ok ? "on" : "OFF", E.equip_ok ? "possible" : "OFF", E.sets_ok ? "possible" : "OFF");
+         E.names_ok ? "on" : "OFF", E.rename_ok ? "on" : "OFF", E.instances_ok ? "on" : "OFF", E.equip_ok ? "possible" : "OFF",
+         E.sets_ok ? "possible" : "OFF");
     // dev.28 (chapter 16b): the durability debit's functions and frames; needs the attribute lookup and the item reads
     E.wear_ok = wear::resolve(g_api, g_owner);  // resolve also lowers the row when an item-service prerequisite is off
     // Prepare availability; the first valid tool-wear rule request installs the hooks.

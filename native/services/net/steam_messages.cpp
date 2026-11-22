@@ -25,12 +25,34 @@
 //  - Run(void*) runs on the game's Steam pump thread: it checks the identity, reads the policy through a lock-free
 //    seqlock (at most 5 reads, then the request is denied), then calls AcceptSessionWithUser. It allocates nothing,
 //    logs nothing and takes no lock. The object is static and never freed.
+// Owners and handles (kiln_net.h, "Owners"):
+//  - steam_open admits the owner kiln.internal.launch designates (Kiln's interpreter for ShroudForge mods) and owners
+//    kiln.internal.owners says the managed host admitted (a C# mod whose kiln.mod.json says "steamMessages": true),
+//    and only while kiln.net is told when owners retire (Config::owners_watched): else a lease could outlive its owner.
+//  - A lease handle is 64 random bits from the system's cryptographic generator (BCryptGenRandom), unique among the
+//    open leases and never 0, so a handle cannot be guessed from another one. It is looked up together with its owner:
+//    another owner's lease answers exactly as a closed one.
+//  - Owner 0 is an invalid argument. An owner is revoked when kiln.net saw it retire (owner_retired, the core's
+//    owner-retiring notification, which also closes its leases) or when kiln.internal.owners says it is not alive;
+//    a revoked owner's calls answer KILN_ERR_REVOKED. A lease opened while its owner was being revoked is closed again
+//    before steam_open returns. The core is asked without the lease lock held, and the notification takes only the
+//    lease lock, so the two locks never nest.
+//  - A send, receive or accept holds its lease from its lease check to the end of its Steam call (Lease::uses). A
+//    lease closed meanwhile (steam_close, its owner retiring) answers as closed at once, but keeps its slot and its
+//    channels until the last such call returns, so that call's one Steam call never reaches another lease's channels.
 // Exit: close_for_exit sets the flag every member and the callback check after counting themselves in, then waits for
 // the ones already past the check; nothing calls Steam afterwards.
 #include "steam_messages.h"
 
+#include "../../core/src/owners_internal.h"  // kiln.internal.owners' grant bits (Kiln-internal, the core's own)
+
 #ifdef _WIN32
 #include <windows.h>
+// clang-format off: after windows.h
+#include <bcrypt.h>
+// clang-format on
+#else
+#include <random>
 #endif
 
 #include <atomic>
@@ -38,8 +60,10 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <deque>
 #include <mutex>
 #include <thread>
+#include <unordered_set>
 
 #if defined(_WIN32) && !defined(_MSC_VER)
 #error "the session callback object needs the MSVC vtable order (Run(void*) in slot 1): build kiln-net with clang-cl"
@@ -74,7 +98,8 @@ constexpr uint32_t kMaxIds = 256;
 constexpr int kPolicyReads = 5;                    // the first read and at most 4 retries; then the request is denied
 constexpr size_t kMaxLeases = 16;
 constexpr uint32_t kMaxChannel = 65535;
-constexpr KilnHandle kHandleTag = 0x5354ull << 48;
+constexpr uint32_t kGrantSteamMessages = KILN_OWNER_GRANT_STEAM_MESSAGES;
+constexpr size_t kMaxRetired = 4096;  // revoked owners remembered (the oldest is forgotten first; it holds no lease)
 constexpr char kMessagesVersion[] = "SteamNetworkingMessages002";
 constexpr char kSocketsVersion[] = "SteamNetworkingSockets013";
 
@@ -180,13 +205,18 @@ struct Lease {
     KilnOwner owner = 0;
     uint32_t first = 0, last = 0;
     bool sessions = false;
+    bool closing = false;  // closed while calls still use it: no longer found, its slot and channels still taken
+    uint32_t uses = 0;     // calls between their lease check and the end of their Steam call
 };
 std::mutex g_mutex;
 Lease g_leases[kMaxLeases];
-uint64_t g_generation = 0;
+std::unordered_set<KilnOwner> g_retired;  // under g_mutex: owners kiln.net saw retire
+std::deque<KilnOwner> g_retired_order;    // under g_mutex: the same, oldest first
 std::atomic<bool> g_registered{false};        // set before RegisterCallback is called, never cleared
 std::atomic<bool> g_register_faulted{false};
 std::atomic<bool> g_owner_refusal_logged{false};
+std::atomic<bool> g_unwatched_logged{false};
+bool (*g_random_for_tests)(uint64_t*) = nullptr;
 
 void log_text(int level, const char* text) {
     if (g_config.log) g_config.log(level, text);
@@ -409,23 +439,118 @@ public:
 static_assert(sizeof(SessionRequestCallback) == 16, "CCallbackBase: vptr, flags @8, id @12");
 SessionRequestCallback g_callback;  // static, never freed, never unregistered
 
-// ---- leases ----
-bool find_lease_locked(KilnHandle handle, Lease** out) {
-    if ((handle & (0xFFFFull << 48)) != kHandleTag) return false;
-    const size_t index = static_cast<size_t>(handle & 0xFF);
-    if (index >= kMaxLeases || g_leases[index].handle != handle) return false;
-    *out = &g_leases[index];
-    return true;
+// ---- owners ----
+bool retired_locked(KilnOwner owner) { return g_retired.count(owner) != 0; }
+
+void remember_retired_locked(KilnOwner owner) {
+    if (!g_retired.insert(owner).second) return;
+    g_retired_order.push_back(owner);
+    if (g_retired_order.size() > kMaxRetired) {
+        g_retired.erase(g_retired_order.front());
+        g_retired_order.pop_front();
+    }
 }
 
-// Whether the lease is open and its channels cover the channel: KILN_OK, KILN_ERR_NOT_FOUND (no such open lease) or
-// KILN_ERR_INVALID_ARGUMENT (outside its range).
-KilnResult check_lease(KilnHandle handle, uint32_t channel, bool any_channel) {
-    std::lock_guard lock(g_mutex);
-    Lease* lease = nullptr;
-    if (!find_lease_locked(handle, &lease)) return KILN_ERR_NOT_FOUND;
-    if (!any_channel && (channel < lease->first || channel > lease->last)) return KILN_ERR_INVALID_ARGUMENT;
+// The owner check of every member but status: KILN_OK (*grants: what kiln.internal.owners says it was admitted to, 0
+// without the table), KILN_ERR_INVALID_ARGUMENT (owner 0) or KILN_ERR_REVOKED. Never called with g_mutex held: the
+// core's grants member takes the owner registry's lock.
+KilnResult check_owner(KilnOwner owner, uint32_t* grants) {
+    if (owner == 0) return KILN_ERR_INVALID_ARGUMENT;
+    {
+        std::lock_guard lock(g_mutex);
+        if (retired_locked(owner)) return KILN_ERR_REVOKED;
+    }
+    uint32_t bits = 0;
+    if (g_config.owner_grants) {
+        const KilnResult rc = g_config.owner_grants(owner, &bits);
+        if (rc == KILN_ERR_REVOKED) return KILN_ERR_REVOKED;
+        if (rc != KILN_OK) bits = 0;
+    }
+    if (grants) *grants = bits;
     return KILN_OK;
+}
+
+// ---- leases ----
+// The open lease `handle` of `owner`; another owner's lease is not found, as a closed or unknown one.
+bool find_lease_locked(KilnOwner owner, KilnHandle handle, Lease** out) {
+    if (!handle) return false;
+    for (Lease& l : g_leases) {
+        if (l.handle == handle && l.owner == owner && !l.closing) {
+            *out = &l;
+            return true;
+        }
+    }
+    return false;
+}
+
+// 64 bits from the system's cryptographic generator. False: no randomness could be drawn.
+bool draw_random(uint64_t* out) {
+    if (g_random_for_tests) return g_random_for_tests(out);
+#ifdef _WIN32
+    return BCryptGenRandom(nullptr, reinterpret_cast<PUCHAR>(out), sizeof *out, BCRYPT_USE_SYSTEM_PREFERRED_RNG) == 0;
+#else  // host tests: the platform's random device (getrandom or /dev/urandom)
+    try {
+        std::random_device random;
+        *out = (static_cast<uint64_t>(random()) << 32) ^ static_cast<uint64_t>(random());
+        return true;
+    } catch (...) {
+        return false;
+    }
+#endif
+}
+
+// A new handle: random, never 0, not the handle of an open lease. False: the generator failed (or kept repeating).
+bool new_handle_locked(KilnHandle* out) {
+    for (int attempt = 0; attempt < 4; ++attempt) {
+        uint64_t value = 0;
+        if (!draw_random(&value)) return false;
+        bool used = value == 0;
+        for (const Lease& l : g_leases) used = used || l.handle == value;
+        if (!used) {
+            *out = value;
+            return true;
+        }
+    }
+    return false;
+}
+
+// A member call's hold on its lease, from its lease check to the end of its Steam call (the destructor). A lease closed
+// meanwhile keeps its slot and channels until the last hold ends, then the slot is free.
+class LeaseUse {
+public:
+    LeaseUse() = default;
+    LeaseUse(const LeaseUse&) = delete;
+    LeaseUse& operator=(const LeaseUse&) = delete;
+    ~LeaseUse() {
+        if (!lease_) return;
+        std::lock_guard lock(g_mutex);
+        if (--lease_->uses == 0 && lease_->closing) *lease_ = Lease{};
+    }
+    // Whether the lease is an open lease of `owner` and its channels cover the channel: KILN_OK (held from now on),
+    // KILN_ERR_NOT_FOUND (no such open lease of this owner) or KILN_ERR_INVALID_ARGUMENT (outside its range).
+    KilnResult take(KilnOwner owner, KilnHandle handle, uint32_t channel, bool any_channel) {
+        std::lock_guard lock(g_mutex);
+        Lease* lease = nullptr;
+        if (!find_lease_locked(owner, handle, &lease)) return KILN_ERR_NOT_FOUND;
+        if (!any_channel && (channel < lease->first || channel > lease->last)) return KILN_ERR_INVALID_ARGUMENT;
+        ++lease->uses;
+        lease_ = lease;
+        return KILN_OK;
+    }
+
+private:
+    Lease* lease_ = nullptr;  // g_leases is static: the slot outlives the hold
+};
+
+// Closes one lease (lock held): a session lease sets the policy to NONE first, so the callback answers nothing now. A
+// lease that calls still hold is only marked: the last hold frees its slot (LeaseUse).
+void close_lease_locked(Lease* lease) {
+    if (lease->sessions) write_policy_locked(KILN_STEAM_ACCEPT_NONE, nullptr, 0);
+    if (lease->uses) {
+        lease->closing = true;
+        return;
+    }
+    *lease = Lease{};
 }
 
 void fill_status(KilnSteamMessagesStatus* out, uint32_t flags, uint64_t local_id) {
@@ -435,7 +560,7 @@ void fill_status(KilnSteamMessagesStatus* out, uint32_t flags, uint64_t local_id
         std::lock_guard lock(g_mutex);  // the writers' lock: a stable view without the seqlock
         mode = g_policy.mode.load(std::memory_order_relaxed);
         listed = mode == KILN_STEAM_ACCEPT_LISTED ? g_policy.count.load(std::memory_order_relaxed) : 0;
-        for (const Lease& l : g_leases) leased = leased || (l.handle && l.sessions);
+        for (const Lease& l : g_leases) leased = leased || (l.handle && l.sessions && !l.closing);
     }
     if (g_config.server) flags |= KILN_STEAM_MSG_SERVER_IFACE;
     if (leased) flags |= KILN_STEAM_MSG_LEASED;
@@ -525,69 +650,94 @@ KilnResult KILN_CALL st_status(KilnSteamMessagesStatus* out) {
 KilnResult KILN_CALL st_open(KilnOwner owner, const KilnSteamMessagesOpen* request, KilnHandle* lease) {
     Entered entered;
     if (!entered.open) return KILN_ERR_UNAVAILABLE;
+    uint32_t grants = 0;
+    if (const KilnResult rc = check_owner(owner, &grants); rc != KILN_OK) return rc;
     const KilnOwner designated = g_config.dialect_owner ? g_config.dialect_owner() : 0;
-    if (owner == 0 || owner != designated) {
+    if (owner != designated && !(grants & kGrantSteamMessages)) {
         if (!g_owner_refusal_logged.exchange(true, std::memory_order_relaxed)) {
-            char line[160];
+            char line[200];
             std::snprintf(line, sizeof line,
-                          "net: steam messages: owner %llu is not the designated owner; no lease (steam-messages-owner, "
-                          "logged once)",
+                          "net: steam messages: owner %llu is neither the designated owner nor admitted by the managed "
+                          "host; no lease (steam-messages-owner, logged once)",
                           static_cast<unsigned long long>(owner));
             log_text(KILN_LOG_WARN, line);
         }
         return KILN_ERR_UNAVAILABLE;
+    }
+    if (!g_config.owners_watched) {  // nothing would close the lease when its owner retires
+        if (!g_unwatched_logged.exchange(true, std::memory_order_relaxed))
+            log_text(KILN_LOG_WARN,
+                     "net: steam messages: kiln.net is not told when an owner is revoked here (no owner-retiring "
+                     "notification); no lease opens (steam-messages-unwatched, logged once)");
+        return KILN_ERR_INTERNAL;
     }
     if (!lease || !request || request->size < sizeof(KilnSteamMessagesOpen) ||
         (request->flags & ~static_cast<uint32_t>(KILN_STEAM_OPEN_SESSIONS)) ||
         request->first_channel > request->last_channel || request->last_channel > kMaxChannel)
         return KILN_ERR_INVALID_ARGUMENT;
     const bool sessions = (request->flags & KILN_STEAM_OPEN_SESSIONS) != 0;
-    std::lock_guard lock(g_mutex);
-    size_t free_slot = kMaxLeases;
-    for (size_t i = 0; i < kMaxLeases; ++i) {
-        const Lease& l = g_leases[i];
-        if (!l.handle) {
-            if (free_slot == kMaxLeases) free_slot = i;
-            continue;
+    KilnHandle handle = 0;
+    {
+        std::lock_guard lock(g_mutex);
+        if (retired_locked(owner)) return KILN_ERR_REVOKED;  // it retired since check_owner
+        size_t free_slot = kMaxLeases;
+        for (size_t i = 0; i < kMaxLeases; ++i) {
+            const Lease& l = g_leases[i];
+            if (!l.handle) {
+                if (free_slot == kMaxLeases) free_slot = i;
+                continue;
+            }
+            if (request->first_channel <= l.last && l.first <= request->last_channel) return KILN_ERR_INVALID_ARGUMENT;
+            if (sessions && l.sessions) return KILN_ERR_INVALID_ARGUMENT;
         }
-        if (request->first_channel <= l.last && l.first <= request->last_channel) return KILN_ERR_INVALID_ARGUMENT;
-        if (sessions && l.sessions) return KILN_ERR_INVALID_ARGUMENT;
+        if (free_slot == kMaxLeases) return KILN_ERR_INVALID_ARGUMENT;
+        if (!new_handle_locked(&handle)) {
+            log_text(KILN_LOG_WARN, "net: steam messages: no random lease handle could be drawn; no lease");
+            return KILN_ERR_INTERNAL;
+        }
+        Lease& l = g_leases[free_slot];
+        l.handle = handle;
+        l.owner = owner;
+        l.first = request->first_channel;
+        l.last = request->last_channel;
+        l.sessions = sessions;
     }
-    if (free_slot == kMaxLeases) return KILN_ERR_INVALID_ARGUMENT;
-    g_generation = (g_generation + 1) & 0xFFFFFFFFFFull;  // 40 bits between the tag and the slot
-    if (!g_generation) g_generation = 1;
-    Lease& l = g_leases[free_slot];
-    l.handle = kHandleTag | (g_generation << 8) | free_slot;
-    l.owner = owner;
-    l.first = request->first_channel;
-    l.last = request->last_channel;
-    l.sessions = sessions;
-    *lease = l.handle;
+    // The core may have revoked the owner after check_owner and before its notification reached kiln.net: asked again
+    // now, a revoke after this answer finds the lease in the table and closes it.
+    if (check_owner(owner, nullptr) == KILN_ERR_REVOKED) {
+        std::lock_guard lock(g_mutex);
+        Lease* opened = nullptr;
+        if (find_lease_locked(owner, handle, &opened)) close_lease_locked(opened);
+        return KILN_ERR_REVOKED;
+    }
+    *lease = handle;
     return KILN_OK;
 }
 
-KilnResult KILN_CALL st_close(KilnHandle handle) {
+KilnResult KILN_CALL st_close(KilnOwner owner, KilnHandle handle) {
     Entered entered;
     if (!entered.open) return KILN_ERR_UNAVAILABLE;
+    if (const KilnResult rc = check_owner(owner, nullptr); rc != KILN_OK) return rc;
     std::lock_guard lock(g_mutex);
     Lease* lease = nullptr;
-    if (!find_lease_locked(handle, &lease)) return KILN_OK;  // closed already (or never a lease): nothing to do
-    if (lease->sessions) write_policy_locked(KILN_STEAM_ACCEPT_NONE, nullptr, 0);  // the callback answers nothing now
-    *lease = Lease{};
+    // closed already, never a lease, or another owner's: nothing to do
+    if (find_lease_locked(owner, handle, &lease)) close_lease_locked(lease);
     return KILN_OK;
 }
 
-KilnResult KILN_CALL st_maintain(KilnHandle handle, const KilnSteamAcceptPolicy* policy, KilnSteamMessagesStatus* out) {
+KilnResult KILN_CALL st_maintain(KilnOwner owner, KilnHandle handle, const KilnSteamAcceptPolicy* policy,
+                                 KilnSteamMessagesStatus* out) {
     if (out && out->size < sizeof(KilnSteamMessagesStatus)) return KILN_ERR_INVALID_ARGUMENT;
     Entered entered;
     if (!entered.open) {
         if (out) fill_status(out, KILN_STEAM_MSG_CLOSED_FOR_EXIT, 0);
         return KILN_ERR_UNAVAILABLE;
     }
+    if (const KilnResult rc = check_owner(owner, nullptr); rc != KILN_OK) return rc;
     {
         std::lock_guard lock(g_mutex);
         Lease* lease = nullptr;
-        if (!find_lease_locked(handle, &lease)) return KILN_ERR_NOT_FOUND;
+        if (!find_lease_locked(owner, handle, &lease)) return KILN_ERR_NOT_FOUND;
         if (!lease->sessions) return KILN_ERR_INVALID_ARGUMENT;
     }
     if (!policy || policy->size < sizeof(KilnSteamAcceptPolicy) || policy->mode > KILN_STEAM_ACCEPT_LISTED ||
@@ -605,7 +755,7 @@ KilnResult KILN_CALL st_maintain(KilnHandle handle, const KilnSteamAcceptPolicy*
     if (mode == KILN_STEAM_ACCEPT_NONE) {
         std::lock_guard lock(g_mutex);
         Lease* lease = nullptr;
-        if (!find_lease_locked(handle, &lease) || !lease->sessions) return KILN_ERR_NOT_FOUND;  // closed meanwhile
+        if (!find_lease_locked(owner, handle, &lease) || !lease->sessions) return KILN_ERR_NOT_FOUND;  // closed meanwhile
         write_policy_locked(KILN_STEAM_ACCEPT_NONE, nullptr, 0);
     }
     const Resolved r = resolve_messages(false);
@@ -620,7 +770,7 @@ KilnResult KILN_CALL st_maintain(KilnHandle handle, const KilnSteamAcceptPolicy*
     if (mode != KILN_STEAM_ACCEPT_NONE) {
         std::lock_guard lock(g_mutex);
         Lease* lease = nullptr;
-        if (!find_lease_locked(handle, &lease) || !lease->sessions) return KILN_ERR_NOT_FOUND;  // closed meanwhile
+        if (!find_lease_locked(owner, handle, &lease) || !lease->sessions) return KILN_ERR_NOT_FOUND;  // closed meanwhile
         write_policy_locked(mode, ids, count);
     }
     KilnResult rc = KILN_OK;
@@ -644,15 +794,17 @@ KilnResult KILN_CALL st_maintain(KilnHandle handle, const KilnSteamAcceptPolicy*
     return rc;
 }
 
-KilnResult KILN_CALL st_send(KilnHandle handle, uint64_t peer, const void* data, uint32_t len, uint32_t channel,
-                             uint32_t flags, int32_t* steam_result) {
+KilnResult KILN_CALL st_send(KilnOwner owner, KilnHandle handle, uint64_t peer, const void* data, uint32_t len,
+                             uint32_t channel, uint32_t flags, int32_t* steam_result) {
     Entered entered;
     if (!entered.open) return KILN_ERR_UNAVAILABLE;
+    if (const KilnResult rc = check_owner(owner, nullptr); rc != KILN_OK) return rc;
     if (!steam_result || !peer || len > KILN_STEAM_MESSAGE_MAX || (len && !data) ||
         (flags != 0 && flags != 8 && flags != 32 && flags != 40))
         return KILN_ERR_INVALID_ARGUMENT;
     *steam_result = 0;
-    if (const KilnResult rc = check_lease(handle, channel, false); rc != KILN_OK) return rc;
+    LeaseUse use;
+    if (const KilnResult rc = use.take(owner, handle, channel, false); rc != KILN_OK) return rc;
     const Resolved r = resolve_messages(false);
     if (r.state == Steam::Fault) return KILN_ERR_INTERNAL;
     if (r.state != Steam::Ready) return KILN_ERR_UNAVAILABLE;
@@ -667,13 +819,15 @@ KilnResult KILN_CALL st_send(KilnHandle handle, uint64_t peer, const void* data,
     return KILN_OK;
 }
 
-KilnResult KILN_CALL st_receive(KilnHandle handle, uint32_t channel, void* buffer, uint32_t cap,
+KilnResult KILN_CALL st_receive(KilnOwner owner, KilnHandle handle, uint32_t channel, void* buffer, uint32_t cap,
                                 KilnSteamMessageInfo* out, uint32_t* got) {
     Entered entered;
     if (!entered.open) return KILN_ERR_UNAVAILABLE;
+    if (const KilnResult rc = check_owner(owner, nullptr); rc != KILN_OK) return rc;
     if (!got || !out || out->size < sizeof(KilnSteamMessageInfo) || (cap && !buffer)) return KILN_ERR_INVALID_ARGUMENT;
     *got = 0;
-    if (const KilnResult rc = check_lease(handle, channel, false); rc != KILN_OK) return rc;
+    LeaseUse use;
+    if (const KilnResult rc = use.take(owner, handle, channel, false); rc != KILN_OK) return rc;
     const Resolved r = resolve_messages(false);
     if (r.state == Steam::Fault) return KILN_ERR_INTERNAL;
     if (r.state != Steam::Ready) return KILN_ERR_UNAVAILABLE;
@@ -708,12 +862,14 @@ KilnResult KILN_CALL st_receive(KilnHandle handle, uint32_t channel, void* buffe
     return KILN_OK;
 }
 
-KilnResult KILN_CALL st_accept(KilnHandle handle, uint64_t peer, uint32_t* accepted) {
+KilnResult KILN_CALL st_accept(KilnOwner owner, KilnHandle handle, uint64_t peer, uint32_t* accepted) {
     Entered entered;
     if (!entered.open) return KILN_ERR_UNAVAILABLE;
+    if (const KilnResult rc = check_owner(owner, nullptr); rc != KILN_OK) return rc;
     if (!accepted || !peer) return KILN_ERR_INVALID_ARGUMENT;
     *accepted = 0;
-    if (const KilnResult rc = check_lease(handle, 0, true); rc != KILN_OK) return rc;
+    LeaseUse use;
+    if (const KilnResult rc = use.take(owner, handle, 0, true); rc != KILN_OK) return rc;
     const Resolved r = resolve_messages(false);
     if (r.state == Steam::Fault) return KILN_ERR_INTERNAL;
     if (r.state != Steam::Ready) return KILN_ERR_UNAVAILABLE;
@@ -739,6 +895,17 @@ bool close_for_exit(uint32_t wait_ms) {
 
 bool ready_seen() { return g_ready_seen.load(std::memory_order_relaxed); }
 
+void owner_retired(KilnOwner owner) {
+    if (owner == 0) return;
+    std::lock_guard lock(g_mutex);
+    for (Lease& l : g_leases)
+        if (l.handle && l.owner == owner && !l.closing) close_lease_locked(&l);
+    try {  // the core calls this through the C ABI: no exception may leave it
+        remember_retired_locked(owner);
+    } catch (...) {  // no memory: kiln.internal.owners still says the owner is not alive
+    }
+}
+
 void reset_for_tests() {
     std::lock_guard lock(g_mutex);
     g_exports = Exports{};
@@ -754,6 +921,10 @@ void reset_for_tests() {
     g_registered.store(false);
     g_register_faulted.store(false);
     g_owner_refusal_logged.store(false);
+    g_unwatched_logged.store(false);
+    g_random_for_tests = nullptr;
+    g_retired.clear();
+    g_retired_order.clear();
     for (Lease& l : g_leases) l = Lease{};
     write_policy_locked(KILN_STEAM_ACCEPT_NONE, nullptr, 0);
     for (auto& id : g_policy.ids) id.store(0, std::memory_order_relaxed);
@@ -762,5 +933,10 @@ void reset_for_tests() {
 }
 
 void* callback_object_for_tests() { return &g_callback; }
+
+void set_random_for_tests(bool (*draw)(uint64_t* out)) {
+    std::lock_guard lock(g_mutex);
+    g_random_for_tests = draw;
+}
 
 }  // namespace knet::steam

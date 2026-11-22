@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// The debugger's safety rules, headless: DAP framing, the guard's policy, target resolution, and dist/dapProxy.js as a
+// The debugger's safety rules, headless: DAP framing, the guard's policy, the target from `kiln debug --json`, and dist/dapProxy.js as a
 // real process around the mock netcoredbg (test/fixtures/dap), including every way a session can end.
 import * as assert from "node:assert/strict";
 import { ChildProcess, spawn, spawnSync } from "node:child_process";
@@ -7,8 +7,10 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { DapGuard, DapMessage, DapReader, encodeDap, ProxySpec, staleContextsWarning } from "../../src/core/dap";
-import { DebugRefused, debugRefusal, findNetcoredbg, netcoredbgCandidates, parseTasklist, proxySpec, resolveTarget, wineAbove } from "../../src/core/debugTarget";
-import type { ServerDef } from "../../src/core/servers";
+import {
+  activeDebugTargets, adapterKind, attachedSession, DebugRefused, debugArgs, describeDebugState, describeResolution, findNetcoredbg, netcoredbgCandidates,
+  netcoredbgEnv, parseResolution, proxySpecFromCli, refusalMessage, reloadBlockedBy, resolveWithCli, selectTarget, unloadsModCode,
+} from "../../src/core/debugTarget";
 
 const EXT = path.resolve(__dirname, "../../..");
 const PROXY = path.join(EXT, "dist", "dapProxy.js");
@@ -153,21 +155,146 @@ suite("DAP guard", () => {
 });
 
 suite("debug target", () => {
-  const def = (dir: string, more: Partial<ServerDef> = {}): ServerDef => ({ name: "t", dir, kind: "lab", prefix: `${dir}.pfx`, source: "settings", ...more });
+  /** A stand-in `kiln`: logs its argv and answers `debug … --json` from a table keyed by the server folder or client. */
+  function fakeCli(d: string, answers: Record<string, object>): { cli: string; calls: () => string[][] } {
+    const log = path.join(d, "cli-calls.log");
+    const cli = path.join(d, "kiln");
+    fs.writeFileSync(
+      cli,
+      `#!${process.execPath}
+const fs = require("fs"), a = process.argv.slice(2);
+fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify(a) + "\\n");
+const answers = ${JSON.stringify(answers)};
+const key = a[a.indexOf(a.includes("--server") ? "--server" : "--client") + 1];
+const v = answers[key] ?? { ok: false, error: { code: "not_found", message: "no server or install " + key } };
+console.log(JSON.stringify(v));
+process.exit(v.ok ? 0 : 1);
+`,
+      { mode: 0o755 },
+    );
+    return { cli, calls: () => (fs.existsSync(log) ? fs.readFileSync(log, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)) : []) };
+  }
+  /** What `kiln debug --json` answers for a proven target (kiln_manage::debug's shape, REPORT-S1-S2 §6). */
+  const resolution = (dir: string, windowsPid: number, more: object = {}) => ({
+    ok: true, kind: "server", server: dir, install: dir, via: "folder", lab: null, pid: windowsPid, hostPid: 9000 + windowsPid,
+    wine: "/r/bin/wine", prefix: `${dir}.pfx`, netcoredbg: "/t/netcoredbg.exe",
+    env: { WINEPREFIX: `${dir}.pfx`, WINEDEBUG: "-all" }, command: ["/r/bin/wine", "/t/netcoredbg.exe", "--interpreter=vscode"], maxPauseMs: null,
+    descriptor: path.join(dir, "kiln", "state", "debug", `${windowsPid}.json`), notes: [],
+    target: {
+      identity: { installId: "i", prefixIdentity: null, runnerSha256: null, windowsPid, creationTime100ns: "134390977514834040", imageSha256: "ab".repeat(32), sessionNonce: "cd".repeat(16) },
+      image: "Z:\\s\\enshrouded_server.exe", runtimeVersion: "10.0.14", managedReady: true, sessionMode: "hosted", runnerContext: null, hostPid: 9000 + windowsPid,
+    },
+    ...more,
+  });
 
-  test("tasklist: only the server's image, any case, CRLF", () => {
-    const text = '"svchost.exe","20","Console","1","1,000 K"\r\n"ENSHROUDED_SERVER.exe","4242","Console","1","9,000 K"\r\nINFO: nothing\r\n';
-    assert.deepEqual(parseTasklist(text), [4242]);
-    assert.deepEqual(parseTasklist("INFO: No tasks are running which match the specified criteria.\r\n"), []);
+  test("one target: server or client, never both; maxPauseMs 100..60000", () => {
+    assert.deepEqual(selectTarget({}), { kind: "server", server: undefined });
+    assert.deepEqual(selectTarget({ server: " lab " }), { kind: "server", server: "lab" });
+    assert.deepEqual(selectTarget({ client: "steam-client", allowClientPause: true }), { kind: "client", client: "steam-client" });
+    assert.throws(() => selectTarget({ server: "a", client: "b", allowClientPause: true }), (e: DebugRefused) => e.code === "usage");
+    for (const bad of [99, 60_001, 1.5, Number.NaN]) assert.throws(() => selectTarget({ server: "a", maxPauseMs: bad }), (e: DebugRefused) => e.code === "usage", String(bad));
+    assert.equal(selectTarget({ server: "a", maxPauseMs: 100 }).kind, "server");
   });
-  test("wine is bin/wine above the preloader, never the one beside it in GE-Proton's lib", () => {
-    const has = (...yes: string[]) => (p: string) => yes.includes(p);
-    const ge = "/ge/files";
-    assert.equal(wineAbove(`${ge}/lib/wine/i386-unix/wine64-preloader`, has(`${ge}/bin/wine`, `${ge}/lib/wine/i386-unix/wine`)), `${ge}/bin/wine`);
-    assert.equal(wineAbove("/usr/lib/wine/wine64-preloader", has("/usr/bin/wine")), "/usr/bin/wine");
-    assert.equal(wineAbove("/opt/w/wine-preloader", has("/opt/w/wine")), "/opt/w/wine");
-    assert.equal(wineAbove("/usr/bin/sleep", has()), undefined);
+
+  test("a client configuration without allowClientPause shows the consent error, and nothing runs", () => {
+    const d = tmp();
+    const { calls } = fakeCli(d, {});
+    for (const c of [{ client: "steam-client" }, { client: "steam-client", allowClientPause: false }, { client: "x", allowClientPause: "true" as unknown as boolean }]) {
+      assert.throws(() => selectTarget(c), (e: DebugRefused) => {
+        assert.equal(e.code, "pause_consent_required");
+        assert.match(refusalMessage(e), /allowClientPause/);
+        assert.match(refusalMessage(e), /--observe/);
+        return true;
+      });
+    }
+    assert.deepEqual(calls(), [], "the configuration is refused before the CLI runs");
   });
+
+  test("arguments: the server's folder, or the client with its consent flag; maxPauseMs passed on", () => {
+    assert.deepEqual(debugArgs({ kind: "server", dir: "/srv/a" }, {}), ["debug", "--server", "/srv/a"]);
+    assert.deepEqual(debugArgs({ kind: "client", client: "steam-client" }, { maxPauseMs: 2000 }), ["debug", "--client", "steam-client", "--allow-client-pause", "--max-pause-ms", "2000"]);
+  });
+
+  test("two Windows servers resolve by their folders, an unknown or ambiguous one is refused", async () => {
+    const d = tmp();
+    const a = path.join(d, "A"), b = path.join(d, "B"), both = path.join(d, "both");
+    const { cli, calls } = fakeCli(d, {
+      [a]: resolution(a, 100),
+      [b]: resolution(b, 200),
+      [both]: { ok: false, error: { code: "refused", message: "2 descriptors match this server", detail: { reason: "several_descriptors" } } },
+    });
+    const ra = await resolveWithCli(cli, debugArgs({ kind: "server", dir: a }, {}), {});
+    const rb = await resolveWithCli(cli, debugArgs({ kind: "server", dir: b }, {}), {});
+    assert.equal(ra.pid, 100);
+    assert.equal(rb.pid, 200);
+    assert.equal(proxySpecFromCli(ra).pid, 100);
+    await assert.rejects(resolveWithCli(cli, debugArgs({ kind: "server", dir: both }, {}), {}), (e: DebugRefused) => e.code === "refused" && e.reason === "several_descriptors");
+    await assert.rejects(resolveWithCli(cli, debugArgs({ kind: "server", dir: path.join(d, "C") }, {}), {}), (e: DebugRefused) => e.code === "not_found");
+    assert.deepEqual(calls().map((c) => c.slice(0, 3).concat(c.slice(-1))), [
+      ["debug", "--server", a, "--json"], ["debug", "--server", b, "--json"], ["debug", "--server", both, "--json"], ["debug", "--server", path.join(d, "C"), "--json"],
+    ]);
+  });
+
+  test("no code path runs tasklist or lists processes itself: only the kiln CLI runs", async () => {
+    // the source: no tasklist, no wine, no process listing in the extension (comments aside)
+    const files: string[] = [];
+    const walk = (p: string) => { for (const f of fs.readdirSync(p, { withFileTypes: true })) f.isDirectory() ? walk(path.join(p, f.name)) : f.name.endsWith(".ts") && files.push(path.join(p, f.name)); };
+    walk(path.join(EXT, "src"));
+    for (const f of files) {
+      const code = fs.readFileSync(f, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "").replace(/ \/\/ .*$/gm, "");
+      assert.doesNotMatch(code, /tasklist/i, f);
+    }
+    // a run: tasklist and wine on PATH would leave a marker; the fake CLI is the only process
+    const d = tmp();
+    const bin = path.join(d, "bin");
+    fs.mkdirSync(bin);
+    const marker = path.join(d, "ran");
+    for (const n of ["tasklist", "tasklist.exe", "wine", "wine64", "ps", "pgrep"]) fs.writeFileSync(path.join(bin, n), `#!/bin/sh\necho ${n} >> ${marker}\n`, { mode: 0o755 });
+    const dir = path.join(d, "lab");
+    const { cli, calls } = fakeCli(d, { [dir]: resolution(dir, 32) });
+    const r = await resolveWithCli(cli, debugArgs({ kind: "server", dir }, {}), { PATH: `${bin}:${process.env.PATH}` });
+    assert.equal(r.target.identity.windowsPid, 32);
+    assert.equal(calls().length, 1);
+    assert.equal(fs.existsSync(marker), false, "nothing but the CLI ran");
+  });
+
+  test("the CLI's answer: refusal codes and reasons kept, an unknown code is refused, an old CLI without identity is tool_missing", () => {
+    assert.throws(() => parseResolution(JSON.stringify({ ok: false, error: { code: "pause_consent_required", message: "m" } })), (e: DebugRefused) => e.code === "pause_consent_required");
+    assert.throws(() => parseResolution(JSON.stringify({ ok: false, error: { code: "identity_changed", message: "m", detail: { reason: "nonce" } } })), (e: DebugRefused) => e.code === "identity_changed" && e.reason === "nonce");
+    assert.throws(() => parseResolution(JSON.stringify({ ok: false, error: { code: "new_code", message: "m" } })), (e: DebugRefused) => e.code === "refused");
+    assert.throws(() => parseResolution(JSON.stringify({ ok: true, pid: 4242 })), (e: DebugRefused) => e.code === "tool_missing", "the pre-dev.31 shape (pid only)");
+    assert.throws(() => parseResolution("not json"), (e: DebugRefused) => e.code === "tool_missing");
+    const r = parseResolution(JSON.stringify(resolution("/s", 7)));
+    assert.match(describeResolution(r), /Windows PID 7 \(created 134390977514834040\).*mode hosted.*host pid 9007 \(display only\)/);
+  });
+
+  test("the built-in proxy is only a transport: the CLI's own command, environment and PID", () => {
+    const r = parseResolution(JSON.stringify(resolution("/s", 32)));
+    const spec = proxySpecFromCli(r);
+    assert.equal(spec.command, "/r/bin/wine");
+    assert.deepEqual(spec.args, ["/t/netcoredbg.exe", "--interpreter=vscode"]);
+    assert.deepEqual(spec.env, { WINEPREFIX: "/s.pfx", WINEDEBUG: "-all" });
+    assert.equal(spec.pid, 32);
+    assert.equal(spec.cwd, "/t");
+  });
+
+  test("kiln/debugState: the watchdog's continue and the end warn, a mode change informs, the rest is a log line", () => {
+    const id = { windowsPid: 32 };
+    assert.deepEqual(describeDebugState({ identity: id, state: "running", sessionMode: "hosted", reason: "timeout_continue", maxPauseMs: 5000 }), {
+      text: "debug: running (timeout_continue), PID 32, mode hosted, pauses end after 5000 ms", notify: "warn",
+    });
+    assert.equal(describeDebugState({ identity: id, state: "ended", reason: "debuggee_exited" }).notify, "warn");
+    assert.equal(describeDebugState({ identity: id, state: "paused", sessionMode: "joined", reason: "session_mode_changed" }).notify, "info");
+    assert.equal(describeDebugState({ identity: id, state: "paused", sessionMode: "menu" }).notify, "none");
+    assert.equal(describeDebugState(undefined).text, "debug: ?, PID ?, mode unknown");
+  });
+
+  test("refusal messages point at the fix", () => {
+    assert.match(refusalMessage(new DebugRefused("refused", "developer debugging is off", "developer_debugging_off")), /Developer debugging/);
+    assert.equal(refusalMessage(new DebugRefused("ambiguous_runner", "two runners", "runner")), "two runners [ambiguous_runner: runner]");
+    assert.equal(refusalMessage(new DebugRefused("tool_missing", "no helper")), "no helper");
+  });
+
   test("netcoredbg lookup: setting, $KILN_NETCOREDBG, data folder; an explicit path never falls through", () => {
     assert.deepEqual(netcoredbgCandidates("/a/n.exe", { KILN_NETCOREDBG: "/b/n.exe" }), ["/a/n.exe"]);
     assert.deepEqual(netcoredbgCandidates("", { KILN_NETCOREDBG: "/b/n.exe" }), ["/b/n.exe"]);
@@ -188,6 +315,42 @@ suite("debug target", () => {
     fs.writeFileSync(installed, "");
     assert.equal(findNetcoredbg("", { KILN_DATA_DIR: path.join(d, "data") }, bundled), installed);
   });
+  test("the CLI checks the extension's own netcoredbg against the pin; an explicit choice only warns", () => {
+    assert.deepEqual(netcoredbgEnv("/b/netcoredbg.exe", "", {}), { KILN_NETCOREDBG: "/b/netcoredbg.exe", KILN_NETCOREDBG_PINNED: "1" });
+    assert.deepEqual(netcoredbgEnv("/s/netcoredbg.exe", "/s/netcoredbg.exe", {}), { KILN_NETCOREDBG: "/s/netcoredbg.exe" });
+    assert.deepEqual(netcoredbgEnv("/e/netcoredbg.exe", "", { KILN_NETCOREDBG: "/e/netcoredbg.exe" }), { KILN_NETCOREDBG: "/e/netcoredbg.exe" });
+  });
+  test("a client is never carried by the built-in proxy (no pause limit, no identity re-check there)", () => {
+    assert.equal(adapterKind("server", true), "cli");
+    assert.equal(adapterKind("client", true), "cli");
+    assert.equal(adapterKind("server", false), "proxy");
+    assert.throws(() => adapterKind("client", false), (e: DebugRefused) => e.code === "tool_missing" && /--dap/.test(e.message));
+  });
+  test("reloads wait while a debugger is attached: this window's session, or a live kiln debug's session file", () => {
+    const d = tmp();
+    const file = path.join(d, "kiln", "state", "debug", "session.json");
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const write = (state: string, proxyPid = process.pid, proxyStarted?: number) =>
+      fs.writeFileSync(file, JSON.stringify({ format: 1, proxyPid, proxyStarted, state: { state, identity: { windowsPid: 32 } } }));
+    assert.equal(reloadBlockedBy(d), undefined, "no file");
+    write("paused", 4321, 1000);
+    assert.deepEqual(attachedSession(d, () => true, () => 1001), { proxyPid: 4321, state: "paused" });
+    assert.equal(attachedSession(d, () => false, () => 1001), undefined, "a proxy that is gone does not count");
+    assert.equal(attachedSession(d, () => true, () => 5000), undefined, "another process under that PID does not count");
+    write("detached", 4321, 1000);
+    assert.equal(attachedSession(d, () => true, () => 1000), undefined, "an ended session does not count");
+    write("running"); // this test process stands in for a live proxy
+    assert.match(reloadBlockedBy(d)!, /kiln debug, pid \d+, running/);
+    fs.rmSync(file);
+    activeDebugTargets.add(path.resolve(d));
+    try {
+      assert.match(reloadBlockedBy(d)!, /this window/);
+    } finally {
+      activeDebugTargets.delete(path.resolve(d));
+    }
+    for (const c of ["reload m", "unload m", "reload-test m 20"]) assert.ok(unloadsModCode(c), c);
+    for (const c of ["mods", "gc", "load folder", "test m", "reloadx"]) assert.ok(!unloadsModCode(c), c);
+  });
   test("the fetch script's pin refuses any other file", () => {
     const d = tmp();
     const bogus = path.join(d, "netcoredbg-win64.zip");
@@ -195,83 +358,6 @@ suite("debug target", () => {
     const r = spawnSync(process.execPath, [path.join(EXT, "scripts", "fetch-netcoredbg.mjs"), "--check-zip", bogus], { encoding: "utf8" });
     assert.equal(r.status, 1);
     assert.match(r.stderr, /expected 3c410a45/);
-  });
-  test("Steam libraries are refused by folder, prefix and symlink", () => {
-    const steam = "/home/x/.local/share/Steam/steamapps/common/EnshroudedServer";
-    assert.ok(debugRefusal(def(steam)));
-    assert.ok(debugRefusal(def("/srv/x", { prefix: "/g/SteamLibrary/steamapps/compatdata/2278520/pfx" })));
-    const d = tmp();
-    const real = path.join(d, "steamapps", "common", "S");
-    fs.mkdirSync(real, { recursive: true });
-    fs.symlinkSync(real, path.join(d, "link"));
-    assert.ok(debugRefusal(def(path.join(d, "link"), { prefix: undefined })));
-    assert.equal(debugRefusal(def(path.join(d, "lab"))), undefined);
-  });
-  test("a running process in a Steam library's prefix is refused whatever the configured folder says", async () => {
-    const d = tmp();
-    const dir = path.join(d, "lab");
-    fs.mkdirSync(dir);
-    const host = spawn("sleep", ["30"], { cwd: dir, env: { ...process.env, WINEPREFIX: "/g/steamapps/compatdata/2278520/pfx" }, stdio: "ignore" });
-    try {
-      await sleep(100);
-      await assert.rejects(resolveTarget(def(dir), { hostPids: [host.pid!] }), (e: DebugRefused) => e.code === "refused");
-    } finally {
-      host.kill("SIGTERM");
-    }
-  });
-  test("a stopped server: refused before any wine runs", async () => {
-    const d = tmp();
-    const marker = path.join(d, "wine-ran");
-    const wine = path.join(d, "wine");
-    fs.writeFileSync(wine, `#!/bin/sh\ntouch ${marker}\n`, { mode: 0o755 });
-    await assert.rejects(resolveTarget(def(path.join(d, "lab")), { wine, hostPids: [] }), (e: DebugRefused) => e.code === "not_running");
-    assert.equal(fs.existsSync(marker), false);
-  });
-  test("two server processes, or one from another folder: refused before any wine runs", async () => {
-    const d = tmp();
-    const dir = path.join(d, "lab");
-    const other = path.join(d, "other");
-    fs.mkdirSync(dir);
-    fs.mkdirSync(other);
-    const marker = path.join(d, "wine-ran");
-    const wine = path.join(d, "wine");
-    fs.writeFileSync(wine, `#!/bin/sh\ntouch ${marker}\n`, { mode: 0o755 });
-    const elsewhere = spawn("sleep", ["30"], { cwd: other, stdio: "ignore" });
-    try {
-      await sleep(100);
-      await assert.rejects(resolveTarget(def(dir), { wine, hostPids: [elsewhere.pid!] }), (e: DebugRefused) => e.code === "refused");
-      await assert.rejects(resolveTarget(def(dir), { wine, hostPids: [elsewhere.pid!, 1] }), (e: DebugRefused) => e.code === "refused");
-      assert.equal(fs.existsSync(marker), false);
-    } finally {
-      elsewhere.kill("SIGTERM");
-    }
-  });
-  test("a running server: its prefix, the wine we were given, the pid from tasklist in that prefix", async () => {
-    const d = tmp();
-    const dir = path.join(d, "lab");
-    fs.mkdirSync(dir);
-    const seen = path.join(d, "seen");
-    const wine = path.join(d, "wine");
-    fs.writeFileSync(wine, `#!/bin/sh\necho "$WINEPREFIX $WINEDEBUG \${DISPLAY:-nodisplay} $1" > ${seen}\nprintf '"enshrouded_server.exe","32","Console","1","1 K"\\r\\n'\n`, { mode: 0o755 });
-    const host = spawn("sleep", ["30"], { cwd: dir, env: { ...process.env, WINEPREFIX: `${dir}.pfx`, WINEESYNC: "1", WINESERVERSOCKET: "16", WINELOADERNOEXEC: "1" }, stdio: "ignore" });
-    try {
-      await sleep(100);
-      const t = await resolveTarget(def(dir), { wine, hostPids: [host.pid!] });
-      assert.equal(t.pid, 32);
-      assert.equal(t.prefix, `${dir}.pfx`);
-      assert.equal(t.env.WINEESYNC, "1", "the server's wine settings carry over");
-      assert.equal(t.env.WINESERVERSOCKET, undefined, "its per-process internals do not (wine: Bad server socket)");
-      assert.equal(t.env.WINELOADERNOEXEC, undefined);
-      assert.equal(fs.readFileSync(seen, "utf8").trim(), `${dir}.pfx -all nodisplay tasklist.exe`);
-      const spec = proxySpec(t, "/t/netcoredbg.exe");
-      assert.equal(spec.command, wine);
-      assert.deepEqual(spec.args, ["/t/netcoredbg.exe", "--interpreter=vscode"]);
-      assert.equal(spec.env!.DOTNET_SYSTEM_GLOBALIZATION_INVARIANT, "1");
-      assert.equal(spec.pid, 32);
-      assert.equal(spec.cwd, "/t");
-    } finally {
-      host.kill("SIGTERM");
-    }
   });
 });
 

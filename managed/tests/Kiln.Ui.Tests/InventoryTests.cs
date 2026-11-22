@@ -141,11 +141,11 @@ public sealed unsafe class InventoryTests : IDisposable
         return s;
     }
 
-    private static void Deliver(nint user, uint button, uint mods, UiValuesNative.VisibleSlot slot, uint taken = 1)
+    private static void Deliver(nint user, uint button, uint mods, UiValuesNative.VisibleSlot slot, uint taken = 1, float x = 0, float y = 0)
     {
         var c = new UiInventoryNative.Click
         {
-            Size = (uint)sizeof(UiInventoryNative.Click), Button = button, Mods = mods, Taken = taken, Slot = slot,
+            Size = (uint)sizeof(UiInventoryNative.Click), Button = button, Mods = mods, Taken = taken, Slot = slot, X = x, Y = y,
             Screen = new UiNative.Screen { Size = (uint)sizeof(UiNative.Screen), UiState = 7, HudScreen = 22 },
         };
         var fn = (delegate* unmanaged[Cdecl]<UiInventoryNative.Click*, void*, void>)FakeInventory.ClickFn;
@@ -172,6 +172,19 @@ public sealed unsafe class InventoryTests : IDisposable
         Assert.Equal(SlotModifiers.Ctrl, c.Modifiers);
         Assert.True(c.Taken);
         Assert.Equal(HudScreen.StorageChest, c.Screen.Hud);
+    }
+
+    [Fact]
+    public void A_click_carries_the_press_position_in_the_overlays_pixels()
+    {
+        // 0.2.0-dev.30.3 (GitHub issue 107): the native record's x, y (the window's client pixels, which are the overlay's)
+        var got = new List<SlotClick>();
+        using var reg = Ui.Inventory.OnClick(new SlotClickOptions(), got.Add);
+        Deliver(FakeInventory.Subscribed[0].User, 1, 0, Slot(0xAA, 900), x: 1712, y: 403);
+        Assert.Equal(new System.Numerics.Vector2(1712, 403), Assert.Single(got).Pointer);
+        // a SlotClick a test makes has none
+        Assert.Null(new SlotClick(SlotButton.Left, SlotModifiers.None, got[0].Slot, got[0].Screen, true).Pointer);
+        Assert.Equal(new System.Numerics.Vector2(1, 2), (got[0] with { Pointer = new System.Numerics.Vector2(1, 2) }).Pointer);
     }
 
     [Fact]

@@ -222,12 +222,72 @@ only gets copies:
   revision and the expected text still match.
 Game evidence: [docs/re/chat-input.md](../../re/chat-input.md#tab-completion-cursor-node-and-rectangle).
 
-After them: byte 1032 is `chat_completion` (Kiln.Ui's own chat Tab completion, refused from native plugins), and
-`subscribe_pointer_press` at 1040 (0.2.0-dev.30; the table is 1048 bytes; check `header.size` and the pointer):
+After them: byte 1032 is `chat_completion` (Kiln.Ui's own chat Tab completion, refused from native plugins),
+`subscribe_pointer_press` at 1040 (0.2.0-dev.30; check `header.size` and the pointer) and `chat_search` at 1048
+(0.2.0-dev.30.3, Kiln.Ui's own Ctrl+R search, refused from native plugins: [below](#chat-searchs-slot-internal-github-issue-44);
+the table is 1056 bytes). `subscribe_pointer_press`:
 `fn(const KilnUiPointerPress*)` once per left or right press over the game window (its raw record and its window message
 are paired), on the window thread, only while Kiln does not capture input and the cursor is not over a Kiln panel; an
 answer of `KILN_UI_POINTER_TAKE` keeps the press from the game, its release always reaches it. A fault in `fn` removes the
 subscription. The core's `kiln.ui.inventory` (slot clicks, `kiln_ui_inventory.h`) is its first user.
+
+## Chat search's slot (internal, GitHub issue 44)
+
+One slot after `subscribe_pointer_press`: `chat_search` at byte offset 1048 (0.2.0-dev.30.3; the table was 1056 bytes with
+it, 1048 before; the pointer tail follows it). First built by bisdat (pull request 106). It is Kiln.Ui's transport for Ctrl+R reverse search of the chat
+history ([chat-history.md](../chat-history.md#ctrlr-reverse-search-issue-44-phase-1c)), **not** an API: a call from a
+native plugin is refused (`KILN_ERR_UNAVAILABLE`), and `KilnUiChatSearch`'s layout (10572 bytes) may change with
+Kiln.Ui; a call whose `size` is smaller is refused (`KILN_ERR_INVALID_ARGUMENT`). It answers only while
+`ui.chatHistory` is on and the chat field's rectangle is verified (the sigdb feature `chat.ui.completion` and the
+rectangle constants resolved); otherwise `KILN_ERR_UNAVAILABLE` and Ctrl+R stays the game's. The game's UI thread owns
+the search and the one replace of the editor; the window thread only queues keys and characters, and the render thread
+only gets copies:
+- operation 1: a snapshot. `active` (search is open), `suppressed` (Tab completion held off after an accepted line),
+  the query (`query`, `query_len`, at most 256 bytes), the `field` and the editor `revision` the search started on,
+  the field's rectangle (`x`, `y`, `width`, `height`), the number of matches (`total`), the selected match
+  (`selected`), up to ten rows from match `first` (`count`, `lines`, NUL-padded UTF-8), and in `index` an opaque
+  token for this list of matches: it changes with every query edit and every new search. Refused while the field or
+  its rectangle no longer matches the search;
+- operation 2: a clicked row. `index` is the absolute match, `field` and `revision` come from the snapshot and
+  `selected` carries the snapshot's token. A stale field, revision or token is refused, and the click is checked again
+  on the UI thread after that frame's queued keys, so it never picks a line from a list the player no longer sees. An
+  accepted row goes into the editor with `EditSetText`, unsent, as Enter does;
+- operation 3: Kiln.Ui's handshake that turns on Ctrl+R. Without it (an older Kiln.Ui.dll) Ctrl+R stays the game's.
+
+No text is logged or kept: the search reads the history already in memory (which never holds the lines the
+sensitive-command filter drops), the query lives only while the search is open, and the one log line (an accept refused
+by the editor checks) names no text.
+
+## The pointer and drag and drop (0.2.0-dev.30.3)
+
+Three slots after `chat_search`, a size-guarded tail (GitHub issue 113): `pointer` at byte 1056, `drag_source` at 1064,
+`drop_target` at 1072; the table is 1080 bytes (1056 before). Check `header.size >= offsetof(KilnUiApi, x) + sizeof(void*)`
+and the pointer for each. They are Dear ImGui calls (`native/services/ui/draw_slots_pointer.inl`, shared with the UI
+preview's shim), so like every drawing slot they work only inside a frame callback and answer false there otherwise.
+Managed: `UiDraw.Pointer`, `ButtonHeld`, `DragSource`, `DropTarget` ([ui.md](../ui.md#the-pointer-held-buttons-and-drag-and-drop-since-020-dev303)).
+
+- `bool pointer(KilnUiPointer* out)`: set `out->size` (24 bytes: `size, flags, x, y, held, reserved`) first. `flags`:
+  `KILN_UI_POINTER_VALID` (x and y hold the pointer; ImGui has seen the cursor), `KILN_UI_POINTER_DRAGGING` (a
+  `drag_source` payload of any kind is in flight). `held`: bit `1 << KILN_UI_MOUSE_*` per button held (1 left, 2 right,
+  4 middle). False, nothing written: outside a frame, `out` NULL or smaller than 24 bytes.
+- `bool drag_source(KilnStr kind, const void* payload, size_t len, KilnStr preview)`: after a widget
+  (`BeginDragDropSource` with `SourceAllowNullID`, so text and images work too). True on the frames it is dragged; each
+  such frame sets the payload (copied, at most `KILN_UI_DRAG_PAYLOAD_MAX` 4096 bytes; an empty one is allowed) and draws
+  `preview` by the pointer (empty: no tooltip). A drag whose source stops being drawn while the button is held goes on
+  with the last payload until the release (Dear ImGui draws "..." by the pointer); released over nothing, it ends and
+  nothing is delivered.
+- `bool drop_target(KilnStr kind, void* out, size_t capacity, size_t* len)`: after a widget (`BeginDragDropTarget`,
+  `AcceptDragDropPayload` without `AcceptBeforeDelivery`). True once, on the frame a payload of `kind` is released over the
+  widget: up to `capacity` bytes go into `out`, `*len` (when not NULL) is the whole length (`*len > capacity`: it was
+  cut). The drop is not offered again, so pass `KILN_UI_DRAG_PAYLOAD_MAX` bytes and nothing is ever cut; `out` NULL
+  with `capacity` 0 reports only the length.
+- A kind is 1..32 bytes (`KILN_UI_DRAG_KIND_MAX`), no NUL, not starting with `_` (Dear ImGui's own); anything else is
+  refused (false). Native kinds are shared by every caller (put your plugin's name in them, and never use
+  `"k"` and 16 hex digits); Kiln.Ui passes `"k"` and the FNV-1a 64 of `"<mod id>\n<kind>"` in hex, so each managed mod's
+  kinds are its own. The hash keeps mods from meeting by accident; it is no security boundary (any code can compute
+  another mod's kind).
+- Coordinates are the overlay's pixels, the space of every drawing slot. Kiln feeds Dear ImGui the game window's client
+  pixels, the same pixels as long as the window's client area and the swapchain match (they always have, so far).
 
 ## The overlay's drawing off: kiln.json and a session that turned it off (0.2.0-dev.29.18)
 
@@ -249,3 +309,11 @@ No table change. Player side: [ui.md](../ui.md#frame-generation-mods-and-drawing
   tool added to the device while it was made, such as frame generation's present queue) whose family has graphics;
   `queue_family` is that queue's own family, never a guess. A queue Kiln did not see the game get is looked up among the
   queues the game asked for when it made its device, so the game's own counts wherever it got it.
+
+## kiln.render v2: outlines (0.2.0-dev.30.3)
+`kiln.render` (registered by kiln-ui.dll next to kiln.ui) appends five functions after `image`: `outline`,
+`outline_info`, `outline_remove`, `outline_clear`, `outline_status`; the version is 2. A reader checks
+`header.size >= offsetof(KilnRenderApi, outline_status) + sizeof(void*)`. They outline an entity's model with the
+game's highlight groups Group1 and Group2, which Kiln colours itself. Managed: `Ui.World.Outline`, `WorldOutline`,
+`OutlineOptions` (Kiln.Ui). Capability `ui.world_outline`. Usage and the C table: [../render.md](../render.md#outlines-since-020-dev303);
+RE: [../../re/client-render.md](../../re/client-render.md#highlight-groups-outlines).

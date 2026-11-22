@@ -265,10 +265,79 @@ pub fn is_hidden_name(name: &str) -> bool {
     })
 }
 
-/// Station tank water: the game's "Water" item is named Food_T1_raw_hydration_Water_Pouch_Filled_DEPRECATED (item id
-/// 4066550441), and the game still shows it as a crafting station's tank water ("Water 92 / 2", owner pass 2026-11-20)
-/// although the 2026-11 catalog's recipes never name it (their inputs are items and categories only). Never hidden.
+/// The game's old "Water" item, Food_T1_raw_hydration_Water_Pouch_Filled_DEPRECATED (item id 4066550441): a leather canteen,
+/// an item like any other. The recipe screen borrows its name and icon for a recipe's water row ("Water 92 / 2"), but that
+/// row is the recipe's `waterCharges`, not this item: no game recipe takes the item, and a recipe input naming it takes the
+/// item, never a station's tank (netjunk, 0.2.0-dev.30.2). Hidden like the game's other old entries since 0.2.0-dev.30.3;
+/// kiln lint KL408 points a recipe input naming it to the recipe's water ([`TANK_STATIONS`]).
 pub const STATION_WATER: &str = "Food_T1_raw_hydration_Water_Pouch_Filled_DEPRECATED";
+
+/// The game's crafting stations with a water tank: `(workshop id, tank charges, name)`. A recipe's water
+/// (`RecipeInfo.waterCharges`, a definition's `"water"`: charges a craft, 64 units each) is paid at the start of a craft:
+/// a factory station pays it from its own tank (`Fuel`) and nothing else, a player's craft from the crafter and the base's
+/// wells and barrels (docs/re/stations.md section 3.6). The six factory templates with `Fuel` + `FuelSetup` of the
+/// 2026-11 game (`maxFuelCharges`; T1_Seedling_Factory, T3_Oven_Factory, T2_Fireplace_Factory, T4_Laboratory_Factory,
+/// T6_coffeemaker_brewer_Factory, T4_Honey_Factory), by their `Crafting.workshopId`. Pack Studio has a copy
+/// (launcher/src/api/stationWater.ts, checked against this one by unit/station-water.test.ts).
+pub const TANK_STATIONS: &[(u32, u32, &str)] = &[
+    (0xba67134f, 150, "Seedbed"),
+    (0x1ee9f0bf, 100, "Oven"),
+    (0x39fbd98f, 100, "Cooking Station"),
+    (0x20b86c20, 100, "Laboratory"),
+    (0x6b8247d6, 100, "Coffee Brewer"),
+    (0x269a27a7, 50, "Beehive"),
+];
+
+/// The game's factory stations without a water tank: `(workshop id, name)`. Their start pays a recipe's water from the
+/// station alone, so a recipe there that asks for water never starts. Every other workshop is a crafting menu (the
+/// player's own, the Workbench, the Kitchen, the NPCs), where a craft takes water from the crafter and the base, as the
+/// game's own Kitchen and Alchemist recipes do. 2026-11 game: the `FactoryStation` templates without `Fuel`.
+pub const DRY_STATIONS: &[(u32, &str)] = &[
+    (0x6ad05fce, "Butter Churn"),
+    (0xd08b9300, "Alchemy Station"),
+    (0x485ec29c, "Blast Furnace"),
+    (0x34564abc, "Force Generator"),
+    (0xa6ebcde3, "Roaster"),
+    (0x8dca2c49, "Forge"),
+    (0x865085ea, "Infusion Altar"),
+    (0xe26134b5, "Spinning Wheel"),
+    (0x3a3cc728, "Loom"),
+    (0x7d96fde8, "Seafood Grill"),
+    (0xa4b9eaa5, "Tanning Station"),
+    (0x847eab53, "Kiln"),
+    (0x2546ae49, "Charcoal Kiln"),
+    (0x1abf2d27, "Ectoplasm Press"),
+    (0xf5aab50a, "Smelter"),
+    (0xd4796c9a, "Spinning Machine"),
+    (0x73306967, "Hand Spindle"),
+    (0x0a921c7b, "Farmbed"),
+    (0x056d94f8, "Grinding Stones"),
+    (0x3b51fb95, "Coloring Station"),
+    (0x1abf8143, "Table Saw"),
+    (0x6b95dc33, "Drying Rack"),
+    (0x7251e0d8, "Mill"),
+];
+
+/// What a workshop does with a recipe's water.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StationWater {
+    /// A factory station with a tank of this many charges.
+    Tank { charges: u32, name: &'static str },
+    /// A factory station without a tank: a recipe there that asks for water never starts.
+    NoTank { name: &'static str },
+    /// A crafting menu (or a workshop this table does not know): the crafter's and the base's water.
+    Menu,
+}
+
+pub fn station_water(workshop: u32) -> StationWater {
+    if let Some(&(_, charges, name)) = TANK_STATIONS.iter().find(|s| s.0 == workshop) {
+        StationWater::Tank { charges, name }
+    } else if let Some(&(_, name)) = DRY_STATIONS.iter().find(|s| s.0 == workshop) {
+        StationWater::NoTank { name }
+    } else {
+        StationWater::Menu
+    }
+}
 
 /// Adds the names a catalog field holds to `used`: a name, a list of names, or a list of stacks (`{"item": name}`).
 pub fn note_used(used: &mut std::collections::HashSet<String>, field: Option<&Value>) {
@@ -296,11 +365,11 @@ pub fn note_used(used: &mut std::collections::HashSet<String>, field: Option<&Va
 }
 
 /// The names the game's own data still uses, so a hidden-looking name among them stays listed (and gets no KL407):
-/// recipe inputs, outputs and stations, the members of recipe input categories, and [`STATION_WATER`]. On the 2026-11
-/// catalog this keeps 7 of the 63 hidden-looking items (the WIP party hats, confetti mortars and Pillbug bait, the
-/// Improved Laboratory) plus the water.
+/// recipe inputs, outputs and stations, and the members of recipe input categories. On the 2026-11 catalog this keeps 7
+/// of the 63 hidden-looking items (the WIP party hats, confetti mortars and Pillbug bait, the Improved Laboratory). Not
+/// [`STATION_WATER`] (hidden since 0.2.0-dev.30.3: it is not the tank).
 pub fn used_names(cat: &Catalog) -> std::collections::HashSet<String> {
-    let mut used = std::collections::HashSet::from([STATION_WATER.to_string()]);
+    let mut used = std::collections::HashSet::new();
     for e in cat.sections.get("recipes").into_iter().flatten() {
         for k in ["inputs", "outputs", "workshopName"] {
             note_used(&mut used, e.get(k));

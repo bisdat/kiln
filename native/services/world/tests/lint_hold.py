@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
 """What kiln.world runs while it holds the engine's write gate (a compare-exchange's hold: ecs_write_hold.cpp, and the
-entity lookups it calls in ecs_lookup.cpp/.h) must not reach a wait, a lock, an allocation, a log or the KilnApi: the
+entity lookups it calls in ecs_lookup.cpp/.h; a named service's hold: named_service_hold.cpp) must not reach a wait, a lock, an allocation, a log or the KilnApi: the
 GameServer thread spins behind a held Scene word, so any of these inside the hold can stall the server. Every loop over
 engine data there has a fixed bound (the id probe's, or the component's size, checked before the gate); a `while` or
 `for (;;)` is reported for review. Checks the code with comments and string literals stripped. Run by tests/run.sh."""
@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-FILES = ['ecs_write_hold.cpp', 'ecs_lookup.cpp', 'ecs_lookup.h']
+FILES = ['ecs_write_hold.cpp', 'ecs_lookup.cpp', 'ecs_lookup.h', 'named_service_hold.cpp']
 FORBIDDEN = {
     r'\bSleep(Ex)?\b|\bSwitchToThread\b|\bYieldProcessor\b|\bWaitFor\w*\b|\bWaitOnAddress\b|\bthis_thread\b': 'a wait',
     r'\bEnterCriticalSection\b|\bAcquireSRWLock\w*\b|\bstd::(recursive_|timed_|shared_)?mutex\b|\block_guard\b|'

@@ -32,6 +32,7 @@
     <ProjectReference Include="../../../managed/services/Kiln.Players/Kiln.Players.csproj" Private="false" ExcludeAssets="runtime" />
     <ProjectReference Include="../../../managed/services/Kiln.Rules/Kiln.Rules.csproj" Private="false" ExcludeAssets="runtime" />
     <ProjectReference Include="../../../managed/services/Kiln.Ui/Kiln.Ui.csproj" Private="false" ExcludeAssets="runtime" />
+    <ProjectReference Include="../../../managed/services/Kiln.ModValues/Kiln.ModValues.csproj" Private="false" ExcludeAssets="runtime" />
     <ProjectReference Include="../../../managed/services/Kiln.Queries/Kiln.Queries.csproj" Private="false" ExcludeAssets="runtime" />
     <ProjectReference Include="../../../managed/services/Kiln.Content/Kiln.Content.csproj" Private="false" ExcludeAssets="runtime" />
     <ProjectReference Include="../../../managed/services/Kiln.Build/Kiln.Build.csproj" Private="false" ExcludeAssets="runtime" />
@@ -44,6 +45,9 @@
     <ProjectReference Include="../../../managed/services/Kiln.Quests/Kiln.Quests.csproj" Private="false" ExcludeAssets="runtime" />
     <!-- 06a-wraps.waterworks: the typed program view Ecs.Programs.FuelSetup and Ecs.Get -->
     <ProjectReference Include="../../../managed/Kiln.Game/Kiln.Game.csproj" Private="false" ExcludeAssets="runtime" />
+    <!-- 11-replication-observe: the network inspector's checks (Dev28Replication.cs) -->
+    <ProjectReference Include="../../../managed/services/Kiln.Replication/Kiln.Replication.csproj" Private="false" ExcludeAssets="runtime" />
+    <ProjectReference Include="../../../managed/services/Kiln.Network/Kiln.Network.csproj" Private="false" ExcludeAssets="runtime" />
     <None Include="kiln.mod.json" CopyToOutputDirectory="PreserveNewest" />
     <Compile Include="../material-pools-test/PoolProof.cs" Link="MaterialPools/PoolProof.cs" />
     <!-- 06a-define.hosted's boot reservation (ClientPassFuelQuery, Dev28ProgramWraps.cs) -->

@@ -72,8 +72,6 @@ public static partial class Abilities
 
     internal const string NotRemovedText = "the entity has no such buff (the game's removeBuff removed nothing)";
 
-    private static bool _buffProgramReady, _removeProgramReady;
-
     /// <summary>Applies a buff or debuff to an entity through the game's own applyBuff native (the path the game's
     /// programs use: the buff entity, its program, BuffNetworkData for clients). <paramref name="buff"/> is the
     /// BuffType's GUID (its id is FNV-1a of it: Abilities.IdOf(buff)); <paramref name="duration"/> null = the buff's
@@ -101,15 +99,27 @@ public static partial class Abilities
         }
     }
 
-    private static void EnsureBuffProgram()
+    private static void EnsureBuffProgram() =>
+        EnsureProgram(static () => Programs.Info(Programs.IdOf(BuffProgram)) is not null,
+            static () => RegisterKilnProgram(BuildBuffProgram()), "ApplyBuff");
+
+    // Kiln's program: not the gated mod call. True = it waits (the world's registry is not loaded yet).
+    private static bool RegisterKilnProgram(byte[] blob)
     {
-        if (_buffProgramReady && Programs.Info(Programs.IdOf(BuffProgram)) is not null) return;
-        if (Programs.Info(Programs.IdOf(BuffProgram)) is null)
-        {
-            Programs.RegisterCore(BuildBuffProgram(), out var waiting);  // Kiln's program: not the gated mod call
-            if (waiting) throw new InvalidOperationException("ApplyBuff: the game's ImpactRegistry is not loaded yet");
-        }
-        _buffProgramReady = true;
+        Programs.RegisterCore(blob, out var waiting);
+        return waiting;
+    }
+
+    /// <summary>Kiln's own programs (ApplyBuff's, RemoveBuff's) in the running world's ImpactRegistry. Asked of the live
+    /// registry at every call and never remembered: a world change empties the registry, and the next world's may sit
+    /// at the same address (#108). A registration after a world change puts the program back (kiln.abilities keeps
+    /// it), so it succeeds; while the next world is still loading it waits and the call says so.</summary>
+    internal static void EnsureProgram(Func<bool> inRegistry, Func<bool> register, string api)
+    {
+        if (inRegistry()) return;
+        if (register()) throw new InvalidOperationException($"{api}: the game's ImpactRegistry is not loaded yet");
+        if (!inRegistry())
+            throw new InvalidOperationException($"{api}: Kiln's program was registered but this world's ImpactRegistry does not list it");
     }
 
     private static byte[] BuildBuffProgram()
@@ -380,16 +390,9 @@ public static partial class Abilities
         r.Done.TrySetResult(new BuffRemoveResult(r.Target, r.Buff, removed, reason));
     }
 
-    private static void EnsureRemoveProgram()
-    {
-        if (_removeProgramReady && Programs.Info(Programs.IdOf(RemoveBuffProgram)) is not null) return;
-        if (Programs.Info(Programs.IdOf(RemoveBuffProgram)) is null)
-        {
-            Programs.RegisterCore(BuildRemoveProgram(), out var waiting);  // Kiln's program: not the gated mod call
-            if (waiting) throw new InvalidOperationException("RemoveBuff: the game's ImpactRegistry is not loaded yet");
-        }
-        _removeProgramReady = true;
-    }
+    private static void EnsureRemoveProgram() =>
+        EnsureProgram(static () => Programs.Info(Programs.IdOf(RemoveBuffProgram)) is not null,
+            static () => RegisterKilnProgram(BuildRemoveProgram()), "RemoveBuff");
 
     internal static byte[] BuildRemoveProgram()
     {

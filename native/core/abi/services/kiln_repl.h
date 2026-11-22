@@ -52,17 +52,25 @@ enum { KILN_REPL_SEND = 1, KILN_REPL_RECEIVE = 2 };
 enum {
     KILN_REPL_PEER_FAKE = 1u,  /* a loopback fake machine (lab) */
     KILN_REPL_PEER_BOUND = 2u, /* ... with a kiln.net lab peer bound to it: `peer` is that lab peer */
+    KILN_REPL_PEER_LOCAL = 4u, /* machine 0 of a hosted world: this process's own client (since 0.2.0-dev.31) */
+    KILN_REPL_PEER_RECEIVED = 8u, /* a game client's receive counters: what this client received from its server
+                                     (`peer` 0; stats_enable / peer_stats on the client world's thread; since 0.2.0-dev.31) */
 };
 
-typedef struct KilnReplPeerStats { /* per machine and channel, since the first enable */
+/* Per machine and channel, since the first stats_enable of any owner (the counters, `dropped` too, start at 0 then). A
+ * machine's rows start over when the peer in its slot changes (a reused slot is a new peer) and when the world stops;
+ * the peer change is seen at the next Pre, so a slot taken over within one frame has that frame counted for neither
+ * peer. Counted by the stats hooks on the game's job threads, each (machine, channel) in memory of its own; read in Pre. */
+typedef struct KilnReplPeerStats {
     uint32_t size;                 /* set by the caller: sizeof(KilnReplPeerStats) */
     uint32_t peer;                 /* full peer handle (generation | machine); see "Machines and peers" */
     uint8_t channel;               /* 4 client, 5 prediction */
     uint8_t flags;                 /* KILN_REPL_PEER_* */
     uint8_t pad[6];
-    uint64_t frames, messages, bytes;
+    uint64_t frames;               /* send callbacks (one batch per machine, channel and frame) */
+    uint64_t messages, bytes;      /* messages the session accepted and their bytes (every message type) */
     uint64_t refused;              /* messages the session refused at allocation (batch count - batch sent) */
-    uint64_t creates, updates, destroy_lists, destroyed_ids;
+    uint64_t creates, updates, destroy_lists, destroyed_ids; /* of the accepted messages; ids of both lists */
     uint64_t unchanged;            /* writer skips with nothing changed */
     uint64_t too_big;              /* writer skips because the message was over the channel's maximum */
     uint64_t acks, resets, dropped; /* ack messages, reset requests, records the rings dropped */
@@ -78,13 +86,32 @@ typedef struct KilnReplComponent {
     const uint8_t* data;
 } KilnReplComponent;
 
+/* KilnReplWatchEvent.kind */
+enum {
+    KILN_REPL_KIND_CREATE = 2,    /* a create message: the components as the peer will create the entity */
+    KILN_REPL_KIND_UPDATE = 3,    /* an update message: the components' full values (never a delta) */
+    KILN_REPL_KIND_DESTROYED = 4, /* a destroy list named the entity as destroyed (its list A); no components */
+    KILN_REPL_KIND_ENDED = 5,     /* the watch is over (`reason`); the last event of a watch; no components */
+};
+/* KilnReplWatchEvent.reason (kind KILN_REPL_KIND_ENDED) */
+enum {
+    KILN_REPL_END_DESTROYED = 1,     /* the entity was destroyed (after its KILN_REPL_KIND_DESTROYED events) */
+    KILN_REPL_END_ID_REUSED = 2,     /* the id now belongs to an entity of another template */
+    KILN_REPL_END_PEER_LEFT = 3,     /* the one peer the watch was for left (its machine slot changed) */
+    KILN_REPL_END_WORLD_STOPPED = 4, /* the server world stopped */
+};
+
 typedef struct KilnReplWatchEvent { /* tick thread (send) / main thread (receive), next Pre; valid during the call */
     uint32_t size;
-    uint32_t peer;
-    uint8_t direction, channel, kind /* 2 create, 3 update, 4 destroyed */, gap /* 1: records were dropped before it */;
-    uint32_t entity, tick, seq, baseline_tick, payload_bytes;
-    uint16_t count, pad;
-    uint32_t pad2;
+    uint32_t peer;                 /* 0 for KILN_REPL_KIND_ENDED */
+    uint8_t direction, channel, kind /* KILN_REPL_KIND_* */, gap /* 1: records were dropped before it */;
+    uint32_t entity, tick, seq;
+    uint32_t baseline_tick;        /* update: the tick of the state it was coded against (0: the template) */
+    uint32_t payload_bytes;        /* create, update: the message's payload bytes (after its header) */
+    uint16_t count;                /* components at `components` */
+    uint8_t peer_flags;            /* KILN_REPL_PEER_* of `peer` (was pad before dev.31) */
+    uint8_t pad;
+    uint32_t reason;               /* KILN_REPL_END_* for KILN_REPL_KIND_ENDED, else 0 (was pad2 before dev.31) */
     const KilnReplComponent* components;
 } KilnReplWatchEvent;
 
@@ -140,19 +167,70 @@ typedef struct KilnReplLoopbackStats { /* since the fakes were added (counters s
     uint32_t slot_mask;            /* the world's mask of player slots being replicated, now */
 } KilnReplLoopbackStats;
 
+/* kiln.repl.lab hook_cost: kiln.repl's observer code (everything its hooks do besides calling the game) in nanoseconds, by hook,
+ * over a window that starts at a call with reset = true; the game's send step and frame interval over the same window
+ * (the cost's yardsticks); heap allocations made inside observer code (operator new in kiln-repl.dll; 0 by design). */
+typedef struct KilnReplHookCost {
+    uint32_t size;                 /* set by the caller: sizeof(KilnReplHookCost) */
+    uint32_t frames;               /* send steps in the window */
+    uint64_t window_ns;
+    uint64_t send_step_mean_ns, send_step_p50_ns, frame_interval_mean_ns, frame_interval_p50_ns;
+    uint64_t callback_calls, callback_ns; /* the stats/watch SendCallback hook, every machine and channel */
+    uint64_t writer_calls, writer_ns;     /* the EntityWriter hook */
+    uint64_t delta_calls, delta_ns;       /* the DeltaWriter hook (copies only a watched entity) */
+    uint64_t tick_calls, tick_ns;         /* the AckReceive and EcsReset hooks (tick thread) */
+    uint64_t allocations;                 /* heap allocations inside observer code (all hooks, also the harness's) */
+    uint64_t watch_records, watch_dropped; /* watch records written / dropped by full rings */
+} KilnReplHookCost;
+
 typedef struct KilnReplApi {
     KilnServiceHeader header;      /* { sizeof(KilnReplApi), KILN_REPL_VERSION } */
     uint32_t(KILN_CALL* capabilities)(void); /* KILN_REPL_CAP_*; any thread */
-    /* Reference-counted per owner: the first enable installs the stats hooks and zeroes the counters, the last disable
-     * (or owner revoke) removes them. Tick thread (server) / main thread (client). */
+    /* Reference-counted per owner (an owner holds one reference; enabling twice is once): the first enable of any owner
+     * installs the stats hooks (SendCallback, EntityWriter, AckReceive, EcsReset) and zeroes the counters, the last
+     * disable (or the owner's revoke) removes them. On the server world's thread (the tick thread; on a hosting game client,
+     * the thread its server world steps on; KILN_ERR_WRONG_THREAD elsewhere).
+     * On a game client's main thread (the client world's thread; KILN_REPL_CAP_CLIENT) the same two functions hold and read
+     * the client's own receive counters instead: every message of both channels the client's session hands the game, in
+     * rows flagged KILN_REPL_PEER_RECEIVED (frames = server ticks seen, messages, bytes, creates, updates, destroy lists and
+     * ids; unchanged, too_big, refused, acks and resets stay 0; dropped = the receive watches' ring drops). Separate holders,
+     * separate counters (from 0 at the first holder and at each new client world); the hook is the receive watches' one
+     * (ClientStore). KILN_ERR_UNAVAILABLE there: repl.client is off, or kiln.hooks refused the hook.
+     * KILN_ERR_UNAVAILABLE: repl.observe is off, or kiln.hooks refused a hook (the owner then holds nothing);
+     * KILN_ERR_INVALID_ARGUMENT: owner 0, or 64 owners hold it already. */
     KilnResult(KILN_CALL* stats_enable)(KilnOwner owner, bool on);
+    /* One row per machine and channel with anything counted; *count = the rows (also with KILN_ERR_BUFFER_TOO_SMALL,
+     * when `cap` is too small; `out` may then be NULL). Each out[i].size is set by the caller. On the server world's
+     * thread, as stats_enable. KILN_ERR_UNAVAILABLE: repl.observe is off. */
     KilnResult(KILN_CALL* peer_stats)(KilnReplPeerStats* out, uint32_t cap, uint32_t* count); /* KILN_ERR_BUFFER_TOO_SMALL */
+    /* What `peer_or_all` (KILN_REPL_ALL_MACHINES, or a peer handle as peer_stats names it, a fake's too) is sent of
+     * entity `e` (direction KILN_REPL_SEND, a server or a hosted world): `fn` gets one event per message that carries
+     * the entity, with its full component values as the game coded them (the snapshot, not the delta), then
+     * KILN_REPL_KIND_DESTROYED for a destroy list that names it, and KILN_REPL_KIND_ENDED as its last event; after ENDED
+     * the watch's slot is given back by itself (remove() is not needed then, and answers KILN_ERR_NOT_FOUND once the
+     * slot is gone). Events come on the server world's thread in the next Pre. While a watch exists the watch hooks are installed (EntityWriter,
+     * DeltaWriter, SendCallback); a watch copies only its own entity's components. At most 64 watches. Tick thread.
+     * KILN_REPL_RECEIVE (a game client, since 0.2.0-dev.31; KILN_REPL_CAP_CLIENT): what this client receives of `e`, from
+     * the game's own decode of the client channel; `peer_or_all` is ignored; events on the game's main thread at the
+     * client world's next Pre; at most 16; call it on the main thread (KILN_ERR_WRONG_THREAD otherwise).
+     * KILN_ERR_INVALID_ARGUMENT: entity 0, no fn, a bad direction, a peer that is not connected, or no free watch;
+     * KILN_ERR_UNAVAILABLE: repl.observe (send) or repl.client (receive) is off, or its hooks could not be installed. */
     KilnResult(KILN_CALL* watch)(KilnOwner owner, KilnEntity e, uint32_t peer_or_all, uint32_t direction,
                                  KilnReplWatchFn fn, void* user, KilnHandle* out);
-    KilnResult(KILN_CALL* remove)(KilnHandle h); /* any handle this service returned */
+    /* Any handle this service returned; any thread. A removed watch gets no event that starts after the call.
+     * KILN_ERR_INVALID_ARGUMENT: h is 0; KILN_ERR_NOT_FOUND: not a live handle of this service (an ended watch's slot
+     * may already be gone). */
+    KilnResult(KILN_CALL* remove)(KilnHandle h);
     /* The registry's facts about a component, from the live world (cached at its first Pre). Any thread.
      * KILN_ERR_NOT_FOUND: no component of that hash; KILN_ERR_UNAVAILABLE: no world seen yet. */
     KilnResult(KILN_CALL* component_info)(uint32_t hash, KilnReplComponentInfo* out);
+    /* Since 0.2.0-dev.31: writes everything `peer` is sent for `seconds` (1..600) as JSON lines (tools/replinspect/README.md)
+     * into the file `path` names in kiln/logs: a plain file name (letters, digits, '.', '_', '-'; empty: one is made up,
+     * repl-<peer>-<utc>.jsonl), never a path, never over a file that is there; at most 256 MiB. Ends early when `owner`
+     * goes, the peer leaves or the world stops. One capture at a time. On the server world's thread.
+     * KILN_ERR_INVALID_ARGUMENT: owner 0, a bad name, peer or length, a peer that is not connected, a file that cannot be
+     * made or is there, or a capture runs already; KILN_ERR_UNAVAILABLE: repl.observe is off, no world yet, or the hooks
+     * could not go in (then no file is made). */
     KilnResult(KILN_CALL* capture)(KilnOwner owner, uint32_t peer, uint32_t seconds, KilnStr path);
 
     /* ---- lab: the loopback harness; since 0.2.0-dev.28; check header.size ---- */
@@ -174,6 +252,245 @@ typedef struct KilnReplApi {
     KilnResult(KILN_CALL* lab_decoded)(uint32_t machine, KilnEntity entity, uint32_t hash, uint8_t* out, uint32_t cap,
                                        uint32_t* len, uint32_t* tick);
 } KilnReplApi;
+
+/* ---- kiln.repl.lab (since 0.2.0-dev.31): more of the lab harness, in a table of its own ----
+ * Published by the same DLL as kiln.repl, on servers. Every function answers KILN_ERR_UNAVAILABLE unless the harness
+ * may run (kiln.json's policy "any" and kiln.net's lab port, as kiln.repl's lab functions), and KILN_ERR_WRONG_THREAD
+ * off the tick thread. The table only grows at its end; readers check header.size. */
+#define KILN_REPL_LAB_SERVICE "kiln.repl.lab"
+#define KILN_REPL_LAB_VERSION 1u
+
+typedef struct KilnReplLabApi {
+    KilnServiceHeader header;      /* { sizeof(KilnReplLabApi), KILN_REPL_LAB_VERSION } */
+    /* The payload (the bytes after the message header) of the newest message of `kind` (KILN_REPL_KIND_CREATE or
+     * _UPDATE) that fake `machine` was sent for `entity` on its client channel, and that message's tick. Same buffer
+     * rules as kiln.repl's lab_decoded. KILN_ERR_NOT_FOUND: no such message since the fakes were added. */
+    KilnResult(KILN_CALL* payload)(uint32_t machine, KilnEntity entity, uint32_t kind, uint8_t* out, uint32_t cap,
+                                   uint32_t* len, uint32_t* tick);
+    /* What kiln.repl's own hook code costs (measured on lab servers only), since the last call with reset = true;
+     * the first call starts the window. KILN_ERR_INVALID_ARGUMENT: out is NULL or out->size is too small. */
+    KilnResult(KILN_CALL* hook_cost)(KilnReplHookCost* out, bool reset);
+} KilnReplLabApi;
+
+/* ---- kiln.repl.net (since 0.2.0-dev.31): what mods add to the game's replication, in a table of its own ----
+ * Published by the same DLL as kiln.repl (servers, hosted worlds and game clients; capabilities() says what works in
+ * this process). Sidecar tracking (which entities each peer was sent and lost, for Kiln's own channel 12), per-peer
+ * snapshot filters and the item remap (the bytes one peer is sent of a component), touch (re-send an entity without
+ * changing it), message hooks on the game's other channels and the game's message codec. The dossier's chapter 15.
+ * Threads: registration on the tick thread (server) / main thread (client); filter functions run on the game's
+ * replication job threads (any thread, in parallel per machine and channel, no allocation, no tick-thread API).
+ * The table only grows at its end; readers check header.size. */
+#define KILN_REPL_NET_SERVICE "kiln.repl.net"
+#define KILN_REPL_NET_VERSION 1u
+
+/* kiln.repl.net capabilities() (the bits are frozen) */
+enum {
+    KILN_REPL_NET_CAP_TRACK = 1u << 0,            /* track(KILN_REPL_SEND), peer_entities: server or hosted world */
+    KILN_REPL_NET_CAP_CLIENT_TRACK = 1u << 1,     /* track(KILN_REPL_RECEIVE): a game client's client channel */
+    KILN_REPL_NET_CAP_FILTER = 1u << 2,           /* filter_add (sigdb feature repl.filter) */
+    KILN_REPL_NET_CAP_TOUCH = 1u << 3,            /* touch (repl.touch + kiln.world's write_other) */
+    KILN_REPL_NET_CAP_REMAP = 1u << 4,            /* remap_set (repl.filter) */
+    KILN_REPL_NET_CAP_MESSAGES_SEND = 1u << 5,    /* message_hook(KILN_REPL_SEND), message_inject */
+    KILN_REPL_NET_CAP_MESSAGES_RECEIVE = 1u << 6, /* message_hook(KILN_REPL_RECEIVE) (repl.messages.server / .client) */
+    KILN_REPL_NET_CAP_SCHEMA = 1u << 7,           /* schema_* (repl.schema) */
+};
+
+/* ---- tracking (sidecars) ---- */
+enum {
+    KILN_REPL_TRACK_CREATED = 1,   /* the peer was sent a create of the entity; tick = its generation for that peer */
+    KILN_REPL_TRACK_DESTROYED = 2, /* a destroy list named it as destroyed (list A) */
+    KILN_REPL_TRACK_LEFT = 3,      /* a destroy list named it as out of the peer's view (list B) */
+    KILN_REPL_TRACK_PEER_GONE = 4, /* the machine's peer changed or the world stopped: forget everything of that peer */
+    KILN_REPL_TRACK_GAP = 5,       /* records of that peer were lost (a full ring): re-read peer_entities */
+};
+typedef struct KilnReplTrackEvent {
+    uint32_t peer;                 /* full peer handle (kiln_repl.h "Machines and peers"); 0 on a game client (the server) */
+    uint32_t entity;               /* 0 for PEER_GONE and GAP */
+    uint32_t tick;                 /* the message's server tick (CREATED: the create's tick = the entity's generation) */
+    uint8_t kind;                  /* KILN_REPL_TRACK_* */
+    uint8_t peer_flags;            /* KILN_REPL_PEER_* */
+    uint8_t machine;               /* machine index (server); 0 on a client */
+    uint8_t pad;
+} KilnReplTrackEvent;
+/* One call per Pre with the events of the last frame, oldest first (tick thread / client main thread); valid during it. */
+typedef void(KILN_CALL* KilnReplTrackFn)(const KilnReplTrackEvent* events, uint32_t count, void* user);
+
+typedef struct KilnReplPeerEntity {
+    uint32_t entity;
+    uint32_t create_tick;          /* the generation tracking saw; 0 = created before tracking began */
+    uint8_t acked;                 /* the peer acknowledged its create */
+    uint8_t pad[3];
+} KilnReplPeerEntity;
+
+/* ---- filters ---- */
+enum { KILN_REPL_CLIENT_CHANNEL = 1u, KILN_REPL_PREDICTION_CHANNEL = 2u }; /* filter_add channels */
+typedef struct KilnReplFilterCtx {
+    uint32_t size;                 /* sizeof(KilnReplFilterCtx) */
+    uint32_t peer;                 /* full peer handle (a fake's KILN_REPL_FAKE_PEER | machine) */
+    uint8_t channel;               /* 4 or 5 */
+    uint8_t peer_flags;            /* KILN_REPL_PEER_* */
+    uint8_t machine;
+    uint8_t pad;
+    uint32_t entity;
+    uint32_t tick;                 /* the server tick of the snapshot */
+    uint32_t component_hash;       /* the component the scratch holds */
+    /* Another component of any entity, read-only, as the world holds it now (job-safe; the world is quiet during the
+     * send step). NULL when the entity or the component is absent; *out_size its bytes. Valid during the call. */
+    const void*(KILN_CALL* read)(const struct KilnReplFilterCtx* self, uint32_t entity, uint32_t component_hash, uint32_t* out_size);
+    /* Set *failed to 1 to say the filter failed (a managed filter that threw): as a fault, the component's edits of this
+     * snapshot are discarded and the filter is removed. */
+    uint32_t* failed;
+} KilnReplFilterCtx;
+/* Edits scratch (size bytes: this peer's copy of the component in its snapshot). Job threads, in parallel. A fault
+ * discards the component's edits for this snapshot (the game's bytes go out), removes the filter and logs once. */
+typedef void(KILN_CALL* KilnReplFilterFn)(uint8_t* scratch, uint32_t size, const KilnReplFilterCtx* ctx, void* user);
+
+/* touch() out_status */
+enum { KILN_REPL_TOUCH_QUEUED = 0, KILN_REPL_TOUCH_NO_CARRIER = 1, KILN_REPL_TOUCH_GONE = 2 };
+
+/* ---- the item remap ---- */
+typedef struct KilnReplItemSite {
+    uint32_t component_hash;
+    uint16_t offset;               /* byte offset of the first item id in the component */
+    uint16_t count;                /* ids at offset, offset + stride, ... (1 for a single field) */
+    uint16_t stride;               /* 0 when count is 1 */
+    uint16_t pad;
+} KilnReplItemSite;
+typedef struct KilnReplItemMap {
+    uint32_t from;                 /* a Kiln-only item id */
+    uint32_t to;                   /* its look-alike, a game item id; 0 = the empty item */
+} KilnReplItemMap;
+typedef struct KilnReplRemapStats {
+    uint32_t size;                 /* set by the caller: sizeof(KilnReplRemapStats) */
+    uint32_t sites;                /* sites in the table */
+    uint64_t snapshots;            /* snapshots of a site component sent to a remapped peer */
+    uint64_t remapped;             /* ids replaced by their look-alike */
+    uint64_t zeroed;               /* ids replaced by 0 (no look-alike, or neither a game item nor mapped) */
+    uint64_t faults;               /* remap faults (every site of that component was zeroed) */
+    uint64_t blanked;              /* states that could not be placed and were blanked for a remapped peer (all data 0) */
+    uint32_t running;              /* 1: the remap works now (its hook is in when needed, the snapshot step has not
+                                    * faulted outside a component's own guard since the world started, every remapped
+                                    * state could be placed or blanked); 0: see reason. A fault stops it even when the
+                                    * peer's state was blanked (vanillaWithoutRemap then applies) */
+    uint32_t reason;               /* KILN_REPL_REMAP_* */
+} KilnReplRemapStats;
+/* KilnReplRemapStats.reason */
+enum {
+    KILN_REPL_REMAP_OK = 0,
+    KILN_REPL_REMAP_HOOK_REFUSED = 1, /* kiln.hooks refused the snapshot hook while a peer needed the remap */
+    KILN_REPL_REMAP_FAULTED = 2,      /* the snapshot step faulted outside a component's own guard */
+    KILN_REPL_REMAP_UNPLACED = 3,     /* a remapped peer's state could neither be placed nor blanked */
+    KILN_REPL_REMAP_OFF = 4,          /* repl.filter is off on this build */
+};
+
+/* ---- message hooks ---- */
+enum { KILN_REPL_PASS = 0, KILN_REPL_DROP = 1, KILN_REPL_REWRITE = 2 };
+typedef struct KilnReplMessage {
+    uint32_t size;                 /* sizeof(KilnReplMessage) */
+    uint32_t peer;                 /* server: the machine's or player's peer handle; client: 0 = the server */
+    uint8_t channel;               /* the game's channel (0..24) */
+    uint8_t direction;             /* KILN_REPL_SEND / KILN_REPL_RECEIVE */
+    uint8_t player_socket;         /* 1: the player socket's loop, 0: the machine socket's */
+    uint8_t pad;
+    uint32_t length;               /* bytes at data */
+    const uint8_t* data;           /* valid during the call */
+    uint8_t* rewrite;              /* REWRITE: write the new bytes here (rewrite_cap = length) */
+    uint32_t rewrite_cap;
+    uint32_t pad2;
+    uint32_t* rewrite_length;      /* REWRITE: the new length (at most rewrite_cap) */
+} KilnReplMessage;
+/* Returns KILN_REPL_PASS, _DROP or _REWRITE. Server: tick thread; client: main thread. */
+typedef int32_t(KILN_CALL* KilnReplMessageFn)(const KilnReplMessage* m, void* user);
+
+/* ---- the game's message codec ---- */
+typedef struct KilnReplSchemaField {
+    KilnStr name;
+    uint32_t type;                 /* the game's type code */
+    uint32_t element;              /* the element parameter (+0xc) */
+    uint32_t shape;                /* 0 optional, 1 scalar, 2 dynamic array */
+    uint32_t offset;               /* byte offset in the message struct */
+    uint32_t count_offset;         /* optional: its present flag; dynamic array: its u16 count */
+    uint32_t fixed_count;          /* inline array length (1 for a scalar) */
+    uint64_t nested;               /* a nested schema (schema_fields takes it), or 0 */
+} KilnReplSchemaField;
+
+typedef struct KilnReplNetApi {
+    KilnServiceHeader header;      /* { sizeof(KilnReplNetApi), KILN_REPL_NET_VERSION } */
+    uint32_t(KILN_CALL* capabilities)(void); /* KILN_REPL_NET_CAP_*; any thread */
+    /* Any handle this table returned (track, filter, message hook); any thread; takes effect before the next send step
+     * (a filter or hook is never called after the Pre that follows). KILN_ERR_NOT_FOUND: not a live handle. */
+    KilnResult(KILN_CALL* remove)(KilnHandle h);
+
+    /* Tracking. KILN_REPL_SEND (server or hosted world): fn gets, in every Pre, the client-channel creates, destroy
+     * lists and peer changes of the last frame for every machine, as the session accepted them. KILN_REPL_RECEIVE (a
+     * game client): what this client stored on its client channel. Installs its hooks while any track exists. Tick
+     * thread / client main thread. KILN_ERR_UNAVAILABLE: KILN_REPL_NET_CAP_TRACK / _CLIENT_TRACK is off. */
+    KilnResult(KILN_CALL* track)(KilnOwner owner, uint32_t direction, KilnReplTrackFn fn, void* user, KilnHandle* out);
+    /* The entities in the peer's client-channel state map (relevant to it now). *count = how many (also with
+     * KILN_ERR_BUFFER_TOO_SMALL). Tick thread. KILN_ERR_INVALID_ARGUMENT: not a connected peer. */
+    KilnResult(KILN_CALL* peer_entities)(uint32_t peer, KilnReplPeerEntity* out, uint32_t cap, uint32_t* count);
+
+    /* Filters: fn edits component component_hash of every snapshot sent to peers (peer_count 0 = every peer) on
+     * channels (KILN_REPL_*_CHANNEL); higher priority first, then registration order; the item remap runs after all.
+     * sources (components of the same entity): a change of their bytes touches the entity so the client channel
+     * re-snapshots it. Tick thread. KILN_ERR_UNAVAILABLE: repl.filter off (or repl.touch off with sources on the
+     * client channel); KILN_ERR_INVALID_ARGUMENT: no fn, an unknown component, a component not on those channels. */
+    KilnResult(KILN_CALL* filter_add)(KilnOwner owner, uint32_t component_hash, const uint32_t* peers, uint32_t peer_count,
+                                      uint32_t channels, int32_t priority, const uint32_t* sources, uint32_t source_count,
+                                      KilnReplFilterFn fn, void* user, KilnHandle* out);
+    /* Another peer set for a filter; touches the entities whose output changes. Tick thread. */
+    KilnResult(KILN_CALL* filter_set_peers)(KilnHandle filter, const uint32_t* peers, uint32_t peer_count);
+    /* Marks e for re-sending on the client channel without changing a byte (the touch program runs in the next sim
+     * step). *out_status = KILN_REPL_TOUCH_*. Tick thread. KILN_ERR_UNAVAILABLE: repl.touch is off. */
+    KilnResult(KILN_CALL* touch)(KilnEntity e, uint32_t* out_status);
+
+    /* The item remap. Replaces the whole table: item-id sites, the game's own item ids (game_ids, sorted), and the
+     * Kiln-only ids' look-alikes (map, sorted by from). For a remapped peer every id at a site that is not a game
+     * item becomes its look-alike or 0. Touches what changes. Tick thread. KILN_ERR_UNAVAILABLE also when the remap
+     * does not work now (remap_stats' running and reason say why): it fails closed and never reports otherwise. */
+    KilnResult(KILN_CALL* remap_set)(const KilnReplItemSite* sites, uint32_t site_count, const uint32_t* game_ids,
+                                     uint32_t game_id_count, const KilnReplItemMap* map, uint32_t map_count);
+    /* The peers the remap applies to (vanilla peers, Kiln peers without the content); touches what changes. Tick thread. */
+    KilnResult(KILN_CALL* remap_peers)(const uint32_t* peers, uint32_t peer_count);
+    KilnResult(KILN_CALL* remap_stats)(KilnReplRemapStats* out);
+
+    /* Message hooks on the game's channels (not 4, 5, 12, 14, 17): directions KILN_REPL_SEND | KILN_REPL_RECEIVE.
+     * Tick thread (server) / main thread (client). KILN_ERR_UNAVAILABLE: that direction is off here. */
+    KilnResult(KILN_CALL* message_hook)(KilnOwner owner, uint8_t channel, uint32_t directions, KilnReplMessageFn fn, void* user,
+                                        KilnHandle* out);
+    /* Sends data to peer on channel as a game message: the schema channels a peer's machine socket carries (1, 15, 19, 20;
+     * 21 goes on the player socket: refused). The bytes must decode as the channel's server message with the game's own
+     * decoder (a vanilla client runs the same code). Tick thread. KILN_ERR_INVALID_ARGUMENT: another channel, bytes that
+     * do not decode; KILN_ERR_NOT_FOUND: not a connected game peer; KILN_ERR_UNAVAILABLE: the session refused. */
+    KilnResult(KILN_CALL* message_inject)(uint32_t peer, uint8_t channel, const void* data, uint32_t length);
+
+    /* The game's message codec. schema_find: a message schema by its name (*out_size its struct's bytes).
+     * KILN_ERR_NOT_FOUND: no such schema; KILN_ERR_UNAVAILABLE: repl.schema off, or the schema uses a type Kiln does
+     * not know (it is refused, not guessed). Any thread. */
+    KilnResult(KILN_CALL* schema_find)(KilnStr name, uint32_t* out_size, uint64_t* out_schema);
+    KilnResult(KILN_CALL* schema_fields)(uint64_t schema, KilnReplSchemaField* out, uint32_t cap, uint32_t* count);
+    /* Decodes length bytes into out (zeroed first; out_size at least the schema's size). KILN_ERR_INVALID_ARGUMENT:
+     * the game's decoder refused the bytes. Any thread. */
+    KilnResult(KILN_CALL* schema_decode)(uint64_t schema, const void* bytes, uint32_t length, void* out, uint32_t out_size);
+    KilnResult(KILN_CALL* schema_encode)(uint64_t schema, const void* msg, uint32_t msg_size, void* out, uint32_t cap,
+                                         uint32_t* out_length);
+    /* Each machine's peer as the last Pre saw it (kiln_repl.h "Machines and peers"): out_peers[m] the peer handle (0: none),
+     * out_flags[m] its KILN_REPL_PEER_* flags, for m < min(cap, KILN_REPL_MACHINES). Tick thread (server) / main thread
+     * (client: all 0). *count = KILN_REPL_MACHINES. */
+    KilnResult(KILN_CALL* peers)(uint32_t* out_peers, uint8_t* out_flags, uint32_t cap, uint32_t* count);
+} KilnReplNetApi;
+
+#ifdef __cplusplus
+static_assert(sizeof(KilnReplTrackEvent) == 16, "KilnReplTrackEvent is 16 bytes");
+static_assert(sizeof(KilnReplPeerEntity) == 12, "KilnReplPeerEntity is 12 bytes");
+static_assert(sizeof(KilnReplFilterCtx) == 40 && offsetof(KilnReplFilterCtx, read) == 24, "KilnReplFilterCtx is 40 bytes");
+static_assert(sizeof(KilnReplItemSite) == 12 && sizeof(KilnReplItemMap) == 8, "remap records");
+static_assert(sizeof(KilnReplRemapStats) == 56, "KilnReplRemapStats is 56 bytes");
+static_assert(sizeof(KilnReplMessage) == 48 && offsetof(KilnReplMessage, data) == 16 && offsetof(KilnReplMessage, rewrite_length) == 40,
+              "KilnReplMessage is 48 bytes");
+static_assert(sizeof(KilnReplSchemaField) == 48, "KilnReplSchemaField is 48 bytes");
+static_assert(sizeof(KilnReplNetApi) == 8 + 17 * sizeof(void*), "KilnReplNetApi v1: 17 members");
+#endif
 
 #ifdef __cplusplus
 }

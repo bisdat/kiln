@@ -104,10 +104,11 @@ pub const PLAN_FOLDER: &str = "launch-plans";
 /// The largest launch plan read (the core's limit, kiln_launch.h).
 pub const PLAN_MAX: u64 = 8 * 1024 * 1024;
 
-/// The reason of a package withdrawn when no native manager run reached the worker.
-pub const NATIVE_NOT_WIRED: &str = "Kiln's native manager is not wired yet: no ShroudForge package DLL loads this start, so a package that ships one does not run";
-/// The reason of a package held while no startup pass commits its data.
-pub const STARTUP_NOT_BUILT: &str = "Kiln's ShroudForge startup pass is not built yet: this package's startup data was not applied (kiln-eml skips it under the same launch plan), so its Lua does not run either; it is skipped whole and the game is as without the mod";
+/// The reason of a package withdrawn when no native manager run reached the worker (a fail-safe: the boundary makes a
+/// run for every start it hands to the worker).
+pub const NATIVE_NOT_WIRED: &str = "Kiln's native manager made no run for this start: no ShroudForge package DLL loads this start, so a package that ships one does not run";
+/// The reason of a package held while no startup pass commits its data: kiln-eml offers no startup seam.
+pub const STARTUP_NOT_BUILT: &str = "Kiln's EML loader (kiln-eml) offers no startup pass this start (it is not loaded, or older than Kiln's interpreter): this package's startup data was not applied, so its Lua does not run either; it is skipped whole and the game is as without the mod";
 /// The reason of a package that depends on `dependency`, whose startup data kiln-eml's own EML pass
 /// applies this start while no outcome of that pass reaches kiln-sfi (when no startup outcome names it).
 fn unwitnessed(dependency: &str) -> String {
@@ -909,6 +910,10 @@ thread_local! {
     static TYPES_FAMILY: RefCell<Option<Family>> = const { RefCell::new(None) };
     /// The runtime.ecs registry family on the same wiring's handle; `families` takes it.
     static ECS_FAMILY: RefCell<Option<Family>> = const { RefCell::new(None) };
+    /// The runtime.ecs attribute family on the same wiring's archive generation; `families` takes it.
+    static ATTRIBUTES_FAMILY: RefCell<Option<Family>> = const { RefCell::new(None) };
+    /// `game.assets`' loaded-resource family on the same wiring's handle; `families` takes it.
+    static ASSETS_FAMILY: RefCell<Option<Family>> = const { RefCell::new(None) };
     /// The override trackers `plan` made (its cleanup) and their world kind; `families`
     /// takes them for the tracker family.
     static TRACKERS: RefCell<Option<(Rc<OverrideTrackers>, u32)>> = const { RefCell::new(None) };
@@ -920,9 +925,10 @@ thread_local! {
     static VALUES_GRANT: RefCell<Option<KilnEmlArchiveIdentityV1>> = const { RefCell::new(None) };
 }
 
-/// The composition's `game_types` on the granted archive registry (`identity`), its family and the ECS registry
-/// family on its handle (asking `world_kind`'s catalog) kept for [`PlanSource::families`], with the typed
-/// values' `game.types.of` recognizer. Runtime-create's (`boot`) handle is kept for [`PlanSource::game_build`].
+/// The composition's `game_types` on the granted archive registry (`identity`), its family, the ECS registry family
+/// on its handle (asking `world_kind`'s catalog) and the attribute family over the same generation, kept for
+/// [`PlanSource::families`], with the typed values' `game.types.of` recognizer. Runtime-create's (`boot`) handle is
+/// kept for [`PlanSource::game_build`].
 fn wire_types(
     cx: &WorkerContext<'_>,
     identity: KilnEmlArchiveIdentityV1,
@@ -931,6 +937,8 @@ fn wire_types(
 ) -> Rc<dyn GameTypes> {
     TYPES_FAMILY.with_borrow_mut(|slot| *slot = None);
     ECS_FAMILY.with_borrow_mut(|slot| *slot = None);
+    ATTRIBUTES_FAMILY.with_borrow_mut(|slot| *slot = None);
+    ASSETS_FAMILY.with_borrow_mut(|slot| *slot = None);
     TYPES_HANDLE.with_borrow_mut(|slot| *slot = None);
     let owner = cx.owner();
     let host = *cx.shared().host();
@@ -950,8 +958,14 @@ fn wire_types(
     if boot {
         TYPES_HANDLE.with_borrow_mut(|slot| *slot = Some(wiring.handle.clone()));
     }
+    ASSETS_FAMILY.with_borrow_mut(|slot| {
+        *slot = Some(crate::runtime::assets::family(wiring.handle.clone()));
+    });
     ECS_FAMILY.with_borrow_mut(|slot| {
         *slot = Some(crate::runtime::ecs::family(wiring.handle, world_kind));
+    });
+    ATTRIBUTES_FAMILY.with_borrow_mut(|slot| {
+        *slot = Some(crate::runtime::ecs::attributes::family(identity));
     });
     wiring.game_types
 }
@@ -1132,6 +1146,8 @@ impl PlanSource for KilnPlanSource {
         crate::runtime::registrar::production(crate::runtime::registrar::Parts {
             types: TYPES_FAMILY.with_borrow_mut(Option::take),
             ecs: ECS_FAMILY.with_borrow_mut(Option::take),
+            attributes: ATTRIBUTES_FAMILY.with_borrow_mut(Option::take),
+            assets: ASSETS_FAMILY.with_borrow_mut(Option::take),
             network: crate::runtime::network::production_family(),
             // shroudforge.ui and shroudforge.notifications over this start's UI files
             ui: crate::runtime::ui::family(crate::runtime::ui::production_transport(cx)),

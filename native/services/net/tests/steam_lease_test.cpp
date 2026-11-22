@@ -82,6 +82,7 @@ void start(bool server) {
     c.lookup = m ? &lookup : nullptr;
     c.lookup_user = m;
     c.dialect_owner = &owner;
+    c.owners_watched = true;  // as kiln.net does once the core's owner-retiring notification is subscribed
     c.log = &log;
     const char* missing = nullptr;
     CHECK(st::init(c, &missing) == st::Presence::Complete, "init: every export found (%s)", missing ? missing : "-");
@@ -96,7 +97,7 @@ KilnResult maintain(KilnHandle lease, uint32_t mode, std::vector<uint64_t> ids =
     KilnSteamAcceptPolicy p{sizeof p, mode, ids.empty() ? nullptr : ids.data(), static_cast<uint32_t>(ids.size()), 0};
     KilnSteamMessagesStatus out{};
     out.size = sizeof out;
-    return st::st_maintain(lease, &p, &out);
+    return st::st_maintain(kOwner, lease, &p, &out);
 }
 KilnSteamMessagesStatus status(KilnResult* rc = nullptr) {
     KilnSteamMessagesStatus s{};
@@ -125,7 +126,7 @@ KilnResult receive_wait(KilnHandle lease, uint32_t channel, std::vector<uint8_t>
     KilnResult rc;
     do {
         info.size = sizeof info;
-        rc = st::st_receive(lease, channel, buf.data(), static_cast<uint32_t>(buf.size()), &info, &got);
+        rc = st::st_receive(kOwner, lease, channel, buf.data(), static_cast<uint32_t>(buf.size()), &info, &got);
         if (rc != KILN_OK || got) return rc;
         Sleep(5);
     } while (GetTickCount64() < until);
@@ -146,7 +147,7 @@ int unit(uint32_t base) {
     take(STANDIN_KNOB_CALLS_BEFORE_READY);
     KilnSteamMessagesStatus s = status();
     int32_t er = -1;
-    CHECK(!(s.flags & KILN_STEAM_MSG_AVAILABLE) && st::st_send(lease, kClient, "x", 1, 1, 8, &er) == KILN_ERR_UNAVAILABLE &&
+    CHECK(!(s.flags & KILN_STEAM_MSG_AVAILABLE) && st::st_send(kOwner, lease, kClient, "x", 1, 1, 8, &er) == KILN_ERR_UNAVAILABLE &&
               maintain(lease, KILN_STEAM_ACCEPT_ANY) == KILN_OK,
           "not ready: unavailable, maintain changes nothing");
     CHECK(knob(STANDIN_KNOB_CALLS_BEFORE_READY) == 0 && calls(STANDIN_EXPORT_REGISTER) == 0,
@@ -189,8 +190,8 @@ int unit(uint32_t base) {
     // 7 on a real message: self loop, release once; too big for the buffer: dropped, released once
     take(STANDIN_KNOB_RELEASES);
     const auto big = pattern(524288, 3);
-    CHECK(st::st_send(lease, kClient, big.data(), 524288, 7, 40, &er) == KILN_OK && er == 1, "512 KiB to self");
-    CHECK(st::st_send(lease, kClient, "small", 5, 7, 32, &er) == KILN_OK && er == 1, "an unreliable one");
+    CHECK(st::st_send(kOwner, lease, kClient, big.data(), 524288, 7, 40, &er) == KILN_OK && er == 1, "512 KiB to self");
+    CHECK(st::st_send(kOwner, lease, kClient, "small", 5, 7, 32, &er) == KILN_OK && er == 1, "an unreliable one");
     std::vector<uint8_t> buf(524288);
     KilnSteamMessageInfo info{};
     uint32_t got = 0;
@@ -203,7 +204,7 @@ int unit(uint32_t base) {
           "5 bytes into a 4-byte buffer: invalid data");
     CHECK(knob(STANDIN_KNOB_RELEASES) == 2 && knob(STANDIN_KNOB_DOUBLE_RELEASES) == 0 && knob(STANDIN_KNOB_LIVE_MESSAGES) == 0,
           "both released exactly once");
-    CHECK(st::st_send(lease, kClient, big.data(), 524288, 101, 8, &er) == KILN_ERR_INVALID_ARGUMENT, "channel outside");
+    CHECK(st::st_send(kOwner, lease, kClient, big.data(), 524288, 101, 8, &er) == KILN_ERR_INVALID_ARGUMENT, "channel outside");
 
     // 11: a faulting Steam export answers internal, and works again after
     struct Fault {
@@ -213,7 +214,7 @@ int unit(uint32_t base) {
     for (const Fault f : {Fault{STANDIN_EXPORT_SEND, "send"}, Fault{STANDIN_EXPORT_USER_HANDLE, "user handle"},
                           Fault{STANDIN_EXPORT_USER_MESSAGES_V002, "messages accessor"}}) {
         knob_fn(STANDIN_KNOB_FAULT_EXPORT, f.e);
-        CHECK(st::st_send(lease, kClient, "x", 1, 8, 8, &er) == KILN_ERR_INTERNAL, "fault in %s: send internal", f.what);
+        CHECK(st::st_send(kOwner, lease, kClient, "x", 1, 8, 8, &er) == KILN_ERR_INTERNAL, "fault in %s: send internal", f.what);
         knob_fn(STANDIN_KNOB_FAULT_EXPORT, 0);
     }
     KilnResult rc;
@@ -222,16 +223,16 @@ int unit(uint32_t base) {
     CHECK(rc == KILN_ERR_INTERNAL, "fault in GetIdentity: status internal");
     knob_fn(STANDIN_KNOB_FAULT_EXPORT, STANDIN_EXPORT_ACCEPT);
     uint32_t acc = 9;
-    CHECK(st::st_accept(lease, kPeer, &acc) == KILN_ERR_INTERNAL, "fault in accept: internal");
+    CHECK(st::st_accept(kOwner, lease, kPeer, &acc) == KILN_ERR_INTERNAL, "fault in accept: internal");
     knob_fn(STANDIN_KNOB_FAULT_EXPORT, STANDIN_EXPORT_RECEIVE);
-    CHECK(st::st_receive(lease, 7, buf.data(), 16, &info, &got) == KILN_ERR_INTERNAL && got == 0, "fault in receive: internal");
+    CHECK(st::st_receive(kOwner, lease, 7, buf.data(), 16, &info, &got) == KILN_ERR_INTERNAL && got == 0, "fault in receive: internal");
     knob_fn(STANDIN_KNOB_FAULT_EXPORT, STANDIN_EXPORT_RELEASE);
-    CHECK(st::st_send(lease, kClient, "r", 1, 9, 8, &er) == KILN_OK, "a message to fault on release");
+    CHECK(st::st_send(kOwner, lease, kClient, "r", 1, 9, 8, &er) == KILN_OK, "a message to fault on release");
     Sleep(300);
     info.size = sizeof info;
-    CHECK(st::st_receive(lease, 9, buf.data(), 16, &info, &got) == KILN_ERR_INTERNAL && got == 0, "fault in release: internal");
+    CHECK(st::st_receive(kOwner, lease, 9, buf.data(), 16, &info, &got) == KILN_ERR_INTERNAL && got == 0, "fault in release: internal");
     knob_fn(STANDIN_KNOB_FAULT_EXPORT, 0);
-    CHECK(st::st_send(lease, kClient, "ok", 2, 8, 8, &er) == KILN_OK && er == 1, "after the faults it works");
+    CHECK(st::st_send(kOwner, lease, kClient, "ok", 2, 8, 8, &er) == KILN_OK && er == 1, "after the faults it works");
     std::vector<uint8_t> small(16);
     CHECK(receive_wait(lease, 8, small, info, got, 5000) == KILN_OK && got == 1 && info.length == 2, "and receives");
     // 11 inside the session callback, on the pumping thread (the stand-in's pump catches nothing): a fault in a Steam
@@ -278,7 +279,7 @@ int unit(uint32_t base) {
     CHECK(st::close_for_exit(1000), "closed for exit");
     const uint64_t before = all_calls();
     status(&rc);
-    CHECK(rc == KILN_ERR_UNAVAILABLE && st::st_send(sl, kPeer, "x", 1, 1, 8, &er) == KILN_ERR_UNAVAILABLE &&
+    CHECK(rc == KILN_ERR_UNAVAILABLE && st::st_send(kOwner, sl, kPeer, "x", 1, 1, 8, &er) == KILN_ERR_UNAVAILABLE &&
               maintain(sl, KILN_STEAM_ACCEPT_ANY) == KILN_ERR_UNAVAILABLE,
           "after exit: unavailable");
     knob_fn(STANDIN_KNOB_INJECT_REQUEST, kPeer + 12);
@@ -326,7 +327,7 @@ int fabric_a(uint32_t base, const std::wstring& sync) {
     KilnSteamMessageInfo info{};
     uint32_t got = 9;
     info.size = sizeof info;
-    CHECK(st::st_receive(lease, 5, buf.data(), 16, &info, &got) == KILN_OK && got == 0, "nothing readable from B");
+    CHECK(st::st_receive(kOwner, lease, 5, buf.data(), 16, &info, &got) == KILN_OK && got == 0, "nothing readable from B");
     CHECK(knob_fn(STANDIN_KNOB_EXPIRE_SESSION, kB) == 1, "B's unanswered session times out");
     // now B is listed: its next message's request is accepted by the callback
     CHECK(maintain(lease, KILN_STEAM_ACCEPT_LISTED, {kA + 7, kB}) == KILN_OK, "A lists B");
@@ -349,7 +350,7 @@ int fabric_a(uint32_t base, const std::wstring& sync) {
           "512 KiB intact");
     CHECK(knob(STANDIN_KNOB_LIVE_MESSAGES) == 0 && knob(STANDIN_KNOB_DOUBLE_RELEASES) == 0, "each released once");
     int32_t er = -1;
-    CHECK(st::st_send(lease, kB, "a2b-1", 5, 9, 40, &er) == KILN_OK && er == 1, "A replies");
+    CHECK(st::st_send(kOwner, lease, kB, "a2b-1", 5, 9, 40, &er) == KILN_OK && er == 1, "A replies");
     CHECK(wait_file(sync + L"\\b.done", 20000), "B finished");
     std::printf("%s: %s %d checks\n", g_who, g_failures ? "FAIL" : "PASS", g_checks);
     return g_failures ? 1 : 0;
@@ -363,13 +364,13 @@ int fabric_b(uint32_t base, const std::wstring& sync) {
     CHECK(maintain(lease, KILN_STEAM_ACCEPT_ANY) == KILN_OK, "B accepts anyone");
     CHECK(wait_file(sync + L"\\a.ready", 20000) && touch(sync + L"\\b.ready"), "both ready");
     int32_t er = -1;
-    CHECK(st::st_send(lease, kA, "first", 5, 5, 40, &er) == KILN_OK && er == 1, "B's first (refused by A)");
-    CHECK(st::st_send(lease, kA, "first", 5, 5, 40, &er) == KILN_OK && er == 1, "and another");
+    CHECK(st::st_send(kOwner, lease, kA, "first", 5, 5, 40, &er) == KILN_OK && er == 1, "B's first (refused by A)");
+    CHECK(st::st_send(kOwner, lease, kA, "first", 5, 5, 40, &er) == KILN_OK && er == 1, "and another");
     CHECK(wait_file(sync + L"\\a.listed", 30000), "A listed B");
     const auto big = pattern(524288, 9);
-    CHECK(st::st_send(lease, kA, "b2a-1", 5, 5, 40, &er) == KILN_OK && er == 1, "b2a-1");
-    CHECK(st::st_send(lease, kA, "b2a-2", 5, 5, 32, &er) == KILN_OK && er == 1, "b2a-2");
-    CHECK(st::st_send(lease, kA, big.data(), 524288, 6, 40, &er) == KILN_OK && er == 1, "512 KiB");
+    CHECK(st::st_send(kOwner, lease, kA, "b2a-1", 5, 5, 40, &er) == KILN_OK && er == 1, "b2a-1");
+    CHECK(st::st_send(kOwner, lease, kA, "b2a-2", 5, 5, 32, &er) == KILN_OK && er == 1, "b2a-2");
+    CHECK(st::st_send(kOwner, lease, kA, big.data(), 524288, 6, 40, &er) == KILN_OK && er == 1, "512 KiB");
     std::vector<uint8_t> buf(64);
     KilnSteamMessageInfo info{};
     uint32_t got = 0;

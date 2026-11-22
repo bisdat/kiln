@@ -15,6 +15,12 @@ KilnHandle next_handle() { static std::atomic<KilnHandle> h{1}; return h++; }
 void logf(int, const char*, ...) {}
 void vk_status(KilnUiStatus* out) { out->width = 1920; out->height = 1080; }
 bool image_texture(KilnHandle, ImTextureRef*) { return false; }
+// outline.cpp is Windows glue (its logic is outline_core.h, tests/outline_test.cpp): stand-ins for kTable's v2 members
+KilnResult KILN_CALL outline_add(KilnOwner, KilnEntity, const KilnRenderOutline*, KilnHandle*) { return KILN_ERR_UNAVAILABLE; }
+KilnResult KILN_CALL outline_info(KilnHandle, KilnRenderOutlineInfo*) { return KILN_ERR_NOT_FOUND; }
+KilnResult KILN_CALL outline_remove(KilnHandle) { return KILN_ERR_NOT_FOUND; }
+KilnResult KILN_CALL outline_clear(KilnOwner) { return KILN_OK; }
+KilnResult KILN_CALL outline_status(KilnRenderOutlineStatus*) { return KILN_ERR_UNAVAILABLE; }
 }
 
 int main() {

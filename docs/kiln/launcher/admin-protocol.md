@@ -248,6 +248,10 @@ truth for each op's arguments and result: its `Ops.*.cs` file.
 | | `build_undo` (async) | owner? (`admin` = Kiln.Admin's own edits, the default; `player:<entity>`; a mod id) -> {id, label, cellsRestored, cellsKept, propsRemoved, propsRestored, complete}; fails when there is nothing to undo |
 | | `build_history` | owner? (none: every owner) -> [{id, owner, label, kind, at, cells, propsPlaced, propsRemoved}] (this session's journal; Kiln.Admin's owner is `kiln-admin`) |
 | | `build_placeonce_list`, `build_placeonce_forget` | mod? (only `kiln-admin`: PlaceOnce records are per mod), key (forget) -> [{key, placedAt, at, rotation, schematic, hash, cells, props}] / {forgotten} |
+| replication (Ops.Repl.cs; when Kiln.Replication is loaded, [../services/replication.md](../services/replication.md)) | `repl_stats` | off? (true: Kiln's own counters off) -> the `ReplPeerStats` rows per peer and channel; the first call turns Kiln's counters on and returns no rows yet |
+| | `repl_watch` (async) | entity, peer? (a name or peer id; none: every peer), seconds? (1..30, default 3) -> the `ReplSent` events of that time and the `ReplWatchEnded` reason when the watch ended before |
+| | `repl_capture` | peer, seconds (1..600) -> the capture file's name under `kiln/logs` (`repl-<peer>-<utc>.jsonl`); one capture at a time |
+| | `repl_component` | name -> the `ReplComponentInfo` (index, size, hash, replication bit, versioned, custom codec, channels) with `found: true`; `{found: false}` for an unknown name |
 
 More ops (both transports serve them):
 

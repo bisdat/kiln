@@ -1,0 +1,352 @@
+{
+  "$schema": "../registry-schema.schema.json",
+  "registrySchema": 1,
+  "registry": "balance",
+  "typeName": "Balance",
+  "version": "0.1.0",
+  "stability": "experimental",
+  "experimentalId": "KILNX031",
+  "doc": "The game's balance table: experience and levels, the flame's altars and water sources, base fog resistance, durability, sockets and perk unlock costs. The game reads it once at start.",
+  "ids": {
+    "game": "game:balance",
+    "mod": "(none: one entry)",
+    "rule": "One entry, game:balance."
+  },
+  "traits": {},
+  "fields": {
+    "xpPerLevel": {
+      "type": "list",
+      "of": {
+        "type": "int",
+        "min": 0,
+        "max": 100000000
+      },
+      "applies": "restart",
+      "ops": "indexed",
+      "doc": "The experience levels 1 to 5 need (later levels follow xpCurve). Exactly 5 values, edited one at a time (xpPerLevel[i]).",
+      "fixedLength": 5
+    },
+    "xpCurve": {
+      "type": "struct",
+      "applies": "restart",
+      "doc": "The experience a level from 6 needs: base = min(start, end) + |end - start| * level / levelMax; need = round(base * seed * 1.5 + fromKnowledge).",
+      "fields": {
+        "start": {
+          "type": "int",
+          "min": 0,
+          "max": 100000000,
+          "ops": "number"
+        },
+        "end": {
+          "type": "int",
+          "min": 0,
+          "max": 100000000,
+          "ops": "number"
+        },
+        "levelMax": {
+          "type": "int",
+          "min": 1,
+          "max": 100000,
+          "ops": "number"
+        },
+        "seed": {
+          "type": "int",
+          "min": 0,
+          "max": 100000000,
+          "ops": "number"
+        },
+        "fromKnowledge": {
+          "type": "int",
+          "min": 0,
+          "max": 100000000,
+          "ops": "number"
+        }
+      },
+      "typeName": "BalanceXpCurve"
+    },
+    "levelCap": {
+      "type": "int",
+      "min": 1,
+      "max": 1000,
+      "applies": "restart",
+      "ops": "number",
+      "doc": "The highest player level."
+    },
+    "skillPointsPerLevel": {
+      "type": "int",
+      "min": 0,
+      "max": 1000,
+      "applies": "restart",
+      "ops": "number",
+      "doc": "Skill points a level gives."
+    },
+    "flameLevelMax": {
+      "type": "int",
+      "min": 0,
+      "max": 1000,
+      "applies": "restart",
+      "doc": "The highest flame level. Read-only in this version: the per-flame-level lists are exactly flameLevelMax + 1 long.",
+      "readOnly": true
+    },
+    "altarsPerFlameLevel": {
+      "type": "list",
+      "of": {
+        "type": "int",
+        "min": 0,
+        "max": 16
+      },
+      "applies": "restart",
+      "ops": "indexed",
+      "doc": "Flame altars allowed at each flame level, one value per level from 0 to flameLevelMax (the game's code stops at 16). Edited one level at a time (altarsPerFlameLevel[i]).",
+      "lengthField": "flameLevelMax",
+      "lengthOffset": 1
+    },
+    "waterSourcesPerFlameLevel": {
+      "type": "list",
+      "of": {
+        "type": "int",
+        "min": 0,
+        "max": 255
+      },
+      "applies": "restart",
+      "ops": "indexed",
+      "doc": "Water sources allowed at each flame level, one value per level from 0 to flameLevelMax. Edited one level at a time.",
+      "lengthField": "flameLevelMax",
+      "lengthOffset": 1
+    },
+    "buildzoneSizesPerAltarLevel": {
+      "type": "list",
+      "maxItems": 1001,
+      "applies": "restart",
+      "ops": "list",
+      "doc": "The size of an altar's build zone at each altar level, in metres.",
+      "of": {
+        "type": "struct",
+        "fields": {
+          "x": {
+            "type": "float",
+            "unit": "m",
+            "min": 0,
+            "max": 100000,
+            "ops": "number"
+          },
+          "y": {
+            "type": "float",
+            "unit": "m",
+            "min": 0,
+            "max": 100000,
+            "ops": "number"
+          },
+          "z": {
+            "type": "float",
+            "unit": "m",
+            "min": 0,
+            "max": 100000,
+            "ops": "number"
+          }
+        },
+        "typeName": "BalanceZoneSize"
+      }
+    },
+    "fogResistance": {
+      "type": "struct",
+      "applies": "restart",
+      "doc": "A player's shroud time.",
+      "fields": {
+        "base": {
+          "type": "int",
+          "min": 0,
+          "max": 100000,
+          "ops": "number"
+        },
+        "perFlameLevel": {
+          "type": "int",
+          "min": 0,
+          "max": 100000,
+          "ops": "number"
+        }
+      },
+      "typeName": "BalanceFogResistance"
+    },
+    "durability": {
+      "type": "struct",
+      "applies": "restart",
+      "doc": "An item's maximum durability: (start + growth * (level - 1)) * rarityDurability[rarity]. Each copy computes it when it is loaded.",
+      "fields": {
+        "start": {
+          "type": "float",
+          "min": 0,
+          "max": 1000000,
+          "ops": "number"
+        },
+        "growth": {
+          "type": "float",
+          "min": 0,
+          "max": 1000000,
+          "ops": "number"
+        }
+      },
+      "typeName": "BalanceDurability"
+    },
+    "rarityDurability": {
+      "type": "struct",
+      "applies": "restart",
+      "doc": "The durability factor of each rarity.",
+      "fields": {
+        "common": {
+          "type": "float",
+          "min": 0,
+          "max": 100,
+          "ops": "number"
+        },
+        "uncommon": {
+          "type": "float",
+          "min": 0,
+          "max": 100,
+          "ops": "number"
+        },
+        "rare": {
+          "type": "float",
+          "min": 0,
+          "max": 100,
+          "ops": "number"
+        },
+        "epic": {
+          "type": "float",
+          "min": 0,
+          "max": 100,
+          "ops": "number"
+        },
+        "legendary": {
+          "type": "float",
+          "min": 0,
+          "max": 100,
+          "ops": "number"
+        }
+      },
+      "typeName": "BalanceRarityDurability"
+    },
+    "socketChance": {
+      "type": "struct",
+      "applies": "restart",
+      "doc": "The chance a new weapon of each rarity gets a gem socket (0 to 1).",
+      "fields": {
+        "common": {
+          "type": "float",
+          "min": 0,
+          "max": 1,
+          "ops": "number"
+        },
+        "uncommon": {
+          "type": "float",
+          "min": 0,
+          "max": 1,
+          "ops": "number"
+        },
+        "rare": {
+          "type": "float",
+          "min": 0,
+          "max": 1,
+          "ops": "number"
+        },
+        "epic": {
+          "type": "float",
+          "min": 0,
+          "max": 1,
+          "ops": "number"
+        },
+        "legendary": {
+          "type": "float",
+          "min": 0,
+          "max": 1,
+          "ops": "number"
+        }
+      },
+      "typeName": "BalanceSocketChance"
+    },
+    "unlockCost": {
+      "type": "struct",
+      "applies": "restart",
+      "doc": "What unlocking a perk costs.",
+      "fields": {
+        "seed": {
+          "type": "int",
+          "min": 0,
+          "max": 100000,
+          "ops": "number"
+        },
+        "creep": {
+          "type": "float",
+          "min": 0,
+          "max": 100,
+          "ops": "number"
+        },
+        "weapons": {
+          "type": "float",
+          "min": 0,
+          "max": 100,
+          "ops": "number"
+        },
+        "armor": {
+          "type": "float",
+          "min": 0,
+          "max": 100,
+          "ops": "number"
+        },
+        "rings": {
+          "type": "float",
+          "min": 0,
+          "max": 100,
+          "ops": "number"
+        },
+        "advanced": {
+          "type": "float",
+          "min": 0,
+          "max": 100000,
+          "ops": "number"
+        },
+        "advancedFrom": {
+          "type": "int",
+          "min": 0,
+          "max": 5,
+          "ops": "number"
+        }
+      },
+      "typeName": "BalanceUnlockCost"
+    },
+    "gear": {
+      "type": "struct",
+      "applies": "restart",
+      "readOnly": true,
+      "doc": "The constants of the power and armour formulas (items.power, items.armor). Read-only in this version: Kiln's solver follows them.",
+      "fields": {
+        "seed": {
+          "type": "float",
+          "min": 0,
+          "max": 100000
+        },
+        "creep": {
+          "type": "float",
+          "min": 0,
+          "max": 100
+        },
+        "armorOffset": {
+          "type": "float",
+          "min": 0,
+          "max": 100000
+        },
+        "armorGradient": {
+          "type": "float",
+          "min": 0,
+          "max": 100000
+        }
+      },
+      "typeName": "BalanceGear"
+    }
+  },
+  "entry": {
+    "add": false,
+    "remove": false
+  },
+  "raw": "allowed"
+}

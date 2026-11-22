@@ -33,6 +33,8 @@ internal unsafe struct EcsWritePolicyNative
     public fixed byte Why[96];
 }
 
+// KilnMutationReply's first 48 bytes (its first release): this size is what Kiln.World passes, and kiln.world writes
+// nothing past it. The header appends restore_ns after hold_ns; nothing here reads it.
 [StructLayout(LayoutKind.Sequential)]
 internal struct MutationReplyNative
 {

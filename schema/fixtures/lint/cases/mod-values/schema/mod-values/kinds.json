@@ -1,0 +1,20 @@
+{
+  "format": 1,
+  "values": {
+    "xp-no-steps": { "kind": "experience", "label": "A" },
+    "xp-scaled": { "kind": "experience", "label": "B", "scale": 2, "thresholds": ["0", "10"] },
+    "xp-from-one": { "kind": "experience", "label": "C", "thresholds": ["1", "10"] },
+    "coins-steps": { "kind": "currency", "label": "D", "thresholds": ["0"] },
+    "coins-negative": { "kind": "currency", "label": "E", "min": "-10" },
+    "coins-carried": { "kind": "currency", "label": "F", "persistence": "carried", "trustClientImports": true },
+    "carried-untrusted": { "kind": "counter", "label": "G", "persistence": "carried" },
+    "carried-negative": { "kind": "counter", "label": "H", "min": "-1", "persistence": "carried", "trustClientImports": true },
+    "readers-public": { "kind": "counter", "label": "I", "readPolicy": "public", "readMods": ["other-mod"] },
+    "format-bad": { "kind": "counter", "label": "J", "numberFormat": "C2" },
+    "number-forms": { "kind": "counter", "label": "K", "min": "+5", "max": "007", "initial": 3 },
+    "typo": { "kind": "counter", "label": "L", "intial": "1" },
+    "kind-typo": { "kind": "currncy", "label": "M" },
+    "no-label": { "kind": "counter" },
+    "Bad_Id": { "kind": "counter", "label": "N" }
+  }
+}

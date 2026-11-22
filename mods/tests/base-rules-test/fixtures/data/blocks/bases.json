@@ -1,0 +1,7 @@
+{
+  "format": 1,
+  // Kiln's base rules, no code: 3 more Flame Altars than the game's at every Flame level, build areas at 120%
+  "baseRules": {
+    "wide": { "extraAltars": 3, "buildAreaPercent": 120 }
+  }
+}

@@ -38,7 +38,7 @@ fail a run.
 ### What gets read
 - A folder with `kiln.mod.json`, `native.json` or a Kiln.Sdk project is a mod. Any other folder is searched for mods, up
   to 8 levels down, skipping `bin`, `obj`, `build`, `node_modules`, `.git`, `target`, `.out`, `.vs` and `.idea`.
-- In a mod: `kiln.mod.json`, `native.json`, `content/*.json`, `skills/*.json`, `quests/*.json`, `blocks/*.json`, `assets/assets.json`, `assets/cook.json`,
+- In a mod: `kiln.mod.json`, `native.json`, `content/*.json`, `skills/*.json`, `quests/*.json`, `blocks/*.json`, `mod-values/*.json`, `assets/assets.json`, `assets/cook.json`,
   `impact/cook.json`, `impact/natives.json`, `kiln-modpack.json` and every `*.kschem`.
 - Outside a mod: `kiln-modpack.json` and `*.kschem` are linted on their own.
 - A Kiln.Sdk project (`<Project Sdk="Kiln.Sdk/...">`) generates its manifest at build time, so kiln lint reads the newest
@@ -104,6 +104,7 @@ file to its real reader. `schema/schemas.json` is the table; the test suite chec
 | `skills/*.json` | yes | no | yes | kiln.skills (nlohmann::json) and Kiln.Skills (System.Text.Json) |
 | `quests/*.json` | yes | yes | yes | Kiln.Quests (System.Text.Json) |
 | `blocks/*.json` | yes | yes | yes | Kiln.Blocks (System.Text.Json) |
+| `mod-values/*.json` | no | no | no | Kiln.ModValues (strict: a key given twice is an error) |
 | `assets/cook.json`, `impact/cook.json` | no | no | no | the cook tools (Python `json`) |
 | `impact/natives.json` | no | no | no | tools/impact (Python `json`) |
 | `kiln-modpack.json` | no | no | no | the launcher (serde_json) |
@@ -158,6 +159,8 @@ extra keywords for kiln lint and the editor tools:
 | `x-kiln-message` | One clear message instead of the raw failures at this location |
 | `x-kiln-docs` | The page findings under this schema link to |
 | `x-kiln-caseInsensitive` | On an enum: another case is a hint ([KL112](#kl112-case)), because Kiln ignores case there |
+| `x-kiln-rules` | Documentation only: what kiln lint checks beyond the schema, Markdown lines listed on the schema's reference page |
+| `examples` | The standard keyword: the first example is shown on the schema's reference page |
 | `x-kiln-cook-base` | Documentation only: the input type a step's `base` must have ([KL510](#kl510-cook-base) checks it) |
 
 Generated from the schemas, so do not edit them by hand: `schema/idrefs.json` (where files name game entries; the
@@ -441,8 +444,12 @@ Error. The real manifest reader refuses the file for a reason the schema cannot 
 schema found no error in the file.
 ```text
 kiln.mod.json:6:3: error KL209: Kiln.Host refuses this manifest: kiln.mod.json: 'other' is in both loadBefore and loadAfter
+kiln.mod.json:2:3: error KL209: Kiln.Host refuses this manifest: kiln.mod.json: id 'native.tools' is reserved: an id that starts with "native." is a native owner's mod-values namespace
 ```
-Fix: follow the reader's message.
+Among the refusals: an `id` that starts with `native.` (since dev.31). [Mod values](../services/mod-values.md) give every
+native owner the namespace `native.` plus a hash of its name, and a mod's id is its own namespace, so the two must never
+meet.
+Fix: follow the reader's message (for an id: pick one that does not start with `native.`).
 
 ## KL3xx: ids, GUIDs and names
 
@@ -519,8 +526,6 @@ Error. Two nodes of a talent tree sit in one grid cell, so Kiln.Skills refuses t
 skills/trees.json:12:7: error KL310: tree my-mod:arts: two nodes at column 0, row 0 (Kiln.Skills refuses the tree; a node without "col" and "row" sits at 0, 0)
 ```
 Fix: give each node its own `col` and `row`.
-
-## KL4xx: references to the game's data
 
 ### KL311 quest-reference
 A quest, step, NPC, dialogue or node named in `quests/*.json` that the mod's quest files do not define. Definitions made
@@ -686,6 +691,76 @@ blocks/run.json:9:23: error KL340: run fixture-blocks-run.Later: its declaration
 Fix: rename the method's parameter to a binding, give it the binding's type, make it `Optional<T>`, or give the effect what it
 binds; declare the native through `[ImpactNative]` (the build writes `"sync": true` and the argc).
 
+## KL35x: mod values (mod-values/*.json)
+What [Kiln.ModValues](schemas/kiln-mod-values.md) refuses when it loads a mod's value definitions, beyond what the schema says.
+A refused definition is not made: code that reads or changes that value gets a definition error. KL356 is a warning about
+a definition Kiln accepts.
+
+### KL350 mod-value-number
+Error. `min`, `max`, `initial` or a threshold that has the right form (a base-10 string, the schema's [KL106](#kl106-pattern))
+but does not fit a signed 64-bit integer, -9223372036854775808 to 9223372036854775807.
+```text
+mod-values/a.json:4:55: error KL350: value over: max "9223372036854775808" is outside the 64-bit range Kiln stores (-9223372036854775808 to 9223372036854775807)
+```
+Fix: use a number in that range. For a value with decimals, `scale` moves the point when it is shown; the stored number stays whole.
+
+### KL351 mod-value-bounds
+Error. `min` above `max`, or `initial` outside `[min, max]`, with the defaults where a key is left out (`min` "0", `max`
+"9223372036854775807", `initial` = `min`). Kiln never clamps an initial value into range: it refuses the definition.
+```text
+mod-values/a.json:6:57: error KL351: value upside: min "10" is above max "5": Kiln refuses the definition
+mod-values/a.json:7:64: error KL351: value below-default: min "0" (the default) is above max "-1": Kiln refuses the definition
+mod-values/a.json:8:77: error KL351: value init-high: initial "11" is outside min "0" (the default) and max "10": Kiln refuses the definition (it never clamps)
+```
+Fix: give `min` (a counter may go below 0 with a negative `min`), `max` or `initial` values that agree.
+
+### KL352 mod-value-thresholds
+Error. An experience value's `thresholds` that do not strictly increase. They are compared as whole numbers, so "10" is
+above "9", and "9007199254740993" above "9007199254740992" (which a floating-point reader would call equal). The first
+threshold is "0" (the schema's [KL105](#kl105-enum)).
+```text
+mod-values/a.json:9:79: error KL352: value steps: thresholds[2] "400" is not above thresholds[1] "900": thresholds strictly increase (Kiln refuses the definition)
+```
+Fix: list the points each level starts at, lowest first, each one above the one before.
+
+### KL353 mod-value-size
+Error. A definition's `label` over 1024 bytes, its `numberFormat` over 256 bytes, or the whole definition over 4096 bytes, each
+measured as compact JSON in UTF-8 (all languages of a label together, with the quotes and keys).
+```text
+mod-values/a.json:10:43: error KL353: value long: label is 1102 bytes as compact JSON, and Kiln takes at most 1024 per definition (all its languages together)
+```
+Fix: shorten the texts, or drop languages the game does not have.
+
+### KL354 mod-value-duplicate
+Error. A value id defined in two of a mod's `mod-values/*.json` files: ids are per mod, across all its files, and a second
+definition is refused (not the later one winning). A key given twice inside one file is [KL004](#kl004-duplicate-key), an error
+in these files.
+```text
+mod-values/b.json:4:5: error KL354: value shared is also defined in mod-values/a.json: an id is defined once per mod, across all its mod-values files (Kiln refuses the second definition)
+```
+Fix: rename one of them, or keep one definition.
+
+### KL355 mod-value-count
+Error. More than 128 values in one mod, across all its `mod-values/*.json` files. Said once, at the 129th in file-name order.
+One file with more than 128 is the schema's [KL108](#kl108-size).
+```text
+mod-values/more.json:32:5: error KL355: value extra-29 is this mod's value number 129 of 130: Kiln takes at most 128 per mod, across all its mod-values files
+```
+Fix: drop values the mod does not use, or fold related ones into one counter.
+
+### KL356 mod-value-carried-max
+Warning. A carried value (`"persistence": "carried"` with `"trustClientImports": true`, a counter or an experience value)
+with no `max`. Carried progress merges by maximum: when a player joins, Kiln keeps the higher of the world's value and the
+copy their client brings, so a carried value is only as safe as its bound. Without a `max` of its own the bound is the
+default, 9223372036854775807, and an edited client can raise the value that far. Kiln accepts the definition.
+```text
+mod-values/a.json:12:5: warning KL356: value open-carried: a carried value without "max" can be raised as far as 9223372036854775807 by a player's own copy (Kiln keeps the higher of the world's value and the copy a client brings); give it a real max
+```
+Fix: give `max` the highest value the mod can really reach (for an experience value, its last threshold or a little
+above: past it no level is gained). An explicit `max`, also the default written out, ends the warning.
+
+## KL4xx: references to the game's data
+
 ### KL401 unknown-reference
 Warning by default; an error where the reader refuses the file or the node (game-tree links, a talent node's `requires`).
 A name, id or GUID that neither the game nor the mods have. References to the game need the catalog.
@@ -752,6 +827,26 @@ pickers leave these entries out unless "Show hidden game entries" is on.
 content/items.json:3:5: info KL407: "Z_Material_Sand_DEPRECATED" is one of the game's old, test or unused item entries (its name says so): it may do nothing in the game
 ```
 Fix: pick the entry the game uses now, or keep it if you meant it.
+
+### KL408 recipe-water
+Warning. A recipe's water that does not do what it looks like:
+- **An input naming `Food_T1_raw_hydration_Water_Pouch_Filled_DEPRECATED`**, the game's old "Water" item. It is a canteen
+  item like any other: a craft takes that item from the crafter, never water from the station's tank. The recipe screen
+  borrows its name and icon for the recipe's water row, which is why it looks like tank water. Give the recipe its
+  water instead: `"water": n` on a new recipe, `"waterCharges": n` in a change to a game recipe.
+- **Water at a factory station without a tank** (the Smelter, the Forge, the Kiln, the Loom...). A factory station takes a
+  recipe's water from its own tank only, so it never starts that recipe. The stations with a tank: Seedbed (150 charges),
+  Oven, Cooking Station, Laboratory, Coffee Brewer (100 each) and Beehive (50).
+- **More water a craft than the station's tank holds**: it never fills enough to start.
+
+The station is the definition's `"0x<workshop id>"`, or the workshop of the game recipe it names as its `station` or
+`base` (with the catalog), or the game recipe a change names. Crafting menus (`"hand"`, the Workbench, the Kitchen, the
+NPCs) take a recipe's water from the crafter and the base's wells and barrels, as the game's own Kitchen recipes do: no
+warning there. How the game pays it: [docs/re/stations.md](../../re/stations.md) section 3.6.
+```text
+content/recipes.json:5:9: warning KL408: recipe "MyMod_Tea" takes "Food_T1_raw_hydration_Water_Pouch_Filled_DEPRECATED", the game's old Water canteen item, as an ingredient: a craft takes 2 of that item, never water from the station's tank. For the station's tank water, remove this input and give the recipe "water": 2 (water charges a craft)
+```
+Fix: remove the input and set the recipe's water; pick a station with a tank, or leave the water out.
 
 ## KL5xx: files, assets and cook recipes
 

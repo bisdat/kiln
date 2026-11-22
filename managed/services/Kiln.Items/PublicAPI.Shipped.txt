@@ -1178,6 +1178,8 @@ Kiln.WaterRefilledEvent.Units.get -> long
 abstract Kiln.EquipmentChange.<Clone>$() -> Kiln.EquipmentChange!
 abstract Kiln.EquipmentSetSelection.<Clone>$() -> Kiln.EquipmentSetSelection!
 const Kiln.EquipmentSetJson.Schema = 1 -> int
+const Kiln.Items.ContainerNameMaxBytes = 64 -> int
+const Kiln.Items.ContainerNameMaxChars = 48 -> int
 const Kiln.Items.Fuel.UnitsPerCharge = 64 -> int
 const Kiln.Items.MaxScale = 100 -> double
 const Kiln.Items.MinScale = 0.01 -> double
@@ -1428,6 +1430,7 @@ static Kiln.Items.CanTransact.get -> bool
 static Kiln.Items.CaptureSet(Kiln.EntityId player) -> Kiln.EquipmentSetCaptureResult!
 static Kiln.Items.ContainerName(Kiln.EntityId entity) -> string?
 static Kiln.Items.ContainerNamesAvailable.get -> bool
+static Kiln.Items.ContainerRenameAvailable.get -> bool
 static Kiln.Items.DisplayName(Kiln.ItemId item) -> string?
 static Kiln.Items.Equip(Kiln.EntityId player, Kiln.SlotId from, Kiln.EquipmentSlot? slot = null, Kiln.EquipOptions options = Kiln.EquipOptions.None, Kiln.EntityId itemEntity = default(Kiln.EntityId)) -> System.Threading.Tasks.Task<Kiln.EquipResult!>!
 static Kiln.Items.EquipSet(Kiln.EntityId player, Kiln.EquipmentSet! set, Kiln.EquipOptions options = Kiln.EquipOptions.None) -> System.Threading.Tasks.Task<Kiln.EquipmentSetResult!>!
@@ -1465,6 +1468,7 @@ static Kiln.Items.Read(Kiln.EntityId entity) -> Kiln.InventoryContents?
 static Kiln.Items.ResultPeekAvailable.get -> bool
 static Kiln.Items.Search(string! text, int max = 25) -> System.Collections.Generic.IReadOnlyList<Kiln.ItemInfo!>!
 static Kiln.Items.SetArmor(Kiln.ItemInstanceRef item, double scale) -> Kiln.GearValuesResult!
+static Kiln.Items.SetContainerName(Kiln.EntityId entity, string! name) -> System.Threading.Tasks.Task<bool>!
 static Kiln.Items.SetDurabilityMax(Kiln.ItemInstanceRef item, int? max, Kiln.GearWriteOptions? options = null) -> System.Threading.Tasks.Task<Kiln.GearResult!>!
 static Kiln.Items.SetEnhancements(Kiln.ItemInstanceRef item, int unlocked, Kiln.GearWriteOptions? options = null) -> System.Threading.Tasks.Task<Kiln.GearResult!>!
 static Kiln.Items.SetLevel(Kiln.ItemInstanceRef item, int level, Kiln.GearWriteOptions? options = null) -> System.Threading.Tasks.Task<Kiln.GearResult!>!

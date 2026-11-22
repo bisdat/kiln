@@ -151,7 +151,8 @@ public readonly struct ExchangeResult<T> where T : unmanaged
     /// <see cref="ExchangeStatus.Ok"/>, the current one on <see cref="ExchangeStatus.Conflict"/>; else <c>default</c>.</summary>
     public T Current { get; }
 
-    /// <summary>How long Kiln held the engine's gate (zero when it never took it).</summary>
+    /// <summary>How long Kiln held the engine's Scene word exclusively, from taking it to releasing it, before the rest
+    /// of the gate's release such as the thread's priority restore (zero when it never took it).</summary>
     public TimeSpan HoldTime { get; }
 
     /// <summary><see cref="Status"/> is <see cref="ExchangeStatus.Ok"/>.</summary>
@@ -185,7 +186,8 @@ public readonly struct ExchangeBytesResult
     /// <summary>Why, when it was refused.</summary>
     public WriteReason Reason { get; }
 
-    /// <summary>How long Kiln held the engine's gate (zero when it never took it).</summary>
+    /// <summary>How long Kiln held the engine's Scene word exclusively, from taking it to releasing it, before the rest
+    /// of the gate's release such as the thread's priority restore (zero when it never took it).</summary>
     public TimeSpan HoldTime { get; }
 
     /// <summary><see cref="Status"/> is <see cref="ExchangeStatus.Ok"/>.</summary>

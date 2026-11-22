@@ -1,0 +1,9 @@
+{
+  "id": "survivor-beds",
+  "name": "Survivor beds",
+  "version": "0.1.0",
+  "apiVersion": "0.2",
+  "entryAssembly": "SurvivorBeds.dll",
+  "side": "server",
+  "description": "Sample for kiln.survivors: /bed assigns the nearest survivor to the nearest bed with your own rights; /recruit <name> (admins) recruits a survivor and hands you its summon tool."
+}

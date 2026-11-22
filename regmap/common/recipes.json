@@ -1,0 +1,114 @@
+{
+  "regmap": 1,
+  "registry": "recipes",
+  "entries": {
+    "kind": "array",
+    "resourceType": "keen::RecipeRegistryResource",
+    "array": "recipes",
+    "name": "debugName",
+    "guid": "recipeGuid",
+    "id": "recipeId",
+    "unnamed": "recipe_%08x"
+  },
+  "rows": {
+    "inputs": {
+      "paths": [
+        "input"
+      ],
+      "conv": "list",
+      "read": "now",
+      "backend": "live",
+      "clientNeeds": true,
+      "evidence": "docs/re/content.md: applyRecipe at every craft"
+    },
+    "inputs[].item": {
+      "paths": [
+        "itemStack.item",
+        "itemStack.itemRef"
+      ],
+      "conv": "ref",
+      "read": "now",
+      "backend": "live",
+      "clientNeeds": true
+    },
+    "inputs[].category": {
+      "paths": [
+        "inputItemCategory.category",
+        "inputItemCategory.categoryRef"
+      ],
+      "conv": "ref",
+      "read": "now",
+      "backend": "live",
+      "clientNeeds": true
+    },
+    "inputs[].count": {
+      "paths": [
+        "itemStack.count",
+        "inputItemCategory.count"
+      ],
+      "conv": "stackCount",
+      "read": "now",
+      "backend": "live",
+      "clientNeeds": true
+    },
+    "outputs": {
+      "paths": [
+        "output"
+      ],
+      "conv": "list",
+      "read": "now",
+      "backend": "live",
+      "clientNeeds": true,
+      "evidence": "docs/re/content.md: applyRecipe at every craft"
+    },
+    "outputs[].item": {
+      "paths": [
+        "item",
+        "itemRef"
+      ],
+      "conv": "ref",
+      "read": "now",
+      "backend": "live",
+      "clientNeeds": true
+    },
+    "outputs[].count": {
+      "paths": [
+        "count"
+      ],
+      "conv": "int",
+      "read": "now",
+      "backend": "live",
+      "clientNeeds": true
+    },
+    "duration": {
+      "paths": [
+        "craftingDuration"
+      ],
+      "conv": "time",
+      "read": "now",
+      "backend": "live",
+      "clientNeeds": true,
+      "evidence": "docs/re/stations.md: factory stations each step"
+    },
+    "unlock": {
+      "paths": [
+        "knowledgeRequirement"
+      ],
+      "conv": "unlock",
+      "read": "now",
+      "backend": "live",
+      "clientNeeds": true,
+      "evidence": "docs/re/content.md: only the client UI checks knowledge"
+    },
+    "station": {
+      "paths": [
+        "workshopId",
+        "workshopGuid"
+      ],
+      "conv": "ref",
+      "read": "restart",
+      "backend": "none",
+      "evidence": "registries.cpp: per-workshop lists are built at RecipeFinishLoading"
+    }
+  }
+}

@@ -562,24 +562,49 @@ fn shroudforge_mode(game: &Utf8Path) -> bool {
 /// The `aside` outcome: `why` names the loader that runs the EML mods; the profile's EML mods are listed as running
 /// under it (Kiln's copy is in its folder) or not loading (only in the Library), the latter as warnings. `shroudforge`:
 /// that loader is ShroudForge, which reads only its own mods folder and runs a package there only while the package's
-/// switch is on, for this side (discover::shroudforge_switch).
+/// switch is on, for this side (discover::shroudforge_switch). Under ShroudForge with drop-ins on (no profile, or the
+/// profile's drop-ins on), the drop-in folders' EML mods that nothing runs are listed too (discover::aside_dropins): one
+/// warning in kiln.log; their rows in the state file on a dedicated server only (a client's in-game menu already lists
+/// ShroudForge's folder as ShroudForge's rows) and for kiln/eml/mods. Under ShroudForge, one info line also counts the EML
+/// packages of its folder and names those it runs (discover::shroudforge_runs). Listing only: what runs stays as it was.
 fn aside_outcome(why: &str, who: &str, shroudforge: bool) -> Outcome {
     let mut out = Outcome::new(Phase::Aside, Vec::new());
     out.aside = Some(why.into());
     let (Some(game), Some(kiln)) = (kpath(KILN_PATH_GAME), kpath(KILN_PATH_KILN)) else { return out };
-    let Some(p) = profile() else { return out };
-    let mode = unsafe { (p.mode)() };
-    if mode != KILN_PROFILE_ACTIVE && mode != KILN_PROFILE_ONCE { return out; }
-    let json = unsafe { (p.json)().to_string() };
-    let server = std::env::current_exe().ok()
-        .and_then(|p| p.file_stem().map(|s| s.to_string_lossy().eq_ignore_ascii_case("enshrouded_server"))).unwrap_or(false);
+    let mode = profile().map(|p| unsafe { (p.mode)() });
+    if matches!(mode, Some(KILN_PROFILE_NO_MODS | KILN_PROFILE_INVALID)) { return out; }
+    let json = profile().filter(|_| matches!(mode, Some(KILN_PROFILE_ACTIVE | KILN_PROFILE_ONCE)))
+        .map(|p| unsafe { (p.json)().to_string() });
+    let server = exe_stem().is_some_and(|s| s == "enshrouded_server");
     let roots = if shroudforge { vec![shroudforge_root(&game)] } else { loader_roots(&game) };
-    out.mods = discover::aside_entries(&json, &kiln, &roots, who, shroudforge.then_some(server));
-    for (level, line) in discover::aside_log(&out.mods, who) {
-        klog(level, &line);
+    if let Some(json) = &json {
+        out.mods = discover::aside_entries(json, &kiln, &roots, who, shroudforge.then_some(server));
+        for (level, line) in discover::aside_log(&out.mods, who) {
+            klog(level, &line);
+        }
+        for (level, line) in discover::apply_partial(json, &mut out.mods) {
+            klog(level, &line);
+        }
     }
-    for (level, line) in discover::apply_partial(&json, &mut out.mods) {
-        klog(level, &line);
+    // what ShroudForge does run from its folder, by name (info): a start that runs its mods says so too
+    if shroudforge {
+        let (runs, total) = discover::shroudforge_runs(&roots[0], server);
+        if let Some(line) = discover::shroudforge_runs_log(&runs, total, &roots[0]) {
+            klog(3, &line);
+        }
+    }
+    // no profile (or the legacy layout): drop-ins on, as run_now reads them
+    if shroudforge && json.as_deref().is_none_or(discover::profile_dropins) {
+        let ids = json.as_deref().map(discover::profile_ids).unwrap_or_default();
+        let mut extra = discover::aside_dropins(&roots[0], &kiln, &ids, &out.mods, who, server);
+        if let Some(line) = discover::aside_dropins_log(&extra, &roots[0], server) {
+            // on a client a package switched off in ShroudForge's own menu is usually the player's choice: info there.
+            // A server (nothing switches it on), or EML mods in kiln/eml/mods (ShroudForge never reads them): a warning.
+            let warn = server || extra.iter().any(|e| e.source == "kiln-dropin");
+            klog(if warn { 2 } else { 3 }, &line);
+        }
+        extra.retain(|e| server || e.source == "kiln-dropin");
+        out.mods.extend(extra);
     }
     out
 }
@@ -1188,6 +1213,8 @@ mod tests {
         static LAUNCH_TABLE: std::cell::RefCell<Option<Box<KilnLaunchApi>>> = const { std::cell::RefCell::new(None) };
         static ASKED: std::cell::RefCell<Vec<(String, u32)>> = const { std::cell::RefCell::new(Vec::new()) };
         static PROFILE_JSON: std::cell::Cell<&'static str> = const { std::cell::Cell::new("") };
+        /// What the fake kiln.profile's mode answers (an active profile unless a test says otherwise).
+        static PROFILE_MODE: std::cell::Cell<u32> = const { std::cell::Cell::new(KILN_PROFILE_ACTIVE) };
         static LOGGED: std::cell::RefCell<Vec<(i32, String)>> = const { std::cell::RefCell::new(Vec::new()) };
     }
 
@@ -1271,7 +1298,7 @@ mod tests {
     }
 
     fn fake_profile_table() -> *const c_void {
-        unsafe extern "C" fn mode() -> u32 { KILN_PROFILE_ACTIVE }
+        unsafe extern "C" fn mode() -> u32 { PROFILE_MODE.get() }
         unsafe extern "C" fn text() -> KilnStr { KilnStr::of(PROFILE_JSON.get()) }
         unsafe extern "C" fn zero() -> u64 { 0 }
         unsafe extern "C" fn count(_: u32) -> u32 { 0 }
@@ -1561,6 +1588,83 @@ mod tests {
             let out = mod_loader_lua::test_gate::output(std::process::Command::new(std::env::current_exe().unwrap())
                 .args(["--exact", "plugin::tests::kiln_mode_reaches_the_state_file_through_the_plugin"])
                 .env(CHILD, case).env("KILN_EML_PRESTART_GAME", &game).env_remove("KILN_SHROUDFORGE")).unwrap();
+            assert!(out.status.success() && String::from_utf8_lossy(&out.stdout).contains("1 passed"), "{case}: {}{}",
+                String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        }
+    }
+
+    /// A hosted ShroudForge start without a profile (kiln.profile's legacy layout: a server from a server pack,
+    /// 2026-11-21): kiln-eml stands aside, and the EML packages of ShroudForge's folder that it has off, and the EML mods of
+    /// kiln/eml/mods, are said in one kiln.log warning. A server's state file lists them; a client's lists only
+    /// kiln/eml/mods (its in-game menu lists ShroudForge's folder). An active profile with drop-ins off: as before. The
+    /// files are left as they are. In child processes: the API pointer, RAN and the stem are process-wide.
+    #[test]
+    fn a_hosted_stand_aside_without_a_profile_names_the_dropins_nothing_runs() {
+        const CHILD: &str = "KILN_EML_DROPINS_TEST_CHILD";
+        if let Ok(case) = std::env::var(CHILD) {
+            let game = Utf8PathBuf::from(std::env::var("KILN_EML_DROPINS_GAME").unwrap());
+            let _ = std::fs::remove_dir_all(&game);
+            let package = |dir: &str, id: &str, ext: Option<&str>| {
+                let p = game.join(dir);
+                std::fs::create_dir_all(p.join("src")).unwrap();
+                std::fs::write(p.join("mod.json"), serde_json::json!({"id": id, "name": id, "version": "1.0.0", "capabilities": ["patch"]}).to_string()).unwrap();
+                std::fs::write(p.join("src/mod.lua"), "-- fixture").unwrap();
+                if let Some(ext) = ext { std::fs::write(p.join("extended.mod.json"), ext).unwrap(); }
+            };
+            package("mods/greeneye", "greeneye", None);
+            package("mods/xhl", "xhl", Some(r#"{"schemaVersion":1,"launcher":"EML","enabled":false}"#));
+            package("mods/on", "on", Some(crate::discover::SERVER_SWITCH_FILE));
+            package("kiln/eml/mods/drop", "drop", None);
+            let before = std::fs::read_dir(game.join("mods")).unwrap().count();
+            GAME_DIR.set(game.to_string()).unwrap();
+            EXE_STEM.set(if case == "client" { "enshrouded" } else { "enshrouded_server" }.into()).unwrap();
+            if case == "profile" {
+                PROFILE_JSON.set(r#"{"mods":{"eml":[]},"dropins":false}"#);
+            } else {
+                PROFILE_MODE.set(0);  // KILN_PROFILE_LEGACY: no kiln/profile.json
+            }
+            API.store(fake_api(), Ordering::Release);
+            serve((24, 1), None, Some(record(KILN_LAUNCH_BACKEND_HOSTED, 0x001)));
+            let rc = unsafe { eml_stand_aside(KilnStr::lit("ShroudForge owns startup asset patching and runs EML packages in its mods folder")) };
+            let logged = LOGGED.with_borrow(|l| l.clone());
+            assert_eq!(rc, KILN_OK, "{logged:?}");
+            let text = std::fs::read_to_string(game.join("kiln/state/eml.json")).unwrap();
+            let state: serde_json::Value = serde_json::from_str(&text).unwrap();
+            assert_eq!(state["phase"], "aside", "{text}");
+            let rows: Vec<(String, String)> = state["mods"].as_array().unwrap().iter()
+                .map(|m| (m["id"].as_str().unwrap().to_owned(), m["state"].as_str().unwrap().to_owned())).collect();
+            let warned: Vec<&String> = logged.iter().filter(|(level, t)| *level == 2 && t.contains("EML package(s) in")).map(|(_, t)| t).collect();
+            match case.as_str() {
+                "server" => {
+                    assert_eq!(rows, [("greeneye".to_owned(), "off-in-shroudforge".to_owned()), ("xhl".into(), "off-in-shroudforge".into()),
+                        ("drop".into(), "not-loaded".into())], "{text}");
+                    assert_eq!(warned.len(), 1, "{logged:?}");
+                    assert!(warned[0].starts_with("kiln-eml: 2 EML package(s) in ") && warned[0].contains("(greeneye, xhl)")
+                        && warned[0].contains("a server needs an extended.mod.json"), "{}", warned[0]);
+                }
+                "client" => {
+                    assert_eq!(rows, [("drop".to_owned(), "not-loaded".to_owned())], "{text}");
+                    assert_eq!(warned.len(), 1, "{logged:?}");
+                    assert!(warned[0].contains("switch them on in Kiln's in-game menu"), "{}", warned[0]);
+                }
+                _ => {
+                    assert!(rows.is_empty(), "{text}");
+                    assert!(warned.is_empty() && !logged.iter().any(|(_, t)| t.contains("kiln/eml/mods")), "{logged:?}");
+                }
+            }
+            // listing only: no switch written, nothing moved
+            assert!(!game.join("mods/greeneye/extended.mod.json").exists());
+            assert_eq!(std::fs::read_dir(game.join("mods")).unwrap().count(), before);
+            crate::runner::release_game_lock(&game);
+            let _ = std::fs::remove_dir_all(&game);
+            return;
+        }
+        for case in ["server", "client", "profile"] {
+            let game = std::env::temp_dir().join(format!("kiln-eml-dropins-{case}-{}", std::process::id()));
+            let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+            child.args(["--exact", "plugin::tests::a_hosted_stand_aside_without_a_profile_names_the_dropins_nothing_runs"])
+                .env(CHILD, case).env("KILN_EML_DROPINS_GAME", &game).env_remove("KILN_SHROUDFORGE");
+            let out = mod_loader_lua::test_gate::output(&mut child).unwrap();
             assert!(out.status.success() && String::from_utf8_lossy(&out.stdout).contains("1 passed"), "{case}: {}{}",
                 String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
         }

@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: MIT
 # Headless Wine run of gate-priority-host.exe: the mod's real DLL, loaded with LoadLibrary, against the fake Kiln of
 # tests/harness.h, whose compare-exchange writes run over kiln.engine's real Windows primitives (the SEH copies and
-# writes, the Interlocked words, SetThreadPriority for the raise). Every scenario of tests/scenarios.h, one process each.
+# writes, the Interlocked words, SetThreadPriority for the raise). Every scenario of tests/scenarios.h but slow-restore, one
+# process each.
 # Build first: native/build.sh gate-priority-test gate-priority-host. Needs a private absolute WINEPREFIX; never a game
 # install or a lab prefix.
 set -euo pipefail
@@ -17,7 +18,8 @@ dll=$KILN_OUT/cmake/bin/mods/gate-priority-test/gate-priority-test.dll
 unset DISPLAY
 export WAYLAND_DISPLAY=kiln-no-display WINEDLLOVERRIDES=winedbg.exe=d WINEDEBUG=-all
 win() { printf 'Z:%s' "${1//\//\\}"; }
-scenarios=(write steps-60hz tail-3ms hang raise-off noop named named-offset named-field named-gap tracked no-padding other-world no-world no-file bad-config stop stop-warmup uncertain-change uncertain-restore)
+# slow-restore is host-only: it slows the priority restore through memory_host.cpp's hook (memory_win.cpp has none).
+scenarios=(write steps-60hz tail-3ms hang raise-off v1-stats noop named named-offset named-field named-gap tracked no-padding other-world no-world no-file bad-config stop stop-warmup uncertain-change uncertain-restore)
 log=$KILN_OUT/gate-priority-test-wine
 mkdir -p "$log"
 result=0
