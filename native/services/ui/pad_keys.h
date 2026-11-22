@@ -12,6 +12,7 @@
 //    trigger reads 0. The release is always handed over and keeps nothing.
 #pragma once
 #include <cstdint>
+#include <mutex>
 
 namespace kui::pad {
 
@@ -58,6 +59,26 @@ struct Tracker {
             }
         prev = now;
         return kept;
+    }
+};
+
+// XInput may poll one controller from several threads. Its edges and kept buttons belong to the controller,
+// not to a polling thread; serialize its synchronous consumption decisions as well as its state transitions.
+class Controllers {
+    struct State { std::mutex mu; Tracker tracker; } states_[4];
+public:
+    template <class Fn> uint32_t step(uint32_t user, uint32_t now, Fn&& fn) {
+        if (user >= 4) return 0;
+        auto& state = states_[user];
+        std::lock_guard lock(state.mu);
+        return state.tracker.step(now, fn);
+    }
+    template <class Fn> uint32_t disconnect(uint32_t user, Fn&& fn) { return step(user, 0, fn); }
+    void reset(uint32_t user) {
+        if (user >= 4) return;
+        auto& state = states_[user];
+        std::lock_guard lock(state.mu);
+        state.tracker = {};
     }
 };
 

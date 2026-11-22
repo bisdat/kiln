@@ -5,6 +5,8 @@
 
 #include <cstdio>
 #include <vector>
+#include <thread>
+#include <atomic>
 
 #include "../../../core/abi/services/kiln_ui.h"
 
@@ -73,6 +75,23 @@ int main() {
     hide(k2.step(held(0x0000, 0, 255), [](uint32_t vk, bool down, uint32_t) { return down && vk == KILN_UI_VK_PAD_RT; }), &b2, &lt2,
          &rt2);
     check(rt2 == 0 && b2 == 0x1000, "a kept trigger reads 0 to the game");
+    Controllers controllers;
+    std::atomic<int> presses{0}, releases{0};
+    auto record = [&](uint32_t, bool down, uint32_t) { (down ? presses : releases).fetch_add(1); return down; };
+    std::thread first([&] { controllers.step(0, 0x1000, record); }); first.join();
+    std::thread second([&] { controllers.step(0, 0x1000, record); }); second.join();
+    check(presses == 1, "controller state: another polling thread sees the same held edge");
+    std::thread release([&] { controllers.step(0, 0, record); }); release.join();
+    check(releases == 1 && controllers.step(0, 0x1000, record) == 0x1000 && presses == 2,
+          "controller state: cross-thread release clears suppression and permits a new press");
+    controllers.step(1, 0x1000, record);
+    check(presses == 3, "controller state: two controllers keep independent edges");
+    controllers.disconnect(0, record);
+    check(releases == 2 && controllers.step(0, 0x1000, record) == 0x1000 && presses == 4,
+          "disconnect: releases a held binding and reconnecting held is a fresh press");
+    controllers.disconnect(0, record);
+    controllers.disconnect(0, record);
+    check(releases == 3, "disconnect: an already disconnected controller emits no duplicate release");
     std::printf("%d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }
