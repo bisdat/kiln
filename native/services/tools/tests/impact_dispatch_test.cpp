@@ -53,6 +53,7 @@ void check(bool b){assert(b);++checks;}
 bool area(uintptr_t zones,uint32_t actor,const double p[3],double radius){check(zones==0x5678&&actor==7&&p[0]==0&&radius==2);return allow_area;}
 uintptr_t KILN_CALL original(KilnHookCall2* call) {
     ++calls;auto* c=reinterpret_cast<kab::NativeCtx*>(call->args[2]);
+    if(!c){check(!kiln_tools_active_policy());return call->args[0];} // a vanilla impact passed through unread
     auto* policy=kiln_tools_active_policy();check(expected_policy ? policy&&policy->policy_id==expected_policy : policy==nullptr);
     check(c->data[80]==expected_type);
     if(retire_in_call) {retire_in_call=false;retiring(2,nullptr);check(kiln_tools_active_policy()==policy && policy->pool_count==1 && policy->pool[0].item==55);}
@@ -85,11 +86,16 @@ int main(){
     hooks.code_state=nullptr;check(!kiln_tools_impact_install(&api,1,&area));hooks.code_state=&code_state;
     live_code=KILN_CODE_MANAGED;
     check(kiln_tools_impact_install(&api,1,&area));check(retiring!=nullptr);
+    // No family bound (a player without a tool mod): every impact is vanilla and passes through without its context
+    // being read, even one this hook could not read
+    {Fixture f;f.call.args[2]=0;int before=calls;kiln_tools_impact_detour(&f.call,nullptr);check(calls==before+1&&f.result[0]!=0x18);}
     KilnToolBrush brush{42,0,2};KilnToolPoolMaterial material{55,8,16,0};KilnToolFamilyDef family{};
     family.tool=99;family.brushes=&brush;family.brush_count=1;family.materials=&material;family.material_count=1;
     family.primary.mode=KILN_TOOL_MODE_REMOVE;family.primary.program=100;family.primary.flags=KILN_TOOL_TERRAIN_ONLY;family.primary.remove_cells[1]=1;
     family.secondary.mode=KILN_TOOL_MODE_ADD;family.secondary.program=101;family.secondary.flags=KILN_TOOL_TERRAIN_ONLY;
     check(kiln_tools_bind_programs(2,family));check(!kiln_tools_bind_programs(3,family));
+    // With a family bound, a context that cannot be read is refused (its program cannot be known)
+    {Fixture f;f.call.args[2]=0;int before=calls;kiln_tools_impact_detour(&f.call,nullptr);check(calls==before&&f.result[0]==0x18);}
     for(uint32_t i=0;i<KILN_TOOL_HOOK_COUNT;++i)kiln_tools_report_hook(i,1);
     check(kiln_tools_actions_ready(KILN_TOOL_POLICY_REMOVE));check(kiln_tools_actions_ready(KILN_TOOL_POLICY_ADD));
     // Presentation-only hooks are not authority requirements, including on dedicated servers.
