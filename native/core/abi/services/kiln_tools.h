@@ -1,10 +1,10 @@
 /* SPDX-License-Identifier: MIT
  * kiln.tools v1. Since 0.2.0-dev.30.5.
  * Building-tool actions use the game's building-mode input and repeat cadence, never global input hooks.
- * Dispatch is synchronous on the authoritative simulation thread (possibly a worker, NOT the tick thread).
- * A handler must only read the immutable snapshot and return a command: no tick-only APIs, blocking, async work,
- * game pointers, inventory changes or world writes. Commands are validated and committed by Kiln on the server.
- * Missing engine context, permissions, payment or history mappings refuse; never fall back to generic digging.
+ * This release supports declarative family policies only. Immutable native snapshots run on authoritative
+ * simulation workers; no managed or mod callback is invoked in an engine hook. The game's own terraform operation
+ * retains its permission, payment, mining-yield and undo machinery. Missing context or required hooks refuse the
+ * action; never fall back to generic digging. The callback registration slots are reserved and unavailable.
  */
 #ifndef KILN_TOOLS_H
 #define KILN_TOOLS_H
@@ -147,11 +147,10 @@ typedef struct KilnToolsApi {
     KilnServiceHeader header;    /* { sizeof(KilnToolsApi), KILN_TOOLS_VERSION } */
     /* Any thread. Set out->size first. */
     KilnResult(KILN_CALL* status)(KilnToolsStatus* out);
-    /* Tick thread/before first tick. Copies definition. Owner must be live; nonzero unique tool/action binding.
-     * Unavailable unless the whole engine path is qualified. No partial or generic fallback. */
+    /* Reserved ABI slot. Always KILN_ERR_UNAVAILABLE, *out=0: declarative tool actions only in this release.
+     * No callback is retained or invoked, on any thread. tools.callbacks reports POLICY with that reason. */
     KilnResult(KILN_CALL* register_action)(KilnOwner owner, const KilnToolActionDef* definition, KilnHandle* out);
-    /* Any thread. Closes admission. An already admitted callback remains pinned until it returns; the caller must
-     * not free handler/user storage until its owning mod's unload barrier has drained. */
+    /* Reserved ABI slot. No arbitrary handler registrations exist in this release; KILN_ERR_NOT_FOUND. */
     KilnResult(KILN_CALL* unregister_action)(KilnOwner owner, KilnHandle handle);
     /* Tick thread/before first tick. Publishes one immutable declarative family and its two policies. Copies all
      * inputs. Refuses if the complete required engine path is unavailable. No partial publication or generic fallback. */

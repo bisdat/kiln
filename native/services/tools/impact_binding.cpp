@@ -15,6 +15,7 @@
 
 namespace {
 struct Binding {
+    mutable std::atomic<bool> live{true};
     KilnOwner owner{};
     uint32_t tool{}, action{}, program{};
     KilnToolPolicyView policy{};
@@ -32,7 +33,8 @@ std::atomic<bool> installed{}, accepting{};
 std::atomic<uint32_t> inflight{};
 std::mutex drain_gate;
 std::condition_variable drained;
-KilnHandle impact_handle=0;
+KilnHandle impact_handle=0, owner_watch=0;
+void KILN_CALL owner_retired(KilnOwner owner,void*) {kiln_tools_unbind_programs(owner,0);}
 std::atomic<uint64_t> dispatched{}, refused{};
 struct Admission {
     bool admitted=false;
@@ -129,7 +131,10 @@ void kiln_tools_unbind_programs(KilnOwner owner,uint32_t tool) noexcept {
         auto current=bindings.load(std::memory_order_acquire);if(!current)return;
         auto next=std::make_shared<Bindings>(*current);
         for(auto i=next->begin();i!=next->end();) {
-            if(i->second->owner==owner && (!tool || i->second->tool==tool))i=next->erase(i);else ++i;
+            if(i->second->owner==owner && (!tool || i->second->tool==tool)) {
+                i->second->live.store(false,std::memory_order_release);
+                i=next->erase(i);
+            } else ++i;
         }
         bindings.store(std::move(next),std::memory_order_release);
     } catch (...) {
@@ -157,7 +162,8 @@ bool kiln_tools_impact_close() noexcept {
 void kiln_tools_impact_uninstall() noexcept {
     if(!kiln_tools_impact_close())return; // process-resident: retain all pointers if an admitted call outlasted the bound
     if(hooks && impact_handle && hooks->revoke)hooks->revoke(impact_handle);
-    impact_handle=0;
+    if(hooks && owner_watch && hooks->unsubscribe_owner_retiring)hooks->unsubscribe_owner_retiring(owner_watch);
+    impact_handle=owner_watch=0;
     bindings.store({},std::memory_order_release);
     server_world.store(0,std::memory_order_release);
     // Continuations and module code remain resident. Do not null hooks while an unrelated vanilla entry can run.
@@ -177,7 +183,8 @@ uintptr_t KILN_CALL kiln_tools_impact_detour(KilnHookCall2* call,void*) {
     auto binding=found->second;
     try {
         Admission admission;
-        if(!admission.admitted || !kiln_tools_actions_ready(binding->policy.mode))return refuse(call);
+        if(!admission.admitted || !binding->live.load(std::memory_order_acquire) ||
+           !kiln_tools_actions_ready(binding->policy.mode))return refuse(call);
         kt::ImpactCopy copy;
         uintptr_t zones=0,world=0;
         if(!prepare(&context,reinterpret_cast<const kab::ArgSlice*>(call->args[1]),binding->policy.mode,&copy,&zones,&world) ||
@@ -186,7 +193,8 @@ uintptr_t KILN_CALL kiln_tools_impact_detour(KilnHookCall2* call,void*) {
         for(const auto& brush:binding->brushes)
             if((brush.item==copy.used_item || binding->tool==copy.used_item) &&
                static_cast<double>(static_cast<float>(brush.radius))==copy.radius)brush_ok=true;
-        if(!brush_ok || !area_check(zones,copy.actor,copy.hit,copy.radius))return refuse(call);
+        if(!brush_ok || !area_check(zones,copy.actor,copy.hit,copy.radius) ||
+           !binding->live.load(std::memory_order_acquire))return refuse(call);
         kt::ToolPolicyScope scope(binding->policy);
         if(!kiln_tools_active_policy())return refuse(call); // allocation failed: never unscoped generic terraform
         RestoreArgs restore{call,call->args[1],call->args[2]};
@@ -203,14 +211,17 @@ bool kiln_tools_impact_install(const KilnApi* api,KilnOwner owner,KilnToolAreaCh
     if(!api || !owner || !check)return false;
     auto* h=static_cast<const KilnHooksApi*>(api->service({KILN_HOOKS_SERVICE,sizeof(KILN_HOOKS_SERVICE)-1},2));
     uintptr_t address=0;int64_t offset=-1;
-    if(!h || h->header.size<offsetof(KilnHooksApi,call_original2)+sizeof(h->call_original2) || !h->detour2 ||
-       !h->call_original2 || api->symbol({"gameplay/TerraformImpact",24},&address)!=KILN_OK ||
+    if(!h || h->header.size<offsetof(KilnHooksApi,unsubscribe_owner_retiring)+sizeof(h->unsubscribe_owner_retiring) ||
+       !h->detour2 || !h->call_original2 || !h->subscribe_owner_retiring || !h->unsubscribe_owner_retiring ||
+       api->symbol({"gameplay/TerraformImpact",24},&address)!=KILN_OK ||
        api->constant({"tools/area.access_zones",23},&offset)!=KILN_OK || offset<0 || offset>0x1000)return false;
     hooks=h;area_check=check;area_offset=offset;
+    if(h->subscribe_owner_retiring(owner,&owner_retired,nullptr,&owner_watch)!=KILN_OK)return false;
     // Run outside gameplay/rules: both see the copied generic arguments and retain their normal protections.
     KilnHookOrder order{sizeof(order),100,{"tools/TerrainAction",19},{"kiln.gameplay,kiln.rules",24},{},0};
     KilnHandle handle=0;
     const bool on=h->detour2(owner,address,&order,3,&kiln_tools_impact_detour,nullptr,&handle)==KILN_OK;
+    if(!on) {h->unsubscribe_owner_retiring(owner_watch);owner_watch=0;}
     impact_handle=handle;
     accepting.store(on,std::memory_order_release);
     installed.store(on,std::memory_order_release);

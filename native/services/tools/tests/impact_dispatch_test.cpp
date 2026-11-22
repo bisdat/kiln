@@ -15,6 +15,9 @@ namespace {
 int calls=0,checks=0; bool allow_area=true,nest=false,fault=false;
 uint8_t expected_type=0; uint32_t expected_policy=100;
 KilnHooksApi hooks{};
+KilnOwnerRetiringFn retiring=nullptr;
+KilnResult KILN_CALL watch(KilnOwner,KilnOwnerRetiringFn fn,void*,KilnHandle* out){retiring=fn;*out=2;return KILN_OK;}
+KilnResult KILN_CALL unwatch(KilnHandle){return KILN_OK;}
 struct Fixture {
     std::array<kab::ImpactVariable,7> layout{};
     std::array<uint8_t,256> data{};
@@ -55,8 +58,9 @@ KilnResult KILN_CALL constant(KilnStr name,int64_t* out){check(std::string_view(
 }
 int main(){
     hooks.header={sizeof(hooks),2};hooks.detour2=&detour;hooks.call_original2=&original;
+    hooks.subscribe_owner_retiring=&watch;hooks.unsubscribe_owner_retiring=&unwatch;
     KilnApi api{};api.service=&service;api.symbol=&symbol;api.constant=&constant;
-    check(kiln_tools_impact_install(&api,1,&area));
+    check(kiln_tools_impact_install(&api,1,&area));check(retiring!=nullptr);
     KilnToolBrush brush{42,0,2};KilnToolPoolMaterial material{55,8,16,0};KilnToolFamilyDef family{};
     family.tool=99;family.brushes=&brush;family.brush_count=1;family.materials=&material;family.material_count=1;
     family.primary.mode=KILN_TOOL_MODE_REMOVE;family.primary.program=100;family.primary.flags=KILN_TOOL_TERRAIN_ONLY;family.primary.remove_cells[1]=1;
@@ -82,5 +86,8 @@ int main(){
 #endif
     kiln_tools_unbind_programs(3,99);{Fixture f;int before=calls;kiln_tools_impact_detour(&f.call,nullptr);check(calls==before+1);}
     kiln_tools_unbind_programs(2,99);expected_policy=0;expected_type=255;{Fixture f;int before=calls;kiln_tools_impact_detour(&f.call,nullptr);check(calls==before+1&&!kiln_tools_active_policy());}
+    check(kiln_tools_bind_programs(2,family));retiring(2,nullptr);
+    {Fixture f;int before=calls;kiln_tools_impact_detour(&f.call,nullptr);check(calls==before+1&&!kiln_tools_active_policy());}
+    check(kiln_tools_impact_close());
     std::printf("%d impact dispatch checks passed\n",checks);
 }
