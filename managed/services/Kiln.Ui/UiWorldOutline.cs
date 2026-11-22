@@ -26,7 +26,9 @@ public sealed record OutlineOptions
     /// fill, in <see cref="Color"/>, breathing with <see cref="Pulse"/> and ending with the outline
     /// (<see cref="Duration"/>, Dispose). It draws over everything, also where the model is in view (the game's highlight
     /// still shows there too), and not while the entity is not in this client's world or the camera is not known. Its own
-    /// row: <see cref="Ui.World.ThroughWallsCapability"/> (while it is off, the outline shows without the silhouette).
+    /// row: <see cref="Ui.World.ThroughWallsCapability"/>. Asking while it is off throws <see cref="KilnUnavailableException"/>
+    /// with that row's reason. Only the native outline winner in <see cref="OutlineState.Shown"/> draws the silhouette:
+    /// the player's off setting, competing requests and the game's or another tool's highlight suppress it too.
     /// Since 0.2.0-dev.30.5 (mod API 0.2.14).</summary>
     public bool ThroughWalls { get; init; }
 
@@ -233,8 +235,9 @@ public static partial class Ui
         public const string ThroughWallsCapability = "ui.world_outline.through_walls";
 
         /// <summary>Kiln draws through-walls silhouettes in this process: the row <see cref="ThroughWallsCapability"/> is on.
-        /// While it is off an outline with <see cref="OutlineOptions.ThroughWalls"/> still shows the game's highlight, without
-        /// the silhouette. Since 0.2.0-dev.30.5 (mod API 0.2.14).</summary>
+        /// Asking for <see cref="OutlineOptions.ThroughWalls"/> while it is off throws <see cref="KilnUnavailableException"/>
+        /// with the row's reason. Existing requests draw no silhouette while it is off.
+        /// Since 0.2.0-dev.30.5 (mod API 0.2.14).</summary>
         [AnyThread]
         public static bool ThroughWallsAvailable => Capabilities.Is(ThroughWallsCapability);
 
@@ -253,7 +256,7 @@ public static partial class Ui
         /// <para>The entity is one of the client world's (a replicated entity has the server's id): props, chests,
         /// stations, NPCs, creatures, dropped items, anything drawn with a model. Voxel models and the terrain cannot be
         /// outlined (they wait with <see cref="OutlineReason.NoModel"/>). The highlight is drawn with the model, so what
-        /// stands in front of it hides it: there is no through-walls outline.</para>
+        /// stands in front of it hides it. <see cref="OutlineOptions.ThroughWalls"/> adds Kiln's own screen-space silhouette.</para>
         /// <para>Two colours (colour and pulse) show at once; a third shares the nearest one's (<see cref="WorldOutline.ColorShared"/>).
         /// On one entity the highest <see cref="OutlineOptions.Priority"/> wins, then the newest. The game's own highlight
         /// (the building cursor's) wins over mods unless the player's kiln.json says <c>"ui": {"outlines": "mods-first"}</c>;
@@ -265,7 +268,8 @@ public static partial class Ui
         /// <returns>The outline's handle: its <see cref="WorldOutline.State"/>, and <see cref="WorldOutline.Dispose"/>.</returns>
         /// <exception cref="ArgumentException">Entity 0, or a colour with alpha 0.</exception>
         /// <exception cref="KilnUnavailableException">The row <see cref="OutlineCapability"/> is off (a dedicated server,
-        /// a game build where the highlight was not found, an older kiln-core, offline).</exception>
+        /// a game build where the highlight was not found, an older kiln-core, offline), or <see cref="OutlineOptions.ThroughWalls"/>
+        /// was asked for while <see cref="ThroughWallsCapability"/> is off (the exception names that row and its reason).</exception>
         /// <exception cref="InvalidOperationException">Your mod holds 1024 outlines already, or it is unloading.</exception>
         [ClientOnly, AnyThread, RequiresCapability(OutlineCapability)]
         public static WorldOutline Outline(EntityId entity, OutlineOptions? options = null) => WorldOutlines.Add(entity, options);
@@ -289,6 +293,7 @@ internal static unsafe class WorldOutlines
         if (entity.Value == 0) throw new ArgumentException("an entity is needed (not 0)", nameof(entity));
         if (options.Color.A == 0) throw new ArgumentException("the outline's colour has alpha 0 (it would never show)", nameof(options));
         UiValueBridge.RequireCapability(Ui.World.OutlineCapability);
+        if (options.ThroughWalls) UiValueBridge.RequireCapability(Ui.World.ThroughWallsCapability);
         var t = RenderNative.T2;
         if (t == null)
             throw new KilnUnavailableException(Ui.World.OutlineCapability, RenderNative.Available
@@ -299,9 +304,8 @@ internal static unsafe class WorldOutlines
         RenderNative.Outline o = new()
         {
             Size = (uint)sizeof(RenderNative.Outline), Rgba = options.Color.Rgba, Priority = options.Priority,
-            // a kiln.render before v3 refuses the flag: the outline goes in without the silhouette there
             Flags = (options.Pulse ? RenderNative.OutlinePulse : 0) |
-                    (options.ThroughWalls && RenderNative.HasThroughWalls ? RenderNative.OutlineThroughWalls : 0),
+                    (options.ThroughWalls ? RenderNative.OutlineThroughWalls : 0),
             DurationMs = options.DurationMs,
         };
         ulong h = 0;
@@ -349,6 +353,7 @@ internal static unsafe class WorldOutlines
             Live.TryRemove(outline, out _);
             var t = RenderNative.T2;
             if (h != 0 && t != null) t->RemoveOutline(h);
+            ThroughWalls.StopIfIdle();
         }
         catch (Exception e)
         {
@@ -371,6 +376,7 @@ internal static unsafe class WorldOutlines
     {
         outline.End(reason);
         Live.TryRemove(outline, out _);
+        ThroughWalls.StopIfIdle();
     }
 
     /// <summary>Ends every outline of <paramref name="mod"/> here and clears its owner in kiln.render. Never throws.</summary>
@@ -388,6 +394,7 @@ internal static unsafe class WorldOutlines
             }
             // the owner's clear also ends what this process does not hold (and forgets its ended requests)
             if (t != null && (mod is null || mod.Owner != 0)) t->ClearOutlines(UiValueBridge.OwnerOf(mod));
+            ThroughWalls.StopIfIdle();
         }
         catch (Exception e)
         {
@@ -414,6 +421,7 @@ internal static unsafe class WorldOutlines
     internal static void ResetForTests()
     {
         Live.Clear();
+        ThroughWalls.StopIfIdle();
         lock (Watched) Watched.Clear();
     }
 }

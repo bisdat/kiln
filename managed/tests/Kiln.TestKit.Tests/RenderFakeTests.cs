@@ -47,14 +47,30 @@ public sealed unsafe class RenderFakeTests
     }
 
     [Fact]
-    public void ThroughWallsIsRecorded()
+    public void ThroughWallsIsUnavailableWithoutTheOverlay()
     {
         using var kiln = new KilnHarness();
         kiln.Step();
-        using var walls = kiln.Run(() => Ui.World.Outline(Chest, new OutlineOptions { ThroughWalls = true, Color = Color.Green }));
-        using var plain = kiln.Run(() => Ui.World.Outline(new EntityId(Chest.Value + 1)));
-        Assert.True(kiln.Outlines.Of(walls)!.ThroughWalls);
+        Assert.False(kiln.Run(() => Ui.World.ThroughWallsAvailable));
+        var e = Assert.Throws<KilnUnavailableException>(() => kiln.Run(() =>
+            Ui.World.Outline(Chest, new OutlineOptions { ThroughWalls = true, Color = Color.Green })));
+        Assert.Equal(Ui.World.ThroughWallsCapability, e.Capability);
+        Assert.Equal(CapabilityReason.ServiceMissing, kiln.Run(() => Capabilities.Get(Ui.World.ThroughWallsCapability).Reason));
+        Assert.Contains(kiln.Run(() => Capabilities.Why(Ui.World.ThroughWallsCapability)), e.Message);
+        Assert.Empty(kiln.Outlines.All);
+        using var plain = kiln.Run(() => Ui.World.Outline(Chest));
         Assert.False(kiln.Outlines.Of(plain)!.ThroughWalls);
+    }
+
+    [Fact]
+    public void TheNativeFakeRecordsTheThroughWallsFlagWithoutModellingDrawing()
+    {
+        using var kiln = new KilnHarness(); kiln.Step();
+        var table = (nint*)KitBackend.Instance.Service("kiln.render", 1);
+        uint* options = stackalloc uint[6] { 24, Color.Green.Rgba, 0, 2, 0, 0 };
+        ulong handle = 0;
+        Assert.Equal(0, ((delegate* unmanaged[Cdecl]<ulong, uint, void*, ulong*, int>)table[14])(1, Chest.Value, options, &handle));
+        Assert.True(Assert.Single(kiln.Outlines.All).ThroughWalls);
     }
 
     [Fact]
@@ -167,5 +183,20 @@ public sealed unsafe class RenderFakeTests
         kiln.Capabilities.ClearOverride(Ui.World.OutlineCapability);
         Assert.Throws<ArgumentException>(() => kiln.Run(() => Ui.World.Outline(EntityId.None)));
         Assert.Empty(kiln.Outlines.All);
+    }
+    [Theory]
+    [InlineData(24u)]
+    [InlineData(32u)]
+    public void Old_outline_info_records_are_bounded_copies(uint size)
+    {
+        using var kiln = new KilnHarness(); kiln.Step();
+        var table = (nint*)KitBackend.Instance.Service("kiln.render", 1);
+        uint* options = stackalloc uint[6] { 24, Color.Green.Rgba, 0, 0, 0, 0 };
+        ulong handle = 0;
+        Assert.Equal(0, ((delegate* unmanaged[Cdecl]<ulong, uint, void*, ulong*, int>)table[14])(1, Chest.Value, options, &handle));
+        byte* bytes = stackalloc byte[80]; new Span<byte>(bytes, 80).Fill(0xA5); *(uint*)bytes = size;
+        Assert.Equal(0, ((delegate* unmanaged[Cdecl]<ulong, void*, int>)table[15])(handle, bytes));
+        Assert.Equal(24u, *(uint*)bytes);
+        for (var i = 24; i < 80; i++) Assert.Equal((byte)0xA5, bytes[i]);
     }
 }
