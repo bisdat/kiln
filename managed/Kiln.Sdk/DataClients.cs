@@ -30,7 +30,7 @@ internal static class DataClients
         // affix kinds and pools: Kiln's own on the server; the rolls reach Kiln clients as item data, and vanilla clients need nothing
         ["affixes"] = None, ["affixPools"] = None,
         // a villager's day plan: only the server chooses tasks
-        ["routines"] = None,
+        ["routines"] = None, ["npcMotions"] = None,
         // rarity at creation and rarity upgrades: the server's rules (kiln.items); the rarity they give is the game's own item state
         ["rarityRolls"] = None, ["rarityUpgrades"] = None,
         // built by every player's game from the mod's own files

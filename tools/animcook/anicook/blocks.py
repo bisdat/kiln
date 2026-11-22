@@ -146,6 +146,7 @@ def plan(mod_dir):
     """What the blocks ask to be cooked: {"skeletons": {name: file}, "clips": {(skeleton, file): {key: entry}}, "graphs": [step], "models": [step],
     "physics": [{"model": file, "from": block, "physics": {"cloth": [...], "chains": [...]}}]}.
     Paths are the mod's. Raises BlocksError for what can't be cooked as written."""
+    npc_bodies(mod_dir)  # refuse malformed authored motion specs before either cook writes outputs
     blocks = read(mod_dir)
     skeletons, clips, graphs, models = {}, {}, [], []
     physics, physics_of = [], {}
@@ -362,3 +363,343 @@ def add_to(doc, recipe_path):
         # a body's cloth and chains, whichever step cooks its model (one of the recipe's wins over the block's): modelcook reads them with physics.json
         doc["blocksPhysics"] = p["physics"]
     return doc
+
+# Roster bodies use the existing cook, but their resources form one boot transaction, never eager assets.json entries.
+MOTION_ROLES = ("sit", "sleep", "inspect", "greet", "talk", "reaction0", "reaction1", "refuse", "idleGesture0", "idleGesture1",
+                "interaction", "greetingExtra", "farewell", "dialogOption", "attentionGreeting", "turnLeftSmall", "turnLeftBig",
+                "turnRightSmall", "turnRightBig", "jump", "door")
+FISHER_INTERACTION = "81ed77f9-4c72-4730-8b05-a5ddee9c7164"
+
+
+def npc_bodies(mod_dir):
+    """Resolve same-mod NPC parts without exposing game reflection names. Returns source specs in deterministic block order."""
+    root = Path(mod_dir)
+    if not (root / "blocks").is_dir():
+        return {}
+    definitions = {s: {} for s in ("npcs", "bodies", "animations", "npcMotions")}
+    for f in sorted((root / "blocks").glob("*.json")):
+        try:
+            doc = json.loads(_relaxed(f.read_text()))
+        except ValueError:
+            continue  # the block loader diagnoses malformed JSON
+        if not isinstance(doc, dict):
+            continue
+        for section, into in definitions.items():
+            for name, b in (doc.get(section) or {}).items():
+                # The existing block loader lets the later definition replace an earlier one (lint warns).
+                # Merely adding body planning must not turn ordinary duplicate body definitions into cook errors.
+                into[name] = b
+    manifest = root / "kiln.mod.json"
+    mod = json.loads(manifest.read_text()).get("id") if manifest.is_file() else None
+
+    def part(npc, name, field, section):
+        value = npc.get(field)
+        if isinstance(value, dict):
+            return f"{name}.{field}", value
+        if isinstance(value, str):
+            local = value
+            if ":" in local:
+                owner, local = local.split(":", 1)
+                if owner != mod:
+                    if field == "body" and not npc.get("motions") and not npc.get("animation"):
+                        return local, None  # an existing vanilla-body reference is not this cook's closure
+                    raise BlocksError(f"npcs.{name}.{field}: cross-mod body dependencies are not supported")
+            return local, definitions[section].get(local)
+        return None, None
+
+    out = {}
+    for name, npc in sorted(definitions["npcs"].items()):
+        if not isinstance(npc, dict):
+            continue
+        bn, body = part(npc, name, "body", "bodies")
+        if not isinstance(body, dict) or not body.get("model"):
+            continue
+        an, animation = part(npc, name, "animation", "animations")
+        _, motions = part(npc, name, "motions", "npcMotions")
+        if not isinstance(animation, dict) or not animation.get("clips"):
+            raise BlocksError(f"npcs.{name}.animation: an authored roster body needs this mod's cooked animation")
+        if not isinstance(motions, dict):
+            raise BlocksError(f"npcs.{name}.motions: an authored roster body needs motion bindings")
+        if body.get("template") not in (None, "NPC_Workshop_Fisher_Trader") or body.get("like") not in (None, "fisher", "villager"):
+            raise BlocksError(f"npcs.{name}.body: only the Fisher/Villager chassis is supported")
+        _body_geometry(body, f"npcs.{name}.body")
+        _motion_shape(motions, f"npcs.{name}.motions")
+        sk = body.get("skeleton") or stem(body["model"])
+        if sk != (animation.get("skeleton") or stem(animation["clips"])):
+            raise BlocksError(f"npcs.{name}.animation: body and animation must use the same skeleton")
+        out[name] = {"key": npc.get("was") or name, "body": body, "animation": animation, "motions": motions,
+                     "skeletonName": sk, "graphName": f"{an}.{bn}" if body.get("slots") else an,
+                     "modelName": model_name(body["model"])}
+    return out
+
+
+def _body_geometry(body, where, box=None):
+    import math
+    if body.get("scale", 1) != 1:
+        raise BlocksError(f"{where}.scale: an authored roster body keeps scale 1")
+    if body.get("colliders"):
+        raise BlocksError(f"{where}.colliders: use Size, not custom roster colliders")
+    size = body.get("size")
+    if not isinstance(size, dict):
+        raise BlocksError(f"{where}.size: an explicit radius and height are required")
+    for key, lo, hi in (("radius", .05, 4), ("height", .1, 8)):
+        value = size.get(key)
+        if type(value) not in (float, int) or not math.isfinite(value) or not lo <= value <= hi:
+            raise BlocksError(f"{where}.size.{key}: a finite value in [{lo}, {hi}] metres")
+    slots = {_slot(k): v for k, v in (body.get("slots") or {}).items()}
+    for slot in ("Root", "Head", "HandR"):
+        if not isinstance(slots.get(slot), str) or not slots[slot].strip():
+            raise BlocksError(f"{where}.slots[{slot}]: the authored rig needs this joint")
+    if box is not None:
+        try:
+            mn = [box["min"][k] for k in "xyz"]
+            mx = [box["max"][k] for k in "xyz"]
+            valid = all(math.isfinite(v) for v in mn + mx) and all(a <= b for a, b in zip(mn, mx))
+            valid = valid and abs(mn[1]) <= .050001 and mx[1] <= size["height"] + .000001
+            valid = valid and all(abs(v) <= size["radius"] + .000001 for v in (mn[0], mx[0], mn[2], mx[2]))
+        except (KeyError, TypeError, ValueError):
+            valid = False
+        if not valid:
+            raise BlocksError(f"{where}.size: model bounds must fit the radius-height box with its floor within 0.05 m of Y0")
+
+
+def _motion_shape(motions, where):
+    import uuid
+    fallback = motions.get("optionalFallback")
+    if fallback is not None and (not isinstance(fallback, str) or not fallback.strip()):
+        raise BlocksError(f"{where}.optionalFallback: a graph state name")
+    bindings = motions.get("bindings", [])
+    if not isinstance(bindings, list):
+        raise BlocksError(f"{where}.bindings: a list")
+    seen = set()
+    for i, b in enumerate(bindings):
+        at = f"{where}.bindings[{i}]"
+        if not isinstance(b, dict) or set(b) - {"role", "variant", "state", "interactionKey"}:
+            raise BlocksError(f"{at}: a binding with role, variant, state and optional interactionKey only")
+        role, variant = b.get("role"), b.get("variant")
+        if role not in MOTION_ROLES:
+            raise BlocksError(f"{at}.role: a known NPC motion role")
+        if type(variant) is not int or not 0 <= variant < (3 if role in ("sit", "sleep", "door") else 1):
+            raise BlocksError(f"{at}.variant: not a variant of {role}")
+        if (role, variant) in seen:
+            raise BlocksError(f"{at}: duplicate {role} variant {variant}")
+        seen.add((role, variant))
+        if not isinstance(b.get("state"), str) or not b["state"].strip():
+            raise BlocksError(f"{at}.state: a graph state name")
+        try:
+            key = str(uuid.UUID(b["interactionKey"])) if b.get("interactionKey") else None
+        except (ValueError, TypeError, AttributeError):
+            key = None
+        if (role == "interaction" and key != FISHER_INTERACTION) or (role != "interaction" and b.get("interactionKey") is not None):
+            raise BlocksError(f"{at}.interactionKey: only Interaction takes the supported nonzero Fisher interaction key")
+    for role in MOTION_ROLES:
+        for v in range(3 if role in ("sit", "sleep", "door") else 1):
+            if (role, v) not in seen and (role in ("sit", "sleep", "inspect", "jump", "door") or not motions.get("optionalFallback")):
+                raise BlocksError(f"{where}.bindings: missing {role} variant {v}; required motions cannot fall back, optional motions need optionalFallback")
+    if set(motions) - {"bindings", "optionalFallback"}:
+        raise BlocksError(f"{where}: unknown motion field")
+
+
+def body_step(recipe_path, step):
+    """Does a step contribute to an authored NPC closure? All graphs/clips on its skeleton join the same deferred group."""
+    specs = npc_bodies(mod_dir_of(recipe_path) or Path(recipe_path).parent.parent)
+    for spec in specs.values():
+        op = step.get("op")
+        if op == "model" and step.get("name") == spec["modelName"]:
+            return True
+        if op == "skeleton" and step.get("name") == spec["skeletonName"]:
+            return True
+        if op in ("clips", "graph") and step.get("skeleton") == spec["skeletonName"]:
+            return True
+    return False
+
+
+def _body_bindings(spec, graph, clips, where):
+    import math
+    motion, anim = spec["motions"], spec["animation"]
+    states = graph.get("states", {})
+
+    def target(name, role, variant, fallback, path):
+        state = states.get(name)
+        if state is None:
+            # Engine state names are case insensitive in AnimState; custom names are not.
+            canonical = next((engine for engine in ENGINE_FIELDS.values() if engine.lower() == name.lower()), name)
+            state = states.get(canonical)
+        else:
+            canonical = name
+        if not state or not state.get("guid"):
+            raise BlocksError(f"{path}: the cooked graph has no GUID-bearing state {name!r}")
+        engine_field = next((f for f, engine in ENGINE_FIELDS.items() if engine == canonical), None)
+        value = anim.get(engine_field) if engine_field else (anim.get("states") or {}).get(canonical)
+        if value is None and canonical in ("IdleCombat", "Fall", "Dead", "Stagger", "Stun"):
+            value = anim.get("stagger") or anim.get("hit") if canonical in ("Stagger", "Stun") else None
+            value = value or anim.get("idle")
+        c = clip_spec(value, path)
+        if "blend" in c:
+            raise BlocksError(f"{path}: a motion needs one clip, not a blend")
+        speed = c.get("speed", 1)
+        if not isinstance(speed, (int, float)) or not math.isfinite(speed) or speed <= 0:
+            raise BlocksError(f"{path}: finite positive speed required")
+        key, _ = clip_key(spec["skeletonName"], c["clip"], canonical in LOOPED, c)
+        cooked = (clips or {}).get("clips", {}).get(key)
+        if not cooked or cooked.get("skeleton") != graph.get("skeleton"):
+            raise BlocksError(f"{path}: missing clip {key!r} on the body's skeleton; cook again")
+        seconds = cooked.get("duration", 0) / speed
+        if not math.isfinite(seconds) or seconds <= 0 or seconds * 1e9 >= 2**63:
+            raise BlocksError(f"{path}: finite positive cooked duration required")
+        ns = math.floor(seconds * 1e9 + 0.5)
+        if ns <= 0:
+            raise BlocksError(f"{path}: duration rounds to zero nanoseconds")
+        loop = c.get("loop", canonical in LOOPED)
+        if not fallback and role in ("sit", "sleep") and bool(loop) != (variant == 1):
+            raise BlocksError(f"{path}: Sit/Sleep entry and exit must not loop; their middle variant must loop")
+        return {"state": state["guid"], "durationNs": ns, "loop": bool(loop) and not fallback, "clamp": fallback}
+
+    fallback = motion.get("optionalFallback")
+    if fallback:
+        target(fallback, "greet", 0, True, f"{where}.optionalFallback")
+    out = []
+    for role in MOTION_ROLES:
+        for v in range(3 if role in ("sit", "sleep", "door") else 1):
+            b = next((b for b in motion.get("bindings", []) if b["role"] == role and b["variant"] == v), None)
+            row = target(b["state"] if b else fallback, role, v, b is None, f"{where}.{role}[{v}].state")
+            row.update(role=role, variant=v)
+            if role == "interaction":
+                row["interactionKey"] = FISHER_INTERACTION
+            out.append(row)
+    return out
+
+
+def body_manifest(recipe_path, entries, update, selected=None, producer="modelcook"):
+    """Split the current cook's entries, merge producer-owned chunks, hash every owned file. No game resource is published here.
+
+    A partial two-tool cook is explicitly incomplete; missing model bytes on a server or unlowered material blocks cannot become Ready.
+    Paths inside the boot manifest are mod-relative (ordinary assets.json remains assets-relative, unchanged for old mods).
+    Returns ordinary entries and missing/mismatched deferred entries for the cook report.
+    """
+    import hashlib
+    from . import cookpaths as CP
+    root = mod_dir_of(recipe_path) or Path(recipe_path).parent.parent
+    specs = npc_bodies(root)
+    if not specs and not (Path(root) / "assets/npc-bodies.v1.json").exists():
+        return entries, [], []
+    try:
+        path = CP.npc_manifest(recipe_path)
+        old = json.loads(path.read_text()) if path.exists() else {"format": 1, "entries": [], "bodies": {}}
+        sources = {}
+        for file in sorted({s[field][key] for s in specs.values() for field, key in (("body", "model"), ("animation", "clips"))}):
+            raw = CP.source(recipe_path, file).read_bytes()
+            sources[file] = hashlib.sha256(raw).hexdigest()
+            if Path(file).suffix.lower() == ".glb":
+                if len(raw) < 20 or raw[:4] != b"glTF" or raw[16:20] != b"JSON":
+                    raise BlocksError(f"{file}: an NPC body source must be a valid GLB")
+                document = json.loads(raw[20:20 + int.from_bytes(raw[12:16], "little")].rstrip(b"\0 \t\r\n"))
+            else:
+                document = json.loads(raw)
+            # An external glTF buffer/image can change without changing the glTF JSON. Both producers must then
+            # rebuild their part; hashing only the container would let one reuse an obsolete model or rig.
+            for section in ("buffers", "images"):
+                for entry in document.get(section, []):
+                    uri = entry.get("uri")
+                    if isinstance(uri, str) and not uri.startswith("data:"):
+                        relative = (Path(file).parent / uri).as_posix()
+                        sources[relative] = hashlib.sha256(CP.source(recipe_path, relative).read_bytes()).hexdigest()
+        source_hash = hashlib.sha256(json.dumps({"specs": specs, "sources": sources}, sort_keys=True,
+                                                separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+        selected = set(selected) if selected is not None else {e["file"] for e in entries} if specs else set()
+        normal, deferred = [], []
+        for e in entries:
+            if e["file"] not in selected:
+                normal.append(e)
+                continue
+            if e.get("mode", "new") != "new":
+                raise BlocksError("an NPC body closure may contain new owned resources only, never a vanilla override")
+            row = dict(e, producer=producer, sourceHash=source_hash)
+            file = CP.cooked(recipe_path, e["file"], "an NPC body's asset")
+            row["file"] = file.relative_to(root).as_posix()
+            # Model blob patches use the same path base as the manifest.
+            if row.get("patch"):
+                row["patch"] = [dict(p, blob=CP.cooked(recipe_path, p["blob"], "an NPC body's blob").relative_to(root).as_posix()) for p in row["patch"]]
+            previous = next((x for x in old.get("entries", []) if x.get("producer") == producer and x.get("kind") == row["kind"] and
+                             x.get("file") == row["file"] and x.get("sourceHash") == source_hash), {})
+            row["sha256"] = hashlib.sha256(file.read_bytes()).hexdigest() if file.is_file() else previous.get("sha256")
+            deferred.append(row)
+        wanted = [dict(e) for e in old.get("entries", []) if e.get("producer") != producer] + deferred if specs else []
+        wanted.sort(key=lambda e: (e["file"], e.get("kind", ""), e.get("type", "")))
+        # Only the tool that rebuilt a file can establish its expected hash. Validate the other producer's bytes,
+        # but never bless corruption by replacing that producer's expected digest (or mutating the old manifest).
+        foreign_mismatched = []
+        for e in wanted:
+            file = CP.cooked(recipe_path, Path(root) / e["file"], "an NPC body's asset")
+            if e.get("producer") != producer and file.is_file() and hashlib.sha256(file.read_bytes()).hexdigest() != e.get("sha256"):
+                foreign_mismatched.append(e)
+            # A server does not cook RenderModel bytes. Keep the shipped expected hash for unchanged sources;
+            # readiness and receipts are checked by the boot consumer, never inferred from this manifest.
+        bodies = {}
+        recipe = json.loads(Path(recipe_path).read_text())
+        cooked_dir = Path(recipe_path).parent / recipe.get("out", "cooked")
+        anim_current = any(e.get("producer") == "animcook" and e.get("sourceHash") == source_hash for e in wanted)
+        model_current = any(e.get("producer") == "modelcook" and e.get("sourceHash") == source_hash for e in wanted)
+
+        def metadata(file):
+            checked = CP.cooked(recipe_path, file, "an NPC body's metadata")
+            return json.loads(checked.read_text()) if checked.is_file() else None
+
+        for name, spec in specs.items():
+            graph = metadata(cooked_dir / f"{spec['graphName']}.graph.json")
+            model = metadata(cooked_dir / f"{spec['modelName'].replace('/', '_')}.model.json")
+            previous = old.get("bodies", {}).get(name)
+            if model is None and previous and previous.get("spec") == spec and wanted == old.get("entries", []) and all(e.get("sourceHash") == source_hash for e in wanted):
+                bodies[name] = previous  # preserve the author's complete expected bundle on a server, byte for byte
+                continue
+            clips = metadata(cooked_dir / "clips.json")
+            bindings = _body_bindings(spec, graph, clips, f"npcs.{name}.motions") if graph and clips and anim_current else []
+            materials, dependencies = [], {}
+            def dependency(file):
+                checked = CP.source(recipe_path, str(file))
+                rel = checked.relative_to(root).as_posix()
+                dependencies[rel] = {"file": rel, "sha256": hashlib.sha256(checked.read_bytes()).hexdigest()}
+                return dependencies[rel]
+            for file in (cooked_dir / f"{spec['graphName']}.graph.json", cooked_dir / f"{spec['modelName'].replace('/', '_')}.model.json", cooked_dir / "clips.json"):
+                if file.is_file():
+                    dependency(file.relative_to(root).as_posix())
+            from .graphgen import derive
+            for material_file in sorted((Path(root) / "blocks").glob("*.json")):
+                document = json.loads(_relaxed(CP.source(recipe_path, material_file.relative_to(root).as_posix()).read_text()))
+                for key, block in (document.get("materials") or {}).items():
+                    if not model or derive(graph["mod"] if graph else json.loads((Path(root) / "kiln.mod.json").read_text())["id"], "material", block.get("was") or key) not in model.get("materials", []):
+                        continue
+                    item = dependency(material_file.relative_to(root).as_posix())
+                    if item not in materials:
+                        materials.append(item)
+                    def textures(value):
+                        if isinstance(value, dict):
+                            for v in value.values():
+                                textures(v)
+                        elif isinstance(value, str) and value.lower().endswith(".png"):
+                            dependency(value)
+                    textures(block)
+            if model and model_current:
+                if not model.get("boundingBox"):
+                    raise BlocksError(f"npcs.{name}.body.size: the cooked model has no bounds; cook again")
+                _body_geometry(spec["body"], f"npcs.{name}.body", model["boundingBox"])
+            if model and graph and anim_current and model_current and model.get("skeleton") != graph.get("skeleton"):
+                raise BlocksError(f"npcs.{name}.body.model: model and graph skeletons differ")
+            # G2: material JSON hashes are dependencies, NOT evidence of lowered material resource bytes.
+            bodies[name] = {"key": spec["key"], "spec": spec, "model": model.get("guid") if model else None,
+                            "graph": graph.get("guid") if graph else None, "skeleton": graph.get("skeleton") if graph else None,
+                            "bindings": bindings, "materialBlocks": materials, "files": [dependencies[k] for k in sorted(dependencies)],
+                            "complete": bool(model and graph and bindings and anim_current and model_current and wanted and
+                                             all(e.get("sha256") and e.get("sourceHash") == source_hash for e in wanted) and not materials)}
+        doc = {"format": 1, "entries": wanted, "bodies": bodies}
+        have = {(e["kind"], e["file"]): e for e in old.get("entries", [])}
+        missing = [e for e in deferred if (e["kind"], e["file"]) not in have]
+        mismatch = [e for e in deferred if (e["kind"], e["file"]) in have and have[(e["kind"], e["file"])] != e]
+        if update:
+            if doc != old and not foreign_mismatched:
+                CP.write(path, (json.dumps(doc, indent=2, sort_keys=True) + "\n").encode())
+            if not foreign_mismatched:
+                missing, mismatch = [], []
+        return normal, missing, mismatch + foreign_mismatched
+    except (CP.Refused, OSError, ValueError) as e:
+        raise BlocksError(f"npc-bodies.v1: {e}") from e

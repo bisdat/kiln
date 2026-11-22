@@ -424,12 +424,21 @@ class Run:
         return {"op": "graph", "name": name, "guid": guid, "bytes": len(raw), "ok": True, **{k: info[k] for k in ("nodes", "warnings") if k in info}, "states": len(info.get("states", {})), "nested": info.get("nested", False)}
 
     def run(self, update_manifest=False, game_info=None, types_info=None):
+        deferred_files = set()
+        if B.npc_bodies(B.mod_dir_of(self.p) or self.dir.parent):
+            try:
+                CP.npc_manifest(self.p)  # all paths checked before the first output is written
+            except CP.Refused as e:
+                raise RecipeError(str(e)) from e
         for i, st in own_steps(self.doc):
+            before = len(self.entries)
             fn = {"skeleton": self.skeleton_step, "clips": self.clips_step, "graph": self.graph_step}[st["op"]]
             try:
                 r = fn(st)
             except (K.SkeletonError, G.GraphError, ValueError) as e:
                 raise RecipeError(f"step {i} ({st['op']}): {e}") from e
+            if B.body_step(self.p, st):
+                deferred_files.update(e["file"] for e in self.entries[before:])
             r["step"] = i
             self.reports.append(r)
         out_dir = self.dir / self.out
@@ -444,15 +453,24 @@ class Run:
                 CP.write(f, data)
         except CP.Refused as e:
             raise RecipeError(f"{self.p}: {e}") from e
+        try:
+            normal, body_missing, body_mismatched = B.body_manifest(self.p, self.entries, update_manifest, deferred_files, TOOL)
+        except B.BlocksError as e:
+            raise RecipeError(str(e)) from e
         man = json.loads(mp.read_text()) if mp.exists() else {"format": 1, "entries": []}
+        eager = [e for e in man.get("entries", []) if e.get("file") in deferred_files]
+        if eager and update_manifest:
+            man["entries"] = [e for e in man["entries"] if e.get("file") not in deferred_files]
         have = {(e.get("kind"), e.get("file")): e for e in man.get("entries", [])}
-        missing = [e for e in self.entries if (e["kind"], e["file"]) not in have]
-        mismatched = [e for e in self.entries if (e["kind"], e["file"]) in have and have[(e["kind"], e["file"])] != e]
-        if update_manifest and (missing or mismatched):
-            keys = {(e["kind"], e["file"]) for e in self.entries}
-            man["entries"] = [x for x in man.get("entries", []) if (x.get("kind"), x.get("file")) not in keys] + self.entries
+        missing = [e for e in normal if (e["kind"], e["file"]) not in have]
+        mismatched = [e for e in normal if (e["kind"], e["file"]) in have and have[(e["kind"], e["file"])] != e]
+        if update_manifest and (missing or mismatched or eager or deferred_files and not mp.exists()):
+            keys = {(e["kind"], e["file"]) for e in normal}
+            man["entries"] = [x for x in man.get("entries", []) if (x.get("kind"), x.get("file")) not in keys] + normal
             CP.write(mp, (json.dumps(man, indent=2) + "\n").encode())
             missing, mismatched = [], []
+        missing += body_missing
+        mismatched += body_mismatched + ([] if update_manifest else eager)
         ok = all(r.get("ok") for r in self.reports) and not missing and not mismatched
         rep = {"recipe": str(self.p), "recipe_sha256": sha256(self.p.read_bytes()), "ok": ok, "mod": self.mod, "game": game_info, "types": types_info,
                "sources": {s: sha256((self.dir / s).read_bytes()) for s in sources_of(self.doc, self.dir)},

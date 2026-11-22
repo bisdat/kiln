@@ -79,6 +79,24 @@ internal static class BlockCapabilities
     /// <summary>For tests: report again at the next <see cref="Ensure"/>.</summary>
     internal static void Rearm() => Interlocked.Exchange(ref _reported, 0);
 
+    // ---- roster bodies ---------------------------------------------------------------------------------------
+    internal const string NpcBody = "blocks.npc_body";
+
+    internal static Row NpcBodyRow(bool bootpack, Func<string, Capability> get)
+    {
+        if (!bootpack) return new(CapabilityState.Unavailable, CapabilityReason.ServiceMissing,
+            "quests.boot_pack: kiln.bootpack v1 is not loaded; custom roster bodies need atomic boot publication");
+        foreach (var name in new[] { "quests.boot_pack", "quests.npc", "assets.resources", "assets.content" })
+        {
+            var dependency = get(name);
+            if (!dependency.IsAvailable) return new(CapabilityState.Unavailable, dependency.Reason,
+                $"{name}: {dependency.ReasonText}");
+        }
+        return new(CapabilityState.Available, CapabilityReason.None, null);
+    }
+
+    internal static Row CurrentNpcBodyRow() => NpcBodyRow(ServiceCaps.Probe("kiln.bootpack"), Capabilities.Get);
+
     // ---- villager routines (0.2.0-dev.31; docs/kiln/services/routines.md) ------------------------------------------
     // routines.decisions is a sigdb feature kiln.routines serves (the villager task chooser and its sleep check); nothing
     // holds it (its guided check 16g-cc16g is the owner's game pass); Kiln.Blocks only lowers it where the service is not here (BlocksRows.Report:

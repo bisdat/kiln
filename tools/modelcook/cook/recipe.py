@@ -481,6 +481,13 @@ def run(path, k, t, exe_sha256=None, update_manifest=False, given=None):
             except FT.FeatureOff as e:
                 raise RecipeError(str(e)) from e
     with_physics = set()
+    try:
+        from anicook import blocks as AB
+    except ImportError:
+        AB = None
+    deferred_files = set()
+    if AB is not None and AB.npc_bodies(mod_dir):
+        _checked(p, CP.npc_manifest)
     own = None
     mod_files = {}  # what goes in the mod's folder rather than beside the recipe: blocks made from a glTF, and PNGs that were embedded in it
     for i, st in own_steps(doc):
@@ -520,7 +527,10 @@ def run(path, k, t, exe_sha256=None, update_manifest=False, given=None):
                 for ext in ("bin", "blob"):  # the names its entries carry: checked like the files a client's cook writes
                     _checked(p, CP.cooked, base_dir / f"{out}/{stem}.{ext}", f"the output {out}/{stem}.{ext} of step {i}")
                 guid, mode = S.model_identity(_model_guid(doc, st, inputs, p), inputs[base_id]["guid"] if base_id else None, st.get("mode"))
-                entries.extend(S.model_entries(guid, mode, f"{out}/{stem}.bin", f"{out}/{stem}.blob"))
+                generated = S.model_entries(guid, mode, f"{out}/{stem}.bin", f"{out}/{stem}.blob")
+                entries.extend(generated)
+                if AB is not None and AB.body_step(p, st):
+                    deferred_files.update(e["file"] for e in generated)
                 reports.append({"op": op, "step": i, "name": st.get("name") or stem, "guid": guid,
                                 "ok": True, "skipped": SKIPPED, "warnings": from_gltf})
                 continue
@@ -537,6 +547,8 @@ def run(path, k, t, exe_sha256=None, update_manifest=False, given=None):
         r["step"] = i
         files.update(f)
         entries.extend(e)
+        if AB is not None and AB.body_step(p, st):
+            deferred_files.update(entry["file"] for entry in e)
         reports.append(r)
 
     unused = sorted(set(physics.models) - with_physics)
@@ -564,8 +576,18 @@ def run(path, k, t, exe_sha256=None, update_manifest=False, given=None):
         if not f.is_file() or f.read_bytes() != data:
             _checked(f, CP.write, data)
 
-    # the committed assets.json must name every output exactly as cooked: a client's outputs on either side
+    # Roster resources are one deferred boot group. Other mods' assets.json is byte-for-byte the existing format.
+    body_missing, body_mismatched = [], []
+    if AB is not None:
+        try:
+            entries, body_missing, body_mismatched = AB.body_manifest(p, entries, update_manifest, deferred_files, TOOL)
+        except AB.BlocksError as e:
+            raise RecipeError(str(e)) from e
+    # the committed assets.json must name every ordinary output exactly as cooked: a client's outputs on either side
     man = json.loads(mp.read_text()) if mp.exists() else {"format": 1, "entries": []}
+    eager = [e for e in man.get("entries", []) if e.get("file") in deferred_files]
+    if eager and update_manifest:
+        man["entries"] = [e for e in man["entries"] if e.get("file") not in deferred_files]
     have = {(e.get("kind"), e.get("file")): e for e in man.get("entries", [])}
     want = {(e["kind"], e["file"]): e for e in entries}
     # "side": "client" on a model's entry, the entry otherwise as cooked. A server's cook of 0.2.0-dev.26 wrote that mark into its copy of the
@@ -580,7 +602,7 @@ def run(path, k, t, exe_sha256=None, update_manifest=False, given=None):
     mismatched = [e for e in entries if (e["kind"], e["file"]) in have and have[(e["kind"], e["file"])] != e and not _is_marked(have[(e["kind"], e["file"])], e)]
     unmarked = []
     heal = legacy and update_manifest
-    if update_manifest and (missing or mismatched or heal):
+    if update_manifest and (missing or mismatched or heal or eager or deferred_files and not mp.exists()):
         if heal:
             for x in marked:
                 del x["side"]  # in place and nothing else: a file the cook wrote before the mark is the shipped one again, byte for byte
@@ -594,6 +616,8 @@ def run(path, k, t, exe_sha256=None, update_manifest=False, given=None):
         _checked(mp, CP.write, (json.dumps(man, indent=2) + "\n").encode())
         missing, mismatched = [], []
 
+    missing += body_missing
+    mismatched += body_mismatched + ([] if update_manifest else eager)
     ok = all(r.get("ok") for r in reports) and not missing and not mismatched
     report = {
         "recipe": str(p), "recipe_sha256": S.sha256(_recipe_bytes(p, given)), "ok": ok,

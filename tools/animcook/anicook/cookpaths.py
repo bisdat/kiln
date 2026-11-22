@@ -135,6 +135,28 @@ def manifest(recipe_path, target):
     return Path(mod).joinpath(*MANIFEST)
 
 
+def source(recipe_path, relative):
+    """A read-only dependency under this mod, without links or parent traversal; never an output permission."""
+    mod = mod_root(recipe_path)
+    if not isinstance(relative, str) or Path(relative).is_absolute() or ".." in relative.replace("\\", "/").split("/"):
+        raise Refused(f"{relative!r}: an NPC dependency must be a mod-relative path without parent traversal")
+    parts, full = _under(mod, Path(mod) / relative)
+    if parts is None:
+        raise Refused(f"{full}: an NPC dependency must belong to this mod")
+    return Path(mod).joinpath(*_spelled(mod, parts))
+
+
+def npc_manifest(recipe_path):
+    """The boot-only body manifest, never the eager assets loader's manifest; same path and link checks."""
+    mod = mod_root(recipe_path)
+    target = Path(mod) / "assets" / "npc-bodies.v1.json"
+    parts, full = _under(mod, target)
+    expected = ("assets", "npc-bodies.v1.json")
+    if parts is None or tuple(_spelled(mod, parts)) != expected:
+        raise Refused(f"the NPC body manifest is {full}: it must be the mod's own assets/npc-bodies.v1.json, without links")
+    return Path(mod).joinpath(*expected)
+
+
 def blocks_file(recipe_path, target):
     """`target` is a file blocks/<name>.materials.json directly in the mod's blocks folder, and no link. -> its path."""
     mod = mod_root(recipe_path)

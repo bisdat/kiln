@@ -144,6 +144,7 @@
       "additionalProperties": { "$ref": "#/$defs/creature" }
     },
     "npcs": { "type": "object", "description": "Friendly NPCs: talk, wares, a place in the roster.", "propertyNames": { "$ref": "#/$defs/name" }, "additionalProperties": { "$ref": "#/$defs/npc" } },
+    "npcMotions": { "type": "object", "propertyNames": { "$ref": "#/$defs/name" }, "additionalProperties": { "$ref": "#/$defs/npcMotions" } },
     "bodies": { "type": "object", "description": "Bodies, for creatures and NPCs to name.", "propertyNames": { "$ref": "#/$defs/name" }, "additionalProperties": { "$ref": "#/$defs/body" } },
     "animations": {
       "type": "object",
@@ -1914,6 +1915,116 @@
         "drops": { "oneOf": [ { "$ref": "#/$defs/ref" }, { "$ref": "#/$defs/lootTable" } ], "description": "What it drops when it dies, besides what the game gives it: a lootTables block by name, or a table written here. Kiln rolls it where the death is reported." }
       }
     },
+    "npcMotions": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "bindings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "role",
+              "variant",
+              "state"
+            ],
+            "properties": {
+              "role": {
+                "enum": [
+                  "sit",
+                  "sleep",
+                  "inspect",
+                  "greet",
+                  "talk",
+                  "reaction0",
+                  "reaction1",
+                  "refuse",
+                  "idleGesture0",
+                  "idleGesture1",
+                  "interaction",
+                  "greetingExtra",
+                  "farewell",
+                  "dialogOption",
+                  "attentionGreeting",
+                  "turnLeftSmall",
+                  "turnLeftBig",
+                  "turnRightSmall",
+                  "turnRightBig",
+                  "jump",
+                  "door"
+                ]
+              },
+              "variant": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 2
+              },
+              "state": {
+                "type": "string",
+                "minLength": 1
+              },
+              "interactionKey": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "role": {
+                      "enum": [
+                        "sit",
+                        "sleep",
+                        "door"
+                      ]
+                    }
+                  }
+                },
+                "else": {
+                  "properties": {
+                    "variant": {
+                      "const": 0
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "role": {
+                      "const": "interaction"
+                    }
+                  }
+                },
+                "then": {
+                  "required": [
+                    "interactionKey"
+                  ],
+                  "properties": {
+                    "interactionKey": {
+                      "const": "81ed77f9-4c72-4730-8b05-a5ddee9c7164"
+                    }
+                  }
+                },
+                "else": {
+                  "not": {
+                    "required": [
+                      "interactionKey"
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "optionalFallback": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
     "npc": {
       "type": "object",
       "additionalProperties": false,
@@ -1924,6 +2035,7 @@
         "was": { "type": "string" },
         "body": { "oneOf": [ { "$ref": "#/$defs/ref" }, { "$ref": "#/$defs/body" } ] },
         "animation": { "oneOf": [ { "$ref": "#/$defs/ref" }, { "$ref": "#/$defs/animation" } ] },
+        "motions": { "oneOf": [ { "$ref": "#/$defs/ref" }, { "$ref": "#/$defs/npcMotions" } ] },
         "ai": { "oneOf": [ { "$ref": "#/$defs/ref" }, { "$ref": "#/$defs/ai" } ] },
         "behaviour": { "oneOf": [ { "$ref": "#/$defs/ref" }, { "$ref": "#/$defs/behaviour" } ] },
         "talk": { "type": "string", "description": "A dialogue block or quests/*.json dialogue of this mod. Another mod's dialogue is not supported by the startup build." },

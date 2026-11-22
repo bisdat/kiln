@@ -21,6 +21,8 @@ internal static class BlocksRows
         // BootDefinitions needs mods.boot, the core's row (sigdb and kiln.boot): with no core it has none, so it is reported here
         if (!ServiceCaps.Probe("kiln.boot"))
             ServiceCaps.Report("mods.boot", CapabilityState.Unavailable, CapabilityReason.Offline, "kiln.boot is not here (no Kiln core): no boot phase in this process");
+        var body = BlockCapabilities.CurrentNpcBodyRow();
+        ServiceCaps.Report(BlockCapabilities.NpcBody, body.State, body.Reason, body.Text);
         BlockCapabilities.Ensure();
         KindCapabilities.Ensure();
         AffixRuntime.RefreshCapabilities();

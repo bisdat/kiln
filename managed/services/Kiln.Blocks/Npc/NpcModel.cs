@@ -596,6 +596,8 @@ public sealed record NpcBlock : INpcBlock
     public string? Was { get; init; }
     public required PartRef<BodyBlock> Body { get; init; }
     public PartRef<AnimationBlock>? Animation { get; init; }
+    /// <summary>The authored graph states for this roster body's sit, sleep, dialogue and navigation motions. Required with <see cref="BodyBlock.Model"/>.</summary>
+    public PartRef<NpcMotionsBlock>? Motions { get; init; }
     public PartRef<AIBlock>? AI { get; init; }
     public PartRef<BehaviourBlock>? Behaviour { get; init; }
     /// <summary>What it says: a dialogue (<c>Dialogues.Define</c>), or the handle of a <see cref="DialogueBlock"/>: <c>Talk = Blocks.Define("tobin-talk", new DialogueBlock { ... })</c>.</summary>

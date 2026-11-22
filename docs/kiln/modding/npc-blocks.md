@@ -121,7 +121,9 @@ new BodyBlock
   release hold the cook features again, the cook writes them only with `"experimental": ["modelcook.cloth"]` (and `"modelcook.chains2"`) in
   `assets/cook.json`, and a mod with such a body logs one warning (`Blocks.Warnings`) while the game reports the row held.
 - **Chains need the body's own skeleton**, and no clip of it may animate a swinging joint; a cloth vertex may not be weighted to one.
-- An NPC's body is a game NPC's for now, so `Cloth` and `Chains` are refused there ("a game body has its own").
+- A game NPC body keeps its own physics (`Cloth` and `Chains` are refused there: "a game body has its own").
+  Authored roster bodies have a separate [boot-publication contract](#authored-roster-bodies-and-motions); authoring
+  cloth or chains is not evidence that the roster body can yet be built or rendered.
 
 ## What Kiln checks, and why
 The game checks none of this; a mistake shows as a creature frozen in a pose, or a blow that never lands. So `Define` refuses, naming block and field:
@@ -270,8 +272,44 @@ villagers do (the body's own when not set).
 
 A `quests/*.json` of the mod's own that names the same NPC wins over both. Players need the mod.
 
-An NPC's body is a game NPC's for now (`Bodies.Villager`, `Bodies.Fisher`): the start-up build would also have to set a custom body's graph and model, and
-its portrait in the roster is unseen.
+### Authored roster bodies and motions
+
+New authoring types in **mod API 0.2.16** (dev.31).
+
+The authoring contract accepts a `BodyBlock.Model`, an `AnimationBlock` and `NpcBlock.Motions` (a reusable
+`npcMotions` block or an inline `NpcMotionsBlock`). The chassis is Kiln's Fisher/Villager chassis; authors name
+Kiln slots and graph states, not game component paths. **Authoring support alone does not build a body:** `Define`
+refuses `body.model` with the `blocks.npc_body` dependency reason until `kiln.bootpack` and the native body builder
+are installed. Ordinary `Bodies.Villager` / `Bodies.Fisher` NPCs keep their existing startup path.
+
+For an authored roster body:
+
+- Set `Size` explicitly: radius **0.05–4 m**, height **0.1–8 m**, both finite. The cooked model's floor must be
+  within **0.05 m of Y0**, and its bounds must fit the radius-height box. Keep `Scale` unset or **1**, and
+  `Colliders` unset or empty. Creature blocks retain their existing scale and collider support.
+- Map `Root`, `Head` and `HandR` to joints. Model and graph must use the same cooked skeleton; the graph must
+  contain every binding target and each target must have a GUID. Hash-only states such as `Run` cannot be used
+  by a sequence binding.
+- Each `NpcMotionBinding(Role, Variant, State, InteractionKey)` is unique. Sit and Sleep variants **0/1/2** are
+  enter/loop/exit: only the middle variant loops. Door variants **0/1/2** are guarded alternatives, not phases.
+  Other roles have variant **0**. The verified Fisher interaction binding uses interaction key
+  `81ed77f9-4c72-4730-8b05-a5ddee9c7164`; other roles leave the key null.
+- Required bindings are **Sit 0–2, Sleep 0–2, Inspect 0, Jump 0, Door 0–2**. Every other missing role needs an
+  explicit `OptionalFallback`, which is clamped rather than allowed to run a vanilla motion on an authored graph.
+  There is no implicit fallback for a required motion. A complete Fisher vector has **27 bindings**.
+- Clip duration, speed and loop information come from the cook, not guesses based on a state GUID. A motion
+  target needs a single cooked clip, with finite positive effective duration; blends are refused for these bindings.
+
+The cook writes this group's resource/blob keys, file hashes, canonical bindings and effective durations to
+`assets/npc-bodies.v1.json`, described by `schema/npc-bodies.schema.json`. It removes those entries from the eager
+`assets/assets.json` group. The two cook tools merge their own contributions; an unfinished two-tool build is
+explicitly incomplete. A server that skips renderer-only outputs preserves a shipped manifest's expected hashes
+for unchanged inputs. This is **not** a Ready status or evidence that a body was published.
+
+Material-block and texture hashes are included as dependencies, but generated material JSON is not material-resource
+publication. The prepared material bridge is still required before that closure can be committed. No hot body or
+graph replacement is supported; body resources belong to the process's boot generation. `clients: mod` and
+`side: both` are required. Never override a vanilla template GUID to bypass content admission.
 
 ## Ids
 From the mod id and the block's name: the template, variant (`<mod>:<name>`), arsenal, attacks (`<mod>:attack:<name>`), sequences, phases and states
