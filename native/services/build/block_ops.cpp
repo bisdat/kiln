@@ -155,6 +155,10 @@ KilnResult break_box(const Source& s,const KilnBuildBreak* q,KilnBuildBreakResul
                 int32_t h=-1,hp=-1;
                 if(!s.metadata(s.context,m,&h,&hp) || h<0 || h>=5 || hp<0 ||
                    (!instant && (hp==0 || (!default_damage && q->damage[h]==0))))continue;
+                if(!instant) {
+                    const int32_t hit=default_damage?defaults[h]:q->damage[h];
+                    if(std::floor(255*std::min(1.0,hit*s.mining_factor/hp))<1)continue;
+                }
                 const int32_t c[3]={lo[0]+static_cast<int32_t>(x),lo[1]+static_cast<int32_t>(y),lo[2]+static_cast<int32_t>(z)};
                 const double distance=std::hypot(s.origin[0]+(c[0]+.5)*s.cell_size-q->sphere_center.x,
                     s.origin[1]+(c[1]+.5)*s.cell_size-q->sphere_center.y,s.origin[2]+(c[2]+.5)*s.cell_size-q->sphere_center.z);

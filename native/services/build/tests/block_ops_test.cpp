@@ -11,7 +11,7 @@ using namespace kb::blocks;
 namespace {
 using Key = std::tuple<int32_t,int32_t,int32_t>;
 std::map<Key,KilnVoxel> cells;
-int writes=0, reads=0,damage_calls=0; bool loaded=true, fail_write=false, unknown=false, unbreakable=false,deny=false;
+int writes=0, reads=0,damage_calls=0; bool loaded=true, fail_write=false, unknown=false, unbreakable=false,deny=false,hard_health=false;
 std::map<Key,uint8_t> damage;
 bool get_damage(void*,const int32_t* c,uint8_t,uint8_t* out){*out=damage[{c[0],c[1],c[2]}];return true;}
 bool add_damage(void*,const int32_t* c,uint8_t,uint8_t increment,double,uint8_t* out){++damage_calls;auto& d=damage[{c[0],c[1],c[2]}];d=static_cast<uint8_t>(std::min(255,static_cast<int>(d)+increment));*out=d;return true;}
@@ -21,7 +21,7 @@ KilnResult read(void*,const int32_t* o,const uint32_t* d,KilnVoxel* out,size_t) 
         out[i++]=cells[{o[0]+x,o[1]+y,o[2]+z}];
     return KILN_OK;
 }
-bool facts(void*,uint8_t, int32_t* hardness,int32_t* health) { *hardness=unbreakable?5:2; *health=100; return true; }
+bool facts(void*,uint8_t material, int32_t* hardness,int32_t* health) { *hardness=unbreakable?5:2; *health=hard_health && material==144?100000:100; return true; }
 int32_t provenance(void*,const int32_t* o,KilnVoxel) { return unknown?-1:(o[0]==3?1:0); }
 KilnResult write(void*,const KilnBuildWrite* w,KilnBuildResult* r) {
     ++writes;if(deny){r->flags=KILN_BUILD_R_ZONE;return KILN_ERR_REVOKED;}
@@ -120,6 +120,10 @@ int main() {
     check(break_box(s,&q,&r)==KILN_OK && r.removed==2,"terrain keeps original sphere when building sphere shrinks");
     q.flags|=KILN_BUILD_BREAK_WORLD;cells[{4,0,0}]=KILN_VOXEL_MAKE(143,0);
     check(break_box(s,&q,&r)==KILN_OK && r.removed==2,"WORLD bypasses protected building shrink");
+    q.flags=KILN_BUILD_BREAK_PROTECTED_SPHERE;q.damage[2]=1;hard_health=true;damage.clear();cells.clear();
+    cells[{3,0,0}]=KILN_VOXEL_MAKE(144,0);cells[{4,0,0}]=KILN_VOXEL_MAKE(143,0);
+    s.damage_get=&get_damage;s.damage_add=&add_damage;s.mining_factor=1;
+    check(break_box(s,&q,&r)==KILN_OK && r.damaged==1 && damage[{4,0,0}]==2,"a protected material with zero damage increment does not shrink the sphere");hard_health=false;
     TerrainDamage terrain;const std::array<int32_t,3> at{1,2,3};uint8_t accumulated=0;
     check(terrain.add(100,at,2,127,20,accumulated) && accumulated==127,"terrain accumulator hit");
     check(terrain.get(100+19000000000LL,at,2)==127,"terrain damage before expiry");
