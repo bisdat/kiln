@@ -18,6 +18,7 @@
 
 #include <cstring>
 #include <mutex>
+#include <new>
 
 #include "kiln_hook.hpp"
 #include "msgcore.h"
@@ -70,7 +71,16 @@ struct Open {
 };
 thread_local Open t_open[8];
 thread_local uint32_t t_open_n = 0;
-alignas(16) thread_local uint8_t t_scratch[msg::kMaxMessage];
+// A scratch per nesting depth (review should 5): a receive handler that injects runs the send chain inside the receive
+// chain; one shared scratch let the inner chain overwrite the outer handler's rewrite. Made at a thread's first message.
+thread_local msg::ScratchStack* t_stack = nullptr;
+uint8_t* scratch_push() {
+    if (!t_stack) t_stack = new (std::nothrow) msg::ScratchStack;
+    return t_stack ? t_stack->push() : nullptr;
+}
+void scratch_pop() {
+    if (t_stack) t_stack->pop();
+}
 
 uint8_t side_here() {
     uint8_t s = 0;
@@ -125,8 +135,11 @@ void d_commit(uintptr_t session, uint64_t* handle) {
         // the peer: a machine socket names its machine as index + 16, a player socket its player slot; on a client: the server (0)
         uint32_t peer = 0;
         if (sides & msg::kSideServer) peer = player ? peer_index : peer_of(peer_index >= 16 ? peer_index - 16 : peer_index, nullptr);
-        const msg::ChainResult cr = msg::run_chain(g_hooks, kMaxHooks, sides, KILN_REPL_SEND, static_cast<uint8_t>(channel), peer,
-                                                   player, res->data, res->size, t_scratch, sizeof t_scratch);
+        uint8_t* scratch = scratch_push();
+        const msg::ChainResult cr = scratch ? msg::run_chain(g_hooks, kMaxHooks, sides, KILN_REPL_SEND, static_cast<uint8_t>(channel), peer,
+                                                             player, res->data, res->size, scratch, msg::kMaxMessage)
+                                            : msg::ChainResult{KILN_REPL_PASS, res->size, 0};  // too deep: the message goes on
+        scratch_pop();
         if (cr.action == KILN_REPL_DROP) {
             reinterpret_cast<CommitFn>(f_abort)(session, handle);  // the message is not sent
             return;
@@ -151,9 +164,12 @@ void KILN_CALL mid_rx(KilnRegisters* r, void* user) {
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return;
     }
+    uint8_t* scratch = scratch_push();
+    if (!scratch) return;  // too deep: the message goes on
     const msg::ChainResult cr = msg::run_chain(g_hooks, kMaxHooks, side_mask, KILN_REPL_RECEIVE, static_cast<uint8_t>(channel), peer,
-                                               site->player, const_cast<uint8_t*>(data), static_cast<uint32_t>(size), t_scratch,
-                                               sizeof t_scratch);
+                                               site->player, const_cast<uint8_t*>(data), static_cast<uint32_t>(size), scratch,
+                                               msg::kMaxMessage);
+    scratch_pop();
     if (cr.action == KILN_REPL_DROP) msg::rx_drop(r, *site);
     else if (cr.action == KILN_REPL_REWRITE) msg::rx_set_size(r, *site, cr.length);
 }

@@ -423,7 +423,78 @@ void helpers() {
     CHECK(!schema_name_ok("ab", 128) && !schema_name_ok("9Lives", 128) && !schema_name_ok("bad name", 128));
 }
 
+namespace review {
+HookEntry hooks[2];
+ScratchStack stack;
+uint8_t out[16];
+int32_t KILN_CALL send_pass(const KilnReplMessage*, void*) { return KILN_REPL_PASS; }
+int32_t KILN_CALL recv_rewrite_then_send(const KilnReplMessage* m, void*) {
+    std::memcpy(m->rewrite, "HELLO", 5);
+    *m->rewrite_length = 5;
+    std::memcpy(out, "XXXXXXXXXX", 10);
+    uint8_t* s = stack.push();  // the nested send chain gets a scratch of its own
+    if (s) run_chain(hooks, 2, kSideServer, KILN_REPL_SEND, 19, 1, 0, out, 10, s, kMaxMessage);
+    stack.pop();
+    return KILN_REPL_REWRITE;
+}
+int32_t KILN_CALL shorten(const KilnReplMessage* m, void*) {
+    std::memcpy(m->rewrite, "abc", 3);
+    *m->rewrite_length = 3;
+    return KILN_REPL_REWRITE;
+}
+}  // namespace review
+
+void review_fixes() {
+    using namespace review;
+    // should 5: a nested send chain does not clobber the receive chain's rewrite
+    hooks[0].handle = 1; hooks[0].fn = &recv_rewrite_then_send; hooks[0].channel = 19; hooks[0].directions = KILN_REPL_RECEIVE; hooks[0].side = kSideServer;
+    hooks[1].handle = 2; hooks[1].fn = &send_pass; hooks[1].channel = 19; hooks[1].directions = KILN_REPL_SEND; hooks[1].side = kSideServer;
+    uint8_t data[8];
+    std::memcpy(data, "abcdefgh", 8);
+    uint8_t* s = stack.push();
+    CHECK(s != nullptr);
+    const ChainResult r = s ? run_chain(hooks, 2, kSideServer, KILN_REPL_RECEIVE, 19, 1, 0, data, 8, s, kMaxMessage) : ChainResult{};
+    stack.pop();
+    CHECK(r.action == KILN_REPL_REWRITE && r.length == 5 && std::memcmp(data, "HELLO", 5) == 0);
+    CHECK(stack.depth == 0);
+    // the stack refuses a fourth level
+    CHECK(stack.push() && stack.push() && stack.push() && !stack.push());
+    stack.pop(); stack.pop(); stack.pop();
+    CHECK(stack.depth == 0);
+    // should 10: a shorter rewrite (8 -> 3 bytes)
+    HookEntry one[1];
+    one[0].handle = 3; one[0].fn = &shorten; one[0].channel = 19; one[0].directions = KILN_REPL_SEND; one[0].side = kSideServer;
+    uint8_t msg8[8];
+    std::memcpy(msg8, "12345678", 8);
+    uint8_t sc[16];
+    const ChainResult sr = run_chain(one, 1, kSideServer, KILN_REPL_SEND, 19, 1, 0, msg8, 8, sc, sizeof sc);
+    CHECK(sr.action == KILN_REPL_REWRITE && sr.length == 3 && std::memcmp(msg8, "abc", 3) == 0);
+    // should 6: a fake session: alloc (ok / refused), commit, abort
+    OpenAllocs oa;
+    int a1 = 0, d1 = 0, a2 = 0, d2 = 0;
+    oa.record(&a1, &d1, 0, 0x100);   // ok: recorded
+    oa.record(&a2, &d2, 3, 0x200);   // refused (status 3): not recorded
+    CHECK(oa.take(&a2, &d2) == 0);   // a refused allocation is never matched
+    CHECK(oa.take(&a1, &d1) == 0x100);
+    CHECK(oa.take(&a1, &d1) == 0);   // taken once
+    // the same result address with another buffer (a later message at the same stack slot) is not tagged by a stale entry
+    oa.record(&a1, &d1, 0, 0x300);
+    CHECK(oa.take(&a1, &d2) == 0);
+    // full: the oldest goes, the newest is still matched (aborted allocations never commit and must not stop recording)
+    int ar[12], dr[12];
+    for (int i = 0; i < 12; ++i) oa.record(&ar[i], &dr[i], 0, 0x1000 + i);
+    CHECK(oa.take(&ar[11], &dr[11]) == 0x100b);
+    CHECK(oa.take(&ar[0], &dr[0]) == 0);
+    // should 7: the schema an outgoing message must decode as
+    CHECK(send_schema(19, kSideServer) && std::strcmp(send_schema(19, kSideServer), "ChatMessageServerMessage") == 0);
+    CHECK(send_schema(19, kSideClient) && std::strcmp(send_schema(19, kSideClient), "ChatMessageClientMessage") == 0);
+    CHECK(send_schema(1, kSideServer) && std::strcmp(send_schema(1, kSideServer), "ServerInfoMessage") == 0);
+    CHECK(send_schema(9, kSideServer) == nullptr);   // no schema: a rewrite there is refused
+    CHECK(send_schema(1, kSideClient) == nullptr);   // a client never sends ServerInfo
+}
+
 int main() {
+    review_fixes();
     helpers();
     abi();
     channels();

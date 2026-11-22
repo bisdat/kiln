@@ -343,4 +343,82 @@ inline bool schema_name_ok(const char* s, size_t max) {
     return n >= 3 && n < max && ((s[0] >= 'A' && s[0] <= 'Z') || (s[0] >= 'a' && s[0] <= 'z'));
 }
 
+
+// ---- review fixes (should 5, 6, 7): plain helpers ----
+// A scratch per nesting depth (a receive handler that sends runs the send chain inside the receive chain).
+struct ScratchStack {
+    static constexpr uint32_t kDepth = 3;
+    alignas(16) uint8_t buf[kDepth][kMaxMessage];
+    uint32_t depth = 0;
+    uint8_t* push() { return depth < kDepth ? buf[depth++] : nullptr; }  // nullptr: too deep (the caller passes the message on)
+    void pop() {
+        if (depth) --depth;
+    }
+};
+// The open allocations of one thread (SessionAlloc .. SessionCommit / SessionAbort): only successful ones are recorded,
+// matched by result address and data pointer; the oldest is overwritten when full.
+struct OpenAllocs {
+    static constexpr uint32_t kCap = 8;
+    struct Entry {
+        const void* res;
+        const void* data;
+        uintptr_t socket;
+    };
+    Entry e[kCap] = {};
+    uint32_t n = 0;
+    uint32_t next = 0;  // the slot the next record takes when full (the oldest)
+    void record(const void* res, const void* data, uint8_t status, uintptr_t socket) {
+        if (status != 0 || !res || !data) return;  // refused: never committed, never matched
+        for (uint32_t i = 0; i < n; ++i)
+            if (e[i].res == res) {  // the same result slot again (an earlier allocation there was aborted): replace it
+                e[i] = Entry{res, data, socket};
+                return;
+            }
+        if (n < kCap) {
+            e[n++] = Entry{res, data, socket};
+            return;
+        }
+        e[next] = Entry{res, data, socket};
+        next = (next + 1) % kCap;
+    }
+    uintptr_t take(const void* res, const void* data) {
+        for (uint32_t i = 0; i < n; ++i)
+            if (e[i].res == res && e[i].data == data) {
+                const uintptr_t s = e[i].socket;
+                e[i] = e[--n];
+                if (next >= n) next = 0;
+                return s;
+            }
+        return 0;
+    }
+};
+// The schema a message sent on a game channel must decode as (side: kSideServer sending to clients, kSideClient sending
+// to the server); nullptr: no schema known (a rewrite there is refused, never sent unchecked).
+inline const char* send_schema(uint32_t channel, uint8_t side) {
+    if (side & kSideServer) {
+        switch (channel) {
+        case 0: return "GameMessageLoginResponse";
+        case 1: return "ServerInfoMessage";
+        case 10: return "KnowledgeServerMessage";
+        case 11: return "LogicGraphEditMessage";
+        case 15: return "CustomPlayerStringServerMessage";
+        case 17: return "TwitchDropSyncMessage";
+        case 18: return "WeatherSyncMessage";
+        case 19: return "ChatMessageServerMessage";
+        case 20: return "BaseSharingServerMessage";
+        case 21: return "BanListUpdate";
+        default: return nullptr;
+        }
+    }
+    switch (channel) {
+    case 0: return "GameMessageLoginRequest";
+    case 10: return "KnowledgeClientMessage";
+    case 11: return "LogicGraphEditMessage";
+    case 15: return "CustomPlayerStringClientMessage";
+    case 19: return "ChatMessageClientMessage";
+    case 20: return "BaseSharingClientMessage";
+    default: return nullptr;
+    }
+}
+
 }  // namespace repl::msg
