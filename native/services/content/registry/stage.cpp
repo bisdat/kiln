@@ -292,6 +292,7 @@ struct Runner::Impl {
         Batch batch;
         std::vector<Refusal> refused;
     };
+    std::map<std::string, std::vector<Batch>> recorded; // successful callback turns kept for live recomposition
     std::map<std::string, std::vector<Queued>> queued;  // mod -> its submits, retaining each caller's owner
     std::set<uint64_t> gone;  // owner ids are never reused
     bool alive(uint64_t owner) const { return !gone.count(owner) && (!env.owner_alive || env.owner_alive(owner)); }
@@ -674,7 +675,7 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn) {
                     d_->pre_refused.push_back({mod, "code:" + mod, st, 0,
                                                "the stage callback faulted; its " + std::to_string(dropped) + " edit(s) of this stage were dropped and it is not called again", ""});
                     d_->log(2, "registry: mod " + mod + "'s stage callback faulted in " + stage_name(st) + ": its edits of that turn are dropped, the callback is removed");
-                }
+                } else if (!out->edits.empty()) d_->recorded[mod].push_back(*out);
             };
         }
     }
@@ -847,7 +848,12 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn) {
     std::lock_guard lk(d.mu);
     d.base = std::move(base);
     d.old = std::move(old);
-    for (ModInput& in : inputs) in.code = nullptr;
+    for (ModInput& in : inputs) {
+        in.code = nullptr;
+        if (auto it = d.recorded.find(in.id); it != d.recorded.end())
+            in.batches.insert(in.batches.end(), it->second.begin(), it->second.end());
+    }
+    d.recorded.clear();
     d.inputs = std::move(inputs);
     d.result = std::move(r);
     d.boot = boot;

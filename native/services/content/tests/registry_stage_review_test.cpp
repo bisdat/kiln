@@ -459,6 +459,22 @@ void worldload_snapshot_revoke(const std::string& dir) {
     publish(result, true);  // revocation does not discard already committed stage edits
     check(r.counts().edits != 0, "committed registry edits remain after subscriber revocation");
 }
+void callback_batches_survive_handoff(const std::string& dir) {
+    TreeView view = world(); Files files;
+    stage::Runner r(env_of(&view, &files, dir, &no_sections));
+    uint64_t h = 0;
+    r.subscribe_stage(77, "bigmod", [&](Stage s, const View&) {
+        if (s == Stage::Alter)
+            check(r.submit(77, "bigmod", R"({"ir":1,"mod":"bigmod","stage":"alter","edits":[{"registry":"items","select":"game:plank","field":"maxStack","op":99}]})", nullptr, nullptr, nullptr) == KILN_OK, "callback submit");
+        return true;
+    }, &h);
+    std::vector<ModInput> kept; BaseModel base;
+    r.set_live([&](const stage::LiveHandoff& x) { kept = *x.inputs; base = *x.base; });
+    r.run({}); r.finish({});
+    const Result replay = compose(generated_schema(), base, {}, kept);
+    const auto it = replay.fields.find({"items", "game:plank", "maxStack"});
+    check(it != replay.fields.end() && it->second.result == Value::integer(99), "a live recompose must retain the successful stage callback's edits");
+}
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -482,7 +498,8 @@ int main(int argc, char** argv) {
         {"P2 ready_fault_removed", [&] { ready_fault_removed(dir); }},
         {"P2 owner_notification_bridge", [&] { owner_notification_bridge(dir); }},
         {"P2 core_dead_before_notification", [&] { core_dead_before_notification(dir); }},
-        {"P2 worldload_snapshot_revoke", [&] { worldload_snapshot_revoke(dir); }}};
+        {"P2 worldload_snapshot_revoke", [&] { worldload_snapshot_revoke(dir); }},
+        {"P2 callback_batches_survive_handoff", [&] { callback_batches_survive_handoff(dir); }}};
     for (const auto& [name, fn] : groups) {
         try {
             fn();
