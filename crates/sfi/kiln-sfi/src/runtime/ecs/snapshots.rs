@@ -16,9 +16,7 @@
 use super::entities::text::COMPONENT_UNAVAILABLE;
 use super::{Ecs, runtime_type_name};
 use mlua::{Lua, Value};
-use sfi_core::bindings::runtime::{
-    Availability, RuntimeHost, RuntimeOperation as Op, runtime_denial_reason,
-};
+use sfi_core::bindings::runtime::{Availability, RuntimeHost, RuntimeOperation as Op};
 use sfi_core::lua::FunctionArgs;
 
 type Reply = (Value, Option<String>);
@@ -55,7 +53,7 @@ pub(crate) fn component_bytes(
     host: &dyn RuntimeHost,
     args: &FunctionArgs,
 ) -> mlua::Result<Read> {
-    if let Some(reason) = runtime_denial_reason(host, Op::EcsRead) {
+    if let Some(reason) = ecs.denial_reason(host, Op::EcsRead) {
         return Ok(Read::Refused(reason));
     }
     // `unavailable_runtime_result`: only reached with the operation outside the contract, which the denial above

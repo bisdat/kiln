@@ -147,6 +147,26 @@ fn a_hosting_client_reads_and_writes_the_hosted_server_world() {
 }
 
 #[test]
+fn a_host_transition_does_not_bind_the_resident_client_world() {
+    let p = process(Side::Client, world_of(CLIENT, 3));
+    p.start(SERVER, 1, 5);
+    p.start(CLIENT, 1, 3);
+    assert_eq!(p.s.facts.ecs_world(), (SERVER, 5));
+
+    // The hosted world has begun stopping, but the core still reports both worlds.
+    p.context.apply(WorldLifecycle {
+        world: SERVER,
+        session: 1,
+        event: LifecycleEvent::Stopping,
+    });
+    let transitioning = "ecs-active-scene-is-transitioning";
+    assert_eq!(p.context.ecs_world(), Err(transitioning));
+    assert_eq!(p.s.facts.ecs_world(), (SERVER, 0));
+    assert!(!p.s.facts.provider_facts().ready);
+    assert_eq!(p.s.reason("ecs.query('keen::ecs::Health')"), transitioning);
+}
+
+#[test]
 fn a_joined_client_reads_its_client_world_and_its_writes_are_refused() {
     let p = process(Side::Client, world_of(CLIENT, 11));
     let s = &p.s;

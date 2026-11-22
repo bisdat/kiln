@@ -366,7 +366,7 @@ pub fn write(
     args: &FunctionArgs,
 ) -> mlua::Result<(bool, Option<String>)> {
     let refused = |reason: String| Ok((false, Some(reason)));
-    if let Some(reason) = runtime_denial_reason(host, Op::EcsWrite) {
+    if let Some(reason) = ecs.denial_reason(host, Op::EcsWrite) {
         return refused(reason);
     }
     if let Availability::Unavailable { reason } = host.static_support(Op::EcsWrite) {

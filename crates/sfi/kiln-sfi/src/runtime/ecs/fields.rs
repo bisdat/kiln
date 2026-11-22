@@ -22,7 +22,7 @@ use super::{Ecs, available, runtime_type_name};
 use crate::runtime::types::{Registry, selectors};
 use crate::runtime::values::Values;
 use mlua::{Lua, Table, Value};
-use sfi_core::bindings::runtime::{RuntimeHost, RuntimeOperation as Op, runtime_denial_reason};
+use sfi_core::bindings::runtime::{RuntimeHost, RuntimeOperation as Op};
 use sfi_core::lua::FunctionArgs;
 use std::collections::{BTreeMap, HashSet};
 use std::ops::Range;
@@ -482,7 +482,7 @@ pub(crate) fn select(
     write: bool,
 ) -> Result<Selected, String> {
     let operation = if write { Op::EcsWrite } else { Op::EcsRead };
-    if let Some(reason) = runtime_denial_reason(host, operation) {
+    if let Some(reason) = ecs.denial_reason(host, operation) {
         return Err(reason);
     }
     if !available(host, operation) {

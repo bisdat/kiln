@@ -60,7 +60,7 @@ use kiln_abi::services::kiln_world::{
 use kiln_abi::{KILN_OK, KILN_WORLD_KINDS, KILN_WORLD_SERVER, KilnEntity, KilnOwner};
 use mlua::{Lua, Table, Value};
 use registry::{EcsRegistry, Resolved};
-use sfi_core::bindings::runtime::{RuntimeHost, RuntimeOperation as Op};
+use sfi_core::bindings::runtime::{RuntimeHost, RuntimeOperation as Op, runtime_denial_reason};
 use sfi_core::host::Phase;
 use sfi_core::lua::{FunctionArgs, LuaError};
 use std::cell::RefCell;
@@ -174,6 +174,12 @@ impl Ecs {
     pub fn runtime(&self) -> Option<EcsRuntime> {
         self.runtime.borrow().clone()
     }
+    fn scene_error(&self) -> Option<&'static str> {
+        self.runtime.borrow().as_ref()?.facts.ecs_scene().err()
+    }
+    fn denial_reason(&self, host: &dyn RuntimeHost, operation: Op) -> Option<String> {
+        runtime_denial_reason(host, operation).or_else(|| self.scene_error().map(str::to_owned))
+    }
     /// kiln-sfi's owner (0 without the runtime-create's part).
     pub fn owner(&self) -> KilnOwner {
         self.runtime.borrow().as_ref().map_or(0, |r| r.owner)
@@ -216,6 +222,9 @@ impl Ecs {
     /// The ref a handle names, if this VM gave it, it is of the newest world and session seen, and of the world the
     /// ECS binds now (a handle of the world a client hosted reads nothing once it joined another).
     pub fn object(&self, handle: u32) -> Option<KilnObjectRef> {
+        if self.scene_error().is_some() {
+            return None;
+        }
         self.handles
             .get(handle)
             .filter(|object| object.world_kind == self.world_kind())
@@ -224,6 +233,9 @@ impl Ecs {
     /// `entity_open` of entity id `entity` in the family's world, live session, as a handle: kiln.world's result
     /// when it refuses (or KILN_ERR_UNAVAILABLE without the member), and 0 is never a handle.
     pub fn open(&self, entity: KilnEntity) -> Result<u32, kiln_abi::KilnResult> {
+        if self.scene_error().is_some() {
+            return Err(kiln_abi::KILN_ERR_UNAVAILABLE);
+        }
         let owner = self.owner();
         let open = self
             .world()
