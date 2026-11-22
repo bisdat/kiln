@@ -48,11 +48,31 @@ public sealed class ToolActionCompilerTests
     {
         var f=Fixture();var plan=Compiler.LowerToolActions(f.Context,f.Low,"shaper","Shaper",Add,Remove);
         var item=new ItemDefinition{Guid=Guid.NewGuid(),Name="brush",BaseOn="Building_Overgrowth_Shape_Small"};
-        var bound=Compiler.ApplyToolActions(item,plan);
+        var bound=Compiler.ApplyToolActions(f.Context,f.Low,item,plan);
         Assert.True((bool)bound.Fields!["equipment.repeatActionWhenPressed"]);
-        Assert.Equal(plan.SecondarySequence.ToString(),bound.Refs!["sequences[0].sequence"]);
-        Assert.Equal(plan.PrimarySequence.ToString(),bound.Refs!["sequences[1].sequence"]);
+        Assert.DoesNotContain(bound.Fields.Keys,path=>path.StartsWith("sequences[",StringComparison.Ordinal));
+        Assert.Null(bound.Refs);
+        var rules=f.Low.Json["toolActionRules"]![item.Name]!;
+        Assert.Equal(plan.SecondarySequence.ToString(),(string?)rules["sequences[0].sequence"]);
+        Assert.Equal(plan.PrimarySequence.ToString(),(string?)rules["sequences[1].sequence"]);
+        Assert.Equal(BlockIds.Fnv(plan.SecondarySequence),(uint)rules["sequences[0].sequenceId"]!);
+        Assert.Equal(BlockIds.Fnv(plan.PrimarySequence),(uint)rules["sequences[1].sequenceId"]!);
         Assert.Null(item.Refs);
+    }
+    [Fact] public void ExportsBindingForTheRealNativeWriterFixture()
+    {
+        var path=Environment.GetEnvironmentVariable("KILN_TOOL_WRITER_FIXTURE");
+        if(string.IsNullOrEmpty(path))return;
+        var f=Fixture();var plan=Compiler.LowerToolActions(f.Context,f.Low,"shaper","Shaper",Add,Remove);
+        var item=new ItemDefinition {Guid=new("54adf19c-7f45-418a-b9bc-665fb24c8561"),Name="test.tool.brush",BaseOn="Building_Overgrowth_Shape_Small"};
+        var bound=Compiler.ApplyToolActions(f.Context,f.Low,item,plan);
+        var document=new JsonObject {
+            ["fields"]=System.Text.Json.JsonSerializer.SerializeToNode(bound.Fields),
+            ["refs"]=System.Text.Json.JsonSerializer.SerializeToNode(bound.Refs),
+            ["itemdata"]=f.Low.Json["toolActionRules"]?[item.Name]?.DeepClone() ?? new JsonObject(),
+            ["primary"]=plan.PrimarySequence.ToString(),["secondary"]=plan.SecondarySequence.ToString(),
+        };
+        File.WriteAllText(path,document.ToJsonString());
     }
     [Theory] [InlineData(0)] [InlineData(128)] [InlineData(255)]
     public void RefusesNonTerrainRemovalBeforeAnyDefinitionsAreEmitted(byte cell)

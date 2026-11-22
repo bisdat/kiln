@@ -29,17 +29,29 @@ internal static partial class Compiler
         return new ToolActionPlan(pp, sp, ps, ss);
     }
 
-    internal static ItemDefinition ApplyToolActions(ItemDefinition brush, ToolActionPlan plan)
+    internal static ItemDefinition ApplyToolActions(BlockContext ctx, Lowered low, ItemDefinition brush, ToolActionPlan plan)
     {
         var fields = brush.Fields is null ? new Dictionary<string, object>() : new(brush.Fields);
-        var refs = brush.Refs is null ? new Dictionary<string, string>() : new(brush.Refs);
-        // The Overgrowth brush starter has Secondary at slot 0 and Primary at slot 1 (not the wand order).
         fields["equipment.repeatActionWhenPressed"] = true;
-        fields["sequences[0].sequenceId.value"] = BlockIds.Fnv(plan.SecondarySequence);
-        fields["sequences[1].sequenceId.value"] = BlockIds.Fnv(plan.PrimarySequence);
-        refs["sequences[0].sequence"] = plan.SecondarySequence.ToString();
-        refs["sequences[1].sequence"] = plan.PrimarySequence.ToString();
-        return brush with { Fields = fields, Refs = refs };
+        ApplyToolActionRules(ctx, low, brush.Name, plan);
+        return brush with { Fields = fields };
+    }
+
+    internal static void ApplyToolActionRules(BlockContext ctx, Lowered low, string brushGameName, ToolActionPlan plan)
+    {
+        // ItemDefinition.Fields/Refs use the scalar content schema, which deliberately does not flatten BlobArray
+        // elements. Indexed sequence paths must use itemdata after the clone owns its lists, as Draft.DataRules does.
+        // The two-slot brush starter has Secondary at 0 and Primary at 1; the root tool has no sequence slots.
+        var rules = new JsonObject
+        {
+            ["sequences[0].sequence"] = plan.SecondarySequence.ToString(),
+            ["sequences[0].sequenceId"] = BlockIds.Fnv(plan.SecondarySequence),
+            ["sequences[1].sequence"] = plan.PrimarySequence.ToString(),
+            ["sequences[1].sequenceId"] = BlockIds.Fnv(plan.PrimarySequence),
+        };
+        low.AfterCommit(() => BlockRuntime.AddRules(ctx.Mod, "itemdata", brushGameName, rules));
+        var targets = (low.Json["toolActionRules"] ??= new JsonObject()).AsObject();
+        targets[brushGameName] = rules.DeepClone();
     }
 
     private static void ValidateToolAction(BlockContext ctx, TerrainToolAction? action, string path)
