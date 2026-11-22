@@ -43,7 +43,7 @@ async function myModsReady(page: Page) {
 
 /** "No profile" on purpose (Settings, Profiles): the launcher forgets the profile it had for the game. */
 async function loadNoProfile(page: Page) {
-  await page.evaluate(() => { location.hash = "#/settings"; });
+  await page.evaluate(() => { location.hash = "#/settings/mods"; });
   const none = page.getByRole("region", { name: "Profiles" }).getByRole("listitem").filter({ hasText: "No profile" });
   await none.getByRole("button", { name: "Load" }).click();
   await expect(none).toContainText("Loaded", { timeout: 10_000 });
@@ -232,6 +232,7 @@ test("players with profiles: a drop is on in the loaded one; the setting can tur
   await expect(hero.getByRole("switch", { name: "Night Owl" })).toHaveAttribute("aria-checked", "true", { timeout: 10_000 });
   // off: a drop joins the list switched off
   await page.locator(".k-head-link", { hasText: "Settings" }).click();
+  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("link", { name: "Mods & profiles", exact: true }).click();
   const sw = page.getByRole("switch", { name: /^Switch new mods on/ });
   await expect(sw).toBeChecked();
   await page.getByText("Switch new mods on", { exact: true }).click();
@@ -352,7 +353,7 @@ test("Load it while another profile is still loading is refused, and the first l
   await page.getByRole("dialog", { name: "Add to which profile?" }).getByRole("button", { name: /Ember run/ }).click();
   const added = toastWith(page, "Added Night Owl to Ember run");
   await expect(added).toBeVisible({ timeout: 10_000 });
-  await page.evaluate(() => { location.hash = "#/settings"; });
+  await page.evaluate(() => { location.hash = "#/settings/mods"; });
   const vanilla = page.getByRole("region", { name: "Profiles" }).getByRole("listitem").filter({ hasText: "Vanilla plus" });
   await vanilla.getByRole("button", { name: "Load" }).click(); // the mock takes 1.5 s
   await added.getByRole("button", { name: "Load it" }).click();
@@ -387,7 +388,7 @@ test("Make and add that fails after the profile was made keeps the drop, says so
 // final review B1: Play re-applies the active profile before the start (launch_play's refresh_active): it goes through
 // the same one-activation guard, both ways
 test("Play while a profile is still loading is refused with the same sentence, and a Load while Play starts too", async ({ page }) => {
-  await start(page, null, "/settings");
+  await start(page, null, "/settings/mods");
   const vanilla = page.getByRole("region", { name: "Profiles" }).getByRole("listitem").filter({ hasText: "Vanilla plus" });
   await vanilla.getByRole("button", { name: "Load" }).click(); // the mock takes 1.5 s
   const play = await page.evaluate(async () => {

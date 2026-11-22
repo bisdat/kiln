@@ -220,7 +220,7 @@ test("a selection made in one profile is gone once another is loaded; Switch off
   await box(page, "Big Stacks").click();
   await box(page, "New Items").click();
   await expect(selbar(page)).toContainText("2 selected");
-  await page.evaluate(() => { location.hash = "#/settings"; });
+  await page.evaluate(() => { location.hash = "#/settings/mods"; });
   const sec = page.getByRole("region", { name: "Profiles" });
   await sec.getByRole("listitem").filter({ hasText: "Vanilla plus" }).getByRole("button", { name: "Load" }).click();
   await expect(sec.getByRole("listitem").filter({ hasText: "Vanilla plus" })).toContainText("Loaded", { timeout: 10_000 });

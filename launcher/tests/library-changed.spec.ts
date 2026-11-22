@@ -21,7 +21,7 @@ const edit = (page: Page, kind: string, id: string, change: { name?: string; ver
     [kind, id, change] as const);
 /** The list reads the Library again when the main screen mounts again. */
 async function back(page: Page) {
-  await page.evaluate(() => { location.hash = "#/settings"; });
+  await page.evaluate(() => { location.hash = "#/settings/mods"; });
   await expect(page.getByRole("region", { name: "Profiles" })).toBeVisible();
   await page.evaluate(() => { location.hash = "#/"; });
 }

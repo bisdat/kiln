@@ -77,7 +77,7 @@ test("import → switch on → the load order of every kind", async ({ page }) =
   const errors = await collectErrors(page, async () => {
     // the power user's way: Settings "Switch new mods on" off, a drop joins the list switched off (the default, a drop
     // that is on at once: tests/firstrun.spec.ts)
-    await open(page, "/settings");
+    await open(page, "/settings/mods");
     await page.getByText("Switch new mods on", { exact: true }).click();
     await expect(page.getByRole("switch", { name: /^Switch new mods on/ })).not.toBeChecked();
     await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Play" }).click();
@@ -405,7 +405,7 @@ test("a server without Kiln offers Install Kiln on Overview; one with Kiln offer
 });
 
 test("the loaded profile is chosen in Settings, Profiles", async ({ page }) => {
-  await open(page, "/settings");
+  await open(page, "/settings/mods");
   const sec = page.getByRole("region", { name: "Profiles" });
   const row = sec.getByRole("listitem").filter({ hasText: "Vanilla plus" });
   await row.getByRole("button", { name: "Load" }).click();
@@ -544,8 +544,8 @@ test("OptiScaler next to the game says what Kiln's overlay does on Play", async 
 
 test("Settings, Graphics edits kiln.json's graphics section and says which tools Kiln steps aside for", async ({ page }) => {
   type Mock = { __kilnMock: { kilnJsonValues: () => { graphics?: Record<string, unknown> }; setGraphicsStepAside: (t: unknown) => void } };
-  await open(page, "/settings");
-  const card = page.getByRole("region", { name: "Graphics" });
+  await open(page, "/settings/graphics");
+  const card = page.getByRole("region", { name: "Kiln's graphics tools" });
   await expect(card).toBeVisible();
   for (const key of ["graphics.fpsCap", "graphics.dlssPreset", "graphics.dlssScale", "graphics.dlssRenderScale", "graphics.dlssQualityScale",
     "graphics.dlssBalancedScale", "graphics.dlssPerformanceScale", "graphics.dlssUltraPerformanceScale", "graphics.readout"])
@@ -563,8 +563,8 @@ test("Settings, Graphics edits kiln.json's graphics section and says which tools
   await expect.poll(() => page.evaluate(() => (window as unknown as Mock).__kilnMock.kilnJsonValues().graphics?.readout)).toBe(true);
   await card.getByRole("button", { name: "Reset DLSS render preset to its default" }).click();
   await expect.poll(() => page.evaluate(() => (window as unknown as Mock).__kilnMock.kilnJsonValues().graphics?.dlssPreset)).toBeUndefined();
-  // the preview's DLSSTweaks, then OptiScaler: one line each
-  const lines = card.getByTestId("graphics-step-aside");
+  // the preview's DLSSTweaks, then OptiScaler: one line each, at the top of the section
+  const lines = page.getByTestId("graphics-step-aside");
   await expect(lines).toHaveText(["DLSSTweaks is installed (dlsstweaks.ini): Kiln's DLSS settings step aside; the frame cap and the readout still work."]);
   await page.evaluate(() => (window as unknown as Mock).__kilnMock.setGraphicsStepAside([
     { kind: "optiscaler", file: "dxgi.dll", frameCap: true }, { kind: "nvngx", file: "nvngx.dll", frameCap: false },
@@ -577,7 +577,7 @@ test("Settings, Graphics edits kiln.json's graphics section and says which tools
 
 test("destructive actions need the typed word, in the arch", async ({ page }) => {
   // a profile's Delete (Settings, Profiles) keeps its typed word whatever "Type a mod's name to remove it" says
-  await open(page, "/settings");
+  await open(page, "/settings/mods");
   const sec = page.getByRole("region", { name: "Profiles" });
   await sec.getByRole("button", { name: "Save current as…" }).click();
   await page.getByRole("dialog", { name: "Save current as" }).getByLabel("Name").fill("Throwaway");

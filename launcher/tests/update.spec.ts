@@ -74,7 +74,7 @@ test("Skip hides the version until a newer one; Settings can undo", async ({ pag
   await mock(page, "offer", "0.2.0-dev.43");
   await page.getByRole("dialog", { name: "Kiln 0.2.0-dev.43" }).getByRole("button", { name: "Skip" }).click();
   await expect(page.locator(".k-upd")).toHaveCount(0);
-  await open(page, "/settings");
+  await open(page, "/settings/online");
   const card = page.locator(".k-card", { has: page.getByRole("heading", { name: "Updates" }) });
   await expect(card.getByText("Skipped 0.2.0-dev.43")).toBeVisible();
   await expect(card.getByRole("switch", { name: /Check automatically/ })).toBeChecked();

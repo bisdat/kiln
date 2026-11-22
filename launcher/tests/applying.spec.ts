@@ -117,7 +117,7 @@ test.describe("desktop", () => {
   test("a Load in Settings holds Play until it is done, on every page", async ({ page }) => {
     await desktop(page);
     await page.evaluate(() => (window as unknown as Mock).__kilnMock.planCommand("profile_activate", { gate: "slow-load" }));
-    await page.evaluate(() => { location.hash = "#/settings"; });
+    await page.evaluate(() => { location.hash = "#/settings/mods"; });
     const row = page.getByRole("region", { name: "Profiles" }).getByRole("listitem").filter({ hasText: "Vanilla plus" });
     await row.getByRole("button", { name: "Load" }).click();
     // the pilot light in the corner is the same control

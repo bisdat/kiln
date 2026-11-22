@@ -488,6 +488,7 @@
 .k-sform-row.changed .k-sform-label > label::before { content: ""; display: inline-block; width: 7px; height: 7px; margin: 0 9px 2px 1px; background: var(--k-gold-400); transform: rotate(45deg); }
 .k-sform-key { font-family: var(--k-font-mono); font-stretch: 90%; font-size: 14px; color: var(--k-text-2); }
 .k-sform-default { font-size: 15px; color: var(--k-text-2); }
+.k-sform-more { margin-left: 6px; font-size: 15px; white-space: nowrap; color: var(--k-ember-300); }
 .k-sform-control { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .k-word-sm { font-family: var(--k-font-label); font-weight: 500; font-size: 15px; letter-spacing: .012em; }
 .k-list-edit { display: flex; flex-direction: column; gap: 6px; }

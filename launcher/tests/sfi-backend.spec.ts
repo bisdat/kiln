@@ -23,14 +23,14 @@ const sf = async (page: Page, gameId = "client-steam") =>
 const sets = async (page: Page) => (await mock<string[]>(page, "calls")).filter((c) => c === "sfi_backend_set").length;
 
 async function open(page: Page) {
-  await page.goto("/#/settings");
+  await page.goto("/#/settings/game");
   await page.locator(".k-splash").waitFor({ state: "detached" });
 }
 /** Leaves the page and comes back (the mock keeps its state): the page reads again. */
 async function again(page: Page) {
   await page.evaluate(() => { location.hash = "/about"; });
   await page.waitForTimeout(150);
-  await page.evaluate(() => { location.hash = "/settings"; });
+  await page.evaluate(() => { location.hash = "/settings/game"; });
   await expect(card(page)).toBeVisible();
 }
 const card = (page: Page) => page.getByRole("region", { name: "ShroudForge", exact: true });
@@ -51,7 +51,7 @@ test("default, then the older switch, then a choice that replaces it (one key wr
   await again(page);
   await expect(c.getByTestId("sf-backend-setting")).toContainText('From the older switch "Use my installed ShroudForge": My installed ShroudForge.');
   await expect(row(page, "installed")).toHaveAttribute("aria-checked", "true");
-  await expect(c.getByTestId("sf-backend-now")).toHaveAttribute("data-setting", "inherited");
+  await expect(c.getByTestId("sf-backend-now")).toHaveAttribute("data-sf-kind", "inherited");
   await shot(page, "inherited");
 
   await row(page, "hosted").click();
@@ -64,7 +64,7 @@ test("default, then the older switch, then a choice that replaces it (one key wr
   await expect(d).toHaveCount(0);
   await expect.poll(() => sf(page)).toEqual({ backend: "hosted" });
   await expect(c.getByTestId("sf-backend-setting")).toHaveText("Chosen: Kiln's bundled ShroudForge.");
-  await expect(c.getByTestId("sf-backend-now")).toHaveAttribute("data-setting", "explicit");
+  await expect(c.getByTestId("sf-backend-now")).toHaveAttribute("data-sf-kind", "explicit");
   await shot(page, "explicit");
 
   // back to the default: the key goes

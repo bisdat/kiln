@@ -80,7 +80,7 @@ test("failed adds surface an error and a later drop can succeed", async ({ page 
 });
 
 test("every dropped modpack gets separate consent, also with switching new mods on turned off", async ({ page }) => {
-  await desktop(page, "/settings");
+  await desktop(page, "/settings/mods");
   await page.getByText("Switch new mods on", { exact: true }).click();
   await expect(page.getByRole("switch", { name: /^Switch new mods on/ })).not.toBeChecked();
   await drop(page, ".k-sheet", "first-modpack.zip", "second-modpack.zip");
@@ -109,13 +109,15 @@ test("a first-install profile failure is visible and a later drop recovers", asy
 });
 
 test("desktop settings cards preserve each other's changes during a slow save", async ({ page }) => {
-  await desktop(page, "/settings");
+  await desktop(page, "/settings/general");
   await plan(page, "app_settings_set", { delay: 400 });
-  await page.getByText("Switch new mods on", { exact: true }).click();
-  const appearance = page.locator(".k-card", { has: page.getByRole("heading", { name: "Appearance", exact: true }) });
-  await appearance.getByText("Animated fire", { exact: true }).click();
-  const deck = page.locator(".k-card", { has: page.getByRole("heading", { name: "Steam Deck", exact: true }) });
+  // two sections, three groups: each change waits for the one before and keeps it
+  const look = page.getByRole("region", { name: "Look", exact: true });
+  await look.getByText("Animated fire", { exact: true }).click();
+  const deck = page.getByRole("region", { name: "Steam Deck", exact: true });
   await deck.getByRole("radio", { name: "Deck mode", exact: true }).click();
+  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("link", { name: "Mods & profiles", exact: true }).click();
+  await page.getByText("Switch new mods on", { exact: true }).click();
   await expect.poll(() => page.evaluate(async () => {
     const s = await (await import("/src/api/commands.ts")).appSettingsGet();
     return [s.addToActiveProfile, s.animatedFire, s.uiMode];
