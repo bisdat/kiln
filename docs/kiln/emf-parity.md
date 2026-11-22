@@ -224,8 +224,9 @@ EMF's unchanged MIT header below Kiln's licence preface. No earlier slot or stru
 
 - EMF owns the queue and callback contract in the adapter, not Kiln core. Calls from any thread queue copied
   requests; server Pre translates each sphere to an x-fastest byte selection mask on Kiln's actual grid, then calls
-  `BreakBox`. Results are delivered at server Post, before mod tick subscribers. Reset cancels waiting requests;
-  like EMF's `Dispatcher.post(server)`, their callbacks wait for the next server Post, not the destroying thread.
+  `BreakBox`. Results are delivered at server Post, before mod tick subscribers. World closure cancels waiting and
+  already-extracted unexecuted work; interrupted columns retain the counts of completed spheres. Like EMF's
+  `Dispatcher.post(server)`, their callbacks wait for the next server Post, not the destroying thread.
   A 3-second watchdog cancels waiting work if the runner has not run. Callback faults do not suppress later results.
   A clean unloaded sphere is skipped (DONE with no contribution to counts), as in EMF's `block_glue.cpp:475-478,519`
   and `block_service.cpp:88,115`; a refusal after possible mutation is never treated as that no-op.

@@ -44,6 +44,7 @@ static KilnResult KILN_CALL cap(KilnStr name, KilnCapRow* out) {
 static KilnResult query_rc = KILN_OK, break_rc = KILN_OK;
 static uint32_t break_refusal = 0, break_result_flags = KILN_BUILD_BREAK_R_VERIFIED;
 static unsigned query_calls = 0, break_calls = 0;
+static bool stop_on_break = false, change_session_on_break = false;
 static KilnBuildBlockInfo block{};
 static KilnVec3 captured_point{}, captured_from{}, captured_to{};
 static uint32_t find_flags = 0;
@@ -77,6 +78,11 @@ static KilnResult KILN_CALL break_box(const KilnBuildBreak* r, KilnBuildBreakRes
     out->damaged = 3; out->removed = 2; out->dropped = r->flags & KILN_BUILD_BREAK_DROPS ? 1 : 0;
     out->refusal = break_refusal;
     out->flags = break_result_flags;
+    if (stop_on_break) {
+        stop_on_break = false;
+        std::thread destroyer([] { terrain_world_stopping(); }); destroyer.join();
+    }
+    if (change_session_on_break) { change_session_on_break = false; ++session; }
     return break_rc;
 }
 struct Answer { EmfWorld* world; uint32_t id; EmfBreakResult result; void* user; };
@@ -284,6 +290,33 @@ int main() {
     for (const auto& producer : ids) for (auto id : producer) { if (id) unique.insert(id); else ++rejected; }
     CHECK(unique.size() == 64 && rejected == 16);
     terrain_world_stopping(); terrain_world_started(); terrain_after_step(w, EMF_WORLD_SERVER);
+    // STOPPING can arrive on the destroying thread after Pre extracted its entire local batch.
+    r = request(); auto started = t.break_blocks(w, &r, &callback, nullptr);
+    auto extracted = t.break_blocks(w, &r, &callback, nullptr);
+    before = break_calls; count = answers.size(); stop_on_break = true;
+    terrain_server_pre();
+    CHECK(break_calls == before + 1 && answers.size() == count);
+    terrain_after_step(w, EMF_WORLD_SERVER);
+    CHECK(answers.size() == count + 2 && answers[count].id == started && answers[count].result.status == EMF_BREAK_DONE);
+    CHECK(answers[count+1].id == extracted && answers[count+1].result.status == EMF_BREAK_CANCELLED && answers[count+1].result.damaged == 0);
+    terrain_world_started();
+    // The same stop must prevent the remaining spheres of an already-started column from running.
+    r = request(); r.height = 1; auto interrupted = t.break_blocks(w, &r, &callback, nullptr);
+    before = break_calls; count = answers.size(); stop_on_break = true;
+    terrain_server_pre();
+    CHECK(break_calls == before + 1 && answers.size() == count);
+    terrain_after_step(w, EMF_WORLD_SERVER);
+    CHECK(answers.size() == count + 1 && answers.back().id == interrupted && answers.back().result.status == EMF_BREAK_CANCELLED);
+    CHECK(answers.back().result.damaged == 3 && answers.back().result.removed == 2);
+    terrain_world_started();
+    // A replacement session between column spheres is also caught without a STOPPING notification.
+    r = request(); r.height = 1; interrupted = t.break_blocks(w, &r, &callback, nullptr);
+    before = break_calls; count = answers.size(); change_session_on_break = true;
+    terrain_server_pre();
+    CHECK(break_calls == before + 1 && answers.size() == count);
+    terrain_after_step(w, EMF_WORLD_SERVER);
+    CHECK(answers.size() == count + 1 && answers.back().id == interrupted && answers.back().result.status == EMF_BREAK_CANCELLED);
+    CHECK(answers.back().result.damaged == 3 && answers.back().result.removed == 2);
     // Session change without a lifecycle notification still cancels, and never edits a replacement world.
     r = request(); CHECK(t.break_blocks(w, &r, &callback, nullptr)); ++session; before = break_calls;
     terrain_server_pre(); terrain_after_step(w, EMF_WORLD_SERVER);

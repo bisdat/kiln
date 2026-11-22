@@ -39,6 +39,10 @@ uint64_t session() {
     return S.world && S.world->header.size >= offsetof(KilnWorldApi, game_world_session) + sizeof(void*) &&
            S.world->game_world_session ? S.world->game_world_session(KILN_WORLD_SERVER) : 0;
 }
+bool world_ended(uint64_t expected) {
+    { std::lock_guard lock(g_mutex); if (g_stopping) return true; }
+    return expected != session();
+}
 bool server_world(EmfWorld* w) { return w && g_api && g_api->world && reinterpret_cast<uintptr_t>(w) == g_api->world(KILN_WORLD_SERVER); }
 bool world_callback(EmfWorld* w) {
     return server_world(w) && t_ctx.world_cb && t_ctx.world == w && g_api->on_tick_thread && g_api->on_tick_thread();
@@ -249,20 +253,24 @@ void terrain_server_pre() {
     for (auto& q : run) {
         const auto expected = q.session;
         Done d = answer(std::move(q), failed ? EMF_BREAK_FAILED : EMF_BREAK_DONE);
-        if (expected != session()) d.result.status = EMF_BREAK_CANCELLED;
+        if (world_ended(expected)) d.result.status = EMF_BREAK_CANCELLED;
         if (d.result.status == EMF_BREAK_DONE) {
             KilnBuildGrid grid{}; grid.size = sizeof grid;
             const char* unavailable = mode_unavailable(d.request.spec.flags);
             bool ok = !unavailable && S.build->grid(&grid) == KILN_OK;
+            if (world_ended(expected)) d.result.status = EMF_BREAK_CANCELLED;
             std::string mod = "emf:" + (d.request.mod ? d.request.mod->id : std::string("unknown"));
             for (const auto& s : d.request.spheres) {
-                if (!ok) break;
+                if (!ok || d.result.status != EMF_BREAK_DONE) break;
                 auto r = d.request.spec; r.origin_mod = kstr(mod);
                 r.flags |= KILN_BUILD_BREAK_PROTECTED_SPHERE;
                 r.sphere_center = {s.x,s.y,s.z}; r.sphere_radius = s.radius;
                 r.sphere_margin = .01; r.sphere_minimum = .25;
                 std::vector<uint8_t> mask;
                 if (!raster(s, grid, r, mask)) { ok = false; break; }
+                // STOPPING may run on another thread after this batch was extracted. Do not enter a later
+                // sphere (or a replacement session); completed sphere counts are retained without replay.
+                if (world_ended(expected)) { d.result.status = EMF_BREAK_CANCELLED; break; }
                 KilnBuildBreakResult result{}; result.size = sizeof result;
                 const auto rc = S.build->break_box(&r, &result);
                 // EMF's unreadable/unloaded sphere and a kernel that did no work are successful no-ops.
@@ -284,7 +292,7 @@ void terrain_server_pre() {
                     ok = false;
                 }
             }
-            if (!ok) {
+            if (!ok && d.result.status == EMF_BREAK_DONE) {
                 d.result.status = EMF_BREAK_FAILED; failed = true;
                 refuse(d.request.mod, "break_blocks", unavailable ? unavailable : "kiln.build refused the queued break; not retried", true);
             }
