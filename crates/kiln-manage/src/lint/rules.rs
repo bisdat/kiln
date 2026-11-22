@@ -148,6 +148,7 @@ pub(crate) fn run(l: &mut Linter) {
         recipe_water(&mut out, m, cat);
         quests(&mut out, m);
         blocks(&mut out, m, &code, cat);
+        ui_rows(&mut out, m);
         run_bindings(&mut out, m);
         skipped_refs += vfx(&mut out, m, cat);
         surfaces(&mut out, m);
@@ -2242,6 +2243,49 @@ fn blocks(out: &mut Out, m: &LMod, code: &Code, cat: Option<&Catalog>) {
 /// recipe tooltip shows the item's own rarity while a craft comes out at a rolled one (docs/kiln/modding/item-blocks.md
 /// "Rarity at creation"). Items of this mod by block name, "<this mod>:name" and patterns over them; game items and other
 /// mods' are not looked up here.
+/// Windows' rows in blocks/*.json, what Kiln.Blocks' UI compiler refuses at load (dossier 09 §4.1): an id two rows of one window
+/// share (rows inside tabs and a tree's node rows included; a tab's id is its tabs row's own), and a text field in a window that does
+/// not take the keyboard (only an interactive window or a screen has it). The schema checks each row's own shape.
+fn ui_rows(out: &mut Out, m: &LMod) {
+    fn walk<'a>(rows: &'a Node, ptr: &str, keyboard: bool, ids: &mut HashMap<&'a str, Span>, found: &mut Vec<(Span, String, String)>) {
+        for (i, row) in rows.as_array().into_iter().flatten().enumerate() {
+            let here = format!("{ptr}/{i}");
+            if let Some(id) = row.member("id").filter(|x| x.value.as_str().is_some()) {
+                let name = id.value.as_str().unwrap_or_default();
+                if ids.contains_key(name) {
+                    found.push((id.value.span, format!("{here}/id"), format!("\"{name}\" is the id of another row of this window: ids are unique in a window, nested rows included (Kiln.Blocks refuses the window)")));
+                } else {
+                    ids.insert(name, id.value.span);
+                }
+            }
+            if row.str_of("type") == Some("input") && !keyboard {
+                found.push((row.span, here.clone(), "a text field needs the keyboard: put it in an interactive window or a screen (interactive: false only shows; Kiln.Blocks refuses the window)".into()));
+            }
+            for (t, tab) in row.get("tabs").and_then(Node::as_array).into_iter().flatten().enumerate() {
+                if let Some(inner) = tab.get("rows") {
+                    walk(inner, &format!("{here}/tabs/{t}/rows"), keyboard, ids, found);
+                }
+            }
+            if let Some(inner) = row.get("nodeRows") {
+                walk(inner, &format!("{here}/nodeRows"), keyboard, ids, found);
+            }
+        }
+    }
+    for f in m.files.iter().filter(|f| f.kind == "blocks") {
+        for w in f.root.as_ref().and_then(|r| r.get("windows")).and_then(Node::as_object).into_iter().flatten() {
+            let screen = w.value.str_of("kind") == Some("screen");
+            let keyboard = screen || w.value.get("interactive").and_then(Node::as_bool) != Some(false);
+            let (mut ids, mut found) = (HashMap::new(), Vec::new());
+            if let Some(rows) = w.value.get("rows") {
+                walk(rows, &format!("/windows/{}/rows", super::json::ptr_seg(&w.key)), keyboard, &mut ids, &mut found);
+            }
+            for (span, pointer, message) in found {
+                out.push(Diagnostic::new(&f.display, codes::UI_ROW, span, &format!("window {}: {message}", w.key)).pointer(&pointer));
+            }
+        }
+    }
+}
+
 fn rarity_rolls_crafted(out: &mut Out, m: &LMod, files: &[&LFile]) {
     let mut crafted: Vec<String> = vec![];
     for f in files {

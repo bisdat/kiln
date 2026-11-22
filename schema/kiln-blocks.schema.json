@@ -4591,7 +4591,10 @@
         },
         "asset": {
           "type": "string",
-          "pattern": "^(?![A-Za-z][A-Za-z0-9+.-]*:)(?!/)[^\\\\]*\\.[Pp][Nn][Gg]$",
+          "pattern": "^(?![A-Za-z][A-Za-z0-9+.-]*:)(?![\\\\/])(?![\\s\\S]*(^|[\\\\/])\\.\\.([\\\\/]|$))[^:]*\\.[Pp][Nn][Gg]$",
+          "x-kiln-file": "mod",
+          "x-kiln-file-kind": "png",
+          "x-kiln-message": "a PNG in the mod's folder by a path relative to it (no full path, no '..', no URL)",
           "description": "A relative path in the mod's folder, no \"..\"."
         },
         "width": {
