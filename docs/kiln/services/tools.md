@@ -80,7 +80,7 @@ supplies. An unavailable producer returns `false`; Kiln does not invent counts o
 | `tools.material_picker` | Terrain group2 is filtered using an owned native held-tool observation; the game's aggregate supply counts are retained. | Missing selector/held-tool mapping; client-only presentation on a server. |
 | `tools.material_snapshot` | A separate per-player backpack/magic-chest observation producer is qualified. | Currently unavailable: aggregate selector counts are never fabricated into two sources. |
 | `tools.preview` | The explicit-item preview has an owned bounded row adapter. | Missing constructor mapping, wrong side or hooks disabled. |
-| `tools.brush_families` | The brush query can distinguish an owning tool from vanilla families. | Missing query/held-tool context or wrong side. |
+| `tools.brush_families` | A checked call-site adapter changes only the current tool frame's owned brush-query GUIDs. | Missing exact frame/query/held-tool context, checked-hook refusal or wrong side. |
 | `tools.identity` | The explicit-item root identity adapter is qualified. | Missing root helper, wrong side or hooks disabled. |
 
 The native client-Post observer copies the actual main-hand/action selection into an owned scalar snapshot tagged by
@@ -88,8 +88,13 @@ actor, owner, generation, session and step. A missing, changed or older-than-one
 It filters only terrain group2, leaving all six other categories unchanged. The qualified preview uses each call's
 explicit item, independently of that held observation.
 
-**Not yet established:** brush-query family context and the per-actor producer that separates backpack and magic-chest
-observations. Their capabilities remain unavailable until their mappings are qualified. Static qualification,
+The brush adapter is confined to the qualified frame drawer's call instruction. It requires the selected hotbar root
+and resolved item to match the registered held family, then rewrites only that call's owned include/ratio GUID values.
+Other query sites, vanilla tools, callbacks and nested unrelated frames inherit no admission. A unique tag alone is not
+sufficient. If this capability is unavailable, the ordinary picker has no established route to the tool's own brushes;
+do not assume that Add/Remove is usable through the normal menu.
+
+**Still unavailable:** the per-actor producer that separates backpack and magic-chest observations. Static qualification,
 filtering fixtures and native runner tests do not establish actual menu rendering, network behavior or the complete
 real-game tool. The item-presentation constructor's traced caller uses the selected hotbar model, which need not be the
 running action's item; its last item must never be cached as evidence of what the player holds.

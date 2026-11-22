@@ -9,6 +9,8 @@ static bool bind_ok=true;
 bool kiln_tools_bind_programs(KilnOwner,const KilnToolFamilyDef&) noexcept {return bind_ok;}
 void kiln_tools_unbind_programs(KilnOwner,uint32_t) noexcept {}
 static RootIdentity* vanilla_identity(RootIdentity* out,const uint32_t*) {*out={123,456,789,1,{}};return out;}
+static unsigned lookup_calls;
+static const uint8_t* KILN_CALL vanilla_lookup(void*,uint8_t) {static uint8_t config; ++lookup_calls;return &config;}
 static KilnHooksApi fake_hooks{};
 static KilnOwner revoked_owner{};
 static bool statuses_closed{};
@@ -20,7 +22,7 @@ static KilnResult KILN_CALL client_build(KilnBuildInfo* out) {
     *out={};out->size=sizeof(*out);out->side=KILN_SIDE_CLIENT;out->verified=1;out->hooks_enabled=1;
     std::strcpy(out->exe_sha256,"5d9ef2f140b8ed49e30dbee655841b89d08baec20f799a1817e171a18a850c77");return KILN_OK;
 }
-static KilnResult KILN_CALL raw(KilnOwner,uintptr_t,const KilnHookOrder*,void*,void** original,KilnHandle* handle) {*original=reinterpret_cast<void*>(&vanilla_identity);*handle=1;return KILN_OK;}
+static KilnResult KILN_CALL raw(KilnOwner,uintptr_t target,const KilnHookOrder*,void*,void** original,KilnHandle* handle) {*original=target==2?reinterpret_cast<void*>(&vanilla_lookup):reinterpret_cast<void*>(&vanilla_identity);*handle=target;return KILN_OK;}
 static KilnResult KILN_CALL revoke(KilnHandle) {return KILN_OK;}
 static KilnResult KILN_CALL revoke_owner(KilnOwner owner) {revoked_owner=owner;statuses_closed=!kiln_tools_hook_installed(KILN_TOOL_HOOK_IDENTITY);return KILN_OK;}
 static void KILN_CALL owner_revoke(KilnOwner owner) {revoked_owner=owner;}
@@ -65,6 +67,15 @@ int main() {
     first.primary.mode=KILN_TOOL_MODE_ADD;std::memset(first.primary.remove_cells,0,32);
     kiln_tools_report_hook(KILN_TOOL_HOOK_SELECTOR_BUILDER,0);
     CHECK(kiln_tools_define_family(7,&first,&one)==KILN_OK&&one!=0); // Client presentation never gates server Add.
+    CHECK(lookup_hook.install(&fake,child,2,reinterpret_cast<void*>(&lookup),"test material lookup"));
+    lookup_calls=0;CHECK(lookup(nullptr,69)!=nullptr&&lookup_calls==1); // Vanilla is unchanged with a policy registered.
+    {
+        kt::ToolPolicyScope scope(kt::policy_for_tool(first.tool,0));const auto* p=kiln_tools_active_policy();
+        CHECK(p&&p->pool_count==1&&p->pool[0].item==1257792166u&&p->pool[0].cell==8&&p->pool[0].voxels_per_item==16);
+        CHECK(lookup(nullptr,8)!=nullptr&&lookup_calls==2);
+        CHECK(lookup(nullptr,69)==nullptr&&lookup_calls==2); // Lookup, like cost, uses the private immutable pool.
+    }
+    CHECK(lookup(nullptr,69)!=nullptr&&lookup_calls==3);
     CHECK(kiln_tools_remove_family(7,one)==KILN_OK);
     kiln_tools_report_hook(KILN_TOOL_HOOK_COST,0);
     CHECK(kiln_tools_define_family(7,&first,&one)==KILN_ERR_UNAVAILABLE&&one==0);

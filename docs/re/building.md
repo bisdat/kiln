@@ -145,8 +145,15 @@ function-local disassembly) and LLVM disassembly. No client execution was perfor
   name the old stack buffer. Rebind the view to the destination's owned data after the original returns, then bound
   and filter that owned data. Never cache this constructor's item as evidence of what an in-flight action holds.
 - `0xd25b50` scans the item registry and applies GUID-tag filters to the item's tag BlobArray at +0x5e0 (24-byte rows:
-  GUID and two 32-bit fractions), producing 72-byte presentation rows. The owning-tool context of its callers is
-  **not yet qualified**. Keeping new brush tags out of vanilla queries does not prove a new root's picker draws.
+  GUID and two 32-bit fractions), producing 72-byte presentation rows. Its four callers use fixed tags or a zero include,
+  so a unique family tag alone does not admit a tool. Only the `0xc3f210` frame drawer's call at **0xc3fe18** is adapted:
+  a unique pattern qualifies the instruction and its rel32 target. A checked MID requires the current held family root
+  to match selected hotbar ID `[RBP+0x118]` and resolved ItemInfo `[RBP+0xe0]`. The Overgrowth branch has
+  `RBP=RSP+0x100`, output `RCX=RBP+0x690` (fresh empty capacity16 array), include `R9=RSP+0x30`, ratio
+  `R8=RBP+0x100`, exclude `RDX=RSP+0x40`. Only include/ratio GUID **values** in these distinct caller-owned
+  temporaries are replaced. Other three query sites, the Decay tuple and persistent callback outputs stay untouched.
+  There is no inherited TLS admission. `RawHook::caller()` alone is insufficient: its per-target caller record is not
+  restored after a recursive predecessor. A write fault skips this one empty-output query, never a half-patched query.
 - `0xd3e130` writes a 16-byte root identity `{itemId,nameTag,descriptionTag,present}`. It substitutes vanilla root IDs
   based on ItemInfo flags +0x5d8 (bits 3/4/5/6/8). A Kiln root can instead use its own identity and content text tags:
   the existing `kiln.item.name` / `kiln.item.description` GUID derivation, verified in the content writer. No game

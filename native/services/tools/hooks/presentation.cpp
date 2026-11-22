@@ -2,6 +2,7 @@
 #include "../presentation_api.h"
 #include "../presentation.h"
 #include "../held_observer.h"
+#include "../brush_frame.h"
 #include "../internal.h"
 #include "../impact_binding.h"
 #include "kiln_hook.hpp"
@@ -24,6 +25,8 @@ std::map<KilnHandle,Registration> registrations;
 std::map<uint32_t,std::array<uint8_t,16>> identities;
 KilnHandle next_handle=1;
 kiln::RawHook lookup_hook, preview_hook, identity_hook, selector_hook;
+kiln::MidHook2 brush_frame_hook;
+std::atomic<uintptr_t> brush_query_resume{};
 HeldObserver held_observer;
 std::atomic<KilnToolHeldItemProvider> held_provider{};
 std::shared_ptr<const Family> held_family() {
@@ -82,6 +85,19 @@ void KILN_CALL selector(SelectorGroup* groups,void* access,uint8_t current_only)
     // The other six groups (arrows, spells, wall, roof, vanilla Overgrowth, bait) remain untouched.
     if(groups&&family)filter_selector(groups[2],family->materials);
 }
+void report_caps();
+void brush_query_frame(KilnRegisters& regs) {
+    const auto resume=brush_query_resume.load(std::memory_order_acquire);
+    const auto family=held_family();if(!resume||!family)return;
+    std::array<uint8_t,16> guid{};
+    {std::lock_guard lock(gate);const auto i=identities.find(family->tool);if(i==identities.end())return;guid=i->second;}
+    const auto result=patch_brush_frame({regs.rsp,regs.rbp,regs.rcx,regs.rdx,regs.r8,regs.r9},family->tool,guid);
+    if(result==BrushFrameResult::WriteFault) {
+        regs.rip=resume; // Skip only this query after a partial write; its fresh output remains empty.
+        brush_query_resume.store(0,std::memory_order_release);
+        kiln_tools_report_hook(KILN_TOOL_HOOK_BRUSH_PICKER,0);report_caps();
+    }
+}
 PreviewOwner* KILN_CALL preview(PreviewOwner* out,const uint32_t* item,SelectorGroup* group) {
     // Capture this invocation's explicit item identity before the original runs. A nested item-presentation
     // constructor cannot lend its family to this call; only the owned immutable metadata stays pinned.
@@ -127,18 +143,33 @@ void report_caps() {
     const bool online=api->build_info&&api->build_info(&build)==KILN_OK;
     const uint32_t reason=!online?KILN_CAP_REASON_OFFLINE:build.side!=KILN_SIDE_CLIENT?KILN_CAP_REASON_WRONG_SIDE:!build.hooks_enabled?KILN_CAP_REASON_POLICY:KILN_CAP_REASON_SYMBOL_MISSING;
     auto report=[&](const char* name,bool ready,const char* missing) {
-        const char* why=ready?"qualified explicit-item presentation adapter installed":!online?"no game in this process":build.side!=KILN_SIDE_CLIENT?"tool presentation is client-only":!build.hooks_enabled?"hooks are disabled by the build policy":missing;
+        const char* why=ready?"qualified native tool presentation adapter installed":!online?"no game in this process":build.side!=KILN_SIDE_CLIENT?"tool presentation is client-only":!build.hooks_enabled?"hooks are disabled by the build policy":missing;
         caps->report(parent_owner,{name,std::strlen(name)},ready?KILN_CAP_AVAILABLE:KILN_CAP_UNAVAILABLE,ready?KILN_CAP_REASON_NONE:reason,{why,std::strlen(why)});
     };
     report("tools.material_picker",online&&build.side==KILN_SIDE_CLIENT&&kiln_tools_hook_installed(KILN_TOOL_HOOK_SELECTOR_BUILDER),"selector or owned held-tool observer is unavailable");
     report("tools.material_snapshot",false,"separate per-player backpack/magic-chest observations are not qualified; aggregate selector counts are not split or fabricated");
     report("tools.preview",online&&build.side==KILN_SIDE_CLIENT&&kiln_tools_hook_installed(KILN_TOOL_HOOK_PREVIEW),"owned preview constructor mapping is unavailable or its hook was refused");
-    report("tools.brush_families",false,"brush query owning-family admission is not qualified; presentation is refused");
+    report("tools.brush_families",online&&build.side==KILN_SIDE_CLIENT&&kiln_tools_hook_installed(KILN_TOOL_HOOK_BRUSH_PICKER),"caller-scoped brush frame or owned held-tool observer is unavailable");
     report("tools.identity",online&&build.side==KILN_SIDE_CLIENT&&kiln_tools_hook_installed(KILN_TOOL_HOOK_IDENTITY),"root identity mapping is unavailable or its hook was refused");
 }
 bool install(kiln::RawHook& hook,const char* symbol,const char* pattern,void* function) {
     uintptr_t address=0;
     return api->symbol({symbol,std::strlen(symbol)},&address)==KILN_OK&&address&&qualify(address,pattern)&&hook.install(api,child,address,function,symbol);
+}
+bool install_brush_frame() {
+    uintptr_t site=0,query=0;
+    constexpr char site_symbol[]="tools/BrushQueryFrame",query_symbol[]="tools/BrushQuery";
+    if(api->symbol({site_symbol,sizeof site_symbol-1},&site)!=KILN_OK||site<7||
+       api->symbol({query_symbol,sizeof query_symbol-1},&query)!=KILN_OK||!query||
+       !qualify(site-7,"0F 29 85 00 01 00 00 E8 ?? ?? ?? ?? 48 8B 05 ?? ?? ?? ?? 48 8B 88 C8 00 00 00 48 81 C1 E0 A7 00 00 E8 ?? ?? ?? ?? 89 45 74")||
+       !qualify(query,"4C 89 44 24 18 48 89 54 24 10 55 53 56 41 54 41 55 41 57 48 8D 6C 24 D1 48 81 EC C8 00 00 00"))return false;
+    uint8_t call[5]{};int32_t relative=0;
+    if(hooks->read_original(site,call,sizeof call)!=KILN_OK||call[0]!=0xe8)return false;
+    std::memcpy(&relative,call+1,4);
+    if(int64_t(site)+5+relative!=int64_t(query))return false;
+    brush_query_resume.store(site+5,std::memory_order_release);
+    if(brush_frame_hook.install_checked(api,child,site,&brush_query_frame,site_symbol))return true;
+    brush_query_resume.store(0,std::memory_order_release);return false;
 }
 }
 
@@ -223,14 +254,14 @@ void kiln_tools_presentation_install(const KilnApi* value,KilnOwner parent) {
         kiln_tools_report_hook(KILN_TOOL_HOOK_IDENTITY,install(identity_hook,"tools/RootIdentity","48 89 5C 24 20 56 48 83 EC 20 48 8B F1 48 85 D2 0F 84 ?? ?? ?? ?? 8B 82 D8 05 00 00",reinterpret_cast<void*>(&identity)));
         const bool held_ready=held_observer.start(api,child);
         kiln_tools_report_hook(KILN_TOOL_HOOK_SELECTOR_BUILDER,held_ready&&install(selector_hook,"tools/MaterialSelector","48 89 5C 24 08 44 88 44 24 18 48 89 54 24 10 55 56 57 41 54 41 55 41 56 41 57 48 81 EC 90 01 00 00 33 ED 4C 8D B9 38 06 00 00 48 8B DA 44 8B F5",reinterpret_cast<void*>(&selector)));
+        kiln_tools_report_hook(KILN_TOOL_HOOK_BRUSH_PICKER,held_ready&&install_brush_frame());
     }
-    if(!client)kiln_tools_report_hook(KILN_TOOL_HOOK_SELECTOR_BUILDER,0);
-    // The brush route still requires qualified caller discrimination, not merely a held root.
-    kiln_tools_report_hook(KILN_TOOL_HOOK_BRUSH_PICKER,0);
+    if(!client) {kiln_tools_report_hook(KILN_TOOL_HOOK_SELECTOR_BUILDER,0);kiln_tools_report_hook(KILN_TOOL_HOOK_BRUSH_PICKER,0);}
 }
 void kiln_tools_presentation_uninstall() {
     held_provider.store(nullptr,std::memory_order_release);held_observer.stop();
     for(auto id:{KILN_TOOL_HOOK_MATERIAL_LOOKUP,KILN_TOOL_HOOK_SELECTOR_BUILDER,KILN_TOOL_HOOK_PREVIEW,KILN_TOOL_HOOK_BRUSH_PICKER,KILN_TOOL_HOOK_IDENTITY})kiln_tools_report_hook(id,0);
     {std::lock_guard lock(gate);for(const auto& [_,registration]:registrations)remove_locked(registration);registrations.clear();}
     if(child&&hooks)hooks->revoke_owner(child);if(child&&api)api->owner_revoke(child);child=0;retiring=0;
+    brush_query_resume.store(0,std::memory_order_release);
 }

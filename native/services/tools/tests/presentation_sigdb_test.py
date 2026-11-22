@@ -62,6 +62,22 @@ class MaterialLookupSignatureTest(unittest.TestCase):
     def test_server(self):
         self.check_build("server")
 
+    def test_client_selector_and_brush_frame(self):
+        image = Image(self.args.client)
+        doc = next(doc for name, doc, _ in compose("client") if name == "tools-presentation.json")
+        resolver = Resolver(image, doc)
+        expected = {"tools/MaterialSelector": 0x40e5d0, "tools/BrushQueryFrame": 0xc3fe18, "tools/BrushQuery": 0xd25b50}
+        for symbol, rva in expected.items():
+            for strategy in doc["symbols"][symbol]["find"]:
+                hits = resolver.scan(parse(strategy["pattern"])[0], resolver.text_lo, resolver.text_hi, limit=100)
+                self.assertEqual([hit + strategy.get("offset", 0) for hit in hits], [rva], symbol)
+        site = expected["tools/BrushQueryFrame"]
+        self.assertEqual(image.img[site], 0xe8)
+        relative = int.from_bytes(image.img[site+1:site+5], "little", signed=True)
+        self.assertEqual(site+5+relative, expected["tools/BrushQuery"])
+        # Source of the two original GUID temporaries, independently decoded from the shipped Small brush.
+        self.assertEqual(image.img[0x1d8aa68:0x1d8aa78].hex(), "cfa6ae08e8e06c4d8a29a21f4693e006")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
