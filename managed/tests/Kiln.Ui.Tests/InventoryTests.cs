@@ -115,6 +115,7 @@ public sealed unsafe class InventoryTests : IDisposable
     private static void Use(IKilnBackend b)
     {
         Backend.Current = b;
+        UiNative.ResetForTests();
         UiValuesNative.ResetForTests();
         UiInventoryBridge.ResetForTests();
         Events.Reset();
@@ -123,6 +124,7 @@ public sealed unsafe class InventoryTests : IDisposable
     public void Dispose()
     {
         UiInventoryBridge.ResetForTests();
+        UiNative.ResetForTests();
         Backend.Current = _previous;
         UiValuesNative.ResetForTests();
         FakeInventory.Free();
@@ -172,6 +174,66 @@ public sealed unsafe class InventoryTests : IDisposable
         Assert.Equal(SlotModifiers.Ctrl, c.Modifiers);
         Assert.True(c.Taken);
         Assert.Equal(HudScreen.StorageChest, c.Screen.Hud);
+    }
+
+    [Fact]
+    public void Worker_pad_polls_do_not_run_slot_click_handlers()
+    {
+        var slot = Slot(0xAA, 900);
+        slot.Available |= UiValuesNative.NativeState;
+        slot.NativeState[0] = 1;
+        FakeUiValues.SlotList = [slot];
+        FakeUiValues.SlotsMeta = new()
+        {
+            Size = (uint)sizeof(UiValuesNative.SlotsFrame), Ok = 1, Count = 1, Session = 1, Frame = 9,
+            CaptureMs = (ulong)Environment.TickCount64,
+            Screen = new() { Size = (uint)sizeof(UiNative.Screen), UiState = (byte)GameUiState.Play, HudScreen = (byte)HudScreen.Backpack, Available = 1 },
+        };
+        var seen = new List<int>();
+        using var reg = Ui.Inventory.OnClick(new SlotClickOptions { Pad = KeyChord.Parse("Pad:LS") },
+            _ => seen.Add(Environment.CurrentManagedThreadId));
+        var taken = false;
+        var worker = new Thread(() => taken = UiInventoryBridge.PadPress(KeyChord.Parse("Pad:LS")));
+        worker.Start(); worker.Join();
+        Assert.True(taken);
+        Assert.Empty(seen);
+        var main = Environment.CurrentManagedThreadId;
+        UiKeyDispatch.Drain();
+        Assert.Equal(new[] { main }, seen);
+    }
+
+    [Fact]
+    public void A_click_carries_the_slots_rarity_level_and_server_entity()
+    {
+        // 0.2.0-dev.30.5 (GitHub issue 121): read with the slot as the game drew it
+        var got = new List<SlotClick>();
+        using var reg = Ui.Inventory.OnClick(new SlotClickOptions(), got.Add);
+        var s = Slot(0xAA, 950, page: 0x6000);
+        s.Available |= UiValuesNative.ItemValues;
+        s.Rarity = 3;
+        s.Level = 12;
+        s.ServerEntity = 950;
+        Deliver(FakeInventory.Subscribed[0].User, 1, 0, s);
+        var c = Assert.Single(got);
+        Assert.Equal((ItemRarity.Epic, 12, new EntityId(950)), (c.Rarity!.Value, c.Level, c.Slot.ServerEntity));
+        Deliver(FakeInventory.Subscribed[0].User, 1, 0, Slot(0xAA, 900));  // no ItemValues: an older core
+        Assert.Equal(((ItemRarity?)null, 0), (got[1].Rarity, got[1].Level));
+    }
+
+    [Fact]
+    public void Selected_is_the_focused_slot_of_a_fresh_frame_on_a_pointer_screen()
+    {
+        // 0.2.0-dev.30.5 (GitHub issue 119 b): the slot draw's state byte 0 is the game's focus test (docs/re/game-ui.md)
+        static VisibleSlot Slot(uint item, byte focus) => new(0, new EntityId(0x5000), 0, new ItemId(item), 1, EntityId.None,
+            EntityId.None, 4, new UiRect(0, 0, 80, 80), null, new byte[] { focus, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+            UiValuesNative.OuterRect | UiValuesNative.NativeState, null, null);
+        var backpack = new GameScreen(GameUiState.Play, HudScreen.Backpack, default, 0, null, 0, 9);
+        var snap = new VisibleSlotsSnapshot(1, 9, 1000, new EntityId(77), backpack, default, 1, 0, [Slot(0xAA, 0), Slot(0xBB, 1), Slot(0xCC, 1)]);
+        Assert.Equal(new ItemId(0xBB), UiInventoryBridge.SelectedIn(snap, 1100)!.Item);
+        Assert.Null(UiInventoryBridge.SelectedIn(snap, 1000 + UiInventoryBridge.SelectedMaxAgeMs + 1));  // stale
+        Assert.Null(UiInventoryBridge.SelectedIn(snap with { Screen = backpack with { Hud = HudScreen.InGame } }, 1100));
+        Assert.Null(UiInventoryBridge.SelectedIn(snap with { Screen = backpack with { State = GameUiState.Load } }, 1100));
+        Assert.Null(UiInventoryBridge.SelectedIn(snap with { Slots = [Slot(0xAA, 0)] }, 1100));
     }
 
     [Fact]

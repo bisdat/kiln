@@ -1,1 +1,84 @@
 #nullable enable
+Kiln.SlotClick.Level.get -> int
+Kiln.SlotClick.Rarity.get -> Kiln.ItemRarity?
+Kiln.VisibleSlot.Level.get -> int
+Kiln.VisibleSlot.Level.init -> void
+Kiln.VisibleSlot.Rarity.get -> Kiln.ItemRarity?
+Kiln.VisibleSlot.Rarity.init -> void
+Kiln.KeyChord.IsPad.get -> bool
+Kiln.KeyListener.Pad.get -> bool
+Kiln.KeyListenFlags.Pad = 2 -> Kiln.KeyListenFlags
+Kiln.KeyMods.PadLB = 8 -> Kiln.KeyMods
+Kiln.KeyMods.PadLT = 32 -> Kiln.KeyMods
+Kiln.KeyMods.PadRB = 16 -> Kiln.KeyMods
+Kiln.KeyMods.PadRT = 64 -> Kiln.KeyMods
+Kiln.KeyPress.IsPad.get -> bool
+static Kiln.Ui.Inventory.Selected.get -> Kiln.VisibleSlot?
+Kiln.SlotButton.Pad = 16 -> Kiln.SlotButton
+Kiln.SlotClick.Pad.get -> Kiln.KeyChord?
+Kiln.SlotClick.Pad.init -> void
+Kiln.SlotClickOptions.Pad.get -> Kiln.KeyChord?
+Kiln.SlotClickOptions.Pad.init -> void
+const Kiln.Ui.World.ThroughWallsCapability = "ui.world_outline.through_walls" -> string!
+Kiln.OutlineOptions.ThroughWalls.get -> bool
+Kiln.OutlineOptions.ThroughWalls.init -> void
+static Kiln.Ui.World.ThroughWallsAvailable.get -> bool
+Kiln.UiItemDetailLine
+Kiln.UiItemDetailLine.<Clone>$() -> Kiln.UiItemDetailLine!
+Kiln.UiItemDetailLine.Deconstruct(out string! Text, out float? Value) -> void
+Kiln.UiItemDetailLine.Equals(Kiln.UiItemDetailLine? other) -> bool
+Kiln.UiItemDetailLine.UiItemDetailLine(string! Text, float? Value) -> void
+Kiln.UiItemDetailLine.Text.get -> string!
+Kiln.UiItemDetailLine.Text.init -> void
+Kiln.UiItemDetailLine.Value.get -> float?
+Kiln.UiItemDetailLine.Value.init -> void
+override Kiln.UiItemDetailLine.Equals(object? obj) -> bool
+override Kiln.UiItemDetailLine.GetHashCode() -> int
+override Kiln.UiItemDetailLine.ToString() -> string!
+static Kiln.UiItemDetailLine.operator !=(Kiln.UiItemDetailLine? left, Kiln.UiItemDetailLine? right) -> bool
+static Kiln.UiItemDetailLine.operator ==(Kiln.UiItemDetailLine? left, Kiln.UiItemDetailLine? right) -> bool
+Kiln.UiItemDetailSnapshot
+Kiln.UiItemDetailSnapshot.<Clone>$() -> Kiln.UiItemDetailSnapshot!
+Kiln.UiItemDetailSnapshot.Deconstruct(out Kiln.ItemId Item, out Kiln.EntityId Entity, out int Level, out Kiln.ItemRarity? Rarity, out ulong Session, out ulong Frame, out ulong CaptureMs, out System.Collections.Generic.IReadOnlyList<Kiln.UiItemDetailLine!>! Lines) -> void
+Kiln.UiItemDetailSnapshot.Equals(Kiln.UiItemDetailSnapshot? other) -> bool
+Kiln.UiItemDetailSnapshot.UiItemDetailSnapshot(Kiln.ItemId Item, Kiln.EntityId Entity, int Level, Kiln.ItemRarity? Rarity, ulong Session, ulong Frame, ulong CaptureMs, System.Collections.Generic.IReadOnlyList<Kiln.UiItemDetailLine!>! Lines) -> void
+Kiln.UiItemDetailSnapshot.Item.get -> Kiln.ItemId
+Kiln.UiItemDetailSnapshot.Item.init -> void
+Kiln.UiItemDetailSnapshot.Entity.get -> Kiln.EntityId
+Kiln.UiItemDetailSnapshot.Entity.init -> void
+Kiln.UiItemDetailSnapshot.Level.get -> int
+Kiln.UiItemDetailSnapshot.Level.init -> void
+Kiln.UiItemDetailSnapshot.Rarity.get -> Kiln.ItemRarity?
+Kiln.UiItemDetailSnapshot.Rarity.init -> void
+Kiln.UiItemDetailSnapshot.Session.get -> ulong
+Kiln.UiItemDetailSnapshot.Session.init -> void
+Kiln.UiItemDetailSnapshot.Frame.get -> ulong
+Kiln.UiItemDetailSnapshot.Frame.init -> void
+Kiln.UiItemDetailSnapshot.CaptureMs.get -> ulong
+Kiln.UiItemDetailSnapshot.CaptureMs.init -> void
+Kiln.UiItemDetailSnapshot.Lines.get -> System.Collections.Generic.IReadOnlyList<Kiln.UiItemDetailLine!>!
+Kiln.UiItemDetailSnapshot.Lines.init -> void
+override Kiln.UiItemDetailSnapshot.Equals(object? obj) -> bool
+override Kiln.UiItemDetailSnapshot.GetHashCode() -> int
+override Kiln.UiItemDetailSnapshot.ToString() -> string!
+static Kiln.UiItemDetailSnapshot.operator !=(Kiln.UiItemDetailSnapshot? left, Kiln.UiItemDetailSnapshot? right) -> bool
+static Kiln.UiItemDetailSnapshot.operator ==(Kiln.UiItemDetailSnapshot? left, Kiln.UiItemDetailSnapshot? right) -> bool
+Kiln.UiItemDetailResult
+Kiln.UiItemDetailResult.<Clone>$() -> Kiln.UiItemDetailResult!
+Kiln.UiItemDetailResult.Deconstruct(out bool Ok, out string? Reason, out Kiln.UiItemDetailSnapshot? Snapshot) -> void
+Kiln.UiItemDetailResult.Equals(Kiln.UiItemDetailResult? other) -> bool
+Kiln.UiItemDetailResult.UiItemDetailResult(bool Ok, string? Reason, Kiln.UiItemDetailSnapshot? Snapshot) -> void
+Kiln.UiItemDetailResult.Ok.get -> bool
+Kiln.UiItemDetailResult.Ok.init -> void
+Kiln.UiItemDetailResult.Reason.get -> string?
+Kiln.UiItemDetailResult.Reason.init -> void
+Kiln.UiItemDetailResult.Snapshot.get -> Kiln.UiItemDetailSnapshot?
+Kiln.UiItemDetailResult.Snapshot.init -> void
+override Kiln.UiItemDetailResult.Equals(object? obj) -> bool
+override Kiln.UiItemDetailResult.GetHashCode() -> int
+override Kiln.UiItemDetailResult.ToString() -> string!
+static Kiln.UiItemDetailResult.operator !=(Kiln.UiItemDetailResult? left, Kiln.UiItemDetailResult? right) -> bool
+static Kiln.UiItemDetailResult.operator ==(Kiln.UiItemDetailResult? left, Kiln.UiItemDetailResult? right) -> bool
+const Kiln.Ui.Values.ItemDetailCapability = "ui.item_detail" -> string!
+static Kiln.Ui.Values.ItemDetail(Kiln.EntityId entity, Kiln.ItemId item = default(Kiln.ItemId), int? level = null, Kiln.ItemRarity? rarity = null) -> Kiln.UiItemDetailResult!
+static Kiln.Ui.Values.ItemDetail(Kiln.ItemId item, int? level = null, Kiln.ItemRarity? rarity = null) -> Kiln.UiItemDetailResult!

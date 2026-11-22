@@ -485,6 +485,7 @@
   },
   "keys": {
     "help_mouse": "点击键位，再按新键。可用鼠标中键、侧键或滚轮，也可搭配 Ctrl、Shift、Alt；鼠标左右键不可绑定。再点一次可取消，Esc 取消并关闭菜单。点「解绑」清除快捷键。设置保存在 kiln/config/keybinds.json。",
+    "help_pad": "也可以用手柄：点击键位后按手柄按键，或按住 LB、RB、LT、RT 再按另一个键组成组合（Pad:LB+A）；单独松开 LB、RB、LT、RT 则绑定该键。",
     "help": "点击键位，再按新键。再点一次可取消，Esc 取消并关闭菜单。点「解绑」清除快捷键。设置保存在 kiln/config/keybinds.json。",
     "col_action": "操作",
     "col_key": "键位",
@@ -494,7 +495,8 @@
     "reset": "重置",
     "unbind": "解绑",
     "toast": {
-      "wheel_menu": "滚轮用于滚动菜单。将 {key} 绑定为菜单开关会意外关闭菜单，请换一个键。"
+      "wheel_menu": "滚轮用于滚动菜单。将 {key} 绑定为菜单开关会意外关闭菜单，请换一个键。",
+      "pad_menu": "Kiln 菜单键不能是手柄按键（{key}）：菜单只能用键盘或鼠标按键打开"
     }
   },
   "network": {

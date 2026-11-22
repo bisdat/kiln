@@ -331,6 +331,8 @@ The seven `ui.values.*` / `ui.slots.inspect` / `ui.gemforge.inspect` rows below 
 | `mods.boot.vfx` | service row | kiln.boot, at its start | — | Staging VFX and materials into a client's boot generation. Not in this build: `unavailable` (`service-missing`) on a client, where VFX and material files are built at start; `wrong-side` on a dedicated server (it renders none: an empty plan) |
 | `mods.boot.resource_patches` | native, static | kiln.content, at its start (and again with a note when a write of this start was not applied) | — | Fields of a game resource stated as resource patches (a boot mod's `OnBoot` or its blocks files) are written before the game reads its resources. Off without a boot phase in this process, and where kiln.assets' resources are off |
 | `kiln.ui.values` | service row | core | — | the in-core service is here (client only; on a server its init says no) |
+| `kiln.ui.item_detail` | service row (client), Since 0.2.0-dev.30.5 | core | — | Passive capture table v1 is present; not registered on a dedicated server. This does not mean any requested item has a cached panel |
+| `ui.item_detail` | sigdb feature (client), Since 0.2.0-dev.30.5 | core `kiln.ui.item_detail`; `wrong-side` on server, missing symbols/layout unavailable, `service-older` without table, `faulted` on hook failure | — | Passive game-panel text/stat-float captures, not on-demand computation; offline/no-session, uninspected and rejected panels return reasoned misses. Client check: inspect an item panel, then compare its lines read from a mod. Real-client proof pending |
 | `ui.values.detail` | sigdb feature (client), static | core (sigdb); kiln.ui.values lowers it (`faulted`) when its hook cannot be installed | — | providers can replace the item detail view's number, bar and label |
 | `ui.values.slot` | sigdb feature (client), static | core (sigdb); kiln.ui.values lowers it (`faulted`) | — | providers can replace the inventory slot bar |
 | `ui.values.hud` | sigdb feature (client), static | core (sigdb); kiln.ui.values lowers it (`faulted`) | — | providers can replace the local player's health, stamina and mana pairs; also the player-UI stage 09 reads |
@@ -482,3 +484,9 @@ kiln.world rows above).
 | Row | Kind | Reported by | What it says |
 |---|---|---|---|
 | `build.voxel_grid_tasks` | native, static | kiln.build, in its `on_ready` | the voxel grid's geometry from task threads (`grid_for_session`, experimental; [build.md](build.md#voxels-from-tasks-since-020-dev303)). Available when kiln.build's voxel reads are on (`build.read`), the running game matches an exact engine profile with its write gate (dedicated server 26430253, client 26430625) and kiln.world's `game_world_session` is there; the text names the profile. Unavailable, `symbol-missing`, otherwise, the text naming the check that failed |
+
+## Rows added in 0.2.0-dev.30.5 / mod API 0.2.14
+
+| Row | Kind | Reported by | Unconfirmed | What it says |
+|---|---|---|---|---|
+| `ui.world_outline.through_walls` | managed, static (since 0.2.0-dev.30.5) | Kiln.Ui, at its start and first use | Client check: toggle through-walls outlines, the off setting and competing requests | `OutlineOptions.ThroughWalls`' silhouette ([../render.md](../render.md#outlineoptions)): needs `ui.world_outline`, kiln.render v3 (the entity's position; `service-older` with a v2 kiln-ui.dll), `render.camera` and kiln.ui (`service-missing`; `faulted` when overlay drawing is explicitly off). Off: a new ThroughWalls request throws `KilnUnavailableException` with the row's reason; existing requests draw no silhouette |

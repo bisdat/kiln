@@ -4793,16 +4793,19 @@
           "size": 24
         },
         "KilnRenderOutlineInfo": {
-          "align": 4,
+          "align": 8,
           "fields": {
             "entity": 12,
             "group": 16,
             "merged": 20,
+            "position": 32,
+            "position_ok": 24,
+            "position_step": 28,
             "reason": 8,
             "size": 0,
             "state": 4
           },
-          "size": 24
+          "size": 56
         },
         "KilnRenderOutlineStatus": {
           "align": 8,
@@ -4837,7 +4840,7 @@
           "size": 32
         }
       },
-      "sha256": "90b67eca89c6a976aaf7933e30effab746ea71099da5c9e080fb301dc21b3bbe"
+      "sha256": "aee4b15b92066ce49a7640891df92adf30d13cac6767439cdd6049fac21eab34"
     },
     "native/core/abi/services/kiln_repl.h": {
       "function_macros": [],
@@ -6715,7 +6718,7 @@
           "size": 48
         }
       },
-      "sha256": "58a3fe675df2ee6ae263a880b0f81899bcdd71de1b38d18ddd3a23c7750e011e"
+      "sha256": "56c03ac30f001d80e59f22a709d34e837eedd1f8d9d0a19f60b3a5cf565d5d0e"
     },
     "native/core/abi/services/kiln_ui_inventory.h": {
       "function_macros": [],
@@ -6771,7 +6774,7 @@
             "x": 16,
             "y": 20
           },
-          "size": 200
+          "size": 208
         },
         "KilnUiSlotClickFilter": {
           "align": 4,
@@ -6794,7 +6797,7 @@
             "size": 0,
             "slot": 32
           },
-          "size": 144
+          "size": 152
         },
         "KilnUiSlotMapping": {
           "align": 8,
@@ -6814,7 +6817,76 @@
           "size": 88
         }
       },
-      "sha256": "48d7341f36d8078c6740c845f2fcc8b75c1071161dd600be7f364b70a32bc4cb"
+      "sha256": "1547395134c9227c18afc25b95316ca1323e1072c8e598d1bff57fbd17a90a64"
+    },
+    "native/core/abi/services/kiln_ui_item_detail.h": {
+      "function_macros": [],
+      "inline_helpers": [],
+      "layouts": {
+        "KilnUiItemDetailApi": {
+          "align": 8,
+          "fields": {
+            "copy": 8,
+            "header": 0
+          },
+          "size": 16
+        },
+        "KilnUiItemDetailLine": {
+          "align": 4,
+          "fields": {
+            "flags": 4,
+            "size": 0,
+            "text": 16,
+            "text_bytes": 12,
+            "value": 8
+          },
+          "size": 4112
+        },
+        "KilnUiItemDetailQuery": {
+          "align": 4,
+          "fields": {
+            "entity": 4,
+            "item": 8,
+            "level": 12,
+            "rarity": 16,
+            "size": 0
+          },
+          "size": 20
+        },
+        "KilnUiItemDetailSnapshot": {
+          "align": 8,
+          "fields": {
+            "capture_ms": 48,
+            "count": 8,
+            "entity": 16,
+            "frame": 40,
+            "item": 12,
+            "level": 20,
+            "ok": 4,
+            "rarity": 24,
+            "reserved": 28,
+            "session": 32,
+            "size": 0
+          },
+          "size": 56
+        }
+      },
+      "sha256": "b1b97b14a2266733bddeb6bd2ff80db5fd00336c7e3ae582c089d8b22cd0a090"
+    },
+    "native/core/abi/services/kiln_ui_slots.h": {
+      "function_macros": [],
+      "inline_helpers": [],
+      "layouts": {
+        "KilnUiSlotsApi": {
+          "align": 8,
+          "fields": {
+            "header": 0,
+            "subscribe": 8
+          },
+          "size": 16
+        }
+      },
+      "sha256": "3e9ca881a7dc6538ef28aaa13b276ee7b29ce31f1589f1ce602bbfee012d5746"
     },
     "native/core/abi/services/kiln_ui_values.h": {
       "function_macros": [],
@@ -7177,9 +7249,35 @@
             "view_flags": 36
           },
           "size": 112
+        },
+        "KilnUiVisibleSlotV2": {
+          "align": 8,
+          "fields": {
+            "available": 4,
+            "client_entity": 28,
+            "count": 24,
+            "holder": 88,
+            "holder_flags": 92,
+            "holder_serial": 96,
+            "inner_ui": 56,
+            "inventory_page": 12,
+            "item": 20,
+            "level": 112,
+            "native_state": 72,
+            "occurrence": 8,
+            "outer_ui": 40,
+            "page_ordinal": 104,
+            "rarity": 116,
+            "reserved2": 108,
+            "server_entity": 32,
+            "size": 0,
+            "slot_index": 16,
+            "view_flags": 36
+          },
+          "size": 120
         }
       },
-      "sha256": "a557ebb9072233c1d0f847fb873c7acceb5ef5b08369644e72e3af0e88194868"
+      "sha256": "2be251137cc4d70ebcf0c219d675a06941d79208417035885758421f9292f2b1"
     },
     "native/core/abi/services/kiln_vfx.h": {
       "function_macros": [],
@@ -8191,7 +8289,7 @@
   },
   "outputs": {
     "src/bindings.rs": "134028a6a9914076cab3f71f98d356141d4fe36c4d7f51bac6a11819501ed935",
-    "src/layout.rs": "9d15338c47c4162c8966282314527ade65d198abd83ac6e0dead1ed123e893cb",
+    "src/layout.rs": "8a7fefcdee8d71db55bafc62194b890cc73339d65b293ac7409b0b33084b9e2a",
     "src/services/kiln_abilities.rs": "06a43042e5c96d6261a17b02eab35463b07a8ad83f63b2bb168bca5ff34e582e",
     "src/services/kiln_assets.rs": "e7fe4eb1c4d53ad31eeaf05be06f41c551a49362ad5bd4174465ec18a03effe0",
     "src/services/kiln_assets_vfx.rs": "90ed8ce5ad512bbf4f002db3277bc3b439d648ca437a58d4477eac4ce46c3b81",
@@ -8230,7 +8328,7 @@
     "src/services/kiln_profile.rs": "7ef9dd4e62ad6ba9c56a88be48c9eda6c26074a6a40405f38c609c8a77d6210c",
     "src/services/kiln_progress.rs": "c998158ce04361ac9ab67651855cb45c6386cfbcec6a28c57140710d14a50bc1",
     "src/services/kiln_queries.rs": "c4888b701b298033d8b9ad525a22b3eba46ceec57a77f900fa1d0ff9002ace19",
-    "src/services/kiln_render.rs": "f0ecd0d1c1af455626438c8e0c40244b07621ce63cfc707856ee158716d54fd0",
+    "src/services/kiln_render.rs": "0d63717bf1a2388f2bf5e03ad5ffe2fc5be815c9522ff4fa124151c4853ccb91",
     "src/services/kiln_repl.rs": "2b702986c7d8f2046dd230eecf12af08b5a10a93b94fa527c35627c9afe31d8e",
     "src/services/kiln_rules.rs": "074b85bf024b8c53bfa21e7744ff4005fe6ebfa78c7aa5ccb3bc077cff3bc37b",
     "src/services/kiln_saves.rs": "0922e2870dc677c62608ab13147e609e5ea9d5109c34ea271e2e569874a1576b",
@@ -8244,15 +8342,17 @@
     "src/services/kiln_time.rs": "879eaed84cd42ab057cc5c6aa452aef7e0d6636205431e9ef54d1daf8dd4bf93",
     "src/services/kiln_toolwear.rs": "bfb7c79cc8ddea86236700983a4deac4d08826a8f4d3ac5648c2fc9e346dcbcb",
     "src/services/kiln_types.rs": "e6eaf5e97d0c284ec9fb98e78e9b2d3c1fb129d0cac1a899009730e2641942eb",
-    "src/services/kiln_ui.rs": "4db7e7f14a1ec7cdef1281a947b4abfa968686f070696e45c9a2f0a3a1127e09",
-    "src/services/kiln_ui_inventory.rs": "048065809ffcd982d597cf50b0e342921b8b94c0da06e658ed266ad1162d2165",
-    "src/services/kiln_ui_values.rs": "8d6982dd8643faa01fb82cdf7b8bdd4006920d657c2d4a99173b7d52f3fe6720",
+    "src/services/kiln_ui.rs": "c5552e5fe6bf0400ef939eeeefa479a0ef827cb15467694a341f0e612be61451",
+    "src/services/kiln_ui_inventory.rs": "0d926c07d14e7a23eb2fd6a29ee444804087d41d9290db17d3bdd4ad192e0d49",
+    "src/services/kiln_ui_item_detail.rs": "196b73cac32c28c4a4971df8916aa8d81e90bfe515769965ade4cc7d18c13d18",
+    "src/services/kiln_ui_slots.rs": "eadd1321046b93dc37ec1bcfbba00f94020ace6083d1f0ec3b0620bda021997b",
+    "src/services/kiln_ui_values.rs": "a13a3afbfb1ec443322ba4ae250fe499d13ce599a438ba0b9652f8e572073627",
     "src/services/kiln_vfx.rs": "046191c4ab30f4ccd99a52f7fc654e7fb53d74aaa4acaa072c8f86a36f0037a0",
     "src/services/kiln_window_clock.rs": "0fedf0f1d97e6aa1959ec46a483181fb930a6f83025a813c31b77bd820a8fa71",
     "src/services/kiln_world.rs": "3cb0272179db9c198f154ce6c008837e4bb95245a2ec62993be78879c4b330b8",
     "src/services/kiln_world_budget.rs": "b196426492d0525df1317c08e4927f3f3ff35817990bed8f2b58c02d174bab98",
     "src/services/kiln_worldtables.rs": "3d423bb8cfd5235f82230a1942bbc334d86b55d343e5e5880c671a57d1469fce",
-    "src/services/mod.rs": "1fa8af1236f86f1321a3ceb34890637fa1908a18d38b1872ec7137be815dbfa8"
+    "src/services/mod.rs": "f24ab5a6ade869b99cba2a1541eb0fefa334137051dc7a8573b63146a0ad8ef4"
   },
   "schema": 1,
   "target": "x86_64-pc-windows-msvc"
