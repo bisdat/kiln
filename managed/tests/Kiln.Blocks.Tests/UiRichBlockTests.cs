@@ -785,7 +785,8 @@ public sealed class UiRichBlockTests : IDisposable
         Assert.Empty(_demands);
         var w = Open();
         UiRuntime.Pump();
-        Assert.Equal(UiWorldFields.LocalInventory, Assert.Single(_demands).Fields);
+        // the Bag table's inventory, and the Map tab's "when": world.local.available (the vitals group, review S1)
+        Assert.Equal(UiWorldFields.LocalInventory | UiWorldFields.LocalVitals, Assert.Single(_demands).Fields);
         w.Close();
         UiRuntime.Pump();
         Assert.Empty(_demands);
@@ -849,7 +850,7 @@ public sealed class UiRichBlockTests : IDisposable
         _now += 1000;
         UiRuntime.Pump();
         Assert.True(w.HasDemand);
-        Assert.Contains(_demands, d => d.Fields == UiWorldFields.LocalInventory);
+        Assert.Contains(_demands, d => d.Fields.HasFlag(UiWorldFields.LocalInventory));
         Assert.Contains(_demands, d => d.Fields == UiWorldFields.LocalVitals);
     }
 
