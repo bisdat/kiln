@@ -206,7 +206,7 @@ internal static partial class UiTypedNames
         if (UiDataRegistry.SchemaOf(scope.Mod, id) is not { } schema)
         {
             if (id.EndsWith(".available", StringComparison.Ordinal)) return false;
-            problem = $"\"{spec}\": mod {scope.Mod} has no data source \"{id}\": define it with BlockUi.Bindings.Define(\"{id}\", schema) before Blocks.Define (a mod reads only its own sources)";
+            problem = $"\"{spec}\": mod {scope.Mod} has no data source \"{id}\": define it with BlockUi.Bindings.Define(\"{id}\", schema) before Blocks.Define, on every side (a dedicated server checks the window too; a mod reads only its own sources)";
             return false;
         }
         var type = schema.Shape switch { UiDataShape.Rows => UiValueType.Rows, UiDataShape.Tree => UiValueType.Tree, _ => TypeOf(schema.ScalarType ?? UiScalarType.String) };

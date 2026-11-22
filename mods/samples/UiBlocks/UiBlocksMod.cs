@@ -81,8 +81,9 @@ public sealed class UiBlocksMod : Mod
         Blocks.Define("open-settings", new KeyBindingBlock { Key = "F8", Description = "Open the UI blocks sample", Does = new UiAction { OpenWindow = "settings" } });
         Blocks.Define("toggle-status", new KeyBindingBlock { Key = "Ctrl+F8", Description = "Show or hide the status line", Does = new UiAction { Toggle = "config.status.show" } });
 
-        // blocks/camp.json's window reads the mod's own data as mod.quests and mod.places: defined here, before the data files compile
-        if (Ui.Available) CampData();
+        // blocks/camp.json's window reads the mod's own data as mod.quests and mod.places: defined here, before the data files
+        // compile, on every side (a dedicated server checks the window too); published only where a window can show it
+        CampData(publish: Ui.Available);
     }
 
     public override void OnUnload()
@@ -93,13 +94,14 @@ public sealed class UiBlocksMod : Mod
 
     private UiDataRegistration? _quests, _places;
 
-    // The mod's own rows and tree for the camp window (since 0.2.0-dev.31). Publish copies at once; the window shows the
-    // last committed publication at its next refresh. A game with no overlay (a dedicated server) skips this.
-    private void CampData()
+    // The mod's own rows and tree for the camp window (since 0.2.0-dev.31). Define works on every side; Publish needs an
+    // overlay (ui.blocks.bindings): it copies at once and the window shows the last committed publication at its next refresh.
+    private void CampData(bool publish)
     {
         _quests = BlockUi.Bindings.Define("quests", new UiDataSchema(UiDataShape.Rows,
             Fields: [new("name", UiScalarType.String), new("reward", UiScalarType.Decimal), new("done", UiScalarType.Bool)]));
         _places = BlockUi.Bindings.Define("places", new UiDataSchema(UiDataShape.Tree, Fields: [new("danger", UiScalarType.Int64)]));
+        if (!publish) return;
         static Dictionary<string, UiScalar> Quest(string name, decimal reward, bool done) => new()
         {
             ["name"] = new UiScalar.String(name), ["reward"] = new UiScalar.Decimal(reward), ["done"] = new UiScalar.Bool(done),

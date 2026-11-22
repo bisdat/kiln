@@ -6,7 +6,8 @@ public static partial class BlockUi
 {
     /// <summary>
     /// A mod's own data for its UI blocks: define a source (a scalar, rows or a tree with typed fields) before the blocks
-    /// that bind it as <c>mod.&lt;id&gt;</c>, then publish snapshots of it from any thread. Windows show the last committed
+    /// that bind it as <c>mod.&lt;id&gt;</c>, on every side, then publish snapshots of it from any thread where there is an
+    /// overlay (<c>ui.blocks.bindings</c>). Windows show the last committed
     /// publication; the mod's code is never called from a frame.
     /// <code>
     /// BlockUi.Bindings.Define("quests", new UiDataSchema(UiDataShape.Rows, Fields: [new("name", UiScalarType.String), new("done", UiScalarType.Bool)]));
@@ -18,14 +19,15 @@ public static partial class BlockUi
         /// <summary>The capability of mods' own data.</summary>
         public const string Capability = "ui.blocks.bindings";
 
-        /// <summary>Declares a data source of this mod (at most 64). Refused when the id is taken.</summary>
+        /// <summary>Declares a data source of this mod (at most 64). Refused when the id is taken. Works on every side, a
+        /// dedicated server included: the windows that bind <c>mod.&lt;id&gt;</c> are checked and kept there too, so define
+        /// the source on every side and publish where there is an overlay.</summary>
         /// <exception cref="ArgumentException">A bad id or schema (fields: at most 16, ids <c>[a-z][a-z0-9_-]{0,63}</c>, none of the built-in key/label/parent/depth).</exception>
         /// <exception cref="InvalidOperationException">Called outside a mod's code.</exception>
-        /// <exception cref="KilnUnavailableException"><c>ui.blocks.bindings</c> is off.</exception>
-        [ClientOnly, AnyThread, RequiresCapability(Capability)]
+        [AnyThread]
         public static UiDataRegistration Define(string id, UiDataSchema schema)
         {
-            var mod = Owner();
+            var mod = Mod();
             return UiDataRegistry.Define(mod, id, schema);
         }
 
@@ -45,7 +47,10 @@ public static partial class BlockUi
         private static string Owner()
         {
             if (!UiRuntime.Active) throw new KilnUnavailableException(Capability, "no overlay here: mods' data is shown only on a player's game");
-            return BlocksBridge.CallerModId ?? throw new InvalidOperationException("BlockUi.Bindings is called from a mod's code: there is no mod here to own the data");
+            return Mod();
         }
+
+        private static string Mod() =>
+            BlocksBridge.CallerModId ?? throw new InvalidOperationException("BlockUi.Bindings is called from a mod's code: there is no mod here to own the data");
     }
 }

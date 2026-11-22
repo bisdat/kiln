@@ -35,7 +35,7 @@ public sealed class UiRichBlockTests : IDisposable
 
     private sealed class Game : IUiBackend
     {
-        public bool Available => true;
+        public bool Available { get; set; } = true;
         public string Language => "en-us";
         public bool JoinedServer { get; set; }
         public ulong WorldSession { get; set; } = 1;
@@ -683,6 +683,40 @@ public sealed class UiRichBlockTests : IDisposable
         var reads = low.Json["window"]!["reads"]!.AsArray().Select(x => (string?)x).ToHashSet();
         foreach (var name in new[] { "world.local.inventory", "world.local.health", "world.local.position.x", "world.server.hours", "stats.ui-blocks/rests", "mod.quests", "mod.places", "state.note" })
             Assert.Contains(name, reads);
+    }
+
+    [Fact]
+    public void The_UiBlocks_samples_camp_window_compiles_on_a_game_without_an_overlay()
+    {
+        // A dedicated server has no overlay, yet it checks and keeps the blocks (review M1): the mod defines its data on every
+        // side through the public BlockUi.Bindings.Define, and the camp window that binds mod.quests and mod.places compiles.
+        _game.Available = false;
+        Assert.False(UiRuntime.Active);
+        var dir = Path.Combine(Repo(), "mods", "samples", "UiBlocks");
+        using var doc = JsonDocument.Parse(File.ReadAllText(Path.Combine(dir, "blocks", "camp.json")));
+        var camp = Json<WindowBlock>(doc.RootElement.GetProperty("windows").GetProperty("camp").GetRawText());
+        const string sample = "ui-blocks";
+        UiStats.Metadata = key => key == new ModValueKey(sample, "rests") ? Def(key) : null;
+        var outer = ModContext.CurrentMod;
+        ModContext.CurrentMod = HostAccess.CreateContext(new ModInfo(sample, "UI blocks", "1", dir), 0x6909, dir);
+        try
+        {
+            using var quests = BlockUi.Bindings.Define("quests", new UiDataSchema(UiDataShape.Rows,
+                Fields: [new("name", UiScalarType.String), new("reward", UiScalarType.Decimal), new("done", UiScalarType.Bool)]));
+            using var places = BlockUi.Bindings.Define("places", new UiDataSchema(UiDataShape.Tree, Fields: [new("danger", UiScalarType.Int64)]));
+            Assert.True(quests.Ok && places.Ok, quests.Reason ?? places.Reason);
+            var mod = new ModBlocks(sample, 1) { ManifestClients = "mod", BootDirectory = dir };
+            var (_, low, _) = Compiler.Lower(mod, "camp", camp);
+            var reads = low.Json["window"]!["reads"]!.AsArray().Select(x => (string?)x).ToHashSet();
+            Assert.Contains("mod.quests", reads);
+            Assert.Contains("mod.places", reads);
+            // publishing is for a game that draws the window: off here, and it says so
+            Assert.Throws<KilnUnavailableException>(() => { _ = BlockUi.Bindings.Publish("quests", new UiDataSnapshot.Rows([])); });
+        }
+        finally
+        {
+            ModContext.CurrentMod = outer;
+        }
     }
 
     // ---- the boundary: the block runtime never reads a world itself ----------------------------------------------------

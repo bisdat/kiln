@@ -197,7 +197,9 @@ session token, and writes asked for before it are refused `StaleSession`.
 ### A mod's own data
 
 `BlockUi.Bindings.Define(id, schema)` declares a scalar, rows or a tree source with typed fields (at most 16; `key`,
-and for trees `parent`, `label`, `depth` are built in), before the blocks that bind it as `mod.<id>`.
+and for trees `parent`, `label`, `depth` are built in), before the blocks that bind it as `mod.<id>`. Define it on every
+side: a dedicated server has no overlay, but it checks and keeps the windows that bind it. `Publish` needs an overlay
+(`ui.blocks.bindings`; guard it with `Ui.Available`).
 `BlockUi.Bindings.Publish(id, snapshot)` copies a snapshot at once and commits it on the client's main thread
 (`UiBindingValueChangedEvent`); a newer publication before the commit makes the older one `Superseded`. Rows with a
 repeated key, and a tree with a repeated key, a missing parent, a loop or more than 8 levels are refused whole: the last
