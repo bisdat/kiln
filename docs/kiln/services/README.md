@@ -46,6 +46,7 @@ available is generated from a boot's `capabilities.json`: [../status.generated.m
 | [progression.md](progression.md) | kiln.progression: levels, experience, skill tree, skill points |
 | [quests.md](quests.md) | Kiln.Quests: the quest engine behind the game's own quest UI |
 | [replication.md](replication.md) | kiln.repl / Kiln.Replication: the network inspector: what the server sends each player (counters, watches on one entity, captures), read only |
+| [registry.md](registry.md) | kiln.registry / kiln.registry.live: Kiln-owned data fields, staged edits and explicit live changes with compare-before-write/revert |
 | [rules.md](rules.md) | Kiln.Rules: what players may do, and what it costs them |
 | [saves.md](saves.md) | kiln.saves: save events and persistent mod data |
 | [screen.md](screen.md) | kiln.screen / ScreenEffects: full-screen effects |

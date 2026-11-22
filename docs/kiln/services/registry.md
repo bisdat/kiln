@@ -1,0 +1,78 @@
+# Stable data registries
+
+Kiln's registry schema uses Kiln ids and fields, not the game's functions, types or memory. See the
+[registry guide](../modding/registries/README.md) for fields, ordering, ids and tiers.
+
+## Native stage: kiln.registry v1
+
+The 88-byte table in `native/core/abi/services/kiln_registry.h` supplies schemas, field metadata, reads/selectors,
+owner-bound staged IR, stage callbacks, ready notifications and the current report. The stage runs every mod's add,
+then alter, then final, in Host load order. Successful callback turns are retained for later live recomposition; no
+native callback or mod assembly is invoked again by a pack reload.
+
+Owner revocation removes queued work and callbacks. Already-taken start-time edits remain until the next start.
+Callbacks already in flight are not waited for; their function and user state must remain valid until they return.
+A faulted stage turn is dropped; a fault in either callback kind removes its subscription.
+
+## Native live changes: kiln.registry.live v1
+
+Since mod API **0.2.16**, this is a separate 56-byte table, not an extension of the stage table. Its header is
+`native/core/abi/services/kiln_registry_live.h`. It is supplied by kiln-content.dll on server and client.
+
+1. `begin(owner, entry_point, &handle)` creates an owner-bound draft.
+2. `submit(owner, handle, ir, ...)` copies ordinary registry IR into it. A batch must name that owner's bound mod.
+   Parsing/mapping refusals are returned per edit; known live edits remain in the draft. This is preparation only:
+   use its accepted/refused counts and report, not its outcome tag as an application verdict. `commit` supplies that verdict.
+3. `commit` composes the accepted edits after the preceding registry composition. It retains the handle and its IR,
+   so later pack changes re-evaluate relative edits over the new pack values.
+4. `revert` removes only that handle's edits and recomposes the other changes. Reverting an earlier change never puts
+   an old snapshot over a later change, an older pack or a `Content.*` code owner. Revert consumes the handle.
+
+Later commits win, relative operations compose, and `exclusive`/`yield` retain their normal meaning across entry
+points. Registry layers remain above old packs and below `Content.*` code. `read` returns actual live values through
+the mapping, including lists and formulas, without creating a layer; pre-world/restart reads use the kept stage view.
+The stage reads all stable fields once for these later entry points. An unmapped or unproven field is refused, never
+inferred from a similar game field.
+
+### Entry points and worlds
+
+| Entry point | Inputs and lifetime |
+|---|---|
+| Game start | The existing stage table, add/alter/final. Restart fields may be baked here. No per-world inputs. |
+| Mod load | Global/process inputs. A committed change made without a world waits for the first world; it follows its owner across worlds. |
+| World load | A world must exist. World settings are allowed. The change expires when that world ends. |
+| Hot reload | Reloaded mod/config inputs. World-scoped when committed with a world; otherwise waits for a world without per-world inputs. |
+| Manual | An explicit runtime transaction. A world must exist; it expires with that world. |
+
+The world token is Kiln-owned and process-local, never a game address. A draft bound to one world cannot commit into
+another. Native retirement only marks an owner dead; live layers are removed on the world thread at its next registry
+publication. No game calls run on the owner-retiring notification thread.
+
+A later entry point refuses each restart-only field with `RestartRequired`; it does not silently alter boot data or
+quietly discard unrelated mapped live edits. Entry add/remove and raw game paths are refused by this stable live API;
+the existing Advanced `Content.*` and raw paths keep their previous behavior.
+
+### Results, safety, reports and bounds
+
+`KilnRegistryLiveResult` is 232 bytes. Its outcome distinguishes applied, waiting for a world/resource, refused,
+restart-required, world-required, reverted, skipped by another writer, and unverified rollback. Accepted/refused/skipped
+counts and a reason accompany it. A native argument/owner/thread/handle error uses `KilnResult`; a valid request that
+cannot take effect uses the result outcome. A binding or write failure takes the candidate back; an unproved take-back
+is **Unverified**, not success.
+
+Both writes and reverts compare with Kiln's last applied bytes. If another writer has changed a slot, Kiln leaves that
+slot to it for the rest of that world and names the skipped operation in the report. The current wording is “another
+writer”; naming a ShroudForge runtime package needs the later owner-write journal integration. This is not a promise to
+identify arbitrary DLL writes.
+
+Live applications rewrite `kiln/state/registry.json` and advance `kiln.registry`'s ready generation outside the store
+lock. Writer sources identify the live handle and entry point. Waiting drafts do not pretend that game bytes changed.
+
+There are at most **64 open drafts**, **1,024 retained changes**, **4,096 edits per change**, **64 MiB of copied IR** in
+all changes, and the stage's existing 16 MiB/32-level document limit. Revert releases a handle. Handles and world tokens
+are never reused in a process. `begin`, `submit` and `status` accept any thread; live `commit`, `revert` and `read` require
+the active world's thread. Without a world they operate only on copied data.
+
+The TestKit currently marks this native table unavailable rather than pretending to simulate game byte ownership.
+The native host suites exercise it over the real store, mapped readers and synthetic game memory. Real client and
+multiplayer behavior belongs to the owner's guided checks; a successful DLL build alone does not prove it.

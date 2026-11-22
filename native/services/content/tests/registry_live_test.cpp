@@ -657,6 +657,53 @@ void another_writer_in_the_report() {
     check(reported("was written by another writer after Kiln's layer: Kiln's edit not applied"), "and registry.json says so");
     check(json_field({"items", "game:material_t1_wood_logs", "maxStack"})["result"] == 777, "the report shows the other writer's effective value");
 }
+// P2: an explicit retained live change, reverted by handle, must compose over packs and never overtake code.
+void live_transactions() {
+    world();
+    g_files.clear();
+    stage({});
+    registry_live_world_begin();
+    apply_registry_files({});
+    uint64_t h = 0;
+    RegistryLiveReply reply;
+    check(registry_live_begin(77, "change", 4, &h) == KILN_OK && h, "begin an owner-scoped live transaction");
+    const std::string ir = R"({"ir":1,"mod":"change","stage":"alter","edits":[{"registry":"items","select":"game:material_t1_wood_logs","field":"maxStack","op":{"mul":3}}]})";
+    check(registry_live_submit(77, h, ir, &reply, nullptr) == KILN_OK, "submit Kiln fields");
+    check(registry_live_commit(77, h, &reply) == KILN_OK && reply.outcome == RegistryLiveOutcome::Applied, "commit the live transaction");
+    check(at<uint32_t>(WOOD_AT) == 30, "the live change writes through the real store");
+    check(registry::report_json(registry_schema(), g_last_report, {}).dump().find("live:") != std::string::npos, "the live owner and transaction are in the report");
+    check(registry_live_revert(78, h, &reply) == KILN_ERR_INVALID_ARGUMENT, "another owner cannot revert it");
+    check(registry_live_revert(77, h, &reply) == KILN_OK && at<uint32_t>(WOOD_AT) == 10, "revert restores the layer below");
+    check(registry_live_revert(77, h, &reply) == KILN_ERR_NOT_FOUND, "revert does not reuse stale handles");
+}
+
+void live_transaction_foreign_revert() {
+    world(); g_files.clear(); stage({}); registry_live_world_begin(); apply_registry_files({});
+    uint64_t h = 0; RegistryLiveReply reply;
+    registry_live_begin(77, "change", 4, &h);
+    registry_live_submit(77, h, R"({"ir":1,"mod":"change","stage":"alter","edits":[{"registry":"items","select":"game:material_t1_wood_logs","field":"maxStack","op":90}]})", &reply, nullptr);
+    registry_live_commit(77, h, &reply);
+    mem<uint32_t>(WOOD_AT, 777);
+    check(registry_live_revert(77, h, &reply) == KILN_OK && reply.outcome == RegistryLiveOutcome::Skipped, "a foreign write makes the revert explicitly skipped");
+    check(at<uint32_t>(WOOD_AT) == 777, "revert never overwrites the foreign writer");
+}
+
+void live_transaction_points_and_revoke() {
+    world(); g_files.clear(); stage({});
+    uint64_t h = 0; RegistryLiveReply reply;
+    registry_live_begin(77, "change", 1, &h);
+    registry_live_submit(77, h, R"({"ir":1,"mod":"change","stage":"alter","edits":[{"registry":"items","select":"game:material_t1_wood_logs","field":"maxStack","op":90}]})", &reply, nullptr);
+    check(registry_live_commit(77, h, &reply) == KILN_OK && reply.outcome == RegistryLiveOutcome::PendingWorld, "mod-load changes can wait for the first world");
+    check(at<uint32_t>(WOOD_AT) == 10, "no premature game write before world readiness");
+    registry_live_world_begin(); apply_registry_files({});
+    check(at<uint32_t>(WOOD_AT) == 90, "the queued mod-load change applies at world load");
+    registry_live_owner_gone(77); registry_live_publish();
+    check(at<uint32_t>(WOOD_AT) == 10, "revoked live owners lose their live layers on the world thread");
+    check(registry_live_begin(77, "change", 2, &h) == KILN_ERR_REVOKED, "a revoked owner cannot create more transactions");
+    registry_live_begin(88, "later", 3, &h);
+    registry_live_submit(88, h, R"({"ir":1,"mod":"later","stage":"alter","edits":[{"registry":"balance","select":"game:balance","field":"levelCap","op":60}]})", &reply, nullptr);
+    check(registry_live_commit(88, h, &reply) == KILN_OK && reply.outcome == RegistryLiveOutcome::RestartRequired, "a restart field is never silently written from hot reload");
+}
 }  // namespace
 
 int main() {
@@ -676,6 +723,9 @@ int main() {
         {"refusals_and_restart_fields", refusals_and_restart_fields},
         {"hot_reload", hot_reload},
         {"another_writer_in_the_report", another_writer_in_the_report},
+        {"live_transactions", live_transactions},
+        {"live_transaction_foreign_revert", live_transaction_foreign_revert},
+        {"live_transaction_points_and_revoke", live_transaction_points_and_revoke},
     };
     int failed = 0;
     for (auto& [name, fn] : tests) {

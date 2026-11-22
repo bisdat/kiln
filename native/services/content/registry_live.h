@@ -86,6 +86,24 @@ void registry_live_publish();
 void registry_live_table(const Entry& table);
 // The last application's result as reported (the stage's plus the live refusals), a copy; none before any.
 std::optional<registry::Result> registry_live_result();
+// Explicit live changes (kiln.registry.live). The wrappers bind/check owners and enforce the world thread.
+enum class RegistryLiveOutcome : uint32_t { Applied, PendingWorld, Refused, RestartRequired, WorldRequired, Reverted, Skipped, Unverified, PendingResource };
+struct RegistryLiveReply {
+    RegistryLiveOutcome outcome = RegistryLiveOutcome::Refused;
+    uint32_t accepted = 0, refused = 0, skipped = 0;
+    uint64_t world = 0;
+    std::string reason;
+};
+struct RegistryLiveStatus { uint64_t world = 0; uint32_t drafts = 0, active = 0; };
+KilnResult registry_live_begin(KilnOwner owner, const std::string& mod, uint32_t point, uint64_t* out);
+KilnResult registry_live_submit(KilnOwner owner, uint64_t handle, const std::string& ir, RegistryLiveReply* out, std::string* report);
+KilnResult registry_live_commit(KilnOwner owner, uint64_t handle, RegistryLiveReply* out);
+KilnResult registry_live_revert(KilnOwner owner, uint64_t handle, RegistryLiveReply* out);
+KilnResult registry_live_read(const std::string& registry, const std::string& id, const std::string& field, std::string* out);
+RegistryLiveStatus registry_live_status();
+void registry_live_world_begin();
+void registry_live_world_stop();
+void registry_live_owner_gone(KilnOwner owner); // notification thread: mark only, never call the game
 // How the live back-end sizes a game type (type_size; tests replace it).
 extern uint32_t (*g_registry_type_size)(const char* qname);
 // The owner of the registry's layers (created on first use).

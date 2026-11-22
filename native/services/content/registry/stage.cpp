@@ -448,6 +448,7 @@ KilnResult Runner::unsubscribe(uint64_t handle) {
 
 void Runner::owner_gone(uint64_t owner) {
     if (!owner) return;
+    {
     std::lock_guard lk(d_->mu);
     d_->gone.insert(owner);
     for (auto it = d_->stage_subs.begin(); it != d_->stage_subs.end();)
@@ -458,6 +459,8 @@ void Runner::owner_gone(uint64_t owner) {
         std::erase_if(it->second, [owner](const Impl::Queued& q) { return q.owner == owner; });
         it = it->second.empty() ? d_->queued.erase(it) : std::next(it);
     }
+    }
+    if (d_->env.owner_gone) d_->env.owner_gone(owner); // never call out while holding the runner lock
 }
 
 void Runner::notify_ready(const std::vector<uint64_t>& handles, Phase phase, uint64_t generation) {
@@ -700,7 +703,8 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn) {
     // running exe has no id table yet (work-bb 2026-11-21: kilnctl update needs one for every build)
     const std::string ids_rel = "ids-" + d.env.side + "-" + d.env.exe_sha256 + ".json";
     const bool ids_missing = d.env.read_data && d.env.write_data && !d.env.exe_sha256.empty() && !d.env.read_data(ids_rel);
-    std::unique_ptr<model::Source> src = inputs.empty() && !ids_missing ? nullptr : d.env.source ? d.env.source(&why) : nullptr;
+    const bool want_base = !inputs.empty() || d.env.prepare_live;
+    std::unique_ptr<model::Source> src = !want_base && !ids_missing ? nullptr : d.env.source ? d.env.source(&why) : nullptr;
     d.meta.pid = d.env.pid;
     d.meta.kiln = d.env.kiln_version;
     d.meta.regmap = {d.env.side, d.env.exe_sha256, d.rm.has_build ? "regmap/" + d.env.side + "/" + d.env.exe_sha256 + ".json" : "", d.rm.has_build && d.rm.build.verified};
@@ -717,11 +721,12 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn) {
     std::vector<OldWrite> old;
     std::unique_ptr<Inventory> inventory;  // before m: the model reads through it
     std::unique_ptr<model::Model> m;
-    const model::Need need = model::needs_of(d.schema, inputs);
+    model::Need need = model::needs_of(d.schema, inputs);
+    if (d.env.prepare_live) need.all = true;
     bool hit = false;
-    if (!src && inputs.empty()) {
+    if (!src && !want_base) {
         d.meta.base.origin = "none";
-    } else if (inputs.empty()) {
+    } else if (!want_base) {
         // only the id table of this build
         model::Model ids_model(*src, d.rm, d.schema);
         for (const auto& [n, r] : d.schema.registries) {

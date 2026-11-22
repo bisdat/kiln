@@ -8,6 +8,7 @@
 #endif
 
 #include "services/kiln_registry.h"
+#include "services/kiln_registry_live.h"
 #ifdef KILN_TEST_REGISTRY_HOST
 #include "kiln_registry_host.h"
 #endif

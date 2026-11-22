@@ -60,6 +60,8 @@ struct Env {
     // The core's current owner state, checked under the runner lock at admission/dispatch (no callbacks into the runner).
     // Closes the interval between the core marking an owner dead and delivering its retiring notification.
     std::function<bool(uint64_t owner)> owner_alive;
+    std::function<void(uint64_t owner)> owner_gone; // queued live-layer cleanup, outside the runner lock
+    bool prepare_live = false; // read every stable field once so later entry points need no game-data reread
     std::function<void(int level, const std::string& line)> log;  // 0 info, 1 warn, 2 error
     std::function<std::string()> now;                              // RFC 3339 UTC
     uint32_t pid = 0;

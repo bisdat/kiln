@@ -1,0 +1,88 @@
+/* SPDX-License-Identifier: MIT
+ * kiln.registry.live v1 (since mod API 0.2.16): explicit owner-scoped live registry changes. Kiln ids/fields only;
+ * kiln.registry v1 is unchanged. Layers are above packs/start-time registry edits and below Content.* code.
+ * begin/submit draft copied IR; commit retains the change until revert, owner revoke or its world's end.
+ * Later commits win and are reported. Revert recomposes the remaining layers, not an old memory snapshot.
+ * Writes AND reverts compare against Kiln's last bytes. Another writer's bytes are skipped and reported, never restored
+ * over. Native owner retirement only queues cleanup; the world thread applies it. No callback quiescence is promised.
+ *
+ * Entry points are declared by the caller: MOD_LOAD (process inputs, may wait for a world), WORLD_LOAD (world settings),
+ * HOT_RELOAD (reloaded mod/config; world-scoped when a world exists), MANUAL (explicit runtime transaction).
+ * GAME_START uses kiln.registry's existing add/alter/final stage, not this table. Later entry points never write restart
+ * fields: they report RESTART_REQUIRED. WORLD_LOAD and MANUAL need a world. A world-bound draft cannot cross worlds.
+ * MOD_LOAD changes persist across worlds; other world-bound changes expire when that world stops. Settings-dependent
+ * inputs belong only to WORLD_LOAD, HOT_RELOAD with a world, or MANUAL. Callers include settings/world/point identity
+ * in their batch source. The managed context integration supplies that identity; there is no live-plan cache in v1.
+ *
+ * Threads: begin/submit/status any thread. commit/revert/read on the active world's thread while a world exists;
+ * without a world they touch only copied data. Drafts and committed handles are owner-bound; owner 0 is invalid;
+ * revoked owners return REVOKED. Unknown/stale handles return NOT_FOUND, another owner's handle INVALID_ARGUMENT.
+ * Limits: 64 open drafts, 1024 retained changes, 4096 edits per change, 64 MiB copied IR total. Revert releases the handle.
+ * Entry add/remove and raw game paths are refused by this stable API (the existing Advanced APIs are unchanged).
+ *
+ * IR/schema/buffer rules are kiln_registry.h's. Reading text uses BUFFER_TOO_SMALL and the whole required length;
+ * submit's optional report never changes its result to BUFFER_TOO_SMALL. Result out is optional; when supplied, size
+ * must cover v1, larger records are accepted and size is set to v1. Refused edits are reported per edit. Runtime binding
+ * or write failure rolls the candidate back; UNVERIFIED means rollback could not be proved, never success.
+ * read returns actual live bytes through Kiln's field mappings; restart fields and pre-world reads use the kept stage
+ * view. Select ids/schema/report/ready events through kiln.registry; live applications update its report/generation.
+ */
+#ifndef KILN_REGISTRY_LIVE_H
+#define KILN_REGISTRY_LIVE_H
+#include "kiln_registry.h"
+#ifdef __cplusplus
+extern "C" {
+#endif
+#define KILN_REGISTRY_LIVE_SERVICE "kiln.registry.live"
+#define KILN_REGISTRY_LIVE_VERSION 1u
+
+enum { KILN_REGISTRY_LIVE_MOD_LOAD = 1, KILN_REGISTRY_LIVE_WORLD_LOAD = 2,
+       KILN_REGISTRY_LIVE_HOT_RELOAD = 3, KILN_REGISTRY_LIVE_MANUAL = 4 };
+enum { KILN_REGISTRY_LIVE_APPLIED = 0, KILN_REGISTRY_LIVE_PENDING_WORLD = 1,
+       KILN_REGISTRY_LIVE_REFUSED = 2, KILN_REGISTRY_LIVE_RESTART_REQUIRED = 3,
+       KILN_REGISTRY_LIVE_WORLD_REQUIRED = 4, KILN_REGISTRY_LIVE_REVERTED = 5,
+       KILN_REGISTRY_LIVE_SKIPPED = 6, KILN_REGISTRY_LIVE_UNVERIFIED = 7,
+       KILN_REGISTRY_LIVE_PENDING_RESOURCE = 8 };
+
+typedef struct KilnRegistryLiveResult {
+    uint32_t size, outcome, accepted, refused, skipped, reserved;
+    uint64_t world; /* Kiln-owned process-local world token, 0 without a world; NEVER a game pointer */
+    uint64_t generation;
+    char reason[192]; /* UTF-8, NUL-terminated, cut to fit */
+} KilnRegistryLiveResult;
+typedef struct KilnRegistryLiveStatus {
+    uint32_t size, world_kind; /* KILN_WORLD_KINDS when no world */
+    uint64_t world, generation;
+    uint32_t drafts, active;
+} KilnRegistryLiveStatus;
+typedef struct KilnRegistryLiveApi {
+    KilnServiceHeader header;
+    KilnResult(KILN_CALL* begin)(KilnOwner owner, uint32_t entry_point, KilnHandle* out);
+    KilnResult(KILN_CALL* submit)(KilnOwner owner, KilnHandle change, KilnStr ir_json, KilnRegistryLiveResult* out,
+                                char* report, size_t cap, size_t* out_len);
+    KilnResult(KILN_CALL* commit)(KilnOwner owner, KilnHandle change, KilnRegistryLiveResult* out);
+    KilnResult(KILN_CALL* revert)(KilnOwner owner, KilnHandle change, KilnRegistryLiveResult* out);
+    KilnResult(KILN_CALL* read)(KilnOwner owner, KilnStr registry, KilnStr id, KilnStr field,
+                              char* buf, size_t cap, size_t* out_len);
+    KilnResult(KILN_CALL* status)(KilnRegistryLiveStatus* out);
+} KilnRegistryLiveApi;
+#ifdef __cplusplus
+}
+#define KILN_REG_LIVE_ASSERT static_assert
+#else
+#define KILN_REG_LIVE_ASSERT _Static_assert
+#endif
+KILN_REG_LIVE_ASSERT(sizeof(KilnRegistryLiveResult) == 232 && offsetof(KilnRegistryLiveResult, outcome) == 4 &&
+    offsetof(KilnRegistryLiveResult, accepted) == 8 && offsetof(KilnRegistryLiveResult, refused) == 12 &&
+    offsetof(KilnRegistryLiveResult, skipped) == 16 && offsetof(KilnRegistryLiveResult, reserved) == 20 &&
+    offsetof(KilnRegistryLiveResult, world) == 24 && offsetof(KilnRegistryLiveResult, generation) == 32 &&
+    offsetof(KilnRegistryLiveResult, reason) == 40, "KilnRegistryLiveResult v1");
+KILN_REG_LIVE_ASSERT(sizeof(KilnRegistryLiveStatus) == 32 && offsetof(KilnRegistryLiveStatus, world_kind) == 4 &&
+    offsetof(KilnRegistryLiveStatus, world) == 8 && offsetof(KilnRegistryLiveStatus, generation) == 16 &&
+    offsetof(KilnRegistryLiveStatus, drafts) == 24 && offsetof(KilnRegistryLiveStatus, active) == 28, "KilnRegistryLiveStatus v1");
+KILN_REG_LIVE_ASSERT(sizeof(KilnRegistryLiveApi) == 56 && offsetof(KilnRegistryLiveApi, begin) == 8 &&
+    offsetof(KilnRegistryLiveApi, submit) == 16 && offsetof(KilnRegistryLiveApi, commit) == 24 &&
+    offsetof(KilnRegistryLiveApi, revert) == 32 && offsetof(KilnRegistryLiveApi, read) == 40 &&
+    offsetof(KilnRegistryLiveApi, status) == 48, "KilnRegistryLiveApi v1");
+#undef KILN_REG_LIVE_ASSERT
+#endif

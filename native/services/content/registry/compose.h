@@ -162,6 +162,9 @@ struct Result {
 };
 
 Result compose(const Schema& schema, const BaseModel& base, const std::vector<OldWrite>& old, const std::vector<ModInput>& mods);
+// A later entry point: keep the earlier point's values, writer chains, exclusive/yield claims and report.
+// Live callers refuse entry add/remove; this continuation is for field/list edits only.
+Result compose_after(const Schema& schema, const BaseModel& base, const Result& previous, const std::vector<ModInput>& mods);
 
 // The registry rows of a chain over another value below them (the live back-end: a pack's value under a relative layer).
 Value evaluate(const std::vector<ChainRow>& rows, const Value& below, const FieldSpec& f);

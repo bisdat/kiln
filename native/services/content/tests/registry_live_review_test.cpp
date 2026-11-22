@@ -460,6 +460,8 @@ void reload_loses_stage_refusals() {
         x.reason = "items game:material_t1_wood_logs: block: Unproven on this build; this edit was not applied";
         g.in->result.refused.insert(g.in->result.refused.begin(), x);
         g.in->pre_refused.push_back(x);  // the stage's handoff (stage_service: LiveHandoff.pre_refused)
+        // Installation freezes the stage baseline for later entry points; hand over the complete stage result.
+        registry_live_install(*g.in);
     }
     apply_registry_files(files);
     check(reported("Unproven"), "the world-load report has the stage's refusal");
@@ -490,6 +492,7 @@ void reload_keeps_boot_outcomes_and_checks_sections() {
                 return true;
             });
         };
+        registry_live_install(*g.in); // boot outcomes are part of the immutable installed handoff too
     }
     apply_registry_files(files);
     g_files["a/content/a.json"] = R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "maxStack", "op": {"mul": 3}},

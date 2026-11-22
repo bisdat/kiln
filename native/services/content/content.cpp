@@ -152,7 +152,10 @@ void mark_all_pending(uint32_t reason) {
 std::unordered_set<uint64_t> g_modified;
 bool g_modified_stale = true;
 void refresh_modified() {
-    if (!g_modified_stale) return;
+    static uint64_t generation = ~0ull;
+    // Registry transactions write through the shared store, not Content's table setters.
+    if (!g_modified_stale && generation == store_generation()) return;
+    generation = store_generation();
     g_modified.clear();
     store_for_each([](uintptr_t, const Slot& s) {
         if (std::memcmp(s.current, s.original, s.n) != 0) g_modified.insert((uint64_t(s.kind) << 32) | s.id);
@@ -312,6 +315,7 @@ void try_ready(uint64_t step, uint32_t kind, uintptr_t world) {
                  mbi.Type == MEM_PRIVATE ? "MEM_PRIVATE" : mbi.Type == MEM_IMAGE ? "MEM_IMAGE" : "MEM_MAPPED", mbi.BaseAddress,
                  mbi.RegionSize / 1048576.0, mbi.AllocationBase);
     }
+    registry_live_world_begin();
     apply_packs(false);
     g_ready.store(true);
     set_detail("ready");
@@ -382,6 +386,7 @@ void world_reset(bool revert, const char* why) {
     std::string err;
     {
         std::lock_guard lock(store_mutex());
+        registry_live_world_stop();
         n = store_reset(revert, &err);
         drops_clear_rules();
         Registry& D = reg(KILN_CONTENT_DROPS);

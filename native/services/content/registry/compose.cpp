@@ -1229,8 +1229,9 @@ void check_references(Ctx& c, State& s) {
 
 }  // namespace
 
-Result compose(const Schema& schema, const BaseModel& base, const std::vector<OldWrite>& old, const std::vector<ModInput>& mods) {
-    Result out;
+static Result compose_impl(const Schema& schema, const BaseModel& base, const std::vector<OldWrite>& old,
+                           const std::vector<ModInput>& mods, const Result* previous) {
+    Result out = previous ? *previous : Result{};
     Ctx c{schema, out, base, {}, {}, {}, {}, {}};
     for (const auto& [reg, covers] : base.raw_cover)
         for (const auto& [key, cover] : covers) {
@@ -1331,6 +1332,7 @@ Result compose(const Schema& schema, const BaseModel& base, const std::vector<Ol
         fo.chain.push_back(std::move(r));
         note_row(fo);
     }
+    if (previous) s.fields = previous->fields; // summaries travel with the chains: exclusive/yield stay exact
     const bool any_code = std::any_of(mods.begin(), mods.end(), [](const ModInput& m) { return bool(m.code); });
     for (const Stage stage : {Stage::Add, Stage::Alter}) {
         std::optional<State> seen;  // what code reads during this stage: the state as the previous stage left it
@@ -1396,6 +1398,13 @@ Result compose(const Schema& schema, const BaseModel& base, const std::vector<Ol
     check_references(c, s);
     out.fields = std::move(s.fields);
     return out;
+}
+
+Result compose(const Schema& schema, const BaseModel& base, const std::vector<OldWrite>& old, const std::vector<ModInput>& mods) {
+    return compose_impl(schema, base, old, mods, nullptr);
+}
+Result compose_after(const Schema& schema, const BaseModel& base, const Result& previous, const std::vector<ModInput>& mods) {
+    return compose_impl(schema, base, {}, mods, &previous);
 }
 
 }  // namespace kc::registry
