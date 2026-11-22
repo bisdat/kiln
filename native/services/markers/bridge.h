@@ -50,6 +50,7 @@ struct Inbound {
 class Inbox {
 public:
     static constexpr size_t kEnvelopes = 128;
+    static constexpr size_t kPerPeerServer = 16;  // the server role's share per (peer, generation): set_per_peer
     static constexpr size_t kBytes = size_t{256} << 10;
     bool push(uint32_t peer, uint64_t generation, uint32_t message, const uint8_t* bytes, size_t length);
     std::deque<Inbound> take();
@@ -59,12 +60,17 @@ public:
     std::map<std::pair<uint32_t, uint64_t>, uint32_t> take_drops();
     size_t size() const;
     void clear();
+    // At most n envelopes of one (peer, generation) wait at a time (0: no per-peer cap); more are dropped and noted. The
+    // server role sets kPerPeerServer, so one peer cannot fill the queue that every other peer's ACKs go through.
+    void set_per_peer(size_t n);
 
 private:
     mutable std::mutex mu_;
     std::deque<Inbound> q_;
     size_t bytes_ = 0;
     std::map<std::pair<uint32_t, uint64_t>, uint32_t> drops_;
+    std::map<std::pair<uint32_t, uint64_t>, uint32_t> queued_;  // envelopes waiting per (peer, generation)
+    size_t per_peer_ = 0;
 };
 
 // A packet a role hands to pump (a copy). tag: the role's id of the packet, for sent().

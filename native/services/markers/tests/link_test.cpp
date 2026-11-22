@@ -1191,6 +1191,44 @@ void received_text_budget() {
     kmk_test::end("link.received_text_budget: per link, one record over budget keeps its last value, others and a new server flow");
 }
 
+// Review F2: one Kiln peer that floods the server role's inbox (200 well-formed frames a second, Kiln.Network's per-peer
+// allowance) must not stall another player's link: its frames beyond its own share are dropped, the others' ACKs get in.
+void inbox_flood() {
+    kmk_test::begin();
+    World w;
+    Proc& p = w.client();
+    w.net.join(&p, 0x81, 101);
+    w.net.settle();
+    Spec a("a", "before the flood");
+    w.send(0, a);
+    w.net.settle();
+    CHECK(p.row("a") != nullptr);
+    Conn& bad = w.net.join(nullptr, 0x82, 102);
+    std::vector<uint8_t> junk(60, 0xAB);
+    int c_sent_at = -1, c_arrived_at = -1;
+    for (int i = 0; i < 300; ++i) {  // 15 s
+        for (int k = 0; k < 10; ++k) w.srv.inbox[0].push(bad.peer, bad.sgen, wire::kAck, junk.data(), junk.size());
+        if (i == 40) {
+            Spec b("b", "during the flood");
+            w.send(0, b);
+        }
+        if (i == 150) {
+            Spec c("c", "later in the flood");
+            w.send(0, c);
+            c_sent_at = i;
+        }
+        w.net.step(1);
+        if (c_sent_at >= 0 && c_arrived_at < 0 && p.row("c")) c_arrived_at = i;
+    }
+    Server::LinkInfo li;
+    CHECK(w.srv.server->link_info(0x81, &li));
+    CHECK(!li.stalled);
+    CHECK(p.row("b") != nullptr);
+    CHECK(c_arrived_at >= 0 && c_arrived_at - c_sent_at <= 40);  // within 2 s, during the flood
+    CHECK(w.srv.inbox[0].size() <= Inbox::kPerPeerServer + 2);   // the flooder holds only its own share of the queue
+    kmk_test::end("link.inbox_flood: one flooding peer keeps only its own share of the server inbox; others' acks get in");
+}
+
 int main(int argc, char** argv) {
     g_verbose = argc > 1 && std::strcmp(argv[1], "-v") == 0;
     g_digest_hex = synthetic_catalog()->digest_hex();
@@ -1207,6 +1245,7 @@ int main(int argc, char** argv) {
     follow_poses();
     follow_references();
     received_text_budget();
+    inbox_flood();
     limits();
     error_rule();
     client_world_stop();

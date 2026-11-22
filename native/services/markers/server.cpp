@@ -75,7 +75,9 @@ const wire::Token kZero{};
 }  // namespace
 
 Server::Server(Store& store, CatalogHolder& catalog, Inbox& inbox, LinkEnv env)
-    : store_(store), catalog_(catalog), inbox_(inbox), env_(std::move(env)) {}
+    : store_(store), catalog_(catalog), inbox_(inbox), env_(std::move(env)) {
+    inbox_.set_per_peer(Inbox::kPerPeerServer);  // one flooding peer keeps only its own share (review F2)
+}
 
 void Server::log(int level, const char* fmt, ...) {
     if (!env_.log) return;

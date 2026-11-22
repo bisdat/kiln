@@ -28,10 +28,11 @@ bool Bucket::take(double n, uint64_t now) {
 
 bool Inbox::push(uint32_t peer, uint64_t generation, uint32_t message, const uint8_t* bytes, size_t length) {
     std::lock_guard g(mu_);
-    if (q_.size() >= kEnvelopes || bytes_ + length > kBytes) {
+    if (q_.size() >= kEnvelopes || bytes_ + length > kBytes || (per_peer_ && queued_[{peer, generation}] >= per_peer_)) {
         ++drops_[{peer, generation}];
         return false;
     }
+    ++queued_[{peer, generation}];
     Inbound m;
     m.peer = peer;
     m.generation = generation;
@@ -47,13 +48,17 @@ std::deque<Inbound> Inbox::take() {
     std::deque<Inbound> out;
     out.swap(q_);
     bytes_ = 0;
+    queued_.clear();
     return out;
 }
 
 void Inbox::put_back(std::deque<Inbound>&& front) {
     if (front.empty()) return;
     std::lock_guard g(mu_);
-    for (const Inbound& m : front) bytes_ += m.bytes.size();
+    for (const Inbound& m : front) {
+        bytes_ += m.bytes.size();
+        ++queued_[{m.peer, m.generation}];
+    }
     for (auto it = front.rbegin(); it != front.rend(); ++it) q_.push_front(std::move(*it));
 }
 
@@ -74,6 +79,12 @@ void Inbox::clear() {
     q_.clear();
     bytes_ = 0;
     drops_.clear();
+    queued_.clear();
+}
+
+void Inbox::set_per_peer(size_t n) {
+    std::lock_guard g(mu_);
+    per_peer_ = n;
 }
 
 // ---- the table's members ------------------------------------------------------------------------------------------------
