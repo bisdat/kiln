@@ -51,6 +51,24 @@ int main() {
     CHECK(filter_brush(original.bytes.data(), bits, result, filtered, copy_memory));
     for (unsigned i = 0; i < 256; ++i) CHECK(filtered[i] == (i > 0 && i < 128 ? source[i] : 0));
 
+    // Each individual policy bit is independent. Allowed values are bit-exact, even signed zero and NaN
+    // payloads: copying the game's coefficients must not perform floating-point arithmetic on them.
+    std::array<uint32_t, 256> representations;
+    constexpr uint32_t special[] = {0x80000000, 0x7fc12345, 0x7f812345, 0xff800000, 0x00000001, 0x3f800001};
+    for (unsigned i = 0; i < 256; ++i) representations[i] = special[i % std::size(special)];
+    std::memcpy(source.data(), representations.data(), sizeof source);
+    const auto source_before = representations;
+    for (unsigned selected = 0; selected < 256; ++selected) {
+        std::fill(std::begin(bits), std::end(bits), uint8_t(0));
+        set(bits, selected);
+        CHECK(filter_brush(original.bytes.data(), bits, result, filtered, copy_memory));
+        std::array<uint32_t, 256> actual;
+        std::memcpy(actual.data(), filtered.data(), sizeof filtered);
+        for (unsigned cell = 0; cell < 256; ++cell)
+            CHECK(actual[cell] == (cell == selected && cell > 0 && cell < 128 ? representations[cell] : 0u));
+    }
+    CHECK(std::memcmp(source.data(), source_before.data(), sizeof source) == 0);
+
     // A partial source span is zero-extended, never read past its count. Allowed coefficients stay exact,
     // including zero/negative values the engine treats as unmineable. The brush geometry is not reimplemented.
     std::fill(std::begin(bits), std::end(bits), uint8_t(0));

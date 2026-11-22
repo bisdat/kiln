@@ -36,4 +36,6 @@ inline bool filter_brush(const void* original, const uint8_t (&remove_cells)[32]
 } // namespace kiln::tools::carve
 
 // Called by the tools service before its action bindings become reachable. Both hooks must be ready for Remove.
+// Serialize lifecycle calls; close admission and drain active tool invocations before reinstalling or uninstalling.
 void kiln_tools_carve_install(const KilnApi* api, KilnOwner owner);
+void kiln_tools_carve_uninstall();

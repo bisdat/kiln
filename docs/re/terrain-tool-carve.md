@@ -3,8 +3,9 @@
 Since 0.2.0-dev.30.5. Static, read-only qualification on client Steam 26430625
 (`5d9ef2f140b8ed49e30dbee655841b89d08baec20f799a1817e171a18a850c77`) and dedicated server Steam 26430253
 (`f0d824be7fcd48ebfe2458ff5c28da26060c2074e3ec1fcac587e5a1d508aeb2`). Image base `0x140000000`.
-The functions were disassembled and individually decompiled with Ghidra 12.1.2, without executing either target.
-No runtime/client verification is implied.
+The kernel, building helper and descriptor wrapper were disassembled and individually decompiled with Ghidra 12.1.2.
+The dispatcher was additionally traced from machine instructions across its complete chained unwind ranges.
+Neither target was executed; no runtime/client verification is implied.
 
 ## Two separate branches
 
@@ -13,6 +14,7 @@ No runtime/client verification is implied.
 | `gameplay/TerraformImpact` | `0x3ece10` | `0x18e0b0` | Impact VM callback; the generic remove path calls terrain removal, then building removal. |
 | Terrain removal helper | `0x490f80` | `0x2284a0` | Builds material coefficients for cell ids 1 through 127 and invokes the terrain brush wrapper twice (preview and commit). |
 | `tools/TerrainCarveKernel` | `0xa8f880` | `0xa3a180` | `bool(void* brush, void* cell_span, void* third, const int32_t* origin, const uint32_t* dims)`; third argument is passed through unchanged. |
+| `tools/TerrainCarveDispatch` | `0xa88350` | `0xa32bf0` | `bool(void* terrain, void* box, void* buffers, const int32_t* begin, const uint32_t* end, const uint8_t* flags, void* brush)`; calls the kernel synchronously, then optionally removes isolated terrain/air. |
 | `tools/RemoveBuildingVoxels` | `0x4906a0` | `0x227bc0` | `uint8_t(void* operation, void* brush, uint32_t item)`; iterates cells 128 through 255 and runs a separate building kernel. |
 
 The terrain kernel itself only changes cells with material 1..127 and nonzero fill. Its coefficient lookup is bounded
@@ -29,6 +31,16 @@ preserves allowed terrain coefficients exactly, and zeroes every other coefficie
 nor its source table is modified. This applies to every native brush size, including fractional-fill boundaries,
 without implementing an approximation to the game's geometry.
 
+The native dispatcher has chained unwind ranges: its first range alone omits the kernel call and post-processing.
+Client `0xa88833` / server `0xa330d3` directly call the kernel on the same thread, after the terrain helper directly
+calls the descriptor wrapper (`0xa931d0` / `0xa3dad0`). There is no job handoff on this call path.
+After the kernel, two optional passes can clear isolated terrain or material-bearing air without consulting the
+coefficient table (client `0xa88945..0xa88ade`, server `0xa331e5..0xa3337e`). The wrapper supplies flags `{0,1,0}`:
+byte 0 controls the native snapshot path, byte 1 the isolated-terrain pass, and byte 2 air cleanup. Coefficient
+filtering alone is therefore insufficient. Under Remove only, Kiln passes an owned three-byte flags copy with bytes
+1 and 2 cleared, preserving byte 0 and every other dispatch argument. No-policy and Add calls retain the exact
+original flags pointer. Both the kernel and dispatch links must install before `KERNEL_FILTER` reports ready.
+
 ## Mining yields remain native
 
 On the client the terrain helper writes removed volume into a per-material float report. The impact passes that report
@@ -44,12 +56,30 @@ these two hooks. The enclosing tool action must still ensure that only the quali
 
 ## Qualification gates
 
-The tools service installs both hooks through `kiln.hooks` and reports them separately to its policy gate. Installation
-requires one of the two exact executable identities, an enabled verified-build hook policy, both resolved symbols,
-and matching entry bytes for both functions. A failed second installation revokes the first link. The action service
-must not activate Remove until both hooks and its required access checks are ready. A malformed/unreadable brush under
-an active Remove policy refuses rather than continuing an unrestricted kernel. No-policy and Add invocations call their
-original continuations with their original arguments and return values.
+The tools service installs all three hooks through `kiln.hooks` and reports kernel filtering (including dispatch) and
+building suppression separately to its policy gate. Installation requires one of the two exact executable identities,
+an enabled verified-build hook policy, all three resolved symbols, and matching original executable entry bytes through
+`kiln.hooks.read_original`. Live code must be
+`ORIGINAL` or `MANAGED` according to `code_state`; foreign, unreadable or unaccounted-for changes refuse. Checking the
+original bytes allows composition with other Kiln links and retry after rollback: revoking a link does not remove the
+registry's physical detour. Missing provenance APIs refuse rather than trusting a patched entry.
+
+All three links belong to a dedicated `kiln.tools.carve` child owner, never to the parent tools service owner. A partial
+installation failure revokes every installed link and retires that child. `kiln_tools_carve_uninstall()` clears both readiness
+flags and the `build.filtered_terrain` capability before revoking the links, calling `hooks.revoke_owner(child)` and
+then `api.owner_revoke(child)`. It is safe after a partial install and on repeated teardown. The capability report is
+owned by the parent service so an unavailable reason remains visible after child retirement.
+
+The service must serialize lifecycle calls, close admission and drain existing invocation scopes before reinstall or
+uninstall. Reinstall starts with the same cleanup, so a subsequent qualification refusal leaves no old links active.
+The tools DLL remains resident; the registry's revoked continuations stay valid. The action service must not activate
+Remove until both hooks and its required access checks are ready.
+
+A malformed/unreadable brush under an active Remove policy refuses rather than continuing an unrestricted kernel.
+No-policy and Add invocations call their original continuations with their original arguments and return values.
+A fault in a continuation propagates to the caller; the filter owns only stack storage, leaves the borrowed descriptor
+and coefficient table untouched, and neither sets nor clears policy TLS. Restoring that scope on fault is the impact
+binder's responsibility. Game writes performed before such a fault are not rolled back by this filter.
 
 Unit/native fixtures validate filtering and continuation behaviour; they do not prove real game brush geometry,
 multiplayer authority, inventory yield, saved history or entity behaviour. Those need the owner-guided client check.
