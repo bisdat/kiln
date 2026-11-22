@@ -2,7 +2,7 @@
 
 Kiln loads unmodified mods for **EMF** (Enshrouded Modding Framework, MIT; API versions through EMF 0.6.19 / v47)
 through the plugin `kiln/plugins/kiln-emf.dll`. It supplies an `EmfApi` v47 table built on Kiln's services:
-of 144 C slots, 77 are full, 18 partial, and 49 (functions EMF added between 0.6.3 and 0.6.19)
+of 144 C slots, 80 are full, 19 partial, and 45 (functions EMF added between 0.6.3 and 0.6.19)
 answer "not available on Kiln yet" ([what that means for a mod](#mods-built-for-emf-063-to-0619)). v41, v42 and v45
 (EMF 0.6.10, 0.6.11 and 0.6.14) added no function. API coverage is not a guarantee for every mod
 pairing or player-facing feature. Every function and its evidence: [emf-parity.md](emf-parity.md). You keep your EMF
@@ -97,18 +97,21 @@ own ruins) and villager moves (`villager_move`, `villager_move_cancel`, `village
 stayed off on Kiln's 1088-byte table ("this mod was built for EMF API v46; the core is v42: update EMF (the mod stays
 off)"). kiln-emf serves that prefix, so that check lets them start (not yet run on Kiln), and a `mod.json`
 that says `"emf": 43` to `46` loads. The
-seven new functions are not carried yet: `player_permissions` answers false, `break_blocks` and `villager_move` refuse
-with their reason (also a villager move with a hold), `block_at` and `find_wall` answer false. Read from their 0.6.14
-source (not seen in a game): Villager Jobs gives jobs to EMF's own admins (`[chat] admins`) but not to the game's
-admins (`player_permissions`); Night Raids' raiders find no wall to break and break none (`find_wall`,
-`break_blocks`).
+block queries and queued sphere/column breaking now translate onto `kiln.build` (since 0.2.0-dev.30.6).
+`player_permissions` and villager moves still give their documented unavailable answers. Night Raids can query
+building walls and player-placed terrain through the adapter; its real gameplay needs the check below.
 
 EMF 0.6.19 (API v47) appends `find_wall_ex` and `spawn_facing` (1160 bytes). The whole table is served so the SDK's
 size/version check accepts Lua 1.40, Night Raids 1.3.0 and Beastmaster 1.19.0, which otherwise report "built for EMF
 API v47; the core is v46". Their gameplay has not been checked. `spawn_facing` forwards yaw and extra components
-through `kiln.spawn` at creation, not a later teleport. Terrain is not added: `find_wall_ex` returns false with output
-untouched; `EMF_BREAK_TERRAIN` gets the existing break refusal (0 with `why` "not available on this game version",
-no callback). Block terrain facts and `EMF_MARKER_BAR` remain unavailable with their parent functions. See
+through `kiln.spawn` at creation, not a later teleport. `block_at` returns cell facts including natural/player/unknown
+provenance and raw material hardness/health;
+`find_wall_ex(..., EMF_FIND_TERRAIN)` includes only player-placed terrain. Breaks never remove natural/unknown terrain,
+even with `EMF_BREAK_WORLD`. Damage uses native building cracks and caller-configured terrain health ×250 / 20-second
+healing. `EMF_BREAK_DROPS` still refuses the whole request (id 0, the documented unavailable reason, no callback).
+`EMF_MARKER_BAR` remains unavailable. Kiln clears exactly selected cells, unlike EMF's possible isolated-terrain
+cleanup just outside the box. Ruin protection still shrinks building spheres as EMF does; terrain keeps the original
+radius and its own natural/unknown-cell protection. See
 [the v47 table](emf-parity.md#v47-emf-0619).
 
 Kiln does not carry every function EMF added since. Carried: chat lines without a speaker (`chat_tell_ex`,
@@ -117,8 +120,8 @@ since 0.2.0-dev.30.3, hit observers (`on_hit`, Lua `emf.on_hit`: every hit the s
 or placed object arrives after the server's step, as on EMF; fall, shroud, cold and drowning damage do not arrive on
 Kiln yet, and the mod's log says so once). Not yet: player join/leave/death events, item names and the game's
 language, character names, changing hits (`on_hit_before`, hit rules), buffs, markers, map clicks and map actions, canvases and the
-minimap's parts, `remove_building`, paths, doors, enemy orders and move orders, a player's game permissions, block
-breaking and villager moves. A mod that calls one of those gets
+minimap's parts, `remove_building`, paths, doors, enemy orders and move orders, a player's game permissions
+and villager moves. A mod that calls one of those gets
 EMF's documented "not available" answer, as on a game build EMF does not know: the rest of the mod runs. `kiln.log`
 says once per mod and function `emf: <mod> called <fn>, not supported (not available on Kiln yet)`, and
 `kiln/state/emf.json` lists the calls under `unsupported`.
@@ -321,3 +324,28 @@ listed. **No** means it logs `emf: <mod> called <fn>, not supported` once and re
 - v22: blessings' level reward (`set_level`) queues the level for the next step; nonzero XP towards that level follows
   after the result, several steps later (see [parity limits](emf-parity.md)). Given XP
   levels the player up with the game's own level-up message.
+
+## Guided block-family check (since 0.2.0-dev.30.6)
+
+Use a disposable copied world and EMF Lua 1.40 or a small C API test mod; only the owner runs this check. Record
+`kiln.log`, `state/emf.json.blocks` and the `build.*` capability rows. Do not use a valued save for destructive checks.
+
+1. In a callback on the host/server world, query `block_at` on air, an unpainted player building block, a natural
+   ruin, natural ground and Stone/dirt placed where the shipped world had air. Expect kind/material/fill, raw
+   hardness/health and `world` 0/1/-1 as appropriate; paint 0 must not make a building empty. A joined-only client
+   cannot perform server queries or breaks.
+2. Trace the same line with `find_wall` and `find_wall_ex(..., EMF_FIND_TERRAIN)` (Lua's `{terrain = true}`). The first
+   ignores terrain; the second stops at the first player-terrain cell before the wall, but passes natural ground.
+3. Queue an instant sphere and a column without drops. Confirm no edit/callback inside `break_blocks`, at most eight
+   spheres run per step, and one result after the executing step on the server thread. With `EMF_BREAK_TERRAIN`, only
+   player-placed ground is removed. Natural ground remains with `EMF_BREAK_WORLD` too; nearby ruins are protected
+   unless that flag is set. Check excluded sphere corners remain untouched and edits save/reload and replicate.
+4. Repeat without instant mode: building cracks advance; player terrain uses material health ×250 and heals after
+   20 seconds without a hit (`block_at.damage` remains -1 for terrain). Check Unbreakable cells never go. If a mode's
+   capability is unavailable, expect id 0 with a reason, no callback and no partial damage.
+5. Ask for drops: expect id 0 and `not available on this game version`, no edit or callback. Queue more than eight
+   spheres, then close the world; waiting requests cancel at the next server Post, without editing the next world.
+6. Optionally use Night Raids 1.3.0 with a disposable player-block and player-Stone wall: verify wall discovery and
+   requests/callbacks. Any unavailable drop request is a refusal, not evidence that a raid broke a wall successfully.
+
+The adapter and Windows stand-in tests do not establish game effects, saving, replication or mod gameplay.

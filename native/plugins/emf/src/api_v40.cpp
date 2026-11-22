@@ -9,18 +9,13 @@
 // (and the flag EMF_MOVE_PEACEFUL_ALL) and EmfPathResult.doors. kiln-emf's version (42 since 0.2.0-dev.28) lets a mod
 // whose mod.json says "emf": 41 or 42 load; enemy_move and path_find, the functions those fields belong to, are not carried yet
 // (below): a move order of either size is refused with its `why`, and no path result is ever handed to a mod.
-// v43 (0.6.13) to v46 (0.6.14) appended seven functions, none carried yet: player_permissions (v43), break_blocks,
-// block_at and find_wall (v44), villager_move, villager_move_cancel and villager_moving (v46). v45 is the version only
-// (EmfBlockInfo.world, EMF_BREAK_WORLD): emf::has_v45() reads `version`, so kiln-emf says 47. v46 also put
-// EmfMoveOrder.hold_seconds where pad2 was and added EMF_MOVE_HOLD; a villager move is refused whatever it holds.
-//
-// v47 adds find_wall_ex (not yet) and spawn_facing (api_spawn.cpp, through kiln.spawn with spawn-time yaw).
-// EMF_BREAK_TERRAIN, EmfBlockInfo terrain facts and EMF_MARKER_BAR stay unavailable with their parent functions.
+// v43-v46 permissions and villager moves remain unavailable. The v44/v45/v47 block family is filled by
+// api_terrain.cpp through kiln.build; spawn_facing by api_spawn.cpp through kiln.spawn. Marker bars stay unavailable.
 //
 // Carried: chat_tell_ex and chat_broadcast_ex (api_game.cpp: kiln.chat's server lines are already lines without a
 // speaker), world_to_screen (kiln.render's camera, below) and on_hit (api_hits.cpp, fill_hits; since 0.2.0-dev.30.3).
 //
-// Not carried yet (49 functions): each answers as EMF's own core answers where a feature is off on a game build, so a
+// Not carried yet (45 functions): each answers as EMF's own core answers where a feature is off on a game build, so a
 // mod meets a state it already has to handle: the documented failure value, out buffers cleared, `why` filled where
 // the request has one, a request whose `size` is too small refused as EMF refuses it, and no callback ever called.
 // One log line per mod and function says so, and the status file lists the call (state/emf.json "unsupported").
@@ -38,9 +33,6 @@ namespace kemf {
 namespace {
 
 constexpr const char* kNotYet = "not available on Kiln yet";
-// EMF's own text when the game has no block breaking: mods compare `why` with it (Night Raids 1.2.1 then stops
-// looking for walls and its raiders go for doors), so break_blocks answers exactly this (GitHub #43)
-constexpr const char* kNoGameVersion = "not available on this game version";
 
 // In the API function itself (never in a helper): the return address names the calling mod.
 #define KEMF_NOT_YET(fn) unsupported(caller_mod(_ReturnAddress()), fn, kNotYet)
@@ -334,28 +326,6 @@ bool api_player_permissions(EmfWorld*, uint32_t, uint32_t* perms) {
     return false;  // "false (*perms = 0) for an entity that is no player here, or on a client world"
 }
 
-// ---------------------------------------------------------------------------------------------- v44 -------------
-uint32_t api_break_blocks(EmfWorld*, EmfBreakBlocks* req, EmfBreakCallback, void*) {
-    Mod* m = caller_mod(_ReturnAddress());
-    if (!req || req->size < v26::kBreakBlocksV44Size) {
-        refuse(m, "break_blocks", "no request, or its size field is not sizeof(EmfBreakBlocks)", true);
-        return 0;
-    }
-    unsupported(m, "break_blocks", kNotYet);  // the log line says why; the request carries EMF's own text
-    say_why(req->why, kNoGameVersion);
-    return 0;  // refused: `cb` is not called, nothing is broken
-}
-
-bool api_block_at(EmfWorld*, float, float, float, EmfBlockInfo*) {
-    KEMF_NOT_YET("block_at");
-    return false;  // as "not available on this game version": *out is not written
-}
-
-bool api_find_wall(EmfWorld*, const float*, const float*, EmfBlockInfo*) {
-    KEMF_NOT_YET("find_wall");
-    return false;  // for block_at's reasons: *out is not written
-}
-
 // ---------------------------------------------------------------------------------------------- v46 -------------
 // The same order struct as enemy_move (EmfMoveOrder, at least v40's 128 bytes); hold_seconds and EMF_MOVE_HOLD change
 // nothing here: every order is refused with its `why`.
@@ -378,12 +348,6 @@ bool api_villager_move_cancel(uint32_t) {
 uint32_t api_villager_moving(EmfWorld*, uint32_t) {
     KEMF_NOT_YET("villager_moving");
     return 0;
-}
-
-// ---------------------------------------------------------------------------------------------- v47 -------------
-bool api_find_wall_ex(EmfWorld*, const float*, const float*, uint32_t, EmfBlockInfo*) {
-    KEMF_NOT_YET("find_wall_ex");
-    return false;  // flags 0, EMF_FIND_TERRAIN and unknown flags: *out is never written
 }
 
 }  // namespace
@@ -434,13 +398,10 @@ void fill_v40(EmfApi* t) {
     t->enemy_move_cancel = &api_enemy_move_cancel;
     t->enemy_moving = &api_enemy_moving;
     t->player_permissions = &api_player_permissions;  // v43
-    t->break_blocks = &api_break_blocks;              // v44
-    t->block_at = &api_block_at;
-    t->find_wall = &api_find_wall;
     t->villager_move = &api_villager_move;  // v46
     t->villager_move_cancel = &api_villager_move_cancel;
     t->villager_moving = &api_villager_moving;
-    t->find_wall_ex = &api_find_wall_ex;  // v47; spawn_facing is filled by fill_game / fill_spawn
+    fill_terrain(t); // v44/v45/v47; spawn_facing is filled by fill_game / fill_spawn
 }
 
 }  // namespace kemf

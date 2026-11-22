@@ -17,10 +17,15 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -I"$here/../inc
 "$out/v26_model_test"
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -pthread \
     -I"$here/host" -I"$here/../include" -I"$here/../src" -I"$here/../../../core/abi" -I"$here/../../../services/players" \
-    "$here/glue_test.cpp" "$here/../src/api_windows.cpp" "$here/../src/api_wheel.cpp" "$here/../src/api_attributes.cpp" "$here/../src/api_level.cpp" "$here/../src/api_components.cpp" "$here/../src/api_events.cpp" "$here/../src/api_v40.cpp" "$here/../src/v26_model.cpp" \
+    "$here/glue_test.cpp" "$here/../src/api_windows.cpp" "$here/../src/api_wheel.cpp" "$here/../src/api_attributes.cpp" "$here/../src/api_level.cpp" "$here/../src/api_components.cpp" "$here/../src/api_events.cpp" "$here/../src/api_v40.cpp" "$here/../src/api_terrain.cpp" "$here/../src/v26_model.cpp" \
     -o "$out/glue_test"
 "$out/glue_test" "$out"
 "$out/glue_test" "$out" no-render
+# v44/v45/v47 terrain translation, async queue and callback timing.
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -pthread \
+    -I"$here/host" -I"$here/../include" -I"$here/../src" -I"$here/../../../core/abi" -I"$here/../../../services/players" \
+    "$here/terrain_test.cpp" "$here/../src/api_terrain.cpp" -o "$out/terrain_test"
+"$out/terrain_test"
 # Spawn-time yaw and component forwarding use the production adapter (no game).
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -pthread \
     -I"$here/host" -I"$here/../include" -I"$here/../src" -I"$here/../../../core/abi" -I"$here/../../../services/players" \
