@@ -423,6 +423,15 @@ fn placement_sweep_preserves_unverified_parked_copies() {
         std::os::unix::fs::symlink(&copy, linked.join("old/link")).unwrap();
         entries.push((linked, Some(&m)));
     }
+    #[cfg(windows)]
+    {
+        let linked = mods.join(".kiln-place-000000000004");
+        std::fs::create_dir_all(linked.join("old")).unwrap();
+        let win = |p: &Path| p.to_string_lossy().replace('/', "\\");
+        let made = std::process::Command::new("cmd").args(["/C", "mklink", "/J"]).arg(win(&linked.join("old/link"))).arg(win(&copy)).output().unwrap();
+        assert!(made.status.success(), "{made:?}");
+        entries.push((linked, Some(&m)));
+    }
     let mut record = Vec::new();
     for (folder, found_marker) in &entries {
         let old = folder.join("old");
@@ -439,6 +448,7 @@ fn placement_sweep_preserves_unverified_parked_copies() {
         assert_eq!(std::fs::read(old.join("main.lua")).unwrap(), b"keep these bytes");
         assert_eq!(marker(&old).as_ref(), expected);
     }
+    assert!(copy.join("main.lua").is_file() && marker(&copy).as_ref() == Some(&m), "a link's target stays");
 }
 
 #[cfg(windows)]

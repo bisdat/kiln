@@ -975,7 +975,7 @@ fn validate_publication(game: &Path, p: &Publication, route: &Route) -> Result<(
 /// Clean up the old copy after the replacement receipt was saved. Record the cleanup before deleting any files,
 /// so the staging sweep can finish it even after the publication journal moves on.
 fn drop_parked(game: &Path, p: &Publication, route: &Route) -> Result<bool> {
-    let (Some(parked), Some(from)) = (&p.parked, &p.from) else { return Ok(false) };
+    let Some(parked) = &p.parked else { return Ok(false) };
     validate_publication(game, p, route)?;
     match std::fs::symlink_metadata(parked) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(true),
@@ -987,8 +987,18 @@ fn drop_parked(game: &Path, p: &Publication, route: &Route) -> Result<bool> {
     if !p.path.is_dir() || !holds_receipt(&p.path, &p.to) || marker(&p.path).as_ref() != Some(&p.to.marker) {
         return Ok(false);
     }
+    let folder = parked.parent().expect("validated parent");
+    let Some(from) = &p.from else {
+        // The folder replaced had no marker: a Flame mod's folder holding only what the mod wrote, adopted with those
+        // files (they are in the new copy now). Nothing identifies it for a later sweep, so it goes whole, and only
+        // while the journal still names it.
+        if marker(parked).is_some() || !plain_staging_tree(parked) { return Ok(false); }
+        std::fs::remove_dir_all(parked).map_err(io_at(parked, "removing"))?;
+        if std::fs::remove_dir(folder).is_ok() && let Some(parent) = folder.parent() { let _ = crate::durable::flush_dir(parent); }
+        return Ok(true);
+    };
     let s = Staging {
-        folder: parked.parent().expect("validated parent").to_path_buf(),
+        folder: folder.to_path_buf(),
         path: p.path.clone(),
         marker: p.to.marker.clone(),
         game_folder: p.to.game_folder,
@@ -1081,7 +1091,7 @@ fn recover_journal(game: &Path, receipts: &mut Vec<Placement>, route: &Route) ->
             Ok(true) => { p.parked = None; changed = true; }
             Ok(false) => {}
             Err(e) => {
-                let folder = p.parked.as_ref().expect("parked cleanup requires an old copy");
+                let folder = p.parked.as_deref().and_then(Path::parent).expect("parked cleanup requires an old copy");
                 notes.push(staging_cleanup_note(folder, &e));
             }
         }
@@ -1277,6 +1287,11 @@ fn remove_parked_copy(old: &Path, expected: &Marker) -> Result<bool> {
             crate::util::make_writable(&path)?;
             std::fs::remove_file(path)?;
         }
+    }
+    // The marker goes only once it is all that is left: a listing read while its entries go need not show each one,
+    // and a file deleted while another program has it open can stay listed until that program lets go of it.
+    if std::fs::read_dir(old)?.any(|e| !e.is_ok_and(|e| e.file_name() == MARKER)) {
+        return Err(Error::new(ErrorCode::Io, format!("{} still holds files", old.display())));
     }
     crate::durable::flush_dir(old)?;
     crate::kept::crash_point(crate::kept::Step::ParkedContentsRemoved);
