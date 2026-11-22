@@ -968,6 +968,7 @@ internal static partial class KilnApis
         "Players",
         "Queries",
         "Quests",
+        "Registry",
         "Replication",
         "Rules",
         "Saves",
