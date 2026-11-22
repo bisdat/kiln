@@ -354,6 +354,9 @@ void bind_service() {
         in.mods = *h.inputs;
         in.decoded = *h.decoded;
         in.added_guid = &model::added_guid;
+        if (h.pre_refused) in.pre_refused = *h.pre_refused;
+        if (h.boot_fields) in.boot_fields = *h.boot_fields;
+        in.check = h.check;
         in.report = h.report;
         registry_live_install(std::move(in));
     });

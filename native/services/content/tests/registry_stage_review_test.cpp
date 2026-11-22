@@ -229,6 +229,31 @@ void worldload_ready_event(const std::string& dir) {
     check(r.phase() == stage::Phase::WorldLoad, "phase worldLoad");
     check(seen.size() == 2 && seen[1] == stage::Phase::WorldLoad, "the ready callback saw START and WORLDLOAD (saw " + std::to_string(seen.size()) + " event(s))");
 }
+// R6: the live handoff keeps what a hot reload must not lose (review finding 6): the refusals made outside compose, the restart
+// fields as the boot back-end wrote them, and the stage's mapping check
+void handoff_keeps_outside_refusals(const std::string& dir) {
+    TreeView view = world();
+    Files files;
+    stage::Runner r(env_of(&view, &files, dir, &sections));
+    stage::LiveHandoff got;
+    r.set_live([&](const stage::LiveHandoff& h) { got = h; });
+    const auto boot = r.run({});
+    r.finish({{boot.at(0).fields.at(0).field, true, Value::integer(60), ""}});
+    check(got.pre_refused && !got.pre_refused->empty(), "the handoff names the refusals made outside compose");
+    bool unproven = false;
+    for (const Refusal& x : *got.pre_refused) unproven = unproven || x.reason.find("Unproven") != std::string::npos;
+    check(unproven, "among them the unproven field's");
+    check(got.boot_fields && got.boot_fields->count({"balance", "game:balance", "levelCap"}) &&
+              got.boot_fields->at({"balance", "game:balance", "levelCap"}).result == Value::integer(60), "the handoff has levelCap as the boot back-end wrote it");
+    check(static_cast<bool>(got.check), "and the mapping check");
+    Batch b;
+    std::vector<Refusal> rf;
+    std::string err;
+    parse_batch(std::string(R"({"ir":1,"mod":"bigmod","stage":"alter","edits":[{"registry":"items","select":{"id":"game:plank"},"field":"block","op":0.5}]})"), generated_schema(), &b, &rf, &err);
+    got.check(&b, &rf);
+    check(b.edits.empty() && !rf.empty(), "the check refuses a reloaded unproven edit");
+}
+
 // R5: the base cache's check touches only the resources the first decode read and compares their digest; the type
 // listings (one resource per item, template, drop table) are in neither. A resource added to a listed type with the same
 // exe, Kiln and regmap (another archive writer's new item) is a cache hit, and the stage's base, ids and globs miss it.
@@ -264,6 +289,7 @@ int main(int argc, char** argv) {
         {"R2 id_table_overwritten", [&] { id_table_overwritten(dir); }},
         {"R3 submit_unbound_owner", [&] { submit_unbound_owner(dir); }},
         {"R4 worldload_ready_event", [&] { worldload_ready_event(dir); }},
+        {"R6 handoff_keeps_outside_refusals", [&] { handoff_keeps_outside_refusals(dir); }},
         {"R5 cache_misses_added_resource", [&] { cache_misses_added_resource(dir); }}};
     for (const auto& [name, fn] : groups) {
         try {

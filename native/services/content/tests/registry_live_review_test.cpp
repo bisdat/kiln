@@ -424,6 +424,7 @@ void reload_loses_stage_refusals() {
         x.mod = "a", x.source = "content/a.json", x.stage = registry::Stage::Alter, x.n = 1;
         x.reason = "items game:material_t1_wood_logs: block: Unproven on this build; this edit was not applied";
         g.in->result.refused.insert(g.in->result.refused.begin(), x);
+        g.in->pre_refused.push_back(x);  // the stage's handoff (stage_service: LiveHandoff.pre_refused)
     }
     registry_live_apply(files);
     check(reported("Unproven"), "the world-load report has the stage's refusal");
@@ -432,6 +433,38 @@ void reload_loses_stage_refusals() {
     check(at<uint32_t>(WOOD_AT) == 120, "recomposed: x4 then x3");
     check(reported("Unproven"), "after b's section is reloaded registry.json still names a's refused edit");
 }
+// L2b: a reload keeps the restart fields' outcomes as the boot back-end wrote them, and runs the stage's mapping check on the
+// reloaded sections.
+void reload_keeps_boot_outcomes_and_checks_sections() {
+    world();
+    g_files = {{"a/content/a.json", R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "maxStack", "op": {"mul": 4}}]}})"}};
+    const auto files = files_of({{"a", "a/content/a.json"}});
+    stage(files);
+    const registry::FieldRef cap{"balance", "game:balance", "levelCap"};
+    {
+        std::lock_guard lock(store_mutex());
+        registry::FieldOutcome fo;
+        fo.base = registry::Value::integer(50), fo.result = registry::Value::integer(60), fo.winner = "a";
+        g.in->boot_fields[cap] = fo;
+        g.in->result.fields[cap] = fo;
+        g.in->check = [](registry::Batch* b, std::vector<registry::Refusal>* r) {
+            std::erase_if(b->edits, [&](const registry::Edit& e) {
+                if (e.field != "rarity") return false;
+                r->push_back({b->mod, b->source, b->stage, e.n, "Unproven: items.rarity is not proven for this game build; this edit was not applied", ""});
+                return true;
+            });
+        };
+    }
+    registry_live_apply(files);
+    g_files["a/content/a.json"] = R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "maxStack", "op": {"mul": 3}},
+        {"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "rarity", "op": "epic"}]}})";
+    registry_live_apply(files);
+    check(at<uint32_t>(WOOD_AT) == 30, "recomposed: x3");
+    check(g_last_report.fields.count(cap) && g_last_report.fields.at(cap).result == registry::Value::integer(60), "the boot back-end's levelCap 60 stays in registry.json");
+    check(reported("Unproven: items.rarity"), "the reloaded section's unproven edit is refused by the stage's check");
+    check(at<uint32_t>(WOOD_AT + 4) == 0, "and not written");
+}
+
 // L3: store.cpp store_flush: when compare-before-write fires on a slot in the same flush as an old pack's layer change
 // (every pack application re-puts the pack layers: apply_all_packs drops and puts them, old_changed = true), the
 // "continue" also drops the pack's write and clears old_changed, so the old pack's new value is never written that time.
@@ -466,6 +499,7 @@ int main() {
     const std::pair<const char*, void (*)()> groups[] = {{"L1 drop_table_without_old_rules", &drop_table_without_old_rules},
                                                          {"L1b drop_table_repointed_by_newcontent", &drop_table_repointed_by_newcontent},
                                                          {"L2 reload_loses_stage_refusals", &reload_loses_stage_refusals},
+                                                         {"L2b reload_keeps_boot_outcomes_and_checks_sections", &reload_keeps_boot_outcomes_and_checks_sections},
                                                          {"L3 pack_write_lost_on_detection", &pack_write_lost_on_detection}};
     for (const auto& [name, fn] : groups) {
         try {

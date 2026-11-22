@@ -285,6 +285,8 @@ struct Runner::Impl {
     std::vector<OldWrite> old;
     std::vector<ModInput> inputs;
     std::vector<Refusal> pre_refused;
+    std::vector<Refusal> outside;                    // every refusal made outside compose (the live back-end keeps them on a reload)
+    std::map<FieldRef, FieldOutcome> boot_fields;    // restart fields as the boot back-end wrote them
     std::map<std::string, std::string> ids;
     std::map<std::string, uint32_t> nums;
     std::set<std::string> decoded;
@@ -681,6 +683,10 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn) {
         pre.insert(pre.end(), d.pre_refused.begin(), d.pre_refused.end());
     }
     r.refused.insert(r.refused.begin(), pre.begin(), pre.end());
+    {
+        std::lock_guard lk(d.mu);
+        d.outside = pre;
+    }
     // the boot back-end's resources: restart fields whose chains hold registry rows
     std::vector<BootResource> boot;
     for (const auto& [ref, fo] : r.fields) {
@@ -739,11 +745,21 @@ void Runner::finish(const std::vector<BootOutcome>& outcomes) {
             }
             for (const ChainRow& c : fo->second.chain)
                 if (c.kind == WriterKind::Registry)
-                    d.result.refused.push_back({c.mod, c.source, c.stage, c.n, o.field.registry + " " + o.field.id + ": " + o.field.field + ": " + o.why + "; this edit was not applied", ""});
+                {
+                    const Refusal x{c.mod, c.source, c.stage, c.n, o.field.registry + " " + o.field.id + ": " + o.field.field + ": " + o.why + "; this edit was not applied", ""};
+                    d.result.refused.push_back(x);
+                    d.outside.push_back(x);
+                }
             d.log(1, "registry: " + o.field.text() + " was not written: " + o.why);
             d.result.fields.erase(fo);
         }
         d.counts.refused = static_cast<uint32_t>(d.result.refused.size());
+        d.boot_fields.clear();
+        for (const auto& [ref, fo] : d.result.fields) {
+            const RegistrySpec* rs = d.schema.registry(ref.registry);
+            const FieldSpec* f = rs && !is_raw_field(ref.field) ? rs->field(ref.field) : nullptr;
+            if (f && f->applies == Applies::Restart) d.boot_fields[ref] = fo;
+        }
         d.generation = 1;
         d.meta.generation = 1;
         d.meta.world_load = false;
@@ -785,7 +801,11 @@ void Runner::finish(const std::vector<BootOutcome>& outcomes) {
         phase_.store(Phase::Start);
         gen = d.generation;
         for (const auto& [h, s] : d.ready_subs) ready.push_back(s.fn);
-        live = {&d.schema, &d.rm, &d.result, &d.ids, &d.nums, &d.base, &d.old, &d.inputs, &d.decoded, nullptr};
+        live = {&d.schema, &d.rm, &d.result, &d.ids, &d.nums, &d.base, &d.old, &d.inputs, &d.decoded, nullptr, &d.outside, &d.boot_fields, nullptr};
+        live.check = [this](Batch* b, std::vector<Refusal>* refused) {
+            std::lock_guard l2(d_->mu);
+            refuse_unmapped(d_->rm, d_->schema, b, refused);
+        };
         live.report = [this](const Result& r) {
             std::lock_guard l2(d_->mu);
             d_->result = r;

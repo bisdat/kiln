@@ -26,6 +26,7 @@ namespace rmap = registry::map;
 struct LiveState {
     std::shared_ptr<RegistryLive> in;
     std::map<std::string, uint64_t> hashes;  // rel -> section hash, last application
+    std::map<std::string, std::pair<std::string, std::string>> section_of;  // rel -> (mod, source), last application
     bool applied = false;                     // a first application happened since the install
     std::unordered_map<std::string, std::string> kiln_of;  // "<registry>|<32-bit id>" -> Kiln id (from nums)
     std::unordered_map<std::string, std::string> kiln_by_guid;  // "<registry>|<guid, lower case>" -> Kiln id (from ids)
@@ -731,7 +732,8 @@ void report() {
 }
 
 std::string edit_key(const registry::Edit& e) {
-    if (e.entry != registry::EntryOp::None) return e.registry + "#entry";
+    if (e.entry != registry::EntryOp::None)  // by entry: a new entry op is new even when the mod had another one at the start
+        return e.registry + "#entry:" + (e.entry == registry::EntryOp::Add ? "add:" + lower(e.add_id) : "remove:" + lower(e.select.id));
     if (!e.raw.empty()) return e.registry + "#raw";
     return e.registry + "." + (e.element.on ? e.element.list : registry::generic_path(e.field));
 }
@@ -741,6 +743,18 @@ std::string edit_key(const registry::Edit& e) {
 void recompose(const std::vector<RegistrySection>& sections) {
     std::vector<registry::ModInput> mods = g.in->mods;
     auto is_data = [](const std::string& source) { return source.rfind("content/", 0) == 0; };
+    std::vector<registry::Refusal> again;  // the changed sections' own refusals and the mapping check's: in registry.json as at the start
+    // a section is changed when its file is new or its text is not the last application's; the stage's refusals of a changed
+    // or removed file are replaced by what reading it again says, the others stay as the stage made them
+    std::set<std::string> stale;  // "<mod>|<source>" and "<mod>|<rel>" of changed and removed files
+    std::set<std::string> now_rels;
+    for (const RegistrySection& s : sections) {
+        now_rels.insert(s.rel);
+        const auto h = g.hashes.find(s.rel);
+        if (h == g.hashes.end() || h->second != s.hash) stale.insert(s.mod + "|" + s.source), stale.insert(s.mod + "|" + s.rel);
+    }
+    for (const auto& [rel, info] : g.section_of)
+        if (!now_rels.count(rel)) stale.insert(info.first + "|" + info.second), stale.insert(info.first + "|" + rel);
     for (registry::ModInput& m : mods) {
         std::set<std::string> before;
         for (const registry::Batch& bt : m.batches)
@@ -750,7 +764,16 @@ void recompose(const std::vector<RegistrySection>& sections) {
         std::erase_if(m.refused, [&](const registry::Refusal& r) { return is_data(r.source); });
         for (const RegistrySection& s : sections) {
             if (s.mod != m.id) continue;
+            const bool changed = stale.count(s.mod + "|" + s.source) != 0;
             for (registry::Batch bt : s.batches) {
+                if (g.in->check) {  // every batch: an unchanged section's refused edits were taken out at the start too
+                    std::vector<registry::Refusal> r;
+                    g.in->check(&bt, &r);
+                    for (const registry::Refusal& x : r) {
+                        m.refused.push_back(x);
+                        if (changed) again.push_back(x);
+                    }
+                }
                 std::erase_if(bt.edits, [&](const registry::Edit& e) {
                     const std::string k = edit_key(e);
                     if (before.count(k) || (k.find('#') == std::string::npos && g.in->decoded.count(k))) return false;
@@ -762,7 +785,12 @@ void recompose(const std::vector<RegistrySection>& sections) {
                 });
                 m.batches.push_back(std::move(bt));
             }
-            for (const registry::Refusal& r : s.refused) m.refused.push_back(r);
+            for (const registry::Refusal& r : s.refused) {
+                m.refused.push_back(r);
+                if (changed) again.push_back(r);
+            }
+            if (changed && !s.error.empty())
+                again.push_back({s.mod, s.rel, registry::Stage::Alter, 0, s.rel + ": " + s.error + "; nothing of this file's registry section was applied", ""});
         }
     }
     for (const RegistrySection& s : sections)  // a mod that had no registry content at the start
@@ -773,6 +801,13 @@ void recompose(const std::vector<RegistrySection>& sections) {
             g.refused.push_back(r);
         }
     registry::Result next = registry::compose(*g.in->schema, g.in->base, g.in->old, mods);
+    // what the stage refused outside compose stays (but the data sections' own: they were read and checked again above)
+    std::vector<registry::Refusal> kept;
+    for (const registry::Refusal& r : g.in->pre_refused)
+        if (!stale.count(r.mod + "|" + r.source)) kept.push_back(r);
+    kept.insert(kept.end(), again.begin(), again.end());
+    next.refused.insert(next.refused.begin(), kept.begin(), kept.end());
+    // restart fields are the boot back-end's as written at the start: a reload changes them only at the next start
     for (const auto& [fr, fo] : next.fields) {
         const registry::RegistrySpec* rs = g.in->schema->registry(fr.registry);
         const FieldSpec* sp = rs ? rs->field(fr.field) : nullptr;
@@ -781,6 +816,12 @@ void recompose(const std::vector<RegistrySection>& sections) {
         if (old == g.in->result.fields.end() || !(old->second.result == fo.result))
             LOGI("registry: %s changes at the next start (a restart field)", fr.text().c_str());
     }
+    std::erase_if(next.fields, [&](const auto& kv) {
+        const registry::RegistrySpec* rs = g.in->schema->registry(kv.first.registry);
+        const FieldSpec* sp = rs ? rs->field(kv.first.field) : nullptr;
+        return sp && sp->applies == registry::Applies::Restart;
+    });
+    for (const auto& [fr, fo] : g.in->boot_fields) next.fields[fr] = fo;
     g.in->mods = std::move(mods);
     g.in->result = std::move(next);
 }
@@ -834,6 +875,8 @@ void registry_live_apply(const std::vector<PackFile>& files) {
         recompose(sections);
     }
     g.hashes = std::move(hashes);
+    g.section_of.clear();
+    for (const RegistrySection& s : sections) g.section_of[s.rel] = {s.mod, s.source};
     g.applied = true;
     put_all();
     std::string err;

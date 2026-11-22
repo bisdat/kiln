@@ -42,6 +42,13 @@ struct RegistryLive {
     std::vector<registry::OldWrite> old;
     std::vector<registry::ModInput> mods;
     std::set<std::string> decoded;  // "<registry>.<field>" the base holds values for
+    // Kept across a hot reload's recomposition (review finding 6): the refusals the stage made outside compose (its mapping
+    // check, skipped mods, unusable sections, faulted callbacks, failed boot writes) and the restart fields' outcomes as the
+    // boot back-end wrote them (they change only at the next start).
+    std::vector<registry::Refusal> pre_refused;
+    std::map<registry::FieldRef, registry::FieldOutcome> boot_fields;
+    // The stage's mapping check (refuse_unmapped), run on every reloaded batch.
+    std::function<void(registry::Batch*, std::vector<registry::Refusal>*)> check;
     // The GUID of an entry a mod added (S11 sets registry::model::added_guid: UUIDv5 of "registry:<registry>:<kiln id>").
     std::function<std::string(const std::string& registry, const std::string& kiln_id)> added_guid;
     // registry.json (S11 writes it): called after every application of the live layers (world load, pack reload) with the
