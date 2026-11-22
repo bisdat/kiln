@@ -86,6 +86,7 @@ enum {
     KILN_LAUNCH_REASON_PLAN_STAMPED = 0x104,      /* the plan carries a launch id: not a plan kiln-manage wrote */
     KILN_LAUNCH_REASON_PLAN_OTHER_GAME = 0x105,   /* the plan is for another executable or side */
     KILN_LAUNCH_REASON_SF18_VETO = 0x106,         /* an admitted package needs ShroudForge 1.8 (the kiln-sfi.sf18 veto) */
+    KILN_LAUNCH_REASON_EML_R_LOADER = 0x107,     /* EML-R's game-folder loader may run the same mods */
     /* idle: the core did not decide; each loader follows its rules from before this table */
     KILN_LAUNCH_REASON_SAFE_IDLE = 0x200,         /* safe idle known at boot */
     KILN_LAUNCH_REASON_NO_MODS = 0x201,           /* play-once no-mods */

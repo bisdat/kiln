@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "nlohmann/json.hpp"
+#include "pe_text.h"  // bounds-checked PE header reads
 #include "services/boot_gamedata.h"  // the core's SHA-256 (header-only, portable)
 #include "services/kiln_profile.h"
 
@@ -431,6 +432,40 @@ Hold interpreter_hold(bool gate_held, std::string_view gate_text) {
     return {false, {}};
 }
 
+bool eml_r_proxy(std::string bytes) {
+    const auto* data = reinterpret_cast<const uint8_t*>(bytes.data());
+    const std::string_view view(bytes);
+    uint32_t pe_offset = 0;
+    if (!view.starts_with("MZ") || !pe::detail::read(data, view.size(), 0x3C, &pe_offset) ||
+        pe_offset < 0x40 || pe_offset > view.size() || view.size() - pe_offset < 26 ||
+        view.substr(pe_offset, 4) != std::string_view("PE\0\0", 4))
+        return false;
+    const size_t coff = static_cast<size_t>(pe_offset) + 4;
+    uint16_t machine = 0, characteristics = 0, magic = 0, optional_size = 0;
+    pe::detail::read(data, bytes.size(), coff, &machine);
+    pe::detail::read(data, bytes.size(), coff + 16, &optional_size);
+    pe::detail::read(data, bytes.size(), coff + 18, &characteristics);
+    pe::detail::read(data, bytes.size(), coff + 20, &magic);
+    if (machine != 0x8664 || magic != 0x020B || !(characteristics & 0x2000) ||
+        optional_size < 112 || optional_size > view.size() - pe_offset - 24 ||
+        view.substr(0x40).starts_with("Wine builtin DLL"))
+        return false;
+
+    for (char& c : bytes)
+        if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
+    for (const std::string_view marker : {"eml-r.json", "eml_r.dll"}) {
+        if (bytes.find(marker) != std::string::npos) return true;
+        std::string wide;
+        wide.reserve(marker.size() * 2);
+        for (char c : marker) {
+            wide.push_back(c);
+            wide.push_back('\0');
+        }
+        if (bytes.find(wide) != std::string::npos) return true;
+    }
+    return false;
+}
+
 namespace {
 Decision decide_inputs(const Inputs& in) {
     if (in.idle_code) {
@@ -458,6 +493,14 @@ Decision decide_inputs(const Inputs& in) {
         return refused(KILN_LAUNCH_REASON_INTERPRETER_HELD,
                        "kiln.json asks for Kiln's interpreter (shroudforge.backend: \"kiln\"), but the capability " +
                            std::string(kInterpreterGate) + " is held (" + in.held_text + ")");
+    // An earlier activation may still have a valid plan. Stand aside before reading it or exposing it to kiln-eml.
+    if (in.eml_r_present && in.eml_r_present()) {
+        Decision d;
+        d.reason_code = KILN_LAUNCH_REASON_EML_R_LOADER;
+        d.reason = "EML-R's own loader is in the game folder. It may run these mods itself, so Kiln's interpreter stands aside.";
+        d.notice = d.reason;
+        return d;
+    }
     const Reference ref = read_reference(in.profile_text);
     if (ref.state == Reference::Absent)
         return refused(KILN_LAUNCH_REASON_PLAN_MISSING, "kiln.json asks for Kiln's interpreter, but " + ref.why +

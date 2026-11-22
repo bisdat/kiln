@@ -5,6 +5,7 @@
 import { Link } from "react-router-dom";
 import { useActiveProfile, useGame } from "../../api/hooks";
 import { EngineStatusList, RestoreVanillaOffer } from "../../components/EngineStatus";
+import { EmlRNotice } from "../../components/EmlRNotice";
 import { Card } from "../../ui";
 import { loaderLine, useFound } from "../profiles/GameFolder";
 import { ProfileFacts } from "../profiles/ProfileLayout";
@@ -21,6 +22,7 @@ export default function EnginesView() {
   return (
     <div className="k-scroll k-stack" style={{ gap: 18, paddingBottom: 20 }}>
       <RestoreVanillaOffer gameId={game.id} />
+      <EmlRNotice found={r} />
       <Card title={t("mods.engines.pluginsTitle")} sub={t("mods.engines.pluginsSub")}>
         <EngineStatusList gameId={game.id} />
       </Card>

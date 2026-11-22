@@ -135,6 +135,7 @@ function Now({ card: c }: { card: SfBackendCard }) {
       {(c.next.envOffNote || c.interpreterRoute === "env-off") && <Banner tone="warn"><span data-testid="sf-backend-env">{t(`${L}.envOff`)}</span></Banner>}
       {c.interpreterRoute === "missing" && <Banner tone="warn"><span data-testid="sf-backend-route">{t(`${L}.route.missing`)}</span></Banner>}
       {c.interpreterRoute === "own-loader" && <Banner tone="warn"><span data-testid="sf-backend-route">{t(`${L}.route.ownLoader`, { file: c.ownLoader ?? "" })}</span></Banner>}
+      {c.interpreterRoute === "eml-r" && <Banner tone="warn"><span data-testid="sf-backend-route">{t("emlRNotice.interpreter")}</span></Banner>}
       {c.last && (
         <span className="k-stack" style={{ gap: 1 }} data-testid="sf-backend-last">
           <span>{t(`${L}.last`, { name: nameOf(t, c.last.backend) })}</span>

@@ -244,6 +244,9 @@ pub fn find_routed(game_dir: &Path, profile: Option<&ProfileView>, route: &crate
         }
         return out;
     }
+    if matches!(route, crate::sfi_routing::Route::Legacy(crate::sfi_routing::Legacy::EmlR(_))) {
+        return out;
+    }
     let plugin = "kiln/plugins/kiln-shroudforge.dll";
     let runtime = game_dir.join("kiln/plugins/shroudforge/shroudforge-runtime.dll").is_file()
         || game_dir.join(crate::shroudforge::RUNTIME_DLL).is_file();
@@ -280,17 +283,22 @@ fn interpreter_carries_eml(game_dir: &Path, p: &ProfileView) -> bool {
     })
 }
 
-/// ShroudForge's own loader that may run in `game_dir`: the first ShroudForge file [`find`] lists (a proxy next to the
-/// game, a `kiln/chain.ini` or `dinput8-chain.ini` line), as find names it; None: none. Reads none of ShroudForge's
-/// own files.
+/// Loader that may run ShroudForge mods in `game_dir`: EML-R's game-folder proxy, or the first ShroudForge file
+/// [`find`] lists (a game-folder proxy, a `kiln/chain.ini` or `dinput8-chain.ini` line). Reads none of ShroudForge's
+/// own files and does not assign any mod kinds to EML-R.
 #[cfg(feature = "sfi-scan")]
-pub(crate) fn shroudforge_loader(game_dir: &Path) -> Option<String> {
-    if let Some(s) = crate::engines::scan_proxies(game_dir).into_iter().find(|s| s.class.kind == ProxyKind::ShroudForge) {
-        return Some(s.name);
+pub(crate) fn interpreter_blocker(game_dir: &Path) -> Option<crate::sfi_routing::OwnLoader> {
+    use crate::sfi_routing::OwnLoader;
+    let proxies = crate::engines::scan_proxies(game_dir);
+    if let Some(s) = proxies.iter().find(|s| s.class.kind == ProxyKind::EmlR && s.name.eq_ignore_ascii_case("dbghelp.dll")) {
+        return Some(OwnLoader::EmlR(s.name.clone()));
+    }
+    if let Some(s) = proxies.into_iter().find(|s| s.class.kind == ProxyKind::ShroudForge) {
+        return Some(OwnLoader::ShroudForge(s.name));
     }
     chained(game_dir).into_iter().chain(emf_chained(game_dir))
         .find(|(_, host)| crate::pe::classify_proxy(host).is_ok_and(|c| c.kind == ProxyKind::ShroudForge))
-        .map(|(file, _)| file)
+        .map(|(file, _)| OwnLoader::ShroudForge(file))
 }
 
 /// The own loader of a kind that decides where its mods are placed (the first found), if any.

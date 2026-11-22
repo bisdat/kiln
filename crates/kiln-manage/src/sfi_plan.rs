@@ -249,7 +249,7 @@ pub enum Outcome {
     },
     /// Kiln's interpreter was asked for and no plan was written: the core refuses that start at boot with its own
     /// reason (every ShroudForge backend stands aside). `code`: interpreter-held, interpreter-off (`KILN_SHROUDFORGE=0`),
-    /// interpreter-missing (no `kiln/plugins/kiln-sfi.dll`), input-unreadable, no-archive-base, plan-invalid or
+    /// interpreter-missing (no `kiln/plugins/kiln-sfi.dll`), eml-r-loader, input-unreadable, no-archive-base, plan-invalid or
     /// write-failed.
     Refused {
         code: &'static str,
@@ -310,6 +310,16 @@ pub fn produce_resolved(
     resolution: Resolution,
     write: &mut PlanWriter<'_>,
 ) -> Outcome {
+    let route = crate::sfi_routing::route_from(req.game, &resolution);
+    produce_routed(req, resolution, &route, write)
+}
+
+pub(crate) fn produce_routed(
+    req: Request<'_>,
+    resolution: Resolution,
+    route: &crate::sfi_routing::Route,
+    write: &mut PlanWriter<'_>,
+) -> Outcome {
     if resolution.selected != Some(Backend::Kiln) {
         if resolution.requested == Some(Backend::Kiln) {
             let reason = format!(
@@ -323,6 +333,9 @@ pub fn produce_resolved(
             };
         }
         return Outcome::NotKiln { resolution };
+    }
+    if matches!(route, crate::sfi_routing::Route::Legacy(crate::sfi_routing::Legacy::EmlR(_))) {
+        return eml_r_blocked(resolution);
     }
     if resolution.env_off_note.is_some() {
         return interpreter_off(resolution);
@@ -386,6 +399,16 @@ pub fn produce_resolved(
         }
     }
     refused("write-failed", last)
+}
+
+pub(crate) const EML_R_LOADER_CODE: &str = "eml-r-loader";
+
+pub(crate) fn eml_r_blocked(resolution: Resolution) -> Outcome {
+    Outcome::Refused {
+        code: EML_R_LOADER_CODE,
+        reason: crate::sfi_routing::EML_R_BLOCK_REASON.into(),
+        resolution,
+    }
 }
 
 /// The refusal of a start `KILN_SHROUDFORGE=0` stands Kiln's interpreter aside for (`interpreter-off`).

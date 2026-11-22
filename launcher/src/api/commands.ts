@@ -451,7 +451,7 @@ export interface BundlePart {
 }
 export type ProxyKind = "none" | "kiln" | "shroudforge" | "emf" | "unknown" | "notdll"
   // other engines' loaders and tools under a proxy name (kiln_manage::engines)
-  | "eml" | "set" | "enshwick" | "greeneye" | "shroudtopia" | "flame" | "shroudlink" | "ember" | "dllmod" | "modloaderproxy"
+  | "eml" | "eml-r" | "set" | "enshwick" | "greeneye" | "shroudtopia" | "flame" | "shroudlink" | "ember" | "dllmod" | "modloaderproxy"
   | "ultimateasiloader" | "aldrich" | "livemap" | "sharedxp" | "reshade" | "chainloader" | "nativefolders" | "optiscaler";
 export interface ProxyClass {
   kind: ProxyKind;
@@ -783,7 +783,7 @@ export type DetectKind = "kiln" | "native" | "plugin" | "emf" | "modpack" | "run
   | "eml" | "xhl" | "shroudforge" | "set" | "enshwick" | "greeneye" | "shroudtopia" | "flame" | "shroudlink" | "ember" | "dllmod"
   | "proxy" | "data" | "save" | "reshade" | "cheat-table" | "asi";
 /** kiln_manage::engines::Engine */
-export type EngineId = "kiln" | "emf" | "shroudforge" | "eml" | "set" | "enshwick" | "greeneye" | "shroudtopia" | "flame"
+export type EngineId = "kiln" | "emf" | "shroudforge" | "eml" | "eml-r" | "set" | "enshwick" | "greeneye" | "shroudtopia" | "flame"
   | "shroudlink" | "ember" | "dllmod" | "mod-loader-proxy" | "ultimate-asi-loader" | "aldrich" | "live-map" | "shared-xp" | "reshade"
   | "chain-loader" | "native-folders" | "optiscaler";
 export interface Detected {
@@ -2084,7 +2084,7 @@ export interface SfBackendCard {
   /** Why Kiln's interpreter cannot be chosen now; absent: it can. */
   interpreterHeld?: string;
   /** With kiln selected for the next start: what it meets in the game folder. */
-  interpreterRoute?: "ready" | "env-off" | "missing" | "own-loader";
+  interpreterRoute?: "ready" | "env-off" | "missing" | "own-loader" | "eml-r";
   ownLoader?: string;
   /** kiln.json cannot be read: why (nothing is written until it is fixed). */
   unreadable?: string;

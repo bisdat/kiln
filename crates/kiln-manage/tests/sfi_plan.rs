@@ -1941,6 +1941,23 @@ fn no_plan_for_an_interpreter_that_cannot_run() {
     assert_eq!(refused(o).0, "interpreter-off");
 }
 
+#[test]
+fn eml_r_blocks_the_interpreter_before_inspecting_or_writing_a_plan() {
+    let g = kiln_game("eml-r", KILN);
+    let fake = Fake::new(&first_managed());
+    let dll = kiln_manage::pe::build_test_dll(&["MiniDumpWriteDump"], b"shroudforge eml_r.dll");
+    fs::write(g.0.join("dbghelp.dll"), dll).unwrap();
+
+    let card = sfi_backend::card(&g.0, RunSide::Client, &Env::default()).unwrap();
+    assert_eq!(card.interpreter_route, Some(sfi_backend::InterpreterRoute::EmlR));
+    assert_eq!(card.own_loader.as_deref(), Some("dbghelp.dll"));
+    let (code, reason) = refused(produce(&g, &fake));
+    assert_eq!(code, "eml-r-loader");
+    assert_eq!(reason, kiln_manage::sfi_routing::EML_R_BLOCK_REASON);
+    assert_eq!(fake.calls.get(), 0);
+    assert!(plan_files(&g).is_empty());
+}
+
 fn kind(o: &Outcome) -> &'static str {
     match o {
         Outcome::NotKiln { .. } => "not-kiln",
