@@ -99,6 +99,16 @@ export default function DeckEditor() {
 
   return (
     <EditorEnv.Provider value={env}>
+      {/* Keep the additional actions compact: an overflowing hint row widens the Deck grid and focus can then
+          scroll a pointer target between press and release. These rules touch only the four history controls. */}
+      <style>{`
+        .dke-buttons [data-deck-id="ed-undo"], .dke-buttons [data-deck-id="ed-redo"] {
+          width: 3.25rem; padding: 0; display: grid; place-items: center;
+        }
+        .deck-hints [data-hint="ls"], .deck-hints [data-hint="rs"] {
+          padding: 0 .25rem; gap: .25rem; font-size: 1rem;
+        }
+      `}</style>
       <GameArtAuto only="editor" />
       <Screen name="editor" className="deck-editor" actions={actions} back={back?.run} backLabel={back?.label}>
         <div ref={root} className="kiln-editor-deck">
@@ -113,9 +123,9 @@ export default function DeckEditor() {
               <DeckButton id="ed-characters" disabled={saving || restoring} a={t('editor.page.open')} onClick={() => setDialog('characters')}>{t('editor.page.characters')}</DeckButton>
               <DeckButton id="ed-backups" a={t('editor.page.open')} disabled={!model || blocked} onClick={() => setDialog('backups')}>{t('editor.page.backups')}</DeckButton>
               {dirty && <DeckButton id="ed-discard" disabled={blocked} onClick={() => setDialog('discard')}>{t('editor.page.discard')}</DeckButton>}
-              <DeckButton id="ed-save" primary disabled={!canSave(s)} onClick={() => void save()}>{saving ? t('editor.page.saving') : t('editor.page.save')}</DeckButton>
               <DeckButton id="ed-undo" aria-label={t('editor.page.history.undo')} a={t('editor.page.history.undo')} disabled={!canUndo(s)} onClick={undo}><span title={historyTitle(s, 'undo')}><Undo2 size={22} aria-hidden="true" /></span></DeckButton>
               <DeckButton id="ed-redo" aria-label={t('editor.page.history.redo')} a={t('editor.page.history.redo')} disabled={!canRedo(s)} onClick={redo}><span title={historyTitle(s, 'redo')}><Redo2 size={22} aria-hidden="true" /></span></DeckButton>
+              <DeckButton id="ed-save" primary disabled={!canSave(s)} onClick={() => void save()}>{saving ? t('editor.page.saving') : t('editor.page.save')}</DeckButton>
             </div>
           </header>
           {(status || art.hint) && (

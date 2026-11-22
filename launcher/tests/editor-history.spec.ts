@@ -45,6 +45,25 @@ for (const deck of [false, true]) test(`${deck ? "Deck" : "desktop"} undo/redo c
   }
 });
 
+test("Deck history controls stay contained while focus and dirty state change", async ({ page }) => {
+  await open(page, true); await edit(page);
+  const undo = page.locator('[data-deck-id="ed-undo"]'), redo = page.locator('[data-deck-id="ed-redo"]');
+  const contained = async () => {
+    const controls = page.locator('[data-deck-id="ed-undo"], [data-deck-id="ed-redo"], .deck-hints [data-hint="ls"], .deck-hints [data-hint="rs"]');
+    await expect(controls).toHaveCount(4);
+    for (const control of await controls.all()) {
+      const box = (await control.boundingBox())!;
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+    }
+  };
+  await contained();
+  await undo.focus(); await contained();
+  await undo.click(); expect(await count(page)).toBe(120);
+  await redo.focus(); await contained();
+  await redo.click(); expect(await count(page)).toBe(121);
+});
+
 test("edit then undo serializes original bytes; saved checkpoints track undo/redo and discard", async ({ page }) => {
   await open(page);
   const result = await session(page, async () => {
@@ -143,8 +162,8 @@ for (const deck of [false, true]) test(`${deck ? "Deck" : "desktop"} history but
   await page.goto(deck ? "/?ui=deck#/deck/editor" : "/#/editor");
   await expect(page.locator(deck ? '.dke-name' : '.k-page-title')).toContainText('Aldric');
   await edit(page); // The dirty toolbar also shows Discard: test its widest state.
-  const controls = page.locator(deck ? '[data-deck-id="ed-undo"], [data-deck-id="ed-redo"]' : '[data-testid="editor-undo"], [data-testid="editor-redo"]');
-  await expect(controls).toHaveCount(2);
+  const controls = page.locator(deck ? '[data-deck-id="ed-undo"], [data-deck-id="ed-redo"], .deck-hints [data-hint="ls"], .deck-hints [data-hint="rs"]' : '[data-testid="editor-undo"], [data-testid="editor-redo"]');
+  await expect(controls).toHaveCount(deck ? 4 : 2);
   await expect(controls.first()).toBeVisible();
   for (const control of await controls.all()) {
     const box = (await control.boundingBox())!;
