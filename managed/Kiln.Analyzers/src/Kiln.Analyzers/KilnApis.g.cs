@@ -955,6 +955,7 @@ internal static partial class KilnApis
         "Systems",
         "Terrain",
         "Time",
+        "Tools",
         "Ui",
         "Vfx",
         "World",
