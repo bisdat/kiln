@@ -54,6 +54,7 @@ available is generated from a boot's `capabilities.json`: [../status.generated.m
 | [tasks.md](tasks.md) | kiln.tasks: Kiln-owned worker threads for off-tick work (`submit`/`cancel`/`status`/`release`/`drain_owner`), states, quiescence, AFTER_STEP sessions, exit and the `tasks.pool` capability |
 | [terrain-tool-carving.md](terrain-tool-carving.md) | Terrain-tool removal: per-tool material filters, terrain-only carving and native mining yields (since 0.2.0-dev.30.5) |
 | [time.md](time.md) | kiln.time: time of day and weather |
+| [tool-actions.md](tool-actions.md) | kiln.tools: declarative terrain actions, native authority checks, capabilities and resident lifecycle (since 0.2.0-dev.30.5) |
 | [tool-payment.md](tool-payment.md) | Terrain-tool placement: pool-item costs, normal building supplies and exact native undo refunds (since 0.2.0-dev.30.5) |
 | [types.md](types.md) | kiln.types: the game's types, systems, events and components by name |
 | [vfx-cook.md](vfx-cook.md) | VFX blocks: the builder |
