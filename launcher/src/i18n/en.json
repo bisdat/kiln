@@ -1309,7 +1309,8 @@
       "quitTitle": "Quit Kiln?",
       "quit": "Quit",
       "unsavedNamed": "Your changes to {name} in the save editor are not saved.",
-      "unsaved": "Your changes to the character in the save editor are not saved."
+      "unsaved": "Your changes to the character in the save editor are not saved.",
+      "busy": "The save editor is writing a save right now. Wait until it is done before you quit."
     },
     "dataFolder": {
       "title": "Data folder",
@@ -4141,6 +4142,16 @@
       "content": "Kiln could not build the NPCs and quests of the mods, so no world was loaded.",
       "reasonNames": "{reason} ({names})",
       "review": "Review these mods"
+    },
+    "closeGuard": {
+      "title": "Close Kiln?",
+      "busy": "The save editor is writing a save right now. Wait until it is done before you close Kiln.",
+      "studio": "Pack Studio has unsaved changes. Closing Kiln now throws them away.",
+      "editor": "An editor has unsaved changes. Closing Kiln now throws them away.",
+      "saveEditor": "Your changes to the character in the save editor are not saved. Closing Kiln now throws them away.",
+      "saveEditorNamed": "Your changes to {name} in the save editor are not saved. Closing Kiln now throws them away.",
+      "close": "Close anyway",
+      "stay": "Keep Kiln open"
     },
     "updateNotice": {
       "updated": "Updated",
