@@ -50,6 +50,7 @@ pub mod kiln_steamguard;
 pub mod kiln_surfaces;
 pub mod kiln_tasks;
 pub mod kiln_time;
+pub mod kiln_tools;
 pub mod kiln_toolwear;
 pub mod kiln_types;
 pub mod kiln_ui;

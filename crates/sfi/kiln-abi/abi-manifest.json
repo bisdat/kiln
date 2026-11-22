@@ -5917,6 +5917,77 @@
       },
       "sha256": "31ec32f36ce6fc7e33ff0ede5931f1aa9f5d6490e19cad430fb816dae5037c23"
     },
+    "native/core/abi/services/kiln_tools.h": {
+      "function_macros": [],
+      "inline_helpers": [],
+      "layouts": {
+        "KilnToolActionCommand": {
+          "align": 4,
+          "fields": {
+            "kind": 4,
+            "size": 0
+          },
+          "size": 8
+        },
+        "KilnToolActionContext": {
+          "align": 8,
+          "fields": {
+            "action": 4,
+            "actor": 24,
+            "brush": 32,
+            "hit": 48,
+            "invocation": 16,
+            "radius": 72,
+            "reserved": 44,
+            "selected_item": 36,
+            "selected_material": 40,
+            "session": 8,
+            "size": 0,
+            "tool": 28
+          },
+          "size": 80
+        },
+        "KilnToolActionDef": {
+          "align": 8,
+          "fields": {
+            "action": 8,
+            "flags": 12,
+            "handler": 24,
+            "program": 16,
+            "sequence": 20,
+            "size": 0,
+            "tool": 4,
+            "user": 32
+          },
+          "size": 40
+        },
+        "KilnToolsApi": {
+          "align": 8,
+          "fields": {
+            "header": 0,
+            "register_action": 16,
+            "status": 8,
+            "unregister_action": 24
+          },
+          "size": 32
+        },
+        "KilnToolsStatus": {
+          "align": 8,
+          "fields": {
+            "actions": 4,
+            "dispatched": 16,
+            "reason": 8,
+            "refused": 24,
+            "registrations": 12,
+            "reserved": 6,
+            "session": 5,
+            "size": 0
+          },
+          "size": 32
+        }
+      },
+      "sha256": "87d01b5317ebb5bb2f665a0883900224b3d7b2bd74c15e7135a8f8ea0921236e"
+    },
     "native/core/abi/services/kiln_toolwear.h": {
       "function_macros": [],
       "inline_helpers": [],
@@ -8191,7 +8262,7 @@
   },
   "outputs": {
     "src/bindings.rs": "134028a6a9914076cab3f71f98d356141d4fe36c4d7f51bac6a11819501ed935",
-    "src/layout.rs": "9d15338c47c4162c8966282314527ade65d198abd83ac6e0dead1ed123e893cb",
+    "src/layout.rs": "cc058d3f56d8a9f53235ef69c4846f6cf1f95b1d387fea16c10acd454ff5deb8",
     "src/services/kiln_abilities.rs": "06a43042e5c96d6261a17b02eab35463b07a8ad83f63b2bb168bca5ff34e582e",
     "src/services/kiln_assets.rs": "e7fe4eb1c4d53ad31eeaf05be06f41c551a49362ad5bd4174465ec18a03effe0",
     "src/services/kiln_assets_vfx.rs": "90ed8ce5ad512bbf4f002db3277bc3b439d648ca437a58d4477eac4ce46c3b81",
@@ -8242,6 +8313,7 @@
     "src/services/kiln_surfaces.rs": "d4d991aef0a14f4be7246227b95a0f34161ca23fe04561e9c94d6d2aba0db4a0",
     "src/services/kiln_tasks.rs": "da41943b4ac01aaa77cfb43091e8c209f0e55707c3a3105dd9070313750a6f79",
     "src/services/kiln_time.rs": "879eaed84cd42ab057cc5c6aa452aef7e0d6636205431e9ef54d1daf8dd4bf93",
+    "src/services/kiln_tools.rs": "2ab087990abf5b6956245b5da73942985c6882e1b427b6c21f88f2299e56c500",
     "src/services/kiln_toolwear.rs": "bfb7c79cc8ddea86236700983a4deac4d08826a8f4d3ac5648c2fc9e346dcbcb",
     "src/services/kiln_types.rs": "e6eaf5e97d0c284ec9fb98e78e9b2d3c1fb129d0cac1a899009730e2641942eb",
     "src/services/kiln_ui.rs": "4db7e7f14a1ec7cdef1281a947b4abfa968686f070696e45c9a2f0a3a1127e09",
@@ -8252,7 +8324,7 @@
     "src/services/kiln_world.rs": "3cb0272179db9c198f154ce6c008837e4bb95245a2ec62993be78879c4b330b8",
     "src/services/kiln_world_budget.rs": "b196426492d0525df1317c08e4927f3f3ff35817990bed8f2b58c02d174bab98",
     "src/services/kiln_worldtables.rs": "3d423bb8cfd5235f82230a1942bbc334d86b55d343e5e5880c671a57d1469fce",
-    "src/services/mod.rs": "1fa8af1236f86f1321a3ceb34890637fa1908a18d38b1872ec7137be815dbfa8"
+    "src/services/mod.rs": "64104ad2870f9f38679bc8c312d5f83f6834d7f58d98c866c40dd8532e37f1f6"
   },
   "schema": 1,
   "target": "x86_64-pc-windows-msvc"
