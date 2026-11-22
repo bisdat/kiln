@@ -108,6 +108,7 @@ struct Shape {
     std::string material_pool;
     Guid pool;
     std::set<std::string> dependencies;
+    bool terrain_brush = false;          // raw fill bytes rather than building-shape bits
 };
 
 // A crafting prop of a mod (PropBlock.Provides): a place in the game's table of props a recipe can ask to stand near (WorkshopRegistryResource.craftingProps), kiln.worldtables'
@@ -122,15 +123,21 @@ struct CraftingProp {
     int index = -1;                 // its place in the game's mask of props, once allocated
 };
 
-struct PoolEntry { std::string material, game_material; };
+struct PoolEntry {
+    std::string material, game_material;
+    // Tool pools alone: the item that places this terrain cell, and its authoritative placement rate.
+    std::string item;
+    uint32_t terrain_material = 0, voxels_per_item = 0;
+};
 struct PoolDefinition {
     std::string mod, block, definition;
     Guid guid;
     bool roof = false, valid = true;
     std::vector<PoolEntry> entries;
     std::set<std::string> dependencies;
+    bool tool = false;
 };
-struct PoolGameMaterial { uint32_t item = 0; bool roof = false; bool ambiguous = false; };
+struct PoolGameMaterial { uint32_t item = 0; bool roof = false; bool ambiguous = false; int cell = -1; };
 // An item of the game that places a voxel material (its voxel reference is set): its debug name, its ItemId and the
 // cell it places (building cells 128..255).
 struct GameBlockItem { std::string debug_name; uint32_t item_id = 0; int cell = -1; };
@@ -234,7 +241,9 @@ struct MaterialPool {
     Guid guid;
     std::string name;  // canonical mod:key, never the localized display name
     bool roof = false;
-    std::vector<uint32_t> items;  // declared UI order, 1..64 distinct nonzero building item ids
+    std::vector<uint32_t> items;  // declared UI order, 1..64 distinct nonzero item ids
+    bool tool = false;           // a terrain-only tool pool, never a building material pool
+    std::vector<uint32_t> terrain_materials, voxels_per_item; // tool entries in the same order
 };
 std::string handshake_hash(const std::vector<Placed>& placed, const std::vector<CraftingProp>& props,
                            const std::vector<MaterialPool>& pools, const std::vector<Shape>& shapes);
@@ -249,7 +258,7 @@ struct PoolResolution {
 // What a pool entry's "gameMaterial" names: a game building material (the material_name of the item that places it)
 // -> that block item, with the material's roof flag from its registry config.
 std::map<std::string, PoolGameMaterial> pool_game_materials(const std::vector<GameBlockItem>& items, const Bytes& registry,
-                                                              const RegistryInfo& info, const Layouts& L);
+                                                              const RegistryInfo& info, const Layouts& L, bool include_tools = false);
 PoolResolution resolve_pools(const std::vector<PoolDefinition>& definitions, const std::vector<Material>& materials,
                              const std::map<std::string, PoolGameMaterial>& game);
 void bind_shape_pools(std::vector<Shape>* shapes, const std::vector<PoolDefinition>& definitions,

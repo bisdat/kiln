@@ -728,7 +728,7 @@ void go_off(const std::string& why) {
 // Only a custom pool needs this catalog. A first late definition builds it lazily.
 void read_pool_catalog(const Bytes& registry,const RegistryInfo& info) {
     read_names();
-    g_game_pool_materials=pool_game_materials(g_names.blocks,registry,info,g_layouts);
+    g_game_pool_materials=pool_game_materials(g_names.blocks,registry,info,g_layouts,true);
     g_game_pool_materials_read=true;
 }
 bool ensure_pool_catalog() {
@@ -1557,22 +1557,22 @@ KilnResult KILN_CALL t_define(KilnStr json, char* report, size_t cap, size_t* ou
                     rc=KILN_ERR_INTERNAL;continue;
                 }
                 g_defined.insert(mf.mod+"/@pool/"+p.block);
-                blocks.push_back({{"name",p.block},{"kind","buildingMaterialPool"},{"guid",p.guid.text()},{"status",identical?"registered":"pending"}});
+                blocks.push_back({{"name",p.block},{"kind",p.tool?"toolMaterialPool":"buildingMaterialPool"},{"guid",p.guid.text()},{"status",identical?"registered":"pending"}});
             }
             for (const Shape& sh : mf.shapes) {
                 ojson b = ojson::object();
                 b["name"] = sh.block;
-                b["kind"] = "blueprint";
+                b["kind"] = sh.terrain_brush ? "terrainBrush" : "blueprint";
                 b["item"] = sh.item.text();
                 const auto it = g_boot_definitions.find(mf.mod + "/b/" + sh.block);
                 const bool in = std::any_of(g_shapes_in.begin(), g_shapes_in.end(), [&](const Shape& x) { return x.mod == mf.mod && x.block == sh.block; });
                 if (!usable) b["status"] = off;
                 else if (it != g_boot_definitions.end() && it->second == sh.definition && in) {
                     b["status"] = "registered";
-                    if (g_from_code.count(mf.mod + "/" + sh.block)) keep_block("blueprints", sh.block);
+                    if (g_from_code.count(mf.mod + "/" + sh.block)) keep_block(sh.terrain_brush ? "toolBrushShapes" : "blueprints", sh.block);
                 } else {
                     b["status"] = "pending";
-                    keep_block("blueprints", sh.block);
+                    keep_block(sh.terrain_brush ? "toolBrushShapes" : "blueprints", sh.block);
                 }
                 for (const std::string& r : g_refused)
                     if (r.find("block blueprint " + sh.block + " (mod " + mf.mod + ")") == 0) errors.push_back(r);
