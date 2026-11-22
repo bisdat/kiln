@@ -23,6 +23,7 @@
 #include "content.h"
 #include "menulayout.h"  // kiln.stationmenus (registered next to kiln.content)
 #include "registry/stage.h"
+#include "registry_live.h"
 #include "refs.h"
 #if KC_GAMEDATA
 #include "gamedata.h"
