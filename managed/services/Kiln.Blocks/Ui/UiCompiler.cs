@@ -313,7 +313,7 @@ internal static class UiCompile
         if (a.ApplyEffect is { } effect) return ApplyEffect(ctx, low, owner, effect, $"{path}.applyEffect");
         if (a.OpenWindow is { } open) return WindowAction(ctx, low, open, true, $"{path}.openWindow");
         if (a.CloseWindow is { } close) return WindowAction(ctx, low, close, false, $"{path}.closeWindow");
-        if (a.ToggleWindow is { } toggle) return (WindowActionPlan)WindowAction(ctx, low, toggle, true, $"{path}.toggleWindow") with { Toggle = true };
+        if (a.ToggleWindow is { } either) return (WindowActionPlan)WindowAction(ctx, low, either, true, $"{path}.toggleWindow") with { Toggle = true };
         var toast = Line(ctx, a.Toast, $"{path}.toast", templated: false, required: true, "a toast");
         return new ToastPlan(toast.Text);
     }
