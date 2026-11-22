@@ -407,7 +407,11 @@ void post_event(uint32_t kind, const Req* r, const KilnSurvivorState& before, co
 }
 
 // The terminal result. after: a readback when the world is alive (after_known), else the last confirmed state.
+uint64_t g_bed_owner = 0;  // the bed request holding the one-at-a-time slot until its end (tick thread; review S2)
+void release_bed_slot(uint64_t id);
+
 void finish(Req& r, uint32_t status, const std::string& reason, bool world_alive = true) {
+    release_bed_slot(r.id);
     KilnSurvivorResult res{};
     res.size = sizeof res;
     res.status = status;
@@ -710,6 +714,13 @@ struct BedOp {
 };
 std::mutex g_op_mu;
 std::unique_ptr<BedOp> g_op;  // under g_op_mu
+// A request that ends frees the bed slot and drops its write if the program has not taken it yet.
+void release_bed_slot(uint64_t id) {
+    if (g_bed_owner != id) return;
+    g_bed_owner = 0;
+    std::lock_guard lock(g_op_mu);
+    if (g_op && g_op->req == id) g_op.reset();
+}
 KilnHandle g_prog = 0;
 int g_slot_common = -1, g_slot_bed = -1;
 std::atomic<bool> g_tpl_warned{false};
@@ -789,9 +800,12 @@ void register_program() {
 }
 
 void take_bed(Req& r) {
+    // one bed request at a time, from its take until its readback ended (review S2): a later write would otherwise land
+    // before this one's readback. Waiting counts against the request's queue limit.
+    if (g_bed_owner && g_bed_owner != r.id) return;
     {
         std::lock_guard lock(g_op_mu);
-        if (g_op) return;  // one bed write at a time: wait (the queue limit applies)
+        if (g_op) return;
     }
     if (!roster_find(r.in.npc_id, &r.roster)) return finish(r, KILN_SURV_REFUSED, "NotARosterNpc: no roster entry has this NpcId");
     g_ent_step = ~0ull;
@@ -890,6 +904,7 @@ void take_bed(Req& r) {
         std::lock_guard lock(g_op_mu);
         g_op = std::move(op);
     }
+    g_bed_owner = r.id;
     r.state = KILN_SURV_APPLYING;
     r.waiting = "the bed program's write";
     r.in_flight = 1;
@@ -1082,6 +1097,7 @@ void KILN_CALL on_world(const KilnWorldEvent* e, void*) {
         if (p->stage >= 0) finish(*p, KILN_SURV_WORLD_ENDED, "WorldEnded: the world stopped", false);
     g_active.clear();
     g_seen.clear();
+    g_bed_owner = 0;
     g_observed_once = false;
     g_observe_from = 0;
     g_ent_step = ~0ull;
