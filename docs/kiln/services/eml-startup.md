@@ -153,6 +153,19 @@ same value as the JSON's `archiveSha256`; `registry_id` / `registry_sha256` from
 - **State file**: kiln/state/eml.json lists one row per package of the pass (`source: "shroudforge"`), the
   unlisted EML contributors (skipped in the ShroudForge and EML dialects; the EML pass's own in a start without a
   dialect), and every other package with the plan's reason.
+- **Progress** (dev.30.5): while the pass runs, the state file says `phase: "running"` with `progress.stage`
+  `startup` and its step: `checking` (the wait for kiln-sfi's terminal, the witness checked again, admission, the
+  startup cache), `mods` (the packages' startup code), `verify` (the stage closed, flushed and checked), `write` (the
+  publication), `save` (the change journal and the startup cache), with `stepNumber` and `steps` (5) and the bytes of
+  the game's files read or written in the step. The launcher's start bar shows it ("Preparing ShroudForge mods for
+  Kiln's interpreter: checking the prepared game data (3 of 5)"); kiln.log gets a line every 10 s while a step moves
+  bytes, a warning naming any flush to the drive that took two seconds or more, and one line with what the pass and each
+  step took. A start the startup cache serves ends after `checking`. No thread is started for it (see below).
+- **What a publication reads**: the check of the prepared stage reads back and hashes every content of the stage's own
+  containers and decodes every resource; the game's own containers are not read again (the baseline index lists those
+  contents at the same place, and the input witness holds the files). On a client the pass of a small package reads
+  about ten times the resource file (around 2 GiB: the staging copy, the stage's digests, the compare with the resource
+  backup), not the 48 GiB of containers it read before dev.30.5.
 - **Threads and the loader lock**: kiln-sfi may call `witness_recheck` and `native_terminal` from its deadline thread
   while a package's DllMain holds the loader lock. No member loads a library, resolves a symbol, starts or joins a thread,
   logs or initializes a lazy static that could; the barrier's wait is a `Condvar` wait. Wine's loader takes the loader

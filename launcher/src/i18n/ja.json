@@ -3573,7 +3573,15 @@
       "now": "現在",
       "notNeeded": "不要",
       "directSlow": "ゲームはまだ起動中です。初めての直接起動ではプレフィックスを作るため、数分かかることがあります。",
-      "directSlowShort": "プレフィックスを準備中"
+      "directSlowShort": "プレフィックスを準備中",
+      "sfStartup": "Kiln のインタープリター用に ShroudForge のモッドを準備しています。",
+      "sfStartupStep": "Kiln のインタープリター用に ShroudForge のモッドを準備しています: {step}（{total} 中 {n}）",
+      "sfStartupStepOnly": "Kiln のインタープリター用に ShroudForge のモッドを準備しています: {step}",
+      "sfStepChecking": "ゲームファイルを確認中",
+      "sfStepMods": "モッドを実行中",
+      "sfStepVerify": "準備したゲームデータを確認中",
+      "sfStepWrite": "ゲームデータを書き込み中",
+      "sfStepSave": "結果を保存中"
     },
     "appShell": {
       "headStart": "{progress} · {step}",

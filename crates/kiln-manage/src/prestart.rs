@@ -2,7 +2,8 @@
 //! game's data files at the very start of the process, which can take a while, and says what it is doing in
 //! `kiln/state/eml.json` (`phase: "running"` and a `progress` object, rewritten a few times a second and at least once a
 //! second; docs/kiln/eml.md "Reading the game data"). This reads it for the Play page's launch status: "Preparing the
-//! game data for EML mods: 12.3 of 48.6 GiB."
+//! game data for EML mods: 12.3 of 48.6 GiB." A kiln-mode start's startup pass (stage `startup`) says its step instead:
+//! "Preparing ShroudForge mods for Kiln's interpreter: checking the prepared game data (3 of 5)."
 //!
 //! A `running` file that is not of the game that runs now (the game crashed or was killed mid-run, or the file is from an
 //! earlier start) says nothing: it counts only while the game's process runs, the file was written after that process
@@ -25,7 +26,7 @@ const QUIET: u64 = 15_000;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PreStart {
-    /// `starting`, `checking`, `prepare`, `mods`, `writing`, `saving`.
+    /// `starting`, `checking`, `prepare`, `mods`, `writing`, `saving`; `startup` for a kiln-mode start's startup pass.
     pub stage: String,
     /// The stage for a person ("Checking the game data").
     pub label: String,
@@ -37,6 +38,10 @@ pub struct PreStart {
     pub file: Option<String>,
     /// Milliseconds since a byte was last read (while a file is being read).
     pub quiet_ms: u64,
+    /// Stage `startup`: the step (`checking`, `mods`, `verify`, `write`, `save`), its number and how many there are.
+    pub step: Option<String>,
+    pub step_number: u64,
+    pub steps: u64,
     /// The sentence for the launch status.
     pub message: String,
 }
@@ -68,6 +73,24 @@ struct Progress {
     file: Option<String>,
     #[serde(default)]
     quiet_ms: u64,
+    #[serde(default)]
+    step: Option<String>,
+    #[serde(default)]
+    step_number: u64,
+    #[serde(default)]
+    steps: u64,
+}
+
+/// A kiln-mode startup pass's step for a person (`kiln-eml` progress.rs `PassStep::label`).
+fn step_label(step: &str) -> Option<&'static str> {
+    Some(match step {
+        "checking" => "checking the game files",
+        "mods" => "running the mods",
+        "verify" => "checking the prepared game data",
+        "write" => "writing the game data",
+        "save" => "saving the result",
+        _ => return None,
+    })
 }
 
 /// `12.3 GiB`, `312 B`.
@@ -83,6 +106,14 @@ fn size(bytes: u64) -> String {
 }
 
 fn message(p: &Progress) -> String {
+    if p.stage == "startup" {
+        let head = "Preparing ShroudForge mods for Kiln's interpreter";
+        return match p.step.as_deref().and_then(step_label) {
+            Some(label) if p.step_number > 0 && p.steps >= p.step_number => format!("{head}: {label} ({} of {}).", p.step_number, p.steps),
+            Some(label) => format!("{head}: {label}."),
+            None => format!("{head}."),
+        };
+    }
     let head = "Preparing the game data for EML mods";
     let mut text = match p.stage.as_str() {
         "checking" if p.total_bytes > 0 => format!(
@@ -120,6 +151,9 @@ pub fn parse(text: &str) -> Option<PreStart> {
         files_total: p.files_total,
         file: p.file,
         quiet_ms: p.quiet_ms,
+        step: p.step,
+        step_number: p.step_number,
+        steps: p.steps,
     })
 }
 
@@ -189,6 +223,24 @@ mod tests {
         let p = parse(&text).expect("a running state");
         assert_eq!((p.stage.as_str(), p.done_bytes, p.total_bytes, p.files_total), ("checking", 13_194_139_533, 52_183_056_384, 55));
         assert!(p.message.starts_with("Preparing the game data for EML mods: 12.3 GiB of 48.6 GiB."), "{}", p.message);
+    }
+
+    #[test]
+    fn a_kiln_mode_startup_pass_says_its_step() {
+        let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../schema/examples/state-eml-startup.json")).unwrap();
+        let p = parse(&text).unwrap();
+        assert_eq!(p.message, "Preparing ShroudForge mods for Kiln's interpreter: checking the prepared game data (3 of 5).");
+        assert_eq!((p.stage.as_str(), p.step.as_deref(), p.step_number, p.steps), ("startup", Some("verify"), 3, 5));
+        for (step, words) in [("checking", "checking the game files"), ("mods", "running the mods"), ("write", "writing the game data"), ("save", "saving the result")] {
+            let p = parse(&text.replace("\"verify\"", &format!("\"{step}\""))).unwrap();
+            assert!(p.message.contains(words), "{step}: {}", p.message);
+        }
+        // a step this launcher does not know, or no numbers: the head alone, or the step without them
+        assert_eq!(parse(&text.replace("\"verify\"", "\"later\"")).unwrap().message, "Preparing ShroudForge mods for Kiln's interpreter.");
+        assert_eq!(parse(&text.replace("\"stepNumber\": 3", "\"stepNumber\": 0")).unwrap().message,
+            "Preparing ShroudForge mods for Kiln's interpreter: checking the prepared game data.");
+        // the EML stages carry no step
+        assert_eq!(parse(&running("mods", 0, 0, 0)).unwrap().step, None);
     }
 
     #[test]

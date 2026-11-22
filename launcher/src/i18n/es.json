@@ -3648,7 +3648,15 @@
       "now": "ahora",
       "notNeeded": "no hace falta",
       "directSlow": "El juego sigue iniciándose: un primer inicio directo crea su prefijo, lo que puede tardar minutos.",
-      "directSlowShort": "Preparando el prefijo"
+      "directSlowShort": "Preparando el prefijo",
+      "sfStartup": "Preparando los mods de ShroudForge para el intérprete de Kiln.",
+      "sfStartupStep": "Preparando los mods de ShroudForge para el intérprete de Kiln: {step} ({n} de {total}).",
+      "sfStartupStepOnly": "Preparando los mods de ShroudForge para el intérprete de Kiln: {step}.",
+      "sfStepChecking": "comprobando los archivos del juego",
+      "sfStepMods": "ejecutando los mods",
+      "sfStepVerify": "comprobando los datos del juego preparados",
+      "sfStepWrite": "escribiendo los datos del juego",
+      "sfStepSave": "guardando el resultado"
     },
     "appShell": {
       "headStart": "{progress} · {step}",

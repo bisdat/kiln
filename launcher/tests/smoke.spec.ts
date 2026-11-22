@@ -206,6 +206,23 @@ test("while kiln-eml prepares the game data the launch status says how far it is
   await expect(page.locator(".k-head-state")).toHaveText("Stopped");
 });
 
+test("while a kiln-mode start prepares its ShroudForge mods the launch status names the step", async ({ page }) => {
+  type M = { __kilnMock: { stopGame: () => void; setPreStart: (p: unknown) => void } };
+  await open(page, "/");
+  await page.evaluate(() => (window as unknown as M).__kilnMock.setPreStart({
+    stage: "startup", label: "Preparing ShroudForge mods for Kiln's interpreter", doneBytes: 470810624, totalBytes: 0, filesDone: 0,
+    filesTotal: 0, quietMs: 0, step: "verify", stepNumber: 3, steps: 5,
+    message: "Preparing ShroudForge mods for Kiln's interpreter: checking the prepared game data (3 of 5).",
+  }));
+  await page.locator(".k-door").click();
+  const hero = page.locator(".k-hero");
+  await expect(hero.getByText("Preparing ShroudForge mods for Kiln's interpreter: checking the prepared game data (3 of 5).")).toBeVisible();
+  await expect(hero.getByText("Waiting for Kiln to boot.")).toHaveCount(0);
+  await page.evaluate(() => (window as unknown as M).__kilnMock.setPreStart(null));
+  await page.evaluate(() => (window as unknown as M).__kilnMock.stopGame());
+  await expect(page.locator(".k-head-state")).toHaveText("Stopped");
+});
+
 test("Without mods when Steam does not load Kiln: No Kiln and the Steam setting, never Starting forever", async ({ page }) => {
   type M = { __kilnMock: { stopGame: () => void; setNoProxy: (on: boolean) => void } };
   await open(page, "/");

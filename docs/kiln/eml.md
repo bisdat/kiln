@@ -426,6 +426,9 @@ Deck saw nothing for minutes and gave up):
 - **The launcher**, when it started the game: the Play page's launch status reads the state file
   (`kiln_manage::prestart`): "Preparing the game data for EML mods: 12.3 GiB of 48.6 GiB. Only the first start after a game
   update takes this long." It counts only while the game runs and the file is fresh, so a start that died leaves nothing behind.
+  A kiln-mode start's startup pass (Kiln's interpreter running ShroudForge mods) writes stage `startup` with its step
+  instead, and the launch status names it: "Preparing ShroudForge mods for Kiln's interpreter: checking the prepared game
+  data (3 of 5)." ([eml-startup.md](services/eml-startup.md), Progress).
 
 #### When a mod cannot be read
 `state/eml.json` and kiln.log give the reason: `entry src/mod.lua: <stage> failed: <OS error>; <what exists>`. Example:

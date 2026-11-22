@@ -21,6 +21,7 @@ import { RuntimeFailure } from "../shell/RuntimeFailure";
 import { isDefaultProfile, useMods } from "../shell/useMods";
 import { MainList } from "./mods/MainList";
 import { StartProgress } from "../shell/StartPanel";
+import { preStartLine } from "../shell/startProgress";
 import { channelNotice } from "../api/channel";
 import { useUpdate } from "../api/update";
 import { rich, t, useT } from "../i18n";
@@ -176,7 +177,7 @@ function PlayFor({ game, ctl, onAdded }: { game: GameInstall; ctl: PlayControl; 
   const on = mods.count.on;
   // a start the runtime ended in safe idle or could not go on with says so, boot.json or not (progress.json's `why`)
   const safeIdle = (why: string | null | undefined) => (why != null ? t("play.run.safeIdle", { why }) : t("play.run.safeIdleOff"));
-  const runLine = v.word === "noWord" ? v.detail ?? "" : prep && !fresh ? prep.message
+  const runLine = v.word === "noWord" ? v.detail ?? "" : prep && !fresh ? preStartLine(prep)
     : v.word === "kilnStopped" ? (ctl.lastTimeline?.why != null ? t("play.run.stopped", { why: ctl.lastTimeline.why }) : t("play.run.stoppedSeeLog"))
     : v.word === "safeIdle" && !fresh ? safeIdle(ctl.lastTimeline?.why) : v.phase === "vanilla" ? t("play.run.vanilla") : ctl.kilnMissing ? (direct ? t("play.run.kilnMissingDirect") : t("play.run.kilnMissing")) : !fresh ? t("play.run.noBootRecord") : boot?.profile?.mode === "no-mods" ? t("play.run.noMods", { version: String(boot?.kiln) })
     : v.word === "safeIdle" ? safeIdle(boot?.safeIdle ?? ctl.lastTimeline?.why) : mods.profile ? t("play.run.withMods", { version: kiln ?? "", count: on }) : t("play.run.with", { version: kiln ?? "" });
@@ -226,7 +227,7 @@ function PlayFor({ game, ctl, onAdded }: { game: GameInstall; ctl: PlayControl; 
           </div>
         ) : starting ? (
           <div className="k-hero-state" key="start">
-            <p className="k-hero-say" role="status">{prep ? prep.message : t("play.waiting")}</p>
+            <p className="k-hero-say" role="status">{prep ? preStartLine(prep) : t("play.waiting")}</p>
             <ol className="k-boot" aria-label={t("play.bootStages")}>
               {stages.map((stage, i) => (
                 <li key={stage.id}>
