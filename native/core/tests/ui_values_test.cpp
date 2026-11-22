@@ -13,6 +13,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "../src/services/ui_values.cpp"

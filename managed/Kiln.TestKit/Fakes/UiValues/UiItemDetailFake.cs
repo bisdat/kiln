@@ -30,10 +30,11 @@ internal sealed unsafe class UiItemDetailFake : IKitFake
     public void Start(KilnHarness harness) { }
     public void BeforeStep(KilnHarness harness, ulong step) { }
     public void End(KilnHarness harness) { }
-    public void AddCoverage(List<CoverageRow> rows) => rows.Add(new CoverageRow("Captured item detail", CoverageKind.RecordingFake,
+    public void AddCoverage(List<CoverageRow> rows) => rows.Add(new CoverageRow("Captured item detail (Since 0.2.0-dev.30.5)", CoverageKind.RecordingFake,
         [UiItemDetailNative.Service, Ui.Values.ItemDetailCapability],
-        "Owned game-panel text/value recordings, exact instance/variant lookup and 64-entry eviction. UiItemDetail.Capture/Clear " +
-        "supply captures and model a world change. Not modelled: game text construction, hooks, fonts or drawing."));
+        "Owned text/stat-float recordings, exact client identity or item+level+rarity lookup, strict UTF-8 byte budgets, worker reads " +
+        "and 64-entry capture-order eviction. UiItemDetail.Capture/Clear supply captures and model a world change. " +
+        "Not modelled: game text construction, native capture failures, session lifecycle, hooks or drawing."));
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int Copy(ulong owner, UiItemDetailNative.Query* q, UiItemDetailNative.Snapshot* output,
@@ -76,27 +77,29 @@ internal sealed unsafe class UiItemDetailFake : IKitFake
 
 public sealed partial class KilnHarness
 {
-    /// <summary>Recordings of the game's item-detail text and values (no game renderer is simulated).</summary>
+    /// <summary>Recordings of the game's item-detail text and values (no game renderer is simulated). Since 0.2.0-dev.30.5.</summary>
     public HarnessUiItemDetail UiItemDetail => new(this);
 }
 
-/// <summary>Explicit game-panel captures for Ui.Values.ItemDetail and UiDraw.ItemDetail. Text and numeric metadata are
-/// supplied by the test, never computed by a pretend game. Clear models leaving the client world.</summary>
+/// <summary>Explicit game-panel captures for Ui.Values.ItemDetail. Text and numeric metadata are
+/// supplied by the test, never computed by a pretend game. Clear models leaving the client world. Since 0.2.0-dev.30.5.</summary>
 public sealed class HarnessUiItemDetail
 {
+    private static readonly Encoding StrictUtf8 = new UTF8Encoding(false, true);
     private readonly KilnHarness _harness;
     internal HarnessUiItemDetail(KilnHarness harness) => _harness = harness;
 
     /// <summary>Records a completed panel (owned copy). Same bounds as native: 64 rows, 4096 UTF-8 bytes per row,
-    /// 32768 total bytes, 64 cached instances/variants. An entity replaces its previous variant.</summary>
+    /// 32768 total bytes, 64 cached instances/variants. An entity replaces its previous variant. Invalid recordings
+    /// throw an argument exception; this fake does not simulate native text-builder failures. Since 0.2.0-dev.30.5.</summary>
     public void Capture(ItemId item, EntityId entity, int level, ItemRarity? rarity, params UiItemDetailLine[] lines)
     {
         ArgumentNullException.ThrowIfNull(lines);
         UiItemDetailBridge.Validate(entity, item, level, rarity);
         if (item.IsNone) throw new ArgumentException("item is required", nameof(item));
         if (lines.Length is 0 or > 64 || lines.Any(l => l is null || l.Text is null || l.Text.Contains('\0') ||
-            Encoding.UTF8.GetByteCount(l.Text) > 4096 || l.Value is { } n && !float.IsFinite(n)) ||
-            lines.Sum(l => Encoding.UTF8.GetByteCount(l.Text)) > 32768) throw new ArgumentException("invalid item-detail recording", nameof(lines));
+            StrictUtf8.GetByteCount(l.Text) > 4096 || l.Value is { } n && !float.IsFinite(n)) ||
+            lines.Sum(l => StrictUtf8.GetByteCount(l.Text)) > 32768) throw new ArgumentException("invalid item-detail recording", nameof(lines));
         var st = KitFakes.State<UiItemDetailFakeState>(_harness);
         lock (st.Lock)
         {
@@ -105,7 +108,7 @@ public sealed class HarnessUiItemDetail
             if (st.Snapshots.Count > 64) st.Snapshots.RemoveAt(64);
         }
     }
-    /// <summary>Forgets every recorded panel, as on a client world change.</summary>
+    /// <summary>Forgets every recorded panel, as on a client world change. Since 0.2.0-dev.30.5.</summary>
     public void Clear()
     {
         var st = KitFakes.State<UiItemDetailFakeState>(_harness);

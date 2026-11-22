@@ -3,6 +3,9 @@
 #![allow(non_camel_case_types, non_snake_case, non_upper_case_globals, unused_imports)]
 use crate::*;
 pub const KILN_UI_ITEM_DETAIL_MAX_LINES: u32 = 64;
+pub const KILN_UI_ITEM_DETAIL_NOT_CAPTURED: u32 = 0;
+pub const KILN_UI_ITEM_DETAIL_NO_SESSION: u32 = 1;
+pub const KILN_UI_ITEM_DETAIL_REJECTED: u32 = 2;
 pub const KILN_UI_ITEM_DETAIL_SERVICE: &[u8] = b"kiln.ui.item_detail\0";
 pub const KILN_UI_ITEM_DETAIL_TEXT_BYTES: u32 = 4096;
 pub const KILN_UI_ITEM_DETAIL_VALUE: u32 = 1;

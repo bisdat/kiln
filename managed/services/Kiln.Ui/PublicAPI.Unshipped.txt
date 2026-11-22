@@ -81,9 +81,4 @@ static Kiln.UiItemDetailResult.operator !=(Kiln.UiItemDetailResult? left, Kiln.U
 static Kiln.UiItemDetailResult.operator ==(Kiln.UiItemDetailResult? left, Kiln.UiItemDetailResult? right) -> bool
 const Kiln.Ui.Values.ItemDetailCapability = "ui.item_detail" -> string!
 static Kiln.Ui.Values.ItemDetail(Kiln.EntityId entity, Kiln.ItemId item = default(Kiln.ItemId), int? level = null, Kiln.ItemRarity? rarity = null) -> Kiln.UiItemDetailResult!
-static Kiln.Ui.Values.ItemDetail(Kiln.ItemId item) -> Kiln.UiItemDetailResult!
-Kiln.UiDraw.ItemDetail(Kiln.ItemId item, float width = 0) -> Kiln.UiItemDetailResult!
-Kiln.UiDraw.ItemDetail(Kiln.EntityId entity, float width = 0) -> Kiln.UiItemDetailResult!
-Kiln.UiDraw.ItemDetail(Kiln.VisibleSlot! slot, float width = 0) -> Kiln.UiItemDetailResult!
-Kiln.UiDraw.ItemDetail(Kiln.InventorySlot! slot, float width = 0) -> Kiln.UiItemDetailResult!
-Kiln.UiDraw.ItemDetail(Kiln.ItemInfo! item, float width = 0) -> Kiln.UiItemDetailResult!
+static Kiln.Ui.Values.ItemDetail(Kiln.ItemId item, int? level = null, Kiln.ItemRarity? rarity = null) -> Kiln.UiItemDetailResult!
