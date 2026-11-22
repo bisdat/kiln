@@ -70,11 +70,12 @@ public static class Crafting
 
     /// <summary>Registers a container for this player, in any base or none. The mod decides which containers the player
     /// may use; the server rechecks the player's own global CanAccessInventories permission and a readable initialized
-    /// container at payment time. It does not enforce base ownership. Player/NPC inventories are refused. Sources pay
+    /// container at payment time. It does not enforce base ownership. Player/NPC inventories and production stations
+    /// are refused; production stations lend their outputs through <see cref="Stations.SetOutputSource"/>. Sources pay
     /// only a shortfall after the bag and crafting base's stock, in one all-or-nothing recipe transaction. Equal-order
     /// sources use registration order; each container is counted once per item. A vanilla client keeps its own counts.</summary>
     /// <returns>A session-only handle. Dispose or unload the registering mod to remove it; re-register after restart.</returns>
-    /// <exception cref="ArgumentException">Invalid player, non-container, or zero item id.</exception>
+    /// <exception cref="ArgumentException">Invalid player, non-container, production station, or zero item id.</exception>
     /// <exception cref="ArgumentOutOfRangeException">Unknown option or more than 65536 filter items.</exception>
     /// <exception cref="InvalidOperationException">Wrong thread, unloading mod, or 4096 registrations already exist.</exception>
     /// <exception cref="KilnUnavailableException">Wrong side, missing native service/payment symbols, offline or no server session.</exception>
@@ -141,7 +142,7 @@ internal static unsafe class CraftingCore
             };
             rc = t->AddSource(owner, &r, &id);
         }
-        if (rc == StationsNative.InvalidArgument) throw new ArgumentException("Crafting.AddSource: player or initialized storage container is invalid (player/NPC inventories are not containers)");
+        if (rc == StationsNative.InvalidArgument) throw new ArgumentException("Crafting.AddSource: player or initialized storage container is invalid (player/NPC inventories are not containers; production stations lend their outputs through Stations.SetOutputSource)");
         if (rc == StationsNative.BufferTooSmall) throw new InvalidOperationException("Crafting.AddSource: 4096 sources are registered already");
         if (rc != StationsNative.Ok || id == 0) throw new KilnUnavailableException(Crafting.SourcesCapability, "Crafting.AddSource: no server session, or native payment/access checks are unavailable");
         return id;

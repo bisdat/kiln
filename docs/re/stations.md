@@ -776,7 +776,10 @@ Factories' own cycles show as `mode0` (about 11 a step in that save). Not run in
 The existing `RecipePaid` adapter also accepts player-bound container registrations. They deliberately skip §8's
 source-base membership rule; they do not skip the game's per-player inventory permission. `source_access` rereads
 `[serverBases+0x10] + (player-1)*0xa0`, requires the id at +0 to match and bit2 of +0x9d (`CanAccessInventories`) to be
-set, then uses `inventory_matches(FIND_CONTAINERS)` (initialized InventorySetup, neither player nor NPC flags). At
+set, then uses `inventory_matches(FIND_CONTAINERS)` (initialized InventorySetup, neither player nor NPC flags) and
+rejects any `FactoryStation` component through the game's guarded `GetComponent`, never kiln.world in the payment hook.
+Registration, counts and payment all enforce this: production stations lend only through #68's output-safe path,
+since `PayMaterial` would otherwise consume queued inputs too. A fault determining the container type fails closed. At
 registration it also captures the existing `players/InfoHandle` result (+4), and every snapshot rejects registrations
 whose login handle changed. A reused player entity slot cannot inherit the previous login's links. The mod chooses
 which containers it authorizes; this right is server-wide, not ownership of a source base.

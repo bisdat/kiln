@@ -848,6 +848,24 @@ bool source_player(void* bases,uint32_t player,uint32_t* session) {
     *session=job.session;return true;
 }
 
+// Linked sources must be ordinary storage: PayMaterial cannot distinguish a production station's queued inputs
+// from its finished outputs. Query the component directly (not kiln.world), including on the payment worker thread.
+struct SourceContainerJob { uint32_t container; bool ok; };
+void source_container_impl(void* p) {
+    auto& j=*static_cast<SourceContainerJob*>(p);
+    const uintptr_t world=items_server_world();
+    if(!world || !E.get_component || !H_FACTORY)return;
+    PtrSize factory{};
+    E.get_component(&factory,world,H_FACTORY,j.container);
+    if(factory.ptr)return;
+    bool container=false;unsigned long fault=0;
+    j.ok=inventory_matches(world,j.container,KILN_ITEMS_FIND_CONTAINERS,&container,&fault) && container;
+}
+bool source_container(uint32_t container) {
+    SourceContainerJob job{container,false};unsigned long fault=0;
+    return guard(&source_container_impl,&job,&fault) && job.ok;
+}
+
 struct SourceAccessJob { void* bases; uint32_t player, container; bool ok; };
 void source_access_impl(void* p) {
     auto& j = *static_cast<SourceAccessJob*>(p);
@@ -856,10 +874,7 @@ void source_access_impl(void* p) {
     if (!infos) return;
     const auto* record = infos + static_cast<size_t>(j.player - 1) * 0xa0;
     if (rd<uint32_t>(record,0) != j.player || !(record[0x9d] & 2)) return;
-    bool container = false;
-    unsigned long fault = 0;
-    if (!inventory_matches(items_server_world(),j.container,KILN_ITEMS_FIND_CONTAINERS,&container,&fault)) return;
-    j.ok = source_identity_ok(j.player,j.container,false,container);
+    j.ok = source_identity_ok(j.player,j.container,false,source_container(j.container));
 }
 bool source_access(void* bases, uint32_t player, uint32_t container) {
     SourceAccessJob job{bases,player,container,false};
@@ -3292,9 +3307,7 @@ KilnResult KILN_CALL t_add_source(KilnOwner owner, const KilnCraftSourceRequest*
         (r->item_count && !r->items)) return KILN_ERR_INVALID_ARGUMENT;
     if (KilnResult g = read_gate(); g != KILN_OK) return g;
     if (!G.registered_ok || g_off.load()) return KILN_ERR_UNAVAILABLE;
-    bool container = false; unsigned long fault = 0;
-    if (!inventory_matches(items_server_world(),r->container,KILN_ITEMS_FIND_CONTAINERS,&container,&fault) ||
-        !source_identity_ok(r->player,r->container,false,container)) return KILN_ERR_INVALID_ARGUMENT;
+    if (!source_identity_ok(r->player,r->container,false,source_container(r->container))) return KILN_ERR_INVALID_ARGUMENT;
     std::vector<uint32_t> items;
     if (r->item_count) items.assign(r->items,r->items + r->item_count);
     if (std::find(items.begin(),items.end(),0u) != items.end()) return KILN_ERR_INVALID_ARGUMENT;

@@ -499,7 +499,8 @@ typedef struct KilnStationsApi {
      * names them or the snapshot goes. Any thread. KILN_ERR_BUFFER_TOO_SMALL: *out_count = needed. */
     KilnResult(KILN_CALL* fill_asks)(KilnStationFillKey* out, uint32_t capacity, uint32_t* out_count);
     /* ---- player crafting sources, since 0.2.0-dev.30.6; capability crafting.sources ---- */
-    /* Tick thread, server world. Rejects non-containers, players/NPCs and inventory links without a container setup.
+    /* Tick thread, server world. Rejects non-containers, players/NPCs, production stations (FactoryStation), and
+     * inventory links without a container setup. Production stations lend their outputs through set_output_source.
      * Up to 4096 registrations and 65536 filter items per registration. Returns an owner-bound disposable handle.
      * Registrations are session-only: after restart the mod must register them again. */
     KilnResult(KILN_CALL* add_source)(KilnOwner owner, const KilnCraftSourceRequest* request, uint64_t* out_handle);

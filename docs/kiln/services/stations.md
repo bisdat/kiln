@@ -271,9 +271,11 @@ source.Dispose();
 
 The bag and the crafting base's own stock pay first (in the game's order). `BeforeStationOutputs` then pays linked
 containers before opted-in station outputs; `AfterStationOutputs` pays them afterwards. Equal-order links use
-registration order. Every container counts once **per item**, even if multiple registrations or the station opt-in
-name it. Unlike the station-output opt-in, a linked container offers every item the filter allows, including inputs
-or leftovers if the mod explicitly links a production station. This does not change `Stations.Fill` or its fill buttons.
+registration order. Every container counts once **per item**, even if multiple registrations name it or it is already
+in the base's own stock. A linked container offers every item the filter allows. Production stations are refused:
+`PayMaterial` cannot separate their queued inputs from their finished outputs. Production stations lend their outputs
+through `Stations.SetOutputSource`, under its existing per-item safety rules. This does not change `Stations.Fill` or
+its fill buttons.
 
 `CraftSourceOptions.Filter` is `Deny` by default: `Items = null` or an empty collection allows every item. `Allow` offers
 only the set (an empty set offers nothing). The item ids are copied eagerly on registration: changing the original
@@ -286,7 +288,9 @@ rebuild that set if they want new items included.
 container in another player's base. Kiln does not infer ownership or enforce that the container shares the crafting
 base. At every payment the server checks that the source belongs to **this player**, that the player's live
 `BasicPlayerInfos` record grants the game's server-wide `CanAccessInventories` right, that the registration still matches the player login, and that the transaction can read
-an initialized storage inventory. Registering a non-container, a player's character/bag or an NPC inventory is refused.
+an initialized storage inventory with no `FactoryStation` component. Registering a non-container, a player's
+character/bag, an NPC inventory or a production station is refused. Counts and payment recheck that container type,
+so an old registration cannot start supplying a production station after an entity changes or its id is reused.
 A client's counts or a message claiming access never authorize payment.
 
 The server still handles only the `RecipePaid` lender path on a verified server-world inventory transaction, never a
@@ -367,7 +371,8 @@ Use a small test mod that can register/dispose one link and change its filter/or
    new craft must not take from that chest. Restart without re-registering and verify the link is gone.
 6. Join **two players**. Register for only one: the other must neither count nor pay from the chest. Remove that player's
    `CanAccessInventories` permission and check that a new craft cannot use the link. Restore it and retry. Registering
-   either player's bag as a container must be refused.
+   either player's bag or a production station as a container must be refused. Opt the station in with
+   `Stations.SetOutputSource` instead and confirm only its safe finished outputs lend, never its queued inputs.
 
 ### Guided dye check
 

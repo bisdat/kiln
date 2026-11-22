@@ -21,6 +21,7 @@ internal sealed unsafe class CraftingFake : IKitFake
     private static StationsNative.Table* _table;
     private static KilnHarness? Harness=>FakeTables.Active(StationsNative.Name);
     private static CraftingState? State=>Harness is {} h ? KitFakes.State<CraftingState>(h) : null;
+    private static bool IsProductionStation(uint entity)=>Harness?.EntitiesFake?.Block(entity,WorldAbi.Hash("FactoryStation")) is not null;
     public void Register()
     {
         if(_table==null)
@@ -65,7 +66,7 @@ internal sealed unsafe class CraftingFake : IKitFake
             if(r==null || r->Size<sizeof(StationsNative.SourceRequest) || r->Player is 0 or >1023 || r->Container<=1023 || r->Order>1 || r->Filter>1 || r->ItemCount>65536 || (r->ItemCount!=0 && r->Items==null))return FakeTables.InvalidArgument;
             if(!FakeTables.OnTickThread)return FakeTables.WrongThread;
             if(FakeTables.Off(Crafting.SourcesCapability) || State is not {} s)return FakeTables.Unavailable;
-            if(Items.Read(new EntityId(r->Container)) is not {Initialized:true,IsPlayer:false,IsNpc:false})return FakeTables.InvalidArgument;
+            if(IsProductionStation(r->Container) || Items.Read(new EntityId(r->Container)) is not {Initialized:true,IsPlayer:false,IsNpc:false})return FakeTables.InvalidArgument;
             if(Players.Find(new EntityId(r->Player)) is not {InGame:true} player)return FakeTables.InvalidArgument;
             var items=new ReadOnlySpan<uint>(r->Items,(int)r->ItemCount).ToArray().Distinct().Order().ToArray();
             if(items.Contains(0u))return FakeTables.InvalidArgument;
@@ -111,7 +112,7 @@ internal sealed unsafe class CraftingFake : IKitFake
         CraftSourceEntry[] sources;lock(state.Gate)sources=[..state.Sources.Where(s=>s.Player==player && s.PlayerSession==who.Handle)];
         var seen=new HashSet<(uint,uint)>();
         foreach(var source in sources)
-            if(Items.Read(new EntityId(source.Container)) is {Initialized:true,IsPlayer:false,IsNpc:false} inv)
+            if(!IsProductionStation(source.Container) && Items.Read(new EntityId(source.Container)) is {Initialized:true,IsPlayer:false,IsNpc:false} inv)
                 foreach(var group in inv.Slots.Where(x=>!x.IsEmpty).GroupBy(x=>x.Item.Value))
                     if(source.Allows(group.Key) && seen.Add((source.Container,group.Key)))result[group.Key]=result.GetValueOrDefault(group.Key)+group.Sum(x=>(long)x.Count);
         return result;

@@ -11,6 +11,7 @@ void* bases=nullptr;
 bool in_base=false;
 void* expected_tx=nullptr;
 bool wrong_tx=false;
+bool production_station=false, component_fault=false;
 }
 namespace kitems {
 Engine E{};
@@ -62,6 +63,13 @@ PayOut* __fastcall pay(PayOut* out,void* tx,uint32_t entity,uint32_t item,uint32
     *out={};out->left=n-take;return out;
 }
 KilnResult KILN_CALL position(KilnEntity,KilnVec3* out) {*out={};return KILN_OK;}
+PtrSize* __fastcall component(PtrSize* out,uintptr_t,uint32_t,uint32_t entity) {
+    if(fixture::component_fault)RaiseException(0xe1230001,0,0,nullptr);
+    static uint8_t factory[0x68]={};
+    *out={};
+    if(entity==2000 && fixture::production_station) {out->ptr=factory;out->size=sizeof factory;}
+    return out;
+}
 bool KILN_CALL tick_thread() {return true;}
 uintptr_t KILN_CALL singleton(uintptr_t,KilnStr name) {
     return std::string_view(name.ptr,name.len)=="PlayerBasesSystemServer"?reinterpret_cast<uintptr_t>(fixture::bases):0;
@@ -74,6 +82,7 @@ int main() {
 #define CHECK(x) do {++checks;if(!(x)){++failed;std::printf("FAIL %d %s\n",__LINE__,#x);}}while(0)
     KilnApi api{}; api.session=&session;api.on_tick_thread=&tick_thread;api.singleton=&singleton; g_api=&api;
     G.read=G.craft_ok=G.registered_ok=G.outputs_ok=true;G.base_at=&base_at;G.base_stock=&base_stock;G.pay=&pay;G.recipe_paid=0x1234;
+    E.get_component=&component;H_FACTORY=99;
     uint8_t infos[0xa0*2]={};wr(infos,0,uint32_t{1});infos[0x9d]=2;
     uint8_t bases[0x400]={};wr(bases,0x10,infos);g_srv_bases.store(bases);fixture::bases=bases;
     uint8_t tx[0x100]={};wr(tx,0x70,bases);fixture::expected_tx=tx;
@@ -100,6 +109,19 @@ int main() {
     bad.container=9999;
     CHECK(t_add_source(10,&bad,&rejected)==KILN_ERR_INVALID_ARGUMENT && !rejected);
     CHECK(t_remove_source(11,handle)==KILN_ERR_NOT_FOUND);
+    fixture::production_station=true;
+    CHECK(t_add_source(10,&request,&rejected)==KILN_ERR_INVALID_ARGUMENT && !rejected);
+    CHECK(t_source_stock(1,0,stocks,2,&n)==KILN_OK && n==0); // a former chest may now name a station
+    CHECK(t_source_stock(1,KILN_CRAFT_SOURCE_STOCK_ALL,stocks,2,&n)==KILN_OK && n==0);
+    uint32_t station_code=99;
+    CHECK(craft_pay_impl(tx,&costs,1,1,nullptr,0x1234,&station_code)==0 && fixture::paid.empty());
+    CHECK(t_set_output_source(2000,1)==KILN_OK && sources_copy()==std::vector<uint32_t>({2000}));
+    CHECK(t_set_output_source(2000,0)==KILN_OK && sources_copy().empty());
+    fixture::production_station=false;fixture::component_fault=true;
+    CHECK(t_add_source(10,&request,&rejected)==KILN_ERR_INVALID_ARGUMENT && !rejected);
+    CHECK(t_source_stock(1,0,stocks,2,&n)==KILN_OK && n==0); // unknown component kind fails closed
+    CHECK(craft_pay_impl(tx,&costs,1,1,nullptr,0x1234,&station_code)==0 && fixture::paid.empty());
+    fixture::component_fault=false;
     uint32_t code=99;
     CHECK(craft_pay_impl(tx,&costs,1,1,nullptr,0x1234,&code)==1 && code==0);
     CHECK(fixture::paid==std::vector<uint32_t>({1,2000}) && !fixture::wrong_tx);

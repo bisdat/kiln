@@ -124,6 +124,22 @@ public sealed class CraftingSourcesTests
     }
 
     [Fact]
+    public void Production_stations_are_not_registered_or_counted_as_linked_containers()
+    {
+        using var h = new KilnHarness();
+        var player = h.Players.Join("Crafter", rights: PlayerPermissions.AccessInventories); h.Step();
+        var item = h.Items.AddItem("wood", 100);
+        var chest = h.Entities.Create(); h.Items.AddContainer(chest).Put(item, 3);
+        using var source = h.Run(() => Crafting.AddSource(player.Entity, chest));
+        h.Entities.SetBytes(chest, "FactoryStation", new byte[0x68]);
+        var error = h.Run(() => Assert.Throws<ArgumentException>(() => Crafting.AddSource(player.Entity, chest)));
+        Assert.Contains("production stations lend their outputs through Stations.SetOutputSource", error.Message);
+        Assert.Single(h.Crafting.Sources);
+        Assert.Empty(h.Crafting.Stock(player.Entity));
+        Assert.Empty(h.Run(() => CraftingCore.AllStock(player.Entity)).Rows);
+    }
+
+    [Fact]
     public void Invalid_arguments_wrong_thread_and_disabled_capability_are_refused()
     {
         using var h=new KilnHarness();var chest=h.Entities.Create();h.Items.AddContainer(chest);
