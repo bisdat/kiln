@@ -23,6 +23,7 @@ int installed = 0;
 using TextFn = void* (*)(void*, const text::GameText*, const void*, uint8_t);
 TextFn next = nullptr;
 thread_local bool has_value = false;
+thread_local DetailCopy* value_owner = nullptr;
 thread_local float stat_value = 0;
 
 void* text_hook(void* out, const text::GameText* text, const void* style, uint8_t mode) {
@@ -33,9 +34,9 @@ void* text_hook(void* out, const text::GameText* text, const void* style, uint8_
         } else if (t.n) {
             char bytes[KILN_UI_ITEM_DETAIL_TEXT_BYTES];
             if (env().read(bytes, reinterpret_cast<uintptr_t>(t.p), static_cast<size_t>(t.n)))
-                item_detail_text(*c, bytes, static_cast<size_t>(t.n), has_value, stat_value);
+                item_detail_text(*c, bytes, static_cast<size_t>(t.n), has_value && value_owner == c, stat_value);
             else c->capture->rejected = true;
-            has_value = false; // metadata on the first text row of a stat draw; remaining rows retain display order
+            if (value_owner == c) has_value = false; // a nested panel cannot consume its caller's metadata
         }
     }
     return next(out, text, style, mode);
@@ -62,9 +63,14 @@ bool install() {
 bool item_detail_on() { return itemdetail::on.load(std::memory_order_acquire); }
 
 void item_detail_begin(DetailCopy& c) {
-    if (!item_detail_on() || !c.ok) return;
+    c.capture.reset();
+    if (!item_detail_on() || !c.ok || !env().row_available || !env().row_available(itemdetail::row)) return;
     ClientNow now{};
-    if (!env().client || !env().client(&now) || !now.session) return;
+    if (!env().client || !env().client(&now) || !now.session || !now.local_player) {
+        std::lock_guard lk(itemdetail::mu);
+        itemdetail::cache.clear();
+        return;
+    }
     ViewLayout layout;
     if (!load_view_layout(&layout)) return;
     KilnUiItemView v{}; v.size = sizeof v;
@@ -94,27 +100,39 @@ void item_detail_text(DetailCopy& c, const char* text, size_t bytes, bool value,
 // The stat label is opaque. Capture its *constructed text*, never reinterpret it as a GameText.
 void item_detail_stat(DetailCopy& c, float value, void (*draw)(const void*, float), const void* label) {
     const bool old_has = itemdetail::has_value;
+    DetailCopy* old_owner = itemdetail::value_owner;
     const float old_value = itemdetail::stat_value;
-    itemdetail::has_value = true; itemdetail::stat_value = value;
+    itemdetail::has_value = true; itemdetail::value_owner = &c; itemdetail::stat_value = value;
     const auto before = c.capture ? c.capture->lines.size() : 0;
     draw(label, value);
     if (c.capture && c.capture->lines.size() == before) item_detail_text(c, "", 0, true, value);
-    itemdetail::has_value = old_has; itemdetail::stat_value = old_value;
+    itemdetail::has_value = old_has; itemdetail::value_owner = old_owner; itemdetail::stat_value = old_value;
 }
 
 void item_detail_end(DetailCopy& c) {
     if (!c.capture) return;
     ClientNow now{};
-    if (!env().client || !env().client(&now) || now.session != c.capture->meta.session) return;
+    const bool active = env().client && env().client(&now) && now.session && now.local_player;
     std::lock_guard lk(itemdetail::mu);
     auto& cache = itemdetail::cache;
+    if (!active) { cache.clear(); return; }
+    if (now.session != c.capture->meta.session) {
+        std::erase_if(cache, [&](const auto& s) { return s->meta.session != now.session; });
+        return;
+    }
     const auto& m = c.capture->meta;
     std::erase_if(cache, [&](const auto& s) {
         return s->meta.session != m.session || (m.entity ? s->meta.entity == m.entity :
             (!s->meta.entity && s->meta.item == m.item && s->meta.level == m.level && s->meta.rarity == m.rarity));
     });
-    if (c.capture->rejected || c.capture->lines.empty()) return;
-    c.capture->meta.ok = 1; c.capture->meta.count = static_cast<uint32_t>(c.capture->lines.size());
+    if (c.capture->rejected || c.capture->lines.empty()) {
+        // Keep a bounded negative entry: a failed refresh must not expose an older panel of this variant.
+        c.capture->meta.reserved = KILN_UI_ITEM_DETAIL_REJECTED;
+        std::vector<KilnUiItemDetailLine>().swap(c.capture->lines);
+    } else {
+        c.capture->meta.ok = 1;
+        c.capture->meta.count = static_cast<uint32_t>(c.capture->lines.size());
+    }
     cache.push_front(std::move(c.capture));
     if (cache.size() > 64) cache.pop_back();
 }
@@ -130,14 +148,20 @@ KilnResult KILN_CALL item_detail_copy(KilnOwner owner, const KilnUiItemDetailQue
     try {
         if (!itemdetail::install()) return KILN_ERR_UNAVAILABLE;
         ClientNow now{};
-        if (!env().client || !env().client(&now)) return KILN_OK;
+        const bool active = env().client && env().client(&now) && now.session && now.local_player;
         std::lock_guard lk(itemdetail::mu);
+        if (!active) {
+            itemdetail::cache.clear();
+            out->reserved = KILN_UI_ITEM_DETAIL_NO_SESSION;
+            return KILN_OK;
+        }
         std::erase_if(itemdetail::cache, [&](const auto& s) { return s->meta.session != now.session; });
         for (const auto& s : itemdetail::cache) {
             const auto& m = s->meta;
             if ((q->entity && q->entity != m.entity) || (q->item && q->item != m.item) ||
                 (q->level != UINT32_MAX && q->level != m.level) || (q->rarity != UINT32_MAX && q->rarity != m.rarity)) continue;
             *out = m;
+            if (!m.ok) return KILN_OK;
             if (capacity < m.count) { out->ok = 0; return KILN_ERR_BUFFER_TOO_SMALL; }
             std::copy(s->lines.begin(), s->lines.end(), lines);
             return KILN_OK;

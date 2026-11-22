@@ -8,6 +8,11 @@ void capture_emit(const char* str) {
         if (raw.label == "ui.item_detail/NativeTextLine") reinterpret_cast<CaptureTextFn>(raw.fn)(nullptr, &t, nullptr, 1);
 }
 void capture_stat_next(const void*, float) { capture_emit("Damage"); capture_emit("42.5"); }
+void capture_nested_detail(void*, uint8_t) { capture_emit("Nested name"); }
+void capture_nested_stat(const void*, float) {
+    g_detail_hook(g_tm->record, 0);
+    capture_emit("Outer damage");
+}
 void capture_game_detail(void*, uint8_t) {
     capture_emit("Weapon name");
     KilnRegisters r{};
@@ -96,7 +101,90 @@ void item_detail_tests() {
     q.entity = 1064;
     CHECK(item_detail_copy(owner, &q, &s, lines.data(), lines.size()) == KILN_OK && s.ok,
           "item detail: keeps the most recent instance within its bound");
+    fake::client.local_player = 0; // kiln.client retains its session counter on the title screen
+    CHECK(item_detail_copy(owner, &q, &s, lines.data(), lines.size()) == KILN_OK && !s.ok && s.reserved == 1,
+          "item detail: leaving the world refuses stale captures even if the session counter remains");
+    fake::client.local_player = 42;
+    CHECK(item_detail_copy(owner, &q, &s, lines.data(), lines.size()) == KILN_OK && !s.ok,
+          "item detail: observing no local player clears the retained cache");
+    q.entity = 900;
+    for (auto& raw : fake::raws) if (raw.label == "ui.values/ItemDetail")
+        *raw.original = reinterpret_cast<void*>(&capture_nested_detail);
+    DetailCopy* outer = current_detail();
+    item_detail_begin(c);
+    t_detail = &c;
+    item_detail_stat(c, 77, &capture_nested_stat, nullptr);
+    t_detail = outer;
+    CHECK(item_detail_copy(owner, &q, &s, lines.data(), lines.size()) == KILN_OK && s.ok &&
+              lines[0].flags == 0,
+          "item detail: a nested panel cannot inherit its caller's stat metadata");
+    item_detail_end(c);
+    q.entity = 1064;
+    CHECK(item_detail_copy(owner, &q, &s, lines.data(), lines.size()) == KILN_OK && s.ok &&
+              lines[0].flags == KILN_UI_ITEM_DETAIL_VALUE && lines[0].value == 77,
+          "item detail: nested capture preserves the outer stat metadata");
+    item_detail_begin(c);
+    for (unsigned i = 0; i < 65; ++i) item_detail_text(c, "row", 3, false, 0);
+    item_detail_end(c);
+    CHECK(item_detail_copy(owner, &q, &s, lines.data(), lines.size()) == KILN_OK && !s.ok && s.reserved == 2,
+          "item detail: a rejected replacement is a bounded refusal, not stale data or an unexplained miss");
+    item_detail_begin(c);
+    std::string row4096(4096, 'x');
+    for (unsigned i = 0; i < 8; ++i) item_detail_text(c, row4096.data(), row4096.size(), false, 0);
+    item_detail_end(c);
+    CHECK(item_detail_copy(owner, &q, &s, lines.data(), lines.size()) == KILN_OK && s.ok && s.count == 8,
+          "item detail: accepts exact 4096-byte rows and 32768-byte panel bound");
+    item_detail_begin(c);
+    for (unsigned i = 0; i < 8; ++i) item_detail_text(c, row4096.data(), row4096.size(), false, 0);
+    item_detail_text(c, "x", 1, false, 0); item_detail_end(c);
+    CHECK(item_detail_copy(owner, &q, &s, lines.data(), lines.size()) == KILN_OK && !s.ok && s.reserved == 2,
+          "item detail: total UTF-8 budget refuses the whole replacement");
+    item_detail_begin(c);
+    item_detail_text(c, "\xff", 1, false, 0); item_detail_end(c);
+    CHECK(item_detail_copy(owner, &q, &s, lines.data(), lines.size()) == KILN_OK && !s.ok && s.reserved == 2,
+          "item detail: invalid UTF-8 refuses the whole replacement");
+    fake::have_client = false;
+    CHECK(item_detail_copy(owner, &q, &s, lines.data(), lines.size()) == KILN_OK && !s.ok && s.reserved == 1,
+          "item detail: unavailable client state explains the offline miss");
+    fake::have_client = true;
+    fake::client_side = false;
+    CHECK(item_detail_copy(owner, &q, &s, lines.data(), lines.size()) == KILN_ERR_UNAVAILABLE,
+          "item detail: a server refuses the client-only service");
+    fake::client_side = true;
+    fake::revoke(owner);
+    CHECK(item_detail_copy(owner, &q, &s, lines.data(), lines.size()) == KILN_ERR_REVOKED,
+          "item detail: a retired owner cannot read cached panels");
+    owner = fake::owner("mod:item-detail-new");
+    std::atomic<bool> coherent{true};
+    std::thread reader([&] {
+        KilnUiItemDetailSnapshot copy{}; copy.size = sizeof copy;
+        std::vector<KilnUiItemDetailLine> rows(64);
+        for (unsigned i = 0; i < 100; ++i) {
+            if (item_detail_copy(owner, &q, &copy, rows.data(), rows.size()) != KILN_OK ||
+                (copy.ok && (copy.count != 1 || rows[0].text_bytes != 4 ||
+                    std::memcmp(rows[0].text, "data", 4) != 0 || rows[0].value != 42))) coherent = false;
+        }
+    });
+    for (unsigned i = 0; i < 100; ++i) {
+        item_detail_begin(c); item_detail_text(c, "data", 4, true, 42); item_detail_end(c);
+    }
+    reader.join();
+    CHECK(coherent.load(), "item detail: worker reads see complete immutable copies during UI-thread publication");
+    item_detail_begin(c); item_detail_text(c, "data", 4, true, 42);
+    fake::client.local_player = 0;
+    item_detail_end(c); // world exit was observed inside a capture, with no intervening mod read
+    fake::client.local_player = 42;
+    CHECK(item_detail_copy(owner, &q, &s, lines.data(), lines.size()) == KILN_OK && !s.ok,
+          "item detail: world exit observed at publication clears older captures too");
     fake::rows.erase("ui.item_detail");
     CHECK(item_detail_copy(owner, &q, &s, lines.data(), lines.size()) == KILN_ERR_UNAVAILABLE,
           "item detail: capability off refuses capture");
+    item_detail_begin(c);
+    CHECK(!c.capture, "item detail: disabling capture stops new panel allocations");
+    fake::rows.insert("ui.item_detail");
+    item_detail_reset_for_tests();
+    fake::symbols.erase("ui/NativeTextLine");
+    CHECK(item_detail_copy(owner, &q, &s, lines.data(), lines.size()) == KILN_ERR_UNAVAILABLE &&
+              std::find(fake::rows_off.begin(), fake::rows_off.end(), "ui.item_detail") != fake::rows_off.end(),
+          "item detail: missing capture symbol refuses and reports the capability off");
 }

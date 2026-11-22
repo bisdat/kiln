@@ -6871,7 +6871,7 @@
           "size": 56
         }
       },
-      "sha256": "d118c60062115b06571e8993c2eba3a8444dc4184f0f0fe8196212f5cfff9f95"
+      "sha256": "b1b97b14a2266733bddeb6bd2ff80db5fd00336c7e3ae582c089d8b22cd0a090"
     },
     "native/core/abi/services/kiln_ui_slots.h": {
       "function_macros": [],
@@ -8344,7 +8344,7 @@
     "src/services/kiln_types.rs": "e6eaf5e97d0c284ec9fb98e78e9b2d3c1fb129d0cac1a899009730e2641942eb",
     "src/services/kiln_ui.rs": "c5552e5fe6bf0400ef939eeeefa479a0ef827cb15467694a341f0e612be61451",
     "src/services/kiln_ui_inventory.rs": "0d926c07d14e7a23eb2fd6a29ee444804087d41d9290db17d3bdd4ad192e0d49",
-    "src/services/kiln_ui_item_detail.rs": "6a883e5e90e7d00ba0645efd1a3d631ad1e500354c281e2e90a7e843c2a898f3",
+    "src/services/kiln_ui_item_detail.rs": "196b73cac32c28c4a4971df8916aa8d81e90bfe515769965ade4cc7d18c13d18",
     "src/services/kiln_ui_slots.rs": "eadd1321046b93dc37ec1bcfbba00f94020ace6083d1f0ec3b0620bda021997b",
     "src/services/kiln_ui_values.rs": "a13a3afbfb1ec443322ba4ae250fe499d13ce599a438ba0b9652f8e572073627",
     "src/services/kiln_vfx.rs": "046191c4ab30f4ccd99a52f7fc654e7fb53d74aaa4acaa072c8f86a36f0037a0",

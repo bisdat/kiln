@@ -1501,43 +1501,74 @@ aside while it is installed, whatever its ini says; the readout stays where Kiln
 
 The additive window size-constraints slot after v7 is described in the [UI service reference](services/ui.md).
 
-## Item detail in a Kiln window (dev.30.5)
+## Captured item detail (Since 0.2.0-dev.30.5)
+
+`Ui.Values.ItemDetail` reads **passive captures** of text and stat numbers the game constructed
+for a panel it actually built. It does not compute a view on demand for every item in a bag or
+chest. First use starts capture; **then inspect the item in the game's own panel**. Uninspected
+items return `Ok=false`, a reason, and no snapshot. There is no `UiDraw.ItemDetail` panel in
+this release: draw a name/id and the reason yourself when no capture exists, never invented
+weapon damage, armor, perks or food effects.
 
 ```csharp
-// Inside a Kiln window draw callback. Keep a saved slot, or use Ui.Inventory.Selected/Hovered.
-if (Ui.Inventory.Selected is { } slot)
-{
-    UiItemDetailResult detail = ui.ItemDetail(slot, width: 300);
-    // detail.Ok means game-computed lines were captured, not merely that fallback text was drawn.
-}
+// A completed visible-slot snapshot, not a server InventorySlot.ItemEntity.
+UiItemDetailResult result = Ui.Values.ItemDetail(slot.ClientEntity, slot.Item,
+    level: slot.Level, rarity: slot.Rarity);
+if (result.Snapshot is { } detail)
+    foreach (var line in detail.Lines)
+        UseGameText(line.Text); // Value is optional metadata, not a number to append again.
+else
+    UseFallback(slot.Item, result.Reason); // Names/known slot metadata only; no computed stats.
+
+// Latest inspected matching type variant, without a dummy entity argument:
+var variant = Ui.Values.ItemDetail(itemId, level: 25, rarity: ItemRarity.Rare);
 ```
 
-`UiDraw.ItemDetail(item|entity|slot, width = 0)` takes an `ItemId`, `EntityId`, `VisibleSlot`,
-`InventorySlot` snapshot, or `ItemInfo`. It draws ordered text and numbers in Kiln's font and
-layout, **not** an offscreen copy of the game's panel (no thumbnail, icons, bars or game styling).
-Width is in pixels, 0 means available width, and text wraps by text elements in the available
-space. A negative or non-finite width is an argument error. Use a scrolling Kiln window for a
-long panel. No gameplay reads or writes occur on the render thread.
+`ItemDetail(EntityId entity, ItemId item = default, int? level = null, ItemRarity? rarity = null)`
+requires a **client presentation entity**, such as `VisibleSlot.ClientEntity`. Never pass an
+arbitrary server inventory entity: numeric equality is not proof of client identity. An exact
+entity query cannot borrow another instance's panel. For stacks without a client entity, use
+the item-type query. `ItemDetail(ItemId item, int? level = null, ItemRarity? rarity = null)`
+selects the most recently inspected matching variant. It may include that inspected instance's
+gems/perks: it is not a newly calculated pristine item type. With no level/rarity constraints,
+it selects the latest inspected variant of the type, not necessarily the one a mod intended.
 
-Capture starts on first use. **Then inspect the item in the game's own detail panel.** Until
-a matching panel is captured, drawing shows “Game detail not captured — Kiln fallback”, the
-known name (or id), and slot rarity/level/count or catalog category/level range/max stack when
-provided. It never invents unknown damage, perks or effects. `Ok=false` and `Reason` describe
-the miss even though fallback text was drawn. A missing/disabled capability also uses fallback.
+The client main/UI thread captures during the game's ItemDetail call. Mods can read on **any
+thread**, including a draw callback: reads copy immutable cached data under a mutex and never
+access live item/world memory. Snapshots and their line lists are owned copies and remain valid
+after replacement/eviction. `Lines` preserve construction order, with localized text and optional
+computed floats from the stat-draw seam (after tooltip value providers). The first text row of
+a stat draw carries `Value`; it is metadata, not another number to append to already formatted
+text. Number-only draws have empty text. Not every numeric string has typed float metadata.
 
-`Ui.Values.ItemDetail(entity, item = default, level = null, rarity = null)` reads a capture on
-any thread; `Ui.Values.ItemDetail(item)` reads the most recently inspected variant of that
-item type. These reads require `ui.item_detail` and throw `KilnUnavailableException` when it
-is unavailable. No matching capture returns an `IKilnResult` with `Ok=false` and a reason.
-The snapshot's `Lines` are owned copies. Each line has text and optional computed numeric
-metadata; text already includes formatting, so do not append the metadata to it again.
+This is **presentation data, not gameplay authority or structured item stats**. Damage/element,
+armor, food effects, gem and perk descriptions are available only to the extent the panel
+constructs them as text through the captured seam. There are no typed damage/element/socket/
+perk/effect fields, icons, styling, models, or reliable unlocked-perk flags when the distinction
+is conveyed only by colour. Game-side line/number coverage still needs a real-client comparison.
 
-Entity/slot overloads are preferable for instance-specific damage/perks. The cache retains
-64 instances/variants in the current world session, not every item in the game. An upgraded
-slot cannot borrow numbers from its old level/rarity. Reinspect to refresh other item state or
-a changed game language. Limits: 64 rows, 4096 UTF-8 bytes per row, 32768 total; oversized panels
-use fallback rather than truncated data. The native hooks require a measured game build.
+The cache keeps **64 instances/variants, including rejected captures**, in capture order; reads
+do not promote entries. A completed panel replaces the same client entity, or the same
+item+level+rarity for a capture without an entity. A rejected replacement invalidates its old
+capture too. Each panel is bounded to 64 rows, 4096 UTF-8 bytes per row and 32768 total bytes;
+invalid/oversized/empty panels are refused whole, never silently truncated. Reasons distinguish
+an uninspected/mismatched variant, an offline/no-local-player session, and a rejected panel.
+World/session changes, missing client state, or no local player clear the cache when next
+observed by a read or capture. **Language and other item-state changes do not automatically
+invalidate cached text**; reinspect after upgrades, socket/perk changes, breakage or a language
+change. Check the snapshot's session/frame/capture time when freshness matters. Already-owned
+snapshots are historical data and do not disappear on world exit.
 
-Offline, `KilnHarness.UiItemDetail.Capture(item, entity, level, rarity, lines)` supplies a
-recording; `Clear()` models leaving the client world. The TestKit does not simulate the game
-text builder or renderer. The real-client line/number comparison still needs the client pass.
+The `ui.item_detail` capability requires a measured client build and capture hooks. A missing or
+disabled capability throws `KilnUnavailableException`; this is different from a cache miss.
+See [the service contract](services/ui.md#captured-item-detail-since-020-dev305) for refusal codes.
+
+Offline, `KilnHarness.UiItemDetail.Capture(item, entity, level, rarity, lines)` supplies an owned
+recording; `Clear()` models a world change. Invalid recordings throw argument exceptions. The
+TestKit models exact identity/variant matching, byte budgets, copy ownership and 64-entry
+eviction, not the game's text builder, native capture failures, session lifecycle or renderer.
+
+Client check: open an item's detail panel, then read its lines from a mod. Compare the same
+weapon across levels/rarities and upgrades, armor, food, gems/perks, stackable and chest items;
+reinspect after a language change, and leave/rejoin before reusing a saved identity. Run on both
+Proton and native Windows, with a vanilla peer confirming unchanged gameplay and game panels.

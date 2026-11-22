@@ -1,35 +1,39 @@
 // SPDX-License-Identifier: MIT
+using System.Runtime.InteropServices;
 using Kiln;
-using Kiln.FakeUi;
 using Xunit;
 
 public sealed class UiItemDetailTests
 {
     [Fact]
-    public void Fallback_is_explicit_and_width_is_validated()
+    public void Data_only_API_cannot_confuse_server_inventory_entities_with_client_entities()
     {
-        var previous = Backend.Current;
-        FakeUiTable.Install(); UiNative.ResetForTests();
-        UiValuesTestSuite.FakeUiValues.Caps = 0;
-        Backend.Current = new UiValuesTestSuite.FakeUiValues.Backend([]);
-        try
-        {
-            var draw = new UiDraw();
-            var result = draw.ItemDetail(new ItemId(0x12345678), 140);
-            Assert.False(result.Ok);
-            Assert.Contains(FakeUiTable.Texts, s => s.Contains("not captured", StringComparison.OrdinalIgnoreCase));
-            Assert.Throws<ArgumentOutOfRangeException>(() => draw.ItemDetail(new ItemId(1), float.NaN));
-            Assert.Throws<ArgumentOutOfRangeException>(() => draw.ItemDetail(new ItemId(1), -1));
-            Assert.Throws<ArgumentException>(() => draw.ItemDetail(ItemId.None));
-        }
-        finally { Backend.Current = previous; FakeUiTable.Free(); UiNative.ResetForTests(); }
+        Assert.DoesNotContain(typeof(UiDraw).GetMethods(), m => m.Name == "ItemDetail");
+        Assert.DoesNotContain(typeof(Ui.Values).GetMethods(), m => m.Name == "ItemDetail" &&
+            m.GetParameters().Any(p => p.ParameterType == typeof(InventorySlot) || p.ParameterType == typeof(ItemInfo)));
     }
 
     [Fact]
-    public void Text_element_wrapping_preserves_lines_and_respects_width()
+    public void Type_query_exposes_level_and_rarity_without_a_dummy_entity()
     {
-        var rows = UiTooltipWrap.Wrap(["first", new string('x', 100), "Ü / test"], 70, s => s.Length * 7);
-        Assert.All(rows, row => Assert.True(row.Length <= 10));
-        Assert.Equal(100, rows.Where(r => r.StartsWith('x')).Sum(r => r.Length));
+        Assert.NotNull(typeof(Ui.Values).GetMethod("ItemDetail", [typeof(ItemId), typeof(int?), typeof(ItemRarity?)]));
+    }
+
+    [Fact]
+    public void Invalid_queries_are_rejected_before_asking_for_a_capability()
+    {
+        Assert.Throws<ArgumentException>(() => Ui.Values.ItemDetail(ItemId.None));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Ui.Values.ItemDetail(new EntityId(1), level: -1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Ui.Values.ItemDetail(new EntityId(1), rarity: (ItemRarity)255));
+    }
+
+    [Fact]
+    public unsafe void Native_records_match_the_C_contract()
+    {
+        Assert.Equal(20, sizeof(UiItemDetailNative.Query));
+        Assert.Equal(4112, sizeof(UiItemDetailNative.Line));
+        Assert.Equal(56, sizeof(UiItemDetailNative.Snapshot));
+        Assert.Equal(16, sizeof(UiItemDetailNative.Table));
+        Assert.Equal(8, Marshal.OffsetOf<UiItemDetailNative.Table>(nameof(UiItemDetailNative.Table.Copy)).ToInt32());
     }
 }

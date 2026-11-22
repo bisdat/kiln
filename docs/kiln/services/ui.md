@@ -318,34 +318,50 @@ game's highlight groups Group1 and Group2, which Kiln colours itself. Managed: `
 `OutlineOptions` (Kiln.Ui). Capability `ui.world_outline`. Usage and the C table: [../render.md](../render.md#outlines-since-020-dev303);
 RE: [../../re/client-render.md](../../re/client-render.md#highlight-groups-outlines).
 
-## Captured item detail for Kiln windows (dev.30.5, #120)
+## Captured item detail (Since 0.2.0-dev.30.5)
 
 `kiln.ui.item_detail` is a **new v1 table**, not an append to `kiln.ui` or `kiln.ui.values`.
 Its only function, `copy(owner, query, snapshot, lines, capacity)`, is callable on any thread;
-see `native/core/abi/services/kiln_ui_item_detail.h`. Header size/version and function pointer
-must be checked. Records are size-tagged. The query is 20 bytes, snapshot 56 bytes, and each
-line 4112 bytes (4096 length-delimited UTF-8 bytes plus size, flags, value and byte count).
-The table is 16 bytes on x64 (8-byte header plus copy). Existing tables and offsets do not change.
+see `native/core/abi/services/kiln_ui_item_detail.h`. Check header size/version and function
+pointer. Records are size-tagged: query 20 bytes, snapshot 56 bytes, line 4112 bytes (4096
+length-delimited UTF-8 bytes plus size, flags, value and byte count). The x64 table is 16 bytes,
+with `copy` at offset 8. No existing table layout changes.
 
-The `ui.item_detail` capability requires the measured client layout and the existing item-detail,
-text-line and stat-value seams. First use installs capture. Only text constructed inside the
-current item-detail occurrence is copied; Kiln-injected native tooltip lines are excluded.
-Stat numbers are captured after tooltip value providers, with the first constructed text row
-carrying the numeric metadata. Number-only draws get a numeric row. No opaque label is cast
-to a string and no game pointer escapes the call. Text already contains the game's formatted
-numbers: consumers must not append numeric metadata a second time.
+This is **passive capture**, not on-demand item computation or a new drawing API. First use
+installs capture. The client's main/UI thread copies text constructed inside the current
+ItemDetail call; Kiln-injected tooltip lines are excluded. Any-thread readers copy completed
+immutable records under a mutex, not live item/world memory. Stat numbers are captured after
+tooltip value providers, with numeric metadata on the first constructed text row. Text already
+contains the game's formatted numbers; do not append the metadata again. A number-only draw
+gets empty text and a float. No opaque label is reinterpreted as a string.
 
-Only complete panels are published. The last 64 instances/variants are retained in a client
-session. Entity queries never use another entity's panel; item-only queries select the latest
-inspected variant. Slot queries constrain item, level and rarity. World changes invalidate
-captures. Reinspect after changing language, upgrading an item, or changing its other state.
-No generic catalog formula pretends to be the game's computed instance stats. Each panel is
-limited to 64 lines, 4096 bytes per line, 32768 total bytes; an oversized panel is rejected,
-not partially displayed. `KILN_OK` with `ok=0` means no matching capture; a short destination
-gets `BUFFER_TOO_SMALL` and the required count, with no partial rows.
+A query's `entity` is a CLIENT presentation id, never an arbitrary server inventory entity.
+Entity queries match only that instance. `entity=0` queries `item` plus optional level/rarity
+(`UINT32_MAX` means unspecified), choosing the latest matching capture. This may include the
+inspected instance's gems/perks, not pristine item-type defaults. No typed semantic stat,
+socket, perk-unlocked or food-effect model is supplied; colour/icon-only information is absent.
 
-Managed API, fallback, and sample: [the UI guide](../ui.md#item-detail-in-a-kiln-window-dev31).
-Hooks and rendering have host tests; **the real-client comparison remains unverified**.
+The last 64 captures/refusals are retained in capture order; reads do not promote entries.
+A completed panel replaces the same entity, or item+level+rarity for entity=0, even on rejection.
+Session/world changes, missing client state or no local player clear captures on next read or
+capture. Language and item-state changes require reinspection; they are not automatically
+observed. A snapshot already copied by a caller remains historical data. Limits: 64 lines,
+4096 UTF-8 bytes per line, 32768 total bytes; reject invalid/oversized/empty panels whole.
+
+`KILN_OK` with `ok=0` is a miss: `snapshot.reserved` carries 0 (no matching capture), 1 (offline,
+missing client state or no active local-player session), or 2 (rejected panel: empty, invalid
+text/number, read failure or budget). A short destination gets `BUFFER_TOO_SMALL` and required
+`count`, with no partial rows. `UNAVAILABLE` means wrong side, missing symbols/layout, disabled
+capability or hook failure; `REVOKED` means retired owner; invalid/short records, owner zero,
+empty query or null rows with nonzero capacity get `INVALID_ARGUMENT`.
+
+Capability `ui.item_detail` is client-only (`wrong-side` on a server); missing build symbols/
+constants make it unavailable, missing table lowers it to `service-older`, and hook failure to
+`faulted`. Offline/no-session and per-item misses are result reasons, not permanent capability
+failures. Client check: inspect a real item panel and compare the text and numbers read by a
+mod on Proton and native Windows. **Real-client hook coverage remains unverified.**
+
+Managed API, cache/fallback contract and sample: [the UI guide](../ui.md#captured-item-detail-since-020-dev305).
 
 ## Negotiated slot subscriptions (dev.30.5 review correction)
 
