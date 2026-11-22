@@ -56,6 +56,7 @@ available is generated from a boot's `capabilities.json`: [../status.generated.m
 | [time.md](time.md) | kiln.time: time of day and weather |
 | [tool-actions.md](tool-actions.md) | kiln.tools: declarative terrain actions, native authority checks, capabilities and resident lifecycle (since 0.2.0-dev.30.5) |
 | [tool-payment.md](tool-payment.md) | Terrain-tool placement: pool-item costs, normal building supplies and exact native undo refunds (since 0.2.0-dev.30.5) |
+| [tools.md](tools.md) | Building tools: typed tool/brush/pool blocks, owned material observations and presentation qualification limits (since 0.2.0-dev.30.5) |
 | [types.md](types.md) | kiln.types: the game's types, systems, events and components by name |
 | [vfx-cook.md](vfx-cook.md) | VFX blocks: the builder |
 | [vfx.md](vfx.md) | kiln.vfx / Kiln.Vfx: play any VFX from code |

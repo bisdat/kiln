@@ -22,6 +22,7 @@ generated [../status.generated.md](../status.generated.md); what has no API yet 
 | [affixes.md](affixes.md) | Affixes: rolled modifiers on one item ("+5 Strength", "+10% Move Speed"), as affix kinds and pools, which are blocks (`Blocks.Define`, `affixes` and `affixPools` in `blocks/*.json`, or `Affixes.Define`); kept with the item, applied while it is worn or in hand, shown in players' games (dev.27) |
 | [inventory.md](inventory.md) | Moving items between inventories keeping their state (a stack, quick stack, move all), container names, transfer rules and events (ported from shroudlink), and why gear data lasts only a session |
 | [item-blocks.md](item-blocks.md) | Items, weapons, wands, armor, stations, loot tables and recipes as blocks; optional legacy identities, existing recipe-menu groups and pickup/craft tracking; a weapon's own moves and held models with moving parts |
+| [../services/tools.md](../services/tools.md) | Building-tool, terrain-brush and material-pool blocks, scoped native policies, material observations and qualification limits |
 | [world-blocks.md](world-blocks.md) | Props, crafting props, stations, containers with default loot and lids, doors, colliders and building materials |
 | [offers.md](offers.md) | Interaction offers from C#: the "E" prompt on any entity at run time, with a handler when a player accepts it (`Kiln.Offers`) |
 | [npc-blocks.md](npc-blocks.md) | Creature bodies, animation, AI, behaviour, drops, friendly NPCs and vendors |
