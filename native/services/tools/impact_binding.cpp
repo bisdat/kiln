@@ -182,10 +182,13 @@ uintptr_t KILN_CALL kiln_tools_impact_detour(KilnHookCall2* call,void*) {
     kt::ToolPolicyScope clear(static_cast<const KilnToolPolicyView*>(nullptr));
     kab::NativeCtx context{};
     if(!call || !hooks)return 0;
-    if(!read_context(reinterpret_cast<void*>(call->args[2]),&context))return refuse(call);
     auto map=bindings.load(std::memory_order_acquire);
-    auto found=map?map->find(context.program_id):Bindings::const_iterator{};
-    if(!map || found==map->end())return hooks->call_original2(call);
+    // No tool family bound (no tool mod, or every one removed): every impact is the game's own. It passes through
+    // untouched, without its context even being read, so a player without a tool mod keeps vanilla terraforming.
+    if(!map || map->empty())return hooks->call_original2(call);
+    if(!read_context(reinterpret_cast<void*>(call->args[2]),&context))return refuse(call);
+    auto found=map->find(context.program_id);
+    if(found==map->end())return hooks->call_original2(call);
     auto binding=found->second;
     try {
         Admission admission;
