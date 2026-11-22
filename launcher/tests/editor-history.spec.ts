@@ -45,6 +45,32 @@ for (const deck of [false, true]) test(`${deck ? "Deck" : "desktop"} undo/redo c
   }
 });
 
+for (const locale of ["es", "ru"]) test(`Deck history leaves the entire hint row and inspector contained in ${locale}`, async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.route("**/assets-local/editor/**", route => route.abort());
+  await open(page, true);
+  await page.evaluate(async (locale) => {
+    const path = "/src/i18n/index.ts";
+    (await import(path)).setLanguage(locale);
+    const s = (window as any).editorSession, model = s.useSession.getState().model;
+    s.setModel({ ...model, name: "Хранитель пламени с невероятно длинным именем", xp: model.xp + 1 });
+    await document.fonts.ready;
+    await Promise.all(document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished.catch(() => {})));
+  }, locale);
+  await page.locator('.ke-grid [data-deck-id="slot-main:0"]').click();
+  // Sample the related boxes in one browser turn: focusing the slot updates the controller's action labels.
+  const geometry = await page.evaluate(() => {
+    const box = (selector: string) => document.querySelector(selector)!.getBoundingClientRect().toJSON();
+    return { split: box(".ke-split"), inspector: box(".ke-insp"), footer: box(".deck-hints"),
+      hints: [...document.querySelectorAll(".deck-hint")].map(el => el.getBoundingClientRect().toJSON()) };
+  });
+  expect(geometry.inspector.bottom, "inspector bottom").toBeLessThanOrEqual(geometry.split.bottom + 1);
+  for (const hint of geometry.hints) {
+    expect.soft(hint.left, "hint left").toBeGreaterThanOrEqual(geometry.footer.left);
+    expect.soft(hint.right, "hint right").toBeLessThanOrEqual(geometry.footer.right);
+  }
+});
+
 test("Deck history controls stay contained while focus and dirty state change", async ({ page }) => {
   await open(page, true); await edit(page);
   const undo = page.locator('[data-deck-id="ed-undo"]'), redo = page.locator('[data-deck-id="ed-redo"]');

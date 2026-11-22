@@ -238,6 +238,9 @@ export async function restoreBackup(b) {
   set({ restoring: true });
   try {
     await api.restoreBackup(b.path, target);
+    // The file has been replaced, even if the follow-up read fails. Never leave snapshots from the old
+    // container editable or replayable against the restored one; a failed restore itself still preserves them.
+    set({ model: null, orig: null, history: null, dirty: false, readAt: 0 });
     return await readSave(target);
   } finally {
     set({ restoring: false });

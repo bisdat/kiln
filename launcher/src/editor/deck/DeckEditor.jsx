@@ -99,14 +99,17 @@ export default function DeckEditor() {
 
   return (
     <EditorEnv.Provider value={env}>
-      {/* Keep the additional actions compact: an overflowing hint row widens the Deck grid and focus can then
-          scroll a pointer target between press and release. These rules touch only the four history controls. */}
+      {/* Keep history compact and let the action group wrap when its localized labels no longer fit. An
+          overflowing hint row can otherwise scroll a pointer target between press and release. */}
       <style>{`
         .dke-buttons [data-deck-id="ed-undo"], .dke-buttons [data-deck-id="ed-redo"] {
           width: 3.25rem; padding: 0; display: grid; place-items: center;
         }
         .deck-hints [data-hint="ls"], .deck-hints [data-hint="rs"] {
           padding: 0 .25rem; gap: .25rem; font-size: 1rem;
+        }
+        .deck:has(.deck-editor) .deck-hints-right {
+          max-width: 100%; flex-wrap: wrap; justify-content: flex-end;
         }
       `}</style>
       <GameArtAuto only="editor" />
