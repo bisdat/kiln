@@ -159,6 +159,26 @@ test("busy save/open/restore cannot consume history; successful reads reset it",
   }
 });
 
+test("reading a save is not writing one: the shell's busy flag (close guard, Quit, update restart) holds only for save and restore", async ({ page }) => {
+  await open(page);
+  for (const [command, operation, busy] of [["editor_read_file", "open", false], ["editor_write_save", "save", true], ["editor_restore_backup", "restore", true]] as const) {
+    if (operation === "save") await edit(page);
+    await page.evaluate(async ([command, operation]) => {
+      const w = window as any, s = w.editorSession, path = s.useSession.getState().model.path;
+      const backups = operation === "restore" ? await w.editorApi.listBackups(path) : [];
+      w.__kilnMock.planCommand(command, { gate: "busy-flag" });
+      w.busyOperation = operation === "save" ? s.saveModel() : operation === "open" ? s.openSave(path) : s.restoreBackup(backups[0]);
+    }, [command, operation]);
+    expect(await session(page, async () => {
+      const s = (window as any).editorSession.useSession.getState();
+      const pending = (await import("/src/editor/kiln/pending.ts")).usePendingEdits.getState();
+      return { blocked: !!(s.saving || s.restoring || s.opening), busy: pending.busy };
+    }), operation).toEqual({ blocked: true, busy });
+    await session(page, async () => { const w = window as any; w.__kilnMock.openGate("busy-flag"); await w.busyOperation; });
+    expect(await session(page, async () => (await import("/src/editor/kiln/pending.ts")).usePendingEdits.getState().busy), operation).toBe(false);
+  }
+});
+
 test("Deck Read again opens the discard confirmation without moving its pointer target", async ({ page }) => {
   await open(page, true);
   await session(page, () => {

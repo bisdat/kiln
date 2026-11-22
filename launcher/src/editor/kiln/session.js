@@ -37,7 +37,9 @@ export const useSession = create(() => ({
 const set = (p) => {
   useSession.setState(p);
   const s = useSession.getState();
-  usePendingEdits.setState({ dirty: s.dirty, busy: mutationsBlocked(s), name: s.model?.name ?? null });
+  // busy: a save or a restore is being written (the close guard, the Deck's Quit and the launcher update's restart wait for
+  // it and say "writing a save"); reading a save (opening) loses nothing and is not busy there
+  usePendingEdits.setState({ dirty: s.dirty, busy: !!(s.saving || s.restoring), name: s.model?.name ?? null });
 };
 
 export const setStatus = (status) => set({ status });
