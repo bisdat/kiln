@@ -503,6 +503,7 @@ void core_after_step(EmfWorld* w, uint8_t kind) {
 
 void dispatch_after_step(EmfWorld* w, uint8_t kind) {
     if (!w) return;
+    terrain_after_step(w, kind); // break results queued by this step, before mod on_tick callbacks
     events_after_step(w, kind);
     components_after_step(w, kind);  // v23/v25: answers of change_component, offer upkeep
     windows_after_step(w, kind);     // v24: window events

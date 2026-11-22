@@ -5,7 +5,7 @@
 static_assert(offsetof(KilnBuildApi, terrain_budget_reserve) == 136);
 static_assert(offsetof(KilnBuildApi, terrain_budget_charge) == 144);
 static_assert(offsetof(KilnBuildApi, grid_for_session) == 152);
-static_assert(sizeof(KilnBuildApi) == 160);
+static_assert(sizeof(KilnBuildApi) == 184);
 #include <cstdio>
 int main() {
     kb::TerrainIoBudget b;

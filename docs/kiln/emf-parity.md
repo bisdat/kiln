@@ -11,12 +11,12 @@ API (`docs/modding/lua.md`), with the Kiln service behind it, the nearest Kiln C
 - **tested**: `probe` = the conformance probe (`mods/tests/emf-test/probe`, lab server), `host` = host test
   (`native/plugins/emf/tests/run.sh`), `client` = only a joined player can show it (client checklist in
   [emf.md](emf.md)), `lab-mod` = a shipped EMF mod uses it in the lab check (`tools/emf/lab-check.py`).
-- Counts: **77 full, 18 partial, 49 not yet out of 144.** The v27 prefix has 90 slots (75 full, 15 partial). v28 to
+- Counts: **80 full, 19 partial, 45 not yet out of 144.** The v27 prefix has 90 slots (75 full, 15 partial). v28 to
   v40 append 45: one full (`world_to_screen`), three partial (`chat_tell_ex`, `chat_broadcast_ex`, `on_hit` since
   0.2.0-dev.30.3) and 41 not yet
-  ([the table below](#v28-to-v40-emf-063-to-068)). v43 to v46 append 7, all not yet
-  ([their table](#v43-to-v46-emf-0613-to-0614)). v47 appends 2: one full (`spawn_facing`) and one not yet
-  (`find_wall_ex`; [v47](#v47-emf-0619)). Counts are C table slots, not grouped rows or attribute constants.
+  ([the table below](#v28-to-v40-emf-063-to-068)). v43 to v46 append 7: two full, one partial and four not yet
+  ([their table](#v43-to-v46-emf-0613-to-0614)). v47 appends 2, both full (`spawn_facing`,
+  `find_wall_ex`; [v47](#v47-emf-0619)). Counts are C table slots, not grouped rows or attribute constants.
   The two attribute slots remain partial because the XP/level ids use the queued progression path below. The four
   chat line slots are partial because a plain line (no `EMF_CHAT_SYSTEM`) shows without a speaker's name on Kiln and
   under the player's own name on EMF (counted as full until 0.2.0-dev.26; the behaviour did not change). Full means
@@ -50,9 +50,10 @@ Structs passed in are read up to their `size` field (EMF's `api_sizes.h` rules):
 `villager_move`, `EmfBreakBlocks`) whose `size` is smaller than EMF's minimum (144, 120, 128 and 160 bytes) is refused
 untouched, as in EMF. v41's `EmfMoveOrder.stuck_seconds` (136 bytes) and v42's
 `EmfPathResult.doors` (32 bytes) change nothing on Kiln: `enemy_move` refuses every order and `path_find` never answers
-(both not yet). Nor do v45's `EmfBlockInfo.world` (40 to 44 bytes) and `EMF_BREAK_WORLD`, or v46's
-`EmfMoveOrder.hold_seconds` (in `pad2`'s place, still 136 bytes) and `EMF_MOVE_HOLD`: `break_blocks` and
-`villager_move` refuse every request, `block_at` and `find_wall` answer false (all not yet).
+(both not yet). v45's `EmfBlockInfo.world` (40 to 44 bytes) is written only when covered by the caller's size; the block
+queries and `EMF_BREAK_WORLD` are translated onto `kiln.build` since 0.2.0-dev.30.6. v46's
+`EmfMoveOrder.hold_seconds` (in `pad2`'s place, still 136 bytes) and `EMF_MOVE_HOLD` remain unavailable with
+`villager_move`.
 
 ## C API
 
@@ -193,16 +194,16 @@ into the engine.
 ## v43 to v46 (EMF 0.6.13 to 0.6.14)
 
 EMF 0.6.13 (API v43) and 0.6.14 (v44 to v46) appended seven functions; v45 added none (`EmfBlockInfo.world` and the
-flag `EMF_BREAK_WORLD`: a break spares the world's own ruins). Kiln carries none of them yet: each gives the answer
-below as EMF documents it for a feature that is off, and logs once per mod and function as above. Host tests check
-every answer (`tests/glue_test.cpp`, `test_v46`); the probe has the same checks for a dedicated server, not run in a
-lab yet.
+flag `EMF_BREAK_WORLD`: without it a break spares the world's own ruins). Since 0.2.0-dev.30.6, the block
+family translates onto Kiln's own typed API ([block operations](services/build-blocks.md)); no engine code is
+inside kiln-emf. Host tests cover translation, refusals, masks, the queue and callback timing. Gameplay remains
+unverified; the probe is non-destructive for these calls.
 
 | EMF function (since) | On Kiln | Status | Tested |
 |---|---|---|---|
 | `player_permissions` (43) | Answer: `false` and `*perms` 0, as for an entity that is no player. The game's own permissions (`EMF_PERM_*`) are not read; EMF's own admins (`EmfNetFrom.admin`, command senders) are not affected. | not yet | host; probe (not run yet) |
-| `break_blocks` (44) | Answer: 0 with `why` "not available on this game version"; no callback, nothing is broken. `EMF_BREAK_WORLD` (45) and `EMF_BREAK_TERRAIN` (47) get the same answer. A request smaller than 160 bytes, or none, is refused untouched. | not yet | host; probe (not run yet) |
-| `block_at`, `find_wall` (44) | Answer: `false`; `*out` is not written (a v44 mod's 40-byte `EmfBlockInfo` and a v45 mod's 44-byte one alike). | not yet | host; probe (not run yet) |
+| `break_blocks` (44) | Adapter-owned async queue → `kiln.build.break_box` / `Build.BreakBox`: sphere/column masks, copied material list, damage table, instant/world/player-terrain flags. 64 waiting, FIFO whole columns, at most eight spheres per server step; guarded result callback on server Post, once. Short (<160-byte) requests untouched. Unsupported modes refuse synchronously with EMF's `why`, without mutation or callback. | partial: drops unavailable; exact-cell difference below | host; native Windows stand-in; in-game check pending |
+| `block_at`, `find_wall` (44) | `kiln.build.block_at` / `find_wall` (`Build.BlockAt` / `FindWall`), inside a callback on the server world. Raw building id minus 128; fill/paint retained, optional metadata unknown → hardness/health 0, damage -1. DDA in cell order, first building up to 64 m. False leaves output untouched; 40-byte v44 and 44-byte v45+ records retain their size. | full | host; native Windows stand-in; in-game check pending |
 | `villager_move` (46) | Answer: 0 with `why` "not available on Kiln yet"; no callback. The same with `hold_seconds` or `EMF_MOVE_HOLD`. An order smaller than 128 bytes, or none, is refused untouched. | not yet | host; probe (not run yet) |
 | `villager_move_cancel`, `villager_moving` (46) | Answer: `false` / 0. | not yet | host; probe (not run yet) |
 
@@ -215,14 +216,46 @@ EMF's unchanged MIT header below Kiln's licence preface. No earlier slot or stru
 | EMF function / addition | On Kiln | Status | Tested |
 |---|---|---|---|
 | `spawn_facing` | Same as `spawn_ex`: immediate, inside a callback on the supplied server world, with at most 15 extra components (never `CurrentTransform`). Finite `yaw_deg` is forwarded to `kiln.spawn`'s creation-time transform: degrees about +Y, quaternion `(0, sin(yaw/2), 0, cos(yaw/2))`, no range clamp; 0 keeps the template's own facing. No post-spawn teleport. Bad yaw, world/thread/context, component list or unavailable service: 0, under the calling function's name. | full | host; native Windows stand-in; probe (not run in game) |
-| `find_wall_ex` | Answer: `false`, `*out` untouched, with flags 0, `EMF_FIND_TERRAIN` or unknown flags alike. Logs once per mod and function and appears in `state/emf.json` `unsupported`. | not yet | host; probe (not run in game) |
-| `EMF_BREAK_TERRAIN`, terrain `EmfBlockInfo.world`, `hardness`, `health` | The v44 block family is not carried: `break_blocks` returns 0 with `why` "not available on this game version", no callback; `block_at`, `find_wall` and `find_wall_ex` return false without writing the output. Requests below 160 bytes remain untouched. | not yet (existing slots) | host; probe (not run in game) |
+| `find_wall_ex` | `kiln.build.find_wall`: flags 0 = buildings; `EMF_FIND_TERRAIN` → `KILN_BUILD_FIND_PLAYER_TERRAIN`, adding only terrain with PlayerPlaced provenance. Natural/unknown terrain passed over; when provenance support is unavailable, the adapter still queries buildings, as EMF does. Unknown flags or any read refusal: false, output untouched. | full | host; native Windows stand-in; in-game check pending |
+| `EMF_BREAK_TERRAIN`, terrain `EmfBlockInfo.world`, `hardness`, `health` | Player terrain only, including with `EMF_BREAK_WORLD`; natural/unknown terrain never breaks. `world` maps Natural/PlayerPlaced/Unknown to 1/0/-1; hardness class and raw integer material health match EMF, damage stays -1. Missing qualified metadata/provenance/mode refuses rather than unrestricted editing. | full queries; partial breaking (existing slots) | host; native Windows stand-in; in-game check pending |
 | `EMF_MARKER_BAR`, `EmfMarker.bar` | Markers are not carried: `marker_set` false, `marker_send` 0; no bar is drawn or sent. | not yet (existing slots) | host; probe (not run in game) |
 
-Terrain work needs more than enabling a flag. Kiln's qualified `kiln.tools` terrain-config lookup and terrain-only
-carve kernel/dispatch hooks are useful seams. `kiln.build` also has live grid reads and exact-cell/shape writes,
-but these do not supply EMF's shipped-cell provenance, pickaxe damage/drop accounting or queued sphere-break contract.
-No terrain implementation is added by this update.
+### Block-family details and differences (since 0.2.0-dev.30.6)
+
+- EMF owns the queue and callback contract in the adapter, not Kiln core. Calls from any thread queue copied
+  requests; server Pre translates each sphere to an x-fastest byte selection mask on Kiln's actual grid, then calls
+  `BreakBox`. Results are delivered at server Post, before mod tick subscribers. World closure cancels waiting and
+  already-extracted unexecuted work; interrupted columns retain the counts of completed spheres. Like EMF's
+  `Dispatcher.post(server)`, their callbacks wait for the next server Post, not the destroying thread.
+  A 3-second watchdog cancels waiting work if the runner has not run. Callback faults do not suppress later results.
+  A clean unloaded sphere is skipped (DONE with no contribution to counts), as in EMF's `block_glue.cpp:475-478,519`
+  and `block_service.cpp:88,115`; a refusal after possible mutation is never treated as that no-op.
+- Damage is per hardness class, default 100/100/95/60/50, with the world's mining factor and native building cracks.
+  Terrain policy is explicitly supplied by the adapter: material health ×250, healing 20 seconds after the last hit
+  (EMF 0.6.19 `src/core/block_rules.h:110,121`, `block_rules.cpp:185-198,201-214`). Queries return **raw** health,
+  not ×250. Unknown facts are hardness/health 0 and damage -1, as EMF does. Material health and exchange rate are
+  integer fields in upstream `MaterialFacts` (`block_rules.h:22-23`, `block_glue.cpp:767-768,789-790`).
+- **Drops remain unavailable.** `EMF_BREAK_DROPS` refuses the **whole** request synchronously: id 0, `why` =
+  `not available on this game version`, no callback, no damage or removals. No fabricated zero-yield success.
+  A successful no-drops callback reports `dropped = 0`. Other missing requested seams likewise refuse the whole
+  request (`EMF_BREAK_TERRAIN` alone uses `breaking terrain is not available on this game version`).
+- **Exact cells, not terrain cleanup.** EMF may also clear isolated terrain just outside the box; Kiln clears exactly
+  the selected cells. EMF's `VoxelBoxFillAir(grow=0)` disables geometric expansion but still runs isolated-terrain
+  cleanup over its widened staging buffer; Kiln uses its guarded writer, readback, save and replication path
+  ([qualified engine notes](../re/terrain-edit.md)). Building masks likewise do not invoke the native mining kernel's
+  grow=1 boundary expansion.
+- **Ruin protection retains EMF's sphere shrinking.** The adapter requests Kiln's generic protected-sphere option
+  with the original centre/radius, a 0.01 m margin and a 0.25 m minimum radius (`block_rules.cpp:71-92`). The nearest
+  eligible natural/unknown building shrinks the whole building sphere; the terrain pass still uses its full radius.
+  `EMF_BREAK_WORLD` bypasses that shrink for buildings, never terrain protection. These are caller policy values,
+  not EMF constants baked into Kiln core.
+- The adapter explicitly permits edits in bases (`IN_BASES`) for EMF's raid semantics and does not opt into Kiln
+  zone checks. Loaded-cell, metadata, provenance and Unbreakable checks still apply; no unrestricted fallback.
+  Kiln keeps edited chunks through its existing save-region mechanism, including outside bases.
+- A failed writer can have partially committed. The callback is `EMF_BREAK_FAILED`, preserving known/lower-bound
+  counts, never retried or compensated. The log says when changes may be partial; further breaks latch off until
+  restart after a fault or failed verification. `state/emf.json.blocks` records queue/completion/cancellation/failure
+  counts and uncertainty; missing-mode calls remain per-mod in `unsupported`, with per-mod log lines.
 
 ## Lua API (`emf.*`, run by EMF's `lua` mod on the C API)
 
@@ -233,7 +266,7 @@ run EMF's Lua mods; their actual player-facing features still need the client ch
 built against the v46 header and needs at least a 1144-byte table; it has not been run on Kiln yet.
 Lua 1.40 (EMF 0.6.19) needs v47 / 1160 bytes, likewise not run in game.
 Lua 1.33 looks at the table's version and size before it uses a newer function, then at the function's answer: on
-Kiln the functions of the last rows below return what EMF's Lua guide documents for a feature that is off (`nil`,
+Kiln the functions still marked not yet below return what EMF's Lua guide documents for a feature that is off (`nil`,
 `false`, or `nil` and a reason).
 
 | Lua | C under it | Status |
@@ -277,10 +310,11 @@ Kiln the functions of the last rows below return what EMF's Lua guide documents 
 | `emf.door`, `emf.door_open`, `emf.door_close`, `emf.door_lock` | v38 | not yet |
 | `emf.enemy_order`, `emf.enemy_order_cancel`, `emf.enemy_target`, `emf.enemy_move`, `emf.enemy_move_cancel`, `emf.enemy_moving` | v39, v40 | not yet |
 | `world:permissions` (1.36) | v43 `player_permissions` | not yet |
-| `emf.break_blocks`, `emf.block_at`, `emf.find_wall` (1.37; a block's `world` and the break option `world`, 1.38) | v44, v45 | not yet |
+| `emf.break_blocks`, `emf.block_at`, `emf.find_wall` (1.37; a block's `world` and the break option `world`, 1.38) | v44, v45 | queries full; breaking partial (as C) |
 | `emf.villager_move`, `emf.villager_move_cancel`, `emf.villager_moving` (1.39) | v46 | not yet |
 | `emf.spawn(..., components, {yaw = degrees})` (1.40) | v47 `spawn_facing` through `kiln.spawn` | full |
-| `emf.find_wall(..., {terrain = true})`, `emf.break_blocks` terrain option, marker `bar` (1.40) | v47 block and marker additions above | not yet |
+| `emf.find_wall(..., {terrain = true})`, `emf.break_blocks` terrain option (1.40) | v47 block additions above | query full; breaking partial (as C) |
+| marker `bar` (1.40) | v47 marker addition above | not yet |
 
 ## Lifetime and host checks
 
