@@ -865,10 +865,9 @@ KilnResult Server::peer_up(const KilnMarkerPeer& p) {
     std::lock_guard g(mu_);
     if (Link* l = find_peer(p.peer)) {
         if (l->generation == p.generation) {  // the same connection: flags, player, limits (idempotent)
-            if (l->entity && l->entity != p.entity) {
-                drop_targets(*l, KILN_MARKER_PEER_LEFT);  // another player on this connection: its overrides are not theirs
-                l->identity = ++identities_;
-            }
+            // A new entity id on the same connection is the same player (dying and respawning, a recreated player
+            // entity): a connection carries one player and a new character comes with a new connection, so the
+            // per-player layer stays; Send(player) resolves the current id at admission (review question, 2026-11-22).
             const bool gained = !(l->flags & kHasPlayer) && (p.flags & kHasPlayer);
             l->route = p.route;
             l->entity = p.entity;
