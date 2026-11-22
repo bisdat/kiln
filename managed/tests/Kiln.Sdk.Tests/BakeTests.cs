@@ -88,7 +88,7 @@ public sealed class BakedModTests
             Assert.Equal($"0x{BlockIds.Fnv(BlockIds.Derive("tool-bake-runtime","recipe","recipes/recipe")):x8}",(string?)knowledge["track.made"]!["id"]);
             var second=Baker.Run(folder,new BakeOptions {WorldTables=true});
             Assert.Empty(second.Warnings);Assert.Contains("blocks.tables.json",second.Unchanged);Assert.Equal(first,File.ReadAllText(path));
-            Assert.Contains(questFile,second.Unchanged);Assert.Equal(firstKnowledge,File.ReadAllText(questPath));
+            Assert.Contains(questFile.Replace('\\','/'),second.Unchanged);Assert.Equal(firstKnowledge,File.ReadAllText(questPath));
         } finally {Directory.Delete(folder,true);}
     }
 
