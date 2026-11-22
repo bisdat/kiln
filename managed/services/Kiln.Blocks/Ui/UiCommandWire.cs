@@ -267,6 +267,22 @@ internal static class UiCommandChannel
             $"the receiver runs joined players' commands as those players{(client ? "; this game can send its own" : "")}");
     }
 
+    /// <summary>The row before <see cref="Start"/> ran (Kiln.Blocks' rows at their first report): it says why it is off, so
+    /// that a call marked with it explains itself also before the start. Start reports the real state; nothing here
+    /// overwrites it afterwards.</summary>
+    internal static void ReportBeforeStart()
+    {
+        if (Volatile.Read(ref _started) != 0) return;
+        bool net;
+        try { net = Network.Available; }
+        catch (Exception e) when (e is InvalidOperationException or TypeLoadException or FileNotFoundException) { net = false; }
+        if (!net)
+            ServiceCaps.Report(BlockUi.ServerCommandCapability, CapabilityState.Unavailable, CapabilityReason.ServiceMissing, "kiln.net is not here: no command reaches a server");
+        else
+            ServiceCaps.Report(BlockUi.ServerCommandCapability, CapabilityState.Pending, CapabilityReason.Session,
+                $"{UiCommandWire.ChannelName} opens at Kiln.Blocks' start (the first service tick)");
+    }
+
     private static void Register<T>(ushort id, Action<T, NetContext> handler, NetDirection direction) where T : class =>
         _channel!.Register<T>(id, static (m, w) => w.Raw(UiCommandWire.Encode(m)), static (ref NetReader r) => UiCommandWire.Decode<T>(r.Rest()), handler, direction);
 
