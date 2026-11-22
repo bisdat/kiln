@@ -64,6 +64,42 @@ class NpcBodies(unittest.TestCase):
         self.assertEqual(json.loads((self.mod / "assets/assets.json").read_text())["entries"], run.entries)
         self.assertFalse((self.mod / "assets/npc-bodies.v1.json").exists())
 
+    def test_commented_manifest_does_not_break_a_creature_only_cook(self):
+        self.doc["creatures"] = self.doc.pop("npcs")
+        del self.doc["creatures"]["tobin"]["motions"]
+        self.write()
+        (self.mod / "kiln.mod.json").write_text('{ // an ordinary manifest\n "id": "npc-mod", "clients": "mod", }')
+        self.assertTrue(R.Run(self.recipe, TYPES).run(update_manifest=True)["ok"])
+
+    def test_commented_manifest_resolves_same_mod_body_parts(self):
+        npc = self.doc["npcs"]["tobin"]
+        self.doc["bodies"] = {"rig": npc["body"]}
+        npc["body"] = "npc-mod:rig"
+        self.write()
+        (self.mod / "kiln.mod.json").write_text('{ // authored body\n "id": "npc-mod", "clients": "mod", }')
+        self.assertTrue(R.Run(self.recipe, TYPES).run(update_manifest=True)["ok"])
+
+    def test_manifest_id_is_only_needed_for_qualified_parts(self):
+        (self.mod / "kiln.mod.json").write_text('[]')
+        self.assertIn("tobin", B.npc_bodies(self.mod))
+        self.doc["npcs"]["tobin"]["body"] = "npc-mod:rig"
+        self.write()
+        with self.assertRaisesRegex(B.BlocksError, "kiln.mod.json"):
+            B.npc_bodies(self.mod)
+
+    def test_materials_without_graph_metadata_read_a_relaxed_mod_id(self):
+        from anicook.graphgen import derive
+        R.Run(self.recipe, TYPES).run(update_manifest=True)
+        entries = self.stage_model()
+        path = self.mod / "assets/cooked/models_golem.model.json"
+        model = json.loads(path.read_text())
+        model["materials"] = [derive("npc-mod", "material", "skin")]
+        path.write_text(json.dumps(model))
+        (self.mod / "assets/cooked/tobin.animation.tobin.body.graph.json").unlink()
+        (self.mod / "blocks/skin.json").write_text(json.dumps({"materials": {"skin": {"roughness": 0.5}}}))
+        (self.mod / "kiln.mod.json").write_text('{ // material id\n "id": "npc-mod", }')
+        self.assertEqual(([], [], []), B.body_manifest(self.recipe, entries, True))
+
     def stage_model(self):
         # The model emitter's output is synthetic: the split seam needs no installed game.
         model = self.mod / "assets/cooked/models_golem.model.bin"

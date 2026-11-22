@@ -158,9 +158,10 @@ def mod_id(doc, recipe_path):
     for d in Path(recipe_path).resolve().parents:
         m = d / "kiln.mod.json"
         if m.exists():
-            import re
-            text = re.sub(r"^\s*//.*$", "", m.read_text(), flags=re.M)
-            return json.loads(re.sub(r",(\s*[}\]])", r"\1", text))["id"]
+            try:
+                return B._manifest_id(d)
+            except B.BlocksError as error:
+                raise RecipeError(str(error)) from error
     raise RecipeError(f"{recipe_path}: no \"mod\" and no kiln.mod.json above it: ids need the mod's id")
 
 

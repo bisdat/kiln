@@ -371,6 +371,17 @@ MOTION_ROLES = ("sit", "sleep", "inspect", "greet", "talk", "reaction0", "reacti
 FISHER_INTERACTION = "81ed77f9-4c72-4730-8b05-a5ddee9c7164"
 
 
+def _manifest_id(root):
+    """Read only when a qualified part or material needs the id; manifests use the loader's relaxed JSON dialect."""
+    try:
+        document = json.loads(_relaxed((Path(root) / "kiln.mod.json").read_text()))
+    except (OSError, ValueError) as error:
+        raise BlocksError(f"kiln.mod.json: cannot read the mod id: {error}") from error
+    if not isinstance(document, dict) or not isinstance(document.get("id"), str) or not document["id"].strip():
+        raise BlocksError("kiln.mod.json: a manifest object with a nonempty mod id is required")
+    return document["id"]
+
+
 def npc_bodies(mod_dir):
     """Resolve same-mod NPC parts without exposing game reflection names. Returns source specs in deterministic block order."""
     root = Path(mod_dir)
@@ -389,9 +400,6 @@ def npc_bodies(mod_dir):
                 # The existing block loader lets the later definition replace an earlier one (lint warns).
                 # Merely adding body planning must not turn ordinary duplicate body definitions into cook errors.
                 into[name] = b
-    manifest = root / "kiln.mod.json"
-    mod = json.loads(manifest.read_text()).get("id") if manifest.is_file() else None
-
     def part(npc, name, field, section):
         value = npc.get(field)
         if isinstance(value, dict):
@@ -400,7 +408,7 @@ def npc_bodies(mod_dir):
             local = value
             if ":" in local:
                 owner, local = local.split(":", 1)
-                if owner != mod:
+                if owner != _manifest_id(root):
                     if field == "body" and not npc.get("motions") and not npc.get("animation"):
                         return local, None  # an existing vanilla-body reference is not this cook's closure
                     raise BlocksError(f"npcs.{name}.{field}: cross-mod body dependencies are not supported")
@@ -667,7 +675,7 @@ def body_manifest(recipe_path, entries, update, selected=None, producer="modelco
             for material_file in sorted((Path(root) / "blocks").glob("*.json")):
                 document = json.loads(_relaxed(CP.source(recipe_path, material_file.relative_to(root).as_posix()).read_text()))
                 for key, block in (document.get("materials") or {}).items():
-                    if not model or derive(graph["mod"] if graph else json.loads((Path(root) / "kiln.mod.json").read_text())["id"], "material", block.get("was") or key) not in model.get("materials", []):
+                    if not model or derive(graph["mod"] if graph else _manifest_id(root), "material", block.get("was") or key) not in model.get("materials", []):
                         continue
                     item = dependency(material_file.relative_to(root).as_posix())
                     if item not in materials:
