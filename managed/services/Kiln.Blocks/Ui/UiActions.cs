@@ -60,7 +60,7 @@ internal static class UiActions
                 case WindowActionPlan w:
                     if (UiRuntime.FindWindow(w.Mod, w.Window) is { } window)
                     {
-                        if (w.Open) window.Open();
+                        if (w.Toggle ? !window.IsOpen : w.Open) window.Open();
                         else window.Close();
                     }
                     else UiRuntime.Backend.Toast(KilnText.T("blocks.toast.no_window", ("window", $"{w.Mod}:{w.Window}")), ToastKind.Warning);

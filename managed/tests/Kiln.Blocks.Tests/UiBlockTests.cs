@@ -1102,6 +1102,35 @@ public sealed class UiBlockTests : IDisposable
         Assert.Equal([("clock.show", (object?)false)], _clock.Sets);
     }
 
+    [Fact]
+    public void The_UiBlocks_samples_camp_key_opens_and_closes_the_camp_window_also_while_it_has_the_keyboard()
+    {
+        // The guided check 09-ui-blocks closes and reopens Camp with Ctrl+F9 (review M2): its key toggles the window, and it
+        // fires while the open window takes the keyboard (whileCapturing).
+        var file = Path.Combine(SampleDir(), "blocks", "camp.json");
+        using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(file));
+        var key = Json<KeyBindingBlock>(doc.RootElement.GetProperty("keyBindings").GetProperty("open-camp").GetRawText());
+        Assert.Equal("Ctrl+F9", key.Key);
+        Assert.True(key.WhileCapturing);
+        var mod = Define("camp", new WindowBlock { Title = "Camp", Rows = [Text("x")] });
+        Define("open-camp", key, mod);
+        var camp = Assert.Single(_game.Surfaces);
+        var press = Assert.Single(_game.Keys).Press;
+        press();
+        Assert.True(camp.IsOpen);
+        press();
+        Assert.False(camp.IsOpen);
+        press();
+        Assert.True(camp.IsOpen);
+    }
+
+    private static string SampleDir([System.Runtime.CompilerServices.CallerFilePath] string self = "")
+    {
+        for (var d = new DirectoryInfo(Path.GetDirectoryName(self)!); d != null; d = d.Parent)
+            if (File.Exists(Path.Combine(d.FullName, "VERSION"))) return Path.Combine(d.FullName, "mods", "samples", "UiBlocks");
+        throw new DirectoryNotFoundException("no repository");
+    }
+
     // ---- reload and a server -----------------------------------------------------------------------------------------------------
 
     [Fact]

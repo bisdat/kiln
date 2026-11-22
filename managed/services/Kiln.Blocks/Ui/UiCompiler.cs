@@ -67,9 +67,9 @@ internal sealed record CastPlan(string AbilityId, string? Effect = null) : Actio
     public override JsonObject Describe() => Effect == null ? new JsonObject { ["castAbility"] = AbilityId } : new JsonObject { ["applyEffect"] = Effect, ["viaAbility"] = AbilityId };
 }
 
-internal sealed record WindowActionPlan(string Mod, string Window, bool Open) : ActionPlan
+internal sealed record WindowActionPlan(string Mod, string Window, bool Open, bool Toggle = false) : ActionPlan
 {
-    public override JsonObject Describe() => new() { [Open ? "openWindow" : "closeWindow"] = $"{Mod}:{Window}" };
+    public override JsonObject Describe() => new() { [Toggle ? "toggleWindow" : Open ? "openWindow" : "closeWindow"] = $"{Mod}:{Window}" };
 }
 
 internal sealed record ToastPlan(UiText Text) : ActionPlan
@@ -263,7 +263,7 @@ internal static class UiCompile
     /// <summary>An action's plan. <paramref name="owner"/> is the block's name, for what an applied effect is called.</summary>
     internal static ActionPlan Action(BlockContext ctx, Lowered low, string owner, UiAction? a, string path)
     {
-        if (a == null) throw Fail(ctx, path, "needs an action: command, toggle, set, castAbility, applyEffect, openWindow, closeWindow or toast");
+        if (a == null) throw Fail(ctx, path, "needs an action: command, toggle, set, castAbility, applyEffect, openWindow, closeWindow, toggleWindow or toast");
         var given = new List<string>();
         if (a.Command != null) given.Add("command");
         if (a.Toggle != null) given.Add("toggle");
@@ -272,13 +272,14 @@ internal static class UiCompile
         if (a.ApplyEffect != null) given.Add("applyEffect");
         if (a.OpenWindow != null) given.Add("openWindow");
         if (a.CloseWindow != null) given.Add("closeWindow");
+        if (a.ToggleWindow != null) given.Add("toggleWindow");
         if (a.Toast != null) given.Add("toast");
         if (a.CommandTarget is { } target)
         {
             if (a.Command == null) throw Fail(ctx, $"{path}.commandTarget", "goes with a command only: it says where the command runs (local or server)");
             if (target is not (UiCommandTarget.Local or UiCommandTarget.Server)) throw Fail(ctx, $"{path}.commandTarget", "is local or server");
         }
-        if (given.Count == 0) throw Fail(ctx, path, "an action does something: give it one of command, toggle, set, castAbility, applyEffect, openWindow, closeWindow, toast");
+        if (given.Count == 0) throw Fail(ctx, path, "an action does something: give it one of command, toggle, set, castAbility, applyEffect, openWindow, closeWindow, toggleWindow, toast");
         if (given.Count > 1) throw Fail(ctx, path, $"an action does one thing, and this has {string.Join(" and ", given)}: use one button or key for each");
 
         if (a.Command is { } command)
@@ -312,6 +313,7 @@ internal static class UiCompile
         if (a.ApplyEffect is { } effect) return ApplyEffect(ctx, low, owner, effect, $"{path}.applyEffect");
         if (a.OpenWindow is { } open) return WindowAction(ctx, low, open, true, $"{path}.openWindow");
         if (a.CloseWindow is { } close) return WindowAction(ctx, low, close, false, $"{path}.closeWindow");
+        if (a.ToggleWindow is { } toggle) return (WindowActionPlan)WindowAction(ctx, low, toggle, true, $"{path}.toggleWindow") with { Toggle = true };
         var toast = Line(ctx, a.Toast, $"{path}.toast", templated: false, required: true, "a toast");
         return new ToastPlan(toast.Text);
     }

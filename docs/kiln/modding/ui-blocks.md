@@ -120,6 +120,7 @@ A button's `does` and a key's `does` are the same record: **exactly one** of the
 | `castAbility` | asks the **server** to cast an ability block of this mod (`"other-mod:name"` for another's), as its key would: its costs and cooldown apply, and a refusal is a toast | a message to the server |
 | `applyEffect` | applies an effect block, or an effect written in place, to the player, through a hidden ability `ui-apply.<name>` Kiln makes for it (one per effect) | a message to the server |
 | `openWindow`, `closeWindow` | opens or closes a window block of this mod (or `"other-mod:name"`'s) | this game |
+| `toggleWindow` (since 0.2.0-dev.31, mod API 0.2.16) | opens the window when it is closed, closes it when it is open; a key that toggles an interactive window needs `"whileCapturing": true` to close it (the open window takes the keyboard) | this game |
 | `toast` | a short message in the corner of the screen | this game |
 
 Limits worth knowing:
@@ -292,7 +293,7 @@ What only a game with the mod can confirm (the unit tests and the dedicated-serv
 6. Open the Kiln menu's **Keys** tab: `ui-blocks:open-settings` is there under the mod's name, and rebinding it keeps through a restart.
 7. Join a server, open **Settings** with a server config bound: the row reads as text, not a widget.
 8. Switch the game's language: the menu entries and the screen's title follow; a window's title follows at its next opening.
-9. (0.2.0-dev.31, Camp window, Ctrl+F9) Type non-ASCII text in **Note**, use Backspace, Tab and Enter: nothing reaches the chat, no movement key sticks after closing; Escape puts the old text back.
+9. (0.2.0-dev.31, Camp window, Ctrl+F9 opens and closes it) Type non-ASCII text in **Note**, use Backspace, Tab and Enter: nothing reaches the chat; walk (hold W), open Camp with Ctrl+F9 while holding W, let go: the character stops; Escape puts the old text back.
 10. Switch tabs, open and close a branch of **Map**, select a quest, see the picture; close and open the window: all kept; leave the world and come back: reset.
 11. The local values follow the game (health, position, slots used); **World hour** shows when hosting and says "not shown" on a joined world.
 12. **Rest at the fire** on a joined Kiln server with the mod: the server log shows the player as the command's source, the toast says the reply, **Rests at the fire** goes up. On a vanilla server: the "cannot run UI commands" toast and nothing else.

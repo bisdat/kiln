@@ -2012,7 +2012,7 @@ fn blocks(out: &mut Out, m: &LMod, code: &Code, cat: Option<&Catalog>) {
             "applies" | "status" | "feeds" | "removes" | "keeps" => (&["status"], "a status", &[]),
             "casts" | "unlocks" | "castAbility" => (&["ability"], "an ability", &[]),
             "applyEffect" => (&["effect"], "an effect", &[]),
-            "openWindow" | "closeWindow" => (&["window"], "a window", &[]),
+            "openWindow" | "closeWindow" | "toggleWindow" => (&["window"], "a window", &[]),
             "visual" => (&["look"], "a look", &[]),
             "head" | "chest" | "arms" | "legs" | "feet" => (&["look", "worn look"], "a look or a worn look", &[]),
             "stats" => (&["weapon stats", "armor stats"], "stats", &[]),

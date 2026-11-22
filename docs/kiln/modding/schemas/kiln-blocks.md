@@ -1864,7 +1864,7 @@ Type: object
 
 ## uiAction
 
-What a button or a key does: exactly one of command, toggle, set, castAbility, applyEffect, openWindow, closeWindow, toast (a command may add commandTarget). Runs on the player's game, never on a dedicated server.
+What a button or a key does: exactly one of command, toggle, set, castAbility, applyEffect, openWindow, closeWindow, toggleWindow, toast (a command may add commandTarget). Runs on the player's game, never on a dedicated server.
 
 | Key | Type | Required | Notes |
 |---|---|---|---|
@@ -1877,6 +1877,7 @@ What a button or a key does: exactly one of command, toggle, set, castAbility, a
 | `set` | [uiSet](#uiset) |  |  |
 | `toast` | [uiText](#uitext) |  | A short message in the corner of the screen. |
 | `toggle` | [uiBind](#uibind) |  | Flips a true/false config entry. |
+| `toggleWindow` | [ref](#ref) |  | Opens a window block when it is closed, closes it when it is open (since 0.2.0-dev.31). A key that toggles an interactive window needs whileCapturing to close it. |
 
 ## uiBind
 

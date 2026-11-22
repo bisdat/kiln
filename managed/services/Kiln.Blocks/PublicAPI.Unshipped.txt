@@ -1297,3 +1297,5 @@ Kiln.UiStatImportRegistration.Dispose() -> void
 Kiln.UiStatImportRegistration.Key.get -> Kiln.ModValueKey
 Kiln.UiStatImportRegistration.Reason.get -> string?
 Kiln.UiStatImportRegistration.Ok.get -> bool
+Kiln.UiAction.ToggleWindow.get -> Kiln.WindowRef?
+Kiln.UiAction.ToggleWindow.init -> void

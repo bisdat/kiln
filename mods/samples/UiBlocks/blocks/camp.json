@@ -208,9 +208,10 @@
   "keyBindings": {
     "open-camp": {
       "key": "Ctrl+F9",
-      "description": "Open the camp window (UI blocks sample)",
+      "description": "Open or close the camp window (UI blocks sample)",
+      "whileCapturing": true,
       "does": {
-        "openWindow": "camp"
+        "toggleWindow": "camp"
       }
     }
   }
