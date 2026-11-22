@@ -7,7 +7,8 @@
 //!
 //! A `running` file that is not of the game that runs now (the game crashed or was killed mid-run, or the file is from an
 //! earlier start) says nothing: it counts only while the game's process runs, the file was written after that process
-//! started (the same rule as `launch::boot_is_current`) and was written in the last few seconds.
+//! started (the same rule as `launch::boot_is_current`) and was written in the last few seconds ([`STALE`]; a startup
+//! pass's in the last two minutes, [`STARTUP_STALE`]).
 
 use crate::game::GameInstall;
 use crate::Result;
@@ -19,6 +20,13 @@ pub const EML_JSON: &str = "kiln/state/eml.json";
 
 /// A running file older than this was left by a process that is gone or stuck (the writer touches it every second).
 pub const STALE: Duration = Duration::from_secs(15);
+
+/// [`STALE`] for a kiln-mode start's startup pass (stage `startup`). It writes the file when a step begins and while it
+/// moves bytes, never on a timer: it may run while a package DLL's initializer holds the loader lock, so it starts no
+/// thread to touch the file (kiln-eml progress.rs `PassSteps`). Its steps that move no bytes (the wait for kiln-sfi's
+/// terminal, up to 20 s; the packages' startup code; a slow flush to the drive) can outlast `STALE`, so its file counts
+/// as long as the start timeline waits for the early plugins (`start_progress::QUIET_EARLY_MS`).
+pub const STARTUP_STALE: Duration = Duration::from_millis(crate::start_progress::QUIET_EARLY_MS);
 
 /// No byte read for this long while reading: the line says so.
 const QUIET: u64 = 15_000;
@@ -160,11 +168,22 @@ pub fn parse(text: &str) -> Option<PreStart> {
 /// Does a running file written at `written` belong to the game process that started at `started` and still say something
 /// at `now`? An unknown start counts as current (the process runs and the file is fresh), an unknown write time as not.
 pub fn is_current(written: Option<SystemTime>, started: Option<SystemTime>, now: SystemTime) -> bool {
+    is_current_within(written, started, now, STALE)
+}
+
+/// `is_current` for a file that may go unwritten for `stale` (`stale_after` its stage).
+pub fn is_current_within(written: Option<SystemTime>, started: Option<SystemTime>, now: SystemTime, stale: Duration) -> bool {
     let Some(written) = written else { return false };
-    if now.duration_since(written).is_ok_and(|age| age > STALE) {
+    if now.duration_since(written).is_ok_and(|age| age > stale) {
         return false;
     }
     crate::launch::written_after_start(Some(written), started)
+}
+
+/// How long a running file whose progress is at `stage` may go unwritten: [`STARTUP_STALE`] for a startup pass, else
+/// [`STALE`].
+pub fn stale_after(stage: &str) -> Duration {
+    if stage == "startup" { STARTUP_STALE } else { STALE }
 }
 
 /// What the game that runs now is doing before its window: None when no game runs, when `kiln/state/eml.json` is not a
@@ -173,11 +192,13 @@ pub fn read(install: &GameInstall) -> Result<Option<PreStart>> {
     let Some(process) = crate::proc::find_game(install)? else { return Ok(None) };
     let path = install.path.join(EML_JSON);
     let written = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
-    if !is_current(written, crate::proc::start_time(process.pid), SystemTime::now()) {
+    let started = crate::proc::start_time(process.pid);
+    // read only a file that can still count; then by its stage
+    if !is_current_within(written, started, SystemTime::now(), STALE.max(STARTUP_STALE)) {
         return Ok(None);
     }
     let Ok(text) = std::fs::read_to_string(&path) else { return Ok(None) };
-    Ok(parse(&text))
+    Ok(parse(&text).filter(|p| is_current_within(written, started, SystemTime::now(), stale_after(&p.stage))))
 }
 
 #[cfg(test)]
@@ -271,5 +292,22 @@ mod tests {
         assert!(!is_current(None, Some(ago(60)), now));
         // a clock that went back a little: not stale
         assert!(is_current(Some(now + Duration::from_secs(1)), Some(ago(60)), now));
+    }
+
+    #[test]
+    fn a_startup_pass_file_counts_through_the_steps_that_move_no_bytes() {
+        // kiln-eml's startup pass writes the file when a step begins and while it moves bytes, never on a timer: the wait
+        // for kiln-sfi's terminal (up to 20 s), the packages' startup code or a slow flush leave it unwritten for longer
+        // than STALE, and the launch status keeps naming the step meanwhile
+        let now = SystemTime::now();
+        let ago = |s: u64| now - Duration::from_secs(s);
+        assert!(is_current_within(Some(ago(40)), Some(ago(60)), now, stale_after("startup")));
+        // the EML stages keep theirs: that writer touches the file every second
+        assert_eq!(stale_after("mods"), STALE);
+        assert!(!is_current_within(Some(ago(40)), Some(ago(60)), now, stale_after("checking")));
+        // a pass that wrote nothing for longer than the start timeline waits for the early plugins: stale too
+        assert!(!is_current_within(Some(ago(130)), Some(ago(200)), now, stale_after("startup")));
+        // and never a file of an earlier start
+        assert!(!is_current_within(Some(ago(40)), Some(ago(30)), now, stale_after("startup")));
     }
 }
