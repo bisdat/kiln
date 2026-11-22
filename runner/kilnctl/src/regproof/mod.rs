@@ -94,7 +94,7 @@ pub struct Proof {
 const MAX_WHY: usize = 8;
 
 fn short(s: &str) -> &str {
-    &s[..s.len().min(12)]
+    s.get(..12).unwrap_or(s)
 }
 
 /// Runs every step on the inputs and decides each row and the record.

@@ -125,7 +125,7 @@ pub fn usable<'a>(side: &str, exe_sha256: &str, suites: &'a [Suite], problems: &
         if s.side != side {
             problems.push(format!("a {} suite of the {} side was set aside (this is the {side} side's proof)", s.generation, s.side));
         } else if !s.exe_sha256.eq_ignore_ascii_case(exe_sha256) {
-            problems.push(format!("a {} suite of another exe ({}) was set aside", s.generation, &s.exe_sha256[..s.exe_sha256.len().min(12)]));
+            problems.push(format!("a {} suite of another exe ({}) was set aside", s.generation, s.exe_sha256.get(..12).unwrap_or(&s.exe_sha256)));
         } else if s.generation != "live" && s.generation != "boot" {
             problems.push(format!("a suite of generation {:?} was set aside (live or boot)", s.generation));
         } else {

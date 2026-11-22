@@ -158,7 +158,7 @@ pub fn diff(old: &Export, new: &Export, side: &str, old_exe: &str, new_exe: &str
 }
 
 fn short(s: &str) -> &str {
-    &s[..s.len().min(12)]
+    s.get(..12).unwrap_or(s)
 }
 
 /// The diff as text for the reviewer (and the players' changelog).
@@ -283,6 +283,14 @@ pub(crate) mod tests {
         assert!(!diff(&export(OLD, "100", "none", old_values()), &client, "server", OLD, NEW).ok);
         let d = diff(&export(OLD, "100", "none", old_values()), &export(OLD, "100", "none", old_values()), "server", OLD, NEW);
         assert!(!d.ok && d.problems.iter().any(|p| p.contains("new export")), "{:?}", d.problems);
+    }
+
+    #[test]
+    fn a_malformed_exe_hash_is_named_without_a_panic() {
+        let odd = export(&format!("a{}", "\u{e9}".repeat(40)), "101", "none", new_values()); // byte 12 inside a character
+        let d = diff(&export(OLD, "100", "none", old_values()), &odd, "server", OLD, NEW);
+        assert!(!d.ok && d.problems.iter().any(|p| p.contains("new export is of exe")), "{:?}", d.problems);
+        assert!(changelog(&d).contains("PROBLEM"));
     }
 
     #[test]
