@@ -129,10 +129,11 @@ export default {
   // Kiln: no Guardian server copies here (see the header)
   serverState: () => ({ configurado: false, erro: null }),
   serverStamp: async () => null,
-  async openSave(path) {
+  async openSave(path, isCurrent = () => true) {
     const s = await load(path);
-    sessions.set(path, s);
     const { modified } = await invoke('file_info', { path });
+    // A superseded read must not replace the opaque save blocks that the current model will be written over.
+    if (isCurrent()) sessions.set(path, s);
     return publicModel(path, modified, s);
   },
   async browseSave() {
