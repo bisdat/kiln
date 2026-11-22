@@ -162,6 +162,8 @@ public:
     // Every received record goes: one CLEARED per nonempty namespace.
     void received_clear(uint32_t cause);
     uint32_t received_count() const;
+    // Received records left out because their new text was over a budget (all links, ever): for logs and tests.
+    uint64_t received_text_skips() const;
     // The store's clock (steady milliseconds; tests set their own).
     void set_clock(uint64_t (*clock)()) { clock_ = clock; }
 
@@ -210,7 +212,8 @@ private:
     std::map<RKey, RRow> received_;
     std::map<std::pair<std::string, uint64_t>, uint64_t, std::less<>> virtual_;  // (namespace, server generation) -> virtual generation
     std::map<std::string, uint64_t, std::less<>> received_charged_;  // new arena bytes per received namespace, ever
-    uint64_t received_text_ = 0;   // ... in all
+    uint64_t received_text_ = 0;   // ... in all (both per link: reset by a new link and clear_received)
+    uint64_t received_text_skips_ = 0;
     uint64_t received_link_ = 0;   // the peer generation of the received view
     uint64_t (*clock_)() = nullptr;
 

@@ -516,6 +516,12 @@ bool Store::received_apply(uint64_t peer_generation, const std::vector<ReceivedR
     };
     std::lock_guard g(mu_);
     const uint64_t now = clock_ ? clock_() : steady_ms();
+    // received text is charged per link: a new link (another server, a reconnect, a link that was reset) starts with fresh
+    // budgets; the arena keeps the bytes and its 4 MiB process cap still bounds them
+    if (peer_generation != received_link_) {
+        received_charged_.clear();
+        received_text_ = 0;
+    }
     // the projected view's keys
     std::map<RKey, const ReceivedRecord*> up;
     for (const ReceivedRecord& r : upserts)
@@ -538,26 +544,34 @@ bool Store::received_apply(uint64_t peer_generation, const std::vector<ReceivedR
     if (local_total_ + total > kClientRecords) return fail("Full: more than 1024 markers on this client (local and received)");
     for (const auto& [ns, n] : per_ns)
         if (n > kPerNamespace) return fail("Full: more than 128 received markers in one namespace");
-    // text: what is new to the arena, per namespace and in all
+    // text: what is new to the arena, per namespace and in all. A record whose new text would pass its namespace's budget
+    // (256 KiB per link), the received budget (1 MiB per link) or the arena (4 MiB per process) is left out of this
+    // transaction alone: an existing row keeps its last value, a new one is not added; everything else applies.
     std::map<std::string, uint64_t, std::less<>> need;
     std::vector<std::string_view> fresh;
+    std::vector<RKey> skip;
     uint64_t need_total = 0;
     for (const auto& [k, r] : up) {
         const std::string_view t = r->rec.text;
         if (t.empty() || arena_.contains(t) || std::find(fresh.begin(), fresh.end(), t) != fresh.end()) continue;
+        const std::string& ns = std::get<0>(k);
+        auto it = received_charged_.find(ns);
+        const uint64_t ns_used = (it == received_charged_.end() ? 0 : it->second) + need[ns];
+        if (ns_used + t.size() > Arena::kNamespaceBytes || received_text_ + need_total + t.size() > kReceivedTextBytes ||
+            arena_.used() + need_total + t.size() > Arena::kGlobalBytes) {
+            skip.push_back(k);
+            continue;
+        }
         fresh.push_back(t);
-        need[std::get<0>(k)] += t.size();
+        need[ns] += t.size();
         need_total += t.size();
     }
-    for (const auto& [ns, n] : need) {
-        auto it = received_charged_.find(ns);
-        if ((it == received_charged_.end() ? 0 : it->second) + n > Arena::kNamespaceBytes) return fail("Full: a received namespace's text budget (256 KiB) is spent");
-    }
-    if (received_text_ + need_total > kReceivedTextBytes) return fail("Full: the received text budget (1 MiB) is spent");
-    if (arena_.used() + need_total > Arena::kGlobalBytes) return fail("Full: the marker text budget (4 MiB) is spent");
+    const auto skipped = [&](const RKey& k) { return std::find(skip.begin(), skip.end(), k) != skip.end(); };
+    received_text_skips_ += skip.size();
     // intern (cannot fail now), then commit
     std::map<RKey, std::string_view> interned;
     for (const auto& [k, r] : up) {
+        if (skipped(k)) continue;
         uint64_t& charged = received_charged_[std::get<0>(k)];
         const uint64_t before = charged;
         std::string_view v;
@@ -580,6 +594,7 @@ bool Store::received_apply(uint64_t peer_generation, const std::vector<ReceivedR
     }
     // upserts
     for (const auto& [k, r] : up) {
+        if (skipped(k)) continue;
         Record rec = r->rec;
         rec.text = interned[k];
         const KilnVec3 at{rec.x, rec.y, rec.z};
@@ -654,11 +669,18 @@ void Store::clear_received(uint32_t cause) {
     received_.clear();
     virtual_.clear();
     received_total_ = 0;
+    received_charged_.clear();  // the budgets are per link (received_apply)
+    received_text_ = 0;
 }
 
 void Store::received_clear(uint32_t cause) {
     std::lock_guard g(mu_);
     clear_received(cause);
+}
+
+uint64_t Store::received_text_skips() const {
+    std::lock_guard g(mu_);
+    return received_text_skips_;
 }
 
 uint32_t Store::received_count() const {

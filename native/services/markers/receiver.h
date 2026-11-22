@@ -142,6 +142,8 @@ private:
     std::vector<uint64_t> bad_;
     uint64_t suspended_until_ = 0;
     uint64_t last_bad_log_ = 0;
+    uint64_t text_skips_seen_ = 0;  // the store's received_text_skips() at the last check (note_text_skips)
+    void note_text_skips();         // logs once per new skip that a received record kept its last value (text over budget)
     uint64_t resync_at_[2] = {0, 0};
     bool want_resync_ = false;
     uint8_t resync_reason_ = 0;

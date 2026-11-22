@@ -67,6 +67,15 @@ void Receiver::mint_nonce() {
 }
 
 // The link starts over: its records go (one CLEARED per namespace, cause), staging and the tuple go; a new nonce when asked.
+void Receiver::note_text_skips() {
+    const uint64_t s = store_.received_text_skips();
+    if (s == text_skips_seen_) return;
+    log(KILN_LOG_WARN, "markers: %llu received marker(s) kept their last value: a server mod's new marker text is over its budget "
+        "for this link (256 KiB of text per server mod, 1 MiB in all); the budget starts again with the next link",
+        static_cast<unsigned long long>(s - text_skips_seen_));
+    text_skips_seen_ = s;
+}
+
 void Receiver::reset_link(uint32_t cause, bool new_nonce) {
     if (store_.received_count()) store_.received_clear(cause);
     view_.clear();
@@ -367,6 +376,7 @@ void Receiver::advance_staging(uint64_t now) {
         ack(seq, wire::kAckFull, why);  // the prior view stays
         return;
     }
+    note_text_skips();
     view_.clear();
     for (const wire::Record* r : rows) view_[r->wire_id] = VRow{r->ns, r->publisher_generation, r->key, r->revision, r->followed != 0, r->source_reason, *r};
     applied_ = seq;
@@ -439,6 +449,7 @@ Receiver::Done Receiver::on_delta(const wire::Header& h, std::vector<wire::Delta
         ack(h.sequence, wire::kAckFull, why);
         return Done::Ok;
     }
+    note_text_skips();
     view_ = std::move(view);
     applied_ = h.sequence;
     ack(applied_, wire::kAckAccepted, {});

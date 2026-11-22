@@ -105,7 +105,9 @@ Kiln's own policy, not the game's: 128 markers per mod and source, 512 local and
 marker text per process and 256 KiB of new text per mod (kept until the game exits; the same text again costs nothing),
 64 mod ids per process. Following: 128 anchor leases per mod, 256 per world, 512 in all, 1024 watched entities; 128 local
 markers of a client may follow an entity; 64 waiting `CaptureAnchorAsync` calls per mod (256 in all). Received markers may
-add at most 1 MiB of new text (256 KiB per server mod). A server keeps at most 1024 definitions, 512 broadcast, 128 per mod across all players, 512
+add at most 1 MiB of new text per link to a server (256 KiB per server mod); a label whose text keeps changing (a countdown)
+uses this up, after which that one marker keeps its last text until the player's next link (a rejoin, another server),
+while other markers and mods keep updating. A server keeps at most 1024 definitions, 512 broadcast, 128 per mod across all players, 512
 effective per player and talks to at most 32 marker peers. Nothing is evicted: a call over a limit is refused with `Full`.
 
 ## Threads and errors

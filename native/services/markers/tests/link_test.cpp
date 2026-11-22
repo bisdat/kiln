@@ -1130,6 +1130,67 @@ void follow_references() {
     kmk_test::end("link.follow_references: one anchors reference per followed incarnation, given back by the last definition");
 }
 
+// Review F1: received text is charged per link generation, and a record over its namespace's budget is left at its last
+// value without refusing the transaction: other mods keep flowing, and a new server starts with a fresh budget.
+std::string padded(const std::string& head) {
+    std::string t = head;
+    t.resize(128, 'x');  // the longest legal text
+    return t;
+}
+
+void received_text_budget() {
+    kmk_test::begin();
+    World w;
+    Proc& p = w.client();
+    Conn& c1 = w.net.join(&p, 0x81, 101);
+    w.net.settle();
+    CHECK_EQ(w.srv.store.bind(6, KilnStr{"other", 5}), KILN_OK);
+    Spec o("o1", "Other mod's marker");
+    KilnMarkerResult r = res();
+    CHECK_EQ(w.srv.server->send(6, 0, &o, &r), KILN_OK);
+    w.net.settle();
+    CHECK(p.row("o1") != nullptr);
+    // one label whose text keeps changing (a countdown): every value is new text for the client
+    int delivered = 0;
+    std::string last;
+    for (int i = 0; i < 2600; ++i) {
+        Spec clock("clock", padded("Event ends in " + std::to_string(i) + " "));
+        w.send(0, clock);
+        w.net.step(3);
+        const ClientRow* row = p.row("clock");
+        if (row && std::string(row->rec.text) == clock.text) {
+            ++delivered;
+            last = clock.text;
+        }
+    }
+    CHECK(delivered >= 2000 && delivered < 2600);  // the namespace's 256 KiB of received text holds per link
+    const ClientRow* row = p.row("clock");
+    CHECK(row && std::string(row->rec.text) == last);  // kept at its last value, not removed
+    Server::LinkInfo li;
+    CHECK(w.srv.server->link_info(0x81, &li));
+    CHECK_EQ(li.refused, 0u);  // the link is not refused
+    CHECK(!li.stalled);
+    Spec o2("o2", "Other mod's second marker");
+    r = res();
+    CHECK_EQ(w.srv.server->send(6, 0, &o2, &r), KILN_OK);
+    CHECK(r.queued == 1 && r.refused == 0);
+    w.net.settle();
+    CHECK(p.row("o2") != nullptr);  // another mod keeps flowing
+    // the player leaves and joins another server in the same process: a fresh budget
+    w.net.leave(c1);
+    p.receiver->world_stopping();
+    p.store.world_stopping(KILN_WORLD_CLIENT);
+    p.store.world_started(KILN_WORLD_CLIENT);
+    p.receiver->world_started();
+    World w2;
+    Spec hello("welcome", "Welcome!");
+    w2.send(0, hello);
+    w2.net.join(&p, 0x91, 201);
+    w2.net.settle();
+    CHECK(p.row("welcome") != nullptr);
+    kmk_test::end("link.received_text_budget: per link, one record over budget keeps its last value, others and a new server flow");
+}
+
 int main(int argc, char** argv) {
     g_verbose = argc > 1 && std::strcmp(argv[1], "-v") == 0;
     g_digest_hex = synthetic_catalog()->digest_hex();
@@ -1145,6 +1206,7 @@ int main(int argc, char** argv) {
     hosted_loopback();
     follow_poses();
     follow_references();
+    received_text_budget();
     limits();
     error_rule();
     client_world_stop();
