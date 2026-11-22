@@ -168,7 +168,8 @@ internal sealed unsafe class UiSnapshotFake : IKitFake
     {
         try
         {
-            if (r == null || r->Size < (uint)sizeof(UiSnapshotAbi.DemandResult) || owner == 0 || mask == 0 || (mask & ~UiSnapshotAbi.KnownMask) != 0)
+            // owner 0 is Kiln's own, as for the native service (kiln_ui_snapshot.cpp's alive(0))
+            if (r == null || r->Size < (uint)sizeof(UiSnapshotAbi.DemandResult) || mask == 0 || (mask & ~UiSnapshotAbi.KnownMask) != 0)
                 return FakeTables.InvalidArgument;
             if (!Live(out var st)) return FakeTables.Unavailable;
             lock (st.Lock)
@@ -208,7 +209,7 @@ internal sealed unsafe class UiSnapshotFake : IKitFake
     {
         try
         {
-            if (a == null || a->Size < (uint)sizeof(UiSnapshotAbi.Acquire) || owner == 0) return FakeTables.InvalidArgument;
+            if (a == null || a->Size < (uint)sizeof(UiSnapshotAbi.Acquire)) return FakeTables.InvalidArgument;
             if (!Live(out var st)) return FakeTables.Unavailable;
             lock (st.Lock)
             {

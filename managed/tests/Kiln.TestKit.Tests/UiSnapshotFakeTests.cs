@@ -205,7 +205,8 @@ public sealed unsafe class UiSnapshotFakeTests
             Assert.Equal(FakeTables.NotFound, T->DemandRemove(r.Handle));
             Assert.Equal(FakeTables.InvalidArgument, T->DemandAdd(77, 0, &r));
             Assert.Equal(FakeTables.InvalidArgument, T->DemandAdd(77, 16, &r));
-            Assert.Equal(FakeTables.InvalidArgument, T->DemandAdd(0, 1, &r));
+            Assert.Equal(0, T->DemandAdd(0, 1, &r));  // owner 0 is Kiln's own, as natively
+            Assert.Equal(1u, r.Ok);
             return 0;
         });
         kiln.UiSnapshot.Publish(new FakeWorldSample { Vitals = new FakeVitals(1, 2) });
@@ -215,6 +216,19 @@ public sealed unsafe class UiSnapshotFakeTests
         Assert.Equal(0, T->AcquireSnapshot(77, &a));
         Assert.Equal((0u, UiSnapshotAbi.Budget, 0ul), (a.Ok, a.Reason, a.Token));  // 2 tokens per owner
         Assert.Equal(2, kiln.UiSnapshot.Tokens);
+    }
+
+    [Fact]
+    public void AcquireTakesOwnerZeroAsTheNativeServiceDoes()
+    {
+        // review nit: kiln.ui.snapshot's acquire and demand_add take owner 0 (Kiln's own), so the fake does too
+        using var kiln = new KilnHarness();
+        kiln.Boot();
+        kiln.UiSnapshot.Publish(new FakeWorldSample());
+        var a = new UiSnapshotAbi.Acquire { Size = (uint)sizeof(UiSnapshotAbi.Acquire) };
+        Assert.Equal(0, T->AcquireSnapshot(0, &a));
+        Assert.Equal(1u, a.Ok);
+        Assert.Equal(0, T->Release(a.Token));
     }
 
     [Fact]
