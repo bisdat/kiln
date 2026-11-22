@@ -29,15 +29,19 @@ test("Start shows its progress at once and the result when the world runs", asyn
   await head.getByRole("button", { name: "Start", exact: true }).click();
   const panel = page.locator(".k-sact");
   await expect(panel).toBeVisible();
-  await expect(panel.getByText("Starting Lab server")).toBeVisible();
-  // the head says so before the next status read
-  await expect(head.getByText("Starting.")).toBeVisible();
+  await expect(panel.locator(".k-sact-title")).toHaveText("Starting Lab server");
+  // the head says so at once, from the start's step: the mock's status says starting only 1.5 s later, as the real one
+  // does once the process is there
+  await expect(head.getByText("Starting.")).toBeVisible({ timeout: 1000 });
   // the start task's own lines, as they come
   await expect(panel.locator(".k-sact-line")).toContainText(/started GE-Proton|Loading world|LoadEcsScene|chunks|HostOnline/);
   await shot(page, "1-starting");
-  await expect(panel).toHaveAttribute("data-state", "done", { timeout: 20_000 });
-  await expect(panel.getByText("Server running")).toBeVisible();
+  // details opened while it starts stay open when the server goes live (the page's frame remounts then)
   await panel.getByRole("button", { name: /Show details/ }).click();
+  await expect(panel.locator(".k-sact-lines")).toBeVisible();
+  await expect(panel).toHaveAttribute("data-state", "done", { timeout: 20_000 });
+  await expect(panel.locator(".k-sact-result")).toHaveText("Server running");
+  await expect(panel.locator(".k-sact-lines")).toBeVisible();
   // the task's five progress lines and its last one, oldest first
   const lines = panel.locator(".k-sact-lines li");
   await expect(lines).toHaveCount(6);
@@ -57,7 +61,7 @@ test("Update Kiln on a running server is one action: stop, install, start again,
   await shot(page, "3-update-dialog");
   await dlg.getByRole("button", { name: "Update", exact: true }).click();
   const panel = page.locator(".k-sact");
-  await expect(panel.getByText(/^Updating Lab server to Kiln /)).toBeVisible();
+  await expect(panel.locator(".k-sact-title")).toHaveText(/^Updating Lab server to Kiln /);
   const steps = panel.locator(".k-sact-step");
   await expect(steps).toHaveCount(3);
   await expect(steps.nth(0)).toHaveClass(/running|done/);
@@ -66,7 +70,7 @@ test("Update Kiln on a running server is one action: stop, install, start again,
   await expect(steps.nth(0)).toHaveClass(/done/);
   await expect(steps.nth(1)).toHaveClass(/done/);
   await expect(steps.nth(2)).toHaveClass(/done/);
-  await expect(panel.getByText(/Kiln .* installed/)).toBeVisible();
+  await expect(panel.locator(".k-sact-result")).toContainText(/Kiln .* installed/);
   await shot(page, "5-update-done");
 });
 
@@ -83,18 +87,41 @@ test("a failed install says why, skips the start, and offers Try again and the c
   await dlg.getByRole("button", { name: "Update", exact: true }).click();
   const panel = page.locator(".k-sact");
   await expect(panel).toHaveAttribute("data-state", "failed", { timeout: 20_000 });
-  await expect(panel.getByText("The server folder is read-only: /home/player/srv/enshrouded/lab/kiln")).toBeVisible();
+  await expect(panel.locator(".k-sact-error")).toContainText("The server folder is read-only: /home/player/srv/enshrouded/lab/kiln");
+  // screen readers hear the failure once, in the summary
+  await expect(panel.getByRole("status")).toHaveText(/failed: The server folder is read-only/);
   await expect(panel.locator(".k-sact-step").nth(1)).toHaveClass(/skipped/);
   await expect(panel.getByRole("button", { name: "Try again" })).toBeVisible();
   await expect(panel.getByRole("button", { name: "Open the console" })).toBeVisible();
   await shot(page, "6-update-failed");
 });
 
+test("Stop during a start takes over: the start stops waiting and the server stops", async ({ page }) => {
+  await open(page, "/servers/lab/overview");
+  await mock(page, "setServer", { running: false });
+  const head = page.locator(".k-server-head");
+  await head.getByRole("button", { name: "Start", exact: true }).click();
+  const panel = page.locator(".k-sact");
+  await expect(panel.getByRole("button", { name: "Stop waiting" })).toBeVisible();
+  await head.getByRole("button", { name: "Stop", exact: true }).click();
+  await expect(panel.locator(".k-sact-title")).toHaveText("Stopping Lab server");
+  await expect(panel).toHaveAttribute("data-state", "done", { timeout: 20_000 });
+  await expect(panel.locator(".k-sact-result")).toHaveText("Server stopped");
+  await expect(head.getByRole("button", { name: "Start", exact: true })).toBeEnabled();
+  // the interrupted start's late failure changes nothing
+  await page.waitForTimeout(4000);
+  await expect(panel).toHaveAttribute("data-flow", "stop");
+  await expect(head.getByText(/^Stopped\./)).toBeVisible();
+});
+
 test("the server list starts a server in place and shows its step and time", async ({ page }) => {
   await open(page, "/servers");
   await mock(page, "setServer", { running: false });
   const row = page.getByRole("table", { name: "Servers" }).getByRole("row").filter({ hasText: "Lab server" });
-  await row.getByRole("button", { name: "Start Lab server" }).click();
+  // the keyboard presses the row's button; it does not open the row
+  await row.getByRole("button", { name: "Start Lab server" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/#\/servers$/);
   await expect(row.locator(".k-sact-cell")).toContainText("Start the server");
   await shot(page, "7-list-starting");
   await expect(row.getByText("Running", { exact: true })).toBeVisible({ timeout: 20_000 });

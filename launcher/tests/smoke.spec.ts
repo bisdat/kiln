@@ -373,17 +373,18 @@ test("a server without Kiln offers Install Kiln on Overview; one with Kiln offer
   await page.keyboard.press("Escape");
   await banner.getByRole("button", { name: "Install Kiln" }).click();
   await page.getByRole("dialog", { name: "Install Kiln" }).getByRole("button", { name: "Install" }).click();
-  const done = page.locator(".k-toast").filter({ hasText: "Kiln 0.2.0-dev+20261104.0f1ffa6 installed" });
-  await expect(done).toBeVisible({ timeout: 8000 });
-  await expect(done.locator(".k-toast-detail")).toHaveCount(0);
+  // the result shows in the server's activity panel (a toast only when the server's page is not open)
+  const done = page.locator(".k-sact[data-state=done] .k-sact-result");
+  await expect(done).toHaveText("Kiln 0.2.0-dev+20261104.0f1ffa6 installed", { timeout: 8000 });
+  await expect(done.locator(".k-muted")).toHaveCount(0);
   await expect(banner).toHaveCount(0);
   await more.click();
   await expect(page.getByRole("menuitem", { name: "Update Kiln…" })).toBeVisible();
   await page.keyboard.press("Escape");
-  // running without Kiln: the banner says why its button waits
+  // running without Kiln: installing stops it first and starts it again, said on the banner (servers revamp part 1)
   await page.evaluate(() => (window as unknown as M).__kilnMock.setServer({ running: true, installed: null }));
-  await expect(banner.locator(".k-banner-text")).toHaveText("Stop the server to install it.");
-  await expect(banner.getByRole("button", { name: "Install Kiln" })).toBeDisabled();
+  await expect(banner.locator(".k-banner-text")).toHaveText("The server is running: installing stops it first and starts it again afterwards.");
+  await expect(banner.getByRole("button", { name: "Install Kiln" })).toBeEnabled();
 });
 
 test("the loaded profile is chosen in Settings, Profiles", async ({ page }) => {

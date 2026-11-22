@@ -14,7 +14,7 @@ import { SERVER_NAV, serverNavFor } from "../../shell/serverNav";
 import { notifyInstall } from "../../shell/notices";
 import { ConfirmHost } from "../../admin/ui";
 import { hasKiln, runnerLabel, sk, useDeployDialog, useServer, useServerEvents, useServers, useServerStatus } from "./serverApi";
-import { runFlow, useServerFlow, type StepSpec } from "./serverActions";
+import { cancelStep, flowPhase, runFlow, useServerFlow, type StepSpec } from "./serverActions";
 import { ServerActivity } from "./ServerActivity";
 import { rich, t, useT } from "../../i18n";
 
@@ -82,26 +82,33 @@ function ServerHead({ id, live }: { id: string; live: boolean }) {
   const query = useQuery({ queryKey: sk.query(id), queryFn: () => api.serverQuery(id), enabled: st.data?.state === "running", refetchInterval: 15000, retry: false });
   const flow = useServerFlow(id);
   const busy = flow?.state === "running" ? flow.kind : null;
+  // the running step's word (starting, stopping, updating) before the backend's: the status keeps the backend's own
+  const phase = flowPhase(flow);
   const { open: deploy, show: setDeploy } = useDeployDialog();
   const [removing, setRemoving] = useState(false);
   const [pick, setPick] = useState(false);
   const state = st.data?.state;
   const s = srv.data;
   const name = s?.name ?? id;
-  const stepStop: StepSpec = { key: "stop", label: t("servers.activity.stepStop"), run: () => api.serverStop(id), optimistic: "stopping" };
-  const stepStart = (again: boolean): StepSpec => ({ key: "start", label: again ? t("servers.activity.stepStartAgain") : t("servers.activity.stepStart"), run: () => api.serverStart(id), optimistic: "starting" });
+  const stepStop: StepSpec = { key: "stop", label: t("servers.activity.stepStop"), run: () => api.serverStop(id), phase: "stopping" };
+  const stepStart = (again: boolean): StepSpec => ({ key: "start", label: again ? t("servers.activity.stepStartAgain") : t("servers.activity.stepStart"), run: () => api.serverStart(id), phase: "starting", cancel: "stopWaiting" });
   const start = () => void runFlow(qc, id, { kind: "start", title: t("servers.activity.startTitle", { name }), steps: [stepStart(false)], done: t("servers.head.runningToast") });
-  const stop = () => void runFlow(qc, id, { kind: "stop", title: t("servers.activity.stopTitle", { name }), steps: [stepStop], done: t("servers.head.stoppedToast") });
+  // Stop also ends a start that is still waiting for the world: the start's wait ends, the stop takes over
+  const stop = () => {
+    const starting = busy === "start";
+    if (starting) void cancelStep(id).catch(() => {});
+    void runFlow(qc, id, { kind: "stop", title: t("servers.activity.stopTitle", { name }), steps: [stepStop], done: t("servers.head.stoppedToast") }, { supersede: starting });
+  };
   const restart = () => void runFlow(qc, id, { kind: "restart", title: t("servers.activity.restartTitle", { name }),
-    steps: [{ key: "restart", label: t("servers.activity.stepRestart"), run: () => api.serverRestart(id), optimistic: "stopping" }], done: t("servers.head.restarted") });
+    steps: [{ key: "restart", label: t("servers.activity.stepRestart"), run: () => api.serverRestart(id), phase: "stopping" }], done: t("servers.head.restarted") });
   const pid = !!st.data?.pid;
   const updateGame = () => void runFlow(qc, id, { kind: "update", title: t("servers.activity.updateGameTitle", { name }),
-    steps: [...(pid ? [stepStop] : []), { key: "update", label: t("servers.activity.stepUpdateGame"), run: () => api.serverUpdate(id) }, ...(pid ? [stepStart(true)] : [])],
+    steps: [...(pid ? [stepStop] : []), { key: "update", label: t("servers.activity.stepUpdateGame"), run: () => api.serverUpdate(id), phase: "updating", cancel: "cancel" }, ...(pid ? [stepStart(true)] : [])],
     done: t("servers.head.upToDate") });
   const deployKiln = (version: string, startAfter: boolean) => void runFlow<api.InstallResult>(qc, id, {
     kind: "deploy",
     title: kilnInstalledNow ? t("servers.activity.updateKilnTitle", { version, name }) : t("servers.activity.deployTitle", { version, name }),
-    steps: [...(pid ? [stepStop] : []), { key: "deploy", label: t("servers.activity.stepDeploy", { version }), run: () => api.serverDeploy(id, version), result: true }, ...(startAfter ? [stepStart(pid)] : [])],
+    steps: [...(pid ? [stepStop] : []), { key: "deploy", label: t("servers.activity.stepDeploy", { version }), run: () => api.serverDeploy(id, version), result: true, phase: "updating", cancel: "cancel" }, ...(startAfter ? [stepStart(pid)] : [])],
     done: t("servers.head.kilnInstalled", { version }), detail: installNote, after: notifyInstall,
   });
   // the dialog belongs to this server: leaving it closes the dialog
@@ -113,7 +120,10 @@ function ServerHead({ id, live }: { id: string; live: boolean }) {
   const max = query.data?.maxPlayers ?? null;
   const who = players == null ? "" : ` ${whoLine(players, max, max != null ? max - players : 0)}`;
   let say: ReactNode;
-  if (!st.data) say = t("servers.head.reading");
+  if (phase === "starting") say = <>{t("servers.head.starting")}{live && <Connection />}</>;
+  else if (phase === "stopping") say = t("servers.head.stopping");
+  else if (phase === "updating") say = t("servers.activity.updating");
+  else if (!st.data) say = t("servers.head.reading");
   else if (state === "running") say = <>{st.data.uptimeS != null ? t("servers.head.runningFor", { time: dur(st.data.uptimeS) }) : t("servers.head.running")}{live ? <LiveWho max={max} fallback={who} /> : who}{live && <Connection />}</>;
   else if (state === "starting") say = <>{t("servers.head.starting")}{live && <Connection />}</>;
   else if (state === "stopping") say = t("servers.head.stopping");
@@ -123,7 +133,9 @@ function ServerHead({ id, live }: { id: string; live: boolean }) {
     say = runner && kilnV ? t("servers.head.stoppedWithKiln", { runner, kiln: kilnV }) : runner ? t("servers.head.stoppedWith", { runner })
       : kilnV ? t("servers.head.stoppedKiln", { kiln: kilnV }) : t("servers.head.stopped");
   }
-  const running = state === "running" || state === "starting";
+  // the buttons follow the running step first: Stop stays usable while a start waits for the world
+  const running = phase ? phase === "starting" || (phase === "stopping" && busy !== "stop" && !!st.data?.pid) : state === "running" || state === "starting";
+  const canStop = busy === "start" || (!busy && !!st.data?.pid);
   const items: MenuItem[] = [
     ...(s?.runner !== "steam" ? [{ label: t("servers.head.updateGame"), disabled: !!busy || state === "starting" || state === "stopping", onSelect: updateGame }] : []),
     ...(!remote ? [{ label: kiln ? t("servers.head.updateKilnMenu") : t("servers.head.installKilnMenu"), disabled: !!busy || state === "starting" || state === "stopping", onSelect: () => setDeploy(true) }] : []),
@@ -147,10 +159,12 @@ function ServerHead({ id, live }: { id: string; live: boolean }) {
         {running ? (
           <>
             <Button disabled={!!busy || state !== "running"} loading={busy === "restart"} onClick={restart}>{t("servers.head.restart")}</Button>
-            <Button variant="danger" disabled={!!busy || !st.data?.pid} loading={busy === "stop"} onClick={stop}>{busy === "stop" ? t("servers.activity.stoppingButton") : t("servers.head.stop")}</Button>
+            <Button variant="danger" disabled={!canStop} onClick={stop}>{t("servers.head.stop")}</Button>
           </>
+        ) : busy === "stop" ? (
+          <Button variant="danger" disabled loading>{t("servers.activity.stoppingButton")}</Button>
         ) : (
-          <Button variant="primary" disabled={!!busy || !st.data} loading={busy === "start"} onClick={start}>{t("servers.head.start")}</Button>
+          <Button variant="primary" disabled={!!busy || !st.data} loading={!!busy} onClick={start}>{busy && busy !== "start" ? t("servers.activity.busyButton") : t("servers.head.start")}</Button>
         )}
         <Menu label={t("servers.head.more")} icon={<MoreHorizontal />} items={items} />
       </div>
@@ -229,10 +243,12 @@ function DeployModal({ open, update, running, current, onClose, onDeploy }: {
   const t = useT();
   const bundles = useQuery({ queryKey: ["runtime_list"], queryFn: api.runtimeList, enabled: open });
   const [v, setV] = useState("");
-  const [startAfter, setStartAfter] = useState<boolean | null>(null);
+  const [startAfter, setStartAfter] = useState(false);
+  // a fresh choice each time the dialog opens
+  useEffect(() => { if (open) { setStartAfter(false); setV(""); } }, [open]);
   const chosen = v || bundles.data?.[0]?.version || "";
-  // a running server is stopped first and started again afterwards; a stopped one starts only when asked
-  const again = startAfter ?? running;
+  // a running server is stopped first and always started again afterwards; a stopped one starts only when asked
+  const again = running || startAfter;
   const steps = [running && t("servers.activity.stepStop"), t("servers.activity.stepDeploy", { version: chosen || "…" }), again && (running ? t("servers.activity.stepStartAgain") : t("servers.activity.stepStart"))]
     .filter(Boolean) as string[];
   return (

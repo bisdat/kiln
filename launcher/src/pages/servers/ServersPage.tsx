@@ -37,12 +37,15 @@ function StateCell({ id }: { id: string }) {
       </span>
     );
   }
-  if (flow?.state === "failed") return <span className="k-badge k-tone-err" title={flow.error?.message ?? ""}>{t("servers.activity.failed")}</span>;
   const state = st.data?.state;
+  // a failed action: the server's own state, and a marker naming the failure
+  const failed = flow?.state === "failed" ? (
+    <span className="k-badge k-tone-err" title={flow.error?.message ?? ""} aria-label={t("servers.activity.failedMarker", { reason: flow.error?.message ?? "" })}>!</span>
+  ) : null;
   const tone = state === "running" ? "ok" : state === "starting" || state === "stopping" ? "warn" : "idle";
   const word = state === "running" ? t("servers.list.running") : state === "starting" ? t("servers.list.starting") : state === "stopping" ? t("servers.list.stopping")
     : state === "stopped" ? t("servers.list.stopped") : state ? state.charAt(0).toUpperCase() + state.slice(1) : "…";
-  return <span className={`k-badge k-tone-${tone}`}>{word}</span>;
+  return <span className="k-sact-cell"><span className={`k-badge k-tone-${tone}`}>{word}</span>{failed}</span>;
 }
 /** Start or Stop from the list, with the same feedback as the server's page. */
 function ActionCell({ srv }: { srv: ServerInstanceX }) {
@@ -57,8 +60,8 @@ function ActionCell({ srv }: { srv: ServerInstanceX }) {
   const go = (e: MouseEvent) => {
     e.stopPropagation();
     void (up
-      ? runFlow(qc, srv.id, { kind: "stop", title: t("servers.activity.stopTitle", { name }), steps: [{ key: "stop", label: t("servers.activity.stepStop"), run: () => api.serverStop(srv.id), optimistic: "stopping" }], done: t("servers.head.stoppedToast") })
-      : runFlow(qc, srv.id, { kind: "start", title: t("servers.activity.startTitle", { name }), steps: [{ key: "start", label: t("servers.activity.stepStart"), run: () => api.serverStart(srv.id), optimistic: "starting" }], done: t("servers.head.runningToast") }));
+      ? runFlow(qc, srv.id, { kind: "stop", title: t("servers.activity.stopTitle", { name }), steps: [{ key: "stop", label: t("servers.activity.stepStop"), run: () => api.serverStop(srv.id), phase: "stopping" }], done: t("servers.head.stoppedToast") })
+      : runFlow(qc, srv.id, { kind: "start", title: t("servers.activity.startTitle", { name }), steps: [{ key: "start", label: t("servers.activity.stepStart"), run: () => api.serverStart(srv.id), phase: "starting", cancel: "stopWaiting" }], done: t("servers.head.runningToast") }));
   };
   if (!st.data) return null;
   return (

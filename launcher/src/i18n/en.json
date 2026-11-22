@@ -2385,7 +2385,17 @@
       "runningNote": "The server is running: it is stopped (the world is saved), Kiln is installed, then it starts again.",
       "startAfter": "Start the server afterwards",
       "planLabel": "What happens",
-      "installStopsFirst": "The server is running: installing stops it first and starts it again afterwards."
+      "installStopsFirst": "The server is running: installing stops it first and starts it again afterwards.",
+      "updating": "Updating.",
+      "busyButton": "Working…",
+      "stopWaiting": "Stop waiting",
+      "cancel": "Cancel",
+      "srRunning": "{title}: {step}.",
+      "srDone": "{title}: {result}.",
+      "srFailed": "{title} failed: {reason}",
+      "srCanceled": "{title}: canceled.",
+      "linesLabel": "Every line of this action",
+      "failedMarker": "The last action failed: {reason}"
     }
   },
   "play": {

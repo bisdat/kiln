@@ -1125,6 +1125,8 @@ const runningServer: ServerStatus = {
   boot: { ...(bootExample as unknown as BootJson), side: "server" }, endpoint: endpointExample as unknown as AdminEndpoint,
 };
 let serverStatus: ServerStatus = runningServer;
+/** Each server_start's number; a stop moves it on, so a start it interrupted fails as the real one does. */
+let serverStartSeq = 0;
 /** Tests (`__kilnMock.setServer`): the lab server stopped and with or without Kiln in its folder, or back to running. */
 function mockSetServer(o: { running?: boolean; installed?: string | null }) {
   const installed = o.installed === undefined ? runningServer.installed : o.installed;
@@ -1779,18 +1781,26 @@ const handlers: Record<string, Handler> = {
   // a start, stop, restart and game update with the real tasks' progress lines (kiln_manage::server::run)
   server_start: () => {
     if (serverStatus.pid) reject("conflict", `${server.id} is running already (pid ${serverStatus.pid})`);
-    serverStatus = { ...serverStatus, state: "starting", pid: 5121, uptimeS: 0 };
-    mockEmit("kiln://server", { serverId: server.id, status: serverStatus });
+    const mine = ++serverStartSeq;
+    // the status says starting once the process is there (the real status reads the pid), not at the click
+    setTimeout(() => {
+      if (mine !== serverStartSeq || serverStatus.pid) return;
+      serverStatus = { ...serverStatus, state: "starting", pid: 5121, uptimeS: 0 };
+      mockEmit("kiln://server", { serverId: server.id, status: serverStatus });
+    }, 1500);
     return startTask("server_start", `Starting ${server.id}`, [
       `started GE-Proton10-3 ./enshrouded_server.exe (wine pid 5121), output in /home/player/.local/state/kiln/${server.id}.run.log`,
       "[Session] 'HostOnline' (up)!", "[server] Loading world 'Lab' (seed 1847)", "[ecs] LoadEcsScene to Load", "[streaming] 812 of 1490 chunks",
     ], () => {
+      // stopped while it started: the process is gone before its world ran (run::wait_ready)
+      if (mine !== serverStartSeq) reject("io", "the server exited before its world ran (exit code 0)");
       serverStatus = { ...runningServer, pid: 5121, uptimeS: 0 };
       mockEmit("kiln://server", { serverId: server.id, status: serverStatus });
       return serverStatus;
     }, 700);
   },
   server_stop: () => {
+    serverStartSeq++;
     const p = serverStatus.pid;
     serverStatus = { ...serverStatus, state: "stopping" };
     mockEmit("kiln://server", { serverId: server.id, status: serverStatus });
