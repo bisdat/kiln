@@ -16,6 +16,7 @@ internal static unsafe class ReplNetNative
     public const uint ClientChannel = 1, PredictionChannel = 2;
     public const uint TouchQueued = 0, TouchNoCarrier = 1, TouchGone = 2;
     public const int Pass = 0, Drop = 1, Rewrite = 2;
+    public const byte MessagePeerUnknown = 1;
 
     /// <summary>KilnReplTrackEvent (16 bytes).</summary>
     [StructLayout(LayoutKind.Sequential)]
@@ -73,7 +74,7 @@ internal static unsafe class ReplNetNative
     public struct Message
     {
         public uint Size, Peer;
-        public byte Channel, Direction, PlayerSocket, Pad;
+        public byte Channel, Direction, PlayerSocket, PeerFlags;
         public uint Length;
         public byte* Data;
         public byte* Rewrite;

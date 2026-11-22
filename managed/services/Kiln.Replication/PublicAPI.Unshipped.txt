@@ -93,6 +93,8 @@ Kiln.MessageRewrite.Buffer.get -> System.Span<byte>
 Kiln.MessageRewrite.Length.get -> int
 Kiln.MessageRewrite.Length.set -> void
 Kiln.MessageRewrite.MessageRewrite() -> void
+Kiln.MessageRewrite.PeerId.get -> uint
+Kiln.MessageRewrite.PeerUnknown.get -> bool
 Kiln.MessageSchema
 Kiln.MessageSchema.<Clone>$() -> Kiln.MessageSchema!
 Kiln.MessageSchema.Deconstruct(out string! Name, out int Size, out System.Collections.Generic.IReadOnlyList<Kiln.MessageField!>! Fields) -> void

@@ -82,17 +82,19 @@ public enum MessageAction
     Rewrite = 2,
 }
 
-/// <summary>The rewrite buffer of a hooked message: a copy of its bytes, its capacity the message's length.</summary>
+/// <summary>The rewrite buffer and peer identity of a hooked message.</summary>
 public unsafe ref struct MessageRewrite
 {
     private readonly byte* _buffer;
     private readonly int _cap;
 
-    internal MessageRewrite(byte* buffer, int cap, int length)
+    internal MessageRewrite(byte* buffer, int cap, int length, uint peerId, bool peerUnknown)
     {
         _buffer = buffer;
         _cap = cap;
         Length = length;
+        PeerId = peerId;
+        PeerUnknown = peerUnknown;
     }
 
     /// <summary>The bytes to change (a copy of the message; as long as the message).</summary>
@@ -100,13 +102,20 @@ public unsafe ref struct MessageRewrite
 
     /// <summary>The new length (at most <see cref="Buffer"/>'s length).</summary>
     public int Length { get; set; }
+
+    /// <summary>The <see cref="NetPeer.Id"/> on the server side. Zero means the server on a client, or an unknown peer.</summary>
+    public uint PeerId { get; }
+
+    /// <summary>Whether Kiln could not resolve the message's peer id on the server side.</summary>
+    public bool PeerUnknown { get; }
 }
 
 /// <summary>Looks at one message of a hooked channel and says what happens to it. Runs on the server's tick thread or
 /// the client's main thread, inside the game's network loop: be quick. An exception passes the message unchanged.</summary>
-/// <param name="peer">The peer it goes to or comes from (null: the server, on a client; a hosted world's own client).</param>
+/// <param name="peer">The peer it goes to or comes from, if available in <see cref="Network.Peers"/>. On a client this is null.</param>
 /// <param name="data">The message's bytes as the game codes them.</param>
-/// <param name="rewrite">Write the new bytes here and return <see cref="MessageAction.Rewrite"/> (shorter or as long).</param>
+/// <param name="rewrite">Contains the peer id and its resolution status. Write new bytes here and return
+/// <see cref="MessageAction.Rewrite"/> (shorter or as long).</param>
 public delegate MessageAction MessageHandler(NetPeer? peer, ReadOnlySpan<byte> data, ref MessageRewrite rewrite);
 
 /// <summary>What <see cref="Replication.Inject"/> did.</summary>
@@ -361,8 +370,9 @@ internal static unsafe class MessageHost
         {
             box = (Box)GCHandle.FromIntPtr((nint)user).Target!;
             if (box.Disposed || box.Fault != null) return ReplNetNative.Pass;
-            var rewrite = new MessageRewrite(m->Rewrite, (int)m->RewriteCap, (int)m->Length);
-            var peer = m->Peer == 0 ? null : PeerOf(m->Peer);
+            var rewrite = new MessageRewrite(m->Rewrite, (int)m->RewriteCap, (int)m->Length, m->Peer,
+                (m->PeerFlags & ReplNetNative.MessagePeerUnknown) != 0);
+            var peer = rewrite.PeerId == 0 ? null : PeerOf(rewrite.PeerId);
             var action = box.Handler(peer, new ReadOnlySpan<byte>(m->Data, (int)m->Length), ref rewrite);
             if (action == MessageAction.Rewrite)
             {
