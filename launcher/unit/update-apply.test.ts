@@ -16,6 +16,12 @@ describe("the restart by itself", () => {
     expect(restartHold({ running: false, unsaved: null, task: "Cook mods" })).toEqual({ kind: "task", title: "Cook mods" });
     expect(restartHold({ running: false, unsaved: null, task: null })).toBeNull();
   });
+  test("the save editor writing a save (a restore has no unsaved changes) is waited for, after the game and its start", () => {
+    expect(restartHold({ running: false, writing: true, unsaved: null, task: null })).toEqual({ kind: "writing" });
+    expect(restartHold({ running: false, writing: true, unsaved: "editor", task: "Cook mods" })).toEqual({ kind: "writing" });
+    expect(restartHold({ running: false, launching: true, writing: true, unsaved: null, task: null })).toEqual({ kind: "launch" });
+    expect(restartHold({ running: true, writing: true, unsaved: null, task: null })).toEqual({ kind: "game" });
+  });
   test("Pack Studio's work is named before an editor's; the save editor's store counts as an editor", () => {
     expect(unsavedKind({}, false)).toBeNull();
     expect(unsavedKind({ a: "editor", b: "studio" }, false)).toBe("studio");

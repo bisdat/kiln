@@ -9,14 +9,17 @@ import type { GameStatus } from "../api/commands";
 import type { UnsavedKind } from "./unsaved";
 
 /** What holds the restart: the game, unsaved work (both hold it for good: the player restarts), a start of the game
- *  under way or a task (both waited for; a start that brings the game holds it for good then). */
-export type RestartHold = { kind: "game" } | { kind: "launch" } | { kind: "unsaved"; who: UnsavedKind } | { kind: "task"; title: string } | null;
+ *  under way, the save editor writing a save (a save or a restore: the close guard asks then too) or a task (each waited
+ *  for; a start that brings the game holds it for good then). */
+export type RestartHold = { kind: "game" } | { kind: "launch" } | { kind: "writing" } | { kind: "unsaved"; who: UnsavedKind } | { kind: "task"; title: string } | null;
 
 /** `running`: the game runs. `launching`: Play was pressed, the warning before Play is open, or Steam was asked and the
- *  game's process is not there yet (the backend's update_restart refuses then too). */
-export function restartHold(o: { running: boolean; launching?: boolean; unsaved: UnsavedKind | null; task: string | null }): RestartHold {
+ *  game's process is not there yet (the backend's update_restart refuses then too). `writing`: the save editor is writing
+ *  a save (editor/kiln/pending.ts `busy`: a save, or a restore of a backup, which has no unsaved changes). */
+export function restartHold(o: { running: boolean; launching?: boolean; writing?: boolean; unsaved: UnsavedKind | null; task: string | null }): RestartHold {
   if (o.running) return { kind: "game" };
   if (o.launching) return { kind: "launch" };
+  if (o.writing) return { kind: "writing" };
   if (o.unsaved) return { kind: "unsaved", who: o.unsaved };
   if (o.task) return { kind: "task", title: o.task };
   return null;

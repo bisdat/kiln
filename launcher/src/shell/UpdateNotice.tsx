@@ -30,6 +30,7 @@ import { useLaunchMemo } from "./play";
 import { useStartWarnings } from "./sfiWarnings";
 import { applyKey, applyWait, restartHold, runtimeToApply, type ApplyWait } from "./updateApply";
 import { useUnsavedKind } from "./unsaved";
+import { usePendingEdits } from "../editor/kiln/pending";
 import { t, useT } from "../i18n";
 import "./update.css";
 
@@ -113,6 +114,8 @@ function useRestartAfterUpdate(s: UpdateStatus | null): RestartPlan {
   const { game } = useGame();
   const gs = useGameStatus(game?.id);
   const unsaved = useUnsavedKind();
+  // the save editor writing a save (a restore has no unsaved changes): waited for, as closing the window asks then
+  const writing = usePendingEdits((x) => x.busy);
   const running = !!gs.data?.running;
   // a start under way: Play pressed (to the end of launch_play, the warning before Play included), its dialog open, or
   // Steam asked and the game not there yet (the Play control forgets that launch once Steam's wait is over)
@@ -120,7 +123,7 @@ function useRestartAfterUpdate(s: UpdateStatus | null): RestartPlan {
   const asking = useStartWarnings((x) => x.asks.length > 0);
   const asked = useLaunchMemo((m) => (game ? m.at[game.id] !== undefined : false));
   const launching = playing || asking || (asked && !running);
-  const hold = restartHold({ running, launching, unsaved, task: blocking?.title ?? null });
+  const hold = restartHold({ running, launching, writing, unsaved, task: blocking?.title ?? null });
   // a game whose status is not known yet: no countdown until it is (never a restart under a game that may run)
   const unknown = !!game && !gs.data;
   const version = s?.phase === "ready" && s.ready && !s.switching ? s.ready.version : null;
@@ -149,12 +152,14 @@ function useRestartAfterUpdate(s: UpdateStatus | null): RestartPlan {
   const why = !version || mode === "stopped" ? null
     : hold?.kind === "game" ? t("shell.updateNotice.holdGame")
     : hold?.kind === "launch" ? t("shell.updateNotice.holdLaunch")
+    : hold?.kind === "writing" ? t("shell.updateNotice.holdWriting")
     : hold?.kind === "unsaved" ? (hold.who === "studio" ? t("shell.updateNotice.holdStudio") : t("shell.updateNotice.holdEditor"))
     : hold?.kind === "task" ? t("shell.updateNotice.waitingFor", { task: hold.title }) : null;
   return {
     left: deadline !== null ? Math.max(0, Math.ceil((deadline - now) / 1000)) : null,
     why,
     blocked: launching ? t("shell.updateNotice.holdLaunch")
+      : writing ? t("shell.updateNotice.holdWriting")
       : blocking ? t("shell.updateNotice.waitingFor", { task: blocking.title }) : null,
     stop: () => { if (version) setDecided((d) => ({ ...d, [version]: "stopped" })); },
   };
