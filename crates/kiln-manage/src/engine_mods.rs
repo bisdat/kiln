@@ -793,14 +793,17 @@ fn engine_lock(managed: &Path, root: &Path) -> Result<std::fs::File> {
 // exercise the Windows decision used by placement, without a Windows filesystem.
 fn sf_reads_parent(parent: &Path, root: &Path, windows: bool) -> bool {
     if windows {
-        crate::winpath::windows_same_folder(&parent.to_string_lossy(), &root.to_string_lossy())
+        #[cfg(windows)]
+        { same_folder(parent, root) }
+        #[cfg(not(windows))]
+        { crate::winpath::windows_same_folder(&parent.to_string_lossy(), &root.to_string_lossy()) }
     } else {
         crate::winpath::same_folder(parent, root)
     }
 }
 
-// Receipts, journals and the current game may use different spellings of the same Windows folder. Compare names
-// without resolving links; the mutation paths still pass refuse_symlink_path and all receipt/content checks.
+// Receipts, journals and the current game may use different spellings of the same Windows folder. Equality is
+// never permission to follow links: mutation paths still pass refuse_symlink_path and all receipt/content checks.
 fn in_folder(path: &Path, folder: &Path) -> bool {
     path.parent().is_some_and(|parent| same_folder(parent, folder))
 }
@@ -840,6 +843,8 @@ fn placements(game: &Path) -> Result<Vec<Placement>> {
 #[cfg(any(windows, test))]
 fn compatible_receipt_path(path: &str, kind: ModKind, game_folder: bool, sf_root: &str) -> String {
     if !game_folder && matches!(kind, ModKind::ShroudForge | ModKind::Eml) {
+        #[cfg(windows)]
+        if !in_folder(Path::new(path), Path::new(sf_root)) { return path.to_owned(); }
         if let Some(rest) = crate::winpath::windows_below(sf_root, path).filter(|rest| rest.len() == 1) {
             return format!("{}\\{}", sf_root.trim_end_matches(['\\', '/']), rest[0]);
         }
@@ -5030,20 +5035,67 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn windows_receipts_use_the_same_paths_for_validation_and_lookup() {
-        let game = Path::new(r"\\?\C:\Games\Enshrouded");
-        let route = Route::Legacy(crate::sfi_routing::Legacy::Off);
+    fn windows_receipts_refuse_case_distinct_game_folders() {
+        use std::os::windows::{fs::OpenOptionsExt, io::AsRawHandle};
+        use windows_sys::Win32::Storage::FileSystem::{
+            FILE_CASE_SENSITIVE_INFO, FILE_FLAG_BACKUP_SEMANTICS,
+            FILE_WRITE_ATTRIBUTES, FileCaseSensitiveInfo, SetFileInformationByHandle,
+        };
+        let t = std::env::temp_dir().join(format!("km-receipt-case-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&t);
+        std::fs::create_dir_all(&t).unwrap();
+        let directory = std::fs::OpenOptions::new().access_mode(FILE_WRITE_ATTRIBUTES)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS).open(&t).unwrap();
+        let info = FILE_CASE_SENSITIVE_INFO { Flags: 1 }; // FILE_CS_FLAG_CASE_SENSITIVE_DIR
+        let set = unsafe { SetFileInformationByHandle(directory.as_raw_handle(), FileCaseSensitiveInfo,
+            (&info as *const FILE_CASE_SENSITIVE_INFO).cast(), std::mem::size_of_val(&info) as u32) };
+        if set == 0 {
+            let error = std::io::Error::last_os_error();
+            drop(directory);
+            std::fs::remove_dir_all(&t).unwrap();
+            eprintln!("case-sensitive directories unavailable: {error}");
+            return;
+        }
+        drop(directory);
+        let (game, other) = (t.join("Game"), t.join("game"));
+        std::fs::create_dir_all(game.join("greeneye/sample")).unwrap();
+        std::fs::create_dir_all(other.join("greeneye/sample")).unwrap();
+        assert_ne!(game.canonicalize().unwrap(), other.canonicalize().unwrap());
         let receipt = Placement {
-            path: PathBuf::from(r"C:\Games\Enshrouded\greeneye\sample"),
+            path: other.join("greeneye/sample"),
             marker: Marker { format: 1, kind: ModKind::Greeneye, id: "sample".into(), version: "1.0.0".into(), hash: "hash".into() },
             files: Default::default(), extension: None, game_folder: false,
         };
-        check_placement_path(game, &receipt, &route).unwrap();
-        for path in [r"\\?\C:\Games\Enshrouded\greeneye\sample", r"c:\games\enshrouded\GREENEYE\SAMPLE"] {
-            assert_eq!(marker_at(std::slice::from_ref(&receipt), Path::new(path)), Some(&receipt.marker));
+        let valid = check_placement_path(&game, &receipt, &Route::Legacy(crate::sfi_routing::Legacy::Off)).is_ok();
+        let found = marker_at(std::slice::from_ref(&receipt), &game.join("greeneye/sample")).is_some();
+        let below = crate::winpath::relative_folder(&game, &receipt.path).is_some();
+        std::fs::remove_dir_all(&t).unwrap();
+        assert!(!valid, "a receipt in a different case-sensitive game is not authorized");
+        assert!(!found, "a different folder's receipt does not confer ownership");
+        assert!(!below, "link refusal must not skip components of a different root");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_receipts_use_the_same_paths_for_validation_and_lookup() {
+        let t = std::env::temp_dir().join(format!("km-receipt-spelling-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&t);
+        std::fs::create_dir_all(t.join("Game/greeneye/sample")).unwrap();
+        let game = t.join("Game").canonicalize().unwrap();
+        let plain = PathBuf::from(crate::winpath::plain_path(game.to_str().unwrap()).into_owned());
+        let route = Route::Legacy(crate::sfi_routing::Legacy::Off);
+        let receipt = Placement {
+            path: plain.join("greeneye/sample"),
+            marker: Marker { format: 1, kind: ModKind::Greeneye, id: "sample".into(), version: "1.0.0".into(), hash: "hash".into() },
+            files: Default::default(), extension: None, game_folder: false,
+        };
+        check_placement_path(&game, &receipt, &route).unwrap();
+        for path in [game.join("greeneye/sample"), PathBuf::from(plain.join("GREENEYE/SAMPLE").to_str().unwrap().to_uppercase())] {
+            assert_eq!(marker_at(std::slice::from_ref(&receipt), &path), Some(&receipt.marker));
         }
-        let other = Placement { path: PathBuf::from(r"C:\Games\Enshrouded\greeneye2\sample"), ..receipt };
-        assert!(check_placement_path(game, &other, &route).is_err(), "a sibling folder is not a placement root");
+        let other = Placement { path: plain.join("greeneye2/sample"), ..receipt };
+        assert!(check_placement_path(&game, &other, &route).is_err(), "a sibling folder is not a placement root");
+        std::fs::remove_dir_all(t).unwrap();
     }
 
     #[test]
@@ -5059,11 +5111,25 @@ mod tests {
 
     #[test]
     fn sf_reads_parent_uses_windows_comparison_only_on_windows() {
-        let plain = Path::new(r"C:\Games\Enshrouded\mods");
-        let sf = Path::new(r"\\?\c:\games\enshrouded\MODS");
-        assert!(sf_reads_parent(plain, sf, true));
-        assert_eq!(sf_reads_parent(plain, sf, false), cfg!(windows));
-        assert!(!sf_reads_parent(Path::new(r"C:\Games\Enshrouded\mods2"), sf, true));
+        #[cfg(windows)]
+        {
+            let t = std::env::temp_dir().join(format!("km-sf-parent-{}", std::process::id()));
+            std::fs::create_dir_all(t.join("mods")).unwrap();
+            let sf = t.join("mods").canonicalize().unwrap();
+            let plain = PathBuf::from(crate::winpath::plain_path(sf.to_str().unwrap()).to_uppercase());
+            assert!(sf_reads_parent(&plain, &sf, true));
+            assert!(sf_reads_parent(&plain, &sf, false));
+            assert!(!sf_reads_parent(&t.join("mods2"), &sf, true));
+            std::fs::remove_dir_all(t).unwrap();
+        }
+        #[cfg(not(windows))]
+        {
+            let plain = Path::new(r"C:\Games\Enshrouded\mods");
+            let sf = Path::new(r"\\?\c:\games\enshrouded\MODS");
+            assert!(sf_reads_parent(plain, sf, true));
+            assert!(!sf_reads_parent(plain, sf, false));
+            assert!(!sf_reads_parent(Path::new(r"C:\Games\Enshrouded\mods2"), sf, true));
+        }
     }
 
     /// Receipts a launcher on Windows wrote while it read ShroudForge's `paths.mods` with the verbatim prefix (before

@@ -103,18 +103,56 @@ pub(crate) fn windows_same_folder(a: &str, b: &str) -> bool {
     windows_below(a, b).is_some_and(|rest| rest.is_empty())
 }
 
-/// `a` and `b` are the same folder, compared as the system the launcher runs on compares folders: on Windows by
-/// Windows' rules ([`windows_same_folder`]: the verbatim prefix and case do not matter), elsewhere exactly (a launcher
-/// on Linux names a Proton game's folders by their host paths, which are case-sensitive).
+/// `a` and `b` are the same folder: on Windows the safe verbatim/plain spellings compare alike, but case differences
+/// must also resolve alike (NTFS can have case-sensitive directories). Elsewhere host paths compare exactly.
 pub(crate) fn same_folder(a: &Path, b: &Path) -> bool {
-    if cfg!(windows) { windows_same_folder(&a.to_string_lossy(), &b.to_string_lossy()) } else { a == b }
+    #[cfg(windows)]
+    {
+        fn spelling(path: &Path) -> Option<PathBuf> {
+            let text = path.to_str()?;
+            // Unlike Win32 paths, verbatim paths do not interpret forward slashes as separators.
+            if text.starts_with(r"\\?\") && text.contains('/') { return None; }
+            Some(PathBuf::from(plain_path(text).as_ref()))
+        }
+        // Resolve the existing prefix, retaining missing names exactly. A missing folder's case is not evidence
+        // that another case spelling is its own; receipt recovery must stay conservative in that case.
+        fn existing_prefix(path: &Path) -> Option<PathBuf> {
+            let mut path = path;
+            let mut missing = Vec::new();
+            loop {
+                match std::fs::canonicalize(path) {
+                    Ok(mut p) => {
+                        for name in missing.into_iter().rev() { p.push(name); }
+                        return spelling(&p);
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                        missing.push(path.file_name()?.to_os_string());
+                        path = path.parent()?;
+                    }
+                    Err(_) => return None,
+                }
+            }
+        }
+        if a == b { return true; }
+        let (Some(plain_a), Some(plain_b)) = (spelling(a), spelling(b)) else { return false };
+        if plain_a == plain_b { return true; }
+        if !windows_same_folder(&plain_a.to_string_lossy(), &plain_b.to_string_lossy()) { return false; }
+        match (existing_prefix(a), existing_prefix(b)) {
+            (Some(a), Some(b)) => a == b,
+            _ => false,
+        }
+    }
+    #[cfg(not(windows))]
+    { a == b }
 }
 
 /// `dir` relative to `base`, '/' separated ("" for `base` itself), compared as [`same_folder`] compares; None when
 /// `dir` is not below `base`.
 pub(crate) fn relative_folder(base: &Path, dir: &Path) -> Option<String> {
     if cfg!(windows) {
-        return windows_below(&base.to_string_lossy(), &dir.to_string_lossy()).map(|rest| rest.join("/"));
+        let rest = windows_below(base.to_str()?, dir.to_str()?)?;
+        let prefix = dir.ancestors().nth(rest.len())?;
+        return same_folder(base, prefix).then(|| rest.join("/"));
     }
     dir.strip_prefix(base).ok().map(|p| p.to_string_lossy().replace('\\', "/"))
 }
@@ -278,6 +316,7 @@ mod tests {
     }
 
     /// The launcher on Linux keeps comparing host paths exactly: `/game/Mods` and `/game/mods` are two folders there.
+    #[cfg(not(windows))]
     #[test]
     fn this_systems_comparison_is_exact_on_linux() {
         let (a, b) = (Path::new("/srv/game/mods"), Path::new("/srv/game/Mods"));

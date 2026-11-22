@@ -22,6 +22,11 @@ pub struct FileKey {
     pub ino: u64,
     /// Unix: ctime in nanoseconds; Windows: the change time (FILETIME ticks), not creation time.
     pub changed: i128,
+    /// Windows identities are volume-local, and ReFS requires all 128 bits of the file ID.
+    #[cfg(windows)]
+    pub volume: u64,
+    #[cfg(windows)]
+    pub file_id: [u8; 16],
 }
 
 fn nanos(t: SystemTime) -> i128 {
@@ -35,26 +40,34 @@ impl FileKey {
     pub fn of(path: &Path) -> Option<FileKey> {
         #[cfg(windows)]
         {
-            use std::os::windows::io::AsRawHandle;
+            use std::os::windows::{fs::OpenOptionsExt, io::AsRawHandle};
             use windows_sys::Win32::Storage::FileSystem::{
-                BY_HANDLE_FILE_INFORMATION, FILE_BASIC_INFO, FileBasicInfo, GetFileInformationByHandle, GetFileInformationByHandleEx,
+                BY_HANDLE_FILE_INFORMATION, FILE_BASIC_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_ID_INFO, FILE_READ_ATTRIBUTES,
+                FileBasicInfo, FileIdInfo, GetFileInformationByHandle, GetFileInformationByHandleEx,
             };
-            let file = std::fs::File::open(path).ok()?;
+            // Only metadata access is needed, including for directories and files with data readers/writers open.
+            let file = std::fs::OpenOptions::new().access_mode(FILE_READ_ATTRIBUTES)
+                .custom_flags(FILE_FLAG_BACKUP_SEMANTICS).open(path).ok()?;
             let handle = file.as_raw_handle();
             let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
             let mut basic: FILE_BASIC_INFO = unsafe { std::mem::zeroed() };
-            // SAFETY: the handle stays live and both buffers have the size/alignment required by the Win32 calls.
+            let mut id: FILE_ID_INFO = unsafe { std::mem::zeroed() };
+            // SAFETY: the handle stays live and the buffers have the size/alignment required by the Win32 calls.
             if unsafe { GetFileInformationByHandle(handle, &mut info) } == 0
                 || unsafe { GetFileInformationByHandleEx(handle, FileBasicInfo, (&mut basic as *mut FILE_BASIC_INFO).cast(), std::mem::size_of::<FILE_BASIC_INFO>() as u32) } == 0
                 || basic.ChangeTime == 0
+                || unsafe { GetFileInformationByHandleEx(handle, FileIdInfo, (&mut id as *mut FILE_ID_INFO).cast(), std::mem::size_of::<FILE_ID_INFO>() as u32) } == 0
+                || id.FileId.Identifier == [0; 16]
             {
-                return None; // No reliable change time: read again rather than cache by size/mtime alone.
+                return None; // No reliable identity/change time: read again rather than cache by size/mtime alone.
             }
             Some(FileKey {
                 len: ((info.nFileSizeHigh as u64) << 32) | info.nFileSizeLow as u64,
                 mtime: (basic.LastWriteTime as i128 - 116_444_736_000_000_000) * 100,
                 ino: ((info.nFileIndexHigh as u64) << 32) | info.nFileIndexLow as u64,
                 changed: basic.ChangeTime as i128,
+                volume: id.VolumeSerialNumber,
+                file_id: id.FileId.Identifier,
             })
         }
         #[cfg(not(windows))]
@@ -95,7 +108,10 @@ struct Hashes {
 }
 
 const MAX_ENTRIES: usize = 100_000;
-// Older Windows keys used creation time, which can survive replacements. Never load those cached hashes.
+// Older Windows keys used creation time or only a 64-bit file ID. Never load those cached hashes.
+#[cfg(windows)]
+const STORE_FORMAT: u32 = 3;
+#[cfg(not(windows))]
 const STORE_FORMAT: u32 = 2;
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -234,6 +250,35 @@ mod tests {
         d
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn windows_keys_preserve_the_full_volume_and_file_identity() {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::Storage::FileSystem::{FILE_ID_INFO, FileIdInfo, GetFileInformationByHandleEx};
+        let d = tmp("full-file-id");
+        let p = d.join("f.bin");
+        std::fs::write(&p, b"file").unwrap();
+        let file = std::fs::File::open(&p).unwrap();
+        let mut id: FILE_ID_INFO = unsafe { std::mem::zeroed() };
+        assert_ne!(unsafe { GetFileInformationByHandleEx(file.as_raw_handle(), FileIdInfo,
+            (&mut id as *mut FILE_ID_INFO).cast(), std::mem::size_of_val(&id) as u32) }, 0);
+        let key = serde_json::to_value(FileKey::of(&p).unwrap()).unwrap();
+        drop(file);
+        std::fs::remove_dir_all(d).unwrap();
+        assert_eq!(key["volume"], serde_json::json!(id.VolumeSerialNumber), "file identities are volume-local");
+        assert_eq!(key["file_id"], serde_json::json!(id.FileId.Identifier), "ReFS requires all 128 bits, not a 64-bit file index");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_directory_keys_track_added_files() {
+        let d = tmp("directory-key");
+        let before = FileKey::of(&d).expect("directory metadata has a cache key");
+        std::fs::write(d.join("new.bin"), b"new").unwrap();
+        assert_ne!(FileKey::of(&d), Some(before), "adding a file changes its directory's key");
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
     #[test]
     fn a_rewrite_with_the_same_size_and_mtime_is_a_new_key() {
         let d = tmp("key");
@@ -299,6 +344,25 @@ mod tests {
 
     /// The persisted store is one per process: the tests that set it take turns.
     static PERSIST: Mutex<()> = Mutex::new(());
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_older_identity_formats_are_not_loaded() {
+        let _turn = PERSIST.lock().unwrap_or_else(|e| e.into_inner());
+        let d = tmp("old-identities");
+        let store = d.join("hashes.json");
+        for format in [1, 2] {
+            let p = d.join(format!("old-{format}.bin"));
+            std::fs::write(&p, b"current").unwrap();
+            let key = FileKey::of(&p).unwrap();
+            let s = StoreFile { format, files: vec![StoreEntry { path: p.clone(), key, sha256: "obsolete".into() }] };
+            std::fs::write(&store, serde_json::to_vec(&s).unwrap()).unwrap();
+            persist_at(&store);
+            assert_eq!(sha256(&p).unwrap(), crate::hash::sha256_hex(b"current"), "old format {format} is not reusable");
+        }
+        unpersist();
+        std::fs::remove_dir_all(d).unwrap();
+    }
 
     #[test]
     fn persisted_hashes_load_and_stale_ones_are_not_used() {
