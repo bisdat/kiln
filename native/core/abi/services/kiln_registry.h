@@ -29,8 +29,8 @@
  *    another mod's final; Kiln's older paths (boot resource patches, data packs) and the archive writer's values lie
  *    below every registry edit and are never refused because of one.
  * When the stage ends the phase is START: restart fields are final (baked into the resources the game reads). Live fields
- * are applied at each world load, above data packs and below code changes (kiln.content), and the phase is WORLDLOAD; when
- * that world stops the phase goes back to START (no event).
+ * are applied at each world load, above data packs and below code changes (kiln.content), and the phase is WORLDLOAD.
+ * v1: the phase stays WORLDLOAD after that world stops (status names the last application of the live fields).
  *
  * Edits: the edit IR, one JSON document per batch (schema/registry-ir.schema.json): {"ir": 1, "mod": "<mod id>",
  * "stage": "add" | "alter" | "final", "source": "<what reports name>", "edits": [...]}. Field edits, list edits, entry
@@ -51,12 +51,13 @@
  *  - Records: size is the caller's sizeof on the way in. A size below v1's is refused (KILN_ERR_INVALID_ARGUMENT); a
  *    larger one is accepted, Kiln fills the members it knows and sets size to the bytes it filled (a newer caller on an
  *    older Kiln sees which members are v1's). A record Kiln passes to a callback has size set to what Kiln filled.
- *  - Owners: owner 0 (the core) is refused (KILN_ERR_INVALID_ARGUMENT); a revoked owner is KILN_ERR_REVOKED. Revoking an
- *    owner drops the batches it queued that have not run, and removes its subscriptions; edits the stage already took
+ *  - Owners: owner 0 (the core) is refused (KILN_ERR_INVALID_ARGUMENT); submit and subscribe_stage refuse a revoked owner
+ *    with KILN_ERR_REVOKED, and an owner Kiln cannot bind to a mod with KILN_ERR_INVALID_ARGUMENT. v1 does not take a
+ *    revoked owner's queued batches or subscriptions away: unsubscribe before the owner goes; edits the stage already took
  *    stay until the next start.
- *  - Callbacks: the record pointer is valid only during the call. fn and user stay valid until unsubscribe returned or the
- *    owner is revoked. A native fault inside a callback is caught (kiln.log and a crash report) and the subscription is
- *    removed; a stage callback's edits submitted before the fault are dropped and reported.
+ *  - Callbacks: the record pointer is valid only during the call. fn and user stay valid until unsubscribe returned. A
+ *    native fault inside a stage callback is caught (kiln.log), the subscription is removed, and that turn's edits are
+ *    dropped and reported; a fault inside a ready callback is caught and logged (v1 keeps that subscription).
  *  - Results: KILN_OK; KILN_ERR_INVALID_ARGUMENT (a NULL required pointer, a bad size, owner 0, a malformed document,
  *    an unknown registry, field or view); KILN_ERR_NOT_FOUND (no such entry or handle); KILN_ERR_UNAVAILABLE (not now:
  *    the phase does not allow it, the field is not mapped on this game build); KILN_ERR_WRONG_THREAD;
@@ -134,12 +135,12 @@ enum {
 typedef struct KilnRegistryStatus {
     uint32_t size;        /* in: sizeof(KilnRegistryStatus) of the caller (v1: 40); out: the bytes Kiln filled */
     uint32_t phase;       /* KILN_REGISTRY_PHASE_* */
-    uint64_t generation;  /* 0 until the stage ended; +1 at START, at each WORLDLOAD, each time the live fields are
-                             applied again (a data-pack reload), and when a world stops */
+    uint64_t generation;  /* 0 until the stage ended; 1 at START, +1 at each WORLDLOAD (each application of the live
+                             fields: a world's load, a data-pack reload) */
     uint32_t edits;       /* edits the stage applied (every mod, every stage) */
     uint32_t refused;     /* edits refused (registry.json "refused") */
     uint32_t conflicts;   /* conflict lines (registry.json "conflicts") */
-    uint32_t world;       /* WORLDLOAD: the KILN_WORLD_* whose load applied the live fields; else KILN_WORLD_KINDS */
+    uint32_t world;       /* v1: always KILN_WORLD_KINDS (the world that applied the live fields is not named yet) */
     uint32_t flags;       /* KILN_REGISTRY_STATUS_* */
     uint32_t reserved;    /* 0 */
 } KilnRegistryStatus;
@@ -174,7 +175,7 @@ typedef struct KilnRegistryReady {
     uint32_t size;       /* what Kiln filled (v1: 24) */
     uint32_t phase;      /* KILN_REGISTRY_PHASE_START or WORLDLOAD */
     uint64_t generation; /* as KilnRegistryStatus.generation */
-    uint32_t world;      /* WORLDLOAD: the KILN_WORLD_* whose load applied the live fields; START: KILN_WORLD_KINDS */
+    uint32_t world;      /* v1: always KILN_WORLD_KINDS */
     uint32_t reserved;   /* 0 */
 } KilnRegistryReady;
 
@@ -239,8 +240,8 @@ typedef struct KilnRegistryApi {
      * field with its writers, the conflicts, the refused edits. KILN_ERR_UNAVAILABLE before START. Any thread. */
     KilnResult(KILN_CALL* report_json)(char* buf, size_t cap, size_t* out_len);
 
-    /* fn runs at START, on the stage thread right after the stage, and at each WORLDLOAD, on the thread of the world whose
-     * load applied the live fields (the tick thread for a server world, the game's main thread for a client world). Events
+    /* fn runs at START, on the stage thread right after the stage, and at each WORLDLOAD (each application of the live
+     * fields), on the thread that applied them (the tick thread for a server world, the game's main thread for a client world). Events
      * are not replayed: subscribe before the stage (kiln_plugin_main, on_ready) to
      * see START; a later subscriber reads status() after subscribing (an event between the two may reach fn too: treat a
      * generation seen twice as one). Remove with unsubscribe. Any thread. */

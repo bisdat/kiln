@@ -807,16 +807,26 @@ void Runner::finish(const std::vector<BootOutcome>& outcomes) {
             refuse_unmapped(d_->rm, d_->schema, b, refused);
         };
         live.report = [this](const Result& r) {
-            std::lock_guard l2(d_->mu);
-            d_->result = r;
-            ++d_->generation;
-            d_->meta.generation = d_->generation;
-            d_->meta.world_load = true;  // the live back-end applied the now and worldLoad fields (a world's load, a pack reload)
-            phase_.store(Phase::WorldLoad);
-            d_->meta.written = d_->env.now ? d_->env.now() : "";
-            const json doc2 = ::kc::registry::report_json(d_->schema, d_->result, d_->meta);
-            d_->report = doc2.dump();
-            if (d_->env.write_report) d_->env.write_report(doc2.dump(1));
+            std::vector<std::function<void(Phase, uint64_t)>> fns;
+            uint64_t g2 = 0;
+            std::string text;
+            {
+                std::lock_guard l2(d_->mu);
+                d_->result = r;
+                ++d_->generation;
+                d_->meta.generation = d_->generation;
+                d_->meta.world_load = true;  // the live back-end applied the now and worldLoad fields (a world's load, a pack reload)
+                phase_.store(Phase::WorldLoad);
+                d_->meta.written = d_->env.now ? d_->env.now() : "";
+                const json doc2 = ::kc::registry::report_json(d_->schema, d_->result, d_->meta);
+                d_->report = doc2.dump();
+                text = doc2.dump(1);
+                g2 = d_->generation;
+                for (const auto& [h, s] : d_->ready_subs) fns.push_back(s.fn);
+            }
+            // outside the runner's lock (review finding 10): the file, then kiln_registry.h's WORLDLOAD event (finding 9)
+            if (d_->env.write_report) d_->env.write_report(text);
+            for (const auto& fn : fns) fn(Phase::WorldLoad, g2);
         };
     }
     if (live_) live_(live);
