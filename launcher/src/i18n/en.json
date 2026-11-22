@@ -5829,7 +5829,6 @@
       },
       "aboveItemMax": "above this item's maximum ({max}): the server clamps it on load, unless its range was opened up by a mod",
       "upgradesHint": "Rarity sets how many upgrades the item takes: max level = base level + rarity.",
-      "levelLimit": "Edits use a maximum level of {max}. Saved values stay as they are until edited.",
       "invalidLevels": "Item levels and upgrades must be whole numbers from 0 to 255.",
       "gem": "Socketed gem",
       "gemUnknown": "id {id} is not in the catalog",

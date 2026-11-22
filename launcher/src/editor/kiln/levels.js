@@ -1,38 +1,34 @@
-// Save item levels, rarity and applied upgrades are bytes (shared/character.mjs). For a known vanilla item,
-// items.json bounds the base level; the saved level includes applied upgrades, capped by instance rarity (1..5).
-// See UPSTREAM.md. Incomplete data and mod items use only the byte bound: their game limits are not known here.
+// Save item levels, rarity and applied upgrades are bytes (shared/character.mjs). The saved level includes upgrades.
+// The vendored catalog may lag the game or mods, so its maxLevel is not an edit limit. See UPSTREAM.md.
 export const MAX_ITEM_LEVEL = 255;
-const RARITIES = new Set(['Common', 'Uncommon', 'Rare', 'Epic', 'Legendary']);
 const byte = (v) => Math.max(0, Math.min(MAX_ITEM_LEVEL, Math.floor(Number(v)) || 0));
-const knownLimits = (item) => !item?.modded && Number.isInteger(item?.maxLevel) && item.maxLevel > 0 && RARITIES.has(item.rarity);
 
-export const baseLevelLimit = (item) => knownLimits(item) ? Math.min(MAX_ITEM_LEVEL, item.maxLevel) : MAX_ITEM_LEVEL;
-export const upgradeLimit = (entry, item) => knownLimits(item) ? Math.min(5, byte(entry.maxUpgrades ?? 0)) : MAX_ITEM_LEVEL;
-const applied = (entry, item) => Math.min(upgradeLimit(entry, item), byte(entry.upgrades ?? 0));
-export const itemLevelLimit = (entry, item) => Math.min(MAX_ITEM_LEVEL, baseLevelLimit(item) + applied(entry, item));
+// Use the instance's own upgrade capacity, not the catalog's rarity or a fixed five-upgrade assumption.
+export const upgradeLimit = (entry) => byte(entry.maxUpgrades ?? MAX_ITEM_LEVEL);
+const applied = (entry) => Math.min(upgradeLimit(entry), byte(entry.upgrades ?? 0));
 
 /** Only called for an edit, never while reading or displaying a save. */
-export function clampItemLevel(entry, item, value) {
-  return Math.max(applied(entry, item), Math.min(itemLevelLimit(entry, item), byte(value)));
+export function clampItemLevel(entry, value) {
+  return Math.max(applied(entry), byte(value));
 }
 
 /** Changing upgrades changes the total level too; rarity is changed only when the player chose a rarity. */
-export function setItemUpgrades(entry, item, value, rarity) {
+export function setItemUpgrades(entry, value, rarity) {
   const next = { ...entry };
-  if (rarity !== undefined) next.maxUpgrades = Math.min(knownLimits(item) ? 5 : MAX_ITEM_LEVEL, byte(rarity));
-  next.upgrades = Math.min(upgradeLimit(next, item), byte(value));
+  if (rarity !== undefined) next.maxUpgrades = byte(rarity);
+  next.upgrades = Math.min(upgradeLimit(next), byte(value));
   if (entry.level !== undefined) {
     const base = Math.max(0, entry.level - (entry.upgrades ?? 0));
-    next.level = clampItemLevel(next, item, base + next.upgrades);
+    next.level = clampItemLevel(next, base + next.upgrades);
   }
   return next;
 }
 
 /** A template creates a new item; unlike an existing save's entry, its values are bounded now. */
-export function newItemLevels(entry, item) {
+export function newItemLevels(entry) {
   const next = entry.maxUpgrades !== undefined || entry.upgrades !== undefined
-    ? setItemUpgrades(entry, item, entry.upgrades ?? 0, entry.maxUpgrades) : { ...entry };
-  if (next.level !== undefined) next.level = clampItemLevel(next, item, next.level);
+    ? setItemUpgrades(entry, entry.upgrades ?? 0, entry.maxUpgrades) : { ...entry };
+  if (next.level !== undefined) next.level = clampItemLevel(next, next.level);
   return next;
 }
 

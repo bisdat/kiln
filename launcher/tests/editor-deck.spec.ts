@@ -228,9 +228,14 @@ test.describe("the save editor in Deck mode", () => {
     await pad(page, "down");
     await walk(page, "right", "value-Level", 3);
     await pad(page, "a");
+    // The vendored catalog has an older cap for this helmet; only the byte bound limits edits.
+    await expect(num).toContainText("255");
     await typeNumber(page, "35");
     await expect(page.locator('[data-deck-id="value-Level"]')).toHaveText("35");
     await expect(say(page)).toContainText("Not saved");
+    await pad(page, "x");
+    await expect(page.locator(".deck-toast")).toContainText("Saved");
+    await expect(page.locator('[data-deck-id="value-Level"]')).toHaveText("35");
   });
 
   test("the skill tree and knowledge with the pad", async ({ page }) => {

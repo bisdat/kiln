@@ -52,12 +52,12 @@ item), `parts.jsx` (the slot, with a neutral square for an item that has no icon
 its rules (equipment mask order, socket bytes, level includes upgrades, the tree checks before a write). Game art
 appears only as item and skill icons. Two rules differ: an amount may go above the item's stack size, up to the
 65535 the save holds, with a note (a mod may have raised stack sizes, which the editor cannot know; upstream stopped
-at the vanilla stack). Level edits use `kiln/levels.js`: `data/items.json`'s per-item `maxLevel` caps the base level,
-then applied upgrades are added, with a hard ceiling of 255 for the save's byte. Instance rarity caps upgrades
-(Common 1 through Legendary 5), as upstream's `src/ItemEditor.jsx`, `src/gamedata.js` and README describe;
-`data/item-extras.json` records rarities 1..5 and `data/item-stats.json` has five enhancement slots where present,
-not a separate per-item upgrade cap. Base maxima vary (weapons up to 55, weapon gems up to 105): a level-10 hat
-with 5 upgrades is level 15, not 10. Mod items and items without complete level/rarity data use only 0..255.
+at the vanilla stack). Level edits use `kiln/levels.js` to keep the total level, including applied upgrades,
+within the save's byte (0..255). The vendored `data/items.json` can predate the game's current level ranges and
+cannot account for mods, so its `maxLevel` is not an edit limit, including for gems, catalog items and templates.
+The instance's own `maxUpgrades` bounds upgrade edits, as upstream's `src/ItemEditor.jsx` describes; no catalog
+rarity or fixed five-upgrade limit replaces that saved capacity. Upstream's README documents that the saved level
+already includes upgrades: a level-10 hat with 5 upgrades is level 15, not 10.
 These limits apply only to edits and newly created items (including templates), never when loading, displaying,
 moving or duplicating an existing entry. The write check rejects only non-byte item levels/upgrades, not values
 above catalog limits; existing saves remain byte-identical if those fields are not edited. The UI speaks the

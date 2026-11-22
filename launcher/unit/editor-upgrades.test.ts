@@ -16,6 +16,8 @@ import { setLanguage } from "../src/i18n";
 // @ts-ignore
 import { parseCharacter, buildCharacter } from "../src/editor/shared/character.mjs";
 // @ts-ignore
+import { replaceSlots } from "../src/editor/shared/inventory.mjs";
+// @ts-ignore
 import * as sv2c from "../src/editor/shared/sv2c-web.mjs";
 import items from "../src/editor/data/items.json";
 import skills from "../src/editor/data/skills.json";
@@ -64,7 +66,7 @@ test("an upgrade from a loaded level-255 item cannot wrap its saved level byte t
   c.main = c.main.map((e: Entry) => e.slot === original.slot ? edited : e);
   const roundTrip = parseCharacter(buildCharacter(c), isItem, isSkill);
   expect(roundTrip.main.find((e: Entry) => e.slot === original.slot).level).toBe(edited.level);
-  expect(edited.level).toBeLessThanOrEqual((items as Record<string, { maxLevel: number }>)[edited.itemId].maxLevel + 1);
+  expect(edited.level).toBe(255);
 });
 
 const hatId = Number(Object.entries(items).find(([, it]) => it.maxLevel === 10 && it.slot === "Armour_Head")![0]);
@@ -82,7 +84,25 @@ function renderControl(element: Element, env: Record<string, any> = { deck: fals
   return controls;
 }
 
-test("upgrades and rarity preserve the base level, within the item's range and rarity", () => {
+test("desktop and Deck level callbacks allow a level-35 Brazen Bull Helmet despite the old catalog cap", () => {
+  const id = Number(Object.entries(items).find(([, it]) => it.en === "Brazen Bull Helmet")![0]);
+  for (const deck of [false, true]) {
+    let edited = { ...hat(), itemId: id };
+    let pad: Record<string, any> = {};
+    const env = { deck, askNumber: (o: Record<string, any>) => { pad = o; } };
+    const level = control(form(edited, (e) => { edited = e; }, env), Stepper, "Level");
+    const controls = renderControl(level, env);
+    if (deck) {
+      controls.find((e) => e.props["data-deck-id"])!.props.onClick();
+      pad.onDone(35);
+    } else {
+      controls.find((e) => e.type === "input")!.props.onChange({ target: { value: "35" } });
+    }
+    expect(edited.level).toBe(35);
+  }
+});
+
+test("upgrades and rarity preserve the base level, within the instance upgrade capacity", () => {
   let edited = hat();
   let controls = form(edited, (e) => { edited = e; });
   control(controls, UpgradePick).props.onChange(5);
@@ -92,46 +112,49 @@ test("upgrades and rarity preserve the base level, within the item's range and r
   expect(edited).toMatchObject({ level: 11, upgrades: 1, maxUpgrades: 1 });
 });
 
-test("the level input caps the base level plus applied upgrades, not the base level alone", () => {
+test("typed and pasted levels fit the byte without using the old catalog maximum", () => {
   let edited = hat();
   const level = control(form(edited, (e) => { edited = e; }), Stepper, "Level");
-  expect(level.props.max).toBe(12);
+  expect(level.props.max).toBe(255);
   const input = renderControl(level).find((e) => e.type === "input")!;
   input.props.onChange({ target: { value: "256" } }); // typed or pasted
-  expect(edited.level).toBe(12);
+  expect(edited.level).toBe(255);
   input.props.onChange({ target: { value: "11.9" } });
   expect(edited.level).toBe(11);
+  input.props.onChange({ target: { value: "-1" } });
+  expect(edited.level).toBe(2); // total level cannot be less than applied upgrades
 });
 
-test("a keyboard step and the Deck number pad use the same per-item limit", () => {
-  let edited = hat({ level: 11 });
+test("a keyboard step and the Deck number pad use the same byte limit", () => {
+  let edited = hat({ level: 254 });
   let level = control(form(edited, (e) => { edited = e; }), Stepper, "Level");
   const plus = renderControl(level).find((e) => e.props["aria-label"] === "+1")!;
   plus.props.onClick(); // the same handler is activated by Enter/Space or Deck A
-  expect(edited.level).toBe(12);
+  expect(edited.level).toBe(255);
   let pad: Record<string, any> = {};
   const env = { deck: true, askNumber: (o: Record<string, any>) => { pad = o; } };
   level = control(form(edited, (e) => { edited = e; }, env), Stepper, "Level");
   renderControl(level, env).find((e) => e.props["data-deck-id"])!.props.onClick();
-  expect(pad.max).toBe(12);
+  expect(pad.max).toBe(255);
   pad.onDone(999);
-  expect(edited.level).toBe(12);
+  expect(edited.level).toBe(255);
   pad.onDone(11.9);
   expect(edited.level).toBe(11);
+  pad.onDone(-1);
+  expect(edited.level).toBe(2);
 });
 
-test("socketed gems and catalog gems use the gem's own maximum", () => {
-  const gemMax = (items as Record<string, { maxLevel: number }>)[gemId].maxLevel;
+test("socketed gems and catalog gems fit the byte without using the old catalog maximum", () => {
   const bytes = Buffer.alloc(5);
   bytes.writeUInt32LE(gemId);
   bytes[4] = 200;
   let edited = hat({ socket: bytes.toString("hex") });
   const level = control(form(edited, (e) => { edited = e; }), Stepper, "Gem level");
   expect(level.props.value).toBe(200); // loaded value is shown, not normalized on render
-  expect(level.props.max).toBe(gemMax);
+  expect(level.props.max).toBe(255);
   renderControl(level).find((e) => e.type === "input")!.props.onChange({ target: { value: "999" } });
-  expect(Buffer.from(edited.socket!, "hex")[4]).toBe(gemMax);
-  expect(newEntry(gemId, 0, 1, undefined, 999).level).toBe(gemMax);
+  expect(Buffer.from(edited.socket!, "hex")[4]).toBe(255);
+  expect(newEntry(gemId, 0, 1, undefined, 999).level).toBe(255);
 });
 
 test("loaded out-of-range levels, upgrades and rarity are not changed by rendering or an unrelated edit", async () => {
@@ -146,7 +169,7 @@ test("loaded out-of-range levels, upgrades and rarity are not changed by renderi
   expect(control(controls, Stepper, "Level").props.value).toBe(255);
   const upgrades = control(controls, UpgradePick);
   expect(upgrades.props.value).toBe(7);
-  expect(upgrades.props.max).toBe(5);
+  expect(upgrades.props.max).toBe(9);
   expect(renderToStaticMarkup(control(controls, RarityPick))).toContain(">9</span>");
   expect(elements(controls).some((e) => e.props.className === "ke-note warn")).toBe(false);
   control(controls, Stepper, "Amount").props.onChange(1);
@@ -155,15 +178,30 @@ test("loaded out-of-range levels, upgrades and rarity are not changed by renderi
   expect(Buffer.compare(buildCharacter(parseCharacter(before, isItem, isSkill)), before)).toBe(0);
 });
 
-test("editing excessive upgrades caps them to rarity instead of offering the saved excessive count", () => {
+test("moving and duplicating loaded values preserve their level, rarity, upgrades and socket", async () => {
+  const c = await character();
+  const original = hat({ level: 255, upgrades: 7, maxUpgrades: 9, socket: "00000000ff" });
+  const model = { ...c, main: [original], extra: [] };
+  const moved = replaceSlots(model, [["main:0", null], ["extra:0", original]]);
+  const duplicated = replaceSlots(moved, [["main:1", moved.extra[0]]]);
+  expect(moved.extra[0]).toEqual(original);
+  expect(duplicated.main[0]).toEqual({ ...original, slot: 1 });
+  const saved = parseCharacter(buildCharacter(duplicated), isItem, isSkill);
+  expect(saved.extra[0]).toMatchObject(original);
+  expect(saved.main[0]).toMatchObject({ ...original, slot: 1 });
+});
+
+test("upgrade edits use the saved instance capacity, not a fixed five-upgrade cap", () => {
   let edited = hat({ level: 255, upgrades: 7, maxUpgrades: 9 });
   control(form(edited, (e) => { edited = e; }), UpgradePick).props.onChange(255);
-  expect(edited).toMatchObject({ level: 15, upgrades: 5, maxUpgrades: 9 }); // rarity was not edited
+  expect(edited).toMatchObject({ level: 255, upgrades: 9, maxUpgrades: 9 }); // rarity was not edited
 });
 
 test("a catalog template is a new item and bounds its level, applied upgrades and rarity", () => {
-  const entry = newEntry(hatId, 3, 1, hat({ level: 255, upgrades: 255, maxUpgrades: 255 }));
-  expect(entry).toMatchObject({ slot: 3, count: 1, level: 5, upgrades: 5, maxUpgrades: 5 });
+  const entry = newEntry(hatId, 3, 1, hat({ level: 999, upgrades: 999, maxUpgrades: 999 }));
+  expect(entry).toMatchObject({ slot: 3, count: 1, level: 255, upgrades: 255, maxUpgrades: 255 });
+  expect(newEntry(hatId, 3, 1, hat({ level: -1, upgrades: -1, maxUpgrades: -1 })))
+    .toMatchObject({ level: 0, upgrades: 0, maxUpgrades: 0 });
 });
 
 test("unknown, incomplete and modded item data fall back to the byte bound", () => {
