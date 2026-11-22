@@ -563,7 +563,8 @@ internal static unsafe class SidecarServer
             _configStamp = stamp;
             var node = JsonNode.Parse(File.ReadAllText(path), documentOptions: new() { CommentHandling = System.Text.Json.JsonCommentHandling.Skip, AllowTrailingCommas = true });
             var b = node?["repl"]?["peerBudget"];
-            _core.Budget = b is JsonValue v && v.TryGetValue<int>(out var n) && n >= 1024 ? n : SidecarServerCore.DefaultBudget;
+            // at least 2,048 bytes a second: the largest value (1,024 bytes) plus its frame must fit one second's budget
+            _core.Budget = b is JsonValue v && v.TryGetValue<int>(out var n) && n >= 2048 ? n : SidecarServerCore.DefaultBudget;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
         {

@@ -88,4 +88,19 @@ public sealed class ReplicationExtensionTests
             """);
         Ids(d);
     }
+    [Fact]
+    public async Task The_runtimes_own_structs_are_reported()
+    {
+        // LayoutHash refuses every struct of the runtime's own library at registration: KILN199 says so at compile time
+        var d = await Run(A, Api + """
+            namespace M
+            {
+                using System.Runtime.InteropServices;
+                using Kiln;
+                [StructLayout(LayoutKind.Sequential, Pack = 1)] public struct HasVector { public System.Numerics.Vector3 V; }
+                public sealed class Use { public void Go() => Replication.Extension<HasVector>("a:v", 1); }
+            }
+            """);
+        Assert.Contains(d, x => x.Id == "KILN199" && x.GetMessage().Contains("Vector3"));
+    }
 }

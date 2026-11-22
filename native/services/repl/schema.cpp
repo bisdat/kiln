@@ -137,6 +137,14 @@ bool seh_encode(BitCursor* c, const void* msg, const void* s) {
         return false;
     }
 }
+size_t seh_strnlen(const char* p, size_t max) {
+    if (!p) return 0;
+    __try {
+        return strnlen(p, max);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 0;  // a bogus handle from a native caller: no name
+    }
+}
 bool seh_counts(const uint8_t* s, const uint8_t* msg) {
     __try {
         return msg::counts_ok(s, msg);
@@ -201,7 +209,8 @@ KilnResult KILN_CALL t_schema_fields(uint64_t schema, KilnReplSchemaField* out, 
         KilnReplSchemaField& o = out[i];
         o = KilnReplSchemaField{};
         const char* nm = read<const char*>(f + msg::kFieldName);
-        o.name = KilnStr{nm, nm ? strnlen(nm, 128) : 0};
+        const size_t nlen = seh_strnlen(nm, 128);
+        o.name = KilnStr{nlen ? nm : nullptr, nlen};
         o.type = read<uint32_t>(f + msg::kFieldType);
         o.element = read<uint32_t>(f + msg::kFieldElement);
         o.shape = read<uint32_t>(f + msg::kFieldShape);
