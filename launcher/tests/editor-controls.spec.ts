@@ -211,9 +211,9 @@ test("a gem overlay merged after the editor loads appears in Catalog and socket 
   await page.getByRole("button", { name: "Add item", exact: true }).click();
   const catalog = page.getByRole("dialog");
   await catalog.getByRole("textbox").fill("Overlay test gem");
-  await expect(catalog.getByRole("button", { name: "Overlay test gem", exact: true })).toBeVisible();
+  await expect(catalog.getByRole("option", { name: "Overlay test gem", exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
-  await page.getByRole("button", { name: "Eclipsed Blade", exact: true }).click();
+  await page.getByRole("button", { name: "Action bar slot 1: Eclipsed Blade", exact: true }).click();
   const gem = page.getByRole("combobox", { name: "Socketed gem", exact: true });
   await expect(gem.locator('option[value="2130711092"]')).toHaveText("Overlay test gem");
   await gem.selectOption(String(0x7f001234));
@@ -223,7 +223,7 @@ test("a gem overlay merged after the editor loads appears in Catalog and socket 
 
 test("durability and water meters support arrows, Page keys, Home and End and persist", async ({ page }) => {
   await open(page);
-  await page.getByRole("button", { name: "Eclipsed Blade", exact: true }).click();
+  await page.getByRole("button", { name: "Action bar slot 1: Eclipsed Blade", exact: true }).click();
   const durability = page.getByRole("slider", { name: "Durability", exact: true });
   await expect(durability).toHaveAttribute("aria-valuemax", "300");
   await durability.focus();
@@ -261,7 +261,7 @@ test("read-only Knowledge controls are disabled while item and Knowledge browsin
   await expect(page.locator(".k-page-title")).toContainText("Mordred");
   await page.locator(".ke-grid .ke-slot.full").first().click();
   await expect(page.locator(".ke-insp")).toContainText("Diamond");
-  await page.getByRole("button", { name: "Eclipsed Blade", exact: true }).click();
+  await page.getByRole("button", { name: "Action bar slot 1: Eclipsed Blade", exact: true }).click();
   await expect(page.locator(".ke-insp")).toContainText("Eclipsed Blade");
   // Inspector's disabled prop is supplied by Inventory/Equipment (tested directly in editor-controls.test.ts).
   // Knowledge owns its read-only state and keeps filters available for browsing.

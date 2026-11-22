@@ -149,7 +149,7 @@ test("a save makes one Kiln backup of the save before it", async ({ page }) => {
 
 test("item level input and upgrades fit the save byte and round-trip through Save", async ({ page }) => {
   await open(page);
-  await page.getByRole("button", { name: "Eclipsed Blade", exact: true }).click();
+  await page.getByRole("button", { name: "Action bar slot 1: Eclipsed Blade", exact: true }).click();
   const level = page.locator('.ke-insp input[aria-label="Level"]');
   await expect(level).toHaveAttribute("max", "255");
   await level.fill("256");
