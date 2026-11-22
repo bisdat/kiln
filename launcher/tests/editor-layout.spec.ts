@@ -141,6 +141,8 @@ test("backup filename is readable rather than clipped in its cell", async ({ pag
 test("active Catalog count meets readable Hearth contrast", async ({ page }) => {
   await open(page); await page.locator(".ke-group-head button").first().click();
   await expect(page.locator(".ke-cat-grid .ke-slot").first()).toBeVisible();
+  // Measure the rail and its count at rest, not in different frames of the modal's spring entrance.
+  await page.getByRole("dialog").evaluate(async (el) => { await Promise.all(el.getAnimations().map((a) => a.finished)); });
   await shot(page, "catalog-count");
   const count = page.locator(".ke-cat-rail .k-sub.on .ke-cat-n");
   await contained(count, page.locator(".ke-cat-rail"));
