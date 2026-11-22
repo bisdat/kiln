@@ -250,8 +250,9 @@ than 16 Flame Altars, per-base sizes, merging bases; a player's build zone on sc
 Base rules are an earlier writer of the balancing table, as resource patches are: they are written into the table before
 the registry stage, and the registry stage composes on their result (ruling D1). A registry edit of
 `balance.altarsPerFlameLevel` or `balance.buildzoneSizesPerAltarLevel` therefore wins over a base rule. The registry
-report names the rule as the writer below (`composedOn` or `overridden`, writer `<mod>/baseRules/<name>`; for the
-counts: the registry models the size list's members only from its own edits). `Build.BaseLimits` reports the values the
+report names the rule as the writer below for the counts (`composedOn` or `overridden`, writer `<mod>/baseRules/<name>`);
+for the sizes the registry stage still composes on the rules' values, but names no writer below it (it models the members
+of the size list only from its own edits). `Build.BaseLimits` reports the values the
 game runs with, after the registry, and `BaseLimits.RegistryChanged` lists every value a registry edit changed after a rule
 had raised it (`"altarsPerFlameLevel[1]: 8 -> 2 (rules-a:roomy)"`).
 

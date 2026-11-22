@@ -74,7 +74,7 @@ form `Code: words`:
 | `NotUnique`, `SpawnFailed`, `MoveRefused`, `Despawned`, `NotConfirmed` | Summon's placement and its readback (home within 0.05 m, position within 1 m, a new NPC alive 3 s) |
 | `NotInWorld`, `Locked`, `NotABed`, `BedOutOfHomeRange` | beds: the NPC must be recruited and in the world, the bed a sleeping place within the NPC's bed radius of its home (read from the NPC's template through the game's GetTemplateComponent; when that cannot be read the check is skipped with one warning in kiln.log) |
 | `ActorNotInGame`, `ActorSessionChanged`, `PermissionsUnknown`, `PermissionDenied`, `BedOutsideBase` | PlayerPermissions |
-| `ChangedByGame` | the readback after a bed write does not show it (the game changed it in between) |
+| `ChangedByGame` | the game changed the bed or the survivor's bed in the same step before Kiln's write (nothing is written), or the readback after the write does not show it |
 | `WorldChanged`, `QueueTimeout`, `Deadline`, `WorldEnded` | the request's world and budget |
 
 ### Authorization of bed changes
