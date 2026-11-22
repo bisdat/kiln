@@ -3929,7 +3929,7 @@ const _: () = {
     assert!(core::mem::offset_of!(crate::services::kiln_repl::KilnReplMessage, channel) == 8);
     assert!(core::mem::offset_of!(crate::services::kiln_repl::KilnReplMessage, direction) == 9);
     assert!(core::mem::offset_of!(crate::services::kiln_repl::KilnReplMessage, player_socket) == 10);
-    assert!(core::mem::offset_of!(crate::services::kiln_repl::KilnReplMessage, pad) == 11);
+    assert!(core::mem::offset_of!(crate::services::kiln_repl::KilnReplMessage, peer_flags) == 11);
     assert!(core::mem::offset_of!(crate::services::kiln_repl::KilnReplMessage, length) == 12);
     assert!(core::mem::offset_of!(crate::services::kiln_repl::KilnReplMessage, data) == 16);
     assert!(core::mem::offset_of!(crate::services::kiln_repl::KilnReplMessage, rewrite) == 24);

@@ -259,6 +259,13 @@ socket carries (1, 15, 19, 20; 21 needs the player socket: not yet). `Decode<T>`
 does not know is refused, never guessed. Not confirmed on a real client yet: a drop or rewrite of real traffic (package
 15's CLIENT-CHECKS.md step 11); a lab has no game session, so it proves the codec and the hooks' install only.
 
+On the server side, hooks on machine and player sockets use the same `NetPeer.Id` as `Peers` and `Network.Peers`.
+For player sockets such as `GameChannel.AdminInfo`, Kiln resolves this id from the session's player and machine
+records. The handler's `rewrite.PeerId` carries the id even when the `peer` argument is null because the peer is
+absent from `Network.Peers`. When Kiln cannot resolve the id, `rewrite.PeerId` is `0`, `rewrite.PeerUnknown` is `true`,
+and `peer` is null. On the client side, `peer` is null, `rewrite.PeerId` is `0`, and `rewrite.PeerUnknown` is `false`
+because the remote endpoint is the server.
+
 ## Limits
 
 - 64 send watches at a time (all mods and the commands together), 16 receive watches on a client. An ended watch gives

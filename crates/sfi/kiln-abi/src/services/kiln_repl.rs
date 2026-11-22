@@ -33,6 +33,7 @@ pub const KILN_REPL_KIND_UPDATE: i32 = 3;
 pub const KILN_REPL_LAB_SERVICE: &[u8] = b"kiln.repl.lab\0";
 pub const KILN_REPL_LAB_VERSION: u32 = 1;
 pub const KILN_REPL_MACHINES: u32 = 17;
+pub const KILN_REPL_MSG_PEER_UNKNOWN: i32 = 1;
 pub const KILN_REPL_NET_CAP_CLIENT_TRACK: i32 = 2;
 pub const KILN_REPL_NET_CAP_FILTER: i32 = 4;
 pub const KILN_REPL_NET_CAP_MESSAGES_RECEIVE: i32 = 64;
@@ -285,7 +286,7 @@ pub struct KilnReplMessage {
     pub channel: u8,
     pub direction: u8,
     pub player_socket: u8,
-    pub pad: u8,
+    pub peer_flags: u8,
     pub length: u32,
     pub data: *const u8,
     pub rewrite: *mut u8,

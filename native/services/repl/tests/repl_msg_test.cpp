@@ -10,10 +10,23 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <string_view>
 #include <vector>
 
 #include "../msgcore.h"
+#include "../repl.h"
 #include "services/kiln_repl.h"
+
+namespace repl {
+const KilnApi* g_api = nullptr;
+KilnOwner g_owner = 0;
+std::atomic<uintptr_t> g_gs{0};
+uint32_t side() { return KILN_SIDE_SERVER; }
+uint32_t peer_of(uint32_t, uint8_t*) { return 0; }
+void logf(int, const char*, ...) {}
+void describe(uintptr_t, char*, size_t) {}
+bool schema_check(const char*, const uint8_t*, uint32_t) { return false; }
+}  // namespace repl
 
 namespace {
 
@@ -242,7 +255,7 @@ void rx_site() {
     const uint8_t* d = nullptr;
     uint64_t len = 0;
     CHECK(rx_read(&r, server, &d, &len) && d == msg && len == 12);
-    CHECK(rx_peer(&r, server) == 0x81);
+    CHECK(rx_peer_key(&r, server) == 0x81);
     rx_set_size(&r, server, 8);
     uint64_t back = 0;
     std::memcpy(&back, reinterpret_cast<void*>(rbp - 0x60), 8);
@@ -251,12 +264,12 @@ void rx_site() {
     CHECK(r.rip == 0x7be0e4);
     const RxSite player{-0x68, -0x60, 0x7be74d, 1, kPeerInEdi};
     r.rdi = 0xdead00000042ull;
-    CHECK(rx_peer(&r, player) == 0x42);
+    CHECK(rx_peer_key(&r, player) == 0x42);
     const RxSite client{-0x18, -0x10, 0x875641, 0, kPeerServer};
     std::memcpy(reinterpret_cast<void*>(rbp - 0x18), &p, 8);
     std::memcpy(reinterpret_cast<void*>(rbp - 0x10), &n, 8);
     CHECK(rx_read(&r, client, &d, &len) && d == msg && len == 12);
-    CHECK(rx_peer(&r, client) == 0);
+    CHECK(rx_peer_key(&r, client) == 0);
     // no data, or a size past the largest message: not a message to hand to anyone
     const uint8_t* none = nullptr;
     std::memcpy(reinterpret_cast<void*>(rbp - 0x18), &none, 8);
@@ -265,6 +278,142 @@ void rx_site() {
     uint64_t big = kMaxMessage + 1;
     std::memcpy(reinterpret_cast<void*>(rbp - 0x10), &big, 8);
     CHECK(!rx_read(&r, client, &d, &len));
+}
+
+// Exercise the installed send and receive hooks against a stand-in GameServer and session.
+struct TestAlloc {
+    uint64_t status = 0, handle = 0, h1 = 0, h2 = 0;
+    uint32_t size = 4, pad = 0;
+    uint8_t* data;
+    uint64_t capacity = 4;
+};
+using TestAllocFn = TestAlloc* (*)(TestAlloc*, uintptr_t, uintptr_t, const void*);
+using TestCommitFn = void (*)(uintptr_t, uint64_t*);
+TestAlloc* alloc_original(TestAlloc* out, uintptr_t, uintptr_t, const void*) { return out; }
+void commit_original(uintptr_t, uint64_t*) {}
+
+void player_socket_peer() {
+    static TestAllocFn alloc = nullptr;
+    static TestCommitFn commit = nullptr;
+    static KilnMidFn receive = nullptr;
+    static void* receive_site = nullptr;
+    static KilnHooksApi hooks{};
+    hooks.header = {sizeof hooks, KILN_HOOKS_VERSION};
+    hooks.raw_detour = [](KilnOwner, uintptr_t target, const KilnHookOrder*, void* fn, void** original, KilnHandle* out) -> KilnResult {
+        if (target == reinterpret_cast<uintptr_t>(&alloc_original)) {
+            alloc = reinterpret_cast<TestAllocFn>(fn);
+            *original = reinterpret_cast<void*>(&alloc_original);
+        } else {
+            commit = reinterpret_cast<TestCommitFn>(fn);
+            *original = reinterpret_cast<void*>(&commit_original);
+        }
+        *out = target;
+        return KILN_OK;
+    };
+    hooks.mid2 = [](KilnOwner, uintptr_t target, const KilnHookOrder*, KilnMidFn fn, void* site, KilnHandle* out) -> KilnResult {
+        if (target == 2) {
+            receive = fn;
+            receive_site = site;
+        }
+        *out = target;
+        return KILN_OK;
+    };
+    static KilnApi api{};
+    api.size = sizeof api;
+    api.on_tick_thread = [] { return true; };
+    api.service = [](KilnStr, uint32_t) -> const void* { return &hooks; };
+    api.feature = [](KilnStr) { return true; };
+    api.symbol = [](KilnStr name, uintptr_t* out) -> KilnResult {
+        const std::string_view n(name.ptr, name.len);
+        if (n == "net/SessionAlloc") *out = reinterpret_cast<uintptr_t>(&alloc_original);
+        else if (n == "net/SessionCommit" || n == "net/SessionAbort") *out = reinterpret_cast<uintptr_t>(&commit_original);
+        else *out = n == "repl/ServerPlayerDispatch" ? 2 : 1;
+        return KILN_OK;
+    };
+    api.constant = [](KilnStr name, int64_t* out) -> KilnResult {
+        const std::string_view n(name.ptr, name.len);
+        const struct { std::string_view name; int64_t value; } constants[] = {
+            {"net/channel", 12}, {"net/gs.sockets", 0x30}, {"net/gs.records", 0x1e0},
+            {"net/rec.stride", 0x148}, {"net/rec.count", 16}, {"net/rec.peer", 4},
+            {"net/after_sync.gs_register", 13},
+            {"net/sockets.machines", 0x28}, {"net/machine.stride", 0x20}, {"net/machine.sockets", 0x10},
+        };
+        for (const auto& c : constants) {
+            if (c.name != n) continue;
+            *out = c.value;
+            return KILN_OK;
+        }
+        return KILN_ERR_NOT_FOUND;
+    };
+    repl::g_api = &api;
+    repl::messages_start();
+    KilnHandle handle = 0;
+    KilnReplMessage observed{};
+    CHECK(repl::t_message_hook(0, 21, KILN_REPL_SEND | KILN_REPL_RECEIVE,
+        [](const KilnReplMessage* m, void* out) -> int32_t {
+            *static_cast<KilnReplMessage*>(out) = *m;
+            return KILN_REPL_PASS;
+        }, &observed, &handle) == KILN_OK);
+    CHECK(alloc && commit && receive);
+    if (!alloc || !commit || !receive) return;
+
+    constexpr uint32_t slot = 2, player = 0x42, peer = 0x183;
+    struct Socket { uint8_t kind; uint8_t pad[3]; uint32_t channel, index; } socket{kPlayerSocket, {}, 21, slot};
+    uintptr_t sockets[25]{};
+    sockets[21] = reinterpret_cast<uintptr_t>(&socket);
+    struct SocketEntry { uint32_t handle; uint32_t pad[3]; uintptr_t* sockets; uint64_t count; } players[64]{}, machines[128]{};
+    players[slot] = {player, {}, sockets, 25};
+    machines[peer & 0x7f].handle = peer;
+    uintptr_t session = 0;
+    uintptr_t set[6]{reinterpret_cast<uintptr_t>(&session), 0, reinterpret_cast<uintptr_t>(players), 0, 0,
+                     reinterpret_cast<uintptr_t>(machines)};
+    alignas(8) uint8_t gs[0x1e0 + 16 * 0x148]{};
+    const auto set_address = reinterpret_cast<uintptr_t>(set);
+    std::memcpy(gs + 0x30, &set_address, sizeof set_address);
+    const uint32_t record[]{player, peer};
+    std::memcpy(gs + 0x1e0 + slot * 0x148, record, sizeof record);
+    repl::g_gs = reinterpret_cast<uintptr_t>(gs);
+
+    uint8_t data[4]{};
+    auto send = [&](uintptr_t to) {
+        TestAlloc out{.data = data};
+        observed = {};
+        alloc(&out, to, reinterpret_cast<uintptr_t>(&socket), nullptr);
+        commit(to, &out.handle);
+        CHECK(observed.direction == KILN_REPL_SEND && observed.player_socket == 1);
+    };
+    send(set[0]);
+    CHECK(observed.peer == peer && observed.peer_flags == 0);
+    send(set[0] + sizeof session);  // the GameServer's record belongs to a different session
+    CHECK(observed.peer == 0 && observed.peer_flags == KILN_REPL_MSG_PEER_UNKNOWN);
+    sockets[21] = 0;  // the allocation's socket no longer belongs to the slot
+    send(set[0]);
+    CHECK(observed.peer == 0 && observed.peer_flags == KILN_REPL_MSG_PEER_UNKNOWN);
+    sockets[21] = reinterpret_cast<uintptr_t>(&socket);
+
+    alignas(8) uint8_t frame[0x80]{};
+    const uint8_t* payload = data;
+    const uint64_t length = sizeof data;
+    std::memcpy(frame + 0x18, &payload, sizeof payload);
+    std::memcpy(frame + 0x20, &length, sizeof length);
+    KilnRegisters r{};
+    r.rax = 21;
+    r.rbp = reinterpret_cast<uintptr_t>(frame) + sizeof frame;
+    r.r13 = reinterpret_cast<uintptr_t>(gs);
+    auto recv = [&](uint32_t from) {
+        r.rdi = 0xdead00000000ull | from;
+        observed = {};
+        receive(&r, receive_site);
+        CHECK(observed.direction == KILN_REPL_RECEIVE && observed.player_socket == 1);
+    };
+    recv(player);
+    CHECK(observed.peer == peer && observed.peer_flags == 0);
+    recv(player + 0x40);  // same slot, different generation
+    CHECK(observed.peer == 0 && observed.peer_flags == KILN_REPL_MSG_PEER_UNKNOWN);
+    machines[peer & 0x7f].handle += 0x80;  // the machine slot now belongs to a different peer
+    recv(player);
+    CHECK(observed.peer == 0 && observed.peer_flags == KILN_REPL_MSG_PEER_UNKNOWN);
+    repl::g_gs = 0;
 }
 
 // ---- the handler chain ----
@@ -299,6 +448,7 @@ int32_t KILN_CALL h_too_long(const KilnReplMessage* m, void* u) {
     *m->rewrite_length = m->rewrite_cap + 1;
     return KILN_REPL_REWRITE;
 }
+#ifdef _WIN32
 int32_t KILN_CALL h_fault(const KilnReplMessage* m, void* u) {
     ++g_calls[reinterpret_cast<uintptr_t>(u)];
     m->rewrite[0] = 'Q';  // edits the rewrite buffer, then faults: the edit must not reach the message
@@ -306,6 +456,7 @@ int32_t KILN_CALL h_fault(const KilnReplMessage* m, void* u) {
     *bad = 1;
     return KILN_REPL_REWRITE;
 }
+#endif
 int32_t KILN_CALL h_odd(const KilnReplMessage*, void* u) {
     ++g_calls[reinterpret_cast<uintptr_t>(u)];
     return 7;
@@ -352,6 +503,7 @@ void chain() {
         const ChainResult res = run_chain(hooks, 3, kSideClient, KILN_REPL_RECEIVE, 19, 0, 0, data, 4, scratch, sizeof scratch);
         CHECK(res.action == KILN_REPL_DROP && g_calls[0] == 1 && g_calls[1] == 0);
     }
+#ifdef _WIN32
     {   // a fault: pass, the bytes are the game's, the hook is flagged (and never called again); the next one runs
         HookEntry hooks[3];
         std::memset(g_calls, 0, sizeof g_calls);
@@ -365,6 +517,7 @@ void chain() {
         res = run_chain(hooks, 3, kSideServer, KILN_REPL_SEND, 20, 0x81, 0, data, 4, scratch, sizeof scratch);
         CHECK(g_calls[0] == 1 && g_calls[1] == 2);
     }
+#endif
     {   // bad answers: a rewrite longer than allowed, an unknown action, a size field the handler must see right
         HookEntry hooks[3];
         std::memset(g_calls, 0, sizeof g_calls);
@@ -542,6 +695,7 @@ int main() {
     counts();
     rx_site();
     chain();
+    player_socket_peer();
     std::printf("repl-msg-test: %d checks, %d failed\n", g_checks, g_failed);
     return g_failed ? 1 : 0;
 }

@@ -385,13 +385,14 @@ enum {
 
 /* ---- message hooks ---- */
 enum { KILN_REPL_PASS = 0, KILN_REPL_DROP = 1, KILN_REPL_REWRITE = 2 };
+enum { KILN_REPL_MSG_PEER_UNKNOWN = 1u << 0 };
 typedef struct KilnReplMessage {
     uint32_t size;                 /* sizeof(KilnReplMessage) */
-    uint32_t peer;                 /* server: the machine's or player's peer handle; client: 0 = the server */
+    uint32_t peer;                 /* server: NetPeer id, or 0 if unknown; client: 0 = the server */
     uint8_t channel;               /* the game's channel (0..24) */
     uint8_t direction;             /* KILN_REPL_SEND / KILN_REPL_RECEIVE */
     uint8_t player_socket;         /* 1: the player socket's loop, 0: the machine socket's */
-    uint8_t pad;
+    uint8_t peer_flags;            /* KILN_REPL_MSG_PEER_UNKNOWN if the server could not resolve a NetPeer id */
     uint32_t length;               /* bytes at data */
     const uint8_t* data;           /* valid during the call */
     uint8_t* rewrite;              /* REWRITE: write the new bytes here (rewrite_cap = length) */

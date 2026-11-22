@@ -10,7 +10,7 @@
 //            (SessionAbort instead of the commit). The game's sends of channels 4/5 (job threads) and Kiln's channel 12
 //            are never hooked.
 //   inject   SessionAlloc + copy + SessionCommit on the machine socket of a server peer for the schema channels that
-//            socket carries (1, 15, 19, 20). Channel 21 goes on the player socket, whose handle is not mapped yet: refused.
+//            socket carries (1, 15, 19, 20). Player-socket channels such as 21 are outside the injection API.
 // Handlers run where the game runs the loop: the server's tick thread (a hosted world: its server thread) and the
 // client's main thread. A handler fault is a pass: the message goes on as it was, the hook is flagged, removed at the
 // next Pre and logged once. The hooks are in only while a hook for that direction exists.
@@ -63,6 +63,61 @@ uintptr_t f_alloc = 0, f_commit = 0, f_abort = 0;
 kiln::RawHook h_alloc, h_commit;
 bool g_send_in = false;
 int64_t c_channel = -1, c_gs_sockets = -1, c_sockets_machines = -1, c_machine_stride = -1, c_machine_sockets = -1;
+int64_t c_rx_gs_register = -1, c_gs_records = -1, c_rec_stride = -1, c_rec_count = -1, c_rec_peer = -1;
+bool g_player_peers = false;
+
+// GameServer's socket set points to the player table at +0x10 (docs/re/network.md, ServerReceive's player loop).
+// Each entry starts with its full player handle and points to Socket*[25] at +0x10, indexed by game channel.
+constexpr uintptr_t kPlayerTableOffset = 0x10, kPlayerEntryStride = 0x20, kPlayerSocketsOffset = 0x10;
+constexpr uint32_t kPlayerSlotMask = 0x3f;
+
+// These table reads run under the caller's SEH guard, on the server tick thread.
+uintptr_t player_entry(uintptr_t set, uint32_t slot) {
+    const auto table = *reinterpret_cast<const uintptr_t*>(set + kPlayerTableOffset);
+    return table ? table + slot * kPlayerEntryStride : 0;
+}
+
+uint32_t player_peer(uintptr_t gs, uintptr_t set, uint32_t slot, uint32_t player) {
+    if (!player || (player & kPlayerSlotMask) != slot) return 0;
+    const uintptr_t record = gs + c_gs_records + slot * c_rec_stride;
+    if (*reinterpret_cast<const uint32_t*>(record) != player) return 0;  // a slot may have been reused
+    const auto peer = *reinterpret_cast<const uint32_t*>(record + c_rec_peer);
+    const auto machines = *reinterpret_cast<const uintptr_t*>(set + c_sockets_machines);
+    if (!peer || !machines) return 0;
+    const uintptr_t machine = machines + (peer & 0x7f) * c_machine_stride;
+    return *reinterpret_cast<const uint32_t*>(machine) == peer ? peer : 0;
+}
+
+uint32_t receive_player_peer(const KilnRegisters* r, uint32_t player) {
+    const uintptr_t gs = c_rx_gs_register == 13 ? r->r13 : c_rx_gs_register == 15 ? r->r15 : 0;
+    const uint32_t slot = player & kPlayerSlotMask;
+    if (!g_player_peers || !gs || !player || slot >= c_rec_count) return 0;
+    __try {
+        const auto set = *reinterpret_cast<const uintptr_t*>(gs + c_gs_sockets);
+        if (!set) return 0;
+        const uintptr_t entry = player_entry(set, slot);
+        if (!entry || *reinterpret_cast<const uint32_t*>(entry) != player) return 0;
+        return player_peer(gs, set, slot, player);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 0;
+    }
+}
+
+uint32_t send_player_peer(uintptr_t session, uintptr_t socket, uint32_t channel, uint32_t slot) {
+    const uintptr_t gs = g_gs.load(std::memory_order_relaxed);
+    if (!g_player_peers || !gs || !session || slot >= c_rec_count) return 0;
+    __try {
+        const auto set = *reinterpret_cast<const uintptr_t*>(gs + c_gs_sockets);
+        if (!set || *reinterpret_cast<const uintptr_t*>(set) != session) return 0;
+        const uintptr_t entry = player_entry(set, slot);
+        if (!entry) return 0;
+        const auto sockets = *reinterpret_cast<const uintptr_t* const*>(entry + kPlayerSocketsOffset);
+        if (!sockets || sockets[channel] != socket) return 0;
+        return player_peer(gs, set, slot, *reinterpret_cast<const uint32_t*>(entry));
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 0;
+    }
+}
 
 // The open allocations of this thread (review should 6): only successful ones, matched by result address and buffer, the
 // oldest overwritten when full, so a refused or aborted allocation never stops the recording or tags another message.
@@ -129,9 +184,11 @@ void d_commit(uintptr_t session, uint64_t* handle) {
     const uint8_t sides = socket ? side_here() : 0;
     if (sides && socket_info(socket, &channel, &player, &peer_index) && msg::hookable(channel) && res->data &&
         res->size && res->size <= msg::kMaxMessage) {
-        // the peer: a machine socket names its machine as index + 16, a player socket its player slot; on a client: the server (0)
+        // A machine socket names its machine as index + 16. A player socket names its player slot.
         uint32_t peer = 0;
-        if (sides & msg::kSideServer) peer = player ? peer_index : peer_of(peer_index >= 16 ? peer_index - 16 : peer_index, nullptr);
+        if (sides & msg::kSideServer)
+            peer = player ? send_player_peer(session, socket, channel, peer_index)
+                          : peer_of(peer_index >= 16 ? peer_index - 16 : peer_index, nullptr);
         uint8_t* original = scratch_push();
         uint8_t* scratch = original ? scratch_push() : nullptr;
         msg::ChainResult cr{KILN_REPL_PASS, res->size, 0};  // too deep: the message goes on as it is
@@ -172,10 +229,11 @@ void KILN_CALL mid_rx(KilnRegisters* r, void* user) {
     uint32_t peer = 0;
     __try {
         if (!msg::rx_read(r, *site, &data, &size)) return;
-        peer = msg::rx_peer(r, *site);
+        peer = msg::rx_peer_key(r, *site);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return;
     }
+    if (site->peer_kind == msg::kPeerInEdi) peer = receive_player_peer(r, peer);
     uint8_t* scratch = scratch_push();
     if (!scratch) return;  // too deep: the message goes on
     const msg::ChainResult cr = msg::run_chain(g_hooks, kMaxHooks, side_mask, KILN_REPL_RECEIVE, static_cast<uint8_t>(channel), peer,
@@ -302,8 +360,14 @@ void messages_start() {
     }
     g_send = sym("net/SessionAlloc", &f_alloc) && sym("net/SessionCommit", &f_commit) && sym("net/SessionAbort", &f_abort) &&
              cst("net/channel", &c_channel);
-    g_inject = g_send && cst("net/gs.sockets", &c_gs_sockets) && cst("net/sockets.machines", &c_sockets_machines) &&
-               cst("net/machine.stride", &c_machine_stride) && cst("net/machine.sockets", &c_machine_sockets);
+    const bool socket_tables = cst("net/gs.sockets", &c_gs_sockets) && cst("net/sockets.machines", &c_sockets_machines) &&
+                               cst("net/machine.stride", &c_machine_stride);
+    g_inject = g_send && socket_tables && cst("net/machine.sockets", &c_machine_sockets);
+    cst("net/after_sync.gs_register", &c_rx_gs_register);  // ServerReceive retains GameServer in r13 or r15 through dispatch
+    g_player_peers = socket_tables && c_gs_sockets >= 0 && c_sockets_machines >= 0 && c_machine_stride > 0 &&
+                     cst("net/gs.records", &c_gs_records) && c_gs_records >= 0 && cst("net/rec.stride", &c_rec_stride) &&
+                     cst("net/rec.count", &c_rec_count) && c_rec_count > 0 && c_rec_count <= kPlayerSlotMask + 1 &&
+                     cst("net/rec.peer", &c_rec_peer) && c_rec_stride >= 8 && c_rec_peer >= 4 && c_rec_peer <= c_rec_stride - 4;
     logf(KILN_LOG_INFO, "repl: message hooks: receive %s/%s, send %s, inject %s (hooks go in while a hook exists)",
          g_recv_server ? "server on" : "server off", g_recv_client ? "client on" : "client off", g_send ? "on" : "off",
          g_inject ? "on" : "off");
@@ -391,7 +455,7 @@ KilnResult KILN_CALL t_message_inject(uint32_t peer, uint8_t channel, const void
     if (!g_inject) return KILN_ERR_UNAVAILABLE;
     if (!g_api->on_tick_thread()) return KILN_ERR_WRONG_THREAD;
     if (!peer || !data || !length || length > msg::kMaxMessage || !msg::injectable(channel)) return KILN_ERR_INVALID_ARGUMENT;
-    if (msg::inject_socket(channel) != msg::kMachineSocket) return KILN_ERR_INVALID_ARGUMENT;  // channel 21: the player socket, not mapped
+    if (msg::inject_socket(channel) != msg::kMachineSocket) return KILN_ERR_INVALID_ARGUMENT;
     // a connected game peer only: the machine whose slot holds it now (kiln.repl's per-Pre snapshot), never a lab fake,
     // never a dedicated server's machine 0 (itself)
     bool connected = false;

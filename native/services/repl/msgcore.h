@@ -217,7 +217,8 @@ inline bool rx_read(const KilnRegisters* r, const RxSite& s, const uint8_t** dat
     *size = n;
     return true;
 }
-inline uint32_t rx_peer(const KilnRegisters* r, const RxSite& s) {
+// The loop's key: a NetPeer id on the machine loop or a player handle on the player loop.
+inline uint32_t rx_peer_key(const KilnRegisters* r, const RxSite& s) {
     if (s.peer_kind == kPeerAtRdi) return *reinterpret_cast<const uint32_t*>(r->rdi);
     if (s.peer_kind == kPeerInEdi) return static_cast<uint32_t>(r->rdi);
     return 0;
@@ -287,6 +288,7 @@ inline ChainResult run_chain(HookEntry* hooks, uint32_t n, uint8_t side, uint8_t
         m.channel = channel;
         m.direction = dir;
         m.player_socket = player_socket;
+        if (!peer && (side & kSideServer)) m.peer_flags = KILN_REPL_MSG_PEER_UNKNOWN;
         m.length = res.length;
         m.data = data;
         m.rewrite = scratch;
