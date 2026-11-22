@@ -1640,6 +1640,24 @@ pub fn exported() -> &'static Boundary {
     &BOUNDARY
 }
 
+/// This build's identity, "<VERSION><KILN_BUILD>" (build.rs): the stamp native/cmake/kiln_build_stamp.cpp gives the
+/// native DLLs of the same build. The core makes kiln/plugins/kiln-sfi.dll the ShroudForge-dialect owner only when
+/// [`kiln_build_stamp`] equals its own build identity (native/core/src/api.cpp load_one), so Kiln's interpreter runs
+/// only from the build of the core that loads it. Without KILN_BUILD at build time it is the version alone, which no
+/// core trusts.
+pub const BUILD_STAMP: &core::ffi::CStr =
+    match core::ffi::CStr::from_bytes_with_nul(concat!(env!("KILN_SFI_BUILD_STAMP"), "\0").as_bytes()) {
+        Ok(stamp) => stamp,
+        Err(_) => panic!("the build stamp holds a NUL"),
+    };
+
+/// [`BUILD_STAMP`], read by the core under its fault guard (api.cpp dll_build_stamp). A pointer to a constant: no state,
+/// no allocation, nothing that can fail.
+#[unsafe(no_mangle)]
+pub extern "C" fn kiln_build_stamp() -> *const core::ffi::c_char {
+    BUILD_STAMP.as_ptr()
+}
+
 /// # Safety
 /// Same caller contract as [`Boundary::enter`]. No Lua or mod code runs here.
 #[unsafe(no_mangle)]
@@ -1664,6 +1682,20 @@ pub unsafe extern "C" fn kiln_plugin_main(
 #[cfg(test)]
 mod audit_tests {
     use super::*;
+
+    #[test]
+    fn the_build_stamp_is_the_version_and_the_build_metadata_it_was_built_with() {
+        // SAFETY: kiln_build_stamp returns a pointer to a NUL-terminated constant.
+        let stamp = unsafe { core::ffi::CStr::from_ptr(kiln_build_stamp()) };
+        assert_eq!(stamp, BUILD_STAMP);
+        assert_eq!(kiln_build_stamp(), kiln_build_stamp(), "always the same constant");
+        let version = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../VERSION"))
+            .map(|v| v.lines().next().unwrap_or("").trim().to_string())
+            .unwrap_or_default();
+        let build = option_env!("KILN_BUILD").unwrap_or("");
+        assert_eq!(stamp.to_str().unwrap(), format!("{version}{build}"));
+        assert!(stamp.to_bytes().len() < 129, "the core copies at most 128 bytes (api.cpp dll_build_stamp)");
+    }
 
     #[test]
     fn every_boundary_looks_for_the_loader_with_the_real_probe_unless_a_test_replaces_it() {

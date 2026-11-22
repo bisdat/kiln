@@ -2,7 +2,8 @@
 # kiln-sfi
 
 This MIT crate is Kiln's interpreter of ShroudForge mods: the plugin boundary
-(`kiln_plugin_early` and `kiln_plugin_main` with Kiln's actual C ABI), the interpreter
+(`kiln_plugin_early` and `kiln_plugin_main` with Kiln's actual C ABI, and `kiln_build_stamp`: the build
+stamp by which the core makes it the ShroudForge-dialect owner, the native build's), the interpreter
 worker on kiln.tasks, the lifecycle host that runs sfi-core's Lua runtime, the runtime
 families that implement ShroudForge's `runtime` API on Kiln's services, the native
 manager for package DLLs, and kiln-sfi's own state file (`kiln/state/sfi.json`).
