@@ -132,6 +132,7 @@ test("a save the game wrote after the editor read it is not overwritten", async 
   await expect(page.getByText("The game wrote this save after the editor read it.")).toBeVisible();
   await expect(say(page)).toContainText("Changes not saved");
   await page.getByRole("button", { name: "Read again" }).click();
+  await page.getByRole("dialog", { name: "Discard the changes?" }).getByRole("button", { name: "Discard and open" }).click();
   await expect(say(page)).toContainText("Level 25");
   await expect(page.getByText("The game wrote this save after the editor read it.")).toHaveCount(0);
 });
