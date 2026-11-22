@@ -9,8 +9,15 @@ async function rest(page: Page) {
   });
 }
 async function box(el: Locator, parent?: Locator, vertical = true) {
-  const r = (await el.boundingBox())!;
-  const p = parent ? (await parent.boundingBox())! : { x: 0, y: 0, ...el.page().viewportSize()! };
+  const root = parent ? await parent.elementHandle() : null;
+  // Focus can reflow the controller hints. Related boxes must describe the same layout state.
+  const { r, p } = await el.evaluate((node, root) => ({
+    r: node.getBoundingClientRect().toJSON(),
+    p: root ? root.getBoundingClientRect().toJSON() : { x: 0, y: 0, width: innerWidth, height: innerHeight },
+  }), root);
+  await root?.dispose();
+  expect.soft(r.width, `visible width for ${el}`).toBeGreaterThan(0);
+  expect.soft(r.height, `visible height for ${el}`).toBeGreaterThan(0);
   expect.soft(r.x, `${el} left`).toBeGreaterThanOrEqual(p.x - 1);
   expect.soft(r.x + r.width, `${el} right`).toBeLessThanOrEqual(p.x + p.width + 1);
   if (vertical) {
