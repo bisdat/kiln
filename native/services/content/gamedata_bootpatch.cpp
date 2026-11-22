@@ -893,7 +893,7 @@ KilnResult KILN_CALL prepare_boot(void*, const KilnBootPrepareInputV1* in, KilnB
                     Field leaf;
                     bool unknown = false;
                     if (!segments(path, &segs, &err) || !type_root(t, false, segs, &root, &rest, &err) || !check_types(root, rest, &leaf, &unknown, &err))
-                        untranslatable = """ + path + "": " + err;
+                        untranslatable = "\"" + path + "\": " + err;
                 }
             }
             if (!untranslatable.empty()) return refused("Kiln's base rules cannot be written into this game build's balancing table: " + untranslatable);
