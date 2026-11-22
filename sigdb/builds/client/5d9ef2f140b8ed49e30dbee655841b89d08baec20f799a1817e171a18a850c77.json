@@ -11,7 +11,7 @@
   "declared": {
     "symbols": 884,
     "constants": 977,
-    "features": 253
+    "features": 254
   },
   "features": {
     "abilities.attributes": true,
@@ -230,6 +230,7 @@
     "ui.gemforge.inspect": true,
     "ui.gemforge.sources": true,
     "ui.inventory.panels": true,
+    "ui.item_detail": true,
     "ui.language": true,
     "ui.main_menu": true,
     "ui.menu_footer": true,
@@ -3202,6 +3203,16 @@
       },
       "features": {
         "impact.pool": "static"
+      }
+    },
+    "item-detail": {
+      "level": "static",
+      "date": "2026-11-22",
+      "evidence": "resolved offline (tools/sigport/build_record.py)",
+      "symbols": {},
+      "constants": {},
+      "features": {
+        "ui.item_detail": "static"
       }
     },
     "items": {
