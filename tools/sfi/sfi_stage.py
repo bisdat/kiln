@@ -144,7 +144,8 @@ BUILD_METADATA = re.compile(r"\+[0-9A-Za-z.-]+")
 def pe_build_stamp(data):
     """The kiln_build_stamp() string of a PE32+ image without running it: None when it has no such export. The export
     must be "lea rax, [rip+X]; ret" (what native/cmake/kiln_build_stamp.cpp and kiln-sfi's Rust both compile to), after
-    at most two "jmp rel32" thunks; X a printable NUL-terminated string. Anything else raises ValueError."""
+    at most three "jmp rel32" thunks; X a printable NUL-terminated string. Anything else raises ValueError, also an image
+    cut off anywhere (every header and section must lie within the file)."""
     def u16(o):
         return int.from_bytes(data[o:o + 2], "little")
 
@@ -160,6 +161,8 @@ def pe_build_stamp(data):
     opt = pe + 24
     if opt + 2 > len(data) or u16(opt) != 0x20B:
         raise ValueError("not a PE32+ image")
+    if opt + opt_size > len(data):
+        raise ValueError("truncated optional header")
     if opt_size < 112 + 8 or u32(opt + 108) < 1:
         return None  # no export directory
     exp_rva, exp_size = u32(opt + 112), u32(opt + 116)
@@ -171,6 +174,8 @@ def pe_build_stamp(data):
         if s + 40 > len(data):
             raise ValueError("truncated section table")
         vsize, va, raw_size, raw = u32(s + 8), u32(s + 12), u32(s + 16), u32(s + 20)
+        if raw_size and raw + raw_size > len(data):
+            raise ValueError(f"section {i} runs past the end of the file")
         table.append((va, max(vsize, raw_size), raw, raw_size))
 
     def at(rva, n):

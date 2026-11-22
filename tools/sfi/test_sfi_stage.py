@@ -184,6 +184,7 @@ class Stage(unittest.TestCase):
                 ("a build without metadata", pe(True, VERSION), f"its build stamp {VERSION} is not the core's"),
                 ("another version", pe(True, "0.0.1" + META), "is not the core's"),
                 ("unreadable code", pe(True, STAMP, code=b"\x48\x8b\x05\x09\0\0\0\xc3"), "cannot be read"),
+                ("cut off in its code", pe(True, STAMP)[:0x277], "cannot be read"),
                 ("a forwarder", None, "cannot be read")):
             with self.subTest(case=case):
                 self.make()
@@ -228,6 +229,12 @@ class Stage(unittest.TestCase):
         for bad in (b"not a PE", pe(True, "x" * 129), pe(True, "bad\tstamp")):
             with self.assertRaises(ValueError):
                 ss.pe_build_stamp(bad)
+        # a cut-off copy (an interrupted download or copy) is unreadable at every length: never another error, never
+        # "no export", never a stamp read from what is left
+        whole = pe(True, STAMP)
+        for cut in range(len(whole)):
+            with self.subTest(cut=cut), self.assertRaises(ValueError):
+                ss.pe_build_stamp(whole[:cut])
         p = self.dir / "kiln-sfi.dll"
         p.write_bytes(pe(True, STAMP))
         self.assertEqual(ss.main(["sfi_stage.py", "stamp", str(p)]), 0)
