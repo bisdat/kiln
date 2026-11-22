@@ -5907,6 +5907,8 @@
         "everything": "Tutto"
       },
       "removeN": "Rimuovi {n}",
+      "removeTitle": "Rimuovere {n} voci di conoscenza?",
+      "removeBody": "Anche le ricette che dipendono da queste voci potrebbero chiudersi. Le modifiche vengono scritte solo quando salvi.",
       "kind": "Tipo",
       "name": "Nome",
       "state": "Stato",

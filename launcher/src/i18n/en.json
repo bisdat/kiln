@@ -6402,6 +6402,8 @@
         "everything": "Everything"
       },
       "removeN": "Remove {n}",
+      "removeTitle": "Remove {n} knowledge entries?",
+      "removeBody": "Recipes that depend on these entries may also close. Changes are written only when you save.",
       "kind": "Kind",
       "name": "Name",
       "state": "State",

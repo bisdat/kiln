@@ -5231,6 +5231,8 @@
         "everything": "全部"
       },
       "removeN": "移除 {n} 项",
+      "removeTitle": "移除 {n} 条知识记录？",
+      "removeBody": "依赖这些记录的配方也可能关闭。更改仅在保存时写入。",
       "kind": "类型",
       "name": "名称",
       "state": "状态",

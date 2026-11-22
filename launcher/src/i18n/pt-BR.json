@@ -5907,6 +5907,8 @@
         "everything": "Tudo"
       },
       "removeN": "Remover {n}",
+      "removeTitle": "Remover {n} entradas de conhecimento?",
+      "removeBody": "As receitas que dependem dessas entradas também podem ser fechadas. As alterações só são gravadas ao salvar.",
       "kind": "Tipo",
       "name": "Nome",
       "state": "Estado",

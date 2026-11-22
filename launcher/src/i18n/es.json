@@ -5907,6 +5907,8 @@
         "everything": "Todo"
       },
       "removeN": "Quitar {n}",
+      "removeTitle": "¿Quitar {n} entradas de conocimiento?",
+      "removeBody": "Las recetas que dependen de estas entradas también pueden cerrarse. Los cambios solo se escriben al guardar.",
       "kind": "Tipo",
       "name": "Nombre",
       "state": "Estado",
