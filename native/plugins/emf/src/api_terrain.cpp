@@ -51,10 +51,10 @@ bool cap(const char* name) {
 const char* mode_unavailable(uint32_t flags) {
     if (!has_build(offsetof(KilnBuildApi, break_box) + sizeof(void*)) || !S.build->break_box || !S.build->grid ||
         !cap("build.break_building") || !cap("build.block_metadata")) return kUnavailable;
+    if ((flags & EMF_BREAK_TERRAIN) && (!cap("build.break_terrain") || !cap("build.block_provenance"))) return kTerrainUnavailable;
     if (!(flags & EMF_BREAK_WORLD) && !cap("build.block_provenance")) return kUnavailable;
     if (!(flags & EMF_BREAK_INSTANT) && !cap("build.break_damage")) return kUnavailable;
     if ((flags & EMF_BREAK_DROPS) && !cap("build.break_drops")) return kUnavailable;
-    if ((flags & EMF_BREAK_TERRAIN) && (!cap("build.break_terrain") || !cap("build.block_provenance"))) return kTerrainUnavailable;
     return nullptr;
 }
 const char* query_why(uint32_t reason) {
@@ -111,8 +111,10 @@ bool find(Mod* m, const char* fn, EmfWorld* w, const float* from, const float* t
         refuse(m, fn, "a point is not a number", true); return false;
     }
     KilnBuildBlockInfo b{}; b.size = sizeof b;
-    auto rc = S.build->find_wall({from[0],from[1],from[2]}, {to[0],to[1],to[2]},
-                                flags & EMF_FIND_TERRAIN ? KILN_BUILD_FIND_PLAYER_TERRAIN : 0, &b);
+    // EMF passes unknown terrain over, including when its shipped-world reader is unavailable.
+    // Kiln refuses PlayerTerrain without that reader: retain EMF's building query instead of losing all walls.
+    const uint32_t mode = (flags & EMF_FIND_TERRAIN) && cap("build.block_provenance") ? KILN_BUILD_FIND_PLAYER_TERRAIN : 0;
+    auto rc = S.build->find_wall({from[0],from[1],from[2]}, {to[0],to[1],to[2]}, mode, &b);
     if (rc != KILN_OK || b.refusal != KILN_BUILD_BLOCK_NONE) {
         if (rc != KILN_ERR_NOT_FOUND || b.refusal != KILN_BUILD_BLOCK_NONE) refuse(m, fn, query_why(b.refusal), true);
         return false;
@@ -160,6 +162,9 @@ uint32_t api_break_blocks(EmfWorld* w, EmfBreakBlocks* r, EmfBreakCallback cb, v
     if (!r) return reject("no request");
     if (r->size < 160) return reject("the request's size is too small (set size = sizeof(EmfBreakBlocks))");
     if (!server_world(w)) return reject("not a server world (a joined game cannot break blocks: do it on the host or the dedicated server)");
+    bool faulted;
+    { std::lock_guard lock(g_mutex); faulted = g_faulted; }
+    if (faulted) return reject(kFaulted);
     if (const char* why = mode_unavailable(r->flags)) return reject(why, true);
     if (auto why = check(*r); !why.empty()) return reject(why.c_str());
     Request q; q.mod = m; q.cb = cb; q.user = user; q.session = session();

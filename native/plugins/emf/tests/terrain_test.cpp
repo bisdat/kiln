@@ -58,6 +58,10 @@ static KilnResult KILN_CALL block_at(KilnVec3 p, KilnBuildBlockInfo* out) {
 }
 static KilnResult KILN_CALL find_wall(KilnVec3 from, KilnVec3 to, uint32_t flags, KilnBuildBlockInfo* out) {
     captured_from = from; captured_to = to; find_flags = flags;
+    if ((flags & KILN_BUILD_FIND_PLAYER_TERRAIN) && !capabilities["build.block_provenance"]) {
+        out->refusal = KILN_BUILD_BLOCK_SYMBOL_MISSING;
+        return KILN_ERR_UNAVAILABLE;
+    }
     return block_at(from, out);
 }
 static KilnResult KILN_CALL grid(KilnBuildGrid* out) {
@@ -129,6 +133,11 @@ int main() {
     CHECK(t.find_wall(w, from, to, &info) && find_flags == 0);
     CHECK(t.find_wall_ex(w, from, to, 0, &info) && find_flags == 0);
     CHECK(t.find_wall_ex(w, from, to, EMF_FIND_TERRAIN, &info) && find_flags == KILN_BUILD_FIND_PLAYER_TERRAIN);
+    // EMF skips unknown terrain but still finds buildings if its shipped-world reader is unavailable.
+    capabilities["build.block_provenance"] = false;
+    block.kind = KILN_BUILD_BLOCK_BUILDING; block.material = 135; block.provenance = -1;
+    CHECK(t.find_wall_ex(w, from, to, EMF_FIND_TERRAIN, &info) && find_flags == 0 && info.kind == EMF_BLOCK_BUILDING && info.world == -1);
+    capabilities["build.block_provenance"] = true;
     CHECK(captured_from.x == 1 && captured_from.y == 2 && captured_from.z == 3 && captured_to.x == 4 && captured_to.y == 5 && captured_to.z == 6);
     // Every refusal leaves the complete output untouched.
     auto saved = info;
@@ -201,6 +210,8 @@ int main() {
         capabilities[c] = true;
     }
     capabilities["build.block_provenance"] = false;
+    r = request(); r.flags |= EMF_BREAK_TERRAIN;
+    CHECK(!t.break_blocks(w, &r, nullptr, nullptr) && std::string(r.why) == "breaking terrain is not available on this game version");
     r = request(); r.flags |= EMF_BREAK_WORLD;
     CHECK(t.break_blocks(w, &r, nullptr, nullptr) != 0); // WORLD can include unknown buildings without provenance
     r.flags |= EMF_BREAK_TERRAIN;
@@ -306,6 +317,10 @@ int main() {
     terrain_server_pre(); terrain_after_step(w, EMF_WORLD_SERVER);
     CHECK(break_calls == before + 1 && answers.back().result.status == EMF_BREAK_FAILED);
     CHECK(!t.break_blocks(w, &r, nullptr, nullptr) && std::string(r.why).find("off") != std::string::npos);
+    // Once a write fault latched breaking off, the restart reason takes priority over unavailable capabilities.
+    capabilities["build.break_building"] = false;
+    CHECK(!t.break_blocks(w, &r, nullptr, nullptr) && std::string(r.why).find("off (") == 0);
+    capabilities["build.break_building"] = true;
     CHECK(terrain_status_json().find("\"partial\":1") != std::string::npos);
     std::printf("terrain_test: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
