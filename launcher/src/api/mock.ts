@@ -957,8 +957,9 @@ function sfCard(gameId: string): SfBackendCard {
   const v = kilnFile(gameId).values;
   const next = sfResolve(v);
   const held = sfHeldNow(v);
+  const route = emlRLoader ? "eml-r" : sfRoute;
   return { gameId, setting: sfSetting(v), next, revision: sfRevision(v), ...(held ? { interpreterHeld: held } : {}),
-    ...(next.selected === "kiln" ? { interpreterRoute: sfRoute, ...(sfRoute === "own-loader" ? { ownLoader: "dbghelp.dll" } : {}) } : {}),
+    ...(next.selected === "kiln" ? { interpreterRoute: route, ...((route === "own-loader" || route === "eml-r") ? { ownLoader: "dbghelp.dll" } : {}) } : {}),
     ...(sfLast[gameId] ? { last: sfLast[gameId] } : {}) };
 }
 function sfPreview(gameId: string, backend: SfBackend | null): SfBackendPreview {
@@ -1979,7 +1980,8 @@ function foundScan(gameId: string, p: Profile): FoundReport {
     const withIt: Profile = { ...p, dropins: [...new Set([...dropinKinds(p), g.kind])], dropinsEngines: true };
     return { ...base, state: "off", reason: st.reason, fix: foundState(withIt, g.kind).loads ? "dropins" : "add" };
   });
-  return { gameId, profileId: p.id, kilnInstalled: kiln, mods, loaders: sfSelfLoader ? [sfSelfLoader] : [], unreadable: [], truncated: false };
+  const loaders = [sfSelfLoader, emlRLoader].filter((loader) => loader !== null);
+  return { gameId, profileId: p.id, kilnInstalled: kiln, mods, loaders, unreadable: [], truncated: false };
 }
 
 /** found_add: the folder into the Library (an id as the Library makes it) and into the profile, enabled. */
@@ -2127,10 +2129,13 @@ if (PERSIST) {
   } else saveState();
 }
 
-const sfSelfScript = typeof location === "undefined" ? null : new URLSearchParams(location.search).get("sfSelf");
+const loaderParams = new URLSearchParams(typeof location === "undefined" ? "" : location.search);
+const sfSelfScript = loaderParams.get("sfSelf");
 const sfSelfLoader = sfSelfScript === "before" || sfSelfScript === "started" || sfSelfScript === "empty" || sfSelfScript === "takeover"
   ? { engine: "shroudforge" as const, name: "ShroudForge", kinds: ["shroudforge" as const], file: sfSelfScript === "takeover" ? "dinput8.dll" : "dbghelp.dll" } : null;
 if (sfSelfScript === "empty") for (const p of profiles.values()) p.mods.shroudforge = [];
+const emlRLoader = loaderParams.get("emlR") === "present"
+  ? { engine: "eml-r", name: "Enshrouded Mod Loader - Revamped", kinds: [], file: "dbghelp.dll" } : null;
 
 export async function mockInvoke<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
   commandCalls.push(cmd);

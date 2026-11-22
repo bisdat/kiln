@@ -3302,6 +3302,11 @@
     "title": "ShroudForge's own loader is installed",
     "manage": "Let Kiln manage ShroudForge"
   },
+  "emlRNotice": {
+    "title": "Kiln found EML-R's loader ({file})",
+    "text": "EML-R loads the mods on its own list when it starts, independently of Kiln and its profile switches.",
+    "interpreter": "Kiln's ShroudForge interpreter stands aside while EML-R's loader is in the game folder because EML-R may run those mods itself."
+  },
   "shroudlinkNotice": {
     "title": "Shroudlink client addon",
     "switchOn": "Switch addon on"

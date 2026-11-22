@@ -4,6 +4,7 @@
 // doing its one fix. The count covers every kind. Saves right away; the game's profile.json follows (applies at the
 // next start while the game runs). Profiles are in the desktop UI's Settings.
 import { SfSelfHostedNotice } from "../../components/SfSelfHostedNotice";
+import { EmlRNotice } from "../../components/EmlRNotice";
 import { ShroudlinkNotice } from "../../components/ShroudlinkNotice";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -159,6 +160,7 @@ export default function Mods() {
   return (
     <Screen name="mods" title={t("deck.app.tabs.mods")} say={say} actions={actions}>
       <SfSelfHostedNotice profile={mods.profile} found={mods.found.data} />
+      <EmlRNotice found={mods.found.data} />
       <ShroudlinkNotice game={game} mods={mods} deck />
       {params.has("filter") && <DeckButton id="clear-filter" onClick={() => nav("/deck/mods")}>{t("deck.mods.showAll")}</DeckButton>}
       {!game ? (

@@ -101,6 +101,7 @@ struct Run {
     std::string env;
     bool has_env = false;
     std::string plan_bytes = plan().dump();
+    std::string dbghelp;
     launch::PlanFile::State plan_state = launch::PlanFile::Read;
     std::string profile;  // empty: profile_for(plan_bytes)
     bool no_profile = false;
@@ -121,6 +122,7 @@ struct Run {
         in.interpreter_held = held;
         in.held_text = held ? "game test pending: sfi-ui-page" : "";
         in.release_allows_180 = allows_180;
+        in.eml_r_present = [this] { return launch::eml_r_proxy(dbghelp); };
         in.read_plan = [this](std::string_view name) {
             ++reads;
             asked = std::string(name);
@@ -249,6 +251,39 @@ void kiln_plans() {
         check(d.plan_read && kiln::boot_gd::hex_of(d.plan_hash) == hex(r.plan_bytes), "the record carries the plan's SHA-256");
         check(d.plan_id == kPlanId, "the record carries the plan id");
         check(!d.notice.empty(), "kiln has a notice");
+    }
+    {
+        Run r;
+        // Minimal PE32+ DLL, followed by the same broad marker ShroudForge's loader carries.
+        constexpr size_t pe = 0x80;
+        r.dbghelp.assign(pe + 24 + 112, '\0');
+        r.dbghelp.replace(0, 2, "MZ");
+        r.dbghelp[0x3C] = static_cast<char>(pe);
+        r.dbghelp.replace(pe, 2, "PE");
+        r.dbghelp[pe + 4] = '\x64';
+        r.dbghelp[pe + 5] = '\x86';
+        r.dbghelp[pe + 20] = 112;
+        r.dbghelp[pe + 23] = '\x20';
+        r.dbghelp[pe + 24] = '\x0B';
+        r.dbghelp[pe + 25] = '\x02';
+        r.dbghelp += "shroudforge";
+        check(!launch::eml_r_proxy(r.dbghelp), "ShroudForge text alone is not an EML-R marker");
+        check(!launch::eml_r_proxy("mods/eml-r.json"), "an EML-R string outside a PE is not a proxy");
+        const std::string stock = r.dbghelp;
+        r.dbghelp += "MODS/EML-R.JSON";
+        check(launch::eml_r_proxy(r.dbghelp), "ASCII EML-R config marker");
+        r.dbghelp = stock;
+        for (char c : std::string_view("EML_R.DLL")) {
+            r.dbghelp.push_back(c);
+            r.dbghelp.push_back('\0');
+        }
+        Run hosted = r;
+        hosted.kiln_json = R"({"shroudforge": {"backend": "hosted"}})";
+        expect(hosted.go(), KILN_LAUNCH_BACKEND_HOSTED, KILN_LAUNCH_REASON_SETTING, "EML-R does not block hosted");
+        const auto d = r.go();
+        expect(d, KILN_LAUNCH_BACKEND_NONE, KILN_LAUNCH_REASON_EML_R_LOADER, "EML-R blocks a pinned interpreter plan");
+        check(r.reads == 0 && !d.plan_read, "EML-R stands the interpreter aside before its launch plan is read");
+        check(has(d.notice, "It may run these mods itself"), "EML-R explains why the interpreter stands aside");
     }
     {
         Run r;

@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::game::{GameKind, PathMode, Platform};
-use crate::pe::build_test_dll;
+use crate::pe::{ProxyKind, build_test_dll};
 use crate::profile::{Dropins, ProfileMods};
 
 struct Tmp(PathBuf);
@@ -58,6 +58,72 @@ fn eml_mod(g: &Path, folder: &str) {
 
 fn one<'a>(r: &'a FoundReport, path: &str) -> &'a FoundMod {
     r.mods.iter().find(|m| m.path == path).unwrap_or_else(|| panic!("{path} not found: {r:#?}"))
+}
+
+#[test]
+fn eml_r_is_reported_without_shroudforge_ownership() {
+    for companions in [false, true] {
+        let t = tmp(if companions { "eml-r-complete" } else { "eml-r-proxy" });
+        let dirs = DataDirs::at(t.0.join("data"));
+        let g = game(&t.0, true);
+        put(&g.path, crate::shroudforge::RUNTIME_DLL, b"runtime");
+        put(&g.path, "dbghelp.dll", &build_test_dll(&["MiniDumpWriteDump"], b"EML_LOG_FILE_PATH shroudforge mods/eml-r.json"));
+        if companions {
+            put(&g.path, "mods/eml-r.json", br#"{"schema":1,"mods":[]}"#);
+            put(&g.path, "mods/eml_r/eml_r.dll", b"EML-R runtime");
+        }
+        let r = scan(&dirs, &g, &profile(&[], true));
+        assert_eq!(r.loaders, [OwnLoader {
+            engine: Engine::EmlR,
+            name: "Enshrouded Mod Loader - Revamped".into(),
+            kinds: vec![],
+            file: "dbghelp.dll".into(),
+        }]);
+        assert_eq!(serde_json::to_value(&r.loaders[0]).unwrap()["engine"], "eml-r");
+        assert!(!crate::shroudforge::detect(&g.path).unwrap().dbghelp);
+        assert!(crate::own_loaders::find(&g.path, None).is_empty());
+    }
+}
+
+#[test]
+fn stale_eml_r_config_preserves_a_shroudforge_proxy() {
+    let t = tmp("eml-r-sf");
+    let g = game(&t.0, true);
+    put(&g.path, crate::shroudforge::RUNTIME_DLL, b"runtime");
+    put(&g.path, "mods/eml-r.json", br#"{"schema":1,"mods":[]}"#);
+    put(&g.path, "dbghelp.dll", &build_test_dll(&["MiniDumpWriteDump", "ShroudforgeSetDinput8Provider"], b"EML_LOG_FILE_PATH shroudforge"));
+    let (loaders, _) = own_loaders(&g.path);
+    assert_eq!(loaders.len(), 1);
+    assert_eq!(loaders[0].engine, Engine::ShroudForge);
+    assert!(crate::shroudforge::detect(&g.path).unwrap().dbghelp);
+    let owners = crate::own_loaders::find(&g.path, None);
+    for kind in [ModKind::ShroudForge, ModKind::Eml] {
+        let loader = crate::own_loaders::of_kind(&owners, kind).unwrap();
+        assert_eq!((loader.engine, loader.file.as_str()), (Engine::ShroudForge, "dbghelp.dll"));
+    }
+}
+
+#[test]
+fn stale_eml_r_config_preserves_modified_eml_evidence() {
+    let t = tmp("eml-r-modified-eml");
+    let g = game(&t.0, true);
+    put(&g.path, "mods/eml-r.json", b"{}");
+    put(&g.path, "dbghelp.dll", &build_test_dll(&["MiniDumpWriteDump"], b"EML_LOG_FILE_PATH m182-stancedump"));
+    let slot = crate::engines::scan_proxies(&g.path).into_iter().find(|s| s.name == "dbghelp.dll").unwrap();
+    assert_eq!(slot.class.kind, ProxyKind::Eml);
+    assert_eq!(slot.class.modified.as_deref(), Some("a stance dump key"));
+}
+
+#[test]
+fn eml_r_companions_alone_do_not_identify_a_proxy() {
+    let t = tmp("eml-r-neither");
+    let g = game(&t.0, true);
+    put(&g.path, "mods/eml-r.json", b"{}");
+    put(&g.path, "mods/eml_r/eml_r.dll", b"runtime");
+    put(&g.path, "dbghelp.dll", &build_test_dll(&["MiniDumpWriteDump"], b""));
+    assert!(own_loaders(&g.path).0.is_empty());
+    std::fs::remove_file(g.path.join("dbghelp.dll")).unwrap();
+    assert!(own_loaders(&g.path).0.is_empty());
 }
 
 #[test]
