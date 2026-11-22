@@ -1,0 +1,52 @@
+{
+  "templates": [
+    {
+      "guid": "bd560f3f-a976-502a-856e-ab095c80643b",
+      "name": "golden-stations.bench-shared.station",
+      "base": "Craftingstation_Workbench",
+      "fields": {}
+    }
+  ],
+  "items": [
+    {
+      "guid": "f150d485-4302-586a-932c-eeaac2b09c35",
+      "name": "golden-stations.bench-shared",
+      "base": "Craftingstation_Workbench",
+      "displayName": "Bench",
+      "description": "",
+      "fields": {},
+      "refs": {
+        "equipment.placedEntity": "bd560f3f-a976-502a-856e-ab095c80643b"
+      }
+    }
+  ],
+  "itemRules": {},
+  "recipes": [
+    {
+      "guid": "f77f96f7-051e-5c04-ac8c-dffaf02b972e",
+      "name": "golden-stations.bench-shared.makes.Material_T1_Wood_Logs",
+      "station": "0x4da88f73",
+      "menu": null,
+      "seconds": null,
+      "fields": null,
+      "inputs": [
+        {
+          "item": "Material_T1_Twigs",
+          "count": 2
+        }
+      ],
+      "outputs": [
+        {
+          "item": "Material_T1_Wood_Logs",
+          "count": 1
+        }
+      ]
+    }
+  ],
+  "workshop": {
+    "id": "0x4da88f73",
+    "station": "0x4da88f73",
+    "menu": null,
+    "own": false
+  }
+}

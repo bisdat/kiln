@@ -514,3 +514,11 @@ steps.
 | `stats.sync` | managed, static | Kiln.ModValues | `ModValues.Synced`: client only (`wrong-side` on a server), needs kiln.net |
 | `stats.ui` | managed, static | Kiln.ModValues | the stat source of UI blocks: client only (`wrong-side` on a server), needs kiln.ui |
 | `kiln.mod-values` | core (in-core service) | core | the native facade's table is here; its calls answer `unavailable` until Kiln.ModValues has bound the backend (through the Kiln-internal `kiln.internal.mod-values.backend`, which has no row) |
+
+## Rows added in dev.31 (station menus)
+
+| Row | Kind | Reported by | Unconfirmed | What it says |
+|---|---|---|---|---|
+| `stationmenus.store` | managed, static | Kiln.Content, at its start | - | kiln.content's table `kiln.stationmenus` is here: `StationMenus.Define` and `MenuBlock.Tabs` can store a layout (both sides, no game signature; `service-missing` with an older kiln.content) |
+| `stationmenus.render` | managed, static (refreshed) | Kiln.Content from kiln.stationmenus' info | `16a-c1`..`16a-c11` (CLIENT-CHECKS of dev.31 16a) | this game client builds a station's menu from its layout in the crafting-menu hook (`content.recipe_menu`, with the layout constants it needs); `wrong-side` on a dedicated server, the hook's reason otherwise |
+| `stationmenus.sync.v1` | managed, static (refreshed) | Kiln.Content | - | the channel `kiln:station-menu` v1 is open ([../sync.md](../sync.md#station-menus)): a server always (with `net.gate.hold_all` for the admission decider), a game client only while `stationmenus.render` is available |

@@ -16,6 +16,7 @@
     <InternalsVisibleTo Include="Kiln.Ui" />
     <InternalsVisibleTo Include="Kiln.Ui.Tests" />
     <InternalsVisibleTo Include="Kiln.Items.Tests" />
+    <InternalsVisibleTo Include="StationMenusTest" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../Kiln.Api/Kiln.Api.csproj" Private="false" />

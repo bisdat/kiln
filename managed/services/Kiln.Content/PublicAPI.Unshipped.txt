@@ -1,1 +1,15 @@
 #nullable enable
+Kiln.StationMenuAppliedEvent
+Kiln.StationMenuAppliedEvent.DefinitionId.get -> System.Guid
+Kiln.StationMenuAppliedEvent.FromServer.get -> bool
+Kiln.StationMenuAppliedEvent.Generation.get -> ulong
+Kiln.StationMenuAppliedEvent.Ok.get -> bool
+Kiln.StationMenuAppliedEvent.Reason.get -> string!
+Kiln.StationMenuAppliedEvent.Session.get -> System.Guid
+Kiln.StationMenuAppliedEvent.Workshop.get -> uint
+Kiln.StationMenuDefinitionChangedEvent
+Kiln.StationMenuDefinitionChangedEvent.DefinitionId.get -> System.Guid
+Kiln.StationMenuDefinitionChangedEvent.Generation.get -> ulong
+Kiln.StationMenuDefinitionChangedEvent.ModId.get -> string!
+Kiln.StationMenuDefinitionChangedEvent.Removed.get -> bool
+Kiln.StationMenuDefinitionChangedEvent.Workshop.get -> uint

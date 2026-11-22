@@ -43,6 +43,7 @@
 
 #include "barber.h"
 #include "content.h"
+#include "menulayout.h"  // kiln.stationmenus: station menu layouts and the own workshops' trees (own_build)
 #include "nlohmann/json.hpp"
 #include "recipe_water.h"
 #include "refs.h"
@@ -2426,7 +2427,7 @@ void menu_sync(const WorldState& ws) {
         std::lock_guard lock(g_ui_mu);
         for (auto& [id, info] : ws.listed) listed.emplace_back(id, info);
     }
-    const uint64_t key = version ^ (static_cast<uint64_t>(listed.size()) << 48) ^ ws.rreg;
+    const uint64_t key = version ^ (static_cast<uint64_t>(listed.size()) << 48) ^ ws.rreg ^ (ml::version() * 0x9E3779B97F4A7C15ull);
     if (key == g_menu_done) return;
     uintptr_t app = 0, cfg = 0;
     if (!rdv(N.ui_app, app) || !app || !rdv(app + N.app_config, cfg) || !cfg) return;  // UI not up yet: retry later
@@ -2649,20 +2650,27 @@ struct CmLayout {
     uint32_t gsize = 0, ssize = 0;
 } CL;
 
+// The menu's layout from the game's reflection (read-only: any thread; kiln.stationmenus' render check reads it too).
+CmLayout cm_read_layout() {
+    CmLayout c;
+    c.max_groups = field_offset("keen::FbUiCraftingRecipeCollection", "maxRecipeGroupCount");
+    c.max_sets = field_offset("keen::FbUiCraftingRecipeCollection", "maxRecipeSetCount");
+    c.g_label = field_offset("keen::FbUiCraftingRecipeGroup", "label");
+    c.g_id = field_offset("keen::FbUiCraftingRecipeGroup", "groupId");
+    c.s_label = field_offset("keen::FbUiCraftingRecipeSet", "label");
+    c.s_id = field_offset("keen::FbUiCraftingRecipeSet", "recipeSetId");
+    c.gsize = type_size("keen::FbUiCraftingRecipeGroup");
+    c.ssize = type_size("keen::FbUiCraftingRecipeSet");
+    c.ok = c.max_groups >= 0 && c.max_sets >= 0 && c.g_label >= 0 && c.g_id >= 0 && c.s_label >= 0 && c.s_id >= 0 &&
+           c.gsize == static_cast<uint32_t>(N.cat_stride) && c.ssize == static_cast<uint32_t>(N.sub_stride);
+    return c;
+}
+
 void cm_layout() {
     static bool tried = false;
     if (tried) return;
     tried = true;
-    CL.max_groups = field_offset("keen::FbUiCraftingRecipeCollection", "maxRecipeGroupCount");
-    CL.max_sets = field_offset("keen::FbUiCraftingRecipeCollection", "maxRecipeSetCount");
-    CL.g_label = field_offset("keen::FbUiCraftingRecipeGroup", "label");
-    CL.g_id = field_offset("keen::FbUiCraftingRecipeGroup", "groupId");
-    CL.s_label = field_offset("keen::FbUiCraftingRecipeSet", "label");
-    CL.s_id = field_offset("keen::FbUiCraftingRecipeSet", "recipeSetId");
-    CL.gsize = type_size("keen::FbUiCraftingRecipeGroup");
-    CL.ssize = type_size("keen::FbUiCraftingRecipeSet");
-    CL.ok = CL.max_groups >= 0 && CL.max_sets >= 0 && CL.g_label >= 0 && CL.g_id >= 0 && CL.s_label >= 0 && CL.s_id >= 0 &&
-            CL.gsize == static_cast<uint32_t>(N.cat_stride) && CL.ssize == static_cast<uint32_t>(N.sub_stride);
+    CL = cm_read_layout();
     LOGI("kiln.craftmenu: layout %s (tab %u B, subcategory %u B, labels +0x%llx / +0x%llx)", CL.ok ? "ok" : "MISMATCH: additions off",
          CL.gsize, CL.ssize, (unsigned long long)CL.g_label, (unsigned long long)CL.s_label);
 }
@@ -2919,22 +2927,34 @@ void cm_build(uintptr_t cfg) {
 // that index (8-byte BlobArray headers at +8). A station's screens ask it for the station's own workshop: its recipe picker ("Change
 // recipe", 0xbb46e0) and a bench's menu. A workshop of a mod's own is in neither array, so both headers point at copies with one more entry
 // per such workshop: a tree of the tabs and subcategories of the menu its recipes name (copied, with ids of their own), each listing only
-// the station's recipes placed there. The game's entries are its own data, rebased. Rebuilt when the stations' lists change; UI thread.
+// the station's recipes placed there; or, for a workshop with a layout of its own (kiln.stationmenus), the tree that layout lays out.
+// The game's entries are its own data, rebased. Rebuilt when the stations' lists or the layouts change; UI thread. The building and the
+// header switch are menulayout.cpp's own_publish (host-tested); this side gives it game memory, near memory and the loca texts.
 uintptr_t g_own_cfg = 0;
-uint64_t g_own_orig[2] = {};        // the collection's workshops and trees headers, as the game's data has them
-std::vector<uint64_t> g_own_trees;  // the trees' headers, as the game's data has them
+ml::OwnState g_own;                 // the collection's original headers and trees, the pair Kiln shows, the layouts' trees
 std::string g_own_sig;              // what the copies list
-bool g_own_on = false, g_own_ok = true;
+bool g_own_ok = true;
+
+struct OwnIo final : ml::MenuIo {
+    // write_batch, set by own_build: named only there, so that the host tests compiling this file without game.cpp still link (a
+    // sanitized build keeps this class's vtable even when own_build is dropped)
+    size_t (*batch)(std::vector<Write>&, uintptr_t*) = nullptr;
+    bool read(uintptr_t address, void* out, size_t n) override { return rd(address, out, n); }
+    void* alloc(uintptr_t anchor, size_t n) override { return near_alloc(anchor, n); }
+    size_t write(std::vector<Write>& writes, uintptr_t* failed) override { return batch ? batch(writes, failed) : 0; }
+    void guid(const std::string& key, uint8_t out[16]) override { cm_guid(key, out); }
+    void texts(uint32_t tag, const ml::TextMap& texts) override { set_texts(tag, texts); }
+};
 
 bool own_build(uintptr_t cfg, const std::map<uint32_t, OwnMenu>& menus) {
     const uintptr_t coll = cfg + N.menu_ws;
     if (cfg != g_own_cfg) {
         // the game's data, before any of Kiln's: Kiln's own tabs (kiln.craftmenu) may have pointed a tree at a copy already
-        g_own_cfg = cfg, g_own_on = false, g_own_ok = true;
+        g_own_cfg = cfg, g_own_ok = true;
         g_own_sig.clear();
-        g_own_trees.clear();
+        g_own.new_config();
         const BlobRef wss = blob_at(coll), trs = blob_at(coll + 8);
-        if (!rdv(coll, g_own_orig[0]) || !rdv(coll + 8, g_own_orig[1]) || !wss.count || trs.count < wss.count) {
+        if (!rdv(coll, g_own.orig[0]) || !rdv(coll + 8, g_own.orig[1]) || !wss.count || trs.count < wss.count) {
             g_own_cfg = 0;
             return false;
         }
@@ -2944,9 +2964,10 @@ bool own_build(uintptr_t cfg, const std::map<uint32_t, OwnMenu>& menus) {
             rdv(trs.data + i * 8ull, v);
             if (i < wss.count) rdv(wss.data + i * 4ull, w);
             if (auto it = g_cm_trees.find(w); it != g_cm_trees.end() && it->second.first == trs.data + i * 8ull) v = it->second.second;
-            g_own_trees.push_back(v);
+            g_own.trees.push_back(v);
         }
     }
+    const std::vector<ml::Effective> layouts = ml::effective();  // kiln.stationmenus: workshops with a layout of their own
     std::string sig;
     for (const auto& [w, om] : menus) {
         char b[48];
@@ -2958,132 +2979,46 @@ bool own_build(uintptr_t cfg, const std::map<uint32_t, OwnMenu>& menus) {
         }
         sig += ';';
     }
+    for (const ml::Effective& e : layouts) {
+        char b[80];
+        std::snprintf(b, sizeof b, "L%x:%llx:%llx:%d;", e.workshop, static_cast<unsigned long long>(e.rec->hash),
+                      static_cast<unsigned long long>(e.generation), e.from_server ? 1 : 0);
+        sig += b;
+    }
     if (sig == g_own_sig) return g_own_ok;
     g_own_sig = sig;
-    const auto header = [](uintptr_t field, uintptr_t data, uint32_t count, Write* w) {
-        w->addr = field;
-        w->n = 8;
-        return cm_point(w->bytes, field, data, count);
-    };
-    std::vector<Write> writes;
-    if (menus.empty()) {
-        if (g_own_on) {
-            for (int i = 0; i < 2; ++i) {
-                Write w{coll + 8ull * i, 8, {}};
-                std::memcpy(w.bytes, &g_own_orig[i], 8);
-                writes.push_back(w);
-            }
-            uintptr_t failed = 0;
-            write_batch(writes, &failed);
-            g_own_on = false;
-            if (!g_cm_trees.empty()) g_cm_version.fetch_add(1);  // Kiln's own tabs go back on the game's trees
-        }
-        return g_own_ok = true;
-    }
-    g_own_ok = false;
     cm_layout();
-    // the game's arrays, as its data has them
-    const auto at = [](uintptr_t field, uint64_t hdr) {
-        int32_t off = 0;
-        std::memcpy(&off, &hdr, 4);
-        return BlobRef{off ? field + static_cast<intptr_t>(off) : 0, static_cast<uint32_t>(hdr >> 32)};
-    };
-    const BlobRef wss = at(coll, g_own_orig[0]), trs = at(coll + 8, g_own_orig[1]);
-    const uint32_t n = wss.count, k = static_cast<uint32_t>(menus.size()), gs = static_cast<uint32_t>(N.cat_stride),
-                   ss = static_cast<uint32_t>(N.sub_stride);
-    if (!wss.data || !trs.data || trs.count < n || g_own_trees.size() < n) return false;
-    auto* ids = static_cast<uint32_t*>(near_alloc(coll, size_t(n + k) * 4));
-    auto* trees = static_cast<uint8_t*>(near_alloc(coll, size_t(n + k) * 8));
-    if (!ids || !trees || !rd(wss.data, ids, size_t(n) * 4)) return false;
-    const uintptr_t T = reinterpret_cast<uintptr_t>(trees);
-    for (uint32_t i = 0; i < n; ++i) {
-        const BlobRef t = at(trs.data + i * 8ull, g_own_trees[i]);
-        if (!cm_point(trees + i * 8ull, T + i * 8ull, t.data, t.count)) return false;
-    }
-    std::string said;
-    uint32_t j = n;
+    std::map<uint32_t, ml::OwnWorkshop> in;
     for (const auto& [w, om] : menus) {
-        uint32_t mi = UINT32_MAX;
-        for (uint32_t i = 0; i < n; ++i)
-            if (ids[i] == om.menu) mi = i;
-        if (mi == UINT32_MAX) return false;
-        const BlobRef tabs = at(trs.data + mi * 8ull, g_own_trees[mi]);
-        if (!tabs.data || !tabs.count) return false;
-        // the tabs and subcategories its recipes use, in the menu's order (a place past the game's tabs, a tab of Kiln's: its last)
-        std::map<uint32_t, std::map<uint32_t, std::vector<uint32_t>>> used;
-        for (const OwnPlace& p : om.places) {
-            const uint32_t t = std::min(p.tab, tabs.count - 1);
-            const uint32_t subs = blob_at(tabs.data + t * uintptr_t(gs) + N.cat_subs).count;
-            if (!subs) continue;
-            auto& list = used[t][p.tab < tabs.count ? std::min(p.sub, subs - 1) : subs - 1];
-            if (std::find(list.begin(), list.end(), p.id) == list.end()) list.push_back(p.id);
-        }
-        if (used.empty()) return false;
-        auto* groups = static_cast<uint8_t*>(near_alloc(coll, used.size() * gs));
-        if (!groups) return false;
-        const uintptr_t G = reinterpret_cast<uintptr_t>(groups);
-        uint32_t ti = 0, listed = 0;
-        for (const auto& [t, subs] : used) {
-            const uintptr_t src = tabs.data + t * uintptr_t(gs);
-            uint8_t* tab = groups + size_t(ti) * gs;
-            if (!rd(src, tab, gs)) return false;
-            if (CL.ok) {
-                char key[48];
-                std::snprintf(key, sizeof key, "kiln.own:%x:%u", w, t);
-                cm_guid(key, tab + CL.g_id);
-            }
-            const BlobRef os = blob_at(src + N.cat_subs);
-            auto* sets = static_cast<uint8_t*>(near_alloc(coll, subs.size() * ss));
-            if (!sets) return false;
-            const uintptr_t S = reinterpret_cast<uintptr_t>(sets);
-            uint32_t si = 0;
-            for (const auto& [s, rids] : subs) {
-                uint8_t* set = sets + size_t(si) * ss;
-                auto* list = static_cast<uint32_t*>(near_alloc(coll, rids.size() * 4));
-                if (!list || !rd(os.data + s * uintptr_t(ss), set, ss)) return false;
-                if (CL.ok) {
-                    char key[48];
-                    std::snprintf(key, sizeof key, "kiln.own:%x:%u:%u", w, t, s);
-                    cm_guid(key, set + CL.s_id);
-                }
-                std::memcpy(list, rids.data(), rids.size() * 4);
-                if (!cm_point(set + N.sub_recipes, S + si * uintptr_t(ss) + N.sub_recipes, reinterpret_cast<uintptr_t>(list),
-                              static_cast<uint32_t>(rids.size())))
-                    return false;
-                listed += static_cast<uint32_t>(rids.size());
-                ++si;
-            }
-            if (!cm_point(tab + N.cat_subs, G + ti * uintptr_t(gs) + N.cat_subs, S, si)) return false;
-            ++ti;
-        }
-        ids[j] = w;
-        if (!cm_point(trees + j * 8ull, T + j * 8ull, G, ti)) return false;
-        ++j;
-        char b[96];
-        std::snprintf(b, sizeof b, "%s0x%08x (%u recipe(s) in %u tab(s) of 0x%08x's)", said.empty() ? "" : ", ", w, listed, ti, om.menu);
-        said += b;
+        ml::OwnWorkshop& o = in[w];
+        o.workshop = w;
+        o.menu = om.menu;
+        for (const OwnPlace& p : om.places) o.places.push_back(ml::OwnPlace{p.tab, p.sub, p.id});
     }
-    Write wi{}, wt{};
-    if (!header(coll, reinterpret_cast<uintptr_t>(ids), n + k, &wi) || !header(coll + 8, T, n + k, &wt)) return false;
-    writes = {wi, wt};
-    uintptr_t failed = 0;
-    if (write_batch(writes, &failed) != 2) {
-        // one header alone is harmless (a workshop past the end of the trees has none), but both go back
-        for (int i = 0; i < 2; ++i) {
-            Write w{coll + 8ull * i, 8, {}};
-            std::memcpy(w.bytes, &g_own_orig[i], 8);
-            writes = {w};
-            write_batch(writes, nullptr);
-        }
+    for (const ml::Effective& e : layouts) {
+        in[e.workshop].workshop = e.workshop;
+        in[e.workshop].layout = e;
+    }
+    std::vector<ml::OwnWorkshop> list;
+    for (auto& [w, o] : in) list.push_back(std::move(o));
+    ml::Geometry geo;
+    geo.gs = static_cast<uint32_t>(N.cat_stride), geo.ss = static_cast<uint32_t>(N.sub_stride);
+    geo.cat_subs = static_cast<uint32_t>(N.cat_subs), geo.sub_recipes = static_cast<uint32_t>(N.sub_recipes);
+    if (CL.ok) geo.g_id = CL.g_id, geo.g_label = CL.g_label, geo.s_id = CL.s_id, geo.s_label = CL.s_label;
+    OwnIo io;
+    io.batch = &write_batch;
+    const bool was_on = g_own.on;
+    const ml::OwnResult r = ml::own_publish(coll, list, geo, io, g_own);
+    for (const auto& [warn, line] : r.notes) {
+        if (warn) LOGW("new content: %s", line.c_str());
+        else LOGI("new content: %s", line.c_str());
+    }
+    if ((r.published || was_on != g_own.on) && !g_cm_trees.empty()) g_cm_version.fetch_add(1);  // Kiln's own tabs move with the trees
+    if (r.published) LOGI("new content: the crafting menu has %u workshop(s) of stations' own: %s", r.own, r.said.c_str());
+    else if (r.failed)
         LOGW("new content: the crafting menu's workshop list could not be written (%p): stations show their recipes in the menus they open",
-             reinterpret_cast<void*>(failed));
-        g_own_on = false;
-        return false;
-    }
-    g_own_on = true;
-    if (!g_cm_trees.empty()) g_cm_version.fetch_add(1);  // Kiln's own tabs move onto the new trees
-    LOGI("new content: the crafting menu has %u workshop(s) of stations' own: %s", k, said.c_str());
-    return g_own_ok = true;
+             reinterpret_cast<void*>(r.failed));
+    return g_own_ok = r.ok;
 }
 
 void cm_sync(int32_t workshop) {
@@ -3236,9 +3171,34 @@ int32_t shown_workshop(int32_t workshop, bool say) {
 
 // The menu's category lookup (UI thread = main thread, while the crafting menu builds): the UI pointer is valid here.
 kiln::RawHook g_menu_hook;
+// kiln.stationmenus' pending hold: while a joined game waits for the server's menus (set_pending(1)), a mod's own workshop lists
+// nothing: the lookup is asked for a workshop id the menu's live list proves absent. The game's own workshops are not held.
+uint32_t menu_hold(int32_t workshop) {
+    if (!workshop || !ml::pending()) return 0;
+    uintptr_t app = 0, cfg = 0;
+    if (!rdv(N.ui_app, app) || !app || !rdv(app + N.app_config, cfg) || !cfg) return 0;
+    const auto list = [](uintptr_t data, uint32_t count, std::vector<uint32_t>* out) {
+        if (count > 4096) return false;
+        out->resize(count);
+        return !count || (data && rd(data, out->data(), size_t(count) * 4));
+    };
+    std::vector<uint32_t> live, game;
+    const BlobRef l = blob_at(cfg + N.menu_ws);
+    if (!list(l.data, l.count, &live)) return 0;
+    if (cfg == g_own_cfg && g_own.orig[0]) {  // the game's own list, before Kiln's copies
+        int32_t off = 0;
+        std::memcpy(&off, &g_own.orig[0], 4);
+        if (!list(off ? cfg + N.menu_ws + static_cast<intptr_t>(off) : 0, static_cast<uint32_t>(g_own.orig[0] >> 32), &game)) game.clear();
+    } else {
+        game = live;  // a configuration own_build has not touched: its list is the game's
+    }
+    return ml::hold_workshop(static_cast<uint32_t>(workshop), game, live, shown_workshop(workshop, false) != workshop);
+}
+
 uint64_t __fastcall hk_menu(void* lists, void* p2, int32_t workshop, uint8_t p4) {
     cm_sync(shown_workshop(workshop, false));  // kiln.craftmenu: Kiln tabs / subcategories first, then the placement of new recipes
     menu_sync(g_ws[KILN_WORLD_CLIENT]);        // and the stations' own menus
+    if (const uint32_t none = menu_hold(workshop)) return g_menu_hook.call<uint64_t>(lists, p2, static_cast<int32_t>(none), p4);
     return g_menu_hook.call<uint64_t>(lists, p2, shown_workshop(workshop, true), p4);
 }
 
@@ -4661,6 +4621,50 @@ void early_boot() {
                              "registry loads, and only if this game joined a server or mods define items)");
 }
 
+namespace {
+bool g_menu_wanted = false;  // content.recipe_menu resolved (N.menu then says whether its hook went in)
+}  // namespace
+
+// kiln.stationmenus' row stationmenus.render (menulayout.h): a game client with the crafting-menu hook and the menu's layout as Kiln
+// knows it (tab and set sizes, their labels and ids, from the game's reflection; read once it is there). Any thread.
+bool nc_menu_render(uint32_t* reason, std::string* detail) {
+    if (!g_api || g_api->side() != KILN_SIDE_CLIENT) {
+        *reason = KILN_CAP_REASON_WRONG_SIDE;
+        *detail = "a dedicated server stores and sends station menus; it draws none";
+        return false;
+    }
+    if (!N.menu) {
+        *reason = g_menu_wanted ? KILN_CAP_REASON_FAULTED : KILN_CAP_REASON_SYMBOL_MISSING;
+        *detail = g_menu_wanted ? "the hook on the crafting menu's lookup (content/CraftMenuCategories) could not be installed"
+                                : "needs content.recipe_menu: the crafting menu's lookup or its layout did not resolve on this build";
+        return false;
+    }
+    static std::mutex mu;
+    static int state = 0;  // 0 not readable yet, 1 as Kiln knows it, 2 different
+    static CmLayout seen;
+    std::lock_guard lock(mu);
+    if (state == 0) {
+        const CmLayout c = cm_read_layout();
+        if (c.gsize || c.ssize) seen = c, state = c.ok ? 1 : 2;
+    }
+    if (state == 0) {
+        *reason = KILN_CAP_REASON_SESSION;
+        *detail = "waits for the crafting menu's types in the game's reflection";
+        return false;
+    }
+    if (state == 2) {
+        char b[160];
+        std::snprintf(b, sizeof b, "the crafting menu's layout differs on this build (tab %u B, set %u B; Kiln knows 0x%llx / 0x%llx)", seen.gsize,
+                      seen.ssize, static_cast<unsigned long long>(N.cat_stride), static_cast<unsigned long long>(N.sub_stride));
+        *reason = KILN_CAP_REASON_SYMBOL_MISSING;
+        *detail = b;
+        return false;
+    }
+    *reason = KILN_CAP_REASON_NONE;
+    *detail = "draws station menu layouts in the crafting menu (content.recipe_menu)";
+    return true;
+}
+
 void nc_boot() {
     auto sym = [](const char* n, uintptr_t* out) {
         return g_api->symbol(KilnStr{n, std::strlen(n)}, out) == KILN_OK && *out;
@@ -4713,6 +4717,7 @@ void nc_boot() {
     if (N.uitex) {
         N.uitex = g_uitex_hook.install(g_api, g_owner, N.uitex_fn, reinterpret_cast<void*>(&hk_uitex), "content/UiTextureGet");
     }
+    g_menu_wanted = N.menu;
     if (N.menu) {
         N.menu = g_menu_hook.install(g_api, g_owner, menu_fn, reinterpret_cast<void*>(&hk_menu), "content/CraftMenuCategories");
     }

@@ -333,6 +333,7 @@ public static unsafe partial class Content
             if (tick.Step % 25 == 0) DefinitionsExport.Tick();  // kiln/state/content-definitions.json (launcher)
         });
         ContentSync.Start();  // server -> client content sync (ContentSync.cs, docs/kiln/sync.md)
+        StationMenuSync.Start();  // station menus with tabs of their own: channel kiln:station-menu (StationMenuSync.cs)
     }
 
     /// <summary>Tells the native service which mods are loaded, in load order: their data packs apply, others not.</summary>

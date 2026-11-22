@@ -697,6 +697,8 @@ internal static partial class KilnApis
         "M:Kiln.Spire.UnlockedFor(Kiln.Player)", // Spire.UnlockedFor(Player): via ProgressFact.Holds(EntityId)
         "M:Kiln.Spire.get_BeaconLit", // Spire.BeaconLit.get: via ProgressFact.Holds(EntityId)
         "M:Kiln.Spire.get_Unlocked", // Spire.Unlocked.get: via ProgressFact.Holds(EntityId)
+        "M:Kiln.StationMenuRegistration.Dispose", // StationMenuRegistration.Dispose(): via StationMenuRuntime.Dispose(StationMenuRegistration)
+        "M:Kiln.StationMenus.Define(Kiln.BlockHandle{Kiln.StationBlock},Kiln.StationMenuDefinition)", // StationMenus.Define(BlockHandle<StationBlock>, StationMenuDefinition): via StationMenuRuntime.Define(BlockHandle<StationBlock>, StationMenuDefinition)
         "M:Kiln.Stations.All", // Stations.All(): via StationsCore.StationList(int, string)
         "M:Kiln.Stations.Category(System.UInt32)", // Stations.Category(uint): via StationsCore.CheckRead(string)
         "M:Kiln.Stations.Collect(Kiln.EntityId,Kiln.EntityId,System.Nullable{Kiln.ItemId},Kiln.CollectWhat)", // Stations.Collect(EntityId, EntityId, ItemId?, CollectWhat): via StationsCore.CheckRead(string)

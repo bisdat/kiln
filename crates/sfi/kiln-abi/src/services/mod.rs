@@ -49,6 +49,7 @@ pub mod kiln_saves;
 pub mod kiln_screen;
 pub mod kiln_settings;
 pub mod kiln_spawn;
+pub mod kiln_station_menus;
 pub mod kiln_stations;
 pub mod kiln_steamguard;
 pub mod kiln_surfaces;
