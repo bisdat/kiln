@@ -133,6 +133,20 @@ test("busy save/open/restore cannot consume history; successful reads reset it",
   }
 });
 
+test("Deck Read again opens the discard confirmation without moving its pointer target", async ({ page }) => {
+  await open(page, true);
+  await session(page, () => {
+    const s = (window as any).editorSession, m = structuredClone(s.useSession.getState().model);
+    m.main[0].count = 121; s.setModel(m); s.setStatus({ tone: 'err', again: true, text: 'Changed on disk' });
+  });
+  expect(await session(page, () => (window as any).editorSession.useSession.getState().dirty)).toBe(true);
+  await page.locator('[data-deck-id="ed-reread"]').click();
+  const dialog = page.getByRole('dialog', { name: 'Discard the changes?' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: /Cancel/ }).click();
+  expect(await count(page)).toBe(121);
+});
+
 test("Read again and another character reset history only after the existing discard confirmation", async ({ page }) => {
   await open(page); await edit(page);
   await session(page, () => (window as any).editorSession.setStatus({ tone: "err", again: true, text: "Changed on disk" }));
