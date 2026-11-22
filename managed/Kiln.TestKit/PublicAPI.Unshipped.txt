@@ -1,16 +1,1 @@
 #nullable enable
-Kiln.TestKit.FakeInventorySlot.Level.get -> int
-Kiln.TestKit.FakeInventorySlot.Level.init -> void
-Kiln.TestKit.FakeInventorySlot.Rarity.get -> Kiln.ItemRarity?
-Kiln.TestKit.FakeInventorySlot.Rarity.init -> void
-Kiln.TestKit.HarnessUiInventory.Select(int? index) -> void
-Kiln.TestKit.HarnessUiInventory.PressPad(string! chord) -> Kiln.TestKit.FakeSlotClickResult
-Kiln.TestKit.FakeOutline.ThroughWalls.get -> bool
-Kiln.TestKit.FakeOutline.ThroughWalls.init -> void
-Kiln.TestKit.HarnessUiItemDetail
-Kiln.TestKit.HarnessUiItemDetail.Capture(Kiln.ItemId item, Kiln.EntityId entity, int level, Kiln.ItemRarity? rarity, params Kiln.UiItemDetailLine![]! lines) -> void
-Kiln.TestKit.HarnessUiItemDetail.Clear() -> void
-Kiln.TestKit.KilnHarness.UiItemDetail.get -> Kiln.TestKit.HarnessUiItemDetail!
-Kiln.TestKit.HarnessWorldTables.PendingToolDefinitionsJson(string! mod) -> string!
-Kiln.TestKit.HarnessWorldTables.TerrainBrushCells(string! mod, string! key) -> byte[]?
-Kiln.TestKit.HarnessWorldTables.TerrainItem(string! name, uint item, byte cell) -> void

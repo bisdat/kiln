@@ -291,6 +291,7 @@ Kiln.KeyChord
 Kiln.KeyChord.Deconstruct(out uint VirtualKey, out Kiln.KeyMods Mods) -> void
 Kiln.KeyChord.Equals(Kiln.KeyChord other) -> bool
 Kiln.KeyChord.IsNone.get -> bool
+Kiln.KeyChord.IsPad.get -> bool
 Kiln.KeyChord.KeyChord() -> void
 Kiln.KeyChord.KeyChord(uint VirtualKey, Kiln.KeyMods Mods) -> void
 Kiln.KeyChord.Mods.get -> Kiln.KeyMods
@@ -301,15 +302,21 @@ Kiln.KeyInput
 Kiln.KeyListenFlags
 Kiln.KeyListenFlags.Mouse = 1 -> Kiln.KeyListenFlags
 Kiln.KeyListenFlags.None = 0 -> Kiln.KeyListenFlags
+Kiln.KeyListenFlags.Pad = 2 -> Kiln.KeyListenFlags
 Kiln.KeyListener
 Kiln.KeyListener.Dispose() -> void
 Kiln.KeyListener.Mouse.get -> bool
 Kiln.KeyListener.Ok.get -> bool
+Kiln.KeyListener.Pad.get -> bool
 Kiln.KeyListener.Reason.get -> string?
 Kiln.KeyMods
 Kiln.KeyMods.Alt = 4 -> Kiln.KeyMods
 Kiln.KeyMods.Ctrl = 1 -> Kiln.KeyMods
 Kiln.KeyMods.None = 0 -> Kiln.KeyMods
+Kiln.KeyMods.PadLB = 8 -> Kiln.KeyMods
+Kiln.KeyMods.PadLT = 32 -> Kiln.KeyMods
+Kiln.KeyMods.PadRB = 16 -> Kiln.KeyMods
+Kiln.KeyMods.PadRT = 64 -> Kiln.KeyMods
 Kiln.KeyMods.Shift = 2 -> Kiln.KeyMods
 Kiln.KeyPress
 Kiln.KeyPress.Captured.get -> bool
@@ -321,6 +328,7 @@ Kiln.KeyPress.Down.get -> bool
 Kiln.KeyPress.Down.init -> void
 Kiln.KeyPress.Equals(Kiln.KeyPress other) -> bool
 Kiln.KeyPress.IsMouse.get -> bool
+Kiln.KeyPress.IsPad.get -> bool
 Kiln.KeyPress.KeyPress() -> void
 Kiln.KeyPress.KeyPress(uint VirtualKey, uint ScanCode, Kiln.KeyMods Mods, bool Down, bool Repeat, bool TextInput, bool Captured) -> void
 Kiln.KeyPress.Mods.get -> Kiln.KeyMods
@@ -379,6 +387,8 @@ Kiln.OutlineOptions.Priority.get -> int
 Kiln.OutlineOptions.Priority.init -> void
 Kiln.OutlineOptions.Pulse.get -> bool
 Kiln.OutlineOptions.Pulse.init -> void
+Kiln.OutlineOptions.ThroughWalls.get -> bool
+Kiln.OutlineOptions.ThroughWalls.init -> void
 Kiln.OutlineReason
 Kiln.OutlineReason.Despawned = 17 -> Kiln.OutlineReason
 Kiln.OutlineReason.Expired = 19 -> Kiln.OutlineReason
@@ -497,6 +507,7 @@ Kiln.ScreenKind.Storage = 15 -> Kiln.ScreenKind
 Kiln.ScreenKind.Title = 1 -> Kiln.ScreenKind
 Kiln.SlotButton
 Kiln.SlotButton.Left = 1 -> Kiln.SlotButton
+Kiln.SlotButton.Pad = 16 -> Kiln.SlotButton
 Kiln.SlotButton.Right = 3 -> Kiln.SlotButton
 Kiln.SlotClick
 Kiln.SlotClick.<Clone>$() -> Kiln.SlotClick!
@@ -507,10 +518,14 @@ Kiln.SlotClick.Equals(Kiln.SlotClick? other) -> bool
 Kiln.SlotClick.Holder.get -> Kiln.EntityId
 Kiln.SlotClick.Item.get -> Kiln.ItemId
 Kiln.SlotClick.ItemEntity.get -> Kiln.EntityId
+Kiln.SlotClick.Level.get -> int
 Kiln.SlotClick.Modifiers.get -> Kiln.SlotModifiers
 Kiln.SlotClick.Modifiers.init -> void
+Kiln.SlotClick.Pad.get -> Kiln.KeyChord?
+Kiln.SlotClick.Pad.init -> void
 Kiln.SlotClick.Pointer.get -> System.Numerics.Vector2?
 Kiln.SlotClick.Pointer.init -> void
+Kiln.SlotClick.Rarity.get -> Kiln.ItemRarity?
 Kiln.SlotClick.Screen.get -> Kiln.GameScreen
 Kiln.SlotClick.Screen.init -> void
 Kiln.SlotClick.Slot.get -> Kiln.VisibleSlot!
@@ -525,6 +540,8 @@ Kiln.SlotClickOptions.Button.init -> void
 Kiln.SlotClickOptions.Equals(Kiln.SlotClickOptions? other) -> bool
 Kiln.SlotClickOptions.Modifiers.get -> Kiln.SlotModifiers
 Kiln.SlotClickOptions.Modifiers.init -> void
+Kiln.SlotClickOptions.Pad.get -> Kiln.KeyChord?
+Kiln.SlotClickOptions.Pad.init -> void
 Kiln.SlotClickOptions.SlotClickOptions() -> void
 Kiln.SlotClickOptions.Take.get -> bool
 Kiln.SlotClickOptions.Take.init -> void
@@ -845,6 +862,47 @@ Kiln.UiItem.UiItem(float MinX, float MinY, float MaxX, float MaxY, bool Hovered,
 Kiln.UiItem.Visible.get -> bool
 Kiln.UiItem.Visible.init -> void
 Kiln.UiItem.Width.get -> float
+Kiln.UiItemDetailLine
+Kiln.UiItemDetailLine.<Clone>$() -> Kiln.UiItemDetailLine!
+Kiln.UiItemDetailLine.Deconstruct(out string! Text, out float? Value) -> void
+Kiln.UiItemDetailLine.Equals(Kiln.UiItemDetailLine? other) -> bool
+Kiln.UiItemDetailLine.Text.get -> string!
+Kiln.UiItemDetailLine.Text.init -> void
+Kiln.UiItemDetailLine.UiItemDetailLine(string! Text, float? Value) -> void
+Kiln.UiItemDetailLine.Value.get -> float?
+Kiln.UiItemDetailLine.Value.init -> void
+Kiln.UiItemDetailResult
+Kiln.UiItemDetailResult.<Clone>$() -> Kiln.UiItemDetailResult!
+Kiln.UiItemDetailResult.Deconstruct(out bool Ok, out string? Reason, out Kiln.UiItemDetailSnapshot? Snapshot) -> void
+Kiln.UiItemDetailResult.Equals(Kiln.UiItemDetailResult? other) -> bool
+Kiln.UiItemDetailResult.Ok.get -> bool
+Kiln.UiItemDetailResult.Ok.init -> void
+Kiln.UiItemDetailResult.Reason.get -> string?
+Kiln.UiItemDetailResult.Reason.init -> void
+Kiln.UiItemDetailResult.Snapshot.get -> Kiln.UiItemDetailSnapshot?
+Kiln.UiItemDetailResult.Snapshot.init -> void
+Kiln.UiItemDetailResult.UiItemDetailResult(bool Ok, string? Reason, Kiln.UiItemDetailSnapshot? Snapshot) -> void
+Kiln.UiItemDetailSnapshot
+Kiln.UiItemDetailSnapshot.<Clone>$() -> Kiln.UiItemDetailSnapshot!
+Kiln.UiItemDetailSnapshot.CaptureMs.get -> ulong
+Kiln.UiItemDetailSnapshot.CaptureMs.init -> void
+Kiln.UiItemDetailSnapshot.Deconstruct(out Kiln.ItemId Item, out Kiln.EntityId Entity, out int Level, out Kiln.ItemRarity? Rarity, out ulong Session, out ulong Frame, out ulong CaptureMs, out System.Collections.Generic.IReadOnlyList<Kiln.UiItemDetailLine!>! Lines) -> void
+Kiln.UiItemDetailSnapshot.Entity.get -> Kiln.EntityId
+Kiln.UiItemDetailSnapshot.Entity.init -> void
+Kiln.UiItemDetailSnapshot.Equals(Kiln.UiItemDetailSnapshot? other) -> bool
+Kiln.UiItemDetailSnapshot.Frame.get -> ulong
+Kiln.UiItemDetailSnapshot.Frame.init -> void
+Kiln.UiItemDetailSnapshot.Item.get -> Kiln.ItemId
+Kiln.UiItemDetailSnapshot.Item.init -> void
+Kiln.UiItemDetailSnapshot.Level.get -> int
+Kiln.UiItemDetailSnapshot.Level.init -> void
+Kiln.UiItemDetailSnapshot.Lines.get -> System.Collections.Generic.IReadOnlyList<Kiln.UiItemDetailLine!>!
+Kiln.UiItemDetailSnapshot.Lines.init -> void
+Kiln.UiItemDetailSnapshot.Rarity.get -> Kiln.ItemRarity?
+Kiln.UiItemDetailSnapshot.Rarity.init -> void
+Kiln.UiItemDetailSnapshot.Session.get -> ulong
+Kiln.UiItemDetailSnapshot.Session.init -> void
+Kiln.UiItemDetailSnapshot.UiItemDetailSnapshot(Kiln.ItemId Item, Kiln.EntityId Entity, int Level, Kiln.ItemRarity? Rarity, ulong Session, ulong Frame, ulong CaptureMs, System.Collections.Generic.IReadOnlyList<Kiln.UiItemDetailLine!>! Lines) -> void
 Kiln.UiItemView
 Kiln.UiItemView.ClientEntity.get -> Kiln.EntityId
 Kiln.UiItemView.ClientEntity.init -> void
@@ -1367,6 +1425,8 @@ Kiln.VisibleSlot.InventoryPage.get -> Kiln.EntityId
 Kiln.VisibleSlot.InventoryPage.init -> void
 Kiln.VisibleSlot.Item.get -> Kiln.ItemId
 Kiln.VisibleSlot.Item.init -> void
+Kiln.VisibleSlot.Level.get -> int
+Kiln.VisibleSlot.Level.init -> void
 Kiln.VisibleSlot.NativeState.get -> System.Collections.Generic.IReadOnlyList<byte>!
 Kiln.VisibleSlot.NativeState.init -> void
 Kiln.VisibleSlot.Occurrence.get -> uint
@@ -1377,6 +1437,8 @@ Kiln.VisibleSlot.OuterUi.get -> Kiln.UiRect?
 Kiln.VisibleSlot.OuterUi.init -> void
 Kiln.VisibleSlot.PageOrdinal.get -> uint
 Kiln.VisibleSlot.PageOrdinal.init -> void
+Kiln.VisibleSlot.Rarity.get -> Kiln.ItemRarity?
+Kiln.VisibleSlot.Rarity.init -> void
 Kiln.VisibleSlot.ServerEntity.get -> Kiln.EntityId
 Kiln.VisibleSlot.ServerEntity.init -> void
 Kiln.VisibleSlot.SlotIndex.get -> byte
@@ -1447,10 +1509,12 @@ const Kiln.Ui.Values.DetailCapability = "ui.values.detail" -> string!
 const Kiln.Ui.Values.GemForgeCandidatesCapability = "ui.gemforge.inspect" -> string!
 const Kiln.Ui.Values.HeldCapability = "ui.values.held" -> string!
 const Kiln.Ui.Values.HudCapability = "ui.values.hud" -> string!
+const Kiln.Ui.Values.ItemDetailCapability = "ui.item_detail" -> string!
 const Kiln.Ui.Values.SlotCapability = "ui.values.slot" -> string!
 const Kiln.Ui.Values.SlotsCapability = "ui.slots.inspect" -> string!
 const Kiln.Ui.Values.TooltipCapability = "ui.values.tooltip_lines" -> string!
 const Kiln.Ui.World.OutlineCapability = "ui.world_outline" -> string!
+const Kiln.Ui.World.ThroughWallsCapability = "ui.world_outline.through_walls" -> string!
 const Kiln.UiWheel.Cancelled = -1 -> int
 const Kiln.UiWheel.HoldAlt = 18 -> uint
 const Kiln.UiWheel.HoldCtrl = 17 -> uint
@@ -1503,6 +1567,15 @@ override Kiln.UiBarValue.GetHashCode() -> int
 override Kiln.UiBarValue.ToString() -> string!
 override Kiln.UiCursor.GetHashCode() -> int
 override Kiln.UiItem.GetHashCode() -> int
+override Kiln.UiItemDetailLine.Equals(object? obj) -> bool
+override Kiln.UiItemDetailLine.GetHashCode() -> int
+override Kiln.UiItemDetailLine.ToString() -> string!
+override Kiln.UiItemDetailResult.Equals(object? obj) -> bool
+override Kiln.UiItemDetailResult.GetHashCode() -> int
+override Kiln.UiItemDetailResult.ToString() -> string!
+override Kiln.UiItemDetailSnapshot.Equals(object? obj) -> bool
+override Kiln.UiItemDetailSnapshot.GetHashCode() -> int
+override Kiln.UiItemDetailSnapshot.ToString() -> string!
 override Kiln.UiItemView.GetHashCode() -> int
 override Kiln.UiLabelEdit.Equals(object? obj) -> bool
 override Kiln.UiLabelEdit.GetHashCode() -> int
@@ -1639,6 +1712,7 @@ static Kiln.Ui.Inventory.MarkWhen(System.Func<Kiln.VisibleSlot!, Kiln.SlotMark?>
 static Kiln.Ui.Inventory.OnClick(Kiln.SlotClickOptions! options, System.Action<Kiln.SlotClick!>! handler) -> System.IDisposable!
 static Kiln.Ui.Inventory.Screen.get -> Kiln.InventoryScreen?
 static Kiln.Ui.Inventory.ScreenChanged -> System.Action<Kiln.InventoryScreen?, Kiln.InventoryScreen?>?
+static Kiln.Ui.Inventory.Selected.get -> Kiln.VisibleSlot?
 static Kiln.Ui.Inventory.Unmark(Kiln.EntityId item) -> void
 static Kiln.Ui.ItemIconsAvailable.get -> bool
 static Kiln.Ui.ItemImage(Kiln.ItemId item) -> Kiln.UiImage?
@@ -1673,6 +1747,8 @@ static Kiln.Ui.Values.GemForgeCandidates() -> Kiln.GemForgeCandidatesResult!
 static Kiln.Ui.Values.HeldBar(Kiln.UiBarProvider! provider) -> Kiln.UiValueRegistration!
 static Kiln.Ui.Values.Hud(Kiln.HudValue vital, Kiln.UiBarProvider! provider) -> Kiln.UiValueRegistration!
 static Kiln.Ui.Values.ItemBar(Kiln.ItemId item, Kiln.UiBarProvider! provider) -> Kiln.UiValueRegistration!
+static Kiln.Ui.Values.ItemDetail(Kiln.EntityId entity, Kiln.ItemId item = default(Kiln.ItemId), int? level = null, Kiln.ItemRarity? rarity = null) -> Kiln.UiItemDetailResult!
+static Kiln.Ui.Values.ItemDetail(Kiln.ItemId item, int? level = null, Kiln.ItemRarity? rarity = null) -> Kiln.UiItemDetailResult!
 static Kiln.Ui.Values.OpenTooltipDetails() -> Kiln.UiTooltipOpenResult!
 static Kiln.Ui.Values.SlotBar(Kiln.ItemId item, Kiln.UiBarProvider! provider) -> Kiln.UiValueRegistration!
 static Kiln.Ui.Values.Slots() -> Kiln.VisibleSlotsResult!
@@ -1684,6 +1760,7 @@ static Kiln.Ui.World.ClearOutlines() -> void
 static Kiln.Ui.World.DefaultOutlineColor.get -> Kiln.Color
 static Kiln.Ui.World.Outline(Kiln.EntityId entity, Kiln.OutlineOptions? options = null) -> Kiln.WorldOutline!
 static Kiln.Ui.World.OutlinesAvailable.get -> bool
+static Kiln.Ui.World.ThroughWallsAvailable.get -> bool
 static Kiln.UiBarEdit.operator !=(Kiln.UiBarEdit? left, Kiln.UiBarEdit? right) -> bool
 static Kiln.UiBarEdit.operator ==(Kiln.UiBarEdit? left, Kiln.UiBarEdit? right) -> bool
 static Kiln.UiBarValue.operator !=(Kiln.UiBarValue? left, Kiln.UiBarValue? right) -> bool
@@ -1692,6 +1769,12 @@ static Kiln.UiCursor.operator !=(Kiln.UiCursor left, Kiln.UiCursor right) -> boo
 static Kiln.UiCursor.operator ==(Kiln.UiCursor left, Kiln.UiCursor right) -> bool
 static Kiln.UiItem.operator !=(Kiln.UiItem left, Kiln.UiItem right) -> bool
 static Kiln.UiItem.operator ==(Kiln.UiItem left, Kiln.UiItem right) -> bool
+static Kiln.UiItemDetailLine.operator !=(Kiln.UiItemDetailLine? left, Kiln.UiItemDetailLine? right) -> bool
+static Kiln.UiItemDetailLine.operator ==(Kiln.UiItemDetailLine? left, Kiln.UiItemDetailLine? right) -> bool
+static Kiln.UiItemDetailResult.operator !=(Kiln.UiItemDetailResult? left, Kiln.UiItemDetailResult? right) -> bool
+static Kiln.UiItemDetailResult.operator ==(Kiln.UiItemDetailResult? left, Kiln.UiItemDetailResult? right) -> bool
+static Kiln.UiItemDetailSnapshot.operator !=(Kiln.UiItemDetailSnapshot? left, Kiln.UiItemDetailSnapshot? right) -> bool
+static Kiln.UiItemDetailSnapshot.operator ==(Kiln.UiItemDetailSnapshot? left, Kiln.UiItemDetailSnapshot? right) -> bool
 static Kiln.UiItemView.operator !=(Kiln.UiItemView left, Kiln.UiItemView right) -> bool
 static Kiln.UiItemView.operator ==(Kiln.UiItemView left, Kiln.UiItemView right) -> bool
 static Kiln.UiLabelEdit.operator !=(Kiln.UiLabelEdit? left, Kiln.UiLabelEdit? right) -> bool
