@@ -514,12 +514,21 @@ internal static partial class Compiler
             return;
         }
         if (props.Count > 0) low.Json["needsProps"] = new JsonArray(props.Select(x => (JsonNode)new JsonObject { ["id"] = $"0x{x.Id:x8}", ["index"] = x.Index }).ToArray());
-        low.Recipe(new RecipeDefinition
+        var def = new RecipeDefinition
         {
             Guid = RecipeGuid(ctx, key, r, path), Name = name, Station = station, Menu = menu, StationItem = stationItem, Inputs = inputs,
             Outputs = [new RecipeIngredient(item, r.Makes)], Duration = r.Seconds is { } d ? TimeSpan.FromSeconds(d) : null, Fields = fields.Count > 0 ? fields : null,
-            Props = props.Count > 0 ? props : null,
-        });
+            Props = props.Count > 0 ? props : null, MenuGroup = r.MenuGroup, TrackCrafted = r.TrackCrafted,
+        };
+        if (r.MenuGroup is { } group)
+        {
+            if (group.Group == Guid.Empty) throw new BlockError(ctx.Block, $"{path}.menuGroup", "names no tab: say a CraftingGroups constant");
+            if (NewContent.MenuWorkshop(def) is not { } shown)
+                throw new BlockError(ctx.Block, $"{path}.menuGroup", "a station of this mod has a menu of its own, with no tabs of the game's: menuGroup is for a game workshop's menu");
+            if (shown != group.Workshop)
+                throw new BlockError(ctx.Block, $"{path}.menuGroup", $"{group} is a tab of workshop 0x{group.Workshop:x8}'s menu, and this recipe is crafted at 0x{shown:x8}: name a tab of its station's menu");
+        }
+        low.Recipe(def);
     }
 }
 

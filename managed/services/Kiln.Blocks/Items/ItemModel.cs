@@ -580,6 +580,13 @@ public sealed record RecipeBlock : IBlock
     /// <summary>A fixed GUID (and so recipe id) in place of the one Kiln derives: <c>BlockIdentity.Legacy(guid)</c>, for a recipe another loader made. Null: derived.
     /// Since 0.2.0-dev.30.5 (mod API 0.2.14).</summary>
     public BlockIdentity? Identity { get; init; }
+    /// <summary>The tab of the game's crafting menu that lists it, one the game has: <c>CraftingGroups.Carpenter.Essentials</c>. Its workshop is the
+    /// <see cref="Station"/>'s (<see cref="Stations.Hand"/>: <c>CraftingGroups.Hand</c>). Null: Kiln picks the place, beside recipes that make the same kind of
+    /// thing. A player's menu without that tab lists it there too, and the recipe's definition warns. Since 0.2.0-dev.30.5 (mod API 0.2.14).</summary>
+    public CraftingGroupRef? MenuGroup { get; init; }
+    /// <summary>Keeps the game's "crafted once" mark of the recipe, as its own recipes have it; a <see cref="KnowledgeBlock"/> with <see cref="KnowledgeTrigger.Craft"/> puts the
+    /// recipe in the game's knowledge table, which the mark reads. False: no mark. Since 0.2.0-dev.30.5 (mod API 0.2.14).</summary>
+    public bool TrackCrafted { get; init; }
 }
 
 public static partial class Stations

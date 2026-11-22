@@ -6,12 +6,40 @@ Kiln.BlockIdentity.Guid.get -> System.Guid
 Kiln.BlockIdentity.Id.get -> uint
 Kiln.ItemBlock.Identity.get -> Kiln.BlockIdentity?
 Kiln.ItemBlock.Identity.init -> void
+Kiln.KnowledgeBlock
+Kiln.KnowledgeBlock.<Clone>$() -> Kiln.KnowledgeBlock!
+Kiln.KnowledgeBlock.Equals(Kiln.KnowledgeBlock? other) -> bool
+Kiln.KnowledgeBlock.Identity.get -> Kiln.BlockIdentity?
+Kiln.KnowledgeBlock.Identity.init -> void
+Kiln.KnowledgeBlock.KnowledgeBlock() -> void
+Kiln.KnowledgeBlock.Of.get -> string?
+Kiln.KnowledgeBlock.Of.init -> void
+Kiln.KnowledgeBlock.Scope.get -> Kiln.TrackingScope?
+Kiln.KnowledgeBlock.Scope.init -> void
+Kiln.KnowledgeBlock.Trigger.get -> Kiln.KnowledgeTrigger
+Kiln.KnowledgeBlock.Trigger.init -> void
+Kiln.KnowledgeTrigger
+Kiln.KnowledgeTrigger.Craft = 1 -> Kiln.KnowledgeTrigger
+Kiln.KnowledgeTrigger.Pickup = 0 -> Kiln.KnowledgeTrigger
 Kiln.RecipeBlock.Identity.get -> Kiln.BlockIdentity?
 Kiln.RecipeBlock.Identity.init -> void
+Kiln.RecipeBlock.MenuGroup.get -> Kiln.CraftingGroupRef?
+Kiln.RecipeBlock.MenuGroup.init -> void
+Kiln.RecipeBlock.TrackCrafted.get -> bool
+Kiln.RecipeBlock.TrackCrafted.init -> void
+Kiln.TrackingScope
+Kiln.TrackingScope.Both = 2 -> Kiln.TrackingScope
+Kiln.TrackingScope.Player = 0 -> Kiln.TrackingScope
+Kiln.TrackingScope.World = 1 -> Kiln.TrackingScope
 override Kiln.BlockIdentity.GetHashCode() -> int
 override Kiln.BlockIdentity.ToString() -> string!
+override Kiln.KnowledgeBlock.Equals(object? obj) -> bool
+override Kiln.KnowledgeBlock.GetHashCode() -> int
+override Kiln.KnowledgeBlock.ToString() -> string!
 override Kiln.BlockIdentity.Equals(object? obj) -> bool
 static Kiln.BlockIdentity.Legacy(System.Guid guid) -> Kiln.BlockIdentity!
 static Kiln.BlockIdentity.Legacy(uint id) -> Kiln.BlockIdentity!
 static Kiln.BlockIdentity.operator !=(Kiln.BlockIdentity? left, Kiln.BlockIdentity? right) -> bool
 static Kiln.BlockIdentity.operator ==(Kiln.BlockIdentity? left, Kiln.BlockIdentity? right) -> bool
+static Kiln.KnowledgeBlock.operator !=(Kiln.KnowledgeBlock? left, Kiln.KnowledgeBlock? right) -> bool
+static Kiln.KnowledgeBlock.operator ==(Kiln.KnowledgeBlock? left, Kiln.KnowledgeBlock? right) -> bool

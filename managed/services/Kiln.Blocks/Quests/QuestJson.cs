@@ -10,7 +10,7 @@ internal static class QuestBlockJson
 {
     public static readonly (string Section, Func<ModBlocks, string, JsonElement, BlockHandle> Make)[] Kinds =
     [
-        ("quests", BlockJson.Make<QuestBlock>), ("dialogues", BlockJson.Make<DialogueBlock>),
+        ("quests", BlockJson.Make<QuestBlock>), ("dialogues", BlockJson.Make<DialogueBlock>), ("knowledge", BlockJson.Make<KnowledgeBlock>),
     ];
 }
 

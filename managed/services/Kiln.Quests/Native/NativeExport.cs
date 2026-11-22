@@ -50,6 +50,39 @@ internal static class NativeExport
         lock (Dirty) return FromData.Contains($"{kind}:{fullId}");
     }
 
+    // tracked items and recipes (Kiln.Blocks KnowledgeBlock, since 0.2.0-dev.30.5): the quests file's knowledge entries with an id
+    // ({"id", "track", "scope"}, native/services/quests/questpack.cpp tracked_knowledge), by mod and entry name
+    private static readonly Dictionary<(string Mod, string Name), JsonObject> Tracked = new();
+
+    /// <summary>Kiln.Blocks: the game tracks <paramref name="id"/> (an item: "pickup"; a recipe: "craft") for this mod, from the next start.</summary>
+    internal static void Track(string mod, string name, uint id, string track, string scope)
+    {
+        var entry = new JsonObject { ["id"] = $"0x{id:x8}", ["track"] = track, ["scope"] = scope };
+        lock (Dirty)
+        {
+            if (Tracked.TryGetValue((mod, name), out var was) && JsonNode.DeepEquals(was, entry)) return;
+            Tracked[(mod, name)] = entry;
+        }
+        Changed(mod);
+    }
+
+    /// <summary>Kiln.Blocks: the block that tracked it is gone.</summary>
+    internal static void Untrack(string mod, string name)
+    {
+        lock (Dirty)
+            if (!Tracked.Remove((mod, name))) return;
+        Changed(mod);
+    }
+
+    private static JsonObject TrackedOf(string mod)
+    {
+        var o = new JsonObject();
+        lock (Dirty)
+            foreach (var ((m, name), entry) in Tracked.OrderBy(x => x.Key.Name, StringComparer.Ordinal))
+                if (m == mod) o[name] = entry.DeepClone();
+        return o;
+    }
+
     /// <summary>From the service tick.</summary>
     public static void Flush()
     {
@@ -124,7 +157,7 @@ internal static class NativeExport
     internal static string? BakedDifference(JsonObject baked, JsonObject? now)
     {
         var diffs = new List<string>();
-        foreach (var (section, what) in new[] { ("npcs", "NPC"), ("quests", "quest"), ("dialogues", "dialogue") })
+        foreach (var (section, what) in new[] { ("npcs", "NPC"), ("quests", "quest"), ("dialogues", "dialogue"), ("knowledge", "tracked item or recipe") })
         {
             var b = baked[section] as JsonObject;
             var n = now?[section] as JsonObject;
@@ -147,13 +180,13 @@ internal static class NativeExport
     {
         if (doc is null || baked is null) return doc;
         var copy = (JsonObject)doc.DeepClone();
-        foreach (var section in new[] { "npcs", "quests", "dialogues" })
+        foreach (var section in new[] { "npcs", "quests", "dialogues", "knowledge" })
         {
             if (copy[section] is not JsonObject mine || baked[section] is not JsonObject theirs) continue;
             foreach (var (id, _) in theirs.ToList()) mine.Remove(id);
             if (mine.Count == 0) copy.Remove(section);
         }
-        return copy.ContainsKey("npcs") || copy.ContainsKey("quests") || copy.ContainsKey("dialogues") ? copy : null;
+        return copy.ContainsKey("npcs") || copy.ContainsKey("quests") || copy.ContainsKey("dialogues") || copy.ContainsKey("knowledge") ? copy : null;
     }
 
     // A mod built with the bake ships what its code defined at build: the game built that at this start. Said once per outcome.
@@ -195,11 +228,13 @@ internal static class NativeExport
             foreach (var (_, e) in Quests.DialogueRegistry)
                 if (!e.FromJson && e.Def.ModId == mod && e.Def.Native && !InData('d', e.Def.FullId)) dialogues[e.Def.Id] = Dialogue(e.Def);
         }
-        if (quests.Count == 0 && npcs.Count == 0 && dialogues.Count == 0) return null;
+        var knowledge = TrackedOf(mod);
+        if (quests.Count == 0 && npcs.Count == 0 && dialogues.Count == 0 && knowledge.Count == 0) return null;
         var doc = new JsonObject { ["format"] = 1, ["comment"] = "written by Kiln from what the mod defines in code: docs/kiln/modding/quests.md, Code" };
         if (npcs.Count > 0) doc["npcs"] = npcs;
         if (quests.Count > 0) doc["quests"] = quests;
         if (dialogues.Count > 0) doc["dialogues"] = dialogues;
+        if (knowledge.Count > 0) doc["knowledge"] = knowledge;
         return doc;
     }
 

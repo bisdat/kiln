@@ -175,6 +175,7 @@
         "$ref": "#/$defs/quest"
       }
     },
+    "knowledge": {"type": "object", "description": "The game's tracking of the mod's items (found) and recipes (crafted once), as it tracks its own: built into the game's knowledge table at start, from the next start or the first when Kiln.Sdk baked it. Needs \"clients\": \"mod\" (since 0.2.0-dev.30.5).", "propertyNames": {"$ref": "#/$defs/name"}, "additionalProperties": {"$ref": "#/$defs/knowledge"}},
     "dialogues": {
       "type": "object",
       "description": "Conversations in the game's own NPC menu, for an NPC block's talk or a quest NPC's dialogue. Needs \"clients\": \"mod\".",
@@ -817,7 +818,9 @@
         "sheltered": { "type": "boolean", "description": "A player crafts it only under a roof. A station that works on its own never checks a roof, so its recipes refuse it." },
         "comfort": { "type": "integer", "minimum": 0, "description": "The comfort level it asks of whoever makes it." },
         "needsProps": { "type": "array", "maxItems": 8, "items": { "type": "string", "minLength": 1 }, "description": "Props that have to stand near a manual station: blocks with provides, by name (\"other-mod:name\" for another mod's). The game's automated factory path has no nearby-prop context, so factory block recipes refuse this field." },
-        "identity": { "$ref": "#/$defs/identity" }
+        "identity": { "$ref": "#/$defs/identity" },
+        "menuGroup": { "type": "string", "pattern": "^0[xX][0-9a-fA-F]{1,8}/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})?$", "description": "The tab of the game's crafting menu that lists it, one the game has (CraftingGroups in C#): \"0x<workshop>/<tab GUID>\", or with \"/<subcategory GUID>\". Its workshop is the station's (\"hand\": 0x00000000). Default: Kiln picks the place (since 0.2.0-dev.30.5)." },
+        "trackCrafted": { "type": "boolean", "description": "Keeps the game's \"crafted once\" mark of the recipe; a knowledge block with trigger craft puts it in the game's knowledge table (since 0.2.0-dev.30.5)." }
       },
       "additionalProperties": false
     },
@@ -830,6 +833,18 @@
       },
       "minProperties": 1,
       "maxProperties": 1,
+      "additionalProperties": false
+    },
+    "knowledge": {
+      "type": "object",
+      "required": ["trigger"],
+      "description": "The game's tracking of one of the mod's items or recipes. One of of and identity.",
+      "properties": {
+        "trigger": { "enum": ["pickup", "craft"], "description": "pickup: an item found (the world's and each player's knowledge); craft: a recipe crafted once (each player's)." },
+        "of": { "type": "string", "minLength": 1, "description": "An item block of this mod (pickup: the item; craft: its own recipe), or a recipe block (craft). The recipe says trackCrafted." },
+        "identity": { "$ref": "#/$defs/identity", "description": "The tracked item's or recipe's identity, in place of of." },
+        "scope": { "enum": ["player", "world", "both"], "description": "Whose knowledge. Default: both for an item, player for a recipe (always player)." }
+      },
       "additionalProperties": false
     },
     "spell": {

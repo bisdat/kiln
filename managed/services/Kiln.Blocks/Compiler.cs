@@ -468,6 +468,8 @@ internal sealed class Lowered(ModBlocks mod)
             ["inputs"] = new JsonArray(d.Inputs.Select(x => (JsonNode)new JsonObject { ["item"] = x.Item, ["count"] = x.Count }).ToArray()),
             ["outputs"] = new JsonArray(d.Outputs.Select(x => (JsonNode)new JsonObject { ["item"] = x.Item, ["count"] = x.Count }).ToArray()) };
         if (d.Props is { Count: > 0 }) json["props"] = new JsonArray(d.Props.Select(x => (JsonNode)new JsonObject { ["id"] = $"0x{x.Id:x8}", ["index"] = x.Index }).ToArray());
+        if (d.MenuGroup is { } group) json["menuGroup"] = group.ToString();
+        if (d.TrackCrafted) json["trackCrafted"] = true;
         Arr("recipes").Add(json);
     }
 
