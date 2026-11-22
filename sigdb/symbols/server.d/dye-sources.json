@@ -1,0 +1,59 @@
+{
+  "format": 1,
+  "side": "server",
+  "comment": "Tint path qualification for GitHub #125, Fuzen777. Static only, exact server 26430253 (f0d824be...) and client 26430625 (5d9ef2f1...). TintAction(action*, inventory_actions iterator*) resolves the target and secondary InventorySlotIds before constructing its own inventory transaction. The dye is the secondary slot's live item, whose itemColorCombinationSetup.isSet must be nonzero. TintPayRet follows InventoryRemoveItems(out, tx, player, dye, preferred secondary slot, 1). Payment error or remainder reaches InventoryRollback; success writes/adds ColorPaletteItem before InventoryCommit. This is not InventoryPay/RecipePaid. These records qualify code locations only: they do not enable dye sources or claim fault-atomic palette mutation. docs/re/gameplay.md section 10 and docs/re/items.md sections 3-4 describe the existing action and transaction layouts.",
+  "symbols": {
+    "dyes/TintAction": {
+      "find": [
+        {
+          "pattern": "48 89 5C 24 18 48 89 74 24 20 55 41 56 41 57 48 8D AC 24 D0 8D FF FF B8 30 73 00 00 E8 ?? ?? ?? ?? 48 2B E0 48 8B 02 4C 8B F2"
+        }
+      ]
+    },
+    "@dyes/TintSlotReads": {
+      "find": [
+        {
+          "scope": { "symbol": "dyes/TintAction", "size": 144 },
+          "pattern": "48 8B 11 48 8D 4C 24 58 48 89 44 24 20 E8 {dyes/SlotInfo:rel32} 4D 8B 8E 68 01 00 00 48 8D 4D 60 4D 8B 86 48 01 00 00 49 8B 57 {dyes/action.secondary:d8} 0F 10 00 49 8B 06 48 89 44 24 20 0F 11 44 24 40 E8 {dyes/SlotInfo:rel32}"
+        }
+      ]
+    },
+    "@dyes/TintPaletteCheck": {
+      "find": [
+        {
+          "scope": { "symbol": "dyes/TintAction", "size": 256 },
+          "pattern": "F7 83 D8 05 00 00 00 00 01 00 0F 85 ?? ?? ?? ?? 80 B8 {dyes/item.palette_set:d32} 00 0F 84 ?? ?? ?? ??"
+        }
+      ]
+    },
+    "dyes/TintPayRet": {
+      "find": [
+        {
+          "scope": { "symbol": "dyes/TintAction", "size": 640 },
+          "pattern": "C7 44 24 28 01 00 00 00 48 8D 95 80 00 00 00 44 8B CE 48 89 5C 24 20 48 8D 4C 24 30 44 8B 00 E8 {items/InventoryRemoveItems:rel32} 80 7C 24 30 00 75 5A 83 7C 24 38 00 75 53",
+          "offset": 36
+        }
+      ]
+    },
+    "dyes/TintRollbackRet": {
+      "find": [
+        {
+          "scope": { "symbol": "dyes/TintAction", "size": 640 },
+          "pattern": "48 8D 8D 80 00 00 00 E8 {items/InventoryRollback:rel32} 48 8D 8D 80 00 00 00 E8 {items/InventoryFreeArrays:rel32}",
+          "offset": 12
+        }
+      ]
+    },
+    "dyes/TintCommitRet": {
+      "find": [
+        {
+          "scope": { "symbol": "dyes/TintAction", "size": 640 },
+          "pattern": "89 30 48 8D 8D 80 00 00 00 E8 {items/InventoryCommit:rel32} EB C3",
+          "offset": 14
+        }
+      ]
+    }
+  },
+  "constants": {},
+  "features": {}
+}

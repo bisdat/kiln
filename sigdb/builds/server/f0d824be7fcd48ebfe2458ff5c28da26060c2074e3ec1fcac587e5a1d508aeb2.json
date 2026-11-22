@@ -9,8 +9,8 @@
   "verified": true,
   "note": "runtime-verified in labs on this exe, 2026-11-11, Kiln 0.2.0-dev+20261112.68988ae, policy any, standard lab save copied fresh for each group, one group per boot (or per run of boots): the running core resolved sigdb 447/447 symbols (355 defined, 92 captured), 542/542 constants (493 defined, 49 captured) and 146/146 features, each to the same value as the offline resolve (compared per name from sigdb-report.json); base world 24/0, players 30/0, chat+time 50/0, hooks 17/0, content 33/0, newcontent 24/0; api 74/0; settings 70/0; items 95/0 (kiln.items self-test on); combat 203/0 (watch-all); spawn 57/0 over 3 boots; gameplay 48/0; creatures 63/0; assets 17/0; rules 53/0; pacing 21/0; types 32/0 + types-peer 8/0; progression 45/0 (no player); net 168/0 with nettest 95 PASS, 0 FAIL; quests 188/0 over 3 boots; skills 124/0 over 2 boots; characters 53/0 over 3 boots; gamedata 71/0 over 2 boots (reload, restart); saves 54/0 over 8 boots (SIGINT, kill -9 x3, restore, game backup); build 79/0 over 4 boots; placeholder 34/0 over 4 boots (kill -9). Failing, so their names stay static: abilities 70/3, 70/3, 71/2 over three runs (the bow shot is refused by the core's PlaySequence guard every time, the Greet emote ran 73/66/79 steps of the 80 the test wants, the staff cast 38/35 then passed, the PC under heavy load); npcai 25/6 twice (force ready unavailable on four spawned creatures, the peacekeeper's relations not applied). Not run: emf (its probe needs third-party EMF mods). Levels: lab 1093 names in 24 services, static 42 (abilities, npcai, emf). With this record under verified-only: build verified, SimStep hooked, every server service loaded (27; audio, screen, ui and vfx skipped as client-only), 0 error lines.",
   "declared": {
-    "symbols": 628,
-    "constants": 712,
+    "symbols": 635,
+    "constants": 714,
     "features": 195
   },
   "features": {
@@ -302,6 +302,11 @@
     "creatures/TemplateComponentAt": "0x64fa00",
     "creatures/TransitionTable": "0x14c5b70",
     "creatures/TypeByHash": "0x7e15d0",
+    "dyes/SlotInfo": "0x1445d0",
+    "dyes/TintAction": "0x1a1230",
+    "dyes/TintCommitRet": "0x1a1490",
+    "dyes/TintPayRet": "0x1a13e8",
+    "dyes/TintRollbackRet": "0x1a1455",
     "emf/AttrAdd": "0x190810",
     "emf/NpcSetDecision": "0x1f65b0",
     "emf/NpcSetState": "0x1f6da0",
@@ -796,6 +801,8 @@
     "creatures/type.kind": "0x4c",
     "creatures/type.qname": "0x20",
     "creatures/type.size": "0x40",
+    "dyes/action.secondary": "0x8",
+    "dyes/item.palette_set": "0x748",
     "events/storage.players_mask": "0x7ddc0a",
     "gamedata/buffreg.collection": "0x20",
     "gamedata/tarr.cap": "0x10",
@@ -2109,6 +2116,25 @@
       "features": {
         "hooks.foreign_modules": "static"
       }
+    },
+    "dye-sources": {
+      "level": "static",
+      "date": "2026-11-22",
+      "evidence": "resolved offline (tools/sigport/build_record.py)",
+      "symbols": {
+        "@dyes/TintPaletteCheck": "static",
+        "@dyes/TintSlotReads": "static",
+        "dyes/SlotInfo": "static",
+        "dyes/TintAction": "static",
+        "dyes/TintCommitRet": "static",
+        "dyes/TintPayRet": "static",
+        "dyes/TintRollbackRet": "static"
+      },
+      "constants": {
+        "dyes/action.secondary": "static",
+        "dyes/item.palette_set": "static"
+      },
+      "features": {}
     },
     "emf": {
       "level": "static",
