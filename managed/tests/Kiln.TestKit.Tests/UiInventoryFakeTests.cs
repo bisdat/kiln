@@ -92,7 +92,7 @@ public sealed unsafe class UiInventoryFakeTests
     [Fact]
     public void APadPressOnTheSelectedSlotIsAClick()
     {
-        // 0.2.0-dev.31 (GitHub issue 119 c): SlotClickOptions.Pad, the press kept from the game
+        // 0.2.0-dev.30.5 (GitHub issue 119 c): SlotClickOptions.Pad, the press kept from the game
         using var kiln = new KilnHarness();
         kiln.Step();
         var got = new List<SlotClick>();
@@ -234,5 +234,15 @@ public sealed unsafe class UiInventoryFakeTests
         {
             kiln.Run(Ui.Inventory.ClearMarks);
         }
+    }
+    [Fact]
+    public void Old_slot_hit_records_do_not_touch_the_tail_canary()
+    {
+        using var kiln = new KilnHarness(); kiln.Step(); kiln.UiInventory.Draw(HudScreen.Backpack, Sword); kiln.UiInventory.Hover(0);
+        var table = (nint*)KitBackend.Instance.Service("kiln.ui.inventory", 1);
+        byte* bytes = stackalloc byte[176]; new Span<byte>(bytes, 176).Fill(0xA5); *(uint*)bytes = 144;
+        Assert.Equal(0, ((delegate* unmanaged[Cdecl]<ulong, float, float, float, float, void*, int>)table[2])(1, -1, -1, 0, 0, bytes));
+        Assert.Equal(1u, ((uint*)bytes)[1]);
+        for (var i = 144; i < 176; i++) Assert.Equal((byte)0xA5, bytes[i]);
     }
 }
