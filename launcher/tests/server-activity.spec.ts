@@ -65,11 +65,12 @@ test("Start shows its progress at once and the result when the world runs", asyn
   await expect(panel).toHaveAttribute("data-state", "done", { timeout: 20_000 });
   await expect(panel.locator(".k-sact-result")).toHaveText("Server running");
   await expect(panel.locator(".k-sact-lines")).toBeVisible();
-  // the task's five progress lines and its last one, oldest first
+  // the task's lines, oldest first: its named stages' lines (preparing ... running) and its last one
   const lines = panel.locator(".k-sact-lines li");
-  await expect(lines).toHaveCount(6);
-  await expect(lines.first()).toContainText("started GE-Proton10-3 ./enshrouded_server.exe");
-  await expect(lines.nth(4)).toContainText("812 of 1490 chunks");
+  await expect(lines).toHaveCount(8);
+  await expect(lines.first()).toContainText("checking the server folder");
+  await expect(panel.locator(".k-sact-lines")).toContainText("started GE-Proton10-3 ./enshrouded_server.exe");
+  await expect(panel.locator(".k-sact-lines")).toContainText("812 of 1490 chunks");
   await shot(page, "2-started");
 });
 

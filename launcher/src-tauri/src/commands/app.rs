@@ -182,6 +182,8 @@ pub struct Task {
     pub kind: String,
     pub title: String,
     pub state: TaskState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stage: Option<String>,
     pub progress: Option<f32>,
     pub message: Option<String>,
     pub started: String,
@@ -230,7 +232,7 @@ fn emit(app: &AppHandle, task: &Task) {
 }
 
 /// The `Progress` a task's work receives: reports become `kiln://task` events (at most ~12 per second, plus every
-/// message change), `canceled()` turns true after `task_cancel`.
+/// message or stage change), `canceled()` turns true after `task_cancel`.
 struct TaskProgress {
     app: AppHandle,
     task: Task,
@@ -250,6 +252,13 @@ impl Progress for TaskProgress {
         self.task.message = Some(message.to_string());
         self.last = Instant::now();
         emit(&self.app, &self.task);
+    }
+
+    fn stage(&mut self, id: &str) {
+        if self.task.stage.as_deref() != Some(id) {
+            self.task.stage = Some(id.to_owned());
+            emit(&self.app, &self.task);
+        }
     }
 
     fn canceled(&self) -> bool {
@@ -274,6 +283,7 @@ pub fn spawn_task(
         kind: kind.to_string(),
         title,
         state: TaskState::Running,
+        stage: None,
         progress: None,
         message: None,
         started: kiln_manage::util::now_rfc3339(),
@@ -1175,6 +1185,28 @@ fn copy_assets_task(app: &AppHandle, kind: &str, from: std::path::PathBuf) -> Re
         }
         to_value(assets_status()?)
     }))
+}
+
+#[cfg(test)]
+mod task_tests {
+    use super::Task;
+    use serde_json::json;
+
+    #[test]
+    fn task_stage_is_optional_and_serialized_when_set() {
+        let old = json!({
+            "id": "start-1", "kind": "server_start", "title": "Starting lab", "state": "running",
+            "progress": null, "message": null, "started": "2026-11-22T00:00:00Z", "finished": null
+        });
+        let mut task: Task = serde_json::from_value(old.clone()).unwrap();
+        assert_eq!(task.stage, None);
+        assert_eq!(serde_json::to_value(&task).unwrap(), old);
+
+        task.stage = Some("world".into());
+        let event = serde_json::to_value(&task).unwrap();
+        assert_eq!(event["stage"], "world");
+        assert_eq!(serde_json::from_value::<Task>(event).unwrap().stage.as_deref(), Some("world"));
+    }
 }
 
 #[cfg(test)]

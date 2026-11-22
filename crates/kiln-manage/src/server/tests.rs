@@ -1,20 +1,111 @@
-//! Lab tests of the server layer (ignored by default: they run SteamCMD and Wine).
+//! Server unit tests and opt-in lab tests (the labs run SteamCMD and Wine).
 //!
 //! `KILN_TEST_SERVER_DIR=~/srv/enshrouded/labs/<name> KILN_TEST_SERVER_PORT=26011 [KILN_TEST_REFLINK_FROM=<install>]
 //!  XDG_CONFIG_HOME=<scratch> XDG_STATE_HOME=<scratch> KILN_DATA_DIR=<scratch>
 //!  cargo test -p kiln-manage --all-features -- --ignored --nocapture lab_instance`
 
-use super::instance::{self, ServerRunner, ServerSpec};
-use super::{run, ServerState};
+#[cfg(feature = "server")]
+use super::instance::{self, ServerSpec};
+use super::instance::{InstanceKind, Scaled, ServerInstance, ServerRunner};
+use super::run;
+#[cfg(feature = "server")]
+use super::ServerState;
+use crate::ErrorCode;
+use crate::task::Progress;
+use std::io::Write;
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+#[derive(Default)]
+struct Stages(Vec<String>);
+
+impl Progress for Stages {
+    fn report(&mut self, _: Option<f32>, _: &str) {}
+
+    fn stage(&mut self, id: &str) {
+        self.0.push(id.to_owned());
+    }
+}
+
+#[test]
+fn start_stages_and_last_successful_duration() {
+    let root = std::env::temp_dir().join(format!("kiln-start-stages-{}", crate::util::uuid_v4().unwrap()));
+    let dir = root.join("server");
+    let log_dir = dir.join("logs");
+    let capture = root.join("local.run.log");
+    let game_log = log_dir.join(super::game::LOG);
+    std::fs::create_dir_all(&log_dir).unwrap();
+    std::fs::write(dir.join(super::game::EXE), []).unwrap();
+    let instance = ServerInstance {
+        id: "local".into(),
+        name: "Fake server".into(),
+        kind: InstanceKind::Local,
+        dir: Some(dir.clone()),
+        port: 15637,
+        query_port: 15637,
+        wine: None,
+        policy: "any".into(),
+        source: "launcher".into(),
+        remote: None,
+        runner: ServerRunner::Windows,
+        prefix: None,
+        backup_dir: None,
+        kilnctl: None,
+        stop_timeout_s: 90,
+    };
+
+    let try_start = |ready, duration_s| {
+        let mut stages = Stages::default();
+        // Restart forwards the start through this progress adapter.
+        let mut scaled = Scaled { inner: &mut stages, from: 0.4, to: 1.0 };
+        let result = run::start_via(None, &instance, &mut scaled, &mut |instance, logs, _, progress| {
+            let mut log = std::fs::OpenOptions::new().create(true).append(true).open(&game_log).unwrap();
+            if ready {
+                writeln!(log, "{}", super::game::READY).unwrap();
+            } else {
+                writeln!(log, "Loading the world").unwrap();
+            }
+            let spawned = Instant::now() - Duration::from_secs(duration_s);
+            run::await_start(instance, logs, &capture, spawned, "started fake runner (pid 1)", progress, &mut || {
+                Some("fake runner exited".into())
+            })
+        });
+        (result, stages.0)
+    };
+
+    let (failed, stages) = try_start(false, 2);
+    assert_eq!(failed.unwrap_err().code, ErrorCode::Io);
+    assert_eq!(stages, ["preparing", "wine", "process", "world"]);
+    assert!(!capture.with_extension("start.json").exists());
+
+    let (started, stages) = try_start(true, 4);
+    assert_eq!(stages, ["preparing", "wine", "process", "world", "running"]);
+    let started = started.unwrap();
+    let duration = started.last_start_s.unwrap();
+    assert!(duration >= 4);
+    assert_eq!(run::read_last_start(&capture, &dir), Some(duration));
+    assert_eq!(run::read_last_start(&capture, &root.join("different-install")), None);
+    let wire = serde_json::to_value(&started).unwrap();
+    assert_eq!(wire["lastStartS"].as_u64(), Some(duration));
+
+    // The previous ready line is still present. A new log write followed by failure must preserve the record.
+    let record = capture.with_extension("start.json");
+    let before = std::fs::read(&record).unwrap();
+    let (failed, stages) = try_start(false, duration + 2);
+    assert_eq!(failed.unwrap_err().code, ErrorCode::Io);
+    assert_eq!(stages, ["preparing", "wine", "process", "world"]);
+    assert_eq!(std::fs::read(record).unwrap(), before);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(feature = "server")]
 fn print_progress(f: Option<f32>, m: &str) {
     println!("[{}] {m}", f.map(|f| format!("{:3.0}%", f * 100.0)).unwrap_or_else(|| "  ? ".into()));
 }
 
 #[test]
 #[ignore]
+#[cfg(feature = "server")]
 fn lab_instance_lifecycle() {
     let dir = PathBuf::from(std::env::var("KILN_TEST_SERVER_DIR").expect("KILN_TEST_SERVER_DIR"));
     let port: u16 = std::env::var("KILN_TEST_SERVER_PORT").expect("KILN_TEST_SERVER_PORT").parse().unwrap();
@@ -77,6 +168,7 @@ fn lab_instance_lifecycle() {
 /// through the stop. Window checks are outside (the server reaches no display: run::headless).
 #[test]
 #[ignore]
+#[cfg(feature = "server")]
 fn lab_console_windowless() {
     use super::console::{ConsoleFollower, ConsoleLevel, ConsoleSource, ConsoleUpdate};
     let id = std::env::var("KILN_TEST_SERVER_ID").expect("KILN_TEST_SERVER_ID");

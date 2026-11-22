@@ -535,6 +535,9 @@ impl Progress for Scaled<'_> {
     fn report(&mut self, fraction: Option<f32>, message: &str) {
         self.inner.report(fraction.map(|f| self.from + f.clamp(0.0, 1.0) * (self.to - self.from)), message)
     }
+    fn stage(&mut self, id: &str) {
+        self.inner.stage(id);
+    }
     fn canceled(&self) -> bool {
         self.inner.canceled()
     }

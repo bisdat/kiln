@@ -567,11 +567,19 @@ function emitTask(t: Task) { tasks.set(t.id, t); mockEmit("kiln://task", clone(t
  *  activation of that kind. `fail`: the task then fails with this message instead of finishing. */
 const taskHolds = new Map<string, { gate: string; fail?: string }>();
 
-/** A fake long task: `steps` progress messages, then `finish()` gives the result (or throws a KilnError). */
-function startTask(kind: string, title: string, steps: string[], finish: () => unknown, stepMs = 450): string {
+type TaskStep = string | { stage: string; message: string };
+
+/** A fake long task: `steps` progress messages and optional stage IDs, then `finish()` gives the result. */
+function startTask(kind: string, title: string, steps: readonly TaskStep[], finish: () => unknown, stepMs = 450): string {
   const id = `t${++taskSeq}-${kind}`;
-  const t: Task = { id, kind, title, state: "running", progress: 0, message: steps[0] ?? null, started: now(), finished: null };
-  emitTask(t);
+  let t: Task = { id, kind, title, state: "running", progress: 0, message: null, started: now(), finished: null };
+  const emitStep = (step: TaskStep, progress: number) => {
+    const fields = typeof step === "string" ? { message: step } : step;
+    t = { ...t, ...fields, progress };
+    emitTask(t);
+  };
+  if (steps.length) emitStep(steps[0], 0);
+  else emitTask(t);
   const hold = taskHolds.get(kind);
   let i = 0;
   const end = () => {
@@ -587,7 +595,11 @@ function startTask(kind: string, title: string, steps: string[], finish: () => u
   const tick = () => {
     if (cancels.has(id)) { emitTask({ ...t, state: "canceled", message: "Canceled", finished: now(), error: { code: "canceled", message: "Canceled." } }); return; }
     i++;
-    if (i < steps.length) { emitTask({ ...t, progress: i / steps.length, message: steps[i] }); setTimeout(tick, stepMs); return; }
+    if (i < steps.length) {
+      emitStep(steps[i], i / steps.length);
+      setTimeout(tick, stepMs);
+      return;
+    }
     if (hold && !gateOf(hold.gate).open) { gateOf(hold.gate).waiters.push(() => setTimeout(end, 0)); return; }
     end();
   };
@@ -1121,7 +1133,7 @@ const server: ServerInstance = {
   wine: "ge:GE-Proton10-3", policy: "any", source: "kilnctl", remote: null,
 };
 const runningServer: ServerStatus = {
-  id: server.id, state: "running", pid: 5120, uptimeS: 3600, players: 0, kiln: "0.2.0-dev", installed: "0.2.0-dev+20261104.0f1ffa6",
+  id: server.id, state: "running", pid: 5120, uptimeS: 3600, lastStartS: 1, players: 0, kiln: "0.2.0-dev", installed: "0.2.0-dev+20261104.0f1ffa6",
   boot: { ...(bootExample as unknown as BootJson), side: "server" }, endpoint: endpointExample as unknown as AdminEndpoint,
 };
 /** One server the mock knows: its instance, its status, the status a start gives it (`running`), and the pids it uses. */
@@ -1183,6 +1195,19 @@ function mockSetServer(o: { running?: boolean; installed?: string | null }) {
   setServerStatus(rec, !(o.running ?? true)
     ? { ...stopped(runningServer), installed }
     : installed ? { ...runningServer, installed } : { ...runningServer, installed: null, kiln: null, boot: null, endpoint: null });
+}
+
+/** A start's lines with its named stages (Task.stage), as kiln_manage::server::run reports them. */
+function startStages(id: string, pid: number, world: string): TaskStep[] {
+  return [
+    { stage: "preparing", message: "checking the server folder and Kiln's setup" },
+    { stage: "wine", message: "GE-Proton10-3, prefix ready" },
+    { stage: "process", message: `started GE-Proton10-3 ./enshrouded_server.exe (wine pid ${pid}), output in /home/player/.local/state/kiln/${id}.run.log` },
+    { stage: "world", message: `[server] Loading world '${world}' (seed 1847)` },
+    { stage: "world", message: "[ecs] LoadEcsScene to Load" },
+    { stage: "world", message: "[streaming] 812 of 1490 chunks" },
+    { stage: "running", message: "[ecs] LoadEcsScene to Run" },
+  ];
 }
 
 // ---------------------------------------------------------------- handlers
@@ -1841,13 +1866,11 @@ const handlers: Record<string, Handler> = {
       if (mine !== rec.startSeq || rec.status.pid) return;
       setServerStatus(rec, { ...rec.status, state: "starting", pid, uptimeS: 0 });
     }, 1500);
-    return startTask("server_start", `Starting ${id}`, [
-      `started GE-Proton10-3 ./enshrouded_server.exe (wine pid ${pid}), output in /home/player/.local/state/kiln/${id}.run.log`,
-      "[Session] 'HostOnline' (up)!", `[server] Loading world '${rec.world}' (seed 1847)`, "[ecs] LoadEcsScene to Load", "[streaming] 812 of 1490 chunks",
-    ], () => {
+    const t0 = Date.now();
+    return startTask("server_start", `Starting ${id}`, startStages(id, pid, rec.world), () => {
       // stopped while it started: the process is gone before its world ran (run::wait_ready)
       if (mine !== rec.startSeq) reject("io", "the server exited before its world ran (exit code 0)");
-      setServerStatus(rec, { ...rec.running, pid, uptimeS: 0 });
+      setServerStatus(rec, { ...rec.running, pid, uptimeS: 0, lastStartS: Math.max(1, Math.round((Date.now() - t0) / 1000)) });
       return rec.status;
     }, 700);
   },
@@ -1863,10 +1886,14 @@ const handlers: Record<string, Handler> = {
   },
   server_restart: (a) => {
     const rec = srvOf(a);
-    return startTask("server_restart", `Restarting ${rec.inst.id}`, [`SIGINT -> pid ${rec.status.pid ?? rec.basePid}; waiting up to 60 s for the save`, `started GE-Proton10-3 ./enshrouded_server.exe (wine pid ${rec.basePid + 2})`, "[ecs] LoadEcsScene to Load"], () => {
-      setServerStatus(rec, { ...rec.running, pid: rec.basePid + 2, uptimeS: 0 });
+    const t0 = Date.now();
+    return startTask("server_restart", `Restarting ${rec.inst.id}`, [
+      { stage: "stopping", message: `SIGINT -> pid ${rec.status.pid ?? rec.basePid}; waiting up to 60 s for the save` },
+      ...startStages(rec.inst.id, rec.basePid + 2, rec.world),
+    ], () => {
+      setServerStatus(rec, { ...rec.running, pid: rec.basePid + 2, uptimeS: 0, lastStartS: Math.max(1, Math.round((Date.now() - t0) / 1000)) });
       return rec.status;
-    });
+    }, 300);
   },
   server_update: (a) => {
     const rec = srvOf(a);
