@@ -181,6 +181,28 @@ void other_side_mod_skipped(const std::string& dir) {
     check(rep.dump().find("\"result\":40") == std::string::npos, "its maxStack edit is not applied");
 }
 
+std::vector<stage::Env::DataFile> server_side(const Schema& schema) {
+    auto out = sections(schema);
+    for (auto& f : out) f.side = "server";
+    return out;
+}
+// R1c (recheck N1): on a game client Kiln.Host's registry order includes side "server" mods (RegistryHost's order resolves
+// with hosted server mods on by default), because a hosted world's server runs in the client process. With Kiln.Host's
+// order the stage decides by membership in that order only; the side check is for the folders' order (no .NET).
+void hosting_client_keeps_ordered_server_mods(const std::string& dir) {
+    TreeView view = world();
+    Files files;
+    stage::Env env = env_of(&view, &files, dir, &server_side);
+    env.side = "client";
+    stage::Runner r(std::move(env));
+    check(r.set_order(R"([{"mod":"bigmod","version":"2.0.0"},{"mod":"late","version":"1.0.0"}])") == KILN_OK, "set_order: Kiln.Host's order on a client with hosted server mods");
+    r.run({});
+    r.finish({});
+    const json rep = json::parse(files.report);
+    check(rep.dump().find("\"result\":160") != std::string::npos,
+          "the server mods Kiln.Host ordered apply on the client (maxStack x4 then x2 = 160); refused: " + rep["refused"].dump().substr(0, 400));
+}
+
 // R2: the id table of a build is written once, when it is missing; a later start with registry content (cache miss)
 // overwrites it with only the registries that start decoded.
 void id_table_overwritten(const std::string& dir) {
@@ -286,6 +308,7 @@ int main(int argc, char** argv) {
     const std::pair<const char*, std::function<void()>> groups[] = {
         {"R1 skipped_mod_data_applied", [&] { skipped_mod_data_applied(dir); }},
         {"R1b other_side_mod_skipped", [&] { other_side_mod_skipped(dir); }},
+        {"R1c hosting_client_keeps_ordered_server_mods", [&] { hosting_client_keeps_ordered_server_mods(dir); }},
         {"R2 id_table_overwritten", [&] { id_table_overwritten(dir); }},
         {"R3 submit_unbound_owner", [&] { submit_unbound_owner(dir); }},
         {"R4 worldload_ready_event", [&] { worldload_ready_event(dir); }},

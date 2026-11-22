@@ -481,11 +481,15 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn) {
     std::vector<Refusal> skipped;
     for (Env::DataFile& f : files) {
         // review finding 3 (ruling 2026-11-21): only mods Kiln.Host loaded on this side, in its order; the others are skipped
-        // and named (without .NET: the folders' order, and a mod for the other side is skipped)
-        const bool side_ok = f.side.empty() || f.side == "both" || f.side == d.env.side;
+        // and named. With Kiln.Host's order, membership decides alone: on a client it holds side "server" mods when hosted
+        // server mods are on, since a hosted world's server runs in this process (recheck N1). Without .NET (the folders'
+        // order), a mod for the other side is skipped.
         std::string why;
-        if (!side_ok) why = "the mod is for the " + f.side + " side, this is the " + d.env.side;
-        else if (d.meta.order_source == "kiln.host" && !loaded.count(f.mod)) why = "Kiln.Host did not load the mod on this side (not in its load order)";
+        if (d.meta.order_source == "kiln.host") {
+            if (!loaded.count(f.mod)) why = "Kiln.Host did not load the mod on this side (not in its load order)";
+        } else if (!(f.side.empty() || f.side == "both" || f.side == d.env.side)) {
+            why = "the mod is for the " + f.side + " side, this is the " + d.env.side;
+        }
         if (!why.empty()) {
             skipped.push_back({f.mod, f.rel, Stage::Alter, 0, f.rel + ": " + why + "; its registry section was not applied", ""});  // kiln.log: report_log
             continue;
