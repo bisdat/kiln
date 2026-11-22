@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "../block_ops.h"
+#include "../terrain_damage.h"
 #include <array>
 #include <cmath>
 #include <cstdio>
@@ -10,7 +11,10 @@ using namespace kb::blocks;
 namespace {
 using Key = std::tuple<int32_t,int32_t,int32_t>;
 std::map<Key,KilnVoxel> cells;
-int writes=0, reads=0; bool loaded=true, fail_write=false, unknown=false, unbreakable=false;
+int writes=0, reads=0,damage_calls=0; bool loaded=true, fail_write=false, unknown=false, unbreakable=false,deny=false;
+std::map<Key,uint8_t> damage;
+bool get_damage(void*,const int32_t* c,uint8_t,uint8_t* out){*out=damage[{c[0],c[1],c[2]}];return true;}
+bool add_damage(void*,const int32_t* c,uint8_t,uint8_t increment,double,uint8_t* out){++damage_calls;auto& d=damage[{c[0],c[1],c[2]}];d=static_cast<uint8_t>(std::min(255,static_cast<int>(d)+increment));*out=d;return true;}
 KilnResult read(void*,const int32_t* o,const uint32_t* d,KilnVoxel* out,size_t) {
     ++reads; if(!loaded) return KILN_ERR_UNAVAILABLE;
     size_t i=0; for(uint32_t z=0;z<d[2];++z) for(uint32_t y=0;y<d[1];++y) for(uint32_t x=0;x<d[0];++x)
@@ -20,7 +24,9 @@ KilnResult read(void*,const int32_t* o,const uint32_t* d,KilnVoxel* out,size_t) 
 bool facts(void*,uint8_t, int32_t* hardness,int32_t* health) { *hardness=unbreakable?5:2; *health=100; return true; }
 int32_t provenance(void*,const int32_t* o,KilnVoxel) { return unknown?-1:(o[0]==3?1:0); }
 KilnResult write(void*,const KilnBuildWrite* w,KilnBuildResult* r) {
-    ++writes; size_t i=0; for(uint32_t z=0;z<w->dims[2];++z) for(uint32_t y=0;y<w->dims[1];++y) for(uint32_t x=0;x<w->dims[0];++x,++i)
+    ++writes;if(deny){r->flags=KILN_BUILD_R_ZONE;return KILN_ERR_REVOKED;}
+    if(w->flags&KILN_BUILD_F_DRY_RUN){r->flags=KILN_BUILD_R_DRY_RUN;return KILN_OK;}
+    size_t i=0; for(uint32_t z=0;z<w->dims[2];++z) for(uint32_t y=0;y<w->dims[1];++y) for(uint32_t x=0;x<w->dims[0];++x,++i)
         if(w->mask[i] && (!fail_write || x==0)) cells[{w->origin[0]+x,w->origin[1]+y,w->origin[2]+z}]=w->cells[i];
     r->flags=KILN_BUILD_R_CHANGED|KILN_BUILD_R_VERIFIED; r->blocks_written=1;
     return fail_write?KILN_ERR_INTERNAL:KILN_OK;
@@ -83,7 +89,22 @@ int main() {
     check(break_box(s,&q,&r)==KILN_OK && r.removed==1 && r.excluded_cells==1,"raw material filter");q.materials[143/8]=0;
     cells[{0,0,0}]=cells[{1,0,0}]=KILN_VOXEL_MAKE(143,0);fail_write=true;
     check(break_box(s,&q,&r)==KILN_ERR_INTERNAL && r.removed==1 && (r.flags&KILN_BUILD_BREAK_R_MAY_HAVE_CHANGED),"partial writer fault reports actual readback and may-have-changed");fail_write=false;
-    q.dims[0]=4097;before=writes;
+    q=request();q.dims[0]=1;q.flags=0;q.damage[2]=50;cells.clear();cells[{0,0,0}]=KILN_VOXEL_MAKE(143,0);
+    s.damage_get=&get_damage;s.damage_add=&add_damage;s.mining_factor=1;
+    check(break_box(s,&q,&r)==KILN_OK && r.damaged==1 && r.removed==0 && damage[{0,0,0}]==127,"half-health hit accumulates native damage");
+    check(break_box(s,&q,&r)==KILN_OK && r.removed==0 && damage[{0,0,0}]==254,"damage floors each hit");
+    check(break_box(s,&q,&r)==KILN_OK && r.removed==1 && r.damaged==1,"255 damage clears through guarded writer");
+    cells[{0,0,0}]=KILN_VOXEL_MAKE(143,0);damage.clear();deny=true;int hits=damage_calls;
+    check(break_box(s,&q,&r)==KILN_ERR_REVOKED && r.refusal==KILN_BUILD_BLOCK_ZONE && damage_calls==hits,"policy preflight before every damage mutation");deny=false;
+    q.build_flags=KILN_BUILD_F_DRY_RUN;
+    check(break_box(s,&q,&r)==KILN_OK && damage_calls==hits && !(r.flags&KILN_BUILD_BREAK_R_MAY_HAVE_CHANGED),"dryrun never damages");q.build_flags=0;
+    cells[{0,0,0}]=KILN_VOXEL_MAKE(2,255);q.flags=KILN_BUILD_BREAK_TERRAIN;q.terrain_health_scale=250;
+    check(break_box(s,&q,&r)==KILN_OK && r.damaged==0 && damage_calls==hits,"caller terrain health scale changes threshold");
+    q.terrain_health_scale=1;q.damage[2]=100;
+    check(break_box(s,&q,&r)==KILN_OK && r.removed==1,"generic terrain damage uses caller threshold");
+    s.mining_factor=0;cells[{0,0,0}]=KILN_VOXEL_MAKE(143,0);q.flags=0;
+    check(break_box(s,&q,&r)==KILN_ERR_UNAVAILABLE,"missing mining scale refuses damage");s.mining_factor=1;
+    q=request();q.dims[0]=4097;before=writes;
     check(break_box(s,&q,&r)==KILN_ERR_INVALID_ARGUMENT && writes==before,"bounded box");q.dims[0]=4;
     q.damage[0]=-1;
     check(break_box(s,&q,&r)==KILN_ERR_INVALID_ARGUMENT,"negative damage rejected");q.damage[0]=0;
@@ -91,5 +112,22 @@ int main() {
     check(break_box(s,&q,&r)==KILN_ERR_INVALID_ARGUMENT,"unknown break flags rejected");q.flags&=~128u;
     q.build_flags=KILN_BUILD_F_UNLOADED;
     check(break_box(s,&q,&r)==KILN_ERR_INVALID_ARGUMENT,"unloaded breaking forbidden");
+    s=source();q=request();q.dims[0]=5;q.flags|=KILN_BUILD_BREAK_PROTECTED_SPHERE;
+    q.sphere_center={.25,.25,.25};q.sphere_radius=2;q.sphere_margin=.01;q.sphere_minimum=.25;
+    cells.clear();cells[{0,0,0}]=cells[{3,0,0}]=cells[{4,0,0}]=KILN_VOXEL_MAKE(143,0);
+    check(break_box(s,&q,&r)==KILN_OK && r.removed==1 && cells[{4,0,0}]!=0,"protected building shrinks whole sphere and spares player block beyond it");
+    cells[{0,0,0}]=KILN_VOXEL_MAKE(143,0);cells[{4,0,0}]=KILN_VOXEL_MAKE(2,255);q.flags|=KILN_BUILD_BREAK_TERRAIN;
+    check(break_box(s,&q,&r)==KILN_OK && r.removed==2,"terrain keeps original sphere when building sphere shrinks");
+    q.flags|=KILN_BUILD_BREAK_WORLD;cells[{4,0,0}]=KILN_VOXEL_MAKE(143,0);
+    check(break_box(s,&q,&r)==KILN_OK && r.removed==2,"WORLD bypasses protected building shrink");
+    TerrainDamage terrain;const std::array<int32_t,3> at{1,2,3};uint8_t accumulated=0;
+    check(terrain.add(100,at,2,127,20,accumulated) && accumulated==127,"terrain accumulator hit");
+    check(terrain.get(100+19000000000LL,at,2)==127,"terrain damage before expiry");
+    check(terrain.get(100+20000000000LL,at,2)==0,"terrain damage expires at caller duration");
+    terrain.add(100,at,2,127,10,accumulated);
+    check(terrain.get(200,at,3)==0,"material change forgets terrain health");
+    terrain.add(100,at,2,255,10,accumulated);terrain.clear();
+    check(terrain.get(101,at,2)==0,"world unload clears accumulated terrain health");
+    check(!terrain.add(INT64_MAX,at,2,1,20,accumulated),"expiry overflow refuses");
     std::printf("block ops: %d passed, %d failed\n",total-fail,fail);return fail?1:0;
 }

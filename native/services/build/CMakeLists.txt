@@ -13,3 +13,10 @@ target_compile_definitions(build-voxel-fault PRIVATE KILN_BUILD_HOLD_TEST_POINTS
 target_include_directories(build-voxel-fault PRIVATE "${CMAKE_SOURCE_DIR}/core/abi" "${KILN_ENGINE_DIR}" "${KILN_ENGINE_DIR}/include"
                                                      "${KILN_ENGINE_DIR}/tests" "${CMAKE_CURRENT_SOURCE_DIR}")
 set_target_properties(build-voxel-fault PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/tests")
+# Offline block policy and Windows engine-boundary tests. No game or world boot.
+add_executable(build-block-ops EXCLUDE_FROM_ALL tests/block_ops_test.cpp block_ops.cpp)
+add_executable(build-block-engine EXCLUDE_FROM_ALL tests/block_engine_win_test.cpp block_engine_win.cpp)
+foreach(test build-block-ops build-block-engine)
+    target_include_directories(${test} PRIVATE "${CMAKE_SOURCE_DIR}/core/abi")
+    set_target_properties(${test} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/tests")
+endforeach()

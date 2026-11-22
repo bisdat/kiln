@@ -639,7 +639,7 @@ const _: () = {
     assert!(core::mem::offset_of!(crate::services::kiln_build::KilnBuildBlockInfo, damage) == 32);
     assert!(core::mem::offset_of!(crate::services::kiln_build::KilnBuildBlockInfo, reserved) == 36);
     assert!(core::mem::offset_of!(crate::services::kiln_build::KilnBuildBlockInfo, center) == 40);
-    assert!(core::mem::size_of::<crate::services::kiln_build::KilnBuildBreak>() == 120);
+    assert!(core::mem::size_of::<crate::services::kiln_build::KilnBuildBreak>() == 184);
     assert!(core::mem::align_of::<crate::services::kiln_build::KilnBuildBreak>() == 8);
     assert!(core::mem::offset_of!(crate::services::kiln_build::KilnBuildBreak, size) == 0);
     assert!(core::mem::offset_of!(crate::services::kiln_build::KilnBuildBreak, flags) == 4);
@@ -652,6 +652,12 @@ const _: () = {
     assert!(core::mem::offset_of!(crate::services::kiln_build::KilnBuildBreak, actor) == 96);
     assert!(core::mem::offset_of!(crate::services::kiln_build::KilnBuildBreak, build_flags) == 100);
     assert!(core::mem::offset_of!(crate::services::kiln_build::KilnBuildBreak, origin_mod) == 104);
+    assert!(core::mem::offset_of!(crate::services::kiln_build::KilnBuildBreak, terrain_health_scale) == 120);
+    assert!(core::mem::offset_of!(crate::services::kiln_build::KilnBuildBreak, terrain_heal_seconds) == 128);
+    assert!(core::mem::offset_of!(crate::services::kiln_build::KilnBuildBreak, sphere_center) == 136);
+    assert!(core::mem::offset_of!(crate::services::kiln_build::KilnBuildBreak, sphere_radius) == 160);
+    assert!(core::mem::offset_of!(crate::services::kiln_build::KilnBuildBreak, sphere_margin) == 168);
+    assert!(core::mem::offset_of!(crate::services::kiln_build::KilnBuildBreak, sphere_minimum) == 176);
     assert!(core::mem::size_of::<crate::services::kiln_build::KilnBuildBreakResult>() == 136);
     assert!(core::mem::align_of::<crate::services::kiln_build::KilnBuildBreakResult>() == 8);
     assert!(core::mem::offset_of!(crate::services::kiln_build::KilnBuildBreakResult, size) == 0);

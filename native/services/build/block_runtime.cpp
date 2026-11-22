@@ -4,6 +4,9 @@
 #include "block_ops.h"
 #include "services/kiln_caps.h"
 #include <map>
+#include <limits>
+#include "terrain_damage.h"
+#include "services/kiln_settings.h"
 
 namespace kb {
 namespace {
@@ -11,8 +14,14 @@ uintptr_t building_config=0,terrain_config=0;
 int64_t hardness_offset=-1,health_offset=-1;
 bool metadata_on=false,provenance_on=false,provenance_faulted=false;
 BlockBaseFunctions base_functions;
+uintptr_t damage_get_fn=0,damage_add_fn=0;
+bool damage_on=false,damage_faulted=false,clock_valid=false;
+int64_t now_ns=0;uint32_t clock_tick=0;uint64_t damage_session=0;
+uintptr_t damage_world=0;
+blocks::TerrainDamage terrain_damage;
+const KilnSettingsApi* settings=nullptr;
 struct Context {
-    uintptr_t registry=0,editor=0;
+    uintptr_t registry=0,editor=0,damage_store=0;
     std::map<std::array<int32_t,3>,std::pair<bool,std::array<KilnVoxel,512>>> baked;
 };
 int32_t provenance(void* p,const int32_t* c,KilnVoxel current) {
@@ -54,9 +63,25 @@ bool metadata(void* p,uint8_t material,int32_t* h,int32_t* hp) {
     return c->registry && block_config_read(material>=128?building_config:terrain_config,c->registry,
         material>=128?static_cast<uint8_t>(material-128):material,hardness_offset,health_offset,h,hp);
 }
+bool damage_get(void* p,const int32_t* c,uint8_t material,uint8_t* out) {
+    if(!clock_valid || damage_faulted)return false;
+    if(material<128){*out=terrain_damage.get(now_ns,{c[0],c[1],c[2]},material);return true;}
+    const auto& ctx=*static_cast<Context*>(p);
+    if(!ctx.damage_store || !damage_on || c[0]<0 || c[1]<0 || c[2]<0)return false;
+    if(block_damage_read(damage_get_fn,ctx.damage_store,c,out))return true;
+    damage_faulted=true;F.write=false;set_detail("building damage read faulted; restart required");return false;
+}
+bool damage_add(void* p,const int32_t* c,uint8_t material,uint8_t amount,double expiry,uint8_t* out) {
+    if(!clock_valid || damage_faulted)return false;
+    if(material<128)return terrain_damage.add(now_ns,{c[0],c[1],c[2]},material,amount,expiry,*out);
+    const auto& ctx=*static_cast<Context*>(p);
+    if(!ctx.damage_store || !damage_on || c[0]<0 || c[1]<0 || c[2]<0)return false;
+    if(block_damage_apply(damage_add_fn,ctx.damage_store,now_ns,clock_tick,c,amount,out))return true;
+    damage_faulted=true;F.write=false;set_detail("building damage mutation faulted; restart required");return false;
+}
 KilnResult prepare(blocks::Source& src,Context& c,uint32_t& why) {
     if(!tick_thread()){why=KILN_BUILD_BLOCK_WRONG_THREAD;return KILN_ERR_WRONG_THREAD;}
-    if(provenance_faulted){why=KILN_BUILD_BLOCK_FAULTED;return KILN_ERR_UNAVAILABLE;}
+    if(provenance_faulted || damage_faulted){why=KILN_BUILD_BLOCK_FAULTED;return KILN_ERR_UNAVAILABLE;}
     if((why=session_reason())!=KILN_BUILD_BLOCK_NONE)return KILN_ERR_UNAVAILABLE;
     if(!F.read){why=KILN_BUILD_BLOCK_SYMBOL_MISSING;return KILN_ERR_UNAVAILABLE;}
     const auto* v=vox();if(!v){why=KILN_BUILD_BLOCK_NO_SESSION;return KILN_ERR_UNAVAILABLE;}
@@ -67,6 +92,18 @@ KilnResult prepare(blocks::Source& src,Context& c,uint32_t& why) {
         if(c.registry)src.metadata=&metadata;
     }
     if(provenance_on){c.editor=v->voxels;src.provenance=&provenance;}
+    if(damage_on && clock_valid) {
+        c.damage_store=g_api->singleton(server_world(),kstr("ServerVoxelDamageSystem"));
+        src.damage_get=&damage_get;
+        src.damage_forget=[](void*,const int32_t* cell,uint8_t material){if(material<128)terrain_damage.forget({cell[0],cell[1],cell[2]});};
+        if(c.damage_store && settings) {
+            uint32_t index=0;KilnSettingValue value{};
+            if(settings->find(kstr("miningDamageFactor"),&index)==KILN_OK && settings->get(index,&value)==KILN_OK &&
+               value.kind==KILN_SETTING_FLOAT && std::isfinite(value.number) && value.number>0 && value.number<=100) {
+                src.mining_factor=value.number;src.damage_add=&damage_add;
+            }
+        }
+    }
     return KILN_OK;
 }
 template<class T> KilnResult refused(T* out,KilnResult rc,uint32_t why) {
@@ -75,13 +112,29 @@ template<class T> KilnResult refused(T* out,KilnResult rc,uint32_t why) {
 void report(const char* name,bool qualified,const char* missing,bool session) {
     const auto* caps=static_cast<const KilnCapsApi*>(g_api->service(kstr(KILN_CAPS_SERVICE),1));
     if(!caps || caps->header.size<offsetof(KilnCapsApi,report)+sizeof(void*) || !caps->report)return;
-    uint32_t reason=provenance_faulted?KILN_CAP_REASON_FAULTED:qualified?(session?session_reason():0):KILN_BUILD_BLOCK_SYMBOL_MISSING;
+    uint32_t reason=(provenance_faulted || damage_faulted)?KILN_CAP_REASON_FAULTED:qualified?(session?session_reason():0):KILN_BUILD_BLOCK_SYMBOL_MISSING;
     uint32_t state=reason==KILN_BUILD_BLOCK_NO_SESSION?KILN_CAP_PENDING:reason?KILN_CAP_UNAVAILABLE:KILN_CAP_AVAILABLE;
-    const char* text=provenance_faulted?"baked-world read faulted; restart required; further world edits refused":!qualified?missing:reason==KILN_BUILD_BLOCK_WRONG_SIDE?"server authority only; ask the host or dedicated server":
+    const char* text=(provenance_faulted || damage_faulted)?"block engine state faulted; restart required; further world edits refused":!qualified?missing:reason==KILN_BUILD_BLOCK_WRONG_SIDE?"server authority only; ask the host or dedicated server":
         reason==KILN_BUILD_BLOCK_OFFLINE?"no game session provider in this process":
         reason==KILN_BUILD_BLOCK_NO_SESSION?"waiting for the running server world":"server tick only; loaded voxel cells";
     caps->report(g_owner,kstr(name),state,reason,kstr(text));
 }
+}
+void block_world_closed() {
+    terrain_damage.clear();damage_session=0;damage_world=0;clock_valid=false;
+    // Fault latches are process-wide: another hosted world cannot prove interrupted engine locks recovered.
+}
+void block_tick(const KilnTickInfo* tick) {
+    clock_valid=false;
+    if(!tick || tick->clock_period<=0 || tick->clock==UINT32_MAX ||
+       tick->clock>static_cast<uint64_t>(INT64_MAX/tick->clock_period))return;
+    KilnSessionInfo s{};s.size=sizeof s;
+    if(!g_api->session || g_api->session(&s)!=KILN_OK || !s.worlds[KILN_WORLD_SERVER] || !s.sessions[KILN_WORLD_SERVER]) {
+        block_world_closed();return;
+    }
+    if(damage_session!=s.sessions[KILN_WORLD_SERVER] || damage_world!=s.worlds[KILN_WORLD_SERVER])terrain_damage.clear();
+    damage_session=s.sessions[KILN_WORLD_SERVER];damage_world=s.worlds[KILN_WORLD_SERVER];
+    now_ns=tick->clock_period*static_cast<int64_t>(tick->clock);clock_tick=tick->clock;clock_valid=true;
 }
 void block_ready() {
     auto symbol=[&](const char* n,uintptr_t& p){return g_api->symbol(kstr(n),&p)==KILN_OK && p;};
@@ -98,10 +151,14 @@ void block_ready() {
         int64_t actual=-1;std::string name="build/base_column.";name+=entry.first;
         provenance_on=constant(name.c_str(),actual) && actual==entry.second && provenance_on;
     }
+    damage_on=g_api->feature(kstr("build.block_damage")) && symbol("build/VoxelDamageGet",damage_get_fn) &&
+        symbol("build/VoxelDamageAdd",damage_add_fn);
+    settings=static_cast<const KilnSettingsApi*>(g_api->service(kstr(KILN_SETTINGS_SERVICE),1));
+    if(!settings || settings->header.size<offsetof(KilnSettingsApi,get)+sizeof(void*) || !settings->get || !settings->find)settings=nullptr;
     // Mark session rows before mods load, including when their engine prerequisites are missing.
     const auto* caps=static_cast<const KilnCapsApi*>(g_api->service(kstr(KILN_CAPS_SERVICE),1));
     if(caps && caps->header.size>=offsetof(KilnCapsApi,report)+sizeof(void*) && caps->report)
-        for(const char* name:{"build.block_info","build.find_wall","build.break_building"})
+        for(const char* name:{"build.block_info","build.find_wall","build.break_building","build.break_damage"})
             caps->report(g_owner,kstr(name),KILN_CAP_PENDING,KILN_CAP_REASON_SESSION,kstr("waiting for the server world"));
     block_caps();
 }
@@ -111,7 +168,7 @@ void block_caps() {
     report("build.block_metadata",metadata_on,"qualified building/terrain material lookup or layout missing",false);
     report("build.block_provenance",provenance_on,"qualified baked-world cell reader missing",false);
     report("build.break_building",F.read && F.write && metadata_on,"qualified building metadata or writer missing",true);
-    report("build.break_damage",false,"qualified damage and crack-state writer missing",false);
+    report("build.break_damage",damage_on && settings,"qualified damage/crack-state writer or kiln.settings missing",true);
     report("build.break_drops",false,"qualified material drop/spawn path missing",false);
     report("build.break_terrain",F.read && F.write && metadata_on && provenance_on,"qualified provenance, metadata or guarded writer missing",false);
 }

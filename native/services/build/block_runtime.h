@@ -4,6 +4,10 @@
 namespace kb {
 void block_ready();
 void block_caps();
+void block_tick(const KilnTickInfo*);
+void block_world_closed();
+bool block_damage_read(uintptr_t function, uintptr_t store, const int32_t cell[3], uint8_t* out);
+bool block_damage_apply(uintptr_t function, uintptr_t store, int64_t now, uint32_t tick, const int32_t cell[3], uint8_t amount, uint8_t* out);
 KilnResult KILN_CALL block_at(KilnVec3, KilnBuildBlockInfo*);
 KilnResult KILN_CALL find_wall(KilnVec3, KilnVec3, uint32_t, KilnBuildBlockInfo*);
 KilnResult KILN_CALL break_box(const KilnBuildBreak*, KilnBuildBreakResult*);

@@ -44,13 +44,25 @@ int block_base_brick(const BlockBaseFunctions& f,uintptr_t editor,const int32_t 
                 if(field<uintptr_t>(h,0x20))reinterpret_cast<Release>(f.release)(field<uintptr_t>(h,0x10),field<uint32_t>(h,0x18));
             }__except(EXCEPTION_EXECUTE_HANDLER){result=-1;}
             __try {
-                auto* lock=field<volatile LONG*>(h,0);const auto mode=field<uint32_t>(h,8);
+                auto* lock=field<volatile LONG*>(h,0);const auto mode=field<uint8_t>(h,8);
                 if(lock && mode==1)InterlockedDecrement(lock);
                 else if(lock && mode==2)InterlockedExchangeAdd(lock,0x7fff0000);
             }__except(EXCEPTION_EXECUTE_HANDLER){result=-1;}
         }
     }
     return result;
+}
+bool block_damage_read(uintptr_t function,uintptr_t store,const int32_t cell[3],uint8_t* out) {
+    if(!function || !store || !cell || !out || cell[0]<0 || cell[1]<0 || cell[2]<0)return false;
+    using Fn=uint8_t (*)(uintptr_t,const uint32_t*);
+    const uint32_t c[3]={static_cast<uint32_t>(cell[0]),static_cast<uint32_t>(cell[1]),static_cast<uint32_t>(cell[2])};
+    __try{*out=reinterpret_cast<Fn>(function)(store,c);return true;}__except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+bool block_damage_apply(uintptr_t function,uintptr_t store,int64_t now,uint32_t tick,const int32_t cell[3],uint8_t amount,uint8_t* out) {
+    if(!function || !store || !cell || !out || now<0 || tick==UINT32_MAX || cell[0]<0 || cell[1]<0 || cell[2]<0)return false;
+    using Fn=uint8_t (*)(uintptr_t,int64_t,uint32_t,const uint32_t*,uint8_t);
+    const uint32_t c[3]={static_cast<uint32_t>(cell[0]),static_cast<uint32_t>(cell[1]),static_cast<uint32_t>(cell[2])};
+    __try{*out=reinterpret_cast<Fn>(function)(store,now,tick,c,amount);return true;}__except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 bool block_config_read(uintptr_t function,uintptr_t registry,uint8_t id,int64_t hardness_offset,
                        int64_t health_offset,int32_t* hardness,int32_t* health) {

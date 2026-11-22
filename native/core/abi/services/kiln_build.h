@@ -270,10 +270,11 @@ typedef struct KilnBuildBlockInfo {
 enum {
     KILN_BUILD_BREAK_INSTANT = 1u, KILN_BUILD_BREAK_DROPS = 2u,
     KILN_BUILD_BREAK_WORLD = 4u,  /* include natural and unknown-provenance BUILDINGS only */
-    KILN_BUILD_BREAK_TERRAIN = 8u /* include player-placed terrain only; natural/unknown terrain always spared */
+    KILN_BUILD_BREAK_TERRAIN = 8u, /* include player-placed terrain only; natural/unknown terrain always spared */
+    KILN_BUILD_BREAK_PROTECTED_SPHERE = 16u /* sphere selection, with building radius shrunk off protected cells */
 };
 enum {
-    KILN_BUILD_BREAK_R_MAY_HAVE_CHANGED = 1u, /* writer entered: a fault may leave partial commits; no rollback */
+    KILN_BUILD_BREAK_R_MAY_HAVE_CHANGED = 1u, /* damage mutator/writer entered: partial changes possible; no rollback */
     KILN_BUILD_BREAK_R_VERIFIED = 2u         /* removed is verified by readback; otherwise it is a lower bound */
 };
 typedef struct KilnBuildBreak {
@@ -287,6 +288,12 @@ typedef struct KilnBuildBreak {
     KilnEntity actor;
     uint32_t build_flags;       /* KILN_BUILD_F_* except UNLOADED/ALLOW_ALTARS; usual zone/base/persistence rules */
     KilnStr origin_mod;
+    double terrain_health_scale; /* material-health multiplier for accumulated terrain hits; 0 defaults to 1; (0,1e6] */
+    double terrain_heal_seconds; /* forget terrain damage after this inactivity; 0 defaults to 20; (0,86400] */
+    KilnVec3 sphere_center;      /* PROTECTED_SPHERE: metres; selection clips to the original sphere */
+    double sphere_radius;       /* >0; protection scan must fit 4096 cells, including sphere_margin */
+    double sphere_margin;       /* >=0; scan radius+margin, shrink building radius to nearest protected centre-margin */
+    double sphere_minimum;      /* >=0; skip buildings if shrunk radius is below this; terrain uses original sphere */
 } KilnBuildBreak;
 typedef struct KilnBuildBreakResult {
     uint32_t size, refusal, flags, reserved;
@@ -377,8 +384,11 @@ typedef struct KilnBuildApi {
 }
 static_assert(offsetof(KilnBuildApi, block_at) == 160 && offsetof(KilnBuildApi, find_wall) == 168 &&
                   offsetof(KilnBuildApi, break_box) == 176, "block rows append to kiln.build");
-static_assert(sizeof(KilnBuildBlockInfo) == 64 && sizeof(KilnBuildBreak) == 120 &&
-                  sizeof(KilnBuildBreakResult) == 136, "block records x64 layout");
+static_assert(sizeof(KilnBuildBlockInfo) == 64 && sizeof(KilnBuildBreak) == 184 &&
+                  sizeof(KilnBuildBreakResult) == 136 && offsetof(KilnBuildBreak, terrain_health_scale) == 120 &&
+                  offsetof(KilnBuildBreak, terrain_heal_seconds) == 128 && offsetof(KilnBuildBreak, sphere_center) == 136 &&
+                  offsetof(KilnBuildBreak, sphere_radius) == 160 && offsetof(KilnBuildBreak, sphere_margin) == 168 &&
+                  offsetof(KilnBuildBreak, sphere_minimum) == 176, "block records x64 layout");
 static_assert(offsetof(KilnBuildApi, terrain_budget_charge) == 144, "kiln.build v1 ends its dev.29 members at 152");
 static_assert(offsetof(KilnBuildApi, grid_for_session) == 152 && sizeof(KilnBuildApi) == 184,
               "grid_for_session stays at 152 (table 184 bytes, x64)");

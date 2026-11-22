@@ -42,6 +42,9 @@ KilnResult read_info(const Source& s,const int32_t c[3],KilnBuildBlockInfo& b) {
             }
         }
         if(s.provenance) b.provenance=s.provenance(s.context,c,v);
+        if(s.damage_get) {
+            uint8_t damage=0;if(s.damage_get(s.context,c,static_cast<uint8_t>(b.material),&damage))b.damage=damage;
+        }
     }
     return KILN_OK;
 }
@@ -91,7 +94,7 @@ KilnResult break_box(const Source& s,const KilnBuildBreak* q,KilnBuildBreakResul
     if(!out || out->size<sizeof *out)return KILN_ERR_INVALID_ARGUMENT;
     KilnBuildBreakResult r{};r.size=out->size;r.write.size=sizeof r.write;
     auto fail=[&](KilnResult rc,uint32_t why){r.refusal=why;*out=r;return rc;};
-    if(!q || q->size<sizeof *q || (q->flags&~15u) ||
+    if(!q || q->size<sizeof *q || (q->flags&~31u) ||
        (q->build_flags&~(KILN_BUILD_F_RESPECT_ZONES|KILN_BUILD_F_IN_BASES|KILN_BUILD_F_DRY_RUN|KILN_BUILD_F_TRANSIENT)))
         return fail(KILN_ERR_INVALID_ARGUMENT,KILN_BUILD_BLOCK_INVALID);
     uint64_t count=1;
@@ -103,9 +106,14 @@ KilnResult break_box(const Source& s,const KilnBuildBreak* q,KilnBuildBreakResul
     }
     if(count>4096)return fail(KILN_ERR_INVALID_ARGUMENT,KILN_BUILD_BLOCK_INVALID);
     for(auto d:q->damage)if(d<0 || d>100000)return fail(KILN_ERR_INVALID_ARGUMENT,KILN_BUILD_BLOCK_INVALID);
-    // Unqualified damage/crack and drop seams are never simulated by raw writes. Terrain uses the same guarded
-    // exact-cell writer as buildings, but always needs qualified baked-world provenance, even with WORLD.
-    if(!(q->flags&KILN_BUILD_BREAK_INSTANT) || (q->flags&KILN_BUILD_BREAK_DROPS) ||
+    if(!std::isfinite(q->terrain_health_scale) || q->terrain_health_scale<0 || q->terrain_health_scale>1e6 ||
+       !std::isfinite(q->terrain_heal_seconds) || q->terrain_heal_seconds<0 || q->terrain_heal_seconds>86400)
+        return fail(KILN_ERR_INVALID_ARGUMENT,KILN_BUILD_BLOCK_INVALID);
+    const bool instant=(q->flags&KILN_BUILD_BREAK_INSTANT)!=0;
+    const bool damage_ready=s.damage_get && s.damage_add && std::isfinite(s.mining_factor) && s.mining_factor>0 && s.mining_factor<=100;
+    // Drops have no qualified grant path. Terrain uses the same guarded exact-cell writer as buildings,
+    // but always needs qualified baked-world provenance, even with WORLD.
+    if((!instant && !damage_ready) || (q->flags&KILN_BUILD_BREAK_DROPS) ||
        !s.metadata || !s.read || !s.write ||
        ((!(q->flags&KILN_BUILD_BREAK_WORLD) || (q->flags&KILN_BUILD_BREAK_TERRAIN)) && !s.provenance))
         return fail(KILN_ERR_UNAVAILABLE,KILN_BUILD_BLOCK_SYMBOL_MISSING);
@@ -113,10 +121,60 @@ KilnResult break_box(const Source& s,const KilnBuildBreak* q,KilnBuildBreakResul
     auto rc=s.read(s.context,q->origin,q->dims,before.data(),before.size());
     if(rc!=KILN_OK)return fail(rc,rc==KILN_ERR_INTERNAL?KILN_BUILD_BLOCK_FAULTED:KILN_BUILD_BLOCK_NOT_LOADED);
     after=before;bool filtered=false;for(auto m:q->materials)filtered|=m!=0;
+    bool default_damage=true;for(auto d:q->damage)default_damage&=d==0;
+    const int32_t defaults[5]={100,100,95,60,50};
+    std::vector<uint8_t> increments(count,0);
+    const bool sphere=(q->flags&KILN_BUILD_BREAK_PROTECTED_SPHERE)!=0;
+    double building_radius=q->sphere_radius;
+    if(sphere) {
+        int32_t center_cell[3];
+        if(!cell(s,q->sphere_center,center_cell) || !std::isfinite(q->sphere_radius) || q->sphere_radius<=0 ||
+           !std::isfinite(q->sphere_margin) || q->sphere_margin<0 || !std::isfinite(q->sphere_minimum) || q->sphere_minimum<0)
+            return fail(KILN_ERR_INVALID_ARGUMENT,KILN_BUILD_BLOCK_INVALID);
+        if(!(q->flags&KILN_BUILD_BREAK_WORLD)) {
+            const double reach=q->sphere_radius+q->sphere_margin;int32_t lo[3],hi[3];
+            if(!cell(s,{q->sphere_center.x-reach,q->sphere_center.y-reach,q->sphere_center.z-reach},lo) ||
+               !cell(s,{q->sphere_center.x+reach,q->sphere_center.y+reach,q->sphere_center.z+reach},hi))
+                return fail(KILN_ERR_INVALID_ARGUMENT,KILN_BUILD_BLOCK_INVALID);
+            uint32_t dims[3];uint64_t n=1;
+            for(int a=0;a<3;++a) {
+                const int64_t d=static_cast<int64_t>(hi[a])-lo[a]+1;
+                if(d<=0 || d>4096)return fail(KILN_ERR_INVALID_ARGUMENT,KILN_BUILD_BLOCK_INVALID);
+                dims[a]=static_cast<uint32_t>(d);n*=dims[a];
+                if(n>4096)return fail(KILN_ERR_INVALID_ARGUMENT,KILN_BUILD_BLOCK_INVALID);
+            }
+            std::vector<KilnVoxel> nearby(n);
+            if(s.read(s.context,lo,dims,nearby.data(),nearby.size())!=KILN_OK)
+                return fail(KILN_ERR_UNAVAILABLE,KILN_BUILD_BLOCK_NOT_LOADED);
+            double nearest=reach+1;size_t j=0;
+            // EMF's shrink_off_world, block_rules.cpp:71-92: protection sees the full r+margin sphere, independent
+            // of the edit mask; only configured/material-selected breakable buildings participate.
+            for(uint32_t z=0;z<dims[2];++z)for(uint32_t y=0;y<dims[1];++y)for(uint32_t x=0;x<dims[0];++x,++j) {
+                const auto m=KILN_VOXEL_MATERIAL(nearby[j]);
+                if(m<128 || (filtered && !(q->materials[m/8]&(1u<<(m%8)))))continue;
+                int32_t h=-1,hp=-1;
+                if(!s.metadata(s.context,m,&h,&hp) || h<0 || h>=5 || hp<0 ||
+                   (!instant && (hp==0 || (!default_damage && q->damage[h]==0))))continue;
+                const int32_t c[3]={lo[0]+static_cast<int32_t>(x),lo[1]+static_cast<int32_t>(y),lo[2]+static_cast<int32_t>(z)};
+                const double distance=std::hypot(s.origin[0]+(c[0]+.5)*s.cell_size-q->sphere_center.x,
+                    s.origin[1]+(c[1]+.5)*s.cell_size-q->sphere_center.y,s.origin[2]+(c[2]+.5)*s.cell_size-q->sphere_center.z);
+                if(distance<=reach && distance<nearest && s.provenance(s.context,c,nearby[j])!=0)nearest=distance;
+            }
+            if(nearest<=reach)building_radius=std::min(building_radius,nearest-q->sphere_margin);
+        }
+        if(building_radius<q->sphere_minimum)building_radius=0;
+    }
     size_t i=0;uint64_t selected=0;
     for(uint32_t z=0;z<q->dims[2];++z)for(uint32_t y=0;y<q->dims[1];++y)for(uint32_t x=0;x<q->dims[0];++x,++i) {
         if((q->selection && !q->selection[i]) || kind(before[i])==KILN_BUILD_BLOCK_AIR)continue;
         ++r.considered;const uint8_t m=KILN_VOXEL_MATERIAL(before[i]);
+        if(sphere) {
+            const double radius=m>=128?building_radius:q->sphere_radius;
+            const double distance=std::hypot(s.origin[0]+(static_cast<double>(q->origin[0])+x+.5)*s.cell_size-q->sphere_center.x,
+                s.origin[1]+(static_cast<double>(q->origin[1])+y+.5)*s.cell_size-q->sphere_center.y,
+                s.origin[2]+(static_cast<double>(q->origin[2])+z+.5)*s.cell_size-q->sphere_center.z);
+            if(radius<=0 || distance>radius){++r.excluded_cells;continue;}
+        }
         if((m<128 && !(q->flags&KILN_BUILD_BREAK_TERRAIN)) || (filtered && !(q->materials[m/8]&(1u<<(m%8))))) {++r.excluded_cells;continue;}
         int32_t h=-1,hp=-1;
         if(!s.metadata(s.context,m,&h,&hp) || h<0 || h>5 || hp<0){++r.unknown_cells;continue;}
@@ -126,12 +184,44 @@ KilnResult break_box(const Source& s,const KilnBuildBreak* q,KilnBuildBreakResul
             const auto p=s.provenance(s.context,c,before[i]);
             if(p!=0){if(p==1)++r.protected_cells;else ++r.unknown_cells;continue;}
         }
+        if(!instant) {
+            const double scale=m<128?(q->terrain_health_scale==0?1:q->terrain_health_scale):1;
+            const int32_t hit=default_damage?defaults[h]:q->damage[h];
+            if(hp<=0 || hit==0)continue;
+            increments[i]=static_cast<uint8_t>(std::floor(255*std::min(1.0,hit*s.mining_factor/(hp*scale))));
+            if(!increments[i])continue;
+        }
         mask[i]=1;after[i]=KILN_VOXEL_AIR;++selected;
     }
     if(!selected){r.flags=KILN_BUILD_BREAK_R_VERIFIED;*out=r;return KILN_OK;}
     KilnBuildWrite w{};w.size=sizeof w;w.flags=q->build_flags;w.cells=after.data();w.mask=mask.data();
     std::memcpy(w.origin,q->origin,sizeof w.origin);std::memcpy(w.dims,q->dims,sizeof w.dims);
     w.actor=q->actor;w.origin_mod=q->origin_mod;
+    if(!instant) {
+        w.flags|=KILN_BUILD_F_DRY_RUN;
+        rc=s.write(s.context,&w,&r.write);
+        if(rc!=KILN_OK) {
+            if(r.write.flags&KILN_BUILD_R_ZONE)return fail(rc,KILN_BUILD_BLOCK_ZONE);
+            if(r.write.flags&KILN_BUILD_R_BASE)return fail(rc,KILN_BUILD_BLOCK_BASE);
+            return fail(rc,(r.write.flags&KILN_BUILD_R_NOT_LOADED)?KILN_BUILD_BLOCK_NOT_LOADED:KILN_BUILD_BLOCK_NO_SESSION);
+        }
+        if(q->build_flags&KILN_BUILD_F_DRY_RUN){*out=r;return KILN_OK;}
+        r.write={};r.write.size=sizeof r.write;w.flags=q->build_flags;
+        selected=0;i=0;
+        for(uint32_t z=0;z<q->dims[2];++z)for(uint32_t y=0;y<q->dims[1];++y)for(uint32_t x=0;x<q->dims[0];++x,++i) {
+            if(!mask[i])continue;
+            const int32_t c[3]={q->origin[0]+static_cast<int32_t>(x),q->origin[1]+static_cast<int32_t>(y),q->origin[2]+static_cast<int32_t>(z)};
+            uint8_t old_damage=0,new_damage=0;const auto m=KILN_VOXEL_MATERIAL(before[i]);
+            if(!s.damage_get(s.context,c,m,&old_damage))return fail(KILN_ERR_INTERNAL,KILN_BUILD_BLOCK_FAULTED);
+            r.flags|=KILN_BUILD_BREAK_R_MAY_HAVE_CHANGED;
+            if(!s.damage_add(s.context,c,m,increments[i],q->terrain_heal_seconds==0?20:q->terrain_heal_seconds,&new_damage))
+                return fail(KILN_ERR_INTERNAL,KILN_BUILD_BLOCK_FAULTED);
+            if(new_damage>old_damage)++r.damaged;
+            mask[i]=new_damage==255?1:0;
+            if(mask[i])++selected;
+        }
+        if(!selected){r.flags|=KILN_BUILD_BREAK_R_VERIFIED;*out=r;return KILN_OK;}
+    }
     rc=s.write(s.context,&w,&r.write);
     if(r.write.flags&KILN_BUILD_R_DRY_RUN){*out=r;return rc;}
     if(rc==KILN_ERR_REVOKED) return fail(rc,(r.write.flags&KILN_BUILD_R_ZONE)?KILN_BUILD_BLOCK_ZONE:KILN_BUILD_BLOCK_BASE);
@@ -140,11 +230,19 @@ KilnResult break_box(const Source& s,const KilnBuildBreak* q,KilnBuildBreakResul
     r.flags|=KILN_BUILD_BREAK_R_MAY_HAVE_CHANGED;
     // Count only what really became air, even after a fault. A writer's cells_changed may be merely planned.
     if(s.read(s.context,q->origin,q->dims,back.data(),back.size())==KILN_OK) {
-        for(size_t j=0;j<count;++j)if(mask[j] && kind(back[j])==KILN_BUILD_BLOCK_AIR)++r.removed;
+        for(size_t j=0;j<count;++j)if(mask[j] && kind(back[j])==KILN_BUILD_BLOCK_AIR) {
+            ++r.removed;
+            if(s.damage_forget) {
+                const auto x=j%q->dims[0],y=(j/q->dims[0])%q->dims[1],z=j/(static_cast<size_t>(q->dims[0])*q->dims[1]);
+                const int32_t c[3]={q->origin[0]+static_cast<int32_t>(x),q->origin[1]+static_cast<int32_t>(y),q->origin[2]+static_cast<int32_t>(z)};
+                s.damage_forget(s.context,c,KILN_VOXEL_MATERIAL(before[j]));
+            }
+        }
         r.flags|=KILN_BUILD_BREAK_R_VERIFIED;
     }
     if(rc!=KILN_OK)return fail(rc,KILN_BUILD_BLOCK_FAULTED);
     if(!(r.flags&KILN_BUILD_BREAK_R_VERIFIED) || r.removed!=selected)return fail(KILN_ERR_INTERNAL,KILN_BUILD_BLOCK_UNVERIFIED);
-    r.damaged=r.removed;*out=r;return KILN_OK;
+    if(instant)r.damaged=r.removed;
+    *out=r;return KILN_OK;
 }
 } // namespace kb::blocks

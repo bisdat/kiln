@@ -22,6 +22,8 @@ uint8_t seek(uint8_t* h,uint32_t){h-=0x30;h[0x80]=uniform;put(h,0x68,&material);
 struct Span {void* data;uint64_t count;};
 void* decode(uint8_t* result,Span* out,Span*){auto* p=static_cast<uint16_t*>(out->data);for(unsigned i=0;i<512;++i)p[i]=static_cast<uint16_t>(i);result[0]=decode_ok?0:1;return result;}
 void release(uintptr_t loader,uint32_t id){if(loader==123 && id==7)++releases;}
+uint8_t damage_get(uintptr_t store,const uint32_t* c){return store==123 && c[0]==1 && c[1]==2 && c[2]==3?127:0;}
+uint8_t damage_add(uintptr_t store,int64_t now,uint32_t tick,const uint32_t* c,uint8_t amount){return store==123 && now==500 && tick==30 && c[0]==1 && amount==128?255:0;}
 }
 int main(){
     int total=0,failed=0;auto check=[&](bool ok,const char* name){++total;if(!ok){++failed;std::printf("FAIL %s\n",name);}};
@@ -45,5 +47,10 @@ int main(){
     decode_ok=false;check(kb::block_base_brick(f,123,brick,voxels)==0 && lock_count==0,"decoder failure unknown with balanced release");decode_ok=true;
     brick[1]=-1;check(kb::block_base_brick(f,123,brick,voxels)==1 && voxels[0]==0xff01,"negative y sentinel");brick[1]=2;
     brick[0]=-1;check(kb::block_base_brick(f,123,brick,voxels)==0,"negative x unknown");brick[0]=1;
+    uint8_t d=0;int32_t c[3]={1,2,3};
+    check(kb::block_damage_read(reinterpret_cast<uintptr_t>(&damage_get),123,c,&d) && d==127,"native damage getter cell order");
+    check(kb::block_damage_apply(reinterpret_cast<uintptr_t>(&damage_add),123,500,30,c,128,&d) && d==255,"native damage add clock and argument order");
+    c[0]=-1;check(!kb::block_damage_apply(reinterpret_cast<uintptr_t>(&damage_add),123,500,30,c,128,&d),"negative damage cell refused before native call");
+    c[0]=1;check(!kb::block_damage_apply(reinterpret_cast<uintptr_t>(&fault),123,500,30,c,128,&d),"damage mutation fault contained");
     std::printf("block engine: %d passed, %d failed\n",total-failed,failed);return failed?1:0;
 }

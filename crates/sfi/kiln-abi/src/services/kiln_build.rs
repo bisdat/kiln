@@ -21,6 +21,7 @@ pub const KILN_BUILD_BLOCK_WRONG_THREAD: i32 = 17;
 pub const KILN_BUILD_BLOCK_ZONE: i32 = 19;
 pub const KILN_BUILD_BREAK_DROPS: i32 = 2;
 pub const KILN_BUILD_BREAK_INSTANT: i32 = 1;
+pub const KILN_BUILD_BREAK_PROTECTED_SPHERE: i32 = 16;
 pub const KILN_BUILD_BREAK_R_MAY_HAVE_CHANGED: i32 = 1;
 pub const KILN_BUILD_BREAK_R_VERIFIED: i32 = 2;
 pub const KILN_BUILD_BREAK_TERRAIN: i32 = 8;
@@ -228,6 +229,12 @@ pub struct KilnBuildBreak {
     pub actor: KilnEntity,
     pub build_flags: u32,
     pub origin_mod: KilnStr,
+    pub terrain_health_scale: f64,
+    pub terrain_heal_seconds: f64,
+    pub sphere_center: KilnVec3,
+    pub sphere_radius: f64,
+    pub sphere_margin: f64,
+    pub sphere_minimum: f64,
 }
 
 #[repr(C)]

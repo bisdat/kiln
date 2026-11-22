@@ -338,6 +338,7 @@ const KilnBuildApi kTable = {
 
 void KILN_CALL on_pre(const KilnTickInfo* tick, void*) {
     ++g_steps;
+    block_tick(tick);
     block_caps();
     if (!server_world()) return;
     g_terrain_budget.begin(tick ? tick->step : g_steps);

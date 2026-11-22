@@ -810,9 +810,15 @@
             "origin_mod": 104,
             "reserved": 52,
             "selection": 88,
-            "size": 0
+            "size": 0,
+            "sphere_center": 136,
+            "sphere_margin": 168,
+            "sphere_minimum": 176,
+            "sphere_radius": 160,
+            "terrain_heal_seconds": 128,
+            "terrain_health_scale": 120
           },
-          "size": 120
+          "size": 184
         },
         "KilnBuildBreakResult": {
           "align": 8,
@@ -967,7 +973,7 @@
           "size": 72
         }
       },
-      "sha256": "c8fddd0060250b184de699b03099b72848fce0664552cf8e962687d6c8adbcf5"
+      "sha256": "13b8b3bed188b600deb74e8b407f43338f7f6da14b04dee12ca8e9ecf4566db4"
     },
     "native/core/abi/services/kiln_capacity.h": {
       "function_macros": [],
@@ -8511,13 +8517,13 @@
   },
   "outputs": {
     "src/bindings.rs": "134028a6a9914076cab3f71f98d356141d4fe36c4d7f51bac6a11819501ed935",
-    "src/layout.rs": "9853d10c3da56f24891454157617c75891d81ff9531bce3eb4016469e0eac528",
+    "src/layout.rs": "965470ff1cc7e5ea8cd60880ade63ff375042b08ca9eed25b8b81c7b7c3d121b",
     "src/services/kiln_abilities.rs": "06a43042e5c96d6261a17b02eab35463b07a8ad83f63b2bb168bca5ff34e582e",
     "src/services/kiln_assets.rs": "e7fe4eb1c4d53ad31eeaf05be06f41c551a49362ad5bd4174465ec18a03effe0",
     "src/services/kiln_assets_vfx.rs": "90ed8ce5ad512bbf4f002db3277bc3b439d648ca437a58d4477eac4ce46c3b81",
     "src/services/kiln_audio.rs": "52a49e9a14975f3abecbe7200bb2dce40c0af7fd54f50faf7890befe559d8d7c",
     "src/services/kiln_boot.rs": "0b39658851db27fcdc6b7b5345ebd269fedaed2e7f837df0dd00be2e17ef501d",
-    "src/services/kiln_build.rs": "f877a3141ad3bf26df1915ecb7e5924883a00e8ee76397ce3e4a6097510dd2c0",
+    "src/services/kiln_build.rs": "c66c6dfabec060ac660415ee5e7f5ae01fd97986f9f95ebb24eb35b501b7e35b",
     "src/services/kiln_capacity.rs": "1fce521cbd490bd4f58c65e527a9c668067d9f909420b7f3d8713b3216af92f5",
     "src/services/kiln_caps.rs": "98d4b069c4331afcbbdfcadee61e85920bc25cce16fd3134c4b5c5e74fe58c44",
     "src/services/kiln_chat.rs": "79e3b08c8c6678ece24cdbfd1cc62011acf5501a5185f4b323db61e459c0b4e7",
