@@ -399,7 +399,7 @@ internal static class UiRuntime
             var shown = p.When?.Test(Value) ?? true;
             // a hidden line's condition still asks for its live values, or it could never become true
             var want = (p.When?.World ?? UiWorldFields.None) | (shown ? p.Text.Bindings.Aggregate(UiWorldFields.None, (f, b) => f | b.World) : UiWorldFields.None);
-            if (want != h.Demanded)
+            if (want != h.Demanded || h.Demand is { Ok: false })  // changed, or refused before (a mod at its budget): ask again
             {
                 Interlocked.Exchange(ref h.Demand, null)?.Dispose();
                 h.Demanded = want;

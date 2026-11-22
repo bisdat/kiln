@@ -199,6 +199,7 @@ internal sealed class WindowRuntime : IDisposable
     private volatile Dictionary<string, ImmutableHashSet<string>> _domains = new(StringComparer.Ordinal);
     private readonly Dictionary<string, (UiImage? Image, string? Problem, Action Release)> _images = new(StringComparer.Ordinal);
     private UiDemandRegistration? _demand;
+    private long _demandRetryAt;
 
     private sealed class Widget
     {
@@ -307,7 +308,12 @@ internal sealed class WindowRuntime : IDisposable
             Interlocked.Exchange(ref _demand, null)?.Dispose();
             return;
         }
-        if (_demand != null) return;
+        if (_demand is { Ok: true }) return;
+        // none yet, or refused (a mod at its demand budget): ask again, at most once a second
+        var now = UiRuntime.Clock();
+        if (_demand != null && now < _demandRetryAt) return;
+        _demandRetryAt = now + 1000;
+        Interlocked.Exchange(ref _demand, null)?.Dispose();
         try { _demand = UiWorldSource.Demand(Plan.Mod, want); }
         catch (Exception e) when (e is not OutOfMemoryException) { BlocksBridge.Log(LogLevel.Warn, $"blocks: {Plan.Mod}: ui: window {Plan.Name}: live values: {e.Message}"); }
     }

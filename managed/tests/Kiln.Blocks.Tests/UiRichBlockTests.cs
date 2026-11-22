@@ -768,6 +768,33 @@ public sealed class UiRichBlockTests : IDisposable
         Assert.True(w.HasDemand);
     }
 
+    [Fact]
+    public void A_refused_demand_is_asked_again_at_the_next_refresh()
+    {
+        // a mod at its 64-demand budget gets Budget; once others go, the open window and the HUD line ask again (review S7)
+        var refuse = true;
+        UiWorldSource.Demand = (mod, f) =>
+        {
+            if (refuse) return new UiDemandRegistration(false, "Budget", 0, null);
+            var e = (mod, f);
+            _demands.Add(e);
+            return new UiDemandRegistration(true, null, 1, () => _demands.Remove(e));
+        };
+        Define("w", Json<WindowBlock>(RichJson));
+        Define("hp", new HudLineBlock { Text = "HP {world.local.health}", Refresh = 0.1 });
+        var w = Open();
+        _now += 1000;
+        UiRuntime.Pump();
+        Assert.False(w.HasDemand);
+        Assert.Empty(_demands);
+        refuse = false;
+        _now += 1000;
+        UiRuntime.Pump();
+        Assert.True(w.HasDemand);
+        Assert.Contains(_demands, d => d.Fields == UiWorldFields.LocalInventory);
+        Assert.Contains(_demands, d => d.Fields == UiWorldFields.LocalVitals);
+    }
+
     // ---- pictures --------------------------------------------------------------------------------------------------
 
     private static byte[] Png(uint w, uint h)
