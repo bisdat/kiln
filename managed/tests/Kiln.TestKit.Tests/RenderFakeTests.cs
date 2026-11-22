@@ -3,6 +3,7 @@
 // requests as recorded, the rules of the next step (priority then newest, the game's highlight and the player's setting,
 // an entity without a model, two colours and a shared third, durations on virtual time), Despawn, EndWorld, SetState,
 // ClearOutlines and the row a test switches off.
+using System.Runtime.InteropServices;
 using Xunit;
 
 namespace Kiln.TestKit.Tests;
@@ -184,6 +185,34 @@ public sealed unsafe class RenderFakeTests
         Assert.Throws<ArgumentException>(() => kiln.Run(() => Ui.World.Outline(EntityId.None)));
         Assert.Empty(kiln.Outlines.All);
     }
+    // Copied unchanged from the RenderNative.OutlineInfo shipped with mod API 0.2.13, not today's managed mirror.
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ReleasedOutlineInfo013
+    {
+        public uint Size, State, Reason, Entity, Group, Merged;
+    }
+
+    [Fact]
+    public void The_released_managed_outline_record_works_with_only_four_byte_alignment()
+    {
+        using var kiln = new KilnHarness(); kiln.Step();
+        var table = (nint*)KitBackend.Instance.Service("kiln.render", 1);
+        uint* options = stackalloc uint[6] { 24, Color.Green.Rgba, 0, 0, 0, 0 };
+        ulong handle = 0;
+        Assert.Equal(0, ((delegate* unmanaged[Cdecl]<ulong, uint, void*, ulong*, int>)table[14])(1, Chest.Value, options, &handle));
+        byte* storage = stackalloc byte[96];
+        byte* aligned = (byte*)(((nuint)storage + 7) & ~(nuint)7);
+        new Span<byte>(aligned, 80).Fill(0xA5);
+        var legacy = (ReleasedOutlineInfo013*)(aligned + 4);
+        legacy->Size = (uint)sizeof(ReleasedOutlineInfo013);
+        Assert.Equal(24u, legacy->Size);
+        Assert.Equal((nuint)4, (nuint)legacy % 8);
+        Assert.Equal(0, ((delegate* unmanaged[Cdecl]<ulong, ReleasedOutlineInfo013*, int>)table[15])(handle, legacy));
+        Assert.Equal((24u, Chest.Value, 0u, 1u), (legacy->Size, legacy->Entity, legacy->State, legacy->Reason));
+        for (var i = 0; i < 4; i++) Assert.Equal((byte)0xA5, aligned[i]);
+        for (var i = 28; i < 80; i++) Assert.Equal((byte)0xA5, aligned[i]);
+    }
+
     [Theory]
     [InlineData(24u)]
     [InlineData(32u)]

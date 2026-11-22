@@ -454,6 +454,14 @@ public sealed unsafe class WorldOutlineTests : IDisposable
     }
 
     [Fact]
+    public void Silhouette_support_tolerates_a_table_without_an_optional_status_probe()
+    {
+        PrepareSilhouettes([Ui.World.OutlineCapability, Ui.World.ThroughWallsCapability]);
+        FakeUiTable.Table->Base.Base.Base.Status = null;
+        Assert.True(UiCaps.ThroughWallsState().Ok);
+    }
+
+    [Fact]
     public void Silhouette_support_is_refused_when_overlay_drawing_is_explicitly_off()
     {
         PrepareSilhouettes([Ui.World.OutlineCapability, Ui.World.ThroughWallsCapability]);
