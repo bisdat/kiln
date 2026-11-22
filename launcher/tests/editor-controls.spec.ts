@@ -16,7 +16,12 @@ async function disk(page: Page) {
 }
 async function save(page: Page) {
   await page.getByRole("button", { name: "Save", exact: true }).click();
-  await expect(page.locator(".ke .k-page-sub")).not.toContainText("Changes not saved");
+  await expect.poll(() => page.evaluate(async () => {
+    const path = "/src/editor/kiln/session.js";
+    const { useSession } = await import(path);
+    const { saving, dirty } = useSession.getState();
+    return { saving, dirty };
+  })).toEqual({ saving: false, dirty: false });
 }
 
 test("clearing 120 and typing 250 persists 250, not 1250", async ({ page }) => {

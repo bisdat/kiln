@@ -59,7 +59,12 @@ async function expectSave(page: Page, edits: [string, string][], copies: [string
 async function checkSavedBytes(page: Page, save = true) {
   if (save) {
     await page.keyboard.press('Control+s');
-    await expect(page.locator('.ke .k-page-sub')).not.toContainText('Changes not saved');
+    await expect.poll(() => page.evaluate(async () => {
+      const path = '/src/editor/kiln/session.js';
+      const { useSession } = await import(/* @vite-ignore */ path);
+      const { saving, dirty } = useSession.getState();
+      return { saving, dirty };
+    })).toEqual({ saving: false, dirty: false });
   }
   const { actual, expected } = await page.evaluate(async () => {
     const load = (path: string) => import(/* @vite-ignore */ path);
