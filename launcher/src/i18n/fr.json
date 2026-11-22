@@ -5935,7 +5935,7 @@
       "available": "Disponibles",
       "enterTotal": "saisir le total…",
       "changeTotal": "Cliquez pour modifier le total",
-      "totalFromGame": "Total {total}, calculé comme le fait le jeu : 2 points par niveau au-dessus de 1, plus les racines du Voile et les puits d'élixir que ce personnage a détruits. Le jeu ne l'enregistre pas, il ne se modifie donc pas ici.",
+      "totalFromGame": "Total {total} : 2 par niveau au-delà de 1 + racines du Voile et puits d’élixir détruits. Calculé, non stocké dans la sauvegarde.",
       "totalHint": "Total des points (utilisés + disponibles, comme le jeu l'affiche) :",
       "zoomIn": "Zoom avant",
       "zoomOut": "Zoom arrière",

@@ -6229,7 +6229,7 @@
       "available": "Dostępne",
       "enterTotal": "wpisz sumę…",
       "changeTotal": "Kliknij, aby zmienić sumę",
-      "totalFromGame": "Łącznie {total}, liczone tak jak w grze: 2 punkty za każdy poziom powyżej 1 oraz korzenie Całunu i studnie eliksiru zniszczone przez tę postać. Gra tego nie zapisuje, więc nie edytuje się tego tutaj.",
+      "totalFromGame": "Łącznie {total}: 2 za poziom powyżej 1 + zniszczone korzenie Całunu i studnie eliksiru. Wartość obliczana, nie zapisywana.",
       "totalHint": "Suma punktów (użyte + dostępne, tak jak pokazuje gra):",
       "zoomIn": "Przybliż",
       "zoomOut": "Oddal",

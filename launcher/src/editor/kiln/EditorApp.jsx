@@ -188,7 +188,7 @@ function SaveSwitch({ model, saves, open, setOpen, onOpen, disabled }) {
     }}>
       <h1 className="k-page-title">
         <button type="button" className="ke-who-btn" disabled={disabled} aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
-          {model ? model.name : t('editor.page.title')}<svg viewBox="0 0 24 24" aria-hidden><path d="M5 9l7 7 7-7" /></svg>
+          <span>{model ? model.name : t('editor.page.title')}</span><svg viewBox="0 0 24 24" aria-hidden><path d="M5 9l7 7 7-7" /></svg>
         </button>
       </h1>
       {open && (
