@@ -29,8 +29,9 @@ int block_base_brick(const BlockBaseFunctions& f,uintptr_t editor,const int32_t 
                         for(size_t i=0;i<512;++i)out[i]=v;result=1;}
                 }else {
                     auto* begin=field<uint8_t*>(h,0x50);const auto end=field<uint32_t>(h,0x60),size=field<uint32_t>(h,0x88);
-                    if(begin && size && size<=end) {
-                        BaseSpan dst{out,512},src{begin+end-size,size};uint8_t decoded[8]{};
+                    const auto address=reinterpret_cast<uintptr_t>(begin);
+                    if(begin && size && size<=end && address<=UINTPTR_MAX-end) {
+                        BaseSpan dst{out,512},src{reinterpret_cast<void*>(address+end-size),size};uint8_t decoded[8]{};
                         reinterpret_cast<Decode>(f.decode)(decoded,&dst,&src);result=decoded[0]==0?1:0;
                     }
                 }
@@ -59,7 +60,8 @@ bool block_damage_read(uintptr_t function,uintptr_t store,const int32_t cell[3],
     __try{*out=reinterpret_cast<Fn>(function)(store,c);return true;}__except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 bool block_damage_apply(uintptr_t function,uintptr_t store,int64_t now,uint32_t tick,const int32_t cell[3],uint8_t amount,uint8_t* out) {
-    if(!function || !store || !cell || !out || now<0 || tick==UINT32_MAX || cell[0]<0 || cell[1]<0 || cell[2]<0)return false;
+    if(!function || !store || !cell || !out || now<0 || now>INT64_MAX-20000000000LL ||
+       tick==UINT32_MAX || cell[0]<0 || cell[1]<0 || cell[2]<0)return false;
     using Fn=uint8_t (*)(uintptr_t,int64_t,uint32_t,const uint32_t*,uint8_t);
     const uint32_t c[3]={static_cast<uint32_t>(cell[0]),static_cast<uint32_t>(cell[1]),static_cast<uint32_t>(cell[2])};
     __try{*out=reinterpret_cast<Fn>(function)(store,now,tick,c,amount);return true;}__except(EXCEPTION_EXECUTE_HANDLER){return false;}

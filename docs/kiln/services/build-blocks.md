@@ -10,7 +10,9 @@ Call `Build.BlockAt`, `Build.FindWall` and `Build.BreakBox` on the **server tick
 program or task thread. A dedicated server or a hosting client is authoritative. A client joined to a remote host
 cannot read or break that host's world. No implicit task posting, streaming wait, queue or callback is hidden in these
 calls. Use the existing `Build.Load` before querying an unloaded area. Native rows return `KILN_ERR_WRONG_THREAD`
-outside the tick; managed calls enforce the same thread guard as other Build methods.
+outside the tick; managed calls enforce the same thread guard as other Build methods. Reads and selections must
+stay inside `Build.Grid`'s lower-inclusive, upper-exclusive cell bounds, including its 8192-cell height limit.
+An out-of-grid cell is InvalidArgument, not proof of air or a clear line.
 
 ## Facts at a point
 
@@ -116,8 +118,12 @@ unloaded tiles, zones, bases, faults and failed verification.
 commit can return without storing the requested cells. `MayHaveChanged` means the writer or damage mutator was entered and partial
 changes may remain; never automatically repeat the whole operation or give drops from planned counts.
 `Removed` counts only selected cells read back as air; `Verified` says that readback completed, not that every planned
-removal succeeded. Without Verified, Removed is only a lower bound. Failed readback or incomplete removal returns
-Unverified; a game fault returns Faulted. Inspect these results even when the native return is not OK. Native
+removal succeeded. Without Verified, Removed is only a lower bound. Failed readback, incomplete removal, a changed
+unselected cell or missing full-block writer verification returns Unverified; a game fault returns Faulted. The
+writer's verification includes unchanged neighbours in its widened 8×8×8 blocks, not just the selected cells.
+The managed `BuildEditEvent.Result.Verified` keeps the stronger exact-edit meaning: a verified removal count does
+not turn an Unverified or faulted break into an exactly verified edit. Inspect these results even when the native
+return is not OK. Native
 `result.write.cells_changed` may be a **planned** count after failure, not an observed count. Kept is not proof that
 partially committed blocks after a fault acquired save-region bookkeeping.
 

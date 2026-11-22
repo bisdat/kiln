@@ -12,6 +12,7 @@ namespace {
 using Key = std::tuple<int32_t,int32_t,int32_t>;
 std::map<Key,KilnVoxel> cells;
 int writes=0, reads=0,damage_calls=0; bool loaded=true, fail_write=false, unknown=false, unbreakable=false,deny=false,hard_health=false;
+bool writer_verified=true,corrupt_unselected=false;
 std::map<Key,uint8_t> damage;
 bool get_damage(void*,const int32_t* c,uint8_t,uint8_t* out){*out=damage[{c[0],c[1],c[2]}];return true;}
 bool add_damage(void*,const int32_t* c,uint8_t,uint8_t increment,double,uint8_t* out){++damage_calls;auto& d=damage[{c[0],c[1],c[2]}];d=static_cast<uint8_t>(std::min(255,static_cast<int>(d)+increment));*out=d;return true;}
@@ -28,7 +29,8 @@ KilnResult write(void*,const KilnBuildWrite* w,KilnBuildResult* r) {
     if(w->flags&KILN_BUILD_F_DRY_RUN){r->flags=KILN_BUILD_R_DRY_RUN;return KILN_OK;}
     size_t i=0; for(uint32_t z=0;z<w->dims[2];++z) for(uint32_t y=0;y<w->dims[1];++y) for(uint32_t x=0;x<w->dims[0];++x,++i)
         if(w->mask[i] && (!fail_write || x==0)) cells[{w->origin[0]+x,w->origin[1]+y,w->origin[2]+z}]=w->cells[i];
-    r->flags=KILN_BUILD_R_CHANGED|KILN_BUILD_R_VERIFIED; r->blocks_written=1;
+    if(corrupt_unselected)cells[{w->origin[0]+1,w->origin[1],w->origin[2]}]=0;
+    r->flags=KILN_BUILD_R_CHANGED|(writer_verified?KILN_BUILD_R_VERIFIED:0); r->blocks_written=1;
     return fail_write?KILN_ERR_INTERNAL:KILN_OK;
 }
 Source source() { Source s{}; s.cell_size=.5; s.read=&read; s.write=&write; s.metadata=&facts; s.provenance=&provenance; return s; }
@@ -59,6 +61,14 @@ int main() {
     check(find_wall(s,{0,1,0},{100,1,0},0,&b)==KILN_ERR_NOT_FOUND,"ray clips at 64m");
     check(find_wall(s,{1.1,.1,.1},{1.1,.1,.1},KILN_BUILD_FIND_TERRAIN,&b)==KILN_OK,"zero ray checks starting cell");
     check(find_wall(s,{0,0,0},{1,0,0},4,&b)==KILN_ERR_INVALID_ARGUMENT,"unknown ray flags rejected");
+    cells.clear();cells[{-1,0,0}]=KILN_VOXEL_MAKE(143,0);cells[{0,1,0}]=KILN_VOXEL_MAKE(144,0);
+    check(find_wall(s,{.25,.25,.25},{0,.5,.25},0,&b)==KILN_OK && b.material==144 && b.center.x==.25 && b.center.y==.75,
+        "mixed-direction endpoint tie never steps outside the endpoint cell");
+    cells.clear();cells[{15,0,0}]=KILN_VOXEL_MAKE(143,0);
+    check(find_wall(s,{.01,.1,.1},{7.5,.1,.1},0,&b)==KILN_OK && b.center.x==7.75,
+        "endpoint cell is visited despite accumulated DDA roundoff");
+    cells.clear();cells[{1,0,0}]=KILN_VOXEL_MAKE(143,0);cells[{0,1,0}]=KILN_VOXEL_MAKE(144,0);
+    check(find_wall(s,{.25,.25,.25},{.75,.75,.25},0,&b)==KILN_OK && b.material==143,"interior DDA ties retain x before y order");
     auto q=request();KilnBuildBreakResult r{};r.size=sizeof r;
     cells.clear();for(int x=0;x<4;++x)cells[{x,0,0}]=KILN_VOXEL_MAKE(143,0);
     check(break_box(s,&q,&r)==KILN_OK && r.removed==3 && r.protected_cells==1 && writes==1,"instant breaks player blocks only");
@@ -124,6 +134,13 @@ int main() {
     cells[{3,0,0}]=KILN_VOXEL_MAKE(144,0);cells[{4,0,0}]=KILN_VOXEL_MAKE(143,0);
     s.damage_get=&get_damage;s.damage_add=&add_damage;s.mining_factor=1;
     check(break_box(s,&q,&r)==KILN_OK && r.damaged==1 && damage[{4,0,0}]==2,"a protected material with zero damage increment does not shrink the sphere");hard_health=false;
+    s=source();q=request();q.dims[0]=2;uint8_t one_cell[2]={1,0};q.selection=one_cell;
+    cells.clear();cells[{0,0,0}]=cells[{1,0,0}]=KILN_VOXEL_MAKE(143,0);writer_verified=false;
+    check(break_box(s,&q,&r)==KILN_ERR_INTERNAL && r.refusal==KILN_BUILD_BLOCK_UNVERIFIED && r.removed==1,
+        "selected removals do not override failed full-block writer verification");writer_verified=true;
+    cells[{0,0,0}]=KILN_VOXEL_MAKE(143,0);corrupt_unselected=true;
+    check(break_box(s,&q,&r)==KILN_ERR_INTERNAL && r.refusal==KILN_BUILD_BLOCK_UNVERIFIED && r.removed==1,
+        "readback detects collateral changes to unselected cells");corrupt_unselected=false;
     TerrainDamage terrain;const std::array<int32_t,3> at{1,2,3};uint8_t accumulated=0;
     check(terrain.add(100,at,2,127,20,accumulated) && accumulated==127,"terrain accumulator hit");
     check(terrain.get(100+19000000000LL,at,2)==127,"terrain damage before expiry");
@@ -134,5 +151,11 @@ int main() {
     check(terrain.get(101,at,2)==0,"world unload clears accumulated terrain health");
     check(!terrain.add(INT64_MAX,at,2,1,20,accumulated),"expiry overflow refuses");
     check(!terrain.add(INT64_MAX-20,at,2,1,1e-7,accumulated),"sub-microsecond expiry overflow refuses on Windows long double");
+    terrain.clear();bool admitted=true;
+    for(int x=0;x<65536;++x)admitted=terrain.add(100,{x,0,0},2,1,20,accumulated) && admitted;
+    check(admitted,"terrain map admits its full documented capacity");
+    check(!terrain.add(101,{-1,0,0},2,1,20,accumulated),"full live terrain map reports failure instead of silently evicting damage");
+    check(terrain.add(101,{0,0,0},2,1,20,accumulated) && accumulated==2,"full terrain map still accumulates existing cells");
+    check(terrain.add(20000000101LL,{-1,0,0},2,1,20,accumulated) && accumulated==1,"expired terrain entries release map capacity");
     std::printf("block ops: %d passed, %d failed\n",total-fail,fail);return fail?1:0;
 }

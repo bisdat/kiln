@@ -47,6 +47,30 @@ public sealed class BlockApiTests
         }
         finally { FakeBuildTable.BlockRows(false); }
     }
+    [Theory]
+    [InlineData(0u, true, true)]
+    [InlineData(22u, false, false)]
+    [InlineData(22u, true, false)]
+    public void EditEventVerificationDoesNotUpgradeCountReadbackToExactSuccess(uint refusal, bool writerVerified, bool expected)
+    {
+        FakeBuildTable.BlockRows(true);
+        FakeBuildTable.BreakRefusalCode = refusal; FakeBuildTable.BreakWriterVerified = writerVerified;
+        try
+        {
+            using var kit = new KilnHarness(); kit.Step(2);
+            kit.Run(() =>
+            {
+                BuildEditEvent? observed = null;
+                using var subscription = Events.On<BuildEditEvent>(e => observed = e);
+                var r = Build.BreakBox(new CellBox(0,0,0,1,1,1),new BlockBreakOptions { Build = new() { Journal = false } });
+                Assert.True(r.Verified); // this flag verifies the observed removal count, not the whole edit
+                Assert.NotNull(observed?.Result);
+                Assert.Equal(expected,observed!.Result!.Verified);
+                Assert.Equal(1L,observed.Result.CellsChanged);
+            });
+        }
+        finally { FakeBuildTable.BlockRows(false); }
+    }
     [Fact]
     public void QueryNotFoundIsNotARefusal()
     {
