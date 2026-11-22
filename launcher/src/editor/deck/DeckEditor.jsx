@@ -4,11 +4,12 @@
 // Deck dialogs, a number pad for numbers, a list for choices, focus instead of hover.
 //   A: the focused control · B: back (out of the inspector, a move, else Home) · X: Save · Y: the view's own (Move,
 //   −1 level) · L2 / R2: previous / next part · L1 / R1: the Deck's tabs · the buttons at the top: Characters, Backups,
-//   Discard, Save.
+//   Undo, Redo, Discard, Save. L3 / R3: Undo / Redo (also in the help line).
 // Text: the catalog's and knowledge's search fields take Steam's keyboard (Steam + X), as Help says for Steam's own
 // fields; nothing needs typing, the number pad sets every number.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DeckButton, Dialog, Row, Screen, Word } from '../../deck/ui';
+import { Undo2, Redo2 } from 'lucide-react';
 import { GameArtAuto } from '../../components/GameArt';
 import { toast } from '../../ui';
 import { api } from '../src/platform.js';
@@ -16,7 +17,7 @@ import { t, useLanguage } from '../../i18n';
 import { dataHora } from '../src/i18n.js';
 import { EditorEnv } from '../kiln/env.jsx';
 import { useEditorArt } from '../kiln/art.js';
-import { canSave, discard, mutationsBlocked, openSave, readOnly, restoreBackup, saveModel, setModel, startSession, useSession } from '../kiln/session.js';
+import { canSave, canUndo, canRedo, undo, redo, historyTitle, startHistoryControls, discard, mutationsBlocked, openSave, readOnly, restoreBackup, saveModel, setModel, startSession, useSession } from '../kiln/session.js';
 import { BACKUP_KIND, TABS, backupGroups, backupName, sayOf } from '../kiln/EditorApp.jsx';
 import Equipment from '../kiln/Equipment.jsx';
 import Inventory from '../kiln/Inventory.jsx';
@@ -38,6 +39,7 @@ export default function DeckEditor() {
   const [choice, setChoice] = useState(null);
   const [dialog, setDialog] = useState(null); // 'characters' | 'backups' | 'discard' | {open: path}
   useEffect(() => startSession(), []);
+  useEffect(() => startHistoryControls(), []);
   // the screen's first focus lands on the header before the character is read: once the views are there, the first slot
   // (or the part's first stop) takes it, unless the player has moved on already
   const placed = useRef(false);
@@ -81,6 +83,8 @@ export default function DeckEditor() {
   const edit = model && !model.readOnly;
   const actions = [
     { button: 'x', label: t('editor.page.save'), run: () => void save(), disabled: !canSave(s) },
+    { button: 'ls', label: t('editor.page.history.undo'), run: undo, disabled: !canUndo(s) },
+    { button: 'rs', label: t('editor.page.history.redo'), run: redo, disabled: !canRedo(s) },
     ...(edit ? (view?.actions ?? []).map((a) => ({ ...a, disabled: blocked || a.disabled })) : []),
     ...(edit ? [{ button: 'lt', label: word(at - 1), run: () => go(-1) }, { button: 'rt', label: word(at + 1), run: () => go(1) }] : []),
   ];
@@ -106,6 +110,8 @@ export default function DeckEditor() {
               </p>
             </div>
             <div className="dke-buttons">
+              <DeckButton id="ed-undo" aria-label={t('editor.page.history.undo')} a={t('editor.page.history.undo')} disabled={!canUndo(s)} onClick={undo}><span title={historyTitle(s, 'undo')}><Undo2 size={22} aria-hidden="true" /></span></DeckButton>
+              <DeckButton id="ed-redo" aria-label={t('editor.page.history.redo')} a={t('editor.page.history.redo')} disabled={!canRedo(s)} onClick={redo}><span title={historyTitle(s, 'redo')}><Redo2 size={22} aria-hidden="true" /></span></DeckButton>
               <DeckButton id="ed-characters" disabled={saving || restoring} a={t('editor.page.open')} onClick={() => setDialog('characters')}>{t('editor.page.characters')}</DeckButton>
               <DeckButton id="ed-backups" a={t('editor.page.open')} disabled={!model || blocked} onClick={() => setDialog('backups')}>{t('editor.page.backups')}</DeckButton>
               {dirty && <DeckButton id="ed-discard" disabled={blocked} onClick={() => setDialog('discard')}>{t('editor.page.discard')}</DeckButton>}

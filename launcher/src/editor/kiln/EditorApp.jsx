@@ -2,13 +2,15 @@
 // and Backups; tabs for Equipment, Inventory, Skills and Knowledge. The session (the saves, the open character, save,
 // discard, restore) is session.js, shared with the Deck screen (../deck/DeckEditor.jsx); this file replaces upstream's
 // in-game frame (src/App.jsx).
-// Keys: Ctrl+S save, Z discard (asks first), B backups, Q/E previous/next tab (not while typing).
+// Keys: Ctrl+S save, Ctrl+Z undo, Ctrl+Shift+Z / Ctrl+Y redo, Z discard (asks first), B backups, Q/E tabs.
+// Text fields keep their own undo/redo; the unmodified view shortcuts also stay out of fields.
 import React, { useEffect, useRef, useState } from 'react';
-import { Banner, Button, Modal, Tabs, toast } from '../../ui';
+import { Banner, Button, IconButton, Modal, Tabs, toast } from '../../ui';
+import { Undo2, Redo2 } from 'lucide-react';
 import { api } from '../src/platform.js';
 import { t, useLanguage } from '../../i18n';
 import { dataHora, definirIdioma, assinarIdioma } from '../src/i18n.js';
-import { canSave, discard, mutationsBlocked, openSave, readOnly, restoreBackup, saveModel, setModel, setStatus, startSession, useSession } from './session.js';
+import { canSave, canUndo, canRedo, undo, redo, historyTitle, startHistoryControls, discard, mutationsBlocked, openSave, readOnly, restoreBackup, saveModel, setModel, setStatus, startSession, useSession } from './session.js';
 import Equipment from './Equipment.jsx';
 import Inventory from './Inventory.jsx';
 import Skills from './Skills.jsx';
@@ -48,6 +50,7 @@ export default function EditorApp() {
   const [, redraw] = useState(0);
   useEffect(() => assinarIdioma(() => redraw((n) => n + 1)), []);
   useEffect(() => startSession(), []);
+  useEffect(() => startHistoryControls(), []);
 
   const open = (path, reread = false) => {
     if (saving || restoring) return;
@@ -93,6 +96,8 @@ export default function EditorApp() {
           <p className="k-page-sub" role="status">{sayOf(s)}</p>
         </div>
         <div className="k-page-actions">
+          <IconButton data-testid="editor-undo" label={t('editor.page.history.undo')} disabled={!canUndo(s)} onClick={undo} title={`${historyTitle(s, 'undo')} · Ctrl+Z`} icon={<Undo2 size={18} aria-hidden="true" />} />
+          <IconButton data-testid="editor-redo" label={t('editor.page.history.redo')} disabled={!canRedo(s)} onClick={redo} title={`${historyTitle(s, 'redo')} · Ctrl+Shift+Z / Ctrl+Y`} icon={<Redo2 size={18} aria-hidden="true" />} />
           {dirty && <Button variant="ghost" disabled={blocked} onClick={() => setAsk({ discard: true })} title="Z">{t('editor.page.discard')}</Button>}
           <Button disabled={!model || blocked} onClick={() => setBackups(true)} title="B">{t('editor.page.backups')}</Button>
           <Button variant="primary" disabled={!ok} loading={saving} onClick={save} title={running ? t('editor.page.gameOpenShort') : 'Ctrl+S'}>{saving ? t('editor.page.saving') : t('editor.page.save')}</Button>
