@@ -287,7 +287,8 @@ listed. **No** means it logs `emf: <mod> called <fn>, not supported` once and re
   `[emf:lua] ... loaded` and no `built for EMF API` line.
 - Turned spawns: on a disposable world, ask a v47 mod to spawn a door/target at yaw 0 and 90 degrees with the
   same extra components. Check both the visible facing and a creature's interaction with the target, not just its
-  drawn transform. Terrain queries/breaks and marker bars should log their unavailable answer without changes.
+  drawn transform. Check terrain queries and no-drops breaks with the guided block-family check below; marker bars
+  still log their unavailable answer without changes.
 - The mod check on join: join a server that runs EMF 0.6.8 with `[net] mods_check=refuse` and a mod with a channel,
   with the same mods in your own game. You stay connected after 60 s; `kiln.log` has `EMF mods check: against the
   server's mods: same mods`. With a mod missing on your side that the server requires, one note names it.
