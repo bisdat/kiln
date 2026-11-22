@@ -55,6 +55,7 @@ internal static class ServiceNames
         "kiln.routines",
         "kiln.repl",
         "kiln.repl.lab",
+        "kiln.repl.net",
         "kiln.rules",
         "kiln.saves",
         "kiln.screen",

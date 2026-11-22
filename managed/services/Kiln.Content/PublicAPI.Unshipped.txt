@@ -1,4 +1,6 @@
 #nullable enable
+Kiln.ItemDefinition.VanillaLook.get -> string?
+Kiln.ItemDefinition.VanillaLook.init -> void
 Kiln.StationMenuAppliedEvent
 Kiln.StationMenuAppliedEvent.DefinitionId.get -> System.Guid
 Kiln.StationMenuAppliedEvent.FromServer.get -> bool

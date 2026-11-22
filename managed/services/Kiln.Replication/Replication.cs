@@ -15,7 +15,7 @@ namespace Kiln;
 /// <para>A diagnostic tool of the Advanced tier: it names the game's own components (their names and registry indices,
 /// verified per game build) and may change with game updates. Mods that need stable names use Kiln's typed APIs.</para>
 /// </summary>
-public static class Replication
+public static partial class Replication
 {
     private static readonly object Gate = new();
     private static readonly HashSet<ulong> StatsOwners = [];

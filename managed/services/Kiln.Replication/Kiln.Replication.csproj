@@ -14,6 +14,13 @@
     <ProjectReference Include="../Kiln.Network/Kiln.Network.csproj" Private="false" />
     <!-- the repl commands -->
     <ProjectReference Include="../Kiln.Chat/Kiln.Chat.csproj" Private="false" />
+    <!-- the item remap: Kiln-only items and their look-alikes (Kiln.Content), the game's items (Kiln.Items) -->
+    <ProjectReference Include="../Kiln.Content/Kiln.Content.csproj" Private="false" />
+    <ProjectReference Include="../Kiln.Items/Kiln.Items.csproj" Private="false" />
+    <!-- the sidecars: the providers' component test and the safety net (Kiln.World), the client's main-thread tick and
+         Changed posted to a hosted world's client thread (Kiln.Client) -->
+    <ProjectReference Include="../Kiln.World/Kiln.World.csproj" Private="false" />
+    <ProjectReference Include="../Kiln.Client/Kiln.Client.csproj" Private="false" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Kiln.Replication.Tests" />

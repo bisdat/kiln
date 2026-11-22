@@ -1,4 +1,8 @@
 #nullable enable
+Kiln.ItemBlock.LargeHolds.get -> bool
+Kiln.ItemBlock.LargeHolds.init -> void
+Kiln.ItemBlock.VanillaLook.get -> string?
+Kiln.ItemBlock.VanillaLook.init -> void
 abstract Kiln.ClothColliderBlock.<Clone>$() -> Kiln.ClothColliderBlock!
 Kiln.BodyBlock.Chains.get -> System.Collections.Generic.IReadOnlyList<Kiln.ModelChainBlock!>?
 Kiln.BodyBlock.Chains.init -> void

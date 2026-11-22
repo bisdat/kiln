@@ -384,6 +384,10 @@ public sealed record ItemBlock : IBlock, ITweakable
     public string? Description { get; init; }
     /// <summary>Where to get it, in the tooltip. Null: nothing.</summary>
     public string? Source { get; init; }
+    /// <summary>The game item players without this mod see in its place (a vanilla client, a Kiln client without this
+    /// mod's content): a game item of the same kind, by debug name. Null: they see an empty slot where it is. JSON
+    /// <c>"vanillaLook"</c>.</summary>
+    public string? VanillaLook { get; init; }
     /// <summary>Null: a <see cref="Tool"/> makes a tool, <see cref="Ammo"/> an arrow, <see cref="Feeds"/> food, <see cref="Heals"/> or <see cref="OnUse"/> a potion, the rest a material.</summary>
     public ItemKind? Kind { get; init; }
     public PartRef<VisualBlock>? Visual { get; init; }
@@ -415,6 +419,11 @@ public sealed record ItemBlock : IBlock, ITweakable
     /// <summary>A <see cref="ItemKind.WateringCan"/>'s or <see cref="ItemKind.WaterPouch"/>'s capacity, in charges as the game counts them: the game's watering can holds 100,
     /// its pouch 20 sips. 1..1023: a player's game is sent the water as charges × 64 in 16 bits. Null: the kind's own.</summary>
     public int? Holds { get; init; }
+    /// <summary>Lets <see cref="Holds"/> go past 1,023, up to 65,535 charges. Every player's game shows such a container full until it is down to
+    /// 1,023 charges (the game sends a container's water as charges × 64 in 16 bits): send Kiln players the true value with a replicated extension
+    /// (<c>Replication.Extension</c>, the BigCan sample) and show other players a fraction with a filter (<c>Replication.Filter</c>). Default false:
+    /// <see cref="Holds"/> stays 1..1023. JSON <c>"largeHolds"</c>.</summary>
+    public bool LargeHolds { get; init; }
     /// <summary>How fast a water container fills and pours, as a multiple of the game's own: at a lake, at a well or a barrel, and onto crops and soil alike. The game
     /// moves the item's Volume (32 for the can, 16 for the pouch: half a charge, a quarter) about 20 times a second while the button is held, and has no rate for
     /// filling alone. 0.25..8. Null: the game's.</summary>

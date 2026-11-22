@@ -1,0 +1,9 @@
+{
+  "id": "itemfallback",
+  "name": "Item Fallback (sample)",
+  "version": "1.0.0",
+  "apiVersion": "0.2",
+  "entryAssembly": "ItemFallback.dll",
+  "side": "both",
+  "description": "Sample for what players without a mod see of its items (Kiln.Replication's item remap): two new items, a Frost Can that declares a vanilla look-alike (the game's watering can) and a Frost Charm that does not. A player without Kiln, or a Kiln player without this mod, sees a watering can where the Frost Can is and an empty slot where the Frost Charm is; nothing they are sent names an item their game does not know."
+}

@@ -134,8 +134,10 @@ void store_before(void* p) {
     t_cur.active = false;
     if (!c->msg || !c->msg->ptr || c->msg->size < 4) return;
     if (g_rx_counting.load(std::memory_order_relaxed)) count_received(c->msg->ptr, c->msg->size, (c->pred & 0xff) ? 1 : 0);
-    if ((c->pred & 0xff) != 0 || !g_hot_n.load(std::memory_order_relaxed)) return;  // the watches: the client channel only
+    if ((c->pred & 0xff) != 0) return;  // tracks and watches: the client channel only
     const uint8_t* d = c->msg->ptr;
+    if (track_client_active()) track_client_store(d, c->msg->size);  // kiln.repl.net's receive tracking (track.cpp)
+    if (!g_hot_n.load(std::memory_order_acquire)) return;
     const uint32_t kind = d[0] & 7;
     if (kind == kKindCreate || kind == kKindUpdate) {
         Header h{};
@@ -307,10 +309,10 @@ void apply() {
         n = 0;
     }
     // the message store for the watches and the counters; the decode for the watches
-    const bool want_store = n || counting, want_decode = n != 0;
+    const bool want_store = n || counting || track_client_active(), want_decode = n != 0;  // + kiln.repl.net's receive tracks
     if (want_store && !g_hooked) {
         g_hooked = h_store.install(g_api, g_owner, f_store, reinterpret_cast<void*>(&d_store), "repl/client ClientStore");
-        if (g_hooked) logf(KILN_LOG_INFO, "repl: receive hook installed (message store) for %s", n ? "a receive watch" : "the receive counters");
+        if (g_hooked) logf(KILN_LOG_INFO, "repl: receive hook installed (message store) for %s", n ? "a receive watch" : counting ? "the receive counters" : "receive tracking");
         else logf(KILN_LOG_WARN, "repl: receive hook not installed (%s)", h_store.error() ? h_store.error() : "?");
     } else if (!want_store && g_hooked) {
         h_store.revoke();
@@ -343,6 +345,8 @@ void read_client_registry() {
 
 void KILN_CALL on_client_pre(const KilnTickInfo*, void*) {
     if (g_dirty.exchange(false, std::memory_order_relaxed)) apply();
+    messages_pre();  // kiln.repl.net's message hooks: removed and faulted ones go, the hooks follow (a joined client too)
+    track_client_pre();  // kiln.repl.net's receive tracks: the last frame's creates and destroy lists
     if (!g_hooked && !g_ring.ready()) return;
     read_client_registry();
     if (g_ring.ready()) g_ring.drain([](const RecordHeader& rh, const uint8_t* p) { deliver_record(rh, p); });
@@ -355,6 +359,7 @@ void KILN_CALL on_client_pre(const KilnTickInfo*, void*) {
 
 void KILN_CALL on_client_world(const KilnWorldEvent* ev, void*) {
     if (!ev || ev->kind != KILN_WORLD_CLIENT || ev->event != KILN_WORLD_STOPPING) return;
+    track_client_world_stopping();
     for (RxWatch& w : g_rx)
         if (w.handle.load(std::memory_order_relaxed)) end(w, KILN_REPL_END_WORLD_STOPPED);
     g_ring.discard();
@@ -386,6 +391,13 @@ bool client_init() {
 }
 
 bool client_on() { return g_resolved; }
+
+// kiln.repl.net's receive tracks came or went (main thread): the store hook follows them and the receive watches.
+bool client_apply() {
+    if (!g_resolved) return false;
+    apply();
+    return g_hooked;
+}
 
 KilnResult client_watch(KilnOwner owner, KilnEntity e, KilnReplWatchFn fn, void* user, KilnHandle* out) {
     if (out) *out = 0;

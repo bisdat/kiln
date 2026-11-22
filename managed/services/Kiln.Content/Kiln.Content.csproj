@@ -10,6 +10,8 @@
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Kiln.Blocks" />
+    <!-- the item remap reads the declared look-alikes (NewContent.VanillaLooks) -->
+    <InternalsVisibleTo Include="Kiln.Replication" />
     <InternalsVisibleTo Include="Kiln.Blocks.Tests" />
     <InternalsVisibleTo Include="Kiln.Contract.Tests" />
     <!-- the item icons' resolver (ItemIcons.cs): a new item's own GUID and the UI texture the game draws for it (ContentNames) -->

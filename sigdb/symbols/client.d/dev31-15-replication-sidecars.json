@@ -1,0 +1,73 @@
+{
+ "format": 1,
+ "side": "client",
+ "extends": "server.d/dev31-15-replication-sidecars.json",
+ "comment": "Client exe (5d9ef2f1, Steam 26430625): the server-side names match unchanged (a hosted world's own server); repl.messages.client = the client's receive loop, its two dispatch sites (rax = channel) and free sites.",
+ "symbols": {
+  "repl/ClientReceiveFn": {
+   "find": [
+    {
+     "pattern": "48 8B C4 55 41 57 48 8D A8 ?? ?? FF FF 48 81 EC ?? ?? 00 00 4C 8B F9"
+    }
+   ]
+  },
+  "repl/ClientMachineDispatch": {
+   "find": [
+    {
+     "scope": {
+      "symbol": "repl/ClientReceiveFn",
+      "size": 4096
+     },
+     "offset": 11,
+     "pattern": "83 FF 16 0F 87 ?? ?? ?? ?? 8B C7 41 8B 8C 86 ?? ?? ?? ?? 49 03 CE FF E1"
+    }
+   ]
+  },
+  "repl/ClientPlayerDispatch": {
+   "find": [
+    {
+     "scope": {
+      "symbol": "repl/ClientReceiveFn",
+      "size": 4096
+     },
+     "offset": 11,
+     "pattern": "83 FB 18 0F 87 ?? ?? ?? ?? 8B C3 41 8B 8C 86 ?? ?? ?? ?? 49 03 CE FF E1"
+    }
+   ]
+  },
+  "repl/ClientMachineFree": {
+   "find": [
+    {
+     "scope": {
+      "symbol": "repl/ClientReceiveFn",
+      "size": 4096
+     },
+     "pattern": "49 8B 8F 80 01 00 00 48 8D 55 D8 48 8B 09 E8 ?? ?? ?? ?? 49 8B 97"
+    }
+   ]
+  },
+  "repl/ClientPlayerFree": {
+   "find": [
+    {
+     "scope": {
+      "symbol": "repl/ClientReceiveFn",
+      "size": 4096
+     },
+     "pattern": "49 8B 8F 80 01 00 00 48 8D 55 D8 48 8B 09 E8 ?? ?? ?? ?? E9"
+    }
+   ]
+  }
+ },
+ "features": {
+  "repl.messages.client": {
+   "symbols": [
+    "repl/ClientReceiveFn",
+    "repl/ClientMachineDispatch",
+    "repl/ClientPlayerDispatch",
+    "repl/ClientMachineFree",
+    "repl/ClientPlayerFree"
+   ],
+   "constants": []
+  }
+ }
+}
