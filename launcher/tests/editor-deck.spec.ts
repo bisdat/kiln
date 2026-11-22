@@ -334,6 +334,8 @@ test.describe("the save editor in Deck mode", () => {
     const bk = page.locator('[data-deck-dialog="editor-backups"]');
     await expect(bk.locator(".deck-row")).toHaveCount(2);
     await expect(bk).toContainText("Game's copy");
+    // Rows arrive before the dialog's asynchronous first-focus pass; A without focus only selects the first row.
+    await expect.poll(() => focused(page)).toMatch(/^bk-/);
     await shot(page, "backups");
     await pad(page, "a");
     const confirm = page.locator('[data-deck-dialog="editor-restore"]');
