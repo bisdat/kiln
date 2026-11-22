@@ -223,7 +223,7 @@ impl Display {
 
     /// A kiln-mode start's startup pass (`PassSteps`): stage `startup` at `step`, `done` bytes of archive work moved in
     /// it, for `stage_ms`. Written at most every `WRITE_EVERY`, at once when `now` (a new step).
-    pub fn pass(&self, step: PassStep, done: u64, stage_ms: u64, now: bool) {
+    pub fn pass(&self, label: &'static str, step: PassStep, done: u64, stage_ms: u64, now: bool) {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         if !now && inner.last_write.is_some_and(|t| t.elapsed() < WRITE_EVERY) {
             return;
@@ -231,7 +231,7 @@ impl Display {
         inner.last_write = Some(Instant::now());
         let live = Live {
             stage: "startup",
-            label: PASS_LABEL,
+            label,
             done_bytes: done,
             total_bytes: 0,
             files_done: 0,
@@ -302,8 +302,9 @@ impl Sink for Display {
 
 // ---- kiln mode: the startup pass's steps ----
 
-/// The state file's `label` while a kiln-mode start's startup pass runs.
+/// The state file's `label` while a kiln-mode start prepares ShroudForge-format mods.
 pub const PASS_LABEL: &str = "Preparing ShroudForge mods for Kiln's interpreter";
+const EML_PASS_LABEL: &str = "Preparing the game data for EML mods";
 
 /// While a step of the startup pass moves bytes, a kiln.log line at least this often says it is still going.
 const PASS_LOG_EVERY: std::time::Duration = std::time::Duration::from_secs(10);
@@ -359,6 +360,7 @@ impl PassStep {
 
 struct PassState {
     display: Option<std::sync::Arc<Display>>,
+    label: &'static str,
     began: Instant,
     step: PassStep,
     since: Instant,
@@ -375,15 +377,17 @@ impl PassState {
         self.took.push((self.step, now - self.since));
         self.step = step;
         self.since = now;
+        // The hook is throttled: the preceding step may have moved more bytes since its last report.
+        self.moved = archive_work::moved();
         self.moved_at_step = self.moved;
         self.last_line = now;
-        tracing::debug!("Kiln's ShroudForge startup pass: {} ({} of {})", step.label(), step.number(), PassStep::ALL.len());
+        tracing::debug!("Kiln's startup pass: {} ({} of {})", step.label(), step.number(), PassStep::ALL.len());
         self.write(true);
     }
 
     fn write(&self, now: bool) {
         if let Some(display) = &self.display {
-            display.pass(self.step, self.moved - self.moved_at_step, self.since.elapsed().as_millis() as u64, now);
+            display.pass(self.label, self.step, self.moved - self.moved_at_step, self.since.elapsed().as_millis() as u64, now);
         }
     }
 
@@ -395,7 +399,7 @@ impl PassState {
         if self.last_line.elapsed() >= PASS_LOG_EVERY {
             self.last_line = Instant::now();
             tracing::info!(
-                "Kiln's ShroudForge startup pass is still {} ({} of {}): {} of the game's files read or written in {} s",
+                "Kiln's startup pass is still {} ({} of {}): {} of the game's files read or written in {} s",
                 self.step.label(), self.step.number(), PassStep::ALL.len(), size(self.moved - self.moved_at_step),
                 self.since.elapsed().as_secs()
             );
@@ -433,13 +437,17 @@ pub struct PassSteps {
 
 impl PassSteps {
     /// The pass begins (step 1): `base` is the state the file carries meanwhile (the mods found).
-    pub fn begin(display: Option<std::sync::Arc<Display>>, base: &Outcome) -> Self {
+    pub fn begin(display: Option<std::sync::Arc<Display>>, base: &Outcome, dialect: crate::kiln_mode::Dialect) -> Self {
         if let Some(display) = &display {
             display.set_base(base);
         }
         let now = Instant::now();
         let state = PassState {
             display,
+            label: match dialect {
+                crate::kiln_mode::Dialect::Shroudforge => PASS_LABEL,
+                crate::kiln_mode::Dialect::Eml | crate::kiln_mode::Dialect::NoPass => EML_PASS_LABEL,
+            },
             began: now,
             step: PassStep::Checking,
             since: now,
@@ -473,7 +481,7 @@ impl PassSteps {
         let now = Instant::now();
         state.took.push((state.step, now - state.since));
         let steps: Vec<String> = state.took.iter().map(|(s, d)| format!("{} {}", s.label(), seconds(*d))).collect();
-        Some(format!("Kiln's ShroudForge startup pass took {}: {}", seconds(now - state.began), steps.join(", ")))
+        Some(format!("Kiln's startup pass took {}: {}", seconds(now - state.began), steps.join(", ")))
     }
 }
 
@@ -600,7 +608,7 @@ mod tests {
                 (Some("running"), Some("startup"), Some(PASS_LABEL), Some(5)), "{v}");
             (p["step"].as_str().unwrap().to_owned(), p["stepNumber"].as_u64().unwrap())
         };
-        let steps = PassSteps::begin(Some(display), &base);
+        let steps = PassSteps::begin(Some(display), &base, crate::kiln_mode::Dialect::Shroudforge);
         assert_eq!(step(), ("checking".to_owned(), 1));
         steps.observe(&Point::Admitted);
         assert_eq!(step(), ("mods".to_owned(), 2));
@@ -613,7 +621,7 @@ mod tests {
         steps.observe(&Point::Published);
         assert_eq!(step(), ("save".to_owned(), 5));
         let line = steps.finish().unwrap();
-        assert!(line.starts_with("Kiln's ShroudForge startup pass took "), "{line}");
+        assert!(line.starts_with("Kiln's startup pass took "), "{line}");
         for s in PassStep::ALL {
             assert!(line.contains(s.label()), "{line}");
         }
@@ -622,6 +630,31 @@ mod tests {
         assert_eq!(step(), ("save".to_owned(), 5));
         assert!(pass_state().is_none());
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn step_boundaries_do_not_charge_unreported_work_to_the_next_step() {
+        let _serial = crate::runner::RUN_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let d = dir("pass-bytes");
+        let display = std::sync::Arc::new(Display::with_window(Some(d.clone()), None));
+        let steps = PassSteps::begin(Some(display), &Outcome::new(Phase::Done, Vec::new()), crate::kiln_mode::Dialect::Shroudforge);
+        let read = || -> serde_json::Value { serde_json::from_slice(&std::fs::read(d.join("eml.json")).unwrap()).unwrap() };
+        archive_work::add(4096);
+        steps.observe(&Point::Admitted);
+        assert_eq!(pass_state().as_ref().unwrap().moved_at_step, 4096, "include work not reported by the throttled hook");
+        assert_eq!(read()["progress"]["doneBytes"], 0);
+        archive_work::add(7);
+        on_archive_work(Note::Moved(4103));
+        pass_state().as_ref().unwrap().write(true);
+        assert_eq!(read()["progress"]["doneBytes"], 7);
+        archive_work::mark(Note::Checking);
+        assert_eq!(read()["progress"]["doneBytes"], 0);
+        archive_work::add(11);
+        archive_work::mark(Note::Publishing);
+        assert_eq!(pass_state().as_ref().unwrap().moved_at_step, 4114);
+        assert_eq!(read()["progress"]["doneBytes"], 0);
+        drop(steps);
+        let _ = std::fs::remove_dir_all(d);
     }
 
     #[test]

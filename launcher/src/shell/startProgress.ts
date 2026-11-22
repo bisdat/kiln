@@ -74,8 +74,8 @@ const SF_STEPS: Record<string, () => string> = {
  *  launcher's language, by its step ("Preparing ShroudForge mods for Kiln's interpreter: checking the prepared game data
  *  (3 of 5)."); anything else as kiln-manage worded it. */
 export function preStartLine(prep: PreStart): string {
-  if (prep.stage !== "startup") return prep.message;
-  const word = prep.step ? SF_STEPS[prep.step] : undefined;
+  if (prep.stage !== "startup" || prep.label === "Preparing the game data for EML mods") return prep.message;
+  const word = prep.step && Object.hasOwn(SF_STEPS, prep.step) ? SF_STEPS[prep.step] : undefined;
   if (!word) return t("shell.startProgress.sfStartup");
   const n = prep.stepNumber ?? 0, total = prep.steps ?? 0;
   return n > 0 && total >= n ? t("shell.startProgress.sfStartupStep", { step: word(), n, total }) : t("shell.startProgress.sfStartupStepOnly", { step: word() });
