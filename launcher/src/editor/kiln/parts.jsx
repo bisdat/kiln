@@ -36,7 +36,7 @@ export const rarityWord = (r) => tv(RARITY_PT[r] || RARITY_PT[0]);
  * line along the bottom. `n`: a small number in the corner (action bar keys). `lazy`: the icon loads when the slot
  * is scrolled to (the catalog's long grid).
  */
-export function Slot({ entry, selected, onClick, onDoubleClick, drag, drop, n, size, title, dim, onFocus, deckId, deckA, label, lazy, mod }) {
+export function Slot({ entry, selected, onClick, onDoubleClick, drag, drop, n, size, title, dim, onFocus, deckId, deckA, label, lazy, mod, ...props }) {
   const it = entry && items[entry.itemId];
   const r = entry ? rarityOf(entry) : 0;
   const dur = entry?.durability !== undefined && entry.maxDurability ? entry.durability / entry.maxDurability : null;
@@ -45,7 +45,7 @@ export function Slot({ entry, selected, onClick, onDoubleClick, drag, drop, n, s
     <button type="button" className={'ke-slot' + (selected ? ' on' : '') + (entry ? ' full' : '') + (drop ? ' drop' : '') + (dim ? ' dim' : '') + (mod ? ' mod' : '')}
       style={{ ...(size ? { '--s': `${size}px` } : null), ...(r > 0 ? { '--r': rarityColor(r) } : null) }}
       onClick={onClick} onDoubleClick={onDoubleClick} onFocus={onFocus} title={name} aria-pressed={selected || undefined} aria-label={label}
-      data-deck-id={deckId} data-deck-a={deckA} {...(drag || {})}>
+      data-deck-id={deckId} data-deck-a={deckA} {...(drag || {})} {...props}>
       {entry && <img src={iconOf(entry.itemId)} alt="" draggable={false} loading={lazy ? 'lazy' : undefined} decoding={lazy ? 'async' : undefined} />}
       {n !== undefined && <span className="ke-slot-n">{n}</span>}
       {/* `mod`: an item another mod keeps in this slot (no table has it): a lock, no count (its count bits are the mod's) */}

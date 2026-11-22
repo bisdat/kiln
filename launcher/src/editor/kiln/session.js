@@ -28,6 +28,8 @@ export const useSession = create(() => ({
   status: null,
   running: false,
   saving: false,
+  restoring: false,
+  opening: false,
   /** the save file's time when read: a save the game wrote since is not overwritten */
   readAt: 0,
 }));
@@ -35,7 +37,7 @@ export const useSession = create(() => ({
 const set = (p) => {
   useSession.setState(p);
   const s = useSession.getState();
-  usePendingEdits.setState({ dirty: s.dirty, name: s.model?.name ?? null });
+  usePendingEdits.setState({ dirty: s.dirty, busy: s.saving || s.restoring, name: s.model?.name ?? null });
 };
 
 export const setStatus = (status) => set({ status });
@@ -51,18 +53,34 @@ export async function refreshSaves() {
   }
 }
 
+// Only the latest requested read may replace the session or its status. Saving/restoring exclude new opens;
+// opening still permits another choice, but not edits to the character that is about to be replaced.
+let openRequest = 0;
+export const mutationsBlocked = (s) => s.saving || s.restoring || s.opening;
+
 /** Reads a save; replaces the open one (the UIs ask before dropping changes). */
-export async function openSave(path) {
+export function openSave(path) {
+  const s = useSession.getState();
+  if (s.saving || s.restoring) return Promise.resolve(false);
+  return readSave(path);
+}
+
+async function readSave(path) {
+  const request = ++openRequest;
+  set({ opening: true });
   try {
-    const m = await api.openSave(path);
+    const m = await api.openSave(path, () => request === openRequest);
+    if (request !== openRequest) return false;
     const json = JSON.stringify(m);
     set({ model: m, orig: clone(m), origJson: json, dirty: false, readAt: m.modified ?? 0,
       // a save read with unknown items says "read-only" by itself; one that could not be read at all gets the word
       status: m.error ? { tone: 'warn', text: m.readOnly ? t('editor.page.readOnlyError', { erro: said(m.error) }) : said(m.error) } : null });
     return true;
   } catch (e) {
-    set({ status: { tone: 'err', text: e.message } });
+    if (request === openRequest) set({ status: { tone: 'err', text: e.message } });
     return false;
+  } finally {
+    if (request === openRequest) set({ opening: false });
   }
 }
 
@@ -73,25 +91,33 @@ export const readOnly = (m) => !!(m && (m.readOnly || m.error));
  *  takes no change: nothing of it could be written. */
 export function setModel(m) {
   const s = useSession.getState();
-  if (readOnly(s.model)) return;
+  if (mutationsBlocked(s) || readOnly(s.model) || m?.path !== s.model?.path) return false;
+  applyModel(m);
+  return true;
+}
+
+// One commit path for user changes (including Discard), so edit history can hook in without changing the views.
+function applyModel(m) {
+  const s = useSession.getState();
   set({ model: m, dirty: !!s.orig && JSON.stringify(m) !== s.origJson });
 }
 
 export function discard() {
   const s = useSession.getState();
-  if (s.dirty) set({ model: clone(s.orig), dirty: false, status: null });
+  if (mutationsBlocked(s)) return;
+  if (s.dirty) { applyModel(clone(s.orig)); set({ status: null }); }
 }
 
 /** Reads the open character again when its save was written since it was read (the player went to play and came
  *  back) and nothing here is changed. With changes the open character stays: Save then refuses and offers "Read again". */
 async function rereadIfWritten() {
   const s = useSession.getState();
-  if (!s.model || s.dirty || s.saving || !s.readAt) return;
+  if (!s.model || s.dirty || mutationsBlocked(s) || !s.readAt) return;
   const path = s.model.path;
   try {
     const { modified } = await editorFileInfo(path);
     const now = useSession.getState();
-    if (modified && modified !== now.readAt && now.model?.path === path && !now.dirty && !now.saving) await openSave(path);
+    if (modified && modified !== now.readAt && now.model?.path === path && !now.dirty && !mutationsBlocked(now)) await openSave(path);
   } catch { /* the file is gone or cannot be read: the open character stays as it was read */ }
 }
 
@@ -100,7 +126,8 @@ async function rereadIfWritten() {
  *  game's state every 3 s. Returns the stop function. */
 export function startSession() {
   refreshSaves().then((l) => {
-    if (useSession.getState().model) return;
+    const s = useSession.getState();
+    if (s.model || mutationsBlocked(s)) return;
     const best = [...l].filter((x) => !x.error).sort((a, b) => b.modified - a.modified)[0];
     if (best) openSave(best.path);
   });
@@ -119,11 +146,11 @@ export function startSession() {
 /** Reads the open character again when nothing is changed (new item tables: a mod's items merged). */
 export function reopenIfClean() {
   const s = useSession.getState();
-  if (s.model && !s.dirty) return openSave(s.model.path);
+  if (s.model && !s.dirty && !mutationsBlocked(s)) return openSave(s.model.path);
   return Promise.resolve(false);
 }
 
-export const canSave = (s) => !!(s.dirty && !s.running && s.model && !readOnly(s.model) && !s.saving);
+export const canSave = (s) => !!(s.dirty && !s.running && s.model && !readOnly(s.model) && !mutationsBlocked(s));
 
 /** Writes the open model. Returns 'saved', or what stopped it: 'skills' (the tree checks), 'changed' (the game wrote the
  *  save since it was read), 'error'. */
@@ -161,6 +188,13 @@ export async function saveModel() {
 /** Restores a backup over the open save and reads it again (the save before it is kept as a backup). */
 export async function restoreBackup(b) {
   const s = useSession.getState();
-  await api.restoreBackup(b.path, s.model.path);
-  await openSave(s.model.path);
+  if (!s.model || s.running || mutationsBlocked(s)) return false;
+  const target = s.model.path;
+  set({ restoring: true });
+  try {
+    await api.restoreBackup(b.path, target);
+    return await readSave(target);
+  } finally {
+    set({ restoring: false });
+  }
 }
