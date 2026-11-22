@@ -71,22 +71,30 @@ test("Russian Deck Save, inspector and footer containment", async ({ page }) => 
   for (const hint of await page.locator(".deck-hint").all()) await contained(hint, page.locator(".deck-hints"));
 });
 
-for (const deck of [false, true]) test(`toolbar contains two additional history actions ${deck ? "Deck" : "desktop"}`, async ({ page }) => {
-  await page.setViewportSize(deck ? { width: 1280, height: 800 } : SIZES[0]); await open(page, deck, "ru");
+for (const deck of [false, true]) for (const locale of deck ? LOCALES : ["ru"]) test(`toolbar contains two additional history actions ${deck ? "Deck" : "desktop"} ${locale}`, async ({ page }) => {
+  await page.setViewportSize(deck ? { width: 1280, height: 800 } : SIZES[0]); await open(page, deck, locale);
   await page.evaluate(async (isDeck) => {
     const { useSession } = await import("/src/editor/kiln/session.js"); useSession.setState({ dirty: true });
     const toolbar = document.querySelector(isDeck ? ".dke-buttons" : ".k-page-actions")!;
     for (const label of ["↶ Отменить", "↷ Повторить"]) {
       const button = document.createElement("button"); button.className = isDeck ? "deck-btn" : "k-btn";
       button.textContent = label; toolbar.insertBefore(button, toolbar.firstChild);
-      if (isDeck) { const hint = document.createElement("button"); hint.className = "deck-hint"; hint.textContent = label; document.querySelector(".deck-hints-left")!.append(hint); }
+      if (isDeck) { const hint = document.createElement("button"); hint.className = "deck-hint"; hint.textContent = label; document.querySelector(".deck-hints-right")!.append(hint); }
     }
   }, deck);
-  await shot(page, `history-actions-${deck ? "deck" : "desktop"}`);
+  await shot(page, `history-actions-${deck ? "deck" : "desktop"}-${locale}`);
   const toolbar = page.locator(deck ? ".dke-buttons" : ".k-page-actions"); await contained(toolbar);
   for (const button of await toolbar.locator("button").all()) await contained(button, toolbar);
   if (!deck) expect((await page.locator(".k-page-head > div").first().boundingBox())!.width).toBeGreaterThanOrEqual((await page.locator(".k-page-head").boundingBox())!.width / 2);
   if (deck) for (const hint of await page.locator(".deck-hint").all()) await contained(hint, page.locator(".deck-hints"));
+});
+
+test("Deck footer leaves room for the complete focus ring", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 }); await open(page, true, "ru");
+  const hint = page.locator(".deck-hints-right button").last(); await hint.focus();
+  await shot(page, "deck-footer-focus");
+  await contained(hint, page.locator(".deck-hints"), true, 6);
+  await contained(hint, undefined, true, 6);
 });
 
 test("Deck inspector numeric control retains its visible focus ring", async ({ page }) => {

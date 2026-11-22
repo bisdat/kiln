@@ -90,7 +90,7 @@
 .deck:has(.deck-editor) .deck-top { grid-template-columns: 6rem minmax(0, 1fr) auto; }
 .deck:has(.deck-editor) .deck-tabs { min-width: 0; gap: 0; }
 .deck:has(.deck-editor) .deck-tab { font-size: 1.0625rem; padding-inline: .375rem; }
-.deck:has(.deck-editor) .deck-hints { flex-wrap: wrap; gap: 0 .5rem; padding: .25rem 1.5rem; }
+.deck:has(.deck-editor) .deck-hints { flex-wrap: wrap; gap: 0 .5rem; padding: .5rem 1.5rem; }
 .deck:has(.deck-editor) .deck-hints-left { flex: 1 1 auto; flex-wrap: wrap; gap: 0 .25rem; }
 .deck:has(.deck-editor) .deck-hints-right { flex: none; margin-left: auto; }
 .deck:has(.deck-editor) .deck-hint { height: 2.75rem; padding-inline: .5rem; font-size: 1.0625rem; }
