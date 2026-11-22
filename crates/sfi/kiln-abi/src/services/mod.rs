@@ -30,6 +30,8 @@ pub mod kiln_hooks;
 pub mod kiln_items;
 pub mod kiln_launch;
 pub mod kiln_log;
+pub mod kiln_markers;
+pub mod kiln_markers_lab;
 pub mod kiln_mod_values;
 pub mod kiln_net;
 pub mod kiln_npcai;

@@ -11,7 +11,7 @@
   "declared": {
     "symbols": 641,
     "constants": 731,
-    "features": 197
+    "features": 198
   },
   "features": {
     "abilities.attributes": true,
@@ -107,6 +107,7 @@
     "items.volume": true,
     "log.mirror": true,
     "log.write": true,
+    "markers.anchors.server": true,
     "mods.boot": true,
     "net.client_guard": true,
     "net.disconnect": true,
@@ -1924,6 +1925,16 @@
       "constants": {},
       "features": {
         "hooks.owner_cleanup": "static"
+      }
+    },
+    "dev28-04-markers": {
+      "level": "static",
+      "date": "2026-11-22",
+      "evidence": "resolved offline (tools/sigport/build_record.py)",
+      "symbols": {},
+      "constants": {},
+      "features": {
+        "markers.anchors.server": "static"
       }
     },
     "dev28-06a-program-wraps": {

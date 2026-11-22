@@ -3943,6 +3943,235 @@
       },
       "sha256": "babe4e75fc47d921587318c72e0e7fe351551d14cb7e6400441e7df24247ca7e"
     },
+    "native/core/abi/services/kiln_markers.h": {
+      "function_macros": [],
+      "inline_helpers": [],
+      "layouts": {
+        "KilnMarkerAnchorResult": {
+          "align": 8,
+          "fields": {
+            "anchor": 8,
+            "entity": 36,
+            "incarnation": 24,
+            "position": 40,
+            "reason": 64,
+            "size": 0,
+            "status": 4,
+            "world_epoch": 16,
+            "world_kind": 32
+          },
+          "size": 320
+        },
+        "KilnMarkerCatalogChange": {
+          "align": 8,
+          "fields": {
+            "count": 12,
+            "generation": 16,
+            "ready": 8,
+            "reason": 24,
+            "role": 4,
+            "size": 0
+          },
+          "size": 280
+        },
+        "KilnMarkerChange": {
+          "align": 8,
+          "fields": {
+            "affected": 48,
+            "audience": 8,
+            "cause": 52,
+            "key": 121,
+            "kind": 4,
+            "owner": 56,
+            "peer_generation": 24,
+            "publisher_generation": 32,
+            "recipient": 12,
+            "sequence": 40,
+            "size": 0,
+            "world_epoch": 16
+          },
+          "size": 192
+        },
+        "KilnMarkerEnvelope": {
+          "align": 8,
+          "fields": {
+            "bytes": 24,
+            "length": 32,
+            "message": 12,
+            "peer": 8,
+            "peer_generation": 16,
+            "reserved": 36,
+            "role": 4,
+            "size": 0
+          },
+          "size": 40
+        },
+        "KilnMarkerIcon": {
+          "align": 4,
+          "fields": {
+            "alias": 46,
+            "flags": 8,
+            "id": 4,
+            "key": 32,
+            "size": 0,
+            "surfaces": 12,
+            "texture_guid": 16,
+            "texture_name": 175
+          },
+          "size": 304
+        },
+        "KilnMarkerPeer": {
+          "align": 8,
+          "fields": {
+            "entity": 16,
+            "flags": 24,
+            "generation": 32,
+            "max_message_bytes": 20,
+            "peer": 8,
+            "reserved": 28,
+            "role": 4,
+            "route": 12,
+            "size": 0
+          },
+          "size": 40
+        },
+        "KilnMarkerResult": {
+          "align": 4,
+          "fields": {
+            "affected": 20,
+            "committed": 8,
+            "queued": 12,
+            "reason": 24,
+            "refused": 16,
+            "size": 0,
+            "status": 4
+          },
+          "size": 280
+        },
+        "KilnMarkerSpec": {
+          "align": 8,
+          "fields": {
+            "follow": 48,
+            "height": 56,
+            "icon_type": 64,
+            "key": 8,
+            "map_label_mode": 76,
+            "max_distance": 60,
+            "position": 24,
+            "priority": 72,
+            "rgba": 68,
+            "size": 0,
+            "surfaces": 4,
+            "text": 80
+          },
+          "size": 96
+        },
+        "KilnMarkerVisibility": {
+          "align": 8,
+          "fields": {
+            "after": 56,
+            "audience": 4,
+            "before": 52,
+            "initial": 12,
+            "key": 137,
+            "owner": 72,
+            "peer_generation": 24,
+            "publisher_generation": 32,
+            "reason": 60,
+            "recipient": 8,
+            "requested": 48,
+            "sequence": 40,
+            "size": 0,
+            "world_epoch": 16
+          },
+          "size": 208
+        },
+        "KilnMarkersApi": {
+          "align": 8,
+          "fields": {
+            "bind_owner": 8,
+            "capture_anchor": 56,
+            "catalog_at": 32,
+            "catalog_count": 24,
+            "catalog_resolve": 40,
+            "clear_local": 88,
+            "clear_sent": 112,
+            "header": 0,
+            "release_anchor": 64,
+            "release_owner": 16,
+            "remove_local": 80,
+            "send": 96,
+            "set_local": 72,
+            "subscribe": 128,
+            "suppress_sent": 120,
+            "unsend": 104,
+            "unsubscribe": 136,
+            "world_epoch": 48
+          },
+          "size": 144
+        },
+        "KilnMarkersBridgeApi": {
+          "align": 8,
+          "fields": {
+            "attach": 8,
+            "header": 0,
+            "peer_down": 24,
+            "peer_up": 16,
+            "pump": 40,
+            "receive": 32
+          },
+          "size": 48
+        }
+      },
+      "sha256": "784ca77506f56bfc4d7f8d24a8228114a2fa33bdf3a5c837176dc5ddfe9a3293"
+    },
+    "native/core/abi/services/kiln_markers_lab.h": {
+      "function_macros": [],
+      "inline_helpers": [],
+      "layouts": {
+        "KilnMarkersLabApi": {
+          "align": 8,
+          "fields": {
+            "create_raw": 24,
+            "follow_now": 8,
+            "header": 0,
+            "stats": 16
+          },
+          "size": 32
+        },
+        "KilnMarkersLabFollow": {
+          "align": 8,
+          "fields": {
+            "entity": 28,
+            "incarnation": 8,
+            "position": 32,
+            "reason": 4,
+            "size": 0,
+            "world_epoch": 16,
+            "world_kind": 24
+          },
+          "size": 56
+        },
+        "KilnMarkersLabStats": {
+          "align": 8,
+          "fields": {
+            "creates": 24,
+            "destroys": 32,
+            "ended": 48,
+            "leases": 16,
+            "network_creates": 40,
+            "other_threads": 8,
+            "references": 20,
+            "serials": 56,
+            "size": 0,
+            "threads": 4,
+            "watched": 12
+          },
+          "size": 64
+        }
+      },
+      "sha256": "03de3c9619807619b9d735e1379b1880b7e1abb92947aa2dfc687bef85786918"
+    },
     "native/core/abi/services/kiln_mod_values.h": {
       "function_macros": [],
       "inline_helpers": [],
@@ -8775,7 +9004,7 @@
   },
   "outputs": {
     "src/bindings.rs": "134028a6a9914076cab3f71f98d356141d4fe36c4d7f51bac6a11819501ed935",
-    "src/layout.rs": "a3fcc459746df5639b4d35b14a49d59421a166ab46c8da524e53d16de995e875",
+    "src/layout.rs": "e9d6bca6fea5e2740837bd5b50fe8f8758d67dc6bd60ff28523fdd5c709ed973",
     "src/services/kiln_abilities.rs": "06a43042e5c96d6261a17b02eab35463b07a8ad83f63b2bb168bca5ff34e582e",
     "src/services/kiln_assets.rs": "e7fe4eb1c4d53ad31eeaf05be06f41c551a49362ad5bd4174465ec18a03effe0",
     "src/services/kiln_assets_vfx.rs": "90ed8ce5ad512bbf4f002db3277bc3b439d648ca437a58d4477eac4ce46c3b81",
@@ -8806,6 +9035,8 @@
     "src/services/kiln_items.rs": "aa910afb12948a34f118f62ca7979704f9f9487e38bd0e76ba6fb8dfba8ef707",
     "src/services/kiln_launch.rs": "ecd86b5c0fc8c0114eeec411fc3a657e78f803f83aabaace53d82142bd932bb7",
     "src/services/kiln_log.rs": "86b18decab13965acd7a5e9d0c3166a80ac5441359f928717b8f4a02cd395df1",
+    "src/services/kiln_markers.rs": "396fba83b17be93970b564b4f5bcd5052795c038d78b54ea80fb6c3e3514c9b9",
+    "src/services/kiln_markers_lab.rs": "e03f1722b7550af2260b4c0092d25a8df38d98222faa6d1b5b2980dbb35e0c3e",
     "src/services/kiln_mod_values.rs": "b8ffa4c778b215cf6b6a9137e8b1ec0925ccdc0a9b23a916c352d9aeee00af90",
     "src/services/kiln_net.rs": "a80d9ff754549a78c03fdc6423f97a582bacbcc11a114ce68a75ecefd873b9ca",
     "src/services/kiln_npcai.rs": "479ad37b5babfc928b3cbb617ca391a623f64a11f3e4f8cf24e42e8a9241cdfa",
@@ -8842,7 +9073,7 @@
     "src/services/kiln_world.rs": "3cb0272179db9c198f154ce6c008837e4bb95245a2ec62993be78879c4b330b8",
     "src/services/kiln_world_budget.rs": "b196426492d0525df1317c08e4927f3f3ff35817990bed8f2b58c02d174bab98",
     "src/services/kiln_worldtables.rs": "3d423bb8cfd5235f82230a1942bbc334d86b55d343e5e5880c671a57d1469fce",
-    "src/services/mod.rs": "9becd6a9dff4e28738a19d6f0ae0089008ce66d961378da272383bb43bd1b986"
+    "src/services/mod.rs": "4fffa61a5942477d74bc6c4473a5e994f2949d8b86310c4af5557c38f6bc85b0"
   },
   "schema": 1,
   "target": "x86_64-pc-windows-msvc"

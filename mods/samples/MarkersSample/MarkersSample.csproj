@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Markers sample (client): markers from a JSON file on the game's map, Kiln's compass strip and in the world, a pin
+       dropped with a key, and a label that follows your own character. Build:
+       dotnet build mods/samples/MarkersSample -c Release -o $KILN_OUT/mods/markers-sample -artifacts-path $KILN_OUT/dotnet -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <GenerateRuntimeConfigurationFiles>false</GenerateRuntimeConfigurationFiles>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../managed/Kiln.Api/Kiln.Api.csproj" Private="false" ExcludeAssets="runtime" />
+    <ProjectReference Include="../../../managed/services/Kiln.Markers/Kiln.Markers.csproj" Private="false" ExcludeAssets="runtime" />
+    <ProjectReference Include="../../../managed/services/Kiln.Client/Kiln.Client.csproj" Private="false" ExcludeAssets="runtime" />
+    <ProjectReference Include="../../../managed/services/Kiln.Ui/Kiln.Ui.csproj" Private="false" ExcludeAssets="runtime" />
+    <None Include="kiln.mod.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="markers.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

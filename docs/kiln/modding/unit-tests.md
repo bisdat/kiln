@@ -552,6 +552,9 @@ time with them sees almost none pass between steps, and an `await Task.Delay(...
 | kiln.hooks | unavailable | `kiln.hooks` | no fake: the service finds no native table, so its own Available is false and its row says offline |
 | kiln.knowledge | unavailable | `kiln.knowledge` | no fake: the service finds no native table, so its own Available is false and its row says offline |
 | kiln.log | unavailable | `kiln.log` | no fake: the service finds no native table, so its own Available is false and its row says offline |
+| kiln.markers | unavailable | `kiln.markers` | no fake: the service finds no native table, so its own Available is false and its row says offline |
+| kiln.markers.bridge | unavailable | `kiln.markers.bridge` | no fake: the service finds no native table, so its own Available is false and its row says offline |
+| kiln.markers.lab | unavailable | `kiln.markers.lab` | no fake: the service finds no native table, so its own Available is false and its row says offline |
 | kiln.mod-values | unavailable | `kiln.mod-values` | no fake: the service finds no native table, so its own Available is false and its row says offline |
 | kiln.npcai | unavailable | `kiln.npcai` | no fake: the service finds no native table, so its own Available is false and its row says offline |
 | kiln.pacing | unavailable | `kiln.pacing` | no fake: the service finds no native table, so its own Available is false and its row says offline |

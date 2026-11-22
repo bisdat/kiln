@@ -1,0 +1,10 @@
+{
+  "id": "markers-send-test",
+  "name": "Markers sent by a server mod (test)",
+  "version": "0.1.0",
+  "apiVersion": "0.2",
+  "entryAssembly": "MarkersSendTest.dll",
+  "side": "server",
+  "clients": "none",
+  "description": "PASS/FAIL lines 'markers-send-test: ...': kiln.markers' server layers and link in a lab, with tools/nettest/markerstest.py as a receiving Kiln peer that does not have this mod and a vanilla peer (dossier chapter 04, M08/M10)."
+}

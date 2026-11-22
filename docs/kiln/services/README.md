@@ -35,6 +35,7 @@ available is generated from a boot's `capabilities.json`: [../status.generated.m
 | [items.md](items.md) | kiln.items: items in inventories |
 | [knowledge.md](knowledge.md) | kiln.knowledge: the game's knowledge, the vanilla journal, dialogue events, the client veto |
 | [client-building-input.md](client-building-input.md) | kiln.client / BuildingInput: the local player's building input (select, place, remove, undo, dismantle) on game client 26430625, hooked at the first request (since 0.2.0-dev.30.3) |
+| [markers.md](markers.md) | kiln.markers / Kiln.Markers: markers on the game's map, Kiln's compass strip and world labels, following an entity, server markers to players with Kiln |
 | [net-steam-messages.md](net-steam-messages.md) | kiln.net / SteamMessages: Steam peer-to-peer messages on leased Steam channels, each lease its owner's (since 0.2.0-dev.30.3; C# mods opt in with `"steamMessages": true`) |
 | [npcs.md](npcs.md) | Friendly NPCs and quests in the game's own UI |
 | [survivors.md](survivors.md) | kiln.survivors: recruit roster survivors, give their summon tool, summon them into a base, assign beds (since 0.2.0-dev.31) |

@@ -1,0 +1,9 @@
+{
+  "id": "markers-test",
+  "name": "kiln.markers anchors lab test",
+  "version": "0.1.0",
+  "apiVersion": "0.2",
+  "entryAssembly": "MarkersTest.dll",
+  "side": "server",
+  "description": "PASS/FAIL lines: Markers.CaptureServerAnchor and the anchors' follow read on a dedicated server (the research probe's run through the product API: an entity without SpawnTime, destroy ends the incarnation, the same id recreated is a new one), the lease limit, a Kiln.Spawn entity, and the create/destroy observers on the game's worker threads with the lab parallel switch. A lab with kiln/control/markers.lab and kiln/control/systems.parallel, no player."
+}
