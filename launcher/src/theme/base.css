@@ -101,7 +101,14 @@ html[data-covered] .k-app ::-webkit-scrollbar, html[data-covered] [data-deck-scr
 /* ---------------------------------------------------------------- the Play page (in front of the stage) */
 .k-hero-layer { position: absolute; inset: 0; z-index: 2; pointer-events: none; opacity: 0; visibility: hidden; transition: opacity .35s, visibility 0s linear .35s; }
 .k-hero-layer.on { opacity: 1; visibility: visible; transition: opacity .35s; }
-.k-hero { position: absolute; left: 64px; top: 92px; bottom: 98px; width: min(630px, calc(100% - var(--kiln) - 170px)); display: flex; flex-direction: column; gap: 10px; pointer-events: auto; }
+.k-hero { position: absolute; left: 64px; top: 92px; bottom: 98px; width: min(630px, calc(100% - var(--kiln) - 170px)); display: flex; flex-direction: column; gap: 10px; pointer-events: auto;
+  /* a short window (a Steam Deck's 1280x800 desktop, notices above the list): the column scrolls; the list keeps 3 rows */
+  overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.k-hero > * { flex-shrink: 0; }
+/* the list fills what is left, never less than its notices, its bar and three rows (min-height: auto in a column) */
+.k-hero > .k-mods:not(.empty) { flex-shrink: 1; min-height: auto; }
+/* Play's list keeps three rows (not the Load order page's lists, which share the class) */
+.k-hero .k-mods-list:not(.k-order-list) { min-height: 132px; }
 /* with the mod list: the column takes the room left of the kiln (48 px from the right edge), up to a width a list still
    reads well at */
 .k-hero.with-mods { width: clamp(400px, calc(100% - var(--kiln) - 48px - 64px - 48px), 920px); gap: 8px; }

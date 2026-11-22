@@ -8,7 +8,7 @@ export function SfSelfHostedNotice({ profile, found }: { profile: Profile | null
   const t = useT();
   const file = sfSelfHostedFile(profile, found);
   if (!file) return null;
-  return <div style={{ flexShrink: 0, overflowWrap: "anywhere" }}><Banner tone="warn" title={t("sfSelfHostedNotice.title")} actions={file.toLowerCase() === "dinput8.dll"
+  return <div style={{ flexShrink: 0, overflowWrap: "anywhere" }}><Banner tone="warn" title={t("sfSelfHostedNotice.title")} fold={`sf-self-hosted:${file.toLowerCase()}`} actions={file.toLowerCase() === "dinput8.dll"
     ? <Link className="k-link" to="/runtime">{t("sfSelfHostedNotice.manage")}</Link> : undefined}>
     {sfSelfHostedText(file)}
   </Banner></div>;
