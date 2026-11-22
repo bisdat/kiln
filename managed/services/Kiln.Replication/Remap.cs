@@ -35,11 +35,7 @@ internal static unsafe class ItemRemap
     {
         Span<uint> ids = stackalloc uint[FilterHost.Machines];
         Span<byte> flags = stackalloc byte[FilterHost.Machines];
-        if (ReplNetNative.MachinePeers(ids, flags) != ReplNative.Ok) return [];
-        var list = new List<uint>();
-        for (var m = 0; m < ids.Length; m++)
-            if (ids[m] != 0 && (m != 0 || (flags[m] & ReplNative.PeerLocal) != 0)) list.Add(ids[m]);  // a dedicated server's machine 0 is itself
-        return [.. list];
+        return ReplNetNative.MachinePeers(ids, flags) == ReplNative.Ok ? Remappable(ids, flags) : [];
     }
 
     /// <summary>Kiln's own rule plus the mods' (RemapItems).</summary>
@@ -109,12 +105,13 @@ internal static unsafe class ItemRemap
     internal static IEnumerable<NetPeer> ToKick(IEnumerable<NetPeer> peers, int kilnOnly, bool working, bool active, bool allow) =>
         working || kilnOnly == 0 || allow ? [] : peers.Where(p => p.State == NetPeerState.Vanilla);
 
-    /// <summary>The machines' peers the remap may cover (review recheck E). RED STUB.</summary>
+    /// <summary>The machines' peers RemapItems(Peers.All) covers (recheck E): never machine 0 (a dedicated server itself, a
+    /// hosted world's own client, which has its content) nor the local client, as LackingContent.</summary>
     internal static uint[] Remappable(ReadOnlySpan<uint> ids, ReadOnlySpan<byte> flags)
     {
         var list = new List<uint>();
-        for (var m = 0; m < ids.Length; m++)
-            if (ids[m] != 0 && (m != 0 || (flags[m] & ReplNative.PeerLocal) != 0)) list.Add(ids[m]);
+        for (var m = 1; m < ids.Length; m++)
+            if (ids[m] != 0 && (flags[m] & ReplNative.PeerLocal) == 0) list.Add(ids[m]);
         return [.. list];
     }
 
