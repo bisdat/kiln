@@ -20,7 +20,9 @@ public sealed class BuildingToolsFakeTests
         public override void OnLoad()
         {
             base.OnLoad();
-            Blocks.Define("recipe",new RecipeBlock {Output="tool",Needs=new Dictionary<ItemRef,int> { ["Build_TerrainMaterial_T1_Rubble"]=1 }});
+            var recipe=Blocks.Define("recipe",new RecipeBlock {Output="tool",TrackCrafted=true,Needs=new Dictionary<ItemRef,int> { ["Build_TerrainMaterial_T1_Rubble"]=1 }});
+            Blocks.Define("found",new KnowledgeBlock {Trigger=KnowledgeTrigger.Pickup,Of="tool"});
+            Blocks.Define("made",new KnowledgeBlock {Trigger=KnowledgeTrigger.Craft,Of=recipe.Name});
         }
     }
     private sealed class EmptyMod:Mod;
@@ -33,6 +35,14 @@ public sealed class BuildingToolsFakeTests
         var id=h.Run(()=>Blocks.Find("recipe",mod.Id)!.Guid);
         var lowered=JsonNode.Parse(h.Run(()=>Blocks.Lowered("recipe",mod.Id))!)!;
         Assert.Single(lowered["recipes"]!.AsArray());Assert.False(h.Run(()=>Content.Available));
+        var runtimeRecipe=lowered["recipes"]![0]!;
+        Assert.Equal(BlockIds.Derive(mod.Id,"recipe","recipes/recipe"),id);
+        Assert.Equal(id,Guid.Parse((string)runtimeRecipe["guid"]!));Assert.True((bool)runtimeRecipe["trackCrafted"]!);
+        var pickup=JsonNode.Parse(h.Run(()=>Blocks.Lowered("found",mod.Id))!)!["knowledge"]!;
+        var crafted=JsonNode.Parse(h.Run(()=>Blocks.Lowered("made",mod.Id))!)!["knowledge"]!;
+        var toolId=h.Run(()=>BlockIds.Fnv(Blocks.Find("tool",mod.Id)!.Guid));
+        Assert.Equal($"0x{toolId:x8}",(string?)pickup["id"]);Assert.Equal("both",(string?)pickup["scope"]);
+        Assert.Equal($"0x{BlockIds.Fnv(id):x8}",(string?)crafted["id"]);Assert.Equal("player",(string?)crafted["scope"]);
         var again=h.Reload(mod);Assert.True(again.IsLoaded,again.Error);
         Assert.Equal(id,h.Run(()=>Blocks.Find("recipe",again.Id)!.Guid));
         // This only records a recipe for a known pending tool. Ordinary content calls are still unavailable.
