@@ -268,7 +268,6 @@ internal static class UiRuntime
             {
                 Of(plan.Mod).Huds[plan.Name] = state;
                 _huds = [.. Mods_.Values.SelectMany(x => x.Huds.Values)];
-            _windows = [.. Mods_.Values.SelectMany(x => x.Windows.Values)];
             }
         });
         EnsureTick();
