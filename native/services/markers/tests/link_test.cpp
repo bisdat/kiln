@@ -1229,6 +1229,115 @@ void inbox_flood() {
     kmk_test::end("link.inbox_flood: one flooding peer keeps only its own share of the server inbox; others' acks get in");
 }
 
+// Review test gap 2: a cheap random-input run of the wire decoders and of both roles' handling of mutated real frames
+// (bit flips, truncation, garbage tails, wrong message ids), under ASan/UBSan. Afterwards the link must recover and the
+// client's limits must hold.
+void fuzz_wire_and_roles() {
+    kmk_test::begin();
+    World w;
+    Proc& p = w.client();
+    Conn& c = w.net.join(&p, 0x81, 101);
+    std::vector<std::pair<uint32_t, std::vector<uint8_t>>> to_client, to_server;
+    w.net.filter = [&](bool down, Conn&, uint32_t m, const std::vector<uint8_t>& b) {
+        auto& v = down ? to_client : to_server;
+        if (v.size() < 600) v.push_back({m, b});
+        return 1;
+    };
+    w.net.settle();
+    g_follow_on = true;
+    g_follow[91] = {{110, 50, 100}, KILN_MARKER_READY};
+    for (int i = 0; i < 6; ++i) {
+        Spec s("f" + std::to_string(i), "Fuzz seed " + std::to_string(i), i % 2 ? KILN_MARKER_WORLD : KILN_MARKER_COMPASS);
+        if (i == 3) s.s.follow = 91;
+        w.send(i == 4 ? 101 : 0, s);
+        w.net.step(4);
+        g_follow[91].first.x += 1;
+    }
+    w.unsend(0, "f1");
+    w.net.settle(20);
+    w.net.filter = nullptr;
+    CHECK(to_client.size() > 10 && to_server.size() > 3);
+    uint64_t rng = 0x9e3779b97f4a7c15ull;
+    auto next = [&] {
+        rng ^= rng << 13;
+        rng ^= rng >> 7;
+        rng ^= rng << 17;
+        return rng;
+    };
+    auto mutate = [&](std::vector<uint8_t> b) {
+        switch (next() % 5) {
+            case 0: for (int k = 0, n = 1 + int(next() % 4); k < n && !b.empty(); ++k) b[next() % b.size()] ^= uint8_t(1u << (next() % 8)); break;
+            case 1: if (!b.empty()) b.resize(next() % b.size()); break;
+            case 2: for (int k = 0, n = int(next() % 64); k < n; ++k) b.push_back(uint8_t(next())); break;
+            case 3: if (b.size() > 44) for (size_t k = 44; k < b.size(); ++k) if (next() % 7 == 0) b[k] = uint8_t(next()); break;
+            default: for (auto& x : b) if (next() % 13 == 0) x = uint8_t(next()); break;
+        }
+        return b;
+    };
+    wire::Header h;
+    const char* why;
+    for (int i = 0; i < 20000; ++i) {
+        const bool down = next() % 4 != 0;
+        const auto& pick = down ? to_client[next() % to_client.size()] : to_server[next() % to_server.size()];
+        const std::vector<uint8_t> b = mutate(pick.second);
+        const uint32_t m = next() % 9 == 0 ? uint32_t(next() % 14) : pick.first;
+        // every decoder on every buffer: none may read out of bounds or accept a malformed length
+        { wire::Hello x; wire::decode_hello(b.data(), b.size(), &h, &x, &why); }
+        { wire::Welcome x; wire::decode_welcome(b.data(), b.size(), &h, &x, &why); }
+        { wire::Catalog x; wire::decode_catalog(b.data(), b.size(), &h, &x, &why); }
+        { wire::SnapBegin x; wire::decode_snap_begin(b.data(), b.size(), &h, &x, &why); }
+        { wire::SnapChunk x; wire::decode_snap_chunk(b.data(), b.size(), &h, &x, &why); }
+        { wire::SnapEnd x; wire::decode_snap_end(b.data(), b.size(), &h, &x, &why); }
+        { std::vector<wire::DeltaOp> x; wire::decode_delta(b.data(), b.size(), &h, &x, &why); }
+        { std::vector<wire::Pose> x; wire::decode_pose(b.data(), b.size(), &h, &x, &why); }
+        { wire::Ack x; wire::decode_ack(b.data(), b.size(), &h, &x, &why); }
+        { wire::Resync x; wire::decode_resync(b.data(), b.size(), &h, &x, &why); }
+        wire::decode_heartbeat(b.data(), b.size(), &h, &why);
+        if (down) p.inbox[1].push(kServerPeer, c.cgen, m, b.data(), b.size());
+        else w.srv.inbox[0].push(c.peer, c.sgen, m, b.data(), b.size());
+        if (i % 16 == 0) w.net.step(1);
+        CHECK(p.store.received_count() <= 512);
+    }
+    // quiet again: the suspension and lease run out, the link comes back with a full snapshot
+    w.net.step(400);
+    Spec after("after_fuzz", "After the fuzz");
+    w.send(0, after);
+    w.net.settle(60);
+    CHECK(p.row("after_fuzz") != nullptr);
+    g_follow_on = false;
+    kmk_test::end("link.fuzz: 20000 mutated frames through every decoder and both roles, then the link recovers");
+}
+
+// Review question (server.cpp peer_up): a player's entity id going to 0 and coming back as another id on the SAME
+// connection (dying and respawning, a recreated player entity) keeps that player's per-player markers: a connection
+// carries one player, a new character means a new connection.
+void respawn_keeps_target_layer() {
+    kmk_test::begin();
+    World w;
+    Proc& p = w.client();
+    Conn& c = w.net.join(&p, 0x81, 101);
+    w.net.settle();
+    Spec a("k", "For everyone");
+    w.send(0, a);
+    Spec b("k", "Only for you");
+    w.send(101, b);
+    w.net.settle();
+    const ClientRow* row = p.row("k");
+    CHECK(row && std::string(row->rec.text) == "Only for you");
+    CHECK_EQ(up(*w.srv.bridge, peer(0, 0x81, kRouteNetwork, 0, kKiln & ~kHasPlayer, c.sgen)), KILN_OK);  // dead: no entity
+    w.net.step(10);
+    CHECK_EQ(up(*w.srv.bridge, peer(0, 0x81, kRouteNetwork, 105, kKiln, c.sgen)), KILN_OK);  // respawned as 105
+    w.net.settle();
+    row = p.row("k");
+    CHECK(row && std::string(row->rec.text) == "Only for you");
+    Spec t("t2", "Sent to the new id");
+    KilnMarkerResult r = w.send(105, t);
+    CHECK(r.status == KILN_MARKER_ACCEPTED && r.queued == 1);
+    w.net.settle();
+    CHECK(p.row("t2") != nullptr);
+    kmk_test::end("link.respawn_keeps_target_layer: a player's per-player markers survive an entity id change on one connection");
+}
+
 int main(int argc, char** argv) {
     g_verbose = argc > 1 && std::strcmp(argv[1], "-v") == 0;
     g_digest_hex = synthetic_catalog()->digest_hex();
@@ -1246,6 +1355,8 @@ int main(int argc, char** argv) {
     follow_references();
     received_text_budget();
     inbox_flood();
+    fuzz_wire_and_roles();
+    respawn_keeps_target_layer();
     limits();
     error_rule();
     client_world_stop();
