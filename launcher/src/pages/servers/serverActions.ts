@@ -9,10 +9,11 @@ import { create } from "zustand";
 import { taskCancel, type KilnError, type ServerId, type Task, type TaskId } from "../../api/commands";
 import { toast, useTasks, waitTask } from "../../ui";
 import { sk } from "./serverApi";
+import { recordFlowEnd } from "./activityLog";
 
 export type StepState = "pending" | "running" | "done" | "failed" | "canceled" | "skipped";
 export type FlowState = "running" | "done" | "failed" | "canceled";
-export type FlowKind = "start" | "stop" | "restart" | "update" | "deploy";
+export type FlowKind = "start" | "stop" | "restart" | "update" | "deploy" | "create" | "backup";
 /** What the head says while a step runs. */
 export type FlowPhase = "starting" | "stopping" | "updating";
 /** How a running step can be ended early: "cancel" ends the task (an install, an update); "stopWaiting" ends a start's
@@ -38,6 +39,8 @@ export interface FlowStep {
   endedAt?: number;
   phase?: FlowPhase;
   cancel?: StepCancel;
+  /** the step's task result once it is done (the activity log reads a start's status, an install's receipt) */
+  result?: unknown;
 }
 
 export interface Flow {
@@ -60,6 +63,8 @@ export interface Flow {
   open?: boolean;
   /** a later flow (Stop during a start) took over */
   superseded?: boolean;
+  /** what the flow's caller knew before it ran (an update's previous Kiln: "from"), for the activity log */
+  meta?: Record<string, string | null | undefined>;
 }
 
 /** What a step does: starts a TaskId command. `phase`: what the head says while it runs. */
@@ -83,6 +88,8 @@ export interface FlowSpec<R = unknown> {
   detail?: (result: R) => string | undefined;
   /** called with the flow's result */
   after?: (result: R) => void;
+  /** kept on the flow for the activity log (Flow.meta) */
+  meta?: Record<string, string | null | undefined>;
 }
 
 const MAX_LINES = 400;
@@ -190,7 +197,7 @@ export async function runFlow<R = unknown>(qc: QueryClient, id: ServerId, spec: 
   const t0 = Date.now();
   useServerFlows.setState((st) => ({ specs: { ...st.specs, [id]: spec } }));
   useServerFlows.getState().put({
-    seq: s, kind: spec.kind, serverId: id, title: spec.title, state: "running", startedAt: t0,
+    seq: s, kind: spec.kind, serverId: id, title: spec.title, state: "running", startedAt: t0, meta: spec.meta,
     steps: spec.steps.map((x) => ({ key: x.key, label: x.label, state: "pending", progress: null, lines: [], phase: x.phase, cancel: x.cancel })),
   });
   const resultAt = spec.steps.some((x) => x.result) ? spec.steps.findIndex((x) => x.result) : spec.steps.length - 1;
@@ -209,7 +216,7 @@ export async function runFlow<R = unknown>(qc: QueryClient, id: ServerId, spec: 
       });
       const r = await waitTask(taskId);
       follow(id, s, i, useTasks.getState().tasks[taskId], t0);
-      patchStep(id, s, i, { state: "done", endedAt: Date.now(), progress: 1 });
+      patchStep(id, s, i, { state: "done", endedAt: Date.now(), progress: 1, result: r });
       // the result step's note and notice at once: a later step's failure must not lose them
       if (i === resultAt && useServerFlows.getState().flows[id]?.seq === s) {
         const detail = spec.detail?.(r as R);
@@ -238,6 +245,8 @@ export async function runFlow<R = unknown>(qc: QueryClient, id: ServerId, spec: 
     error: failed,
     doneText: ok ? spec.done : undefined,
   }));
+  // the Servers list's "Recent" (activityLog.ts): every flow of this launcher that ends, whoever started it
+  if (mine) recordFlowEnd(qc, useServerFlows.getState().flows[id]);
   if (mine && !shown.has(id)) {
     const detail = useServerFlows.getState().flows[id]?.detail;
     if (ok) toast.ok(spec.done, detail);
