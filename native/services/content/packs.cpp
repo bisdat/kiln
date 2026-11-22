@@ -904,8 +904,9 @@ std::vector<PackFile> order_packs(const std::vector<PackFile>& files, const std:
 }
 
 PacksReport apply_all_packs(const std::vector<PackFile>& files) {
-    std::lock_guard lock(store_mutex());
     PacksReport rep;
+    {
+    std::lock_guard lock(store_mutex());
     rep.generation = ++g_generation;
     for (auto& [id, owner] : g_pack_owners) {
         store_drop_owner(owner);
@@ -939,10 +940,12 @@ PacksReport apply_all_packs(const std::vector<PackFile>& files) {
         t_pack_dir.clear();
         rep.files.emplace_back(p.rel, std::move(r));
     }
-    registry_live_apply(files);  // the registry's live layers over the packs (re-evaluated, or recomposed when a section changed)
+    registry_live_apply(files, false);  // the registry's live layers over the packs (re-evaluated, or recomposed when a section changed)
     std::string ferr;
     store_flush(&ferr);
     rep.conflicts = store_conflicts();
+    }
+    registry_live_publish();  // registry.json with the store's lock released (review finding 10)
     return rep;
 }
 

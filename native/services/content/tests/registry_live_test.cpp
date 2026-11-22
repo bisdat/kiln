@@ -482,7 +482,7 @@ void hot_reload() {
     g_files["b/content/b.json"] = R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "maxStack", "op": {"mul": 3}}]}})";
     registry_live_apply(files);
     check(at<uint32_t>(WOOD_AT) == 120, "recomposed: x4 then x3 = 120");
-    const registry::Result* r = registry_live_result();
+    const auto r = registry_live_result();
     check(r && r->fields.count({"items", "game:material_t1_wood_logs", "maxStack"}) &&
               r->fields.at({"items", "game:material_t1_wood_logs", "maxStack"}).result == registry::Value::integer(120),
           "registry.json has the new result");

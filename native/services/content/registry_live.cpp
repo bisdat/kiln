@@ -50,6 +50,9 @@ struct LiveState {
         registry::FieldSpec spec;
     };
     std::vector<Scalar> scalars;
+    registry::Result pending;  // the last application's report, waiting for registry_live_publish
+    bool pending_set = false;
+    size_t skipped_logged = 0;  // store_skipped rows already in kiln.log
     registry::Result reported;
     bool have_report = false;
     uint32_t ordinal = 0;
@@ -717,18 +720,28 @@ void report() {
     for (const LiveState::Scalar& sc : g.scalars) live_row(r, sc);
     const size_t first = r.refused.size();
     for (const registry::Refusal& x : g.refused) r.refused.push_back(x);
-    for (const StoreSkipped& s : store_skipped()) {
+    const size_t live_end = r.refused.size();
+    const std::vector<StoreSkipped> skipped = store_skipped();
+    for (const StoreSkipped& s : skipped) {
         registry::Refusal x;
         x.mod = s.mod, x.source = s.source, x.reason = s.text;
         r.refused.push_back(std::move(x));
     }
+    // this application's refusals, then the skipped writes found since the last report (each once per world)
     size_t logged = 0;
-    for (size_t i = first; i < r.refused.size() && logged < 50; ++i, ++logged)
+    const size_t from_skipped = live_end + std::min(g.skipped_logged, skipped.size());
+    for (size_t i = first; i < r.refused.size() && logged < 50; ++i) {
+        if (i >= live_end && i < from_skipped) continue;
         LOGW("registry (live): %s%s", r.refused[i].mod.empty() ? "" : (r.refused[i].mod + ": ").c_str(), r.refused[i].reason.c_str());
-    if (r.refused.size() - first > 50) LOGW("registry (live): ... and %zu more (state/registry.json)", r.refused.size() - first - 50);
+        ++logged;
+    }
+    const size_t to_log = (live_end - first) + (skipped.size() - std::min(g.skipped_logged, skipped.size()));
+    if (to_log > 50) LOGW("registry (live): ... and %zu more (state/registry.json)", to_log - 50);
+    g.skipped_logged = skipped.size();
     g.reported = r;
     g.have_report = true;
-    if (g.in->report) g.in->report(r);
+    g.pending = std::move(r);  // written by registry_live_publish, outside the store's lock (review finding 10)
+    g.pending_set = true;
 }
 
 std::string edit_key(const registry::Edit& e) {
@@ -856,6 +869,8 @@ void registry_live_install(RegistryLive in) {
     g.hashes.clear();
     g.applied = false;
     g.have_report = false;
+    g.pending_set = false;
+    g.skipped_logged = 0;
 }
 
 bool registry_live_installed() {
@@ -863,26 +878,49 @@ bool registry_live_installed() {
     return g.in != nullptr;
 }
 
-void registry_live_apply(const std::vector<PackFile>& files) {
-    std::lock_guard lock(store_mutex());
-    if (!g.in) return;
-    const std::vector<RegistrySection> sections = registry_sections(files, *g.in->schema);
-    std::map<std::string, uint64_t> hashes;
-    for (const RegistrySection& s : sections) hashes[s.rel] = s.hash;
-    g.refused.clear(), g.refused_keys.clear();
-    if (g.applied && hashes != g.hashes) {
-        LOGI("registry: a data pack's registry section changed: composing the registry again");
-        recompose(sections);
+void registry_live_apply(const std::vector<PackFile>& files, bool publish) {
+    std::shared_ptr<const registry::Schema> schema;
+    {
+        std::lock_guard lock(store_mutex());
+        if (!g.in) return;
+        schema = g.in->schema;
     }
-    g.hashes = std::move(hashes);
-    g.section_of.clear();
-    for (const RegistrySection& s : sections) g.section_of[s.rel] = {s.mod, s.source};
-    g.applied = true;
-    put_all();
-    std::string err;
-    store_flush(&err);
-    if (!err.empty()) LOGW("registry (live): writing: %s", err.c_str());
-    report();
+    // the pack files are read and lowered before the store's lock is taken (review finding 10)
+    const std::vector<RegistrySection> sections = registry_sections(files, *schema);
+    {
+        std::lock_guard lock(store_mutex());
+        if (!g.in) return;
+        std::map<std::string, uint64_t> hashes;
+        for (const RegistrySection& s : sections) hashes[s.rel] = s.hash;
+        g.refused.clear(), g.refused_keys.clear();
+        if (g.applied && hashes != g.hashes) {
+            LOGI("registry: a data pack's registry section changed: composing the registry again");
+            recompose(sections);
+        }
+        g.hashes = std::move(hashes);
+        g.section_of.clear();
+        for (const RegistrySection& s : sections) g.section_of[s.rel] = {s.mod, s.source};
+        g.applied = true;
+        put_all();
+        std::string err;
+        store_flush(&err);
+        if (!err.empty()) LOGW("registry (live): writing: %s", err.c_str());
+        report();
+    }
+    if (publish) registry_live_publish();
+}
+
+void registry_live_publish() {
+    std::function<void(const registry::Result&)> fn;
+    registry::Result r;
+    {
+        std::lock_guard lock(store_mutex());
+        if (!g.in || !g.pending_set) return;
+        r = std::move(g.pending);
+        g.pending_set = false;
+        fn = g.in->report;
+    }
+    if (fn) fn(r);  // registry.json: the stage runner writes it, with no lock of kiln.content's held
 }
 
 void registry_live_table(const Entry& table) {
@@ -916,9 +954,10 @@ void drops_table_loaded(const Entry& table) {
     registry_live_table(table);                        // the registry's layers over the stacks the game reads now, rules or not
 }
 
-const registry::Result* registry_live_result() {
+std::optional<registry::Result> registry_live_result() {
     std::lock_guard lock(store_mutex());
-    return g.have_report ? &g.reported : nullptr;
+    if (!g.have_report) return std::nullopt;
+    return g.reported;  // a copy: the next application replaces it
 }
 
 }  // namespace kc

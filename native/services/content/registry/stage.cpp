@@ -730,6 +730,7 @@ void Runner::finish(const std::vector<BootOutcome>& outcomes) {
     std::vector<std::function<void(Phase, uint64_t)>> ready;
     LiveHandoff live;
     uint64_t gen = 0;
+    std::string plan_rel, plan_text, report_text;  // written after the runner's lock is released (review finding 10)
     {
         std::lock_guard lk(d.mu);
         if (phase_.load() == Phase::Start || phase_.load() == Phase::WorldLoad) return;
@@ -785,10 +786,13 @@ void Runner::finish(const std::vector<BootOutcome>& outcomes) {
         for (const auto& o : d.meta.order) key["order"].push_back({{"mod", o.mod}, {"version", o.version}, {"inputs", o.edits_hash}});
         const json plan = {{"format", 1}, {"key", key}, {"boot", bootj}, {"live", livej}, {"adds", adds}};
         const std::string hash = sha_hex(plan.dump());
-        if (d.env.write_data && d.env.write_data("plans/" + hash + ".json", plan.dump(1))) d.meta.plan = {hash, "kiln/data/content/registry/plans/" + hash + ".json", ""};
+        if (d.env.write_data) {
+            plan_rel = "plans/" + hash + ".json", plan_text = plan.dump(1);
+            d.meta.plan = {hash, "kiln/data/content/registry/plans/" + hash + ".json", ""};
+        }
         const json doc = ::kc::registry::report_json(d.schema, d.result, d.meta);
         d.report = doc.dump();
-        if (d.env.write_report && !d.env.write_report(doc.dump(1))) d.log(1, "registry: state/registry.json could not be written");
+        report_text = doc.dump(1);
         // refusals first (warnings, never crowded out by conflict lines), then the conflict lines, then one total
         const std::vector<std::string> all = report_log(d.result);  // refusals first (warnings), then conflicts, then the total
         for (size_t i = 0; i < all.size(); ++i) {
@@ -829,6 +833,8 @@ void Runner::finish(const std::vector<BootOutcome>& outcomes) {
             for (const auto& fn : fns) fn(Phase::WorldLoad, g2);
         };
     }
+    if (!plan_rel.empty() && !d.env.write_data(plan_rel, plan_text)) d.log(1, "registry: the plan could not be written");
+    if (d.env.write_report && !d.env.write_report(report_text)) d.log(1, "registry: state/registry.json could not be written");
     if (live_) live_(live);
     else {
         bool any = false;

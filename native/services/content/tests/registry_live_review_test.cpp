@@ -9,6 +9,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include "../content.h"
 #include "../registry/formulas.h"
 #include "../registry/schema_ir.h"
@@ -465,6 +466,34 @@ void reload_keeps_boot_outcomes_and_checks_sections() {
     check(at<uint32_t>(WOOD_AT + 4) == 0, "and not written");
 }
 
+// L4 (review finding 10): registry.json is written with no lock of kiln.content's held: apply_all_packs applies under the
+// store's lock (registry_live_apply(files, false)) and publishes after it released the lock.
+void report_written_outside_the_store_lock() {
+    world();
+    g_files = {{"a/content/a.json", R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "maxStack", "op": {"mul": 4}}]}})"}};
+    const auto files = files_of({{"a", "a/content/a.json"}});
+    stage(files);
+    bool free = false, called = false;
+    {
+        std::lock_guard lock(store_mutex());
+        g.in->report = [&](const registry::Result&) {
+            called = true;
+            std::thread t([&] {
+                free = store_mutex().try_lock();
+                if (free) store_mutex().unlock();
+            });
+            t.join();
+        };
+    }
+    {
+        std::lock_guard lock(store_mutex());  // apply_all_packs's hold
+        registry_live_apply(files, false);
+        check(!called, "not published under the store's lock");
+    }
+    registry_live_publish();
+    check(called && free, "published with the store's lock free (another thread took it)");
+}
+
 // L3: store.cpp store_flush: when compare-before-write fires on a slot in the same flush as an old pack's layer change
 // (every pack application re-puts the pack layers: apply_all_packs drops and puts them, old_changed = true), the
 // "continue" also drops the pack's write and clears old_changed, so the old pack's new value is never written that time.
@@ -500,7 +529,8 @@ int main() {
                                                          {"L1b drop_table_repointed_by_newcontent", &drop_table_repointed_by_newcontent},
                                                          {"L2 reload_loses_stage_refusals", &reload_loses_stage_refusals},
                                                          {"L2b reload_keeps_boot_outcomes_and_checks_sections", &reload_keeps_boot_outcomes_and_checks_sections},
-                                                         {"L3 pack_write_lost_on_detection", &pack_write_lost_on_detection}};
+                                                         {"L3 pack_write_lost_on_detection", &pack_write_lost_on_detection},
+                                                         {"L4 report_written_outside_the_store_lock", &report_written_outside_the_store_lock}};
     for (const auto& [name, fn] : groups) {
         try {
             fn();
