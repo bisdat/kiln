@@ -1,0 +1,112 @@
+{
+  "$schema": "../registry-schema.schema.json",
+  "registrySchema": 1,
+  "registry": "recipes",
+  "typeName": "Recipe",
+  "version": "0.1.0",
+  "stability": "experimental",
+  "experimentalId": "KILNX031",
+  "doc": "Every crafting recipe: what it takes, what it makes and how long it takes.",
+  "ids": {
+    "game": "game:<stable name>",
+    "mod": "<mod id>:<name>",
+    "rule": "The stable name starts as the recipe's debug name in lower case. A recipe without a debug name is game:recipe_<its 32-bit recipe id as 8 hex digits> (the name Kiln's content selectors already give it). Recipes and items are separate registries: a recipe may have the same id as the item it makes. When two recipes would get the same name, the one that held it first keeps it and the other is game:<name>~<first 8 hex digits of its GUID>."
+  },
+  "traits": {
+    "cooking": "a cooking recipe",
+    "upgrade": "an upgrade recipe"
+  },
+  "fields": {
+    "inputs": {
+      "type": "list",
+      "maxItems": 32,
+      "applies": "now",
+      "ops": "list",
+      "doc": "What one craft takes: an item or an input category, and a count.",
+      "of": {
+        "type": "struct",
+        "fields": {
+          "item": {
+            "type": "ref",
+            "registry": "items",
+            "doc": "The item; absent when the input is a category.",
+            "ops": "set",
+            "optional": true
+          },
+          "category": {
+            "type": "ref",
+            "registry": "inputCategories",
+            "doc": "An input category (any item of it); absent when the input is an item.",
+            "ops": "set",
+            "optional": true
+          },
+          "count": {
+            "type": "int",
+            "min": 1,
+            "max": 65535,
+            "ops": "number"
+          }
+        },
+        "typeName": "RecipeInput"
+      }
+    },
+    "outputs": {
+      "type": "list",
+      "maxItems": 32,
+      "applies": "now",
+      "ops": "list",
+      "doc": "What one craft makes.",
+      "of": {
+        "type": "struct",
+        "fields": {
+          "item": {
+            "type": "ref",
+            "registry": "items",
+            "ops": "set"
+          },
+          "count": {
+            "type": "int",
+            "min": 1,
+            "max": 65535,
+            "ops": "number"
+          }
+        },
+        "typeName": "RecipeOutput"
+      }
+    },
+    "duration": {
+      "type": "time",
+      "unit": "s",
+      "min": 0,
+      "max": 86400,
+      "applies": "now",
+      "ops": "number",
+      "doc": "How long a station takes for one craft."
+    },
+    "unlock": {
+      "type": "enum",
+      "values": [
+        "game",
+        "always"
+      ],
+      "applies": "now",
+      "ops": "set",
+      "side": "client",
+      "doc": "When players see the recipe: game = the game's own knowledge requirement, always = from the start. Only the crafting menu reads it (a client without Kiln keeps the game's).",
+      "typeName": "RecipeUnlockMode"
+    },
+    "station": {
+      "type": "ref",
+      "registry": "stations",
+      "readOnly": true,
+      "applies": "restart",
+      "doc": "The workshop the recipe belongs to. Read-only for game recipes: the game sorts recipes into stations once at start."
+    }
+  },
+  "entry": {
+    "add": true,
+    "remove": "hidden",
+    "removeDoc": "A removed recipe is taken out of every station's list."
+  },
+  "raw": "allowed"
+}

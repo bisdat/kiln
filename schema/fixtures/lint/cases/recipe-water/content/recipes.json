@@ -1,0 +1,17 @@
+{
+  "format": 1,
+  "recipes": {
+    "add": [
+      { "guid": "0000c003-0000-4000-8000-000000000001", "name": "Fx_Oven_Water", "station": "0x1ee9f0bf", "water": 3, "inputs": [ { "item": "Material_Fixture_Logs", "count": 1 } ], "outputs": [ { "item": "Material_Fixture_Twigs", "count": 1 } ] },
+      { "guid": "0000c003-0000-4000-8000-000000000002", "name": "Fx_Smelter_Water", "station": "0xf5aab50a", "water": 2, "inputs": [ { "item": "Material_Fixture_Logs", "count": 1 } ], "outputs": [ { "item": "Material_Fixture_Twigs", "count": 1 } ] },
+      { "guid": "0000c003-0000-4000-8000-000000000003", "name": "Fx_Beehive_Flood", "station": "0x269a27a7", "water": 60, "inputs": [ { "item": "Material_Fixture_Logs", "count": 1 } ], "outputs": [ { "item": "Material_Fixture_Twigs", "count": 1 } ] },
+      { "guid": "0000c003-0000-4000-8000-000000000004", "name": "Fx_Hand_Water", "station": "hand", "water": 5, "inputs": [ { "item": "Material_Fixture_Logs", "count": 1 } ], "outputs": [ { "item": "Material_Fixture_Twigs", "count": 1 } ] },
+      { "guid": "0000c003-0000-4000-8000-000000000005", "name": "Fx_Canteen", "station": "0xba67134f", "inputs": [ { "item": "Material_Fixture_Logs", "count": 1 }, { "item": "Food_T1_raw_hydration_Water_Pouch_Filled_DEPRECATED", "count": 2 } ], "outputs": [ { "item": "Material_Fixture_Twigs", "count": 1 } ] },
+      { "guid": "0000c003-0000-4000-8000-000000000006", "name": "Fx_Based_On_Smelter", "base": "Recipe_Fixture_Smelter_Bar", "water": 1, "inputs": [ { "item": "Material_Fixture_Logs", "count": 1 } ], "outputs": [ { "item": "Material_Fixture_Twigs", "count": 1 } ] },
+      { "guid": "0000c003-0000-4000-8000-000000000007", "name": "Fx_No_Water", "station": "0xf5aab50a", "water": 0, "inputs": [ { "item": "Material_Fixture_Logs", "count": 1 } ], "outputs": [ { "item": "Material_Fixture_Twigs", "count": 1 } ] },
+      { "guid": "0000c003-0000-4000-8000-000000000008", "name": "Fx_Bad_Water", "station": "hand", "water": -1, "inputs": [ { "item": "Material_Fixture_Logs", "count": 1 } ], "outputs": [ { "item": "Material_Fixture_Twigs", "count": 1 } ] }
+    ],
+    "Recipe_Fixture_Smelter_Bar": { "waterCharges": 4 },
+    "Recipe_Fixture_Oven_Bread": { "waterCharges": 2, "inputs": [ { "item": "Food_T1_raw_hydration_Water_Pouch_Filled_DEPRECATED", "count": 1 } ] }
+  }
+}

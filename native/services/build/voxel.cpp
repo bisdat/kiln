@@ -14,6 +14,7 @@
 #include <algorithm>
 
 #include "internal.h"
+#include "voxel_tasks.h"
 #endif
 
 namespace kb {
@@ -116,6 +117,9 @@ bool box_ok(const int32_t origin[3], const uint32_t dims[3], uint64_t* count) {
 void vox_world_closed() {
     g_vox = VoxelWorld{};
     g_failed_world = 0;
+#ifndef KILN_VOXEL_HOST_TEST
+    tasks::grid().clear();  // the task-thread members: nothing published outlives its world
+#endif
 }
 
 const VoxelWorld* vox() {

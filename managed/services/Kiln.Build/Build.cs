@@ -36,6 +36,12 @@ public static partial class Build
 
         /// <summary>The sigdb features kiln.build serves.</summary>
         public static readonly string[] Features = ["build.read", "build.write", "build.persist", "build.items", "build.zones"];
+
+        /// <summary>Kiln.Build's row (since 0.2.0-dev.31): <see cref="Build.BaseLimits"/> reads kiln.base_rules and the world.</summary>
+        public const string BaseLimits = "build.base_limits";
+
+        /// <summary>kiln.content's row (since 0.2.0-dev.31): base rules can be staged and are written in this process.</summary>
+        public const string BaseRules = "build.base_rules";
     }
 
     // Kiln.Build in the capability registry: reported at the service's first use, fixed from then on. It has no row of
@@ -45,6 +51,8 @@ public static partial class Build
 
     private static void ReportCapabilities()
     {
+        ServiceCaps.Static(Caps.BaseLimits, BaseRulesNative.Here && World.Available, CapabilityReason.ServiceMissing,
+            BaseRulesNative.Here ? "kiln.world is not running" : "kiln.base_rules is not in this build (kiln.content of 0.2.0-dev.31 or later publishes it)");
         if (Available) return;
         ServiceCaps.LowerFeatures(Caps.Service, Caps.Features);
     }

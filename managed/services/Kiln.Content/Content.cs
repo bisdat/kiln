@@ -747,6 +747,29 @@ public sealed unsafe class ContentEntry
         set => Set("craftingDuration", value);
     }
 
+    /// <summary>
+    /// Recipes: the tank water a craft takes, in water charges (<c>waterCharges</c>; one charge is 64 of the game's water
+    /// units), the recipe screen's "Water" row. At one of the six stations with a tank (Seedbed, Oven, Cooking Station,
+    /// Laboratory, Coffee Brewer, Beehive) it comes from the station's tank; in a crafting menu (the player's own, the
+    /// Workbench, the Kitchen, an NPC's) from the player and the base (the crafter's water containers, then the base's wells
+    /// and barrels). 0: none. Setting it changes the game's recipe like <c>Set("waterCharges", value)</c>: 0..1023, as
+    /// <see cref="RecipeDefinition.Water"/> takes; <see cref="Reset(string)"/> with <c>"waterCharges"</c> puts the game's back.
+    /// Since 0.2.0-dev.30.3 (mod API 0.2.13).
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">A value below 0 or above 1023.</exception>
+    [TickThreadOnly]
+    [RequiresCapability("kiln.content")]
+    public int CraftingWater
+    {
+        get => (int)Get("waterCharges").Number;
+        set
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(value);
+            ArgumentOutOfRangeException.ThrowIfGreaterThan(value, NewContent.MaxWater);
+            Set("waterCharges", value);
+        }
+    }
+
     // ---- recipe lists, drop stacks ----
 
     /// <summary>Recipes: the ingredients as the game sees them now.</summary>

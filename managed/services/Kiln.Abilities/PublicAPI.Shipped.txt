@@ -804,6 +804,17 @@ Kiln.ImpactVariableChangedEvent.Origin.get -> string!
 Kiln.ImpactVariableChangedEvent.ProgramId.get -> uint
 Kiln.ImpactVariableChangedEvent.Self.get -> Kiln.EntityId
 Kiln.ImpactVariableChangedEvent.Variable.get -> string!
+Kiln.ItemUseResult
+Kiln.ItemUseResult.Busy = 8 -> Kiln.ItemUseResult
+Kiln.ItemUseResult.Dead = 6 -> Kiln.ItemUseResult
+Kiln.ItemUseResult.EmptySlot = 3 -> Kiln.ItemUseResult
+Kiln.ItemUseResult.NotAPlayer = 5 -> Kiln.ItemUseResult
+Kiln.ItemUseResult.NotConsumable = 1 -> Kiln.ItemUseResult
+Kiln.ItemUseResult.NotOwnSlot = 2 -> Kiln.ItemUseResult
+Kiln.ItemUseResult.NotReady = 7 -> Kiln.ItemUseResult
+Kiln.ItemUseResult.ServerOnly = 9 -> Kiln.ItemUseResult
+Kiln.ItemUseResult.SlotChanged = 4 -> Kiln.ItemUseResult
+Kiln.ItemUseResult.Started = 0 -> Kiln.ItemUseResult
 Kiln.NativeArg
 Kiln.NativeArg.Deconstruct(out string! Type, out Kiln.NativeArgDirection Direction, out bool Optional, out bool Raw, out int Size) -> void
 Kiln.NativeArg.Direction.get -> Kiln.NativeArgDirection
@@ -1134,6 +1145,7 @@ static Kiln.Abilities.RunImpact(string! template, Kiln.WorldPosition position, K
 static Kiln.Abilities.RunProgram(System.Guid program, Kiln.WorldPosition position, Kiln.ImpactOptions? options = null) -> System.Threading.Tasks.Task<Kiln.EntityId>!
 static Kiln.Abilities.SequenceOf(Kiln.EntityId actor) -> (uint Sequence, long TriggerTime, int CallIndex)?
 static Kiln.Abilities.Status.get -> Kiln.AbilitiesStatus?
+static Kiln.Abilities.UseItem(Kiln.EntityId player, Kiln.SlotId slot) -> Kiln.ItemUseResult
 static Kiln.AbilitiesStatus.operator !=(Kiln.AbilitiesStatus? left, Kiln.AbilitiesStatus? right) -> bool
 static Kiln.AbilitiesStatus.operator ==(Kiln.AbilitiesStatus? left, Kiln.AbilitiesStatus? right) -> bool
 static Kiln.AbilityCost.OfMana(int n) -> Kiln.AbilityCost

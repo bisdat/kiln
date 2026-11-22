@@ -16,10 +16,22 @@ pub const KILN_REPL_COMPONENT_CUSTOM_CODEC: i32 = 4;
 pub const KILN_REPL_COMPONENT_PREDICTION: i32 = 16;
 pub const KILN_REPL_COMPONENT_REPLICATED: i32 = 1;
 pub const KILN_REPL_COMPONENT_VERSIONED: i32 = 2;
+pub const KILN_REPL_END_DESTROYED: i32 = 1;
+pub const KILN_REPL_END_ID_REUSED: i32 = 2;
+pub const KILN_REPL_END_PEER_LEFT: i32 = 3;
+pub const KILN_REPL_END_WORLD_STOPPED: i32 = 4;
 pub const KILN_REPL_FAKE_PEER: u32 = 2147483648;
+pub const KILN_REPL_KIND_CREATE: i32 = 2;
+pub const KILN_REPL_KIND_DESTROYED: i32 = 4;
+pub const KILN_REPL_KIND_ENDED: i32 = 5;
+pub const KILN_REPL_KIND_UPDATE: i32 = 3;
+pub const KILN_REPL_LAB_SERVICE: &[u8] = b"kiln.repl.lab\0";
+pub const KILN_REPL_LAB_VERSION: u32 = 1;
 pub const KILN_REPL_MACHINES: u32 = 17;
 pub const KILN_REPL_PEER_BOUND: i32 = 2;
 pub const KILN_REPL_PEER_FAKE: i32 = 1;
+pub const KILN_REPL_PEER_LOCAL: i32 = 4;
+pub const KILN_REPL_PEER_RECEIVED: i32 = 8;
 pub const KILN_REPL_RECEIVE: i32 = 2;
 pub const KILN_REPL_SEND: i32 = 1;
 pub const KILN_REPL_SERVICE: &[u8] = b"kiln.repl\0";
@@ -74,8 +86,9 @@ pub struct KilnReplWatchEvent {
     pub baseline_tick: u32,
     pub payload_bytes: u32,
     pub count: u16,
-    pub pad: u16,
-    pub pad2: u32,
+    pub peer_flags: u8,
+    pub pad: u8,
+    pub reason: u32,
     pub components: *const KilnReplComponent,
 }
 
@@ -118,6 +131,29 @@ pub struct KilnReplLoopbackStats {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
+pub struct KilnReplHookCost {
+    pub size: u32,
+    pub frames: u32,
+    pub window_ns: u64,
+    pub send_step_mean_ns: u64,
+    pub send_step_p50_ns: u64,
+    pub frame_interval_mean_ns: u64,
+    pub frame_interval_p50_ns: u64,
+    pub callback_calls: u64,
+    pub callback_ns: u64,
+    pub writer_calls: u64,
+    pub writer_ns: u64,
+    pub delta_calls: u64,
+    pub delta_ns: u64,
+    pub tick_calls: u64,
+    pub tick_ns: u64,
+    pub allocations: u64,
+    pub watch_records: u64,
+    pub watch_dropped: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
 pub struct KilnReplApi {
     pub header: KilnServiceHeader,
     pub capabilities: Option<unsafe extern "C" fn() -> u32>,
@@ -132,4 +168,12 @@ pub struct KilnReplApi {
     pub lab_remove_fakes: Option<unsafe extern "C" fn() -> KilnResult>,
     pub lab_stats: Option<unsafe extern "C" fn(*mut KilnReplLoopbackStats) -> KilnResult>,
     pub lab_decoded: Option<unsafe extern "C" fn(u32, KilnEntity, u32, *mut u8, u32, *mut u32, *mut u32) -> KilnResult>,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct KilnReplLabApi {
+    pub header: KilnServiceHeader,
+    pub payload: Option<unsafe extern "C" fn(u32, KilnEntity, u32, *mut u8, u32, *mut u32, *mut u32) -> KilnResult>,
+    pub hook_cost: Option<unsafe extern "C" fn(*mut KilnReplHookCost, bool) -> KilnResult>,
 }

@@ -10,6 +10,10 @@
     <NoWarn>$(NoWarn);CS1591;CS1573;CS0419;CS1574</NoWarn>
   </PropertyGroup>
   <ItemGroup>
+    <!-- BaseLimitsReader (kiln.base_rules' state JSON) is tested offline next to BaseRulesBlock -->
+    <InternalsVisibleTo Include="Kiln.Blocks.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="../../Kiln.Api/Kiln.Api.csproj" Private="false" />
     <ProjectReference Include="../Kiln.Saves/Kiln.Saves.csproj" Private="false" />
     <ProjectReference Include="../Kiln.Chat/Kiln.Chat.csproj" Private="false" />

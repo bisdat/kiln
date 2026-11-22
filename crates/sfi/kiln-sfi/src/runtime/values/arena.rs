@@ -1172,6 +1172,20 @@ impl Values {
         value: Option<Value>,
     ) -> mlua::Result<Value> {
         let _scope = self.scope();
+        let handled = self.open_handled(origin, qualified_type, key, bytes, source, value)?;
+        self.item_or_scalar(lua, handled)
+    }
+
+    /// `value_open` inside the caller's scope: the HANDLED reply, its item and payload the caller's.
+    fn open_handled(
+        &self,
+        origin: i32,
+        qualified_type: &str,
+        key: KilnAssetKey,
+        bytes: &[u8],
+        source: (u64, u64),
+        value: Option<Value>,
+    ) -> mlua::Result<Handled> {
         let object = value.map_or(0, |value| self.0.local().argument(value));
         let record = KilnEmlValueOpenV1 {
             size: std::mem::size_of::<KilnEmlValueOpenV1>() as u32,
@@ -1195,8 +1209,31 @@ impl Values {
                 }
             })
             .map_err(|e| e.to_lua())?;
-        let handled = self.handled(out)?;
-        self.item_or_scalar(lua, handled)
+        self.handled(out)
+    }
+
+    /// Source's `encode_owned_value` (values/encode_owned_value.rs:9-24): `value` validated and cloned as an owned root
+    /// of `qualified_type` (`value_open` LUA_INPUT), then serialized as that type (`value_export`), a scalar type
+    /// included; the root and its VIEW close. A Source error of either step is raised as Source raises it.
+    pub fn encode(&self, qualified_type: &str, value: Value) -> mlua::Result<Vec<u8>> {
+        let _scope = self.scope();
+        let handled = self.open_handled(
+            KILN_VALUE_OPEN_LUA_INPUT,
+            qualified_type,
+            no_key(),
+            &[],
+            (0, 0),
+            Some(value),
+        )?;
+        self.close_lease(handled.payload);
+        if handled.item == 0 {
+            return Err(self.kiln_fault(ValuesError::Fault(
+                "a LUA_INPUT reply without its root".into(),
+            )));
+        }
+        let bytes = self.export(handled.item, qualified_type);
+        self.close_lease(handled.item);
+        bytes
     }
 
     /// A fresh owned root of `qualified_type` validated from a Lua value (Source's validate_and_clone).

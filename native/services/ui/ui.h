@@ -10,6 +10,7 @@
 
 #include "kiln_api.h"
 #include "overlay_mode.h"
+#include "services/kiln_render.h"
 #include "services/kiln_ui.h"
 
 namespace kui {
@@ -123,6 +124,7 @@ bool chat_input_probe_install();  // game_install: hooks the chat field when cha
 void chat_input_frame_end(uintptr_t sys10);  // game's UI thread, focus and native rectangle conversion
 void chat_input_exit();           // on_unload: writes the history file still pending, stops its writer thread
 KilnResult chat_completion_io(KilnUiChatCompletion* io);  // internal managed snapshot/selection/replacement, NOT game call
+KilnResult chat_search_io(KilnUiChatSearch* io); // internal Ctrl+R search snapshot/mouse selection, NOT a game call
 
 // The window procedure's one hook point for the game's chat field (input.cpp calls it on the window thread, before
 // Kiln's own key handling). Set by chat_input_probe_install while chat history or its diagnostic runs; null otherwise,
@@ -275,6 +277,14 @@ bool image_texture(KilnHandle h, ImTextureRef* out);  // render thread
 // ---- render.cpp (kiln.render: drawing for mods, the game's camera) ----
 bool render_install();                 // plugin main: the camera hook (feature render.camera)
 const void* render_table();            // the KilnRenderApi
+
+// ---- outline.cpp (kiln.render v2's outlines: the game's highlight on an entity's model; outline_core.h) ----
+bool outline_init();                   // plugin main: what sigdb found (feature ui.world_outline); nothing is hooked here
+KilnResult KILN_CALL outline_add(KilnOwner owner, KilnEntity entity, const KilnRenderOutline* opts, KilnHandle* out);
+KilnResult KILN_CALL outline_info(KilnHandle handle, KilnRenderOutlineInfo* out);
+KilnResult KILN_CALL outline_remove(KilnHandle handle);
+KilnResult KILN_CALL outline_clear(KilnOwner owner);
+KilnResult KILN_CALL outline_status(KilnRenderOutlineStatus* out);
 
 // ---- graphics.cpp (Kiln's own graphics tools: the frame cap, DLSS settings, the readout; docs/kiln/graphics.md) ----
 void graphics_start(bool optiscaler, bool streamline);  // plugin main, after overlay_guard_start: kiln.json, what steps aside

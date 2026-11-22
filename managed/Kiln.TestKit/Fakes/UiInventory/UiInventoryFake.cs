@@ -226,6 +226,8 @@ internal sealed unsafe class UiInventoryFake : IKitFake
                 Size = (uint)sizeof(UiInventoryNative.Click), Button = button, Mods = mods & ModsAll,
                 Taken = matched.Any(x => x.Take) ? 1u : 0u, Session = 1, Frame = st.Frame, PressMs = (ulong)Environment.TickCount64,
                 Screen = ScreenOf(st.Screen, st.Frame), Slot = slots[index],
+                // the press at the slot's centre, as a 1920x1080 game at UI scale 1 draws it (one pixel per UI unit)
+                X = slots[index].OuterUi.X + slots[index].OuterUi.Width / 2, Y = slots[index].OuterUi.Y + slots[index].OuterUi.Height / 2,
             };
         }
         var delivered = 0;

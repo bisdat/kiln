@@ -43,6 +43,11 @@
 #include "safetyhook.hpp"  // safetyhook::Context: the mid handlers' register view
 #include "services/kiln_world.h"
 
+namespace kiln::survivors {
+void survivors_main(const KilnApi* api, KilnOwner owner);  // survivors.cpp
+void survivors_ready();
+}  // namespace kiln::survivors
+
 namespace kiln::knowledge {
 
 const KilnApi* g_api = nullptr;
@@ -1855,6 +1860,7 @@ void install_hooks() {
 
 void KILN_CALL on_ready(void*) {
     roster_ready();       // the npcs.* rows
+    kiln::survivors::survivors_ready();  // kiln.survivors: services, the bed program, its rows
     native_pack_boot();   // a boot profile: the mods' quest files are prepared with the boot generation (chapter 08)
     native_pack_ready();
     flame_ready();        // Flame mods: another loader's, not moved
@@ -1897,5 +1903,7 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
        "dialogue %s, client input %s",
        g_changes_ok ? "on" : "OFF", g_journal_ok ? "on" : "OFF", g_npc_ok ? "on" : "OFF", g_dialogue_ok ? "on" : "OFF",
        g_input_ok ? "on" : "OFF");
-    return api->register_service(owner, KilnStr{KILN_KNOWLEDGE_SERVICE, sizeof(KILN_KNOWLEDGE_SERVICE) - 1}, &kTable);
+    const KilnResult rc = api->register_service(owner, KilnStr{KILN_KNOWLEDGE_SERVICE, sizeof(KILN_KNOWLEDGE_SERVICE) - 1}, &kTable);
+    if (rc == KILN_OK) kiln::survivors::survivors_main(api, owner);  // kiln.survivors rides on kiln.knowledge
+    return rc;
 }

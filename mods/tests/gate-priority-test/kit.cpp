@@ -393,6 +393,12 @@ struct Loop {
     uint64_t post_delay = 0;                     // how long after a Post edge the gate has been free (learned)
     uint64_t edge_waits = 0, edge_timeouts = 0;  // waits for a Post edge, and those that saw none for 250 ms
     std::vector<uint64_t> holds;          // hold_ns of every successful exchange (the summary's percentiles)
+    std::vector<uint64_t> restores;       // restore_ns of the same, when this Kiln measures it
+    // Where this Kiln ends a hold (setup, from kiln.engine's gate counters): "scene-release" (the Scene word's release;
+    // the priority restore is timed apart, in restore_ns), "release-end" (an older Kiln: the hold includes the rest of
+    // the release and the restore, and restore_ns is not filled) or "unknown" (no gate counters).
+    std::string hold_ends = "unknown";
+    bool restore_measured() const { return hold_ends == "scene-release"; }
     fs::path dir;
     std::ofstream writes, steps, gate;
     int loop_priority = 0;
@@ -418,12 +424,15 @@ struct Loop {
     bool setup();
     void row(const char* op, int attempt, KilnResult rc, const KilnMutationReply& r, uint64_t call_ns, int64_t at, int prio,
              uint64_t post_step, uint64_t since_post_ns) {
+        char restore[24] = "";  // empty: this Kiln does not measure it (its hold_ns includes the restore)
+        if (restore_measured()) std::snprintf(restore, sizeof restore, "%llu", static_cast<unsigned long long>(r.restore_ns));
         char line[320];
-        const int n = std::snprintf(line, sizeof line, "%lld,%s,%d,%s,%d,%u,%u,0x%x,%llu,%llu,%llu,%d,%llu,%llu\n",
+        const int n = std::snprintf(line, sizeof line, "%lld,%s,%d,%s,%d,%u,%u,0x%x,%llu,%llu,%llu,%d,%llu,%llu,%s\n",
                                     static_cast<long long>(at), op, attempt, status_name(r.status), rc, r.why_code,
                                     r.engine_reason, r.flags, static_cast<unsigned long long>(r.hold_ns),
                                     static_cast<unsigned long long>(call_ns), static_cast<unsigned long long>(r.step), prio,
-                                    static_cast<unsigned long long>(post_step), static_cast<unsigned long long>(since_post_ns));
+                                    static_cast<unsigned long long>(post_step), static_cast<unsigned long long>(since_post_ns),
+                                    restore);
         if (n > 0) writes.write(line, std::min<int>(n, sizeof line - 1));
     }
     // One compare-exchange of the whole component: `want` is the target byte's new value (write mode), or none (no-op).
@@ -455,6 +464,7 @@ struct Loop {
         counts[std::min<uint32_t>(r.status, kStatuses - 1)] += 1;
         if (r.status == KILN_ECS_OK && (r.flags & KILN_MUTATION_NO_OP)) counts[kStatuses] += 1;
         if (r.status == KILN_ECS_OK && holds.size() < kMaxHolds) holds.push_back(r.hold_ns);  // writes.csv has them all
+        if (r.status == KILN_ECS_OK && restore_measured() && restores.size() < kMaxHolds) restores.push_back(r.restore_ns);
         if ((r.flags & KILN_MUTATION_CONFIRMED) && (r.status == KILN_ECS_OK || r.status == KILN_ECS_CONFLICT)) cur = confirmed;
         return rc;
     }
@@ -642,25 +652,42 @@ struct Loop {
             if (n > 0) steps.write(line, n);
         });
     }
+    // Whether kiln.engine's gate counters carry the restore fields (gate_stats leaves the size it wrote in s.size).
+    static bool has_restore_stats(const KilnEngineGateStats& s) {
+        return s.size >= offsetof(KilnEngineGateStats, restore_ns_max) + sizeof s.restore_ns_max;
+    }
+    // A Kiln whose gate counters carry the restore fields ends a hold at the Scene word's release and fills
+    // KilnMutationReply.restore_ns (GitHub #58); an older one measured each hold to the end of the gate's release.
+    std::string hold_end() const {
+        if (!g->engine || !g->engine->gate_stats) return "unknown";
+        KilnEngineGateStats s{};
+        s.size = sizeof s;
+        if (g->engine->gate_stats(&s) != KILN_OK) return "unknown";
+        return has_restore_stats(s) ? "scene-release" : "release-end";
+    }
     void gate_row() {
         if (!g->engine || !g->engine->gate_stats) return;
         KilnEngineGateStats s{};
         s.size = sizeof s;
         if (g->engine->gate_stats(&s) != KILN_OK) return;
+        char restore[72] = ",,";  // empty cells: this Kiln's counters have no restore fields
+        if (has_restore_stats(s))
+            std::snprintf(restore, sizeof restore, "%llu,%llu,%llu", static_cast<unsigned long long>(s.restores),
+                          static_cast<unsigned long long>(s.restore_ns_total), static_cast<unsigned long long>(s.restore_ns_max));
         char line[400];
-        const int n = std::snprintf(line, sizeof line, "%lld,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu\n",
+        const int n = std::snprintf(line, sizeof line, "%lld,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%s\n",
                                     static_cast<long long>(utc_ms()), static_cast<unsigned long long>(s.attempts),
                                     static_cast<unsigned long long>(s.acquired), static_cast<unsigned long long>(s.busy_registry),
                                     static_cast<unsigned long long>(s.busy_scene), static_cast<unsigned long long>(s.refused_in_frame),
                                     static_cast<unsigned long long>(s.refused_world_thread),
                                     static_cast<unsigned long long>(s.refused_other), static_cast<unsigned long long>(s.hold_ns_total),
                                     static_cast<unsigned long long>(s.hold_ns_max), static_cast<unsigned long long>(s.views),
-                                    static_cast<unsigned long long>(s.view_failures));
-        if (n > 0) gate.write(line, n);
+                                    static_cast<unsigned long long>(s.view_failures), restore);
+        if (n > 0) gate.write(line, std::min<int>(n, sizeof line - 1));
     }
     std::string header() const {
         return std::string("# gate-priority-test ") + kKitVersion + "; raise=" + raise + "; label=" + label + "; mode=" + mode +
-               "; profile=" + profile + "\n";
+               "; profile=" + profile + "; hold=" + hold_ends + "\n";
     }
     void write_run_json(bool final);
     void finish(const std::string& why, const KilnTaskRun* run);
@@ -766,6 +793,7 @@ bool Loop::setup() {
     loop_priority = current_thread_priority();
     label = g->config.label;
     raise = raise_mode(&raise_note);
+    hold_ends = hold_end();
     if (g->engine && g->engine->identity) {
         KilnEngineIdentity id{};
         id.size = sizeof id;
@@ -858,11 +886,11 @@ bool Loop::setup() {
     if (mode == "write") mask[offset] = 1;
     original = cur[offset];
     writes << header() << "utc_ms,op,attempt,status,result,why,engine_reason,flags,hold_ns,call_ns,step,priority,post_step,"
-                          "since_post_ns\n";
+                          "since_post_ns,restore_ns\n";
     steps << header() << "step,utc_ms,pre_ns,post_ns\n";
     gate << header()
          << "utc_ms,attempts,acquired,busy_registry,busy_scene,refused_in_frame,refused_world_thread,refused_other,"
-            "hold_ns_total,hold_ns_max,views,view_failures\n";
+            "hold_ns_total,hold_ns_max,views,view_failures,restores,restore_ns_total,restore_ns_max\n";
     const uint64_t t = steady_ns();
     warmup_end = t + uint64_t{g->config.warmup_s} * 1'000'000'000ull;
     deadline = warmup_end + (g->config.seconds ? uint64_t{g->config.seconds} : uint64_t{g->config.minutes} * 60) * 1'000'000'000ull;
@@ -893,7 +921,7 @@ void Loop::write_run_json(bool final) {
     j << "{\n  \"kit\": " << json_text(kKitVersion) << ",\n  \"mod\": " << json_text(g->version)
       << ",\n  \"kiln\": " << json_text(kiln) << ",\n  \"label\": " << json_text(label) << ",\n  \"mode\": " << json_text(mode)
       << ",\n  \"raise\": " << json_text(raise) << ",\n  \"raise_note\": " << json_text(raise_note)
-      << ",\n  \"profile\": " << json_text(profile)
+      << ",\n  \"profile\": " << json_text(profile) << ",\n  \"hold_ends\": " << json_text(hold_ends)
       << ",\n  \"side\": "
       << json_text(g->api->size >= offsetof(KilnApi, side) + sizeof(void*) && g->api->side && g->api->side() == KILN_SIDE_CLIENT
                        ? "client"
@@ -912,8 +940,14 @@ void Loop::write_run_json(bool final) {
         for (int s = 0; s < kStatuses; ++s) j << (s ? ", " : "") << json_text(status_name(static_cast<uint32_t>(s))) << ": " << counts[s];
         j << ", \"no_op\": " << counts[kStatuses] << "}"
           << ",\n  \"hold_ns\": {\"n\": " << h.size() << ", \"p50\": " << percentile(h, 0.5) << ", \"p90\": " << percentile(h, 0.9)
-          << ", \"p99\": " << percentile(h, 0.99) << ", \"max\": " << (h.empty() ? 0 : *std::max_element(h.begin(), h.end())) << "}"
-          << ",\n  \"restored\": " << (restored ? "true" : "false") << ",\n  \"verified\": " << (verified ? "true" : "false")
+          << ", \"p99\": " << percentile(h, 0.99) << ", \"max\": " << (h.empty() ? 0 : *std::max_element(h.begin(), h.end())) << "}";
+        if (restore_measured()) {
+            std::vector<uint64_t> rs = restores;
+            j << ",\n  \"restore_ns\": {\"n\": " << rs.size() << ", \"p50\": " << percentile(rs, 0.5) << ", \"p90\": "
+              << percentile(rs, 0.9) << ", \"p99\": " << percentile(rs, 0.99)
+              << ", \"max\": " << (rs.empty() ? 0 : *std::max_element(rs.begin(), rs.end())) << "}";
+        }
+        j << ",\n  \"restored\": " << (restored ? "true" : "false") << ",\n  \"verified\": " << (verified ? "true" : "false")
           << ",\n  \"verify_ok\": " << verify_ok << ",\n  \"verify_mismatches\": " << verify_bad << ",\n  \"reopened\": " << reopened
           << ",\n  \"steps_dropped\": " << g->steps.dropped() << ",\n  \"post_edge_waits\": " << edge_waits
           << ",\n  \"post_edge_timeouts\": " << edge_timeouts << ",\n  \"post_delay_ns\": " << post_delay;
@@ -962,16 +996,22 @@ void Loop::finish(const std::string& why, const KilnTaskRun* run) {
     gate.flush();
     write_run_json(true);
     std::vector<uint64_t> h = holds;
+    char restore[120] = "restore not measured (this Kiln's hold includes the release and the restore)";
+    if (restore_measured()) {
+        std::vector<uint64_t> rs = restores;
+        std::snprintf(restore, sizeof restore, "restore p50 %.1f us, p99 %.1f us, max %.1f us", percentile(rs, 0.5) / 1000.0,
+                      percentile(rs, 0.99) / 1000.0, (rs.empty() ? 0 : *std::max_element(rs.begin(), rs.end())) / 1000.0);
+    }
     say(restored ? KILN_LOG_INFO : KILN_LOG_WARN,
         "done (%s): %llu pairs; ok %llu (no-op %llu), conflict %llu, busy %llu, unreadable %llu, stale %llu, absent %llu, "
-        "not writable %llu, uncertain %llu, unavailable %llu; hold p50 %.1f us, p99 %.1f us, max %.1f us; %s; raise %s",
+        "not writable %llu, uncertain %llu, unavailable %llu; hold p50 %.1f us, p99 %.1f us, max %.1f us; %s; %s; raise %s",
         end_reason.c_str(), static_cast<unsigned long long>(pairs), static_cast<unsigned long long>(counts[KILN_ECS_OK]),
         static_cast<unsigned long long>(counts[kStatuses]), static_cast<unsigned long long>(counts[KILN_ECS_CONFLICT]),
         static_cast<unsigned long long>(counts[KILN_ECS_BUSY]), static_cast<unsigned long long>(counts[KILN_ECS_UNREADABLE]),
         static_cast<unsigned long long>(counts[KILN_ECS_STALE]), static_cast<unsigned long long>(counts[KILN_ECS_ABSENT]),
         static_cast<unsigned long long>(counts[KILN_ECS_NOT_WRITABLE]), static_cast<unsigned long long>(counts[KILN_ECS_UNCERTAIN]),
         static_cast<unsigned long long>(counts[KILN_ECS_UNAVAILABLE]), percentile(h, 0.5) / 1000.0, percentile(h, 0.99) / 1000.0,
-        (h.empty() ? 0 : *std::max_element(h.begin(), h.end())) / 1000.0,
+        (h.empty() ? 0 : *std::max_element(h.begin(), h.end())) / 1000.0, restore,
         mode == "noop" ? "nothing was changed"
         : !restored    ? "the last change could not be put back (an untracked padding byte, never saved)"
         : verified     ? "the byte is back and read back"

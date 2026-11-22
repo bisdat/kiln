@@ -18,6 +18,7 @@
 //   api_wheel.cpp v10 radial wheel through kiln.ui's wheel (client); refused on a dedicated server
 //   api_v40.cpp   v28-v46: world_to_screen through kiln.render; the functions Kiln does not carry yet answer their
 //                 documented failure (chat_tell_ex / chat_broadcast_ex are in api_game.cpp)
+//   api_hits.cpp  v31 on_hit: the server world's HitEvents through kiln-emf's event relay (hits_model.* without the game)
 //   v26_model.*   the v22-v26 logic without the game (host tests: tests/run.sh)
 //   seh.cpp       structured-exception guards around every call into a mod
 // Docs: docs/kiln/emf.md (users), docs/re/emf-compat.md (how each function maps onto Kiln).
@@ -279,6 +280,16 @@ bool level_attribute_add(Mod* m, EmfWorld* w, uint32_t entity, uint32_t attr, in
 uint32_t spawn_for(Mod* m, EmfWorld* w, const uint8_t guid[16], double x, double y, double z, const char* fn);
 // a listener of kiln-emf itself for an engine event (no mod), before events_on_ready
 bool events_add_internal(const char* name, uint32_t expected_size, EmfWorldEventCallback cb, void* user);
+// the same, with a gate: while wanted() is false (and no other registration of that event wants it) the relay leaves
+// the game's queue alone, so a listener nobody uses costs one call per step (on_hit, api_hits.cpp)
+bool events_add_internal_gated(const char* name, uint32_t expected_size, EmfWorldEventCallback cb, void* user,
+                               bool (*wanted)());
+// after events_on_ready: the server world's relay of `name` is a registered kiln.world program with its queue slot
+bool events_relay_registered(const char* name);
+// v31 on_hit (api_hits.cpp): after load_mods and before events_on_ready, then right after events_on_ready
+void hits_on_ready(bool any_mod_loaded);
+void hits_after_ready();
+void fill_hits(EmfApi* t);  // after fill_v40: on_hit (on_hit_before and the hit rules stay in api_v40.cpp)
 // a posted task that runs `f` on the server world's tick thread (Pre of the next step); false when it was not queued
 bool post_tick(std::function<void()> f);
 // kiln.ui v2 slots (a core with an older kiln.ui ends its table above them)

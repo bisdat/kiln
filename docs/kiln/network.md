@@ -305,6 +305,51 @@ Kiln.Network follows [the API contract](modding/contract.md).
   so it has no change event of its own.
 - Tested offline: `managed/tests/Kiln.Contract.Tests/NetworkContractTests.cs` and the conformance rules.
 
+## Steam peer messages (`SteamMessages`)
+Since 0.2.0-dev.30.3 (mod API 0.2.13). A mod's own Steam networking messages between game processes, by Steam id:
+separate from the game connection and from the channels above. It works on a game client (the player's Steam user) and on
+a dedicated server (the GameServer interfaces); the game pumps Steam's callbacks, Kiln never initialises or pumps Steam.
+Native side and every rule: [services/net-steam-messages.md](services/net-steam-messages.md). Prefer channels when the
+players are on the same server: Steam messages reach anyone by Steam id, outside the game's admission, so treat every
+message as untrusted.
+
+```csharp
+// kiln.mod.json: "steamMessages": true (Kiln.Sdk: <KilnSteamMessages>true</KilnSteamMessages>)
+var open = SteamMessages.Open(4100, 4103, answerSessions: true);   // a lease on Steam channels 4100..4103
+if (!open.Ok) { Log.Info(open.Reason!); return; }                   // Taken, NotPermitted, ClosedForExit, Fault
+using var lease = open.Lease!;                                       // closes at Dispose or the mod's unload
+lease.SetAcceptPolicy(SteamAcceptMode.Listed, [friendSteamId]);     // who may start a session with this process
+lease.Send(friendSteamId, 4100, Encoding.UTF8.GetBytes("hello"));    // SteamSendFlags.Reliable by default
+var buffer = new byte[SteamMessages.MaxMessageBytes];
+for (var r = lease.Receive(4100, buffer); r.Ok; r = lease.Receive(4100, buffer))
+    Log.Info($"{r.Message.Sender}: {Encoding.UTF8.GetString(buffer, 0, r.Message.Length)}");
+```
+- **Opt-in.** Only a mod whose kiln.mod.json says `"steamMessages": true` (`ModInfo.SteamMessages`) opens a lease;
+  `Open` throws `InvalidOperationException` for any other mod, outside mod code and in `OnBoot` (open leases from
+  `OnLoad` on), before anything is called.
+- **A lease is the mod's own.** It belongs to the mod that opened it: kiln.net checks the mod's owner on every lease call,
+  closes the mod's leases when it unloads, and `SteamMessageLease` never shows its handle. A closed lease answers
+  `LeaseClosed` and never calls Steam; `Dispose` is idempotent, any thread.
+- **Channels.** Leases own inclusive ranges of Steam message channels (0..65535), never overlap (across every mod and
+  Kiln's own runtimes), and at most 16 are open in the process (`Taken` otherwise; an overlap with another mod's lease
+  names it).
+- **Sessions.** Steam accepts a session with a peer this process sent to first. To hear from a peer that writes first,
+  open one lease with `answerSessions` and set its accept policy (`None`, `Any`, `Listed` with up to 256 Steam ids), or
+  accept a pending request with `lease.Accept(steamId)`. One session-answering lease at most; closing it sets `None`.
+- **Sizes.** Send 0..524,288 bytes (`MaxMessageBytes`; more throws). `Receive` takes at most one message per call into
+  your buffer; one bigger than the buffer is taken and `Dropped`, so a `MaxMessageBytes` buffer never drops for size.
+  Nothing is buffered by Kiln: a message waits in Steam's queue until a `Receive` on its channel takes it.
+- **Results.** `SteamLeaseResult`, `SteamSendResult` (with Steam's EResult), `SteamReceiveResult`, `SteamAcceptResult`,
+  `SteamPolicyResult`, each with `Ok`, `Reason` and `Refusal` (`SteamMessagesRefusal`); the per-message results are
+  structs, so sending and receiving allocate nothing. Bad arguments throw `ArgumentException` before any call.
+- **Availability.** Capability `net.steam_messages`: `pending` until a call first finds Steam ready, then `available`.
+  `SteamMessages.Available` says whether it works now; `SteamMessages.Status` never throws. `Open` throws
+  `KilnUnavailableException` only when the row is unavailable (safe idle, kiln-net.dll not started, steam_api64.dll or an
+  export missing) or this Kiln has no Steam messages; while it is pending a lease opens and answers `SteamNotReady`.
+- **Threads.** Every member: any thread, never waits.
+- Tested: `managed/tests/Kiln.Network.Tests/SteamMessagesTests.cs` over a fake kiln.net; the native side's host tests and
+  a two-process test over a stand-in Steam library. Not run with real Steam yet.
+
 ## Limits
 - Game frames are zero-padded to 4 bytes; Kiln trims the padding in fragments and JSON messages.
 - Frames up to kiln.net's `max_frame` (8000 bytes, under the game's 8192 per message on channel 12). Bigger messages

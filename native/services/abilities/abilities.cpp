@@ -28,14 +28,17 @@
 #include "engine.h"
 #include "kiln_api.h"
 #include "impact_watch.h"
+#include "item_use.h"
 #include "nlohmann/json.hpp"
 #include "kiln_hook.hpp"
 #include "natives_core.h"
 #include "natives_json.h"
 #include "services/kiln_abilities.h"
 #include "services/kiln_assets.h"
+#include "services/kiln_items.h"
 #include "services/kiln_profile.h"
 #include "services/kiln_spawn.h"
+#include "services/kiln_types.h"
 #include "services/kiln_world.h"
 #include "verify.h"
 
@@ -50,8 +53,12 @@ static_assert(offsetof(KilnAbilitiesApi, sequence_play) == 232 && offsetof(KilnA
               offsetof(KilnAbilitiesApi, native_detach) == 264 && offsetof(KilnAbilitiesApi, native_declare_typed) == 272 &&
               offsetof(KilnAbilitiesApi, native_state) == 280 && offsetof(KilnAbilitiesApi, native_attach_state) == 288 &&
               offsetof(KilnAbilitiesApi, native_ecs_read) == 296 && offsetof(KilnAbilitiesApi, native_ecs_write) == 304 &&
-              sizeof(KilnAbilitiesApi) == 312 && sizeof(KilnNativeCounters) == 128 && sizeof(KilnNativeFilter) == 16 &&
-              sizeof(KilnNativeArg) == 8);
+              sizeof(KilnNativeCounters) == 128 && sizeof(KilnNativeFilter) == 16 && sizeof(KilnNativeArg) == 8);
+// since 0.2.0-dev.30.3 (mod API 0.2.13): item_use appended
+static_assert(offsetof(KilnAbilitiesApi, item_use) == 312 && sizeof(KilnAbilitiesApi) == 320 && sizeof(KilnItemUse) == 48 &&
+              offsetof(KilnItemUse, slot) == 8 && offsetof(KilnItemUse, item) == 16 && offsetof(KilnItemUse, sequence) == 20 &&
+              offsetof(KilnItemUse, flags) == 24 && offsetof(KilnItemUse, status) == 28 && offsetof(KilnItemUse, count) == 32 &&
+              offsetof(KilnItemUse, trigger_time) == 40);
 
 namespace {
 
@@ -1396,6 +1403,9 @@ struct KProgram {
     uint8_t* blob;  // permanent copy (VirtualAlloc, never freed: running instances read it)
     size_t len;
     KilnOwner owner;
+    // The ImpactRegistry it was last put into: a note only (cleared when the server world goes). #108: a new world's
+    // registry can sit at the old one's address with fresh content, so whether the program is in the registry is
+    // always asked of the registry itself (get_program(reg, id) == blob), never answered from this pointer.
     uintptr_t inserted_in = 0;
     std::string source;
 };
@@ -1455,7 +1465,24 @@ uintptr_t prog_registry() {
 }
 
 
+// Queues a program until the registry or its natives are there; one entry per GUID (the latest bytes). g_mu held.
+void queue_waiting(PendingProgram&& w) {
+    for (auto& x : g_waiting)
+        if (x.bytes.size() >= 20 && w.bytes.size() >= 20 && std::memcmp(x.bytes.data() + 4, w.bytes.data() + 4, 16) == 0) {
+            // other bytes under the GUID (another mod's program with the same GUID, say): the latest goes in, said so
+            if (x.bytes != w.bytes)
+                logw("kiln.abilities: program %s from %s replaces the one from %s that waited with other bytes under its GUID",
+                     guid_text(w.bytes.data() + 4).c_str(), w.source.c_str(), x.source.c_str());
+            x = std::move(w);
+            return;
+        }
+    g_waiting.push_back(std::move(w));
+}
+
 // Verify + insert. Tick thread. Returns KILN_OK, or INVALID_ARGUMENT with err set; *waiting = queued for natives.
+// A program Kiln has already (g_programs, kept across worlds) is put back when this world's registry lacks it, and the
+// same bytes again in the world that holds it are a no-op: after a world change a second registration of the same GUID
+// (EnsureBuffProgram, a mod's world-start Register, kiln.assets' refresh) succeeds (#108).
 KilnResult add_program(const uint8_t* blob, size_t len, KilnOwner owner, const std::string& source, uint32_t* out_id,
                        std::string& err, bool* waiting) {
     *waiting = false;
@@ -1480,44 +1507,58 @@ KilnResult add_program(const uint8_t* blob, size_t len, KilnOwner owner, const s
     }
     if (!reg || !g_programs_ready.load()) {
         // the game fills its ImpactRegistry while the world loads: wait for it
-        PendingProgram w{std::vector<uint8_t>(blob, blob + len), owner, source, {}};
-        g_waiting.push_back(std::move(w));
+        queue_waiting(PendingProgram{std::vector<uint8_t>(blob, blob + len), owner, source, {}});
         *waiting = true;
         return KILN_OK;
     }
-    for (const auto& p : g_programs)
-        if (p.id == r.id) {
-            err = "a Kiln program with this GUID is registered already";
-            return KILN_ERR_INVALID_ARGUMENT;
+    KProgram* known = nullptr;
+    for (auto& p : g_programs)
+        if (p.id == r.id) known = &p;
+    const bool same = known && known->len == len && std::memcmp(known->blob, blob, len) == 0;
+    const uint8_t* live = get_program(reg, r.id);  // this world's registry, asked now (#108)
+    if (known && live == known->blob) {
+        if (same) {
+            known->inserted_in = reg;
+            return KILN_OK;  // in this world's registry already: the same program again changes nothing
         }
-    if (get_program(reg, r.id)) {
-        err = "the GUID belongs to a program the game has (clone it to a new GUID)";
+        err = "a Kiln program with this GUID is registered already (with other bytes: give the new one a GUID of its own)";
+        return KILN_ERR_INVALID_ARGUMENT;
+    }
+    if (live) {
+        err = known ? "this world's ImpactRegistry holds another program with this GUID"
+                    : "the GUID belongs to a program the game has (clone it to a new GUID)";
         c_refused.fetch_add(1);
         return KILN_ERR_INVALID_ARGUMENT;
     }
     if (!r.unknown_natives.empty()) {
-        PendingProgram w{std::vector<uint8_t>(blob, blob + len), owner, source, r.unknown_natives};
-        for (auto& x : g_waiting)
-            if (x.bytes.size() >= 20 && std::memcmp(x.bytes.data() + 4, blob + 4, 16) == 0) {
-                x = std::move(w);
-                *waiting = true;
-                return KILN_OK;
-            }
-        g_waiting.push_back(std::move(w));
+        queue_waiting(PendingProgram{std::vector<uint8_t>(blob, blob + len), owner, source, r.unknown_natives});
         *waiting = true;
         return KILN_OK;
     }
-    auto* mem = static_cast<uint8_t*>(VirtualAlloc(nullptr, len, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
+    uint8_t* mem = same ? known->blob : static_cast<uint8_t*>(VirtualAlloc(nullptr, len, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
     if (!mem) {
         err = "out of memory";
         return KILN_ERR_INTERNAL;
     }
-    std::memcpy(mem, blob, len);
+    if (!same) std::memcpy(mem, blob, len);
     bool existed = false;
     if (!program_map_insert(reg, r.id, mem, &existed) || existed) {
-        VirtualFree(mem, 0, MEM_RELEASE);
+        if (!same) VirtualFree(mem, 0, MEM_RELEASE);
         err = existed ? "the GUID is in the registry already" : "the ImpactRegistry map is full or unreadable";
         return KILN_ERR_INTERNAL;
+    }
+    if (known) {  // a program of an earlier world, back in this one's registry
+        if (!same) {  // new bytes under its GUID: no instance of this world runs the old copy (it stays: never freed)
+            known->blob = mem;
+            known->len = len;
+            known->owner = owner;
+            known->source = source;
+        }
+        known->inserted_in = reg;
+        g_programs_added.store(true, std::memory_order_release);
+        logi("kiln.abilities: program %s (0x%08x) from %s put back into this world's ImpactRegistry%s",
+             guid_text(r.guid).c_str(), r.id, source.c_str(), same ? "" : " with new bytes");
+        return KILN_OK;
     }
     KProgram p{r.id, {}, mem, len, owner, reg, source};
     std::memcpy(p.guid, r.guid, 16);
@@ -1550,13 +1591,35 @@ void retry_waiting() {
 uint32_t refresh_programs() {  // tick thread
     const uintptr_t reg = g_prog_registry.load();
     if (!reg || !g_programs_ready.load()) return 0;
+    // first what waited for this registry: a program registered again while the world loaded (maybe with new bytes)
+    // goes in as it is now, before the copies below are put back
+    retry_waiting();
     {
         std::lock_guard lock(g_mu);
+        uint32_t back = 0;
         for (auto& p : g_programs) {
-            if (p.inserted_in == reg) continue;
+            // #108: ask the registry, not p.inserted_in: the next world's registry may have the same address
+            const uint8_t* live = get_program(reg, p.id);
+            if (live == p.blob) {
+                p.inserted_in = reg;
+                continue;
+            }
+            if (live) {
+                logw("kiln.abilities: program 0x%08x not re-inserted: this world's ImpactRegistry holds another program with "
+                     "its GUID", p.id);
+                continue;
+            }
             bool existed = false;
-            if (program_map_insert(reg, p.id, p.blob, &existed)) p.inserted_in = reg;
-            else logw("kiln.abilities: program 0x%08x could not be re-inserted", p.id);
+            if (program_map_insert(reg, p.id, p.blob, &existed) && !existed) {
+                p.inserted_in = reg;
+                ++back;
+            } else {
+                logw("kiln.abilities: program 0x%08x could not be re-inserted", p.id);
+            }
+        }
+        if (back) {
+            g_programs_added.store(true, std::memory_order_release);
+            logi("kiln.abilities: %u Kiln program(s) of an earlier world put back into ImpactRegistry %p", back, (void*)reg);
         }
     }
     uint32_t added = 0;
@@ -1590,7 +1653,6 @@ uint32_t refresh_programs() {  // tick thread
             }
         }
     }
-    retry_waiting();
     return added;
 }
 
@@ -1922,7 +1984,17 @@ void KILN_CALL on_pre(const KilnTickInfo* tick, void*) {
 
 void KILN_CALL on_world(const KilnWorldEvent* ev, void*) {
     if (ev->kind != KILN_WORLD_SERVER) return;
-    if (ev->event == KILN_WORLD_STOPPING) {
+    if (ev->event == KILN_WORLD_STARTED) {
+        // #108: a server world starts (tick thread, before its first Pre) while the last one's state is still here, so
+        // its stop was not seen (a build without the world.lifecycle hook). The new world's ImpactSystem and registries
+        // may sit at the old addresses: nothing of the old world may stay, or it would pass for the new one's.
+        if (!g_setup_world && !g_prog_registry.load()) return;
+        logi("kiln.abilities: server world session %u starts before the last one's stop was seen: that world's state goes now",
+             ev->session);
+    } else if (ev->event != KILN_WORLD_STOPPING) {
+        return;
+    }
+    {
         // review P1: the world's state goes only with no Kiln native call inside (bounded; reported when not)
         const int64_t end = now_ns() + kRetireWaitNs;
         while (g_inflight.load(std::memory_order_seq_cst) != 0 && now_ns() < end) SwitchToThread();
@@ -1958,6 +2030,7 @@ void KILN_CALL on_world(const KilnWorldEvent* ev, void*) {
         g_setup_registry = 0;
         g_programs_ready.store(false);
         for (auto& s : g_slots) s.registered_in = 0;
+        for (auto& p : g_programs) p.inserted_in = 0;  // #108: the next world's registry gets them again (refresh_programs)
     }
 }
 
@@ -2909,6 +2982,132 @@ KilnResult KILN_CALL t_sequence_play(KilnEntity e, uint32_t sequence, uint32_t t
     return KILN_OK;
 }
 
+// ---- item_use (since 0.2.0-dev.30.3; item_use.h, docs/kiln/services/abilities.md "Using an item") ----
+// An item used from a player's slot the way the game does it for a hand use: TriggerSequence with the item's own
+// sequence and trigger Primary, then the slot and the item into the trigger context's used item, which the sequence's
+// consume event reads (actor_apply_buff takes the item from that slot and applies the buff with it). kiln.playerstate's
+// lab_use_item is the same call on lab characters. The slot is read through kiln.items (the player's inventory tree),
+// the states through this build's reflection (kiln.types); both are resolved at the first call.
+kab::use::Layout g_use;               // tick thread
+int g_use_state = 0;                  // 0 not resolved yet, 1 on, -1 off for this process (logged once)
+const KilnItemsApi* g_use_items = nullptr;
+
+bool use_ready() {
+    if (g_use_state != 0) return g_use_state > 0;
+    char why[200] = {};
+    const auto* types = static_cast<const KilnTypesApi*>(g_api->service(KilnStr{KILN_TYPES_SERVICE, sizeof(KILN_TYPES_SERVICE) - 1}, 1));
+    if (types && types->header.size < sizeof(KilnTypesApi)) types = nullptr;
+    g_use_items = static_cast<const KilnItemsApi*>(g_api->service(KilnStr{KILN_ITEMS_SERVICE, sizeof(KILN_ITEMS_SERVICE) - 1}, 1));
+    bool ok = false;
+    if (!g_use_items || !g_use_items->read) std::snprintf(why, sizeof why, "kiln.items is not here");
+    else ok = kab::use::resolve(types, &g_use, why, sizeof why);
+    g_use_state = ok ? 1 : -1;
+    if (ok)
+        logi("kiln.abilities: item_use on (used item at ActorInput+0x%llx/+0x%llx, pending trigger +0x%llx, context +0x%llx "
+             "(%u bytes), Actor.currentState +0x%llx, sequenceRuntimeId +0x%llx, trigger Primary %lld)",
+             static_cast<unsigned long long>(g_use.used_slot), static_cast<unsigned long long>(g_use.used_item),
+             static_cast<unsigned long long>(g_use.pending), static_cast<unsigned long long>(g_use.context), g_use.context_size,
+             static_cast<unsigned long long>(g_use.state), static_cast<unsigned long long>(g_use.running),
+             static_cast<long long>(g_use.primary));
+    else
+        logw("kiln.abilities: item_use is off: %s", why);
+    return ok;
+}
+
+// TriggerSequence, then the used item. A fault in the second write would leave a consuming sequence with no item (the
+// server's spawn path reads one without a check): the component was just written by the game through the same pointer
+// and its size checked against the offsets, so the write is not expected to fault; it is guarded all the same, and a
+// trigger that did not get its item (or a TriggerSequence that faulted half way) is taken back (guarded_abort).
+bool guarded_used(void* ai, uint64_t slot, uint32_t item) {
+    __try {
+        kab::use::write_used(static_cast<uint8_t*>(ai), g_use, slot, item);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+bool guarded_abort(void* ai) {
+    __try {
+        kab::use::abort_trigger(static_cast<uint8_t*>(ai), g_use);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+// A trigger with no used item could not be taken back: item_use stays off for the process from here on.
+KilnResult use_failed(void* ai, KilnEntity e, uint32_t sequence, const char* what) {
+    const bool cleared = guarded_abort(ai);
+    if (!cleared) g_use_state = -1;
+    logw("kiln.abilities: item_use: %s (entity %u, sequence 0x%08x); the trigger %s", what, e, sequence,
+         cleared ? "is taken back" : "could NOT be taken back: item_use is off for this process");
+    return KILN_ERR_INTERNAL;
+}
+
+KilnResult KILN_CALL t_item_use(KilnItemUse* u) {
+    if (const KilnResult rc = kab::use::check_request(u); rc != KILN_OK) return rc;
+    if (!on_tick()) return KILN_ERR_WRONG_THREAD;
+    // Pre or Post only. Inside a Kiln native (a sync native, an attachment, a wrap: impact_simulation, pinned to the
+    // world's thread) the world's step runs, and the game's programs run on workers beside it: actor_simulation_start
+    // could take the trigger between TriggerSequence and the used item.
+    if (t_slot >= 0 || t_ctx) return KILN_ERR_WRONG_THREAD;
+    const uintptr_t world = g_api->server_world();
+    if (!world) return KILN_ERR_WRONG_THREAD;  // no server world in this process: a joined client, or none started yet
+    if (!g_have_sequences || !use_ready()) return KILN_ERR_UNAVAILABLE;
+    if (!sequence_key(u->sequence) && !g_sequence_keys.empty()) return KILN_ERR_NOT_FOUND;
+    const KilnEntity e = u->entity;
+    uint64_t ai_size = 0, a_size = 0;
+    void* ai = component(world, kActorInput, e, &ai_size);
+    auto* a = static_cast<const uint8_t*>(component(world, kActor, e, &a_size));
+    const uint64_t ai_need = static_cast<uint64_t>(std::max({g_use.used_slot + 8, g_use.used_item + 4, g_use.pending + 4,
+                                                             g_use.context + static_cast<int64_t>(g_use.context_size),
+                                                             E.trigger_counter + 1}));
+    const uint64_t a_need = static_cast<uint64_t>(std::max<int64_t>(g_use.state + 8, g_use.running + 4));
+    if (!ai || !a || ai_size < ai_need || a_size < a_need) {
+        u->status = KILN_ITEM_USE_NOT_A_PLAYER;  // not a character the game can trigger a sequence on
+        return KILN_OK;
+    }
+
+    kab::use::Facts f;
+    f.expected = u->item;
+    KilnItemsInventory info{};
+    info.size = sizeof info;
+    KilnItemsSlot slots[KILN_ITEMS_MAX_INVENTORIES * 8];
+    uint32_t n = 0;
+    const KilnResult rr = g_use_items->read(e, &info, slots, KILN_ITEMS_MAX_INVENTORIES * 8, &n);
+    if (rr == KILN_OK || rr == KILN_ERR_BUFFER_TOO_SMALL) {
+        f.player = (info.setup_flags & 0x01) != 0;  // InventorySetup IsPlayer
+        for (uint32_t i = 0; i < n; ++i)
+            if (slots[i].slot == u->slot) {
+                f.own_slot = true;
+                f.item = slots[i].item;
+                f.count = slots[i].count;
+                break;
+            }
+    } else if (rr != KILN_ERR_NOT_FOUND) {
+        return rr;  // kiln.items off or not on its thread: the slot cannot be checked
+    }
+    if (!read_bytes(a + g_use.state, &f.state, 8) || !read_bytes(a + g_use.running, &f.running, 4) ||
+        !read_bytes(static_cast<const uint8_t*>(ai) + g_use.pending, &f.pending, 4))
+        return KILN_ERR_INTERNAL;
+    u->count = f.count;
+    u->status = kab::use::verdict(f, g_use);
+    if (u->status != KILN_ITEM_USE_STARTED) return KILN_OK;
+
+    const int64_t now = ecs_now(world);
+    if (!trigger_sequence(ai, e, u->sequence, now, static_cast<uint16_t>(g_use.primary)))
+        return use_failed(ai, e, u->sequence, "TriggerSequence faulted");
+    if (!guarded_used(ai, u->slot, u->item)) return use_failed(ai, e, u->sequence, "writing the used item faulted after the trigger");
+    // a new sequence replaces a held one (sequence_play's rule); the game's consumables have no keep-alive gates
+    g_seq_holds.erase(std::remove_if(g_seq_holds.begin(), g_seq_holds.end(), [&](const SeqHold& h) { return h.entity == e; }),
+                      g_seq_holds.end());
+    u->trigger_time = now;
+    logi("kiln.abilities: item 0x%08x used from slot %u:%u by %u (sequence 0x%08x, %u in the stack, time %lld)", u->item,
+         KILN_SLOT_INVENTORY(u->slot), KILN_SLOT_INDEX(u->slot), e, u->sequence, f.count, static_cast<long long>(now));
+    return KILN_OK;
+}
+
 const KilnAbilitiesApi kTable = {
     {sizeof(KilnAbilitiesApi), KILN_ABILITIES_VERSION},
     &t_status,
@@ -2949,6 +3148,7 @@ const KilnAbilitiesApi kTable = {
     &t_native_attach_state,
     &t_native_ecs_read,
     &t_native_ecs_write,
+    &t_item_use,
 };
 
 // ------------------------------------------------------------------------------------------- boot --------------

@@ -2262,6 +2262,8 @@
       "byHand": "Colocado à mão",
       "folder": "Pasta",
       "advanced": "Avançado (hooks ou patches)",
+      "steam": "Steam",
+      "steamMessages": "Conversa com outros jogadores pelo Steam",
       "role": "Papel",
       "servesLive": "Serve as páginas ao vivo",
       "also": "Também {list}",
@@ -5446,6 +5448,19 @@
         "duration": "Duração",
         "durationPh": "do jogo",
         "seconds": "segundos",
+        "water": "Água do tanque",
+        "waterTip": "A água da própria receita, em cargas por fabricação (64 unidades de água cada), como a linha Água da tela de receitas mostra. O jogo a retira quando uma fabricação começa.",
+        "waterPh": "nenhuma",
+        "waterPhBase": "a da base",
+        "waterPhGame": "a do jogo",
+        "waterUnit": "cargas por fabricação",
+        "waterTank": "O tanque de {station} comporta {max} cargas: mantenha-o cheio para fabricar.",
+        "waterOver": "Mais do que o tanque de {station} comporta ({max}): a estação nunca começa esta receita.",
+        "waterNoTank": "{station} não tem tanque de água: nunca começa uma receita que precise de água.",
+        "waterMenu": "Fabricado por um menu: o jogo retira a água dos recipientes do jogador e dos poços e barris da base.",
+        "oldWater": "Um ingrediente é o antigo item Água do jogo, um cantil: cada fabricação consome {count} desse item, não água do tanque da estação.",
+        "useTank": "Usar água do tanque",
+        "useTankTip": "Remove os ingredientes do item Água e pede a mesma quantidade de água do tanque",
         "itemAria": "Item",
         "countAria": "Quantidade",
         "category": "qualquer item da categoria {id}",
@@ -5530,7 +5545,8 @@
         "toggle": "Mostrar entradas ocultas do jogo",
         "tag": "oculta",
         "tip": "Entradas antigas, de teste ou sem uso do jogo: podem não fazer nada no jogo.",
-        "tankWater": "água do tanque da estação"
+        "oldWater": "cantil antigo, não é água do tanque",
+        "oldWaterTip": "O antigo item Água do jogo. A tela de receitas usa o nome dele para a água de uma receita, mas como ingrediente ele é o próprio item. Para água do tanque, use Água do tanque na receita."
       }
     },
     "order": {

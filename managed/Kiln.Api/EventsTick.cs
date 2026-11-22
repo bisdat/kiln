@@ -67,6 +67,8 @@ internal static class ServiceTick
          ("Kiln.Blocks", "Kiln.CraftStockStartup"),
          // 0.2.0-dev.29.19 (the equipment wave, P7): per-instance gear values kept through loads, written again after each
          ("Kiln.Blocks", "Kiln.GearKeepStartup"),
+         // 0.2.0-dev.30.3: client.building_input where only Kiln.Client can say why it is off (an older kiln.client, no core)
+         ("Kiln.Client", "Kiln.ClientStartup"),
          // 0.2.0-dev.31 (16a): station menus' runtime, so that "the mods' menus are declared" comes also without any menu
          ("Kiln.Blocks", "Kiln.StationMenuStartup")];
 

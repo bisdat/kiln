@@ -828,6 +828,26 @@ content/items.json:3:5: info KL407: "Z_Material_Sand_DEPRECATED" is one of the g
 ```
 Fix: pick the entry the game uses now, or keep it if you meant it.
 
+### KL408 recipe-water
+Warning. A recipe's water that does not do what it looks like:
+- **An input naming `Food_T1_raw_hydration_Water_Pouch_Filled_DEPRECATED`**, the game's old "Water" item. It is a canteen
+  item like any other: a craft takes that item from the crafter, never water from the station's tank. The recipe screen
+  borrows its name and icon for the recipe's water row, which is why it looks like tank water. Give the recipe its
+  water instead: `"water": n` on a new recipe, `"waterCharges": n` in a change to a game recipe.
+- **Water at a factory station without a tank** (the Smelter, the Forge, the Kiln, the Loom...). A factory station takes a
+  recipe's water from its own tank only, so it never starts that recipe. The stations with a tank: Seedbed (150 charges),
+  Oven, Cooking Station, Laboratory, Coffee Brewer (100 each) and Beehive (50).
+- **More water a craft than the station's tank holds**: it never fills enough to start.
+
+The station is the definition's `"0x<workshop id>"`, or the workshop of the game recipe it names as its `station` or
+`base` (with the catalog), or the game recipe a change names. Crafting menus (`"hand"`, the Workbench, the Kitchen, the
+NPCs) take a recipe's water from the crafter and the base's wells and barrels, as the game's own Kitchen recipes do: no
+warning there. How the game pays it: [docs/re/stations.md](../../re/stations.md) section 3.6.
+```text
+content/recipes.json:5:9: warning KL408: recipe "MyMod_Tea" takes "Food_T1_raw_hydration_Water_Pouch_Filled_DEPRECATED", the game's old Water canteen item, as an ingredient: a craft takes 2 of that item, never water from the station's tank. For the station's tank water, remove this input and give the recipe "water": 2 (water charges a craft)
+```
+Fix: remove the input and set the recipe's water; pick a station with a tank, or leave the water out.
+
 ## KL5xx: files, assets and cook recipes
 
 ### KL501 file-missing

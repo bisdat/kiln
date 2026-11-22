@@ -11,6 +11,9 @@
  *      (game_program_*, below).
  *   6. Kiln programs in a game client's client world and prediction storage (since 0.2.0-dev.29: register_program_world,
  *      program_world_state, bind_program_world, unbind_program_world at the end of the table).
+ *   7. Named services from task threads (since 0.2.0-dev.30.3: named_service_open, _snapshot, _close,
+ *      _compare_exchange at the end of the table): the game's original named plain-data services, read and changed
+ *      under the engine's write gate.
  * Only kiln.world hooks the game's program registration; everyone else registers programs through this table.
  * Evidence and engine notes: docs/re/world.md. Usage: docs/kiln/services/world.md.
  *
@@ -37,6 +40,7 @@
 #ifndef KILN_WORLD_H
 #define KILN_WORLD_H
 #include "../kiln_api.h"
+#include "kiln_types.h" /* KilnType (named_service_open's type), since 0.2.0-dev.30.3 */
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -770,6 +774,26 @@ typedef struct KilnEcsWritePolicy {
     char why[96];            /* the same in words, NUL-terminated */
 } KilnEcsWritePolicy;
 
+/* One row of a world's component registration catalog (ecs_registration). A registration names up to two reflected
+ * types: the entity storage (runtime) type and the template (configuration) type, the layout a template resource
+ * stores the component in. Hashes are FNV-1a-32 of the type's qualified name ("keen::ecs::FallDamage"), as kiln.types'
+ * KilnTypeInfo.hash; sizes are the type descriptors' own. Since 0.2.0-dev.30.3. */
+typedef struct KilnEcsRegistrationDetail {
+    uint32_t size;          /* set to sizeof(KilnEcsRegistrationDetail) before calling */
+    uint32_t status;        /* KILN_ECS_OK, ABSENT (no world of the kind), UNREADABLE or UNAVAILABLE */
+    uint32_t index;         /* the registration's position in the catalog */
+    uint32_t component;     /* the registration's hash (the hash asked for) */
+    uint32_t runtime_size;  /* the registered entity storage size (0 for a template-only registration) */
+    uint32_t flags;         /* the registration's flags word, passed on raw */
+    uint32_t storage_flags; /* the registration's storage flags (the high half of its size word), passed on raw */
+    uint32_t storage_hash;  /* the entity storage type's hash; 0: template-only (no entity storage) */
+    uint32_t storage_size;  /* its reflected size (0 with storage_hash 0) */
+    uint32_t template_hash; /* the template type's hash; 0: the registration has no template role */
+    uint32_t template_size; /* its reflected size (0 with template_hash 0) */
+    uint32_t reserved;      /* 0 */
+    uint64_t layout_stamp;  /* the catalog's identity: KilnObjectRef.layout_stamp of this world while it holds */
+} KilnEcsRegistrationDetail;
+
 /* KilnMutationReply.flags */
 enum {
     KILN_MUTATION_WRITTEN = 1u << 0,       /* the bytes were written and read back */
@@ -780,7 +804,10 @@ enum {
     KILN_MUTATION_EVENT_QUEUED = 1u << 5   /* a KilnEcsWriteEvent will be delivered after this write */
 };
 typedef struct KilnMutationReply {
-    uint32_t size;          /* set to sizeof(KilnMutationReply) before calling */
+    uint32_t size;          /* set to sizeof(KilnMutationReply) before calling (48 or more); nothing is written past it.
+                               On return: the bytes this Kiln filled, the smaller of yours and its own (a caller built
+                               before restore_ns passes 48 and gets the fields before it). A Kiln before restore_ns
+                               (0.2.0-dev.30.2 and earlier) gives back the size passed */
     uint32_t status;        /* KILN_ECS_*: the outcome */
     uint32_t flags;         /* KILN_MUTATION_* */
     uint32_t why_code;      /* KILN_ECS_WRITE_WHY_* */
@@ -788,7 +815,17 @@ typedef struct KilnMutationReply {
     uint32_t generation;    /* the entity's generation the call saw */
     uint64_t session;       /* the server world session of the attempt */
     uint64_t step;          /* the server step of the attempt (0 when unknown) */
-    uint64_t hold_ns;       /* how long Kiln held the engine's gate (0: never taken) */
+    uint64_t hold_ns;       /* how long Kiln held the engine's Scene word exclusively: from the moment its CAS won to the
+                               moment it was released, before the rest of the gate's release (0: the gate refused or
+                               was never taken). A Kiln without restore_ns measured to the end of the release, the
+                               priority restore included (GitHub #58) */
+    /* --- appended after the first release (48 bytes): filled when size covers it --- */
+    uint64_t restore_ns;    /* how long putting the calling thread's priority back took when this call's gate was
+                               released, after the Scene word was free (SetThreadPriority; under Proton a wineserver
+                               round trip). 0: the priority was not raised (the raise is off, the thread was above
+                               normal already, or the call was refused before the raise). A Kiln without this field
+                               (0.2.0-dev.30.2 and earlier) leaves it as the caller set it and still gives back size 56:
+                               zero the record; kiln.engine's gate_stats tells such a Kiln (its size comes back 96) */
 } KilnMutationReply;
 
 /* One committed write, delivered on the server tick (kiln.world's Pre) after its gate was released, exactly once per
@@ -805,6 +842,46 @@ typedef struct KilnEcsWriteEvent {
     uint64_t step;          /* the server step the write was made after */
 } KilnEcsWriteEvent;
 typedef void(KILN_CALL* KilnEcsWriteEventFn)(const KilnEcsWriteEvent* event, void* user);
+
+/* ======================================================================== Named services ====== */
+/* Since 0.2.0-dev.30.3 (the version stays 4): check header.size and KILN_WORLD_CAP_NAMED_READ / _NAMED_WRITE (the
+ * kiln.caps rows world.named_read and world.named_write say why not). A named service is one of the game's original
+ * named plain-data services: a struct of plain values the SERVER world's own service registry holds under its original
+ * name ("ecs::GameSettings": the world's settings, which every system that needs them reads each time), shared by the
+ * whole world. Only the services this build's exact engine profile names can be opened, each with its size and type;
+ * docs/kiln/services/world.md, "Named services from tasks".
+ *
+ * A view (named_service_open) is the caller's own, bound to one service and the server world session it was opened in.
+ * It holds no engine pointer: every snapshot and compare-exchange finds the service again in the game's registry under
+ * the engine's write gate (the record by name and hash, its one binding, the one system that writes it, the type's
+ * size and hash), copies or changes the bytes, and finds it again before the gate is released. So no member waits, posts
+ * work to a tick, or returns partial bytes. Any thread but a world's own (on the server tick they answer BUSY at once).
+ *
+ * The compare-exchange (named_service_compare_exchange) has the protocol of ecs_compare_exchange: before the gate the
+ * arguments, the view, its session and the staging buffers; inside the hold the service found again, its bytes copied
+ * and compared in full with `expected`, `desired` merged under `mask`, written, read back and the service found again;
+ * a write that does not read back is rolled back in the same hold and that rollback is read back too. Outcomes
+ * (KilnMutationReply.status, the KilnResult mirrors it; KilnMutationReply.generation is 0):
+ *   OK            written and read back (KILN_MUTATION_WRITTEN), or nothing to change (KILN_MUTATION_NO_OP)  KILN_OK
+ *   CONFLICT      the current bytes are not `expected`; `confirmed` holds them; nothing written         KILN_ECS_ERR_CONFLICT
+ *   BUSY          the engine holds a gate word (every frame), another Kiln writer holds the gate, this owner's busy
+ *                 latch for the step, a call on the server tick, or an owner retired during the call     KILN_ECS_ERR_BUSY
+ *   STALE         the view's session or world is not the live one, or the calling owner retired         KILN_ECS_ERR_STALE
+ *   NOT_WRITABLE  `bytes` is not the service's size, or it is over the gate's write budget             KILN_ECS_ERR_NOT_WRITABLE
+ *   UNCERTAIN     a write could not be proven, now or earlier for this service in this session
+ *                 (KILN_MUTATION_TARGET_LATCHED)                                                       KILN_ECS_ERR_UNCERTAIN
+ *   UNAVAILABLE   named services are off on this build, no server world now, not the local authority,
+ *                 or the gate closed                                                                    KILN_ERR_UNAVAILABLE
+ *   ABSENT        no such view of the calling owner (never opened, closed, or another owner's)          KILN_ERR_NOT_FOUND
+ *   UNREADABLE    the service could not be found again or read (a fault, a changed binding) before any write, or a
+ *                 write was rolled back and proven (KILN_MUTATION_ROLLED_BACK): the bytes are as they were KILN_ECS_ERR_UNREADABLE
+ * why_code is the KILN_ECS_WRITE_WHY_* of the first rule that decided (REF: the view, its session or the service's
+ * binding; NOT_OWNERS_REF: another owner's view). Only a BUSY refusal from the gate itself latches the owner for the rest
+ * of the server step. An UNCERTAIN write latches the service for the rest of its server session: every later
+ * compare-exchange of it answers UNCERTAIN with KILN_MUTATION_TARGET_LATCHED and takes no gate; snapshots go on.
+ * Owner scoping: an owner's views end when it retires (unload, reload, a failed start); its calls answer STALE from
+ * then on. At most KILN_NAMED_SERVICE_VIEWS views per owner are open at once. */
+#define KILN_NAMED_SERVICE_VIEWS 64u
 
 typedef struct KilnWorldApi {
     KilnServiceHeader header; /* { sizeof(KilnWorldApi), KILN_WORLD_VERSION } */
@@ -1236,7 +1313,7 @@ typedef struct KilnWorldApi {
     /* Compare `expected` (the whole component, `bytes` long) with the entity's component and, when equal, write
      * `desired` under `mask` (byte by byte: nonzero takes the byte from `desired`; NULL = every byte). `bytes` must be
      * the registered size. `confirmed` (optional, `bytes` long) gets the current bytes on CONFLICT and the written
-     * bytes on OK. `reply` (size set) gets the outcome. Any thread but a world's own; on the server tick it answers
+     * bytes on OK. `reply` (size set, 48 or more) gets the outcome. Any thread but a world's own; on the server tick it answers
      * BUSY at once. Never waits. Invalid arguments: KILN_ERR_INVALID_ARGUMENT, reply untouched. */
     KilnResult(KILN_CALL* ecs_compare_exchange)(KilnOwner owner, const KilnObjectRef* ref, uint32_t component,
                                                 const void* expected, const void* mask, const void* desired,
@@ -1257,6 +1334,51 @@ typedef struct KilnWorldApi {
      *     and its STOPPING), so no callback can be running then.
      * KILN_ERR_NOT_FOUND: no such subscription. Any thread. */
     KilnResult(KILN_CALL* ecs_write_unsubscribe)(KilnHandle subscription);
+
+    /* ---- named services from task threads: appended since 0.2.0-dev.30.3 (the version stays 4) after the
+     * compare-exchange writes, at offsets 616..640 (the table is 648 bytes with them). Check header.size for each member
+     * you use, and KILN_WORLD_CAP_NAMED_READ / _NAMED_WRITE. See the section above the table. ---- */
+    /* Opens a view of the named service `name` (the original name, without "keen::": "ecs::GameSettings") for `owner`, in
+     * the live server world session (`expected_session` 0 accepts it; a nonzero one that differs is STALE). Finds the
+     * service under the gate once and copies nothing. *view (non-NULL) gets the handle; *type (when non-NULL) the
+     * service's reflected type from kiln.types (NULL when kiln.types cannot describe it with the profile's size and hash).
+     * KILN_OK; KILN_ERR_INVALID_ARGUMENT (owner 0, view NULL, a name that is empty, over 127 bytes, has a NUL or starts
+     * with "keen::"); KILN_ERR_NOT_FOUND (this build's profile names no such service); KILN_ERR_BUFFER_TOO_SMALL (the
+     * owner has KILN_NAMED_SERVICE_VIEWS views open); KILN_ERR_UNAVAILABLE, KILN_ECS_ERR_STALE, KILN_ECS_ERR_BUSY,
+     * KILN_ECS_ERR_UNREADABLE as above. Any thread but a world's own. */
+    KilnResult(KILN_CALL* named_service_open)(KilnOwner owner, KilnStr name, uint64_t expected_session, KilnHandle* view,
+                                              const KilnType** type);
+    /* The service's whole bytes, copied under the gate between frames and found again before the release. *required (when
+     * non-NULL) is the service's size, also when capacity is short (KILN_ERR_BUFFER_TOO_SMALL, nothing copied and no gate
+     * taken). KILN_OK; KILN_ERR_INVALID_ARGUMENT (owner 0, out NULL with capacity); KILN_ERR_NOT_FOUND (no such view of
+     * this owner); KILN_ECS_ERR_STALE, KILN_ECS_ERR_BUSY, KILN_ECS_ERR_UNREADABLE, KILN_ERR_UNAVAILABLE as above. */
+    KilnResult(KILN_CALL* named_service_snapshot)(KilnOwner owner, KilnHandle view, void* out, uint32_t capacity,
+                                                  uint32_t* required);
+    /* Ends a view. KILN_OK; KILN_ERR_NOT_FOUND (no such view of this owner); KILN_ERR_INVALID_ARGUMENT (owner 0). Any
+     * thread. */
+    KilnResult(KILN_CALL* named_service_close)(KilnOwner owner, KilnHandle view);
+    /* Compare `expected` (the whole service, `bytes` long) with the service and, when equal, write `desired` under
+     * `mask` (byte by byte: nonzero takes the byte from `desired`; NULL = every byte), in one hold of the engine's gate.
+     * `bytes` must be the service's size. `confirmed` (optional, `bytes` long) gets the current bytes on CONFLICT and
+     * the written bytes on OK. `reply` (size set) gets the outcome. Never waits. Invalid arguments (owner 0, a NULL
+     * expected, desired or reply, bytes 0, a short reply): KILN_ERR_INVALID_ARGUMENT, reply untouched. */
+    KilnResult(KILN_CALL* named_service_compare_exchange)(KilnOwner owner, KilnHandle view, const void* expected,
+                                                          const void* mask, const void* desired, uint32_t bytes,
+                                                          void* confirmed, KilnMutationReply* reply);
+
+    /* ---- since 0.2.0-dev.30.3 (check header.size): one registration of a world's component catalog, at 648 (the
+     * table is 656 bytes with it) ---- */
+    /* The registration whose hash is `component` in the catalog of `world_kind`'s world, with its storage and template
+     * types (KilnEcsRegistrationDetail), read through the same engine view and guarded copy as the ECS reads above: it
+     * works where they do (KILN_WORLD_CAP_ECS_READ, the world.ecs_read row) and needs a world of that kind. The row and
+     * both type descriptors are validated (in the image, a keen::ecs:: name whose hash is the descriptor's, a size;
+     * the registration's identity, its template type or else its storage type, carries the registration's own hash;
+     * the registered size is the storage type's) and the row is read again after them. Any thread, never waits.
+     * KILN_OK; KILN_ERR_NOT_FOUND (no registration has that hash, status OK); KILN_ERR_UNAVAILABLE (no reads on this
+     * build, no world of the kind (status ABSENT), no engine view, or a row that does not validate);
+     * KILN_ECS_ERR_UNREADABLE (the catalog moved during the read: read again); KILN_ERR_INVALID_ARGUMENT (out NULL or
+     * short, world_kind out of range), out untouched. */
+    KilnResult(KILN_CALL* ecs_registration)(uint32_t world_kind, uint32_t component, KilnEcsRegistrationDetail* out);
 } KilnWorldApi;
 
 enum {
@@ -1266,6 +1388,8 @@ enum {
     KILN_WORLD_CAP_TRACKED_WRITES = 1u << 3, /* since 0.2.0-dev.27: write_submit works on this build */
     KILN_WORLD_CAP_ECS_READ = 1u << 4,        /* appended in v4: the ECS-read members above work on this build */
     KILN_WORLD_CAP_ECS_WRITE = 1u << 5,       /* appended in v4: ecs_compare_exchange can write on this build */
+    KILN_WORLD_CAP_NAMED_READ = 1u << 6,      /* since 0.2.0-dev.30.3: named services open and snapshot on this build */
+    KILN_WORLD_CAP_NAMED_WRITE = 1u << 7,     /* since 0.2.0-dev.30.3: named_service_compare_exchange can write here */
 };
 
 #ifdef __cplusplus
@@ -1296,9 +1420,10 @@ static_assert(KILN_ECS_ERR_CONFLICT == 105 && KILN_ECS_ERR_NOT_WRITABLE == 106 &
 static_assert(sizeof(KilnEcsWritePolicy) == 128 && offsetof(KilnEcsWritePolicy, flags) == 24 &&
                   offsetof(KilnEcsWritePolicy, why) == 32,
               "KilnEcsWritePolicy layout");
-static_assert(sizeof(KilnMutationReply) == 48 && offsetof(KilnMutationReply, session) == 24 &&
-                  offsetof(KilnMutationReply, step) == 32 && offsetof(KilnMutationReply, hold_ns) == 40,
-              "KilnMutationReply layout");
+static_assert(sizeof(KilnMutationReply) == 56 && offsetof(KilnMutationReply, session) == 24 &&
+                  offsetof(KilnMutationReply, step) == 32 && offsetof(KilnMutationReply, hold_ns) == 40 &&
+                  offsetof(KilnMutationReply, restore_ns) == 48,
+              "KilnMutationReply layout (the first release's 48 bytes, then restore_ns)");
 static_assert(sizeof(KilnEcsWriteEvent) == 48 && offsetof(KilnEcsWriteEvent, owner) == 24 &&
                   offsetof(KilnEcsWriteEvent, session) == 32 && offsetof(KilnEcsWriteEvent, step) == 40,
               "KilnEcsWriteEvent layout");
@@ -1309,7 +1434,16 @@ static_assert(offsetof(KilnWorldApi, entity_open) == 528 && offsetof(KilnWorldAp
               "kiln.world ECS-read members append at 528 (x64)");
 static_assert(offsetof(KilnWorldApi, ecs_write_policy) == 584 && offsetof(KilnWorldApi, ecs_compare_exchange) == 592 &&
                   offsetof(KilnWorldApi, ecs_write_subscribe) == 600 && offsetof(KilnWorldApi, ecs_write_unsubscribe) == 608 &&
-                  sizeof(KilnWorldApi) == 616,
-              "kiln.world compare-exchange members append at 584 (table 616 bytes, x64)");
+                  offsetof(KilnWorldApi, named_service_open) == 616,
+              "kiln.world compare-exchange members append at 584 (x64)");
+static_assert(offsetof(KilnWorldApi, named_service_open) == 616 && offsetof(KilnWorldApi, named_service_snapshot) == 624 &&
+                  offsetof(KilnWorldApi, named_service_close) == 632 &&
+                  offsetof(KilnWorldApi, named_service_compare_exchange) == 640,
+              "kiln.world named-service members append at 616 (table 648 bytes, x64)");
+static_assert(sizeof(KilnEcsRegistrationDetail) == 56 && offsetof(KilnEcsRegistrationDetail, template_hash) == 36 &&
+                  offsetof(KilnEcsRegistrationDetail, layout_stamp) == 48,
+              "KilnEcsRegistrationDetail layout");
+static_assert(offsetof(KilnWorldApi, ecs_registration) == 648 && sizeof(KilnWorldApi) == 656,
+              "kiln.world ecs_registration appends at 648 (table 656 bytes, x64)");
 #endif
 #endif

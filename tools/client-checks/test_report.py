@@ -305,7 +305,8 @@ class CoverageTests(unittest.TestCase):
 
 # the checks of Kiln's interpreter (mods/tests/client-pass/Sfi.cs) and its gate row
 # (native/core/gates/sfi.json). A build whose list has no kiln-sfi.interpreter row (Kiln's interpreter a normal choice in
-# Settings) has no gate of them: the seven checks are then kiln mode's guided checks, still in the pack and the rows.
+# Settings) has no gate of them: the checks are then kiln mode's guided checks, still in the pack and the rows (the seven
+# the gate named, and sfi-keybinds since 0.2.0-dev.30.3).
 SFI_GATE = REPO / "native" / "core" / "gates" / "sfi.json"
 SFI_GATE_ROWS = [g for g in (json.loads(SFI_GATE.read_text("utf-8"))["gates"] if SFI_GATE.exists() else [])
                  if g["name"] == "kiln-sfi.interpreter"]
@@ -315,14 +316,14 @@ SFI_SECTION = "Kiln's interpreter (kiln-sfi.interpreter)"
 
 
 class SfiGateTests(unittest.TestCase):
-    """Kiln's interpreter's seven guided checks: each one must be a check of the pack, once, and a row of the rows file,
+    """Kiln's interpreter's eight guided checks: each one must be a check of the pack, once, and a row of the rows file,
     so a missing check is a failure here and never a silent skip in the pass. While the gate list has the interpreter's
     row, they are that row's checks (it stays held until they pass)."""
 
     def test_every_check_of_the_interpreter_row_is_in_the_pack_and_the_rows(self):
-        self.assertEqual(len(SFI_CHECKS), 7, sorted(SFI_CHECKS))
+        self.assertEqual(len(SFI_CHECKS), 8, sorted(SFI_CHECKS))
         if SFI_GATE_ROWS:
-            self.assertEqual(SFI_GATE_CHECKS, SFI_CHECKS, "the interpreter's gate row names its seven checks")
+            self.assertEqual(SFI_GATE_CHECKS, SFI_CHECKS, "the interpreter's gate row names its checks")
         ids = pack_check_ids()
         rows = json.loads((PACK / "rows.json").read_text("utf-8"))["rows"]
         for cid in sorted(SFI_CHECKS):
@@ -341,6 +342,65 @@ class SfiGateTests(unittest.TestCase):
         rows = json.loads((PACK / "rows.json").read_text("utf-8"))["rows"]
         self.assertEqual(set(CHECK_ID.findall(src)), {c for r in rows if r["section"] == SFI_SECTION for c in r["checks"]})
         self.assertEqual(set(CHECK_ID.findall(src)), SFI_GATE_CHECKS or SFI_CHECKS)
+
+
+# kiln.client's building input (mods/tests/client-pass/BuildingInput.cs) and its gate row
+# (native/core/gates/client-input.json): the checks that open client.building_input.
+BI_GATE = REPO / "native" / "core" / "gates" / "client-input.json"
+BI_GATE_CHECKS = {cid for g in (json.loads(BI_GATE.read_text("utf-8"))["gates"] if BI_GATE.exists() else [])
+                  if g["name"] == "client.building_input" for cid in g["checks"]}
+BI_CHECKS = set(CHECK_ID.findall((PACK / "BuildingInput.cs").read_text("utf-8")))
+BI_SECTION = "Building input (client.building_input)"
+
+
+class BuildingInputGateTests(unittest.TestCase):
+    """While the gate list holds client.building_input, its checks are exactly the pack's building input checks, each
+    one check of the pack and one row of the rows file, so the row cannot open on a check that does not exist."""
+
+    def test_every_check_of_the_building_input_row_is_in_the_pack_and_the_rows(self):
+        self.assertEqual(len(BI_CHECKS), 5, sorted(BI_CHECKS))
+        if BI_GATE_CHECKS:
+            self.assertEqual(BI_GATE_CHECKS, BI_CHECKS, "the gate row names the five building input checks")
+        ids = pack_check_ids()
+        rows = json.loads((PACK / "rows.json").read_text("utf-8"))["rows"]
+        for cid in sorted(BI_CHECKS):
+            self.assertEqual(ids.count(cid), 1, f"{cid}: one [ClientCheck] in the pack")
+            self.assertEqual(sum(cid in r["checks"] for r in rows), 1, f"{cid}: one row of rows.json")
+        self.assertEqual({c for r in rows if r["section"] == BI_SECTION for c in r["checks"]}, BI_CHECKS,
+                         "the building input rows are its checks")
+
+    def test_the_plan_reads_every_building_input_check(self):
+        import plan
+        self.assertLessEqual(BI_CHECKS, {c["id"] for c in plan.read_pack(str(PACK))})
+
+
+# kiln mode's own guided checks since 0.2.0-dev.30.3, outside the interpreter's eight (mods/tests/client-pass/Sfi*.cs
+# other than Sfi.cs): one row each, in their own section.
+SFI303_CHECKS = {cid for f in PACK.glob("Sfi*.cs") if f.name != "Sfi.cs"
+                 for cid in CHECK_ID.findall(f.read_text("utf-8"))}
+SFI303_SECTION = "Kiln's interpreter in 0.2.0-dev.30.3"
+
+
+class KilnModeChecksTests(unittest.TestCase):
+    """Every kiln-mode check since 0.2.0-dev.30.3 is one check of the pack and one row of its section, and the pack's
+    orders are unique, so two checks never claim the same place in the pass."""
+
+    def test_every_kiln_mode_check_has_one_row_in_its_section(self):
+        self.assertTrue(SFI303_CHECKS)
+        ids = pack_check_ids()
+        rows = json.loads((PACK / "rows.json").read_text("utf-8"))["rows"]
+        for cid in sorted(SFI303_CHECKS):
+            self.assertEqual(ids.count(cid), 1, f"{cid}: one [ClientCheck] in the pack")
+            self.assertEqual(sum(cid in r["checks"] for r in rows), 1, f"{cid}: one row of rows.json")
+        self.assertEqual({c for r in rows if r["section"] == SFI303_SECTION for c in r["checks"]}, SFI303_CHECKS,
+                         "the section's rows are the kiln-mode checks")
+
+    def test_orders_are_unique(self):
+        import plan
+        by_order = {}
+        for c in plan.read_pack(str(PACK)):
+            by_order.setdefault(c["order"], []).append(c["id"])
+        self.assertEqual({o: ids for o, ids in by_order.items() if len(ids) > 1}, {}, "one check per order")
 
 
 if __name__ == "__main__":

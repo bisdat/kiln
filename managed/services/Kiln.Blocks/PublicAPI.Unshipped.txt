@@ -384,3 +384,21 @@ static Kiln.Routines.Assign(Kiln.Villager! npc, Kiln.BlockHandle<Kiln.RoutineBlo
 static Kiln.Routines.Inspect(Kiln.Villager! npc) -> Kiln.RoutineSnapshot?
 static Kiln.Routines.Remove(Kiln.Villager! npc) -> System.Threading.Tasks.Task<Kiln.RoutineResult!>!
 static Kiln.Routines.Resume(Kiln.Villager! npc) -> System.Threading.Tasks.Task<Kiln.RoutineResult!>!
+const Kiln.BaseRulesBlock.MaxAltars = 16 -> int
+Kiln.BaseRulesBlock
+Kiln.BaseRulesBlock.<Clone>$() -> Kiln.BaseRulesBlock!
+Kiln.BaseRulesBlock.BaseRulesBlock() -> void
+Kiln.BaseRulesBlock.BuildAreaPercent.get -> int?
+Kiln.BaseRulesBlock.BuildAreaPercent.init -> void
+Kiln.BaseRulesBlock.Equals(Kiln.BaseRulesBlock? other) -> bool
+Kiln.BaseRulesBlock.ExtraAltars.get -> int
+Kiln.BaseRulesBlock.ExtraAltars.init -> void
+Kiln.BaseRulesBlock.MinimumAltars.get -> int?
+Kiln.BaseRulesBlock.MinimumAltars.init -> void
+Kiln.BaseRulesBlock.Sizes.get -> System.Collections.Generic.IReadOnlyList<Kiln.AltarSize!>?
+Kiln.BaseRulesBlock.Sizes.init -> void
+override Kiln.BaseRulesBlock.Equals(object? obj) -> bool
+override Kiln.BaseRulesBlock.GetHashCode() -> int
+override Kiln.BaseRulesBlock.ToString() -> string!
+static Kiln.BaseRulesBlock.operator !=(Kiln.BaseRulesBlock? left, Kiln.BaseRulesBlock? right) -> bool
+static Kiln.BaseRulesBlock.operator ==(Kiln.BaseRulesBlock? left, Kiln.BaseRulesBlock? right) -> bool

@@ -596,6 +596,26 @@ fn scenarios() -> Vec<(&'static str, Reducer)> {
     let mut out = Vec::new();
     out.push(("starting", starting()));
     out.push(("running-qs-skipped", qs_running()));
+    // kiln-sfi's native banner showed revision 1 at the main menu; revision 2 (a late loss) came while the
+    // overlay's drawing was off
+    let mut delivered = qs_running();
+    delivered.late_loss(
+        "example-lua",
+        "runtime-error",
+        "runtime error in on_update: attempt to call a nil value",
+    );
+    for (revision, state, at_ms) in [
+        (1, DeliveryState::Shown, 1_763_520_014_000),
+        (2, DeliveryState::NotShown, 1_763_520_030_000),
+    ] {
+        delivered.set_delivery(Delivery {
+            revision,
+            state,
+            world_session: None,
+            at_ms: Some(at_ms),
+        });
+    }
+    out.push(("running-native-delivery", delivered));
     let mut late = qs_running();
     late.late_loss(
         "example-lua",

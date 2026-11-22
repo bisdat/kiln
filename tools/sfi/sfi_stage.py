@@ -14,10 +14,17 @@ tools/package/stage.sh runs it:
           - component sfi (MIT): exactly kiln/plugins/kiln-sfi.dll, a non-empty AMD64 PE32+ DLL; installed by default
             on both sides and requiring core and eml; no kiln-sfi.* anywhere else (never swept into core, never in the
             hosted ShroudForge folder); ShroudForge's runtime (component shroudforge) still there and a default;
+          - kiln-sfi.dll carries the core's build stamp: its kiln_build_stamp() export equals the stamp every native
+            service DLL in core/kiln/services exports (one build: the core's), that stamp is "<VERSION><build metadata>"
+            and kiln-core.dll holds the same build metadata. The core makes kiln-sfi.dll the ShroudForge-dialect owner
+            only then (native/core/src/api.cpp load_one); without it kiln mode never starts. Read from the files, never
+            run: the export's code is the "lea rax, [rip+X]; ret" both builds emit, X the NUL-terminated stamp;
           - component eml: kiln/tools/eml-inspect/<platform>/ for linux-x86_64 (an x86-64 ELF executable, mode 0755) and
             windows-x86_64 (an AMD64 PE32+ executable, not a DLL), each with exactly its LICENSE.txt and NOTICE.txt
             (gpl/kiln-eml's), archive-inspection.schema.json (the checked-in schema) and a version.json that binds them;
             no eml-inspect folder in any other component.
+  python3 -I tools/sfi/sfi_stage.py stamp <dll>
+          prints a DLL's kiln_build_stamp() as the check reads it (exit 1 when it has none or it cannot be read).
 Exit 0: complete. 1: problems, each on stderr. 2: wrong usage."""
 import hashlib
 import json
@@ -127,6 +134,137 @@ def pe_amd64(data, dll):
     return machine == 0x8664 and magic == 0x20B and bool(chars & 0x2000) == dll and bool(chars & 0x0002)
 
 
+STAMP_EXPORT = b"kiln_build_stamp"
+CORE_DLL = "kiln/kiln-core.dll"
+SERVICES_DIR = "kiln/services"
+STAMP_MAX = 128  # the core copies at most 128 bytes of a stamp (api.cpp dll_build_stamp)
+BUILD_METADATA = re.compile(r"\+[0-9A-Za-z.-]+")
+
+
+def pe_build_stamp(data):
+    """The kiln_build_stamp() string of a PE32+ image without running it: None when it has no such export. The export
+    must be "lea rax, [rip+X]; ret" (what native/cmake/kiln_build_stamp.cpp and kiln-sfi's Rust both compile to), after
+    at most three "jmp rel32" thunks; X a printable NUL-terminated string. Anything else raises ValueError, also an image
+    cut off anywhere (every header and section must lie within the file)."""
+    def u16(o):
+        return int.from_bytes(data[o:o + 2], "little")
+
+    def u32(o):
+        return int.from_bytes(data[o:o + 4], "little")
+
+    if len(data) < 0x40 or data[:2] != b"MZ":
+        raise ValueError("not a PE image")
+    pe = u32(0x3C)
+    if pe + 24 > len(data) or data[pe:pe + 4] != b"PE\0\0":
+        raise ValueError("not a PE image")
+    sections, opt_size = u16(pe + 6), u16(pe + 20)
+    opt = pe + 24
+    if opt + 2 > len(data) or u16(opt) != 0x20B:
+        raise ValueError("not a PE32+ image")
+    if opt + opt_size > len(data):
+        raise ValueError("truncated optional header")
+    if opt_size < 112 + 8 or u32(opt + 108) < 1:
+        return None  # no export directory
+    exp_rva, exp_size = u32(opt + 112), u32(opt + 116)
+    if not exp_rva:
+        return None
+    table = []
+    for i in range(sections):
+        s = opt + opt_size + 40 * i
+        if s + 40 > len(data):
+            raise ValueError("truncated section table")
+        vsize, va, raw_size, raw = u32(s + 8), u32(s + 12), u32(s + 16), u32(s + 20)
+        if raw_size and raw + raw_size > len(data):
+            raise ValueError(f"section {i} runs past the end of the file")
+        table.append((va, max(vsize, raw_size), raw, raw_size))
+
+    def at(rva, n):
+        for va, size, raw, raw_size in table:
+            if va <= rva and rva + n <= va + size:
+                off = rva - va
+                if off + n > raw_size:
+                    raise ValueError(f"RVA {rva:#x} is not in the file")
+                return raw + off
+        raise ValueError(f"RVA {rva:#x} is in no section")
+
+    e = at(exp_rva, 40)
+    count, functions, names, ordinals = u32(e + 24), u32(e + 28), u32(e + 32), u32(e + 36)
+    rva = None
+    for i in range(count):
+        n = at(u32(at(names + 4 * i, 4)), len(STAMP_EXPORT) + 1)
+        if data[n:n + len(STAMP_EXPORT) + 1] == STAMP_EXPORT + b"\0":
+            rva = u32(at(functions + 4 * u16(at(ordinals + 2 * i, 2)), 4))
+            break
+    if rva is None:
+        return None
+    if exp_rva <= rva < exp_rva + exp_size:
+        raise ValueError("kiln_build_stamp is a forwarder")
+    for _ in range(3):
+        o = at(rva, 5)
+        if data[o] != 0xE9:
+            break
+        rva = (rva + 5 + int.from_bytes(data[o + 1:o + 5], "little", signed=True)) & 0xFFFFFFFF
+    o = at(rva, 8)
+    if data[o:o + 3] != b"\x48\x8d\x05" or data[o + 7] != 0xC3:
+        raise ValueError(f"kiln_build_stamp is not 'lea rax, [rip+X]; ret' ({data[o:o + 8].hex(' ')})")
+    target = (rva + 7 + int.from_bytes(data[o + 3:o + 7], "little", signed=True)) & 0xFFFFFFFF
+    s = at(target, 1)
+    end = data.find(b"\0", s, s + STAMP_MAX + 1)
+    if end < 0:
+        raise ValueError(f"kiln_build_stamp's string is longer than {STAMP_MAX} bytes")
+    text = data[s:end]
+    if not all(0x20 < c < 0x7F for c in text):
+        raise ValueError(f"kiln_build_stamp's string is not printable: {text!r}")
+    return text.decode("ascii")
+
+
+def stamp_problems(repo, stage):
+    """kiln-sfi.dll's stamp against the core's build (empty: it is the core's, or there is no kiln-sfi.dll)."""
+    dll = os.path.join(stage, "sfi", *SFI_DLL.split("/"))
+    core = os.path.join(stage, "core", *CORE_DLL.split("/"))
+    if not os.path.isfile(dll):
+        return []  # check() reports it
+    if not os.path.isfile(core):
+        return [f"core/{CORE_DLL}: missing, so {SFI_DLL}'s build stamp has no core to match"]
+    bad = []
+    services = os.path.join(stage, "core", *SERVICES_DIR.split("/"))
+    stamps = {}
+    for name in sorted(os.listdir(services)) if os.path.isdir(services) else []:
+        if not name.lower().endswith(".dll"):
+            continue
+        try:
+            stamps[name] = pe_build_stamp(read(os.path.join(services, name)))
+        except (OSError, ValueError) as e:
+            bad.append(f"core/{SERVICES_DIR}/{name}: its build stamp cannot be read ({e})")
+    for name, s in stamps.items():
+        if s is None:
+            bad.append(f"core/{SERVICES_DIR}/{name}: exports no kiln_build_stamp (every native service DLL does)")
+    found = sorted({s for s in stamps.values() if s is not None})
+    if not found:
+        return bad + [f"core/{SERVICES_DIR}: no native service DLL with a build stamp, so the core's build is unknown"]
+    if len(found) > 1:
+        return bad + [f"core/{SERVICES_DIR}: the service DLLs are of different builds ({', '.join(found)})"]
+    identity = found[0]
+    version = kiln_version(repo)
+    meta = identity[len(version):] if identity.startswith(version) else ""
+    if not BUILD_METADATA.fullmatch(meta):
+        return bad + [f"core/{SERVICES_DIR}: the core's build stamp {identity!r} is not '{version}<build metadata>' "
+                      "(a build without build metadata: the core trusts no DLL)"]
+    if read(core).count(meta.encode("ascii") + b"\0") < 1:
+        bad.append(f"core/{CORE_DLL}: does not hold the build metadata {meta} of its services (not the same build)")
+    try:
+        sfi = pe_build_stamp(read(dll))
+    except (OSError, ValueError) as e:
+        return bad + [f"sfi/{SFI_DLL}: its build stamp cannot be read ({e})"]
+    if sfi is None:
+        bad.append(f"sfi/{SFI_DLL}: exports no kiln_build_stamp, so the core never makes it the ShroudForge-dialect owner "
+                   f"(kiln mode would never start); this build's stamp is {identity}")
+    elif sfi != identity:
+        bad.append(f"sfi/{SFI_DLL}: its build stamp {sfi} is not the core's {identity} (a stale or foreign kiln-sfi.dll: "
+                   "the core would not make it the ShroudForge-dialect owner, kiln mode would never start)")
+    return bad
+
+
 def read(path, limit=None):
     with open(path, "rb") as f:
         return f.read() if limit is None else f.read(limit)
@@ -179,6 +317,7 @@ def check(repo, stage):
         bad.append(f"{SFI_DLL}: empty")
     elif not pe_amd64(read(dll, 1 << 16), dll=True):
         bad.append(f"{SFI_DLL}: not an AMD64 PE32+ DLL")
+    bad.extend(stamp_problems(repo, stage))
     for rel in files.get("sfi", []):
         if rel != SFI_DLL:
             bad.append(f"sfi/{rel}: component sfi holds only {SFI_DLL}")
@@ -264,11 +403,22 @@ def main(argv):
         if bad:
             print(f"sfi_stage: FAIL: {len(bad)} problem(s) in {argv[3]}", file=sys.stderr)
             return 1
-        print(f"sfi_stage: OK: component sfi ({SFI_DLL}) and kiln-eml's archive inspector for "
-              f"{', '.join(PLATFORMS)} in {argv[3]}")
+        print(f"sfi_stage: OK: component sfi ({SFI_DLL}, the core's build stamp) and kiln-eml's archive inspector "
+              f"for {', '.join(PLATFORMS)} in {argv[3]}")
         return 0
-    print("usage: sfi_stage.py version <repo> <platform folder> <platform> | sfi_stage.py check <repo> <stage dir>",
-          file=sys.stderr)
+    if len(argv) == 3 and argv[1] == "stamp":
+        try:
+            stamp = pe_build_stamp(read(argv[2]))
+        except (OSError, ValueError) as e:
+            print(f"sfi_stage: {argv[2]}: {e}", file=sys.stderr)
+            return 1
+        if stamp is None:
+            print(f"sfi_stage: {argv[2]}: no kiln_build_stamp export", file=sys.stderr)
+            return 1
+        print(stamp)
+        return 0
+    print("usage: sfi_stage.py version <repo> <platform folder> <platform> | sfi_stage.py check <repo> <stage dir> | "
+          "sfi_stage.py stamp <dll>", file=sys.stderr)
     return 2
 
 

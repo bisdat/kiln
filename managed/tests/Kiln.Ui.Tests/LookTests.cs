@@ -112,6 +112,13 @@ public unsafe class LookTests : IDisposable
             Assert.Equal(max, e.GetProperty("max").GetSingle());
             Assert.False(e.GetProperty("requiresRestart").GetBoolean());  // Kiln reads the file again while the game runs
         }
+        // kiln-ui.dll's outline_core.h parse_setting (Ui.World.Outline, 0.2.0-dev.30.3): read once per game start
+        var outlines = entries["ui.outlines"];
+        Assert.Equal("game-first", outlines.GetProperty("default").GetString());
+        Assert.Equal(new[] { "game-first", "mods-first", "off" }, outlines.GetProperty("options").EnumerateArray().Select(o => o.GetString()!).ToArray());
+        Assert.True(outlines.GetProperty("requiresRestart").GetBoolean());
+        var core = File.ReadAllText(Path.Combine(RepoRoot(), "native", "services", "ui", "outline_core.h"));
+        Assert.Contains("s == \"mods-first\" ? kModsFirst : s == \"off\" ? kOff : kGameFirst", core);
         Range("ui.background", LookSettings.Default.Background, 0.1f, 1f);
         Range("ui.opacity", LookSettings.Default.Opacity, 0.3f, 1f);
         Range("ui.scale", LookSettings.Default.Scale, 0.75f, 1.5f);

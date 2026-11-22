@@ -66,6 +66,23 @@ internal static class BootLowering
                 }
                 var type = BootDefinitions.Kinds.First(k => k.Value == kind).Key;
                 sink.Key = key;
+                // base rules are not compiled either: kiln.content composes them (the patches collector, key "baseRules@<name>")
+                if (kind == BootDefinitions.BaseRules)
+                {
+                    try
+                    {
+                        var rules = JsonSerializer.Deserialize<BaseRulesBlock>((string)s["json"]!, BlockJson.SharedOptions)!;
+                        if (rules.Problem() is { } problem)
+                            return new JsonObject { ["ok"] = false, ["reason"] = $"{kind}/{key}: {problem}" }.ToJsonString();
+                        sink.Patch(BootDefinitions.BaseRulesKey(key), JsonNode.Parse((string)s["json"]!)!.AsObject());
+                    }
+                    catch (JsonException e)
+                    {
+                        return new JsonObject { ["ok"] = false, ["reason"] = $"{kind}/{key}: {e.Message}" }.ToJsonString();
+                    }
+                    definitions.Add($"{kind}/{key}");
+                    continue;
+                }
                 // a resource patch is not compiled: its record is the patches collector's document, which checks it in prepare
                 if (kind == BootDefinitions.ResourcePatches)
                 {
@@ -262,7 +279,7 @@ internal static class BootLowering
             {
                 var type = BootDefinitions.Kinds.FirstOrDefault(k => k.Value == s.Kind).Key;
                 if (type == null) continue;
-                if (s.Kind == BootDefinitions.ResourcePatches)
+                if (s.Kind is BootDefinitions.ResourcePatches or BootDefinitions.BaseRules)
                 {
                     done.Add($"{s.Kind}/{s.Key}");  // written by kiln.content when the game's resources came up: nothing to define
                     continue;

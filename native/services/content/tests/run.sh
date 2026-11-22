@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
-# kiln.content: the game's own texts (text_test.cpp, host: the loca hook, text() and text_info() over a fake lookup); content transactions (txn_test.cpp, host: store.cpp over a made-up memory with failing writes); the hook on the
+# kiln.content: resource patches and Kiln's base rules (bootpatch_test.cpp, baserules_test.cpp, host); the game's own texts (text_test.cpp, host: the loca hook, text() and text_info() over a fake lookup); content transactions (txn_test.cpp, host: store.cpp over a made-up memory with failing writes); the hook on the
 # game's item lookup only when it is needed (itemfind_test.cpp, host: newcontent.cpp over a fake kiln.hooks table); a sequence clone's names in a later world of the process (seqnames_test.cpp, host); the buff room (buffroom_test.cpp, host: the 4,096 reservation, its fallback, checked sizes, the map the game reads); near memory
 # (nearmem.cpp): the policy against simulated address spaces on the host (near_test.cpp: the layout of GitHub issue 14,
 # the Wine layout, no free hole, budget, top and bottom of the address space), then the Windows side (nearwin.h) on a
@@ -14,6 +14,8 @@ export KILN_OUT
 out=$KILN_OUT/content-tests
 mkdir -p "$out"
 bash "$here/bootpatch_test.sh"
+bash "$here/baserules_test.sh"
+bash "$here/bootpatch_equiv_test.sh"
 bash "$here/bootstruct_test.sh"
 bash "$here/bootview_test.sh"
 # resource patches in a kiln-backend start (the committed archive generation)
@@ -33,6 +35,26 @@ bash "$here/text_test.sh"
 bash "$here/menulayout_test.sh"
 echo "== gear-test (host)"
 bash "$here/gear_test.sh"
+bash "$here/registry_claims_test.sh"
+bash "$here/registry_compose_test.sh"
+bash "$here/registry_schema_test.sh"
+bash "$here/registry_generated_test.sh"
+bash "$here/registry_regmap_test.sh"
+bash "$here/registry_formulas_test.sh"
+bash "$here/registry_raw_test.sh"
+bash "$here/registry_review_test.sh"
+bash "$here/registry_review2_test.sh"
+bash "$here/registry_ir_test.sh"
+bash "$here/registry_refs_test.sh"
+bash "$here/registry_report_test.sh"
+bash "$here/registry_model_test.sh"
+bash "$here/registry_stage_test.sh"
+bash "$here/registry_store_test.sh"
+bash "$here/registry_live_test.sh"
+bash "$here/registry_stage_review_test.sh"
+bash "$here/registry_live_review_test.sh"
+echo "== recipe-water-test (host)"
+bash "$here/recipe_water_test.sh"
 echo "== near-test (host)"
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/near_test.cpp" "$here/../nearmem.cpp" -o "$out/near-test"
 "$out/near-test"

@@ -34,6 +34,9 @@ extern thread_local std::uint64_t test_boost_cas, test_restore_releases;
 extern thread_local int test_boosts, test_restores;
 extern std::atomic<int> test_tracker_calls;
 extern std::atomic<bool> test_tracker_fault;
+extern thread_local std::uint64_t test_exclusive_won_ns, test_exclusive_release_ns, test_shared_release_ns,
+    test_restore_begin_ns;
+extern std::atomic<void (*)()> test_restore_hook;
 }
 
 std::atomic<long> g_allocations{0};
@@ -343,6 +346,126 @@ void hold_time(const char* target) {
         __atomic_store_n(fake::word(e.scene_word()), 0, __ATOMIC_SEQ_CST);
     }
     check(word(e.registry_word()) == 0 && word(e.scene_word()) == 0, t + "words free at the end");
+}
+
+// The release's own measurements in the record (GitHub #58): hold_ns is the Scene word's exclusive interval and ends at
+// that word's release, before the registry word, the holder flag and the priority restore; restore_ns is the restore
+// alone. A slow restore (SetThreadPriority under Proton, or a preemption right after it) shows in restore_ns and the
+// restore stats, never in hold_ns or the hold stats. Every bound is placed against the host memory's own timestamps
+// of the same clock, so no check depends on how fast this host runs.
+std::atomic<std::uint64_t> g_restore_sleep_ns{0};
+void slow_restore() { std::this_thread::sleep_for(std::chrono::nanoseconds(g_restore_sleep_ns.load())); }
+std::string us(std::uint64_t ns) { return std::to_string(ns / 1000) + " us"; }
+void release_measurements(const char* target) {
+    const Layout& L = layout_of(target);
+    const std::string t = std::string(target) + ": release measurements: ";
+    fake::Engine e(L);
+    EcsView v{};
+    check(ecs_view(&L, ViewKind::Authority, v, e.image.at()) == Reason::None, t + "view");
+    const auto acquire = [&](GateState& g, const EcsView& view) {
+        return gate_acquire(&L, view, g, CallerThread::Other, e.image.at());
+    };
+    Stats& s = stats();
+    mem::test_priority = -1;
+    mem::test_restore_hook = &slow_restore;
+    {
+        // a hold of 2 ms or more, then a restore of 20 ms or more
+        constexpr std::uint64_t kHold = 2'000'000, kRestore = 20'000'000;
+        g_restore_sleep_ns = kRestore;
+        GateState g = fresh();
+        g.hold_ns = 77;
+        g.restore_ns = 88;  // a reused record's earlier measurements
+        check(acquire(g, v) == Reason::None && g.boosted && mem::test_priority == 1 && g.hold_ns == 0 && g.restore_ns == 0,
+              t + "held and raised; acquire reset the record's earlier measurements");
+        const std::uint64_t acquired = g.acquired_ns;
+        check(acquired >= mem::test_exclusive_won_ns, t + "the hold starts after the Scene CAS won");
+        std::this_thread::sleep_for(std::chrono::nanoseconds(kHold));
+        const std::uint64_t hold_total = s.hold_ns_total.load(), restores = s.restores.load(),
+                            restore_total = s.restore_ns_total.load();
+        gate_release(g);
+        const std::uint64_t end = acquired + g.hold_ns;
+        check(g.hold_ns >= kHold, t + "hold_ns covers the whole Scene hold (" + us(g.hold_ns) + ")");
+        check(end >= mem::test_exclusive_release_ns && end <= mem::test_shared_release_ns,
+              t + "hold_ns ends after the Scene word's release, before the registry word's");
+        check(end <= mem::test_restore_begin_ns && mem::test_priority == -1,
+              t + "hold_ns ends before the priority restore begins (the restore came after it)");
+        check(g.restore_ns >= kRestore, t + "restore_ns is the slow restore (" + us(g.restore_ns) + ")");
+        check(s.hold_ns_total.load() - hold_total == g.hold_ns && s.hold_ns_max.load() >= g.hold_ns,
+              t + "the hold stats add hold_ns, not the restore");
+        check(s.restores.load() == restores + 1 && s.restore_ns_total.load() - restore_total == g.restore_ns &&
+                  s.restore_ns_max.load() >= g.restore_ns,
+              t + "the restore stats add restore_ns once");
+        // a second release (EcsGateScope's destructor after an explicit release) measures nothing and keeps them
+        const std::uint64_t hold = g.hold_ns, restore = g.restore_ns;
+        gate_release(g);
+        check(g.hold_ns == hold && g.restore_ns == restore && s.restores.load() == restores + 1 &&
+                  s.hold_ns_total.load() - hold_total == hold && g.size == sizeof g && g.owner == 1,
+              t + "a second release keeps the measurements, counts nothing, keeps size and owner");
+        check(word(e.registry_word()) == 0 && word(e.scene_word()) == 0, t + "words free");
+    }
+    {
+        // the update holds the Scene word: refused after the raise and the registry word; no hold, the restore timed
+        g_restore_sleep_ns = 1'000'000;
+        __atomic_store_n(fake::word(e.scene_word()), 1, __ATOMIC_SEQ_CST);
+        GateState g = fresh();
+        const std::uint64_t hold_total = s.hold_ns_total.load(), restores = s.restores.load();
+        const Reason r = acquire(g, v);  // before the check: its message reads the record
+        check(r == Reason::EcsSceneFrameBusy && g.hold_ns == 0 && g.restore_ns >= 1'000'000 &&
+                  s.restores.load() == restores + 1 && s.hold_ns_total.load() == hold_total,
+              t + "Scene busy: hold_ns 0, the restore of the refusal timed (" + us(g.restore_ns) + ")");
+        const std::uint64_t restore = g.restore_ns;
+        gate_release(g);  // the caller's own release after the refusal
+        check(g.restore_ns == restore && s.restores.load() == restores + 1, t + "the caller's release after it keeps it");
+        __atomic_store_n(fake::word(e.scene_word()), 0, __ATOMIC_SEQ_CST);
+    }
+    {
+        // a stale view: refused after both words were taken; that hold and its restore are measured too
+        g_restore_sleep_ns = 1'000'000;
+        EcsView stale = v;
+        stale.manager += 8;
+        GateState g = fresh();
+        const Reason r = acquire(g, stale);
+        check(r == Reason::EcsWriteOwnerChangedOrNotAuthoritative && g.hold_ns > 0 &&
+                  g.hold_ns <= mem::test_shared_release_ns - mem::test_exclusive_won_ns && g.restore_ns >= 1'000'000 &&
+                  mem::test_restore_begin_ns >= mem::test_shared_release_ns,
+              t + "refused after the Scene word: hold " + us(g.hold_ns) + " (within the Scene CAS to the registry "
+                  "release) and restore " + us(g.restore_ns) + " apart");
+    }
+    mem::test_restore_hook = nullptr;
+    {
+        // another Kiln holder: refused before any word and before the raise; nothing measured
+        GateState a = fresh(), b = gate_for(2, ++g_step);
+        b.hold_ns = 5;
+        b.restore_ns = 6;
+        check(acquire(a, v) == Reason::None && acquire(b, v) == Reason::KilnHolderBusy && b.hold_ns == 0 && b.restore_ns == 0,
+              t + "kiln-gate-busy: nothing held, nothing raised: both 0");
+        gate_release(a);
+        check(a.hold_ns > 0 && a.hold_ns <= mem::test_shared_release_ns - mem::test_exclusive_won_ns,
+              t + "the holder's own release: a hold within the Scene CAS to the registry release");
+    }
+    {
+        // a thread already above normal: not raised, so nothing to restore; the hold is measured all the same
+        mem::test_priority = 1;
+        const std::uint64_t restores = s.restores.load(), hold_total = s.hold_ns_total.load();
+        GateState g = fresh();
+        check(acquire(g, v) == Reason::None && !g.boosted, t + "above normal already: held, not raised");
+        gate_release(g);
+        check(g.hold_ns > 0 && g.restore_ns == 0 && s.restores.load() == restores && mem::test_priority == 1 &&
+                  s.hold_ns_total.load() - hold_total == g.hold_ns,
+              t + "above normal already: a hold, no restore, the priority left as it was");
+        mem::test_priority = -1;
+    }
+    {
+        // kiln.engine's measurement switch turned the raise off: nothing to restore
+        gate_set_priority_raise(false);
+        const std::uint64_t restores = s.restores.load();
+        GateState g = fresh();
+        check(acquire(g, v) == Reason::None && !g.boosted, t + "raise off: held at the thread's own priority");
+        gate_release(g);
+        check(g.hold_ns > 0 && g.restore_ns == 0 && s.restores.load() == restores, t + "raise off: a hold, no restore");
+        gate_set_priority_raise(true);
+    }
+    check(word(e.registry_word()) == 0 && word(e.scene_word()) == 0 && mem::test_priority == -1, t + "words free at the end");
 }
 
 // Kiln's admission: one Kiln holder, the per-owner busy latch, closing at STOPPING and exit, the holder's priority.
@@ -895,6 +1018,7 @@ int main() {
         refusals(t);
         blocked_update(t);
         hold_time(t);
+        release_measurements(t);
         overlap(t);
         hardening(t);
         exit_race(t);
@@ -912,8 +1036,9 @@ int main() {
     const Stats& s = stats();
     check(s.attempts.load() > 0 && s.acquired.load() > 0 && s.busy_scene.load() > 0 && s.busy_registry.load() > 0 &&
               s.refused_in_frame.load() > 0 && s.refused_world_thread.load() > 0 && s.hold_ns_max.load() > 0 &&
-              s.hold_ns_total.load() >= s.hold_ns_max.load(),
-          "gate stats count every kind and the hold time");
+              s.hold_ns_total.load() >= s.hold_ns_max.load() && s.restores.load() > 0 &&
+              s.restore_ns_total.load() >= s.restore_ns_max.load() && s.restore_ns_max.load() >= 20'000'000,
+          "gate stats count every kind, the hold time and the priority restores");
     std::printf("engine gate: %d checks, %d failures (max hold %llu ns)\n", checks.load(), failures.load(),
                 static_cast<unsigned long long>(s.hold_ns_max.load()));
     return failures ? 1 : 0;

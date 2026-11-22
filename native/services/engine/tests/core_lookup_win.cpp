@@ -33,6 +33,8 @@
 #include "services/kiln_profile.h"
 #include "services/kiln_progress.h"
 #include "../../../core/src/tasks_host.h"  // the lookup block names the core's managed-host table (kiln.tasks)
+#include "../../../core/src/hooks_protect_internal.h"  // and the core's kiln.internal.hooks table
+#include "../../../core/src/owners_internal.h"  // and the core's kiln.internal.owners table
 #include "../../../core/src/launch_internal.h"  // and the core's kiln.launch tables
 #include "../../../plugins/compat/original_code_service.h"  // and the core's original-code table
 
@@ -61,6 +63,7 @@ std::set<KilnOwner> alive{1, 2};
 namespace reg {
 bool owner_alive(KilnOwner o) { return o == 0 || alive.count(o); }
 std::string owner_name(KilnOwner o) { return "owner:" + std::to_string(o); }
+const KilnOwnersInternalApi* owners_internal_table() { return nullptr; }  // kiln.internal.owners: not part of this check
 }  // namespace reg
 namespace svc {
 const void* find(std::string_view, uint32_t) { return nullptr; }
@@ -83,6 +86,9 @@ const KilnLaunchInternalApi* internal_table() {
     return &g_internal;
 }
 }  // namespace launch
+namespace hooks {
+const KilnHooksInternalApi* internal_table() { return nullptr; }  // kiln.internal.hooks: not part of this check
+}  // namespace hooks
 namespace caps {
 const void* table() { return nullptr; }
 void service_published(KilnOwner, std::string_view, uint32_t) {}

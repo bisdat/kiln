@@ -3,6 +3,12 @@
     "completion": {
       "title": "命令提示",
       "hint": "Tab：补全 · Esc：关闭"
+    },
+    "search": {
+      "title": "搜索聊天记录",
+      "hint": "Ctrl+R：更早 · Ctrl+Shift+R：更新 · Enter/Tab：使用 · Esc：取消",
+      "query": "搜索",
+      "none": "没有匹配的聊天记录"
     }
   },
   "language": {
