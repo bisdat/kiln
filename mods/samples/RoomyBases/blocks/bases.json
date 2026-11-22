@@ -1,0 +1,14 @@
+{
+  "format": 1,
+  // Kiln's base rules (docs/kiln/services/build.md, "Base rules and base limits"): read before the game starts.
+  "baseRules": {
+    "roomy": {
+      "minimumAltars": 6,          // at least 6 Flame Altars at every Flame level
+      "extraAltars": 2,            // and 2 more than the game's number (at most 16)
+      "buildAreaPercent": 150,     // every altar level's build zone at 150% of the game's (at most 256 m an axis)
+      "sizes": [
+        { "altarLevel": 1, "size": [64, 64, 64] }   // a new altar's zone at least 64 m on each axis (the game: 40)
+      ]
+    }
+  }
+}

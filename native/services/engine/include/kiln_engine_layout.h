@@ -126,6 +126,35 @@ struct CallRecipes {
     std::array<CallRecipe, kCallRecipes> recipe;
 };
 
+// The profile's serviceLayout, typed (Kiln-internal): where the server world keeps the game's original named plain-data
+// services (its registry owner's DI records, their name map and the systems bound to them), and the service contracts
+// this exact build admits. Adapted from ShroudForge (MIT, Copyright (c) 2026 bonsaibauer),
+// modules/game-runtime/native/named-services/named_service_contract.h:24-38 (BindingContract, Contract) and
+// resolve_named_service.cpp (prepare_binding, contract): the same fields, each rule those two apply checked once by the
+// generator (tools/engine/generate.py parse_service_layout; a profile they would refuse never ships), so kiln.world reads
+// the record as it is. records ... maximum_systems are offsets from the registry owner (or within one record row or system
+// record) and bounds; a contract's descriptor, function, metadata and metadata_slot are image RVAs. enabled is false
+// (and the record zero) when the profile has no serviceLayout. The contracts are the profile's, in its order.
+inline constexpr std::size_t kServiceContracts = 8, kServiceKeyBytes = 128;
+struct ServiceContract {
+    std::array<char, kServiceKeyBytes> key;  // the original DI name ("ecs::GameSettings"), NUL-padded, 1..127 bytes
+    std::uint32_t key_size;
+    std::uint32_t key_hash;   // FNV-1a-32 of key: the hash the records and the name map carry (ShroudForge's hash_name)
+    std::uint32_t type_hash;  // qualifiedHash: FNV-1a-32 of "keen::" + key, also at the type's metadata + 0x50
+    std::uint32_t size;       // the service's bytes (1..65536), also at the type's metadata + 0x40
+    std::uint32_t descriptor, function;       // RVAs: the one system that writes the service, its descriptor and update
+    std::uint32_t metadata, metadata_slot;    // RVAs: the type's metadata, and the registry slot that points at it
+};
+struct ServiceLayout {
+    bool enabled;
+    std::size_t records, record_count, stride, record_hash, normal, alternate;
+    std::size_t map_bits, map_capacity, map_keys, map_values, map_count, maximum_records, maximum_capacity;
+    std::size_t systems, system_count, system_stride, normal_bindings, alternate_bindings, normal_count, alternate_count;
+    std::size_t maximum_systems;
+    std::uint32_t contract_count;  // 0..kServiceContracts
+    std::array<ServiceContract, kServiceContracts> contracts;
+};
+
 struct Layout {
     bool dedicated_server;
     std::size_t image_size;
@@ -144,6 +173,7 @@ struct Layout {
     ResourceWriteLayout resource_write;
     ResourceLayout resource;  // last, so the generator's existing initializers are unchanged
     CallRecipes calls;        // after it, for the same reason
+    ServiceLayout services;   // after them, for the same reason (since 0.2.0-dev.30.3)
 };
 
 // The verbatim profile's leaves (JSON path -> value), sorted by key, for diagnostics and later typed records.

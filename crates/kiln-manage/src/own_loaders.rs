@@ -1029,7 +1029,7 @@ mod tests {
         // a link to the state file
         std::fs::write(g.join("real-state.json"), APPLIED).unwrap();
         std::fs::remove_file(g.join("shroudforge/state.json")).unwrap();
-        std::os::unix::fs::symlink(g.join("real-state.json"), g.join("shroudforge/state.json")).unwrap();
+        #[cfg(unix)] std::os::unix::fs::symlink(g.join("real-state.json"), g.join("shroudforge/state.json")).unwrap();
         assert!(hosted(&g, &view), "a linked state file");
         // `..` in paths.state
         std::fs::remove_file(g.join("shroudforge/state.json")).unwrap();
@@ -1060,7 +1060,7 @@ mod tests {
         let pfx = t.join("lib/steamapps/compatdata/1203620/pfx");
         std::fs::create_dir_all(pfx.join("dosdevices")).unwrap();
         std::fs::create_dir_all(pfx.join("drive_c/sf-state")).unwrap();
-        std::os::unix::fs::symlink("../drive_c", pfx.join("dosdevices/c:")).unwrap();
+        #[cfg(unix)] std::os::unix::fs::symlink("../drive_c", pfx.join("dosdevices/c:")).unwrap();
         std::fs::write(pfx.join("drive_c/sf-state/state.json"), APPLIED).unwrap();
         let config = |v: &str| std::fs::write(g.join(crate::shroudforge::CONFIG_FILE), serde_json::json!({"paths": {"state": v}}).to_string()).unwrap();
         config(r"C:\sf-state");
@@ -1088,7 +1088,7 @@ mod tests {
         std::fs::write(g.join("shroudforge/state.json"), APPLIED).unwrap();  // an old record in the default folder
         std::fs::create_dir_all(g.join("now")).unwrap();
         std::fs::write(g.join("real-config.json"), br#"{"paths":{"state":"now"}}"#).unwrap();
-        std::os::unix::fs::symlink(g.join("real-config.json"), g.join(crate::shroudforge::CONFIG_FILE)).unwrap();
+        #[cfg(unix)] std::os::unix::fs::symlink(g.join("real-config.json"), g.join(crate::shroudforge::CONFIG_FILE)).unwrap();
         assert!(!hosted(&g, &view), "the configured folder has no record");
         std::fs::create_dir_all(g.join("mods/sfpack")).unwrap();
         std::fs::write(g.join("mods/sfpack/mod.json"), br#"{"id":"s","name":"s","version":"1.0.0"}"#).unwrap();
@@ -1188,7 +1188,7 @@ mod tests {
             let pfx = t.join(format!("lib/steamapps/compatdata/{app}/pfx"));
             std::fs::create_dir_all(pfx.join("dosdevices")).unwrap();
             std::fs::create_dir_all(pfx.join("drive_c")).unwrap();
-            std::os::unix::fs::symlink("../drive_c", pfx.join("dosdevices/c:")).unwrap();
+            #[cfg(unix)] std::os::unix::fs::symlink("../drive_c", pfx.join("dosdevices/c:")).unwrap();
         }
         (t, g)
     }
@@ -1287,7 +1287,7 @@ mod tests {
     fn dot_dot_stops_at_the_game_drive_s_root() {
         let (t, g) = proton_game("r2-dotdot", "Enshrouded", &[crate::game::CLIENT_EXE], &[crate::CLIENT_APP_ID]);
         // S: is the game folder itself
-        std::os::unix::fs::symlink(&g, t.join("lib/steamapps/compatdata/1203620/pfx/dosdevices/s:")).unwrap();
+        #[cfg(unix)] std::os::unix::fs::symlink(&g, t.join("lib/steamapps/compatdata/1203620/pfx/dosdevices/s:")).unwrap();
         std::fs::create_dir_all(t.join("lib/steamapps/common/sf-state")).unwrap();
         std::fs::write(t.join("lib/steamapps/common/sf-state/state.json"), APPLIED).unwrap();
         std::fs::write(g.join(crate::shroudforge::CONFIG_FILE), br#"{"paths":{"state":"..\\sf-state"}}"#).unwrap();

@@ -225,6 +225,12 @@
       "description": "Changes to the game's own resources, made before the game reads them: fields, a template's components, a list's length (a mod with \"boot\": true; docs/kiln/modding/resource-patches.md). Not blocks: kiln.content applies them.",
       "propertyNames": { "pattern": "^[a-z][a-z0-9_.-]{0,95}$" },
       "additionalProperties": { "$ref": "#/$defs/resourcePatch" }
+    },
+    "baseRules": {
+      "type": "object",
+      "description": "Base rules (since 0.2.0-dev.31): room for more Flame Altars and larger build zones, in Kiln's own names (a mod with \"boot\": true; docs/kiln/services/build.md, Base rules and base limits). Kiln combines every mod's rules (the largest count per Flame level, the largest size per altar level and axis) and applies them after every resource patch, raising only: two mods with base rules never conflict. Not blocks: kiln.content applies them.",
+      "propertyNames": { "pattern": "^[a-z][a-z0-9_.-]{0,95}$" },
+      "additionalProperties": { "$ref": "#/$defs/baseRule" }
     }
   },
   "patternProperties": {
@@ -242,6 +248,31 @@
   "additionalProperties": false,
   "$defs": {
     "buildingMaterialPool": {"type": "object", "required": ["name", "materials"], "additionalProperties": false, "properties": {"name": {"type": "string", "minLength": 1}, "roof": {"type": "boolean"}, "was": {"type": "string", "minLength": 1}, "materials": {"type": "array", "minItems": 1, "maxItems": 64, "items": {"oneOf": [{"type": "object", "required": ["material"], "additionalProperties": false, "properties": {"material": {"type": "string", "minLength": 1}}}, {"type": "object", "required": ["gameMaterial"], "additionalProperties": false, "properties": {"gameMaterial": {"type": "string", "minLength": 1}}}]}}}},
+
+    "baseRule": {
+      "type": "object",
+      "description": "One base rule. Every member is optional; a rule never lowers the game's numbers.",
+      "additionalProperties": false,
+      "properties": {
+        "format": { "const": 1 },
+        "minimumAltars": { "type": ["integer", "null"], "minimum": 1, "maximum": 16, "description": "At least this many Flame Altars at every Flame level. Above 16 is refused: the game counts no more." },
+        "extraAltars": { "type": "integer", "minimum": 0, "maximum": 15, "description": "This many more Flame Altars than the game's own number at every Flame level; the result is at most 16." },
+        "buildAreaPercent": { "type": ["integer", "null"], "minimum": 100, "maximum": 200, "description": "Every altar level's build zone at this share of the game's own size, at most 256 metres on an axis." },
+        "sizes": {
+          "type": ["array", "null"],
+          "description": "At least this full size for an altar of a level, one entry per level.",
+          "items": {
+            "type": "object",
+            "required": ["altarLevel", "size"],
+            "additionalProperties": false,
+            "properties": {
+              "altarLevel": { "type": "integer", "minimum": 1, "maximum": 5, "description": "The altar level (1 to 5)." },
+              "size": { "type": "array", "minItems": 3, "maxItems": 3, "items": { "type": "number", "minimum": 0.5, "maximum": 256, "multipleOf": 0.5 }, "description": "The full size [x, y, z] in metres." }
+            }
+          }
+        }
+      }
+    },
 
     "resourcePatch": {
       "type": "object",
@@ -817,6 +848,7 @@
         "output": { "$ref": "#/$defs/itemRef", "description": "What it makes: in a station's list of recipes, and in a recipes block of its own, where it is needed. Elsewhere a recipe makes the block it is on." },
         "sheltered": { "type": "boolean", "description": "A player crafts it only under a roof. A station that works on its own never checks a roof, so its recipes refuse it." },
         "comfort": { "type": "integer", "minimum": 0, "description": "The comfort level it asks of whoever makes it." },
+        "menuKey": { "$ref": "#/$defs/menuKey", "description": "Its name in the menu of a station with tabs of its own (menu.tabs): one recipe of the mod per key at a station. Only for a recipe at a station with a workshop of its own; it changes nothing of the recipe itself." },
         "needsProps": { "type": "array", "maxItems": 8, "items": { "type": "string", "minLength": 1 }, "description": "Props that have to stand near a manual station: blocks with provides, by name (\"other-mod:name\" for another mod's). The game's automated factory path has no nearby-prop context, so factory block recipes refuse this field." }
       },
       "additionalProperties": false
@@ -1387,11 +1419,50 @@
     },
     "menu": {
       "type": "object",
-      "description": "The crafting menu a station opens: an existing station's, which lists the station's recipes among its own.",
+      "description": "The crafting menu a station opens: an existing station's, which lists the station's recipes among its own; or, with tabs, a menu a station with a workshop of its own lays out itself.",
       "properties": {
         "like": {
           "enum": ["workbench", "carpenter", "kitchen", "forge", "oven", "alchemy", "drying-rack", "charcoal-kiln", "kiln", "smelter", "fireplace", "grinder", "tannery", "table-saw"],
-          "description": "Default: the station's kind."
+          "description": "Default: the station's kind. With tabs: the menu whose tabs lend theirs their icons."
+        },
+        "tabs": {
+          "type": "array",
+          "maxItems": 15,
+          "items": { "$ref": "#/$defs/stationMenuTab" },
+          "description": "The menu in tabs of its own (since 0.2.0-dev.31; capability stationmenus.store). Only for a station with a workshop of its own: the game's stations keep the game's tabs. Recipes are named by their menuKey; one that no tab lists is still made, but not shown."
+        }
+      },
+      "additionalProperties": false
+    },
+    "menuKey": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]{1,64}$",
+      "description": "A key in a station's menu: letters, digits, '.', '_' and '-', at most 64, no colon."
+    },
+    "stationMenuTab": {
+      "type": "object",
+      "required": ["key", "name", "sets"],
+      "description": "A tab of a station's menu: its name, the icon it borrows, and its sets of recipes.",
+      "properties": {
+        "key": { "$ref": "#/$defs/menuKey", "description": "Unique in the menu; the tab's id follows from it, so keep it." },
+        "name": { "$ref": "#/$defs/uiText", "description": "What the tab says. A language map: at most 35 languages, each text 1 to 4096 bytes." },
+        "iconFromTab": { "type": "integer", "minimum": -1, "maximum": 14, "description": "The icon of the n-th tab (0 the first) of the menu the station is like, as the game shipped it. -1 (the default): the first." },
+        "sets": { "type": "array", "maxItems": 28, "items": { "$ref": "#/$defs/stationMenuSet" }, "description": "Its sets of recipes. The first has no heading: the tab's name heads it." }
+      },
+      "additionalProperties": false
+    },
+    "stationMenuSet": {
+      "type": "object",
+      "required": ["key", "recipes"],
+      "description": "A set of recipes in a tab.",
+      "properties": {
+        "key": { "$ref": "#/$defs/menuKey", "description": "Unique in its tab." },
+        "heading": { "$ref": "#/$defs/uiText", "description": "The heading over the set; none on a tab's first set." },
+        "recipes": {
+          "type": "array",
+          "maxItems": 512,
+          "items": { "type": "string", "pattern": "^([A-Za-z0-9._-]{1,64}:)?[A-Za-z0-9._-]{1,64}$" },
+          "description": "The recipes it lists, in this order, by their menuKey: \"key\" for the station's mod, \"other-mod:key\" for another's. Each one once in the menu, at most 512 in a tab."
         }
       },
       "additionalProperties": false

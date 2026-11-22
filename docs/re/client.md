@@ -228,3 +228,63 @@ the live process (read-only gdb), the program table, Ghidra decompiles. **[rt] [
     than 1 km from the player for 120 frames, after it was once near, logs the same once at I.
   The camera's own view stays wrong: they keep the game running and name the source; the overflow itself is the
   game's. A better fix once the source is known: put a camera more than a few km from the player back on it.
+
+## The local input path (building input)
+
+Client 26430625 (`enshrouded.exe` sha256 `5d9ef2f1…`), static: rizin disassembly and a capstone pass over every
+`.pdata` function (direct calls, RIP-relative references, displacements), `sigdb/programs/client` for the programs'
+access lists, `sigdb/types/client` for the layout. Used by kiln.client's building input
+(`sigdb/symbols/client.d/client-input.json`, feature `client.input_observation`;
+[docs/kiln/services/client-building-input.md](../kiln/services/client-building-input.md)). Nothing here ran in a game.
+
+- **The client frame** (`0x87a290`, the client game's update; `r13` = the client game, `[r13+0x1d0]` the client world,
+  `[r13+0x47d4e0]` its input object):
+  1. `0x87a63a` → `0x9d5440(world)`: advances the world's step counter `[world+0xe17e9c]` (the previous value at
+     `+0xe17ea0`) and returns {counter, time, changed}.
+  2. Only when the counter changed: `0x87a778` → `0x3af340`, the **local input writer** (below).
+  3. Only when it changed: `0x87a810` → `0x3a8970`, the **input message** ("[Client] Input Message error %k" right
+     after): it returns early when the step is the one its slot last sent (`[slot+0xc]`), else first copies the whole
+     `ClientPlayerInputData` (952 bytes) and the admin block out of the component (`0x3a8a80..0x3a8b82`), then builds the
+     message (`0x3aba10` compares `createBuildingItemAction.versionData` with the last one sent).
+  4. `0x87a8f9` → `0xa1fad0(world)` → `0xa1fae0` → `SimStep` `0xa2c660` → `world/StepPrograms`: the client world's
+     programs run for the step, after the message.
+  5. `0x87a937` → `0x3ae540`, then (counter changed) `0x87a94d` → `0x3af670`, the action writer: each action stamped
+     with `0x9bd990(world)`, e.g. `createBuildingItemAction` at `0x3b0d22..0x3b0d3d` (version, itemId, selectedIndex).
+  When `0x1037b60([r13+0x78])` is true (input blocked), `0xeb43e0` clears the device input and step 2 and step 5's
+  `0x3ae540` are skipped (`0x3af670` still runs when the counter changed); the message still goes out with the input as
+  last written.
+- **The writer** `0x3af340`: `rbp` = the input object, `ebx` = its local player's entity (`[rcx+0x65c]`), `r14` = that
+  entity's `ClientPlayerInput` (component lookup `0x9b2f20` with the type id `0x9621e4c3` at `0x14152b58c`). It calls the
+  input sample `0x3b1e20` (`0x3af3d3`), which reads the version `0x9bd990([rbp+8])` (`0x3b22ad`) and passes it with
+  `rcx = r14` to `0x2477d0` (`0x3b2303`); `0x2477d0` stores the whole `digitalInput` word (`0x24780f`,
+  `[rsi+0x3a8]`, `rsi = rcx`) and the `mask` bits. Then the camera block (`0x3af47c..0x3af55b`; skipped to `0x3af55f` when
+  there is no camera object). `0x3af55f` (`mov rcx,[rbp+0x3da8]`, 7 bytes) is reached on both paths with `rbp`, `rbx`,
+  `r14` unchanged; after it only `0xe94470`, `0x3b8410`, `0x1221a90` (none gets `r14`) and the `mask` stores at
+  `+0x3a0`. kiln.rules' camera check and kiln.client's observation are links on `0x3af55f`; kiln.render's hook is
+  `0x3af578`.
+- **The version** `0x9bd990`: `mov eax,[rcx+0xe17e9c]; ret`, the step counter of 1. The execution-view getter
+  `0x9bd980` (`mov rax,[rcx]; mov eax,[rax+0x6c]`) has 23 direct callers (`client_cursor` `0x294620` among them), none on
+  the input path above, which uses `0x9bd990` only (56 direct calls, 35 of them in `0x3af670`).
+- **Who writes the fields:** `cursorInput` (+760): the program `client_cursor` (`0x294620`, stores at
+  `0x296036..0x2960b0` from its ray result; `isCursorAttachedToProp` +920 read at `0x295fc2`), in step 4.
+  `digitalInput` (+936): `0x2477d0` in step 2 (the other stores at +0x3a8 in `0x3a8970`/`0x3aba10` go to the local
+  player slot and the message, not to the component). `0x3ae540` (step 5, every unblocked frame) calls `0x2477d0` on
+  the same component too (`0x3ae7f4`), in its other mode (`r12d` 1, step 2's is 0 from `0x3af3c8`): its bit loop sets
+  or clears a bit only when `0xe9f780` gives the bit's action that mode, and it gives 0 for all 56, so that call changes
+  no bit; only its first branch (`0xea4e40` true, `0x24780f`) clears the whole word, in either mode.
+  `createBuildingItemAction` (+500): `0x3af670` in step 5. The client programs that write `ClientPlayerInput`
+  (`client_cursor`, `client_cycle_inventory_stock`, `client_player_trigger_parry`, `player_ui`, `lore_reading_data`,
+  `stop_dialog_voiceover`) all run in step 4.
+- **Who reads them:** on the client, the message (step 3) and the client programs of step 4 (`client_cursor_entity`,
+  `player_camera_control`, `fill_ui_healthbar`, `update_screwdriver_mode_vfx`: visuals). The building programs
+  (`player_building_place_prop`, `_blueprints`, `_dismantle`, `_undo`) are server programs reading `PlayerInput`,
+  filled from the message.
+- **So `0x3af55f` is the observation point:** `digitalInput` and the camera are written for the step before it, the
+  last writes of `cursorInput`, `createBuildingItemAction` and `buildingStockCycleAction` were a frame earlier (steps 4
+  and 5), and the first reader is the message's copy right after it. One visit per changed step, so consecutive visits
+  have consecutive versions and a press and its release go out in two messages.
+- **Search bounds:** the call graph is direct calls and tail jumps only (conditional tail jumps and indirect calls are
+  not followed; `0xa1fad0` → `0xa1fae0` was read by hand). `0x8734a0` (a second caller of `0x3af340`) and
+  `0x863cb0` (a second caller of `0x3a8970`) have no code or data reference besides `.pdata` (rel32 scan of `.text`, 64-bit
+  and 32-bit address search). Which server program consumes which bit was not traced; the layout and bits are the
+  reflected ones.

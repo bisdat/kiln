@@ -1130,6 +1130,68 @@ bool gd_own_lists(uintptr_t item, bool game_base, std::string* err) {
     return err->empty();
 }
 
+bool gd_item_config_slot(const Entry& e, const std::string& path, GdValueSlot* out, std::string* why) {
+    std::lock_guard lock(store_mutex());
+    const GRegistry& I = greg(KILN_GD_ITEMS);
+    if (!I.type) return *why = "item configurations are not available on this build", false;
+    std::vector<Resolved> rs;
+    std::string err;
+    if (!resolve(Root::Plain, Node{I.type, e.addr}, path, &rs, &err) || rs.empty())
+        return *why = err.empty() ? "the item has no " + path : err, false;
+    Resolved r = rs[0];
+    if (!r.node.t) return *why = "the item has no such configuration (Kiln's live back-end does not add one)", false;
+    Field f;
+    if (!leaf_of(r.node.t, &f)) {  // the config itself: its value
+        std::vector<Resolved> vs;
+        if (!resolve(Root::Plain, Node{I.type, e.addr}, path + ".value", &vs, &err) || vs.empty() || !vs[0].node.t || !leaf_of(vs[0].node.t, &f))
+            return *why = path + " is not a value", false;
+        r = vs[0];
+    }
+    out->addr = r.node.addr + f.offset, out->f = f, out->kind = GD_KIND_BASE + KILN_GD_ITEMS, out->id = e.id, out->field = path_index(r.path);
+    SlotInfo& si = g_info[out->addr];
+    si.section = KILN_GD_ITEMS, si.id = e.id, si.name = e.name, si.path = r.path, si.f = f, si.sub = -1, si.follow = false;
+    // its tooltip row, found as pair_tooltip finds it
+    out->tip = 0;
+    const TType* ui_t = type_named("keen::ImpactUiValue");
+    if (!r.config || !r.uivalues_owner || !r.uivalues_type || !r.config_type || !ui_t) return true;
+    const TField* own_value = r.config_type->field("value");
+    const TField* lt = r.config_type->field("locaTag");
+    const TField* vf = r.config_type->field("valueFormat");
+    const TField* uiv = r.uivalues_type->field("uiValues");
+    const TField* lid = ui_t->field("locaId");
+    const TField* uval = ui_t->field("value");
+    if (!own_value || r.config + own_value->offset != out->addr || !lt || !vf || !uiv || !lid || !uval) return true;
+    uint8_t tag[16];
+    if (!rd(r.config + lt->offset, tag, 16)) return true;
+    bool any = false;
+    for (uint8_t b : tag) any = any || b;
+    if (!any) return true;
+    uint8_t format = 0;
+    rdv(r.config + vf->offset, format);
+    const uint32_t loca = fnv1a(tag, 16);
+    uintptr_t data = 0;
+    uint32_t n = 0;
+    if (!blob_array(r.uivalues_owner + uiv->offset, &data, &n)) return true;
+    for (uint32_t i = 0; i < n; ++i) {
+        const uintptr_t u = data + static_cast<uintptr_t>(i) * ui_t->size;
+        uint32_t id = 0;
+        if (!rdv(u + lid->offset, id) || id != loca) continue;
+        out->tip = u + uval->offset, out->tip_format = format;
+        SlotInfo& ti = g_info[out->tip];
+        Field uf;
+        uf.bytes = 4, uf.vt = KILN_CV_INT, uf.is_signed = true, uf.type_name = "keen::sint32", uf.writable = true;
+        ti.section = KILN_GD_ITEMS, ti.id = e.id, ti.name = e.name, ti.path = "uiValues[" + std::to_string(i) + "].value", ti.f = uf, ti.sub = -1, ti.follow = true;
+        break;
+    }
+    return true;
+}
+
+bool gd_ui_scale(uint8_t format, double v, int64_t* out) {
+    bool ok = false;
+    *out = ui_scale(format, v, &ok);
+    return ok;
+}
+
 int gd_item_path(KilnOwner owner, uint64_t seq, const Entry& e, const std::string& path, const gjson& val,
                  const std::string& source, std::string* err) {
     std::lock_guard lock(store_mutex());

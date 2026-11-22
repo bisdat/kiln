@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "common.h"
+#include "owners_internal.h"
 
 namespace kiln::reg {
 
@@ -38,6 +39,14 @@ bool owner_managed_host(KilnOwner owner);
 std::string owner_name(KilnOwner owner);
 bool owner_alive(KilnOwner owner);
 void owner_revoke(KilnOwner owner);
+
+// What the managed host admitted an owner to (kiln.internal.owners, owners_internal.h): KILN_OWNER_GRANT_* bits kept
+// with the owner and dropped when it is revoked. owner_grant: KILN_ERR_INVALID_ARGUMENT for owner 0, no bit or an
+// unknown bit, KILN_ERR_REVOKED for an owner that is not alive. owner_grants: a live owner's bits (0 when none),
+// KILN_ERR_REVOKED for one that is not alive, KILN_ERR_INVALID_ARGUMENT for owner 0 or out NULL.
+KilnResult owner_grant(KilnOwner owner, uint32_t grants);
+KilnResult owner_grants(KilnOwner owner, uint32_t* out);
+const KilnOwnersInternalApi* owners_internal_table();
 
 // Owner-retiring observers (kiln.hooks subscribe_owner_retiring, dev.28): a native service that keeps state for other
 // owners (leases, queued work) is told when one of them is revoked. owner_revoke() calls every live observer once

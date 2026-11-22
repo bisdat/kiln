@@ -15,9 +15,9 @@
 // EmfMoveOrder.hold_seconds where pad2 was and added EMF_MOVE_HOLD; a villager move is refused whatever it holds.
 //
 // Carried: chat_tell_ex and chat_broadcast_ex (api_game.cpp: kiln.chat's server lines are already lines without a
-// speaker) and world_to_screen (kiln.render's camera, below).
+// speaker), world_to_screen (kiln.render's camera, below) and on_hit (api_hits.cpp, fill_hits; since 0.2.0-dev.30.3).
 //
-// Not carried yet (49 functions): each answers as EMF's own core answers where a feature is off on a game build, so a
+// Not carried yet (48 functions): each answers as EMF's own core answers where a feature is off on a game build, so a
 // mod meets a state it already has to handle: the documented failure value, out buffers cleared, `why` filled where
 // the request has one, a request whose `size` is too small refused as EMF refuses it, and no callback ever called.
 // One log line per mod and function says so, and the status file lists the call (state/emf.json "unsupported").
@@ -78,11 +78,8 @@ bool api_player_character_name(EmfWorld*, uint32_t, char* buf, uint32_t size) {
 }
 
 // ---------------------------------------------------------------------------------------------- v31 -------------
-bool api_on_hit(EmfHitCallback, void*) {
-    KEMF_NOT_YET("on_hit");
-    return false;
-}
-
+// on_hit is carried (api_hits.cpp). Changing a hit before it lands needs a link on the game's applyHitToEntity that
+// kiln-emf does not have yet: kiln.combat's hit hold is one listener's (the managed Kiln.Combat) and one step late.
 bool api_on_hit_before(EmfHitBeforeCallback, void*) {
     KEMF_NOT_YET("on_hit_before");
     return false;  // "false when the hook is not available on this game build"
@@ -382,13 +379,13 @@ uint32_t api_villager_moving(EmfWorld*, uint32_t) {
 
 }  // namespace
 
-// chat_tell_ex and chat_broadcast_ex are filled by fill_game (api_game.cpp).
+// chat_tell_ex and chat_broadcast_ex are filled by fill_game (api_game.cpp), on_hit by fill_hits (api_hits.cpp).
 void fill_v40(EmfApi* t) {
     t->on_player = &api_on_player;
     t->item_name = &api_item_name;
     t->game_language = &api_game_language;
     t->player_character_name = &api_player_character_name;
-    t->on_hit = &api_on_hit;
+    // on_hit: fill_hits (api_hits.cpp), called after this
     t->on_hit_before = &api_on_hit_before;
     t->hit_rule_add = &api_hit_rule_add;
     t->hit_rule_remove = &api_hit_rule_remove;

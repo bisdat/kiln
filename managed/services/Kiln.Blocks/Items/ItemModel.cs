@@ -578,6 +578,9 @@ public sealed record RecipeBlock : IBlock
     /// the prop is not near is refused. This is for manual stations: the game's automated factory craft path has no nearby-prop context, so factory recipes refuse this field.
     /// The prop's block has to be in the game's table first: see <see cref="PropBlock.Provides"/>.</summary>
     public IReadOnlyList<PropRef>? NeedsProps { get; init; }
+    /// <summary>Its name in the menu of a station with tabs of its own (<see cref="MenuBlock.Tabs"/>, <see cref="StationMenus.Define"/>): letters, digits, '.', '_' and '-',
+    /// at most 64, no colon. One recipe of your mod per key at a station. Only for a recipe at a station with a workshop of its own; it changes nothing of the recipe itself.</summary>
+    public string? MenuKey { get; init; }
 }
 
 public static partial class Stations

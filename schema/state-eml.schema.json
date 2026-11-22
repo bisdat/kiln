@@ -13,7 +13,7 @@
     "eml": { "type": "string", "description": "The EML release the plugin carries." },
     "phase": {
       "enum": ["done", "failed", "aside", "idle", "running"],
-      "description": "done: patched, or nothing changed since the last run. failed: patching failed or was refused; restored says whether owned output was put back to vanilla, and error/reason explain retained data. aside: another loader runs the EML mods this start (EML's own dbghelp.dll, ShroudForge's, or ShroudForge hosted by Kiln); `aside` says which, and `mods` lists the profile's EML mods (dev.22). idle: no EML mods. running (dev.22): the run is going on, `progress` says what it is doing; a file that stays running while the game does not run was left by a start that died."
+      "description": "done: patched, or nothing changed since the last run. failed: patching failed or was refused; restored says whether owned output was put back to vanilla, and error/reason explain retained data. aside: another loader runs the EML mods this start (EML's own dbghelp.dll, ShroudForge's, or ShroudForge hosted by Kiln); `aside` says which, and `mods` lists the profile's EML mods (dev.22); under ShroudForge with drop-ins on, also the drop-in EML mods nothing runs (dev.30.3: source game-mods, off-in-shroudforge, on a dedicated server; source kiln-dropin, not-loaded). idle: no EML mods. running (dev.22): the run is going on, `progress` says what it is doing; a file that stays running while the game does not run was left by a start that died."
     },
     "file": { "type": ["string", "null"], "description": "The game's data file stem: enshrouded or enshrouded_server." },
     "patched": { "type": "integer", "minimum": 0 },

@@ -38,6 +38,11 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/image_bu
 # an image's opaque bounds (trimmed item icons), their UVs and fitting a source in a box (image_rect.h): plain logic
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/image_rect_test.cpp" -o "$out/image_rect_test"
 "$out/image_rect_test"
+# kiln.render's outlines (outline_core.h): a fake renderer and instances, several mods, the game's highlight, a despawn,
+# an unload, a world change, the colour groups, the palette, kiln.json ui.outlines
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -I"$here/../../../third_party" -I"$here/../../../core/abi" \
+    "$here/outline_test.cpp" -o "$out/outline_test"
+"$out/outline_test"
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/render_math_test.cpp" -o "$out/render_math_test"
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/wheel_math_test.cpp" -o "$out/wheel_math_test"
 "$out/wheel_math_test"
@@ -85,6 +90,9 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/chat_com
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -I"$here/../../../core/abi" \
     "$here/chat_completion_abi_test.cpp" -o "$out/chat_completion_abi_test"
 "$out/chat_completion_abi_test"
+# Issue 44 Phase 1c: bounded reverse history search, matching, UTF-16/UTF-8 and distinct entries.
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/chat_search_test.cpp" -o "$out/chat_search_test"
+"$out/chat_search_test"
 # Issue 44: history draft, commands-only persistence policy, sensitive text, UTF-8.
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/chat_history_test.cpp" -o "$out/chat_history_test"
 "$out/chat_history_test"
@@ -140,6 +148,10 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=address,undefined \
     -I"$here/stubs" -I"$here/../../../core/abi" -I"$imgui" \
     "$here/wheel_host_test.cpp" "${objs[@]}" -o "$out/wheel_host_test"
 "$out/wheel_host_test"
+# the pointer, held buttons and drag and drop between widgets (draw_slots_pointer.inl, 0.2.0-dev.30.3, GitHub issue 113)
+g++ -std=c++20 -O1 -g -Wall -Wextra -Wno-unused-function -fsanitize=address,undefined \
+    -I"$here/../../../core/abi" -I"$imgui" "$here/pointer_drag_test.cpp" "${objs[@]}" -o "$out/pointer_drag_test"
+"$out/pointer_drag_test"
 # the looks: the game's colours through reflection, the player's look, themes, mod fonts (style.cpp, look_palette.h, font_budget.h)
 g++ -std=c++20 -O1 -g -Wall -Wextra -Wno-unused-function -pthread -fsanitize=address,undefined \
     -I"$here/stubs" -I"$here/.." -I"$here/../../../core/abi" -I"$imgui" -I"$here/../../../third_party" \

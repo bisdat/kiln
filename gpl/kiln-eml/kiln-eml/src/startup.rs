@@ -238,7 +238,7 @@ impl Witnessed {
 }
 
 /// A witness refused: no DLL loads and no plan package runs. `code` is the inspector's or `plan-stale`,
-/// `lock-busy`, `baseline-capture-failed`, `changed`.
+/// `lock-busy`, `baseline-shroudforge-output`, `baseline-capture-failed`, `changed`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Refused {
     pub code: String,
@@ -684,7 +684,8 @@ pub fn cache_record(stem: &str) -> String {
 ///    over game files that are not Kiln's output (rebaselined; the rebaseline rule: the inspector's note `receipt-stale`,
 ///    and that receipt is first set aside as a recovery copy, never deleted) is captured now, Deferred (ShroudForge's
 ///    folder untouched); its origin is the inspector's. A recorded origin keyed to the backups
-///    present is kept; anything else is unrecorded.
+///    present is kept; anything else is unrecorded. A live set that is Kiln's bundled ShroudForge's output (its record
+///    names the live header) is never captured: `baseline-shroudforge-output`, verify the game files in Steam.
 /// 5. The stamped input witness over the baseline's containers; an input hashed only because it changed within
 ///    the racy window is captured again once that window passed (at most [`RECAPTURE_WAIT`]), so the checks of this
 ///    start stay byte-free. The witnessed header and working baseline must be the bytes the inspector classified (else
@@ -773,6 +774,30 @@ pub fn witness(
     let origin = Origin::of(base.origin.token);
     // 4. the working baseline, captured or refreshed now (Deferred), never after a DLL ran
     let header = game.join(format!("{stem}.kfc"));
+    if base.evidence == "current-set" {
+        // the live set becomes the working baseline: never when it is Kiln's bundled ShroudForge's output (its record
+        // names the live header), whose backups are gone or are of another game build: that is a modded set, and only
+        // Steam's file check gives the game's own data back
+        match startup_host::hosted_shroudforge_output(game.as_std_path(), stem) {
+            Ok(startup_host::HostedShroudForge::NotProven) => {}
+            Ok(_) => {
+                return Err(refuse(
+                    "baseline-shroudforge-output",
+                    format!(
+                        "the live {stem}.kfc is what Kiln's bundled ShroudForge prepared, and Kiln has no backup of this \
+                         game build's own data to start from. {}",
+                        startup_host::VERIFY_GAME_FILES
+                    ),
+                ));
+            }
+            Err(e) => {
+                return Err(refuse(
+                    "unreadable",
+                    format!("the game's archive could not be checked before Kiln takes its working baseline: {e}"),
+                ));
+            }
+        }
+    }
     // after lost backups, the receipt that names them goes aside first (only the one the inspector judged, under the
     // held lock), so the new baseline is never taken with Kiln's ownership of an older one still in place
     if inspected.notes.iter().any(|n| n.code == inspection::RECEIPT_STALE) {

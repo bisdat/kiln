@@ -1842,6 +1842,54 @@
       "ok": true,
       "rules": [],
       "dropped": 1
+    },
+    {
+      "name": "known with a module subject",
+      "input": {
+        "format": 1,
+        "rules": [
+          {
+            "id": "livemap",
+            "when": [
+              {
+                "engine": "livemap"
+              }
+            ],
+            "action": "known",
+            "subject": {
+              "module": "iphlpapi.dll"
+            },
+            "message": "Live Map"
+          }
+        ]
+      },
+      "ok": true,
+      "rules": [
+        "livemap"
+      ],
+      "dropped": 0
+    },
+    {
+      "name": "known needs a module subject",
+      "input": {
+        "format": 1,
+        "rules": [
+          {
+            "id": "k1",
+            "action": "known",
+            "subject": {
+              "mod": "native:x"
+            }
+          },
+          {
+            "id": "k2",
+            "action": "known"
+          }
+        ]
+      },
+      "ok": true,
+      "rules": [],
+      "dropped": 2
     }
   ],
   "merge": [
@@ -2433,6 +2481,67 @@
         "mods": [
           "kiln:auto-loot-plus"
         ],
+        "symbols": []
+      },
+      "fires": []
+    },
+    {
+      "name": "known fires on its engine",
+      "rules": [
+        {
+          "id": "livemap",
+          "action": "known",
+          "when": [
+            {
+              "engine": "livemap"
+            }
+          ],
+          "subject": {
+            "module": "iphlpapi.dll"
+          },
+          "message": "m"
+        }
+      ],
+      "facts": {
+        "modules": [
+          "IPHLPAPI.DLL"
+        ],
+        "engines": [
+          "livemap",
+          "kiln"
+        ],
+        "mods": [],
+        "symbols": []
+      },
+      "fires": [
+        "livemap"
+      ]
+    },
+    {
+      "name": "known: the DLL name alone is not Live Map",
+      "rules": [
+        {
+          "id": "livemap",
+          "action": "known",
+          "when": [
+            {
+              "engine": "livemap"
+            }
+          ],
+          "subject": {
+            "module": "iphlpapi.dll"
+          },
+          "message": "m"
+        }
+      ],
+      "facts": {
+        "modules": [
+          "IPHLPAPI.DLL"
+        ],
+        "engines": [
+          "kiln"
+        ],
+        "mods": [],
         "symbols": []
       },
       "fires": []

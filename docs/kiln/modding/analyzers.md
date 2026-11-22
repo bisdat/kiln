@@ -767,6 +767,24 @@ They leave experimental once their in-game checks (services/world.md, "World rea
 from task threads") pass on both exact game builds; until then their shape can still change. The guide:
 [tasks.md](tasks.md#project-setup).
 
+## KILNX031: registries
+**What.** The code uses `Kiln.Registry` (the registries' entry types such as `ItemEntry`, `RegistryId`, `RegistrySchema`)
+or `Kiln.RegistryApplies`. They are `[Experimental("KILNX031")]`: generated from Kiln's registry schemas, documented, but
+new; the registry stage that reads and edits through them is not wired yet. The compiler reports the use as an error.
+
+**Since when.** 0.2.0-dev.31.
+
+**Fix.** Opt in once in the mod's project file (and its test project):
+
+```xml
+<PropertyGroup>
+  <NoWarn>$(NoWarn);KILNX031</NoWarn>
+</PropertyGroup>
+```
+
+A registry leaves experimental when its schema is marked stable; until then field names and types can still change. The
+guide: [registries/README.md](registries/README.md).
+
 ---
 
 <a id="kiln194"></a>

@@ -310,4 +310,11 @@ KilnResult KILN_CALL t_ecs_write_unsubscribe(KilnHandle subscription) {
     return g_writer.load(std::memory_order_acquire)->unsubscribe(subscription);
 }
 
+KilnResult KILN_CALL t_ecs_registration(uint32_t world_kind, uint32_t component, KilnEcsRegistrationDetail* out) {
+    if (!out || out->size < sizeof(KilnEcsRegistrationDetail) || world_kind >= KILN_WORLD_KINDS)
+        return KILN_ERR_INVALID_ARGUMENT;
+    // The boot reader (before on_ready) has no engine: its context refuses, as the ECS reads do.
+    return g_reader.load(std::memory_order_acquire)->registration_detail(world_kind, component, out);
+}
+
 }  // namespace kw

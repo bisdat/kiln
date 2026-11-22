@@ -37,6 +37,9 @@ void operator delete(void* p, std::size_t) noexcept { std::free(p); }
 
 namespace kiln::engine::mem {
 extern std::atomic<std::uint64_t> test_writes;
+extern thread_local int test_priority;
+extern thread_local std::uint64_t test_exclusive_won_ns, test_shared_release_ns, test_restore_begin_ns;
+extern std::atomic<void (*)()> test_restore_hook;
 }
 
 namespace {
@@ -360,6 +363,117 @@ void ok_cases(Env& v) {
     Call sz = cx(v.wr, kOwner, r, counter, std::vector<uint8_t>(4, 0), std::vector<uint8_t>(4, 1));
     check(sz.rc == KILN_ECS_ERR_NOT_WRITABLE && sz.reply.why_code == KILN_ECS_WRITE_WHY_SIZE, k + "bytes is not the registered size");
     v.wr.unsubscribe(sub);
+    put<uint64_t>(at, 0);
+}
+
+// The reply's two measurements (GitHub #58): hold_ns is the Scene word's exclusive interval and ends at that word's
+// release; restore_ns is the priority restore after it, apart. A restore made slow (as SetThreadPriority under Proton
+// can be) shows in restore_ns and never in hold_ns; a hold made long shows in hold_ns. Bounds are placed against the
+// host memory's own timestamps of the same clock (this thread's Scene CAS, registry release and restore). A caller
+// built before restore_ns (48 bytes) gets the first release's fields and nothing written past them.
+std::atomic<uint64_t> g_restore_sleep_ns{0};
+void slow_restore() { std::this_thread::sleep_for(std::chrono::nanoseconds(g_restore_sleep_ns.load())); }
+std::string us(uint64_t ns) { return std::to_string(ns / 1000) + " us"; }
+void measure_cases(Env& v) {
+    namespace mem = kiln::engine::mem;
+    const std::string k = std::string(v.p.id) + ": measurements: ";
+    const uint32_t counter = H(v.w, "Counter");
+    const uintptr_t at = component_address(v.w, 7000, "Counter");
+    put<uint64_t>(at, 20);
+    KilnObjectRef r = open(v, kOwner, 7000);
+    next_step(v);
+    mem::test_priority = -1;  // a Kiln worker's (below normal): the gate raises it
+    mem::test_restore_hook = &slow_restore;
+    {
+        g_restore_sleep_ns = 20'000'000;
+        Call c = cx(v.wr, kOwner, r, counter, le64(20), le64(21));
+        const uint64_t won = mem::test_exclusive_won_ns, registry = mem::test_shared_release_ns;
+        check(c.rc == KILN_OK && (c.reply.flags & KILN_MUTATION_WRITTEN) && u64_at(at) == 21 &&
+                  c.reply.restore_ns >= 20'000'000 && c.reply.hold_ns > 0 && c.reply.hold_ns <= registry - won &&
+                  mem::test_restore_begin_ns >= registry && mem::test_priority == -1,
+              k + "a 20 ms restore is in restore_ns (" + us(c.reply.restore_ns) + "), not in hold_ns (" +
+                  us(c.reply.hold_ns) + ", within the Scene CAS to the registry release)");
+    }
+    {
+        // a hold made 5 ms long inside the hold: in hold_ns
+        g_restore_sleep_ns = 0;
+        g_point = [](HoldPoint p) {
+            if (p == HoldPoint::AfterCompare) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        };
+        Call h = cx(v.wr, kOwner, r, counter, le64(21), le64(22));
+        g_point = nullptr;
+        const uint64_t won = mem::test_exclusive_won_ns, registry = mem::test_shared_release_ns;
+        check(h.rc == KILN_OK && u64_at(at) == 22 && h.reply.hold_ns >= 5'000'000 && h.reply.hold_ns <= registry - won,
+              k + "a 5 ms hold is in hold_ns (" + us(h.reply.hold_ns) + ")");
+    }
+    constexpr uint64_t kUntouched = 0xa5a5a5a5a5a5a5a5ull;
+    const auto e22 = le64(22), d23 = le64(23), d24 = le64(24);
+    {
+        // a caller built before restore_ns: 48 bytes accepted, nothing written past them
+        g_restore_sleep_ns = 1'000'000;
+        KilnMutationReply old{};
+        old.size = 48;
+        old.restore_ns = kUntouched;
+        const KilnResult rc = v.wr.compare_exchange(kOwner, &r, counter, e22.data(), nullptr, d23.data(), 8, nullptr, &old);
+        check(rc == KILN_OK && old.size == 48 && old.status == KILN_ECS_OK && (old.flags & KILN_MUTATION_WRITTEN) &&
+                  old.hold_ns > 0 && old.restore_ns == kUntouched && u64_at(at) == 23,
+              k + "a 48-byte reply (before restore_ns): written, its fields filled, restore_ns untouched");
+        KilnMutationReply shorter{};
+        shorter.size = 47;
+        shorter.status = 77;
+        check(v.wr.compare_exchange(kOwner, &r, counter, d23.data(), nullptr, d24.data(), 8, nullptr, &shorter) ==
+                      KILN_ERR_INVALID_ARGUMENT &&
+                  shorter.status == 77 && u64_at(at) == 23,
+              k + "a reply below 48 bytes: refused, untouched");
+        // between the two: the first release's fields, then the caller's own bytes; nothing written past its 52
+        unsigned char mid[sizeof(KilnMutationReply)];
+        std::memset(mid, 0xa5, sizeof mid);
+        uint32_t mid_size = 52;
+        std::memcpy(mid, &mid_size, sizeof mid_size);
+        auto* const mid_reply = reinterpret_cast<KilnMutationReply*>(mid);
+        const KilnResult mid_rc =
+            v.wr.compare_exchange(kOwner, &r, counter, d23.data(), nullptr, d24.data(), 8, nullptr, mid_reply);
+        KilnMutationReply mid_view{};
+        std::memcpy(&mid_view, mid, offsetof(KilnMutationReply, restore_ns));
+        const bool tail_kept = std::all_of(mid + 52, mid + sizeof mid, [](unsigned char b) { return b == 0xa5; });
+        check(mid_rc == KILN_OK && mid_view.size == 52 && mid_view.status == KILN_ECS_OK && mid_view.hold_ns > 0 &&
+                  tail_kept && u64_at(at) == 24,
+              k + "a 52-byte reply: the first release's fields, size 52, nothing written past it");
+        put<uint64_t>(at, 23);
+        struct {
+            KilnMutationReply r;
+            uint64_t tail[2];
+        } big{};
+        big.r.size = sizeof big;
+        big.tail[0] = big.tail[1] = kUntouched;
+        check(v.wr.compare_exchange(kOwner, &r, counter, d23.data(), nullptr, d24.data(), 8, nullptr, &big.r) == KILN_OK &&
+                  big.r.size == sizeof(KilnMutationReply) && big.r.restore_ns >= 1'000'000 &&
+                  big.tail[0] == kUntouched && big.tail[1] == kUntouched && u64_at(at) == 24,
+              k + "a larger reply: restore_ns filled, size says this build's record, nothing written past it");
+    }
+    {
+        // the update holds the Scene word: busy after the raise; no hold, the restore of the refusal timed
+        next_step(v);
+        g_restore_sleep_ns = 1'000'000;
+        *fake::word(v.e.scene_word()) = 1;
+        Call b = cx(v.wr, kOwner, r, counter, le64(24), le64(25));
+        *fake::word(v.e.scene_word()) = 0;
+        check(b.rc == KILN_ECS_ERR_BUSY &&
+                  b.reply.engine_reason == static_cast<uint32_t>(kiln::engine::Reason::EcsSceneFrameBusy) &&
+                  b.reply.hold_ns == 0 && b.reply.restore_ns >= 1'000'000 && u64_at(at) == 24,
+              k + "Scene busy: hold_ns 0, restore_ns " + us(b.reply.restore_ns));
+    }
+    mem::test_restore_hook = nullptr;
+    {
+        // kiln.engine's measurement switch turned the raise off: nothing restored
+        next_step(v);
+        kiln::engine::gate_set_priority_raise(false);
+        Call o = cx(v.wr, kOwner, r, counter, le64(24), le64(25));
+        kiln::engine::gate_set_priority_raise(true);
+        check(o.rc == KILN_OK && u64_at(at) == 25 && o.reply.hold_ns > 0 && o.reply.restore_ns == 0,
+              k + "raise off: a hold, restore_ns 0");
+    }
+    v.wr.drain();
     put<uint64_t>(at, 0);
 }
 
@@ -1340,6 +1454,7 @@ void exact(const Profile& p) {
     Env v{p, e, server, worlds, reader, wr, rig, reader.backend()};
     policy_cases(v);
     ok_cases(v);
+    measure_cases(v);
     busy_cases(v);
     stale_cases(v);
     not_writable_cases(v);

@@ -762,3 +762,21 @@ fn resource_patch_examples_pass_and_a_patch_needs_a_change() {
         assert_eq!(errors > 0, *bad, "case {i}: {patch}: {}", r.to_text());
     }
 }
+
+/// A data pack's "registry" section is checked against registry-section.schema.json (content-pack.schema.json refers to
+/// it): a well-formed section passes, an edit naming a field the registry does not have, or a stage that does not exist,
+/// is refused.
+#[test]
+fn content_pack_registry_section() {
+    let dir = tmp("registry-section");
+    let good = r#"{"registry": {"alter": [{"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "maxStack", "op": {"mul": 4}}],
+        "final": [{"registry": "recipes", "select": {"id": "game:*"}, "field": "inputs[*].count", "op": {"mul": 2}}]}}"#;
+    let r = lint_as(&dir.join("good"), "content/a.json", good);
+    assert!(refuses(&r, &[]).is_empty(), "{:?}", refuses(&r, &[]));
+    let bad_field = r#"{"registry": {"alter": [{"registry": "items", "select": {"id": "game:x"}, "field": "maxStackSize", "op": 5}]}}"#;
+    let r = lint_as(&dir.join("field"), "content/a.json", bad_field);
+    assert!(!refuses(&r, &[]).is_empty(), "a game member name in place of a Kiln field is refused");
+    let bad_stage = r#"{"registry": {"later": []}}"#;
+    let r = lint_as(&dir.join("stage"), "content/a.json", bad_stage);
+    assert!(!refuses(&r, &[]).is_empty(), "an unknown stage is refused");
+}

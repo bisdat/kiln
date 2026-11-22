@@ -1,0 +1,11 @@
+{
+  "id": "base-rules-test",
+  "name": "base rules lab test",
+  "version": "0.1.0",
+  "apiVersion": "0.2",
+  "entryAssembly": "BaseRulesTest.dll",
+  "side": "server",
+  "clients": "none",
+  "boot": true,
+  "description": "PASS/FAIL lines: Kiln's base rules of two mods (one staged in OnBoot, one a data-only pack's blocks file) and More Flame Altars' own resource patch (fixtures/mfa) composed into one table: no refusal, the max of the three, read back through Build.BaseLimits, WorldProgress.LimitsAt and a new altar's zone."
+}

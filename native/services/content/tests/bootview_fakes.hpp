@@ -135,6 +135,7 @@ bool boot_append(Root, const TType*, const std::string& path, const std::vector<
     for (const auto& x : v) r.list[r.n++] = x.get<uint32_t>();
     return *n = v.size(), true;
 }
+gjson leaf_json(const Field&, const uint8_t* b, bool) { uint32_t n; std::memcpy(&n, b, 4); return n; }  // baserules.hpp's reads (no base rule here)
 }  // namespace gd
 }  // namespace kc
 

@@ -1,0 +1,32 @@
+{
+  "raw": "{\n  \"id\": \"steam-chat\", \"version\": \"1.0.0\", \"apiVersion\": \"0.2\", \"entryAssembly\": \"SteamChat.dll\",\n  // the mod opens its own Steam peer message leases (Kiln.Network's SteamMessages)\n  \"steamMessages\": true\n}",
+  "expect": {
+    "ok": true,
+    "manifest": {
+      "id": "steam-chat",
+      "name": "steam-chat",
+      "version": "1.0.0",
+      "parsedVersion": "1.0.0",
+      "apiVersion": "0.2",
+      "entryAssembly": "SteamChat.dll",
+      "entryType": null,
+      "side": "server",
+      "clients": "none",
+      "authors": [],
+      "description": "",
+      "license": null,
+      "url": null,
+      "dependencies": [],
+      "loadBefore": [],
+      "loadAfter": [],
+      "incompatible": [],
+      "features": [],
+      "exports": [],
+      "advanced": false,
+      "tests": null,
+      "kilnBuild": null,
+      "warnings": [],
+      "steamMessages": true
+    }
+  }
+}

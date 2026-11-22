@@ -108,6 +108,10 @@ public sealed class MyMod : Mod
 
 All are posted in Pre of the step after the change, on the tick thread. A `PlayerActionEvent` handler also receives `PlayerConsumeEvent`s.
 
+A use started by a mod with `Abilities.UseItem` (0.2.0-dev.30.3) runs the same path as a hand use (the lab's
+`lab_use_item`, made public with its checks: [kiln.abilities, Using an item](abilities.md#using-an-item-since-020-dev303-mod-api-0213)),
+so it raises `PlayerConsumeEvent` and `PlayerConsumedEvent` and a cancel stops it.
+
 Use what exists for the rest: fall damage `EntityFallEvent`, death `EntityDeathEvent`, respawn `PlayerRespawnEvent` (Kiln.Combat), parry and hit results `EntityHurtEvent`, all actors' sequences `SequenceStartedEvent` (Kiln.Abilities).
 
 | You want | Write |

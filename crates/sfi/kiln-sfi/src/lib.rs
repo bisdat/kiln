@@ -60,6 +60,11 @@
 //! under `kiln` (at on_ready when the early phase never ran) before anything is armed,
 //! attached or submitted (no start without it), `running` once the worker has its
 //! runtime, `ended` from on_unload.
+//!
+//! Under `kiln` (after on_ready, or at main for a start refused there) kiln-sfi's own
+//! do-not-save banner ([`notice_native`]) watches that record on kiln-sfi's IO
+//! thread: it draws through kiln.ui only while a warning is pending and Kiln.Ui is absent,
+//! and on_unload takes it down before the final flush.
 
 pub mod fault;
 pub mod hop;
@@ -67,6 +72,7 @@ pub mod input;
 pub mod lifecycle;
 pub mod native_enforcement;
 pub mod native_manager;
+pub mod notice_native;
 pub mod plan_source;
 pub mod runtime;
 pub mod startup_seam;
@@ -612,6 +618,10 @@ pub struct Boundary {
     /// The early phase could not write this start's sfi.json record: nothing was armed or attached, and on_ready
     /// refuses the start.
     early_unwritable: OnceLock<state::WriteError>,
+    /// This start's native do-not-save banner (`kiln` only), made and started once.
+    notice: OnceLock<Arc<notice_native::Notice>>,
+    /// What the banner's probe and durations are: [`notice_native::NoticeHooks::PRODUCTION`] unless a test replaces it.
+    notice_hooks: notice_native::NoticeHooks,
 }
 
 /// kiln-eml's startup seam as the early phase found it.
@@ -662,9 +672,20 @@ impl Boundary {
             seam: OnceLock::new(),
             outcome: OnceLock::new(),
             early_unwritable: OnceLock::new(),
+            notice: OnceLock::new(),
+            notice_hooks: notice_native::NoticeHooks::PRODUCTION,
         }
     }
-    /// Replaces where kiln-eml's startup seam is found (production: the loaded kiln-eml.dll's early export).
+    /// Replaces the native banner's ready-event probe and durations. Tests use it for a Kiln.Ui that is there.
+    pub const fn with_notice(mut self, hooks: notice_native::NoticeHooks) -> Self {
+        self.notice_hooks = hooks;
+        self
+    }
+    /// This start's native do-not-save banner: `None` before it was started, and for every selection but `kiln`.
+    pub fn notice(&self) -> Option<&Arc<notice_native::Notice>> {
+        self.notice.get()
+    }
+    /// Replaces where kiln-eml's startup seam is found ( production: the loaded kiln-eml.dll's early export).
     /// Tests use it for a fake seam built from kiln-abi's types.
     pub const fn with_startup(mut self, resolve: startup_seam::Resolve) -> Self {
         self.startup = resolve;
@@ -923,11 +944,57 @@ impl Boundary {
         }
     }
 
-    /// on_unload: the final flush, `ended`, unless the record is final already. It
-    /// never touches the worker or waits for it.
+    /// on_unload: the native banner taken down (no frame subscription, no demand: native subscribers unsubscribe before
+    /// they unload), then the final flush, `ended`, unless the record is final already. It never touches the worker or
+    /// waits for it.
     fn unload(&self) {
+        if let Some(notice) = self.notice.get() {
+            notice.close();
+        }
         let written = self.status().end();
         self.log_write(written);
+    }
+
+    /// Makes this start's native do-not-save banner and puts its step on kiln-sfi's IO thread, once (`kiln`: after
+    /// on_ready, whatever it decided, or at main for a start refused there). Before Kiln's plugin step nothing is
+    /// identified yet: no banner.
+    fn start_notice(&self) {
+        let (api, log, service, owner) = {
+            let state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+            (state.api, state.log, state.service, state.owners[1])
+        };
+        let (Some(log), Some(service), Some(owner)) = (log, service, owner) else {
+            return;
+        };
+        let mut made = false;
+        let notice = self.notice.get_or_init(|| {
+            made = true;
+            // SAFETY: `api` is stored only after Boundary::enter's prefix checks; Host::read checks each member against
+            // the declared size.
+            let host = unsafe { worker::Host::read(api as *const KilnApi) };
+            Arc::new(notice_native::Notice::new(
+                Arc::clone(self.status()),
+                notice_native::Env {
+                    log,
+                    service,
+                    session: host.session,
+                    owner,
+                    pid: std::process::id(),
+                },
+                self.notice_hooks,
+            ))
+        });
+        if made && !notice.start() {
+            unsafe {
+                log(
+                    owner,
+                    KILN_LOG_WARN,
+                    kstr(
+                        "kiln-sfi: no IO thread for the do-not-save banner; kiln.log and sfi.json keep the warnings",
+                    ),
+                )
+            };
+        }
     }
 
     /// Kiln's native.policy for ShroudForge package DLLs this start, as Kiln's
@@ -1415,6 +1482,9 @@ impl Boundary {
                 };
                 self.record_after_outcome(code, &reason);
                 self.record_refused(Some(identity), code, &reason);
+                // its warnings (kiln-eml's data applied, the runtime refused) need the banner too; no on_unload is
+                // installed for this start, and a plugin is never unloaded, so nothing outlives the banner's state
+                self.start_notice();
             } else {
                 let decided = !matches!(launch, Launch::Absent | Launch::Idle { .. });
                 let code = match &launch {
@@ -1525,6 +1595,8 @@ unsafe extern "C" fn interpreter_ready(user: *mut core::ffi::c_void) {
     guard_callback(|| {
         if let Some(boundary) = unsafe { user.cast_const().cast::<Boundary>().as_ref() } {
             boundary.ready();
+            // whatever on_ready decided, the record's warnings get the banner
+            boundary.start_notice();
         }
     });
 }
@@ -1568,6 +1640,24 @@ pub fn exported() -> &'static Boundary {
     &BOUNDARY
 }
 
+/// This build's identity, "<VERSION><KILN_BUILD>" (build.rs): the stamp native/cmake/kiln_build_stamp.cpp gives the
+/// native DLLs of the same build. The core makes kiln/plugins/kiln-sfi.dll the ShroudForge-dialect owner only when
+/// [`kiln_build_stamp`] equals its own build identity (native/core/src/api.cpp load_one), so Kiln's interpreter runs
+/// only from the build of the core that loads it. Without KILN_BUILD at build time it is the version alone, which no
+/// core trusts.
+pub const BUILD_STAMP: &core::ffi::CStr =
+    match core::ffi::CStr::from_bytes_with_nul(concat!(env!("KILN_SFI_BUILD_STAMP"), "\0").as_bytes()) {
+        Ok(stamp) => stamp,
+        Err(_) => panic!("the build stamp holds a NUL"),
+    };
+
+/// [`BUILD_STAMP`], read by the core under its fault guard (api.cpp dll_build_stamp). A pointer to a constant: no state,
+/// no allocation, nothing that can fail.
+#[unsafe(no_mangle)]
+pub extern "C" fn kiln_build_stamp() -> *const core::ffi::c_char {
+    BUILD_STAMP.as_ptr()
+}
+
 /// # Safety
 /// Same caller contract as [`Boundary::enter`]. No Lua or mod code runs here.
 #[unsafe(no_mangle)]
@@ -1592,6 +1682,20 @@ pub unsafe extern "C" fn kiln_plugin_main(
 #[cfg(test)]
 mod audit_tests {
     use super::*;
+
+    #[test]
+    fn the_build_stamp_is_the_version_and_the_build_metadata_it_was_built_with() {
+        // SAFETY: kiln_build_stamp returns a pointer to a NUL-terminated constant.
+        let stamp = unsafe { core::ffi::CStr::from_ptr(kiln_build_stamp()) };
+        assert_eq!(stamp, BUILD_STAMP);
+        assert_eq!(kiln_build_stamp(), kiln_build_stamp(), "always the same constant");
+        let version = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../VERSION"))
+            .map(|v| v.lines().next().unwrap_or("").trim().to_string())
+            .unwrap_or_default();
+        let build = option_env!("KILN_BUILD").unwrap_or("");
+        assert_eq!(stamp.to_str().unwrap(), format!("{version}{build}"));
+        assert!(stamp.to_bytes().len() < 129, "the core copies at most 128 bytes (api.cpp dll_build_stamp)");
+    }
 
     #[test]
     fn every_boundary_looks_for_the_loader_with_the_real_probe_unless_a_test_replaces_it() {

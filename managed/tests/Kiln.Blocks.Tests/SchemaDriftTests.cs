@@ -12,7 +12,7 @@ namespace Kiln.Blocks.Tests;
 public sealed class SchemaDriftTests
 {
     // Top-level schema properties that are no section of blocks.
-    private static readonly HashSet<string> NotSections = ["$schema", "format", "comment", "resourcePatches"];  // resourcePatches: kiln.content's, not a block kind
+    private static readonly HashSet<string> NotSections = ["$schema", "format", "comment", "resourcePatches", "baseRules"];  // resourcePatches, baseRules: kiln.content's, not block kinds
 
     // Intentional differences between a record and its schema entry, "section.field". Keep this short; say why for each.
     private static readonly HashSet<string> Allowed =

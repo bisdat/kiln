@@ -89,6 +89,10 @@ internal static unsafe class AbilitiesDispatch
     private static readonly List<(ModGate Gate, ulong Since)> Deferred = new();
     [ThreadStatic] private static int _inside;  // dispatch depth on this thread
 
+    /// <summary>True inside a sync native's or an attachment's handler on this thread: the game's step runs (impact_simulation),
+    /// with the game's own programs on other threads beside it.</summary>
+    internal static bool InsideHandler => _inside > 0;
+
     internal static int RetireWaitMs = 2;  // the bound; tests raise it so a busy machine cannot decide their outcome
 
     internal static ModGate GateOf(ModContext? mod) => mod is null ? NoMod : Gates.GetValue(mod, m => new ModGate { Id = m.Info.Id });

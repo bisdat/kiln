@@ -14,9 +14,10 @@ import type {
   StudioCatalogStatus, StudioPublishRequest, StudioPublishResult, StudioSummary, StudioTestReport,
 } from "./commands";
 import { MOD_KINDS, emptyMods } from "./kinds";
-import { STATION_WATER, isHiddenGameName } from "./hiddenNames";
-/** Hidden in the pickers: an old, test or unused name the game's own data does not use (catalog::used_names; here: the water). */
-const hiddenEntry = (name: string) => isHiddenGameName(name) && name !== STATION_WATER;
+import { isHiddenGameName } from "./hiddenNames";
+import { OLD_WATER_ITEM } from "./stationWater";
+/** Hidden in the pickers: an old, test or unused name the game's own data does not use (catalog::used_names; the mock has none). */
+const hiddenEntry = (name: string) => isHiddenGameName(name);
 
 type Handler = (args: Record<string, unknown>) => unknown;
 type StartTask = (kind: string, title: string, steps: string[], finish: () => unknown, stepMs?: number) => string;
@@ -69,8 +70,8 @@ export const GAME: Record<string, { name: string; displayName?: string; id?: str
     // the game's old and test entries (catalog::is_hidden_name): the pickers hide them unless "Show hidden game entries"
     { name: "Z_Material_Sand_DEPRECATED", displayName: "Sand", id: "0x0000a1e0" },
     { name: "Material_T1_Stone_TEST", displayName: "Stone", id: "0x0000a1e1" },
-    // a deprecated-looking name the game still uses (station tank water): always listed
-    { name: STATION_WATER, displayName: "Water", id: "0xf262a2a9" },
+    // the game's old Water canteen item: hidden like the others (it is not a station's tank water: KL408)
+    { name: OLD_WATER_ITEM, displayName: "Water", id: "0xf262a2a9" },
   ],
   recipes: [
     { name: "Recipe_Weapon_T1_1H_Sword_Craft", displayName: "Crafted Sword" },
@@ -94,6 +95,9 @@ export const GAME: Record<string, { name: string; displayName?: string; id?: str
     { name: "Workshop_Alchemist", displayName: "Alchemist", id: "0x0c0c0002" },
     { name: "Workshop_Hunter", displayName: "Hunter", id: "0x0c0c0003" },
     { name: "Workshop_Workbench", displayName: "Workbench", id: "0x0c0c0004" },
+    // the game's ids: a station with a water tank and one without (stationWater.ts)
+    { name: "Prop_Production_T1_Seedbed", displayName: "Seedbed", id: "0xba67134f" },
+    { name: "Prop_Production_T2_Smelter", displayName: "Smelter", id: "0xf5aab50a" },
   ],
 };
 
@@ -229,6 +233,8 @@ export function studioMockHandlers(d: StudioMockDeps): Record<string, Handler> {
       for (const st of Array.isArray(list) ? list : []) {
         const item = typeof st === "string" ? st : (st as { item?: unknown })?.item;
         if (typeof item === "string" && item && !known.has(item)) diagnostics.push(diag("KL104", "unknown-ref", "warning", where + ": no item " + item + " in the game or the pack's mods", "layer/" + path));
+        // kiln lint KL408: the game's old Water canteen item as an input is that item, not the station's tank
+        if (item === OLD_WATER_ITEM && where.endsWith(" inputs")) diagnostics.push(diag("KL408", "recipe-water", "warning", where + ": \"" + item + "\" is the game's old Water canteen item, not the station's tank: give the recipe its water instead", "layer/" + path));
         // a category input: one of the catalog's itemCategories (by id, as a number: 0xEE.. = 0xee..)
         const category = typeof st === "object" && st ? (st as { category?: unknown }).category : undefined;
         const num = (v: unknown) => (typeof v === "number" ? v : typeof v === "string" && /^(0[xX])?[0-9a-fA-F]+$/.test(v.trim()) ? parseInt(v.trim().replace(/^0[xX]/, ""), 16) : NaN);

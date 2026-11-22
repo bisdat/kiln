@@ -45,7 +45,7 @@ public static partial class Coverage
             "enableTextChat, the account hash and connection state of a chat player",
             ChatAbi.Service, ChatFake.SendFeature, ChatFake.ReceiveFeature, ChatFake.PlayersFeature);
         Row("Items", CoverageKind.RecordingFake,
-            "Kiln.Items' own code on the kit's kiln.items (the v1 table and v8's gear functions): the items are the ones the test adds " +
+            "Kiln.Items' own code on the kit's kiln.items (the v1 table, v8's gear functions and v9's container renames): the items are the ones the test adds " +
             "(KilnHarness.Items.AddItem, with their stack size), an inventory per fake player in game (FakePlayer.Inventory, 5 generic " +
             "8-slot inventories unless the test says) and per container entity (AddContainer); Give and Take run as one transaction " +
             "at the start of the next step (stacks topped up first, gear one per slot with an item entity, Partial or NoRoom when it " +
@@ -57,7 +57,9 @@ public static partial class Coverage
             "code and the fake takes the cost from the payers' plain stacks and makes the write in the same step, all or nothing " +
             "(CantPay, payers, refusals as kiln.items); KilnHarness.Items.SetUpgradeRolls names the rolls. Per-instance values (package P7): " +
             "Items.SetPower, SetArmor and ValuesOf on the kit's scale table (no damage or armour is computed), SetDurabilityMax and " +
-            "SetLevel with AnyLevel with kiln.items' rules. Offline: water, moves, container names, transfer " +
+            "SetLevel with AnyLevel with kiln.items' rules. Container renames (v9): Items.SetContainerName with kiln.items' rules (the " +
+            "game's Rename field's limits and the entity at the call, the name stored at the next step, \"\" clears it; read with " +
+            "KilnHarness.Items.ContainerName). Offline: water, moves, reading container names, transfer " +
             "hooks, item instances, equip, recipe results, unlocked upgrades and gem slots at creation, the game's player inventory layout, max " +
             "durability computed again after a gear change",
             [ItemsAbi.Service, .. ItemsFake.Features, "items.gear.read", "items.gear.write", "items.gear.durability", "items.gear.upgrade", .. ItemsFake.OfflineRows]);
@@ -91,6 +93,16 @@ public static partial class Coverage
             "no fake: a true pair is a client hosting its world (a kiln.client fake, a client-side harness, a client tick) and " +
             "shares one channel registry, so no handshake refusal could be tested; Kiln.Network reports itself unavailable",
             "kiln.net");
+        Row("Building input (Kiln.Client)", CoverageKind.Unavailable,
+            "no fake: BuildingInput emits the local player's ordinary building input through a game client's input path; the " +
+            "kit's harness is a server with no client world, so every submit throws KilnUnavailableException (offline). " +
+            "Kiln.Api.Tests drive the managed side on a fake kiln.client table",
+            BuildingInput.Capability);
+        Row("Steam peer messages (Kiln.Network)", CoverageKind.Unavailable,
+            "no fake: SteamMessages moves a mod's own Steam networking messages through kiln.net and the game's Steam; the kit " +
+            "has neither, so Open throws KilnUnavailableException (offline) and Status answers not answered. " +
+            "Kiln.Network.Tests drive the managed side on a fake kiln.net table",
+            SteamMessages.Capability);
         Row("kiln.gemcraft", CoverageKind.Unavailable,
             "no fake: Gems.Socket, Unsocket, Upgrade and Recycle run the game's own forge transaction in a server world, and " +
             "GemCraftingEvent / GemCraftedEvent come from a hook on the game's gem handler; the kit has neither, so the calls " +

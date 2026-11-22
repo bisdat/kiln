@@ -205,8 +205,10 @@ KilnResult register_list(KilnOwner owner, uint32_t list, uint32_t item, void* fn
 void clicks_frame_published(uint64_t session);
 bool pointer_screen(const KilnUiScreen& s);
 uint32_t panel_screen(const KilnUiScreen& s);  // KUI_VIEW_* of a screen a panel may sit beside (KUI_VIEW_NONE: none)  // the screen has a pointer: slot clicks may hit there
-// units-to-pixels for a target size; false = the frame has no usable viewport
-bool map_frame(const KilnUiSlotsFrame& m, float target_w, float target_h, float* sx, float* sy, float* ox, float* oy);
+// units-to-pixels for a target size (0 = the game's picture: the viewport's pixels, never the canvas's units);
+// false = the frame has no usable viewport. *scaled (optional): the target is not the picture's size
+bool map_frame(const KilnUiSlotsFrame& m, float target_w, float target_h, float* sx, float* sy, float* ox, float* oy,
+               bool* scaled = nullptr);
 // the slot under (x, y) target pixels: its index, -1 = none (the last drawn wins)
 int hit_slot(const SlotsSnapshot& f, float x, float y, float target_w, float target_h);
 uint32_t on_pointer(const KilnUiPointerPress* p);  // what kiln.ui's press callback does (tests call it directly)

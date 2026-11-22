@@ -3,6 +3,12 @@
     "completion": {
       "title": "Подсказки команд",
       "hint": "Tab: дополнить · Esc: закрыть"
+    },
+    "search": {
+      "title": "Поиск по истории чата",
+      "hint": "Ctrl+R: раньше · Ctrl+Shift+R: позже · Enter/Tab: выбрать · Esc: отмена",
+      "query": "Поиск",
+      "none": "В истории нет совпадений"
     }
   },
   "language": {

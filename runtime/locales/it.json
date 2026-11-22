@@ -3,6 +3,12 @@
     "completion": {
       "title": "Comandi suggeriti",
       "hint": "Tab: completa · Esc: chiudi"
+    },
+    "search": {
+      "title": "Cerca nella cronologia della chat",
+      "hint": "Ctrl+R: più vecchio · Ctrl+Shift+R: più recente · Invio/Tab: usa · Esc: annulla",
+      "query": "Cerca",
+      "none": "Nessuna corrispondenza nella cronologia"
     }
   },
   "language": {

@@ -80,7 +80,7 @@ internal static class BootHandles
             foreach (var s in committed)
             {
                 definitions[s.Key] = s;
-                if (s.Kind == BootDefinitions.ResourcePatches) continue;  // a game resource's fields: no block, no handle
+                if (s.Kind is BootDefinitions.ResourcePatches or BootDefinitions.BaseRules) continue;  // a game resource's fields: no block, no handle
                 var type = BootDefinitions.Kinds.FirstOrDefault(k => k.Value == s.Kind).Key;
                 if (type == null) continue;
                 try

@@ -56,10 +56,12 @@ public sealed class FixtureTests
     private static string Lower<T>(T value) where T : Enum => value.ToString().ToLowerInvariant();
 
     /// <summary>A manifest as the fixtures describe it (every parsed field, normalized). "updates" is listed only when the
-    /// manifest has a readable one, so a fixture without it reads as it did before the key existed.</summary>
+    /// manifest has a readable one and "steamMessages" only when it is true, so a fixture without them reads as it did
+    /// before the keys existed.</summary>
     internal static JsonObject Describe(Manifest m)
     {
         var o = DescribeFields(m);
+        if (m.SteamMessages) o["steamMessages"] = true;
         if (m.Updates is { Provider: "github" } g)
             o["updates"] = new JsonObject
             {

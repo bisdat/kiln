@@ -134,7 +134,7 @@ internal static class BlockJson
                 {
                     if (p.Name is "format" or "comment" or "$schema") continue;
                     // resource patches are not blocks: kiln.content reads this section itself, in a boot generation (docs/kiln/modding/resource-patches.md)
-                    if (p.Name == "resourcePatches") continue;
+                    if (p.Name is "resourcePatches" or "baseRules") continue;  // baseRules (since 0.2.0-dev.31): kiln.content's too
                     var kind = Kinds.FirstOrDefault(k => k.Section == p.Name);
                     // "provider-mod:plural": a kind another mod registered (Blocks.RegisterKind). Its provider is a dependency, so it loaded first.
                     if (kind.Make == null && KindRegistry.IsExternalSection(p.Name))

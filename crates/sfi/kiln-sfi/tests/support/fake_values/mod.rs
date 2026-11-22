@@ -646,12 +646,21 @@ unsafe extern "C" fn value_clone(
 unsafe extern "C" fn value_export(
     _owner: KilnOwner,
     value: KilnHandle,
-    _selected: KilnStr,
+    selected: KilnStr,
     out: *mut KilnEmlValueResultV1,
 ) -> KilnResult {
+    let qualified_type = if selected.len == 0 {
+        String::new()
+    } else {
+        String::from_utf8_lossy(unsafe {
+            std::slice::from_raw_parts(selected.ptr.cast::<u8>(), selected.len)
+        })
+        .into_owned()
+    };
     let call = Call {
         member: "value_export",
         lease: value,
+        qualified_type,
         ..Call::default()
     };
     unsafe { reply(call, out) }

@@ -318,7 +318,10 @@ internal sealed unsafe class HostRuntime : IHostServices, IKilnBackend
         // Mod.OnBoot's generation (kiln.boot, chapter 08): in a boot profile Kiln.Host commits it here, on the boot thread, before the tick
         // subscriptions and the game's entry point (BootPhase.cs)
         host._mods.PrepareGameplayHooks();
-        BootPhase.Run(host.Service, host._owner, host._mods, host.Log);
+        // the registry stage's order: Kiln.Host's runtime load order, handed to kiln.registry before the boot phase (RegistryHost.cs)
+        RegistryHost.Run(host.Service, host._mods, RegistryHost.ModeOf(Path.Combine(KilnPaths.Root, "kiln.json")), host.Log);
+        var onBoot = BootPhase.Run(host.Service, host._owner, host._mods, host.Log);
+        RegistryHost.CompareWithOnBoot(host._mods, onBoot, host.Log);
         // the files the first mod load and the first service tick read on the game's thread, read now on another one (a
         // hard disk the game loads from made them slow there: ModPrefetch.cs)
         ModPrefetch.Start(host._mods.PrefetchFiles, host.Log);
@@ -1047,11 +1050,29 @@ internal sealed unsafe class HostRuntime : IHostServices, IKilnBackend
         };
     }
 
+    /// <summary>Whether a .NET debugger is attached to this process (kiln debug, netcoredbg). A seam for the tests.</summary>
+    internal static Func<bool> DebuggerAttached = () => System.Diagnostics.Debugger.IsAttached;
+
+    /// <summary>The refusal of a control command that unloads mod code while a debugger is attached (unload, reload,
+    /// reload-test): breakpoints stay on the dead copy and such sessions have ended the server
+    /// (docs/kiln/modding/debugging.md). Null when the command may run. Every path that asks for a reload ends here: kiln
+    /// reload, the SDK's KilnReload, the VS Code extension and a hand-written .cmd file.</summary>
+    internal static string? RefusedWhileDebugging(string[] args, bool debuggerAttached) =>
+        debuggerAttached && args.Length > 0 && args[0] is "unload" or "reload" or "reload-test"
+            ? $"refused (debugger_attached): a debugger is attached to this process; detach it before '{args[0]}' (a reload under a debugger keeps breakpoints on the old copy)"
+            : null;
+
     private void Execute(string command, string resultFile)
     {
         var args = command.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         if (args.Length == 0) throw new ArgumentException("empty command");
         Log(LogLevel.Info, $"control: {command}");
+        if (RefusedWhileDebugging(args, DebuggerAttached()) is { } refused)
+        {
+            Log(LogLevel.Warn, $"control: {refused}");
+            WriteResult(resultFile, command, false, refused);
+            return;
+        }
         switch (args[0])
         {
             case "mods":

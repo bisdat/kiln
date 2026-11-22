@@ -13,7 +13,7 @@ Players' guide: the frostdev.io wiki page "Mods for other frameworks" (`/kiln/wi
 | Greeneye Loader 1.2.2 (API 2) | `kiln-greeneye.dll` | `greeneye/<id>/` with `mod.json` and a DLL exporting `GreeneyeModStart` | [greeneye.md](greeneye.md) |
 | Flame (Creative Mode's loader) | `kiln-flame.dll` | `mods/<id>/` with `flame.json` and a DLL exporting `FlameStartRuntime` | [flame.md](flame.md) |
 | Shroudtopia 0.1.1 / 1.0 r1 | `kiln-shroudtopia.dll` | `mods/*.dll` and `mods/<name>/` exporting `CreateModInstance` | [shroudtopia.md](shroudtopia.md) |
-| EMF 0.3.3 through 0.6.14 (EmfApi v46: 76 full, 17 partial, 49 not yet of 142 C slots; client checks remain) | `kiln-emf.dll` (component `emf`, default on) | `emf/mods/<id>/`, `emf/mods/<name>.dll`; Lua mods through EMF's `lua` mod. API coverage does not guarantee every mod pairing | [../emf.md](../emf.md), [../emf-parity.md](../emf-parity.md) |
+| EMF 0.3.3 through 0.6.14 (EmfApi v46: 76 full, 18 partial, 48 not yet of 142 C slots; client checks remain) | `kiln-emf.dll` (component `emf`, default on) | `emf/mods/<id>/`, `emf/mods/<name>.dll`; Lua mods through EMF's `lua` mod. API coverage does not guarantee every mod pairing | [../emf.md](../emf.md), [../emf-parity.md](../emf-parity.md) |
 | Enshwick 1.0.0-alpha.14 | `kiln-enshwick.dll`, hosting Enshwick's own loader: the game's `mods/enshwick/enshwick.dll` when present, else the copy Kiln ships in `kiln/plugins/enshwick/` (built from Enshwick's MIT source; `"loader": "auto"`), so Enshwick need not be installed | `mods/<author.name>/`: DLL mods, `main.luau`, `pack.toml` data packs | [enshwick.md](enshwick.md) |
 | shroudlink 0.8.0 (SDK ABI 8), server | `kiln-shroudlink.dll` (shroudlink's own server core, built from source) | `shroudlink_mods/*.dll`; EML data mods go to kiln-eml | [shroudlink.md](shroudlink.md) |
 | Enshrouded ModLoader 0.6.12 (AndyPimms', ABI 1; CarryOn, Belt Lantern), client build 26430625 only | `kiln-dllmod.dll` | packages (a DLL with its `<file>.dll.mod` manifest) of the profile's `dllmod` list, run from Kiln's copy in `Mods/EnshroudedModLoader/<id>/` at a local world's start | [dllmod.md](dllmod.md) |
@@ -327,8 +327,12 @@ yours with the same `id` replaces Kiln's. Plain JSON, no comments.
   pattern with wildcards has at most 64 characters and 4 `*`.
 - `action`: `warn` (log the message), `late` (the `subject` module loads late), `disable` (the `subject` module, mod or
   engine does not load), `before` (dev.29: the `subject` loads before the `target`, below), `defer` (since
-  0.2.0-dev.29.4: the `subject` native mod waits for the Shroudtopia host's first pass, below) and `original-code`
-  (since 0.2.0-dev.29.6: the `subject` Shroudtopia mod compares against the game's original code, below). Every action
+  0.2.0-dev.29.4: the `subject` native mod waits for the Shroudtopia host's first pass, below), `original-code`
+  (since 0.2.0-dev.29.6: the `subject` Shroudtopia mod compares against the game's original code, below) and `known`
+  (since 0.2.0-dev.30.3: the `subject` module's hook overlaps are known and harmless; kiln-core logs them as info, not a
+  warning, marks them `known` in `hooks.json` `overlaps`, and changes nothing; the subject is a `module`). Kiln ships
+  one for Live Map: `{"engine": "livemap"}` holds only when the IPHLPAPI.DLL loaded from the game folder holds the text
+  `livemap.ini` in its image, since the name alone is a Windows DLL's. Every action
   but `warn` needs a `subject`; `before` and `defer` also need a `target`, and only they take one; only `defer` takes
   `max_wait_ms` (required for it).
 - Who applies what: the launcher writes `chain.ini` and the profile, so it applies `late` and `disable` of chain entries

@@ -17,7 +17,7 @@
 // The four members appended in 0.2.0-dev.29, after game_program_contract (440): tests/abi.json says the same.
 static_assert(offsetof(KilnWorldApi, register_program_world) == 496 && offsetof(KilnWorldApi, program_world_state) == 504 &&
               offsetof(KilnWorldApi, bind_program_world) == 512 && offsetof(KilnWorldApi, unbind_program_world) == 520 &&
-              offsetof(KilnWorldApi, entity_open) == 528 && sizeof(KilnWorldApi) == 616); // the ECS reads append at 528, the writes at 584
+              offsetof(KilnWorldApi, entity_open) == 528 && sizeof(KilnWorldApi) == 656); // the ECS reads append at 528, the writes at 584, the named services at 616, ecs_registration at 648
 
 namespace kw {
 const KilnApi* g_api;
@@ -72,6 +72,7 @@ void writes_before_world(uintptr_t) {}
 void writes_after_world() {}
 uint32_t writes_capability() { return 0; }
 uint32_t ecs_capability() { return 0; }
+uint32_t named_capability() { return 0; }
 thread_local bool t_in_stage = false;
 bool game_in_slice() { return t_in_stage; }
 uint32_t current_thread_id() { return static_cast<uint32_t>(std::hash<std::thread::id>{}(std::this_thread::get_id()) | 1u); }

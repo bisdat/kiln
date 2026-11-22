@@ -326,8 +326,12 @@ Others: 0 HdrCalibration, 1 EULA, 2 PS5 preset, 4 UserFeedback, 7 News, 9 Sessio
 - **Back sound.** PlaySelection's back: `UiPlaySound 0xa4f310(*UiApp, &copy of cfg+0x124f0)`
   (`sounds.menu.entryCancel`). **[dis]**
 - **Canvas** (UI system update 0xa4fb40; GameUiFrame gets `system+0x10`): `system+0x30/+0x34` canvas in UI units
-  (1920x1080 times the scale at `+0xf48`, grown along the longer side), `+0x38..+0x44` viewport x, y, w, h (floats,
-  pixels), `+0x48` pixels per UI unit = min(w / 1920s, h / 1080s). **[dis]**
+  (1920x1080 times the scale at `+0xf48`, grown along the longer side: 1920s * max(1, a), 1080s * max(1, 1/a) with
+  a = (w / h) / (1920 / 1080)), `+0x38..+0x44` viewport x, y, w, h (floats, pixels, copied from `+0xf38`), `+0x48`
+  pixels per UI unit = min(w / 1920s, h / 1080s). So canvas * ppu is the viewport's size exactly. `+0xf38` has two
+  writers: the system's init (0xa44357: {0, 0, 1920, 1080}) and 0xa4df13 ({0, 0, width, height} of the u32 size the
+  UI is drawn at): x and y are always 0 in 26430625, the viewport is the whole picture. **[dis]** (re-read 2026-11-21 for
+  GitHub issue 107: the canvas is units, not pixels.)
 - **Padding.** PlaySelection uses `FbUiPreGame.playMenusPadding` = 80 / 50 / 80 / 50 units **[data]**, raised to the
   safe-area insets **[dis]**. Kiln uses the 80 / 50 values (the bundle field is not read at run time).
 - **Error popup.** "errorMessageWindow" (layer 31) draws while the byte at `sys10 + 0x120 + 0x550` is set
@@ -673,8 +677,10 @@ above (ItemSlot `0xc046c0` raw link, SlotGeometry mid `0xc05433`, GameUiFrame) a
 - **Hit test:** the core hit-tests the press against the last completed slot frame's outer rectangles (the last drawn
   wins: a slot drawn over another, a dragged item's preview). The frame must be this client session's and at most
   250 ms old. **[src]**
-- **Pixels:** `pixel = viewport + unit * px_per_unit` on the game's canvas (`ui/sys.canvas_w/h`, `ui/sys.viewport`,
-  `ui/sys.px_per_unit`, chapter 05a), then scaled by client (or overlay display) size / canvas size when they differ.
+- **Pixels:** `pixel = viewport + unit * px_per_unit` on the game's canvas (`ui/sys.viewport`, `ui/sys.px_per_unit`,
+  chapter 05a), then scaled by client (or overlay display) size / the picture's size (viewport w + 2x, h + 2y) when they
+  differ. Through 0.2.0-dev.30.2 the divisor was the canvas size, which is in units: at 3840x2160 (2 px per unit) every
+  mark and hit test landed at twice its place (GitHub issue 107, verified against the reporter's numbers).
   Static only; check `ui-hooks.c1` (marks on the slots at two resolutions/UI scales) confirms it, which is also 05a-c5.
   Expected to hold: the game renders its UI at the swapchain size and kiln.ui's overlay draws at that size. **[hyp]**
 - **Screens with a pointer** (HUD screen byte, play `+0x1cd8`): 4 InGameMenu, 8 PlayerCrafting, 9 Backpack,

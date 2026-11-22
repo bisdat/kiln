@@ -1,0 +1,9 @@
+{
+  "id": "survivors-test",
+  "name": "Survivors test",
+  "version": "0.1.0",
+  "apiVersion": "0.1",
+  "entryAssembly": "SurvivorsTest.dll",
+  "side": "server",
+  "clients": "none"
+}

@@ -14,6 +14,10 @@ namespace {
 
 constexpr uint64_t kQueueMs = 5000;          // a request not emitted by then times out (a pressed one still releases)
 constexpr uint64_t kDismantleHoldMs = 1200;  // a dismantle is held this long, written again at every visit
+// A press its input never came back for (the local player's entity or its ClientPlayerInput changed before the release)
+// ends this long after the press, unreleased: the slot is not kept for the rest of the session. A release comes one input
+// version after the press (a dismantle's 1.2 s later); the game's own input writer rewrites every digital bit each step.
+constexpr uint64_t kUnreleasedMs = 10000;
 
 // keen::WorldTransform: position in Q32.32 metres, quaternion x y z w, scale.
 struct Transform {
@@ -41,8 +45,8 @@ uint64_t steady_ms() {
 }
 
 const char* const kUnbound =
-    "no verified client input observation point on this game build: the client cursor system's input point, its building "
-    "version call and the ClientPlayerInput layout are not in sigdb";
+    "no verified client input observation point on this game build: sigdb has no client.input_observation (the local "
+    "input writer's observation point, the client world's step and the ClientPlayerInput layout) for it";
 
 std::atomic<uint64_t (*)()> g_clock{&steady_ms};
 std::mutex g_mu;  // the slot below; never held across a call out of this file
@@ -50,8 +54,53 @@ Command g_cmd;
 uint32_t g_next_id = 0;
 uint32_t g_ended = 0;  // the newest client session whose world stopped
 Layout g_layout{};
+const char* const kInstallFailed = "hooking the local input observation point failed (kiln.log says why)";
+const char* const kInstallThrew = "hooking the local input observation point failed at the first request: it threw";
+
 std::atomic<bool> g_bound{false};
+std::atomic<const char*> g_why{kUnbound};  // bound()'s answer while unbound
 std::atomic<uint64_t> g_skipped{0}, g_faults{0};
+std::atomic<uint64_t> g_installs{0};  // installer calls that returned (written under g_install_mu)
+std::mutex g_install_mu;  // one install at a time; taken before g_mu (bind), never inside it
+std::atomic<Installer> g_installer{nullptr};
+std::atomic<bool> g_install_failed{false};
+std::atomic<uint64_t> g_generation{1};
+
+void changed() { g_generation.fetch_add(1, std::memory_order_acq_rel); }
+
+// The first submit's install (the lazy producer, client_building_input.h). True when the producer is bound.
+bool install_once() {
+    // An attempt that ended while this submit waited for the mutex answers for it too: a burst of first submits spends
+    // one attempt, and a later submit tries again.
+    const uint64_t seen = g_installs.load(std::memory_order_acquire);
+    std::lock_guard install(g_install_mu);
+    if (g_bound.load(std::memory_order_acquire)) return true;  // another submit installed it meanwhile
+    const Installer install_fn = g_installer.load(std::memory_order_acquire);
+    if (!install_fn) return false;  // a failed install before this one (final), or none
+    if (g_installs.load(std::memory_order_relaxed) != seen) return false;  // refused while this one waited
+    const uint64_t attempt = seen + 1;
+    Layout layout{};
+    const char* why = nullptr;
+    Install result = Install::Failed;
+    try {  // the caller is a mod's thread: nothing the install throws leaves submit
+        result = install_fn(&layout, &why);
+    } catch (...) {
+        why = kInstallThrew;
+    }
+    g_installs.store(attempt, std::memory_order_release);
+    if (result == Install::Bound) {
+        // The installer stays: a submit that read "not bound" meanwhile finds it, waits here and finds the producer
+        // bound (dropping it first would answer that submit unavailable).
+        bind(&layout);
+        return true;
+    }
+    if (result == Install::Again && attempt < kInstallAttempts) return false;  // nothing written; a later submit tries
+    g_install_failed.store(true, std::memory_order_release);  // before the installer goes: usable() false implies it
+    g_why.store(why ? why : kInstallFailed, std::memory_order_release);
+    g_installer.store(nullptr, std::memory_order_release);
+    changed();
+    return false;
+}
 
 uint64_t now_ms() { return g_clock.load(std::memory_order_relaxed)(); }
 bool open(const Command& c) { return c.status == KILN_BUILDING_INPUT_QUEUED || c.status == KILN_BUILDING_INPUT_PRESSED; }
@@ -94,11 +143,16 @@ bool convert(const KilnBuildingInput& in, Command& out) {
     return true;
 }
 
-// The source's 5 s rule, at every status and every visit.
+// The source's 5 s rule, at every submit, status and visit; and the end of a press never released (kUnreleasedMs).
+// `now` may be older than the request (a submit reads the clock before it takes the slot): then nothing has expired.
 void expire(Command& c, uint64_t now) {
-    if (now - c.queued_at <= kQueueMs) return;
-    if (c.status == KILN_BUILDING_INPUT_QUEUED) c.status = KILN_BUILDING_INPUT_TIMEOUT;
-    else if (c.status == KILN_BUILDING_INPUT_PRESSED) c.terminal = KILN_BUILDING_INPUT_TIMEOUT;
+    if (now <= c.queued_at || now - c.queued_at <= kQueueMs) return;
+    if (c.status == KILN_BUILDING_INPUT_QUEUED) {
+        c.status = KILN_BUILDING_INPUT_TIMEOUT;
+    } else if (c.status == KILN_BUILDING_INPUT_PRESSED) {
+        c.terminal = KILN_BUILDING_INPUT_TIMEOUT;  // still released at its next input
+        if (now > c.pressed_at && now - c.pressed_at > kUnreleasedMs) c.status = c.terminal;
+    }
 }
 
 void fault(Command& c) {
@@ -175,15 +229,25 @@ KilnResult submit(const Env& env, KilnOwner owner, uint64_t expected_session, co
     if (request_id) *request_id = 0;
     if (!input || !request_id || input->size < sizeof(KilnBuildingInput) || owner == 0) return KILN_ERR_INVALID_ARGUMENT;
     if (!env.owner_alive) return KILN_ERR_REVOKED;
-    if (!env.client_side || !env.hooks || !g_bound.load(std::memory_order_acquire)) return KILN_ERR_UNAVAILABLE;
+    const bool bound_now = g_bound.load(std::memory_order_acquire);
+    if (!env.client_side || !env.hooks || (!bound_now && !g_installer.load(std::memory_order_acquire)))
+        return KILN_ERR_UNAVAILABLE;
     Command next;
     if (!convert(*input, next)) return KILN_ERR_INVALID_ARGUMENT;
+    if (!bound_now) {
+        // The lazy producer's first use: only a request that could be queued now installs it (the slot's own checks
+        // below still decide; a session that ends meanwhile answers stale there).
+        if (!env.live_session || (expected_session && expected_session != env.live_session))
+            return KILN_CLIENT_ERR_BUILDING_STALE;
+        if (!install_once()) return KILN_ERR_UNAVAILABLE;
+    }
     const uint64_t now = now_ms();
     {
         std::lock_guard lock(g_mu);
         if (!g_bound.load(std::memory_order_relaxed)) return KILN_ERR_UNAVAILABLE;  // stopped meanwhile
         if (!env.live_session || env.live_session <= g_ended || (expected_session && expected_session != env.live_session))
             return KILN_CLIENT_ERR_BUILDING_STALE;
+        expire(g_cmd, now);
         if (open(g_cmd)) return KILN_CLIENT_ERR_BUILDING_BUSY;
         next.id = ++g_next_id;
         if (!next.id) next.id = ++g_next_id;
@@ -234,13 +298,39 @@ void bind(const Layout* layout) {
     if (open(g_cmd)) g_cmd.status = KILN_BUILDING_INPUT_CANCELLED;
     if (layout) g_layout = *layout;
     g_bound.store(layout != nullptr, std::memory_order_release);
+    changed();
 }
 
 bool bound(const char** why) {
     if (g_bound.load(std::memory_order_acquire)) return true;
-    if (why) *why = kUnbound;
+    if (why) *why = g_why.load(std::memory_order_acquire);
     return false;
 }
+
+void unbound_reason(const char* why) {
+    g_install_failed.store(false, std::memory_order_release);  // a reason of the build, not of an install
+    g_why.store(why ? why : kUnbound, std::memory_order_release);
+    changed();
+}
+
+void set_installer(Installer install) {
+    std::lock_guard lock(g_install_mu);
+    g_install_failed.store(false, std::memory_order_release);
+    g_installer.store(install, std::memory_order_release);
+    changed();
+}
+
+bool install_failed() { return g_install_failed.load(std::memory_order_acquire); }
+
+bool usable(const char** why, bool* installed) {
+    const bool now = g_bound.load(std::memory_order_acquire);
+    if (installed) *installed = now;
+    if (now || g_installer.load(std::memory_order_acquire)) return true;
+    if (why) *why = g_why.load(std::memory_order_acquire);
+    return false;
+}
+
+uint64_t generation() { return g_generation.load(std::memory_order_acquire); }
 
 void observe(const Observation& o, const Memory& m) {
     std::unique_lock lock(g_mu, std::try_to_lock);
@@ -251,14 +341,8 @@ void observe(const Observation& o, const Memory& m) {
     Command& c = g_cmd;
     if (!g_bound.load(std::memory_order_relaxed) || !open(c) || !o.record) return;
     const uint64_t now = now_ms();
-    if (now - c.queued_at > kQueueMs) {
-        if (c.status == KILN_BUILDING_INPUT_QUEUED) {
-            c.status = KILN_BUILDING_INPUT_TIMEOUT;
-            return;
-        }
-        c.terminal = KILN_BUILDING_INPUT_TIMEOUT;  // still release an already pressed input
-    }
-    if (o.entity != c.player || o.session != c.session) return;
+    expire(c, now);  // a queued request times out; a pressed one still releases, unless it was never released in time
+    if (!open(c) || o.entity != c.player || o.session != c.session) return;
     apply(o, m, g_layout, c, now);
 }
 
@@ -277,17 +361,26 @@ void owner_gone(KilnOwner owner) {
     else if (g_cmd.status == KILN_BUILDING_INPUT_PRESSED) g_cmd.terminal = KILN_BUILDING_INPUT_CANCELLED;
 }
 
-Stats stats() { return {g_skipped.load(std::memory_order_relaxed), g_faults.load(std::memory_order_relaxed)}; }
+Stats stats() {
+    return {g_skipped.load(std::memory_order_relaxed), g_faults.load(std::memory_order_relaxed),
+            g_installs.load(std::memory_order_relaxed)};
+}
 
 void set_clock_for_tests(uint64_t (*ms)()) { g_clock.store(ms ? ms : &steady_ms, std::memory_order_relaxed); }
 
 void reset_for_tests() {
+    std::lock_guard install(g_install_mu);
+    g_installer.store(nullptr, std::memory_order_release);
+    g_install_failed.store(false, std::memory_order_release);
+    g_installs.store(0, std::memory_order_relaxed);
+    changed();
     std::lock_guard lock(g_mu);
     g_cmd = {};
     g_next_id = 0;
     g_ended = 0;
     g_layout = {};
     g_bound.store(false, std::memory_order_release);
+    g_why.store(kUnbound, std::memory_order_release);
     g_skipped.store(0, std::memory_order_relaxed);
     g_faults.store(0, std::memory_order_relaxed);
 }

@@ -68,6 +68,7 @@ public static unsafe partial class Items
     /// <see cref="ContainerNamesAvailable"/> is false (an older Kiln, or a game build the string table is unknown on).
     /// </summary>
     /// <example><code>if (Items.ContainerName(chest) == "Ores") { /* deposit ore here */ }</code></example>
+    /// <seealso cref="SetContainerName"/>
     [RequiresCapability(Caps.Names)]
     [TickThreadOnly]
     public static string? ContainerName(EntityId entity)
@@ -111,11 +112,25 @@ public static unsafe partial class Items
     /// <param name="to">The inventory owner it enters; not <paramref name="from"/>.</param>
     /// <param name="count">How many items; 0 = the whole stack. Gear is always 1.</param>
     /// <param name="options">See <see cref="MoveOptions"/>.</param>
-    /// <param name="toSlot">A slot of <paramref name="to"/> to fill first; null = the game's choice (partial stacks of the
-    /// item first, then the first empty slot).</param>
-    /// <remarks>Runs in the next sim step; the task completes on the tick thread one step later. A player's equipped or
-    /// held items are refused and the action bar is left alone unless <see cref="MoveOptions"/> says otherwise. Game-side
-    /// outcomes never throw: read <see cref="MoveResult.Status"/>.</remarks>
+    /// <param name="toSlot">A slot of <paramref name="to"/> to fill first; null = Kiln's choice (partial stacks of the
+    /// item first, then the first empty slot). Into a player it must be a slot the item may enter: a backpack slot (an
+    /// action-bar slot only with <see cref="MoveOptions.ActionBar"/>), a currency-page slot for a currency item, or a worn
+    /// equipment slot whose equipment type is the item's, to top up the worn stack (arrows, bait). An empty equipment slot
+    /// or the backpack slot is refused: a move is no equip, use <see cref="Equip"/>. Any other slot is <see cref="ItemsStatus.Refused"/> with the reason in
+    /// <see cref="MoveResult.Message"/>, and nothing moves. A slot the item may enter that is full, or holds another item,
+    /// gives way to Kiln's choice.</param>
+    /// <remarks>
+    /// <para>Runs in the next sim step; the task completes on the tick thread one step later. A player's equipped or held
+    /// items are refused and the action bar is left alone unless <see cref="MoveOptions"/> says otherwise. Game-side
+    /// outcomes never throw: read <see cref="MoveResult.Status"/>.</para>
+    /// <para>Into a player or an NPC, Kiln's choice uses only the backpack: the Generic pages of the inventory and the
+    /// worn backpack's pages, in the order <see cref="Read"/> lists them; never an equipment, currency or customization
+    /// page, nor the action bar without <see cref="MoveOptions.ActionBar"/> (issue #109: a player's equipment pages come
+    /// first, and a stack placed there is out of the player's sight). Nothing fits: <see cref="ItemsStatus.NoRoom"/>. A
+    /// chest or other container: every page, as before.</para>
+    /// <para><see cref="ItemsStatus.Done"/> means the items are where the player can take them: a stack move that put any
+    /// of them elsewhere, or lost some on the way, is rolled back and <see cref="ItemsStatus.Refused"/>.</para>
+    /// </remarks>
     /// <example><code>
     /// var r = await Items.Move(player, sword.Slot, chest);
     /// if (r.Succeeded) Log.Info($"moved {r.Changes[0].ItemEntity}");   // the same item entity as sword.ItemEntity

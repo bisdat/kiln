@@ -163,6 +163,17 @@ pub struct KilnBuildStatus {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
+pub struct KilnBuildGridSpec {
+    pub size: u32,
+    pub reserved: u32,
+    pub id: [core::ffi::c_char; 16],
+    pub origin: [f64; 3],
+    pub cell_size: [f64; 3],
+    pub maximum: [u64; 3],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
 pub struct KilnBuildApi {
     pub header: KilnServiceHeader,
     pub status: Option<unsafe extern "C" fn(*mut KilnBuildStatus) -> KilnResult>,
@@ -183,4 +194,5 @@ pub struct KilnBuildApi {
     pub release: Option<unsafe extern "C" fn(*const i32, *const u32, *mut u64) -> KilnResult>,
     pub terrain_budget_reserve: Option<unsafe extern "C" fn(u32, u32) -> KilnResult>,
     pub terrain_budget_charge: Option<unsafe extern "C" fn(f64)>,
+    pub grid_for_session: Option<unsafe extern "C" fn(KilnOwner, u64, KilnStr, *mut KilnBuildGridSpec) -> KilnResult>,
 }

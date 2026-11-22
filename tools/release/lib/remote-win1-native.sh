@@ -9,7 +9,8 @@
 # there: the DLLs come back unsigned and release.sh signs them here as before.
 #   SRC    the release's export ($work/src, VERSION already the release's)
 #   RWORK  a local folder for this job (emptied): on success bin/ (as $KILN_OUT/cmake/bin: *.dll *.pdb, services/,
-#          plugins/) and the file ok
+#          plugins/, and kiln_build.h: the build's stamp, its generated/kiln_build.h, which tools/package/stage.sh builds
+#          kiln-sfi.dll with) and the file ok
 # A different clang version on win1, or no LLVM there, fails the job (exit 3): release.sh then builds them here.
 # Env: SOURCE_DATE_EPOCH, KILN_GIT, KILN_RELEASE_BUILD (release.sh's), RELEASE_WORK (release.sh's $work: the path maps),
 # XWIN_ROOT (default ~/.cache/cargo-xwin/xwin), KILN_REMOTE_HOST (default kiln-win1); win1's slots as remote-win1.sh.
@@ -107,6 +108,10 @@ if (\$rc -ne 0) { Get-Content "\$J\build.log" | Select-String -Pattern 'error|FA
 \$b = "\$J\out\cmake\bin"
 \$keep = New-Object System.Collections.Generic.List[string]
 Get-ChildItem \$b -File | Where-Object { \$_.Extension -in '.dll','.pdb' } | ForEach-Object { \$keep.Add(\$_.Name) }
+# this build's stamp (generated/kiln_build.h): the stage builds kiln-sfi.dll with it, so it carries the core's stamp
+Copy-Item "\$J\out\cmake\generated\kiln_build.h" "\$b\kiln_build.h" -ErrorAction SilentlyContinue
+if (-not (Test-Path "\$b\kiln_build.h")) { "remote-win1-native: the build wrote no generated/kiln_build.h"; exit 7 }
+\$keep.Add('kiln_build.h')
 foreach (\$d in 'services','plugins') { if (Test-Path "\$b\\\$d") { Get-ChildItem "\$b\\\$d" -File -Recurse | ForEach-Object { \$keep.Add(\$d + '/' + \$_.FullName.Substring((Resolve-Path "\$b\\\$d").Path.Length + 1).Replace('\', '/')) } } }
 [System.IO.File]::WriteAllLines("\$J\keep.txt", \$keep)
 tar -cf "\$J\results.tar" -C \$b -T "\$J\keep.txt"
@@ -150,5 +155,6 @@ mkdir -p "$rwork/bin"
 tar -xf "$rwork/results.tar" -C "$rwork/bin"
 rm -f -- "$rwork/up.tar" "$rwork/results.tar"
 [[ -s $rwork/bin/kiln-core.dll && -s $rwork/bin/dinput8.dll ]] || { say "no kiln-core.dll/dinput8.dll in the results"; exit 6; }
+grep -q '^#define KILN_BUILD "+' "$rwork/bin/kiln_build.h" 2>/dev/null || { say "no build stamp (kiln_build.h) in the results"; exit 6; }
 : >"$rwork/ok"
 say "done: $(find "$rwork/bin" -name '*.dll' | wc -l) DLLs in $rwork/bin"

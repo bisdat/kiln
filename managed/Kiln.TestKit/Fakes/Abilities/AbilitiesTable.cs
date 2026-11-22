@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// The fake kiln.abilities table (native/core/abi/services/kiln_abilities.h, v1 with the dev.29 members) under the real
+// The fake kiln.abilities table (native/core/abi/services/kiln_abilities.h, v1 with the dev.29 and dev.30.3 members) under the real
 // Kiln.Abilities. Only its natives are modelled (06c: same-step natives, attachments, typed declarations, the ECS bridge);
 // every other function answers as the native service does when it is unavailable.
 using System.Runtime.CompilerServices;
@@ -163,6 +163,8 @@ internal static unsafe class AbilitiesAbi
         public delegate* unmanaged[Cdecl]<ulong, uint*, int> NativeAttachState;
         public delegate* unmanaged[Cdecl]<NativeCall*, Str, uint, void*, uint, int> NativeEcsRead;
         public delegate* unmanaged[Cdecl]<NativeCall*, Str, uint, void*, uint, uint, void*, void*, int> NativeEcsWrite;
+        // since 0.2.0-dev.30.3: item_use (KilnItemUse*)
+        public delegate* unmanaged[Cdecl]<void*, int> ItemUse;
     }
 
     public static uint Fnv(ReadOnlySpan<byte> bytes)
@@ -229,6 +231,7 @@ internal static unsafe class AbilitiesTable
         t->NativeAttachState = &NativeAttachState;
         t->NativeEcsRead = &NativeEcsRead;
         t->NativeEcsWrite = &NativeEcsWrite;
+        t->ItemUse = &ItemUse;
         _table = t;
         return (nint)t;
     }
@@ -427,4 +430,8 @@ internal static unsafe class AbilitiesTable
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int SequencePlay(uint entity, uint sequence, uint trigger) => FakeTables.Unavailable;
+
+    // an item use starts a sequence: offline like sequence_play (abilities.sequences is an offline row of the kit)
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int ItemUse(void* use) => FakeTables.Unavailable;
 }

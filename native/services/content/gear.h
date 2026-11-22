@@ -28,15 +28,26 @@ constexpr char kBalancingType[] = "keen::BalancingTable";
 // "perks" in the items section does: a vanilla client keeps the game's perks. One switch, so that the coordinator can lift it.
 constexpr bool kPerksNeedRefs = true;
 
+// The formulas' constants as one value: the game's own by default; the registry stage passes the balance registry's resolved
+// gear.* values (registry/formulas.h), so that one solver serves both. The functions without it use the game's values.
+struct Constants {
+    float seed = kSeed, creep = kCreep, armor_offset = kArmorOffset, armor_gradient = kArmorGradient;
+};
+
 // The base of the game's damage power at a level: int(seed * creep * level + seed) (server 0x91e9d0), in float as the game.
 int base_power(int level);
+int base_power(int level, const Constants& c);
 // The tooltip's damage: int(base_power(level) * dmgMod * speedMod).
 int power_of(double dmg_mod, double speed_mod, int level);
+int power_of(double dmg_mod, double speed_mod, int level, const Constants& c);
 // The dmgMod that makes the tooltip show this power at this level and speed (half a point of margin, as Kiln.Blocks).
 double dmg_mod_for(int power, int level, double speed_mod);
+double dmg_mod_for(int power, int level, double speed_mod, const Constants& c);
 // The tooltip's armour of one kind: round((gradient * level + offset) * share) (client 0xe6dfe0).
 int armor_of(double share, int level);
+int armor_of(double share, int level, const Constants& c);
 double armor_share_for(int armor, int level);
+double armor_share_for(int armor, int level, const Constants& c);
 
 // The game's original number at an item field path; nullopt: this build's ItemInfo has no such field.
 using Reader = std::function<std::optional<double>(const std::string& path)>;

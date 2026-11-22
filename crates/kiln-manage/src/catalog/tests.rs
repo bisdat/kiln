@@ -1047,7 +1047,8 @@ fn hidden_names() {
 }
 
 /// Hiding keeps every entry the game's own data uses (names from the 2026-11 catalog): a recipe's input or output, a
-/// recipe's station, an input category's member, and station tank water, which no recipe names.
+/// recipe's station, an input category's member. The game's old Water canteen item, which no recipe names, is hidden
+/// since 0.2.0-dev.30.3 (it is not a station's tank water: netjunk); kiln lint gives it KL408 instead of KL407.
 #[test]
 fn hidden_names_keep_what_the_game_uses() {
     let doc = serde_json::json!({
@@ -1070,10 +1071,10 @@ fn hidden_names_keep_what_the_game_uses() {
     let cat: Catalog = serde_json::from_value(doc.clone()).unwrap();
     let used = super::used_names(&cat);
     let shown = |n: &str| !super::is_hidden_name(n) || used.contains(n);
-    for n in ["Vanity_TX_PartyHat_04_Tint_WIP", "Material_T5_MountainWoodlouse_FishingBait_WIP", "Z_Prop_Production_T5_Laboratory2_DEPRECATED", super::STATION_WATER, "Material_T1_Wood_Logs"] {
+    for n in ["Vanity_TX_PartyHat_04_Tint_WIP", "Material_T5_MountainWoodlouse_FishingBait_WIP", "Z_Prop_Production_T5_Laboratory2_DEPRECATED", "Material_T1_Wood_Logs"] {
         assert!(shown(n), "{n} is in use: listed");
     }
-    for n in ["Z_Material_Sand_DEPRECATED", "Consumable_Toy_Confetti_01_Blue_Mortar_WIP"] {
+    for n in ["Z_Material_Sand_DEPRECATED", "Consumable_Toy_Confetti_01_Blue_Mortar_WIP", super::STATION_WATER] {
         assert!(!shown(n), "{n} is unused: hidden");
     }
     // kiln lint's own catalog reads the same uses (no KL407 for them)
@@ -1125,4 +1126,22 @@ fn item_categories_name_their_items_and_recipes() {
     assert_eq!(fx.len(), 1);
     assert_eq!(fx[0].items[0].display_name.as_deref(), Some("Ice Shard"));
     assert_eq!(fx[0].recipes.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(), ["Test_Frost_Blade"]);
+}
+
+/// A recipe's water by station (docs/re/stations.md section 3.6): the six factory stations with a tank and its charges,
+/// the factory stations without one, and every other workshop a crafting menu. No workshop in both tables.
+#[test]
+fn station_water_knows_the_tanks() {
+    use super::{DRY_STATIONS, StationWater, TANK_STATIONS, station_water};
+    assert_eq!(station_water(0xba67134f), StationWater::Tank { charges: 150, name: "Seedbed" });
+    assert_eq!(station_water(0x269a27a7), StationWater::Tank { charges: 50, name: "Beehive" });
+    assert_eq!(station_water(0x39fbd98f), StationWater::Tank { charges: 100, name: "Cooking Station" });
+    assert_eq!(station_water(0xf5aab50a), StationWater::NoTank { name: "Smelter" });
+    assert_eq!(station_water(0x4da88f73), StationWater::Menu); // the Workbench
+    assert_eq!(station_water(0x07ce61f0), StationWater::Menu); // the Kitchen: its soups take water from the base
+    assert_eq!(station_water(0), StationWater::Menu); // the player's own menu
+    assert_eq!(TANK_STATIONS.len(), 6);
+    for (id, _) in DRY_STATIONS {
+        assert!(!TANK_STATIONS.iter().any(|t| t.0 == *id), "0x{id:08x} in both tables");
+    }
 }

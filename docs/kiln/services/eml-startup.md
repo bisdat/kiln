@@ -139,6 +139,15 @@ same value as the JSON's `archiveSha256`; `registry_id` / `registry_sha256` from
 - **Grant**: `kiln.eml.archive`'s `authorize_with_archive` once per kiln start, phase PUBLISHED (never PREPARED), with the
   pins above; never retired in-process. An authorization that fails turns the outcome into `failed` without a grant
   (`startup-grant-missing`).
+- **Kiln's bundled ShroudForge's output**: a start that settles on the verified BASE finds that
+  output live when the player used Kiln's bundled ShroudForge before choosing Kiln's interpreter. Its record beside the
+  backup (`<stem>.kfc.prepared.json`) proves it when it names the live header (whole SHA-256), the resource file (its
+  ends, length and time) and the backups present (length and time), and Steam's build where both name one: then the
+  BASE is restored over it (`restored`, granted). A record that names the live header but not the rest, and output
+  nothing proves, are refused with nothing changed (`base-not-restored`), as is a witness whose live set would become
+  a new working baseline while it is that output (`baseline-shroudforge-output`). Each such text ends with what the
+  player does: verify the game files in Steam, then start again from the Kiln launcher. kiln-sfi's
+  `startup-grant-missing` reason quotes it.
 - **BASE origin**: the record's `baseOrigin` is a fact about the live generation, so an outcome without a grant
   (`refused`, `failed`) writes `null` whatever the witness found; kiln-sfi reads a non-null origin only with a grant.
 - **State file**: kiln/state/eml.json lists one row per package of the pass (`source: "shroudforge"`), the

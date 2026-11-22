@@ -279,13 +279,13 @@ fn no_kiln_missing_and_unreadable_folders_do_not_fail() {
     assert_eq!((m.state, m.fix), (FoundState::Off, None), "{m:?}");
     assert!(m.reason.contains("not installed"));
     // a folder that cannot be listed, and a link
-    use std::os::unix::fs::PermissionsExt;
+    #[cfg(unix)] use std::os::unix::fs::PermissionsExt;
     put(&g.path, "greeneye/x/mod.json", b"{}");
-    std::fs::set_permissions(g.path.join("greeneye"), std::fs::Permissions::from_mode(0o000)).unwrap();
-    std::os::unix::fs::symlink("/", g.path.join("mods/link")).unwrap();
+    #[cfg(unix)] std::fs::set_permissions(g.path.join("greeneye"), std::fs::Permissions::from_mode(0o000)).unwrap();
+    #[cfg(unix)] std::os::unix::fs::symlink("/", g.path.join("mods/link")).unwrap();
     let root_reads = std::fs::read_dir(g.path.join("greeneye")).is_ok(); // root reads everything
     let r = scan(&dirs, &g, &profile(&[], true));
-    std::fs::set_permissions(g.path.join("greeneye"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    #[cfg(unix)] std::fs::set_permissions(g.path.join("greeneye"), std::fs::Permissions::from_mode(0o755)).unwrap();
     assert!(root_reads || r.unreadable.iter().any(|u| u.path == "greeneye"), "{r:?}");
     assert_eq!(one(&r, "mods/link").state, FoundState::CannotRun);
 }

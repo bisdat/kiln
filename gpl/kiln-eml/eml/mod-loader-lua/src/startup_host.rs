@@ -23,6 +23,7 @@ use crate::{
     transaction::{self, FileIdentity, TargetSnapshot},
 };
 pub use crate::ownership::SfHandoff;
+pub use crate::ownership::{HostedShroudForge, hosted_shroudforge_output};
 pub use crate::transaction::InputWitness;
 use kfc::{
     container::{KFCCursor, KFCFile, KFCReader},
@@ -400,8 +401,11 @@ impl<'guard> StartupHost<'guard> {
     /// must hold the resource backup's bytes from its start (a restore interrupted between the two files leaves chunks
     /// the BASE header never references after them) and every container the BASE header lists must have its size,
     /// whatever was live before. Output Kiln cannot prove it published is never touched: when it is not the BASE either,
-    /// this refuses. The receipt goes after a verified BASE (`baseOrigin` with it). Reads the resource backup and as
-    /// much of the resource file in full.
+    /// this refuses, except (kiln mode, Deferred) for Kiln's bundled ShroudForge's output whose record proves it was
+    /// made over exactly the backups present (`ownership::hosted_shroudforge_output`), which is restored as owned output
+    /// is (the backups pass the same checks); a record that names the live header but not the rest refuses. The
+    /// receipt goes after a verified BASE (`baseOrigin` with it). Reads the resource backup and as much of the resource
+    /// file in full.
     pub fn restore_base(&mut self) -> anyhow::Result<RestoredBase> {
         if self.started {
             anyhow::bail!("startup generation already staged");
@@ -413,20 +417,59 @@ impl<'guard> StartupHost<'guard> {
         // names a generation that is not the live one)
         crate::ownership::forget_journal(&self.game, &self.name)?;
         let owned = crate::ownership::owns_output(&self.game, &self.name)?;
+        let header = |ext: &str| crate::ownership::digest(&self.game, &self.game.join(format!("{}.{ext}", self.name)));
+        let header_path = || {
+            camino::Utf8PathBuf::from_path_buf(self.game.join(format!("{}.kfc", self.name)))
+                .map_err(|_| anyhow::anyhow!("non UTF-8 archive root"))
+        };
+        let mut copied = owned;
         if owned {
-            let header = camino::Utf8PathBuf::from_path_buf(self.game.join(format!("{}.kfc", self.name)))
-                .map_err(|_| anyhow::anyhow!("non UTF-8 archive root"))?;
-            crate::load::restore_backup_with(&header, self.handoff)
+            crate::load::restore_backup_with(&header_path()?, self.handoff)
                 .map_err(|()| anyhow::anyhow!("the BASE could not be restored from the working baseline (see kiln.log)"))?;
+        } else if header("kfc")? == header("kfc.bak")? {
+            // the BASE header is live already (checked once: nothing was copied)
+        } else {
+            // kiln-eml: output no receipt lists. Kiln's bundled ShroudForge's output, proven by its record over the
+            // backups present, goes back to the BASE in kiln mode (that ShroudForge stands aside in kiln mode and prepares
+            // its output again from the same backups when it runs next); anything else is left as it is.
+            use crate::ownership::HostedShroudForge;
+            let hosted = match self.handoff {
+                SfHandoff::Deferred => crate::ownership::hosted_shroudforge_output(&self.game, &self.name)?,
+                SfHandoff::Live => HostedShroudForge::NotProven,
+            };
+            match hosted {
+                HostedShroudForge::Output => {
+                    crate::load::restore_backup_as(&header_path()?, self.handoff, crate::ownership::RestoreProof::HostedShroudForge)
+                        .map_err(|()| {
+                            anyhow::anyhow!(
+                                "the live {}.kfc is what Kiln's bundled ShroudForge prepared, and its backup could not be put back \
+                                 (see kiln.log). {VERIFY_GAME_FILES}",
+                                self.name
+                            )
+                        })?;
+                    copied = true;
+                }
+                HostedShroudForge::Stale(why) => anyhow::bail!(
+                    "the live {}.kfc is what Kiln's bundled ShroudForge prepared, but {why}, so Kiln cannot prove its backup \
+                     is this game's own data; left as it is. {VERIFY_GAME_FILES}",
+                    self.name
+                ),
+                HostedShroudForge::NotProven => anyhow::bail!(
+                    "the live {}.kfc is neither the BASE nor output Kiln can prove it published; left as it is. {VERIFY_GAME_FILES}",
+                    self.name
+                ),
+            }
         }
         self.guard.check()?;
         // the BASE is what the game reads: the live header is the backup header byte for byte, and the live resource
         // file holds the resource backup's bytes from its start (a restore interrupted between the header and the
         // resource file leaves the published generation's appended chunks after them, which the BASE header never
         // references; the next publication replaces the file)
-        let header = |ext: &str| crate::ownership::digest(&self.game, &self.game.join(format!("{}.{ext}", self.name)));
-        if header("kfc")? != header("kfc.bak")? {
-            anyhow::bail!("the live {}.kfc is neither the BASE nor output Kiln can prove it published; left as it is", self.name);
+        if copied && header("kfc")? != header("kfc.bak")? {
+            anyhow::bail!(
+                "the live {}.kfc is neither the BASE nor output Kiln can prove it published; left as it is. {VERIFY_GAME_FILES}",
+                self.name
+            );
         }
         let resources = self.game.join(format!("{}.kfc_resources", self.name));
         let backup = self.game.join(format!("{}.kfc_resources.bak", self.name));
@@ -436,7 +479,8 @@ impl<'guard> StartupHost<'guard> {
         transaction::regular(&backup)?;
         if !same_prefix(&backup, &resources)? {
             anyhow::bail!(
-                "the live {}.kfc_resources is neither the BASE nor output Kiln can prove it published; left as it is",
+                "the live {}.kfc_resources is neither the BASE nor output Kiln can prove it published; left as it is. \
+                 {VERIFY_GAME_FILES}",
                 self.name
             );
         }
@@ -445,16 +489,21 @@ impl<'guard> StartupHost<'guard> {
             crate::ownership::checked_path(&self.game, &path)?;
             transaction::regular(&path)?;
             if fs::metadata(&path)?.len() != info.size {
-                anyhow::bail!("the BASE container {} does not have its size", path.display());
+                anyhow::bail!("the BASE container {} does not have its size. {VERIFY_GAME_FILES}", path.display());
             }
         }
         let receipt_removed = crate::ownership::forget_receipt(&self.game, &self.name)?;
         Ok(RestoredBase {
-            copied: owned,
+            copied,
             receipt_removed,
         })
     }
 }
+
+/// kiln-eml: what a player does when kiln mode cannot put the game's own data back (the end of `restore_base`'s
+/// refusals; the launcher shows it as the reason Kiln's interpreter did not start).
+pub const VERIFY_GAME_FILES: &str =
+    "Verify the game files in Steam (Properties, Installed Files), then start the game again from the Kiln launcher";
 
 /// `whole` is, byte for byte, the start of `file` (which may be longer).
 fn same_prefix(whole: &Path, file: &Path) -> io::Result<bool> {

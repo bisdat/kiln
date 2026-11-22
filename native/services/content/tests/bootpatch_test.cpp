@@ -51,6 +51,7 @@ bool resolve(Root, Node root, const std::string& path, std::vector<Resolved>* ou
     if (path.rfind("past", 0) == 0 || path.rfind("empty", 0) == 0) return true;
     Resolved r{}; r.node = {&scalar, root.addr}; r.path = path; out->push_back(r); return true;
 }
+gjson leaf_json(const Field&, const uint8_t* b, bool) { uint32_t n; std::memcpy(&n, b, 4); return n; }  // baserules.hpp's reads (no base rule here)
 bool parse_leaf(const Field&, const gjson& v, const uint8_t*, uint8_t* out, bool* reset, std::string* err) {
     if (!v.is_number()) return *err = "not a number", false;
     uint32_t n = v.get<uint32_t>(); std::memcpy(out, &n, 4); *reset = false; return true;

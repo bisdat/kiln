@@ -36,6 +36,15 @@ pub enum WriteOutcome {
     /// `ecs_compare_exchange` still answered CONFLICT on the last of its three holds
     /// (Kiln's own retry bound).
     EcsWriteConflictExhausted,
+    /// `ecs_compare_exchange` answered BUSY: a frame (or another Kiln writer) held the engine's
+    /// gate; never retried within the call.
+    EcsWriteBusy,
+    /// `named_service_compare_exchange` answered `KILN_ECS_UNCERTAIN`: a named-service write was
+    /// attempted and could not be proven.
+    ServiceWriteUncertain,
+    /// kiln.assets' `loaded_scalar_compare_exchange` answered `KILN_ECS_UNCERTAIN`: a loaded-resource
+    /// write could not be proven.
+    ResourceWriteUncertain,
 }
 
 /// One mapping: Kiln's outcome, ShroudForge's reason text, and whether it latches.
@@ -59,6 +68,24 @@ pub const REASONS: &[ReasonRow] = &[
         outcome: WriteOutcome::EcsWriteConflictExhausted,
         reason: "ecs-scene-frame-busy",
         latches: false,
+    },
+    // lock_scene_access.cpp:171: the frame holds the scene now.
+    ReasonRow {
+        outcome: WriteOutcome::EcsWriteBusy,
+        reason: "ecs-scene-frame-busy",
+        latches: false,
+    },
+    // update_service.rs:42 and access_named_service.rs:231-233: the service write's text, which latches.
+    ReasonRow {
+        outcome: WriteOutcome::ServiceWriteUncertain,
+        reason: "Service write outcome is uncertain. Stop writes and do not retry blindly",
+        latches: true,
+    },
+    // update_resource_scalar.rs:70: the outcome of a loaded-resource scalar write is not proven.
+    ReasonRow {
+        outcome: WriteOutcome::ResourceWriteUncertain,
+        reason: "Resource write outcome is uncertain because lifetime or original data-page protection could not be verified. Do not retry blindly",
+        latches: true,
     },
 ];
 
