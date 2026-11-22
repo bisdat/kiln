@@ -569,8 +569,9 @@ const taskHolds = new Map<string, { gate: string; fail?: string }>();
 
 type TaskStep = string | { stage: string; message: string };
 
-/** A fake long task: `steps` progress messages and optional stage IDs, then `finish()` gives the result. */
-function startTask(kind: string, title: string, steps: readonly TaskStep[], finish: () => unknown, stepMs = 450): string {
+/** A fake long task: `steps` progress messages and optional stage IDs, then `finish()` gives the result. `failed`:
+ *  called when it fails instead (a held task's `fail`, or `finish` throwing). */
+function startTask(kind: string, title: string, steps: readonly TaskStep[], finish: () => unknown, stepMs = 450, failed?: () => void): string {
   const id = `t${++taskSeq}-${kind}`;
   let t: Task = { id, kind, title, state: "running", progress: 0, message: null, started: now(), finished: null };
   const emitStep = (step: TaskStep, progress: number) => {
@@ -589,7 +590,7 @@ function startTask(kind: string, title: string, steps: readonly TaskStep[], fini
     try {
       if (hold?.fail) reject("io", hold.fail);
       result = finish();
-    } catch (e) { state = "failed"; error = e as KilnError; }
+    } catch (e) { state = "failed"; error = e as KilnError; failed?.(); }
     emitTask({ ...t, state, progress: 1, message: error ? error.message : "Done", finished: now(), result, error });
   };
   const tick = () => {
@@ -1154,6 +1155,16 @@ const mockServers = new Map<string, MockServer>();
  *  SSH. Without it: the one "lab" server the other tests know. */
 const SERVERS3 = typeof location !== "undefined" && new URLSearchParams(location.search).get("servers") === "3";
 const stopped = (s: ServerStatus): ServerStatus => ({ ...s, state: "stopped", pid: null, uptimeS: null, players: null, kiln: null, boot: null, endpoint: null });
+/** What run::remote_status can tell over SSH: running when the admin endpoint answers (else unknown), the Kiln it
+ *  names; never a pid, uptime, players, last start, installed Kiln or boot. */
+const remoteStatus = (s: ServerStatus): ServerStatus => {
+  const up = s.state === "running" || s.state === "stopping";
+  return { ...s, state: up ? "running" : "unknown", pid: null, uptimeS: null, lastStartS: null, players: null, installed: null, boot: null,
+    kiln: up ? s.kiln : null, endpoint: up ? s.endpoint : null };
+};
+/** `__kilnMock.namedStages(false)`: start tasks name no stage (a backend before Task.stage): Overview reads the lines. */
+let namedStages = true;
+const unnamed = (steps: TaskStep[]): TaskStep[] => (namedStages ? steps : steps.map((s) => (typeof s === "string" ? s : s.message)));
 if (!SERVERS3) {
   mockServers.set(server.id, { inst: server, status: runningServer, running: runningServer, startSeq: 0, maxPlayers: 4, basePid: 5120, world: "Lab" });
 } else {
@@ -1171,7 +1182,9 @@ if (!SERVERS3) {
   mockServers.set("ember-isles", { inst: local("ember-isles", "Ember Isles", 15636), status: ember, running: ember, startSeq: 0, maxPlayers: 16, basePid: 6120, world: "Ember Isles" });
   const hollow: ServerStatus = { ...runningServer, id: "hollow-lab", pid: 6220, uptimeS: 0, players: 0, kiln: "0.2.0-dev.30.2", installed: "0.2.0-dev.30.2" };
   mockServers.set("hollow-lab", { inst: local("hollow-lab", "Hollow Lab", 15638), status: { ...stopped(hollow), installed: hollow.installed }, running: hollow, startSeq: 0, maxPlayers: 8, basePid: 6220, world: "Hollow" });
-  const frost: ServerStatus = { ...runningServer, id: "frostwood", pid: 2210, uptimeS: 443_000, players: 0, kiln: "0.2.0-dev.30.4", installed: null };
+  // a remote server's status as run::remote_status gives it: running from its admin endpoint, no pid, uptime, players,
+  // last start or folder here
+  const frost: ServerStatus = remoteStatus({ ...runningServer, id: "frostwood", kiln: "0.2.0-dev.30.4" });
   mockServers.set("frostwood", {
     inst: { id: "frostwood", name: "Frostwood", kind: "remote", dir: null, port: 15636, queryPort: 15637, wine: null, policy: "verified-only", source: "remote",
       remote: { host: "vps-01", port: 22, dir: "/srv/enshrouded/frostwood", instance: "frostwood" }, runner: "remote" },
@@ -1184,6 +1197,7 @@ function srvOf(a: Record<string, unknown>): MockServer {
   return mockServers.get(id) ?? reject("not_found", `no server '${id}'`);
 }
 function setServerStatus(rec: MockServer, status: ServerStatus) {
+  if (rec.inst.kind === "remote") status = remoteStatus(status);
   rec.status = status;
   mockEmit("kiln://server", { serverId: rec.inst.id, status });
 }
@@ -1197,9 +1211,11 @@ function mockSetServer(o: { running?: boolean; installed?: string | null }) {
     : installed ? { ...runningServer, installed } : { ...runningServer, installed: null, kiln: null, boot: null, endpoint: null });
 }
 
-/** A start's lines with its named stages (Task.stage), as kiln_manage::server::run reports them. */
-function startStages(id: string, pid: number, world: string): TaskStep[] {
-  return [
+/** A start's lines with its named stages (Task.stage), as kiln_manage::server::run reports them; a remote start only
+ *  prepares (`kilnctl start` over SSH) and runs. */
+function startStages(id: string, pid: number, world: string, remote?: MockServer["inst"]["remote"]): TaskStep[] {
+  if (remote) return unnamed([{ stage: "preparing", message: `ssh ${remote.host} kilnctl start ${remote.instance ?? id}` }, { stage: "running", message: `${id} started` }]);
+  return unnamed([
     { stage: "preparing", message: "checking the server folder and Kiln's setup" },
     { stage: "wine", message: "GE-Proton10-3, prefix ready" },
     { stage: "process", message: `started GE-Proton10-3 ./enshrouded_server.exe (wine pid ${pid}), output in /home/player/.local/state/kiln/${id}.run.log` },
@@ -1207,7 +1223,7 @@ function startStages(id: string, pid: number, world: string): TaskStep[] {
     { stage: "world", message: "[ecs] LoadEcsScene to Load" },
     { stage: "world", message: "[streaming] 812 of 1490 chunks" },
     { stage: "running", message: "[ecs] LoadEcsScene to Run" },
-  ];
+  ]);
 }
 
 // ---------------------------------------------------------------- handlers
@@ -1867,12 +1883,15 @@ const handlers: Record<string, Handler> = {
       setServerStatus(rec, { ...rec.status, state: "starting", pid, uptimeS: 0 });
     }, 1500);
     const t0 = Date.now();
-    return startTask("server_start", `Starting ${id}`, startStages(id, pid, rec.world), () => {
+    return startTask("server_start", `Starting ${id}`, startStages(id, pid, rec.world, rec.inst.remote), () => {
       // stopped while it started: the process is gone before its world ran (run::wait_ready)
       if (mine !== rec.startSeq) reject("io", "the server exited before its world ran (exit code 0)");
       setServerStatus(rec, { ...rec.running, pid, uptimeS: 0, lastStartS: Math.max(1, Math.round((Date.now() - t0) / 1000)) });
       return rec.status;
-    }, 700);
+    }, 700, () => {
+      // a failed start: its process is gone (a later start or stop has moved on: that one's status stands)
+      if (mine === rec.startSeq) { rec.startSeq++; setServerStatus(rec, stopped(rec.status)); }
+    });
   },
   server_stop: (a) => {
     const rec = srvOf(a);
@@ -1887,9 +1906,14 @@ const handlers: Record<string, Handler> = {
   server_restart: (a) => {
     const rec = srvOf(a);
     const t0 = Date.now();
+    const remote = rec.inst.remote;
     return startTask("server_restart", `Restarting ${rec.inst.id}`, [
-      { stage: "stopping", message: `SIGINT -> pid ${rec.status.pid ?? rec.basePid}; waiting up to 60 s for the save` },
-      ...startStages(rec.inst.id, rec.basePid + 2, rec.world),
+      ...unnamed(remote ? [{ stage: "stopping", message: `ssh ${remote.host} kilnctl stop ${remote.instance ?? rec.inst.id}` }] : [
+        { stage: "stopping", message: `SIGINT -> pid ${rec.status.pid ?? rec.basePid}; waiting up to 60 s for the save` },
+        { stage: "stopping", message: "waiting for wineserver" },
+        { stage: "stopping", message: `${rec.inst.id} stopped, world saved` },
+      ]),
+      ...startStages(rec.inst.id, rec.basePid + 2, rec.world, remote),
     ], () => {
       setServerStatus(rec, { ...rec.running, pid: rec.basePid + 2, uptimeS: 0, lastStartS: Math.max(1, Math.round((Date.now() - t0) / 1000)) });
       return rec.status;
@@ -1905,17 +1929,22 @@ const handlers: Record<string, Handler> = {
   server_create: (a) => {
     const spec = a.spec as ServerSpec;
     if (!/^[a-z0-9][a-z0-9_-]{0,47}$/.test(spec.id)) reject("invalid_argument", `'${spec.id}' is not a valid server name`);
-    if (!spec.name?.trim() || spec.name.length > 64) reject("invalid_argument", "server name: 1 to 64 characters");
+    if (!spec.name?.trim() || new TextEncoder().encode(spec.name).length > 64) reject("invalid_argument", "server name: 1 to 64 characters");
     if (spec.port < 1024) reject("invalid_argument", `port ${spec.port} is below 1024`);
     if (!spec.dir.startsWith("/")) reject("invalid_argument", `${spec.dir} must be an absolute path`);
-    if (mockServers.has(spec.id)) reject("already_exists", `a server '${spec.id}' exists`);
+    const half = mockServers.get(spec.id);
+    const resume = !!(spec as ServerSpec & { resume?: boolean }).resume;
+    // Try again after a failed create: the half-made server in the same folder is finished (instance::resumable)
+    if (half && !(resume && half.inst.dir === spec.dir && half.inst.runner === "kilnctl" && !half.status.pid))
+      reject("already_exists", resume && half.inst.dir !== spec.dir ? `a server '${spec.id}' exists in ${half.inst.dir}; trying again finishes one in the same folder only`
+        : `a server '${spec.id}' exists`);
     const inst: ServerInstance = { id: spec.id, name: spec.name.trim(), kind: "local", dir: spec.dir, port: spec.port, queryPort: spec.port + 1, wine: "ge:GE-Proton10-3",
       policy: spec.policy ?? "verified-only", source: "kilnctl", remote: null, runner: "kilnctl" };
     const running: ServerStatus = { ...runningServer, id: spec.id, pid: null, uptimeS: 0, players: 0, kiln: null, installed: null };
     const basePid = 7000 + mockServers.size * 100;
-    mockServers.set(spec.id, { inst, status: { ...stopped(running), installed: null }, running: { ...running, pid: basePid }, startSeq: 0, maxPlayers: 16, basePid, world: inst.name });
+    if (!half) mockServers.set(spec.id, { inst, status: { ...stopped(running), installed: null }, running: { ...running, pid: basePid }, startSeq: 0, maxPlayers: 16, basePid, world: inst.name });
     return startTask("server_create", `Creating server ${inst.name}`, [
-      `instance file /home/player/.config/kiln/instances/${spec.id}.toml`,
+      `instance file /home/player/.config/kiln/instances/${spec.id}.toml${half ? " (kept from the first try)" : ""}`,
       ...(spec.reflinkFrom ? [`copying the game files from ${spec.reflinkFrom} (reflink)`] : []),
       ...(spec.skipSteamcmd ? [] : ["steamcmd: Logging in to Steam anonymously", "steamcmd: Update state (0x61) downloading, progress: 38.20 (1205 / 3155 MB)",
         "steamcmd: Update state (0x81) verifying update, progress: 61.24 (1932 / 3155 MB)", "steamcmd: Success! App '2278520' fully installed."]),
@@ -2367,6 +2396,8 @@ if (typeof window !== "undefined") (window as unknown as { __kilnMock?: unknown 
   /** Tasks of `kind` started from now on wait before their last step until `openGate(gate)`; with `fail`, they then
    *  fail with that message. null clears it. */
   holdTasks: (kind: string, hold: { gate: string; fail?: string } | null) => { if (hold) taskHolds.set(kind, hold); else taskHolds.delete(kind); },
+  /** Start and restart tasks from now on name their stages (Task.stage), or not (`false`: a backend before stages). */
+  namedStages: (on: boolean) => { namedStages = on; },
   setOnceBootSnapshot: (profileId: string, s: BootSnapshot | null) => { if (s) onceBootSnapshots.set(profileId, s); else onceBootSnapshots.delete(profileId); },
   setCook: (id: string, cook: { reason?: CookReason | null; fails?: string | null } | null) => {
     if (!cook) { cookMods.delete(id); return; }

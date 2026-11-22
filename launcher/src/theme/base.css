@@ -407,6 +407,9 @@ html[data-covered] .k-app ::-webkit-scrollbar, html[data-covered] [data-deck-scr
   .k-sstats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .k-slinks { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .k-sov-start { flex-direction: column; }
+  /* stacked, the live column keeps its own height (stages, clock, console) and the aside follows it: the page scrolls */
+  .k-sov-start > .k-sov-live { flex: none; }
+  .k-sov-start .k-console-log { min-height: 200px; }
   .k-sov-aside { width: auto; border-left: 0; padding-left: 0; }
 }
 .k-server-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }

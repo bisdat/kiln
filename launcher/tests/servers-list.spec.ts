@@ -54,9 +54,13 @@ test("the list says what runs and what needs an update, and a start shows live i
   await expect(hollow).toContainText("0.2.0-dev.30.2");
   await expect(hollow.getByText("Update", { exact: true })).toBeVisible();
   await expect(frost).toContainText("vps-01 over SSH");
-  await expect(frost).toContainText("0 / 8");
-  // remote: no health, no Kiln update
+  await expect(frost).toContainText("Running");
+  // remote: its status has no players (run::remote_status), so Online says "-"; no health, no Kiln update; it still
+  // stops from here (kilnctl stop over SSH), though its status has no pid
+  await expect(frost.getByRole("cell").nth(2)).toHaveText("-");
+  await expect(frost.getByRole("cell").nth(3)).toHaveText("-");
   await expect(frost.getByRole("button", { name: /Update Kiln/ })).toHaveCount(0);
+  await expect(frost.getByRole("button", { name: "Stop Frostwood" })).toBeEnabled();
   await expect(recent(page)).toHaveCount(4);
   await expect(recent(page).first()).toContainText("Hollow LabStopped by you. Saved in 0.9 s.");
   await expect(recent(page).nth(2)).toContainText("Started in 41 s, Kiln 0.2.0-dev.30.4.");
@@ -166,7 +170,19 @@ test("the ··· menu: Restart, Open the console, Back up now, Update Kiln, Remo
   await row(page, "Frostwood").click({ button: "right" });
   await expect(items).toHaveText(["Restart", "Open the console", "Back up now", "Remove from the launcher"]);
   await items.filter({ hasText: "Open the console" }).click();
-  await expect(page).toHaveURL(/#\/servers\/frostwood\/overview$/);
+  await expect(page).toHaveURL(/#\/servers\/frostwood\/console$/);
+});
+
+test("a running remote server stops from its row (kilnctl stop over SSH)", async ({ page }) => {
+  await open(page);
+  const frost = row(page, "Frostwood");
+  await frost.getByRole("button", { name: "Stop Frostwood" }).click();
+  // a stopped remote server's state is unknown (no endpoint answers); it can start again
+  await expect(frost.getByRole("button", { name: "Start Frostwood" })).toBeEnabled({ timeout: 20_000 });
+  await expect(recent(page).first()).toContainText(/FrostwoodStopped by you/);
+  // the list's Console opens the console page
+  await row(page, "Ember Isles").getByRole("button", { name: "Open the console of Ember Isles" }).click();
+  await expect(page).toHaveURL(/#\/servers\/ember-isles\/console$/);
 });
 
 test("keyboard: Enter opens a row; its buttons and its menu keep their own keys", async ({ page }) => {
@@ -300,6 +316,86 @@ test("a failed install says why, skips the rest, and Back keeps what was typed",
   await expect(back.getByLabel("Folder", { exact: true })).toHaveValue("/home/player/srv/enshrouded/frost-lab");
   await expect(back.getByText("Frost Lab has this id already.")).toBeVisible();
   await expect(recent(page).first()).toContainText(/Frost LabInstall failed after [\d.]+ s: steamcmd: Disk write failure/);
+});
+
+test("a failed install's Try again finishes the half-made server in the same folder", async ({ page }) => {
+  await open(page);
+  await mock(page, "holdTasks", "server_create", { gate: "create-retry", fail: "steamcmd: the connection to Steam was lost" });
+  await mock(page, "openGate", "create-retry");
+  await page.getByRole("button", { name: "New server" }).click();
+  const dlg = page.getByRole("dialog", { name: "New server" });
+  await dlg.getByLabel("Name", { exact: true }).fill("Frost Lab");
+  const dir = dlg.getByLabel("Folder", { exact: true });
+  await dir.fill("/home/player/srv/enshrouded/frost-lab");
+  await dir.press("Enter");
+  await dlg.getByRole("button", { name: "Install", exact: true }).click();
+  const run = page.getByRole("dialog", { name: "Installing Frost Lab" });
+  await expect(run.locator(".k-wiz-progress")).toHaveAttribute("data-state", "failed", { timeout: 20_000 });
+  await expect(run.locator(".k-wiz-error")).toContainText("The launcher now lists frost-lab, half made. Try again finishes it in the same folder");
+  await expect(row(page, "Frost Lab")).toHaveCount(1);
+  await expect(run.getByRole("button", { name: "Back" })).toBeVisible();
+  await mock(page, "holdTasks", "server_create", null);
+  await run.getByRole("button", { name: "Try again" }).click();
+  await expect(run.locator(".k-wiz-progress")).toHaveAttribute("data-state", "done", { timeout: 30_000 });
+  await expect(run.locator(".k-wiz-step")).toHaveClass([/done/, /done/]);
+  // the same server, finished: the first try's instance file was kept (ServerSpec resume)
+  await run.getByRole("button", { name: /Show details/ }).click();
+  await expect(run.locator(".k-sact-lines")).toContainText("frost-lab.toml (kept from the first try)");
+  await run.getByRole("button", { name: "Close" }).click();
+  await expect(row(page, "Frost Lab")).toHaveCount(1);
+  await expect(row(page, "Frost Lab")).toContainText("0.2.0-dev.30.4");
+  await expect(recent(page).first()).toContainText(/Frost LabInstalled with Kiln 0\.2\.0-dev\.30\.4 in [\d.]+ s\./);
+});
+
+test("the wizard checks a name in bytes, and a name without letters for an id gets a made-up id it says so", async ({ page }) => {
+  await open(page);
+  await page.getByRole("button", { name: "New server" }).click();
+  const dlg = page.getByRole("dialog", { name: "New server" });
+  const name = dlg.getByLabel("Name", { exact: true });
+  const install = dlg.getByRole("button", { name: "Install", exact: true });
+  await name.fill("冰霜岛");
+  await expect(dlg.getByLabel("Id", { exact: true })).toHaveValue("server");
+  await expect(dlg.getByText("The name has no letters an id can use, so this one is made up.")).toBeVisible();
+  const dir = dlg.getByLabel("Folder", { exact: true });
+  await dir.fill("/home/player/srv/enshrouded/bingshuang");
+  await dir.press("Enter");
+  await expect(install).toBeEnabled();
+  // 30 characters, 90 bytes: the backend's limit is 64 bytes
+  await name.fill("冰".repeat(30));
+  await expect(dlg.getByText(/Too long: a name has at most 64 bytes/)).toBeVisible();
+  await expect(install).toBeDisabled();
+  await name.fill("冰".repeat(21));
+  await expect(install).toBeEnabled();
+});
+
+test("a server's page: the switcher says each state, the name picker starts at the server and takes arrows; a remote server stops from its head, without a game update", async ({ page }) => {
+  await page.goto("/?servers=3#/servers/hollow-lab/overview");
+  await page.locator(".k-splash").waitFor({ state: "detached" });
+  const sw = page.getByRole("navigation", { name: "Other servers" });
+  await expect(sw.getByRole("link", { name: "Ember Isles, Running" })).toBeVisible({ timeout: 30_000 });
+  await expect(sw.getByRole("link", { name: "Hollow Lab, Stopped" })).toHaveAttribute("aria-current", "page");
+  await expect(sw.getByRole("link", { name: "Frostwood, Running" })).toBeVisible();
+  await page.getByRole("button", { name: "Server: Hollow Lab. Change server." }).click();
+  const pick = page.getByRole("listbox", { name: "Servers" });
+  await expect(pick.getByRole("option", { name: /Hollow Lab/ })).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(pick.getByRole("option", { name: /Frostwood/ })).toBeFocused();
+  await page.keyboard.press("Home");
+  await expect(pick.getByRole("option", { name: /Ember Isles/ })).toBeFocused();
+  await page.keyboard.press("ArrowUp");
+  await expect(pick.getByRole("button", { name: "All servers" })).toBeFocused();
+  await page.keyboard.press("ArrowUp");
+  await expect(pick.getByRole("option", { name: /Frostwood/ })).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/#\/servers\/frostwood\/overview$/);
+  const head = page.locator(".k-server-head");
+  await page.getByRole("button", { name: "More server actions" }).click();
+  await expect(page.getByRole("menuitem", { name: "Remove from the launcher" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Update the game (SteamCMD)" })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await head.getByRole("button", { name: "Stop", exact: true }).click();
+  await expect(head.locator(".k-server-word")).toHaveText("Stopped", { timeout: 20_000 });
+  await expect(head.getByRole("button", { name: "Start", exact: true })).toBeEnabled();
 });
 
 test.describe("at 1280x800 (the Steam Deck and the launcher's default window)", () => {

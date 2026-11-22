@@ -4,7 +4,8 @@
 // are the wizard's steps 2 to 4: the install (server_create: the instance file, the copy, SteamCMD, the config, the
 // Wine prefix), Install Kiln (the deploy step of Update Kiln) and Start, each shown as it runs with its task's lines,
 // like a server's activity panel. Closing the dialog leaves the flow running: the new server's row in the list shows
-// it, and New server opens on it again until it ends. A failed install says why; Back keeps what was typed.
+// it, and New server opens on it again until it ends. A failed install says why; Back keeps what was typed, and Try
+// again installs into the same folder again, finishing the server a failed install left half made.
 import { useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -27,6 +28,24 @@ export const ABSOLUTE = /^(\/|[A-Za-z]:[\\/])/;
 export function idFromName(name: string): string {
   return name.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48).replace(/-+$/, "");
 }
+
+/** The id a name gives: idFromName, or for a name without a letter an id can use ("冰霜岛") the first free "server",
+ *  "server-2", ... (made up, and the wizard says so). "" for an empty name. */
+export function autoId(name: string, servers: { id: string }[]): string {
+  const id = idFromName(name);
+  if (id || !name.trim()) return id;
+  const taken = new Set(servers.map((s) => s.id));
+  for (let n = 1; ; n++) {
+    const c = n === 1 ? "server" : `server-${n}`;
+    if (!taken.has(c)) return c;
+  }
+}
+
+/** How long a name is where the backend counts it (kiln_manage::server::instance::create: 64 bytes of UTF-8). */
+export const NAME_MAX_BYTES = 64;
+export const utf8Bytes = (s: string) => new TextEncoder().encode(s).length;
+/** The name the wizard sends (trimmed) is 1 to 64 bytes. */
+export const nameFits = (name: string) => name.trim().length > 0 && utf8Bytes(name.trim()) <= NAME_MAX_BYTES;
 
 /** The first query port from 15637 (step 2) no server on this PC uses. */
 export function freePort(servers: ServerInstanceX[]): number {
@@ -106,7 +125,9 @@ export function NewServerWizard({ open, onClose, servers, bundles }: { open: boo
   // the checks (the backend's own: kiln_manage::server::instance::create)
   const idOk = SERVER_ID.test(spec.id);
   const idTaken = servers.find((s) => s.id === spec.id);
-  const nameOk = spec.name.trim().length > 0 && spec.name.length <= 64;
+  const nameOk = nameFits(spec.name);
+  const nameLong = utf8Bytes(spec.name.trim()) > NAME_MAX_BYTES;
+  const idMadeUp = !f.idTyped && !!spec.name.trim() && !idFromName(spec.name);
   const dirOk = ABSOLUTE.test(spec.dir);
   const portOk = Number.isInteger(spec.port) && spec.port >= 1024 && spec.port <= 65535;
   const portUser = servers.find((s) => s.kind !== "remote" && (s.port === spec.port || s.queryPort === spec.port));
@@ -148,7 +169,9 @@ export function NewServerWizard({ open, onClose, servers, bundles }: { open: boo
       <Button variant="primary" onClick={openServer}>{t("servers.wizard.open")}</Button>
     </> : atCreate || !failedAt ? <>
       <Button variant="ghost" onClick={close}>{t("common.close")}</Button>
-      <Button variant="primary" onClick={() => setFlowId(null)}>{t("common.back")}</Button>
+      <Button variant={atCreate ? undefined : "primary"} onClick={() => setFlowId(null)}>{t("common.back")}</Button>
+      {/* the install again, into the same folder: a server it left half made is finished (createFlow: resume) */}
+      {atCreate && <Button variant="primary" onClick={() => void retryFlow(qc, showing.serverId)}>{t("servers.activity.tryAgain")}</Button>}
     </> : <>
       <Button variant="ghost" onClick={close}>{t("common.close")}</Button>
       <Button onClick={openServer}>{t("servers.wizard.open")}</Button>
@@ -160,11 +183,11 @@ export function NewServerWizard({ open, onClose, servers, bundles }: { open: boo
       <Stepper flow={showing} plan={{ kiln: showing ? showing.steps.some((s) => s.key === "deploy") : !!kilnV, start: showing ? showing.steps.some((s) => s.key === "start") : f.start }} />
       {showing ? <Progress flow={showing} halfMade={servers.some((s) => s.id === showing.serverId)} /> : (
         <div className="k-wiz-form">
-          <Field label={t("servers.list.name")} hint={spec.name.length > 64 ? undefined : t("servers.list.nameHint")} error={spec.name.length > 64 ? t("servers.wizard.nameLong") : undefined} htmlFor="wiz-name">
-            <TextInput id="wiz-name" data-autofocus value={spec.name} placeholder={t("servers.list.namePlaceholder")}
-              onChange={(e) => { const name = e.target.value; setSpec({ name, ...(f.idTyped ? {} : { id: idFromName(name) }) }); }} />
+          <Field label={t("servers.list.name")} hint={nameLong ? undefined : t("servers.list.nameHint")} error={nameLong ? t("servers.wizard.nameLongBytes") : undefined} htmlFor="wiz-name">
+            <TextInput id="wiz-name" data-autofocus value={spec.name} placeholder={t("servers.list.namePlaceholder")} invalid={nameLong}
+              onChange={(e) => { const name = e.target.value; setSpec({ name, ...(f.idTyped ? {} : { id: autoId(name, servers) }) }); }} />
           </Field>
-          <Field label={t("servers.list.id")} htmlFor="wiz-id" hint={t("servers.list.idHint")}
+          <Field label={t("servers.list.id")} htmlFor="wiz-id" hint={idMadeUp ? t("servers.wizard.idMadeUp") : t("servers.list.idHint")}
             error={spec.id && !idOk ? t("servers.list.idBad") : idTaken ? t("servers.wizard.idTaken", { name: idTaken.name }) : undefined}>
             <TextInput id="wiz-id" mono value={spec.id} placeholder="ember-isles" invalid={!!spec.id && (!idOk || !!idTaken)}
               onChange={(e) => set({ idTyped: e.target.value !== "", spec: { ...spec, id: e.target.value } })} />
@@ -297,7 +320,7 @@ function Progress({ flow, halfMade }: { flow: Flow; halfMade: boolean }) {
         <div className="k-sact-error k-wiz-error">
           <p className="k-wiz-error-at">{t("servers.wizard.failedAt", { step: failedAt?.label ?? "" })}</p>
           <p>{flow.error?.message ?? t("servers.activity.noReason")}</p>
-          {failedAt?.key === "create" && halfMade && <p className="k-muted">{t("servers.wizard.halfMade", { id: flow.serverId })}</p>}
+          {failedAt?.key === "create" && halfMade && <p className="k-muted">{t("servers.wizard.halfMadeRetry", { id: flow.serverId })}</p>}
         </div>
       )}
       {flow.state === "canceled" && <p className="k-wiz-result k-muted">{t("servers.activity.srCanceled", { title: flow.title })}</p>}

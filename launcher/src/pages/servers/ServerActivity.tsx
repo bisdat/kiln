@@ -1,16 +1,17 @@
 // The server's activity panel, under the server head: the flow that runs or just ended (serverActions.ts). While it
 // runs: the title, the time it has taken, its steps (stop, install, start again), the newest line the running step's
 // task reported, and a way to end the step early when it has one (Cancel, or Stop waiting for a start); "Show details"
-// lists every line. When it ends: the result, or why it failed with Try again and the console. A finished flow closes
-// by itself after a while unless its details are open or it failed. Screen readers hear a short summary (the step, the
-// result), not the timers or the log lines.
+// lists every line. When it ends: the result, or why it failed with Try again and the console page. A finished flow
+// closes by itself after a while unless its details are open or it failed. Screen readers hear a short summary (the
+// step, the result), not the timers or the log lines. On Overview a running start is the start view's (its stages);
+// once it ends, it shows here like any other.
 import { useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronDown, ChevronUp, Minus, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button, Cones, IconButton, Spinner, toast } from "../../ui";
 import { useT } from "../../i18n";
-import { cancelStep, elapsed, markShown, retryFlow, useServerFlow, useServerFlows, type FlowKind, type FlowStep } from "./serverActions";
+import { cancelStep, elapsed, markShown, retryFlow, useServerFlow, useServerFlows, type Flow, type FlowKind, type FlowStep } from "./serverActions";
 
 const CLOSE_AFTER_MS = 15_000;
 
@@ -32,7 +33,11 @@ function StepMark({ step }: { step: FlowStep }) {
   return <span className="k-sact-mark idle" aria-hidden><Minus /></span>;
 }
 
-export function ServerActivity({ id, hideKinds }: { id: string; /** flows another view shows (Overview shows a start's stages) */ hideKinds?: FlowKind[] }) {
+/** The panel leaves a running flow of these kinds to another view; once it ends (done, failed with its reason and Try
+ *  again, canceled), the panel shows it. */
+const leaves = (f: Flow, kinds: readonly string[]) => f.state === "running" && kinds.includes(f.kind);
+
+export function ServerActivity({ id, hideKinds }: { id: string; /** running flows another view shows (Overview shows a start's stages) */ hideKinds?: FlowKind[] }) {
   const t = useT();
   const qc = useQueryClient();
   const nav = useNavigate();
@@ -45,7 +50,12 @@ export function ServerActivity({ id, hideKinds }: { id: string; /** flows anothe
   const tick = Math.floor(now / 900);
   const linesRef = useRef<HTMLOListElement>(null);
   const seen = useRef(0);
-  useEffect(() => markShown(id), [id]);
+  // counts as showing the server's flows only when it does (a running start on Overview is the start view's)
+  const hideKey = (hideKinds ?? []).join(" ");
+  useEffect(() => {
+    const kinds = hideKey ? hideKey.split(" ") : [];
+    return markShown(id, (f) => !leaves(f, kinds));
+  }, [id, hideKey]);
   // a finished flow closes by itself unless its details are open or it failed
   useEffect(() => {
     if (!flow || flow.state === "running" || open || flow.state === "failed") return;
@@ -64,7 +74,7 @@ export function ServerActivity({ id, hideKinds }: { id: string; /** flows anothe
     }
     seen.current = all.length;
   }, [all.length, open]);
-  if (!flow || hideKinds?.includes(flow.kind)) return null;
+  if (!flow || leaves(flow, hideKinds ?? [])) return null;
   const took = (flow.endedAt ?? now) - flow.startedAt;
   const step = flow.steps.find((s) => s.state === "running");
   const cur = step ?? [...flow.steps].reverse().find((s) => s.lines.length);
@@ -112,7 +122,7 @@ export function ServerActivity({ id, hideKinds }: { id: string; /** flows anothe
           <p>{flow.error?.message ?? t("servers.activity.noReason")}</p>
           <div className="k-sact-actions">
             <Button size="s" variant="primary" onClick={() => void retryFlow(qc, id)}>{t("servers.activity.tryAgain")}</Button>
-            <Button size="s" onClick={() => nav(`/servers/${encodeURIComponent(id)}/overview`)}>{t("servers.activity.console")}</Button>
+            <Button size="s" onClick={() => nav(`/servers/${encodeURIComponent(id)}/console`)}>{t("servers.activity.console")}</Button>
           </div>
         </div>
       )}

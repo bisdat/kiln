@@ -73,13 +73,16 @@ export interface CreatePlan {
 export function createFlow(qc: QueryClient, plan: CreatePlan): FlowSpec {
   const { spec } = plan;
   const id = spec.id;
+  // Try again (retryFlow runs this step again): the first try may have left the server half made (its instance file is
+  // written first), so every later try finishes it (`resume`: the same id and folder only)
+  let tries = 0;
   return {
     kind: "create",
     title: t("servers.wizard.flowTitle", { name: spec.name }),
     steps: [
       { key: "create", label: spec.reflinkFrom ? (spec.skipSteamcmd ? t("servers.wizard.stepCopyOnly") : t("servers.wizard.stepCopy")) : t("servers.wizard.stepCreate"), cancel: "cancel",
         run: async () => {
-          const task = await api.serverCreate(spec);
+          const task = await api.serverCreate(tries++ ? { ...spec, resume: true } : spec);
           setTimeout(() => qc.invalidateQueries({ queryKey: sk.list }), 400);
           return task;
         } },

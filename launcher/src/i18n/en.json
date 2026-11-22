@@ -2057,6 +2057,7 @@
       "process": "Process",
       "stages": "Start stages",
       "stage": {
+        "stopping": "Stopping",
         "preparing": "Preparing",
         "wine": "Wine",
         "process": "Server process",
@@ -2064,6 +2065,8 @@
         "running": "Running"
       },
       "stageHint": {
+        "stopping": "The world is saved first",
+        "remote": "kilnctl starts it over SSH",
         "preparing": "Checks the folder and Kiln's setup",
         "wine": "The runner and its prefix",
         "process": "enshrouded_server.exe starts",
@@ -2072,6 +2075,12 @@
       },
       "elapsed": "Elapsed",
       "left": "About {left} left. The last start took {last}.",
+      "longer": "Taking longer than the last start ({last}). The console shows what it is doing.",
+      "stoppingFirst": "Stopping first",
+      "stoppingHint": "The restart saves the world and stops the server, then starts it again.",
+      "srStage": "{name} is starting: {stage}.",
+      "srStopping": "{name} is restarting: it stops first.",
+      "stageState": "({state})",
       "noLast": "The first start the launcher times; players can join when it says Running.",
       "whileStarts": "While it starts",
       "can": {
@@ -2538,6 +2547,8 @@
       "live": "live",
       "allServers": "‹ All servers",
       "switch": "Other servers",
+      "switchItem": "{name}, {state}",
+      "unknown": "State unknown",
       "updating": "Updating"
     },
     "recent": {
@@ -2593,7 +2604,8 @@
       "stepCopy": "Copy the game files and check them (SteamCMD)",
       "stepCopyOnly": "Copy the game files",
       "idTaken": "{name} has this id already.",
-      "nameLong": "At most 64 characters.",
+      "nameLongBytes": "Too long: a name has at most 64 bytes (letters beyond A to Z take 2 to 4 each).",
+      "idMadeUp": "The name has no letters an id can use, so this one is made up. Type your own if you like.",
       "folderBad": "An absolute folder: it starts with / (or a drive letter on Windows).",
       "portBad": "A port from 1024 to 65535.",
       "portFree": "Free",
@@ -2616,7 +2628,7 @@
       "readyHint": "All done in {time}. Its page has the console, the settings and the mods.",
       "open": "Open the server",
       "failedAt": "It stopped at: {step}.",
-      "halfMade": "The launcher now lists {id}, half made. Remove it from its ··· menu before you install again with this id, or pick another id."
+      "halfMadeRetry": "The launcher now lists {id}, half made. Try again finishes it in the same folder; or remove it from its ··· menu (its files stay) and install again."
     }
   },
   "play": {

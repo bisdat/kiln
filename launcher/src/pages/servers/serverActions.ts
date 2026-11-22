@@ -35,6 +35,9 @@ export interface FlowStep {
   progress: number | null;
   /** the distinct progress lines the step's task reported, oldest first (at most MAX_LINES) */
   lines: FlowLine[];
+  /** the stages the step's task named (Task.stage: a start's "preparing", "world"...), each with when it began (ms since
+   *  the flow started), oldest first */
+  stages?: { id: string; at: number }[];
   startedAt?: number;
   endedAt?: number;
   phase?: FlowPhase;
@@ -139,15 +142,24 @@ export const useServerFlow = (id: ServerId) => useServerFlows((s) => s.flows[id]
 
 export const flowRunning = (id: ServerId) => useServerFlows.getState().flows[id]?.state === "running";
 
-/** Server pages showing a flow's panel: a flow that ends while none shows it ends with a toast instead. */
-const shown = new Map<ServerId, number>();
-export function markShown(id: ServerId): () => void {
-  shown.set(id, (shown.get(id) ?? 0) + 1);
+/** Server pages showing a flow's panel, each with which flows it shows (Overview's panel leaves a running start to the
+ *  start's own view): a flow that ends while no page shows it, as it ended, ends with a toast instead. */
+const shown = new Map<ServerId, Set<{ shows: (f: Flow) => boolean }>>();
+export function markShown(id: ServerId, shows: (f: Flow) => boolean = () => true): () => void {
+  const mark = { shows };
+  const set = shown.get(id) ?? new Set();
+  set.add(mark);
+  shown.set(id, set);
   return () => {
-    const n = (shown.get(id) ?? 1) - 1;
-    if (n <= 0) shown.delete(id);
-    else shown.set(id, n);
+    set.delete(mark);
+    if (!set.size && shown.get(id) === set) shown.delete(id);
   };
+}
+
+/** A page shows this flow of the server (as it is now). */
+export function isShown(id: ServerId, f: Flow): boolean {
+  for (const m of shown.get(id) ?? []) if (m.shows(f)) return true;
+  return false;
 }
 
 function update(id: ServerId, s: number, f: (flow: Flow) => Flow) {
@@ -163,14 +175,17 @@ function patchStep(id: ServerId, s: number, i: number, p: Partial<FlowStep> | ((
   }));
 }
 
-/** Adds the task's current message to the step's lines (when it is new) and takes its progress. */
+/** Adds the task's current message to the step's lines (when it is new), its stage to the step's stages (when it
+ *  changed) and takes its progress. */
 function follow(id: ServerId, s: number, i: number, t: Task | undefined, t0: number) {
   if (!t) return;
   patchStep(id, s, i, (st) => {
     const msg = (t.state === "failed" ? t.error?.message ?? t.message : t.message)?.trim();
     const last = st.lines[st.lines.length - 1]?.text;
     const lines = msg && msg !== last ? [...st.lines, { at: Date.now() - t0, text: msg }].slice(-MAX_LINES) : st.lines;
-    return lines === st.lines && st.progress === t.progress ? {} : { lines, progress: t.progress };
+    const stage = t.stage ?? null;
+    const stages = stage && stage !== st.stages?.[st.stages.length - 1]?.id ? [...(st.stages ?? []), { id: stage, at: Date.now() - t0 }] : st.stages;
+    return lines === st.lines && stages === st.stages && st.progress === t.progress ? {} : { lines, stages, progress: t.progress };
   });
 }
 
@@ -247,8 +262,9 @@ export async function runFlow<R = unknown>(qc: QueryClient, id: ServerId, spec: 
   }));
   // the Servers list's "Recent" (activityLog.ts): every flow of this launcher that ends, whoever started it
   if (mine) recordFlowEnd(qc, useServerFlows.getState().flows[id]);
-  if (mine && !shown.has(id)) {
-    const detail = useServerFlows.getState().flows[id]?.detail;
+  const ended = useServerFlows.getState().flows[id];
+  if (mine && ended && !isShown(id, ended)) {
+    const detail = ended.detail;
     if (ok) toast.ok(spec.done, detail);
     else if (failed) toast.error(failed, spec.title);
   }

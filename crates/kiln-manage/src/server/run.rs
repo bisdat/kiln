@@ -97,13 +97,8 @@ fn local_status(instance: &ServerInstance, capture: Option<&Path>) -> Result<Ser
     let up = pid.and_then(uptime);
     let state = match pid {
         None => ServerState::Stopped,
-        Some(_) => {
-            // the world runs once the log says so after this process started
-            let log = log_path(instance).ok().and_then(|p| super::game::read_log(&p));
-            let ready = log.as_deref().and_then(super::game::last_state).is_some_and(|s| s.contains("Run"))
-                || log.as_deref().is_some_and(|t| t.contains(super::game::READY));
-            if ready { ServerState::Running } else { ServerState::Starting }
-        }
+        Some(_) if world_runs(instance, dir, started) => ServerState::Running,
+        Some(_) => ServerState::Starting,
     };
     let players = if state == ServerState::Running {
         super::query::query(&format!("127.0.0.1:{}", instance.query_port), Duration::from_millis(600)).ok().map(|q| q.players)
@@ -150,6 +145,30 @@ pub fn installed_kiln(dir: &Path) -> Option<String> {
     (c.kind == crate::pe::ProxyKind::Kiln).then(|| c.version.unwrap_or_else(|| "unknown".into()))
 }
 
+/// Kiln's log in a server folder; Kiln renames the last run's to kiln.prev.log when it starts.
+const KILN_LOG: &str = "kiln/logs/kiln.log";
+
+/// Kiln's own line once the server world ticks (`tick: server world 0x… started (session 1, thread 388)`).
+fn kiln_world_started(log: &str) -> bool {
+    log.lines().any(|l| l.contains("tick: server world") && l.contains(" started"))
+}
+
+/// The world of a running local server runs (the same two signs a start waits for, [`wait_ready`]): the game log says so,
+/// or this run's kiln.log does. Kiln's line can reach disk well before the game flushes its log (on Windows especially),
+/// and a start that ended on it must not read as starting again afterwards. A kiln.log not written since the process
+/// started (`started`; None: unknown) is the last run's and counts for nothing.
+pub(super) fn world_runs(instance: &ServerInstance, dir: &Path, started: Option<SystemTime>) -> bool {
+    let log = log_path(instance).ok().and_then(|p| super::game::read_log(&p));
+    if log.as_deref().and_then(super::game::last_state).is_some_and(|s| s.contains("Run"))
+        || log.as_deref().is_some_and(|t| t.contains(super::game::READY))
+    {
+        return true;
+    }
+    let kiln = dir.join(KILN_LOG);
+    let written = std::fs::metadata(&kiln).and_then(|m| m.modified()).ok();
+    started.zip(written).is_some_and(|(s, w)| w >= s) && super::game::read_log(&kiln).is_some_and(|t| kiln_world_started(&t))
+}
+
 fn remote_status(instance: &ServerInstance) -> Result<ServerStatus> {
     let r = instance.remote.as_ref().ok_or_else(|| Error::invalid("remote server without ssh details"))?;
     let ep = crate::admin::discover::remote_endpoint(r).ok().flatten();
@@ -173,17 +192,26 @@ pub struct StartLogs {
     kiln: LogWatch,
 }
 
-/// Waits for a new readiness line, reporting progress from the game log.
+/// Waits for a new readiness line, reporting progress from the game log. Stage "world" once the process writes a log
+/// (the game's, or Kiln's from inside it): until then the start is at "process", the process spawned and Wine (or
+/// Windows) bringing it up.
 fn wait_ready(instance: &ServerInstance, mut logs: StartLogs, spawned: Instant, progress: &mut dyn Progress, exited: &mut dyn FnMut() -> Option<String>) -> Result<()> {
+    let mut loading = false;
     loop {
         if progress.canceled() {
             return Err(Error::new(ErrorCode::Canceled, "stopped waiting (the server keeps starting)"));
         }
         // Kiln's own readiness line can reach disk before the game flushes its log, especially on Windows.
-        if logs.kiln.poll().is_some_and(|t| t.lines().any(|l| l.contains("tick: server world") && l.contains(" started"))) {
+        let kiln = logs.kiln.poll();
+        if kiln.as_deref().is_some_and(kiln_world_started) {
             return Ok(());
         }
-        if let Some(text) = logs.game.poll() {
+        let game = logs.game.poll();
+        if !loading && [&kiln, &game].into_iter().any(|t| t.as_deref().is_some_and(|t| !t.trim().is_empty())) {
+            loading = true;
+            progress.stage("world");
+        }
+        if let Some(text) = game {
             if text.contains(super::game::READY) {
                 return Ok(());
             }
@@ -207,7 +235,6 @@ pub(super) fn await_start(instance: &ServerInstance, logs: StartLogs, capture: &
                           progress: &mut dyn Progress, exited: &mut dyn FnMut() -> Option<String>) -> Result<ServerStatus> {
     progress.stage("process");
     progress.report(Some(0.02), message);
-    progress.stage("world");
     wait_ready(instance, logs, spawned, progress, exited)?;
     let elapsed = spawned.elapsed();
     let mut status = local_status(instance, Some(capture))?;
@@ -272,10 +299,18 @@ pub fn start_via(dirs: Option<&crate::paths::DataDirs>, instance: &ServerInstanc
     }
     let logs = StartLogs {
         game: LogWatch::new(log_path(instance)?),
-        kiln: LogWatch::new(dir.join("kiln/logs/kiln.log")),
+        kiln: LogWatch::new(dir.join(KILN_LOG)),
     };
-    progress.stage("wine");
+    // the runner and its prefix: only where a Wine runs the server (not a Windows server, nor a Steam install on Windows)
+    if uses_wine(instance.runner) {
+        progress.stage("wine");
+    }
     spawn(instance, logs, &notes, progress)
+}
+
+/// A local start of this runner goes through Wine (the "wine" stage).
+pub fn uses_wine(runner: ServerRunner) -> bool {
+    matches!(runner, ServerRunner::Kilnctl) || (matches!(runner, ServerRunner::Steam) && cfg!(unix))
 }
 
 /// Before a local start of the server folder `dir`: None when its kiln.json asks for no Kiln interpreter

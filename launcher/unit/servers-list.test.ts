@@ -7,8 +7,9 @@ import type { RuntimeBundle, ServerStatus, Task } from "../src/api/commands";
 import { t } from "../src/i18n";
 import { compareKiln, kilnUpdateFor, newestServerBundle, shortKiln } from "../src/pages/servers/kilnUpdate";
 import {
-  ACTIVITY_KEY, ACTIVITY_MAX, activitySentence, entryFromFlow, fmtDuration, readActivity, reloadActivity, stoppedSince, useActivity, type ActivityEntry,
+  ACTIVITY_KEY, ACTIVITY_MAX, activitySentence, entryFromFlow, fmtDuration, readActivity, reloadActivity, stoppedSince, useActivity, validEntry, type ActivityEntry,
 } from "../src/pages/servers/activityLog";
+import { autoId, idFromName, nameFits, utf8Bytes } from "../src/pages/servers/NewServerWizard";
 import { runFlow, useServerFlows, type Flow, type StepSpec } from "../src/pages/servers/serverActions";
 import { listSentence } from "../src/pages/servers/listSay";
 import type { ServerRow } from "../src/pages/servers/serverListCells";
@@ -157,6 +158,49 @@ test("a flow another one took over (Stop during a start) writes no entry of its 
   release();
   await starting;
   expect(useActivity.getState().entries.map((e) => e.kind)).toEqual(["stop"]);
+});
+
+test("entries another version wrote or a hand-edited store left are dropped, every field checked, so Recent always renders", () => {
+  const good = { at: Date.now(), serverId: "hollow-lab", name: "Hollow Lab", kind: "stop", state: "done", ms: 900, steps: ["stop"] };
+  const bad = [
+    { ...good, steps: undefined },                        // missing steps (activitySentence and stoppedSince read it)
+    { ...good, steps: "stop" },
+    { ...good, steps: [1] },
+    { ...good, at: 9e15 },                                 // past what a Date holds (toISOString throws RangeError)
+    { ...good, at: -5 }, { ...good, at: Number.NaN }, { ...good, at: "2026-11-22" },
+    { ...good, kind: "teleport" }, { ...good, state: "maybe" }, { ...good, ms: -1 }, { ...good, ms: "1" },
+    { ...good, serverId: "" }, { ...good, name: 7 }, { ...good, kiln: 1 }, { ...good, reason: {} },
+    null, 3, "x", [],
+  ];
+  g.localStorage!.setItem(ACTIVITY_KEY, JSON.stringify([good, ...bad, { ...good, kind: "deploy", steps: ["stop", "deploy", "start"], kiln: "0.2.0-dev.30.4", from: null }]));
+  const read = readActivity();
+  expect(read).toHaveLength(2);
+  expect(read.map((e) => e.kind)).toEqual(["stop", "deploy"]);
+  expect(bad.some((e) => validEntry(e))).toBe(false);
+  // what is left renders: a sentence and a time each
+  for (const e of read) {
+    expect(activitySentence(e, t)).toBeTruthy();
+    expect(new Date(e.at).toISOString()).toBeTruthy();
+  }
+  expect(stoppedSince(read, "hollow-lab")).toBe(good.at);
+});
+
+test("the wizard checks a name in UTF-8 bytes as the backend does, and a name without an id gets a made-up one", () => {
+  expect(nameFits("Ember Isles")).toBe(true);
+  expect(nameFits("   ")).toBe(false);
+  expect(nameFits("a".repeat(64))).toBe(true);
+  expect(nameFits("a".repeat(65))).toBe(false);
+  // 30 CJK characters: 30 UTF-16 units but 90 bytes; 21 of them are 63 bytes
+  expect(utf8Bytes("冰".repeat(30))).toBe(90);
+  expect(nameFits("冰".repeat(30))).toBe(false);
+  expect(nameFits("冰".repeat(21))).toBe(true);
+  // the trimmed name is what the wizard sends
+  expect(nameFits(` ${"a".repeat(64)} `)).toBe(true);
+  expect(idFromName("冰霜岛")).toBe("");
+  expect(autoId("冰霜岛", [])).toBe("server");
+  expect(autoId("冰霜岛", [{ id: "server" }, { id: "server-2" }])).toBe("server-3");
+  expect(autoId("Ember Isles 2", [{ id: "server" }])).toBe("ember-isles-2");
+  expect(autoId("  ", [])).toBe("");
 });
 
 test("a stopped server's time comes from its last stop, when nothing started it since", () => {

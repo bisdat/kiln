@@ -45,11 +45,31 @@ function storage(): Storage | null {
   }
 }
 
-/** The entries kept in localStorage (none when it is missing or unreadable), newest first. */
+const KINDS: readonly ActivityKind[] = ["start", "stop", "restart", "update", "deploy", "create", "backup", "remove"];
+const STATES: readonly ActivityEntry["state"][] = ["done", "failed", "canceled"];
+/** The largest time a Date holds (ms either side of the epoch). */
+const MAX_TIME = 8.64e15;
+const optText = (v: unknown, orNull = false) => v === undefined || typeof v === "string" || (orNull && v === null);
+
+/** An entry as this launcher writes it, every field checked: what another version wrote, or a hand-edited store, must
+ *  not break the list (a missing `steps` or a time no Date holds threw while it rendered). */
+export function validEntry(e: unknown): e is ActivityEntry {
+  if (!e || typeof e !== "object") return false;
+  const x = e as Record<string, unknown>;
+  return typeof x.at === "number" && Number.isFinite(x.at) && x.at > 0 && x.at <= MAX_TIME
+    && typeof x.serverId === "string" && x.serverId !== ""
+    && KINDS.includes(x.kind as ActivityKind) && STATES.includes(x.state as ActivityEntry["state"])
+    && typeof x.ms === "number" && Number.isFinite(x.ms) && x.ms >= 0
+    && Array.isArray(x.steps) && x.steps.every((s) => typeof s === "string")
+    && optText(x.name) && optText(x.kiln, true) && optText(x.from, true) && optText(x.reason);
+}
+
+/** The entries kept in localStorage (none when it is missing or unreadable), newest first; entries that are not what
+ *  this launcher writes are left out. */
 export function readActivity(): ActivityEntry[] {
   try {
     const v = JSON.parse(storage()?.getItem(ACTIVITY_KEY) ?? "[]");
-    return Array.isArray(v) ? v.filter((e) => e && typeof e.at === "number" && typeof e.serverId === "string" && typeof e.kind === "string").slice(0, ACTIVITY_MAX) : [];
+    return Array.isArray(v) ? v.filter(validEntry).slice(0, ACTIVITY_MAX) : [];
   } catch {
     return [];
   }

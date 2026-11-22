@@ -23,13 +23,24 @@ and the launcher manage the same kilnctl instances; `kilnctl status <id>` and th
 | Stage | What happens |
 |---|---|
 | `preparing` | Check the instance and prepare its active profile when required. |
-| `wine` | Resolve the Wine or Proton runner and prepare its prefix as needed. On native Windows this stage covers launch setup. |
-| `process` | The runner has spawned and the start message includes its PID. |
-| `world` | Wait for the readiness line while reporting game-log progress. |
+| `wine` | Resolve the Wine or Proton runner and prepare its prefix as needed. Only where a Wine runs the server (kilnctl, a Steam install on Linux): a Windows server and a Steam install on Windows skip it. |
+| `process` | The runner has spawned (the start message includes its PID) and the process has written no log yet. |
+| `world` | The process writes its log (the game's, or Kiln's from inside it): wait for the readiness line while reporting game-log progress. |
 | `running` | The server has reported that its world is ready. |
 
 A restart starts with `stopping` and then follows the start stages. An SSH start reports `preparing` before the
 command and `running` when remote `kilnctl start` succeeds.
+
+A start ends on either readiness sign: the game log's `LoadEcsScene to Run`, or Kiln's own
+`tick: server world 0x… started` in `kiln/logs/kiln.log`, which can reach disk well before the game flushes its log.
+`ServerStatus.state` reads both too (kiln.log only when written since the server process started: Kiln renames the
+last run's log when it starts), so a start that ended on Kiln's line does not read as starting again afterwards.
+
+The new-server wizard's Try again sends `server_create` again with `resume: true`: a create that failed half way
+left the server listed (its instance file is written first), and a resumed create finishes that server in the same
+folder (it keeps the instance file and runs the copy, SteamCMD, the config and the prefix again). It is refused for a
+server in another folder, one that runs, and anything a create does not make (a Steam library install, a remote
+server).
 
 `ServerStatus.lastStartS` is the last successful local start's elapsed time from spawn to readiness in whole seconds.
 The launcher writes it atomically to `<state>/<id>.run.start.json` beside the capture log, using the same instance

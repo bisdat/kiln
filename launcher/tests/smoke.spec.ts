@@ -612,6 +612,11 @@ test("seven section tabs per server, and a section's pages as a second row", asy
   await expect(page).toHaveURL(/#\/servers\/lab\/admin\/map$/);
   await page.getByRole("navigation", { name: "World" }).getByRole("link", { name: "Zones" }).click();
   await expect(page).toHaveURL(/#\/servers\/lab\/admin\/zones$/);
+  // on a section's other page its tab is still the current one (and the page's own in the second row)
+  await expect(tabs.getByRole("link", { name: /^World/ })).toHaveAttribute("aria-current", "page");
+  await expect(tabs.locator("[aria-current]")).toHaveCount(1);
+  await expect(page.getByRole("navigation", { name: "World" }).getByRole("link", { name: "Zones" })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("navigation", { name: "World" }).getByRole("link", { name: "Map" })).not.toHaveAttribute("aria-current", /./);
   await tabs.getByRole("link", { name: /^Backups/ }).click();
   await expect(page).toHaveURL(/#\/servers\/lab\/backups$/);
   // old links still land: the merged admin routes redirect; the console has its own page now
@@ -622,6 +627,7 @@ test("seven section tabs per server, and a section's pages as a second row", asy
   await expect(page).toHaveURL(/#\/servers\/lab\/mods$/);
   await open(page, "/servers/lab/ticks");
   await expect(page.getByRole("navigation", { name: "Console" }).getByRole("link", { name: "Tick stats" })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("navigation", { name: "Server" }).getByRole("link", { name: /^Console/ })).toHaveAttribute("aria-current", "page");
 });
 
 test("schema form edits a config value", async ({ page }) => {

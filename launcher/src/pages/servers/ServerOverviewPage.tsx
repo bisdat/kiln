@@ -1,8 +1,10 @@
-// /servers/:id/overview (the Servers redesign, mockup A). While the server starts: the start's five stages as cones
-// (preparing, Wine, server process, loading the world, running), the clock, "about N s left" from the last start, the
-// newest line, the console, and what can still be done meanwhile. Otherwise: the Kiln update when a newer runtime is
-// here, the numbers that matter (players, health, uptime, versions), one line about each section, who is online and
-// the console. Kiln missing from the folder: the Install Kiln banner first.
+// /servers/:id/overview (the Servers redesign, mockup A). While the server starts: the start's stages as cones
+// (preparing, Wine where a Wine runs it, server process, loading the world, running; a restart stops first:
+// startProgress.ts), the clock of the start itself, "about N s left" from the last start (or that it takes longer), the
+// newest line, the console, and what can still be done meanwhile; a start that fails or is canceled shows in the
+// activity panel above. Otherwise: the Kiln update when a newer runtime is here, the numbers that matter (players,
+// health, uptime, versions), one line about each section, who is online and the console. Kiln missing from the folder:
+// the Install Kiln banner first.
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { NavLink, useParams } from "react-router-dom";
@@ -13,28 +15,13 @@ import { Banner, Button, Cone, KeyValue, Sparkline, fmtAgo, useTasks } from "../
 import { useTicks } from "../ticks";
 import { ServerConsole } from "./ServerConsole";
 import { elapsed, useServerFlow, type Flow } from "./serverActions";
+import { startStep, startTrack, startView } from "./startProgress";
 import { hasKiln, runnerLabel, sk, useDeployDialog, useServer, useServerStatus, type ServerModX } from "./serverApi";
 import { kilnUpdateFor, shortKiln } from "./kilnUpdate";
 import { useT } from "../../i18n";
 
-export const START_STAGES = ["preparing", "wine", "process", "world", "running"] as const;
-export type StartStage = (typeof START_STAGES)[number];
-
-/** Which stage a start is in: the task's own stage when the backend names it (Task.stage), else read from its lines
- *  ("creating the Wine prefix", "started ... (wine pid N)", then the game's log lines). -1: not a start. */
-export function startStage(flow: Flow | undefined, task: (Task & { stage?: string | null }) | undefined): number {
-  if (!flow) return -1;
-  if (flow.state === "done") return START_STAGES.length - 1;
-  const step = flow.steps.find((s) => s.key === "start" || s.key === "restart");
-  if (!step || step.state === "pending") return -1;
-  const named = task?.stage ? START_STAGES.indexOf(task.stage as StartStage) : -1;
-  if (named >= 0) return named;
-  const lines = step.lines.map((l) => l.text);
-  const started = lines.findIndex((l) => /^started /i.test(l));
-  if (started >= 0) return started < lines.length - 1 ? 3 : 2;
-  if (lines.some((l) => /wine prefix|wineboot/i.test(l))) return 1;
-  return 0;
-}
+/** Windows (WebView2): a Steam install starts without Wine there. */
+const WIN = typeof navigator !== "undefined" && /Windows/i.test(navigator.userAgent);
 
 export default function ServerOverviewPage() {
   const { id = "" } = useParams();
@@ -60,32 +47,49 @@ function Starting({ id, flow }: { id: string; flow: Flow | undefined }) {
   const st = useServerStatus(id);
   const srv = useServer(id);
   const now = useNow(true);
-  const step = flow?.steps.find((s) => s.key === "start" || s.key === "restart");
-  const task = useTasks((s) => (step?.taskId ? s.tasks[step.taskId] : undefined)) as (Task & { stage?: string | null }) | undefined;
+  const step = startStep(flow);
+  const task = useTasks((s) => (step?.taskId ? s.tasks[step.taskId] : undefined)) as Task | undefined;
+  const s = srv.data;
+  const remote = s?.runner === "remote" || s?.kind === "remote";
+  const track = startTrack({ runner: s?.runner ?? "kilnctl", remote, onWindows: WIN, restart: flow?.kind === "restart" });
+  const last = st.data?.lastStartS ?? null;
   // started outside the launcher (kilnctl, another launcher): only "loading the world" is known
-  const at = flow ? Math.max(0, startStage(flow, task)) : 3;
-  const since = flow?.startedAt ?? (st.data?.uptimeS != null ? now - st.data.uptimeS * 1000 : now);
-  const took = now - since;
-  const last = (st.data as { lastStartS?: number | null } | undefined)?.lastStartS ?? null;
-  const left = last != null ? Math.max(0, Math.round(last - took / 1000)) : null;
+  const v = startView(flow, task, now, { track, lastStartS: last, uptimeS: st.data?.uptimeS });
+  const at = track.indexOf(v.stage);
+  const stopping = v.stage === "stopping";
+  const took = now - v.since;
   const newest = step?.lines[step.lines.length - 1]?.text;
+  const name = s?.name ?? id;
+  const label = (x: string) => t(`servers.overview.stage.${x}`);
+  const hint = (x: string) => t(remote && x === "preparing" ? "servers.overview.stageHint.remote" : `servers.overview.stageHint.${x}`);
   return (
     <div className="k-sov k-sov-start">
+      {/* what screen readers hear: the stage when it changes, not the clock */}
+      <span className="k-sr-only" role="status" aria-live="polite">
+        {stopping ? t("servers.overview.srStopping", { name }) : t("servers.overview.srStage", { name, stage: label(v.stage) })}
+      </span>
       <div className="k-sov-live">
-        <ol className="k-strack" aria-label={t("servers.overview.stages")}>
-          {START_STAGES.map((s, i) => (
-            <li key={s} className={i < at ? "done" : i === at ? "now" : ""} aria-current={i === at ? "step" : undefined}>
-              <Cone state={i < at ? "done" : i === at ? "bend" : ""} />
-              <b>{t(`servers.overview.stage.${s}`)}</b>
-              <span className="d">{t(`servers.overview.stageHint.${s}`)}</span>
-            </li>
-          ))}
+        <ol className="k-strack" aria-label={t("servers.overview.stages")} style={{ gridTemplateColumns: `repeat(${track.length}, minmax(0, 1fr))` }}>
+          {track.map((x, i) => {
+            const state = i < at ? "done" : i === at ? "running" : "pending";
+            return (
+              <li key={x} className={i < at ? "done" : i === at ? "now" : ""} aria-current={i === at ? "step" : undefined} data-stage={x}>
+                <Cone state={i < at ? "done" : i === at ? "bend" : ""} />
+                <b>{label(x)}</b>
+                <span className="k-sr-only"> {t("servers.overview.stageState", { state: t(`servers.activity.step.${state}`) })}</span>
+                <span className="d">{hint(x)}</span>
+              </li>
+            );
+          })}
         </ol>
         <div className="k-sclockrow">
-          <span className="k-sclock" aria-label={t("servers.overview.elapsed")}>{elapsed(took)}</span>
+          <span className="k-sclock" aria-hidden>{elapsed(took)}</span>
           <span className="k-sclock-lab">
-            <b>{t("servers.overview.elapsed")}</b>
-            <span>{left != null ? t("servers.overview.left", { left: elapsed(left * 1000), last: elapsed(last! * 1000) }) : t("servers.overview.noLast")}</span>
+            <b>{stopping ? t("servers.overview.stoppingFirst") : t("servers.overview.elapsed")}</b>
+            <span>{stopping ? t("servers.overview.stoppingHint")
+              : v.over && last != null ? t("servers.overview.longer", { last: elapsed(last * 1000) })
+              : v.left != null && last != null ? t("servers.overview.left", { left: elapsed(v.left * 1000), last: elapsed(last * 1000) })
+              : t("servers.overview.noLast")}</span>
           </span>
         </div>
         {newest && <div className="k-slastline" title={newest}><span>{newest}</span></div>}
@@ -100,8 +104,8 @@ function Starting({ id, flow }: { id: string; flow: Flow | undefined }) {
           <li className="no"><b>{t("servers.overview.can.join")}</b><span>{t("servers.overview.can.joinHint")}</span></li>
         </ul>
         <KeyValue rows={[
-          srv.data && [t("servers.overview.runBy"), runnerLabel(srv.data.runner ?? "kilnctl")],
-          srv.data && [t("servers.overview.port"), <span className="k-mono">UDP {srv.data.queryPort}</span>],
+          s && [t("servers.overview.runBy"), runnerLabel(s.runner ?? "kilnctl")],
+          s && [t("servers.overview.port"), <span className="k-mono">UDP {s.queryPort}</span>],
           (st.data?.installed || st.data?.kiln) && ["Kiln", <span className="k-mono">{st.data?.kiln ?? st.data?.installed}</span>],
         ]} />
       </aside>

@@ -183,7 +183,7 @@ export default function ServersPage() {
       if (!version) return;
       void runFlow(qc, r.srv.id, kilnFlow({ id: r.srv.id, name: r.srv.name, version, running: !!r.st?.pid, from: r.kiln }));
     },
-    console: (r) => nav(`/servers/${enc(r.srv.id)}/overview`),
+    console: (r) => nav(`/servers/${enc(r.srv.id)}/console`),
     remove: (r) => setRemoving(r.srv),
   };
   // Update all: one server after the other (each its own flow, shown in its row)

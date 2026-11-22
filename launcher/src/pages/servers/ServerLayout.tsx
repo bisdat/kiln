@@ -4,8 +4,8 @@
 // labelled menu beside the buttons.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { MoreHorizontal } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { NavLink, Outlet, useLocation, useNavigate, useParams } from "react-router-dom";
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { Link, NavLink, Outlet, useLocation, useNavigate, useParams } from "react-router-dom";
 import { AdminProvider, reconnectAdmin, useAdminState } from "../../api/admin";
 import * as api from "../../api/commands";
 import type { AdminTransport } from "../../api/commands";
@@ -14,6 +14,7 @@ import { SERVER_SECTIONS, serverPlace } from "../../shell/serverNav";
 import { ConfirmHost } from "../../admin/ui";
 import { hasKiln, runnerLabel, sk, useDeployDialog, useServer, useServerEvents, useServers, useServerStatus } from "./serverApi";
 import { flowPhase, runFlow, useServerFlow } from "./serverActions";
+import { flowWord } from "./serverListCells";
 import { kilnFlow, restartFlow, startFlow, stepStart, stepStop, stopServer } from "./serverFlows";
 import { ServerActivity } from "./ServerActivity";
 import { rich, t, useT } from "../../i18n";
@@ -46,26 +47,29 @@ function ServerFrame({ id, live }: { id: string; live: boolean }) {
     <div className="k-page k-page-fill k-server">
       <ServerTop id={id} />
       <ServerHead id={id} live={live} />
+      {/* plain links with the state worked out here: a NavLink drops aria-current on a section's other pages (its own
+          link is not the page then), and the section tab must keep it there */}
       <nav className="k-stabs" aria-label={t("servers.head.navLabel")}>
         {SERVER_SECTIONS.map((sec) => {
           const on = place?.section.id === sec.id;
           return (
-            <NavLink key={sec.id} to={`${base}/${sec.tabs[0].to}`} className={"k-stab" + (on ? " on" : "")} aria-current={on ? "page" : undefined}>
+            <Link key={sec.id} to={`${base}/${sec.tabs[0].to}`} className={"k-stab" + (on ? " on" : "")} aria-current={on ? "page" : undefined}>
               {sec.label}{badge(sec.id)}
-            </NavLink>
+            </Link>
           );
         })}
       </nav>
       {place && place.section.tabs.length > 1 && (
         <nav className="k-stabs-sub" aria-label={place.section.label}>
           {place.section.tabs.map((i) => (
-            <NavLink key={i.to} to={`${base}/${i.to}`} className={"k-stab-sub" + (place.tab.to === i.to ? " on" : "")} aria-current={place.tab.to === i.to ? "page" : undefined}>
+            <Link key={i.to} to={`${base}/${i.to}`} className={"k-stab-sub" + (place.tab.to === i.to ? " on" : "")} aria-current={place.tab.to === i.to ? "page" : undefined}>
               {i.label}
-            </NavLink>
+            </Link>
           ))}
         </nav>
       )}
-      {/* a start shows its stages on Overview itself; every other action (and a start seen from another page) here */}
+      {/* a running start shows its stages on Overview itself; every other action, a start that ended (failed: its reason
+          and Try again) and a start seen from another page show here */}
       <ServerActivity id={id} hideKinds={place?.section.id === "overview" ? ["start", "restart"] : undefined} />
       <div className="k-server-page">
         <Outlet />
@@ -75,7 +79,7 @@ function ServerFrame({ id, live }: { id: string; live: boolean }) {
   );
 }
 
-/** "‹ All servers" and every server with its state's dot (a click opens it, on the same section). */
+/** "‹ All servers" and every server with its state's dot and word (a click opens it, on the same section). */
 function ServerTop({ id }: { id: string }) {
   const t = useT();
   const servers = useServers();
@@ -94,15 +98,24 @@ function ServerTop({ id }: { id: string }) {
   );
 }
 
+/** How often the switcher reads the other servers' status: a dot is no page (the current server's is the page's own). */
+const OTHERS_EVERY = 30_000;
+
 function SwitchDot({ id, name, current, to }: { id: string; name: string; current: boolean; to: string }) {
-  const st = useServerStatus(id);
+  const t = useT();
+  const st = useServerStatus(id, current ? undefined : OTHERS_EVERY);
   const flow = useServerFlow(id);
   const s = st.data?.state;
   const tone = flow?.state === "running" || s === "starting" || s === "stopping" ? "busy" : s === "running" ? "ok" : "idle";
+  // the dot's meaning in words, for screen readers (and a pointer's tooltip)
+  const word = flow?.state === "running" ? flowWord(flow, flow.steps.find((x) => x.state === "running"), t)
+    : s === "running" ? t("servers.list.running") : s === "starting" ? t("servers.list.starting") : s === "stopping" ? t("servers.list.stopping")
+    : s === "stopped" ? t("servers.list.stopped") : s ? t("servers.frame.unknown") : "…";
   return (
-    <NavLink to={to} className={"k-sswitch-item" + (current ? " on" : "")} aria-current={current ? "page" : undefined}>
+    <Link to={to} className={"k-sswitch-item" + (current ? " on" : "")} aria-current={current ? "page" : undefined}
+      aria-label={t("servers.frame.switchItem", { name, state: word })} title={word}>
       <i className={tone} aria-hidden />{name}
-    </NavLink>
+    </Link>
   );
 }
 
@@ -179,10 +192,13 @@ function ServerHead({ id, live }: { id: string; live: boolean }) {
     : shown === "running" ? { word: t("servers.list.running"), tone: "ok" }
     : { word: t("servers.list.stopped"), tone: "idle" };
   // the buttons follow the running step first: Stop stays usable while a start waits for the world
-  const running = phase ? phase === "starting" || (phase === "stopping" && busy !== "stop" && !!st.data?.pid) : state === "running" || state === "starting";
-  const canStop = busy === "start" || (!busy && !!st.data?.pid);
+  // a process here, or a remote server that answers (its status has no pid: kilnctl runs it over there)
+  const up = !!st.data?.pid || (remote && state === "running");
+  const running = phase ? phase === "starting" || (phase === "stopping" && busy !== "stop" && up) : state === "running" || state === "starting";
+  const canStop = busy === "start" || (!busy && up);
   const items: MenuItem[] = [
-    ...(s?.runner !== "steam" ? [{ label: t("servers.head.updateGame"), disabled: !!busy || state === "starting" || state === "stopping", onSelect: updateGame }] : []),
+    // SteamCMD updates a folder on this PC: not a Steam library install (Steam does), not a remote server
+    ...(s?.runner !== "steam" && !remote ? [{ label: t("servers.head.updateGame"), disabled: !!busy || state === "starting" || state === "stopping", onSelect: updateGame }] : []),
     ...(!remote ? [{ label: kiln ? t("servers.head.updateKilnMenu") : t("servers.head.installKilnMenu"), disabled: !!busy || state === "starting" || state === "stopping", onSelect: () => setDeploy(true) }] : []),
     ...(live ? transportItems(id) : []),
     { label: t("servers.head.removeMenu"), danger: true, disabled: !!st.data?.pid || !!busy, onSelect: () => setRemoving(true) },
@@ -267,11 +283,22 @@ function ServerPicker({ current, servers, onClose, onPick }: { current: string; 
     const esc = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     document.addEventListener("mousedown", close);
     document.addEventListener("keydown", esc);
-    ref.current?.querySelector<HTMLElement>(".k-menu-item")?.focus();
+    // the current server first, as a list box does
+    (ref.current?.querySelector<HTMLElement>('.k-menu-item[aria-selected="true"]') ?? ref.current?.querySelector<HTMLElement>(".k-menu-item"))?.focus();
     return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", esc); };
   }, [onClose]);
+  // the arrows (and Home, End) move between the servers and "All servers"
+  const keys = (e: ReactKeyboardEvent) => {
+    const items = [...(ref.current?.querySelectorAll<HTMLElement>(".k-menu-item") ?? [])];
+    const at = items.indexOf(document.activeElement as HTMLElement);
+    const to = e.key === "ArrowDown" ? (at + 1) % items.length : e.key === "ArrowUp" ? (at - 1 + items.length) % items.length
+      : e.key === "Home" ? 0 : e.key === "End" ? items.length - 1 : -1;
+    if (to < 0 || !items.length) return;
+    e.preventDefault();
+    items[to].focus();
+  };
   return (
-    <div ref={ref} className="k-popover" role="listbox" aria-label={t("servers.list.title")} style={{ left: 0, top: 60, width: 320 }}>
+    <div ref={ref} className="k-popover" role="listbox" aria-label={t("servers.list.title")} style={{ left: 0, top: 60, width: 320 }} onKeyDown={keys}>
       {servers.map((s) => (
         <button key={s.id} type="button" role="option" aria-selected={s.id === current} className="k-menu-item" onClick={() => onPick(s.id)}>
           <span style={{ fontWeight: s.id === current ? 700 : 400 }}>{s.name}</span><span className="k-mono">{s.id}</span>

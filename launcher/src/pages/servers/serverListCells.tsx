@@ -154,7 +154,8 @@ export function ActionsCell({ row, act, target }: { row: ServerRow; act: RowActi
   const state = st?.state;
   const moving = state === "starting" || state === "stopping";
   const up = busy === "start" || state === "running" || state === "starting";
-  const canStop = busy === "start" || (!busy && !!st?.pid);
+  // a process here, or a remote server that answers (a remote status has no pid: kilnctl runs it over there)
+  const canStop = busy === "start" || (!busy && (!!st?.pid || (row.remote && state === "running")));
   const canStart = !busy && !moving && !!st && !st.pid;
   const canKiln = !row.remote && !busy && !moving && !!st && !!target && (!!row.update || !row.kiln);
   const quick = row.update && !row.remote ? (
