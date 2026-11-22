@@ -20,7 +20,7 @@ export function useSummaries(values: unknown): Summaries {
   const lang = useLanguage();
   const s = useSettings();
   const info = useAppInfo();
-  const { game } = useGame();
+  const { game, games } = useGame();
   const status = useGameStatus(game?.id);
   const profiles = useProfiles();
   const active = useActiveProfile(game?.id);
@@ -32,7 +32,7 @@ export function useSummaries(values: unknown): Summaries {
   const language = languageName(lang);
   const fire = !info.data?.noWebgl && s.data?.animatedFire !== false;
   const mode = uiModeOf(s.data);
-  const general = [language, fire ? t("settings.summary.fireOn") : t("settings.summary.fireOff"), t("settings.summary.deck", { mode: t(`deck.modeCard.${mode}`) })].join(" · ");
+  const general = [language, fire ? t("settings.summary.fireOn") : t("settings.summary.fireOff"), t(`settings.summary.deck.${mode}`)].join(" · ");
 
   const loadedId = active.data?.profileId ?? null;
   const loaded = loadedId ? profiles.data?.find((p) => p.id === loadedId) : null;
@@ -46,7 +46,9 @@ export function useSummaries(values: unknown): Summaries {
     : installed ? `${gameName} · ${t("settings.summary.kiln", { version: kiln })}` : `${gameName} · ${t("settings.summary.noKiln")}`;
 
   const cap = fpsCapOf(values);
-  const graphics = !game ? t("settings.summary.noGame") : status.data && !installed ? t("settings.summary.noKiln")
+  // only a dedicated server known: graphics are a game client's
+  const serverOnly = !game && games.some((g) => g.kind === "server");
+  const graphics = serverOnly ? t("settings.summary.noClient") : !game ? t("settings.summary.noGame") : status.data && !installed ? t("settings.summary.noKiln")
     : [t(`settings.summary.upscaler.${choiceOf(values as never)}`), cap ? t("settings.summary.cap", { fps: cap }) : t("settings.summary.noCap")].join(" · ");
 
   const updates = dist === "nexus" ? t("settings.summary.nexusBuild") : upd ? updateWords(upd) : "";
@@ -61,7 +63,7 @@ export function useSummaries(values: unknown): Summaries {
       mods: loaded ? t("settings.sections.mods.say", { name: loaded.name }) : t("settings.sections.mods.sayNone"),
       game: !game ? t("settings.sections.game.sayNoGame") : installed ? t("settings.sections.game.say", { version: kiln, game: gameName })
         : t("settings.sections.game.sayNoKiln", { game: gameName }),
-      graphics: game ? t("settings.sections.graphics.say", { game: gameName }) : t("settings.sections.game.sayNoGame"),
+      graphics: game ? t("settings.sections.graphics.say", { game: gameName }) : serverOnly ? t("settings.sections.graphics.sayServer") : t("settings.sections.game.sayNoGame"),
       online: t("settings.sections.online.say"),
       advanced: t("settings.sections.advanced.say"),
     },

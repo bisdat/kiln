@@ -212,10 +212,11 @@ export function AppShell() {
   const ready = minShown && (info.isSuccess || info.isError);
   const isPlay = loc.pathname === "/" || loc.pathname === "";
   stageInput.play = isPlay;
-  // a new page starts over (an error in one does not stay); Settings' sections (/settings/<section>) are one page
+  // a new page starts over (an error in one does not stay); Settings' sections (/settings/<section>) are one page, whose
+  // error still goes when the path changes (another section, or /settings from the main nav)
   const pageKey = loc.pathname.startsWith("/settings/") ? "/settings" : loc.pathname;
   const page = (
-    <RouteErrorBoundary key={pageKey}>
+    <RouteErrorBoundary key={pageKey} resetKey={loc.pathname}>
       <Suspense fallback={<div className="k-page"><Skeleton lines={4} /></div>}><div className="k-route">{outlet}</div></Suspense>
     </RouteErrorBoundary>
   );

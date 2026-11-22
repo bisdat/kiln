@@ -2,7 +2,7 @@
 // a row (its name, at most one line of help with More for the rest, a word such as NEXT START, the control on the
 // right), the marks search puts on what it found. Rows and groups read their words from the search index
 // (./searchIndex.ts), so what search finds is what the row says.
-import { createContext, useContext, useId, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useT } from "../../i18n";
 import { Card } from "../../ui";
 import { groupById, markParts, matchItem, sectionTitle, snippet, type SearchItem, type SectionId, type SettingsCtx } from "./model";
@@ -69,13 +69,34 @@ export interface SettingRowProps {
   testId?: string;
 }
 
+/** The control of a row: the element its label points at, else the control's first part (a group of choices, a field,
+ *  a button). */
+function controlOf(row: HTMLElement, htmlFor?: string): HTMLElement | null {
+  if (htmlFor) return row.querySelector<HTMLElement>(`#${CSS.escape(htmlFor)}`);
+  return row.querySelector<HTMLElement>(".k-st-ctl [role=radiogroup], .k-st-ctl [role=group], .k-st-ctl input, .k-st-ctl select, .k-st-ctl textarea, .k-st-ctl button");
+}
+
 /** One setting: name, one line of help (More opens the rest under it), a tag, the control on the right. */
 export function SettingRow({ id, control, htmlFor, tag, hint, more: moreOwn, moreExtra, wide, testId }: SettingRowProps) {
   const t = useT();
   const v = useSettingsView();
   const [open, setOpen] = useState(false);
   const uid = useId();
+  const row = useRef<HTMLDivElement>(null);
   const item = v.items.get(id);
+  const help = hint !== undefined ? hint : item?.hint;
+  // the control is described by the row's tag and line of help (a screen reader reads them with it). The controls are of
+  // many kinds (a switch, a list, a path picker), so the attribute goes on the element itself, keeping any it has
+  const described = [tag ? `${uid}-tag` : "", help ? `${uid}-hint` : ""].filter(Boolean).join(" ");
+  useEffect(() => {
+    const el = row.current && controlOf(row.current, htmlFor);
+    if (!el) return;
+    const own = new Set([`${uid}-tag`, `${uid}-hint`]);
+    const others = (el.getAttribute("aria-describedby") ?? "").split(/\s+/).filter((x) => x && !own.has(x));
+    const next = [described, ...others].filter(Boolean).join(" ");
+    if (next) el.setAttribute("aria-describedby", next);
+    else el.removeAttribute("aria-describedby");
+  });
   if (!item) return null;
   if (v.hits && !v.hits.has(id)) return null;
   const more = moreOwn ?? item.more;
@@ -83,15 +104,15 @@ export function SettingRow({ id, control, htmlFor, tag, hint, more: moreOwn, mor
   const quote = where?.in === "more" && more && !open ? snippet(more, v.words) : null;
   const Label = htmlFor ? "label" : "span";
   return (
-    <div className={"k-st-row" + (wide ? " wide" : "")} data-setting={id} data-testid={testId}>
+    <div className={"k-st-row" + (wide ? " wide" : "")} data-setting={id} data-testid={testId} ref={row}>
       <div className="k-st-meta">
         <div className="k-st-lab">
           <Label className="k-st-name" htmlFor={htmlFor} id={`${uid}-name`}><Hi text={item.label} /></Label>
-          {tag && <span className="k-st-when">{tag}</span>}
+          {tag && <span className="k-st-when" id={`${uid}-tag`}>{tag}</span>}
         </div>
-        {(hint !== undefined ? hint : item.hint) || more ? (
-          <div className="k-st-hint" id={`${uid}-hint`}>
-            {hint !== undefined ? hint : item.hint ? <Hi text={item.hint} /> : null}
+        {help || more ? (
+          <div className="k-st-hint">
+            {help ? <span id={`${uid}-hint`}>{hint !== undefined ? hint : <Hi text={item.hint!} />}</span> : null}
             {more && <MoreButton open={open} onClick={() => setOpen(!open)} controls={`${uid}-more`} />}
           </div>
         ) : null}
@@ -139,7 +160,7 @@ export function Group({ id, items, hint, more, actions, testId, children }: Grou
   const [open, setOpen] = useState(false);
   const uid = useId();
   const def = groupById(id);
-  if (!def) return null;
+  if (!def || (def.when && !def.when(v.ctx))) return null;
   const hits = v.hits ? items.filter((i) => v.hits!.has(i)) : null;
   if (hits && !hits.length) return null;
   const title = def.title();
@@ -163,7 +184,8 @@ export function Group({ id, items, hint, more, actions, testId, children }: Grou
 export function CardGroup({ id, items, children }: { id: string; items?: string[]; children: ReactNode }) {
   const v = useSettingsView();
   const def = groupById(id);
-  if (!def) return null;
+  // a group this game or build does not have (ShroudForge without a game client): no card, no link in the list
+  if (!def || (def.when && !def.when(v.ctx))) return null;
   if (v.hits && !(items ?? [id]).some((i) => v.hits!.has(i))) return null;
   return (
     <div className="k-st-cardgroup" data-group={id}>

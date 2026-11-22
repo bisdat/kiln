@@ -1,6 +1,10 @@
 // Page scaffolding on the sheet: Page, PageHeader (a blackletter name and one live sentence), titled sections
 // (Card keeps its name and props, but draws no frame: no cards), Panel, Aside, KeyValue facts.
-import type { HTMLAttributes, ReactNode } from "react";
+import { createContext, useContext, type HTMLAttributes, type ReactNode } from "react";
+
+/** The level of a Card's title: 2 on a page; 3 where the page's own sections have an h2 above the cards (Settings: the
+ *  section's title, then its groups). A Panel's title is one below. */
+export const CardLevel = createContext<2 | 3>(2);
 
 export interface CardProps extends Omit<HTMLAttributes<HTMLElement>, "title"> {
   title?: ReactNode;
@@ -16,12 +20,13 @@ export interface CardProps extends Omit<HTMLAttributes<HTMLElement>, "title"> {
 
 /** A titled group on the sheet: small-caps head, the hint beside it, actions on the right. */
 export function Card({ title, sub, actions, footer, glow: _glow, flush: _flush, className, children, ...rest }: CardProps) {
+  const Title = useContext(CardLevel) === 3 ? "h3" : "h2";
   return (
     <section className={["k-card", className].filter(Boolean).join(" ")} {...rest}>
       {(title || sub || actions) && (
         <header className="k-card-head">
           <div className="k-card-titles">
-            {title && <h2 className="k-card-title">{title}</h2>}
+            {title && <Title className="k-card-title">{title}</Title>}
             {sub && <div className="k-card-sub">{sub}</div>}
           </div>
           {actions && <div className="k-card-actions">{actions}</div>}
@@ -42,11 +47,12 @@ export interface PanelProps extends Omit<HTMLAttributes<HTMLElement>, "title"> {
 
 /** A smaller titled group inside a section. */
 export function Panel({ title, actions, className, children, ...rest }: PanelProps) {
+  const Title = useContext(CardLevel) === 3 ? "h4" : "h3";
   return (
     <section className={["k-panel", className].filter(Boolean).join(" ")} {...rest}>
       {(title || actions) && (
         <header className="k-panel-head">
-          {title && <h3 className="k-panel-title">{title}</h3>}
+          {title && <Title className="k-panel-title">{title}</Title>}
           {actions && <div className="k-panel-actions">{actions}</div>}
         </header>
       )}

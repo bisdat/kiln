@@ -4,7 +4,7 @@
 // the search: every row registers its section, group, name, one line of help, More text and a few keywords
 // (pages/settings/searchIndex.ts builds the list in the launcher's language).
 import type { AppInfo, Distribution, LauncherSettings, SchemaSnapshot } from "../../api/commands";
-import { t } from "../../i18n";
+import { hasOwnText, t } from "../../i18n";
 
 export const SECTIONS = ["general", "mods", "game", "graphics", "online", "advanced"] as const;
 export type SectionId = (typeof SECTIONS)[number];
@@ -175,6 +175,24 @@ export function markParts(text: string, words: string[]): { text: string; hit: b
   }
   return out;
 }
+
+/** The More text without what the line above it already says: a More that opens with the line drops it (the rest, its
+ *  first letter upper case); a More that says nothing more is none. */
+export function moreBeyond(hint: string | undefined, more: string | undefined): string | undefined {
+  if (!more) return undefined;
+  const line = (hint ?? "").trim().replace(/[.。!！?？]+$/u, "");
+  const text = more.trim();
+  if (!line) return text;
+  const fl = fold(line), ft = fold(text);
+  // folding keeps the length for nearly every text; where it does not, the More stays as it is
+  if (fl.length !== line.length || ft.length !== text.length || !ft.startsWith(fl)) return text;
+  const rest = text.slice(line.length).replace(/^[\s.,;:。、，；：!！?？]+/u, "");
+  return rest ? rest.charAt(0).toLocaleUpperCase() + rest.slice(1) : undefined;
+}
+
+/** `key`'s text where the language shown has it, else `older`'s (a newer text that replaces an older one shows the older
+ *  one, translated, until a translation has the newer one). */
+export const textOr = (key: string, older: string) => t(hasOwnText(key) ? key : older);
 
 /** A kiln.json key in words, as SchemaForm names a row without a label ("chatHistory": "Chat history"). */
 export function keyWords(path: string): string {

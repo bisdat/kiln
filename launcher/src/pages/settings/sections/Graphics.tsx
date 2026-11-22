@@ -11,13 +11,22 @@ import { AMD_MODES, UPSCALER_CHOICES, amdModeOf, choiceOf, upscalerView } from "
 import { useT } from "../../../i18n";
 import { Banner, Button, EmptyState, ProgressBar, SchemaForm, Select, Skeleton, errorText } from "../../../ui";
 import { useKilnJson } from "../kilnJson";
+import { moreBeyond, textOr } from "../model";
 import { Group, SettingRow, useSettingsView } from "../parts";
 
 export function GraphicsSection() {
   const t = useT();
-  const { game } = useGame();
-  // a dedicated server draws no frames: the section is for a client
-  if (!game || game.kind !== "client") return <EmptyState title={t("settings.noClient")} hint={t("settings.noClientHint")} />;
+  const v = useSettingsView();
+  const { game, games } = useGame();
+  // a dedicated server draws no frames: the section is for a client (the selected game is always one when the launcher
+  // knows one: useGame), so with none, it says what is missing and leads to the list of installs
+  if (!game || game.kind !== "client") {
+    const server = games.some((g) => g.kind === "server");
+    return (
+      <EmptyState title={t(server ? "settings.noClientServer" : "settings.noClient")} hint={t(server ? "settings.noClientServerHint" : "settings.noClientHint")}
+        action={<Button size="s" onClick={() => v.jump("game", "games")}>{t("settings.openGames")}</Button>} />
+    );
+  }
   return <Graphics key={game.id} gameId={game.id} />;
 }
 
@@ -47,7 +56,7 @@ function Graphics({ gameId }: { gameId: GameId }) {
           ))}
         </div>
       )}
-      <Group id="graphics" items={ids} hint={t("settings.groups.graphicsHint")} more={t("settings.graphics.sub")}>
+      <Group id="graphics" items={ids} hint={t("settings.groups.graphicsHint")} more={moreBeyond(t("settings.groups.graphicsHint"), textOr("settings.groups.graphicsMore", "settings.graphics.sub"))}>
         {blocked ?? (shown && (
           <SchemaForm clamp schema={shown} values={doc!.values} errors={doc!.errors.filter((e) => isGraphicsPath(e.path) && !UPSCALER_PATHS.includes(e.path))} disabled={k.busy}
             labels={graphicsLabels()} onChange={(path, value) => k.set.mutate({ path, value })} onReset={(path) => k.reset.mutate(path)} />
@@ -82,7 +91,7 @@ function UpscalerGroup({ values, disabled, onSet, state, aside, files, running }
   const task = offer ? files.task(offer) : undefined;
   const downloading = !!task && (task.state === "running" || task.state === "queued");
   return (
-    <Group id="upscaler" items={["upscaler.choice", "upscaler.amd"]} hint={t("settings.rows.upscalerGroup")} more={t("settings.graphics.upscaler.hint")} testId="upscaler-choice">
+    <Group id="upscaler" items={["upscaler.choice", "upscaler.amd"]} hint={t("settings.rows.upscalerGroup")} more={moreBeyond(t("settings.rows.upscalerGroup"), t("settings.graphics.upscaler.hint"))} testId="upscaler-choice">
       <SettingRow id="upscaler.choice" htmlFor="gfx-upscaler"
         control={<Select style={{ width: 240 }} id="gfx-upscaler" value={choice} disabled={disabled} onChange={(x) => onSet("graphics.upscaler", x)}
           options={UPSCALER_CHOICES.map((x) => ({ value: x, label: t(`settings.graphics.upscaler.choice.${x}`) }))} />} />

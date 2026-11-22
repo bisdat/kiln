@@ -3047,7 +3047,8 @@
       },
       "graphics": {
         "title": "Graphics",
-        "say": "Kiln's frame cap, DLSS settings and upscaler for {game}."
+        "say": "Kiln's frame cap, DLSS settings and upscaler for {game}.",
+        "sayServer": "Graphics settings are for the game, not a dedicated server."
       },
       "online": {
         "title": "Updates & online",
@@ -3061,7 +3062,11 @@
     "summary": {
       "fireOn": "fire on",
       "fireOff": "fire off",
-      "deck": "Deck: {mode}",
+      "deck": {
+        "auto": "Deck mode: auto",
+        "deck": "Deck mode: always",
+        "desktop": "Deck mode: off"
+      },
       "loaded": "{name} loaded",
       "mods": {
         "one": "{count} mod",
@@ -3071,6 +3076,7 @@
       "kiln": "Kiln {version}",
       "noKiln": "Kiln not installed",
       "noGame": "No game found",
+      "noClient": "No game client",
       "upscaler": {
         "game": "Game's FSR 3",
         "amd": "AMD FSR",
@@ -3087,14 +3093,15 @@
       "computer": "On this computer",
       "adding": "Adding and removing mods",
       "kiln": "Kiln in the game",
-      "kilnHint": "Also in the game's Kiln menu (Insert)",
+      "kilnHint": "Also in the game's Kiln menu (Insert).",
       "graphics": "Kiln's graphics tools",
       "graphicsHint": "Also in the game's Kiln menu (Insert), under Graphics.",
+      "graphicsMore": "The frame cap and the readout apply at once, DLSS settings when the game next sets up DLSS, the upscaler when the game next sets up FSR.",
       "updates": "Launcher updates",
       "community": "Discord",
       "sends": "What Kiln sends",
       "drawing": "Drawing the launcher",
-      "drawingHint": "Linux",
+      "drawingHint": "How WebKit draws this window on Linux. A change applies at the next start.",
       "protection": "Protection",
       "steam": "Steam folders",
       "kilnjson": "Kiln's file",
@@ -3104,13 +3111,16 @@
       "languageLauncher": "The launcher's own texts. Applies at once.",
       "languageGame": "Kiln's own menus and messages in the game.",
       "fire": "The fire on Play. Off: a plain Play button.",
+      "fireMore": "It draws with WebGL. Off is easier on weak GPUs.",
       "deck": "Auto opens Deck mode on a Steam Deck.",
       "desktop": "With Kiln's icon in the taskbar and dock.",
       "folderNotes": "Each note shows once, when it is new.",
+      "folderNotesMore": "About folders Kiln left as they are, mod files it kept and your own folders. Off: only a folder that may still run a mod you switched off. Notes above your mods has them all.",
       "dailyUpdates": "Reads your mods' pages. Never installs anything.",
       "typeToConfirm": "Off: removing a mod is one click.",
       "keepVersions": "Per mod, for Roll back in its menu. 0 keeps none.",
-      "games": "The installs the launcher knows",
+      "keepVersionsMore": "At an update, Kiln keeps the mod's earlier version and the settings it had.",
+      "games": "The installs the launcher knows.",
       "addFolder": "A copy of the game Steam does not list.",
       "defaultGame": "The install Play opens with.",
       "savesKeep": "Per game. The oldest goes first.",
@@ -3135,6 +3145,10 @@
     "version": "Launcher {version}",
     "noClient": "No game found",
     "noClientHint": "Graphics are a game client's: add one under Game & Kiln.",
+    "noClientServer": "No game client",
+    "noClientServerHint": "Graphics settings apply to the game itself: a dedicated server draws no frames. Add the game under Game & Kiln.",
+    "openGames": "Open Game & Kiln",
+    "failed": "This section failed",
     "nav": {
       "label": "Settings sections",
       "groups": "Groups of {section}",
@@ -3158,7 +3172,7 @@
         "other": "Change them here, or open one where it lives."
       },
       "none": "Nothing matches “{query}”.",
-      "foot": "Search reads every setting's name, its line of help and its More text, in the launcher's language. Enter opens the first one; Esc clears the search.",
+      "foot": "Search reads every setting's name, its line of help and its More text, in the launcher's language. Enter opens the best match; Esc clears the search.",
       "inMore": "In More:",
       "openIn": "Open in {section}"
     },

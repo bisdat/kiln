@@ -13,7 +13,8 @@ import * as api from "../api/commands";
 import { qk, useAppInfo, useDistribution, useGame, useGameSel, useNexusEnabled, useSettings } from "../api/hooks";
 import { useCrucibleOn } from "../crucible/state";
 import { useLanguage, useT } from "../i18n";
-import { Kbd, Page, Select, WellInput } from "../ui";
+import { RouteErrorBoundary } from "../shell/ErrorBoundary";
+import { Banner, CardLevel, Kbd, Page, Select, WellInput, errorText } from "../ui";
 import { SECTIONS, bestHit, countBySection, groupById, queryWords, resolveAnchor, search, sectionFor, sectionTitle, type SectionId, type SettingsCtx } from "./settings/model";
 import { SettingsViewProvider, type SettingsView } from "./settings/parts";
 import { buildIndex } from "./settings/searchIndex";
@@ -31,6 +32,19 @@ const LAST = "kiln.settings.section";
 const lastSection = () => { try { return sessionStorage.getItem(LAST); } catch { return null; } };
 /** How long a row or group found by a jump stays flushed with ember. */
 const FLUSH_MS = 2000;
+/** What takes the keyboard in a row found by a jump: its control. */
+const CONTROL = ["input", "select", "textarea", "button", "[tabindex]:not([tabindex='-1'])"]
+  .flatMap((c) => [`.k-st-ctl ${c}:not([disabled])`, `.k-sform-control ${c}:not([disabled])`]).join(", ");
+
+/** After a jump the keyboard goes where the eyes go: the row's control (a screen reader reads its name and help), else the
+ *  row itself, the group's heading or the section's title (focusable for this, not in the Tab order). */
+function focusJump(el: HTMLElement) {
+  const row = !!el.dataset.setting || el.classList.contains("k-sform-row");
+  const control = row ? el.querySelector<HTMLElement>(CONTROL) : null;
+  const target = control ?? (row ? el : el.querySelector<HTMLElement>(".k-card-title, .k-st-title") ?? el);
+  if (!control && !target.hasAttribute("tabindex")) target.tabIndex = -1;
+  target.focus({ preventScroll: true });
+}
 
 const BODIES: Record<SectionId, () => JSX.Element> = {
   general: GeneralSection, mods: ModsSection, game: GameSection, graphics: GraphicsSection, online: OnlineSection, advanced: AdvancedSection,
@@ -71,6 +85,7 @@ export default function SettingsPage() {
   const searching = words.length > 0;
   const sums = useSummaries(ctx.values);
   const info = useAppInfo();
+  const settings = useSettings();
 
   const main = useRef<HTMLDivElement>(null);
   const box = useRef<HTMLInputElement>(null);
@@ -93,13 +108,18 @@ export default function SettingsPage() {
   // a new section starts at its top
   useLayoutEffect(() => { if (main.current) main.current.scrollTop = 0; }, [section, searching]);
 
-  // find the jump's target (it may still be loading), scroll to it, flush it
+  // the placed jump's timers (placing it once more, the flush's end): they outlive the jump, which is over once placed
+  const after = useRef<number[]>([]);
+  const clearAfter = () => { for (const id of after.current) clearTimeout(id); after.current = []; };
+  useEffect(() => clearAfter, []);
+
+  // find the jump's target (it may still be loading, or its section still coming), scroll to it, flush it, give it the
+  // keyboard. Then the jump is over (flash null), so another section, a search or Esc later never finds it again.
   useEffect(() => {
-    if (!flash || searching) return;
+    if (!flash) return;
     const root = main.current;
     if (!root) return;
-    let tries = 0, done = false;
-    let timer = 0, unflush = 0;
+    let tries = 0, timer = 0;
     const find = () => {
       if (!flash.target) return root.querySelector<HTMLElement>(".k-st-head");
       // a kiln.json entry: SchemaForm's row of the control sf-<path>
@@ -115,22 +135,29 @@ export default function SettingsPage() {
       root.scrollTop += r.top - box.top - off;
     };
     const go = () => {
-      if (done) return;
       const el = find();
-      if (!el) { if (tries++ < 60) timer = window.setTimeout(go, 50); return; }
-      done = true;
+      if (!el) {
+        if (tries++ < 60) timer = window.setTimeout(go, 50);
+        else setFlash(null); // not there (a row this game does not have): the jump is over
+        return;
+      }
+      setFlash(null);
+      clearAfter();
       place(el);
+      focusJump(el);
       if (!flash.target) return;
       el.classList.remove("k-st-flush");
       void el.offsetWidth;
       el.classList.add("k-st-flush");
-      // what loads above it can push it down: place it once more
-      timer = window.setTimeout(() => place(el), 350);
-      unflush = window.setTimeout(() => el.classList.remove("k-st-flush"), FLUSH_MS);
+      // what loads above it can push it down: place it once more (unless a search or another section took its place)
+      after.current.push(
+        window.setTimeout(() => { if (el.isConnected) place(el); }, 350),
+        window.setTimeout(() => el.classList.remove("k-st-flush"), FLUSH_MS),
+      );
     };
     go();
-    return () => { done = true; clearTimeout(timer); clearTimeout(unflush); };
-  }, [flash, searching, section]);
+    return () => clearTimeout(timer);
+  }, [flash]);
 
   // Ctrl+F (Cmd+F) finds a setting while Settings is open
   useEffect(() => {
@@ -190,6 +217,9 @@ export default function SettingsPage() {
     : hits.length ? [t("settings.search.found", { count: hits.length, query: q.trim() }), hitSections.length === 1 && t("settings.search.allIn", { section: sectionTitle(hitSections[0]) }),
       t("settings.search.change", { count: hits.length })].filter(Boolean).join(" ")
     : t("settings.search.none", { query: q.trim() });
+  // the launcher's settings did not read: the rows that need them are gone or switched off, and this says why (Graphics
+  // has none of them)
+  const unavailable = !settings.data && settings.isError && (searching || section !== "graphics");
 
   return (
     <Page fill className="k-settings">
@@ -237,17 +267,28 @@ export default function SettingsPage() {
             <header className="k-st-head">
               <div className="k-st-head-text">
                 <h2 className="k-st-title">{searching ? t("settings.search.title") : sectionTitle(section)}</h2>
-                {say && <p className="k-st-say" role={searching ? "status" : undefined}>{say}</p>}
+                {say && <p className="k-st-say">{say}</p>}
+                {/* mounted all the time, so a screen reader hears each new count of a search */}
+                <p className="k-sr-only" role="status" data-testid="settings-search-status">{searching ? say : ""}</p>
               </div>
               {!searching && (section === "game" || section === "graphics") && <GamePicker />}
             </header>
             <div className="k-st-body">
-              {searching ? (
-                <>
-                  {hitSections.map((s) => { const B = BODIES[s]; return <B key={s} />; })}
-                  <p className="k-st-searchfoot">{t("settings.search.foot")}</p>
-                </>
-              ) : <Body />}
+              {unavailable && (
+                <Banner tone="err" title={t("settings.launcher.unavailable")}>
+                  <span data-testid="settings-unavailable">{errorText(settings.error)}</span>
+                </Banner>
+              )}
+              {/* the groups are h3 under the section's h2; a section that fails shows why in its place, and the list
+                  of sections stays (another section, or the same one again, starts over) */}
+              <CardLevel.Provider value={3}>
+                {searching ? (
+                  <>
+                    {hitSections.map((s) => { const B = BODIES[s]; return <RouteErrorBoundary key={s} inline title={t("settings.failed")}><B /></RouteErrorBoundary>; })}
+                    <p className="k-st-searchfoot">{t("settings.search.foot")}</p>
+                  </>
+                ) : <RouteErrorBoundary key={section} inline title={t("settings.failed")}><Body /></RouteErrorBoundary>}
+              </CardLevel.Provider>
             </div>
           </div>
         </div>

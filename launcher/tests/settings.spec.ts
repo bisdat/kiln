@@ -34,7 +34,7 @@ test("six sections with a live line each; one shows at a time with its groups as
   for (const [, name] of SECTIONS) await expect(nav(page).getByRole("link", { name, exact: true })).toBeVisible();
   await expect(nav(page).getByRole("link", { name: "General", exact: true })).toHaveAttribute("aria-current", "page");
   // the live lines: what each section is set to
-  await expect(nav(page).locator('[data-section="general"] .k-st-sec-line')).toHaveText("English · fire on · Deck: Auto");
+  await expect(nav(page).locator('[data-section="general"] .k-st-sec-line')).toHaveText("English · fire on · Deck mode: auto");
   await expect(nav(page).locator('[data-section="mods"] .k-st-sec-line')).toHaveText("Ember run loaded · 14 mods");
   await expect(nav(page).locator('[data-section="game"] .k-st-sec-line')).toContainText("Enshrouded · Kiln 0.2.0");
   await expect(nav(page).locator('[data-section="graphics"] .k-st-sec-line')).toHaveText("Game's FSR 3 · no frame cap");
@@ -113,12 +113,13 @@ test("search: hits by section with counts, a change in place, Open in, Enter jum
   const fire = page.locator('[data-setting="fire"]');
   await expect(fire.locator(".k-st-quote")).toContainText("easier on weak GPUs");
   await expect(nav(page).locator('[data-section="general"] .k-st-count')).toHaveText("1");
-  // Open in General: the section, the row in view, flushed with ember
+  // Open in General: the section, the row in view, flushed with ember, its switch with the keyboard (the link is gone)
   await page.getByRole("button", { name: "Open in General" }).click();
   await expect(heading(page)).toHaveText("General");
   await expect(box(page)).toHaveValue("");
   await expect(page.locator('[data-setting="fire"]')).toHaveClass(/k-st-flush/);
-  // Enter opens the first hit, in its section, and flushes its row; the flush goes after 2 s
+  await expect(page.locator("#st-fire")).toBeFocused();
+  // Enter opens the best hit, in its section, and flushes its row; the flush goes after 2 s
   await box(page).fill("http modpacks");
   await expect(nav(page).locator('[data-section="advanced"] .k-st-count')).toHaveText("1");
   await box(page).press("Enter");
@@ -126,6 +127,8 @@ test("search: hits by section with counts, a change in place, Open in, Enter jum
   const row = page.locator('[data-setting="httpModpacks"]');
   await expect(row).toHaveClass(/k-st-flush/);
   await expect.poll(() => inView(page, row)).toBe(true);
+  // the keyboard is on the row's switch: a screen reader reads its name and help, not the search box again
+  await expect(page.locator("#st-http-modpacks")).toBeFocused();
   await expect(row).not.toHaveClass(/k-st-flush/, { timeout: 4000 });
   // Enter prefers a hit by its name ("Upscaler"), not the first in the page (Readout's help names the upscaler)
   await box(page).fill("upscaler");
@@ -223,6 +226,139 @@ for (const [w, h] of [[1280, 800], [1024, 640]] as const) {
     await expect(nav(page).locator(".k-st-sec-line").first()).toBeVisible({ visible: w > 1100 });
   });
 }
+
+test("a jump is over once it lands: leaving the section and coming back, or a new search and Esc, do not jump again", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const top = () => page.locator(".k-st-main").evaluate((el) => el.scrollTop);
+  await open(page, "/settings#library");
+  const library = page.locator('[data-group="library"]');
+  await expect(library).toHaveClass(/k-st-flush/);
+  await expect.poll(top).toBeGreaterThan(0);
+  await expect(library).not.toHaveClass(/k-st-flush/, { timeout: 4000 });
+  await nav(page).getByRole("link", { name: "Graphics", exact: true }).click();
+  await expect(heading(page)).toHaveText("Graphics");
+  await page.waitForTimeout(400);
+  await nav(page).getByRole("link", { name: "Mods & profiles", exact: true }).click();
+  await expect(heading(page)).toHaveText("Mods & profiles");
+  await page.waitForTimeout(700);
+  expect(await top()).toBe(0);
+  await expect(library).not.toHaveClass(/k-st-flush/);
+  // a search's Enter lands on its row; a new search cleared with Esc leaves the column where it is
+  await box(page).fill("http modpacks");
+  await box(page).press("Enter");
+  const row = page.locator('[data-setting="httpModpacks"]');
+  await expect(row).toHaveClass(/k-st-flush/);
+  await expect(row).not.toHaveClass(/k-st-flush/, { timeout: 4000 });
+  await page.locator(".k-st-main").evaluate((el) => { el.scrollTop = 0; });
+  await box(page).fill("fire");
+  await expect(heading(page)).toHaveText("Search");
+  await box(page).press("Escape");
+  await expect(heading(page)).toHaveText("Advanced");
+  await page.waitForTimeout(700);
+  await expect(row).not.toHaveClass(/k-st-flush/);
+  expect(await top()).toBe(0);
+});
+
+test("a section that throws shows why in its place: the list of sections stays, another section works", async ({ page }) => {
+  // a kiln.json comment that is not text: Game & Kiln's form throws, nothing else does
+  await open(page, "/");
+  const doc = await page.evaluate(async () => (await import("/src/api/commands.ts")).configKilnRead("client-steam"));
+  (doc.schema!.entries.find((e) => e.path === "ui.scale") as unknown as { comment: unknown }).comment = 12345;
+  await page.addInitScript((d) => {
+    (window as unknown as { __kilnMockPlans: unknown }).__kilnMockPlans = { config_kiln_read: Array.from({ length: 60 }, () => ({ result: d })) };
+  }, doc);
+  await open(page, "/settings/game", "?section-throws");
+  await expect(heading(page)).toHaveText("Game & Kiln");
+  const failed = page.getByTestId("section-failed");
+  await expect(failed).toContainText("This section failed");
+  await expect(failed.getByRole("button", { name: "Try again" })).toBeVisible();
+  // the list is still there and works: General shows, without the error
+  await nav(page).getByRole("link", { name: "General", exact: true }).click();
+  await expect(heading(page)).toHaveText("General");
+  await expect(failed).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Language" })).toBeVisible();
+  // the failing section again: its notice, the list around it
+  await nav(page).getByRole("link", { name: "Game & Kiln", exact: true }).click();
+  await expect(failed).toBeVisible();
+  await expect(nav(page).getByRole("link")).toHaveCount(6);
+  // and another section after it shows whole
+  await nav(page).getByRole("link", { name: "Advanced", exact: true }).click();
+  await expect(heading(page)).toHaveText("Advanced");
+  await expect(failed).toHaveCount(0);
+});
+
+test("a row's help and tag describe its control, the search count is announced, groups are h3 under the section's h2", async ({ page }) => {
+  await open(page, "/settings/advanced");
+  await expect(page.locator("#st-sandbox")).toHaveAccessibleDescription(/^next start\s+Keep it on unless the window will not open\.$/);
+  await expect(page.locator("#st-http-modpacks")).toHaveAccessibleDescription("Off: https only.");
+  // a kiln.json entry's control: its comment
+  await nav(page).getByRole("link", { name: "Graphics", exact: true }).click();
+  await expect(page.locator("#sf-graphics-readout")).toHaveAccessibleDescription(/readout in a corner of the game/);
+  await expect(page.getByRole("heading", { level: 2, name: "Graphics" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 3, name: "Kiln's graphics tools" })).toBeVisible();
+  await expect(page.locator(".k-st-body h2")).toHaveCount(0);
+  // a whole card's group (Profiles) has an h3 too, and its anchor gives that heading the keyboard
+  await open(page, "/settings#profiles");
+  const profiles = page.getByRole("heading", { level: 3, name: "Profiles", exact: true });
+  await expect(profiles).toBeVisible();
+  await expect(profiles).toBeFocused();
+  // the status region is there before a search, and says each count
+  const status = page.getByTestId("settings-search-status");
+  await expect(status).toHaveAttribute("role", "status");
+  await expect(status).toHaveText("");
+  await box(page).fill("http modpacks");
+  await expect(status).toContainText("1 setting matches “http modpacks”.");
+  await box(page).fill("zzzz nothing");
+  await expect(status).toHaveText("Nothing matches “zzzz nothing”.");
+  await box(page).press("Escape");
+  await expect(status).toHaveText("");
+});
+
+test("only a dedicated server known: Graphics says it is for the game and leads to the installs; no ShroudForge group", async ({ page }) => {
+  const server = {
+    id: "server-dedicated", kind: "server", path: "/srv/enshrouded-server", exe: "enshrouded_server.exe", appId: 2278520, library: null, platform: "proton",
+    prefix: null, buildId: null, exeSha256: null, steamFlavor: null, pathMode: "z", source: "manual",
+  };
+  await page.addInitScript((s) => {
+    (window as unknown as { __kilnMockPlans: unknown }).__kilnMockPlans = {
+      game_list: Array.from({ length: 80 }, () => ({ result: [s] })), game_detect: Array.from({ length: 10 }, () => ({ result: [s] })),
+    };
+  }, server);
+  await open(page, "/settings/graphics");
+  await expect(heading(page)).toHaveText("Graphics");
+  await expect(page.locator(".k-st-body")).toContainText("No game client");
+  await expect(page.locator(".k-st-body")).toContainText("a dedicated server draws no frames");
+  await expect(page.locator(".k-st-body")).not.toContainText("No game found");
+  await expect(nav(page).locator('[data-section="graphics"] .k-st-sec-line')).toHaveText("No game client");
+  await page.getByRole("button", { name: "Open Game & Kiln" }).click();
+  await expect(heading(page)).toHaveText("Game & Kiln");
+  await expect(page.locator('[data-group="games"]')).toHaveClass(/k-st-flush/);
+  await expect(page.getByTestId("game-row-server-dedicated")).toBeVisible();
+  // ShroudForge is a game client's: no card, no link to an empty one
+  await expect(page.locator('[data-group="shroudforge"]')).toHaveCount(0);
+  await expect(nav(page).getByRole("button", { name: "ShroudForge" })).toHaveCount(0);
+});
+
+test("launcher settings that do not read say so above the section", async ({ page }) => {
+  await page.addInitScript(() => {
+    (window as unknown as { __kilnMockPlans: unknown }).__kilnMockPlans = {
+      app_settings_get: Array.from({ length: 80 }, () => ({ error: { code: "io", message: "settings.json: permission denied" } })),
+    };
+  });
+  await open(page, "/settings/mods");
+  const note = page.getByTestId("settings-unavailable");
+  await expect(note).toHaveText("settings.json: permission denied", { timeout: 20_000 });
+  await expect(page.locator(".k-st-body .k-banner")).toContainText("Settings unavailable");
+  await nav(page).getByRole("link", { name: "Game & Kiln", exact: true }).click();
+  await expect(note).toBeVisible();
+  // Graphics has no launcher setting: nothing to say there
+  await nav(page).getByRole("link", { name: "Graphics", exact: true }).click();
+  await expect(heading(page)).toHaveText("Graphics");
+  await expect(note).toHaveCount(0);
+  // Updates: no skeleton for ever
+  await nav(page).getByRole("link", { name: "Updates & online", exact: true }).click();
+  await expect(page.locator('[data-group="updates"]')).toContainText("Settings unavailable");
+});
 
 test("screenshots of each section at 1440×900 and 1280×800", async ({ page }) => {
   const dir = process.env.SETTINGS_SHOTS;

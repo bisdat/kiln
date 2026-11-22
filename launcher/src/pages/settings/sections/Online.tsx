@@ -59,6 +59,8 @@ function SelfUpdates() {
     onSuccess: (v) => { if (v) api.updateStatus().then((x) => useUpdateStore.getState().setStatus(x)).catch(() => {}); },
   });
   const items = ["updates.auto", "updates.channel", "updates.state"];
+  // the launcher's settings did not read (the section's banner says why): no rows, rather than a skeleton for ever
+  if (!settings.data && settings.isError) return <Group id="updates" items={items}><span className="k-hint k-st-note">{t("settings.launcher.unavailable")}</span></Group>;
   if (!s || !settings.data) return <Group id="updates" items={items}><Skeleton /></Group>;
   const v = settings.data;
   const busy = check.busy || s.phase === "checking" || s.phase === "downloading";

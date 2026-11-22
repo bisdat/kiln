@@ -7,7 +7,7 @@ import { t } from "../../i18n";
 import { graphicsLabels, isGraphicsPath, UPSCALER_PATHS } from "../../components/GraphicsSettings";
 import { isShroudForgePath } from "../../components/ShroudForgeSettings";
 import { choiceOf } from "../../components/upscalerStatus";
-import { keyWords, type SearchItem, type SectionId, type SettingsCtx } from "./model";
+import { keyWords, moreBeyond, textOr, type SearchItem, type SectionId, type SettingsCtx } from "./model";
 
 /** kiln.json entries of Game & Kiln > Kiln in the game (the rest but language, graphics and ShroudForge: Advanced). */
 export const KILN_GAME_PATHS = ["ui.look", "ui.theme", "ui.background", "ui.scale", "ui.chatHistory", "ui.chatCompletion", "ui.outlines"];
@@ -112,8 +112,9 @@ const UPSCALING = ["FSR", "FSR 3", "FSR 4", "XeSS", "AMD", "Intel", "upscaling",
 /** Every search item the page has now. */
 export function buildIndex(c: SettingsCtx): SearchItem[] {
   const out: SearchItem[] = [];
+  // More holds what the line does not say: a More that opens with the line keeps only the rest
   const add = (section: SectionId, group: string, id: string, label: string, hint?: string, more?: string, words?: string[]) =>
-    out.push({ id, section, group, label, hint, more, words });
+    out.push({ id, section, group, label, hint, more: moreBeyond(hint, more), words });
   const info = c.info;
   const join = (...xs: (string | false | null | undefined)[]) => xs.filter(Boolean).join(" · ");
 
@@ -121,7 +122,7 @@ export function buildIndex(c: SettingsCtx): SearchItem[] {
   add("general", "language", "language.launcher", t("languageSettings.launcher"), t("settings.rows.languageLauncher"), t("languageSettings.launcherHint"), ["language", "translation"]);
   add("general", "language", "language.game", t("languageSettings.game"), t("settings.rows.languageGame"), t("languageSettings.gameHint"), ["language", "ui.language"]);
   const forced = !!info?.noWebgl;
-  add("general", "look", "fire", t("settings.appearance.fire"), forced ? fireOff(info) : t("settings.rows.fire"), forced ? undefined : t("settings.appearance.fireHint"), ["WebGL", "animation"]);
+  add("general", "look", "fire", t("settings.appearance.fire"), forced ? fireOff(info) : t("settings.rows.fire"), forced ? undefined : textOr("settings.rows.fireMore", "settings.appearance.fireHint"), ["WebGL", "animation"]);
   add("general", "deck", "deck.startIn", t("deck.modeCard.startIn"), t("settings.rows.deck"), deckLine(info), ["Steam Deck", "Deck mode", "desktop", "SteamOS"]);
   if (info?.desktop) add("general", "computer", "desktop", t("settings.appearance.desktop"), t("settings.rows.desktop"), desktopHint(info.desktop), ["AppImage", "icon", "taskbar"]);
 
@@ -130,13 +131,13 @@ export function buildIndex(c: SettingsCtx): SearchItem[] {
     join(t("profilesSettings.saveAs"), t("profilesSettings.noProfile"), t("profilesSettings.noProfileSub"), t("profilesSettings.rename"), t("profilesSettings.folders")));
   if (c.crucible) add("mods", "crucible", "crucible", t("crucible.profiles.cardTitle"), t("crucible.profiles.cardSub"), undefined, ["Crucible", "pack", "modpack"]);
   add("mods", "adding", "addToActive", t("settings.launcher.addToActive"), t("settings.launcher.addToActiveHint"));
-  add("mods", "adding", "folderNotes", t("settings.launcher.folderNotes"), t("settings.rows.folderNotes"), t("settings.launcher.folderNotesHint"));
+  add("mods", "adding", "folderNotes", t("settings.launcher.folderNotes"), t("settings.rows.folderNotes"), textOr("settings.rows.folderNotesMore", "settings.launcher.folderNotesHint"));
   add("mods", "adding", "dailyUpdates", t("settings.launcher.dailyUpdates"), t("settings.rows.dailyUpdates"),
     t(c.nexus ? "settings.launcher.dailyUpdatesHint" : "settings.launcher.dailyUpdatesHintNoNexus"));
   add("mods", "adding", "typeToConfirm", t("settings.typeToConfirm"), t("settings.rows.typeToConfirm"), t("settings.typeToConfirmHint"), ["remove", "confirm"]);
   add("mods", "library", "library", t("librarySettings.title"), t("librarySettings.sub"),
     join(t("librarySettings.hint"), t("librarySettings.cleanUp"), t("librarySettings.dataFolder"), t("librarySettings.keptVersions")), ["data folder", "disk", "storage"]);
-  add("mods", "library", "keepVersions", t("settings.launcher.keepVersions"), t("settings.rows.keepVersions"), t("settings.launcher.keepVersionsHint"), ["roll back", "rollback"]);
+  add("mods", "library", "keepVersions", t("settings.launcher.keepVersions"), t("settings.rows.keepVersions"), textOr("settings.rows.keepVersionsMore", "settings.launcher.keepVersionsHint"), ["roll back", "rollback"]);
 
   // Game & Kiln
   add("game", "games", "games.list", t("settings.games.title"), t("settings.rows.games"), t("settings.games.forgetMessage"), [t("settings.games.detect"), t("settings.games.forget"), "Steam", "install"]);
