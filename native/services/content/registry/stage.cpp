@@ -4,7 +4,9 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <iterator>
 
+#include "services/kiln_caps.h"
 #include "../../../core/src/services/boot_gamedata.h"
 #include "schema_ir.h"
 
@@ -26,6 +28,23 @@ std::string lc(std::string s) {
 std::string sha_hex(const std::string& s) { return kiln::boot_gd::hex_of(kiln::boot_gd::sha256(s)); }
 
 const char* applies_word(Applies a) { return a == Applies::Now ? "now" : a == Applies::WorldLoad ? "worldLoad" : "restart"; }
+
+static_assert(std::size(gen::kRegistries) + std::size(gen::kFields) < KILN_CAP_OWNER_MAX);
+
+// In increasing order of registry coverage. A registry is available if any of its fields is verified here.
+enum class CapCoverage { WrongSide, Unmapped, Unverified, Verified };
+
+const char* only_side(gen::Side side) {
+    if (side == gen::Side::Client) return "client";
+    if (side == gen::Side::Server) return "server";
+    return nullptr;
+}
+
+std::string field_cap_name(const std::string& prefix, const char* path) {
+    std::string name = prefix + "." + path;
+    for (size_t pos = name.find("[]"); pos != std::string::npos; pos = name.find("[]", pos)) name.erase(pos, 2);
+    return name;
+}
 
 // ---- the decoded base in the cache: values with their kinds kept ----
 json value_out(const Value& v) {
@@ -310,6 +329,57 @@ struct Runner::Impl {
         for (const std::string& e : rm_errs) log(1, "registry: regmap: " + e);
         return true;
     }
+
+    void report_caps() {
+        if (!env.report_cap) return;
+        const bool verified_build = rm.has_build && rm.build.verified;
+        auto publish = [&](const std::string& name, CapCoverage coverage, const std::string& detail) {
+            const char* status = "unmapped on this game build";
+            uint32_t reason = KILN_CAP_REASON_SYMBOL_MISSING;
+            switch (coverage) {
+                case CapCoverage::WrongSide:
+                    status = "wrong side";
+                    reason = KILN_CAP_REASON_WRONG_SIDE;
+                    break;
+                case CapCoverage::Unmapped:
+                    break;
+                case CapCoverage::Unverified:
+                    status = verified_build ? "unverified mapping on this game build" : "unverified regmap record for this game build";
+                    if (!verified_build) reason = KILN_CAP_REASON_POLICY;
+                    break;
+                case CapCoverage::Verified:
+                    status = "mapped and verified";
+                    reason = KILN_CAP_REASON_NONE;
+                    break;
+            }
+            const uint32_t state = reason == KILN_CAP_REASON_NONE ? KILN_CAP_AVAILABLE : KILN_CAP_UNAVAILABLE;
+            const KilnResult rc = env.report_cap(name, state, reason, std::string(status) + "; " + detail);
+            if (rc != KILN_OK) log(1, "registry: capability " + name + " could not be reported (rc " + std::to_string(rc) + ")");
+        };
+        for (const auto& reg : gen::kRegistries) {
+            const std::string prefix = std::string("registry.") + reg.name;
+            CapCoverage best = CapCoverage::WrongSide;
+            size_t verified_fields = 0;
+            for (size_t i = reg.first; i < reg.first + reg.count; ++i) {
+                const auto& f = gen::kFields[i];
+                std::string detail = std::string("applies: ") + applies_word(schema_detail::applies_of(f.applies));
+                CapCoverage coverage = CapCoverage::WrongSide;
+                const char* side = only_side(f.side);
+                if (side && env.side != side) {
+                    detail += std::string("; ") + side + " only";
+                } else {
+                    std::string edit_reason;
+                    const auto mapping = rm.mapping(reg.name, f.path, &edit_reason);
+                    coverage = mapping == map::Mapping::Mapped ? CapCoverage::Verified :
+                               mapping == map::Mapping::Unproven ? CapCoverage::Unverified : CapCoverage::Unmapped;
+                }
+                if (coverage == CapCoverage::Verified) ++verified_fields;
+                best = std::max(best, coverage);
+                publish(field_cap_name(prefix, f.path), coverage, detail);
+            }
+            publish(prefix, best, std::to_string(verified_fields) + " of " + std::to_string(reg.count) + " fields verified on this side");
+        }
+    }
 };
 
 Runner::Runner(Env env) : d_(std::make_unique<Impl>()) { d_->env = std::move(env); }
@@ -460,8 +530,10 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn) {
         d.stage_thread = std::this_thread::get_id();
         d.stage_thread_set = true;
         phase_.store(Phase::Add);
+        d.load_regmap();
     }
-    d.load_regmap();
+    // Reports can invoke capability subscribers synchronously, so keep the stage mutex out of the call.
+    d.report_caps();
     if (mode_.load() == Mode::OnBoot)
         d.log(1, "registry: stage mode onBoot was asked (option A); this build runs the stage at resources-ready: a kiln-backend start's committed "
                  "view lists no resources and the boot snapshot is older than the start, so the base cannot be read before the entry point yet");

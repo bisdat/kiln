@@ -10,6 +10,7 @@
 #include <cstring>
 #include <stdexcept>
 
+#include "services/kiln_caps.h"
 #include "../registry/boot_hooks.h"
 #include "../registry/schema_ir.h"
 #include "../registry/stage.h"
@@ -42,6 +43,88 @@ KilnAssetKey key_of(const std::string& guid, const std::string& type) {
 }
 const char* kBalance = "82706b40-61b1-4b8f-8b23-dcec6971bda1";
 const std::string kExe = "f0d824be7fcd48ebfe2458ff5c28da26060c2074e3ec1fcac587e5a1d508aeb2";
+const std::string kClientExe = "5d9ef2f140b8ed49e30dbee655841b89d08baec20f799a1817e171a18a850c77";
+
+void registry_caps(const std::string& dir) {
+    struct Row {
+        uint32_t state, reason;
+        std::string detail;
+    };
+    using Rows = std::map<std::string, Row>;
+    constexpr std::string_view name_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._/-";
+    auto run = [&](const std::string& side, const std::string& exe,
+                   const std::function<void(map::RegMap&)>& adjust = {}) {
+        Rows rows;
+        stage::Env e;
+        e.side = side;
+        e.exe_sha256 = exe;
+        unsigned loads = 0;
+        e.regmap = [&](map::RegMap* rm, std::vector<std::string>* errs) {
+            ++loads;
+            const bool ok = map::load_dir(dir, side, exe, rm, errs);
+            if (adjust) adjust(*rm);
+            return ok;
+        };
+        e.report_cap = [&](const std::string& name, uint32_t state, uint32_t reason, const std::string& detail) {
+            check(loads == 1, "reports use the loaded regmap");
+            check(!name.empty() && name.size() <= KILN_CAP_NAME_MAX && name.find_first_not_of(name_chars) == std::string::npos,
+                  "valid kiln.caps name: " + name);
+            check(rows.size() < KILN_CAP_OWNER_MAX, "fits kiln.caps owner limit");
+            check(rows.emplace(name, Row{state, reason, detail}).second, "row reported once: " + name);
+            return KILN_OK;
+        };
+        stage::Runner runner(std::move(e));
+        // Schema queries can load the regmap before resources-ready.
+        if (side == "server" && exe == kExe) runner.schema_json();
+        runner.run({});
+        runner.run({});
+        check(rows.size() == std::size(gen::kRegistries) + std::size(gen::kFields), "one capability per registry and field");
+        return rows;
+    };
+    const auto server = run("server", kExe);
+    for (const auto& r : gen::kRegistries)
+        check(server.at(std::string("registry.") + r.name).state == KILN_CAP_AVAILABLE, "verified registry: " + std::string(r.name));
+    for (const auto& f : gen::kFields) {
+        std::string path = f.path;
+        if (const auto pos = path.find("[]"); pos != std::string::npos) path.erase(pos, 2);
+        const auto& row = server.at(std::string("registry.") + f.registry + "." + path);
+        const char* applies = f.applies == gen::Applies::Now ? "now" : f.applies == gen::Applies::WorldLoad ? "worldLoad" : "restart";
+        check(row.detail.find(std::string("applies: ") + applies) != std::string::npos, "schema applies in " + path + " detail");
+    }
+    auto expect = [&](const Rows& rows, const char* name, uint32_t reason, const char* detail) {
+        const Row& row = rows.at(name);
+        check(row.state == (reason == KILN_CAP_REASON_NONE ? KILN_CAP_AVAILABLE : KILN_CAP_UNAVAILABLE) &&
+                  row.reason == reason && row.detail.find(detail) != std::string::npos,
+              std::string(name) + " reports " + detail + ": " + row.detail);
+    };
+    expect(server, "registry.items.power", KILN_CAP_REASON_NONE, "applies: now");
+    expect(server, "registry.items.maxStack", KILN_CAP_REASON_NONE, "applies: worldLoad");
+    expect(server, "registry.balance.levelCap", KILN_CAP_REASON_NONE, "applies: restart");
+    expect(server, "registry.recipes.inputs.count", KILN_CAP_REASON_NONE, "applies: now");
+    expect(server, "registry.items.block", KILN_CAP_REASON_SYMBOL_MISSING, "unverified");
+    expect(server, "registry.recipes.unlock", KILN_CAP_REASON_WRONG_SIDE, "client");
+
+    const auto client = run("client", kClientExe);
+    expect(client, "registry.recipes.unlock", KILN_CAP_REASON_NONE, "applies: now");
+    const auto missing_client_unlock = run("client", kClientExe, [](map::RegMap& rm) {
+        rm.build.rows.erase("recipes.unlock");
+    });
+    expect(missing_client_unlock, "registry.recipes.unlock", KILN_CAP_REASON_SYMBOL_MISSING, "unmapped");
+
+    const auto unknown = run("server", std::string(64, '0'));
+    expect(unknown, "registry.items", KILN_CAP_REASON_POLICY, "unverified");
+    expect(unknown, "registry.items.power", KILN_CAP_REASON_POLICY, "unverified");
+    const auto unverified_build = run("server", kExe, [](map::RegMap& rm) { rm.build.verified = false; });
+    expect(unverified_build, "registry.items.power", KILN_CAP_REASON_POLICY, "unverified");
+    const auto incomplete = run("server", kExe, [](map::RegMap& rm) {
+        rm.build.rows["items.power"] = map::BuildRow::Changed;
+        rm.registries.erase("balance");
+    });
+    expect(incomplete, "registry.items.power", KILN_CAP_REASON_SYMBOL_MISSING, "unmapped");
+    expect(incomplete, "registry.items", KILN_CAP_REASON_NONE, "verified");
+    expect(incomplete, "registry.balance", KILN_CAP_REASON_SYMBOL_MISSING, "unmapped");
+    expect(incomplete, "registry.balance.levelCap", KILN_CAP_REASON_SYMBOL_MISSING, "unmapped");
+}
 
 struct TreeView final : kiln::boot_view::BaseView {
     std::map<std::string, json> values;
@@ -309,7 +392,8 @@ int main(int argc, char** argv) {
     const std::string dir = argc > 1 ? argv[1] : "regmap";
     int failed = 0;
     const std::pair<const char*, std::function<void()>> groups[] = {
-        {"one_start", [&] { one_start(dir); }}, {"host_order_and_code", [&] { host_order_and_code(dir); }}, {"id_table_without_content", [&] { id_table_without_content(dir); }}, {"bridge_write", [] { bridge_write(); }}};
+        {"one_start", [&] { one_start(dir); }}, {"host_order_and_code", [&] { host_order_and_code(dir); }}, {"id_table_without_content", [&] { id_table_without_content(dir); }}, {"bridge_write", [] { bridge_write(); }},
+        {"registry_caps", [&] { registry_caps(dir); }}};
     for (const auto& [name, fn] : groups) {
         try {
             fn();

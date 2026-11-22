@@ -34,6 +34,35 @@ matched. `schema/registry/ids.lock.json` keeps every field's contract and every 
 The per-registry pages are generated from `schema/registry/<registry>.json` by `tools/registrygen/registrygen.py`; edit
 the schema, never the page.
 
+## Capabilities
+
+At resources-ready, the registry stage loads the regmap and reports `registry.<name>` for each registry and
+`registry.<name>.<field>` for each schema field. A field is available when its mapping is verified for the running
+executable and the field applies to this side. A registry is available when at least one of its fields is available.
+Check the field you need with `Capabilities.Is("registry.items.power")` or use `Capabilities.Get` to read its reason
+and detail. The detail includes the field's `applies` value even when the field is unavailable. The host resolves
+manifest features before the stage, so use these rows in runtime checks after resources-ready.
+[Capability states and reasons](../../services/caps.md#rows-added-in-dev31)
+
+Capability names preserve the field's case and dots and omit the `[]` list marker. Use the schema path in edits and
+the capability name when querying `Capabilities`.
+
+| Capability name | Schema field path |
+|---|---|
+| `registry.recipes.inputs.item` | `recipes.inputs[].item` |
+| `registry.recipes.inputs.category` | `recipes.inputs[].category` |
+| `registry.recipes.inputs.count` | `recipes.inputs[].count` |
+| `registry.recipes.outputs.item` | `recipes.outputs[].item` |
+| `registry.recipes.outputs.count` | `recipes.outputs[].count` |
+| `registry.drops.entries.item` | `drops.entries[].item` |
+| `registry.drops.entries.count.min` | `drops.entries[].count.min` |
+| `registry.drops.entries.count.max` | `drops.entries[].count.max` |
+| `registry.drops.entries.chance` | `drops.entries[].chance` |
+| `registry.drops.entries.weight` | `drops.entries[].weight` |
+| `registry.balance.buildzoneSizesPerAltarLevel.x` | `balance.buildzoneSizesPerAltarLevel[].x` |
+| `registry.balance.buildzoneSizesPerAltarLevel.y` | `balance.buildzoneSizesPerAltarLevel[].y` |
+| `registry.balance.buildzoneSizesPerAltarLevel.z` | `balance.buildzoneSizesPerAltarLevel[].z` |
+
 ## When an edit takes effect: applies
 
 Every field of every registry says when an edit of it takes effect, in the schema, on the C# property
