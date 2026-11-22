@@ -92,6 +92,16 @@ int main() {
     controllers.disconnect(0, record);
     controllers.disconnect(0, record);
     check(releases == 3, "disconnect: an already disconnected controller emits no duplicate release");
+    Controllers reentrant;
+    int callbacks = 0;
+    std::puts("reentrant poll fixture: a raw subscriber queries the same controller");
+    std::fflush(stdout);
+    reentrant.step(0, 0x1000, [&](uint32_t, bool down, uint32_t) {
+        callbacks++;
+        reentrant.step(0, 0x1000, [&](uint32_t, bool, uint32_t) { callbacks++; return true; });
+        return down;
+    });
+    check(callbacks == 1, "reentrant poll: no deadlock or duplicate edge when a raw subscriber polls again");
     std::printf("%d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }

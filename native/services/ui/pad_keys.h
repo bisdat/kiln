@@ -45,6 +45,7 @@ struct Tracker {
     uint32_t step(uint32_t now, Fn&& fn) {
         now &= kButtons;
         const uint32_t changed = now ^ prev;
+        prev = now; // publish the edge before a raw subscriber can re-poll this same controller
         for (uint32_t i = 0; i < 18; ++i) {  // releases first
             const uint32_t bit = 1u << i;
             if (!(changed & bit) || (now & bit)) continue;
@@ -57,7 +58,6 @@ struct Tracker {
                 if (!(changed & bit) || !(now & bit) || is_modifier_bit(bit) != (pass == 0)) continue;
                 if (fn(kVkFirst + i, true, mods_of(now & ~bit))) kept |= bit;
             }
-        prev = now;
         return kept;
     }
 };
@@ -65,7 +65,7 @@ struct Tracker {
 // XInput may poll one controller from several threads. Its edges and kept buttons belong to the controller,
 // not to a polling thread; serialize its synchronous consumption decisions as well as its state transitions.
 class Controllers {
-    struct State { std::mutex mu; Tracker tracker; } states_[4];
+    struct State { std::recursive_mutex mu; Tracker tracker; } states_[4];
 public:
     template <class Fn> uint32_t step(uint32_t user, uint32_t now, Fn&& fn) {
         if (user >= 4) return 0;
