@@ -314,6 +314,25 @@ void below_registry_and_cycles() {
     check(at(F2) != 0 && at(F3) != 0, "a cycle ends (bounded depth)");
 }
 
+// review nit: an evaluated layer that reads another field of its entry (a formula) is evaluated again when another layer of
+// that field changes (a code layer on the level), without store_mark_evals
+void entry_change_re_evaluates() {
+    fresh();
+    LayerEval ev = [](const uint8_t* below, uint8_t n, uint8_t* out, std::string*) {
+        uint8_t other[4];
+        store_effective(F2, 4, other);
+        std::memcpy(out, below, n);
+        out[0] = static_cast<uint8_t>(below[0] + other[0]);
+        return true;
+    };
+    store_put_eval(REG, registry_seq(1), 1, 1, 0, -1, F1, 4, std::move(ev), "x");
+    flush();
+    check(at(F1) == 20, "10 + 10");
+    put(CODE, next_code_seq(), F2, 5);  // another field of the same entry (kind 1, id 1) changes
+    flush();
+    check(at(F1) == 15, "evaluated again: 10 + 5 (now " + std::to_string(at(F1)) + ")");
+}
+
 // a world reset forgets skipped writes and other writers
 void reset_forgets() {
     fresh();
@@ -360,6 +379,7 @@ int main() {
         {"old_paths_unchanged", old_paths_unchanged},
         {"mark_evals_re_evaluates", mark_evals_re_evaluates},
         {"below_registry_and_cycles", below_registry_and_cycles},
+        {"entry_change_re_evaluates", entry_change_re_evaluates},
         {"reset_forgets", reset_forgets},
         {"rollback_reads_folded_values", rollback_reads_folded_values},
     };

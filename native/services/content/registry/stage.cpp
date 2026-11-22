@@ -487,16 +487,14 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn) {
         if (!side_ok) why = "the mod is for the " + f.side + " side, this is the " + d.env.side;
         else if (d.meta.order_source == "kiln.host" && !loaded.count(f.mod)) why = "Kiln.Host did not load the mod on this side (not in its load order)";
         if (!why.empty()) {
-            skipped.push_back({f.mod, f.rel, Stage::Alter, 0, f.rel + ": " + why + "; its registry section was not applied", ""});
-            d.log(1, "registry: mod " + f.mod + ": " + f.rel + ": " + why + "; its registry section was not applied");
+            skipped.push_back({f.mod, f.rel, Stage::Alter, 0, f.rel + ": " + why + "; its registry section was not applied", ""});  // kiln.log: report_log
             continue;
         }
         ModInput& in = by_mod[f.mod];
         in.id = f.mod;
         if (versions[f.mod].empty()) versions[f.mod] = f.version;
         if (!f.error.empty()) {
-            in.refused.push_back({f.mod, f.rel, Stage::Alter, 0, f.rel + ": " + f.error + "; nothing of this file's registry section was applied", ""});
-            d.log(1, "registry: mod " + f.mod + ": " + f.rel + ": " + f.error + "; nothing of its registry section was applied");
+            in.refused.push_back({f.mod, f.rel, Stage::Alter, 0, f.rel + ": " + f.error + "; nothing of this file's registry section was applied", ""});  // kiln.log: report_log
         }
         for (Batch& b : f.batches) in.batches.push_back(std::move(b));
         in.refused.insert(in.refused.end(), f.refused.begin(), f.refused.end());
@@ -751,8 +749,7 @@ void Runner::finish(const std::vector<BootOutcome>& outcomes) {
                     d.result.refused.push_back(x);
                     d.outside.push_back(x);
                 }
-            d.log(1, "registry: " + o.field.text() + " was not written: " + o.why);
-            d.result.fields.erase(fo);
+            d.result.fields.erase(fo);  // kiln.log names the refusal (report_log)
         }
         d.counts.refused = static_cast<uint32_t>(d.result.refused.size());
         d.boot_fields.clear();

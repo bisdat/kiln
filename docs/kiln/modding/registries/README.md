@@ -10,8 +10,9 @@ Registries hold **data only**. Services and events (Kiln.Content, Kiln.Items, Ki
 registry replaces raw data paths, not services.
 
 **Status in this release: experimental (`KILNX031`), schema version 0.1.0.** The schemas, the generated C# types (`Kiln.Registry`), the field
-catalog (`Kiln.Registry.RegistrySchema`) and these pages ship; the registry stage that reads a data pack's `registry`
-section and runs `Mod.OnRegistry` comes in a later release. Until a registry is marked stable its shape may change in any
+catalog (`Kiln.Registry.RegistrySchema`) and these pages ship, and the registry stage reads a data pack's `registry` section at
+start (fields that apply now or at world load also follow a pack's hot reload). Entry add and remove are refused, each with
+its reason in kiln.log and registry.json, until their back-end ships; `Mod.OnRegistry` (C#) comes in a later release. Until a registry is marked stable its shape may change in any
 release; from API 1.0.0 the stable registries' contract is frozen (additive only).
 
 **Versions.** Experimental schemas are 0.x; a schema reaches 1.0.0 when it is frozen with API 1.0.0. Within one breaking

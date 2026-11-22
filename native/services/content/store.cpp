@@ -41,6 +41,11 @@ std::vector<SkippedRaw> g_skipped;
 
 bool excluded(const Slot& s, const Layer& l) { return s.foreign && is_registry_seq(l.seq); }
 
+// The slots holding an evaluated layer, by the entry they belong to: a formula's layer reads its entry's other fields, so
+// another layer put on or taken off one of them flushes (evaluates) the entry's evaluated slots again.
+std::map<std::pair<uint32_t, uint32_t>, std::set<uintptr_t>> g_evals;
+void mark_entry_evals(uint32_t kind, uint32_t id, uintptr_t except);
+
 // The bytes the layers give, in seq order: a plain layer's bytes replace the value, an evaluated layer computes it from the
 // value below (and keeps the result in its bytes, for conflicts and reports). Registry layers of a foreign slot are left out.
 // below_registry: only the layers under the registry band (what a registry layer's value is computed over).
@@ -275,7 +280,19 @@ bool put_layer(KilnOwner owner, uint64_t seq, uint32_t kind, uint32_t id, int32_
     if (is_registry_seq(seq)) s.registry = true;
     else s.old_changed = true;
     mark(addr, s);
+    if (l->eval) g_evals[{s.kind, s.id}].insert(addr);
+    else mark_entry_evals(s.kind, s.id, addr);
     return true;
+}
+
+void mark_entry_evals(uint32_t kind, uint32_t id, uintptr_t except) {
+    const auto it = g_evals.find({kind, id});
+    if (it == g_evals.end()) return;
+    for (uintptr_t a : it->second) {
+        if (a == except) continue;
+        const auto s = g_slots.find(a);
+        if (s != g_slots.end()) mark(a, s->second);
+    }
 }
 }  // namespace
 
@@ -344,6 +361,7 @@ bool store_drop(KilnOwner owner, uintptr_t addr) {
     std::erase_if(ls, [&](const Layer& x) { return x.owner == owner; });
     if (ls.size() == before) return false;
     mark(addr, it->second);
+    mark_entry_evals(it->second.kind, it->second.id, addr);
     return true;
 }
 
@@ -358,6 +376,7 @@ uint32_t store_drop_owner(KilnOwner owner) {
         std::erase_if(s.layers, [&](const Layer& x) { return x.owner == owner; });
         if (s.layers.size() != before) {
             mark(addr, s);
+            mark_entry_evals(s.kind, s.id, addr);
             ++n;
         }
     }
@@ -393,6 +412,7 @@ uint32_t store_reset(bool revert, std::string* error) {
     g_dirty.clear();
     g_txns.clear();
     g_skipped.clear();
+    g_evals.clear();
     return n;
 }
 
@@ -744,7 +764,6 @@ std::vector<StoreSkipped> store_skipped() {
         x.addr = r.addr, x.kind = r.kind, x.id = r.id, x.mod = r.mod, x.source = r.source, x.revert = r.revert;
         x.what = slot_what(s, &field, &f);
         x.text = x.what + " was written by another writer after Kiln's layer: Kiln's " + (r.revert ? "revert" : "edit") + " not applied";
-        if (!r.mod.empty()) x.text += " (" + r.mod + ")";
         out.push_back(std::move(x));
     }
     return out;
