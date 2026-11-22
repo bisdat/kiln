@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <vector>
 
 namespace kui {
 bool drawing = false;
@@ -240,6 +241,36 @@ int main() {
     field_frame(small, sizeof small, 0);
     CHECK(std::strcmp(small, "ab\xc3\xa9") == 0);
     click_away(small, sizeof small, 0);
+
+    // ---- a capacity that grows while the field is active (review S4, the reviewer's repro): ImGui sized its own copy of
+    // the text when the field was activated, so typing past that size would write past its buffer. The slot keeps the
+    // activation's capacity until the field lets go of the keyboard; the next activation takes the new one. ----
+    std::vector<char> big(4097, 0);
+    click_field(big.data(), 8, 0);
+    CHECK(ImGui::GetActiveID() != 0);
+    const int activated = GImGui->InputTextState.TextA.Size;
+    for (int i = 0; i < 64; ++i) {
+        io.AddInputCharacter('a' + (i % 26));
+        field_frame(big.data(), big.size(), 0);
+    }
+    CHECK(GImGui->InputTextState.TextA.Size == activated);
+    CHECK(GImGui->InputTextState.TextLen <= activated - 1);
+    CHECK(std::strlen(big.data()) == 7);  // the capacity at activation, 8 bytes with the NUL
+    click_away(big.data(), big.size(), 0);
+    click_field(big.data(), big.size(), 0);  // activated again: the whole new capacity
+    io.AddInputCharactersUTF8("xyz");
+    field_frame(big.data(), big.size(), 0);
+    CHECK(std::strlen(big.data()) == 10);
+    click_away(big.data(), big.size(), 0);
+    // a capacity that shrinks while active is ImGui's own bound: never more than it is given
+    std::memset(big.data(), 0, big.size());
+    click_field(big.data(), 64, 0);
+    for (int i = 0; i < 20; ++i) {
+        io.AddInputCharacter('k');
+        field_frame(big.data(), 6, 0);
+    }
+    CHECK(std::strlen(big.data()) <= 5);
+    click_away(big.data(), 6, 0);
 
     // ---- no buffer: false, nothing drawn into ----
     begin_frame();

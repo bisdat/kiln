@@ -21,13 +21,26 @@ uint32_t KILN_CALL t_item_state() {
     if (ImGui::IsItemEdited()) s |= KUI_ITEM_EDITED;
     return s;
 }
+// ImGui sizes its own copy of a field's text once, when the field is activated (InputTextState::TextA = buf_size + 1), and
+// bounds what it inserts by each frame's buf_size: a capacity that grows while the field has the keyboard would let typed
+// bytes land past that copy. While this field is the active one, keep the capacity it was activated with; it gets the new
+// one when it is activated again. A smaller capacity is ImGui's own bound.
+size_t active_text_cap(const char* label, size_t cap) {
+    const ImGuiContext& g = *GImGui;
+    const ImGuiID id = ImGui::GetID(label);
+    if (id != 0 && g.ActiveId == id && g.InputTextState.ID == id && g.InputTextState.TextA.Size > 0)
+        cap = std::min(cap, static_cast<size_t>(g.InputTextState.TextA.Size - 1));
+    return cap;
+}
 bool KILN_CALL t_input_text_ex(KilnStr l, char* buf, size_t cap, uint32_t flags, float w, float h) {
     IN_FRAME(false);
     if (!buf || !cap) return false;
+    const char* label = z(l);
+    cap = active_text_cap(label, cap);
     ImGuiInputTextFlags f = ImGuiInputTextFlags_None;
     if (flags & KUI_INPUT_READ_ONLY) f |= ImGuiInputTextFlags_ReadOnly;
-    if (flags & KUI_INPUT_MULTILINE) return ImGui::InputTextMultiline(z(l), buf, cap, ImVec2(w, h), f);
+    if (flags & KUI_INPUT_MULTILINE) return ImGui::InputTextMultiline(label, buf, cap, ImVec2(w, h), f);
     if (flags & KUI_INPUT_ENTER_RETURNS) f |= ImGuiInputTextFlags_EnterReturnsTrue;
     if (w > 0.0f) ImGui::SetNextItemWidth(w);
-    return ImGui::InputText(z(l), buf, cap, f);
+    return ImGui::InputText(label, buf, cap, f);
 }
