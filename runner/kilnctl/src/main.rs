@@ -245,7 +245,8 @@ enum Cmd {
         /// The new build's exe, read as data and never run [default: the instance's]
         #[arg(long)]
         new_exe: Option<PathBuf>,
-        /// The build the regmap was last proven on [default: the newest cached exe with a verified record]
+        /// The build the regmap was last proven on [default: the newest cached exe whose build has a verified regmap
+        /// record, in the instance's kiln/regmap or the tree]
         #[arg(long)]
         old_exe: Option<PathBuf>,
         /// The new build's reflection dump (kfc.py types --closure ... --json-out) instead of its exe

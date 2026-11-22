@@ -68,6 +68,10 @@ fn setup(t: &Path) -> (PathBuf, PathBuf) {
         "rows": {"size": {"paths": ["stackLimit"], "conv": "int", "read": "now", "backend": "live"},
                  "cap": {"paths": ["limit"], "conv": "float", "read": "restart", "backend": "boot"},
                  "label": {"paths": ["isSet"], "conv": "bool", "read": "now", "backend": "none"}}}));
+    // the old build's record (the build the regmap was last proven on): the removal history carries through it
+    put(&tree.join(format!("regmap/server/{OLD}.json")), &json!({"regmap": 1, "side": "server", "exeSha256": OLD, "gameBuild": "100",
+        "verified": true, "rows": {"gadgets.size": "ok", "gadgets.cap": "ok", "gadgets.label": "ok"},
+        "aliases": {"renames": [], "removals": [], "suffixes": []}}));
     let inp = t.join("inputs");
     put(&inp.join("refl-new.json"), &types(NEW));
     put(&inp.join("refl-old.json"), &types(OLD));
@@ -144,7 +148,9 @@ fn a_complete_proof_writes_a_verified_record_outside_the_tree() {
             if e.file_type().unwrap().is_dir() { todo.push(e.path()) } else { files.push(e.path().to_string_lossy().into_owned()) }
         }
     }
-    assert_eq!(files, [tree.join("regmap/common/gadgets.json").to_string_lossy().into_owned()]);
+    files.sort();
+    assert_eq!(files, [tree.join("regmap/common/gadgets.json").to_string_lossy().into_owned(),
+                       tree.join(format!("regmap/server/{OLD}.json")).to_string_lossy().into_owned()]);
     let _ = std::fs::remove_dir_all(&t);
 }
 

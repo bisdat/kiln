@@ -47,6 +47,8 @@ pub struct Inputs {
     pub new_refl: Option<refl::TypeDb>,
     /// regmap_check.py's record of the new build (its rows, layouts and aliases)
     pub candidate: Option<Value>,
+    /// the old build's record (the tree's, else the instance's): the removal history and pins carry through it
+    pub previous: Option<Value>,
     /// the new build's id table as regmap_check.py computed it (with the previous build's table and the aliases)
     pub new_ids: Option<ids::IdTable>,
     pub prev_ids: Option<ids::IdTable>,
@@ -197,8 +199,13 @@ pub fn prove(inp: &Inputs, when: &str) -> Proof {
             }
         }
     }
-    // 5. aliases
+    // 5. aliases (the removal history and pins of the old build's record carry forward)
     let aliases = inp.candidate.as_ref().map(ids::Aliases::of_record).unwrap_or_default();
+    let previous_aliases = inp.previous.as_ref().map(ids::Aliases::of_record).unwrap_or_default();
+    if inp.previous.is_none() && !inp.first_build {
+        p.blockers.push("no regmap record of the old build (in the tree or the instance's kiln/regmap): the removal history and pins \
+                         carry forward only through it".into());
+    }
     match (&inp.prev_ids, &inp.new_ids) {
         (_, None) => p.blockers.push("no id table of the new build (regmap_check.py --ids-out over this build's entries)".into()),
         (None, Some(_)) if !inp.first_build => {
@@ -215,7 +222,7 @@ pub fn prove(inp: &Inputs, when: &str) -> Proof {
                                  the two implementations were not compared".into());
             }
             let empty = ids::IdTable { side: inp.side.clone(), ..Default::default() };
-            let r = ids::check(prev.as_ref().unwrap_or(&empty), now, &aliases, inp.native_ids.as_ref());
+            let r = ids::check(prev.as_ref().unwrap_or(&empty), now, &aliases, &previous_aliases, inp.native_ids.as_ref());
             p.blockers.extend(r.problems.iter().take(20).map(|x| format!("ids: {x}")));
             if r.problems.len() > 20 {
                 p.blockers.push(format!("ids: {} more problems (aliases.json)", r.problems.len() - 20));
@@ -580,7 +587,7 @@ fn copy_tree(from: &Path, to: &Path) -> Result<()> {
 /// The candidate record and the new build's id table from regmap_check.py --record, in a scratch copy of the tree's
 /// regmap/common and schema/ (nothing is written into the tree). No build record is copied: only the record this run
 /// writes can be the candidate.
-fn run_record(g: &Gather, exe: &Path, new_sha: &str, old_sha: Option<&str>, prev_ids: Option<&ids::IdTable>, problems: &mut Vec<String>,
+fn run_record(g: &Gather, exe: &Path, new_sha: &str, previous: Option<&Path>, prev_ids: Option<&ids::IdTable>, problems: &mut Vec<String>,
               notes: &mut Vec<String>) -> Result<(Option<Value>, Option<ids::IdTable>)> {
     let root = g.out.join("root");
     let _ = std::fs::remove_dir_all(&root);
@@ -604,8 +611,8 @@ fn run_record(g: &Gather, exe: &Path, new_sha: &str, old_sha: Option<&str>, prev
     if have_entries {
         args.extend(["--entries".into(), entries.into_os_string(), "--ids-out".into(), ids_out.clone().into_os_string()]);
     }
-    if let Some(prev) = old_sha.map(|s| g.tree.join("regmap").join(&g.side).join(format!("{s}.json"))).filter(|p| p.is_file()) {
-        args.extend(["--previous".into(), prev.into_os_string()]);
+    if let Some(prev) = previous {
+        args.extend(["--previous".into(), prev.as_os_str().to_owned()]);
     }
     if let Some(t) = prev_ids {
         let p = g.out.join("ids-prev.json");
@@ -753,7 +760,21 @@ pub fn gather(g: &Gather) -> Result<Inputs> {
             inp.problems.push(format!("evidence {} does not exist", e.display()));
         }
     }
+    // the old build's record: the tree's, else the instance's (marked there, not committed yet)
+    let mut previous_path = None;
     if let Some(old) = inp.old_exe_sha.clone() {
+        let rel = Path::new("regmap").join(&g.side).join(format!("{old}.json"));
+        if let Some(p) = [Some(g.tree.clone()), g.deployed.clone()].into_iter().flatten().map(|r| r.join(&rel)).find(|p| p.is_file()) {
+            match read_json(&p) {
+                Ok(v) if v.get("exeSha256").and_then(Value::as_str).is_some_and(|s| s.eq_ignore_ascii_case(&old))
+                    && v.get("side").and_then(Value::as_str) == Some(g.side.as_str()) => {
+                    inp.previous = Some(v);
+                    previous_path = Some(p);
+                }
+                Ok(_) => inp.problems.push(format!("{} is not the record of the old build", p.display())),
+                Err(e) => inp.problems.push(format!("the old build's record: {e:#}")),
+            }
+        }
         if inp.prev_ids.is_none() {
             inp.prev_ids = store.get(&g.side, &old).transpose()?;
         }
@@ -765,7 +786,7 @@ pub fn gather(g: &Gather) -> Result<Inputs> {
     match (&g.record, &g.new_exe) {
         (Some(r), _) => inp.candidate = Some(read_json(r)?),
         (None, Some(exe)) => {
-            let (rec, table) = run_record(g, exe, &inp.new_exe_sha, inp.old_exe_sha.as_deref(), inp.prev_ids.as_ref(), &mut inp.problems,
+            let (rec, table) = run_record(g, exe, &inp.new_exe_sha, previous_path.as_deref(), inp.prev_ids.as_ref(), &mut inp.problems,
                                           &mut inp.notes)?;
             inp.candidate = rec;
             inp.new_ids = table;
@@ -820,6 +841,25 @@ pub fn keep(p: &Proof, inp: &Inputs, store: &ids::Store, data_dir: Option<&Path>
 }
 
 // ---- the command and kilnctl update -------------------------------------------------------------------------------
+
+/// The newest cached exe (`<state>/exe-cache/<sha>.exe`) other than `except` whose build has a verified regmap record in
+/// the instance's Kiln folder or the tree: the build the regmap was last proven on.
+pub fn regmap_baseline(cache: &Path, kiln_dir: &Path, tree: &Path, side: &str, except: &str) -> Option<(PathBuf, String)> {
+    let mut v: Vec<(std::time::SystemTime, PathBuf, String)> = std::fs::read_dir(cache)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| {
+            let sha = e.file_name().to_string_lossy().strip_suffix(".exe")?.to_string();
+            if sha.len() != 64 || sha.eq_ignore_ascii_case(except) || !(record_verified(kiln_dir, side, &sha) || record_verified(tree, side, &sha)) {
+                return None;
+            }
+            Some((e.metadata().ok()?.modified().ok()?, e.path(), sha))
+        })
+        .collect();
+    v.sort();
+    v.pop().map(|(_, p, s)| (p, s))
+}
 
 /// A Kiln folder holds a verified record of this build (`<kiln>/regmap/<side>/<exe sha256>.json`).
 pub fn record_verified(kiln_dir: &Path, side: &str, exe_sha256: &str) -> bool {
@@ -878,6 +918,23 @@ fn run(g: &Gather, inst: Option<&crate::config::Instance>, mark_it: bool) -> Res
     Ok((p, rec, lines))
 }
 
+/// The new build's sha from what names it: the exe, else its reflection dump, else its candidate record.
+fn new_sha_hint(g: &Gather) -> Result<Option<String>> {
+    if let Some(e) = &g.new_exe {
+        return Ok(Some(crate::util::sha256(e)?));
+    }
+    if let Some(d) = &g.new_refl {
+        let sha = refl::TypeDb::parse(&std::fs::read_to_string(d)?)?.exe_sha256;
+        if !sha.is_empty() {
+            return Ok(Some(sha));
+        }
+    }
+    Ok(match &g.record {
+        Some(r) => read_json(r)?.get("exeSha256").and_then(Value::as_str).map(str::to_string),
+        None => None,
+    })
+}
+
 /// `kilnctl regproof`: exit 0 when the record is verified (and marked, with --mark), else 1.
 pub fn cli(a: CliArgs) -> Result<i32> {
     if a.side != "server" && a.side != "client" {
@@ -901,8 +958,8 @@ pub fn cli(a: CliArgs) -> Result<i32> {
             g.new_exe = Some(i.exe());
         }
         if g.old_exe.is_none() && g.old_refl.is_none() && !g.first_build {
-            let new_sha = g.new_exe.as_deref().map(crate::util::sha256).transpose()?.unwrap_or_default();
-            g.old_exe = crate::sigport::baseline_exe(i, &new_sha).map(|(p, _)| p);
+            let new_sha = new_sha_hint(&g)?.context("which build is new? pass --new-exe (or --new-refl / --record)")?;
+            g.old_exe = regmap_baseline(&crate::sigport::cache_dir(), &crate::kiln::kiln_dir(i), &g.tree, "server", &new_sha).map(|(p, _)| p);
         }
         if g.evidence.is_empty() {
             g.evidence = instance_evidence(i);
@@ -928,14 +985,17 @@ pub fn cli(a: CliArgs) -> Result<i32> {
 /// The registry proof inside `kilnctl update` / `kilnctl port`, right after the lab gate (whose copy holds the lab's
 /// outputs): (summary, lines for NEXT.txt). Marks only when `mark` (the sigdb port was complete and the gate green) and
 /// the proof is verified. A Kiln tree without regmap/common is skipped.
-pub fn flow(inst: &crate::config::Instance, old: Option<&Path>, new: &Path, mark_it: bool) -> (String, Vec<String>) {
+pub fn flow(inst: &crate::config::Instance, new: &Path, mark_it: bool) -> (String, Vec<String>) {
     if !inst.kiln.source.join("regmap/common").is_dir() {
         return ("no regmap in the Kiln tree; skipped".into(), Vec::new());
     }
+    // the build the regmap was last proven on (not sigport's baseline, which may never have had a regmap record)
+    let new_sha = crate::util::sha256(new).unwrap_or_default();
+    let old = regmap_baseline(&crate::sigport::cache_dir(), &crate::kiln::kiln_dir(inst), &inst.kiln.source, "server", &new_sha).map(|(p, _)| p);
     let g = Gather {
         side: "server".into(), tree: inst.kiln.source.clone(), deployed: Some(crate::kiln::kiln_dir(inst)),
         out: default_out(&inst.name, Some(new)), new_exe: Some(new.to_path_buf()),
-        old_exe: old.map(Path::to_path_buf), evidence: instance_evidence(inst), steam_build: crate::steam::buildid(&inst.dir),
+        old_exe: old, evidence: instance_evidence(inst), steam_build: crate::steam::buildid(&inst.dir),
         ..Default::default()
     };
     match run(&g, Some(inst), mark_it) {
@@ -993,6 +1053,8 @@ mod tests {
             old_refl: Some(db(old_types(), OLD)),
             new_refl: Some(db(old_types(), SHA)),
             candidate: Some(candidate()),
+            previous: Some(json!({"regmap": 1, "side": "server", "exeSha256": OLD, "verified": true, "rows": {},
+                                  "aliases": {"renames": [], "removals": [], "suffixes": []}})),
             new_ids: Some(table(SHA, &[("g1", "game:a"), ("g2", "game:b")])),
             prev_ids: Some(table(OLD, &[("g1", "game:a"), ("g2", "game:b")])),
             native_ids: Some(table(SHA, &[("g1", "game:a"), ("g2", "game:b")])),
@@ -1141,6 +1203,59 @@ mod tests {
         // a record without unproven rows has no reasons member
         let all = prove(&with_power_samples(inputs()), "T");
         assert!(record(&all, &candidate()).get("reasons").is_none());
+    }
+
+    #[test]
+    fn the_old_builds_record_carries_the_removal_history() {
+        // no record of the old build: removals made then could be given again unseen
+        let mut inp = with_power_samples(inputs());
+        inp.previous = None;
+        let p = prove(&inp, "T");
+        assert!(!p.verified && p.blockers.iter().any(|b| b.contains("record of the old build")), "{:?}", p.blockers);
+        // the old build retired game:z; the candidate lost that and the new build gives game:z out again
+        let mut reuse = with_power_samples(inputs());
+        reuse.previous.as_mut().unwrap()["aliases"]["removals"] = json!([{"registry": "gadgets", "id": "game:z", "removedIn": "100"}]);
+        for t in [reuse.new_ids.as_mut().unwrap(), reuse.native_ids.as_mut().unwrap()] {
+            t.registries.get_mut("gadgets").unwrap().insert("g9".into(), "game:z".into());
+        }
+        let p = prove(&reuse, "T");
+        assert!(!p.verified && p.blockers.iter().any(|b| b.contains("game:z")), "{:?}", p.blockers);
+        // a first build has no previous record to carry
+        let mut first = with_power_samples(inputs());
+        first.previous = None;
+        first.first_build = true;
+        first.old_refl = None;
+        first.values_old = None;
+        first.prev_ids = None;
+        first.old_exe_sha = None;
+        assert!(prove(&first, "T").verified);
+    }
+
+    #[test]
+    fn the_default_old_build_has_a_verified_regmap_record() {
+        let root = scratch("baseline");
+        let (cache, kiln, tree) = (root.join("cache"), root.join("game/kiln"), root.join("tree"));
+        std::fs::create_dir_all(&cache).unwrap();
+        let (a, b, c) = ("a".repeat(64), "b".repeat(64), "c".repeat(64));
+        let at = |sha: &str, secs: u64| {
+            let p = cache.join(format!("{sha}.exe"));
+            std::fs::write(&p, "MZ").unwrap();
+            std::fs::File::options().write(true).open(&p).unwrap()
+                .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs)).unwrap();
+        };
+        at(&a, 1_000);
+        at(&b, 2_000);
+        at(&c, 3_000); // the newest, but only sigdb-verified: no regmap record
+        let rec = |dir: &Path, sha: &str| {
+            let p = dir.join(format!("regmap/server/{sha}.json"));
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, json!({"regmap": 1, "verified": true}).to_string()).unwrap();
+        };
+        rec(&kiln, &a);
+        rec(&tree, &b);
+        assert_eq!(regmap_baseline(&cache, &kiln, &tree, "server", &c).map(|(_, s)| s), Some(b.clone()));
+        assert_eq!(regmap_baseline(&cache, &kiln, &tree, "server", &b).map(|(_, s)| s), Some(a.clone()), "never the new build");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -1355,6 +1470,12 @@ mod tests {
         std::fs::create_dir_all(kiln.join("regmap/common")).unwrap();
         std::fs::copy(tree.join("regmap/common/gadgets.json"), kiln.join("regmap/common/gadgets.json")).unwrap();
         assert!(gather(&Gather { deployed: Some(kiln.clone()), ..g.clone() }).unwrap().problems.is_empty());
+        // the old build's record only in the instance (marked, not committed yet): found there
+        std::fs::create_dir_all(kiln.join("regmap/server")).unwrap();
+        std::fs::write(kiln.join(format!("regmap/server/{OLD}.json")),
+                       json!({"regmap": 1, "side": "server", "exeSha256": OLD, "verified": true, "rows": {}}).to_string()).unwrap();
+        let found = gather(&Gather { deployed: Some(kiln.clone()), ..g.clone() }).unwrap();
+        assert_eq!(found.previous.as_ref().and_then(|p| p["exeSha256"].as_str()), Some(OLD), "{:?}", found.problems);
         std::fs::write(kiln.join("regmap/common/gadgets.json"), "{}").unwrap();
         let stale = gather(&Gather { deployed: Some(kiln.clone()), ..g.clone() }).unwrap();
         assert!(stale.problems.iter().any(|p| p.contains("deployed") && p.contains("gadgets.json")), "{:?}", stale.problems);

@@ -760,7 +760,7 @@ pub fn port_flow(inst: &Instance, old: Option<PathBuf>, new: &Path, f: &FlowArgs
     // the registry proof (registry P2): the regmap record of the new build, from the lab the gate just ran; marked under
     // the same conditions as the build record, and only when every step of it is green (otherwise every registry field
     // stays refused on the new build)
-    let (reg, reg_next) = regproof::flow(inst, Some(&old), new, ok && f.mark && !dry);
+    let (reg, reg_next) = regproof::flow(inst, new, ok && f.mark && !dry);
     println!("registry  {reg}");
     next.extend(reg_next);
     let mut marked = None;

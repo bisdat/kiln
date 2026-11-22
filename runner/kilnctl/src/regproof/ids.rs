@@ -263,13 +263,28 @@ pub struct AliasReport {
 
 /// The new build's table against the previous build's, the candidate record's aliases and (when the lab wrote one)
 /// kiln.content's own table of the new build.
-pub fn check(prev: &IdTable, now: &IdTable, aliases: &Aliases, native: Option<&IdTable>) -> AliasReport {
+pub fn check(prev: &IdTable, now: &IdTable, aliases: &Aliases, previous: &Aliases, native: Option<&IdTable>) -> AliasReport {
     use std::collections::BTreeSet;
     let mut r = AliasReport::default();
     let pins: BTreeMap<(String, String), String> =
         aliases.renames.iter().chain(&aliases.suffixes).map(|p| ((p.registry.clone(), p.guid.to_ascii_lowercase()), p.id.clone())).collect();
     let removed: BTreeMap<(String, String), String> =
         aliases.removals.iter().map(|x| ((x.registry.clone(), x.id.clone()), x.removed_in.clone())).collect();
+    // the previous record's history: an id table holds no removed ids, so the records carry them
+    let earlier: BTreeMap<(String, String), String> =
+        previous.removals.iter().map(|x| ((x.registry.clone(), x.id.clone()), x.removed_in.clone())).collect();
+    for ((reg, id), b) in &earlier {
+        if !removed.contains_key(&(reg.clone(), id.clone())) {
+            r.problems.push(format!("{reg}: the candidate drops the removal of {id} (removed in game build {b}): a record carries every earlier removal"));
+        }
+    }
+    for p in previous.renames.iter().chain(&previous.suffixes) {
+        let kept = pins.get(&(p.registry.clone(), p.guid.to_ascii_lowercase())) == Some(&p.id);
+        if !kept && !removed.contains_key(&(p.registry.clone(), p.id.clone())) {
+            r.problems.push(format!("{}: the previous record pins GUID {} to {}; the candidate neither keeps the pin nor lists {} as removed",
+                                    p.registry, p.guid, p.id, p.id));
+        }
+    }
     let empty = BTreeMap::new();
     // every id of the previous build
     for (reg, pt) in &prev.registries {
@@ -304,7 +319,7 @@ pub fn check(prev: &IdTable, now: &IdTable, aliases: &Aliases, native: Option<&I
             if let Some(other) = seen.insert(id, g) {
                 r.problems.push(format!("{reg}: {id} is given to two entries (GUIDs {other} and {g})"));
             }
-            if let Some(b) = removed.get(&(reg.clone(), id.clone())) {
+            if let Some(b) = removed.get(&(reg.clone(), id.clone())).or_else(|| earlier.get(&(reg.clone(), id.clone()))) {
                 r.problems.push(format!("{reg}: {id} was removed in game build {b} and is never given again; the new build gives it to GUID {g}"));
             }
             if !pt.contains_key(g) && !prev_ids.contains(id) {
@@ -452,12 +467,12 @@ pub(crate) mod tests {
         let mut prev = native.clone();
         prev.exe_sha256 = OLD.into();
         // without kiln.content's entries the previous build's loot ids would look lost
-        assert!(!check(&prev, &computed, &Aliases::default(), Some(&native)).ok);
+        assert!(!check(&prev, &computed, &Aliases::default(), &Aliases::default(), Some(&native)).ok);
         let m = merged(&computed, Some(&native));
         assert_eq!(m.registries["loot"]["#7"], "game:a");
         assert_eq!(m.registries["cats"]["c1"], "game:wood");
         assert_eq!(m.decoder.as_deref(), Some("kiln-model 1"));
-        let r = check(&prev, &m, &Aliases::default(), Some(&native));
+        let r = check(&prev, &m, &Aliases::default(), &Aliases::default(), Some(&native));
         assert!(r.ok, "{:?}", r.problems);
         assert_eq!(r.kept, 4);
         // regmap_check.py's ids win where both have the entry (its pins hold)
@@ -471,7 +486,7 @@ pub(crate) mod tests {
     fn a_stable_build_keeps_every_id() {
         let prev = table(OLD, &[("g1", "game:a"), ("g2", "game:b")]);
         let now = table(NEW, &[("g1", "game:a"), ("g2", "game:b"), ("g3", "game:c")]);
-        let r = check(&prev, &now, &Aliases::default(), Some(&now));
+        let r = check(&prev, &now, &Aliases::default(), &Aliases::default(), Some(&now));
         assert!(r.ok, "{:?}", r.problems);
         assert_eq!(r.kept, 2);
         assert_eq!(r.added, ["gadgets game:c"]);
@@ -481,28 +496,53 @@ pub(crate) mod tests {
     fn removals_must_be_recorded_and_never_reused() {
         let prev = table(OLD, &[("g1", "game:a"), ("g2", "game:b")]);
         let now = table(NEW, &[("g1", "game:a")]);
-        let unrecorded = check(&prev, &now, &Aliases::default(), None);
+        let unrecorded = check(&prev, &now, &Aliases::default(), &Aliases::default(), None);
         assert!(!unrecorded.ok && unrecorded.problems[0].contains("game:b"), "{:?}", unrecorded.problems);
         let rec = aliases(json!({"removals": [{"registry": "gadgets", "id": "game:b", "removedIn": "101"}]}));
-        let r = check(&prev, &now, &rec, None);
+        let r = check(&prev, &now, &rec, &Aliases::default(), None);
         assert!(r.ok, "{:?}", r.problems);
         assert_eq!(r.removed, ["gadgets game:b"]);
         // an id removed in an earlier build given to a new entry
         let older = aliases(json!({"removals": [{"registry": "gadgets", "id": "game:z", "removedIn": "90"}]}));
-        let reuse = check(&prev, &table(NEW, &[("g1", "game:a"), ("g2", "game:b"), ("g9", "game:z")]), &older, None);
+        let reuse = check(&prev, &table(NEW, &[("g1", "game:a"), ("g2", "game:b"), ("g9", "game:z")]), &older, &Aliases::default(), None);
         assert!(!reuse.ok && reuse.problems.iter().any(|p| p.contains("game:z") && p.contains("removed")), "{:?}", reuse.problems);
+    }
+
+    /// The removal history lives in the records (an id table does not hold removed ids): every earlier removal is carried
+    /// by the candidate and never reused, and every earlier pin is kept or its id retired.
+    #[test]
+    fn the_removal_history_carries_through_the_previous_record() {
+        let prev = table(OLD, &[("g1", "game:a")]);
+        let earlier = aliases(json!({"removals": [{"registry": "gadgets", "id": "game:z", "removedIn": "100"}],
+                                     "renames": [{"registry": "gadgets", "guid": "g1", "id": "game:a"}]}));
+        let keeps = aliases(json!({"removals": [{"registry": "gadgets", "id": "game:z", "removedIn": "100"}],
+                                   "renames": [{"registry": "gadgets", "guid": "g1", "id": "game:a"}]}));
+        let now = table(NEW, &[("g1", "game:a")]);
+        assert!(check(&prev, &now, &keeps, &earlier, None).ok, "the candidate carries the history");
+        // the candidate dropped game:z's removal (the previous record was not where the record step looked)
+        let drops = aliases(json!({"renames": [{"registry": "gadgets", "guid": "g1", "id": "game:a"}]}));
+        let r = check(&prev, &now, &drops, &earlier, None);
+        assert!(!r.ok && r.problems.iter().any(|p| p.contains("game:z") && p.contains("drops")), "{:?}", r.problems);
+        // ... and a new entry got the retired id: blocked even though the candidate does not list the removal
+        let reused = table(NEW, &[("g1", "game:a"), ("g9", "game:z")]);
+        let r = check(&prev, &reused, &drops, &earlier, None);
+        assert!(r.problems.iter().any(|p| p.contains("game:z") && p.contains("never given again")), "{:?}", r.problems);
+        // an earlier pin neither kept nor retired
+        let unpinned = aliases(json!({"removals": [{"registry": "gadgets", "id": "game:z", "removedIn": "100"}]}));
+        let r = check(&prev, &now, &unpinned, &earlier, None);
+        assert!(!r.ok && r.problems.iter().any(|p| p.contains("g1") && p.contains("previous record pins")), "{:?}", r.problems);
     }
 
     #[test]
     fn ids_never_move_and_guid_changes_need_a_pin() {
         let prev = table(OLD, &[("g1", "game:a"), ("g2", "game:b")]);
-        let moved = check(&prev, &table(NEW, &[("g1", "game:a_renamed"), ("g2", "game:b")]), &Aliases::default(), None);
+        let moved = check(&prev, &table(NEW, &[("g1", "game:a_renamed"), ("g2", "game:b")]), &Aliases::default(), &Aliases::default(), None);
         assert!(!moved.ok && moved.problems[0].contains("game:a"), "{:?}", moved.problems);
         // the game gave game:b's entry a new GUID: the id follows only where the record pins it
         let rekeyed = table(NEW, &[("g1", "game:a"), ("g7", "game:b")]);
-        let unpinned = check(&prev, &rekeyed, &Aliases::default(), None);
+        let unpinned = check(&prev, &rekeyed, &Aliases::default(), &Aliases::default(), None);
         assert!(!unpinned.ok && unpinned.problems.iter().any(|p| p.contains("game:b")), "{:?}", unpinned.problems);
-        let pinned = check(&prev, &rekeyed, &aliases(json!({"renames": [{"registry": "gadgets", "guid": "g7", "id": "game:b"}]})), None);
+        let pinned = check(&prev, &rekeyed, &aliases(json!({"renames": [{"registry": "gadgets", "guid": "g7", "id": "game:b"}]})), &Aliases::default(), None);
         assert!(pinned.ok, "{:?}", pinned.problems);
         assert_eq!(pinned.guid_changes, ["gadgets game:b: g2 -> g7"]);
     }
@@ -512,21 +552,21 @@ pub(crate) mod tests {
         let prev = table(OLD, &[("g1", "game:a")]);
         let now = table(NEW, &[("g1", "game:a"), ("g2", "game:x~00000002")]);
         let stale = aliases(json!({"suffixes": [{"registry": "gadgets", "guid": "g2", "id": "game:x~0000000f"}]}));
-        assert!(!check(&prev, &now, &stale, None).ok, "a pin the table does not hold");
+        assert!(!check(&prev, &now, &stale, &Aliases::default(), None).ok, "a pin the table does not hold");
         let gone = aliases(json!({"renames": [{"registry": "gadgets", "guid": "g404", "id": "game:q"}]}));
-        assert!(!check(&prev, &now, &gone, None).ok, "a pin of a GUID the build does not have");
-        let twice = check(&prev, &table(NEW, &[("g1", "game:a"), ("g2", "game:a")]), &Aliases::default(), None);
+        assert!(!check(&prev, &now, &gone, &Aliases::default(), None).ok, "a pin of a GUID the build does not have");
+        let twice = check(&prev, &table(NEW, &[("g1", "game:a"), ("g2", "game:a")]), &Aliases::default(), &Aliases::default(), None);
         assert!(!twice.ok && twice.problems.iter().any(|p| p.contains("two entries")), "{:?}", twice.problems);
         // kiln.content's own table differs on an entry the record does not pin: the implementations disagree
         let native = table(NEW, &[("g1", "game:a"), ("g2", "game:x")]);
-        let r = check(&prev, &now, &Aliases::default(), Some(&native));
+        let r = check(&prev, &now, &Aliases::default(), &Aliases::default(), Some(&native));
         assert!(!r.ok && r.problems.iter().any(|p| p.contains("kiln.content")), "{:?}", r.problems);
         // ... but not on a pinned one (the lab ran without the candidate record)
         let pin = aliases(json!({"suffixes": [{"registry": "gadgets", "guid": "g2", "id": "game:x~00000002"}]}));
-        assert!(check(&prev, &now, &pin, Some(&native)).ok);
+        assert!(check(&prev, &now, &pin, &Aliases::default(), Some(&native)).ok);
         // a registry with no entries on the new build: its decode failed
         let mut empty = now.clone();
         empty.registries.clear();
-        assert!(!check(&prev, &empty, &Aliases::default(), None).ok);
+        assert!(!check(&prev, &empty, &Aliases::default(), &Aliases::default(), None).ok);
     }
 }
