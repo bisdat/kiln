@@ -4,6 +4,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
+#include <barrier>
+#include <thread>
 
 namespace {
 int checks = 0;
@@ -66,15 +68,80 @@ int main() {
     check(kiln::tools::create_history(small, begin, discard, 0xabc, 0xdef, true) == first,
           "policy history creation returns the native entry");
     next = second;
-    check(kiln::tools::create_history(small, begin, discard, 0xabc, 0xdef, true) == 0 && discarded == 1,
-          "full sidecar discards new pending history and refuses before terrain mutation");
+    int evicted = 0;
+    auto full_ring_begin = [&](uintptr_t allocator, uintptr_t storage) {
+        ++evicted;  // Native HistoryBegin evicts the oldest entry before returning a new slot in a full ring.
+        return begin(allocator, storage);
+    };
+    check(kiln::tools::create_history(small, full_ring_begin, discard, 0xabc, 0xdef, true) == 0 &&
+          evicted == 0 && discarded == 0,
+          "full sidecar refuses before native begin can evict an older vanilla undo entry");
     check(small.exact(first + materials) && !small.exact(second + materials),
           "failed history creation retains prior exact payment identity");
-    next = 0;
-    check(kiln::tools::create_history(small, begin, discard, 0xabc, 0xdef, true) == 0 && discarded == 1,
-          "native history failure never discards an unrelated entry");
     next = first;
     check(kiln::tools::create_history(small, begin, discard, 0xabc, 0xdef, false) == first &&
-          !small.exact(first + materials) && discarded == 1, "vanilla history reuse invalidates old policy identity");
+          !small.exact(first + materials) && discarded == 0, "vanilla history reuse invalidates old policy identity");
+    next = 0;
+    check(kiln::tools::create_history(small, begin, discard, 0xabc, 0xdef, true) == 0 && discarded == 0,
+          "native history failure never discards an unrelated entry");
+    next = std::numeric_limits<uintptr_t>::max() - 0x100;
+    check(kiln::tools::create_history(small, begin, discard, 0xabc, 0xdef, true) == 0 && discarded == 1,
+          "untaggable nonzero native result discards its pending entry exactly once");
+    next = second;
+    check(kiln::tools::create_history(small, begin, discard, 0xabc, 0xdef, true) == second &&
+          small.exact(second + materials), "native failure and malformed result release reserved capacity");
+    small.reset();
+    int nested_begins = 0;
+    auto nested_begin = [&](uintptr_t allocator, uintptr_t storage) {
+        auto inner = [&](uintptr_t, uintptr_t) { ++nested_begins; return second; };
+        check(kiln::tools::create_history(small, inner, discard, allocator, storage, true) == 0 && nested_begins == 0,
+              "nested policy cannot consume capacity reserved by its outer invocation");
+        check(!small.exact(first + materials), "a pending reservation is not an exact history identity");
+        return first;
+    };
+    check(kiln::tools::create_history(small, nested_begin, discard, 0xabc, 0xdef, true) == first &&
+          small.exact(first + materials) && discarded == 1, "outer invocation commits its own reservation");
+    HistoryTags<2> pair;
+    auto nested_pair = [&](uintptr_t allocator, uintptr_t storage) {
+        auto inner = [&](uintptr_t, uintptr_t) { return second; };
+        check(kiln::tools::create_history(pair, inner, discard, allocator, storage, true) == second,
+              "nested policy with spare capacity owns an independent reservation");
+        return first;
+    };
+    check(kiln::tools::create_history(pair, nested_pair, discard, 0xabc, 0xdef, true) == first &&
+          pair.exact(first + materials) && pair.exact(second + materials), "both nested histories remain exact");
+    {
+        HistoryTags<1> reset;
+        auto old = reset.reserve();
+        reset.reset();
+        auto current = reset.reserve();
+        check(!old.created(first) && current.created(second), "world reset invalidates older reservations");
+    }
+    HistoryTags<2> concurrent;
+    std::barrier rendezvous(3);
+    auto worker = [&](uintptr_t entry) {
+        auto pending = [&](uintptr_t, uintptr_t) {
+            rendezvous.arrive_and_wait();
+            rendezvous.arrive_and_wait();
+            return entry;
+        };
+        kiln::tools::create_history(concurrent, pending, [](uintptr_t) {}, 0, entry, true);
+    };
+    std::thread player_one(worker, first), player_two(worker, second);
+    rendezvous.arrive_and_wait();
+    check(!concurrent.reserve() && !concurrent.exact(first + materials) && !concurrent.exact(second + materials),
+          "two players reserve bounded slots without exposing unfinished history as exact");
+    rendezvous.arrive_and_wait();
+    player_one.join(); player_two.join();
+    check(concurrent.exact(first + materials) && concurrent.exact(second + materials),
+          "concurrent players commit independent exact identities");
+    // Exhaust every build/refund multiplier branch against the old rule decision. Only exact lists may differ.
+    for (const float multiplier : {0.0f, 0.25f, 1.0f, 2.0f}) {
+        for (const bool building : {false, true}) {
+            check(scale_materials(multiplier, building, false) == (multiplier != 1.0f && building),
+                  "every untagged building and non-building path keeps the original rule decision");
+            check(!scale_materials(multiplier, building, true), "every exact-list multiplier is suppressed");
+        }
+    }
     std::printf("%d checks passed\n", checks);
 }

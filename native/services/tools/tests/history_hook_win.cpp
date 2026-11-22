@@ -3,6 +3,8 @@
 #include "../history.h"
 #include "../include/kiln_tools_policy.h"
 #include "services/kiln_hooks.h"
+#include <windows.h>
+#include <limits>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -103,7 +105,8 @@ void kiln_tools_report_hook(uint32_t hook, int installed) {
     history_reported = installed != 0;
 }
 
-int main() {
+int main(int argc, char** argv) {
+    check(argc == 3, "native bridge fixture paths are provided");
     KilnApi api{};
     api.size = sizeof api; api.abi_version = KILN_ABI_VERSION;
     api.feature = &feature; api.symbol = &symbol; api.constant = &constant; api.session = &session;
@@ -147,9 +150,14 @@ int main() {
         check(hooked(0xabc, 0xdef) == next_entry, "bounded native tool history identity is retained");
     }
     next_entry = 2049 * 0x200;
-    check(hooked(0xabc, 0xdef) == 0 && discarded == 1, "full sidecar discards pending entry and refuses before terrain writes");
+    const int before_overflow = begins;
+    check(hooked(0xabc, 0xdef) == 0 && discarded == 0 && begins == before_overflow,
+          "full sidecar refuses before native history allocation and eviction");
     check(!kiln_tools_history_exact(list(next_entry)), "refused history cannot create an exact refund identity");
     world(KILN_WORLD_SERVER, KILN_WORLD_STARTED);
+    next_entry = std::numeric_limits<uintptr_t>::max() - 0x100;
+    check(hooked(0xabc, 0xdef) == 0 && discarded == 1,
+          "untaggable nonzero native entry is discarded once and never escapes as pending history");
     check(!kiln_tools_history_exact(list(0x200)), "new server session cannot inherit old identities");
     next_entry = 0x1000;
     check(hooked(0xabc, 0xdef) == next_entry && kiln_tools_history_exact(list(next_entry)),
@@ -164,5 +172,33 @@ int main() {
     check(kiln_tools_history_install(&api, 99), "history can install again after complete global teardown");
     kiln_tools_history_uninstall();
     check(revoked == 3 && owners_retired == 3, "reinstalled history owns only its new hook and subscription");
+    HMODULE rules = LoadLibraryA(argv[1]);
+    check(rules && GetModuleHandleW(L"kiln-rules.dll") == rules, "missing-setter rules fixture loads under the production DLL name");
+    check(!kiln_tools_history_install(&api, 99) && !history_reported && revoked == 3 && owners_retired == 3,
+          "present rules without exact setter refuse before allocating hook or subscription");
+    check(FreeLibrary(rules) != 0, "missing-setter fixture is released by its test owner");
+    rules = LoadLibraryA(argv[2]);
+    check(rules && GetModuleHandleW(L"kiln-rules.dll") == rules, "exact-setter rules fixture loads under the production DLL name");
+    using ProbeFn = bool(KILN_CALL*)(const void*);
+    const auto probe = reinterpret_cast<ProbeFn>(GetProcAddress(rules, "history_bridge_exact"));
+    check(probe && !probe(list(next_entry)), "new rules fixture has no predicate before history installation");
+    check(kiln_tools_history_install(&api, 99), "history installs with a previously loaded rules setter");
+    history_reported = true;
+    policy = true; next_entry = 0x4000;
+    check(hooked(0xabc, 0xdef) == next_entry && probe(list(next_entry)), "rules calls the installed exact predicate for tool history");
+    policy = false; next_entry = 0x5000;
+    check(hooked(0xabc, 0xdef) == next_entry && !probe(list(next_entry)) && probe(list(0x4000)),
+          "rules predicate isolates interleaved vanilla lists from exact tool lists");
+    kiln_tools_history_uninstall();
+    check(!probe(list(0x4000)) && !history_reported, "global shutdown clears rules callback before tags and service teardown");
+    check(kiln_tools_history_install(&api, 99), "history reinstalls against resident rules and a retained detour");
+    history_reported = true;
+    policy = true; next_entry = 0x6000;
+    check(hooked(0xabc, 0xdef) == next_entry && probe(list(next_entry)) && !probe(list(0x4000)),
+          "reinstallation publishes only new exact identities");
+    kiln_tools_history_uninstall();
+    check(!probe(list(next_entry)) && revoked == 5 && owners_retired == 5,
+          "reinstalled bridge clears its callback and retires only its own registrations");
+    check(FreeLibrary(rules) != 0, "exact-setter fixture unloads only after callback removal");
     std::printf("%d checks passed; %d native continuation calls; %d pending-entry discards\n", checks, begins, discarded);
 }

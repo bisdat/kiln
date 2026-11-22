@@ -273,9 +273,12 @@ checks; history creation/discard signatures and the material-list offset also re
 - Rules' ordinary BuildCost/BuildRefund multipliers must not scale this exact list again during tool undo. The tools
   DLL tags the descriptor identity returned by HistoryBegin only under an active tool policy, invalidates old tags
   on **every** new entry (including vanilla reuse), and clears tags at server-world start/stop. Rules consults this
-  private predicate before scaling; vanilla entries keep their ordinary rule behaviour. If the bounded tag storage
-  fills, the new pending native entry is discarded and creation refuses before later terrain mutation. Missing
-  mappings, a layout mismatch, an unavailable rules bridge or unobservable world teardown refuse this integration.
+  private predicate before scaling; vanilla entries keep their ordinary rule behaviour. Capacity is reserved before
+  native HistoryBegin: a full sidecar refuses without letting the allocator evict an older vanilla undo entry.
+  Native begin failure releases the reservation without discarding anything; an untaggable nonzero result discards
+  only its new pending entry. Missing mappings, a layout mismatch, an unavailable rules bridge or unobservable world
+  teardown refuse this integration. Installation runs after all resident service DLLs load (on_ready); hot service
+  unload/reload is unsupported. Global quiesced shutdown removes the rules predicate before clearing the tags.
 
 Vanilla limitations remain vanilla. ApplyMaterials returns false when an inventory add reports a shortfall; undo then
 skips terrain replay and BuildFinish rolls the inventory transaction back **and discards the pending history entry**.
