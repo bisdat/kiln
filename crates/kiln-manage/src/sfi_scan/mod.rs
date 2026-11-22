@@ -1006,7 +1006,8 @@ pub fn inventory(inputs: &Inputs<'_>) -> Inventory {
     }
     // A planned package that needs a blocked one is skipped with it (the package runs whole or not at all). A switched-off
     // package is not "skipped" whatever blocks it: ShroudForge's planner already keeps out a dependent that requires it,
-    // and leaves it out of an optional edge.
+    // and leaves it out of an optional edge. It never visits a switched-off package's own dependencies either, so no
+    // chain runs through one.
     let blocked: BTreeSet<String> = inv
         .packages
         .iter()
@@ -1016,6 +1017,7 @@ pub fn inventory(inputs: &Inputs<'_>) -> Inventory {
     let deps: BTreeMap<String, Vec<String>> = inv
         .packages
         .iter()
+        .filter(|p| p.presence != Presence::Disabled)
         .filter_map(|p| {
             Some((
                 p.id.clone()?,

@@ -1453,6 +1453,45 @@ fn switched_off_packages_are_disabled_whatever_else_blocks_them() {
     }
 }
 
+#[test]
+fn a_dependency_chain_never_runs_through_a_switched_off_package() {
+    let g = kiln_game("off-chain", KILN);
+    // switched on, needs ShroudForge 1.8: skipped
+    g.sf(
+        "held",
+        json!({"id":"held","name":"H","version":"1.0.0"}),
+        json!({"schemaVersion":1,"enabled":true,"groups":[{"label":"g","tab":true}]}),
+    );
+    // switched off, and needs the skipped package
+    g.sf(
+        "off-link",
+        json!({"id":"off-link","name":"L","version":"1.0.0","capabilities":["runtime"],
+            "dependencies":[{"id":"held","version":"^1"}]}),
+        json!({"schemaVersion":1,"enabled":false,"targets":["client","server"]}),
+    );
+    // switched on, the switched-off package an optional dependency: ShroudForge never visits it, nor what it needs
+    g.simple(
+        "opt-link",
+        "opt-link",
+        &["runtime"],
+        json!([{"id":"off-link","version":"^1","optional":true}]),
+    );
+    let inv = client(&g);
+    let p = pkg(&inv, "opt-link");
+    assert!(p.planned && p.blockers.is_empty(), "{p:?}");
+    let w = written(produce(&g, &Fake::new(&first_managed())));
+    let v = plan_json(&g, &w);
+    assert_eq!(package(&v, "held")["decision"], "skip");
+    assert_eq!(package(&v, "off-link")["decision"], "disabled");
+    let opt = package(&v, "opt-link");
+    assert_eq!(
+        (opt["decision"].as_str(), &opt["reasons"]),
+        (Some("candidate"), &json!([])),
+        "{opt}"
+    );
+    assert_eq!(w.load_order, ["opt-link"]);
+}
+
 fn put(b: &mut [u8], at: usize, value: u64, n: usize) {
     b[at..at + n].copy_from_slice(&value.to_le_bytes()[..n]);
 }
