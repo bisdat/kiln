@@ -6,7 +6,7 @@ launcher makes its own copy from their own installed client, read-only, into the
 
 | Where | What | Made by |
 |---|---|---|
-| `<data>/editor-assets/{icons,ui,ui/tinted,fonts}` | the save editor's art | `kiln_manage::gameart::extract_editor` |
+| `<data>/editor-assets/{icons,ui,ui/tinted,fonts,names}` | the save editor's art and localized display names | `kiln_manage::gameart::extract_editor` |
 | `<data>/admin-assets/map/{gpu,tiles,fonts}`, `map/i/g-*.webp` | the admin map's relief, tiles, marker icons, fonts | `kiln_manage::gameart::extract_map` |
 | `<data>/admin-assets/map/game/{markers.json,lang/*.json}` | the map's markers, place names and their texts in every game language | `extract_map` ([Map markers](#map-markers-mapmarkersrs)) |
 | `<data>/admin-assets/map/data/`, `map/i/{i,j,p}-*`, `data/*.json` | local markers (the map's fallback), the finder data, item-named icons, catalogs | copied from the folder `$KILN_ADMIN_EXTRAS` names, when set (not extracted yet) |
@@ -85,7 +85,7 @@ docs/re/resources.md):
    content blob is the mip chain, largest first, tightly packed. `UiFontResource.fonts[]`: one OTF/TTF per content blob.
 4. Pixels: RGBA8/BGRA8/R8/RG8/R16 copied; BC1-5, BC7 decoded with `bcdec_rs` (MIT); BC6H is not supported (none in UI).
 
-## The editor recipe (`editor.rs`, `RECIPE` 1)
+## The editor recipe (`editor.rs`, `RECIPE` 3)
 | File | Rule |
 |---|---|
 | `icons/<debugName>.webp` | every 2D part-0 `UiTextureResource` named `*_icon` (the editor's `items[id].debug + "_icon"`), fitted into 96x96 (never upscaled, aspect kept, premultiplied bicubic from mip 0 or the first mip at least twice the size) |
@@ -97,6 +97,23 @@ Skipped on purpose (counted in `.source.json` `skipped`): multi-part textures (t
 names, duplicate names (first wins), unknown formats, large UI images the editor does not use.
 
 Encoding: lossless WebP (`image-webp`); fully transparent pixels get black RGB; opaque images drop alpha.
+
+### Editor names (`catalog/editor_names.rs`)
+`names/names.json` is `{format: 1, languages: {"en-us": {items, skills, knowledge}, ...}}`, with decimal id keys.
+The same extraction task reads every installed `LocaTagCollectionResource` language, resolves `ItemInfo.name` by
+`itemId`, skill node name tags by node id, and recipe names by `recipeId` (an unnamed recipe uses its first output
+item's name). Item knowledge uses the item id. Text markup is stripped with the map's loca reader. Miscellaneous
+knowledge flags have no shipped display name; they keep the editor's existing label. No game text is bundled.
+
+The names folder is staged and swapped alongside icons, UI and fonts; `.source.json` records `nameLanguages` and
+includes the names in its byte count. Recipe 3 makes older art outdated so `useExtractTask` prepares names too.
+If the text layout is unsupported, extraction still makes art, records the problem, and drops stale cached names.
+Canceled extraction leaves the old names and art alone.
+
+Both editor shells load the table through the existing `kiln-asset` protocol before mounting their views. Names use
+the launcher's current locale (`de` → `de-de`, `zh-CN` → `zh-cn`, etc.), then the game's English, then the existing
+editor table (including its Portuguese/English fallback). No extraction behaves as before. Add item and Knowledge
+search the displayed name and English; the catalog also retains its existing Portuguese/debug-name search.
 
 ### Check against the Save Editor's own set (client 26430625)
 - Files: the editor ships 4,587; this extraction writes 5,235 (4,367 icons, 793 UI, 51 tinted, 12 fonts, + the

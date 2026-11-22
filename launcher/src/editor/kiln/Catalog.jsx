@@ -8,7 +8,7 @@
 // below the fold loads when it is scrolled to.
 import React, { memo, startTransition, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Modal } from '../../ui';
-import { items, newEntry, itemName } from '../src/gamedata.js';
+import { items, newEntry, itemName, englishItemName } from '../src/gamedata.js';
 import { rarityColor } from '../src/ui.js';
 import { t, useLanguage } from '../../i18n';
 import { localeAtual } from '../src/i18n.js';
@@ -39,7 +39,7 @@ export const allItems = () => {
     // dyes (ColorPalette) are ordinary backpack stacks the player carries; Customization entries are unlocks the game
     // keeps elsewhere, so the editor never adds those as items
     .filter(([, it]) => it.category !== 'Customization' && (it.pt || it.en))
-    .map(([id, it]) => ({ id: Number(id), ...it, name: itemName(id), r: BASE_RARITY[it.rarity] || 1, tier: tierOf(Number(id)), q: `${it.pt || ''} ${it.en || ''} ${it.debug}`.toLowerCase() }))
+    .map(([id, it]) => ({ id: Number(id), ...it, name: itemName(id), r: BASE_RARITY[it.rarity] || 1, tier: tierOf(Number(id)), q: `${itemName(id)} ${englishItemName(id)} ${it.pt || ''} ${it.en || ''} ${it.debug}`.toLowerCase() }))
     .sort((a, b) => by(a.name, b.name));
 };
 /** The catalog's items with a search and filters, in the list's (name) order. */
@@ -102,7 +102,8 @@ export function Catalog({ open, target, targetPlace, onAdd, onClose, level, disa
 }
 
 function CatalogBody({ target, targetPlace, onAdd, onClose, level, disabled }) {
-  const ALL = useMemo(allItems, []);
+  const language = useLanguage();
+  const ALL = useMemo(allItems, [language]);
   const [cat, setCat] = useState('all');
   const [q, setQ] = useState('');
   const [rar, setRar] = useState(0);

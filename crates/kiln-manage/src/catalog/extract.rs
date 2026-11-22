@@ -120,6 +120,7 @@ impl Src {
 pub(super) struct Loca {
     en: BTreeMap<u32, String>,
     languages: Vec<String>,
+    tables: BTreeMap<String, BTreeMap<u32, String>>,
 }
 
 impl Loca {
@@ -145,6 +146,14 @@ fn lang_code(name: &str) -> String {
 }
 
 fn read_loca(s: &Src) -> Result<Loca> {
+    read_loca_inner(s, false)
+}
+
+pub(super) fn read_loca_all(s: &Src) -> Result<BTreeMap<String, BTreeMap<u32, String>>> {
+    Ok(read_loca_inner(s, true)?.tables)
+}
+
+fn read_loca_inner(s: &Src, all_languages: bool) -> Result<Loca> {
     let coll = s.one("keen::LocaTagCollectionResource")?;
     let dec = Decoder::new(&s.types);
     let v = dec.decode("keen::LocaTagCollectionResource", &coll, 0)?;
@@ -153,22 +162,25 @@ fn read_loca(s: &Src) -> Result<Loca> {
     let stride = s.types.get("keen::LocaTagResource").map_or(24, |t| t.size as usize);
     let mut languages = Vec::new();
     let mut en = BTreeMap::new();
+    let mut tables = BTreeMap::new();
     for (i, l) in v["languages"].as_array().cloned().unwrap_or_default().iter().enumerate() {
         let name = l["language"].as_str().map(str::to_string).unwrap_or_else(|| format!("lang{i}"));
         let code = lang_code(&name);
-        if code == "en-us" || (en.is_empty() && i + 1 == v["languages"].as_array().map_or(0, Vec::len)) {
+        if all_languages || code == "en-us" || (en.is_empty() && i + 1 == v["languages"].as_array().map_or(0, Vec::len)) {
             let h = &l["data"]["hash"];
             let ch = ContentHash {
                 size: h["size"].as_u64().unwrap_or(0) as u32,
                 h: [h["hash0"].as_u64().unwrap_or(0) as u32, h["hash1"].as_u64().unwrap_or(0) as u32, h["hash2"].as_u64().unwrap_or(0) as u32],
             };
+            let table = loca_table(&s.kfc.read_content(&ch)?, id_off, text_off, stride)?;
             if en.is_empty() || code == "en-us" {
-                en = loca_table(&s.kfc.read_content(&ch)?, id_off, text_off, stride)?;
+                en = table.clone();
             }
+            if all_languages { tables.insert(code.clone(), table); }
         }
         languages.push(code);
     }
-    Ok(Loca { en, languages })
+    Ok(Loca { en, languages, tables })
 }
 
 pub(super) fn e(name: Option<String>, id: Option<String>, guid: Option<String>) -> Entry {
@@ -1578,7 +1590,7 @@ pub fn build(game_dir: &Path, dest: &Path, opts: &BuildOptions, p: &mut dyn Prog
             if side == "client" || e.code != ErrorCode::NotFound {
                 note("loca", e, &mut problems);
             }
-            Loca { en: BTreeMap::new(), languages: vec![] }
+            Loca { en: BTreeMap::new(), languages: vec![], tables: BTreeMap::new() }
         }
     };
     let icons_dir = opts

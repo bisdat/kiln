@@ -21,6 +21,10 @@ mod decode;
 #[cfg(feature = "gameart")]
 mod extract;
 #[cfg(feature = "gameart")]
+mod editor_names;
+#[cfg(feature = "gameart")]
+pub(crate) use editor_names::extract as extract_editor_names;
+#[cfg(feature = "gameart")]
 pub mod types;
 #[cfg(feature = "gameart")]
 mod world;

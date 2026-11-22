@@ -504,6 +504,8 @@ fn extracts_the_editor_layout_with_builtin_layouts() {
     std::fs::create_dir_all(dest.join("icons")).unwrap();
     std::fs::write(dest.join("icons/stale_icon.webp"), b"old").unwrap();
     std::fs::write(dest.join("README.txt"), b"kept").unwrap();
+    std::fs::create_dir_all(dest.join("names")).unwrap();
+    std::fs::write(dest.join("names/names.json"), b"old names").unwrap();
     let mut reports = 0;
     let mut prog = |_f: Option<f32>, _m: &str| reports += 1;
     let info = extract_editor(&game.0, &dest, &EditorOptions { threads: Some(3), ..Default::default() }, Some("123".into()), &mut prog).unwrap();
@@ -521,6 +523,8 @@ fn extracts_the_editor_layout_with_builtin_layouts() {
     let files = files_under(&dest);
     assert!(files.contains(&"icons/Sword_T1_icon.webp".into()) && files.contains(&"icons/Tall_Thing_icon.webp".into()));
     assert!(!files.contains(&"icons/stale_icon.webp".into()), "old art replaced");
+    assert!(!files.contains(&"names/names.json".into()), "unsupported text layouts drop stale names");
+    assert!(info.problems.iter().any(|p| p.starts_with("names/names.json:")));
     assert!(files.contains(&"README.txt".into()), "other files kept");
     assert!(files.contains(&"ui/compass_player.webp".into()) && files.contains(&"ui/tinted/gem_3.webp".into()));
     assert!(files.contains(&"fonts/font00.otf".into()) && files.contains(&"fonts/font01.ttf".into()));
@@ -586,9 +590,12 @@ fn cancel_keeps_the_old_art_and_refuses_the_game_folder() {
     let dest = data.0.join("editor-assets");
     std::fs::create_dir_all(dest.join("icons")).unwrap();
     std::fs::write(dest.join("icons/keep_icon.webp"), b"old").unwrap();
+    std::fs::create_dir_all(dest.join("names")).unwrap();
+    std::fs::write(dest.join("names/names.json"), b"old names").unwrap();
     let e = extract_editor(&game.0, &dest, &EditorOptions { threads: Some(1), ..Default::default() }, None, &mut CancelAfter(4)).unwrap_err();
     assert_eq!(e.code, ErrorCode::Canceled);
-    assert_eq!(files_under(&dest), vec!["icons/keep_icon.webp".to_string()]);
+    assert_eq!(files_under(&dest), vec!["icons/keep_icon.webp".to_string(), "names/names.json".to_string()]);
+    assert_eq!(std::fs::read(dest.join("names/names.json")).unwrap(), b"old names");
     let e = extract_editor(&game.0, &game.0.join("kiln/art"), &EditorOptions::default(), None, &mut crate::task::NoProgress).unwrap_err();
     assert_eq!(e.code, ErrorCode::Refused);
     assert!(!game.0.join("kiln").exists());

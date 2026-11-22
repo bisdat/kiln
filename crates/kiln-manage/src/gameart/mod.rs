@@ -39,7 +39,7 @@ pub use res::LayoutSource;
 /// `<dest>/.source.json`.
 pub const SOURCE_FILE: &str = ".source.json";
 /// The editor's subfolders this module owns inside its destination (replaced as a whole on each extraction).
-pub const EDITOR_DIRS: [&str; 3] = ["fonts", "icons", "ui"];
+pub const EDITOR_DIRS: [&str; 4] = ["fonts", "icons", "ui", "names"];
 
 /// The game build art was made from.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -311,6 +311,22 @@ pub fn extract_editor(
         if rep.written.get("icons").copied().unwrap_or(0) == 0 {
             return Err(Error::new(ErrorCode::Internal, "No icon could be made.").with_detail(rep.failed.iter().take(10).cloned().collect::<Vec<_>>()));
         }
+        // Names travel with this art generation. An unsupported text layout must not block icons;
+        // swapping an empty names folder also drops stale names from the previous game build.
+        p.report(Some(0.96), "Reading the game's item and skill names");
+        let mut name_problem = None;
+        let mut name_bytes = 0;
+        let mut counts = rep.written.clone();
+        match crate::catalog::extract_editor_names(game_dir) {
+            Ok(names) => {
+                let path = staging.join("names/names.json");
+                crate::util::write_json_atomic(&path, &names)?;
+                name_bytes = std::fs::metadata(&path).map_err(crate::util::io_at(&path, "reading"))?.len();
+                counts.insert("nameLanguages".into(), names.language_count());
+            }
+            Err(e) => name_problem = Some(format!("names/names.json: {}", e.message)),
+        }
+        if p.canceled() { return Err(Error::new(ErrorCode::Canceled, "Canceled.")); }
         p.report(Some(0.99), "Putting the art in place");
         swap_in(&staging, dest, &EDITOR_DIRS)?;
         // guid -> icon name of every item icon (the mod overlay resolves GUID icon aliases with it)
@@ -322,6 +338,7 @@ pub fn extract_editor(
         crate::util::write_json_atomic(&dest.join(modded::ICON_INDEX), &index)?;
         let mut problems: Vec<String> = plan.missing.clone();
         problems.extend(rep.failed.iter().cloned());
+        problems.extend(name_problem);
         problems.truncate(50);
         let mut skipped = plan.skipped.clone();
         if !rep.failed.is_empty() {
@@ -334,9 +351,9 @@ pub fn extract_editor(
             recipe: Some(editor::RECIPE),
             game: Some(g.source(steam_build)),
             from: None,
-            counts: rep.written.clone(),
+            counts,
             skipped,
-            bytes: rep.bytes,
+            bytes: rep.bytes + name_bytes,
             extracted: crate::util::now_rfc3339(),
             seconds: Some((t0.elapsed().as_secs_f64() * 10.0).round() / 10.0),
             tool: Some(format!("kiln-manage {} gameart", crate::VERSION)),

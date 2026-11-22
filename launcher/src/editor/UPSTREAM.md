@@ -63,7 +63,9 @@ moving or duplicating an existing entry. The write check rejects only non-byte i
 above catalog limits; existing saves remain byte-identical if those fields are not edited. The UI speaks the
 launcher's language: Kiln's files call the launcher's `t("editor.…")` (`launcher/src/i18n/*.json`, the `editor` keys, checked
 by `bun scripts/i18n-check.ts --source`), upstream's texts go through `src/i18n.js` and `launcher-keys.json`. Item and skill
-names stay the game's (`definirIdioma('en')`: English outside Portuguese). The Kiln strings at the end of `src/i18n/en.json`
+names come from the locally extracted `names/names.json` in the launcher's language (`kiln/game-names.js`),
+then the game's English, then the vendored Portuguese/English tables. Item and recipe knowledge uses the same cache.
+Without extraction names behave as before. The Kiln strings at the end of `src/i18n/en.json`
 are no longer read (kept for a clean re-vendor diff).
 
 No longer mounted, kept for a clean re-vendor: `src/App.jsx`, `src/Backpack.jsx`, `src/Character.jsx`,

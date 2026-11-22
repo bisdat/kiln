@@ -5,8 +5,8 @@ import React, { useMemo, useState } from 'react';
 import { Button, Modal } from '../../ui';
 import { estadoTexto } from '../shared/knowledge.mjs';
 import map from '../data/conhecimento.json';
-import { items, nomeConhecimento } from '../src/gamedata.js';
-import { t } from '../../i18n';
+import { items, nomeConhecimento, englishKnowledgeName } from '../src/gamedata.js';
+import { t, useLanguage } from '../../i18n';
 import { t as tv, localeAtual } from '../src/i18n.js';
 import { useEditorEnv } from './env.jsx';
 import { readOnly } from './session.js';
@@ -27,7 +27,7 @@ const readable = (debug) => {
 
 /** The entry's name and, for an item the game gives no name (its debug name came back), the debug name beside it. */
 const naming = (info, id) => {
-  if (!info) return { name: null, raw: null };
+  if (!info) { const name = nomeConhecimento(info, id); return { name: name === `#${id}` ? null : name, raw: null }; }
   const name = nomeConhecimento(info, id);
   const debug = info.i !== undefined ? items[info.i]?.debug : null;
   return debug && name === debug ? { name: readable(debug), raw: debug } : { name, raw: null };
@@ -35,6 +35,7 @@ const naming = (info, id) => {
 
 export default function Knowledge({ model, setModel }) {
   const env = useEditorEnv();
+  const language = useLanguage();
   const [q, setQ] = useState('');
   const [above, setAbove] = useState('');
   const [kinds, setKinds] = useState('ir');
@@ -48,9 +49,9 @@ export default function Knowledge({ model, setModel }) {
     return (model.knowledge ?? [])
       .map((k) => ({ ...k, info: map[k.id], ...naming(map[k.id], k.id) }))
       .filter((k) => kinds.includes(k.info?.t ?? 'o') && (above === '' || (k.info?.l ?? 0) > n)
-        && (!s || (k.name ?? '').toLowerCase().includes(s) || (k.raw ?? '').toLowerCase().includes(s) || String(k.id).includes(s)))
+        && (!s || (k.name ?? '').toLowerCase().includes(s) || englishKnowledgeName(k.info, k.id).toLowerCase().includes(s) || (k.raw ?? '').toLowerCase().includes(s) || String(k.id).includes(s)))
       .sort((a, b) => (b.info?.l ?? 0) - (a.info?.l ?? 0) || (a.name ?? '').localeCompare(b.name ?? '', localeAtual()));
-  }, [model.knowledge, q, above, kinds]);
+  }, [model.knowledge, q, above, kinds, language]);
   if (!model.knowledge) return <div className="ke-empty"><span className="ke-empty-word">{t('editor.knowledge.noBlock')}</span></div>;
   const toggle = (id) => setSel((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   // All edits still go through the session's one setModel path, ready for session-wide undo/redo.
