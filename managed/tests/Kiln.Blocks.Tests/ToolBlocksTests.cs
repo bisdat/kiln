@@ -75,6 +75,38 @@ public sealed class ToolBlocksTests
         } finally {WorldTablesNative.TestDefine=null;}
     }
     [Fact]
+    public void Tool_pool_owns_its_entry_collection_after_definition()
+    {
+        WorldTablesNative.ForgetBaked("tool-owned-pool");WorldTablesNative.Baking=true;
+        try {
+            var mod=new ModBlocks("tool-owned-pool",1) {ManifestClients="mod"};
+            var entries=new List<ToolMaterialPoolEntry> {new("Build_TerrainMaterial_T1_Rubble",8,16)};
+            var handle=Compiler.Define(mod,"materials",new ToolMaterialPoolBlock {Name="Materials",Entries=entries});
+            Assert.IsType<ToolMaterialPoolEntry[]>(handle.Block.Entries);Assert.NotSame(entries,handle.Block.Entries);
+            entries[0]=entries[0] with {VoxelsPerItem=32};Assert.Equal(16,handle.Block.Entries[0].VoxelsPerItem);
+        } finally {WorldTablesNative.Baking=false;WorldTablesNative.ForgetBaked("tool-owned-pool");}
+    }
+
+    [Fact]
+    public void Tool_owns_its_brush_and_both_action_collections_after_definition()
+    {
+        WorldTablesNative.ForgetBaked("tool-owned-family");WorldTablesNative.Baking=true;
+        try {
+            var mod=new ModBlocks("tool-owned-family",1) {ManifestClients="mod"};
+            var brush=Compiler.Define(mod,"small",new TerrainBrushBlock {Name="Small",Radius=0.5});
+            var brushes=new List<PartRef<TerrainBrushBlock>> {"small"};
+            var primary=new List<byte> {8,66,69};var secondary=new List<byte> {8,66,69};
+            var handle=Compiler.Define(mod,"tool",new BuildingToolBlock {Name="Tool",Brushes=brushes,
+                Primary=new() {Mode=TerrainToolMode.Remove,RemoveMaterials=primary},Secondary=new() {Mode=TerrainToolMode.Remove,RemoveMaterials=secondary}});
+            Assert.IsType<PartRef<TerrainBrushBlock>[]>(handle.Block.Brushes);Assert.NotSame(brushes,handle.Block.Brushes);
+            Assert.IsType<byte[]>(handle.Block.Primary.RemoveMaterials);Assert.NotSame(primary,handle.Block.Primary.RemoveMaterials);
+            Assert.IsType<byte[]>(handle.Block.Secondary.RemoveMaterials);Assert.NotSame(secondary,handle.Block.Secondary.RemoveMaterials);
+            brushes.Clear();primary.Clear();secondary.Clear();
+            Assert.Single(handle.Block.Brushes);Assert.Equal(new byte[]{8,66,69},handle.Block.Primary.RemoveMaterials);Assert.Equal(new byte[]{8,66,69},handle.Block.Secondary.RemoveMaterials);
+        } finally {WorldTablesNative.Baking=false;WorldTablesNative.ForgetBaked("tool-owned-family");}
+    }
+
+    [Fact]
     public void Bake_keeps_tool_pool_and_brush_descriptors_pending_not_live()
     {
         WorldTablesNative.ForgetBaked("tool-bake"); WorldTablesNative.Baking=true;

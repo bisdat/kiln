@@ -25,7 +25,28 @@ public sealed class BuildingToolsFakeTests
             Blocks.Define("made",new KnowledgeBlock {Trigger=KnowledgeTrigger.Craft,Of=recipe.Name});
         }
     }
+    public sealed class CollectionToolMod:Mod
+    {
+        public override void OnLoad()
+        {
+            var pool=Blocks.Define("materials",new ToolMaterialPoolBlock {Name="Terrain materials",Entries=[
+                new("Build_TerrainMaterial_T1_Rubble",8,16),new("Build_TerrainMaterial_T1_Grassland_Rubble",66,16),new("Build_TerrainMaterial_T3_Steppes_Rubble",69,16)]});
+            var small=Blocks.Define("small",new TerrainBrushBlock {Name="Small",Radius=0.5});
+            var medium=Blocks.Define("medium",new TerrainBrushBlock {Name="Medium",Radius=1.5});
+            var large=Blocks.Define("large",new TerrainBrushBlock {Name="Large",Radius=2.5});
+            Blocks.Define("tool",new BuildingToolBlock {Name="Terrain tool",MaterialPool=pool,Brushes=[small,medium,large],
+                Primary=new() {Mode=TerrainToolMode.Remove,RemoveMaterials=[8,66,69]},Secondary=new() {Mode=TerrainToolMode.Add}});
+        }
+    }
     private sealed class EmptyMod:Mod;
+
+    [Fact]
+    public void Tool_collection_expressions_do_not_keep_the_mod_load_context_alive()
+    {
+        using var h=new KilnHarness();var mod=h.Load<CollectionToolMod>(new ModManifest("tool-collections").Set("clients","mod"));h.Step(2);
+        Assert.True(mod.IsLoaded,mod.Error);
+        h.Unload(mod);
+    }
 
     [Fact]
     public void A_pending_tool_recipe_is_recorded_without_claiming_live_content_and_survives_reload()

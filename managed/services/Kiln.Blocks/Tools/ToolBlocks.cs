@@ -41,7 +41,7 @@ public sealed record ToolMaterialPoolBlock : IBlock
 {
     /// <summary>The pool's readable name.</summary>
     public required string Name { get; init; }
-    /// <summary>One to 64 distinct items and distinct terrain materials.</summary>
+    /// <summary>One to 64 distinct items and distinct terrain materials. The compiler copies the list into Kiln-owned storage.</summary>
     public required IReadOnlyList<ToolMaterialPoolEntry> Entries { get; init; }
     /// <summary>The old key, preserving the pool identity after a rename.</summary>
     public string? Was { get; init; }
@@ -61,7 +61,7 @@ public sealed record BuildingToolBlock : IBlock
     public BlockIdentity? Identity { get; init; }
     /// <summary>The terrain selector pool. Required for an Add action; optional for Remove-only tools.</summary>
     public PartRef<ToolMaterialPoolBlock>? MaterialPool { get; init; }
-    /// <summary>One to 64 named brushes. A brush belongs to exactly one tool.</summary>
+    /// <summary>One to 64 named brushes. A brush belongs to exactly one tool. The compiler copies the list into Kiln-owned storage.</summary>
     public required IReadOnlyList<PartRef<TerrainBrushBlock>> Brushes { get; init; }
     /// <summary>The game's building-mode primary action.</summary>
     public required TerrainToolAction Primary { get; init; }

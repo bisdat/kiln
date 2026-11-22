@@ -8,6 +8,9 @@ internal static partial class Compiler
     {
         ctx.Need(ClientsLevel.Mod,null,"a tool pool and its terrain identities must agree in every player's game");
         var node=ToolBlockValidation.PoolNode(block);
+        // A mod's collection expression may use a compiler-generated type from its collectible assembly.
+        // Handles and runtime policies must retain Kiln-owned arrays, never that collection implementation.
+        block=block with {Entries=block.Entries.ToArray()};
         for(var i=0;i<block.Entries.Count;i++)node["entries"]![i]!["item"]=ctx.ItemName(block.Entries[i].Item,$"entries[{i}].item");
         var (status,_)=AskTables(ctx,low,"toolMaterialPools",name,node);
         low.Json["toolMaterialPool"]=node.DeepClone();
@@ -32,6 +35,9 @@ internal static partial class Compiler
             if(!action.TerrainOnly||action.Mode is not (TerrainToolMode.Remove or TerrainToolMode.Add)||action.RemoveMaterials is null||action.RemoveMaterials.Any(c=>c is <1 or >127)||
                 (action.Mode==TerrainToolMode.Add&&action.RemoveMaterials.Count!=0))throw new BlockError(ctx.Block,"actions","actions must be terrain-only, with terrain removal cells on Remove only");
         }
+        block=block with {Brushes=block.Brushes.ToArray(),
+            Primary=block.Primary with {RemoveMaterials=block.Primary.RemoveMaterials.ToArray()},
+            Secondary=block.Secondary with {RemoveMaterials=block.Secondary.RemoveMaterials.ToArray()}};
         var guid=LegacyIdentities.Claim(ctx,"item",block.Identity,"identity",BlockIds.Derive(ctx.Mod.Id,"item",block.Was??name));
         TableBlockHandle<ToolMaterialPoolBlock>? pool=null;
         if(block.MaterialPool is {} poolRef) {
