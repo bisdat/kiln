@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <iterator>
 #include <optional>
 #include <tuple>
 #include <unordered_map>
@@ -972,6 +973,7 @@ void recompose(const std::vector<RegistrySection>& sections) {
                 for (const registry::Edit& e : bt.edits) before.insert(edit_key(e));
         std::erase_if(m.batches, [&](const registry::Batch& bt) { return is_data(bt.source); });
         std::erase_if(m.refused, [&](const registry::Refusal& r) { return is_data(r.source); });
+        std::vector<registry::Batch> data;
         for (const RegistrySection& s : sections) {
             if (s.mod != m.id) continue;
             const bool changed = stale.count(s.mod + "|" + s.source) != 0;
@@ -993,7 +995,7 @@ void recompose(const std::vector<RegistrySection>& sections) {
                     g.refused.push_back(r);
                     return true;
                 });
-                m.batches.push_back(std::move(bt));
+                data.push_back(std::move(bt));
             }
             for (const registry::Refusal& r : s.refused) {
                 m.refused.push_back(r);
@@ -1002,6 +1004,8 @@ void recompose(const std::vector<RegistrySection>& sections) {
             if (changed && !s.error.empty())
                 again.push_back({s.mod, s.rel, registry::Stage::Alter, 0, s.rel + ": " + s.error + "; nothing of this file's registry section was applied", ""});
         }
+        // Match Runner::run: data precedes queued code and recorded callback turns, on every recompose too.
+        m.batches.insert(m.batches.begin(), std::make_move_iterator(data.begin()), std::make_move_iterator(data.end()));
     }
     for (const RegistrySection& s : sections)  // a mod that had no registry content at the start
         if (std::none_of(mods.begin(), mods.end(), [&](const registry::ModInput& m) { return m.id == s.mod; })) {

@@ -315,7 +315,7 @@ std::vector<PackFile> files_of(const std::vector<std::pair<std::string, std::str
 }
 
 // What S11 does at resources-ready: lower the sections, compose, install.
-void stage(const std::vector<PackFile>& files) {
+void stage(const std::vector<PackFile>& files, const std::vector<registry::Batch>& code = {}) {
     const registry::Schema& sc = registry_schema();
     std::vector<registry::ModInput> mods;
     for (const RegistrySection& s : registry_sections(files, sc)) {
@@ -323,6 +323,12 @@ void stage(const std::vector<PackFile>& files) {
         if (it == mods.end()) mods.push_back({}), it = mods.end() - 1, it->id = s.mod;
         for (auto& b : s.batches) it->batches.push_back(b);
         for (auto& r : s.refused) it->refused.push_back(r);
+    }
+    // Runner hands over data first, queued code next, and recorded callback turns last.
+    for (const auto& batch : code) {
+        auto it = std::find_if(mods.begin(), mods.end(), [&](const auto& m) { return m.id == batch.mod; });
+        if (it == mods.end()) mods.push_back({}), it = mods.end() - 1, it->id = batch.mod;
+        it->batches.push_back(batch);
     }
     RegistryLive in;
     in.schema = std::make_shared<const registry::Schema>(sc);
@@ -368,6 +374,37 @@ bool conflict(const registry::FieldRef& ref, registry::LineKind kind, const std:
     return std::any_of(g_last_report.lines.begin(), g_last_report.lines.end(), [&](const registry::Line& line) {
         return line.field == ref && line.kind == kind && line.winner == "m" && line.loser == pack;
     });
+}
+
+void callback_order_survives_reloads() {
+    for (bool queued : {false, true}) {
+        world();
+        g_files = {{"a/content/a.json", R"({"registry":{"alter":[{"registry":"items","select":"game:material_t1_wood_logs","field":"maxStack","op":{"mul":4}}]}})"},
+                   {"b/content/b.json", R"({"registry":{"alter":[{"registry":"items","select":"game:material_stone","field":"maxStack","op":{"mul":2}}]}})"}};
+        const auto files = files_of({{"a", "a/content/a.json"}, {"b", "b/content/b.json"}});
+        std::vector<registry::Batch> code;
+        auto record = [&](const char* op, const char* source) {
+            registry::Batch batch; std::vector<registry::Refusal> refused; std::string why;
+            const std::string ir = std::string(R"({"ir":1,"mod":"a","stage":"alter","edits":[{"registry":"items","select":"game:material_t1_wood_logs","field":"maxStack","op":)") + op + "}]}";
+            check(registry::parse_batch(ir, registry_schema(), &batch, &refused, &why) && refused.empty(), "parse recorded code batch");
+            batch.source = source; code.push_back(std::move(batch));
+        };
+        if (queued) record(R"({"mul":2})", "code:a");
+        record(R"({"add":5})", "code");
+        stage(files, code); apply_registry_files(files);
+        const uint32_t factor = queued ? 2 : 1;
+        check(at<uint32_t>(WOOD_AT) == 40 * factor + 5, "start applies data, queued code, then the callback");
+        g_files["b/content/b.json"] = R"({"registry":{"alter":[{"registry":"items","select":"game:material_stone","field":"maxStack","op":{"mul":3}}]}})";
+        apply_registry_files(files);
+        check(at<uint32_t>(WOOD_AT) == 40 * factor + 5, "an unrelated section reload keeps data before recorded code");
+        g_files["a/content/a.json"] = R"({"registry":{"alter":[{"registry":"items","select":"game:material_t1_wood_logs","field":"maxStack","op":{"mul":6}}]}})";
+        apply_registry_files(files);
+        check(at<uint32_t>(WOOD_AT) == 60 * factor + 5, "a same-mod reload also keeps the callback last, exactly once");
+        g_files["a/content/a.json"] = "{}"; apply_registry_files(files);
+        check(at<uint32_t>(WOOD_AT) == 10 * factor + 5, "removing data leaves queued code and the callback exactly once");
+        registry_live_owner_gone(77); registry_live_publish();
+        check(at<uint32_t>(WOOD_AT) == 10 * factor + 5, "owner retirement does not discard already-taken start edits");
+    }
 }
 
 void live_recipe_report() {
@@ -715,6 +752,7 @@ int main() {
     }
     const std::pair<const char*, void (*)()> tests[] = {
         {"relative_over_packs_and_reload", relative_over_packs_and_reload},
+        {"callback_order_survives_reloads", callback_order_survives_reloads},
         {"live_recipe_report", live_recipe_report},
         {"live_formula_report", live_formula_report},
         {"report_caps_lists", report_caps_lists},
