@@ -515,6 +515,30 @@ Each is marked `kiln-eml:` in the source.
     `validation_reads_a_baseline_containers_content_the_baseline_does_not_list_there`,
     `baseline_samples_spread_from_the_first_content_to_the_last_and_skip_large_ones`, and `m6_startup_timing.rs`
     (ignored: a client-sized archive, run by hand).
+40. `mod-loader-lua` `load.rs` (`create_backup_with`, `stale_backup`, `base_relation`, `containers_hold`,
+    `restore_backup_as`), `ownership.rs` (`header_is_kilns`, `readonly::base_relation`) and `kiln-eml/src/inspection.rs`
+    (note `baseline-stale`) (kiln-eml's own code): a working baseline of the live game build that does not describe the
+    game's data files is found before anything is staged. The backup's own checks (version, seal or live resource
+    prefix) pass a backup that is itself modded data: another mod loader or an earlier start can keep the modded pair it
+    found under the backup's names, a later start seals it again while it equals the live files, and after Steam's file
+    check (the game's own header and resource file back, the extra containers left) a container that backup lists can
+    hold other bytes. EML mode built the stage from it, and the stage's read-back refused every start with "staged
+    content hash mismatch" (0.2.0-dev.30.4; 0.2.0-dev.30.1 had no read-back and published it). Now `create_backup`
+    compares the two headers by the writer's rule (`base_relation`: every writer builds a header over a baseline by
+    keeping its containers, contents and resource chunks in place and appending): the live header is the backup or was
+    built over it (Under), and every container the backup lists is there at its size (`containers_hold`; the game itself
+    refuses another size), or the start is refused with what to do (verify the game files in Steam, then start again; if
+    the message comes back, move the three backup files out of the game folder). A backup built over the live header
+    (Over) is replaced by a new backup of the live files, before any seal is repaired or written, when no ownership
+    receipt lists the live header, no record of Kiln's bundled ShroudForge names it, and every container the live header
+    lists has its size; else refused. `restore_backup_as` puts back only a backup whose containers are at their sizes. The
+    inspector agrees for kiln mode: Over is the live set as a new baseline (note `baseline-stale`, origin
+    `rebaselined-unclassified`; the boot witness takes it through `create_backup`), unless a live file is still Kiln's
+    output; a backup that is neither is `baseline-corrupt`. Tests: load.rs
+    `base_relation_follows_how_a_writer_builds_over_a_baseline`,
+    `a_backup_whose_containers_are_not_at_their_size_is_neither_built_from_nor_restored`,
+    `a_header_only_backup_built_over_the_game_files_is_replaced`, and `m6_stale_backup.rs` (the field's game folder
+    through the production runner and the inspector).
 
 The plugin validates paths from each authorized root down (root included), leaving linked Steam/Wine layout
 ancestors alone; it also checks final resolved containment. Profile paths resolve against `<game>/kiln`.
@@ -642,14 +666,14 @@ set a kiln-mode start builds from, with its evidence, strongest first:
 | `receipt-baseline` | the backups present are exactly the receipt's `backups` (size and SHA-256) and pass the writer's checks |
 | `sealed-baseline` | no matching receipt; the backup pair matches its seal (`<stem>.kfc.bak.integrity`) for the live build |
 | `unsealed-baseline` | no seal (an older EML's pair), or a seal another writer left behind (other lengths, or a pair equal to the live files): the live resource file's prefix equals the backup's, as the writer checks |
-| `current-set` | no backup at all, a backup of another game build (note `baseline-outdated`, origin `rebaselined-unclassified`), or a receipt whose backups are all gone over live files that are not Kiln's output from it (note `receipt-stale`, origin `rebaselined-unclassified`): the validated live set |
+| `current-set` | no backup at all, a backup of another game build (note `baseline-outdated`, origin `rebaselined-unclassified`), a backup of this build that was built over the live header (an archive writer's output kept under the backup's name, by another mod loader or an earlier start; note `baseline-stale`, origin `rebaselined-unclassified`; refused as `baseline-corrupt` when a live file is still Kiln's output), or a receipt whose backups are all gone over live files that are not Kiln's output from it (note `receipt-stale`, origin `rebaselined-unclassified`): the validated live set |
 
 Refused, with no base: a receipt this build does not understand (`receipt-unknown`, kept as it is), a receipt whose
 baseline is gone while a live file is still Kiln's output from it (`baseline-missing`, naming that file; its text
 tells the user to verify the game files in Steam), a header-only or resources-only backup
 (`baseline-incomplete`; its text tells the user to verify the game files in Steam and move the leftover backup files
 out of the game folder, so that Kiln takes a new baseline), a receipt path holding something that is not a receipt
-this build reads (over the writer's 16 MiB cap, or not a regular file: `receipt-unknown`), a pair that fails its seal and the unsealed rule (`baseline-corrupt`), and any missing,
+this build reads (over the writer's 16 MiB cap, or not a regular file: `receipt-unknown`), a pair that fails its seal and the unsealed rule, a backup of this build that is neither the live header nor built under it, or one built over the live header while a live file is still Kiln's output (`baseline-corrupt`), and any missing,
 invalid, linked, unreadable or changed input (`missing`, `invalid`, `link`, `unreadable`, `changed`). Containers the
 live header does not list are reported (`retained-container`, note `unreferenced-containers`), never read or blocking.
 
@@ -672,7 +696,7 @@ calls a set vanilla, and true vanilla is Steam's file verification.
 | Token | Exact label | When |
 |---|---|---|
 | `first-managed-unclassified` | `unclassified: game files as found when Kiln first managed this install` | `current-set` with no backup present, or a receipt's `baseOrigin` with this token keyed to exactly this baseline |
-| `rebaselined-unclassified` | `unclassified: game files as found when Kiln took a new baseline after the game changed` | `current-set` because the backups present are of another game build (note `baseline-outdated`), or a receipt's `baseOrigin` with this token keyed to exactly this baseline |
+| `rebaselined-unclassified` | `unclassified: game files as found when Kiln took a new baseline after the game changed` | `current-set` because the backups present are of another game build (note `baseline-outdated`) or were built over the live header (note `baseline-stale`), or a receipt's `baseOrigin` with this token keyed to exactly this baseline |
 | `unrecorded` | `unrecorded: a working baseline from an earlier start; where its files came from was not recorded` | every other backup-based BASE |
 
 A receipt's `baseOrigin` (written by kiln mode, read here) is `{"token", "label", "baseline"}`, `baseline` mapping each of

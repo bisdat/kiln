@@ -41,6 +41,12 @@ The game data is `<exe>.kfc` (header and tables), `<exe>.kfc_resources` (residen
    When nothing changed, the patch is skipped.
 3. **Backup.** On the first run it copies `<exe>.kfc` to `<exe>.kfc.bak`, and refreshes the copy when the game
    updates (the version tag changes). Every run reads the vanilla data from the backup, so patches never stack.
+   A backup of the current game build must describe the game's own data files before anything is
+   built from it: the game's `<exe>.kfc` is the backup or was built over it, and every `.dat` container the backup
+   lists is there at its size. A backup that is itself modded data built over the game's files (left by another mod
+   loader or an earlier start) is replaced by a new backup when no loader Kiln knows claims the game's files; any other
+   mismatch stops the start with advice: verify the game files in Steam, and if the message comes back, move the
+   `.kfc.bak`, `.kfc_resources.bak` and `.kfc.bak.integrity` files out of the game folder.
 4. **Lua run.** Each mod gets its own Lua 5.4 environment. A mod runs when it declares `patch` (and patching is on) or
    `export` (and export is on). Resources are typed tables. Changes are tracked, and only changed or created
    resources are serialised.

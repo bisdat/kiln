@@ -311,6 +311,9 @@ pub mod readonly {
     }
     impl Default for SealCrc { fn default() -> Self { Self::new() } }
 
+    /// kiln-eml: how a working baseline's header relates to the live header (the writer's rule, `load::base_relation`).
+    pub use crate::load::{base_relation, BaseRelation};
+
     /// A seal's recorded (length, CRC-64) of the header backup and the resource backup; None when it is not one.
     pub fn seal(bytes: &[u8]) -> Option<((u64, u64), (u64, u64))> {
         #[derive(Deserialize)]
@@ -403,6 +406,21 @@ impl<'a> Live<'a> {
             _ => Ok(None),
         }
     }
+}
+
+/// kiln-eml: the live header is one Kiln's ownership receipt lists for its current or previous generation, whatever
+/// backups the receipt names: Kiln's own output, never a game file to take a backup of. Reads the receipt, and hashes the
+/// live header only when a listed one has its length. Err: a receipt Kiln does not understand, or an unreadable header.
+pub(crate) fn header_is_kilns(root: &Path, stem: &str) -> io::Result<bool> {
+    let Some(receipt) = read_receipt(root, stem)? else { return Ok(false) };
+    let name = format!("{stem}.kfc");
+    let header = root.join(&name);
+    let size = fs::metadata(&header)?.len();
+    let listed: Vec<&Digest> = std::iter::once(&receipt.files).chain(receipt.previous.as_ref())
+        .filter_map(|generation| generation.get(&name)).filter(|d| d.size == size).collect();
+    if listed.is_empty() { return Ok(false); }
+    let live = digest(root, &header)?;
+    Ok(listed.into_iter().any(|d| *d == live))
 }
 
 /// Exact output and original working-baseline proof. Legacy performance caches never authorize restoration.
