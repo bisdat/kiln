@@ -30,6 +30,7 @@ A mod's blocks: spells, weapons, wands, armor, items, stations, statuses, effect
 | `bodies` | object |  | Bodies, for creatures and NPCs to name. |
 | `buildingMaterialPools` | object |  |  |
 | `buildingMaterials` | object |  | New building materials: an id and a GUID in the game's tables, and a block item. 49 fit across all mods. Needs "clients": "mod". |
+| `buildingTools` | object |  |  |
 | `comforts` | object |  | Parts: what the game's comfort counts. |
 | `containers` | object |  | Things that hold items, as the game's chests do: a lid, sounds and upgrades from the game's small chest. |
 | `cosmetics` | object |  | Pieces for the vanity slots: shown over what is worn there, with no stats. A look with files of the mod's own needs "clients": "mod". |
@@ -71,7 +72,9 @@ A mod's blocks: spells, weapons, wands, armor, items, stations, statuses, effect
 | `surfaces` | object |  | Parts: how building materials look, defined once for materials of this mod to name. |
 | `talentTrees` | object |  | Whole trees of their own, on Kiln's screen. Needs "clients": "mod". |
 | `talents` | object |  | Nodes of a skill tree: in the game's own tree with game, else parts for a talent tree. Needs "clients": "mod". |
+| `terrainBrushes` | object |  |  |
 | `terrainMaterials` | object |  | New terrain materials: ground, rock or ore, an id and a GUID in the game's tables. 11 fit across all mods, apart from the building materials. Needs "clients": "mod". |
+| `toolMaterialPools` | object |  |  |
 | `triggers` | object |  | What a player does or is, any of the game's states and actions, driving effects. |
 | `vfx` | `kiln-vfx.schema.json section` |  | Effects written from nothing: particles and a light. No compiler, no game data. Built by the game client at start. |
 | `wands` | object |  | One-handed casters whose attacks are spells of their own: no spell item, no charges. |
@@ -492,6 +495,20 @@ How a building material looks. On a new material a layer left out repeats side (
 A building surface, inline or by the name of one in this mod's surfaces sections.
 
 Type: string or [buildingSurface](#buildingsurface)
+
+## buildingTool
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `brushes` | array of [ref](#ref) | yes | min items 1 max items 64 |
+| `description` | string |  | max length 16384 |
+| `icon` | string |  | min length 1 |
+| `identity` | [identity](#identity) |  |  |
+| `materialPool` | [ref](#ref) |  |  |
+| `name` | string | yes | min length 1 max length 1024 |
+| `primary` | [terrainToolAction](#terraintoolaction) | yes |  |
+| `secondary` | [terrainToolAction](#terraintoolaction) | yes |  |
+| `was` | [name](#name) |  |  |
 
 ## cast
 
@@ -1691,6 +1708,17 @@ A whole tree on Kiln's screen in the game's look. Kiln keeps each character's un
 | `respec` | boolean |  | Everything can be given back for free (default). |
 | `was` | [name](#name) |  |  |
 
+## terrainBrush
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `description` | string |  | max length 16384 |
+| `identity` | [identity](#identity) |  |  |
+| `name` | string | yes | min length 1 max length 1024 |
+| `radius` | number | yes | min 0.25 max 8 |
+| `shape` | `"sphere"` |  |  |
+| `was` | [name](#name) |  |  |
+
 ## terrainMaterial
 
 A new terrain material: it starts from a game terrain material and looks like one.
@@ -1709,6 +1737,14 @@ A new terrain material: it starts from a game terrain material and looks like on
 | `sliding` | boolean |  | Feet slide on it, as on ice. Default: like's. |
 | `strength` | [strengthRef](#strengthref) |  |  |
 | `was` | string |  | The block's old name, after a rename: the material's id comes from it, so its cells stay in every world. |
+
+## terrainToolAction
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `mode` | `"remove"` \| `"add"` | yes |  |
+| `removeMaterials` | array of integer |  |  |
+| `terrainOnly` | `true` |  |  |
 
 ## texts
 
@@ -1730,6 +1766,14 @@ What a tool does: what it is for, and how well. Each class takes the fields it h
 | `range` | number |  | Metres: how far a rake flattens around where it aims (3), how far a grappling hook reaches (13.5). max 32 |
 | `staminaCost` | integer |  | Stamina each use costs; the tooltip follows. Not for a fishing rod or a torch. min 0 |
 | `wearPerDebit` | integer |  | What each of the game's wear debits costs the tool's durability (1: the game's own; 0: it does not wear). Per debit, not per swing. A tool with enhancement slots (an axe, a pickaxe, a sieve). Set where the world runs. Needs items.tool_wear_debit. min 0 max 32767 |
+
+## toolMaterialPool
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `entries` | array of object | yes | min items 1 max items 64 |
+| `name` | string | yes | min length 1 max length 1024 |
+| `was` | [name](#name) |  |  |
 
 ## trigger
 
