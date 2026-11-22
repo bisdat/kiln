@@ -194,8 +194,18 @@ void fault_outcomes() {
     CHECK(!d.blank && !d.stop);
 }
 
+void lab_blanking() {
+    CHECK(repl::lab_blanks(true, true, KILN_REPL_PEER_FAKE));
+    CHECK(repl::lab_blanks(true, true, KILN_REPL_PEER_FAKE | KILN_REPL_PEER_BOUND));
+    CHECK(!repl::lab_blanks(true, true, 0));                    // a real player: never
+    CHECK(!repl::lab_blanks(true, true, KILN_REPL_PEER_LOCAL));
+    CHECK(!repl::lab_blanks(false, true, KILN_REPL_PEER_FAKE));  // not remapped
+    CHECK(!repl::lab_blanks(true, false, KILN_REPL_PEER_FAKE));  // the switch off
+}
+
 int main() {
     fault_outcomes();
+    lab_blanking();
     blanking();
     abi();
     remap();

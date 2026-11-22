@@ -175,6 +175,17 @@ void filter_after(void* p) {
     }
     if (!any) return;
     const bool remap_here = hot->remap && ((hot->remap_machines >> m) & 1);
+    if (remap_here && g_lab_force_blank.load(std::memory_order_relaxed)) {
+        uint8_t pf = 0;
+        peer_of(static_cast<uint32_t>(m), &pf);
+        if (lab_blanks(remap_here, true, pf)) {  // lab servers only: as a state that cannot be placed (recheck F)
+            if (blank_state(s, reg->count, [reg](uint32_t i) { return (reg->at[i].flags & KILN_REPL_COMPONENT_VERSIONED) != 0; }))
+                g_remap_counters.blanked.fetch_add(1, std::memory_order_relaxed);
+            else
+                remap_set_stopped(KILN_REPL_REMAP_UNPLACED);
+            return;
+        }
+    }
     // 3. offsets of the components with data, from the game's pure StateIndex (room for every component: a state with
     // many is still placed, never sent past the remap)
     Part parts[kMaxComponents];

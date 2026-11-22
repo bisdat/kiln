@@ -139,4 +139,10 @@ struct FaultOutcome {
 inline FaultOutcome after_fault(bool any_remapped, bool machine_known, bool machine_remapped) {
     return FaultOutcome{machine_known && machine_remapped, any_remapped};
 }
+
+// Lab servers only (recheck F): kiln/config/repl-lab.json {"forceBlank": true} blanks every remapped loopback fake's
+// states, as a state that cannot be placed, so a lab proves the game's own decoder takes a blanked state.
+inline bool lab_blanks(bool remap_here, bool forced, uint8_t peer_flags) {
+    return remap_here && forced && (peer_flags & KILN_REPL_PEER_FAKE) != 0;
+}
 }  // namespace repl

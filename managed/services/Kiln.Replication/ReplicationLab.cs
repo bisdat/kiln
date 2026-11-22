@@ -245,6 +245,14 @@ public sealed record ReplLabDecoded(uint Tick, ReadOnlyMemory<byte> Bytes);
 /// public API.</summary>
 internal static class ReplicationLabInternals
 {
+    /// <summary>The remap's blanked-state count (kiln.repl.net remap_stats), for repl-test's blank part.</summary>
+    internal static unsafe ulong RemapBlanked()
+    {
+        var t = ReplNetNative.T;
+        var s = new ReplNetNative.RemapStats { Size = (uint)sizeof(ReplNetNative.RemapStats) };
+        return t != null && t->RemapStatsFn != null && t->RemapStatsFn(&s) == ReplNative.Ok ? s.Blanked : 0;
+    }
+
     /// <summary>The newest create or update payload fake <paramref name="machine"/> was sent for <paramref name="entity"/>
     /// on its client channel; null when none.</summary>
     internal static (byte[] Bytes, uint Tick)? Payload(int machine, EntityId entity, ReplKind kind)
