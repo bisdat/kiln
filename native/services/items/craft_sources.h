@@ -10,6 +10,7 @@ struct CraftSource {
     uint32_t player = 0, container = 0;
     bool after_outputs = false, deny = true;
     std::vector<uint32_t> items;
+    uint32_t player_session = 0;
     bool allows(uint32_t item) const {
         const bool found = std::binary_search(items.begin(), items.end(), item);
         return item && (deny ? !found : found);
@@ -24,13 +25,13 @@ class CraftSourceRegistry {
     uint64_t next_ = 0;
     std::vector<CraftSource> sources_;
 public:
-    uint64_t add(uint64_t owner, uint32_t player, uint32_t container, bool after, bool deny, std::vector<uint32_t> items) {
+    uint64_t add(uint64_t owner, uint32_t player, uint32_t container, bool after, bool deny, std::vector<uint32_t> items, uint32_t session = 0) {
         std::lock_guard lock(mutex_);
         if (sources_.size() >= 4096) return 0;
         std::sort(items.begin(), items.end());
         items.erase(std::unique(items.begin(), items.end()), items.end());
         const auto id = ++next_;
-        sources_.push_back({owner,id,player,container,after,deny,std::move(items)});
+        sources_.push_back({owner,id,player,container,after,deny,std::move(items),session});
         return id;
     }
     bool remove(uint64_t owner, uint64_t handle) {

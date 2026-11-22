@@ -398,6 +398,7 @@ typedef struct KilnStationCollect KilnStationCollect;
  * player's own CanAccessInventories permission and a readable initialized container, not membership of a base.
  * order: 0 before station outputs, 1 after. filter: 0 deny set, 1 allow set. Empty deny set allows every item.
  * items is copied at registration; no callbacks run during native payment. All reserved fields must be zero. */
+enum { KILN_CRAFT_SOURCE_STOCK_ALL = 1u }; /* source_stock: include overlaps with bag/base/station stock */
 typedef struct KilnCraftSourceRequest {
     uint32_t size;
     KilnEntity player;
@@ -508,8 +509,9 @@ typedef struct KilnStationsApi {
     void(KILN_CALL* cancel_sources)(KilnOwner owner);
     /* Tick thread: the registered sources' filtered extra counts, beyond the bag, current base stock and opted-in
      * station outputs. No base required. Access is checked again, never inferred from a client's message.
+     * flags 0: crafting extras; KILN_CRAFT_SOURCE_STOCK_ALL: all registered counts (e.g. for dyes). Unknown bits: INVALID_ARGUMENT.
      * BUFFER_TOO_SMALL reports the whole needed count: never send a truncated crafting snapshot. */
-    KilnResult(KILN_CALL* source_stock)(KilnEntity player, KilnStationStack* out, uint32_t capacity, uint32_t* out_count);
+    KilnResult(KILN_CALL* source_stock)(KilnEntity player, uint32_t flags, KilnStationStack* out, uint32_t capacity, uint32_t* out_count);
 } KilnStationsApi;
 
 /* KilnStationCollect.flags. Bits 16 and up, so a result's flags never read as a request flag (KILN_STATION_DRY_RUN). */

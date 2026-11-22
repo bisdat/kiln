@@ -5712,7 +5712,7 @@
           "size": 188
         }
       },
-      "sha256": "e7af06b069cb7d794f9028957b9701d8d7804b1245cb339e764577e1a746325c"
+      "sha256": "778b88b2902d061a12bc6f109f1a52da84d529e4c99438ff413ea24b9e67f7cf"
     },
     "native/core/abi/services/kiln_steamguard.h": {
       "function_macros": [],
@@ -8518,7 +8518,7 @@
     "src/services/kiln_screen.rs": "16e368975e8826d818a3647791e26b2d35443263f8044e3e482f3eb97a49299e",
     "src/services/kiln_settings.rs": "c88c9e2771d5f520cfe37a07feab6eaa0a9d6aa8b6abb8a7b0efcaf0eeee68c7",
     "src/services/kiln_spawn.rs": "b6ced999b7a1ecd93684a0a7c138081547ccec6f496aee7c69c0f807d1bb83dc",
-    "src/services/kiln_stations.rs": "f20f9da6b51f1b05cec4d007ad94a8fea59b74a3160545c137e970290f100ff2",
+    "src/services/kiln_stations.rs": "bc4b45800f45df67612a322e34e8aa852f3a5cfc2844024af14ec07f0c359c19",
     "src/services/kiln_steamguard.rs": "f14ecec92f945c2b34f4682c216940187797b8db81a8de652fcba6ddb61f072c",
     "src/services/kiln_surfaces.rs": "d4d991aef0a14f4be7246227b95a0f34161ca23fe04561e9c94d6d2aba0db4a0",
     "src/services/kiln_tasks.rs": "da41943b4ac01aaa77cfb43091e8c209f0e55707c3a3105dd9070313750a6f79",

@@ -830,6 +830,23 @@ bool is_character(const Access& a, KilnEntity e) {
 
 // BasicPlayerInfos is the server-wide per-player right, not a per-base ownership check (docs/re/stations.md §10.1).
 // These offsets are pinned by crafting.sources in sigdb; unknown builds never enable this path.
+struct SourcePlayerJob { void* bases; uint32_t player, session; bool ok; };
+void source_player_impl(void* p) {
+    auto& j=*static_cast<SourcePlayerJob*>(p);
+    if(!j.bases || !j.player || j.player>kMaxPlayerEntity) return;
+    const auto* infos=rd<const uint8_t*>(j.bases,0x10);
+    if(!infos)return;
+    const auto* record=infos+static_cast<size_t>(j.player-1)*0xa0;
+    if(rd<uint32_t>(record,0)!=j.player)return;
+    j.session=rd<uint32_t>(record,4); // players/InfoHandle: same id, different login must not inherit links
+    j.ok=true;
+}
+bool source_player(void* bases,uint32_t player,uint32_t* session) {
+    SourcePlayerJob job{bases,player,0,false}; unsigned long fault=0;
+    if(!G.registered_ok || !guard(&source_player_impl,&job,&fault) || !job.ok)return false;
+    *session=job.session;return true;
+}
+
 struct SourceAccessJob { void* bases; uint32_t player, container; bool ok; };
 void source_access_impl(void* p) {
     auto& j = *static_cast<SourceAccessJob*>(p);
@@ -907,7 +924,7 @@ int craft_pay_impl(void* tx, void* costs, uint32_t owner, uint32_t multiplier, v
     // (RecipePayAlt) return elsewhere and stay the game's.
     if (ret != G.recipe_paid) return 0;
     CS.calls.fetch_add(1, std::memory_order_relaxed);
-    const auto registered = G.registered_ok ? g_registered.copy(owner) : std::vector<CraftSource>{};
+    const auto registered = G.registered_ok ? craft_sources_copy(owner) : std::vector<CraftSource>{};
     {
         std::lock_guard lock(g_mu);
         if (g_sources.empty() && registered.empty()) {
@@ -1065,13 +1082,13 @@ int craft_pay_impl(void* tx, void* costs, uint32_t owner, uint32_t multiplier, v
         CS.paid.fetch_add(1, std::memory_order_relaxed);
         CS.from_outputs.fetch_add(static_cast<uint32_t>(std::min<uint64_t>(from, 0xffffffffu)), std::memory_order_relaxed);
         if (const uint32_t n = g_log_paid.take())
-            LOGI("stations: a craft paid %llu from opted-in station outputs (base %d, payer %u)%s",
+            LOGI("stations: a craft paid %llu from additional crafting sources (base %d, payer %u)%s",
                  static_cast<unsigned long long>(from), base, owner, n > 1 ? " (more held back)" : "");
         *code = 0;
         return 1;
     }
     CS.rollback.fetch_add(1, std::memory_order_relaxed);
-    LOGW("stations: a craft paid from station outputs rolled back (%s; base %d, payer %u): nothing moved",
+    LOGW("stations: a craft paid from additional sources rolled back (%s; base %d, payer %u): nothing moved",
          why == kCraftWhyFault ? "a take faulted" : "a line stayed short", base, owner);
     *code = 4;  // a take may already be queued: CraftRecipe rolls the transaction back
     return 1;
@@ -3270,7 +3287,7 @@ uint64_t KILN_CALL t_last_seq() {
 KilnResult KILN_CALL t_add_source(KilnOwner owner, const KilnCraftSourceRequest* r, uint64_t* out) {
     if (!out) return KILN_ERR_INVALID_ARGUMENT;
     *out = 0;
-    if (!r || r->size < sizeof *r || !owner || r->order > 1 || r->filter > 1 || r->item_count > 65536 ||
+    if (!r || r->size < sizeof *r || r->order > 1 || r->filter > 1 || r->item_count > 65536 ||
         (r->item_count && !r->items)) return KILN_ERR_INVALID_ARGUMENT;
     if (KilnResult g = read_gate(); g != KILN_OK) return g;
     if (!G.registered_ok || g_off.load()) return KILN_ERR_UNAVAILABLE;
@@ -3280,7 +3297,9 @@ KilnResult KILN_CALL t_add_source(KilnOwner owner, const KilnCraftSourceRequest*
     std::vector<uint32_t> items;
     if (r->item_count) items.assign(r->items,r->items + r->item_count);
     if (std::find(items.begin(),items.end(),0u) != items.end()) return KILN_ERR_INVALID_ARGUMENT;
-    *out = g_registered.add(owner,r->player,r->container,r->order != 0,r->filter == 0,std::move(items));
+    uint32_t session=0;
+    if(!source_player(g_srv_bases.load(std::memory_order_acquire),r->player,&session))return KILN_ERR_INVALID_ARGUMENT;
+    *out = g_registered.add(owner,r->player,r->container,r->order != 0,r->filter == 0,std::move(items),session);
     return *out ? KILN_OK : KILN_ERR_BUFFER_TOO_SMALL;
 }
 KilnResult KILN_CALL t_remove_source(KilnOwner owner, uint64_t handle) {
@@ -3288,15 +3307,16 @@ KilnResult KILN_CALL t_remove_source(KilnOwner owner, uint64_t handle) {
 }
 void KILN_CALL t_cancel_sources(KilnOwner owner) { g_registered.cancel_owner(owner); }
 
-KilnResult KILN_CALL t_source_stock(KilnEntity player, KilnStationStack* out, uint32_t capacity, uint32_t* out_count) {
-    if (!out_count || (capacity && !out) || !player || player > kMaxPlayerEntity) return KILN_ERR_INVALID_ARGUMENT;
+KilnResult KILN_CALL t_source_stock(KilnEntity player, uint32_t flags, KilnStationStack* out, uint32_t capacity, uint32_t* out_count) {
+    if (!out_count || (capacity && !out) || !player || player > kMaxPlayerEntity || (flags & ~KILN_CRAFT_SOURCE_STOCK_ALL)) return KILN_ERR_INVALID_ARGUMENT;
     *out_count = 0;
     if (KilnResult g = read_gate(); g != KILN_OK) return g;
     if (!G.registered_ok || g_off.load()) return KILN_ERR_UNAVAILABLE;
     RawBases rb{};
-    if (!read_bases(&rb)) return KILN_ERR_UNAVAILABLE;
+    if(flags & KILN_CRAFT_SOURCE_STOCK_ALL) {rb.sys=singleton("PlayerBasesSystemServer");if(!rb.sys)return KILN_ERR_UNAVAILABLE;}
+    else if (!read_bases(&rb)) return KILN_ERR_UNAVAILABLE;
     KilnVec3 position{};
-    const int32_t base = position_of(player,&position) ? base_index_at(rb.sys,position) : -1;
+    const int32_t base = !(flags & KILN_CRAFT_SOURCE_STOCK_ALL) && position_of(player,&position) ? base_index_at(rb.sys,position) : -1;
     std::vector<KilnEntity> normal{player};
     if (base >= 0) {
         std::vector<KilnEntity> chests;
@@ -3307,7 +3327,7 @@ KilnResult KILN_CALL t_source_stock(KilnEntity player, KilnStationStack* out, ui
     std::unordered_map<uint32_t,uint64_t> sum;
     const auto stations = sources_copy();
     void* const reg = recipes_registry();
-    for (const auto& source : g_registered.copy(player)) {
+    for (const auto& source : craft_sources_copy(player)) {
         const auto e = source.container;
         if (std::find(normal.begin(),normal.end(),e) != normal.end() || !source_access(rb.sys,player,e)) continue;
         // The normal snapshot already includes this station's outputs. A registration can additionally allow its
@@ -3389,7 +3409,7 @@ void craft_pre() {
             LOGW("stations: station outputs in a craft are off: %s", why.c_str());
             lower("stations.craft_sources", reason, why.c_str());
             lower("crafting.sources", reason, why.c_str());
-            G.craft_ok = false;
+            G.craft_ok = G.registered_ok = false;
             return;
         }
     }
@@ -3441,9 +3461,11 @@ void KILN_CALL client_pre(const KilnTickInfo*, void*) {
         if (!rules_hook(KILN_RULES_HOOK_CRAFT_UI, &why, &reason)) {
             LOGW("stations: the crafting menu does not count station outputs here: %s", why.c_str());
             lower("stations.craft_ui", reason, why.c_str());
+            lower("crafting.source_ui", reason, why.c_str());
         } else if (!G.resolve || !G.recipe_find) {
             LOGW("stations: the crafting menu does not count station outputs here: the recipe reads did not resolve");
             lower("stations.craft_ui", KILN_CAP_REASON_SYMBOL_MISSING, "stations/ResolveRecipeInputs or content/RecipeFind did not resolve");
+            lower("crafting.source_ui", KILN_CAP_REASON_SYMBOL_MISSING, "stations/ResolveRecipeInputs or content/RecipeFind did not resolve");
         } else {
             LOGI("stations: the crafting menu counts opted-in station outputs when a Kiln server sends them (client world %s)",
                  g_client_recipes.load() ? "recipes read" : "recipes not read yet");
@@ -3535,9 +3557,9 @@ void stations_resolve() {
     else if (feat("stations.craft_sources"))
         lower("stations.craft_sources", KILN_CAP_REASON_SYMBOL_MISSING,
               "the recipe payment or its per-item take did not resolve on this build");
-    int64_t infos = 0, stride = 0, perms = 0;
+    int64_t infos = 0, stride = 0, perms = 0, handle = 0;
     G.registered_ok = G.craft_ok && feat("crafting.sources") && cst("crafting/bases.players",&infos) && infos == 0x10 &&
-        cst("crafting/player.stride",&stride) && stride == 0xa0 && cst("crafting/player.permissions",&perms) && perms == 0x9d;
+        cst("crafting/player.stride",&stride) && stride == 0xa0 && cst("crafting/player.permissions",&perms) && perms == 0x9d && cst("players/info.handle",&handle) && handle == 4;
     if (!G.registered_ok && feat("crafting.sources"))
         lower("crafting.sources",KILN_CAP_REASON_SYMBOL_MISSING,"the server recipe payment, inventory access or player permission layout is unavailable");
     // the recipe map, for the items a Kiln client is sent (craft_items); absolute offsets in the RecipeRegistry
@@ -3718,7 +3740,13 @@ void stations_world_closed() {
     g_state.compare_exchange_strong(expected, KILN_ITEMS_PROGRAM_ACTIVE);
 }
 
-std::vector<CraftSource> craft_sources_copy(uint32_t player) { return g_registered.copy(player); }
+std::vector<CraftSource> craft_sources_copy(uint32_t player) {
+    uint32_t session=0;
+    if(!source_player(g_srv_bases.load(std::memory_order_acquire),player,&session))return {};
+    auto sources=g_registered.copy(player);
+    sources.erase(std::remove_if(sources.begin(),sources.end(),[&](const CraftSource& source) {return source.player_session!=session;}),sources.end());
+    return sources;
+}
 bool craft_source_access(void* bases, uint32_t player, uint32_t container) { return source_access(bases,player,container); }
 bool craft_source_access(uint32_t player, uint32_t container) { return source_access(g_srv_bases.load(std::memory_order_acquire),player,container); }
 void craft_sources_cancel_owner(KilnOwner owner) { g_registered.cancel_owner(owner); }

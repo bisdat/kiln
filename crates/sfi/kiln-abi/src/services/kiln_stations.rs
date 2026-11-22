@@ -4,6 +4,7 @@
 use crate::*;
 pub use super::kiln_items::*;
 pub type KilnStationDoneFn = Option<unsafe extern "C" fn(*const KilnStationResult, *mut core::ffi::c_void)>;
+pub const KILN_CRAFT_SOURCE_STOCK_ALL: i32 = 1;
 pub const KILN_STATIONS_MAX_ALTARS: u32 = 16;
 pub const KILN_STATIONS_MAX_BASES: u32 = 16;
 pub const KILN_STATIONS_MAX_CHANGES: u32 = 32;
@@ -355,7 +356,7 @@ pub struct KilnStationsApi {
     pub add_source: Option<unsafe extern "C" fn(KilnOwner, *const KilnCraftSourceRequest, *mut u64) -> KilnResult>,
     pub remove_source: Option<unsafe extern "C" fn(KilnOwner, u64) -> KilnResult>,
     pub cancel_sources: Option<unsafe extern "C" fn(KilnOwner)>,
-    pub source_stock: Option<unsafe extern "C" fn(KilnEntity, *mut KilnStationStack, u32, *mut u32) -> KilnResult>,
+    pub source_stock: Option<unsafe extern "C" fn(KilnEntity, u32, *mut KilnStationStack, u32, *mut u32) -> KilnResult>,
 }
 
 #[repr(C)]

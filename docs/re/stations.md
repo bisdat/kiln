@@ -770,3 +770,30 @@ The same run without the switch (control): every craft of the character `no_acce
 untouched. The first run of this branch had every player craft `other_world`: it read only `tx+0x68` (§10.4).
 Factories' own cycles show as `mode0` (about 11 a step in that save). Not run in a lab: anything on a client (C7 to C15).
 
+
+### 10.7 Player-registered sources (#125, since 0.2.0-dev.30.6)
+
+The existing `RecipePaid` adapter also accepts player-bound container registrations. They deliberately skip §8's
+source-base membership rule; they do not skip the game's per-player inventory permission. `source_access` rereads
+`[serverBases+0x10] + (player-1)*0xa0`, requires the id at +0 to match and bit2 of +0x9d (`CanAccessInventories`) to be
+set, then uses `inventory_matches(FIND_CONTAINERS)` (initialized InventorySetup, neither player nor NPC flags). At
+registration it also captures the existing `players/InfoHandle` result (+4), and every snapshot rejects registrations
+whose login handle changed. A reused player entity slot cannot inherit the previous login's links. The mod chooses
+which containers it authorizes; this right is server-wide, not ownership of a source base.
+
+Mode0 is eligible only for a real registered player, with the bag as its normal order. Its bases words may both be null
+if `access_from_tx` still proves the server inventory storage; the cached server bases supplies only the player
+permission check. In other modes a refused BaseStockForPlayer leaves the normal list empty, as the game does, and
+station outputs are not added. Independently authorized registered sources can still cover the bag's shortfall.
+Per-item registered sources are merged before or after the existing output lenders, deduplicated against the normal
+order and one another, then passed through the same preflight and same-transaction `PayMaterial` loop. The only
+intercepted return remains `RecipePaid`; a fault/remainder returns4 for CraftRecipe's rollback.
+
+`source_stock(player, flags, ...)` runs on the server tick thread: flags0 returns filtered extra counts excluding
+current base stock and opted-in outputs already counted by `kiln:craftstock`; `KILN_CRAFT_SOURCE_STOCK_ALL` returns
+all filtered registered counts for consumers whose normal inventory view does not include that stock. Unknown flags
+refuse. Counts recheck the live player login, permission and container setup; they never authorize a payment.
+
+Verification here is offline: host registry/payment arithmetic, Windows tests of the actual guarded adapter with
+fake transactions, managed snapshot/lifetime tests and symbol resolution on the two pinned binaries. No new game
+client, server or lab was run for this change; the guided checks are in the public station service docs.
