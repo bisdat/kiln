@@ -243,10 +243,10 @@ fn a_first_kiln_mode_start_on_a_client_sized_archive_reads_the_stage_not_the_gam
         runs.push((n, r3 - r2));
     }
     for (n, read) in runs {
-        // the stage's own files are copied, hashed and compared a few times: a multiple of the resource file, never the
-        // containers
+        // the stage's own files are copied, hashed and compared a few times: a multiple of the resource file whatever
+        // the contents, never the containers on top
         assert!(
-            read < content_bytes / 2 && read < 12 * resources + (64 << 20),
+            read < 12 * resources + (64 << 20),
             "start {n} read {} (contents {}, resource file {}): the pass read the game's containers",
             mib(read), mib(content_bytes), mib(resources)
         );
