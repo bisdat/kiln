@@ -172,13 +172,12 @@ fn safe_rel(file: &str) -> Result<PathBuf> {
 pub(crate) fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
     use std::io::Write;
     static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let failed = |e: std::io::Error| {
-        let base = Error::from(e);
+    let failed = |base: Error| {
         Error::new(base.code, format!("Kiln could not write its file {}: {}", path.display(), base.message))
             .with_detail(path.display().to_string())
     };
     if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(failed)?;
+        std::fs::create_dir_all(dir).map_err(|e| failed(e.into()))?;
     }
     let mut last = None;
     for _ in 0..8 {
@@ -193,11 +192,15 @@ pub(crate) fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
                 last = Some(e);
                 continue;
             }
-            Err(e) => return Err(failed(e)),
+            Err(e) => return Err(failed(e.into())),
         };
-        let res = f.write_all(bytes).and_then(|()| f.sync_all()).and_then(|()| {
-            drop(f);
-            std::fs::rename(&tmp, path)
+        let written = f.write_all(bytes).and_then(|()| f.sync_all());
+        drop(f);
+        let res = written.map_err(Error::from).and_then(|()| {
+            #[cfg(windows)]
+            return crate::util::replace_durable_with_retry(&tmp, path, std::time::Duration::from_millis(250));
+            #[cfg(not(windows))]
+            std::fs::rename(&tmp, path).map_err(Error::from)
         });
         if let Err(e) = res {
             let _ = std::fs::remove_file(&tmp);
@@ -205,7 +208,7 @@ pub(crate) fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
         }
         return Ok(());
     }
-    Err(failed(last.unwrap_or_else(|| std::io::Error::other("no free temporary file name"))))
+    Err(failed(last.unwrap_or_else(|| std::io::Error::other("no free temporary file name")).into()))
 }
 
 fn read_json_file(path: &Path) -> Result<Option<serde_json::Value>> {

@@ -405,13 +405,32 @@ fn win32_path_units(mut path: Vec<u16>) -> Result<Vec<u16>> {
 /// Windows: the folder cannot be flushed like on Unix; the replace itself is written through before it returns.
 #[cfg(windows)]
 fn replace_durable(from: &Path, to: &Path) -> Result<()> {
+    replace_durable_with_retry(from, to, std::time::Duration::ZERO)
+}
+
+/// Retry Windows rename contention without truncating, unlinking or copying the target.
+#[cfg(windows)]
+pub(crate) fn replace_durable_with_retry(from: &Path, to: &Path, timeout: std::time::Duration) -> Result<()> {
+    use std::time::{Duration, Instant};
+    use windows_sys::Win32::Foundation::{ERROR_ACCESS_DENIED, ERROR_SHARING_VIOLATION};
     use windows_sys::Win32::Storage::FileSystem::{MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH};
     let (src, dst) = (win32_path(from)?, win32_path(to)?);
-    // SAFETY: both are NUL-terminated UTF-16 strings that live until the call returns.
-    if unsafe { MoveFileExW(src.as_ptr(), dst.as_ptr(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) } == 0 {
-        return Err(io_at(to, "renaming to")(std::io::Error::last_os_error()));
+    let start = Instant::now();
+    loop {
+        // SAFETY: both are NUL-terminated UTF-16 strings that live until the call returns.
+        if unsafe { MoveFileExW(src.as_ptr(), dst.as_ptr(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) } != 0 {
+            return Ok(());
+        }
+        let error = std::io::Error::last_os_error();
+        let remaining = timeout.saturating_sub(start.elapsed());
+        // Windows can report access denied while another rename or a reader briefly holds the destination.
+        match error.raw_os_error().map(|code| code as u32) {
+            Some(ERROR_ACCESS_DENIED | ERROR_SHARING_VIOLATION) if !remaining.is_zero() => {
+                std::thread::sleep(remaining.min(Duration::from_millis(5)));
+            }
+            _ => return Err(io_at(to, "renaming to")(error)),
+        }
     }
-    Ok(())
 }
 
 /// Elsewhere: the plain replace (no Kiln build targets such a system).
