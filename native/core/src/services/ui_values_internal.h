@@ -31,6 +31,7 @@
 
 #include "services/kiln_hooks.h"
 #include "services/kiln_ui_inventory.h"
+#include "services/kiln_ui_item_detail.h"
 #include "services/kiln_ui_values.h"
 
 namespace kiln::uivalues {
@@ -355,7 +356,10 @@ struct NativeLine {
     std::string_view text;  // process-lifetime bytes (the text store, or the probe's static strings)
     uint32_t flags = 0;
 };
+struct ItemDetailCapture;
 struct DetailCopy {
+    std::shared_ptr<ItemDetailCapture> capture;
+    bool suppress_capture = false;
     uint8_t raw[kViewBytes] = {};
     bool ok = false, collected = false;
     uintptr_t record = 0;      // ItemDetail's record (valid while ItemDetail runs)
@@ -367,6 +371,15 @@ struct DetailCopy {
     bool scaled = false;  // the values scale below was computed (once per occurrence)
     float scale = 1.0f;
 };
+bool item_detail_on();
+bool item_detail_stats_install();
+void item_detail_begin(DetailCopy& c);
+void item_detail_end(DetailCopy& c);
+void item_detail_text(DetailCopy& c, const char* text, size_t bytes, bool value, float number);
+void item_detail_stat(DetailCopy& c, float value, void (*draw)(const void*, float), const void* label);
+KilnResult KILN_CALL item_detail_copy(KilnOwner owner, const KilnUiItemDetailQuery* query, KilnUiItemDetailSnapshot* out, KilnUiItemDetailLine* lines, uint32_t capacity);
+const KilnUiItemDetailApi* item_detail_table();
+void item_detail_reset_for_tests();
 DetailCopy* current_detail();          // this thread's innermost detail occurrence, or null
 void collect_once(DetailCopy& c);      // runs the lines providers over c once (the details window's snapshot)
 // The ItemDetail link (shared by the lines, the native lines and the values): installed once; false = not possible.

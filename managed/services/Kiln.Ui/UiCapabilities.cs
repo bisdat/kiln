@@ -55,6 +55,8 @@ internal static unsafe class UiCaps
         if (UiValuesNative.T != null && UiInventoryNative.T2 == null)
             ServiceCaps.LowerOff(Ui.Inventory.PanelCapability, CapabilityReason.ServiceOlder,
                 "kiln.ui.inventory has no screen_view (v2: an older kiln-core)");
+        if (UiItemDetailNative.T == null)
+            ServiceCaps.LowerOff(Ui.Values.ItemDetailCapability, CapabilityReason.ServiceOlder, "kiln.ui.item_detail is not available");
         // Collected lines have one production consumer: the overlay's Item details window.
         ServiceCaps.LowerFeatures(Service, "ui.values.tooltip_lines");
         if (!RenderNative.Available) ServiceCaps.LowerFeatures(Render, "render.camera", Ui.World.OutlineCapability);

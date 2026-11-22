@@ -27,6 +27,7 @@
 #include "../src/services/ui_values_lines.cpp"
 #include "../src/services/ui_values_tooltip.cpp"
 #include "../src/services/ui_values_inventory.cpp"
+#include "../src/services/ui_item_detail.cpp"
 
 using namespace kiln::uivalues;
 
@@ -239,6 +240,7 @@ bool always_installed(uint32_t) { return true; }
 // A clean service: no registrations, no text, every row available, every list "installed" by a no-op installer.
 void reset() {
     kiln::uivalues::reset_for_tests();
+    kiln::uivalues::item_detail_reset_for_tests();
     owners.clear();
     alive.clear();
     version = 1;
@@ -2991,6 +2993,7 @@ void write_layout_validation() {
 #include "ui_values_sockets_test.inc"
 #include "ui_values_sources_test.inc"
 #include "ui_values_tooltip_test.inc"
+#include "ui_item_detail_test.inc"
 }  // namespace
 
 int main() {
@@ -3044,6 +3047,7 @@ int main() {
     slot_layout_is_independent();
     lines_writer_tampering();
     tooltip_tests();
+    item_detail_tests();
     std::printf(g_fail ? "%d FAILED\n" : "all passed\n", g_fail);
     return g_fail ? 1 : 0;
 }

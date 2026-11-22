@@ -1500,3 +1500,44 @@ aside while it is installed, whatever its ini says; the readout stays where Kiln
 ([graphics.md](graphics.md#living-next-to-other-tools)).
 
 The additive window size-constraints slot after v7 is described in the [UI service reference](services/ui.md).
+
+## Item detail in a Kiln window (dev.31)
+
+```csharp
+// Inside a Kiln window draw callback. Keep a saved slot, or use Ui.Inventory.Selected/Hovered.
+if (Ui.Inventory.Selected is { } slot)
+{
+    UiItemDetailResult detail = ui.ItemDetail(slot, width: 300);
+    // detail.Ok means game-computed lines were captured, not merely that fallback text was drawn.
+}
+```
+
+`UiDraw.ItemDetail(item|entity|slot, width = 0)` takes an `ItemId`, `EntityId`, `VisibleSlot`,
+`InventorySlot` snapshot, or `ItemInfo`. It draws ordered text and numbers in Kiln's font and
+layout, **not** an offscreen copy of the game's panel (no thumbnail, icons, bars or game styling).
+Width is in pixels, 0 means available width, and text wraps by text elements in the available
+space. A negative or non-finite width is an argument error. Use a scrolling Kiln window for a
+long panel. No gameplay reads or writes occur on the render thread.
+
+Capture starts on first use. **Then inspect the item in the game's own detail panel.** Until
+a matching panel is captured, drawing shows “Game detail not captured — Kiln fallback”, the
+known name (or id), and slot rarity/level/count or catalog category/level range/max stack when
+provided. It never invents unknown damage, perks or effects. `Ok=false` and `Reason` describe
+the miss even though fallback text was drawn. A missing/disabled capability also uses fallback.
+
+`Ui.Values.ItemDetail(entity, item = default, level = null, rarity = null)` reads a capture on
+any thread; `Ui.Values.ItemDetail(item)` reads the most recently inspected variant of that
+item type. These reads require `ui.item_detail` and throw `KilnUnavailableException` when it
+is unavailable. No matching capture returns an `IKilnResult` with `Ok=false` and a reason.
+The snapshot's `Lines` are owned copies. Each line has text and optional computed numeric
+metadata; text already includes formatting, so do not append the metadata to it again.
+
+Entity/slot overloads are preferable for instance-specific damage/perks. The cache retains
+64 instances/variants in the current world session, not every item in the game. An upgraded
+slot cannot borrow numbers from its old level/rarity. Reinspect to refresh other item state or
+a changed game language. Limits: 64 rows, 4096 UTF-8 bytes per row, 32768 total; oversized panels
+use fallback rather than truncated data. The native hooks require a measured game build.
+
+Offline, `KilnHarness.UiItemDetail.Capture(item, entity, level, rarity, lines)` supplies a
+recording; `Clear()` models leaving the client world. The TestKit does not simulate the game
+text builder or renderer. The real-client line/number comparison still needs the client pass.

@@ -466,3 +466,7 @@ bool inventory_init() { return kiln::image().side == KILN_SIDE_CLIENT; }
 }  // namespace
 KILN_SERVICE(ui_inventory, KILN_UI_INVENTORY_SERVICE, KILN_UI_INVENTORY_VERSION, kiln::uivalues::inventory_table(),
              &inventory_init);
+
+// Independent v1 table; no append to any shared service ABI.
+KILN_SERVICE(ui_item_detail, KILN_UI_ITEM_DETAIL_SERVICE, KILN_UI_ITEM_DETAIL_VERSION,
+             kiln::uivalues::item_detail_table(), &inventory_init);

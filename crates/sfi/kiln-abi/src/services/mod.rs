@@ -54,6 +54,7 @@ pub mod kiln_toolwear;
 pub mod kiln_types;
 pub mod kiln_ui;
 pub mod kiln_ui_inventory;
+pub mod kiln_ui_item_detail;
 pub mod kiln_ui_values;
 pub mod kiln_vfx;
 pub mod kiln_window_clock;

@@ -317,3 +317,32 @@ No table change. Player side: [ui.md](../ui.md#frame-generation-mods-and-drawing
 game's highlight groups Group1 and Group2, which Kiln colours itself. Managed: `Ui.World.Outline`, `WorldOutline`,
 `OutlineOptions` (Kiln.Ui). Capability `ui.world_outline`. Usage and the C table: [../render.md](../render.md#outlines-since-020-dev303);
 RE: [../../re/client-render.md](../../re/client-render.md#highlight-groups-outlines).
+
+## Captured item detail for Kiln windows (dev.31, #120)
+
+`kiln.ui.item_detail` is a **new v1 table**, not an append to `kiln.ui` or `kiln.ui.values`.
+Its only function, `copy(owner, query, snapshot, lines, capacity)`, is callable on any thread;
+see `native/core/abi/services/kiln_ui_item_detail.h`. Header size/version and function pointer
+must be checked. Records are size-tagged. The query is 20 bytes, snapshot 56 bytes, and each
+line 4112 bytes (4096 length-delimited UTF-8 bytes plus size, flags, value and byte count).
+The table is 16 bytes on x64 (8-byte header plus copy). Existing tables and offsets do not change.
+
+The `ui.item_detail` capability requires the measured client layout and the existing item-detail,
+text-line and stat-value seams. First use installs capture. Only text constructed inside the
+current item-detail occurrence is copied; Kiln-injected native tooltip lines are excluded.
+Stat numbers are captured after tooltip value providers, with the first constructed text row
+carrying the numeric metadata. Number-only draws get a numeric row. No opaque label is cast
+to a string and no game pointer escapes the call. Text already contains the game's formatted
+numbers: consumers must not append numeric metadata a second time.
+
+Only complete panels are published. The last 64 instances/variants are retained in a client
+session. Entity queries never use another entity's panel; item-only queries select the latest
+inspected variant. Slot queries constrain item, level and rarity. World changes invalidate
+captures. Reinspect after changing language, upgrading an item, or changing its other state.
+No generic catalog formula pretends to be the game's computed instance stats. Each panel is
+limited to 64 lines, 4096 bytes per line, 32768 total bytes; an oversized panel is rejected,
+not partially displayed. `KILN_OK` with `ok=0` means no matching capture; a short destination
+gets `BUFFER_TOO_SMALL` and the required count, with no partial rows.
+
+Managed API, fallback, and sample: [the UI guide](../ui.md#item-detail-in-a-kiln-window-dev31).
+Hooks and rendering have host tests; **the real-client comparison remains unverified**.
