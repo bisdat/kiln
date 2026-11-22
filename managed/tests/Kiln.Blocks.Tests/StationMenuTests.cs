@@ -336,7 +336,7 @@ public sealed class StationMenuTests : IDisposable
         var station = new StationMenuCompiler.Station("m", "s", BlockIds.Derive("m", "workshop", "s"), BlockIds.Fnv(BlockIds.Derive("m", "workshop", "s")), 0x4da88f73, true);
         string Record(UiText name)
         {
-            var menu = StationMenuCompiler.Check("m", "s.menu", "m", [new StationMenuTabBlock { Key = "t", Name = name, Sets = [] }], "menu.");
+            var menu = StationMenuCompiler.Check("m", "s.menu", "m", [new StationMenuTabBlock { Key = "t", Name = name, Sets = [Set("s")] }], "menu.");
             var res = StationMenuCompiler.Resolve(menu, station, [], _ => "registered", prune: false);
             Assert.Equal(StationMenuCompiler.Outcome.Record, res.Outcome);
             return res.Record;
@@ -355,15 +355,17 @@ public sealed class StationMenuTests : IDisposable
     public void A_menu_of_no_tab_or_a_tab_of_no_set_is_refused_and_one_empty_set_is_legal()
     {
         // review S2 (ruling): a menu needs a tab and a tab needs a set; the game's own data never has either shape empty
-        var m = Ledger("empty-menu");
-        Station(m, "forge", new StationBlock
+        Assert.Equal("menu.tabs", Field(() => Station(Ledger("empty-menu"), "forge", new StationBlock
         {
             Name = "Forge", Kind = StationKind.Forge, Processing = new ProcessingBlock(),
             Menu = new MenuBlock { Tabs = [] },
-        });
-        _host.Apply();
+        })));
+        Assert.Equal("menu.tabs[0].sets", Field(() => Station(Ledger("empty-tab"), "forge", new StationBlock
+        {
+            Name = "Forge", Kind = StationKind.Forge, Processing = new ProcessingBlock(),
+            Menu = new MenuBlock { Tabs = [Tab("a")] },
+        })));
         Assert.Empty(_store.Layers);
-        Assert.Contains(m.Errors, x => x.Contains("at least one tab"));
         var forge = Station(Ledger("empty-sets"), "forge", new StationBlock { Name = "Forge", Kind = StationKind.Forge, Processing = new ProcessingBlock() });
         ModContext.CurrentMod = Context("empty-sets", 7);
         var none = Assert.Throws<ArgumentException>(() => StationMenus.Define(forge, new StationMenuDefinition { Key = "m", Tabs = [] }));
@@ -381,15 +383,15 @@ public sealed class StationMenuTests : IDisposable
     {
         string Icon(int n)
         {
-            var menu = StationMenuCompiler.Check("m", "s.menu", "m", [new StationMenuTabBlock { Key = "t", Name = "T", IconFromTab = n, Sets = [] }], "menu.");
+            var menu = StationMenuCompiler.Check("m", "s.menu", "m", [new StationMenuTabBlock { Key = "t", Name = "T", IconFromTab = n, Sets = [Set("s")] }], "menu.");
             return menu.Tabs[0].Icon.ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
-        Assert.Equal(-1, new StationMenuTabBlock { Key = "t", Name = "T", Sets = [] }.IconFromTab);
+        Assert.Equal(-1, new StationMenuTabBlock { Key = "t", Name = "T", Sets = [Set("s")] }.IconFromTab);
         Assert.Equal("0", Icon(-1));
         Assert.Equal("3", Icon(3));
         Assert.Equal("14", Icon(14));
         foreach (var n in new[] { -2, 15 })
-            Assert.Equal("menu.tabs[0].iconFromTab", Field(() => Forge([new StationMenuTabBlock { Key = "t", Name = "T", IconFromTab = n, Sets = [] }], $"icon{n + 10}")));
+            Assert.Equal("menu.tabs[0].iconFromTab", Field(() => Forge([new StationMenuTabBlock { Key = "t", Name = "T", IconFromTab = n, Sets = [Set("s")] }], $"icon{n + 10}")));
     }
 
     // ---- refusals -------------------------------------------------------------------------------------------------------
@@ -417,17 +419,17 @@ public sealed class StationMenuTests : IDisposable
         Assert.Equal("menu.tabs[0].key", Bad(Tab("a b")));
         Assert.Equal("menu.tabs[0].key", Bad(Tab("a:b")));
         Assert.Equal("menu.tabs[0].key", Bad(Tab(new string('k', 65))));
-        Assert.Equal("menu.tabs[1].key", Bad(Tab("a"), Tab("a")));
+        Assert.Equal("menu.tabs[1].key", Bad(Tab("a", Set("s")), Tab("a", Set("s"))));
         Assert.Equal("menu.tabs[0].sets[1].key", Bad(Tab("a", Set("s"), Set("s"))));
         Assert.Equal("menu.tabs[0].sets[0].recipes[0]", Bad(Tab("a", Set("s", "a:b:c"))));
         Assert.Equal("menu.tabs[0].sets[0].heading", Bad(Tab("a", new StationMenuSetBlock { Key = "s", Heading = "H", Recipes = [] })));
         Assert.Equal("menu.tabs", Bad([.. Enumerable.Range(0, 16).Select(i => Tab($"t{i}"))]));
         Assert.Equal("menu.tabs[0].sets", Bad(Tab("a", [.. Enumerable.Range(0, 29).Select(i => Set($"s{i}"))])));
         Assert.Equal("menu.tabs[0].sets[1].recipes", Bad(Tab("a", Set("s", [.. Enumerable.Range(0, 300).Select(i => $"r{i}")]), Set("u", [.. Enumerable.Range(300, 213).Select(i => $"r{i}")]))));
-        Assert.Equal("menu.tabs[0].name", Bad(new StationMenuTabBlock { Key = "a", Name = new UiText(Enumerable.Range(0, 36).ToDictionary(i => $"{(char)('a' + i / 26)}{(char)('a' + i % 26)}", _ => "x")), Sets = [] }));
-        Assert.Equal("menu.tabs[0].name", Bad(new StationMenuTabBlock { Key = "a", Name = "", Sets = [] }));
-        Assert.Equal("menu.tabs[0].name", Bad(new StationMenuTabBlock { Key = "a", Name = new string('x', 4097), Sets = [] }));
-        Assert.Equal("menu.tabs[0].name", Bad(new StationMenuTabBlock { Key = "a", Name = Text(("english", "x")), Sets = [] }));
+        Assert.Equal("menu.tabs[0].name", Bad(new StationMenuTabBlock { Key = "a", Name = new UiText(Enumerable.Range(0, 36).ToDictionary(i => $"{(char)('a' + i / 26)}{(char)('a' + i % 26)}", _ => "x")), Sets = [Set("s")] }));
+        Assert.Equal("menu.tabs[0].name", Bad(new StationMenuTabBlock { Key = "a", Name = "", Sets = [Set("s")] }));
+        Assert.Equal("menu.tabs[0].name", Bad(new StationMenuTabBlock { Key = "a", Name = new string('x', 4097), Sets = [Set("s")] }));
+        Assert.Equal("menu.tabs[0].name", Bad(new StationMenuTabBlock { Key = "a", Name = Text(("english", "x")), Sets = [Set("s")] }));
         Assert.Equal("menu.tabs[0].sets[1].heading", Bad(Tab("a", Set("s"), new StationMenuSetBlock { Key = "u", Heading = new string('é', 2049), Recipes = [] })));
         // the edges are fine
         Forge([.. Enumerable.Range(0, 15).Select(i => Tab($"t{i}", [.. Enumerable.Range(0, 28).Select(j => Set($"s{j}"))]))], "edges");
@@ -614,7 +616,7 @@ public sealed class StationMenuTests : IDisposable
         _host.Apply();
         var other = Context("other-mod", 9);
         ModContext.CurrentMod = other;
-        Assert.True(StationMenus.Define(forge, new StationMenuDefinition { Key = "winter", Tabs = [] }).Ok);
+        Assert.True(StationMenus.Define(forge, new StationMenuDefinition { Key = "winter", Tabs = [Tab("w", Set("s"))] }).Ok);
         Assert.Equal(2, _store.Layers.Count);
         ModContext.CurrentMod = _outer;
         other.Retire();
@@ -633,7 +635,7 @@ public sealed class StationMenuTests : IDisposable
         var (_, forge) = Forge(null);
         _store.Available = false;
         ModContext.CurrentMod = Context("menu-example", 7);
-        var e = Assert.Throws<KilnUnavailableException>(() => StationMenus.Define(forge, new StationMenuDefinition { Key = "m", Tabs = [] }));
+        var e = Assert.Throws<KilnUnavailableException>(() => StationMenus.Define(forge, new StationMenuDefinition { Key = "m", Tabs = [Tab("t", Set("s"))] }));
         Assert.Equal("stationmenus.store", e.Capability);
     }
 
