@@ -82,20 +82,21 @@ internal static class BlockCapabilities
     // ---- roster bodies ---------------------------------------------------------------------------------------
     internal const string NpcBody = "blocks.npc_body";
 
-    internal static Row NpcBodyRow(bool bootpack, Func<string, Capability> get)
+    internal static Row NpcBodyRow(bool nativeQuests, Func<string, Capability> get)
     {
-        if (!bootpack) return new(CapabilityState.Unavailable, CapabilityReason.ServiceMissing,
-            "quests.boot_pack: kiln.bootpack v1 is not loaded; custom roster bodies need atomic boot publication");
-        foreach (var name in new[] { "quests.boot_pack", "quests.npc", "assets.resources", "assets.content" })
+        if (!nativeQuests) return new(CapabilityState.Unavailable, CapabilityReason.ServiceMissing,
+            "quests.boot_pack: the native quests backend is not loaded; custom roster bodies need boot publication");
+        foreach (var name in new[] { "quests.boot_pack", "quests.npc_body", "quests.npc", "assets.resources", "assets.content" })
         {
             var dependency = get(name);
-            if (!dependency.IsAvailable) return new(CapabilityState.Unavailable, dependency.Reason,
-                $"{name}: {dependency.ReasonText}");
+            if (!dependency.IsAvailable) return new(CapabilityState.Unavailable,
+                dependency.Reason == CapabilityReason.Unknown ? CapabilityReason.ServiceMissing : dependency.Reason,
+                $"{name}: {(string.IsNullOrEmpty(dependency.ReasonText) ? "the required native implementation is not available" : dependency.ReasonText)}");
         }
         return new(CapabilityState.Available, CapabilityReason.None, null);
     }
 
-    internal static Row CurrentNpcBodyRow() => NpcBodyRow(ServiceCaps.Probe("kiln.bootpack"), Capabilities.Get);
+    internal static Row CurrentNpcBodyRow() => NpcBodyRow(ServiceCaps.Probe("kiln.knowledge"), Capabilities.Get);
 
     // ---- villager routines (0.2.0-dev.31; docs/kiln/services/routines.md) ------------------------------------------
     // routines.decisions is a sigdb feature kiln.routines serves (the villager task chooser and its sleep check); nothing

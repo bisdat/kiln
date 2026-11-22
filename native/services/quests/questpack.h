@@ -24,6 +24,8 @@ struct ModInput {
     std::vector<std::string> files;  // parallel: names for messages
     ojson audio;                     // assets/cooked/audio.json (null when the mod has none)
     std::string guid_namespace;      // assets/cook.json's guidNamespace ("" when none)
+    std::vector<std::string> required_mods;  // native dependencies: a refused dependency contributes no shared tables
+    bool authored_body = false;      // do not fall back to publishing the ordinary part of a body-dependent mod
 };
 
 // Read access to the game's resources.

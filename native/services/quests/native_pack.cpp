@@ -29,6 +29,9 @@
 #include <sstream>
 #include <unordered_map>
 
+#include "bootpack.h"
+#include "../content/bootpack_internal.h"
+#include "services/kiln_caps.h"
 #include "knowledge_internal.h"
 #include "questpack.h"
 #include "start_stop.h"
@@ -138,7 +141,7 @@ std::string read_block_file(const fs::path& path) {
 // The NPC blocks of a mod's blocks/*.json ("npcs"), in the quests' file format, so the game builds them at the first start: what Kiln.Blocks'
 // NpcCompiler.NpcFile writes for an NPC block, the same ids (UUIDv5 of <mod>:npc:<name>, <mod>:item:<name>.tool) and the same body premades.
 // An NPC block written in code is not visible here: Kiln.Blocks writes it to the data folder, and the game builds it from the next start.
-qb::ojson npcs_from_blocks(const std::string& mod, const std::vector<qb::ojson>& docs) {
+qb::ojson npcs_from_blocks(const std::string& mod, const std::vector<qb::ojson>& docs, bool* authored_body = nullptr) {
     struct Premade {
         const char *key, *tmpl, *workshop, *tool;
     };
@@ -174,18 +177,21 @@ qb::ojson npcs_from_blocks(const std::string& mod, const std::vector<qb::ojson>&
             o = &it->second;
         }
         if (!o->is_object()) return false;
+        b->own = o->contains("model");  // even a malformed premade reference makes the whole pack body-dependent
         if (o->contains("like") && (*o)["like"].is_string() && !premade((*o)["like"].get<std::string>(), b)) return false;
         for (auto [key, field] : {std::pair{"template", &b->tmpl}, std::pair{"workshop", &b->workshop}, std::pair{"tool", &b->tool}})
             if (o->contains(key) && (*o)[key].is_string()) *field = (*o)[key].get<std::string>();
-        b->own = o->contains("model");
         return !b->tmpl.empty();
     };
     qb::ojson out = qb::ojson::object();
     for (const qb::ojson& d : docs) {
         if (!d.contains("npcs") || !d["npcs"].is_object()) continue;
         for (const auto& [name, n] : d["npcs"].items()) {
+            if (!n.is_object()) continue;
             Body b;
-            if (!n.is_object() || !n.contains("name") || !n["name"].is_string() || !n.contains("body") || !body_of(n["body"], &b) || b.own) continue;  // Kiln.Blocks says what is wrong
+            const bool resolved = n.contains("body") && body_of(n["body"], &b);
+            if (authored_body && (b.own || n.contains("motions"))) *authored_body = true;
+            if (!n.contains("name") || !n["name"].is_string() || !resolved || b.own) continue;  // Kiln.Blocks says what is wrong
             const std::string key = n.contains("was") && n["was"].is_string() ? n["was"].get<std::string>() : name;
             const std::string clone = qb::guid_text(qb::derive_guid(mod, "npc", key));
             qb::ojson o = {{"template", b.tmpl}, {"clone", {{"guid", clone}, {"name", "Kiln_" + mod + "_" + key}}}};
@@ -368,14 +374,32 @@ void collect_mods(std::vector<qb::ModInput>* mods, bool client, const kiln::boot
             }
         }
         ec.clear();
-        const qb::ojson block_npcs = block_docs.empty() ? qb::ojson::object() : npcs_from_blocks(mf["id"].get<std::string>(), block_docs);
-        if (!fs::is_directory(qdir, ec) && !fs::exists(code, ec) && !fs::exists(npc_blocks, ec) && block_npcs.empty() && block_quests.empty() &&
+        bool authored_body = false;
+        const qb::ojson block_npcs = block_docs.empty() ? qb::ojson::object() : npcs_from_blocks(mf["id"].get<std::string>(), block_docs, &authored_body);
+        const fs::path body_manifest = base / L"assets" / L"npc-bodies.v1.json";
+        if (fs::exists(body_manifest, ec)) {
+            const auto bundle = qb::parse_blocks_json(read_block_file(body_manifest));
+            authored_body = authored_body || !bundle.is_object() || !bundle.contains("bodies") || !bundle["bodies"].is_object() || !bundle["bodies"].empty();
+        }
+        if (!authored_body && !fs::is_directory(qdir, ec) && !fs::exists(code, ec) && !fs::exists(npc_blocks, ec) && block_npcs.empty() && block_quests.empty() &&
             boot_docs.empty())
             return;
         const std::string side = mf.value("side", "both");
         if ((side == "server" && client) || (side == "client" && !client)) return;
         qb::ModInput m;
         m.id = mf["id"].get<std::string>();
+        m.authored_body = authored_body;
+        if (mf.contains("dependencies")) {
+            const auto& dependencies = mf["dependencies"];
+            if (dependencies.is_object()) {
+                for (const auto& [id, value] : dependencies.items())
+                    if (id != "kiln" && !(value.is_object() && value.value("optional", false))) m.required_mods.push_back(id);
+            } else if (dependencies.is_array()) {
+                for (const auto& value : dependencies)
+                    if (value.is_object() && value.contains("id") && value["id"].is_string() && !value.value("optional", false) && value["id"] != "kiln")
+                        m.required_mods.push_back(value["id"].get<std::string>());
+            }
+        }
         for (const auto& existing : *mods)
             if (existing.id == m.id) return;
         std::vector<fs::path> files, generated;
@@ -429,6 +453,10 @@ void collect_mods(std::vector<qb::ModInput>* mods, bool client, const kiln::boot
             m.files.push_back(reinterpret_cast<const char*>(f.filename().u8string().c_str()));
         }
         if (files.size() == own_files && has_blocks_or_boot) push_blocks();
+        for (const auto& document : m.documents)
+            if (document.contains("npcs") && document["npcs"].is_object())
+                for (const auto& [name, npc] : document["npcs"].items())
+                    if (npc.is_object() && npc.contains("body") && npc["body"].is_object() && npc["body"].contains("model")) m.authored_body = true;
         const qb::ojson audio = qb::ojson::parse(read_file(base / L"assets" / L"cooked" / L"audio.json"), nullptr, false, true);
         if (!audio.is_discarded()) m.audio = audio;
         const qb::ojson cook = qb::ojson::parse(read_file(base / L"assets" / L"cook.json"), nullptr, false, true);
@@ -553,6 +581,126 @@ std::vector<std::string> shipping_now() {
     return shipping(mods);
 }
 
+
+// No new service/epoch table: the startup thread uses the existing ResourceInit/OnBoot before-world boundary.
+// This is not an epoch protecting independently started native-plugin workers.
+std::map<std::string, KilnOwner> g_pack_owners;
+std::vector<qb::bootpack::Applied> g_pack_applied;
+bool g_pack_used = false;
+
+kc::bootpack::Call content_boot_bridge() {
+    const HMODULE module = GetModuleHandleW(L"kiln-content.dll");
+    return module ? reinterpret_cast<kc::bootpack::Call>(GetProcAddress(module, kc::bootpack::kExport)) : nullptr;
+}
+
+bool content_boot_call(kc::bootpack::Call bridge, uint32_t operation, KilnOwner owner, uint32_t kind,
+                       const std::string& document, std::string* why) {
+    char report[8192] = {};
+    size_t length = 0;
+    const KilnResult result = bridge(operation, owner, kind, document.data(), document.size(), report, sizeof report, &length);
+    if (result == KILN_OK) return true;
+    *why = std::string(report, std::min(length, sizeof report - 1));
+    if (why->empty()) *why = "native content operation refused (" + std::to_string(result) + ")";
+    return false;  // a mutating private call is never repeated merely to enlarge its report buffer
+}
+
+qb::bootpack::Backend pack_backend(const qb::GameData& game, kc::bootpack::Call bridge, bool client) {
+    qb::bootpack::Backend backend;
+    backend.game = game;
+    backend.owner = [](const std::string& mod) -> uint64_t {
+        if (const auto found = g_pack_owners.find(mod); found != g_pack_owners.end()) return found->second;
+        if (!g_api->owner_create) return 0;
+        const std::string label = "bootpack:" + mod;
+        const KilnOwner owner = g_api->owner_create(KilnStr{label.data(), label.size()});
+        if (owner) g_pack_owners.emplace(mod, owner);
+        return owner;
+    };
+    backend.begin = [bridge](uint64_t owner, const std::string& mod, std::string* why) {
+        return content_boot_call(bridge, kc::bootpack::Begin, owner, 0, qb::ojson{{"mod", mod}}.dump(), why);
+    };
+    backend.put = [](uint64_t owner, const qb::bootpack::Resource& resource, std::string* why) {
+        KilnAssetKey key{};
+        std::memcpy(key.guid, resource.guid.b, 16);
+        key.type = resource.type;
+        const KilnResult result = A->resource_put(owner, &key, resource.bytes->data(), resource.bytes->size(),
+            resource.is_new ? KILN_ASSET_PUT_NEW : KILN_ASSET_PUT_OVERRIDE);
+        if (result == KILN_OK) return true;
+        *why = resource.name + ": kiln.assets refused it (" + std::to_string(result) + ")";
+        return false;
+    };
+    backend.define = [bridge](uint64_t owner, bool item, const std::string& definition, std::string* why) {
+        return content_boot_call(bridge, kc::bootpack::Define, owner, item ? KILN_CONTENT_ITEMS : KILN_CONTENT_RECIPES, definition, why);
+    };
+    backend.text = [bridge, client](uint64_t owner, const qb::TextOut& text, std::string* why) {
+        if (!client) return true;
+        return content_boot_call(bridge, kc::bootpack::Text, owner, 0,
+            qb::ojson{{"tag", text.tag}, {"texts", qb::ojson::parse(text.json)}}.dump(), why);
+    };
+    backend.finish = [bridge](uint64_t owner, std::string* why) {
+        if (!content_boot_call(bridge, kc::bootpack::Finish, owner, 0, "", why)) return false;
+        g_template_names.clear();  // the next mod resolves against the surviving effective templates
+        return true;
+    };
+    backend.rollback = [bridge](uint64_t owner, std::string* why) {
+        if (!A || !A->revert_owner) { *why = "kiln.assets owner rollback is missing"; return false; }
+        A->revert_owner(owner);  // only this process-lifetime owner, never kiln.knowledge or an earlier mod
+        g_template_names.clear();
+        return content_boot_call(bridge, kc::bootpack::Abort, owner, 0, "", why);
+    };
+    return backend;
+}
+
+void report_bootpack_rows() {
+    const auto* caps = static_cast<const KilnCapsApi*>(g_api->service(kstr(KILN_CAPS_SERVICE), 1));
+    if (!caps || caps->header.size < offsetof(KilnCapsApi, report) + sizeof(void*) || !caps->report) return;
+    const bool ready = content_boot_bridge() != nullptr && g_no_hook.empty();
+    const std::string why = ready ? "" : !g_no_hook.empty() ? g_no_hook : "kiln.content's private native boot rollback helper is missing";
+    caps->report(g_owner, kstr("quests.boot_pack"), ready ? KILN_CAP_AVAILABLE : KILN_CAP_UNAVAILABLE,
+        ready ? KILN_CAP_REASON_NONE : KILN_CAP_REASON_SERVICE_OLDER, KilnStr{why.data(), why.size()});
+    // S2 builds the transaction seam, not the roster-body lowerer. This is an implementation dependency, not a release gate.
+    caps->report(g_owner, kstr("quests.npc_body"), KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SERVICE_OLDER,
+        kstr("native roster-body lowering is not installed"));
+}
+
+void build_per_mod(const std::vector<qb::ModInput>& mods, const qb::GameData& game, kc::bootpack::Call bridge,
+                   const std::set<std::string>* required, std::vector<LeftOut>* left_out, Stop* stop, bool client) {
+    g_pack_used = true;
+    if (g_fail == Fail::Compile || g_fail == Fail::Assets) {
+        whole_stop(stop, kFailSwitch + (g_fail == Fail::Compile ? ": compile" : ": assets"), shipping(mods));
+        return;
+    }
+    auto result = qb::bootpack::build(mods, pack_backend(game, bridge, client));
+    for (const auto& error : result.errors) KW("native: %s", error.c_str());
+    for (const auto& warning : result.warnings) KW("native: %s", warning.c_str());
+    g_manifest = result.manifest.dump();
+    g_pack_applied = std::move(result.applied);
+    g_served = built(result.manifest["mods"]);
+    g_names.clear();
+    for (const auto& mod : result.manifest["mods"]) {
+        if (!mod.value("ok", false)) {
+            if (required && left_out && required->count(mod.value("id", ""))) {
+                const auto errors = mod.value("errors", qb::ojson::array());
+                left_out->push_back({mod.value("id", ""), errors.empty() ? "native boot pack refused" : errors.front().get<std::string>()});
+            }
+            continue;
+        }
+        if (!mod.contains("knowledge")) continue;
+        for (const auto& [name, id] : mod["knowledge"].items()) {
+            std::string key = mod.value("id", "") + ":" + name;
+            std::transform(key.begin(), key.end(), key.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+            g_names[key] = static_cast<uint32_t>(std::stoul(id.get<std::string>(), nullptr, 16));
+        }
+    }
+    if (!result.roster_boot_ids.empty() || !result.roster_kiln_ids.empty()) roster_built(result.roster_boot_ids, result.roster_kiln_ids);
+    if (result.stopped) {
+        KE("native: %s; mods: %s", result.reason.c_str(), kiln::knowledge::stop::list(result.stopped_mods).c_str());
+        if (stop) *stop = Stop{true, result.roster_refused ? StartStop::Roster : StartStop::Content, result.reason, result.stopped_mods};
+        return;
+    }
+    KI("native: %zu mod(s): %zu new knowledge object(s), %zu quest(s), %zu NPC(s) in the roster, %zu template(s), %zu text(s); per-mod boot rollback",
+        g_served.size(), result.knowledge, result.quests, result.npcs, result.templates, client ? result.texts : 0);
+}
+
 // `left_out` (a boot generation): the required mods of `required` the build could not build whole. `stop`: set when
 // the roster was refused, or when the whole build failed while a mod ships such content (whole_stop): then nothing is
 // served and the start must not go on. One mod's own errors set neither.
@@ -560,6 +708,9 @@ void build_locked(const std::vector<qb::ModInput>* prepared = nullptr, const std
                   std::vector<LeftOut>* left_out = nullptr, Stop* stop = nullptr) {
     if (g_built) return;
     g_built = true;
+    const auto bridge = content_boot_bridge();
+    g_pack_used = bridge != nullptr;  // even an empty early plan must not withdraw the shared knowledge owner
+    g_pack_applied.clear();
     KilnBuildInfo bi{sizeof bi};
     g_api->build_info(&bi);
     const bool client = bi.side == KILN_SIDE_CLIENT;
@@ -608,6 +759,19 @@ void build_locked(const std::vector<qb::ModInput>* prepared = nullptr, const std
         game.read = &res_read;
     game.template_by_name = &template_by_name;
     game.roster_max = &roster_max;  // 64, or 128 with the second unlock page (installed only when a roster needs it)
+    if (bridge) {
+        build_per_mod(mods, game, bridge, required, left_out, stop, client);
+        return;  // the legacy publisher must never run before or after this path
+    }
+    qb::ojson excluded = qb::ojson::array();
+    std::erase_if(mods, [&](const qb::ModInput& mod) {
+        if (!mod.authored_body) return false;
+        const std::string why = "bootpack:" + mod.id + ": native boot rollback support is missing; the whole body-dependent native pack is excluded";
+        excluded.push_back({{"id", mod.id}, {"ok", false}, {"errors", {why}}});
+        KW("native: %s", why.c_str());
+        if (required && left_out && required->count(mod.id)) left_out->push_back({mod.id, why});
+        return true;
+    });
     qb::PackOut p;
     try {
         if (g_fail == Fail::Compile) throw std::runtime_error(kFailSwitch + ": compile");
@@ -619,6 +783,7 @@ void build_locked(const std::vector<qb::ModInput>* prepared = nullptr, const std
         whole_stop(stop, whole, shipping(mods));
         return;
     }
+    for (const auto& mod : excluded) p.manifest["mods"].push_back(mod);
     for (const std::string& e : p.errors) KW("native: %s", e.c_str());
     if (p.roster_refused && stop) {
         stop->set = true;
@@ -824,9 +989,32 @@ namespace {
 void KILN_CALL destroy_boot(const void* p) {
     const auto* plan = static_cast<const BootPlan*>(p);
     if (plan->built_early) {  // what the early build served and defined goes with it
-        std::lock_guard lock(g_mu);
-        if (A) A->revert_owner(g_owner);
-        if (const auto* C = static_cast<const KilnContentApi*>(g_api->service(KilnStr{"kiln.content", 12}, 4))) C->undefine_owner(g_owner);
+        std::unique_lock lock(g_mu);
+        if (g_pack_used) {
+            qb::GameData game;
+            game.read = &res_read;
+            const auto bridge = content_boot_bridge();
+            if (!bridge) {
+                lock.unlock();
+                refuse_start(StartStop::Content, "boot pack rollback invariant: content helper disappeared", shipping(plan->mods));
+                return;
+            }
+            const auto backend = pack_backend(game, bridge, client_side());
+            for (auto entry = g_pack_applied.rbegin(); entry != g_pack_applied.rend(); ++entry) {
+                std::string why;
+                if (!qb::bootpack::withdraw(*entry, backend, &why)) {
+                    const std::string mod = entry->mod;
+                    lock.unlock();
+                    refuse_start(StartStop::Content, "bootpack:" + mod + ": rollback invariant failed: " + why, {mod});
+                    return;
+                }
+            }
+            g_pack_applied.clear();
+            g_pack_used = false;
+        } else {
+            if (A) A->revert_owner(g_owner);
+            if (const auto* C = static_cast<const KilnContentApi*>(g_api->service(KilnStr{"kiln.content", 12}, 4))) C->undefine_owner(g_owner);
+        }
         g_built = false;
         g_names.clear();
         g_manifest = "{\"mods\":[],\"errors\":[]}";
@@ -891,6 +1079,7 @@ KilnResult KILN_CALL prepare_boot(void*, const KilnBootPrepareInputV1* in, KilnB
 }  // namespace
 
 bool native_pack_boot() {
+    report_bootpack_rows();
     g_boot = kiln::boot::collect(g_api, g_owner, "knowledge", &prepare_boot, nullptr);
     if (g_boot) KI("native: boot profile: the mods' quest files are read with the boot generation");
     return g_boot;

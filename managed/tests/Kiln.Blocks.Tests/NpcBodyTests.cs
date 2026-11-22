@@ -169,7 +169,7 @@ public sealed class NpcBodyTests
         Capability Available(string name) => new(name, CapabilityState.Available, CapabilityReason.None, "", "test");
         Assert.Equal(CapabilityState.Available, BlockCapabilities.NpcBodyRow(true, Available).State);
         Assert.Equal(CapabilityReason.ServiceMissing, BlockCapabilities.NpcBodyRow(false, Available).Reason);
-        foreach (var dependency in new[] { "quests.boot_pack", "quests.npc", "assets.resources", "assets.content" })
+        foreach (var dependency in new[] { "quests.boot_pack", "quests.npc_body", "quests.npc", "assets.resources", "assets.content" })
         {
             var row = BlockCapabilities.NpcBodyRow(true, name => name == dependency ? new(name, CapabilityState.Unavailable, CapabilityReason.SymbolMissing, "layout changed", "test") : Available(name));
             Assert.Equal(CapabilityReason.SymbolMissing, row.Reason);
@@ -196,6 +196,17 @@ public sealed class NpcBodyTests
     [InlineData("{\"role\":0,\"variant\":0,\"state\":\"sit-enter\"}")]
     public void JSON_bindings_require_named_role_variant_and_state(string binding) =>
         Assert.Throws<JsonException>(() => BlockJson.Parse<NpcMotionsBlock>("{\"bindings\":[" + binding + "]}"));
+
+    [Fact]
+    public void A_transaction_backend_without_body_lowering_does_not_make_authored_bodies_available()
+    {
+        var row = BlockCapabilities.NpcBodyRow(true, name => name == "quests.npc_body"
+            ? new(name, CapabilityState.Unavailable, CapabilityReason.Unknown, "", "")
+            : new(name, CapabilityState.Available, CapabilityReason.None, "", "test"));
+        Assert.Equal(CapabilityState.Unavailable, row.State);
+        Assert.Equal(CapabilityReason.ServiceMissing, row.Reason); // Unknown is a query result, never a reportable reason.
+        Assert.Contains("quests.npc_body", row.Text!, StringComparison.Ordinal);
+    }
 
     [Fact]
     public void An_unavailable_body_keeps_the_existing_diagnostic_and_names_the_missing_dependency()

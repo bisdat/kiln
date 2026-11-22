@@ -16,8 +16,16 @@ ${CXX:-g++} -std=c++20 -O1 -g -pthread -Wall -Wextra -fsanitize=thread \
 # the boot build's stops (0.2.0-dev.29, contentstop): native_pack.cpp with fake Kiln services and a fake build; the texts
 ${CXX:-g++} -std=c++20 -O1 -g -pthread -Wall -Wextra -Wno-missing-field-initializers -fsanitize=address,undefined \
   -I"$here/host" -I"$here/.." -I"$here/../../../core/abi" -I"$here/../../../third_party" \
-  "$here/native_pack_test.cpp" "$here/../questbuild.cpp" -o "$out/native_pack_test"
+  "$here/native_pack_test.cpp" "$here/../bootpack.cpp" "$here/../questbuild.cpp" -o "$out/native_pack_test"
 ASAN_OPTIONS=detect_leaks=0 "$out/native_pack_test" "$out"
+# per-mod native boot rollback (16f): the real publisher with failure injection and isolated owners
+${CXX:-g++} -std=c++20 -O1 -g -pthread -Wall -Wextra -Wno-missing-field-initializers -fsanitize=address,undefined \
+  -I"$here/host" -I"$here/.." -I"$here/../../../core/abi" -I"$here/../../../third_party" \
+  "$here/bootpack_native_test.cpp" "$here/../bootpack.cpp" "$here/../questbuild.cpp" -o "$out/bootpack_native_test"
+ASAN_OPTIONS=detect_leaks=0 "$out/bootpack_native_test" "$out"
+${CXX:-g++} -std=c++20 -O1 -g -pthread -Wall -Wextra -fsanitize=address,undefined \
+  "$here/../../content/tests/boot_text_undo_test.cpp" -o "$out/boot_text_undo_test"
+ASAN_OPTIONS=detect_leaks=0 "$out/boot_text_undo_test"
 # kiln.survivors' game-free core (dev.31 package 18): request shapes, outcome and authorization rules, result cache, events
 ${CXX:-g++} -std=c++20 -O1 -g -pthread -Wall -Wextra -fsanitize=address,undefined \
   -I"$here/.." -I"$here/../../../core/abi" "$here/survivors_test.cpp" -o "$out/survivors_test"

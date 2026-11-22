@@ -62,13 +62,23 @@ KL210 as an error otherwise.
 `NpcBlock.Motions` names an `NpcMotionsBlock`: Kiln-owned motion roles bound to states of the body's cooked graph.
 The [authoring contract](../modding/npc-blocks.md#authored-roster-bodies-and-motions) covers the complete 27-binding
 Fisher vector, shared skeleton/slot checks, explicit size, and the deferred `assets/npc-bodies.v1.json` bundle.
-This authoring slice does **not** supply native body lowering or atomic publication. An unavailable dependency is
-a refusal, not a rendered fallback and not a release hold.
+The authoring and boot-rollback slices do **not** supply native body lowering or atomic cross-service publication.
+An unavailable dependency is a refusal, not a rendered fallback and not a release hold.
 
 | Capability | Needs | Current contract |
 |---|---|---|
-| `blocks.npc_body` | `kiln.bootpack` v1, `quests.boot_pack`, `quests.npc`, `assets.resources`, `assets.content` | Managed row; refuses authored-body definition with the missing dependency's reason. Ordinary game-body NPCs do not need it |
-| `quests.boot_pack` | Native per-mod prepare/commit/abort bridge before the resource initialization barrier | Required dependency name, not implemented by the authoring slice. Existing `kiln.boot` collectors are not that bridge |
+| `blocks.npc_body` | `kiln.knowledge`, `quests.boot_pack`, `quests.npc_body`, `quests.npc`, `assets.resources`, `assets.content` | Managed row; refuses authored-body definition with the missing dependency's reason. Ordinary game-body NPCs do not need it |
+| `quests.boot_pack` | Private native content rollback helper and the resource initialization hook | Per-mod compile/preflight and owner-isolated rollback through the existing boot path; no public bootpack or epoch API |
+| `quests.npc_body` | Native authored-body lowering | Unavailable: the native body lowerer is not installed yet; a working rollback backend alone cannot enable authored bodies |
+
+Native packs compile separately in dependency order against the surviving effective resources. A refused pack withdraws
+only its `bootpack:<mod>` owner, restores its text-tag before-images without overwriting unrelated writers, and leaves
+earlier successful packs intact. Failed required native dependencies are excluded before their dependants compile.
+An invariant failure stops startup through the existing named fault/notice path rather than continuing with a partial pack.
+Without the private helper, ordinary legacy packs retain their old path and whole body-dependent packs are excluded.
+This is rollback behind the existing startup barrier, **not** an unpublished snapshot or an epoch: an independently
+started native-plugin worker reading GameKnowledge during publication could see it before the pack's item definitions.
+No such production reader has been measured; that hypothetical worker remains an open concurrency risk.
 
 Generated material-block/texture hashes describe dependencies only; they must not be mistaken for prepared material
 resource bytes. No Ready status, hot body replacement, or safe missing-model fallback is promised by a cooked manifest.

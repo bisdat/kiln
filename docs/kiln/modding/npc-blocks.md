@@ -279,8 +279,9 @@ New authoring types in **mod API 0.2.16** (dev.31).
 The authoring contract accepts a `BodyBlock.Model`, an `AnimationBlock` and `NpcBlock.Motions` (a reusable
 `npcMotions` block or an inline `NpcMotionsBlock`). The chassis is Kiln's Fisher/Villager chassis; authors name
 Kiln slots and graph states, not game component paths. **Authoring support alone does not build a body:** `Define`
-refuses `body.model` with the `blocks.npc_body` dependency reason until `kiln.bootpack` and the native body builder
-are installed. Ordinary `Bodies.Villager` / `Bodies.Fisher` NPCs keep their existing startup path.
+refuses `body.model` with the `blocks.npc_body` dependency reason until `quests.boot_pack` and `quests.npc_body`
+are available. The internal per-mod rollback backend is present, but the native body builder is not yet installed.
+There is no public bootpack or epoch API. Ordinary `Bodies.Villager` / `Bodies.Fisher` NPCs retain their authoring format.
 
 For an authored roster body:
 
