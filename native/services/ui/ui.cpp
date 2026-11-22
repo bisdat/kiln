@@ -839,6 +839,7 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     // the game's own UI (screens, menu entries, crafting): independent of the overlay's Vulkan hooks
     const bool game = game_install();
     render_install();  // kiln.render's camera (screen drawing works without it)
+    outline_init();    // kiln.render's outlines: what sigdb found; hooks only with the first request
     info->on_ready = [](void*) { game_ready(); };
     // the process exits with code 0 (kiln_api.h on_unload: under Wine, and on Windows where kiln.json turns it on): the
     // scrolling pause menu's crash guard knows the game did not end in its calls (menu_scroll.cpp), and the overlay's

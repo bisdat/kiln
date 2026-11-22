@@ -102,8 +102,11 @@ admins (`player_permissions`); Night Raids' raiders find no wall to break and br
 `break_blocks`).
 
 Kiln does not carry every function EMF added since. Carried: chat lines without a speaker (`chat_tell_ex`,
-`chat_broadcast_ex`; on Kiln every line a mod sends shows without a name, also a plain one) and `world_to_screen`. Not yet: player join/leave/death events, item names and the game's
-language, character names, hit observers and hit rules, buffs, markers, map clicks and map actions, canvases and the
+`chat_broadcast_ex`; on Kiln every line a mod sends shows without a name, also a plain one), `world_to_screen` and,
+since 0.2.0-dev.30.3, hit observers (`on_hit`, Lua `emf.on_hit`: every hit the server applies to a creature, player
+or placed object arrives after the server's step, as on EMF; fall, shroud, cold and drowning damage do not arrive on
+Kiln yet, and the mod's log says so once). Not yet: player join/leave/death events, item names and the game's
+language, character names, changing hits (`on_hit_before`, hit rules), buffs, markers, map clicks and map actions, canvases and the
 minimap's parts, `remove_building`, paths, doors, enemy orders and move orders, a player's game permissions, block
 breaking and villager moves. A mod that calls one of those gets
 EMF's documented "not available" answer, as on a game build EMF does not know: the rest of the mod runs. `kiln.log`

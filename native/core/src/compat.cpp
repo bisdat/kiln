@@ -110,6 +110,51 @@ void add_unique(std::vector<std::string>& v, const std::string& s) {
     if (!s.empty() && std::find(v.begin(), v.end(), s) == v.end()) v.push_back(s);
 }
 
+// Live Map (github.com/anthony-spruyt/enshrouded-livemap, a stand-alone server map): an iphlpapi.dll proxy in the game
+// folder. IPHLPAPI is a Windows DLL name, so the name proves nothing: Live Map is the one whose loaded image holds the name
+// of its config file, livemap.ini (its source reads L"\\livemap.ini"; the launcher's engine table knows it by the same
+// text). The running image is read, not the file: a Wine builtin under that name reports the game-folder path without
+// running the file there. Read once per module base, readable committed pages only, with a reference held so that the
+// module cannot unload (another thread's FreeLibrary) while its pages are read.
+bool livemap_loaded() {
+    static std::mutex mu;
+    static std::vector<std::pair<HMODULE, bool>> seen;
+    HMODULE h = nullptr;
+    if (!GetModuleHandleExW(0, L"iphlpapi.dll", &h) || !h) return false;
+    struct Release {
+        HMODULE m;
+        ~Release() { FreeLibrary(m); }
+    } release{h};
+    std::lock_guard lock(mu);
+    for (const auto& s : seen)
+        if (s.first == h) return s.second;
+    bool found = false;
+    wchar_t path[2048];
+    const DWORD len = GetModuleFileNameW(h, path, 2048);
+    std::error_code ec;
+    if (len && len < 2048 && fs::equivalent(fs::path(std::wstring(path, len)).parent_path(), paths().game, ec)) {
+        MODULEINFO mi{};
+        if (K32GetModuleInformation(GetCurrentProcess(), h, &mi, sizeof mi) && mi.SizeOfImage <= 256u * 1024 * 1024) {
+            const auto* base = static_cast<const char*>(mi.lpBaseOfDll);
+            const char* end = base + mi.SizeOfImage;
+            for (const char* p = base; p < end && !found;) {
+                MEMORY_BASIC_INFORMATION m{};
+                if (!VirtualQuery(p, &m, sizeof m) || m.RegionSize == 0) break;
+                const char* next = static_cast<const char*>(m.BaseAddress) + m.RegionSize;
+                const DWORD prot = m.Protect & 0xff;
+                const bool readable = m.State == MEM_COMMIT && !(m.Protect & PAGE_GUARD) && prot != PAGE_NOACCESS && prot != PAGE_EXECUTE;
+                if (readable) {
+                    const char* from = std::max(p, static_cast<const char*>(m.BaseAddress));
+                    found = contains_text(std::string_view(from, static_cast<size_t>(std::min(next, end) - from)), "livemap.ini");
+                }
+                p = next;
+            }
+        }
+    }
+    seen.emplace_back(h, found);
+    return found;
+}
+
 bool ieq(const std::string& a, const char* b) { return glob_match(b, a); }  // no wildcard in b: a case-insensitive compare
 
 // What is present now (compat_rules.h Facts).
@@ -127,6 +172,7 @@ Facts gather_facts(const std::vector<ChainRow>& rows, const std::vector<std::str
         if (ieq(m, "shroudforge-runtime.dll")) add_unique(f.engines, "shroudforge");
         if (ieq(m, "emf_core.dll")) add_unique(f.engines, "emf");
         if (ieq(m, "enshwick.dll")) add_unique(f.engines, "enshwick");
+        if (ieq(m, "iphlpapi.dll") && livemap_loaded()) add_unique(f.engines, "livemap");
     }
     const auto& prof = profile::state();
     if (prof.mode == KILN_PROFILE_ACTIVE || prof.mode == KILN_PROFILE_ONCE) {
@@ -243,11 +289,17 @@ void fill(ojson& doc) {
     const ojson overlaps = compute_overlaps(doc, rows, parse_sf_status(sf));
     doc["overlaps"] = overlaps;  // the sections go in before anything is logged: one odd row must not drop them
     std::vector<std::string> symbols;
-    for (const auto& o : overlaps) {
+    for (const auto& o : overlaps)
         if (o.contains("symbol") && o["symbol"].is_string()) add_unique(symbols, o["symbol"].get<std::string>());
-        if (log_once("overlap|" + overlap_key(o))) KLOG_W("compat: overlap: %s", json_text(o, "message").c_str());
-    }
     const Facts facts = gather_facts(rows, symbols, sf_running(sf));
+    // a `known` rule's overlaps are info (Live Map's hooks, sidelia's server 2026-11-21); the rest stay warnings
+    ojson marked = overlaps;
+    if (mark_known(marked, evaluate(g_rules, facts))) doc["overlaps"] = marked;
+    for (const auto& o : marked) {
+        if (!log_once("overlap|" + overlap_key(o))) continue;
+        if (o.contains("known")) KLOG_I("compat: overlap: %s", json_text(o, "message").c_str());
+        else KLOG_W("compat: overlap: %s", json_text(o, "message").c_str());
+    }
     doc["rules"] = rules_report(rows, facts);
     doc["ruleFiles"] = files_json();
 }

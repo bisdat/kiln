@@ -38,6 +38,11 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/image_bu
 # an image's opaque bounds (trimmed item icons), their UVs and fitting a source in a box (image_rect.h): plain logic
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/image_rect_test.cpp" -o "$out/image_rect_test"
 "$out/image_rect_test"
+# kiln.render's outlines (outline_core.h): a fake renderer and instances, several mods, the game's highlight, a despawn,
+# an unload, a world change, the colour groups, the palette, kiln.json ui.outlines
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -I"$here/../../../third_party" -I"$here/../../../core/abi" \
+    "$here/outline_test.cpp" -o "$out/outline_test"
+"$out/outline_test"
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/render_math_test.cpp" -o "$out/render_math_test"
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$here/wheel_math_test.cpp" -o "$out/wheel_math_test"
 "$out/wheel_math_test"
