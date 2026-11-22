@@ -30,12 +30,15 @@ const CATEGORIES = [
   ['tools', 'editor.catalog.cat.tools', (it) => ['Tools', 'FishingRod', 'Instrument'].includes(it.category)],
   ['build', 'editor.catalog.cat.building', (it) => it.category === 'BuildTools' || it.category === 'Blueprints'],
   ['vanity', 'editor.catalog.cat.cosmetics', (it) => it.category === 'Collectibles' || (it.category === 'Equipment' && /^Vanity/.test(it.debug))],
+  ['dyes', 'editor.catalog.cat.dyes', (it) => it.category === 'ColorPalette'],
 ];
 // built when the dialog opens: Kiln mod items merge into `items` after the module loads
 export const allItems = () => {
   const by = new Intl.Collator(localeAtual()).compare;
   return Object.entries(items)
-    .filter(([, it]) => !['Customization', 'ColorPalette'].includes(it.category) && (it.pt || it.en))
+    // dyes (ColorPalette) are ordinary backpack stacks the player carries; Customization entries are unlocks the game
+    // keeps elsewhere, so the editor never adds those as items
+    .filter(([, it]) => it.category !== 'Customization' && (it.pt || it.en))
     .map(([id, it]) => ({ id: Number(id), ...it, name: itemName(id), r: BASE_RARITY[it.rarity] || 1, tier: tierOf(Number(id)), q: `${it.pt || ''} ${it.en || ''} ${it.debug}`.toLowerCase() }))
     .sort((a, b) => by(a.name, b.name));
 };
