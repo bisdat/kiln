@@ -937,7 +937,7 @@ void synth_escape() {
     dispatch_key(k);
 }
 
-// The pad's buttons as key presses (0.2.0-dev.31, pad_keys.h) for the subscribers with KILN_UI_KEYS_PAD, on the thread
+// The pad's buttons as key presses (0.2.0-dev.30.5, pad_keys.h) for the subscribers with KILN_UI_KEYS_PAD, on the thread
 // the game polls the pad from: each controller's tracker is that thread's (a poll from another thread starts afresh).
 // Returns the buttons kept from the game (hidden until their release); a kept B is reported in *b_kept.
 uint32_t pad_presses(DWORD user, const PadState& pad, bool captured, bool* b_kept) {

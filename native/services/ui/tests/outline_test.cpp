@@ -95,7 +95,7 @@ struct World {
 
 int main() {
     const uint32_t gold = 0xFFC440FFu, green = 0x46FF6EFFu, blue = 0x3070FFFFu;
-    // ---- through walls (0.2.0-dev.31): the position of a through-walls request's entity in outline_info ----
+    // ---- through walls (0.2.0-dev.30.5): the position of a through-walls request's entity in outline_info ----
     {
         World w;
         check(KILN_RENDER_OUTLINE_THROUGH_WALLS == 2u && sizeof(KilnRenderOutlineInfo) == 56 &&

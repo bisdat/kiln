@@ -105,8 +105,8 @@ KilnResult KILN_CALL t_subscribe_clicks(KilnOwner owner, const KilnUiSlotClickFi
     }
 }
 
-// a hit record of a caller built before dev.31 (its slot record ended at level: 112 bytes)
-constexpr uint32_t kHitMin = offsetof(KilnUiSlotHit, slot) + offsetof(KilnUiVisibleSlot, level);
+// a hit record of a caller built before dev.30.5 (its slot record ended at level: 112 bytes)
+constexpr uint32_t kHitMin = offsetof(KilnUiSlotHit, slot) + offsetof(KilnUiVisibleSlotV2, level);
 
 KilnResult slot_at_full(KilnOwner owner, float x, float y, float tw, float th, KilnUiSlotHit* out);
 
@@ -119,7 +119,7 @@ KilnResult KILN_CALL t_slot_at(KilnOwner owner, float x, float y, float tw, floa
     const uint32_t size = out->size;
     std::memcpy(out, &full, size);
     out->size = size;
-    out->slot.size = static_cast<uint32_t>(offsetof(KilnUiVisibleSlot, level));
+    out->slot.size = static_cast<uint32_t>(offsetof(KilnUiVisibleSlotV2, level));
     return rc;
 }
 
@@ -251,7 +251,7 @@ KilnResult KILN_CALL t_screen_view(KilnOwner owner, float tw, float th, KilnUiSc
         }
         if (scaled) out->flags |= KUI_VIEW_SCALED;
         Bounds all, mine, theirs;
-        for (const KilnUiVisibleSlot& v : f->slots) {
+        for (const KilnUiVisibleSlotV2& v : f->slots) {
             if (!(v.available & KUI_OUTER_RECT)) continue;
             const float x0 = ox + v.outer_ui.x * sx, y0 = oy + v.outer_ui.y * sy;
             const float x1 = x0 + v.outer_ui.width * sx, y1 = y0 + v.outer_ui.height * sy;
@@ -358,7 +358,7 @@ int hit_slot(const SlotsSnapshot& f, float x, float y, float tw, float th) {
     float sx, sy, ox, oy;
     if (!map_frame(f.meta, tw, th, &sx, &sy, &ox, &oy)) return -1;
     for (size_t k = f.slots.size(); k-- > 0;) {
-        const KilnUiVisibleSlot& s = f.slots[k];
+        const KilnUiVisibleSlotV2& s = f.slots[k];
         if (!(s.available & KUI_OUTER_RECT)) continue;
         const float x0 = ox + s.outer_ui.x * sx, y0 = oy + s.outer_ui.y * sy;
         const float x1 = x0 + s.outer_ui.width * sx, y1 = y0 + s.outer_ui.height * sy;

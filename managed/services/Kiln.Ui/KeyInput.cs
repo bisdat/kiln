@@ -34,7 +34,7 @@ public readonly record struct KeyPress(uint VirtualKey, uint ScanCode, KeyMods M
     /// <summary>A mouse input: the middle or a side button, or a notch of the wheel.</summary>
     public bool IsMouse => MouseKeys.IsButton(VirtualKey) || MouseKeys.IsWheel(VirtualKey);
 
-    /// <summary>A game controller's button (<see cref="KeyListenFlags.Pad"/>). Since 0.2.0-dev.31.</summary>
+    /// <summary>A game controller's button (<see cref="KeyListenFlags.Pad"/>). Since 0.2.0-dev.30.5.</summary>
     public bool IsPad => PadKeys.IsPad(VirtualKey);
 }
 
@@ -54,7 +54,7 @@ public enum KeyListenFlags
     /// <see cref="KeyPress.Mods"/> are the pad's shoulder buttons and triggers held, <see cref="KeyMods.PadLB"/> ..
     /// <see cref="KeyMods.PadRT"/>). They come on the thread the game reads the pad from, at the poll that sees the
     /// change; true for a press keeps that button from the game until it is let go. Needs the kiln-ui.dll of the same
-    /// release (<see cref="KeyListener.Pad"/> false next to an older one). Since 0.2.0-dev.31 (mod API 0.2.14).</summary>
+    /// release (<see cref="KeyListener.Pad"/> false next to an older one). Since 0.2.0-dev.30.5 (mod API 0.2.14).</summary>
     Pad = 2,
 }
 
@@ -82,7 +82,7 @@ public sealed class KeyListener : IDisposable, IKilnResult
     /// <summary>It gets the mouse inputs of <see cref="KeyListenFlags.Mouse"/> as well.</summary>
     public bool Mouse { get; }
 
-    /// <summary>It gets a game controller's buttons (<see cref="KeyListenFlags.Pad"/>) as well. Since 0.2.0-dev.31.</summary>
+    /// <summary>It gets a game controller's buttons (<see cref="KeyListenFlags.Pad"/>) as well. Since 0.2.0-dev.30.5.</summary>
     public bool Pad { get; }
 
     internal ModContext? Owner { get; }
@@ -129,7 +129,7 @@ public static unsafe class KeyInput
         var native = (mouse ? UiNative.KeysMouse : 0u) | (pad ? UiNative.KeysPad : 0u);
         KeyListener l = null!;
         int rc;
-        // registered before the subscription goes in (a press may come at once); a kiln-ui.dll older than 0.2.0-dev.31
+        // registered before the subscription goes in (a press may come at once); a kiln-ui.dll older than 0.2.0-dev.30.5
         // refuses KeysPad: then without the pad
         for (var attempt = 0; ; attempt++)
         {

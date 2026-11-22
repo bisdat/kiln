@@ -11,16 +11,16 @@ public sealed partial class KilnHarness
 }
 
 /// <summary>A slot as the game would draw it: the item, the stack, the item's entity (the server's id of it: what
-/// <c>SlotClick.ItemEntity</c> carries), the inventory that holds it, its page and index; since 0.2.0-dev.31 the item's
+/// <c>SlotClick.ItemEntity</c> carries), the inventory that holds it, its page and index; since 0.2.0-dev.30.5 the item's
 /// <see cref="Rarity"/> and <see cref="Level"/> as the game draws them (VisibleSlot.Rarity / Level). A slot with a Holder
 /// and an ItemEntity also carries it as VisibleSlot.ServerEntity (the fake takes every holder for the player or the open
 /// container, the two Kiln proves in a game).</summary>
 public readonly record struct FakeInventorySlot(uint Item, uint Count = 1, uint ItemEntity = 0, uint Holder = 0, uint InventoryPage = 0,
     byte SlotIndex = 0)
 {
-    /// <summary>The item's rarity as drawn (null: none). Since 0.2.0-dev.31.</summary>
+    /// <summary>The item's rarity as drawn (null: none). Since 0.2.0-dev.30.5.</summary>
     public ItemRarity? Rarity { get; init; }
-    /// <summary>The item's level as drawn. Since 0.2.0-dev.31.</summary>
+    /// <summary>The item's level as drawn. Since 0.2.0-dev.30.5.</summary>
     public int Level { get; init; }
 }
 
@@ -120,10 +120,20 @@ public sealed class HarnessUiInventory
         if (FakeTables.Off(UiValuesAbi.SlotsRow) || UiValuesFake.State is not { } vs) return;
         UiValuesFakeState.Reg[] subs;
         lock (vs.Lock) subs = vs.Regs.Where(r => r.List == UiValuesAbi.Slots).ToArray();
+        var legacy = new byte[drawn.Length * 112];
+        fixed (byte* packed = legacy)
         fixed (UiValuesNative.VisibleSlot* p = drawn)
+        {
+            for (var i = 0; i < drawn.Length; i++)
+            {
+                Buffer.MemoryCopy(p + i, packed + i * 112, 112, 112);
+                ((uint*)(packed + i * 112))[0] = 112;
+                ((uint*)(packed + i * 112))[1] &= ~UiValuesNative.ItemValues;
+            }
             foreach (var r in subs)
                 ((delegate* unmanaged[Cdecl]<UiValuesNative.SlotsFrame*, UiValuesNative.VisibleSlot*, uint, void*, void>)r.Fn)(
-                    &frame, p, frame.Count, (void*)r.User);
+                    &frame, r.Item == 120 ? p : (UiValuesNative.VisibleSlot*)packed, frame.Count, (void*)r.User);
+        }
     }
 
     /// <summary>The player opens the backpack with these slots drawn (the backpack screen, HUD Backpack).</summary>
@@ -152,7 +162,7 @@ public sealed class HarnessUiInventory
     /// in the order they were added).</summary>
     public IReadOnlyList<string> PanelsShown => UiInventoryScreens.Showing();
 
-    /// <summary>The game's own selection (a controller's: what Ui.Inventory.Selected reads, since 0.2.0-dev.31) rests on
+    /// <summary>The game's own selection (a controller's: what Ui.Inventory.Selected reads, since 0.2.0-dev.30.5) rests on
     /// drawn slot <paramref name="index"/> (null: on none), as the game marks it in the slot draw's state byte 0. A
     /// <see cref="Draw"/> starts with none.</summary>
     public unsafe void Select(int? index)
@@ -204,7 +214,7 @@ public sealed class HarnessUiInventory
     /// drawn slot (<see cref="Select"/>): every <c>SlotClickOptions.Pad</c> handler of that chord gets it as a click on that
     /// slot (<c>SlotButton.Pad</c>), in subscription order, at once on the calling thread. Nothing (Delivered 0, the game
     /// gets the press) without a selected slot, on a screen without a pointer, or while a row is off. Since
-    /// 0.2.0-dev.31.</summary>
+    /// 0.2.0-dev.30.5.</summary>
     public FakeSlotClickResult PressPad(string chord)
     {
         var c = KeyChord.Parse(chord);

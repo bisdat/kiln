@@ -72,7 +72,7 @@ internal static unsafe class UiCaps
         ReportThroughWalls();
     }
 
-    /// <summary>ui.world_outline.through_walls (0.2.0-dev.31): Kiln.Ui's own row for OutlineOptions.ThroughWalls. Kiln.Ui draws
+    /// <summary>ui.world_outline.through_walls (0.2.0-dev.30.5): Kiln.Ui's own row for OutlineOptions.ThroughWalls. Kiln.Ui draws
     /// the silhouette, so it needs the outline itself, kiln.render v3 (the entity's position), the camera and kiln.ui's
     /// overlay.</summary>
     internal static (bool Ok, CapabilityReason Reason, string Why) ThroughWallsState()

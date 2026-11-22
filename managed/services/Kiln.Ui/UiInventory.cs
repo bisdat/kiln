@@ -17,7 +17,7 @@ public enum SlotButton
     Left = 1,
     Right = 3,
     /// <summary>A game controller's button on the selected slot (<see cref="SlotClickOptions.Pad"/>, <see cref="SlotClick.Pad"/>).
-    /// Since 0.2.0-dev.31.</summary>
+    /// Since 0.2.0-dev.30.5.</summary>
     Pad = 16,
 }
 
@@ -61,8 +61,8 @@ public sealed record SlotClickOptions
     /// it (its own action on that button does not happen; the buttons held for a combination still reach it). The
     /// handler runs at once on the thread the game polls the pad from, with <see cref="SlotClick.Button"/>
     /// <see cref="SlotButton.Pad"/> and <see cref="SlotClick.Pad"/> set. No selected slot, a Kiln screen with the input or
-    /// a stale frame: no click, the game gets the press. Next to a kiln-ui.dll older than 0.2.0-dev.31 it never fires. Since
-    /// 0.2.0-dev.31 (mod API 0.2.14).</summary>
+    /// a stale frame: no click, the game gets the press. Next to a kiln-ui.dll older than 0.2.0-dev.30.5 it never fires. Since
+    /// 0.2.0-dev.30.5 (mod API 0.2.14).</summary>
     public KeyChord? Pad { get; init; }
 }
 
@@ -78,11 +78,11 @@ public sealed record SlotClick(SlotButton Button, SlotModifiers Modifiers, Visib
     /// <summary>The entity whose inventory holds the slot (the player, a chest), when the game's models said.</summary>
     public EntityId Holder => Slot.Holder;
     /// <summary>The controller chord pressed, for a <see cref="SlotClickOptions.Pad"/> click (<see cref="SlotButton.Pad"/>);
-    /// null for a mouse click. Since 0.2.0-dev.31.</summary>
+    /// null for a mouse click. Since 0.2.0-dev.30.5.</summary>
     public KeyChord? Pad { get; init; }
-    /// <summary>The item's rarity as the game drew the slot (<see cref="VisibleSlot.Rarity"/>). Since 0.2.0-dev.31.</summary>
+    /// <summary>The item's rarity as the game drew the slot (<see cref="VisibleSlot.Rarity"/>). Since 0.2.0-dev.30.5.</summary>
     public ItemRarity? Rarity => Slot.Rarity;
-    /// <summary>The item's level as the game drew the slot (<see cref="VisibleSlot.Level"/>). Since 0.2.0-dev.31.</summary>
+    /// <summary>The item's level as the game drew the slot (<see cref="VisibleSlot.Level"/>). Since 0.2.0-dev.30.5.</summary>
     public int Level => Slot.Level;
 
     /// <summary>
@@ -143,7 +143,7 @@ public static partial class Ui
         /// of the game's UI navigation, which the d-pad and stick move (the slot draw's state byte 0, which the game sets
         /// from its focus test). With a mouse the game may move that focus with the pointer too, so for a mouse player
         /// <see cref="Selected"/> can follow <see cref="Hovered"/>. Not checked in a game yet (client check
-        /// ui-fuzen.c2). Since 0.2.0-dev.31 (mod API 0.2.14).</summary>
+        /// ui-fuzen.c2). Since 0.2.0-dev.30.5 (mod API 0.2.14).</summary>
         [ClientOnly, AnyThread]
         public static VisibleSlot? Selected => UiInventoryBridge.Selected();
     }
@@ -382,7 +382,7 @@ internal static unsafe class UiInventoryBridge
             : null;
     }
 
-    // ---- a controller's press on the selected slot (SlotClickOptions.Pad, 0.2.0-dev.31) ----
+    // ---- a controller's press on the selected slot (SlotClickOptions.Pad, 0.2.0-dev.30.5) ----
     private sealed class PadSub
     {
         public KeyChord Chord;
@@ -447,7 +447,7 @@ internal static unsafe class UiInventoryBridge
         return take;
     }
 
-    // ---- selected (0.2.0-dev.31) ----
+    // ---- selected (0.2.0-dev.30.5) ----
     internal const long SelectedMaxAgeMs = 250;  // as fresh as a click's frame must be (kiln_ui_inventory.h)
 
     /// <summary>The screens on which a slot can be pressed or selected (kiln_ui_inventory.h "Clicks").</summary>

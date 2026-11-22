@@ -97,7 +97,7 @@ internal static unsafe class UiValuesNative
 
     // KilnUiSlotAvailability
     public const uint OuterRect = 1, InnerRect = 2, NativeState = 4, Viewport = 8, PixelMappingVerified = 16, ItemValues = 32;
-    // KilnUiHolderFlags / KilnUiViewFlags (dev.31: a proven holder's item entity is the server's)
+    // KilnUiHolderFlags / KilnUiViewFlags (dev.30.5: a proven holder's item entity is the server's)
     public const uint HolderServerProven = 8, ViewServerEntity = 2;
 
     [StructLayout(LayoutKind.Sequential)]
@@ -110,7 +110,7 @@ internal static unsafe class UiValuesNative
         public uint Holder, HolderFlags;
         public ulong HolderSerial;
         public uint PageOrdinal, Reserved2;
-        public uint Level, Rarity;  // dev.31: valid with ItemValues
+        public uint Level, Rarity;  // dev.30.5: valid with ItemValues
     }
 
     [StructLayout(LayoutKind.Sequential)]

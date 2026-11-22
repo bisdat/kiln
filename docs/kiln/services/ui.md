@@ -318,7 +318,7 @@ game's highlight groups Group1 and Group2, which Kiln colours itself. Managed: `
 `OutlineOptions` (Kiln.Ui). Capability `ui.world_outline`. Usage and the C table: [../render.md](../render.md#outlines-since-020-dev303);
 RE: [../../re/client-render.md](../../re/client-render.md#highlight-groups-outlines).
 
-## Captured item detail for Kiln windows (dev.31, #120)
+## Captured item detail for Kiln windows (dev.30.5, #120)
 
 `kiln.ui.item_detail` is a **new v1 table**, not an append to `kiln.ui` or `kiln.ui.values`.
 Its only function, `copy(owner, query, snapshot, lines, capacity)`, is callable on any thread;
@@ -346,3 +346,14 @@ gets `BUFFER_TOO_SMALL` and the required count, with no partial rows.
 
 Managed API, fallback, and sample: [the UI guide](../ui.md#item-detail-in-a-kiln-window-dev31).
 Hooks and rendering have host tests; **the real-client comparison remains unverified**.
+
+## Negotiated slot subscriptions (dev.30.5 review correction)
+
+The released `KilnUiVisibleSlot` and `kiln.ui.values.subscribe_slots` callback stay frozen at
+112 bytes per row. `KilnUiVisibleSlotV2` is 120 bytes, adding level and rarity at 112/116.
+A new **`kiln.ui.slots` v1** table has `subscribe(owner, record_size, fn, user, out)`; it accepts
+only `record_size == 120` and delivers typed V2 rows. An unknown negotiation is refused.
+Unsubscribe through the existing kiln.ui.values handle registry. Capability: `ui.slots.inspect`.
+No existing table grows. Size-aware `copy_slots` still supports both strides through the first
+output row's size. `Ui.Values.SubscribeSlots` prefers the negotiated table and expands frozen
+112-byte callbacks when running on an older core. TestKit models both callback layouts.

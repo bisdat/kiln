@@ -363,7 +363,7 @@ uint32_t model_of(KilnEntity e) {
     return rc == KILN_OK && need == 4 ? model : 0;  // NOT_FOUND: no ModelComponent (a voxel model, an effect)
 }
 
-// 0.2.0-dev.31: the positions of the entities of through-walls requests, each client step: the first WorldTransform of
+// 0.2.0-dev.30.5: the positions of the entities of through-walls requests, each client step: the first WorldTransform of
 // keen::ecs::RenderTransform (176 bytes; three 32.32 fixed-point metres first), as kiln.markers' client anchors read it
 // (native/services/markers/world_read.h). Another size: not read (the layout moved; no silhouette rather than a wrong one).
 constexpr uint32_t kRenderTransformBytes = 176;
@@ -555,7 +555,7 @@ KilnResult KILN_CALL outline_add(KilnOwner owner, KilnEntity entity, const KilnR
 }
 
 KilnResult KILN_CALL outline_info(KilnHandle h, KilnRenderOutlineInfo* out) {
-    // a caller built before 0.2.0-dev.31 passes the 24-byte record (through merged): answered without the position
+    // a caller built before 0.2.0-dev.30.5 passes the 24-byte record (through merged): answered without the position
     constexpr uint32_t kOld = offsetof(KilnRenderOutlineInfo, position_ok);
     if (!out || out->size < kOld) return KILN_ERR_INVALID_ARGUMENT;
     KilnRenderOutlineInfo full{};

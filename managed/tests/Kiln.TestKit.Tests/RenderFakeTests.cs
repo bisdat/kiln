@@ -19,7 +19,7 @@ public sealed unsafe class RenderFakeTests
         // kiln_render.h v2: the header, v1's thirteen functions and the five outline functions
         var t = (uint*)KitBackend.Instance.Service("kiln.render", 1);  // KilnServiceHeader { size, version }
         Assert.True(t != null);
-        Assert.Equal((152u, 3u), (t[0], t[1]));  // v3 (0.2.0-dev.31): through walls, no new member
+        Assert.Equal((152u, 3u), (t[0], t[1]));  // v3 (0.2.0-dev.30.5): through walls, no new member
     }
 
     [Fact]

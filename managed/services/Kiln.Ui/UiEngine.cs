@@ -87,7 +87,7 @@ internal static unsafe class UiEngine
     private static readonly UiDraw Draw = new();
     private static uint _lastDemand = uint.MaxValue, _lastCapture = uint.MaxValue, _lastHover = uint.MaxValue;
     private static volatile string? _remapping;  // binding id waiting for "press a key"
-    private static uint _remapPadHeld;  // a pad's LB/RB/LT/RT went down while waiting (0.2.0-dev.31): alone on its release
+    private static uint _remapPadHeld;  // a pad's LB/RB/LT/RT went down while waiting (0.2.0-dev.30.5): alone on its release
     private static bool _keysDrawn;               // the Keys tab was drawn this frame
     private static long _keysDrawnAtMs;           // ... and when it was drawn last
     private static bool _pageHost;      // this Kiln.Ui draws the Kiln menu inside the game's main menu (kiln.ui v4)
@@ -600,7 +600,7 @@ internal static unsafe class UiEngine
     public static bool Key(in UiNative.Key k)
     {
         if (k.Vk == 0) return false;
-        var pad = PadKeys.IsPad(k.Vk);  // a game controller's button (0.2.0-dev.31): its modifiers are the pad's
+        var pad = PadKeys.IsPad(k.Vk);  // a game controller's button (0.2.0-dev.30.5): its modifiers are the pad's
         var mods = (KeyMods)(k.Mods & (pad ? (uint)PadKeys.Mods : 7u));
         var down = k.Down != 0;
         // "press a key" in the Keys tab; the menu closed since (Escape: kiln.ui keeps that key) drops it, and the key is the game's
@@ -648,12 +648,12 @@ internal static unsafe class UiEngine
         }
         var consumed = false;
         var wheel = MouseKeys.IsWheel(k.Vk);
-        // a controller's press on the game's selected slot (SlotClickOptions.Pad, 0.2.0-dev.31): during play and on the
+        // a controller's press on the game's selected slot (SlotClickOptions.Pad, 0.2.0-dev.30.5): during play and on the
         // game's screens, never while a Kiln screen has the input
         if (pad && down && k.Repeat == 0 && k.Captured == 0) consumed |= UiInventoryBridge.PadPress(new KeyChord(k.Vk, mods));
         // a Kiln screen has the mouse (the Keys page had its chance above): the wheel scrolls it, and no mouse press fires
         // a binding there; a button's release still ends a hold that began in play
-        // a pad's button there navigates the screen (0.2.0-dev.31): no pad binding fires while a Kiln screen has the input
+        // a pad's button there navigates the screen (0.2.0-dev.30.5): no pad binding fires while a Kiln screen has the input
         if ((wheel || MouseKeys.IsButton(k.Vk) || pad) && k.Captured != 0 && down) return false;
         foreach (var b in KeyBindings.All)
         {

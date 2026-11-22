@@ -522,7 +522,7 @@ public sealed unsafe class UiValuesTests : IDisposable
         Assert.Equal(320, sizeof(UiValuesNative.TooltipDetails));
         Assert.Equal(296, sizeof(UiValuesNative.LineWriter));  // append_line appended in 0.2.0-dev.29.19
         Assert.Equal(280, (int)Marshal.OffsetOf<UiValuesNative.LineWriter>(nameof(UiValuesNative.LineWriter.Append)));
-        Assert.Equal(120, sizeof(UiValuesNative.VisibleSlot));  // level and rarity appended in 0.2.0-dev.31
+        Assert.Equal(120, sizeof(UiValuesNative.VisibleSlot));  // level and rarity appended in 0.2.0-dev.30.5
         Assert.Equal(112, (int)Marshal.OffsetOf<UiValuesNative.VisibleSlot>(nameof(UiValuesNative.VisibleSlot.Level)));
         Assert.Equal(120, sizeof(UiValuesNative.SlotsFrame));
     }
@@ -907,11 +907,21 @@ public sealed unsafe class UiValuesTests : IDisposable
         Frame(2);
         var fn = (delegate* unmanaged[Cdecl]<UiValuesNative.SlotsFrame*, UiValuesNative.VisibleSlot*, uint, void*, void>)FakeUiValues.SlotsFn;
         var meta = FakeUiValues.SlotsMeta;
-        fixed (UiValuesNative.VisibleSlot* p = FakeUiValues.SlotList) fn(&meta, p, 2, (void*)FakeUiValues.SlotsUser);
+        fixed (UiValuesNative.VisibleSlot* p = FakeUiValues.SlotList)
+        {
+            byte* legacy = stackalloc byte[224];
+            for (var i = 0; i < 2; i++) Buffer.MemoryCopy(p + i, legacy + i * 112, 112, 112);
+            fn(&meta, (UiValuesNative.VisibleSlot*)legacy, 2, (void*)FakeUiValues.SlotsUser);
+        }
         var r = Assert.Single(got);
         Assert.Equal(2, r.Snapshot!.Slots.Count);
         reg.Dispose();
-        fixed (UiValuesNative.VisibleSlot* p = FakeUiValues.SlotList) fn(&meta, p, 2, (void*)FakeUiValues.SlotsUser);
+        fixed (UiValuesNative.VisibleSlot* p = FakeUiValues.SlotList)
+        {
+            byte* legacy = stackalloc byte[224];
+            for (var i = 0; i < 2; i++) Buffer.MemoryCopy(p + i, legacy + i * 112, 112, 112);
+            fn(&meta, (UiValuesNative.VisibleSlot*)legacy, 2, (void*)FakeUiValues.SlotsUser);
+        }
         Assert.Single(got);  // nothing after Dispose
         Assert.Contains(reg.Handle, FakeUiValues.Unsubscribed);
         Assert.Throws<ArgumentNullException>(() => Ui.Values.SubscribeSlots(null!));

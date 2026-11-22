@@ -27,7 +27,7 @@ std::vector<std::shared_ptr<KeySub>> g_subs;
 // Unsubscribed, a call may still be in flight: kept findable while another thread drains it (also self-unsubscribe).
 std::unordered_map<KilnHandle, std::shared_ptr<KeySub>> g_retiring;
 std::atomic<uint32_t> g_mouse_subs{0};  // subscribers with KILN_UI_KEYS_MOUSE (any thread reads it)
-std::atomic<uint32_t> g_pad_subs{0};    // subscribers with KILN_UI_KEYS_PAD (0.2.0-dev.31; any thread reads it)
+std::atomic<uint32_t> g_pad_subs{0};    // subscribers with KILN_UI_KEYS_PAD (0.2.0-dev.30.5; any thread reads it)
 
 // Under g_mu, after every change of g_subs.
 void count_mouse_locked() {

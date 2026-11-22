@@ -360,11 +360,11 @@ var under = Ui.Inventory.Hovered;                      // the slot under the cur
 
 | Member | What | Row |
 |---|---|---|
-| `OnClick(options, handler)` | clicks matching `Button` (Left, Right) and `Modifiers` (exactly: Ctrl alone is not Ctrl+Shift); `Take` (default) keeps the press from the game, its release still reaches it. The handler runs on the client's main thread after the next UI frame. Dispose to stop. Since 0.2.0-dev.31 `Pad = KeyChord.Parse("Pad:LS")` (or `"Pad:LB+A"`) makes it a controller press on the `Selected` slot instead: `SlotClick.Button` is `SlotButton.Pad` and `SlotClick.Pad` the chord; `Take` keeps that button from the game until it is let go (the buttons held for a combination still reach it); the handler runs at once on the thread the game polls the pad from; no selected slot, or a Kiln screen with the input: no click | `ui.slots.click` |
+| `OnClick(options, handler)` | clicks matching `Button` (Left, Right) and `Modifiers` (exactly: Ctrl alone is not Ctrl+Shift); `Take` (default) keeps the press from the game, its release still reaches it. The handler runs on the client's main thread after the next UI frame. Dispose to stop. Since 0.2.0-dev.30.5 `Pad = KeyChord.Parse("Pad:LS")` (or `"Pad:LB+A"`) makes it a controller press on the `Selected` slot instead: `SlotClick.Button` is `SlotButton.Pad` and `SlotClick.Pad` the chord; `Take` keeps that button from the game until it is let go (the buttons held for a combination still reach it); the handler runs at once on the thread the game polls the pad from; no selected slot, or a Kiln screen with the input: no click | `ui.slots.click` |
 | `Mark(item, mark)`, `Unmark(item)`, `ClearMarks()` | a mark on the item's slot wherever the game draws it (it follows the item: move it and the mark moves); `SlotMark(Color, Style = Border/Fill/Corner, Thickness = 3)` | `ui.slots.inspect` |
 | `MarkWhen(rule)` | a mark from a rule asked for each drawn slot (an item mark wins) | `ui.slots.inspect` |
 | `Hovered` | the slot under the cursor in the game's latest UI frame (the mouse's only) | `ui.slots.inspect` |
-| `Selected` (0.2.0-dev.31) | the slot the game's own selection is on (a controller's: the focus of the game's UI navigation, which the d-pad and stick move), on a screen with a pointer, in a frame at most 250 ms old; with a mouse the game may move that focus with the pointer, so it can follow `Hovered` there. Not checked in a game yet (`ui-fuzen.c2`) | `ui.slots.inspect` |
+| `Selected` (0.2.0-dev.30.5) | the slot the game's own selection is on (a controller's: the focus of the game's UI navigation, which the d-pad and stick move), on a screen with a pointer, in a frame at most 250 ms old; with a mouse the game may move that focus with the pointer, so it can follow `Hovered` there. Not checked in a game yet (`ui-fuzen.c2`) | `ui.slots.inspect` |
 
 **The item's identity.** `SlotClick.ItemEntity` (and `VisibleSlot.ClientEntity`) is the item's entity in this game's
 world. Only items with an item entity of their own have one: weapons, tools, armour, cans (the items `Items.Read` also
@@ -373,7 +373,7 @@ has none, so a click on it says `ItemEntity` 0 with its `Item` and `Slot.Count`;
 `Slot.InventoryPage`, `Slot.SlotIndex` and `Item`. For an item the server sent (every item in a player's, a chest's or a
 station's inventory) the entity is the server's own id of it: the game creates replicated entities with the server's id
 (`docs/re/network.md`, dossier chapter 05a section 6).
-Since 0.2.0-dev.31 (mod API 0.2.14, GitHub issue 121) Kiln also says so: `VisibleSlot.ServerEntity` (and so
+Since 0.2.0-dev.30.5 (mod API 0.2.14, GitHub issue 121) Kiln also says so: `VisibleSlot.ServerEntity` (and so
 `SlotClick.Slot.ServerEntity`) is that id for every slot of the local player and of the open container (a storage chest,
 the chest-style transfer screen, a factory station: the entity the screen is about), so it equals the server's
 `InventorySlot.ItemEntity` there; `HolderFlags` bit 8 marks such a holder. It is `EntityId.None` for a plain stack and for
@@ -884,7 +884,7 @@ b.OnRelease = …;  b.IsDown;  b.TakePresses();  b.Consume = false;  b.WhileCapt
   - The mouse needs the kiln-ui.dll of the same release (kiln.ui v7). Next to an older kiln-ui.dll, which only a hand-mixed
     install has, the names still parse and `Register` works, but mouse bindings never fire and the Keys page takes keys
     only; kiln.log says so once ("this kiln-ui.dll is older than Kiln.Ui").
-- **A game controller** (0.2.0-dev.31, mod API 0.2.14, GitHub issue 119, thanks Fuzen777): `Pad:A`, `Pad:B`, `Pad:X`,
+- **A game controller** (0.2.0-dev.30.5, mod API 0.2.14, GitHub issue 119, thanks Fuzen777): `Pad:A`, `Pad:B`, `Pad:X`,
   `Pad:Y`, `Pad:LB`, `Pad:RB`, `Pad:LT`, `Pad:RT` (the triggers), `Pad:LS`, `Pad:RS` (a stick pressed: L3, R3),
   `Pad:Start`, `Pad:Back`, `Pad:Up`, `Pad:Down`, `Pad:Left`, `Pad:Right` (the d-pad), and combinations with the
   shoulder buttons and triggers held: `Pad:LB+A`, `Pad:LT+RS`, `Pad:LB+RB+Y`. `KeyBindings.Register("fav.mark", "Pad:LS", …)`
@@ -899,7 +899,7 @@ b.OnRelease = …;  b.IsDown;  b.TakePresses();  b.Consume = false;  b.WhileCapt
   - The Kiln menu's own key is never a pad button (it is opened from the keyboard or a mouse button).
   - On the Keys page: click the key, then press a pad button, or hold LB, RB, LT or RT and press another for a
     combination; let go of LB, RB, LT or RT alone to bind that button.
-  - A Kiln older than 0.2.0-dev.31 does not know these names (`KeyChord.TryParse` says false; `Register` throws). Next to
+  - A Kiln older than 0.2.0-dev.30.5 does not know these names (`KeyChord.TryParse` says false; `Register` throws). Next to
     an older kiln-ui.dll (a hand-mixed install) pad bindings register but never fire.
 - The player's choice is kept in `kiln/config/keybinds.json` (`{"bindings": {"mymod.toggle": "F9"}}`). The Kiln menu's
   **Keys** tab remaps keys by press: click the key, press the new one (a key, the middle or a side mouse button, or a
@@ -942,7 +942,7 @@ listener.Dispose();                           // or let the mod's unload end it
 - `Listen` is kiln.ui's key subscription (`subscribe_key_ex` in `kiln_ui.h`). With `KeyListenFlags.Mouse` (the default)
   it gets the middle and side mouse buttons and the wheel's notches too, as key bindings do; `KeyListenFlags.None` gets
   keyboard keys only. Next to an older kiln-ui.dll (a hand-mixed install) it gets keys only and `listener.Mouse` is false.
-  `KeyListenFlags.Pad` (0.2.0-dev.31) adds a game controller's buttons (`KeyPress.IsPad`, the pad's modifiers in
+  `KeyListenFlags.Pad` (0.2.0-dev.30.5) adds a game controller's buttons (`KeyPress.IsPad`, the pad's modifiers in
   `KeyPress.Mods`), on the thread the game polls the pad from; true for a press keeps the button from the game until it is
   let go. `listener.Pad` says whether it gets them.
 - It runs on the game's window thread while the message is handled, before the game gets the press: keep it short.
@@ -1501,7 +1501,7 @@ aside while it is installed, whatever its ini says; the readout stays where Kiln
 
 The additive window size-constraints slot after v7 is described in the [UI service reference](services/ui.md).
 
-## Item detail in a Kiln window (dev.31)
+## Item detail in a Kiln window (dev.30.5)
 
 ```csharp
 // Inside a Kiln window draw callback. Keep a saved slot, or use Ui.Inventory.Selected/Hovered.

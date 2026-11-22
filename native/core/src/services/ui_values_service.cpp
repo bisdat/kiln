@@ -160,6 +160,17 @@ bool call_slots(KilnUiSlotsFn fn, const KilnUiSlotsFrame* f, const KilnUiVisible
         return false;
     }
 }
+bool call_slots_v2(KilnUiSlotsFnV2 fn, const KilnUiSlotsFrame* f, const KilnUiVisibleSlotV2* s, uint32_t n, void* user) {
+    crash::Capture cap{};
+    unsigned long code = 0;
+    __try {
+        fn(f, s, n, user);
+        return true;
+    } __except (crash::filter(GetExceptionInformation(), &cap, &code)) {
+        crash::report(cap, "kiln.ui.values slots subscriber", reinterpret_cast<const void*>(fn));
+        return false;
+    }
+}
 
 bool call_gemforge(KilnUiGemForgeFn fn, const KilnUiGemForgeFrame* f, const KilnUiGemForgeCandidate* rows,
                   uint32_t n, void* user) {
@@ -390,6 +401,7 @@ void wire() {
     e.call_value = &call_value;
     e.call_changed = &call_changed;
     e.call_slots = &call_slots;
+    e.call_slots_v2 = &call_slots_v2;
     e.call_lines = &call_lines;
     e.call_gemforge = &call_gemforge;
     e.gemforge_abi = &gemforge_contract;
@@ -470,3 +482,5 @@ KILN_SERVICE(ui_inventory, KILN_UI_INVENTORY_SERVICE, KILN_UI_INVENTORY_VERSION,
 // Independent v1 table; no append to any shared service ABI.
 KILN_SERVICE(ui_item_detail, KILN_UI_ITEM_DETAIL_SERVICE, KILN_UI_ITEM_DETAIL_VERSION,
              kiln::uivalues::item_detail_table(), &inventory_init);
+
+KILN_SERVICE(ui_slots, KILN_UI_SLOTS_SERVICE, KILN_UI_SLOTS_VERSION, kiln::uivalues::slots_table(), &inventory_init);

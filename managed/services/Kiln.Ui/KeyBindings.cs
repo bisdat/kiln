@@ -15,13 +15,13 @@ public enum KeyMods
     Ctrl = 1,
     Shift = 2,
     Alt = 4,
-    /// <summary>A game controller's left shoulder button held (a pad chord: "Pad:LB+A"). Since 0.2.0-dev.31.</summary>
+    /// <summary>A game controller's left shoulder button held (a pad chord: "Pad:LB+A"). Since 0.2.0-dev.30.5.</summary>
     PadLB = 8,
-    /// <summary>The right shoulder button held. Since 0.2.0-dev.31.</summary>
+    /// <summary>The right shoulder button held. Since 0.2.0-dev.30.5.</summary>
     PadRB = 16,
-    /// <summary>The left trigger pulled. Since 0.2.0-dev.31.</summary>
+    /// <summary>The left trigger pulled. Since 0.2.0-dev.30.5.</summary>
     PadLT = 32,
-    /// <summary>The right trigger pulled. Since 0.2.0-dev.31.</summary>
+    /// <summary>The right trigger pulled. Since 0.2.0-dev.30.5.</summary>
     PadRT = 64,
 }
 
@@ -38,7 +38,7 @@ public enum KeyMods
 /// "Semicolon", "Quote", "Comma", "Period", "Slash", "IntlBackslash", "IntlRo", "NumpadComma") name the key at that place
 /// of a US keyboard on every layout: "Backquote" is the key left of 1 also where a UK, German or French layout gives it
 /// another virtual key. <see cref="VirtualKey"/> holds the US layout's code of that place.</para>
-/// <para>Since 0.2.0-dev.31 (mod API 0.2.14) a game controller's buttons too, written with "Pad:" in front: "Pad:A",
+/// <para>Since 0.2.0-dev.30.5 (mod API 0.2.14) a game controller's buttons too, written with "Pad:" in front: "Pad:A",
 /// "Pad:B", "Pad:X", "Pad:Y", "Pad:LB", "Pad:RB", "Pad:LT", "Pad:RT" (the triggers), "Pad:LS", "Pad:RS" (a stick pressed:
 /// L3, R3), "Pad:Start", "Pad:Back", "Pad:Up", "Pad:Down", "Pad:Left", "Pad:Right" (the d-pad), and combinations with the
 /// shoulder buttons and triggers held: "Pad:LB+A", "Pad:LT+RS", "Pad:LB+RB+Y" (<see cref="KeyMods.PadLB"/> ..
@@ -109,7 +109,7 @@ public readonly record struct KeyChord(uint VirtualKey, KeyMods Mods)
                   "left and right mouse buttons cannot be bound)";
 
     /// <summary>A game controller's button (with the pad's shoulder buttons or triggers held): "Pad:LB+A". Since
-    /// 0.2.0-dev.31.</summary>
+    /// 0.2.0-dev.30.5.</summary>
     public bool IsPad => PadKeys.IsPad(VirtualKey);
 
     public override string ToString()
@@ -250,7 +250,7 @@ internal static class MouseKeys
 }
 
 /// <summary>A game controller's buttons in a <see cref="KeyChord"/> (kiln_ui.h KILN_UI_VK_PAD_*, native/services/ui/pad_keys.h;
-/// 0.2.0-dev.31).</summary>
+/// 0.2.0-dev.30.5).</summary>
 internal static class PadKeys
 {
     public const string Prefix = "Pad:";

@@ -131,7 +131,7 @@ public sealed unsafe class KeyInputTests : IDisposable
     [Fact]
     public void KeyListenFlags_Pad_gives_a_listener_the_controllers_buttons()
     {
-        // 0.2.0-dev.31 (GitHub issue 119): KILN_UI_KEYS_PAD; a pad press carries the pad's modifiers only
+        // 0.2.0-dev.30.5 (GitHub issue 119): KILN_UI_KEYS_PAD; a pad press carries the pad's modifiers only
         InstallV7(sizeof(UiNative.Table7));
         var got = new List<KeyPress>();
         using var l = KeyInput.Listen(p => { got.Add(p); return p.IsPad; }, KeyListenFlags.Mouse | KeyListenFlags.Pad);

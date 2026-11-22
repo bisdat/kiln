@@ -8,6 +8,7 @@ pub type KilnUiScaleFn = Option<unsafe extern "C" fn(*const KilnUiProviderContex
 pub type KilnUiValueFn = Option<unsafe extern "C" fn(*const KilnUiProviderContext, *const KilnUiItemView, *const KilnUiBarValue, *mut KilnUiBarEdit, *mut core::ffi::c_void) -> KilnResult>;
 pub type KilnUiLinesFn = Option<unsafe extern "C" fn(*const KilnUiProviderContext, *const KilnUiItemView, *mut KilnUiLineWriter, *mut core::ffi::c_void) -> KilnResult>;
 pub type KilnUiSlotsFn = Option<unsafe extern "C" fn(*const KilnUiSlotsFrame, *const KilnUiVisibleSlot, u32, *mut core::ffi::c_void)>;
+pub type KilnUiSlotsFnV2 = Option<unsafe extern "C" fn(*const KilnUiSlotsFrame, *const KilnUiVisibleSlotV2, u32, *mut core::ffi::c_void)>;
 pub type KilnUiValueChangedFn = Option<unsafe extern "C" fn(*const KilnUiValueChange, *mut core::ffi::c_void)>;
 pub type KilnUiGemForgeFn = Option<unsafe extern "C" fn(*const KilnUiGemForgeFrame, *const KilnUiGemForgeCandidate, u32, *mut core::ffi::c_void)>;
 pub const KILN_UI_VALUES_SERVICE: &[u8] = b"kiln.ui.values\0";
@@ -228,6 +229,29 @@ pub struct KilnUiRect {
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct KilnUiVisibleSlot {
+    pub size: u32,
+    pub available: u32,
+    pub occurrence: u32,
+    pub inventory_page: u32,
+    pub slot_index: u32,
+    pub item: u32,
+    pub count: u32,
+    pub client_entity: u32,
+    pub server_entity: u32,
+    pub view_flags: u32,
+    pub outer_ui: KilnUiRect,
+    pub inner_ui: KilnUiRect,
+    pub native_state: [u8; 16],
+    pub holder: u32,
+    pub holder_flags: u32,
+    pub holder_serial: u64,
+    pub page_ordinal: u32,
+    pub reserved2: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct KilnUiVisibleSlotV2 {
     pub size: u32,
     pub available: u32,
     pub occurrence: u32,

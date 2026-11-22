@@ -18,11 +18,11 @@ public readonly record struct UiRect(float X, float Y, float Width, float Height
 /// <see cref="Holder"/> is the client entity whose inventory holds the page, with Kiln's lifetime serial of it in this
 /// process (<see cref="HolderSerial"/>: a destroyed and recreated holder gets a new one, never reused) and the page's
 /// position among the holder's pages; <see cref="HolderFlags"/>: 1 known, 2 the local player, 4 ordinal set, 8 proven
-/// to be the server's entity (since 0.2.0-dev.31: the local player, and the container of an open chest, chest-style or
+/// to be the server's entity (since 0.2.0-dev.30.5: the local player, and the container of an open chest, chest-style or
 /// factory screen). <see cref="ServerEntity"/> is the item's entity in the server's world for a slot of a proven holder
-/// (since 0.2.0-dev.31), so it equals the server's <c>InventorySlot.ItemEntity</c> for the player's and an open chest's
+/// (since 0.2.0-dev.30.5), so it equals the server's <c>InventorySlot.ItemEntity</c> for the player's and an open chest's
 /// slots; <see cref="EntityId.None"/> for a plain stack (no item entity) and any other holder. <see cref="Rarity"/> and
-/// <see cref="Level"/> are the item's as the game drew the slot (since 0.2.0-dev.31).</summary>
+/// <see cref="Level"/> are the item's as the game drew the slot (since 0.2.0-dev.30.5).</summary>
 public sealed record VisibleSlot(uint Occurrence, EntityId InventoryPage, byte SlotIndex, ItemId Item, uint Count,
     EntityId ClientEntity, EntityId ServerEntity, uint ViewFlags, UiRect? OuterUi, UiRect? InnerUi,
     IReadOnlyList<byte> NativeState, uint Availability, UiRect? OuterPixels, UiRect? InnerPixels)
@@ -34,11 +34,11 @@ public sealed record VisibleSlot(uint Occurrence, EntityId InventoryPage, byte S
 
     /// <summary>The item's rarity as the game drew the slot (the value its tooltip shows), read on the render thread with the
     /// slot: no <c>Items.Read</c> needed in a mark rule. Null for an empty slot, a rarity outside Common..Legendary, or a
-    /// Kiln without the value. Since 0.2.0-dev.31 (mod API 0.2.14).</summary>
+    /// Kiln without the value. Since 0.2.0-dev.30.5 (mod API 0.2.14).</summary>
     public ItemRarity? Rarity { get; init; }
 
     /// <summary>The item's level as the game drew the slot (0 for an empty slot, an item without levels, or a Kiln without
-    /// the value). Since 0.2.0-dev.31 (mod API 0.2.14).</summary>
+    /// the value). Since 0.2.0-dev.30.5 (mod API 0.2.14).</summary>
     public int Level { get; init; }
 
     internal static ItemRarity? RarityOf(uint available, uint rarity) =>
@@ -174,7 +174,10 @@ internal static unsafe class UiSlotsBridge
         Subs[id] = (onFrame, mod);
         UiValuesNative.Registration r = default;
         r.Size = (uint)sizeof(UiValuesNative.Registration);
-        var rc = t->SubscribeSlots(UiValueBridge.OwnerOf(mod), &OnFrame, (void*)id, &r);
+        var expanded = UiSlotsNative.T;
+        var rc = expanded != null
+            ? expanded->Subscribe(UiValueBridge.OwnerOf(mod), (uint)sizeof(UiValuesNative.VisibleSlot), &OnFrame, (void*)id, &r)
+            : t->SubscribeSlots(UiValueBridge.OwnerOf(mod), &OnLegacyFrame, (void*)id, &r);
         if (rc != UiValuesNative.Ok || r.Ok == 0) Subs.TryRemove(id, out _);
         var handle = r.Handle;
         var accepted = r.Ok != 0;
@@ -205,6 +208,23 @@ internal static unsafe class UiSlotsBridge
 
     internal static void ResetForTests() => Subs.Clear();
 
+    // Frozen kiln.ui.values callback: old records are 112 bytes even when today's managed mirror is larger.
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    internal static void OnLegacyFrame(UiValuesNative.SlotsFrame* f, UiValuesNative.VisibleSlot* slots, uint count, void* user)
+    {
+        try
+        {
+            if (!Subs.TryGetValue((long)user, out var sub)) return;
+            var expanded = new UiValuesNative.VisibleSlot[count];
+            for (var i = 0; i < expanded.Length; ++i)
+                fixed (UiValuesNative.VisibleSlot* target = &expanded[i])
+                    Buffer.MemoryCopy((byte*)slots + i * 112, target, sizeof(UiValuesNative.VisibleSlot), 112);
+            var result = Result(f, expanded, f->Ok != 0 ? count : 0);
+            UiModCalls.Invoke(sub.Mod, sub.Fn, result, "legacy slots subscriber");
+        }
+        catch (Exception e) { UiEngine.Log(LogLevel.Error, $"ui.values: legacy slots subscriber: {e}"); }
+    }
+
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     internal static void OnFrame(UiValuesNative.SlotsFrame* f, UiValuesNative.VisibleSlot* slots, uint count, void* user)
     {
@@ -217,6 +237,27 @@ internal static unsafe class UiSlotsBridge
         catch (Exception e)
         {
             UiEngine.Log(LogLevel.Error, $"ui.values: slots subscriber: {e}");
+        }
+    }
+}
+
+internal static unsafe class UiSlotsNative
+{
+    internal const string Service = "kiln.ui.slots";
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct Table
+    {
+        public ServiceHeader Header;
+        public delegate* unmanaged[Cdecl]<ulong, uint,
+            delegate* unmanaged[Cdecl]<UiValuesNative.SlotsFrame*, UiValuesNative.VisibleSlot*, uint, void*, void>,
+            void*, UiValuesNative.Registration*, int> Subscribe;
+    }
+    internal static Table* T
+    {
+        get
+        {
+            var t = Services.Get<Table>(Service, 1);
+            return t != null && t->Header.Size >= sizeof(Table) && t->Subscribe != null ? t : null;
         }
     }
 }

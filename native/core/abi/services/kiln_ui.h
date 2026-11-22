@@ -137,9 +137,9 @@ enum {
     KILN_UI_VK_WHEEL_RIGHT = 0x103u,
 };
 
-/* KilnUiKey.vk of a game controller's button (0.2.0-dev.31, mod API 0.2.14). A pad has no Windows virtual key: these are
+/* KilnUiKey.vk of a game controller's button (0.2.0-dev.30.5, mod API 0.2.14). A pad has no Windows virtual key: these are
  * above every key and the wheel. Pad presses go only to a callback made with subscribe_key_ex and KILN_UI_KEYS_PAD; a
- * kiln-ui.dll older than 0.2.0-dev.31 answers that flag KILN_ERR_INVALID_ARGUMENT (subscribe again without it). kiln.ui
+ * kiln-ui.dll older than 0.2.0-dev.30.5 answers that flag KILN_ERR_INVALID_ARGUMENT (subscribe again without it). kiln.ui
  * reads the pad where the game does (its XInputGetState, every controller 0..3), on the thread the game polls it from,
  * and hands each button's press and release over at the poll that first sees it (scan 0, repeat 0). LT and RT count as
  * pressed from a pull of 30 of 255 (XINPUT_GAMEPAD_TRIGGER_THRESHOLD). mods holds KILN_UI_MOD_PAD_* for the shoulder
@@ -167,7 +167,7 @@ enum {
     KILN_UI_VK_PAD_LT = 0x210u,    /* left trigger pulled */
     KILN_UI_VK_PAD_RT = 0x211u,
 };
-/* KilnUiKey.mods of a pad press (0.2.0-dev.31): the shoulder buttons and triggers held */
+/* KilnUiKey.mods of a pad press (0.2.0-dev.30.5): the shoulder buttons and triggers held */
 enum {
     KILN_UI_MOD_PAD_LB = 8u,
     KILN_UI_MOD_PAD_RB = 16u,
@@ -178,7 +178,7 @@ enum {
 /* subscribe_key_ex flags (v7) */
 enum {
     KILN_UI_KEYS_MOUSE = 1u, /* also the middle and side buttons and the wheel's notches (above) */
-    KILN_UI_KEYS_PAD = 2u,   /* also a game controller's buttons (KILN_UI_VK_PAD_*, 0.2.0-dev.31) */
+    KILN_UI_KEYS_PAD = 2u,   /* also a game controller's buttons (KILN_UI_VK_PAD_*, 0.2.0-dev.30.5) */
 };
 
 typedef struct KilnUiKey {
@@ -1238,8 +1238,8 @@ typedef struct KilnUiApi {
 
     /* ---- v7 (0.2.0-dev.27; check header.size >= offsetof(KilnUiApi, subscribe_key_ex) + sizeof(void*)) ----
      * subscribe_key_ex: subscribe_key with flags. 0 is subscribe_key (keyboard keys only); KILN_UI_KEYS_MOUSE adds the
-     * mouse presses described at KILN_UI_VK_WHEEL_UP, KILN_UI_KEYS_PAD (0.2.0-dev.31) the pad's buttons described at
-     * KILN_UI_VK_PAD_UP. Other bits (and KILN_UI_KEYS_PAD before 0.2.0-dev.31): KILN_ERR_INVALID_ARGUMENT. Remove it with
+     * mouse presses described at KILN_UI_VK_WHEEL_UP, KILN_UI_KEYS_PAD (0.2.0-dev.30.5) the pad's buttons described at
+     * KILN_UI_VK_PAD_UP. Other bits (and KILN_UI_KEYS_PAD before 0.2.0-dev.30.5): KILN_ERR_INVALID_ARGUMENT. Remove it with
      * unsubscribe. */
     KilnResult(KILN_CALL* subscribe_key_ex)(KilnOwner owner, KilnUiKeyFn fn, void* user, uint32_t flags, KilnHandle* out);
     /* Additive size-guarded tail: inside a frame callback, constrain the next window in screen pixels.

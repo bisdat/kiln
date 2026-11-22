@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: MIT
- * kiln.ui.item_detail v1 (client only, dev.31): copies of the text/values built by the game's item-detail panel.
+ * kiln.ui.item_detail v1 (client only, dev.30.5): copies of the text/values built by the game's item-detail panel.
  * No offscreen game rendering. Capture starts on first copy, only while ItemDetail runs. No borrowed game pointers.
  * Capability ui.item_detail. Cache: last 64 instances/variants in this client session, updated on each panel build.
  * Text is in the language used when captured. Reinspect after a language or item-state change.

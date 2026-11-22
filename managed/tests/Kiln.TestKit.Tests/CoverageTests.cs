@@ -36,6 +36,7 @@ public sealed class CoverageTests
             Assert.Single(rows, r => r.Area == area);
         Assert.Equal(CoverageKind.RecordingFake, rows.Single(r => r.Capabilities.Contains("kiln.abilities")).Kind);  // its natives (dev.29)
         Assert.Equal(CoverageKind.Unavailable, rows.Single(r => r.Area == "kiln.audio").Kind);
+        Assert.Equal(CoverageKind.RecordingFake, rows.Single(r => r.Capabilities.Contains("kiln.ui.slots")).Kind);
         Assert.Equal(CoverageKind.RecordingFake, rows.Single(r => r.Area == "Combat").Kind);
         Assert.Equal(CoverageKind.Unavailable, rows.Single(r => r.Area == "Tests.RunAsync").Kind);
         Assert.All(rows, r => Assert.False(string.IsNullOrWhiteSpace(r.Note)));

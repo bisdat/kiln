@@ -176,7 +176,7 @@ KilnResult KILN_CALL t_copy_slots(KilnOwner owner, uint64_t expected_session, ui
     if (owner == 0 || !frame || frame->size < sizeof(KilnUiSlotsFrame) || !required || (capacity && !slots))
         return KILN_ERR_INVALID_ARGUMENT;
     return guarded("copy_slots", [&] {
-        return slots_copy(owner, expected_session, expected_frame, frame, slots, capacity, required);
+        return slots_copy(owner, expected_session, expected_frame, frame, reinterpret_cast<KilnUiVisibleSlotV2*>(slots), capacity, required);
     });
 }
 
@@ -633,6 +633,19 @@ CallScope::~CallScope() { t_call = prev; }
 
 const KilnUiTextOps* text_ops() { return &kTextOps; }
 const KilnUiValuesApi* table() { return &kTable; }
+KilnResult KILN_CALL subscribe_slots_v2(KilnOwner owner, uint32_t record_size, KilnUiSlotsFnV2 fn, void* user, KilnUiRegistration* out) {
+    if (!out || out->size < sizeof *out) return KILN_ERR_INVALID_ARGUMENT;
+    clear_registration(out);
+    if (!owner || !fn || record_size != sizeof(KilnUiVisibleSlotV2)) return KILN_ERR_INVALID_ARGUMENT;
+    return guarded("subscribe_slots_v2", [&] {
+        return register_in(owner, kListSlots, 0, reinterpret_cast<void*>(fn), user, out, record_size);
+    });
+}
+const KilnUiSlotsApi* slots_table() {
+    static const KilnUiSlotsApi t{{sizeof(KilnUiSlotsApi), KILN_UI_SLOTS_VERSION}, &subscribe_slots_v2};
+    return &t;
+}
+
 
 void reset_for_tests() {  // host tests only: nothing dispatches while it runs
     delete g_reg;

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// OutlineOptions.ThroughWalls (0.2.0-dev.31, GitHub issue 111 follow-up): the game's highlight is depth-tested with the
+// OutlineOptions.ThroughWalls (0.2.0-dev.30.5, GitHub issue 111 follow-up): the game's highlight is depth-tested with the
 // model and no flag of the game draws it through walls (docs/re/client-render.md "Through walls"), so Kiln draws a
 // screen-space silhouette on its own UI layer: kiln.render v3 reads the entity's position for a through-walls request at
 // each client step (outline_info), and every overlay frame Kiln projects a box at that position with the camera world

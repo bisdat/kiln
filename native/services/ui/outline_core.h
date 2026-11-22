@@ -252,7 +252,7 @@ public:
         out->entity = r->entity;
         out->group = r->group;
         out->merged = r->merged;
-        // 0.2.0-dev.31: a through-walls request that has not ended carries its entity's latest position
+        // 0.2.0-dev.30.5: a through-walls request that has not ended carries its entity's latest position
         if ((r->flags & KILN_RENDER_OUTLINE_THROUGH_WALLS) && r->state != KILN_RENDER_OUTLINE_ENDED)
             if (const auto it = positions_.find(r->entity); it != positions_.end()) {
                 out->position_ok = 1;
@@ -262,7 +262,7 @@ public:
         return KILN_OK;
     }
 
-    // ---- positions for through-walls requests (0.2.0-dev.31) ----
+    // ---- positions for through-walls requests (0.2.0-dev.30.5) ----
     // The entities of live requests with KILN_RENDER_OUTLINE_THROUGH_WALLS (sorted, once each).
     std::vector<KilnEntity> wall_entities() const {
         std::lock_guard lk(mu_);
@@ -527,7 +527,7 @@ private:
         double p[3];
         uint32_t step;
     };
-    std::unordered_map<KilnEntity, Pos> positions_;  // through-walls requests' entities (0.2.0-dev.31)
+    std::unordered_map<KilnEntity, Pos> positions_;  // through-walls requests' entities (0.2.0-dev.30.5)
     std::vector<Request> live_;
     std::deque<Request> ended_;
     Slot last_[2];

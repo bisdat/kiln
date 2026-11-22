@@ -55,7 +55,7 @@ internal sealed unsafe class RenderFake : IKitFake
         {
             var v2 = (RenderNative.TableV2*)NativeMemory.AllocZeroed((nuint)sizeof(RenderNative.TableV2));
             var t = &v2->Base;
-            t->Header = new ServiceHeader { Size = (uint)sizeof(RenderNative.TableV2), Version = 3 };  // v3: through walls (0.2.0-dev.31)
+            t->Header = new ServiceHeader { Size = (uint)sizeof(RenderNative.TableV2), Version = 3 };  // v3: through walls (0.2.0-dev.30.5)
             t->GetStatus = &Status;
             t->AcquireFrames = &AcquireFrames;
             t->Release = &Release;

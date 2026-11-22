@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// OutlineOptions.ThroughWalls' silhouette (0.2.0-dev.31, GitHub issue 111 follow-up): the box at the entity's position
+// OutlineOptions.ThroughWalls' silhouette (0.2.0-dev.30.5, GitHub issue 111 follow-up): the box at the entity's position
 // projected with the camera world labels use, its hull clockwise on screen, nothing behind the camera, the pulse.
 using System.Numerics;
 using Xunit;

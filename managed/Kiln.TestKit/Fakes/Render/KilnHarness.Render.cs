@@ -39,7 +39,7 @@ public sealed record FakeOutline(EntityId Entity, Color Color, bool Pulse, int P
     internal ulong Handle { get; init; }
 
     /// <summary>Asked with <c>OutlineOptions.ThroughWalls</c> (Kiln's silhouette through walls; its drawing is not modelled).
-    /// Since 0.2.0-dev.31.</summary>
+    /// Since 0.2.0-dev.30.5.</summary>
     public bool ThroughWalls { get; init; }
 }
 

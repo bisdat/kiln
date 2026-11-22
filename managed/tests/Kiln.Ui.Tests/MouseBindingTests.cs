@@ -527,7 +527,7 @@ public sealed unsafe class KeySubscriptionTests : IDisposable
     private static int NewKeys(ulong o, delegate* unmanaged[Cdecl]<UiNative.Key*, void*, byte> f, void* u, uint flags, ulong* h)
     {
         lock (Calls) Calls.Add($"subscribe_key_ex {flags}");
-        if (_beforePad && (flags & ~1u) != 0) return -2;  // a kiln-ui.dll before 0.2.0-dev.31: KILN_ERR_INVALID_ARGUMENT
+        if (_beforePad && (flags & ~1u) != 0) return -2;  // a kiln-ui.dll before 0.2.0-dev.30.5: KILN_ERR_INVALID_ARGUMENT
         *h = 3;
         return 0;
     }
@@ -563,7 +563,7 @@ public sealed unsafe class KeySubscriptionTests : IDisposable
     {
         InstallV7(sizeof(UiNative.Table7));
         Assert.True(UiNative.Subscribe());
-        lock (Calls) Assert.Equal(["subscribe_key_ex 3"], Calls);  // KILN_UI_KEYS_MOUSE | KILN_UI_KEYS_PAD (0.2.0-dev.31)
+        lock (Calls) Assert.Equal(["subscribe_key_ex 3"], Calls);  // KILN_UI_KEYS_MOUSE | KILN_UI_KEYS_PAD (0.2.0-dev.30.5)
         Assert.True(UiNative.MouseKeysAvailable);
         Assert.True(UiNative.PadKeysAvailable);
     }

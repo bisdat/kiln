@@ -177,7 +177,7 @@ public sealed unsafe class InventoryTests : IDisposable
     [Fact]
     public void A_click_carries_the_slots_rarity_level_and_server_entity()
     {
-        // 0.2.0-dev.31 (GitHub issue 121): read with the slot as the game drew it
+        // 0.2.0-dev.30.5 (GitHub issue 121): read with the slot as the game drew it
         var got = new List<SlotClick>();
         using var reg = Ui.Inventory.OnClick(new SlotClickOptions(), got.Add);
         var s = Slot(0xAA, 950, page: 0x6000);
@@ -195,7 +195,7 @@ public sealed unsafe class InventoryTests : IDisposable
     [Fact]
     public void Selected_is_the_focused_slot_of_a_fresh_frame_on_a_pointer_screen()
     {
-        // 0.2.0-dev.31 (GitHub issue 119 b): the slot draw's state byte 0 is the game's focus test (docs/re/game-ui.md)
+        // 0.2.0-dev.30.5 (GitHub issue 119 b): the slot draw's state byte 0 is the game's focus test (docs/re/game-ui.md)
         static VisibleSlot Slot(uint item, byte focus) => new(0, new EntityId(0x5000), 0, new ItemId(item), 1, EntityId.None,
             EntityId.None, 4, new UiRect(0, 0, 80, 80), null, new byte[] { focus, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
             UiValuesNative.OuterRect | UiValuesNative.NativeState, null, null);

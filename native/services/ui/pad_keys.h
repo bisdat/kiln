@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // kiln.ui: a game controller's buttons as key presses (key bindings "Pad:LS", "Pad:LB+A", the Keys page's "press a key",
-// KeyInput listeners with KeyListenFlags.Pad; 0.2.0-dev.31, GitHub issue 119). The rules without XInput or a window:
+// KeyInput listeners with KeyListenFlags.Pad; 0.2.0-dev.30.5, GitHub issue 119). The rules without XInput or a window:
 // input.cpp applies them in its XInputGetState hook for the key subscribers that ask for pad presses (subscribe_key_ex
 // with KILN_UI_KEYS_PAD, keys.cpp); tests/pad_keys_test.cpp checks them on the host.
 //  - Codes (kiln_ui.h KILN_UI_VK_PAD_*): 0x200 + the button's bit in XINPUT_GAMEPAD.wButtons, and 0x210 / 0x211 for the

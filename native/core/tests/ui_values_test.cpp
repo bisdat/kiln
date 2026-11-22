@@ -223,6 +223,9 @@ void install() {
             return false;
         }
     };
+    e.call_slots_v2 = [](KilnUiSlotsFnV2 fn, const KilnUiSlotsFrame* f, const KilnUiVisibleSlotV2* sl, uint32_t n, void* user) {
+        try { fn(f, sl, n, user); return true; } catch (...) { return false; }
+    };
     e.subscribe_frames = [](void (*fn)(uint64_t, void*), void* user) {
         if (!frames_ok) return false;
         frame_fn = fn;
@@ -1924,19 +1927,19 @@ bool arm_slots() {
 }
 struct SlotsBuffer {
     KilnUiSlotsFrame frame{};
-    std::vector<KilnUiVisibleSlot> slots;
+    std::vector<KilnUiVisibleSlotV2> slots;
     uint32_t required = 0;
     KilnResult rc = KILN_ERR_INTERNAL;
 };
 SlotsBuffer copy(KilnOwner o, uint32_t capacity, uint64_t session = 0, uint64_t frame = 0) {
     SlotsBuffer b;
     b.frame.size = sizeof b.frame;
-    b.slots.assign(capacity + 1, KilnUiVisibleSlot{});
+    b.slots.assign(capacity + 1, KilnUiVisibleSlotV2{});
     for (auto& s : b.slots) {
         std::memset(&s, 0xAB, sizeof s);  // a record that was not written keeps this
         s.size = sizeof s;
     }
-    b.rc = T()->copy_slots(o, session, frame, &b.frame, b.slots.data(), capacity, &b.required);
+    b.rc = T()->copy_slots(o, session, frame, &b.frame, reinterpret_cast<KilnUiVisibleSlot*>(b.slots.data()), capacity, &b.required);
     return b;
 }
 struct SlotsSeen {
@@ -1974,7 +1977,7 @@ void slots_basics() {
     g_frame_script = {desc(&a, 0x5000, 0, 0xAA, 900), desc(&b, 0x5001, 3, 0, 0), desc(&c, 0x6000, 0, 0xBB, 0)};
     ui_frame(700);
     auto got = copy(o, 8);
-    const KilnUiVisibleSlot* s = got.slots.data();
+    const KilnUiVisibleSlotV2* s = got.slots.data();
     CHECK(got.rc == KILN_OK && got.frame.ok == 1 && got.frame.count == 3 && got.required == 3 &&
               got.frame.frame == 700 && got.frame.session == 5 && got.frame.local_player == 77 &&
               got.frame.capture_ms == fake::ticks && got.frame.transform_flags == KUI_VIEWPORT &&
@@ -1983,18 +1986,18 @@ void slots_basics() {
     CHECK(s[0].occurrence == 0 && s[0].inventory_page == 0x5000 && s[0].item == 0xAA && s[0].client_entity == 900 &&
               s[0].outer_ui.width == 80 && s[0].inner_ui.x == 12 && s[0].native_state[0] == 1 &&
               s[0].available == (KUI_OUTER_RECT | KUI_INNER_RECT | KUI_NATIVE_STATE | KUI_VIEWPORT | KUI_ITEM_VALUES) &&
-              s[0].size == sizeof(KilnUiVisibleSlot) && sizeof(KilnUiVisibleSlot) == 120 &&
-              offsetof(KilnUiVisibleSlot, level) == 112,
+              s[0].size == sizeof(KilnUiVisibleSlotV2) && sizeof(KilnUiVisibleSlotV2) == 120 &&
+              offsetof(KilnUiVisibleSlotV2, level) == 112,
           "copy: the slot record: identity, outer and inner rectangles, the state bytes");
     CHECK(s[0].level == 3 && s[0].rarity == 2 && (s[2].available & KUI_ITEM_VALUES) && s[2].level == 3 &&
               s[2].rarity == 2 && !(s[1].available & KUI_ITEM_VALUES) && s[1].level == 0 && s[1].rarity == 0,
-          "values (dev.31): the item's level and rarity as the view gave them; an empty slot has neither");
+          "values (dev.30.5): the item's level and rarity as the view gave them; an empty slot has neither");
     CHECK(!(s[1].available & KUI_OUTER_RECT) && (s[1].available & KUI_INNER_RECT) && s[1].slot_index == 3 &&
               s[1].item == 0 && !(s[2].available & KUI_INNER_RECT) && (s[2].available & KUI_OUTER_RECT) &&
               s[2].item == 0xBB,
           "rects: zero width clears the outer bit, a NaN the inner bit; identity and the other rect stay (empty "
           "slots too)");
-    CHECK(got.slots[3].size == sizeof(KilnUiVisibleSlot) && got.slots[3].occurrence == 0xABABABAB,
+    CHECK(got.slots[3].size == sizeof(KilnUiVisibleSlotV2) && got.slots[3].occurrence == 0xABABABAB,
           "copy: nothing written past the frame's count");
     CHECK(seen.counts == (std::vector<uint32_t>{3}) && seen.frames[0].frame == 700,
           "subscribe: one publication after the frame");
@@ -2054,7 +2057,7 @@ void slots_budget_and_nesting() {
           "nesting: a slot drawn inside another gets its own geometry; the outer one keeps its own after it");
 }
 
-// dev.31 (#121): a chest screen's slots carry the server's item entity when kiln.ui's target is their holder
+// dev.30.5 (#121): a chest screen's slots carry the server's item entity when kiln.ui's target is their holder
 void slots_chest_server_entity() {
     prime_slots();
     const KilnOwner o = fake::owner("mod:chest-ids");
@@ -2125,7 +2128,7 @@ void slots_holders() {
     CHECK((s[0].holder_flags & KUI_HOLDER_LOCAL_PLAYER) && s[0].server_entity == 900 &&
               (s[0].view_flags & KUI_SERVER_ENTITY) && s[1].server_entity == 0 && !(s[1].view_flags & KUI_SERVER_ENTITY) &&
               !(s[2].holder_flags & KUI_HOLDER_SERVER_PROVEN) && s[3].server_entity == 0,
-          "server entity (dev.31): the local player's item entity is the server's; an empty slot and a holder that is "
+          "server entity (dev.30.5): the local player's item entity is the server's; an empty slot and a holder that is "
           "not the open container (no chest screen) have none");
     const uint64_t own = s[0].holder_serial, chest = s[2].holder_serial;
     ui_frame(901);
@@ -2306,15 +2309,15 @@ void clicks_mapping_and_slot_at() {
           "slot_at: the slot under a point, and whether the screen takes clicks");
     CHECK(I()->slot_at(o, 400, 50, 2560, 1440, &h) == KILN_OK && h.ok == 0 && h.reason == KUI_NO_SLOT,
           "slot_at: between slots -> KUI_NO_SLOT");
-    {  // a caller built against the 112-byte slot record (before dev.31): accepted, nothing written past its size
-        constexpr uint32_t old_size = offsetof(KilnUiSlotHit, slot) + offsetof(KilnUiVisibleSlot, level);
+    {  // a caller built against the 112-byte slot record (before dev.30.5): accepted, nothing written past its size
+        constexpr uint32_t old_size = offsetof(KilnUiSlotHit, slot) + offsetof(KilnUiVisibleSlotV2, level);
         alignas(KilnUiSlotHit) uint8_t buf[sizeof(KilnUiSlotHit)];
         std::memset(buf, 0xCD, sizeof buf);
         auto* old = reinterpret_cast<KilnUiSlotHit*>(buf);
         old->size = old_size;
         CHECK(I()->slot_at(o, 200, 50, 2560, 1440, old) == KILN_OK && old->ok == 1 && old->slot.item == 0xBB &&
                   buf[old_size] == 0xCD && buf[sizeof buf - 1] == 0xCD,
-              "slot_at (dev.31): an old 112-byte slot record is accepted and nothing is written past it");
+              "slot_at (dev.30.5): an old 112-byte slot record is accepted and nothing is written past it");
         old->size = old_size - 4;
         CHECK(I()->slot_at(o, 200, 50, 2560, 1440, old) == KILN_ERR_INVALID_ARGUMENT, "slot_at: shorter -> INVALID_ARGUMENT");
     }
@@ -2994,6 +2997,7 @@ void write_layout_validation() {
 #include "ui_values_sources_test.inc"
 #include "ui_values_tooltip_test.inc"
 #include "ui_item_detail_test.inc"
+#include "ui_slot_subscription_compat_test.inc"
 }  // namespace
 
 int main() {
@@ -3048,6 +3052,7 @@ int main() {
     lines_writer_tampering();
     tooltip_tests();
     item_detail_tests();
+    slot_subscription_compat_tests();
     std::printf(g_fail ? "%d FAILED\n" : "all passed\n", g_fail);
     return g_fail ? 1 : 0;
 }
