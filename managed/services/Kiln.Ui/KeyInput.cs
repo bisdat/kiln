@@ -105,7 +105,8 @@ public static unsafe class KeyInput
 
     /// <summary>Calls <paramref name="onKey"/> for every key press and release Kiln's overlay gets, and with
     /// <see cref="KeyListenFlags.Mouse"/> (the default) for the middle and side mouse buttons and the wheel's notches. It runs
-    /// on the game's window thread while the message is handled, before the game gets the press: keep it short. Return true
+    /// on the game's window thread while the message is handled (or, with <see cref="KeyListenFlags.Pad"/>, on the
+    /// controller polling thread), before the game gets the press: keep it short. Return true
     /// to keep the press from the game; false lets it go on. Every listener and Kiln's own key bindings get every press
     /// whatever another returned (kiln.ui keeps a press from the game when any of them asked). Every press comes, also while a Kiln screen, the Kiln menu or a Kiln text field has the input
     /// (<see cref="KeyPress.Captured"/>, <see cref="KeyPress.TextInput"/> say so): a listener that only wants play skips

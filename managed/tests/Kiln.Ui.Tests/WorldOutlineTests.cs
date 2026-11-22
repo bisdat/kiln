@@ -454,6 +454,17 @@ public sealed unsafe class WorldOutlineTests : IDisposable
     }
 
     [Fact]
+    public void Silhouette_support_is_refused_when_overlay_drawing_is_explicitly_off()
+    {
+        PrepareSilhouettes([Ui.World.OutlineCapability, Ui.World.ThroughWallsCapability]);
+        FakeUiTable.StatusError = "the overlay's drawing is off: disabled by the player";
+        var state = UiCaps.ThroughWallsState();
+        Assert.False(state.Ok);
+        Assert.Equal(CapabilityReason.Faulted, state.Reason);
+        Assert.Equal(FakeUiTable.StatusError, state.Why);
+    }
+
+    [Fact]
     public void An_unavailable_silhouette_is_refused_with_its_capability_reason()
     {
         PrepareSilhouettes([Ui.World.OutlineCapability]);

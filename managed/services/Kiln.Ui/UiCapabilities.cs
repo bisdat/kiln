@@ -78,6 +78,7 @@ internal static unsafe class UiCaps
     internal static (bool Ok, CapabilityReason Reason, string Why) ThroughWallsState()
     {
         if (UiNative.T == null) return (false, CapabilityReason.ServiceMissing, "kiln.ui (Kiln's overlay) is not here");
+        if (UiNative.DrawingOffReason is { } drawingOff) return (false, CapabilityReason.Faulted, drawingOff);
         if (!RenderNative.Available) return (false, CapabilityReason.ServiceMissing, "kiln.render is not here");
         if (!Capabilities.Is(Ui.World.OutlineCapability))
             return (false, CapabilityReason.ServiceOlder, $"outlines are off: {Capabilities.Why(Ui.World.OutlineCapability)}");

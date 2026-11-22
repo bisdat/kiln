@@ -26,6 +26,7 @@ public sealed unsafe class PadBindingTests : IDisposable
     {
         FakeUiTable.Install();
         _uiTick = 0;
+        _refuseTick = false;
         FakeUiTable.Table->Base.Base.Base.SubscribeUiTick = &SubscribeTick;
         Backend.Current = new FakeUiTable.Backend();
         UiNative.ResetForTests();
@@ -66,9 +67,11 @@ public sealed unsafe class PadBindingTests : IDisposable
     private const uint LS = 0x206, LB = 0x208, RB = 0x209, A = 0x20C, B = 0x20D, X = 0x20E, Start = 0x204, LT = 0x210;
 
     private static nint _uiTick;
+    private static bool _refuseTick;
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int SubscribeTick(ulong owner, delegate* unmanaged[Cdecl]<UiNative.Screen*, void*, void> fn, void* user, ulong* handle)
     {
+        if (_refuseTick) { *handle = 0; return -1; }
         _uiTick = (nint)fn;
         *handle = 731;
         return 0;
@@ -200,6 +203,28 @@ public sealed unsafe class PadBindingTests : IDisposable
         Assert.Equal(Start, KeyChord.Parse("Pad:Start").VirtualKey);
         Assert.Equal(RB, KeyChord.Parse("Pad:RB").VirtualKey);
     }
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void A_pad_press_is_not_taken_when_the_main_thread_queue_cannot_start(bool releaseOnly)
+    {
+        var calls = 0;
+        var binding = Register("t.no-tick", "Pad:LS", releaseOnly ? null : () => calls++);
+        if (releaseOnly) binding.OnRelease = () => calls++;
+        _refuseTick = true;
+        Assert.False(UiEngine.Key(new UiNative.Key { Vk = LS, Down = 1 }));
+        Assert.False(binding.IsDown);
+        Assert.Equal(0, binding.TakePresses());
+        Assert.Equal(0, calls);
+        // A later successful subscription must not replay a press previously left to the game.
+        _refuseTick = false;
+        Assert.True(UiEngine.Key(new UiNative.Key { Vk = LS, Down = 1 }));
+        Assert.False(UiEngine.Key(new UiNative.Key { Vk = LS, Down = 0 }));
+        Tick();
+        Assert.Equal(1, calls);
+        Assert.Equal(1, binding.TakePresses());
+    }
+
     [Fact]
     public void Worker_pad_polls_only_decide_consumption_not_run_binding_callbacks()
     {

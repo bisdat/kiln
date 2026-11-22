@@ -489,4 +489,4 @@ kiln.world rows above).
 
 | Row | Kind | Reported by | Unconfirmed | What it says |
 |---|---|---|---|---|
-| `ui.world_outline.through_walls` | managed, static (since 0.2.0-dev.30.5) | Kiln.Ui, at its start and first use | `ui-fuzen.c5` | `OutlineOptions.ThroughWalls`' silhouette ([../render.md](../render.md#outlineoptions)): needs `ui.world_outline`, kiln.render v3 (the entity's position; `service-older` with a v2 kiln-ui.dll), `render.camera` and kiln.ui (`service-missing`). Off: an outline asked with ThroughWalls shows without the silhouette |
+| `ui.world_outline.through_walls` | managed, static (since 0.2.0-dev.30.5) | Kiln.Ui, at its start and first use | Client check: toggle through-walls outlines, the off setting and competing requests | `OutlineOptions.ThroughWalls`' silhouette ([../render.md](../render.md#outlineoptions)): needs `ui.world_outline`, kiln.render v3 (the entity's position; `service-older` with a v2 kiln-ui.dll), `render.camera` and kiln.ui (`service-missing`; `faulted` when overlay drawing is explicitly off). Off: a new ThroughWalls request throws `KilnUnavailableException` with the row's reason; existing requests draw no silhouette |

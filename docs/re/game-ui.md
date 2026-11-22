@@ -700,7 +700,9 @@ above (ItemSlot `0xc046c0` raw link, SlotGeometry mid `0xc05433`, GameUiFrame) a
   layouter's per-user navigation focus, the one the d-pad / stick and keyboard navigation move (section "How an entry
   works"), not a pointer test of its own. Whether the pointer moves that focus too was not found statically (the writers
   of `+0x68` were not located in a linear sweep). Kiln's `Ui.Inventory.Selected` (0.2.0-dev.30.5) is the first slot draw of a
-  fresh frame with the byte set; client check `ui-fuzen.c2` confirms it with a pad and says whether the mouse moves it. `ui-hooks.c4` logs it next to the cursor's slot (read while the cursor rests on the slot, not at a verdict: Kiln
+  fresh frame with the byte set; a client check must move selection with the d-pad and then the mouse to confirm which
+  moves the focus. `ui-hooks.c4` logs it next to the cursor's slot (read while the cursor rests on the slot, not at a
+  verdict: Kiln
   then has the input for its check window and the cursor is on that window). A gamepad slot action waits for it. **[hyp]**
 
 ### Slice 2 (dev.30): the chest's entity and panels beside the screens

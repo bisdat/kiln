@@ -104,8 +104,8 @@ internal sealed unsafe class RenderFake : IKitFake
 
     public void AddCoverage(List<CoverageRow> rows) =>
         rows.Add(new CoverageRow("Outlines in the world", CoverageKind.RecordingFake, [Service, OutlineRow],
-            "Ui.World.Outline's own code on the kit's kiln.render v2: each request is recorded with its entity, colour, pulse, " +
-            "priority and duration (KilnHarness.Outlines.All, Live, Of, Showing); at the start of the next step the native rules " +
+            "Ui.World.Outline's own code on the kit's kiln.render v3: each request is recorded with its entity, colour, pulse, " +
+            "priority, duration and ThroughWalls flag (KilnHarness.Outlines.All, Live, Of, Showing); at the start of the next step the native rules " +
             "decide its state: on one entity the highest priority, then the newest, shows and the others wait (Outshone); the " +
             "game's own highlight shows instead (GameHighlight) unless the player's setting is mods-first; off keeps every " +
             "request waiting; an entity without a model waits (HideModel); two colours at once and a third shares the nearest " +

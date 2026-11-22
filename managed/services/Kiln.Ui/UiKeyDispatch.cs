@@ -13,16 +13,26 @@ internal static unsafe class UiKeyDispatch
     private static readonly Queue<Action> Pending = new();
     private static ulong _tickHandle;
 
+    // The production pad router checks this before taking an action. TestKit instead supplies its own simulated tick.
+    internal static bool EnsureStarted()
+    {
+        lock (Lock)
+        {
+            if (_tickHandle != 0) return true;
+            if (!UiNative.HasGameUi || UiNative.T->SubscribeUiTick == null) return false;
+            ulong handle = 0;
+            if (UiNative.T->SubscribeUiTick(0, &OnTick, null, &handle) != UiNative.Ok || handle == 0) return false;
+            _tickHandle = handle;
+            return true;
+        }
+    }
+
     internal static bool Post(Action work, bool release = false)
     {
         lock (Lock)
         {
             if (!release && Pending.Count >= Limit) return false; // never lose the release of an accepted hold
-            if (_tickHandle == 0 && UiNative.HasGameUi && UiNative.T->SubscribeUiTick != null)
-            {
-                ulong handle = 0;
-                if (UiNative.T->SubscribeUiTick(0, &OnTick, null, &handle) == UiNative.Ok) _tickHandle = handle;
-            }
+            EnsureStarted(); // native ticks when present; TestKit explicitly drains a simulated frame
             Pending.Enqueue(work);
             return true;
         }

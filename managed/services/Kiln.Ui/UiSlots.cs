@@ -32,9 +32,9 @@ public sealed record VisibleSlot(uint Occurrence, EntityId InventoryPage, byte S
     public uint PageOrdinal { get; init; }
     public uint HolderFlags { get; init; }
 
-    /// <summary>The item's rarity as the game drew the slot (the value its tooltip shows), read on the render thread with the
-    /// slot: no <c>Items.Read</c> needed in a mark rule. Null for an empty slot, a rarity outside Common..Legendary, or a
-    /// Kiln without the value. Since 0.2.0-dev.30.5 (mod API 0.2.14).</summary>
+    /// <summary>The item's rarity as the game drew the slot (the value its tooltip shows), captured on the game's main/UI
+    /// thread and copied to render-thread mark rules: no <c>Items.Read</c> needed in a mark rule. Null for an empty slot, a
+    /// rarity outside Common..Legendary, or a Kiln without the value. Since 0.2.0-dev.30.5 (mod API 0.2.14).</summary>
     public ItemRarity? Rarity { get; init; }
 
     /// <summary>The item's level as the game drew the slot (0 for an empty slot, an item without levels, or a Kiln without

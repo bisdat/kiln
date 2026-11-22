@@ -378,8 +378,8 @@ Since 0.2.0-dev.30.5 (mod API 0.2.14, GitHub issue 121) Kiln also says so: `Visi
 the chest-style transfer screen, a factory station: the entity the screen is about), so it equals the server's
 `InventorySlot.ItemEntity` there; `HolderFlags` bit 8 marks such a holder. It is `EntityId.None` for a plain stack and for
 any other holder. `VisibleSlot.Rarity` (an `ItemRarity?`) and `Level` (also on `SlotClick`) are the item's as the game
-drew the slot, the values its tooltip shows, read on the render thread with the slot: a `MarkWhen` rule can tell a
-Legendary staff from an Uncommon one without `Items.Read`. `Rarity` is null for an empty slot.
+drew the slot, the values its tooltip shows, captured on the game's main/UI thread and copied to render-thread mark
+rules: a `MarkWhen` rule can tell a Legendary staff from an Uncommon one without `Items.Read`. `Rarity` is null for an empty slot.
 `Holder`, `Slot.InventoryPage` and `Slot.SlotIndex` say where it was drawn. Send the id to your server half and check
 there that the item is in the sender's inventory or a container they may use (Kiln.Items) before acting: a click is a wish,
 never authority. Kiln Auto Loot's salvage marks work this way.

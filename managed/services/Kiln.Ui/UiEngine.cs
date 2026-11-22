@@ -646,6 +646,9 @@ internal static unsafe class UiEngine
                 return true;
             }
         }
+        // A published table does not prove the game's UI frame hook started. Never take a pad action that has no
+        // main-thread delivery path (including a binding with only an OnRelease handler).
+        if (pad && !UiKeyDispatch.EnsureStarted()) return false;
         var consumed = false;
         var wheel = MouseKeys.IsWheel(k.Vk);
         // a controller's press on the game's selected slot (SlotClickOptions.Pad, 0.2.0-dev.30.5): during play and on the
