@@ -184,6 +184,7 @@ if (_found is { State: OutlineState.Waiting, Reason: OutlineReason.NoModel }) Hu
 | `Pulse` | the colour breathes (1.2 s period, 40 % to 100 % brightness) |
 | `Priority` | among mods' outlines on the same entity: the highest wins; on a tie, the newest. When more than two colours are in use, the colours of the highest-priority outlines keep the two groups |
 | `Duration` | null (the default): until disposed. Otherwise above zero and at most `uint.MaxValue` ms (`ArgumentOutOfRangeException`) |
+| `ThroughWalls` | (0.2.0-dev.31, mod API 0.2.14) also seen through walls: Kiln draws its own screen-space silhouette on its UI layer every frame, a hull of a box about 1.2 m wide and high at the entity's position, projected with the camera world labels use, as an outline plus a soft fill in `Color`, breathing with `Pulse`, ending with the outline. Row `ui.world_outline.through_walls` (`Ui.World.ThroughWallsAvailable`); while it is off the outline shows without the silhouette |
 
 ### States
 `WorldOutline.State` and `Reason` ask kiln.render at each read. `Active` is `State != Ended`. `ColorShared`: a
@@ -208,8 +209,13 @@ A waiting outline takes over when the reason goes away (the winner ends, the mod
   (`SwitchedOff`). The default is `"game-first"` ([client.md](client.md#kilnjson-per-side)). Another tool's highlight
   (Greeneye's Quick Deposit and Find, The Worst Map Mod) always shows instead, `"mods-first"` included: Kiln never
   takes a group it did not set, other than the building cursor's.
-- **No through-walls outline.** The game draws its highlight with the model, so what stands in front of the entity
-  hides it.
+- **Through walls is Kiln's own silhouette.** The game draws its highlight with the model, so what stands in front of
+  the entity hides it. `ThroughWalls` (0.2.0-dev.31) adds a screen-space silhouette instead: kiln.render v3 reads the
+  entity's position (its RenderTransform, as world labels do) for that request at each client step (`outline_info`'s
+  position, `KILN_RENDER_OUTLINE_THROUGH_WALLS`), Kiln.Ui projects a box at it and draws the hull over everything. It is a
+  box, not the model's shape (a mesh-shaped silhouette needs a pass inside the game's renderer: not planned), and it shows
+  where the model is in view too, next to the game's highlight. Nothing is drawn while the camera or the position is not
+  known, or a corner is behind the camera.
 - **Many at once.** Kiln reads up to 64 entities' models per client step, so a batch of hundreds lights up over a few
   steps. A model that is remade (or hidden) is noticed at the next step; one that appears later (streamed in, shown
   again) is found within 16 steps.

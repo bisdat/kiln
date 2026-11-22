@@ -55,7 +55,7 @@ internal sealed unsafe class RenderFake : IKitFake
         {
             var v2 = (RenderNative.TableV2*)NativeMemory.AllocZeroed((nuint)sizeof(RenderNative.TableV2));
             var t = &v2->Base;
-            t->Header = new ServiceHeader { Size = (uint)sizeof(RenderNative.TableV2), Version = 2 };
+            t->Header = new ServiceHeader { Size = (uint)sizeof(RenderNative.TableV2), Version = 3 };  // v3: through walls (0.2.0-dev.31)
             t->GetStatus = &Status;
             t->AcquireFrames = &AcquireFrames;
             t->Release = &Release;
@@ -245,7 +245,7 @@ internal sealed unsafe class RenderFake : IKitFake
         {
             if (h != null) *h = 0;
             if (owner == 0 || entity == 0 || o == null || h == null || o->Size < (uint)sizeof(RenderNative.Outline) ||
-                (o->Rgba & 0xFF) == 0 || (o->Flags & ~RenderNative.OutlinePulse) != 0 || o->Reserved != 0)
+                (o->Rgba & 0xFF) == 0 || (o->Flags & ~(RenderNative.OutlinePulse | RenderNative.OutlineThroughWalls)) != 0 || o->Reserved != 0)
                 return FakeTables.InvalidArgument;
             if (FakeTables.Off(OutlineRow) || KitBackend.Instance.Harness is not { } harness || State is not { } st)
                 return FakeTables.Unavailable;

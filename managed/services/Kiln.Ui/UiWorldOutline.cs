@@ -20,6 +20,16 @@ public sealed record OutlineOptions
     /// <summary>The colour breathes (a 1.2 s period, 40 % to 100 % brightness). Since 0.2.0-dev.30.3 (mod API 0.2.13).</summary>
     public bool Pulse { get; init; }
 
+    /// <summary>Also seen through walls (default false; client only, like the outline). The game's highlight is drawn with
+    /// the model and hidden by what stands in front, so Kiln adds its own silhouette on its UI layer every frame: the
+    /// entity's projected bounds (a box about 1.2 m wide and high at the entity's position) as a hull outline with a soft
+    /// fill, in <see cref="Color"/>, breathing with <see cref="Pulse"/> and ending with the outline
+    /// (<see cref="Duration"/>, Dispose). It draws over everything, also where the model is in view (the game's highlight
+    /// still shows there too), and not while the entity is not in this client's world or the camera is not known. Its own
+    /// row: <see cref="Ui.World.ThroughWallsCapability"/> (while it is off, the outline shows without the silhouette).
+    /// Since 0.2.0-dev.31 (mod API 0.2.14).</summary>
+    public bool ThroughWalls { get; init; }
+
     /// <summary>Among mods' outlines on the same entity the highest priority shows; on a tie the newest. The others wait
     /// (<see cref="OutlineReason.Outshone"/>) and take over when it ends. When more than two colours are in use, the
     /// colours of the highest-priority outlines keep the game's two highlight groups and the others share them
@@ -217,6 +227,17 @@ public static partial class Ui
         /// older kiln-core). Since 0.2.0-dev.30.3 (mod API 0.2.13).</summary>
         public const string OutlineCapability = "ui.world_outline";
 
+        /// <summary>The capability row of <see cref="OutlineOptions.ThroughWalls"/>: <see cref="OutlineCapability"/> on,
+        /// kiln.render v3 (the entity's position for the silhouette), the camera (<c>render.camera</c>) and Kiln's overlay
+        /// drawing. Since 0.2.0-dev.31 (mod API 0.2.14).</summary>
+        public const string ThroughWallsCapability = "ui.world_outline.through_walls";
+
+        /// <summary>Kiln draws through-walls silhouettes in this process: the row <see cref="ThroughWallsCapability"/> is on.
+        /// While it is off an outline with <see cref="OutlineOptions.ThroughWalls"/> still shows the game's highlight, without
+        /// the silhouette. Since 0.2.0-dev.31 (mod API 0.2.14).</summary>
+        [AnyThread]
+        public static bool ThroughWallsAvailable => Capabilities.Is(ThroughWallsCapability);
+
         /// <summary>The colour of an outline whose options name none: gold, (255, 196, 64). Since 0.2.0-dev.30.3 (mod API 0.2.13).</summary>
         public static Color DefaultOutlineColor { get; } = new(255, 196, 64);
 
@@ -278,7 +299,10 @@ internal static unsafe class WorldOutlines
         RenderNative.Outline o = new()
         {
             Size = (uint)sizeof(RenderNative.Outline), Rgba = options.Color.Rgba, Priority = options.Priority,
-            Flags = options.Pulse ? RenderNative.OutlinePulse : 0, DurationMs = options.DurationMs,
+            // a kiln.render before v3 refuses the flag: the outline goes in without the silhouette there
+            Flags = (options.Pulse ? RenderNative.OutlinePulse : 0) |
+                    (options.ThroughWalls && RenderNative.HasThroughWalls ? RenderNative.OutlineThroughWalls : 0),
+            DurationMs = options.DurationMs,
         };
         ulong h = 0;
         var rc = t->AddOutline(UiValueBridge.OwnerOf(mod), entity.Value, &o, &h);
@@ -296,6 +320,7 @@ internal static unsafe class WorldOutlines
             };
         var outline = new WorldOutline(h, entity, options, mod);
         Live[outline] = 0;
+        if (options.ThroughWalls) ThroughWalls.Started();
         Watch(mod);
         if (mod is { Alive: false }) Remove(outline, OutlineReason.ModUnloaded);  // it unloaded in between
         return outline;
@@ -333,6 +358,15 @@ internal static unsafe class WorldOutlines
     }
 
     /// <summary>An outline that ended in kiln.render (or that it forgot): ended here, nothing to remove.</summary>
+    /// <summary>The live outlines with <see cref="OutlineOptions.ThroughWalls"/> (0.2.0-dev.31), for Kiln's silhouettes.</summary>
+    internal static List<WorldOutline> LiveThroughWalls()
+    {
+        var list = new List<WorldOutline>();
+        foreach (var o in Live.Keys)
+            if (o.Options.ThroughWalls) list.Add(o);
+        return list;
+    }
+
     internal static void Forget(WorldOutline outline, OutlineReason reason)
     {
         outline.End(reason);

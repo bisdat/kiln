@@ -72,7 +72,8 @@ internal static unsafe class FakeRender
     private static int Add(ulong owner, uint entity, RenderNative.Outline* o, ulong* h)
     {
         if (AddRc != 0) return AddRc;
-        if (owner == 0 || entity == 0 || o == null || o->Size < 24 || (o->Rgba & 0xFF) == 0 || o->Reserved != 0 || (o->Flags & ~1u) != 0)
+        if (owner == 0 || entity == 0 || o == null || o->Size < 24 || (o->Rgba & 0xFF) == 0 || o->Reserved != 0 ||
+            (o->Flags & ~(Table->Base.Header.Version >= 3 ? 3u : 1u)) != 0)  // v3 (0.2.0-dev.31) takes THROUGH_WALLS
             return 1;
         var handle = NextHandle++;
         Added.Add((owner, entity, *o, handle));
@@ -216,6 +217,26 @@ public sealed unsafe class WorldOutlineTests : IDisposable
     }
 
     [Fact]
+    public void ThroughWalls_asks_kiln_render_v3_for_the_position_and_an_older_one_gets_the_plain_outline()
+    {
+        // 0.2.0-dev.31 (GitHub issue 111 follow-up): KILN_RENDER_OUTLINE_THROUGH_WALLS, outline_info's position (56 bytes)
+        Assert.Equal(56, sizeof(RenderNative.OutlineInfo));
+        Assert.Equal(32, (int)Marshal.OffsetOf<RenderNative.OutlineInfo>(nameof(RenderNative.OutlineInfo.X)));
+        FakeRender.Table->Base.Header.Version = 3;
+        using (var o = Ui.World.Outline(Chest, new OutlineOptions { ThroughWalls = true }))
+        {
+            Assert.Equal(RenderNative.OutlineThroughWalls, FakeRender.Added[^1].Opts.Flags);
+            Assert.True(o.Options.ThroughWalls);
+            Assert.Single(WorldOutlines.LiveThroughWalls());
+        }
+        Assert.Empty(WorldOutlines.LiveThroughWalls());
+        FakeRender.Table->Base.Header.Version = 2;  // a kiln-ui.dll before 0.2.0-dev.31 would refuse the flag
+        using (Ui.World.Outline(Chest, new OutlineOptions { ThroughWalls = true, Pulse = true }))
+            Assert.Equal(RenderNative.OutlinePulse, FakeRender.Added[^1].Opts.Flags);
+        Assert.False(new OutlineOptions().ThroughWalls);
+    }
+
+    [Fact]
     public void A_default_outline_is_gold_steady_and_until_removed()
     {
         using var outline = Ui.World.Outline(Chest);
@@ -267,7 +288,7 @@ public sealed unsafe class WorldOutlineTests : IDisposable
         Assert.Equal(reasons.Count, Enum.GetValues<OutlineReason>().Length);
         foreach (var (r, v) in reasons) Assert.Equal(v, (int)r);
         Assert.Equal(24, sizeof(RenderNative.Outline));
-        Assert.Equal(24, sizeof(RenderNative.OutlineInfo));
+        Assert.Equal(56, sizeof(RenderNative.OutlineInfo));  // the position appended in 0.2.0-dev.31
         Assert.Equal(208, sizeof(RenderNative.OutlineStatus));
         Assert.Equal(112, sizeof(RenderNative.Table));
         Assert.Equal(152, sizeof(RenderNative.TableV2));

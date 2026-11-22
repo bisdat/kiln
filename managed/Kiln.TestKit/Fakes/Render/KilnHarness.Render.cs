@@ -37,6 +37,10 @@ public sealed record FakeOutline(EntityId Entity, Color Color, bool Pulse, int P
     OutlineReason Reason, int Group, bool ColorShared, string Owner)
 {
     internal ulong Handle { get; init; }
+
+    /// <summary>Asked with <c>OutlineOptions.ThroughWalls</c> (Kiln's silhouette through walls; its drawing is not modelled).
+    /// Since 0.2.0-dev.31.</summary>
+    public bool ThroughWalls { get; init; }
 }
 
 /// <summary>
@@ -183,6 +187,7 @@ public sealed class HarnessOutlines
             (int)r.Group, r.Merged != 0, OwnerName(r.Owner))
         {
             Handle = r.Handle,
+            ThroughWalls = (r.Flags & RenderNative.OutlineThroughWalls) != 0,
         };
 
     private static string OwnerName(ulong owner)

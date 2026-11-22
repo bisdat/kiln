@@ -16,6 +16,7 @@ pub const KILN_RENDER_OUTLINE_PULSE: i32 = 1;
 pub const KILN_RENDER_OUTLINE_REMOVED: i32 = 16;
 pub const KILN_RENDER_OUTLINE_SHOWN: i32 = 1;
 pub const KILN_RENDER_OUTLINE_SWITCHED_OFF: i32 = 4;
+pub const KILN_RENDER_OUTLINE_THROUGH_WALLS: i32 = 2;
 pub const KILN_RENDER_OUTLINE_WAITING: i32 = 0;
 pub const KILN_RENDER_OUTLINE_WORLD: i32 = 18;
 pub const KILN_RENDER_SERVICE: &[u8] = b"kiln.render\0";
@@ -24,7 +25,7 @@ pub const KILN_RENDER_TEXT_CENTER_Y: i32 = 8;
 pub const KILN_RENDER_TEXT_OUTLINE: i32 = 2;
 pub const KILN_RENDER_TEXT_RIGHT: i32 = 16;
 pub const KILN_RENDER_TEXT_SHADOW: i32 = 1;
-pub const KILN_RENDER_VERSION: u32 = 2;
+pub const KILN_RENDER_VERSION: u32 = 3;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -78,6 +79,9 @@ pub struct KilnRenderOutlineInfo {
     pub entity: KilnEntity,
     pub group: u32,
     pub merged: u32,
+    pub position_ok: u32,
+    pub position_step: u32,
+    pub position: [f64; 3],
 }
 
 #[repr(C)]

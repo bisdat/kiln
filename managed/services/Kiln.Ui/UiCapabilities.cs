@@ -67,6 +67,29 @@ internal static unsafe class UiCaps
                 ServiceCaps.LowerOff(Ui.World.OutlineCapability, CapabilityReason.ServiceOlder,
                     "kiln.render has no outlines (v1: an older kiln-core)");
         }
+        ReportThroughWalls();
+    }
+
+    /// <summary>ui.world_outline.through_walls (0.2.0-dev.31): Kiln.Ui's own row for OutlineOptions.ThroughWalls. Kiln.Ui draws
+    /// the silhouette, so it needs the outline itself, kiln.render v3 (the entity's position), the camera and kiln.ui's
+    /// overlay.</summary>
+    internal static (bool Ok, CapabilityReason Reason, string Why) ThroughWallsState()
+    {
+        if (UiNative.T == null) return (false, CapabilityReason.ServiceMissing, "kiln.ui (Kiln's overlay) is not here");
+        if (!RenderNative.Available) return (false, CapabilityReason.ServiceMissing, "kiln.render is not here");
+        if (!Capabilities.Is(Ui.World.OutlineCapability))
+            return (false, CapabilityReason.ServiceOlder, $"outlines are off: {Capabilities.Why(Ui.World.OutlineCapability)}");
+        if (!RenderNative.HasThroughWalls)
+            return (false, CapabilityReason.ServiceOlder, "kiln.render has no through-walls positions (v2: an older kiln-ui.dll)");
+        if (!Capabilities.Is("render.camera"))
+            return (false, CapabilityReason.ServiceOlder, $"the camera is not known: {Capabilities.Why("render.camera")}");
+        return (true, CapabilityReason.None, "");
+    }
+
+    private static void ReportThroughWalls()
+    {
+        var (ok, reason, why) = ThroughWallsState();
+        Capabilities.Report(Ui.World.ThroughWallsCapability, ok ? CapabilityState.Available : CapabilityState.Unavailable, reason, why);
     }
 
     // kiln.ui's screen answers "unavailable" exactly when the game-UI integration is off (feature or frame hook)

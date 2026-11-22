@@ -19,3 +19,7 @@ Kiln.SlotClick.Pad.get -> Kiln.KeyChord?
 Kiln.SlotClick.Pad.init -> void
 Kiln.SlotClickOptions.Pad.get -> Kiln.KeyChord?
 Kiln.SlotClickOptions.Pad.init -> void
+const Kiln.Ui.World.ThroughWallsCapability = "ui.world_outline.through_walls" -> string!
+Kiln.OutlineOptions.ThroughWalls.get -> bool
+Kiln.OutlineOptions.ThroughWalls.init -> void
+static Kiln.Ui.World.ThroughWallsAvailable.get -> bool

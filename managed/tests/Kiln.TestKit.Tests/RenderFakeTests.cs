@@ -19,7 +19,7 @@ public sealed unsafe class RenderFakeTests
         // kiln_render.h v2: the header, v1's thirteen functions and the five outline functions
         var t = (uint*)KitBackend.Instance.Service("kiln.render", 1);  // KilnServiceHeader { size, version }
         Assert.True(t != null);
-        Assert.Equal((152u, 2u), (t[0], t[1]));
+        Assert.Equal((152u, 3u), (t[0], t[1]));  // v3 (0.2.0-dev.31): through walls, no new member
     }
 
     [Fact]
@@ -44,6 +44,17 @@ public sealed unsafe class RenderFakeTests
         Assert.Empty(kiln.Outlines.Live);
         Assert.Equal((OutlineState.Ended, OutlineReason.Removed), (kiln.Outlines.All[0].State, kiln.Outlines.All[0].Reason));
         Assert.Equal(OutlineState.Ended, outline.State);
+    }
+
+    [Fact]
+    public void ThroughWallsIsRecorded()
+    {
+        using var kiln = new KilnHarness();
+        kiln.Step();
+        using var walls = kiln.Run(() => Ui.World.Outline(Chest, new OutlineOptions { ThroughWalls = true, Color = Color.Green }));
+        using var plain = kiln.Run(() => Ui.World.Outline(new EntityId(Chest.Value + 1)));
+        Assert.True(kiln.Outlines.Of(walls)!.ThroughWalls);
+        Assert.False(kiln.Outlines.Of(plain)!.ThroughWalls);
     }
 
     [Fact]

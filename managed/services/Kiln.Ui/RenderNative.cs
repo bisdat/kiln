@@ -48,6 +48,7 @@ internal static unsafe class RenderNative
 
     // ---- outlines (v2, 0.2.0-dev.30.3) ----
     public const uint OutlinePulse = 1;
+    public const uint OutlineThroughWalls = 2;  // 0.2.0-dev.31 (kiln.render v3)
     public const uint OutlineWaiting = 0, OutlineShown = 1, OutlineGame = 2, OutlineEnded = 3;
 
     /// <summary>KilnRenderOutline (24 bytes).</summary>
@@ -64,6 +65,8 @@ internal static unsafe class RenderNative
     public struct OutlineInfo
     {
         public uint Size, State, Reason, Entity, Group, Merged;
+        public uint PositionOk, PositionStep;  // 0.2.0-dev.31 (56 bytes): a through-walls request's entity position
+        public double X, Y, Z;
     }
 
     /// <summary>KilnRenderOutlineStatus (208 bytes).</summary>
@@ -111,6 +114,8 @@ internal static unsafe class RenderNative
 
     /// <summary>The v2 table is here (<see cref="T2"/> is not null).</summary>
     public static bool HasOutlines => T2 != null;
+    /// <summary>kiln.render v3 (0.2.0-dev.31): through-walls requests and outline_info's position.</summary>
+    public static bool HasThroughWalls => T2 != null && T->Header.Version >= 3;
 
     /// <summary>outline_status, or null without the v2 table or when it fails.</summary>
     public static OutlineStatus? ReadOutlineStatus()

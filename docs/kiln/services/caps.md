@@ -482,3 +482,9 @@ kiln.world rows above).
 | Row | Kind | Reported by | What it says |
 |---|---|---|---|
 | `build.voxel_grid_tasks` | native, static | kiln.build, in its `on_ready` | the voxel grid's geometry from task threads (`grid_for_session`, experimental; [build.md](build.md#voxels-from-tasks-since-020-dev303)). Available when kiln.build's voxel reads are on (`build.read`), the running game matches an exact engine profile with its write gate (dedicated server 26430253, client 26430625) and kiln.world's `game_world_session` is there; the text names the profile. Unavailable, `symbol-missing`, otherwise, the text naming the check that failed |
+
+## Rows added in 0.2.0-dev.30.5 / mod API 0.2.14
+
+| Row | Kind | Reported by | Unconfirmed | What it says |
+|---|---|---|---|---|
+| `ui.world_outline.through_walls` | managed, static (since 0.2.0-dev.30.5) | Kiln.Ui, at its start and first use | `ui-fuzen.c5` | `OutlineOptions.ThroughWalls`' silhouette ([../render.md](../render.md#outlineoptions)): needs `ui.world_outline`, kiln.render v3 (the entity's position; `service-older` with a v2 kiln-ui.dll), `render.camera` and kiln.ui (`service-missing`). Off: an outline asked with ThroughWalls shows without the silhouette |
