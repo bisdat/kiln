@@ -144,12 +144,16 @@ bool guarded_append(AppendCall* c) {
     }
 }
 
+// The client world's G38UiPlayData, looked up again at every use (review N1): a pointer kept for the whole world could
+// outlive the object if the game ever reallocated it, and the list guards would then run on freed memory. When the
+// epoch or the object changes, our own rows of the last step are no longer ours to recognise.
 uint8_t* ui_data(uint64_t epoch) {
-    if (g_ui_epoch != epoch || !g_ui) {
+    const uintptr_t w = g.api->world ? g.api->world(KILN_WORLD_CLIENT) : 0;
+    const uintptr_t ui = w ? g.api->singleton(w, str("G38UiPlayData")) : 0;
+    if (g_ui_epoch != epoch || g_ui != ui) {
         g_ui_epoch = epoch;
+        g_ui = ui;
         g_appended = Appended{};
-        const uintptr_t w = g.api->world ? g.api->world(KILN_WORLD_CLIENT) : 0;
-        g_ui = w ? g.api->singleton(w, str("G38UiPlayData")) : 0;
     }
     return reinterpret_cast<uint8_t*>(g_ui);
 }
