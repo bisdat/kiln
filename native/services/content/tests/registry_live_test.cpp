@@ -123,6 +123,16 @@ std::vector<RegistrySection> registry_sections(const std::vector<PackFile>& file
     }
     return out;
 }
+
+void apply_registry_files(const std::vector<PackFile>& files) {
+    const auto schema = registry_live_schema();
+    const auto sections = registry_sections(files, *schema);
+    {
+        std::lock_guard lock(store_mutex());
+        registry_live_apply(sections, schema.get());
+    }
+    registry_live_publish();
+}
 }  // namespace kc
 
 namespace {
@@ -349,11 +359,11 @@ void relative_over_packs_and_reload() {
                 R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "maxStack", "op": {"mul": 4}}]}})"}};
     const auto files = files_of({{"bigstacks", "bigstacks/content/a.json"}});
     stage(files);
-    registry_live_apply(files);
+    apply_registry_files(files);
     check(at<uint32_t>(WOOD_AT) == 40, "x4 over the game's 10: " + std::to_string(at<uint32_t>(WOOD_AT)));
     // world load with an old pack (apply_all_packs: packs first, then the registry)
     put_pack(WOOD_AT, 30);
-    registry_live_apply(files);
+    apply_registry_files(files);
     check(at<uint32_t>(WOOD_AT) == 120, "x4 over the pack's 30");
     {
         const registry::FieldOutcome& fo = g_last_report.fields.at({"items", "game:material_t1_wood_logs", "maxStack"});
@@ -368,7 +378,7 @@ void relative_over_packs_and_reload() {
     }
     store_drop_owner(PACK);  // the pack edited: a reload
     put_pack(WOOD_AT, 50);
-    registry_live_apply(files);
+    apply_registry_files(files);
     check(at<uint32_t>(WOOD_AT) == 200, "x4 over the reloaded pack's 50");
     check(g_reports == 3 && g_last_report.refused.empty(), "registry.json written at every application, nothing refused");
     uint8_t b[4] = {7, 0, 0, 0};
@@ -394,7 +404,7 @@ void every_live_kind() {
     ]}})"}};
     const auto files = files_of({{"m", "m/content/a.json"}});
     stage(files);
-    registry_live_apply(files);
+    apply_registry_files(files);
     check(at<uint32_t>(WOOD_AT + 4) == 3, "rarity epic -> the game's Epic (3)");
     check(at<int64_t>(PLANK_AT) == 5'000'000'000ll, "duration 5 s");
     const gear::Constants c = registry::formulas::constants_of({});
@@ -436,7 +446,7 @@ void perks_costs_unlock_loot() {
     ]}})"}};
     const auto files = files_of({{"m", "m/content/a.json"}});
     stage(files);
-    registry_live_apply(files);
+    apply_registry_files(files);
     for (const auto& r : g_last_report.refused) std::fprintf(stderr, "  refused: %s\n", r.reason.c_str());
     check(std::memcmp(g_arena + WOOD_AT + 0x30, P1, 16) == 0 && at<uint32_t>(WOOD_AT + 0x80) == 0x901, "perk slot 0 kept");
     check(std::memcmp(g_arena + WOOD_AT + 0x40, P2, 16) == 0 && at<uint32_t>(WOOD_AT + 0x84) == 0x902, "perk_b appended into slot 1, its id with it");
@@ -447,7 +457,7 @@ void perks_costs_unlock_loot() {
     check(at<uint32_t>(0x40004) == 10, "loot stack.max x2: 10");
     // back to the game's: the section removed on a reload
     g_files["m/content/a.json"] = R"({"registry": {"alter": [{"registry": "recipes", "select": {"id": "game:plank_recipe"}, "field": "unlock", "op": "game"}]}})";
-    registry_live_apply(files);
+    apply_registry_files(files);
     check(at<uint32_t>(PLANK_AT + 0x50) == 0x12345678 && at<uint32_t>(PLANK_AT + 0x58) == 7, "unlock game: the game's requirement again");
     check(std::memcmp(g_arena + WOOD_AT + 0x40, "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0", 16) == 0 && at<uint32_t>(WOOD_AT + 0x84) == 0, "perk slot 1 back to none");
     check(at<float>(SWORD_AT + 0x40) == 10.0f && at<int32_t>(SWORD_AT + 0x44) == 10, "manaCost and its tooltip back");
@@ -463,7 +473,7 @@ void refusals_and_restart_fields() {
     ]}})"}};
     const auto files = files_of({{"m", "m/content/a.json"}});
     stage(files);
-    registry_live_apply(files);
+    apply_registry_files(files);
     for (const auto& r : g_last_report.refused) std::fprintf(stderr, "  refused: %s\n", r.reason.c_str());
     check(!reported("levelCap"), "a restart field is the boot back-end's: not refused here");
     check(at<uint32_t>(WOOD_AT) == 10, "an out-of-range value is not written");
@@ -476,11 +486,11 @@ void hot_reload() {
                {"b/content/b.json", R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "maxStack", "op": {"mul": 2}}]}})"}};
     auto files = files_of({{"a", "a/content/a.json"}, {"b", "b/content/b.json"}});
     stage(files);
-    registry_live_apply(files);
+    apply_registry_files(files);
     check(at<uint32_t>(WOOD_AT) == 80, "x4 then x2 stack: 80");
     // b's section edited: x2 -> x3
     g_files["b/content/b.json"] = R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "maxStack", "op": {"mul": 3}}]}})";
-    registry_live_apply(files);
+    apply_registry_files(files);
     check(at<uint32_t>(WOOD_AT) == 120, "recomposed: x4 then x3 = 120");
     const auto r = registry_live_result();
     check(r && r->fields.count({"items", "game:material_t1_wood_logs", "maxStack"}) &&
@@ -488,17 +498,17 @@ void hot_reload() {
           "registry.json has the new result");
     // a's pack removed
     files = files_of({{"b", "b/content/b.json"}});
-    registry_live_apply(files);
+    apply_registry_files(files);
     check(at<uint32_t>(WOOD_AT) == 30, "a removed pack's x4 leaves nothing behind: x3 over 10");
     // b removed too: back to the game's value, no registry layer left
     files.clear();
-    registry_live_apply(files);
+    apply_registry_files(files);
     check(at<uint32_t>(WOOD_AT) == 10, "no residue");
     check(!owner_has_layers(registry_owner()), "no registry layer left");
     // a new field the start never decoded needs a restart
     files = files_of({{"b", "b/content/b.json"}});
     g_files["b/content/b.json"] = R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "levels.min", "op": 5}]}})";
-    registry_live_apply(files);
+    apply_registry_files(files);
     check(reported("needs a restart"), "a field the start never decoded: refused, needs a restart");
 }
 
@@ -509,9 +519,9 @@ void another_writer_in_the_report() {
                 R"({"registry": {"alter": [{"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "maxStack", "op": {"mul": 4}}]}})"}};
     const auto files = files_of({{"bigstacks", "bigstacks/content/a.json"}});
     stage(files);
-    registry_live_apply(files);
+    apply_registry_files(files);
     mem<uint32_t>(WOOD_AT, 777);  // a ShroudForge run-time write in kiln mode
-    registry_live_apply(files);   // a pack reload
+    apply_registry_files(files);   // a pack reload
     check(at<uint32_t>(WOOD_AT) == 777, "the other writer's value stays");
     check(reported("was written by another writer after Kiln's layer: Kiln's edit not applied"), "and registry.json says so");
 }

@@ -873,41 +873,29 @@ void registry_live_install(RegistryLive in) {
     g.skipped_logged = 0;
 }
 
-bool registry_live_installed() {
+std::shared_ptr<const registry::Schema> registry_live_schema() {
     std::lock_guard lock(store_mutex());
-    return g.in != nullptr;
+    return g.in ? g.in->schema : nullptr;
 }
 
-void registry_live_apply(const std::vector<PackFile>& files, bool publish) {
-    std::shared_ptr<const registry::Schema> schema;
-    {
-        std::lock_guard lock(store_mutex());
-        if (!g.in) return;
-        schema = g.in->schema;
+void registry_live_apply(const std::vector<RegistrySection>& sections, const registry::Schema* schema) {
+    if (!g.in || g.in->schema.get() != schema) return;
+    std::map<std::string, uint64_t> hashes;
+    for (const RegistrySection& s : sections) hashes[s.rel] = s.hash;
+    g.refused.clear(), g.refused_keys.clear();
+    if (g.applied && hashes != g.hashes) {
+        LOGI("registry: a data pack's registry section changed: composing the registry again");
+        recompose(sections);
     }
-    // the pack files are read and lowered before the store's lock is taken (review finding 10)
-    const std::vector<RegistrySection> sections = registry_sections(files, *schema);
-    {
-        std::lock_guard lock(store_mutex());
-        if (!g.in) return;
-        std::map<std::string, uint64_t> hashes;
-        for (const RegistrySection& s : sections) hashes[s.rel] = s.hash;
-        g.refused.clear(), g.refused_keys.clear();
-        if (g.applied && hashes != g.hashes) {
-            LOGI("registry: a data pack's registry section changed: composing the registry again");
-            recompose(sections);
-        }
-        g.hashes = std::move(hashes);
-        g.section_of.clear();
-        for (const RegistrySection& s : sections) g.section_of[s.rel] = {s.mod, s.source};
-        g.applied = true;
-        put_all();
-        std::string err;
-        store_flush(&err);
-        if (!err.empty()) LOGW("registry (live): writing: %s", err.c_str());
-        report();
-    }
-    if (publish) registry_live_publish();
+    g.hashes = std::move(hashes);
+    g.section_of.clear();
+    for (const RegistrySection& s : sections) g.section_of[s.rel] = {s.mod, s.source};
+    g.applied = true;
+    put_all();
+    std::string err;
+    store_flush(&err);
+    if (!err.empty()) LOGW("registry (live): writing: %s", err.c_str());
+    report();
 }
 
 void registry_live_publish() {

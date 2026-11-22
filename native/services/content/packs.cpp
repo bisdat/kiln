@@ -9,7 +9,7 @@
 //     "options": { "stackGuard": true },
 //     "registry": { "add": [edits], "alter": [edits], "final": [edits] } }
 // "registry" (schema/registry-section.schema.json) is read by the registry stage at start (registry_sections, registry_live.h),
-// not applied here: a pack file's section is checked here only so that its pack report names a section that cannot be used.
+// and lowered again from the same snapshot as the other sections on a pack reload.
 // "gear" is a typed face over "items" (gear.h); "gearRules" are boot values (gamedata_bootpatch.cpp), not applied here.
 //
 // Selectors: a debug name, "0x1234abcd" / decimal id, or a case-insensitive glob ("Material_*", "*"). Values: numbers,
@@ -410,7 +410,6 @@ std::string api_path(int kind) {
 
 std::unordered_map<std::string, KilnOwner> g_pack_owners;  // mod id -> owner
 uint64_t g_generation = 0;
-thread_local bool t_pack_file = false;  // apply_all_packs is applying a mod's pack file (its registry section is the stage's)
 
 std::string section_source(const std::string& rel) {
     const size_t at = rel.find("/content/");
@@ -519,8 +518,8 @@ KilnResult apply_kitbash(KilnOwner owner, uint64_t seq, const Entry& e, const st
     return ko.writes.empty() && ko.blobs.empty() && !ko.problems.empty() ? KILN_ERR_INVALID_ARGUMENT : KILN_OK;
 }
 
-bool apply_pack(KilnOwner owner, uint64_t seq_base, const std::string& text, const std::string& source, ApplyResult* out) {
-    json doc = json::parse(text, nullptr, false, true);
+namespace {
+bool valid_pack(const json& doc, const std::string& source, ApplyResult* out) {
     if (doc.is_discarded() || !doc.is_object()) {
         out->errors.push_back(source + ": not a JSON object");
         return false;
@@ -529,7 +528,12 @@ bool apply_pack(KilnOwner owner, uint64_t seq_base, const std::string& text, con
         out->errors.push_back(source + ": format " + doc["format"].dump() + " is not supported (1)");
         return false;
     }
-    std::lock_guard lock(store_mutex());
+    return true;
+}
+
+// The caller holds store_mutex. File-backed packs supply the registry diagnostics computed while preparing the snapshot.
+void apply_parsed_pack(KilnOwner owner, uint64_t seq_base, const json& doc, const std::string& source,
+                       const ApplyResult* registry_report, ApplyResult* out) {
     g_seq_counter = 0;
     // "options": {"refs": true}: this document may change references of game items (kitbash opt-in)
     const bool doc_refs = doc.contains("options") && doc["options"].is_object() && doc["options"].value("refs", false) == true;
@@ -742,18 +746,12 @@ bool apply_pack(KilnOwner owner, uint64_t seq_base, const std::string& text, con
     gd_pack_sections(owner, seq_base, doc, source, out);  // templates, arsenals, sequences, buffs, perks, skills
 #endif
     if (doc.contains("registry")) {
-        if (!t_pack_file) {
+        if (!registry_report) {
             out->warnings.push_back("registry: a registry section is read from a mod's content/*.json at start (the registry stage), "
                                     "not from text applied at run time; ignored");
         } else {
-            std::vector<registry::Batch> batches;
-            std::vector<registry::Refusal> refused;
-            std::string err;
-            const registry::json section = registry::json::parse(doc["registry"].dump(), nullptr, false);
-            if (!registry::lower_section(section, "pack", "", section_source(source), registry_schema(), &batches, &refused, &err))
-                out->errors.push_back("registry: " + err);
-            else if (!refused.empty())
-                out->warnings.push_back("registry: " + std::to_string(refused.size()) + " edit(s) refused (state/registry.json says why)");
+            out->errors.insert(out->errors.end(), registry_report->errors.begin(), registry_report->errors.end());
+            out->warnings.insert(out->warnings.end(), registry_report->warnings.begin(), registry_report->warnings.end());
         }
     }
     if (doc.contains("options") && doc["options"].is_object()) {
@@ -778,6 +776,14 @@ bool apply_pack(KilnOwner owner, uint64_t seq_base, const std::string& text, con
     std::string ferr;
     store_flush(&ferr);
     if (!ferr.empty()) out->errors.push_back("writing: " + ferr);
+}
+}  // namespace
+
+bool apply_pack(KilnOwner owner, uint64_t seq_base, const std::string& text, const std::string& source, ApplyResult* out) {
+    const json doc = json::parse(text, nullptr, false, true);
+    if (!valid_pack(doc, source, out)) return false;
+    std::lock_guard lock(store_mutex());
+    apply_parsed_pack(owner, seq_base, doc, source, nullptr, out);
     return true;
 }
 
@@ -903,47 +909,94 @@ std::vector<PackFile> order_packs(const std::vector<PackFile>& files, const std:
     return out;
 }
 
+namespace {
+RegistrySection lower_registry_section(const PackFile& file, const registry::json& doc, const registry::Schema& schema) {
+    RegistrySection s;
+    s.mod = file.mod, s.version = file.version, s.rel = file.rel, s.source = section_source(file.rel), s.side = file.side;
+    s.hash = std::hash<std::string>{}(doc.dump());
+    if (!registry::lower_section(doc, s.mod, s.version, s.source, schema, &s.batches, &s.refused, &s.error)) s.batches.clear();
+    return s;
+}
+
+struct ParsedPack {
+    const PackFile& file;
+    json doc;
+    bool valid = false;
+    ApplyResult report;
+    ApplyResult registry_report;
+};
+
+ParsedPack read_pack(const PackFile& file, const registry::Schema* live_schema, std::vector<RegistrySection>* sections) {
+    ParsedPack p{file, {}, false, {}, {}};
+    bool ok = false;
+    const std::string text = read_file(upath(file.path), &ok);
+    if (!ok) {
+        p.report.errors.push_back("cannot read the file");
+        return p;
+    }
+    p.doc = json::parse(text, nullptr, false, true);
+    p.valid = valid_pack(p.doc, file.rel, &p.report);
+    if (p.doc.is_object() && p.doc.contains("registry")) {
+        const registry::json section(p.doc["registry"]);
+        // The stage accepts a registry section independently of the legacy pack format.
+        if (live_schema) sections->push_back(lower_registry_section(file, section, *live_schema));
+        if (p.valid) {
+            std::vector<registry::Batch> batches;
+            std::vector<registry::Refusal> refused;
+            std::string err;
+            if (!registry::lower_section(section, "pack", "", section_source(file.rel), registry_schema(), &batches, &refused, &err))
+                p.registry_report.errors.push_back("registry: " + err);
+            else if (!refused.empty())
+                p.registry_report.warnings.push_back("registry: " + std::to_string(refused.size()) + " edit(s) refused (state/registry.json says why)");
+        }
+    }
+    return p;
+}
+}  // namespace
+
 PacksReport apply_all_packs(const std::vector<PackFile>& files) {
+    const auto live_schema = registry_live_schema();
+    std::vector<RegistrySection> sections;
+    std::vector<ParsedPack> packs;
+    packs.reserve(files.size());
+    std::vector<std::string> order;
+    for (const PackFile& file : files) {
+        if (std::find(order.begin(), order.end(), file.mod) == order.end()) order.push_back(file.mod);
+        packs.push_back(read_pack(file, live_schema.get(), &sections));
+    }
+
     PacksReport rep;
     {
-    std::lock_guard lock(store_mutex());
-    rep.generation = ++g_generation;
-    for (auto& [id, owner] : g_pack_owners) {
-        store_drop_owner(owner);
-        drops_drop_owner(owner);
-    }
-    std::vector<std::string> order;
-    for (const PackFile& p : files)
-        if (std::find(order.begin(), order.end(), p.mod) == order.end()) order.push_back(p.mod);
-    uint32_t file_index = 0;
-    for (const PackFile& p : files) {
-        auto it = g_pack_owners.find(p.mod);
-        if (it == g_pack_owners.end()) {
-            const std::string label = "content:" + p.mod;
-            const KilnOwner o = g_api->owner_create(KilnStr{label.data(), label.size()});
-            it = g_pack_owners.emplace(p.mod, o).first;
-            set_owner_label(o, "pack " + p.mod);
+        std::lock_guard lock(store_mutex());
+        rep.generation = ++g_generation;
+        for (auto& [id, owner] : g_pack_owners) {
+            store_drop_owner(owner);
+            drops_drop_owner(owner);
         }
-        const uint64_t mod_index = static_cast<uint64_t>(std::find(order.begin(), order.end(), p.mod) - order.begin());
-        const uint64_t base = ((mod_index + 1) << 44) | (static_cast<uint64_t>(++file_index & 0xFFF) << 32);
-        ApplyResult r;
-        bool ok = false;
-        const std::string text = read_file(upath(p.path), &ok);
-        t_pack_dir = p.dir;
-        if (!ok) r.errors.push_back("cannot read the file");
-        else {
-            PhaseTimer ft(PH_PACK_FILE);
-            t_pack_file = true;
-            apply_pack(it->second, base, text, p.rel, &r);
-            t_pack_file = false;
+        uint32_t file_index = 0;
+        for (ParsedPack& pack : packs) {
+            const PackFile& p = pack.file;
+            auto it = g_pack_owners.find(p.mod);
+            if (it == g_pack_owners.end()) {
+                const std::string label = "content:" + p.mod;
+                const KilnOwner o = g_api->owner_create(KilnStr{label.data(), label.size()});
+                it = g_pack_owners.emplace(p.mod, o).first;
+                set_owner_label(o, "pack " + p.mod);
+            }
+            const uint64_t mod_index = static_cast<uint64_t>(std::find(order.begin(), order.end(), p.mod) - order.begin());
+            const uint64_t base = ((mod_index + 1) << 44) | (static_cast<uint64_t>(++file_index & 0xFFF) << 32);
+            if (pack.valid) {
+                PhaseTimer ft(PH_PACK_FILE);
+                t_pack_dir = p.dir;
+                apply_parsed_pack(it->second, base, pack.doc, p.rel, &pack.registry_report, &pack.report);
+                t_pack_dir.clear();
+            }
+            rep.files.emplace_back(p.rel, std::move(pack.report));
         }
-        t_pack_dir.clear();
-        rep.files.emplace_back(p.rel, std::move(r));
-    }
-    registry_live_apply(files, false);  // the registry's live layers over the packs (re-evaluated, or recomposed when a section changed)
-    std::string ferr;
-    store_flush(&ferr);
-    rep.conflicts = store_conflicts();
+        registry_live_apply(sections, live_schema.get());  // re-evaluate over the legacy packs, recomposing when a section changed
+        std::string ferr;
+        store_flush(&ferr);
+        rep.conflicts = store_conflicts();
     }
     registry_live_publish();  // registry.json with the store's lock released (review finding 10)
     return rep;
@@ -962,12 +1015,7 @@ std::vector<RegistrySection> registry_sections(const std::vector<PackFile>& file
         if (!ok) continue;
         const registry::json doc = registry::json::parse(text, nullptr, false, true);
         if (doc.is_discarded() || !doc.is_object() || !doc.contains("registry")) continue;
-        RegistrySection s;
-        s.mod = f.mod, s.version = f.version, s.rel = f.rel, s.source = section_source(f.rel), s.side = f.side;
-        const std::string dumped = doc["registry"].dump();
-        s.hash = std::hash<std::string>{}(dumped);
-        if (!registry::lower_section(doc["registry"], f.mod, f.version, s.source, schema, &s.batches, &s.refused, &s.error)) s.batches.clear();
-        out.push_back(std::move(s));
+        out.push_back(lower_registry_section(f, doc["registry"], schema));
     }
     return out;
 }
