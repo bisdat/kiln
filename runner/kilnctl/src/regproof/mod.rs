@@ -80,6 +80,9 @@ pub struct Proof {
     pub roundtrip: roundtrip::Report,
     pub values: Option<values::Diff>,
     pub aliases: Option<ids::AliasReport>,
+    /// the new build's table as checked and kept (regmap_check.py's with kiln.content's entries it does not cover)
+    #[serde(skip)]
+    pub table: Option<ids::IdTable>,
     pub rows: BTreeMap<String, RowVerdict>,
     pub accepted: Vec<String>,
     /// why the record may not be verified (empty: verified)
@@ -184,7 +187,8 @@ pub fn prove(inp: &Inputs, when: &str) -> Proof {
             p.blockers.push("no id table of the previous build (kilnctl keeps one per build in the maintainer folder; kiln.content writes \
                              the running build's into its data folder)".into())
         }
-        (prev, Some(now)) => {
+        (prev, Some(computed)) => {
+            let now = &ids::merged(computed, inp.native_ids.as_ref());
             if !now.exe_sha256.eq_ignore_ascii_case(&inp.new_exe_sha) || now.side != inp.side {
                 p.blockers.push(format!("the new id table is of {} {}, not of the new exe", now.side, short(&now.exe_sha256)));
             }
@@ -200,6 +204,7 @@ pub fn prove(inp: &Inputs, when: &str) -> Proof {
             }
             p.notes.extend(r.notes.iter().map(|x| format!("ids: {x}")));
             p.aliases = Some(r);
+            p.table = Some(now.clone());
         }
     }
     // 6. each row
@@ -694,7 +699,7 @@ impl ids::Store {
 /// table into a game's Kiln data folder when that game runs this build and the alias check passed.
 pub fn keep(p: &Proof, inp: &Inputs, store: &ids::Store, data_dir: Option<&Path>) -> Result<Vec<String>> {
     let mut lines = Vec::new();
-    if let Some(t) = &inp.new_ids {
+    if let Some(t) = p.table.as_ref().or(inp.new_ids.as_ref()) {
         lines.push(format!("ids       kept {}", store.put(t)?.display()));
         if let (Some(d), Some(a)) = (data_dir, &p.aliases) {
             if a.ok {
@@ -946,7 +951,11 @@ mod tests {
             (|i| i.problems.push("kfc.py types failed".into()), "kfc.py"),
             (|i| i.values_new.as_mut().unwrap().base.origin.clear(), "base"),
             (|i| i.candidate.as_mut().unwrap()["verified"] = json!(false), "root type"),
-            (|i| i.new_ids = Some(table(SHA, &[("g1", "game:a")])), "removed"),
+            (|i| {
+                // the entry is gone from the build: from both tables
+                i.new_ids = Some(table(SHA, &[("g1", "game:a")]));
+                i.native_ids = Some(table(SHA, &[("g1", "game:a")]));
+            }, "removed"),
         ];
         for (strip, word) in cases {
             let mut inp = base.clone();
@@ -1072,6 +1081,7 @@ mod tests {
         // a failed alias check deploys nothing
         let mut bad = inp.clone();
         bad.new_ids = Some(table(SHA, &[("g1", "game:a")]));
+        bad.native_ids = Some(table(SHA, &[("g1", "game:a")]));
         let pb = prove(&bad, "T");
         let data2 = root.join("game2/kiln/data");
         keep(&pb, &bad, &store, Some(&data2)).unwrap();

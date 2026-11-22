@@ -197,6 +197,25 @@ fn absolute(p: &Path) -> PathBuf {
     c
 }
 
+/// The new build's table to check and keep: regmap_check.py's (its pins applied) with kiln.content's entries it does not
+/// cover (entries without a GUID, such as the loot registry's, which kiln.content keys `#<id>`; registries regmap_check.py
+/// does not name), so the kept table is as complete as the one kiln.content writes for itself.
+pub fn merged(computed: &IdTable, native: Option<&IdTable>) -> IdTable {
+    let mut t = computed.clone();
+    if let Some(n) = native {
+        if t.decoder.is_none() {
+            t.decoder = n.decoder.clone();
+        }
+        for (reg, nt) in &n.registries {
+            let e = t.registries.entry(reg.clone()).or_default();
+            for (k, id) in nt {
+                e.entry(k.clone()).or_insert_with(|| id.clone());
+            }
+        }
+    }
+    t
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 pub struct Pin {
     pub registry: String,
@@ -418,6 +437,34 @@ pub(crate) mod tests {
 
     fn aliases(v: Value) -> Aliases {
         Aliases::of_record(&json!({"aliases": v}))
+    }
+
+    #[test]
+    fn kiln_contents_entries_without_a_guid_complete_the_computed_table() {
+        // the shape of a real build: regmap_check.py's table has no loot entries (they have no GUID), kiln.content keys
+        // them by number and has a registry regmap_check.py does not name
+        let mut native = table(NEW, &[("g1", "game:a"), ("g2", "game:b")]);
+        native.registries.insert("loot".into(), BTreeMap::from([("#7".to_string(), "game:a".to_string())]));
+        native.registries.insert("cats".into(), BTreeMap::from([("c1".to_string(), "game:wood".to_string())]));
+        native.decoder = Some("kiln-model 1".into());
+        let mut computed = table(NEW, &[("g1", "game:a"), ("g2", "game:b")]);
+        computed.registries.insert("loot".into(), BTreeMap::new());
+        let mut prev = native.clone();
+        prev.exe_sha256 = OLD.into();
+        // without kiln.content's entries the previous build's loot ids would look lost
+        assert!(!check(&prev, &computed, &Aliases::default(), Some(&native)).ok);
+        let m = merged(&computed, Some(&native));
+        assert_eq!(m.registries["loot"]["#7"], "game:a");
+        assert_eq!(m.registries["cats"]["c1"], "game:wood");
+        assert_eq!(m.decoder.as_deref(), Some("kiln-model 1"));
+        let r = check(&prev, &m, &Aliases::default(), Some(&native));
+        assert!(r.ok, "{:?}", r.problems);
+        assert_eq!(r.kept, 4);
+        // regmap_check.py's ids win where both have the entry (its pins hold)
+        let mut pinned = computed.clone();
+        pinned.registries.get_mut("gadgets").unwrap().insert("g2".into(), "game:b_kept".into());
+        assert_eq!(merged(&pinned, Some(&native)).registries["gadgets"]["g2"], "game:b_kept");
+        assert_eq!(merged(&computed, None), computed);
     }
 
     #[test]
