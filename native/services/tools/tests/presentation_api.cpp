@@ -78,4 +78,5 @@ int main() {
     revoked_owner=0;retiring_attempts=0;kiln_tools_presentation_install(&fake,66);
     CHECK(child==0&&revoked_owner==0&&retiring_attempts==0); // Never revoke the parent when child creation aliases it.
     std::cout<<"presentation API: "<<checks<<" checks passed\n";
+    return 0;
 }

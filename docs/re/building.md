@@ -132,6 +132,10 @@ function-local disassembly) and LLVM disassembly. No client execution was perfor
   has data/count/capacity at +0/+8/+0x10, 24-byte rows with item +0 and aggregate stock +0x10, selected index +0x628,
   has-selection byte +0x630, and mode +0x638. Finalizer `0x40dfe0` restores a selection by item identity. Filtering a
   group must remap the selected index or clear it; retaining an index after compaction selects another material.
+  Only terrain group2 is filtered. Root/brush category `Blueprints` (10), equipment `BuildTool` (3) and vanilla terrain
+  pool GUID `256c43ba-dd20-4369-b3bf-f49c671a59ec` select group2 before Overgrowth flags. The runtime map is keyed by
+  pool ID, not equipment slot; a second row repeating terrain items adds magic stock again even with vanilla held.
+  Tool pools therefore stay policy metadata and leave the game-visible pool resource unchanged.
 - `0xb1a230` is an **item presentation constructor**:
   `out = constructor(out, ItemInfo*, selectorGroup*)`. The traced direct caller obtains its item from the selected
   hotbar model (`0xd43f40`), not necessarily the running action's `actionItem`. Hover provenance is not established.
@@ -148,15 +152,21 @@ function-local disassembly) and LLVM disassembly. No client execution was perfor
   the existing `kiln.item.name` / `kiln.item.description` GUID derivation, verified in the content writer. No game
   text pointer needs to escape this helper.
 - `0xe9f270` is **terrain-config lookup**, not player material selection: it scans the registry's +0x38 resource,
-  comparing the cell byte in **184-byte** rows. Its server equivalent is `0x9464b0`. The adjacent building lookup
-  (`C 0xe9f210`, `S 0x946450`) shares its short prologue but has a 180-byte stride: a signature must distinguish them.
+  comparing the cell byte in **184-byte** rows. Its server equivalent is `0x9464b0`. The adjacent lookup
+  (`C 0xe9f210`, `S 0x946450`) is a value/default helper over the same terrain rows, not the building lookup.
+  It shares the 184-byte loop prefix; discovery must extend through the pointer/null return to distinguish them.
 - Equipped-stack helper `C 0x3853c0` / `S 0x1444a0` has matching unique normalized prologues. The client decompile
-  returns a 20-byte inventory binding/item/count/flags value, but replacing it from a current tool selection remains
-  **unqualified**. No guessed equipment or MaterialSelection component offset is used.
+  returns a 20-byte inventory binding/item/count/flags value. Its MainHand path first uses nonzero cached action item
+  at SlotSelection+0xb0, otherwise selected hotbar index+0xc0 (<16), inventory entity+0xa0/+0xa4 and a 12-byte stack
+  whose count+4 must be nonzero. The native client-Post producer copies complete 216-byte SlotSelection and 96-byte
+  Inventory components through the shipped GetComponent ABI, resamples selection/session, then publishes only owned
+  scalar values tagged by owner, actor, generation, session and step. Selector hooks accept at most one step of age;
+  world events and missing or changed state clear the observation. No preview identity becomes held state.
 
 The qualified material lookup may refuse a non-pool cell only while an Add policy is scoped around the native call.
-Outside that scope it must call the vanilla continuation unchanged. The selector's genuine held-item admission and
-per-player/source snapshot producer remain missing; pure filtering fixtures are not runtime qualification.
+Outside that scope it must call the vanilla continuation unchanged. The per-player producer separating backpack and
+magic-chest observations remains missing: aggregate selector counts must not be represented as separate-source data.
+Static qualification and portable fixtures do not establish actual menu rendering or real-game behavior.
 
 ### 1.3 Hardness **[dec] [data] [rt]**
 ```

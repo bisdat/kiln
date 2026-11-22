@@ -32,11 +32,11 @@ public sealed class ToolMaterialSnapshot
 /// Since 0.2.0-dev.30.5.</summary>
 public static class ToolMaterials
 {
-    /// <summary>True when the qualified selector and owned-preview adapters are available.</summary>
+    /// <summary>True when the qualified per-player, separate-source observation producer is available.</summary>
     [AnyThread]
-    public static bool Available => Capabilities.Is("tools.material_picker");
+    public static bool Available => Capabilities.Is("tools.material_snapshot");
     /// <summary>Reads an owned observation. False when offline, on the wrong side, outside a session, or when a required
-    /// symbol/source is missing; <c>Capabilities.Why("tools.material_picker")</c> explains capability refusal.</summary>
+    /// symbol/source is missing; <c>Capabilities.Why("tools.material_snapshot")</c> explains capability refusal.</summary>
     [AnyThread]
     public static bool TrySnapshot(EntityId actor,ItemId tool,out ToolMaterialSnapshot? snapshot) => ToolsNative.Read(actor,tool,out snapshot);
 }

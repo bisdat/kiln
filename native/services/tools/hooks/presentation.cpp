@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "../presentation_api.h"
 #include "../presentation.h"
+#include "../held_observer.h"
 #include "../internal.h"
 #include "../impact_binding.h"
 #include "kiln_hook.hpp"
@@ -22,7 +23,14 @@ struct Registration { KilnOwner owner; uint32_t tool; std::vector<uint32_t> ids;
 std::map<KilnHandle,Registration> registrations;
 std::map<uint32_t,std::array<uint8_t,16>> identities;
 KilnHandle next_handle=1;
-kiln::RawHook lookup_hook, preview_hook, identity_hook;
+kiln::RawHook lookup_hook, preview_hook, identity_hook, selector_hook;
+HeldObserver held_observer;
+std::atomic<KilnToolHeldItemProvider> held_provider{};
+std::shared_ptr<const Family> held_family() {
+    const auto provider=held_provider.load(std::memory_order_acquire);
+    const auto item=provider?provider():held_observer.current();
+    return families.family(families.root(item));
+}
 uint32_t fnv(const uint8_t* bytes,size_t length) {uint32_t h=0x811c9dc5u;for(size_t i=0;i<length;++i)h=(h^bytes[i])*0x01000193u;return h;}
 uint32_t text_tag(const std::array<uint8_t,16>& identity,const char* purpose) {
     auto guid=identity;const auto hash=fnv(reinterpret_cast<const uint8_t*>(purpose),std::strlen(purpose));
@@ -65,6 +73,14 @@ const uint8_t* KILN_CALL lookup(void* registry,uint8_t cell) {
         if(!allowed)return nullptr;
     }
     return lookup_hook.call<const uint8_t*>(registry,cell);
+}
+void KILN_CALL selector(SelectorGroup* groups,void* access,uint8_t current_only) {
+    // A quiet-tick owned observation, sampled once per entry. Never borrow another preview's identity or policy TLS.
+    const auto family=held_family();
+    selector_hook.call<void>(groups,access,current_only);
+    // Blueprint category10 + BuildTool3 + vanilla TerrainMaterials selects group2 before Overgrowth flags.
+    // The other six groups (arrows, spells, wall, roof, vanilla Overgrowth, bait) remain untouched.
+    if(groups&&family)filter_selector(groups[2],family->materials);
 }
 PreviewOwner* KILN_CALL preview(PreviewOwner* out,const uint32_t* item,SelectorGroup* group) {
     // Capture this invocation's explicit item identity before the original runs. A nested item-presentation
@@ -114,7 +130,8 @@ void report_caps() {
         const char* why=ready?"qualified explicit-item presentation adapter installed":!online?"no game in this process":build.side!=KILN_SIDE_CLIENT?"tool presentation is client-only":!build.hooks_enabled?"hooks are disabled by the build policy":missing;
         caps->report(parent_owner,{name,std::strlen(name)},ready?KILN_CAP_AVAILABLE:KILN_CAP_UNAVAILABLE,ready?KILN_CAP_REASON_NONE:reason,{why,std::strlen(why)});
     };
-    report("tools.material_picker",false,"selector held-tool admission and per-player/source snapshot producer are not qualified; presentation is refused");
+    report("tools.material_picker",online&&build.side==KILN_SIDE_CLIENT&&kiln_tools_hook_installed(KILN_TOOL_HOOK_SELECTOR_BUILDER),"selector or owned held-tool observer is unavailable");
+    report("tools.material_snapshot",false,"separate per-player backpack/magic-chest observations are not qualified; aggregate selector counts are not split or fabricated");
     report("tools.preview",online&&build.side==KILN_SIDE_CLIENT&&kiln_tools_hook_installed(KILN_TOOL_HOOK_PREVIEW),"owned preview constructor mapping is unavailable or its hook was refused");
     report("tools.brush_families",false,"brush query owning-family admission is not qualified; presentation is refused");
     report("tools.identity",online&&build.side==KILN_SIDE_CLIENT&&kiln_tools_hook_installed(KILN_TOOL_HOOK_IDENTITY),"root identity mapping is unavailable or its hook was refused");
@@ -125,6 +142,9 @@ bool install(kiln::RawHook& hook,const char* symbol,const char* pattern,void* fu
 }
 }
 
+void kiln_tools_presentation_set_held_provider(KilnToolHeldItemProvider provider) {
+    held_provider.store(provider,std::memory_order_release);
+}
 KilnResult KILN_CALL kiln_tools_define_family(KilnOwner owner,const KilnToolFamilyDef* definition,KilnHandle* out) {
     if(out)*out=0;
     if(!definition||!out||!owner||definition->size<sizeof(KilnToolFamilyDef)||!definition->tool||definition->reserved||definition->reserved2||definition->reserved3||
@@ -201,12 +221,15 @@ void kiln_tools_presentation_install(const KilnApi* value,KilnOwner parent) {
     if(client) {
         kiln_tools_report_hook(KILN_TOOL_HOOK_PREVIEW,install(preview_hook,"tools/MaterialPreview","48 89 5C 24 20 4C 89 44 24 18 48 89 4C 24 08 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 B0 F9 FF FF 48 81 EC 50 07 00 00",reinterpret_cast<void*>(&preview)));
         kiln_tools_report_hook(KILN_TOOL_HOOK_IDENTITY,install(identity_hook,"tools/RootIdentity","48 89 5C 24 20 56 48 83 EC 20 48 8B F1 48 85 D2 0F 84 ?? ?? ?? ?? 8B 82 D8 05 00 00",reinterpret_cast<void*>(&identity)));
+        const bool held_ready=held_observer.start(api,child);
+        kiln_tools_report_hook(KILN_TOOL_HOOK_SELECTOR_BUILDER,held_ready&&install(selector_hook,"tools/MaterialSelector","48 89 5C 24 08 44 88 44 24 18 48 89 54 24 10 55 56 57 41 54 41 55 41 56 41 57 48 81 EC 90 01 00 00 33 ED 4C 8D B9 38 06 00 00 48 8B DA 44 8B F5",reinterpret_cast<void*>(&selector)));
     }
-    // Held-tool admission for the selector and brush queries is not qualified. Never infer it from the
-    // generic inventory preview constructor, which also runs for non-held/hovered items.
-    kiln_tools_report_hook(KILN_TOOL_HOOK_SELECTOR_BUILDER,0);kiln_tools_report_hook(KILN_TOOL_HOOK_BRUSH_PICKER,0);
+    if(!client)kiln_tools_report_hook(KILN_TOOL_HOOK_SELECTOR_BUILDER,0);
+    // The brush route still requires qualified caller discrimination, not merely a held root.
+    kiln_tools_report_hook(KILN_TOOL_HOOK_BRUSH_PICKER,0);
 }
 void kiln_tools_presentation_uninstall() {
+    held_provider.store(nullptr,std::memory_order_release);held_observer.stop();
     for(auto id:{KILN_TOOL_HOOK_MATERIAL_LOOKUP,KILN_TOOL_HOOK_SELECTOR_BUILDER,KILN_TOOL_HOOK_PREVIEW,KILN_TOOL_HOOK_BRUSH_PICKER,KILN_TOOL_HOOK_IDENTITY})kiln_tools_report_hook(id,0);
     {std::lock_guard lock(gate);for(const auto& [_,registration]:registrations)remove_locked(registration);registrations.clear();}
     if(child&&hooks)hooks->revoke_owner(child);if(child&&api)api->owner_revoke(child);child=0;retiring=0;

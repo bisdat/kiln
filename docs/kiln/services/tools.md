@@ -77,15 +77,21 @@ supplies. An unavailable producer returns `false`; Kiln does not invent counts o
 | Capability | Meaning | Refusal |
 |---|---|---|
 | `tools.actions` | The complete authoritative action pipeline is qualified. | Missing required hook/context, offline or no session. |
-| `tools.material_picker` | Selector admission and an owned per-player/source observation producer are qualified. | Missing held-tool/source mapping; client-only presentation on a server. |
+| `tools.material_picker` | Terrain group2 is filtered using an owned native held-tool observation; the game's aggregate supply counts are retained. | Missing selector/held-tool mapping; client-only presentation on a server. |
+| `tools.material_snapshot` | A separate per-player backpack/magic-chest observation producer is qualified. | Currently unavailable: aggregate selector counts are never fabricated into two sources. |
 | `tools.preview` | The explicit-item preview has an owned bounded row adapter. | Missing constructor mapping, wrong side or hooks disabled. |
 | `tools.brush_families` | The brush query can distinguish an owning tool from vanilla families. | Missing query/held-tool context or wrong side. |
 | `tools.identity` | The explicit-item root identity adapter is qualified. | Missing root helper, wrong side or hooks disabled. |
 
-**Not yet established by game execution:** selector held-tool admission, brush-query family context, and a per-actor
-producer that separates backpack and magic-chest observations. Their capability must remain unavailable until those
-mappings are qualified. Filtering helpers, registry fixtures and native runner tests do not establish menu rendering,
-network behavior or the complete real-game tool. The item-presentation constructor's traced caller uses the selected hotbar model, which need not be the
+The native client-Post observer copies the actual main-hand/action selection into an owned scalar snapshot tagged by
+actor, owner, generation, session and step. A missing, changed or older-than-one-step sample does not admit a tool.
+It filters only terrain group2, leaving all six other categories unchanged. The qualified preview uses each call's
+explicit item, independently of that held observation.
+
+**Not yet established:** brush-query family context and the per-actor producer that separates backpack and magic-chest
+observations. Their capabilities remain unavailable until their mappings are qualified. Static qualification,
+filtering fixtures and native runner tests do not establish actual menu rendering, network behavior or the complete
+real-game tool. The item-presentation constructor's traced caller uses the selected hotbar model, which need not be the
 running action's item; its last item must never be cached as evidence of what the player holds.
 
 Only the player runs the real-game check: confirm root/brush names, independent vanilla Overgrowth choices, all pool
