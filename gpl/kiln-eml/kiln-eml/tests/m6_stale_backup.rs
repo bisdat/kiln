@@ -10,6 +10,8 @@
 //! header listing bytes the container no longer holds. Kiln now looks at the backup before it stages anything.
 #[path = "support/m6_fixture/mod.rs"]
 mod fixture;
+#[path = "support/m6_startup/mod.rs"]
+mod startup_support;
 
 use fixture::archive::{ArchiveFixture, NEW_CONTENT, STEM};
 use kfc::{
@@ -94,7 +96,7 @@ fn stale_with(tag: &str, verified: bool) -> (ArchiveFixture, Vec<u8>, Vec<u8>) {
     (f, header, resources)
 }
 
-/// Kiln's bundled ShroudForge's record of a startup pass naming the live header (its output; the rest is not checked).
+/// Kiln's bundled mod loader's record of a startup pass naming the live header (its output; the rest is not checked).
 fn shroudforge_record(f: &ArchiveFixture) {
     let header = read(f, &name("kfc"));
     let sha: String = Sha256::digest(&header).iter().map(|b| format!("{b:02x}")).collect();
@@ -119,7 +121,7 @@ fn eml_mode_replaces_a_backup_built_over_the_game_files_before_staging() {
     live_contents_hold(&f).unwrap();
 }
 
-// The same backup over game files Kiln's bundled ShroudForge claims (its record names the live header): refused with
+// The same backup over game files Kiln's bundled mod loader claims (its record names the live header): refused with
 // what to do, before anything is staged; the backup and the game files stay as they are.
 #[test]
 fn eml_mode_refuses_a_backup_built_over_files_another_loader_claims() {
@@ -130,7 +132,7 @@ fn eml_mode_refuses_a_backup_built_over_files_another_loader_claims() {
     let text = format!("{out:?}");
     for part in [
         "does not describe this game build's data files",
-        "Kiln's bundled ShroudForge prepared",
+        "Kiln's bundled mod loader prepared",
         "Verify the game files in Steam",
         "out of the game folder",
     ] {
@@ -220,4 +222,78 @@ fn the_inspector_does_not_take_a_stale_backup_for_the_base() {
     let v = inspect(&f);
     assert_eq!(v["status"], "refused", "{v:#}");
     assert_eq!(v["reasons"][0]["code"], "baseline-corrupt", "{v:#}");
+}
+
+#[test]
+fn a_live_header_missing_its_resource_chunks_cannot_replace_a_good_backup() {
+    let f = ArchiveFixture::new("stale-missing-chunks");
+    f.package("patch", PATCH, &["patch"]);
+    assert!(f.run_packages(&["patch"]).error.is_none());
+    let backup = read(&f, &name("kfc.bak"));
+    let resources = read(&f, &name("kfc_resources.bak"));
+    let seal = read(&f, &name("kfc.bak.integrity"));
+    let mut damaged = backup.clone();
+    // KFCHeader: 16-byte prefix, then sixteen (offset, count) locations; resource_chunks is last.
+    damaged[140..144].copy_from_slice(&0u32.to_le_bytes());
+    fs::write(f.game.join(name("kfc")), &damaged).unwrap();
+    let out = f.run_packages(&["patch"]);
+    assert!(out.error.is_some(), "{out:?}");
+    assert_eq!(read(&f, &name("kfc.bak")), backup, "the good backup must not be replaced by the damaged live index");
+    assert_eq!(read(&f, &name("kfc_resources.bak")), resources);
+    assert_eq!(read(&f, &name("kfc.bak.integrity")), seal);
+    assert_eq!(read(&f, &name("kfc")), damaged);
+    assert_eq!(inspect(&f)["status"], "refused");
+}
+
+#[test]
+fn kiln_mode_captures_a_fresh_baseline_and_commits_after_a_stale_backup() {
+    use kiln_eml::{sf_pass::StartupDialect, startup::State};
+    let (source, header, resources) = stale("stale-kiln-source");
+    // The EML runner keeps its install lock for process life. Copy the archive state to another synthetic install
+    // before taking the kiln-mode host's lock, rather than trying to take that same lock twice.
+    let f = ArchiveFixture::new("stale-kiln-commit");
+    fn copy_install(source: &std::path::Path, target: &std::path::Path) {
+        fs::create_dir_all(target).unwrap();
+        for entry in fs::read_dir(source).unwrap() {
+            let entry = entry.unwrap();
+            if entry.file_name() == ".kiln-eml.lock" { continue; }
+            let path = target.join(entry.file_name());
+            if entry.file_type().unwrap().is_dir() {
+                copy_install(&entry.path(), &path);
+            } else {
+                fs::copy(entry.path(), path).unwrap();
+            }
+        }
+    }
+    copy_install(source.game.as_std_path(), f.game.as_std_path());
+    let start = startup_support::Start::over(f);
+    start.patch("fresh", &[], &[], &startup_support::content("fresh content"));
+    let (_, outcome) = start.start(&start.plan(StartupDialect::Shroudforge, &[]), &startup_support::native());
+    assert_eq!(outcome.state, State::Committed, "{outcome:?}");
+    assert_eq!(read(&start.f, &name("kfc.bak")), header);
+    assert_eq!(read(&start.f, &name("kfc_resources.bak")), resources);
+    live_contents_hold(&start.f).unwrap();
+}
+
+#[test]
+fn another_loaders_appended_output_does_not_replace_the_original_backup() {
+    let f = ArchiveFixture::new("stale-append-keeps-base");
+    f.package("patch", PATCH, &["patch"]);
+    assert!(f.run_packages(&["patch"]).error.is_none());
+    let (backup, resources) = (read(&f, &name("kfc.bak")), read(&f, &name("kfc_resources.bak")));
+    let seal = read(&f, &name("kfc.bak.integrity"));
+    fs::write(f.game.join(name("kfc")), &backup).unwrap();
+    fs::write(f.game.join(name("kfc_resources")), &resources).unwrap();
+    fs::remove_file(f.receipt()).unwrap();
+    let base = Rc::new(KFCFile::from_path(f.game.join(name("kfc")), false).unwrap());
+    let mut writer = KFCWriter::new_incremental_with_options(&f.game, STEM, base, f.types.clone(),
+        KFCWriteOptions { overwrite_containers: true, truncate_containers: true, ..Default::default() }).unwrap();
+    writer.write_content(&ContentHash::from_data(b"other loader"), b"other loader").unwrap();
+    writer.finalize().unwrap();
+    let out = f.run_packages(&["patch"]);
+    assert!(out.error.is_none(), "{out:?}");
+    assert_eq!(read(&f, &name("kfc.bak")), backup);
+    assert_eq!(read(&f, &name("kfc_resources.bak")), resources);
+    assert_eq!(read(&f, &name("kfc.bak.integrity")), seal);
+    live_contents_hold(&f).unwrap();
 }

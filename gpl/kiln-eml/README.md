@@ -530,13 +530,15 @@ Each is marked `kiln-eml:` in the source.
     refuses another size), or the start is refused with what to do (verify the game files in Steam, then start again; if
     the message comes back, move the three backup files out of the game folder). A backup built over the live header
     (Over) is replaced by a new backup of the live files, before any seal is repaired or written, when no ownership
-    receipt lists the live header, no record of Kiln's bundled ShroudForge names it, and every container the live header
-    lists has its size; else refused. `restore_backup_as` puts back only a backup whose containers are at their sizes. The
+    receipt lists the live header, no record of Kiln's bundled mod loader names it, and every container the live header
+    lists has its size; else refused. A smaller header must also be internally consistent (container content counts,
+    content ranges and resource ranges); a damaged live index missing entries cannot replace an intact backup. `restore_backup_as` puts back only a backup whose containers are at their sizes. The
     inspector agrees for kiln mode: Over is the live set as a new baseline (note `baseline-stale`, origin
     `rebaselined-unclassified`; the boot witness takes it through `create_backup`), unless a live file is still Kiln's
     output; a backup that is neither is `baseline-corrupt`. A backup the live header itself was built over (a start without
-    the read-back published from it) passes the headers' comparison; the stage's sampled read-back (item 39) refuses it,
-    and that refusal now says what to do (`load::stage_refusal`, EML mode and kiln mode's prepared stages). Tests: load.rs
+    the read-back published from it) passes the headers' comparison; the stage's sampled read-back (item 39) can refuse
+    it when a sampled content differs. That baseline-content refusal says what to do (`load::stage_refusal`, EML mode and
+    kiln mode's prepared stages); a mismatch in a newly staged container does not blame the backup. Tests: load.rs
     `base_relation_follows_how_a_writer_builds_over_a_baseline`,
     `a_backup_whose_containers_are_not_at_their_size_is_neither_built_from_nor_restored`,
     `a_header_only_backup_built_over_the_game_files_is_replaced`, and `m6_stale_backup.rs` (the field's game folder

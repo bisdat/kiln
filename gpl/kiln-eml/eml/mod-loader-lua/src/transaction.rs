@@ -998,7 +998,12 @@ fn read_content(patch: &PatchWriter, index: &KFCFile, id: &ContentHash) -> io::R
     let mut bytes = vec![0; id.size() as usize];
     f.read_exact(&mut bytes)?;
     archive_work::add(bytes.len() as u64);
-    if ContentHash::from_data(&bytes) != *id { return Err(io::Error::other("staged content hash mismatch")); }
+    if ContentHash::from_data(&bytes) != *id {
+        let baseline = entry.container_index < patch.target.as_ref()
+            .ok_or_else(|| io::Error::other("missing baseline"))?.baseline.containers().len();
+        return Err(io::Error::other(if baseline { "staged content hash mismatch in baseline container" }
+            else { "staged content hash mismatch" }));
+    }
     Ok(Some(bytes))
 }
 
@@ -1359,7 +1364,9 @@ pub(crate) mod tests {
         staged[0] ^= 0xff;
         fs::write(&own, &staged).unwrap();
         let error = validate_stage(&patch, &base).unwrap_err();
-        assert!(error.to_string().contains("staged content hash mismatch"), "{error}");
+        assert_eq!(error.to_string(), "staged content hash mismatch");
+        let text = format!("{:#}", crate::load::stage_refusal("g")(error.into()));
+        assert!(!text.contains("move g.kfc.bak"), "the new container does not implicate the backup: {text}");
         drop(patch);
         fs::remove_dir_all(game).unwrap();
     }
