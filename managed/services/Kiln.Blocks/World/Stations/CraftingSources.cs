@@ -100,7 +100,16 @@ public static class Crafting
 
 internal static unsafe class CraftingCore
 {
-    private static StationsNative.Table* Table => Services.Get<StationsNative.Table>(StationsNative.Name, 1);
+    // Only the prefix through SourceStock is required; later appended members must not enlarge this requirement.
+    internal static bool HasSourcePrefix(uint size) => size >= (uint)(StationsNative.TableFillUi + 4 * sizeof(nint));
+    private static StationsNative.Table* Table
+    {
+        get
+        {
+            var header = Services.Get<ServiceHeader>(StationsNative.Name, 1);
+            return header != null && HasSourcePrefix(header->Size) ? (StationsNative.Table*)header : null;
+        }
+    }
     internal static bool HasSources => Table is var t && t != null && t->AddSource != null && t->RemoveSource != null && t->SourceStock != null;
     private static readonly ServiceCapRows Rows = new(StationsNative.Name, () =>
     {

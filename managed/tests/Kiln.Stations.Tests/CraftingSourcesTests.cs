@@ -7,6 +7,16 @@ namespace Kiln.StationsTests;
 public sealed class CraftingSourcesTests
 {
     [Fact]
+    public void The_source_prefix_stays_280_bytes_when_later_members_are_appended()
+    {
+        Assert.False(CraftingCore.HasSourcePrefix(0));
+        Assert.False(CraftingCore.HasSourcePrefix(248));
+        Assert.False(CraftingCore.HasSourcePrefix(279));
+        Assert.True(CraftingCore.HasSourcePrefix(280));
+        Assert.True(CraftingCore.HasSourcePrefix(288));
+    }
+
+    [Fact]
     public void Registrations_copy_the_filter_and_dispose_removes_them()
     {
         using var h = new KilnHarness();
