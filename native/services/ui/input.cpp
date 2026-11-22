@@ -33,6 +33,7 @@
 #include "backends/imgui_impl_win32.h"
 #include "imgui.h"
 #include "key_hold.h"
+#include "pad_slots.h"
 #include "key_names.h"
 #include "mouse_press.h"
 #include "safetyhook.hpp"
@@ -906,19 +907,15 @@ void* patch_iat(HMODULE mod, const char* dll, const char* name, void* hook) {
 // the Kiln menu has the input, the game gets an idle pad (no buttons, sticks centred: whatever it held is released),
 // and Kiln feeds the pad to ImGui's gamepad navigation (d-pad / left stick move, A activates, LB/RB switch tabs);
 // B closes the top Kiln screen like Escape.
-struct PadState {
-    WORD buttons;
-    BYTE lt, rt;
-    SHORT lx, ly, rx, ry;
-};
+// Each user's state, a stick back at centre included, and the pad that last moved (pad_slots.h, kiln#123).
+using kiln::ui::PadState;
 struct XState {
     DWORD packet;
     PadState pad;
 };
 SafetyHookInline g_xinput_hook;
 std::mutex g_pad_mu;
-PadState g_pad{};
-bool g_pad_seen = false;
+kiln::ui::PadSlots g_pads;
 WORD g_pad_prev[4] = {};
 PadState g_pad_fed{};
 bool g_pad_fed_any = false;
@@ -948,8 +945,7 @@ DWORD WINAPI hk_xinput_get_state(DWORD user, XState* st) {
     g_pad_prev[user] = b;
     {
         std::lock_guard<std::mutex> lk(g_pad_mu);
-        if (b || st->pad.lx > 8000 || st->pad.lx < -8000 || st->pad.ly > 8000 || st->pad.ly < -8000 || !g_pad_seen) g_pad = st->pad;
-        g_pad_seen = true;
+        g_pads.update(user, st->pad);
     }
     std::memset(&st->pad, 0, sizeof st->pad);  // the game sees an idle pad while Kiln has the input
     if (b_edge) synth_escape();
@@ -960,8 +956,8 @@ void feed_pad(ImGuiIO& io) {
     PadState p{};
     {
         std::lock_guard<std::mutex> lk(g_pad_mu);
-        if (!g_pad_seen) return;
-        p = g_pad;
+        if (!g_pads.seen()) return;
+        p = g_pads.followed();
     }
     io.BackendFlags |= ImGuiBackendFlags_HasGamepad;
     if (g_pad_fed_any && std::memcmp(&p, &g_pad_fed, sizeof p) == 0) return;
@@ -981,7 +977,7 @@ void feed_pad(ImGuiIO& io) {
     key(ImGuiKey_GamepadFaceLeft, 0x4000);
     key(ImGuiKey_GamepadFaceUp, 0x8000);
     auto axis = [&](ImGuiKey k, float v) {
-        const float dz = 8000.0f / 32767.0f;
+        const float dz = static_cast<float>(kiln::ui::kLeftDeadZone) / 32767.0f;  // the state is settled: 0 inside it
         const float a = v < dz ? 0.0f : std::min(1.0f, (v - dz) / (1.0f - dz));
         io.AddKeyAnalogEvent(k, a > 0.1f, a);
     };
