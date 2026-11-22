@@ -339,7 +339,9 @@ internal static class StationMenuSync
             foreach (var gone in Sending.Keys.Where(k => !peers.Any(p => p.Id == k)).ToList()) Sending.Remove(gone);
         }
         if (!peers.Any(p => p.State == NetPeerState.Ready && p.HasChannel(ChannelName) && !NetAdmission.IsLocalMachine(p))) return;
-        if (_dirty || _snapshot is null) Build();
+        // also when the content sync serves another state than the snapshot names (a hot load, a value change): a client that
+        // joins later must be told the state it will get, or it waits for one that never comes
+        if (_dirty || _snapshot is null || (_snapshot.Menus > 0 && ContentSync.Serving?.StateId is { } served && served != _snapshot.ContentStateId)) Build();
         if (_snapshot is not { } s) return;
         lock (Sent)
             foreach (var p in peers)
