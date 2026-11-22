@@ -238,7 +238,11 @@ public static unsafe class Survivors
 internal static unsafe class SurvivorsPump
 {
     private static readonly object Lock = new();
-    private static readonly Dictionary<ulong, (TaskCompletionSource<SurvivorResult> Tcs, ulong Since)> Waiting = [];
+    private static readonly Dictionary<ulong, (TaskCompletionSource<SurvivorResult> Tcs, long SinceMs)> Waiting = [];
+
+    // The native side ends every request: the 30 s budget, then at most 10 minutes of draining (Indeterminate). A result not
+    // seen 15 minutes after the submit is lost (review N2: counted in time, not in steps, whose rate differs by host).
+    private const long LostAfterMs = 15 * 60 * 1000;
     private static IDisposable? _tick;
     private static ulong _cursor;
 
@@ -259,7 +263,7 @@ internal static unsafe class SurvivorsPump
     internal static Task<SurvivorResult> Wait(ulong id)
     {
         var tcs = new TaskCompletionSource<SurvivorResult>(TaskCreationOptions.None);  // continuations: tick thread
-        lock (Lock) Waiting[id] = (tcs, ServiceTick.Step);
+        lock (Lock) Waiting[id] = (tcs, Environment.TickCount64);
         return tcs.Task;
     }
 
@@ -267,16 +271,15 @@ internal static unsafe class SurvivorsPump
     {
         var t = SurvivorsNative.T;
         if (t == null) return;
-        List<(ulong Id, TaskCompletionSource<SurvivorResult> Tcs, ulong Since)> due;
-        lock (Lock) due = [.. Waiting.Select(kv => (kv.Key, kv.Value.Tcs, kv.Value.Since))];
+        List<(ulong Id, TaskCompletionSource<SurvivorResult> Tcs, long SinceMs)> due;
+        lock (Lock) due = [.. Waiting.Select(kv => (kv.Key, kv.Value.Tcs, kv.Value.SinceMs))];
         foreach (var (id, tcs, since) in due)
         {
             SurvivorsNative.Result r = default;
             r.Size = (uint)sizeof(SurvivorsNative.Result);
             if (t->GetResult(id, &r) != SurvivorsNative.Ok)
             {
-                // the native side ends every request (30 s, then draining); a result older than its cache is gone
-                if (tick.Step > since + 50 * 60 * 15)
+                if (Environment.TickCount64 - since > LostAfterMs)
                 {
                     lock (Lock) Waiting.Remove(id);
                     tcs.TrySetException(new InvalidOperationException($"kiln.survivors request {id}: its result was not seen within 15 minutes"));
