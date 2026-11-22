@@ -3312,7 +3312,8 @@ KilnResult KILN_CALL t_add_source(KilnOwner owner, const KilnCraftSourceRequest*
     if (r->item_count) items.assign(r->items,r->items + r->item_count);
     if (std::find(items.begin(),items.end(),0u) != items.end()) return KILN_ERR_INVALID_ARGUMENT;
     uint32_t session=0;
-    if(!source_player(g_srv_bases.load(std::memory_order_acquire),r->player,&session))return KILN_ERR_INVALID_ARGUMENT;
+    // Registration already holds the tick-thread gate: do not depend on our first Pre having cached this world yet.
+    if(!source_player(singleton("PlayerBasesSystemServer"),r->player,&session))return KILN_ERR_INVALID_ARGUMENT;
     *out = g_registered.add(owner,r->player,r->container,r->order != 0,r->filter == 0,std::move(items),session);
     return *out ? KILN_OK : KILN_ERR_BUFFER_TOO_SMALL;
 }

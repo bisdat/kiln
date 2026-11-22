@@ -91,6 +91,10 @@ int main() {
     fixture::inventory={{1,{{7,1}}},{2000,{{7,2}}}};
     uint64_t handle=0;
     KilnCraftSourceRequest request{sizeof request,1,2000,0,0,0,nullptr};
+    g_srv_bases.store(nullptr);uint64_t early=0;
+    CHECK(t_add_source(10,&request,&early)==KILN_OK && early!=0); // current server singleton, before the first cached Pre
+    if(early)t_remove_source(10,early);
+    g_srv_bases.store(bases);
     CHECK(t_add_source(10,&request,&handle)==KILN_OK && handle!=0);
     KilnStationStack stocks[2]{};uint32_t n=0;
     CHECK(t_source_stock(1,0,stocks,2,&n)==KILN_OK && n==1 && stocks[0].item==7 && stocks[0].count==2);
