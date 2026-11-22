@@ -437,7 +437,7 @@ internal static class StationMenuSync
         Log(a.Stage == StageRefused ? LogLevel.Warn : LogLevel.Info,
             $"{ctx.Sender.Name} (0x{ctx.Sender.Id:x}): snapshot {(a.StateId.Length >= 12 ? a.StateId[..12] : a.StateId)} generation {a.Generation} {stage}" +
             (a.Reason.Length > 0 ? $": {a.Reason}" : ""));
-        if (a.Stage == StageRefused) lock (Sent) Sent.Remove(ctx.Sender.Id);  // sent again with the next snapshot
+        // a refused snapshot is not sent again: that peer gets the next one (a menu or content change makes a new state id)
     }
 
     // ------------------------------------------------------------------------------------------------ client ---
