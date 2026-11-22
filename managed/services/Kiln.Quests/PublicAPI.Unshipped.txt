@@ -141,3 +141,4 @@ static Kiln.Survivors.RecruitWorld(Kiln.SurvivorId id, Kiln.SurvivorRecruitOptio
 static Kiln.Survivors.Summon(Kiln.SurvivorId id, System.Guid baseId, Kiln.WorldPosition position, float yawDegrees = 0) -> System.Threading.Tasks.Task<Kiln.SurvivorResult!>!
 static Kiln.Survivors.UnassignBed(Kiln.SurvivorId id, Kiln.SurvivorAssignmentOptions! options) -> System.Threading.Tasks.Task<Kiln.SurvivorResult!>!
 ~override Kiln.SurvivorId.Equals(object obj) -> bool
+Kiln.SurvivorCompletion.Indeterminate = 6 -> Kiln.SurvivorCompletion

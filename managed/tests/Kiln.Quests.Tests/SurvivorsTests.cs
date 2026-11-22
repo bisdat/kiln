@@ -87,6 +87,7 @@ public unsafe class SurvivorsTests
     [InlineData(3u, false, SurvivorCompletion.TimedOut)]
     [InlineData(4u, false, SurvivorCompletion.Partial)]
     [InlineData(5u, false, SurvivorCompletion.WorldEnded)]
+    [InlineData(6u, false, SurvivorCompletion.Indeterminate)]
     public void Ok_only_for_done_and_no_change(uint status, bool ok, SurvivorCompletion completion)
     {
         var r = new SurvivorsNative.Result { Size = (uint)sizeof(SurvivorsNative.Result), Status = status, Effects = 1 | 2, Steps = 7 };

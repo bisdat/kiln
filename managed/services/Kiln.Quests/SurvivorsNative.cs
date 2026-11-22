@@ -153,7 +153,7 @@ internal static unsafe class SurvivorsNative
     {
         fixed (Result* p = &r)
         {
-            var completion = (SurvivorCompletion)Math.Min(r.Status, (uint)SurvivorCompletion.WorldEnded);
+            var completion = (SurvivorCompletion)Math.Min(r.Status, (uint)SurvivorCompletion.Indeterminate);
             var ok = completion is SurvivorCompletion.Done or SurvivorCompletion.NoChange;
             var reason = Text(p->Reason, 160);
             return new SurvivorResult(ok, ok ? null : (reason.Length > 0 ? reason : completion.ToString()), Info(r.Before), Info(r.After),

@@ -502,19 +502,38 @@ void step_recruit(Req& r, uint64_t now, uint64_t step) {
         KilnKnowledgeResult kr{};
         kr.size = sizeof kr;
         if (K->result(r.know_req, &kr) != KILN_OK) {
-            if (past(r, now)) r.state = KILN_SURV_DRAINING;
-            if (now > r.accepted_ms + KILN_SURVIVOR_DEADLINE_MS + 30000)  // the knowledge queue never answered
-                return fail(r, KILN_SURV_TIMED_OUT, "KnowledgeNotApplied: no answer from kiln.knowledge");
-            return;
+            // No result: still pending, or already forgotten (kiln.knowledge keeps the last 256). The grant is in kiln.knowledge's
+            // hands and may land at any step, so the request drains and never ends "nothing written" (review S1): the roster
+            // says when the unlock is there (it was locked when the request was taken, so the unlock is the grant's).
+            RosterEntry cur;
+            if (roster_at(r.roster.index, &cur) && cur.npc.npc_id == r.in.npc_id && cur.npc.unlocked == 1) {
+                r.in_flight = 0;
+                r.effects |= KILN_SURV_KNOWLEDGE_WRITTEN;
+                r.confirm_ms = now;
+                r.confirm_step = step;
+                r.state = KILN_SURV_VERIFYING;
+                r.stage = 2;
+            } else {
+                if (past(r, now)) {
+                    r.state = KILN_SURV_DRAINING;
+                    r.waiting = "the knowledge grant (handed to kiln.knowledge, it may still land)";
+                }
+                if (now > r.accepted_ms + KILN_SURVIVOR_DEADLINE_MS + KILN_SURVIVOR_DRAIN_MS)
+                    return finish(r, KILN_SURV_INDETERMINATE,
+                                  "KnowledgeUnknown: kiln.knowledge gave no answer for the grant and the survivor is still locked; the unlock may still land");
+                return;
+            }
         }
-        r.in_flight = 0;
-        if (kr.status != KILN_OK) return fail(r, KILN_SURV_REFUSED, std::string("KnowledgeRefused: ") + kr.reason);
-        if (kr.changed || kr.after != kr.before) r.effects |= KILN_SURV_KNOWLEDGE_WRITTEN;
-        r.confirm_ms = now;
-        r.confirm_step = step;
-        r.state = KILN_SURV_VERIFYING;
-        r.waiting = "the NPC registry's unlock";
-        r.stage = 2;
+        if (r.stage == 1) {
+            r.in_flight = 0;
+            if (kr.status != KILN_OK) return fail(r, KILN_SURV_REFUSED, std::string("KnowledgeRefused: ") + kr.reason);
+            if (kr.changed || kr.after != kr.before) r.effects |= KILN_SURV_KNOWLEDGE_WRITTEN;
+            r.confirm_ms = now;
+            r.confirm_step = step;
+            r.state = KILN_SURV_VERIFYING;
+            r.waiting = "the NPC registry's unlock";
+            r.stage = 2;
+        }
     }
     if (r.stage == 2) {
         RosterEntry cur;

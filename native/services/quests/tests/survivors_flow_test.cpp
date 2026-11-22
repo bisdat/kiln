@@ -248,6 +248,20 @@ void recruit_drains() {
               std::to_string(res.committed_effects) + ")");
 }
 
+// S1: a grant that never answers and never lands ends INDETERMINATE (it may still land), never TIMED_OUT
+void recruit_indeterminate() {
+    roster[0].npc.unlocked = 0;
+    uint64_t id = 0;
+    const KilnSurvivorRequest r = req(KILN_SURV_OP_RECRUIT, 0);
+    check(t_submit(1, &r, &id) == KILN_OK, "S1: second recruit accepted");
+    KilnSurvivorResult res{};
+    step();
+    t_ms += 31000 + 600000;  // the budget and ten minutes of draining
+    for (int i = 0; i < 5 && !done(id, &res); ++i) step();
+    check(done(id, &res) && res.status == KILN_SURV_INDETERMINATE && std::string(res.reason).rfind("KnowledgeUnknown", 0) == 0,
+          "S1: unanswered for the budget and ten minutes more: INDETERMINATE, may still land (status " + std::to_string(res.status) + ")");
+}
+
 // S2: two bed requests back to back on the same bed: each reads back its own write
 void beds_one_at_a_time() {
     roster[0].npc.unlocked = 1;
@@ -293,6 +307,7 @@ void bed_changed_in_step() {
 int main() {
     setup();
     recruit_drains();
+    recruit_indeterminate();
     beds_one_at_a_time();
     bed_changed_in_step();
     std::printf("survivors_flow_test: %d passed, %d failed\n", g_pass, g_fail);

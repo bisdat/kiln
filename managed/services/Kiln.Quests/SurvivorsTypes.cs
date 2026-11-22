@@ -73,6 +73,9 @@ public enum SurvivorCompletion
     Partial,
     /// <summary>The world stopped; Effects says what was written before.</summary>
     WorldEnded,
+    /// <summary>A step Kiln handed to the game (the unlock's grant) gave no answer within the budget and 10 minutes more: it may
+    /// still land. Effects lists only what was seen. Read <see cref="Survivors.Find"/> later to know. Since 0.2.0-dev.31.</summary>
+    Indeterminate,
 }
 
 /// <summary>A roster survivor as the world has it now.</summary>

@@ -50,6 +50,7 @@ Each write is a request that ends in one `SurvivorResult` (`IKilnResult`) within
 | `TimedOut` | no | the 30 s budget ran out before anything was written |
 | `Partial` | no | something was written (`Effects`), then it could not finish |
 | `WorldEnded` | no | the world stopped; `Effects` says what was written before |
+| `Indeterminate` | no | a step Kiln handed to the game (the unlock's grant) never answered within the budget and 10 minutes more: it may still land; read `Find` later |
 
 `Effects` lists what was really written: `KnowledgeWritten`, `ToolGiven`, `EntityCreated`, `HomeMoved`,
 `BedChanged` (and the observation `RegistryConfirmed`). **Kiln never takes something back to fake a rollback**: an

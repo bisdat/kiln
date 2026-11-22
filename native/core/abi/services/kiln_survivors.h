@@ -17,7 +17,9 @@
  * while it runs, then the result for 10 minutes, the last 256 kept). Kiln never takes back what a request already did:
  * a request that wrote something and then could not finish ends PARTIAL with the exact committed effects, never with a
  * rollback. A child step (a knowledge grant, an item transaction) is never cancelled: when the budget runs out while one
- * is in flight, the request drains (progress state DRAINING) until it settles, then ends with what really happened.
+ * is in flight, the request drains (progress state DRAINING) until it settles, then ends with what really happened. A
+ * request never reports "nothing written" while a child it handed over may still land: a grant whose result kiln.knowledge
+ * no longer has is read back from the roster, and one that stays unanswered 10 minutes past the budget ends INDETERMINATE.
  *
  *  RECRUIT: the survivor's unlock knowledge (a plain world Bool in the game's roster) is granted for the world, then
  *    the game's NPC registry must confirm the unlock (10 s or 180 world updates), then, with KILN_SURV_GIVE_TOOL, one
@@ -52,6 +54,7 @@ extern "C" {
 #define KILN_SURVIVORS_VERSION 1u
 #define KILN_SURVIVOR_DEADLINE_MS 30000u
 #define KILN_SURVIVOR_QUEUE_MS 5000u
+#define KILN_SURVIVOR_DRAIN_MS 600000u /* a child step in flight past the budget is waited for this long more */
 #define KILN_SURVIVOR_NAME_MAX 96u
 
 /* KilnSurvivorRequest.op */
@@ -68,6 +71,8 @@ enum {
     KILN_SURV_TIMED_OUT = 3,   /* the budget ran out before anything was written */
     KILN_SURV_PARTIAL = 4,     /* something was written (committed_effects), then it could not finish (reason) */
     KILN_SURV_WORLD_ENDED = 5, /* the world stopped; committed_effects says what was written before */
+    KILN_SURV_INDETERMINATE = 6, /* a child step was handed over and never answered within the budget and 10 minutes more:
+                                    it may still land (reason); committed_effects lists only what was seen */
 };
 /* committed_effects bits. REGISTRY_CONFIRMED is an observation, the others are writes. */
 enum {
