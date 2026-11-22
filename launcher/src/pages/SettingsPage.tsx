@@ -210,9 +210,10 @@ export default function SettingsPage() {
                   return (
                     <li key={s} className={["k-st-sec", on && "on", searching && !n && "dim", s === "advanced" && "last"].filter(Boolean).join(" ")}>
                       <Link to={`/settings/${s}`} aria-current={on ? "page" : undefined} onClick={() => setQ("")} data-section={s}
-                        aria-label={searching && n ? t("settings.nav.hits", { section: sectionTitle(s), count: n }) : sectionTitle(s)}>
+                        aria-label={searching && n ? t("settings.nav.hits", { section: sectionTitle(s), count: n }) : sectionTitle(s)}
+                        aria-describedby={line ? `k-st-line-${s}` : undefined}>
                         <span className="k-st-sec-name">{sectionTitle(s)}</span>
-                        {line && <span className="k-st-sec-line">{line}</span>}
+                        {line && <span className="k-st-sec-line" id={`k-st-line-${s}`}>{line}</span>}
                         {searching && n > 0 && <span className="k-st-count" aria-hidden>{n}</span>}
                       </Link>
                       {on && groups.length > 1 && (
