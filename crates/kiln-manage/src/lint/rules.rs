@@ -1980,6 +1980,7 @@ fn blocks(out: &mut Out, m: &LMod, code: &Code, cat: Option<&Catalog>) {
         ("windows", "window"), ("hudLines", "HUD line"), ("keyBindings", "key binding"),
         ("affixes", "affix"), ("affixPools", "affix pool"), ("rarityRolls", "rarity roll"), ("rarityUpgrades", "rarity upgrade"),
         ("buildingMaterialPools", "building material pool"),
+        ("buildingTools", "building tool"), ("terrainBrushes", "terrain brush"), ("toolMaterialPools", "tool material pool"),
     ];
     let mut known: HashMap<String, (&'static str, String, Span)> = HashMap::new();
     for f in &files {
