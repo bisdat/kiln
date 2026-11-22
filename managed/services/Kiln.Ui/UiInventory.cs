@@ -63,6 +63,10 @@ public sealed record SlotClick(SlotButton Button, SlotModifiers Modifiers, Visib
     public EntityId ItemEntity => Slot.ClientEntity;
     /// <summary>The entity whose inventory holds the slot (the player, a chest), when the game's models said.</summary>
     public EntityId Holder => Slot.Holder;
+    /// <summary>The item's rarity as the game drew the slot (<see cref="VisibleSlot.Rarity"/>). Since 0.2.0-dev.31.</summary>
+    public ItemRarity? Rarity => Slot.Rarity;
+    /// <summary>The item's level as the game drew the slot (<see cref="VisibleSlot.Level"/>). Since 0.2.0-dev.31.</summary>
+    public int Level => Slot.Level;
 
     /// <summary>
     /// Where the button went down, in the overlay's pixels: the space <see cref="UiDraw"/> draws in and
@@ -333,6 +337,7 @@ internal static unsafe class UiInventoryBridge
             new EntityId(s.ClientEntity), new EntityId(s.ServerEntity), s.ViewFlags, outer, inner, state, s.Available, null, null)
         {
             Holder = new EntityId(s.Holder), HolderSerial = s.HolderSerial, PageOrdinal = s.PageOrdinal, HolderFlags = s.HolderFlags,
+            Rarity = VisibleSlot.RarityOf(s.Available, s.Rarity), Level = VisibleSlot.LevelOf(s.Available, s.Level),
         };
     }
 

@@ -4862,7 +4862,7 @@ const _: () = {
     assert!(core::mem::offset_of!(crate::services::kiln_ui_inventory::KilnUiSlotClickFilter, button) == 4);
     assert!(core::mem::offset_of!(crate::services::kiln_ui_inventory::KilnUiSlotClickFilter, mods) == 8);
     assert!(core::mem::offset_of!(crate::services::kiln_ui_inventory::KilnUiSlotClickFilter, flags) == 12);
-    assert!(core::mem::size_of::<crate::services::kiln_ui_inventory::KilnUiSlotClick>() == 200);
+    assert!(core::mem::size_of::<crate::services::kiln_ui_inventory::KilnUiSlotClick>() == 208);
     assert!(core::mem::align_of::<crate::services::kiln_ui_inventory::KilnUiSlotClick>() == 8);
     assert!(core::mem::offset_of!(crate::services::kiln_ui_inventory::KilnUiSlotClick, size) == 0);
     assert!(core::mem::offset_of!(crate::services::kiln_ui_inventory::KilnUiSlotClick, button) == 4);
@@ -4888,7 +4888,7 @@ const _: () = {
     assert!(core::mem::offset_of!(crate::services::kiln_ui_inventory::KilnUiSlotMapping, session) == 32);
     assert!(core::mem::offset_of!(crate::services::kiln_ui_inventory::KilnUiSlotMapping, frame) == 40);
     assert!(core::mem::offset_of!(crate::services::kiln_ui_inventory::KilnUiSlotMapping, screen) == 48);
-    assert!(core::mem::size_of::<crate::services::kiln_ui_inventory::KilnUiSlotHit>() == 144);
+    assert!(core::mem::size_of::<crate::services::kiln_ui_inventory::KilnUiSlotHit>() == 152);
     assert!(core::mem::align_of::<crate::services::kiln_ui_inventory::KilnUiSlotHit>() == 8);
     assert!(core::mem::offset_of!(crate::services::kiln_ui_inventory::KilnUiSlotHit, size) == 0);
     assert!(core::mem::offset_of!(crate::services::kiln_ui_inventory::KilnUiSlotHit, ok) == 4);
@@ -5041,7 +5041,7 @@ const _: () = {
     assert!(core::mem::offset_of!(crate::services::kiln_ui_values::KilnUiRect, y) == 4);
     assert!(core::mem::offset_of!(crate::services::kiln_ui_values::KilnUiRect, width) == 8);
     assert!(core::mem::offset_of!(crate::services::kiln_ui_values::KilnUiRect, height) == 12);
-    assert!(core::mem::size_of::<crate::services::kiln_ui_values::KilnUiVisibleSlot>() == 112);
+    assert!(core::mem::size_of::<crate::services::kiln_ui_values::KilnUiVisibleSlot>() == 120);
     assert!(core::mem::align_of::<crate::services::kiln_ui_values::KilnUiVisibleSlot>() == 8);
     assert!(core::mem::offset_of!(crate::services::kiln_ui_values::KilnUiVisibleSlot, size) == 0);
     assert!(core::mem::offset_of!(crate::services::kiln_ui_values::KilnUiVisibleSlot, available) == 4);
@@ -5061,6 +5061,8 @@ const _: () = {
     assert!(core::mem::offset_of!(crate::services::kiln_ui_values::KilnUiVisibleSlot, holder_serial) == 96);
     assert!(core::mem::offset_of!(crate::services::kiln_ui_values::KilnUiVisibleSlot, page_ordinal) == 104);
     assert!(core::mem::offset_of!(crate::services::kiln_ui_values::KilnUiVisibleSlot, reserved2) == 108);
+    assert!(core::mem::offset_of!(crate::services::kiln_ui_values::KilnUiVisibleSlot, level) == 112);
+    assert!(core::mem::offset_of!(crate::services::kiln_ui_values::KilnUiVisibleSlot, rarity) == 116);
     assert!(core::mem::size_of::<crate::services::kiln_ui_values::KilnUiSlotsFrame>() == 120);
     assert!(core::mem::align_of::<crate::services::kiln_ui_values::KilnUiSlotsFrame>() == 8);
     assert!(core::mem::offset_of!(crate::services::kiln_ui_values::KilnUiSlotsFrame, size) == 0);

@@ -105,8 +105,25 @@ KilnResult KILN_CALL t_subscribe_clicks(KilnOwner owner, const KilnUiSlotClickFi
     }
 }
 
+// a hit record of a caller built before dev.31 (its slot record ended at level: 112 bytes)
+constexpr uint32_t kHitMin = offsetof(KilnUiSlotHit, slot) + offsetof(KilnUiVisibleSlot, level);
+
+KilnResult slot_at_full(KilnOwner owner, float x, float y, float tw, float th, KilnUiSlotHit* out);
+
 KilnResult KILN_CALL t_slot_at(KilnOwner owner, float x, float y, float tw, float th, KilnUiSlotHit* out) {
-    if (owner == 0 || !out || out->size < sizeof(KilnUiSlotHit)) return KILN_ERR_INVALID_ARGUMENT;
+    if (owner == 0 || !out || out->size < kHitMin) return KILN_ERR_INVALID_ARGUMENT;
+    if (out->size >= sizeof(KilnUiSlotHit)) return slot_at_full(owner, x, y, tw, th, out);
+    KilnUiSlotHit full{};  // an older, shorter record: answer into a whole one, hand back what fits
+    full.size = sizeof full;
+    const KilnResult rc = slot_at_full(owner, x, y, tw, th, &full);
+    const uint32_t size = out->size;
+    std::memcpy(out, &full, size);
+    out->size = size;
+    out->slot.size = static_cast<uint32_t>(offsetof(KilnUiVisibleSlot, level));
+    return rc;
+}
+
+KilnResult slot_at_full(KilnOwner owner, float x, float y, float tw, float th, KilnUiSlotHit* out) {
     if (!env().client_side || !env().client_side()) return KILN_ERR_UNAVAILABLE;
     if (!env().owner_alive(owner)) return KILN_ERR_REVOKED;
     const uint32_t size = out->size;

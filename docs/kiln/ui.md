@@ -372,6 +372,13 @@ has none, so a click on it says `ItemEntity` 0 with its `Item` and `Slot.Count`;
 `Slot.InventoryPage`, `Slot.SlotIndex` and `Item`. For an item the server sent (every item in a player's, a chest's or a
 station's inventory) the entity is the server's own id of it: the game creates replicated entities with the server's id
 (`docs/re/network.md`, dossier chapter 05a section 6).
+Since 0.2.0-dev.31 (mod API 0.2.14, GitHub issue 121) Kiln also says so: `VisibleSlot.ServerEntity` (and so
+`SlotClick.Slot.ServerEntity`) is that id for every slot of the local player and of the open container (a storage chest,
+the chest-style transfer screen, a factory station: the entity the screen is about), so it equals the server's
+`InventorySlot.ItemEntity` there; `HolderFlags` bit 8 marks such a holder. It is `EntityId.None` for a plain stack and for
+any other holder. `VisibleSlot.Rarity` (an `ItemRarity?`) and `Level` (also on `SlotClick`) are the item's as the game
+drew the slot, the values its tooltip shows, read on the render thread with the slot: a `MarkWhen` rule can tell a
+Legendary staff from an Uncommon one without `Items.Read`. `Rarity` is null for an empty slot.
 `Holder`, `Slot.InventoryPage` and `Slot.SlotIndex` say where it was drawn. Send the id to your server half and check
 there that the item is in the sender's inventory or a container they may use (Kiln.Items) before acting: a click is a wish,
 never authority. Kiln Auto Loot's salvage marks work this way.

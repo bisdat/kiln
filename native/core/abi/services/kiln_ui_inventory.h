@@ -29,8 +29,11 @@
  *
  * Identity. slot.client_entity is the item's pide in this game's world; 0 (KUI_CLIENT_ENTITY clear) for a plain stack,
  * which the game keeps without an item entity (materials, consumables). For an item the server replicated, that is the
- * server's entity id (createEntityWithId keeps the wire id: docs/re/network.md, chapter 05a §6); slot.server_entity
- * stays 0 here (KUI_SERVER_ENTITY clear): the managed side names it ItemEntity and the server checks it.
+ * server's entity id (createEntityWithId keeps the wire id: docs/re/network.md, chapter 05a §6). Since 0.2.0-dev.31
+ * slot.server_entity says so (KUI_SERVER_ENTITY) for the slots of a proven holder: the local player, or the container of
+ * an open chest, chest-style or factory screen (kiln_ui_values.h KilnUiVisibleSlot); the server still checks the item.
+ * slot.level / slot.rarity (KUI_ITEM_VALUES): the item's as drawn. The slot record grew to 120 bytes in dev.31:
+ * slot_at accepts a KilnUiSlotHit whose slot ends at level (the 112-byte record) and writes only that much.
  *
  * Screen view (v2, capability ui.inventory.panels: ui.slots.inspect's slot sites plus the play data's HUD screen and
  * play.target). screen_view answers, for the latest slot frame, whether it shows one of the game's inventory screens a

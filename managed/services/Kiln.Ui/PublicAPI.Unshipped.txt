@@ -1,1 +1,7 @@
 #nullable enable
+Kiln.SlotClick.Level.get -> int
+Kiln.SlotClick.Rarity.get -> Kiln.ItemRarity?
+Kiln.VisibleSlot.Level.get -> int
+Kiln.VisibleSlot.Level.init -> void
+Kiln.VisibleSlot.Rarity.get -> Kiln.ItemRarity?
+Kiln.VisibleSlot.Rarity.init -> void

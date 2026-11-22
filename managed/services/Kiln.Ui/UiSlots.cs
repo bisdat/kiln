@@ -18,8 +18,11 @@ public readonly record struct UiRect(float X, float Y, float Width, float Height
 /// <see cref="Holder"/> is the client entity whose inventory holds the page, with Kiln's lifetime serial of it in this
 /// process (<see cref="HolderSerial"/>: a destroyed and recreated holder gets a new one, never reused) and the page's
 /// position among the holder's pages; <see cref="HolderFlags"/>: 1 known, 2 the local player, 4 ordinal set, 8 proven
-/// to be the server's entity (never in this version: a holder other than the local player is not mapped to the
-/// server).</summary>
+/// to be the server's entity (since 0.2.0-dev.31: the local player, and the container of an open chest, chest-style or
+/// factory screen). <see cref="ServerEntity"/> is the item's entity in the server's world for a slot of a proven holder
+/// (since 0.2.0-dev.31), so it equals the server's <c>InventorySlot.ItemEntity</c> for the player's and an open chest's
+/// slots; <see cref="EntityId.None"/> for a plain stack (no item entity) and any other holder. <see cref="Rarity"/> and
+/// <see cref="Level"/> are the item's as the game drew the slot (since 0.2.0-dev.31).</summary>
 public sealed record VisibleSlot(uint Occurrence, EntityId InventoryPage, byte SlotIndex, ItemId Item, uint Count,
     EntityId ClientEntity, EntityId ServerEntity, uint ViewFlags, UiRect? OuterUi, UiRect? InnerUi,
     IReadOnlyList<byte> NativeState, uint Availability, UiRect? OuterPixels, UiRect? InnerPixels)
@@ -28,6 +31,21 @@ public sealed record VisibleSlot(uint Occurrence, EntityId InventoryPage, byte S
     public ulong HolderSerial { get; init; }
     public uint PageOrdinal { get; init; }
     public uint HolderFlags { get; init; }
+
+    /// <summary>The item's rarity as the game drew the slot (the value its tooltip shows), read on the render thread with the
+    /// slot: no <c>Items.Read</c> needed in a mark rule. Null for an empty slot, a rarity outside Common..Legendary, or a
+    /// Kiln without the value. Since 0.2.0-dev.31 (mod API 0.2.14).</summary>
+    public ItemRarity? Rarity { get; init; }
+
+    /// <summary>The item's level as the game drew the slot (0 for an empty slot, an item without levels, or a Kiln without
+    /// the value). Since 0.2.0-dev.31 (mod API 0.2.14).</summary>
+    public int Level { get; init; }
+
+    internal static ItemRarity? RarityOf(uint available, uint rarity) =>
+        (available & UiValuesNative.ItemValues) != 0 && rarity <= (uint)ItemRarity.Legendary ? (ItemRarity)rarity : null;
+
+    internal static int LevelOf(uint available, uint level) =>
+        (available & UiValuesNative.ItemValues) != 0 ? (int)Math.Min(level, int.MaxValue) : 0;
 }
 
 /// <summary>One completed frame's slots. <see cref="CaptureMs"/> is <c>Environment.TickCount64</c>'s clock
@@ -136,6 +154,7 @@ internal static unsafe class UiSlotsBridge
                 Px(outer), Px(inner))
             {
                 Holder = new EntityId(s.Holder), HolderSerial = s.HolderSerial, PageOrdinal = s.PageOrdinal, HolderFlags = s.HolderFlags,
+                Rarity = VisibleSlot.RarityOf(s.Available, s.Rarity), Level = VisibleSlot.LevelOf(s.Available, s.Level),
             };
         }
         var screen = f->Screen.Size != 0 ? GameScreen.From(f->Screen) : GameScreen.None;

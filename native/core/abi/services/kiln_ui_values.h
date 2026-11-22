@@ -234,19 +234,25 @@ enum KilnUiSlotAvailability {
     KUI_NATIVE_STATE = 4,
     KUI_VIEWPORT = 8,
     KUI_PIXEL_MAPPING_VERIFIED = 16,
+    KUI_ITEM_VALUES = 32, /* level and rarity are the slot's item's, read from the view the game drew it from (dev.31) */
 };
 /* KilnUiVisibleSlot.holder_flags */
 enum KilnUiHolderFlags {
     KUI_HOLDER_KNOWN = 1,          /* holder / holder_serial name the inventory's holder (from the game's UI models) */
     KUI_HOLDER_LOCAL_PLAYER = 2,   /* the holder is kiln.client's local player */
     KUI_HOLDER_ORDINAL = 4,        /* page_ordinal is set */
-    KUI_HOLDER_SERVER_PROVEN = 8,  /* the holder is proven to be the server's entity of that id: never set in v1 */
+    KUI_HOLDER_SERVER_PROVEN = 8,  /* the holder is the server's entity of that id (0.2.0-dev.31): the local player, or the
+                                    * container of an open chest, chest-style or factory screen (kiln.ui's screen_target of
+                                    * the same frame); then server_entity is set for its slots' item entities */
 };
 /* One slot the game drew in a completed UI frame (a copy). occurrence is the draw order, not an identity; a page/index
  * can appear twice in one frame (two screen regions). outer_ui / inner_ui are UI units, valid only with their
  * KUI_OUTER_RECT / KUI_INNER_RECT bit (zero, negative or non-finite geometry clears it). native_state is the slot
  * record's 16 state bytes; state[0] is only the candidate hover byte until check 05a-c5 passed. A missing identity
- * leaves usable geometry valid. */
+ * leaves usable geometry valid. server_entity (0.2.0-dev.31): the item entity again, with KUI_SERVER_ENTITY in view_flags,
+ * when the page's holder is KUI_HOLDER_SERVER_PROVEN and the view has an entity (pide): a joined client creates every
+ * replicated entity with the server's id and makes none of its own (docs/re/network.md "Client-local entity ids"), so
+ * it equals the server's InventorySlot.ItemEntity; 0 for a plain stack and for any other holder. */
 typedef struct KilnUiVisibleSlot {
     uint32_t size, available, occurrence, inventory_page, slot_index;
     uint32_t item, count, client_entity, server_entity, view_flags;
@@ -260,6 +266,11 @@ typedef struct KilnUiVisibleSlot {
     uint32_t holder, holder_flags;
     uint64_t holder_serial;
     uint32_t page_ordinal, reserved2;
+    /* 0.2.0-dev.31 (record 120 bytes; 112 before, still accepted wherever a record size is given): the slot's item level
+     * and rarity byte as the game drew them (the ItemView's ui/view.level and ui/view.rarity, the values the tooltip
+     * shows; rarity 0 Common .. 4 Legendary, other values as the game gave them). Valid only with KUI_ITEM_VALUES, which
+     * is set for a slot with an item; an empty slot has neither. */
+    uint32_t level, rarity;
 } KilnUiVisibleSlot;
 typedef struct KilnUiSlotsFrame {
     uint32_t size, ok, reason, count, local_player, reserved;

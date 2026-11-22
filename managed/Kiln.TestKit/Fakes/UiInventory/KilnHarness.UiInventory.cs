@@ -11,9 +11,18 @@ public sealed partial class KilnHarness
 }
 
 /// <summary>A slot as the game would draw it: the item, the stack, the item's entity (the server's id of it: what
-/// <c>SlotClick.ItemEntity</c> carries), the inventory that holds it, its page and index.</summary>
+/// <c>SlotClick.ItemEntity</c> carries), the inventory that holds it, its page and index; since 0.2.0-dev.31 the item's
+/// <see cref="Rarity"/> and <see cref="Level"/> as the game draws them (VisibleSlot.Rarity / Level). A slot with a Holder
+/// and an ItemEntity also carries it as VisibleSlot.ServerEntity (the fake takes every holder for the player or the open
+/// container, the two Kiln proves in a game).</summary>
 public readonly record struct FakeInventorySlot(uint Item, uint Count = 1, uint ItemEntity = 0, uint Holder = 0, uint InventoryPage = 0,
-    byte SlotIndex = 0);
+    byte SlotIndex = 0)
+{
+    /// <summary>The item's rarity as drawn (null: none). Since 0.2.0-dev.31.</summary>
+    public ItemRarity? Rarity { get; init; }
+    /// <summary>The item's level as drawn. Since 0.2.0-dev.31.</summary>
+    public int Level { get; init; }
+}
 
 /// <summary>What a <see cref="HarnessUiInventory.Click"/> did: how many handlers got it, and whether the game would not
 /// have seen the press (a handler asked to take it).</summary>
@@ -59,7 +68,10 @@ public sealed class HarnessUiInventory
         {
             lock (State.Lock)
                 return State.Slots is { } s
-                    ? s.Select(v => new FakeInventorySlot(v.Item, v.Count, v.ClientEntity, v.Holder, v.InventoryPage, (byte)v.SlotIndex)).ToArray()
+                    ? s.Select(v => new FakeInventorySlot(v.Item, v.Count, v.ClientEntity, v.Holder, v.InventoryPage, (byte)v.SlotIndex)
+                    {
+                        Rarity = VisibleSlot.RarityOf(v.Available, v.Rarity), Level = VisibleSlot.LevelOf(v.Available, v.Level),
+                    }).ToArray()
                     : [];
         }
     }
@@ -74,13 +86,22 @@ public sealed class HarnessUiInventory
         for (var i = 0; i < slots.Length; i++)
         {
             var s = slots[i];
+            var proven = s.Holder != 0 && s.ItemEntity != 0;  // the player's or the open container's (see FakeInventorySlot)
             drawn[i] = new UiValuesNative.VisibleSlot
             {
                 Size = (uint)sizeof(UiValuesNative.VisibleSlot), Available = UiValuesNative.OuterRect, Occurrence = (uint)i,
                 InventoryPage = s.InventoryPage, SlotIndex = s.SlotIndex, Item = s.Item, Count = s.Count, ClientEntity = s.ItemEntity,
                 ViewFlags = (s.ItemEntity != 0 ? 1u : 0u) | 4u, Holder = s.Holder, HolderFlags = s.Holder != 0 ? 1u : 0u,
+                Level = (uint)Math.Max(0, s.Level), Rarity = s.Rarity is { } r ? (uint)r : 0xFFu,
                 OuterUi = new UiValuesNative.Rect { X = 10 + 90 * (i % 8), Y = 20 + 90 * (i / 8), Width = 80, Height = 80 },
             };
+            if (s.Item != 0) drawn[i].Available |= UiValuesNative.ItemValues;
+            if (proven)
+            {
+                drawn[i].ServerEntity = s.ItemEntity;
+                drawn[i].ViewFlags |= UiValuesNative.ViewServerEntity;
+                drawn[i].HolderFlags |= UiValuesNative.HolderServerProven;
+            }
         }
         UiValuesNative.SlotsFrame frame = default;
         frame.Size = (uint)sizeof(UiValuesNative.SlotsFrame);

@@ -157,6 +157,11 @@ void record(FrameCollector& f, const SlotCollector& c, uintptr_t out) {
         s.count = v.count;
         s.client_entity = v.client_entity;
         s.view_flags = v.flags;
+        if (v.item != 0) {  // dev.31 (#121): the level and rarity the game draws the slot with (the tooltip's values)
+            s.level = v.level;
+            s.rarity = v.rarity;
+            s.available |= KUI_ITEM_VALUES;
+        }
         if (!f.holders_read) {
             f.holders_read = true;
             f.holders_valid = read_holders(*f.pages);  // UiApp exists only while the frame runs
@@ -203,6 +208,12 @@ void publish(FrameCollector& f, uintptr_t sys10) {
         m.frame = screen.frame;
     }
     m.capture_ms = env().tick_ms ? env().tick_ms() : 0;
+    // the open container (dev.31): kiln.ui's screen_target, published inside the chain for this frame, only on the
+    // screens it is read for (22 storage chest, 41 the chest-style transfer screen, 28 a factory station)
+    uint32_t container = 0;
+    if (m.screen.size && m.screen.ui_state == KILN_UI_STATE_PLAY &&
+        (m.screen.hud_screen == 22 || m.screen.hud_screen == 41 || m.screen.hud_screen == 28) && env().screen_target)
+        container = env().screen_target();
     const uintptr_t sys = sys10 - static_cast<uintptr_t>(g_sl.frame_arg);
     float vp[4] = {};
     if (sys10 && game_read(sys + g_sl.canvas_w, &m.canvas_width) && game_read(sys + g_sl.canvas_h, &m.canvas_height) &&
@@ -243,6 +254,15 @@ void publish(FrameCollector& f, uintptr_t sys10) {
                 if (!(s.holder_flags & KUI_HOLDER_KNOWN)) continue;
                 s.holder_serial = r.holders[s.holder].first;
                 if (now.local_player && s.holder == now.local_player) s.holder_flags |= KUI_HOLDER_LOCAL_PLAYER;
+                // dev.31 (#121): the local player and the open container are the server's entities of those ids, and
+                // so are their item entities (a joined client keeps every replicated id and makes none of its own)
+                if (s.holder && ((s.holder_flags & KUI_HOLDER_LOCAL_PLAYER) || s.holder == container)) {
+                    s.holder_flags |= KUI_HOLDER_SERVER_PROVEN;
+                    if ((s.view_flags & KUI_CLIENT_ENTITY) && s.client_entity) {
+                        s.server_entity = s.client_entity;
+                        s.view_flags |= KUI_SERVER_ENTITY;
+                    }
+                }
             }
         }
         for (auto& s : frame->slots)

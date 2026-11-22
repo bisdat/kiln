@@ -1,1 +1,5 @@
 #nullable enable
+Kiln.TestKit.FakeInventorySlot.Level.get -> int
+Kiln.TestKit.FakeInventorySlot.Level.init -> void
+Kiln.TestKit.FakeInventorySlot.Rarity.get -> Kiln.ItemRarity?
+Kiln.TestKit.FakeInventorySlot.Rarity.init -> void

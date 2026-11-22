@@ -175,6 +175,24 @@ public sealed unsafe class InventoryTests : IDisposable
     }
 
     [Fact]
+    public void A_click_carries_the_slots_rarity_level_and_server_entity()
+    {
+        // 0.2.0-dev.31 (GitHub issue 121): read with the slot as the game drew it
+        var got = new List<SlotClick>();
+        using var reg = Ui.Inventory.OnClick(new SlotClickOptions(), got.Add);
+        var s = Slot(0xAA, 950, page: 0x6000);
+        s.Available |= UiValuesNative.ItemValues;
+        s.Rarity = 3;
+        s.Level = 12;
+        s.ServerEntity = 950;
+        Deliver(FakeInventory.Subscribed[0].User, 1, 0, s);
+        var c = Assert.Single(got);
+        Assert.Equal((ItemRarity.Epic, 12, new EntityId(950)), (c.Rarity!.Value, c.Level, c.Slot.ServerEntity));
+        Deliver(FakeInventory.Subscribed[0].User, 1, 0, Slot(0xAA, 900));  // no ItemValues: an older core
+        Assert.Equal(((ItemRarity?)null, 0), (got[1].Rarity, got[1].Level));
+    }
+
+    [Fact]
     public void A_click_carries_the_press_position_in_the_overlays_pixels()
     {
         // 0.2.0-dev.30.3 (GitHub issue 107): the native record's x, y (the window's client pixels, which are the overlay's)

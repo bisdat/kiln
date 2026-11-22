@@ -42,6 +42,7 @@ pub const KUI_HOLDER_SERVER_PROVEN: i32 = 8;
 pub const KUI_INNER_RECT: i32 = 2;
 pub const KUI_INVALID_EDIT: i32 = 3;
 pub const KUI_INVENTORY_SLOT: i32 = 4;
+pub const KUI_ITEM_VALUES: i32 = 32;
 pub const KUI_LABEL: i32 = 8;
 pub const KUI_LINES_IN_GAME_TOOLTIP: i32 = 1;
 pub const KUI_LINE_AFTER_STATS: i32 = 256;
@@ -245,6 +246,8 @@ pub struct KilnUiVisibleSlot {
     pub holder_serial: u64,
     pub page_ordinal: u32,
     pub reserved2: u32,
+    pub level: u32,
+    pub rarity: u32,
 }
 
 #[repr(C)]

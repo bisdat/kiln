@@ -73,6 +73,23 @@ public sealed unsafe class UiInventoryFakeTests
     }
 
     [Fact]
+    public void AChestSlotCarriesTheItemsRarityLevelAndServerEntity()
+    {
+        using var kiln = new KilnHarness();
+        kiln.Step();
+        var clicks = new List<SlotClick>();
+        using var a = kiln.Run(() => Ui.Inventory.OnClick(new SlotClickOptions { Button = SlotButton.Right, Modifiers = SlotModifiers.Shift }, clicks.Add));
+        var staff = new FakeInventorySlot(0xCC, 1, ItemEntity: 950, Holder: 99, InventoryPage: 0x6000) { Rarity = ItemRarity.Legendary, Level = 25 };
+        kiln.UiInventory.OpenChest(new EntityId(99), staff, Wood);
+        Assert.Equal([staff, Wood], kiln.UiInventory.Drawn);
+        Assert.Equal(new FakeSlotClickResult(1, true), kiln.UiInventory.Click(0, SlotButton.Right, SlotModifiers.Shift));
+        var c = Assert.Single(clicks);
+        Assert.Equal((ItemRarity.Legendary, 25, new EntityId(950)), (c.Rarity!.Value, c.Level, c.Slot.ServerEntity));
+        var slots = kiln.Run(() => Ui.Values.Slots()).Snapshot!.Slots;
+        Assert.Equal(((ItemRarity?)null, 0, EntityId.None), (slots[1].Rarity, slots[1].Level, slots[1].ServerEntity));  // a plain stack
+    }
+
+    [Fact]
     public void AClickReachesTheMatchingHandlersWithTheItemsIdentity()
     {
         using var kiln = new KilnHarness();
