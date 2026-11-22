@@ -263,6 +263,20 @@ pub fn io_at(path: &Path, what: &str) -> impl FnOnce(std::io::Error) -> Error {
     }
 }
 
+/// A directory reparse point that needs neither Developer Mode nor the symlink privilege.
+#[cfg(all(test, windows))]
+pub(crate) fn test_junction(link: &Path, target: &Path) {
+    use std::os::windows::process::CommandExt;
+    let plain = |p: &Path| crate::winpath::strip_verbatim(p.to_str().unwrap()).into_owned();
+    let output = std::process::Command::new("cmd").args(["/D", "/V:OFF", "/C"])
+        .raw_arg(r#"mklink /J "%KILN_TEST_JUNCTION%" "%KILN_TEST_JUNCTION_TARGET%""#)
+        .env("KILN_TEST_JUNCTION", plain(link))
+        .env("KILN_TEST_JUNCTION_TARGET", plain(target))
+        .output().unwrap();
+    assert!(output.status.success(), "mklink /J {link:?} -> {target:?}: {output:?}");
+    assert!(crate::quick::import_is_link(&std::fs::symlink_metadata(link).unwrap()));
+}
+
 /// Replaces `path` atomically (contracts.md 1): `<name>.tmp` in the same folder, flushed, renamed over the target.
 pub fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
     use std::io::Write;

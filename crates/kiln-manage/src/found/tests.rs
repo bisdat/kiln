@@ -278,16 +278,28 @@ fn no_kiln_missing_and_unreadable_folders_do_not_fail() {
     let m = one(&r, "mods/Ember");
     assert_eq!((m.state, m.fix), (FoundState::Off, None), "{m:?}");
     assert!(m.reason.contains("not installed"));
-    // a folder that cannot be listed, and a link
-    #[cfg(unix)] use std::os::unix::fs::PermissionsExt;
+    // A linked package must be reported as a link even if its target would load.
     put(&g.path, "greeneye/x/mod.json", b"{}");
-    #[cfg(unix)] std::fs::set_permissions(g.path.join("greeneye"), std::fs::Permissions::from_mode(0o000)).unwrap();
-    #[cfg(unix)] std::os::unix::fs::symlink("/", g.path.join("mods/link")).unwrap();
-    let root_reads = std::fs::read_dir(g.path.join("greeneye")).is_ok(); // root reads everything
+    let link = g.path.join("mods/link");
+    let target = g.path.join("mods/Ember");
+    #[cfg(unix)] std::os::unix::fs::symlink(&target, &link).unwrap();
+    #[cfg(windows)] crate::util::test_junction(&link, &target);
+    #[cfg(unix)]
+    let root_reads = {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(g.path.join("greeneye"), std::fs::Permissions::from_mode(0o000)).unwrap();
+        std::fs::read_dir(g.path.join("greeneye")).is_ok() // root reads everything
+    };
     let r = scan(&dirs, &g, &profile(&[], true));
-    #[cfg(unix)] std::fs::set_permissions(g.path.join("greeneye"), std::fs::Permissions::from_mode(0o755)).unwrap();
-    assert!(root_reads || r.unreadable.iter().any(|u| u.path == "greeneye"), "{r:?}");
-    assert_eq!(one(&r, "mods/link").state, FoundState::CannotRun);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(g.path.join("greeneye"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(root_reads || r.unreadable.iter().any(|u| u.path == "greeneye"), "{r:?}");
+    }
+    let m = one(&r, "mods/link");
+    assert_eq!(m.state, FoundState::CannotRun);
+    assert!(m.reason.starts_with("A link."), "{m:?}");
 }
 
 #[test]
@@ -419,8 +431,16 @@ fn an_added_shroudforge_folder_stays_the_players_own_at_every_activation() {
         assert!(a.retained.is_empty(), "{a:?}");
         let notes: Vec<_> = a.warnings.iter().filter(|w| w.contains("your own folder")).collect();
         assert_eq!(notes.len(), 1, "{a:?}");
-        assert!(notes[0].starts_with("shroudforge:hoardershelper: ") && notes[0].contains("HoardersHelper"), "{notes:?}");
-        assert!(!g.path.join("mods/hoardershelper").exists(), "no second package of the same id");
+        let packages: Vec<_> = std::fs::read_dir(g.path.join("mods")).unwrap()
+            .map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(packages, [std::ffi::OsString::from("HoardersHelper")], "only the original package");
+        let names = notes[0].replace('\\', "/");
+        let names_original_folder = if g.path.join("mods/hoardershelper").is_dir() {
+            names.to_ascii_lowercase().contains("mods/hoardershelper")
+        } else {
+            names.contains("mods/HoardersHelper")
+        };
+        assert!(notes[0].starts_with("shroudforge:hoardershelper: ") && names_original_folder, "{notes:?}");
         assert!(!g.path.join("mods/HoardersHelper").join(crate::engine_mods::MARKER).exists(), "never adopted");
     }
 }

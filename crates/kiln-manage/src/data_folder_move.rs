@@ -3291,18 +3291,30 @@ mod tests {
 
     #[test]
     fn root_fields_are_rewritten_only_below_the_old_root() {
-        let old = PathBuf::from("/data/kiln");
-        let new = Path::new("/mnt/big/kiln");
-        let text = "{\n  \"id\": \"isles\",\n  \"backupDir\": \"/data/kiln/backups/servers/isles\",\n  \"stopTimeoutS\": 90\n}\n";
-        let out = rewrite_root_field(text, "backupDir", std::slice::from_ref(&old), new).unwrap();
-        assert_eq!(out, text.replace("/data/kiln/backups", "/mnt/big/kiln/backups"), "only that field, the rest byte for byte");
-        assert_eq!(rewrite_root_field(text, "backupDir", &[PathBuf::from("/data/kil")], new), None, "a name prefix is not the root");
-        assert_eq!(rewrite_root_field("{\"backupDir\": \"/srv/isles.backups\"}", "backupDir", &[old.clone()], new), None);
-        assert_eq!(rewrite_root_field("{\"backupDir\": null}", "backupDir", &[old.clone()], new), None);
-        assert_eq!(rewrite_root_field("{\"other\": 1}", "backupDir", &[old.clone()], new), None);
-        let exact = rewrite_root_field("{\"file\":\"/data/kiln\"}", "file", &[old], new).unwrap();
+        #[cfg(windows)]
+        let (old, new, partial, outside, from, to) = (
+            r"C:\Data\Kiln", r"D:\Big\Kiln", r"C:\Data\Kil", r"C:\isles.backups",
+            r"c:\data\kiln\backups\servers\isles", r"D:\Big\Kiln\backups\servers\isles",
+        );
+        #[cfg(not(windows))]
+        let (old, new, partial, outside, from, to) = (
+            "/data/kiln", "/mnt/big/kiln", "/data/kil", "/srv/isles.backups",
+            "/data/kiln/backups/servers/isles", "/mnt/big/kiln/backups/servers/isles",
+        );
+        let olds = [PathBuf::from(old)];
+        let new = Path::new(new);
+        let json_path = |p: &str| serde_json::to_string(p).unwrap();
+        let text = |path| format!("{{\n  \"id\": \"isles\",\n  \"backupDir\": {},\n  \"stopTimeoutS\": 90\n}}\n", json_path(path));
+        let input = text(from);
+        let out = rewrite_root_field(&input, "backupDir", &olds, new).unwrap();
+        assert_eq!(out, text(to), "only that field, the rest byte for byte");
+        assert_eq!(rewrite_root_field(&input, "backupDir", &[PathBuf::from(partial)], new), None, "a name prefix is not the root");
+        assert_eq!(rewrite_root_field(&text(outside), "backupDir", &olds, new), None);
+        assert_eq!(rewrite_root_field("{\"backupDir\": null}", "backupDir", &olds, new), None);
+        assert_eq!(rewrite_root_field("{\"other\": 1}", "backupDir", &olds, new), None);
+        let exact = rewrite_root_field(&format!("{{\"file\":{}}}", json_path(old)), "file", &olds, new).unwrap();
         let v: serde_json::Value = serde_json::from_str(&exact).unwrap();
-        assert_eq!(v["file"], "/mnt/big/kiln");
+        assert_eq!(v["file"], new.to_str().unwrap());
     }
 
     #[test]

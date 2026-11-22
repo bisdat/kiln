@@ -1026,13 +1026,25 @@ mod tests {
         big.extend(br#""}"#);
         std::fs::write(g.join("shroudforge/state.json"), &big).unwrap();
         assert!(hosted(&g, &view), "a 3 MiB state file");
-        // a link to the state file
-        std::fs::write(g.join("real-state.json"), APPLIED).unwrap();
         std::fs::remove_file(g.join("shroudforge/state.json")).unwrap();
-        #[cfg(unix)] std::os::unix::fs::symlink(g.join("real-state.json"), g.join("shroudforge/state.json")).unwrap();
-        assert!(hosted(&g, &view), "a linked state file");
+        #[cfg(unix)]
+        {
+            let state = g.join("shroudforge/state.json");
+            std::fs::write(g.join("real-state.json"), APPLIED).unwrap();
+            std::os::unix::fs::symlink(g.join("real-state.json"), &state).unwrap();
+            assert!(hosted(&g, &view), "a linked state file");
+            std::fs::remove_file(state).unwrap();
+        }
+        #[cfg(windows)]
+        {
+            let state = g.join("real-state");
+            std::fs::create_dir(&state).unwrap();
+            std::fs::write(state.join("state.json"), APPLIED).unwrap();
+            crate::util::test_junction(&g.join("linked-state"), &state);
+            std::fs::write(g.join(crate::shroudforge::CONFIG_FILE), br#"{"paths":{"state":"linked-state"}}"#).unwrap();
+            assert!(hosted(&g, &view), "a state file through a junction");
+        }
         // `..` in paths.state
-        std::fs::remove_file(g.join("shroudforge/state.json")).unwrap();
         std::fs::create_dir_all(g.join("sub")).unwrap();
         std::fs::create_dir_all(g.join("sfstate")).unwrap();
         std::fs::write(g.join("sfstate/state.json"), APPLIED).unwrap();
@@ -1044,39 +1056,56 @@ mod tests {
         std::fs::remove_dir_all(g).unwrap();
     }
 
-    /// Review finding 2: `paths.state` is a Windows path for the game. Under Proton `C:\sf-state` is in the prefix's
-    /// drive_c, case is ignored, and Windows drops trailing spaces of a name but keeps leading ones.
+    /// The state path resolves on the native drive on Windows and on the mapped drive under Proton.
     #[test]
     fn dropins_find_the_state_folder_with_windows_path_rules() {
-        let t = tmp("sf-winpath");
-        let g = t.join("lib/steamapps/common/Enshrouded");
-        std::fs::create_dir_all(&g).unwrap();
-        std::fs::rename(t.join("kiln"), g.join("kiln")).unwrap();
-        std::fs::create_dir_all(g.join("kiln/plugins/shroudforge")).unwrap();
-        std::fs::create_dir_all(g.join("shroudforge/config")).unwrap();
-        std::fs::write(g.join("kiln/plugins/kiln-shroudforge.dll"), b"x").unwrap();
-        std::fs::write(g.join("kiln/plugins/shroudforge/shroudforge-runtime.dll"), b"x").unwrap();
+        #[cfg(unix)]
+        let (t, g) = proton_game("sf-winpath", "Enshrouded", &[crate::game::CLIENT_EXE], &[crate::CLIENT_APP_ID]);
+        #[cfg(windows)]
+        let (t, g) = {
+            let (g, _) = sf_game("sf-winpath");
+            (g.clone(), g)
+        };
         let view = ProfileView { dropins_shroudforge: true, ..ProfileView::default() };
-        let pfx = t.join("lib/steamapps/compatdata/1203620/pfx");
-        std::fs::create_dir_all(pfx.join("dosdevices")).unwrap();
-        std::fs::create_dir_all(pfx.join("drive_c/sf-state")).unwrap();
-        #[cfg(unix)] std::os::unix::fs::symlink("../drive_c", pfx.join("dosdevices/c:")).unwrap();
-        std::fs::write(pfx.join("drive_c/sf-state/state.json"), APPLIED).unwrap();
         let config = |v: &str| std::fs::write(g.join(crate::shroudforge::CONFIG_FILE), serde_json::json!({"paths": {"state": v}}).to_string()).unwrap();
-        config(r"C:\sf-state");
-        assert!(hosted(&g, &view), "C: of the Proton prefix");
-        config(r"\\?\C:\SF-STATE");
-        assert!(hosted(&g, &view), "verbatim, another case");
+        #[cfg(unix)]
+        {
+            let state = t.join("lib/steamapps/compatdata/1203620/pfx/drive_c/sf-state");
+            std::fs::create_dir_all(&state).unwrap();
+            std::fs::write(state.join("state.json"), APPLIED).unwrap();
+            config(r"C:\sf-state");
+            assert!(hosted(&g, &view), "C: of the Proton prefix");
+            config(r"\\?\C:\SF-STATE");
+            assert!(hosted(&g, &view), "verbatim, another case");
+            config(r"D:\nowhere");
+            assert!(hosted(&g, &view), "an unmapped drive leaves the hosting decision open");
+        }
+        #[cfg(windows)]
+        {
+            let state = g.join("absolute-state");
+            std::fs::create_dir(&state).unwrap();
+            std::fs::write(state.join("state.json"), APPLIED).unwrap();
+            let absolute = state.canonicalize().unwrap();
+            let plain = crate::winpath::strip_verbatim(absolute.to_str().unwrap());
+            config(&plain);
+            assert!(hosted(&g, &view), "absolute state folder on the native drive");
+            config(&absolute.to_str().unwrap().to_ascii_uppercase());
+            assert!(hosted(&g, &view), "verbatim, another case");
+            config(g.join("missing-state").to_str().unwrap());
+            assert!(!hosted(&g, &view), "a native path with no state file");
+        }
         std::fs::create_dir_all(g.join("sfstate")).unwrap();
         std::fs::write(g.join("sfstate/state.json"), APPLIED).unwrap();
         config("SFState");
         assert!(hosted(&g, &view), "a relative folder in another case");
         config("sfstate. ");
+        #[cfg(unix)]
         assert!(hosted(&g, &view), "trailing dot and space dropped");
+        #[cfg(windows)]
+        assert_eq!(hosted(&g, &view), std::fs::File::open(g.join("sfstate. ").join("state.json")).is_ok(),
+            "a state directory with trailing dot and space follows the native file-open rules");
         config(" sfstate");
         assert!(!hosted(&g, &view), "a leading space is part of the name");
-        config(r"D:\nowhere");
-        assert!(hosted(&g, &view), "a drive the prefix does not map: open, so hosted (see the module's note)");
         std::fs::remove_dir_all(t).unwrap();
     }
 
@@ -1087,8 +1116,22 @@ mod tests {
         let (g, view) = sf_game("sf-config");
         std::fs::write(g.join("shroudforge/state.json"), APPLIED).unwrap();  // an old record in the default folder
         std::fs::create_dir_all(g.join("now")).unwrap();
-        std::fs::write(g.join("real-config.json"), br#"{"paths":{"state":"now"}}"#).unwrap();
-        #[cfg(unix)] std::os::unix::fs::symlink(g.join("real-config.json"), g.join(crate::shroudforge::CONFIG_FILE)).unwrap();
+        let contents = br#"{"paths":{"state":"now"}}"#;
+        #[cfg(unix)]
+        {
+            let real = g.join("real-config.json");
+            std::fs::write(&real, contents).unwrap();
+            std::os::unix::fs::symlink(real, g.join(crate::shroudforge::CONFIG_FILE)).unwrap();
+        }
+        #[cfg(windows)]
+        {
+            let real = g.join("real-config");
+            std::fs::create_dir(&real).unwrap();
+            std::fs::write(real.join("modloader-config.json"), contents).unwrap();
+            let config = g.join("shroudforge/config");
+            std::fs::remove_dir(&config).unwrap();
+            crate::util::test_junction(&config, &real);
+        }
         assert!(!hosted(&g, &view), "the configured folder has no record");
         std::fs::create_dir_all(g.join("mods/sfpack")).unwrap();
         std::fs::write(g.join("mods/sfpack/mod.json"), br#"{"id":"s","name":"s","version":"1.0.0"}"#).unwrap();
@@ -1176,6 +1219,7 @@ mod tests {
 
     /// A Steam library layout: `<t>/lib/steamapps/common/<folder>` with `exes`, Kiln's ShroudForge plugin and runtime,
     /// and the Proton prefix of `app` with `c:` linked to its drive_c.
+    #[cfg(unix)]
     fn proton_game(name: &str, folder: &str, exes: &[&str], apps: &[u32]) -> (PathBuf, PathBuf) {
         let t = tmp(name);
         let g = t.join("lib/steamapps/common").join(folder);
@@ -1188,7 +1232,7 @@ mod tests {
             let pfx = t.join(format!("lib/steamapps/compatdata/{app}/pfx"));
             std::fs::create_dir_all(pfx.join("dosdevices")).unwrap();
             std::fs::create_dir_all(pfx.join("drive_c")).unwrap();
-            #[cfg(unix)] std::os::unix::fs::symlink("../drive_c", pfx.join("dosdevices/c:")).unwrap();
+            std::os::unix::fs::symlink("../drive_c", pfx.join("dosdevices/c:")).unwrap();
         }
         (t, g)
     }
@@ -1197,21 +1241,35 @@ mod tests {
     /// `paths.mods` = `C:\sfmods` under Proton is in the prefix's drive_c; the old resolver fell back to `<game>/mods`.
     #[test]
     fn placement_and_hosting_resolve_shroudforge_s_mods_folder_alike() {
+        #[cfg(unix)]
         let (t, g) = proton_game("r2-mods", "Enshrouded", &[crate::game::CLIENT_EXE], &[crate::CLIENT_APP_ID]);
+        #[cfg(unix)]
         let sfmods = t.join("lib/steamapps/compatdata/1203620/pfx/drive_c/sfmods");
+        #[cfg(unix)]
+        let config_path = r"C:\sfmods".to_string();
+        #[cfg(windows)]
+        let (t, g, sfmods, config_path) = {
+            let (g, _) = sf_game("native-mods");
+            let t = g.canonicalize().unwrap();
+            let t = PathBuf::from(crate::winpath::strip_verbatim(t.to_str().unwrap()).as_ref());
+            let sfmods = t.join("sfmods");
+            let config_path = sfmods.to_str().unwrap().to_string();
+            (t, g, sfmods, config_path)
+        };
         std::fs::create_dir_all(sfmods.join("pack")).unwrap();
         std::fs::write(sfmods.join("pack/extended.mod.json"), br#"{"launcher":"SF"}"#).unwrap();
-        std::fs::write(g.join(crate::shroudforge::CONFIG_FILE), br#"{"paths":{"mods":"C:\\sfmods"}}"#).unwrap();
+        std::fs::write(g.join(crate::shroudforge::CONFIG_FILE), serde_json::json!({"paths": {"mods": config_path}}).to_string()).unwrap();
         assert_eq!(crate::shroudforge::mods_dir(&g), sfmods);
         let view = ProfileView { dropins_shroudforge: true, ..ProfileView::default() };
         let l = find(&g, Some(&view));
-        let host = l.iter().find(|l| l.via == Via::HostedShroudForge).expect("hosted for the package in C:\\sfmods");
+        let host = l.iter().find(|l| l.via == Via::HostedShroudForge).expect("hosted for the package in the configured folder");
         assert_eq!(host.root(&g), sfmods);
         std::fs::remove_dir_all(t).unwrap();
     }
 
     /// Rerun 2, finding 2: a dedicated server's folder takes the server app's prefix, not the client's. With both
     /// executables (or neither) no Steam prefix is taken: drive paths then stay unnamed and the answer is "hosted".
+    #[cfg(unix)]
     #[test]
     fn a_server_folder_takes_the_server_app_s_prefix() {
         let apps = [crate::CLIENT_APP_ID, crate::SERVER_APP_ID];
@@ -1283,11 +1341,12 @@ mod tests {
     }
 
     /// Rerun 2, finding 5: `..` relative to the game folder stops at the root of the game's drive, as on Windows.
+    #[cfg(unix)]
     #[test]
     fn dot_dot_stops_at_the_game_drive_s_root() {
         let (t, g) = proton_game("r2-dotdot", "Enshrouded", &[crate::game::CLIENT_EXE], &[crate::CLIENT_APP_ID]);
         // S: is the game folder itself
-        #[cfg(unix)] std::os::unix::fs::symlink(&g, t.join("lib/steamapps/compatdata/1203620/pfx/dosdevices/s:")).unwrap();
+        std::os::unix::fs::symlink(&g, t.join("lib/steamapps/compatdata/1203620/pfx/dosdevices/s:")).unwrap();
         std::fs::create_dir_all(t.join("lib/steamapps/common/sf-state")).unwrap();
         std::fs::write(t.join("lib/steamapps/common/sf-state/state.json"), APPLIED).unwrap();
         std::fs::write(g.join(crate::shroudforge::CONFIG_FILE), br#"{"paths":{"state":"..\\sf-state"}}"#).unwrap();
@@ -1297,6 +1356,13 @@ mod tests {
         std::fs::write(g.join("sf-state/state.json"), APPLIED).unwrap();
         assert!(hosted(&g, &view));
         std::fs::remove_dir_all(t).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn dot_dot_stops_at_the_native_drive_root() {
+        let path = crate::sf_paths::windows_folder(Path::new(r"S:\game"), r"..\..\sf-state").unwrap();
+        assert_eq!(std::path::absolute(path).unwrap(), Path::new(r"S:\sf-state"));
     }
 
     /// Rerun 2, findings 8 and 10: EML's registry (mod-loader-base/src/registry/mod.rs `load_mod_at`, manifest.rs)
@@ -1339,7 +1405,10 @@ mod tests {
         assert_eq!(n.len(), 1);
         assert_eq!((n[0].enabled, n[0].copied.clone(), n[0].not_copied.clone()), (3, vec!["a".to_string(), "b".into()], vec!["c".to_string()]));
         assert!(n[0].text.starts_with("EML's own loader (dbghelp.dll) is installed: it runs the EML mods in mods/; 1 of this profile's 3 EML mod(s) are not in mods/"), "{}", n[0].text);
+        #[cfg(unix)]
         assert!(n[0].text.contains("DLL override"));
+        #[cfg(windows)]
+        assert!(!n[0].text.contains("DLL override"), "native Windows loads the DLL without an override");
         std::fs::create_dir_all(g.join("mods/c")).unwrap();
         let m = crate::engine_mods::Marker { format: 1, kind: ModKind::Eml, id: "c".into(), version: "1.0.0".into(), hash: "h".into() };
         crate::util::write_json_atomic(&g.join("mods/c").join(crate::engine_mods::MARKER), &m).unwrap();
