@@ -3648,7 +3648,15 @@
       "now": "now",
       "notNeeded": "not needed",
       "directSlow": "The game is still starting: a first direct start makes its prefix, which can take minutes.",
-      "directSlowShort": "Preparing the prefix"
+      "directSlowShort": "Preparing the prefix",
+      "sfStartup": "Preparing ShroudForge mods for Kiln's interpreter.",
+      "sfStartupStep": "Preparing ShroudForge mods for Kiln's interpreter: {step} ({n} of {total}).",
+      "sfStartupStepOnly": "Preparing ShroudForge mods for Kiln's interpreter: {step}.",
+      "sfStepChecking": "checking the game files",
+      "sfStepMods": "running the mods",
+      "sfStepVerify": "checking the prepared game data",
+      "sfStepWrite": "writing the game data",
+      "sfStepSave": "saving the result"
     },
     "appShell": {
       "headStart": "{progress} · {step}",

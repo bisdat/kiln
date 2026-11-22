@@ -3648,7 +3648,15 @@
       "now": "jetzt",
       "notNeeded": "nicht nötig",
       "directSlow": "Das Spiel startet noch: Ein erster direkter Start legt sein Prefix an, das kann Minuten dauern.",
-      "directSlowShort": "Prefix wird vorbereitet"
+      "directSlowShort": "Prefix wird vorbereitet",
+      "sfStartup": "ShroudForge-Mods werden für Kilns Interpreter vorbereitet.",
+      "sfStartupStep": "ShroudForge-Mods werden für Kilns Interpreter vorbereitet: {step} ({n} von {total}).",
+      "sfStartupStepOnly": "ShroudForge-Mods werden für Kilns Interpreter vorbereitet: {step}.",
+      "sfStepChecking": "Spieldateien werden geprüft",
+      "sfStepMods": "Mods laufen",
+      "sfStepVerify": "vorbereitete Spieldaten werden geprüft",
+      "sfStepWrite": "Spieldaten werden geschrieben",
+      "sfStepSave": "Ergebnis wird gespeichert"
     },
     "appShell": {
       "headStart": "{progress} · {step}",

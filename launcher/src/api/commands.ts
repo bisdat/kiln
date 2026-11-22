@@ -1091,7 +1091,7 @@ export interface BootState {
 }
 /** What kiln-eml is doing before the game's window exists (kiln/state/eml.json, phase running): `launch_prestart`. */
 export interface PreStart {
-  /** starting | checking | prepare | mods | writing | saving */
+  /** starting | checking | prepare | mods | writing | saving; startup: a kiln-mode start's startup pass (`step` says where) */
   stage: string;
   label: string;
   doneBytes: number;
@@ -1102,7 +1102,12 @@ export interface PreStart {
   file?: string | null;
   /** Milliseconds since a byte was last read (while a file is being read). */
   quietMs: number;
-  /** The sentence for the launch status ("Preparing the game data for EML mods: 12.3 GiB of 48.6 GiB. ..."). */
+  /** Stage startup: checking | mods | verify | write | save, its number and how many steps there are. */
+  step?: string | null;
+  stepNumber?: number;
+  steps?: number;
+  /** The sentence for the launch status ("Preparing the game data for EML mods: 12.3 GiB of 48.6 GiB. ..."), in English:
+   *  shell/startProgress.ts `preStartLine` says a startup pass in the launcher's language. */
   message: string;
 }
 /** One step of a start (`launch_progress`, kiln_manage::start_progress): the launcher's own (`cook`, `profile`,

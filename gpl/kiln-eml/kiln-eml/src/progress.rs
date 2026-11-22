@@ -15,10 +15,14 @@ use std::sync::Mutex;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use camino::Utf8PathBuf;
-use mod_loader::lua::{Event, Sink, Stage};
+use mod_loader::lua::{
+    Event, Sink, Stage,
+    archive_work::{self, Note},
+};
 use serde::Serialize;
 
 use crate::runner::{Outcome, Phase};
+use crate::startup::Point;
 
 /// The state file is rewritten at most this often (but at every change of stage).
 const WRITE_EVERY: std::time::Duration = std::time::Duration::from_millis(250);
@@ -46,6 +50,14 @@ pub struct Live {
     /// When the run began and when this was written, in ms since 1970.
     pub started_ms: u64,
     pub updated_ms: u64,
+    /// A kiln-mode start's startup pass (stage `startup`): the step it is at (`PassStep::word`), its number and how many
+    /// there are. Absent in every other stage.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub step: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub step_number: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub steps: Option<usize>,
 }
 
 fn unix_ms() -> u64 {
@@ -193,7 +205,8 @@ impl Display {
         inner.base = Some(out.clone());
         let live = Live {
             stage: "starting", label: "Starting", done_bytes: 0, total_bytes: 0, files_done: 0, files_total: 0, file: None,
-            stage_ms: 0, quiet_ms: 0, started_ms: inner.started_ms, updated_ms: unix_ms(),
+            stage_ms: 0, quiet_ms: 0, started_ms: inner.started_ms, updated_ms: unix_ms(), step: None, step_number: None,
+            steps: None,
         };
         let json = Self::document(&inner, live);
         inner.last_write = Some(Instant::now());
@@ -206,6 +219,35 @@ impl Display {
         out.phase = Phase::Running;
         out.progress = Some(live);
         serde_json::to_string_pretty(&out).ok()
+    }
+
+    /// A kiln-mode start's startup pass (`PassSteps`): stage `startup` at `step`, `done` bytes of archive work moved in
+    /// it, for `stage_ms`. Written at most every `WRITE_EVERY`, at once when `now` (a new step).
+    pub fn pass(&self, step: PassStep, done: u64, stage_ms: u64, now: bool) {
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        if !now && inner.last_write.is_some_and(|t| t.elapsed() < WRITE_EVERY) {
+            return;
+        }
+        inner.last_write = Some(Instant::now());
+        let live = Live {
+            stage: "startup",
+            label: PASS_LABEL,
+            done_bytes: done,
+            total_bytes: 0,
+            files_done: 0,
+            files_total: 0,
+            file: None,
+            stage_ms,
+            quiet_ms: 0,
+            started_ms: inner.started_ms,
+            updated_ms: unix_ms(),
+            step: Some(step.word()),
+            step_number: Some(step.number()),
+            steps: Some(PassStep::ALL.len()),
+        };
+        let json = Self::document(&inner, live);
+        drop(inner);
+        self.write(&json);
     }
 
     fn write(&self, json: &Option<String>) {
@@ -242,6 +284,9 @@ impl Sink for Display {
             quiet_ms: e.quiet.as_millis() as u64,
             started_ms: inner.started_ms,
             updated_ms: unix_ms(),
+            step: None,
+            step_number: None,
+            steps: None,
         };
         let json = Self::document(&inner, live);
         drop(inner);
@@ -253,6 +298,195 @@ impl Sink for Display {
         // publish (`publish` in plugin.rs), with the result
         *self.window.lock().unwrap_or_else(|p| p.into_inner()) = None;
     }
+}
+
+// ---- kiln mode: the startup pass's steps ----
+
+/// The state file's `label` while a kiln-mode start's startup pass runs.
+pub const PASS_LABEL: &str = "Preparing ShroudForge mods for Kiln's interpreter";
+
+/// While a step of the startup pass moves bytes, a kiln.log line at least this often says it is still going.
+const PASS_LOG_EVERY: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// The steps of a kiln-mode start's startup pass, as the launcher's start bar shows them ("Preparing ShroudForge mods for
+/// Kiln's interpreter: checking the prepared game data (3 of 5)") and kiln.log times them. A start the startup cache
+/// serves ends after the first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PassStep {
+    /// The input witness checked again, the packages admitted, the startup cache looked up (and, first, the wait for
+    /// Kiln's interpreter's DLL step).
+    Checking,
+    /// The packages' startup code, writing into the private stage.
+    Mods,
+    /// The stage closed, flushed to the drive and checked.
+    Verifying,
+    /// The one publication.
+    Writing,
+    /// The change journal and the startup cache.
+    Saving,
+}
+
+impl PassStep {
+    pub const ALL: [PassStep; 5] = [PassStep::Checking, PassStep::Mods, PassStep::Verifying, PassStep::Writing, PassStep::Saving];
+
+    /// The state file's `step` (`schema/state-eml.schema.json`).
+    pub fn word(self) -> &'static str {
+        match self {
+            PassStep::Checking => "checking",
+            PassStep::Mods => "mods",
+            PassStep::Verifying => "verify",
+            PassStep::Writing => "write",
+            PassStep::Saving => "save",
+        }
+    }
+
+    /// For kiln.log: "checking the prepared game data".
+    pub fn label(self) -> &'static str {
+        match self {
+            PassStep::Checking => "checking the game files",
+            PassStep::Mods => "running the mods",
+            PassStep::Verifying => "checking the prepared game data",
+            PassStep::Writing => "writing the game data",
+            PassStep::Saving => "saving the result",
+        }
+    }
+
+    /// 1 to 5.
+    pub fn number(self) -> usize {
+        PassStep::ALL.iter().position(|s| *s == self).unwrap_or(0) + 1
+    }
+}
+
+struct PassState {
+    display: Option<std::sync::Arc<Display>>,
+    began: Instant,
+    step: PassStep,
+    since: Instant,
+    /// Bytes of archive work moved since the pass began, and when the step began.
+    moved: u64,
+    moved_at_step: u64,
+    last_line: Instant,
+    took: Vec<(PassStep, std::time::Duration)>,
+}
+
+impl PassState {
+    fn enter(&mut self, step: PassStep) {
+        let now = Instant::now();
+        self.took.push((self.step, now - self.since));
+        self.step = step;
+        self.since = now;
+        self.moved_at_step = self.moved;
+        self.last_line = now;
+        tracing::debug!("Kiln's ShroudForge startup pass: {} ({} of {})", step.label(), step.number(), PassStep::ALL.len());
+        self.write(true);
+    }
+
+    fn write(&self, now: bool) {
+        if let Some(display) = &self.display {
+            display.pass(self.step, self.moved - self.moved_at_step, self.since.elapsed().as_millis() as u64, now);
+        }
+    }
+
+    /// The bytes moved so far: the state file (at its own rate), and a kiln.log line when the step has been quiet in the
+    /// log for `PASS_LOG_EVERY`.
+    fn moved(&mut self, moved: u64) {
+        self.moved = moved;
+        self.write(false);
+        if self.last_line.elapsed() >= PASS_LOG_EVERY {
+            self.last_line = Instant::now();
+            tracing::info!(
+                "Kiln's ShroudForge startup pass is still {} ({} of {}): {} of the game's files read or written in {} s",
+                self.step.label(), self.step.number(), PassStep::ALL.len(), size(self.moved - self.moved_at_step),
+                self.since.elapsed().as_secs()
+            );
+        }
+    }
+}
+
+/// The one pass going on in this process (kiln-eml runs one per start). The archive work reports through a plain
+/// function (`archive_work`), which finds it here.
+static PASS: Mutex<Option<PassState>> = Mutex::new(None);
+
+fn pass_state() -> std::sync::MutexGuard<'static, Option<PassState>> {
+    PASS.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// What the archive work of the pass's thread says (`archive_work::install`).
+fn on_archive_work(note: Note) {
+    let mut guard = pass_state();
+    let Some(state) = guard.as_mut() else { return };
+    match note {
+        Note::Moved(moved) => state.moved(moved),
+        Note::Checking if state.step != PassStep::Verifying => state.enter(PassStep::Verifying),
+        Note::Publishing if state.step != PassStep::Writing => state.enter(PassStep::Writing),
+        Note::Checking | Note::Publishing => {}
+    }
+}
+
+/// The steps of one kiln-mode start's startup pass (runner.rs `run_kiln`), on the thread that runs it: the state file says
+/// `phase: running`, stage `startup` and the step as the pass goes (the launcher's start bar shows it), kiln.log gets a
+/// line every `PASS_LOG_EVERY` while a step moves bytes, and `finish` logs what each step took. No thread of its own:
+/// the pass may run while another thread's DLL initializer holds the loader lock.
+pub struct PassSteps {
+    _work: archive_work::Installed,
+}
+
+impl PassSteps {
+    /// The pass begins (step 1): `base` is the state the file carries meanwhile (the mods found).
+    pub fn begin(display: Option<std::sync::Arc<Display>>, base: &Outcome) -> Self {
+        if let Some(display) = &display {
+            display.set_base(base);
+        }
+        let now = Instant::now();
+        let state = PassState {
+            display,
+            began: now,
+            step: PassStep::Checking,
+            since: now,
+            moved: 0,
+            moved_at_step: 0,
+            last_line: now,
+            took: Vec::new(),
+        };
+        state.write(true);
+        *pass_state() = Some(state);
+        PassSteps { _work: archive_work::install(on_archive_work) }
+    }
+
+    /// A point the startup controller reached (startup.rs `Point`): the admission ends step 1, a retry runs the mods
+    /// again, the publication's return begins the last step. The archive work marks the two in between.
+    pub fn observe(&self, point: &Point<'_>) {
+        let next = match point {
+            Point::Admitted => PassStep::Mods,
+            Point::Attempt(n) if *n > 1 => PassStep::Mods,
+            Point::Published => PassStep::Saving,
+            _ => return,
+        };
+        if let Some(state) = pass_state().as_mut() {
+            state.enter(next);
+        }
+    }
+
+    /// The pass is over: the line for kiln.log with what it and each step took (None when no pass began).
+    pub fn finish(self) -> Option<String> {
+        let mut state = pass_state().take()?;
+        let now = Instant::now();
+        state.took.push((state.step, now - state.since));
+        let steps: Vec<String> = state.took.iter().map(|(s, d)| format!("{} {}", s.label(), seconds(*d))).collect();
+        Some(format!("Kiln's ShroudForge startup pass took {}: {}", seconds(now - state.began), steps.join(", ")))
+    }
+}
+
+impl Drop for PassSteps {
+    fn drop(&mut self) {
+        pass_state().take();
+    }
+}
+
+/// `0.4 s`, `12 s`.
+fn seconds(d: std::time::Duration) -> String {
+    let s = d.as_secs_f64();
+    if s < 10.0 { format!("{s:.1} s") } else { format!("{s:.0} s") }
 }
 
 #[cfg(test)]
@@ -347,6 +581,46 @@ mod tests {
         display.update(&event(Stage::Mods, 0, 0));
         assert_eq!(read()["progress"]["stage"], "mods");
         assert_eq!(std::fs::read_dir(&d).unwrap().count(), 1, "no temp file is left behind");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_kiln_mode_pass_says_its_step_in_the_state_file_and_times_each_step() {
+        // one pass per process: the runs of this crate's other tests hold the run lock while theirs goes
+        let _serial = crate::runner::RUN_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let d = dir("pass");
+        let display = std::sync::Arc::new(Display::with_window(Some(d.clone()), None));
+        let mut base = Outcome::new(Phase::Done, Vec::new());
+        base.file = Some("enshrouded".into());
+        let read = || -> serde_json::Value { serde_json::from_str(&std::fs::read_to_string(d.join("eml.json")).unwrap()).unwrap() };
+        let step = || {
+            let v = read();
+            let p = &v["progress"];
+            assert_eq!((v["phase"].as_str(), p["stage"].as_str(), p["label"].as_str(), p["steps"].as_u64()),
+                (Some("running"), Some("startup"), Some(PASS_LABEL), Some(5)), "{v}");
+            (p["step"].as_str().unwrap().to_owned(), p["stepNumber"].as_u64().unwrap())
+        };
+        let steps = PassSteps::begin(Some(display), &base);
+        assert_eq!(step(), ("checking".to_owned(), 1));
+        steps.observe(&Point::Admitted);
+        assert_eq!(step(), ("mods".to_owned(), 2));
+        // the archive work marks the next two (mod-loader-lua's PatchWriter::prepare and publish_as), and counts bytes
+        archive_work::mark(Note::Checking);
+        assert_eq!(step(), ("verify".to_owned(), 3));
+        archive_work::add(4096);
+        archive_work::mark(Note::Publishing);
+        assert_eq!(step(), ("write".to_owned(), 4));
+        steps.observe(&Point::Published);
+        assert_eq!(step(), ("save".to_owned(), 5));
+        let line = steps.finish().unwrap();
+        assert!(line.starts_with("Kiln's ShroudForge startup pass took "), "{line}");
+        for s in PassStep::ALL {
+            assert!(line.contains(s.label()), "{line}");
+        }
+        // over: the archive work reaches nothing, the file keeps its last step until the run publishes its result
+        archive_work::mark(Note::Checking);
+        assert_eq!(step(), ("save".to_owned(), 5));
+        assert!(pass_state().is_none());
         let _ = std::fs::remove_dir_all(&d);
     }
 

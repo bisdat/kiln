@@ -3460,7 +3460,15 @@
       "now": "现在",
       "notNeeded": "无需执行",
       "directSlow": "正在启动游戏。首次直接启动需创建兼容环境，可能要等几分钟。",
-      "directSlowShort": "正在准备兼容环境"
+      "directSlowShort": "正在准备兼容环境",
+      "sfStartup": "正在为 Kiln 解释器准备 ShroudForge 模组。",
+      "sfStartupStep": "正在为 Kiln 解释器准备 ShroudForge 模组：{step}（{n}/{total}）",
+      "sfStartupStepOnly": "正在为 Kiln 解释器准备 ShroudForge 模组：{step}",
+      "sfStepChecking": "检查游戏文件",
+      "sfStepMods": "运行模组",
+      "sfStepVerify": "检查准备好的游戏数据",
+      "sfStepWrite": "写入游戏数据",
+      "sfStepSave": "保存结果"
     },
     "appShell": {
       "headStart": "{progress} · {step}",

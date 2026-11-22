@@ -359,6 +359,73 @@ impl LogState {
     }
 }
 
+/// kiln-eml: the progress of a kiln-mode startup pass's archive work (copying, hashing and checking the game's files),
+/// reported by that work itself, on its own thread. The pass may run while another thread's DLL initializer holds the
+/// loader lock (kiln-eml's startup_seam.rs), so nothing here starts a thread, waits for one, takes a lock or allocates:
+/// the thread that runs the pass installs a plain function (`install`), the read and copy loops of that thread add the
+/// bytes they move (`add`), and at most every `EVERY` that function hears the total since `install` (kiln-eml: the
+/// state file the launcher shows, and a kiln.log line now and then). The start of a step is heard at once (`mark`). A
+/// thread with nothing installed pays one thread-local read per call.
+pub mod archive_work {
+    use std::{cell::Cell, marker::PhantomData, time::{Duration, Instant}};
+
+    /// How often the installed function hears of the bytes moved.
+    pub const EVERY: Duration = Duration::from_millis(250);
+
+    /// What the installed function hears.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum Note {
+        /// Bytes read or written since `install`.
+        Moved(u64),
+        /// The staged archive is closed, flushed and checked before it may be published.
+        Checking,
+        /// The checked archive is being published.
+        Publishing,
+    }
+
+    thread_local! {
+        static HOOK: Cell<Option<fn(Note)>> = const { Cell::new(None) };
+        static MOVED: Cell<u64> = const { Cell::new(0) };
+        static TOLD: Cell<Option<Instant>> = const { Cell::new(None) };
+    }
+
+    /// While it lives, this thread's archive work reports to the installed function. Not `Send`: it is this thread's.
+    pub struct Installed(PhantomData<*const ()>);
+    impl Drop for Installed {
+        fn drop(&mut self) {
+            HOOK.set(None);
+        }
+    }
+
+    /// Installs `hook` for this thread (in place of one installed before) and starts the count at zero.
+    pub fn install(hook: fn(Note)) -> Installed {
+        MOVED.set(0);
+        TOLD.set(Some(Instant::now()));
+        HOOK.set(Some(hook));
+        Installed(PhantomData)
+    }
+
+    /// `bytes` more bytes were read or written by this thread's archive work.
+    #[inline]
+    pub fn add(bytes: u64) {
+        let Some(hook) = HOOK.get() else { return };
+        let moved = MOVED.get().saturating_add(bytes);
+        MOVED.set(moved);
+        let now = Instant::now();
+        if TOLD.get().is_none_or(|t| now.duration_since(t) >= EVERY) {
+            TOLD.set(Some(now));
+            hook(Note::Moved(moved));
+        }
+    }
+
+    /// A step of the archive work begins: the installed function hears it now.
+    pub fn mark(note: Note) {
+        if let Some(hook) = HOOK.get() {
+            hook(note);
+        }
+    }
+}
+
 /// `1.5 GiB`, `312 B`.
 pub(crate) fn human(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
@@ -474,6 +541,31 @@ mod tests {
         state.look(&at(2, 10), true, 0, 0, &timing);
         assert_eq!(state.done_at_line, 10, "a new step restarts: {:?}", state.stage);
         assert_eq!(state.stage, Some((Stage::Checking, 2)));
+    }
+
+    #[test]
+    fn archive_work_reaches_the_installed_function_on_its_thread_only() {
+        use archive_work::{Note, add, install, mark};
+        thread_local! { static HEARD: std::cell::RefCell<Vec<Note>> = const { std::cell::RefCell::new(Vec::new()) }; }
+        fn hook(note: Note) {
+            HEARD.with(|h| h.borrow_mut().push(note));
+        }
+        // nothing installed: nothing heard, nothing counted
+        add(10);
+        mark(Note::Checking);
+        assert!(HEARD.with(|h| h.borrow().is_empty()));
+        {
+            let _installed = install(hook);
+            mark(Note::Checking);
+            add(5); // within the first quarter second: counted, not told yet
+            std::thread::sleep(archive_work::EVERY + Duration::from_millis(20));
+            add(7);
+            // another thread's work is not this thread's
+            std::thread::spawn(|| add(1000)).join().unwrap();
+            mark(Note::Publishing);
+        }
+        add(1); // after the guard: nothing
+        assert_eq!(HEARD.with(|h| h.borrow().clone()), [Note::Checking, Note::Moved(12), Note::Publishing]);
     }
 
     #[test]

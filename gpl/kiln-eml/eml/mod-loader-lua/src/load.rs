@@ -191,24 +191,43 @@ pub fn create_backup_with(
     // client, so say so before it starts (the run's log would otherwise be silent for as long as it takes)
     let size = |p: &Path| std::fs::metadata(p.as_std_path()).map_or(0, |m| m.len());
     let resources_bak = path.with_extension("kfc_resources.bak");
-    if bak_path.exists() {
+    // kiln-eml: a backup of this game build must describe the game's own data files, or nothing is built from it (a
+    // stale one, left by another mod loader or an earlier start, made every stage fail its read-back check). Decided
+    // before any seal is repaired or written below, so such a pair is never sealed.
+    let stale = if bak_path.exists() { stale_backup(path, bak_path) } else { None };
+    let retake = match stale {
+        Some(Stale::Refuse(why)) => anyhow::bail!(
+            "create_backup: the vanilla backup {bak_path} does not describe this game build's data files ({why}). Another mod \
+             loader or an earlier start left it, and Kiln does not build the game data from it. Verify the game files in \
+             Steam, then start through Kiln again; if this comes back, move {bak_path}, {resources_bak} and {} out of the \
+             game folder", seal_path(path)
+        ),
+        Some(Stale::Retake(why)) => {
+            warn!("The vanilla backup {bak_path} is not a backup of the game files: it was built over them ({why}), by another \
+                   mod loader or an earlier start. No loader Kiln knows claims the game files and every container they list \
+                   has its size, so a new backup is taken from them");
+            true
+        }
+        None => false,
+    };
+    if bak_path.exists() && !retake {
         info!("Checking the vanilla backup against its seal: {} read, twice", crate::progress::human(size(bak_path) + size(&resources_bak)));
     }
     // A crash can leave the old seal after both new backups were published. Only repair it when both backups
     // are byte-identical to the untouched live files; never bless a mismatching backup from a patched install.
-    if bak_path.exists() && !validate_backup(path, bak_path) && backups_equal_live(path, bak_path) {
+    if !retake && bak_path.exists() && !validate_backup(path, bak_path) && backups_equal_live(path, bak_path) {
         write_backup_seal(path, bak_path)?;
     }
     // kiln-eml: another writer replaced the whole pair after a game update and left this seal behind (an installed
     // ShroudForge's Updater does). The backups then have other lengths than the seal recorded: a damaged one keeps
     // its length and stays refused below. Such a pair is checked like an unsealed one (its version is the live
     // one, the live resource prefix equals it) and sealed again; never promoted from a patched header of this build.
-    if bak_path.exists() && !validate_backup(path, bak_path) && replaced_since_sealed(path, bak_path)
+    if !retake && bak_path.exists() && !validate_backup(path, bak_path) && replaced_since_sealed(path, bak_path)
         && KFCFile::get_version_tag(bak_path).ok() == KFCFile::get_version_tag(path).ok() && validate_unsealed(path, bak_path) {
         warn!("The vanilla backup pair was replaced since it was sealed (another loader after a game update); it matches the live resource file and is sealed again");
         write_backup_seal(path, bak_path)?;
     }
-    if bak_path.exists() && !validate_backup(path, bak_path) {
+    if !retake && bak_path.exists() && !validate_backup(path, bak_path) {
         let old = KFCFile::get_version_tag(bak_path).with_context(|| format!("create_backup: could not read backup {bak_path} as a game archive"))?;
         let current = KFCFile::get_version_tag(path).with_context(|| format!("create_backup: could not read version from {path}"))?;
         // kiln-eml: diagnose only an already refused same-version pair; retain update/recovery behavior.
@@ -222,7 +241,7 @@ pub fn create_backup_with(
             anyhow::bail!("create_backup: backup pair {bak_path} and {resources} does not match the seal Kiln recorded for the game's own files; verify the game files in Steam, then start through Kiln again");
         }
     }
-    if !bak_path.exists() || !validate_backup(path, bak_path) {
+    if retake || !bak_path.exists() || !validate_backup(path, bak_path) {
         let live = path.with_extension("kfc_resources");
         info!(
             "Backing up the vanilla game data: {} and {} ({}) are copied, then read back for the seal",
@@ -297,6 +316,13 @@ pub(crate) fn restore_backup_as(
 
     let root = path.parent().ok_or(())?;
     let stem = path.file_stem().ok_or(())?;
+    // kiln-eml: the backup goes live only when every container it lists is there at its size (the game refuses to start
+    // on a container of another size): a backup that does not describe the game's data files is never put back.
+    let base = KFCFile::from_path(bak_path, false).map_err(|_| ())?;
+    if let Err(why) = containers_hold(root, stem, &base) {
+        warn!(path = ?path, backup_path = ?bak_path, "The backup does not describe the game's data files ({why}); nothing is restored");
+        return Err(());
+    }
     // Proof is rechecked under SF's lock. Hold it through both copies AND container cleanup: SF must not append
     // new containers between reading the restored header's range and removing the old generation's extras.
     let _sf = crate::ownership::before_restore_as(root.as_std_path(), stem, mode, proof).map_err(|error| {
@@ -438,6 +464,162 @@ fn write_backup_seal(path: &Path, bak: &Path) -> anyhow::Result<()> {
     let pair = backup_seal(path, bak).with_context(|| format!("create_backup: could not read backup pair {bak} and {}", path.with_extension("kfc_resources.bak")))?;
     let bytes = serde_json::to_vec(&pair).context("create_backup: could not serialize backup seal")?;
     crate::transaction::atomic_write(seal.as_std_path(), &bytes).with_context(|| format!("create_backup: could not write backup seal {seal}"))
+}
+
+/// kiln-eml: how a working baseline's header relates to the live header of the same game build (`base_relation`). Every
+/// archive writer Kiln knows (EML's, Kiln's, the bundled mod loader's) builds a header over a baseline the same way: the baseline's
+/// containers as they are (size and content count), its contents at the same places and its resource chunks first, then
+/// only appended containers, contents and chunks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BaseRelation {
+    /// The live header is the baseline, or was built over it: the baseline is what the live game data was built from.
+    Under,
+    /// The baseline was built over the live header (and is not the same): an archive writer's output kept under the
+    /// backup's name, by another mod loader or left from an earlier start, never a backup of these game files.
+    Over,
+    /// Neither: the two describe different archives.
+    Other,
+}
+
+/// A prefix comparison cannot prove that a smaller index is a base when it merely lost entries. In particular,
+/// never replace an intact backup with a damaged live index whose container counts or resource ranges contradict it.
+fn complete_header(header: &KFCFile) -> bool {
+    let mut counts = vec![0usize; header.containers().len()];
+    for (id, entry) in header.contents().iter() {
+        let Some(container) = header.containers().get(entry.container_index) else { return false };
+        if entry.offset.checked_add(id.size() as u64).is_none_or(|end| end > container.size)
+            || header.contents().get(id).is_none_or(|found| !std::ptr::eq(found, entry)) {
+            return false;
+        }
+        counts[entry.container_index] += 1;
+    }
+    if !counts.iter().zip(header.containers()).all(|(count, container)| *count == container.count) {
+        return false;
+    }
+    let mut logical_end = 0u64;
+    for chunk in header.resource_chunks() {
+        if chunk.compressed_size > chunk.size || chunk.uncompressed_offset != logical_end
+            || chunk.offset.checked_add(chunk.size).is_none() {
+            return false;
+        }
+        let Some(end) = logical_end.checked_add(chunk.uncompressed_size) else { return false };
+        logical_end = end;
+    }
+    header.bundles_in_range() && header.resources().iter().all(|(id, entry)| {
+        entry.offset.checked_add(entry.size).is_some_and(|end| end <= logical_end)
+            && header.resources().get(id).is_some_and(|found| std::ptr::eq(found, entry))
+    })
+}
+
+/// `outer` lists everything `inner` does, as a writer building `outer` over `inner` keeps it. Only a complete inner
+/// index can be the base: otherwise a damaged subset of a genuine backup could authorize replacing that backup.
+fn built_over(outer: &KFCFile, inner: &KFCFile) -> bool {
+    outer.game_version() == inner.game_version()
+        && complete_header(inner)
+        && inner.containers().len() <= outer.containers().len()
+        && inner.containers().iter().zip(outer.containers()).all(|(a, b)| (a.size, a.count) == (b.size, b.count))
+        && inner.resource_chunks().len() <= outer.resource_chunks().len()
+        && inner.resource_chunks().iter().zip(outer.resource_chunks()).all(|(a, b)| {
+            (a.offset, a.size, a.compressed_size, a.uncompressed_offset, a.uncompressed_size)
+                == (b.offset, b.size, b.compressed_size, b.uncompressed_offset, b.uncompressed_size)
+        })
+        && inner.contents().len() <= outer.contents().len()
+        && inner.contents().iter().all(|(id, e)| outer.contents().get(id)
+            .is_some_and(|o| (o.offset, o.flags, o.container_index) == (e.offset, e.flags, e.container_index)))
+}
+
+/// kiln-eml: how the baseline header `base` relates to the live header `live` (headers only; nothing else is read).
+pub fn base_relation(base: &KFCFile, live: &KFCFile) -> BaseRelation {
+    if built_over(live, base) {
+        BaseRelation::Under
+    } else if built_over(base, live) {
+        BaseRelation::Over
+    } else {
+        BaseRelation::Other
+    }
+}
+
+/// kiln-eml: every container `header` lists is in `dir` as a regular file of exactly the size it lists (the game itself
+/// refuses to start on a container of another size). Err: the first one that is not, in words. Metadata only.
+fn containers_hold(dir: &Path, stem: &str, header: &KFCFile) -> Result<(), String> {
+    for (i, info) in header.containers().iter().enumerate() {
+        let name = format!("{stem}_{i:03}.dat");
+        let path = dir.join(&name);
+        if crate::transaction::regular(path.as_std_path()).is_err() {
+            return Err(format!("{name} is missing or not a regular file"));
+        }
+        match std::fs::metadata(&path) {
+            Ok(m) if m.len() == info.size => {}
+            Ok(m) => return Err(format!("{name} is {} bytes, the header lists {}", m.len(), info.size)),
+            Err(e) => return Err(format!("{name} cannot be read: {e}")),
+        }
+    }
+    Ok(())
+}
+
+/// kiln-eml: a stage's refusal, with what the player does when its read-back found other bytes than the working baseline
+/// lists (a baseline that no longer describes the game's data files, which its header alone cannot show: one the live
+/// header itself was built over, by a start that did not read the game's containers back). After Steam's file check
+/// `create_backup` takes such a backup for what it is. Any other error is passed on as it is.
+pub(crate) fn stage_refusal(stem: &str) -> impl FnOnce(kfc::container::KFCWriteError) -> anyhow::Error + '_ {
+    move |error| {
+        let mismatch = error.to_string().contains("staged content hash mismatch in baseline container");
+        let error = anyhow::Error::from(error);
+        if !mismatch { return error; }
+        error.context(format!(
+            "the prepared game data does not match the game's data files (the vanilla backup {stem}.kfc.bak no longer \
+             describes them: verify the game files in Steam, then start through Kiln again; if this comes back, move \
+             {stem}.kfc.bak, {stem}.kfc_resources.bak and {stem}.kfc.bak.integrity out of the game folder)"
+        ))
+    }
+}
+
+/// kiln-eml: what `create_backup` does with a backup of this game build that is not the BASE of the live game data.
+enum Stale {
+    /// Take a new backup of the live files instead (why the old one is not theirs, in words).
+    Retake(String),
+    /// Refuse the start (why, in words).
+    Refuse(String),
+}
+
+/// kiln-eml: whether the backup `bak` of the live header `path`'s game build may be built from. None: it describes the
+/// game's data files (the live header is the backup or was built over it, and every container the backup lists is there
+/// at its size), or it is of another game build or not an archive Kiln can read (`create_backup`'s other rules decide
+/// then). A backup built over the live header (an archive writer's output, kept under the backup's name) is replaced by
+/// a new backup only when no loader Kiln knows claims the live files (no ownership receipt lists the live header, no
+/// record of Kiln's bundled mod loader names it) and every container the live header lists has its size; anything
+/// else is refused. Reads both headers and the receipt (the live header is hashed only when a receipt lists one).
+fn stale_backup(path: &Path, bak: &Path) -> Option<Stale> {
+    let (Ok(base), Ok(live)) = (KFCFile::from_path(bak, false), KFCFile::from_path(path, false)) else { return None };
+    if base.game_version() != live.game_version() { return None; }
+    let (Some(root), Some(stem)) = (path.parent(), path.file_stem()) else { return None };
+    match base_relation(&base, &live) {
+        BaseRelation::Under => containers_hold(root, stem, &base).err().map(Stale::Refuse),
+        BaseRelation::Other => Some(Stale::Refuse("it lists other containers or contents than the game's header".into())),
+        BaseRelation::Over => {
+            let more = |a: usize, b: usize| a.saturating_sub(b);
+            let why = format!(
+                "it lists {} more containers, {} more contents and {} more resource chunks than the game's header",
+                more(base.containers().len(), live.containers().len()), more(base.contents().len(), live.contents().len()),
+                more(base.resource_chunks().len(), live.resource_chunks().len())
+            );
+            let std_root = root.as_std_path();
+            match crate::ownership::header_is_kilns(std_root, stem) {
+                Ok(false) => {}
+                Ok(true) => return Some(Stale::Refuse(format!("{why}, and the game's header is Kiln's own earlier output"))),
+                Err(e) => return Some(Stale::Refuse(format!("{why}, and Kiln's ownership receipt cannot be read: {e}"))),
+            }
+            match crate::ownership::hosted_shroudforge_output(std_root, stem) {
+                Ok(crate::ownership::HostedShroudForge::NotProven) => {}
+                Ok(_) => return Some(Stale::Refuse(format!("{why}, and the game's header is what Kiln's bundled mod loader prepared"))),
+                Err(e) => return Some(Stale::Refuse(format!("{why}, and the game's header cannot be checked: {e}"))),
+            }
+            match containers_hold(root, stem, &live) {
+                Ok(()) => Some(Stale::Retake(why)),
+                Err(bad) => Some(Stale::Refuse(format!("{why}, and {bad}"))),
+            }
+        }
+    }
 }
 
 fn backups_equal_live(path: &Path, bak: &Path) -> bool {
@@ -782,6 +964,116 @@ mod kiln_tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
+    // kiln-eml: a game folder of `vanilla` one-content containers, its sealed backup, and a publication of `content` over
+    // it (Kiln owns it); `max_container_size: 1` puts each content in its own container, as the client's are big.
+    fn published(vanilla: usize, content: &[&[u8]]) -> PathBuf {
+        use kfc::{container::KFCWriteOptions, guid::ContentHash};
+        let dir = PathBuf::from_path_buf(std::env::temp_dir()).unwrap().join(format!("kiln-base-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&dir).unwrap();
+        File::create(dir.join("g.kfc")).unwrap();
+        File::create(dir.join("g.kfc_resources")).unwrap();
+        let types = Rc::new(TypeRegistry::default());
+        let mut writer: crate::transaction::Writer = KFCWriter::new_with_options(&dir, "g", types.clone(), "fixture",
+            KFCWriteOptions { max_container_size: 1, ..Default::default() }).unwrap();
+        for i in 0..vanilla { let blob = format!("vanilla {i}"); writer.write_content(&ContentHash::from_data(blob.as_bytes()), blob.as_bytes()).unwrap(); }
+        writer.finalize().unwrap();
+        create_backup(dir.join("g.kfc")).unwrap();
+        let base = Rc::new(KFCFile::from_path(dir.join("g.kfc.bak"), false).unwrap());
+        let mut patch = create_writer(&dir, "g", &types, &base).unwrap();
+        for blob in content { patch.write_content(&ContentHash::from_data(blob), blob).unwrap(); }
+        patch.finalize().unwrap();
+        assert!(crate::ownership::owns_output(dir.as_std_path(), "g").unwrap());
+        dir
+    }
+    // kiln-eml: the writer's rule over two headers: the live header is the baseline or was built over it (Under), the
+    // baseline was built over the live header (Over), or neither (Other).
+    #[test]
+    fn base_relation_follows_how_a_writer_builds_over_a_baseline() {
+        let (one, other) = (published(2, &[b"one mod's content"]), published(2, &[b"another mod's content"]));
+        let header = |dir: &PathBuf, ext: &str| KFCFile::from_path(dir.join(format!("g.{ext}")), false).unwrap();
+        let (vanilla, live, foreign) = (header(&one, "kfc.bak"), header(&one, "kfc"), header(&other, "kfc"));
+        assert_eq!(base_relation(&vanilla, &live), BaseRelation::Under);
+        assert_eq!(base_relation(&vanilla, &vanilla), BaseRelation::Under, "the live header is the baseline");
+        assert_eq!(base_relation(&vanilla, &foreign), BaseRelation::Under, "the same game build's baseline");
+        assert_eq!(base_relation(&live, &vanilla), BaseRelation::Over, "a publication kept under the backup's name");
+        assert_eq!(base_relation(&live, &foreign), BaseRelation::Other, "two publications over the same baseline");
+        for dir in [one, other] { std::fs::remove_dir_all(dir).unwrap(); }
+    }
+    // kiln-eml: a backup whose containers are not all at the size it lists (here a container of the game's own that
+    // changed size) is neither built from nor restored: the start is refused with what to do, and nothing changes.
+    #[test]
+    fn a_backup_whose_containers_are_not_at_their_size_is_neither_built_from_nor_restored() {
+        let dir = published(2, &[b"content"]);
+        let kfc = dir.join("g.kfc");
+        let live = std::fs::read(&kfc).unwrap();
+        let container = dir.join("g_001.dat");
+        let mut bytes = std::fs::read(&container).unwrap();
+        bytes.push(0);
+        std::fs::write(&container, &bytes).unwrap();
+        let text = format!("{:#}", create_backup(&kfc).unwrap_err());
+        for part in ["does not describe this game build's data files", "g_001.dat is", "Verify the game files in Steam",
+            "out of the game folder"] {
+            assert!(text.contains(part), "{part:?} in {text}");
+        }
+        assert!(restore_backup(&kfc).is_err());
+        assert_eq!(std::fs::read(&kfc).unwrap(), live, "the live header stays as it is");
+        assert!(crate::ownership::owns_output(dir.as_std_path(), "g").unwrap());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+    // kiln-eml: an older EML's header-only backup (no resource backup, no seal) that is a publication built over the game
+    // files is replaced by a backup of the game files before anything is staged.
+    #[test]
+    fn a_header_only_backup_built_over_the_game_files_is_replaced() {
+        let dir = published(2, &[b"content"]);
+        let (kfc, bak) = (dir.join("g.kfc"), dir.join("g.kfc.bak"));
+        let vanilla = std::fs::read(&bak).unwrap();
+        std::fs::copy(&kfc, &bak).unwrap();
+        for name in ["g.kfc_resources.bak", "g.kfc.bak.integrity"] { std::fs::remove_file(dir.join(name)).unwrap(); }
+        // the game files are verified: the game's own header is back, Kiln's receipt no longer names it
+        std::fs::write(&kfc, &vanilla).unwrap();
+        assert!(validate_backup(&kfc, &bak), "an older EML's pair of this build passes the backup checks");
+        create_backup(&kfc).unwrap();
+        assert_eq!(std::fs::read(&bak).unwrap(), vanilla, "a backup of the game files");
+        assert!(dir.join("g.kfc_resources.bak").exists() && validate_backup(&kfc, &bak), "with its resources, sealed");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_live_header_missing_a_content_cannot_replace_a_good_backup() {
+        let dir = published(2, &[b"mod content"]);
+        let (kfc, bak) = (dir.join("g.kfc"), dir.join("g.kfc.bak"));
+        let good = std::fs::read(&bak).unwrap();
+        let resources = std::fs::read(dir.join("g.kfc_resources.bak")).unwrap();
+        let seal = std::fs::read(dir.join("g.kfc.bak.integrity")).unwrap();
+        let mut broken = KFCFile::from_path(&bak, false).unwrap();
+        let contents: std::collections::HashMap<_, _> = broken.contents().iter().skip(1)
+            .map(|(id, entry)| (*id, entry.clone())).collect();
+        broken.set_contents(contents.into());
+        let chunks = broken.resource_chunks().len() as u32;
+        KFCWriter::new_incremental(&dir, "g", Rc::new(broken), Rc::new(TypeRegistry::default()))
+            .unwrap().finalize().unwrap();
+        // The writer appends an empty resource chunk even without edits. Keep only the original chunks in this
+        // damaged index (KFCHeader's last KFCLocation, after its 16-byte prefix and 15 preceding locations).
+        let mut live = std::fs::read(&kfc).unwrap();
+        live[140..144].copy_from_slice(&chunks.to_le_bytes());
+        std::fs::write(&kfc, &live).unwrap();
+        let error = create_backup(&kfc).expect_err("a damaged live index must not replace a good backup");
+        assert!(format!("{error:#}").contains("Verify the game files in Steam"), "{error:#}");
+        assert_eq!(std::fs::read(&bak).unwrap(), good);
+        assert_eq!(std::fs::read(dir.join("g.kfc_resources.bak")).unwrap(), resources);
+        assert_eq!(std::fs::read(dir.join("g.kfc.bak.integrity")).unwrap(), seal);
+        assert_eq!(std::fs::read(&kfc).unwrap(), live);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_newly_staged_content_mismatch_does_not_blame_the_backup() {
+        let error = kfc::container::KFCWriteError::from(std::io::Error::other("staged content hash mismatch"));
+        let text = format!("{:#}", stage_refusal("g")(error));
+        assert!(text.contains("staged content hash mismatch"), "{text}");
+        assert!(!text.contains("move g.kfc.bak"), "the backup is not implicated: {text}");
+    }
+
     // kiln-eml: a game folder whose one mod patches (nothing, but the run publishes), and the run's arguments.
     fn patch_fixture() -> (PathBuf, mod_loader::ModEnvironment, crate::RunArgs) {
         let dir = fixture();
@@ -963,9 +1255,15 @@ mod kiln_tests {
         crate::cache::RACY_WINDOW_OVERRIDE.with(|w| w.set(Some(std::time::Duration::ZERO)));
         let (dir, env, args) = patch_fixture();
         const MIB: usize = 1 << 20;
+        // three containers the header lists at their sizes (each one content, a byte short of 2 MiB, then its padding)
+        for name in ["g.kfc", "g.kfc_resources"] { File::create(dir.join(name)).unwrap(); }
+        let mut vanilla: crate::transaction::Writer = KFCWriter::new_with_options(&dir, "g", Rc::new(TypeRegistry::default()), "fixture",
+            kfc::container::KFCWriteOptions { max_container_size: 1, overwrite_containers: true, truncate_containers: true, ..Default::default() }).unwrap();
         for i in 0..3 {
-            std::fs::write(dir.join(format!("g_{i:03}.dat")), vec![i as u8 + 1; 2 * MIB]).unwrap();
+            let content = vec![i as u8 + 1; 2 * MIB - 1];
+            vanilla.write_content(&kfc::guid::ContentHash::from_data(&content), &content).unwrap();
         }
+        vanilla.finalize().unwrap();
         let progress = crate::Progress::none();
 
         // no cache at all: the containers are recorded by their stamps and never read
@@ -980,12 +1278,14 @@ mod kiln_tests {
         let hit = crate::run(&env, args.clone()).unwrap();
         assert!(hit.cached && hit.fingerprint.hashed_bytes == 0, "{}", hit.fingerprint);
 
-        // a container changes (same length, last-write time put back): the patch runs again, and no container is read
+        // a container changes (same length, last-write time put back; its padding, which no content covers): the patch
+        // runs again, and no container is read
         std::thread::sleep(std::time::Duration::from_millis(30));
         let container = dir.join("g_001.dat");
         let modified = std::fs::metadata(&container).unwrap().modified().unwrap();
         let mut bytes = std::fs::read(&container).unwrap();
-        bytes[0] ^= 0x55;
+        let last = bytes.len() - 1;
+        bytes[last] ^= 0x55;
         let mut f = std::fs::OpenOptions::new().write(true).open(&container).unwrap();
         f.write_all(&bytes).unwrap();
         f.set_modified(modified).unwrap();

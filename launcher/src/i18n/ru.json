@@ -3798,7 +3798,15 @@
       "now": "сейчас",
       "notNeeded": "не нужно",
       "directSlow": "Игра ещё запускается: первый прямой запуск создаёт её префикс, это может занять несколько минут.",
-      "directSlowShort": "Готовим префикс"
+      "directSlowShort": "Готовим префикс",
+      "sfStartup": "Подготовка модов ShroudForge для интерпретатора Kiln.",
+      "sfStartupStep": "Подготовка модов ShroudForge для интерпретатора Kiln: {step} ({n} из {total}).",
+      "sfStartupStepOnly": "Подготовка модов ShroudForge для интерпретатора Kiln: {step}.",
+      "sfStepChecking": "проверка файлов игры",
+      "sfStepMods": "запуск модов",
+      "sfStepVerify": "проверка подготовленных данных игры",
+      "sfStepWrite": "запись данных игры",
+      "sfStepSave": "сохранение результата"
     },
     "appShell": {
       "headStart": "{progress} · {step}",
