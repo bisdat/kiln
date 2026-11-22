@@ -444,7 +444,10 @@ internal static class StationMenuSync
 
     private sealed record Ready(string StateId, string Session, ulong Generation, uint ContentStateId, string Container, int Menus, DateTime Since);
 
+    private static readonly TimeSpan FirstPartDeadline = TimeSpan.FromSeconds(120);
+    internal static TimeProvider ClientClock = TimeProvider.System;  // tests control elapsed time
     private static readonly object Lock = new();
+    private static long? _waitingForFirstPartSince;
     private static StagingState? _staging;
     private static Ready? _ready;              // validated, waiting for its content state
     private static string? _appliedState;      // state id of the remote collection in place
@@ -472,9 +475,18 @@ internal static class StationMenuSync
     /// <summary>A mod's own workshops list nothing until the server's first snapshot is in (tests call it directly).</summary>
     internal static void BeginHold()
     {
+        lock (Lock) _waitingForFirstPartSince = ClientClock.GetTimestamp();
         _holding = true;
         StationMenuStore.Backend.SetPending(true);
         Log(LogLevel.Info, "joined a server with station menus: own workshops wait for its snapshot");
+    }
+
+    // Called under Lock. A late part can reach OnPart before ClientTick checks the deadline.
+    private static void ExpireFirstPartWait()
+    {
+        if (_waitingForFirstPartSince is not { } since || ClientClock.GetElapsedTime(since) < FirstPartDeadline) return;
+        _waitingForFirstPartSince = null;
+        EndHold($"no station-menu snapshot part arrived within {FirstPartDeadline.TotalSeconds:0} s of joining");
     }
 
     private static void OnPart(MenuPartMsg m, NetContext ctx)
@@ -484,6 +496,8 @@ internal static class StationMenuSync
         string? refuse;
         lock (Lock)
         {
+            ExpireFirstPartWait();
+            _waitingForFirstPartSince = null;
             (done, refuse, _staging) = Accept(_staging, m, DateTime.UtcNow);
         }
         if (refuse is not null)
@@ -521,6 +535,7 @@ internal static class StationMenuSync
         var timedOut = false;
         lock (Lock)
         {
+            ExpireFirstPartWait();
             if (_staging is { } s && DateTime.UtcNow - s.Started > ReceiptDeadline)
             {
                 Log(LogLevel.Warn, $"snapshot {Short(s.StateId)}: {s.Have}/{s.Parts.Length} part(s) in {ReceiptDeadline.TotalSeconds:0} s; dropped");
@@ -582,6 +597,7 @@ internal static class StationMenuSync
         _leavePending = false;
         lock (Lock)
         {
+            _waitingForFirstPartSince = null;
             _staging = null;
             _ready = null;
         }
@@ -807,6 +823,7 @@ internal static class StationMenuSync
         }
         lock (Lock)
         {
+            _waitingForFirstPartSince = null;
             _staging = null;
             _ready = null;
         }
@@ -822,6 +839,7 @@ internal static class StationMenuSync
         TestContentReady = null;
         TestChannelOpen = false;
         _holding = false;
+        ClientClock = TimeProvider.System;
         ReceiptDeadline = DefaultReceiptDeadline;
         ContentDeadline = DefaultContentDeadline;
     }
