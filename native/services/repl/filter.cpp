@@ -253,20 +253,18 @@ void filter_after(void* p) {
 // After a fault in the step: a remapped peer's state is blanked when its machine can still be told; else the remap stops.
 void emergency(const SnapCall* c) {
     const Hot* hot = g_hot.load(std::memory_order_acquire);
-    if (!hot || !hot->remap || !hot->remap_machines || !c->result || !c->result->state) return;
+    const bool any = hot && hot->remap && hot->remap_machines;
+    if (!any) return;
+    // recheck A: a fault is a stop per the ruling (vanillaWithoutRemap applies), also when the blank below works
+    remap_set_stopped(KILN_REPL_REMAP_FAULTED);
+    if (!c->result || !c->result->state) return;
     const Registry* reg = registry_hot();
     const uintptr_t pool = *reinterpret_cast<const uintptr_t*>(c->args + kSnapPool);
     uint8_t pred = 0;
-    const int m = pool > kCtxPool ? machine_of_ctx(g_world.load(std::memory_order_relaxed), pool - kCtxPool, &pred) : -1;
-    if (m < 0 || !reg) {
-        remap_set_stopped(KILN_REPL_REMAP_FAULTED);
-        return;
-    }
-    if (!((hot->remap_machines >> m) & 1)) return;
-    if (blank_state(c->result->state, reg->count, [reg](uint32_t i) { return (reg->at[i].flags & KILN_REPL_COMPONENT_VERSIONED) != 0; }))
+    const int m = pool > kCtxPool && reg ? machine_of_ctx(g_world.load(std::memory_order_relaxed), pool - kCtxPool, &pred) : -1;
+    const FaultOutcome o = after_fault(any, m >= 0, m >= 0 && ((hot->remap_machines >> m) & 1));
+    if (o.blank && blank_state(c->result->state, reg->count, [reg](uint32_t i) { return (reg->at[i].flags & KILN_REPL_COMPONENT_VERSIONED) != 0; }))
         g_remap_counters.blanked.fetch_add(1, std::memory_order_relaxed);
-    else
-        remap_set_stopped(KILN_REPL_REMAP_FAULTED);
 }
 std::atomic<uint64_t> g_step_faults{0};
 std::atomic<uintptr_t> g_step_fault_at{0};

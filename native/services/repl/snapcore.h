@@ -129,4 +129,14 @@ inline bool blank_state(uint8_t* s, uint32_t reg_count, Versioned&& versioned) {
     return true;
 }
 
+
+// What the snapshot step does after a fault (review recheck A): a remapped peer's state is blanked when its machine is
+// known; and whenever a remapped machine exists the remap counts as stopped (a fault is a stop per the ruling, also
+// when the blank worked), so vanillaWithoutRemap applies.
+struct FaultOutcome {
+    bool blank, stop;
+};
+inline FaultOutcome after_fault(bool any_remapped, bool machine_known, bool machine_remapped) {
+    return FaultOutcome{machine_known && machine_remapped, any_remapped};
+}
 }  // namespace repl

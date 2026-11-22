@@ -181,7 +181,21 @@ void blanking() {
     CHECK(!repl::blank_state(bad.data(), 640, ver) && bad == bad0);
 }
 
+void fault_outcomes() {
+    // recheck A: a fault while a remapped machine exists always stops the remap; the state is blanked when its machine is
+    // known and remapped
+    const auto a = repl::after_fault(true, true, true);
+    CHECK(a.blank && a.stop);
+    const auto b = repl::after_fault(true, false, false);
+    CHECK(!b.blank && b.stop);
+    const auto c = repl::after_fault(true, true, false);  // another peer's state: kept, but the remap stops all the same
+    CHECK(!c.blank && c.stop);
+    const auto d = repl::after_fault(false, true, false);  // nobody is remapped: nothing to stop
+    CHECK(!d.blank && !d.stop);
+}
+
 int main() {
+    fault_outcomes();
     blanking();
     abi();
     remap();
