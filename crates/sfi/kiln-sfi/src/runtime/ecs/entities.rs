@@ -28,7 +28,7 @@ use kiln_abi::services::kiln_world::{
 };
 use kiln_abi::{KILN_ERR_BUFFER_TOO_SMALL, KILN_OK, KilnVec3};
 use mlua::{Lua, Table, Value};
-use sfi_core::bindings::runtime::{RuntimeHost, RuntimeOperation as Op};
+use sfi_core::bindings::runtime::{RuntimeHost, RuntimeOperation as Op, runtime_denial_reason};
 use sfi_core::lua::{FunctionArgs, LuaError};
 
 /// ShroudForge's texts.
@@ -79,8 +79,9 @@ impl Ecs {
     /// kiln.world's `ecs_query` for entities of the family's world that have every component of `components`
     /// (hashes): the refs in ascending entity id, or ShroudForge's provider text.
     pub fn query_refs(&self, components: &[u32]) -> Result<Vec<KilnObjectRef>, &'static str> {
-        if let Some(reason) = self.scene_error() {
-            return Err(reason);
+        // A hosted scene in transition binds no world: the provider's query fails (resolve_engine_owners.cpp:56).
+        if self.scene_transitioning() {
+            return Err(text::QUERY_FAILED);
         }
         let query = self
             .world()
@@ -179,7 +180,7 @@ pub fn query(
     host: &dyn RuntimeHost,
     args: &FunctionArgs,
 ) -> mlua::Result<Reply> {
-    if let Some(reason) = ecs.denial_reason(host, Op::EcsQuery) {
+    if let Some(reason) = runtime_denial_reason(host, Op::EcsQuery) {
         return refused(reason);
     }
     if args.is_empty() {
@@ -277,7 +278,7 @@ pub fn query_bounds(
     host: &dyn RuntimeHost,
     args: &FunctionArgs,
 ) -> mlua::Result<Reply> {
-    if let Some(reason) = ecs.denial_reason(host, Op::EcsQuery) {
+    if let Some(reason) = runtime_denial_reason(host, Op::EcsQuery) {
         return refused(reason);
     }
     if args.len() < 3 {
@@ -318,7 +319,7 @@ pub fn resolve(
     host: &dyn RuntimeHost,
     args: &FunctionArgs,
 ) -> mlua::Result<Reply> {
-    if let Some(reason) = ecs.denial_reason(host, Op::EcsResolve) {
+    if let Some(reason) = runtime_denial_reason(host, Op::EcsResolve) {
         return refused(reason);
     }
     let entity = args.get::<u32>(0)?;

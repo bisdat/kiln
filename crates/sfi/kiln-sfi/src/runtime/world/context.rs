@@ -177,8 +177,9 @@ impl WorldContext {
     /// The world ShroudForge's ECS binds now, its local authority's when there is one (1.7.9
     /// engine-context/resolve_engine_owners.cpp:65,133): on a server the server world; on a client the hosted server
     /// world while it hosts (single player included), else the client world (a joined client's replicated copies).
-    /// With that world's live session ([`Self::read_world`]'s checks), 0 outside a world. A client still
-    /// hosting a scene that cannot be bound refuses ECS access until the transition completes.
+    /// With that world's live session ([`Self::read_world`]'s checks), 0 outside a world. A hosting client whose hosted
+    /// world is not live (starting or stopping) answers the resolver's transition refusal (resolve_engine_owners.cpp:56):
+    /// the ECS is then not ready and binds no world, never the resident client world. A server never refuses here.
     pub fn ecs_world(&self) -> Result<(u32, u64), &'static str> {
         let server = KILN_WORLD_SERVER as u32;
         let hosted = self.read_world(server);

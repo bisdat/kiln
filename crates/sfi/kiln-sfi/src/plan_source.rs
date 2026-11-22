@@ -1138,7 +1138,7 @@ impl PlanSource for KilnPlanSource {
 
     /// The production registrar's list ([`crate::runtime::registrar`]) over this plan's parts: the types family
     /// when [`Self::plan`] wired `game.types` (the cross-check and `game.version` run there) and the ECS registry family
-    /// on it, the network family, the UI family, the override tracker on the plan side's
+    /// on it, the network family, the UI family, the override tracker on the active ECS
     /// world; the registrar adds the world context, the placement and patch refusals and ShroudForge's
     /// unavailable answers for every member left. Without an archive grant there is no runtime at all (the
     /// runtime-create is refused before any family runs).

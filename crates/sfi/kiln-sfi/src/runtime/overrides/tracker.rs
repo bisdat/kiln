@@ -12,9 +12,9 @@
 //! `active_keys` is per mod as there. The trackers of one mod are kept in a named registry
 //! table for that mod id, so rebuilding the mod's environment keeps them (and its ownership).
 //!
-//! What Kiln adds (tracker.lua's "Kiln:" lines): an entry remembers the nonzero live session it
-//! was bound in, and `restore` never writes into another nonzero session (non-shared: dropped
-//! without a write; shared: waits, kept). Restores only write while the read value is still the
+//! What Kiln adds (tracker.lua's "Kiln:" lines): an entry remembers the world kind and nonzero live
+//! session it was bound in, and `restore` never writes into another nonzero session or another world
+//! kind (non-shared: dropped without a write; shared: waits, kept). Restores only write while the read value is still the
 //! last applied one (ShroudForge's own rule); each target's `write` is its family's CAS.
 //!
 //! [`OverrideTrackers`] is the lifecycle's [`Cleanup`] port: on a mod's unload (after its

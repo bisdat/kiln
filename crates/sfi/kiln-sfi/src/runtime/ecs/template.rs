@@ -18,7 +18,7 @@ use crate::runtime::assets::resource::LoadedResource;
 use crate::runtime::unavailable::NO_RESOURCE_READ;
 use kiln_abi::services::kiln_assets::KilnAssetKey;
 use mlua::{Lua, Value};
-use sfi_core::bindings::runtime::{RuntimeHost, RuntimeOperation as Op};
+use sfi_core::bindings::runtime::{RuntimeHost, RuntimeOperation as Op, runtime_denial_reason};
 use sfi_core::lua::FunctionArgs;
 
 /// The reflected type of an entity's template.
@@ -44,7 +44,7 @@ pub fn get_template(
     args: &FunctionArgs,
 ) -> mlua::Result<(Value, Option<String>)> {
     let resolve = || -> Result<Value, String> {
-        if let Some(reason) = ecs.denial_reason(host, Op::EcsRead) {
+        if let Some(reason) = runtime_denial_reason(host, Op::EcsRead) {
             return Err(reason);
         }
         if !available(host, Op::EcsRead) {
