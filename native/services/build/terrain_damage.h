@@ -21,7 +21,9 @@ public:
     bool add(int64_t now,const std::array<int32_t,3>& c,uint8_t material,uint8_t increment,double seconds,uint8_t& out){
         if(now<0 || !std::isfinite(seconds) || seconds<=0 || seconds>86400)return false;
         const double ns=seconds*1e9;
-        if(ns<1 || static_cast<long double>(now)+ns>INT64_MAX)return false;
+        if(ns<1)return false;
+        const int64_t duration=static_cast<int64_t>(ns); // bounded to one day, well inside int64
+        if(now>INT64_MAX-duration)return false; // integer guard also works where long double has only 53 bits
         const auto old=get(now,c,material);
         if(!increment){out=old;return true;}
         if(cells_.size()>=65536 && cells_.find(c)==cells_.end()){
@@ -29,7 +31,7 @@ public:
             if(cells_.size()>=65536)return false;
         }
         out=static_cast<uint8_t>(std::min(255,static_cast<int>(old)+increment));
-        cells_[c]={material,out,now+static_cast<int64_t>(ns)};return true;
+        cells_[c]={material,out,now+duration};return true;
     }
 };
 }

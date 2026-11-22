@@ -133,5 +133,6 @@ int main() {
     terrain.add(100,at,2,255,10,accumulated);terrain.clear();
     check(terrain.get(101,at,2)==0,"world unload clears accumulated terrain health");
     check(!terrain.add(INT64_MAX,at,2,1,20,accumulated),"expiry overflow refuses");
+    check(!terrain.add(INT64_MAX-20,at,2,1,1e-7,accumulated),"sub-microsecond expiry overflow refuses on Windows long double");
     std::printf("block ops: %d passed, %d failed\n",total-fail,fail);return fail?1:0;
 }
