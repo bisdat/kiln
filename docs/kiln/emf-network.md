@@ -1,13 +1,13 @@
 # EMF 0.6 mod messages on Kiln
 
-`kiln-emf` supplies EMF 0.6.14's API v46 table. Mod messages are its five v27 functions: `net_channel`,
+`kiln-emf` supplies EMF 0.6.19's API v47 table. Mod messages are its five v27 functions: `net_channel`,
 `net_to_server`, `net_to_player`, `net_to_players` and `net_peer`. EMF's unmodified Lua host loads on this table,
 including `emf.net`.
 
 The wire protocol is EMF's `#!emf1` protocol in the game's text chat. A peer can run EMF itself or Kiln. There is no
 extra port and a peer does not need Kiln's network protocol. The server uses `kiln.chat`; the client hooks the game's
 chat outbox and receive function. Marked lines are consumed before chat commands or the chat display. Hello/welcome
-advertise `0.6.14-kiln` as the implementation and API 46.
+advertise `0.6.19-kiln` as the implementation and API 47.
 
 The greeting (EMF 0.6.8's timing and text): a server with a mod channel greets each new connection 10 s after it
 appears and once more 35 s later, with a chat line a game without EMF or Kiln shows ("This server runs EMF mods. Get
@@ -33,7 +33,7 @@ connection that still delivered lines while a new world runs from the new one. W
 EMF's core channel `emf/mods`, with EMF's own code (`native/plugins/emf/src/net/mods_check*.h`):
 
 - **A Kiln game that joined a server** sends the list of its running EMF mods when the server has the channel, one
-  exchange per session (while no answer comes it is sent again every 5 s: six sends at most, the first and five more): `e emf 0.6.14-kiln`, then one line per mod, `kind id version`, the kind from the mod's `mod.json`
+  exchange per session (while no answer comes it is sent again every 5 s: six sends at most, the first and five more): `e emf 0.6.19-kiln`, then one line per mod, `kind id version`, the kind from the mod's `mod.json`
   `side` (`b` both, `s` server, `l` client, `u` none). The server answers with its list. When the game lacks a mod
   the server's players must have (the server's `c` content and `b` mods, by id and version), the player gets one
   note per session ("Missing mods for this server ...: ... Install the same versions in the Kiln launcher.") and
@@ -94,12 +94,16 @@ leaves that endpoint off; host loopback still works. Client engine access requir
 copy), `[net] enabled=0` disables the remote endpoints. `[net] greet=0` disables server beacons. The beacon can be
 visible to a player without EMF, as in EMF itself.
 
-Source contract (EMF's wire protocol and mod check are unchanged from 0.6.8 to 0.6.14; kiln-emf keeps its 0.6.8 copy
+Source contract (EMF's wire protocol and mod check are unchanged from 0.6.8 to 0.6.19; kiln-emf keeps its 0.6.8 copy
 with Kiln's changes, and EMF 0.6.12 to 0.6.14's changes to its own end, such as a 60 s limit on half-received messages
 and unfinished hellos, a beacon worded for servers with content mods or a refusing check, and the game's admins in
 `EmfNetFrom.admin` with `[chat] game_admins=1`, are not in it): [EMF 0.6.8 reference](https://github.com/matenm/emf-enshrouded/blob/v0.6.8/docs/modding/reference.md),
 [public header](https://github.com/matenm/emf-enshrouded/blob/v0.6.8/sdk/include/emf/emf_api.h), and
 [MIT protocol implementation](https://github.com/matenm/emf-enshrouded/tree/v0.6.8/src/core/net).
+Upstream 0.6.14 to 0.6.19 leaves every `src/core/net` and mod-check source file unchanged. The separate
+`emf/markers` payload does grow: optional numeric JSON key `b` carries the bar when `EMF_MARKER_BAR` is set; older
+cores ignore it, and a flag without `b` is cleared. Kiln does not carry marker send/receive or bars yet, so that
+payload extension is not implemented here.
 The copied implementation is attributed in `native/plugins/emf/src/net/`; its license is `licenses/EMF-LICENSE.txt`.
 
 `native/plugins/emf/tests/run.sh` checks the frozen ABI, production adapters, upstream wire peer, binary fragments,

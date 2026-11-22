@@ -1,23 +1,26 @@
 // SPDX-License-Identifier: MIT
-// The EmfApi table, v28 to v46 (EMF 0.6.3 to 0.6.14): the 52 functions EMF appended after net_peer.
+// The EmfApi table, v28 to v47 (EMF 0.6.3 to 0.6.19): the 54 functions EMF appended after net_peer.
 //
-// kiln-emf serves the whole table (1144 bytes) so that a mod built against any EMF header up to 0.6.14 starts:
+// kiln-emf serves the whole table (1160 bytes) so that a mod built against any EMF header up to 0.6.19 starts:
 // emf::init in EMF's SDK refuses a host whose table is smaller than the mod's own, whatever the mod then calls (since
 // 0.6.10 a mod may pass a lower min_version and check has_vNN(), but the default is the header's whole table: EMF's
-// own lua 1.39, raids and villager_jobs of 0.6.14 keep it).
+// own lua 1.40 and raids of 0.6.19 keep it).
 // v41 (0.6.10) and v42 (0.6.11) added no function, only fields at the end of two structs: EmfMoveOrder.stuck_seconds
 // (and the flag EMF_MOVE_PEACEFUL_ALL) and EmfPathResult.doors. kiln-emf's version (42 since 0.2.0-dev.28) lets a mod
 // whose mod.json says "emf": 41 or 42 load; enemy_move and path_find, the functions those fields belong to, are not carried yet
 // (below): a move order of either size is refused with its `why`, and no path result is ever handed to a mod.
 // v43 (0.6.13) to v46 (0.6.14) appended seven functions, none carried yet: player_permissions (v43), break_blocks,
 // block_at and find_wall (v44), villager_move, villager_move_cancel and villager_moving (v46). v45 is the version only
-// (EmfBlockInfo.world, EMF_BREAK_WORLD): emf::has_v45() reads `version`, so kiln-emf says 46. v46 also put
+// (EmfBlockInfo.world, EMF_BREAK_WORLD): emf::has_v45() reads `version`, so kiln-emf says 47. v46 also put
 // EmfMoveOrder.hold_seconds where pad2 was and added EMF_MOVE_HOLD; a villager move is refused whatever it holds.
+//
+// v47 adds find_wall_ex (not yet) and spawn_facing (api_spawn.cpp, through kiln.spawn with spawn-time yaw).
+// EMF_BREAK_TERRAIN, EmfBlockInfo terrain facts and EMF_MARKER_BAR stay unavailable with their parent functions.
 //
 // Carried: chat_tell_ex and chat_broadcast_ex (api_game.cpp: kiln.chat's server lines are already lines without a
 // speaker), world_to_screen (kiln.render's camera, below) and on_hit (api_hits.cpp, fill_hits; since 0.2.0-dev.30.3).
 //
-// Not carried yet (48 functions): each answers as EMF's own core answers where a feature is off on a game build, so a
+// Not carried yet (49 functions): each answers as EMF's own core answers where a feature is off on a game build, so a
 // mod meets a state it already has to handle: the documented failure value, out buffers cleared, `why` filled where
 // the request has one, a request whose `size` is too small refused as EMF refuses it, and no callback ever called.
 // One log line per mod and function says so, and the status file lists the call (state/emf.json "unsupported").
@@ -377,6 +380,12 @@ uint32_t api_villager_moving(EmfWorld*, uint32_t) {
     return 0;
 }
 
+// ---------------------------------------------------------------------------------------------- v47 -------------
+bool api_find_wall_ex(EmfWorld*, const float*, const float*, uint32_t, EmfBlockInfo*) {
+    KEMF_NOT_YET("find_wall_ex");
+    return false;  // flags 0, EMF_FIND_TERRAIN and unknown flags: *out is never written
+}
+
 }  // namespace
 
 // chat_tell_ex and chat_broadcast_ex are filled by fill_game (api_game.cpp), on_hit by fill_hits (api_hits.cpp).
@@ -431,6 +440,7 @@ void fill_v40(EmfApi* t) {
     t->villager_move = &api_villager_move;  // v46
     t->villager_move_cancel = &api_villager_move_cancel;
     t->villager_moving = &api_villager_moving;
+    t->find_wall_ex = &api_find_wall_ex;  // v47; spawn_facing is filled by fill_game / fill_spawn
 }
 
 }  // namespace kemf

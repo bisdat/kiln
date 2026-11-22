@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
-// Frozen x64 slot map reviewed against EMF 0.6.14 sdk/include/emf/emf_api.h and src/core/api_sizes.h (v27: 728 bytes;
-// v40 to v42: 1088; v43: 1096; v44 and v45: 1120; v46: 1144).
+// Frozen x64 slot map reviewed against EMF 0.6.19 sdk/include/emf/emf_api.h and src/core/api_sizes.h (v27: 728 bytes;
+// v40 to v42: 1088; v43: 1096; v44 and v45: 1120; v46: 1144; v47: 1160).
 #include "emf/emf_api.h"
 #include <cstddef>
 #define SLOT(name, offset) static_assert(offsetof(EmfApi, name) == offset)
-static_assert(sizeof(EmfApi)==1144 && alignof(EmfApi)==8 && EMF_API_VERSION==46);
+static_assert(sizeof(EmfApi)==1160 && alignof(EmfApi)==8 && EMF_API_VERSION==47);
 static_assert(offsetof(EmfApi,version)==0 && offsetof(EmfApi,size)==4);
 SLOT(log, 8);
 SLOT(server_world, 16);
@@ -154,7 +154,13 @@ static_assert(offsetof(EmfApi, find_wall) + sizeof(void*) == 1120);
 SLOT(villager_move, 1120);
 SLOT(villager_move_cancel, 1128);
 SLOT(villager_moving, 1136);
-static_assert(offsetof(EmfApi, villager_moving) + sizeof(void*) == 1144 && sizeof(EmfApi) == 1144);
+static_assert(offsetof(EmfApi, villager_moving) + sizeof(void*) == 1144);
+// v47 (0.6.19): 1160 bytes, every earlier slot stays in place
+SLOT(find_wall_ex, 1144);
+SLOT(spawn_facing, 1152);
+static_assert(offsetof(EmfApi, spawn_facing) + sizeof(void*) == 1160 && sizeof(EmfApi) == 1160);
+static_assert(offsetof(EmfMarker, bar) == 76 && sizeof(EmfMarker) == 80);
+static_assert(EMF_MARKER_BAR == 0x20u && EMF_BREAK_TERRAIN == 0x8u && EMF_FIND_TERRAIN == 0x1u);
 static_assert(sizeof(EmfNetFrom) == 24 && offsetof(EmfNetFrom, account) == 8);
 static_assert(sizeof(EmfNetChannel) == 56 && offsetof(EmfNetChannel, on_server) == 32);
 static_assert(sizeof(EmfPlayerEvent) == 96 && sizeof(EmfHit) == 80 && sizeof(EmfHitRule) == 36);
@@ -165,7 +171,7 @@ static_assert(sizeof(EmfPathResult) == 32 && offsetof(EmfPathResult, length) == 
 static_assert(sizeof(EmfPathQuery) == 52 && sizeof(EmfMarker) == 80 && sizeof(EmfCanvas) == 24 && sizeof(EmfCanvasCmd) == 64);
 // v46 put EmfMoveOrder.hold_seconds where pad2 was (the struct stays 136 bytes)
 static_assert(offsetof(EmfMoveOrder, hold_seconds) == 132 && sizeof(EmfMoveOrder) == 136);
-// v44's structs (EMF's api_sizes.h at 0.6.14); v45 appended EmfBlockInfo.world (40 -> 44)
+// v44's structs (EMF's api_sizes.h at 0.6.19); v45 appended EmfBlockInfo.world (40 -> 44)
 static_assert(sizeof(EmfBreakBlocks) == 160 && offsetof(EmfBreakBlocks, radius) == 20 && offsetof(EmfBreakBlocks, damage) == 28 &&
               offsetof(EmfBreakBlocks, material_count) == 48 && offsetof(EmfBreakBlocks, materials) == 56 &&
               offsetof(EmfBreakBlocks, why) == 64);
@@ -173,4 +179,4 @@ static_assert(sizeof(EmfBreakResult) == 20 && offsetof(EmfBreakResult, dropped) 
 static_assert(sizeof(EmfBlockInfo) == 44 && offsetof(EmfBlockInfo, damage) == 24 && offsetof(EmfBlockInfo, x) == 28 &&
               offsetof(EmfBlockInfo, z) + sizeof(float) == 40 && offsetof(EmfBlockInfo, world) == 40);
 static_assert(EMF_MOVE_HOLD == 0x8u && EMF_BREAK_WORLD == 0x4u && EMF_PERM_KICK_BAN == 0x01u && EMF_PERM_RECEIVE_EXP == 0x20u);
-int main() { return EMF_API_VERSION == 46 ? 0 : 1; }
+int main() { return EMF_API_VERSION == 47 ? 0 : 1; }

@@ -630,7 +630,7 @@ static void mods_check_as_server() {
     const auto list = answers.empty() ? std::nullopt : emf::core::decode_mods(answers[0].second, &why);
     CHECK(list && list->size() == 4);
     if (list && list->size() == 4) {
-        CHECK((*list)[0].kind == 'e' && (*list)[0].id == "emf" && (*list)[0].version == "0.6.14-kiln");
+        CHECK((*list)[0].kind == 'e' && (*list)[0].id == "emf" && (*list)[0].version == "0.6.19-kiln");
         CHECK((*list)[1].kind == 'b' && (*list)[1].id == "shared" && (*list)[1].version == "1.0.0");
         CHECK((*list)[2].kind == 's' && (*list)[2].id == "srv" && (*list)[2].version == "1.2.0");
         CHECK((*list)[3].kind == 'u' && (*list)[3].id == "plain");
@@ -761,7 +761,7 @@ static void mods_check_as_client() {
     const auto mine = lists.empty() ? std::nullopt : emf::core::decode_mods(lists[0], &why);
     CHECK(mine && mine->size() == 4);
     if (mine && mine->size() == 4) {
-        CHECK((*mine)[0].kind == 'e' && (*mine)[0].id == "emf" && (*mine)[0].version == "0.6.14-kiln");
+        CHECK((*mine)[0].kind == 'e' && (*mine)[0].id == "emf" && (*mine)[0].version == "0.6.19-kiln");
         CHECK((*mine)[1].kind == 'b' && (*mine)[1].id == "shared" && (*mine)[1].version == "1.0.0");
         CHECK((*mine)[2].kind == 's' && (*mine)[2].id == "srv");
         CHECK((*mine)[3].kind == 'u' && (*mine)[3].id == "plain");

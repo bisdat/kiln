@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Host tests of kiln-emf's EmfApi v10 wheel, v18 attributes, v22-v26 logic, v28-v46 answers and v31 on_hit (src/v26_model.*, api_*.cpp
+# Host tests of kiln-emf's EmfApi v10 wheel, v18 attributes, v22-v26 logic, v28-v47 answers and v31 on_hit (src/v26_model.*, api_*.cpp
 # against fake Kiln services): no game, no Wine.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
@@ -19,6 +19,11 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -pthread \
     -o "$out/glue_test"
 "$out/glue_test" "$out"
 "$out/glue_test" "$out" no-render
+# Spawn-time yaw and component forwarding use the production adapter (no game).
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -pthread \
+    -I"$here/host" -I"$here/../include" -I"$here/../src" -I"$here/../../../core/abi" -I"$here/../../../services/players" \
+    "$here/spawn_test.cpp" "$here/../src/api_spawn.cpp" -o "$out/spawn_test"
+"$out/spawn_test"
 # v31 on_hit through the production event relay (0.2.0-dev.30.3)
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -pthread \
     -I"$here/host" -I"$here/../include" -I"$here/../src" -I"$here/../../../core/abi" -I"$here/../../../services/players" \

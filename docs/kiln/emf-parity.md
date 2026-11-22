@@ -1,7 +1,7 @@
-# EMF API parity (EmfApi v46)
+# EMF API parity (EmfApi v47)
 
 kiln-emf (`native/plugins/emf`) hands every EMF mod an `EmfApi` table built on Kiln's services. This page lists
-every function of EMF 0.6.14's C API (v46, 142 functions, `sdk/include/emf/emf_api.h`; v41, v42 and v45 added none) and every function of its Lua
+every function of EMF 0.6.19's C API (v47, 144 functions, `sdk/include/emf/emf_api.h`; v41, v42 and v45 added none) and every function of its Lua
 API (`docs/modding/lua.md`), with the Kiln service behind it, the nearest Kiln C# API, and the status.
 
 - **full**: behaves as EMF documents. **partial**: the difference is in the row. **not yet**: Kiln does not carry
@@ -11,11 +11,12 @@ API (`docs/modding/lua.md`), with the Kiln service behind it, the nearest Kiln C
 - **tested**: `probe` = the conformance probe (`mods/tests/emf-test/probe`, lab server), `host` = host test
   (`native/plugins/emf/tests/run.sh`), `client` = only a joined player can show it (client checklist in
   [emf.md](emf.md)), `lab-mod` = a shipped EMF mod uses it in the lab check (`tools/emf/lab-check.py`).
-- Counts: **76 full, 18 partial, 48 not yet out of 142.** The v27 prefix has 90 slots (75 full, 15 partial). v28 to
+- Counts: **77 full, 18 partial, 49 not yet out of 144.** The v27 prefix has 90 slots (75 full, 15 partial). v28 to
   v40 append 45: one full (`world_to_screen`), three partial (`chat_tell_ex`, `chat_broadcast_ex`, `on_hit` since
   0.2.0-dev.30.3) and 41 not yet
   ([the table below](#v28-to-v40-emf-063-to-068)). v43 to v46 append 7, all not yet
-  ([their table](#v43-to-v46-emf-0613-to-0614)). Counts are C table slots, not grouped rows or attribute constants.
+  ([their table](#v43-to-v46-emf-0613-to-0614)). v47 appends 2: one full (`spawn_facing`) and one not yet
+  (`find_wall_ex`; [v47](#v47-emf-0619)). Counts are C table slots, not grouped rows or attribute constants.
   The two attribute slots remain partial because the XP/level ids use the queued progression path below. The four
   chat line slots are partial because a plain line (no `EMF_CHAT_SYSTEM`) shows without a speaker's name on Kiln and
   under the player's own name on EMF (counted as full until 0.2.0-dev.26; the behaviour did not change). Full means
@@ -29,18 +30,20 @@ a joined player's handshake, hidden chat, taming, portraits, UI or multiplayer b
 
 ## Version negotiation
 
-One table, `version = 46`, `size = sizeof(EmfApi) = 1144`. Slots are only appended (v22 at
+One table, `version = 47`, `size = sizeof(EmfApi) = 1160`. Slots are only appended (v22 at
 byte 592, v23 616, v24 624, v25 648, v26 672, v27 688, v28 728, v29 736, v30 752, v31 776, v32 808, v33 864, v34 920,
 v35 952, v36 992, v37 1000, v38 1016, v39 1040, v40 1064; v41 and v42 appended nothing; v43 1088, v44 1096; v45
-appended nothing; v46 1120). Every earlier prefix is unchanged. A mod's `mod.json` `"emf": N` above 46 is refused
+appended nothing; v46 1120; v47 1144). Every earlier prefix is unchanged. A mod's `mod.json` `"emf": N` above 47 is refused
 ("needs EMF API vN"). Mods built with EMF's C++ SDK also check
 `api->size >= sizeof(EmfApi)` of their own header and do not start on a smaller table, whatever they then call: this
 is why Kiln serves the whole table although it does not carry every function yet. A mod built for EMF 0.6.3 or
 later, EMF's Lua host among them, did not start on Kiln's earlier 728-byte table; one built for EMF 0.6.13 or 0.6.14
 (EMF 0.6.14's Lua host 1.39, Night Raids 1.2 and Villager Jobs 1.5.2 among them) did not start on the 1088-byte v42
 table ("this mod was built for EMF API v46; the core is v42"). `emf::has_v45()` goes by the version (v45 did not grow
-the table), so the table says 46. The table is a shared, immutable prefix-compatible view; it is not shrunk for an
-older mod.
+the table), so the table says 47. The table is a shared, immutable prefix-compatible view; it is not shrunk for an
+older mod. EMF 0.6.19 SDK mods (Lua 1.40, Night Raids 1.3.0 and Beastmaster 1.19.0) need the new
+1160-byte v47 table, replacing the 1144-byte v46 table that refused them. This is ABI acceptance,
+not a gameplay check of those mods.
 Structs passed in are read up to their `size` field (EMF's `api_sizes.h` rules): an `EmfUiWidget` array is walked by
 `widget_size` (44..4096 bytes, at most 256 widgets), and a v24/v25 mod's 56-byte widgets read `icon`, `fps` and
 `height` as 0. A v36 to v46 request (`EmfRemoveBuilding`, `EmfEnemyOrder`, `EmfMoveOrder` for `enemy_move` and
@@ -198,10 +201,28 @@ lab yet.
 | EMF function (since) | On Kiln | Status | Tested |
 |---|---|---|---|
 | `player_permissions` (43) | Answer: `false` and `*perms` 0, as for an entity that is no player. The game's own permissions (`EMF_PERM_*`) are not read; EMF's own admins (`EmfNetFrom.admin`, command senders) are not affected. | not yet | host; probe (not run yet) |
-| `break_blocks` (44) | Answer: 0 with `why` "not available on Kiln yet"; no callback, nothing is broken. `EMF_BREAK_WORLD` (45) gets the same answer. A request smaller than 160 bytes, or none, is refused untouched. | not yet | host; probe (not run yet) |
+| `break_blocks` (44) | Answer: 0 with `why` "not available on this game version"; no callback, nothing is broken. `EMF_BREAK_WORLD` (45) and `EMF_BREAK_TERRAIN` (47) get the same answer. A request smaller than 160 bytes, or none, is refused untouched. | not yet | host; probe (not run yet) |
 | `block_at`, `find_wall` (44) | Answer: `false`; `*out` is not written (a v44 mod's 40-byte `EmfBlockInfo` and a v45 mod's 44-byte one alike). | not yet | host; probe (not run yet) |
 | `villager_move` (46) | Answer: 0 with `why` "not available on Kiln yet"; no callback. The same with `hold_seconds` or `EMF_MOVE_HOLD`. An order smaller than 128 bytes, or none, is refused untouched. | not yet | host; probe (not run yet) |
 | `villager_move_cancel`, `villager_moving` (46) | Answer: `false` / 0. | not yet | host; probe (not run yet) |
+
+## v47 (EMF 0.6.19)
+
+Two slots are appended: `find_wall_ex` at byte 1144 and `spawn_facing` at 1152; the table is 1160 bytes. The header is
+EMF's unchanged MIT header below Kiln's licence preface. No earlier slot or struct size changes: `EmfBlockInfo` stays
+44 bytes; `EmfMarker` stays 80 (`bar` at byte 76 replaces `pad2`).
+
+| EMF function / addition | On Kiln | Status | Tested |
+|---|---|---|---|
+| `spawn_facing` | Same as `spawn_ex`, with finite `yaw_deg` forwarded to `kiln.spawn`'s spawn-time transform (`yaw_degrees`), including extra components. No post-spawn teleport. Bad yaw, world/thread/context, component list or unavailable service: 0, under the calling function's name. | full | host; native Windows stand-in; probe (not run in game) |
+| `find_wall_ex` | Answer: `false`, `*out` untouched, with flags 0, `EMF_FIND_TERRAIN` or unknown flags alike. Logs once per mod and function and appears in `state/emf.json` `unsupported`. | not yet | host; probe (not run in game) |
+| `EMF_BREAK_TERRAIN`, terrain `EmfBlockInfo.world`, `hardness`, `health` | The v44 block family is not carried: `break_blocks` returns 0 with `why` "not available on this game version", no callback; `block_at`, `find_wall` and `find_wall_ex` return false without writing the output. Requests below 160 bytes remain untouched. | not yet (existing slots) | host; probe (not run in game) |
+| `EMF_MARKER_BAR`, `EmfMarker.bar` | Markers are not carried: `marker_set` false, `marker_send` 0; no bar is drawn or sent. | not yet (existing slots) | host; probe (not run in game) |
+
+Terrain work needs more than enabling a flag. Kiln's qualified `kiln.tools` terrain-config lookup and terrain-only
+carve kernel/dispatch hooks are useful seams. `kiln.build` also has live grid reads and exact-cell/shape writes,
+but these do not supply EMF's shipped-cell provenance, pickaxe damage/drop accounting or queued sphere-break contract.
+No terrain implementation is added by this update.
 
 ## Lua API (`emf.*`, run by EMF's `lua` mod on the C API)
 
@@ -209,7 +230,8 @@ EMF's `lua` mod is an EMF DLL mod built on the public C API only, so every Lua f
 as the C function under it does. Lua mods need EMF's `lua` mod in `emf/mods/lua/`. Unmodified Lua 1.19 (EMF 0.6.0,
 EMF's own DLL, dev.20) and Lua 1.33 (EMF 0.6.8, built from EMF's unchanged source for a lab) load on the v40 table and
 run EMF's Lua mods; their actual player-facing features still need the client checklist. Lua 1.39 (EMF 0.6.14) is
-built against the v46 header and starts only on a 1144-byte table; it has not been run on Kiln yet.
+built against the v46 header and needs at least a 1144-byte table; it has not been run on Kiln yet.
+Lua 1.40 (EMF 0.6.19) needs v47 / 1160 bytes, likewise not run in game.
 Lua 1.33 looks at the table's version and size before it uses a newer function, then at the function's answer: on
 Kiln the functions of the last rows below return what EMF's Lua guide documents for a feature that is off (`nil`,
 `false`, or `nil` and a reason).
@@ -257,6 +279,8 @@ Kiln the functions of the last rows below return what EMF's Lua guide documents 
 | `world:permissions` (1.36) | v43 `player_permissions` | not yet |
 | `emf.break_blocks`, `emf.block_at`, `emf.find_wall` (1.37; a block's `world` and the break option `world`, 1.38) | v44, v45 | not yet |
 | `emf.villager_move`, `emf.villager_move_cancel`, `emf.villager_moving` (1.39) | v46 | not yet |
+| `emf.spawn(..., components, {yaw = degrees})` (1.40) | v47 `spawn_facing` through `kiln.spawn` | full |
+| `emf.find_wall(..., {terrain = true})`, `emf.break_blocks` terrain option, marker `bar` (1.40) | v47 block and marker additions above | not yet |
 
 ## Lifetime and host checks
 
