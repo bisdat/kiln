@@ -522,8 +522,18 @@ void strings() {
     CHECK(!strings_terminated(S(kList), l));
 }
 
+void frees() {
+    CHECK(may_free(kSideServer, kSideServer));
+    CHECK(!may_free(kSideClient, kSideServer));  // a hosted world: the client world's hook, the server's Pre
+    CHECK(!may_free(kSideServer, kSideClient));
+    CHECK(may_free(kSideServer | kSideClient, kSideServer | kSideClient));
+    CHECK(!may_free(kSideServer | kSideClient, kSideServer));
+    CHECK(!may_free(kSideServer, 0));
+}
+
 int main() {
     strings();
+    frees();
     review_fixes();
     helpers();
     abi();

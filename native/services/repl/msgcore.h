@@ -237,6 +237,9 @@ struct HookEntry {
     std::atomic<uintptr_t> fault_where{0};
     std::atomic<uint32_t> bad{0};         // answers that were neither pass, drop nor a rewrite that fits
 };
+// Whether a Pre on a thread of sides 'here' may free a removed hook (recheck D): only when every side the hook runs on is
+// this thread's, so the other side's lock-free chain never calls a freed slot.
+inline bool may_free(uint8_t hook_side, uint8_t here) { return here && (hook_side & static_cast<uint8_t>(~here)) == 0; }
 struct ChainResult {
     int32_t action;   // KILN_REPL_PASS, _DROP, or _REWRITE (data holds the new bytes)
     uint32_t length;  // the message's length now
