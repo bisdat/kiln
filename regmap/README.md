@@ -67,9 +67,17 @@ game's member and type names go in `evidence` only. regmap_check.py refuses a re
 { "regmap": 1, "side": "server", "exeSha256": "f0d8...", "gameBuild": "1287369", "steamBuild": "26430253",
   "verified": true, "proof": "regmap_check.py --exe: every row resolved and type-checked against the exe's reflection",
   "layouts": { "keen::ItemInfo": "0x07009d37" },          // the reflection's layout hash of each root type
-  "rows": { "items.maxStack": "ok" },                      // ok | changed | unmapped
+  "rows": { "items.maxStack": "ok" },                      // ok | changed | unproven | unmapped
+  "reasons": { "items.comfort": "no lab round trip of it on this build yet" },   // unproven rows only, in Kiln words
   "aliases": { "renames": [], "removals": [], "suffixes": [] } }
 ```
+
+Row states: `ok` (proven on this build), `changed` (the build changed what the row maps, or a lab step disproved it: a
+Kiln update is needed), `unproven` (nothing is wrong that kilnctl can see, but the lab gave no evidence for it yet, for
+example no round-trip sample in its generation; the reason says what is missing), `unmapped` (no mapping on this build).
+Only `ok` is applied. `unproven` and `reasons` are written by `kilnctl regproof` since dev.31; kiln.content's reader
+(regmap.cpp) learns them in registry P2 (it reads ok, changed and unmapped before that, and refuses a whole record with
+any other state, so every field of that build stays off). A record with unproven rows ships only with that reader.
 
 A field is applied only on a build whose record is `verified` and lists its row `ok`; everything else is refused per
 entry with the reason, which names the field and the game build and ends "; this edit was not applied" (BRIEF 6.2:
@@ -78,12 +86,78 @@ entry with the reason, which names the field and the game build and ends "; this
 for this game build (server exe f0d824be) (no verified regmap record for it yet; a Kiln update is needed)"), so Kiln
 never writes a field it has not proven on that exact build; reads of the game's own values are not affected.
 
-A record is written by `regmap_check.py --exe <a copy of the exe> --record --side <side> --game-build <b>` (later
-`kilnctl update`) after the proof; never by hand. With `--entries` (this build's entries, made by
+A record is written by `kilnctl regproof` (and by `kilnctl update` / `kilnctl port` after the lab gate; docs/kiln/sigport.md
+"The registry proof"), never by hand. kilnctl runs `regmap_check.py --exe <the exe, read as data> --record --side <side>
+--game-build <b>` in a scratch copy of `regmap/` and `schema/` for the candidate, then the proof below, and marks the
+record `verified` only when every step of it ran green. With `--entries` (this build's entries, made by
 `regmap_entries.py --exe <copy> --out <file>`), `--ids-in` (the previous build's id table) and `--ids-out` it also computes
 the alias deltas below; the entries file and the id tables hold the game's names and stay outside the repository (a
 build folder; at run time kiln.content keeps the id table of the running build in its own data folder). Without
 `--entries` the previous record's aliases are carried as they are.
+
+**Id tables kept per build.** kilnctl keeps one id table per game build in a maintainer folder, `$KILN_REGMAP_IDS`
+(default `~/.local/state/kiln/regmap-ids/<side>/ids-<side>-<exe sha256>.json`, beside each proven build's values export
+`values-<side>-<exe sha256>.json`), harvests the tables kiln.content wrote into a lab's or instance's data folder
+(`<game>/kiln/data/content/registry/ids-<side>-<exe sha256>.json`) and deploys the new build's table there. The kept table
+is regmap_check.py's (its pins applied) plus kiln.content's entries regmap_check.py does not cover (loot entries, keyed
+`#<id>`; input categories). Only a verified proof keeps its tables and export, and a kept one is never overwritten;
+tables harvested from data folders are kept apart, under `<side>/harvested/`. kilnctl refuses a maintainer or output
+folder inside a Kiln tree: tables, entries and values hold the game's names and never go into the repository.
+
+## The proof (`kilnctl regproof`)
+
+1. **Reflection diff**: the old and new exe's reflection (`tools/kfc/kfc.py --exe <the exe, read as data> types --closure <root types>`),
+   per row the members its paths walk, the leaf types and the enum values it maps. Same, carried (offsets moved, the enum
+   gained values) or new (resolves only on the new build) rows go on; a changed row is reviewed by a human, with a rename
+   or move proposal where one fits (`--accept <registry.field>` after the review).
+2. **Formulas**: kilnctl computes gear.power and gear.armor itself (the same numbers as gear.cpp and GearMath) over the
+   lab's raw member values, with the build's gear constants.
+3. **Round trip** in the lab, live fields in a live generation and boot fields in a boot generation (file below).
+4. **Values diff** of the old and new build's exports, with each base's origin (file below); never assumed vanilla.
+5. **Aliases**: ids never move, removals are recorded and never reused, pins hold, kiln.content's table agrees.
+
+A row is `ok` when every step proved it, `unproven` when only lab evidence is missing, `changed` otherwise. The lab writes
+its files into `<game>/kiln/data/content/registry/proof/`; kilnctl finds them (and kiln.content's id tables) by content.
+Both formats are format 1; kilnctl refuses another kind or format.
+
+`regmapDigest` ties a lab file to the mapping the run used: sha256 (lower-case hex) over `<file name>\n<sha256 of its
+bytes>\n` for each `regmap/common/*.json` of the game's Kiln folder, in name order (build records are left out: they are
+what the proof writes). kilnctl sets aside every suite whose digest is not the tree's, refuses a new build's values export
+of another mapping, and with an instance refuses to judge a tree whose regmap/common differs from the deployed
+`<game>/kiln/regmap/common`. The lab gate's copy starts with an empty `content/registry/proof/`.
+
+`registry-roundtrip`, one file per side and generation:
+```jsonc
+{ "format": 1, "kind": "registry-roundtrip", "side": "server", "exeSha256": "<sha256>", "generation": "live",  // live | boot
+  "regmapDigest": "<sha256>",                                        // the regmap/common the run used (below)
+  "constants": { "gear.seed": 10, "gear.creep": 0.15, "gear.armorOffset": 23, "gear.armorGradient": 15 },
+  "samples": [ { "field": "items.maxStack", "entry": "game:...", "element": null,     // element: a list element's index
+                 "read": 20, "probe": 21, "readBack": 21,                            // through the schema
+                 "rawBefore": [20], "rawAfter": [21],                                // each row path, through reflection
+                 "reverted": true, "bytesBefore": "<sha256>", "bytesAfter": "<sha256>", "error": null } ] }
+```
+Raw values: the number of an int, float or bool member (a bool may be 0/1), a time member's nanoseconds, an enum's game
+name, a bitmask's list of game names, an optional enum's [switch, name]. A probe must differ from the value before; a
+read-only field is read, never written; the bytes are the entry's resource before the write and after the revert.
+
+`registry-values`, one file per side and build: every entry of every registry read through the schema, with the base as
+state/registry.json names it:
+```jsonc
+{ "format": 1, "kind": "registry-values", "side": "server", "exeSha256": "<sha256>", "gameBuild": "1287369",
+  "regmapDigest": "<sha256>",
+  "base": { "origin": "live", "writer": "none" },                    // + "token" when the archive writer has one
+  "registries": { "items": { "game:...": { "maxStack": 20, "power": 31 } } } }
+```
+An export whose base origin is empty, `none` or `unknown`, or whose writer is empty or `unknown`, is refused (writer `none`
+is the game's own data, as shipped).
+
+**The old build** is the newest cached exe whose build has a verified regmap record (the instance's `kiln/regmap` or the
+tree), not sigport's baseline. Its record, from the tree or else the instance (marked there and not committed yet),
+carries the removal history and the pins: the candidate must carry every earlier removal and never give such an id
+again, and keep every earlier pin or retire its id. Without that record the proof blocks; `--first-build` waives it only
+where the side has no proven build yet. A row regmap/common marks unproven stays unproven with its reason whatever the lab
+shows: a round trip proves the mapping, not when the game reads the value. A list or reference write must change the
+game's members.
 
 **Alias deltas (D3).** The full name-to-GUID table is made at every start from the game's own data; a record keeps only
 what must not move, carried forward from the previous build's record:

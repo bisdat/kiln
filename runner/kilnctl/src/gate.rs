@@ -225,6 +225,10 @@ fn install_mod(built: &Path, dst: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Folders of the copy emptied before it boots: its own logs and console, and the registry proof's lab files (a lab
+/// run of the instance's must never stand in for this one's).
+pub const COPY_CLEAN: &[&str] = &["kiln/logs", "kiln/control", "kiln/data/content/registry/proof"];
+
 /// Lays out `<dir>.gate` and writes the `<name>-gate` instance file. The instance is only read.
 pub fn prepare(inst: &Instance, o: &GateOpts) -> Result<Instance> {
     if !kiln::is_deployed(inst) {
@@ -277,7 +281,7 @@ pub fn prepare(inst: &Instance, o: &GateOpts) -> Result<Instance> {
     let mut args: Vec<&std::ffi::OsStr> = entries.iter().map(|p| p.as_os_str()).collect();
     args.push(gdir.as_os_str());
     cp(&args)?;
-    let mut clean = vec!["kiln/logs", "kiln/control"];
+    let mut clean = COPY_CLEAN.to_vec();
     if !o.instance_mods {
         clean.extend(["kiln/mods", "kiln/plugins"]);
     }
@@ -429,6 +433,11 @@ mod tests {
 
     fn tests() -> Vec<String> {
         ["settings-test", "spawn-test", "gameplay-test", "world-test", "net-test", "chat-test"].map(String::from).to_vec()
+    }
+
+    #[test]
+    fn the_copy_starts_without_the_instances_registry_proof_files() {
+        assert!(COPY_CLEAN.contains(&"kiln/data/content/registry/proof"), "{COPY_CLEAN:?}");
     }
 
     #[test]
