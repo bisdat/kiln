@@ -24,6 +24,7 @@ public sealed unsafe partial class UiDraw
 
     /// <summary>Screen size in pixels.</summary>
     public float Width => Frame.Width;
+    /// <summary>Screen height in pixels (<see cref="Width"/> is the width).</summary>
     public float Height => Frame.Height;
 
     /// <summary>UI scale (DPI); multiply your own pixel sizes by it.</summary>
@@ -38,15 +39,23 @@ public sealed unsafe partial class UiDraw
     /// <summary>Kiln captures mouse and keyboard right now.</summary>
     public bool Capturing => Frame.Capturing != 0;
 
+    /// <summary>Overlay frames since start.</summary>
     public ulong FrameNumber => Frame.Number;
 
+    /// <summary>A line of text.</summary>
     public void Text(string text) => T->Text(Utf8.Of(text));
+    /// <summary>A line of text in <paramref name="color"/>.</summary>
     public void Text(Color color, string text) => T->TextColored(color.Rgba, Utf8.Of(text));
+    /// <summary>Text that wraps at the right edge of the window.</summary>
     public void TextWrapped(string text) => T->TextWrapped(Utf8.Of(text));
+    /// <summary>A line of text in the look's disabled (greyed) colour.</summary>
     public void TextDisabled(string text) => T->TextDisabled(Utf8.Of(text));
+    /// <summary>A button; true on the frame it is clicked. Width and height in pixels; 0 fits the label.</summary>
     public bool Button(string label, float width = 0, float height = 0) => T->Button(Utf8.Of(label), width, height) != 0;
+    /// <summary>A small button (no frame padding, fits a line of text); true on the frame it is clicked.</summary>
     public bool SmallButton(string label) => T->SmallButton(Utf8.Of(label)) != 0;
 
+    /// <summary>A check box; true on the frame <paramref name="value"/> was toggled.</summary>
     public bool Checkbox(string label, ref bool value)
     {
         byte v = value ? (byte)1 : (byte)0;
@@ -55,6 +64,7 @@ public sealed unsafe partial class UiDraw
         return changed;
     }
 
+    /// <summary>A slider for a float between <paramref name="min"/> and <paramref name="max"/>; true on the frame <paramref name="value"/> changed.</summary>
     public bool Slider(string label, ref float value, float min, float max)
     {
         var v = value;
@@ -63,6 +73,7 @@ public sealed unsafe partial class UiDraw
         return changed;
     }
 
+    /// <summary>A slider for an integer between <paramref name="min"/> and <paramref name="max"/>; true on the frame <paramref name="value"/> changed.</summary>
     public bool Slider(string label, ref int value, int min, int max)
     {
         var v = value;
@@ -108,15 +119,22 @@ public sealed unsafe partial class UiDraw
         return true;
     }
 
+    /// <summary>A header that folds what follows it; true while it is open. <paramref name="defaultOpen"/>: starts open.</summary>
     public bool CollapsingHeader(string label, bool defaultOpen = false) => T->CollapsingHeader(Utf8.Of(label), defaultOpen ? 1u << 5 : 0) != 0;
 
     /// <summary>A tree node; call <see cref="TreePop"/> when it returns true.</summary>
     public bool TreeNode(string label) => T->TreeNode(Utf8.Of(label)) != 0;
+    /// <summary>Ends a <see cref="TreeNode"/> that returned true.</summary>
     public void TreePop() => T->TreePop();
+    /// <summary>A selectable row that fills the line's width; true on the frame it is clicked.</summary>
     public bool Selectable(string label, bool selected = false) => T->Selectable(Utf8.Of(label), selected ? (byte)1 : (byte)0) != 0;
+    /// <summary>A horizontal line.</summary>
     public void Separator() => T->Separator();
+    /// <summary>A horizontal line with <paramref name="text"/> in it.</summary>
     public void Separator(string text) => T->SeparatorText(Utf8.Of(text));
+    /// <summary>Puts the next widget on the same line. <paramref name="offset"/> is the x position from the window's left edge (0 = right after the last widget); <paramref name="spacing"/> the gap in pixels (negative = the look's default).</summary>
     public void SameLine(float offset = 0, float spacing = -1) => T->SameLine(offset, spacing);
+    /// <summary>A small vertical gap.</summary>
     public void Spacing() => T->Spacing();
 
     /// <summary>Scopes widget ids (needed when the same label appears twice).</summary>
@@ -126,11 +144,14 @@ public sealed unsafe partial class UiDraw
         return new IdScope();
     }
 
+    /// <summary>The scope <see cref="Id(string)"/> returns; dispose it to leave the id scope.</summary>
     public readonly struct IdScope : IDisposable
     {
+        /// <summary>Ends the id scope.</summary>
         public void Dispose() => UiNative.T->PopId();
     }
 
+    /// <summary>A progress bar for <paramref name="fraction"/> (0 to 1, clamped) with optional text over it. Width in pixels, negative = the rest of the line; height 0 = one line.</summary>
     public void Progress(float fraction, string? overlay = null, float width = -1, float height = 0) =>
         T->ProgressBar(Math.Clamp(fraction, 0, 1), width, height, Utf8.Of(overlay ?? ""));
 
@@ -155,17 +176,25 @@ public sealed unsafe partial class UiDraw
         }
     }
 
+    /// <summary>Starts a new table row (after <see cref="BeginTable"/>).</summary>
     public void NextRow() => T->TableNextRow();
+    /// <summary>Moves to the next cell of the row; false when that column is not visible.</summary>
     public bool NextColumn() => T->TableNextColumn() != 0;
+    /// <summary>Ends a table that <see cref="BeginTable"/> returned true for.</summary>
     public void EndTable() => T->EndTable();
 
+    /// <summary>Starts a tab bar; true when it is shown (then add tabs with <see cref="BeginTab"/> and end it with <see cref="EndTabBar"/>).</summary>
     public bool BeginTabBar(string id) => T->BeginTabBar(Utf8.Of(id)) != 0;
+    /// <summary>A tab of the tab bar; true while it is the selected one (then draw its contents and call <see cref="EndTab"/>).</summary>
     public bool BeginTab(string label) => T->BeginTabItem(Utf8.Of(label)) != 0;
+    /// <summary>Ends a tab that <see cref="BeginTab"/> returned true for.</summary>
     public void EndTab() => T->EndTabItem();
+    /// <summary>Ends a tab bar that <see cref="BeginTabBar"/> returned true for.</summary>
     public void EndTabBar() => T->EndTabBar();
 
     /// <summary>A scrolling region (call <see cref="EndChild"/> always).</summary>
     public bool BeginChild(string id, float width = 0, float height = 0) => T->BeginChild(Utf8.Of(id), width, height, 0) != 0;
+    /// <summary>Ends a child region begun with <c>BeginChild</c>; call it whether or not the region was shown.</summary>
     public void EndChild() => T->EndChild();
 
     /// <summary>Shows <paramref name="text"/> as a tooltip while the previous widget is hovered.</summary>
@@ -174,6 +203,7 @@ public sealed unsafe partial class UiDraw
         if (T->IsItemHovered() != 0) T->SetTooltip(Utf8.Of(text));
     }
 
+    /// <summary>The mouse is over the widget drawn last.</summary>
     public bool ItemHovered => T->IsItemHovered() != 0;
 
     /// <summary>True on the frame <paramref name="button"/> went down over the widget drawn last: <c>if (ui.Button("Item"))</c>
@@ -186,12 +216,15 @@ public sealed unsafe partial class UiDraw
     }
 
     // ---- free drawing on top of everything (pixels) ----
+    /// <summary>Text at (<paramref name="x"/>, <paramref name="y"/>) screen pixels, over everything. <paramref name="size"/> 0 = the current font size; the colour defaults to white.</summary>
     public void DrawText(float x, float y, string text, Color? color = null, float size = 0) =>
         T->DrawText(x, y, (color ?? Color.White).Rgba, size, Utf8.Of(text));
 
+    /// <summary>A rectangle between two corners in screen pixels, over everything: filled, or only its outline. <paramref name="rounding"/> rounds the corners.</summary>
     public void DrawRect(float x0, float y0, float x1, float y1, Color color, float rounding = 0, bool filled = true) =>
         T->DrawRect(x0, y0, x1, y1, color.Rgba, rounding, filled ? 1 : 0);
 
+    /// <summary>The size in pixels of <paramref name="text"/> at <paramref name="size"/> (0 = the current font size).</summary>
     public (float Width, float Height) MeasureText(string text, float size = 0)
     {
         float w, h;
@@ -447,6 +480,7 @@ public sealed unsafe partial class UiDraw
 
         internal LookScope(long serial) => _serial = serial;
 
+        /// <summary>Ends the look, if it is still the one on top.</summary>
         public void Dispose()
         {
             if (_serial == 0) return;
@@ -505,25 +539,70 @@ public sealed unsafe partial class UiDraw
 }
 
 /// <summary>An RGBA colour.</summary>
+/// <param name="R">Red, 0 to 255.</param>
+/// <param name="G">Green, 0 to 255.</param>
+/// <param name="B">Blue, 0 to 255.</param>
+/// <param name="A">Alpha (opacity), 0 to 255. Default 255.</param>
 public readonly record struct Color(byte R, byte G, byte B, byte A = 255)
 {
+    /// <summary>The colour packed as <c>0xRRGGBBAA</c>.</summary>
     public uint Rgba => ((uint)R << 24) | ((uint)G << 16) | ((uint)B << 8) | A;
+    /// <summary>The colour from a value packed as <c>0xRRGGBBAA</c> (<see cref="Rgba"/>).</summary>
     public static Color FromRgba(uint rgba) => new((byte)(rgba >> 24), (byte)(rgba >> 16), (byte)(rgba >> 8), (byte)rgba);
+    /// <summary>The same colour with alpha <paramref name="a"/> (0 to 255).</summary>
     public Color WithAlpha(byte a) => this with { A = a };
-    public static readonly Color White = new(255, 255, 255), Black = new(0, 0, 0), Gray = new(160, 160, 160),
-        Red = new(235, 80, 70), Green = new(110, 210, 110), Yellow = new(240, 210, 90), Orange = new(255, 150, 60),
-        Cyan = new(90, 210, 230);
+    /// <summary>White.</summary>
+    public static readonly Color White = new(255, 255, 255);
+    /// <summary>Black.</summary>
+    public static readonly Color Black = new(0, 0, 0);
+    /// <summary>A light grey.</summary>
+    public static readonly Color Gray = new(160, 160, 160);
+    /// <summary>A soft red.</summary>
+    public static readonly Color Red = new(235, 80, 70);
+    /// <summary>A soft green.</summary>
+    public static readonly Color Green = new(110, 210, 110);
+    /// <summary>A soft yellow.</summary>
+    public static readonly Color Yellow = new(240, 210, 90);
+    /// <summary>An orange.</summary>
+    public static readonly Color Orange = new(255, 150, 60);
+    /// <summary>A light cyan.</summary>
+    public static readonly Color Cyan = new(90, 210, 230);
 }
 
 /// <summary>Where HUD text sits.</summary>
 public enum HudAnchor
 {
-    TopLeft, TopCenter, TopRight, MiddleLeft, Center, MiddleRight, BottomLeft, BottomCenter, BottomRight,
+    /// <summary>The top left corner.</summary>
+    TopLeft,
+    /// <summary>The middle of the top edge.</summary>
+    TopCenter,
+    /// <summary>The top right corner.</summary>
+    TopRight,
+    /// <summary>The middle of the left edge.</summary>
+    MiddleLeft,
+    /// <summary>The centre of the screen.</summary>
+    Center,
+    /// <summary>The middle of the right edge.</summary>
+    MiddleRight,
+    /// <summary>The bottom left corner.</summary>
+    BottomLeft,
+    /// <summary>The middle of the bottom edge.</summary>
+    BottomCenter,
+    /// <summary>The bottom right corner.</summary>
+    BottomRight,
 }
 
+/// <summary>The kind of a <see cref="Hud.Toast"/> message, which sets its look.</summary>
 public enum ToastKind
 {
-    Info, Success, Warning, Error,
+    /// <summary>A plain message.</summary>
+    Info,
+    /// <summary>Something worked.</summary>
+    Success,
+    /// <summary>Something needs attention.</summary>
+    Warning,
+    /// <summary>Something failed.</summary>
+    Error,
 }
 
 /// <summary>Options of a Kiln window.</summary>
@@ -533,17 +612,21 @@ public sealed record UiWindowOptions
     /// only looks at (no input).</summary>
     public bool Interactive { get; init; } = true;
 
+    /// <summary>Whether the window is open when it is created. Default true.</summary>
     public bool StartOpen { get; init; } = true;
 
     /// <summary>Initial size in pixels at scale 1 (0 = fit the contents).</summary>
     public float Width { get; init; }
 
+    /// <summary>Initial size in pixels at scale 1 (0 = fit the contents).</summary>
     public float Height { get; init; }
 
     /// <summary>Initial position as a fraction of the screen (0..1), the window's centre placed there; null = ImGui's default.</summary>
     public (float X, float Y)? Position { get; init; }
 
+    /// <summary>The window grows and shrinks with its contents. Default false.</summary>
     public bool AutoResize { get; init; }
+    /// <summary>Whether the window has a title bar. Default true.</summary>
     public bool TitleBar { get; init; } = true;
 
     /// <summary>Background opacity (0..1), null = the theme's.</summary>
@@ -576,7 +659,9 @@ public sealed class UiWindow : IDisposable
 
     private readonly string _id;
 
+    /// <summary>The window's title.</summary>
     public string Title { get; private set; }
+    /// <summary>The options the window was created with.</summary>
     public UiWindowOptions Options { get; }
     internal Action<UiDraw> Draw { get; }
     internal ModContext? Owner { get; }
@@ -606,8 +691,11 @@ public sealed class UiWindow : IDisposable
         }
     }
 
+    /// <summary>Opens the window (<see cref="Open"/> = true).</summary>
     public void Show() => Open = true;
+    /// <summary>Closes the window (<see cref="Open"/> = false).</summary>
     public void Hide() => Open = false;
+    /// <summary>Opens the window if it is closed, closes it if it is open.</summary>
     public void Toggle() => Open = !Open;
 
     /// <summary>Removes the window for good (also done when the owning mod unloads).</summary>
@@ -631,8 +719,11 @@ public sealed class HudLine : IDisposable
         Owner = owner;
     }
 
+    /// <summary>The line's id, as given to <see cref="Hud.Show(string, string, HudAnchor, Color?)"/>.</summary>
     public string Id { get; }
+    /// <summary>Where on the screen the line sits.</summary>
     public HudAnchor Anchor { get; set; }
+    /// <summary>The text colour. Default white.</summary>
     public Color Color { get; set; } = Color.White;
 
     /// <summary>Text shown (any thread).</summary>
@@ -645,6 +736,7 @@ public sealed class HudLine : IDisposable
     internal ModContext? Owner { get; }
     internal bool Disposed;
 
+    /// <summary>Removes the line from the screen (<see cref="Hud.Remove(HudLine)"/>).</summary>
     public void Dispose() => Hud.Remove(this);
 }
 
@@ -671,8 +763,10 @@ public static class Hud
         return line;
     }
 
+    /// <summary>Removes <paramref name="line"/> from the screen.</summary>
     public static void Remove(HudLine line) => UiEngine.RemoveHud(line);
 
+    /// <summary>Removes the line with <paramref name="id"/>, if there is one.</summary>
     public static void Remove(string id)
     {
         if (UiEngine.FindHud(id) is { } l) UiEngine.RemoveHud(l);
@@ -760,13 +854,16 @@ public sealed class UiImage : IDisposable
 {
     internal ulong Handle;
     internal ModContext? Owner;
+    /// <summary>The image's width in pixels.</summary>
     public int Width { get; internal init; }
+    /// <summary>The image's height in pixels.</summary>
     public int Height { get; internal init; }
 
     /// <summary>The item whose game icon this image draws (<see cref="Ui.ItemImage"/>), or null for a mod's own picture.
     /// Since 0.2.0-dev.29.15.</summary>
     public ItemId? Item { get; internal init; }
 
+    /// <summary>Frees the image. Does nothing for an item's icon (<see cref="Ui.ItemImage"/>), which Kiln owns.</summary>
     public unsafe void Dispose()
     {
         if (Handle == 0) return;
@@ -823,5 +920,18 @@ public static unsafe partial class Ui
     public static bool ItemIconsAvailable => ItemIcons.Available;
 }
 
+/// <summary>Diagnostics of the overlay (<see cref="Ui.Status"/>).</summary>
+/// <param name="Hooked">The Vulkan hooks are installed.</param>
+/// <param name="Device">The game's Vulkan device has been seen.</param>
+/// <param name="Swapchain">A swapchain of the game window exists.</param>
+/// <param name="Window">The game window's message handling is hooked.</param>
+/// <param name="Width">The swapchain's width in pixels.</param>
+/// <param name="Height">The swapchain's height in pixels.</param>
+/// <param name="Format">The Vulkan format (<c>VkFormat</c>) of the swapchain.</param>
+/// <param name="Presents">Game presents seen.</param>
+/// <param name="FramesDrawn">Presents the overlay drew into.</param>
+/// <param name="FrameMs">CPU time of the last overlay frame in milliseconds (the UI, the callbacks, recording and submitting).</param>
+/// <param name="Scale">The UI scale (DPI).</param>
+/// <param name="Error">The last overlay error; empty when there is none.</param>
 public readonly record struct UiStatus(bool Hooked, bool Device, bool Swapchain, bool Window, uint Width, uint Height,
     uint Format, long Presents, long FramesDrawn, double FrameMs, float Scale, string Error);

@@ -24,6 +24,7 @@ public enum KnowledgeType : byte
 [Flags]
 public enum KnowledgeObjectFlags : uint
 {
+    /// <summary>The game does not know the id.</summary>
     None = 0,
     /// <summary>A world object: shared progress (NPC rescues, world quests, lines heard by anyone).</summary>
     World = 0x01,
@@ -31,6 +32,7 @@ public enum KnowledgeObjectFlags : uint
     Player = 0x02,
     /// <summary>A world object with a player twin of the same id (personal progression).</summary>
     Twin = 0x04,
+    /// <summary>The game reports it to its analytics when it is set.</summary>
     Analytics = 0x08,
     /// <summary>The game pays XP when the player object is set.</summary>
     Experience = 0x10,
@@ -43,15 +45,22 @@ public enum KnowledgeQueryType : byte
 {
     /// <summary>A named query of the game's query db (AND/OR of knowledge, inventory, NPC state, flame level, ...).</summary>
     Extern = 0,
+    /// <summary>A Bool knowledge object compared to a value.</summary>
     SimpleBool = 1,
+    /// <summary>A Counter knowledge object compared to a value.</summary>
     SimpleCount = 2,
+    /// <summary>A Flags knowledge object compared to a value.</summary>
     SimpleFlag = 3,
 }
 
+/// <summary>How a requirement compares a knowledge object's value with its compare value.</summary>
 public enum KnowledgeCompare : byte
 {
+    /// <summary>The object's value is greater than the compare value.</summary>
     GreaterThan = 0,
+    /// <summary>The object's value is less than the compare value.</summary>
     LessThan = 1,
+    /// <summary>The object's value equals the compare value.</summary>
     Equals = 2,
 }
 
@@ -68,24 +77,46 @@ public enum KnowledgeMode : uint
 
 /// <summary>A requirement exactly as the game stores it (KnowledgeQueryData): a knowledge object compared to a value,
 /// or a named query (<see cref="KnowledgeQueryType.Extern"/>). Evaluate it with <see cref="Knowledge.Query"/>.</summary>
+/// <param name="Id">The knowledge id to compare, or the named query's id when <paramref name="Type"/> is
+/// <see cref="KnowledgeQueryType.Extern"/>.</param>
+/// <param name="Type">The kind of requirement.</param>
+/// <param name="Compare">How the object's value is compared with <paramref name="CompareValue"/>.</param>
+/// <param name="CompareValue">The value to compare with.</param>
+/// <param name="PlayerOnly">Read the player's own object even in shared progression (the game's
+/// <c>isExplicitPlayerKnowledgeQuery</c>).</param>
 public readonly record struct KnowledgeQuery(uint Id, KnowledgeQueryType Type, KnowledgeCompare Compare, uint CompareValue,
     bool PlayerOnly = false)
 {
     /// <summary>"this Bool knowledge is set".</summary>
     public static KnowledgeQuery IsSet(uint id) => new(id, KnowledgeQueryType.SimpleBool, KnowledgeCompare.Equals, 1);
+    /// <summary>True when <c>Id</c> is 0: there is no requirement.</summary>
     public bool IsEmpty => Id == 0;
+    /// <summary>The requirement as text: the id, the kind, the comparison and the value.</summary>
     public override string ToString() => Type == KnowledgeQueryType.Extern
         ? $"query 0x{Id:x8}"
         : $"0x{Id:x8} {Type} {Compare} {CompareValue}{(PlayerOnly ? " (player)" : "")}";
 }
 
 /// <summary>What GameKnowledgeResource says about one id (<see cref="Knowledge.Info"/>).</summary>
+/// <param name="Id">The knowledge id.</param>
+/// <param name="Flags">Which kinds of object the id is (world, player, twin, experience, skill points...). None: the game
+/// does not know it.</param>
+/// <param name="WorldType">The type of the id's world object; <see cref="KnowledgeType.None"/> when it has none.</param>
+/// <param name="PlayerType">The type of the id's player object; <see cref="KnowledgeType.None"/> when it has none.</param>
+/// <param name="WorldFlags">For a Flags world object: the bits that exist.</param>
+/// <param name="PlayerFlags">For a Flags player object: the bits that exist.</param>
+/// <param name="ExperienceId">For a player object that pays XP: the game's experience value id; 0 for none.</param>
+/// <param name="SkillPoints">For a player object that gives skill points: how many.</param>
 public readonly record struct KnowledgeInfo(uint Id, KnowledgeObjectFlags Flags, KnowledgeType WorldType, KnowledgeType PlayerType,
     uint WorldFlags, uint PlayerFlags, uint ExperienceId, int SkillPoints)
 {
+    /// <summary>True when the game knows the id (it has at least one flag).</summary>
     public bool Known => Flags != KnowledgeObjectFlags.None;
+    /// <summary>True when the id is a world object.</summary>
     public bool IsWorld => (Flags & KnowledgeObjectFlags.World) != 0;
+    /// <summary>True when the id is a player object.</summary>
     public bool IsPlayer => (Flags & KnowledgeObjectFlags.Player) != 0;
+    /// <summary>The id, its flags and the world and player types.</summary>
     public override string ToString() => $"0x{Id:x8} {Flags} world {WorldType} player {PlayerType}";
 }
 
@@ -93,10 +124,17 @@ public readonly record struct KnowledgeInfo(uint Id, KnowledgeObjectFlags Flags,
 /// <param name="Target">0 = the world map, else the player.</param>
 /// <param name="Value">Bool 0/1, Counter n, Flags mask; 0 = not set.</param>
 /// <param name="Present">The map has an entry (it can hold 0 after a revoke).</param>
+/// <param name="Id">The knowledge id.</param>
+/// <param name="Type">The object's type in this target.</param>
+/// <param name="NewMask">The game's "new" markers (bits 32 to 39 of the state); 0xff for an id without an entry.</param>
+/// <param name="Step">The server-world step of the read.</param>
 public readonly record struct KnowledgeState(EntityId Target, uint Id, uint Value, KnowledgeType Type, bool Present, byte NewMask, ulong Step)
 {
+    /// <summary>True when the value is not 0.</summary>
     public bool IsSet => Value != 0;
+    /// <summary>For a Flags object: true when flag number <paramref name="flag"/> (0 to 31) is set.</summary>
     public bool HasFlag(int flag) => flag is >= 0 and < 32 && ((Value >> flag) & 1) != 0;
+    /// <summary>The id, the value, the type and the target.</summary>
     public override string ToString() => $"0x{Id:x8} = {Value} ({Type}{(Target.IsNone ? ", world" : $", player {Target}")})";
 }
 
@@ -104,37 +142,89 @@ public readonly record struct KnowledgeState(EntityId Target, uint Id, uint Valu
 /// <param name="IsQuery">The name is a named query (evaluate with <see cref="Knowledge.Query"/>; it cannot be granted).</param>
 /// <param name="Requirement">The full requirement behind the name: an NPC's unlock requirement, a quest step's query; a
 /// plain knowledge name: "is set".</param>
+/// <param name="Text">The name as it was asked for.</param>
+/// <param name="Id">The knowledge id (or the query id when <paramref name="IsQuery"/>).</param>
 public sealed record KnowledgeName(string Text, bool IsQuery, uint Id, KnowledgeQuery Requirement)
 {
+    /// <summary>The name, and whether it is a query or knowledge, with its id.</summary>
     public override string ToString() => $"{Text} = {(IsQuery ? "query" : "knowledge")} 0x{Id:x8}";
 }
 
+/// <summary>A change to the game's knowledge.</summary>
 public enum KnowledgeOp
 {
+    /// <summary>Grant through the game's own apply: set a Bool, add to a Counter, or set a Flags flag (XP, triggers and
+    /// replication are the game's).</summary>
     Grant = 1,
+    /// <summary>Clear a knowledge id: a Flags flag, or all of the object. A direct write; the game has no path that
+    /// lowers a value.</summary>
     Revoke = 2,
+    /// <summary>Write an exact value (a direct write: no XP, no "new" marker).</summary>
     Set = 3,
 }
 
 /// <summary>What a change did. <see cref="Before"/>/<see cref="After"/> are the target's value around the apply (inside the
 /// game's knowledge update of the step).</summary>
+/// <param name="Request">The id of the request this answers; 0 when it was refused at once.</param>
+/// <param name="Op">The change that was asked for.</param>
+/// <param name="Target">The target's entity; <see cref="EntityId.None"/> for the world.</param>
+/// <param name="Id">The knowledge id.</param>
+/// <param name="Ok">True when the game applied the request. False means a refusal: see <paramref name="Reason"/>.</param>
+/// <param name="Status">The result code as text.</param>
+/// <param name="Before">The target's value before the apply.</param>
+/// <param name="After">The target's value after the apply.</param>
+/// <param name="Changed">True when the value changed.</param>
+/// <param name="Steps">The number of server steps from the request to the apply.</param>
+/// <param name="Reason">Why a change was refused or did nothing, in words; empty on a plain success.</param>
 public sealed record KnowledgeResult(ulong Request, KnowledgeOp Op, EntityId Target, uint Id, bool Ok, string Status, uint Before,
     uint After, bool Changed, int Steps, string Reason) : IKilnResult
 {
     // IKilnResult's reason is null when the change was applied; this record's own Reason may still carry a note then.
     string? IKilnResult.Reason => Ok ? null : Reason;
 
+    /// <summary>The change and the values around it, or the failure and its reason.</summary>
     public override string ToString() => Ok
         ? $"{Op} 0x{Id:x8}: {Before} -> {After}{(Reason.Length > 0 ? $" ({Reason})" : "")}"
         : $"{Op} 0x{Id:x8} failed: {Reason}";
 }
 
 /// <summary>What kiln.knowledge can do on this build, and its counters.</summary>
+/// <param name="Knowledge">Reads and grants work (feature <c>quests.knowledge</c>).</param>
+/// <param name="Changes">The in-step apply works: revoke, set, ordered grants and change events (feature
+/// <c>quests.changes</c>).</param>
+/// <param name="Journal">The journal and the query evaluator work (feature <c>quests.journal</c>).</param>
+/// <param name="Npc">The NPC registry's unlock states can be read (feature <c>quests.npc</c>).</param>
+/// <param name="Dialogue">Dialogue events and holds work (feature <c>quests.dialogue</c>).</param>
+/// <param name="ClientInput">The hold on knowledge that clients send works (feature <c>quests.client_input</c>).</param>
+/// <param name="Program">Kiln's knowledge program runs.</param>
+/// <param name="World">A server world with a knowledge registry exists.</param>
+/// <param name="WorldObjects">The number of static world objects.</param>
+/// <param name="PlayerObjects">The number of static player objects.</param>
+/// <param name="WorldEntries">The number of entries in the world map now.</param>
+/// <param name="Players">The number of player maps loaded now.</param>
+/// <param name="Npcs">The number of NPCs in the catalog.</param>
+/// <param name="Quests">The number of quests in the catalog.</param>
+/// <param name="Queries">The number of named queries in the catalog.</param>
+/// <param name="Pending">The number of requests waiting for the next apply.</param>
+/// <param name="Submitted">The number of requests submitted.</param>
+/// <param name="Applied">The number of requests the game applied.</param>
+/// <param name="Failed">The number of requests that failed.</param>
+/// <param name="ChangesSeen">The number of change events produced.</param>
+/// <param name="ClientOps">The number of knowledge operations clients sent.</param>
+/// <param name="ClientVetoed">The number of those operations that were dropped by the client veto.</param>
+/// <param name="DialogueEvents">The number of dialogue events seen.</param>
+/// <param name="DialogueHeld">The number of dialogue lines whose knowledge was held for a check.</param>
+/// <param name="DialogueDropped">The number of held dialogue knowledge operations that were dropped.</param>
+/// <param name="QueueMax">The most entries seen in the game's knowledge trigger queue at an apply.</param>
+/// <param name="Reason">Why a part is off; empty when all is on.</param>
+/// <param name="Applying">The game's knowledge update has run in this world (the world runs and the save's knowledge is
+/// in the maps). Before that, reads come back empty and changes wait.</param>
 public sealed record KnowledgeStatus(bool Knowledge, bool Changes, bool Journal, bool Npc, bool Dialogue, bool ClientInput,
     bool Program, bool World, int WorldObjects, int PlayerObjects, int WorldEntries, int Players, int Npcs, int Quests, int Queries,
     int Pending, ulong Submitted, ulong Applied, ulong Failed, ulong ChangesSeen, ulong ClientOps, ulong ClientVetoed,
     ulong DialogueEvents, ulong DialogueHeld, ulong DialogueDropped, int QueueMax, string Reason, bool Applying = false)
 {
+    /// <summary>Which parts are on or off, and the catalog sizes, as text.</summary>
     public override string ToString() =>
         $"knowledge {(Knowledge ? "on" : "OFF")}, in-step changes {(Changes ? "on" : "OFF")}, journal {(Journal ? "on" : "OFF")}, " +
         $"npc {(Npc ? "on" : "OFF")}, dialogue {(Dialogue ? "on" : "OFF")}, client input {(ClientInput ? "on" : "OFF")}, " +
@@ -143,11 +233,21 @@ public sealed record KnowledgeStatus(bool Knowledge, bool Changes, bool Journal,
 }
 
 /// <summary>An NPC of the game's roster (NpcCollection) with the NPC registry's unlock state.</summary>
+/// <param name="Index">The NPC's index in the roster.</param>
+/// <param name="DebugName">The NPC's debug name, such as <c>NPC_Workshop_Bard01</c>.</param>
+/// <param name="NpcId">The game's NPC id (FNV-1a of the NPC template's GUID).</param>
+/// <param name="NameTag">The loca tag of the NPC's name.</param>
+/// <param name="Workshop">The NPC's workshop id; 0 for none.</param>
+/// <param name="SummonItem">The item id of the NPC's summon tool.</param>
+/// <param name="Unlock">The requirement that unlocks the NPC. An empty one means the NPC is always unlocked.</param>
+/// <param name="Unlocked">Whether the game's NPC registry says the NPC is unlocked; null when it is not known.</param>
+/// <param name="CraftingAssistant">Whether the NPC is a crafting assistant.</param>
 public sealed record KnowledgeNpc(int Index, string DebugName, uint NpcId, uint NameTag, uint Workshop, uint SummonItem,
     KnowledgeQuery Unlock, bool? Unlocked, bool CraftingAssistant)
 {
     /// <summary>"npc:&lt;debugName&gt;".</summary>
     public string Name => "npc:" + DebugName;
+    /// <summary>The NPC's debug name and id, its unlock requirement and whether it is unlocked.</summary>
     public override string ToString() => $"{DebugName} (0x{NpcId:x8}) unlock {Unlock}: {(Unlocked is null ? "?" : Unlocked.Value ? "unlocked" : "locked")}";
 }
 
@@ -160,12 +260,15 @@ public sealed class KnowledgeScope
 
     /// <summary>0 = the world.</summary>
     public EntityId Target { get; }
+    /// <summary>True for the world's knowledge.</summary>
     public bool IsWorld => Target.IsNone;
 
     /// <summary>The id's state (tick thread); null when the id is not an object of this kind of target.</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.knowledge")]
     public KnowledgeState? Get(uint id) => Knowledge.Get(Target, id);
+    /// <summary>The name's state, as <see cref="Get(uint)"/> (tick thread). The name is resolved as in
+    /// <see cref="Knowledge.Resolve"/>.</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.knowledge")]
     public KnowledgeState? Get(string name) => Knowledge.Get(Target, Knowledge.KnowledgeId(name, nameof(Get)));
@@ -175,6 +278,7 @@ public sealed class KnowledgeScope
     [TickThreadOnly]
     [RequiresCapability("kiln.knowledge")]
     public bool Has(uint id) => Get(id)?.IsSet ?? false;
+    /// <summary>True when the name holds, as <see cref="Has(uint)"/>; a query is evaluated (tick thread).</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.knowledge")]
     public bool Has(string name) => Knowledge.Has(Target, name);
@@ -189,6 +293,8 @@ public sealed class KnowledgeScope
     /// player twin also sets the world object (the game's rule).</summary>
     [RequiresCapability("kiln.knowledge")]
     public Task<KnowledgeResult> Grant(uint id, uint value = 1) => Knowledge.Submit(KnowledgeOp.Grant, Target, id, value);
+    /// <summary>Grants a name, as <see cref="Grant(uint, uint)"/>. A query name cannot be granted (it throws
+    /// <see cref="InvalidOperationException"/>).</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.knowledge")]
     public Task<KnowledgeResult> Grant(string name, uint value = 1) => Grant(Knowledge.KnowledgeId(name, nameof(Grant)), value);
@@ -198,6 +304,7 @@ public sealed class KnowledgeScope
     [RequiresCapability("kiln.knowledge")]
     public Task<KnowledgeResult> Revoke(uint id, int flag = -1) =>
         Knowledge.Submit(KnowledgeOp.Revoke, Target, id, flag < 0 ? uint.MaxValue : (uint)flag);
+    /// <summary>Revokes a name, as <see cref="Revoke(uint, int)"/> (tick thread).</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.knowledge")]
     public Task<KnowledgeResult> Revoke(string name, int flag = -1) => Revoke(Knowledge.KnowledgeId(name, nameof(Revoke)), flag);
@@ -205,10 +312,12 @@ public sealed class KnowledgeScope
     /// <summary>Writes an exact value (a direct write: no XP, no query-trigger event).</summary>
     [RequiresCapability("kiln.knowledge")]
     public Task<KnowledgeResult> Set(uint id, uint value) => Knowledge.Submit(KnowledgeOp.Set, Target, id, value);
+    /// <summary>Writes an exact value for a name, as <see cref="Set(uint, uint)"/> (tick thread).</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.knowledge")]
     public Task<KnowledgeResult> Set(string name, uint value) => Set(Knowledge.KnowledgeId(name, nameof(Set)), value);
 
+    /// <summary>A short text: "world knowledge", or "knowledge of player" and the entity.</summary>
     public override string ToString() => IsWorld ? "world knowledge" : $"knowledge of player {Target}";
 }
 
@@ -222,6 +331,7 @@ public static unsafe class Knowledge
     /// <summary>True when kiln.knowledge is loaded (see <see cref="Status"/> for its parts).</summary>
     public static bool Available => KnowledgeNative.T != null;
 
+    /// <summary>What kiln.knowledge can do on this build, and its counters; null when the service is not loaded.</summary>
     public static KnowledgeStatus? Status
     {
         get
@@ -256,24 +366,31 @@ public static unsafe class Knowledge
     public static KnowledgeScope World { get; } = new(EntityId.None);
     /// <summary>One player's knowledge (while they are on the server).</summary>
     public static KnowledgeScope For(EntityId player) => player.IsNone ? World : new KnowledgeScope(player);
+    /// <summary>One player's knowledge, as <see cref="For(EntityId)"/>.</summary>
     public static KnowledgeScope For(Player player) => For(player.Entity);
 
     // ---- shortcuts (player first) ----
+    /// <summary>Grants <paramref name="name"/> to a player, as <see cref="KnowledgeScope.Grant(string, uint)"/>.</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.knowledge")]
     public static Task<KnowledgeResult> Grant(EntityId player, string name, uint value = 1) => For(player).Grant(name, value);
+    /// <summary>Grants <paramref name="name"/> to a player, as <see cref="KnowledgeScope.Grant(string, uint)"/>.</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.knowledge")]
     public static Task<KnowledgeResult> Grant(Player player, string name, uint value = 1) => For(player.Entity).Grant(name, value);
+    /// <summary>Revokes <paramref name="name"/> for a player, as <see cref="KnowledgeScope.Revoke(string, int)"/>.</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.knowledge")]
     public static Task<KnowledgeResult> Revoke(EntityId player, string name, int flag = -1) => For(player).Revoke(name, flag);
+    /// <summary>Revokes <paramref name="name"/> for a player, as <see cref="KnowledgeScope.Revoke(string, int)"/>.</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.knowledge")]
     public static Task<KnowledgeResult> Revoke(Player player, string name, int flag = -1) => For(player.Entity).Revoke(name, flag);
+    /// <summary>True when the name holds for the player (tick thread), as <see cref="Has(EntityId, string)"/>.</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.knowledge")]
     public static bool Has(Player player, string name) => Has(player.Entity, name);
+    /// <summary>The name's state in the player's map (tick thread), as <see cref="KnowledgeScope.Get(string)"/>.</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.knowledge")]
     public static KnowledgeState? Get(Player player, string name) => For(player.Entity).Get(name);
@@ -393,6 +510,8 @@ public static unsafe class Knowledge
     public static KnowledgeName Resolve(string name) =>
         TryResolve(name, out var n) ? n : throw new KeyNotFoundException($"Knowledge: unknown knowledge name '{name}'");
 
+    /// <summary>Resolves a name like <see cref="Resolve"/>, without throwing: false for an unknown name or when the
+    /// catalog is not built yet.</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.knowledge")]
     public static bool TryResolve(string name, out KnowledgeName result)
@@ -518,13 +637,19 @@ public static unsafe class Knowledge
     private static readonly Dictionary<ulong, (TaskCompletionSource<KnowledgeResult> Tcs, KnowledgeOp Op, EntityId Target, uint Id, ulong Since)> Waiting = new();
     private static IDisposable? _pump;
 
-    /// <summary>Queues a change (any thread). Unknown ids and bad flags throw <see cref="ArgumentException"/>; a player who
-    /// is not in game or a part that is off completes the task with Ok = false.</summary>
     /// <summary>A grant the game's apply gets even when <paramref name="id"/> is in no static map, where the game drops it
     /// (<see cref="KnowledgeResult.After"/> stays 0). For tests of the game's own rule; docs/kiln/services/npcs.md.</summary>
     [RequiresCapability("kiln.knowledge")]
     public static Task<KnowledgeResult> GrantUnchecked(EntityId target, uint id) => Submit(KnowledgeOp.Grant, target, id, 1, 1);
 
+    /// <summary>Queues a change (any thread). Unknown ids and bad flags throw <see cref="ArgumentException"/>; a player who
+    /// is not in game or a part that is off completes the task with Ok = false. The task completes on the tick thread after
+    /// the step in which the game applied the change.</summary>
+    /// <param name="op">The change: grant, revoke or set.</param>
+    /// <param name="target">The player entity whose knowledge changes; <see cref="EntityId.None"/> for the world.</param>
+    /// <param name="id">The knowledge id.</param>
+    /// <param name="value">Its meaning follows <paramref name="op"/>: for a grant, the counter amount to add or the flag number to set;
+    /// for a revoke, the flag number to clear or <c>uint.MaxValue</c> for all; for a set, the exact new value.</param>
     [RequiresCapability("kiln.knowledge")]
     public static Task<KnowledgeResult> Submit(KnowledgeOp op, EntityId target, uint id, uint value) => Submit(op, target, id, value, 0);
 
@@ -639,8 +764,11 @@ public static unsafe class Knowledge
 /// <summary>Catalogs of <see cref="Knowledge.Catalog"/>.</summary>
 public enum KnowledgeCatalog : uint
 {
+    /// <summary>The NPC roster: <c>npc:&lt;debugName&gt;</c> names, each with its unlock requirement.</summary>
     Npcs = 1,
+    /// <summary>The journal's quests: <c>quest:0x&lt;entryId&gt;</c> names.</summary>
     Quests = 2,
+    /// <summary>The game's named queries: <c>query:&lt;name&gt;</c> names.</summary>
     Queries = 3,
 }
 
@@ -650,5 +778,11 @@ public enum KnowledgeCatalog : uint
 /// client sends some knowledge itself (tutorial steps), which the veto would drop.</param>
 /// <param name="CheckDialogue">Hold a dialogue line's knowledge and run it only if the line's requirement holds for the
 /// player and the player is within <paramref name="DialogueRange"/> metres of the NPC.</param>
+/// <param name="DialogueRange">The most metres between player and NPC for <paramref name="CheckDialogue"/> (default 12; 0
+/// means no distance check).</param>
+/// <param name="LogClientKnowledge">Log each distinct knowledge id a client sends, once per player and session (default
+/// true).</param>
+/// <param name="AllowedIds">The number of ids in the client veto's allow list (read-only information:
+/// <see cref="Knowledge.Security.Apply"/> ignores it; use <see cref="Knowledge.Security.Allow"/>).</param>
 public sealed record KnowledgeSecurity(bool VetoClientKnowledge = false, bool CheckDialogue = false, double DialogueRange = 12.0,
     bool LogClientKnowledge = true, int AllowedIds = 0);

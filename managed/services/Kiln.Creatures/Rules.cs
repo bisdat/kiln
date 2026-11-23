@@ -61,6 +61,7 @@ public sealed class NpcView
 
     internal NpcView(EntityId entity) => Entity = entity;
 
+    /// <summary>The creature.</summary>
     public EntityId Entity { get; }
 
     /// <summary>The creature, with every <see cref="CreatureRef"/> API. Changes are layers of the mod that owns the rule.</summary>
@@ -82,9 +83,12 @@ public sealed class NpcView
         }
     }
 
+    /// <summary>Its health now; 0 when it is gone.</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.creatures")]
     public int Health => Info?.Health ?? 0;
+
+    /// <summary>Its maximum health; 0 when it is gone.</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.creatures")]
     public int HealthMax => Info?.HealthMax ?? 0;
@@ -94,6 +98,7 @@ public sealed class NpcView
     [RequiresCapability("kiln.creatures")]
     public double HealthFraction => HealthMax > 0 ? (double)Health / HealthMax : 0;
 
+    /// <summary>Its enemy AI state; <see cref="EnemyState.Invalid"/> when it has none or is gone.</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.creatures")]
     public EnemyState State => Info?.State ?? EnemyState.Invalid;
@@ -367,7 +372,9 @@ public enum RuleMode
     OnEnter = 1,
     /// <summary>Leaving one of the body's own phases.</summary>
     OnExit = 2,
+    /// <summary>Starting an attack.</summary>
     OnStartAttack = 3,
+    /// <summary>Ending an attack.</summary>
     OnEndAttack = 4,
     /// <summary>Entering an AI state.</summary>
     OnEnterState = 5,
@@ -397,10 +404,23 @@ public sealed class ArsenalAttack
     /// Special, Initiate, InitiateFollowUp, IgnoreThreat, Flanking. Default for a new attack: Normal.</summary>
     public string[]? Style { get; init; }
 
+    /// <summary>The attack's <c>selectionChance</c>: the game rolls under it when it selects an attack. Null keeps the base
+    /// arsenal's value, or the game's default for a new attack.</summary>
     public double? Chance { get; init; }
+
+    /// <summary>The attack's <c>threat</c> value. Null keeps the base arsenal's value, or the game's default for a new attack.</summary>
     public double? Threat { get; init; }
+
+    /// <summary>The shortest distance to the target at which the attack is available (<c>minRange</c>). Null keeps the base
+    /// arsenal's value, or the game's default for a new attack.</summary>
     public double? MinRange { get; init; }
+
+    /// <summary>The longest distance to the target at which the attack is available (<c>maxRange</c>). Null keeps the base
+    /// arsenal's value, or the game's default for a new attack.</summary>
     public double? MaxRange { get; init; }
+
+    /// <summary>The attack's <c>flags</c> as the game's names. Null keeps the base arsenal's value, or the game's default
+    /// for a new attack.</summary>
     public string[]? Flags { get; init; }
 
     /// <summary>Must hold for the game to pick it.</summary>
@@ -428,6 +448,7 @@ public sealed class ArsenalRule
     /// <summary>Change the base arsenal's rule with this index instead of adding one.</summary>
     public int? ModifyIndex { get; init; }
 
+    /// <summary>When the game looks at the rule. Default <see cref="RuleMode.OnUpdate"/>.</summary>
     public RuleMode When { get; init; } = RuleMode.OnUpdate;
 
     /// <summary>Seconds between checks of an OnUpdate rule, at least. Default 1.</summary>
@@ -442,8 +463,13 @@ public sealed class ArsenalRule
     /// <summary>Chance it fires when its conditions hold, 0 to 1.</summary>
     public double Chance { get; init; } = 1;
 
+    /// <summary>Conditions that must all hold for the rule to fire. Empty: it fires whenever the game looks at it.</summary>
     public List<RuleCondition> If { get; init; } = [];
+
+    /// <summary>Conditions that abort the rule when one holds. Null: none.</summary>
     public List<RuleCondition>? AbortIf { get; init; }
+
+    /// <summary>What the rule does when it fires, in order.</summary>
     public List<RuleAction> Do { get; init; } = [];
 }
 
@@ -453,7 +479,10 @@ public sealed class ArsenalSpec
     /// <summary>A new arsenal starts with this one's attacks and rules (the low-level way; a block does not name one).</summary>
     public Guid? From { get; init; }
 
+    /// <summary>The attacks to write: new ones, or changes to the base arsenal's.</summary>
     public List<ArsenalAttack> Attacks { get; init; } = [];
+
+    /// <summary>The rules to write: new ones, or changes to the base arsenal's.</summary>
     public List<ArsenalRule> Rules { get; init; } = [];
 
     /// <summary>Decides the attack for each creature, on the tick thread, every <see cref="PickEvery"/> seconds: an attack
@@ -465,19 +494,67 @@ public sealed class ArsenalSpec
     /// for the game's own choice.</summary>
     public Func<NpcView, EntityId>? PickTarget { get; init; }
 
+    /// <summary>Seconds between the calls of <see cref="PickAttack"/> and <see cref="PickTarget"/> for a creature. Default 0.25.</summary>
     public double PickEvery { get; init; } = 0.25;
 }
 
 /// <summary>An arsenal as the AI reads it now.</summary>
+/// <param name="Id">The arsenal's GUID.</param>
+/// <param name="IsKiln">Kiln's additions are installed in this arsenal (from <see cref="Arsenals.Define"/> or <see cref="Arsenals.Extend(Guid, ArsenalSpec)"/>), not only the game's own data.</param>
+/// <param name="Address">The address of the arsenal record in memory, for diagnostics.</param>
+/// <param name="Attacks">Its attacks, in index order.</param>
+/// <param name="Rules">Its rules, in index order.</param>
+/// <param name="Problems">What went wrong writing it, such as a limit of the base arsenal (32 attacks, 32 rules) that left some additions out. Empty when nothing did.</param>
 public sealed record ArsenalInfo(Guid Id, bool IsKiln, ulong Address, IReadOnlyList<ArsenalInfo.Attack> Attacks, IReadOnlyList<ArsenalInfo.Rule> Rules, IReadOnlyList<string> Problems)
 {
+    /// <summary>One attack of an arsenal, as the AI reads it.</summary>
+    /// <param name="Index">The attack's index in the arsenal (<see cref="AttackControl.Force(int)"/> takes it).</param>
+    /// <param name="Id">The attack's GUID.</param>
+    /// <param name="Sequence">The GUID of the sequence it plays.</param>
+    /// <param name="Style">The attack's style mask: bits of the game's <c>keen::enemy01::AttackStyle</c>.</param>
     public sealed record Attack(int Index, Guid Id, Guid Sequence, int Style);
+
+    /// <summary>One rule of an arsenal, as the AI reads it.</summary>
+    /// <param name="Index">The rule's index in the arsenal.</param>
+    /// <param name="Id">The rule's GUID (all zero when it has none).</param>
+    /// <param name="Mode">The rule's mode: a <see cref="RuleMode"/> value.</param>
+    /// <param name="When">How many conditions the rule has.</param>
+    /// <param name="Actions">How many actions the rule has.</param>
     public sealed record Rule(int Index, Guid Id, int Mode, int When, int Actions);
 }
 
 /// <summary>What the rule system has resolved and done so far. Any thread, except that the counts of creatures read 0 off the tick.
 /// Obsolete: Kiln.Rules has a <c>Kiln.RulesStatus</c> of its own, so a mod with both libraries cannot name this one; use
 /// <see cref="ArsenalRulesStatus"/> (same fields, from <see cref="Arsenals.RulesState"/>).</summary>
+/// <param name="Writer">Arsenals can be written (the registry map and the record layout were read).</param>
+/// <param name="Dispatcher">The targets of the two rule hooks resolved.</param>
+/// <param name="Attacks">The attack override's targets resolved.</param>
+/// <param name="AiSwitch">The AI switch's field resolved.</param>
+/// <param name="RuleHooks">The rule hooks are installed now.</param>
+/// <param name="AttackHooks">The attack hooks are installed now.</param>
+/// <param name="Arsenals">Kiln's arsenals in the registry.</param>
+/// <param name="Tracked">Creatures in the published table (0 off the tick).</param>
+/// <param name="Overrides">Creatures with an attack override (0 off the tick).</param>
+/// <param name="AiOff">Creatures whose AI Kiln switched off (0 off the tick).</param>
+/// <param name="MapCapacity">Capacity of the registry's lookup map.</param>
+/// <param name="MapCount">Entries in the registry's lookup map.</param>
+/// <param name="Constraints">Kiln constraints evaluated on the job threads.</param>
+/// <param name="ConstraintsTrue">Of those, the ones that were true.</param>
+/// <param name="Actions">Kiln actions fired.</param>
+/// <param name="ActionsDropped">Kiln actions lost to a full queue.</param>
+/// <param name="Selects">The game's attack selections seen.</param>
+/// <param name="SelectsForced">Selections an override forced.</param>
+/// <param name="SelectsFiltered">Attacks an allow mask refused.</param>
+/// <param name="PicksWaiting">Selections that waited for an override.</param>
+/// <param name="FollowupsRefused">Combo follow-ups an override refused.</param>
+/// <param name="Starts">Attacks started.</param>
+/// <param name="StartsOffOverride">Attacks started against an override (rewritten).</param>
+/// <param name="SequencesRefused">Attack sequences played by a rule that were refused.</param>
+/// <param name="PreNs">The tick side's cost so far, in nanoseconds.</param>
+/// <param name="PreCalls">The tick side's calls so far.</param>
+/// <param name="JobTicks">The job-thread side's cost so far, in counter ticks (rdtsc, while <see cref="Arsenals.Timing"/> is on).</param>
+/// <param name="JobCalls">The job-thread side's calls so far.</param>
+/// <param name="JobTickHz">The counter's frequency: <paramref name="JobTicks"/> / <paramref name="JobTickHz"/> is seconds.</param>
 [Obsolete("Use ArsenalRulesStatus.")]
 public sealed record RulesStatus(bool Writer, bool Dispatcher, bool Attacks, bool AiSwitch, bool RuleHooks, bool AttackHooks, int Arsenals, int Tracked,
     int Overrides, int AiOff, int MapCapacity, int MapCount, ulong Constraints, ulong ConstraintsTrue, ulong Actions, ulong ActionsDropped, ulong Selects,

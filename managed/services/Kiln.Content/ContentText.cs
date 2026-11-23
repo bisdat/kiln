@@ -54,6 +54,7 @@ public enum TooltipValueFormat
 public sealed record TooltipValue(uint LocaId, string? Label, int Raw, double Value, string Display, TooltipValueFormat Format,
     bool IsSigned, bool IsScaled)
 {
+    /// <summary>The label (or the tag id when there is none) and the display text.</summary>
     public override string ToString() => $"{Label ?? $"0x{LocaId:x8}"}: {Display}";
 
     // One row of GetJson("uiValues")["value"]: {locaId, valueFormat, value, scaleData, isSigned, isScaled}.

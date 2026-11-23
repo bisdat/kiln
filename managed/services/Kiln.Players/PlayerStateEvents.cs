@@ -21,18 +21,24 @@ public sealed class PlayerStateChangedEvent : KilnEvent
         Snapshot = snapshot;
     }
 
+    /// <summary>The player whose state changed.</summary>
     public Player Player { get; }
+    /// <summary>The state that was entered or left.</summary>
     public PlayerStateId State { get; }
     /// <summary>True: the player entered <see cref="State"/>. False: left it.</summary>
     public bool Entered { get; }
+    /// <summary>The player left <see cref="State"/> (<see cref="Entered"/> is false).</summary>
     public bool Left => !Entered;
+    /// <summary>The world step the change was seen in.</summary>
     public ulong Step { get; }
     /// <summary>Everything else at that moment (states and action; health only in a read of its own).</summary>
     public PlayerSnapshot Snapshot { get; }
     /// <summary>The game's name of the state.</summary>
     public string Name => PlayerStates.NameOf(State);
+    /// <summary>Where the state comes from: the game's enum and field that hold it.</summary>
     public PlayerStateSource Source => PlayerStates.SourceOf(State);
 
+    /// <summary>The player, whether they entered or left, and the state, for a log line.</summary>
     public override string ToString() => $"{Player.Name} {(Entered ? "entered" : "left")} {State} ({Name})";
 }
 
@@ -56,8 +62,11 @@ public class PlayerActionEvent : CancelableEvent
         CanCancel = canCancel;
     }
 
+    /// <summary>The player who started the action.</summary>
     public Player Player { get; }
+    /// <summary>The action: its sequence, trigger, item and timing.</summary>
     public PlayerAction Action { get; }
+    /// <summary>The world step the action was seen starting in.</summary>
     public ulong Step { get; }
     /// <summary>False where a cancel has no effect: a joined client, or a build where the game's reset did not resolve.</summary>
     public bool CanCancel { get; }
@@ -72,12 +81,14 @@ public class PlayerActionEvent : CancelableEvent
     /// <summary>The game's name of what plays: "UseItem_Food_Buff", "Movement_Tool_HangGlider_Start".</summary>
     public string SequenceName => Action.SequenceName;
 
+    /// <summary>The player, the action's sequence and trigger, and the item, for a log line.</summary>
     public override string ToString() => $"{Player.Name} started {SequenceName} ({Trigger}), item {Item}";
 }
 
 /// <summary>What a consumable does, by the game's own sequence for it.</summary>
 public enum PlayerConsumeKind
 {
+    /// <summary>A consumable that none of the kinds below describes.</summary>
     Other,
     /// <summary>Food: sequences <c>UseItem_Food_Buff</c>, <c>_Heal_Buff</c>, <c>_Bad</c>.</summary>
     Food,
@@ -106,13 +117,17 @@ public sealed class PlayerConsumeEvent : PlayerActionEvent
         Buffs = buffs;
     }
 
+    /// <summary>What the consumable is, by the game's sequence for it.</summary>
     public PlayerConsumeKind Kind { get; }
     /// <summary>Buffs the item gives (its applied buff). Empty for items that work through an impact program, such as
     /// health potions.</summary>
     public IReadOnlyList<PlayerBuff> Buffs { get; }
+    /// <summary>The consumable is food (<see cref="Kind"/> is <see cref="PlayerConsumeKind.Food"/>).</summary>
     public bool IsFood => Kind == PlayerConsumeKind.Food;
+    /// <summary>The consumable is a drink (<see cref="Kind"/> is <see cref="PlayerConsumeKind.Drink"/>).</summary>
     public bool IsDrink => Kind == PlayerConsumeKind.Drink;
 
+    /// <summary>The player, the item and its kind, for a log line.</summary>
     public override string ToString() => $"{Player.Name} consumes {Item} ({Kind})";
 }
 
@@ -131,9 +146,13 @@ public sealed class PlayerConsumedEvent : KilnEvent
         Left = left;
     }
 
+    /// <summary>The player who used the consumable.</summary>
     public Player Player { get; }
+    /// <summary>The item that was used.</summary>
     public PlayerItem Item { get; }
+    /// <summary>What the consumable is, by the game's sequence for it.</summary>
     public PlayerConsumeKind Kind { get; }
+    /// <summary>Buffs the item gives. Empty for items that work through an impact program, such as health potions.</summary>
     public IReadOnlyList<PlayerBuff> Buffs { get; }
     /// <summary>What is left in the slot.</summary>
     public int Left { get; }
@@ -152,7 +171,9 @@ public sealed class PlayerActionEndedEvent : KilnEvent
         Canceled = canceled;
     }
 
+    /// <summary>The player whose action ended.</summary>
     public Player Player { get; }
+    /// <summary>The action that ended.</summary>
     public PlayerAction Action { get; }
     /// <summary>Wall time it was seen running.</summary>
     public TimeSpan Duration { get; }
@@ -172,11 +193,13 @@ public sealed class PlayerJumpEvent : KilnEvent
         Count = count;
     }
 
+    /// <summary>The player who jumped.</summary>
     public Player Player { get; }
     /// <summary><see cref="PlayerStateId.JumpDefault"/>, <see cref="PlayerStateId.JumpDoubleDefault"/>, ...</summary>
     public PlayerStateId Type { get; }
     /// <summary>Jumps since the last landing.</summary>
     public int Count { get; }
+    /// <summary>The jump was a double jump (<see cref="Type"/> is one of the <c>JumpDouble*</c> states).</summary>
     public bool IsDoubleJump => Type is PlayerStateId.JumpDoubleDefault or PlayerStateId.JumpDoubleSprint or PlayerStateId.JumpDoubleMountain;
 }
 
@@ -194,8 +217,11 @@ public sealed class PlayerGlideEvent : KilnEvent
         Duration = duration;
     }
 
+    /// <summary>The player who started or stopped gliding.</summary>
     public Player Player { get; }
+    /// <summary>True: the glide started. False: it ended.</summary>
     public bool Started { get; }
+    /// <summary>The glide ended (<see cref="Started"/> is false).</summary>
     public bool Ended => !Started;
     /// <summary>The glider in the player's equipment slot.</summary>
     public PlayerItem Glider { get; }
@@ -216,10 +242,15 @@ public sealed class PlayerEquipmentChangedEvent : KilnEvent
         Now = now;
     }
 
+    /// <summary>The player whose equipment changed.</summary>
     public Player Player { get; }
+    /// <summary>The slot that changed.</summary>
     public PlayerEquipSlot Slot { get; }
+    /// <summary>The item in the slot before; <see cref="PlayerItem.IsNone"/> when it was empty.</summary>
     public PlayerItem Before { get; }
+    /// <summary>The item in the slot now; <see cref="PlayerItem.IsNone"/> when it is empty.</summary>
     public PlayerItem Now { get; }
+    /// <summary>The slot holds an item now (<see cref="Now"/> is not none).</summary>
     public bool Equipped => !Now.IsNone;
 }
 
@@ -237,10 +268,15 @@ public sealed class PlayerHotbarChangedEvent : KilnEvent
         Held = held;
     }
 
+    /// <summary>The player whose action bar or held item changed.</summary>
     public Player Player { get; }
+    /// <summary>The selected action bar slot before; -1 when unknown.</summary>
     public int Before { get; }
+    /// <summary>The selected action bar slot now; -1 when unknown.</summary>
     public int Now { get; }
+    /// <summary>The item in hand before.</summary>
     public PlayerItem HeldBefore { get; }
+    /// <summary>The item in hand now.</summary>
     public PlayerItem Held { get; }
 }
 
@@ -278,10 +314,13 @@ public sealed class PlayerClientActionEvent : CancelableEvent
     /// listens, or the action has already run). Since 0.2.0-dev.29.</summary>
     public DecisionId DecisionId { get; }
 
+    /// <summary>The player whose client sent the action.</summary>
     public Player Player { get; }
+    /// <summary>Which action it is: its number, the game's field name and the size of its struct.</summary>
     public PlayerClientActionInfo Action { get; }
     /// <summary>The game's field name: "changeEquipmentAction".</summary>
     public string Name => Action.Name;
+    /// <summary>The action's version number as the client sent it. A cancel marks it consumed, which is how the game skips it.</summary>
     public uint Version { get; }
     /// <summary>The action's struct as the client sent it (layout: the game's reflection of the field's type).</summary>
     public byte[] Payload { get; }
@@ -289,6 +328,7 @@ public sealed class PlayerClientActionEvent : CancelableEvent
     /// (a joined client, or a build where client actions cannot be held; a client's action has already run).</summary>
     public bool CanCancel { get; }
 
+    /// <summary>The player, the action's name and its version, for a log line.</summary>
     public override string ToString() => $"{Player.Name} sent {Name} v{Version}";
 }
 

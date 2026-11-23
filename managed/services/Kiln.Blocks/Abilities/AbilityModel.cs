@@ -24,6 +24,7 @@ public abstract record PlacedDelivery : IDeliveryBlock
 /// <summary>Only the caster: a buff, a heal, a dash.</summary>
 public sealed record SelfBlock : PlacedDelivery
 {
+    /// <summary>What happens to the caster.</summary>
     public required IReadOnlyList<EffectRef> Effects { get; init; }
 }
 
@@ -32,7 +33,9 @@ public sealed record AroundBlock : PlacedDelivery
 {
     /// <summary>Metres.</summary>
     public required float Radius { get; init; }
+    /// <summary>Whom it reaches: enemies of the caster (the default) or its friends, as the game's own enemy and friend checks tell.</summary>
     public AreaAffects Affects { get; init; } = AreaAffects.Enemies;
+    /// <summary>What each one around the caster gets.</summary>
     public required IReadOnlyList<EffectRef> Effects { get; init; }
 }
 
@@ -43,7 +46,9 @@ public sealed record ConeBlock : PlacedDelivery
     public float Range { get; init; } = 8;
     /// <summary>The cone's whole width, in degrees: 1 to 179.</summary>
     public float Angle { get; init; } = 60;
+    /// <summary>Whom it reaches: enemies of the caster (the default) or its friends, as the game's own enemy and friend checks tell.</summary>
     public AreaAffects Affects { get; init; } = AreaAffects.Enemies;
+    /// <summary>What each one in the cone gets.</summary>
     public required IReadOnlyList<EffectRef> Effects { get; init; }
 }
 
@@ -54,7 +59,9 @@ public sealed record BeamBlock : PlacedDelivery
     public float Range { get; init; } = 20;
     /// <summary>Metres across.</summary>
     public float Width { get; init; } = 1;
+    /// <summary>Whom it reaches: enemies of the caster (the default) or its friends, as the game's own enemy and friend checks tell.</summary>
     public AreaAffects Affects { get; init; } = AreaAffects.Enemies;
+    /// <summary>What each one along the line gets, at every hit.</summary>
     public required IReadOnlyList<EffectRef> Effects { get; init; }
     /// <summary>How long it keeps hitting, turning with the caster. 0: one hit, along the aim it was cast at.</summary>
     public double Seconds { get; init; }
@@ -67,11 +74,15 @@ public sealed record ZoneBlock : PlacedDelivery
 {
     /// <summary>Metres.</summary>
     public required float Radius { get; init; }
+    /// <summary>How long the place keeps hitting, in seconds.</summary>
     public required double Seconds { get; init; }
+    /// <summary>Seconds between hits on whoever is in it.</summary>
     public double TickEvery { get; init; } = 1;
     /// <summary>Metres in front of the caster. 0: at the caster.</summary>
     public float Ahead { get; init; }
+    /// <summary>Whom it reaches: enemies of the caster (the default) or its friends, as the game's own enemy and friend checks tell.</summary>
     public AreaAffects Affects { get; init; } = AreaAffects.Enemies;
+    /// <summary>What each one in the place gets, at every hit.</summary>
     public required IReadOnlyList<EffectRef> Effects { get; init; }
 }
 
@@ -86,13 +97,16 @@ public sealed record ChainBlock : PlacedDelivery
     public int Jumps { get; init; } = 2;
     /// <summary>Metres from one to the next.</summary>
     public float JumpRange { get; init; } = 6;
+    /// <summary>Whom it reaches: enemies of the caster (the default) or its friends, as the game's own enemy and friend checks tell.</summary>
     public AreaAffects Affects { get; init; } = AreaAffects.Enemies;
+    /// <summary>What each one it reaches gets.</summary>
     public required IReadOnlyList<EffectRef> Effects { get; init; }
 }
 
 /// <summary>Something spawned in front of the caster: a <c>GameTemplates</c> constant or a template's GUID, as a child of the caster, at its level and of its faction.</summary>
 public sealed record SummonBlock : PlacedDelivery
 {
+    /// <summary>What is spawned: a <c>GameTemplates</c> constant or a template's GUID.</summary>
     public required TemplateRef Template { get; init; }
     /// <summary>1 to 16, side by side.</summary>
     public int Count { get; init; } = 1;
@@ -119,7 +133,9 @@ public sealed record HomingBlock
 /// A weapon's <see cref="WeaponBlock.OnHit"/> is the same effects with no unlock.</summary>
 public sealed record PerkBlock : IBlock, ITweakable
 {
+    /// <summary>The perk's name, as players read it in its tooltip. Required.</summary>
     public required string Name { get; init; }
+    /// <summary>The perk's description in its tooltip. Null: the stats <see cref="Modifies"/> changes when it has more than one, else none (not the starter's text).</summary>
     public string? Description { get; init; }
     /// <summary>The number the tooltip shows in front of the name: <c>"5%"</c>, <c>"12"</c>, <c>"2.5"</c>, <c>"8s"</c>. Null: what a single <see cref="Modifies"/> entry or a single on-hit effect's chance says, else none.</summary>
     public string? Value { get; init; }
@@ -150,7 +166,9 @@ internal sealed class PerkTweakConverter() : TweakConverter("perks");
 /// Its id is <c>&lt;mod&gt;:&lt;name&gt;</c>, also what <c>/cast</c> takes.</summary>
 public sealed record AbilityBlock : IBlock
 {
+    /// <summary>The ability's name, as players read it. Required. Its id comes from the name it is defined under, not from this text.</summary>
     public required string Name { get; init; }
+    /// <summary>What the ability does, as players read it. Null: none.</summary>
     public string? Description { get; init; }
     /// <summary>The default key ("G", "Shift+F"); players remap it in the Kiln menu. Binding it needs the mod on the player's game. Null: no key.</summary>
     [ClientsModWhen(".")]
@@ -180,11 +198,15 @@ public sealed record AbilityBlock : IBlock
 }
 
 /// <summary>An ability: what <see cref="Blocks.Define{T}"/> returned, its name in this mod, or <c>"other-mod:name"</c>.</summary>
+/// <param name="Value">The ability as written: its name in this mod, or <c>"other-mod:name"</c>.</param>
 [JsonConverter(typeof(AbilityRefConverter))]
 public readonly record struct AbilityRef(string Value)
 {
+    /// <summary>An ability by name: its name in this mod, or <c>"other-mod:name"</c>.</summary>
     public static implicit operator AbilityRef(string value) => new(value);
+    /// <summary>The ability that <see cref="Blocks.Define{T}"/> returned.</summary>
     public static implicit operator AbilityRef(BlockHandle<AbilityBlock> handle) => new(handle.ToString());
+    /// <summary>The ability's name as written, the same as <see cref="Value"/>.</summary>
     public override string ToString() => Value;
 }
 
@@ -201,6 +223,7 @@ internal sealed class AbilityRefConverter : JsonConverter<AbilityRef>
 [BlockClients(ClientsLevel.Mod)]
 public sealed record TalentBlock : IBlock
 {
+    /// <summary>The talent's name, as players read it in the tree. Required: a blank name is an error.</summary>
     public required string Name { get; init; }
     /// <summary>Null: what <see cref="Modifies"/> says, per level.</summary>
     public string? Description { get; init; }
@@ -236,6 +259,7 @@ public sealed record TalentBlock : IBlock
     public string? Icon { get; init; }
     /// <summary>In a tree: the grid cell. Null: worked out from what leads here.</summary>
     public int? Column { get; init; }
+    /// <summary>In a tree: the grid row. Null: worked out from what leads here.</summary>
     public int? Row { get; init; }
     /// <summary>A place in the game's own tree. The game's screen draws it and its skill points pay for it. Past the game's room for nodes Kiln's shadow table carries it, and a node here is there from the next start of a dedicated server, which reads its tree before mods load.</summary>
     public GameTreePlace? Game { get; init; }
@@ -262,7 +286,9 @@ public sealed record GameTreePlace
 [BlockClients(ClientsLevel.Mod)]
 public sealed record TalentTreeBlock : IBlock
 {
+    /// <summary>The tree's name, shown on its screen. Its entry in the pause menu too, unless <see cref="Menu"/> says another.</summary>
     public required string Name { get; init; }
+    /// <summary>A text shown with the tree's name. Null: none.</summary>
     public string? Description { get; init; }
     /// <summary>Where its points come from. Null: 1, and 1 more per character level.</summary>
     public TalentPointsBlock? Points { get; init; }
@@ -294,6 +320,7 @@ public sealed record TalentPointsBlock
 /// <summary>Something a player does or is, which any of the game's states and actions can say: a <see cref="PlayerStateId"/> in C#, the same name or the game's own in JSON
 /// (<c>"Gliding"</c>, <c>"HangGliding"</c>, <c>"Glider"</c>). <see cref="PlayerStates.All"/> has every one the running game has, and docs/kiln/modding/player-states.md lists them.
 /// Two more say what happens to a consumable: <see cref="Eating"/> and <see cref="Eaten"/>.</summary>
+/// <param name="Name">The state as written: the game's name (<c>"Gliding"</c>), a state id as <c>0x</c> and four hex digits, <c>"eating"</c> or <c>"eaten"</c>.</param>
 [JsonConverter(typeof(PlayerStateRefConverter))]
 public readonly record struct PlayerStateRef(string Name)
 {
@@ -302,8 +329,11 @@ public readonly record struct PlayerStateRef(string Name)
     /// <summary>The consumable has really gone.</summary>
     public static readonly PlayerStateRef Eaten = new("eaten");
 
+    /// <summary>A state or action by name: the game's own (<c>"Gliding"</c>), <see cref="Eating"/> or <see cref="Eaten"/>.</summary>
     public static implicit operator PlayerStateRef(string name) => new(name);
+    /// <summary>One of the game's states, by its id; the name it gets is the id as <c>0x</c> and four hex digits.</summary>
     public static implicit operator PlayerStateRef(PlayerStateId state) => new($"0x{(ushort)state:x4}");
+    /// <summary>The state's name as written, the same as <see cref="Name"/>.</summary>
     public override string ToString() => Name;
 }
 

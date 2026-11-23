@@ -20,22 +20,32 @@ public enum ZoneShape
 /// interaction and loot requests are checked in Pre before the game reads them.</summary>
 public sealed record ProtectionZone
 {
+    /// <summary>The zone's name, as <see cref="GameplayCancelableEvent.ZoneName"/> reports it.</summary>
     public string Name { get; init; } = "";
+    /// <summary>The actions refused to players who are not allowed in the zone (default: build, break, terraform,
+    /// interact, loot).</summary>
     public GameplayActions Deny { get; init; } = GameplayActions.Build | GameplayActions.Break | GameplayActions.Terraform |
                                                   GameplayActions.Interact | GameplayActions.Loot;
+    /// <summary>The zone's shape (default <see cref="ZoneShape.Sphere"/>).</summary>
     public ZoneShape Shape { get; init; } = ZoneShape.Sphere;
+    /// <summary>The centre of a sphere or a cylinder.</summary>
     public WorldPosition Center { get; init; }
+    /// <summary>The radius of a sphere or a cylinder, in metres (default 16).</summary>
     public double Radius { get; init; } = 16;
+    /// <summary>The lowest corner of a box (the lowest height of a cylinder).</summary>
     public WorldPosition Min { get; init; }
+    /// <summary>The highest corner of a box (the highest height of a cylinder).</summary>
     public WorldPosition Max { get; init; }
     /// <summary>Cylinder height range (sets Min.Y / Max.Y).</summary>
     public double MinY { get => Min.Y; init => Min = Min with { Y = value }; }
+    /// <summary>The top of a cylinder (sets Max.Y); see <see cref="MinY"/>.</summary>
     public double MaxY { get => Max.Y; init => Max = Max with { Y = value }; }
     /// <summary>SteamID64s of the players allowed in the zone (the owners).</summary>
     public IReadOnlyCollection<ulong> AllowedSteamIds { get; init; } = [];
     /// <summary>Players with the game's admin bit are allowed too.</summary>
     public bool AllowAdmins { get; init; } = true;
 
+    /// <summary>True when <paramref name="p"/> is inside the zone's shape.</summary>
     public bool Contains(WorldPosition p) => Shape switch
     {
         ZoneShape.Sphere => p.DistanceTo(Center) <= Radius,
@@ -55,9 +65,12 @@ public sealed class ZoneHandle : IDisposable
         Owner = owner;
     }
 
+    /// <summary>The zone's id, as <see cref="GameplayCancelableEvent.DeniedByZone"/> reports it.</summary>
     public uint Id { get; }
+    /// <summary>The zone as it is registered now (<see cref="Update"/> replaces it).</summary>
     public ProtectionZone Zone { get; internal set; }
     internal ModContext? Owner { get; }
+    /// <summary>True until the zone is removed.</summary>
     public bool Active { get; internal set; } = true;
 
     /// <summary>Replaces the zone's shape, actions and owners. Tick thread.</summary>
@@ -65,17 +78,43 @@ public sealed class ZoneHandle : IDisposable
     [RequiresCapability("kiln.gameplay")]
     public void Update(ProtectionZone zone) => Gameplay.UpdateZone(this, zone);
 
+    /// <summary>Removes the zone. Calling it again does nothing.</summary>
     public void Dispose() => Gameplay.RemoveZone(this);
 }
 
 /// <summary>A recipe of the game's recipe registry. Inputs with item 0 are category inputs ("any wood").</summary>
+/// <param name="Id">The recipe's id.</param>
+/// <param name="Workshop">The id of the workshop (station) that crafts it.</param>
+/// <param name="Inputs">What a craft takes.</param>
+/// <param name="Outputs">What a craft makes.</param>
+/// <param name="Duration">How long a craft takes.</param>
+/// <param name="RequiredProps">A bit mask of the crafting props that must be near the station (a bit per prop in the
+/// game's table of crafting props).</param>
 public sealed record GameplayRecipe(uint Id, uint Workshop, IReadOnlyList<GameplayItemStack> Inputs,
     IReadOnlyList<GameplayItemStack> Outputs, TimeSpan Duration, ulong RequiredProps)
 {
+    /// <summary>True when an input is a category (item 0: "any wood") rather than one item.</summary>
     public bool HasCategoryInputs => Inputs.Any(i => i.ItemId == 0);
 }
 
 /// <summary>Native status of kiln.gameplay.</summary>
+/// <param name="Intercept">True when pending events are read in Pre.</param>
+/// <param name="Inject">True when <see cref="Gameplay.Inject"/> works: Kiln's program is registered and the game's
+/// emitter was found.</param>
+/// <param name="CraftHook">True when the craft core is hooked.</param>
+/// <param name="BuildHooks">True when the building core is hooked.</param>
+/// <param name="TerraformHook">True when the terraforming impact is hooked.</param>
+/// <param name="SpawnHook">True when the random spawners' spawn is hooked.</param>
+/// <param name="Teleports">True when Teleport components are watched.</param>
+/// <param name="WorldRunning">True when a server world is stepping.</param>
+/// <param name="Zones">How many protection zones are registered.</param>
+/// <param name="Subscribers">How many event subscriptions there are.</param>
+/// <param name="Steps">How many Pre passes read pending events.</param>
+/// <param name="EventsSeen">How many pending records were read (all types).</param>
+/// <param name="Dispatched">How many events were handed to subscribers.</param>
+/// <param name="Canceled">How many Pre events were neutralized.</param>
+/// <param name="Denied">How many hook operations zones refused.</param>
+/// <param name="HookRecords">How many hook records were reported in Post.</param>
 public sealed record GameplayStatus(bool Intercept, bool Inject, bool CraftHook, bool BuildHooks, bool TerraformHook,
     bool SpawnHook, bool Teleports, bool WorldRunning, int Zones, int Subscribers, ulong Steps, ulong EventsSeen,
     ulong Dispatched, ulong Canceled, ulong Denied, ulong HookRecords)
@@ -84,13 +123,17 @@ public sealed record GameplayStatus(bool Intercept, bool Inject, bool CraftHook,
     public bool EntityHooks { get; init; }
     /// <summary>Categories reported now.</summary>
     public EntityCategories EntityCategories { get; init; }
+    /// <summary>Entity creations reported so far.</summary>
     public ulong EntitiesJoined { get; init; }
+    /// <summary>Entity destructions reported so far.</summary>
     public ulong EntitiesLeft { get; init; }
     /// <summary>Creations/destructions the hooks saw outside the categories.</summary>
     public ulong EntitiesFiltered { get; init; }
     /// <summary>Discard actions (<see cref="ItemTossEvent"/>) are read on this build.</summary>
     public bool Discard { get; init; }
+    /// <summary>Discard actions read so far.</summary>
     public ulong DiscardsSeen { get; init; }
+    /// <summary>Discard actions canceled so far.</summary>
     public ulong DiscardsCanceled { get; init; }
 }
 
@@ -134,6 +177,7 @@ public static unsafe partial class Gameplay
     [ModuleInitializer]
     internal static void ModuleInit() => ServiceUse.Start(typeof(Gameplay).Assembly, "kiln.gameplay", static () => EnsureListener());
 
+    /// <summary>The service's state, or null when the native service is not loaded.</summary>
     [AnyThread]
     public static GameplayStatus? Status
     {

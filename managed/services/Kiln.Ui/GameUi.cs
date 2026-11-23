@@ -13,8 +13,10 @@ public sealed class UiText
 {
     private readonly Dictionary<string, string> _texts;
 
+    /// <summary>A text that is the same in every language.</summary>
     public UiText(string text) => _texts = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["*"] = text ?? "" };
 
+    /// <summary>A text per language: the keys are language keys ("en", "pt-br") or <c>*</c> for any language.</summary>
     public UiText(IReadOnlyDictionary<string, string> texts)
     {
         _texts = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -26,6 +28,7 @@ public sealed class UiText
     public static UiText Of(params (string Language, string Text)[] texts) =>
         new(texts.ToDictionary(t => t.Language, t => t.Text, StringComparer.OrdinalIgnoreCase));
 
+    /// <summary>A plain string as a text for every language.</summary>
     public static implicit operator UiText(string text) => new(text);
 
     /// <summary>The languages given ("en", "de", "*", ...).</summary>
@@ -76,23 +79,136 @@ public static class GameLanguage
 /// <summary>keen::UiState: the game's top-level UI state.</summary>
 public enum GameUiState : byte
 {
-    None = 0, Preload = 1, PreGame = 2, Load = 3, LoreIntro = 4, LoreOutro = 5, Credits = 6, Play = 7,
+    /// <summary>No state yet (boot), or a dedicated server.</summary>
+    None = 0,
+    /// <summary>Start-up logos and the title screen.</summary>
+    Preload = 1,
+    /// <summary>The main menu (landing page, character and world selection, the main menu's settings).</summary>
+    PreGame = 2,
+    /// <summary>Loading a world.</summary>
+    Load = 3,
+    /// <summary>The lore intro.</summary>
+    LoreIntro = 4,
+    /// <summary>The lore outro.</summary>
+    LoreOutro = 5,
+    /// <summary>The credits.</summary>
+    Credits = 6,
+    /// <summary>In game: <see cref="GameScreen.Hud"/> says which screen is open.</summary>
+    Play = 7,
 }
 
 /// <summary>keen::HudScreenType (reflected enum of client 26404966): the screen open in game.</summary>
+/// <remarks>The names and numbers are the game's. Kiln reads the screens named in <see cref="ScreenKind"/> and <see cref="GameScreen.Target"/>; for the others the description here only says what the name says.</remarks>
 public enum HudScreen : byte
 {
-    Invalid = 0, InGame = 1, SystemMenu = 2, SettingsMenu = 3, InGameMenu = 4, Map = 5, Journal = 6, Character = 7,
-    PlayerCrafting = 8, Backpack = 9, SkillTree = 10, SkillTreeRespec = 11, FlameAltar = 12, AltarUpgrade = 13,
-    FlameUpgrade = 14, AltarDeactivate = 15, AltarReskill = 16, AltarItemPickup = 17, LoreReading = 18, Signpost = 19,
-    LogicEditor = 20, ReadOnlyLootChest = 21, StorageChest = 22, Collection = 23, FeedingStation = 24,
-    StationBasedCrafting = 25, NpcDialog = 26, NpcCrafting = 27, FactoryCrafting = 28, BlueprintMultiTool = 29,
-    BlueprintMultiToolMaterialCatalog = 30, OvergrowthMultiTool = 31, DecayMultiTool = 32,
-    ScrewdriverMultiToolBuildingMode = 33, ScrewdriverMultiToolGraphManager = 34, ScrewdriverMultiToolEntityConfig = 35,
-    TerraformingSideMenu = 36, NpcSummonerMenu = 37, UserFeedback = 38, TwitchDrops = 39, RedeemCommerceProducts = 40,
-    CommerceProductChest = 41, ItemTinting = 42, TextChat = 43, Social = 44, ShroudForge = 45,
-    CharacterCustomization = 46, Rename = 47, TakeScreenshot = 48, InfoPopup = 49, NewCommerceUnlock = 50, NoUi = 51,
-    TechGallery = 52, YcPlayground = 53,
+    /// <summary>Not a screen: the game's invalid value. <see cref="ScreenKind"/> treats it as in game.</summary>
+    Invalid = 0,
+    /// <summary>Playing with no menu open: the HUD.</summary>
+    InGame = 1,
+    /// <summary>The pause (system) menu, opened with Escape.</summary>
+    SystemMenu = 2,
+    /// <summary>The settings menu.</summary>
+    SettingsMenu = 3,
+    /// <summary>The tabbed in-game menu (character, map, journal, crafting, backpack, skills).</summary>
+    InGameMenu = 4,
+    /// <summary>The map.</summary>
+    Map = 5,
+    /// <summary>The journal.</summary>
+    Journal = 6,
+    /// <summary>The character screen.</summary>
+    Character = 7,
+    /// <summary>The player's own crafting menu.</summary>
+    PlayerCrafting = 8,
+    /// <summary>The backpack.</summary>
+    Backpack = 9,
+    /// <summary>The skill tree.</summary>
+    SkillTree = 10,
+    /// <summary>The skill tree's respec screen.</summary>
+    SkillTreeRespec = 11,
+    /// <summary>The flame altar's screen.</summary>
+    FlameAltar = 12,
+    /// <summary>The altar upgrade screen.</summary>
+    AltarUpgrade = 13,
+    /// <summary>The flame upgrade screen.</summary>
+    FlameUpgrade = 14,
+    /// <summary>The altar deactivate screen.</summary>
+    AltarDeactivate = 15,
+    /// <summary>The altar re-skill screen.</summary>
+    AltarReskill = 16,
+    /// <summary>The altar's item pickup screen.</summary>
+    AltarItemPickup = 17,
+    /// <summary>The lore reading screen.</summary>
+    LoreReading = 18,
+    /// <summary>The signpost screen.</summary>
+    Signpost = 19,
+    /// <summary>The logic editor screen.</summary>
+    LogicEditor = 20,
+    /// <summary>A read-only loot chest's screen.</summary>
+    ReadOnlyLootChest = 21,
+    /// <summary>A storage chest's screen, a chest-style transfer screen. <see cref="GameScreen.Target"/> is the chest.</summary>
+    StorageChest = 22,
+    /// <summary>The collection screen.</summary>
+    Collection = 23,
+    /// <summary>The feeding station's screen.</summary>
+    FeedingStation = 24,
+    /// <summary>A crafting station's crafting menu (see <see cref="CraftingScreen"/>).</summary>
+    StationBasedCrafting = 25,
+    /// <summary>An NPC's dialog.</summary>
+    NpcDialog = 26,
+    /// <summary>An NPC's crafting menu.</summary>
+    NpcCrafting = 27,
+    /// <summary>A production station's screen (a kiln, smelter, loom, seed bed). The game draws it as a transfer screen: see <see cref="CraftingScreen.IsFactory"/>. <see cref="GameScreen.Target"/> is the station.</summary>
+    FactoryCrafting = 28,
+    /// <summary>The blueprint multi tool's screen.</summary>
+    BlueprintMultiTool = 29,
+    /// <summary>The blueprint multi tool's material catalog.</summary>
+    BlueprintMultiToolMaterialCatalog = 30,
+    /// <summary>The overgrowth multi tool's screen.</summary>
+    OvergrowthMultiTool = 31,
+    /// <summary>The decay multi tool's screen.</summary>
+    DecayMultiTool = 32,
+    /// <summary>The screwdriver multi tool's building mode screen.</summary>
+    ScrewdriverMultiToolBuildingMode = 33,
+    /// <summary>The screwdriver multi tool's graph manager screen.</summary>
+    ScrewdriverMultiToolGraphManager = 34,
+    /// <summary>The screwdriver multi tool's entity configuration screen.</summary>
+    ScrewdriverMultiToolEntityConfig = 35,
+    /// <summary>The terraforming side menu.</summary>
+    TerraformingSideMenu = 36,
+    /// <summary>The NPC summoner menu.</summary>
+    NpcSummonerMenu = 37,
+    /// <summary>The user feedback screen.</summary>
+    UserFeedback = 38,
+    /// <summary>The Twitch drops screen.</summary>
+    TwitchDrops = 39,
+    /// <summary>The screen to redeem commerce products.</summary>
+    RedeemCommerceProducts = 40,
+    /// <summary>A commerce product chest's screen, a chest-style transfer screen. <see cref="GameScreen.Target"/> is the chest.</summary>
+    CommerceProductChest = 41,
+    /// <summary>The item tinting screen.</summary>
+    ItemTinting = 42,
+    /// <summary>The text chat.</summary>
+    TextChat = 43,
+    /// <summary>The social screen.</summary>
+    Social = 44,
+    /// <summary>The Shroud Forge screen (the Gem Forge).</summary>
+    ShroudForge = 45,
+    /// <summary>The character customization screen.</summary>
+    CharacterCustomization = 46,
+    /// <summary>The rename screen.</summary>
+    Rename = 47,
+    /// <summary>The take-screenshot screen.</summary>
+    TakeScreenshot = 48,
+    /// <summary>An info popup.</summary>
+    InfoPopup = 49,
+    /// <summary>The new commerce unlock screen.</summary>
+    NewCommerceUnlock = 50,
+    /// <summary>No UI is drawn. <see cref="ScreenKind"/> treats it as in game.</summary>
+    NoUi = 51,
+    /// <summary>The game's tech gallery screen.</summary>
+    TechGallery = 52,
+    /// <summary>The game's YcPlayground screen.</summary>
+    YcPlayground = 53,
 }
 
 /// <summary>What kind of screen the player looks at (a summary of <see cref="GameUiState"/> and <see cref="HudScreen"/>).</summary>
@@ -104,27 +220,35 @@ public enum ScreenKind
     Title,
     /// <summary>The main menu (landing page, character and world selection, the main menu's settings).</summary>
     MainMenu,
+    /// <summary>Loading a world.</summary>
     Loading,
     /// <summary>The lore intro / outro.</summary>
     Cinematic,
+    /// <summary>The credits.</summary>
     Credits,
     /// <summary>Playing: the HUD, no menu open.</summary>
     InGame,
     /// <summary>The pause (system) menu, opened with Escape.</summary>
     PauseMenu,
+    /// <summary>The settings menu.</summary>
     Settings,
     /// <summary>The tabbed in-game menu (character, map, journal, crafting, backpack, skills) or the backpack.</summary>
     Inventory,
+    /// <summary>The map.</summary>
     Map,
+    /// <summary>The journal.</summary>
     Journal,
+    /// <summary>The character screen (or character customization).</summary>
     Character,
     /// <summary>A crafting menu: the player's own, a crafting station's, an NPC's or a factory's (see <see cref="GameScreen.Crafting"/>).</summary>
     Crafting,
+    /// <summary>The skill tree (or its respec screen).</summary>
     SkillTree,
     /// <summary>A storage or loot chest.</summary>
     Storage,
     /// <summary>NPC dialog.</summary>
     Dialog,
+    /// <summary>The text chat.</summary>
     Chat,
     /// <summary>Any other game screen (see <see cref="GameScreen.Hud"/>).</summary>
     Other,
@@ -154,9 +278,17 @@ public readonly record struct CraftingScreen(bool AtStation, uint Workshop, uint
 
 /// <summary>The game screen of the last UI frame. <c>StationWorkshop</c>: the workshop id of the crafting station the
 /// player uses (0 when none).</summary>
+/// <param name="State">The game's top-level UI state.</param>
+/// <param name="Hud">The screen open in game: meaningful while <paramref name="State"/> is <see cref="GameUiState.Play"/>, otherwise <see cref="HudScreen.Invalid"/>.</param>
+/// <param name="Kind">A summary of <paramref name="State"/> and <paramref name="Hud"/>.</param>
+/// <param name="StationWorkshop">The game's <c>keen::WorkshopId</c> of the crafting station the player uses; 0 when none.</param>
+/// <param name="Crafting">The crafting menu that is open (or a production station's screen); null when none is.</param>
+/// <param name="LanguageId">The game's <c>keen::LanguageId</c> of its text language; 0 when unknown. <see cref="Language"/> is its key.</param>
+/// <param name="Frame">Game UI frames since start, at the frame this was read.</param>
 public readonly record struct GameScreen(GameUiState State, HudScreen Hud, ScreenKind Kind, uint StationWorkshop,
     CraftingScreen? Crafting, uint LanguageId, ulong Frame)
 {
+    /// <summary>No screen known: no UI state, no HUD screen, no crafting menu.</summary>
     public static readonly GameScreen None = new(GameUiState.None, HudScreen.Invalid, ScreenKind.None, 0, null, 0, 0);
 
     /// <summary>The entity the open screen is about, on the screens the game draws as a chest-style transfer screen: a storage
@@ -174,8 +306,11 @@ public readonly record struct GameScreen(GameUiState State, HudScreen Hud, Scree
     /// <summary>The game's text language key ("de-de", ...).</summary>
     public string Language => GameLanguage.KeyOf(LanguageId);
 
+    /// <summary>True on the main menu (<see cref="ScreenKind.MainMenu"/>).</summary>
     public bool IsMainMenu => Kind == ScreenKind.MainMenu;
+    /// <summary>True in the pause menu (<see cref="ScreenKind.PauseMenu"/>).</summary>
     public bool IsPaused => Kind == ScreenKind.PauseMenu;
+    /// <summary>True while a world is played: <see cref="State"/> is <see cref="GameUiState.Play"/>, whatever screen is open.</summary>
     public bool InGame => State == GameUiState.Play;
 
     internal static ScreenKind KindOf(GameUiState s, HudScreen h, byte crafting) => s switch
@@ -233,7 +368,9 @@ public readonly record struct GameScreen(GameUiState State, HudScreen Hud, Scree
 /// without delay, on the game's UI thread, use <see cref="Ui.Screens.Changed"/>.</summary>
 public sealed class ScreenChangedEvent(GameScreen previous, GameScreen current) : KilnEvent
 {
+    /// <summary>The screen before the change.</summary>
     public GameScreen Previous { get; } = previous;
+    /// <summary>The screen after the change.</summary>
     public GameScreen Current { get; } = current;
     /// <summary>The kind opened (<see cref="Current"/>.Kind) when it differs from the previous one.</summary>
     public bool KindChanged => Previous.Kind != Current.Kind;
@@ -394,7 +531,9 @@ public sealed class MenuEntry : IDisposable
         Owner = owner;
     }
 
+    /// <summary>The menu the entry is in.</summary>
     public MenuLocation Location { get; }
+    /// <summary>Where the entry sits: lower first (see <see cref="Ui.Menus.Add"/>).</summary>
     public int Order { get; }
     internal ModContext? Owner { get; }
 
@@ -413,6 +552,7 @@ public sealed class MenuEntry : IDisposable
         }
     }
 
+    /// <summary>False hides the entry from the menu without removing it. Default true.</summary>
     public bool Visible
     {
         get => _visible;

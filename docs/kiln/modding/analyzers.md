@@ -227,7 +227,7 @@ Context.Tasks.Run("loot-scan", async ctx =>
     var found = ScanNearbyContainers(area);            // a worker: compute and IO are fine here
     Chat.Broadcast("scan done");                       // KILN101: runs on a Kiln task worker (Context.Tasks.Run)
     await ctx.ToTick();
-    foreach (var c in found) Inventory.Transfer(c, player);   // on the tick after the hop
+    foreach (var c in found) await Items.MoveAll(c, player);   // on the tick after the hop
     await ctx.NextGateWindow();
     Chat.Broadcast("applied");                         // KILN101: NextGateWindow took the work back to a worker
 });

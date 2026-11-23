@@ -17,7 +17,9 @@ namespace Kiln;
 [BlockClients(ClientsLevel.Mod)]
 public sealed record BlueprintBlock : IBlock, ITweakable
 {
+    /// <summary>The shape's name, as players read it in the build menu. Required.</summary>
     public required string Name { get; init; }
+    /// <summary>The shape's description.</summary>
     public string? Description { get; init; }
 
     /// <summary>The shape, half a metre a cell: layers from the bottom up; in a layer, rows from the back (+z) to the front; in a row, cells from left to right. <c>#</c> is a cell,

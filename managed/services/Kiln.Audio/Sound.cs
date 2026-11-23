@@ -6,9 +6,13 @@ using System.Runtime.InteropServices;
 namespace Kiln;
 
 /// <summary>A cue: a SoundContainerResource GUID (takes, volume, loop, 3D distances), vanilla or a mod's.</summary>
+/// <param name="Cue">The cue's resource GUID. <see cref="Guid.Empty"/> means no cue.</param>
 public readonly record struct SoundId(Guid Cue)
 {
+    /// <summary>No cue (the default value). Playing it returns <see cref="SoundHandle.None"/>.</summary>
     public static readonly SoundId None = default;
+
+    /// <summary>True when this is <see cref="None"/> (an empty GUID).</summary>
     public bool IsNone => Cue == Guid.Empty;
 
     /// <summary>Any cue by GUID (vanilla or modded).</summary>
@@ -28,15 +32,24 @@ public readonly record struct SoundId(Guid Cue)
     /// <summary>Another loaded mod's cue (e.g. a sound pack's), by mod id and cue name.</summary>
     public static SoundId Named(string modId, string name) => new(AudioCore.IndexOf(modId).CueGuid(name));
 
+    /// <summary>The cue's GUID as text.</summary>
     public override string ToString() => Cue.ToString();
 }
 
 /// <summary>A voice-over line: a VoiceoverResource GUID (one cue per voice language: en, de, fr, es, zh).</summary>
+/// <param name="Value">The line's resource GUID. <see cref="Guid.Empty"/> means no line.</param>
 public readonly record struct VoiceoverId(Guid Value)
 {
+    /// <summary>No line (the default value).</summary>
     public static readonly VoiceoverId None = default;
+
+    /// <summary>True when this is <see cref="None"/> (an empty GUID).</summary>
     public bool IsNone => Value == Guid.Empty;
+
+    /// <summary>Any voice-over line by GUID (the game's or a mod's).</summary>
     public static VoiceoverId Of(Guid line) => new(line);
+
+    /// <summary>Any voice-over line by GUID text. Throws <see cref="FormatException"/> when the text is not a GUID.</summary>
     public static VoiceoverId Of(string line) => new(Guid.Parse(line));
 
     /// <summary>The calling mod's voice-over <paramref name="name"/> (its recipe's <c>voiceover</c> step).</summary>
@@ -49,16 +62,20 @@ public readonly record struct VoiceoverId(Guid Value)
     /// <summary>Another loaded mod's voice-over line.</summary>
     public static VoiceoverId Named(string modId, string name) => new(AudioCore.IndexOf(modId).VoiceoverGuid(name));
 
+    /// <summary>The line's GUID as text.</summary>
     public override string ToString() => Value.ToString();
 }
 
 /// <summary>The game's sound scenes (keen::SoundSceneType). Each has its own voices and the player's volume slider.</summary>
 public enum SoundScene : uint
 {
+    /// <summary>Music: Kiln's music slot (<see cref="Sound.PlayMusic"/>) plays here, on the player's music slider.</summary>
     Music = 0,
+    /// <summary>Interface sounds, 2D with no position.</summary>
     Ui = 1,
     /// <summary>The world: positional sounds.</summary>
     Game = 2,
+    /// <summary>Ambience beds.</summary>
     Ambience = 3,
     /// <summary>Lore narration (2 voices; ducks music and game sounds). Use <see cref="Voiceover.Narrate"/>.</summary>
     LoreVoiceover = 6,
@@ -83,11 +100,27 @@ public enum SoundState
 /// <summary>Why a sound is <see cref="SoundState.Stopped"/> or <see cref="SoundState.Failed"/>.</summary>
 public enum SoundEndReason
 {
-    None = 0, Finished = 1, Stopped = 2, EntityGone = 3, StartFailed = 4, NoSoundSystem = 5, TimedOut = 6, Replaced = 7,
+    /// <summary>No end reason yet: the sound is still pending or playing.</summary>
+    None = 0,
+    /// <summary>The sound ended by itself: a one-shot finished (or was ended at its cooked length).</summary>
+    Finished = 1,
+    /// <summary>The sound was stopped: <see cref="Sound.Stop"/>, <see cref="Sound.StopAll"/>, <see cref="Voiceover.Stop"/>, or its mod unloading.</summary>
+    Stopped = 2,
+    /// <summary>A sound that follows an entity ended because the entity disappeared (or the client world ended).</summary>
+    EntityGone = 3,
+    /// <summary>Failed: the game refused to start the sound (unknown cue, no data, voice limit, bad scene).</summary>
+    StartFailed = 4,
+    /// <summary>Failed: the game's sound system was never captured, so nothing can play.</summary>
+    NoSoundSystem = 5,
+    /// <summary>Failed: the sound waited 10 s and never started (no client world for a followed sound, no voice-over manager, or a voice-over resource that never loaded).</summary>
+    TimedOut = 6,
+    /// <summary>Another line took the voice-over channel or the music slot.</summary>
+    Replaced = 7,
     /// <summary>Voice-over: the line has no take for the player's voice language (the mod's cooked data).</summary>
     Silent = 8,
     /// <summary>Narration: the lore queue did not take it (auto-play "never", queue full).</summary>
     Refused = 9,
+    /// <summary>The client world ended: Game and Ambience sounds, followed sounds and voice-over lines stop with it.</summary>
     WorldEnded = 10,
     /// <summary>No such cue or voice-over line: neither the game nor a loaded mod has a resource with that GUID.</summary>
     NotFound = 11,
@@ -96,24 +129,61 @@ public enum SoundEndReason
 }
 
 /// <summary>A playing (or finished) sound. Kiln's id: never reused, safe to keep.</summary>
+/// <param name="Value">Kiln's id for the sound. 0 means no sound; a server-relayed handle has bit 31 set (see <see cref="IsRemote"/>).</param>
 public readonly record struct SoundHandle(uint Value)
 {
+    /// <summary>No sound (the default value): what a call returns when nothing was started.</summary>
     public static readonly SoundHandle None = default;
+
+    /// <summary>True when this is <see cref="None"/>.</summary>
     public bool IsNone => Value == 0;
 
     /// <summary>A server-side handle (the sound was relayed to Kiln clients).</summary>
     public bool IsRemote => (Value & AudioCore.RemoteBit) != 0;
 
+    /// <summary>The handle as <c>#n</c>, or <c>remote#n</c> for a server-relayed handle.</summary>
     public override string ToString() => IsRemote ? $"remote#{Value & ~AudioCore.RemoteBit}" : $"#{Value}";
 }
 
 /// <summary>Details of a sound (client side).</summary>
+/// <param name="Handle">The handle these details belong to.</param>
+/// <param name="State">Where the sound stands: pending, playing, stopped or failed.</param>
+/// <param name="Reason">Why the sound is <see cref="SoundState.Stopped"/> or <see cref="SoundState.Failed"/>. <see cref="SoundEndReason.None"/> while it is pending or playing.</param>
+/// <param name="Scene">The sound scene the sound plays in.</param>
+/// <param name="Instance">The game's own instance id behind the handle; 0 when the game has not started it yet.</param>
+/// <param name="Thread">The id of the thread that made the game's start call (the game's main thread).</param>
+/// <param name="Entity">The entity the sound was started on (<see cref="Sound.PlayOn"/>); <see cref="EntityId.None"/> for a sound without one.</param>
+/// <param name="Following">True while the sound's position follows <see cref="Entity"/>. It is set once the sound has started on a matching entity, and cleared by <see cref="Sound.SetPosition"/>.</param>
+/// <param name="Unmatched">True when the sound was asked to follow an entity but plays at its given position without following: the entity was not in the client world, or (a relayed sound) it was too far from the sent position.</param>
+/// <param name="VoiceLanguage">For a voice-over line or narration: the voice language that was played (en, de, fr, es or zh). Null for other sounds.</param>
+/// <param name="StartDelay">The time from the request until the game started the sound. Null until it has started.</param>
+/// <param name="Played">How long the sound has played so far, or in total once it has ended. Null until it has started.</param>
+/// <param name="Position">The last position set for the sound (<see cref="Sound.PlayAt"/>, <see cref="Sound.PlayOn"/>, <see cref="Sound.SetPosition"/>). Meaningful for a positional sound.</param>
 public sealed record SoundInfo(
     SoundHandle Handle, SoundState State, SoundEndReason Reason, SoundScene Scene, uint Instance, int Thread,
     EntityId Entity, bool Following, bool Unmatched, string? VoiceLanguage, TimeSpan? StartDelay, TimeSpan? Played,
     WorldPosition Position);
 
-/// <summary>kiln.audio's state (client side).</summary>
+/// <summary>kiln.audio's state (client side), from <see cref="Sound.Status"/>.</summary>
+/// <param name="Available">The play feature (<c>audio.play</c>) is available.</param>
+/// <param name="SoundSystem">The game's sound system and its scenes are captured, so sounds can play.</param>
+/// <param name="Voiceover">Voice-over lines (<see cref="Voiceover.Play"/>, the <c>audio.voiceover</c> feature) are available.</param>
+/// <param name="Narration">Narration (<see cref="Voiceover.Narrate"/>, the <c>audio.narration</c> feature) is available.</param>
+/// <param name="VoiceoverManager">The game's voice-over manager is running (in a game world, not the menu).</param>
+/// <param name="Frames">A main-thread drain is running, so queued calls start (a UI frame or a client-world step).</param>
+/// <param name="MainThread">The id of the thread that runs the drains (the game's main thread).</param>
+/// <param name="VoiceLanguageId">The game's language id of the player's voice-over setting; 0 when not seen yet.</param>
+/// <param name="VoiceLanguage">The player's voice language as a short key: en, de, fr, es or zh. Empty when not seen yet.</param>
+/// <param name="VoiceoverVolume">The voice-over volume the game's manager applies.</param>
+/// <param name="LoreMode">The game's lore auto-play mode byte (believed: 0 play now, 1 queue, 2 and up never; this mapping is not confirmed in the game).</param>
+/// <param name="LoreQueued">The number of entries in the game's lore queue.</param>
+/// <param name="Live">The number of sounds that are pending or playing.</param>
+/// <param name="Played">The number of Kiln sound starts that worked since boot.</param>
+/// <param name="Failed">The number of Kiln sound starts that failed since boot.</param>
+/// <param name="GameStarts">The number of start calls the game made itself (counted only when the start probe is on; diagnostics).</param>
+/// <param name="GameStartsOffMainThread">Of <paramref name="GameStarts"/>, the calls that were not on the main thread (diagnostics).</param>
+/// <param name="GameThreads">The number of distinct threads the game's own start calls came from (diagnostics).</param>
+/// <param name="Scenes">The game's scene ids, indexed by <see cref="SoundScene"/> (seven entries); 0 means a scene that was not captured.</param>
 public sealed record AudioStatus(
     bool Available, bool SoundSystem, bool Voiceover, bool Narration, bool VoiceoverManager, bool Frames,
     int MainThread, uint VoiceLanguageId, string VoiceLanguage, float VoiceoverVolume, uint LoreMode, uint LoreQueued,

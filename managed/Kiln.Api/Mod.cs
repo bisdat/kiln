@@ -80,9 +80,13 @@ public sealed record ModInfo(string Id, string Name, string Version, string Dire
     /// <summary>Where the mod runs: <c>server</c> (default), <c>client</c> or <c>both</c>.</summary>
     public ModSide Side { get; init; } = ModSide.Server;
 
+    /// <summary>The mod's description from <c>kiln.mod.json</c>; empty when it has none.</summary>
     public string Description { get; init; } = "";
+    /// <summary>The mod's authors from <c>kiln.mod.json</c>.</summary>
     public IReadOnlyList<string> Authors { get; init; } = [];
+    /// <summary>The license the manifest names; null when it names none.</summary>
     public string? License { get; init; }
+    /// <summary>The web address the manifest names; null when it names none.</summary>
     public string? Url { get; init; }
 
     /// <summary>The Kiln API range the mod declared (<c>apiVersion</c>).</summary>
@@ -122,7 +126,9 @@ public sealed class ModContext
         Tasks = new KilnTasks(this);
     }
 
+    /// <summary>The mod's identity and metadata (its <c>kiln.mod.json</c>).</summary>
     public ModInfo Info { get; }
+    /// <summary>The mod's logger: lines go to <c>kiln.log</c> tagged with the mod's id.</summary>
     public Logger Log { get; }
 
     /// <summary>Server-world tick events (24.5 Hz on a dedicated server).</summary>
@@ -215,7 +221,7 @@ public sealed class ModContext
 
     /// <summary>The mod's live tasks as <c>'name' (State)</c> joined by ", ", or null when none is live. The host
     /// polls this off the tick while it joins the mod's tasks after the unload; nothing on the tick ever waits on
-    /// it, and <see cref="OnUnload"/> never does.</summary>
+    /// it, and <see cref="Mod.OnUnload"/> never does.</summary>
     internal Func<string?>? UnloadTaskBlocker;
 
     /// <summary>What keeps this mod's tasks from being quiescent after its unload began, or null when they are.

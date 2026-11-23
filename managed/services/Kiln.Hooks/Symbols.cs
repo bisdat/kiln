@@ -20,6 +20,8 @@ public static unsafe class Symbols
         => TryGet(name, out var addr) ? addr
             : throw new KeyNotFoundException($"sigdb symbol '{name}' is unresolved on this build");
 
+    /// <summary>Looks up the sigdb symbol <paramref name="name"/> like <see cref="Get"/> but returns false instead of
+    /// throwing when it is unresolved on this build. Still throws when the calling mod is not advanced.</summary>
     public static bool TryGet(string name, out nuint address)
     {
         HooksGate.RequireAdvanced("Symbols.Get");
@@ -171,6 +173,8 @@ public static unsafe class Constants
         => TryGet(name, out var v) ? v
             : throw new KeyNotFoundException($"sigdb constant '{name}' is unresolved on this build");
 
+    /// <summary>Looks up the sigdb constant <paramref name="name"/> like <see cref="Get"/> but returns false instead
+    /// of throwing when it is unresolved on this build. Still throws when the calling mod is not advanced.</summary>
     public static bool TryGet(string name, out long value)
     {
         HooksGate.RequireAdvanced("Constants.Get");
@@ -183,5 +187,11 @@ public static unsafe class Constants
 }
 
 /// <summary>Result of resolving a mod's shipped symbol fragment.</summary>
+/// <param name="Symbols">How many symbols the fragment declares.</param>
+/// <param name="SymbolsOk">How many of those symbols resolved on this build.</param>
+/// <param name="Constants">How many constants the fragment declares.</param>
+/// <param name="ConstantsOk">How many of those constants resolved on this build.</param>
+/// <param name="Features">How many features the fragment declares.</param>
+/// <param name="FeaturesOk">How many of those features are on for this build.</param>
 public readonly record struct SigSummary(int Symbols, int SymbolsOk, int Constants, int ConstantsOk, int Features,
     int FeaturesOk);

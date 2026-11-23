@@ -15,6 +15,7 @@ public enum CraftingPanelAnchor
 {
     /// <summary>Along the right edge of the screen (the crafting menu's details are on the left and centre).</summary>
     Right,
+    /// <summary>Along the left edge of the screen.</summary>
     Left,
     /// <summary>Above the bottom edge, centred.</summary>
     Bottom,
@@ -23,6 +24,7 @@ public enum CraftingPanelAnchor
 /// <summary>Options of a crafting panel.</summary>
 public sealed record CraftingPanelOptions
 {
+    /// <summary>Where the panel sits. Default right.</summary>
     public CraftingPanelAnchor Anchor { get; init; } = CraftingPanelAnchor.Right;
     /// <summary>Width in pixels at scale 1 (height fits the contents).</summary>
     public float Width { get; init; } = 340;
@@ -48,7 +50,9 @@ public sealed class CraftingMenuAddition : IDisposable
 {
     internal ulong Handle;
     internal ModContext? Owner;
+    /// <summary>The <c>keen::WorkshopId</c> of the station whose menu it was added to.</summary>
     public uint Workshop { get; internal init; }
+    /// <summary>True for a tab, false for a subcategory.</summary>
     public bool IsTab { get; internal init; }
 
     /// <summary>Takes it out of the menu (the menu shows the change when it next rebuilds its lists: reopen it).</summary>

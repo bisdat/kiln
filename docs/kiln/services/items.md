@@ -1020,7 +1020,7 @@ Details and every field: the header.
 ## For Kiln.Admin
 | op | Kiln |
 |---|---|
-| `inventory {entity}` → `{inventories:[{link, entity, category, slots:[{item, count, pide}]}], generic, available}` | `Items.Read(entity)`: group `Slots` by `Slot.Inventory` (`Link`, `Category`), `GenericSlots`, `AvailableSlots`. Names: `Items.Get(slot.Item)?.Label` |
+| `inventory {entity}` → `{inventories:[{link, entity, category, slots:[{item, count, pide}]}], generic, available}` | `Items.Read(entity)`: group `Slots` by `InventorySlot.Link` (an index into `Inventories`, whose entries have an `Inventory` and a `Category`), `GenericSlots`, `AvailableSlots`. Names: `Items.Get(slot.Item)?.Label` |
 | `give_item {entity, item, count 1..100000, maxStack}` → `{given, requested, stacks}` | `await Items.Give(entity, new ItemId(item), count, gear, GiveOptions.Notify)` → `{given = r.Done, requested = r.Requested, stacks = r.Changes.Count}`. `maxStack` is no longer needed (the game knows it); gear works: pass `new Gear(level, rarity)`; `Partial` / `NoRoom` say when the backpack is full |
 
 ## Client checklist (needs a joined player; not verifiable in a player-free lab)

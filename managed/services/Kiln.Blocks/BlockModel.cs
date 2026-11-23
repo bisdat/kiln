@@ -104,6 +104,7 @@ public sealed record AreaBlock
 {
     /// <summary>Metres.</summary>
     public required float Radius { get; init; }
+    /// <summary>Whom the area reaches: enemies of the caster (the default) or its friends, as the game's own enemy and friend checks tell.</summary>
     public AreaAffects Affects { get; init; } = AreaAffects.Enemies;
     /// <summary>What each one in the area gets.</summary>
     public required IReadOnlyList<EffectRef> Effects { get; init; }
@@ -112,25 +113,86 @@ public sealed record AreaBlock
     public VfxRef? Vfx { get; init; }
 }
 
-public enum EffectOn { Target, Caster }
-public enum AreaAffects { Enemies, Friends }
-public enum Flinch { None = 0, VeryLight = 1, Light = 2, Medium = 3, Heavy = 4 }
-public enum Knockback { None = 0, Small = 1, Normal = 2, Big = 3, VeryBig = 4, VerySmall = 5, PullSmall = 6, PullNormal = 7 }
+/// <summary>Who an <see cref="EffectBlock"/> is for.</summary>
+public enum EffectOn
+{
+    /// <summary>What the trigger gives it: what was hit, who has the status.</summary>
+    Target,
+    /// <summary>The caster: whoever wields the weapon or cast the spell.</summary>
+    Caster,
+}
+
+/// <summary>Whom an area, a cone, a beam, a zone or a chain reaches, judged from the caster by the game's own enemy and friend checks.</summary>
+public enum AreaAffects
+{
+    /// <summary>Whoever is an enemy of the caster.</summary>
+    Enemies,
+    /// <summary>Whoever is a friend of the caster.</summary>
+    Friends,
+}
+
+/// <summary>How hard a hit makes its target flinch: the game's hit reaction, by its number.</summary>
+public enum Flinch
+{
+    /// <summary>No flinch.</summary>
+    None = 0,
+    /// <summary>The lightest flinch.</summary>
+    VeryLight = 1,
+    /// <summary>A light flinch. What an effect does when it says nothing.</summary>
+    Light = 2,
+    /// <summary>A medium flinch.</summary>
+    Medium = 3,
+    /// <summary>A heavy flinch.</summary>
+    Heavy = 4,
+}
+
+/// <summary>How far a hit pushes its target: the game's push-back strength, by its number. The two <c>Pull</c> values pull the target instead.</summary>
+public enum Knockback
+{
+    /// <summary>No push. The default.</summary>
+    None = 0,
+    /// <summary>A small push.</summary>
+    Small = 1,
+    /// <summary>A normal push.</summary>
+    Normal = 2,
+    /// <summary>A big push.</summary>
+    Big = 3,
+    /// <summary>A very big push.</summary>
+    VeryBig = 4,
+    /// <summary>A very small push, smaller than <see cref="Small"/>.</summary>
+    VerySmall = 5,
+    /// <summary>A small pull instead of a push.</summary>
+    PullSmall = 6,
+    /// <summary>A normal pull instead of a push.</summary>
+    PullNormal = 7,
+}
 
 /// <summary>Damage per kind. <c>Damage.Ice(40)</c>, <c>Damage.Ice(30) + Damage.Fire(10)</c>.</summary>
 public sealed record DamageBlock
 {
+    /// <summary>Cutting damage.</summary>
     public float Cut { get; init; }
+    /// <summary>Piercing damage.</summary>
     public float Pierce { get; init; }
+    /// <summary>Blunt damage.</summary>
     public float Blunt { get; init; }
+    /// <summary>Fire damage.</summary>
     public float Fire { get; init; }
+    /// <summary>Ice damage.</summary>
     public float Ice { get; init; }
+    /// <summary>Shroud damage.</summary>
     public float Shroud { get; init; }
+    /// <summary>Lightning damage.</summary>
     public float Lightning { get; init; }
+    /// <summary>Poison damage.</summary>
     public float Poison { get; init; }
+    /// <summary>Damage to wood, the game's own <c>woodDamage</c> in the hit's damage distribution. Whole numbers; <see cref="Total"/> leaves it out.</summary>
     public int Wood { get; init; }
+    /// <summary>Damage to stone, the game's own <c>stoneDamage</c> in the hit's damage distribution. Whole numbers; <see cref="Total"/> leaves it out.</summary>
     public int Stone { get; init; }
+    /// <summary>Damage to metal, the game's own <c>metalDamage</c> in the hit's damage distribution. Whole numbers; <see cref="Total"/> leaves it out.</summary>
     public int Metal { get; init; }
+    /// <summary>Explosion damage, the game's own <c>explosionDamage</c> in the hit's damage distribution. Whole numbers; <see cref="Total"/> leaves it out.</summary>
     public int Explosion { get; init; }
 
     /// <summary>On a spell: exactly this number, with no share of the staff's power. Elsewhere damage is flat anyway.</summary>
@@ -139,6 +201,7 @@ public sealed record DamageBlock
     /// <summary>The kinds that hurt, added up.</summary>
     [JsonIgnore] public float Total => Cut + Pierce + Blunt + Fire + Ice + Shroud + Lightning + Poison;
 
+    /// <summary>Adds two damages kind by kind. The result is <see cref="Flat"/> if either one is.</summary>
     public static DamageBlock operator +(DamageBlock a, DamageBlock b) => new()
     {
         Cut = a.Cut + b.Cut, Pierce = a.Pierce + b.Pierce, Blunt = a.Blunt + b.Blunt, Fire = a.Fire + b.Fire, Ice = a.Ice + b.Ice,
@@ -150,13 +213,21 @@ public sealed record DamageBlock
 /// <summary>Shorthands for <see cref="DamageBlock"/>.</summary>
 public static class Damage
 {
+    /// <summary>A <see cref="DamageBlock"/> of <paramref name="n"/> cutting damage.</summary>
     public static DamageBlock Cut(float n) => new() { Cut = n };
+    /// <summary>A <see cref="DamageBlock"/> of <paramref name="n"/> piercing damage.</summary>
     public static DamageBlock Pierce(float n) => new() { Pierce = n };
+    /// <summary>A <see cref="DamageBlock"/> of <paramref name="n"/> blunt damage.</summary>
     public static DamageBlock Blunt(float n) => new() { Blunt = n };
+    /// <summary>A <see cref="DamageBlock"/> of <paramref name="n"/> fire damage.</summary>
     public static DamageBlock Fire(float n) => new() { Fire = n };
+    /// <summary>A <see cref="DamageBlock"/> of <paramref name="n"/> ice damage.</summary>
     public static DamageBlock Ice(float n) => new() { Ice = n };
+    /// <summary>A <see cref="DamageBlock"/> of <paramref name="n"/> shroud damage.</summary>
     public static DamageBlock Shroud(float n) => new() { Shroud = n };
+    /// <summary>A <see cref="DamageBlock"/> of <paramref name="n"/> lightning damage.</summary>
     public static DamageBlock Lightning(float n) => new() { Lightning = n };
+    /// <summary>A <see cref="DamageBlock"/> of <paramref name="n"/> poison damage.</summary>
     public static DamageBlock Poison(float n) => new() { Poison = n };
 }
 
@@ -165,12 +236,15 @@ public static class Damage
 /// <summary>A buff or debuff: its own block, made of effects. Shown in the game's buff bar with its name and time.</summary>
 public sealed record StatusBlock : IBlock, ITweakable
 {
+    /// <summary>The status's name, as players read it in the buff bar. Required.</summary>
     public required string Name { get; init; }
+    /// <summary>What the status does, as players read it. Null: none, not the look's.</summary>
     public string? Description { get; init; }
     /// <summary>Seconds it lasts unless whoever applies it says otherwise. Needed unless <see cref="While"/> says when it ends.</summary>
     public double Seconds { get; init; }
     /// <summary>A player has it for as long as they are in this state: any of the game's, <c>PlayerStateId.Gliding</c>, in JSON a name such as <c>"Gliding"</c> or <c>"HangGliding"</c>.</summary>
     public PlayerStateRef? While { get; init; }
+    /// <summary>Whether it is a buff or a debuff: the slot it takes in the buff bar, and the look it gets when <see cref="Look"/> names none.</summary>
     public StatusKind Kind { get; init; } = StatusKind.Debuff;
     /// <summary>What it looks like: its icon and body effect. A premade <see cref="StatusLook"/> today; your own with VfxBlock.
     /// Null: a debuff has a timer's icon and a buff a blessing's, and neither has a body effect.</summary>
@@ -197,6 +271,7 @@ public sealed record StatusBlock : IBlock, ITweakable
     public IReadOnlyList<EffectRef>? OnApply { get; init; }
     /// <summary>Runs on whoever has it every <see cref="TickEvery"/> seconds.</summary>
     public IReadOnlyList<EffectRef>? OnTick { get; init; }
+    /// <summary>Seconds between runs of <see cref="OnTick"/>.</summary>
     public double TickEvery { get; init; } = 1;
     /// <summary>Runs on whoever has it when it ends.</summary>
     public IReadOnlyList<EffectRef>? OnExpire { get; init; }
@@ -209,9 +284,18 @@ public sealed record StatusBlock : IBlock, ITweakable
     public string? Was { get; init; }
 }
 
-public enum StatusKind { Debuff, Buff }
+/// <summary>Whether a status is a buff or a debuff.</summary>
+public enum StatusKind
+{
+    /// <summary>A debuff: it takes the buff bar's debuff slot. The default.</summary>
+    Debuff,
+    /// <summary>A buff: it takes the buff bar's buff slot.</summary>
+    Buff,
+}
 
 /// <summary>What a status looks like. Premade instances of a block you will also be able to write yourself.</summary>
+/// <param name="Key">The name JSON gives this look.</param>
+/// <param name="Starter">The game's own status it is made from, by name or <c>0x</c> id: it supplies the icon and body effect.</param>
 [JsonConverter(typeof(PremadeConverter<StatusLook>))]
 public sealed record StatusLook(string Key, string Starter) : IPremade
 {
@@ -237,13 +321,18 @@ public sealed record StatusLook(string Key, string Starter) : IPremade
 [JsonConverter(typeof(StatusApplyConverter))]
 public sealed record StatusApply
 {
+    /// <summary>The status to put on.</summary>
     public required StatusRef Status { get; init; }
     /// <summary>Seconds. Null: the status's own <see cref="StatusBlock.Seconds"/>.</summary>
     public double? Seconds { get; init; }
 
+    /// <summary>The status, for its own <see cref="StatusBlock.Seconds"/>.</summary>
     public static implicit operator StatusApply(StatusRef status) => new() { Status = status };
+    /// <summary>The status that <see cref="Blocks.Define{T}"/> returned, for its own <see cref="StatusBlock.Seconds"/>.</summary>
     public static implicit operator StatusApply(BlockHandle<StatusBlock> status) => new() { Status = status };
+    /// <summary>The status, written inline, for its own <see cref="StatusBlock.Seconds"/>.</summary>
     public static implicit operator StatusApply(StatusBlock status) => new() { Status = status };
+    /// <summary>A status by block name, for its own <see cref="StatusBlock.Seconds"/>.</summary>
     public static implicit operator StatusApply(string status) => new() { Status = status };
 }
 
@@ -252,7 +341,9 @@ public sealed record StatusApply
 /// <summary>A staff spell: an item in the stack per charge. A cast takes its <see cref="CastBlock.ManaCost"/> and one charge.</summary>
 public sealed record SpellBlock : IBlock, ITweakable
 {
+    /// <summary>The spell's name, as players read it on its item. Required.</summary>
     public required string Name { get; init; }
+    /// <summary>What the spell does, as players read it on its item. Null: none, not the starter's.</summary>
     public string? Description { get; init; }
     /// <summary>How it is cast: animation, timing, costs.</summary>
     public required CastBlock Cast { get; init; }
@@ -277,7 +368,9 @@ public sealed record SpellBlock : IBlock, ITweakable
 /// <summary>How a spell is cast.</summary>
 public sealed record CastBlock
 {
+    /// <summary>Mana one cast takes.</summary>
     public int ManaCost { get; init; }
+    /// <summary>Stamina one cast takes. 0: none.</summary>
     public int StaminaCost { get; init; }
     /// <summary>How many a cast takes of the spell's stack, or of an ability's item. 0: none, it is used for ever. Null: 1. An ability with no item has none to take.</summary>
     public int? Charges { get; init; }
@@ -292,6 +385,9 @@ public sealed record CastBlock
 
 /// <summary>A cast animation with its timing. Premade instances; <c>CastAnimation.Lob with { Animation = …, HitAt = 1.2 }</c> plays another state or moves the release
 /// (in JSON <c>{ "like": "lob", "animation": …, "hitAt": 1.2 }</c>; without <c>like</c>, the quick bolt). A spell takes them; an ability's cast does not yet.</summary>
+/// <param name="Key">The name JSON gives this animation (<c>"fast-bolt"</c>, <c>"lob"</c>).</param>
+/// <param name="Sequence">The game's own cast sequence it plays, by name.</param>
+/// <param name="ChargeSeconds">The charge time the spell's tooltip shows, in seconds.</param>
 [JsonConverter(typeof(MotionConverter<CastAnimation>))]
 public sealed record CastAnimation(string Key, string Sequence, double ChargeSeconds) : IPremade
 {
@@ -319,6 +415,7 @@ public sealed record ProjectileBlock : IDeliveryBlock
     public float Gravity { get; init; } = 0.1f;
     /// <summary>Metres before it fizzles.</summary>
     public float Range { get; init; } = 150;
+    /// <summary>What the projectile and its impact look and sound like. Default: <see cref="ProjectileLook.IceBolt"/>.</summary>
     public ProjectileLook Look { get; init; } = ProjectileLook.IceBolt;
     /// <summary>What happens at the place it stops. It has no target of its own there: use <see cref="EffectBlock.Area"/>.</summary>
     public IReadOnlyList<EffectRef>? OnImpact { get; init; }
@@ -339,13 +436,23 @@ public sealed record ProjectileBlock : IDeliveryBlock
 }
 
 /// <summary>What a projectile and its impact look and sound like. Premade instances of a block you will also be able to write yourself.</summary>
+/// <param name="Key">The name JSON gives this look (<c>"ice-bolt"</c>, <c>"fireball"</c>).</param>
+/// <param name="Projectile">The game's own projectile template it flies as, by name.</param>
+/// <param name="Impact">The game's own template that plays where it stops, by name.</param>
+/// <param name="HandItem">The game's own spell item that shows in the hand, by name.</param>
 [JsonConverter(typeof(PremadeConverter<ProjectileLook>))]
 public sealed record ProjectileLook(string Key, string Projectile, string Impact, string HandItem) : IPremade
 {
+    /// <summary>The Ice Bolt staff spell's projectile, impact and hand item.</summary>
     public static readonly ProjectileLook IceBolt = new("ice-bolt", "Projectile_Player_Staff_IceBolt_1", "Explosion_Player_Spell_IceBolt_1", "Ammo_T1_Spell_Ice_Bolt_lvl5");
+    /// <summary>The Fireball staff spell's projectile, impact and hand item.</summary>
     public static readonly ProjectileLook Fireball = new("fireball", "Projectile_Player_Staff_Fireball_1", "Explosion_Player_Spell_Fireball_1", "Ammo_T1_Spell_Fire_Ball_lvl10");
     internal static readonly ProjectileLook[] All = [IceBolt, Fireball];
 }
 
 /// <summary>Premade instances that JSON names by <see cref="Key"/>.</summary>
-public interface IPremade { string Key { get; } }
+public interface IPremade
+{
+    /// <summary>The name JSON uses for this premade.</summary>
+    string Key { get; }
+}

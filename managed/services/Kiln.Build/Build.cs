@@ -549,6 +549,10 @@ public static partial class Build
             : PlacePropCore(Guid.Empty, template, position, rotation ?? Quaternion.Identity, itemId, options ?? BuildOptions.Default, null);
     }
 
+    /// <summary>Places a prop by the GUID of its template; see
+    /// <see cref="PlaceProp(string, WorldPosition, Quaternion?, uint, BuildOptions?)"/>. Returns <see cref="EntityId.None"/>
+    /// when a zone, a base, a flame altar without <see cref="BuildFlags.AllowAltars"/> or a <see cref="BuildEditingEvent"/>
+    /// handler refused it.</summary>
     [TickThreadOnly]
     [RequiresCapability("kiln.build")]
     public static EntityId PlaceProp(Guid template, WorldPosition position, Quaternion? rotation = null, uint itemId = 0,

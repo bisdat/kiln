@@ -36,6 +36,8 @@ public enum AmmoListMode
 
 /// <summary>A row of an ammunition or spell list: the item and the count shown next to it (a picture: the count is not
 /// inventory). Since 0.2.0-dev.30.6.</summary>
+/// <param name="Item">The item the row shows. Item 0 is left out of the composed list.</param>
+/// <param name="Count">The number shown next to it, a picture, not inventory; a negative count shows as 0.</param>
 public readonly record struct AmmoListRow(ItemId Item, int Count);
 
 /// <summary>How <see cref="Ui.AmmoList.Provide"/> composes a provider's rows. Since 0.2.0-dev.30.6.</summary>
@@ -93,6 +95,9 @@ public sealed class AmmoListContext
 /// <summary>The player picked a mod's row the game cannot equip itself (the item is not in the backpack): the game did
 /// nothing, so the mod's server half can do the swap. A wish, never authority: the server checks it. Since
 /// 0.2.0-dev.30.6.</summary>
+/// <param name="Kind">The list the row was picked in: <see cref="AmmoListKind.Arrow"/> or <see cref="AmmoListKind.Spell"/>.</param>
+/// <param name="Item">The item of the row the mod provided.</param>
+/// <param name="Count">The count the row showed (a picture, not inventory authority).</param>
 public sealed record AmmoListPick(AmmoListKind Kind, ItemId Item, int Count);
 
 /// <summary>A provider of <see cref="Ui.AmmoList.Provide"/>: dispose it to take its rows out (the game's own list shows
