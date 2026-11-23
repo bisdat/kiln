@@ -130,9 +130,9 @@ enum: Ready, SuspendedBudget, SuspendedMetadata, Disposed
 ## EntityTransform — An entity's world transform: position in metres, rotation, scale.
 - `EntityTransform()`
 - `EntityTransform(WorldPosition Position, Quaternion Rotation, Vector3 Scale)`
-- `Position { get; init; } -> WorldPosition`
-- `Rotation { get; init; } -> Quaternion`
-- `Scale { get; init; } -> Vector3`
+- `Position { get; init; } -> WorldPosition` — Where the entity is, in metres.
+- `Rotation { get; init; } -> Quaternion` — Its orientation.
+- `Scale { get; init; } -> Vector3` — Its scale on each axis.
 - `YawDegrees { get; } -> double` — Heading about +Y (up) in degrees, 0..360.
 
 ## Nearby — Entities near a point or another entity.
@@ -184,29 +184,29 @@ enum: None, Health, Stamina, Mana, Fuel, Inventory, SlotSelection, All
 - `static ToEntity(EntityId entity, EntityId target, double offset = 1.5, TeleportOptions? options = null) -> Task<TeleportResult>` — Teleports `entity` next to `target` (e.g. a player to another player): `offset` metres beside it along +X, with the...
 - `static ToSpawnPoint(EntityId entity, EntityId spawnPoint, TeleportOptions? options = null) -> Task<TeleportResult>` — Teleports `entity` onto a landing pad of a spawn point (an entity with PlayerSpawnPoint: flame altar, spire), as...
 
-## TeleportFlags
+## TeleportFlags — What was different about how a teleport ended; combine with the bitwise or.
 enum: None, OffTarget, RawTarget, TimedOut
 
 ## TeleportOptions — Options for `Teleport`.
 - `Checkpoint { get; init; } -> bool` — Players: also set a replication checkpoint, as the game's fast travel does (for long moves).
-- `static readonly Default -> TeleportOptions`
+- `static readonly Default -> TeleportOptions` — The defaults: no ground search, the orientation is kept, no replication checkpoint.
 - `FindGround { get; init; } -> bool` — The game's ground search: the nearest walkable spot within about 10 m (up or down) of the target.
 - `YawDegrees { get; init; } -> double?` — Face this heading (degrees about +Y) on arrival; null keeps the current orientation.
 
 ## TeleportResult — Outcome of one teleport.
 - `TeleportResult(TeleportStatus Status, EntityId Entity, WorldPosition Position, WorldPosition Target, double Distance, TeleportFlags Flags, int Steps, string Reason)`
-- `Distance { get; init; } -> double`
-- `Entity { get; init; } -> EntityId`
-- `Flags { get; init; } -> TeleportFlags`
-- `Moved { get; } -> bool`
+- `Distance { get; init; } -> double` — Metres between `Position` and `Target`.
+- `Entity { get; init; } -> EntityId` — The entity that was asked to move.
+- `Flags { get; init; } -> TeleportFlags` — What was different about how it ended.
+- `Moved { get; } -> bool` — True when the entity was moved (`TeleportResult.Status` is `TeleportStatus.Moved`).
 - `Ok { get; } -> bool` `0.2.2` — The entity was moved: `TeleportResult.Moved` (the contract's name for it).
-- `Position { get; init; } -> WorldPosition`
-- `Reason { get; init; } -> string`
-- `Status { get; init; } -> TeleportStatus`
-- `Steps { get; init; } -> int`
-- `Target { get; init; } -> WorldPosition`
+- `Position { get; init; } -> WorldPosition` — Where the entity is now (when `TeleportStatus.Failed`: its last known position, or 0).
+- `Reason { get; init; } -> string` — When `TeleportStatus.Failed`: why, in words; otherwise "".
+- `Status { get; init; } -> TeleportStatus` — Whether the entity was moved.
+- `Steps { get; init; } -> int` — Simulation steps from the request to this result.
+- `Target { get; init; } -> WorldPosition` — The position that was asked for.
 
-## TeleportStatus
+## TeleportStatus — How a teleport ended.
 enum: Failed, Moved
 
 ## WaitingTransformScale `0.2.4` — A kept transform scale currently waiting for positional identity.
@@ -239,7 +239,7 @@ enum: Failed, Moved
 - `const TrackedWritesCapability = "world.tracked_writes" -> string` `0.2.2` — The capability of tracked writes: `world.tracked_writes`.
 - `static Transform(EntityId entity) -> EntityTransform?` — The entity's CurrentTransform, or null.
 - `const TransformScaleCapability = "world.transform_scale" -> string` `0.2.3` — The capability of `World.SetTransformScale`: `world.transform_scale`.
-- `static TryGetPosition(EntityId entity, out WorldPosition position) -> bool`
+- `static TryGetPosition(EntityId entity, out WorldPosition position) -> bool` — Reads the entity's position like `World.Position`: false (and `position` is `default`) when it does not exist or has...
 - `static TryRead<T>(EntityId entity, string component, out T value) -> bool` — Copies the first `sizeof(T)` bytes of the entity's component into `value`.
 - `static TryWrite<T>(EntityId entity, string component, int offset, T value) -> bool` — Copies `value` into the entity's component at `offset`, as a raw store: the game is not told.
 - `static Update<T>(EntityId entity, WorldChange<T> change) -> Task<WorldWriteResult>` `0.2.2` — Changes component `T` of `entity`: `change` gets the value the entity holds after the game's own programs of the...
@@ -256,15 +256,15 @@ enum: Failed, Moved
 ## WorldStatus — What kiln.world can do on this server build right now.
 - `WorldStatus()`
 - `WorldStatus(bool Programs, bool WorldLive, bool Teleport, bool Find, int KilnPrograms, int EnginePrograms, int EngineMax, int TeleportsPending, ulong WorldSteps)`
-- `EngineMax { get; init; } -> int`
-- `EnginePrograms { get; init; } -> int`
-- `Find { get; init; } -> bool`
-- `KilnPrograms { get; init; } -> int`
-- `Programs { get; init; } -> bool`
-- `Teleport { get; init; } -> bool`
-- `TeleportsPending { get; init; } -> int`
-- `WorldLive { get; init; } -> bool`
-- `WorldSteps { get; init; } -> ulong`
+- `EngineMax { get; init; } -> int` — The table's capacity.
+- `EnginePrograms { get; init; } -> int` — How many programs are in the server world's table.
+- `Find { get; init; } -> bool` — True when entity search and `World.EntityCount` work on this build.
+- `KilnPrograms { get; init; } -> int` — How many programs are registered through kiln.world (its own included).
+- `Programs { get; init; } -> bool` — True when registering programs works on this build.
+- `Teleport { get; init; } -> bool` — True when `Teleport` works on this build.
+- `TeleportsPending { get; init; } -> int` — How many teleports are still waiting for their result.
+- `WorldLive { get; init; } -> bool` — True when a server world exists and its programs ran in the last step.
+- `WorldSteps { get; init; } -> ulong` — How many server-world steps kiln.world's own program ran in.
 
 ## WorldWriteInfo `0.2.2` — What kiln.world knows about writing one component type (`World.WriteInfo`).
 - `WorldWriteInfo(string Component, WorldWriteState State, string? Reason, int GameWriterCount, IReadOnlyList<string> GameWriters, int InitWriterCount, bool? SaveTracked, bool? ReplicationTracked, bool Attribute, int ComponentSize)`

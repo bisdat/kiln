@@ -52,14 +52,14 @@ enum: Unknown, Queued, Pressed, Dispatched, TimedOut, Cancelled
 - `static State { get; } -> ClientState` — What runs right now.
 - `static Tick -> TickHandler?` — One client-world step (about 60 a second while in game; nothing in the menu), on the game's main thread.
 
-## Client.NextTickAwaitable
-- `GetAwaiter() -> Client.NextTickAwaitable.Awaiter`
+## Client.NextTickAwaitable — What `Client.NextTick` returns: await it to continue on the main thread at the next client-world step.
+- `GetAwaiter() -> Client.NextTickAwaitable.Awaiter` — The awaiter that posts the continuation to the next client-world step.
 
-## Client.NextTickAwaitable.Awaiter
-- `GetResult() -> void`
-- `IsCompleted { get; } -> bool`
-- `OnCompleted(Action continuation) -> void`
-- `UnsafeOnCompleted(Action continuation) -> void`
+## Client.NextTickAwaitable.Awaiter — The awaiter of `NextTickAwaitable`.
+- `GetResult() -> void` — Nothing to return: awaiting only waits for the next step.
+- `IsCompleted { get; } -> bool` — Always false: the continuation never runs inline.
+- `OnCompleted(Action continuation) -> void` — Queues `continuation` to run on the main thread at the next client-world step.
+- `UnsafeOnCompleted(Action continuation) -> void` — The same as `Awaiter.OnCompleted`: queues `continuation` for the next client-world step.
 
 ## ClientState — What runs in this process.
 enum: Menu, DedicatedServer, Hosting, Remote

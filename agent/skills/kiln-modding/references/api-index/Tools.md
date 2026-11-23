@@ -23,8 +23,8 @@ enum: Remove, Add
 
 ## ToolMaterialStock `0.2.14` — Owned material counts from the game's normal building supplies.
 - `ToolMaterialStock(ItemId Item, byte TerrainMaterial, int VoxelsPerItem, ulong Backpack, ulong MagicChests)`
-- `Backpack { get; init; } -> ulong`
-- `Item { get; init; } -> ItemId`
-- `MagicChests { get; init; } -> ulong`
-- `TerrainMaterial { get; init; } -> byte`
-- `VoxelsPerItem { get; init; } -> int`
+- `Backpack { get; init; } -> ulong` — How many of the item the player carries in the backpack.
+- `Item { get; init; } -> ItemId` — The pool entry's placement item.
+- `MagicChests { get; init; } -> ulong` — How many of the item the connected magic chests hold.
+- `TerrainMaterial { get; init; } -> byte` — The terrain cell the item places (1 to 127).
+- `VoxelsPerItem { get; init; } -> int` — How many voxels one item pays for (1 to 1,000,000); placement pays the ceiling of the added volume divided by it.

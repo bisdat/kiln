@@ -33,44 +33,44 @@ enum: Off, Unlimited, BuildingArea
 - `static SetTime(double hours, string who) -> CreativeResult` — Jumps the world's clock forward to `hours`, with no check of who asks: for the console, commands that check their...
 
 ## EffectiveRules — A player's rules after every rule set that applies was combined, and the server's limits held.
-- `BuildCost { get; init; } -> double`
-- `BuildInShroud { get; init; } -> bool`
-- `BuildOutsideBases { get; init; } -> bool`
-- `BuildRefund { get; init; } -> double`
-- `CharacterFlight { get; init; } -> CharacterFlightMode`
+- `BuildCost { get; init; } -> double` — The multiplier on what placing takes from the inventory (`PlayerRules.BuildCost`).
+- `BuildInShroud { get; init; } -> bool` — The player may build inside the Shroud (`PlayerRules.BuildInShroud`).
+- `BuildOutsideBases { get; init; } -> bool` — The player may build outside bases (`PlayerRules.BuildOutsideBases`).
+- `BuildRefund { get; init; } -> double` — The multiplier on what dismantling and undo give back (`PlayerRules.BuildRefund`).
+- `CharacterFlight { get; init; } -> CharacterFlightMode` — The character flight mode in force (`PlayerRules.CharacterFlight`); `CharacterFlightMode.Off` when none.
 - `Denied { get; init; } -> IReadOnlyList<string>` — What the server's limits or unavailable features took away, when they did.
-- `DigDamage { get; init; } -> double`
-- `FlightCarriesBody { get; init; } -> bool`
-- `FlyAnywhere { get; init; } -> bool`
-- `FreeCrafting { get; init; } -> bool`
-- `FreezeShroudTimer { get; init; } -> bool`
+- `DigDamage { get; init; } -> double` — The multiplier on the damage the player's tools deal to terrain and building blocks (`PlayerRules.DigDamage`).
+- `FlightCarriesBody { get; init; } -> bool` — The character goes where the player flew and is put on the ground when the flight ends...
+- `FlyAnywhere { get; init; } -> bool` — The building fly mode works outside bases too (`PlayerRules.FlyAnywhere`).
+- `FreeCrafting { get; init; } -> bool` — Crafting takes no input costs (`PlayerRules.FreeCrafting`).
+- `FreezeShroudTimer { get; init; } -> bool` — The Shroud timer does not go down in the Shroud (`PlayerRules.FreezeShroudTimer`).
 - `From { get; init; } -> IReadOnlyList<RuleSet>` — The rule sets that applied, in the order they were set.
-- `GlideBoost { get; init; } -> GlideBoostRule?`
-- `GlideSink { get; init; } -> double`
-- `GlideSteer { get; init; } -> GlideSteerRule?`
-- `IgnoreBasePermissions { get; init; } -> bool`
-- `IgnoreEnemiesNearby { get; init; } -> bool`
-- `IgnoreNoBuildZones { get; init; } -> bool`
-- `Invulnerable { get; init; } -> bool`
+- `GlideBoost { get; init; } -> GlideBoostRule?` — The glider boost in force (`PlayerRules.GlideBoost`); null when no rule set asks for one.
+- `GlideSink { get; init; } -> double` — The multiplier on how fast the glider sinks (`PlayerRules.GlideSink`).
+- `GlideSteer { get; init; } -> GlideSteerRule?` — The glider steering in force (`PlayerRules.GlideSteer`); null when no rule set asks for it.
+- `IgnoreBasePermissions { get; init; } -> bool` — The player may build in other players' bases without their permission (`PlayerRules.IgnoreBasePermissions`).
+- `IgnoreEnemiesNearby { get; init; } -> bool` — The player may build with enemies nearby (`PlayerRules.IgnoreEnemiesNearby`).
+- `IgnoreNoBuildZones { get; init; } -> bool` — The player may build inside the game's no-build zones (`PlayerRules.IgnoreNoBuildZones`).
+- `Invulnerable { get; init; } -> bool` — The player takes no damage from hits (`PlayerRules.Invulnerable`).
 - `IsDefault { get; } -> bool` — True when nothing differs from the game's own rules.
-- `KeepBuildsOutsideBases { get; init; } -> bool`
-- `KeepConsumables { get; init; } -> bool`
-- `MinHealth { get; init; } -> double`
-- `MinMana { get; init; } -> double`
-- `MinShroudTime { get; init; } -> double`
-- `MinStamina { get; init; } -> double`
+- `KeepBuildsOutsideBases { get; init; } -> bool` — What the player builds outside bases is kept in the save (`PlayerRules.KeepBuildsOutsideBases`).
+- `KeepConsumables { get; init; } -> bool` — Used consumables are not removed (`PlayerRules.KeepConsumables`).
+- `MinHealth { get; init; } -> double` — The fraction of maximum health the player is kept at least at, 0 to 1 (`PlayerRules.MinHealth`).
+- `MinMana { get; init; } -> double` — The fraction of maximum mana the player is kept at least at, 0 to 1 (`PlayerRules.MinMana`).
+- `MinShroudTime { get; init; } -> double` — The fraction of its maximum the Shroud timer never drops below, 0 to 1 (`PlayerRules.MinShroudTime`).
+- `MinStamina { get; init; } -> double` — The fraction of maximum stamina the player is kept at least at, 0 to 1 (`PlayerRules.MinStamina`).
 - `NoClip { get; init; } -> bool` `0.2.2` — The character flies without collision (`PlayerRules.NoClip`).
-- `NoFallDamage { get; init; } -> bool`
-- `static None(EntityId player) -> EffectiveRules`
-- `Player { get; init; } -> EntityId`
+- `NoFallDamage { get; init; } -> bool` — The player takes no damage from falls (`PlayerRules.NoFallDamage`).
+- `static None(EntityId player) -> EffectiveRules` — Rules that change nothing for `player`: the game's own rules.
+- `Player { get; init; } -> EntityId` — The player entity these rules are for.
 - `SameAs(EffectiveRules o) -> bool` — The same values, ignoring `EffectiveRules.From`.
-- `UnlimitedGliding { get; init; } -> bool`
-- `Water { get; init; } -> WaterRule?`
+- `UnlimitedGliding { get; init; } -> bool` — The glider never forces the player down for a gameplay reason (`PlayerRules.UnlimitedGliding`).
+- `Water { get; init; } -> WaterRule?` — The water refill in force (`PlayerRules.Water`); null when no rule set asks for one.
 
 ## GlideBoostRule — Gliding like a plane (`PlayerRules.GlideBoost`): the glider's path takes its pitch from where the player looks (a view within about 5 degrees of level flies level)...
 - `Climb { get; init; } -> double` — The fastest the glider climbs while the player looks up, m/s (default 15; 0 = it never climbs: looking up then only...
 - `Coast { get; init; } -> double` — After letting go of sprint the glider slows down at most this fast, m/s2 (default 8: about 2-3 s back to a plain...
-- `static Default { get; } -> GlideBoostRule`
+- `static Default { get; } -> GlideBoostRule` — The default boost: every value at its default.
 - `Lift { get; init; } -> double` — Upward acceleration while boosting, m/s2 (default 0: the boost goes where the glider points; a "jetpack" might use...
 - `MaxSpeed { get; init; } -> double` — The boost accelerates up to this speed, m/s (default 35).
 - `const SpeedLimit = 120 -> double` — The fastest any rule may make a boosted glider, m/s.
@@ -78,7 +78,7 @@ enum: Off, Unlimited, BuildingArea
 
 ## GlideSteerRule — Steering the glider's own nose (`PlayerRules.GlideSteer`): S raises it, a centred stick holds the pitch, W dives as in the game.
 - `const AngleLimit = 85 -> double` — The highest `GlideSteerRule.MaxClimbAngle`, degrees: never straight up, where the game's pitch measure folds over.
-- `static Default { get; } -> GlideSteerRule`
+- `static Default { get; } -> GlideSteerRule` — The default steering: `GlideSteerRule.MaxClimbAngle` at its default.
 - `MaxClimbAngle { get; init; } -> double` — How far above level the nose may rise, degrees (0..85; default 85; 0 = up to level flight).
 
 ## NoClip `0.2.2` — NoClip: a player's character flies through terrain, blocks and props (`PlayerRules.NoClip`).
@@ -142,15 +142,15 @@ enum: RuleEnded, Death, Teleport, Left `0.2.3`
 - `NoClip { get; init; } -> bool?` `0.2.2` — The character moves through terrain, blocks and props: it flies as with `PlayerRules.CharacterFlight` (at once, from...
 - `NoFallDamage { get; init; } -> bool?` — No damage from falls, from any height, and no hard-landing stagger (Kiln.Combat's fall event, canceled on the server).
 - `Problems() -> IReadOnlyList<string>` — Out-of-range values, by member name; empty when the rules are fine.
-- `ToJson() -> string`
+- `ToJson() -> string` — These rules as indented JSON with camelCase members; members that are not set are left out.
 - `UnlimitedGliding { get; init; } -> bool?` — The glider never forces the player down for a gameplay reason: gliding costs no stamina and does not end when...
 - `Water { get; init; } -> WaterRule?` — The player's water containers get water back (Kiln.Items' refill policies).
 - `With(PlayerRules other) -> PlayerRules` — These rules with every member `other` sets taking its place.
 
 ## PlayerRulesChangedEvent — A player's rules changed (a rule set applied, updated, ended, or an area entered or left).
-- `After { get; } -> EffectiveRules`
-- `Before { get; } -> EffectiveRules`
-- `Player { get; } -> EntityId`
+- `After { get; } -> EffectiveRules` — The player's rules after the change.
+- `Before { get; } -> EffectiveRules` — The player's rules before the change.
+- `Player { get; } -> EntityId` — The player entity whose rules changed.
 
 ## Rules — Per-player rules: what the game lets a player do (fly, build where, at what cost, how fast they mine) and what they never run out of (health, stamina, mana, water).
 - `static Active { get; } -> IReadOnlyList<RuleSet>` — Every active rule set, in the order they were applied.
@@ -170,89 +170,89 @@ enum: RuleEnded, Death, Teleport, Left `0.2.3`
 enum: Unknown, Host, Kiln, KilnWithoutRules, Vanilla, Pending, Simulated
 
 ## RuleScope — Who a rule set applies to: one player, everyone, or the players inside an area (optionally only one of them).
-- `static Box(WorldPosition min, WorldPosition max) -> RuleScope`
+- `static Box(WorldPosition min, WorldPosition max) -> RuleScope` — The players inside the box between two corners (given in any order).
 - `Covers(EntityId player, WorldPosition? at) -> bool` — Whether the scope covers `player` at `at` (an area needs a position).
 - `static Cylinder(WorldPosition center, double radius, double minY, double maxY) -> RuleScope` — An upright cylinder: `radius` around `center` (x, z), from `minY` to `maxY`.
 - `static Everyone { get; } -> RuleScope` — Every player in the world.
-- `static ForPlayer(EntityId player) -> RuleScope`
-- `IsArea { get; } -> bool`
+- `static ForPlayer(EntityId player) -> RuleScope` — Only the player with this entity id.
+- `IsArea { get; } -> bool` — True for an area scope: a sphere, a box or a cylinder.
 - `Only(EntityId player) -> RuleScope` — This area, for one player only.
 - `Player { get; } -> EntityId?` — Only this player entity (a player's entity id goes to the next player who joins after they leave: a player rule set...
-- `static Sphere(WorldPosition center, double radius) -> RuleScope`
+- `static Sphere(WorldPosition center, double radius) -> RuleScope` — The players within `radius` metres of `center`.
 
 ## RuleSet — One mod's rules for a scope.
-- `Active { get; } -> bool`
-- `Dispose() -> void`
+- `Active { get; } -> bool` — True until the set ends: it was disposed, it expired, or it was removed with its mod or its player.
+- `Dispose() -> void` — Takes the rules away.
 - `Expires { get; } -> DateTime?` — When it ends by itself (UTC), or null.
-- `Id { get; } -> long`
-- `Label { get; } -> string`
+- `Id { get; } -> long` — A number that identifies this rule set, unique in the process.
+- `Label { get; } -> string` — A name for the set, for logs and listings; empty when none was given.
 - `Owner { get; } -> string` — Id of the mod that applied it ("kiln" outside mod code).
-- `Rules { get; } -> PlayerRules`
-- `Scope { get; } -> RuleScope`
+- `Rules { get; } -> PlayerRules` — The rules this set asks for.
+- `Scope { get; } -> RuleScope` — Who the rules apply to.
 - `Update(PlayerRules rules) -> void` — Changes the rules (same scope, owner and end).
 
 ## RulesPolicy — The server's limits on everyone's rules: `<configDir>/rules.json`.
-- `AllowBuildInShroud { get; set; } -> bool`
-- `AllowBuildOutsideBases { get; set; } -> bool`
-- `AllowCharacterFlight { get; set; } -> bool`
-- `AllowFlyAnywhere { get; set; } -> bool`
-- `AllowFreeCrafting { get; set; } -> bool`
-- `AllowFreezeShroudTimer { get; set; } -> bool`
-- `AllowGlideBoost { get; set; } -> bool`
-- `AllowGlideSteer { get; set; } -> bool`
-- `AllowIgnoreBasePermissions { get; set; } -> bool`
-- `AllowIgnoreEnemiesNearby { get; set; } -> bool`
-- `AllowIgnoreNoBuildZones { get; set; } -> bool`
-- `AllowInvulnerable { get; set; } -> bool`
-- `AllowKeepConsumables { get; set; } -> bool`
-- `AllowNoClip { get; set; } -> bool` `0.2.2`
-- `AllowNoFallDamage { get; set; } -> bool`
-- `AllowUnlimitedGliding { get; set; } -> bool`
-- `AllowWater { get; set; } -> bool`
-- `MaxDigDamage { get; set; } -> double`
-- `MaxGlideSpeed { get; set; } -> double`
-- `MaxGlideSteerAngle { get; set; } -> double`
-- `MaxHealthFloor { get; set; } -> double`
-- `MaxManaFloor { get; set; } -> double`
-- `MaxShroudFloor { get; set; } -> double`
-- `MaxStaminaFloor { get; set; } -> double`
-- `MinBuildCost { get; set; } -> double`
+- `AllowBuildInShroud { get; set; } -> bool` — Players may build inside the Shroud (`PlayerRules.BuildInShroud`).
+- `AllowBuildOutsideBases { get; set; } -> bool` — Players may build outside bases (`PlayerRules.BuildOutsideBases`).
+- `AllowCharacterFlight { get; set; } -> bool` — The character itself may fly for a player (`PlayerRules.CharacterFlight`).
+- `AllowFlyAnywhere { get; set; } -> bool` — Players may get the building fly mode outside bases (`PlayerRules.FlyAnywhere`).
+- `AllowFreeCrafting { get; set; } -> bool` — Allows requesting `PlayerRules.FreeCrafting`.
+- `AllowFreezeShroudTimer { get; set; } -> bool` — The Shroud timer may be frozen for a player (`PlayerRules.FreezeShroudTimer`).
+- `AllowGlideBoost { get; set; } -> bool` — Holding sprint may push a glider along the view (`PlayerRules.GlideBoost`).
+- `AllowGlideSteer { get; set; } -> bool` — The glider's own nose may be steered for a player (`PlayerRules.GlideSteer`).
+- `AllowIgnoreBasePermissions { get; set; } -> bool` — Players may build in other players' bases without their permission (`PlayerRules.IgnoreBasePermissions`).
+- `AllowIgnoreEnemiesNearby { get; set; } -> bool` — Players may build with enemies nearby (`PlayerRules.IgnoreEnemiesNearby`).
+- `AllowIgnoreNoBuildZones { get; set; } -> bool` — Players may build in the game's no-build zones around points of interest, dungeons and altars...
+- `AllowInvulnerable { get; set; } -> bool` — Players may be made invulnerable (`PlayerRules.Invulnerable`).
+- `AllowKeepConsumables { get; set; } -> bool` — Allows requesting `PlayerRules.KeepConsumables`: arrows, ammunition, food and potions are not used up.
+- `AllowNoClip { get; set; } -> bool` `0.2.2` — A player may move through terrain, blocks and props (`PlayerRules.NoClip`, also `/noclip`).
+- `AllowNoFallDamage { get; set; } -> bool` — Falls may do no damage for a player (`PlayerRules.NoFallDamage`).
+- `AllowUnlimitedGliding { get; set; } -> bool` — Gliding may cost no stamina for a player (`PlayerRules.UnlimitedGliding`).
+- `AllowWater { get; set; } -> bool` — Water containers may get water back (`PlayerRules.Water`).
+- `MaxDigDamage { get; set; } -> double` — The highest dig damage multiplier any rule may give, 1 to 1000000 (1000 breaks anything breakable in one hit).
+- `MaxGlideSpeed { get; set; } -> double` — The fastest a boosted glider may go, m/s, 0 to 120.
+- `MaxGlideSteerAngle { get; set; } -> double` — How far above level a steered glider's nose may rise, degrees, 0 to 85 (85 is almost straight up, 0 is level at most).
+- `MaxHealthFloor { get; set; } -> double` — The highest health floor any rule may keep, 0 to 1 (1 is full).
+- `MaxManaFloor { get; set; } -> double` — The highest mana floor any rule may keep, 0 to 1 (1 is full).
+- `MaxShroudFloor { get; set; } -> double` — The highest Shroud timer floor any rule may keep, 0 to 1 (1 is full).
+- `MaxStaminaFloor { get; set; } -> double` — The highest stamina floor any rule may keep, 0 to 1 (1 is full).
+- `MinBuildCost { get; set; } -> double` — The lowest building cost multiplier any rule may give, 0 to 1000 (0 allows free building).
 
-## RulesStatus
+## RulesStatus — The state of kiln.rules' hooks and counters (diagnostics).
 - `RulesStatus(bool Flight, bool Placement, bool Costs, bool Mining, int Players, ulong FlyAllowed, ulong CursorCleared, ulong CostsScaled, ulong RefundsScaled, ulong DigsScaled, ulong Faults, string Detail)`
 - `BuildingZone { get; init; } -> bool` — The server cursor's building-zone hook (BuildOutsideBases: the hammer's "Needs a Flame Altar nearby").
 - `CharacterFlight { get; init; } -> bool` — Character flight's hooks (CharacterFlight): the locomotion state, gravity and the flying mover.
 - `ConsumablesKept { get; init; } -> ulong` — Consume removals skipped so far.
-- `Costs { get; init; } -> bool`
-- `CostsScaled { get; init; } -> ulong`
+- `Costs { get; init; } -> bool` — The material cost hooks work (BuildCost, BuildRefund).
+- `CostsScaled { get; init; } -> ulong` — Material lists scaled when placing.
 - `CraftButtons { get; init; } -> bool` — Game client: the crafting menu's craftable amount (craft buttons stay enabled with FreeCrafting).
 - `CraftsFree { get; init; } -> ulong` — Recipe payments answered "paid" so far.
-- `CursorCleared { get; init; } -> ulong`
-- `Detail { get; init; } -> string`
-- `DigsScaled { get; init; } -> ulong`
-- `Faults { get; init; } -> ulong`
-- `Flight { get; init; } -> bool`
-- `FlyAllowed { get; init; } -> ulong`
+- `CursorCleared { get; init; } -> ulong` — Cursor evaluations where a refusal flag was cleared.
+- `Detail { get; init; } -> string` — What is switched off and why, as text; empty when nothing is.
+- `DigsScaled { get; init; } -> ulong` — Damage values scaled.
+- `Faults { get; init; } -> ulong` — Hook bodies that faulted; the game's own path ran instead.
+- `Flight { get; init; } -> bool` — The fly-gate hook works (FlyAnywhere).
+- `FlyAllowed { get; init; } -> ulong` — Fly-gate decisions turned to allowed.
 - `FreeCrafting { get; init; } -> bool` — The recipe-payment hooks (FreeCrafting): crafts pay nothing inside the game's own transaction.
-- `GlideChanged { get; init; } -> ulong`
+- `GlideChanged { get; init; } -> ulong` — Glider steps changed (sink, stamina, boost).
 - `GlideSteer { get; init; } -> bool` — The glider's pitch step (GlideSteer; actor_rotation).
 - `GlideSteered { get; init; } -> ulong` — Glider pitch steps steered so far.
 - `Gliding { get; init; } -> bool` — The glider's hooks (UnlimitedGliding, GlideSink, GlideBoost).
 - `KeptConsumables { get; init; } -> bool` — The two consume removals (KeepConsumables: fired arrows, thrown items, staff ammunition).
 - `KeptFoodAndPotions { get; init; } -> bool` — The buff item's consume removal (KeepConsumables: food, drinks, potions, bandages).
 - `MapReveal { get; init; } -> bool` — Game client: the fog of war's discover call (the creative menu's map reveal).
-- `Mining { get; init; } -> bool`
+- `Mining { get; init; } -> bool` — The dig damage hook works (DigDamage).
 - `NoClip { get; init; } -> bool` `0.2.2` — NoClip's hook on the character's collision step (NoClip; only ever on with `RulesStatus.CharacterFlight`).
-- `Placement { get; init; } -> bool`
-- `Players { get; init; } -> int`
-- `RefundsScaled { get; init; } -> ulong`
-- `ShroudHeld { get; init; } -> ulong`
+- `Placement { get; init; } -> bool` — The build cursor's hook works (the placement rules).
+- `Players { get; init; } -> int` — Server entities that have rules set.
+- `RefundsScaled { get; init; } -> ulong` — Material lists scaled when dismantling and undoing.
+- `ShroudHeld { get; init; } -> ulong` — Shroud timer steps held or recovered instead of draining.
 - `ShroudTimer { get; init; } -> bool` — The Shroud timer's hook (FreezeShroudTimer, MinShroudTime).
-- `ZoneForced { get; init; } -> ulong`
+- `ZoneForced { get; init; } -> ulong` — Building-zone tests turned to "near a base".
 
 ## WaterRule — Water a player's containers get back (Kiln.Items' refill policies, on the player's inventories).
 - `ChargesPerSecond { get; init; } -> double` — Charges per second of game time; `Infinity` (the default) keeps the containers full.
 - `Items { get; init; } -> IReadOnlyList<string>?` — The items refilled: debug names (`Tool_T1_WateringCan`, a mod's `<mod>.<block>`) or ids (`0x8ec15337`).
-- `static KeepFull(params string[] items) -> WaterRule`
-- `KeepsFull { get; } -> bool`
-- `static Rate(double chargesPerSecond, params string[] items) -> WaterRule`
+- `static KeepFull(params string[] items) -> WaterRule` — A rule that keeps the containers full.
+- `KeepsFull { get; } -> bool` — True when the water never runs out: `WaterRule.ChargesPerSecond` is infinite.
+- `static Rate(double chargesPerSecond, params string[] items) -> WaterRule` — A rule that gives water back at a fixed rate.

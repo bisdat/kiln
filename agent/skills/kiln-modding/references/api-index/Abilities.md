@@ -5,7 +5,7 @@
 - `static Available { get; } -> bool` — The service runs on this build.
 - `static BuffsOf(EntityId entity) -> IReadOnlyList<EntityBuff>` `0.2.2` — Every buff on an entity (a player, a creature, an NPC), from the game's buff slots.
 - `static Cast(EntityId caster, string abilityId, CastOrigin origin = CastOrigin.Server) -> CastResult` — Casts an ability for `caster` (a player or any actor with the attributes it costs): the same checks as a key press...
-- `static CooldownLeft(EntityId caster, string abilityId) -> TimeSpan`
+- `static CooldownLeft(EntityId caster, string abilityId) -> TimeSpan` — The time left on `caster`'s cooldown for this ability; zero when there is none.
 - `static readonly GenericImpactTemplate -> Guid` — The default template the game spawns for a SpawnImpact sequence event without its own template (an entity with only...
 - `static HashOf(string name) -> uint` — FNV-1a of a name (native hashes: "ApplyDamage" 0xb04d0e7a, "mymod.Chill").
 - `static HoldPrograms(params uint[] programIds) -> IDisposable` — Holds only instances of these programs for `ImpactStartingEvent` (the union over all callers; no filter = every new...
@@ -19,7 +19,7 @@
 - `static Registered { get; } -> IReadOnlyList<AbilityDefinition>` — Every registered ability.
 - `static RemoveBuff(EntityId target, Guid buff) -> Task<BuffRemoveResult>` `0.2.2` — Takes a buff off an entity (a player, a creature, an NPC) through the game's own removeBuff native, the call the...
 - `static RemoveBuff(EntityId target, uint buffId) -> Task<BuffRemoveResult>` `0.2.2` — Takes a buff off an entity by its id (`GameBuffs.Ids.X`, `EntityBuff.Id`): the game's removeBuff only hashes the...
-- `static ResetCooldown(EntityId caster, string abilityId) -> void`
+- `static ResetCooldown(EntityId caster, string abilityId) -> void` — Ends `caster`'s cooldown for this ability at once.
 - `static RunImpact(Guid template, WorldPosition position, ImpactOptions? options = null) -> Task<EntityId>` — Spawns an impact template (a projectile, explosion or zone that has an Impact component) at `position` and binds it...
 - `static RunImpact(string template, WorldPosition position, ImpactOptions? options = null) -> Task<EntityId>` — Spawns an impact template (a projectile, explosion or zone that has an Impact component) at `position` and binds it...
 - `static RunProgram(Guid program, WorldPosition position, ImpactOptions? options = null) -> Task<EntityId>` — Runs a program (a game's or one Kiln registered) on the game's generic impact entity at `position`: the entity gets...
@@ -38,7 +38,7 @@
 - `static Attach(uint program, string native, NativeStage stage, NativeWrapHandler handler, uint site = 0, int priority = 0) -> AttachResult` `0.2.4` — Attaches `handler` to the calls of the game's native `native` made by program `program` (at call site `site`), at...
 - `static Declare(string fullName, int argc) -> void` — Declares a native from a mod's impact/natives.json before it is registered, so programs that call it pass the...
 - `static DeclareTyped(string fullName, params NativeArg[] args) -> void` `0.2.4` — Declares Kiln native `fullName` with the type of each argument (since 0.2.0-dev.29; what a `"sync": true` entry of a...
-- `static NameOf(uint hash) -> string`
+- `static NameOf(uint hash) -> string` — The name of the native with this hash (the game's or Kiln's); `0x<hash>` when it is unknown or kiln.abilities is not...
 - `static Observe(string nameOrHash) -> void` — Observes a vanilla native: its calls arrive as `ImpactNativeEvent` (applyDamage, applyBuff and spawnEntity are...
 - `static Register(string name, int argc, NativeHandler handler) -> uint` — Registers a managed native "\<modid>.`name`" (hash = FNV-1a-32 of the full name; ECALL it from a program).
 - `static RegisterSync(string name, int argc, NativeSyncHandler handler) -> NativeResult` `0.2.4` — Registers a synchronous native "\<modid>.`name`" (hash = FNV-1a-32 of the full name): `handler` runs inside the...
@@ -46,86 +46,86 @@
 - `static Wrap(string nameOrHash, NativeWrapHandler handler, int priority = 0) -> IDisposable` — Wraps a vanilla native: `handler` runs synchronously on the game's job thread for every call, before the game's...
 
 ## Abilities.Programs — The game's ImpactRegistry: list, inspect and add programs (keen::ImpactProgram blobs, e.g. from tools/impact).
-- `static Count { get; } -> int`
-- `static IdOf(Guid program) -> uint`
-- `static Info(uint id) -> ImpactProgramInfo?`
+- `static Count { get; } -> int` — The number of programs in the game's ImpactRegistry; 0 when kiln.abilities is not loaded.
+- `static IdOf(Guid program) -> uint` — The id of a program: FNV-1a of its GUID's bytes.
+- `static Info(uint id) -> ImpactProgramInfo?` — A program's description; null when kiln.abilities is not loaded or no program has this id.
 - `static Refresh() -> int` — Lists kiln.assets' ImpactProgram resources again and registers the new ones.
 - `static Register(byte[] blob) -> uint` — Like `Programs.Register`, without the waiting flag.
 - `static Register(byte[] blob, out bool waiting) -> uint` — Verifies and inserts a program blob (copied).
-- `static Variables(uint id) -> IReadOnlyList<ImpactVariable>`
+- `static Variables(uint id) -> IReadOnlyList<ImpactVariable>` — The variables of a program; empty when there are none or no program has this id.
 
 ## AbilitiesStatus — Counters of kiln.abilities (diagnostics).
 - `AbilitiesStatus(bool Natives, bool Programs, bool Instances, bool Attributes, int VanillaNatives, int NativeCapacity, int KilnNatives, int ProgramsTotal, int ProgramsKiln, int HeldNow, uint Interest, ulong InstancesCreated, ulong InstancesHeld, ulong OverridesApplied, ulong OverridesMismatched, ulong Runs, ulong NativeCalls, ulong NativeCallsObserved, ulong Signals, ulong ManagedCalls, ulong ManagedSuspends, ulong EventsDelivered, ulong EventsDropped, ulong WrapCalls, ulong ProgramsRefused, ulong Step)`
 - `AttachmentsActive { get; init; } -> int` `0.2.4` — Attachments checked and taking calls (since 0.2.0-dev.29).
 - `AttachmentsOff { get; init; } -> int` `0.2.4` — Attachments that take no call: their program is not loaded or does not call the native there (checked again whenever...
 - `AttachmentsPending { get; init; } -> int` `0.2.4` — Attachments whose program and site are not checked yet (no server world's programs yet); since 0.2.0-dev.29, 0 with...
-- `Attributes { get; init; } -> bool`
-- `EventsDelivered { get; init; } -> ulong`
-- `EventsDropped { get; init; } -> ulong`
-- `HeldNow { get; init; } -> int`
-- `Instances { get; init; } -> bool`
-- `InstancesCreated { get; init; } -> ulong`
-- `InstancesHeld { get; init; } -> ulong`
-- `Interest { get; init; } -> uint`
-- `KilnNatives { get; init; } -> int`
-- `ManagedCalls { get; init; } -> ulong`
-- `ManagedSuspends { get; init; } -> ulong`
-- `NativeCalls { get; init; } -> ulong`
-- `NativeCallsObserved { get; init; } -> ulong`
-- `NativeCapacity { get; init; } -> int`
-- `Natives { get; init; } -> bool`
-- `OverridesApplied { get; init; } -> ulong`
-- `OverridesMismatched { get; init; } -> ulong`
-- `Programs { get; init; } -> bool`
-- `ProgramsKiln { get; init; } -> int`
-- `ProgramsRefused { get; init; } -> ulong`
-- `ProgramsTotal { get; init; } -> int`
-- `Runs { get; init; } -> ulong`
-- `Signals { get; init; } -> ulong`
-- `Step { get; init; } -> ulong`
-- `VanillaNatives { get; init; } -> int`
-- `WrapCalls { get; init; } -> ulong`
+- `Attributes { get; init; } -> bool` — Attribute reads and writes work (`Attributes`).
+- `EventsDelivered { get; init; } -> ulong` — Events delivered to the listener.
+- `EventsDropped { get; init; } -> ulong` — Events lost because the event queue was full or its lock could not be taken in time.
+- `HeldNow { get; init; } -> int` — Instances held for event handlers right now (`ImpactStartingEvent`).
+- `Instances { get; init; } -> bool` — The hooks on instance creation and first run are on: observing, config overrides and holds work.
+- `InstancesCreated { get; init; } -> ulong` — Impact instances created.
+- `InstancesHeld { get; init; } -> ulong` — Instances held for the listener, counted since start.
+- `Interest { get; init; } -> uint` — The event kinds the listener asks for now, as a bit mask: one bit per kind, and bit 31 asks to hold new instances.
+- `KilnNatives { get; init; } -> int` — Live Kiln natives: the built-in and the managed ones.
+- `ManagedCalls { get; init; } -> ulong` — Calls of managed Kiln natives handed to the listener.
+- `ManagedSuspends { get; init; } -> ulong` — Times a program's call of a managed native suspended again while its answer was still pending.
+- `NativeCalls { get; init; } -> ulong` — Calls of the vanilla natives Kiln wraps.
+- `NativeCallsObserved { get; init; } -> ulong` — Native calls reported to the listener as events (`ImpactNativeEvent`).
+- `NativeCapacity { get; init; } -> int` — The native registry's capacity (256).
+- `Natives { get; init; } -> bool` — The native registry was captured and Kiln's natives and wrappers are registered.
+- `OverridesApplied { get; init; } -> ulong` — Config overrides written into a variable.
+- `OverridesMismatched { get; init; } -> ulong` — Config overrides that wrote nothing: no variable matched, or the size did not fit.
+- `Programs { get; init; } -> bool` — The game's ImpactRegistry is reachable: program lookup and registration work.
+- `ProgramsKiln { get; init; } -> int` — Programs Kiln inserted.
+- `ProgramsRefused { get; init; } -> ulong` — Program registrations refused: the verifier said no, or the GUID belongs to a game program or to another Kiln program.
+- `ProgramsTotal { get; init; } -> int` — Programs in the ImpactRegistry.
+- `Runs { get; init; } -> ulong` — Calls of the game's run-impact function that Kiln saw.
+- `Signals { get; init; } -> ulong` — `kiln.Signal` calls.
+- `Step { get; init; } -> ulong` — The server world's step when the status was read.
+- `VanillaNatives { get; init; } -> int` — Natives the game registered (107 on svn 1285601).
+- `WrapCalls { get; init; } -> ulong` — Calls handed to `Natives.Wrap` handlers.
 
 ## AbilityCast — One cast of an ability (server, tick thread).
-- `Ability { get; } -> AbilityDefinition`
+- `Ability { get; } -> AbilityDefinition` — The ability being cast.
 - `At(TimeSpan sinceStart) -> Task` — Completes on the tick thread once `sinceStart` has passed since the cast started.
-- `Caster { get; } -> EntityId`
-- `CasterPosition { get; } -> WorldPosition`
-- `CasterYaw { get; } -> float`
+- `Caster { get; } -> EntityId` — The caster.
+- `CasterPosition { get; } -> WorldPosition` — Where the caster stood when the cast started.
+- `CasterYaw { get; } -> float` — The caster's yaw in degrees when the cast started.
 - `Damage(EntityId target, int amount, DamageOptions? options = null) -> Task<HitResult>` — Damages an entity as the caster (kiln.combat: a real engine hit with kill credit).
 - `Impact(string template, WorldPosition? at = null, ImpactConfigs? configs = null) -> Task<EntityId>` — Spawns an impact template bound to the caster (`Abilities.RunImpact`), at `at` or the cast's `AbilityCast.Position`.
-- `Origin { get; } -> CastOrigin`
+- `Origin { get; } -> CastOrigin` — How the cast was started.
 - `PlaySequence(Guid sequence, bool abortCurrent = true) -> bool` — Plays an existing action sequence on the caster (`Abilities.PlaySequence`).
 - `Position { get; } -> WorldPosition` — The point the ability aims at.
-- `StartedMs { get; } -> long`
-- `Step { get; } -> ulong`
+- `StartedMs { get; } -> long` — When the cast started, as `Environment.TickCount64` milliseconds: the time base of `AbilityCast.At`.
+- `Step { get; } -> ulong` — The sim step the cast started in.
 - `Target { get; } -> EntityId` — The target entity (NearestEnemy: the enemy; Self: the caster; Forward: none).
 
 ## AbilityCastedEvent — A scripted ability was cast (cost paid, cooldown started; its OnCast is running).
-- `Cast { get; } -> AbilityCast`
-- `Paid { get; } -> AbilityCost`
+- `Cast { get; } -> AbilityCast` — The cast.
+- `Paid { get; } -> AbilityCost` — What the cast cost: the cost as `AbilityCastEvent` left it.
 
 ## AbilityCastEvent — A scripted ability is about to be cast (all checks passed, nothing paid yet).
-- `Cast { get; } -> AbilityCast`
-- `Cost { get; set; } -> AbilityCost`
-- `Reason { get; set; } -> string`
+- `Cast { get; } -> AbilityCast` — The cast that is about to start.
+- `Cost { get; set; } -> AbilityCost` — What the cast will cost: the ability's cost at first.
+- `Reason { get; set; } -> string` — The refusal text the caster gets when a handler cancels the event.
 
 ## AbilityCost — What an ability costs: mana, stamina and special-ability charge (attribute points; the game's own costs come from the same attributes).
 - `AbilityCost()`
 - `AbilityCost(int Mana = 0, int Stamina = 0, int Special = 0)`
 - `Deconstruct(out int Mana, out int Stamina, out int Special) -> void`
 - `Equals(AbilityCost other) -> bool`
-- `IsFree { get; } -> bool`
-- `Mana { get; init; } -> int`
-- `static readonly None -> AbilityCost`
-- `static OfMana(int n) -> AbilityCost`
-- `static OfSpecial(int n) -> AbilityCost`
-- `static OfStamina(int n) -> AbilityCost`
+- `IsFree { get; } -> bool` — True when no part is above 0.
+- `Mana { get; init; } -> int` — Mana points.
+- `static readonly None -> AbilityCost` — No cost.
+- `static OfMana(int n) -> AbilityCost` — A cost of `n` mana.
+- `static OfSpecial(int n) -> AbilityCost` — A cost of `n` special-ability charge.
+- `static OfStamina(int n) -> AbilityCost` — A cost of `n` stamina.
 - `static operator !=(AbilityCost left, AbilityCost right) -> bool`
-- `static operator +(AbilityCost a, AbilityCost b) -> AbilityCost`
+- `static operator +(AbilityCost a, AbilityCost b) -> AbilityCost` — Adds the costs part by part.
 - `static operator ==(AbilityCost left, AbilityCost right) -> bool`
-- `Special { get; init; } -> int`
-- `Stamina { get; init; } -> int`
+- `Special { get; init; } -> int` — Special-ability charge.
+- `Stamina { get; init; } -> int` — Stamina points.
 
 ## AbilityDefinition — A scripted ability.
 - `CanCast { get; init; } -> Func<AbilityCast, string?>?` — An extra check before the cost is paid: return a refusal reason, or null to allow.
@@ -133,20 +133,20 @@
 - `CastTime { get; init; } -> TimeSpan` — Cast lock: the caster cannot start another Kiln ability for this long (it does not lock the game's own attacks).
 - `ChatCommand { get; init; } -> string?` — A chat command that casts it (without the prefix, e.g. "nova"); null = only `/cast <id>`.
 - `Cooldown { get; init; } -> TimeSpan` — Kiln's cooldown per caster (the game has no cooldown system for players).
-- `Cost { get; init; } -> AbilityCost`
+- `Cost { get; init; } -> AbilityCost` — What the cast costs; default free.
 - `DefaultKey { get; init; } -> string?` — The client's default key ("G", "Shift+F"); null = no key binding.
-- `Description { get; init; } -> string?`
-- `DisplayName { get; init; } -> string?`
+- `Description { get; init; } -> string?` — A line about the ability; the key's description on the Keys page.
+- `DisplayName { get; init; } -> string?` — A name for players.
 - `Id { get; init; } -> string` — "\<modid>:\<name>", e.g. "firenova:fire-nova".
-- `Name { get; } -> string`
+- `Name { get; } -> string` — `AbilityDefinition.DisplayName`, or `AbilityDefinition.Id` when it has none.
 - `OnCast { get; init; } -> Func<AbilityCast, Task>` — The effect (server, tick thread).
 - `PlayersOnly { get; init; } -> bool` — Only players may cast it through keys and commands (server code may cast for any actor).
-- `Range { get; init; } -> double`
-- `Targeting { get; init; } -> AbilityTargeting`
+- `Range { get; init; } -> double` — Metres: how far ahead `AbilityTargeting.Forward` aims, and how far `AbilityTargeting.NearestEnemy` looks.
+- `Targeting { get; init; } -> AbilityTargeting` — Where the ability aims.
 
 ## AbilityHandle — A registered ability; dispose to take it off (also when the mod unloads).
-- `Definition { get; } -> AbilityDefinition`
-- `Dispose() -> void`
+- `Definition { get; } -> AbilityDefinition` — The ability's definition.
+- `Dispose() -> void` — Takes the ability off: its key binding, HUD line and chat command go with it.
 
 ## AbilityResource — A resource attribute an ability can cost or change.
 enum: Health, Mana, Stamina, SpecialAbility
@@ -176,46 +176,46 @@ enum: Key, Command, Server
 
 ## CastResult — The outcome of a cast request.
 - `CastResult(bool Ok, string? Reason, TimeSpan CooldownLeft, AbilityCast? Cast = null)`
-- `Cast { get; init; } -> AbilityCast?`
-- `CooldownLeft { get; init; } -> TimeSpan`
-- `Ok { get; init; } -> bool`
-- `Reason { get; init; } -> string?`
-- `static Refused(string reason, TimeSpan cooldown = default(TimeSpan)) -> CastResult`
+- `Cast { get; init; } -> AbilityCast?` — The cast; null when it was refused.
+- `CooldownLeft { get; init; } -> TimeSpan` — A cast: the cooldown now running.
+- `Ok { get; init; } -> bool` — True when the cast started.
+- `Reason { get; init; } -> string?` — Why it was refused; null when `Ok`.
+- `static Refused(string reason, TimeSpan cooldown = default(TimeSpan)) -> CastResult` — A refusal with a reason, and the cooldown left when that is why.
 
 ## DamageCall — A synchronous applyDamage call (job thread): change it before the game applies it, or cancel it.
-- `Attacker { get; } -> EntityId`
+- `Attacker { get; } -> EntityId` — The attacker (argument 1).
 - `AttackMod { get; set; } -> float` — The attack multiplier (variable AttackMod, 1.0 by default).
-- `Cancel() -> void`
+- `Cancel() -> void` — The hit does not happen: the program gets 0 and the game's applyDamage does not run.
 - `Damage { get; set; } -> DamageSetup` — The damage setup argument (per-type factors), when connected.
-- `HasAttackMod { get; } -> bool`
-- `ImpactId { get; } -> uint`
-- `ProgramId { get; } -> uint`
-- `Self { get; } -> EntityId`
-- `Target { get; } -> EntityId`
+- `HasAttackMod { get; } -> bool` — True when this call site passes an AttackMod.
+- `ImpactId { get; } -> uint` — The id of the instance whose program made the call.
+- `ProgramId { get; } -> uint` — The id of that instance's program.
+- `Self { get; } -> EntityId` — The entity the program runs on.
+- `Target { get; } -> EntityId` — The target (argument 2).
 
-## DamageHandler
+## DamageHandler — A handler of `Abilities.OnDamage`: runs synchronously on the game's job thread for every applyDamage call.
 - `Invoke(ref DamageCall call) -> void`
 
 ## DamageSetup — Damage per type, the engine's DamageSetup variable (52 bytes).
 - `DamageSetup()`
 - `DamageSetup(float Cut, float Pierce, float Blunt, float Fire, float Ice, float Fog, float Lightning, float Healing, float Poison, float Wood, float Stone, float Metal, float Explosion)`
-- `Blunt { get; set; } -> float`
-- `Cut { get; set; } -> float`
-- `Explosion { get; set; } -> float`
-- `Fire { get; set; } -> float`
-- `static FireOnly(float f) -> DamageSetup`
-- `Fog { get; set; } -> float`
-- `Healing { get; set; } -> float`
-- `Ice { get; set; } -> float`
-- `static IceOnly(float f) -> DamageSetup`
-- `Lightning { get; set; } -> float`
-- `Metal { get; set; } -> float`
-- `Pierce { get; set; } -> float`
-- `Poison { get; set; } -> float`
-- `Scaled(float k) -> DamageSetup`
-- `Stone { get; set; } -> float`
-- `Total { get; } -> float`
-- `Wood { get; set; } -> float`
+- `Blunt { get; set; } -> float` — The factor for blunt damage.
+- `Cut { get; set; } -> float` — The factor for cut damage.
+- `Explosion { get; set; } -> float` — The factor for explosion damage.
+- `Fire { get; set; } -> float` — The factor for fire damage.
+- `static FireOnly(float f) -> DamageSetup` — A setup with fire set to `f` and every other factor 0.
+- `Fog { get; set; } -> float` — The factor for fog damage.
+- `Healing { get; set; } -> float` — The factor for healing.
+- `Ice { get; set; } -> float` — The factor for ice damage.
+- `static IceOnly(float f) -> DamageSetup` — A setup with ice set to `f` and every other factor 0.
+- `Lightning { get; set; } -> float` — The factor for lightning damage.
+- `Metal { get; set; } -> float` — The factor for metal damage.
+- `Pierce { get; set; } -> float` — The factor for pierce damage.
+- `Poison { get; set; } -> float` — The factor for poison damage.
+- `Scaled(float k) -> DamageSetup` — Every factor multiplied by `k`.
+- `Stone { get; set; } -> float` — The factor for stone damage.
+- `Total { get; } -> float` — The sum of all factors.
+- `Wood { get; set; } -> float` — The factor for wood damage.
 
 ## EntityBuff `0.2.2` — A buff on an entity: a player, a creature or an NPC (the game keeps them in the entity's BuffContainer, on the server).
 - `EntityBuff(uint Id, string Slot, TimeSpan? Remaining = null, int Level = 0)`
@@ -228,19 +228,19 @@ enum: Key, Command, Server
 
 ## EquippedGem `0.2.5` — A gem whose effect runs for a player now: the game spawned its impact entity.
 - `EquippedGem(EntityId Player, GemImpactSlot Slot, SocketedGem Socket, EntityId Impact)`
-- `Impact { get; init; } -> EntityId`
-- `Player { get; init; } -> EntityId`
-- `Slot { get; init; } -> GemImpactSlot`
-- `Socket { get; init; } -> SocketedGem`
+- `Impact { get; init; } -> EntityId` — The gem's impact entity the game spawned.
+- `Player { get; init; } -> EntityId` — The player.
+- `Slot { get; init; } -> GemImpactSlot` — The equipment impact slot the gem's item is in.
+- `Socket { get; init; } -> SocketedGem` — The gem in its socket, with the item that carries it.
 
 ## GemConfigValue `0.2.5` — One config of a gem's impact program.
 - `GemConfigValue(uint Id, string? Alias, string Kind, double Value, double? ScaleFactor)`
-- `Alias { get; init; } -> string?`
-- `Id { get; init; } -> uint`
-- `Kind { get; init; } -> string`
-- `ScaleFactor { get; init; } -> double?`
+- `Alias { get; init; } -> string?` — The config's alias in the shared vocabulary (`ImpactConfigIds`); null when it has none.
+- `Id { get; init; } -> uint` — The config's id.
+- `Kind { get; init; } -> string` — The config type, for example `ScaledSint32` or `BuffType`.
+- `ScaleFactor { get; init; } -> double?` — The level scaling of a scaled config; null for an unscaled one.
 - `Text { get; init; } -> string?` — The value as kiln.gamedata writes it when it is not a number: a GUID (a buff, a template), an enum name (`Big`)...
-- `Value { get; init; } -> double`
+- `Value { get; init; } -> double` — The base value; 0 when the value is not a number (see `GemConfigValue.Text`).
 
 ## GemCost `0.2.5` — An amount of one item: what a forge action costs, or what Recycle gives.
 - `GemCost()`
@@ -344,15 +344,15 @@ enum: Held, Shield, Head, Chest, Hands, Legs, Feet, Ring1, Ring2, Ammo, Spell
 
 ## GemInfo `0.2.5` — A gem item definition (category WeaponGem) from the catalog: the game's own gems and any mod's.
 - `GemInfo(ItemId Item, string Name, string? DisplayName, ItemRarity Rarity, int LevelMin, int LevelMax, Guid Program, IReadOnlyDictionary<uint, GemConfigValue> Configs, bool FromMod)`
-- `Configs { get; init; } -> IReadOnlyDictionary<uint, GemConfigValue>`
-- `DisplayName { get; init; } -> string?`
-- `FromMod { get; init; } -> bool`
-- `Item { get; init; } -> ItemId`
-- `LevelMax { get; init; } -> int`
-- `LevelMin { get; init; } -> int`
-- `Name { get; init; } -> string`
-- `Program { get; init; } -> Guid`
-- `Rarity { get; init; } -> ItemRarity`
+- `Configs { get; init; } -> IReadOnlyDictionary<uint, GemConfigValue>` — The program's config values by config id (the gem's `impactValues`).
+- `DisplayName { get; init; } -> string?` — The English display name, or the name a mod's definition gave; null without one.
+- `FromMod { get; init; } -> bool` — True for a gem a mod defined: a mod's own item, or a clone of a game item.
+- `Item { get; init; } -> ItemId` — The gem's item id.
+- `LevelMax { get; init; } -> int` — The highest level the gem can reach (the high end of the item's level range).
+- `LevelMin { get; init; } -> int` — The level a new gem has (the low end of the item's level range).
+- `Name { get; init; } -> string` — The item's name.
+- `Program { get; init; } -> Guid` — The Impact program the gem runs; empty when it is not known.
+- `Rarity { get; init; } -> ItemRarity` — The item's rarity.
 
 ## GemPayer `0.2.7` — Who pays a forge action's cost (`GemCraftOptions.PayFrom`, `GemSourceOptions.PayFrom`): the player (the default), a container your mod vouches for, or the base's...
 - `static BaseStorage { get; } -> GemPayer` — The base's crafting-stock containers pay.
@@ -493,64 +493,65 @@ enum: Done, AlreadyHasSocket, KindNotAllowed, Equipped, NotFound, NotGear, Refus
 enum: Hit, Crit, Kill, Backstab, HitTaken, Passive
 
 ## ImpactBuffEvent — applyBuff ran (args: 0 buff type, 1 target, 2 damage setup, 4 duration).
-- `Buff { get; } -> Guid`
-- `Duration { get; } -> TimeSpan`
-- `Target { get; } -> EntityId`
+- `Buff { get; } -> Guid` — The buff type's GUID (argument 0); empty when it is not connected.
+- `Duration { get; } -> TimeSpan` — The buff's duration (argument 4); zero when it is not connected.
+- `Target { get; } -> EntityId` — The entity that gets the buff (argument 1).
 
 ## ImpactConfigIds — Config ids of the shared vocabulary (docs/re/abilities.md section 1) and the C++-read cost ids, for keys that are not program variable names.
-- `const AttackCategory = 606890942 -> uint`
-- `const AttackMod = 2236524794 -> uint`
-- `const BuffType = 1524311620 -> uint`
-- `const Damage = 1921402148 -> uint`
-- `const DamageScaleAttribute = 1395916278 -> uint`
-- `const Duration = 319426290 -> uint`
-- `const FuelAmount = 3360236544 -> uint`
-- `const FuelCharges = 3919228920 -> uint`
-- `const HitReactionType = 2178607591 -> uint`
-- `const IgnoreConsecutiveHits = 3602621489 -> uint`
-- `const ManaCost = 2938334926 -> uint`
-- `const Material = 3205040191 -> uint`
-- `const NoiseRange = 2710833586 -> uint`
+- `const AttackCategory = 606890942 -> uint` — The config id of the shared `AttackCategory` variable.
+- `const AttackMod = 2236524794 -> uint` — The config id of the shared `AttackMod` variable (the attack multiplier).
+- `const BuffType = 1524311620 -> uint` — The config id of the shared `BuffType` variable (a buff GUID).
+- `const Damage = 1921402148 -> uint` — The config id of the shared `Damage` variable (a `DamageSetup`).
+- `const DamageScaleAttribute = 1395916278 -> uint` — The config id of the shared `DamageScaleAttribute` variable.
+- `const Duration = 319426290 -> uint` — The config id of the shared `Duration` variable.
+- `const FuelAmount = 3360236544 -> uint` — The config id the game's own code reads as the fuel amount when a PayUsageCost event pays.
+- `const FuelCharges = 3919228920 -> uint` — The config id the game's own code reads as the fuel charges when a PayUsageCost event pays.
+- `const HitReactionType = 2178607591 -> uint` — The config id of the shared `HitReactionType` variable.
+- `const IgnoreConsecutiveHits = 3602621489 -> uint` — The config id of the shared `IgnoreConsecutiveHits` variable.
+- `const ManaCost = 2938334926 -> uint` — The config id the game's own code reads as the mana cost when a PayUsageCost event pays.
+- `const Material = 3205040191 -> uint` — The config id of the shared `Material` variable.
+- `const NoiseRange = 2710833586 -> uint` — The config id of the shared `NoiseRange` variable.
 - `static Parse(string key) -> uint` — "0x..." text or a known alias -> config id; 0 when neither.
-- `const PostWaitTime = 2854198668 -> uint`
-- `const PushBackStrength = 3844426053 -> uint`
-- `const SpawnTemplate = 4138173901 -> uint`
-- `const SpawnTemplate2 = 699017590 -> uint`
-- `const SpecialAbilityCost = 770044405 -> uint`
-- `const StaminaCost = 1920827256 -> uint`
-- `const WaitTime = 3793439602 -> uint`
+- `const PostWaitTime = 2854198668 -> uint` — The config id of the shared `PostWaitTime` variable.
+- `const PushBackStrength = 3844426053 -> uint` — The config id of the shared `PushBackStrength` variable.
+- `const SpawnTemplate = 4138173901 -> uint` — The config id of the shared `SpawnTemplate` variable (a template GUID).
+- `const SpawnTemplate2 = 699017590 -> uint` — The config id of the shared `SpawnTemplate2` variable (a template GUID).
+- `const SpecialAbilityCost = 770044405 -> uint` — The config id the game's own code reads as the special-ability cost when a PayUsageCost event pays.
+- `const StaminaCost = 1920827256 -> uint` — The config id the game's own code reads as the stamina cost when a PayUsageCost event pays.
+- `const WaitTime = 3793439602 -> uint` — The config id of the shared `WaitTime` variable.
 
 ## ImpactConfigs — Config values for `Abilities.RunImpact` and `Abilities.RunProgram`: key = a variable alias or name of the program ("NoiseRange", "Damage1", "SpawnTemplate_Pre"), a...
+- `ImpactConfigs()` — An empty set of config values; keys compare without regard to case.
 
 ## ImpactDamageEvent — applyDamage ran (args: 0 wasBlocked, 1 attacker/root, 2 target, 3 position, 6 AttackMod, 12 push-back, 13 hit reaction, 14 damage setup).
-- `Attacker { get; } -> EntityId`
-- `AttackMod { get; } -> float`
-- `Blocked { get; } -> bool`
-- `Damage { get; } -> DamageSetup`
-- `Position { get; } -> WorldPosition`
-- `Target { get; } -> EntityId`
+- `Attacker { get; } -> EntityId` — The attacker or root (argument 1).
+- `AttackMod { get; } -> float` — The attack multiplier (argument 6); 1 when the call site passes none.
+- `Blocked { get; } -> bool` — True when the hit was blocked (argument 0, wasBlocked).
+- `Damage { get; } -> DamageSetup` — The damage setup (argument 14); default when it is not connected.
+- `Position { get; } -> WorldPosition` — The position of the hit (argument 3); default when the argument holds none.
+- `Target { get; } -> EntityId` — The target (argument 2).
 
 ## ImpactEndedEvent — An instance reported by `ImpactStartedEvent` or `ImpactStartingEvent` no longer exists (its program finished or its entity was destroyed).
-- `Impact { get; } -> ImpactRef`
-- `Step { get; } -> ulong`
+- `Impact { get; } -> ImpactRef` — The instance that no longer exists.
+- `Step { get; } -> ulong` — The step in which Kiln saw that it was gone.
 
 ## ImpactInstance — A live instance (tick thread: Pre/Post, handlers, OnLoad).
 - `Alive { get; } -> bool` — Whether the instance still exists.
 - `Find(string key) -> ImpactVariable?` — A variable by alias or debug name ("NoiseRange", "NoiseRange::value"), config id text ("0xa19409b2") or a known...
-- `Find(uint configId) -> ImpactVariable?` — A variable by alias or debug name ("NoiseRange", "NoiseRange::value"), config id text ("0xa19409b2") or a known...
+- `Find(uint configId) -> ImpactVariable?` — The variable bound to this config id; null when there is none (and for 0).
 - `Flags { get; } -> uint?` — Instance flags (Initialized 1, Executed 2, Halt 8, Error 0x10, Destroy 0x40), or null when gone.
-- `GetBool(string key) -> bool?`
-- `GetDamage(string key) -> DamageSetup?`
-- `GetFloat(string key) -> float?`
-- `GetGuid(string key) -> Guid?`
-- `GetInt(string key) -> int?`
-- `GetTime(string key) -> TimeSpan?`
-- `ImpactId { get; } -> uint`
-- `Read(ImpactVariable v) -> byte[]?`
+- `GetBool(string key) -> bool?` — A 1-byte variable read as a bool; null when there is none.
+- `GetDamage(string key) -> DamageSetup?` — A 52-byte variable read as a `DamageSetup`; null when there is none.
+- `GetFloat(string key) -> float?` — A 4-byte variable (`key` as for `ImpactInstance.Find`) read as a float; null when there is none.
+- `GetGuid(string key) -> Guid?` — A 16-byte variable read as a GUID; null when there is none.
+- `GetInt(string key) -> int?` — A 4-byte variable read as an int; null when there is none.
+- `GetTime(string key) -> TimeSpan?` — An 8-byte variable read as engine time (int64 nanoseconds); null when there is none.
+- `ImpactId { get; } -> uint` — The game's id of the instance.
+- `Read(ImpactVariable v) -> byte[]?` — The variable's bytes now; null when the instance is gone or the read was refused.
 - `Set(string key, object value) -> bool` — Sets a variable from a value (float, int, bool, TimeSpan, Guid, DamageSetup, byte[]), converted to the variable's type.
-- `SetFloat(string key, float value) -> bool`
-- `SetInt(string key, int value) -> bool`
-- `Variables { get; } -> IReadOnlyList<ImpactVariable>`
+- `SetFloat(string key, float value) -> bool` — `ImpactInstance.Set` with a float.
+- `SetInt(string key, int value) -> bool` — `ImpactInstance.Set` with an int.
+- `Variables { get; } -> IReadOnlyList<ImpactVariable>` — The instance's variables (read once, then kept).
 - `Write(ImpactVariable v, ReadOnlySpan<byte> bytes) -> bool` — Writes a variable.
 
 ## ImpactNativeAccess `0.2.4` — Generated code of `ImpactNativeAttribute` methods: typed views of a call's arguments, and the registration hand-over.
@@ -573,28 +574,28 @@ enum: Hit, Crit, Kill, Backstab, HitTaken, Passive
 
 ## ImpactNativeEvent — A vanilla native ran inside a program (observe only; posted in the next Pre).
 - `ArgBytes(int i) -> ReadOnlySpan<byte>` — The bytes of argument i's variable when it was larger than 4 bytes (else empty).
-- `ArgCount { get; } -> int`
-- `ArgEntity(int i) -> EntityId`
-- `ArgFloat(int i) -> float`
+- `ArgCount { get; } -> int` — The number of arguments of the call.
+- `ArgEntity(int i) -> EntityId` — Argument `i` as an entity; none when it is not connected.
+- `ArgFloat(int i) -> float` — `ImpactNativeEvent.ArgU32` read as a float.
 - `ArgU32(int i) -> uint` — The first 4 bytes of argument i's variable after the call (or the raw value).
-- `Error { get; } -> byte`
-- `Impact { get; } -> ImpactRef`
-- `IsConnected(int i) -> bool`
-- `Native { get; } -> uint`
-- `NativeName { get; } -> string`
+- `Error { get; } -> byte` — The native's error byte: 0 = ok, 1 to 3 = the call suspended.
+- `Impact { get; } -> ImpactRef` — The instance whose program called the native.
+- `IsConnected(int i) -> bool` — True when argument `i` is a variable handle (0xFFFF0000|index), not 0 or a raw value.
+- `Native { get; } -> uint` — The native's hash: FNV-1a-32 of its name.
+- `NativeName { get; } -> string` — The native's name; its hash as `0x<hash>` when it is unknown.
 - `RawArg(int i) -> uint` — The raw argument (a handle 0xFFFF0000|index, 0 = not connected, or a raw value).
 - `Result { get; } -> byte` — The value the native pushed (applyDamage: 1 = the hit was not blocked).
-- `Site { get; } -> uint`
-- `Step { get; } -> ulong`
+- `Site { get; } -> uint` — The call-site id of the call in the program.
+- `Step { get; } -> ulong` — The step the call ran in.
 
 ## ImpactNativeInfo — A native in the game's registry.
 - `ImpactNativeInfo(uint Hash, string Name, int Argc, ImpactNativeKind Kind)`
-- `Argc { get; init; } -> int`
-- `Hash { get; init; } -> uint`
-- `Kind { get; init; } -> ImpactNativeKind`
-- `Name { get; init; } -> string`
+- `Argc { get; init; } -> int` — The number of arguments.
+- `Hash { get; init; } -> uint` — FNV-1a-32 of the native's name: what a program's call names.
+- `Kind { get; init; } -> ImpactNativeKind` — Who registered it.
+- `Name { get; init; } -> string` — The native's display name.
 
-## ImpactNativeKind
+## ImpactNativeKind — Who registered a native in the game's registry (`ImpactNativeInfo.Kind`).
 enum: Vanilla, Wrapped, Builtin, Managed, Sync `0.2.4`
 
 ## ImpactOptions — Options of `Abilities.RunImpact` / `Abilities.RunProgram`.
@@ -602,63 +603,63 @@ enum: Vanilla, Wrapped, Builtin, Managed, Sync `0.2.4`
 - `Configs { get; init; } -> ImpactConfigs?` — Config values for the instance (see `ImpactConfigs`).
 - `Faction { get; init; } -> byte?` — The impact's faction (FactionType: Player 7, PlayerAlly 11, Vukah 3, ...).
 - `Root { get; init; } -> EntityId` — The caster: the impact's ImpactHierarchy root and parent (kill credit, faction and same-root filters: the caster is...
-- `Tag { get; init; } -> string?`
+- `Tag { get; init; } -> string?` — The tag kiln.spawn stores for the spawned entity (`SpawnOptions.Tag`).
 - `Track { get; init; } -> bool` — Record the entity in kiln.spawn's per-world list (default: no; impacts are short-lived and never saved: they always...
-- `YawDegrees { get; init; } -> float`
+- `YawDegrees { get; init; } -> float` — The spawned entity's yaw in degrees about the up axis.
 
 ## ImpactProgramInfo — A program in the game's ImpactRegistry.
 - `ImpactProgramInfo(uint Id, Guid Guid, int CodeWords, int ShutdownWords, int Variables, int DataBytes, int StackSize, int Streams, bool FromKiln)`
-- `CodeWords { get; init; } -> int`
-- `DataBytes { get; init; } -> int`
-- `FromKiln { get; init; } -> bool`
-- `Guid { get; init; } -> Guid`
-- `Id { get; init; } -> uint`
-- `ShutdownWords { get; init; } -> int`
-- `StackSize { get; init; } -> int`
-- `Streams { get; init; } -> int`
-- `Variables { get; init; } -> int`
+- `CodeWords { get; init; } -> int` — Words of code in the program.
+- `DataBytes { get; init; } -> int` — Bytes of variable data one instance holds.
+- `FromKiln { get; init; } -> bool` — True when Kiln inserted the program (a mod's), false for a game program.
+- `Guid { get; init; } -> Guid` — The program's GUID.
+- `Id { get; init; } -> uint` — The program's id: FNV-1a of its GUID's bytes (`Programs.IdOf`).
+- `ShutdownWords { get; init; } -> int` — Words of shutdown code.
+- `StackSize { get; init; } -> int` — The program's stack size.
+- `Streams { get; init; } -> int` — The streams the program uses, as bits: OnCollision 1, OnHit 2, OnParry 4, EntityInRange 8.
+- `Variables { get; init; } -> int` — The number of variables.
 
 ## ImpactRef — A running Impact program instance: the game's impact id, its program, the entity it runs on and that entity's ImpactHierarchy root (the caster of a player ability...
 - `ImpactRef()`
 - `ImpactRef(uint ImpactId, uint ProgramId, EntityId Self, EntityId Root)`
-- `ImpactId { get; init; } -> uint`
-- `ProgramId { get; init; } -> uint`
-- `Root { get; init; } -> EntityId`
-- `Self { get; init; } -> EntityId`
+- `ImpactId { get; init; } -> uint` — The game's id of the instance.
+- `ProgramId { get; init; } -> uint` — The id of the instance's program (FNV-1a of its GUID's bytes).
+- `Root { get; init; } -> EntityId` — The entity's ImpactHierarchy root: the caster of a player ability; none when it has none.
+- `Self { get; init; } -> EntityId` — The entity the program runs on.
 
 ## ImpactSignalEvent — A program called kiln.Signal(value, tag): Kiln's bridge from Impact programs to mods (fire and forget; posted in the next Pre).
-- `AsEntity { get; } -> EntityId`
-- `AsFloat { get; } -> float`
-- `AsInt { get; } -> int`
-- `Impact { get; } -> ImpactRef`
-- `Site { get; } -> uint`
-- `Step { get; } -> ulong`
-- `Tag { get; } -> uint`
-- `Value { get; } -> byte[]`
+- `AsEntity { get; } -> EntityId` — `ImpactSignalEvent.Value` as an entity id (its first 4 bytes).
+- `AsFloat { get; } -> float` — `ImpactSignalEvent.Value` as a float (its first 4 bytes); 0 when it is shorter.
+- `AsInt { get; } -> int` — `ImpactSignalEvent.Value` as an int: its first 4 bytes, or a 1-byte value as that byte; 0 otherwise.
+- `Impact { get; } -> ImpactRef` — The instance whose program signalled.
+- `Site { get; } -> uint` — The call-site id of the signal in the program.
+- `Step { get; } -> ulong` — The step the program signalled in.
+- `Tag { get; } -> uint` — The tag the program passed (the second argument of `kiln.Signal`).
+- `Value { get; } -> byte[]` — The bytes of the value argument: a variable's bytes, or the raw 32-bit value.
 - `ValueTypeHash { get; } -> uint` — The value variable's type hash (0 = a raw u32).
 
 ## ImpactSpawnEvent — spawnEntity ran (args: 0 the spawned entity (when connected), 5 template, 6 transform).
 - `Position { get; } -> WorldPosition` — Position of the transform argument (32.32 fixed point in the engine).
-- `Spawned { get; } -> EntityId`
-- `Template { get; } -> Guid`
-- `TemplateName { get; } -> string?`
+- `Spawned { get; } -> EntityId` — The spawned entity (argument 0); none when it is not connected.
+- `Template { get; } -> Guid` — The template's GUID (argument 5); empty when it is not connected.
+- `TemplateName { get; } -> string?` — The template's name; null when there is no template or Kiln does not know it.
 
 ## ImpactStartedEvent — An Impact instance was created and the game copied its config values in (observe only; one step later).
-- `Impact { get; } -> ImpactRef`
-- `Instance { get; } -> ImpactInstance`
-- `Step { get; } -> ulong`
+- `Impact { get; } -> ImpactRef` — The instance that was created.
+- `Instance { get; } -> ImpactInstance` — The live instance, to read or write its variables while it exists.
+- `Step { get; } -> ulong` — The step the instance was created in.
 - `TemplateName { get; } -> string?` — The entity's template name (looked up now; null when the entity is gone).
 
 ## ImpactStartingEvent — Before an instance's first run (Forge-style "per cast" tweak): the instance exists with the game's config values and has not run yet; handlers change its variables...
-- `GetFloat(string key) -> float?`
-- `Impact { get; } -> ImpactRef`
-- `Instance { get; } -> ImpactInstance`
-- `RootIsPlayer { get; } -> bool`
+- `GetFloat(string key) -> float?` — A 4-byte variable read as a float (`key` as for `ImpactInstance.Find`); null when the program has no such variable.
+- `Impact { get; } -> ImpactRef` — The instance that is about to run for the first time.
+- `Instance { get; } -> ImpactInstance` — The instance, to read or write its variables before its first run.
+- `RootIsPlayer { get; } -> bool` — True when the instance's root (the caster) is a player.
 - `Scale(string key, float factor) -> bool` — Multiplies a float variable (e.g. "AttackMod", "NoiseRange").
-- `Set(string key, object value) -> bool`
-- `SetFloat(string key, float value) -> bool`
-- `Step { get; } -> ulong`
-- `TemplateName { get; } -> string?`
+- `Set(string key, object value) -> bool` — Sets a variable from a value (float, int, bool, `TimeSpan`, `Guid`, `DamageSetup` or byte[]), converted to the...
+- `SetFloat(string key, float value) -> bool` — Writes a float variable.
+- `Step { get; } -> ulong` — The step the instance was created in.
+- `TemplateName { get; } -> string?` — The entity's template name (looked up now); null when the entity is gone.
 
 ## ImpactValueType — What a variable holds, from its engine type.
 enum: Bytes, UInt32, Int32, Float, Bool, Time, Entity, Float3, Guid, Damage
@@ -666,14 +667,14 @@ enum: Bytes, UInt32, Int32, Float, Bool, Time, Entity, Float3, Guid, Damage
 ## ImpactVariable — A program variable.
 - `ImpactVariable(int Index, uint NameHash, uint ConfigId, uint Type, int Size, int Offset, string Name)`
 - `Alias { get; } -> string` — The name without the "::value" suffix and node prefixes ("NoiseRange", "Damage1").
-- `ConfigId { get; init; } -> uint`
+- `ConfigId { get; init; } -> uint` — The config id that binds the variable to a config value; 0 when it is not bound.
 - `Index { get; init; } -> int` — Its index (handle 0xFFFF0000 | index).
 - `Name { get; init; } -> string` — Debug name, e.g. "NoiseRange::value".
-- `NameHash { get; init; } -> uint`
-- `Offset { get; init; } -> int`
-- `Size { get; init; } -> int`
-- `Type { get; init; } -> uint`
-- `ValueType { get; } -> ImpactValueType`
+- `NameHash { get; init; } -> uint` — The hash of the variable's name.
+- `Offset { get; init; } -> int` — Where the variable sits in the instance's variable data, in bytes.
+- `Size { get; init; } -> int` — The variable's size in bytes.
+- `Type { get; init; } -> uint` — The engine's type hash (`ImpactVariable.ValueType` sorts the common ones).
+- `ValueType { get; } -> ImpactValueType` — What the variable holds, from its type and size.
 
 ## ImpactVariableChangedEvent `0.2.2` — A mod changed a variable of a live Impact instance (`ImpactInstance.Write`, `ImpactInstance.Set` and the typed setters).
 - `ImpactId { get; } -> uint` — The instance's id (`ImpactInstance.ImpactId`).
@@ -711,26 +712,26 @@ enum: In, Out, InOut
 enum: Gone, Pending, Active, Off
 
 ## NativeCall — A synchronous call of a wrapped vanilla native, on the game's job thread inside the sim step.
-- `ArgCount { get; } -> int`
+- `ArgCount { get; } -> int` — The number of arguments of the call.
 - `Bytes(int i) -> Span<byte>` — The bytes of argument i's variable, or empty (not connected, out of range).
 - `CallOriginal() -> void` — Runs the game's native now with the current arguments (once).
 - `Cancel() -> void` — The native does not run and the program gets 0 (applyDamage: no hit; applyBuff: no buff).
 - `Decided { get; } -> bool` — The game's native ran (or a handler returned a value): later handlers see the outcome.
-- `GetEntity(int i) -> EntityId`
-- `GetFloat(int i) -> float`
-- `GetU32(int i) -> uint`
-- `ImpactId { get; } -> uint`
-- `IsConnected(int i) -> bool`
-- `Native { get; } -> uint`
-- `ProgramId { get; } -> uint`
-- `Raw(int i) -> uint`
-- `ResultValue { get; } -> byte`
+- `GetEntity(int i) -> EntityId` — `NativeCall.GetU32` as an entity id.
+- `GetFloat(int i) -> float` — The variable's first 4 bytes as a float; 0 when the argument is not a variable of at least 4 bytes.
+- `GetU32(int i) -> uint` — The variable's first 4 bytes as an unsigned integer; 0 when the argument is not a variable of at least 4 bytes.
+- `ImpactId { get; } -> uint` — The id of the instance whose program made the call.
+- `IsConnected(int i) -> bool` — True when argument `i` is a variable handle, not 0 or a raw value.
+- `Native { get; } -> uint` — The native's hash: FNV-1a-32 of its name (`Natives.NameOf` gives the name).
+- `ProgramId { get; } -> uint` — The id of that instance's program.
+- `Raw(int i) -> uint` — Argument `i` as passed: a variable handle (0xFFFF0000|index), 0 (not connected) or a raw value.
+- `ResultValue { get; } -> byte` — The value the program gets so far: the game's native's result, or the value a handler returned.
 - `Return(byte value) -> void` — The native does not run; the program gets `value`.
-- `Self { get; } -> EntityId`
-- `SetFloat(int i, float v) -> bool`
-- `SetU32(int i, uint v) -> bool`
-- `Site { get; } -> uint`
-- `VariableType(int i) -> uint`
+- `Self { get; } -> EntityId` — The entity the program runs on.
+- `SetFloat(int i, float v) -> bool` — Writes a float into a 4-byte variable.
+- `SetU32(int i, uint v) -> bool` — Writes an unsigned integer into a 4-byte variable.
+- `Site { get; } -> uint` — The call-site id of the call in the program.
+- `VariableType(int i) -> uint` — The type hash of the variable argument `i` names; 0 when it is not a variable.
 
 ## NativeContext `0.2.4` — The call an `ImpactNativeAttribute` method answers (its optional first parameter, `in NativeContext ctx`): which instance, program and call site.
 - `ImpactId { get; } -> uint` — The program instance's id.
@@ -746,21 +747,21 @@ enum: Gone, Pending, Active, Off
 - `Invoke(NativeInvocation call) -> byte`
 
 ## NativeInvocation — A call of a managed Kiln native (tick thread, the step after the program called it).
-- `ArgCount { get; } -> int`
-- `GetBool(int i) -> bool`
-- `GetBytes(int i) -> byte[]?`
-- `GetEntity(int i) -> EntityId`
-- `GetFloat(int i) -> float`
-- `GetInt(int i) -> int`
-- `Impact { get; } -> ImpactRef`
-- `Instance { get; } -> ImpactInstance`
-- `IsVariable(int i) -> bool`
-- `Name { get; } -> string`
+- `ArgCount { get; } -> int` — The number of arguments of the call.
+- `GetBool(int i) -> bool` — Argument `i` as a bool: the variable's first byte is not 0, or the raw argument is not 0.
+- `GetBytes(int i) -> byte[]?` — The bytes of the variable argument `i` names; null when it is not a variable.
+- `GetEntity(int i) -> EntityId` — Argument `i` as an entity id (read like `NativeInvocation.GetInt`).
+- `GetFloat(int i) -> float` — Argument `i` as a float: the variable's first 4 bytes, or the raw argument when it is not a variable.
+- `GetInt(int i) -> int` — Argument `i` as an int: the variable's first 4 bytes, or the raw argument when it is not a variable.
+- `Impact { get; } -> ImpactRef` — The instance whose program made the call.
+- `Instance { get; } -> ImpactInstance` — The live instance, to read or write the program's variables.
+- `IsVariable(int i) -> bool` — True when argument `i` is a variable handle (0xFFFF0000|index), not 0 or a raw value.
+- `Name { get; } -> string` — The native's name.
 - `Raw(int i) -> uint` — Argument i as passed: a handle 0xFFFF0000|index, 0 (not connected) or a raw value.
-- `SetBool(int i, bool value) -> bool`
-- `SetEntity(int i, EntityId value) -> bool`
-- `SetFloat(int i, float value) -> bool`
-- `SetInt(int i, int value) -> bool`
+- `SetBool(int i, bool value) -> bool` — Writes a bool into the variable argument `i` names, converted to its type.
+- `SetEntity(int i, EntityId value) -> bool` — Writes an entity id into the variable argument `i` names.
+- `SetFloat(int i, float value) -> bool` — Writes a float into the variable argument `i` names, converted to its type.
+- `SetInt(int i, int value) -> bool` — Writes an int into the variable argument `i` names, converted to its type.
 - `Site { get; } -> uint` — The ECALL's call-site id (unique per call site; the editor node id).
 - `Variable(int i) -> ImpactVariable?` — The variable argument i names (null for a raw value or a variable index out of range).
 
@@ -798,15 +799,15 @@ enum: None, Waiting, Live, Refused, Dead
 ## NativeSyncHandler `0.2.4` — A synchronous Kiln native (`Natives.RegisterSync`): runs inside the program's ECALL, on the thread that runs the game's Impact programs, and returns the value the...
 - `Invoke(ref NativeCall call) -> byte`
 
-## NativeWrapHandler
+## NativeWrapHandler — A handler of `Natives.Wrap`: runs synchronously on the game's job thread for every call of the wrapped native.
 - `Invoke(ref NativeCall call) -> void`
 
 ## OfferedGem `0.2.7` — One gem an offer listed: its token (Kiln's, unguessable), the gem, its slot and level when offered.
 - `OfferedGem(ulong Token, ItemInstanceRef Gem, SlotId Slot, int Level)`
-- `Gem { get; init; } -> ItemInstanceRef`
-- `Level { get; init; } -> int`
-- `Slot { get; init; } -> SlotId`
-- `Token { get; init; } -> ulong`
+- `Gem { get; init; } -> ItemInstanceRef` — The gem item.
+- `Level { get; init; } -> int` — Its level when it was offered.
+- `Slot { get; init; } -> SlotId` — Its slot in the container that was offered from.
+- `Token { get; init; } -> ulong` — Kiln's token for the offered gem; it cannot be guessed.
 
 ## `Optional<T>` `0.2.4` — An argument of an `ImpactNativeAttribute` method that the program may leave not connected (0): `Optional.HasValue` false then.
 - `Optional()` — A connected argument.
@@ -818,9 +819,9 @@ enum: None, Waiting, Live, Refused, Dead
 ## RawAttribute `0.2.4` — On a `uint` parameter of an `ImpactNativeAttribute` method: the program may pass a raw integer (a literal) as well as a variable.
 
 ## SequenceEndedEvent — An actor's sequence ended (replaced by none or by another sequence).
-- `Actor { get; } -> EntityId`
+- `Actor { get; } -> EntityId` — The actor whose sequence ended.
 - `Duration { get; } -> TimeSpan` — Wall time it was seen running.
-- `Sequence { get; } -> uint`
+- `Sequence { get; } -> uint` — The sequence that ended: FNV-1a of the ActorSequenceResource GUID (`Abilities.IdOf`).
 
 ## SequenceOptions — How `Abilities.PlaySequence` starts a sequence.
 - `AbortCurrent { get; init; } -> bool` — Abort the actor's current sequence (trigger ExternalAbortAndOverride, as fall damage does); false = ExternalTrigger...
@@ -829,14 +830,14 @@ enum: None, Waiting, Live, Refused, Dead
 - `static readonly Queue -> SequenceOptions` — ExternalTrigger (the trigger the game's emotes use), hold the keep-alive states.
 
 ## SequenceStartedEvent — An actor started an action sequence (attack, spell cast, ability, hit reaction ...): its `Actor.sequenceRuntimeId` changed.
-- `Actor { get; } -> EntityId`
-- `CallIndex { get; } -> int`
+- `Actor { get; } -> EntityId` — The actor that started the sequence.
+- `CallIndex { get; } -> int` — The sequence's call index (`Abilities.SequenceOf`).
 - `Sequence { get; } -> uint` — FNV-1a of the ActorSequenceResource GUID (`Abilities.IdOf`).
-- `TriggerTime { get; } -> long`
+- `TriggerTime { get; } -> long` — The sequence's trigger time, in ECS nanoseconds (`Abilities.SequenceOf`).
 
 ## SocketedGem `0.2.5` — A gem in a socket: the carrier item, the gem item and its level.
 - `SocketedGem()`
 - `SocketedGem(ItemInstanceRef Carrier, ItemId Gem, int Level)`
-- `Carrier { get; init; } -> ItemInstanceRef`
-- `Gem { get; init; } -> ItemId`
-- `Level { get; init; } -> int`
+- `Carrier { get; init; } -> ItemInstanceRef` — The item that holds the socket.
+- `Gem { get; init; } -> ItemId` — The gem item in the socket.
+- `Level { get; init; } -> int` — The gem's level.

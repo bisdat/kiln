@@ -18,18 +18,18 @@
 
 ## TerrainChangedEvent `0.2.3` — One batch of an overlay reached the world.
 - `Batch { get; } -> int` — This batch's number, from 1.
-- `BatchCount { get; } -> int`
+- `BatchCount { get; } -> int` — How many batches the patch has.
 - `Box { get; } -> CellBox` — The cells of this batch.
-- `CellsChanged { get; } -> long`
+- `CellsChanged { get; } -> long` — Cells whose value changed in this batch.
 - `Last { get; } -> bool` — The patch's last batch.
 - `Mod { get; } -> string` — The mod that owns the plan.
-- `Plan { get; } -> string`
-- `Version { get; } -> int`
+- `Plan { get; } -> string` — The plan's name inside the mod (`TerrainPatch.Id`).
+- `Version { get; } -> int` — The plan's version (`TerrainPatch.Version`).
 
 ## TerrainConflict `0.2.3` — One block an overlay left alone.
 - `TerrainConflict(TerrainConflictKind Kind, CellBox Block, string? Owner = null)`
 - `Block { get; init; } -> CellBox` — The block's cells (8 per axis, on the world's 8-cell grid).
-- `Kind { get; init; } -> TerrainConflictKind`
+- `Kind { get; init; } -> TerrainConflictKind` — Why the block was not written.
 - `Owner { get; init; } -> string?` — For `TerrainConflictKind.OtherPlan`: "mod/plan".
 
 ## TerrainConflictKind `0.2.3` — Why a block was not written.
@@ -71,15 +71,15 @@ enum: Kept, Transient
 ## TerrainPlanInfo `0.2.3` — A kept plan of the calling mod in this world (`Terrain.Applied`).
 - `TerrainPlanInfo(string Plan, int Version, CellBox Region, bool Complete, int Blocks, int GivenUp, DateTimeOffset AppliedAt)`
 - `Adopted { get; init; } -> bool` `0.2.4` — The plan adopted current terrain; its original terrain cannot be restored.
-- `AppliedAt { get; init; } -> DateTimeOffset`
+- `AppliedAt { get; init; } -> DateTimeOffset` — When the plan was last applied (UTC): set when an apply finishes or adopts the current cells.
 - `Blocks { get; init; } -> int` — Blocks the plan owns.
 - `Complete { get; init; } -> bool` — False while an apply is under way or was interrupted.
 - `GivenUp { get; init; } -> int` — Blocks the plan gave up after a conflict.
 - `InstalledWithoutProof { get; init; } -> bool` `0.2.4` — The initial automatic installation lacked history/proof and was admitted below the presence bound.
-- `Plan { get; init; } -> string`
+- `Plan { get; init; } -> string` — The plan's name inside the mod (`TerrainPatch.Id`).
 - `PresenceShare { get; init; } -> double?` `0.2.4` — The initial installation's measured exact-match fraction, retained in the ledger; otherwise null.
-- `Region { get; init; } -> CellBox`
-- `Version { get; init; } -> int`
+- `Region { get; init; } -> CellBox` — The cells the plan may touch.
+- `Version { get; init; } -> int` — The version that is applied.
 
 ## TerrainPlanReport `0.2.3` — What `Terrain.Inspect` found.
 - `TerrainPlanReport(bool Ok, string? Reason, CellBox Box, long Cells, int Blocks, int Batches, long EstimatedBytes, TerrainState Would, IReadOnlyList<TerrainConflict> Conflicts)`
@@ -89,30 +89,30 @@ enum: Kept, Transient
 - `Cells { get; init; } -> long` — Cells the patch addresses.
 - `Conflicts { get; init; } -> IReadOnlyList<TerrainConflict>` — The blocks an apply would leave alone.
 - `EstimatedBytes { get; init; } -> long` — What the save grows by at most (1,024 bytes a block, before the game packs them).
-- `Ok { get; init; } -> bool`
+- `Ok { get; init; } -> bool` — False when the inspection could not be made: the world is not running, or the tiles did not load.
 - `PresenceShare { get; init; } -> double?` `0.2.4` — Exact-match fraction measured for the automatic first-install decision; otherwise null.
-- `Reason { get; init; } -> string?`
+- `Reason { get; init; } -> string?` — Why the apply would not complete, or why the inspection failed; null when there is nothing to say.
 - `Would { get; init; } -> TerrainState` — How an apply would end now.
 
 ## TerrainProgress `0.2.3` — How far an `Terrain.Apply` is.
 - `TerrainProgress()`
 - `TerrainProgress(int Batches, int BatchCount, long ChangedCells)`
-- `BatchCount { get; init; } -> int`
-- `Batches { get; init; } -> int`
-- `ChangedCells { get; init; } -> long`
+- `BatchCount { get; init; } -> int` — How many batches the patch has.
+- `Batches { get; init; } -> int` — The number of the batch that was just written, counting from 1.
+- `ChangedCells { get; init; } -> long` — Cells whose value changed so far, over the batches written by this call.
 
 ## TerrainResult `0.2.3` — What `Terrain.Apply` did.
 - `TerrainResult(bool Ok, string? Reason, TerrainState State, string Plan, int Version, long ChangedCells, int Batches, IReadOnlyList<TerrainConflict> Conflicts)`
 - `Batches { get; init; } -> int` — Batches written to the world by this call.
 - `ChangedCells { get; init; } -> long` — Cells whose value changed, in the batches that were written.
-- `Conflicts { get; init; } -> IReadOnlyList<TerrainConflict>`
+- `Conflicts { get; init; } -> IReadOnlyList<TerrainConflict>` — The blocks that were left alone; empty when there are none.
 - `InstalledWithoutProof { get; init; } -> bool` `0.2.4` — The initial automatic installation used the below-bound presence heuristic without history/proof.
-- `Ok { get; init; } -> bool`
-- `Plan { get; init; } -> string`
+- `Ok { get; init; } -> bool` — True when the call completed, found the plan already applied, or adopted the current cells; see `State`.
+- `Plan { get; init; } -> string` — The plan's name inside the mod (`TerrainPatch.Id`).
 - `PresenceShare { get; init; } -> double?` `0.2.4` — Exact-match fraction of addressed cells when the initial decision used terrain sampling; otherwise null.
-- `Reason { get; init; } -> string?`
-- `State { get; init; } -> TerrainState`
-- `Version { get; init; } -> int`
+- `Reason { get; init; } -> string?` — Why it ended as it did when it did not complete; null when there is nothing to say.
+- `State { get; init; } -> TerrainState` — How the call ended.
+- `Version { get; init; } -> int` — The plan's version (`TerrainPatch.Version`).
 
 ## TerrainSource `0.2.3` — Where a patch's cells come from: `TerrainVoxelVolume` or `TerrainHeightfield`.
 - `TerrainSource(TerrainSource original)`
@@ -122,4 +122,4 @@ enum: Completed, AlreadyApplied, Conflict, Partial, Refused, NeedsAdoption `0.2.
 
 ## TerrainVoxelVolume `0.2.3` — One palette number per cell of the region, x fastest, then y, then z (`CellBox.Index`).
 - `TerrainVoxelVolume(byte[] Cells)`
-- `Cells { get; init; } -> byte[]`
+- `Cells { get; init; } -> byte[]` — The palette numbers, one byte per cell of the region (x fastest, then y, then z).

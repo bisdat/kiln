@@ -5,48 +5,48 @@
 - `Configs { get; init; } -> IReadOnlyDictionary<uint, double>?` — Number configs of the like node to change: config id (0x...) -> value.
 - `Cost { get; init; } -> int` — Skill points (per level for nodes with levels).
 - `From { get; init; } -> IReadOnlyList<string>` — Nodes that lead to this one ("0x\<id>" of a game node, a node GUID, or a Kiln node's `GameNodeDefinition.Name`).
-- `Guid { get; init; } -> Guid`
+- `Guid { get; init; } -> Guid` — The node's fixed GUID.
 - `Icon { get; init; } -> Guid?` — A UiTexture GUID (e.g. an icon kiln.assets serves, from assets/assets.json) or null.
 - `IconFile { get; init; } -> string?` — A PNG for the icon (absolute, or relative to the kiln folder); kiln.assets serves it on clients.
 - `Id { get; } -> uint` — This node's id in the game (FNV-1a of the GUID's bytes).
 - `Like { get; init; } -> string?` — A node whose effect (program, config values, tooltip values), icon and texts to copy.
 - `MaxLevel { get; init; } -> int?` — 0 = one unlock; 1..7 = levels (default: the like node's).
 - `Name { get; init; } -> string` — A debug name (also how other Kiln nodes refer to this one).
-- `Near { get; init; } -> string?`
-- `Offset { get; init; } -> (float X, float Y)?`
+- `Near { get; init; } -> string?` — A node to place this one near, written like the entries of `GameNodeDefinition.From`; used when...
+- `Offset { get; init; } -> (float X, float Y)?` — Where to put the node relative to `GameNodeDefinition.Near`, in the game's tree units, when...
 - `Position { get; init; } -> (float X, float Y)?` — Absolute position in the game's tree units (the game's tree spans about 1700..6500); null = near...
 - `Program { get; init; } -> Guid?` — An ImpactProgram to run instead of the like node's (tools/impact, a Kiln program).
 - `Scales { get; init; } -> IReadOnlyDictionary<uint, double>?` — Scale factors of the like node's scaled configs.
 - `Texts { get; init; } -> IReadOnlyDictionary<string, (string Name, string Description, string? PerLevel)>?` — language ("en", "de", "*") -> (name, description, perLevel).
-- `To { get; init; } -> IReadOnlyList<string>`
+- `To { get; init; } -> IReadOnlyList<string>` — Nodes this one leads to, written like the entries of `GameNodeDefinition.From`.
 - `Type { get; init; } -> string?` — "PassiveSkill" (default: the like node's), "Attribute" or "ActiveSkill".
 - `UnlocksAbility { get; init; } -> Guid?` — The Ability_* item the node unlocks (its activeSkillUnlockRef).
 
 ## GameNodeInfo — A definition as kiln.skills holds it.
 - `GameNodeInfo(Guid Guid, uint Id, string Name, string Owner, string Source, string State, int Index, int LevelIndex, string? Error)`
-- `Error { get; init; } -> string?`
-- `Guid { get; init; } -> Guid`
-- `Id { get; init; } -> uint`
-- `Index { get; init; } -> int`
-- `LevelIndex { get; init; } -> int`
-- `Name { get; init; } -> string`
-- `Owner { get; init; } -> string`
-- `Source { get; init; } -> string`
-- `State { get; init; } -> string`
+- `Error { get; init; } -> string?` — Why the definition is refused; null when it is not.
+- `Guid { get; init; } -> Guid` — The node's GUID.
+- `Id { get; init; } -> uint` — The node's id in the game (FNV-1a of the GUID's bytes).
+- `Index { get; init; } -> int` — The node's index in the game's tree, which is its bit in the game's unlock masks (256 and up are shadow nodes); -1...
+- `LevelIndex { get; init; } -> int` — The slot of the node's level byte among the game's 100; -1 for a node without levels, one that is not in a tree, and...
+- `Name { get; init; } -> string` — The node's debug name.
+- `Owner { get; init; } -> string` — The id of the mod that defined it; empty when no mod did.
+- `Source { get; init; } -> string` — Where the definition came from: `"code"` for `GameTree.Define` and `GameTree.DefineJson`; otherwise how kiln.skills...
+- `State { get; init; } -> string` — `"defined"`, `"redefined"` (in a `GameTree.Define` report), `"pending"` (waits for the next world), `"in-tree"`...
 
 ## GameNodesRefundedEvent — A player joined with game-tree nodes the tree does not know (a mod that added them is gone): kiln.skills removed them before the game's own check (which would reset...
 - `Nodes { get; } -> IReadOnlyList<(uint Id, int Level)>` — The removed node ids and their levels.
 - `Player { get; } -> EntityId` — The player (None when Kiln could not tell which player it was).
-- `Step { get; } -> ulong`
+- `Step { get; } -> ulong` — The server world's step the removal happened in; 0 when unknown.
 
 ## GameShadowMessage — Server to client: the local player's shadow levels.
 - `GameShadowMessage(Dictionary<string, int> Levels, long Revision)`
-- `Levels { get; init; } -> Dictionary<string, int>`
-- `Revision { get; init; } -> long`
+- `Levels { get; init; } -> Dictionary<string, int>` — The player's shadow levels: `"0x<node id>"` to level.
+- `Revision { get; init; } -> long` — Reserved: the server sends 0 and the client does not read it.
 
 ## GameShadowState — A character's levels of shadow nodes (carried character data "gameShadow" of Kiln.Skills' data owner).
 - `Levels { get; set; } -> Dictionary<string, int>` — "0x\<node id>" -> level.
-- `Revision { get; set; } -> long`
+- `Revision { get; set; } -> long` — Plus 1 for every change to `GameShadowState.Levels`.
 
 ## GameTree — Nodes in the game's own skill tree.
 - `static Available { get; } -> bool` — True when kiln.skills is loaded on this game build (capability `kiln.skills`), or while Kiln.Sdk's build bakes a...
@@ -63,39 +63,39 @@
 - `static ShadowLevel { get; } -> int` — The shadow table is on (nodes past the game's 256-node / 100-level caps work): 1 server side, 2 with the client's...
 - `static ShadowLevels(EntityId player, int world = 0) -> IReadOnlyDictionary<uint, int>` — A player's shadow levels (server world: world 0; a joined client's local player: world 2).
 - `static ShadowNodes { get; } -> IReadOnlySet<uint>` — Ids of the shadow nodes (index 256 and up) in the tree Kiln serves now.
-- `static Status { get; } -> GameTreeStatus?`
+- `static Status { get; } -> GameTreeStatus?` — What kiln.skills does with the game's tree right now; null when kiln.skills is not on this build or does not answer.
 
 ## GameTreeStatus — What kiln.skills does with the game's own tree right now.
 - `GameTreeStatus(bool TreeExpansion, bool LoginGuard, bool GameFunctions, bool NodeTexts, int GameNodes, int GameLinks, int GameLevelMax, int Nodes, int Links, int AddedNodes, int AddedLinks, int FreeNodes, int FreeLevelSlots, int Defined, int Refused, int Pending, int WorldsServed, int Builds, ulong Refunded, string Reason, int ShadowNodes = 0, int ShadowLevel = 0)`
-- `AddedLinks { get; init; } -> int`
-- `AddedNodes { get; init; } -> int`
-- `Builds { get; init; } -> int`
-- `Defined { get; init; } -> int`
-- `FreeLevelSlots { get; init; } -> int`
-- `FreeNodes { get; init; } -> int`
-- `GameFunctions { get; init; } -> bool`
-- `GameLevelMax { get; init; } -> int`
-- `GameLinks { get; init; } -> int`
-- `GameNodes { get; init; } -> int`
-- `Links { get; init; } -> int`
-- `LoginGuard { get; init; } -> bool`
-- `Nodes { get; init; } -> int`
-- `NodeTexts { get; init; } -> bool`
-- `Pending { get; init; } -> int`
-- `Reason { get; init; } -> string`
-- `Refunded { get; init; } -> ulong`
-- `Refused { get; init; } -> int`
-- `ShadowLevel { get; init; } -> int`
-- `ShadowNodes { get; init; } -> int`
-- `TreeExpansion { get; init; } -> bool`
-- `WorldsServed { get; init; } -> int`
+- `AddedLinks { get; init; } -> int` — Links Kiln added to the game's.
+- `AddedNodes { get; init; } -> int` — Nodes Kiln added to the game's.
+- `Builds { get; init; } -> int` — Resources Kiln has built.
+- `Defined { get; init; } -> int` — Definitions known, of all mods.
+- `FreeLevelSlots { get; init; } -> int` — Level slots still free of the game's 100 (a node with levels needs one).
+- `FreeNodes { get; init; } -> int` — Native node slots still free: the game's cap of 256 nodes minus `Nodes`.
+- `GameFunctions { get; init; } -> bool` — The game's own skill functions were found on this build; `GameTree.Dump` and the simulation need them.
+- `GameLevelMax { get; init; } -> int` — The highest level slot (`levelIndex`) the game's own nodes use (90 on svn 1287369).
+- `GameLinks { get; init; } -> int` — Links in the game's own resource.
+- `GameNodes { get; init; } -> int` — Nodes in the game's own resource; 0 until the first world has read it.
+- `Links { get; init; } -> int` — Links in the resource Kiln serves now.
+- `LoginGuard { get; init; } -> bool` — The login guard is on: at a join, node ids the tree does not know are removed from the player's save instead of...
+- `Nodes { get; init; } -> int` — Nodes in the resource Kiln serves now: the game's plus the added ones.
+- `NodeTexts { get; init; } -> bool` — Node texts reach the game's text tables (needs kiln.content); without it the like node's texts show.
+- `Pending { get; init; } -> int` — Definitions made after every live world read its tree; they go in at the next world.
+- `Reason { get; init; } -> string` — Why something is off; empty when everything works.
+- `Refunded { get; init; } -> ulong` — Node ids the login guard has removed at joins since the game started (see `GameNodesRefundedEvent`).
+- `Refused { get; init; } -> int` — Definitions that are not in the tree: errors, and nodes over the game's caps while the shadow table is off.
+- `ShadowLevel { get; init; } -> int` — 0 = the shadow hooks are off, 1 = on (server side), 2 = on, with the client's skill-tree screen hook as well.
+- `ShadowNodes { get; init; } -> int` — Nodes past the game's caps in the tree Kiln serves (shadow nodes); 0 when the shadow hooks are off.
+- `TreeExpansion { get; init; } -> bool` — The tree-loading hook is on, so nodes Kiln defines can enter the game's tree (sigdb feature `skills.tree_load` and...
+- `WorldsServed { get; init; } -> int` — Tree loads Kiln has served.
 
 ## Skills — Kiln talent trees (and, in `GameTree`, nodes in the game's own skill tree).
 - `static ActiveEffects(EntityId player) -> IReadOnlyList<(string Tree, string Node, int Level, IReadOnlyList<EntityId> Entities)>` — The effects running for a player now (diagnostics): tree/node -> level and effect entities.
-- `static Available { get; } -> bool`
+- `static Available { get; } -> bool` — Always true: Kiln talent trees run in managed code and need no native service.
 - `static EnsureStarted() -> void` — Starts Kiln.Skills' channel, /talents and its tick (Kiln does this at its first service tick).
-- `static Find(string id) -> TalentTree?`
-- `static Grant(string tree, EntityId player, int points) -> TalentPointsInfo` — Gives points of the tree's own (any points source; negative takes back).
+- `static Find(string id) -> TalentTree?` — The registered tree with this id; null when there is none.
+- `static Grant(string tree, EntityId player, int points) -> TalentPointsInfo` — Gives a player in game points of the tree's own: `Skills.Grant` with `Skills.HolderOf`.
 - `static Grant(string tree, TalentHolder holder, int points) -> TalentPointsInfo` — Gives points of the tree's own (any points source; negative takes back).
 - `static Has(EntityId player, string tree, string node) -> bool` — True when the player has the node (level 1 or more).
 - `static HolderOf(CharacterKey character, ulong legacySteamId = 0) -> TalentHolder` — The holder of a character, online or not.
@@ -103,48 +103,48 @@
 - `static LevelOf(string tree, string node, TalentHolder holder) -> int` — The level of a node for a character (0 = locked).
 - `static LoadTrees(string? modDirectory = null) -> IReadOnlyList<TalentTree>` — Loads the "trees" of every skills/*.json in `modDirectory` (default: the calling mod's folder) and registers them as...
 - `static Lock(string tree, string node, TalentHolder holder, bool force = false) -> TalentResult` — Gives one level back (the points return).
-- `static Points(string tree, TalentHolder holder) -> TalentPointsInfo`
+- `static Points(string tree, TalentHolder holder) -> TalentPointsInfo` — A character's points in a tree: total, spent and available.
 - `static Refresh(string tree, TalentHolder holder) -> void` — Applies the player's state now (instead of at the next maintenance pass).
 - `static Register(TalentTree tree) -> TalentTree` — Registers a tree as the calling mod's (it goes away when the mod unloads; players' states stay in that mod's player...
 - `static Respec(string tree, TalentHolder holder, bool force = false) -> TalentResult` — Gives every point of the tree back (free).
-- `static State(string tree, EntityId player) -> TalentTreeState` — A character's state in a tree (live object; the player need not be online).
+- `static State(string tree, EntityId player) -> TalentTreeState` — A character's state in a tree, for a player in game: `Skills.State` with `Skills.HolderOf`.
 - `static State(string tree, TalentHolder holder) -> TalentTreeState` — A character's state in a tree (live object; the player need not be online).
 - `static Trees { get; } -> IReadOnlyList<TalentTree>` — Every registered tree.
-- `static Unlock(EntityId player, string tree, string node) -> TalentResult` — Takes a node (one more level).
+- `static Unlock(EntityId player, string tree, string node) -> TalentResult` — Takes a node for a player in game: `Skills.Unlock` with `Skills.HolderOf` and no force.
 - `static Unlock(string tree, string node, TalentHolder holder, bool force = false) -> TalentResult` — Takes a node (one more level).
 
 ## TalentAttributes — The AttributeReference GUIDs the game's attribute nodes use (from its SkillTreeResource, svn 1287369; the names were matched in the lab through each attribute...
-- `static readonly Constitution -> Guid`
-- `static readonly Dexterity -> Guid`
-- `static readonly Endurance -> Guid`
-- `static readonly Intelligence -> Guid`
-- `static NameOf(Guid g) -> string`
-- `static readonly Spirit -> Guid`
-- `static readonly Strength -> Guid`
+- `static readonly Constitution -> Guid` — The game's AttributeReference GUID for Constitution.
+- `static readonly Dexterity -> Guid` — The game's AttributeReference GUID for Dexterity.
+- `static readonly Endurance -> Guid` — The game's AttributeReference GUID for Endurance.
+- `static readonly Intelligence -> Guid` — The game's AttributeReference GUID for Intelligence.
+- `static NameOf(Guid g) -> string` — The attribute's name ("Strength", "Constitution", "Intelligence", "Spirit", "Dexterity" or "Endurance") for one of...
+- `static readonly Spirit -> Guid` — The game's AttributeReference GUID for Spirit.
+- `static readonly Strength -> Guid` — The game's AttributeReference GUID for Strength.
 
-## TalentChange
+## TalentChange — One change of a player's tree, as `TalentTree.OnChanged` and `TalentChangedEvent` report it.
 - `TalentChange(TalentTree Tree, TalentHolder Holder, TalentChangeKind Kind, string? Node, int OldLevel, int NewLevel, int Points)`
-- `Holder { get; init; } -> TalentHolder`
-- `Kind { get; init; } -> TalentChangeKind`
-- `NewLevel { get; init; } -> int`
-- `Node { get; init; } -> string?`
-- `OldLevel { get; init; } -> int`
-- `Points { get; init; } -> int`
-- `Tree { get; init; } -> TalentTree`
+- `Holder { get; init; } -> TalentHolder` — The character whose tree changed.
+- `Kind { get; init; } -> TalentChangeKind` — What happened.
+- `NewLevel { get; init; } -> int` — The node's level after; 0 for a respec and for a grant.
+- `Node { get; init; } -> string?` — The id of the node that changed; null for `TalentChangeKind.Respec` and `TalentChangeKind.Grant`.
+- `OldLevel { get; init; } -> int` — The node's level before; for a respec, the sum of all levels given back; 0 for a grant.
+- `Points { get; init; } -> int` — The character's points still available in the tree after the change.
+- `Tree { get; init; } -> TalentTree` — The tree that changed.
 
 ## TalentChangedEvent — A player's tree changed (after the effects were applied).
-- `Change { get; } -> TalentChange`
+- `Change { get; } -> TalentChange` — What changed.
 
 ## TalentChangeKind — What changed in a player's tree.
 enum: Unlock, Lock, Respec, Grant, Reset
 
 ## TalentContext — Passed to callbacks and effects (server, tick thread).
-- `Holder { get; } -> TalentHolder`
+- `Holder { get; } -> TalentHolder` — The character the effect applies to.
 - `Level { get; } -> int` — The level being applied (or the one being removed).
-- `Node { get; } -> TalentNode`
-- `Player { get; } -> EntityId`
+- `Node { get; } -> TalentNode` — The node whose effect runs.
+- `Player { get; } -> EntityId` — The player's entity (the holder's `TalentHolder.Entity`).
 - `State { get; set; } -> object?` — Anything the effect wants to keep until its remove (per player and node).
-- `Tree { get; } -> TalentTree`
+- `Tree { get; } -> TalentTree` — The tree the node belongs to.
 
 ## TalentEffect — What a node does while it is unlocked.
 - `static Ability(string abilityId) -> TalentEffect` — A Kiln.Abilities ability (id) that only players with this node can cast.
@@ -160,25 +160,25 @@ enum: Unlock, Lock, Respec, Grant, Reset
 - `TalentHolder()`
 - `TalentHolder(ulong SteamId, EntityId Entity)`
 - `Character { get; init; } -> CharacterKey` — The character whose unlocks these are; none when only the Steam id is known.
-- `Entity { get; init; } -> EntityId`
+- `Entity { get; init; } -> EntityId` — The player entity while the player is in game; none for an offline holder.
 - `static explicit operator PlayerRef(TalentHolder holder) -> PlayerRef` — This holder as a `PlayerRef`.
-- `SteamId { get; init; } -> ulong`
+- `SteamId { get; init; } -> ulong` — The player's Steam id; 0 when it is not known.
 
 ## TalentNode — A node of a `TalentTree`.
 - `Column { get; init; } -> int` — Grid position (column, row from the top-left).
 - `Cost { get; init; } -> int` — Points per level.
-- `Description { get; init; } -> UiText?`
-- `Effects { get; init; } -> IReadOnlyList<TalentEffect>`
+- `Description { get; init; } -> UiText?` — A text for the node's tooltip and detail panel.
+- `Effects { get; init; } -> IReadOnlyList<TalentEffect>` — What the node does while it is unlocked.
 - `Icon { get; init; } -> string?` — A PNG, relative to the tree's mod folder (client).
 - `Id { get; init; } -> string` — Unique in the tree; the save key.
 - `LevelRequired { get; init; } -> int` — The character level needed (0 = none).
 - `ListEffects { get; init; } -> bool` — The tooltip lists what `TalentNode.Effects` do under the description.
 - `MaxLevel { get; init; } -> int` — Levels (1 = a single unlock).
-- `Name { get; init; } -> UiText`
+- `Name { get; init; } -> UiText` — The node's name: on its button, in its tooltip and in the detail panel of the tree's screen.
 - `PointsSpentRequired { get; init; } -> int` — Points spent in this tree before this node can be taken (tiers).
-- `RequireAll { get; init; } -> bool`
+- `RequireAll { get; init; } -> bool` — True: every node in `TalentNode.Requires` must be unlocked.
 - `Requires { get; init; } -> IReadOnlyList<string>` — Nodes of the same tree that lead here: any one of them unlocked (all, with `TalentNode.RequireAll`).
-- `Row { get; init; } -> int`
+- `Row { get; init; } -> int` — Grid row, counted from the top (0 to 31).
 
 ## TalentPoints — Where a tree's points come from.
 - `static Custom(Func<TalentHolder, int> total) -> TalentPoints` — Code decides the total (server, tick thread); spent points are subtracted.
@@ -188,59 +188,59 @@ enum: Unlock, Lock, Respec, Grant, Reset
 ## TalentPointsInfo — A character's points in one tree.
 - `TalentPointsInfo()`
 - `TalentPointsInfo(int Total, int Spent, int Available)`
-- `Available { get; init; } -> int`
-- `Spent { get; init; } -> int`
-- `Total { get; init; } -> int`
+- `Available { get; init; } -> int` — `Total` minus `Spent`.
+- `Spent { get; init; } -> int` — Points in unlocked levels: each node's cost times its level.
+- `Total { get; init; } -> int` — All the points the tree gives the character: its points source plus what code granted.
 
 ## TalentRequest — Client to server: `TalentRequest.Op` 0 = state, 1 = unlock, 2 = lock, 3 = respec.
 - `TalentRequest(int Op, string Tree, string Node)`
-- `Node { get; init; } -> string`
-- `Op { get; init; } -> int`
-- `Tree { get; init; } -> string`
+- `Node { get; init; } -> string` — The id of the node for an unlock or lock; not read for the other operations.
+- `Op { get; init; } -> int` — 0 = state, 1 = unlock, 2 = lock, 3 = respec.
+- `Tree { get; init; } -> string` — The id of the tree.
 
 ## TalentResult — The answer of an unlock / lock / respec / grant.
 - `TalentResult(bool Ok, string Reason, int Level, TalentPointsInfo Points)`
-- `Level { get; init; } -> int`
-- `Ok { get; init; } -> bool`
-- `Points { get; init; } -> TalentPointsInfo`
-- `Reason { get; init; } -> string`
+- `Level { get; init; } -> int` — The node's level after the call (a refusal: the level it stayed at); 0 for a respec and for an unknown node.
+- `Ok { get; init; } -> bool` — True when the action happened.
+- `Points { get; init; } -> TalentPointsInfo` — The character's points in the tree after the call.
+- `Reason { get; init; } -> string` — Why it was refused; empty when `Ok`.
 
 ## TalentStateMessage — Server to client: a player's state in one tree.
 - `TalentStateMessage(string Tree, int Total, int Spent, int Available, Dictionary<string, int> Levels, bool Ok, string Message, long Revision, int CharacterLevel)`
-- `Available { get; init; } -> int`
-- `CharacterLevel { get; init; } -> int`
-- `Levels { get; init; } -> Dictionary<string, int>`
-- `Message { get; init; } -> string`
-- `Ok { get; init; } -> bool`
-- `Revision { get; init; } -> long`
-- `Spent { get; init; } -> int`
-- `Total { get; init; } -> int`
-- `Tree { get; init; } -> string`
+- `Available { get; init; } -> int` — Points still free (`TalentPointsInfo.Available`).
+- `CharacterLevel { get; init; } -> int` — The character level the server saw last (`TalentTreeState.LastLevel`).
+- `Levels { get; init; } -> Dictionary<string, int>` — Node id to level; a locked node is absent.
+- `Message { get; init; } -> string` — A text for the player: the refusal or error; empty when there is none.
+- `Ok { get; init; } -> bool` — False when the request was refused or failed; `Message` says why, and a Kiln client shows it as a toast.
+- `Revision { get; init; } -> long` — The count of changes to the character's state in this tree (`TalentTreeState.Revision`: plus 1 per change).
+- `Spent { get; init; } -> int` — Points in unlocked levels (`TalentPointsInfo.Spent`).
+- `Total { get; init; } -> int` — All the points the tree gives the character (`TalentPointsInfo.Total`).
+- `Tree { get; init; } -> string` — The id of the tree.
 
 ## TalentTree — A Kiln talent tree: nodes on a grid, their links (requirements), costs, levels, icons, texts and effects.
 - `AllowRespec { get; init; } -> bool` — The respec rule: free (default) or refused.
-- `Description { get; init; } -> UiText?`
+- `Description { get; init; } -> UiText?` — A text under the title on the tree's screen.
 - `Directory { get; set; } -> string?` — The mod folder icons are read from (set by `Skills.Register` to the calling mod's folder; icon paths are relative to...
 - `Id { get; init; } -> string` — Unique id, "\<mod>:\<name>" (letters, digits, '.', '_', '-', ':').
 - `Key { get; init; } -> string?` — A key that opens the tree ("K", "Shift+T"); null = none.
 - `MenuEntry { get; init; } -> UiText?` — An entry in the game's pause menu that opens the tree (client).
-- `MenuOrder { get; init; } -> int` — Also in the main menu?
-- `Name { get; init; } -> UiText`
-- `Nodes { get; init; } -> IReadOnlyList<TalentNode>`
+- `MenuOrder { get; init; } -> int` — Where `TalentTree.MenuEntry` sits among the pause menu's entries: lower comes first (the `order` of `Ui.Menus.Add`).
+- `Name { get; init; } -> UiText` — The tree's name: the title of its screen, and the tree's name in its key's description on the Keys page.
+- `Nodes { get; init; } -> IReadOnlyList<TalentNode>` — The tree's nodes.
 - `OnChanged { get; init; } -> Action<TalentChange>?` — Called on the server (tick thread) after a player's tree changed (unlock, lock, respec, grant).
 - `Points { get; init; } -> TalentPoints` — Where the points come from (default: 1 at level 1, plus 1 per level).
 
 ## TalentTreeState — A character's state in one tree, as stored in carried character data ("talents:\<tree id>").
 - `Granted { get; set; } -> int` — Points given by code (`Skills.Grant`).
-- `LastGameTotal { get; set; } -> int`
+- `LastGameTotal { get; set; } -> int` — The game's skill-point total seen last (the base of a `TalentPoints.ShareOfGame` tree, for offline reads).
 - `LastLevel { get; set; } -> int` — The character level / game skill-point total seen last (for offline reads).
 - `Levels { get; set; } -> Dictionary<string, int>` — node id -> level (1..MaxLevel); absent = locked.
 - `Revision { get; set; } -> long` — +1 per change.
 
 ## TalentUnlockingEvent — A player is about to take a node (all checks passed, nothing changed yet).
-- `Cost { get; } -> int`
-- `Holder { get; } -> TalentHolder`
+- `Cost { get; } -> int` — The points the unlock costs (the node's `TalentNode.Cost`).
+- `Holder { get; } -> TalentHolder` — The character taking it.
 - `Level { get; } -> int` — The level the node gets.
-- `Node { get; } -> TalentNode`
-- `Reason { get; set; } -> string`
-- `Tree { get; } -> TalentTree`
+- `Node { get; } -> TalentNode` — The node being taken.
+- `Reason { get; set; } -> string` — The text the refusal carries when a handler cancels the event.
+- `Tree { get; } -> TalentTree` — The tree.

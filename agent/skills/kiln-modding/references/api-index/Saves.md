@@ -2,65 +2,65 @@
 
 ## BackupInfo — A backup made by `Saves.Backup`: the world file and the matching Kiln sidecar generation.
 - `BackupInfo(string Name, string Directory, DateTimeOffset Created, string WorldId, uint Revision, uint WorldUnix, SaveReason Reason, int Files, long Bytes, int DataBundles)`
-- `Bytes { get; init; } -> long`
-- `Created { get; init; } -> DateTimeOffset`
-- `DataBundles { get; init; } -> int`
-- `Directory { get; init; } -> string`
-- `Files { get; init; } -> int`
-- `Name { get; init; } -> string`
-- `Reason { get; init; } -> SaveReason`
-- `Revision { get; init; } -> uint`
-- `WorldId { get; init; } -> string`
-- `WorldUnix { get; init; } -> uint`
+- `Bytes { get; init; } -> long` — The total size of those files in bytes.
+- `Created { get; init; } -> DateTimeOffset` — When the backup was made (UTC).
+- `DataBundles { get; init; } -> int` — How many mod data bundles of the matching sidecar generation the backup holds.
+- `Directory { get; init; } -> string` — The backup's folder.
+- `Files { get; init; } -> int` — How many files the backup holds.
+- `Name { get; init; } -> string` — The name given to the backup.
+- `Reason { get; init; } -> SaveReason` — The reason of the save the backup was made from.
+- `Revision { get; init; } -> uint` — The world file's revision in the backup.
+- `WorldId { get; init; } -> string` — The world's GUID as text.
+- `WorldUnix { get; init; } -> uint` — The save time in the world file's header (UTC seconds, 0 when unknown).
 
-## CharAck
+## CharAck — Client to server: an update was written to the client's sidecar.
 - `CharAck(Guid Character, long Revision)`
-- `Character { get; init; } -> Guid`
-- `Revision { get; init; } -> long`
+- `Character { get; init; } -> Guid` — The game's character id.
+- `Revision { get; init; } -> long` — The revision the client wrote.
 
 ## CharacterData — Per-character mod data of the calling mod: one world's record of one character (like `PlayerData`, but two characters of one account have separate data).
 - `static Characters { get; } -> IReadOnlyList<CharacterKey>` — Characters the calling mod has data for in this world.
-- `static Contains(CharacterKey character, string key) -> bool`
+- `static Contains(CharacterKey character, string key) -> bool` — Whether the character has a value under `key`.
 - `static EnsureStarted() -> void` — Starts the channel and the session tracking (Kiln.Skills does this at Kiln's first service tick).
 - `static Get<T>(CharacterKey character, string key) -> T` — The object stored under `key` for the character, created with `new T()` if there is none.
 - `static Get<T>(EntityId player, string key) -> T` — `CharacterData.Get` for a player in game.
 - `static KeyOf(EntityId player) -> CharacterKey` — The character of a connected player (`CharacterKey.None` when the player is unknown).
-- `static Keys(CharacterKey character) -> IReadOnlyList<string>`
+- `static Keys(CharacterKey character) -> IReadOnlyList<string>` — The calling mod's keys for the character, a snapshot.
 - `static LastOf(ulong playerId) -> CharacterKey` — The character last played by this Steam or account id in this world, none if unknown.
 - `static MigrateFromPlayerData(CharacterKey character, string key, params ulong[] playerIds) -> bool` — Moves the calling mod's `PlayerData` entry to this character, once: only when the character has no such key yet.
-- `static Remove(CharacterKey character, string key) -> bool`
-- `static Set<T>(CharacterKey character, string key, T value) -> void`
+- `static Remove(CharacterKey character, string key) -> bool` — Removes the character's key (from the next save on).
+- `static Set<T>(CharacterKey character, string key, T value) -> void` — Stores `value` for the character under `key` (replacing what was there).
 - `static Status { get; } -> CharacterSyncStatus` — Counters of the transport.
-- `static TryGet<T>(CharacterKey character, string key, out T? value) -> bool`
+- `static TryGet<T>(CharacterKey character, string key, out T? value) -> bool` — Reads the object stored under `key` for the character without creating one.
 
 ## CharacterData.Carried — What travels with the character: the same API, but a Kiln client keeps a copy next to its character and offers it to the next server, and the server sends changes...
-- `static Characters { get; } -> IReadOnlyList<CharacterKey>`
-- `static Contains(CharacterKey character, string key) -> bool`
-- `static Get<T>(CharacterKey character, string key) -> T`
-- `static Get<T>(EntityId player, string key) -> T`
-- `static Keys(CharacterKey character) -> IReadOnlyList<string>`
+- `static Characters { get; } -> IReadOnlyList<CharacterKey>` — Characters the calling mod has carried data for in this world.
+- `static Contains(CharacterKey character, string key) -> bool` — Whether the character carries a value under `key`.
+- `static Get<T>(CharacterKey character, string key) -> T` — The object carried by the character under `key`, created with `new T()` if there is none.
+- `static Get<T>(EntityId player, string key) -> T` — `Carried.Get` for a player in game.
+- `static Keys(CharacterKey character) -> IReadOnlyList<string>` — The calling mod's carried keys for the character, a snapshot.
 - `static MigrateFromPlayerData(CharacterKey character, string key, params ulong[] playerIds) -> bool` — See `CharacterData.MigrateFromPlayerData`.
-- `static Remove(CharacterKey character, string key) -> bool`
+- `static Remove(CharacterKey character, string key) -> bool` — Removes the carried key (from the next save on).
 - `static Revision(CharacterKey character) -> long` — The revision of this character's carried data on this server (+1 each time a save finds a change).
-- `static Set<T>(CharacterKey character, string key, T value) -> void`
-- `static TryGet<T>(CharacterKey character, string key, out T? value) -> bool`
+- `static Set<T>(CharacterKey character, string key, T value) -> void` — Stores `value` for the character to carry under `key` (replacing what was there).
+- `static TryGet<T>(CharacterKey character, string key, out T? value) -> bool` — Reads the object carried by the character under `key` without creating one.
 
 ## CharacterImportedEvent — A character's carried data was replaced by what its client offered.
 - `CharacterImportedEvent(CharacterKey character, EntityId player, long revision, IReadOnlyList<string> applied, IReadOnlyList<string> kept)`
 - `Applied { get; } -> IReadOnlyList<string>` — Mods loaded here whose data came in.
-- `Character { get; } -> CharacterKey`
+- `Character { get; } -> CharacterKey` — The character whose carried data was replaced.
 - `Kept { get; } -> IReadOnlyList<string>` — Mods not loaded here: their data is stored and passed on, nothing reads it.
-- `Player { get; } -> EntityId`
-- `Revision { get; } -> long`
+- `Player { get; } -> EntityId` — The player, none for a lab peer.
+- `Revision { get; } -> long` — The revision the server now holds, taken from the client's offer.
 
 ## CharacterImportingEvent — A client offered newer carried data for a character.
 - `CharacterImportingEvent(CharacterKey character, EntityId player, long revision, long serverRevision, IReadOnlyDictionary<string, IReadOnlyList<string>> mods)`
-- `Character { get; } -> CharacterKey`
+- `Character { get; } -> CharacterKey` — The character whose data the client offered.
 - `Mods { get; } -> IReadOnlyDictionary<string, IReadOnlyList<string>>` — Mod id -> its keys in the offer.
 - `Player { get; } -> EntityId` — The player, none for a lab peer.
 - `Reason { get; set; } -> string` — Shown in the log and sent to the client.
 - `Revision { get; } -> long` — The client's revision and the server's.
-- `ServerRevision { get; } -> long`
+- `ServerRevision { get; } -> long` — The revision the server holds for this character.
 
 ## CharacterKey — Who a character is: the game's CharacterId under the account that plays it.
 - `CharacterKey()`
@@ -69,8 +69,8 @@
 - `static explicit operator PlayerRef(CharacterKey k) -> PlayerRef` — The person behind a character, as a `PlayerRef` with the character id only: no Steam id (the key's...
 - `Id { get; init; } -> Guid` — The game's CharacterId.
 - `IsAccountOnly { get; } -> bool` — The game's character id is unknown on this build: this key stands for the account, so every character of the account...
-- `IsNone { get; } -> bool`
-- `static None { get; } -> CharacterKey`
+- `IsNone { get; } -> bool` — True for `CharacterKey.None`: no account and no character id.
+- `static None { get; } -> CharacterKey` — The key of no character (the default value).
 - `Text { get; } -> string` — The text used in storage scopes: "\<account hex>.\<id>".
 - `static TryParse(string? text, out CharacterKey key) -> bool` — Reads `CharacterKey.Text` back.
 
@@ -83,58 +83,58 @@
 
 ## CharacterSyncStatus — The transport's counters.
 - `CharacterSyncStatus(bool Started, bool ChannelOpen, bool ImportsAllowed, int Sessions, long Imports, long Refused, long Kept, long Dropped, long Updates, long UpdateBytes, long SidecarWrites)`
-- `ChannelOpen { get; init; } -> bool`
-- `Dropped { get; init; } -> long`
-- `Imports { get; init; } -> long`
-- `ImportsAllowed { get; init; } -> bool`
-- `Kept { get; init; } -> long`
-- `Refused { get; init; } -> long`
-- `Sessions { get; init; } -> int`
-- `SidecarWrites { get; init; } -> long`
-- `Started { get; init; } -> bool`
-- `UpdateBytes { get; init; } -> long`
-- `Updates { get; init; } -> long`
+- `ChannelOpen { get; init; } -> bool` — The `kiln:character` channel is open (Kiln.Network is available).
+- `Dropped { get; init; } -> long` — Offered values left out because they were broken or over a limit.
+- `Imports { get; init; } -> long` — Offers the server took.
+- `ImportsAllowed { get; init; } -> bool` — This server takes carried data from clients (`importProgress` in `characters.json`).
+- `Kept { get; init; } -> long` — Mods whose offered data was stored unread because the mod is not loaded here.
+- `Refused { get; init; } -> long` — Offers the server refused: the setting is off, a cap was passed, or a handler canceled the import.
+- `Sessions { get; init; } -> int` — Characters in game that the transport tracks now.
+- `SidecarWrites { get; init; } -> long` — Times a client-side sidecar file was written (a hosted game's own player, or an update received).
+- `Started { get; init; } -> bool` — The transport started (`CharacterData.EnsureStarted` ran).
+- `UpdateBytes { get; init; } -> long` — Bytes of JSON values in those updates.
+- `Updates { get; init; } -> long` — Updates made to send a character's changes back to its client.
 
-## CharHello
+## CharHello — Server to client, sent when the player is in game: which character this is and whether the server takes carried data.
 - `CharHello(Guid Character, string? World, bool Imports, int MaxBytes, long Revision)`
-- `Character { get; init; } -> Guid`
-- `Imports { get; init; } -> bool`
-- `MaxBytes { get; init; } -> int`
-- `Revision { get; init; } -> long`
-- `World { get; init; } -> string?`
+- `Character { get; init; } -> Guid` — The game's character id.
+- `Imports { get; init; } -> bool` — The server takes carried data from clients (`importProgress` in `characters.json`).
+- `MaxBytes { get; init; } -> int` — The largest offer the server takes, in bytes of JSON values.
+- `Revision { get; init; } -> long` — The server's revision of this character's carried data.
+- `World { get; init; } -> string?` — The world's id, or null when it is not known.
 
 ## CharLabJoin — Lab peers (tools/nettest) have no player: they say which character they pretend to be.
 - `CharLabJoin(Guid Character, ulong Account, bool Local = false)`
-- `Account { get; init; } -> ulong`
-- `Character { get; init; } -> Guid`
-- `Local { get; init; } -> bool`
+- `Account { get; init; } -> ulong` — The account key it pretends to play under.
+- `Character { get; init; } -> Guid` — The character the lab peer pretends to be.
+- `Local { get; init; } -> bool` — True to act as the local player of a hosted game, whose sidecar is read and written directly.
 
-## CharLabLeave
+## CharLabLeave — A lab peer (tools/nettest) leaves: its character is no longer in game.
 - `CharLabLeave(Guid Character)`
-- `Character { get; init; } -> Guid`
+- `Character { get; init; } -> Guid` — The character that left.
 
-## CharOffer
+## CharOffer — Client to server: the character's carried data as the client's sidecar holds it.
 - `CharOffer(Guid Character, long Revision, Dictionary<string, Dictionary<string, Json.JsonElement>> Mods)`
-- `Character { get; init; } -> Guid`
-- `Mods { get; init; } -> Dictionary<string, Dictionary<string, Json.JsonElement>>`
-- `Revision { get; init; } -> long`
+- `Character { get; init; } -> Guid` — The game's character id.
+- `Mods { get; init; } -> Dictionary<string, Dictionary<string, Json.JsonElement>>` — The data, by mod id and then key, as JSON values.
+- `Revision { get; init; } -> long` — The client's revision of the carried data.
 
-## CharResult
+## CharResult — Server to client: what happened to an offer.
 - `CharResult(Guid Character, bool Accepted, string Reason, long Revision, List<string> Applied, List<string> Kept, List<string> Dropped)`
-- `Accepted { get; init; } -> bool`
-- `Applied { get; init; } -> List<string>`
-- `Character { get; init; } -> Guid`
-- `Dropped { get; init; } -> List<string>`
-- `Kept { get; init; } -> List<string>`
-- `Reason { get; init; } -> string`
-- `Revision { get; init; } -> long`
+- `Accepted { get; init; } -> bool` — The server took the offer.
+- `Applied { get; init; } -> List<string>` — Mod ids loaded on the server whose data came in.
+- `Character { get; init; } -> Guid` — The game's character id.
+- `Dropped { get; init; } -> List<string>` — Entries left out of the offer: a mod id that is not valid, or `mod/key` of a value that was broken or too big.
+- `Kept { get; init; } -> List<string>` — Mod ids not loaded on the server: their data is stored and passed on, nothing reads it.
+- `Reason { get; init; } -> string` — Why: `taken`, or the reason the offer was not taken.
+- `Revision { get; init; } -> long` — The server's revision of the carried data after the answer.
 
 ## CharUpdate — A null value removes the key.
 - `CharUpdate(Guid Character, long Revision, Dictionary<string, Dictionary<string, Json.JsonElement?>> Changes, bool Final)`
-- `Changes { get; init; } -> Dictionary<string, Dictionary<string, Json.JsonElement?>>`
-- `Character { get; init; } -> Guid`
-- `Final { get; init; } -> bool`
-- `Revision { get; init; } -> long`
+- `Changes { get; init; } -> Dictionary<string, Dictionary<string, Json.JsonElement?>>` — The changed values by mod id and then key, as JSON; null removes the key.
+- `Character { get; init; } -> Guid` — The game's character id.
+- `Final { get; init; } -> bool` — True for the last update of a session: the character left, or the server is shutting down.
+- `Revision { get; init; } -> long` — The revision the client has after applying the changes.
 
 ## DataMatch — Which sidecar generation `WorldData` loaded for the world file on disk.
 enum: None, Exact, Staged, Older
@@ -143,13 +143,13 @@ enum: None, Exact, Staged, Older
 - `static Available { get; } -> bool` — True when kiln.saves and kiln.spawn are both available: every entity's data works.
 - `static Clear(EntityId entity) -> bool` — Removes everything the calling mod attached to the entity.
 - `static Entities { get; } -> IReadOnlyList<EntityId>` — Live entities the calling mod has attachments on.
-- `static Get<T>(EntityId entity, string key) -> T`
-- `static Has(EntityId entity, string key) -> bool`
+- `static Get<T>(EntityId entity, string key) -> T` — The object the calling mod attached to the entity under `key`, created with `new T()` if there is none.
+- `static Has(EntityId entity, string key) -> bool` — Whether the calling mod has a value attached to the entity under `key`.
 - `static IsPersistent(EntityId entity) -> bool` — Whether the entity has a known, saved world template with a position for matching after a restart.
 - `static Matched { get; } -> int` `0.2.7` — Saved attachments of the calling mod matched to a loaded entity since the world's data was loaded: with...
-- `static Remove(EntityId entity, string key) -> bool`
-- `static Set<T>(EntityId entity, string key, T value) -> void`
-- `static TryGet<T>(EntityId entity, string key, out T? value) -> bool`
+- `static Remove(EntityId entity, string key) -> bool` — Removes the calling mod's key from the entity.
+- `static Set<T>(EntityId entity, string key, T value) -> void` — Attaches `value` to the entity under `key` (replacing what was there).
+- `static TryGet<T>(EntityId entity, string key, out T? value) -> bool` — Reads the object the calling mod attached to the entity under `key` without creating one.
 - `static Waiting { get; } -> int` — Loaded attachments of the calling mod still waiting for their entity: saved with the world, not matched to a loaded...
 
 ## InstanceClaimResult `0.2.2` — The answer to `InstanceData.Claim`: whether the mod's values of a parked record are on the item now.
@@ -259,25 +259,25 @@ enum: Waiting, SetAside
 enum: World, Carried, Session
 
 ## PlayerData — Persistent per-player data of the calling mod, keyed by the player's SteamID64 (Forge's player persistent data / player attachments).
-- `static Contains(ulong steamId, string key) -> bool`
-- `static Get<T>(ulong steamId, string key) -> T`
-- `static Keys(ulong steamId) -> IReadOnlyList<string>`
+- `static Contains(ulong steamId, string key) -> bool` — Whether the player has a value under `key`.
+- `static Get<T>(ulong steamId, string key) -> T` — The object stored under `key` for the player, created with `new T()` if there is none.
+- `static Keys(ulong steamId) -> IReadOnlyList<string>` — The calling mod's keys for the player, a snapshot.
 - `static Players { get; } -> IReadOnlyList<ulong>` — Steam ids the calling mod has data for in this world.
-- `static Remove(ulong steamId, string key) -> bool`
-- `static Set<T>(ulong steamId, string key, T value) -> void`
-- `static TryGet<T>(ulong steamId, string key, out T? value) -> bool`
+- `static Remove(ulong steamId, string key) -> bool` — Removes the player's key (from the next save on).
+- `static Set<T>(ulong steamId, string key, T value) -> void` — Stores `value` for the player under `key` (replacing what was there).
+- `static TryGet<T>(ulong steamId, string key, out T? value) -> bool` — Reads the object stored under `key` for the player without creating one.
 
 ## SaveReason — Why the game saved the world.
 enum: Unknown, Autosave, Shutdown, PlayerLeft, Request, Backup
 
 ## SaveResult — The outcome of `Saves.Request`.
 - `SaveResult(bool Success, SaveReason Reason, uint Revision, TimeSpan Duration, string? Error)`
-- `Duration { get; init; } -> TimeSpan`
-- `Error { get; init; } -> string?`
+- `Duration { get; init; } -> TimeSpan` — From the game accepting the request to the file being complete.
+- `Error { get; init; } -> string?` — Why nothing was written; null on success.
 - `Ok { get; } -> bool` `0.2.2` — The save was written: `SaveResult.Success` (the contract's name for it).
-- `Reason { get; init; } -> SaveReason`
-- `Revision { get; init; } -> uint`
-- `Success { get; init; } -> bool`
+- `Reason { get; init; } -> SaveReason` — The reason of the save.
+- `Revision { get; init; } -> uint` — The world file's revision after the write (0 when nothing was written).
+- `Success { get; init; } -> bool` — The world file was written.
 
 ## Saves — The world save: events (`WorldSavingEvent`, `WorldSavedEvent`, `WorldLoadedEvent` on the event bus), "save now", the world's identity and paths, and consistent backups.
 - `static Available { get; } -> bool` — True when the native service is loaded on this build.
@@ -328,36 +328,36 @@ enum: Unknown, Autosave, Shutdown, PlayerLeft, Request, Backup
 - `TryGet<T>(InstanceKey<T> key, out T? value) -> bool` — The value of `key` for the item: a copy read from the server's JSON at each call.
 
 ## WorldData — Persistent per-world data of the calling mod (Forge's `SavedData`): typed objects under string keys, stored as JSON (System.Text.Json, public properties and fields)...
-- `static Contains(string key) -> bool`
+- `static Contains(string key) -> bool` — Whether the calling mod has a value under `key`.
 - `static Get<T>(string key) -> T` — The object stored under `key`, created with `new T()` if there is none.
 - `static Keys { get; } -> IReadOnlyList<string>` — The calling mod's keys.
 - `static Loaded { get; } -> DataMatch` — Which stored generation was loaded for the world file on disk.
 - `static Remove(string key) -> bool` — Removes a key (from the next save on).
 - `static Set<T>(string key, T value) -> void` — Stores `value` under `key` (replacing what was there).
-- `static TryGet<T>(string key, out T? value) -> bool`
+- `static TryGet<T>(string key, out T? value) -> bool` — Reads the object stored under `key` without creating one.
 - `static WorldId { get; } -> string?` — The world these keys belong to (null before a new world's first save).
 
 ## WorldLoadedEvent — Fired on the tick thread once the server finished loading the world save (Forge's `LevelEvent.Load`).
 - `Data { get; } -> DataMatch` — Which sidecar generation was loaded for this world file.
 - `NewWorld { get; } -> bool` — No world file existed: a new world (its file and id appear with the first save).
-- `Revision { get; } -> uint`
-- `WorldFile { get; } -> string?`
-- `WorldId { get; } -> string?`
+- `Revision { get; } -> uint` — The world file's revision at load.
+- `WorldFile { get; } -> string?` — The world file's path; null when it is not known.
+- `WorldId { get; } -> string?` — The world's GUID as text; null before a new world's first save.
 
 ## WorldSavedEvent — Fired on the tick thread at the start of the step after the game finished writing the world file (or failed to).
 - `Duration { get; } -> TimeSpan` — From the game accepting the request to the file being complete.
-- `Reason { get; } -> SaveReason`
+- `Reason { get; } -> SaveReason` — Why the game saved the world.
 - `Result { get; } -> int` — The game's result byte (0 = ok).
 - `Revision { get; } -> uint` — The world file's revision after the write.
-- `Success { get; } -> bool`
+- `Success { get; } -> bool` — True when the world file was written.
 - `TimedOut { get; } -> bool` — A Kiln request the game did not accept within 60 s (nothing was written).
-- `WorldFile { get; } -> string?`
-- `WorldId { get; } -> string?`
+- `WorldFile { get; } -> string?` — The world file's path; null when it is not known.
+- `WorldId { get; } -> string?` — The world's GUID as text; null when it is not known.
 
 ## WorldSavingEvent — Fired on the tick thread when the game has accepted a world save, before it snapshots the world (Forge's `LevelEvent.Save`).
 - `BeforeSnapshot { get; } -> bool` — True when handlers run inside the game's request, before its snapshot (the normal case).
-- `Reason { get; } -> SaveReason`
+- `Reason { get; } -> SaveReason` — Why the game saved the world.
 - `Revision { get; } -> uint` — The revision the world file will have (+0x1C of its header) once this save is written.
-- `Step { get; } -> ulong`
-- `WorldFile { get; } -> string?`
-- `WorldId { get; } -> string?`
+- `Step { get; } -> ulong` — The sim step the save request was seen in.
+- `WorldFile { get; } -> string?` — The world file's path; null when it is not known yet.
+- `WorldId { get; } -> string?` — The world's GUID as text; null before a new world's first save.

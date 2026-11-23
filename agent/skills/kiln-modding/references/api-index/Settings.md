@@ -2,16 +2,16 @@
 
 ## SettingChange — The result of `Settings.Set`: the value before and after (after = what the game holds now).
 - `SettingChange(string Name, object Before, object After, bool Changed)`
-- `After { get; init; } -> object`
-- `Before { get; init; } -> object`
-- `Changed { get; init; } -> bool`
-- `Name { get; init; } -> string`
+- `After { get; init; } -> object` — The value the game holds now, as `Settings.Get` returns it.
+- `Before { get; init; } -> object` — The value before the change, as `Settings.Get` returns it.
+- `Changed { get; init; } -> bool` — False when the setting already had that value, so nothing changed.
+- `Name { get; init; } -> string` — The setting (`enshrouded_server.json` key).
 
 ## SettingChangedEvent — A game setting changed.
-- `After { get; } -> object`
+- `After { get; } -> object` — The value after the change, as `Settings.Get` returns it.
 - `Before { get; } -> object` — Values as `Settings.Get` returns them (bool, double, long, string).
 - `By { get; } -> string` — Id of the mod that changed it, "kiln" for Kiln itself, "game" for a change outside Kiln.
-- `FromGame { get; } -> bool`
+- `FromGame { get; } -> bool` — True for a change made outside Kiln (`SettingChangedEvent.By` is "game").
 - `Name { get; } -> string` — The setting (enshrouded_server.json key).
 
 ## SettingFlags — What Kiln knows about when a change takes effect.
@@ -19,22 +19,22 @@ enum: None, Live, PlayersRead, NextEvent, DocumentedRange, Unknown, Changed, Ver
 
 ## SettingInfo — One game setting with its current value.
 - `SettingInfo(int Index, string Name, string Group, SettingKind Kind, SettingFlags Flags, string Effect, object Value, object Initial, object? Default, double Min, double Max, IReadOnlyList<string> Options, int Offset)`
-- `Changed { get; } -> bool`
-- `Default { get; init; } -> object?`
-- `Effect { get; init; } -> string`
-- `Flags { get; init; } -> SettingFlags`
-- `Group { get; init; } -> string`
-- `Index { get; init; } -> int`
-- `Initial { get; init; } -> object`
-- `Kind { get; init; } -> SettingKind`
-- `Live { get; } -> bool`
-- `Max { get; init; } -> double`
-- `Min { get; init; } -> double`
-- `Name { get; init; } -> string`
-- `Offset { get; init; } -> int`
-- `Options { get; init; } -> IReadOnlyList<string>`
-- `PlayersRead { get; } -> bool`
-- `Value { get; init; } -> object`
+- `Changed { get; } -> bool` — True when the value differs from the world's own value (`SettingFlags.Changed`).
+- `Default { get; init; } -> object?` — The game's "Default" preset value (from the server readme); null when it is not known.
+- `Effect { get; init; } -> string` — When a change takes effect, in words.
+- `Flags { get; init; } -> SettingFlags` — What Kiln knows about when a change takes effect.
+- `Group { get; init; } -> string` — The group it belongs to (Player, Survival, World, Time, Rates, Enemies or Other).
+- `Index { get; init; } -> int` — The setting's index in `Settings.All`; stable for the life of the process.
+- `Initial { get; init; } -> object` — The world's own value: what the settings held when Kiln first read them.
+- `Kind { get; init; } -> SettingKind` — How the value is stored, and so the .NET type of `Value`.
+- `Live { get; } -> bool` — True when the server uses a new value without a restart (`SettingFlags.Live`).
+- `Max { get; init; } -> double` — The highest value `Settings.Set` accepts without `anyValue`.
+- `Min { get; init; } -> double` — The lowest value `Settings.Set` accepts without `anyValue`.
+- `Name { get; init; } -> string` — The `enshrouded_server.json` key, like `"enemyDamageFactor"`.
+- `Offset { get; init; } -> int` — The setting's byte offset in the game's settings block (for diagnostics).
+- `Options { get; init; } -> IReadOnlyList<string>` — The option names of an enum setting, in the game's order; empty for the other kinds.
+- `PlayersRead { get; } -> bool` — True when players' games read it too (`SettingFlags.PlayersRead`).
+- `Value { get; init; } -> object` — The current value, as `Settings.Get` returns it.
 
 ## SettingKind — How a setting's value is stored.
 enum: Bool, Float, Int, Enum, Duration
@@ -58,17 +58,17 @@ enum: Bool, Float, Int, Enum, Duration
 
 ## SettingsStatus — State of kiln.settings and of the game's day/night clock.
 - `SettingsStatus(bool Ready, bool ResendsToPlayers, bool VerifiedSingleton, int Count, long Revision, long Sets, long ResendsRequested, long ResendsSent, string? Preset, TimeSpan? DayDuration, TimeSpan? NightDuration, TimeSpan? TimeOfDay, uint DaytimeChanges, string ConfigPath)`
-- `ConfigPath { get; init; } -> string`
-- `Count { get; init; } -> int`
-- `DayDuration { get; init; } -> TimeSpan?`
-- `DaytimeChanges { get; init; } -> uint`
-- `NightDuration { get; init; } -> TimeSpan?`
-- `Preset { get; init; } -> string?`
-- `Ready { get; init; } -> bool`
-- `ResendsRequested { get; init; } -> long`
-- `ResendsSent { get; init; } -> long`
-- `ResendsToPlayers { get; init; } -> bool`
-- `Revision { get; init; } -> long`
-- `Sets { get; init; } -> long`
-- `TimeOfDay { get; init; } -> TimeSpan?`
-- `VerifiedSingleton { get; init; } -> bool`
+- `ConfigPath { get; init; } -> string` — The `enshrouded_server.json` that `Settings.Save` writes.
+- `Count { get; init; } -> int` — How many settings there are; 0 until `Ready`.
+- `DayDuration { get; init; } -> TimeSpan?` — The length of the day the game's day/night clock uses now; null when the clock is not readable.
+- `DaytimeChanges { get; init; } -> uint` — Goes up by one each time the clock took new durations (or a time skip).
+- `NightDuration { get; init; } -> TimeSpan?` — The length of the night the clock uses now; null when the clock is not readable.
+- `Preset { get; init; } -> string?` — The `gameSettingsPreset` the server started with (Default, Relaxed, Hard, Survival or Custom); null when unknown.
+- `Ready { get; init; } -> bool` — True once the live settings were found (capability `settings.ready`).
+- `ResendsRequested { get; init; } -> long` — How many times kiln.settings asked the game to send the settings to the players.
+- `ResendsSent { get; init; } -> long` — How many times the game sent the settings to the players.
+- `ResendsToPlayers { get; init; } -> bool` — True when changes are sent to the connected players (the game's send flag is known on this build).
+- `Revision { get; init; } -> long` — Goes up by one for every change kiln.settings sees, its own or the game's admin menu (`Settings.Revision`).
+- `Sets { get; init; } -> long` — How many values were changed through kiln.settings.
+- `TimeOfDay { get; init; } -> TimeSpan?` — The clock's time of day, 0 to 24 hours; null when the clock is not readable.
+- `VerifiedSingleton { get; init; } -> bool` — True when the settings block is the world's registered `ecs::GameSettings` singleton.
