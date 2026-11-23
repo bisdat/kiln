@@ -6,9 +6,12 @@ $here = $PSScriptRoot
 $root = (Resolve-Path "$here\..\..\..\..").Path
 New-Item -ItemType Directory -Force $OutputDirectory | Out-Null
 $out = (Resolve-Path $OutputDirectory).Path
-$vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+$vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+$discovery = Start-Process -FilePath $vswhere -ArgumentList '-latest','-products','*','-property','installationPath' -Wait -PassThru -NoNewWindow -RedirectStandardOutput "$out\vswhere.txt"
+if ($discovery.ExitCode -ne 0) { throw 'MSVC toolchain discovery failed' }
+$vs = (Get-Content -Raw "$out\vswhere.txt").Trim()
 if (-not $vs) { throw 'No installed MSVC toolchain' }
-$tests = @('ammo_abi','ammo_list','ammo_sources','ammo_hook','presentation','presentation_api','presentation_admission','brush_frame','held_state','held_observer','service_presentation_lifecycle')
+$tests = @('ammo_abi','ammo_list','ammo_allocation','ammo_sources','ammo_hook','presentation','presentation_api','presentation_admission','brush_frame','held_state','held_observer','service_presentation_lifecycle')
 $lines = @('@echo off', "call `"$vs\VC\Auxiliary\Build\vcvars64.bat`" >nul", 'if errorlevel 1 exit /b 1', "cd /d `"$out`"")
 foreach ($test in $tests) {
     $extra = if ($test -eq 'service_presentation_lifecycle') { "`"$here\..\hooks\presentation.cpp`"" } else { '' }

@@ -144,9 +144,13 @@ void after(Frame& frame,SelectorGroup* groups,void* access) try {
         auto composed=compose_ammo(next.rows.data(),next.value.game_count,p->rows.data(),p->count,p->mode,frame.selected[i]?frame.selected[i]:selection(groups+i));
         if(composed.count>capacity){composed.count=uint32_t(std::min<uint64_t>(capacity,KUA_CAPACITY));composed.truncated=true;}
         if(bindings.size()>=16){previous.value.reason=KUA_REASON_LIMIT;continue;}
-        if(!write_rows(groups+i,composed.rows.data(),composed.count,frame.selected[i]?frame.selected[i]:selection(groups+i))){fault(groups+i);continue;}
-        if(composed.truncated)previous.value.reason=KUA_REASON_LIMIT;
-        bindings.emplace(reinterpret_cast<uintptr_t>(groups+i),Binding{next,p,std::move(composed)});
+        // Reserve suppression bookkeeping before the first game write. Allocation failure must leave vanilla
+        // rows, never a synthetic row whose later equip request has no binding to intercept.
+        const auto [bound,inserted]=bindings.emplace(reinterpret_cast<uintptr_t>(groups+i),Binding{next,p,std::move(composed)});
+        if(!inserted){fault(nullptr);continue;}
+        const auto& output=bound->second.composed;
+        if(!write_rows(groups+i,output.rows.data(),output.count,frame.selected[i]?frame.selected[i]:selection(groups+i))){fault(groups+i);continue;}
+        if(output.truncated)previous.value.reason=KUA_REASON_LIMIT;
     }
 }
 catch(...) {fault(nullptr);}
