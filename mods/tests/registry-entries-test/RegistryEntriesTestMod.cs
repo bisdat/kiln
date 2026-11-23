@@ -84,5 +84,10 @@ public sealed class RegistryEntriesTestMod : Mod
         var manual = DataRegistry.Change(view => { view.Recipes.Remove(Recipe); view.Items[Child].MaxStack = 99; });
         Check(manual.Result.Outcome == RegistryChangeOutcome.RestartRequired && Stack(Child) == 65, "Manual entry refusal commits none of its valid fields");
         Check(Stack(Wood) > 0, "unproven item removal leaves the original item addressable");
+        var loot = JsonNode.Parse(NewContent.InfoJson())?["loot"];
+        var candidates = loot?["getter"]?["count"]?.GetValue<int>() ?? -1;
+        var records = Content.Status()?.Loot ?? -1;
+        Check(loot?["on"]?.GetValue<bool>() == true && records > 0 && candidates == records - (Mode == "item-only" ? 0 : 1),
+            "the actual random-loot getter excludes only the requested candidate while retaining its record");
     }
 }
