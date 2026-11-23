@@ -78,8 +78,8 @@ server -> {"t":"res","id":8,"ok":false,"op":"heal","ms":0,"error":"entity must b
   (teleport, give_item, mod_reload, ...) answer when they finish; responses may come out of order.
 - At most 64 requests in flight per connection; more get `res{ok: false, code: "busy"}` at once. A second `req` with an
   id still in flight gets `error{code: "bad_frame", id}` (non-fatal).
-- A request not answered within its op's budget (default 30 s; `mod_test` 180 s, `backup_create` 90 s, `save_now`
-  60 s, `mod_*` 45 s) gets `res{ok: false, code: "timeout"}`; a later result is dropped.
+- A request not answered within its op's budget (default 30 s; `mod_test` and `update_stage` 180 s, `backup_create`
+  90 s, `save_now` 60 s, `mod_*` 45 s) gets `res{ok: false, code: "timeout"}`; a later result is dropped.
 
 ## 5. Subscriptions, pings, bye
 ```
@@ -262,6 +262,20 @@ More ops (both transports serve them):
 | `world_status_player` | target (entity or name) | one player's progress: counts, every spire, shrine, root, obelisk and tracked boss with that player's value, started quests |
 | `world_chests` | x, y, z, radius? (default 8, max 64) | `{chests: [{lootId, template, position, loaded, entity, opened, looted}]}` |
 | `admin_token_rotate` | - | writes a new `admin-token`, returns `{rotated: true}`; every other connection gets `bye{reason: "token"}`, the calling one stays open |
+
+Staged updates (0.2.0-dev.30.9, `Ops.Updates.cs` and `Staging.cs`; [staged-updates.md](../staged-updates.md)). A mod or
+Kiln update is staged while the server runs and applied at its next start, before anything loads it. The previous
+version is kept for a rollback. Kiln.Admin only stages from files that are already on the server: downloading and
+checking signatures is the caller's job (Kiln Web Admin). `unit` is `"kiln"` or `"mod.<folder>"` (a folder under
+`kiln/mods`). `by` (optional, at most 120 characters, default `"kiln-admin"`) says who asked; it goes into the records
+and `kiln.log`.
+
+| Op | Arguments | Result |
+|---|---|---|
+| `update_list` | - | `{units: [{unit, kind: "kiln"\|"mod", folder, id, current: {version} \| null, staged: {version, from, staged, by, label, files, bytes, remove} \| null, previous: {version, replacedBy, kept, reason} \| null, rollback: {requested, by} \| null, probation: {state, version, error} \| null, open}], results: [the newest 20 result records], incoming}` (`open`: a change waits for the next start to finish it; `incoming`: the folder sources must sit in) |
+| `update_stage` (async) | kind (`mod` \| `kiln`), source (a folder under `kiln/staged/incoming`: a name there or a full path; copied, never moved), id? (mod: must match its `kiln.mod.json`), folder? (mod: default the `kiln/mods` folder that holds that id now, else the id), files? (`[{path, sha256}]`: the caller's list from the archive it checked; the source must match it exactly), label?, sha256? (kiln: the bundle zip's, for the receipt), by? | `{unit, staged: {version, from, staged, by, label, files, bytes, remove}, note}`. Refused: a source outside `kiln/staged/incoming`, a link or a bad path in it, an update or a rollback of that unit already waiting (cancel it first), a change still open, a mod folder Kiln's receipt lists (it updates with Kiln), a Kiln bundle whose bytes are not its `kiln-runtime.json`'s or that would write outside what a Kiln update may write (never `kiln/data`), a `dinput8.dll` that is not Kiln's, a Kiln version that is installed already |
+| `update_cancel` | unit | `{unit, canceled: ["update"?, "rollback"?]}`; fails when nothing waits |
+| `update_rollback` | unit | `{unit, requested: true, to, from, note}` (`to` = the kept version; `""` when it was not installed before, so the rollback removes it); fails without a kept version or while an update of that unit is staged |
 
 ## 9. Remote servers: the SSH tunnel recipe
 The launcher never stores SSH keys or passwords: it uses the user's ssh config and agent, non-interactively.

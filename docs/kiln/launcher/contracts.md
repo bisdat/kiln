@@ -393,7 +393,8 @@ Today's layout stays (`tools/deploy-server.sh`): `kiln-core.dll`, `kiln.json`, `
 | `../mods/<original folder>/` | the active profile's XHL companions (only XHL-Core loads them) and EML mods a native DLL reads there, placed by activation under the folder name they came with (5.1) |
 | `../mods/<id>/`, `../greeneye/<id>/` | the active profile's enabled Flame and Greeneye mods, placed by activation with a marker and a receipt, with or without the engine's own loader: a Flame mod reads its own files (`sigs/`, `symbols/`, settings) from `<game>/mods/<id>/` wherever its DLL is loaded from, a Greeneye mod gets its folder as `greeneye\<id>\` from Greeneye's API. Files the mod wrote there stay across updates and go to `kiln/kept-mod-files/<kind>/<id>/` when the copy goes (5.1) |
 | `state/` | status files for the launcher (section 5.9); created by kiln-core at boot (`KILN_PATH_STATE`) |
-| `.install.json` | install receipt (section 5.7) |
+| `.install.json` | install receipt (section 5.7); a staged Kiln update (0.2.0-dev.30.9) writes a new one as its last file, and writes one for a server pack install that had none |
+| `staged/` | (0.2.0-dev.30.9, servers) staged mod and Kiln updates, the kept versions for a rollback, their journals and results ([../staged-updates.md](../staged-updates.md)); never `kiln/data` |
 | `backups/install-<yyyymmddThhmmssZ>/` | what the installer replaced, byte-identical |
 | `.staging-<random>/` | installer staging; deleted at the end, stale ones deleted by the next install |
 | `logs/proxy.log` | the proxy's decisions |
