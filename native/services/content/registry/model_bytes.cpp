@@ -39,6 +39,9 @@ bool contains(const Node& root, uintptr_t address, size_t count) {
 nlohmann::json json_of(const gd::Node& n, int depth, const Node& root) {
     const gd::TType* t = n.t ? n.t->resolved() : nullptr;
     if (!t || !contains(root, n.addr, t->size)) return nullptr;
+    // a leaf first, as gd::node_json does: one-scalar structs (keen::ItemId, keen::HashKey32), GUIDs, enums read as values
+    Field leaf;
+    if (t->kind != gd::K_BLOBVAR && gd::leaf_of(n.t, &leaf)) return plain(gd::node_json(n, depth));
     if (t->kind == gd::K_ARRAY || t->kind == gd::K_BLOBARRAY) {
         const gd::TType* el = t->inner() ? t->inner()->resolved() : nullptr;
         if (!el || !el->size) return nullptr;

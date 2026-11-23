@@ -20,6 +20,7 @@ std::string guid_text(const uint8_t g[16]);
 bool guid_parse(const std::string& s, uint8_t out[16]);
 namespace rbtest {
 void byte_blob_type(uintptr_t unreadable);
+void wrapped_id_type();
 void item_type();  // keen::ItemInfo {itemId u32 +0, objectId Guid +4, maxStackSize u16 +0x14, debugName BlobString +0x18}, 40 bytes
 }
 }  // namespace kc
@@ -348,13 +349,25 @@ void byte_array_bounds(const std::string&) {
     kc::rbtest::byte_blob_type(0);
     check(model::bytes_member(bytes.data(), bytes.size(), "test::ByteBlob", "", &out, &why) && out["values"].size() == 21, "a nested byte array also reads as numbers");
 }
+void single_scalar_structs(const std::string&) {
+    const uint32_t raw[3] = {4242, 7, 9};
+    kc::rbtest::wrapped_id_type();
+    json out;
+    std::string why;
+    check(model::bytes_member(raw, sizeof raw, "test::Wrapped", "id", &out, &why) && out.is_number() && out.get<uint32_t>() == 4242,
+          "a one-scalar struct id reads as its number, not {\"value\": n} (got " + out.dump() + ")");
+    check(model::bytes_member(raw, sizeof raw, "test::Wrapped", "pair", &out, &why) && out.is_object() && out["a"] == 7 && out["b"] == 9,
+          "a struct of two members still reads as an object");
+    check(model::bytes_member(raw, sizeof raw, "test::Wrapped", "", &out, &why) && out["id"] == 4242,
+          "nested in the root too");
+}
 }  // namespace
 
 int main(int argc, char** argv) {
     const std::string dir = argc > 1 ? argv[1] : "regmap";
     int failed = 0;
     const std::pair<const char*, void (*)(const std::string&)> groups[] = {
-        {"byte_array_bounds", byte_array_bounds}, {"entries_and_ids", entries_and_ids}, {"values", values}, {"needs_and_compose", needs_and_compose},
+        {"byte_array_bounds", byte_array_bounds}, {"single_scalar_structs", single_scalar_structs}, {"entries_and_ids", entries_and_ids}, {"values", values}, {"needs_and_compose", needs_and_compose},
         {"encode_writes", encode_writes},     {"id_table", id_table}, {"live_bytes", live_bytes}};
     for (const auto& [name, fn] : groups) {
         try {

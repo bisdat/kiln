@@ -154,6 +154,21 @@ void byte_blob_type(uintptr_t unreadable) {
     tab.fields = {{"values", reinterpret_cast<uintptr_t>(&blob), 0}};
     named()[tab.name] = &tab;
 }
+// test::Wrapped {id: test::ItemId {value u32} +0, pair: test::Pair {a u32 +0, b u32 +4} +4}: the game's ids (keen::ItemId,
+// keen::RecipeId) are one-scalar structs, which the walker reads as the scalar (gd::leaf_of), not as {"value": n}
+void wrapped_id_type() {
+    using namespace kc::gd;
+    static TType u32, id, pair, w;
+    auto rec = [](const TType& t) { return reinterpret_cast<uintptr_t>(&t); };
+    u32.name = u32.brief = "uint32", u32.kind = K_U32, u32.size = 4;
+    id.name = "test::ItemId", id.brief = "ItemId", id.kind = K_STRUCT, id.size = 4;
+    id.fields = {{"value", rec(u32), 0}};
+    pair.name = "test::Pair", pair.brief = "Pair", pair.kind = K_STRUCT, pair.size = 8;
+    pair.fields = {{"a", rec(u32), 0}, {"b", rec(u32), 4}};
+    w.name = "test::Wrapped", w.brief = "Wrapped", w.kind = K_STRUCT, w.size = 12;
+    w.fields = {{"id", rec(id), 0}, {"pair", rec(pair), 4}};
+    named()[w.name] = &w;
+}
 void byte_table_type() {
     using namespace kc::gd;
     static TType u8, u32, arr, tab;
