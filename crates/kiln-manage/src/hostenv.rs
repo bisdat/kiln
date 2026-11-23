@@ -272,8 +272,9 @@ mod tests {
         }
         // the user's own values (not in the list) go along as before
         assert!(changes(vars(&[("WEBKIT_FORCE_DMABUF_RENDERER", "1"), ("WEBKIT_DMABUF_RENDERER_FORCE_SHM", "1")])).is_empty());
-        // and a program really started for the host (a server's Wine, Steam through xdg-open) sees neither
-        let mut cmd = Command::new("sh");
+        // and a program really started for the host (a server's Wine, Steam through xdg-open) sees neither. /bin/sh by
+        // path: the PATH this command gets is the filtered test one (/usr/bin, no /bin), and macOS has no /usr/bin/sh
+        let mut cmd = Command::new("/bin/sh");
         for (k, v) in &ours {
             cmd.env(k, v);
         }

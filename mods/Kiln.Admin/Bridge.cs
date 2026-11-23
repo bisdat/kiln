@@ -155,9 +155,12 @@ internal sealed partial class Bridge(string directory, Logger log) : IDisposable
             var stopping = _ioStop;
             try
             {
+                if (stopping) AnswerUnrun();
                 WriteOut();
                 if (stopping) return;
-                if (_incoming.Count < MaxIncoming) Scan();
+                // a stop that came while this thread waited for the disk: take no more requests (their files would be
+                // deleted, and nothing would run them)
+                if (!_ioStop && _incoming.Count < MaxIncoming) Scan();
             }
             catch (Exception e)
             {
@@ -168,6 +171,21 @@ internal sealed partial class Bridge(string directory, Logger log) : IDisposable
                     log.Warn($"file bridge I/O: {e.Message}");
                 }
             }
+        }
+    }
+
+    /// <summary>I/O thread, at the stop: requests it read (their files are deleted) that the tick thread never ran get a
+    /// failed result, so no caller waits for an answer that cannot come. Before the I/O thread such a request stayed in
+    /// the folder for the next Kiln.Admin; a caller now sends it again.</summary>
+    private void AnswerUnrun()
+    {
+        while (_incoming.TryDequeue(out var r))
+        {
+            var op = r.Request?["op"] is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
+            _out.Enqueue((r.ResultPath, new JsonObject
+            {
+                ["op"] = op, ["ok"] = false, ["error"] = "Kiln.Admin unloaded before it ran this request; send it again",
+            }.ToJsonString(Json)));
         }
     }
 

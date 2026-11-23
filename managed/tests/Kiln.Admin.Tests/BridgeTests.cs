@@ -114,6 +114,48 @@ public sealed class BridgeTests : AdminTest
     }
 
     [Fact]
+    public void A_request_read_but_never_run_gets_a_failed_result_at_the_stop()
+    {
+        var b = NewBridge();
+        var request = Path.Combine(Requests, "u1.json");
+        File.WriteAllText(request, "{\"op\":\"echo\",\"x\":1}");
+        b.WriteStateText("{\"n\":0}");  // starts the I/O thread, which reads the request; the tick thread never polls again
+        Assert.True(Eventually(() => !File.Exists(request)), "the I/O thread did not take the request");
+        b.Dispose();
+        var r = ReadJson(Path.Combine(Results, "u1.json"));
+        Assert.NotNull(r);
+        Assert.False(r!["ok"]!.GetValue<bool>());
+        Assert.Equal("echo", r["op"]!.GetValue<string>());
+        Assert.Contains("unloaded before it ran", r["error"]!.GetValue<string>(), StringComparison.Ordinal);
+        // after the stop nothing reads the folder: a request for the next Kiln.Admin stays where it is
+        var next = Path.Combine(Requests, "n2.json");
+        File.WriteAllText(next, "{\"op\":\"echo\",\"x\":2}");
+        Thread.Sleep(300);
+        Assert.True(File.Exists(next));
+    }
+
+    [Fact]
+    public void A_stop_during_a_stuck_write_takes_no_request_after_it()
+    {
+        using var gate = new ManualResetEventSlim(false);
+        var b = NewBridge();
+        b.WriteFile = (path, text) =>
+        {
+            gate.Wait(10_000);
+            Bridge.WriteAtomic(path, text);
+        };
+        b.WriteStateText("{\"n\":1}");
+        Thread.Sleep(200);  // the I/O thread is stuck in that write
+        var late = Path.Combine(Requests, "late.json");
+        File.WriteAllText(late, "{\"op\":\"echo\",\"x\":3}");
+        Assert.False(b.StopIo(200));  // the unload goes on without it
+        gate.Set();
+        Assert.True(b.StopIo(5000), "the I/O thread did not end after its write");
+        Assert.True(File.Exists(late), "a request meant for the next Kiln.Admin was taken by the stopped one");
+        Assert.False(File.Exists(Path.Combine(Results, "late.json")));
+    }
+
+    [Fact]
     public void A_slow_write_is_logged_once()
     {
         using var b = NewBridge();
