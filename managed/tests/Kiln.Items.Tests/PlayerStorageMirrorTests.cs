@@ -343,6 +343,42 @@ public sealed class PlayerStorageMirrorTests
     }
 
     [Fact]
+    public void WhenAHostedWorldStopsItsCopyEmptiesAndNothingOfItIsHandledInTheNextWorld()
+    {
+        using var r = new Run();
+        var q = r.Register("quiver", 8, StorageFilter.Ammunition(AmmoKinds.Arrow));
+        r.Kiln.Step();
+        r.Kiln.PlayerStorage.JoinAndRestore(r.Ada);
+        r.Kiln.PlayerStorage.JoinAndRestore(r.Bo);
+        r.Kiln.Step();
+        r.Link.Hosting = true;
+        r.Link.LocalPlayer = r.Ada.Entity;
+        r.Link.See(r.Ada, local: true);
+        r.Link.See(r.Bo);
+        r.Give(q, r.Ada, r.Arrow, 12);
+        r.Pass();
+        Assert.Single(r.Kiln.Run(() => PlayerStorage.Client.Rows("quivers:quiver")));
+        var boView = Assert.Single(r.Link.Sent[r.Bo.Entity.Value]).View;
+        var equips = new Equips();
+        PlayerStorageMirror.EquipHook = equips.Equip;
+        using var ammo = r.Kiln.Run(() => As(r.Quivers, () => PlayerStorage.Client.ProvideAmmo("quivers:quiver", AmmoKinds.Arrow)));
+        Assert.True(PlayerStorageMirror.Pick("quivers:quiver", AmmoKinds.Arrow, r.Arrow));  // the HUD: queued for the server tick
+
+        // the game's menu runs Kiln's service tick off the tick thread: a queued pick waits for a world, it is not checked there
+        PlayerStorageMirror.Pass();
+        Assert.Empty(equips.Calls);
+
+        // the hosted world stops (ServerStoppingEvent): the copy empties at once, and the queued pick goes with the world
+        r.Kiln.Run(PlayerStorageMirror.WorldStopping);
+        Assert.Empty(r.Kiln.Run(() => PlayerStorage.Client.Rows("quivers:quiver")));
+        r.Kiln.Step();
+        Assert.Empty(r.Changes[^1].Rows);
+        r.Pass();
+        Assert.Empty(equips.Calls);
+        Assert.NotEqual(boView, r.Link.Sent[r.Bo.Entity.Value][^1].View);  // the next world: a new view for every player
+    }
+
+    [Fact]
     public void WithoutKilnsNetworkTheCopyIsOffAndSaysWhy()
     {
         using var r = new Run();
@@ -497,6 +533,40 @@ public sealed class PlayerStorageMirrorTests
     }
 
     [Fact]
+    public void TheServerMarksArrowsAndSpellsAndAGameWithoutAnItemCatalogListsThemByTheMarks()
+    {
+        using var r = new Run();
+        var bag = r.Register("bag", 8);
+        r.Kiln.Step();
+        r.Kiln.PlayerStorage.JoinAndRestore(r.Ada);
+        r.Kiln.Step();
+        r.Link.See(r.Ada);
+        r.Give(bag, r.Ada, r.Arrow, 10);
+        r.Give(bag, r.Ada, r.Spell, 2);
+        r.Give(bag, r.Ada, r.Logs, 5);
+        r.Pass();
+        // the server's catalog says what each item is: Flags carries its AmmoKinds (1 arrows, 2 a spell, 0 anything else)
+        Assert.Equal([1u, 2u, 0u], r.Link.Games[r.Ada.Entity.Value].Rows("quivers:bag").Select(x => x.Flags));
+
+        // A game that joined another's world has no item catalog (Items.Get answers null there): only the server's marks
+        // say which rows are arrows and spells.
+        ItemId arrow = new(0x5A0001), spell = new(0x5A0002), other = new(0x5A0003);
+        Assert.Null(r.Kiln.Run(() => Items.Get(arrow)));
+        PlayerStorageMirror.Store.Apply(new StorageMirrorUpdate(9, 1,
+            [E("quivers:quiver", 8, new StorageMirrorRow(0, arrow.Value, 20, 0, 1), new StorageMirrorRow(1, spell.Value, 3, 0, 2),
+                new StorageMirrorRow(2, other.Value, 7, 0, 0))]));
+        using var ammo = r.Kiln.Run(() => As(r.Quivers, () => PlayerStorage.Client.ProvideAmmo("quivers:quiver", AmmoKinds.Arrow | AmmoKinds.Spell)));
+        r.Kiln.AmmoList.Hold(AmmoListKind.Arrow, r.Kiln.Items.AddItem("Weapon_Bow_T1", 1, ItemCategory.Weapons, gear: true));
+        r.Kiln.AmmoList.Hold(AmmoListKind.Spell, r.Kiln.Items.AddItem("Weapon_Staff_T1", 1, ItemCategory.Weapons, gear: true));
+        r.Kiln.Step(2);
+        Assert.Equal([new AmmoListRow(arrow, 20)], r.Kiln.AmmoList.Provided(AmmoListKind.Arrow));
+        Assert.Equal([new AmmoListRow(spell, 3)], r.Kiln.AmmoList.Provided(AmmoListKind.Spell));
+        Assert.True(r.Kiln.AmmoList.Pick(AmmoListKind.Spell, spell));
+        r.Kiln.Step(2);
+        Assert.Equal([new StorageAmmoPick("quivers:quiver", 2, spell.Value)], r.Link.Picks);
+    }
+
+    [Fact]
     public void ReplaceShowsOnlyTheStoragesRows()
     {
         using var r = new Run();
@@ -531,5 +601,218 @@ public sealed class PlayerStorageMirrorTests
         // the kit has no moves (items.move): the swap is handed to Items.Move, which says so
         Assert.Equal("items.move", Assert.Throws<KilnUnavailableException>(() => r.Kiln.Run(() => { _ = bag.Activate(r.Ada.Entity, 1); })).Capability);
         Assert.Throws<ArgumentOutOfRangeException>(() => r.Kiln.Run(() => { _ = bag.Activate(r.Ada.Entity, 8); }));
+    }
+
+    /// <summary>Stands in for kiln.items' move and equip in Activate (the kit has neither). Each request waits until the
+    /// test completes it, and completes as kiln.items' do: their continuations never run inline.</summary>
+    private sealed class Steps
+    {
+        public readonly List<(EntityId From, SlotId Slot, EntityId To, int Count, MoveOptions Options, bool Tick)> Moves = [];
+        public readonly List<(EntityId Player, SlotId From, EquipmentSlot Slot, bool Tick)> Equips = [];
+        public readonly Queue<TaskCompletionSource<MoveResult>> MoveWaits = new();
+        public readonly Queue<TaskCompletionSource<EquipResult>> EquipWaits = new();
+
+        public Steps()
+        {
+            PlayerStorageActivation.MoveHook = (from, slot, to, count, options) =>
+            {
+                var wait = new TaskCompletionSource<MoveResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+                lock (this)
+                {
+                    Moves.Add((from, slot, to, count, options, Game.IsTickThread));
+                    MoveWaits.Enqueue(wait);
+                }
+                return wait.Task;
+            };
+            PlayerStorageActivation.EquipHook = (player, from, slot) =>
+            {
+                var wait = new TaskCompletionSource<EquipResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+                lock (this)
+                {
+                    Equips.Add((player, from, slot, Game.IsTickThread));
+                    EquipWaits.Enqueue(wait);
+                }
+                return wait.Task;
+            };
+        }
+
+        public int MoveCount
+        {
+            get { lock (this) return Moves.Count; }
+        }
+
+        public int EquipCount
+        {
+            get { lock (this) return Equips.Count; }
+        }
+    }
+
+    private static MoveResult Moved(EntityId from, SlotId fromSlot, EntityId to, SlotId toSlot, ItemId item, int n) =>
+        new(ItemsStatus.Done, MoveKind.Stack, from, to, n, n, 1, [new MoveChange(fromSlot, toSlot, item, n, default)], "", 0, false, 1, false);
+
+    private static EquipResult Equipped(EntityId player, SlotId cell, ItemId item) =>
+        new(ItemsStatus.Done, player, EquipmentSlot.Arrow, false, item, default, cell, cell, default, default, default, "", 0, 1, false);
+
+    // What the mod's scheduler holds, run on the tick thread as Kiln.Host runs it at the start of the mod's Pre.
+    private static void Drain(Run r, ModContext mod) => r.Kiln.Run(() =>
+    {
+        var sync = SynchronizationContext.Current;
+        var outer = HostAccess.Current;
+        SynchronizationContext.SetSynchronizationContext(mod.Scheduler.SynchronizationContext);
+        HostAccess.Current = mod;
+        try
+        {
+            while (true)
+            {
+                Action? next;
+                lock (mod.PendingLock)
+                    if (!mod.Pending.TryDequeue(out next)) break;
+                next();
+            }
+        }
+        finally
+        {
+            HostAccess.Current = outer;
+            SynchronizationContext.SetSynchronizationContext(sync);
+        }
+    });
+
+    private static void DrainUntil(Run r, ModContext mod, Func<bool> done)
+    {
+        var until = Environment.TickCount64 + 5000;
+        do
+        {
+            Drain(r, mod);
+            if (done()) return;
+            Thread.Sleep(5);
+        } while (Environment.TickCount64 < until);
+    }
+
+    // a slot of the player's backpack holding count of item (the kit's inventories: what a move there would leave)
+    private static SlotId BackpackStack(Run r, FakePlayer p, ItemId item, int count)
+    {
+        var give = r.Kiln.Run(() => Items.Give(p.Entity, item, count, null, GiveOptions.NoMerge));
+        r.Kiln.Step();
+        Assert.Equal(ItemsStatus.Done, give.Result.Status);
+        return r.Kiln.Run(() => Items.Read(p.Entity)!.Slots.Last(s => s.Item == item).Slot);
+    }
+
+    [Fact]
+    public void APickThatActivatesTakesEachStepOnTheTickThreadAsTheStoragesMod()
+    {
+        using var r = new Run();
+        var q = r.Register("quiver", 8, StorageFilter.Ammunition(AmmoKinds.Arrow));
+        r.Kiln.Step();
+        r.Kiln.PlayerStorage.JoinAndRestore(r.Ada);
+        r.Kiln.Step();
+        r.Give(q, r.Ada, r.Arrow, 30);
+        var holder = r.Holder(q, r.Ada);
+        var cell = BackpackStack(r, r.Ada, r.Arrow, 30);  // where the move puts the stack
+        var steps = new Steps();
+        using var ammo = r.Kiln.Run(() => As(r.Quivers, () =>
+            PlayerStorage.Client.ProvideAmmo("quivers:quiver", AmmoKinds.Arrow, new PlayerStorageAmmoOptions { Activate = true })));
+        var pick = new StorageAmmoPick("quivers:quiver", 1, r.Arrow.Value);
+
+        r.Kiln.Run(() => PlayerStorageMirror.HandlePick(r.Ada.Entity, pick));
+        var move = Assert.Single(steps.Moves);
+        var from = r.Kiln.Run(() => q.Slot(r.Ada.Entity, 0));
+        Assert.Equal((holder, from, r.Ada.Entity, true), (move.From, move.Slot, move.To, move.Tick));
+        r.Kiln.Run(() => steps.MoveWaits.Dequeue().SetResult(Moved(holder, from, r.Ada.Entity, cell, r.Arrow, 30)));
+        DrainUntil(r, r.Quivers, () => steps.EquipCount > 0);
+        // kiln.items completes off the step: the equip still runs on the tick thread (the storage's mod's scheduler)
+        Assert.Equal((r.Ada.Entity, cell, EquipmentSlot.Arrow, true), Assert.Single(steps.Equips));
+        r.Kiln.Run(() => steps.EquipWaits.Dequeue().SetResult(Equipped(r.Ada.Entity, cell, r.Arrow)));
+        DrainUntil(r, r.Quivers, () => r.Kiln.Logs.Any(l => l.Text.Contains("(activate): equip Done")));
+        Assert.Contains(r.Kiln.Logs, l => l.Text.Contains("pick by") && l.Text.Contains("(activate): equip Done"));
+
+        // finished: the same pick is no repeat of one under way any more
+        r.Kiln.Run(() => PlayerStorageMirror.HandlePick(r.Ada.Entity, pick));
+        Assert.Equal(2, steps.MoveCount);
+    }
+
+    [Fact]
+    public void ADirectPicksOutcomeIsHandledOnTheTickThread()
+    {
+        using var r = new Run();
+        var q = r.Register("quiver", 8, StorageFilter.Ammunition(AmmoKinds.Arrow));
+        r.Kiln.Step();
+        r.Kiln.PlayerStorage.JoinAndRestore(r.Ada);
+        r.Kiln.Step();
+        r.Give(q, r.Ada, r.Arrow, 30);
+        var wait = new TaskCompletionSource<EquipResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = 0;
+        PlayerStorageMirror.EquipHook = (_, _, _, _) => ++calls == 1 ? wait.Task : Task.FromResult(Equipped(r.Ada.Entity, default, r.Arrow));
+        using var ammo = r.Kiln.Run(() => As(r.Quivers, () => PlayerStorage.Client.ProvideAmmo("quivers:quiver", AmmoKinds.Arrow)));
+        var pick = new StorageAmmoPick("quivers:quiver", 1, r.Arrow.Value);
+        r.Kiln.Run(() => PlayerStorageMirror.HandlePick(r.Ada.Entity, pick));
+        r.Kiln.Run(() => wait.SetResult(Equipped(r.Ada.Entity, default, r.Arrow)));
+        Thread.Sleep(200);
+        // kiln.items completed the equip off the step: its outcome waits for the tick thread
+        Assert.DoesNotContain(r.Kiln.Logs, l => l.Text.Contains("pick by") && l.Text.Contains("equip Done"));
+        Drain(r, r.Quivers);
+        Assert.Contains(r.Kiln.Logs, l => l.Text.Contains("pick by") && l.Text.Contains("equip Done"));
+        r.Kiln.Run(() => PlayerStorageMirror.HandlePick(r.Ada.Entity, pick));
+        Assert.Equal(2, calls);
+    }
+
+    [Fact]
+    public void AnActivateWhoseEquipFailsPutsWhatMovedBackAndOnlyOneRunsAtATime()
+    {
+        using var r = new Run();
+        var q = r.Register("quiver", 8, StorageFilter.Ammunition(AmmoKinds.Arrow));
+        r.Kiln.Step();
+        r.Kiln.PlayerStorage.JoinAndRestore(r.Ada);
+        r.Kiln.Step();
+        r.Give(q, r.Ada, r.Arrow, 30);
+        r.Give(q, r.Ada, r.FireArrow, 6);
+        var holder = r.Holder(q, r.Ada);
+        var cell = BackpackStack(r, r.Ada, r.Arrow, 30);
+        var steps = new Steps();
+        var from = r.Kiln.Run(() => q.Slot(r.Ada.Entity, 0));
+
+        var first = r.Kiln.Run(() => As(r.Quivers, () => q.Activate(r.Ada.Entity, 0)));
+        Assert.Single(steps.Moves);
+        // another activation of the same player's arrows while the first runs: refused, nothing moves
+        var second = r.Kiln.Run(() => As(r.Quivers, () => q.Activate(r.Ada.Entity, 1)));
+        Assert.True(second.IsCompleted);
+        Assert.Equal(ItemsStatus.Refused, second.Result.Status);
+        Assert.Single(steps.Moves);
+
+        // the stack reached the backpack but the game refuses the equip: what moved goes back into the storage
+        r.Kiln.Run(() => steps.MoveWaits.Dequeue().SetResult(Moved(holder, from, r.Ada.Entity, cell, r.Arrow, 30)));
+        DrainUntil(r, r.Quivers, () => steps.EquipCount > 0);
+        r.Kiln.Run(() => steps.EquipWaits.Dequeue().SetResult(
+            EquipResult.Fail(ItemsStatus.Refused, r.Ada.Entity, EquipmentSlot.Arrow, false, cell, "the game refused it", false)));
+        DrainUntil(r, r.Quivers, () => steps.MoveCount > 1);
+        var back = steps.Moves[1];
+        Assert.Equal((r.Ada.Entity, cell, holder, 30, true), (back.From, back.Slot, back.To, back.Count, back.Tick));
+        r.Kiln.Run(() => steps.MoveWaits.Dequeue().SetResult(Moved(r.Ada.Entity, cell, holder, from, r.Arrow, 30)));
+        DrainUntil(r, r.Quivers, () => first.IsCompleted);
+        Assert.Equal(ItemsStatus.Refused, first.Result.Status);
+        Assert.Contains("the game refused it", first.Result.Message);
+
+        // over: the next activation runs
+        _ = r.Kiln.Run(() => As(r.Quivers, () => q.Activate(r.Ada.Entity, 1)));
+        Assert.Equal(3, steps.MoveCount);
+    }
+
+    [Fact]
+    public void RefusalsAreLoggedOncePerReasonAndAnIdlePlayersPickRateIsForgotten()
+    {
+        using var r = new Run();
+        var q = r.Register("quiver", 8, StorageFilter.Ammunition(AmmoKinds.Arrow));
+        r.Kiln.Step();
+        r.Kiln.PlayerStorage.JoinAndRestore(r.Ada);
+        r.Kiln.Step();
+        r.Link.See(r.Ada);
+        r.Give(q, r.Ada, r.Arrow, 30);
+        using var ammo = r.Kiln.Run(() => As(r.Quivers, () => PlayerStorage.Client.ProvideAmmo("quivers:quiver", AmmoKinds.Arrow)));
+        // six made-up items: one line for the reason, not one per item a game can make up
+        for (var i = 0; i < 6; i++)
+            r.Kiln.Run(() => PlayerStorageMirror.HandlePick(r.Ada.Entity, new StorageAmmoPick("quivers:quiver", 1, 0x7000u + (uint)i)));
+        Assert.Single(r.Kiln.Logs, l => l.Text.Contains("was not taken"));
+        Assert.Equal(1, PlayerStorageMirror.PickStateCount);
+        r.Pass(2500);  // the bucket is full again: nothing is kept for the player
+        Assert.Equal(0, PlayerStorageMirror.PickStateCount);
     }
 }

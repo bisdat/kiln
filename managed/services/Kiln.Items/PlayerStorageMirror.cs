@@ -719,6 +719,14 @@ internal static class PlayerStorageMirror
             if (Acceptors.TryGetValue(acceptor.Key, out var had) && ReferenceEquals(had, acceptor)) Acceptors.Remove(acceptor.Key);
     }
 
+    /// <summary>The hosted server world is stopping (ServerStoppingEvent).</summary>
+    internal static void WorldStopping()
+    {
+    }
+
+    /// <summary>Tests: how many players' pick rates are kept.</summary>
+    internal static int PickStateCount => PickStates.Count;
+
     /// <summary>What the copy did, for a status line.</summary>
     internal static (bool Open, long Sent, long PicksRefused) Counters()
     {
@@ -751,6 +759,8 @@ internal static class PlayerStorageMirror
         while (LocalPicks.TryDequeue(out _)) { }
         Store.Clear();
         EquipHook = null;
+        PlayerStorageActivation.MoveHook = null;
+        PlayerStorageActivation.EquipHook = null;
         Clock = static () => Environment.TickCount64;
     }
 }

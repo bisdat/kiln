@@ -666,6 +666,10 @@ public sealed class PlayerStorageClientChangedEvent : KilnEvent
 // one step after the one before, as the storage's mod.
 internal static class PlayerStorageActivation
 {
+    /// <summary>Tests: kiln.items' move and equip (the test kit has neither); null: Items.Move and Items.Equip.</summary>
+    internal static Func<EntityId, SlotId, EntityId, int, MoveOptions, Task<MoveResult>>? MoveHook;
+    internal static Func<EntityId, SlotId, EquipmentSlot, Task<EquipResult>>? EquipHook;
+
     public static async Task<EquipResult> Run(PlayerStorage storage, EntityId player, EntityId holder, SlotId slot, InventorySlot stack, AmmoKinds kind)
     {
         var equipSlot = kind == AmmoKinds.Arrow ? EquipmentSlot.Arrow : EquipmentSlot.Spell;
