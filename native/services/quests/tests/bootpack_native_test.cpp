@@ -230,7 +230,9 @@ void test_body_pack_exclusion() {
         mod("a-body", kGood); mod("b-ordinary", kGood);
         write(t_root / "mods/a-body/blocks/body.json", malformed_like
             ? R"({"npcs":{"n":{"name":"Authored","body":{"like":"not-a-body","model":"model"}}}})"
-            : R"({"npcs":{"n":{"name":"Authored","body":{"model":"model"},"motions":"poses"}}})");
+            // a complete authored body (model, animation, motions): one without its animation or motions is no authored body and
+            // leaves only its NPC out (body_native_test's legacy model case)
+            : R"({"npcs":{"n":{"name":"Authored","body":{"model":"model"},"animation":{"clips":"model.glb"},"motions":{"bindings":[]}}}})");
         boot_and_resource_init();
         CHECK(t_stops.empty());
         CHECK(g_names.count("a-body:k1") == 0);

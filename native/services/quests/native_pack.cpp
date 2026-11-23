@@ -216,6 +216,16 @@ qb::ojson npcs_from_blocks(const std::string& mod, const std::vector<qb::ojson>&
             if (!n.is_object()) continue;
             Body b;
             const bool resolved = n.contains("body") && body_of(n["body"], &b);
+            // 16f: a model body without its animation or its motions is no authored roster body: the cook keeps such a legacy model on
+            // its eager path and Kiln.Blocks refuses the block (it says what is wrong). Only that NPC is left out, as before 16f.
+            if (b.own && resolved) {
+                const qb::ojson spec = qb::bodyadmit::resolve_spec(mod, n, body_blocks, animation_blocks, motion_blocks);
+                if (!spec.is_null() && (!spec["animation"].is_object() || !spec["motions"].is_object())) {
+                    KW("native: %s: npcs.%s: its body names a model but no %s: not an authored roster body, so this NPC is not built "
+                       "(Kiln.Blocks says what is wrong)", mod.c_str(), name.c_str(), spec["animation"].is_object() ? "motions" : "animation");
+                    continue;
+                }
+            }
             if (authored_body && (b.own || n.contains("motions"))) *authored_body = true;
             if (b.own && !resolved && body_refusal) {
                 if (body_refusal->empty()) *body_refusal = "npcs." + name + ".body: an authored roster body uses the Fisher/Villager chassis only";

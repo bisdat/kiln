@@ -302,6 +302,23 @@ void test_removed_when_no_native_mod_is_left() {
     CHECK(after.is_object() && after["bodies"].is_array() && after["bodies"].empty());
 }
 
+// Found by the 16f S6 lab (blocks-npc-test's refusal fixture): an NPC block whose body names a model but has no animation or no
+// motions is no authored roster body (the cook keeps such a legacy model on its eager path; Kiln.Blocks refuses the block). The
+// start leaves only that NPC out, as before 16f, and builds the rest of the mod's native pack.
+void test_an_incomplete_model_body_leaves_only_its_npc_out() {
+    body_reset("16f S6: an NPC whose body names a model but no animation or motions leaves only itself out");
+    mod("a-legacy", kGood);
+    write(t_root / "mods/a-legacy/blocks/npc.json",
+          R"({"npcs":{"nobody":{"name":"Nobody","body":"stone"},"keeper":{"name":"Keeper","body":"villager"}},)"
+          R"("bodies":{"stone":{"model":"models/stone.glb","scale":1.4}}})");
+    boot_and_resource_init();
+    CHECK(t_stops.empty());
+    CHECK(g_names.count("a-legacy:k1") == 1);
+    CHECK(owns_layers("a-legacy"));
+    CHECK(kiln::qb::ojson::parse(g_manifest)["bodies"].empty());
+    CHECK(logged("a-legacy: npcs.nobody"));
+}
+
 void test_refusals_leave_the_neighbour() {
     struct Case { const char* name; std::function<void()> arrange; const char* says; };
     const std::vector<Case> cases{
@@ -358,6 +375,7 @@ int main(int argc, char** argv) {
     test_status_rows_and_removal();
     test_a_damaged_ledger_is_named_and_written_anew();
     test_removed_when_no_native_mod_is_left();
+    test_an_incomplete_model_body_leaves_only_its_npc_out();
     std::error_code ec;
     fs::remove_all(t_root, ec);
     std::printf("body native: %d checks, %d failed\n", g_checks, g_failures);
