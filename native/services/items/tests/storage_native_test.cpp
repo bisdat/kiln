@@ -2,6 +2,7 @@
 // Windows SEH and the actual engine adapter with a fake ECS; never starts or loads the game.
 #include "../storage.cpp"
 #include "../storage_engine.cpp"
+#include "fake_types.h"
 #include <cstdio>
 #include <malloc.h>
 #include <map>
@@ -838,6 +839,277 @@ void init_caps_test() {
     CHECK(std::count(caps_reported.begin(), caps_reported.end(), "items.storage.client") == 0);
     fake_caps = {};
 }
+
+// ---- The client inventory guard at storage_ready (kiln#135) ----
+// A catalog shaped like both approved builds' PlayerInput: the nine inventory-addressed actions with their versionData,
+// their refs and their consumed versions, plus members that are not actions (an enum with two values, a bitmask
+// typedef, a bool) between them, as ClientPlayerInputData has.
+const char* const kGuarded[]{"inventoryTransferAction", "sortInventoryAction",   "areaDepositPermissionAction",
+                             "upgradeStorageAction",    "changeEquipmentAction", "swapEquipmentSetAction",
+                             "itemAction",              "weaponGemAction",       "playerCraftingAction"};
+std::string consumed_name(const std::string& action) {
+    std::string c = "consumed" + action;
+    c[8] = static_cast<char>(c[8] - 32);
+    return c;
+}
+void guard_catalog(fake_types::Catalog& c, const char* drop_action = nullptr, const char* drop_consumed = nullptr) {
+    c.add("keen::uint8", 1, KILN_TYPE_U8);
+    c.add("keen::uint32", 4, KILN_TYPE_U32);
+    c.add("keen::Time", 8, KILN_TYPE_U64);
+    c.add("keen::bool", 1, KILN_TYPE_BOOL);
+    c.add("keen::ecs::DirectionalInputMode", 1, KILN_TYPE_ENUM, 2); // two values, no fields
+    c.add("keen::ecs::ClientPlayerStateMask", 2, KILN_TYPE_TYPEDEF);
+    c.add_struct("keen::VersionedData", 4, {{"version", "keen::uint32", 0}});
+    c.add_struct("keen::ecs::EntityId", 4, {{"id", "keen::uint32", 0}});
+    c.add_struct("keen::InventorySlotId", 8, {{"entityId", "keen::ecs::EntityId", 0}, {"slotIndex", "keen::uint32", 4}});
+    std::vector<fake_types::Field> group, used;
+    uint64_t at = 0;
+    for (const char* name : kGuarded) {
+        const std::string type = std::string("keen::ecs::T_") + name;
+        c.add_struct(type, 16,
+                     {{"versionData", "keen::VersionedData", 0},
+                      {"targetEntityId", "keen::ecs::EntityId", 4},
+                      {"slotId", "keen::InventorySlotId", 8}});
+        if (!drop_action || std::strcmp(drop_action, name))
+            group.push_back({name, type, at});
+        if (!drop_consumed || std::strcmp(drop_consumed, name))
+            used.push_back({consumed_name(name), "keen::VersionedData", 4 * used.size()});
+        at += 16;
+        if (!std::strcmp(name, "sortInventoryAction")) { // non-actions between the actions
+            group.push_back({"movementStickInputMode", "keen::ecs::DirectionalInputMode", at});
+            group.push_back({"mask", "keen::ecs::ClientPlayerStateMask", at + 2});
+            group.push_back({"isRespawnChargedFully", "keen::bool", at + 4});
+            at += 8;
+        }
+    }
+    c.add_struct("keen::ecs::ClientPlayerInputData", static_cast<uint32_t>(at), group);
+    c.add_struct("keen::ecs::PlayerInput", static_cast<uint32_t>(at + 8),
+                 {{"serverTime", "keen::Time", 0}, {"fromClient", "keen::ecs::ClientPlayerInputData", 8}});
+    c.add_struct("keen::ecs::ServerConsumedPlayerInput", static_cast<uint32_t>(4 * used.size()), used);
+}
+// DeliverEvents' first bytes on both approved builds, and what a Kiln detour (another owner's raw link) leaves there.
+uint8_t deliver_code[32]{0x40, 0x56, 0x41, 0x55, 0x41, 0x56, 0x48, 0x83, 0xec, 0x40, 0x48, 0x8b, 0x31, 0x45, 0x33, 0xed};
+uint8_t deliver_file[32]{0x40, 0x56, 0x41, 0x55, 0x41, 0x56, 0x48, 0x83, 0xec, 0x40, 0x48, 0x8b, 0x31, 0x45, 0x33, 0xed};
+bool client_hold = true, deliver_known = true;
+uint32_t deliver_state = KILN_CODE_MANAGED;
+KilnResult detour_rc = KILN_OK;
+unsigned detours = 0, continued = 0;
+uintptr_t detour_target = 0;
+std::string detour_label;
+void* detour_fn = nullptr;
+uintptr_t __fastcall deliver_next(uintptr_t a, uintptr_t, uintptr_t, uintptr_t) {
+    ++continued;
+    return a + 1;
+}
+KilnResult KILN_CALL guard_symbol(KilnStr name, uintptr_t* out) {
+    if (!deliver_known || std::string(name.ptr, name.len) != "gameplay/DeliverEvents")
+        return KILN_ERR_NOT_FOUND;
+    *out = reinterpret_cast<uintptr_t>(deliver_code);
+    return KILN_OK;
+}
+bool KILN_CALL guard_feature(KilnStr name) {
+    return client_hold && std::string(name.ptr, name.len) == "players.client_action_hold";
+}
+KilnResult KILN_CALL guard_code_state(uintptr_t at, size_t n, uint32_t* state, uint64_t* generation) {
+    CHECK(at == reinterpret_cast<uintptr_t>(deliver_code) && n == 16);
+    *state = deliver_state;
+    *generation = 1;
+    return KILN_OK;
+}
+KilnResult KILN_CALL guard_read(uintptr_t at, void* out, size_t n) {
+    std::memcpy(out, reinterpret_cast<const void*>(at), n);
+    return KILN_OK;
+}
+KilnResult KILN_CALL guard_read_original(uintptr_t at, void* out, size_t n) {
+    std::memcpy(out, deliver_file + (at - reinterpret_cast<uintptr_t>(deliver_code)), n);
+    return KILN_OK;
+}
+KilnResult KILN_CALL guard_raw_detour(KilnOwner, uintptr_t target, const KilnHookOrder* order, void* fn,
+                                      void** original, KilnHandle* out) {
+    ++detours;
+    detour_target = target;
+    detour_label = order && order->label.ptr ? std::string(order->label.ptr, order->label.len) : std::string();
+    detour_fn = fn;
+    if (detour_rc != KILN_OK)
+        return detour_rc;
+    *original = reinterpret_cast<void*>(&deliver_next);
+    *out = 77;
+    return KILN_OK;
+}
+KilnResult KILN_CALL guard_retiring(KilnOwner, KilnOwnerRetiringFn, void*, KilnHandle* out) {
+    *out = 5;
+    return KILN_OK;
+}
+void unused_member() {}
+template <class T> void set(T& member) { member = reinterpret_cast<T>(&unused_member); }
+KilnWorldApi guard_world{};
+KilnTypesApi guard_types{};
+KilnPlayersApi guard_players{};
+KilnSavesApi guard_saves{};
+KilnHooksApi guard_hooks{};
+std::vector<std::pair<std::string, std::string>> guard_caps; // name, text
+KilnResult KILN_CALL guard_report(KilnOwner, KilnStr name, uint32_t, uint32_t, KilnStr text) {
+    guard_caps.emplace_back(std::string(name.ptr, name.len), std::string(text.ptr, text.len));
+    return KILN_OK;
+}
+const void* KILN_CALL guard_service(KilnStr n, uint32_t) {
+    const std::string name(n.ptr, n.len);
+    if (name == KILN_WORLD_SERVICE)
+        return &guard_world;
+    if (name == KILN_TYPES_SERVICE)
+        return &guard_types;
+    if (name == KILN_PLAYERS_SERVICE)
+        return &guard_players;
+    if (name == KILN_SAVES_SERVICE)
+        return &guard_saves;
+    if (name == KILN_HOOKS_SERVICE)
+        return &guard_hooks;
+    if (name == KILN_CAPS_SERVICE)
+        return &fake_caps;
+    return nullptr;
+}
+// One storage_ready from a storage that storage_init enabled; the detail it leaves.
+std::string run_ready(fake_types::Catalog& catalog) {
+    guard_types = fake_types::api(&catalog);
+    set(guard_types.in_system_callback);
+    guard_types.header.size = sizeof guard_types;
+    kitems::enabled = true;
+    kitems::detail = "waiting for services";
+    kitems::reason = KILN_CAP_REASON_NONE;
+    kitems::client_actions.clear();
+    detours = 0;
+    guard_caps.clear();
+    kitems::storage_ready();
+    return kitems::detail;
+}
+bool has(const std::string& text, const char* part) { return text.find(part) != std::string::npos; }
+void guard_ready_tests() {
+    using namespace kitems;
+    const auto saved_api = fake_api;
+    const auto saved_caps = fake_caps;
+    fake_api.service = &guard_service;
+    fake_api.symbol = &guard_symbol;
+    fake_api.feature = &guard_feature;
+    fake_caps.header = {sizeof fake_caps, 1};
+    fake_caps.report = &guard_report;
+    guard_world.header = {sizeof guard_world, 1};
+    set(guard_world.in_program);
+    set(guard_world.game_program_find);
+    set(guard_world.game_program_list);
+    set(guard_world.game_program_wrap);
+    set(guard_world.game_wrap_info);
+    guard_players.header = {sizeof guard_players, 1};
+    set(guard_players.get);
+    set(guard_players.status);
+    guard_saves.header = {sizeof guard_saves, 1};
+    set(guard_saves.next_event);
+    guard_hooks.header = {sizeof guard_hooks, 2};
+    guard_hooks.subscribe_owner_retiring = &guard_retiring;
+    guard_hooks.code_state = &guard_code_state;
+    guard_hooks.read = &guard_read;
+    guard_hooks.read_original = &guard_read_original;
+    guard_hooks.raw_detour = &guard_raw_detour;
+    // Another Kiln owner (kiln-players) raw-linked DeliverEvents first: its bytes are the registry's detour.
+    const uint8_t kiln_detour[6]{0xe9, 0x10, 0x20, 0x30, 0x40, 0x90};
+    std::memcpy(deliver_code, kiln_detour, sizeof kiln_detour);
+
+    // 1. Both builds' layout (non-action members between the actions) with DeliverEvents already in Kiln's registry:
+    //    the guard joins that chain and storage is ready.
+    {
+        fake_types::Catalog c;
+        guard_catalog(c);
+        const auto why = run_ready(c);
+        CHECK(kitems::enabled && detours == 1 && detour_target == reinterpret_cast<uintptr_t>(deliver_code) &&
+              detour_label == "items/StorageClientGuard");
+        CHECK(kitems::client_actions.size() == 9 && kitems::input_size == c.find("keen::ecs::PlayerInput")->size &&
+              kitems::consumed_size == 36);
+        if (!kitems::enabled)
+            std::printf("  storage_ready left: %s\n", why.c_str());
+        // kiln-shroudlink hooks DeliverEvents later, in front of the registry's detour: nothing checks again, and the
+        // chain still reaches the rest of the chain (and the game) through the guard.
+        deliver_state = KILN_CODE_FOREIGN;
+        continued = 0;
+        if (detour_fn) {
+            auto guard = reinterpret_cast<uintptr_t(__fastcall*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t)>(detour_fn);
+            CHECK(guard(41, 0, 0, 0) == 42 && continued == 1 && kitems::enabled);
+        } else
+            CHECK(detour_fn != nullptr);
+        deliver_state = KILN_CODE_MANAGED;
+    }
+    // 2. Each refusal says which check failed; the caps reason stays symbol-missing.
+    const char* prefix = "items.storage: client inventory guard is unavailable: ";
+    {
+        fake_types::Catalog c;
+        guard_catalog(c);
+        client_hold = false;
+        const auto why = run_ready(c);
+        client_hold = true;
+        CHECK(!kitems::enabled && detours == 0 && kitems::reason == KILN_CAP_REASON_SYMBOL_MISSING &&
+              why == std::string(prefix) + "sigdb feature players.client_action_hold is off on this build");
+        CHECK(!guard_caps.empty() && guard_caps.back().first == "items.storage" && guard_caps.back().second == why);
+    }
+    {
+        fake_types::Catalog c;
+        guard_catalog(c);
+        deliver_known = false;
+        const auto why = run_ready(c);
+        deliver_known = true;
+        CHECK(!kitems::enabled && detours == 0 && why == std::string(prefix) + "symbol missing: gameplay/DeliverEvents");
+    }
+    {
+        // Another module hooked DeliverEvents before the guard: refused, with the bytes Kiln saw.
+        fake_types::Catalog c;
+        guard_catalog(c);
+        deliver_state = KILN_CODE_FOREIGN;
+        const auto why = run_ready(c);
+        deliver_state = KILN_CODE_MANAGED;
+        CHECK(!kitems::enabled && detours == 0 && has(why, prefix) && has(why, "gameplay/DeliverEvents") &&
+              has(why, "outside Kiln's hook registry") && has(why, "live e9 10 20 30 40 90 48 83") &&
+              has(why, "file 40 56 41 55 41 56 48 83"));
+        std::printf("  foreign: %s\n", why.c_str());
+    }
+    {
+        fake_types::Catalog c;
+        guard_catalog(c);
+        deliver_state = KILN_CODE_UNKNOWN;
+        const auto why = run_ready(c);
+        deliver_state = KILN_CODE_MANAGED;
+        CHECK(!kitems::enabled && detours == 0 && has(why, "gameplay/DeliverEvents") && has(why, "could not be read"));
+    }
+    {
+        fake_types::Catalog c;
+        guard_catalog(c, "itemAction");
+        const auto why = run_ready(c);
+        CHECK(!kitems::enabled && detours == 0 && has(why, prefix) &&
+              has(why, "PlayerInput.fromClient has no itemAction"));
+    }
+    {
+        fake_types::Catalog c;
+        guard_catalog(c, nullptr, "weaponGemAction");
+        const auto why = run_ready(c);
+        CHECK(!kitems::enabled && detours == 0 && has(why, "weaponGemAction") &&
+              has(why, "no consumedWeaponGemAction in ServerConsumedPlayerInput"));
+    }
+    {
+        fake_types::Catalog c;
+        guard_catalog(c);
+        detour_rc = KILN_ERR_UNAVAILABLE;
+        const auto why = run_ready(c);
+        detour_rc = KILN_OK;
+        CHECK(!kitems::enabled && detours == 1 && has(why, "gameplay/DeliverEvents") &&
+              has(why, "raw_detour returned 3 (unavailable"));
+        std::printf("  install: %s\n", why.c_str());
+    }
+    fake_api = saved_api;
+    fake_caps = saved_caps;
+    kitems::world_api = nullptr;
+    kitems::types_api = nullptr;
+    kitems::players_api = nullptr;
+    kitems::saves_api = nullptr;
+    kitems::client_actions.clear();
+    kitems::enabled = true;
+    fake_types::current = nullptr;
+}
 } // namespace
 int main() {
     using namespace kitems;
@@ -1013,6 +1285,7 @@ int main() {
     service_tests();
     review_tests();
     leave_timeout_tests();
+    guard_ready_tests();
     init_caps_test(); // last: storage_init replaces the structural gate the tests above use
     std::printf("storage native: %d checks, %d failed\n", checks, failed);
     return failed ? 1 : 0;
