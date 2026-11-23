@@ -590,4 +590,60 @@ public sealed class ProtocolTests
         rig.Advance(100, 100);
         Assert.Equal(CameraEndReasons.Expired, Assert.Single(rig.Ended).EndReason);
     }
+
+    private static byte[] HelloFrom(ulong nonce) =>
+        CameraWire.Hello(new HelloMessage(CameraWireAbi.Protocol, nonce, 3, 1001, CameraWireAbi.RemoteParts, CameraWireAbi.MaxKeys, CameraWireAbi.MaxBody));
+
+    [Fact]
+    public void A_new_client_world_rebinds_at_most_once_a_second_and_the_rest_change_nothing()
+    {
+        var rig = Bound();
+        rig.Client = rig.NewClient(0xBEEF, 4);   // a new client world: its rebind is taken at once
+        rig.Client.Start();
+        rig.Pump();
+        Assert.Equal(0xBEEFul, rig.Server.Binding.ClientNonce);
+        Assert.Equal(rig.Server.Binding, rig.Client.Binding);
+        rig.Submit(TransportOp.Apply, lease: 1000, request: Requests.Lens(durationMs: 60000));
+        rig.Tick();
+        Assert.True(Last(rig).Ok);
+        var binding = rig.Server.Binding;
+        var welcomes = rig.Count(CameraMessage.Welcome);
+        // a client churning Hellos with new nonces in the same second: no Welcome, no new token, the lease stays
+        for (ulong n = 1; n <= 50; n++) rig.Server.Receive(CameraMessage.Hello, HelloFrom(0xD000 + n));
+        Assert.Equal(binding, rig.Server.Binding);
+        Assert.Equal(welcomes, rig.Count(CameraMessage.Welcome));
+        Assert.Empty(rig.Ended);
+        rig.Now += 999;
+        rig.Server.Receive(CameraMessage.Hello, HelloFrom(0xE001));
+        Assert.Equal(binding, rig.Server.Binding);
+        Assert.Equal(welcomes, rig.Count(CameraMessage.Welcome));
+        rig.Now += 1;   // a second after the last rebind: the next one is taken
+        rig.Server.Receive(CameraMessage.Hello, HelloFrom(0xE002));
+        Assert.Equal(0xE002ul, rig.Server.Binding.ClientNonce);
+        Assert.NotEqual(binding.Token, rig.Server.Binding.Token);
+        Assert.Equal(welcomes + 1, rig.Count(CameraMessage.Welcome));
+        Assert.Contains(rig.Ended, e => e.Lease == 1000 && e.EndReason == CameraEndReasons.PeerDisconnected);
+        rig.Server.Receive(CameraMessage.Hello, HelloFrom(0xE003));
+        Assert.Equal(0xE002ul, rig.Server.Binding.ClientNonce);
+    }
+
+    [Fact]
+    public void A_repeated_Hello_gets_the_same_Welcome_at_most_once_a_second()
+    {
+        var rig = Bound();
+        var hello = rig.SentToServer.First(m => m.Id == CameraMessage.Hello).Body;
+        var welcome = rig.SentToClient.First(m => m.Id == CameraMessage.Welcome).Body;
+        var binding = rig.Server.Binding;
+        // the Welcome of the bind went out this millisecond: replays of the same Hello are not an amplifier
+        for (var i = 0; i < 50; i++) rig.Server.Receive(CameraMessage.Hello, hello);
+        Assert.Equal(1, rig.Count(CameraMessage.Welcome));
+        rig.Now += 999;
+        rig.Server.Receive(CameraMessage.Hello, hello);
+        Assert.Equal(1, rig.Count(CameraMessage.Welcome));
+        rig.Now += 1;
+        for (var i = 0; i < 50; i++) rig.Server.Receive(CameraMessage.Hello, hello);
+        Assert.Equal(2, rig.Count(CameraMessage.Welcome));
+        Assert.Equal(welcome, rig.SentToClient.Last(m => m.Id == CameraMessage.Welcome).Body);   // still idempotent: the same Welcome
+        Assert.Equal(binding, rig.Server.Binding);
+    }
 }
