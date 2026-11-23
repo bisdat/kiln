@@ -12,6 +12,8 @@ public sealed partial class PlayerStorageStoreTests
         public JsonObject? Restored, Parked;
         public bool ExtraPages;
         public string JoinWitness = "join";
+        public CharacterKey? InSlot;
+        public CharacterKey? CharacterOf(EntityId player) => InSlot;
         public bool ExtraMainPages(EntityId player) => ExtraPages;
         public StorageFreeze? Frozen = new("saved", PlayerStorageDocumentTests.Storages(1));
         public Dictionary<string, int> Definitions = new() { ["mod:bag"] = 8 };

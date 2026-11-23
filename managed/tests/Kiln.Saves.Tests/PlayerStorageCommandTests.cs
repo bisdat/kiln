@@ -48,6 +48,12 @@ public sealed partial class PlayerStorageStoreTests
             Assert.Equal([(new EntityId(7), "mod:bag", true)], released);
             Assert.Contains(release.Output, l => l.Contains("mod:bag") && l.Contains("backpack"));
 
+            // Hero left and another character now plays in that slot: a release by Hero's name must not touch it.
+            persist.InSlot = new CharacterKey(2, Guid.Parse("00000000-0000-4000-8000-000000000999"));
+            var stale = Commands.Execute(CommandSource.Console, "/playerstorage release Hero mod:bag");
+            Assert.False(stale.Ok);
+            Assert.Contains("not in game", stale.Error);
+            persist.InSlot = null;
             Assert.False(Commands.Execute(CommandSource.Console, "/playerstorage release Hero other:key").Ok);
             Assert.False(Commands.Execute(CommandSource.Console, "/playerstorage list Nobody").Ok);
             Assert.False(Commands.Execute(CommandSource.Console, "/playerstorage").Ok);
