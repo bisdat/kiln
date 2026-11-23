@@ -58,6 +58,7 @@ int main() {
     std::map<registry::EntryRef, registry::json> queued;
     in.define_entry = [&](const auto& ref, const auto& body, auto*) { queued[ref] = body; return true; };
     in.forget_entry = [&](const auto& ref) { queued.erase(ref); };
+    in.pin_definition = [](const auto&, const auto&, auto*) { return true; }; // isolated definition-binding fixture
     registry_entries_prepare(&in);
     entry_check(queued.size() == 2 && in.result.definitions.size() == 2, "both stable entries queue through the definition adapter");
     entry_check(queued.at({"recipes", "a:recipe"})["outputs"][0]["item"] == in.added_guid("items", "a:logs"), "recipe references bind a new item's stable GUID");
@@ -68,6 +69,7 @@ int main() {
         queued[ref] = body; return true;
     };
     in.forget_entry = [&](const auto& ref) { queued.erase(ref); };
+    in.pin_definition = [](const auto&, const auto&, auto*) { return true; }; // isolated definition-binding fixture
     registry_entries_prepare(&in);
     entry_check(queued.empty() && in.result.added.empty(), "definition failure refuses dependent recipes and forgets their unpublished definitions");
     entry_check(std::any_of(in.result.refused.begin(), in.result.refused.end(), [](const auto& r) { return r.registry == "recipes" && r.reason.find("injected item definition refusal") != std::string::npos; }), "definition failure root reaches dependent recipe refusal");
@@ -80,6 +82,17 @@ int main() {
     proof.build.rows["drops.entries[].chance"] = registry::map::BuildRow::Ok; refusals.clear();
     registry::refuse_unmapped_edits(proof, *in.schema, &removal, &refusals, true);
     entry_check(removal.edits.size() == 1 && refusals.empty(), "proven drop rows admit removal to the group-safety preflight");
+    world(); stage({}); registry_live_world_begin(); apply_registry_files({});
+    registry::json recorded;
+    g.in->entry_bodies[{"items", "game:material_t1_wood_logs"}] = {{"registryFields", {{"maxStack", 10}}}};
+    g.in->record_entry = [&](const auto&, const auto& fields) { recorded = fields; };
+    uint64_t handle = 0; RegistryLiveReply reply;
+    entry_check(registry_live_begin(91, "recorder", 4, &handle) == KILN_OK, "effective-record change begins");
+    registry_live_submit(91, handle, R"({"ir":1,"mod":"recorder","stage":"alter","edits":[{"registry":"items","select":"game:material_t1_wood_logs","field":"maxStack","op":77}]})", &reply, nullptr);
+    registry_live_commit(91, handle, &reply);
+    entry_check(recorded.is_object() && recorded.value("maxStack", 0) == 77, "definition export records actual effective values before a save");
+    registry_live_revert(91, handle, &reply);
+    entry_check(recorded.is_object() && recorded.value("maxStack", 0) == 10, "reverting a world layer restores the recorded baseline rather than retaining stale effective values");
     std::printf("registry-entry-binding-test: %d checks, %d failed\n", entry_checks, failures);
     return failures ? 1 : 0;
 }

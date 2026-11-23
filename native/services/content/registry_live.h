@@ -55,6 +55,8 @@ struct RegistryLive {
     std::function<std::string(const std::string& registry, const std::string& kiln_id)> added_guid;
     // Internal entry backend. Preparation is GameStart-only; native definitions are retained until restart.
     std::function<bool(const registry::EntryRef&, const registry::json&, std::string*)> define_entry;
+    std::function<bool(const registry::EntryRef&, const registry::json&, std::string*)> pin_definition;
+    std::function<void(const registry::EntryRef&, const registry::json&)> record_entry;
     std::function<void(const registry::EntryRef&)> forget_entry;
     std::map<registry::EntryRef, registry::json> entry_bodies;
     // registry.json (S11 writes it): a world load or pack reload passes true for a new application.

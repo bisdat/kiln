@@ -24,6 +24,7 @@
 #include "../../../core/src/owners_internal.h"
 #include "kiln_boot_collector.hpp"
 #include "pristine.h"
+#include "entry_compat.h"
 #include "services/kiln_assets.h"
 #include "services/kiln_caps.h"
 #include "services/kiln_launch.h"
@@ -104,6 +105,33 @@ std::optional<std::string> read_whole(const fs::path& p) {
     return std::string((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
 }
 fs::path data_root() { return u8(data_dir()) / u8"content" / u8"registry"; }
+
+// Install-wide compatibility, deliberately outside the per-build cache tree and every save directory.
+bool pin_definition(const EntryRef& ref, const json& body, std::string* why) {
+    const auto directory = u8(data_dir()) / u8"registry";
+    const auto file = directory / u8"entry-compat.json";
+    std::error_code ec; fs::create_directories(directory, ec);
+    if (ec) return *why = "entry compatibility directory is unavailable; this entry was refused", false;
+    const auto lock_file = directory / u8"entry-compat.lock";
+    const HANDLE handle = CreateFileW(lock_file.wstring().c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (handle == INVALID_HANDLE_VALUE) return *why = "entry compatibility record is locked or unavailable; this entry was refused", false;
+    struct Close { HANDLE handle; ~Close() { CloseHandle(handle); } } close{handle};
+    const bool exists = fs::exists(file, ec);
+    if (ec || (exists && fs::file_size(file, ec) > 32u * 1024 * 1024) || ec)
+        return *why = "entry compatibility record is unreadable or oversized; this entry was refused", false;
+    const auto stored = exists ? read_whole(file) : std::optional<std::string>{};
+    if (exists && !stored) return *why = "entry compatibility record is unreadable; this entry was refused", false;
+    auto write = [&](const std::string& text) {
+        auto temporary = file; temporary += u8".tmp";
+        std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
+        stream.write(text.data(), static_cast<std::streamsize>(text.size())); stream.flush(); stream.close();
+        const bool ok = stream && MoveFileExW(temporary.wstring().c_str(), file.wstring().c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
+        if (!ok) fs::remove(temporary, ec);
+        return ok;
+    };
+    return registry::pin_entry(stored, ref.id.substr(0, ref.id.find(':')), ref.id, ref.registry,
+                               body.value("guid", ""), body.value("base", ""), write, why);
+}
 
 std::string version_of(const fs::path& dir) {
     const auto text = read_whole(dir / L"kiln.mod.json");

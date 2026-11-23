@@ -4241,6 +4241,19 @@ extern "C" __declspec(dllexport) void kc_nc_set_texts(uint32_t tag, const char* 
     if (tag && json && len) set_texts(tag, cm_texts(std::string(json, len)));
 }
 
+void nc_registry_record(uint32_t kind, const std::string& id, const std::string& fields_json) {
+    std::lock_guard lock(store_mutex());
+    const auto fields = json::parse(fields_json, nullptr, false);
+    if (!fields.is_object()) return;
+    for (const auto& definition : g_defs) {
+        if (definition->kind != kind || definition->registry_id != id) continue;
+        if (definition->body["registryFields"] == fields) continue;
+        // The constructor's registry_fields stays the GameStart baseline. Only the exported/save record follows live values.
+        definition->body["registryFields"] = fields;
+        definition->listed.clear();
+    }
+}
+
 bool nc_registry_supports(const std::string& registry, bool add, std::string* why) {
     const bool client = g_api && g_api->side() == KILN_SIDE_CLIENT;
     if (!N.on || !layouts()) return *why = "content definitions are unavailable on this build", false;

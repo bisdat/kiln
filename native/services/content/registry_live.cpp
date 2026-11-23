@@ -928,6 +928,12 @@ void report(bool application = true) {
     g.tables_changed = false;
     registry::Result r = g.in->result;
     for (const auto& [ref, field] : g.fields) live_row(r, ref, field);
+    if (g.world && g.in->record_entry) for (const auto& [entry, body] : g.in->entry_bodies) {
+        auto fields = body.value("registryFields", registry::json::object());
+        for (auto it = r.fields.lower_bound({entry.registry, entry.id, ""}); it != r.fields.end() && it->first.registry == entry.registry && it->first.id == entry.id; ++it)
+            if (!registry::is_raw_field(it->first.field) && fields.contains(it->first.field)) fields[it->first.field] = it->second.result.to_json();
+        g.in->record_entry(entry, fields);
+    }
     const size_t first = r.refused.size();
     for (const registry::Refusal& x : g.refused) r.refused.push_back(x);
     const size_t live_end = r.refused.size();

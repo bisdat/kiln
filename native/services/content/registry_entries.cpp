@@ -115,6 +115,8 @@ void registry_entries_prepare(RegistryLive* target) {
             std::string why;
             auto body = registry_entry_definition(ref, definition, in, &why);
             if (body.is_null()) failures[ref] = why;
+            else if (!in.pin_definition || !in.pin_definition(ref, body, &why))
+                failures[ref] = why.empty() ? "entry compatibility storage is unavailable" : why;
             else bodies[ref] = std::move(body);
         }
         if (failures.empty()) {

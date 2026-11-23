@@ -444,6 +444,7 @@ namespace registry { struct Visibility; }
 bool nc_registry_supports(const std::string& registry, bool add, std::string* why);
 void nc_registry_visibility(std::shared_ptr<const registry::Visibility> visibility);
 bool nc_registry_apply_visibility(std::string* why); // store held, active world's thread
+void nc_registry_record(uint32_t kind, const std::string& id, const std::string& fields_json); // copied effective placeholder/sync values
 void nc_world_ready(uintptr_t world, uint32_t kind);  // try_ready: the active world's registries just loaded
 void nc_world_stopping(uintptr_t world);          // world_reset, before the store is reset (world intact)
 void nc_packs_begin();                            // apply_packs, before apply_all_packs

@@ -39,6 +39,7 @@ internal static unsafe class MissingContent
     private static int _lastCount = -1;
     private static string? _world;
     private static readonly List<string> _placed = new();
+    private static EventSubscription? _saving;
 
     /// <summary>Placeholders registered at the last world load ("mod:item (0x...)").</summary>
     public static IReadOnlyList<string> Placed => _placed;
@@ -63,7 +64,18 @@ internal static unsafe class MissingContent
         {
             Log(LogLevel.Warn, $"no owner for placeholders: {e.Message}");
         }
+        AsKiln(() => _saving ??= Events.On<WorldSavingEvent>(_ => Snapshot(), EventPriority.Lowest));
         return true;
+    }
+
+    private static void Snapshot()
+    {
+        try
+        {
+            if (_ctx is null || !HasServerWorld || !Saves.WorldDataReady || Saves.WorldId != _world) return;
+            Update(AsKiln(() => WorldData.Get<Record>(Key)), NewContent.Definitions());
+        }
+        catch (Exception e) { Log(LogLevel.Warn, $"save record update failed: {e.Message}"); }
     }
 
     /// <summary>Runs <paramref name="fn"/> with WorldData scoped to Kiln's own bundle (tick thread).</summary>
@@ -195,8 +207,23 @@ internal static unsafe class MissingContent
             Log(LogLevel.Warn, $"{seen.Name} ({guid}): the recorded definition is unreadable ({e.Message}); its stacks are lost at load");
             return;
         }
+        var ph = Placeholder(guid, seen, body);
+        var label = (string?)body["registryId"] ?? $"{seen.Mod ?? "?"}:{seen.Name}";
+        try
+        {
+            var d = NewContent.Define(ContentKind.Items, ph, _owner);
+            _placed.Add($"{label} (0x{d.Id:x8})");
+        }
+        catch (Exception e)
+        {
+            Log(LogLevel.Warn, $"{label} ({guid}): no placeholder: {e.Message}");
+        }
+    }
+
+    internal static JsonObject Placeholder(Guid guid, SeenItem seen, JsonObject body)
+    {
         var mod = seen.Mod ?? "?";
-        var label = $"{mod}:{seen.Name}";
+        var label = (string?)body["registryId"] ?? $"{mod}:{seen.Name}";
         var ph = new JsonObject
         {
             ["guid"] = guid.ToString("D"),
@@ -207,18 +234,10 @@ internal static unsafe class MissingContent
                               "It is kept so that nothing is lost: install the mod again and it is back.",
             ["placeholder"] = new JsonObject { ["mod"] = mod, ["item"] = seen.Name, ["displayName"] = seen.DisplayName },
         };
-        foreach (var k in new[] { "fields", "model", "visual", "perks", "weaponType", "impact", "program", "animation", "collectionModel", "iconModel", "refs" })
+        foreach (var k in new[] { "fields", "model", "visual", "perks", "weaponType", "impact", "program", "animation", "collectionModel", "iconModel", "refs", "registryId", "registryKind", "registryFields" })
             if (body[k] is { } v) ph[k] = v.DeepClone();
         if (body["icon"] is JsonValue iv && iv.TryGetValue<string>(out var icon) && !icon.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
             ph["icon"] = icon;
-        try
-        {
-            var d = NewContent.Define(ContentKind.Items, ph, _owner);
-            _placed.Add($"{label} (0x{d.Id:x8})");
-        }
-        catch (Exception e)
-        {
-            Log(LogLevel.Warn, $"{label} ({guid}): no placeholder: {e.Message}");
-        }
+        return ph;
     }
 }
