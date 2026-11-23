@@ -3,16 +3,18 @@
 // the active (not abandoned) base zones from BuildZoneSystem: entries {BaseId[16], float3 min, pad, float3 max, pad},
 // 0x30 bytes, in a game array {data, count, capacity, grow}. Three places in the game call it (docs/re/build.md §12):
 //  - the world save, which writes one base record per entry: its BaseId, its bounds, the stored 32-cell chunks whose 16 m
-//    box touches the bounds (whole) and the water inside them. The loader applies every record it finds, base or not;
-//    the world list counts the records as Flame Altars;
+//    box touches the bounds, of each only the 4 m blocks (8 cells a side) that touch them too (the rest written empty:
+//    it regrows), and the water inside them. The loader applies every record it finds, base or not; the world list
+//    counts the records as Flame Altars;
 //  - the step that publishes the base zones to the ECS when BuildZoneSystem changed: the base areas the game's systems
 //    group stations, storage and beds by, and every client receives;
 //  - an ECS callback that asks which entities stand inside a base.
 // Kiln remembers the 16 m chunks its own writes touched (kiln/data/kiln.build/regions/<world GUID>.json, written
 // atomically when it changes). Into the world save's list only, after the game's own entries, it appends boxes for the
-// kept chunks that no entry of that same list touches, so the save keeps Kiln's edits outside bases too, without a box
-// (and a Flame Altar in the world list) for chunks a base saves already. The other two callers get the game's list as
-// its builder wrote it. Thanks bisdat (kiln#136) for the covered-chunk filter and its bounds checks.
+// kept chunks the entries of that same list do not save whole (every 4 m block), so the save keeps Kiln's edits outside
+// bases too, without a box (and a Flame Altar in the world list) for chunks a base saves already. The other two callers
+// get the game's list as its builder wrote it. Thanks bisdat (kiln#136) for the covered-chunk filter and its bounds
+// checks.
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -46,6 +48,9 @@ bool regions_lifecycle_safe();
 namespace {
 
 constexpr int kChunk = 32;              // cells per store chunk edge (16 m)
+constexpr int kBlock = 8;               // cells per edge of the blocks the save keeps or drops (4 m)
+constexpr int kBlocks = kChunk / kBlock;  // blocks per chunk edge: 4, 64 blocks per chunk
+constexpr uint64_t kWholeChunk = ~uint64_t{0};
 constexpr size_t kEntry = 0x30;         // one entry of the game's region list
 constexpr uint64_t kMaxGameEntries = 256;  // far more than the game's base limit: a larger list is not read
 
@@ -58,8 +63,8 @@ struct RegionBounds {
     float lo[3], hi[3];
 };
 struct RegionCoverage {
-    size_t overlaps_base = 0;
-    size_t outside_bases = 0;
+    size_t overlaps_base = 0;  // kept chunks the entries save whole
+    size_t outside_bases = 0;  // kept chunks they save in part or not at all: Kiln's boxes
 };
 bool valid_region(const RegionBounds& b) {
     for (int axis = 0; axis < 3; ++axis)
@@ -67,8 +72,8 @@ bool valid_region(const RegionBounds& b) {
             return false;
     return true;
 }
-// The serializer's own rule (docs/re/build.md §12): a stored chunk goes, whole, into the blob of every entry its 16 m box
-// [16c, 16c + 16] touches, edges included.
+// The serializer's own rule (docs/re/build.md §12), first step: a stored chunk goes into the blob of every entry its 16 m
+// box [16c, 16c + 16] touches, edges included.
 bool chunk_touches_region(const std::array<int32_t, 3>& chunk, const RegionBounds& region) {
     if (!valid_region(region)) return false;
     constexpr double metres_per_chunk = 0.5 * kChunk;
@@ -79,16 +84,45 @@ bool chunk_touches_region(const std::array<int32_t, 3>& chunk, const RegionBound
     }
     return true;
 }
-// The kept chunks no game entry saves. They stay in g_chunks and the JSON either way: a base can move, shrink, be
-// abandoned or go, and the next save then needs Kiln's boxes for them again.
+// Second step: of such a chunk, only the 4 m blocks whose own box touches the entry's bounds (edges included) keep their
+// cells in that blob; the others are written empty, and the loader leaves an empty block as the world generates it. Bit
+// x + 4y + 16z for block (x, y, z), as the serializer walks them. The values are whole metres and the entry's floats,
+// so these comparisons in double give the game's float results.
+uint64_t blocks_saved_by(const std::array<int32_t, 3>& chunk, const RegionBounds& region) {
+    if (!chunk_touches_region(chunk, region)) return 0;
+    constexpr double metres_per_block = 0.5 * kBlock;
+    unsigned touched[3] = {};  // per axis: the block rows that touch the bounds
+    for (int axis = 0; axis < 3; ++axis) {
+        const double first = static_cast<double>(chunk[axis]) * (0.5 * kChunk);
+        for (int i = 0; i < kBlocks; ++i) {
+            const double lo = first + i * metres_per_block, hi = lo + metres_per_block;
+            if (lo <= region.hi[axis] && region.lo[axis] <= hi) touched[axis] |= 1u << i;
+        }
+    }
+    uint64_t saved = 0;
+    for (int z = 0; z < kBlocks; ++z)
+        for (int y = 0; y < kBlocks; ++y)
+            for (int x = 0; x < kBlocks; ++x)
+                if ((touched[0] >> x & 1) && (touched[1] >> y & 1) && (touched[2] >> z & 1))
+                    saved |= uint64_t{1} << (x + kBlocks * y + kBlocks * kBlocks * z);
+    return saved;
+}
+// Every block of the chunk is in the blob of some entry: the loader applies each blob's blocks and skips its empty ones,
+// so blocks two bases save between them count too.
+bool chunk_saved_whole(const std::array<int32_t, 3>& chunk, const std::vector<RegionBounds>& native) {
+    uint64_t saved = 0;
+    for (const RegionBounds& b : native)
+        if ((saved |= blocks_saved_by(chunk, b)) == kWholeChunk) return true;
+    return false;
+}
+// The kept chunks the game's entries do not save whole: those outside every base, and those on a base's edge that reach
+// outside it (Kiln knows only which 16 m chunks its edits touched, not where in them). They stay in g_chunks and the
+// JSON either way: a base can move, shrink, be abandoned or go, and the next save then needs Kiln's boxes for them again.
 using ChunkSet = std::set<std::array<int32_t, 3>>;
 ChunkSet chunks_outside_regions(const ChunkSet& chunks, const std::vector<RegionBounds>& native) {
     ChunkSet outside;
-    for (const auto& chunk : chunks) {
-        if (!std::any_of(native.begin(), native.end(),
-                         [&](const RegionBounds& b) { return chunk_touches_region(chunk, b); }))
-            outside.insert(chunk);
-    }
+    for (const auto& chunk : chunks)
+        if (!chunk_saved_whole(chunk, native)) outside.insert(chunk);
     return outside;
 }
 RegionCoverage classify_chunks(const ChunkSet& chunks, const std::vector<RegionBounds>& native) {
@@ -133,7 +167,7 @@ std::atomic<bool> g_unknown_told{false}, g_header_told{false};
 // What one save needs from Kiln, and the last one logged (under g_mu).
 struct SavePlan {
     std::vector<Box> boxes;
-    size_t kept = 0, covered = 0;  // kept chunks; those a game entry of the same list saves already
+    size_t kept = 0, covered = 0;  // kept chunks; those the game's entries of the same list save whole already
     bool bounds = false;           // false: the game's entries could not be read, every kept chunk has a box
 };
 struct LoggedPlan {
@@ -326,8 +360,8 @@ std::vector<Box> boxes_locked() { return boxes_for_chunks(g_chunks); }
 bool same_bounds(const std::vector<RegionBounds>& a, const std::vector<RegionBounds>& b) {
     return a.size() == b.size() && (a.empty() || std::memcmp(a.data(), b.data(), a.size() * sizeof(RegionBounds)) == 0);
 }
-// The boxes this save needs: over the kept chunks no game entry touches, or over every kept chunk when the entries could
-// not be read (`native` null). Kept until the chunk set or the entries' bounds change.
+// The boxes this save needs: over the kept chunks the game's entries do not save whole, or over every kept chunk when the
+// entries could not be read (`native` null). Kept until the chunk set or the entries' bounds change.
 const SavePlan& plan_locked(const std::vector<RegionBounds>* native) {
     const bool bounds = native != nullptr;
     if (g_boxes_stale || !g_plan.valid || g_plan.bounds != bounds || (bounds && !same_bounds(g_plan.native, *native))) {
@@ -438,7 +472,8 @@ bool read_game_entries(const GameArray& head, std::vector<RegionBounds>* out) {
 }
 
 // After the game's builder returned `r` and `list`: into the world save's list (or a caller Kiln does not know), after
-// the game's entries, Kiln's boxes for the kept chunks no game entry saves. Lists for anyone else stay untouched.
+// the game's entries, Kiln's boxes for the kept chunks the game's entries do not save whole. Lists for anyone else stay
+// untouched.
 void after_save_regions(uintptr_t ret, const uint8_t* r, GameArray* list, const CallSites& sites) {
     const Caller kind = classify_caller(ret, sites);
     if (!kiln_boxes_for(kind)) return;
@@ -490,16 +525,16 @@ void after_save_regions(uintptr_t ret, const uint8_t* r, GameArray* list, const 
     }
     if (!tell) return;
     if (c.added < boxes.size())
-        KB_W("save regions: the game's list took only %u of %zu Kiln box(es); %llu kept chunk(s) outside its %llu base "
-             "region(s) may not be in this save", c.added, boxes.size(),
+        KB_W("save regions: the game's list took only %u of %zu Kiln box(es); %llu kept chunk(s) its %llu base "
+             "region(s) do not save whole may not be in this save", c.added, boxes.size(),
              static_cast<unsigned long long>(now.kept - now.covered), static_cast<unsigned long long>(head.count));
     else if (!now.bounds)
         KB_I("save regions: the game's save now writes %u Kiln box(es) for all %llu kept chunk(s) after its %llu base "
              "region(s), whose bounds could not be read", c.added, static_cast<unsigned long long>(now.kept),
              static_cast<unsigned long long>(head.count));
     else
-        KB_I("save regions: the game's save now writes %u Kiln box(es) for %llu kept chunk(s) outside its %llu base "
-             "region(s); the other %llu are saved with the bases", c.added,
+        KB_I("save regions: the game's save now writes %u Kiln box(es) for %llu kept chunk(s) its %llu base region(s) "
+             "do not save whole; the other %llu are saved with the bases", c.added,
              static_cast<unsigned long long>(now.kept - now.covered), static_cast<unsigned long long>(head.count),
              static_cast<unsigned long long>(now.covered));
 }
