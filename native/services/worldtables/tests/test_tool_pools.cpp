@@ -9,9 +9,12 @@ static unsigned checks;
 template<class T> static void put(Bytes& b, size_t at, T value) { std::memcpy(b.data()+at,&value,sizeof value); }
 int main() {
     ModFile file; file.mod="tool-test"; file.clients="mod";
-    read_blocks(parse_relaxed(R"({"toolMaterialPools":{"rubble":{"name":"Rubble","entries":[{"item":"RubbleItem","terrainMaterial":8,"voxelsPerItem":16}]}}})"),&file);
+    const auto pool_document = parse_relaxed(R"({"toolMaterialPools":{"rubble":{"name":"Rubble","entries":[{"item":"RubbleItem","terrainMaterial":8,"voxelsPerItem":16}]}}})");
+    CHECK(pool_document.size()==1 && pool_document.contains("toolMaterialPools"));
+    read_blocks(pool_document,&file);
     CHECK(file.errors.empty());
     CHECK(file.pools.size()==1);
+    CHECK(file.pools[0].tool && file.pools[0].valid && file.pools[0].block=="rubble");
     Layouts l; l.reg_terrain=0; l.reg_building=8; l.terrain={184,0}; l.building={180,0};
     Bytes registry(16+184+180,0); put<int32_t>(registry,0,16); put<uint32_t>(registry,4,1); registry[16]=8;
     put<int32_t>(registry,8,192); put<uint32_t>(registry,12,1);
@@ -62,8 +65,11 @@ int main() {
     Material terrain; terrain.mod=file.mod; terrain.block="terrain"; terrain.terrain=true; terrain.item=true; terrain.item_id=100; terrain.guid=derive_guid(file.mod,"terrain","terrain");
     CHECK(!resolve_pools(building.pools,{terrain},game).errors.empty()); // Existing building pool still refuses terrain.
     ModFile brush; brush.mod=file.mod; brush.clients="mod";
-    read_blocks(parse_relaxed(R"({"toolBrushShapes":{"small":{"item":"c52ceb9f-b1b0-4b4b-a801-52bf8340c002","shape":"sphere","radius":0.5}}})"),&brush);
+    const auto brush_document = parse_relaxed(R"({"toolBrushShapes":{"small":{"item":"c52ceb9f-b1b0-4b4b-a801-52bf8340c002","shape":"sphere","radius":0.5}}})");
+    CHECK(brush_document.size()==1 && brush_document.contains("toolBrushShapes"));
+    read_blocks(brush_document,&brush);
     CHECK(brush.errors.empty() && brush.shapes.size()==1);
+    CHECK(brush.shapes[0].terrain_brush && brush.shapes[0].block=="small");
     CHECK(brush.shapes[0].item_id==3155237504u);
     Bytes empty(8,0), merged; std::vector<std::string> refused;
     l.blueprints=0;l.bp_stride=28;l.bp_item=0;l.bp_size=4;l.bp_data=16;l.bp_compressed=24;
@@ -72,5 +78,22 @@ int main() {
     CHECK(rows.base[24]==0); // Terrain brush uses fill bytes, not compressed building bits.
     ArrayView fills; CHECK(array_at(merged,uint32_t(rows.base-merged.data()+16),1,&fills));
     CHECK(fills.count==8);
+    // read_mod hands every object document to read_blocks: one with none of its sections gives nothing and no error.
+    for (const char* text : {R"({"format":1})", R"({"format":1,"items":{"x":{"name":"X"}},"spells":{"y":{}},"comment":"z"})",
+                             R"({"strengths":{"s":{"hardness":"soft"}},"surfaces":{"t":{}}})"}) {
+        ModFile none; none.mod="tool-test"; none.clients="mod";
+        read_blocks(parse_relaxed(text),&none);
+        CHECK(none.errors.empty() && none.pools.empty() && none.shapes.empty() && none.tweaks.empty() && none.materials.empty() && none.craft_props.empty());
+    }
+    // An empty tool section is nothing to do and a malformed one one error naming it, as the other world-table sections.
+    for (const char* section : {"toolMaterialPools", "toolBrushShapes", "buildingMaterialPools", "blueprints", "buildingMaterials", "materialTweaks", "terrainMaterials", "craftingProps"}) {
+        ModFile empty_section; empty_section.mod="tool-test"; empty_section.clients="mod";
+        read_blocks(ojson{{section, ojson::object()}},&empty_section);
+        CHECK(empty_section.errors.empty() && empty_section.pools.empty() && empty_section.shapes.empty() && empty_section.materials.empty());
+        ModFile malformed; malformed.mod="tool-test"; malformed.clients="mod";
+        read_blocks(ojson{{section, ojson::array()}},&malformed);
+        CHECK(malformed.errors.size()==1 && malformed.errors[0].find(std::string(section)+": expected block name -> ")!=std::string::npos);
+        CHECK(malformed.pools.empty() && malformed.shapes.empty() && malformed.materials.empty());
+    }
     std::cout<<"tool registry: "<<checks<<" checks passed\n";
 }
