@@ -1,1 +1,1 @@
-kiln_service(quests knowledge.cpp survivors.cpp flame.cpp catalog.cpp roster.cpp native_pack.cpp bootpack.cpp bodyadmit.cpp bodypack.cpp start_stop.cpp questpack.cpp questbuild.cpp)
+kiln_service(quests knowledge.cpp survivors.cpp flame.cpp catalog.cpp roster.cpp native_pack.cpp bootpack.cpp bodyadmit.cpp bodypack.cpp motionpack.cpp start_stop.cpp questpack.cpp questbuild.cpp)
