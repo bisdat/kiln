@@ -108,6 +108,43 @@ public sealed partial class PlayerStorageStoreTests
 public sealed partial class PlayerStorageStoreTests
 {
     [Fact]
+    public void A_leave_save_the_gone_player_never_got_leaves_the_progress_revision_alone()
+    {
+        // A remote player left: their connection is gone when the game's leave save commits, so its storage cannot reach
+        // them. This server's counter must stay where the player's sidecar is: raised, it would tie the first update of
+        // the next server they play on, and back here this server's older progress would win (Decide keeps it on a tie).
+        using var h = new InstanceHarness();
+        using var remote = new HostedSession();
+        remote.Session.GetType().GetField("Local", Hidden)!.SetValue(remote.Session, false);
+        var leaving = (System.Collections.IList)typeof(CharacterSync).GetField("Leaving", Hidden)!.GetValue(null)!;
+        leaving.Clear();
+        var persist = new Persist();
+        var store = InstanceHarness.Store.Storage;
+        store.Native = persist;
+        try
+        {
+            store.Join(remote.Character, new EntityId(1), "join", null, true);
+            h.Save(1);
+            CharacterSync.OnWorldSaving(SaveReason.Request);
+            typeof(CharacterSync).GetMethod("Close", Hidden)!.Invoke(null, [remote.Session]);
+            HostedSession.Sessions.Clear();
+            Assert.Single(leaving);
+            var before = CharacterStore.RevisionOf(remote.Character);
+            persist.Frozen = new("leave", PlayerStorageDocumentTests.Storages(3));
+            h.Save(2);
+            CharacterSync.OnWorldSaving(SaveReason.PlayerLeft);
+            Assert.Equal(before, CharacterStore.RevisionOf(remote.Character));
+            // the server keeps the leave pair for the next join
+            Assert.Equal("leave", PlayerStorageDocument.Read(store.Carried(remote.Character)!, remote.Character.Id).Data["current"]!["witness"]!.GetValue<string>());
+        }
+        finally
+        {
+            leaving.Clear();
+            store.Native = null;
+        }
+    }
+
+    [Fact]
     public void A_late_offer_after_the_join_timeout_never_swaps_live_storage_and_its_pairs_are_kept()
     {
         // The player's offer came after the 15-second window: storage was restored from this server's copy. The late copy

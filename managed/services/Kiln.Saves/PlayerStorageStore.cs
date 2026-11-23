@@ -129,13 +129,20 @@ internal sealed class PlayerStorageStore(WorldStore owner)
         return lines;
     }
 
-    /// <summary>A player of this world's storage visits by name (the /playerstorage token) or character id.</summary>
+    /// <summary>A player of this world's storage visits by name (the /playerstorage token) or character id. One account's
+    /// characters share its platform name, and a visit stays after its character left: the visit whose character is in
+    /// game on its entity now wins, else the first match.</summary>
     internal EntityId? FindPlayer(string text)
     {
+        EntityId? first = null;
         foreach (var (character, visit) in _visits)
             if ((visit.Name is { Length: > 0 } n && string.Equals(n, text, StringComparison.OrdinalIgnoreCase))
-                || (Guid.TryParse(text, out var id) && id == character.Id)) return visit.Player;
-        return null;
+                || (Guid.TryParse(text, out var id) && id == character.Id))
+            {
+                if (Native?.CharacterOf(visit.Player) == character) return visit.Player;
+                first ??= visit.Player;
+            }
+        return first;
     }
 
     /// <summary>Whether the player's storage visit is still the character in game on that entity (entity ids are reused by

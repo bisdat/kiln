@@ -58,6 +58,26 @@ public sealed unsafe class PlayerStorageNativeTests : IDisposable
     }
 
     [Fact]
+    public void Registrations_come_from_a_connected_player_after_a_chest_lookup_or_that_player_leaving()
+    {
+        // Registrations lists through a connected player. InstancesReady asks WitnessOf about any holder (a chest), and the
+        // player last asked about may leave: neither may empty the registrations (InstancesReady would call a player's
+        // storages ready before their holders are, and a restore would park every storage).
+        Register();
+        Join();
+        var native = Store.Native!;
+        Assert.Equal(new[] { "mod:bag" }, native.Registrations.Keys);
+        Assert.Null(native.WitnessOf(new EntityId(99)));  // a chest: no witness
+        Assert.Equal(new[] { "mod:bag" }, native.Registrations.Keys);
+        // a second player is asked about, then leaves: the first one still answers
+        _fake.JoinRead(1, 2, Guid.Parse("00000000-0000-4000-8000-000000000222"), 0x777);
+        _fake.JoinApply(1, 2);
+        Assert.Equal("xxh3:0000000000000777", native.WitnessOf(new EntityId(2)));
+        _fake.Leave(1);
+        Assert.Equal(new[] { "mod:bag" }, native.Registrations.Keys);
+    }
+
+    [Fact]
     public void TestKit_capture_batch_stages_exact_bytes_and_publishes_only_on_world_written()
     {
         Register();
