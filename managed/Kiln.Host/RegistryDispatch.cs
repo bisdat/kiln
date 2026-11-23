@@ -14,7 +14,7 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
     private readonly Dictionary<ModContext, Action> _retirements = [];
     private volatile bool _closed;
     private readonly object _signals = new();
-    private (RegistryPhase Phase, ulong Generation)? _pendingReady;
+    private (RegistryReadyPhase Phase, ulong Generation)? _pendingReady;
     private bool _worldChanged;
     private string? _worldDirectory;
     private IDisposable? _ready;
@@ -54,7 +54,7 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
         };
         if (!_native.Available) return;
         _starting = _native.StageStatus().Phase < 1;
-        _ready = _native.Subscribe(hostOwner, true, Ready, e => Log("ready callback", e));
+        _ready = _native.Subscribe(hostOwner, true, (phase, generation) => Ready((RegistryReadyPhase)phase, generation), e => Log("ready callback", e));
         if (!_starting) return; // a late Host may read/live-edit, but cannot retroactively enter GameStart
         var candidates = mods.RegistryCandidates();
         var directories = candidates.Select(c => c.Directory).ToArray();
@@ -70,7 +70,7 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
                 var (instance, context, assembly) = loaded.Value;
                 author = new Author(instance, context, assembly, code);
                 _authors.Add(author);
-                author.Subscription = _native.Subscribe(context.Owner, false, (phase, _) => Stage(author, phase), e => Retire(author, e));
+                author.Subscription = _native.Subscribe(context.Owner, false, (phase, _) => Stage(author, (RegistryPhase)phase), e => Retire(author, e));
             }
             catch (Exception e)
             {
@@ -169,14 +169,14 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
         author.Context.Retire(); mods.Host.OwnerRevoke(author.Context.Owner);
         author.Inputs.Clear(); _authors.Remove(author); author.Assembly.Unload();
     }
-    private void Ready(RegistryPhase phase, ulong generation)
+    private void Ready(RegistryReadyPhase phase, ulong generation)
     {
         // Native readiness can arrive on a resource thread. Only the tick owns runtime records and author retirement.
         lock (_signals) { if (!_closed) _pendingReady = (phase, generation); }
     }
     private void DrainSignals()
     {
-        (RegistryPhase Phase, ulong Generation)? ready;
+        (RegistryReadyPhase Phase, ulong Generation)? ready;
         lock (_signals)
         {
             ready = _pendingReady; _pendingReady = null;

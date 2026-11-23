@@ -76,7 +76,7 @@ internal sealed unsafe class RegistryNative(IHostServices host)
         Stage->Subscribe != null && Stage->Submit != null && Stage->Read != null && Stage->Select != null &&
         Stage->Ready != null && Stage->Unsubscribe != null;
     internal bool LiveAvailable => Available && Live != null && Live->Size >= 56 && Live->Version >= 1 && Live->Begin != null && Live->Submit != null && Live->Commit != null && Live->Revert != null && Live->Read != null && Live->Status != null;
-    private sealed record Callback(Action<RegistryPhase, ulong> Invoke, Action<Exception> Fault);
+    private sealed record Callback(Action<uint, ulong> Invoke, Action<Exception> Fault);
     private static readonly ConcurrentDictionary<long, Callback> Callbacks = new();
     private static long _next;
     private unsafe delegate int TextCall(byte* buffer, nuint cap, nuint* length);
@@ -153,7 +153,7 @@ internal sealed unsafe class RegistryNative(IHostServices host)
         if (rc == KilnAbi.ErrNotFound) return new(2, 0, 1, 0, 0, 0, 0, "the change expired or was already reverted");
         Check(rc, "kiln.registry.live"); return result.Copy(0);
     }
-    internal IDisposable Subscribe(ulong owner, bool ready, Action<RegistryPhase, ulong> callback, Action<Exception> fault)
+    internal IDisposable Subscribe(ulong owner, bool ready, Action<uint, ulong> callback, Action<Exception> fault)
     {
         var token = Interlocked.Increment(ref _next); Callbacks[token] = new(callback, fault); ulong handle = 0;
         var rc = ready ? Stage->Ready(owner, &OnReady, (void*)(nint)token, &handle) : Stage->Subscribe(owner, &OnStage, (void*)(nint)token, &handle);
@@ -173,7 +173,7 @@ internal sealed unsafe class RegistryNative(IHostServices host)
     private static void Dispatch(nint token, uint phase, ulong generation)
     {
         if (!Callbacks.TryGetValue((long)token, out var callback)) return;
-        try { callback.Invoke((RegistryPhase)phase, generation); }
+        try { callback.Invoke(phase, generation); }
         catch (Exception e) { try { callback.Fault(e); } catch { /* never escape reverse P/Invoke */ } }
     }
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]

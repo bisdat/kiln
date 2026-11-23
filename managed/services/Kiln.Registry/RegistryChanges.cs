@@ -77,7 +77,7 @@ public sealed class RegistryChange
 
 /// <summary>A ready notification. The world token is Kiln-owned, never a native address.</summary>
 [Experimental("KILNX031")]
-public sealed record RegistryReady(RegistryPhase Phase, ulong Generation, RegistryWorld? World);
+public sealed record RegistryReady(RegistryReadyPhase Phase, ulong Generation, RegistryWorld? World);
 
 public static partial class Registry
 {
@@ -130,7 +130,7 @@ public static partial class Registry
         if (!mod.Alive) throw new RegistryContextException(RegistryContextError.Unloaded, "the mod retired");
         return mod;
     }
-    private static void Publish(RegistryPhase phase, ulong generation, RegistryWorld? world)
+    private static void Publish(RegistryReadyPhase phase, ulong generation, RegistryWorld? world)
     {
         var ready = new RegistryReady(phase, generation, world);
         (ModContext Owner, Action<RegistryReady> Handler)[] handlers;

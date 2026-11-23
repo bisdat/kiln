@@ -386,13 +386,13 @@
 [KILNX031]Kiln.Registry.RegistryEntries<T>.this[string! id].get -> T
 [KILNX031]Kiln.Registry.RegistryReady
 [KILNX031]Kiln.Registry.RegistryReady.<Clone>$() -> Kiln.Registry.RegistryReady!
-[KILNX031]Kiln.Registry.RegistryReady.Deconstruct(out Kiln.RegistryPhase Phase, out ulong Generation, out Kiln.RegistryWorld? World) -> void
+[KILNX031]Kiln.Registry.RegistryReady.Deconstruct(out Kiln.RegistryReadyPhase Phase, out ulong Generation, out Kiln.RegistryWorld? World) -> void
 [KILNX031]Kiln.Registry.RegistryReady.Equals(Kiln.Registry.RegistryReady? other) -> bool
 [KILNX031]Kiln.Registry.RegistryReady.Generation.get -> ulong
 [KILNX031]Kiln.Registry.RegistryReady.Generation.init -> void
-[KILNX031]Kiln.Registry.RegistryReady.Phase.get -> Kiln.RegistryPhase
+[KILNX031]Kiln.Registry.RegistryReady.Phase.get -> Kiln.RegistryReadyPhase
 [KILNX031]Kiln.Registry.RegistryReady.Phase.init -> void
-[KILNX031]Kiln.Registry.RegistryReady.RegistryReady(Kiln.RegistryPhase Phase, ulong Generation, Kiln.RegistryWorld? World) -> void
+[KILNX031]Kiln.Registry.RegistryReady.RegistryReady(Kiln.RegistryReadyPhase Phase, ulong Generation, Kiln.RegistryWorld? World) -> void
 [KILNX031]Kiln.Registry.RegistryReady.World.get -> Kiln.RegistryWorld?
 [KILNX031]Kiln.Registry.RegistryReady.World.init -> void
 [KILNX031]Kiln.Registry.RegistryStage

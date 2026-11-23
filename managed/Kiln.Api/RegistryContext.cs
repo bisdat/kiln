@@ -31,6 +31,12 @@ public enum RegistryPhase
     Alter = 2,
     /// <summary>All mods' final pass, reading add + alter, not another mod's final.</summary>
     Final = 3,
+}
+
+/// <summary>Completed registry snapshot readiness, separate from an author's Add/Alter/Final passes.</summary>
+[Experimental("KILNX031")]
+public enum RegistryReadyPhase
+{
     /// <summary>The complete game-start registry is ready.</summary>
     Start = 4,
     /// <summary>The live application is ready (also used for later live refreshes).</summary>
@@ -187,7 +193,7 @@ public sealed class RegistryContext
 
 internal sealed record RegistryCompletion(uint Outcome, uint Accepted, uint Refused, uint Skipped,
     ulong World, ulong Generation, ulong Handle, string Reason);
-internal sealed record RegistryReadyState(RegistryPhase Phase, ulong Generation, RegistryWorld? World);
+internal sealed record RegistryReadyState(RegistryReadyPhase Phase, ulong Generation, RegistryWorld? World);
 
 // Host installs these; Kiln.Registry never references Kiln.Host or moves its published generated types into Kiln.Api.
 internal static class RegistryRuntime
@@ -198,9 +204,9 @@ internal static class RegistryRuntime
     internal static Func<ModContext, ulong, RegistryCompletion>? Revert;
     internal static Action<ModContext, Action<RegistryContext>>? Read;
     internal static Action<string?>? WorldChanged;
-    internal static Action<RegistryPhase, ulong, RegistryWorld?>? Ready;
+    internal static Action<RegistryReadyPhase, ulong, RegistryWorld?>? Ready;
     internal static volatile RegistryReadyState? LastReady;
-    internal static void PublishReady(RegistryPhase phase, ulong generation, RegistryWorld? world)
+    internal static void PublishReady(RegistryReadyPhase phase, ulong generation, RegistryWorld? world)
     {
         LastReady = new(phase, generation, world);
         Ready?.Invoke(phase, generation, world);

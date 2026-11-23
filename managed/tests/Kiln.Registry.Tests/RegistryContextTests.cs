@@ -146,7 +146,7 @@ public sealed class RegistryContextTests
         var context = Frame(owner, RegistryEntryPoint.ModLoad);
         using (context.Enter()) DataRegistry.Ready += _ => { ++calls; callbackThread = Environment.CurrentManagedThreadId; };
         context.Close(); owner.Pending.Clear();
-        var native = new Thread(() => RegistryRuntime.PublishReady(RegistryPhase.Start, 42, null));
+        var native = new Thread(() => RegistryRuntime.PublishReady(RegistryReadyPhase.Start, 42, null));
         native.Start(); native.Join();
         Assert.Equal(0, calls);
         Assert.Single(owner.Pending);
@@ -207,6 +207,15 @@ public sealed class RegistryContextTests
             Assert.True(change.Revert().Ok); Assert.True(change.Revert().Ok); Assert.Equal(1, calls);
         }
         finally { Backend.Current = backend; RegistryRuntime.Revert = previous; owner.Retire(); }
+    }
+    [Fact]
+    public void AuthoringPassesAndSnapshotReadinessUseSeparateEnums()
+    {
+        Assert.Equal(new[] { "Add", "Alter", "Final" }, Enum.GetNames<RegistryPhase>());
+        var phase = typeof(RegistryReady).GetProperty(nameof(RegistryReady.Phase))!.PropertyType;
+        Assert.Equal("Kiln.RegistryReadyPhase", phase.FullName);
+        Assert.Equal(new[] { "Start", "WorldLoad" }, Enum.GetNames(phase));
+        Assert.Equal(new[] { 4, 5 }, Enum.GetValues(phase).Cast<object>().Select(Convert.ToInt32));
     }
     [Fact]
     public void EveryNonOkCompletionHasAReason()

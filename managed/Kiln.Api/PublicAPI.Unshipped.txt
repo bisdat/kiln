@@ -48,5 +48,6 @@ Kiln.RegistryThreadOnlyAttribute.RegistryThreadOnlyAttribute() -> void
 [KILNX031]virtual Kiln.Mod.OnRegistry(Kiln.RegistryContext! context) -> void
 ~[KILNX031]override Kiln.RegistryWorld.Equals(object obj) -> bool
 ~[KILNX031]override Kiln.RegistryWorld.ToString() -> string
-[KILNX031]Kiln.RegistryPhase.Start = 4 -> Kiln.RegistryPhase
-[KILNX031]Kiln.RegistryPhase.WorldLoad = 5 -> Kiln.RegistryPhase
+[KILNX031]Kiln.RegistryReadyPhase
+[KILNX031]Kiln.RegistryReadyPhase.Start = 4 -> Kiln.RegistryReadyPhase
+[KILNX031]Kiln.RegistryReadyPhase.WorldLoad = 5 -> Kiln.RegistryReadyPhase

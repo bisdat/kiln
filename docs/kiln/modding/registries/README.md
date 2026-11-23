@@ -113,6 +113,7 @@ only explicit `Revert()` on the tick thread or owner retirement removes its laye
 their world. Already committed GameStart layers stay until process restart, including through a runtime hot reload.
 
 Subscribe to `Registry.Ready` in `OnLoad` for copied stage/live ready notifications; the Host removes the handler at unload.
+Its `RegistryReady.Phase` uses `RegistryReadyPhase.Start` or `WorldLoad`, not the author's `RegistryPhase` passes.
 Notifications are posted through the owner's scheduler, never run inline on a native loader thread or inside a commit.
 A late subscriber likewise receives the last snapshot on its next tick. This event reports readiness/generation, not proof that
 every field in a transaction applied: inspect results and the registry report. `Registry.Available` checks the transport;
