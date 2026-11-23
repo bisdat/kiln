@@ -43,6 +43,10 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
         // A replacing HotReload pass that read per-world settings is world-scoped; it runs again once the next world is
         // bound (review4 NS3). 0: nothing to replay.
         internal ulong ReplayWorld;
+        // review4 NS4: a transient KilnUnavailableException (live install window, budgets, lazy preparation) defers this
+        // record's point to a later tick: the next tick first, then backing off to 5 s, logged once per streak.
+        internal long RetryAt;
+        internal int Retries;
         // This hot-reloaded record's HotReload pass stands in for its ModLoad point.
         internal bool ReplacesModLoad => Reload && (Points & RegistryEntryPoint.ModLoad) != 0 && (Points & RegistryEntryPoint.HotReload) != 0;
         internal string? WorldId;
@@ -122,11 +126,13 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
         _flushing = true;
         try
         {
-            var pending = _runtime.Where(r => r.Pending && r.Context.Alive).ToArray();
+            var now = Environment.TickCount64;
+            var pending = _runtime.Where(r => r.Pending && r.Context.Alive && r.RetryAt <= now).ToArray();
             foreach (var record in pending) record.Pending = false;
-            Apply(pending, RegistryEntryPoint.ModLoad, static r => (r.Points & RegistryEntryPoint.ModLoad) != 0 &&
+            var retry = Apply(pending, RegistryEntryPoint.ModLoad, static r => (r.Points & RegistryEntryPoint.ModLoad) != 0 &&
                 (!r.Reload || (r.Points & RegistryEntryPoint.HotReload) == 0));
-            Apply(pending, RegistryEntryPoint.HotReload, static r => r.Reload && (r.Points & RegistryEntryPoint.HotReload) != 0);
+            retry.UnionWith(Apply(pending, RegistryEntryPoint.HotReload, static r => r.Reload && (r.Points & RegistryEntryPoint.HotReload) != 0));
+            foreach (var record in retry) record.Pending = true;
         }
         finally { _flushing = false; }
         TryWorld();
@@ -212,16 +218,19 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
             if (candidate is null) return;
             var bound = _worldBinding.Bind(candidate);
             var world = bound ? candidate.Value : candidate.Value with { Id = null };
+            var now = Environment.TickCount64;
             if (bound)
             {
                 // A replacing HotReload pass that read the previous world's settings expired with that world: author it again
                 // with this world's settings, as its ModLoad point would have persisted (review4 NS3).
-                var replays = _runtime.Where(r => !r.Pending && r.Context.Alive && r.ReplayWorld != 0 && r.ReplayWorld != world.Token).ToArray();
+                var replays = _runtime.Where(r => !r.Pending && r.Context.Alive && r.ReplayWorld != 0 && r.ReplayWorld != world.Token &&
+                    r.RetryAt <= now).ToArray();
+                var previous = replays.ToDictionary(r => r, r => r.ReplayWorld);
                 foreach (var record in replays) record.ReplayWorld = 0;
-                Apply(replays, RegistryEntryPoint.HotReload, static _ => true);
+                foreach (var record in Apply(replays, RegistryEntryPoint.HotReload, static _ => true)) record.ReplayWorld = previous[record];
             }
             var records = _runtime.Where(r => !r.Pending && r.Context.Alive && (r.Points & RegistryEntryPoint.WorldLoad) != 0 &&
-                (r.World != world.Token || (bound && r.WorldId is null && world.Id is not null))).ToArray();
+                r.RetryAt <= now && (r.World != world.Token || (bound && r.WorldId is null && world.Id is not null))).ToArray();
             foreach (var record in records)
             {
                 // Adoption reauthors this point with its settings, rather than stacking it on the id-less turn.
@@ -235,14 +244,17 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
                     catch (Exception e) { Log(record.Context.Info.Id + " previous world point cleanup", e); }
                 record.World = world.Token; record.WorldId = world.Id; // our own notifications cannot recurse
             }
-            Apply(records, RegistryEntryPoint.WorldLoad, static _ => true);
+            // A transiently unavailable point authors this world again on a later tick, from scratch.
+            foreach (var record in Apply(records, RegistryEntryPoint.WorldLoad, static _ => true)) { record.World = 0; record.WorldId = null; }
         }
         finally { _dispatchingWorld = false; }
     }
-    private void Apply(IEnumerable<Runtime> records, RegistryEntryPoint point, Func<Runtime, bool> selected)
+    // Returns the records whose point met a transient KilnUnavailableException: the caller schedules them again.
+    private HashSet<Runtime> Apply(IEnumerable<Runtime> records, RegistryEntryPoint point, Func<Runtime, bool> selected)
     {
         Game.AssertTickThread();
         var ordered = records.Where(r => selected(r) && r.Context.Alive).ToArray();
+        var retry = new HashSet<Runtime>();
         var inputs = ordered.ToDictionary(r => r, _ => new Dictionary<string, ConfigFile>(StringComparer.Ordinal));
         var committed = ordered.ToDictionary(r => r, _ => new List<ulong>());
         foreach (var record in ordered) record.Faulted = false; // a fault closes this point, not every future world/point
@@ -272,6 +284,15 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
                 }
                 catch (Exception e) { Log(record.Context.Info.Id + " point rollback (owner cleanup will retry)", e); }
             committed[record].Clear();
+            if (error is KilnUnavailableException)
+            {
+                // Not the author's fault and not permanent: try this point again later, with backoff (review4 NS4).
+                if (record.Retries == 0)
+                    mods.Host.Log(LogLevel.Warn, $"registry: {record.Context.Info.Id} OnRegistry {point}: the registry is not available yet ({error.Message}); retrying on a later tick");
+                record.RetryAt = Environment.TickCount64 + (record.Retries == 0 ? 0 : Math.Min(5000, 100L << Math.Min(record.Retries, 6)));
+                ++record.Retries; retry.Add(record);
+                return;
+            }
             Log(record.Context.Info.Id + " OnRegistry " + point, error);
         }
         foreach (var phase in new[] { RegistryPhase.Add, RegistryPhase.Alter, RegistryPhase.Final })
@@ -303,6 +324,9 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
                 try { Remember(record, native, _native.Commit(record.Context.Owner, handle)); }
                 catch (Exception e) { try { _native.Revert(record.Context.Owner, handle); } catch { } Fault(record, e); }
         }
+        foreach (var record in ordered)
+            if (!retry.Contains(record)) { record.Retries = 0; record.RetryAt = 0; }
+        return retry;
     }
     private static bool Retained(RegistryCompletion result) => result.Outcome is 0 or 1 or 8 && result.Accepted != 0 && result.Handle != 0;
     private RegistryCompletion Applied(ModContext owner, RegistryCompletion result, bool worldScoped = false)

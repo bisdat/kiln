@@ -388,6 +388,43 @@ public sealed class RegistryDispatchTests : ModsFixture
         }
         finally { WorldConfigs.Reset(); }
     }
+    // review4 NS4: a transient UNAVAILABLE (live install window, budgets, lazy preparation) defers the point to a later tick.
+    [Fact(Timeout = 30_000)]
+    public async Task ATransientUnavailableModLoadIsRetriedOnALaterTick()
+    {
+        await Task.Yield();
+        using var native = new FakeRegistry(); using var manager = NewManager(native.Host);
+        using var dispatch = new RegistryDispatch(manager); dispatch.Prepare(100);
+        var owner = Owner(native, "transient"); var calls = 0;
+        dispatch.Loaded(new Author(c => { if (c.Phase != RegistryPhase.Alter) return; ++calls; Edit(c, 50); }), owner, Root, false);
+        native.BeginUnavailable = 1;
+        dispatch.FlushLoads(); Assert.Equal(10, native.Value); Assert.Equal(1, calls);
+        dispatch.FlushLoads(); Assert.Equal(50, native.Value); Assert.Equal(2, calls);
+        dispatch.FlushLoads(); Assert.Equal(2, calls); // applied once, never again
+        native.ReadUnavailable = 1; // a read inside the callback can be the first to see the window
+        var reader = Owner(native, "transient-read");
+        dispatch.Loaded(new Author(c => { if (c.Phase == RegistryPhase.Alter) Edit(c, int.Parse(c.ReadValue("items", "game:wood", "maxStack"), System.Globalization.CultureInfo.InvariantCulture) + 1); }), reader, Root, false);
+        dispatch.FlushLoads(); Assert.Equal(50, native.Value);
+        dispatch.FlushLoads(); Assert.Equal(51, native.Value);
+        owner.Retire(); reader.Retire();
+    }
+    [Fact(Timeout = 30_000)]
+    public async Task ATransientUnavailableWorldLoadIsRetriedOnALaterTick()
+    {
+        await Task.Yield();
+        using var native = new FakeRegistry(); using var manager = NewManager(native.Host);
+        using var dispatch = new RegistryDispatch(manager); dispatch.Prepare(100);
+        var owner = Owner(native, "transient-world"); var calls = 0;
+        dispatch.Loaded(new WorldAuthor(c => {
+            if (c.EntryPoint != RegistryEntryPoint.WorldLoad || c.Phase != RegistryPhase.Alter) return;
+            ++calls; Edit(c, 60);
+        }), owner, Root, false);
+        native.BeginUnavailable = 1;
+        dispatch.FlushLoads(); Assert.Equal(10, native.Value); Assert.Equal(1, calls);
+        dispatch.FlushLoads(); Assert.Equal(60, native.Value); Assert.Equal(2, calls);
+        dispatch.FlushLoads(); Assert.Equal(2, calls);
+        owner.Retire(); Assert.Equal(10, native.Value);
+    }
     [Fact]
     public unsafe void MissingStageFunctionsMakeTheTransportUnavailable()
     {

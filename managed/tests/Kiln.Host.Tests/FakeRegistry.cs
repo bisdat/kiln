@@ -17,7 +17,7 @@ internal sealed unsafe class FakeRegistry : IDisposable
     internal readonly RegistryLiveTable* Live;
     internal uint Phase = 4;
     internal ulong World = 1, Generation;
-    internal int Submits, StageError, ReadyError, StatusFailures, WorldRequiredCommits;
+    internal int Submits, StageError, ReadyError, StatusFailures, WorldRequiredCommits, BeginUnavailable, ReadUnavailable;
     internal int Value => _layers.Count == 0 ? 10 : _layers.Last().Value.Value;
     private ulong _next;
     private readonly Dictionary<ulong, (ulong Owner, uint Point, int? Value, bool Restart)> _drafts = [];
@@ -71,7 +71,11 @@ internal sealed unsafe class FakeRegistry : IDisposable
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int ReadStage(uint view, KilnStr registry, KilnStr id, KilnStr field, byte* output, nuint capacity, nuint* length) => Text(Current.Value.ToString(System.Globalization.CultureInfo.InvariantCulture), output, capacity, length);
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
-    private static int ReadLive(ulong owner, KilnStr registry, KilnStr id, KilnStr field, byte* output, nuint capacity, nuint* length) => Text(Current.Value.ToString(System.Globalization.CultureInfo.InvariantCulture), output, capacity, length);
+    private static int ReadLive(ulong owner, KilnStr registry, KilnStr id, KilnStr field, byte* output, nuint capacity, nuint* length)
+    {
+        if (Current.ReadUnavailable > 0) { --Current.ReadUnavailable; return KilnAbi.ErrUnavailable; }
+        return Text(Current.Value.ToString(System.Globalization.CultureInfo.InvariantCulture), output, capacity, length);
+    }
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int Select(uint view, KilnStr registry, KilnStr selector, byte* output, nuint capacity, nuint* length) => Text("[\"game:wood\"]", output, capacity, length);
     private static ulong Add(nint fn, nint user, bool ready)
@@ -89,6 +93,7 @@ internal sealed unsafe class FakeRegistry : IDisposable
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int Begin(ulong owner, uint point, ulong* handle)
     {
+        if (Current.BeginUnavailable > 0) { --Current.BeginUnavailable; return KilnAbi.ErrUnavailable; }
         *handle = ++Current._next; Current.Points.Add(point); Current._drafts.Add(*handle, (owner, point, null, false)); return 0;
     }
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
