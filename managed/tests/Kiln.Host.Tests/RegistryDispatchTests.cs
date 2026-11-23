@@ -202,6 +202,29 @@ public sealed class RegistryDispatchTests : ModsFixture
         Assert.Equal(1, calls); Assert.Equal(0, native.Submits); Assert.Equal(10, native.Value); owner.Retire();
     }
     [Fact]
+    public void LoadedContainsCodeIdentityIoFailuresAndStillCleansUpManualChanges()
+    {
+        using var native = new FakeRegistry(); using var manager = NewManager(native.Host);
+        using var dispatch = new RegistryDispatch(manager); dispatch.Prepare(100);
+        var owner = Owner(native, "missing-code");
+        Assert.Null(Record.Exception(() => dispatch.Loaded(new Author(_ => { }), owner, Path.Combine(Root, "removed"), false)));
+        Assert.True(native.Host.Has("missing-code"), native.Host.Dump());
+        RegistryRuntime.Manual!(owner, c => Edit(c, 90)); Assert.Equal(90, native.Value);
+        owner.Retire(); Assert.Equal(10, native.Value);
+    }
+    [Fact]
+    public void DuplicateLoadedNotificationDoesNotThrowOrDoubleDispatch()
+    {
+        using var native = new FakeRegistry(); using var manager = NewManager(native.Host);
+        using var dispatch = new RegistryDispatch(manager); dispatch.Prepare(100);
+        var owner = Owner(native, "duplicate"); var calls = 0;
+        var author = new Author(_ => ++calls);
+        dispatch.Loaded(author, owner, Root, false);
+        Assert.Null(Record.Exception(() => dispatch.Loaded(author, owner, Root, false)));
+        dispatch.FlushLoads(); Assert.Equal(3, calls);
+        owner.Retire();
+    }
+    [Fact]
     public void DisposingTheManagerReleasesTheReadySubscriptionAndRuntimeBridge()
     {
         using var native = new FakeRegistry(); var manager = NewManager(native.Host);

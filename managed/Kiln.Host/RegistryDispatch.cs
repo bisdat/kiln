@@ -79,20 +79,27 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
     }
     internal void Loaded(Mod instance, ModContext context, string directory, bool reload)
     {
-        RegistryEntryPoint points;
-        try { points = RegistryDeclarations.PointsOf(instance.GetType()); }
-        catch (Exception e) { Log(context.Info.Id + " declaration", e); return; }
-        var record = points == 0 ? null : new Runtime(instance, context, points, Code(directory), reload);
-        if (record is not null) _runtime.Add(record);
-        Action retirement = () =>
+        try
         {
-            // Still before core OwnerRevoke. Remove layers now so a replacement that drops an edit sees the base.
-            RemoveChanges(context);
-            if (record is not null) _runtime.Remove(record);
-            _retirements.Remove(context);
-        };
-        _retirements.Add(context, retirement);
-        context.Retiring += retirement;
+            if (_closed || !context.Alive || _retirements.ContainsKey(context)) return;
+            Runtime? record = null;
+            Action retirement = () =>
+            {
+                // Still before core OwnerRevoke. Also covers manual changes if author setup fails below.
+                RemoveChanges(context);
+                if (record is not null) _runtime.Remove(record);
+                _retirements.Remove(context);
+            };
+            _retirements.Add(context, retirement);
+            context.Retiring += retirement;
+            var points = RegistryDeclarations.PointsOf(instance.GetType());
+            if (points != 0)
+            {
+                record = new Runtime(instance, context, points, Code(directory), reload);
+                _runtime.Add(record);
+            }
+        }
+        catch (Exception e) { Log(context.Info.Id + " runtime author setup", e); }
     }
     internal void FlushLoads()
     {
