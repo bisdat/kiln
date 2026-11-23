@@ -158,11 +158,17 @@ internal sealed class CameraBridgeHost
         _ended = ended ?? throw new ArgumentNullException(nameof(ended));
         _channelMax = Math.Clamp(channelMax, 1, CameraWireAbi.MaxBody);
         _endpoint = new LocalEndpoint(local);
-        _host = new HostSelfRoute(_clock) { OnEnded = ended };
+        _host = new HostSelfRoute(_clock) { OnEnded = Ended };
     }
 
     /// <summary>The client's binding with its server (null: none). Tests.</summary>
     internal ClientBinding? ClientBinding => _binding;
+
+    /// <summary>Leases the server role routes now (tests).</summary>
+    internal int RouteCount
+    {
+        get { lock (_server) return _routes.Count; }
+    }
 
     /// <summary>The server's binding for <paramref name="player"/> (null: none). Tests.</summary>
     internal ServerBinding? BindingOf(uint player)
@@ -192,11 +198,11 @@ internal sealed class CameraBridgeHost
                 {
                     case CameraBridgeRoute.HostSelf:
                         _routes[lease] = null;
-                        _host.Submit(op, token, lease, revision, request, done);
+                        _host.Submit(op, token, lease, revision, request, ForgetIfRefused(lease, done));
                         return;
                     case CameraBridgeRoute.Remote or CameraBridgeRoute.AwaitNegotiation:
                         _routes[lease] = peer!.Key;
-                        peer.Binding.Submit(op, token, lease, revision, request, done);
+                        peer.Binding.Submit(op, token, lease, revision, request, ForgetIfRefused(lease, done));
                         return;
                     default:
                         _results.Add((done, TransportResult.Refused(decision.Reason, lease, revision, 0, RefusalText(decision.Reason, peer))));
@@ -216,6 +222,22 @@ internal sealed class CameraBridgeHost
             else if (_peers.TryGetValue(key, out var p)) p.Binding.Submit(op, token, lease, revision, request, done);
             else _results.Add((done, TransportResult.Refused(CameraReasons.PeerUnavailable, lease, revision, 0, "the player's connection is gone")));
         }
+    }
+
+    // A refused apply never became a lease (one that timed out was already let go on the client by its binding): its route
+    // goes with the answer, so a mod retrying against a refusing client does not grow the table.
+    private Action<TransportResult> ForgetIfRefused(ulong lease, Action<TransportResult> done) => r =>
+    {
+        if (!r.Ok)
+            lock (_server) _routes.Remove(lease);
+        done(r);
+    };
+
+    // A lease that ended on the bridge's side (the client's own end, a timeout, a peer or world gone) keeps no route.
+    private void Ended(RemoteEnded e)
+    {
+        lock (_server) _routes.Remove(e.Lease);
+        _ended(e);
     }
 
     /// <summary>KilnCameraTransport.caps (any thread): what the player's client offered; the host's own player: this
@@ -371,7 +393,7 @@ internal sealed class CameraBridgeHost
         Player = player,
         Incarnation = ++_incarnations,  // the connection's identity: a new binding per connection object and player
         ChannelMaxBody = _channelMax,
-        OnEnded = _ended,
+        OnEnded = Ended,
     });
 
     // ================================================================ the client role

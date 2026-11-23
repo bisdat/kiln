@@ -424,6 +424,28 @@ public sealed class BridgeHostTests
         Assert.Single(_ended);
     }
 
+    // review S8 N1 (its F4, inverted): a refused apply never becomes a lease and a lease the client ended is gone: neither
+    // keeps a route, so a mod retrying against a refusing client does not grow the bridge's table.
+    [Fact]
+    public void Refused_applies_and_ended_leases_keep_no_route()
+    {
+        var p = NewPair();
+        p.Server.Submit(11, TransportOp.Apply, 100, 1, Guest, Lens(60000), _results.Add);  // in flight
+        p.Pump();
+        for (ulong l = 101; l <= 150; l++) p.Server.Submit(11, TransportOp.Apply, l, 1, Guest, Lens(60000), _results.Add);
+        p.Pump();
+        Assert.Equal(50, _results.Count(x => x.Reason == CameraReasons.Busy));
+        Assert.Equal(1, p.Server.RouteCount);
+        Answer(p.Client, p.ClientLocal);
+        p.Pump(2);
+        Assert.True(_results[^1].Ok);
+        var local = p.ClientLocal.Calls[0].Lease;
+        p.Client.LocalChanged(local, 3, CameraEndReasons.Expired, 0, 0);  // the client ends it by itself
+        p.Pump(2);
+        Assert.Single(_ended);
+        Assert.Equal(0, p.Server.RouteCount);
+    }
+
     [Fact]
     public void The_channel_and_the_bridge_are_Kilns_whatever_mods_code_starts_them()
     {
