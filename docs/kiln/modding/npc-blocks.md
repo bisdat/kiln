@@ -312,6 +312,8 @@ when a cook fails. The two cook tools merge their own contributions. Output hash
 A shared cache receipt tracks the final two-tool result. None of this is a Ready status or evidence of body publication.
 External glTF buffer/image URIs are percent-decoded and resolved relative to the glTF; `../shared/...` is allowed only
 while it stays inside this mod. Escapes, nested links, and a `link/..` walk are refused before source hashing.
+A legacy NPC model block missing its animation or motion part stays on the ordinary eager asset-cook path, with a
+warning naming that NPC's field. This preserves its other assets; it does not make the incomplete NPC definition valid.
 
 Material-block and texture hashes are included as dependencies, but generated material JSON is not material-resource
 publication. The prepared material bridge is still required before that closure can be committed. No hot body or

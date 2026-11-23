@@ -27,6 +27,7 @@ joints (anicook/retarget.py) and the skeleton stays the body's.
 import json
 import os
 import re
+import warnings
 from pathlib import Path
 
 ENGINE_FIELDS = {"idle": "Idle", "walk": "Walk", "run": "Run", "sprint": "Sprint", "idleCombat": "IdleCombat", "fall": "Fall", "idleSneak": "IdleSneak",
@@ -428,9 +429,11 @@ def npc_bodies(mod_dir):
         an, animation = part(npc, name, "animation", "animations")
         _, motions = part(npc, name, "motions", "npcMotions")
         if not isinstance(animation, dict) or not animation.get("clips"):
-            raise BlocksError(f"npcs.{name}.animation: an authored roster body needs this mod's cooked animation")
+            warnings.warn(f"npcs.{name}.animation: not deferred; keeping the ordinary asset cook. This NPC still needs this mod's cooked animation before its authored body can be defined", stacklevel=2)
+            continue
         if not isinstance(motions, dict):
-            raise BlocksError(f"npcs.{name}.motions: an authored roster body needs motion bindings")
+            warnings.warn(f"npcs.{name}.motions: not deferred; keeping the ordinary asset cook. This NPC still needs motion bindings before its authored body can be defined", stacklevel=2)
+            continue
         if body.get("template") not in (None, "NPC_Workshop_Fisher_Trader") or body.get("like") not in (None, "fisher", "villager"):
             raise BlocksError(f"npcs.{name}.body: only the Fisher/Villager chassis is supported")
         _body_geometry(body, f"npcs.{name}.body")

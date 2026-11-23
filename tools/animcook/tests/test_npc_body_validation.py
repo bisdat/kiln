@@ -156,6 +156,27 @@ class NpcBodyValidation(unittest.TestCase):
             self.assertEqual({}, B.npc_bodies(root))
             self.assertEqual([], B.plan(root)["models"])
 
+    def test_incomplete_legacy_npc_models_keep_the_ordinary_eager_cook_path(self):
+        import warnings
+        for missing in ("animation", "motions"):
+            with self.subTest(missing=missing), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                recipe, entries = self.uri_fixture(root, "rig.bin")
+                block = root / "blocks/npc.json"
+                document = json.loads(block.read_text())
+                document["npcs"]["tobin"].pop(missing)
+                block.write_text(json.dumps(document))
+                with warnings.catch_warnings(record=True) as notices:
+                    warnings.simplefilter("always")
+                    self.assertEqual({}, B.npc_bodies(root))
+                self.assertTrue(any("npcs.tobin." + missing in str(w.message) for w in notices))
+                with warnings.catch_warnings(record=True):
+                    warnings.simplefilter("always")
+                    planned = B.plan(root)
+                self.assertTrue(any(step["gltf"] == "models/rig.gltf" for step in planned["models"]))
+                self.assertFalse(B.body_step(recipe, {"op": "model", "name": "models/rig"}, specs={}))
+                self.assertEqual((entries, [], []), B.body_manifest(recipe, entries, True, specs={}))
+
     def test_complete_vector_uses_effective_cooked_duration_and_canonical_order(self):
         spec, graph, clips = fixture()
         vector = B._body_bindings(spec, graph, clips, "motions")
