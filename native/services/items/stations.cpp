@@ -22,6 +22,7 @@
 //    the station outputs. docs/re/stations.md §8 and §9.
 #include "stations.h"
 #include "dyes.h"
+#include "storage_guard.h"
 
 #include <windows.h>
 
@@ -3764,11 +3765,11 @@ std::vector<CraftSource> craft_sources_copy(uint32_t player) {
     uint32_t session=0;
     if(!source_player(g_srv_bases.load(std::memory_order_acquire),player,&session))return {};
     auto sources=g_registered.copy(player);
-    sources.erase(std::remove_if(sources.begin(),sources.end(),[&](const CraftSource& source) {return source.player_session!=session;}),sources.end());
+    sources.erase(std::remove_if(sources.begin(),sources.end(),[&](const CraftSource& source) {return source.player_session!=session||storage_contains(source.container);}),sources.end());
     return sources;
 }
-bool craft_source_access(void* bases, uint32_t player, uint32_t container) { return source_access(bases,player,container); }
-bool craft_source_access(uint32_t player, uint32_t container) { return source_access(g_srv_bases.load(std::memory_order_acquire),player,container); }
+bool craft_source_access(void* bases, uint32_t player, uint32_t container) { return !storage_contains(container)&&source_access(bases,player,container); }
+bool craft_source_access(uint32_t player, uint32_t container) { return !storage_contains(container)&&source_access(g_srv_bases.load(std::memory_order_acquire),player,container); }
 void craft_sources_cancel_owner(KilnOwner owner) { g_registered.cancel_owner(owner); }
 
 KilnResult stations_publish(const KilnApi* api, KilnOwner owner) {

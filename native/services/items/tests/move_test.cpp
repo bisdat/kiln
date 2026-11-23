@@ -18,6 +18,7 @@
 
 #include "hooks_shim.h"
 #include "../engine.cpp"
+#include "../storage_guard.h"
 #include "../moves.cpp"
 #include "../names.cpp"
 #include "../xfer.cpp"
@@ -1868,9 +1869,52 @@ void give_equip_test() {
     }
 }
 
+Result12* __fastcall padded_storage_add(Result12* out,void*,uint32_t,uint64_t,uint32_t item,uint32_t count,OptU32*,OptU8*,OptF32*) {
+    *out={};push_op(0,KILN_SLOT_ID(B2,1),item,static_cast<uint16_t>(count),0);
+    put(B2,1,item,count_at(B2,1)+count);return out;
+}
+void storage_guard_test() {
+    E.tx_ctor=&fake_tx_ctor;E.tx_init=&fake_tx_init;E.commit=&fake_tx_noop;E.rollback=&fake_tx_rollback;E.free_arrays=&fake_tx_noop;
+    static const StorageGuards guards{
+        +[](uint32_t e){return e==B||e==B2;}, +[](uint32_t e){return e==B;},
+        +[](uint32_t e,uint32_t item,bool,uint64_t slot){if(e!=B&&e!=B2)return true;if(item!=IRON)return false;if(!slot)return true;uint32_t page=KILN_SLOT_INVENTORY(slot);return(page==B||page==B2)&&((page==B2?8u:0u)+KILN_SLOT_INDEX(slot)<9);},
+        +[](uint32_t e,uint32_t actor){return e!=B||actor==1;}};
+    storage_guards.store(&guards);
+    for(uint32_t kind:{uint32_t(KILN_MOVE_STACK),uint32_t(KILN_MOVE_QUICK_STACK),uint32_t(KILN_MOVE_ALL)}) {
+        reset_world();put(A,0,WOOD,9);FakeTx tx;Access access;access_from_tx(&tx,&access);
+        MoveJob job;job.r.size=sizeof job.r;job.r.kind=kind;job.r.from=A;job.r.to=B;job.r.slot=kind==KILN_MOVE_STACK?KILN_SLOT_ID(A,0):0;
+        KilnItemsMoveResult result{};unsigned long code=0;const auto before=g_comps;
+        check(run_move(access,job,reinterpret_cast<uint8_t*>(&tx),&result,&code)&&result.status==KILN_ITEMS_FILTERED&&g_comps==before,
+              "storage: filtered stack, quick stack and move all refuse without mutation");
+    }
+    for (bool merging : {false,true}) {
+        reset_world();put(A,0,IRON,9);if(merging)put(B2,1,IRON,3);FakeTx tx;Access access;access_from_tx(&tx,&access);
+        MoveJob job;job.r.size=sizeof job.r;job.r.kind=KILN_MOVE_STACK;job.r.from=A;job.r.to=B;job.r.slot=KILN_SLOT_ID(A,0);job.r.to_slot=KILN_SLOT_ID(B2,1);
+        KilnItemsMoveResult result{};unsigned long code=0;const auto before=g_comps;
+        check(run_move(access,job,reinterpret_cast<uint8_t*>(&tx),&result,&code)&&result.status==KILN_ITEMS_FILTERED&&g_comps==before,
+              merging?"storage: merge refuses padded logical cell 9":"storage: Move refuses padded logical cell 9");
+    }
+    for(bool automatic:{false,true}) {
+        reset_world();put(B2,1,IRON,3);FakeTx tx;Access access;access_from_tx(&tx,&access);E.tx_ops=0x100;E.add_items=&padded_storage_add;g_ops.clear();g_oplist=reinterpret_cast<OpList*>(reinterpret_cast<uint8_t*>(&tx)+E.tx_ops);*g_oplist={};
+        Job job;job.r.size=sizeof job.r;job.r.entity=B;job.r.item=IRON;job.r.count=5;job.r.slot=automatic?0:KILN_SLOT_ID(B2,1);KilnItemsResult result{};unsigned long code=0;const auto before=g_comps;
+        check(run_job(access,job,reinterpret_cast<uint8_t*>(&tx),&result,&code)&&result.status==KILN_ITEMS_FILTERED&&g_comps==before,
+              automatic?"storage: automatic Give top-up rolls back padded cell 9":"storage: Give refuses padded logical cell 9");
+    }
+    reset_world();put(A,0,IRON,5);for(unsigned i=0;i<8;++i)put(B,i,IRON,100);put(B2,0,IRON,100);put(B2,1,IRON,3);
+    {FakeTx tx;Access access;access_from_tx(&tx,&access);MoveJob job;job.r.size=sizeof job.r;job.r.kind=KILN_MOVE_QUICK_STACK;job.r.from=A;job.r.to=B;KilnItemsMoveResult result{};unsigned long code=0;const auto before=g_comps;
+    check(run_move(access,job,reinterpret_cast<uint8_t*>(&tx),&result,&code)&&result.status==KILN_ITEMS_FILTERED&&g_comps==before,"storage: bulk merge rolls back padded cell 9");}
+    E.get_component=+[](PtrSize*out,uintptr_t,uint32_t hash,uint32_t entity)->PtrSize*{auto it=g_comps.find({hash==kHashInventorySetup?T_SETUP:T_INV,entity});*out=it==g_comps.end()?PtrSize{}:PtrSize{it->second.data(),it->second.size()};return out;};
+    bool matched=true;unsigned long code=0;
+    check(inventory_matches(0,B,0,&matched,&code)&&!matched,"storage: default inventory scan excludes holders");
+    check(inventory_matches(0,B,KILN_ITEMS_FIND_CONTAINERS,&matched,&code)&&!matched,"storage: Containers excludes holders");
+    check(inventory_matches(0,B,KILN_ITEMS_FIND_PLAYER_STORAGE,&matched,&code)&&matched,"storage: explicit player-storage scan includes holders");
+    storage_guards.store(nullptr);
+}
+
 int main(int argc, char** argv) {
     setup_engine();
     const std::string mode = argc > 1 ? argv[1] : "all";
+    if (mode == "storage") { storage_guard_test(); return failures ? EXIT_FAILURE : EXIT_SUCCESS; }
     if (mode == "give-equip") { give_equip_test(); return failures ? EXIT_FAILURE : EXIT_SUCCESS; }
     if (mode == "review") {
         review_tests();

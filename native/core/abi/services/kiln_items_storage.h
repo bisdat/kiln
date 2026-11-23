@@ -32,9 +32,9 @@
  *     from then on (the player entity is 0 until the join apply spawns it).
  *  2. Decide and restore. Kiln.Saves picks the copy (the duplication rule) and calls restore(slot, join, document)
  *     once for this join, with an empty document (KIS_SOURCE_NEW) for a character without storage. restore is valid at
- *     any time after the read of step 1; it copies the document and returns. At the end of the game's join apply
- *     (characters/JoinApply: the player's own pages exist) Kiln builds a holder for every registered key and rebuilds
- *     its records; a restore that comes after the join apply is built in the next sim step. Records that fail
+ *     any time after the read of step 1; it copies the document and returns. After the game's join apply
+ *     (characters/JoinApply: the player's own pages exist), the next quiescent Post builds a holder for every
+ *     registered key and rebuilds its records. Held copies stay parked beside that usable live holder. Records that fail
  *     validation are quarantined (kept, with a reason); records of a key no loaded mod registered, or that do not fit,
  *     stay parked unchanged. KIS_EVENT_RESTORED / _PARKED / _QUARANTINED follow.
  *  3. Play. Mods move items in and out with kiln.items' rows. A registration made while the player is online restores
@@ -51,7 +51,8 @@
  *     thread: the captures-done stage, in the pattern of kiln.saves' SNAPSHOT stage (a pump, its kind a hint, the events
  *     read with next_event). There Kiln.Saves takes the batch (take_frozen) and queues the storage part of the pending
  *     generation for its writer; kiln.saves' stage barrier holds the world write, and the publication to clients after
- *     it, until that part is durable, so the pair is on disk before the world file and before the character leaves.
+ *     it, for the existing bounded wait. On success the pair is durable before the world and character publication;
+ *     on failure/timeout vanilla saving continues while Kiln retains/retries its staged pair and reports degraded.
  *     It releases the batch (release_frozen) once it has it. A leave save runs the same way. On a build without the
  *     captures-done hook items.storage.persist is unavailable ("no captures-done hook on this build") and persist_bind
  *     refuses: no holder is ever built there.
@@ -64,12 +65,14 @@
  * Threads
  *  - Every row: any thread. Values are as of the last sim step. Writes (set_ref, return_parked, restore, park, unpark)
  *    are copied before the call returns and run in the next sim step (a restore before the join apply: at its end),
- *    inside kiln.items' program.
+ *    in kiln.items' program (transactions/references) or quiescent Post (structural create/rebuild/cleanup).
  *  - KilnStorageStageFn: the server world's thread, inside the game's save, after the world's jobs finished and after
  *    the save's captures (game state may be read as in Post). It must not block on the disk, wait for another thread
  *    or call kiln.items' write rows: it copies the batch and only queues the pending write; kiln.saves' stage barrier
  *    (stage_progress) then holds the world write, and with it the publication to clients, until that write is
- *    durable. A stage function that faults is removed (logged); the batch stays for take_frozen.
+ *    durable, subject to the existing bounded wait (failure never stops vanilla saving/publication). Also called
+ *    at quiescent Post for the persistence-only housekeeping hints documented below. A stage function that faults
+ *    is removed (logged); the batch stays for take_frozen.
  *  - KilnStorageReturnFn: the tick thread, Pre of the step after the return ran.
  *
  * Fail soft: on a game build where a row of sigdb feature items.storage does not resolve, register_storage still
@@ -392,7 +395,7 @@ typedef struct KilnStorageEvent {
     uint32_t reason;           /* PARKED: KIS_PARK_*; QUARANTINED: KIS_QUARANTINE_*; DEATH: KIS_DEATH_* applied */
     uint32_t stacks;
     uint32_t items;            /* the stacks' counts together */
-    KilnEntity target;         /* DEATH: the tombstone (0: kept); RETURNED: where they went */
+    KilnEntity target;         /* DEATH: tombstone; RETURNED: destination; PARKED/RESTORED: readable old/new holder */
     uint32_t source;           /* RESTORED: KIS_SOURCE_* */
     uint32_t slot;             /* the game's player slot */
     uint32_t reserved;
@@ -438,8 +441,16 @@ typedef struct KilnStorageReturnResult {
 } KilnStorageReturnResult;
 
 typedef void(KILN_CALL* KilnStorageReturnFn)(const KilnStorageReturnResult* result, void* user);
+/* Persistence-only StageFn hints, not raw KilnStorageEvent.kind values and not mod API events. */
+enum { KIS_STAGE_PARKED = 0x100u, KIS_STAGE_RESTORED = 0x101u };
+
 /* The captures-done stage: `kind` is the kind of the newest queued event (a hint: KIS_EVENT_BATCH; read them with
  * next_event). */
+/* Also called at quiescent server Post with KIS_STAGE_PARKED (after freeze, before deletion) or
+ * KIS_STAGE_RESTORED (immediately after rebuild). Drain next_event: PARKED/RESTORED events have target = the
+ * still-readable old/new holder. These hints copy/restore InstanceData synchronously, bounded, without mod/user
+ * callbacks or disk waits. Never called from Capture or a program. No binding means no hint. Temporary/retired
+ * holders use handle 0 and nonzero target; they remain internal to persistence. No new event kinds or layouts. */
 typedef void(KILN_CALL* KilnStorageStageFn)(uint32_t kind, void* user);
 
 /* ------------------------------------------------------------------------------------------------ table -------- */
