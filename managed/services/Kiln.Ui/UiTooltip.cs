@@ -49,12 +49,18 @@ public enum TooltipColor
 
 /// <summary>One line in the game's item detail view: its text, colour, and whether it uses the game's smaller detail text
 /// size.</summary>
+/// <param name="Text">The line's text.</param>
+/// <param name="Color">The line's colour. Default <see cref="TooltipColor.Default"/>.</param>
+/// <param name="Small">True to use the game's smaller detail text size. Default false.</param>
 public readonly record struct TooltipLine(UiText Text, TooltipColor Color = TooltipColor.Default, bool Small = false);
 
 /// <summary>A tooltip-lines provider's answer: Ok with the lines to add (at most 16 per detail view, all providers of
 /// Ui.Tooltip and Ui.Values.TooltipLines together; a provider whose lines do not fit adds none), or not Ok (adds none;
 /// the reason is logged once). Lines are interned for the process: keep them stable, do not make a new text every
 /// frame.</summary>
+/// <param name="Ok">True to add <paramref name="Lines"/>; false to add none.</param>
+/// <param name="Reason">Why it refused; null when <see cref="Ok"/>.</param>
+/// <param name="Lines">The lines to add.</param>
 public sealed record UiTooltipLines(bool Ok, string? Reason, IReadOnlyList<TooltipLine> Lines) : IKilnResult
 {
     /// <summary>No lines.</summary>
@@ -75,6 +81,9 @@ public delegate UiTooltipLines UiTooltipLinesProvider(in UiValueContext context,
 
 /// <summary>A tooltip-values provider's answer: Ok with a factor the detail's stat numbers are multiplied by (finite, 0 to
 /// 1000; providers multiply in order), or not Ok (the numbers stay as the earlier providers left them).</summary>
+/// <param name="Ok">True to apply <paramref name="Factor"/>; false to leave the numbers.</param>
+/// <param name="Reason">Why it refused; null when <see cref="Ok"/>.</param>
+/// <param name="Factor">What the stat numbers are multiplied by: finite, 0 to 1000.</param>
 public sealed record UiTooltipScale(bool Ok, string? Reason, float Factor) : IKilnResult
 {
     /// <summary>No change (factor 1).</summary>

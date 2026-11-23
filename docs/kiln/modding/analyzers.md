@@ -228,7 +228,7 @@ Context.Tasks.Run("loot-scan", async ctx =>
     var found = ScanNearbyContainers(area);            // a worker: compute and IO are fine here
     Chat.Broadcast("scan done");                       // KILN101: runs on a Kiln task worker (Context.Tasks.Run)
     await ctx.ToTick();
-    foreach (var c in found) Inventory.Transfer(c, player);   // on the tick after the hop
+    foreach (var c in found) await Items.MoveAll(c, player);   // on the tick after the hop
     await ctx.NextGateWindow();
     Chat.Broadcast("applied");                         // KILN101: NextGateWindow took the work back to a worker
 });
@@ -733,8 +733,8 @@ you compile.
 
 In a mod players install, use the documented API instead; `limits.md` lists what has none yet.
 
-The task-thread world reads and writes (`WorldConcurrent`) are not lab members: they have their own id,
-[KILNX003](#kilnx003), and `KILNX001` does not opt in to them.
+The task-thread world reads and writes (`WorldConcurrent`) are not lab members and need no experimental opt-in
+([retired KILNX003](#kilnx003)).
 
 <a id="kilnx002"></a>
 ## KILNX002: not yet proven in the game client
@@ -744,28 +744,16 @@ pass settles it). `[Experimental("KILNX002")]`; today the achievement guard (`St
 **Fix.** Opt in the same way with `KILNX002` when you accept that; the mark goes once the client pass confirms it.
 
 <a id="kilnx003"></a>
-## KILNX003: task-thread world reads and writes
-**What.** The code uses `WorldConcurrent` or one of its types (Kiln.World): the reads from a Kiln task (`Open`, `Read`,
-`ReadMany`, `Query`, `ConcurrentEntity`, `ReadStatus` and the rest) or the compare-exchange writes
-(`TryCompareExchange`, `WritePolicy`, `ExchangeResult<T>`, `ComponentExchangedEvent` and the rest). They are
-`[Experimental("KILNX003")]`: documented API for mods that shows in completion, but new. The compiler reports the use as
-an error. In unit tests, `FakeWorld.BusyReads` and `BusyWrites` (Kiln.TestKit) carry the same id.
+## KILNX003: task-thread world reads and writes (retired in 0.2.0-dev.30.7)
+**First availability.** The task-thread reads and compare-exchange writes (`WorldConcurrent` and its types,
+Kiln.World) and TestKit's `FakeWorld.BusyReads` / `BusyWrites` first shipped in 0.2.0-dev.29.18 with
+`[Experimental("KILNX003")]`. On those older SDKs, using them requires a `KILNX003` opt-in in `NoWarn`.
 
-**Since when.** 0.2.0-dev.29.18, the first release with `WorldConcurrent`. Pre-release builds of the task branch marked it
-`KILNX001`, the lab members' id: a project that opted in with `KILNX001` for it now opts in with `KILNX003` (and keeps
-`KILNX001` only if it also calls lab members).
-
-**Fix.** Opt in once in the mod's project file, and in its test project when the tests use them:
-
-```xml
-<PropertyGroup>
-  <NoWarn>$(NoWarn);KILNX003</NoWarn>
-</PropertyGroup>
-```
-
-They leave experimental once their in-game checks (services/world.md, "World reads from task threads" and "World writes
-from task threads") pass on both exact game builds; until then their shape can still change. The guide:
-[tasks.md](tasks.md#project-setup).
+**Stabilization.** Since 0.2.0-dev.30.7, mod API 0.2.16 (no longer experimental). Mod and test projects no longer
+need that opt-in. An existing `KILNX003` suppression is harmless and can go. `KILNX001` lab APIs and `KILNX002`
+client APIs retain their own opt-ins. Threading, bounds, capability checks and refusal behavior have not changed:
+KILN101 still reports tick-only API in task work, and KILN105 still reports task-unsafe uses, including escaped
+world reads and compare-exchange writes on the tick. See the [task guide](tasks.md#project-setup).
 
 ## KILNX031: registries
 **What.** The code uses `Kiln.Registry` (the registries' entry types such as `ItemEntry`, `RegistryId`, `RegistrySchema`)

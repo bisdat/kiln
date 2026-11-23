@@ -202,6 +202,24 @@ public sealed unsafe class AmmoListTests : IDisposable
     }
 
     [Fact]
+    public void In_Append_a_game_row_at_count_0_leaves_the_mods_row_in_and_takes_no_room()
+    {
+        // GitHub issue 131: the game keeps the row of a used-up stack at count 0. Only a game row with stock leaves the mod's
+        // row of its item out; native shows the game's row and sends its pick to the mod when the backpack does not hold it.
+        FakeAmmo.Context(Arrow, 1, game: [(0x10, 0), (0x11, 4)]);
+        using var p = Ui.AmmoList.Provide(AmmoListKind.Arrow, c => c.Revision == 1
+            ? [R(0x10, 7), R(0x11, 2), R(0x30, 1)]
+            : [R(1, 7), R(0x100, 1), R(0x101, 1)]);
+        UiAmmoListBridge.Tick();
+        Assert.Equal([(0x10u, 7u), (0x30u, 1u)], FakeAmmo.Last(Arrow).Rows);
+        Assert.Contains(0x10u, UiAmmoListBridge.StateOf(AmmoListKind.Arrow).Keys.Select(k => k.Item));
+        // the game's 63 rows leave one: its count-0 item shows as the game's row, so the next item still fits
+        FakeAmmo.Context(Arrow, 2, game: Enumerable.Range(1, 63).Select(i => ((uint)i, i == 1 ? 0u : 1u)).ToArray());
+        UiAmmoListBridge.Tick();
+        Assert.Equal([(1u, 7u), (0x100u, 1u)], FakeAmmo.Last(Arrow).Rows);
+    }
+
+    [Fact]
     public void Replace_wins_for_the_whole_list_and_keeps_registration_order()
     {
         FakeAmmo.Context(Spell, 1, game: (0x10, 1));

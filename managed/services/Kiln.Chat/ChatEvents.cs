@@ -24,8 +24,11 @@ public sealed class ChatMessageEvent : CancelableEvent
     /// <summary>The line as received.</summary>
     public ChatMessage Message { get; }
 
+    /// <summary>The sender; null when their connection record was not found.</summary>
     public ChatPlayer? Player => Message.Player;
+    /// <summary>The sender's player entity; <see cref="EntityId.None"/> when the sender is not known.</summary>
     public EntityId Sender => Message.Sender;
+    /// <summary>The sender's platform name; empty when the sender is not known.</summary>
     public string SenderName => Message.SenderName;
 
     /// <summary>The line as typed; handlers may replace it.</summary>
@@ -34,6 +37,7 @@ public sealed class ChatMessageEvent : CancelableEvent
     /// <summary>The original line starts with the command prefix.</summary>
     public bool IsCommand => Message.IsCommand;
 
+    /// <summary>True when a handler changed <see cref="Text"/> from the line as typed.</summary>
     public bool TextChanged => !string.Equals(Text, Message.Text, StringComparison.Ordinal);
 }
 
@@ -53,7 +57,9 @@ public sealed class CommandExecutingEvent : CancelableEvent
         Args = args;
     }
 
+    /// <summary>Who runs the command.</summary>
     public CommandSource Source { get; }
+    /// <summary>The command that is about to run.</summary>
     public CommandInfo Command { get; }
 
     /// <summary>The name as typed (may be an alias).</summary>
@@ -62,6 +68,7 @@ public sealed class CommandExecutingEvent : CancelableEvent
     /// <summary>The whole line without the prefix.</summary>
     public string Line { get; }
 
+    /// <summary>The arguments after the name.</summary>
     public IReadOnlyList<string> Args { get; }
 
     /// <summary>What the source is told when the run is canceled.</summary>
@@ -81,9 +88,13 @@ public sealed class CommandExecutedEvent : KilnEvent
         ElapsedMs = ms;
     }
 
+    /// <summary>Who ran the command.</summary>
     public CommandSource Source { get; }
+    /// <summary>The command.</summary>
     public CommandInfo Command { get; }
+    /// <summary>The whole line without the prefix.</summary>
     public string Line { get; }
+    /// <summary>How it ended: output, error and whether it ran.</summary>
     public CommandResult Result { get; }
 
     /// <summary>Time spent in the handler (and parsing).</summary>

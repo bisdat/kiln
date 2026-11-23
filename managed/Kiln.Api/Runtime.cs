@@ -1,12 +1,19 @@
 // SPDX-License-Identifier: MIT
 namespace Kiln;
 
+/// <summary>How severe a log line is: from <see cref="Error"/> (1, the most severe) to <see cref="Trace"/> (5, the
+/// finest detail).</summary>
 public enum LogLevel
 {
+    /// <summary>Something failed.</summary>
     Error = 1,
+    /// <summary>Something unexpected happened; the mod went on.</summary>
     Warn = 2,
+    /// <summary>A normal event worth a line in the log.</summary>
     Info = 3,
+    /// <summary>Detail for finding a problem.</summary>
     Debug = 4,
+    /// <summary>The finest detail.</summary>
     Trace = 5,
 }
 
@@ -17,11 +24,18 @@ public sealed class Logger
 
     internal Logger(ulong owner) => _owner = owner;
 
+    /// <summary>Writes a line at <paramref name="level"/>.</summary>
     public void Write(LogLevel level, string message) => Backend.Current.Log(_owner, level, message);
+    /// <summary>Writes an <see cref="LogLevel.Error"/> line.</summary>
     public void Error(string message) => Write(LogLevel.Error, message);
+    /// <summary>Writes a <see cref="LogLevel.Warn"/> line.</summary>
     public void Warn(string message) => Write(LogLevel.Warn, message);
+    /// <summary>Writes an <see cref="LogLevel.Info"/> line.</summary>
     public void Info(string message) => Write(LogLevel.Info, message);
+    /// <summary>Writes a <see cref="LogLevel.Debug"/> line.</summary>
     public void Debug(string message) => Write(LogLevel.Debug, message);
+    /// <summary>Writes an <see cref="LogLevel.Error"/> line: the message, then the exception (its type, message and
+    /// stack).</summary>
     public void Error(Exception e, string message) => Write(LogLevel.Error, $"{message}: {e}");
 }
 
@@ -55,15 +69,24 @@ public sealed class Scheduler
     /// <c>ConfigureAwait(false)</c> comes back to the tick thread.</summary>
     public SynchronizationContext SynchronizationContext { get; }
 
+    /// <summary>What <see cref="Scheduler.NextTick"/> returns: <c>await</c> it to continue on the tick thread at the
+    /// next step.</summary>
     public readonly struct NextTickAwaitable(Scheduler scheduler)
     {
+        /// <summary>The awaiter the <c>await</c> uses.</summary>
         public Awaiter GetAwaiter() => new(scheduler);
 
+        /// <summary>The awaiter of <see cref="NextTickAwaitable"/>.</summary>
         public readonly struct Awaiter(Scheduler scheduler) : System.Runtime.CompilerServices.ICriticalNotifyCompletion
         {
+            /// <summary>Always false: the continuation is posted to the tick thread
+            /// (<see cref="Scheduler.Post"/>).</summary>
             public bool IsCompleted => false;
+            /// <summary>Posts <paramref name="continuation"/> to the tick thread.</summary>
             public void OnCompleted(Action continuation) => scheduler.Post(continuation);
+            /// <summary>Posts <paramref name="continuation"/> to the tick thread.</summary>
             public void UnsafeOnCompleted(Action continuation) => scheduler.Post(continuation);
+            /// <summary>Returns nothing: the await has no value.</summary>
             public void GetResult() { }
         }
     }
@@ -85,6 +108,7 @@ public sealed class Scheduler
 /// <summary>Process-wide facts about the running server and Kiln.</summary>
 public static class Game
 {
+    /// <summary>The version of the Kiln that is running.</summary>
     public static string KilnVersion => Backend.Current.Version;
 
     /// <summary>True on the server-world tick thread, where game state may be touched. False in a Kiln task's menu hop

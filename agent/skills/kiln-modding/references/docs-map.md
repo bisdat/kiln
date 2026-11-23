@@ -2,10 +2,16 @@
 
 The wiki: https://frostdev.io/kiln/wiki/<page>.
 
-The generated API reference: https://frostdev.io/kiln/downloads/<version>/sdk/api/, for example
-https://frostdev.io/kiln/downloads/0.2.0-dev.30.5/sdk/api/. Release builds publish one (a few older versions have none).
+The generated API reference of the newest release: https://frostdev.io/kiln/api/. Each release keeps its own copy at
+https://frostdev.io/kiln/downloads/<version>/sdk/api/ (a few older versions have none).
 It covers every public type and member with its XML docs, so look there when this skill or the wiki doesn't name a call.
-There is no "latest" URL: use the version the mod builds on.
+For a mod that builds on an older release, use that release's copy: the newest one can name members it lacks.
+
+This skill's own guides to the C# API, by area ([api.md](api.md) is the index): [contract, threads and which assembly holds a
+type](api-contract.md#which-assembly-holds-a-type-kilnservices), [events, config, commands, players](api-events.md),
+[items and recipes](api-items.md), [gear and rarity](api-gear.md), [content, creatures, abilities](api-content.md),
+[world, block queries and building tools](api-world.md), [UI](api-ui.md), [network and client](api-network.md),
+[hooks and other engines](api-hooks.md).
 
 | Question | Page |
 |---|---|
@@ -91,6 +97,7 @@ dev.26+ (pages in the repository's `docs/kiln/`):
 | Unit tests with no game (`Kiln.TestKit`) | `modding/unit-tests.md` |
 | Guided client checks (`[ClientCheck]`) | `modding/testing.md`; the pack: `client-pass.md` |
 | The achievement guard (`Kiln.SteamGuard`) | `services/steamguard.md` |
+| Persistent per-player bags, quivers and spellbooks (dev.30.7+, mod API 0.2.16) | `modding/player-storage.md`, `services/player-storage.md` |
 | Data on one item (`InstanceData`) | `modding/inventory.md` "Data on one item"; `services/saves.md`, `services/items.md` |
 | A mod's own player animation states (`assets/player-states.json`) | `modding/animations.md` "Player states"; `services/playeranim.md` |
 | Weapon moves, animated held models, clips reworked at cook time | `modding/item-blocks.md` "Moves"; `modding/animations.md` "Clips reworked" |
@@ -146,7 +153,7 @@ dev.28+ and dev.29+ (pages in the repository's `docs/kiln/`):
 | Item icons and names, looks and themes, fonts | `ui.md` |
 | The game's own texts (`Content.Text`) | `services/content.md` |
 | Kiln tasks, `WorldConcurrent` | `modding/tasks.md`, `services/tasks.md`, `services/world.md` |
-| Analyzers, KILNX003 | `modding/analyzers.md` |
+| Analyzers, retired KILNX003 | `modding/analyzers.md` |
 | Unknown slash commands, `chat.json` | `services/chat.md` |
 | Graphics status | `graphics.md` |
 | EMF parity | `emf.md`, `emf-parity.md` |
@@ -177,6 +184,9 @@ dev.30+ (pages in the repository's `docs/kiln/`):
 | dev.30.5+: terrain-only removal, a per-tool list of removable materials | `services/terrain-tool-carving.md` |
 | dev.30.5+: a mod's item or recipe tracked as game knowledge (`KnowledgeBlock`) | `modding/item-blocks.md` "Tracking"; reads and changes: `services/knowledge.md` |
 | dev.30.6+: block queries and controlled breaking (`Build.BlockAt`, `FindWall`, `BreakBox`) | `services/build-blocks.md` |
+| dev.30.6+: player crafting from linked chests, dye sources (`Crafting.AddSource`, #125) | `services/stations.md` "Player crafting sources"; [api-items.md](api-items.md#crafting-from-linked-containers-306-mod-api-0215) |
+| dev.30.6+: create and equip one stack in one step (`Items.GiveEquip`, #126) | `services/items.md` "Give straight into equipment"; [api-items.md](api-items.md#inventory-transfers-dev20) |
+| dev.30.6+: mods' rows in the HUD's arrow and spell lists (`Ui.AmmoList`, #127; client) | `ui.md` "The HUD's ammunition and spell lists"; `services/ui.md` "kiln.ui.ammo"; [api-ui.md](api-ui.md#game-ui-hud-keys) |
 
 dev.30+ samples: GearValues, RarityAnvil, SlotMarks.
 

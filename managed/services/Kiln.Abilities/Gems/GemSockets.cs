@@ -10,6 +10,7 @@ namespace Kiln;
 [Flags]
 public enum GemSocketKinds
 {
+    /// <summary>No gear besides weapons.</summary>
     None = 0,
     /// <summary>Rings (category Equipment, slot type Armour_Ring): gem impact slots 7 and 8.</summary>
     Rings = 1,
@@ -20,6 +21,7 @@ public enum GemSocketKinds
     /// <summary>Any other gear with its own item entity (tools, backpacks, gliders, instruments...). A gem in it runs only
     /// while the item sits in an impact slot (held in the hand, for a tool).</summary>
     OtherGear = 8,
+    /// <summary>Every kind above: rings, armour, shields and other gear.</summary>
     All = Rings | Armour | Shields | OtherGear,
 }
 

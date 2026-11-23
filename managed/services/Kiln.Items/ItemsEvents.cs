@@ -14,11 +14,13 @@ public abstract class ItemsTransactionEvent : KilnEvent
         Origin = origin;
     }
 
+    /// <summary>The result of the transaction.</summary>
     public ItemsResult Result { get; }
 
     /// <summary>The inventory owner (player, chest, NPC).</summary>
     public EntityId Target => Result.Entity;
 
+    /// <summary>The item that was given or taken.</summary>
     public ItemId Item => Result.Item;
 
     /// <summary>How many were given / taken.</summary>
@@ -35,6 +37,7 @@ public abstract class ItemsTransactionEvent : KilnEvent
 public sealed class ItemsGivenEvent : ItemsTransactionEvent
 {
     internal ItemsGivenEvent(ItemsResult result, string origin) : base(result, origin) { }
+    /// <summary>The count, the item, the receiver and the mod, for logs.</summary>
     public override string ToString() => $"given {Count} x {Item} to {Target} by {Origin}";
 }
 
@@ -42,6 +45,7 @@ public sealed class ItemsGivenEvent : ItemsTransactionEvent
 public sealed class ItemsTakenEvent : ItemsTransactionEvent
 {
     internal ItemsTakenEvent(ItemsResult result, string origin) : base(result, origin) { }
+    /// <summary>The count, the item, the owner and the mod, for logs.</summary>
     public override string ToString() => $"taken {Count} x {Item} from {Target} by {Origin}";
 }
 

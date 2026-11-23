@@ -4,6 +4,8 @@ using System.Text.Json.Nodes;
 namespace Kiln;
 
 /// <summary>One selector entry. Set exactly one named material reference or game building-material catalog name.</summary>
+/// <param name="Material">A building material of this mod by its name, or <c>"other-mod:name"</c>. Set this or <paramref name="GameMaterial"/>, not both.</param>
+/// <param name="GameMaterial">A building material of the game, by its catalog name. Set this or <paramref name="Material"/>, not both.</param>
 public sealed record BuildingMaterialPoolEntry(PartRef<BuildingMaterialBlock>? Material = null, string? GameMaterial = null);
 
 /// <summary>A boot-time pool of 1..64 building-material items for opt-in new blueprint shapes. It consumes no material IDs.

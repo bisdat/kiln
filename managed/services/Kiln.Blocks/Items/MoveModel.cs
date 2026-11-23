@@ -63,6 +63,7 @@ public sealed record MoveBlock
 public sealed class MoveChain : IEnumerable<MoveBlock>
 {
     private readonly List<MoveBlock> _moves = new();
+    /// <summary>An empty chain. Moves are added with <see cref="Add"/>.</summary>
     public MoveChain() { }
     /// <summary>A chain of these moves, in order.</summary>
     public MoveChain(IEnumerable<MoveBlock> moves) => _moves.AddRange(moves);
@@ -87,6 +88,7 @@ public sealed class MoveChain : IEnumerable<MoveBlock>
 public sealed class MoveAnimation : IEnumerable<string?>
 {
     private readonly List<string?> _names = new();
+    /// <summary>An empty list of state names. Names are added with <see cref="Add"/>.</summary>
     public MoveAnimation() { }
     /// <summary>These state names, one per state event in order; a null keeps that one.</summary>
     public MoveAnimation(IEnumerable<string?> names) => _names.AddRange(names);

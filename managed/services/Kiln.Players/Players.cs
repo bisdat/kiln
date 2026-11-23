@@ -10,15 +10,23 @@ namespace Kiln;
 [Flags]
 public enum PlayerPermissions : uint
 {
+    /// <summary>No rights (also what is reported when the rights are unknown: see <see cref="Player.PermissionsKnown"/>).</summary>
     None = 0,
+    /// <summary>Kick and ban other players.</summary>
     KickBan = 0x01,
+    /// <summary>Open other players' inventories.</summary>
     AccessInventories = 0x02,
+    /// <summary>Edit the base.</summary>
     EditBase = 0x04,
+    /// <summary>Edit the world.</summary>
     EditWorld = 0x08,
+    /// <summary>Extend the base.</summary>
     ExtendBase = 0x10,
+    /// <summary>Receive experience.</summary>
     ReceiveExp = 0x20,
 }
 
+/// <summary>Where a player is in joining and leaving.</summary>
 public enum PlayerState
 {
     /// <summary>Connected and loading; no player entity yet.</summary>
@@ -57,11 +65,15 @@ public sealed partial record Player
 
     /// <summary>The game's player slot (0..15).</summary>
     public int Slot { get; init; }
+    /// <summary>Whether the player is joining, in game or leaving.</summary>
     public PlayerState State { get; init; }
     /// <summary>The user group's rights; <see cref="PlayerPermissions.None"/> when unknown (see
     /// <see cref="PermissionsKnown"/>).</summary>
     public PlayerPermissions Permissions { get; init; }
+    /// <summary>True when <see cref="Permissions"/> was read from the game's player record. False: it is
+    /// <see cref="PlayerPermissions.None"/> because it is unknown (the game-log source has no user group).</summary>
     public bool PermissionsKnown { get; init; }
+    /// <summary>True when <see cref="IsAdmin"/> was read from the game. False: it is false because it is unknown.</summary>
     public bool IsAdminKnown { get; init; }
     /// <summary>The game's user-group id (raw); 0 when unknown.</summary>
     public uint UserGroupId { get; init; }
@@ -72,21 +84,58 @@ public sealed partial record Player
     /// <summary>Server-world step when Kiln saw the join; 0 if they were in game before Kiln watched.</summary>
     public ulong JoinedStep { get; init; }
 
+    /// <summary>The player is logged in: <see cref="State"/> is <see cref="PlayerState.InGame"/>.</summary>
     public bool InGame => State == PlayerState.InGame;
+    /// <summary>True when the player's user group has every right in <paramref name="p"/> (see <see cref="PermissionsKnown"/>).</summary>
     public bool Can(PlayerPermissions p) => (Permissions & p) == p;
+    /// <summary>The player's name, entity and Steam id, for a log line.</summary>
     public override string ToString() => $"{Name} (entity {Entity}{(SteamId != 0 ? $", steam {SteamId}" : "")})";
 }
 
 /// <summary>A join or leave seen by kiln.players.</summary>
+/// <param name="Sequence">kiln.players' running event number.</param>
+/// <param name="Joined">True for a join, false for a leave.</param>
+/// <param name="Step">The server-world step the event was seen in.</param>
+/// <param name="Player">The player, as they were at that moment.</param>
 public sealed record PlayerEvent(ulong Sequence, bool Joined, ulong Step, Player Player);
 
 /// <summary>What kiln.players can do on this build, and what it saw last.</summary>
+/// <param name="Source">Where the player data comes from on this build.</param>
+/// <param name="Records">The game's player records were found (the layout resolved and the singleton was captured).</param>
+/// <param name="AdminBit">The game's BasicPlayerInfos was found, so <see cref="Player.IsAdmin"/> can be read.</param>
+/// <param name="Positions">Positions work (the entity transform and the server world resolved).</param>
+/// <param name="GameLog">kiln.players follows the game log.</param>
+/// <param name="SingletonMapAgrees">The world's singleton map gives the same objects the registration hook saw.</param>
+/// <param name="LayoutConsistent">The last scan found every record consistent.</param>
+/// <param name="Slots">How many player slots the game has (16 on this build).</param>
+/// <param name="InGame">How many players were in game at the last scan.</param>
+/// <param name="Connected">How many records were in use at the last scan: joining, in game and leaving.</param>
+/// <param name="LastSequence">The newest event number (0: none yet).</param>
+/// <param name="Scans">How many scans were done.</param>
+/// <param name="LogLines">How many game log lines were seen.</param>
+/// <param name="LogLinesMatched">How many log lines the log tracker understood.</param>
+/// <param name="WorldCaptured">The server world object was captured.</param>
+/// <param name="ServerPlayersCaptured">The game's <c>ServerPlayers</c> singleton (the first player record) was captured.</param>
+/// <param name="BasicPlayerInfosCaptured">The game's <c>BasicPlayerInfos</c> singleton was captured.</param>
+/// <param name="Simulated">The lab simulation is on: players are replayed from a log file.</param>
 public sealed record PlayersStatus(
     PlayerSource Source, bool Records, bool AdminBit, bool Positions, bool GameLog, bool SingletonMapAgrees,
     bool LayoutConsistent, int Slots, int InGame, int Connected, ulong LastSequence, ulong Scans, ulong LogLines,
     ulong LogLinesMatched, bool WorldCaptured, bool ServerPlayersCaptured, bool BasicPlayerInfosCaptured, bool Simulated);
 
 /// <summary>One raw player record and its BasicPlayerInfos entry (diagnostics).</summary>
+/// <param name="Handle">The record's connection handle.</param>
+/// <param name="Peer">The machine (peer) handle of the connection.</param>
+/// <param name="State">The record's state: 0 free, 1 loading, 2 waiting for login, 3 in game, 4 removing entity, 5 removing, 6 failed.</param>
+/// <param name="UserGroup">The record's user group id.</param>
+/// <param name="Permissions">The record's permission bits (see <see cref="PlayerPermissions"/>).</param>
+/// <param name="Entity">The player entity (0 until it is spawned).</param>
+/// <param name="NameLength">The length of the name in the record.</param>
+/// <param name="AccountId">The record's account id.</param>
+/// <param name="InfoEntity">The entity in the BasicPlayerInfos entry of this slot.</param>
+/// <param name="InfoHandle">The handle in the BasicPlayerInfos entry of this slot.</param>
+/// <param name="InfoAdminByte">The whole admin byte of the BasicPlayerInfos entry.</param>
+/// <param name="InfoNonZeroBytes">How many bytes of the BasicPlayerInfos entry are not zero.</param>
 public readonly record struct PlayerSlotRaw(
     uint Handle, uint Peer, uint State, uint UserGroup, uint Permissions, uint Entity, uint NameLength, ulong AccountId,
     uint InfoEntity, uint InfoHandle, uint InfoAdminByte, uint InfoNonZeroBytes);

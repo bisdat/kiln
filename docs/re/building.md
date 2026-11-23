@@ -147,16 +147,40 @@ function-local disassembly) and LLVM disassembly. No client execution was perfor
   item/count at +0x10/+0x14. It swaps its local array into that destination with `0xd90570`, but the view may still
   name the old stack buffer. Rebind the view to the destination's owned data after the original returns, then bound
   and filter that owned data. Never cache this constructor's item as evidence of what an in-flight action holds.
-- `0xd25b50` scans the item registry and applies GUID-tag filters to the item's tag BlobArray at +0x5e0 (24-byte rows:
-  GUID and two 32-bit fractions), producing 72-byte presentation rows. Its four callers use fixed tags or a zero include,
-  so a unique family tag alone does not admit a tool. Only the `0xc3f210` frame drawer's call at **0xc3fe18** is adapted:
+- `0xd25b50` (corrected 0.2.0-dev.30.7, kiln#130) does **not** scan the runtime item registry: it takes the list
+  `ItemRegistryResource.terraformingTools` (resource +0x20, BlobArray<ItemId>) through `0xe9f0f0`, whose only caller it
+  is (`[registry+0x20]` is the resource, `registry` the object at `+0x4667b8` that `0xe94470` looks items up in). The game
+  data lists 21 ids there: the Overgrowth and Decay tools and their improved forms, rakes, pickaxes, the gold sieve and
+  the six Overgrowth/Decay shapes. Per id it looks the item up (`0xe94470`), skips it when its tag BlobArray at +0x5e0
+  (24-byte rows: GUID, nominator, denominator) holds the exclude GUID, keeps it only when it holds the include GUID (a
+  zero include keeps all), copies the ratio GUID's nominator/denominator, and appends a 72-byte row `{u64 0, u32 item
+  +8, zeros, nominator +0x40, denominator +0x44}` to the caller's output (growing it through its callback, a fatal
+  error when there is none). It ends by sorting the output ascending by nominator/denominator (`0xb0b110`). A runtime
+  item (a clone in the registry map) is therefore never a row, whatever its tags. Vanilla Overgrowth shapes carry tag
+  `08aea6cf…` at ratio 1, 2 and 3. The four callers: `0xc3fe18` (frame drawer: Overgrowth branch include/ratio
+  `08aea6cf…` exclude `918b8e6c…`; Decay branch include/ratio `851efd4c…` exclude `ac4e9069…`), `0xd180a0` (Decay
+  tags), `0xd20190` (Overgrowth tags), `0xd6aa05` (zero include, exclude `3c68fe37…` (the rakes' tag), ratio
+  `db153a96…`). Only the `0xc3f210` frame drawer's call at **0xc3fe18** is adapted:
   a unique pattern qualifies the instruction and its rel32 target. A checked MID requires the current held family root
   to match selected hotbar ID `[RBP+0x118]` and resolved ItemInfo `[RBP+0xe0]`. The Overgrowth branch has
   `RBP=RSP+0x100`, output `RCX=RBP+0x690` (fresh empty capacity16 array), include `R9=RSP+0x30`, ratio
-  `R8=RBP+0x100`, exclude `RDX=RSP+0x40`. Only include/ratio GUID **values** in these distinct caller-owned
-  temporaries are replaced. Other three query sites, the Decay tuple and persistent callback outputs stay untouched.
+  `R8=RBP+0x100`, exclude `RDX=RSP+0x40`. The include/ratio GUID **values** in these distinct caller-owned
+  temporaries are replaced, and (since 0.2.0-dev.30.7) the family's rows go into the output's inline storage
+  (`RBP+0x6b8`, 16 rows of 72 bytes, up to `RBP+0xb38`), its count (`RBP+0x698`) written last. After the call the
+  drawer copies the output's data pointer and count into a 0x68-byte entry of its own list at `RBP+0x248` and draws
+  from that view; nothing outlives the frame, so a later vanilla frame starts from a fresh empty output again. Other
+  three query sites, the Decay tuple and persistent callback outputs stay untouched.
   There is no inherited TLS admission. `RawHook::caller()` alone is insufficient: its per-target caller record is not
   restored after a recursive predecessor. A write fault skips this one empty-output query, never a half-patched query.
+- Item tags (0.2.0-dev.30.7) are no resources: the game data cooks no `keen::ItemTag` (`{label}`), and no resource has
+  a tag's GUID. `ItemRegistryResource.itemTags` (+8, BlobArray of 20-byte `ItemTagInfo {tagGuid, labelId}`) lists the
+  210 tags the game knows, every tag an item carries among them (many with the empty label `0x69691905`). The readers
+  seen (`0xd25b50`, the pickup notice's `0xd53370`) compare GUIDs.
+- `equipment.terrainVoxelObject` (`ItemInfo+0x468`, `ObjectReference<keen::TerrainVoxelObjectDefinition>`, an empty
+  editor type): the 11 game items that set it (terrain blueprints) name a `keen::VoxelModelResource` of the same GUID
+  with `isTerrain` set, as `voxelObject` names one for a shape (the 144 items with a `voxelObject` name 67 models,
+  every one with `isTerrain` clear; the 11 terrain models are named only by `terrainVoxelObject`). Vanilla Overgrowth
+  shapes set neither; their radius is their own `FloatImpactConfig` `0x5258131e` (0.5, 1.5, 2.5).
 - `0xd3e130` writes a 16-byte root identity `{itemId,nameTag,descriptionTag,present}`. It substitutes vanilla root IDs
   based on ItemInfo flags +0x5d8 (bits 3/4/5/6/8). A Kiln root can instead use its own identity and content text tags:
   the existing `kiln.item.name` / `kiln.item.description` GUID derivation, verified in the content writer. No game
@@ -198,7 +222,9 @@ Static qualification on the exact client 26430625 (`5d9ef2f1…`), read-only; no
   is admitted for the list of that kind; any other item is refused at publish.
 - Backpack membership (is a row virtual?) comes from the stable client ECS snapshot: `InventorySetup` (84 bytes; linked
   entities +0, categories +64; Generic 4, Virtual 5) and `Inventory` (96 bytes; eight 12-byte stacks, id +0, count +4).
-  A read failure suppresses the wish without an event. A row the game listed itself is never virtual, in either mode.
+  A read failure suppresses the wish without an event. A row the game listed itself with a non-zero count is never
+  virtual, in either mode; one it kept at count 0 (see the next point) is decided by the backpack (since
+  0.2.0-dev.30.7).
 - Rebuilding a group, vanilla zeroes the count of every row it keeps and adds stock to rows with a matching item; it does
   not remove unmatched rows, and the cycle `0x40c320` does not check a row's count. Kiln therefore keeps a group's
   binding across a session or world change until that group's next build takes the mod rows out (picks of them stay

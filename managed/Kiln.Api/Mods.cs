@@ -51,6 +51,17 @@ internal static class HostedReasons
 public sealed record ModDependency(string Id, string VersionRange, bool Optional);
 
 /// <summary>Time and faults of one mod since it was loaded.</summary>
+/// <param name="Steps">The steps the mod's Pre handlers have run in since it was loaded.</param>
+/// <param name="TotalMs">The time spent in its handlers, Pre and Post together, in milliseconds.</param>
+/// <param name="PreMsPerStep">The average time its Pre handlers took per step, in milliseconds.</param>
+/// <param name="PostMsPerStep">The average time its Post handlers took per step, in milliseconds.</param>
+/// <param name="MaxMs">The longest single run of its handlers, in milliseconds.</param>
+/// <param name="Faults">The exceptions it has thrown since it was loaded.</param>
+/// <param name="RecentFaults">The faults inside the fault policy's time window (<c>mods.fault_window_s</c>); the mod is
+/// disabled when this reaches <c>mods.fault_limit</c>.</param>
+/// <param name="LastFault">When the last fault happened (UTC); null when there was none.</param>
+/// <param name="LastFaultMessage">The exception type, its message and where it was thrown, for the last fault; null
+/// when there was none.</param>
 public readonly record struct ModStats(
     long Steps, double TotalMs, double PreMsPerStep, double PostMsPerStep, double MaxMs, int Faults,
     int RecentFaults, DateTime? LastFault, string? LastFaultMessage);
@@ -73,16 +84,23 @@ public sealed class ModEntry
         Info = info;
     }
 
+    /// <summary>The mod's id.</summary>
     public string Id { get; }
+    /// <summary>The mod's display name.</summary>
     public string Name { get; }
+    /// <summary>The mod's version.</summary>
     public string Version { get; }
+    /// <summary>The mod's folder.</summary>
     public string Directory { get; }
+    /// <summary>Where the mod runs.</summary>
     public ModSide Side { get; }
+    /// <summary>What became of the mod.</summary>
     public ModState State { get; }
 
     /// <summary>Why the mod is not loaded (or was disabled); null otherwise.</summary>
     public string? Error { get; }
 
+    /// <summary>The dependencies the mod declared, in manifest order.</summary>
     public IReadOnlyList<ModDependency> Dependencies { get; }
 
     /// <summary>Position in the load order (0 = first), -1 when not loaded.</summary>
@@ -91,11 +109,13 @@ public sealed class ModEntry
     /// <summary>The full manifest metadata, when the manifest could be read.</summary>
     public ModInfo? Info { get; }
 
+    /// <summary>True when <see cref="State"/> is <see cref="ModState.Loaded"/>.</summary>
     public bool IsLoaded => State == ModState.Loaded;
 
     /// <summary>Live stats (tick time, faults) of the running instance; zero when not loaded.</summary>
     public ModStats Stats => ModsBackend.Current?.Stats(Id) ?? default;
 
+    /// <summary>The id, the version and the state, for logs.</summary>
     public override string ToString() => $"{Id} {Version} ({State.ToString().ToLowerInvariant()})";
 }
 
@@ -113,7 +133,7 @@ public static class Mods
     /// A const is copied into the mod when it is built, so a mod reading it sees the API it was built against, not the
     /// running one: read <see cref="RuntimeApiVersion"/>.</summary>
     [Obsolete("Use Mods.RuntimeApiVersion: a const is copied into the mod at build time.")]
-    public const string ApiVersion = "0.2.15";
+    public const string ApiVersion = "0.2.16";
 
     /// <summary>The Kiln mod API version of the Kiln that is running (for example <c>0.2.0</c>); a manifest's
     /// <c>apiVersion</c> is checked against it. Read at run time, so a mod built against an older SDK still sees the
@@ -128,6 +148,7 @@ public static class Mods
     /// <summary>The side this process runs as (from the core: dedicated server or client).</summary>
     public static ModSide Side => ModsBackend.Current?.Side ?? ModSide.Server;
 
+    /// <summary>True when the mod with this id is loaded.</summary>
     public static bool IsLoaded(string id) => Get(id)?.State == ModState.Loaded;
 
     /// <summary>The mod with <paramref name="id"/>, loaded or not; null when Kiln never saw it.</summary>
@@ -220,13 +241,16 @@ public sealed class ImcMessage
 
     /// <summary>The sending mod's id (<c>kiln</c> when Kiln or a service sent it).</summary>
     public string Sender { get; }
+    /// <summary>What the sender asks for; the receiver decides what the names mean.</summary>
     public string Method { get; }
+    /// <summary>The data that goes with it; null when there is none. <see cref="PayloadAs{T}"/> casts it.</summary>
     public object? Payload { get; }
     internal ModContext? SenderContext { get; }
 
     /// <summary>The payload as <typeparamref name="T"/>, or default when it is something else.</summary>
     public T? PayloadAs<T>() => Payload is T t ? t : default;
 
+    /// <summary>The sender and the method, for logs.</summary>
     public override string ToString() => $"{Sender} -> {Method}";
 }
 

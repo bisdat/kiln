@@ -67,6 +67,13 @@
 # The API gate (tools/release/api-gate.sh), before any build: no shipped public API removed since the previous v* tag,
 #   new API only with a raised Kiln.Mods.ApiVersion; after a release whose checks passed, the Unshipped.txt lines move
 #   into Shipped.txt in the working tree (to commit). The builds get the full version (VERSION in the export).
+# The agent API index (agent/skills/kiln-modding/references/api-index/, tools/docs-site/api_index.py), before the export: regenerated
+#   from the checked-out tree (its PublicAPI record, the XML docs of a Release build in $work/api-index, KILN_API_XML=DIR to use
+#   docs built elsewhere, and managed/api-history.tsv). A release exports a commit, so when the index changed the release stops at
+#   once and says to commit it; run again then. After the promote below it is generated once more from the same XML docs and goes
+#   into the same closing commit as the API record and the ledger. Test builds (--beta, --worktree, --launcher-only) skip both.
+# The doc gate: the API reference build (tools/docs-site/build.sh, in the assemble step) runs with KILN_DOCS_STRICT=1: a public name with no XML
+#   summary fails the release (undocumented-baseline.txt names none). tools/check.sh holds it current in every commit (stage `docs`).
 # KILN_API_BASELINE: the last release's Kiln.Api .nupkg (or it unzipped) for pack.sh's API compat gate; unset: a loud
 #   warning, at the start and in the closing text, and the release goes on.
 # Builds run one at a time (they share Cargo's build directory); KILN_RELEASE_NICE=1 runs them at the lowest priority.
@@ -82,6 +89,12 @@
 #   launcher/dist-windows); KILN_RELEASE_SERIAL_LAUNCHERS=1 runs them one after the other.
 # NuGet: the builds restore into a private package cache, $work/nuget-packages (KILN_RELEASE_NUGET_PACKAGES), never
 #   ~/.nuget/packages: a trial run of a version leaves no kiln.* packages of it behind for later local builds.
+# One run at a time per work folder and per KILN_GLIBC_DIR (lib/run-locks.sh): each run holds <work>/.release.lock and
+#   KILN_GLIBC_DIR/.release.lock until it ends, and a second run on either stops at once, before it changes anything,
+#   naming the lock and the run that holds it. Two releases at once need their own --work and KILN_GLIBC_DIR.
+# The export's files get the time of the export (after the source tarball, which keeps the commit's): a reused cargo
+#   folder then rebuilds the workspace crates every run instead of keeping another commit's build. kilnctl, kiln and
+#   kiln-eml-inspect (Linux) are copied into <work>/linux-bin right after their build; the rest of the run takes them there.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../.." && pwd)
@@ -174,6 +187,16 @@ else
   python3 -I "$here/roadmap.py" check "$version" ||
     { echo "release: $version cannot ship without its roadmap entry (above): add it to tools/release/roadmap/roadmap.json (tools/release/roadmap/README.md), commit, and build again" >&2; exit 1; }
 fi
+# One release at a time per work folder and per Linux build folder (KILN_GLIBC_DIR), taken before anything is removed
+# or written (the --force removal of $out below included): two runs sharing one swap each other's files (the
+# 0.2.0-dev.30 T1b trial shipped the kilnctl another run built minutes later in the same KILN_GLIBC_DIR/cargo). Held
+# until this run ends (lib/run-locks.sh).
+source "$lib/run-locks.sh"
+lock_info="release $name, out $out, since $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+release_lock "$work" "another release runs in the work folder $work: wait for it, or give this one its own --work" "$lock_info" || exit 1
+if ((!host_build)); then
+  release_lock "$glibc" "another release builds in KILN_GLIBC_DIR=$glibc: wait for it, or give this one its own KILN_GLIBC_DIR" "$lock_info" || exit 1
+fi
 if [[ -e $out && -n $(ls -A "$out" 2>/dev/null) ]]; then
   ((force)) || { echo "$out is not empty (use --force to replace it)" >&2; exit 1; }
   rm -rf "$out"
@@ -201,6 +224,33 @@ step() { printf '\n== %s (%ss)\n' "$*" $(($(date +%s) - t0)) | tee -a "$log"; }
 note() { echo "$*" | tee -a "$log"; }
 die() { echo "release: $*" | tee -a "$log" >&2; exit 1; }
 quiet() { "$@" >>"$log" 2>&1 || { tail -40 "$log" >&2; die "failed: $*"; }; }
+
+# ---------------------------------------------------------------- 0. the agent API index
+# Generated before the export so the export carries it. A release exports a commit: the index has to be committed, so a release
+# whose index changed stops here (the files are regenerated in the working tree: commit them, then run again). Only for a
+# release of the checked-out commit with committed inputs; a test build, a launcher-only build and --commit of another revision
+# export the committed index as it is (tools/check.sh's `index` stage holds it current in every commit).
+api_index=$repo/agent/skills/kiln-modding/references/api-index api_index_xml=""
+if ((!launcher_only)) && ((!worktree)) && [[ $channel != beta ]] && [[ -f $repo/tools/docs-site/api_index.py ]]; then
+  step "agent API index"
+  if [[ $(git -C "$repo" rev-parse HEAD) != "$(git -C "$repo" rev-parse --verify "$commit^{commit}" 2>/dev/null)" ]]; then
+    note "API index: $commit is not the checked-out commit: not regenerated, the committed index is exported"
+  elif ! git -C "$repo" diff --quiet HEAD -- managed native/core/abi crates/sfi/kiln-abi agent/skills/kiln-modding tools/docs-site/api_index.py; then
+    die "the working tree has uncommitted changes in the API inputs or the agent API index (git status): a release builds a commit, commit them first"
+  else
+    api_index_xml=${KILN_API_XML:-$work/api-index/artifacts/bin}
+    if [[ -n ${KILN_API_XML:-} ]]; then
+      quiet low python3 -I "$repo/tools/docs-site/api_index.py" --xml "$KILN_API_XML"
+    else
+      quiet low python3 -I "$repo/tools/docs-site/api_index.py" --build-dir "$work/api-index"
+    fi
+    if [[ -n $(git -C "$repo" status --porcelain -- "$api_index") ]]; then
+      git -C "$repo" status --short -- "$api_index" | head -20 | tee -a "$log"
+      die "the agent API index was out of date and is regenerated in $repo (above): commit it, new and removed parts included (git -C $repo add -A -- agent/skills/kiln-modding/references/api-index && git -C $repo commit -m 'skill: regenerate the API index' -- agent/skills/kiln-modding/references/api-index) and run the release again"
+    fi
+    note "API index: current"
+  fi
+fi
 
 # ---------------------------------------------------------------- 1. export
 src=$work/src
@@ -312,6 +362,11 @@ if [[ -n $sfpin ]]; then
   note "ShroudForge runtime source: source/shroudforge-kiln-${sfpin:0:12}-src.tar.gz"
 fi
 date_iso=$(date -u -d "@$SOURCE_DATE_EPOCH" +%Y-%m-%d)
+# git archive gives every exported file the commit's time, and Cargo counts a crate as built when no input is newer than
+# its last build: a reused target folder ($work/cargo, KILN_GLIBC_DIR/cargo) that last built a later commit would keep
+# that commit's code. The whole export (ShroudForge's and an overlay's files too) gets the time of now instead, newer
+# than any earlier build; the source tarballs above keep the commit's (lib/run-locks.sh, fresh_mtimes).
+fresh_mtimes "$src" "$(date +%s)" || die "cannot set the export's file times ($src)"
 
 # ---------------------------------------------------------------- 2. environment
 export KILN_OUT=$work/out CARGO_TARGET_DIR=$work/cargo
@@ -485,14 +540,23 @@ step "kilnctl and kiln (Linux, Windows)"
 (cd "$src" && quiet linux cargo build --release --locked -p kilnctl -p kiln-cli)
 win=x86_64-pc-windows-msvc
 (cd "$src" && quiet low cargo xwin build --release --locked -p kilnctl -p kiln-cli --target $win)
-kilnctl=$lin_target/release/kilnctl
+# this run's own copies of the Linux CLIs, taken right after their build: the runtime bundle, the folder and the checks
+# use these, never the cargo target folder (KILN_GLIBC_DIR/cargo can be shared with other builds)
+linux_bin=$work/linux-bin
+rm -rf "$linux_bin" && mkdir -p "$linux_bin"
+for f in kilnctl kiln; do
+  [[ -s $lin_target/release/$f ]] || die "no $f in $lin_target/release after the build"
+  install -m 755 "$lin_target/release/$f" "$linux_bin/$f"
+done
+kilnctl=$linux_bin/kilnctl
 # kiln-eml's archive inspector for Linux (component eml, kiln/tools/eml-inspect/linux-x86_64/) is built where the other
 # Linux files are, for their glibc; the stage takes it from KILN_EML_INSPECT_LINUX (its Windows .exe builds in the stage)
 if [[ -f $src/gpl/kiln-eml/kiln-eml/src/kiln_eml_inspect.rs ]]; then
   step "kiln-eml's archive inspector (Linux)"
   (cd "$src/gpl/kiln-eml" && quiet linux cargo build --release --locked -p kiln-eml --bin kiln-eml-inspect)
-  export KILN_EML_INSPECT_LINUX=$lin_target/release/kiln-eml-inspect
-  [[ -s $KILN_EML_INSPECT_LINUX ]] || die "no kiln-eml-inspect in $lin_target/release"
+  [[ -s $lin_target/release/kiln-eml-inspect ]] || die "no kiln-eml-inspect in $lin_target/release"
+  install -m 755 "$lin_target/release/kiln-eml-inspect" "$linux_bin/kiln-eml-inspect"
+  export KILN_EML_INSPECT_LINUX=$linux_bin/kiln-eml-inspect
 fi
 
 # ---------------------------------------------------------------- 4. runtime
@@ -811,12 +875,12 @@ python3 "$lib/serverpack.py" build "$out/runtime/kiln-runtime-$version.zip" --ou
   --readme "$here/templates/KILN-SERVER-README.txt" --version "$version" --epoch "$SOURCE_DATE_EPOCH" | tee -a "$log"
 # kilnctl's systemd user units (docs/kiln/kilnctl.md "systemd"), next to kilnctl
 install -m 644 "$src"/runner/systemd/*.service "$src"/runner/systemd/*.timer "$out/runtime/"
-install -m 755 "$lin_target/release/kilnctl" "$out/runtime/kilnctl"
+install -m 755 "$linux_bin/kilnctl" "$out/runtime/kilnctl"
 if ((!skip_windows)); then
   install -m 644 "$CARGO_TARGET_DIR/$win/release/kilnctl.exe" "$out/runtime/kilnctl.exe"
 fi
 if ((!launcher_only)); then
-install -m 755 "$lin_target/release/kiln" "$out/sdk/kiln"
+install -m 755 "$linux_bin/kiln" "$out/sdk/kiln"
 ((skip_windows)) || install -m 644 "$CARGO_TARGET_DIR/$win/release/kiln.exe" "$out/sdk/kiln.exe"
 # kiln debug's Windows side (the signed kiln.exe as tools/debug-inspect/win-x64/kiln.exe with its manifest, next to
 # sdk/kiln; and the same as kiln-debug-inspect-VERSION.zip for a kiln downloaded on its own): lib/debug-inspect.sh
@@ -826,6 +890,9 @@ cp "$vsix" "$out/sdk/"
 # the modding site (guide + API reference, DocFX) in sdk/api/, when the export has its build script
 if [[ -f $src/tools/docs-site/build.sh ]]; then
   export KILN_DOCS_TRACKED=$work/src-files
+  # strict: a public type or member without an XML summary (undocumented.py against undocumented-baseline.txt, which names
+  # none) stops the release here; the same gate runs in tools/check.sh (stage `docs`), so it is found before the release
+  export KILN_DOCS_STRICT=1
   quiet low "$src/tools/docs-site/build.sh" "$out/sdk/api"   # the modding site: guide + API reference (DocFX)
 else
   note "no tools/docs-site/build.sh in the export: the API reference (sdk/api/) is left out"
@@ -998,11 +1065,16 @@ if ((worktree)); then
 elif [[ $channel == beta ]]; then
   note "API record: a test build ($name) ships no API; the Unshipped.txt lines stay for the release"
 elif ((!checks)) || printf '%s\n' "${results[@]}" | grep -q '^FAIL'; then
-  note "API record: not promoted (the checks failed or did not run); after a good release run tools/release/api-gate.sh promote"
+  note "API record: not promoted (the checks failed or did not run); after a good release run tools/release/api-gate.sh promote --release $version"
 else
   step "API record: Unshipped.txt lines into Shipped.txt"
-  if "$here/api-gate.sh" promote --if-same-as "$full" 2>&1 | tee -a "$log"; then
-    api_moved=$(git -C "$repo" status --porcelain -- ':(glob)managed/**/PublicAPI.*.txt' | wc -l)
+  if "$here/api-gate.sh" promote --if-same-as "$full" --release "$version" 2>&1 | tee -a "$log"; then
+    # the index again, with the ledger's new rows (the same bytes when the API version is the one the Unshipped lines carried)
+    if [[ -n $api_index_xml ]]; then
+      python3 -I "$repo/tools/docs-site/api_index.py" --xml "$api_index_xml" >>"$log" 2>&1 ||
+        note "API index: not regenerated after the promote (see the log); run python3 -I tools/docs-site/api_index.py --xml $api_index_xml"
+    fi
+    api_moved=$(git -C "$repo" status --porcelain -- ':(glob)managed/**/PublicAPI.*.txt' managed/api-history.tsv "$api_index" | wc -l)
   else
     note "API record: not promoted (above); the release itself is fine"
   fi
@@ -1031,7 +1103,9 @@ Next (by hand, see docs/kiln/launcher/releasing.md):
   tools/release/github-draft.sh $out        a DRAFT GitHub release with the files (needs the commit pushed)
   tools/release/publish.sh $out             publish: the GitHub release, the dev and beta channel pointers, frostdev.io,
                                             then the roadmap: $version as released on frostdev.io/kiln/roadmap
-  python3 -I tools/release/nexus.py $out    Nexus Mods (dry run; --publish uploads): the nexus/ build, no self-update"
+  python3 -I tools/release/nexus.py $out    Nexus Mods (dry run; --publish uploads): the nexus/ build, no self-update
+  python3 -I tools/docs-site/status-tables.py --server <game>/kiln/state/capabilities.json --checks <game>/kiln/state/client-checks.json \\
+      -o docs/kiln/status.generated.md      the status page, from the state files of this release's lab run (a build boots no game)"
 fi
 step "done"
 du -sh "$out" | tee -a "$log"
@@ -1047,8 +1121,11 @@ if ((!api_compat)); then
 fi
 if ((api_moved)); then
   cat <<EOF | tee -a "$log"
-  The API record: $api_moved PublicAPI file(s) changed in $repo (this release's API moved from Unshipped.txt into
-  Shipped.txt). Commit them: git -C "$repo" commit -m "api: ship the API of $version" -- ':(glob)managed/**/PublicAPI.*.txt'
+  The API record: $api_moved file(s) changed in $repo (this release's API moved from Unshipped.txt into Shipped.txt, its rows
+  went into the API history ledger, and the agent API index is generated from them). Commit them (add -A: a new or
+  removed index part is a new or deleted file, which a commit with paths alone leaves out):
+  git -C "$repo" add -A -- agent/skills/kiln-modding/references/api-index &&
+    git -C "$repo" commit -m "api: ship the API of $version" -- ':(glob)managed/**/PublicAPI.*.txt' managed/api-history.tsv agent/skills/kiln-modding/references/api-index
 EOF
 fi
 if printf '%s\n' "${results[@]}" | grep -q '^FAIL'; then exit 1; fi

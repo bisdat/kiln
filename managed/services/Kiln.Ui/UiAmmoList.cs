@@ -36,6 +36,8 @@ public enum AmmoListMode
 
 /// <summary>A row of an ammunition or spell list: the item and the count shown next to it (a picture: the count is not
 /// inventory). Since 0.2.0-dev.30.6.</summary>
+/// <param name="Item">The item the row shows. Item 0 is left out of the composed list.</param>
+/// <param name="Count">The number shown next to it, a picture, not inventory; a negative count shows as 0.</param>
 public readonly record struct AmmoListRow(ItemId Item, int Count);
 
 /// <summary>How <see cref="Ui.AmmoList.Provide"/> composes a provider's rows. Since 0.2.0-dev.30.6.</summary>
@@ -93,6 +95,9 @@ public sealed class AmmoListContext
 /// <summary>The player picked a mod's row the game cannot equip itself (the item is not in the backpack): the game did
 /// nothing, so the mod's server half can do the swap. A wish, never authority: the server checks it. Since
 /// 0.2.0-dev.30.6.</summary>
+/// <param name="Kind">The list the row was picked in: <see cref="AmmoListKind.Arrow"/> or <see cref="AmmoListKind.Spell"/>.</param>
+/// <param name="Item">The item of the row the mod provided.</param>
+/// <param name="Count">The count the row showed (a picture, not inventory authority).</param>
 public sealed record AmmoListPick(AmmoListKind Kind, ItemId Item, int Count);
 
 /// <summary>A provider of <see cref="Ui.AmmoList.Provide"/>: dispose it to take its rows out (the game's own list shows
@@ -170,8 +175,9 @@ public static partial class Ui
         /// not an arrow, or not a spell, for that list), the other providers' rows still show and the refusal is
         /// logged.</para>
         /// <para>The game keeps its selection on the same item when the rows change. A pick of a row whose item the game
-        /// lists itself (in Replace too) or the player carries is the game's own (it equips it); a pick of any other mod row
-        /// raises <see cref="Picked"/> for the mod that provided it.</para>
+        /// lists itself with stock (in Replace too) or the player carries is the game's own (it equips it); a pick of any
+        /// other mod row, also of an item whose used-up stack the game still lists at count 0, raises <see cref="Picked"/>
+        /// for the mod that provided it.</para>
         /// </remarks>
         /// <exception cref="KilnUnavailableException">The row <c>ui.ammo.list</c> is off (an unmeasured game build, a
         /// server, an older kiln-tools).</exception>
@@ -569,29 +575,38 @@ internal static unsafe class UiAmmoListBridge
     }
 
     /// <summary>The list a set of providers' rows makes: their rows in registration order, the first row of an item wins,
-    /// in Append the game's own items left out. A list holds 64 rows in all: in Append the mods' rows fit in what the
-    /// game's rows leave (none when the game's own were cut), in Replace 64.</summary>
+    /// in Append the game's own items with stock left out. A list holds 64 rows in all: in Append the mods' rows fit in
+    /// what the game's rows leave (none when the game's own were cut), in Replace 64.</summary>
     internal static (uint Mode, AmmoListRow[] Rows, (uint Item, ModContext? Mod)[] Owners, bool Cut) Compose(
         IReadOnlyList<(Provider P, List<AmmoListRow> Rows)> asked, AmmoListContext ctx)
     {
         var mode = asked.Any(a => a.P.Mode == AmmoListMode.Replace) ? UiAmmoNative.ModeReplace : UiAmmoNative.ModeAppend;
         var seen = new HashSet<uint>();
+        // A game row kept at count 0 for a used-up stack is no stock (GitHub issue 131): the mod's row of its item is
+        // published, the HUD shows the game's row in its place (no room taken), and native sends its pick to the mod
+        // when the backpack does not hold the item.
+        var zero = new HashSet<uint>();
         if (mode == UiAmmoNative.ModeAppend)
-            foreach (var g in ctx.GameRows) seen.Add(g.Item.Value);
+            foreach (var g in ctx.GameRows) (g.Count > 0 ? seen : zero).Add(g.Item.Value);
         // the room follows the game's rows seen (at most 64), never Truncated alone: native's LIMIT may be left from an
         // earlier overfull list, and a reason by itself changes no serial, so nothing would build the list again
         var room = mode == UiAmmoNative.ModeAppend ? Math.Max(0, UiAmmoNative.Capacity - ctx.GameRows.Count) : UiAmmoNative.Capacity;
         var rows = new List<AmmoListRow>();
         var owners = new List<(uint, ModContext?)>();
         var cut = false;
+        var used = 0;
         foreach (var (p, list) in asked)
             foreach (var r in list)
             {
                 if (!seen.Add(r.Item.Value)) continue;
-                if (rows.Count == room)
+                if (!zero.Contains(r.Item.Value))
                 {
-                    cut = true;
-                    continue;
+                    if (used == room)
+                    {
+                        cut = true;
+                        continue;
+                    }
+                    used++;
                 }
                 rows.Add(r);
                 owners.Add((r.Item.Value, p.Mod));

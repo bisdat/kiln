@@ -9,8 +9,11 @@ namespace Kiln;
 public sealed class BlockError(string block, string? field, string problem)
     : ArgumentException($"block {block}{(string.IsNullOrEmpty(field) ? "" : $", {field}")}: {problem}")
 {
+    /// <summary>The name of the block that is wrong.</summary>
     public string Block { get; } = block;
+    /// <summary>The field that is wrong, by its path in the block. Null or empty: the block as a whole.</summary>
     public string? Field { get; } = field;
+    /// <summary>What is wrong with it, in words a mod author can act on.</summary>
     public string Problem { get; } = problem;
 }
 

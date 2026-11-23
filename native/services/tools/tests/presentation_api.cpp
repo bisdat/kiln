@@ -16,10 +16,10 @@ static KilnHooksApi fake_hooks{};
 static KilnOwner revoked_owner{};
 static bool statuses_closed{};
 static KilnCapsApi fake_caps{};
-struct Capability {uint32_t state,reason;};
+struct Capability {uint32_t state,reason;std::string text;};
 static std::map<std::string,Capability> capabilities;
-static KilnResult KILN_CALL report_cap(KilnOwner,KilnStr name,uint32_t state,uint32_t reason,KilnStr) {
-    capabilities[std::string(name.ptr,name.len)]={state,reason};return KILN_OK;
+static KilnResult KILN_CALL report_cap(KilnOwner,KilnStr name,uint32_t state,uint32_t reason,KilnStr text) {
+    capabilities[std::string(name.ptr,name.len)]={state,reason,std::string(text.ptr,text.len)};return KILN_OK;
 }
 static const void* KILN_CALL service(KilnStr name,uint32_t) {
     const std::string id(name.ptr,name.len);

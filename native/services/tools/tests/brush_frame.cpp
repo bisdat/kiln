@@ -22,8 +22,13 @@ struct Frame {
         std::memcpy(reinterpret_cast<void*>(regs.r9),overgrowth_brush_tag.data(),16);std::memcpy(reinterpret_cast<void*>(regs.r8),overgrowth_brush_tag.data(),16);
     }
     bool own_tag(const uint8_t* tag) const {return !std::memcmp(reinterpret_cast<const void*>(regs.r9),tag,16);}
+    uint64_t count() const {uint64_t c;std::memcpy(&c,reinterpret_cast<const void*>(regs.rcx+8),8);return c;}
+    struct Row {uint64_t lead;uint32_t item;uint8_t zero[0x34];uint32_t nominator,denominator;};
+    Row row(size_t i) const {Row r;std::memcpy(&r,reinterpret_cast<const void*>(regs.rbp+0x6b8+i*72),72);return r;}
 };
 static void invoke(uintptr_t site,Frame& frame) {if(site==mid_site)mid_callback(&frame.regs,mid_user);}
+static std::vector<std::string> logged;
+static void KILN_CALL capture_log(KilnOwner,int32_t,KilnStr text) {logged.emplace_back(text.ptr,text.len);}
 int main() {
     boundary_fixture();
     KilnApi fake{};fake.size=sizeof fake;fake.abi_version=KILN_ABI_VERSION;fake.service=&service;fake.subscribe_tick=&tick;fake.unsubscribe=&unsubscribe;fake.owner_revoke=&owner_revoke;
@@ -38,9 +43,14 @@ int main() {
     Frame own(family.tool);const auto saved=own.regs;invoke(0xc3fe18,own);
     CHECK(own.own_tag(family.identity));CHECK(!std::memcmp(reinterpret_cast<const void*>(own.regs.r8),family.identity,16));
     CHECK(!std::memcmp(&saved,&own.regs,sizeof saved)); // No register/stack redirection for a successful call.
-    // Native tag matching admits all three family brushes and excludes the vanilla tagged brush.
-    unsigned selected=0;for(const auto& brush:brushes){(void)brush;if(own.own_tag(family.identity))++selected;}
-    CHECK(selected==3&&!own.own_tag(overgrowth_brush_tag.data()));
+    // The query scans only the game data's terraformingTools list, which never holds a runtime brush: the family's
+    // own rows are written into the fresh output, in declared order, before the native call sorts them by ratio.
+    CHECK(!own.own_tag(overgrowth_brush_tag.data()));
+    CHECK(own.count()==3);
+    for(size_t i=0;i<3;++i)CHECK(own.row(i).item==brushes[i].item&&own.row(i).nominator==i+1&&own.row(i).denominator==1);
+#ifndef KILN_RED_BASELINE
+    CHECK(brush_trace.count(BrushFrameExit::Patched)==1&&brush_trace.last()==BrushFrameExit::Patched);
+#endif
     Frame vanilla(0xbe8b0750);const auto vanilla_bytes=vanilla.bytes;held_item=0xbe8b0750;invoke(0xc3fe18,vanilla);CHECK(vanilla.bytes==vanilla_bytes);
     held_item=family.tool;
     for(auto other:{uintptr_t(0xd180a0),uintptr_t(0xd20190),uintptr_t(0xd6aa05)}) {Frame callback(family.tool);const auto before=callback.bytes;invoke(other,callback);CHECK(callback.bytes==before);}
@@ -49,6 +59,27 @@ int main() {
     Frame nested(family.tool);const auto nested_bytes=nested.bytes;held_item=0;invoke(0xc3fe18,nested);CHECK(nested.bytes==nested_bytes); // No inherited scope from outer own call.
     held_item=family.tool;Frame decay(family.tool);std::swap(decay.regs.r9,decay.regs.rdx);const auto decay_bytes=decay.bytes;invoke(0xc3fe18,decay);CHECK(decay.bytes==decay_bytes);
     Frame modified(family.tool);*reinterpret_cast<uint8_t*>(modified.regs.r9)=0;const auto modified_bytes=modified.bytes;invoke(0xc3fe18,modified);CHECK(modified.bytes==modified_bytes);
+#ifndef KILN_RED_BASELINE
+    // Every refused frame above was counted under its own exit; one change of state each way publishes one line.
+    CHECK(brush_trace.count(BrushFrameExit::NoFamily)==2&&brush_trace.count(BrushFrameExit::NotSelected)==1&&
+          brush_trace.count(BrushFrameExit::NotResolved)==1&&brush_trace.count(BrushFrameExit::FrameMismatch)==1&&
+          brush_trace.count(BrushFrameExit::TagMismatch)==1&&brush_trace.count(BrushFrameExit::Patched)==1);
+    logged.clear();fake.log=&capture_log;fake.build_info=&client_build;parent_owner=66;fake_caps.report=&report_cap;
+    publish_brush_trace();
+    CHECK(logged.size()==1&&logged[0].find("tools: brush picker: tag mismatch")!=std::string::npos&&
+          logged[0].find("state changes since the last line")!=std::string::npos&&logged[0].find("patched 1 (3 rows)")!=std::string::npos);
+    CHECK(capabilities["tools.brush_families"].text.find("picker frames: ")!=std::string::npos&&
+          capabilities["tools.brush_families"].text.find("no held family 2")!=std::string::npos);
+    publish_brush_trace();CHECK(logged.size()==1); // nothing changed: no second line
+    for(int i=0;i<100;++i){Frame again(family.tool);invoke(0xc3fe18,again);CHECK(again.count()==3);}
+    trace_published-=std::chrono::seconds(2);publish_brush_trace();
+    CHECK(logged.size()==2&&logged[1].find("tools: brush picker: patched")!=std::string::npos&&logged[1].find("state changes")==std::string::npos);
+    for(int i=0;i<100;++i){Frame again(family.tool);invoke(0xc3fe18,again);}publish_brush_trace();CHECK(logged.size()==2); // 100 frames, one state
+    {Frame vanilla_again(0xbe8b0750);held_item=0xbe8b0750;invoke(0xc3fe18,vanilla_again);held_item=family.tool;}
+    publish_brush_trace();CHECK(logged.size()==2); // within a second of the last line: held until the next publication
+    trace_published-=std::chrono::seconds(2);publish_brush_trace();CHECK(logged.size()==3&&logged[2].find("no held family")!=std::string::npos);
+    fake.log=nullptr;
+#endif
 #ifdef _WIN32
     Frame fault(family.tool);auto* memory=static_cast<uint8_t*>(VirtualAlloc(nullptr,fault.bytes.size(),MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE));CHECK(memory);
     std::memcpy(memory,fault.bytes.data(),fault.bytes.size());

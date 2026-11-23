@@ -646,6 +646,56 @@ is a webview that never painted the page (a player on NVIDIA / X11 with 0.2.0-de
     Settings > Appearance, "Switch to X11 when drawing is slow on Wayland" (`app_render_x11_set`, on by default): off
     writes `state/x11-auto-off.json` and removes `x11.json`; on removes it and `x11-no-help.json` (try again). Markers
     are written once the beta copy's gate opens. `launcher.log` has one `render: X11 ...` line per decision.
+- **Ubuntu WebKit's NVIDIA block** (0.2.0-dev.30.7): the AppImage bundles Ubuntu's WebKitGTK (libwebkit2gtk-4.1-0
+  2.50.4-0ubuntu0.22.04.1 in 0.2.0-dev.30.5), which carries Debian's `disable-nvidia-dmabuf.patch`: when GL_VENDOR names
+  NVIDIA, its DMA-BUF renderer gets no buffer transport at all, so WebKit composites nothing (policy Never) and prints
+  nothing about it (a player's RTX 5080 on Wayland, 0.2.0-dev.30.6). So:
+  - the PROBLEM line's why names this cause first after the variables when the loaded libwebkit2gtk carries the patch
+    (it has the string `WEBKIT_FORCE_DMABUF_RENDERER`; upstream WebKit reads no such variable) and GTK's GL context says
+    an NVIDIA GL_VENDOR (without one: NVIDIA's kernel driver is loaded). The line also gives the GL vendor and the
+    library's path. The support report's compositing line carries the same why;
+  - GLib's warnings and criticals (GTK's, GDK's, WebKit's UI process) go into `launcher.log` as `glib:` lines from the
+    start of `main`, 40 at most a start, one line each, as well as on stderr as before;
+  - Settings > Advanced > Drawing the launcher, "Force GPU drawing on NVIDIA" (`app_render_force_set`, writes
+    `state/force-dmabuf.json`), **off by default** (`render::FORCE_DEFAULT`, one constant: real NVIDIA driver bugs sit
+    behind the patch's guard): on sets `WEBKIT_FORCE_DMABUF_RENDERER=1` with `WEBKIT_DMABUF_RENDERER_FORCE_SHM=1`
+    (shared-memory buffers, no GBM buffers between WebKit's processes) from the next start. The plain forced renderer is
+    not offered: it can fail with a Wayland protocol error before its page starts. Shared memory is the variant on X11
+    too; wider hardware coverage is still needed.
+  - Clean starts leave this off. On Linux with the NVIDIA kernel driver loaded and no explicit preference, a normal
+    GPU start writes `state/nvidia-frame-pending.json`. If that start expected a visible window but never confirmed a
+    painted frame, the **next** start tries both SHM variables once. Internal DMA-BUF fallback markers do not prevent
+    this attempt; explicit software/no-DMA-BUF flags, environment overrides, a manual off choice, and non-NVIDIA
+    machines do. A corrupt/unreadable preference is treated as off, and only a valid, matching success record can
+    remember SHM. Once visible, the recovery attempt explains why it was chosen. A process-held
+    `state/render-startup.lock` keeps a second launcher from treating a live attempt as a crash or changing its markers;
+    if that lock is unavailable, this start applies no SHM override or marker changes. A blank default start may still
+    restart once in software using only its restart variable, even when the state folder cannot be written. A data
+    folder that is held at the start (a pointer to a folder that cannot be used, another launcher's move, an unfinished
+    move's copy that this start removes first) is treated the same way: no lock, no guard, no recovery read from its
+    files, nothing written there in that run.
+  - The SHM attempt has a different guard, `state/force-dmabuf-pending.json`, written before either variable is set or
+    WebKit is used (including the sandbox probe). If it cannot write that guard, it forces nothing. If this attempt
+    also dies or times out, the next start forces nothing, turns the switch off, and writes
+    `state/force-dmabuf-failed.json` with why and when. It does not alternate indefinitely between failed renderers.
+  - `app_started` is only page readiness. `app_render_frame` reports visibility separately and confirms startup only
+    after two consecutive visible animation frames, checking the native window is shown and not minimized as well as
+    the document. Hiding between callbacks resets that confirmation; the IPC independently rejects a hidden window.
+    Hidden/minimized starts are not considered failed visible attempts. While the data folder is held (its dialog over
+    the window, or a move) the page sends no `app_render_frame` and the backend writes no renderer state: once the hold
+    ends, the page reports its visibility and two fresh visible frames, and that confirmation clears the guards as
+    usual; a hold that does not end in that run (a committed move, Quit) leaves them as they were. A
+    successful frame clears the pending guards after 10 seconds (or on a clean exit). Successful automatic SHM recovery
+    is remembered in `state/force-dmabuf-recovered.json`, separately from a manual opt-in, keyed by the stable executable
+    or AppImage path and GTK display backend. That working automatic renderer is used on subsequent matching starts.
+    An explicit manual off clears that memory and vetoes further automatic retries; manual on permits another try.
+  - Turning the switch off or on removes the failure note and automatic memory. On also removes `dmabuf-off.json`
+    (without that renderer there is nothing to force) and `x11.json` (the X11 switch can still act if WebKit composites
+    nothing). The switch's More text explains automatic recovery and how to disable it.
+  - The user's own `WEBKIT_FORCE_DMABUF_RENDERER` or `WEBKIT_DMABUF_RENDERER_FORCE_SHM` always wins; software mode and a
+    DMA-BUF renderer that is off force nothing. The launcher never suggests `WEBKIT_DISABLE_DMABUF_RENDERER=1`, chmod or
+    root for this. Both variables the launcher sets are named in `KILN_LAUNCHER_RENDER_SET`, so kiln-manage's host
+    environment takes them away from every program it starts (the game through Steam, servers, Wine, SteamCMD).
 - **Choosing the mode** (the DMA-BUF renderer has its own order, above): `--software-render` / `--gpu-render` (the last one given wins), then
   `KILN_LAUNCHER_RENDER=software|gpu`, then the marker, then the GPU. Settings > Appearance, "Draw the launcher without
   the GPU", sets or clears the marker (`app_render_set`) for the next start. A start with an nxm link takes no other

@@ -31,7 +31,9 @@ evidence is separate from the older observations below; neither is a client rend
 `version.json` version `1.8.1`. Runtime ABI 12, the four bootstrap exports and the client (26430625) and server (26430253)
 profiles are unchanged. The merge's six conflicts and what each kept: the fork's `kiln/UPSTREAM-PATCHES.md`. The adapter
 accepts 1.8.0 and 1.8.1 beside 1.7.8 and 1.7.9, bundled and installed (`src/contract.h`). See section 11 for what 1.8.1
-adds next to Kiln.
+adds next to Kiln. 0.2.0-dev.30.7 pins fork branch `kiln-30.7-fixes` on top of `5bb133f0`: a working baseline that is not
+whole or not the source of the game files is never restored, and EML manifests may leave optional metadata null
+(section 5.0).
 
 ## 1. How ShroudForge loads (source facts)
 
@@ -134,6 +136,72 @@ its copy is complete: until then it is `<stem>.kfc.bak.partial` / `<stem>.kfc_re
 folder, flushed and then renamed, so a start that ends during the copy (the resource file is about 200 MiB) leaves a
 `.partial` file that nothing restores from, and one can stay behind after a killed start. With an SF installation in
 the game folder nothing changes: its Updater and recycle bin are used.
+
+**A working baseline that is not the source of the game files** (fork branch `kiln-30.7-fixes`, 0.2.0-dev.30.7). Before
+every startup pass SF copies `<stem>.kfc.bak` and `<stem>.kfc_resources.bak` over the game files. It checked only the
+header backup's version tag and archive format: a player's header backup from before a game update that kept the tag
+went back over the updated files, and the pass failed with "failed to fill whole buffer" (the old header pointed past
+the end of the resource file). Nothing tied the companion to its header either. Now `check_working_baseline`
+(`modules/mod-runtime/startup/verify_working_baseline.rs`) decides first:
+- it restores only a whole pair that is the source of the game files. Whole: both backups are the pair
+  `<stem>.kfc.baseline.json` recorded when it was made (size and SHA-256 of each; changing the recorded last-write times
+  neither discards the hashes nor invalidates identical bytes); a pair from before
+  that record must hold its header's resource data in its companion, and is recorded once restored. Source: the live
+  header is the header backup, or was built over it (its containers, resource chunks and contents unchanged, additions
+  only after them, as every incremental writer SF, EML and Kiln use writes).
+- it sets the pair aside (as after a game update; the record moves with it) and copies a new pair from the game files
+  when the pair is not their source (an update or Steam's file check wrote them), is of another game version (SF's own
+  rule), or is not whole while the game's header is the backup's own. SF's log, and so kiln.log's `[sf]` lines, says
+  `ShroudForge: its clean copy of the game data (<stem>.kfc.bak, <stem>.kfc_resources.bak) was not used: <why>. It was
+  set aside and a new clean copy was made from the game's current files`.
+- it refuses the pass when no clean copy is left: the game files carry mods built from a pair that is not whole, are
+  what SF's last pass left (its record of the pass, read before the pass removes it), or are not whole themselves. The
+  error ends "Verify the game files in Steam (or update the server files with SteamCMD's validate), then start again";
+  the recovery after the failed pass refuses the same pair and changes no file. Missing or incompatible backups pass
+  the same live-file checks before a new pair is taken. A missing backup companion is never borrowed from modded live
+  files, and a refused pass keeps the last-output proof so another start cannot mistake those files for a clean copy.
+- restoration stages both files before publishing either, using SF's recoverable asset transaction. A failed copy
+  leaves the live pair untouched; interrupted publication keeps rollback data for the next start.
+Tests (cross-built with `cargo xwin test --no-run`, executed on native Windows): `verify_working_baseline` (9),
+`baseline_record` (4), and three whole startup passes in `kiln_baseline_tests.rs` (red before the fixes). Not run
+against a real game update or a real client.
+
+**EML manifests with null optional metadata** (fork branch `kiln-30.7-fixes`, 0.2.0-dev.30.7). EML reads its manifest
+into a type whose `description`, `license`, `icon` and `dependencies[].optional` are optional, so `null` there means
+"not given". SF's manifest schema allowed null only for `license` and `icon`: a player's EML package with
+`"description": null` was refused with "mod: null is not of type string". The schema
+(`modules/modloader/manifest/manifest.schema.json`) now takes null for `description` and `dependencies[].optional` too,
+and a schema error names the field after the document (`modules/loader-config/validate_document.rs`), so the launcher
+and SF's log say, for example, `JSON error in <package>/mod.json: mod: /description: false is not of type "string"`.
+Errors of the whole document (a missing required field) read as before; `authors`, `capabilities` and `dependencies`
+stay non-null, as in EML. Tests (Wine): `kiln_manifest_tests.rs` (2, red before).
+
+**Large asset walks** (fork branch `kiln-30.7`, 0.2.0-dev.30.7). Every `mlua::Value` that holds a Lua object (a string,
+table, function or userdata) pins one slot of mlua's auxiliary stack while it lives, and that stack has about a million
+slots. The values of an asset tree kept one such value for each child a mod visited (a value a mod made, one for each
+field and element; a resource, one for its `data`), so a startup mod that walks a large asset (a player's Forged and
+Found 0.16.1 on a Steam Deck) ran the pass into "cannot create a Lua reference, out of auxiliary stack space (used
+1000194 slots)", and the game started without its asset mods. A walk over 350,000 plain recipe records, with no mod
+code, reproduces that count; upstream 1.8.1 has the same code. The fork keeps such values in Lua's registry
+(`modules/mod-runtime/lua/stored_lua_value.rs`) and loads one for each operation: the same Lua object every time, so
+identity and edits hold; nil, booleans and numbers stay plain; a released tree is collected as before. The type
+metadata `game.types` hands out, which lives as long as the session, is held the same way (each type, its
+`struct_fields`, `enum_fields` and `attributes`): read whole for the game's 12,658 types it held about 695,000 of the
+million slots. Tests (host and Wine): a walk over and a mod-made copy of 350,000 recipes (red before, with the player's
+panic), the references a walk holds (red before: 3002 for 1,000 recipes, 150002 for 50,000; now under 64 at any size,
+and the registry back to its count once the tree is released), identity, edits, copies and removal; all the metadata of
+2,000 struct types read (red before: 254,037 references; now under 64), its values, order and identity.
+
+**A panic in the startup pass** (fork branch `kiln-30.7`, 0.2.0-dev.30.7). The pass logged "Rust panic during startup
+asset preparation: " and the panic's message, which named no mod and could run over several lines. Now kiln.log's
+`[sf]` error line, and the pass's recorded error, read `ShroudForge stopped preparing mod assets because of an internal
+error while running <name>`: the name of the package whose entrypoint ran, when the panic came from there, on one line,
+at most 80 characters, with no version, path or message. The panic's message follows on an info line
+(`Internal error detail, for a bug report: ...`, one line, each absolute path in it cut to its last two components,
+such as `state/extra.rs:287`, so no folder of the player's or of the build machine reaches a shared kiln.log). A panic
+is SF's own failure, so the pass is not run again
+without the package; the recovery is upstream's (the saved baseline back, the game starts without asset mods). Tests
+(host and Wine): `name_failing_mod`, `report_startup_panic`, `kiln_retry_tests`.
 
 **Writes into values a mod created** (fork `63b8862`, branch `kiln-sf-eml`, on top of `112d939`). In the pregame pass a
 value a mod builds (a plain table put into game data, such as a recipe inserted into the recipe registry, or a whole
@@ -259,10 +327,17 @@ waits on that auto-reset event. This is SF's real `shroudforge.ui.toggle_modload
 with the installed helper for events. The fallback key is remappable in Kiln's Keys tab; unsupported/mouse-only/Meta
 or empty configured bindings do not silently become F9, nor does a `toggleKey` that is not text (null, a number:
 ShroudForge refuses those too), which reports `menuKey` "" and a warning in kiln.log. Helper exit hands ownership to Kiln; stopped runtime removes
-the fallback binding. SF module-off and self-hosted behavior stay intact.
+the fallback binding. SF module-off and self-hosted behavior stay intact. An installed `shroudforge.exe` older than the
+runtime Kiln runs (by its install's `<game>/shroudforge/version.json`; the exe has no version resource) opens neither
+window, since it refuses the newer settings that runtime writes (a 1.7.9 app beside the bundled 1.8.1: `Additional
+properties are not allowed ('uiTargets' was unexpected)`): kiln.log says so in one warning, Kiln's page takes the
+shortcut and mods load as before (0.2.0-dev.30.7, `src/helper_version.h`). One whose version cannot be read (no
+`version.json`, no version in it, or text that is no version) starts its windows as before, and kiln.log says in one
+info line that they may fail if the app is older.
 
-Windowless native Wine tests exercise absent/installed/exited/disabled/self-hosted helpers and repeated auto-reset
-signals. Managed tests exercise settings, writer coalescing/failure recovery, state freshness and shortcut ownership.
+Windowless native Wine tests exercise absent/installed/exited/disabled/self-hosted helpers, an app older, equal,
+newer or of unreadable version (`run.py` `app-*`; the comparison itself: `tests/test-helper-version.sh`) and repeated
+auto-reset signals. Managed tests exercise settings, writer coalescing/failure recovery, state freshness and shortcut ownership.
 A headless software preview renders the shared-fixture SF panel at 1280×800 and its main-menu page at 1920×1080.
 In an isolated server lab, the actual managed UI writer queue changed `sf-probe` live: setting on confirmed a guarded
 write, setting off restored the baseline, and the enabled switch deactivated/reactivated its runtime without errors.

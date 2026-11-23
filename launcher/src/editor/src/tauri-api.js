@@ -13,6 +13,11 @@ import skills from '../data/skills.json';
 import { t } from './i18n.js';
 import { t as launcherT } from '../../i18n';
 import { itemLevelsFit } from '../kiln/levels.js';
+import { useGameSel } from '../../api/hooks';
+import { readExactCharacter, writeExactCharacter } from '../shared/character-exact.mjs';
+import { inventoryWitness } from '../shared/storage-witness.mjs';
+import { planStorageReturn, storageView } from '../shared/player-storage.mjs';
+import { vanillaStackLimit } from '../shared/storage-catalog.mjs';
 
 // Kiln: commands reject with a KilnError {code, message}; the editor shows e.message, so wrap it in an Error.
 const wrap = (p) => p.catch((e) => {
@@ -46,9 +51,10 @@ const readFile = async (path) => new Uint8Array(await invoke('read_file', { path
 const decompress = async (bytes) => new Uint8Array(await invoke('zstd_decompress', { data: Array.from(bytes) }));
 const compress = async (bytes) => new Uint8Array(await invoke('zstd_compress', { data: Array.from(bytes) }));
 
-async function load(path) {
+async function load(path, includeStorage = false) {
   await sv2c.init();
-  const save = await sv2c.parse(await readFile(path), decompress, ['character_data', 'player_character', 'player_knowledge']);
+  const bytes = await readFile(path);
+  const save = await sv2c.parse(bytes, decompress, ['character_data', 'player_character', 'player_knowledge']);
   const pc = save.blocks.find((b) => b.name === 'player_character');
   let character = null, error = null;
   // Kiln: a save that holds items nobody defines any more (a mod that is gone) is read again accepting any item id
@@ -67,7 +73,21 @@ async function load(path) {
   let knowledge = null;
   const pk = save.blocks.find((b) => b.name === 'player_knowledge');
   try { if (pk?.payload) knowledge = know.parseBlock(pk.payload); } catch (e) { knowledge = null; }
-  return { save, character, knowledge, error };
+  let storage = null, storageSnapshot = null;
+  if (includeStorage) {
+    try {
+      storageSnapshot = await wrap(kiln.editorStorageRead(path, useGameSel.getState().gameId));
+      if (storageSnapshot?.text) {
+        const sidecar = JSON.parse(storageSnapshot.text);
+        if (sidecar.mods?.['kiln-items']?.storage) {
+          const exact = readExactCharacter(pc.payload, pc.head.readUInt32LE(10));
+          storage = { ...await storageView(exact, sidecar, storageSnapshot.character), local: storageSnapshot.local };
+          if (mods.length) { storage.canReturn = false; storage.error = error; }
+        }
+      }
+    } catch (e) { storage = { hasStorage: true, canReturn: false, groups: [], error: e.message }; }
+  }
+  return { save, character, knowledge, error, bytes, storage, storageSnapshot };
 }
 
 function publicModel(path, modified, s) {
@@ -80,6 +100,7 @@ function publicModel(path, modified, s) {
     // Kiln: the inventory's place in the save is a guess (shared/character.mjs): read-only, and the Inventory tab says
     // so when it read empty
     inventoryUnsure: !!c?._invUnsure,
+    storage: s.storage,
     blocks: s.save.blocks.map((b) => ({ name: b.name, size: b.payload ? b.payload.length : b.size })),
   };
 }
@@ -130,7 +151,7 @@ export default {
   serverState: () => ({ configurado: false, erro: null }),
   serverStamp: async () => null,
   async openSave(path, isCurrent = () => true) {
-    const s = await load(path);
+    const s = await load(path, true);
     const { modified } = await invoke('file_info', { path });
     // A superseded read must not replace the opaque save blocks that the current model will be written over.
     if (isCurrent()) sessions.set(path, s);
@@ -160,10 +181,40 @@ export default {
     // Kiln: write_save copies the save (and the game's own backups) to the editor's backups before it writes; a
     // backup_file call here made a second, identical copy of each
     await invoke('write_save', { path, data: Array.from(data) });
-    const fresh = await load(path);
+    const fresh = await load(path, true);
     sessions.set(path, fresh);
     const { modified } = await invoke('file_info', { path });
     return { model: publicModel(path, modified, fresh) };
+  },
+  async returnStorage(path) {
+    if (await invoke('game_running')) throw new Error(launcherT('playerStorage.closeGame'));
+    const s = await load(path, true); // never use a possibly stale editor session
+    if (!s.storageSnapshot?.local) throw new Error(launcherT('playerStorage.localOnly'));
+    if (s.storage?.paired === false) throw new Error(launcherT('playerStorage.unpaired'));
+    if (!s.storage?.canReturn) throw new Error(s.storage?.error ?? launcherT('playerStorage.unavailable'));
+    const pc = s.save.blocks.find((b) => b.name === 'player_character');
+    const c = readExactCharacter(pc.payload, pc.head.readUInt32LE(10));
+    const plan = await planStorageReturn(c, JSON.parse(s.storageSnapshot.text), s.storageSnapshot.character, vanillaStackLimit);
+    let backup = null;
+    if (plan.returned) {
+      const payload = writeExactCharacter(plan.character);
+      const written = readExactCharacter(payload, pc.head.readUInt32LE(10));
+      const nextWitness = await inventoryWitness(written);
+      if (nextWitness !== plan.sidecar.mods['kiln-items'].storage.current.witness) throw new Error('Returned inventory witness mismatch');
+      if (written.mainPages <= c.mainPages) throw new Error('Returned stacks must go to new backpack pages');
+      const blocks = s.save.blocks.map((b) => b === pc ? { ...b, payload, changed: true } : b);
+      const data = await sv2c.build({ header: s.save.header, blocks }, compress);
+      await sv2c.parse(data, decompress, []);
+      const result = await wrap(kiln.editorReturnStorage({ path, gameId: s.storageSnapshot.gameId, expectedSave: Array.from(s.bytes),
+        // Only the storage value: the launcher splices it into the sidecar's exact bytes, so other mods' data is
+        // never re-encoded by JSON.parse/JSON.stringify (large integers, 1.0).
+        expectedSidecar: s.storageSnapshot.text, data: Array.from(data), storage: JSON.stringify(plan.sidecar.mods['kiln-items'].storage),
+        oldWitness: await inventoryWitness(c), newWitness: nextWitness }));
+      backup = result.backup;
+    }
+    const fresh = await load(path, true); sessions.set(path, fresh);
+    const { modified } = await invoke('file_info', { path });
+    return { model: publicModel(path, modified, fresh), returned: plan.returned, remaining: plan.remaining, modItems: plan.modItems, skipped: plan.skipped.length, backup };
   },
   gameRunning: () => invoke('game_running'),
   listBackups: (target) => invoke('list_backups', { target }),

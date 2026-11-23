@@ -19,6 +19,8 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+pub mod editor_storage;
+
 pub const KEEP: usize = 10;
 pub const BACKUP_JSON: &str = "backup.json";
 
@@ -537,7 +539,7 @@ pub mod editor {
         source: EditorBackupSource,
     }
 
-    fn target_path(path: &Path) -> Result<PathBuf> {
+    pub(super) fn target_path(path: &Path) -> Result<PathBuf> {
         match std::fs::canonicalize(path) {
             Ok(p) => Ok(p),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -607,7 +609,7 @@ pub mod editor {
     }
 
     /// The sidecar stays after unlocking: deleting it would let a third caller lock a different inode.
-    fn lock_target(path: &Path) -> Result<std::fs::File> {
+    pub(super) fn lock_target(path: &Path) -> Result<std::fs::File> {
         let name = path.file_name().ok_or_else(|| Error::invalid("save has no file name"))?.to_string_lossy();
         let lock = path.with_file_name(format!(".{name}.kiln-editor-lock"));
         let file = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(false).open(&lock)?;
@@ -635,7 +637,7 @@ pub mod editor {
         }
     }
 
-    fn is_character_file(name: &str) -> bool {
+    pub(super) fn is_character_file(name: &str) -> bool {
         name.len() > 13
             && name.starts_with("character")
             && name.ends_with(".ksd")
@@ -735,7 +737,7 @@ pub mod editor {
         Ok(())
     }
 
-    fn make_backup(file: &Path) -> Result<PathBuf> {
+    pub(super) fn make_backup(file: &Path) -> Result<PathBuf> {
         let secs = std::time::SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
         let base = backups_dir()?;
         crate::durable::ensure_dir(&base)?;
@@ -868,7 +870,7 @@ pub mod editor {
     }
 
     /// Stage next to the target, flush and verify it, then replace the name without ever deleting the old file first.
-    fn replace_save(target: &Path, data: &[u8], copy: Option<&Path>) -> Result<()> {
+    pub(super) fn replace_save(target: &Path, data: &[u8], copy: Option<&Path>) -> Result<()> {
         use std::io::Write;
         let tag = crate::hash::hex(&crate::util::random_bytes::<16>()?);
         let name = target.file_name().ok_or_else(|| Error::invalid("save has no file name"))?.to_string_lossy();
@@ -962,7 +964,7 @@ pub mod editor {
     }
 
     #[cfg(test)]
-    mod tests {
+    pub(super) mod tests {
         use super::*;
 
         use std::cell::RefCell;
@@ -994,7 +996,7 @@ pub mod editor {
             }
             Ok(())
         }
-        fn set_io(backups: PathBuf) { IO.with(|c| *c.borrow_mut() = TestIo { backups: Some(backups), ..Default::default() }); }
+        pub(in crate::saves) fn set_io(backups: PathBuf) { IO.with(|c| *c.borrow_mut() = TestIo { backups: Some(backups), ..Default::default() }); }
 
         struct Fixture { root: PathBuf, target: PathBuf, src: PathBuf }
         impl Fixture {

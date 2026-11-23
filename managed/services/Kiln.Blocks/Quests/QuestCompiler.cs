@@ -113,7 +113,8 @@ internal static class QuestCompiler
         if (s is null) throw new BlockError(ctx.Block, path, "a step is an object");
         CheckId(ctx, s.Id, $"{path}.id", "a step's id");
         if (!ids.Add(s.Id)) throw new BlockError(ctx.Block, $"{path}.id", $"step \"{s.Id}\" twice");
-        if (s.RecommendedLevel < 0) throw new BlockError(ctx.Block, $"{path}.recommendedLevel", $"{s.RecommendedLevel} is less than 0");
+        if (s.RecommendedLevel < 0) throw new BlockError(ctx.Block, $"{path}.recommendedLevel", $"{s.RecommendedLevel} must be at least 0 and at most 255");
+        if (s.RecommendedLevel > 255) ctx.Tolerate($"{path}.recommendedLevel", $"{s.RecommendedLevel} must be at least 0 and at most 255; the game's journal keeps its lowest byte, {s.RecommendedLevel & 0xFF}");
         // the game's journal shows a step by its text: the boot build leaves the mod's whole journal out for one without
         if (s.Text is null && s.Title is null) throw new BlockError(ctx.Block, $"{path}.text", "a step in the journal needs text (or a title)");
         var step = new QuestStep
@@ -141,6 +142,7 @@ internal static class QuestCompiler
         if (s is null) throw new BlockError(ctx.Block, path, "a spawn is an object");
         if (string.IsNullOrWhiteSpace(s.Template.Value)) throw new BlockError(ctx.Block, $"{path}.template", "a spawn needs a template");
         if (s.Count < 1) throw new BlockError(ctx.Block, $"{path}.count", $"{s.Count} is less than 1");
+        if (s.Level < 0) ctx.Tolerate($"{path}.level", $"{s.Level} must be at least 0; Kiln's spawner refuses a level below 0, so this spawn does not happen");
         if (s.Retries is < 0) throw new BlockError(ctx.Block, $"{path}.retries", $"{s.Retries} is less than 0");
         if (s.Spread is { } sp && !(sp >= 0 && double.IsFinite(sp))) throw new BlockError(ctx.Block, $"{path}.spread", $"{sp} must be 0 metres or more");
         return new QuestSpawn

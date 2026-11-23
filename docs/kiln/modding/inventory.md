@@ -12,6 +12,14 @@ Ported from [shroudlink](https://github.com/bjck/shroudlink) (MIT, bjck, v0.8.0)
 Kiln reaches the same game functions by its own signatures (`sigdb/symbols/server.d/items.json`) and runs the moves inside
 the game's own transaction, which shroudlink's host does not. Everything is server side. Call it on the tick thread.
 
+## Persistent player storage (since 0.2.0-dev.30.7)
+
+For a quiver, spellbook, or extra bag, use `Items.RegisterPlayerStorage`. Kiln owns the inventory pages and persists
+their game item records separately, paired with the character save; the player's normal backpack and crafting do not
+include them. `PlayerStorage.Store` and `PlayerStorage.Retrieve` use the moves below. Start with
+[player-storage.md](player-storage.md); save/trust/removal limits are in the
+[service contract](../services/player-storage.md).
+
 ## Moving items
 
 ```csharp

@@ -29,6 +29,12 @@
 //! XWayland, one restart through X11 ([`X11_VAR`]`=x11`, [`X11_RESTARTED`]); X11 is remembered ([`x11_marker`], also
 //! when WebKit composites nothing there too), a page late through X11 goes back to Wayland first ([`x11_no_help`]),
 //! the user's own `GDK_BACKEND` always wins, Settings can turn it off ([`x11_auto_off`]); never a loop.
+//!
+//! Ubuntu WebKit's NVIDIA block (0.2.0-dev.30.7): the AppImage bundles Ubuntu's WebKitGTK, whose DMA-BUF renderer is off
+//! for every NVIDIA GL driver (Debian's disable-nvidia-dmabuf.patch), so it composites nothing there and says nothing.
+//! launcher.log names that cause ([`nvidia_block_reason`]); GLib's warnings go into launcher.log from the start
+//! ([`glib_line`]); Settings' "Force GPU drawing on NVIDIA" (off by default, [`FORCE_DEFAULT`]) sets [`FORCE_VAR`]
+//! with [`SHM_VAR`], and a forced start that dies or is late turns the switch off again ([`force_gave_up`]).
 //! docs/kiln/launcher/app.md, "Drawing without the GPU".
 
 use kiln_manage::paths::DataDirs;
@@ -224,6 +230,399 @@ pub fn dmabuf_crash_why(pending: &Path) -> String {
     }
 }
 
+// ---------------------------------------------------------------- Ubuntu WebKit's NVIDIA block
+
+/// The AppImage bundles Ubuntu's WebKitGTK (libwebkit2gtk-4.1-0 2.50.4-0ubuntu0.22.04.1 in 0.2.0-dev.30.5), which
+/// carries Debian's disable-nvidia-dmabuf.patch: `isNVIDIA()` in AcceleratedBackingStore::rendererBufferTransportMode
+/// makes a GL context, and when GL_VENDOR names NVIDIA the DMA-BUF renderer gets no transport at all, so WebKit
+/// composites nothing (the webview's policy reads Never) and prints nothing about it. The patch's own way past it is
+/// this variable, set (not "0"). A player with an RTX 5080 on Wayland, 0.2.0-dev.30.6.
+pub const FORCE_VAR: &str = "WEBKIT_FORCE_DMABUF_RENDERER";
+/// WebKit's DMA-BUF renderer with shared-memory buffers only (no GBM buffers between its processes): always set with
+/// [`FORCE_VAR`] ([`Force::Shm`]).
+pub const SHM_VAR: &str = "WEBKIT_DMABUF_RENDERER_FORCE_SHM";
+/// Settings' "Force GPU drawing on NVIDIA" for a player who never set it. Off: real NVIDIA driver bugs (a crash at the
+/// start, a black window) sit behind the patch's guard. One constant: the owner decides it before a build.
+pub const FORCE_DEFAULT: bool = false;
+/// Set only for a start the watchdog made after a forced start's page was late: "off" (nothing forced).
+pub(crate) const FORCE_RESTARTED: &str = "KILN_LAUNCHER_FORCE_DMABUF_RESTARTED";
+/// The loaded libwebkit2gtk carries the patch when it has this string: upstream WebKit reads no such variable.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+const PATCH_MARKER: &[u8] = FORCE_VAR.as_bytes();
+/// The library is read in pieces this big when it is searched for [`PATCH_MARKER`].
+const MARKER_CHUNK: usize = 1 << 20;
+
+/// What a start forces past the NVIDIA block.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Force {
+    /// Nothing: WebKit as it is.
+    Off,
+    /// [`FORCE_VAR`]=1 with [`SHM_VAR`]=1. The plain forced renderer (shared GBM buffers) is not offered: it can
+    /// fail with a Wayland protocol error before the page starts. Shared memory is the variant on X11 too.
+    Shm,
+}
+
+/// Why a start forces what it does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ForceWhy {
+    /// The switch is off (or was never set and [`FORCE_DEFAULT`] is off).
+    Off,
+    /// The switch is on.
+    On,
+    /// The switch is on, but the start before with it failed (its guard was left, or its page was late): nothing is
+    /// forced, and the launcher turns the switch off ([`force_gave_up`]).
+    Failed,
+    /// An earlier normal NVIDIA start never confirmed a visible painted frame: try shared memory once.
+    Recovery,
+    /// Shared memory was the last working automatic renderer for this installation and display backend.
+    Recovered,
+    /// The startup guard could not be written: no override is safe to try.
+    Unguarded,
+    /// The user's own [`FORCE_VAR`] or [`SHM_VAR`]: theirs, never changed.
+    Yours,
+    /// This start draws without the GPU or without WebKit's DMA-BUF renderer: nothing to force.
+    Unused,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForceDmabuf {
+    pub step: Force,
+    pub why: ForceWhy,
+}
+
+/// The NVIDIA-block step for this start. Precedence: the user's own variables (`yours`), Settings' switch (`chosen`),
+/// WebKit's DMA-BUF renderer in this start (`dmabuf_on`, [`decide_dmabuf`]), a forced start before this one that
+/// failed (`failed`: its guard was left, or the watchdog's restart says so), then on.
+pub fn decide_force(chosen: bool, yours: bool, dmabuf_on: bool, failed: bool) -> ForceDmabuf {
+    let (step, why) = match () {
+        _ if yours => (Force::Off, ForceWhy::Yours),
+        _ if !chosen => (Force::Off, ForceWhy::Off),
+        _ if !dmabuf_on => (Force::Off, ForceWhy::Unused),
+        _ if failed => (Force::Off, ForceWhy::Failed),
+        _ => (Force::Shm, ForceWhy::On),
+    };
+    ForceDmabuf { step, why }
+}
+
+/// The variables a step sets before GTK starts.
+pub fn force_env(step: Force) -> Vec<(&'static str, &'static str)> {
+    match step {
+        Force::Off => vec![],
+        Force::Shm => vec![(FORCE_VAR, "1"), (SHM_VAR, "1")],
+    }
+}
+
+/// The DMA-BUF start guard ([`Dmabuf::guarded`]) is not a forced start's: that one has its own guard, whose failure
+/// turns the switch off instead of turning WebKit's DMA-BUF renderer off.
+pub fn guarded(d: &Dmabuf, f: &ForceDmabuf) -> bool {
+    d.guarded() && f.step == Force::Off
+}
+
+/// [`when_late_x11`] with the forced renderer first: the newest change the player asked for goes first.
+pub fn when_late_forced(c: &Choice, d: &Dmabuf, x: &X11, f: &ForceDmabuf) -> Late {
+    if RENDER_OWNER.get() == Some(&false) {
+        // No shared state is ours to change, but a blank default start must still have a way out. The restart's
+        // in-memory software sentinel bounds this escape to one try even on a read-only data folder.
+        return if c.mode == Mode::Gpu && c.why == Why::Default { Late::Restart } else { Late::Report };
+    }
+    if f.step != Force::Off { Late::NoForce } else { when_late_x11(c, d, x) }
+}
+
+/// `<data>/state/force-dmabuf.json`: Settings' switch (absent: [`FORCE_DEFAULT`]).
+pub fn force_choice(d: &DataDirs) -> PathBuf {
+    d.root.join("state").join("force-dmabuf.json")
+}
+
+/// `<data>/state/force-dmabuf-failed.json`: why the launcher turned the switch off by itself; gone when the player sets
+/// the switch again.
+pub fn force_failed(d: &DataDirs) -> PathBuf {
+    d.root.join("state").join("force-dmabuf-failed.json")
+}
+
+/// `<data>/state/force-dmabuf-pending.json`: written before any forced renderer variables or WebKit use, removed once
+/// a visible frame has settled, at a successful clean exit, or before a normal restart. A failed fallback keeps it
+/// until the off preference is durable. Left behind with a visible window expected: that start failed.
+pub fn force_pending(d: &DataDirs) -> PathBuf {
+    d.root.join("state").join("force-dmabuf-pending.json")
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ForceChoice {
+    format: u32,
+    on: bool,
+    at: String,
+    version: String,
+}
+
+/// Settings' switch as its file says, or [`FORCE_DEFAULT`] without one.
+pub fn force_chosen(path: &Path) -> bool {
+    force_setting(path).unwrap_or(FORCE_DEFAULT)
+}
+
+/// None differs from an explicit manual off: only an unset preference may recover automatically.
+fn force_setting(path: &Path) -> Option<bool> {
+    match kiln_manage::util::read_json::<ForceChoice>(path) {
+        Ok(Some(c)) if c.format == 1 => Some(c.on),
+        Ok(None) => None,
+        // A damaged or unreadable preference is not permission to try an unsafe renderer again.
+        _ => Some(false),
+    }
+}
+
+pub fn normal_pending(d: &DataDirs) -> PathBuf { d.root.join("state/nvidia-frame-pending.json") }
+pub fn force_recovered(d: &DataDirs) -> PathBuf { d.root.join("state/force-dmabuf-recovered.json") }
+
+#[derive(Serialize, Deserialize)]
+struct StartupGuard {
+    #[serde(flatten)]
+    marker: Marker,
+    context: String,
+    visible: bool,
+}
+
+/// An installation's stable executable path (not its transient AppImage mount) and the GTK display backend.
+#[cfg(target_os = "linux")]
+fn startup_context(x11: bool) -> String {
+    let install = std::env::var_os("APPIMAGE").map(PathBuf::from).or_else(|| std::env::current_exe().ok()).unwrap_or_default();
+    let backend = std::env::var(X11_VAR).unwrap_or_else(|_| if x11 { "x11" } else if std::env::var_os("WAYLAND_DISPLAY").is_some() { "wayland" } else { "x11" }.into());
+    format!("{}|{backend}", install.display())
+}
+
+/// The attempt and the off preference must survive a process crash: flush the file and its rename, including a newly
+/// created state directory's entry in the data root. Failure prevents enabling the override at startup.
+fn write_force_state(path: &Path, value: &impl Serialize) -> Result<(), Error> {
+    let dir = path.parent().ok_or_else(|| Error::invalid("No renderer state directory."))?;
+    std::fs::create_dir_all(dir).map_err(kiln_manage::util::io_at(dir, "creating renderer state"))?;
+    #[cfg(unix)]
+    if let Some(parent) = dir.parent() {
+        std::fs::File::open(parent).and_then(|d| d.sync_all()).map_err(kiln_manage::util::io_at(parent, "flushing renderer state directory"))?;
+    }
+    let mut text = serde_json::to_vec_pretty(value)?;
+    text.push(b'\n');
+    kiln_manage::util::write_atomic_durable_exclusive(path, &text)
+}
+
+fn write_startup_guard(path: &Path, context: &str, visible: bool, why: &str) -> Result<(), Error> {
+    write_force_state(path, &StartupGuard {
+        marker: Marker { format: 1, why: why.into(), at: kiln_manage::util::now_rfc3339(), version: env!("CARGO_PKG_VERSION").into() },
+        context: context.into(), visible,
+    })?;
+    Ok(())
+}
+
+/// Hidden/minimized starts and a different installation/backend are not failed visible attempts. A legacy or damaged
+/// SHM guard still counts, conservatively: it must never cause a persistent manual setting to lock the player out.
+fn expected_frame(path: &Path, context: &str) -> bool {
+    if !path.is_file() { return false; }
+    kiln_manage::util::read_json::<StartupGuard>(path).ok().flatten().is_none_or(|g| g.context == context && g.visible)
+}
+
+/// Unlike a crash breadcrumb, a damaged success record proves nothing.
+fn confirmed_frame(path: &Path, context: &str) -> bool {
+    kiln_manage::util::read_json::<StartupGuard>(path).ok().flatten()
+        .is_some_and(|g| g.marker.format == 1 && g.context == context && g.visible)
+}
+
+/// The data folder is held now (crate::folder: a pointer to a folder that cannot be used, another launcher's move, this
+/// launcher's move or its way out, an unfinished move's removal): the renderer writes nothing there, not even its own
+/// breadcrumbs, and a frame reported meanwhile is no confirmation. What waits goes once the hold ends; a hold that does
+/// not end in this run leaves the renderer state as it was.
+fn folder_held() -> bool {
+    crate::folder::current().held_error().is_some()
+}
+
+/// Waits while the data folder is held (a move begun before a frame settled): a hold that ends lets the settle go on.
+fn wait_until_free() {
+    while folder_held() {
+        std::thread::sleep(Duration::from_millis(500));
+    }
+}
+
+/// Before the window: the folder is held now, or this start holds it to remove an unfinished move's partial copy
+/// (crate::commands::data_folder). Its renderer state is then read for nothing and written never in this run.
+#[cfg(target_os = "linux")]
+fn held_at_start() -> bool {
+    let f = crate::folder::current();
+    f.held_error().is_some() || crate::commands::data_folder::undo_waits(&f)
+}
+
+/// Keep the lock for this process's lifetime. A second launcher must neither mistake a live attempt for a crash nor
+/// overwrite/clear its breadcrumbs. The OS releases this lock on a crash or exec; the lock file itself stays put.
+#[cfg(target_os = "linux")]
+fn own_renderer_state(dirs: &DataDirs) -> Result<(), Error> {
+    let path = dirs.root.join("state/render-startup.lock");
+    let dir = path.parent().unwrap();
+    std::fs::create_dir_all(dir).map_err(kiln_manage::util::io_at(dir, "creating renderer state"))?;
+    let file = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(false)
+        .open(&path).map_err(kiln_manage::util::io_at(&path, "opening renderer startup lock"))?;
+    file.try_lock().map_err(|e| Error::invalid(format!("Renderer startup state is unavailable: {e}")))?;
+    let _ = RENDER_LOCK.set(file);
+    Ok(())
+}
+
+pub fn write_force_choice(path: &Path, on: bool) -> Result<(), Error> {
+    let c = ForceChoice { format: 1, on, at: kiln_manage::util::now_rfc3339(), version: env!("CARGO_PKG_VERSION").into() };
+    write_force_state(path, &c)
+}
+
+/// The sentence for a forced start's guard that was left behind: what happened and when.
+pub fn force_crash_why(pending: &Path) -> String {
+    match kiln_manage::util::read_json::<Marker>(pending).ok().flatten() {
+        Some(m) => format!(
+            "The launcher turned this off by itself: its start at {} (Kiln Launcher {}) with GPU drawing forced on NVIDIA ended before its page had started",
+            m.at, m.version),
+        None => format!("The launcher turned this off by itself: a start with GPU drawing forced on NVIDIA ended before its page had started ({} was left)",
+            pending.display()),
+    }
+}
+
+/// A forced start failed: the switch goes off and its note says why (Settings shows it), so a setting that ends the
+/// launcher at its start can never lock the player out of the setting itself.
+pub fn force_gave_up(d: &DataDirs, why: &str) -> Result<(), Error> {
+    write_marker_file(&force_failed(d), why)?;
+    write_force_choice(&force_choice(d), false)?;
+    clear_marker_file(&force_recovered(d))?;
+    clear_marker_file(&normal_pending(d))
+}
+
+/// What Settings' switch does to the files: the choice, and the note of a failure goes (the player decides again). On also
+/// takes away the sticky DMA-BUF marker, without which there is no renderer to force, and the X11 marker, written because
+/// WebKit drew without the GPU on Wayland: with the GPU the window stays sharp on Wayland (the X11 switch still acts by
+/// itself if WebKit composites nothing).
+pub fn force_switch_files(d: &DataDirs, on: bool) -> Result<(), Error> {
+    write_force_choice(&force_choice(d), on)?;
+    clear_marker_file(&force_failed(d))?;
+    clear_marker_file(&force_recovered(d))?;
+    clear_marker_file(&normal_pending(d))?;
+    if on {
+        clear_marker_file(&dmabuf_marker(d))?;
+        clear_marker_file(&x11_marker(d))?;
+    }
+    Ok(())
+}
+
+/// The why of WebKit's Never when Ubuntu's NVIDIA block explains it: `patched`, the loaded libwebkit2gtk carries the
+/// patch ([`has_marker`]; None: unknown); `vendor`, GL_VENDOR of GTK's GL context (None: not asked); `driver`, NVIDIA's
+/// kernel driver is loaded; `forced`, [`FORCE_VAR`] is set (the block is lifted already). None: not this cause.
+pub fn nvidia_block_reason(patched: Option<bool>, vendor: Option<&str>, driver: bool, forced: bool) -> Option<String> {
+    if forced || patched != Some(true) {
+        return None;
+    }
+    let gl = match vendor {
+        Some(v) if v.contains("NVIDIA") => format!("GL vendor {v}"),
+        Some(_) => return None,
+        None if driver => "NVIDIA's driver is loaded".to_string(),
+        None => return None,
+    };
+    Some(format!(
+        "this WebKitGTK is Ubuntu's build (the AppImage bundles it), which turns its DMA-BUF renderer off for every NVIDIA GL \
+         driver (Debian's disable-nvidia-dmabuf.patch; {gl}), so WebKit composites nothing. Settings > Advanced > Drawing \
+         the launcher > \"Force GPU drawing on NVIDIA\" lifts that block from the next start (off by default: some NVIDIA \
+         drivers crash or show a black window with it; the launcher then turns it off by itself)"
+    ))
+}
+
+/// `marker` occurs in what `r` gives, read in [`MARKER_CHUNK`] pieces (a hit across two pieces counts).
+pub fn has_marker(mut r: impl std::io::Read, marker: &[u8]) -> std::io::Result<bool> {
+    fn find(h: &[u8], n: &[u8]) -> bool {
+        let Some(&first) = n.first() else { return true };
+        let mut i = 0;
+        while let Some(p) = h.get(i..).and_then(|rest| rest.iter().position(|&b| b == first)) {
+            let at = i + p;
+            if h.get(at..at + n.len()) == Some(n) {
+                return true;
+            }
+            i = at + 1;
+        }
+        false
+    }
+    let keep = marker.len().saturating_sub(1);
+    let mut buf = vec![0u8; MARKER_CHUNK + keep];
+    let mut have = 0;
+    loop {
+        let n = r.read(&mut buf[have..])?;
+        if n == 0 {
+            return Ok(false);
+        }
+        let end = have + n;
+        if find(&buf[..end], marker) {
+            return Ok(true);
+        }
+        let start = end.saturating_sub(keep);
+        buf.copy_within(start..end, 0);
+        have = end - start;
+    }
+}
+
+/// The loaded libwebkit2gtk's path and whether it carries the patch ([`PATCH_MARKER`]); None when it cannot be read.
+#[cfg(target_os = "linux")]
+fn webkit_patched() -> Option<(String, bool)> {
+    use std::ffi::{CStr, c_void};
+    let f = webkit2gtk::ffi::webkit_get_major_version as *const c_void;
+    // SAFETY: dladdr only reads the dynamic loader's tables for the address of a function of a loaded library.
+    let path = unsafe {
+        let mut info: libc::Dl_info = std::mem::zeroed();
+        if libc::dladdr(f, &mut info) == 0 || info.dli_fname.is_null() {
+            return None;
+        }
+        CStr::from_ptr(info.dli_fname).to_string_lossy().into_owned()
+    };
+    let file = std::fs::File::open(&path).ok()?;
+    has_marker(file, PATCH_MARKER).ok().map(|p| (path, p))
+}
+
+/// GLib's lines of this start that go into launcher.log at most (WebKitGTK, GTK and GDK say what they found only there).
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+const GLIB_LINES: usize = 40;
+/// A GLib line is cut to this many bytes.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+const GLIB_LINE_MAX: usize = 300;
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+static GLIB_SAID: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// A GLib message as launcher.log's line ("<domain> WARNING: <text>", one line, short); None for info and debug.
+#[cfg(target_os = "linux")]
+pub fn glib_line(domain: Option<&str>, level: gtk::glib::LogLevel, message: &str) -> Option<String> {
+    use gtk::glib::LogLevel as L;
+    let lvl = match level {
+        L::Error => "ERROR",
+        L::Critical => "CRITICAL",
+        L::Warning => "WARNING",
+        L::Message => "MESSAGE",
+        L::Info | L::Debug => return None,
+    };
+    let text: String = message.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
+    let mut text = text.trim().to_string();
+    if text.len() > GLIB_LINE_MAX {
+        let mut cut = GLIB_LINE_MAX;
+        while !text.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        text.truncate(cut);
+        text.push_str("...");
+    }
+    Some(match domain.filter(|d| !d.is_empty()) {
+        Some(d) => format!("{d} {lvl}: {text}"),
+        None => format!("{lvl}: {text}"),
+    })
+}
+
+/// From the start of `main`, before GTK: GLib's warnings (GTK's, GDK's, WebKit's own process) go on to stderr as before
+/// and into launcher.log too, [`GLIB_LINES`] at most.
+#[cfg(target_os = "linux")]
+fn capture_glib() {
+    gtk::glib::log_set_default_handler(|domain, level, message| {
+        gtk::glib::log_default_handler(domain, level, Some(message));
+        if let Some(line) = glib_line(domain, level, message)
+            && GLIB_SAID.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < GLIB_LINES
+        {
+            crate::commands::app::launcher_log("glib", &line);
+        }
+    });
+}
+
 /// GTK's own choice of display server: `x11` on a Wayland session draws through XWayland.
 pub const X11_VAR: &str = "GDK_BACKEND";
 /// Set only for a start the launcher made itself: "1", the switch to X11 (that start draws through XWayland even when
@@ -326,6 +725,9 @@ pub fn x11_auto_off(d: &DataDirs) -> PathBuf {
 /// What a start does when the page has not said it started in time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Late {
+    /// This start forces WebKit's DMA-BUF renderer past Ubuntu's NVIDIA block: note the step as failed and start again
+    /// with the next one (shared memory, then nothing forced).
+    NoForce,
     /// This start draws through X11 (the launcher's switch): X11 made it worse; start again on Wayland, X11 marked as no help.
     NoX11,
     /// Write the DMA-BUF marker and start again with the GPU, without the DMA-BUF renderer.
@@ -411,6 +813,10 @@ impl Relaunch {
     pub fn x11_switch() -> Relaunch {
         Relaunch { set: vec![(X11_RESTARTED, "1".into())], ..Default::default() }
     }
+    /// A forced start failed: [`FORCE_RESTARTED`]=off (the new start forces nothing even before the switch is written off).
+    pub fn force_fallback() -> Relaunch {
+        Relaunch { set: vec![(FORCE_RESTARTED, "off".into())], ..Default::default() }
+    }
     /// Back from X11 to Wayland: [`X11_RESTARTED`]=0 (X11 is not tried again in this chain), without our `GDK_BACKEND`.
     pub fn x11_back() -> Relaunch {
         Relaunch { unset: vec![X11_VAR], set: vec![(X11_RESTARTED, "0".into())], ..Default::default() }
@@ -433,6 +839,9 @@ impl Relaunch {
             Some(X11Why::Restart) => self.add(X11_RESTARTED, "1"),
             Some(X11Why::Tried) => self.add(X11_RESTARTED, "0"),
             _ => {}
+        }
+        if let Some(v) = FORCE_RESTARTED_SEEN.get() {
+            self.add(FORCE_RESTARTED, v);
         }
         crate::sandbox::keep(&mut self);
         self
@@ -471,11 +880,12 @@ pub fn software_env(get: impl Fn(&str) -> Option<OsString>) -> Vec<(&'static str
     SOFTWARE_ENV.iter().copied().filter(|(k, _)| get(k).is_none()).collect()
 }
 
-/// The names in a [`SET_BY_US`] value that are ours to take back (only [`SOFTWARE_ENV`] names, [`DMABUF_VAR`] and
-/// [`X11_VAR`], never anything else).
+/// The names in a [`SET_BY_US`] value that are ours to take back (only [`SOFTWARE_ENV`] names, [`DMABUF_VAR`],
+/// [`X11_VAR`], [`FORCE_VAR`] and [`SHM_VAR`], never anything else).
 pub fn set_by_us(list: Option<&str>) -> Vec<&'static str> {
     let list = list.unwrap_or_default();
-    SOFTWARE_ENV.iter().map(|(k, _)| *k).chain([DMABUF_VAR, X11_VAR]).filter(|k| list.split(',').any(|x| x.trim() == *k)).collect()
+    SOFTWARE_ENV.iter().map(|(k, _)| *k).chain([DMABUF_VAR, X11_VAR, FORCE_VAR, SHM_VAR])
+        .filter(|k| list.split(',').any(|x| x.trim() == *k)).collect()
 }
 
 // ---------------------------------------------------------------- the marker
@@ -539,6 +949,7 @@ pub struct Watch {
 struct WatchState {
     started: Option<Instant>,
     window: Option<Instant>,
+    painted: bool,
 }
 
 /// What the watchdog saw.
@@ -552,7 +963,7 @@ pub enum Seen {
 
 impl Watch {
     pub const fn new() -> Watch {
-        Watch { state: Mutex::new(WatchState { started: None, window: None }), cv: Condvar::new() }
+        Watch { state: Mutex::new(WatchState { started: None, window: None, painted: false }), cv: Condvar::new() }
     }
     pub fn window_created(&self) {
         let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
@@ -570,6 +981,18 @@ impl Watch {
     /// The page has said it started.
     pub fn has_started(&self) -> bool {
         self.state.lock().unwrap_or_else(|e| e.into_inner()).started.is_some()
+    }
+    pub fn has_window(&self) -> bool {
+        self.state.lock().unwrap_or_else(|e| e.into_inner()).window.is_some()
+    }
+    pub fn page_painted(&self) -> bool {
+        let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let first = !s.painted;
+        s.painted = true;
+        first
+    }
+    pub fn has_painted(&self) -> bool {
+        self.state.lock().unwrap_or_else(|e| e.into_inner()).painted
     }
     /// Waits for the ready call: `timeout` from the window's creation, or `no_window` from `begun` while there is none.
     pub fn wait(&self, begun: Instant, timeout: Duration, no_window: Duration) -> Seen {
@@ -621,6 +1044,25 @@ enum X11Note {
 }
 /// The pending marker this start wrote (a guarded start, [`watch`]); removed at most once.
 static PENDING: Mutex<Option<PathBuf>> = Mutex::new(None);
+/// This start's step past Ubuntu WebKit's NVIDIA block ([`prepare`]).
+static FORCE: OnceLock<ForceDmabuf> = OnceLock::new();
+/// The guard a forced start wrote before setting its variables ([`prepare`]); removed at most once.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+static FORCE_PENDING: Mutex<Option<PathBuf>> = Mutex::new(None);
+/// A forced start's guard an earlier start left: its path and the note's sentence, for [`after_gate`].
+static FORCE_LEFT: OnceLock<(PathBuf, String)> = OnceLock::new();
+/// Why this start could not arm its guard: the switch goes off once the data folder opens.
+static FORCE_GUARD_ERROR: OnceLock<String> = OnceLock::new();
+#[cfg(target_os = "linux")]
+static RENDER_LOCK: OnceLock<std::fs::File> = OnceLock::new();
+static RENDER_OWNER: OnceLock<bool> = OnceLock::new();
+static RENDER_CONTEXT: OnceLock<String> = OnceLock::new();
+static NORMAL_PENDING: Mutex<Option<PathBuf>> = Mutex::new(None);
+/// The [`FORCE_RESTARTED`] value this start was given: a later restart keeps it ([`Relaunch::keeping`]).
+static FORCE_RESTARTED_SEEN: OnceLock<String> = OnceLock::new();
+/// This start found Ubuntu WebKit's NVIDIA block behind WebKit's Never ([`window_created`]).
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+static NVIDIA_BLOCK: OnceLock<bool> = OnceLock::new();
 /// A pending marker an earlier start left: its path and the sticky marker's sentence, for [`after_gate`].
 static LEFT: OnceLock<(PathBuf, String)> = OnceLock::new();
 
@@ -637,6 +1079,21 @@ pub fn dmabuf() -> Option<&'static Dmabuf> {
 /// This start's X11 choice (Linux, after [`prepare`]).
 pub fn x11() -> Option<&'static X11> {
     X11_CHOICE.get()
+}
+
+/// This start's step past Ubuntu WebKit's NVIDIA block (Linux, after [`prepare`]).
+pub fn force() -> Option<&'static ForceDmabuf> {
+    FORCE.get()
+}
+
+/// Removes the guard this forced start wrote (the page started and settled, a clean exit, a restart).
+fn clear_force_pending(when: &str) {
+    if folder_held() { return; }
+    let Some(p) = FORCE_PENDING.lock().unwrap_or_else(|e| e.into_inner()).take() else { return };
+    match clear_marker_file(&p) {
+        Ok(()) => log(&format!("forced DMA-BUF start guard cleared ({when}): {}", p.display())),
+        Err(e) => log(&format!("could not remove {} ({when}): {}", p.display(), e.message)),
+    }
 }
 
 /// Keeps `note` for the data folder and writes the newest one once the gate is open (`gate`: it opened now).
@@ -668,6 +1125,7 @@ fn x11_note(note: Option<X11Note>, gate: bool) {
 
 /// Removes the pending marker this start wrote (the page started and settled, a clean exit, a restart).
 fn clear_pending(when: &str) {
+    if folder_held() { return; }
     let Some(p) = PENDING.lock().unwrap_or_else(|e| e.into_inner()).take() else { return };
     match clear_marker_file(&p) {
         Ok(()) => log(&format!("DMA-BUF start guard cleared ({when}): {}", p.display())),
@@ -679,7 +1137,10 @@ fn clear_pending(when: &str) {
 /// earlier start left (then that one goes), or for this start's watchdog restart when its marker could not be written
 /// then. Before the gate a start only reads the data folder (and writes its own pending marker).
 pub fn after_gate() {
+    if RENDER_OWNER.get() == Some(&false) { return; }
     x11_note(None, true);
+    force_after_gate();
+    if WATCH.has_painted() { finish_frame("the data folder opened after a visible frame"); }
     let Some(d) = dmabuf() else { return };
     let Ok(dirs) = crate::state::dirs() else { return };
     let off = dmabuf_marker(&dirs);
@@ -703,11 +1164,84 @@ pub fn after_gate() {
     }
 }
 
+/// After the gate: a forced start's guard an earlier start left, or this start's restart after a late page, turns the
+/// switch off with its note ([`force_gave_up`]; then the guard goes).
+fn force_after_gate() {
+    let Ok(dirs) = crate::state::dirs() else { return };
+    let why = match (FORCE_LEFT.get(), FORCE_GUARD_ERROR.get(), FORCE_RESTARTED_SEEN.get()) {
+        (Some((_, why)), _, _) => why.clone(),
+        (_, Some(why), _) => why.clone(),
+        (None, None, Some(_)) if !force_failed(&dirs).is_file() =>
+            "The launcher turned this off by itself: the page did not start in time with GPU drawing forced on NVIDIA".into(),
+        _ => return,
+    };
+    match force_gave_up(&dirs, &why) {
+        Ok(()) => log(&format!("Settings' \"Force GPU drawing on NVIDIA\" is off now: wrote {} ({why})", force_failed(&dirs).display())),
+        // the guard stays: the next start finds it again
+        Err(e) => { log(&format!("could not turn \"Force GPU drawing on NVIDIA\" off: {}", e.message)); return; }
+    }
+    if let Some((p, _)) = FORCE_LEFT.get()
+        && let Err(e) = clear_marker_file(p)
+    {
+        log(&format!("could not remove {}: {}", p.display(), e.message));
+    }
+}
+
 /// `RunEvent::Exit`: a clean exit after the page started is no crash.
 pub fn leaving() {
     if WATCH.has_started() {
         clear_pending("the launcher quit");
     }
+    if WATCH.has_painted() { finish_frame("the launcher quit"); }
+}
+
+/// Page navigation/readiness is not proof of painting. Visibility updates suspend the failure breadcrumb for an
+/// intentionally hidden page; the frontend acknowledges painting only after two visible animation frames.
+pub fn frame_painted(painted: bool, visible: bool) -> Option<String> {
+    choice()?; // Only Linux has renderer startup guards.
+    if RENDER_OWNER.get() == Some(&false) { return None; }
+    // a held folder: no visibility update and no confirmation; the page reports its frames again once the hold ends
+    if folder_held() { return None; }
+    if let Some(context) = RENDER_CONTEXT.get() {
+        for pending in [&NORMAL_PENDING, &FORCE_PENDING] {
+            let pending = pending.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(p) = pending.as_ref()
+                && let Err(e) = write_startup_guard(p, context, visible, "Waiting for a confirmed visible frame")
+            { log(&format!("could not update startup visibility: {}", e.message)); }
+        }
+    }
+    if !painted || !visible || !WATCH.has_window() || !WATCH.page_painted() { return None; }
+    WATCH.page_started();
+    std::thread::Builder::new().name("kiln-render-settle".into()).spawn(|| {
+        std::thread::sleep(SETTLE);
+        wait_until_free();
+        clear_pending("a visible frame settled");
+        finish_frame("a visible frame settled");
+    }).ok();
+    force().filter(|f| f.why == ForceWhy::Recovery).map(|_| {
+        "The previous normal NVIDIA startup never confirmed a visible frame. Kiln is trying shared-memory GPU drawing; if this attempt fails, it will turn that recovery off.".into()
+    })
+}
+
+fn finish_frame(when: &str) {
+    if RENDER_OWNER.get() == Some(&false) || folder_held() { return; }
+    let Ok(dirs) = crate::state::dirs() else { return };
+    if force().is_some_and(|f| matches!(f.why, ForceWhy::Recovery | ForceWhy::Recovered))
+        && force_setting(&force_choice(&dirs)).is_none()
+        && let Some(context) = RENDER_CONTEXT.get()
+        && let Err(e) = write_startup_guard(&force_recovered(&dirs), context, true, "Shared-memory GPU drawing confirmed a visible frame")
+    {
+        log(&format!("could not remember the working automatic renderer: {}", e.message));
+        return;
+    }
+    let mut normal = NORMAL_PENDING.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(p) = normal.as_ref() {
+        match clear_marker_file(p) {
+            Ok(()) => { normal.take(); }
+            Err(e) => log(&format!("could not clear normal startup guard: {}", e.message)),
+        }
+    }
+    clear_force_pending(when);
 }
 
 // ---------------------------------------------------------------- does WebKit composite (inbox 94)
@@ -876,19 +1410,56 @@ fn egl_client_extensions() -> Option<String> {
     }
 }
 
-/// GTK 3's GL check, as WebKitGTK makes it: a GL context for a realized popup window. Main thread only.
+/// GTK 3's GL check, as WebKitGTK makes it: a GL context for a realized popup window; and that context's GL_VENDOR
+/// (what Ubuntu's NVIDIA block reads, [`gl_vendor`]). Main thread only.
 #[cfg(target_os = "linux")]
-fn gtk_gl_check() -> Result<(), String> {
+fn gtk_gl_check() -> (Result<(), String>, Option<String>) {
     use gtk::prelude::*;
     let w = gtk::Window::new(gtk::WindowType::Popup);
     w.realize();
     let r = match w.window() {
-        Some(gw) => gw.create_gl_context().map(|_| ()).map_err(|e| e.to_string()),
-        None => Err("the test window has no GdkWindow".into()),
+        Some(gw) => match gw.create_gl_context() {
+            Ok(ctx) => (Ok(()), gl_vendor(&ctx)),
+            Err(e) => (Err(e.to_string()), None),
+        },
+        None => (Err("the test window has no GdkWindow".into()), None),
     };
     // SAFETY: our own toplevel, never shown, referenced nowhere else.
     unsafe { w.destroy() };
     r
+}
+
+/// GL_VENDOR of a GTK GL context: made current, asked through GLVND's dispatch (libOpenGL, libGL, libGLESv2: whichever
+/// is there), released again. None when any step fails.
+#[cfg(target_os = "linux")]
+fn gl_vendor(ctx: &gtk::gdk::GLContext) -> Option<String> {
+    use std::ffi::{CStr, c_char};
+    const GL_VENDOR: u32 = 0x1F00;
+    ctx.realize().ok()?;
+    ctx.make_current();
+    // SAFETY: dlopen/dlsym of system GL libraries by name; glGetString(GL_VENDOR) with a context current on this thread
+    // returns a static string or NULL (a dispatch without a context returns NULL). The handles are kept.
+    let vendor = unsafe {
+        let mut f = std::ptr::null_mut();
+        for lib in [c"libOpenGL.so.0", c"libGL.so.1", c"libGLESv2.so.2"] {
+            let h = libc::dlopen(lib.as_ptr(), libc::RTLD_NOW | libc::RTLD_LOCAL);
+            if !h.is_null() {
+                f = libc::dlsym(h, c"glGetString".as_ptr());
+                if !f.is_null() {
+                    break;
+                }
+            }
+        }
+        if f.is_null() {
+            None
+        } else {
+            let get: extern "C" fn(u32) -> *const c_char = std::mem::transmute(f);
+            let p = get(GL_VENDOR);
+            (!p.is_null()).then(|| CStr::from_ptr(p).to_string_lossy().into_owned())
+        }
+    };
+    gtk::gdk::GLContext::clear_current();
+    vendor.filter(|v| !v.trim().is_empty())
 }
 
 // ---------------------------------------------------------------- what the UI sees
@@ -911,6 +1482,25 @@ pub struct RenderInfo {
     /// X11 (XWayland) in this start; only on a Wayland session with XWayland.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub x11: Option<X11Info>,
+    /// Settings' "Force GPU drawing on NVIDIA" and this start's step past Ubuntu WebKit's NVIDIA block.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub force: Option<ForceInfo>,
+}
+
+/// `app_info.render.force`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ForceInfo {
+    /// Settings' switch (its file, or [`FORCE_DEFAULT`]).
+    pub on: bool,
+    /// This start.
+    pub step: Force,
+    pub why: ForceWhy,
+    /// Why the launcher turned the switch off by itself, and when (a forced start failed).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failed_why: Option<String>,
+    /// This start found Ubuntu WebKit's NVIDIA block behind WebKit's choice to draw without the GPU.
+    pub blocked: bool,
 }
 
 /// `app_info.render.x11`.
@@ -960,7 +1550,30 @@ pub fn info() -> Option<RenderInfo> {
             auto: !d.as_ref().is_some_and(|d| x11_auto_off(d).is_file()),
             yours: if x.why == X11Why::Yours { std::env::var(X11_VAR).ok() } else { None },
         }),
+        force: force().map(|f| ForceInfo {
+            on: d.as_ref().and_then(|d| force_setting(&force_choice(d)))
+                .unwrap_or(FORCE_DEFAULT || matches!(f.why, ForceWhy::Recovery | ForceWhy::Recovered)),
+            step: f.step,
+            why: f.why,
+            failed_why: d.as_ref().and_then(|d| marker_file_why(&force_failed(d))),
+            blocked: NVIDIA_BLOCK.get().copied().unwrap_or(false),
+        }),
     })
+}
+
+/// Settings, "Force GPU drawing on NVIDIA": the switch for the next start ([`force_switch_files`]).
+pub fn set_force(on: bool) -> Result<RenderInfo, Error> {
+    if choice().is_none() {
+        return Err(Error::new(kiln_manage::ErrorCode::Unsupported, "Only the Linux launcher has this."));
+    }
+    let d = crate::state::dirs()?;
+    force_switch_files(&d, on)?;
+    log(&format!("Settings: \"Force GPU drawing on NVIDIA\" is {}", if on {
+        "on: the next start sets WEBKIT_FORCE_DMABUF_RENDERER=1 and WEBKIT_DMABUF_RENDERER_FORCE_SHM=1 past Ubuntu WebKit's NVIDIA block (and turns this off by itself if that start fails)"
+    } else {
+        "off: the next start leaves WebKit's NVIDIA block as it is"
+    }));
+    info().ok_or_else(|| Error::new(kiln_manage::ErrorCode::Internal, "no render state"))
 }
 
 /// Settings, "Switch to X11 when drawing is slow on Wayland": off writes `state/x11-auto-off.json` and removes the X11
@@ -1043,6 +1656,26 @@ pub fn says_dmabuf(d: &Dmabuf) -> String {
     format!("WebKit's DMA-BUF renderer {}: {why}", if d.on { "on" } else { "off" })
 }
 
+/// "WebKit's DMA-BUF renderer forced past Ubuntu WebKit's NVIDIA block on shared memory (...): Settings' ... is on", for
+/// the logs and the support report.
+pub fn says_force(f: &ForceDmabuf) -> String {
+    let how = match f.step {
+        Force::Off => "not forced past Ubuntu WebKit's NVIDIA block".to_string(),
+        Force::Shm => format!("forced past Ubuntu WebKit's NVIDIA block on shared memory ({FORCE_VAR}=1, {SHM_VAR}=1)"),
+    };
+    let why = match f.why {
+        ForceWhy::Off => "Settings' \"Force GPU drawing on NVIDIA\" is off",
+        ForceWhy::On => "Settings' \"Force GPU drawing on NVIDIA\" is on",
+        ForceWhy::Failed => "the start before with it failed, so the launcher turns the switch off",
+        ForceWhy::Recovery => "the previous normal NVIDIA start never confirmed a visible frame: trying shared memory once",
+        ForceWhy::Recovered => "shared memory is the last working automatic renderer for this installation and display backend",
+        ForceWhy::Unguarded => "the startup crash guard could not be written, so no override is applied",
+        ForceWhy::Yours => "your own variables decide",
+        ForceWhy::Unused => "WebKit's DMA-BUF renderer is off in this start",
+    };
+    format!("WebKit's DMA-BUF renderer {how}: {why}")
+}
+
 /// "X11 (XWayland) on: switched once after ...", for the logs.
 pub fn says_x11(x: &X11) -> String {
     let why = match x.why {
@@ -1065,6 +1698,9 @@ pub fn dmabuf_report() -> Option<String> {
     if let Some(w) = crate::state::dirs().ok().and_then(|dirs| marker_file_why(&dmabuf_marker(&dirs))) {
         s += &format!("; marker: {w}");
     }
+    if let Some(f) = force().filter(|f| f.why != ForceWhy::Off) {
+        s += &format!("; {}", says_force(f));
+    }
     Some(s)
 }
 
@@ -1074,11 +1710,19 @@ pub fn dmabuf_report() -> Option<String> {
 /// prints the log's path and the mode to stderr. [`watch`] starts the watchdog after crate::sandbox's start.
 #[cfg(target_os = "linux")]
 pub fn prepare(args: &[String]) {
+    prepare_for_driver(args, Path::new("/proc/driver/nvidia/version").is_file());
+}
+
+#[cfg(target_os = "linux")]
+fn prepare_for_driver(args: &[String], nvidia: bool) {
+    // GLib's warnings into launcher.log from here on, before GTK and WebKit start (they say what they found only there)
+    capture_glib();
     // a launcher started from another Kiln (the fallback, an update's restart): its variables are not the user's
     let ours = set_by_us(std::env::var(SET_BY_US).ok().as_deref());
     let restarted = std::env::var_os(RESTARTED).is_some();
     let dmabuf_restarted = std::env::var_os(DMABUF_RESTARTED).is_some();
     let x11_restarted = std::env::var(X11_RESTARTED).ok();
+    let force_restarted = std::env::var(FORCE_RESTARTED).ok().filter(|v| v == "off");
     // SAFETY: main, before any thread exists (the callers' contract).
     unsafe {
         for k in &ours {
@@ -1088,6 +1732,7 @@ pub fn prepare(args: &[String]) {
         std::env::remove_var(RESTARTED);
         std::env::remove_var(DMABUF_RESTARTED);
         std::env::remove_var(X11_RESTARTED);
+        std::env::remove_var(FORCE_RESTARTED);
     }
     // read only, before the beta copy's gate opens (state::dirs() refuses until then: 0.2.0-dev.29 to 29.17 never saw the marker)
     let dirs = crate::folder::found_dirs();
@@ -1098,11 +1743,82 @@ pub fn prepare(args: &[String]) {
     let left = dirs.as_ref().map(dmabuf_pending).filter(|p| p.is_file());
     let has_off = dirs.as_ref().is_some_and(|d| dmabuf_marker(d).is_file());
     let yours = std::env::var(DMABUF_VAR).ok();
-    let d = decide_dmabuf(args, yours.as_deref(), std::env::var(DMABUF_ENV).ok().as_deref(), c.mode == Mode::Software,
+    let mut d = decide_dmabuf(args, yours.as_deref(), std::env::var(DMABUF_ENV).ok().as_deref(), c.mode == Mode::Software,
         dmabuf_restarted, left.is_some(), has_off);
     if let Some(p) = left {
         let why = dmabuf_crash_why(&p);
         let _ = LEFT.set((p, why));
+    }
+    // X11 (XWayland) on a Wayland session: the user's own GDK_BACKEND (ours were taken back above) always wins
+    let present = |k: &str| std::env::var_os(k).is_some_and(|v| !v.is_empty());
+    let has = |f: fn(&DataDirs) -> PathBuf| dirs.as_ref().is_some_and(|dd| f(dd).is_file());
+    let x = decide_x11(std::env::var(X11_VAR).ok().as_deref(), present("WAYLAND_DISPLAY"), present("DISPLAY"), c.mode == Mode::Software,
+        has(x11_auto_off), x11_restarted.as_deref(), has(x11_marker), has(x11_no_help));
+    // Ubuntu WebKit's NVIDIA block: Settings' switch; a forced start before this one that died (its guard was left) or
+    // whose page was late (the watchdog's restart) forces nothing now and turns the switch off once the data folder opens;
+    // the user's own variables (ours were taken back above) always win
+    // A held folder (another launcher moves it, or this start first removes an unfinished move's partial copy) is no
+    // renderer state of this start: no lock, no breadcrumb, no recovery from its guards, as without the lock.
+    let held = dirs.is_some() && held_at_start();
+    if held {
+        log("not changing renderer startup state: the data folder is held (a move, or an unfinished move's copy is removed first)");
+    }
+    let owns_state = !held && dirs.as_ref().is_some_and(|dd| match own_renderer_state(dd) {
+        Ok(()) => true,
+        Err(e) => { log(&format!("not changing renderer startup state: {}", e.message)); false }
+    });
+    let _ = RENDER_OWNER.set(owns_state);
+    let context = startup_context(x.on);
+    let _ = RENDER_CONTEXT.set(context.clone());
+    let force_left = dirs.as_ref().filter(|_| owns_state).map(force_pending).filter(|p| expected_frame(p, &context)).map(|p| { let why = force_crash_why(&p); (p, why) });
+    let force_yours = [FORCE_VAR, SHM_VAR].iter().any(|k| std::env::var_os(k).is_some());
+    let setting = if owns_state { dirs.as_ref().and_then(|dd| force_setting(&force_choice(dd))) } else { Some(false) };
+    let recovered = owns_state && dirs.as_ref().is_some_and(|dd| confirmed_frame(&force_recovered(dd), &context));
+    let normal_failed = owns_state && dirs.as_ref().is_some_and(|dd| expected_frame(&normal_pending(dd), &context));
+    let render_yours = kiln_manage::hostenv::RENDER_VARS.iter().chain([ENV, DMABUF_ENV].iter())
+        .any(|k| std::env::var_os(k).is_some());
+    let automatic = owns_state && !render_yours && c.why == Why::Default && nvidia && setting.is_none() && (normal_failed || recovered) && !force_yours
+        && force_left.is_none() && force_restarted.is_none() && c.mode == Mode::Gpu;
+    // Internal sticky/restart DMA-BUF fallbacks must not prevent the one SHM attempt. Explicit user choices still win.
+    if automatic {
+        d = decide_dmabuf(args, yours.as_deref(), std::env::var(DMABUF_ENV).ok().as_deref(), false, false, false, false);
+    }
+    let chosen = setting.unwrap_or(FORCE_DEFAULT) || automatic;
+    let mut f = decide_force(chosen, force_yours, d.on && c.mode == Mode::Gpu && nvidia, force_left.is_some() || force_restarted.is_some());
+    if automatic && f.step == Force::Shm {
+        f.why = if recovered { ForceWhy::Recovered } else { ForceWhy::Recovery };
+    }
+    // A previous normal start belongs to this attempt too; clear it only after a confirmed, settled frame.
+    if normal_failed && let Some(dd) = &dirs {
+        *NORMAL_PENDING.lock().unwrap_or_else(|e| e.into_inner()) = Some(normal_pending(dd));
+    }
+    if f.step != Force::Off {
+        // Arm before setting variables: sandbox::prepare can call WebKit or GTK too. If the breadcrumb cannot be
+        // written, never apply a persistent setting whose crash would leave the next start with no way to recover.
+        let armed = dirs.as_ref().ok_or_else(|| Error::invalid("No data folder is available for the startup crash guard.")).and_then(|dirs| {
+            let p = force_pending(dirs);
+            let why = format!("A start with GPU drawing forced on NVIDIA (pid {}) has not said yet that its page started", std::process::id());
+            write_startup_guard(&p, &context, true, &why)?;
+            Ok(p)
+        });
+        match armed {
+            Ok(p) => *FORCE_PENDING.lock().unwrap_or_else(|e| e.into_inner()) = Some(p),
+            Err(e) => {
+                let why = format!("The launcher turned this off by itself: it could not write the startup crash guard for GPU drawing forced on NVIDIA: {}", e.message);
+                log(&why);
+                let _ = FORCE_GUARD_ERROR.set(why);
+                f = ForceDmabuf { step: Force::Off, why: ForceWhy::Unguarded };
+            }
+        }
+    }
+    if nvidia && setting.is_none() && !force_yours && c.mode == Mode::Gpu && d.on && f.why == ForceWhy::Off
+        && let Some(dd) = &dirs
+    {
+        let p = normal_pending(dd);
+        match write_startup_guard(&p, &context, true, "A normal NVIDIA startup has not confirmed a visible frame") {
+            Ok(()) => *NORMAL_PENDING.lock().unwrap_or_else(|e| e.into_inner()) = Some(p),
+            Err(e) => log(&format!("could not write normal NVIDIA startup guard: {}", e.message)),
+        }
     }
     let mut set = Vec::new();
     if c.mode == Mode::Software {
@@ -1117,11 +1833,17 @@ pub fn prepare(args: &[String]) {
         unsafe { std::env::set_var(DMABUF_VAR, "1") };
         set.push(DMABUF_VAR);
     }
-    // X11 (XWayland) on a Wayland session: the user's own GDK_BACKEND (ours were taken back above) always wins
-    let present = |k: &str| std::env::var_os(k).is_some_and(|v| !v.is_empty());
-    let has = |f: fn(&DataDirs) -> PathBuf| dirs.as_ref().is_some_and(|dd| f(dd).is_file());
-    let x = decide_x11(std::env::var(X11_VAR).ok().as_deref(), present("WAYLAND_DISPLAY"), present("DISPLAY"), c.mode == Mode::Software,
-        has(x11_auto_off), x11_restarted.as_deref(), has(x11_marker), has(x11_no_help));
+    for (k, v) in force_env(f.step) {
+        // SAFETY: as above.
+        unsafe { std::env::set_var(k, v) };
+        set.push(k);
+    }
+    if let Some(left) = force_left {
+        let _ = FORCE_LEFT.set(left);
+    }
+    if let Some(v) = force_restarted {
+        let _ = FORCE_RESTARTED_SEEN.set(v);
+    }
     if x.on {
         // SAFETY: as above.
         unsafe { std::env::set_var(X11_VAR, "x11") };
@@ -1191,9 +1913,30 @@ pub fn prepare(args: &[String]) {
         log(&line);
     }
     log(&says_x11(&x));
+    let mut line = says_force(&f);
+    if let Some((p, why)) = FORCE_LEFT.get() {
+        line += &format!("; found {} ({why}); the switch is turned off once the data folder opens", p.display());
+    }
+    if f.why == ForceWhy::Off
+        && let Some(w) = dirs.as_ref().and_then(|dd| marker_file_why(&force_failed(dd)))
+    {
+        line += &format!(" ({}: {w})", force_failed(dirs.as_ref().unwrap()).display());
+    }
+    if f.why == ForceWhy::Yours {
+        let v = |k: &str| std::env::var(k).map_or("(not set)".to_string(), |v| format!("{v} (yours)"));
+        line += &format!("; {FORCE_VAR}={}, {SHM_VAR}={}", v(FORCE_VAR), v(SHM_VAR));
+    }
+    if f.why == ForceWhy::Failed {
+        eprintln!("Kiln Launcher: PROBLEM: the last start with GPU drawing forced on NVIDIA failed: this start forces nothing, and \
+            Settings > Advanced > Drawing the launcher > \"Force GPU drawing on NVIDIA\" goes off");
+        log(&format!("PROBLEM: {line}"));
+    } else {
+        log(&line);
+    }
     let _ = CHOICE.set(c);
     let _ = DMABUF.set(d);
     let _ = X11_CHOICE.set(x);
+    let _ = FORCE.set(f);
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -1207,7 +1950,8 @@ pub fn prepare(_args: &[String]) {}
 pub fn watch() {
     let Some(c) = choice().cloned() else { return };
     let d = dmabuf().cloned().unwrap_or(Dmabuf { on: false, why: DmabufWhy::Software, ignored: None });
-    if d.guarded()
+    let f = force().cloned().unwrap_or(ForceDmabuf { step: Force::Off, why: ForceWhy::Unused });
+    if RENDER_OWNER.get() != Some(&false) && guarded(&d, &f) && !folder_held()
         && let Some(dirs) = crate::folder::found_dirs()
     {
         // read-only use of the folder before the beta copy's gate, except this one file of our own
@@ -1219,7 +1963,7 @@ pub fn watch() {
     }
     let x = x11().cloned().unwrap_or(X11 { on: false, why: X11Why::Unavailable });
     let begun = Instant::now();
-    std::thread::Builder::new().name("kiln-render-watch".into()).spawn(move || watchdog(c, d, x, begun)).ok();
+    std::thread::Builder::new().name("kiln-render-watch".into()).spawn(move || watchdog(c, d, x, f, begun)).ok();
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -1227,21 +1971,36 @@ pub fn watch() {}
 
 /// The watchdog: the page's ready call in time, or the fallback.
 #[cfg(target_os = "linux")]
-fn watchdog(c: Choice, d: Dmabuf, x: X11, begun: Instant) {
+fn watchdog(c: Choice, d: Dmabuf, x: X11, f: ForceDmabuf, begun: Instant) {
     let window = match WATCH.wait(begun, TIMEOUT, NO_WINDOW_TIMEOUT) {
         Seen::Started(after) => {
             log(&format!("the page started {} ms after the window was made ({:?}, dmabuf {})", after.as_millis(), c.mode,
                 if d.on { "on" } else { "off" }).to_lowercase());
-            if d.guarded() {
+            if guarded(&d, &f) {
                 std::thread::sleep(SETTLE);
-                clear_pending(&format!("the page started {} s ago", SETTLE.as_secs()));
+                let when = format!("the page started {} s ago", SETTLE.as_secs());
+                clear_pending(&when);
             }
             return;
         }
         Seen::Late { window } => window,
     };
     let what = if window { format!("the page did not start within {} s of the window", TIMEOUT.as_secs()) } else { format!("no window within {} s", NO_WINDOW_TIMEOUT.as_secs()) };
-    match when_late_x11(&c, &d, &x) {
+    match when_late_forced(&c, &d, &x, &f) {
+        Late::NoForce => {
+            let why = format!("The launcher turned this off by itself: {what} with GPU drawing forced on NVIDIA");
+            let off = crate::state::dirs().and_then(|dd| force_gave_up(&dd, &why).map(|_| force_failed(&dd)));
+            match &off {
+                Ok(p) => log(&format!("{what} ({}); the switch is off now, wrote {}; starting again without forcing it", says_force(&f), p.display())),
+                Err(e) => log(&format!("{what} ({}); could not turn the switch off yet ({}); starting again without forcing it", says_force(&f), e.message)),
+            }
+            eprintln!("Kiln Launcher: {what} with GPU drawing forced on NVIDIA; starting again without it");
+            let err = restart(&Relaunch::force_fallback().keeping());
+            log(&format!("PROBLEM: could not start again without forcing it: {err}"));
+            eprintln!("Kiln Launcher: {what}; could not start again: {err}. Turn off Settings > Advanced > Drawing the launcher > \
+                \"Force GPU drawing on NVIDIA\".");
+            crate::dialog::late(&c, &what, Some(&err.to_string()));
+        }
         Late::NoX11 => {
             let why = format!("The launcher turned this on by itself: {what} through X11 (XWayland)");
             log(&format!("X11: {what} through X11 ({}); X11 did not help: starting again on Wayland, X11 is not tried again", says_x11(&x)));
@@ -1269,10 +2028,14 @@ fn watchdog(c: Choice, d: Dmabuf, x: X11, begun: Instant) {
         }
         Late::Restart => {
             let why = format!("The launcher turned this on by itself: {what} with the GPU");
-            let wrote = crate::state::dirs().and_then(|d| write_marker(&d, &why).map(|_| marker(&d)));
-            match &wrote {
-                Ok(p) => log(&format!("{what} ({}); wrote {}; starting again without the GPU", says(&c), p.display())),
-                Err(e) => log(&format!("{what} ({}); could not write the marker ({}); starting again without the GPU", says(&c), e.message)),
+            if RENDER_OWNER.get() == Some(&false) {
+                log(&format!("{what}; renderer state is unavailable; starting once without the GPU without changing shared markers"));
+            } else {
+                let wrote = crate::state::dirs().and_then(|d| write_marker(&d, &why).map(|_| marker(&d)));
+                match &wrote {
+                    Ok(p) => log(&format!("{what} ({}); wrote {}; starting again without the GPU", says(&c), p.display())),
+                    Err(e) => log(&format!("{what} ({}); could not write the marker ({}); starting again without the GPU", says(&c), e.message)),
+                }
             }
             let err = restart(&Relaunch::software_fallback().keeping());
             log(&format!("PROBLEM: could not start again without the GPU: {err}"));
@@ -1295,6 +2058,16 @@ fn watchdog(c: Choice, d: Dmabuf, x: X11, begun: Instant) {
     log(&format!("the page started late, {} ms after the window was made", after.as_millis()));
 }
 
+/// Prepare a restart's breadcrumbs independently of exec, so failure to persist the off setting is testable.
+fn before_restart(how: &Relaunch) {
+    clear_pending("a restart");
+    // A failed SHM start keeps its breadcrumb until the next start durably turns the preference off. Otherwise a
+    // failed off-setting write followed by exec would erase the only persistent evidence and could retry forever.
+    if !how.set.iter().any(|(k, v)| *k == FORCE_RESTARTED && v == "off") {
+        clear_force_pending("a restart");
+    }
+}
+
 /// Replaces this process with a new start as `how` says (the fallback's software mode, or the player's choice in a
 /// message, crate::dialog); returns only when that failed.
 #[cfg(target_os = "linux")]
@@ -1304,8 +2077,8 @@ pub(crate) fn restart(how: &Relaunch) -> std::io::Error {
         return std::io::Error::other("neither $APPIMAGE nor this executable's path is known");
     };
     let args: Vec<OsString> = std::env::args_os().skip(1).collect();
-    // a restart is no crash: the new start must not read this start's guard as one
-    clear_pending("a restart");
+    // A normal restart is no crash; a failed forced start retains its guard until the off choice is durable.
+    before_restart(how);
     log(&format!("restart: {}{}", target.display(), if appimage { " (the AppImage)" } else { "" }));
     // exec: the same process (a terminal keeps waiting for it), and the instance lock goes with the old image
     restart_command(&target, appimage, &args, std::env::vars_os(), how).exec()
@@ -1326,7 +2099,9 @@ pub fn window_created(app: &tauri::AppHandle) {
         unsafe { format!("{}.{}.{}", ffi::webkit_get_major_version(), ffi::webkit_get_minor_version(), ffi::webkit_get_micro_version()) }
     };
     let var = |k: &str| match std::env::var_os(k) { Some(v) if !v.is_empty() => "set", Some(_) => "empty", None => "not set" };
-    let nvidia = std::fs::read_to_string("/proc/driver/nvidia/version").ok().as_deref().and_then(nvidia_line)
+    let nvidia_version = std::fs::read_to_string("/proc/driver/nvidia/version").ok();
+    let nvidia_driver = nvidia_version.is_some();
+    let nvidia = nvidia_version.as_deref().and_then(nvidia_line)
         .map_or("no /proc/driver/nvidia/version".to_string(), |l| format!("/proc/driver/nvidia/version: {l}"));
     let sandbox = crate::sandbox::state().map(|s| format!("; WebKit's sandbox: {}", s.says())).unwrap_or_default();
     let dmabuf_says = dmabuf().map(|d| format!(" ({})", says_dmabuf(d))).unwrap_or_default();
@@ -1348,6 +2123,7 @@ pub fn window_created(app: &tauri::AppHandle) {
         });
     }
     let Some(w) = app.get_webview_window("main") else { return };
+    frame_painted(false, w.is_visible().unwrap_or(true) && !w.is_minimized().unwrap_or(false));
     let software = c.mode == Mode::Software;
     let x = x11().cloned();
     let _ = w.with_webview(move |pw| {
@@ -1368,17 +2144,38 @@ pub fn window_created(app: &tauri::AppHandle) {
             let env = |k: &str| std::env::var(k).ok();
             // a variable that turns compositing off explains it whatever the display server: X11 would not help
             let by_vars = [env("WEBKIT_DISABLE_COMPOSITING_MODE"), env(DMABUF_VAR)].iter().any(|v| v.as_deref().is_some_and(|v| v != "0"));
+            let forced = force().filter(|f| f.step != Force::Off);
             let accel = if off {
+                let (gl, vendor) = gtk_gl_check();
                 let mut reasons = webkit_off_reasons(env("WEBKIT_DISABLE_COMPOSITING_MODE").as_deref(), env(DMABUF_VAR).as_deref(),
-                    egl_client_extensions().as_deref(), Some(gtk_gl_check()));
+                    egl_client_extensions().as_deref(), Some(gl));
+                // Ubuntu WebKit's NVIDIA block comes right after the variables, where WebKit checks it
+                let patched = webkit_patched();
+                let lifted = env(FORCE_VAR).is_some_and(|v| v != "0");
+                let block = nvidia_block_reason(patched.as_ref().map(|(_, p)| *p), vendor.as_deref(), nvidia_driver, lifted);
+                let at = reasons.iter().take_while(|r| r.starts_with("WEBKIT_")).count();
+                if let Some(b) = &block {
+                    reasons.insert(at, b.clone());
+                } else if let Some(f) = forced {
+                    reasons.insert(at, format!("{}, and WebKit still composites nothing", says_force(f)));
+                }
+                let _ = NVIDIA_BLOCK.set(block.is_some());
                 let (nodes, modeset) = drm_state();
                 reasons.extend(drm_reasons(&nodes, modeset.as_deref()));
                 let why = if reasons.is_empty() { "none of the checks the launcher knows failed here".to_string() } else { reasons.join("; ") };
+                let lib = match &patched {
+                    Some((path, true)) => format!("; WebKitGTK library {path}: Ubuntu's build with the NVIDIA block"),
+                    Some((path, false)) => format!("; WebKitGTK library {path}: without the NVIDIA block"),
+                    None => String::new(),
+                };
                 log(&format!("PROBLEM: WebKit turned hardware acceleration off by itself (the launcher did not ask for it): it composites \
-                    nothing, every change of the page is painted again on the CPU (slow in a large window). Why: {why}. {}; scale {scale}",
-                    says_drm(&nodes, modeset.as_deref())));
+                    nothing, every change of the page is painted again on the CPU (slow in a large window). Why: {why}. {}; scale {scale}; \
+                    GL vendor: {}{lib}", says_drm(&nodes, modeset.as_deref()), vendor.as_deref().unwrap_or("(not known)")));
                 format!("off (WebKit's own choice): {why}")
             } else {
+                if let Some(f) = forced {
+                    log(&format!("{}: WebKit composites (policy {policy:?})", says_force(f)));
+                }
                 format!("{policy:?}")
             };
             let _ = ACCEL.set(accel);
@@ -1689,7 +2486,7 @@ mod tests {
 
     #[test]
     fn host_programs_know_every_variable_software_mode_sets() {
-        let names: Vec<&str> = SOFTWARE_ENV.iter().map(|(k, _)| *k).chain([DMABUF_VAR, X11_VAR]).collect();
+        let names: Vec<&str> = SOFTWARE_ENV.iter().map(|(k, _)| *k).chain([DMABUF_VAR, X11_VAR, FORCE_VAR, SHM_VAR]).collect();
         assert_eq!(names, kiln_manage::hostenv::RENDER_VARS, "kiln_manage::hostenv takes back exactly these");
     }
 
@@ -1966,5 +2763,388 @@ mod tests {
         assert!(matches!(w.wait(Instant::now(), Duration::from_secs(20), Duration::from_secs(20)), Seen::Started(_)));
         assert!(t.elapsed() < Duration::from_secs(5));
         h.join().unwrap();
+    }
+
+    // ------------------------------------------------ forcing past Ubuntu WebKit's NVIDIA block (0.2.0-dev.30.7)
+
+    #[test]
+    fn forcing_past_ubuntus_nvidia_block_is_opt_in_on_shared_memory() {
+        use ForceWhy as W;
+        let f = decide_force;
+        assert_eq!(f(false, false, true, false), ForceDmabuf { step: Force::Off, why: W::Off });
+        assert_eq!(f(true, false, true, false), ForceDmabuf { step: Force::Shm, why: W::On });
+        // the start before with it failed (its guard left, or its page late): nothing forced now
+        assert_eq!(f(true, false, true, true), ForceDmabuf { step: Force::Off, why: W::Failed });
+        // the user's own variables win; without WebKit's DMA-BUF renderer (software mode, its off switch) nothing to force
+        assert_eq!(f(true, true, true, false), ForceDmabuf { step: Force::Off, why: W::Yours });
+        assert_eq!(f(true, false, false, false), ForceDmabuf { step: Force::Off, why: W::Unused });
+        assert_eq!(f(false, false, false, true).why, W::Off);
+    }
+
+    /// A setting that ends the launcher at its start must never lock the player out of it: the forced start's guard, left
+    /// behind, makes the next start force nothing and turn the switch off with a note Settings shows.
+    #[test]
+    fn a_forced_start_that_dies_turns_the_switch_off() {
+        let t = std::env::temp_dir().join(format!("kl-force-guard-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&t);
+        let d = DataDirs::at(&t);
+        assert_eq!(force_pending(&d), t.join("state").join("force-dmabuf-pending.json"));
+        // never set: the default; Settings turns it on (and takes away what would stand in its way)
+        assert_eq!(force_chosen(&force_choice(&d)), FORCE_DEFAULT);
+        write_marker_file(&dmabuf_marker(&d), "an earlier crash").unwrap();
+        write_marker_file(&x11_marker(&d), "X11 helped").unwrap();
+        force_switch_files(&d, true).unwrap();
+        assert!(force_chosen(&force_choice(&d)) && !dmabuf_marker(&d).exists() && !x11_marker(&d).exists());
+        let start = |d: &DataDirs| decide_force(force_chosen(&force_choice(d)), false, true, force_pending(d).is_file());
+        assert_eq!(start(&d).step, Force::Shm);
+        // the forced start writes its guard and dies before its page started (Gdk Error 71)
+        write_marker_file(&force_pending(&d), "test forced start").unwrap();
+        let at = kiln_manage::util::read_json::<Marker>(&force_pending(&d)).unwrap().unwrap().at;
+        // the next start forces nothing; once the data folder opens the switch goes off with the dead start's time
+        assert_eq!(start(&d), ForceDmabuf { step: Force::Off, why: ForceWhy::Failed });
+        let why = force_crash_why(&force_pending(&d));
+        assert!(why.starts_with("The launcher turned this off by itself") && why.contains(&at), "{why}");
+        force_gave_up(&d, &why).unwrap();
+        clear_marker_file(&force_pending(&d)).unwrap();
+        assert!(!force_chosen(&force_choice(&d)));
+        assert!(marker_file_why(&force_failed(&d)).is_some_and(|w| w.starts_with(&why)));
+        assert_eq!(start(&d), ForceDmabuf { step: Force::Off, why: ForceWhy::Off });
+        // the player turns it on again: the note goes, the next start forces again
+        force_switch_files(&d, true).unwrap();
+        assert!(!force_failed(&d).exists());
+        assert_eq!(start(&d).step, Force::Shm);
+        // a guard that is not readable still counts (the start died); the sentence says less
+        std::fs::write(force_pending(&d), b"{").unwrap();
+        assert_eq!(start(&d).why, ForceWhy::Failed);
+        assert!(force_crash_why(&force_pending(&d)).contains("ended before its page had started"));
+        std::fs::remove_dir_all(&t).unwrap();
+    }
+
+    /// Every folder and file below `root` with its bytes: what a held folder must still hold afterwards.
+    #[cfg(target_os = "linux")]
+    fn data_tree(root: &Path) -> Vec<(PathBuf, Option<String>)> {
+        let mut out = Vec::new();
+        let mut dirs = vec![root.to_path_buf()];
+        while let Some(d) = dirs.pop() {
+            for e in std::fs::read_dir(&d).unwrap() {
+                let p = e.unwrap().path();
+                if p.is_dir() {
+                    dirs.push(p.clone());
+                    out.push((p, None));
+                } else {
+                    let text = String::from_utf8_lossy(&std::fs::read(&p).unwrap()).into_owned();
+                    out.push((p, Some(text)));
+                }
+            }
+        }
+        out.sort();
+        out
+    }
+
+    /// Waits for the watchdog thread's line once the page started (it appends to launcher.log at once), so that line is
+    /// written before the folder is held or removed, never during.
+    #[cfg(target_os = "linux")]
+    fn watchdog_logged(root: &Path) {
+        let log = root.join("logs/launcher.log");
+        for _ in 0..500 {
+            if std::fs::read_to_string(&log).is_ok_and(|l| l.contains("render: the page started")) { return; }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        panic!("the watchdog never said that the page started");
+    }
+
+    /// Run prepare before any renderer or sandbox initialization, with no other tests sharing its environment or
+    /// OnceLocks. folder::process_env gives each child a fresh synthetic data folder, never the player's settings.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn forced_startup_is_guarded_before_any_webkit_use() {
+        const CASE: &str = "KILN_TEST_FORCED_STARTUP";
+        if let Ok(case) = std::env::var(CASE) {
+            let dirs = crate::folder::found_dirs().unwrap();
+            let manual_on = ["success", "guard-denied", "software", "failed-off-write"].contains(&case.as_str());
+            if manual_on { force_switch_files(&dirs, true).unwrap(); }
+            if ["manual-off", "recovered-off"].contains(&case.as_str()) { force_switch_files(&dirs, false).unwrap(); }
+            let context = startup_context(false);
+            let fixture_context = if case == "other-backend" { "another installation|x11" } else { &context };
+            if !manual_on && !["fresh", "hold-never-ends"].contains(&case.as_str()) {
+                write_startup_guard(&normal_pending(&dirs), fixture_context, case != "hidden", "synthetic normal start never painted").unwrap();
+            }
+            if ["shm-failed", "failed-recovered"].contains(&case.as_str()) {
+                write_startup_guard(&force_pending(&dirs), &context, true, "synthetic SHM start never painted").unwrap();
+            }
+            if ["recovered", "recovered-off", "failed-recovered", "other-backend"].contains(&case.as_str()) {
+                write_startup_guard(&force_recovered(&dirs), fixture_context, true, "synthetic successful recovery").unwrap();
+            }
+            if case == "sticky-dmabuf" { write_marker_file(&dmabuf_marker(&dirs), "an internal fallback").unwrap(); }
+            if ["guard-denied", "auto-guard-denied"].contains(&case.as_str()) { std::fs::create_dir(force_pending(&dirs)).unwrap(); }
+            if case == "unwritable-escape" { std::fs::create_dir(force_choice(&dirs)).unwrap(); }
+            if case == "corrupt-choice" { std::fs::write(force_choice(&dirs), b"{").unwrap(); }
+            if case == "corrupt-recovered" {
+                clear_marker_file(&normal_pending(&dirs)).unwrap();
+                std::fs::write(force_recovered(&dirs), b"{").unwrap();
+            }
+            let _competing = if case == "competing" {
+                let file = std::fs::File::create(dirs.root.join("state/render-startup.lock")).unwrap();
+                file.try_lock().unwrap();
+                Some(file)
+            } else { None };
+            let args = if case == "software" { args(&[ARG_SOFTWARE]) } else if ["escape", "unwritable-escape"].contains(&case.as_str()) { args(&[ARG_NO_DMABUF]) } else { args(&[]) };
+            // another launcher holds the folder exclusively (it is moving it): what folder::Folder::open finds then
+            if case == "held-elsewhere" { crate::folder::current().set_hold(crate::folder::Hold::Elsewhere); }
+            let before = data_tree(&dirs.root);
+            prepare_for_driver(&args, case != "non-nvidia");
+            match case.as_str() {
+                "held-elsewhere" => {
+                    // an earlier start's guard is evidence, but a held folder is neither read for recovery nor written
+                    assert_eq!(RENDER_OWNER.get(), Some(&false), "a held folder's renderer state is not this start's");
+                    assert_eq!(force().unwrap().step, Force::Off, "a held folder starts no recovery");
+                    assert!(std::env::var_os(FORCE_VAR).is_none());
+                    assert_eq!(when_late_forced(choice().unwrap(), dmabuf().unwrap(), x11().unwrap(), force().unwrap()), Late::Restart,
+                        "a held start keeps the stateless software escape");
+                    page_started();
+                    watch();
+                    WATCH.window_created();
+                    frame_painted(false, true);
+                    assert!(frame_painted(true, true).is_none());
+                    after_gate();
+                    before_restart(&Relaunch::software_fallback());
+                    leaving();
+                    assert_eq!(data_tree(&dirs.root), before, "nothing of the renderer goes into a held folder");
+                }
+                "hold-ends" => {
+                    // the start owned the free folder and armed its recovery; then the folder is held (an unfinished
+                    // move's copy is removed, a move runs), and the page reports frames only after the hold ends
+                    assert_eq!(force().unwrap().why, ForceWhy::Recovery);
+                    assert!(force_pending(&dirs).is_file());
+                    crate::folder::current().set_hold(crate::folder::Hold::Undoing);
+                    let held = data_tree(&dirs.root);
+                    WATCH.window_created();
+                    page_started();
+                    frame_painted(false, true);
+                    assert!(frame_painted(true, true).is_none(), "no explanation and no confirmation while held");
+                    frame_painted(false, false);
+                    assert!(!WATCH.has_painted(), "a frame while held is not the start's confirmation");
+                    after_gate();
+                    finish_frame("while held");
+                    clear_pending("while held");
+                    assert_eq!(data_tree(&dirs.root), held, "nothing is written while the folder is held");
+                    assert!(expected_frame(&force_pending(&dirs), &context));
+                    crate::folder::current().set_hold(crate::folder::Hold::Free);
+                    assert!(frame_painted(true, true).is_some(), "the first painted frame after the hold explains the recovery");
+                    leaving();
+                    assert!(confirmed_frame(&force_recovered(&dirs), &context), "the working recovery is remembered");
+                    assert_eq!(force_setting(&force_choice(&dirs)), None);
+                    assert!(!force_pending(&dirs).exists());
+                    assert!(!normal_pending(&dirs).exists());
+                }
+                "hold-never-ends" => {
+                    // a normal start painted, then a move held the folder before the settle: it ends in this run
+                    // (the move is committed, the launcher restarts): nothing changes in the old folder
+                    assert_eq!(force().unwrap().step, Force::Off);
+                    assert!(normal_pending(&dirs).is_file());
+                    page_started();
+                    watch();
+                    assert!(dmabuf_pending(&dirs).is_file());
+                    WATCH.window_created();
+                    assert!(frame_painted(true, true).is_none());
+                    watchdog_logged(&dirs.root);
+                    crate::folder::current().set_hold(crate::folder::Hold::Moving);
+                    let held = data_tree(&dirs.root);
+                    frame_painted(false, false);
+                    frame_painted(true, true);
+                    after_gate();
+                    finish_frame("while held");
+                    crate::folder::current().set_hold(crate::folder::Hold::Moved);
+                    before_restart(&Relaunch::software_fallback());
+                    leaving();
+                    assert_eq!(data_tree(&dirs.root), held, "a hold that does not end leaves the renderer state untouched");
+                }
+                "never-shown" => {
+                    frame_painted(true, true);
+                    assert!(!WATCH.has_painted(), "a page cannot prove a window painted before one exists");
+                }
+                "failed-off-write" => {
+                    assert_eq!(force().unwrap().step, Force::Shm);
+                    std::fs::create_dir(force_failed(&dirs)).unwrap();
+                    assert!(force_gave_up(&dirs, "synthetic late SHM startup").is_err());
+                    before_restart(&Relaunch::force_fallback());
+                    assert!(force_pending(&dirs).is_file(), "keep the failed SHM guard until the off choice is durable");
+                }
+                "success" | "automatic" | "recovered" | "sticky-dmabuf" => {
+                    assert_eq!(force().unwrap().step, Force::Shm);
+                    assert!(force_pending(&dirs).is_file(), "the guard must exist before even sandbox::prepare can use WebKit");
+                    assert!(dmabuf().unwrap().on);
+                    for (k, v) in force_env(Force::Shm) {
+                        assert_eq!(std::env::var(k).unwrap(), v);
+                        assert!(set_by_us(std::env::var(SET_BY_US).ok().as_deref()).contains(&k));
+                    }
+                    page_started();
+                    assert!(force_pending(&dirs).is_file(), "page navigation alone does not prove painting");
+                    frame_painted(false, false);
+                    assert!(!expected_frame(&force_pending(&dirs), &context), "an intentional hidden window is no failed visible attempt");
+                    frame_painted(false, true);
+                    assert!(expected_frame(&force_pending(&dirs), &context));
+                    WATCH.window_created();
+                    let note = frame_painted(true, true);
+                    assert_eq!(note.is_some(), ["automatic", "sticky-dmabuf"].contains(&case.as_str()));
+                    assert!(frame_painted(true, true).is_none(), "the explanation is shown once");
+                    leaving();
+                    if !manual_on {
+                        assert!(expected_frame(&force_recovered(&dirs), &context));
+                        assert_eq!(force_setting(&force_choice(&dirs)), None, "automatic recovery is not a manual opt-in");
+                    }
+                    assert!(!force_pending(&dirs).exists(), "a successful clean exit clears its guard");
+                    assert!(!normal_pending(&dirs).exists());
+                }
+                _ => {
+                    if case == "competing" {
+                        assert_eq!(when_late_forced(choice().unwrap(), dmabuf().unwrap(), x11().unwrap(), force().unwrap()), Late::Restart,
+                            "an unowned blank start must retain a stateless software escape, not disable its watchdog");
+                        let before = std::fs::read(normal_pending(&dirs)).unwrap();
+                        page_started();
+                        watch();
+                        watchdog_logged(&dirs.root);
+                        frame_painted(true, true);
+                        after_gate();
+                        leaving();
+                        assert!(!dmabuf_pending(&dirs).exists());
+                        assert_eq!(std::fs::read(normal_pending(&dirs)).unwrap(), before);
+                        assert_eq!(when_late_forced(&decide(&[], None, true, false), dmabuf().unwrap(), x11().unwrap(), force().unwrap()), Late::Report);
+                    }
+                    assert_eq!(force().unwrap().step, Force::Off, "no guarded GPU start is possible: {case}");
+                    assert!(std::env::var_os(FORCE_VAR).is_none());
+                    assert!(std::env::var_os(SHM_VAR).is_none());
+                    if ["shm-failed", "failed-recovered"].contains(&case.as_str()) {
+                        after_gate();
+                        assert_eq!(force_setting(&force_choice(&dirs)), Some(false));
+                        assert!(!force_pending(&dirs).exists());
+                        assert!(!force_recovered(&dirs).exists());
+                        assert!(!normal_pending(&dirs).exists());
+                    }
+                    if case == "fresh" {
+                        assert!(!FORCE_DEFAULT);
+                        assert!(normal_pending(&dirs).is_file());
+                        page_started();
+                        assert!(normal_pending(&dirs).is_file());
+                        frame_painted(false, false);
+                        assert!(!expected_frame(&normal_pending(&dirs), &context));
+                        WATCH.window_created();
+                        frame_painted(true, true);
+                        leaving();
+                        assert!(!normal_pending(&dirs).exists());
+                        assert!(!force_recovered(&dirs).exists(), "normal painting must not enable SHM");
+                    }
+                }
+            }
+            std::fs::remove_dir_all(dirs.root.parent().unwrap()).unwrap();
+            return;
+        }
+        let mut failures = Vec::new();
+        for case in ["success", "guard-denied", "software", "automatic", "non-nvidia", "manual-off", "escape", "shm-failed", "recovered", "fresh", "hidden", "other-backend", "recovered-off", "failed-recovered", "sticky-dmabuf", "restart-escape", "failed-off-write", "auto-guard-denied", "unwritable-escape", "user-software", "user-dmabuf", "corrupt-choice", "corrupt-recovered", "competing", "never-shown", "held-elsewhere", "hold-ends", "hold-never-ends"] {
+            let mut cmd = Command::new(std::env::current_exe().unwrap());
+            cmd.args(["--exact", "render::tests::forced_startup_is_guarded_before_any_webkit_use", "--nocapture"])
+                .env(CASE, case);
+            for name in kiln_manage::hostenv::RENDER_VARS.into_iter().chain([
+                ENV, DMABUF_ENV, SET_BY_US, RESTARTED, DMABUF_RESTARTED, X11_RESTARTED, FORCE_RESTARTED, TEST_WITHHOLD,
+            ]) {
+                cmd.env_remove(name);
+            }
+            // A user's DMA-BUF=0 must not make the opt-in apply in software mode.
+            if case == "software" { cmd.env(DMABUF_VAR, "0"); }
+            if case == "restart-escape" { cmd.env(FORCE_RESTARTED, "off"); }
+            if case == "user-software" { cmd.env("LIBGL_ALWAYS_SOFTWARE", "1"); }
+            if case == "user-dmabuf" { cmd.env(DMABUF_VAR, "0"); }
+            let out = cmd.output().unwrap();
+            if !out.status.success() {
+                failures.push(format!("{case}: {}\n{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr)));
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    #[test]
+    fn the_forced_variables_are_the_launchers_to_take_back() {
+        assert_eq!(set_by_us(Some("WEBKIT_FORCE_DMABUF_RENDERER,WEBKIT_DMABUF_RENDERER_FORCE_SHM,HOME")), vec![FORCE_VAR, SHM_VAR]);
+        assert_eq!(force_env(Force::Shm), vec![(FORCE_VAR, "1"), (SHM_VAR, "1")], "never the plain forced renderer");
+        assert!(force_env(Force::Off).is_empty());
+        // every variable the launcher sets for its own webview is one a host program never gets
+        for k in SOFTWARE_ENV.iter().map(|(k, _)| *k).chain([DMABUF_VAR, X11_VAR, FORCE_VAR, SHM_VAR]) {
+            assert!(kiln_manage::hostenv::RENDER_VARS.contains(&k), "{k}");
+        }
+    }
+
+    #[test]
+    fn a_late_forced_start_steps_down_first() {
+        let c = decide(&[], None, false, false);
+        let d = decide_dmabuf(&[], None, None, false, false, false, false);
+        let x = X11 { on: true, why: X11Why::Restart };
+        let forced = ForceDmabuf { step: Force::Shm, why: ForceWhy::On };
+        let none = ForceDmabuf { step: Force::Off, why: ForceWhy::Off };
+        assert_eq!(when_late_forced(&c, &d, &x, &forced), Late::NoForce);
+        assert_eq!(when_late_forced(&c, &d, &x, &none), Late::NoX11);
+        assert_eq!(when_late_forced(&c, &d, &X11 { on: false, why: X11Why::Default }, &none), Late::NoDmabuf);
+        // a forced start has its own guard: it turns the switch off, never WebKit's DMA-BUF renderer
+        assert!(!guarded(&d, &forced) && guarded(&d, &none));
+        assert_eq!(Relaunch::force_fallback().set, vec![(FORCE_RESTARTED, "off".to_string())]);
+    }
+
+    #[test]
+    fn ubuntus_nvidia_block_is_named_in_the_why() {
+        let r = nvidia_block_reason(Some(true), Some("NVIDIA Corporation"), true, false).unwrap();
+        assert!(r.contains("disable-nvidia-dmabuf.patch") && r.contains("GL vendor NVIDIA Corporation"), "{r}");
+        assert!(r.contains("Settings > Advanced > Drawing the launcher > \"Force GPU drawing on NVIDIA\""), "{r}");
+        // it never sends the player the other way, or to root
+        for no in ["WEBKIT_DISABLE_DMABUF_RENDERER", "chmod", "sudo", "root"] {
+            assert!(!r.contains(no), "{no}: {r}");
+        }
+        // the driver alone when GL could not be asked
+        assert!(nvidia_block_reason(Some(true), None, true, false).unwrap().contains("NVIDIA's driver is loaded"));
+        // not NVIDIA's GL, no driver, not this build, unknown, or forced already: not this cause
+        assert_eq!(nvidia_block_reason(Some(true), Some("Mesa"), true, false), None);
+        assert_eq!(nvidia_block_reason(Some(true), None, false, false), None);
+        assert_eq!(nvidia_block_reason(Some(false), Some("NVIDIA Corporation"), true, false), None);
+        assert_eq!(nvidia_block_reason(None, Some("NVIDIA Corporation"), true, false), None);
+        assert_eq!(nvidia_block_reason(Some(true), Some("NVIDIA Corporation"), true, true), None);
+    }
+
+    #[test]
+    fn the_patch_is_found_in_the_library_whatever_the_chunks() {
+        let marker = FORCE_VAR.as_bytes();
+        let mut lib = vec![0u8; 3 * MARKER_CHUNK + 10];
+        let at = MARKER_CHUNK - 5; // across a chunk boundary
+        lib[at..at + marker.len()].copy_from_slice(marker);
+        assert!(has_marker(&lib[..], marker).unwrap());
+        assert!(!has_marker(&vec![b'W'; 3 * MARKER_CHUNK][..], marker).unwrap());
+        assert!(!has_marker(&b"WEBKIT_FORCE_DMABUF_RENDERE"[..], marker).unwrap());
+        assert!(has_marker(&b"WEBKIT_FORCE_DMABUF_RENDERER"[..], marker).unwrap());
+    }
+
+    #[test]
+    fn the_switch_lives_in_its_file() {
+        let t = std::env::temp_dir().join(format!("kl-force-{}", std::process::id()));
+        std::fs::create_dir_all(&t).unwrap();
+        let choice = t.join("force-dmabuf.json");
+        assert_eq!(force_chosen(&choice), FORCE_DEFAULT, "never set: the default");
+        write_force_choice(&choice, true).unwrap();
+        assert!(force_chosen(&choice));
+        write_force_choice(&choice, false).unwrap();
+        assert!(!force_chosen(&choice));
+        std::fs::write(&choice, b"not json").unwrap();
+        assert_eq!(force_chosen(&choice), FORCE_DEFAULT, "a file that is not one: the default");
+        std::fs::remove_dir_all(&t).unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn glib_lines_go_into_the_log_short_and_only_the_loud_ones() {
+        use gtk::glib::LogLevel;
+        assert_eq!(glib_line(Some("Gdk"), LogLevel::Warning, "Error 71 (Protocol error) dispatching to Wayland display.").as_deref(),
+            Some("Gdk WARNING: Error 71 (Protocol error) dispatching to Wayland display."));
+        assert_eq!(glib_line(None, LogLevel::Critical, "x").as_deref(), Some("CRITICAL: x"));
+        assert_eq!(glib_line(Some("WebKit"), LogLevel::Debug, "noise"), None);
+        assert_eq!(glib_line(Some("WebKit"), LogLevel::Info, "noise"), None);
+        let long = glib_line(Some("Gtk"), LogLevel::Message, &"y\n".repeat(400)).unwrap();
+        assert!(long.starts_with("Gtk MESSAGE: y y") && long.ends_with("...") && !long.contains('\n'), "{long}");
+        assert!(long.len() <= "Gtk MESSAGE: ".len() + GLIB_LINE_MAX + "...".len(), "{}", long.len());
     }
 }
