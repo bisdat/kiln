@@ -1901,6 +1901,13 @@ void storage_pre(uint64_t current) {
                 p.leave_step = step;
             }
             if (step - p.leave_step > 250) {
+                // The game's leave save captures the live character (characters/Capture reads its entity). While the
+                // player entity exists that capture can still come, late behind a world save that is still writing;
+                // tearing the holders down first would let it publish a character whose storage was never captured
+                // with it (an item moved since the last save lost, or duplicated). Only a gone entity is torn down.
+                uint8_t setup[84]{};
+                if (component_copy(api->server_world(), kHashInventorySetup, p.witness.player, setup, sizeof setup))
+                    continue;
                 for (const auto& [k, h] : p.holders)
                     garbage.push_back(h);
                 model.leave(slot);
