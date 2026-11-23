@@ -3134,8 +3134,8 @@
           "area": "api"
         },
         {
-          "title": "Crafting sources and dyes",
-          "text": "Mods can let players craft and dye from linked chests in any base or none, paid all or nothing in the game's own transaction (thanks Fuzen777).",
+          "title": "Crafting sources, dyes and HUD lists",
+          "text": "Mods can let players craft and dye from linked chests in any base or none, paid all or nothing in the game's own transaction, and add rows to the HUD's arrow and spell lists (thanks Fuzen777).",
           "area": "api"
         },
         {
@@ -3147,6 +3147,11 @@
           "title": "Simplified Chinese",
           "text": "The launcher and in-game texts new in 30.5, translated by MagicFox (XHL).",
           "area": "launcher"
+        },
+        {
+          "title": "Safer hosted worlds with mod content",
+          "text": "Two rare hosted-world races in mod content are fixed: late model references written by the wrong side, and drop tables read while Kiln was still patching them.",
+          "area": "compat"
         }
       ]
     },
