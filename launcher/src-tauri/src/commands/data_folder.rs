@@ -376,6 +376,7 @@ pub(crate) fn start_with(f: &Folder) -> Next {
 /// Before the window (crate::render's start, which writes its breadcrumbs into the folder): this start holds the folder
 /// to remove an unfinished move's partial copy ([`start_with`]'s `Next::Undo`; also when it then cannot lock it for
 /// that). Reads the journal only.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub(crate) fn undo_waits(f: &Folder) -> bool {
     f.located().is_ok_and(|l| l.source != RootSource::Env) && matches!(dfm::pending(&f.env), Ok(Pending::Uncommitted { .. }))
 }
