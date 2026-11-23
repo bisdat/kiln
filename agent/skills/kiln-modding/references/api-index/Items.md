@@ -682,6 +682,7 @@ enum: None, DryRun, Equipped, ActionBar, Silent
 - `PriorCanceledBy { get; } -> string?` — The mod that canceled it there; null when none did.
 
 ## PlayerStorage `0.2.16` — One storage a mod registered (`Items.RegisterPlayerStorage`): every player of the server world has one.
+- `Activate(EntityId player, int index) -> Task<EquipResult>` — Makes the arrows or spell in slot `index` the player's active ammunition through the backpack: the stack moves into...
 - `static Available { get; } -> bool` — Whether player storage works on this game build (capability `items.storage`)...
 - `const Capability = "items.storage" -> string` — The capability row of player storage: `items.storage`.
 - `Death { get; } -> StorageDeath` — What happens to its items when the player dies.
@@ -697,12 +698,26 @@ enum: None, DryRun, Equipped, ActionBar, Silent
 - `Status(EntityId player) -> PlayerStorageStatus` — Where the storage stands for `player`.
 - `Store(EntityId player, SlotId from, int count = 0) -> Task<MoveResult>` — Moves a stack (or `count` of it) from `player`'s inventory into the storage: `Items.Move`, with Kiln's choice of slot.
 
-## PlayerStorage.Client `0.2.16` — The player's own read-only copy of their storages on a game client: rows Kiln sends to the owner when a storage changes, so a mod's client half can show them (a HUD...
-- `static Available { get; } -> bool` — Whether the client copy works here (capability `items.storage.client`).
+## PlayerStorage.Client `0.2.16` — The player's own read-only copy of their storages on their game: rows the server sends the storage's owner (never another player) when a storage changes, so a mod's...
+- `static Available { get; } -> bool` — Whether the client copy works here (capability `items.storage.client`: Kiln's network channel is open).
 - `const Capability = "items.storage.client" -> string` — The capability row of the client copy: `items.storage.client`.
-- `static Rows(string fullKey) -> IReadOnlyList<PlayerStorageRow>` — The local player's rows of storage `fullKey`, by slot.
+- `static ProvideAmmo(string fullKey, AmmoKinds kinds, PlayerStorageAmmoOptions? options = null) -> PlayerStorageAmmoProvider` — Shows the arrows and spells of your mod's storage `fullKey` in the HUD's ammunition and spell lists (`Ui.AmmoList`...
+- `static Rows(string fullKey) -> IReadOnlyList<PlayerStorageRow>` — The local player's rows of storage `fullKey` (`PlayerStorage.FullKey`), by slot: one per slot that holds something.
 
-## PlayerStorageClientChangedEvent `0.2.16` — The local player's client copy of a storage changed (`Client`).
+## PlayerStorageAmmoOptions `0.2.16` — How `Client.ProvideAmmo` shows a storage's ammunition and what a pick does.
+- `Activate { get; init; } -> bool` — A pick swaps the chosen stack into the backpack and equips it there (`PlayerStorage.Activate`), instead of equipping...
+- `Replace { get; init; } -> bool` — The storage's rows instead of the game's own rows (the HUD list's Replace mode); default false: after the game's...
+
+## PlayerStorageAmmoProvider `0.2.16` — A storage's ammunition in the HUD's lists and the server half that takes its picks (`Client.ProvideAmmo`).
+- `Active { get; } -> bool` — False once disposed.
+- `Dispose() -> void` — Ends both halves: the rows leave the HUD at the next UI frame, and this server takes no more picks of the storage.
+- `FullKey { get; } -> string` — The storage's full key.
+- `Kinds { get; } -> AmmoKinds` — The lists it provides for.
+- `Options { get; } -> PlayerStorageAmmoOptions` — How it shows and what a pick does.
+- `Shown { get; } -> bool` — This game shows the storage's rows in the HUD's lists (a game client where `ui.ammo.list` is on).
+- `WhyNotShown { get; } -> string?` — Why the rows are not shown in this process (a dedicated server has no HUD; `ui.ammo.list` is off); null when they are.
+
+## PlayerStorageClientChangedEvent `0.2.16` — The local player's client copy of a storage changed (`Client`): the server sent other rows, the storage went (its rows are then empty), or the game left the world.
 - `Key { get; } -> string` — The storage's full key.
 - `Rows { get; } -> IReadOnlyList<PlayerStorageRow>` — Its rows now.
 
@@ -742,12 +757,12 @@ enum: Unregistered, Overflow, Filter, Requested, Stale, Locked, ReturnedOutsideK
 - `Source { get; } -> PlayerStorageSource` — The copy it came from.
 - `Stacks { get; } -> int` — Stacks put back.
 
-## PlayerStorageRow `0.2.16` — One slot of a storage in the client copy (`Client.Rows`).
+## PlayerStorageRow `0.2.16` — One slot of a storage in the client copy (`Client.Rows`): a picture of what the server holds, never authority.
 - `PlayerStorageRow()`
 - `PlayerStorageRow(string Key, int Index, ItemId Item, int Count, int Level, uint Flags)`
-- `Count { get; init; } -> int` — How many.
-- `Flags { get; init; } -> uint` — Reserved: 0.
-- `Index { get; init; } -> int` — The slot (0 to slots - 1).
+- `Count { get; init; } -> int` — How many (at least 1).
+- `Flags { get; init; } -> uint` — The item's `AmmoKinds` as the server's item catalog has it: 1 (`AmmoKinds.Arrow`) for arrows, 2 (`AmmoKinds.Spell`)...
+- `Index { get; init; } -> int` — The slot (0 to slots - 1), as `PlayerStorage.Slot` counts them.
 - `Item { get; init; } -> ItemId` — The item.
 - `Key { get; init; } -> string` — The storage's full key.
 - `Level { get; init; } -> int` — Gear's level (0 for a plain stack).

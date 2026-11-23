@@ -378,6 +378,7 @@
         "NpcSample",
         "OreVein",
         "QuietServer",
+        "QuiverSample",
         "RulesSample",
         "SavedData",
         "Schematics",
@@ -640,11 +641,11 @@
       "capabilities": [
         {
           "name": "identity.entities",
-          "members": 3
+          "members": 4
         },
         {
           "name": "items.equip",
-          "members": 2
+          "members": 3
         },
         {
           "name": "items.equip_sets",
@@ -684,7 +685,7 @@
         },
         {
           "name": "items.move",
-          "members": 5
+          "members": 6
         },
         {
           "name": "items.names",
@@ -722,6 +723,7 @@
         "NewItems",
         "NpcSample",
         "PlayerStates",
+        "QuiverSample",
         "RarityAnvil",
         "SavedData",
         "Schematics",

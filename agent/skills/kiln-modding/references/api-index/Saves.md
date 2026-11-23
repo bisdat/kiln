@@ -75,11 +75,12 @@
 - `static TryParse(string? text, out CharacterKey key) -> bool` — Reads `CharacterKey.Text` back.
 
 ## CharacterSettings — `kiln/config/characters.json` (server): what a server takes from clients.
-- `ImportProgress { get; init; } -> bool` — Take carried data from clients, and send it back.
+- `ImportProgress { get; init; } -> bool` — Take carried progress from clients, and send it back.
 - `MaxCharactersPerAccount { get; init; } -> int` — Characters one account may bring to this world.
 - `MaxImportBytes { get; init; } -> int` — The largest offer, in bytes of JSON values.
 - `MaxKeys { get; init; } -> int` — Most keys in an offer.
 - `MaxValueBytes { get; init; } -> int` — The largest single value.
+- `Storage { get; init; } -> PlayerStorageSettings` `0.2.16` — Player storage trust, independent of imported progress.
 
 ## CharacterSyncStatus — The transport's counters.
 - `CharacterSyncStatus(bool Started, bool ChannelOpen, bool ImportsAllowed, int Sessions, long Imports, long Refused, long Kept, long Dropped, long Updates, long UpdateBytes, long SidecarWrites)`
@@ -267,6 +268,10 @@ enum: World, Carried, Session
 - `static Set<T>(ulong steamId, string key, T value) -> void` — Stores `value` for the player under `key` (replacing what was there).
 - `static TryGet<T>(ulong steamId, string key, out T? value) -> bool` — Reads the object stored under `key` for the player without creating one.
 
+## PlayerStorageSettings `0.2.16` — Per-server player storage settings in `characters.json`.
+- `PlayerStorageSettings()` — Creates the default settings: storage travels with the character.
+- `TrustClient { get; init; } -> bool` — Accept the character's carried storage copy and send committed storage back.
+
 ## SaveReason — Why the game saved the world.
 enum: Unknown, Autosave, Shutdown, PlayerLeft, Request, Backup
 
@@ -287,6 +292,7 @@ enum: Unknown, Autosave, Shutdown, PlayerLeft, Request, Backup
 - `static CancelRestore() -> bool` — Cancels a staged restore; false if none was staged.
 - `static DataDirectory { get; } -> string?` — Kiln's sidecar folder of this world: `kiln/data/worlds/<world id>`.
 - `static PendingRestore { get; } -> string?` — The staged restore, or null.
+- `static PlayerStoragePersistenceFailure { get; } -> string?` `0.2.16` — The player-storage persistence degradation reason, or null.
 - `static Request() -> Task<SaveResult>` — Asks the game to save the world now (its own save, the one the 30 s timer makes).
 - `static RestoreOnNextStart(string name) -> BackupInfo` — Stages a restore of backup `name` (its folder name or its given name, newest match) for the next server start...
 - `static SaveDirectory { get; } -> string?` — The server's save directory (enshrouded_server.json `saveDirectory`).
