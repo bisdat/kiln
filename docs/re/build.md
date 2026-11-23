@@ -467,6 +467,17 @@ block another record saved keeps that record's cells. So a 16 m chunk only partl
 part, and blocks two records save between them are saved. There is no other terrain list in the save: a block outside
 every record regrows.
 
+**The writer keeps at most 4,096 chunks per record** **[dis, lab]** (lab, 2026-11-23: a counter on the writer's
+candidate step, S `0x83d42f`). The voxel writer collects a record's stored chunks into a scratch array of 4,096 keys
+on its own stack (S `0x83d2f8` in `0x83d200`, C `0x10b8aa8` in `0x10b89b0`) whose grow callback (S `0x832de0`,
+C `0x10ae690`) has no allocator: from the 4,097th chunk on the grow returns 0, the caller skips that chunk
+(S `je 0x83d466`) and goes on, with no message. It walks the store map in hash-slot order (S `0x21980` / `0x21b80`),
+so the skipped chunks are scattered over the whole record, its centre included. A lab altar of 288 m had 6,498
+candidate chunks: 4,096 saved, 2,402 skipped. 16 x 16 x 16 chunks is a 256 m cube: a zone side under
+240 m touches at most 16 chunk positions per axis wherever it lies; a side of exactly 240 m touches 17 when a face lies
+on the 16 m grid (a lab altar with 4,352 candidates lost 256). The game's own zones stop at 160 m; larger ones come from
+mods that enlarge zones. The loader has no count limit, and the writer is the same for every record, Kiln's boxes too.
+
 **Load (C `0xe63fb0`).** Case 5 reads the records (BaseId + bounds) into a list and hands their bounds to water
 (`0x1165ef0`); case 6 applies each record's voxel and water blobs, and after the last one hands the list to `0x9f3a70`,
 the build-zone publisher: until BuildZoneSystem's own step publishes again, every saved record, Kiln's included, is a
@@ -487,8 +498,18 @@ writes the smaller bounds.
 game's entries, boxes for the kept chunks whose 64 blocks the entries of that same list do not all keep (the
 serializer's rule above, so the decision is the save's own, whatever the bounds are at that instant: no time window).
 Kiln knows only which 16 m chunks its edits touched, so a kept chunk on a base's edge that reaches outside it gets a box
-even when the edits in it are all inside the base. Base zones and base query: the list stays as the builder wrote it. Any other return address (unresolved sites, another mod's hook in front of Kiln's):
-boxes as for the world save, so no edit goes unsaved. Entries that cannot be read, bounds that are not finite or have
-min > max, or a list with more than 256 entries or count > capacity: boxes for every kept chunk. The chunk JSON is never
-filtered. Up to 0.2.0-dev.30.8 every caller got a box for every kept chunk: Kiln's boxes were ECS base zones (stations,
+even when the edits in it are all inside the base. An entry whose bounds touch more than 4,096 chunk positions (the
+product of the chunks it touches per axis, edges included) counts as keeping none of its chunks, so the kept chunks
+inside it get boxes too; and no Kiln box covers more than 4,096 chunks (a box's bounds sit 0.05 m inside its chunks, so
+its chunks are its candidates): a larger one is cut into slabs across its longest axis (both since 0.2.0-dev.30.9).
+Base zones and base query: the list stays as the builder wrote it. Any other return address (another mod's hook in
+front of Kiln's): no boxes either; kiln.log says so once when all three sites resolved. The three return addresses are sigdb names
+(`build/RetSaveRegionsWorldSave`, `build/RetSaveRegionsBaseZones`, `build/RetSaveRegionsBaseQuery`). When the world
+save's does not resolve (a game update broke its pattern), Kiln cannot tell the save from the others and every caller
+gets the boxes, as up to 0.2.0-dev.30.8; when only the base-zone or base-query one does not, the world save alone still
+gets them. kiln.build's start then logs a warning naming the missing names, and its kiln.caps row
+`build.persist_callers` names them too (unavailable, `symbol-missing`, when every caller gets the boxes). The three
+names are on sigport's must-port list (`tools/sigport/must_port.json`). Entries that cannot be read, bounds that are
+not finite or have min > max, or a list with more than 256 entries or count > capacity: boxes for every kept chunk.
+The chunk JSON is never filtered. Up to 0.2.0-dev.30.8 every caller got a box for every kept chunk: Kiln's boxes were ECS base zones (stations,
 storage and beds grouped by them, clients sent them) and Flame Altars in the world list.
