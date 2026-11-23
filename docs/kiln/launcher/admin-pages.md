@@ -112,7 +112,7 @@ DESIGN.md section 4) serves them from inside the server, so both panels get ever
 | Sources | `launcher/src/admin/**` and what its entry reaches: `src/api/{admin,adminWs,shared}.ts`, the design system's Tauri-free modules (`src/ui/*` without TaskProgress, DropZone, dialogFolder), `src/i18n`, `src/theme` |
 | Entry | `src/admin/web.ts`: the pages (`AdminRoutes`, `ADMIN_PAGES`, each page), the hub and hooks, `configureAdmin`, `createWebSocketTransport`, `kapOps`/`useKap`, the KAP and op types, `ConfirmHost`, `Toaster`, the languages |
 | Package | `launcher/packages/admin-ui/package.json` (`@kiln/admin-ui`, a Bun workspace of `launcher/`; `launcher/bunfig.toml` keeps the install hoisted): `exports` `.` = `dist/admin-ui.js` + `dist/types/admin/web.d.ts`, `./style.css` = `dist/admin-ui.css` |
-| Build | `bun run build:admin-ui` in `launcher/` (`vite.admin-ui.config.ts`, `tsconfig.admin-ui.json`, `scripts/admin-ui-dist.ts`): an ES module with React, React Router, TanStack Query (peer dependencies), zustand, leaflet, lucide-react and react-virtual as imports; the stylesheet with the theme, fonts and leaflet's CSS. The last step fails when the bundle or its declarations reach Tauri, the command layer or the mock, or a package the package.json does not declare |
+| Build | `bun run build:admin-ui` in `launcher/` (`vite.admin-ui.config.ts`, `tsconfig.admin-ui.json`, `scripts/admin-ui-dist.ts`): an ES module with React, React Router, TanStack Query (peer dependencies), zustand, leaflet, lucide-react and react-virtual as imports; the stylesheet with the theme, fonts and leaflet's CSS. The last step fails when the bundle (every chunk, and every module its source maps name) or its declarations reach Tauri, the command layer, the launcher's own pages, components or shell, the mock, or a package the package.json does not declare |
 | Not in it | the launcher's own server pages that use the admin hooks (Overview, the console `pages/servers/ServerConsole.tsx`, Mods `pages/servers/ServerModsPage.tsx`; Configs is in it as `AdminConfigsPage`), the browser mock (`src/admin/mock`, launcher dev only) |
 
 A web page sets the transport and renders the pages in its own providers:
@@ -135,7 +135,8 @@ restore. Kiln.Admin's op `server_restart` is something else, a KAP request (`kap
 names never meet: the WebSocket transport has no way to reach a launcher command
 (`unit-tests/admin-{tauri,ws}-transport.test.ts`).
 
-Checks: `unit-tests/admin-ui-package.test.ts` (what the entry reaches, by value and by type), `admin-hub.test.ts` (the
+Checks: `unit-tests/admin-ui-package.test.ts` (what the entry reaches, by value and by type),
+`scripts/admin-ui-dist.test.ts` (the build's last step on fake builds), `admin-hub.test.ts` (the
 hub over a fake transport), `admin-tauri-transport.test.ts` (the launcher's transport at Tauri's invoke),
 `admin-ws-transport.test.ts` (a fake KAP-over-WebSocket server); `tests/admin-ui-web.spec.ts` runs the pages in a plain
 page (`src/admin/harness/index.html?kap=<ws url>`, served by the launcher's dev server, not part of a build) against

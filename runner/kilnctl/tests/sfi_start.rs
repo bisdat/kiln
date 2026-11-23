@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 //! `kilnctl client activate` and `play-once` in kiln mode, with the real binary and scratch folders: they
 //! run kiln_manage's own activation and play-once write, then print every warning the check before Play would show
-//! (here the held interpreter), and ask nothing; a hosted game prints what it printed before. Nothing here starts the
+//! (here the interpreter that does not run: held, or not installed), and ask nothing; a hosted game prints what it printed before. Nothing here starts the
 //! game, Steam, Wine or a server.
 use kiln_manage::paths::DataDirs;
 use std::path::{Path, PathBuf};
@@ -45,21 +45,31 @@ fn client(t: &Path, kiln_json: &str) -> (PathBuf, String) {
     (g, p.id)
 }
 
+/// Why a kiln-mode start of the scratch client runs no ShroudForge package: the interpreter is held while this build's
+/// gate list (native/core/gates/sfi.json) has its row, as kiln-manage's routing tests read it; else it is a normal
+/// choice, and the scratch folder has no kiln/plugins/kiln-sfi.dll.
+fn kiln_mode_refusal() -> &'static str {
+    let policy = kiln_manage::sfi_release::ReleasePolicy::shipped();
+    let held = policy.rows().unwrap().iter().any(|r| r.name == kiln_manage::sfi_release::INTERPRETER);
+    if held { "interpreter-held" } else { "interpreter-missing" }
+}
+
 #[test]
 fn activate_and_play_once_print_the_warnings_of_a_kiln_mode_start() {
     let t = scratch("held");
     let (g, id) = client(&t, HELD);
     let dir = g.to_string_lossy().into_owned();
+    let code = kiln_mode_refusal();
     let o = kilnctl(&t, &["client", "activate", &id, "--dir", &dir]);
     let out = text(&o);
     assert!(o.status.success(), "{out}");
     assert!(out.contains("activated profile"), "{out}");
-    assert!(out.contains("WARNING: no ShroudForge package runs this start (interpreter-held)"), "{out}");
+    assert!(out.contains(&format!("WARNING: no ShroudForge package runs this start ({code})")), "{out}");
     assert!(out.contains("a headless start asks nobody"), "{out}");
     let o = kilnctl(&t, &["client", "play-once", "profile", "--profile", &id, "--dir", &dir]);
     let out = text(&o);
     assert!(o.status.success(), "{out}");
-    assert!(out.contains("(interpreter-held)") && out.contains("wrote "), "{out}");
+    assert!(out.contains(&format!("({code})")) && out.contains("wrote "), "{out}");
     assert!(g.join("kiln/play-once.ini").is_file(), "the start goes on: {out}");
     let _ = std::fs::remove_dir_all(&t);
 }

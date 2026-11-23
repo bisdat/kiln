@@ -426,7 +426,8 @@ ops and topics a user may have.
 
 - **Messages:** one frame per WebSocket message: the frame's JSON object (section 2's payload) as a text message, with no
   length prefix. A binary message holds the same UTF-8 JSON. Section 2's limits apply: the page never sends a request
-  larger than `ready.limits.maxClientFrame` (it refuses it itself, `invalid_argument`).
+  larger than `ready.limits.maxClientFrame` (it refuses it itself, `invalid_argument`). A limit that is missing or not a
+  number of at least 0 keeps section 2's default.
 - **Opening:** after the upgrade the host sends `hello` (optional; `proto`, `kiln`, `admin`, `server {id, name}`; no
   `nonce` or `auth` needed) and then `ready` (`ops`, `topics`, `limits`, `restart`; `session` is the host's id, `mac`
   is left out). Nothing comes from the page before `ready`, and the page never sends `auth`. A `hello` with another

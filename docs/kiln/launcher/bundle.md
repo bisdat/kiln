@@ -27,7 +27,8 @@ gives a byte-identical zip (checked: two runs, same sha256). A dirty tree still 
 ```
 `kilnctl bundle create` walks every component folder, hashes the files (sha256, size), marks the `config` ones and
 writes `files[]` sorted by path. A path in two components, an unknown component folder, a symlink or an unsafe name
-is an error.
+is an error, and so are two paths Windows would take for one (they differ only in case, or one file is a folder of
+another path): every reader of a manifest refuses them (`bundle::validate`).
 
 ### Components (what stage.sh writes)
 | Component | Sides | Default | Files |
