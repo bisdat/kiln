@@ -859,7 +859,51 @@ fn _unused(_: &Path) {}
 // ---- the foreground runner (Unix only) -----------------------
 // - `wine ./enshrouded_server.exe` in the server folder, own process group, stdin /dev/null.
 // - SIGINT, SIGTERM and SIGHUP become one SIGINT to the server process (the game saves and exits on Ctrl-C).
-// - After the launcher exits: wait for the server process, then `wineserver -w`; exit with the launcher's status.
+// - After the launcher exits: wait for the server process, then `wineserver -w`; exit with the launcher's status, or
+//   with 75 when Kiln.Admin asked for a restart (restart.json; docs/kiln/launcher/admin-protocol.md, "Restart").
+
+/// What `kilnctl run` exits with when the server stopped because Kiln.Admin's `server_restart` asked for it
+/// (EX_TEMPFAIL). Not one of kiln@.service's `RestartPreventExitStatus=1 2 3`, so `Restart=on-failure` starts the
+/// server again.
+pub const RESTART_EXIT_CODE: i32 = 75;
+
+/// `<server>/kiln/data/kiln-admin/restart.json`: Kiln.Admin writes it right before it raises the server's stop for a
+/// restart (`{format: 1, runId, pid, at, by, message}`).
+pub fn restart_marker(server_dir: &Path) -> PathBuf {
+    server_dir.join("kiln").join("data").join("kiln-admin").join("restart.json")
+}
+
+/// Takes the restart marker after a run: it is deleted whatever it says, and it asks for a restart (Some(who asked))
+/// only when its `runId` is this run's and the file was written after the run started. A marker of another run (an
+/// earlier server, a copied folder) is stale: a later normal stop must never turn into a restart.
+pub fn take_restart(server_dir: &Path, run_id: &str, started: SystemTime) -> Option<String> {
+    let p = restart_marker(server_dir);
+    let bytes = std::fs::read(&p).ok()?;
+    let written = std::fs::metadata(&p).and_then(|m| m.modified()).ok();
+    let _ = std::fs::remove_file(&p);
+    let v: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    let ours = v.get("runId").and_then(|r| r.as_str()) == Some(run_id);
+    // a second of slack for file systems that keep coarse times
+    let fresh = written.is_some_and(|w| w + Duration::from_secs(1) >= started);
+    (ours && fresh).then(|| v.get("by").and_then(|b| b.as_str()).unwrap_or("Kiln.Admin").to_string())
+}
+
+/// True when this process is a systemd unit's main process (kiln@.service's `kilnctl run`): `SYSTEMD_EXEC_PID` is our
+/// pid (systemd 248+), else `INVOCATION_ID` is set. Kiln.Admin then reports restarts as supported.
+pub fn systemd_main_process(exec_pid: Option<&str>, invocation_id: Option<&str>, me: u32) -> bool {
+    match exec_pid {
+        Some(p) => p.trim().parse::<u32>().ok() == Some(me),
+        None => invocation_id.is_some_and(|v| !v.trim().is_empty()),
+    }
+}
+
+/// An id for one `kilnctl run` (`KILN_RUN_ID` in the server's environment; Kiln.Admin copies it into restart.json).
+pub fn new_run_id(name: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let now = SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+    let h = Sha256::digest(format!("{name}\n{}\n{}\n{:?}", std::process::id(), now.as_nanos(), Instant::now()).as_bytes());
+    h.iter().take(16).map(|b| format!("{b:02x}")).collect()
+}
 
 #[cfg(unix)]
 pub use unix_runner::*;
@@ -874,7 +918,7 @@ mod unix_runner {
     use std::os::unix::process::{CommandExt, ExitStatusExt};
     use std::process::{Child, ExitStatus, Stdio};
     use std::sync::atomic::{AtomicI32, Ordering};
-    use std::time::{Duration, Instant};
+    use std::time::{Duration, Instant, SystemTime};
 
     static PENDING: AtomicI32 = AtomicI32::new(0);
 
@@ -967,6 +1011,13 @@ mod unix_runner {
     /// every warning goes to the log (stderr, the journal under systemd) before Wine starts (super::prepare_local).
     pub fn run_foreground_via(dirs: Option<&crate::paths::DataDirs>, inst: &Instance,
                               spawn: &mut dyn FnMut(&Runner, &Instance) -> Result<Child>) -> Result<i32> {
+        run_foreground_with(dirs, inst, spawn, super::systemd_main_process(
+            std::env::var("SYSTEMD_EXEC_PID").ok().as_deref(), std::env::var("INVOCATION_ID").ok().as_deref(), std::process::id()))
+    }
+
+    /// [`run_foreground_via`], told whether a systemd unit runs it (then `KILN_RESTART=kilnctl` for Kiln.Admin).
+    pub fn run_foreground_with(dirs: Option<&crate::paths::DataDirs>, inst: &Instance,
+                               spawn: &mut dyn FnMut(&Runner, &Instance) -> Result<Child>, unit: bool) -> Result<i32> {
         let runner = wine::resolve(&inst.wine, &util::home())?;
         if let Some(p) = procs::find_server(&inst.prefix) {
             return Err(Error::new(ErrorCode::Conflict, format!("{} is already running (pid {p})", inst.name)));
@@ -983,6 +1034,15 @@ mod unix_runner {
             log(n);
         }
         std::fs::create_dir_all(inst.dir.join("logs")).ok();
+        // this run's id, and whether a stop for a restart comes back (Kiln.Admin's server_restart; restart.json)
+        let run_id = super::new_run_id(&inst.name);
+        let started = SystemTime::now();
+        let _ = std::fs::remove_file(super::restart_marker(&inst.dir));  // an earlier run's
+        let mut launched = inst.clone();
+        launched.env.insert("KILN_RUN_ID".into(), run_id.clone());
+        if unit {
+            launched.env.insert("KILN_RESTART".into(), "kilnctl".into());
+        }
         install_handlers();
         log(format!(
             "starting {}: {} ./{} in {} (prefix {}, UDP {}, wine {})",
@@ -994,7 +1054,7 @@ mod unix_runner {
             inst.query_port,
             runner.label
         ));
-        let spawned = spawn(&runner, inst);
+        let spawned = spawn(&runner, &launched);
         drop(prepared);
         let mut child = spawned?;
         let t_start = Instant::now();
@@ -1067,7 +1127,18 @@ mod unix_runner {
             status,
             stop_at.map(|t| format!(", {:.1} s after the stop request", t.elapsed().as_secs_f64())).unwrap_or_default()
         ));
-        Ok(code)
+        Ok(match super::take_restart(&inst.dir, &run_id, started) {
+            Some(by) if code == 0 => {
+                log(format!("{} stopped for a restart ({by} asked through Kiln.Admin): exit {} so its unit starts it again",
+                    inst.name, super::RESTART_EXIT_CODE));
+                super::RESTART_EXIT_CODE
+            }
+            Some(by) => {
+                log(format!("{by} asked for a restart, but the server exited {code}: passing that on"));
+                code
+            }
+            None => code,
+        })
     }
 }
 
@@ -1097,5 +1168,137 @@ mod installed_tests {
         std::fs::write(dir.join("kiln/.install.json"), receipt.to_string()).unwrap();
         assert_eq!(installed_kiln(&dir).as_deref(), Some("0.2.1+20261106.0d9662b"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(all(test, unix, feature = "server"))]
+mod restart_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+    use std::time::{Duration, SystemTime};
+
+    fn temp(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("km-restart-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn mark(dir: &Path, run_id: &str) {
+        let p = restart_marker(dir);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        let v = serde_json::json!({"format": 1, "runId": run_id, "pid": 32, "at": "2026-11-23T16:00:00Z", "by": "web:alice"});
+        std::fs::write(p, v.to_string()).unwrap();
+    }
+
+    #[test]
+    fn a_marker_of_this_run_asks_for_a_restart_once() {
+        let dir = temp("ours");
+        let started = SystemTime::now() - Duration::from_secs(5);
+        assert_eq!(take_restart(&dir, "run-1", started), None, "no marker");
+        mark(&dir, "run-1");
+        assert_eq!(take_restart(&dir, "run-1", started).as_deref(), Some("web:alice"));
+        assert!(!restart_marker(&dir).exists(), "taken");
+        assert_eq!(take_restart(&dir, "run-1", started), None, "once");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_stale_marker_is_deleted_and_never_restarts() {
+        let dir = temp("stale");
+        // another run's
+        mark(&dir, "run-0");
+        assert_eq!(take_restart(&dir, "run-1", SystemTime::now() - Duration::from_secs(5)), None);
+        assert!(!restart_marker(&dir).exists(), "deleted anyway");
+        // ours by id, but written before this run started (a copied folder, a clock that went back)
+        mark(&dir, "run-1");
+        let f = std::fs::File::options().write(true).open(restart_marker(&dir)).unwrap();
+        f.set_modified(SystemTime::now() - Duration::from_secs(3600)).unwrap();
+        drop(f);
+        assert_eq!(take_restart(&dir, "run-1", SystemTime::now() - Duration::from_secs(60)), None);
+        assert!(!restart_marker(&dir).exists());
+        // not JSON
+        std::fs::write(restart_marker(&dir), b"{").unwrap();
+        assert_eq!(take_restart(&dir, "run-1", SystemTime::now() - Duration::from_secs(5)), None);
+        assert!(!restart_marker(&dir).exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn only_a_systemd_units_main_process_says_restarts_come_back() {
+        assert!(systemd_main_process(Some("4242"), Some("abc"), 4242));
+        assert!(!systemd_main_process(Some("17"), Some("abc"), 4242), "a child of the unit's main process");
+        assert!(systemd_main_process(None, Some("abc"), 4242), "systemd before 248");
+        assert!(!systemd_main_process(None, None, 4242));
+        assert!(!systemd_main_process(None, Some(" "), 4242));
+        assert_ne!(new_run_id("a"), new_run_id("a"));
+        assert_eq!(new_run_id("a").len(), 32);
+    }
+
+    /// `kilnctl run` with a fake Wine: the server gets KILN_RUN_ID (and KILN_RESTART under a unit); a stop Kiln.Admin
+    /// asked for with this run's id exits 75, anything else passes the server's status on.
+    #[test]
+    fn the_foreground_runner_exits_75_after_a_restart_kiln_admin_asked_for() {
+        let root = temp("run");
+        let dir = root.join("server");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(super::super::game::EXE), b"MZ").unwrap();
+        let bin = root.join("wine/bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        for f in ["wine", "wineserver"] {
+            std::fs::write(bin.join(f), b"#!/bin/false\n").unwrap();
+            std::fs::set_permissions(bin.join(f), std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let inst = super::super::instance::Instance {
+            name: "srv".into(),
+            file: root.join("srv.toml"),
+            dir: dir.clone(),
+            prefix: root.join("pfx"),
+            wine: crate::wine::WineSpec::Path(bin.join("wine")),
+            query_port: 15999,
+            backup_dir: root.join("backups"),
+            require_ntsync: false,
+            stop_timeout: Duration::from_secs(5),
+            kiln: super::super::instance::Kiln {
+                source: root.join("src"),
+                build: root.join("out"),
+                policy: Default::default(),
+                samples: false,
+            },
+            env: Default::default(),
+        };
+        // the server asks for a restart with this run's id, then exits 0 (the Ctrl-C stop)
+        let run = |unit: bool, marker: Option<&str>, exit: i32| {
+            let mut env = Vec::new();
+            let code = unix_runner::run_foreground_with(None, &inst, &mut |_, launched| {
+                env = launched.env.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+                let id = launched.env.get("KILN_RUN_ID").cloned().unwrap_or_default();
+                match marker {
+                    Some("this run") => mark(&launched.dir, &id),
+                    Some(other) => mark(&launched.dir, other),
+                    None => {}
+                }
+                Ok(std::process::Command::new("/bin/sh").arg("-c").arg(format!("exit {exit}")).spawn().unwrap())
+            }, unit).unwrap();
+            (code, env)
+        };
+        let (code, env) = run(true, Some("this run"), 0);
+        assert_eq!(code, RESTART_EXIT_CODE);
+        assert!(env.iter().any(|(k, v)| k == "KILN_RESTART" && v == "kilnctl"), "{env:?}");
+        assert!(env.iter().any(|(k, v)| k == "KILN_RUN_ID" && v.len() == 32), "{env:?}");
+        assert!(!restart_marker(&dir).exists(), "taken");
+        assert!(inst.env.is_empty(), "the instance itself is not changed");
+        // no unit: no KILN_RESTART (Kiln.Admin says "unknown"), the marker still decides kilnctl's own exit
+        let (code, env) = run(false, None, 0);
+        assert_eq!(code, 0);
+        assert!(!env.iter().any(|(k, _)| k == "KILN_RESTART"));
+        // another run's marker, a server that failed on the way out
+        assert_eq!(run(true, Some("run-0"), 0).0, 0);
+        assert_eq!(run(true, Some("this run"), 3).0, 3);
+        // a marker left over from before the start is removed before the server starts
+        mark(&dir, "old");
+        assert_eq!(run(true, None, 0).0, 0);
+        assert!(!restart_marker(&dir).exists());
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
