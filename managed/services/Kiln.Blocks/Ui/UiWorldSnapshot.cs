@@ -23,9 +23,19 @@ public enum UiWorldFields : uint
 }
 
 /// <summary>When a part of a <see cref="UiWorldSnapshot"/> was taken: the world's session and step, and the capture time in milliseconds (Environment.TickCount64).</summary>
+/// <param name="Session">The world's session: a world or session change (menu, loading screen, rejoin) gives a new one.</param>
+/// <param name="Step">The world's step the values were taken in.</param>
+/// <param name="CaptureMs">When they were taken: Environment.TickCount64, in milliseconds.</param>
 public sealed record UiSnapshotStamp(ulong Session, ulong Step, ulong CaptureMs);
 
 /// <summary>One nonempty slot of the local player's inventory. <see cref="Key"/> is <c>l:</c> + 8 hex digits of the page + <c>:</c> + the slot index.</summary>
+/// <param name="Key">The slot's key, <c>l:</c> + 8 hex digits of the page + <c>:</c> + the slot index: the row key a table tells slots apart by.</param>
+/// <param name="Holder">The entity that owns the inventory: the local player.</param>
+/// <param name="InventoryPage">The inventory page (one of the player's inventories) the slot is in.</param>
+/// <param name="SlotIndex">The slot's index in its page.</param>
+/// <param name="Item">The game's item id of what is in the slot.</param>
+/// <param name="Count">How many are in the slot.</param>
+/// <param name="Pide">The stack's own item entity in this game's world; 0 for a plain stack without one.</param>
 public sealed record UiInventoryValue(string Key, uint Holder, uint InventoryPage, byte SlotIndex, uint Item, uint Count, uint Pide);
 
 /// <summary>
@@ -33,6 +43,23 @@ public sealed record UiInventoryValue(string Key, uint Holder, uint InventoryPag
 /// (<see cref="UiWorldFields"/>); <see cref="UnavailableReasons"/> says why the others are missing, one entry per group in
 /// ascending bit order. Position is in 32.32 fixed point (metres = value / 4294967296).
 /// </summary>
+/// <param name="Publication">The publication's id: each publication gets the next one (monotonic for the process).</param>
+/// <param name="AvailableMask">The <see cref="UiWorldFields"/> groups this publication holds; the fields of other groups are not valid.</param>
+/// <param name="Local">When the local player's values were taken, in the game's own world.</param>
+/// <param name="Server">When <paramref name="ServerHours"/> was taken, in the world this game hosts; all zeros when it hosts none.</param>
+/// <param name="LocalPlayer">The local player's entity.</param>
+/// <param name="Health">The local player's health as the game computed it, before any mod's HUD change (<see cref="UiWorldFields.LocalVitals"/>).</param>
+/// <param name="HealthMax">The local player's maximum health (<see cref="UiWorldFields.LocalVitals"/>).</param>
+/// <param name="Stamina">The local player's stamina (<see cref="UiWorldFields.LocalVitals"/>).</param>
+/// <param name="StaminaMax">The local player's maximum stamina (<see cref="UiWorldFields.LocalVitals"/>).</param>
+/// <param name="Mana">The local player's mana (<see cref="UiWorldFields.LocalVitals"/>).</param>
+/// <param name="ManaMax">The local player's maximum mana (<see cref="UiWorldFields.LocalVitals"/>).</param>
+/// <param name="XFixed">The local player's x position, 32.32 fixed point (<see cref="UiWorldFields.LocalPosition"/>).</param>
+/// <param name="YFixed">The local player's y position, 32.32 fixed point (<see cref="UiWorldFields.LocalPosition"/>).</param>
+/// <param name="ZFixed">The local player's z position, 32.32 fixed point (<see cref="UiWorldFields.LocalPosition"/>).</param>
+/// <param name="ServerHours">The hour of day of the world this game hosts (<see cref="UiWorldFields.HostTime"/>).</param>
+/// <param name="Inventory">The local player's nonempty own slots, sorted by page and slot (<see cref="UiWorldFields.LocalInventory"/>).</param>
+/// <param name="UnavailableReasons">Why each group is missing (<c>NoWorld</c>, <c>StaleSource</c>, <c>LayoutOff</c>, ...), one entry per group in ascending bit order; null for a group that is there.</param>
 public sealed record UiWorldSnapshot(ulong Publication, uint AvailableMask, UiSnapshotStamp Local, UiSnapshotStamp Server, uint LocalPlayer,
     uint Health, uint HealthMax, uint Stamina, uint StaminaMax, uint Mana, uint ManaMax,
     long XFixed, long YFixed, long ZFixed, decimal ServerHours,
@@ -43,6 +70,9 @@ public sealed record UiWorldSnapshot(ulong Publication, uint AvailableMask, UiSn
 }
 
 /// <summary>What <see cref="BlockUi.ReadWorld"/> returned: a snapshot, or why there is none now (no world, no sample yet, expired).</summary>
+/// <param name="Ok">True when <paramref name="Snapshot"/> is set.</param>
+/// <param name="Reason">Why there is no snapshot now; null when Ok.</param>
+/// <param name="Snapshot">The latest publication; null when not Ok.</param>
 public sealed record UiWorldReadResult(bool Ok, string? Reason, UiWorldSnapshot? Snapshot) : IKilnResult;
 
 /// <summary>A request that the world collector gather some groups (<see cref="BlockUi.DemandWorld"/>). Dispose it when the values are no longer shown.</summary>

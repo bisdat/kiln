@@ -13,6 +13,7 @@ namespace Kiln;
 /// <summary>A recipe in a station's menu, by its <see cref="RecipeBlock.MenuKey"/>: <c>"key"</c> for a recipe of the mod that defines the
 /// station, <c>"other-mod:key"</c> for another mod's. It names the one recipe with that key that runs at the station's own workshop. A
 /// recipe's output or name never stands in for its key.</summary>
+/// <param name="Value">The recipe's menu key as written: <c>"key"</c> for the station's own mod, <c>"other-mod:key"</c> for another mod's.</param>
 [JsonConverter(typeof(StationRecipeRefConverter))]
 public readonly record struct StationRecipeRef(string Value)
 {

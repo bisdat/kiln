@@ -25,9 +25,13 @@ namespace Kiln;
 public abstract record UiStateDefinition;
 
 /// <summary>A true/false state entry.</summary>
+/// <param name="Initial">The value in each new world; false unless given.</param>
 public sealed record UiBoolState(bool Initial = false) : UiStateDefinition;
 
 /// <summary>A whole-number state entry in [<see cref="Min"/>, <see cref="Max"/>]. JSON: the numbers as strings.</summary>
+/// <param name="Initial">The value in each new world, within <paramref name="Min"/> and <paramref name="Max"/>.</param>
+/// <param name="Min">The smallest value a write may set; no bound unless given.</param>
+/// <param name="Max">The largest value a write may set; no bound unless given.</param>
 public sealed record UiInt64State(
     [property: JsonConverter(typeof(UiInt64StringConverter))] long Initial,
     [property: JsonConverter(typeof(UiInt64StringConverter))] long Min = long.MinValue,
@@ -35,6 +39,10 @@ public sealed record UiInt64State(
 
 /// <summary>A decimal state entry in [<see cref="Min"/>, <see cref="Max"/>] with at most <see cref="Scale"/> digits after
 /// the point (0..6); a value with more is refused, never rounded. JSON: the numbers as strings.</summary>
+/// <param name="Initial">The value in each new world, within <paramref name="Min"/> and <paramref name="Max"/>.</param>
+/// <param name="Min">The smallest value a write may set; no bound unless given.</param>
+/// <param name="Max">The largest value a write may set; no bound unless given.</param>
+/// <param name="Scale">At most this many digits after the point, 0 to 6 (6 unless given).</param>
 public sealed record UiDecimalState(
     [property: JsonConverter(typeof(UiDecimalStringConverter))] decimal Initial,
     [property: JsonConverter(typeof(UiDecimalStringConverter))] decimal Min = decimal.MinValue,
@@ -42,10 +50,15 @@ public sealed record UiDecimalState(
     int Scale = 6) : UiStateDefinition;
 
 /// <summary>A text state entry of at most <see cref="MaxBytes"/> UTF-8 bytes (up to 4096).</summary>
+/// <param name="Initial">The text in each new world; empty unless given.</param>
+/// <param name="MaxBytes">The longest text a write may set, in UTF-8 bytes (up to 4096; 256 unless given).</param>
 public sealed record UiStringState(string Initial = "", int MaxBytes = 256) : UiStateDefinition;
 
 /// <summary>A set of texts (unique, kept in ordinal order): what a tree's expanded branches bind to. At most
 /// <see cref="MaxItems"/> items of <see cref="MaxItemBytes"/> UTF-8 bytes each.</summary>
+/// <param name="Initial">The texts in each new world.</param>
+/// <param name="MaxItems">The most texts the set may hold (512 unless given).</param>
+/// <param name="MaxItemBytes">The longest text an item may be, in UTF-8 bytes (128 unless given).</param>
 public sealed record UiStringSetState(IReadOnlyList<string> Initial, int MaxItems = 512, int MaxItemBytes = 128) : UiStateDefinition;
 
 // ---- state values -------------------------------------------------------------------------------------------------
@@ -56,15 +69,20 @@ public abstract record UiStateValue
     private UiStateValue() { }
 
     /// <summary>A true/false.</summary>
+    /// <param name="Value">The value.</param>
     public sealed record Bool(bool Value) : UiStateValue;
     /// <summary>A whole number.</summary>
+    /// <param name="Value">The number.</param>
     public sealed record Int64(long Value) : UiStateValue;
     /// <summary>A decimal.</summary>
+    /// <param name="Value">The number, exact.</param>
     public sealed record Decimal(decimal Value) : UiStateValue;
     /// <summary>A text.</summary>
+    /// <param name="Value">The text.</param>
     public sealed record String(string Value) : UiStateValue;
 
     /// <summary>A set of texts; stored unique and in ordinal order.</summary>
+    /// <param name="Value">The texts, unique and in ordinal order.</param>
     public sealed record StringSet(IReadOnlyList<string> Value) : UiStateValue
     {
         /// <inheritdoc/>
@@ -77,20 +95,34 @@ public abstract record UiStateValue
 
 /// <summary>Which state a write expects to change: the world session's token and the window's revision. A reset (a new
 /// world) gives a new session, so revision 0 of one world is never taken for revision 0 of another.</summary>
+/// <param name="Session">The world session's token: a new one each time the state is reset for a new world.</param>
+/// <param name="Revision">The window's revision in that session: it goes up with each committed change.</param>
 public readonly record struct UiStateVersion(ulong Session, ulong Revision);
 
 /// <summary>What an unbound tab bar or tree of a window holds: the selected tab or node, the expanded branches.</summary>
+/// <param name="Selected">The selected tab's id or node's key; null when nothing is selected.</param>
+/// <param name="Expanded">A tree's open branches, by node key; empty when none is open.</param>
 public sealed record UiControlState(string? Selected, IReadOnlyList<string> Expanded);
 
 /// <summary>A window's whole state at one version: the declared entries and the tab bars' and trees' own state.</summary>
+/// <param name="Window">The window.</param>
+/// <param name="Version">The version this state is at; pass it to a write that expects it.</param>
+/// <param name="Values">The declared state entries by key.</param>
+/// <param name="Controls">The state of the window's unbound tab bars and trees, by row id.</param>
 public sealed record UiStateSnapshot(WindowRef Window, UiStateVersion Version,
     IReadOnlyDictionary<string, UiStateValue> Values, IReadOnlyDictionary<string, UiControlState> Controls);
 
 /// <summary>What <see cref="BlockUi.State"/> returned.</summary>
+/// <param name="Ok">True when the call succeeded and <paramref name="Snapshot"/> is set.</param>
+/// <param name="Reason">Why not, starting with one of <see cref="UiStateReasons"/>; null when Ok.</param>
+/// <param name="Snapshot">The window's state now; null when not Ok.</param>
 public sealed record UiStateReadResult(bool Ok, string? Reason, UiStateSnapshot? Snapshot) : IKilnResult;
 
 /// <summary>What <see cref="BlockUi.SetState"/> returned: the snapshot after the write (a write of the same value is
 /// accepted and changes nothing), or why it was refused (<see cref="UiStateReasons"/>).</summary>
+/// <param name="Ok">True when the write was accepted and <paramref name="Snapshot"/> is set.</param>
+/// <param name="Reason">Why it was refused, starting with one of <see cref="UiStateReasons"/>; null when Ok.</param>
+/// <param name="Snapshot">The window's state after the write; null when refused.</param>
 public sealed record UiStateResult(bool Ok, string? Reason, UiStateSnapshot? Snapshot) : IKilnResult;
 
 /// <summary>Why a state or data call was refused (<see cref="IKilnResult.Reason"/> starts with one of these).</summary>
@@ -138,11 +170,17 @@ public enum UiStateChangeCause
 public sealed class UiWindowStateChangedEvent(WindowRef window, string key, UiStateValue? before, UiStateValue? after,
     UiStateVersion version, UiStateChangeCause cause) : KilnEvent
 {
+    /// <summary>The window whose state changed.</summary>
     public WindowRef Window { get; } = window;
+    /// <summary>The state entry's key, as the window declares it.</summary>
     public string Key { get; } = key;
+    /// <summary>The entry's value before the change.</summary>
     public UiStateValue? Before { get; } = before;
+    /// <summary>The entry's value after the change.</summary>
     public UiStateValue? After { get; } = after;
+    /// <summary>The window's state version after the change.</summary>
     public UiStateVersion Version { get; } = version;
+    /// <summary>What made the change.</summary>
     public UiStateChangeCause Cause { get; } = cause;
 }
 
@@ -151,11 +189,17 @@ public sealed class UiWindowStateChangedEvent(WindowRef window, string key, UiSt
 public sealed class UiControlStateChangedEvent(WindowRef window, string rowId, UiControlState? before, UiControlState after,
     UiStateVersion version, UiStateChangeCause cause) : KilnEvent
 {
+    /// <summary>The window the tab bar or tree is in.</summary>
     public WindowRef Window { get; } = window;
+    /// <summary>The id of the tab bar's or tree's row.</summary>
     public string RowId { get; } = rowId;
+    /// <summary>What it held before the change; null when it held nothing yet.</summary>
     public UiControlState? Before { get; } = before;
+    /// <summary>What it holds after the change.</summary>
     public UiControlState After { get; } = after;
+    /// <summary>The window's state version after the change.</summary>
     public UiStateVersion Version { get; } = version;
+    /// <summary>What made the change.</summary>
     public UiStateChangeCause Cause { get; } = cause;
 }
 
@@ -163,15 +207,32 @@ public sealed class UiControlStateChangedEvent(WindowRef window, string rowId, U
 /// thread, as <see cref="UiWindowStateChangedEvent"/>.</summary>
 public sealed class UiWindowStateResetEvent(WindowRef window, UiStateVersion oldVersion, UiStateVersion newVersion) : KilnEvent
 {
+    /// <summary>The window whose state was reset.</summary>
     public WindowRef Window { get; } = window;
+    /// <summary>The version before the reset, in the old session.</summary>
     public UiStateVersion OldVersion { get; } = oldVersion;
+    /// <summary>The version after the reset, with the new session token.</summary>
     public UiStateVersion NewVersion { get; } = newVersion;
 }
 
 // ---- a mod's own data (BlockUi.Bindings) ----------------------------------------------------------------------------
 
 /// <summary>The types a data field or scalar has.</summary>
-public enum UiScalarType { Bool, Int64, UInt64, Decimal, Float64, String }
+public enum UiScalarType
+{
+    /// <summary>True or false.</summary>
+    Bool,
+    /// <summary>A signed 64-bit whole number.</summary>
+    Int64,
+    /// <summary>An unsigned 64-bit whole number.</summary>
+    UInt64,
+    /// <summary>An exact decimal.</summary>
+    Decimal,
+    /// <summary>A finite double.</summary>
+    Float64,
+    /// <summary>A text.</summary>
+    String,
+}
 
 /// <summary>One typed value of a data field or a scalar source. JSON (a tree's fields in a block file): true/false, a
 /// number (whole numbers read as int64, others as exact decimals) or a string.</summary>
@@ -183,30 +244,60 @@ public abstract record UiScalar
     /// <summary>The type of the value.</summary>
     public abstract UiScalarType Type { get; }
 
+    /// <summary>A true/false.</summary>
+    /// <param name="Value">The value.</param>
     public sealed record Bool(bool Value) : UiScalar { public override UiScalarType Type => UiScalarType.Bool; }
+    /// <summary>A signed whole number.</summary>
+    /// <param name="Value">The number.</param>
     public sealed record Int64(long Value) : UiScalar { public override UiScalarType Type => UiScalarType.Int64; }
+    /// <summary>An unsigned whole number.</summary>
+    /// <param name="Value">The number.</param>
     public sealed record UInt64(ulong Value) : UiScalar { public override UiScalarType Type => UiScalarType.UInt64; }
+    /// <summary>An exact decimal.</summary>
+    /// <param name="Value">The number.</param>
     public sealed record Decimal(decimal Value) : UiScalar { public override UiScalarType Type => UiScalarType.Decimal; }
     /// <summary>A finite double (NaN and infinities are refused).</summary>
+    /// <param name="Value">The number.</param>
     public sealed record Float64(double Value) : UiScalar { public override UiScalarType Type => UiScalarType.Float64; }
+    /// <summary>A text.</summary>
+    /// <param name="Value">The text.</param>
     public sealed record String(string Value) : UiScalar { public override UiScalarType Type => UiScalarType.String; }
 }
 
 /// <summary>A data field: its id (as <c>row.&lt;id&gt;</c> / <c>node.&lt;id&gt;</c> in templates) and type.</summary>
+/// <param name="Id">The field's id: a template reads it as <c>{row.&lt;id&gt;}</c> or <c>{node.&lt;id&gt;}</c>.</param>
+/// <param name="Type">The type of its values.</param>
 public sealed record UiField(string Id, UiScalarType Type);
 
 /// <summary>What shape a data source has.</summary>
-public enum UiDataShape { Scalar, Rows, Tree }
+public enum UiDataShape
+{
+    /// <summary>One value (<see cref="UiDataSnapshot.Scalar"/>).</summary>
+    Scalar,
+    /// <summary>Rows with keys and field values, for a table (<see cref="UiDataSnapshot.Rows"/>).</summary>
+    Rows,
+    /// <summary>Nodes with parents, labels and field values, for a tree (<see cref="UiDataSnapshot.Tree"/>).</summary>
+    Tree,
+}
 
 /// <summary>A data source's shape: a scalar of <see cref="ScalarType"/>, or rows / tree nodes with up to 16
 /// <see cref="Fields"/> (each required in every row or node).</summary>
+/// <param name="Shape">Whether the source is a scalar, rows or a tree.</param>
+/// <param name="ScalarType">The scalar's type, for a <see cref="UiDataShape.Scalar"/> source; null for the others.</param>
+/// <param name="Fields">The fields of each row or node, up to 16, for a rows or tree source; null for a scalar.</param>
 public sealed record UiDataSchema(UiDataShape Shape, UiScalarType? ScalarType = null, IReadOnlyList<UiField>? Fields = null);
 
 /// <summary>One row of a rows source: a unique key (<c>[A-Za-z0-9._:-]{1,128}</c>) and its field values.</summary>
+/// <param name="Key">The row's key, unique in the source: <c>[A-Za-z0-9._:-]{1,128}</c>. A table tells its rows apart by it.</param>
+/// <param name="Values">The row's value for each field of the source's schema, by field id.</param>
 public sealed record UiDataRow(string Key, IReadOnlyDictionary<string, UiScalar> Values);
 
 /// <summary>One node of a tree source: a key unique in the whole tree, its parent's key (null at a root), its label and
 /// field values. Children keep the order they are given in.</summary>
+/// <param name="Key">The node's key, unique in the whole tree.</param>
+/// <param name="ParentKey">The key of the node it is under; null for a root.</param>
+/// <param name="Label">The node's label.</param>
+/// <param name="Values">The node's value for each field of the source's schema, by field id.</param>
 public sealed record UiTreeDataNode(string Key, string? ParentKey, UiText Label, IReadOnlyDictionary<string, UiScalar> Values);
 
 /// <summary>A publication of a data source (<see cref="BlockUi.Bindings.Publish"/>): copied at once, so the caller may
@@ -215,13 +306,22 @@ public abstract record UiDataSnapshot
 {
     private UiDataSnapshot() { }
 
+    /// <summary>A publication of a scalar source.</summary>
+    /// <param name="Value">The value, of the schema's scalar type.</param>
     public sealed record Scalar(UiScalar Value) : UiDataSnapshot;
+    /// <summary>A publication of a rows source.</summary>
+    /// <param name="Values">The rows, in the order a table shows them.</param>
     public sealed record Rows(IReadOnlyList<UiDataRow> Values) : UiDataSnapshot;
+    /// <summary>A publication of a tree source.</summary>
+    /// <param name="Values">The nodes; children keep the order they are given in.</param>
     public sealed record Tree(IReadOnlyList<UiTreeDataNode> Values) : UiDataSnapshot;
 }
 
 /// <summary>What <see cref="BlockUi.Bindings.Publish"/> returned: the source's version after the publication was
 /// committed, or why not (<see cref="UiStateReasons.Superseded"/> when a newer one replaced it first).</summary>
+/// <param name="Ok">True when the publication was committed.</param>
+/// <param name="Reason">Why not, starting with one of <see cref="UiStateReasons"/>; null when Ok.</param>
+/// <param name="Version">The source's version after the publication was committed.</param>
 public sealed record UiDataPublishResult(bool Ok, string? Reason, ulong Version) : IKilnResult;
 
 /// <summary>A data source of a mod (<see cref="BlockUi.Bindings.Define"/>). Dispose it to take the source away.</summary>
@@ -253,9 +353,13 @@ public sealed class UiDataRegistration : IKilnResult, IDisposable
 /// <summary>A data source's publication was committed. On the game's main thread, as <see cref="UiWindowStateChangedEvent"/>.</summary>
 public sealed class UiBindingValueChangedEvent(string mod, string id, ulong oldVersion, ulong newVersion) : KilnEvent
 {
+    /// <summary>The id of the mod that owns the data source.</summary>
     public string Mod { get; } = mod;
+    /// <summary>The source's id (windows bind it as <c>mod.&lt;id&gt;</c>).</summary>
     public string Id { get; } = id;
+    /// <summary>The source's version before this publication.</summary>
     public ulong OldVersion { get; } = oldVersion;
+    /// <summary>The source's version after it.</summary>
     public ulong NewVersion { get; } = newVersion;
 }
 

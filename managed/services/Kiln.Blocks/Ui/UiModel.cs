@@ -222,12 +222,14 @@ public sealed record InputRow : UiRow
 {
     /// <summary>The row's id, unique in the window: <c>[a-z][a-z0-9_-]{0,63}</c>.</summary>
     public required string Id { get; init; }
+    /// <summary>The label shown beside the field.</summary>
     [JsonConverter(typeof(UiBlockTextConverter))]
     public required UiText Label { get; init; }
     /// <summary><c>config.&lt;path&gt;</c> of a text entry, or <c>state.&lt;key&gt;</c> of a string state entry.</summary>
     public required string Bind { get; init; }
     /// <summary>At most this many UTF-8 bytes (2..4096); a longer text is cut at a character before anything is written.</summary>
     public int MaxBytes { get; init; } = 256;
+    /// <summary>When the typed text is written: <see cref="UiInputCommit.Blur"/> (the default) or <see cref="UiInputCommit.Enter"/>.</summary>
     public UiInputCommit Commit { get; init; } = UiInputCommit.Blur;
     /// <summary>Several lines (Enter is a new line; the text is committed when the field loses the keyboard).</summary>
     public bool Multiline { get; init; }
@@ -235,6 +237,9 @@ public sealed record InputRow : UiRow
 
 /// <summary>A column of a <see cref="TableRow"/>: its id, heading and cell, a template that reads the row's fields as
 /// <c>{row.&lt;field&gt;}</c> (and any other value).</summary>
+/// <param name="Id">The column's id, unique in the table.</param>
+/// <param name="Label">The column's heading.</param>
+/// <param name="Cell">What each row's cell in this column shows: a template such as <c>{row.count}</c>.</param>
 public sealed record UiColumn(
     string Id,
     [property: JsonConverter(typeof(UiBlockTextConverter))] UiText Label,
@@ -258,6 +263,10 @@ public sealed record TableRow : UiRow
 }
 
 /// <summary>A tab of a <see cref="TabsRow"/>.</summary>
+/// <param name="Id">The tab's id, unique in its row; the selected tab's id is what <see cref="TabsRow.Selected"/> holds.</param>
+/// <param name="Label">The tab's name on the tab bar.</param>
+/// <param name="Rows">The rows shown while the tab is selected.</param>
+/// <param name="When">Shown only while this is true (see <see cref="UiRow.When"/>); null: always shown. A hidden selected tab moves to the first visible one.</param>
 public sealed record UiTab(
     string Id,
     [property: JsonConverter(typeof(UiBlockTextConverter))] UiText Label,
@@ -277,6 +286,10 @@ public sealed record TabsRow : UiRow
 }
 
 /// <summary>A node of a tree written in the block (<see cref="TreeRow.Roots"/>).</summary>
+/// <param name="Key">The node's key, unique in the whole tree: what the tree's selection and expanded branches hold.</param>
+/// <param name="Label">The node's label.</param>
+/// <param name="Children">The nodes under it, in this order; null or empty for a leaf.</param>
+/// <param name="Values">Its field values (the tree's <see cref="TreeRow.Fields"/>), shown as <c>{node.&lt;field&gt;}</c>; null when it has none.</param>
 public sealed record UiTreeNodeDefinition(
     string Key,
     [property: JsonConverter(typeof(UiBlockTextConverter))] UiText Label,
