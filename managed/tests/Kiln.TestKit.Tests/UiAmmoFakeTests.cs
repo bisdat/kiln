@@ -67,6 +67,24 @@ public sealed unsafe class UiAmmoFakeTests
     }
 
     [Fact]
+    public void InAppendAGameRowAtCountZeroShowsAndAPickOfItReachesTheModWithARowOfItsItem()
+    {
+        using var kiln = new KilnHarness();
+        kiln.Step();
+        var picks = new List<AmmoListPick>();
+        kiln.AmmoList.Hold(AmmoListKind.Arrow, Bow, R(0x10, 0), R(0x11, 4));
+        using var p = kiln.Run(() => Ui.AmmoList.Provide(AmmoListKind.Arrow, c => [R(0x10, 7), R(0x11, 2), R(0x30, 12)]));
+        kiln.Run(() => Ui.AmmoList.Picked += picks.Add);
+        kiln.Step();
+        Assert.Equal([R(0x10, 0), R(0x11, 4), R(0x30, 12)], kiln.AmmoList.Shown(AmmoListKind.Arrow));  // the game's rows first
+        Assert.Equal([R(0x10, 7), R(0x30, 12)], kiln.AmmoList.Provided(AmmoListKind.Arrow));
+        Assert.True(kiln.AmmoList.Pick(AmmoListKind.Arrow, new ItemId(0x10)));
+        Assert.False(kiln.AmmoList.Pick(AmmoListKind.Arrow, new ItemId(0x11)));  // the game's own stock
+        kiln.Step();
+        Assert.Equal([new AmmoListPick(AmmoListKind.Arrow, new ItemId(0x10), 7)], picks);
+    }
+
+    [Fact]
     public void ReplaceRowsAreBuiltAgainWhenTheHeldWeaponOrTheBackpackChanges()
     {
         using var kiln = new KilnHarness();
