@@ -87,6 +87,28 @@ int main() {
     kb::F.persist = true;
     kb::regions_lifecycle_ready(true, false);
     check(!kb::F.persist, "an installed subscriber without the core stop hook disables persistent writes");
+    // Reproduce the important geometry from the user's 120 m-altar case without committing
+    // any private world-save data. The serializer saves whole 16 m chunks on intersection.
+    const kb::RegionBounds altar{{0.f, 0.f, 0.f}, {120.f, 120.f, 120.f}};
+    const std::set<std::array<int32_t, 3>> sample{
+        {-1, 0, 0}, {0, 0, 0}, {7, 0, 0}, {7, 7, 7},
+        {8, 0, 0}, {0, 8, 0}, {8, 8, 8}
+    };
+    const auto cover = kb::classify_chunks(sample, {altar});
+    check(cover.overlaps_base == 4 && cover.outside_bases == 3,
+          "120 m altar: partially overlapping 16 m chunks are saved by the base; off-base chunks are not");
+    check(kb::classify_chunks(sample, {}).outside_bases == sample.size(),
+          "without any genuine base, all kept chunks require external coverage");
+    const kb::RegionBounds edge{{0.f, 0.f, 0.f}, {128.f, 128.f, 128.f}};
+    check(kb::chunk_touches_region({8, 0, 0}, edge),
+          "a chunk touching a base region at exactly 128 m counts as overlapping");
+    const kb::RegionBounds second{{130.f, 0.f, 0.f}, {160.f, 160.f, 160.f}};
+    check(kb::classify_chunks({{8, 0, 0}}, {altar, second}).overlaps_base == 1,
+          "a chunk saved by either of two bases is not classified as off-base");
+    const kb::RegionBounds invalid{{12.f, 0.f, 0.f}, {0.f, 16.f, 16.f}};
+    check(!kb::chunk_touches_region({0, 0, 0}, invalid),
+          "inverted base bounds are never treated as verified coverage");
+
     std::filesystem::remove_all(dir);
     std::printf("regions: %d passed, %d failed\n", passed, failed);
     return failed ? 1 : 0;
