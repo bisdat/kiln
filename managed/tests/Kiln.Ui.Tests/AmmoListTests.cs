@@ -23,6 +23,7 @@ internal static unsafe class FakeAmmo
     public static int ContextRc;
     public static HashSet<uint> Refused = [];  // items the game refuses (not of the list's kind)
     public static int PublishRc;
+    public static int RefuseSetsFromCall;  // 0: off; else the n-th publish call on refuses every set
 
     public static void Install()
     {
@@ -38,6 +39,7 @@ internal static unsafe class FakeAmmo
         Picks.Clear();
         ContextRc = 0;
         PublishRc = 0;
+        RefuseSetsFromCall = 0;
         Refused = [];
     }
 
@@ -73,6 +75,7 @@ internal static unsafe class FakeAmmo
         Published.Add((owner, *p, rows));
         if (PublishRc != 0) return PublishRc;
         if (p->Mode == UiAmmoNative.ModeGame) return 0;
+        if (RefuseSetsFromCall != 0 && Published.Count >= RefuseSetsFromCall) return UiAmmoNative.InvalidArgument;
         if (!Contexts.TryGetValue(p->Kind, out var c)) return UiAmmoNative.NotFound;
         if (c.GameSerial != p->Serial || c.Session != p->Session || rows.Any(r => Refused.Contains(r.Item))) return UiAmmoNative.InvalidArgument;
         return 0;
@@ -289,6 +292,23 @@ public sealed unsafe class AmmoListTests : IDisposable
     }
 
     [Fact]
+    public void A_part_taken_on_the_way_does_not_stay_up_when_the_whole_list_is_refused()
+    {
+        FakeAmmo.Context(Arrow, 1);
+        FakeAmmo.Refused = [0x99];
+        FakeAmmo.RefuseSetsFromCall = 4;  // 1 all: refused, 2 the first provider: taken, 3 with the second: refused, 4 final: refused
+        using var good = Ui.AmmoList.Provide(AmmoListKind.Arrow, _ => [R(0x30, 1)]);
+        using var bad = Ui.AmmoList.Provide(AmmoListKind.Arrow, _ => [R(0x99, 1)]);
+        UiAmmoListBridge.Tick();
+        Assert.Equal(5, FakeAmmo.Published.Count);
+        Assert.Equal(UiAmmoNative.ModeGame, FakeAmmo.Published[^1].P.Mode);  // the part taken in call 2 is cleared
+        Assert.False(UiAmmoListBridge.StateOf(AmmoListKind.Arrow).Live);
+        Assert.Contains("refused", UiAmmoListBridge.StateOf(AmmoListKind.Arrow).Refusal);
+        UiAmmoListBridge.Tick();
+        Assert.Equal(5, FakeAmmo.Published.Count);  // not tried again until the context changes
+    }
+
+    [Fact]
     public void A_throwing_provider_adds_no_rows_and_the_others_still_show()
     {
         FakeAmmo.Context(Arrow, 1);
@@ -368,6 +388,32 @@ public sealed unsafe class AmmoListTests : IDisposable
         Assert.Equal([new AmmoListPick(AmmoListKind.Arrow, new ItemId(0x30), 12)], toQuiver);
         Assert.Equal([new AmmoListPick(AmmoListKind.Arrow, new ItemId(0x31), 3)], toBag);
         quiver.Retire();
+        bag.Retire();
+    }
+
+    [Fact]
+    public void A_queued_pick_of_a_retired_providers_row_never_reaches_the_provider_that_shows_the_item_next()
+    {
+        FakeAmmo.Context(Arrow, 1);
+        var quiver = Mod("quiver", 72);
+        var bag = Mod("bag", 73);
+        var toBag = new List<AmmoListPick>();
+        As(quiver, () => Ui.AmmoList.Provide(AmmoListKind.Arrow, _ => [R(0x30, 12)]));
+        As(quiver, () => { Ui.AmmoList.Picked += _ => { }; return 0; });
+        UiAmmoListBridge.Tick();
+        // the player picks the quiver's row; before the next UI frame the quiver unloads and the bag shows the same item
+        FakeAmmo.Picks.Enqueue(new UiAmmoNative.Pick { Size = 32, Kind = Arrow, Item = 0x30, Count = 12, Key = 0, Session = 1 });
+        quiver.Retire();
+        using var pb = As(bag, () => Ui.AmmoList.Provide(AmmoListKind.Arrow, _ => [R(0x30, 3)]));
+        As(bag, () => { Ui.AmmoList.Picked += toBag.Add; return 0; });
+        UiAmmoListBridge.Tick();
+        Assert.Empty(toBag);
+        Assert.Equal([(0x30u, 3u)], FakeAmmo.Last(Arrow).Rows);
+        // a key that does not name that item in the publication it came from is dropped too
+        FakeAmmo.Picks.Enqueue(new UiAmmoNative.Pick { Size = 32, Kind = Arrow, Item = 0x31, Count = 1, Key = 0, Session = 1 });
+        FakeAmmo.Picks.Enqueue(new UiAmmoNative.Pick { Size = 32, Kind = Arrow, Item = 0x30, Count = 3, Key = 0, Session = 1 });
+        UiAmmoListBridge.Tick();
+        Assert.Equal([new AmmoListPick(AmmoListKind.Arrow, new ItemId(0x30), 3)], toBag);
         bag.Retire();
     }
 

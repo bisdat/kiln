@@ -312,7 +312,8 @@ internal static unsafe class UiAmmoListBridge
         public uint Session;            // the session of the latest context read (0: none)
         public uint Mode = UiAmmoNative.ModeGame;
         public AmmoListRow[] Rows = [];
-        public Dictionary<uint, ModContext?> Owners = new();
+        // the live publication's rows by key (Row.row = the composed index): whose row each was, for its picks
+        public (uint Item, ModContext? Mod)[] Keys = [];
         public string? Refusal;         // why the latest build did not publish (null: it did, or none was tried)
     }
 
@@ -481,16 +482,17 @@ internal static unsafe class UiAmmoListBridge
         }
     }
 
-    /// <summary>One UI frame (the game's UI thread): each list whose context changed (or whose providers did) is built
-    /// again and published; then the picks are drained and handed to the mods whose rows they were.</summary>
+    /// <summary>One UI frame (the game's UI thread): first the picks queued since the last frame go to the mods whose rows
+    /// they were in the publication they came from (before anything is published again: a pick carries no publication
+    /// of its own), then each list whose context changed (or whose providers did) is built again and published.</summary>
     internal static void Tick()
     {
         var t = UiAmmoNative.T;
         if (t == null) return;
         lock (TickLock)
         {
-            foreach (var st in Lists) TickList(t, st);
             DrainPicks(t);
+            foreach (var st in Lists) TickList(t, st);
         }
     }
 
@@ -498,13 +500,14 @@ internal static unsafe class UiAmmoListBridge
 
     private static void TickList(UiAmmoNative.Table* t, ListState st)
     {
-        var providers = ProvidersOf(st.Kind);
+        // the flag first, then the providers: a provider added in between sets the flag again for the next frame
         bool dirty;
         lock (Lock)
         {
             dirty = st.Dirty;
             st.Dirty = false;
         }
+        var providers = ProvidersOf(st.Kind);
         if (providers.Length == 0)
         {
             st.Session = 0;
@@ -609,6 +612,16 @@ internal static unsafe class UiAmmoListBridge
                     a.P.Mod?.Log.Warn($"Ui.AmmoList: the game refused this provider's {kind} rows (an item that is not a {kind} item of this game?)");
                 }
                 rc = Publish(t, st, c, Compose(kept, ctx));
+                // a part of the list the game took on the way must not stay up when the whole list was refused
+                if (rc != UiAmmoNative.Ok && st.Live)
+                {
+                    var why = st.Refusal;
+                    Clear(t, st);
+                    st.Refusal = why;
+                    st.Tried = true;  // not again for this context (Clear forgets it)
+                    st.TriedSerial = c->GameSerial;
+                    st.TriedSession = c->Session;
+                }
             }
         }
         // anything else waits for the next change of the list's context (no retry each frame)
@@ -641,9 +654,7 @@ internal static unsafe class UiAmmoListBridge
             st.Live = true;
             st.Mode = composed.Mode;
             st.Rows = composed.Rows;
-            var owners = new Dictionary<uint, ModContext?>();
-            foreach (var (item, mod) in composed.Owners) owners.TryAdd(item, mod);
-            st.Owners = owners;
+            st.Keys = composed.Owners;  // in row order: index = Row.row
             st.Refusal = null;
         }
         else
@@ -671,7 +682,7 @@ internal static unsafe class UiAmmoListBridge
         st.Tried = false;
         st.Mode = UiAmmoNative.ModeGame;
         st.Rows = [];
-        st.Owners = new();
+        st.Keys = [];
         st.Refusal = null;
     }
 
@@ -687,7 +698,10 @@ internal static unsafe class UiAmmoListBridge
         {
             var p = buf[i];
             if (StateOf(p.Kind) is not { } st || p.Session == 0 || p.Session != st.Session) continue;  // an earlier session's
-            if (!st.Owners.TryGetValue(p.Item, out var mod)) continue;  // no provider shows that item now
+            // the row by its key in the publication that is up (picks queued before it were drained before it went up);
+            // a key that does not name that item there is no row of anyone's now
+            if (p.Key >= (uint)st.Keys.Length || st.Keys[p.Key].Item != p.Item) continue;
+            var mod = st.Keys[p.Key].Mod;
             var pick = new AmmoListPick(st.Kind, new ItemId(p.Item), (int)Math.Min(p.Count, int.MaxValue));
             foreach (var h in handlers)
                 if (ReferenceEquals(h.Mod, mod)) UiModCalls.Invoke(h.Mod, h.Fn, pick, "Ui.AmmoList.Picked");

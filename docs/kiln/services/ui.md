@@ -318,6 +318,25 @@ game's highlight groups Group1 and Group2, which Kiln colours itself. Managed: `
 `OutlineOptions` (Kiln.Ui). Capability `ui.world_outline`. Usage and the C table: [../render.md](../render.md#outlines-since-020-dev303);
 RE: [../../re/client-render.md](../../re/client-render.md#highlight-groups-outlines).
 
+## kiln.ui.ammo: the HUD's ammunition and spell lists (0.2.0-dev.30.6)
+
+`kiln.ui.ammo` is a **new v1 table** (`native/core/abi/services/kiln_ui_ammo.h`, 32 bytes), served by kiln-tools on its
+existing checked list-builder chain, client only. Managed: `Ui.AmmoList` (Kiln.Ui), page
+[../ui.md](../ui.md#the-huds-ammunition-and-spell-lists-020-dev306). Capabilities `ui.ammo.list` and `ui.ammo.pick`
+([caps.md](caps.md)). The game's hooks read only owned immutable snapshots; nothing calls into a mod from a hook.
+
+| Member | Thread | What it does |
+|---|---|---|
+| `publish(owner, KilnUiAmmoPublish*)` | client main / UI | Copies up to 64 `KilnUiAmmoRow` rows (`item`, shown `count`, `flags` 0, `row`: the publisher's key, echoed in picks) for one kind (`KUA_KIND_ARROW` 1, `KUA_KIND_SPELL` 2) with `KUA_MODE_APPEND` 1 or `KUA_MODE_REPLACE` 2; `KUA_MODE_GAME` 0 clears. `serial` and `session` must be the context's. `KILN_ERR_INVALID_ARGUMENT`: a malformed, duplicate or unknown item (not of that kind in the client's catalog), more than 64 rows, a stale serial or session; `KUA_ERR_BUSY` (200): another owner holds the kind; `KILN_ERR_NOT_FOUND`: no context yet; `KILN_ERR_UNAVAILABLE`: the row is off. |
+| `context(owner, kind, KilnUiAmmoContext*)` | any | An owned copy of what the list is built for: `session`, `local_player`, `held_item`, the game's own rows (`game_count`, `game_rows[64]`) and `game_serial`, which changes with the held item, the game's rows, sources or counts, the actor or the session. `ok` 0 carries a reason: `KUA_REASON_NO_SESSION` 1, `NO_CONTEXT` 2, `LIMIT` 3 (only the first 64 rows fit), `STALE` 4, `FAULT` 5, `CATALOG` 6 (the client's item catalog not read yet). `KILN_ERR_NOT_FOUND` before the game first built a list. |
+| `take_picks(owner, KilnUiAmmoPick*, capacity, written*)` | client main / UI | Drains the owner's queue (at most 64 a call; the oldest is dropped on overflow) of selections of the owner's rows whose item has no stack in the backpack: `kind`, `item`, `count`, `row`, `session`, `step`. Kiln keeps the game's equip request for those rows from running and moves no item. The caller drops an earlier session's picks. |
+
+Kiln.Ui calls all three under one owner of its own: it composes every mod's providers into one snapshot per kind, builds it
+again when `game_serial` or the session changes, and drains the picks at the start of each UI frame (`kiln.ui`'s
+`subscribe_ui_tick`), before it publishes again: a pick carries no publication of its own, so its `row` key (the row's
+index in the publication) is read against the publication that was up when it was queued, and a key that does not name
+that item there is dropped. An owner's retirement or a world's stop clears its snapshots and queued picks.
+
 ## Captured item detail (Since 0.2.0-dev.30.5)
 
 `kiln.ui.item_detail` is a **new v1 table**, not an append to `kiln.ui` or `kiln.ui.values`.
