@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT
+#pragma warning disable KILNX031
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -16,7 +17,7 @@ internal sealed unsafe class FakeRegistry : IDisposable
     internal readonly RegistryLiveTable* Live;
     internal uint Phase = 4;
     internal ulong World = 1, Generation;
-    internal int Submits;
+    internal int Submits, StageError, ReadyError;
     internal int Value => _layers.Count == 0 ? 10 : _layers.Last().Value.Value;
     private ulong _next;
     private readonly Dictionary<ulong, (ulong Owner, uint Point, int? Value, bool Restart)> _drafts = [];
@@ -36,6 +37,12 @@ internal sealed unsafe class FakeRegistry : IDisposable
         Host.Services["kiln.registry"] = (nint)Stage;
         Host.Services["kiln.registry.live"] = (nint)Live;
     }
+    internal void FireStage(RegistryPhase phase)
+    {
+        var info = new RegistryStageInfo { Size = 24, Stage = (uint)phase };
+        foreach (var callback in _callbacks.Values.Where(c => !c.Ready).ToArray())
+            ((delegate* unmanaged[Cdecl]<RegistryStageInfo*, void*, void>)callback.Fn)(&info, (void*)callback.User);
+    }
     internal void FireReady()
     {
         var info = new RegistryReadyInfo { Size = 24, Phase = Phase, Generation = ++Generation, World = 1 };
@@ -51,7 +58,7 @@ internal sealed unsafe class FakeRegistry : IDisposable
         bytes.CopyTo(new Span<byte>(output, bytes.Length)); output[bytes.Length] = 0; return 0;
     }
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
-    private static int StageStatus(RegistryStageStatus* value) { value->Phase = Current.Phase; value->Generation = Current.Generation; return 0; }
+    private static int StageStatus(RegistryStageStatus* value) { if (Current.StageError != 0) return Current.StageError; value->Phase = Current.Phase; value->Generation = Current.Generation; return 0; }
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int Status(RegistryLiveStatus* value) { value->World = Current.World; value->Kind = 1; value->Generation = Current.Generation; return 0; }
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
@@ -67,7 +74,7 @@ internal sealed unsafe class FakeRegistry : IDisposable
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int Subscribe(ulong owner, delegate* unmanaged[Cdecl]<RegistryStageInfo*, void*, void> fn, void* user, ulong* handle) { *handle = Add((nint)fn, (nint)user, false); return 0; }
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
-    private static int Ready(ulong owner, delegate* unmanaged[Cdecl]<RegistryReadyInfo*, void*, void> fn, void* user, ulong* handle) { *handle = Add((nint)fn, (nint)user, true); return 0; }
+    private static int Ready(ulong owner, delegate* unmanaged[Cdecl]<RegistryReadyInfo*, void*, void> fn, void* user, ulong* handle) { if (Current.ReadyError != 0) return Current.ReadyError; *handle = Add((nint)fn, (nint)user, true); return 0; }
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int Unsubscribe(ulong handle) { Current._callbacks.Remove(handle); return 0; }
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]

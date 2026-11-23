@@ -58,12 +58,12 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
         var directories = candidates.Select(c => c.Directory).ToArray();
         foreach (var (manifest, directory) in candidates)
         {
-            if (!manifest.HasCode || !RegistryDeclarations.MightOverride(Path.Combine(directory, manifest.EntryAssembly), directories)) continue;
             Author? author = null;
             try
             {
+                if (!manifest.HasCode || !RegistryDeclarations.MightOverride(Path.Combine(directory, manifest.EntryAssembly), directories)) continue;
                 var code = Code(directory);
-                var loaded = mods.CreateRegistryAuthor(manifest, directory);
+                var loaded = mods.CreateRegistryAuthor(manifest, directory, candidates);
                 if (loaded is null) continue;
                 var (instance, context, assembly) = loaded.Value;
                 author = new Author(instance, context, assembly, code);
@@ -297,16 +297,31 @@ internal sealed partial class ModManager
 {
     private RegistryDispatch? _registry;
     private bool _registryReload;
-    internal void PrepareRegistry(ulong hostOwner) { _registry = new(this); _registry.Prepare(hostOwner); }
-    internal void TickRegistry() => _registry?.FlushLoads();
+    private string? _registryFault;
+    internal void PrepareRegistry(ulong hostOwner)
+    {
+        _registry = new(this);
+        try { _registry.Prepare(hostOwner); }
+        catch (Exception e) { _host.Log(LogLevel.Warn, $"registry: game-start authors were not prepared: {e.Message}"); }
+    }
+    internal void TickRegistry()
+    {
+        try { _registry?.FlushLoads(); _registryFault = null; }
+        catch (Exception e)
+        {
+            if (_registryFault != e.Message) _host.Log(LogLevel.Warn, $"registry: runtime dispatch deferred: {e.Message}");
+            _registryFault = e.Message;
+        }
+    }
     internal List<(Manifest Manifest, string Directory)> RegistryCandidates()
     {
         var byId = BootCandidates().GroupBy(c => c.Manifest.Id, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
         return RegistryOrder().Where(x => byId.ContainsKey(x.Id)).Select(x => (byId[x.Id].Manifest, byId[x.Id].Directory)).ToList();
     }
-    internal (Mod Instance, ModContext Context, AssemblyLoadContext Assembly)? CreateRegistryAuthor(Manifest manifest, string directory)
+    internal (Mod Instance, ModContext Context, AssemblyLoadContext Assembly)? CreateRegistryAuthor(Manifest manifest, string directory,
+        IReadOnlyList<(Manifest Manifest, string Directory)> snapshot)
     {
-        var candidates = RegistryCandidates().ToDictionary(x => x.Manifest.Id, x => x.Manifest, StringComparer.Ordinal);
+        var candidates = snapshot.ToDictionary(x => x.Manifest.Id, x => x.Manifest, StringComparer.Ordinal);
         var exports = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var seen = new HashSet<string>(StringComparer.Ordinal) { manifest.Id };
         var queue = new Queue<Manifest>([manifest]);

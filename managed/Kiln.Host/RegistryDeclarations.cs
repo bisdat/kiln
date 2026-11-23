@@ -41,9 +41,9 @@ internal static class RegistryDeclarations
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         bool Inspect(string file)
         {
-            if (!seen.Add(Path.GetFullPath(file))) return false;
             try
             {
+                if (!seen.Add(Path.GetFullPath(file))) return false;
                 using var stream = File.OpenRead(file);
                 using var pe = new PEReader(stream);
                 if (!pe.HasMetadata) return false;
@@ -78,7 +78,7 @@ internal static class RegistryDeclarations
                     }
                 }
             }
-            catch (Exception e) when (e is IOException or BadImageFormatException or UnauthorizedAccessException) { }
+            catch (Exception) { /* An unreadable path or malformed metadata is not a registry author. */ }
             return false;
         }
         return Inspect(assembly);

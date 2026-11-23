@@ -431,7 +431,7 @@ internal sealed partial class ModManager : IModsBackend, IDisposable
         }
         if (_reportStart) StartProgress.Step("mods", "", "", count, count);
         PublishSnapshot();
-        _registry?.FlushLoads();
+        TickRegistry();
         return loaded;
     }
 

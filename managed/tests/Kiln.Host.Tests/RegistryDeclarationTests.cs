@@ -41,6 +41,12 @@ public sealed class RegistryDeclarationTests
         Assert.Null(RegistryDeclarations.GameStartExport("author", exports, new AssemblyName("OwnHelper")));
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("invalid\0.dll")]
+    public void MetadataPrefilterRefusesMalformedPathsWithoutThrowing(string file)
+        => Assert.False(RegistryDeclarations.MightOverride(file, []));
+
     [Fact]
     public void MetadataPrefilterFollowsExternalGenericBases()
     {
