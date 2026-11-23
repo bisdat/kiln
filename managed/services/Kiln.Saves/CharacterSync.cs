@@ -78,6 +78,11 @@ internal static class CharacterSync
     private static readonly Dictionary<uint, Session> Sessions = new();
     private static readonly Dictionary<uint, Session> LabSessions = new();
 
+    /// <summary>Closed sessions whose character's last storage pair may still commit: the game's leave save (and a closing
+    /// hosted world's final save) is written after Kiln saw the player leave. Storage only, never progress.</summary>
+    private static readonly List<Session> Leaving = new();
+    internal const ulong LeavingSteps = 120 * 25;
+
     private sealed class Session(CharacterKey key, EntityId entity, string name)
     {
         public readonly CharacterKey Key = key;
@@ -93,6 +98,7 @@ internal static class CharacterSync
         public Dictionary<(string Mod, string Key), string> Acked = new();
         public Dictionary<(string Mod, string Key), string>? Sent;
         public long SentRevision;
+        public ulong LeavingUntil;
         public override string ToString() => $"{Name} character {Key}";
     }
 
@@ -148,6 +154,7 @@ internal static class CharacterSync
             CharacterStore.RememberLast(key, CharacterStore.LegacyIds(p));
             if (key.IsAccountOnly) continue;  // no character id on this build: nothing can travel
             _settings = CharacterSettings.Load();
+            Leaving.RemoveAll(l => l.Key == key);  // the character is back: its new session carries storage from now on
             s = Sessions[p.Entity.Value] = new Session(key, p.Entity, p.Name)
             { ProgressAllowed = _settings.ImportProgress, StorageTrusted = _settings.Storage?.TrustClient ?? false };
             s.Local = Client.Available && Client.IsHosting && (p.Slot == 0 || Client.LocalPlayer == p.Entity);
@@ -159,6 +166,7 @@ internal static class CharacterSync
             Close(Sessions[gone]);
             Sessions.Remove(gone);
         }
+        Leaving.RemoveAll(l => _ticks > l.LeavingUntil);
         foreach (var s in Sessions.Values)
         {
             if (!s.Local)
@@ -202,7 +210,41 @@ internal static class CharacterSync
         {
             SavesRuntime.Log(LogLevel.Warn, $"characters: closing {s}: {e.Message}");
         }
+        if (s.Speaks && s.StorageTrusted && SavesRuntime.Store.Storage.Native is not null)
+        {
+            Leaving.RemoveAll(l => l.Key == s.Key);
+            s.LeavingUntil = _ticks + LeavingSteps;
+            Leaving.Add(s);
+        }
         SavesRuntime.Log(LogLevel.Info, $"characters: {s} left");
+    }
+
+    /// <summary>A closed session's storage pair that committed after it closed (its leave save): sent once, alone. Nothing
+    /// else of the character is sent or deleted, since the session no longer follows the character's progress.</summary>
+    private static void PushLeavingStorage(Session s)
+    {
+        if (s.Key.Id == Guid.Empty || SavesRuntime.Store.Storage.Carried(s.Key) is not { } storage) return;
+        var at = (Mod: PlayerStorageStore.Mod, Key: PlayerStorageStore.Key);
+        if ((s.Sent is not null && s.Sent.TryGetValue(at, out var sent) && sent == storage) || (s.Acked.TryGetValue(at, out var acked) && acked == storage)) return;
+        var revision = CharacterStore.RevisionOf(s.Key) + 1;
+        CharacterStore.SetRevision(s.Key, revision);
+        var changes = new Dictionary<string, Dictionary<string, JsonElement?>>(StringComparer.Ordinal)
+        { [at.Mod] = new(StringComparer.Ordinal) { [at.Key] = Parse(storage) } };
+        (s.Sent ??= new())[at] = storage;
+        _updates++;
+        _updateBytes += storage.Length;
+        if (s.Local)
+        {
+            CharacterSidecar.Apply(s.Key.Id, revision, changes, SavesRuntime.WorldId);
+            _sidecarWrites++;
+            s.Acked[at] = storage;
+            SavesRuntime.Log(LogLevel.Info, $"characters: {s}: its leave save's storage written to the sidecar (revision {revision})");
+            return;
+        }
+        if (s.Peer is null || _channel is null) return;
+        var delivered = _channel.SendTo(s.Peer, new CharUpdate(s.Key.Id, revision, changes, true));
+        SavesRuntime.Log(delivered ? LogLevel.Info : LogLevel.Warn,
+            $"characters: {s}: its leave save's storage {(delivered ? "sent after the session closed" : "could not be sent: the player is gone; the server keeps its copy")}");
     }
 
     /// <summary>A world save: where the game sends each character back. Tick thread.</summary>
@@ -218,6 +260,17 @@ internal static class CharacterSync
             catch (Exception e)
             {
                 SavesRuntime.Log(LogLevel.Warn, $"characters: sending {s} back: {e.Message}");
+            }
+        }
+        foreach (var s in Leaving.ToArray())
+        {
+            try
+            {
+                PushLeavingStorage(s);
+            }
+            catch (Exception e)
+            {
+                SavesRuntime.Log(LogLevel.Warn, $"characters: sending {s}'s leave save storage: {e.Message}");
             }
         }
     }
