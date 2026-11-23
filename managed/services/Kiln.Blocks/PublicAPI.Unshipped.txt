@@ -406,6 +406,61 @@ override Kiln.BaseRulesBlock.GetHashCode() -> int
 override Kiln.BaseRulesBlock.ToString() -> string!
 static Kiln.BaseRulesBlock.operator !=(Kiln.BaseRulesBlock? left, Kiln.BaseRulesBlock? right) -> bool
 static Kiln.BaseRulesBlock.operator ==(Kiln.BaseRulesBlock? left, Kiln.BaseRulesBlock? right) -> bool
+Kiln.NpcMotionRole
+Kiln.NpcMotionRole.Sit = 0 -> Kiln.NpcMotionRole
+Kiln.NpcMotionRole.Sleep = 1 -> Kiln.NpcMotionRole
+Kiln.NpcMotionRole.Inspect = 2 -> Kiln.NpcMotionRole
+Kiln.NpcMotionRole.Greet = 3 -> Kiln.NpcMotionRole
+Kiln.NpcMotionRole.Talk = 4 -> Kiln.NpcMotionRole
+Kiln.NpcMotionRole.Reaction0 = 5 -> Kiln.NpcMotionRole
+Kiln.NpcMotionRole.Reaction1 = 6 -> Kiln.NpcMotionRole
+Kiln.NpcMotionRole.Refuse = 7 -> Kiln.NpcMotionRole
+Kiln.NpcMotionRole.IdleGesture0 = 8 -> Kiln.NpcMotionRole
+Kiln.NpcMotionRole.IdleGesture1 = 9 -> Kiln.NpcMotionRole
+Kiln.NpcMotionRole.Interaction = 10 -> Kiln.NpcMotionRole
+Kiln.NpcMotionRole.GreetingExtra = 11 -> Kiln.NpcMotionRole
+Kiln.NpcMotionRole.Farewell = 12 -> Kiln.NpcMotionRole
+Kiln.NpcMotionRole.DialogOption = 13 -> Kiln.NpcMotionRole
+Kiln.NpcMotionRole.AttentionGreeting = 14 -> Kiln.NpcMotionRole
+Kiln.NpcMotionRole.TurnLeftSmall = 15 -> Kiln.NpcMotionRole
+Kiln.NpcMotionRole.TurnLeftBig = 16 -> Kiln.NpcMotionRole
+Kiln.NpcMotionRole.TurnRightSmall = 17 -> Kiln.NpcMotionRole
+Kiln.NpcMotionRole.TurnRightBig = 18 -> Kiln.NpcMotionRole
+Kiln.NpcMotionRole.Jump = 19 -> Kiln.NpcMotionRole
+Kiln.NpcMotionRole.Door = 20 -> Kiln.NpcMotionRole
+Kiln.NpcMotionBinding
+Kiln.NpcMotionBinding.<Clone>$() -> Kiln.NpcMotionBinding!
+Kiln.NpcMotionBinding.Equals(Kiln.NpcMotionBinding? other) -> bool
+override Kiln.NpcMotionBinding.Equals(object? obj) -> bool
+override Kiln.NpcMotionBinding.GetHashCode() -> int
+override Kiln.NpcMotionBinding.ToString() -> string!
+static Kiln.NpcMotionBinding.operator !=(Kiln.NpcMotionBinding? left, Kiln.NpcMotionBinding? right) -> bool
+static Kiln.NpcMotionBinding.operator ==(Kiln.NpcMotionBinding? left, Kiln.NpcMotionBinding? right) -> bool
+Kiln.NpcMotionsBlock
+Kiln.NpcMotionsBlock.<Clone>$() -> Kiln.NpcMotionsBlock!
+Kiln.NpcMotionsBlock.Equals(Kiln.NpcMotionsBlock? other) -> bool
+override Kiln.NpcMotionsBlock.Equals(object? obj) -> bool
+override Kiln.NpcMotionsBlock.GetHashCode() -> int
+override Kiln.NpcMotionsBlock.ToString() -> string!
+static Kiln.NpcMotionsBlock.operator !=(Kiln.NpcMotionsBlock? left, Kiln.NpcMotionsBlock? right) -> bool
+static Kiln.NpcMotionsBlock.operator ==(Kiln.NpcMotionsBlock? left, Kiln.NpcMotionsBlock? right) -> bool
+Kiln.NpcMotionBinding.NpcMotionBinding(Kiln.NpcMotionRole Role, int Variant, Kiln.AnimState! State, System.Guid? InteractionKey = null) -> void
+Kiln.NpcMotionBinding.Deconstruct(out Kiln.NpcMotionRole Role, out int Variant, out Kiln.AnimState! State, out System.Guid? InteractionKey) -> void
+Kiln.NpcMotionsBlock.NpcMotionsBlock() -> void
+Kiln.NpcMotionBinding.Role.get -> Kiln.NpcMotionRole
+Kiln.NpcMotionBinding.Role.init -> void
+Kiln.NpcMotionBinding.Variant.get -> int
+Kiln.NpcMotionBinding.Variant.init -> void
+Kiln.NpcMotionBinding.State.get -> Kiln.AnimState!
+Kiln.NpcMotionBinding.State.init -> void
+Kiln.NpcMotionBinding.InteractionKey.get -> System.Guid?
+Kiln.NpcMotionBinding.InteractionKey.init -> void
+Kiln.NpcMotionsBlock.Bindings.get -> System.Collections.Generic.IReadOnlyList<Kiln.NpcMotionBinding!>!
+Kiln.NpcMotionsBlock.Bindings.init -> void
+Kiln.NpcMotionsBlock.OptionalFallback.get -> Kiln.AnimState?
+Kiln.NpcMotionsBlock.OptionalFallback.init -> void
+Kiln.NpcBlock.Motions.get -> Kiln.PartRef<Kiln.NpcMotionsBlock!>?
+Kiln.NpcBlock.Motions.init -> void
 Kiln.BlockUi
 Kiln.UiAction.CommandTarget.get -> Kiln.UiCommandTarget?
 Kiln.UiAction.CommandTarget.init -> void
@@ -1300,3 +1355,45 @@ Kiln.UiStatImportRegistration.Ok.get -> bool
 static Kiln.Blocks.ImportStat(Kiln.ModValueKey key) -> Kiln.UiStatImportRegistration!
 Kiln.UiAction.ToggleWindow.get -> Kiln.WindowRef?
 Kiln.UiAction.ToggleWindow.init -> void
+Kiln.NpcBodyBuildState
+Kiln.NpcBodyBuildState.PendingRestart = 0 -> Kiln.NpcBodyBuildState
+Kiln.NpcBodyBuildState.Ready = 1 -> Kiln.NpcBodyBuildState
+Kiln.NpcBodyBuildState.Failed = 2 -> Kiln.NpcBodyBuildState
+Kiln.NpcBodyBuildState.RemovalPendingRestart = 3 -> Kiln.NpcBodyBuildState
+Kiln.NpcBodyBuildState.Removed = 4 -> Kiln.NpcBodyBuildState
+Kiln.NpcBodyBuildResult
+Kiln.NpcBodyBuildResult.<Clone>$() -> Kiln.NpcBodyBuildResult!
+Kiln.NpcBodyBuildResult.Equals(Kiln.NpcBodyBuildResult? other) -> bool
+override Kiln.NpcBodyBuildResult.Equals(object? obj) -> bool
+override Kiln.NpcBodyBuildResult.GetHashCode() -> int
+override Kiln.NpcBodyBuildResult.ToString() -> string!
+static Kiln.NpcBodyBuildResult.operator !=(Kiln.NpcBodyBuildResult? left, Kiln.NpcBodyBuildResult? right) -> bool
+static Kiln.NpcBodyBuildResult.operator ==(Kiln.NpcBodyBuildResult? left, Kiln.NpcBodyBuildResult? right) -> bool
+Kiln.NpcBodyBuildResult.NpcBodyBuildResult(bool Ok, string? Reason, Kiln.NpcBodyBuildState State, string! ModId, string! BlockKey, System.Guid Template, System.Guid Model, System.Guid Graph, ulong Generation) -> void
+Kiln.NpcBodyBuildResult.Deconstruct(out bool Ok, out string? Reason, out Kiln.NpcBodyBuildState State, out string! ModId, out string! BlockKey, out System.Guid Template, out System.Guid Model, out System.Guid Graph, out ulong Generation) -> void
+Kiln.NpcBodyBuildResult.Ok.get -> bool
+Kiln.NpcBodyBuildResult.Ok.init -> void
+Kiln.NpcBodyBuildResult.Reason.get -> string?
+Kiln.NpcBodyBuildResult.Reason.init -> void
+Kiln.NpcBodyBuildResult.State.get -> Kiln.NpcBodyBuildState
+Kiln.NpcBodyBuildResult.State.init -> void
+Kiln.NpcBodyBuildResult.ModId.get -> string!
+Kiln.NpcBodyBuildResult.ModId.init -> void
+Kiln.NpcBodyBuildResult.BlockKey.get -> string!
+Kiln.NpcBodyBuildResult.BlockKey.init -> void
+Kiln.NpcBodyBuildResult.Template.get -> System.Guid
+Kiln.NpcBodyBuildResult.Template.init -> void
+Kiln.NpcBodyBuildResult.Model.get -> System.Guid
+Kiln.NpcBodyBuildResult.Model.init -> void
+Kiln.NpcBodyBuildResult.Graph.get -> System.Guid
+Kiln.NpcBodyBuildResult.Graph.init -> void
+Kiln.NpcBodyBuildResult.Generation.get -> ulong
+Kiln.NpcBodyBuildResult.Generation.init -> void
+Kiln.NpcBodies
+static Kiln.NpcBodies.Status(Kiln.BlockHandle<Kiln.NpcBlock!>! npc) -> Kiln.NpcBodyBuildResult!
+static Kiln.NpcBodies.Status(string! qualifiedBlockKey) -> Kiln.NpcBodyBuildResult!
+Kiln.NpcBodyBuildChangedEvent
+Kiln.NpcBodyBuildChangedEvent.Before.get -> Kiln.NpcBodyBuildResult!
+Kiln.NpcBodyBuildChangedEvent.After.get -> Kiln.NpcBodyBuildResult!
+Kiln.NpcBodyBuildChangedEvent.ClientSide.get -> bool
+override Kiln.NpcBodyBuildChangedEvent.ToString() -> string!

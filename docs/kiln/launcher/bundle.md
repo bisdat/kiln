@@ -1,8 +1,9 @@
 # Kiln runtime bundles and the installer
 
 The runtime bundle is how Kiln reaches a game folder outside the repository: the launcher, `kilnctl deploy --bundle`
-and `kilnctl client install` all install the same zip with `kiln_manage::install`. Format contract: contracts.md 5.6
-and 5.7 (`schema/kiln-runtime.schema.json`, `schema/install-receipt.schema.json`).
+and `kilnctl client install` all install the same zip with `kiln_manage::install`. kilnctl also takes the bundle
+unpacked into a folder ("The unpacked folder", below). Format contract: contracts.md 5.6 and 5.7
+(`schema/kiln-runtime.schema.json`, `schema/install-receipt.schema.json`).
 
 ## Building one
 ```sh
@@ -26,7 +27,8 @@ gives a byte-identical zip (checked: two runs, same sha256). A dirty tree still 
 ```
 `kilnctl bundle create` walks every component folder, hashes the files (sha256, size), marks the `config` ones and
 writes `files[]` sorted by path. A path in two components, an unknown component folder, a symlink or an unsafe name
-is an error.
+is an error, and so are two paths Windows would take for one (they differ only in case, or one file is a folder of
+another path): every reader of a manifest refuses them (`bundle::validate`).
 
 ### Components (what stage.sh writes)
 | Component | Sides | Default | Files |
@@ -62,14 +64,14 @@ as it is; otherwise it downloads from `builds.dotnet.microsoft.com` and checks t
 (what deploy-server.sh, client.sh and stage.sh copy).
 
 ## Installing (kiln_manage::install)
-`install(dirs, game, bundle, options, progress)`; the CLI: `kilnctl bundle install`, `kilnctl client install`,
-`kilnctl deploy <instance> --bundle`.
+`install(dirs, game, bundle, options, progress)`, `bundle` a zip or an unpacked folder; the CLI: `kilnctl bundle install`,
+`kilnctl client install`, `kilnctl deploy <instance> --bundle`.
 1. The folder has the side's exe (`enshrouded.exe` client, `enshrouded_server.exe` server).
 2. Refuse while the game runs (`proc::find_game`: Wine comm + argv[0]/cwd, Windows image path) with `game_running`,
    and while Steam updates or validates it (`appmanifest_<app>.acf` StateFlags in the recorded library, in
    `<lib>/steamapps/common/<dir>/../../`, or in the folder for SteamCMD installs) with `steam_updating`.
 3. `bundle::verify`: every entry's size and sha256, no entry outside `files[]`, no `..`/absolute/backslash/drive
-   names, no symlink entries.
+   names, no symlink entries (a folder: no link, FIFO or other special file either).
 4. Components (`install::resolve_components`), plus what they `require`; the selection must include `dinput8.dll`:
    - `options.components` (the player's explicit choice, `--components`): exactly those. The bundle's defaults for
      the side that it leaves out are recorded as turned off in the receipt's `runtime.deselected`.
@@ -123,6 +125,30 @@ size+mtime per process; a missing file counts), `missingFiles` (since 0.2.0-dev.
 in the folder at all, such as a DLL an antivirus removed; Runtime offers Repair, the same bundle again, for them) and
 a newer bundle in `<data>/runtime/` for the side.
 
+## The unpacked folder
+A folder with `kiln-runtime.json` at its root is a bundle too: what unzipping the bundle gives. The Nexus Mods runtime file
+carries it as `kiln-runtime-<version>/` (`tools/release/nexus.py`; Nexus cannot scan an archive inside an archive and
+held 0.2.0-dev.30.8's runtime file, which had the zip inside, in review). `bundle::read`, `verify` and `extract`, so
+`install`, take either form through one set of checks (`Source`: the zip's entries or the folder's names, walked without
+following links):
+- every file `files[]` lists is there, with its size and sha256, read through the same checked copy (staging checks
+  them again while writing);
+- nothing else is in it but `kiln-runtime.json` (empty folders are fine, as a zip's folder entries are). Files a system
+  or file manager adds (`.DS_Store`, `._*`, `__MACOSX/`, `Thumbs.db`, `ehthumbs.db`, `desktop.ini`) are refused like
+  every other unlisted file, with a message that says what they are: a check that let some names through would let them
+  through anywhere, and deleting one is easy;
+- `safe_rel_path` (the zip-slip guard) for every name; a name that is not UTF-8 is refused;
+- a link (file or folder, also one swapped in after the check: each file is opened without following one, the folders
+  on its way are checked again) or a FIFO, socket or device is refused, never opened;
+- file modes are never read, as a zip's are not: the archive inspector (`bundle::executable`) gets 0755 when staged.
+
+The receipt is the zip's, files and `replaced[]` alike, and uninstall restores the same, except `runtime.sha256`: the
+sha256 of the bundle zip, absent for a folder (there is no zip; `kiln-runtime.json` pins every file). The launcher
+keeps zips in `<data>/runtime/`: `bundle::import` refuses a folder (`unsupported`) and `list` skips one named like a zip.
+Tests: `crates/kiln-manage/tests/bundle_folder.rs` (a good folder, a missing file, other bytes, an extra file and OS
+leftovers, links and a FIFO, unsafe names and a manifest path out of the folder, install and uninstall from the folder
+equal to the zip's, import refused).
+
 ## Uninstall and rollback
 `uninstall` (refused while running/updating): checks first that every original (the oldest `replaced[]` record per
 path, `adopted` ones excepted) can come back from its chain file or backup with the recorded sha256; then deletes the
@@ -141,6 +167,10 @@ turned-off parts required by another selected part. Runtime shows them and offer
 - Client copy with EMF's real loader: chain entry, backup, receipt; upgrade (obsolete file gone, edited kiln.json
   kept, same installId); uninstall: byte-identical folder outside `kiln/`. The receipts, `kiln-runtime.json`,
   `profile.json`, native state and generated `native.json` validate against `schema/*.schema.json` (ajv).
+- The 0.2.0-dev.30.8 runtime as nexus.py lays it out for Nexus (`kiln-runtime-<v>/`): `kilnctl bundle verify` passes
+  on the folder and the zip; `deploy --bundle`, `bundle install` (a server folder) and `client install` from each into
+  scratch folders gave the same trees (633, 633 and 648 files, the archive inspector 0755) and receipts (but
+  `runtime.sha256`), and uninstall gave every folder back as it was.
 - Tests: `crates/kiln-manage/tests/install.rs` (determinism, tamper, zip-slip, EMF/unknown/Kiln/ShroudForge/not-DLL,
   upgrade, uninstall, rollback, steam_updating, game_running, a pre-deployed identical kiln/ tree adopted and given
   back byte-identically, also across an upgrade), Linux and Windows (cargo xwin + Wine).

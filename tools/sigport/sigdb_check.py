@@ -8,6 +8,10 @@ symbol has several strategies, every one that matches must name the same address
 
     python3 tools/sigport/sigdb_check.py sigdb/symbols/server.json <enshrouded_server.exe> [--json out.json]
     python3 tools/sigport/sigdb_check.py sigdb/symbols/client.json <enshrouded.exe> [--json out.json]
+
+A must-port name (tools/sigport/must_port.json) of the side that the definitions declare and the exe does not resolve
+gets a line of its own, "FAIL  must-port <section> <name>: ...", with what Kiln falls back to without it ("WARN  ..."
+for a warn-level name).
 """
 import argparse
 import json
@@ -18,6 +22,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from peimg import Image  # noqa: E402
+import must_port  # noqa: E402
 
 HOLE = re.compile(r"\{([^}:]+):(d8|d16|d32|s32|rel32)\}")
 WIDTH = {"d8": 1, "d16": 2, "d32": 4, "s32": 4, "rel32": 4}
@@ -209,7 +214,13 @@ def main():
     ap.add_argument("--json")
     ap.add_argument("--fptool", help="kiln-fptool (tools/sigport/fptool/build.sh): also check every sig block against "
                                      "the function's code, as the core does at load")
+    ap.add_argument("--must-port", default=str(must_port.LIST), help=argparse.SUPPRESS)
     a = ap.parse_args()
+    try:
+        must_entries = must_port.load(a.must_port)
+    except must_port.ListError as e:
+        print(f"sigdb_check: {e}", file=sys.stderr)
+        return 2
     # <side>.json + the per-service files the core would see in kiln/sigdb/<side>.d/ (duplicates are errors). The
     # client's .d set is composed from server.d + client.d overlays like the deploy does (tools/sigport/sides.py).
     from sides import merged  # noqa: E402
@@ -230,6 +241,21 @@ def main():
         print(f"  {'ok' if r['ok'] else 'FAIL'}  {n:24s} {('%#x' % r['value']) if r.get('ok') else r.get('error', '')}  {r.get('source', '')}")
         bad += not r["ok"]
     print("features: " + ", ".join(f"{n}={'on' if ok else 'OFF'}" for n, ok in feats.items()))
+    # must-port names the definitions declare (a mod's own fragment declares none of Kiln's): an unresolved symbol or
+    # constant already fails the check above, a feature that is off fails it here. A warn-level name gets a WARN line
+    # and fails nothing of its own (an unresolved symbol still fails the check above, as any unresolved name does).
+    side = Path(a.definitions).stem
+    for e in must_port.for_side(must_entries, side) if side in must_port.SIDES else []:
+        tag = "WARN" if must_port.warns(e) else "FAIL"
+        if e["section"] == "features":
+            if e["name"] in feats and not feats[e["name"]]:
+                print(f"{tag}  must-port {must_port.label(e)}: off on this exe. {e['why']}")
+                bad += not must_port.warns(e)
+            continue
+        r = (syms if e["section"] == "symbols" else consts).get(e["name"])
+        if r is not None and not r["ok"]:
+            print(f"{tag}  must-port {must_port.label(e)}: does not resolve on this exe ({r.get('error') or 'no match'}). "
+                  f"{e['why']}")
     sigs, sig_bad = check_sigs(doc, syms, a.exe, a.fptool)
     bad += sig_bad
     if a.json:

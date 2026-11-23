@@ -82,12 +82,14 @@ internal static partial class Ops
             }));
         }
 
-        bridge.Register("commands_describe", _ => Commands.Describe(CommandSource.Remote("dashboard")));
-        // {text, steamId?} -> completion suggestions for a partial command line
+        // {source?, level?} -> the commands that source may run, each with its arguments' types, ranges, options,
+        // defaults and permission levels (a web panel builds a form from it; Ops.CommandSource.cs)
+        bridge.Register("commands_describe", req => Commands.Describe(RemoteSource(req)));
+        // {text, steamId?, source?, level?} -> completion suggestions for a partial command line
         bridge.Register("command_complete", req =>
         {
             var text = req["text"]?.GetValue<string>() ?? "";
-            var src = req["steamId"] is not null ? CommandSource.ForSteamId(SteamId(req)) : CommandSource.Remote("dashboard");
+            var src = LineSource(req);
             var c = Commands.Complete(src, text);
             return new JsonObject { ["start"] = c.Start, ["suggestions"] = new JsonArray([.. c.Suggestions.Select(s => (JsonNode)s)]) };
         });

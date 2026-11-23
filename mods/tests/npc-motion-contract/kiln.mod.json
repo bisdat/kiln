@@ -1,0 +1,9 @@
+{
+  "id": "npc-motion-contract",
+  "name": "NPC motion authoring contract",
+  "version": "0.1.0",
+  "apiVersion": "0.2",
+  "side": "both",
+  "clients": "none",
+  "description": "Offline schema/authoring fixture: reusable motion parts only, no NPC, rendering or guided check."
+}

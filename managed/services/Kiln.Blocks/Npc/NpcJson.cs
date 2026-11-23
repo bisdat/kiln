@@ -29,8 +29,12 @@ internal static class NpcJson
     [
         ("creatures", BlockJson.Make<CreatureBlock>), ("npcs", BlockJson.Make<NpcBlock>), ("bodies", BlockJson.Make<BodyBlock>), ("animations", BlockJson.Make<AnimationBlock>),
         ("ais", BlockJson.Make<AIBlock>), ("behaviours", BlockJson.Make<BehaviourBlock>), ("attacks", BlockJson.Make<AttackBlock>), ("rules", BlockJson.Make<RuleBlock>),
+        ("npcMotions", BlockJson.Make<NpcMotionsBlock>),
     ];
 }
+
+// Bindings use named Kiln roles, never a numeric enum value accidentally accepted as another role.
+internal sealed class NpcMotionRoleConverter() : JsonStringEnumConverter<NpcMotionRole>(JsonNamingPolicy.CamelCase, allowIntegerValues: false);
 
 // "slam", "Idle", "0x1490bed7", a GUID; also as a key of "states"
 internal sealed class AnimStateConverter : JsonConverter<AnimState>

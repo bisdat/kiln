@@ -3373,7 +3373,13 @@
     "checkNow": "今すぐ確認",
     "testBuild": "{current} のテストビルド {beta}。",
     "switchBack": "リリース版に戻す",
-    "followBeta": "ベータを追跡中: 次のテストビルドはアップデートとして届きます。"
+    "followBeta": "ベータを追跡中: 次のテストビルドはアップデートとして届きます。",
+    "checkingNow": "アップデートを確認中…",
+    "upToDateLine": "Kiln は最新です（{version}）",
+    "availableLine": "Kiln {version} があります",
+    "failedLine": "確認に失敗: {reason}",
+    "checkedAt": "確認: {time}",
+    "noAnswer": "どの更新サーバーからも応答がありません"
   },
   "nav": {
     "play": "プレイ",

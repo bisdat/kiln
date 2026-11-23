@@ -1,0 +1,297 @@
+{
+ "format": 1,
+ "comment": "16f lab fixture: an authored roster body on the figure tools/modelcook/samples/rigged_figure.py writes (no game data; lab.sh makes models/figure.glb) with all 27 motion bindings, and a game-body NPC built in the same native pack.",
+ "bodies": {
+  "figure-body": {
+   "model": "models/figure.glb",
+   "size": {
+    "radius": 0.75,
+    "height": 2
+   },
+   "slots": {
+    "Root": "root",
+    "Head": "head",
+    "HandR": "hand_r"
+   }
+  }
+ },
+ "animations": {
+  "figure-moves": {
+   "clips": "models/figure.glb",
+   "idle": "Idle",
+   "walk": "Walk",
+   "run": "Run",
+   "states": {
+    "sit-0": {
+     "clip": "Bend",
+     "loop": false
+    },
+    "sit-1": {
+     "clip": "Hold",
+     "loop": true
+    },
+    "sit-2": {
+     "clip": "Bend",
+     "loop": false
+    },
+    "sleep-0": {
+     "clip": "Dead",
+     "loop": false
+    },
+    "sleep-1": {
+     "clip": "Hold",
+     "loop": true
+    },
+    "sleep-2": {
+     "clip": "Bend",
+     "loop": false
+    },
+    "inspect-0": {
+     "clip": "Bend",
+     "loop": false
+    },
+    "greet-0": {
+     "clip": "Flinch",
+     "loop": false
+    },
+    "talk-0": {
+     "clip": "Idle",
+     "loop": false
+    },
+    "reaction0-0": {
+     "clip": "Flinch",
+     "loop": false
+    },
+    "reaction1-0": {
+     "clip": "Attack",
+     "loop": false
+    },
+    "refuse-0": {
+     "clip": "Flinch",
+     "loop": false
+    },
+    "idlegesture0-0": {
+     "clip": "Idle",
+     "loop": false
+    },
+    "idlegesture1-0": {
+     "clip": "Bend",
+     "loop": false
+    },
+    "interaction-0": {
+     "clip": "Attack",
+     "loop": false
+    },
+    "greetingextra-0": {
+     "clip": "Idle",
+     "loop": false
+    },
+    "farewell-0": {
+     "clip": "Flinch",
+     "loop": false
+    },
+    "dialogoption-0": {
+     "clip": "Idle",
+     "loop": false
+    },
+    "attentiongreeting-0": {
+     "clip": "Flinch",
+     "loop": false
+    },
+    "turnleftsmall-0": {
+     "clip": "Walk",
+     "loop": false
+    },
+    "turnleftbig-0": {
+     "clip": "Walk",
+     "loop": false
+    },
+    "turnrightsmall-0": {
+     "clip": "Walk",
+     "loop": false
+    },
+    "turnrightbig-0": {
+     "clip": "Walk",
+     "loop": false
+    },
+    "jump-0": {
+     "clip": "Bend",
+     "loop": false
+    },
+    "door-0": {
+     "clip": "Attack",
+     "loop": false
+    },
+    "door-1": {
+     "clip": "Attack",
+     "loop": false
+    },
+    "door-2": {
+     "clip": "Attack",
+     "loop": false
+    }
+   }
+  }
+ },
+ "npcMotions": {
+  "figure-motions": {
+   "bindings": [
+    {
+     "role": "sit",
+     "variant": 0,
+     "state": "sit-0"
+    },
+    {
+     "role": "sit",
+     "variant": 1,
+     "state": "sit-1"
+    },
+    {
+     "role": "sit",
+     "variant": 2,
+     "state": "sit-2"
+    },
+    {
+     "role": "sleep",
+     "variant": 0,
+     "state": "sleep-0"
+    },
+    {
+     "role": "sleep",
+     "variant": 1,
+     "state": "sleep-1"
+    },
+    {
+     "role": "sleep",
+     "variant": 2,
+     "state": "sleep-2"
+    },
+    {
+     "role": "inspect",
+     "variant": 0,
+     "state": "inspect-0"
+    },
+    {
+     "role": "greet",
+     "variant": 0,
+     "state": "greet-0"
+    },
+    {
+     "role": "talk",
+     "variant": 0,
+     "state": "talk-0"
+    },
+    {
+     "role": "reaction0",
+     "variant": 0,
+     "state": "reaction0-0"
+    },
+    {
+     "role": "reaction1",
+     "variant": 0,
+     "state": "reaction1-0"
+    },
+    {
+     "role": "refuse",
+     "variant": 0,
+     "state": "refuse-0"
+    },
+    {
+     "role": "idleGesture0",
+     "variant": 0,
+     "state": "idlegesture0-0"
+    },
+    {
+     "role": "idleGesture1",
+     "variant": 0,
+     "state": "idlegesture1-0"
+    },
+    {
+     "role": "interaction",
+     "variant": 0,
+     "state": "interaction-0"
+    },
+    {
+     "role": "greetingExtra",
+     "variant": 0,
+     "state": "greetingextra-0"
+    },
+    {
+     "role": "farewell",
+     "variant": 0,
+     "state": "farewell-0"
+    },
+    {
+     "role": "dialogOption",
+     "variant": 0,
+     "state": "dialogoption-0"
+    },
+    {
+     "role": "attentionGreeting",
+     "variant": 0,
+     "state": "attentiongreeting-0"
+    },
+    {
+     "role": "turnLeftSmall",
+     "variant": 0,
+     "state": "turnleftsmall-0"
+    },
+    {
+     "role": "turnLeftBig",
+     "variant": 0,
+     "state": "turnleftbig-0"
+    },
+    {
+     "role": "turnRightSmall",
+     "variant": 0,
+     "state": "turnrightsmall-0"
+    },
+    {
+     "role": "turnRightBig",
+     "variant": 0,
+     "state": "turnrightbig-0"
+    },
+    {
+     "role": "jump",
+     "variant": 0,
+     "state": "jump-0"
+    },
+    {
+     "role": "door",
+     "variant": 0,
+     "state": "door-0"
+    },
+    {
+     "role": "door",
+     "variant": 1,
+     "state": "door-1"
+    },
+    {
+     "role": "door",
+     "variant": 2,
+     "state": "door-2"
+    }
+   ]
+  }
+ },
+ "npcs": {
+  "figure": {
+   "name": "Figure (authored body)",
+   "body": "figure-body",
+   "animation": "figure-moves",
+   "motions": "figure-motions",
+   "roster": {
+    "summonTool": "Figure Token",
+    "description": "A lab NPC with a body of its own."
+   }
+  },
+  "pip": {
+   "name": "Pip (game body)",
+   "body": "villager",
+   "roster": {
+    "summonTool": "Pip's Whistle",
+    "description": "A lab NPC on the game's villager body."
+   }
+  }
+ }
+}

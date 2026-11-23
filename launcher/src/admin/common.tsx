@@ -3,7 +3,7 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { useParams } from "react-router-dom";
 import { AdminProvider, useAdminQuery, useAdminServerId, useAdminState, useHasOp, useInAdminProvider, type AdminPlayer, type AdminPos, type KnownOp } from "../api/admin";
-import type { ServerId } from "../api/commands";
+import type { ServerId } from "../api/shared";
 import { t as tr, useT } from "../i18n";
 import type { ItemHit } from "./types";
 import { Banner, Select, SuggestInput, TextInput, useDebounced, type Suggestion } from "./ui";

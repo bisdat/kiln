@@ -72,6 +72,9 @@ Guid derive_guid(const std::string& mod, const std::string& kind, const std::str
 enum class Fake { Ok, Throw, Failed, Roster };
 Fake t_fake = Fake::Ok;
 int t_compiles = 0;
+bool t_bootpack_test = false;
+std::vector<std::pair<std::string, Bytes>> t_compile_bases;
+std::vector<ModInput> t_compile_inputs;  // what each per-mod compile was given (16f: admitted authored bodies)
 // A document with "broken" is one mod's own error (ok: false); "knowledge", "quests" or "npcs" is native content;
 // "template": a template the build adds for that mod.
 PackOut compile_pack(const std::vector<ModInput>& mods, const GameData& game) {
@@ -127,6 +130,19 @@ PackOut compile_pack(const std::vector<ModInput>& mods, const GameData& game) {
         return fail(out.roster_refusal);
     }
     out.res_knowledge = {1, 2, 3, 4};
+    if (t_bootpack_test) {
+        std::string names;
+        for (const auto& mod : mods) names += (names.empty() ? "" : ",") + mod.id;
+        t_compile_bases.push_back({names, Bytes(p, p + n)});
+        t_compile_inputs.insert(t_compile_inputs.end(), mods.begin(), mods.end());
+        out.res_knowledge.assign(p, p + n);
+        for (const auto& mod : mods) {
+            out.res_knowledge.push_back(static_cast<uint8_t>(mod.id[0]));
+            for (const auto& document : mod.documents)
+                if (document.contains("bootItems"))
+                    for (const auto& item : document["bootItems"]) out.content_items.push_back(item.dump());
+        }
+    }
     out.res_npcs = {5, 6};
     out.ok = out.errors.empty();
     return out;
@@ -296,6 +312,9 @@ void start(const char* name) {
     t_plan = nullptr, t_post = nullptr, t_post_user = nullptr, t_boot = false, t_prepare = nullptr;
     kiln::qb::t_fake = kiln::qb::Fake::Ok;
     kiln::qb::t_compiles = 0;
+    kiln::qb::t_bootpack_test = false;
+    kiln::qb::t_compile_bases.clear();
+    kiln::qb::t_compile_inputs.clear();
     g_built = false;
     g_boot = false;
     A = nullptr;

@@ -79,6 +79,30 @@ internal static class BlockCapabilities
     /// <summary>For tests: report again at the next <see cref="Ensure"/>.</summary>
     internal static void Rearm() => Interlocked.Exchange(ref _reported, 0);
 
+    // ---- roster bodies ---------------------------------------------------------------------------------------
+    internal const string NpcBody = "blocks.npc_body";
+
+    internal static Row NpcBodyRow(bool nativeQuests, Func<string, Capability> get)
+    {
+        if (!nativeQuests) return new(CapabilityState.Unavailable, CapabilityReason.ServiceMissing,
+            "quests.boot_pack: the native quests backend is not loaded; custom roster bodies need boot publication");
+        foreach (var name in new[] { "quests.boot_pack", "quests.npc_body", "quests.npc", "assets.resources", "assets.content" })
+        {
+            var dependency = get(name);
+            if (!dependency.IsAvailable) return new(CapabilityState.Unavailable,
+                dependency.Reason == CapabilityReason.Unknown ? CapabilityReason.ServiceMissing : dependency.Reason,
+                $"{name}: {(string.IsNullOrEmpty(dependency.ReasonText) ? "the required native implementation is not available" : dependency.ReasonText)}");
+        }
+        return new(CapabilityState.Available, CapabilityReason.None, null);
+    }
+
+    // Synchronous lowering tests may supply a row without changing the process-wide native capability table.
+    [ThreadStatic] internal static Func<Row>? NpcBodyForTests;
+    // The test kit's (Fakes/BootPack): process-wide, as the kit has no kiln.knowledge; a test switches the reported row off instead.
+    internal static Func<Row>? NpcBodyKit;
+    internal static Row CurrentNpcBodyRow() =>
+        NpcBodyForTests?.Invoke() ?? NpcBodyKit?.Invoke() ?? NpcBodyRow(ServiceCaps.Probe("kiln.knowledge"), Capabilities.Get);
+
     // ---- villager routines (0.2.0-dev.31; docs/kiln/services/routines.md) ------------------------------------------
     // routines.decisions is a sigdb feature kiln.routines serves (the villager task chooser and its sleep check); nothing
     // holds it (its guided check 16g-cc16g is the owner's game pass); Kiln.Blocks only lowers it where the service is not here (BlocksRows.Report:

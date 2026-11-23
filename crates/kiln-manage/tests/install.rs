@@ -325,6 +325,36 @@ fn names_windows_would_normalise_are_refused() {
     assert!(bundle::validate(&m("kiln/evil.dll.")).is_err());
 }
 
+/// Paths a Windows folder cannot hold apart (case does not count there), or a file that is another path's folder: the
+/// manifest is refused before a zip or a folder is installed from it, instead of the second file overwriting the first.
+#[test]
+fn paths_one_name_on_windows_are_refused() {
+    let m = |paths: &[&str]| -> kiln_manage::bundle::RuntimeManifest {
+        let files: Vec<_> = paths.iter().map(|p| serde_json::json!({ "path": p, "size": 1, "component": "core",
+            "sha256": "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb" })).collect();
+        serde_json::from_value(serde_json::json!({
+            "format": 1, "version": "0.2.0-dev+20261104.0f1ffa6", "kiln": "0.2.0-dev", "abi": 2,
+            "components": { "core": { "sides": ["client"] } }, "files": files
+        })).unwrap()
+    };
+    for (bad, said) in [(&["kiln/A.dll", "kiln/a.dll"][..], "kiln/a.dll: the same name as kiln/A.dll"),
+                        (&["Kiln/x.dll", "kiln/y.dll"][..], ""),
+                        (&["kiln/X", "kiln/x/y.dll"][..], "kiln/x/y.dll: one of its folders is the file kiln/X"),
+                        (&["kiln/x", "kiln/x/y.dll"][..], "kiln/x/y.dll: one of its folders is the file kiln/x")] {
+        let r = bundle::validate(&m(bad));
+        if said.is_empty() {
+            // "Kiln/" and "kiln/" are one folder on Windows, and two files in it are fine
+            assert!(r.is_ok(), "{bad:?}: {r:?}");
+            continue;
+        }
+        let e = r.unwrap_err();
+        assert_eq!(e.code, ErrorCode::Schema, "{bad:?}");
+        assert!(e.message.contains(said), "{bad:?}: {}", e.message);
+    }
+    // names that only look alike stay apart
+    assert!(bundle::validate(&m(&["kiln/a.dll", "kiln/a.dll.bak", "kiln/a/b.dll", "kiln/ab.dll"])).is_ok());
+}
+
 #[test]
 fn install_chains_emf_backs_up_and_uninstall_restores_it() {
     let t = tmp("emf");

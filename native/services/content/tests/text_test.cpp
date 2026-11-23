@@ -51,6 +51,7 @@ bool ui_loaded = true;
 bool loading = false;              // the game's English table is not loaded yet (error 3)
 int lookups = 0;                   // calls that reached the game's own lookup
 std::vector<std::string> lines;
+std::map<KilnOwner, std::string> owner_labels;
 struct Row { std::string name; uint32_t state, reason; std::string text; };
 std::vector<Row> rows;             // kiln.caps reports, in order
 
@@ -213,7 +214,11 @@ StoreMutex g_store;
 StoreMutex& store_mutex() { return g_store; }
 PhaseTimer::PhaseTimer(Phase) {}
 PhaseTimer::~PhaseTimer() {}
-std::string owner_label(KilnOwner o) { return o == 1 ? "kiln" : "mod test-items"; }
+std::string owner_label(KilnOwner o) {
+    if (const auto found = fake::owner_labels.find(o); found != fake::owner_labels.end()) return found->second;
+    return o == 1 ? "kiln" : "mod test-items";
+}
+void set_owner_label(KilnOwner o, const std::string& label) { fake::owner_labels[o] = label; }
 std::string data_dir() { return "D:\\kiln\\data"; }
 bool path_exists(const std::string&) {
     return false;

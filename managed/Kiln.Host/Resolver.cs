@@ -205,8 +205,7 @@ internal static class Resolver
         {
             if (d.Id == Manifest.KilnId)
             {
-                // a dev build (0.1.0-dev) counts as its release for dependency checks
-                if (!d.Range.Satisfies(env.KilnVersion) && !d.Range.Satisfies(env.KilnVersion.Release))
+                if (!d.Range.SatisfiesKiln(env.KilnVersion))
                     return $"needs Kiln {d.RangeText}; this is Kiln {env.KilnVersion}";
                 continue;
             }

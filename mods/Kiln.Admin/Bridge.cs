@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT
+using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
@@ -11,8 +12,13 @@ namespace Kiln.Admin;
 /// <c>results/&lt;id&gt;.json</c> gets {ok, op, ms, data | error}; <c>state.json</c> is refreshed about once a second.
 /// Writes go through a temp file + rename so the dashboard never reads half a file.</para>
 /// <para>KAP/1 (<see cref="TcpAdmin"/>) calls <see cref="Execute"/> with the same request objects, so every op answers
-/// the same over both transports (docs/kiln/launcher/admin-protocol.md).</para></summary>
-internal sealed partial class Bridge(string directory, Logger log)
+/// the same over both transports (docs/kiln/launcher/admin-protocol.md).</para>
+/// <para>The disk is only touched by the bridge's own I/O thread (started at the first use): it reads and deletes the
+/// request files, writes the result files and state.json. The tick thread hands texts over and takes parsed requests,
+/// never waiting for the disk (step 0 of the web admin saw one Pre handler take 810 ms while Kiln.Saves waited 3.66 s
+/// for the disk). When the disk is slow, state.json gets the newest state once it answers; states in between are
+/// skipped.</para></summary>
+internal sealed partial class Bridge(string directory, Logger log) : IDisposable
 {
     public delegate JsonNode? Op(JsonObject request);
     public delegate Task<JsonNode?> AsyncOp(JsonObject request);
@@ -40,6 +46,27 @@ internal sealed partial class Bridge(string directory, Logger log)
 
     [GeneratedRegex("^[A-Za-z0-9-]{1,64}\\.json$")]
     private static partial Regex RequestName();
+
+    // ---- the I/O thread
+    private const int ScanMs = 80;         // the requests folder, as often as the tick thread used to poll it
+    private const int MaxIncoming = 64;    // parsed requests waiting for the tick thread; the scan pauses above this
+    private const int SlowWriteMs = 1000;  // a write this slow gets one log line a minute
+    private readonly ConcurrentQueue<Incoming> _incoming = new();
+    private readonly ConcurrentQueue<(string Path, string Text)> _out = new();  // result files to write
+    private readonly AutoResetEvent _wake = new(false);
+    private readonly object _ioLock = new();
+    private Thread? _io;
+    private volatile bool _ioStop;
+    private string? _state;  // the newest state.json text not yet written (Interlocked)
+    private long _lastSlowLog, _lastIoWarn;
+
+    private sealed record Incoming(string ResultPath, JsonObject? Request, string? Error);
+
+    /// <summary>How a file is written (path, text): <see cref="WriteAtomic"/>; tests make the disk slow here.</summary>
+    internal Action<string, string> WriteFile { get; set; } = WriteAtomic;
+
+    /// <summary>state.json texts that were replaced by a newer one before the disk took them.</summary>
+    internal long StatesSkipped;
 
     public void Register(string name, Op op)
     {
@@ -79,19 +106,126 @@ internal sealed partial class Bridge(string directory, Logger log)
         }
     }
 
-    /// <summary>File bridge: handles up to <paramref name="max"/> pending requests (oldest first).</summary>
+    /// <summary>File bridge, tick thread: runs up to <paramref name="max"/> requests the I/O thread has read (oldest
+    /// first); their results go back to it to be written. No disk access here.</summary>
     public int Poll(int max = 16)
     {
         FinishPending();
-        if (!System.IO.Directory.Exists(_requests)) return 0;
-        var files = new DirectoryInfo(_requests).EnumerateFiles("*.json")
-            .Where(f => RequestName().IsMatch(f.Name))
-            .OrderBy(f => f.LastWriteTimeUtc).Take(max).ToList();
-        foreach (var f in files) Handle(f.FullName);
-        return files.Count;
+        EnsureIo();
+        var n = 0;
+        while (n < max && _incoming.TryDequeue(out var r))
+        {
+            n++;
+            var path = r.ResultPath;
+            if (r.Request is null)
+            {
+                QueueResult(path, (r.Error is null ? new JsonObject { ["ok"] = false } : new JsonObject { ["ok"] = false, ["error"] = r.Error }).ToJsonString(Json));
+                continue;
+            }
+            Execute(r.Request, result => QueueResult(path, result.ToJsonString(Json)));
+        }
+        if (n == max) _wake.Set();  // more may be waiting
+        return n;
     }
 
-    private void Handle(string file)
+    private void QueueResult(string path, string text)
+    {
+        _out.Enqueue((path, text));
+        _wake.Set();
+    }
+
+    /// <summary>Starts the I/O thread (once; again after <see cref="Dispose"/> is not supported).</summary>
+    private void EnsureIo()
+    {
+        if (_io is not null || _ioStop) return;
+        lock (_ioLock)
+        {
+            if (_io is not null || _ioStop) return;
+            var t = new Thread(IoLoop) { IsBackground = true, Name = "kiln-admin bridge io" };
+            t.Start();
+            _io = t;
+        }
+    }
+
+    private void IoLoop()
+    {
+        while (true)
+        {
+            _wake.WaitOne(ScanMs);
+            var stopping = _ioStop;
+            try
+            {
+                if (stopping) AnswerUnrun();
+                WriteOut();
+                if (stopping) return;
+                // a stop that came while this thread waited for the disk: take no more requests (their files would be
+                // deleted, and nothing would run them)
+                if (!_ioStop && _incoming.Count < MaxIncoming) Scan();
+            }
+            catch (Exception e)
+            {
+                if (stopping) return;
+                if (Environment.TickCount64 - Interlocked.Read(ref _lastIoWarn) > 60_000)
+                {
+                    Interlocked.Exchange(ref _lastIoWarn, Environment.TickCount64);
+                    log.Warn($"file bridge I/O: {e.Message}");
+                }
+            }
+        }
+    }
+
+    /// <summary>I/O thread, at the stop: requests it read (their files are deleted) that the tick thread never ran get a
+    /// failed result, so no caller waits for an answer that cannot come. Before the I/O thread such a request stayed in
+    /// the folder for the next Kiln.Admin; a caller now sends it again.</summary>
+    private void AnswerUnrun()
+    {
+        while (_incoming.TryDequeue(out var r))
+        {
+            var op = r.Request?["op"] is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
+            _out.Enqueue((r.ResultPath, new JsonObject
+            {
+                ["op"] = op, ["ok"] = false, ["error"] = "Kiln.Admin unloaded before it ran this request; send it again",
+            }.ToJsonString(Json)));
+        }
+    }
+
+    /// <summary>I/O thread: the results waiting, then the newest state.</summary>
+    private void WriteOut()
+    {
+        while (_out.TryDequeue(out var r)) Write(r.Path, r.Text);
+        if (Interlocked.Exchange(ref _state, null) is { } state) Write(Path.Combine(directory, "state.json"), state);
+    }
+
+    private void Write(string path, string text)
+    {
+        var started = Environment.TickCount64;
+        try
+        {
+            WriteFile(path, text);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            log.Warn($"file bridge: cannot write {path}: {e.Message}");
+        }
+        var ms = Environment.TickCount64 - started;
+        if (ms >= SlowWriteMs && Environment.TickCount64 - Interlocked.Read(ref _lastSlowLog) > 60_000)
+        {
+            Interlocked.Exchange(ref _lastSlowLog, Environment.TickCount64);
+            log.Info($"file bridge: writing {Path.GetFileName(path)} took {ms} ms (the disk is busy); the server's steps did not wait for it");
+        }
+    }
+
+    /// <summary>I/O thread: reads (and deletes) up to 16 request files, oldest first.</summary>
+    private void Scan()
+    {
+        if (!System.IO.Directory.Exists(_requests)) return;
+        var files = new DirectoryInfo(_requests).EnumerateFiles("*.json")
+            .Where(f => RequestName().IsMatch(f.Name))
+            .OrderBy(f => f.LastWriteTimeUtc).Take(16).ToList();
+        foreach (var f in files) Read(f.FullName);
+    }
+
+    private void Read(string file)
     {
         var id = Path.GetFileNameWithoutExtension(file);
         string raw;
@@ -102,25 +236,17 @@ internal sealed partial class Bridge(string directory, Logger log)
         }
         catch (IOException)
         {
-            return;  // still being written; next poll
+            return;  // still being written; next scan
         }
         var resultPath = Path.Combine(_results, id + ".json");
-        JsonObject? request = null;
         try
         {
-            request = JsonNode.Parse(raw) as JsonObject;
+            _incoming.Enqueue(new Incoming(resultPath, JsonNode.Parse(raw) as JsonObject, null));
         }
         catch (JsonException e)
         {
-            WriteAtomic(resultPath, new JsonObject { ["ok"] = false, ["error"] = "bad request: " + e.Message }.ToJsonString(Json));
-            return;
+            _incoming.Enqueue(new Incoming(resultPath, null, "bad request: " + e.Message));
         }
-        if (request is null)
-        {
-            WriteAtomic(resultPath, new JsonObject { ["ok"] = false }.ToJsonString(Json));
-            return;
-        }
-        Execute(request, result => WriteAtomic(resultPath, result.ToJsonString(Json)));
     }
 
     /// <summary>Runs one request ({"op": name, ...args}) on the tick thread. <paramref name="done"/> gets the result
@@ -206,6 +332,25 @@ internal sealed partial class Bridge(string directory, Logger log)
     /// listener anyway; file-bridge results are simply not written, as before).</summary>
     public void Abandon() => _pending.Clear();
 
+    /// <summary>Unload: the I/O thread writes what it has (results, the last state) and ends. It waits for the disk at
+    /// most <paramref name="waitMs"/> ms; a thread still stuck in a write then ends on its own after it.</summary>
+    public void Dispose() => StopIo(1000);
+
+    internal bool StopIo(int waitMs)
+    {
+        Thread? t;
+        lock (_ioLock)
+        {
+            _ioStop = true;
+            t = _io;
+        }
+        if (t is null) return true;
+        _wake.Set();
+        if (t.Join(waitMs)) return true;
+        log.Warn($"file bridge: the I/O thread is still waiting for the disk after {waitMs} ms; it ends after that write");
+        return false;
+    }
+
     private void Deliver(Action<JsonObject> done, JsonObject result, string name)
     {
         try
@@ -223,7 +368,14 @@ internal sealed partial class Bridge(string directory, Logger log)
 
     public void WriteState(JsonObject state) => WriteStateText(Serialize(state));
 
-    public void WriteStateText(string text) => WriteAtomic(Path.Combine(directory, "state.json"), text);
+    /// <summary>Tick thread: hands state.json's new text to the I/O thread (never waits for the disk; a text not yet
+    /// written is replaced by this one).</summary>
+    public void WriteStateText(string text)
+    {
+        EnsureIo();
+        if (Interlocked.Exchange(ref _state, text) is not null) Interlocked.Increment(ref StatesSkipped);
+        _wake.Set();
+    }
 
     internal static void WriteAtomic(string path, string text)
     {

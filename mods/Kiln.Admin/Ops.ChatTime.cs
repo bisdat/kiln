@@ -54,19 +54,23 @@ internal static partial class Ops
                 if (!r.Ok) throw new AdminError(r.Error ?? "command failed");
                 return new JsonObject { ["output"] = new JsonArray([.. r.Output.Select(o => (JsonNode)o)]) };
             });
-            // The dashboard console: {line, steamId?} -> the whole result (output kept on errors too). With steamId the
-            // line runs as that player (their permissions), else as the dashboard (admin).
+            // The dashboard console: {line, steamId?, source?, level?} -> the whole result (output kept on errors too).
+            // With steamId the line runs as that player (their permissions), else as the dashboard (admin); source and
+            // level name the caller (web:<user>) and cap it (Ops.CommandSource.cs).
             bridge.Register("command_run", req =>
             {
                 var line = req["line"]?.GetValue<string>()?.Trim() ?? throw new AdminError("line required");
                 if (line.Length == 0 || line.Length > 1000) throw new AdminError("line must be 1 to 1000 characters");
-                var src = req["steamId"] is not null ? CommandSource.ForSteamId(SteamId(req)) : CommandSource.Remote("dashboard", admin: true);
+                var src = LineSource(req);
+                var who = SourceName(req) ?? "dashboard";
+                var cap = Level(req) is { } lv ? $" (up to {lv.ToString().ToLowerInvariant()})" : "";
                 var r = Commands.Execute(src, line);
-                log.Info($"dashboard command{(req["steamId"] is not null ? " as " + req["steamId"] : "")}: {line} -> {(r.Ok ? "ok" : r.Error)}");
+                log.Info($"{who} command{(req["steamId"] is not null ? " as " + req["steamId"] : "")}{cap}: {line} -> {(r.Ok ? "ok" : r.Error)}");
                 return new JsonObject
                 {
                     ["name"] = r.Name, ["found"] = r.Found, ["ok"] = r.Ok, ["denied"] = r.Denied, ["canceled"] = r.Canceled,
                     ["parseError"] = r.ParseError, ["error"] = r.Error, ["output"] = new JsonArray([.. r.Output.Select(o => (JsonNode)o)]),
+                    ["source"] = who,
                 };
             });
             bridge.Register("commands", _ =>

@@ -16,7 +16,7 @@ the same file). v1 manifests (id, name, version, apiVersion, entryAssembly, entr
                                         //   client/both -> mod; see "Clients" below)
   "dependencies": {
     "sample-lib": "^1.2",               // required, version range
-    "kiln": ">=0.1",                    // the Kiln core itself (a dev build 0.1.0-dev counts as 0.1.0)
+    "kiln": ">=0.1",                    // the Kiln core itself (plain ranges also count dev builds as their release)
     "extras": { "version": "*", "optional": true }
   },
   "loadAfter": ["some-mod"],            // ordering only: when present, load after / before it
@@ -229,6 +229,20 @@ mod when the mod is built, so it says the API the mod was built against. A relea
 member of the previous release was removed (`tools/release/api-gate.sh`, and `pack.sh` compares against
 `KILN_API_BASELINE`). A release also builds its SDK packages as a NuGet feed (`sdk/feed/`); its URL is given here once
 it is published.
+
+### Requiring a particular Kiln dev release
+
+For the `kiln` dependency only, a plain range such as `>=0.2.0` also accepts `0.2.0-dev.30.8` as `0.2.0`, preserving
+existing mods' release-style requirements. An alternative containing an explicit pre-release version instead compares
+the actual version throughout that alternative. For example, `>=0.2.0-dev.30.9` rejects dev.30.8 and accepts dev.30.9,
+dev.30.10, dev.31 and stable 0.2.0. Numeric identifiers compare by value; build metadata (`+...`) never affects precedence.
+Use `=0.2.0-dev.30.9` (or `[0.2.0-dev.30.9]`) for exactly that pre-release, not a minimum.
+
+Each OR alternative (`||`, or an interval union) is independent: `>=0.2.0-dev.30.9 || =0.2.0` still accepts dev.30.8
+through the plain second alternative. Within one alternative, every comparator uses the actual version if any operand
+mentions a pre-release; `>=0.2.0 <0.3.0-dev.1` therefore rejects `0.2.0-dev.30.8`. Parser-generated upper bounds do not
+make an otherwise plain range explicit. Ordinary mod dependencies, incompatibilities and `apiVersion` keep their
+existing matching rules; they do not get this Kiln-only release fallback.
 
 ## What the loader does (Forge's ModSorter + dependency checks)
 At the first server-world step (a client: in the menu; its side "server" mods at each hosted world's first step, see

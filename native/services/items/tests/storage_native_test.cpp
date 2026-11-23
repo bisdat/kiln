@@ -4,6 +4,7 @@
 #include "../storage_engine.cpp"
 #include "fake_types.h"
 #include <cstdio>
+#include <cstdarg>
 #include <malloc.h>
 #include <map>
 #include <new>
@@ -28,6 +29,13 @@ int checks = 0, failed = 0;
 uint32_t next_id = 2000;
 std::map<std::pair<uint32_t, uint32_t>, std::vector<uint8_t>> components;
 bool fail_create = false, raise_create = false;
+unsigned create_fail_at = 0;
+uint32_t create_raw = 0;
+bool create_fault = false, mutate_before_failure = false, destroy_fault = false;
+uint8_t destroy_raw = 1;
+unsigned setup_lookup_mode = 0;
+void* readonly_setup = nullptr;
+std::vector<std::string> storage_logs;
 unsigned creates = 0, destroys = 0, writes = 0, converts = 0;
 #define CHECK(...)                                                                                                     \
     do {                                                                                                               \
@@ -45,24 +53,62 @@ uint32_t __fastcall create(void*, const CreateDesc* d) {
         RaiseException(0xe0000012, 0, 0, nullptr);
     if (fail_create && creates == 2)
         return 0;
+    const bool failing = creates == create_fail_at;
+    if (failing && !mutate_before_failure) {
+        if (create_fault)
+            RaiseException(0xe0000012, 0, 0, nullptr);
+        return create_raw;
+    }
     auto e = next_id++;
     for (unsigned i = 0; i < d->count; ++i) {
         const auto& c = d->components[i];
         components[{e, c.hash}].assign(static_cast<const uint8_t*>(c.bytes),
                                        static_cast<const uint8_t*>(c.bytes) + c.size);
     }
+    if (failing) {
+        if (create_fault)
+            RaiseException(0xe0000012, 0, 0, nullptr);
+        return create_raw;
+    }
     return e;
 }
 uint8_t __fastcall destroy(void*, uint32_t e, uint8_t mode, uint8_t skip) {
     CHECK(mode == 1 && skip == 0);
     ++destroys;
+    if (destroy_fault)
+        RaiseException(0xe0000013, 0, 0, nullptr);
+    if (!destroy_raw)
+        return 0;
     for (auto i = components.begin(); i != components.end();)
         i = i->first.first == e ? components.erase(i) : std::next(i);
-    return 1;
+    return destroy_raw;
 }
 bool gate_open = true;
-bool gate() { return gate_open; }
+unsigned gate_refusals = 0;
+bool gate() {
+    if (gate_refusals) {
+        --gate_refusals;
+        return false;
+    }
+    return gate_open;
+}
 PtrSize* __fastcall get(PtrSize* out, uintptr_t, uint32_t hash, uint32_t entity) {
+    if (entity > kMaxPlayer && hash == kHashInventorySetup) {
+        if (setup_lookup_mode == 1) {
+            *out = {};
+            return out;
+        }
+        if (setup_lookup_mode == 2)
+            RaiseException(0xe0000014, 0, 0, nullptr);
+        if (setup_lookup_mode == 3) {
+            *out = {nullptr, 12};
+            return out;
+        }
+        if (setup_lookup_mode == 4) {
+            *out = {readonly_setup, 84};
+            return out;
+        }
+    }
     auto i = components.find({entity, hash});
     *out = i == components.end() ? PtrSize{} : PtrSize{i->second.data(), i->second.size()};
     return out;
@@ -124,7 +170,14 @@ Engine E;
 KilnApi fake_api{};
 const KilnApi* items_api() { return &fake_api; }
 KilnOwner items_owner() { return 7; }
-void items_log(int, const char*, ...) {}
+void items_log(int, const char* format, ...) {
+    char text[2048]{};
+    va_list args;
+    va_start(args, format);
+    std::vsnprintf(text, sizeof text, format, args);
+    va_end(args);
+    storage_logs.emplace_back(text);
+}
 KilnResult items_item_info(uint32_t, KilnItemInfo*) { return KILN_ERR_NOT_FOUND; }
 bool run_move(const Access&, const MoveJob& job, uint8_t*, KilnItemsMoveResult* out, unsigned long*) {
     auto src = kitems::storage::read<uint32_t>(components[{KILN_SLOT_INVENTORY(job.r.slot), kHashInventory}].data(),
@@ -787,6 +840,186 @@ KilnResult KILN_CALL leaving_player_get(KilnEntity entity, KilnPlayer* out) {
     out->state = KILN_PLAYER_LEAVING;
     return KILN_OK;
 }
+// A pre-create gate denial is the only failure with proof that no native mutation ran.
+void holder_retry_tests() {
+    kitems::storage_reset();
+    kitems::model = Model{};
+    kitems::enabled = true;
+    CHECK(kitems::bind(0, &review_stage, &review_hints, nullptr) == KILN_OK);
+    KilnWorldApi world{};
+    world.header = {sizeof world, 1};
+    world.game_wrap_info = +[](KilnHandle, KilnGameWrapInfo* out) -> KilnResult {
+        out->state = KILN_WRAP_ACTIVE;
+        out->disabled = KILN_WRAP_OK;
+        return KILN_OK;
+    };
+    kitems::world_api = &world;
+    kitems::death_before_wrap = 1;
+    kitems::death_after_wrap = 2;
+    uint8_t storage_bytes[16]{};
+    void* registry = storage_bytes + 8;
+    std::memcpy(storage_bytes, &registry, sizeof registry);
+    E.component_map_find = +[](void*, const uint32_t*) -> uint16_t* {
+        static uint16_t index = 0;
+        return &index;
+    };
+    auto prepare = [&] {
+        kitems::structural_access.storage = storage_bytes;
+        review_player(1);
+        auto join = kitems::model.join(0, 55, {}, 19, 1);
+        auto entry = review_entry("retry:bag", KIS_ENTRY_PARKED, 9, KIS_PARK_HELD, 0, 1);
+        auto record = review_record(0, 123, 5);
+        auto doc = review_doc(55, KIS_SOURCE_SERVER, &entry, 1, &record, 1);
+        CHECK(kitems::restore(0, 0, join, &doc) == KILN_OK);
+        kitems::model.applied(0, 1);
+        return join;
+    };
+    review_register(80, "retry:bag", 9);
+    prepare();
+    auto before = creates;
+    auto contents = entries_hash(kitems::model.players.at(0).entries);
+    gate_refusals = 1;
+    kitems::post(nullptr, nullptr);
+    CHECK(kitems::enabled && creates == before && kitems::model.players.at(0).holders.empty());
+    CHECK(entries_hash(kitems::model.players.at(0).entries) == contents);
+    kitems::post(nullptr, nullptr);
+    CHECK(kitems::enabled && creates == before + 3 && kitems::model.players.at(0).holders.count("retry:bag"));
+    kitems::post(nullptr, nullptr);
+    CHECK(creates == before + 3); // no duplicate holder
+
+    // A second denial consumes the single retry; no busy loop or native work.
+    kitems::storage_reset();
+    prepare();
+    before = creates;
+    gate_refusals = 2;
+    kitems::post(nullptr, nullptr);
+    CHECK(kitems::enabled);
+    kitems::post(nullptr, nullptr);
+    CHECK(!kitems::enabled && creates == before);
+    kitems::post(nullptr, nullptr);
+    CHECK(creates == before);
+    gate_refusals = 0;
+
+    // Access/world switched under a pending retry: fail closed before any native call.
+    kitems::enabled = true;
+    kitems::storage_reset();
+    prepare();
+    before = creates;
+    gate_refusals = 1;
+    kitems::post(nullptr, nullptr);
+    CHECK(kitems::enabled && creates == before);
+    uint8_t other_bytes[16]{};
+    void* other_registry = other_bytes + 8;
+    std::memcpy(other_bytes, &other_registry, sizeof other_registry);
+    kitems::structural_access.storage = other_bytes;
+    kitems::post(nullptr, nullptr);
+    CHECK(!kitems::enabled && creates == before && kitems::model.players.at(0).holders.empty());
+    CHECK(kitems::detail.find("world/access changed") != std::string::npos);
+    gate_refusals = 0;
+
+    // Unload and world reset cancel pending work; a reused slot is a new join, not the old retry.
+    kitems::enabled = true;
+    kitems::storage_reset();
+    const auto old_join = prepare();
+    gate_refusals = 1;
+    kitems::post(nullptr, nullptr);
+    kitems::storage_cancel_owner(80);
+    before = creates;
+    kitems::post(nullptr, nullptr);
+    CHECK(creates == before);
+    kitems::storage_reset();
+    CHECK(!kitems::structural_access.storage && kitems::model.players.empty());
+    kitems::post(nullptr, nullptr);
+    CHECK(creates == before);
+    review_register(81, "retry:bag", 9);
+    CHECK(prepare() != old_join);
+    kitems::post(nullptr, nullptr);
+    CHECK(kitems::enabled && creates == before + 3);
+    // Failure after a native call is ambiguous, even when known-id cleanup reports success.
+    // Keep persisted held/quarantine rows, witness/revision pairing, and another valid holder untouched.
+    struct FailureCase {
+        unsigned nth, lookup;
+        uint32_t raw;
+        bool fault, mutate, cleanup_fault;
+        uint8_t cleanup_raw;
+        const char* stage;
+    };
+    const FailureCase cases[]{
+        {1, 0, 0, false, true, false, 1, "root-create"},
+        {1, 0, 1, false, false, false, 1, "root-create"},
+        {1, 0, UINT32_MAX, false, false, false, 1, "root-create"},
+        {1, 0, 0, true, true, false, 1, "root-create"},
+        {3, 0, 0, false, true, false, 7, "page-create"},
+        {3, 0, 0, true, true, false, 1, "page-create"},
+        {3, 0, 0, false, false, false, 0, "page-create"},
+        {3, 0, 0, false, false, true, 1, "page-create"},
+        {0, 1, 0, false, false, false, 1, "setup-lookup"},
+        {0, 2, 0, false, false, false, 1, "setup-lookup"},
+        {0, 3, 0, false, false, false, 1, "setup-lookup"},
+        {0, 4, 0, false, false, false, 1, "setup-copy"},
+    };
+    readonly_setup = VirtualAlloc(nullptr, 4096, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    CHECK(readonly_setup);
+    DWORD old_protection = 0;
+    CHECK(VirtualProtect(readonly_setup, 4096, PAGE_READONLY, &old_protection));
+    for (const auto& c : cases) {
+        std::printf("  holder failure: %s nth=%u lookup=%u raw=%u fault=%d cleanup_raw=%u cleanup_fault=%d\n",
+                    c.stage, c.nth, c.lookup, c.raw, c.fault, c.cleanup_raw, c.cleanup_fault);
+        kitems::storage_reset();
+        kitems::enabled = true;
+        prepare();
+        auto& p = kitems::model.players.at(0);
+        p.paired = true;
+        p.revision = 61;
+        auto quarantined = entry_for("retry:bag", KIS_ENTRY_QUARANTINE, 9, 0);
+        auto record = review_record(2, 123, 2);
+        record.reason = KIS_QUARANTINE_COUNT;
+        quarantined.records.push_back(record);
+        p.entries.push_back(quarantined);
+        Holder unrelated;
+        CHECK(create_holder(kitems::structural_access, 1, 8, &unrelated));
+        p.holders.emplace("other:valid", unrelated);
+        const auto unrelated_setup = components.at({unrelated.entity, kHashInventorySetup});
+        const auto unrelated_page = components.at({unrelated.pages[0], kHashInventory});
+        const auto witness_before = p.witness;
+        const auto persisted = entries_hash(p.entries);
+        const auto snapshot = components;
+        before = creates;
+        create_fail_at = c.nth ? creates + c.nth : 0;
+        create_raw = c.raw;
+        create_fault = c.fault;
+        mutate_before_failure = c.mutate;
+        destroy_fault = c.cleanup_fault;
+        destroy_raw = c.cleanup_raw;
+        setup_lookup_mode = c.lookup;
+        kitems::post(nullptr, nullptr);
+        CHECK(!kitems::enabled && p.holders.size() == 1 && p.holders.at("other:valid").entity == unrelated.entity);
+        CHECK(entries_hash(p.entries) == persisted && p.paired && p.revision == 61 &&
+              p.witness.witness == witness_before.witness && p.witness.join == witness_before.join);
+        CHECK(components.at({unrelated.entity, kHashInventorySetup}) == unrelated_setup &&
+              components.at({unrelated.pages[0], kHashInventory}) == unrelated_page);
+        CHECK(kitems::detail.find(std::string("stage=") + c.stage) != std::string::npos);
+        CHECK(kitems::detail.find("cleanup=") != std::string::npos);
+        // #135: the one log line / capability text must name the native outcome and raw result
+        CHECK(kitems::detail.find(" native=") != std::string::npos && kitems::detail.find(" raw=") != std::string::npos);
+        CHECK(std::any_of(storage_logs.begin(), storage_logs.end(), [&](const std::string& line) {
+            return line.find(std::string("stage=") + c.stage) != std::string::npos;
+        }));
+        const auto failed_creates = creates;
+        kitems::post(nullptr, nullptr);
+        CHECK(creates == failed_creates && creates == before + (c.nth ? c.nth : 3));
+        create_fail_at = 0;
+        create_fault = mutate_before_failure = destroy_fault = false;
+        destroy_raw = 1;
+        setup_lookup_mode = 0;
+        components = snapshot; // only the fake ECS; never a game world
+    }
+    CHECK(VirtualFree(readonly_setup, 0, MEM_RELEASE));
+    readonly_setup = nullptr;
+    kitems::world_api = nullptr;
+    kitems::storage_reset();
+}
+
 // The leave timeout: a leaving player whose entity still exists keeps its holders past 250 steps (the game's leave save
 // can still capture it); once the entity is gone they go, and the slot is marked left.
 void leave_timeout_tests() {
@@ -1186,10 +1419,12 @@ int main() {
                    : i == A_OWNER     ? 0xd7361788u
                                       : kHashSlotSelection;
     S.structural_gate = &gate;
+    std::puts("storage native: engine adapter cases");
     Holder h;
     gate_open = false;
     CHECK(!create_holder(a, 1, 9, &h) && creates == 0);
     gate_open = true;
+    std::puts("  adapter: initial create");
     CHECK(create_holder(a, 1, 9, &h));
     CHECK(h.entity == 2000 && h.pages.size() == 2);
     CHECK(components[{h.entity, kHashInventorySetup}][81] == 16 &&
@@ -1273,13 +1508,16 @@ int main() {
     CHECK(clear_holder_references(1, 1, h));
     CHECK(kitems::storage::read<uint64_t>(components[{1, kHashSlotSelection}].data(), 14 * 8) == 0 &&
           components[{1, kHashInventorySetup}] == main_setup);
+    std::puts("  adapter: full cleanup");
     CHECK(destroy_holder(a, &h) && destroys == 4);
     creates = 0;
     fail_create = true;
+    std::puts("  adapter: failed page cleanup");
     CHECK(!create_holder(a, 1, 9, &h));
     CHECK(!h.entity && destroys == 5);
     fail_create = false;
     raise_create = true;
+    std::puts("  adapter: create fault");
     CHECK(!create_holder(a, 1, 9, &h));
     raise_create = false;
     Record rec{};
@@ -1321,11 +1559,19 @@ int main() {
     character[layout.extra_pages] = 0;
     character[layout.main_pages] = 17;
     CHECK(!character_witness(character.data(), &hash));
+    std::puts("  adapter: read fault");
     CHECK(!character_witness(reinterpret_cast<void*>(1), &hash));
+    std::puts("storage native: service_tests");
     service_tests();
+    std::puts("storage native: review_tests");
     review_tests();
+    std::puts("storage native: holder_retry_tests");
+    holder_retry_tests();
+    std::puts("storage native: leave_timeout_tests");
     leave_timeout_tests();
+    std::puts("storage native: guard_ready_tests");
     guard_ready_tests();
+    std::puts("storage native: init_caps_test");
     init_caps_test(); // last: storage_init replaces the structural gate the tests above use
     std::printf("storage native: %d checks, %d failed\n", checks, failed);
     return failed ? 1 : 0;

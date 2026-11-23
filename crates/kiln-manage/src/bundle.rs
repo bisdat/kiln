@@ -1,12 +1,15 @@
 //! Runtime bundles `kiln-runtime-<semver>+<yyyymmdd>.<gitsha>.zip` with `kiln-runtime.json` at the root
 //! (schema/kiln-runtime.schema.json). Deterministic: entries sorted bytewise, times fixed to the commit time,
 //! no extra attributes, deflate. Created by `kilnctl bundle create` from tools/package's staging folder.
+//! [`read`], [`verify`], [`extract`] (so the installer) also take the bundle unpacked into a folder, `kiln-runtime.json`
+//! at its root, as the Nexus Mods runtime file carries it: the same checks over both (`Source`).
 
 use crate::manifest::RunSide;
 use crate::task::Progress;
 use crate::{Error, ErrorCode, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 pub const MANIFEST: &str = "kiln-runtime.json";
@@ -203,6 +206,22 @@ pub fn validate(m: &RuntimeManifest) -> Result<()> {
             problems.push(format!("{MANIFEST} cannot be a runtime file"));
         }
     }
+    // Windows (and macOS) folders do not tell names apart by case: two paths that differ only in it, or a file that is
+    // a folder of another path, would be one name there (the second written over the first, the receipt never
+    // matching what is on disk), from the zip or the folder alike
+    let mut folded: BTreeMap<String, &str> = BTreeMap::new();
+    for f in &m.files {
+        if let Some(other) = folded.insert(f.path.to_lowercase(), &f.path)
+            && other != f.path
+        {
+            problems.push(format!("{}: the same name as {other} where case does not count (Windows)", f.path));
+        }
+    }
+    for f in &m.files {
+        if let Some(file) = f.path.match_indices('/').find_map(|(i, _)| folded.get(&f.path[..i].to_lowercase())) {
+            problems.push(format!("{}: one of its folders is the file {file}", f.path));
+        }
+    }
     for (name, c) in &m.components {
         for r in &c.requires {
             if !m.components.contains_key(r) {
@@ -268,149 +287,374 @@ pub fn restore_executable(path: &Path, sha256: &str) -> std::io::Result<bool> {
     Ok(true)
 }
 
+/// What an entry of a bundle is: a zip says it of each entry, a folder of each name below it (never following a link).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    File,
+    Dir,
+    Link,
+    /// A FIFO, socket or device (a folder only).
+    Special,
+}
+
+/// A bundle's files, read one way from either form: its zip (`imp::ZipSource`, feature `zip`) or the same tree unpacked
+/// in a folder ([`FolderSource`]). [`verify`] and [`extract`] run the same checks and the same checked copy over both.
+trait Source {
+    /// The zip or the folder, for messages.
+    fn path(&self) -> &Path;
+    /// What one of its names is called in a message: a zip's "entry", a folder's "file".
+    fn noun(&self) -> &'static str;
+    /// Every entry, its name '/' separated (a zip's folder entries may end in '/'), and what it is.
+    fn entries(&mut self) -> Result<Vec<(String, Kind)>>;
+    /// The bytes of one plain file named by a [`safe_rel_path`]: never through a link, never a special file. A name it
+    /// does not have is `Schema`.
+    fn open(&mut self, name: &str) -> Result<Box<dyn Read + '_>>;
+}
+
+fn missing(at: &Path, name: &str) -> Error {
+    Error::new(ErrorCode::Schema, format!("{}: {name} is listed but not in the bundle", at.display()))
+}
+
+fn link_refused(at: &Path, name: &str) -> Error {
+    Error::new(ErrorCode::Refused, format!("{}: {name} is a link (a bundle folder holds plain files and folders only)", at.display()))
+}
+
+/// A bundle unpacked into a folder: `kiln-runtime.json` at its root and every file at its manifest path, as unzipping the
+/// bundle gives it. The Nexus Mods runtime file carries the bundle this way (`kiln-runtime-<version>/`): Nexus cannot
+/// scan an archive inside an archive. Its file modes are never read, as a zip's are not: the executable helper gets its
+/// mode from [`executable`] when it is staged.
+struct FolderSource {
+    root: PathBuf,
+}
+
+impl FolderSource {
+    fn new(root: &Path) -> Result<FolderSource> {
+        match std::fs::symlink_metadata(root.join(MANIFEST)) {
+            Ok(_) => Ok(FolderSource { root: root.to_path_buf() }),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(Error::new(
+                ErrorCode::Schema,
+                format!("{}: no {MANIFEST} at the folder's root: not a runtime bundle (its zip, or the folder it was unpacked to)", root.display()),
+            )),
+            Err(e) => Err(crate::util::io_at(&root.join(MANIFEST), "reading")(e)),
+        }
+    }
+
+    fn walk(&self, dir: &Path, out: &mut Vec<(String, Kind)>) -> Result<()> {
+        let mut entries: Vec<_> =
+            std::fs::read_dir(dir).map_err(crate::util::io_at(dir, "reading"))?.collect::<std::io::Result<Vec<_>>>().map_err(crate::util::io_at(dir, "reading"))?;
+        entries.sort_by_key(|e| e.file_name());
+        for e in entries {
+            let p = e.path();
+            let rel = p
+                .strip_prefix(&self.root)
+                .expect("below the root")
+                .components()
+                .map(|c| c.as_os_str().to_str().map(str::to_string))
+                .collect::<Option<Vec<_>>>()
+                .ok_or_else(|| Error::new(ErrorCode::Refused, format!("{}: a name that is not UTF-8 is no bundle file", p.display())))?
+                .join("/");
+            let ft = std::fs::symlink_metadata(&p).map_err(crate::util::io_at(&p, "reading"))?.file_type();
+            let kind = if ft.is_symlink() {
+                Kind::Link
+            } else if ft.is_dir() {
+                Kind::Dir
+            } else if ft.is_file() {
+                Kind::File
+            } else {
+                Kind::Special
+            };
+            out.push((rel, kind));
+            if kind == Kind::Dir {
+                self.walk(&p, out)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Source for FolderSource {
+    fn path(&self) -> &Path {
+        &self.root
+    }
+
+    fn noun(&self) -> &'static str {
+        "file"
+    }
+
+    fn entries(&mut self) -> Result<Vec<(String, Kind)>> {
+        let mut out = Vec::new();
+        self.walk(&self.root, &mut out)?;
+        Ok(out)
+    }
+
+    fn open(&mut self, name: &str) -> Result<Box<dyn Read + '_>> {
+        let rel = safe_rel_path(name)?;
+        let parts: Vec<&str> = rel.split('/').collect();
+        // the folders on the way are folders, not links (also one swapped in after the walk)
+        let mut path = self.root.clone();
+        for (i, part) in parts[..parts.len() - 1].iter().enumerate() {
+            path.push(part);
+            match std::fs::symlink_metadata(&path) {
+                Ok(m) if m.file_type().is_symlink() => return Err(link_refused(&self.root, &parts[..=i].join("/"))),
+                Ok(m) if m.is_dir() => {}
+                Ok(_) => return Err(missing(&self.root, name)),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(missing(&self.root, name)),
+                Err(e) => return Err(crate::util::io_at(&path, "reading")(e)),
+            }
+        }
+        path.push(parts[parts.len() - 1]);
+        // the file itself: never followed if it is a link, never blocking on a FIFO (whose open waits for a writer)
+        let mut o = std::fs::OpenOptions::new();
+        o.read(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt as _;
+            o.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt as _;
+            o.custom_flags(0x0020_0000); // FILE_FLAG_OPEN_REPARSE_POINT: a link itself, never its target
+        }
+        let f = match o.open(&path) {
+            Ok(f) => f,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(missing(&self.root, name)),
+            Err(_) if std::fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_symlink()) => return Err(link_refused(&self.root, name)),
+            Err(e) => return Err(crate::util::io_at(&path, "opening")(e)),
+        };
+        let m = f.metadata().map_err(crate::util::io_at(&path, "reading"))?;
+        if m.file_type().is_symlink() {
+            return Err(link_refused(&self.root, name));
+        }
+        if !m.is_file() {
+            return Err(Error::new(ErrorCode::Refused, format!("{}: {name} is not a plain file", self.root.display())));
+        }
+        Ok(Box::new(f))
+    }
+}
+
+/// Is `bundle` a folder (an unpacked bundle) rather than a zip? Only the path itself is followed when it is a link.
+pub fn is_folder(bundle: &Path) -> bool {
+    std::fs::metadata(bundle).is_ok_and(|m| m.is_dir())
+}
+
+#[cfg(not(feature = "zip"))]
+fn no_zip() -> Error {
+    Error::new(ErrorCode::Unsupported, "kiln-manage was built without the zip feature")
+}
+
+fn open_source(bundle: &Path) -> Result<Box<dyn Source>> {
+    if is_folder(bundle) {
+        return Ok(Box::new(FolderSource::new(bundle)?));
+    }
+    #[cfg(feature = "zip")]
+    {
+        Ok(Box::new(imp::ZipSource::open(bundle)?))
+    }
+    #[cfg(not(feature = "zip"))]
+    {
+        Err(no_zip())
+    }
+}
+
+fn read_manifest(src: &mut dyn Source) -> Result<RuntimeManifest> {
+    let at = src.path().to_path_buf();
+    let mut text = Vec::new();
+    src.open(MANIFEST)?.read_to_end(&mut text).map_err(crate::util::io_at(&at, "reading"))?;
+    let m: RuntimeManifest =
+        serde_json::from_slice(&text).map_err(|e| Error::new(ErrorCode::Parse, format!("{}: {MANIFEST}: {e}", at.display())))?;
+    validate(&m)?;
+    Ok(m)
+}
+
+/// Files a system or a file manager leaves in folders and zips made of them: Finder's `.DS_Store` and `._*` files and
+/// the `__MACOSX/` folder of its zips, Explorer's `Thumbs.db`, `ehthumbs.db` and `desktop.ini`. A bundle refuses them
+/// like any other file its manifest does not list (no name is let through); the message only says what they are.
+fn os_leftover(name: &str) -> bool {
+    let base = name.rsplit('/').next().unwrap_or(name);
+    name.starts_with("__MACOSX/")
+        || base.starts_with("._")
+        || [".DS_Store", "Thumbs.db", "ehthumbs.db", "desktop.ini"].iter().any(|n| base.eq_ignore_ascii_case(n))
+}
+
+/// Every entry is safe (zip-slip guard), no link or special file, listed in the manifest (or the manifest itself) and
+/// there once, and every listed file is there.
+fn check_entries(src: &mut dyn Source, m: &RuntimeManifest) -> Result<()> {
+    let at = src.path().to_path_buf();
+    let noun = src.noun();
+    let wanted: std::collections::BTreeSet<&str> = m.files.iter().map(|f| f.path.as_str()).collect();
+    let mut seen = std::collections::BTreeSet::new();
+    for (name, kind) in src.entries()? {
+        match kind {
+            Kind::Link => return Err(Error::new(ErrorCode::Refused, format!("{}: symlink {noun} {name}", at.display()))),
+            Kind::Special => return Err(Error::new(ErrorCode::Refused, format!("{}: {name} is not a plain file or folder", at.display()))),
+            Kind::Dir => {
+                safe_rel_path(name.trim_end_matches('/'))?;
+                continue;
+            }
+            Kind::File => {}
+        }
+        safe_rel_path(&name)?;
+        if name != MANIFEST && !wanted.contains(name.as_str()) {
+            let what = if os_leftover(&name) {
+                " (the system or a file manager adds such files to folders: delete it; a bundle holds only its own files)"
+            } else {
+                ""
+            };
+            return Err(Error::new(ErrorCode::Schema, format!("{}: {noun} {name} is not in {MANIFEST}{what}", at.display())));
+        }
+        if !seen.insert(name.clone()) {
+            return Err(Error::new(ErrorCode::Schema, format!("{}: {noun} {name} is there twice", at.display())));
+        }
+    }
+    if let Some(missing) = wanted.iter().find(|p| !seen.contains(**p)) {
+        return Err(Error::new(ErrorCode::Schema, format!("{}: {missing} is listed but not in the bundle", at.display())));
+    }
+    Ok(())
+}
+
+/// Streams one file into `out` (when given) while hashing it; checks size and sha256.
+fn copy_checked(src: &mut dyn Source, f: &RuntimeFile, mut out: Option<&mut dyn Write>) -> Result<()> {
+    use sha2::Digest as _;
+    let at = src.path().to_path_buf();
+    let mut e = src.open(&f.path)?;
+    let mut h = sha2::Sha256::new();
+    let mut buf = vec![0u8; 1 << 16];
+    let mut size = 0u64;
+    loop {
+        let n = e.read(&mut buf).map_err(|err| Error::new(ErrorCode::Parse, format!("{}: {}: {err}", at.display(), f.path)))?;
+        if n == 0 {
+            break;
+        }
+        size += n as u64;
+        if size > f.size {
+            break;
+        }
+        h.update(&buf[..n]);
+        if let Some(o) = out.as_mut() {
+            // the staged copy of a DLL that Windows refuses (an antivirus): crate::blocked
+            o.write_all(&buf[..n]).map_err(crate::blocked::io_at(Path::new(&f.path), "writing", &f.path))?;
+        }
+    }
+    let sha = crate::hash::hex(h.finalize().as_slice());
+    if size != f.size || sha != f.sha256 {
+        return Err(Error::new(ErrorCode::HashMismatch, format!("{}: {} does not match {MANIFEST} (size {size}, sha256 {sha})", at.display(), f.path))
+            .with_detail(serde_json::json!({ "path": f.path, "expectedSha256": f.sha256, "expectedSize": f.size })));
+    }
+    Ok(())
+}
+
+fn verify_source(src: &mut dyn Source, progress: &mut dyn Progress) -> Result<RuntimeManifest> {
+    let m = read_manifest(src)?;
+    check_entries(src, &m)?;
+    let total: u64 = m.files.iter().map(|f| f.size).sum::<u64>().max(1);
+    let mut done = 0u64;
+    for f in &m.files {
+        if progress.canceled() {
+            return Err(Error::new(ErrorCode::Canceled, "canceled"));
+        }
+        copy_checked(src, f, None)?;
+        done += f.size;
+        progress.report(Some(done as f32 / total as f32), &format!("verified {}", f.path));
+    }
+    Ok(m)
+}
+
+fn extract_source(src: &mut dyn Source, files: &[RuntimeFile], dest: &Path, progress: &mut dyn Progress) -> Result<()> {
+    let m = read_manifest(src)?;
+    let total: u64 = files.iter().map(|f| f.size).sum::<u64>().max(1);
+    let mut done = 0u64;
+    for f in files {
+        if progress.canceled() {
+            return Err(Error::new(ErrorCode::Canceled, "canceled"));
+        }
+        let listed = m.files.iter().find(|x| x.path == f.path);
+        if listed != Some(f) {
+            return Err(Error::invalid(format!("{} is not a file of this bundle", f.path)));
+        }
+        let target = dest.join(safe_rel_path(&f.path)?);
+        if !target.starts_with(dest) {
+            return Err(Error::new(ErrorCode::Refused, format!("{} escapes the staging folder", f.path)));
+        }
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent).map_err(crate::util::io_at(parent, "creating"))?;
+        }
+        // a DLL Windows refuses here is in the staging folder (an antivirus scans it as it is written): crate::blocked
+        let mut out = std::fs::File::create(&target).map_err(crate::blocked::io_at(&target, "writing", &f.path))?;
+        copy_checked(src, f, Some(&mut out))?;
+        // (kiln-eml-inspect: the helper, its bytes and its manifest entry checked, gets 0755 on the
+        // handle it was written through; a refusal is said and the install goes on: the helper cannot run there)
+        #[cfg(unix)]
+        if executable(&f.path, &f.component) {
+            use std::os::unix::fs::PermissionsExt as _;
+            let made = out.metadata().and_then(|m| {
+                if m.is_file() { out.set_permissions(std::fs::Permissions::from_mode(0o755)) } else { Err(std::io::Error::other("not a plain file")) }
+            });
+            if let Err(e) = made {
+                progress.report(None, &format!("{} could not be made executable ({e}): Kiln's archive inspector cannot run from this folder", f.path));
+            }
+        }
+        out.sync_all().map_err(crate::blocked::io_at(&target, "flushing", &f.path))?;
+        done += f.size;
+        progress.report(Some(done as f32 / total as f32), &format!("staged {}", f.path));
+    }
+    Ok(())
+}
+
 #[cfg(feature = "zip")]
 mod imp {
     use super::*;
-    use crate::hash::hex;
-    use sha2::{Digest, Sha256};
-    use std::io::{Read, Write};
 
     fn zip_err(zip: &Path) -> impl Fn(zip::result::ZipError) -> Error + '_ {
         move |e| Error::new(ErrorCode::Parse, format!("{}: {e}", zip.display()))
     }
 
-    pub fn open(zip: &Path) -> Result<zip::ZipArchive<std::fs::File>> {
-        let f = std::fs::File::open(zip).map_err(crate::util::io_at(zip, "opening"))?;
-        zip::ZipArchive::new(f).map_err(zip_err(zip))
+    /// A bundle zip as a [`Source`]: its own modes are never read.
+    pub struct ZipSource {
+        a: zip::ZipArchive<std::fs::File>,
+        path: PathBuf,
     }
 
-    pub fn read_manifest(a: &mut zip::ZipArchive<std::fs::File>, zip: &Path) -> Result<RuntimeManifest> {
-        let mut e = a.by_name(MANIFEST).map_err(|_| Error::new(ErrorCode::Schema, format!("{}: no {MANIFEST}", zip.display())))?;
-        let mut text = Vec::new();
-        e.read_to_end(&mut text).map_err(crate::util::io_at(zip, "reading"))?;
-        let m: RuntimeManifest = serde_json::from_slice(&text)
-            .map_err(|e| Error::new(ErrorCode::Parse, format!("{}: {MANIFEST}: {e}", zip.display())))?;
-        validate(&m)?;
-        Ok(m)
+    impl ZipSource {
+        pub fn open(zip: &Path) -> Result<ZipSource> {
+            let f = std::fs::File::open(zip).map_err(crate::util::io_at(zip, "opening"))?;
+            Ok(ZipSource { a: zip::ZipArchive::new(f).map_err(zip_err(zip))?, path: zip.to_path_buf() })
+        }
     }
 
-    pub fn read(zip: &Path) -> Result<RuntimeManifest> {
-        read_manifest(&mut open(zip)?, zip)
-    }
+    impl Source for ZipSource {
+        fn path(&self) -> &Path {
+            &self.path
+        }
 
-    fn check_entries(a: &mut zip::ZipArchive<std::fs::File>, m: &RuntimeManifest, zip: &Path) -> Result<()> {
-        let wanted: std::collections::BTreeSet<&str> = m.files.iter().map(|f| f.path.as_str()).collect();
-        let mut seen = std::collections::BTreeSet::new();
-        for i in 0..a.len() {
-            let e = a.by_index_raw(i).map_err(zip_err(zip))?;
-            let name = e.name().map_err(zip_err(zip))?.to_string();
-            if e.is_symlink() {
-                return Err(Error::new(ErrorCode::Refused, format!("{}: symlink entry {name}", zip.display())));
-            }
-            if e.is_dir() {
-                safe_rel_path(name.trim_end_matches('/'))?;
-                continue;
-            }
-            safe_rel_path(&name)?;
-            if name != MANIFEST && !wanted.contains(name.as_str()) {
-                return Err(Error::new(ErrorCode::Schema, format!("{}: entry {name} is not in {MANIFEST}", zip.display())));
-            }
-            if !seen.insert(name.clone()) {
-                return Err(Error::new(ErrorCode::Schema, format!("{}: entry {name} is there twice", zip.display())));
-            }
+        fn noun(&self) -> &'static str {
+            "entry"
         }
-        if let Some(missing) = wanted.iter().find(|p| !seen.contains(**p)) {
-            return Err(Error::new(ErrorCode::Schema, format!("{}: {missing} is listed but not in the zip", zip.display())));
-        }
-        Ok(())
-    }
 
-    /// Streams one entry into `out` (when given) while hashing it; checks size and sha256.
-    fn copy_checked(a: &mut zip::ZipArchive<std::fs::File>, f: &RuntimeFile, zip: &Path, mut out: Option<&mut dyn Write>) -> Result<()> {
-        let mut e = a.by_name(&f.path).map_err(zip_err(zip))?;
-        let mut h = Sha256::new();
-        let mut buf = vec![0u8; 1 << 16];
-        let mut size = 0u64;
-        loop {
-            let n = e.read(&mut buf).map_err(|err| Error::new(ErrorCode::Parse, format!("{}: {}: {err}", zip.display(), f.path)))?;
-            if n == 0 {
-                break;
+        fn entries(&mut self) -> Result<Vec<(String, Kind)>> {
+            let mut out = Vec::with_capacity(self.a.len());
+            for i in 0..self.a.len() {
+                let e = self.a.by_index_raw(i).map_err(zip_err(&self.path))?;
+                let name = e.name().map_err(zip_err(&self.path))?.to_string();
+                let kind = if e.is_symlink() {
+                    Kind::Link
+                } else if e.is_dir() {
+                    Kind::Dir
+                } else {
+                    Kind::File
+                };
+                out.push((name, kind));
             }
-            size += n as u64;
-            if size > f.size {
-                break;
-            }
-            h.update(&buf[..n]);
-            if let Some(o) = out.as_mut() {
-                // the staged copy of a DLL that Windows refuses (an antivirus): crate::blocked
-                o.write_all(&buf[..n]).map_err(crate::blocked::io_at(Path::new(&f.path), "writing", &f.path))?;
-            }
+            Ok(out)
         }
-        let sha = hex(h.finalize().as_slice());
-        if size != f.size || sha != f.sha256 {
-            return Err(Error::new(ErrorCode::HashMismatch, format!("{}: {} does not match {MANIFEST} (size {size}, sha256 {sha})", zip.display(), f.path))
-                .with_detail(serde_json::json!({ "path": f.path, "expectedSha256": f.sha256, "expectedSize": f.size })));
-        }
-        Ok(())
-    }
 
-    pub fn verify(zip: &Path, progress: &mut dyn Progress) -> Result<RuntimeManifest> {
-        let mut a = open(zip)?;
-        let m = read_manifest(&mut a, zip)?;
-        check_entries(&mut a, &m, zip)?;
-        let total: u64 = m.files.iter().map(|f| f.size).sum::<u64>().max(1);
-        let mut done = 0u64;
-        for f in &m.files {
-            if progress.canceled() {
-                return Err(Error::new(ErrorCode::Canceled, "canceled"));
+        fn open(&mut self, name: &str) -> Result<Box<dyn Read + '_>> {
+            match self.a.by_name(name) {
+                Ok(e) => Ok(Box::new(e)),
+                Err(zip::result::ZipError::FileNotFound) => Err(Error::new(ErrorCode::Schema, format!("{}: no {name}", self.path.display()))),
+                Err(e) => Err(zip_err(&self.path)(e)),
             }
-            copy_checked(&mut a, f, zip, None)?;
-            done += f.size;
-            progress.report(Some(done as f32 / total as f32), &format!("verified {}", f.path));
         }
-        Ok(m)
-    }
-
-    pub fn extract(zip: &Path, files: &[RuntimeFile], dest: &Path, progress: &mut dyn Progress) -> Result<()> {
-        let mut a = open(zip)?;
-        let m = read_manifest(&mut a, zip)?;
-        let total: u64 = files.iter().map(|f| f.size).sum::<u64>().max(1);
-        let mut done = 0u64;
-        for f in files {
-            if progress.canceled() {
-                return Err(Error::new(ErrorCode::Canceled, "canceled"));
-            }
-            let listed = m.files.iter().find(|x| x.path == f.path);
-            if listed != Some(f) {
-                return Err(Error::invalid(format!("{} is not a file of this bundle", f.path)));
-            }
-            let target = dest.join(safe_rel_path(&f.path)?);
-            if !target.starts_with(dest) {
-                return Err(Error::new(ErrorCode::Refused, format!("{} escapes the staging folder", f.path)));
-            }
-            if let Some(parent) = target.parent() {
-                std::fs::create_dir_all(parent).map_err(crate::util::io_at(parent, "creating"))?;
-            }
-            // a DLL Windows refuses here is in the staging folder (an antivirus scans it as it is written): crate::blocked
-            let mut out = std::fs::File::create(&target).map_err(crate::blocked::io_at(&target, "writing", &f.path))?;
-            copy_checked(&mut a, f, zip, Some(&mut out))?;
-            // (kiln-eml-inspect: the helper, its bytes and its manifest entry checked, gets 0755 on the
-            // handle it was written through; a refusal is said and the install goes on: the helper cannot run there)
-            #[cfg(unix)]
-            if super::executable(&f.path, &f.component) {
-                use std::os::unix::fs::PermissionsExt as _;
-                let made = out.metadata().and_then(|m| {
-                    if m.is_file() { out.set_permissions(std::fs::Permissions::from_mode(0o755)) } else { Err(std::io::Error::other("not a plain file")) }
-                });
-                if let Err(e) = made {
-                    progress.report(None, &format!("{} could not be made executable ({e}): Kiln's archive inspector cannot run from this folder", f.path));
-                }
-            }
-            out.sync_all().map_err(crate::blocked::io_at(&target, "flushing", &f.path))?;
-            done += f.size;
-            progress.report(Some(done as f32 / total as f32), &format!("staged {}", f.path));
-        }
-        Ok(())
     }
 
     fn zip_time(epoch: i64) -> zip::DateTime {
@@ -537,47 +781,37 @@ pub fn manifest_for_stage(stage: &Path, options: &CreateOptions) -> Result<(Runt
     Ok((m, files))
 }
 
-/// Reads `kiln-runtime.json` from a bundle zip (feature `zip`).
-pub fn read(zip: &Path) -> Result<RuntimeManifest> {
-    #[cfg(feature = "zip")]
-    {
-        // `list` reads every bundle's manifest on each status poll: parsed once per zip while it is unchanged
-        static MANIFESTS: std::sync::LazyLock<crate::filecache::Memo<std::sync::Arc<RuntimeManifest>>> =
-            std::sync::LazyLock::new(|| crate::filecache::Memo::new(64));
-        MANIFESTS.get(zip, |z| imp::read(z).map(std::sync::Arc::new)).map(|m| (*m).clone())
+/// Reads `kiln-runtime.json` from a bundle: its zip (feature `zip`) or the folder it was unpacked to.
+pub fn read(bundle: &Path) -> Result<RuntimeManifest> {
+    if is_folder(bundle) {
+        return read_manifest(&mut FolderSource::new(bundle)?);
     }
-    #[cfg(not(feature = "zip"))]
-    {
-        let _ = zip;
-        Err(Error::new(ErrorCode::Unsupported, "kiln-manage was built without the zip feature"))
-    }
+    // `list` reads every bundle's manifest on each status poll: parsed once per zip while it is unchanged
+    static MANIFESTS: std::sync::LazyLock<crate::filecache::Memo<std::sync::Arc<RuntimeManifest>>> =
+        std::sync::LazyLock::new(|| crate::filecache::Memo::new(64));
+    MANIFESTS.get(bundle, |z| read_manifest(&mut *open_source(z)?).map(std::sync::Arc::new)).map(|m| (*m).clone())
 }
 
-/// Reads the manifest and checks every file's size and sha256 against it.
-pub fn verify(zip: &Path, progress: &mut dyn Progress) -> Result<RuntimeManifest> {
-    #[cfg(feature = "zip")]
-    {
-        imp::verify(zip, progress)
-    }
-    #[cfg(not(feature = "zip"))]
-    {
-        let _ = (zip, progress);
-        Err(Error::new(ErrorCode::Unsupported, "kiln-manage was built without the zip feature"))
-    }
+/// Reads the manifest and checks the bundle against it: every listed file there with its size and sha256, nothing
+/// else in it (but the manifest), no unsafe name, link or special file. A zip (feature `zip`) and an unpacked folder
+/// (`kiln-runtime.json` at its root) are held to the same rules.
+pub fn verify(bundle: &Path, progress: &mut dyn Progress) -> Result<RuntimeManifest> {
+    verify_source(&mut *open_source(bundle)?, progress)
 }
 
 /// Unpacks `files` (entries of the bundle's manifest) below `dest`, checking each one's size and sha256 while it is
-/// written (zip-slip guarded). The installer stages with it.
-pub fn extract(zip: &Path, files: &[RuntimeFile], dest: &Path, progress: &mut dyn Progress) -> Result<()> {
-    #[cfg(feature = "zip")]
-    {
-        imp::extract(zip, files, dest, progress)
+/// written (zip-slip guarded), from the zip or the unpacked folder. The installer stages with it.
+pub fn extract(bundle: &Path, files: &[RuntimeFile], dest: &Path, progress: &mut dyn Progress) -> Result<()> {
+    extract_source(&mut *open_source(bundle)?, files, dest, progress)
+}
+
+/// The sha256 of a bundle zip, which an install receipt records (`runtime.sha256`); `None` for an unpacked folder,
+/// which has no zip to name (its `kiln-runtime.json` still pins every file's sha256).
+pub fn zip_sha256(bundle: &Path) -> Result<Option<String>> {
+    if is_folder(bundle) {
+        return Ok(None);
     }
-    #[cfg(not(feature = "zip"))]
-    {
-        let _ = (zip, files, dest, progress);
-        Err(Error::new(ErrorCode::Unsupported, "kiln-manage was built without the zip feature"))
-    }
+    Ok(Some(crate::hash::sha256_file(bundle)?.0))
 }
 
 /// Builds a deterministic bundle from a staging folder (game-relative layout + kiln-runtime.json without files[]).
@@ -605,7 +839,7 @@ pub fn create(stage: &Path, out_dir: &Path, options: &CreateOptions) -> Result<P
     #[cfg(not(feature = "zip"))]
     {
         let _ = (m, files, out_dir);
-        Err(Error::new(ErrorCode::Unsupported, "kiln-manage was built without the zip feature"))
+        Err(no_zip())
     }
 }
 
@@ -655,7 +889,9 @@ pub fn list(dirs: &crate::paths::DataDirs) -> Result<Vec<RuntimeBundle>> {
     let mut out = Vec::new();
     for e in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
         let p = e.path();
+        // zips only: a folder of that name is no bundle the launcher keeps
         if p.extension().is_some_and(|x| x == "zip")
+            && p.is_file()
             && let Ok(m) = read(&p)
         {
             out.push(describe(&p, &m)?);
@@ -680,8 +916,15 @@ pub fn compare_versions(a: &str, b: &str) -> std::cmp::Ordering {
     }
 }
 
-/// Copies a bundle zip into `<data>/runtime/` after `verify`.
+/// Copies a bundle zip into `<data>/runtime/` after `verify`. An unpacked folder is refused: the launcher keeps zips.
 pub fn import(dirs: &crate::paths::DataDirs, zip: &Path) -> Result<RuntimeBundle> {
+    if is_folder(zip) {
+        return Err(Error::new(
+            ErrorCode::Unsupported,
+            format!("{}: an unpacked bundle folder; the launcher keeps runtime bundles as zips in {} (import the bundle's zip, \
+                     or install the folder with kilnctl bundle install)", zip.display(), dirs.runtime().display()),
+        ));
+    }
     let m = verify(zip, &mut crate::task::NoProgress)?;
     let dir = dirs.runtime();
     std::fs::create_dir_all(&dir).map_err(crate::util::io_at(&dir, "creating"))?;

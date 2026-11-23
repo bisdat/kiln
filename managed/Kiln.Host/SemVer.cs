@@ -167,7 +167,7 @@ internal sealed class VersionRange
 {
     private enum Op { Eq, Gt, Ge, Lt, Le }
 
-    private readonly record struct Comparator(Op Op, SemVersion Version)
+    private readonly record struct Comparator(Op Op, SemVersion Version, bool ExplicitPrerelease = false)
     {
         public bool Test(SemVersion v) => Op switch
         {
@@ -192,6 +192,15 @@ internal sealed class VersionRange
     public bool IsAny => _sets.Exists(s => s.Count == 0);
 
     public bool Satisfies(SemVersion v) => _sets.Exists(set => set.TrueForAll(c => c.Test(v)));
+
+    /// <summary>Only for the Kiln core dependency: a plain alternative also accepts a dev build as its release.
+    /// An alternative mentioning a pre-release must match the actual version; generated -0 upper bounds do not count.</summary>
+    public bool SatisfiesKiln(SemVersion v)
+    {
+        var release = v.Release;
+        return _sets.Exists(set => set.TrueForAll(c => c.Test(v)) ||
+            (!set.Exists(c => c.ExplicitPrerelease) && set.TrueForAll(c => c.Test(release))));
+    }
 
     /// <summary><paramref name="v"/> or any later version with the same major (an <c>apiVersion</c> written as a bare
     /// version: Kiln's API is additive within a major, 0.x included).</summary>
@@ -255,7 +264,7 @@ internal sealed class VersionRange
                     error = $"bad hyphen range '{tokens[i]} - {tokens[i + 2]}'";
                     return false;
                 }
-                set.Add(new Comparator(Op.Ge, lo.Floor));
+                set.Add(new Comparator(Op.Ge, lo.Floor, lo.Pre.Length > 0 || hi.Pre.Length > 0));
                 set.Add(hi.Count == 3 ? new Comparator(Op.Le, hi.Floor) : new Comparator(Op.Lt, hi.Next.Lowest));
                 i += 2;
                 continue;
@@ -283,6 +292,7 @@ internal sealed class VersionRange
             return true;
         }
         if (op == "" && p.Wildcard) op = "=";  // 1.2.x / 1.* mean "any 1.2.z" / "any 1.y.z", not caret
+        var start = set.Count;
         switch (op)
         {
             case "" or "^":
@@ -320,6 +330,8 @@ internal sealed class VersionRange
                 set.Add(p.Count == 3 ? new Comparator(Op.Le, p.Floor) : new Comparator(Op.Lt, p.Next.Lowest));
                 break;
         }
+        // Keep source syntax on one comparator of the operand, including when expansion replaces its version.
+        if (p.Pre.Length > 0) set[start] = set[start] with { ExplicitPrerelease = true };
         return true;
     }
 
@@ -354,7 +366,7 @@ internal sealed class VersionRange
                     error = $"version range '{text}': '[{body}]' must be an exact version in square brackets";
                     return false;
                 }
-                set.Add(new Comparator(Op.Eq, exact));
+                set.Add(new Comparator(Op.Eq, exact, exact.IsPrerelease));
             }
             else
             {
@@ -367,7 +379,7 @@ internal sealed class VersionRange
                         error = $"version range '{text}': bad lower bound '{lo}'";
                         return false;
                     }
-                    set.Add(new Comparator(lowerInclusive ? Op.Ge : Op.Gt, l));
+                    set.Add(new Comparator(lowerInclusive ? Op.Ge : Op.Gt, l, l.IsPrerelease));
                 }
                 if (hi.Length > 0)
                 {
@@ -376,7 +388,7 @@ internal sealed class VersionRange
                         error = $"version range '{text}': bad upper bound '{hi}'";
                         return false;
                     }
-                    set.Add(upperInclusive ? new Comparator(Op.Le, h) : new Comparator(Op.Lt, h.IsPrerelease ? h : h.Lowest));
+                    set.Add(upperInclusive ? new Comparator(Op.Le, h, h.IsPrerelease) : new Comparator(Op.Lt, h.IsPrerelease ? h : h.Lowest, h.IsPrerelease));
                 }
             }
             sets.Add(set);

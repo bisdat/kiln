@@ -1,0 +1,20 @@
+{
+  "_comment": "Staged update path rules (docs/kiln/staged-updates.md): native/core/src/staged.cpp and mods/Kiln.Admin/Staging.cs must both answer every case as listed here (native/core/tests/staged_test.cpp, managed/tests/Kiln.Host.Tests/StagingTests.cs).",
+  "rel": {
+    "ok": ["kiln.mod.json", "Mod.dll", "data/blocks/a.json", ".disabled", "a b/c-d_e.f", "ünïcode/ok.txt", "console.txt", "com10.txt", "lpt/x"],
+    "bad": ["", "../evil.dll", "a/../../evil.dll", "a/./b", "/etc/passwd", "C:/Windows/x.dll", "a\\b", "a//b", "a/", "con", "CON.txt",
+            "data/nul.json", "com1", "lpt9.log", "COM¹.txt", "x.", "x ", "a:stream", "a*b", "a?b", "a<b", "a>b", "a|b", "a\"b", "tab\there", "\u007f"]
+  },
+  "kiln": {
+    "ok": ["dinput8.dll", "DINPUT8.DLL", "kiln/kiln-core.dll", "kiln/.install.json", "kiln/mods/kiln-admin/Kiln.Admin.dll",
+           "kiln/host/Kiln.Host.dll", "kiln/dataset.txt", "kiln/kiln.json"],
+    "bad": ["enshrouded_server.exe", "steam_api64.dll", "kiln/staged/kiln/staged.json", "kiln/data/kiln-admin/admin-token",
+            "kiln/data/kiln-network/server-id", "kiln/data/registry/entry-compat.json", "kiln/data", "Kiln/Data/x", "Kiln/Config/x.json",
+            "kiln/logs/kiln.log", "kiln/state/boot.json", "kiln/backups/x", "kiln/control/x.cmd", "kiln/crash-reports/x.txt", "kiln/staged",
+            "../kiln/x", "kiln/../x"]
+  },
+  "folder": {
+    "ok": ["m", "kiln-webadmin", "Kiln.Example", "my mod", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+    "bad": ["", ".stage-1", ".hidden", "a/b", "..", ".", "con", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]
+  }
+}

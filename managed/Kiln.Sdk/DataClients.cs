@@ -26,7 +26,7 @@ internal static class DataClients
         // nothing a player's game has to know, unless a field says so (an ability that places something, an NPC attack of its own: kiln)
         ["effects"] = None, ["abilities"] = None, ["triggers"] = None, ["screenEffects"] = None,
         ["materialTweaks"] = None, ["strengths"] = None, ["surfaces"] = None, ["lootTables"] = None,
-        ["creatures"] = None, ["bodies"] = None, ["animations"] = None, ["ais"] = None, ["behaviours"] = None, ["attacks"] = None, ["rules"] = None,
+        ["creatures"] = None, ["bodies"] = None, ["animations"] = None, ["npcMotions"] = None, ["ais"] = None, ["behaviours"] = None, ["attacks"] = None, ["rules"] = None,
         // affix kinds and pools: Kiln's own on the server; the rolls reach Kiln clients as item data, and vanilla clients need nothing
         ["affixes"] = None, ["affixPools"] = None,
         // a villager's day plan: only the server chooses tasks

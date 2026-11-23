@@ -182,6 +182,7 @@ internal sealed unsafe class HostRuntime : IHostServices, IKilnBackend
     private readonly string _control;
     private readonly HostConfig _config;
     private readonly ModManager _mods;
+    private readonly StagedProbation? _staged;  // kiln/staged/probation: the verdict on updates applied at this start
     private readonly CrashReports? _crash;
     private readonly KilnBuildInfo _build;
     private readonly HostProfile _profile;
@@ -250,8 +251,12 @@ internal sealed unsafe class HostRuntime : IHostServices, IKilnBackend
         _build = build;
         _wine = WineVersion();
         var data = _profile.DataDirectory ?? NativeCalls.Path(api, KilnAbi.PathData);
-        _mods = new ModManager(this, NativeCalls.Path(api, KilnAbi.PathMods), data, new ModManagerOptions
+        var modsDir = NativeCalls.Path(api, KilnAbi.PathMods);
+        // kiln/staged (docs/kiln/staged-updates.md): the updates applied at this start wait for their verdict here
+        _staged = _client ? null : new StagedProbation(Path.Combine(kiln, "staged"), modsDir, Log);
+        _mods = new ModManager(this, modsDir, data, new ModManagerOptions
         {
+            Probation = _staged,
             Profile = _profile,
             ModsJsonFile = Path.Combine(state, "mods.json"),
             Side = CurrentSide(),
@@ -841,6 +846,7 @@ internal sealed unsafe class HostRuntime : IHostServices, IKilnBackend
         Lifecycle.Phase = ServerPhase.Booting;
         ServiceTick.StartEarlyServices();  // rows a mod reads in OnLoad (world.transform_scale), decided before it does
         _mods.LoadAll();
+        _staged?.ConfirmKiln();  // a Kiln update this start booted got as far as the mods: it stays
         Lifecycle.ModsLoaded = true;
         var all = Kiln.Mods.All;
         _mods.PostEvent(new ModsLoadedEvent(all.Where(e => e.IsLoaded).ToArray(), all.Where(e => !e.IsLoaded).ToArray()));

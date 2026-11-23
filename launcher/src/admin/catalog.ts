@@ -3,27 +3,24 @@
 // through assetsRoot(). Without it the pages fall
 // back to what the server reports (the `enemies` catalog, item_search).
 import { useQuery } from "@tanstack/react-query";
-import { convertFileSrc } from "@tauri-apps/api/core";
-import { isTauri } from "../api/commands";
+import { adminHost } from "../api/admin";
 import { t } from "../i18n";
 
-/** The one base URL of the admin pages' local assets (layout: map/..., data/...):
+/** The one base URL of the admin pages' local assets (layout: map/..., data/...), read when used (the host is set
+ *  after the modules load):
  *  - VITE_KILN_ASSETS when set;
- *  - a release build of the launcher: the `kiln-asset` protocol, prefix admin/ (src-tauri/src/assets.rs:
- *    $KILN_ADMIN_ASSETS, then <data>/admin-assets): kiln-asset://localhost/admin/, on Windows
- *    http://kiln-asset.localhost/admin/;
- *  - dev (vite, `tauri dev`, a plain browser): /assets-local/ (vite serves launcher/assets-local; under tauri dev
+ *  - the host's (configureAdmin): a release build of the launcher uses the `kiln-asset` protocol, prefix admin/
+ *    (src-tauri/src/assets.rs: $KILN_ADMIN_ASSETS, then <data>/admin-assets): kiln-asset://localhost/admin/, on Windows
+ *    http://kiln-asset.localhost/admin/ (../api/adminTauri.ts); a web host serves its own;
+ *  - else /assets-local/ (dev: vite, `tauri dev`, a plain browser; vite serves launcher/assets-local; under tauri dev
  *    WebKitGTK refuses custom-scheme images and CSS from the http://localhost:1420 page). */
 export function assetsRoot(): string {
   const env = import.meta.env.VITE_KILN_ASSETS as string | undefined;
   if (env) return env.endsWith("/") ? env : `${env}/`;
-  if (isTauri() && !import.meta.env.DEV) {
-    const base = convertFileSrc("", "kiln-asset");
-    return `${base.endsWith("/") ? base : `${base}/`}admin/`;
-  }
+  const host = adminHost().assetsRoot?.();
+  if (host) return host.endsWith("/") ? host : `${host}/`;
   return "/assets-local/";
 }
-export const ASSETS_ROOT: string = assetsRoot();
 
 export interface CreatureTemplate {
   guid: string;
@@ -38,7 +35,7 @@ export function useCreatureCatalog() {
     staleTime: Infinity,
     retry: false,
     queryFn: async (): Promise<CreatureTemplate[]> => {
-      const r = await fetch(`${ASSETS_ROOT}data/creature-templates.json`);
+      const r = await fetch(`${assetsRoot()}data/creature-templates.json`);
       if (!r.ok || !(r.headers.get("content-type") ?? "").includes("json")) return [];
       const d = (await r.json()) as Record<string, { template: string; name?: string }>;
       return Object.entries(d)

@@ -27,5 +27,8 @@
     <InternalsVisibleTo Include="Kiln.Build" />
     <!-- a button or a key of a UI block runs a command line as the console folder would -->
     <InternalsVisibleTo Include="Kiln.Blocks" />
+    <!-- Kiln.Admin's command_run / commands_describe run lines as a named remote source capped at a level
+         (CommandSource.RemoteCapped, WithCap) -->
+    <InternalsVisibleTo Include="Kiln.Admin" />
   </ItemGroup>
 </Project>

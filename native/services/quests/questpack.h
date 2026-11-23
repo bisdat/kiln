@@ -24,7 +24,16 @@ struct ModInput {
     std::vector<std::string> files;  // parallel: names for messages
     ojson audio;                     // assets/cooked/audio.json (null when the mod has none)
     std::string guid_namespace;      // assets/cook.json's guidNamespace ("" when none)
+    std::vector<std::string> required_mods;  // native dependencies: a refused dependency contributes no shared tables
+    bool authored_body = false;      // do not fall back to publishing the ordinary part of a body-dependent mod
+    std::string dir;                 // the mod's folder (UTF-8): authored-body admission reads its cooked body cache there
+    std::string body_refusal;        // set at collection: this mod's authored bodies cannot be admitted (the whole mod is refused)
+    std::vector<std::string> refused_bodies;  // NPC blocks collection left out for body_refusal (another chassis): failed rows still
+    struct SkippedBody { std::string npc, key, reason; };
+    std::vector<SkippedBody> skipped_bodies;  // incomplete legacy models: only that NPC is left out, with a failed status row
 };
+// The one verified roster-body chassis (chapter 16f section 5.1): Bodies.Fisher and Bodies.Villager both lower to it.
+constexpr const char* kBodyChassis = "NPC_Workshop_Fisher_Trader";
 
 // Read access to the game's resources.
 struct GameData {
@@ -35,12 +44,21 @@ struct GameData {
     // entries together are more than kMaxNpcs, with that total. Returns kMaxNpcs or kMaxNpcsPaged; `why` says why it is
     // kMaxNpcs (the build's refusal carries it). Not set: kMaxNpcs.
     std::function<uint32_t(uint32_t needed, std::string* why)> roster_max;
+    // 16f: the running game's type registry still has the verified body layout (bodypack.h check_body_layout). Not set:
+    // an NPC with an admitted "body" refuses its mod. Asked only when such an NPC is built.
+    std::function<bool(std::string* why)> body_layout;
 };
 
 struct TemplateOut {
     Guid guid;
     std::string name;
     bool is_new = false;
+    Bytes data;
+};
+struct ResourceOut {  // 16f S4: a new resource the build adds beside its templates (cloned NPC motion sequences)
+    Guid guid;
+    uint32_t type = 0;
+    std::string name;
     Bytes data;
 };
 struct TextOut {
@@ -51,11 +69,14 @@ struct PackOut {
     bool any = false;          // something native to build
     bool ok = true;
     std::vector<std::string> errors, warnings;
+    std::string shared_failure;  // missing shared inputs stop startup; one mod's template/build failure does not
     std::vector<KnowledgeDef> knowledge;
     std::vector<JournalQuestDef> quests;
     std::vector<NpcDef> npcs;
     Bytes res_knowledge, res_journal, res_npcs;
+    size_t knowledge_source_size = 0;  // input length before this compile appended tables; private compaction provenance
     std::vector<TemplateOut> templates;
+    std::vector<ResourceOut> resources;  // new keys only, published with the templates
     std::vector<TextOut> texts;
     std::vector<std::string> content_items, content_recipes;  // definitions for kiln.content's define()
     // The roster as built (since 0.2.0-dev.29; empty when no mod adds an NPC): the collection's NpcIds before the

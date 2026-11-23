@@ -29,6 +29,7 @@
 #include <intrin.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <atomic>
 #include <cstdio>
@@ -39,9 +40,12 @@
 #include <mutex>
 #include <optional>
 #include <set>
+#include <stdexcept>
 #include <unordered_set>
 
 #include "barber.h"
+#include "bootpack_internal.h"
+#include "boot_text_undo.h"
 #include "content.h"
 #include "menulayout.h"  // kiln.stationmenus: station menu layouts and the own workshops' trees (own_build)
 #include "nlohmann/json.hpp"
@@ -439,6 +443,8 @@ std::atomic<const TextMap*> g_texts[kShards] = {};
 std::atomic<const TextMap*>& text_shard(uint32_t tag) { return g_texts[tag & (kShards - 1)]; }
 std::mutex g_text_mu;
 std::deque<std::string> g_text_arena;
+std::map<KilnOwner, bootpack::TextUndo<const TextEntry*>> g_boot_text_undo;  // g_text_mu; retained until a boot generation cannot abort
+thread_local KilnOwner t_boot_text_owner = 0;  // only the private boot helper records definition text writes
 // loca hook diagnostics (client)
 std::atomic<uint64_t> g_loca_calls{0}, g_loca_hits{0};
 std::atomic<bool> g_loca_trace{false};
@@ -523,7 +529,7 @@ bool same_view(const TextView& v, const std::string* s) {
 
 // Sets the texts of one tag (empty set: nothing). Unchanged texts keep their entry. Texts in some languages only, with no "en" or "*" (a German
 // description alone): those languages get theirs and the rest are left to the game, which has no text for the tag, so they show none.
-void set_texts(uint32_t tag, const TextSet& texts) {
+void set_texts(uint32_t tag, const TextSet& texts, KilnOwner boot_owner = 0) {
     if (!tag || texts.empty()) return;
     PhaseTimer pt(PH_TEXTS);
     std::lock_guard lock(g_text_mu);
@@ -559,13 +565,22 @@ void set_texts(uint32_t tag, const TextSet& texts) {
         delete e;
         return;
     }
-    auto* next = new TextMap(cur ? *cur : TextMap{});
+    auto next = std::make_unique<TextMap>(cur ? *cur : TextMap{});
     (*next)[tag] = e;
-    shard.store(next);
+    if (boot_owner) {
+        const auto transaction = g_boot_text_undo.find(boot_owner);
+        const auto previous = cur ? cur->find(tag) : TextMap::const_iterator{};
+        const TextEntry* before = cur && previous != cur->end() ? previous->second : nullptr;
+        if (transaction == g_boot_text_undo.end() || !transaction->second.record(tag, before, e)) {
+            delete e;
+            throw std::runtime_error("boot text tag " + std::to_string(tag) + " changed outside its owner or its transaction is closed");
+        }
+    }
+    shard.store(next.release());
 }
 
-void set_text(uint32_t tag, const std::string& text) {
-    if (!text.empty()) set_texts(tag, TextSet{{"*", text}});
+void set_text(uint32_t tag, const std::string& text, KilnOwner boot_owner = 0) {
+    if (!text.empty()) set_texts(tag, TextSet{{"*", text}}, boot_owner);
 }
 
 // The text a hook answers for `tag` in the pool's current language (nullptr: not one of ours).
@@ -3878,6 +3893,12 @@ uintptr_t __fastcall hk_itemupdate(uintptr_t ireg, uintptr_t a, uintptr_t b, uin
 
 // A world's first step, before its first Pre. Last chance for the prediction world's first step, and the log line.
 void world_started(const KilnWorldEvent& ev) {
+    {
+        std::lock_guard lock(g_text_mu);
+        // The private helper refuses every operation once a world has run: no boot generation can abort now.
+        // Only the undo records go; published text entries/maps and content definitions keep their existing lifetimes.
+        g_boot_text_undo.clear();
+    }
     g_first_step_ms[ev.kind] = GetTickCount64();
     if (ev.kind == KILN_WORLD_SERVER || g_api->side() != KILN_SIDE_CLIENT) return;
     const uintptr_t cw = ev.kind == KILN_WORLD_CLIENT ? ev.world : g_early_world.load();
@@ -4253,7 +4274,7 @@ std::string str_of(const json& j, const char* k) { return j.contains(k) && j[k].
 
 // "mod newitems" / "pack newitems" -> "newitems"
 std::string mod_of_label(const std::string& label) {
-    for (const char* p : {"mod ", "pack ", "boot:"})  // "boot:<mod>": the process owner of a boot generation's definitions
+    for (const char* p : {"mod ", "pack ", "boot:", "bootpack:"})  // process owners retain native definitions until restart
         if (label.rfind(p, 0) == 0) return label.substr(std::strlen(p));
     return {};
 }
@@ -4582,6 +4603,8 @@ KilnResult nc_define(KilnOwner owner, uint32_t kind, const std::string& text, bo
         PhaseTimer lt(PH_DEFINE_LOCKED);
         std::lock_guard lock(store_mutex());
         DefPtr cur = find_def(kind, d->guid);
+        if (t_boot_text_owner == owner && cur && cur->owner != owner)
+            return fail("a native boot pack cannot take another owner's definition " + d->guid_s);
         if (const auto* same_name = g_index.named(kind, d->name))
             for (const DefPtr& x : *same_name)
                 if (x != cur && !(x->placeholder || d->placeholder))
@@ -4636,7 +4659,8 @@ KilnResult nc_define(KilnOwner owner, uint32_t kind, const std::string& text, bo
             out["state"] = d->placeholder ? "placeholder" : "defined";
         }
     }
-    for (int i = 0; i < (kind == KILN_CONTENT_ITEMS ? kTextSlots : 0); ++i) set_texts(d->tags[i], d->texts[i]);
+    for (int i = 0; i < (kind == KILN_CONTENT_ITEMS ? kTextSlots : 0); ++i)
+        set_texts(d->tags[i], d->texts[i], t_boot_text_owner == owner ? owner : 0);
     if (kind == KILN_CONTENT_ITEMS && !d->icon_file.empty())
         if (const KilnAssetsApi* a = assets_api(); a && a->icon_register_file) {
             const KilnResult irc = a->icon_register_file(owner, d->guid, KilnStr{d->icon_file.data(), d->icon_file.size()});
@@ -4648,7 +4672,8 @@ KilnResult nc_define(KilnOwner owner, uint32_t kind, const std::string& text, bo
                 d->icon_problem = "icon " + d->icon_file + " refused by kiln.assets (" + std::to_string(irc) + ")";
             }
         }
-    if (kind == KILN_CONTENT_RECIPES && !d->display.empty()) set_text(d->tags[0], d->display);
+    if (kind == KILN_CONTENT_RECIPES && !d->display.empty())
+        set_text(d->tags[0], d->display, t_boot_text_owner == owner ? owner : 0);
     if (changed) {
         g_version.fetch_add(1);
         LOGI("new content: %s %s %s (%s, id %s) by %s%s", kind == KILN_CONTENT_ITEMS ? "item" : "recipe", d->name.c_str(),
@@ -4897,7 +4922,7 @@ bool nc_lab_refuse(const std::string& guid, const std::string& why) {
 
 void nc_boot_failed(std::vector<BootFailed>* out) {
     for (const DefPtr& dp : g_defs)
-        if (dp && !dp->error.empty() && dp->owner_label.rfind("boot:", 0) == 0)
+        if (dp && !dp->error.empty() && (dp->owner_label.rfind("boot:", 0) == 0 || dp->owner_label.rfind("bootpack:", 0) == 0))
             out->push_back({dp->mod, dp->name, std::string(dp->kind == KILN_CONTENT_ITEMS ? "item " : "recipe ") + dp->name + " (" + dp->guid_s +
                                                    ") was not registered when a world loaded its registries: " + dp->error});
 }
@@ -4935,6 +4960,123 @@ uint32_t nc_forget_unbound(KilnOwner owner) {
         return n;
     }
     return nc_undefine_owner(owner);
+}
+
+// A private boot-only protocol. The public kiln.content table is unchanged. The caller uses a unique process owner,
+// and may abort even a finished pack while the enclosing OnBoot generation has not passed its entry barrier.
+extern "C" __declspec(dllexport) KilnResult KILN_CALL kc_nc_boot_pack_v1(
+    uint32_t operation, KilnOwner owner, uint32_t kind, const char* document, size_t length,
+    char* report, size_t capacity, size_t* written) {
+    const auto reply = [&](KilnResult result, const std::string& text) {
+        if (written) *written = text.size();
+        if (report && capacity) {
+            const size_t count = std::min(capacity - 1, text.size());
+            std::memcpy(report, text.data(), count);
+            report[count] = 0;
+        }
+        return result;
+    };
+    try {
+        if (!owner || (!document && length) || length > (16u << 20))
+            return reply(KILN_ERR_INVALID_ARGUMENT, "invalid native boot pack request");
+        KilnSessionInfo session{};
+        session.size = sizeof session;
+        if (!g_api->session || g_api->session(&session) != KILN_OK)
+            return reply(KILN_ERR_UNAVAILABLE, "cannot verify the before-world native boot boundary");
+        for (uint32_t world = 0; world < KILN_WORLD_KINDS; ++world)
+            if (session.worlds[world] || session.sessions[world])
+                return reply(KILN_ERR_UNAVAILABLE, "a world already ran; native boot content requires a restart");
+        {
+            std::lock_guard lock(store_mutex());
+            for (const auto& world : g_ws)
+                if (world.world) return reply(KILN_ERR_UNAVAILABLE, "a content registry is bound to a world");
+        }
+        const std::string text(document ? document : "", length);
+        if (operation == bootpack::Begin) {
+            const json input = json::parse(text, nullptr, false, true);
+            if (!input.is_object() || !input.contains("mod") || !input["mod"].is_string() ||
+                !valid_name(input["mod"].get<std::string>()))
+                return reply(KILN_ERR_INVALID_ARGUMENT, "native boot pack needs its mod id");
+            {
+                std::lock_guard lock(store_mutex());
+                for (const auto& definition : g_defs)
+                    if (definition->owner == owner)
+                        return reply(KILN_ERR_INVALID_ARGUMENT, "native boot owner already has definitions");
+            }
+            set_owner_label(owner, "bootpack:" + input["mod"].get<std::string>());
+            {
+                std::lock_guard lock(g_text_mu);
+                if (!g_boot_text_undo.try_emplace(owner).second)
+                    return reply(KILN_ERR_INVALID_ARGUMENT, "native boot owner already has a transaction");
+            }
+            return reply(KILN_OK, "prepared");
+        }
+        if (operation == bootpack::Abort) {
+            std::array<std::unique_ptr<TextMap>, kShards> next;
+            {
+                std::lock_guard lock(g_text_mu);
+                const auto transaction = g_boot_text_undo.find(owner);
+                if (transaction == g_boot_text_undo.end()) return reply(KILN_OK, "already withdrawn");
+                std::string why;
+                for (const auto& [tag, change] : transaction->second.changes) {
+                    const size_t shard = tag & (kShards - 1);
+                    if (next[shard]) continue;
+                    next[shard] = std::make_unique<TextMap>();
+                    const auto* current = g_texts[shard].load();
+                    if (!transaction->second.restore(current ? *current : TextMap{}, next[shard].get(),
+                            [&](uint32_t key) { return (key & (kShards - 1)) == shard; }, &why))
+                        return reply(KILN_ERR_INTERNAL, "text rollback invariant: " + why);
+                }
+                // All tags were checked and every replacement allocated before the first shard is changed.
+                for (size_t shard = 0; shard < kShards; ++shard)
+                    if (next[shard]) g_texts[shard].store(next[shard].release());
+            }
+            nc_forget_unbound(owner);
+            {
+                std::lock_guard lock(store_mutex());
+                for (const auto& definition : g_defs)
+                    if (definition->owner == owner)
+                        return reply(KILN_ERR_INTERNAL, "definition rollback invariant: owner still has a definition");
+            }
+            {
+                std::lock_guard lock(g_text_mu);
+                g_boot_text_undo.erase(owner);
+            }
+            return reply(KILN_OK, "withdrawn");
+        }
+        {
+            std::lock_guard lock(g_text_mu);
+            const auto transaction = g_boot_text_undo.find(owner);
+            if (transaction == g_boot_text_undo.end() || !transaction->second.recording)
+                return reply(KILN_ERR_UNAVAILABLE, "native boot transaction is absent or finished");
+            if (operation == bootpack::Finish) {
+                transaction->second.recording = false;
+                return reply(KILN_OK, "committed");
+            }
+        }
+        if (operation == bootpack::Define) {
+            struct Scope {
+                KilnOwner previous;
+                explicit Scope(KilnOwner value) : previous(t_boot_text_owner) { t_boot_text_owner = value; }
+                ~Scope() { t_boot_text_owner = previous; }
+            } scope(owner);
+            std::string result;
+            const KilnResult status = nc_define(owner, kind, text, false, "native boot pack", &result);
+            return reply(status, result);
+        }
+        if (operation == bootpack::Text) {
+            const json input = json::parse(text, nullptr, false, true);
+            if (!input.is_object() || !input.contains("tag") || !input["tag"].is_number_unsigned() || !input.contains("texts"))
+                return reply(KILN_ERR_INVALID_ARGUMENT, "native boot text needs tag and texts");
+            set_texts(input["tag"].get<uint32_t>(), cm_texts(input["texts"].dump()), owner);
+            return reply(KILN_OK, "text staged");
+        }
+        return reply(KILN_ERR_INVALID_ARGUMENT, "unknown native boot operation");
+    } catch (const std::exception& error) {
+        return reply(KILN_ERR_INTERNAL, std::string("native boot content: ") + error.what());
+    } catch (...) {
+        return reply(KILN_ERR_INTERNAL, "native boot content raised an unknown exception");
+    }
 }
 
 uint32_t nc_undefine_owner(KilnOwner owner) {

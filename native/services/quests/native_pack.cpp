@@ -25,10 +25,16 @@
 #include <fstream>
 #include <functional>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <sstream>
 #include <unordered_map>
 
+#include "bootpack.h"
+#include "bodyadmit.h"
+#include "../assets/bootpack_internal.h"
+#include "../content/bootpack_internal.h"
+#include "services/kiln_caps.h"
 #include "knowledge_internal.h"
 #include "questpack.h"
 #include "start_stop.h"
@@ -37,6 +43,8 @@
 #include "services/kiln_assets.h"
 #include "services/kiln_content.h"
 #include "services/kiln_profile.h"
+#include "services/kiln_types.h"
+#include "services/kiln_vfx.h"
 
 namespace fs = std::filesystem;
 
@@ -138,7 +146,9 @@ std::string read_block_file(const fs::path& path) {
 // The NPC blocks of a mod's blocks/*.json ("npcs"), in the quests' file format, so the game builds them at the first start: what Kiln.Blocks'
 // NpcCompiler.NpcFile writes for an NPC block, the same ids (UUIDv5 of <mod>:npc:<name>, <mod>:item:<name>.tool) and the same body premades.
 // An NPC block written in code is not visible here: Kiln.Blocks writes it to the data folder, and the game builds it from the next start.
-qb::ojson npcs_from_blocks(const std::string& mod, const std::vector<qb::ojson>& docs) {
+qb::ojson npcs_from_blocks(const std::string& mod, const std::vector<qb::ojson>& docs, bool* authored_body = nullptr,
+                           std::string* body_refusal = nullptr, std::vector<std::string>* refused_bodies = nullptr,
+                           std::vector<qb::ModInput::SkippedBody>* skipped_bodies = nullptr) {
     struct Premade {
         const char *key, *tmpl, *workshop, *tool;
     };
@@ -149,9 +159,16 @@ qb::ojson npcs_from_blocks(const std::string& mod, const std::vector<qb::ojson>&
         {"scavenger", "Enemy_Scavenger_Melee01", "", ""},
     };
     std::map<std::string, qb::ojson> bodies;
-    for (const qb::ojson& d : docs)
+    // 16f: the parts of an authored body as the cooker resolves them (later files win), for its admission
+    qb::ojson body_blocks = qb::ojson::object(), animation_blocks = qb::ojson::object(), motion_blocks = qb::ojson::object();
+    for (const qb::ojson& d : docs) {
         if (d.contains("bodies") && d["bodies"].is_object())
-            for (const auto& [k, v] : d["bodies"].items()) bodies[k] = v;
+            for (const auto& [k, v] : d["bodies"].items()) bodies[k] = v, body_blocks[k] = v;
+        if (d.contains("animations") && d["animations"].is_object())
+            for (const auto& [k, v] : d["animations"].items()) animation_blocks[k] = v;
+        if (d.contains("npcMotions") && d["npcMotions"].is_object())
+            for (const auto& [k, v] : d["npcMotions"].items()) motion_blocks[k] = v;
+    }
     // a body: a premade's key, a "bodies" block by name, or one inline; "like" starts from a premade
     struct Body {
         std::string tmpl, workshop, tool;
@@ -174,21 +191,59 @@ qb::ojson npcs_from_blocks(const std::string& mod, const std::vector<qb::ojson>&
             o = &it->second;
         }
         if (!o->is_object()) return false;
+        b->own = o->contains("model");  // even a malformed premade reference makes the whole pack body-dependent
+        if (b->own) {
+            // 16f: an authored roster body is built on the one verified chassis; its workshop and tool default to the Fisher's
+            premade("fisher", b);
+            const auto is = [&](const char* key, std::initializer_list<const char*> allowed) {
+                if (!o->contains(key)) return true;
+                const qb::ojson& v = (*o)[key];
+                return v.is_string() && std::any_of(allowed.begin(), allowed.end(), [&](const char* a) { return v.get_ref<const std::string&>() == a; });
+            };
+            if (!is("template", {qb::kBodyChassis}) || !is("like", {"fisher", "villager"})) return false;
+            for (auto [key, field] : {std::pair{"workshop", &b->workshop}, std::pair{"tool", &b->tool}})
+                if (o->contains(key) && (*o)[key].is_string()) *field = (*o)[key].get<std::string>();
+            return true;
+        }
         if (o->contains("like") && (*o)["like"].is_string() && !premade((*o)["like"].get<std::string>(), b)) return false;
         for (auto [key, field] : {std::pair{"template", &b->tmpl}, std::pair{"workshop", &b->workshop}, std::pair{"tool", &b->tool}})
             if (o->contains(key) && (*o)[key].is_string()) *field = (*o)[key].get<std::string>();
-        b->own = o->contains("model");
         return !b->tmpl.empty();
     };
     qb::ojson out = qb::ojson::object();
     for (const qb::ojson& d : docs) {
         if (!d.contains("npcs") || !d["npcs"].is_object()) continue;
         for (const auto& [name, n] : d["npcs"].items()) {
+            if (!n.is_object()) continue;
             Body b;
-            if (!n.is_object() || !n.contains("name") || !n["name"].is_string() || !n.contains("body") || !body_of(n["body"], &b) || b.own) continue;  // Kiln.Blocks says what is wrong
+            const bool resolved = n.contains("body") && body_of(n["body"], &b);
+            // 16f: a model body without its animation or its motions is no authored roster body: the cook keeps such a legacy model on
+            // its eager path and Kiln.Blocks refuses the block (it says what is wrong). Only that NPC is left out, as before 16f.
+            if (b.own && resolved) {
+                const qb::ojson spec = qb::bodyadmit::resolve_spec(mod, n, body_blocks, animation_blocks, motion_blocks);
+                if (!spec.is_null() && (!spec["animation"].is_object() || !spec["motions"].is_object())) {
+                    const std::string reason = "npcs." + name + ": its body names a model but no " +
+                        (spec["animation"].is_object() ? "motions" : "animation") + ": not an authored roster body, so this NPC is not built";
+                    KW("native: %s: %s (Kiln.Blocks says what is wrong)", mod.c_str(), reason.c_str());
+                    if (skipped_bodies) skipped_bodies->push_back({name, n.contains("was") && n["was"].is_string() ? n["was"].get<std::string>() : name, reason});
+                    continue;
+                }
+            }
+            if (authored_body && (b.own || n.contains("motions"))) *authored_body = true;
+            if (b.own && !resolved && body_refusal) {
+                if (body_refusal->empty()) *body_refusal = "npcs." + name + ".body: an authored roster body uses the Fisher/Villager chassis only";
+                if (refused_bodies) refused_bodies->push_back(name);  // left out below: its status row still says why
+            }
+            if (!n.contains("name") || !n["name"].is_string() || !resolved) continue;  // Kiln.Blocks says what is wrong
             const std::string key = n.contains("was") && n["was"].is_string() ? n["was"].get<std::string>() : name;
             const std::string clone = qb::guid_text(qb::derive_guid(mod, "npc", key));
             qb::ojson o = {{"template", b.tmpl}, {"clone", {{"guid", clone}, {"name", "Kiln_" + mod + "_" + key}}}};
+            if (b.own) {
+                // 16f: admitted at the build against this machine's cook (bodyadmit.cpp), never published as it stands
+                const qb::ojson spec = qb::bodyadmit::resolve_spec(mod, n, body_blocks, animation_blocks, motion_blocks);
+                if (spec.is_null()) continue;
+                o["body"] = {{"block", name}, {"spec", spec}};
+            }
             qb::ojson names = {{"en", n["name"]}};
             if (n.contains("names") && n["names"].is_object())
                 for (const auto& [lang, text] : n["names"].items()) names[lang] = text;
@@ -338,7 +393,7 @@ void collect_mods(std::vector<qb::ModInput>* mods, bool client, const kiln::boot
                     block_quests.emplace_back(label, std::move(q));
                 }
                 if (d.contains("npcs")) block_docs.push_back(std::move(d));
-                else if (d.contains("bodies")) bodies.push_back(std::move(d));
+                else if (d.contains("bodies") || d.contains("animations") || d.contains("npcMotions")) bodies.push_back(std::move(d));
             }
             // bodies a block names may be in any of the files
             if (!block_docs.empty())
@@ -368,14 +423,41 @@ void collect_mods(std::vector<qb::ModInput>* mods, bool client, const kiln::boot
             }
         }
         ec.clear();
-        const qb::ojson block_npcs = block_docs.empty() ? qb::ojson::object() : npcs_from_blocks(mf["id"].get<std::string>(), block_docs);
-        if (!fs::is_directory(qdir, ec) && !fs::exists(code, ec) && !fs::exists(npc_blocks, ec) && block_npcs.empty() && block_quests.empty() &&
-            boot_docs.empty())
+        bool authored_body = false;
+        std::string body_refusal;
+        std::vector<std::string> refused_bodies;
+        std::vector<qb::ModInput::SkippedBody> skipped_bodies;
+        const qb::ojson block_npcs = block_docs.empty() ? qb::ojson::object()
+                                                        : npcs_from_blocks(mf["id"].get<std::string>(), block_docs, &authored_body, &body_refusal,
+                                                                           &refused_bodies, &skipped_bodies);
+        const fs::path body_manifest = base / L"assets" / L"cooked" / L"npc-bodies.v1.json";
+        if (fs::exists(body_manifest, ec)) {
+            const auto bundle = qb::parse_blocks_json(read_block_file(body_manifest));
+            authored_body = authored_body || !bundle.is_object() || !bundle.contains("bodies") || !bundle["bodies"].is_object() || !bundle["bodies"].empty();
+        }
+        if (!authored_body && skipped_bodies.empty() && !fs::is_directory(qdir, ec) && !fs::exists(code, ec) && !fs::exists(npc_blocks, ec) &&
+            block_npcs.empty() && block_quests.empty() && boot_docs.empty())
             return;
         const std::string side = mf.value("side", "both");
         if ((side == "server" && client) || (side == "client" && !client)) return;
         qb::ModInput m;
         m.id = mf["id"].get<std::string>();
+        m.authored_body = authored_body;
+        m.dir = dir;
+        m.body_refusal = body_refusal;
+        m.refused_bodies = refused_bodies;
+        m.skipped_bodies = std::move(skipped_bodies);
+        if (mf.contains("dependencies")) {
+            const auto& dependencies = mf["dependencies"];
+            if (dependencies.is_object()) {
+                for (const auto& [id, value] : dependencies.items())
+                    if (id != "kiln" && !(value.is_object() && value.value("optional", false))) m.required_mods.push_back(id);
+            } else if (dependencies.is_array()) {
+                for (const auto& value : dependencies)
+                    if (value.is_object() && value.contains("id") && value["id"].is_string() && !value.value("optional", false) && value["id"] != "kiln")
+                        m.required_mods.push_back(value["id"].get<std::string>());
+            }
+        }
         for (const auto& existing : *mods)
             if (existing.id == m.id) return;
         std::vector<fs::path> files, generated;
@@ -419,6 +501,14 @@ void collect_mods(std::vector<qb::ModInput>* mods, bool client, const kiln::boot
             std::ifstream probe(f, std::ios::binary);
             const bool readable = static_cast<bool>(probe);
             qb::ojson doc = readable ? qb::ojson::parse(read_file(f), nullptr, false, true) : qb::ojson(qb::ojson::value_t::discarded);
+            if (i < own_files && doc.is_object() && doc.contains("npcs") && doc["npcs"].is_object())
+                for (auto& [npc_name, npc] : doc["npcs"].items()) {
+                    if (!npc.is_object() || !npc.contains("body") || !npc["body"].is_object()) continue;
+                    // 16f: an authored body is an NPC block; a quests file never names cooked body ids itself
+                    if (npc["body"].contains("model") && m.body_refusal.empty())
+                        m.body_refusal = "quests/" + name + ": npcs." + npc_name + ".body: an authored roster body is an NPC block in blocks/*.json";
+                    if (!npc["body"].contains("model")) npc.erase("body");  // never read before 16f: still not read
+                }
             if (doc.is_discarded() || !doc.is_object()) {
                 KW("native: %s/%s %s: skipped", m.id.c_str(), name.c_str(), readable ? "is not valid JSON" : "cannot be read");
                 // the mod's own quests files (quests/ and quests/generated/); what Kiln kept from its code is Kiln's data
@@ -429,6 +519,10 @@ void collect_mods(std::vector<qb::ModInput>* mods, bool client, const kiln::boot
             m.files.push_back(reinterpret_cast<const char*>(f.filename().u8string().c_str()));
         }
         if (files.size() == own_files && has_blocks_or_boot) push_blocks();
+        for (const auto& document : m.documents)
+            if (document.contains("npcs") && document["npcs"].is_object())
+                for (const auto& [name, npc] : document["npcs"].items())
+                    if (npc.is_object() && npc.contains("body") && npc["body"].is_object() && npc["body"].contains("model")) m.authored_body = true;
         const qb::ojson audio = qb::ojson::parse(read_file(base / L"assets" / L"cooked" / L"audio.json"), nullptr, false, true);
         if (!audio.is_discarded()) m.audio = audio;
         const qb::ojson cook = qb::ojson::parse(read_file(base / L"assets" / L"cook.json"), nullptr, false, true);
@@ -553,13 +647,372 @@ std::vector<std::string> shipping_now() {
     return shipping(mods);
 }
 
+
+// No new service/epoch table: the startup thread uses the existing ResourceInit/OnBoot before-world boundary.
+// This is not an epoch protecting independently started native-plugin workers.
+std::map<std::string, KilnOwner> g_pack_owners;
+std::vector<qb::bootpack::Applied> g_pack_applied;
+bool g_pack_used = false;
+Stop g_pack_failure;  // a failed abort requires a restart; never rebuild over partially withdrawn owners
+
+kc::bootpack::Call content_boot_bridge() {
+    const HMODULE module = GetModuleHandleW(L"kiln-content.dll");
+    return module ? reinterpret_cast<kc::bootpack::Call>(GetProcAddress(module, kc::bootpack::kExport)) : nullptr;
+}
+
+bool content_boot_call(kc::bootpack::Call bridge, uint32_t operation, KilnOwner owner, uint32_t kind,
+                       const std::string& document, std::string* why) {
+    char report[8192] = {};
+    size_t length = 0;
+    const KilnResult result = bridge(operation, owner, kind, document.data(), document.size(), report, sizeof report, &length);
+    if (result == KILN_OK) return true;
+    *why = std::string(report, std::min(length, sizeof report - 1));
+    if (why->empty()) *why = "native content operation refused (" + std::to_string(result) + ")";
+    return false;  // a mutating private call is never repeated merely to enlarge its report buffer
+}
+
+// ---- 16f authored roster bodies: what admission reads on this machine ----------------------------------------------
+// Admission, lowering and the NPC motion closure (16f S3/S4) are built, and so is the network clearance (16f S5: Ready
+// and the body's closure hash in the join handshake, Kiln.Network's NpcBodyGate): without it a client whose own
+// admission refused a body would meet a clone template it lacks. Installed since the S6 lab (owner 2026-11-23); a
+// build without the managed gate sets this false, and every authored body mod is then refused with this reason (an
+// implementation dependency, not a release gate).
+bool g_body_network_clearance = true;
+const char* const kNoClearance =
+    "authored roster bodies need the network clearance (Ready and the body's closure hash in the join handshake), which this build does not install yet";
+ka::bootpack::Call assets_body_bridge() {
+    const HMODULE module = GetModuleHandleW(L"kiln-assets.dll");
+    return module ? reinterpret_cast<ka::bootpack::Call>(GetProcAddress(module, ka::bootpack::kExport)) : nullptr;
+}
+ka::bootpack::Verdict assets_cooked_verdict() {
+    const HMODULE module = GetModuleHandleW(L"kiln-assets.dll");
+    return module ? reinterpret_cast<ka::bootpack::Verdict>(GetProcAddress(module, ka::bootpack::kVerdictExport)) : nullptr;
+}
+
+// One mod-relative file of the mod's folder (bodyadmit.h contained()), no link on the way, at most `max` bytes.
+bool read_mod_file(const std::string& dir, const std::string& file, size_t max, qb::Bytes* out, std::string* why) {
+    if (dir.empty() || !qb::bodyadmit::contained(file)) { *why = "not a contained path of the mod"; return false; }
+    std::error_code ec;
+    fs::path at(widen(dir));
+    for (size_t from = 0;;) {
+        const size_t end = file.find('/', from);
+        at /= widen(file.substr(from, end == std::string::npos ? std::string::npos : end - from));
+        // a link, and on Windows a junction (MSVC's file_type::junction, neither a folder nor a file here): review3 N2
+        const fs::file_status st = fs::symlink_status(at, ec);
+        if (fs::is_symlink(st) || (fs::exists(st) && !fs::is_directory(st) && !fs::is_regular_file(st))) { *why = "a link is on its path"; return false; }
+        if (end == std::string::npos) break;
+        from = end + 1;
+    }
+    if (!fs::is_regular_file(at, ec)) { *why = "missing"; return false; }
+    const uintmax_t size = fs::file_size(at, ec);
+    if (ec || size > max) { *why = ec ? "cannot be read" : "larger than " + std::to_string(max >> 20) + " MiB"; return false; }
+    std::ifstream in(at, std::ios::binary);
+    out->assign(static_cast<size_t>(size), 0);
+    if (size && !in.read(reinterpret_cast<char*>(out->data()), static_cast<std::streamsize>(size))) { *why = "cannot be read"; return false; }
+    char extra;
+    if (in.read(&extra, 1)) { *why = "changed while read"; return false; }  // it grew past the size asked
+    return true;
+}
+
+// The running game's type registry against the verified Fisher body layout (bodypack.h): checked once per process.
+bool g_layout_checked = false, g_layout_ok = false;
+std::string g_layout_why;
+bool body_layout_ok(std::string* why) {
+    if (!g_layout_checked) {
+        g_layout_checked = true;
+        const auto* T = static_cast<const KilnTypesApi*>(g_api->service(kstr(KILN_TYPES_SERVICE), 1));
+        KilnTypesStatus status{sizeof status};
+        if (!T || T->header.size < offsetof(KilnTypesApi, type_enum) + sizeof(void*) || !T->status || T->status(&status) != KILN_OK || !status.types) {
+            g_layout_why = "body.chassis: kiln.types has no type registry on this build, so the Fisher layout cannot be verified";
+        } else {
+            const auto qualified = [T](const KilnType* type) {
+                KilnTypeInfo info{sizeof info};
+                return type && T->type_info(type, &info) == KILN_OK ? std::string(info.qualified_name.ptr, info.qualified_name.len) : std::string();
+            };
+            const qb::BodyTypeLookup lookup = [&](const std::string& name, qb::BodyTypeFacts* out) {
+                const KilnType* type = T->type_by_name(KilnStr{name.data(), name.size()});
+                KilnTypeInfo info{sizeof info};
+                // type_by_name also answers short names: only the exact qualified type stands for itself
+                if (!type || T->type_info(type, &info) != KILN_OK || std::string(info.qualified_name.ptr, info.qualified_name.len) != name) return false;
+                out->size = info.type_size;
+                out->inner = qualified(info.inner);
+                const bool values = info.kind == KILN_TYPE_ENUM || (info.kind >= KILN_TYPE_BITMASK8 && info.kind <= KILN_TYPE_BITMASK64);
+                for (uint32_t i = 0; i < info.field_count && i < 4096; ++i) {
+                    if (values) {
+                        KilnStr value_name{};
+                        int64_t value = 0;
+                        if (T->type_enum(type, i, &value_name, &value) == KILN_OK) out->values.emplace_back(std::string(value_name.ptr, value_name.len), value);
+                    } else {
+                        KilnTypeField field{};
+                        if (T->type_field(type, i, &field) == KILN_OK)
+                            out->fields.push_back({std::string(field.name.ptr, field.name.len), qualified(field.type), field.offset});
+                    }
+                }
+                return true;
+            };
+            g_layout_ok = qb::check_body_layout(lookup, &g_layout_why);
+        }
+        if (!g_layout_ok) KW("native: %s", g_layout_why.c_str());
+    }
+    if (!g_layout_ok && why) *why = g_layout_why;
+    return g_layout_ok;
+}
+
+// G2 (out/16f-motion/G2.md, option a): a client admits a body's materials only as kiln.vfx built and kiln.assets serves them.
+qb::BodyMaterialContext material_context(const std::string& dir) {
+    qb::BodyMaterialContext context;
+    context.read_source = [dir](const std::string& file, qb::Bytes* bytes, std::string* why) { return read_mod_file(dir, file, 16u << 20, bytes, why); };
+    context.build_status = [](qb::ojson* report, std::string* why) {
+        const auto* V = static_cast<const KilnVfxApi*>(g_api->service(kstr(KILN_VFX_SERVICE), 1));
+        if (!V || V->header.size < offsetof(KilnVfxApi, build_status) + sizeof(void*) || !V->build_status) { *why = "kiln.vfx is not loaded"; return false; }
+        size_t need = 0;
+        V->build_status(nullptr, 0, &need);
+        if (need > (32u << 20)) { *why = "its report is over 32 MiB"; return false; }
+        std::string text(need + 1, '\0');
+        size_t got = 0;
+        if (V->build_status(text.data(), text.size(), &got) != KILN_OK || got > need) { *why = "its report could not be read"; return false; }
+        text.resize(got);
+        *report = qb::ojson::parse(text, nullptr, false);
+        if (report->is_discarded()) { *why = "its report is not JSON"; return false; }
+        return true;
+    };
+    context.served = [](const qb::Guid& guid, uint32_t type) {
+        const uint8_t* data = nullptr;
+        size_t size = 0;
+        return res_read(guid, type, &data, &size);
+    };
+    return context;
+}
+
+qb::bootpack::Backend pack_backend(const qb::GameData& game, kc::bootpack::Call bridge, bool client) {
+    qb::bootpack::Backend backend;
+    backend.game = game;
+    backend.owner = [](const std::string& mod) -> uint64_t {
+        if (const auto found = g_pack_owners.find(mod); found != g_pack_owners.end()) return found->second;
+        if (!g_api->owner_create) return 0;
+        const std::string label = "bootpack:" + mod;
+        const KilnOwner owner = g_api->owner_create(KilnStr{label.data(), label.size()});
+        if (owner) g_pack_owners.emplace(mod, owner);
+        return owner;
+    };
+    backend.begin = [bridge](uint64_t owner, const std::string& mod, std::string* why) {
+        return content_boot_call(bridge, kc::bootpack::Begin, owner, 0, qb::ojson{{"mod", mod}}.dump(), why);
+    };
+    backend.put = [](uint64_t owner, const qb::bootpack::Resource& resource, std::string* why) {
+        KilnAssetKey key{};
+        std::memcpy(key.guid, resource.guid.b, 16);
+        key.type = resource.type;
+        const KilnResult result = A->resource_put(owner, &key, resource.bytes->data(), resource.bytes->size(),
+            resource.is_new ? KILN_ASSET_PUT_NEW : KILN_ASSET_PUT_OVERRIDE);
+        if (result == KILN_OK) return true;
+        *why = resource.name + ": kiln.assets refused it (" + std::to_string(result) + ")";
+        return false;
+    };
+    backend.define = [bridge](uint64_t owner, bool item, const std::string& definition, std::string* why) {
+        return content_boot_call(bridge, kc::bootpack::Define, owner, item ? KILN_CONTENT_ITEMS : KILN_CONTENT_RECIPES, definition, why);
+    };
+    backend.text = [bridge, client](uint64_t owner, const qb::TextOut& text, std::string* why) {
+        if (!client) return true;
+        return content_boot_call(bridge, kc::bootpack::Text, owner, 0,
+            qb::ojson{{"tag", text.tag}, {"texts", qb::ojson::parse(text.json)}}.dump(), why);
+    };
+    backend.finish = [bridge](uint64_t owner, std::string* why) {
+        if (!content_boot_call(bridge, kc::bootpack::Finish, owner, 0, "", why)) return false;
+        g_template_names.clear();  // the next mod resolves against the surviving effective templates
+        return true;
+    };
+    backend.rollback = [bridge](uint64_t owner, std::string* why) {
+        if (!A || !A->revert_owner) { *why = "kiln.assets owner rollback is missing"; return false; }
+        A->revert_owner(owner);  // only this process-lifetime owner, never kiln.knowledge or an earlier mod
+        g_template_names.clear();
+        return content_boot_call(bridge, kc::bootpack::Abort, owner, 0, "", why);
+    };
+    // 16f: only where kiln.assets can register a body for this owner; otherwise a body-dependent mod is refused whole
+    if (assets_body_bridge()) {
+        backend.admit_body = [client](qb::ModInput* mod, qb::ojson* assets, std::string* why) {
+            if (!g_body_network_clearance) { *why = kNoClearance; return false; }
+            qb::bodyadmit::Env env;
+            env.client = client;
+            env.read = [dir = mod->dir](const std::string& file, size_t max, qb::Bytes* out, std::string* reason) {
+                return read_mod_file(dir, file, max, out, reason);
+            };
+            env.layout = &body_layout_ok;
+            if (const auto verdict = assets_cooked_verdict())
+                env.cooked = [verdict](const qb::Bytes& bytes) { return verdict(bytes.data(), bytes.size()); };
+            env.warn = [id = mod->id](const std::string& line) { KW("native: %s: %s", id.c_str(), line.c_str()); };
+            if (client) env.materials = material_context(mod->dir);
+            return qb::bodyadmit::admit(mod, env, assets, why);
+        };
+        backend.put_body = [](uint64_t owner, const qb::ModInput& mod, const qb::ojson& assets, std::string* why) {
+            if (!assets.contains("entries") || !assets["entries"].is_array() || assets["entries"].empty()) return true;
+            const auto call = assets_body_bridge();
+            if (!call) { *why = "kiln.assets' private body registration disappeared"; return false; }
+            const std::string document = assets.dump();
+            char report[4096] = {};
+            size_t length = 0;
+            const KilnResult result = call(owner, mod.dir.data(), mod.dir.size(), document.data(), document.size(), report, sizeof report, &length);
+            if (result == KILN_OK) return true;
+            *why = "kiln.assets refused the body's cooked resources: " + std::string(report, std::min(length, sizeof report - 1));
+            return false;
+        };
+    }
+    return backend;
+}
+
+void report_bootpack_rows() {
+    const auto* caps = static_cast<const KilnCapsApi*>(g_api->service(kstr(KILN_CAPS_SERVICE), 1));
+    if (!caps || caps->header.size < offsetof(KilnCapsApi, report) + sizeof(void*) || !caps->report) return;
+    const bool ready = content_boot_bridge() != nullptr && g_no_hook.empty();
+    const std::string why = ready ? "" : !g_no_hook.empty() ? g_no_hook : "kiln.content's private native boot rollback helper is missing";
+    caps->report(g_owner, kstr("quests.boot_pack"), ready ? KILN_CAP_AVAILABLE : KILN_CAP_UNAVAILABLE,
+        ready ? KILN_CAP_REASON_NONE : KILN_CAP_REASON_SERVICE_OLDER, KilnStr{why.data(), why.size()});
+    // 16f S3: authored roster bodies need the rollback seam and kiln.assets' body registration; the Fisher layout itself is
+    // checked against kiln.types at the build (a changed layout refuses each body mod, and this row says why from then on).
+    const bool bodies = ready && assets_body_bridge() != nullptr && g_body_network_clearance;
+    const std::string body_why = !ready ? why : !assets_body_bridge() ? "kiln.assets' private body registration is missing"
+                               : !g_body_network_clearance ? kNoClearance : "";
+    caps->report(g_owner, kstr("quests.npc_body"), bodies ? KILN_CAP_AVAILABLE : KILN_CAP_UNAVAILABLE,
+        bodies ? KILN_CAP_REASON_NONE : KILN_CAP_REASON_SERVICE_OLDER, KilnStr{body_why.data(), body_why.size()});
+}
+
+// A string member of a ledger or manifest row, "" when it is missing or of another type (a hand-edited file must not throw).
+std::string row_text(const qb::ojson& row, const char* key) {
+    const auto it = row.is_object() ? row.find(key) : row.end();
+    return it != row.end() && it->is_string() ? it->get<std::string>() : std::string();
+}
+
+// 16f S5: the last build's body statuses, kept next to Kiln.Blocks' NPC files (kiln-quests/native/), so that a body which
+// was ready at the previous start and is no longer built at all is reported "removed" once. Not a replay of game state.
+// A damaged file (not JSON, a field of another type: a hand edit) is named in the log, read as far as it can be, and written
+// anew from this start's rows; nothing of it may throw out of the game's resource init (review3 S1).
+qb::ojson body_ledger(const qb::ojson& rows, uint64_t generation) {
+    qb::ojson all = rows;
+    try {
+        const std::string data = path_of(KILN_PATH_DATA);
+        if (data.empty()) return all;
+        const fs::path dir = fs::path(widen(data)) / L"kiln-quests" / L"native";
+        const fs::path file = dir / L"npc-bodies.ledger.json";
+        std::error_code ec;
+        const bool had = fs::exists(file, ec);
+        const qb::ojson before = had ? qb::ojson::parse(read_file(file), nullptr, false) : qb::ojson();
+        const bool shaped = before.is_object() && before.contains("bodies") && before["bodies"].is_array();
+        size_t damaged = had && !shaped ? 1 : 0;
+        if (shaped)
+            for (const auto& old : before["bodies"]) {
+                const std::string mod = row_text(old, "mod"), npc = row_text(old, "npc"), state = row_text(old, "state");
+                if (mod.empty() || npc.empty() || state.empty()) { ++damaged; continue; }
+                if (state != "ready") continue;
+                const auto same = [&](const qb::ojson& row) { return row_text(row, "mod") == mod && row_text(row, "npc") == npc; };
+                if (std::any_of(rows.begin(), rows.end(), same)) continue;
+                all.push_back({{"mod", mod}, {"npc", npc}, {"key", row_text(old, "key")}, {"state", "removed"},
+                               {"reason", "no longer built at this start"}, {"template", row_text(old, "template")}, {"model", ""}, {"graph", ""},
+                               {"closure", row_text(old, "closure")}, {"generation", generation}});
+            }
+        if (damaged)
+            KW("native: the NPC body ledger kiln-quests/native/npc-bodies.ledger.json is damaged (%s): it is written anew from this start's "
+               "bodies; a body taken out since the last start may not be reported removed",
+               shaped ? (std::to_string(damaged) + " row(s) without a mod, an NPC and a state as text").c_str() : "not a JSON object with a \"bodies\" list");
+        qb::ojson keep = qb::ojson::array();
+        for (const auto& row : rows)
+            keep.push_back({{"mod", row_text(row, "mod")}, {"npc", row_text(row, "npc")}, {"key", row_text(row, "key")}, {"state", row_text(row, "state")},
+                            {"template", row_text(row, "template")}, {"closure", row_text(row, "closure")}});
+        if (keep.empty() && !had) return all;  // no body ever: no file
+        fs::create_directories(dir, ec);
+        fs::path tmp = file;
+        tmp += L".tmp";
+        {
+            std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
+            f << qb::ojson{{"format", 1}, {"bodies", keep}}.dump(1);
+        }
+        ec.clear();
+        fs::rename(tmp, file, ec);
+        if (ec) KW("native: the NPC body ledger could not be written (%s): a body taken out is not reported as removed at the next start", ec.message().c_str());
+    } catch (const std::exception& e) {
+        KW("native: the NPC body ledger could not be read or written (%s): no body is reported removed at this start", e.what());
+    }
+    return all;
+}
+
+// One line per authored body for the server's operator (NpcBodies.Status reads the same rows).
+void report_bodies(const qb::ojson& bodies) {
+    for (const auto& row : bodies) {
+        const std::string state = row_text(row, "state"), reason = row_text(row, "reason");
+        const std::string built = state == "ready" ? " (template " + row_text(row, "template") + ", closure " + row_text(row, "closure") + ")" : "";
+        KI("native: NPC body %s:%s: %s%s%s", row_text(row, "mod").c_str(), row_text(row, "npc").c_str(), state.c_str(), built.c_str(),
+           reason.empty() ? "" : (": " + reason).c_str());
+    }
+}
+
+// review3 S2: a start with no mod of native content builds nothing, but a body Ready at the previous start is still gone now: the
+// ledger says so (once) and the manifest carries its removed row for NpcBodies.Status.
+void bodies_without_mods() {
+    const qb::ojson bodies = body_ledger(qb::ojson::array(), 0);
+    if (bodies.empty()) return;
+    report_bodies(bodies);
+    qb::ojson manifest = qb::ojson::parse(g_manifest, nullptr, false);
+    if (!manifest.is_object()) manifest = qb::ojson{{"mods", qb::ojson::array()}, {"errors", qb::ojson::array()}};
+    manifest["bodies"] = bodies;
+    g_manifest = manifest.dump();
+}
+
+void build_per_mod(const std::vector<qb::ModInput>& mods, const qb::GameData& game, kc::bootpack::Call bridge,
+                   const std::set<std::string>* required, std::vector<LeftOut>* left_out, Stop* stop, bool client) {
+    g_pack_used = true;
+    if (g_fail == Fail::Compile || g_fail == Fail::Assets) {
+        whole_stop(stop, kFailSwitch + (g_fail == Fail::Compile ? ": compile" : ": assets"), shipping(mods));
+        return;
+    }
+    auto result = qb::bootpack::build(mods, pack_backend(game, bridge, client));
+    if (g_layout_checked && !g_layout_ok) {  // a game update changed the Fisher layout: no body can be built in this process
+        const auto* caps = static_cast<const KilnCapsApi*>(g_api->service(kstr(KILN_CAPS_SERVICE), 1));
+        if (caps && caps->header.size >= offsetof(KilnCapsApi, report) + sizeof(void*) && caps->report)
+            caps->report(g_owner, kstr("quests.npc_body"), KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SYMBOL_MISSING,
+                         KilnStr{g_layout_why.data(), g_layout_why.size()});
+    }
+    for (const auto& error : result.errors) KW("native: %s", error.c_str());
+    for (const auto& warning : result.warnings) KW("native: %s", warning.c_str());
+    result.manifest["bodies"] = body_ledger(result.bodies, result.generation);
+    report_bodies(result.manifest["bodies"]);
+    g_manifest = result.manifest.dump();
+    g_pack_applied = std::move(result.applied);
+    g_served = built(result.manifest["mods"]);
+    g_names.clear();
+    for (const auto& mod : result.manifest["mods"]) {
+        if (!mod.value("ok", false)) {
+            if (required && left_out && required->count(mod.value("id", ""))) {
+                const auto errors = mod.value("errors", qb::ojson::array());
+                left_out->push_back({mod.value("id", ""), errors.empty() ? "native boot pack refused" : errors.front().get<std::string>()});
+            }
+            continue;
+        }
+        if (!mod.contains("knowledge")) continue;
+        for (const auto& [name, id] : mod["knowledge"].items()) {
+            std::string key = mod.value("id", "") + ":" + name;
+            std::transform(key.begin(), key.end(), key.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+            g_names[key] = static_cast<uint32_t>(std::stoul(id.get<std::string>(), nullptr, 16));
+        }
+    }
+    if (!result.roster_boot_ids.empty() || !result.roster_kiln_ids.empty()) roster_built(result.roster_boot_ids, result.roster_kiln_ids);
+    if (result.stopped) {
+        KE("native: %s; mods: %s", result.reason.c_str(), kiln::knowledge::stop::list(result.stopped_mods).c_str());
+        if (stop) *stop = Stop{true, result.roster_refused ? StartStop::Roster : StartStop::Content, result.reason, result.stopped_mods};
+        return;
+    }
+    KI("native: %zu mod(s): %zu new knowledge object(s), %zu quest(s), %zu NPC(s) in the roster, %zu template(s), %zu text(s); per-mod boot rollback",
+        g_served.size(), result.knowledge, result.quests, result.npcs, result.templates, client ? result.texts : 0);
+}
+
 // `left_out` (a boot generation): the required mods of `required` the build could not build whole. `stop`: set when
 // the roster was refused, or when the whole build failed while a mod ships such content (whole_stop): then nothing is
 // served and the start must not go on. One mod's own errors set neither.
 void build_locked(const std::vector<qb::ModInput>* prepared = nullptr, const std::set<std::string>* required = nullptr,
                   std::vector<LeftOut>* left_out = nullptr, Stop* stop = nullptr) {
+    if (g_pack_failure.set) { if (stop) *stop = g_pack_failure; return; }
     if (g_built) return;
     g_built = true;
+    const auto bridge = content_boot_bridge();
+    g_pack_used = bridge != nullptr;  // even an empty early plan must not withdraw the shared knowledge owner
+    g_pack_applied.clear();
     KilnBuildInfo bi{sizeof bi};
     g_api->build_info(&bi);
     const bool client = bi.side == KILN_SIDE_CLIENT;
@@ -584,7 +1037,10 @@ void build_locked(const std::vector<qb::ModInput>* prepared = nullptr, const std
             return;
         }
     }
-    if (mods.empty()) return;
+    if (mods.empty()) {
+        if (bridge) bodies_without_mods();
+        return;
+    }
     // every required mod in the build that did not come out whole (its entry's errors, or the whole build's)
     std::string whole;  // why the whole build is not served
     auto required_left_out = [&](const qb::ojson& manifest_mods) {
@@ -608,6 +1064,20 @@ void build_locked(const std::vector<qb::ModInput>* prepared = nullptr, const std
         game.read = &res_read;
     game.template_by_name = &template_by_name;
     game.roster_max = &roster_max;  // 64, or 128 with the second unlock page (installed only when a roster needs it)
+    game.body_layout = &body_layout_ok;  // 16f: asked only when an admitted authored body is built
+    if (bridge) {
+        build_per_mod(mods, game, bridge, required, left_out, stop, client);
+        return;  // the legacy publisher must never run before or after this path
+    }
+    qb::ojson excluded = qb::ojson::array();
+    std::erase_if(mods, [&](const qb::ModInput& mod) {
+        if (!mod.authored_body) return false;
+        const std::string why = "bootpack:" + mod.id + ": native boot rollback support is missing; the whole body-dependent native pack is excluded";
+        excluded.push_back({{"id", mod.id}, {"ok", false}, {"errors", {why}}});
+        KW("native: %s", why.c_str());
+        if (required && left_out && required->count(mod.id)) left_out->push_back({mod.id, why});
+        return true;
+    });
     qb::PackOut p;
     try {
         if (g_fail == Fail::Compile) throw std::runtime_error(kFailSwitch + ": compile");
@@ -619,6 +1089,7 @@ void build_locked(const std::vector<qb::ModInput>* prepared = nullptr, const std
         whole_stop(stop, whole, shipping(mods));
         return;
     }
+    for (const auto& mod : excluded) p.manifest["mods"].push_back(mod);
     for (const std::string& e : p.errors) KW("native: %s", e.c_str());
     if (p.roster_refused && stop) {
         stop->set = true;
@@ -709,7 +1180,8 @@ void build_once() {
     {
         std::lock_guard lock(g_mu);
         if (!A) A = static_cast<const KilnAssetsApi*>(g_api->service(kstr(KILN_ASSETS_SERVICE), 1));
-        if (!A || A->header.size < sizeof(KilnAssetsApi) || !A->resource_data || !A->resource_put) {
+        if (g_pack_failure.set) stop = g_pack_failure;
+        else if (!A || A->header.size < sizeof(KilnAssetsApi) || !A->resource_data || !A->resource_put) {
             if (!g_built) {
                 KW("native: kiln.assets is not available: mods' native quests and NPCs are off");
                 const auto* plan = g_boot ? static_cast<const BootPlan*>(kiln::boot::published(g_api, "knowledge")) : nullptr;
@@ -822,16 +1294,50 @@ void native_pack_install() {
 
 namespace {
 void KILN_CALL destroy_boot(const void* p) {
-    const auto* plan = static_cast<const BootPlan*>(p);
-    if (plan->built_early) {  // what the early build served and defined goes with it
-        std::lock_guard lock(g_mu);
-        if (A) A->revert_owner(g_owner);
-        if (const auto* C = static_cast<const KilnContentApi*>(g_api->service(KilnStr{"kiln.content", 12}, 4))) C->undefine_owner(g_owner);
+    const std::unique_ptr<const BootPlan> plan(static_cast<const BootPlan*>(p));
+    if (!plan->built_early) return;
+    std::unique_lock lock(g_mu);
+    const auto clear_built = [&] {
         g_built = false;
         g_names.clear();
-        g_manifest = "{\"mods\":[],\"errors\":[]}";
+        g_served.clear();
+        g_template_names.clear();
+        g_manifest = g_pack_failure.set
+            ? qb::ojson{{"mods", qb::ojson::array()}, {"errors", {g_pack_failure.why}}, {"failed", g_pack_failure.why}}.dump()
+            : "{\"mods\":[],\"errors\":[]}";
+    };
+    const auto failed = [&](const std::string& why, std::vector<std::string> mods) {
+        g_pack_failure = Stop{true, StartStop::Content, why, std::move(mods)};
+        clear_built();
+        const Stop fault = g_pack_failure;
+        KE("native: %s; mods: %s", fault.why.c_str(), kiln::knowledge::stop::list(fault.mods).c_str());
+        lock.unlock();
+        refuse_start(fault.kind, fault.why, fault.mods);
+    };
+    if (g_pack_used) {
+        qb::GameData game;
+        game.read = &res_read;
+        const auto bridge = content_boot_bridge();
+        if (!bridge) {
+            failed("boot pack rollback invariant: content helper disappeared", shipping(plan->mods));
+            return;
+        }
+        const auto backend = pack_backend(game, bridge, client_side());
+        while (!g_pack_applied.empty()) {
+            const auto& entry = g_pack_applied.back();
+            std::string why;
+            if (!qb::bootpack::withdraw(entry, backend, &why)) {
+                failed("bootpack:" + entry.mod + ": rollback invariant failed: " + why, {entry.mod});
+                return;
+            }
+            g_pack_applied.pop_back(); // a later failure must not retry owners already withdrawn
+        }
+        g_pack_used = false;
+    } else {
+        if (A) A->revert_owner(g_owner);
+        if (const auto* C = static_cast<const KilnContentApi*>(g_api->service(KilnStr{"kiln.content", 12}, 4))) C->undefine_owner(g_owner);
     }
-    delete plan;
+    clear_built();
 }
 
 KilnResult KILN_CALL prepare_boot(void*, const KilnBootPrepareInputV1* in, KilnBootPreparedV1* out, KilnBootIssueV1* issue) {
@@ -891,6 +1397,7 @@ KilnResult KILN_CALL prepare_boot(void*, const KilnBootPrepareInputV1* in, KilnB
 }  // namespace
 
 bool native_pack_boot() {
+    report_bootpack_rows();
     g_boot = kiln::boot::collect(g_api, g_owner, "knowledge", &prepare_boot, nullptr);
     if (g_boot) KI("native: boot profile: the mods' quest files are read with the boot generation");
     return g_boot;
@@ -922,6 +1429,15 @@ void native_pack_ready() {
 
 std::string native_pack_manifest() {
     std::lock_guard lock(g_mu);
+    // A missing bodies key means "not built yet" to managed readers. Complete even the empty and legacy paths so they
+    // can cache the final manifest, without freezing an early read (the build and this read both hold g_mu).
+    if (g_built) {
+        auto manifest = qb::ojson::parse(g_manifest, nullptr, false);
+        if (manifest.is_object() && !manifest.contains("bodies")) {
+            manifest["bodies"] = qb::ojson::array();
+            g_manifest = manifest.dump();
+        }
+    }
     return g_manifest;
 }
 

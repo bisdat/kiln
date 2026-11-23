@@ -458,6 +458,7 @@ bun run check:schemas
 bun run test                        # unit tests (unit/, unit-tests/, scripts/*.test.ts*), no dev server
 bun run test:schema                 # schema/tests/*.mjs (profile, closed-DLL and UI block schemas)
 bun run test:smoke                  # Playwright, mock mode; screenshots to .out/launcher/shots/ (KILN_DEV_PORT: another port)
+bun run build:admin-ui              # the admin pages' package @kiln/admin-ui into packages/admin-ui/dist (admin-pages.md)
 bun x playwright test tests/catalog.spec.ts   # the catalog, desktop and Deck (?nexus=free|premium|nokey)
 CARGO_TARGET_DIR=.out/launcher/cargo cargo test -p kiln-launcher
 CARGO_TARGET_DIR=.out/launcher/cargo cargo test -p kiln-launcher --no-default-features   # the Nexus Mods build (no self-update)

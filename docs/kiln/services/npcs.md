@@ -57,6 +57,96 @@ engine's, [docs/kiln/modding/quests.md](../modding/quests.md).
 `quests/*.json` at boot, before any world or server connection exists, so a server cannot send them. `kiln lint` reports
 KL210 as an error otherwise.
 
+## Authored roster bodies
+
+`NpcBlock.Motions` names an `NpcMotionsBlock`: Kiln-owned motion roles bound to states of the body's cooked graph.
+The [authoring contract](../modding/npc-blocks.md#authored-roster-bodies-and-motions) covers the complete 27-binding
+Fisher vector, shared skeleton/slot checks, explicit size, and the deferred `assets/cooked/npc-bodies.v1.json` bundle.
+Native admission, body lowering, the NPC motion closure and the network clearance (Ready and the body's closure hash in
+the join handshake) are built: a body in `blocks/*.json` is built at start. A player whose game did not build the same
+bodies is refused at the join (except under `modSync: off`, where a player lacking a body may crash on that NPC). An unavailable dependency is a refusal, not a rendered
+fallback. Not verified in a real game yet: the player side (admission, the same closure, the body drawn and animated).
+
+| Capability | Needs | Current contract |
+|---|---|---|
+| `blocks.npc_body` | `kiln.knowledge`, `quests.boot_pack`, `quests.npc_body`, `quests.npc`, `assets.resources`, `assets.content` | Managed row; refuses authored-body definition with the missing dependency's reason. Ordinary game-body NPCs do not need it |
+| `quests.boot_pack` | Private native content rollback helper and the resource initialization hook | Per-mod compile/preflight and owner-isolated rollback through the existing boot path; no public bootpack or epoch API |
+| `quests.npc_body` | Native authored-body admission and lowering, the NPC motion closure, kiln.assets' private body registration, the network clearance | Available where kiln.assets' private body registration is there; a body mod is refused whole otherwise. A game update that changes the verified Fisher layout makes the row unavailable (`symbol-missing`) with the changed type named |
+
+Native packs compile separately in dependency order against the surviving effective resources. A refused pack withdraws
+only its `bootpack:<mod>` owner, restores its text-tag before-images without overwriting unrelated writers, and leaves
+earlier successful packs intact. Failed required native dependencies are excluded before their dependants compile.
+A missing template or a mod-specific build failure refuses only that pack; missing shared knowledge, journal or NPC
+collection inputs still stop startup, as does a roster overflow.
+An invariant failure stops startup through the existing named fault/notice path rather than continuing with a partial pack.
+Aborting a boot generation always releases its plan, removes successful withdrawals from the pending list, and clears
+its served-name metadata. A rollback failure remains a named restart-required fault, not a fresh build over partially
+withdrawn owners.
+Rollback records retain resource presence, length and a local 64-bit fingerprint, not full resource copies. The private
+compile snapshots are released after each pack. Repeated Kiln knowledge-map tails are compacted to the original input
+prefix plus the latest maps; a different effective blob from another writer starts a new prefix so its unknown data
+is preserved. Text undo records are discarded at the first world start, when the helper can no longer abort a pack.
+The assets store still retains published immutable layers: knowledge storage is one bounded blob per pack, not one
+blob containing every earlier map copy. Journal/NPC builders retain their existing append-only layout.
+Without the private helper, ordinary legacy packs retain their old path and whole body-dependent packs are excluded.
+This is rollback behind the existing startup barrier, **not** an unpublished snapshot or an epoch: an independently
+started native-plugin worker reading GameKnowledge during publication could see it before the pack's item definitions.
+No such production reader has been measured; that hypothetical worker remains an open concurrency risk.
+
+### Admission and lowering at the native boot build
+
+An authored body is admitted once per mod, before the mod compiles, against **this machine's** cook
+(`assets/cooked/npc-bodies.v1.json`, never shipped as identity). Admission refuses the whole mod, naming the NPC, when:
+the cache is missing, malformed or from an older cook; an authored source (model, clips, glTF buffers and images, material
+blocks and their textures) or a cooked output no longer hashes as recorded; the NPC's resolved body, animation or motions
+blocks differ from what was cooked; the cook has no complete 27-row motion vector, no graph of its own or not exactly one
+RenderModel row for the body; a game client finds a dedicated server's cook (skipped renderer output) or an incomplete
+cook; a game client's material blocks are not built and served by kiln.vfx/kiln.assets (G2); or kiln.types no longer has
+the verified Fisher layout. A dedicated server takes the model id from the cook's RenderModel row and publishes no
+renderer output. Only NPC blocks (and NPCs Kiln.Blocks wrote for code at an earlier start) may carry a body; a mod's own
+`quests/*.json` naming one refuses that mod.
+
+The admitted pack compiles with the body lowered first: the Fisher template is copied into an owned buffer, its five
+appearance producers removed, model, graph, cloth collider, slots, path/movement size, interaction box, steering sphere
+and UI offsets set from the cooked ids and the authored Size, and then the ordinary quest edit (name, NpcId, loca,
+dialogue) runs on those bytes. The vanilla Fisher key is never written; an authored body on a non-clone or another
+chassis refuses the mod. The body's cooked resources and blobs are registered by kiln.assets' private body export for
+the same `bootpack:<mod>` owner inside that mod's transaction (new keys only, checked absent first and absent again
+after a rollback; never pinned), so a refusal or withdrawal takes them away with the rest of the pack and leaves earlier
+and independent mods as they were.
+
+### The NPC motion closure
+
+The Fisher's template names 21 action sequences (sit, sleep, inspect, greetings, talk, reactions, refusal, idle gestures,
+its object interaction, init/farewell/option lines, turns, jump and door; 27 animation events). For an authored body each
+is cloned under an id of the mod (UUIDv5 of the mod, the NPC, the source sequence and the binding vector's hash; its
+sub-sequence ids likewise), every `SetAnimationEvent` is bound in serialized order to the authored state of its role and
+variant, and every whitelisted event's local times are retimed to the cooked clip durations (chapter 16f section 5.1:
+zero stays zero, the lead-in is kept, each animation phase takes its longest bound clip, `lerpDuration` maps through the
+same piecewise-linear time map, loop flags and all other fields are copied). Then every sequence reference of the
+template's ActiveNpcState, NpcState, NpcActionSequences, NpcDialog and PathWalker is replaced by its clone. The build
+refuses the mod, naming the sequence, for an event type outside the verified whitelist, a changed event size, a
+different number of animation events than the manifest, a nonzero reference outside the 21, or a source id left anywhere
+in the template afterwards (a reference path a game update added). The sequence, event and reference layouts are
+checked against kiln.types together with the body's. The clones are new keys published with the template under
+`bootpack:<mod>`; the game's own sequences are never changed.
+
+### Body status
+
+The boot build's manifest (kiln.knowledge `native_manifest`, read by Kiln.Quests/Kiln.Blocks) carries a `bodies` array,
+one row per authored-body NPC: `mod`, `npc` (the block name), `key` (`was` or the name), `state` (`ready`, `failed`,
+`removed`), `reason` (the refusal, empty when ready), `template` (the clone's GUID), `model`, `graph`, `closure` and
+`generation`. `closure` is the body's network identity: a SHA-256 over its authored-source hash, its binding vector, its
+cooked model and graph ids, its size and the verified chassis; never over machine-local cooked bytes or process handles.
+A failed mod's rows carry its refusal. The native build keeps the last build's rows in
+`<Kiln data>/kiln-quests/native/npc-bodies.ledger.json`; a body that was ready there and is not built at all at the next
+start (its mod or NPC taken out) is reported once as `removed`. The ledger records statuses only, never game state.
+
+Generated material-block/texture hashes describe dependencies only; they must not be mistaken for prepared material
+resource bytes. No Ready status, hot body replacement, or safe missing-model fallback is promised by a cooked manifest.
+Both sides need the mod. A vanilla peer must be refused or have the new NPC withheld by normal content admission;
+never publish an authored body under a vanilla template key.
+
 ## The format
 
 `quests/*.json`, read by two readers: this boot build and the quest engine. No key asks for the game's UI: only `"journal": "chat"`

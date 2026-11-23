@@ -9,9 +9,9 @@
   "verified": true,
   "note": "runtime-verified through Steam (GE-Proton11-11), policy any, core + every service + kiln-emf + probe + ui-test + menubuttons: side client, sigdb 306/306 symbols, 434/434 constants (client.d composed), SimStep + WorldDestroy hooked, boot complete, 0 errors; main menu entries Kiln / ui-test / Mods (the Kiln sample screen opened); hosted a LOCAL world offline (saves: world loaded: slot 0x0002 (world1.ksd)): server world 60 steps/s on the GameServer thread, client and prediction worlds on the main thread, local player 1; ui-test all checks PASS (screens MainMenu/Loading/InGame/PauseMenu/Map/Crafting, menu entries chosen, crafting state), Kiln crafting tabs and subcategories shown, Insert overlay; tick cost as on ce6fdba6 (server step p50 2.5 ms, Kiln Pre 0.037 ms; client 1.2 ms); back to the menu (worlds stopping, shutdown save), clean quit (Shutdown 'Steam'). Not covered: joining a remote server, service write paths on the client. Added in dev.22 from static analysis only (resolved offline with sigdb_check.py, not yet seen running): ui.menu_page, ui.menu_page_sound, ui.error_popup (ui/PreGameCredits, ui/PreGameCreditsRet, ui/UiPlaySound and their constants). Levels (record 2, refreshed offline on 2026-11-11, no client run): lab = the names the boot above resolved, as its record listed them (199 named symbols, 434 constants, 106 features), each resolving to the same value today; every service loaded in that boot, but only ui-test ran, so lab here means loaded with Kiln's checks passing, not that the service test mods ran on the client. static = everything else, resolved offline only: the 186 @ probes (the boot's record did not list probes), the dev.22 ui names above, and every name declared since (the services audio, characters, emf-net, npcai, pacing, progression, quests, render, rules, skills, types and vfx, and new names of combat, creatures, gamedata, items, net, players, time and ui): 158 symbols, 210 constants and 70 features. sigdb now declares 543 symbols (441 defined, 102 captured), 644 constants (595 defined, 49 captured) and 176 features; all of them resolve offline on this exe.",
   "declared": {
-    "symbols": 1030,
-    "constants": 1082,
-    "features": 280
+    "symbols": 1040,
+    "constants": 1096,
+    "features": 285
   },
   "features": {
     "abilities.attributes": true,
@@ -35,6 +35,11 @@
     "build.read": true,
     "build.write": true,
     "build.zones": true,
+    "camera.local_fov": true,
+    "camera.local_pose": true,
+    "camera.local_profile": true,
+    "camera.local_shake": true,
+    "camera.rendered_snapshot": true,
     "caps.vfx.expansion_sites": true,
     "characters.id": true,
     "chat.players": true,
@@ -293,12 +298,7 @@
     "world.slice_record": true,
     "world.systems": true,
     "world.teleport": true,
-    "world.write": true,
-    "camera.local_fov": true,
-    "camera.local_pose": true,
-    "camera.local_profile": true,
-    "camera.local_shake": true,
-    "camera.rendered_snapshot": true
+    "world.write": true
   },
   "symbols": {
     "AddLogListener": "0x885e90",
@@ -348,6 +348,9 @@
     "build/BuildZoneAppend": "0xeab880",
     "build/BuildingConfigFind": "0xe8c9b0",
     "build/ItemFind": "0xe94470",
+    "build/RetSaveRegionsBaseQuery": "0xe58696",
+    "build/RetSaveRegionsBaseZones": "0xe6031d",
+    "build/RetSaveRegionsWorldSave": "0xe67709",
     "build/SaveRegions": "0xe8b8f0",
     "build/SetVoxelInterface": "0x9e3540",
     "build/StoreCommit": "0x10baca0",
@@ -364,6 +367,9 @@
     "build/VoxelTileReady": "0x10bc130",
     "build/VoxelWrite": "0x10bb030",
     "build/voxel.base_size": "0x13d47a0",
+    "camera/RenderFovSelected": "0x87b9fd",
+    "camera/RenderPoseGetter": "0x3aaaf0",
+    "camera/VisualFrameReady": "0x86098f",
     "caps/VfxCreateSystem": "0x198590",
     "caps/VfxInitResources": "0x1b0ed0",
     "caps/VfxMapAllocate": "0x196ab0",
@@ -973,10 +979,7 @@
     "world/ResolveSingletons": "0x98a660",
     "world/RunInitPrograms": "0x9acf40",
     "world/SliceTaskFn": "0x9eebb0",
-    "world/StepPrograms": "0x9ade50",
-    "camera/RenderFovSelected": "0x87b9fd",
-    "camera/RenderPoseGetter": "0x3aaaf0",
-    "camera/VisualFrameReady": "0x86098f"
+    "world/StepPrograms": "0x9ade50"
   },
   "constants": {
     "abilities/actor.trigger_context": "0x8",
@@ -1068,6 +1071,20 @@
     "build/zone.abandoned": "0x46",
     "build/zone.entity": "0x40",
     "build/zone.stride": "0x48",
+    "camera/render.client_pose": "0x5d0",
+    "camera/render.client_world": "0x1d0",
+    "camera/render.far": "0x4672e4",
+    "camera/render.mode_fov": "0x46734c",
+    "camera/render.near": "0x4672e0",
+    "camera/render.pose_block1": "0x4672b8",
+    "camera/render.pose_block2": "0x4672c8",
+    "camera/render.pose_start": "0x4672a8",
+    "camera/render.pose_tail": "0x4672d8",
+    "camera/render.proj_aspect": "0x4693b8",
+    "camera/render.proj_far": "0x4693c0",
+    "camera/render.proj_fov": "0x4693c4",
+    "camera/render.proj_near": "0x4693bc",
+    "camera/render.selected_fov": "0x4672e8",
     "caps/vfx.alias": "0x2118",
     "caps/vfx.alias_capacity": "0x2120",
     "caps/vfx.init_state": "0x2138",
@@ -2060,21 +2077,7 @@
     "world/teleport.applied": "0x48",
     "world/teleport.find_ground": "0x49",
     "world/teleport.target_entity": "0x38",
-    "world/world.may_finalize": "0xe17958",
-    "camera/render.client_pose": "0x5d0",
-    "camera/render.client_world": "0x1d0",
-    "camera/render.far": "0x4672e4",
-    "camera/render.mode_fov": "0x46734c",
-    "camera/render.near": "0x4672e0",
-    "camera/render.pose_block1": "0x4672b8",
-    "camera/render.pose_block2": "0x4672c8",
-    "camera/render.pose_start": "0x4672a8",
-    "camera/render.pose_tail": "0x4672d8",
-    "camera/render.proj_aspect": "0x4693b8",
-    "camera/render.proj_far": "0x4693c0",
-    "camera/render.proj_fov": "0x4693c4",
-    "camera/render.proj_near": "0x4693bc",
-    "camera/render.selected_fov": "0x4672e8"
+    "world/world.may_finalize": "0xe17958"
   },
   "services": {
     "core": {
@@ -2273,6 +2276,9 @@
         "@build/VoxelWrite.commit": "static",
         "build/BuildZoneAppend": "lab",
         "build/ItemFind": "lab",
+        "build/RetSaveRegionsBaseQuery": "static",
+        "build/RetSaveRegionsBaseZones": "static",
+        "build/RetSaveRegionsWorldSave": "static",
         "build/SaveRegions": "lab",
         "build/SetVoxelInterface": "lab",
         "build/StoreCommit": "lab",
@@ -2869,12 +2875,12 @@
         "camera/render.selected_fov": "static"
       },
       "features": {
-        "hooks.owner_cleanup": "static",
         "camera.local_fov": "static",
         "camera.local_pose": "static",
         "camera.local_profile": "static",
         "camera.local_shake": "static",
-        "camera.rendered_snapshot": "static"
+        "camera.rendered_snapshot": "static",
+        "hooks.owner_cleanup": "static"
       }
     },
     "dev28-04-markers": {

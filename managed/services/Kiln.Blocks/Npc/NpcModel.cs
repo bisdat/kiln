@@ -684,10 +684,12 @@ public sealed record NpcBlock : INpcBlock
     public required string Name { get; init; }
     /// <summary>The name before a rename: ids come from the oldest name.</summary>
     public string? Was { get; init; }
-    /// <summary>The body, as a block or the name of one defined once. It has to be a game NPC's (<see cref="Bodies.Villager"/>, <see cref="Bodies.Fisher"/>); a model of your own is refused.</summary>
+    /// <summary>The body, as a block or the name of one defined once: a game NPC's (<see cref="Bodies.Villager"/>, <see cref="Bodies.Fisher"/>), or an authored roster body (a <see cref="BodyBlock.Model"/> of this mod on the Fisher chassis, with <see cref="Animation"/> and <see cref="Motions"/>), which needs the <c>blocks.npc_body</c> capability.</summary>
     public required PartRef<BodyBlock> Body { get; init; }
-    /// <summary>Not supported: setting it is refused, as an NPC moves like the game's villagers. A friendly fighter is a <see cref="CreatureBlock"/>.</summary>
+    /// <summary>Only with an authored roster body (<see cref="BodyBlock.Model"/>): its cooked clips and graph. A game NPC body moves like the game's villagers and refuses it. A friendly fighter is a <see cref="CreatureBlock"/>.</summary>
     public PartRef<AnimationBlock>? Animation { get; init; }
+    /// <summary>The authored graph states for this roster body's sit, sleep, dialogue and navigation motions. Required with <see cref="BodyBlock.Model"/>.</summary>
+    public PartRef<NpcMotionsBlock>? Motions { get; init; }
     /// <summary>Not supported: setting it is refused. A friendly fighter is a <see cref="CreatureBlock"/> with a player-ally faction.</summary>
     public PartRef<AIBlock>? AI { get; init; }
     /// <summary>Not supported: setting it is refused. A friendly fighter is a <see cref="CreatureBlock"/>.</summary>

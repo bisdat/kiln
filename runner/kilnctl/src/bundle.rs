@@ -66,9 +66,14 @@ pub fn create(stage: &Path, out: &Path, git: Option<String>, epoch: Option<i64>)
     Ok(0)
 }
 
-pub fn verify(zip: &Path) -> Result<i32> {
-    let m = kiln_manage::bundle::verify(zip, &mut kiln_manage::task::NoProgress).km()?;
-    println!("ok: {} {} files, every size and sha256 matches kiln-runtime.json", m.version, m.files.len());
+/// `kilnctl bundle verify`: a bundle zip, or the folder it was unpacked to (the Nexus Mods runtime file has one), under
+/// the same rules (kiln_manage::bundle::verify).
+pub fn verify(bundle: &Path) -> Result<i32> {
+    let m = kiln_manage::bundle::verify(bundle, &mut kiln_manage::task::NoProgress).km()?;
+    // tools/release/nexus.py finds "the folder holds nothing else" in a kilnctl that takes a bundle folder (it builds the
+    // Nexus runtime file, which holds the bundle as a folder, only then): keep these words
+    let form = if kiln_manage::bundle::is_folder(bundle) { "the folder holds nothing else" } else { "the zip holds nothing else" };
+    println!("ok: {} {} files, every size and sha256 matches kiln-runtime.json; {form}", m.version, m.files.len());
     for (name, c) in &m.components {
         let n = m.files.iter().filter(|f| &f.component == name).count();
         let sides: Vec<&str> = c.sides.iter().map(|s| if *s == kiln_manage::manifest::RunSide::Server { "server" } else { "client" }).collect();
@@ -109,7 +114,8 @@ pub fn print_receipt(r: &install::InstallReceipt, dir: &Path) {
 }
 
 pub struct InstallArgs {
-    pub zip: PathBuf,
+    /// The bundle: its zip, or the folder it was unpacked to.
+    pub bundle: PathBuf,
     pub dir: PathBuf,
     pub components: Option<Vec<String>>,
     pub switch_from_shroudforge: bool,
@@ -118,14 +124,15 @@ pub struct InstallArgs {
 
 pub fn install_cmd(a: InstallArgs) -> Result<i32> {
     let g = game_at(&a.dir, a.real)?;
-    install_into(&g, &a.zip, a.components, a.switch_from_shroudforge)?;
+    install_into(&g, &a.bundle, a.components, a.switch_from_shroudforge)?;
     Ok(0)
 }
 
-pub fn install_into(g: &GameInstall, zip: &Path, components: Option<Vec<String>>, sf: bool) -> Result<install::InstallReceipt> {
+/// Installs a bundle (its zip or the folder it was unpacked to) into `g`.
+pub fn install_into(g: &GameInstall, bundle: &Path, components: Option<Vec<String>>, sf: bool) -> Result<install::InstallReceipt> {
     let dirs = data_dirs()?;
-    println!("installing {} into {} ({})", zip.display(), g.path.display(), if g.kind == GameKind::Server { "server" } else { "client" });
-    let r = install::install(&dirs, g, zip, &InstallOptions {
+    println!("installing {} into {} ({})", bundle.display(), g.path.display(), if g.kind == GameKind::Server { "server" } else { "client" });
+    let r = install::install(&dirs, g, bundle, &InstallOptions {
         components,
         switch_from_shroudforge: sf,
         installer: Some(format!("kilnctl {}", env!("CARGO_PKG_VERSION"))),

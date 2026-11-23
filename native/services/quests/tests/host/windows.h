@@ -19,5 +19,7 @@ inline int MultiByteToWideChar(unsigned, unsigned long, const char* s, int n, wc
     for (int i = 0; i < m; ++i) out[i] = static_cast<wchar_t>(static_cast<unsigned char>(s[i]));
     return m;
 }
-inline HMODULE GetModuleHandleW(const wchar_t*) { return nullptr; }
-inline void* GetProcAddress(HMODULE, const char*) { return nullptr; }
+inline HMODULE kiln_test_module = nullptr;
+inline void* (*kiln_test_proc)(const char*) = nullptr;
+inline HMODULE GetModuleHandleW(const wchar_t*) { return kiln_test_module; }
+inline void* GetProcAddress(HMODULE, const char* name) { return kiln_test_proc ? kiln_test_proc(name) : nullptr; }

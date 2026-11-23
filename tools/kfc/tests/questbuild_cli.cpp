@@ -3,6 +3,8 @@
 // kiln-quests.dll, on resource files tools/kfc dumped.
 //   questbuild_cli --res DIR --names names.json --out DIR [--mod DIR]...
 //   questbuild_cli --hash TEXT   (uuid5 / fnv checks)
+//   questbuild_cli --motion DIR  (16f S4: DIR/template.bin, DIR/<source guid>.bin, DIR/bindings.json -> clones + remap)
+//   questbuild_cli --motion-closure  (the 21 closure sources as JSON)
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -11,6 +13,8 @@
 #include <sstream>
 
 #include "questpack.h"
+#include "bodypack.h"
+#include "motionclose.h"
 
 namespace fs = std::filesystem;
 using namespace kiln::qb;
@@ -27,7 +31,7 @@ static void spit(const fs::path& p, const void* d, size_t n) {
 }
 
 int main(int argc, char** argv) {
-    fs::path res, names, out;
+    fs::path res, names, out, body, body_spec;
     std::vector<fs::path> mod_dirs;
     uint32_t roster_max = 0;  // --roster-max 128: as a side where the roster's second page installs (default 64)
     for (int i = 1; i < argc; ++i) {
@@ -36,6 +40,56 @@ int main(int argc, char** argv) {
         else if (a == "--names") names = argv[++i];
         else if (a == "--out") out = argv[++i];
         else if (a == "--mod") mod_dirs.push_back(argv[++i]);
+        else if (a == "--body") body = argv[++i];
+        else if (a == "--body-spec") body_spec = argv[++i];
+        else if (a == "--body-layout") {
+            ojson types = ojson::array();
+            for (const auto& type : body_layout()) {
+                ojson fields = ojson::array();
+                for (const auto& field : type.fields) fields.push_back({{"name", field.name}, {"type", field.type}, {"offset", field.offset}});
+                ojson values = ojson::array();
+                for (const auto& value : type.values) values.push_back({{"name", value.name}, {"value", value.value}});
+                types.push_back({{"name", type.name}, {"size", type.size}, {"fields", fields},
+                    {"inner", type.inner ? ojson(type.inner) : ojson(nullptr)}, {"values", values}});
+            }
+            std::cout << types.dump() << '\n';
+            return 0;
+        }
+        else if (a == "--motion-closure") {
+            ojson rows = ojson::array();
+            for (const auto& s : motionclose::fisher_closure()) rows.push_back({{"guid", s.guid}, {"role", s.role}, {"variants", s.variants}});
+            std::cout << rows.dump() << '\n';
+            return 0;
+        }
+        else if (a == "--motion") {
+            // The motion closure as kiln-quests.dll builds it, on files a test dumped: clone ids derived like the boot build's.
+            const fs::path dir = argv[++i];
+            const ojson rows = ojson::parse(slurp(dir / "bindings.json"));
+            motionclose::Bindings bound;
+            std::string why;
+            ojson report = {{"ok", false}, {"reason", ""}, {"clones", ojson::object()}, {"replaced", 0}};
+            const auto done = [&](bool ok) { report["ok"] = ok; report["reason"] = why; std::cout << report.dump() << '\n'; return ok ? 0 : 1; };
+            if (!motionclose::parse_bindings(rows, &bound, &why)) return done(false);
+            std::map<std::string, Guid> map;
+            for (const auto& s : motionclose::fisher_closure()) {
+                const std::string raw = slurp(dir / (std::string(s.guid) + ".bin"));
+                const Guid clone = derive_guid("motion-cli", "npcmotion", std::string("tobin:") + s.guid);
+                Bytes out;
+                if (!motionclose::clone_sequence(reinterpret_cast<const uint8_t*>(raw.data()), raw.size(), clone, s, bound[s.role],
+                        [](const Guid& old) { return derive_guid("motion-cli", "npcmotion", "tobin:" + guid_text(old)); }, &out, &why))
+                    return done(false);
+                spit(dir / (std::string(s.guid) + ".clone.bin"), out.data(), out.size());
+                map[s.guid] = clone;
+                report["clones"][s.guid] = guid_text(clone);
+            }
+            const std::string raw = slurp(dir / "template.bin");
+            Bytes tpl(raw.begin(), raw.end());
+            size_t replaced = 0;
+            if (!motionclose::remap_template(&tpl, map, &replaced, &why)) return done(false);
+            spit(dir / "template.clone.bin", tpl.data(), tpl.size());
+            report["replaced"] = replaced;
+            return done(true);
+        }
         else if (a == "--roster-max") roster_max = static_cast<uint32_t>(std::stoul(argv[++i]));
         else if (a == "--parse-blocks") {
             const std::string text((std::istreambuf_iterator<char>(std::cin)), std::istreambuf_iterator<char>());
@@ -50,6 +104,33 @@ int main(int argc, char** argv) {
             std::printf("%s %08x %08x\n", guid_text(g).c_str(), fnv(g), derive_id("mod", "know", "x"));
             return 0;
         }
+    }
+    if (!body.empty()) {
+        const std::string raw = slurp(body);
+        const ojson spec = ojson::parse(slurp(body_spec));
+        BodySpec b;
+        std::string why;
+        Bytes lowered{0x5a};  // a refusal must not replace its caller's output
+        const bool ids = parse_guid(spec.value("model", ""), &b.model) && parse_guid(spec.value("graph", ""), &b.graph);
+        b.radius = spec["size"]["radius"].get<double>();
+        b.height = spec["size"]["height"].get<double>();
+        bool ok = ids && lower_body(reinterpret_cast<const uint8_t*>(raw.data()), raw.size(), b, &lowered, &why);
+        if (ok && spec.contains("edit")) {
+            const auto& edit = spec["edit"];
+            TemplateEdit e;
+            e.new_name = edit.value("name", "");
+            e.has_npc_id = edit.contains("npcId"); e.npc_id = edit.value("npcId", 0u);
+            e.has_loca = edit.contains("locaTag");
+            if (e.has_loca) parse_guid(edit["locaTag"].get<std::string>(), &e.loca_tag);
+            e.dialog.any = edit.contains("headline"); e.dialog.headline = edit.value("headline", 0u);
+            Bytes final;
+            ok = edit_template(lowered.data(), lowered.size(), e, &final, &why);
+            if (ok) lowered = std::move(final);
+        }
+        fs::create_directories(out);
+        spit(out / "body.bin", lowered.data(), lowered.size());
+        std::cout << ojson{{"ok", ok}, {"reason", why}, {"inputUnchanged", raw == slurp(body)}}.dump() << '\n';
+        return ok ? 0 : 1;
     }
     std::map<std::string, std::string> cache;
     std::map<std::string, Guid> tnames;
