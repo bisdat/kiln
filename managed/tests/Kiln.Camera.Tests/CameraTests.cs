@@ -358,4 +358,20 @@ public sealed class CameraTests
         kiln.Step();
         Assert.True(end.Result.Ok);
     }
+
+    // review S8 S1: Camera.Set needs camera.server_mode (a mode lock) or camera.remote (visual parts, also for the host's
+    // own player); a local part row alone serves no server request, so the aggregate must not read available on it.
+    [Fact]
+    public void The_server_aggregate_needs_a_mode_lock_or_the_remote_row_not_a_local_part()
+    {
+        using var kiln = Started(out var mod);
+        kiln.Run(() => Camera.GetCapabilities(CameraEndpoint.Local));
+        bool Is(string row) => kiln.Run(() => Capabilities.Is(row));
+        kiln.Capabilities.Override("camera.server_mode", false, "switched off by the test");
+        kiln.Capabilities.Override("camera.remote", false, "switched off by the test");
+        kiln.Step(25);
+        Assert.True(Is("camera.local"));
+        Assert.False(Is("camera.server"), kiln.Run(() => Capabilities.Why("camera.server")));
+        Assert.Equal("camera.remote", Assert.Throws<KilnUnavailableException>(() => Sync(kiln, mod, () => Camera.Set(Player, Lens()))).Capability);
+    }
 }

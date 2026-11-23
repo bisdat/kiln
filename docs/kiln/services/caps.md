@@ -583,7 +583,7 @@ Product rendering and hosted Mode have not run in a real game. The dedicated Mod
 | `camera.remote` | service row | kiln.camera | - | the server can ask a render-only camera of a player whose client runs Kiln (`Camera.Set` with visual parts): on while Kiln.Camera's transport bridge is bound (from Kiln's first service tick, with the channel `kiln.camera` v1); each player's client must still offer the parts (`Camera.GetCapabilities(Remote, player)`) |
 | `camera.resource_profile` | service row | kiln.camera | - | reserved for the game's own camera resource profiles; always `unavailable`, `policy` in kiln.camera v1 |
 | `camera.local` | managed | Kiln.Camera | - | at least one `camera.local_*` part row is on (the mark on `Camera.SetLocal`); a request still needs the row of each part it carries |
-| `camera.server` | managed | Kiln.Camera | - | a camera request of a server can work here: `camera.server_mode`, `camera.remote` or, for a host's own player, a `camera.local_*` row is on (the mark on `Camera.Set`) |
+| `camera.server` | managed | Kiln.Camera | - | a camera request of a server can work here: `camera.server_mode` (a mode lock) or `camera.remote` (visual parts, also for a host's own player, whose `camera.local_*` rows then decide the parts) is on (the mark on `Camera.Set`) |
 
 ## Rows added in 0.2.0-dev.30.7 / mod API 0.2.16
 

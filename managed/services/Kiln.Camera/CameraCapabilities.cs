@@ -8,7 +8,8 @@ internal static unsafe class CameraCaps
 {
     /// <summary>kiln.camera's table is here.</summary>
     public const string Service = "camera.service";
-    /// <summary>Some camera request of a server works here: a mode lock, a remote visual, or the host's own view.</summary>
+    /// <summary>Some camera request of a server works here: a mode lock (<c>camera.server_mode</c>) or a visual for a
+    /// player's client, the host's own player included (<c>camera.remote</c>).</summary>
     public const string Server = "camera.server";
     /// <summary>Some render-only part works for this client's own player.</summary>
     public const string Local = "camera.local";
@@ -47,10 +48,11 @@ internal static unsafe class CameraCaps
             _lowered = false;
         }
         var local = here && LocalParts.Any(Capabilities.Is);
-        // A server world can exist on both sides (a client hosts one). The host's own view goes through its local rows.
-        var server = here && (Capabilities.Is(ServerMode) || Capabilities.Is(Remote) || local);
+        // A server world can exist on both sides (a client hosts one). Camera.Set needs camera.server_mode for a mode lock
+        // and camera.remote for visual parts, the host's own player included (its local rows decide the parts after that).
+        var server = here && (Capabilities.Is(ServerMode) || Capabilities.Is(Remote));
         ServiceCaps.Static(Local, local, CapabilityReason.ServiceMissing, here ? "no camera.local_* row is on" : missing, Service);
-        ServiceCaps.Static(Server, server, CapabilityReason.ServiceMissing, here ? "neither camera.server_mode nor camera.remote nor a camera.local_* row is on" : missing, Service);
+        ServiceCaps.Static(Server, server, CapabilityReason.ServiceMissing, here ? "neither camera.server_mode nor camera.remote is on" : missing, Service);
     }
 
     /// <summary>Throws <see cref="KilnUnavailableException"/> naming <paramref name="capability"/> unless it is available.</summary>
