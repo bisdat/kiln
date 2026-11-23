@@ -30,7 +30,8 @@ public enum RegistryPhase
     Add = 1,
     /// <summary>All mods' ordinary field edits.</summary>
     Alter = 2,
-    /// <summary>All mods' final pass, reading add + alter, not another mod's final.</summary>
+    /// <summary>All mods' final pass. At GameStart it reads add + alter, not another mod's final; a runtime pass reads the
+    /// pre-pass values without the reading mod's own layers in every phase, and commits all finals after all alters.</summary>
     Final = 3,
 }
 

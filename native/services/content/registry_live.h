@@ -105,7 +105,9 @@ KilnResult registry_live_begin(KilnOwner owner, const std::string& mod, uint32_t
 KilnResult registry_live_submit(KilnOwner owner, uint64_t handle, const std::string& ir, RegistryLiveReply* out, std::string* report);
 KilnResult registry_live_commit(KilnOwner owner, uint64_t handle, RegistryLiveReply* out);
 KilnResult registry_live_revert(KilnOwner owner, uint64_t handle, RegistryLiveReply* out);
-KilnResult registry_live_read(const std::string& registry, const std::string& id, const std::string& field, std::string* out);
+// exclude_mod (kiln.internal.registry read_pass, review4 NS5): the value without that mod's own registry rows.
+KilnResult registry_live_read(const std::string& registry, const std::string& id, const std::string& field, std::string* out,
+                              const std::string& exclude_mod = {});
 RegistryLiveStatus registry_live_status();
 void registry_live_world_begin(uint32_t kind = KILN_WORLD_SERVER);
 void registry_live_world_stop();

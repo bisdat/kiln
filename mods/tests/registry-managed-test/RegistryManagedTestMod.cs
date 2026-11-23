@@ -63,7 +63,8 @@ public sealed class RegistryManagedTestMod : Mod
         else if (context.EntryPoint == RegistryEntryPoint.HotReload)
         {
             ++_hotReload;
-            if (Drop && registry.Items[Wood].MaxStack != 271) throw new InvalidOperationException("replacement did not see retained GameStart base");
+            // review4 NS5: a runtime pass reads the pre-pass values without the mod's own layers, its GameStart edit included
+            if (Drop && registry.Items[Wood].MaxStack == 271) throw new InvalidOperationException("replacement pass read its own GameStart layer");
         }
     }
     public override void OnLoad()

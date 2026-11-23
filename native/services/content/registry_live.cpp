@@ -94,6 +94,8 @@ struct LiveState {
     bool reading = false;
     std::string read_reason;
     std::map<registry::FieldRef, LiveField> read_fields;
+    bool read_capture = false;                   // a pass read: put() keeps each slot's evaluation (review4 NS5)
+    std::map<uintptr_t, LayerEval> read_evals;
 };
 LiveState g;  // under store_mutex
 bool inactive_now(const LiveState::Change& c) { return c.inactive && c.inactive_world == g.world; }
@@ -266,13 +268,19 @@ std::string source_of(const Binding& b) {
 }
 
 bool put(const std::shared_ptr<Binding>& b, int32_t field_index, int32_t sub, uintptr_t addr, uint8_t n, LayerEval ev) {
-    if (g.reading) return true;
+    if (g.reading) {
+        if (g.read_capture) g.read_evals.insert_or_assign(addr, std::move(ev));
+        return true;
+    }
     LayerModScope scope(b->rows.back().mod);
     return store_put_eval(registry_owner(), registry_seq(++g.ordinal), b->kind, b->entry.id, field_index, sub, addr, n, std::move(ev), source_of(*b));
 }
 
 bool put_at(const std::shared_ptr<Binding>& b, uint32_t kind, uint32_t id, int32_t field_index, int32_t sub, uintptr_t addr, uint8_t n, LayerEval ev) {
-    if (g.reading) return true;
+    if (g.reading) {
+        if (g.read_capture) g.read_evals.insert_or_assign(addr, std::move(ev));
+        return true;
+    }
     LayerModScope scope(b->rows.back().mod);
     return store_put_eval(registry_owner(), registry_seq(++g.ordinal), kind, id, field_index, sub, addr, n, std::move(ev), source_of(*b));
 }
@@ -1621,7 +1629,8 @@ RegistryLiveStatus registry_live_status() {
     return status;
 }
 
-KilnResult registry_live_read(const std::string& reg_name, const std::string& id, const std::string& field, std::string* out) {
+KilnResult registry_live_read(const std::string& reg_name, const std::string& id, const std::string& field, std::string* out,
+                              const std::string& exclude_mod) {
     if (!out) return KILN_ERR_UNAVAILABLE;
     {
         std::lock_guard lock(store_mutex());
@@ -1643,7 +1652,7 @@ KilnResult registry_live_read(const std::string& reg_name, const std::string& id
         std::string mapping_reason;
         if (spec && g.in->regmap->mapping(reg_name, registry::generic_path(field), &mapping_reason) != rmap::Mapping::Mapped) return KILN_ERR_UNAVAILABLE;
         std::string text;
-        const KilnResult rc = registry_live_read(reg_name, id, parent, &text);
+        const KilnResult rc = registry_live_read(reg_name, id, parent, &text, exclude_mod);
         if (rc != KILN_OK) return rc;
         const auto list = registry::json::parse(text, nullptr, false);
         if (!list.is_array()) return KILN_ERR_INVALID_ARGUMENT;
@@ -1675,6 +1684,22 @@ KilnResult registry_live_read(const std::string& reg_name, const std::string& id
     std::string why;
     if (g.in->regmap->mapping(reg_name, field, &why) != rmap::Mapping::Mapped) return KILN_ERR_UNAVAILABLE;
     const registry::FieldRef ref{reg_name, id, field};
+    // review4 NS5: a runtime pass reads the value without the reading mod's own registry rows (its stage edits and live
+    // changes), so a read-derived assignment restates the mod's intent instead of stacking on its earlier layers.
+    const registry::FieldOutcome* own = nullptr;
+    if (!exclude_mod.empty())
+        if (auto it = g.in->result.fields.find(ref); it != g.in->result.fields.end() &&
+            std::any_of(it->second.chain.begin(), it->second.chain.end(), [&](const ChainRow& r) {
+                return r.kind == registry::WriterKind::Registry && r.mod == exclude_mod; }))
+            own = &it->second;
+    auto others = [&](const ChainRow& r) { return !(r.kind == registry::WriterKind::Registry && r.mod == exclude_mod); };
+    if (own && (!g.world || spec->applies == registry::Applies::Restart)) {
+        Value v = own->base;
+        for (const ChainRow& r : own->chain)
+            if (others(r)) v = registry::evaluate({r}, v, *spec);
+        *out = v.to_json().dump();
+        return KILN_OK;
+    }
     if (!g.world || spec->applies == registry::Applies::Restart) {
         if (auto it = g.in->result.fields.find(ref); it != g.in->result.fields.end()) { *out = it->second.result.to_json().dump(); return KILN_OK; }
         if (auto reg = g.in->base.registries.find(reg_name); reg != g.in->base.registries.end())
@@ -1686,17 +1711,30 @@ KilnResult registry_live_read(const std::string& reg_name, const std::string& id
         return KILN_ERR_NOT_FOUND;
     }
     struct ReadScope {
-        ReadScope() { g.reading = true; g.read_fields.clear(); g.read_reason.clear(); }
-        ~ReadScope() { g.reading = false; g.read_fields.clear(); }
+        ReadScope() { g.reading = true; g.read_fields.clear(); g.read_reason.clear(); g.read_evals.clear(); }
+        ~ReadScope() { g.reading = false; g.read_capture = false; g.read_fields.clear(); g.read_evals.clear(); }
     } scope;
     registry::FieldOutcome identity;
-    identity.chain.push_back({});
+    if (own) {
+        for (const ChainRow& r : own->chain)
+            if (r.kind == registry::WriterKind::Registry && others(r)) identity.chain.push_back(r);
+        g.read_capture = true;
+    }
+    if (identity.chain.empty()) identity.chain.push_back({});
     bind(ref, identity);
     const auto it = g.read_fields.find(ref);
     if (it == g.read_fields.end()) return KILN_ERR_UNAVAILABLE;
     std::vector<SlotBytes> bytes(it->second.slots.size());
-    for (size_t i = 0; i < bytes.size(); ++i)
-        if (!rd(it->second.slots[i].addr, bytes[i].data(), it->second.slots[i].size)) return KILN_ERR_UNAVAILABLE;
+    for (size_t i = 0; i < bytes.size(); ++i) {
+        const LiveSlot& slot = it->second.slots[i];
+        if (own) {  // the slot's layers with the other mods' rows in place of the registry's layer
+            const auto ev = g.read_evals.find(slot.addr);
+            if (!store_effective_without_registry(slot.addr, slot.size, ev != g.read_evals.end() ? &ev->second : nullptr, bytes[i].data()))
+                return KILN_ERR_UNAVAILABLE;
+        } else if (!rd(slot.addr, bytes[i].data(), slot.size)) {
+            return KILN_ERR_UNAVAILABLE;
+        }
+    }
     auto value = it->second.decode(bytes, nullptr);
     if (!value || (value->numeric() && !std::isfinite(value->as_double()))) return KILN_ERR_UNAVAILABLE;
     *out = value->to_json().dump();

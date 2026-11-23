@@ -338,6 +338,40 @@ bool store_effective(uintptr_t addr, uint8_t n, uint8_t* out) {
     return true;
 }
 
+bool store_effective_without_registry(uintptr_t addr, uint8_t n, const LayerEval* registry, uint8_t* out) {
+    if (n == 0 || n > kSlotBytes) return false;
+    std::lock_guard lock(g_mu);
+    auto it = g_slots.find(addr);
+    if (it == g_slots.end()) return rd(addr, out, n);
+    Slot& s = it->second;
+    if (s.n != n) return false;
+    if (s.foreign) return rd(addr, out, n);  // another writer owns it for this world: its bytes are what a reader sees
+    uint8_t v[kSlotBytes] = {};
+    std::memcpy(v, s.original, n);
+    bool applied = false;
+    auto apply_registry = [&] {
+        if (applied) return;
+        applied = true;
+        uint8_t r[kSlotBytes] = {};
+        std::string why;
+        if (registry && *registry && (*registry)(v, n, r, &why)) std::memcpy(v, r, n);
+    };
+    for (const Layer& l : s.layers) {
+        if (is_registry_seq(l.seq)) continue;      // the registry's own layer is replaced by the reader's evaluation
+        if (l.seq >= kRegistrySeq) apply_registry();  // code above the registry band still wins
+        if (l.eval) {
+            uint8_t r[kSlotBytes] = {};
+            std::string why;
+            if ((*l.eval)(v, n, r, &why)) std::memcpy(v, r, n);
+        } else {
+            std::memcpy(v, l.bytes, n);
+        }
+    }
+    apply_registry();
+    std::memcpy(out, v, n);
+    return true;
+}
+
 bool store_below_registry(uintptr_t addr, uint8_t n, uint8_t* out) {
     if (n == 0 || n > kSlotBytes) return false;
     std::lock_guard lock(g_mu);

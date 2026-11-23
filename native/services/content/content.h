@@ -284,6 +284,10 @@ bool store_put_eval(KilnOwner owner, uint64_t seq, uint32_t kind, uint32_t id, i
 bool store_effective(uintptr_t addr, uint8_t n, uint8_t* out);
 // The same, with only the layers below the registry band (packs, the original): the value registry layers are computed over.
 bool store_below_registry(uintptr_t addr, uint8_t n, uint8_t* out);
+// The slot's value with its registry-band layers replaced by one evaluated layer (none: nullptr), layers below and above
+// it as they are: what a registry reader sees without some registry rows (review4 NS5). Memory when there is no slot or
+// another writer owns it for this world.
+bool store_effective_without_registry(uintptr_t addr, uint8_t n, const LayerEval* registry, uint8_t* out);
 uint32_t store_mark_evals();  // every slot holding an evaluated layer is flushed (evaluated) again; returns how many
 bool store_slot_copy(uintptr_t addr, Slot* out);  // a snapshot of the slot and its last evaluated layer bytes; false: none
 // Compare-before-write (sfi R3, owner decision D1): a registry write, or a registry layer's revert, on a slot whose memory is

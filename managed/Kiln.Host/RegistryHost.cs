@@ -13,16 +13,18 @@ using System.Text.Json.Nodes;
 
 namespace Kiln.Host;
 
-/// <summary>kiln.internal.registry v1 (kiln_registry_host.h), 24 bytes: field order is the table's.</summary>
+/// <summary>kiln.internal.registry v2 (kiln_registry_host.h), 32 bytes: field order is the table's. v1 (24 bytes) ends
+/// after SetMode; ReadPass (v2) is a runtime pass's read without the reading mod's own layers (review4 NS5).</summary>
 [StructLayout(LayoutKind.Sequential)]
 internal unsafe struct KilnRegistryHostApi
 {
     public uint Size, Version;
     public delegate* unmanaged[Cdecl]<KilnStr, int> SetOrder;
     public delegate* unmanaged[Cdecl]<uint, int> SetMode;
+    public delegate* unmanaged[Cdecl]<ulong, KilnStr, KilnStr, KilnStr, byte*, nuint, nuint*, int> ReadPass;
 
     public const string Name = "kiln.internal.registry";
-    public const uint Version1 = 1;
+    public const uint Version1 = 1, Version2 = 2;
     public const uint ModeResourcesReady = 0, ModeOnBoot = 1;
 }
 
@@ -72,9 +74,10 @@ internal static unsafe class RegistryHost
                 log(LogLevel.Info, "registry: no kiln.internal.registry table (kiln-content.dll does not run the registry stage): nothing to hand over");
                 return;
             }
-            if (t->Version != KilnRegistryHostApi.Version1 || t->Size != (uint)sizeof(KilnRegistryHostApi))
+            if (t->Version < KilnRegistryHostApi.Version1 || t->Version > KilnRegistryHostApi.Version2 || t->Size < 24 ||
+                (t->Version >= KilnRegistryHostApi.Version2 && t->Size != (uint)sizeof(KilnRegistryHostApi)))
             {
-                log(LogLevel.Warn, $"registry: kiln.internal.registry is v{t->Version}, {t->Size} bytes, not v1 of {sizeof(KilnRegistryHostApi)}: " +
+                log(LogLevel.Warn, $"registry: kiln.internal.registry is v{t->Version}, {t->Size} bytes, not v1 or v2 of {sizeof(KilnRegistryHostApi)}: " +
                                    "the stage runs in the mod folders' order");
                 return;
             }

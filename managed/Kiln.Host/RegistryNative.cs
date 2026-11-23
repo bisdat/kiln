@@ -72,6 +72,7 @@ internal sealed unsafe class RegistryNative(IHostServices host)
 {
     private RegistryStageTable* Stage => (RegistryStageTable*)host.Service("kiln.registry", 1);
     private RegistryLiveTable* Live => (RegistryLiveTable*)host.Service("kiln.registry.live", 1);
+    private KilnRegistryHostApi* Internal => (KilnRegistryHostApi*)host.Service(KilnRegistryHostApi.Name, KilnRegistryHostApi.Version2);
     internal bool Available => Stage != null && Stage->Size >= 88 && Stage->Version >= 1 && Stage->Status != null &&
         Stage->Subscribe != null && Stage->Submit != null && Stage->Read != null && Stage->Select != null &&
         Stage->Ready != null && Stage->Unsubscribe != null;
@@ -118,6 +119,16 @@ internal sealed unsafe class RegistryNative(IHostServices host)
     internal string Read(ulong owner, bool stage, string registry, string id, string field) =>
         NativeCalls.WithUtf8(registry, r => NativeCalls.WithUtf8(id, i => NativeCalls.WithUtf8(field, f =>
             Text((buffer, cap, length) => stage ? Stage->Read(1, r, i, f, buffer, cap, length) : Live->Read(owner, r, i, f, buffer, cap, length)))));
+    // review4 NS5: an automatic runtime pass reads the live value without the reading mod's own registry layers
+    // (kiln.internal.registry v2 read_pass); without it (an older kiln-content.dll) the plain live read.
+    internal string ReadPass(ulong owner, string registry, string id, string field)
+    {
+        var t = Internal;
+        if (t == null || t->Version < KilnRegistryHostApi.Version2 || t->Size < 32 || t->ReadPass == null)
+            return Read(owner, false, registry, id, field);
+        return NativeCalls.WithUtf8(registry, r => NativeCalls.WithUtf8(id, i => NativeCalls.WithUtf8(field, f =>
+            Text((buffer, cap, length) => t->ReadPass(owner, r, i, f, buffer, cap, length)))));
+    }
     internal IReadOnlyList<string> Select(bool stage, string registry, string pattern) =>
         NativeCalls.WithUtf8(registry, r => NativeCalls.WithUtf8(JsonSerializer.Serialize(pattern), selector =>
             JsonSerializer.Deserialize<string[]>(Text((buffer, cap, length) => Stage->Select(stage ? 1u : 2u, r, selector, buffer, cap, length))) ?? []));

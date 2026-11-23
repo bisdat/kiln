@@ -15,8 +15,10 @@ internal sealed unsafe class FakeRegistry : IDisposable
     internal readonly FakeHost Host = new();
     internal readonly RegistryStageTable* Stage;
     internal readonly RegistryLiveTable* Live;
+    internal readonly KilnRegistryHostApi* Internal;
     internal uint Phase = 4;
     internal ulong World = 1, Generation;
+    internal int PassReads;
     internal int Submits, StageError, ReadyError, StatusFailures, WorldRequiredCommits, BeginUnavailable, ReadUnavailable;
     internal int Value => _layers.Count == 0 ? 10 : _layers.Last().Value.Value;
     private ulong _next;
@@ -41,8 +43,11 @@ internal sealed unsafe class FakeRegistry : IDisposable
             Read = &ReadStage, Select = &Select, Ready = &Ready, Unsubscribe = &Unsubscribe };
         *Live = new() { Size = 56, Version = 1, Begin = &Begin, Submit = &Submit, Commit = &Commit,
             Revert = &Revert, Read = &ReadLive, Status = &Status };
+        Internal = (KilnRegistryHostApi*)NativeMemory.AllocZeroed((nuint)sizeof(KilnRegistryHostApi));
+        *Internal = new() { Size = (uint)sizeof(KilnRegistryHostApi), Version = KilnRegistryHostApi.Version2, ReadPass = &ReadPass };
         Host.Services["kiln.registry"] = (nint)Stage;
         Host.Services["kiln.registry.live"] = (nint)Live;
+        Host.Services["kiln.internal.registry"] = (nint)Internal;
     }
     internal void FireStage(RegistryPhase phase)
     {
@@ -75,6 +80,16 @@ internal sealed unsafe class FakeRegistry : IDisposable
     {
         if (Current.ReadUnavailable > 0) { --Current.ReadUnavailable; return KilnAbi.ErrUnavailable; }
         return Text(Current.Value.ToString(System.Globalization.CultureInfo.InvariantCulture), output, capacity, length);
+    }
+    // kiln.internal.registry read_pass: the live value without the reading owner's own layers (review4 NS5).
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int ReadPass(ulong owner, KilnStr registry, KilnStr id, KilnStr field, byte* output, nuint capacity, nuint* length)
+    {
+        if (Current.ReadUnavailable > 0) { --Current.ReadUnavailable; return KilnAbi.ErrUnavailable; }
+        ++Current.PassReads;
+        var others = Current._layers.Values.Where(l => l.Owner != owner).ToArray();
+        var value = others.Length == 0 ? 10 : others.Last().Value;
+        return Text(value.ToString(System.Globalization.CultureInfo.InvariantCulture), output, capacity, length);
     }
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int Select(uint view, KilnStr registry, KilnStr selector, byte* output, nuint capacity, nuint* length) => Text("[\"game:wood\"]", output, capacity, length);
@@ -127,6 +142,6 @@ internal sealed unsafe class FakeRegistry : IDisposable
     }
     public void Dispose()
     {
-        Host.Services.Clear(); NativeMemory.Free(Stage); NativeMemory.Free(Live); _current = null;
+        Host.Services.Clear(); NativeMemory.Free(Stage); NativeMemory.Free(Live); NativeMemory.Free(Internal); _current = null;
     }
 }

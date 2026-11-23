@@ -156,11 +156,12 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
         return !bound || _worldBinding.Matches(world) ? world : world with { Id = null };
     }
     private RegistryContext Context(ModContext owner, RegistryEntryPoint point, RegistryPhase phase, RegistryWorld? world,
-        string code, bool stage, Dictionary<string, ConfigFile> inputs, bool readOnly = false)
+        string code, bool stage, Dictionary<string, ConfigFile> inputs, bool readOnly = false, bool pass = false)
     {
         var nativeOwner = owner.Owner; // transport delegates must not retain a collectible mod context
         return new(owner, point, phase, world, code,
-            (registry, id, field) => _native.Read(nativeOwner, stage, registry, id, field),
+            pass ? (registry, id, field) => _native.ReadPass(nativeOwner, registry, id, field)
+                 : (registry, id, field) => _native.Read(nativeOwner, stage, registry, id, field),
             (registry, pattern) => _native.Select(stage, registry, pattern), inputs)
             { ReadOnly = readOnly, CurrentWorldToken = () => _native.Status().World };
     }
@@ -250,12 +251,18 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
         finally { _dispatchingWorld = false; }
     }
     // Returns the records whose point met a transient KilnUnavailableException: the caller schedules them again.
+    // review4 NS5 (coordinator ruling, Nov 23): a runtime pass behaves like GameStart's stage. Every callback of the pass reads
+    // the same pre-pass values (the live values without the reading mod's own registry layers, so a read-derived assignment
+    // restates its intent and never stacks), whatever the load order. The pass's edits are captured, then committed only
+    // after every callback ran: all Adds, then all Alters, then all Finals, each in Kiln.Host load order (dependencies first).
+    // Live commit order across passes still decides between passes.
     private HashSet<Runtime> Apply(IEnumerable<Runtime> records, RegistryEntryPoint point, Func<Runtime, bool> selected)
     {
         Game.AssertTickThread();
         var ordered = records.Where(r => selected(r) && r.Context.Alive).ToArray();
         var retry = new HashSet<Runtime>();
         var inputs = ordered.ToDictionary(r => r, _ => new Dictionary<string, ConfigFile>(StringComparer.Ordinal));
+        var captured = ordered.ToDictionary(r => r, _ => new List<(RegistryPhase Phase, RegistryEntryPoint Native, string Ir)>());
         var committed = ordered.ToDictionary(r => r, _ => new List<ulong>());
         foreach (var record in ordered) record.Faulted = false; // a fault closes this point, not every future world/point
         void Remember(Runtime record, RegistryEntryPoint native, RegistryCompletion result)
@@ -276,6 +283,7 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
         void Fault(Runtime record, Exception error)
         {
             record.Faulted = true;
+            captured[record].Clear();
             foreach (var handle in committed[record].AsEnumerable().Reverse())
                 try
                 {
@@ -295,35 +303,45 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
             }
             Log(record.Context.Info.Id + " OnRegistry " + point, error);
         }
-        foreach (var phase in new[] { RegistryPhase.Add, RegistryPhase.Alter, RegistryPhase.Final })
-        {
-            var finals = new List<(Runtime Record, RegistryEntryPoint Native, ulong Handle)>();
+        var phases = new[] { RegistryPhase.Add, RegistryPhase.Alter, RegistryPhase.Final };
+        foreach (var phase in phases)
             foreach (var record in ordered)
             {
                 if (!record.Context.Alive || record.Faulted) continue;
-                ulong handle = 0;
                 RegistryContext? context = null;
                 try
                 {
-                    context = Context(record.Context, point, phase, World(), record.Code, false, inputs[record]);
+                    context = Context(record.Context, point, phase, World(), record.Code, false, inputs[record], pass: true);
                     using var scope = context.Enter();
                     record.Instance.OnRegistry(context);
                     var ir = context.CaptureIr(); var native = NativePoint(record, point, context.ReadWorldSettings); context.Close();
-                    if (ir is null) continue;
-                    handle = _native.Begin(record.Context.Owner, native);
-                    _native.Submit(record.Context.Owner, handle, ir);
-                    if (phase == RegistryPhase.Final) finals.Add((record, native, handle));
-                    else Remember(record, native, _native.Commit(record.Context.Owner, handle));
-                    handle = 0;
+                    if (ir is not null) captured[record].Add((phase, native, ir));
                 }
                 catch (Exception e) { Fault(record, e); }
-                finally { context?.Close(); if (handle != 0) try { _native.Revert(record.Context.Owner, handle); } catch { } }
+                finally { context?.Close(); }
             }
-            // Every final handler read the add+alter view, never another mod's final commit.
-            foreach (var (record, native, handle) in finals)
-                try { Remember(record, native, _native.Commit(record.Context.Owner, handle)); }
-                catch (Exception e) { try { _native.Revert(record.Context.Owner, handle); } catch { } Fault(record, e); }
-        }
+        // Every callback has read the pre-pass view; the pass's edits land now, phase by phase, in load order.
+        foreach (var phase in phases)
+            foreach (var record in ordered)
+            {
+                if (!record.Context.Alive || record.Faulted) continue;
+                foreach (var (_, native, ir) in captured[record].Where(x => x.Phase == phase).ToArray())
+                {
+                    ulong handle = 0;
+                    try
+                    {
+                        handle = _native.Begin(record.Context.Owner, native);
+                        _native.Submit(record.Context.Owner, handle, ir);
+                        var result = _native.Commit(record.Context.Owner, handle); handle = 0;
+                        Remember(record, native, result);
+                    }
+                    catch (Exception e)
+                    {
+                        if (handle != 0) try { _native.Revert(record.Context.Owner, handle); } catch { }
+                        Fault(record, e); break;
+                    }
+                }
+            }
         foreach (var record in ordered)
             if (!retry.Contains(record)) { record.Retries = 0; record.RetryAt = 0; }
         return retry;

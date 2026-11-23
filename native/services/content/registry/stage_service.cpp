@@ -430,7 +430,16 @@ KilnResult KILN_CALL h_set_order(KilnStr order) {
     return rc;
 }
 KilnResult KILN_CALL h_set_mode(uint32_t mode) { return runner().set_mode(mode); }
-const KilnRegistryHostApi kHostTable = {{sizeof(KilnRegistryHostApi), KILN_REGISTRY_HOST_VERSION}, &h_set_order, &h_set_mode};
+KilnResult KILN_CALL h_read_pass(KilnOwner owner, KilnStr reg, KilnStr id, KilnStr field, char* buf, size_t cap, size_t* len) {
+    if (!str_ok(reg, 1024) || !str_ok(id, 1024) || !str_ok(field, 1024) || (!buf && cap)) return KILN_ERR_INVALID_ARGUMENT;
+    std::string mod;
+    const KilnResult own = live_owner(owner, &mod);
+    if (own != KILN_OK) return own;
+    std::string text;
+    const KilnResult rc = registry_live_read(str(reg), str(id), str(field), &text, mod);
+    return rc == KILN_OK ? copy_out(text, buf, cap, len) : rc;
+}
+const KilnRegistryHostApi kHostTable = {{sizeof(KilnRegistryHostApi), KILN_REGISTRY_HOST_VERSION}, &h_set_order, &h_set_mode, &h_read_pass};
 
 }  // namespace
 

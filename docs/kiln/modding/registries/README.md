@@ -71,9 +71,18 @@ lookup at GameStart is refused with `RegistryContextError.RuntimeExportUnavailab
 Private helper assemblies in the mod's own folder remain loadable; they are not another mod's runtime export graph.
 
 Automatic points run all selected mods' Add, then Alter, then Final in load order. Ordinary property assignments are absolute and target
-Alter; `registry.Final(...)` and `registry.Items.Final(pattern, ...)` explicitly target Final. Final handlers read the
+Alter; `registry.Final(...)` and `registry.Items.Final(pattern, ...)` explicitly target Final. At GameStart, Final handlers read the
 Add+Alter view, never another mod's Final commit. A callback's own pending writes are projected into its typed read view;
-they are submitted only after successful return. A throwing callback submits none of that turn's buffered edits and
+they are submitted only after successful return.
+
+**What runtime reads see.** A runtime point (`ModLoad`, `WorldLoad`, `HotReload`) works like GameStart's stage: every
+callback of one pass, in every phase, reads the same pre-pass values, whatever the load order, and a mod's reads leave out
+its own registry layers (its GameStart edits and its earlier live changes). So `item.MaxStack = item.MaxStack * 2` restates
+the mod's intent at each point (10 becomes 20 at ModLoad and stays 20 at WorldLoad) instead of doubling again, and two mods
+doing it in one pass both read 10. The pass's edits are committed only after every callback ran: all Adds, then all Alters,
+then all Finals, each in load order (dependencies first), so an earlier mod's Final still beats a later mod's Alter. Between
+passes the later commit wins (a ModLoad Final of 70 loses to a later Manual Alter of 80; reverting that restores 70).
+`Registry.Change` and `Registry.Read` read the live values as they are, the mod's own layers included. A throwing callback submits none of that turn's buffered edits and
 reverts that author's earlier commits from the same point. Other points' retained layers remain; a later point or world
 can retry the author. When the registry itself is not available yet (`KilnUnavailableException`: its live back-end is still
 being installed, a budget is full, or the base is still being prepared), the point is not a fault: Kiln undoes that pass's

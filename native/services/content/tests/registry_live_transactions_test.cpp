@@ -123,6 +123,37 @@ void foreign_slot_keeps_the_rest_of_a_retained_change() {
     registry_live_world_begin(); apply_registry_files({});
     check(at<uint32_t>(WOOD_AT) == 50 && at<uint32_t>(STONE_AT) == 70, "the next world applies the whole process change again");
 }
+// review4 NS5: a runtime pass reads the live value without the reading mod's own registry rows (stage edits and live
+// changes); layers below (packs) and above (code) stay, and a slot another writer took reads that writer's bytes.
+void pass_read_excludes_own_layers() {
+    world();
+    g_files = {{"a/content/a.json", R"({"registry":{"alter":[{"registry":"items","select":"game:material_t1_wood_logs","field":"maxStack","op":{"add":1}}]}})"}};
+    const auto files = files_of({{"a", "a/content/a.json"}});
+    stage(files); registry_live_world_begin(); apply_registry_files(files);
+    put_pack(WOOD_AT, 20); std::string err; store_flush(&err);
+    RegistryLiveReply reply;
+    const auto a = change(71, "a", "[{" + wood + R"("op":{"mul":2}}])", 1); registry_live_commit(71, a, &reply);
+    const auto b = change(72, "b", "[{" + wood + R"("op":{"add":5}}])", 1); registry_live_commit(72, b, &reply);
+    check(at<uint32_t>(WOOD_AT) == 47, "pack 20, a's stage +1, a's x2, b's +5");
+    std::string value;
+    auto read = [&](const std::string& mod) {
+        check(registry_live_read("items", "game:material_t1_wood_logs", "maxStack", &value, mod) == KILN_OK, "pass read " + mod);
+        return std::stoi(value);
+    };
+    check(read("") == 47 && read("c") == 47, "a plain read and another mod's pass read see the live value");
+    check(read("a") == 25, "a's pass read leaves out a's stage edit and a's live change, not the pack or b's change");
+    check(read("b") == 42, "b's pass read leaves out only b's change");
+    check(at<uint32_t>(WOOD_AT) == 47, "a pass read writes nothing");
+    uint8_t bytes[4]; uint32_t code = 333; std::memcpy(bytes, &code, 4);
+    store_put(CODE, next_code_seq(), KILN_CONTENT_ITEMS, WOOD, 0, -1, A(WOOD_AT), 4, bytes, "code"); store_flush(&err);
+    check(read("a") == 333, "code above the registry still wins in a pass read");
+    store_drop_owner(CODE); store_flush(&err);
+    registry_live_world_stop();
+    check(read("a") == 15 && read("b") == 22, "before a world, the composed value is read without the mod's rows (base 10)");
+    registry_live_world_begin(); apply_registry_files(files);
+    mem<uint32_t>(WOOD_AT, 777); apply_registry_files(files); // another writer took the slot
+    check(read("a") == 777, "a slot another writer took reads that writer's bytes");
+}
 // review4 NM1: two retained changes, one slot each, the write of one of them fails at a reapplication: only that one is charged.
 void multi_change_write_failure_is_attributed_per_change() {
     fresh_live(); RegistryLiveReply reply;
@@ -771,7 +802,8 @@ int main() {
         {"rejected_rows_survive_the_rollback_pass", rejected_rows_survive_the_rollback_pass},
         {"multi_change_write_failure_is_attributed_per_change", multi_change_write_failure_is_attributed_per_change},
         {"rejected_process_change_returns_next_world", rejected_process_change_returns_next_world},
-        {"foreign_slot_keeps_the_rest_of_a_retained_change", foreign_slot_keeps_the_rest_of_a_retained_change}};
+        {"foreign_slot_keeps_the_rest_of_a_retained_change", foreign_slot_keeps_the_rest_of_a_retained_change},
+        {"pass_read_excludes_own_layers", pass_read_excludes_own_layers}};
     for (auto [name, fn] : tests) try { fn(); std::printf("ok %s\n", name); } catch (const std::exception& e) { ++failed; std::printf("FAIL %s: %s\n", name, e.what()); }
     std::printf("registry live transactions: %d checks, %d failed groups\n", checks, failed);
     return failed ? 1 : 0;

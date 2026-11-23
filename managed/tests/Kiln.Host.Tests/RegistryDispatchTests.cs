@@ -60,9 +60,12 @@ public sealed class RegistryDispatchTests : ModsFixture
         Assert.Equal(0, native.Submits);
         owner.Retire();
     }
-    [Fact]
-    public void AllAlterPassesPrecedeFinalAndAllFinalsReadTheAlterView()
+    // review4 NS5 (ruling Nov 23): every callback of a runtime pass reads the same pre-pass values, whatever the order; the
+    // pass commits at its end, all Alters then all Finals, in load order.
+    [Fact(Timeout = 30_000)]
+    public async Task RuntimePassesReadPrePassValuesAndCommitAtTheEndInLoadOrder()
     {
+        await Task.Yield();
         using var native = new FakeRegistry(); using var manager = NewManager(native.Host);
         using var dispatch = new RegistryDispatch(manager); dispatch.Prepare(100);
         var seen = new List<string>();
@@ -76,8 +79,9 @@ public sealed class RegistryDispatchTests : ModsFixture
         dispatch.Loaded(new Author(c => Invoke(c, 20)), a, Root, false);
         dispatch.Loaded(new Author(c => Invoke(c, 30)), b, Root, false);
         dispatch.FlushLoads();
-        Assert.Equal(new[] { "a:Add:10", "b:Add:10", "a:Alter:10", "b:Alter:20", "a:Final:30", "b:Final:30" }, seen);
+        Assert.Equal(new[] { "a:Add:10", "b:Add:10", "a:Alter:10", "b:Alter:10", "a:Final:10", "b:Final:10" }, seen);
         Assert.Equal(130, native.Value);
+        Assert.True(native.PassReads >= 6, "automatic passes read through the pass view");
         a.Retire(); b.Retire();
         Assert.Equal(10, native.Value);
     }
@@ -118,6 +122,47 @@ public sealed class RegistryDispatchTests : ModsFixture
     private sealed class WorldAuthor(Action<RegistryContext> callback) : Mod
     {
         public override void OnRegistry(RegistryContext context) => callback(context);
+    }
+    private static int Read(RegistryContext context) =>
+        int.Parse(context.ReadValue("items", "game:wood", "maxStack"), System.Globalization.CultureInfo.InvariantCulture);
+    // review4 NS5: a read-derived assignment restates the mod's intent at every point; it never stacks on its own layers.
+    [Fact(Timeout = 30_000)]
+    public async Task ARuntimeReadExcludesTheReadersOwnLayers()
+    {
+        await Task.Yield();
+        using var native = new FakeRegistry(); using var manager = NewManager(native.Host);
+        using var dispatch = new RegistryDispatch(manager); dispatch.Prepare(100);
+        var owner = Owner(native, "doubler");
+        dispatch.Loaded(new WorldAuthor(c => { if (c.Phase == RegistryPhase.Alter) Edit(c, Read(c) * 2); }), owner, Root, false);
+        dispatch.FlushLoads();
+        Assert.Equal(20, native.Value); Assert.Equal(2, native.LayerCount); // ModLoad 20, then WorldLoad 20 (not 40)
+        owner.Retire(); Assert.Equal(10, native.Value);
+    }
+    [Fact(Timeout = 30_000)]
+    public async Task TwoModsDoublingInOnePassDoNotStack()
+    {
+        await Task.Yield();
+        using var native = new FakeRegistry(); using var manager = NewManager(native.Host);
+        using var dispatch = new RegistryDispatch(manager); dispatch.Prepare(100);
+        var a = Owner(native, "a"); var b = Owner(native, "b");
+        dispatch.Loaded(new Author(c => { if (c.Phase == RegistryPhase.Alter) Edit(c, Read(c) * 2); }), a, Root, false);
+        dispatch.Loaded(new Author(c => { if (c.Phase == RegistryPhase.Alter) Edit(c, Read(c) * 2); }), b, Root, false);
+        dispatch.FlushLoads();
+        Assert.Equal(20, native.Value); // like GameStart: both read 10, in any order
+        a.Retire(); b.Retire();
+    }
+    [Fact(Timeout = 30_000)]
+    public async Task AnEarlierModsFinalBeatsALaterModsAlterInOnePass()
+    {
+        await Task.Yield();
+        using var native = new FakeRegistry(); using var manager = NewManager(native.Host);
+        using var dispatch = new RegistryDispatch(manager); dispatch.Prepare(100);
+        var a = Owner(native, "a"); var b = Owner(native, "b");
+        dispatch.Loaded(new Author(c => { if (c.Phase == RegistryPhase.Final) Edit(c, 70); }), a, Root, false);
+        dispatch.Loaded(new Author(c => { if (c.Phase == RegistryPhase.Alter) Edit(c, 80); }), b, Root, false);
+        dispatch.FlushLoads();
+        Assert.Equal(70, native.Value);
+        a.Retire(); b.Retire();
     }
     [Fact]
     public void AFinalFaultRevertsOnlyTheCurrentPointsEarlierCommits()

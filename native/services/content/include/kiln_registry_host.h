@@ -25,7 +25,7 @@ extern "C" {
 #endif
 
 #define KILN_REGISTRY_HOST_SERVICE "kiln.internal.registry"
-#define KILN_REGISTRY_HOST_VERSION 1u
+#define KILN_REGISTRY_HOST_VERSION 2u
 
 /* set_mode: where the stage runs (P1-PLAN.md section 1). */
 enum {
@@ -43,6 +43,12 @@ typedef struct KilnRegistryHostApi {
     KilnResult(KILN_CALL* set_order)(KilnStr order_json);
     /* KILN_REGISTRY_MODE_*. KILN_ERR_INVALID_ARGUMENT: another value. */
     KilnResult(KILN_CALL* set_mode)(uint32_t mode);
+    /* v2 (review4 NS5): an automatic runtime registry pass's read (ModLoad, WorldLoad, HotReload). As kiln.registry.live
+     * read, but the value leaves out every registry row of owner's bound mod (its stage edits and live changes): a pass
+     * reads the pre-pass values without its own layers, so read-derived assignments never stack. World thread rules,
+     * errors and the text contract are kiln.registry.live read's. Any time after START. */
+    KilnResult(KILN_CALL* read_pass)(KilnOwner owner, KilnStr registry, KilnStr id, KilnStr field, char* buf, size_t cap,
+                                     size_t* out_len);
 } KilnRegistryHostApi;
 
 #ifdef __cplusplus
@@ -50,13 +56,13 @@ typedef struct KilnRegistryHostApi {
 #endif
 
 #ifdef __cplusplus
-static_assert(sizeof(KilnRegistryHostApi) == 24 && offsetof(KilnRegistryHostApi, set_order) == 8 &&
-                  offsetof(KilnRegistryHostApi, set_mode) == 16,
-              "kiln.internal.registry v1 (Kiln-internal; checked with the build stamp, not an ABI promise)");
+static_assert(sizeof(KilnRegistryHostApi) == 32 && offsetof(KilnRegistryHostApi, set_order) == 8 &&
+                  offsetof(KilnRegistryHostApi, set_mode) == 16 && offsetof(KilnRegistryHostApi, read_pass) == 24,
+              "kiln.internal.registry v2 (Kiln-internal; checked with the build stamp, not an ABI promise)");
 #else
-_Static_assert(sizeof(KilnRegistryHostApi) == 24 && offsetof(KilnRegistryHostApi, set_order) == 8 &&
-                   offsetof(KilnRegistryHostApi, set_mode) == 16,
-               "kiln.internal.registry v1 (Kiln-internal; checked with the build stamp, not an ABI promise)");
+_Static_assert(sizeof(KilnRegistryHostApi) == 32 && offsetof(KilnRegistryHostApi, set_order) == 8 &&
+                   offsetof(KilnRegistryHostApi, set_mode) == 16 && offsetof(KilnRegistryHostApi, read_pass) == 24,
+               "kiln.internal.registry v2 (Kiln-internal; checked with the build stamp, not an ABI promise)");
 #endif
 
 #endif /* KILN_REGISTRY_HOST_H */
