@@ -777,7 +777,7 @@ public abstract class ConfigFile
             WorldDirectory = worldDirectory;
             FilePath = worldDirectory is null ? "" : System.IO.Path.Combine(worldDirectory, "config", Id + ".json");
         }
-        LoadForBoot(); // validated/clamped input values, without registering or writing anything
+        RegistryContext.WithoutObservation(() => { LoadForBoot(); }); // hash only complete validated values when the author reads them
     }
 
     internal void BindWorld(string? worldDirectory)

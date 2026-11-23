@@ -100,6 +100,38 @@ public sealed class RegistryContextTests
     }
 
     [Fact]
+    public void RepeatedReadsOfOneSettingsInputDoNotChangeItsIdentity()
+    {
+        var context = Frame(Mod()); using var scope = context.Enter();
+        var settings = Config.Register<Settings>(name: "repeated-input");
+        _ = settings.Value; var identity = context.Identity;
+        for (var i = 0; i < 10; ++i) _ = settings.Value;
+        Assert.Equal(identity, context.Identity); context.Close();
+    }
+    [Fact]
+    public void InputLoadingObservesOnlyTheCompleteValidatedSettingsOnce()
+    {
+        var root = Directory.CreateTempSubdirectory("registry-input-").FullName;
+        var previous = KilnPaths.Root; Config.Reset();
+        KilnPaths.Root = root; KilnPaths.Config = null!;
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(root, "config"));
+            File.WriteAllText(Path.Combine(root, "config", "test-complete-input.json"), "{\"value\":9}");
+            var owner = Mod(); var context = Frame(owner); ModConfig<Settings> input; string identity;
+            using (context.Enter())
+            {
+                input = Config.Register<Settings>(name: "complete-input");
+                Assert.Equal(9, input.Value.Value);
+                identity = context.Identity; context.Close();
+            }
+            var expected = Frame(owner);
+            expected.ObserveSettings(input.Id, input.ValuesJson());
+            Assert.Equal(expected.Identity, identity); expected.Close(); owner.Retire();
+        }
+        finally { Config.Reset(); KilnPaths.Root = previous; KilnPaths.Config = null!; Directory.Delete(root, true); }
+    }
+    [Fact]
     public void ResolvedViewsCannotWriteEvenInTheAlterPass()
     {
         var owner = Mod();

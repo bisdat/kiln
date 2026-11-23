@@ -101,6 +101,7 @@ public sealed class RegistryContext
     private readonly int _thread = Environment.CurrentManagedThreadId;
     private readonly string _code;
     private readonly IncrementalHash _settings = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+    private readonly HashSet<string> _observedSettings = new(StringComparer.Ordinal);
     private volatile bool _open = true;
     private string? _closedIdentity;
     [ThreadStatic] internal static RegistryContext? Current;
@@ -158,7 +159,12 @@ public sealed class RegistryContext
     }
     internal void ObserveSettings(string id, string values)
     {
-        _settings.AppendData(Encoding.UTF8.GetBytes(id + "\0" + values + "\n"));
+        if (_observedSettings.Add(id)) _settings.AppendData(Encoding.UTF8.GetBytes(id + "\0" + values + "\n"));
+    }
+    internal static void WithoutObservation(Action load)
+    {
+        var previous = _observing; _observing = true;
+        try { load(); } finally { _observing = previous; }
     }
     internal static void Observe(ConfigFile file)
     {
@@ -170,6 +176,7 @@ public sealed class RegistryContext
             if (frame.World?.Id is not { } id || file.WorldId != id)
                 throw Error(RegistryContextError.WorldSettingsUnavailable, "this world's settings have not been bound");
         }
+        if (frame._observedSettings.Contains(file.Id)) return;
         _observing = true;
         try { frame.ObserveSettings(file.Id, file.ValuesJson()); }
         finally { _observing = false; }
@@ -178,7 +185,7 @@ public sealed class RegistryContext
     internal void Close()
     {
         if (!_open) return;
-        _closedIdentity = Identity; _open = false; Capture = null; Adapter = null; InputConfigs = new(); _settings.Dispose();
+        _closedIdentity = Identity; _open = false; Capture = null; Adapter = null; InputConfigs = new(); _settings.Dispose(); _observedSettings.Clear();
     }
     internal IDisposable Enter() { Ensure(); return new Scope(this); }
     internal static RegistryContextException Error(RegistryContextError code, string message) => new(code, message);
