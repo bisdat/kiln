@@ -1,0 +1,203 @@
+{
+  "format": 1,
+  "npcMotions": {
+    "implicit": {
+      "bindings": [
+        {
+          "role": "sit",
+          "variant": 0,
+          "state": "motion-sit-0"
+        },
+        {
+          "role": "sit",
+          "variant": 1,
+          "state": "motion-sit-1"
+        },
+        {
+          "role": "sit",
+          "variant": 2,
+          "state": "motion-sit-2"
+        },
+        {
+          "role": "sleep",
+          "variant": 0,
+          "state": "motion-sleep-0"
+        },
+        {
+          "role": "sleep",
+          "variant": 1,
+          "state": "motion-sleep-1"
+        },
+        {
+          "role": "sleep",
+          "variant": 2,
+          "state": "motion-sleep-2"
+        },
+        {
+          "role": "inspect",
+          "variant": 0,
+          "state": "motion-inspect-0"
+        },
+        {
+          "role": "jump",
+          "variant": 0,
+          "state": "motion-jump-0"
+        },
+        {
+          "role": "door",
+          "variant": 0,
+          "state": "motion-door-0"
+        },
+        {
+          "role": "door",
+          "variant": 1,
+          "state": "motion-door-1"
+        },
+        {
+          "role": "door",
+          "variant": 2,
+          "state": "motion-door-2"
+        },
+        {
+          "role": "interaction",
+          "variant": 0,
+          "state": "motion-interaction-0"
+        }
+      ],
+      "optionalFallback": "Idle"
+    },
+    "null-key": {
+      "bindings": [
+        {
+          "role": "sit",
+          "variant": 0,
+          "state": "motion-sit-0",
+          "interactionKey": null
+        },
+        {
+          "role": "sit",
+          "variant": 1,
+          "state": "motion-sit-1"
+        },
+        {
+          "role": "sit",
+          "variant": 2,
+          "state": "motion-sit-2"
+        },
+        {
+          "role": "sleep",
+          "variant": 0,
+          "state": "motion-sleep-0"
+        },
+        {
+          "role": "sleep",
+          "variant": 1,
+          "state": "motion-sleep-1"
+        },
+        {
+          "role": "sleep",
+          "variant": 2,
+          "state": "motion-sleep-2"
+        },
+        {
+          "role": "inspect",
+          "variant": 0,
+          "state": "motion-inspect-0"
+        },
+        {
+          "role": "jump",
+          "variant": 0,
+          "state": "motion-jump-0"
+        },
+        {
+          "role": "door",
+          "variant": 0,
+          "state": "motion-door-0"
+        },
+        {
+          "role": "door",
+          "variant": 1,
+          "state": "motion-door-1"
+        },
+        {
+          "role": "door",
+          "variant": 2,
+          "state": "motion-door-2"
+        },
+        {
+          "role": "interaction",
+          "variant": 0,
+          "state": "motion-interaction-0",
+          "interactionKey": null
+        }
+      ],
+      "optionalFallback": "Idle"
+    },
+    "explicit-key": {
+      "bindings": [
+        {
+          "role": "sit",
+          "variant": 0,
+          "state": "motion-sit-0"
+        },
+        {
+          "role": "sit",
+          "variant": 1,
+          "state": "motion-sit-1"
+        },
+        {
+          "role": "sit",
+          "variant": 2,
+          "state": "motion-sit-2"
+        },
+        {
+          "role": "sleep",
+          "variant": 0,
+          "state": "motion-sleep-0"
+        },
+        {
+          "role": "sleep",
+          "variant": 1,
+          "state": "motion-sleep-1"
+        },
+        {
+          "role": "sleep",
+          "variant": 2,
+          "state": "motion-sleep-2"
+        },
+        {
+          "role": "inspect",
+          "variant": 0,
+          "state": "motion-inspect-0"
+        },
+        {
+          "role": "jump",
+          "variant": 0,
+          "state": "motion-jump-0"
+        },
+        {
+          "role": "door",
+          "variant": 0,
+          "state": "motion-door-0"
+        },
+        {
+          "role": "door",
+          "variant": 1,
+          "state": "motion-door-1"
+        },
+        {
+          "role": "door",
+          "variant": 2,
+          "state": "motion-door-2"
+        },
+        {
+          "role": "interaction",
+          "variant": 0,
+          "state": "motion-interaction-0",
+          "interactionKey": "81ed77f9-4c72-4730-8b05-a5ddee9c7164"
+        }
+      ],
+      "optionalFallback": "Idle"
+    }
+  }
+}

@@ -1960,7 +1960,7 @@
     },
     "npcMotions": {
       "type": "object",
-      "description": "The v1 roster motion vector: bind required roles to cooked graph states, and bind optional roles or provide optionalFallback. This part alone requests no client content.",
+      "description": "The v1 roster motion vector: bind required roles to cooked graph states, and bind optional roles or provide optionalFallback. Interaction uses Kiln's chassis key when omitted or null; no game GUID is needed. This part alone requests no client content.",
       "additionalProperties": false,
       "properties": {
         "bindings": {
@@ -2013,8 +2013,8 @@
                 "minLength": 1
               },
               "interactionKey": {
-                "type": "string",
-                "description": "The supported chassis interaction key; only the Interaction role takes a key.",
+                "type": ["string", "null"],
+                "description": "Optional advanced compatibility key. Interaction uses the chassis key when omitted or null; an explicit key must match it. Other roles leave it null.",
                 "format": "uuid"
               }
             },
@@ -2048,20 +2048,15 @@
                   }
                 },
                 "then": {
-                  "required": [
-                    "interactionKey"
-                  ],
                   "properties": {
                     "interactionKey": {
-                      "const": "81ed77f9-4c72-4730-8b05-a5ddee9c7164"
+                      "enum": [null, "81ed77f9-4c72-4730-8b05-a5ddee9c7164"]
                     }
                   }
                 },
                 "else": {
-                  "not": {
-                    "required": [
-                      "interactionKey"
-                    ]
+                  "properties": {
+                    "interactionKey": { "type": "null" }
                   }
                 }
               }

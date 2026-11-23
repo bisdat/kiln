@@ -1129,7 +1129,7 @@ A friendly NPC on a game NPC's body: talk, wares, a place in the roster.
 
 ## npcMotions
 
-The v1 roster motion vector: bind required roles to cooked graph states, and bind optional roles or provide optionalFallback. This part alone requests no client content.
+The v1 roster motion vector: bind required roles to cooked graph states, and bind optional roles or provide optionalFallback. Interaction uses Kiln's chassis key when omitted or null; no game GUID is needed. This part alone requests no client content.
 
 | Key | Type | Required | Notes |
 |---|---|---|---|

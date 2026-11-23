@@ -67,7 +67,7 @@ internal static class NpcBodyRig
             if (b.Variant < 0 || b.Variant >= Variants(b.Role)) throw new BlockError(ctx.Block, $"{at}.variant", $"{b.Role} uses variants 0..{Variants(b.Role) - 1}");
             if (!seen.Add((b.Role, b.Variant))) throw new BlockError(ctx.Block, at, $"duplicate {b.Role} variant {b.Variant}");
             if (b.State == null) throw new BlockError(ctx.Block, $"{at}.state", "a graph state, not null");
-            if (b.Role == NpcMotionRole.Interaction ? b.InteractionKey != FisherInteraction : b.InteractionKey != null)
+            if (b.Role == NpcMotionRole.Interaction ? b.InteractionKey is { } key && key != FisherInteraction : b.InteractionKey != null)
                 throw new BlockError(ctx.Block, $"{at}.interactionKey", b.Role == NpcMotionRole.Interaction ? "the Fisher chassis' supported nonzero interaction key" : "only Interaction takes an interaction key");
         }
         foreach (var role in Enum.GetValues<NpcMotionRole>())

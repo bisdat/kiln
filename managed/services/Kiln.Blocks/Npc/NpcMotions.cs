@@ -13,7 +13,7 @@ public enum NpcMotionRole
     TurnRightSmall, TurnRightBig, Jump, Door,
 }
 
-/// <summary>Binds one chassis motion to an authored graph state. Interaction needs its nonzero interaction key; other roles leave it null.</summary>
+/// <summary>Binds one chassis motion to an authored graph state. Interaction uses the chassis key when omitted or null; an explicit key must match it. Other roles leave it null.</summary>
 public sealed record NpcMotionBinding(
     [property: JsonRequired, JsonConverter(typeof(NpcMotionRoleConverter))] NpcMotionRole Role,
     [property: JsonRequired] int Variant,

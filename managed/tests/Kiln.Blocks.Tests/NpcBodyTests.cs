@@ -31,6 +31,29 @@ public sealed class NpcBodyTests
         Motions().Bindings.Select(b => b.State).Append(AnimState.Idle).Append(AnimState.Run).ToDictionary(s => s.Name,
             s => (s.Hash("npc-body-test"), s.Guid("npc-body-test"), s.EngineName)), new() { ["Root"] = 0, ["Head"] = 2, ["HandR"] = 3 }, false);
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Interaction_uses_the_chassis_key_when_omitted_or_null_and_still_accepts_the_exact_key(bool explicitKey)
+    {
+        var motions = Motions() with { Bindings = Motions().Bindings.Select(b => b.Role == NpcMotionRole.Interaction
+            ? b with { InteractionKey = explicitKey ? NpcBodyRig.FisherInteraction : null } : b).ToArray() };
+        var parsed = BlockJson.Parse<NpcMotionsBlock>(JsonSerializer.Serialize(motions, BlockJson.SharedOptions));
+        var rows = NpcBodyRig.Bindings(Context, parsed, "npc-body-test", Animation(), Graph(), (_, _) => 1);
+        var interaction = rows.Single(row => (string?)row!["role"] == "interaction")!;
+        Assert.Equal(NpcBodyRig.FisherInteraction.ToString(), (string?)interaction["interactionKey"]);
+    }
+
+    [Theory]
+    [InlineData("00000000-0000-0000-0000-000000000000")]
+    [InlineData("12345678-1234-5678-9234-123456789abc")]
+    public void A_nondefault_interaction_key_must_still_match_the_chassis(string key)
+    {
+        var motions = Motions() with { Bindings = Motions().Bindings.Select(b => b.Role == NpcMotionRole.Interaction
+            ? b with { InteractionKey = Guid.Parse(key) } : b).ToArray() };
+        Assert.Contains("interactionKey", Assert.Throws<BlockError>(() => NpcBodyRig.Shape(Context, motions, "motions")).Field!, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void The_complete_27_binding_vector_is_canonical_and_timed_from_cooked_clips()
     {

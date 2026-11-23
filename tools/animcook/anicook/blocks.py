@@ -538,10 +538,13 @@ def _motion_shape(motions, where):
         seen.add((role, variant))
         if not isinstance(b.get("state"), str) or not b["state"].strip():
             raise BlocksError(f"{at}.state: a graph state name")
-        try:
-            key = str(uuid.UUID(b["interactionKey"])) if b.get("interactionKey") else None
-        except (ValueError, TypeError, AttributeError):
-            key = None
+        supplied_key = b.get("interactionKey")
+        key = FISHER_INTERACTION if role == "interaction" and supplied_key is None else None
+        if supplied_key is not None:
+            try:
+                key = str(uuid.UUID(supplied_key))
+            except (ValueError, TypeError, AttributeError):
+                key = None
         if (role == "interaction" and key != FISHER_INTERACTION) or (role != "interaction" and b.get("interactionKey") is not None):
             raise BlocksError(f"{at}.interactionKey: only Interaction takes the supported nonzero Fisher interaction key")
     for role in MOTION_ROLES:

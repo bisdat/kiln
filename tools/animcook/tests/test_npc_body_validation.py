@@ -177,6 +177,31 @@ class NpcBodyValidation(unittest.TestCase):
                 self.assertFalse(B.body_step(recipe, {"op": "model", "name": "models/rig"}, specs={}))
                 self.assertEqual((entries, [], []), B.body_manifest(recipe, entries, True, specs={}))
 
+    def test_interaction_key_is_implicit_or_the_exact_supported_key(self):
+        for mode in ("omitted", "null", "explicit"):
+            with self.subTest(mode=mode):
+                spec, graph, clips = fixture()
+                row = next(b for b in spec["motions"]["bindings"] if b["role"] == "interaction")
+                if mode == "omitted":
+                    row.pop("interactionKey")
+                elif mode == "null":
+                    row["interactionKey"] = None
+                B._motion_shape(spec["motions"], "motions")
+                vector = B._body_bindings(spec, graph, clips, "motions")
+                self.assertEqual(B.FISHER_INTERACTION, next(b for b in vector if b["role"] == "interaction")["interactionKey"])
+        for value in ("", False, "00000000-0000-0000-0000-000000000000", "12345678-1234-5678-9234-123456789abc"):
+            with self.subTest(invalid=value):
+                spec, _, _ = fixture()
+                next(b for b in spec["motions"]["bindings"] if b["role"] == "interaction")["interactionKey"] = value
+                with self.assertRaisesRegex(B.BlocksError, "interactionKey"):
+                    B._motion_shape(spec["motions"], "motions")
+
+    def test_shared_interaction_schema_fixture_is_valid_motion_authoring(self):
+        source = ROOT.parent.parent / "mods/tests/npc-motion-contract/blocks/motions.json"
+        for name, motions in json.loads(source.read_text())["npcMotions"].items():
+            with self.subTest(name=name):
+                B._motion_shape(motions, name)
+
     def test_complete_vector_uses_effective_cooked_duration_and_canonical_order(self):
         spec, graph, clips = fixture()
         vector = B._body_bindings(spec, graph, clips, "motions")

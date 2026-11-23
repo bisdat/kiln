@@ -293,10 +293,11 @@ For an authored roster body:
 - Map `Root`, `Head` and `HandR` to joints. Model and graph must use the same cooked skeleton; the graph must
   contain every binding target and each target must have a GUID. Hash-only states such as `Run` cannot be used
   by a sequence binding.
-- Each `NpcMotionBinding(Role, Variant, State, InteractionKey)` is unique. Sit and Sleep variants **0/1/2** are
+- Each `NpcMotionBinding(Role, Variant, State)` is unique. Sit and Sleep variants **0/1/2** are
   enter/loop/exit: only the middle variant loops. Door variants **0/1/2** are guarded alternatives, not phases.
-  Other roles have variant **0**. The verified Fisher interaction binding uses interaction key
-  `81ed77f9-4c72-4730-8b05-a5ddee9c7164`; other roles leave the key null.
+  Other roles have variant **0**. For Interaction, omit `InteractionKey` or leave it null: Kiln fills the chassis
+  key internally. An explicit compatibility key is still accepted only when it matches the supported chassis;
+  other roles leave the key null. No game GUID is needed for normal motion authoring.
 - Required bindings are **Sit 0–2, Sleep 0–2, Inspect 0, Jump 0, Door 0–2**. Every other missing role needs an
   explicit `OptionalFallback`, which is clamped rather than allowed to run a vanilla motion on an authored graph.
   There is no implicit fallback for a required motion. A complete Fisher vector has **27 bindings**.
