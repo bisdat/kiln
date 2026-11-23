@@ -27,6 +27,9 @@ class CraftSourceRegistry {
 public:
     uint64_t add(uint64_t owner, uint32_t player, uint32_t container, bool after, bool deny, std::vector<uint32_t> items, uint32_t session = 0) {
         std::lock_guard lock(mutex_);
+        // This player's registrations from an earlier login are dead (every snapshot drops them): free their slots, so
+        // a mod that re-registers on each join without disposing cannot exhaust the shared 4096 limit for everyone.
+        sources_.erase(std::remove_if(sources_.begin(),sources_.end(),[&](const CraftSource& s) { return s.player == player && s.player_session != session; }),sources_.end());
         if (sources_.size() >= 4096) return 0;
         std::sort(items.begin(), items.end());
         items.erase(std::unique(items.begin(), items.end()), items.end());
