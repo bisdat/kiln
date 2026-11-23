@@ -230,6 +230,30 @@ bool LocalBackend::step() {
             }
         }
 
+        // a capability the request needs went (the sampler faulted: pose, profile and shake): it ends at once
+        const uint64_t have = caps();
+        if (staged_) {
+            const uint64_t need = required_caps(staged_->request.req);
+            if ((have & need) != need) {
+                const bool drawn = staged_->first_selection.load(std::memory_order_acquire) != 0;
+                reports.push_back({Report::Rejected, staged_->lease, staged_->revision, KILN_CAMERA_REASON_CLIENT_CAPABILITY, 0,
+                                   drawn ? static_cast<uint32_t>(KILN_CAMERA_MAY_HAVE_APPLIED) : 0u, 0, "a camera capability of this client went off"});
+                staged_->stop.store(true, std::memory_order_release);
+                retire(staged_);
+                mail = true;
+            }
+        }
+        if (active_) {
+            const uint64_t need = required_caps(active_->request.req);
+            if ((have & need) != need) {
+                reports.push_back({Report::Ended, active_->lease, active_->revision, KILN_CAMERA_END_CAPABILITY_LOST, KILN_CAMERA_REASON_CLIENT_CAPABILITY, 0,
+                                   frames_->published(), "a camera capability of this client went off"});
+                active_->stop.store(true, std::memory_order_release);
+                retire(active_);
+                mail = true;
+            }
+        }
+
         if (staged_) {
             Plan& s = *staged_;
             const bool shown = s.first_selection.load(std::memory_order_acquire) != 0;

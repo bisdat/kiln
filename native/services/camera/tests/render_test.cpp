@@ -1037,6 +1037,40 @@ void test_capture_fault_turns_writes_off() {
     CHECK(g.pre() && g.backend.caps() == kAllLocal);  // the next world starts healthy
 }
 
+// Should-fix 4: a capability lost while a lease runs (the sampler faulted: pose, profile and shake go) ends it
+// CapabilityLost at once; a lens alone keeps running.
+void test_capability_lost() {
+    Rig g(kAllLocal);
+    std::vector<KilnCameraKey> keys = {key(0, 0, 10, 0)};
+    Result r;
+    g.apply(30, g.path(keys), &r);
+    g.pre();
+    g.frame(0);
+    g.pre();
+    CHECK(r.r.ok);
+    g.backend.set_serving(KILN_CAMERA_CAP_LOCAL_FOV);
+    g.pre();
+    CHECK(g.env.lines.back().find("end=7 code=25") != std::string::npos && g.core.live_leases() == 0);
+    // a staged path request when the pose row goes: refused ClientCapability
+    g.backend.set_serving(kAllLocal);
+    g.pre();
+    Result r2;
+    g.apply(30, g.path(keys), &r2);
+    g.backend.set_serving(KILN_CAMERA_CAP_LOCAL_FOV);
+    g.pre();
+    CHECK(r2.seen && !r2.r.ok && r2.r.reason_code == KILN_CAMERA_REASON_CLIENT_CAPABILITY);
+    // a lens lease is not touched
+    Result r3;
+    g.apply(30, g.lens(40), &r3);
+    g.pre();
+    g.frame(0);
+    g.pre();
+    CHECK(r3.r.ok);
+    g.backend.set_serving(KILN_CAMERA_CAP_LOCAL_FOV);
+    g.pre();
+    g.frame(0);
+    CHECK(near(g.fov_reg, radians(40), 1e-6) && g.core.live_leases() == 1);
+}
 
 
 }  // namespace
@@ -1048,7 +1082,8 @@ int main(int argc, char** argv) {
         void (*fn)();
     } named[] = {{"drawn_then_ended", test_drawn_then_ended_before_pre},
                  {"recheck_before_write", test_recheck_before_write},
-                 {"capture_fault", test_capture_fault_turns_writes_off}};
+                 {"capture_fault", test_capture_fault_turns_writes_off},
+                 {"capability_lost", test_capability_lost}};
     if (argc > 1) {
         for (const auto& t : named)
             if (std::strcmp(argv[1], t.name) == 0) {
