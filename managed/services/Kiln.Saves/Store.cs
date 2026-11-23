@@ -320,7 +320,7 @@ internal sealed unsafe class WorldStore
     {
         if (Root is null || LoadDeferred) return [];
         var root = Root;
-        if (!Writer.TryExclusive("reading pending player storage", SaveWriter.DrainLimit, () =>
+        if (!Writer.TryExclusive("reading pending player storage", TimeSpan.Zero, () =>
         {
             var values = new List<string>();
             foreach (var manifest in ListManifests(Path.Combine(root, "manifests")).Where(m => m.Pending))
@@ -330,7 +330,6 @@ internal sealed unsafe class WorldStore
             return values;
         }, out var result))
         {
-            Storage.Failed("pending storage candidates unavailable while writer is busy");
             throw new InvalidOperationException("player storage pending candidates are not available yet; restore deferred");
         }
         return result;

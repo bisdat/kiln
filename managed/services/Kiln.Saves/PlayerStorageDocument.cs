@@ -12,7 +12,7 @@ internal sealed record StorageChoice(JsonObject Pair, long Revision, bool Paired
 /// are isolated with their original JSON, and unsupported future documents are never rewritten.</summary>
 internal sealed class PlayerStorageDocument
 {
-    internal const int MaxBytes = 64 * 1024, MaxStorages = 32;
+    internal const int MaxBytes = 64 * 1024, ServerMaxBytes = 256 * 1024, MaxStorages = 32;
     internal JsonObject Data { get; }
     internal bool ReadOnly { get; }
     internal string? Original { get; }
@@ -26,9 +26,9 @@ internal sealed class PlayerStorageDocument
         ["history"] = new JsonArray(), ["quarantine"] = new JsonArray(),
     });
 
-    internal static PlayerStorageDocument Read(string json, Guid character)
+    internal static PlayerStorageDocument Read(string json, Guid character, int maxBytes = MaxBytes)
     {
-        if (Encoding.UTF8.GetByteCount(json) > MaxBytes) throw new InvalidDataException("storage document exceeds 64 KiB before decode");
+        if (Encoding.UTF8.GetByteCount(json) > maxBytes) throw new InvalidDataException($"storage document exceeds {maxBytes} bytes before decode");
         try
         {
             var data = JsonNode.Parse(json, documentOptions: new JsonDocumentOptions { MaxDepth = 32 }) as JsonObject
@@ -273,7 +273,6 @@ internal sealed class PlayerStorageDocument
         }
         Data["revision"] = checked(revision + 1);
         Data["current"] = next;
-        Trim(Data, 32);
     }
 
     private static JsonObject Alias((string Witness, long Revision, long WorldRev) p) => new() { ["witness"] = p.Witness, ["revision"] = p.Revision, ["worldRev"] = p.WorldRev };
@@ -285,7 +284,8 @@ internal sealed class PlayerStorageDocument
         if (current["pairs"] is JsonArray aliases)
         {
             var kept = new JsonArray();
-            foreach (var a in aliases.OfType<JsonObject>().OrderByDescending(a => Number(a["revision"])).Take(remaining)) kept.Add(a.DeepClone());
+            var reserve = data["history"]!.AsArray().Count > 0 && remaining > 0 ? 1 : 0;
+            foreach (var a in aliases.OfType<JsonObject>().OrderByDescending(a => Number(a["revision"])).Take(Math.Max(0, remaining - reserve))) kept.Add(a.DeepClone());
             remaining -= kept.Count;
             current["pairs"] = kept;
         }
@@ -307,13 +307,63 @@ internal sealed class PlayerStorageDocument
         data["history"] = history;
     }
 
-    internal string Write(int historyLimit)
+    private static int PairCount(JsonObject data) => Pairs(data["current"]!.AsObject(), Number(data["revision"])).Count()
+        + data["history"]!.AsArray().OfType<JsonObject>().Sum(p => Pairs(p, Number(p["revision"])).Count());
+
+    private static bool DropOldest(JsonObject data)
+    {
+        var choices = new List<(long Revision, Action Remove)>();
+        if (data["current"]!["pairs"] is JsonArray currentAliases)
+            foreach (var alias in currentAliases.OfType<JsonObject>())
+            {
+                var captured = alias;
+                choices.Add((Number(alias["revision"]), () => currentAliases.Remove(captured)));
+            }
+        var history = data["history"]!.AsArray();
+        // The whole newest historical entry is pinned: the character file can still be that pre-write state.
+        for (var i = 1; i < history.Count; i++)
+        {
+            var entry = history[i]!.AsObject();
+            if (entry["pairs"] is JsonArray aliases && aliases.Count > 0)
+                foreach (var alias in aliases.OfType<JsonObject>())
+                {
+                    var captured = alias;
+                    choices.Add((Number(alias["revision"]), () => aliases.Remove(captured)));
+                }
+            choices.Add((Number(entry["revision"]), () =>
+            {
+                if (entry["pairs"] is JsonArray { Count: > 0 } remaining)
+                {
+                    var first = remaining[0]!.AsObject();
+                    entry["witness"] = first["witness"]?.DeepClone();
+                    entry["revision"] = first["revision"]?.DeepClone();
+                    entry["worldRev"] = first["worldRev"]?.DeepClone();
+                    remaining.RemoveAt(0);
+                }
+                else history.Remove(entry);
+            }));
+        }
+        if (choices.Count == 0) return false;
+        choices.OrderBy(c => c.Revision).First().Remove();
+        return true;
+    }
+
+    internal string Write(int historyLimit, int maxBytes = MaxBytes)
     {
         if (ReadOnly) return Original!;
         var copy = (JsonObject)Data.DeepClone();
+        var before = PairCount(copy);
         Trim(copy, historyLimit);
         var json = copy.ToJsonString();
-        if (Encoding.UTF8.GetByteCount(json) > MaxBytes) throw new InvalidDataException("storage document exceeds 64 KiB; previous copy kept");
+        var bytes = Encoding.UTF8.GetByteCount(json);
+        while (bytes > maxBytes && DropOldest(copy))
+        {
+            json = copy.ToJsonString();
+            bytes = Encoding.UTF8.GetByteCount(json);
+        }
+        if (bytes > maxBytes) throw new InvalidDataException($"storage current, newest history and quarantine exceed {maxBytes} bytes; previous copy kept");
+        var dropped = before - PairCount(copy);
+        if (dropped > 0) SavesRuntime.Log(LogLevel.Info, $"player-storage: {Data["character"]}: trimmed {dropped} old history pairs; {bytes} bytes");
         return json;
     }
 

@@ -15,8 +15,10 @@ internal interface IPlayerStoragePersistence
     void Park(EntityId player, JsonObject parked);
     void Lock(EntityId player) { }
     IReadOnlyDictionary<string, EntityId> Holders(EntityId player) => new Dictionary<string, EntityId>();
+    IReadOnlyList<StorageInstanceHolder> InstanceHolders(EntityId player) => Holders(player).Select(h => new StorageInstanceHolder(h.Key, h.Value)).ToArray();
 }
 
+internal readonly record struct StorageInstanceHolder(string Key, EntityId Holder, bool Temporary = false);
 internal sealed record StorageFreeze(string Witness, JsonObject Storages, JsonObject? Parked = null, JsonArray? Quarantine = null);
 
 /// <summary>One world's server copies and pending carried updates. Pending generations remain on a failed world write;
@@ -28,7 +30,10 @@ internal sealed class PlayerStorageStore(WorldStore owner)
     private readonly Dictionary<CharacterKey, Visit> _visits = [];
     private readonly Dictionary<uint, Dictionary<CharacterKey, string>> _pending = [];
     private readonly Dictionary<CharacterKey, string> _committed = [];
+    private readonly Dictionary<uint, (EntityId Player, int Offset)> _instanceOwners = [];
+    private readonly HashSet<uint> _ordinaryHolders = [];
     private readonly Dictionary<uint, SaveWriter.StageJob> _stages = [];
+    private readonly Dictionary<uint, string> _carriedBlocked = [];
     private readonly System.Collections.Concurrent.ConcurrentQueue<(uint Generation, bool Success)> _outcomes = new();
     internal string? Failure { get; private set; }
     internal void Failed(string reason)
@@ -75,7 +80,8 @@ internal sealed class PlayerStorageStore(WorldStore owner)
 
     internal void Clear()
     {
-        _visits.Clear(); _pending.Clear(); _committed.Clear(); _stages.Clear();
+        _visits.Clear(); _pending.Clear(); _committed.Clear(); _stages.Clear(); _carriedBlocked.Clear();
+        _instanceOwners.Clear(); _ordinaryHolders.Clear();
         while (_outcomes.TryDequeue(out _)) { }
         Failure = null;
     }
@@ -86,7 +92,7 @@ internal sealed class PlayerStorageStore(WorldStore owner)
     {
         var json = owner.FindBundle(Prefix + character.Text)?.Keys.GetValueOrDefault(Key)?.Json;
         if (json is null) return null;
-        try { return PlayerStorageDocument.Read(json, character.Id); }
+        try { return PlayerStorageDocument.Read(json, character.Id, PlayerStorageDocument.ServerMaxBytes); }
         catch (InvalidDataException e)
         {
             SavesRuntime.Log(LogLevel.Warn, $"player-storage: server copy for {character} is unusable and kept: {e.Message}");
@@ -99,11 +105,12 @@ internal sealed class PlayerStorageStore(WorldStore owner)
     {
         owner.EnsureOpen();
         if (character.IsNone || character.IsAccountOnly || owner.LoadDeferred) return null;
+        _committed.Remove(character); // A travelling offer must never be overwritten by this world's old carried update.
         var servers = new List<PlayerStorageDocument>();
         if (Read(character) is { } stored) servers.Add(stored);
         foreach (var json in owner.PendingStorageValues(Prefix + character.Text))
         {
-            try { servers.Add(PlayerStorageDocument.Read(json, character.Id)); }
+            try { servers.Add(PlayerStorageDocument.Read(json, character.Id, PlayerStorageDocument.ServerMaxBytes)); }
             catch (InvalidDataException e) { SavesRuntime.Log(LogLevel.Warn, $"player-storage: pending copy for {character} unusable: {e.Message}"); }
         }
         var server = servers.FirstOrDefault(d => d.ReadOnly) ?? servers
@@ -125,7 +132,8 @@ internal sealed class PlayerStorageStore(WorldStore owner)
         }
         var choice = PlayerStorageDocument.Choose(witness, server, client, trustClient);
         var selected = choice?.Source == "client" ? client : server;
-        var document = selected is null ? PlayerStorageDocument.Empty(character.Id) : PlayerStorageDocument.Read(selected.Write(32), character.Id);
+        var document = selected is null ? PlayerStorageDocument.Empty(character.Id)
+            : PlayerStorageDocument.Read(selected.Write(32, PlayerStorageDocument.ServerMaxBytes), character.Id, PlayerStorageDocument.ServerMaxBytes);
         if (choice is not null)
         {
             // Keep the chosen copy's history, including its old current when a historical pair won.
@@ -134,7 +142,7 @@ internal sealed class PlayerStorageStore(WorldStore owner)
             document.Data["history"]!.AsArray().Insert(0, previous);
             document.Data["current"] = choice.Pair.DeepClone();
             document.Data["current"]!.AsObject().Remove("pairs");
-            document.Data["revision"] = Math.Max(server?.Revision ?? 0, client?.Revision ?? 0);
+            document.Data["revision"] = trustClient ? Math.Max(server?.Revision ?? 0, client?.Revision ?? 0) : server?.Revision ?? 0;
             // Pair aliases describe this content only, and must not be carried over from another selected candidate.
             SavesRuntime.Log(choice.Paired ? LogLevel.Info : LogLevel.Warn,
                 $"player-storage: {character}: {(choice.Paired ? "paired" : "unpaired: newest revision; character changed outside Kiln")}, {choice.Source}, revision {choice.Revision}");
@@ -172,6 +180,7 @@ internal sealed class PlayerStorageStore(WorldStore owner)
     internal void Stage(uint generation)
     {
         if (Native is null || owner.LoadDeferred) return;
+        _carriedBlocked.Remove(generation);
         foreach (var (character, visit) in _visits)
         {
             if (visit.Document.ReadOnly) continue;
@@ -179,22 +188,51 @@ internal sealed class PlayerStorageStore(WorldStore owner)
             if (!visit.Restored || (!Native.AutomaticRegistration && visit.Registration != registration)) Restore(visit, true, "registration");
             if (Native.Freeze(character, visit.Player, generation) is not { } frozen) continue;
             var current = visit.Document.Data["current"]!.AsObject();
-            var next = PlayerStorageDocument.Read(visit.Document.Write(32), character.Id);
+            var next = PlayerStorageDocument.Read(visit.Document.Write(32, PlayerStorageDocument.ServerMaxBytes), character.Id, PlayerStorageDocument.ServerMaxBytes);
             var frozenStorages = (JsonObject)frozen.Storages.DeepClone();
-            var frozenParked = frozen.Parked is null ? current["parked"]!.AsObject() : (JsonObject)frozen.Parked.DeepClone();
+            var frozenParked = frozen.Parked is null ? current["parked"]!.AsObject() : PreserveParked(current["parked"]!.AsObject(), frozen.Parked);
             next.Capture(frozen.Witness, generation, frozenStorages, frozenParked);
             if (frozen.Quarantine is not null)
-                foreach (var entry in frozen.Quarantine) next.Data["quarantine"]!.AsArray().Add(entry?.DeepClone());
+                foreach (var entry in frozen.Quarantine)
+                    if (!next.Data["quarantine"]!.AsArray().Any(old => JsonNode.DeepEquals(old, entry))) next.Data["quarantine"]!.AsArray().Add(entry?.DeepClone());
             next.Data["current"]!["source"] = visit.Local && current["source"]?.GetValue<string>() != "server" ? "local" : "server";
-            var serverJson = next.Write(32);
-            var clientJson = next.Write(8);
+            var serverJson = next.Write(32, PlayerStorageDocument.ServerMaxBytes);
+            string? clientJson = null;
+            try { clientJson = next.Write(8); }
+            catch (InvalidDataException e)
+            {
+                _carriedBlocked[generation] = $"character {character}: carried storage unchanged: {e.Message}";
+                Failed(_carriedBlocked[generation]);
+            }
             owner.GetBundleRaw(Prefix + character.Text, Mod).Keys[Key] = new WorldStore.Slot { Json = serverJson };
             visit.Document = next;
             EnsureBands(visit);
             if (!_pending.TryGetValue(generation, out var pending)) _pending[generation] = pending = [];
-            pending[character] = clientJson;
-            foreach (var older in _pending.Keys.OrderByDescending(g => g).Skip(2).ToArray()) _pending.Remove(older);
+            if (clientJson is not null) pending[character] = clientJson;
+            else pending.Remove(character);
+            foreach (var older in _pending.Keys.OrderByDescending(g => g).Skip(2).ToArray()) { _pending.Remove(older); _carriedBlocked.Remove(older); }
         }
+    }
+
+    private static JsonObject PreserveParked(JsonObject previous, JsonObject captured)
+    {
+        var kept = (JsonObject)captured.DeepClone();
+        foreach (var (key, value) in captured)
+        {
+            if (value is not JsonObject now || previous[key] is not JsonObject old) continue;
+            var before = old["records"]!.AsArray();
+            var after = now["records"]!.AsArray();
+            static string Bytes(JsonNode? record) => record?["b64"]?.GetValue<string>() ?? "";
+            var same = before.Select(Bytes).SequenceEqual(after.Select(Bytes));
+            var merged = (JsonObject)old.DeepClone();
+            if (!same) merged["records"] = new JsonArray(after.Select(r => before.FirstOrDefault(o => Bytes(o) == Bytes(r))?.DeepClone() ?? r!.DeepClone()).ToArray());
+            if (now["parkReason"] is { } held) merged["parkReason"] = held.DeepClone();
+            else merged.Remove("parkReason");
+            kept[key] = merged;
+        }
+        foreach (var (key, value) in previous)
+            if (!kept.ContainsKey(key) && value?["records"] is JsonArray { Count: 0 }) kept[key] = value.DeepClone();
+        return kept;
     }
 
     private void EnsureBands(Visit visit)
@@ -230,16 +268,23 @@ internal sealed class PlayerStorageStore(WorldStore owner)
         if (Native is null) yield break;
         foreach (var visit in _visits.Values.Where(v => v.Restored && !v.Document.ReadOnly))
         {
-            foreach (var (key, holder) in Native.Holders(visit.Player))
-                if (!holder.IsNone && visit.Bands.TryGetValue(key, out var band))
-                    yield return (visit, key, holder, 1024 + band * 64);
+            foreach (var row in Native.InstanceHolders(visit.Player))
+                if (!row.Holder.IsNone && visit.Bands.TryGetValue(row.Key, out var band))
+                {
+                    var offset = 1024 + band * 128 + (row.Temporary ? 64 : 0);
+                    _instanceOwners[row.Holder.Value] = (visit.Player, offset);
+                    yield return (visit, row.Key, row.Holder, offset);
+                }
         }
     }
 
     internal InstancePlace NormalizeInstance(InstancePlace place)
     {
+        if (_instanceOwners.TryGetValue(place.Holder.Value, out var cached)) return new(cached.Player, cached.Offset + place.FlatSlot);
+        if (_ordinaryHolders.Contains(place.Holder.Value)) return place;
         foreach (var row in InstanceHolders())
             if (row.Holder == place.Holder) return new(row.Visit.Player, row.Offset + place.FlatSlot);
+        _ordinaryHolders.Add(place.Holder.Value);
         return place;
     }
 
@@ -266,7 +311,8 @@ internal sealed class PlayerStorageStore(WorldStore owner)
             return;
         }
         _pending.Remove(generation);
-        Failure = null;
+        if (_carriedBlocked.Remove(generation, out var blocked)) Failed(blocked);
+        else Failure = null;
         ReportCapability();
         foreach (var (character, json) in pending) _committed[character] = json;
         foreach (var older in _pending.Keys.Where(g => g < generation).ToArray()) _pending.Remove(older);

@@ -195,6 +195,37 @@ public sealed class PlayerStorageDocumentTests
     }
 
     [Fact]
+    public void Byte_budget_trims_old_pairs_but_keeps_newest_offline_return_history()
+    {
+        var doc = Doc("w0", 1);
+        for (var i = 1; i <= 6; i++)
+        {
+            var bags = Storages();
+            bags["mod:bag"]!["opaque"] = new string((char)('a' + i), 21000);
+            doc.Capture("w" + i, (uint)i, bags, new());
+        }
+        var json = doc.Write(8);
+        Assert.True(System.Text.Encoding.UTF8.GetByteCount(json) <= PlayerStorageDocument.MaxBytes);
+        var read = PlayerStorageDocument.Read(json, Character);
+        Assert.True(PlayerStorageDocument.Choose("w5", read, null)!.Paired);
+        Assert.False(PlayerStorageDocument.Choose("w0", read, null)!.Paired);
+        Assert.NotEmpty(read.Data["history"]!.AsArray());
+    }
+
+    [Fact]
+    public void Current_plus_pinned_history_over_budget_refuses_without_mutating_document()
+    {
+        var doc = Doc("before", 1);
+        doc.Data["current"]!["storages"]!["mod:bag"]!["opaque"] = new string('a', 36000);
+        var returned = Storages(1);
+        returned["mod:bag"]!["opaque"] = new string('b', 36000);
+        doc.Capture("after", 2, returned, new());
+        var before = doc.Data.ToJsonString();
+        Assert.Throws<InvalidDataException>(() => doc.Write(8));
+        Assert.Equal(before, doc.Data.ToJsonString());
+    }
+
+    [Fact]
     public void Unregistered_and_overflow_records_ride_unchanged_then_registration_restores_them()
     {
         var bag = Bag(7);

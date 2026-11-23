@@ -267,8 +267,8 @@ public sealed class CharacterImportedEvent(CharacterKey character, EntityId play
 /// file gives the defaults. Read again whenever a character joins.</summary>
 public sealed record CharacterSettings
 {
-    /// <summary>Take carried data from clients, and send it back. False: this server keeps its own copy per character,
-    /// clients' copies are neither read nor changed.</summary>
+    /// <summary>Take carried progress from clients, and send it back. False keeps this server's progress per character
+    /// without changing client progress. Player storage uses the independent <see cref="Storage"/> setting.</summary>
     public bool ImportProgress { get; init; } = true;
 
     /// <summary>Player storage trust, independent of imported progress.</summary>
@@ -310,6 +310,9 @@ public sealed record CharacterSettings
 /// <summary>Per-server player storage settings in <c>characters.json</c>.</summary>
 public sealed class PlayerStorageSettings
 {
+    /// <summary>Creates the default settings: storage travels with the character.</summary>
+    public PlayerStorageSettings() { }
+
     /// <summary>Accept the character's carried storage copy and send committed storage back. Defaults to true:
     /// storage is editable like the character file. False keeps this server's own copy and leaves the client's alone.</summary>
     public bool TrustClient { get; init; } = true;

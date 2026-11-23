@@ -12,6 +12,8 @@ public sealed class PlayerStorageStoreTests
         public JsonObject? Restored, Parked;
         public StorageFreeze? Frozen = new("saved", PlayerStorageDocumentTests.Storages(1));
         public Dictionary<string, int> Definitions = new() { ["mod:bag"] = 8 };
+        public readonly List<StorageInstanceHolder> Parts = [];
+        public IReadOnlyList<StorageInstanceHolder> InstanceHolders(EntityId player) => Parts;
         public IReadOnlyDictionary<string, int> Registrations => Definitions;
         public StorageFreeze? Freeze(CharacterKey character, EntityId player, uint generation) => Frozen;
         public string? WitnessOf(EntityId player) => "join";
@@ -105,6 +107,80 @@ public sealed class PlayerStorageStoreTests
             InstanceHarness.Store.Commit(1, 1001, SaveReason.PlayerLeft);
             InstanceHarness.Written();
             Assert.Equal(old, InstanceHarness.Store.FindBundle(PlayerStorageStore.Prefix + character.Text)!.Keys["storage"].Json);
+            Assert.Null(store.Carried(character));
+        }
+        finally { store.Native = null; }
+    }
+
+    [Fact]
+    public void Instance_bands_keep_registration_order_and_temporary_return_holders_distinct()
+    {
+        using var h = new InstanceHarness();
+        var store = InstanceHarness.Store.Storage;
+        var persist = new Persist();
+        persist.Parts.Add(new("mod:bag", new EntityId(2000)));
+        persist.Parts.Add(new("mod:bag", new EntityId(2001), true));
+        store.Native = persist;
+        try
+        {
+            var character = new CharacterKey(1, PlayerStorageDocumentTests.Character);
+            store.Join(character, new EntityId(1), "join", PlayerStorageDocumentTests.Doc("join", 1).Write(8), true);
+            var live = store.NormalizeInstance(new(new EntityId(2000), 3));
+            var temporary = store.NormalizeInstance(new(new EntityId(2001), 3));
+            Assert.Equal(1027, live.FlatSlot);
+            Assert.Equal(1091, temporary.FlatSlot);
+            Assert.Equal(3, store.InstanceParts(new EntityId(1)).Count);
+            persist.Definitions["aaa:bag"] = 8;
+            persist.Parts.Add(new("aaa:bag", new EntityId(2002)));
+            h.Save(1);
+            Assert.Equal(live, store.NormalizeInstance(new(new EntityId(2000), 3)));
+            Assert.NotEqual(live.FlatSlot, store.NormalizeInstance(new(new EntityId(2002), 3)).FlatSlot);
+            persist.Parts.Clear(); // delayed destruction notices still need the old logical owner and slot
+            Assert.Equal(temporary, store.NormalizeInstance(new(new EntityId(2001), 3)));
+            Assert.DoesNotContain("instanceBands", store.Carried(character)!);
+        }
+        finally { store.Native = null; }
+    }
+
+    [Fact]
+    public void Larger_server_cap_can_keep_pending_pair_when_irreducible_sidecar_is_refused()
+    {
+        using var h = new InstanceHarness();
+        var store = InstanceHarness.Store.Storage;
+        var persist = new Persist();
+        store.Native = persist;
+        try
+        {
+            var character = new CharacterKey(1, PlayerStorageDocumentTests.Character);
+            var old = PlayerStorageDocumentTests.Doc("join", 1);
+            old.Data["current"]!["storages"]!["mod:bag"]!["opaque"] = new string('a', 36000);
+            store.Join(character, new EntityId(1), "join", old.Write(8), true);
+            var next = PlayerStorageDocumentTests.Storages(1);
+            next["mod:bag"]!["opaque"] = new string('b', 36000);
+            persist.Frozen = new("new", next);
+            h.Save(1);
+            Assert.Null(store.Carried(character));
+            Assert.NotNull(store.Failure);
+            var server = InstanceHarness.Store.FindBundle(PlayerStorageStore.Prefix + character.Text)!.Keys["storage"].Json!;
+            Assert.True(System.Text.Encoding.UTF8.GetByteCount(server) > PlayerStorageDocument.MaxBytes);
+            Assert.Equal("new", store.Read(character)!.Data["current"]!["witness"]!.GetValue<string>());
+        }
+        finally { store.Native = null; }
+    }
+
+    [Fact]
+    public void New_visit_never_receives_previous_visits_committed_update_before_its_own_save()
+    {
+        using var h = new InstanceHarness();
+        var store = InstanceHarness.Store.Storage;
+        store.Native = new Persist();
+        try
+        {
+            var character = new CharacterKey(1, PlayerStorageDocumentTests.Character);
+            store.Join(character, new EntityId(1), "join", PlayerStorageDocumentTests.Doc("join", 1).Write(8), true);
+            h.Save(1);
+            Assert.NotNull(store.Carried(character));
+            store.Join(character, new EntityId(1), "travel", PlayerStorageDocumentTests.Doc("travel", 100, 7).Write(8), true);
             Assert.Null(store.Carried(character));
         }
         finally { store.Native = null; }

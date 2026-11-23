@@ -24,6 +24,8 @@ internal sealed unsafe class PlayerStorageNative : IPlayerStoragePersistence
     {
         var table = StorageNative.T;
         if (table == null) return false;
+        // A remote client carries its sidecar even though only the server can bind persistence.
+        CharacterSync.EnsureStarted();
         if (_bound is { } existing && existing._table == table)
         {
             SavesRuntime.Store.Storage.Native = existing;
@@ -188,7 +190,8 @@ internal sealed unsafe class PlayerStorageNative : IPlayerStoragePersistence
 
     private IReadOnlyList<StorageNative.State> States(EntityId player)
     {
-        var rows = new StorageNative.State[StorageNative.MaxStorages];
+        // Temporary parked-return holders can add rows of an existing key; they are not extra storage keys.
+        var rows = new StorageNative.State[StorageNative.MaxEntries];
         uint count = 0;
         fixed (StorageNative.State* p = rows)
         {
@@ -220,6 +223,17 @@ internal sealed unsafe class PlayerStorageNative : IPlayerStoragePersistence
             var state = row;
             if (state.Status == StorageNative.StateReady && state.Holder != 0)
                 result[StorageNative.Text(state.Key, StorageNative.KeyMax)] = new(state.Holder);
+        }
+        return result;
+    }
+
+    public IReadOnlyList<StorageInstanceHolder> InstanceHolders(EntityId player)
+    {
+        var result = new List<StorageInstanceHolder>();
+        foreach (var row in States(player))
+        {
+            var state = row;
+            if (state.Holder != 0) result.Add(new(StorageNative.Text(state.Key, StorageNative.KeyMax), new(state.Holder), state.Status != StorageNative.StateReady));
         }
         return result;
     }
