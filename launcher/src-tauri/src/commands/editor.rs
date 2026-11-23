@@ -59,6 +59,22 @@ pub async fn editor_restore_backup(src: String, target: String) -> Result<(), Er
 }
 
 #[tauri::command]
+pub async fn editor_storage_read(path: String, game_id: Option<String>) -> Result<Option<kiln_manage::saves::editor_storage::StorageSnapshot>, Error> {
+    blocking(move || {
+        let installs = kiln_manage::game::known(&crate::state::dirs()?)?;
+        let selected = game_id.or_else(|| crate::state::read_settings().ok().and_then(|s| s.default_game_id));
+        let clients = || installs.iter().filter(|g| g.kind == kiln_manage::game::GameKind::Client);
+        let install = clients().find(|g| selected.as_ref().is_some_and(|id| g.id == *id)).or_else(|| clients().next());
+        install.map(|g| kiln_manage::saves::editor_storage::read_for_install(g, &path)).transpose()
+    }).await
+}
+
+#[tauri::command]
+pub async fn editor_return_storage(request: kiln_manage::saves::editor_storage::ReturnRequest) -> Result<kiln_manage::saves::editor_storage::ReturnResult, Error> {
+    blocking(move || kiln_manage::saves::editor_storage::return_for_install(&crate::state::game(&request.game_id)?, &request)).await
+}
+
+#[tauri::command]
 pub async fn editor_open_backups() -> Result<(), Error> {
     blocking(|| {
         let dir = editor::backups_dir()?;

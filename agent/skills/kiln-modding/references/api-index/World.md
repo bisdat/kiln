@@ -27,6 +27,23 @@ enum: Unknown, Game, Kiln, Mixed
 - `static Resume(ComponentWatch watch) -> ComponentWatchResult` — Resumes a suspended watch from scratch: its roots must still be the same lives, and it must fit the budgets again.
 - `static Watch(ComponentWatchRequest request) -> ComponentWatchResult` — Starts a watch.
 
+## ComponentExchangedEvent `0.2.16` — A task changed a component by compare-exchange (`WorldConcurrent.TryCompareExchange`, or a native service's).
+- `ComponentExchangedEvent(EntityId entity, uint generation, uint componentHash, ulong session, ulong step, string? mod)` — Makes the event (Kiln posts it; a mod or a test may make one to test its handler).
+- `ComponentHash { get; } -> uint` — The component's hash (compare with `World.ComponentHash`).
+- `Entity { get; } -> EntityId` — The entity whose component was written.
+- `Generation { get; } -> uint` — Its generation at the write.
+- `Involves(EntityId entity) -> bool`
+- `Is(string component) -> bool` — The component is `component` (a short or qualified name).
+- `Mod { get; } -> string?` — The id of the mod that wrote it, or null when it was not a mod (a native service).
+- `Session { get; } -> ulong` — The server world's session.
+- `Step { get; } -> ulong` — The server step the write was made after.
+- `World { get; } -> WorldKind` — The world: always `WorldKind.Server`.
+
+## ComponentSet `0.2.16` — The components one `WorldConcurrent.ReadMany` reads, in order.
+- `ComponentSet(params string[] components)` — The components, by the engine's short names.
+- `Count { get; } -> int` — How many components.
+- `this[int index] { get; } -> string` — The name at `index`.
+
 ## ComponentValueChangedEvent `0.2.4` — A watched component changed (`ComponentChanges.Watch`): its bytes before and after the step's interval (from one compare to the next: the simulation and the Post and...
 - `ComponentValueChangedEvent(EventEntityKey key, string component, byte[] before, byte[] after, ulong step, ChangeOrigin origin, string? sourceMod, IEnumerable<ulong> tokens, IEnumerable<EntityId> roots, IEnumerable<ulong> watches)` — Makes the event (Kiln posts it; a mod or a test may make one to test its handler).
 - `After { get; } -> ReadOnlyMemory<byte>` — The bytes after (a copy); empty when the component is absent now or larger than 256 bytes.
@@ -85,6 +102,18 @@ enum: Ready, SuspendedBudget, SuspendedMetadata, Disposed
 - `State { get; } -> ComponentWatchState` — Its new state.
 - `WatchId { get; } -> ulong` — The watch.
 
+## ComponentWritePolicy `0.2.16` — Whether a task may write a component, and why not (`WorldConcurrent.WritePolicy`).
+- `Budget { get; } -> int` — The engine's per-component write budget in bytes (0 without a gate).
+- `Component { get; } -> string` — The component asked about.
+- `IsPlain { get; } -> bool` — Its type holds plain values only.
+- `IsTracked { get; } -> bool` — The engine tracks changes to it (either category).
+- `IsWritable { get; } -> bool` — A task may write it with `WorldConcurrent.TryCompareExchange`.
+- `Reason { get; } -> WriteReason` — The first rule that refused it (`WriteReason.None` when writable).
+- `Size { get; } -> int` — The component's registered size: the only size a value may have (0 when unknown).
+- `Status { get; } -> ExchangeStatus` — `ExchangeStatus.Ok` (writable), `ExchangeStatus.NotWritable`, `ExchangeStatus.Unavailable` or...
+- `Text { get; } -> string` — The same in words ("" when writable).
+- `TrackingKnown { get; } -> bool` — The engine's change-tracking bits were read.
+
 ## ComponentWrittenEvent `0.2.2` — A mod changed a component: posted on the tick thread when a tracked write's answer arrives, one step after the call (two when the game writes the type too), for every...
 - `Component { get; } -> string` — The component's short name.
 - `Entity { get; } -> EntityId` — The entity whose component changed.
@@ -93,6 +122,47 @@ enum: Ready, SuspendedBudget, SuspendedMetadata, Disposed
 - `Result { get; } -> WorldWriteResult` — The write's answer: the bytes before and after, who else writes the type, whether the save tracks it.
 - `Writer { get; } -> string?` `0.2.4` — Who wrote: the mod's id for a tracked write through `World` (null for Kiln's own tools), or...
 - `Writers { get; } -> IReadOnlyList<string>` `0.2.4` — Every writer of the component in that step, `ComponentWrittenEvent.Writer` first, each once (one entry for a tracked...
+
+## ConcurrentCopy `0.2.16` — The outcome of `WorldConcurrent.ReadBytes`.
+- `Required { get; } -> int` — The component's size, when it is known (`ReadStatus.Ok` and `ReadStatus.TooSmall`); else 0.
+- `Status { get; } -> ReadStatus` — What happened.
+- `Written { get; } -> int` — Bytes copied into the buffer: the whole component on `ReadStatus.Ok`, else 0.
+
+## ConcurrentEntity `0.2.16` — An entity as `WorldConcurrent.Open` found it: its id, generation, world and session.
+- `Equals(ConcurrentEntity other) -> bool`
+- `Generation { get; } -> uint` — The id's generation when it was opened.
+- `Id { get; } -> EntityId` — The entity's id.
+- `IsNone { get; } -> bool` — True for `default`: no entity.
+- `static operator !=(ConcurrentEntity left, ConcurrentEntity right) -> bool` — Not the same ref.
+- `static operator ==(ConcurrentEntity left, ConcurrentEntity right) -> bool` — Same entity, generation, world, session, layout and load.
+- `Session { get; } -> ulong` — The world's session when it was opened (a new world, a new session).
+- `World { get; } -> WorldKind` — The world it belongs to.
+
+## ConcurrentQueryResult `0.2.16` — The outcome of `WorldConcurrent.Query`.
+- `Count { get; } -> int` — Refs written to the start of the buffer (`ReadStatus.Ok`), else 0.
+- `Required { get; } -> int` — The number of matches (`ReadStatus.Ok` and `ReadStatus.TooSmall`); else 0.
+- `Status { get; } -> ReadStatus` — What happened.
+
+## `ConcurrentRead<T>` `0.2.16` — A value read by `WorldConcurrent`, with its status.
+- `IsOk { get; } -> bool` — `ConcurrentRead.Status` is `ReadStatus.Ok`.
+- `Status { get; } -> ReadStatus` — What happened.
+- `Value { get; } -> T` — The value when `ConcurrentRead.Status` is `ReadStatus.Ok`, else `default`.
+
+## ConcurrentSnapshot `0.2.16` — Several components of one entity, from `WorldConcurrent.ReadMany`.
+- `Bytes(int index) -> ReadOnlySpan<byte>` — The component's bytes when its status is `ReadStatus.Ok`, else empty.
+- `Count { get; } -> int` — How many components were asked for.
+- `Status { get; } -> ReadStatus` — The call's outcome: `ReadStatus.Ok` when the entity was read (each component then has its own status...
+- `StatusOf(int index) -> ReadStatus` — The status of the component at `index` of the set.
+- `TryGet<T>(int index, out T value) -> bool` — The first `sizeof(T)` bytes of the component at `index`; false when its status is not `ReadStatus.Ok` or it is...
+
+## EntityQuery `0.2.16` — A query for `WorldConcurrent.Query`: the entities of one world that have every listed component, optionally within `EntityQuery.Radius` metres of `EntityQuery.Center`.
+- `EntityQuery()` — The entities of `world` that have all of `components` (the engine's short names, as `World.ComponentHash` takes them).
+- `EntityQuery(WorldKind world, params string[] components)` — The entities of `world` that have all of `components` (the engine's short names, as `World.ComponentHash` takes them).
+- `Center { get; init; } -> WorldPosition?` — With a value, only entities with a position within `EntityQuery.Radius` of it match (an entity with no position...
+- `Components { get; } -> IReadOnlyList<string>` — The components every match has.
+- `Mode { get; init; } -> ReadMode` — `ReadMode.FrameQuiet` runs the query's walks only while no server frame runs.
+- `Radius { get; init; } -> double` — Metres, finite and above 0, when `EntityQuery.Center` is set.
+- `World { get; } -> WorldKind` — The world queried.
 
 ## EntityScaleChangedEvent `0.2.3` — An entity's transform scale changed through `World.SetTransformScale`: posted for a write that was committed and changed the vector (none for...
 - `Before { get; } -> Scale3` — The scale before.
@@ -135,6 +205,29 @@ enum: Ready, SuspendedBudget, SuspendedMetadata, Disposed
 - `Scale { get; init; } -> Vector3` — Its scale on each axis.
 - `YawDegrees { get; } -> double` — Heading about +Y (up) in degrees, 0..360.
 
+## ExchangeBytesResult `0.2.16` — The outcome of `WorldConcurrent.TryCompareExchangeBytes`.
+- `Flags { get; } -> ExchangeFlags` — The details (`ExchangeFlags.Confirmed`: the caller's `current` buffer was filled).
+- `HoldTime { get; } -> TimeSpan` — How long Kiln held the engine's Scene word exclusively, from taking it to releasing it, before the rest of the...
+- `IsOk { get; } -> bool` — `ExchangeBytesResult.Status` is `ExchangeStatus.Ok`.
+- `Reason { get; } -> WriteReason` — Why, when it was refused.
+- `Status { get; } -> ExchangeStatus` — What happened.
+- `Written { get; } -> bool` — The bytes were written (not a no-op).
+
+## ExchangeFlags `0.2.16` — What else a compare-exchange reports (kiln.world's KILN_MUTATION_* flags).
+enum: None, Written, NoOp, Confirmed, RolledBack, TargetLatched, EventQueued
+
+## `ExchangeResult<T>` `0.2.16` — The outcome of `WorldConcurrent.TryCompareExchange`.
+- `Current { get; } -> T` — The value the write saw (`ExchangeFlags.Confirmed`): the written one on `ExchangeStatus.Ok`, the current one on...
+- `Flags { get; } -> ExchangeFlags` — The details.
+- `HoldTime { get; } -> TimeSpan` — How long Kiln held the engine's Scene word exclusively, from taking it to releasing it, before the rest of the...
+- `IsOk { get; } -> bool` — `ExchangeResult.Status` is `ExchangeStatus.Ok`.
+- `Reason { get; } -> WriteReason` — Why, when it was refused.
+- `Status { get; } -> ExchangeStatus` — What happened.
+- `Written { get; } -> bool` — The bytes were written (not a no-op).
+
+## ExchangeStatus `0.2.16` — The outcome of a `WorldConcurrent` compare-exchange, and the status of a `ComponentWritePolicy`.
+enum: Ok, Absent, Stale, Unreadable, Unavailable, Busy, Conflict, NotWritable, Uncertain
+
 ## Nearby — Entities near a point or another entity.
 - `static Entities(EntityId center, double radius, string component) -> IReadOnlyList<EntityId>` — Entities with the per-entity component `component` within `radius` metres of `center`, nearest first; `center`...
 - `static Entities(WorldPosition at, double radius, string component) -> IReadOnlyList<EntityId>` — Entities with `component` within `radius` metres of a point, nearest first.
@@ -167,6 +260,12 @@ enum: None, Health, Stamina, Mana, Fuel, Inventory, SlotSelection, All
 - `PerFileMax { get; init; } -> uint` — Declarations a mod's `kiln.programs.json` may hold (32).
 - `Reason { get; init; } -> string?` — Null when `Ok`; else the readiness name (`NoWorld`, `NotReady`, `AccountingMismatch`).
 - `World { get; init; } -> CapacityWorldToken?` — The world the answer is for while it lives (also when it is not ready yet); null when there is no world of that kind.
+
+## ReadMode `0.2.16` — How a `WorldConcurrent` read copies component bytes.
+enum: Stable, FrameQuiet
+
+## ReadStatus `0.2.16` — The outcome of a `WorldConcurrent` read.
+enum: Ok, Absent, Stale, Unreadable, Unavailable, Busy, Unsupported, Changed, TooSmall, SizeMismatch
 
 ## Scale3 `0.2.3` — The three scale factors of a transform (`keen::float3`): X, Y, Z, 12 bytes, sequential.
 - `Scale3()`
@@ -253,6 +352,24 @@ enum: Failed, Moved
 ## `WorldChange<T>` `0.2.2` — A change to a component, made on the value the entity holds at that moment (`World.Update`).
 - `Invoke(ref T value) -> void`
 
+## WorldConcurrent `0.2.16` — Entity and component reads from Kiln tasks (kiln.world's verified copies).
+- `static CanWrite { get; } -> bool` — True when the writes work on this game build: kiln.world has them and says so.
+- `const Capability = "world.ecs_read" -> string` — The capability row kiln.world reports for these reads; its text says why they are off.
+- `static IsAvailable { get; } -> bool` — True when the reads work on this game build: kiln.world has them and Kiln has an exact engine profile that checks...
+- `static IsPresent(WorldKind world) -> bool` — True when a world of `world` exists right now.
+- `static Open(EntityId id, WorldKind world = WorldKind.Server) -> ConcurrentRead<ConcurrentEntity>` — The entity `id` of `world` as a ref for the other reads.
+- `static OrOnTick<T>(KilnTaskContext ctx, Func<T> offTick, Func<T> onTick) -> Task<T>` — The fallback in one line: when the reads work here (`WorldConcurrent.IsAvailable`) `offTick` runs at once, in the...
+- `static Query(in EntityQuery query, Span<ConcurrentEntity> into) -> ConcurrentQueryResult` — The entities that match `query`, as refs in ascending id, into `into`.
+- `static Read<T>(ConcurrentEntity entity, string component, ReadMode mode = ReadMode.Stable) -> ConcurrentRead<T>` — The first `sizeof(T)` bytes of the entity's `component` (the whole component is copied and verified).
+- `static ReadBytes(ConcurrentEntity entity, string component, Span<byte> into, ReadMode mode = ReadMode.Stable) -> ConcurrentCopy` — The whole `component` into `into`.
+- `static ReadMany(ConcurrentEntity entity, ComponentSet components, ReadMode mode = ReadMode.Stable) -> ConcurrentSnapshot` — Several components of one entity in one call (one frame-quiet window for all of them with `ReadMode.FrameQuiet`).
+- `static Template(ConcurrentEntity entity) -> ConcurrentRead<Guid>` — The template the entity was spawned from.
+- `static TryCompareExchange<T>(ConcurrentEntity entity, string component, in T expected, in T desired) -> ExchangeResult<T>` — Compares the entity's whole `component` with `expected` and, only when they are equal, writes `desired`, under the...
+- `static TryCompareExchangeBytes(ConcurrentEntity entity, string component, ReadOnlySpan<byte> expected, ReadOnlySpan<byte> desired, ReadOnlySpan<byte> mask = default(ReadOnlySpan<byte>), Span<byte> current = default(Span<byte>)) -> ExchangeBytesResult` — The same with bytes: `desired` merged under `mask` (a nonzero mask byte takes the byte from `desired`; an empty mask...
+- `static Validate(ConcurrentEntity entity) -> ReadStatus` — Checks `entity` again: `ReadStatus.Ok` while it is the same entity in the same world, session, layout and mod load.
+- `const WriteCapability = "world.ecs_write" -> string` — The capability row kiln.world reports for the writes; its text says why they are off.
+- `static WritePolicy(string component, WorldKind world = WorldKind.Server) -> ComponentWritePolicy` — Whether a task may write `component` of `world`, and why not.
+
 ## WorldStatus — What kiln.world can do on this server build right now.
 - `WorldStatus()`
 - `WorldStatus(bool Programs, bool WorldLive, bool Teleport, bool Find, int KilnPrograms, int EnginePrograms, int EngineMax, int TeleportsPending, ulong WorldSteps)`
@@ -306,3 +423,6 @@ enum: Ready, Pending, NotDeclared, NotListed, UnknownComponent, OverLimit, Off, 
 
 ## WorldWriteStatus `0.2.2` — What became of a tracked write (`WorldWriteResult.Status`).
 enum: Written, Unchanged, NoComponent, OutOfRange, NotDeclared, Refused, Faulted, Dropped, LayoutMismatch
+
+## WriteReason `0.2.16` — The first rule that decided a compare-exchange or a policy (kiln.world's KILN_ECS_WRITE_WHY_* codes).
+enum: None, NotServerWorld, NoProfile, NoWorld, Unregistered, Tracked, TrackingUnknown, NotPlain, Size, OverBudget, InFrame, Gate, EventsFull, TargetLatched, OwnerRetired, Ref, Compare, Fault, Readback, NotOwnersRef, RetireRace

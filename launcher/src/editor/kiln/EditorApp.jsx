@@ -13,6 +13,7 @@ import { dataHora, definirIdioma, assinarIdioma } from '../src/i18n.js';
 import { canSave, canUndo, canRedo, undo, redo, historyTitle, startHistoryControls, discard, mutationsBlocked, openSave, readOnly, restoreBackup, saveModel, setModel, setStatus, startSession, useSession } from './session.js';
 import Equipment from './Equipment.jsx';
 import Inventory from './Inventory.jsx';
+import Storage, { StorageRestoreWarning } from './Storage.jsx';
 import Skills from './Skills.jsx';
 import Knowledge from './Knowledge.jsx';
 
@@ -20,7 +21,7 @@ import Knowledge from './Knowledge.jsx';
 // keep upstream's English mode as the legacy fallback when no extraction is available.
 definirIdioma('en');
 
-export const TABS = [['char', 'editor.tabs.equipment'], ['inv', 'editor.tabs.inventory'], ['skills', 'editor.tabs.skills'], ['know', 'editor.tabs.knowledge']];
+export const TABS = [['char', 'editor.tabs.equipment'], ['inv', 'editor.tabs.inventory'], ['skills', 'editor.tabs.skills'], ['know', 'editor.tabs.knowledge'], ['storage', 'playerStorage.tab']];
 
 /** The page's one live sentence (the Deck screen says the same). */
 export function sayOf(s) {
@@ -155,6 +156,7 @@ export default function EditorApp() {
             {tab === 'inv' && <Inventory model={model} setModel={setModel} />}
             {tab === 'skills' && <Skills model={model} setModel={setModel} />}
             {tab === 'know' && <Knowledge model={model} setModel={setModel} />}
+            {tab === 'storage' && <Storage model={model} />}
           </div>
         </>
       )}
@@ -243,6 +245,7 @@ function Backups({ model, dirty, onClose }) {
     <Modal open locked={busy} onClose={onClose} title={t('editor.backups.title', { nome: model.name })} width={720}
       footer={<><Button variant="ghost" onClick={() => api.openBackups()}>{t('editor.backups.openFolder')}</Button><Button disabled={busy} onClick={onClose}>{t('editor.page.close')}</Button></>}>
       <p className="k-hint">{t('editor.backups.hint')}{dirty ? ` ${t('editor.backups.dropsChanges')}` : ''}</p>
+      <StorageRestoreWarning model={model} />
       {err && <Banner tone="err" title={t('editor.page.error')}>{err}</Banner>}
       <div className="ke-bk">
         {list === null && <span className="ke-note">{t('editor.backups.looking')}</span>}

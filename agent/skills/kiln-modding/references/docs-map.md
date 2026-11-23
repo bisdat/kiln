@@ -5,7 +5,7 @@ The wiki: https://frostdev.io/kiln/wiki/<page>.
 The generated API reference of the newest release: https://frostdev.io/kiln/api/. Each release keeps its own copy at
 https://frostdev.io/kiln/downloads/<version>/sdk/api/ (a few older versions have none).
 It covers every public type and member with its XML docs, so look there when this skill or the wiki doesn't name a call.
-There is no "latest" URL: use the version the mod builds on.
+For a mod that builds on an older release, use that release's copy: the newest one can name members it lacks.
 
 This skill's own guides to the C# API, by area ([api.md](api.md) is the index): [contract, threads and which assembly holds a
 type](api-contract.md#which-assembly-holds-a-type-kilnservices), [events, config, commands, players](api-events.md),
@@ -153,7 +153,7 @@ dev.28+ and dev.29+ (pages in the repository's `docs/kiln/`):
 | Item icons and names, looks and themes, fonts | `ui.md` |
 | The game's own texts (`Content.Text`) | `services/content.md` |
 | Kiln tasks, `WorldConcurrent` | `modding/tasks.md`, `services/tasks.md`, `services/world.md` |
-| Analyzers, KILNX003 | `modding/analyzers.md` |
+| Analyzers, retired KILNX003 | `modding/analyzers.md` |
 | Unknown slash commands, `chat.json` | `services/chat.md` |
 | Graphics status | `graphics.md` |
 | EMF parity | `emf.md`, `emf-parity.md` |

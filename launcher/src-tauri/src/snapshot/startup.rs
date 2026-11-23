@@ -21,7 +21,7 @@ pub fn refusal() -> Option<Error> {
     (s.phase != "ready").then(|| Error::new(ErrorCode::Busy, if s.reasons.is_empty() { "Preparing the copy from before the beta.".into() } else { s.reasons.join("\n") }))
 }
 pub fn command_refusal(cmd: &str) -> Option<Error> {
-    if matches!(cmd, "snapshot_status" | "snapshot_continue" | "app_info" | "app_started" | "data_folder_get" | "deck_quit" | "app_open_url" | "task_list" | "task_get" | "task_cancel") { None } else { refusal() }
+    if matches!(cmd, "snapshot_status" | "snapshot_continue" | "app_info" | "app_started" | "app_render_frame" | "data_folder_get" | "deck_quit" | "app_open_url" | "task_list" | "task_get" | "task_cancel") { None } else { refusal() }
 }
 // Identical ordinary starts do not mutate beta state and may share the folder.
 fn present(root: &Path, rel: &str) -> bool {

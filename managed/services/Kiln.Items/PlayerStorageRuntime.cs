@@ -106,7 +106,7 @@ internal static unsafe class PlayerStorageRuntime
         {
             StorageNative.InvalidArgument => $"kiln.items.storage refused {storage.FullKey}: another mod or plugin has the key, or an argument is bad",
             StorageNative.Unavailable => $"kiln.items.storage refused {storage.FullKey}: a limit is reached ({StorageNative.MaxPerMod} storages per mod, " +
-                                         $"{StorageNative.MaxSlotsPlayer} slots for all storages together)",
+                                         $"{StorageNative.MaxSlotsPlayer} slots for all storages together, each storage counted in whole 8-slot pages: at most 32 pages)",
             StorageNative.Revoked => $"{storage.Mod?.Info.Id ?? "the mod"} is unloading",
             _ => $"kiln.items.storage refused {storage.FullKey} ({rc})",
         };

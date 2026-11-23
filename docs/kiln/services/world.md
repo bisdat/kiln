@@ -558,13 +558,14 @@ compares: `world ecs-read check: ...` lines in `kiln.log`, one `PASS` or `FAIL` 
 3. Send `kiln.log` if any round says `FAIL`, or if `world.ecs_read` is off (its text says why). Remove the file again
    afterwards.
 
-#### From C#: `WorldConcurrent` (experimental)
+<a id="from-c-worldconcurrent-experimental"></a>
+#### From C#: `WorldConcurrent`
 
 `WorldConcurrent` (Kiln.World) is the C# face of these members, for code in a Kiln task (the guide:
-[../modding/tasks.md](../modding/tasks.md#reading-the-world-from-a-task)). It is
-`[Experimental("KILNX003")]`: opt in with `<NoWarn>$(NoWarn);KILNX003</NoWarn>` in the mod's project
-([KILNX003](../modding/analyzers.md#kilnx003); `KILNX001`, the lab members' id, does not opt in). It can change until it
-leaves experimental, and that waits for the in-game check above to pass on both exact builds.
+[../modding/tasks.md](../modding/tasks.md#reading-the-world-from-a-task)). Since 0.2.0-dev.30.7, mod API 0.2.16 (no longer experimental).
+It first shipped in 0.2.0-dev.29.18 under `KILNX003`; neither mod nor test projects need that opt-in now.
+Existing suppressions remain harmless ([retired KILNX003](../modding/analyzers.md#kilnx003)). The threading,
+bounds, capabilities and refusal rules below are unchanged.
 
 ```csharp
 // CurrentTransform starts with x, y, z as 32.32 fixed-point metres (layouts depend on the game build)
@@ -771,9 +772,11 @@ when its file names that world:
 
 The write protocol is adapted from ShroudForge's `write_entity_components.cpp` (MIT, bonsaibauer), as the gate is.
 
-#### From C#: compare-exchange (experimental)
+<a id="from-c-compare-exchange-experimental"></a>
+#### From C#: compare-exchange
 
-`WorldConcurrent` (Kiln.World) has the C# face of these members, `[Experimental("KILNX003")]` like the reads. A task
+`WorldConcurrent` (Kiln.World) has the C# face of these members, normal public API like the reads.
+Since 0.2.0-dev.30.7, mod API 0.2.16 (no longer experimental). A task
 reads a component, works out the new value off the tick, and writes it only if nothing changed it meanwhile:
 
 ```csharp

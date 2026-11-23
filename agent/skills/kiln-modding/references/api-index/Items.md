@@ -1,5 +1,8 @@
 # Items (Kiln.Items)
 
+## AmmoKinds `0.2.16` — Kinds of ammunition, for `StorageFilter.Ammunition`.
+enum: Arrow, Spell
+
 ## ClientTransfer — A client's `inventoryTransferAction`.
 - `ClientTransfer()`
 - `ClientTransfer(EntityId Source, EntityId Target, SlotId SourceSlot, SlotId TargetSlot, ClientTransferAmount Amount, int CustomAmount, bool RefillStacks, bool MoveAllStacks, bool Gifting)`
@@ -383,7 +386,7 @@ enum: None, Customization, Equipment, Currency, Generic, Virtual
 - `UsedSlots { get; } -> int` — How many slots hold an item.
 
 ## InventoryKinds — Which kinds of inventory owner `Items.FindInventories` looks for.
-enum: Containers, Players, Npcs, NonEmpty, All
+enum: Containers, Players, Npcs, NonEmpty, PlayerStorage `0.2.16`, All
 
 ## InventorySlot — One slot of an inventory.
 - `InventorySlot(SlotId Slot, ItemId Item, int Count, EntityId ItemEntity, int Level, ItemRarity? Rarity, InventoryCategory Category, int Link, bool IsGear, bool IsEquipped, bool IsBroken, ushort ItemState)`
@@ -514,6 +517,7 @@ enum: Common, Uncommon, Rare, Epic, Legendary
 - `static QuickStack(EntityId from, EntityId to, MoveOptions options = MoveOptions.None) -> Task<MoveResult>` — Runs the game's own quick stack from `from` into `to`: every stack of `from` that `to` already holds a stack of...
 - `static RarityOf(ItemInstanceRef item) -> ItemRarity?` `0.2.12` — The item's rarity now (the game's itemRarityOf: its enhancement slots - 1, or its type's rarity when it has none)...
 - `static Read(EntityId entity) -> InventoryContents?` — The inventory of `entity`, or null when it has none (or it does not exist).
+- `static RegisterPlayerStorage(string key, int slots, StorageFilter filter, StorageDeath death = StorageDeath.Keep) -> PlayerStorage` `0.2.16` — Registers a storage every player of the server world gets: a quiver, a spellbook, an extra bag.
 - `static ResultPeekAvailable { get; } -> bool` — The runtime can observe inventory commits before their next-step callbacks.
 - `static Search(string text, int max = 25) -> IReadOnlyList<ItemInfo>` — Items whose debug or display name contains `text` (ignoring case).
 - `static SetArmor(ItemInstanceRef item, double scale) -> GearValuesResult` `0.2.12` — Multiplies the armour one worn item adds to its wearer (its type's armour at its level and that of its unlocked...
@@ -548,6 +552,10 @@ enum: Common, Uncommon, Rare, Epic, Legendary
 - `static Set(EntityId container, int units, bool dryRun = false) -> Task<FuelResult>` — Sets `container`'s water to `units` (clamped to 0..max).
 - `static SetAll(EntityId holder, int units, ItemId item = default(ItemId), bool dryRun = false) -> Task<FuelResult>` — Sets every water container in `holder`'s inventories to `units` (each clamped to its max), only those of `item` when...
 - `const UnitsPerCharge = 64 -> int` — Units per charge (the game's `waterChargeAmount`).
+
+## Items.PlayerStorages `0.2.16` — Every mod's player storages: what a player has (registered and parked) and the return of parked items.
+- `static Of(EntityId player) -> IReadOnlyList<PlayerStorageInfo>` — Every storage key of `player`: the registered ones (any state) and those whose items wait parked, sorted by key...
+- `static ReturnOrphans(EntityId player, string fullKey, OrphanTarget target) -> Task<MoveResult>` — Puts every parked item of storage `fullKey` back into the game: into `player`'s backpack (as far as there is room)...
 
 ## Items.Transfers — Rules and events for the game's quick stack and move all: what a player does with the R key or a Quick Stack Station, what `Items.QuickStack` and `Items.MoveAll` do...
 - `static Available { get; } -> bool` — True when the hooks can be installed on this game build (capability `items.transfer`).
@@ -587,7 +595,7 @@ enum: Common, Uncommon, Rare, Epic, Legendary
 - `Transactions { get; init; } -> bool` — True when give and take can run.
 
 ## ItemsStatus — How a give, take, move or water write ended.
-enum: Done, Partial, NoRoom, NotEnough, NoInventory, UnknownItem, SlotChanged, Refused, Unavailable, Dropped, Invalid
+enum: Done, Partial, NoRoom, NotEnough, NoInventory, UnknownItem, SlotChanged, Refused, Unavailable, Dropped, Filtered `0.2.16`, Invalid
 
 ## ItemsTakenEvent — Kiln.Items took items (see `ItemsTransactionEvent`).
 
@@ -647,6 +655,15 @@ enum: None, DryRun, Equipped, ActionBar, Silent
 - `Succeeded { get; } -> bool` — Something moved (or would, in a dry run).
 - `To { get; init; } -> EntityId` — The inventory owner they went to.
 
+## OrphanTarget `0.2.16` — Where `PlayerStorages.ReturnOrphans` puts parked items.
+- `static Backpack { get; } -> OrphanTarget` — The player's backpack (as far as there is room).
+- `Container { get; } -> EntityId` — The container; none for the backpack.
+- `Equals(OrphanTarget other) -> bool`
+- `static Into(EntityId container) -> OrphanTarget` — An inventory owner: a chest, a station.
+- `IsBackpack { get; } -> bool` — The player's backpack.
+- `static operator !=(OrphanTarget left, OrphanTarget right) -> bool`
+- `static operator ==(OrphanTarget left, OrphanTarget right) -> bool`
+
 ## PerkSlot `0.2.12` — One of an item's five enhancement slots (the game's perk slots: one per rarity, Common's first).
 - `PerkSlot(int Index, bool Available, bool Unlocked, bool TypeHasSlot)`
 - `Available { get; init; } -> bool` — The item has this slot now (its rarity reaches it): the player can unlock it at the workbench.
@@ -663,6 +680,94 @@ enum: None, DryRun, Equipped, ActionBar, Silent
 - `PlayerKey { get; } -> EventEntityKey` — Which life of the player.
 - `PriorCanceled { get; } -> bool` — True when a `PlayerClientActionEvent` handler of the same input canceled it already.
 - `PriorCanceledBy { get; } -> string?` — The mod that canceled it there; null when none did.
+
+## PlayerStorage `0.2.16` — One storage a mod registered (`Items.RegisterPlayerStorage`): every player of the server world has one.
+- `static Available { get; } -> bool` — Whether player storage works on this game build (capability `items.storage`)...
+- `const Capability = "items.storage" -> string` — The capability row of player storage: `items.storage`.
+- `Death { get; } -> StorageDeath` — What happens to its items when the player dies.
+- `EntityOf(EntityId player) -> EntityId` — The storage's inventory owner for `player` (use it with Kiln.Items' calls), or none while it is not ready.
+- `Filter { get; } -> StorageFilter` — What it takes.
+- `FullKey { get; } -> string` — "\<mod id>:\<key>": the storage's name in saves, logs and `PlayerStorages`.
+- `IsReady(EntityId player) -> bool` — The storage is restored for `player` and takes items.
+- `Key { get; } -> string` — The key the mod gave.
+- `Read(EntityId player) -> InventoryContents?` — What the storage holds for `player` (`Items.Read` of `PlayerStorage.EntityOf`), or null while it is not ready.
+- `Retrieve(EntityId player, int index, int count = 0, EntityId to = default(EntityId)) -> Task<MoveResult>` — Moves the stack in slot `index` (or `count` of it) out of the storage into `player`'s backpack, or into `to` (a...
+- `Slot(EntityId player, int index) -> SlotId` — Slot `index` (0 to `PlayerStorage.Slots` - 1) of the storage for `player`, or none while it is not ready.
+- `Slots { get; } -> int` — How many slots it has (1 to 64).
+- `Status(EntityId player) -> PlayerStorageStatus` — Where the storage stands for `player`.
+- `Store(EntityId player, SlotId from, int count = 0) -> Task<MoveResult>` — Moves a stack (or `count` of it) from `player`'s inventory into the storage: `Items.Move`, with Kiln's choice of slot.
+
+## PlayerStorage.Client `0.2.16` — The player's own read-only copy of their storages on a game client: rows Kiln sends to the owner when a storage changes, so a mod's client half can show them (a HUD...
+- `static Available { get; } -> bool` — Whether the client copy works here (capability `items.storage.client`).
+- `const Capability = "items.storage.client" -> string` — The capability row of the client copy: `items.storage.client`.
+- `static Rows(string fullKey) -> IReadOnlyList<PlayerStorageRow>` — The local player's rows of storage `fullKey`, by slot.
+
+## PlayerStorageClientChangedEvent `0.2.16` — The local player's client copy of a storage changed (`Client`).
+- `Key { get; } -> string` — The storage's full key.
+- `Rows { get; } -> IReadOnlyList<PlayerStorageRow>` — Its rows now.
+
+## PlayerStorageDeathEvent `0.2.16` — A player died: what Kiln did with a storage's items (`StorageDeath`).
+- `Items { get; } -> int` — Their items together.
+- `Key { get; } -> string` — The storage's full key.
+- `Moved { get; } -> int` — Stacks moved into the tombstone (0: kept).
+- `Player { get; } -> EntityId` — The player.
+- `Rule { get; } -> StorageDeath` — The storage's death rule.
+- `To { get; } -> EntityId` — The tombstone; none when the storage kept everything.
+
+## PlayerStorageInfo `0.2.16` — One key of a player's storages, any mod's (`PlayerStorages.Of`).
+- `PlayerStorageInfo(string FullKey, bool Registered, int Slots, EntityId Holder, PlayerStorageStatus Status)`
+- `FullKey { get; init; } -> string` — "\<mod id>:\<name>".
+- `Holder { get; init; } -> EntityId` — The storage's inventory (none until restored).
+- `Registered { get; init; } -> bool` — A loaded mod registered it.
+- `Slots { get; init; } -> int` — The registration's slots (0 when unregistered).
+- `Status { get; init; } -> PlayerStorageStatus` — Where it stands.
+
+## PlayerStorageParkedEvent `0.2.16` — Items of a player's storage were parked: they wait, unchanged, in Kiln's copies (`PlayerStorageParkedEvent.Reason`).
+- `Character { get; } -> Guid` — The game's CharacterId of the character.
+- `Key { get; } -> string` — The storage's full key.
+- `Player { get; } -> EntityId` — The player.
+- `Reason { get; } -> PlayerStorageParkReason` — Why.
+- `Stacks { get; } -> int` — Stacks parked.
+
+## PlayerStorageParkReason `0.2.16` — Why a storage's items wait parked.
+enum: Unregistered, Overflow, Filter, Requested, Stale, Locked, ReturnedOutsideKiln
+
+## PlayerStorageRestoredEvent `0.2.16` — Kiln restored a player's storage of one key at the join (or when a mod registered it while the player was on): it is ready now.
+- `Character { get; } -> Guid` — The game's CharacterId of the character.
+- `Key { get; } -> string` — The storage's full key.
+- `Live { get; } -> bool` — A registration while the player was on (not the join).
+- `Paired { get; } -> bool` — The copy was saved together with exactly this character (see `PlayerStorageStatus.Paired`).
+- `Player { get; } -> EntityId` — The player.
+- `Revision { get; } -> long` — The copy's revision.
+- `Source { get; } -> PlayerStorageSource` — The copy it came from.
+- `Stacks { get; } -> int` — Stacks put back.
+
+## PlayerStorageRow `0.2.16` — One slot of a storage in the client copy (`Client.Rows`).
+- `PlayerStorageRow()`
+- `PlayerStorageRow(string Key, int Index, ItemId Item, int Count, int Level, uint Flags)`
+- `Count { get; init; } -> int` — How many.
+- `Flags { get; init; } -> uint` — Reserved: 0.
+- `Index { get; init; } -> int` — The slot (0 to slots - 1).
+- `Item { get; init; } -> ItemId` — The item.
+- `Key { get; init; } -> string` — The storage's full key.
+- `Level { get; init; } -> int` — Gear's level (0 for a plain stack).
+
+## PlayerStorageSource `0.2.16` — Which copy a player's storages were restored from.
+enum: None, New, Server, Client
+
+## PlayerStorageState `0.2.16` — Where a player's storage stands.
+enum: None, Waiting, Ready, Parked, Locked
+
+## PlayerStorageStatus `0.2.16` — One player's storage of one key (`PlayerStorage.Status`).
+- `PlayerStorageStatus(PlayerStorageState State, bool Paired, PlayerStorageSource Source, int Stacks, int Parked, int Quarantined, long Revision)`
+- `Paired { get; init; } -> bool` — The restored copy was saved together with exactly the character the player brought (the safe case); false: Kiln took...
+- `Parked { get; init; } -> int` — Records of this key waiting parked.
+- `Quarantined { get; init; } -> int` — Records of this key Kiln could not use (an unknown item, a bad count or slot); kept, never deleted.
+- `Restored { get; } -> bool` — The storage is restored and takes items.
+- `Revision { get; init; } -> long` — The restored copy's revision.
+- `Source { get; init; } -> PlayerStorageSource` — The copy it was restored from.
+- `Stacks { get; init; } -> int` — Stacks in the storage now.
+- `State { get; init; } -> PlayerStorageState` — Where it stands.
 
 ## RarityUpgradeRule `0.2.12` — The rule of a rarity upgrade: which items it takes, up to which rarity, and what each step costs.
 - `AllowEmptySlot { get; init; } -> bool` — Give a rarity whose enhancement slot the item's type has no perk for (the slot exists and can be unlocked for a...
@@ -705,6 +810,21 @@ enum: Keep, GameChance
 - `ExpectedCount { get; init; } -> int` — The count read in Pre.
 - `Item { get; init; } -> ItemId` — The item type.
 - `Source { get; init; } -> SlotId` — The inventory slot of the stack.
+
+## StorageDeath `0.2.16` — What happens to a storage's items when its player dies.
+enum: Keep, Grave, FollowGame
+
+## StorageFilter `0.2.16` — What items a player storage takes.
+- `static Ammunition(AmmoKinds kinds) -> StorageFilter` — Ammunition of these kinds (what the game equips into the arrow or spell slot).
+- `And(StorageFilter other) -> StorageFilter` — Only items both filters take.
+- `static Any { get; } -> StorageFilter` — Any item.
+- `static Categories(params ItemCategory[] categories) -> StorageFilter` — Items of these categories.
+- `Equals(StorageFilter other) -> bool`
+- `static Items(params ItemId[] items) -> StorageFilter` — Exactly these items.
+- `NoItemEntities() -> StorageFilter` — The same filter, taking only items without an item entity: plain stackables, no gear.
+- `static operator !=(StorageFilter left, StorageFilter right) -> bool`
+- `static operator ==(StorageFilter left, StorageFilter right) -> bool`
+- `static Where(Func<ItemInfo, bool> pick) -> StorageFilter` — Items `pick` says yes to, asked once per catalog item (see the remarks of `StorageFilter`): keep it a pure function...
 
 ## ToolDurabilityChangedEvent `0.2.3` — A tool with a rule lost durability to one of the game's debits.
 - `Actor { get; } -> EntityId` — Whose action it was.

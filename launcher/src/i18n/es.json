@@ -3395,7 +3395,7 @@
       "saves": "Tus partidas guardadas y mundos",
       "settings": "Los ajustes de los mods y la carpeta de configuración de Kiln (pueden tener contraseñas de servidores)",
       "admin": "El token y la dirección de Kiln.Admin",
-      "mods": "El contenido de tus mods (solo nombres, tamaños y fechas de archivos)",
+      "mods": "El contenido de tus mods (solo se enumeran nombres de archivos y carpetas, tamaños y fechas, además de identificadores y versiones de los manifiestos de ShroudForge en los avisos)",
       "steam": "Los archivos propios de Steam"
     }
   },
@@ -6207,5 +6207,28 @@
       "vanilla": "No son necesariamente los archivos tal como los distribuye Steam. Para eso, usa Verificar integridad de los archivos del juego en Steam (Propiedades del juego, Archivos instalados).",
       "unknown": "Kiln no puede saber qué archivos del juego devolvería: {reason}."
     }
+  },
+  "playerStorage": {
+    "tab": "Almacén",
+    "title": "Almacén del jugador",
+    "readOnly": "Solo lectura. Estos objetos permanecen en Kiln, separados de tu mochila.",
+    "empty": "Este personaje no tiene almacén.",
+    "return": "Devolver al personaje",
+    "returnTitle": "¿Devolver el almacén a este personaje?",
+    "returnBody": "Kiln crea primero una copia de seguridad y añade tantas pilas del juego base como quepan en páginas adicionales de la mochila. Los objetos de mods y todo lo demás permanecen en el almacén. El juego y Steam deben estar cerrados.",
+    "serverCopy": "Un servidor de Kiln conserva su propia copia de este almacén. Si entras sin Kiln, ese servidor puede devolverte su copia allí.",
+    "confirm": "Devolver objetos",
+    "returning": "Devolviendo…",
+    "result": "Se devolvieron {returned} pilas; quedan {remaining} pilas en el almacén.",
+    "closeGame": "Cierra Enshrouded y Steam antes de devolver el almacén.",
+    "localOnly": "La devolución solo está disponible para personajes LOCAL, no para partidas de Steam Cloud.",
+    "saveFirst": "Guarda o descarta tus cambios antes de devolver el almacén.",
+    "unavailable": "No se puede devolver el almacén",
+    "restoreWarning": "Este personaje tiene un almacén. Una copia de seguridad antigua puede corresponder a un almacén anterior; si ya no se conserva esa pareja, los objetos movidos desde esa copia podrían perderse o duplicarse.",
+    "unpaired": "Ninguna pareja guardada coincide con este personaje. Se muestra la copia más reciente del almacén.",
+    "parked": "Mod desactivado",
+    "kept": "kiln/data/characters y kiln/data/worlds se conservan. Mantienen a salvo el almacén hasta que vuelvas a instalar Kiln.",
+    "unreadable": "Algunos registros almacenados no se pueden mostrar. Se dejan sin cambios.",
+    "modItems": "{count} pilas de objetos de mods permanecen en el almacén: necesitan su mod."
   }
 }

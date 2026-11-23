@@ -51,3 +51,14 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -pthread -DKEMF
 g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -pthread -I"$here/../src" \
     "$here/io_worker_test.cpp" -o "$out/io_worker_test"
 "$out/io_worker_test" "$here/../src"
+# for_each_entity's entity-map read and the per-mod cost line (0.2.0-dev.30.7); the benchmark at -O2 without sanitizers
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -I"$here/../src" \
+    "$here/entity_scan_test.cpp" -o "$out/entity_scan_test"
+"$out/entity_scan_test"
+g++ -std=c++20 -O2 -Wall -Wextra -I"$here/../src" "$here/entity_scan_test.cpp" -o "$out/entity_scan_bench"
+"$out/entity_scan_bench" bench
+"$out/entity_scan_bench" bench fresh
+g++ -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -pthread \
+    -I"$here/host" -I"$here/../include" -I"$here/../src" -I"$here/../../../core/abi" -I"$here/../../../services/players" \
+    "$here/mod_cost_test.cpp" -o "$out/mod_cost_test"
+"$out/mod_cost_test"

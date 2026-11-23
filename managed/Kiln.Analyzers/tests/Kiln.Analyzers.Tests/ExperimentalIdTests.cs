@@ -7,15 +7,15 @@ using Xunit;
 
 namespace Kiln.Analyzers.Tests;
 
-/// <summary>Kiln.World's task-thread world reads and writes (WorldConcurrent and its types) have an experimental id of
-/// their own, KILNX003, apart from KILNX001's lab and test members: a mod opts in to them with KILNX003 alone, and
-/// KILNX001 does not opt it in.</summary>
+/// <summary>Kiln.World's task-thread world reads and writes (WorldConcurrent and its types) were experimental under
+/// KILNX003 from 0.2.0-dev.29.18; 0.2.0-dev.30.7 makes them normal API: a mod uses them without any opt-in, a project that
+/// still has KILNX003 in its NoWarn builds as before, and unrelated experimental API keeps its opt-in.</summary>
 public sealed class ExperimentalIdTests
 {
     private const string Reads = "KILNX003";
     private const string Lab = "KILNX001";
 
-    /// <summary>The reads, the writes and WorldConcurrent itself: Kiln.World's public types marked experimental.</summary>
+    /// <summary>The reads, the writes and WorldConcurrent itself: the types KILNX003 marked until 0.2.0-dev.30.7.</summary>
     private static readonly string[] Family =
     [
         "Kiln.WorldConcurrent", "Kiln.ReadMode", "Kiln.ReadStatus", "Kiln.ConcurrentEntity", "Kiln.ConcurrentRead`1",
@@ -46,7 +46,7 @@ public sealed class ExperimentalIdTests
         }
         """;
 
-    private static IReadOnlyList<Diagnostic> Build(params string[] noWarn)
+    private static IReadOnlyList<Diagnostic> Build(string source = Mod, params string[] noWarn)
     {
         var options = new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, allowUnsafe: true,
                 nullableContextOptions: NullableContextOptions.Enable)
@@ -54,7 +54,7 @@ public sealed class ExperimentalIdTests
         var parse = new CSharpParseOptions(LanguageVersion.Preview);
         var comp = CSharpCompilation.Create("TestMod",
             [CSharpSyntaxTree.ParseText("global using System; global using System.Threading.Tasks; global using Kiln;", parse),
-             CSharpSyntaxTree.ParseText(Mod, parse, "Mod.cs")],
+             CSharpSyntaxTree.ParseText(source, parse, "Mod.cs")],
             Harness.References, options);
         return comp.GetDiagnostics().Where(d => d.Severity is DiagnosticSeverity.Error or DiagnosticSeverity.Warning).ToList();
     }
@@ -62,54 +62,48 @@ public sealed class ExperimentalIdTests
     private static string Show(IEnumerable<Diagnostic> d) => string.Join("\n", d.Select(x => $"{x.Id}: {x.GetMessage()}"));
 
     [Fact]
-    public void A_mod_that_opts_in_with_KILNX003_alone_builds_without_a_warning()
+    public void A_mod_uses_the_world_reads_and_writes_without_an_opt_in()
     {
-        var d = Build(Reads);
+        var d = Build();
         Assert.True(d.Count == 0, "expected no warnings or errors:\n" + Show(d));
     }
 
     [Fact]
-    public void KILNX001_alone_does_not_opt_a_mod_in_to_the_world_reads_and_writes()
+    public void A_project_that_still_opts_in_with_KILNX003_builds_as_before()
     {
-        var d = Build(Lab);
-        Assert.NotEmpty(d);
-        Assert.All(d, x => Assert.Equal((Reads, DiagnosticSeverity.Error), (x.Id, x.Severity)));
-        // the reads' types and members and the writes' are each reported under the new id
-        Assert.Contains(d, x => x.GetMessage().Contains("WorldConcurrent"));
-        Assert.Contains(d, x => x.GetMessage().Contains("ExchangeResult"));
+        var d = Build(noWarn: [Reads]);
+        Assert.True(d.Count == 0, "expected no warnings or errors:\n" + Show(d));
     }
 
-    [Fact]
-    public void Without_an_opt_in_every_use_is_a_KILNX003_error()
+    [Theory]
+    [InlineData(Lab, "public static class M { public static void Run() => ComponentChanges.LabCounters(); }")]
+    [InlineData("KILNX002", "public static class M { public static string Run() => SteamGuard.Capability; }")]
+    public void Retired_task_opt_in_does_not_suppress_other_experimental_API(string id, string source)
     {
-        var d = Build();
+        var d = Build(source, Reads);
         Assert.NotEmpty(d);
-        Assert.All(d, x => Assert.Equal(Reads, x.Id));
+        Assert.All(d, x => Assert.Equal((id, DiagnosticSeverity.Error), (x.Id, x.Severity)));
+        Assert.Empty(Build(source, id));
     }
 
     private static string? Id(MemberInfo m) => m.GetCustomAttribute<ExperimentalAttribute>(inherit: false)?.DiagnosticId;
 
     [Fact]
-    public void Every_public_member_of_the_world_reads_and_writes_carries_KILNX003()
+    public void Nothing_of_the_world_reads_and_writes_is_experimental()
     {
-        var world = typeof(ComponentChanges).Assembly;  // Kiln.World, by a type that is not experimental
-        // the family is exactly Kiln.World's public types marked experimental, each with KILNX003
-        var marked = world.GetExportedTypes().Where(t => Id(t) != null).ToDictionary(t => t.FullName!, t => Id(t));
-        Assert.Equal(Family.Order(), marked.Keys.Order());
-        Assert.All(marked, p => Assert.True(p.Value == Reads, $"{p.Key} is [Experimental(\"{p.Value}\")]"));
-        // and no member of theirs carries another id (a member's own mark would replace the type's for its callers)
+        var world = typeof(ComponentChanges).Assembly;
         const BindingFlags All = BindingFlags.Public | BindingFlags.Static | BindingFlags.Instance | BindingFlags.DeclaredOnly;
         foreach (var name in Family)
         {
             var type = world.GetType(name, throwOnError: true)!;
-            var members = type.GetMembers(All);
-            Assert.NotEmpty(members);
-            foreach (var m in members)
-                Assert.True((Id(m) ?? Id(type)) == Reads, $"{name}.{m.Name} is [Experimental(\"{Id(m)}\")]");
+            Assert.True(Id(type) == null, $"{name} is still [Experimental(\"{Id(type)}\")]");
+            foreach (var m in type.GetMembers(All))
+                Assert.True(Id(m) == null, $"{name}.{m.Name} is still [Experimental(\"{Id(m)}\")]");
         }
-        // what stays KILNX001 in Kiln.World: the lab members only (hidden from completion, named Lab*)
-        var lab = world.GetExportedTypes().SelectMany(t => t.GetMembers(All)).Where(m => Id(m) == Lab)
-            .Select(m => $"{m.DeclaringType!.Name}.{m.Name}").Order().ToList();
-        Assert.Equal(["ComponentChanges.LabCounters", "ComponentChanges.LabHoldDelivery"], lab);
+        // what stays experimental in Kiln.World: the KILNX001 lab members only (hidden from completion, named Lab*); nothing
+        // anywhere in it still names KILNX003
+        var marked = world.GetExportedTypes().SelectMany(t => t.GetMembers(All).Append<MemberInfo>(t)).Where(m => Id(m) != null)
+            .Select(m => $"{Id(m)} {(m is Type t ? t.FullName : $"{m.DeclaringType!.Name}.{m.Name}")}").Order().ToList();
+        Assert.Equal([$"{Lab} ComponentChanges.LabCounters", $"{Lab} ComponentChanges.LabHoldDelivery"], marked);
     }
 }
