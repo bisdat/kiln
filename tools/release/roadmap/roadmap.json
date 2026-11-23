@@ -3190,8 +3190,32 @@
   ],
   "upcoming": [
     {
-      "version": "0.2.0-dev.31",
+      "version": "0.2.0-dev.30.8",
       "status": "next",
+      "title": "Building tools that change terrain, EMF 0.6.20",
+      "summary": "Building tools from Kiln mods now change terrain in a real game; EMF 0.6.20 mods load; crafting menus count linked containers.",
+      "patch": true,
+      "features": [
+        {
+          "title": "Building tools change terrain",
+          "text": "Strokes of Kiln mods' building tools reach the game's terraform, and Remove on the primary button works (thanks bisdat).",
+          "area": "content"
+        },
+        {
+          "title": "EMF 0.6.20",
+          "text": "Mods built with EMF 0.6.20 (API v48) load on Kiln.",
+          "area": "compat"
+        },
+        {
+          "title": "Crafting counts",
+          "text": "Crafting menus count linked containers in their ingredient rows; station screens show what their buttons can move (thanks Fuzen777).",
+          "area": "content"
+        }
+      ]
+    },
+    {
+      "version": "0.2.0-dev.31",
+      "status": "planned",
       "title": "Registries, values, UI, network and NPCs",
       "summary": "Kiln's own registries, so mods outlast game updates, and one data stage for all mods; mods' own character values and richer UI, map markers, station tabs, cloth on models and a debugger for the game client; control over what the server sends each player, survivors and bases, and friendly NPCs with bodies and routines of their own.",
       "features": [
