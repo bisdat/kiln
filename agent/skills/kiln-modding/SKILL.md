@@ -42,13 +42,17 @@ Enshrouded is a trademark of Keen Games GmbH. Kiln is unofficial.
    [references/gameplay.md](references/gameplay.md) (queries, terrain, refusable events, stations, gems).
    Data the game reads once at start (Flame Altars, experience per level): OnBoot and resource patches,
    [references/boot.md](references/boot.md). Heavy work: Kiln tasks, [references/tasks.md](references/tasks.md).
-3. **Check names**: `kiln catalog search`. Never guess game ids or field paths.
-4. **Build and deploy** to a local test server: `kiln build && kiln deploy`, then `kiln run`.
-5. **Check the log**: `kiln logs --mod <id>` for `mod <id> <version> loaded in … ms`, or the reason it didn't load.
-6. **Hot reload** after each change: `kiln deploy --reload`.
-7. **Test** in the server with `[KilnTest]` methods: `kiln test`. dev.26+: the same methods offline under `dotnet test`
+3. **Find or check an API**: grep [references/api-index/](references/api-index/INDEX.md) for the name or a word of what it does
+   (`grep -rn "BlockAt" references/api-index/`), then open that assembly's file. The file name is the `KilnServices` entry
+   (`Items.md` needs `Items`); a split file (`Blocks.md`) is a map of its parts. Each line has the signature, the mod API that
+   added it and a summary. Never write a signature, an enum value or a result property from memory.
+4. **Check names**: `kiln catalog search`. Never guess game ids or field paths.
+5. **Build and deploy** to a local test server: `kiln build && kiln deploy`, then `kiln run`.
+6. **Check the log**: `kiln logs --mod <id>` for `mod <id> <version> loaded in … ms`, or the reason it didn't load.
+7. **Hot reload** after each change: `kiln deploy --reload`.
+8. **Test** in the server with `[KilnTest]` methods: `kiln test`. dev.26+: the same methods offline under `dotnet test`
    (`Kiln.TestKit`), and `[ClientCheck]` for what a player must see. [references/testing.md](references/testing.md).
-8. **Package**: `kiln pack`. dev.28+: `kiln publish` makes a GitHub release in steps you confirm, and `updates` in the
+9. **Package**: `kiln pack`. dev.28+: `kiln publish` makes a GitHub release in steps you confirm, and `updates` in the
    manifest gives players update notices ([references/devkit.md](references/devkit.md)).
 
 `--json` on any `kiln` command gives one JSON document; exit 0 ok, 1 failure, 2 usage.
