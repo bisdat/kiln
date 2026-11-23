@@ -1315,8 +1315,11 @@ KilnResult registry_live_commit(KilnOwner owner, uint64_t handle, RegistryLiveRe
                 apply_changes(&error);
                 const auto slots = change_slots(handle);
                 reply.skipped = foreign_slots(slots);
-                if (!error.empty() || !g.refused.empty() || reply.skipped) {
-                    const std::string why = !error.empty() ? error : !g.refused.empty() ? g.refused.front().reason : "another writer owns a target slot";
+                const auto own_refusal = std::find_if(g.refused.begin(), g.refused.end(), [&](const auto& row) {
+                    return row.source.rfind(prefix, 0) == 0;
+                });
+                if (!error.empty() || own_refusal != g.refused.end() || reply.skipped) {
+                    const std::string why = !error.empty() ? error : own_refusal != g.refused.end() ? own_refusal->reason : "another writer owns a target slot";
                     const std::string mod = change->mod;
                     g.changes.erase(handle);
                     std::string rollback;

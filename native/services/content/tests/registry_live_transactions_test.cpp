@@ -36,6 +36,30 @@ void packs_code_and_out_of_order_revert() {
     store_drop_owner(CODE); store_flush(&err);
     check(at<uint32_t>(WOOD_AT) == 20, "old pack remains under every reverted transaction");
 }
+void unrelated_pack_binding_failure_isolated() {
+    world();
+    g_files = {{"p/content/p.json", R"({"registry":{"alter":[{"registry":"items","select":"game:material_t1_wood_logs","field":"manaCost","op":2}]}})"}};
+    const auto files = files_of({{"p", "p/content/p.json"}});
+    stage(files); registry_live_world_begin(); apply_registry_files(files);
+    RegistryLiveReply reply;
+    const auto h = change(71, "a", "[{" + wood + R"("op":{"mul":3}}])");
+    check(registry_live_commit(71, h, &reply) == KILN_OK, "independent commit call succeeds");
+    check(reply.outcome == RegistryLiveOutcome::Applied && reply.accepted == 1 && at<uint32_t>(WOOD_AT) == 30,
+          "an unrelated pack's unbindable edit does not refuse this live change");
+    check(reported("the item has no such configuration"), "the unrelated binding refusal remains visible in the report");
+}
+void unrelated_live_binding_failure_isolated() {
+    fresh_live(); RegistryLiveReply reply;
+    const auto a = change(71, "a", R"([{"registry":"items","select":"game:sword_t2","field":"manaCost","op":20}])");
+    registry_live_commit(71, a, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Applied, "first live change initially binds");
+    reg(KILN_CONTENT_ITEMS).by_id.erase(SWORD); // the earlier change's entry no longer binds in this world
+    const auto b = change(72, "b", "[{" + wood + R"("op":{"mul":3}}])");
+    check(registry_live_commit(72, b, &reply) == KILN_OK, "second independent commit call succeeds");
+    check(reply.outcome == RegistryLiveOutcome::Applied && reply.accepted == 1 && at<uint32_t>(WOOD_AT) == 30,
+          "an earlier live change's unbindable edit does not refuse another owner");
+    check(reported("the entry is not in this world"), "the earlier change's binding refusal remains visible");
+}
 void claims_and_binding_failure() {
     fresh_live(); RegistryLiveReply reply;
     auto a = change(71, "a", "[{" + wood + R"("op":50,"exclusive":true}])"); registry_live_commit(71, a, &reply);
@@ -129,6 +153,8 @@ int main() {
     int failed = 0;
     const std::pair<const char*, void(*)()> tests[] = {
         {"packs_code_and_out_of_order_revert", packs_code_and_out_of_order_revert},
+        {"unrelated_pack_binding_failure_isolated", unrelated_pack_binding_failure_isolated},
+        {"unrelated_live_binding_failure_isolated", unrelated_live_binding_failure_isolated},
         {"claims_and_binding_failure", claims_and_binding_failure},
         {"mapped_reads_have_no_write_side_effect", mapped_reads_have_no_write_side_effect},
         {"world_scope_and_admission", world_scope_and_admission},
