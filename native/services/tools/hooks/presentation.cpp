@@ -14,8 +14,10 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <cstring>
 #include <map>
+#include <string>
 
 namespace {
 using namespace kiln::tools;
@@ -286,6 +288,21 @@ bool install_brush_frame() {
 void kiln_tools_presentation_set_held_provider(KilnToolHeldItemProvider provider) {
     held_provider.store(provider,std::memory_order_release);
 }
+namespace {
+const char* mode_name(uint32_t mode) {return mode==KILN_TOOL_MODE_REMOVE?"Remove":mode==KILN_TOOL_MODE_ADD?"Add":"none";}
+// One line per published family (kiln#133): this process binds the family's programs, so its strokes reach the trace.
+void log_bound(const KilnToolFamilyDef& definition) noexcept {
+    if(!api||!api->log)return;
+    try {
+        char tail[200];
+        std::snprintf(tail,sizeof tail,": actions bound: primary %s (program 0x%08x), secondary %s (program 0x%08x), %u brushes; "
+            "strokes are traced on tools.actions",mode_name(definition.primary.mode),definition.primary.program,
+            mode_name(definition.secondary.mode),definition.secondary.program,definition.brush_count);
+        const std::string line="tools: "+std::string(definition.name.ptr,definition.name.len)+tail;
+        api->log(parent_owner,KILN_LOG_INFO,{line.data(),line.size()});
+    } catch(...) {}
+}
+}
 KilnResult KILN_CALL kiln_tools_define_family(KilnOwner owner,const KilnToolFamilyDef* definition,KilnHandle* out) {
     if(out)*out=0;
     if(!definition||!out||!owner||definition->size<sizeof(KilnToolFamilyDef)||!definition->tool||definition->reserved||definition->reserved2||definition->reserved3||
@@ -307,7 +324,7 @@ KilnResult KILN_CALL kiln_tools_define_family(KilnOwner owner,const KilnToolFami
         Registration registration{owner,definition->tool,{definition->tool}};
         for(uint32_t i=0;i<definition->brush_count;++i)registration.ids.push_back(definition->brushes[i].item);
         std::array<uint8_t,16> guid;std::memcpy(guid.data(),definition->identity,16);
-        std::lock_guard lock(gate);
+        std::unique_lock lock(gate);
         // The owner lease can race teardown; validate admission again at the publication boundary.
         if(!child||!retiring||!required_hooks(definition->primary)||!required_hooks(definition->secondary))return KILN_ERR_UNAVAILABLE;
         // Retirement marks an owner dead before its callback takes this gate. A last live-owner check under
@@ -331,7 +348,10 @@ KilnResult KILN_CALL kiln_tools_define_family(KilnOwner owner,const KilnToolFami
         }
         if(ok)ok=kiln_tools_bind_programs(owner,*definition);
         if(!ok){remove_locked(registration);registrations.erase(handle);return KILN_ERR_UNAVAILABLE;}
-        *out=handle;return KILN_OK;
+        *out=handle;
+        lock.unlock();
+        log_bound(*definition);
+        return KILN_OK;
     } catch(...) {return KILN_ERR_UNAVAILABLE;}
 }
 KilnResult KILN_CALL kiln_tools_remove_family(KilnOwner owner,KilnHandle handle) {

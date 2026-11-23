@@ -97,6 +97,8 @@ bool kiln_tools_actions_ready(uint32_t) noexcept {return false;}
 bool kiln_tools_actions_faulted() noexcept {return false;}
 uint64_t kiln_tools_actions_dispatched() noexcept {return 0;}
 uint64_t kiln_tools_actions_refused() noexcept {return 0;}
+kiln::tools::ActionTrace& kiln_tools_action_trace() noexcept {static kiln::tools::ActionTrace trace;return trace;}
+uint32_t kiln_tools_bound_programs() noexcept {return 0;}
 bool kiln_tools_bind_programs(KilnOwner,const KilnToolFamilyDef&) noexcept {return true;}
 void kiln_tools_unbind_programs(KilnOwner,uint32_t) noexcept {}
 bool kiln_tools_build_area_init(const KilnApi*) {fixture::record("area");return true;}

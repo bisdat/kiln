@@ -96,6 +96,24 @@ public sealed class ToolCompilerContentTests : IDisposable
         }
     }
 
+    [Fact]
+    public void A_remove_action_asks_the_game_cursor_for_no_building_material()
+    {
+        // The game's build cursor checks the selected building material for an action whose item asks for it, and the
+        // impact refuses the stroke while that check fails (CursorFlag MissingMaterials). The base brush
+        // Building_Overgrowth_Shape_Small asks on primary, its Add; a removal-only tool has no material to select, so its
+        // primary Remove never reached the terrain (kiln#133). A Remove asks on neither input.
+        var (_, low, _, brushes) = LowerRemover();
+        var items = low.Json["items"]!.AsArray().Select(x => x!.AsObject()).ToArray();
+        for (var i = 0; i < brushes.Length; i++)
+        {
+            var fields = items[i + 1]["fields"]!.AsObject();
+            Assert.Equal("False", (string?)fields["equipment.cursorConfig.checkRequiredMaterialsOnPrimaryAction"]);
+            Assert.Equal("False", (string?)fields["equipment.cursorConfig.checkRequiredMaterialsOnSecondaryAction"]);
+        }
+        Assert.False(items[0]["fields"]!.AsObject().ContainsKey("equipment.cursorConfig.checkRequiredMaterialsOnPrimaryAction"));
+    }
+
     // KILN_TOOL_CONTENT_FIXTURE=<file>: the document native/services/tools/tests/test-tool-content.sh feeds kiln.content's
     // resolvers with the game's reflection and the real Small brush bytes. Exactly what this compiler emits, no hand edits.
     [Fact]

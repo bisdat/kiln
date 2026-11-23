@@ -18,11 +18,13 @@ struct ImpactCopy {
     uint32_t actor{}, used_item{};
     double hit[3]{}, radius{};
 };
-inline bool copy_tool_impact(const kab::NativeCtx& source, const kab::ArgSlice& arguments,
-                             uint32_t mode, ImpactCopy& out) {
+// Why a copy was refused, for the action trace (action_trace.h). Ok is the only admitted value.
+enum class CopyExit : uint8_t { Ok, Layout, Marker, NoActor, NoUsedItem, Radius, Position, Aliased };
+inline CopyExit copy_tool_impact_checked(const kab::NativeCtx& source, const kab::ArgSlice& arguments,
+                                         uint32_t mode, ImpactCopy& out) {
     if ((mode != KILN_TOOL_POLICY_REMOVE && mode != KILN_TOOL_POLICY_ADD) || !source.layout ||
         !source.data || !source.layout_count || source.layout_count > 4096 || !source.data_size ||
-        source.data_size > 65536 || !arguments.data || arguments.count != 9) return false;
+        source.data_size > 65536 || !arguments.data || arguments.count != 9) return CopyExit::Layout;
     const auto* layout = reinterpret_cast<const kab::ImpactVariable*>(source.layout);
     auto variable = [&](uint32_t handle, uint32_t type, uint16_t size) -> const kab::ImpactVariable* {
         const uint32_t index = handle & 0xffff;
@@ -39,29 +41,30 @@ inline bool copy_tool_impact(const kab::NativeCtx& source, const kab::ArgSlice& 
     const auto* range = variable(arguments.data[5], 0xe89f7410, 4);
     if (mode == KILN_TOOL_POLICY_ADD && arguments.data[6])
         range = variable(arguments.data[6], 0xe89f7410, 4);
-    if (!root || !transform || !type || !damage || !range || source.data[type->offset] != 0xff) return false;
+    if (!root || !transform || !type || !damage || !range) return CopyExit::Layout;
+    if (source.data[type->offset] != 0xff) return CopyExit::Marker;
     uint32_t actor=0, used=0;
     bool found_used=false;
     std::memcpy(&actor, source.data + root->offset, 4);
-    if (!actor) return false;  // unowned impacts bypass vanilla player permissions; never permit them
+    if (!actor) return CopyExit::NoActor;  // unowned impacts bypass vanilla player permissions; never permit them
     for (uint64_t i=0; i<source.layout_count; ++i) {
         const auto& v=layout[i];
         if (v.config_id != 0x220e6b10) continue; // UsedItem (ItemId), bound by the native sequence event
         if (found_used || v.type != 0x5bfc0dbb || v.size != 4 || v.offset > source.data_size || 4 > source.data_size-v.offset)
-            return false;
+            return CopyExit::Layout;
         found_used=true;
         std::memcpy(&used, source.data+v.offset, 4);
     }
-    if (!used) return false;
+    if (!used) return CopyExit::NoUsedItem;  // the spawning action carried no item (or the program binds none)
     float radius=0;
     std::memcpy(&radius, source.data+range->offset, 4);
-    if (!std::isfinite(radius) || radius < 0.25f || radius > 8.0f) return false;
+    if (!std::isfinite(radius) || radius < 0.25f || radius > 8.0f) return CopyExit::Radius;
     int64_t fixed[3]{};
     std::memcpy(fixed, source.data+transform->offset, sizeof(fixed));
     for (int i=0;i<3;++i) {
         // TerraformImpact first narrows the fixed integer to float, then multiplies by 2^-32.
         out.hit[i] = static_cast<double>(static_cast<float>(fixed[i]) * 0x1p-32f);
-        if (std::abs(out.hit[i]) > 1000000.0) return false;
+        if (std::abs(out.hit[i]) > 1000000.0) return CopyExit::Position;
     }
     // Reject aliasing of rewritten values with other inputs (even if a malformed program used overlapping variables).
     for (const auto* change : {type, damage}) {
@@ -69,7 +72,7 @@ inline bool copy_tool_impact(const kab::NativeCtx& source, const kab::ArgSlice& 
             const auto* other=&layout[i];
             if (other==change) continue;
             if (change->offset < uint32_t(other->offset)+other->size && other->offset < uint32_t(change->offset)+change->size)
-                return false;
+                return CopyExit::Aliased;
         }
     }
     out.data.assign(source.data, source.data+source.data_size);
@@ -83,6 +86,10 @@ inline bool copy_tool_impact(const kab::NativeCtx& source, const kab::ArgSlice& 
     const int32_t complete_damage[5]={INT32_MAX,INT32_MAX,INT32_MAX,INT32_MAX,INT32_MAX};
     std::memcpy(out.context.data+damage->offset,complete_damage,sizeof(complete_damage));
     out.actor=actor; out.used_item=used; out.radius=radius;
-    return true;
+    return CopyExit::Ok;
+}
+inline bool copy_tool_impact(const kab::NativeCtx& source, const kab::ArgSlice& arguments,
+                             uint32_t mode, ImpactCopy& out) {
+    return copy_tool_impact_checked(source, arguments, mode, out) == CopyExit::Ok;
 }
 } // namespace kt

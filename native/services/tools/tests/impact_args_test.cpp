@@ -45,5 +45,19 @@ int main() {
     f.layout[9].config_id=0; check(!kt::copy_tool_impact(f.ctx,f.args,KILN_TOOL_POLICY_REMOVE,c)); f.layout[9].config_id=0x220e6b10;
     f.ctx.data_size=65537; check(!kt::copy_tool_impact(f.ctx,f.args,KILN_TOOL_POLICY_REMOVE,c)); f.ctx.data_size=256;
     check(!kt::copy_tool_impact(f.ctx,f.args,0,c));
+    // Each refusal names its reason for the action trace (kiln#133).
+    using kt::CopyExit;
+    auto why=[&](Fixture& g,uint32_t mode=KILN_TOOL_POLICY_REMOVE){kt::ImpactCopy out;return kt::copy_tool_impact_checked(g.ctx,g.args,mode,out);};
+    {Fixture g;check(why(g)==CopyExit::Ok);check(why(g,0)==CopyExit::Layout);}
+    {Fixture g;g.handles[3]=0;check(why(g)==CopyExit::Layout);}
+    {Fixture g;g.args.count=8;check(why(g)==CopyExit::Layout);}
+    {Fixture g;g.data[80]=0;check(why(g)==CopyExit::Marker);}
+    {Fixture g;g.data[0]=0;check(why(g)==CopyExit::NoActor);}
+    {Fixture g;std::memset(g.data.data()+208,0,4);check(why(g)==CopyExit::NoUsedItem);}
+    {Fixture g;g.layout[9].config_id=0;check(why(g)==CopyExit::NoUsedItem);}  // a program that binds no UsedItem
+    {Fixture g;g.layout[9].type=0x737c8f86;check(why(g)==CopyExit::Layout);}  // a malformed UsedItem variable
+    {Fixture g;float tiny=0.1f;std::memcpy(g.data.data()+144,&tiny,4);check(why(g)==CopyExit::Radius);}
+    {Fixture g;int64_t far=int64_t(2000000)<<32;std::memcpy(g.data.data()+16,&far,8);check(why(g)==CopyExit::Position);}
+    {Fixture g;g.layout[4].offset=96;g.layout[4].size=4;check(why(g)==CopyExit::Aliased);} // material overlaps the damage
     std::printf("%d impact argument checks passed\n",checks);
 }
