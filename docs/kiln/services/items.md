@@ -661,7 +661,7 @@ real runs.
   program boundary (chapter 10 §8: no attribute snapshot was taken), a fault of the game inside the transaction (only the
   host test injects one).
 
-## Gear: rarity, enhancements, level (v8, since 0.2.0-dev.29.19)
+## Gear: rarity, enhancements, level (v8, since 0.2.0-dev.30)
 
 The game keeps an item's rarity as its number of **enhancement slots** (its `PerkContainerNew` component: Common one ..
 Legendary five), and every unlocked slot is one level (docs/re/items.md section 19). Kiln.Items reads and writes these in
@@ -731,7 +731,7 @@ Events.On<GearEnhancedEvent>(e => Log.Info($"{e.Item}: unlocked {e.From} -> {e.T
   `HarnessItems.SetPerkSlots(item, n)` sets a type's filled perk slots, `HarnessItems.SetGear(ref, ...)` plays the game's
   own change ([unit-tests.md](../modding/unit-tests.md)).
 
-## Upgrading rarity (v8, since 0.2.0-dev.29.19)
+## Upgrading rarity (v8, since 0.2.0-dev.30)
 
 `Items.UpgradeRarity` raises an item's rarity by one step of a rule, paid for: the item gets its next enhancement slot in
 place (locked: the player unlocks it at the workbench as usual, for its cost, and gets a level and the perk), and the
@@ -802,7 +802,7 @@ await Items.UpgradeRarity(player, item, rule, new UpgradeOptions { PayFrom = che
 - Test kit: the fake kiln.items runs upgrades with kiln.items' rules (pay and write together, payers, refusals);
   `HarnessItems.SetUpgradeRolls(0.9, 0.1)` names the rolls of the upgrades that follow.
 
-## Per-instance values: power, armour, max durability, levels outside the range (v8, since 0.2.0-dev.29.19)
+## Per-instance values: power, armour, max durability, levels outside the range (v8, since 0.2.0-dev.30)
 
 One item can be stronger or weaker than others of its type, and keep it wherever it goes: its power (the damage it deals),
 its armour, its max durability and a level outside its type's range. The game stores none of these per item, so Kiln does
@@ -938,7 +938,7 @@ per Pre) / `fuel_keep_end`. v4 (header size >= `sizeof(KilnItemsApi)` of v4; fea
 `read_instances(items, count, item_size, flags)` and `read_holder(holder, out, capacity, item_size, &count, &initialized)`
 fill `KilnItemsInstance` records (stamp, item, holder, slot, link, flat slot, count, the save record's fields; tick thread),
 `instances_status` (any thread); the stamps are in the `reserved` fields of `KilnItemsSlot`, `KilnItemsChange` and
-`KilnItemsMoveChange` (0 from an older service). v8 (since 0.2.0-dev.29.19; feature `items.gear`): `gear_write` queues a
+`KilnItemsMoveChange` (0 from an older service). v8 (since 0.2.0-dev.30; feature `items.gear`): `gear_write` queues a
 `KilnItemsGearRequest` for one item entity named with its stamp (`AVAILABLE` sets the enhancement slots, so the rarity;
 `UNLOCKED` the unlocked enhancements, Level moving with them; `LEVEL`; `DURABILITY_REFRESH` / `DURABILITY_REPAIR`;
 `DRY_RUN`; `FORCE_SLOT`; `NOT_EQUIPPED`), run in the next step inside the serial program `kiln_items_gear` through the

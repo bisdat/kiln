@@ -266,7 +266,7 @@ Server-to-addon messages `Open`, `Close`, `Entries` (MODS menu), `SlotKeys`, `Ma
 `Toggle`, `ItemGrid`, `List`, `Tabs`; addon-to-server `SlotKey`, `Stored`, `Layout`, `ui_event` (`Click`, `Change`,
 `Submit`, `Menu`, `Closed`). All carried unchanged by shroudlink's link host; drawn by shroudlink's addon. Lab: "MODS
 menu entry", "backpack section offered", "notification: Wave answers with a HUD message", "chest categories window".
-Kiln C# equivalents: `Ui.AddWindow` (Kiln.Ui, needs Kiln in the client), `Menus.Add`, `Ui.AddHud`, `Ui.AddToast`;
+Kiln C# equivalents: `Ui.Window` / `Ui.Screen` (Kiln.Ui, needs Kiln in the client), `Ui.Menus.Add`, `Hud.Show`, `Hud.Toast`;
 slot marks and slot keys have no Kiln equivalent (gap).
 
 ### SDK helpers (compiled into each mod)

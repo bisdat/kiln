@@ -28,6 +28,7 @@ the same file). v1 manifests (id, name, version, apiVersion, entryAssembly, entr
   "exports": ["MyMod.Api.dll"],         // assemblies dependents compile against (shared at run time)
   "advanced": false,                    // opt into the advanced tier (ModInfo.Advanced)
   "steamMessages": false,               // the mod opens its own Steam peer message leases (see "steamMessages")
+  "systems": { "replaces": ["fuel_setup"] },  // the game's ECS programs the mod replaces, a declaration (see "systems")
   "writes": ["Fuel", "ScaleComponent"], // component types the mod writes through the game's write tracking (see "writes")
   "tests": { "autoRun": true, "timeoutSeconds": 20 },  // Kiln.Testing (testing.md)
   "boot": false,                        // true | "required": Mod.OnBoot runs before the game starts (see "Boot content")
@@ -69,6 +70,15 @@ without git has no stamp, and nothing is compared before the load.
   messages, and does not stop other code in the game's process.
 - Steam peer messages reach players by Steam id, outside the game's connection and its admission: treat every message
   as untrusted, and prefer Kiln.Network's channels when the players are on the same server.
+
+## What the mod does to the game's ECS programs (`systems`, since 0.2.0-dev.29)
+`systems` is an object that says what the mod does to the game's own ECS programs ([Kiln.Systems](../services/systems.md)).
+Its one key is `replaces`: a list of up to 64 program names (letters, digits and `_`, 1 to 64 characters, such as
+`fuel_setup`) that the mod replaces with `ProgramWrap.Replace`. Any other key in `systems` fails the schema.
+- **It is a declaration for tools.** Only one mod per program can replace it (a second `Replace` is refused at run time,
+  naming the holder); the list lets a tool find two mods that replace one program before play. The launcher and
+  `kiln lint` do not read it yet, and listing a program or not changes nothing at run time: Kiln.Host only accepts the key.
+- Leave it out when the mod replaces no program.
 
 ## Where new versions are published (`updates`, since 0.2.0-dev.28)
 `updates` tells Kiln where to look for a newer version of the mod. The launcher and `kiln updates check`
