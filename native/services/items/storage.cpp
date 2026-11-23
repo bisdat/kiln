@@ -646,6 +646,12 @@ bool get_component_pair(uintptr_t world, uint32_t player, PtrSize* pi, PtrSize* 
         return false;
     }
 }
+std::set<uint32_t> unreadable_pages;
+// The guard never stops guarding: a fault turns storage off once (no more moves or captures) and the scan goes on.
+void guard_fault(const char* text) {
+    if (enabled)
+        off(KILN_CAP_REASON_FAULTED, text);
+}
 void guard_client_inputs(uintptr_t storage) {
     std::lock_guard lock(storage_mu);
     if (!api->on_tick_thread() || storage != api->server_world() + E.world_storage)
@@ -662,9 +668,12 @@ void guard_client_inputs(uintptr_t storage) {
             for (auto page : h.pages) {
                 entities.insert(page);
                 uint32_t inv[24]{};
+                // A page the game already removed (a leaving player's owned entities) has no items to add; its id and
+                // the holder's stay refused, and every other player stays guarded.
                 if (!component_copy(api->server_world(), kHashInventory, page, inv, 96)) {
-                    off(KILN_CAP_REASON_FAULTED, "items.storage: cannot inspect storage at client guard");
-                    return;
+                    if (unreadable_pages.insert(page).second)
+                        items_log(KILN_LOG_WARN, "player-storage: client guard cannot read storage page %u", page);
+                    continue;
                 }
                 for (unsigned i = 0; i < 8; ++i)
                     if (inv[i * 3 + 2] && inv[i * 3 + 2] != UINT32_MAX)
@@ -680,8 +689,8 @@ void guard_client_inputs(uintptr_t storage) {
             continue;
         if (pi.size < input_size || scpi.size < consumed_size || !storage_copy(input.data(), pi.ptr, input.size()) ||
             !storage_copy(used.data(), scpi.ptr, used.size())) {
-            off(KILN_CAP_REASON_FAULTED, "items.storage: client input guard read failed");
-            return;
+            guard_fault("items.storage: client input guard read failed");
+            continue;
         }
         for (const auto& a : client_actions) {
             uint32_t version = 0, consumed = 0;
@@ -691,8 +700,8 @@ void guard_client_inputs(uintptr_t storage) {
                 continue;
             if (forbidden_action(input.data() + a.offset, a, [&](uint32_t e) { return entities.count(e) != 0; })) {
                 if (!storage_copy(static_cast<uint8_t*>(scpi.ptr) + a.consumed, &version, 4)) {
-                    off(KILN_CAP_REASON_FAULTED, "items.storage: client action cancellation failed");
-                    return;
+                    guard_fault("items.storage: client action cancellation failed");
+                    continue;
                 }
                 items_log(KILN_LOG_WARN, "player-storage: refused client inventory action by player %u (action +%u)",
                           player, a.offset);
@@ -1915,6 +1924,7 @@ void storage_reset() {
     refs.clear();
     parks.clear();
     garbage.clear();
+    unreadable_pages.clear();
     deaths.clear();
     grave_before.clear();
     graves_done.clear();
