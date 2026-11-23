@@ -243,7 +243,7 @@ void KILN_CALL on_world(const KilnWorldEvent* e, void*) {
     if (e->event == KILN_WORLD_STARTED) {
         g_sampler.world_started();
         if (g_backend) g_backend->set_serving(g_serving);  // a new world starts healthy
-        g_frames.world_started(e->session, static_cast<uint64_t>(g_api->world(KILN_WORLD_CLIENT)));
+        g_frames.world_started(e->session, static_cast<uint64_t>(e->world));  // the event's own world, as a number
     } else if (e->event == KILN_WORLD_STOPPING) {
         g_frames.world_stopping();
     }

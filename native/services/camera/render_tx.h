@@ -11,7 +11,7 @@
 // Pre (step()) owns the plans and hands the render path the live one and the staged one through a mailbox that the
 // render path try-locks once per frame: a busy mailbox keeps last frame's plans; a stop (end, owner gone, world gone)
 // is an atomic on the plan and needs no mailbox. Plans the render path may still hold are freed only after it has taken
-// a newer mailbox, so nothing is freed on the render path.
+// a newer mailbox, so nothing is freed on the render path (unless it took none of the last 64: see step()).
 //
 // Applied only after a frame showed it: the selection writes the plan's values and tells the capture what it wrote
 // (Frames::expect); the capture compares the final frame with that (position exact in 32.32, rotation and field of view
@@ -160,7 +160,7 @@ private:
     enum class Eval { Write, Nothing, Refused, Ended };
     Eval evaluate(Plan& p, Run& run, const View& natural, bool natural_had_override, const SampleSet& samples, int64_t now, Output* out,
                   uint32_t* code, uint32_t* end_reason);
-    bool safe(const Plan& p, const Output& o, const SampleSet& samples) const;
+    bool safe(const Output& o, const SampleSet& samples) const;
 
     // client side (lock held)
     void publish_mail();
@@ -174,7 +174,6 @@ private:
     LocalWorld* world_;
     std::atomic<uint64_t> serving_{0};
     std::atomic<bool> write_fault_{false};  // a guarded write faulted: no visual write for the rest of this world
-    std::atomic<uint32_t> stopped_epoch_{0};
 
     // client side
     mutable std::mutex m_;

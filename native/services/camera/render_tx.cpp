@@ -145,7 +145,7 @@ void LocalBackend::drop(KilnCameraLease lease) {
 }
 
 void LocalBackend::world_stopped(uint32_t epoch) {
-    stopped_epoch_.store(epoch, std::memory_order_release);
+    (void)epoch;
     frames_->world_stopping();  // the render path compares a plan's epoch with this: nothing of that world is written
 }
 
@@ -303,7 +303,9 @@ bool LocalBackend::step() {
         const uint64_t adopted = adopted_gen_.load(std::memory_order_acquire);
         for (size_t i = graveyard_.size(); i-- > 0;)
             if (graveyard_[i].first <= adopted) graveyard_.erase(graveyard_.begin() + static_cast<std::ptrdiff_t>(i));
-        while (graveyard_.size() > kGraveyardMax) graveyard_.erase(graveyard_.begin());  // a renderer that never draws
+        // a renderer that has not taken 64 mailboxes (not drawing): the oldest go; should it still hold one, that plan is
+        // freed when the render path lets go of it (the one case of a free there)
+        while (graveyard_.size() > kGraveyardMax) graveyard_.erase(graveyard_.begin());
 
         const uint64_t c = caps();
         changed = c != reported_caps_;
@@ -347,7 +349,7 @@ uint32_t LocalBackend::plans_held() const {
 
 // ---- the render path ----------------------------------------------------------------------------------------------------------
 
-bool LocalBackend::safe(const Plan& p, const Output& o, const SampleSet& samples) const {
+bool LocalBackend::safe(const Output& o, const SampleSet& samples) const {
     if (o.fov && !lens_ok(o.view.fov)) return false;
     if (!o.pose) return true;
     Quat q = o.view.rotation;
@@ -357,7 +359,7 @@ bool LocalBackend::safe(const Plan& p, const Output& o, const SampleSet& samples
     const double gap = length(o.view.position - at);
     if (!(gap <= kMaxSeparationMetres)) return false;
     int64_t f;
-    return metres_to_fixed(o.view.position.x, &f) && metres_to_fixed(o.view.position.y, &f) && metres_to_fixed(o.view.position.z, &f) && p.pose();
+    return metres_to_fixed(o.view.position.x, &f) && metres_to_fixed(o.view.position.y, &f) && metres_to_fixed(o.view.position.z, &f);
 }
 
 LocalBackend::Eval LocalBackend::evaluate(Plan& p, Run& run, const View& natural, bool natural_had_override, const SampleSet& samples, int64_t now,
@@ -447,7 +449,7 @@ LocalBackend::Eval LocalBackend::evaluate(Plan& p, Run& run, const View& natural
     if (!out->pose) out->view.position = natural.position, out->view.rotation = natural.rotation;
     if (!out->fov) out->view.fov = natural.fov;
 
-    if (!safe(p, *out, samples)) {
+    if (!safe(*out, samples)) {
         *code = KILN_CAMERA_REASON_BOUNDS;
         if (!shown) return Eval::Refused;  // a bad request leaves the previous one as it is
         *end_reason = KILN_CAMERA_END_SAFETY_REJECTED;
@@ -567,10 +569,14 @@ void LocalBackend::on_select(const Renderer& r, uint64_t selection, float* fov) 
     if (out.pose) {
         EnginePose w = np;  // the scale and what follows the 52 value bytes stay the game's
         Quat q = out.view.rotation;
-        engine_unit(&q);
-        metres_to_fixed(out.view.position.x, &w.position[0]);
-        metres_to_fixed(out.view.position.y, &w.position[1]);
-        metres_to_fixed(out.view.position.z, &w.position[2]);
+        // safe() accepted exactly these values, so none of these can fail; checked anyway rather than assumed
+        if (!engine_unit(&q) || !metres_to_fixed(out.view.position.x, &w.position[0]) || !metres_to_fixed(out.view.position.y, &w.position[1]) ||
+            !metres_to_fixed(out.view.position.z, &w.position[2])) {
+            frames_->expect(selection, none);
+            last_out_ = natural;
+            last_overridden_ = false;
+            return;
+        }
         w.rotation[0] = static_cast<float>(q.x), w.rotation[1] = static_cast<float>(q.y), w.rotation[2] = static_cast<float>(q.z),
         w.rotation[3] = static_cast<float>(q.w);
         uint8_t bytes[kPoseBytes];

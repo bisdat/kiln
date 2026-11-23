@@ -105,6 +105,11 @@ public sealed class CameraVisualTests
         Assert.True(Shot().Project(new WorldPosition(0, 0, 1000), Zero, Hundred).WithinDepth);                                         // on it
         var right = Shot().Project(new WorldPosition(30, 0, 10), Zero, Hundred);
         Assert.Equal(new CameraProjection(true, false, new Vector2(200, 50), 10, 77), right);   // off-screen pixels stay available
+        // a depth past float's range stays finite
+        var deep = Shot().Project(new WorldPosition(0, 0, 1e300), Zero, Hundred);
+        Assert.False(deep.WithinDepth);
+        Assert.Equal(float.MaxValue, deep.DepthMetres);
+        Assert.Equal(-float.MaxValue, Shot().Project(new WorldPosition(0, 0, -1e300), Zero, Hundred).DepthMetres);
         // a pixel that does not fit a float: none, and not on screen
         var overflow = Shot(near: 1e-30f).Project(new WorldPosition(1e30, 0, 1e-29), Zero, Hundred);
         Assert.True(overflow.WithinDepth);

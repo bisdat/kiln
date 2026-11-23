@@ -135,15 +135,18 @@ public sealed partial record CameraVisualSnapshot
         if (!CameraPose.Finite(c.X, c.Y, c.Z)) throw new ArgumentException("CameraVisualSnapshot.Project: the snapshot's position is not finite");
         // into the camera's axes: rotate d by the conjugate (x right, y up, z forward)
         var (x, y, z) = Rotate(-qx, -qy, -qz, qw, point.X - c.X, point.Y - c.Y, point.Z - c.Z);
-        if (!(z > NearPlane) || z > FarPlane) return new CameraProjection(false, false, null, (float)z, Frame);
+        if (!(z > NearPlane) || z > FarPlane) return new CameraProjection(false, false, null, Depth(z), Frame);
         var t = Math.Tan(fovRadians / 2);
         var px = viewportOrigin.X + viewportSize.X * (0.5 + x / (2 * z * t * AspectRatio));
         var py = viewportOrigin.Y + viewportSize.Y * (0.5 - y / (2 * z * t));
         if (!double.IsFinite(px) || !double.IsFinite(py) || Math.Abs(px) > float.MaxValue || Math.Abs(py) > float.MaxValue)
-            return new CameraProjection(true, false, null, (float)z, Frame);
+            return new CameraProjection(true, false, null, Depth(z), Frame);
         var onScreen = px >= viewportOrigin.X && px <= viewportOrigin.X + (double)viewportSize.X && py >= viewportOrigin.Y && py <= viewportOrigin.Y + (double)viewportSize.Y;
-        return new CameraProjection(true, onScreen, new Vector2((float)px, (float)py), (float)z, Frame);
+        return new CameraProjection(true, onScreen, new Vector2((float)px, (float)py), Depth(z), Frame);
     }
+
+    // Metres as a float that stays finite for any finite point (a depth past float's range reads as its largest value).
+    private static float Depth(double z) => (float)Math.Clamp(z, -float.MaxValue, float.MaxValue);
 
     // v rotated by the unit quaternion (x, y, z, w): q v q*.
     private static (double X, double Y, double Z) Rotate(double x, double y, double z, double w, double vx, double vy, double vz)
