@@ -31,7 +31,8 @@ const Sample* fresh_local(const SampleSet& samples, uint32_t player, uint32_t ep
 // ---- Backend (the core's lock is held; the client world's thread) -------------------------------------------------------
 
 uint64_t LocalBackend::caps() const {
-    if (write_fault_.load(std::memory_order_acquire)) return 0;
+    // a faulted write, or a faulted capture (nothing could confirm a write any more): no visual write in this world
+    if (write_fault_.load(std::memory_order_acquire) || frames_->faulted()) return 0;
     return serving_.load(std::memory_order_acquire) & kLocalBits;
 }
 
@@ -120,7 +121,7 @@ bool LocalBackend::release(KilnCameraLease lease, uint64_t) {
     if (!active_ || active_->lease != lease) return true;
     const uint32_t out = active_->request.req.blend_out_ms;
     // nothing to blend out: no blend, never drawn, writes off, or the render path has ended it already
-    if (!out || !active_->first_ns.load(std::memory_order_acquire) || write_fault_.load(std::memory_order_acquire) ||
+    if (!out || !active_->first_ns.load(std::memory_order_acquire) || write_fault_.load(std::memory_order_acquire) || frames_->faulted() ||
         active_->end_reason.load(std::memory_order_acquire) || active_->refusal.load(std::memory_order_acquire)) {
         active_->stop.store(true, std::memory_order_release);  // the next frame is the game's own
         retire(active_);
@@ -212,18 +213,17 @@ bool LocalBackend::step() {
             }
         }
 
-        // a guarded write faulted: no visual write for the rest of this world
-        if (write_fault_.load(std::memory_order_acquire)) {
+        // a guarded write or the capture faulted: no visual write for the rest of this world
+        if (write_fault_.load(std::memory_order_acquire) || frames_->faulted()) {
+            const char* why = write_fault_.load(std::memory_order_acquire) ? "writing the renderer's camera faulted" : "reading the frame's camera faulted";
             if (staged_) {
-                reports.push_back({Report::Rejected, staged_->lease, staged_->revision, KILN_CAMERA_REASON_FRAME_FAULT, 0, KILN_CAMERA_MAY_HAVE_APPLIED, 0,
-                                   "writing the renderer's camera faulted"});
+                reports.push_back({Report::Rejected, staged_->lease, staged_->revision, KILN_CAMERA_REASON_FRAME_FAULT, 0, KILN_CAMERA_MAY_HAVE_APPLIED, 0, why});
                 staged_->stop.store(true, std::memory_order_release);
                 retire(staged_);
                 mail = true;
             }
             if (active_) {
-                reports.push_back({Report::Ended, active_->lease, active_->revision, KILN_CAMERA_END_SAFETY_REJECTED, KILN_CAMERA_REASON_FRAME_FAULT, 0, 0,
-                                   "writing the renderer's camera faulted"});
+                reports.push_back({Report::Ended, active_->lease, active_->revision, KILN_CAMERA_END_SAFETY_REJECTED, KILN_CAMERA_REASON_FRAME_FAULT, 0, 0, why});
                 active_->stop.store(true, std::memory_order_release);
                 retire(active_);
                 mail = true;

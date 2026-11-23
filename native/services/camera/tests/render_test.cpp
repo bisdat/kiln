@@ -137,9 +137,11 @@ constexpr float kNaturalFov = 1.13446f;
 struct FakeRenderer : RendererMem {
     std::vector<uint8_t> bytes = std::vector<uint8_t>(0x469400);
     bool fault_writes = false;
+    uint64_t fault_reads_from = UINT64_MAX;  // reads at or past this offset fault (the projection descriptor: the capture only)
     std::vector<std::pair<uint64_t, size_t>> writes;
     uintptr_t base() const { return reinterpret_cast<uintptr_t>(bytes.data()); }
     bool copy_in(uintptr_t a, void* dst, size_t n) override {
+        if (a - base() >= fault_reads_from) return false;
         std::memcpy(dst, reinterpret_cast<const void*>(a), n);
         return true;
     }
@@ -1008,6 +1010,32 @@ void test_recheck_before_write() {
     }
 }
 
+// Should-fix 2: a capture that faults leaves nothing that can confirm a write: the write rows go off for the world and
+// the live lease ends FrameFault.
+void test_capture_fault_turns_writes_off() {
+    Rig g(kAllLocal);
+    Result r;
+    g.apply(30, g.lens(40), &r);
+    g.pre();
+    g.frame(0);
+    g.pre();
+    CHECK(r.r.ok && g.backend.caps() == kAllLocal);
+    g.mem.fault_reads_from = g.layout.proj_aspect - 4;
+    g.frame(0);
+    CHECK(g.frames.faulted());
+    CHECK(g.pre());  // the rows changed
+    CHECK(g.backend.caps() == 0);
+    CHECK(g.env.lines.back().find("end=11 code=18") != std::string::npos);
+    KilnCameraLease l2 = 0;
+    Result r2;
+    KilnCameraRequest q = g.lens(50);
+    CHECK(g.core.apply(30, &q, &l2, &on_done, &r2, kOnClient) == KILN_ERR_UNAVAILABLE);
+    g.mem.fault_reads_from = UINT64_MAX;
+    g.core.world_stopping(kClient, 1);
+    g.core.world_started(kClient, 2);
+    g.frames.world_started(2, kWorld);
+    CHECK(g.pre() && g.backend.caps() == kAllLocal);  // the next world starts healthy
+}
 
 
 
@@ -1019,7 +1047,8 @@ int main(int argc, char** argv) {
         const char* name;
         void (*fn)();
     } named[] = {{"drawn_then_ended", test_drawn_then_ended_before_pre},
-                 {"recheck_before_write", test_recheck_before_write}};
+                 {"recheck_before_write", test_recheck_before_write},
+                 {"capture_fault", test_capture_fault_turns_writes_off}};
     if (argc > 1) {
         for (const auto& t : named)
             if (std::strcmp(argv[1], t.name) == 0) {
