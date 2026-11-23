@@ -1,0 +1,101 @@
+// SPDX-License-Identifier: MIT
+#define main registry_live_baseline_main
+#include "registry_live_test.cpp"
+#undef main
+
+namespace {
+int review_checks = 0, review_failures = 0;
+void expect(bool ok, const char* message) {
+    ++review_checks;
+    if (!ok) { ++review_failures; std::printf("FAIL %s\n", message); }
+}
+void publish_clone(const std::vector<PackFile>& files) {
+    stage(files);
+    RegistryLive in = *g.in;
+    in.added_guid = [](const auto&, const auto&) { return "12345678-1234-5678-9123-123456789abc"; };
+    in.pin_definition = [](const auto&, const auto&, auto*) { return true; };
+    in.define_entry = [](const auto&, const auto&, auto*) { return true; };
+    registry_entries_prepare(&in);
+    const auto body = in.entry_bodies.at({"items", "a:logs"});
+    Entry clone = *reg(KILN_CONTENT_ITEMS).get(WOOD);
+    clone.id = in.nums.at("items|a:logs"); clone.addr = A(0x41000); guid_parse(body.at("guid"), clone.guid);
+    registry_live_install(std::move(in));
+    std::memcpy(reinterpret_cast<void*>(clone.addr), reinterpret_cast<const void*>(reg(KILN_CONTENT_ITEMS).get(WOOD)->addr), 0x100);
+    std::string why;
+    if (!registry_live_initialize_entry(KILN_CONTENT_ITEMS, clone, "a:logs", body.at("registryFields"), &why)) throw std::runtime_error(why);
+    auto& items = reg(KILN_CONTENT_ITEMS);
+    items.by_id[clone.id] = static_cast<uint32_t>(items.entries.size()); items.entries.push_back(clone);
+}
+void baseline_cases() {
+    const auto files = files_of({{"a", "a/content/entries.json"}});
+    for (const char* phase : {"alter", "final"}) {
+        world(); g_files.clear();
+        g_files["a/content/entries.json"] = std::string(R"({"registry":{"add":[{"registry":"items","entry":"add","id":"a:logs","like":"game:material_t1_wood_logs"}],")") + phase + R"(":[{"registry":"items","select":"a:logs","field":"maxStack","op":{"mul":2}}]}})";
+        publish_clone(files);
+        expect(at<uint32_t>(0x41000) == 10, "constructor keeps the inherited Add baseline, not a pending Alter/Final result");
+        std::string value;
+        expect(registry_live_read("items", "a:logs", "maxStack", &value) == KILN_OK && value == "20", "pre-world stable read retains the composed effective view");
+        registry_live_world_begin(); apply_registry_files(files);
+        expect(at<uint32_t>(0x41000) == 20, "relative Alter/Final is applied exactly once to native clone bytes");
+        expect(registry_live_read("items", "a:logs", "maxStack", &value) == KILN_OK && value == "20", "world stable read matches one relative application");
+        registry::json recorded;
+        g.in->record_entry = [&](const auto&, const auto& fields) { recorded = fields; };
+        apply_registry_files(files);
+        expect(recorded.value("maxStack", 0) == 20, "persisted/synced definition exports the effective value separately from its constructor");
+        g_files["a/content/entries.json"] = R"({"registry":{"add":[{"registry":"items","entry":"add","id":"a:logs","like":"game:material_t1_wood_logs"}]}})";
+        apply_registry_files(files);
+        expect(at<uint32_t>(0x41000) == 10 && registry_live_read("items", "a:logs", "maxStack", &value) == KILN_OK && value == "10", "removing Alter/Final on pack reload restores inherited native and stable values");
+        expect(recorded.value("maxStack", 0) == 10, "reload also restores the persisted effective baseline");
+    }
+    world(); g_files.clear();
+    g_files["a/content/entries.json"] = R"({"registry":{"add":[{"registry":"items","entry":"add","id":"a:logs","like":"game:material_t1_wood_logs","fields":{"maxStack":14}}],"alter":[{"registry":"items","select":"a:logs","field":"maxStack","op":{"mul":2}}],"final":[{"registry":"items","select":"a:logs","field":"maxStack","op":{"add":3}}]}})";
+    publish_clone(files);
+    expect(at<uint32_t>(0x41000) == 14, "explicit Add overrides belong to the constructor before later stages");
+    registry_live_world_begin(); apply_registry_files(files);
+    expect(at<uint32_t>(0x41000) == 31, "explicit Add override plus Alter and Final each take effect once");
+    g_files["a/content/entries.json"] = R"({"registry":{"add":[{"registry":"items","entry":"add","id":"a:logs","like":"game:material_t1_wood_logs","fields":{"maxStack":14}}]}})";
+    apply_registry_files(files);
+    expect(at<uint32_t>(0x41000) == 14, "reload retains the explicit Add override after removing later stages");
+}
+void lazy_case() {
+    world(); stage({}); RegistryLive lazy = *g.in;
+    lazy.base = {}; lazy.ids.clear(); lazy.nums.clear();
+    bool prepared = false;
+    lazy.prepare = [&](registry::stage::LiveData* data, std::string*) {
+        prepared = true; data->base = base(); data->ids["perks|game:perk_a"] = guid_text(P1); data->nums["perks|game:perk_a"] = 0x901; return true;
+    };
+    registry_live_install(std::move(lazy));
+    Entry clone = *reg(KILN_CONTENT_ITEMS).get(WOOD); clone.addr = A(0x41000);
+    std::memcpy(reinterpret_cast<void*>(clone.addr), reinterpret_cast<const void*>(reg(KILN_CONTENT_ITEMS).get(WOOD)->addr), 0x100);
+    std::string why;
+    const bool restored = registry_live_initialize_entry(KILN_CONTENT_ITEMS, clone, "a:logs", {{"perks", {"game:perk_a"}}}, &why);
+    expect(restored && prepared, "missing-mod nonempty perk refs trigger lazy identity preparation before construction");
+}
+void drop_case() {
+    world(); add_drop_table(); stage({}); RegistryLive in = *g.in;
+    auto& table = in.base.registries.at("drops").front(); table.drop_groups = {{0,2}};
+    auto& survivor = table.fields.at("entries").list[1];
+    survivor.list[static_cast<size_t>(std::find(survivor.keys.begin(), survivor.keys.end(), "item") - survivor.keys.begin())] = registry::Value::text("game:sword_t2");
+    mem<uint32_t>(0x31040 + 0x10, SWORD);
+    registry::ModInput mod; mod.id = "hide"; registry::Batch removal; std::vector<registry::Refusal> refused; std::string why;
+    registry::parse_batch(std::string(R"({"ir":1,"mod":"hide","stage":"alter","edits":[{"registry":"items","entry":"remove","select":"game:material_t1_wood_logs"}]})"), *in.schema, &removal, &refused, &why);
+    mod.batches = {removal}; in.mods = {mod}; in.result = registry::compose(*in.schema, in.base, {}, in.mods);
+    registry_live_install(std::move(in)); registry_live_world_begin(); apply_registry_files({});
+    uint64_t handle = 0; RegistryLiveReply reply;
+    registry_live_begin(91, "editor", 4, &handle);
+    registry_live_submit(91, handle, R"({"ir":1,"mod":"editor","stage":"alter","edits":[{"registry":"drops","select":"game:dt_wolf","field":"entries[1].weight","op":0},{"registry":"items","select":"game:material_stone","field":"maxStack","op":77}]})", &reply, nullptr);
+    registry_live_commit(91, handle, &reply);
+    expect(registry_live_result()->removed.size() == 3 && at<float>(0x31000 + 0x20) == 0 && at<float>(0x31040 + 0x20) > 0, "later field edits preserve an established removal and at least one viable candidate");
+    expect(reply.refused > 0 && at<uint32_t>(STONE_AT) == 77, "unsafe field target is refused while unrelated Manual field edits retain existing semantics");
+}
+}
+int main(int argc, char** argv) {
+    std::vector<std::string> errors; g_regmap = std::make_shared<registry::map::RegMap>();
+    if (!registry::map::load_dir(KILN_REGMAP_DIR, "server", "f0d824be7fcd48ebfe2458ff5c28da26060c2074e3ec1fcac587e5a1d508aeb2", g_regmap.get(), &errors)) return 2;
+    const std::string which = argc > 1 ? argv[1] : "all";
+    if (which == "all" || which == "baseline") baseline_cases();
+    if (which == "all" || which == "lazy") lazy_case();
+    if (which == "all" || which == "drop") drop_case();
+    std::printf("registry-entry-review: %d checks, %d failed\n", review_checks, review_failures);
+    return review_failures ? 1 : 0;
+}
