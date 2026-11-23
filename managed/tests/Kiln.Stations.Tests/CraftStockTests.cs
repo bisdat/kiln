@@ -348,6 +348,34 @@ public sealed class CraftStockTests : IDisposable
     }
 
     [Fact]
+    public void A_cut_linked_part_or_rows_past_the_cap_keep_the_rows_and_never_misread_the_linked_part()
+    {
+        // a linked part cut short: the rows as an older client reads them, nothing named linked (no exception)
+        var cut = new NetWriter();
+        cut.UInt16(1).UInt32(Coal).UInt32(4).UInt16(2).UInt32(Coal).UInt32(3).UInt32(Scrap);
+        var cr = new NetReader(cut.ToArray());
+        var fromCut = CraftStockRows.Decode(ref cr);
+        Assert.Equal([new CraftStockRow(Coal, 4)], fromCut.Rows);
+        Assert.Empty(fromCut.Linked);
+        // the two zero bytes a transport may pad an older server's snapshot with name nothing linked
+        var padded = new NetWriter();
+        padded.UInt16(1).UInt32(Coal).UInt32(4).UInt16(0);
+        var pr = new NetReader(padded.ToArray());
+        Assert.Empty(CraftStockRows.Decode(ref pr).Linked);
+        // more rows than this client keeps (a later server with a larger snapshot): the first MaxRows count, and the
+        // linked part is read after every row, never out of the rows past the cap
+        var big = new NetWriter();
+        var total = CraftStock.MaxRows + 2;
+        big.UInt16((ushort)total);
+        for (var i = 1; i <= total; i++) big.UInt32((uint)i).UInt32(7);
+        big.UInt16(1).UInt32(1).UInt32(5);
+        var br = new NetReader(big.ToArray());
+        var fromBig = CraftStockRows.Decode(ref br);
+        Assert.Equal(CraftStock.MaxRows, fromBig.Rows.Length);
+        Assert.Equal([new CraftStockRow(1, 5)], fromBig.Linked);
+    }
+
+    [Fact]
     public void A_snapshot_that_only_moves_counts_between_linked_and_other_sources_is_sent_again()
     {
         Assert.NotEqual(CraftStock.Key(Linked(Rows((Coal, 9)), (Coal, 6))), CraftStock.Key(Linked(Rows((Coal, 9)), (Coal, 2))));

@@ -45,13 +45,19 @@ internal sealed record CraftStockRows(CraftStockRow[] Rows, CraftStockRow[] Link
 
     public static CraftStockRows Decode(ref NetReader r)
     {
-        var n = Math.Min((int)r.UInt16(), CraftStock.MaxRows);
+        var sent = (int)r.UInt16();
+        var n = Math.Min(sent, CraftStock.MaxRows);
         var rows = new CraftStockRow[n];
         for (var i = 0; i < n; i++) rows[i] = new CraftStockRow(r.UInt32(), r.UInt32());
-        if (r.Remaining < 2) return new CraftStockRows(rows);  // an older server: nothing is named linked
+        // The linked part follows every row the message holds: rows past this client's cap are stepped over, never read
+        // as the linked part. None (an older server), or one cut short: the rows alone, as an older client reads them.
+        var past = (sent - n) * 8;
+        if (r.Remaining < past + 2) return new CraftStockRows(rows);
+        r.Raw(past);
+        var m = Math.Min((int)r.UInt16(), CraftStock.MaxRows);
+        if (r.Remaining < m * 8) return new CraftStockRows(rows);
         var counts = new Dictionary<uint, uint>();
         foreach (var row in rows) counts.TryAdd(row.Item, row.Count);
-        var m = Math.Min((int)r.UInt16(), CraftStock.MaxRows);
         var linked = new List<CraftStockRow>();
         for (var i = 0; i < m; i++)
         {
