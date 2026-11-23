@@ -79,6 +79,16 @@ pub struct Sample {
     pub bytes_after: Option<String>,
     #[serde(default)]
     pub error: Option<String>,
+    #[serde(default)]
+    pub config_kind: Option<String>,
+    #[serde(default)]
+    pub expect_refused: bool,
+    #[serde(default)]
+    pub refused: bool,
+    #[serde(default)]
+    pub refusal_reason: String,
+    #[serde(default)]
+    pub refusal_code: String,
 }
 
 /// A suite file; refuses another kind or format.
@@ -158,7 +168,7 @@ pub fn constants(suites: &[&Suite]) -> BTreeMap<String, f64> {
 
 fn raw_kind(conv: &str) -> Raw {
     match conv {
-        "int" | "float" | "bool" | "time" | "enum" | "flags" | "optionalEnum" => Raw::Compared,
+        "int" | "float" | "impactConfig" | "bool" | "time" | "enum" | "flags" | "optionalEnum" => Raw::Compared,
         "formula" => Raw::Formula,
         _ => Raw::SchemaOnly,
     }
@@ -207,7 +217,7 @@ fn raw_mismatch(row: &Row, raw: &[Value], kiln: &Value) -> Option<String> {
     let first = raw.first().unwrap_or(&Value::Null);
     let agree = match row.conv.as_str() {
         "int" => num(first).is_some() && num(first) == num(kiln),
-        "float" => num(first).zip(num(kiln)).is_some_and(|(a, b)| close(a, b)),
+        "float" | "impactConfig" => num(first).zip(num(kiln)).is_some_and(|(a, b)| close(a, b)),
         "bool" => truthy(first).is_some() && truthy(first) == kiln.as_bool(),
         "time" => num(first).zip(num(kiln)).is_some_and(|(ns, s)| (ns / 1e9 - s).abs() <= 1e-9 * s.abs().max(1.0)),
         "enum" => first.as_str().is_some() && first.as_str() == kiln.as_str().and_then(|k| row.values.get(k)).map(String::as_str),
@@ -267,6 +277,23 @@ fn sample_problems(row: &Row, x: &Sample, raw: Raw) -> Vec<String> {
         p.push(format!("{e}: no probe value was written"));
         return p;
     };
+    if x.expect_refused {
+        if row.conv != "impactConfig" || x.config_kind.as_deref() != Some("sint32") ||
+            !num(probe).is_some_and(|n| n.is_finite() && n.fract() != 0.0) {
+            p.push(format!("{e}: not a fractional Sint32 refusal probe"));
+        }
+        if !x.refused || (x.refusal_code != "not_exact" || x.refusal_reason.is_empty()) {
+            p.push(format!("{e}: a fractional Sint32 value was not refused with a named exactness reason"));
+        }
+        if x.read_back.as_ref().is_none_or(|b| !same(&row.conv, b, read)) {
+            p.push(format!("{e}: the refused probe changed the schema value"));
+        }
+        raw_check("after", &x.raw_after, read, &mut p);
+        if x.raw_before != x.raw_after || x.bytes_before.as_ref().is_none_or(String::is_empty) || x.bytes_before != x.bytes_after {
+            p.push(format!("{e}: the refused probe changed the raw value or resource bytes"));
+        }
+        return p;
+    }
     if same(&row.conv, probe, read) {
         p.push(format!("{e}: the probe equals the value before the write: the write proves nothing"));
     }
@@ -315,6 +342,7 @@ pub fn check(map: &RegMap, side: &str, exe_sha256: &str, regmap_digest: &str, su
         let raw = raw_kind(&row.conv);
         let (mut problems, mut samples, mut passed, mut in_generation) = (Vec::new(), 0, 0, false);
         let mut unread = false;
+        let (mut sint_whole, mut sint_refusal, mut float_fraction) = (false, false, false);
         for s in &good {
             for x in s.samples.iter().filter(|x| x.field == q) {
                 // a member the lab could not read raw: no evidence for the comparison (missing), not a wrong value
@@ -327,7 +355,14 @@ pub fn check(map: &RegMap, side: &str, exe_sha256: &str, regmap_digest: &str, su
                 let p = sample_problems(row, x, raw);
                 if p.is_empty() {
                     passed += 1;
-                    in_generation |= want.is_none_or(|g| g == s.generation);
+                    let right_generation = want.is_none_or(|g| g == s.generation);
+                    in_generation |= right_generation;
+                    if right_generation && row.conv == "impactConfig" {
+                        let fractional = x.probe.as_ref().and_then(num).is_some_and(|n| n.fract() != 0.0);
+                        sint_whole |= x.config_kind.as_deref() == Some("sint32") && !fractional && !x.expect_refused;
+                        sint_refusal |= x.config_kind.as_deref() == Some("sint32") && fractional && x.expect_refused;
+                        float_fraction |= x.config_kind.as_deref() == Some("float") && fractional && !x.expect_refused;
+                    }
                 }
                 problems.extend(p.into_iter().map(|m| format!("{} generation: {m}", s.generation)));
             }
@@ -340,6 +375,9 @@ pub fn check(map: &RegMap, side: &str, exe_sha256: &str, regmap_digest: &str, su
             missing.push(format!("no round-trip sample{where_}: the field is not proven on this build"));
         } else if !in_generation && problems.is_empty() {
             missing.push(format!("no round-trip sample{where_} (only in another generation): the field is not proven on this build"));
+        }
+        if row.conv == "impactConfig" && !(sint_whole && sint_refusal && float_fraction) {
+            missing.push("no complete impact-config evidence: need a Sint32 whole round trip, a named fractional refusal, and a float-config fractional round trip".into());
         }
         r.fields.insert(q, FieldResult { ok: problems.is_empty() && missing.is_empty(), samples, passed, raw, problems, missing });
     }
@@ -552,6 +590,41 @@ pub(crate) mod tests {
         let fs = formula_samples(&all, "gadgets.power");
         assert_eq!(fs, [formula::Sample { entry: "game:thing".into(), read: Some(30.0), probe: Some(44.0),
                                          raw_before: vec![1.525, 1.25, 4.0], raw_after: vec![2.225, 1.25, 4.0] }]);
+    }
+
+    #[test]
+    fn impact_configs_require_whole_fractional_and_refusal_evidence() {
+        let mut map = map_with_float_cap();
+        map.get_mut("plans").unwrap().rows.get_mut("cap").unwrap().conv = "impactConfig".into();
+        map.get_mut("plans").unwrap().rows.get_mut("cap").unwrap().backend = "live".into();
+        let bytes = "ab".repeat(32);
+        let mk = |extra: Value| {
+            let mut s = json!({"field": "plans.cap", "entry": "game:cost", "read": 2, "rawBefore": [2],
+                               "reverted": true, "bytesBefore": bytes, "bytesAfter": bytes});
+            s.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+            s
+        };
+        let whole = mk(json!({"configKind": "sint32", "probe": 3, "readBack": 3, "rawAfter": [3]}));
+        let float = mk(json!({"configKind": "float", "probe": 2.5, "readBack": 2.5, "rawAfter": [2.5]}));
+        let refused = mk(json!({"configKind": "sint32", "probe": 2.5, "expectRefused": true, "refused": true,
+                                "refusalReason": "not_exact: value cannot be represented exactly", "refusalCode": "not_exact", "readBack": 2, "rawAfter": [2]}));
+        let run = |samples: Vec<Value>| {
+            let suite = parse(&json!({"format": 1, "kind": KIND, "side": "server", "exeSha256": SHA,
+                                     "generation": "live", "regmapDigest": DIGEST, "samples": samples}).to_string()).unwrap();
+            check(&map, "server", SHA, DIGEST, &[suite]).fields.remove("plans.cap").unwrap()
+        };
+        assert!(!run(vec![whole.clone()]).ok, "a whole-only probe hides Sint32 rounding");
+        assert!(run(vec![whole.clone(), float.clone(), refused.clone()]).ok);
+        let mut rounded = refused.clone();
+        rounded["refused"] = json!(false);
+        rounded["readBack"] = json!(2);
+        assert!(!run(vec![whole.clone(), float.clone(), rounded]).problems.is_empty(), "accepting a fraction is a disproof");
+        let mut wrong_code = refused.clone();
+        wrong_code["refusalCode"] = json!("unproven");
+        assert!(!run(vec![whole.clone(), float.clone(), wrong_code]).ok);
+        let mut unnamed = refused;
+        unnamed["refusalReason"] = json!("");
+        assert!(!run(vec![whole, float, unnamed]).ok, "refusals must name their reason");
     }
 
     #[test]

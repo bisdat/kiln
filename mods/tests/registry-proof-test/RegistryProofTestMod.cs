@@ -78,24 +78,24 @@ public sealed unsafe class RegistryProofTestMod : Mod
         return null;
     }
 
-    private (bool Ok, string Why) Change(string registry, string id, string field, JsonNode value, out ulong handle)
+    private (bool Ok, string Why, bool ExactRefusal) Change(string registry, string id, string field, JsonNode value, out ulong handle)
     {
         handle = 0;
         ulong h = 0;
         var begin = *(delegate* unmanaged[Cdecl]<ulong, uint, ulong*, int>*)(_table + 8);
         var rc = begin(_owner, Manual, &h);
-        if (rc != 0 || h == 0) return (false, $"begin rc={rc}");
+        if (rc != 0 || h == 0) return (false, $"begin rc={rc}", false);
         var ir = new JsonObject { ["ir"] = 1, ["mod"] = "registry-proof-test", ["stage"] = "alter", ["source"] = "registry-proof",
             ["edits"] = new JsonArray(new JsonObject { ["registry"] = registry, ["select"] = id, ["field"] = field, ["op"] = value.DeepClone() }) };
         var bytes = Encoding.UTF8.GetBytes(ir.ToJsonString());
         var reply = new Reply { Size = (uint)sizeof(Reply) };
         var submit = *(delegate* unmanaged[Cdecl]<ulong, ulong, Str, Reply*, byte*, nuint, nuint*, int>*)(_table + 16);
         fixed (byte* p = bytes) rc = submit(_owner, h, S(bytes, p), &reply, null, 0, null);
-        if (rc != 0 || reply.Accepted != 1) { Finish(h, true); return (false, $"submit rc={rc} accepted={reply.Accepted} refused={reply.Refused}: {Why(reply)}"); }
+        if (rc != 0 || reply.Accepted != 1) { Finish(h, true); return (false, $"submit rc={rc} accepted={reply.Accepted} refused={reply.Refused}: {Why(reply)}", IsExactRefusal(reply)); }
         var commit = Finish(h, false);
-        if (commit.Outcome != Applied) { Finish(h, true); return (false, $"commit outcome={commit.Outcome}: {Why(commit)}"); }
+        if (commit.Outcome != Applied) { Finish(h, true); return (false, $"commit outcome={commit.Outcome}: {Why(commit)}", IsExactRefusal(commit)); }
         handle = h;
-        return (true, "");
+        return (true, "", false);
     }
 
     private Reply Finish(ulong handle, bool revert)
@@ -105,6 +105,8 @@ public sealed unsafe class RegistryProofTestMod : Mod
         fn(_owner, handle, &reply);
         return reply;
     }
+
+    private static bool IsExactRefusal(Reply r) => r.Outcome == 2 && Why(r).StartsWith("not_exact: ", StringComparison.Ordinal);
 
     private static string Why(Reply r) => Encoding.UTF8.GetString(r.Reason, 192).TrimEnd('\0');
 
@@ -182,8 +184,8 @@ public sealed unsafe class RegistryProofTestMod : Mod
         {
             case "int": case "stackCount": case "formula":
                 return v is JsonValue n && n.TryGetValue<double>(out var d) ? JsonValue.Create((long)d + 1) : null;
-            case "impactConfig": // a whole value may be a whole-number (Sint32) config, which takes no fraction: a whole probe
-                return v is JsonValue ic && ic.TryGetValue<double>(out var c) ? (c == Math.Floor(c) ? JsonValue.Create((long)c + 1) : JsonValue.Create(Math.Round(c * 1.25, 4))) : null;
+            case "impactConfig": // float-config probe: fractional even when the current value happens to be whole
+                return v is JsonValue ic && ic.TryGetValue<double>(out var c) ? JsonValue.Create(Math.Floor(c) + 0.5) : null;
             case "float":
                 return v is JsonValue f && f.TryGetValue<double>(out var x) ? JsonValue.Create(x == 0 ? 1.0 : Math.Round(x * 1.25, 4)) : null;
             case "time":
@@ -285,8 +287,12 @@ public sealed unsafe class RegistryProofTestMod : Mod
                 var paths = row["paths"]?.AsArray().Select(p => (string)p!).ToList() ?? new List<string>();
                 if ((string?)row["state"] == "unmapped" || paths.Count == 0) continue;
                 var backend = (string?)row["backend"] ?? "";
-                var sample = SampleOf(registry, field, row, paths, backend, entries, map["rows"]!.AsObject(), ids);
-                if (sample != null) samples.Add(sample);
+                // Never infer the config's representation from whether its current value is whole.
+                foreach (var mode in (string?)row["conv"] == "impactConfig" ? new[] { "sint32", "sint32-refusal", "float" } : new[] { "" })
+                {
+                    var sample = SampleOf(registry, field, row, paths, backend, entries, map["rows"]!.AsObject(), ids, mode);
+                    if (sample != null) samples.Add(sample);
+                }
             }
         }
         var doc = new JsonObject { ["format"] = 1, ["kind"] = "registry-roundtrip", ["side"] = side, ["exeSha256"] = exe, ["generation"] = "live",
@@ -310,7 +316,7 @@ public sealed unsafe class RegistryProofTestMod : Mod
 
     /// <summary>One sample of a field: the first entry that reads (and, for a writable field, takes a probe).</summary>
     private JsonObject? SampleOf(string registry, string field, JsonObject row, List<string> paths, string backend,
-                                 List<(ContentEntry E, string Id)> entries, JsonObject rows, JsonObject idTables)
+                                 List<(ContentEntry E, string Id)> entries, JsonObject rows, JsonObject idTables, string mode = "")
     {
         var q = $"{registry}.{field}";
         var element = field.Contains("[].");
@@ -322,10 +328,12 @@ public sealed unsafe class RegistryProofTestMod : Mod
         // the table a reference names (the schema's target): items, input categories, perks; others get no probe
         var table = conv is "ref" or "refList" ? leafName switch { "item" => "items", "category" => "inputCategories", "perks" => "perks", _ => "" } : "";
         var ids = table.Length > 0 ? idTables[table]?.AsObject().Select(p => (string?)p.Value).Where(v => v != null).Cast<string>().Take(64).ToList() ?? new() : new List<string>();
+        var config = (string?)row["config"];
+        var configPath = paths[0] + "." + (config == "ManaCost" ? "0xaf236ece" : "0x727d7f78") + ".value";
         // a structured value (list, reference, unlock...) is not one scalar member: its raw view is the entry's resource bytes;
         // a scalar of a recipe's list element (outputs[].count), which Content.Get does not address, from the game's stacks
         JsonArray RawOf(ContentEntry e, AssetKey? key) =>
-            new(rawPaths.Select((p, i) => Raw(e, p) ?? (registry == "recipes" && element && Compared.Contains(conv) ? StackRaw(e, listPath, paths[i]) : null)
+            new(rawPaths.Select((p, i) => Raw(e, conv == "impactConfig" ? configPath : p) ?? (registry == "recipes" && element && Compared.Contains(conv) ? StackRaw(e, listPath, paths[i]) : null)
                 ?? (Compared.Contains(conv) ? null : JsonValue.Create("resource:" + BytesSha(key)))).ToArray());
         JsonObject? refused = null;
         var tries = 0;
@@ -333,6 +341,13 @@ public sealed unsafe class RegistryProofTestMod : Mod
         void Skip(string reason) => why[reason] = why.GetValueOrDefault(reason) + 1;
         foreach (var (e, id) in entries.Take(400))
         {
+            if (mode.Length > 0)
+            {
+                ContentValueType kind;
+                try { kind = e.Get(configPath).Type; }
+                catch (Exception) { Skip("config kind unreadable"); continue; }
+                if (kind != (mode == "float" ? ContentValueType.Float : ContentValueType.Int)) continue;
+            }
             var readText = Read(registry, id, element ? list : field, out var rc);
             if (readText is null) { Skip($"read rc={rc}"); continue; }
             var whole = JsonNode.Parse(readText);
@@ -350,7 +365,9 @@ public sealed unsafe class RegistryProofTestMod : Mod
             var before = BytesSha(key);
             s["bytesBefore"] = before;
             if (backend != "live") return s; // read-only (and none): read only
-            var probe = Probe(read, row, ids);
+            var probe = mode == "sint32" && read is JsonValue iv && iv.TryGetValue<double>(out var integer)
+                ? JsonValue.Create(integer + (integer < int.MaxValue ? 1 : -1)) : Probe(read, row, ids);
+            if (mode.Length > 0) s["configKind"] = mode == "float" ? "float" : "sint32";
             if (probe is null || JsonNode.DeepEquals(probe, read)) { Skip("no probe"); continue; } // another entry may take one
             JsonNode op = probe;
             if (element)
@@ -359,8 +376,20 @@ public sealed unsafe class RegistryProofTestMod : Mod
                 SetLeaf((JsonObject)copy[0]!, leafName, probe);
                 op = copy;
             }
-            var (ok, refusal) = Change(registry, id, element ? list : field, op, out var handle);
+            var (ok, refusal, exactRefusal) = Change(registry, id, element ? list : field, op, out var handle);
             s["probe"] = probe.DeepClone();
+            if (mode == "sint32-refusal")
+            {
+                s["expectRefused"] = true;
+                s["refused"] = !ok && exactRefusal;
+                s["refusalCode"] = exactRefusal ? "not_exact" : "";
+                s["refusalReason"] = refusal;
+                s["readBack"] = JsonNode.Parse(Read(registry, id, field) ?? "null");
+                s["rawAfter"] = RawOf(e, key);
+                if (ok) s["reverted"] = Finish(handle, true).Outcome == Reverted;
+                s["bytesAfter"] = BytesSha(key);
+                return s; // accepting 2.5 on Sint32 is changed, even if its rounded read-back happens to equal the base
+            }
             if (!ok)
             {
                 // this entry refused it (an item without damage for power, ...): try another, keep the last refusal
@@ -391,7 +420,7 @@ public sealed unsafe class RegistryProofTestMod : Mod
     {
         JsonNode? v = conv switch { "bool" => JsonValue.Create(true), "unlock" => JsonValue.Create("always"), _ => null };
         if (v is null) return "";
-        var (ok, refusal) = Change(registry, id, field, v, out var handle);
+        var (ok, refusal, _) = Change(registry, id, field, v, out var handle);
         if (!ok) return $"; a write to {id} is refused: {refusal}";
         Finish(handle, true);
         return $"; a write to {id} applies (reverted at once): the read alone fails";

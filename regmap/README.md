@@ -153,6 +153,13 @@ Raw values: the number of an int, float or bool member (a bool may be 0/1), a ti
 name, a bitmask's list of game names, an optional enum's [switch, name]. A probe must differ from the value before; a
 read-only field is read, never written; the bytes are the entry's resource before the write and after the revert.
 
+For `impactConfig` rows the live producer identifies the raw config type, never guesses it from a whole value.
+The row needs a Sint32 whole-number round trip, a fractional Sint32 probe refused without changing the value or bytes,
+and a float-config fractional round trip. Refusal samples carry `configKind: "sint32"`, `expectRefused: true`,
+`refused: true`, `refusalCode: "not_exact"` and `refusalReason`; the code is emitted only for a native REFUSED outcome
+whose reason starts with the stable `not_exact: ` token. Accepting or rounding the fractional probe makes the row
+`changed`; missing any of these cases leaves it `unproven`. Whole-only evidence cannot prove the row.
+
 `registry-values`, one file per side and build: every entry of every registry read through the schema, with the base as
 state/registry.json names it:
 ```jsonc
