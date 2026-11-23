@@ -36,16 +36,19 @@
                 "type": "int",
                 "min": 0,
                 "max": 1000000,
-                "ops": "number"
+                "ops": "number",
+                "doc": "The fewest the entry gives."
               },
               "max": {
                 "type": "int",
                 "min": 0,
                 "max": 1000000,
-                "ops": "number"
+                "ops": "number",
+                "doc": "The most the entry gives."
               }
             },
-            "typeName": "DropEntryCount"
+            "typeName": "DropEntryCount",
+            "doc": "How many of the item the entry gives: a number from min to max."
           },
           "chance": {
             "type": "float",

@@ -22,6 +22,7 @@ public sealed partial class DropTableEntry : IRegistryEntry
     public RegistryEntryList<DropEntry> Entries => new(_c, DropTableFields.Entries, static (c, i) => new DropEntry(c, i), static (c, i) => RegistryCells.Snapshot(c, i, DropTableFields.EntriesElement));
 }
 
+/// <summary>How many of the item the entry gives: a number from min to max.</summary>
 [global::System.Diagnostics.CodeAnalysis.Experimental("KILNX031", UrlFormat = "https://github.com/frostdev-ops/kiln/blob/main/docs/kiln/modding/registries/drops.md")]
 public sealed partial class DropEntryCount
 {
@@ -29,9 +30,11 @@ public sealed partial class DropEntryCount
     private readonly int _i;
     internal DropEntryCount(IRegistryCells cells, int index) { _c = cells; _i = index; }
 
+    /// <summary>The fewest the entry gives.</summary>
     [RegistryField("drops.entries[].count.min", RegistryApplies.Now)]
     public int Min { get => RegistryCells.Int(_c, DropTableFields.EntriesCountMin, _i); set => RegistryCells.Set(_c, DropTableFields.EntriesCountMin, _i, value); }
 
+    /// <summary>The most the entry gives.</summary>
     [RegistryField("drops.entries[].count.max", RegistryApplies.Now)]
     public int Max { get => RegistryCells.Int(_c, DropTableFields.EntriesCountMax, _i); set => RegistryCells.Set(_c, DropTableFields.EntriesCountMax, _i, value); }
 }
@@ -51,6 +54,7 @@ public sealed partial class DropEntry
     [RegistryField("drops.entries[].item", RegistryApplies.Now)]
     public RegistryId Item => RegistryCells.Id(_c, DropTableFields.EntriesItem, _i);
 
+    /// <summary>How many of the item the entry gives: a number from min to max.</summary>
     public DropEntryCount Count => new(_c, _i);
 
     /// <summary>The chance the entry drops.</summary>

@@ -28,45 +28,45 @@ Groups of fields:
 | Field | Type | Applies | Ops | Since | Mapping | About |
 |---|---|---|---|---|---|---|
 | `xpPerLevel` | list of int 0..100000000, exactly 5 | restart | indexed | 0.1.0 | mapped | The experience levels 1 to 5 need (later levels follow xpCurve). Exactly 5 values, edited one at a time (xpPerLevel[i]). |
-| `xpCurve.start` | int 0..100000000 | restart | number | 0.1.0 | mapped |  |
-| `xpCurve.end` | int 0..100000000 | restart | number | 0.1.0 | mapped |  |
-| `xpCurve.levelMax` | int 1..100000 | restart | number | 0.1.0 | mapped |  |
-| `xpCurve.seed` | int 0..100000000 | restart | number | 0.1.0 | mapped |  |
-| `xpCurve.fromKnowledge` | int 0..100000000 | restart | number | 0.1.0 | mapped |  |
+| `xpCurve.start` | int 0..100000000 | restart | number | 0.1.0 | mapped | One end of the curve's base range (base = min(start, end) + /end - start/ * level / levelMax). |
+| `xpCurve.end` | int 0..100000000 | restart | number | 0.1.0 | mapped | The other end of the curve's base range. |
+| `xpCurve.levelMax` | int 1..100000 | restart | number | 0.1.0 | mapped | The level at which the base has moved the whole way from one end of the range to the other. |
+| `xpCurve.seed` | int 0..100000000 | restart | number | 0.1.0 | mapped | The factor the base is multiplied by (with 1.5) to give the experience a level needs. |
+| `xpCurve.fromKnowledge` | int 0..100000000 | restart | number | 0.1.0 | mapped | Experience added to every level's need after the factor. |
 | `levelCap` | int 1..1000 | restart | number | 0.1.0 | mapped | The highest player level. |
 | `skillPointsPerLevel` | int 0..1000 | restart | number | 0.1.0 | mapped | Skill points a level gives. |
 | `flameLevelMax` | int 0..1000 | restart | read-only | 0.1.0 | mapped | The highest flame level. Read-only in this version: the per-flame-level lists are exactly flameLevelMax + 1 long. |
 | `altarsPerFlameLevel` | list of int 0..16, as long as flameLevelMax + 1 | restart | indexed | 0.1.0 | mapped | Flame altars allowed at each flame level, one value per level from 0 to flameLevelMax (the game's code stops at 16). Edited one level at a time (altarsPerFlameLevel[i]). |
 | `waterSourcesPerFlameLevel` | list of int 0..255, as long as flameLevelMax + 1 | restart | indexed | 0.1.0 | mapped | Water sources allowed at each flame level, one value per level from 0 to flameLevelMax. Edited one level at a time. |
 | `buildzoneSizesPerAltarLevel` | list of entries, at most 1001 | restart | list | 0.1.0 | mapped | The size of an altar's build zone at each altar level, in metres. |
-| `buildzoneSizesPerAltarLevel[].x` | float m 0..100000 | restart | number | 0.1.0 | mapped |  |
-| `buildzoneSizesPerAltarLevel[].y` | float m 0..100000 | restart | number | 0.1.0 | mapped |  |
-| `buildzoneSizesPerAltarLevel[].z` | float m 0..100000 | restart | number | 0.1.0 | mapped |  |
-| `fogResistance.base` | int 0..100000 | restart | number | 0.1.0 | mapped |  |
-| `fogResistance.perFlameLevel` | int 0..100000 | restart | number | 0.1.0 | mapped |  |
-| `durability.start` | float 0..1000000 | restart | number | 0.1.0 | mapped |  |
-| `durability.growth` | float 0..1000000 | restart | number | 0.1.0 | mapped |  |
-| `rarityDurability.common` | float 0..100 | restart | number | 0.1.0 | mapped |  |
-| `rarityDurability.uncommon` | float 0..100 | restart | number | 0.1.0 | mapped |  |
-| `rarityDurability.rare` | float 0..100 | restart | number | 0.1.0 | mapped |  |
-| `rarityDurability.epic` | float 0..100 | restart | number | 0.1.0 | mapped |  |
-| `rarityDurability.legendary` | float 0..100 | restart | number | 0.1.0 | mapped |  |
-| `socketChance.common` | float 0..1 | restart | number | 0.1.0 | mapped |  |
-| `socketChance.uncommon` | float 0..1 | restart | number | 0.1.0 | mapped |  |
-| `socketChance.rare` | float 0..1 | restart | number | 0.1.0 | mapped |  |
-| `socketChance.epic` | float 0..1 | restart | number | 0.1.0 | mapped |  |
-| `socketChance.legendary` | float 0..1 | restart | number | 0.1.0 | mapped |  |
-| `unlockCost.seed` | int 0..100000 | restart | number | 0.1.0 | mapped |  |
-| `unlockCost.creep` | float 0..100 | restart | number | 0.1.0 | mapped |  |
-| `unlockCost.weapons` | float 0..100 | restart | number | 0.1.0 | mapped |  |
-| `unlockCost.armor` | float 0..100 | restart | number | 0.1.0 | mapped |  |
-| `unlockCost.rings` | float 0..100 | restart | number | 0.1.0 | mapped |  |
-| `unlockCost.advanced` | float 0..100000 | restart | number | 0.1.0 | mapped |  |
-| `unlockCost.advancedFrom` | int 0..5 | restart | number | 0.1.0 | mapped |  |
-| `gear.seed` | float 0..100000 | restart | read-only | 0.1.0 | mapped |  |
-| `gear.creep` | float 0..100 | restart | read-only | 0.1.0 | mapped |  |
-| `gear.armorOffset` | float 0..100000 | restart | read-only | 0.1.0 | mapped |  |
-| `gear.armorGradient` | float 0..100000 | restart | read-only | 0.1.0 | mapped |  |
+| `buildzoneSizesPerAltarLevel[].x` | float m 0..100000 | restart | number | 0.1.0 | mapped | The build zone's size along x, in metres. |
+| `buildzoneSizesPerAltarLevel[].y` | float m 0..100000 | restart | number | 0.1.0 | mapped | The build zone's size along y (height), in metres. |
+| `buildzoneSizesPerAltarLevel[].z` | float m 0..100000 | restart | number | 0.1.0 | mapped | The build zone's size along z, in metres. |
+| `fogResistance.base` | int 0..100000 | restart | number | 0.1.0 | mapped | A player's shroud time before any flame level. |
+| `fogResistance.perFlameLevel` | int 0..100000 | restart | number | 0.1.0 | mapped | The shroud time each flame level adds. |
+| `durability.start` | float 0..1000000 | restart | number | 0.1.0 | mapped | The maximum durability of a level 1 item, before the rarity factor. |
+| `durability.growth` | float 0..1000000 | restart | number | 0.1.0 | mapped | The maximum durability each item level above 1 adds, before the rarity factor. |
+| `rarityDurability.common` | float 0..100 | restart | number | 0.1.0 | mapped | The durability factor of common items. |
+| `rarityDurability.uncommon` | float 0..100 | restart | number | 0.1.0 | mapped | The durability factor of uncommon items. |
+| `rarityDurability.rare` | float 0..100 | restart | number | 0.1.0 | mapped | The durability factor of rare items. |
+| `rarityDurability.epic` | float 0..100 | restart | number | 0.1.0 | mapped | The durability factor of epic items. |
+| `rarityDurability.legendary` | float 0..100 | restart | number | 0.1.0 | mapped | The durability factor of legendary items. |
+| `socketChance.common` | float 0..1 | restart | number | 0.1.0 | mapped | The chance a new common weapon gets a gem socket. |
+| `socketChance.uncommon` | float 0..1 | restart | number | 0.1.0 | mapped | The chance a new uncommon weapon gets a gem socket. |
+| `socketChance.rare` | float 0..1 | restart | number | 0.1.0 | mapped | The chance a new rare weapon gets a gem socket. |
+| `socketChance.epic` | float 0..1 | restart | number | 0.1.0 | mapped | The chance a new epic weapon gets a gem socket. |
+| `socketChance.legendary` | float 0..1 | restart | number | 0.1.0 | mapped | The chance a new legendary weapon gets a gem socket. |
+| `unlockCost.seed` | int 0..100000 | restart | number | 0.1.0 | mapped | The base cost of a perk unlock, before the creep and the kind's factor. |
+| `unlockCost.creep` | float 0..100 | restart | number | 0.1.0 | mapped | How much the cost grows with each unlock step, as a factor of the base. |
+| `unlockCost.weapons` | float 0..100 | restart | number | 0.1.0 | mapped | The cost factor of weapon and shield perks. |
+| `unlockCost.armor` | float 0..100 | restart | number | 0.1.0 | mapped | The cost factor of armour perks. |
+| `unlockCost.rings` | float 0..100 | restart | number | 0.1.0 | mapped | The cost factor of ring perks. |
+| `unlockCost.advanced` | float 0..100000 | restart | number | 0.1.0 | mapped | The numerator of an advanced perk's cost. |
+| `unlockCost.advancedFrom` | int 0..5 | restart | number | 0.1.0 | mapped | The perk level (0 to 5) from which the advanced cost applies. |
+| `gear.seed` | float 0..100000 | restart | read-only | 0.1.0 | mapped | The base of the damage power formula: base power = int(seed * creep * level + seed). |
+| `gear.creep` | float 0..100 | restart | read-only | 0.1.0 | mapped | The share of seed the base power grows by with each level. |
+| `gear.armorOffset` | float 0..100000 | restart | read-only | 0.1.0 | mapped | The armour formula's offset: armour = round((armorGradient * level + armorOffset) * share). |
+| `gear.armorGradient` | float 0..100000 | restart | read-only | 0.1.0 | mapped | The armour each level adds in the armour formula, before the item's share. |
 
 ## Entries
 

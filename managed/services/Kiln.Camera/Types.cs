@@ -19,6 +19,7 @@ public enum CameraEndpoint
 [Flags]
 public enum CameraCapability : ulong
 {
+    /// <summary>No capability: the camera service can do nothing here.</summary>
     None = 0,
     /// <summary><c>camera.server_mode</c>: a stock camera mode lock from the server.</summary>
     ServerMode = 1 << 0,
@@ -63,6 +64,7 @@ public enum CameraRotationMode
 /// <summary>Camera collision. This version has none: an authored view can clip terrain and buildings.</summary>
 public enum CameraCollisionPolicy
 {
+    /// <summary>No collision: the camera goes where the request puts it, through terrain and buildings.</summary>
     None = 0,
 }
 
@@ -71,7 +73,9 @@ public enum CameraTransitionOverride
 {
     /// <summary>The game's own transition for that mode.</summary>
     None = 0,
+    /// <summary>The game's blink transition: a quick cut into the mode at its blink blend speed.</summary>
     BlinkLerpSpeed = 1,
+    /// <summary>The game's smooth transition: a blend into the mode at its camera transition speed.</summary>
     CameraTransitionLerpSpeed = 2,
 }
 
@@ -87,29 +91,44 @@ public enum CameraUpdateTiming
 /// <summary>What happened to a lease (<see cref="CameraChange"/>).</summary>
 public enum CameraChangeKind
 {
+    /// <summary>The lease took effect for the first time.</summary>
     Applied = 1,
+    /// <summary>A replacement request (<see cref="Camera.Update"/>) took effect; the revision went up.</summary>
     Updated = 2,
+    /// <summary>The lease ended; <see cref="CameraChange.EndReason"/> says why. It is the lease's last change.</summary>
     Ended = 3,
 }
 
 /// <summary>Why a lease ended.</summary>
 public enum CameraEndReason
 {
+    /// <summary>Not ended (an applied or updated change).</summary>
     None = 0,
     /// <summary>Its owner ended it (<see cref="Camera.End"/>).</summary>
     Released = 1,
+    /// <summary>Its duration ran out.</summary>
     Expired = 2,
+    /// <summary>The entity a follow profile followed is gone.</summary>
     TargetLost = 3,
+    /// <summary>The player whose camera it was left the world.</summary>
     PlayerLeft = 4,
+    /// <summary>The world the lease belonged to stopped. This change may come on the thread that destroys the world: do
+    /// not touch the game in it.</summary>
     WorldStopped = 5,
     /// <summary>Another owner's request with a higher priority took its place.</summary>
     Superseded = 6,
+    /// <summary>A capability the lease needs turned off (a write faulted, or the player's client dropped a part).</summary>
     CapabilityLost = 7,
     /// <summary>The mod that held it was unloaded, or one of its camera callbacks faulted.</summary>
     OwnerRetired = 8,
+    /// <summary>The player's client disconnected while it showed a server's visual request.</summary>
     PeerDisconnected = 9,
+    /// <summary>The client stopped hearing from the server (no heartbeat for 3 seconds) and let the camera go.</summary>
     AuthorityTimeout = 10,
+    /// <summary>A safety limit stopped it after it was shown: a value out of bounds, a position too far from the player,
+    /// or the player's or target's position not updated for 250 ms.</summary>
     SafetyRejected = 11,
+    /// <summary>The player's client did not answer an update within 3 seconds.</summary>
     TransportTimeout = 12,
     /// <summary>Ended by its owner before it was ever applied.</summary>
     CancelledBeforeApply = 13,
@@ -118,44 +137,69 @@ public enum CameraEndReason
 /// <summary>Why a request was refused. Decide by this, never by the text of <see cref="CameraResult.Reason"/>.</summary>
 public enum CameraReason
 {
+    /// <summary>No refusal.</summary>
     None = 0,
     /// <summary>Another request holds this camera with an equal or higher priority, or one is being applied.</summary>
     Busy = 1,
     /// <summary>The caller already holds this camera: use <see cref="Camera.Update"/>.</summary>
     AlreadyOwned = 2,
+    /// <summary>No such lease: it never existed, has ended or is ending.</summary>
     UnknownLease = 3,
+    /// <summary>The lease belongs to another owner (another mod).</summary>
     ForeignOwner = 4,
     /// <summary>The request does not fit the endpoint (a mode lock through <see cref="Camera.SetLocal"/>, another player's lease).</summary>
     WrongEndpoint = 5,
+    /// <summary>The input policy is not supported: <see cref="CameraInputPolicy.AimToo"/> is reserved.</summary>
     InputPolicyUnsupported = 6,
+    /// <summary>The player's client does not run Kiln with <c>kiln.camera</c>: only a stock mode lock reaches it.</summary>
     RequiresKilnClient = 7,
+    /// <summary>The player is not connected, or left before the request took effect.</summary>
     PeerUnavailable = 8,
+    /// <summary>The player's client has not finished the camera handshake yet (or not within 2 seconds); ask again later.</summary>
     Negotiation = 9,
+    /// <summary>The entity a follow profile names is not in the client's world.</summary>
     TargetUnavailable = 10,
+    /// <summary>No frame showed the request or can give a snapshot: no frame of the live client world yet, the world
+    /// stopped, or the game's view is one this version does not describe.</summary>
     NoCameraFrame = 11,
+    /// <summary>The world the request or lease belongs to stopped.</summary>
     StaleWorld = 12,
+    /// <summary>A <see cref="CameraUpdateTiming.Preserve"/> update of a lease that has no time left.</summary>
     ExpiredUpdate = 13,
+    /// <summary>Reserved for camera collision, which this version does not have.</summary>
     Collision = 14,
+    /// <summary>The player's client did not answer within 3 seconds; see <see cref="CameraResult.MayHaveApplied"/>.</summary>
     TransportTimeout = 15,
+    /// <summary>A camera message from the other side could not be read.</summary>
     MalformedRemote = 16,
+    /// <summary>The camera resource is in use: the player's client could not take its camera for the request.</summary>
     ResourceBusy = 17,
+    /// <summary>The frame could not be confirmed: something after Kiln changed the drawn camera, or a write faulted.</summary>
     FrameFault = 18,
+    /// <summary>The snapshot was being written at that instant; ask again.</summary>
     SnapshotBusy = 19,
+    /// <summary>The newest snapshot is older than 250 ms: the game is paused or not drawing.</summary>
     SnapshotStale = 20,
+    /// <summary>A value is out of its range (a position too far from the player, a lens, distance or time out of bounds).</summary>
     Bounds = 21,
     /// <summary>Too many camera requests wait already: ask again in a later step.</summary>
     RateLimit = 22,
     /// <summary>A mode lease stays a mode lease, a visual lease a visual one: end it and set a new one.</summary>
     LeaseKind = 23,
+    /// <summary>The operation was cancelled before it completed: its lease was ended or replaced, or its owner retired.</summary>
     Cancelled = 24,
+    /// <summary>The player's client runs Kiln but does not offer a part the request needs (its <c>camera.local_*</c> row is off there).</summary>
     ClientCapability = 25,
+    /// <summary>A <see cref="CameraUpdateTiming.Preserve"/> update has less time left than its blends need.</summary>
     InsufficientLifetime = 26,
+    /// <summary>The request is larger than the message size negotiated with the player's client.</summary>
     BodyTooLarge = 27,
 }
 
 /// <summary>What an <c>Ok</c> result proves.</summary>
 public enum CameraCommitScope
 {
+    /// <summary>Nothing is proven: the request was not carried out.</summary>
     None = 0,
     /// <summary>The server's state holds the value. A vanilla client sends no acknowledgement.</summary>
     ServerState = 1,
@@ -217,9 +261,13 @@ public sealed record CameraProfile(EntityId Follow, float Distance, Vector3 Offs
 public sealed record CameraShake(float AmplitudeMetres, float FrequencyHz, TimeSpan Falloff, uint Seed = 0);
 
 /// <summary>How a visual request fades in and out, in whole milliseconds; both together at most the duration.</summary>
+/// <param name="In">The fade from what was on screen to the request, from the lease's start.</param>
+/// <param name="Out">The fade back to the game's own view over the duration's last part (and after <see cref="Camera.End"/>).</param>
 public sealed record CameraBlend(TimeSpan In, TimeSpan Out);
 
 /// <summary>A stock camera mode lock.</summary>
+/// <param name="Mode">The game's camera mode the player is held in.</param>
+/// <param name="Transition">How the game moves into it; <see cref="CameraTransitionOverride.None"/>: the mode's own transition.</param>
 public sealed record CameraModeRequest(CameraMode Mode, CameraTransitionOverride Transition = CameraTransitionOverride.None);
 
 /// <summary>
@@ -257,11 +305,23 @@ public sealed record CameraResult(bool Ok, string? Reason, CameraReason ReasonCo
     bool MayHaveApplied = false, bool AlreadyEnded = false) : IKilnResult;
 
 /// <summary>A lease was applied, updated or ended (<see cref="Camera.Changed"/>).</summary>
+/// <param name="Lease">The lease that changed.</param>
+/// <param name="Revision">The lease's revision in force after the change: 1 after the first apply, higher after each update.</param>
+/// <param name="Kind">Applied, updated or ended.</param>
+/// <param name="EndReason">Why it ended; <see cref="CameraEndReason.None"/> unless <paramref name="Kind"/> is
+/// <see cref="CameraChangeKind.Ended"/>.</param>
+/// <param name="ReasonCode">The refusal or fault behind an end, to decide by; <see cref="CameraReason.None"/> when there is none.</param>
+/// <param name="Reason">The same in words for a log; null when there is none.</param>
 /// <param name="Frame">The client frame that showed it, when one confirmed it; else 0.</param>
 public sealed record CameraChange(CameraLease Lease, ulong Revision, CameraChangeKind Kind,
     CameraEndReason EndReason, CameraReason ReasonCode, string? Reason, ulong Frame);
 
 /// <summary>The camera a frame was drawn with: after the game's own shake and after any camera override.</summary>
+/// <param name="Pose">Where the drawn camera was and where it looked.</param>
+/// <param name="FieldOfViewDegrees">The frame's vertical field of view, in degrees.</param>
+/// <param name="AspectRatio">The frame's width divided by its height.</param>
+/// <param name="NearPlane">The distance of the near clipping plane in front of the camera, in metres.</param>
+/// <param name="FarPlane">The distance of the far clipping plane in front of the camera, in metres.</param>
 /// <param name="Frame">Counts the frames this was taken from.</param>
 /// <param name="TargetSampleStep">The client step whose positions the frame's camera was built from.</param>
 /// <param name="SessionGeneration">The client world it belongs to.</param>
@@ -280,4 +340,8 @@ public sealed record CameraProjection(bool WithinDepth, bool OnScreen, Vector2? 
 
 /// <summary>The answer of <see cref="Camera.GetVisual"/>. Not Ok: there is no frame to give
 /// (<see cref="CameraReason.NoCameraFrame"/>, <see cref="CameraReason.SnapshotBusy"/>, <see cref="CameraReason.SnapshotStale"/>).</summary>
+/// <param name="Ok">True when <paramref name="Snapshot"/> holds a frame's camera.</param>
+/// <param name="Reason">Why not, in words for a log; null when <paramref name="Ok"/>.</param>
+/// <param name="ReasonCode">Why not, to decide by; <see cref="CameraReason.None"/> when <paramref name="Ok"/>.</param>
+/// <param name="Snapshot">The newest frame's camera; null when not <paramref name="Ok"/>.</param>
 public sealed record CameraVisualResult(bool Ok, string? Reason, CameraReason ReasonCode, CameraVisualSnapshot? Snapshot) : IKilnResult;

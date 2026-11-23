@@ -57,6 +57,7 @@ public sealed partial class RecipeInput
     [RegistryField("recipes.inputs[].category", RegistryApplies.Now)]
     public RegistryId? Category { get => RegistryCells.OptionalId(_c, RecipeFields.InputsCategory, _i); set => RegistryCells.SetOptional(_c, RecipeFields.InputsCategory, _i, value); }
 
+    /// <summary>How many of the item or category one craft takes.</summary>
     [RegistryField("recipes.inputs[].count", RegistryApplies.Now)]
     public int Count { get => RegistryCells.Int(_c, RecipeFields.InputsCount, _i); set => RegistryCells.Set(_c, RecipeFields.InputsCount, _i, value); }
 }
@@ -72,9 +73,11 @@ public sealed partial class RecipeOutput
     /// <summary>The element's index in its list.</summary>
     public int Index => _i;
 
+    /// <summary>The item one craft makes.</summary>
     [RegistryField("recipes.outputs[].item", RegistryApplies.Now)]
     public RegistryId Item { get => RegistryCells.Id(_c, RecipeFields.OutputsItem, _i); set => RegistryCells.Set(_c, RecipeFields.OutputsItem, _i, value); }
 
+    /// <summary>How many of the item one craft makes.</summary>
     [RegistryField("recipes.outputs[].count", RegistryApplies.Now)]
     public int Count { get => RegistryCells.Int(_c, RecipeFields.OutputsCount, _i); set => RegistryCells.Set(_c, RecipeFields.OutputsCount, _i, value); }
 }

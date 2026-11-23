@@ -28,6 +28,14 @@ public enum RegistryChangeOutcome
 }
 
 /// <summary>A copied outcome. Partial application has refused edits and is not Ok; inspect all counts.</summary>
+/// <param name="Outcome">What happened to the change as a whole.</param>
+/// <param name="Accepted">How many edits were accepted.</param>
+/// <param name="Refused">How many edits were refused; the registry report says why.</param>
+/// <param name="Skipped">How many fields were skipped to keep another writer's bytes.</param>
+/// <param name="World">The Kiln-owned token of the world the change applied to (as <see cref="RegistryWorld.Token"/>); 0: none.</param>
+/// <param name="Generation">The registry generation the outcome belongs to (1 at game start, one more at each application
+/// of the live fields).</param>
+/// <param name="Reason">Why it is not Ok, in words for a log; null when it is.</param>
 [Experimental("KILNX031")]
 public sealed record RegistryChangeResult(RegistryChangeOutcome Outcome, uint Accepted, uint Refused, uint Skipped,
     ulong World, ulong Generation, string? Reason) : IKilnResult
@@ -76,6 +84,10 @@ public sealed class RegistryChange
 }
 
 /// <summary>A ready notification. The world token is Kiln-owned, never a native address.</summary>
+/// <param name="Phase">Which registry snapshot is ready: the game-start one or a world load's live application.</param>
+/// <param name="Generation">The registry generation now in force (1 at game start, one more at each application of the
+/// live fields).</param>
+/// <param name="World">The world the live fields were applied to; null at game start or when no world is known.</param>
 [Experimental("KILNX031")]
 public sealed record RegistryReady(RegistryReadyPhase Phase, ulong Generation, RegistryWorld? World);
 

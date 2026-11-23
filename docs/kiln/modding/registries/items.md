@@ -34,29 +34,29 @@ Groups of fields:
 | `power` | int 0..100000 | now | number | 0.1.0 | mapped | The damage the tooltip shows at levels.min. Kiln solves the game's damage factor for it with the balance table's constants. Formula: `gear.power`. |
 | `speed` | float 0.01..100 | now | number | 0.1.0 | mapped | The speed factor of the weapon's damage (multiplies power). |
 | `hasDamage` | bool | now | read-only | 0.1.0 | mapped | The item deals damage (power, speed and damage apply). |
-| `damage.cut` | float 0..10 | now | number | 0.1.0 | mapped |  |
-| `damage.pierce` | float 0..10 | now | number | 0.1.0 | mapped |  |
-| `damage.blunt` | float 0..10 | now | number | 0.1.0 | mapped |  |
-| `damage.fire` | float 0..10 | now | number | 0.1.0 | mapped |  |
-| `damage.ice` | float 0..10 | now | number | 0.1.0 | mapped |  |
-| `damage.shroud` | float 0..10 | now | number | 0.1.0 | mapped |  |
-| `damage.lightning` | float 0..10 | now | number | 0.1.0 | mapped |  |
-| `damage.poison` | float 0..10 | now | number | 0.1.0 | mapped |  |
-| `damage.healing` | float 0..10 | now | number | 0.1.0 | mapped |  |
-| `damage.wood` | int 0..1000000 | now | number | 0.1.0 | mapped |  |
-| `damage.stone` | int 0..1000000 | now | number | 0.1.0 | mapped |  |
-| `damage.metal` | int 0..1000000 | now | number | 0.1.0 | mapped |  |
-| `damage.explosion` | int 0..1000000 | now | number | 0.1.0 | mapped |  |
+| `damage.cut` | float 0..10 | now | number | 0.1.0 | mapped | The share of a hit dealt as cut damage. |
+| `damage.pierce` | float 0..10 | now | number | 0.1.0 | mapped | The share of a hit dealt as pierce damage. |
+| `damage.blunt` | float 0..10 | now | number | 0.1.0 | mapped | The share of a hit dealt as blunt damage. |
+| `damage.fire` | float 0..10 | now | number | 0.1.0 | mapped | The share of a hit dealt as fire damage. |
+| `damage.ice` | float 0..10 | now | number | 0.1.0 | mapped | The share of a hit dealt as ice damage. |
+| `damage.shroud` | float 0..10 | now | number | 0.1.0 | mapped | The share of a hit dealt as shroud damage. |
+| `damage.lightning` | float 0..10 | now | number | 0.1.0 | mapped | The share of a hit dealt as lightning damage. |
+| `damage.poison` | float 0..10 | now | number | 0.1.0 | mapped | The share of a hit dealt as poison damage. |
+| `damage.healing` | float 0..10 | now | number | 0.1.0 | mapped | The share of a hit that heals instead of hurting; not counted in the hit shares. |
+| `damage.wood` | int 0..1000000 | now | number | 0.1.0 | mapped | The damage a hit deals to wood, a whole number. |
+| `damage.stone` | int 0..1000000 | now | number | 0.1.0 | mapped | The damage a hit deals to stone, a whole number. |
+| `damage.metal` | int 0..1000000 | now | number | 0.1.0 | mapped | The damage a hit deals to metal, a whole number. |
+| `damage.explosion` | int 0..1000000 | now | number | 0.1.0 | mapped | The explosion damage a hit deals, a whole number. |
 | `hasArmor` | bool | now | read-only | 0.1.0 | mapped | The item gives armour (armor applies). |
-| `armor.physical` | int 0..100000 | now | number | 0.1.0 | mapped | Formula: `gear.armor`. |
-| `armor.magical` | int 0..100000 | now | number | 0.1.0 | mapped | Formula: `gear.armor`. |
-| `armor.cut` | int 0..100000 | now | number | 0.1.0 | mapped | Formula: `gear.armor`. |
-| `armor.pierce` | int 0..100000 | now | number | 0.1.0 | mapped | Formula: `gear.armor`. |
-| `armor.blunt` | int 0..100000 | now | number | 0.1.0 | mapped | Formula: `gear.armor`. |
-| `armor.fire` | int 0..100000 | now | number | 0.1.0 | mapped | Formula: `gear.armor`. |
-| `armor.ice` | int 0..100000 | now | number | 0.1.0 | mapped | Formula: `gear.armor`. |
-| `armor.shroud` | int 0..100000 | now | number | 0.1.0 | mapped | Formula: `gear.armor`. |
-| `armor.lightning` | int 0..100000 | now | number | 0.1.0 | mapped | Formula: `gear.armor`. |
+| `armor.physical` | int 0..100000 | now | number | 0.1.0 | mapped | The physical armour the tooltip shows at levels.min. Formula: `gear.armor`. |
+| `armor.magical` | int 0..100000 | now | number | 0.1.0 | mapped | The magical armour the tooltip shows at levels.min. Formula: `gear.armor`. |
+| `armor.cut` | int 0..100000 | now | number | 0.1.0 | mapped | The cut armour the tooltip shows at levels.min. Formula: `gear.armor`. |
+| `armor.pierce` | int 0..100000 | now | number | 0.1.0 | mapped | The pierce armour the tooltip shows at levels.min. Formula: `gear.armor`. |
+| `armor.blunt` | int 0..100000 | now | number | 0.1.0 | mapped | The blunt armour the tooltip shows at levels.min. Formula: `gear.armor`. |
+| `armor.fire` | int 0..100000 | now | number | 0.1.0 | mapped | The fire armour the tooltip shows at levels.min. Formula: `gear.armor`. |
+| `armor.ice` | int 0..100000 | now | number | 0.1.0 | mapped | The ice armour the tooltip shows at levels.min. Formula: `gear.armor`. |
+| `armor.shroud` | int 0..100000 | now | number | 0.1.0 | mapped | The shroud armour the tooltip shows at levels.min. Formula: `gear.armor`. |
+| `armor.lightning` | int 0..100000 | now | number | 0.1.0 | mapped | The lightning armour the tooltip shows at levels.min. Formula: `gear.armor`. |
 | `block` | float 0..1 | worldLoad | number | 0.1.0 | unproven: when the game reads the block value is not traced yet | How well the item blocks (0 to 1). When the game reads it is not traced yet: unproven until a Kiln update maps it. |
 | `staminaCost` | float 0..100000 | now | number | 0.1.0 | mapped | The stamina a use costs, at the next payment. |
 | `manaCost` | float 0..100000 | now | number | 0.1.0 | mapped | The mana a use costs, at the next cast. |

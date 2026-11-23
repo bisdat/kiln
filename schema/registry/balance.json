@@ -35,31 +35,36 @@
           "type": "int",
           "min": 0,
           "max": 100000000,
-          "ops": "number"
+          "ops": "number",
+          "doc": "One end of the curve's base range (base = min(start, end) + |end - start| * level / levelMax)."
         },
         "end": {
           "type": "int",
           "min": 0,
           "max": 100000000,
-          "ops": "number"
+          "ops": "number",
+          "doc": "The other end of the curve's base range."
         },
         "levelMax": {
           "type": "int",
           "min": 1,
           "max": 100000,
-          "ops": "number"
+          "ops": "number",
+          "doc": "The level at which the base has moved the whole way from one end of the range to the other."
         },
         "seed": {
           "type": "int",
           "min": 0,
           "max": 100000000,
-          "ops": "number"
+          "ops": "number",
+          "doc": "The factor the base is multiplied by (with 1.5) to give the experience a level needs."
         },
         "fromKnowledge": {
           "type": "int",
           "min": 0,
           "max": 100000000,
-          "ops": "number"
+          "ops": "number",
+          "doc": "Experience added to every level's need after the factor."
         }
       },
       "typeName": "BalanceXpCurve"
@@ -128,21 +133,24 @@
             "unit": "m",
             "min": 0,
             "max": 100000,
-            "ops": "number"
+            "ops": "number",
+            "doc": "The build zone's size along x, in metres."
           },
           "y": {
             "type": "float",
             "unit": "m",
             "min": 0,
             "max": 100000,
-            "ops": "number"
+            "ops": "number",
+            "doc": "The build zone's size along y (height), in metres."
           },
           "z": {
             "type": "float",
             "unit": "m",
             "min": 0,
             "max": 100000,
-            "ops": "number"
+            "ops": "number",
+            "doc": "The build zone's size along z, in metres."
           }
         },
         "typeName": "BalanceZoneSize"
@@ -157,13 +165,15 @@
           "type": "int",
           "min": 0,
           "max": 100000,
-          "ops": "number"
+          "ops": "number",
+          "doc": "A player's shroud time before any flame level."
         },
         "perFlameLevel": {
           "type": "int",
           "min": 0,
           "max": 100000,
-          "ops": "number"
+          "ops": "number",
+          "doc": "The shroud time each flame level adds."
         }
       },
       "typeName": "BalanceFogResistance"
@@ -177,13 +187,15 @@
           "type": "float",
           "min": 0,
           "max": 1000000,
-          "ops": "number"
+          "ops": "number",
+          "doc": "The maximum durability of a level 1 item, before the rarity factor."
         },
         "growth": {
           "type": "float",
           "min": 0,
           "max": 1000000,
-          "ops": "number"
+          "ops": "number",
+          "doc": "The maximum durability each item level above 1 adds, before the rarity factor."
         }
       },
       "typeName": "BalanceDurability"
@@ -197,31 +209,36 @@
           "type": "float",
           "min": 0,
           "max": 100,
-          "ops": "number"
+          "ops": "number",
+          "doc": "The durability factor of common items."
         },
         "uncommon": {
           "type": "float",
           "min": 0,
           "max": 100,
-          "ops": "number"
+          "ops": "number",
+          "doc": "The durability factor of uncommon items."
         },
         "rare": {
           "type": "float",
           "min": 0,
           "max": 100,
-          "ops": "number"
+          "ops": "number",
+          "doc": "The durability factor of rare items."
         },
         "epic": {
           "type": "float",
           "min": 0,
           "max": 100,
-          "ops": "number"
+          "ops": "number",
+          "doc": "The durability factor of epic items."
         },
         "legendary": {
           "type": "float",
           "min": 0,
           "max": 100,
-          "ops": "number"
+          "ops": "number",
+          "doc": "The durability factor of legendary items."
         }
       },
       "typeName": "BalanceRarityDurability"
@@ -235,31 +252,36 @@
           "type": "float",
           "min": 0,
           "max": 1,
-          "ops": "number"
+          "ops": "number",
+          "doc": "The chance a new common weapon gets a gem socket."
         },
         "uncommon": {
           "type": "float",
           "min": 0,
           "max": 1,
-          "ops": "number"
+          "ops": "number",
+          "doc": "The chance a new uncommon weapon gets a gem socket."
         },
         "rare": {
           "type": "float",
           "min": 0,
           "max": 1,
-          "ops": "number"
+          "ops": "number",
+          "doc": "The chance a new rare weapon gets a gem socket."
         },
         "epic": {
           "type": "float",
           "min": 0,
           "max": 1,
-          "ops": "number"
+          "ops": "number",
+          "doc": "The chance a new epic weapon gets a gem socket."
         },
         "legendary": {
           "type": "float",
           "min": 0,
           "max": 1,
-          "ops": "number"
+          "ops": "number",
+          "doc": "The chance a new legendary weapon gets a gem socket."
         }
       },
       "typeName": "BalanceSocketChance"
@@ -273,43 +295,50 @@
           "type": "int",
           "min": 0,
           "max": 100000,
-          "ops": "number"
+          "ops": "number",
+          "doc": "The base cost of a perk unlock, before the creep and the kind's factor."
         },
         "creep": {
           "type": "float",
           "min": 0,
           "max": 100,
-          "ops": "number"
+          "ops": "number",
+          "doc": "How much the cost grows with each unlock step, as a factor of the base."
         },
         "weapons": {
           "type": "float",
           "min": 0,
           "max": 100,
-          "ops": "number"
+          "ops": "number",
+          "doc": "The cost factor of weapon and shield perks."
         },
         "armor": {
           "type": "float",
           "min": 0,
           "max": 100,
-          "ops": "number"
+          "ops": "number",
+          "doc": "The cost factor of armour perks."
         },
         "rings": {
           "type": "float",
           "min": 0,
           "max": 100,
-          "ops": "number"
+          "ops": "number",
+          "doc": "The cost factor of ring perks."
         },
         "advanced": {
           "type": "float",
           "min": 0,
           "max": 100000,
-          "ops": "number"
+          "ops": "number",
+          "doc": "The numerator of an advanced perk's cost."
         },
         "advancedFrom": {
           "type": "int",
           "min": 0,
           "max": 5,
-          "ops": "number"
+          "ops": "number",
+          "doc": "The perk level (0 to 5) from which the advanced cost applies."
         }
       },
       "typeName": "BalanceUnlockCost"
@@ -323,22 +352,26 @@
         "seed": {
           "type": "float",
           "min": 0,
-          "max": 100000
+          "max": 100000,
+          "doc": "The base of the damage power formula: base power = int(seed * creep * level + seed)."
         },
         "creep": {
           "type": "float",
           "min": 0,
-          "max": 100
+          "max": 100,
+          "doc": "The share of seed the base power grows by with each level."
         },
         "armorOffset": {
           "type": "float",
           "min": 0,
-          "max": 100000
+          "max": 100000,
+          "doc": "The armour formula's offset: armour = round((armorGradient * level + armorOffset) * share)."
         },
         "armorGradient": {
           "type": "float",
           "min": 0,
-          "max": 100000
+          "max": 100000,
+          "doc": "The armour each level adds in the armour formula, before the item's share."
         }
       },
       "typeName": "BalanceGear"
