@@ -477,7 +477,7 @@ The core's row for Kiln's task pool ([tasks.md](tasks.md)), and kiln.engine's ro
 | `engine.attribute_model` | native, static | kiln.engine, with `engine.profile` | that profile publishes an attribute calculation model (`attributeCalculationModel` with its evidence, [engine.md](engine.md)); the text is the model's name, `attribute-command-v1`. Kiln's interpreter for ShroudForge-format mods recalculates attribute writes with it and refuses them without it. Unavailable: `symbol-missing` "the profile publishes no attribute calculation model", or `engine.profile`'s reason |
 
 A mod asks `world.ecs_read` (`WorldConcurrent.IsAvailable`) for the task-thread world reads and `world.ecs_write`
-(`WorldConcurrent.CanWrite`; both experimental, opt in with [KILNX003](../modding/analyzers.md#kilnx003)) for the
+(`WorldConcurrent.CanWrite`) for the
 compare-exchange writes, not the `engine.*` rows: those say what the profile
 carries, the `world.*` rows say whether kiln.world reads or writes with it in this process (both are among the
 kiln.world rows above).

@@ -257,6 +257,11 @@ class Files(Base):
         self.assertNotIn("LabThing", "".join(self.files.values()).replace("KILNX001 Kiln.Lab 1", ""))
         self.assertIn("KILNX001 Kiln.Items 1", self.files["INDEX.md"])
         self.assertIn("KILNX002 Kiln.Items 1", self.files["INDEX.md"])
+        # KILNX003 (WorldConcurrent) is normal API since 0.2.0-dev.30.7: the note no longer calls it experimental
+        note = [l for l in self.files["INDEX.md"].splitlines() if l.startswith("Left out as experimental:")][0]
+        self.assertNotIn("KILNX003", note)
+        self.assertNotIn("WorldConcurrent", note)
+        self.assertIn("KILNX001 is lab and test API. KILNX002 (Kiln.Client SteamGuard) is real but unproven", note)
 
     def test_forwarded_lines_are_no_members(self):
         self.assertNotIn("OldName", self.items)

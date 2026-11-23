@@ -153,7 +153,7 @@ dev.28+ and dev.29+ (pages in the repository's `docs/kiln/`):
 | Item icons and names, looks and themes, fonts | `ui.md` |
 | The game's own texts (`Content.Text`) | `services/content.md` |
 | Kiln tasks, `WorldConcurrent` | `modding/tasks.md`, `services/tasks.md`, `services/world.md` |
-| Analyzers, KILNX003 | `modding/analyzers.md` |
+| Analyzers, retired KILNX003 | `modding/analyzers.md` |
 | Unknown slash commands, `chat.json` | `services/chat.md` |
 | Graphics status | `graphics.md` |
 | EMF parity | `emf.md`, `emf-parity.md` |

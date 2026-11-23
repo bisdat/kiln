@@ -157,7 +157,7 @@
 | `ConfigureAwait(false)` inside a task | the code after it has left the task: `WorldConcurrent` refuses it (KILN105) | drop it; `await ctx.NextGateWindow()` before the next read |
 | `ctx.ToTick();` without `await` | nothing hops: the rest still runs on the worker (KILN105) | `await ctx.ToTick();` |
 | Moving items or spawning inside a task | tick-only APIs throw there; an unload between take and give loses items | return a plan, carry it out in tick code |
-| `KILNX001` in `NoWarn` to use `WorldConcurrent` | still `error KILNX003` | `<NoWarn>$(NoWarn);KILNX003</NoWarn>` |
+| Keeping `KILNX003` in `NoWarn` for task-thread world API | harmless but unnecessary with dev.30.7 / mod API 0.2.16 | remove only that id; keep unrelated opt-ins |
 | `WorldConcurrent` with no tick fallback | `Unavailable` on every game build without an exact profile | `WorldConcurrent.OrOnTick(ctx, offTick, onTick)` |
 | `Content.Text` on a dedicated server, or off the client's main thread | null on a server | `Texts.Get` with a client catalog on a server; call it on the main thread |
 | A server wrap that changes what a player's own character does, with no prediction stage | that player's own screen does not show it | the same stage with `WorldKind.Prediction` (dev.29.18+) |

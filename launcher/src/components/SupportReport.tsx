@@ -6,49 +6,35 @@
 import { useState } from "react";
 import * as api from "../api/commands";
 import type { LogTarget } from "../api/commands";
-import { isTauri } from "../api/commands";
-import { t, useT } from "../i18n";
+import { useAppInfo } from "../api/hooks";
+import { useT } from "../i18n";
 import { Button, errorText, fmtBytes, toast } from "../ui";
 import { SendToSupport } from "../community/parts";
 import { ReportContentsDialog } from "./ReportContents";
-import { saveDialog } from "../ui/dialogFolder";
-
-/** `kiln-report-2026-11-10.zip` (the crate's report::file_name, in local time). */
-export function reportFileName(d = new Date()): string {
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `kiln-report-${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}.zip`;
-}
-
-async function choosePath(): Promise<string | null> {
-  if (!isTauri()) return reportFileName(); // mock mode: no dialog
-  // "<Downloads>/kiln-report-....zip" (or the folder the last report went to), never the AppImage's own mount
-  return saveDialog({ kind: "supportReport", title: t("supportReport.dialogTitle"), fileName: reportFileName(), filters: [{ name: "Zip", extensions: ["zip"] }] });
-}
+import { reportDestination } from "../ui/reportSave";
+export { reportFileName } from "../ui/reportSave";
 
 /** The block: one sentence, "Save report...", "Copy summary". `target` null: the system and the launcher only. */
 export function SupportReport({ target, compact }: { target: LogTarget | null; compact?: boolean }) {
   const t = useT();
+  const deck = useAppInfo().data?.deck;
   const [busy, setBusy] = useState<"save" | "copy" | null>(null);
   const [contents, setContents] = useState(false);
-  const save = async (exclude: string[]) => {
+  const save = async (exclude: string[], mode: "dialog" | "downloads" = "dialog") => {
     setContents(false);
+    setBusy("save");
     try {
-      const path = await choosePath();
-      if (!path) {
-        void api.reportNote("dialogCancelled");
-        return;
-      }
-      void api.reportNote("dialogChosen", path);
-      setBusy("save");
-      const r = await api.reportSave(target, path, exclude);
+      const dest = await reportDestination(mode);
+      if (!dest) return;
+      const r = await api.reportSave(target, dest.path, exclude, dest.destination);
       const problems = r.findings.filter((f) => f.level === "problem").length;
-      const folder = r.path.replace(/[\\/][^\\/]*$/, "");
+      const folder = r.path.replace(/([\\/])[^\\/]*$/, "$1");
       toast.ok(t("supportReport.saved"), [
-        t("supportReport.savedFile", { file: r.path.split(/[\\/]/).pop(), size: fmtBytes(r.size) }),
+        t("supportReport.savedPath", { path: r.path, size: fmtBytes(r.size) }),
         problems ? t("supportReport.problems", { count: problems }) : null,
         t("supportReport.attach"),
       ].filter(Boolean).join(" "),
-        { actions: isTauri() && folder && folder !== r.path ? [{ label: t("supportReport.openFolder"), onClick: () => { api.appOpenPath(folder).catch((e) => toast.error(e)); } }] : [] });
+        { actions: folder && folder !== r.path ? [{ label: t("supportReport.openFolder"), onClick: () => { api.appOpenPath(folder).catch((e) => toast.error(e)); } }] : [] });
     } catch (e) {
       void api.reportNote("failed", errorText(e));
       toast.error(e, t("supportReport.notSaved"));
@@ -77,6 +63,7 @@ export function SupportReport({ target, compact }: { target: LogTarget | null; c
       </span>
       <SendToSupport from="logs" target={target} variant="primary" />
       <Button size="s" loading={busy === "save"} disabled={!!busy} onClick={() => { void api.reportNote("opened"); setContents(true); }}>{t("supportReport.save")}</Button>
+      {(deck?.detected || deck?.gamescope) && <Button size="s" disabled={!!busy} onClick={() => void save([], "downloads")}>{t("supportReport.saveDownloads")}</Button>}
       <Button size="s" variant="ghost" loading={busy === "copy"} disabled={!!busy} onClick={copy}>{t("supportReport.copy")}</Button>
       {contents && <ReportContentsDialog target={target} onSave={(x) => void save(x)} onClose={() => setContents(false)} />}
     </div>

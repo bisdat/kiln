@@ -51,3 +51,11 @@ static Kiln.TestKit.HarnessStorageRecord.operator !=(Kiln.TestKit.HarnessStorage
 static Kiln.TestKit.HarnessStorageRecord.operator ==(Kiln.TestKit.HarnessStorageRecord left, Kiln.TestKit.HarnessStorageRecord right) -> bool
 ~override Kiln.TestKit.HarnessStorageRecord.Equals(object obj) -> bool
 ~override Kiln.TestKit.HarnessStorageRecord.ToString() -> string
+*REMOVED*[KILNX003]Kiln.TestKit.FakeWorld.BusyReads.get -> int
+Kiln.TestKit.FakeWorld.BusyReads.get -> int
+*REMOVED*[KILNX003]Kiln.TestKit.FakeWorld.BusyReads.set -> void
+Kiln.TestKit.FakeWorld.BusyReads.set -> void
+*REMOVED*[KILNX003]Kiln.TestKit.FakeWorld.BusyWrites.get -> int
+Kiln.TestKit.FakeWorld.BusyWrites.get -> int
+*REMOVED*[KILNX003]Kiln.TestKit.FakeWorld.BusyWrites.set -> void
+Kiln.TestKit.FakeWorld.BusyWrites.set -> void

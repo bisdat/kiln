@@ -7,12 +7,21 @@
 using TkEvents;
 using Xunit;
 
-#pragma warning disable KILNX003
-
 namespace Kiln.TestKit.Tests;
 
 public sealed class WorldConcurrentWritesKitTests
 {
+    [Theory]
+    [InlineData(nameof(FakeWorld.BusyReads))]
+    [InlineData(nameof(FakeWorld.BusyWrites))]
+    public void Busy_controls_are_normal_public_API(string name)
+    {
+        var property = typeof(FakeWorld).GetProperty(name)!;
+        Assert.Empty(property.GetCustomAttributes(typeof(System.Diagnostics.CodeAnalysis.ExperimentalAttribute), false));
+        Assert.All(property.GetAccessors(), accessor =>
+            Assert.Empty(accessor.GetCustomAttributes(typeof(System.Diagnostics.CodeAnalysis.ExperimentalAttribute), false)));
+    }
+
     private static (KilnHarness Kiln, ModHandle Mod, EntityId Chest) Start(bool untracked = true)
     {
         var kiln = new KilnHarness();
