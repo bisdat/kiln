@@ -195,6 +195,14 @@ Check `PlayerStorage.Available` or `Capabilities.Why(PlayerStorage.Capability)`.
 wrong side, missing service, or a fault refuse storage instead of guessing engine state. See [caps.md](caps.md).
 The native `items.storage.persist` rows are exclusively for Kiln.Saves, not mod persistence APIs.
 
+Storage needs its client inventory guard: a link in Kiln's hook registry after `gameplay/DeliverEvents` that refuses
+every client action naming a storage holder, page or item (the nine inventory-addressed actions of `PlayerInput.fromClient`,
+found through the game's reflection). Without it `items.storage` is unavailable (`symbol-missing`) and the text says
+which check failed: the sigdb feature `players.client_action_hold`, the symbol, the live code (another module hooked or
+patched `DeliverEvents` outside Kiln's registry: refused, with the bytes Kiln saw), the reflected action or field that
+did not resolve, or the hook registry's result. A `DeliverEvents` that another Kiln component already linked is fine:
+the guard joins that chain.
+
 Server storage availability does not imply a joined client can read it: the client copy below is a separate row.
 
 ## The client copy and the HUD's ammunition lists
@@ -267,3 +275,9 @@ copy, server passes and pick checks, and the HUD half on the kit's fake `kiln.ui
 Real-game unverified: holder exclusion from world snapshots/restarts; exact capture/rebuild and travel pairing; live
 parked-return metadata tracking/cleanup; death transfers; external-cell ammunition debit and cycling; the client copy
 over a real connection; HUD rows from storage and their picks; `Activate` in a running game.
+
+## Changelog
+
+- **0.2.0-dev.30.8:** storage no longer switches itself off at start ("client inventory guard is unavailable"): the
+  guard's reading of `PlayerInput.fromClient` stopped at its first member that is not an action (an enum), on dedicated
+  servers and hosted worlds alike. The capability text now names the check that failed. Thanks Fuzen777 (kiln#135).
