@@ -770,3 +770,90 @@ The same run without the switch (control): every craft of the character `no_acce
 untouched. The first run of this branch had every player craft `other_world`: it read only `tx+0x68` (§10.4).
 Factories' own cycles show as `mode0` (about 11 a step in that save). Not run in a lab: anything on a client (C7 to C15).
 
+
+### 10.7 Player-registered sources (#125, since 0.2.0-dev.30.6)
+
+The existing `RecipePaid` adapter also accepts player-bound container registrations. They deliberately skip §8's
+source-base membership rule; they do not skip the game's per-player inventory permission. `source_access` rereads
+`[serverBases+0x10] + (player-1)*0xa0`, requires the id at +0 to match and bit2 of +0x9d (`CanAccessInventories`) to be
+set, then uses `inventory_matches(FIND_CONTAINERS)` (initialized InventorySetup, neither player nor NPC flags) and
+rejects any `FactoryStation` component through the game's guarded `GetComponent`, never kiln.world in the payment hook.
+Registration, counts and payment all enforce this: production stations lend only through #68's output-safe path,
+since `PayMaterial` would otherwise consume queued inputs too. A fault determining the container type fails closed. At
+registration it also captures the existing `players/InfoHandle` result (+4), and every snapshot rejects registrations
+whose login handle changed. A reused player entity slot cannot inherit the previous login's links. The mod chooses
+which containers it authorizes; this right is server-wide, not ownership of a source base.
+
+Mode0 is eligible only for a real registered player, with the bag as its normal order. Its bases words may both be null
+if `access_from_tx` still proves the server inventory storage; the cached server bases supplies only the player
+permission check. In other modes a refused BaseStockForPlayer leaves the normal list empty, as the game does, and
+station outputs are not added. Independently authorized registered sources can still cover the bag's shortfall.
+Per-item registered sources are merged before or after the existing output lenders, deduplicated against the normal
+order and one another, then passed through the same preflight and same-transaction `PayMaterial` loop. The only
+intercepted return remains `RecipePaid`; a fault/remainder returns4 for CraftRecipe's rollback.
+
+`source_stock(player, flags, ...)` runs on the server tick thread: flags0 returns filtered extra counts excluding
+current base stock and opted-in outputs already counted by `kiln:craftstock`; `KILN_CRAFT_SOURCE_STOCK_ALL` returns
+all filtered registered counts for consumers whose normal inventory view does not include that stock. Unknown flags
+refuse. Counts recheck the live player login, permission and container setup; they never authorize a payment.
+
+Verification here is offline: host registry/payment arithmetic, Windows tests of the actual guarded adapter with
+fake transactions, managed snapshot/lifetime tests and symbol resolution on the two pinned binaries. No new game
+client, server or lab was run for this change; the guided checks are in the public station service docs.
+
+## 12. Registered sources for dyes (GitHub #125)
+
+Static qualification on the same exact builds: server **26430253** (`f0d824be…`) and client **26430625** (`5d9ef2f1…`).
+Owned headless Ghidra projects (no automatic analysis), instruction reads, exact-build uniqueness/call-edge/schema tests
+and generator-refreshed sigdb records; no game or lab execution. Definitions: `server.d/dye-sources.json` and its client
+extension. Since 0.2.0-dev.30.6; request by Fuzen777. RVAs below.
+
+| Seam | Server | Client (hosted server code) |
+| --- | --- | --- |
+| `dyes/TintAction(action*, inventory_actions iterator*)` | `0x1a1230` | `0x3fff50` |
+| return from `InventoryRemoveItems(out, tx, player, dye, preferredSlot, 1)` | `0x1a13e8` | `0x400108` |
+| return from Tint's rollback | `0x1a1455` | `0x400175` |
+| return from Tint's commit | `0x1a1490` | `0x4001b0` |
+| slot-info resolver | `0x1445d0` | `0x3854f0` |
+
+Tint first resolves both requested slots, looks up both items, rejects a non-tintable target (flag `0x10000`) or a dye
+without `itemColorCombinationSetup.isSet` (`ItemInfo+0x748`), then opens its own inventory transaction. It does **not**
+call InventoryPay/RecipePaid. Its removeItems result's error and remainder are tested before a palette write; either
+failure branches to rollback. A successful payment writes/adds `ColorPaletteItem` (the existing component's store is
+S `0x1a1482` / C `0x4001a2`) and commits. The commit's deliberate rollback guards are the existing `@items/CommitGuards`:
+flags `tx+0xb0 & 0x40`, or no InventoryEmptyState accessor at `tx+0xa0` with touched inventories.
+
+The sparse setup is captured on both builds. Iterator `+0x160` is InventorySetup, `+0x148` Inventory, `+0x190`
+SlotSelection, `+0x168` ItemState, `+0x178` OwnerRelationship and `+0x158` InventoryEmptyState. Iterator `+0xc8` is copied
+to setup `+0xd8`, hence **tx `+0x70` has the server bases**; Fuel is absent. Kiln validates the used accessor type indices
+against this job storage's component map on every request, requires server storage kind0 **and the active server
+world's exact storage identity** cached at Pre, and never relies on the full-accessor cache. removeItems reads the named holder's setup through tx[3], expands its links, writes each page
+through tx[4] in the same job, and queues type1 operations keyed by page/slot in tx+0xf0. Thus a registered chest is
+reachable through this transaction's own accessors, and the game's rollback restores its debits.
+
+Client UI: screen `0xc0ace0` calls submenu `0xc09740`; palette builder `0xd14ce0` fills the 72-byte views at tint state
+`+0x90b80` (count `+0x90b88`) from the player/station models plus unlocked palettes. Palette screen `0xc0b930` overwrites
+row counts from the two models' Generic-index views at `0xc0bf14` (eax count, rbx row, r15d item). Its selected palette's
+detail has a separate sum at `0xc0c302` (eax, r15d). Confirm `0xb2ceb0` emits command `0x6e`, copying the target key at
+command+4 and the selected palette key at command+0xc. The input writer preserves both keys unchanged.
+
+**No chest key is sent.** A server-announced source palette uses `{entityId = dye ItemId, slotIndex = 0xff}`. Both
+actual input wire schemas preserve that index as a full u8: C root `0x1fe0cf0` → ItemAction `0x1fdfdd0` → InventorySlotId
+`0x1fde3f8`; S root `0x14b0bb0` → ItemAction `0x14afc90` → InventorySlotId `0x14ae2b8`. The slotIndex field is kind4,
+fixed1, offset4, not a bitfield; client serializer `0x11f6420` writes eight bits, server decoder `0x9a77e0` reads eight
+without clamping. Kiln also validates the live schema path before enabling the hooks. Without the entry hook, the
+normal slot-info resolver refuses index255 (it requires <8), not a real source slot.
+
+The entry re-resolves that requested dye from the bag first, then this player's generation-bound, filtered,
+access-checked sources, using the iterator's own accessors, and calls the original on a shadow action. Only that call's
+scoped removeItems hook may borrow: it rechecks the live source registry, permission, sparse transaction identity and
+commit guards, pays the bag first, and verifies a source take **before returning success to Tint**. Every hook-owned
+fault, error or remainder returns a payment failure, so Tint rolls back before the palette is written. The ordinary
+unmarked action is unchanged and clears any outer Tint's thread-local payment route for the duration of a nested call.
+Vanilla grid callbacks likewise clear any outer palette's source-count scope, restoring it when the nested call returns.
+Before installing server or client hooks, Kiln compares qualified prologues/count instructions through `read_original`
+and refuses foreign or unreadable live code through `code_state`; registry-owned detours remain valid. The entry is
+installed only after the payment link, and an entry installation failure revokes that otherwise unused link.
+Windows fake-transaction tests cover entry/debit revocation, player generations, wrong storage/missing accessors,
+commit guards, nested routing, code qualification, partial installation and an injected SEH fault after a source debit;
+native palette tests cover the raw grid callback and both mids. These are not real-client execution evidence.

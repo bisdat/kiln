@@ -55,6 +55,9 @@ internal static unsafe class UiCaps
         if (UiValuesNative.T != null && UiInventoryNative.T2 == null)
             ServiceCaps.LowerOff(Ui.Inventory.PanelCapability, CapabilityReason.ServiceOlder,
                 "kiln.ui.inventory has no screen_view (v2: an older kiln-core)");
+        // Ui.AmmoList (0.2.0-dev.30.6): kiln-tools serves kiln.ui.ammo; without its table neither row can work
+        if (UiAmmoNative.T == null)
+            ServiceCaps.LowerFeatures(UiAmmoNative.Service, Ui.AmmoList.ListCapability, Ui.AmmoList.PickCapability);
         if (UiItemDetailNative.T == null)
             ServiceCaps.LowerOff(Ui.Values.ItemDetailCapability, CapabilityReason.ServiceOlder, "kiln.ui.item_detail is not available");
         if (UiNativeChest.T == null)

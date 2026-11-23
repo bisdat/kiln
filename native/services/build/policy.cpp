@@ -49,7 +49,12 @@ bool read_bases(std::vector<Base>& out) {
 }  // namespace
 
 uint32_t zone_denies_box(KilnEntity actor, KilnVec3 lo, KilnVec3 hi, uint32_t action) {
-    if (!g_gameplay || !g_gameplay->zone_denies || !action) return 0;
+    if (!action) return 0;
+    if (!g_gameplay || g_gameplay->header.size < offsetof(KilnGameplayApi, zone_denies) + sizeof(void*) ||
+        !g_gameplay->zone_denies) {
+        set_detail("protection-zone checks unavailable; edit refused");
+        return ~0u;
+    }
     // sample a grid of at most 9^3 points, spacing <= 4 m where the box allows, corners and centre included
     int steps[3];
     const double ext[3] = {hi.x - lo.x, hi.y - lo.y, hi.z - lo.z};
@@ -69,7 +74,10 @@ uint32_t zone_denies_box(KilnEntity actor, KilnVec3 lo, KilnVec3 hi, uint32_t ac
 
 bool touches_base(KilnVec3 lo, KilnVec3 hi, KilnEntity* altar) {
     std::vector<Base> bases;
-    if (!read_bases(bases)) return false;
+    if (!read_bases(bases)) {
+        set_detail("player-base mapping unavailable or unreadable; edit refused (IN_BASES is not set)");
+        return true;
+    }
     for (const auto& b : bases) {
         if (hi.x < b.lo.x || lo.x > b.hi.x || hi.y < b.lo.y || lo.y > b.hi.y || hi.z < b.lo.z || lo.z > b.hi.z) continue;
         if (altar) *altar = b.altar;

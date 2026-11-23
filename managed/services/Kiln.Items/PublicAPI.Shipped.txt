@@ -96,8 +96,11 @@ Kiln.EquipResult.Ref.get -> Kiln.ItemInstanceRef
 Kiln.EquipResult.Ref.init -> void
 Kiln.EquipResult.Replaced.get -> Kiln.ItemId
 Kiln.EquipResult.Replaced.init -> void
+Kiln.EquipResult.ReplacedCount.get -> int
+Kiln.EquipResult.ReplacedCount.init -> void
 Kiln.EquipResult.ReplacedEntity.get -> Kiln.EntityId
 Kiln.EquipResult.ReplacedEntity.init -> void
+Kiln.EquipResult.ReplacedItem.get -> Kiln.ItemId
 Kiln.EquipResult.ReplacedRef.get -> Kiln.ItemInstanceRef
 Kiln.EquipResult.ReplacedRef.init -> void
 Kiln.EquipResult.ReplacedTo.get -> Kiln.SlotId
@@ -564,6 +567,14 @@ Kiln.GearWriteOptions.Equals(Kiln.GearWriteOptions? other) -> bool
 Kiln.GearWriteOptions.GearWriteOptions() -> void
 Kiln.GearWriteOptions.RefuseEquipped.get -> bool
 Kiln.GearWriteOptions.RefuseEquipped.init -> void
+Kiln.GiveEquipOptions
+Kiln.GiveEquipOptions.<Clone>$() -> Kiln.GiveEquipOptions!
+Kiln.GiveEquipOptions.DryRun.get -> bool
+Kiln.GiveEquipOptions.DryRun.init -> void
+Kiln.GiveEquipOptions.Equals(Kiln.GiveEquipOptions? other) -> bool
+Kiln.GiveEquipOptions.GiveEquipOptions() -> void
+Kiln.GiveEquipOptions.Replaced.get -> Kiln.Replaced
+Kiln.GiveEquipOptions.Replaced.init -> void
 Kiln.GiveOptions
 Kiln.GiveOptions.AllOrNothing = 2 -> Kiln.GiveOptions
 Kiln.GiveOptions.DryRun = 8 -> Kiln.GiveOptions
@@ -970,6 +981,9 @@ Kiln.RarityUpgradeRule.Socket.get -> Kiln.SocketRule
 Kiln.RarityUpgradeRule.Socket.init -> void
 Kiln.RarityUpgradeRule.Steps.get -> System.Collections.Generic.IDictionary<Kiln.ItemRarity, Kiln.UpgradeStep!>!
 Kiln.RarityUpgradeRule.Steps.init -> void
+Kiln.Replaced
+Kiln.Replaced.Backpack = 0 -> Kiln.Replaced
+Kiln.Replaced.Take = 1 -> Kiln.Replaced
 Kiln.SetEquipmentChange
 Kiln.SetEquipmentChange.Deconstruct(out ulong ItemsTicket, out Kiln.InventorySnapshotToken Snapshot, out Kiln.EquipmentSet! Set, out bool DryRun) -> void
 Kiln.SetEquipmentChange.DryRun.get -> bool
@@ -1267,6 +1281,9 @@ override Kiln.GearValuesResult.ToString() -> string!
 override Kiln.GearWriteOptions.Equals(object? obj) -> bool
 override Kiln.GearWriteOptions.GetHashCode() -> int
 override Kiln.GearWriteOptions.ToString() -> string!
+override Kiln.GiveEquipOptions.Equals(object? obj) -> bool
+override Kiln.GiveEquipOptions.GetHashCode() -> int
+override Kiln.GiveEquipOptions.ToString() -> string!
 override Kiln.InstanceEquipment.<Clone>$() -> Kiln.InstanceEquipment!
 override Kiln.InstanceEquipment.Equals(object? obj) -> bool
 override Kiln.InstanceEquipment.GetHashCode() -> int
@@ -1405,6 +1422,8 @@ static Kiln.GearValuesResult.operator ==(Kiln.GearValuesResult? left, Kiln.GearV
 static Kiln.GearWriteOptions.Default.get -> Kiln.GearWriteOptions!
 static Kiln.GearWriteOptions.operator !=(Kiln.GearWriteOptions? left, Kiln.GearWriteOptions? right) -> bool
 static Kiln.GearWriteOptions.operator ==(Kiln.GearWriteOptions? left, Kiln.GearWriteOptions? right) -> bool
+static Kiln.GiveEquipOptions.operator !=(Kiln.GiveEquipOptions? left, Kiln.GiveEquipOptions? right) -> bool
+static Kiln.GiveEquipOptions.operator ==(Kiln.GiveEquipOptions? left, Kiln.GiveEquipOptions? right) -> bool
 static Kiln.InstanceEquipment.operator !=(Kiln.InstanceEquipment? left, Kiln.InstanceEquipment? right) -> bool
 static Kiln.InstanceEquipment.operator ==(Kiln.InstanceEquipment? left, Kiln.InstanceEquipment? right) -> bool
 static Kiln.InventoryContents.operator !=(Kiln.InventoryContents? left, Kiln.InventoryContents? right) -> bool
@@ -1454,6 +1473,8 @@ static Kiln.Items.GearWriteAvailable.get -> bool
 static Kiln.Items.Get(Kiln.ItemId id) -> Kiln.ItemInfo?
 static Kiln.Items.Give(Kiln.EntityId target, Kiln.ItemId item, int count = 1, Kiln.Gear? gear = null, Kiln.GiveOptions options = Kiln.GiveOptions.None, Kiln.SlotId? slot = null) -> System.Threading.Tasks.Task<Kiln.ItemsResult!>!
 static Kiln.Items.Give(Kiln.EntityId target, string! item, int count = 1, Kiln.Gear? gear = null, Kiln.GiveOptions options = Kiln.GiveOptions.None) -> System.Threading.Tasks.Task<Kiln.ItemsResult!>!
+static Kiln.Items.GiveEquip(Kiln.EntityId player, Kiln.ItemId item, int count, Kiln.EquipmentSlot slot, Kiln.GiveEquipOptions? options = null) -> System.Threading.Tasks.Task<Kiln.EquipResult!>!
+static Kiln.Items.GiveEquipAvailable.get -> bool
 static Kiln.Items.GiveRecipeResult(Kiln.EntityId target, uint recipeId, int count = 1, Kiln.GiveOptions options = Kiln.GiveOptions.None) -> System.Threading.Tasks.Task<Kiln.ItemsResult!>!
 static Kiln.Items.Held(Kiln.EntityId player) -> Kiln.ItemInstanceRef
 static Kiln.Items.Lookup(string! nameOrId) -> Kiln.ItemInfo?

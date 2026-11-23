@@ -23,7 +23,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
 /// Bump when the editor recipe changes: art made by an older recipe shows as outdated.
-pub const RECIPE: u32 = 2;  // 2: writes .icon-index.json for the mod overlay
+pub const RECIPE: u32 = 3; // 3: writes names/names.json in every installed game language
 pub const ICON_SIZE: u32 = 96;
 /// UI textures up to this size are all written (766 files, about 5 MB in client 26430625).
 pub const UI_SMALL_SIDE: u32 = 256;

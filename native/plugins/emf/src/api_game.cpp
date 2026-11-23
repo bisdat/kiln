@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// The EmfApi table, part 2: items (kiln.items, kiln.content), spawn/destroy (kiln.spawn), chat (kiln.chat,
+// The EmfApi table, part 2: items (kiln.items, kiln.content), destroy (kiln.spawn), chat (kiln.chat,
 // kiln.players), saves (kiln.saves), damage (kiln.combat), teleport (kiln.world), world settings
 // (kiln.settings), HUD lines and notes (kiln.ui, client).
 #include <intrin.h>
@@ -233,64 +233,7 @@ bool api_take_items(EmfWorld* w, const EmfItemsRequest* e) {
     return submit_items(m, false, w, r, e->cb, e->user, "take_items");
 }
 
-// ============================================================================================= spawn =========
-uint32_t do_spawn(Mod* m, EmfWorld* w, const uint8_t guid[16], double x, double y, double z, const char* fn, const KilnSpawnComponent* components = nullptr, uint32_t component_count = 0) {
-    if (!S.spawn) {
-        unsupported(m, fn, "kiln.spawn is not available");
-        return 0;
-    }
-    if (!in_server_cb(w) || !t_ctx.world_cb) {
-        refuse(m, fn, "server world only, inside a world callback on the world passed to it");
-        return 0;
-    }
-    if (!guid || !std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) return refuse(m, fn, "bad arguments"), 0;
-    KilnSpawnRequest req{};
-    req.size = sizeof req;
-    req.components = components;
-    req.component_count = component_count;
-    std::memcpy(req.template_guid.b, guid, 16);
-    req.position = KilnVec3{x, y, z};
-    // EMF: spawned entities are not saved (except villagers); kiln.spawn's sidecar is not used for them
-    req.flags = KILN_SPAWN_NO_TRACK;
-    KilnTemplateInfo ti{};
-    ti.size = sizeof ti;
-    if (S.spawn->template_get(&req.template_guid, &ti) == KILN_OK && ti.kind != KILN_TEMPLATE_NPC)
-        req.flags |= KILN_SPAWN_TRANSIENT;
-    const std::string origin = "emf:" + std::string(mod_name(m));
-    req.tag = kstr("emf");
-    req.origin = kstr(origin);
-    KilnEntity e = 0;
-    const KilnResult rc = S.spawn->spawn(&req, &e);
-    if (rc != KILN_OK) {
-        refuse(m, fn, rc == KILN_ERR_NOT_FOUND ? "unknown template" : rc == KILN_ERR_UNAVAILABLE ? "the world is not running yet"
-                                                                                                   : "the engine refused (kiln.log)");
-        return 0;
-    }
-    return e;
-}
-
-uint32_t api_spawn(EmfWorld* w, const uint8_t guid[16], double x, double y, double z) {
-    return do_spawn(caller_mod(_ReturnAddress()), w, guid, x, y, z, "spawn");
-}
-
-uint32_t api_spawn_ex(EmfWorld* w, const uint8_t guid[16], double x, double y, double z, const EmfComponentInit* comps,
-                      uint32_t count) {
-    Mod* m = caller_mod(_ReturnAddress());
-    if (count == 0) return do_spawn(m, w, guid, x, y, z, "spawn_ex");
-    if (!comps || count > KILN_SPAWN_MAX_COMPONENTS) return refuse(m, "spawn_ex", "bad component list"), 0;
-    if (!S.spawn || S.spawn->header.size < offsetof(KilnSpawnApi, capabilities) + sizeof(S.spawn->capabilities) ||
-        !S.spawn->capabilities || !(S.spawn->capabilities() & KILN_SPAWN_CAP_COMPONENTS))
-        return unsupported(m, "spawn_ex", "kiln.spawn spawn-time components are unavailable"), 0;
-    std::vector<KilnSpawnComponent> values;
-    values.reserve(count);
-    for (uint32_t i = 0; i < count; ++i) {
-        if (!comps[i].hash || !comps[i].data || !comps[i].size || comps[i].size > (1u << 20))
-            return refuse(m, "spawn_ex", "invalid component bytes"), 0;
-        values.push_back({comps[i].hash, 0, comps[i].data, comps[i].size});
-    }
-    return do_spawn(m, w, guid, x, y, z, "spawn_ex", values.data(), count);
-}
-
+// ============================================================================================= destroy =======
 bool api_destroy(EmfWorld* w, uint32_t entity) {
     Mod* m = caller_mod(_ReturnAddress());
     if (!S.spawn) {
@@ -1135,10 +1078,6 @@ void core_note(std::string_view text) {
 
 void hud_on_ready() {}
 
-uint32_t spawn_for(Mod* m, EmfWorld* w, const uint8_t guid[16], double x, double y, double z, const char* fn) {
-    return do_spawn(m, w, guid, x, y, z, fn);
-}
-
 void ui_refresh_demand() {
     std::lock_guard lock(g_hud_mutex);
     update_demand();
@@ -1149,8 +1088,7 @@ void fill_game(EmfApi* t) {
     t->find_item = &api_find_item;
     t->item_info = &api_item_info;
     t->give_item = &api_give_item;
-    t->spawn = &api_spawn;
-    t->spawn_ex = &api_spawn_ex;
+    fill_spawn(t);
     t->destroy = &api_destroy;
     t->on_save = &api_on_save;
     t->on_load = &api_on_load;

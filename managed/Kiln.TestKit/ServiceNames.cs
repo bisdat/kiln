@@ -76,6 +76,7 @@ internal static class ServiceNames
         "kiln.toolwear",
         "kiln.types",
         "kiln.ui",
+        "kiln.ui.ammo",
         "kiln.ui.blocks",
         "kiln.ui.chest",
         "kiln.ui.inventory",
