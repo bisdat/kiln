@@ -337,7 +337,7 @@ Not reported:
 - plain values such as strings and numbers.
 
 ```csharp
-Shared.Registry.Items.Add(this);          // KILN104: added to 'Registry.Items', static state of SharedLib
+Shared.Listeners.All.Add(this);           // KILN104: added to 'Listeners.All', static state of SharedLib
 AppContext.SetData("my-mod", settings);   // KILN104
 GCHandle.Alloc(this);                     // KILN104 (no Free in the type)
 ```
