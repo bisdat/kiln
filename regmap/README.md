@@ -71,6 +71,7 @@ game's member and type names go in `evidence` only. regmap_check.py refuses a re
   "reasons": { "items.comfort": "no lab round trip of it on this build yet" },   // unproven rows only, in Kiln words
   "kinds": { "items.manaCost": { "sint32": "proven (141 entries on this build)", "float": "none on this build" } },
   "regmapDigest": "<sha256>",                              // the regmap/common it was proven on (rows enabled only on it)
+  "provenBy": "lab",                                       // lab (kilnctl regproof on lab evidence) | mirror (client, --mirror)
   "aliases": { "renames": [], "removals": [], "suffixes": [] } }
 ```
 
@@ -104,8 +105,9 @@ exe> --game-build <b> --out <dir>` (both exes read as data) writes the client re
 when the same row is `ok` in the verified server record AND the client exe's reflection gives the row the same layout as the
 server exe's (the members its paths walk, their types and offsets, the enum values it maps, and the registry's entry
 members). Every other mapped row is `unproven`: with the server's reason where the server proof left it unproven, else
-"layout differs from the proven server build". The mirror is `verified` only when the server record is verified and of the
-same game build and both reflections are of the two exes; its layouts and aliases are the client exe's own (regmap_check.py,
+"layout differs from the proven server build". The mirror is `verified` only when the server record is verified, lab-proven
+(`"provenBy": "lab"`, which kilnctl regproof writes only when it judged fresh lab evidence: the gate copy's reflection-only
+candidate never qualifies; review3 S5) and of the same game build and both reflections are of the two exes; its layouts and aliases are the client exe's own (regmap_check.py,
 the aliases carried from the tree's record of that exe). Commit `regmap-client-<sha>.json` from `<dir>` as
 `regmap/client/<sha>.json`, and mirror again whenever the server record changes.
 

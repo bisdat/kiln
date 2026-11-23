@@ -433,6 +433,11 @@ impl Proof {
     }
 }
 
+/// A record's `provenBy` when kilnctl regproof judged fresh lab evidence (the only server record `--mirror` takes).
+pub const PROVEN_BY_LAB: &str = "lab";
+/// A client record's `provenBy` when it mirrors a lab-proven server record.
+pub const PROVEN_BY_MIRROR: &str = "mirror";
+
 /// The record to write: the candidate with each row's proven state, `verified` and what the proof covered.
 pub fn record(p: &Proof, candidate: &Value) -> Value {
     let mut r = candidate.clone();
@@ -456,6 +461,12 @@ pub fn record(p: &Proof, candidate: &Value) -> Value {
             o.insert("kinds".into(), Value::Object(kinds));
         }
         o.insert("verified".into(), Value::Bool(p.verified));
+        // review3 S5: what proved a verified record ("lab": kilnctl regproof judged fresh lab evidence; "mirror": --mirror of a
+        // lab-proven server record); never carried from the candidate (the gate copy's reflection-only one claims nothing)
+        o.remove("provenBy");
+        if p.verified {
+            o.insert("provenBy".into(), Value::String(if p.mirror_of.is_some() { PROVEN_BY_MIRROR } else { PROVEN_BY_LAB }.into()));
+        }
         o.insert("proof".into(), Value::String(p.summary()));
         if p.regmap_digest.is_empty() {
             o.remove("regmapDigest");
@@ -1726,6 +1737,11 @@ mod tests {
         // review3 S4: the instance's copy says it was marked on this server (kiln.content then advises a new proof, not a
         // Kiln update, when regmap/common changes under it); the copy to commit does not
         assert_eq!(read_json(&dst).unwrap()["markedLocally"], true);
+        // review3 S5: a record kilnctl marks from fresh lab evidence says so (what --mirror requires); a candidate's own claim
+        // is never carried, and an unverified proof claims nothing
+        assert_eq!(rec["provenBy"], "lab");
+        let mut claimed = candidate();
+        claimed["provenBy"] = json!("lab");
         assert!(read_json(&out.join(format!("verified-regmap-server-{SHA}.json"))).unwrap().get("markedLocally").is_none());
         // a verified record is kept unless the caller replaces it (a fuller proof of the same build); kept is no error
         let mut newer = rec.clone();
@@ -1741,6 +1757,7 @@ mod tests {
         let pb = prove(&bad, "T");
         let kiln2 = root.join("game2/kiln");
         assert!(mark(&kiln2, &pb, &record(&pb, &candidate()), &out, true).is_err());
+        assert!(record(&pb, &claimed).get("provenBy").is_none(), "an unverified proof is proven by nothing");
         assert!(!kiln2.exists());
         assert!(report_text(&pb).contains("NOT verified"));
         let _ = std::fs::remove_dir_all(&root);
