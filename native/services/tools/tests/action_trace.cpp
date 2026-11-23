@@ -3,6 +3,7 @@
 // from what its terrain kernel saw, and the trace reports a change of state once, however many strokes repeat it.
 // No game, no hooks.
 #include "../action_trace.h"
+#include <chrono>
 #include <cstdlib>
 #include <iostream>
 #include <thread>
@@ -100,7 +101,36 @@ void trace() {
     t.reset();CHECK(!t.any()&&t.count(ActionExit::Removed)==0&&t.others()==0&&!t.take(&state,&covered)&&t.detail_text().empty());
 }
 }
+void publication() {
+    // What the tools service's Pre publisher writes: the log line (state, meaning, last stroke, how many changes it
+    // covers, every counter) and the capability text, which names the last stroke first so the 512-byte capability
+    // text never cuts it off.
+    ActionTrace t;
+    t.record(ActionExit::NotServerWorld,{0x1234,0,0,0xff,0xff});
+    t.record(ActionExit::Removed,{0x1234,0xb00b0001,0.5f,0,1});
+    ActionExit state{};uint64_t covered=0;
+    CHECK(t.take(&state,&covered)&&covered==2);
+    CHECK(t.log_line(state,covered)=="tools: action attempts: removed (allowed terrain was removed) (program 0x00001234, "
+          "UsedItem 0xb00b0001, radius 0.50 m, game result 0 done); 2 state changes since the last line; strokes: "
+          "not the server world 1, removed 1");
+    CHECK(t.log_line(state,1)=="tools: action attempts: removed (allowed terrain was removed) (program 0x00001234, "
+          "UsedItem 0xb00b0001, radius 0.50 m, game result 0 done); strokes: not the server world 1, removed 1");
+    CHECK(t.caps_text(state)=="last stroke: removed; strokes: not the server world 1, removed 1");
+    // Every counter busy: the capability text still starts with the last stroke.
+    for(size_t i=0;i<size_t(ActionExit::Count);++i)for(int k=0;k<3;++k)t.record(ActionExit(i));
+    for(int k=0;k<123456;++k)t.other();
+    CHECK(t.caps_text(ActionExit::Added).rfind("last stroke: added; strokes: unreadable 3, ",0)==0);
+    CHECK(t.caps_text(ActionExit::Added).find(", added 3; other programs 123456")!=std::string::npos);
+    // At most one publication a second: the first is due at once, then nothing until a second has passed.
+    using clock=std::chrono::steady_clock;
+    PublishGate gate;const auto t0=clock::now();
+    CHECK(gate.due(t0));gate.mark(t0);
+    CHECK(!gate.due(t0)&&!gate.due(t0+std::chrono::milliseconds(999)));
+    CHECK(gate.due(t0+std::chrono::seconds(1)));gate.mark(t0+std::chrono::seconds(1));
+    CHECK(!gate.due(t0+std::chrono::milliseconds(1500))&&gate.due(t0+std::chrono::seconds(5)));
+    PublishGate early;CHECK(early.due(clock::time_point{}));
+}
 int main() {
-    names();outcomes();tally();trace();
+    names();outcomes();tally();trace();publication();
     std::cout<<"action trace: "<<checks<<" checks passed\n";
 }

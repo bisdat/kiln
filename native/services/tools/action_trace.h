@@ -8,6 +8,7 @@
 #include "include/kiln_tools_policy.h"
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -236,10 +237,33 @@ public:
         if(size_t(used)>=sizeof buffer) used = int(sizeof buffer)-1;
         return std::string(" (")+std::string(buffer, size_t(used))+")";
     }
+    // The kiln.log line for a taken change of state: the state, what it means, the last stroke's facts, how many changes
+    // it covers, then every counter. Allocates: publisher only.
+    std::string log_line(ActionExit state, uint64_t covered) const {
+        std::string line = std::string("tools: action attempts: ") + action_exit_name(state) + " (" +
+            action_exit_meaning(state) + ")" + detail_text();
+        if(covered>1) line += "; " + std::to_string(covered) + " state changes since the last line";
+        return line + "; strokes: " + summary();
+    }
+    // The tools.actions capability text's trace: the last stroke first, so the capability's 512-byte cut never drops it.
+    std::string caps_text(ActionExit state) const {
+        return std::string("last stroke: ") + action_exit_name(state) + "; strokes: " + summary();
+    }
     void reset() noexcept {
         for(auto& c : counts_) c.store(0, std::memory_order_relaxed);
         others_.store(0); changes_.store(0); published_changes_.store(0);
         last_.store(uint8_t(n)); program_.store(0); item_.store(0); radius_bits_.store(0); game_.store(0xff); done_.store(0xff);
     }
+};
+
+// The publisher's rate limit: the first publication is due at once, each later one a second after the previous.
+class PublishGate {
+    std::chrono::steady_clock::time_point last_{};
+    bool published_ = false;
+public:
+    bool due(std::chrono::steady_clock::time_point now) const noexcept {
+        return !published_ || now - last_ >= std::chrono::seconds(1);
+    }
+    void mark(std::chrono::steady_clock::time_point now) noexcept { last_ = now; published_ = true; }
 };
 } // namespace kiln::tools

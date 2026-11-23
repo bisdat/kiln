@@ -57,7 +57,7 @@ void report(const char* name,uint32_t state,uint32_t reason,const char* message)
 // The action trace (action_trace.h, kiln#133): the Pre publisher's last summary, shown on the tools.actions rows.
 std::mutex trace_gate;
 std::string trace_text;
-std::chrono::steady_clock::time_point trace_published{};
+kiln::tools::PublishGate trace_published; // Pre only
 // "<why>; tool programs bound here: N; action attempts: ...": whether this process published a family, and its strokes.
 void report_actions(const char* name,const kt::ActionAvailability& a) {
     if(!caps)return;
@@ -75,21 +75,18 @@ void publish_action_trace() {
     auto& trace=kiln_tools_action_trace();
     if(!trace.pending()||!api)return;
     const auto now=std::chrono::steady_clock::now();
-    if(trace_published.time_since_epoch().count()&&now-trace_published<std::chrono::seconds(1))return;
+    if(!trace_published.due(now))return;
     kiln::tools::ActionExit state{};uint64_t covered=0;
     if(!trace.take(&state,&covered))return;
-    trace_published=now;
+    trace_published.mark(now);
     try {
-        const std::string summary=trace.summary();
-        std::string line=std::string("tools: action attempts: ")+kiln::tools::action_exit_name(state)+" ("+
-            kiln::tools::action_exit_meaning(state)+")"+trace.detail_text();
-        if(covered>1)line+="; "+std::to_string(covered)+" state changes since the last line";
-        line+="; strokes: "+summary;
+        const std::string line=trace.log_line(state,covered);
         const bool fault=state==kiln::tools::ActionExit::ContinuationFault||state==kiln::tools::ActionExit::ReadFault||
             state==kiln::tools::ActionExit::Faulted;
         if(api->log)api->log(service_owner,fault?KILN_LOG_WARN:KILN_LOG_INFO,{line.data(),line.size()});
+        std::string text=trace.caps_text(state);
         std::lock_guard lock(trace_gate);
-        trace_text="action attempts: "+summary+"; last: "+kiln::tools::action_exit_name(state);
+        trace_text.swap(text);
     } catch(...) {}
 }
 uint32_t session_state() {
