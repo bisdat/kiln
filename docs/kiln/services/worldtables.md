@@ -41,8 +41,10 @@ reads the game's own bytes once, applies every enabled mod's entries, and serves
 - A table with nothing to change is served as the game has it. With no mod, every table is the game's to the byte (the lab compares them).
 
 ## When
-- `on_ready`: read every enabled mod's `blocks/*.json` (sections `materialTweaks`, `buildingMaterials`, `terrainMaterials`, `strengths`, `blueprints`), `blocks.tables.json` when there is
-  one, and what code defined in an earlier run (below).
+- `on_ready`: read every enabled mod's `blocks/*.json`, `blocks.tables.json` when there is one, and what code defined in an earlier run (below).
+  Each file gives every section this service reads (`materialTweaks`, `buildingMaterials`, `buildingMaterialPools`, `terrainMaterials`, `strengths`,
+  `surfaces`, `blueprints`, `toolMaterialPools`, `toolBrushShapes`, `craftingProps`, and props, stations, containers, doors, beds and seats that
+  provide a crafting prop); a file needs no other section to be read.
 - When the game's resource service comes up (kiln.assets' `when_resources_ready`), on the game's thread and before its first read: resolve names, give
   ids, write the tables, register them as overrides, then run the table writers. Every service's `on_ready` has run by then, on both sides (client log:
   services ready 3 s before the resource service).
@@ -248,3 +250,9 @@ The process freezes the boot file set and SHA-256 fingerprints before managed mo
 Canonical pool GUID/id, ordered item IDs and blueprint-to-pool bindings enter the handshake under `kiln.materialpools.v1`. The existing network gate consumes that hash before custom block/template streams. A join refused over pools names the pool and which side lacks it or differs (HELLO's `kiln.worldtables.pools`: a digest per pool of its GUID, roof, members and bound shapes); a current peer with no pools sends an empty field, while a peer older than dev.29 sends none and reads the old text. No custom pools preserves the existing fixture hash `78445d0c05b1c25e` exactly; package matching still applies independently.
 
 **Verification boundary:** these paths ship enabled when their inputs resolve. Native sanitizer tests use synthetic resources and original resource bytes from both executables; managed tests use a scriptable fake. The lab proof (`mods/tests/material-pools-test`: 18 cases on two dedicated-server labs, server build 26430253) has passed; a real client has not run it. Registry ingestion, exact menu contents/order, preview, cost, surface/loot, restart/rejoin and real peer refusal remain the coordinator's lab and `17-material-pools` guided check. Do not treat a fake or served byte dump as proof of those outcomes.
+
+## Changelog
+
+- **0.2.0-dev.30.7:** a blocks file holding only `toolBrushShapes` or `toolMaterialPools`, as `KilnBakeWorldTables` writes
+  `blocks.tables.json` for a mod whose only world-table block is a building tool, is read at startup. Before, such a file was
+  skipped unless it also had another section, so the tool's items and recipe were missing. Thanks bisdat (kiln#129).
