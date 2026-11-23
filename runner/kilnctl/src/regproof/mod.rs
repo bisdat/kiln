@@ -281,6 +281,13 @@ pub fn prove(inp: &Inputs, when: &str) -> Proof {
                         why = hard;
                         why.extend(missing);
                         "changed"
+                    } else if row.state.as_deref() == Some("unproven") {
+                        // a round trip proves the mapping, not when the game reads the value: regmap/common decides
+                        let r = row.reason.clone().unwrap_or_else(|| "when the game reads it is not traced yet".into());
+                        why = vec![format!("regmap/common: unproven ({r})")];
+                        why.extend(missing);
+                        reason = Some(r);
+                        "unproven"
                     } else if !missing.is_empty() {
                         reason = Some(unproven_reason(&missing));
                         why = missing;
@@ -305,6 +312,13 @@ pub fn prove(inp: &Inputs, when: &str) -> Proof {
             why.push(format!("... {more} more (proof.json)"));
         }
         p.rows.insert(q, RowVerdict { state: state.into(), why, reason });
+    }
+    for a in &accepted {
+        if !regmap::qualified(&inp.map).iter().any(|(q, ..)| q == *a) {
+            p.notes.push(format!("--accept {a}: no such row"));
+        } else if p.refl.as_ref().and_then(|r| r.rows.get(*a)).is_none_or(|d| d.status != refl::Status::Changed) {
+            p.notes.push(format!("--accept {a}: its reflection did not change; nothing to accept"));
+        }
     }
     p.accepted = accepted.into_iter().cloned().collect();
     p.verified = p.blockers.is_empty();
@@ -1350,6 +1364,37 @@ mod tests {
         assert_eq!(regmap_baseline(&cache, &kiln, &tree, "server", &c).map(|(_, s)| s), Some(b.clone()));
         assert_eq!(regmap_baseline(&cache, &kiln, &tree, "server", &b).map(|(_, s)| s), Some(a.clone()), "never the new build");
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A row regmap/common marks unproven (when the game reads it is not traced) stays unproven with that reason: a round
+    /// trip proves the mapping, not when the game reads the value.
+    #[test]
+    fn a_row_unproven_in_common_stays_unproven_whatever_the_lab_shows() {
+        let mut inp = with_power_samples(inputs());
+        let row = inp.map.get_mut("gadgets").unwrap().rows.get_mut("size").unwrap();
+        row.state = Some("unproven".into());
+        row.reason = Some("when the game reads it is not traced".into());
+        let p = prove(&inp, "T");
+        assert!(p.verified, "{:?}", p.blockers);
+        assert_eq!(p.rows["gadgets.size"].state, "unproven");
+        assert_eq!(p.rows["gadgets.size"].reason.as_deref(), Some("when the game reads it is not traced"));
+        assert_eq!(record(&p, &candidate())["reasons"]["gadgets.size"], "when the game reads it is not traced");
+        assert!(p.summary().contains("rows ok 6/7 (1 unproven)"), "{}", p.summary());
+        // a failed step still makes it changed
+        let mut bad = inp.clone();
+        for x in bad.suites[0].samples.iter_mut().filter(|x| x.field == "gadgets.size") {
+            x.read_back = Some(json!(20));
+        }
+        assert_eq!(prove(&bad, "T").rows["gadgets.size"].state, "changed");
+    }
+
+    #[test]
+    fn accepting_a_row_that_did_not_change_or_does_not_exist_is_named() {
+        let mut inp = with_power_samples(inputs());
+        inp.accepted = vec!["gadgets.size".into(), "gadgets.nothing".into()];
+        let p = prove(&inp, "T");
+        assert!(p.notes.iter().any(|n| n.contains("gadgets.size") && n.contains("did not change")), "{:?}", p.notes);
+        assert!(p.notes.iter().any(|n| n.contains("gadgets.nothing") && n.contains("no such row")), "{:?}", p.notes);
     }
 
     #[test]

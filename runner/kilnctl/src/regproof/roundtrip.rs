@@ -275,6 +275,14 @@ fn sample_problems(row: &Row, x: &Sample, raw: Raw) -> Vec<String> {
         b => p.push(format!("{e}: read back {} after writing {probe}", show(b))),
     }
     raw_check("after", &x.raw_after, probe, &mut p);
+    // structured values are proven through Kiln's own mapping both ways: the game's members must at least have moved
+    if raw == Raw::SchemaOnly && !same(&row.conv, probe, read) {
+        if let (Some(a), Some(b)) = (&x.raw_before, &x.raw_after) {
+            if a.len() == n && a == b {
+                p.push(format!("{e}: the raw members did not change after a write that changed the value"));
+            }
+        }
+    }
     if x.reverted != Some(true) {
         p.push(format!("{e}: the write was not reverted"));
     }
@@ -493,6 +501,17 @@ pub(crate) mod tests {
             assert!(x.problems.iter().any(|p| p.contains(word)), "{field}: {word:?} not in {:?}", x.problems);
             assert!(r.fields.iter().filter(|(q, _)| q.as_str() != field).all(|(_, o)| o.ok), "only {field} fails");
         }
+    }
+
+    /// A list or reference row is not compared value by value, so a write through a wrong conversion and a read back
+    /// through the same one would pass: the game's members must at least have changed.
+    #[test]
+    fn a_schema_only_write_must_change_the_raw_members() {
+        let mut suites = full();
+        edit(&mut suites, "plans.parts", |s| s.raw_after = s.raw_before.clone());
+        let r = check(&map_with_float_cap(), "server", SHA, DIGEST, &suites);
+        assert!(!r.fields["plans.parts"].ok);
+        assert!(r.fields["plans.parts"].problems.iter().any(|p| p.contains("did not change")), "{:?}", r.fields["plans.parts"]);
     }
 
     #[test]

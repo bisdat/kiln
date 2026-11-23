@@ -205,7 +205,8 @@ pub fn changelog(d: &Diff) -> String {
 
 /// The numbers of the balance registry's entry (the gear constants among them).
 pub fn balance(e: &Export) -> BTreeMap<String, f64> {
-    let Some(entry) = e.registries.get("balance").and_then(|r| r.values().next()) else { return BTreeMap::new() };
+    let Some(reg) = e.registries.get("balance") else { return BTreeMap::new() };
+    let Some(entry) = reg.values().find(|x| x.contains_key("gear.seed")).or_else(|| reg.values().next()) else { return BTreeMap::new() };
     entry.iter().filter_map(|(k, v)| Some((k.clone(), v.as_f64()?))).collect()
 }
 
@@ -307,5 +308,8 @@ pub(crate) mod tests {
         assert_eq!(b["gear.seed"], 11.0);
         assert_eq!(b.len(), 4, "the numbers only: {b:?}");
         assert!(balance(&export(NEW, "101", "none", json!({}))).is_empty());
+        // the entry with the gear constants, not the first by name
+        let two = export(NEW, "101", "none", json!({"balance": {"game:a_first": {"other": 1}, "game:balance": {"gear.seed": 11}}}));
+        assert_eq!(balance(&two)["gear.seed"], 11.0);
     }
 }

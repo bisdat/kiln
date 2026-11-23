@@ -218,24 +218,41 @@ pub fn harvest(data_dir: &Path, store: &Store) -> Result<Harvest> {
     Ok(Harvest { tables: out, problems })
 }
 
-/// Refuses a folder for id tables or proof outputs inside the Kiln tree or any Kiln checkout (a folder with `.git`
-/// and `regmap/common`): ids and values never go into the repository.
+/// Refuses a folder for id tables or proof outputs inside the Kiln tree or any Kiln tree (a folder with `regmap/common` and
+/// `.git` or `tools/registrygen`): ids and values never go into the repository.
 pub fn guard(dir: &Path, tree: &Path) -> Result<()> {
     let d = absolute(dir);
     if !tree.as_os_str().is_empty() && d.starts_with(absolute(tree)) {
         bail!("{} is inside the Kiln tree {}: id tables and values hold the game's names and never go into the repository \
                (set KILN_REGMAP_IDS or --out to a folder outside it)", d.display(), tree.display());
     }
-    if let Some(a) = d.ancestors().find(|a| a.join(".git").exists() && a.join("regmap/common").is_dir()) {
+    let kiln_tree = |a: &Path| a.join("regmap/common").is_dir() && (a.join(".git").exists() || a.join("tools/registrygen").is_dir());
+    if let Some(a) = d.ancestors().find(|a| kiln_tree(a)) {
         bail!("{} is inside a Kiln checkout ({}): id tables and values hold the game's names and never go into the repository",
               d.display(), a.display());
     }
     Ok(())
 }
 
+/// `.` and `..` taken out by the letters of the path (a `..` past a folder that does not exist yet would stop the walk
+/// below and hide where the path really goes).
+fn lexical(p: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for c in p.components() {
+        match c {
+            std::path::Component::ParentDir => {
+                out.pop();
+            }
+            std::path::Component::CurDir => {}
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
+
 /// An absolute path with the existing part's links resolved (the rest may not exist yet).
 fn absolute(p: &Path) -> PathBuf {
-    let p = if p.is_absolute() { p.to_path_buf() } else { std::env::current_dir().unwrap_or_default().join(p) };
+    let p = lexical(&if p.is_absolute() { p.to_path_buf() } else { std::env::current_dir().unwrap_or_default().join(p) });
     let (mut base, mut rest) = (p.clone(), Vec::new());
     while !base.exists() {
         match (base.parent(), base.file_name()) {
@@ -357,7 +374,7 @@ pub fn check(prev: &IdTable, now: &IdTable, aliases: &Aliases, previous: &Aliase
         for (g, id) in pt {
             match nt.get(g) {
                 Some(i) if i == id => r.kept += 1,
-                Some(i) => r.problems.push(format!("{reg}: {id} (GUID {g}) is {i} on the new build: a Kiln id never moves (the record must pin it)")),
+                Some(i) => r.problems.push(format!("{reg}: {id} (GUID {g}) is {i} on the new build: a Kiln id never moves (the record must pin GUID {g} to the old id {id})")),
                 None => match by_id.get(id) {
                     Some(g2) if pins.get(&(reg.clone(), (*g2).clone())) == Some(id) => r.guid_changes.push(format!("{reg} {id}: {g} -> {g2}")),
                     Some(g2) => r.problems.push(format!("{reg}: {id} was GUID {g}; the new build gives it to GUID {g2} (record the GUID \
@@ -541,6 +558,14 @@ pub(crate) mod tests {
         std::fs::write(other.join(".git"), "gitdir: elsewhere").unwrap();
         assert!(guard(&other.join("a/b"), &tree).is_err(), "inside another Kiln checkout (a worktree)");
         assert!(guard(&root.join("state/regmap-ids"), &tree).is_ok());
+        // ".." that walks back into the tree through a folder that does not exist
+        assert!(guard(&root.join("missing/../kiln/out"), &tree).is_err(), "lexical .. into the tree");
+        assert!(guard(&root.join("missing/x/../../kiln/out"), &tree).is_err());
+        // an unpacked Kiln tree without .git
+        let unpacked = root.join("unpacked");
+        std::fs::create_dir_all(unpacked.join("regmap/common")).unwrap();
+        std::fs::create_dir_all(unpacked.join("tools/registrygen")).unwrap();
+        assert!(guard(&unpacked.join("out"), &tree).is_err(), "a Kiln tree without .git");
         let _ = std::fs::remove_dir_all(&root);
     }
 

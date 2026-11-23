@@ -49,6 +49,9 @@ pub struct Row {
     /// mapped (default) | unproven | unmapped
     #[serde(default)]
     pub state: Option<String>,
+    /// why an unproven or unmapped row is not mapped, in Kiln words (players read it)
+    #[serde(default)]
+    pub reason: Option<String>,
 }
 
 impl Row {

@@ -292,6 +292,16 @@ mod tests {
         assert_eq!(h, 0xa40975297674a479, "gear vectors: fnv64 {h:#018x}");
     }
 
+    /// kiln.content reads the level range from the schema (formulas.cpp level_limit over gen::kFields): the port's
+    /// constants must be the schema's.
+    #[test]
+    fn the_level_range_is_the_schemas() {
+        let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../schema/registry/items.json");
+        let s: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap();
+        let min = &s["fields"]["levels"]["fields"]["min"];
+        assert_eq!((min["min"].as_i64(), min["max"].as_i64()), (Some(LEVEL_MIN as i64), Some(LEVEL_MAX as i64)));
+    }
+
     #[test]
     fn formulas_by_name_as_kiln_content_takes_them() {
         let g = Constants::default();
