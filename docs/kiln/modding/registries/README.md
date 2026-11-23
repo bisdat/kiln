@@ -108,8 +108,8 @@ if (!reverted.Ok) Log.Warn(reverted.Reason ?? "registry revert not applied");
 
 `RegistryChangeResult` copies outcome, accepted/refused/skipped counts, world token, generation and reason. `Ok` means
 Applied or Reverted with no refused edits or skipped foreign bytes. PendingWorld/PendingResource do not claim bytes were
-changed. RestartRequired, WorldRequired, Refused, Skipped and Unverified stay distinct. Disposal reverts once; owner
-retirement also cleans up live changes. Process ModLoad layers persist across worlds; world-bound layers expire with
+changed. RestartRequired, WorldRequired, Refused, Skipped and Unverified stay distinct. A change is not disposable:
+only explicit `Revert()` on the tick thread or owner retirement removes its layer, never leaving a scope. Process ModLoad layers persist across worlds; world-bound layers expire with
 their world. Already committed GameStart layers stay until process restart, including through a runtime hot reload.
 
 Subscribe to `Registry.Ready` in `OnLoad` for copied stage/live ready notifications; the Host removes the handler at unload.

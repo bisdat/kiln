@@ -346,7 +346,6 @@
 ~[KILNX031]override Kiln.Registry.RegistryId.Equals(object obj) -> bool
 [KILNX031]Kiln.Registry.Registry
 [KILNX031]Kiln.Registry.RegistryChange
-[KILNX031]Kiln.Registry.RegistryChange.Dispose() -> void
 [KILNX031]Kiln.Registry.RegistryChange.Result.get -> Kiln.Registry.RegistryChangeResult!
 [KILNX031]Kiln.Registry.RegistryChange.Revert() -> Kiln.Registry.RegistryChangeResult!
 [KILNX031]Kiln.Registry.RegistryChangeOutcome

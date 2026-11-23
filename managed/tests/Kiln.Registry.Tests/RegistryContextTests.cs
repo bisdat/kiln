@@ -176,6 +176,39 @@ public sealed class RegistryContextTests
     }
 
     [Fact]
+    public void ChangesHaveExplicitRevertLifetimeRatherThanDisposableScopeLifetime()
+    {
+        Assert.False(typeof(IDisposable).IsAssignableFrom(typeof(RegistryChange)));
+        Assert.Null(typeof(RegistryChange).GetMethod("Dispose"));
+        Assert.NotNull(typeof(RegistryChange).GetMethod(nameof(RegistryChange.Revert))!.GetCustomAttributes(typeof(TickThreadOnlyAttribute), false).SingleOrDefault());
+    }
+    private sealed class ThreadBackend(int tick) : IKilnBackend
+    {
+        public string Version => "test";
+        public bool IsTickThread => Environment.CurrentManagedThreadId == tick;
+        public bool HasFeature(string name) => false;
+        public void Log(ulong owner, LogLevel level, string text) { }
+        public nint Service(string name, uint minVersion) => 0;
+    }
+    [Fact]
+    public void ExplicitRevertRefusesOtherThreadsAndRunsOnlyOnceOnTheTick()
+    {
+        var owner = Mod(); var calls = 0;
+        var backend = Backend.Current; var previous = RegistryRuntime.Revert;
+        Backend.Current = new ThreadBackend(Environment.CurrentManagedThreadId);
+        RegistryRuntime.Revert = (_, _) => { ++calls; return new(5, 0, 0, 0, 1, 2, 0, ""); };
+        try
+        {
+            var change = new RegistryChange(owner, new(0, 1, 0, 0, 1, 1, 9, ""));
+            Exception? failure = null;
+            var worker = new Thread(() => failure = Record.Exception(() => { change.Revert(); }));
+            worker.Start(); worker.Join();
+            Assert.IsType<InvalidOperationException>(failure); Assert.Equal(0, calls);
+            Assert.True(change.Revert().Ok); Assert.True(change.Revert().Ok); Assert.Equal(1, calls);
+        }
+        finally { Backend.Current = backend; RegistryRuntime.Revert = previous; owner.Retire(); }
+    }
+    [Fact]
     public void EveryNonOkCompletionHasAReason()
     {
         for (uint outcome = 0; outcome <= 8; ++outcome)

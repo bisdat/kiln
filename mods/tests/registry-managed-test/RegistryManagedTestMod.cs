@@ -88,13 +88,13 @@ public sealed class RegistryManagedTestMod : Mod
         }
         Check(Stack() == 274, "WorldLoad Alter and Final mapped writes completed");
         ItemEntry? retained = null;
-        using var change = DataRegistry.Change(view => { retained = view.Items[Wood]; retained.MaxStack = 281; });
+        var change = DataRegistry.Change(view => { retained = view.Items[Wood]; retained.MaxStack = 281; });
         Check(change.Result.Ok && change.Result.Accepted == 1, "manual change returns Applied with one accepted edit");
         Check(Stack() == 281, "resolved typed mapped read sees manual bytes");
         Check(Throws(RegistryContextError.Closed, () => _ = retained!.MaxStack), "retained manual cell expired");
         var reverted = change.Revert();
         Check(reverted.Ok && Stack() == 274, "revert recomposes prior automatic layers");
-        using var restart = DataRegistry.Change(view => view.Balance.LevelCap = 60);
+        var restart = DataRegistry.Change(view => view.Balance.LevelCap = 60);
         Check(restart.Result.Outcome == RegistryChangeOutcome.RestartRequired && !restart.Result.Ok && restart.Result.Reason is not null,
             "later restart-only write has a typed refusal and reason");
         try { DataRegistry.Change(view => { view.Items[Wood].MaxStack = 999; throw new InvalidOperationException("expected"); }); }

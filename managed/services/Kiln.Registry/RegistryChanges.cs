@@ -50,9 +50,10 @@ public sealed record RegistryChangeResult(RegistryChangeOutcome Outcome, uint Ac
         });
 }
 
-/// <summary>An owner-bound live change. Revert removes only this transaction, never an old memory snapshot.</summary>
+/// <summary>An owner-bound live change. Only explicit Revert or owner retirement removes it; leaving a scope does not.
+/// Revert removes this transaction, never an old memory snapshot.</summary>
 [Experimental("KILNX031")]
-public sealed class RegistryChange : IDisposable
+public sealed class RegistryChange
 {
     private readonly WeakReference<ModContext> _owner;
     private ulong _handle;
@@ -61,23 +62,16 @@ public sealed class RegistryChange : IDisposable
     /// <summary>The last copied outcome (safe to retain after a callback or unload).</summary>
     public RegistryChangeResult Result { get; private set; }
     /// <summary>Reverts on the active world's thread. Foreign bytes are skipped, and an expired handle is refused.</summary>
-    [RegistryThreadOnly, RequiresCapability("kiln.registry.live")]
+    [TickThreadOnly, RequiresCapability("kiln.registry.live")]
     public RegistryChangeResult Revert()
     {
         if (!_owner.TryGetTarget(out var owner) || !owner.Alive)
             throw new RegistryContextException(RegistryContextError.Unloaded, "the registry change's mod retired");
         if (ModContext.CurrentMod is { } caller && !ReferenceEquals(caller, owner)) throw new ArgumentException("the change belongs to another mod");
+        Game.AssertTickThread();
         if (_handle == 0) return Result;
         var revert = RegistryRuntime.Revert ?? throw new KilnUnavailableException("kiln.registry.live");
         Result = RegistryChangeResult.From(revert(owner, _handle)); _handle = 0; return Result;
-    }
-    /// <summary>Reverts once. After owner retirement cleanup is already the host's responsibility.</summary>
-    [RegistryThreadOnly]
-    public void Dispose()
-    {
-        if (_handle == 0) return;
-        if (!_owner.TryGetTarget(out var owner) || !owner.Alive) { _handle = 0; return; }
-        Revert();
     }
 }
 
