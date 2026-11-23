@@ -195,7 +195,7 @@ private:
     uint32_t checked_epoch_ = 0;            // the server world whose write state step() last asked for (the lock)
     std::atomic<uint32_t> live_epoch_{0};   // the change callback's epoch guard (0: no world)
     std::atomic<uint64_t> now_ns_{0};       // the change callback's clock (the last step's)
-    std::atomic<bool> stopped_{false};      // world_stopped came (step() forgets that world's work by its epoch)
+    std::atomic<uint64_t> stops_{0};        // world_stopped calls so far (step() re-arms only when none came since its epoch read)
 
     mutable std::mutex m_;
     Slot slots_[kMaxPlayerSlots];

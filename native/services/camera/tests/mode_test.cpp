@@ -73,6 +73,7 @@ struct FakeWorld : ModeWorld {
     bool cancel_wrong_thread = false;      // write_cancel answers WRONG_THREAD (inside the write program, off the tick thread)
     bool in_update = false;                // the write program's update runs: a cancel now drops the result only
     std::function<void()> mid_update;      // runs inside the update, after it took its batch (a program on the tick thread)
+    std::function<void()> on_now;          // runs once inside the next now_ns() (another thread's call at that point)
     bool game_writes = true;               // the game's writer puts the stock bytes back every step
     bool component_gone = false;           // NO_COMPONENT for every request
     uint32_t force_status = 0xffffffffu;   // answer every request with this status, without running it
@@ -111,7 +112,14 @@ struct FakeWorld : ModeWorld {
         return true;
     }
     uint64_t now_ms() override { return now; }
-    uint64_t now_ns() override { return now * 1000000 + fraction_ns; }
+    uint64_t now_ns() override {
+        if (on_now) {
+            auto fn = std::move(on_now);
+            on_now = nullptr;
+            fn();
+        }
+        return now * 1000000 + fraction_ns;
+    }
     uint64_t step() override { return steps; }
     void log(int32_t, const std::string& t) override { logs.push_back(t); }
     uint32_t write_state(uint32_t component, const std::string& who) override {
@@ -636,6 +644,32 @@ void test_program_off_turns_the_row_off() {
     CHECK(g_log.back() == L("done %llu ok=0 reason=%llu rev=0 flags=0 scope=0", late, KILN_CAMERA_REASON_FRAME_FAULT));
 }
 
+// world_stopping may come on any thread. One that lands inside step(), after it read the core's epoch and before it
+// re-armed the change callbacks' epoch guard, must not bring the stopped world's epoch back: the step forgets that
+// world's work instead of keeping its ticket and guard for one more step.
+void test_stop_inside_step_keeps_the_world_stopped() {
+    Rig r;
+    const auto id = r.apply(kMod, A, 34, 2);
+    r.tick(3);
+    CHECK(r.at(A) == kHeld);
+    r.world.deliver();  // the result submits the next write
+    CHECK(r.mode.tickets() == 1);
+    r.world.on_now = [&] { r.core.world_stopping(kServer, 1); };  // fires inside step(), after its epoch read
+    r.mode.step();
+    CHECK(!r.world.on_now);
+    CHECK(g_log.back() == L("ended %llu rev=1 end=%llu", id, KILN_CAMERA_END_WORLD_STOPPED));
+    CHECK(r.mode.tickets() == 0);        // that world's ticket is cancelled and forgotten
+    CHECK(r.mode.guard(A).lease == 0);   // no guard is armed for it
+    r.world.sim();
+    CHECK(r.at(A) == r.world.stock[A]);
+    // the next world arms again
+    r.core.world_started(kServer, 2);
+    const auto next = r.apply(kMod, A, 34, 2);
+    r.tick(2);
+    CHECK(g_log.back() == L("applied %llu rev=1 end=0", next));
+    CHECK(r.at(A) == kHeld);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -645,11 +679,13 @@ int main(int argc, char** argv) {
         if (std::strcmp(argv[1], "timeline") == 0) test_timeline_begins_at_write();
         if (std::strcmp(argv[1], "precision") == 0) test_submillisecond_origin();
         if (std::strcmp(argv[1], "running-cancel") == 0) test_cancel_while_change_can_still_run();
+        if (std::strcmp(argv[1], "stop-inside-step") == 0) test_stop_inside_step_keeps_the_world_stopped();
         return 0;
     }
     test_cancel_while_change_can_still_run();
     test_cancel_in_pre_retires_until_next_step();
     test_program_off_turns_the_row_off();
+    test_stop_inside_step_keeps_the_world_stopped();
     test_retire_before_next_pre();
     test_expiry_inside_write();
     test_timeline_begins_at_write();

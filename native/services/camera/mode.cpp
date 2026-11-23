@@ -134,15 +134,20 @@ void ModeBackend::drop(KilnCameraLease lease) {
 }
 
 void ModeBackend::world_stopped(uint32_t) {
-    live_epoch_.store(0, std::memory_order_release);  // no change callback writes from here
-    stopped_.store(true, std::memory_order_release);
+    // The core zeroed its epoch before this call (under its lock). Count first, then close the guard: a step() that read
+    // the old epoch sees the count move, or its re-arm comes before this store and is overwritten by it.
+    stops_.fetch_add(1, std::memory_order_seq_cst);
+    live_epoch_.store(0, std::memory_order_seq_cst);  // no change callback writes from here
 }
 
 // ---- the server Pre -----------------------------------------------------------------------------------------------------
 
 void ModeBackend::step() {
     std::vector<Report> reports;
-    const uint32_t epoch = core_->epoch(kServer);
+    // world_stopped may come on any thread at any point of this: read its count before the core's epoch (not under the
+    // backend's lock: the order is core, then backend), and look again after re-arming.
+    const uint64_t stops = stops_.load(std::memory_order_seq_cst);
+    uint32_t epoch = core_->epoch(kServer);
     {
         std::lock_guard<std::mutex> lock(m_);
         // A Pre: no update of the write program runs now, and the one that may have held a ticket cancelled since the
@@ -157,8 +162,12 @@ void ModeBackend::step() {
         }
         const uint64_t now = world_->now_ns();
         now_ns_.store(now, std::memory_order_release);
-        stopped_.store(false, std::memory_order_release);
-        live_epoch_.store(epoch, std::memory_order_release);
+        live_epoch_.store(epoch, std::memory_order_seq_cst);
+        if (stops_.load(std::memory_order_seq_cst) != stops) {
+            // a world stopped after the epoch was read: that epoch is void, its work is forgotten below
+            live_epoch_.store(0, std::memory_order_seq_cst);
+            epoch = 0;
+        }
         for (Slot& s : slots_) {
             if (!s.player) continue;
             // Another world's work is void: the core ended its leases (WorldStopped); cancel and forget, report nothing.
