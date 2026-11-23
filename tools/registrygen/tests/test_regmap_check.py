@@ -271,7 +271,84 @@ class Checks(unittest.TestCase):
         self.assertEqual(db.member_type("keen::Row", "n")["name"], "keen::uint32")
 
 
+class Records(unittest.TestCase):
+    """review3 S3: a committed verified record is bound to the tree's regmap/common (regmapDigest), so an edit of
+    regmap/common that was not re-proven fails the check (kiln.content would enable no row of that build)."""
+
+    def tree_with_record(self, **record):
+        t = Tree()
+        self.addCleanup(t.close)
+        (t.root / "regmap" / "server").mkdir()
+        rec = {"regmap": 1, "side": "server", "exeSha256": "ab" * 32, "verified": True, "rows": {}, "provenBy": "lab"}
+        rec.update(record)
+        (t.root / "regmap" / "server" / f"{'ab' * 32}.json").write_text(json.dumps(rec))
+        return t
+
+    def test_digest_is_kilnctls(self):
+        t = Tree()
+        self.addCleanup(t.close)
+        import hashlib
+        body = (t.root / "regmap" / "common" / "things.json").read_bytes()
+        want = hashlib.sha256(f"things.json\n{hashlib.sha256(body).hexdigest()}\n".encode()).hexdigest()
+        self.assertEqual(rc.common_digest(t.root), want)
+
+    def test_a_record_of_the_trees_common_passes(self):
+        t = Tree()
+        self.addCleanup(t.close)
+        t = self.tree_with_record(regmapDigest=rc.common_digest(t.root))
+        self.assertEqual(rc.record_problems(t.root), [])
+        self.assertEqual(rc.main(["--root", str(t.root)]), 0)
+
+    def test_an_edit_of_common_that_was_not_re_proven_fails(self):
+        t = Tree()
+        self.addCleanup(t.close)
+        t = self.tree_with_record(regmapDigest=rc.common_digest(t.root))
+        f = t.root / "regmap" / "common" / "things.json"
+        f.write_text(f.read_text() + "\n")  # even a cosmetic edit: every row of the build would go off
+        problems = rc.record_problems(t.root)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("regmapDigest", problems[0])
+        self.assertEqual(rc.main(["--root", str(t.root)]), 1)
+
+    def test_a_stray_file_in_common_fails(self):
+        t = Tree()
+        self.addCleanup(t.close)
+        t = self.tree_with_record(regmapDigest=rc.common_digest(t.root))
+        shutil.copy(t.root / "regmap" / "common" / "things.json", t.root / "regmap" / "common" / "things - Copy.json")
+        self.assertEqual(len(rc.record_problems(t.root)), 1)
+
+    def test_a_verified_record_without_a_digest_fails(self):
+        t = self.tree_with_record()
+        self.assertEqual(len(rc.record_problems(t.root)), 1)
+
+    def test_an_instance_marked_record_is_not_committed(self):
+        # review3 S4: kilnctl regproof --mark's instance copy says "markedLocally"; the tree takes the --out copy
+        t = Tree()
+        self.addCleanup(t.close)
+        t = self.tree_with_record(regmapDigest=rc.common_digest(t.root), markedLocally=True)
+        problems = rc.record_problems(t.root)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("markedLocally", problems[0])
+
+    def test_a_verified_server_record_is_lab_proven(self):
+        # review3 S5: the gate copy's reflection-only candidate (verified, every row ok) must never be committed as a proof
+        t = Tree()
+        self.addCleanup(t.close)
+        for proven_by in (None, "mirror"):
+            t = self.tree_with_record(regmapDigest=rc.common_digest(t.root), provenBy=proven_by)
+            problems = rc.record_problems(t.root)
+            self.assertEqual(len(problems), 1, problems)
+            self.assertIn("provenBy", problems[0])
+
+    def test_an_unverified_record_enables_nothing_and_passes(self):
+        t = self.tree_with_record(verified=False, regmapDigest="00" * 32)
+        self.assertEqual(rc.record_problems(t.root), [])
+
+
 class Repository(unittest.TestCase):
+    def test_committed_records_are_bound_to_the_trees_common(self):
+        self.assertEqual(rc.record_problems(REPO), [])
+
     def test_repository_against_the_committed_dumps(self):
         for side in ("server", "client"):
             for dump in sorted((REPO / "sigdb" / "types" / side).glob("*.json")):

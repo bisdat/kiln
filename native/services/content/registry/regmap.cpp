@@ -175,6 +175,8 @@ bool load_record(const json& doc, BuildRecord* out, std::vector<std::string>* er
         errs->push_back("record: regmapDigest is the sha256 of the regmap/common it was proven on, 64 lower-case hex digits");
     if (!doc.contains("verified") || !doc["verified"].is_boolean()) errs->push_back("record: verified is true or false");
     else out->verified = doc["verified"].get<bool>();
+    if (doc.contains("markedLocally") && !doc["markedLocally"].is_boolean()) errs->push_back("record: markedLocally is true or false");
+    else out->marked_locally = doc.value("markedLocally", false);
     const json layouts = doc.value("layouts", json::object());
     for (const auto& [k, v] : layouts.items()) {
         const std::string s = v.is_string() ? v.get<std::string>() : std::string();
@@ -261,10 +263,19 @@ bool load_dir(const std::string& dir, const std::string& side, const std::string
     }
     out->common_digest = kiln::boot_gd::hex_of(kiln::boot_gd::sha256(digest_text));
     for (const fs::path& p : files) {
+        const std::u8string file_name = p.filename().u8string();
+        const std::string file(file_name.begin(), file_name.end());
         json doc;
-        if (!read_json(p, &doc, errs)) continue;
+        if (!read_json(p, &doc, errs)) {
+            out->stray_common.push_back(file);
+            continue;
+        }
         RegistryMap m;
-        if (!load_common(doc, &m, errs)) continue;
+        if (!load_common(doc, &m, errs)) {
+            out->stray_common.push_back(file);
+            continue;
+        }
+        if (file != m.registry + ".json") out->stray_common.push_back(file);
         for (const std::string& broken : check_routing(m)) {
             errs->push_back(broken);
             const auto colon = broken.find(": ");
@@ -313,9 +324,20 @@ Mapping RegMap::mapping(const std::string& registry, const std::string& field, s
         return Mapping::Unproven;
     }
     if (build.regmap_digest != common_digest) {
-        // the record's proof holds for the mapping it was proven on, not for an edited one (review2 S1)
-        *reason = "Unproven: " + q + " is not proven for " + build_name + " (its record was proven for another Kiln mapping than the one " +
-                  "installed; a Kiln update is needed)" + kNotApplied;
+        // the record's proof holds for the mapping it was proven on, not for an edited one (review2 S1); the advice fits
+        // why they differ (review3 S4)
+        std::string why = "regmap/common differs from the one this build's record was proven on";
+        if (!stray_common.empty()) {
+            why += ", because it holds files Kiln did not install: ";
+            for (size_t i = 0; i < stray_common.size() && i < 3; ++i) why += (i ? ", " : "") + stray_common[i];
+            if (stray_common.size() > 3) why += " and " + std::to_string(stray_common.size() - 3) + " more";
+            why += "; remove them, or repair or reinstall Kiln";
+        } else if (build.marked_locally) {
+            why = "regmap/common differs from the one this server's own record was proven on; run kilnctl regproof for this server again";
+        } else {
+            why += "; a Kiln update is needed";
+        }
+        *reason = "Unproven: " + q + " is not proven for " + build_name + " (" + why + ")" + kNotApplied;
         return Mapping::Unproven;
     }
     const auto b = build.rows.find(q);

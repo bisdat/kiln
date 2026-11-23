@@ -352,6 +352,9 @@ sample a build that has no proven record yet. Missing state, ids, or live sample
 self-test failure. Producer diagnostics never block the sigport build mark; the separate registry proof still refuses
 each row without passing evidence. No candidate is written into the source instance.
 
+Proving a new registry's rows for the first time (producer probes, the lab run, the client mirror):
+[adding-a-registry.md](adding-a-registry.md).
+
 ### The lab gate (`kilnctl gate`)
 A sibling instance `<name>-gate`: `<dir>.gate` gets the instance's game files (reflinked), its deployed `kiln/` folder
 and its save (copied), policy `any`, the candidate record, the candidate definitions when the port changed patterns,

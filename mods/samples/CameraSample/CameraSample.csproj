@@ -1,0 +1,19 @@
+<Project>
+  <!-- Since mod API 0.2.17. Repository-mode SDK sample; the same services are supplied by Kiln.Api in package mode. -->
+  <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.props" />
+  <PropertyGroup>
+    <KilnModId>camera-sample</KilnModId>
+    <KilnModName>Camera sample</KilnModName>
+    <Version>0.1.0</Version>
+    <Description>Stock-mode locks, a lens-only request and a two-key render-only path, with explicit lease cleanup.</Description>
+    <KilnSide>both</KilnSide>
+    <KilnServices>Camera;Chat;Client</KilnServices>
+    <KilnGameIds>None</KilnGameIds>
+  </PropertyGroup>
+  <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.targets" />
+  <Target Name="_CameraSampleSharedOut" AfterTargets="_KilnModFiles">
+    <ItemGroup>
+      <_KilnModFile Remove="$(OutDir)Kiln.*" />
+    </ItemGroup>
+  </Target>
+</Project>

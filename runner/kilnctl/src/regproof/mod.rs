@@ -161,7 +161,7 @@ pub fn prove(inp: &Inputs, when: &str) -> Proof {
         _ => {}
     }
     // 3. round trip (before the formulas: they use its samples)
-    p.roundtrip = roundtrip::check(&inp.map, &inp.side, &inp.new_exe_sha, &inp.regmap_digest, &inp.suites);
+    p.roundtrip = roundtrip::check(&inp.map, &inp.side, &inp.new_exe_sha, &inp.regmap_digest, &inp.suites, inp.values_new.as_ref());
     if !p.roundtrip.complete {
         p.blockers.push(format!("the round-trip suite is incomplete: no {} generation of this build (the lab's proof producer writes one per generation)",
                                 p.roundtrip.missing.join(" and no ")));
@@ -433,6 +433,11 @@ impl Proof {
     }
 }
 
+/// A record's `provenBy` when kilnctl regproof judged fresh lab evidence (the only server record `--mirror` takes).
+pub const PROVEN_BY_LAB: &str = "lab";
+/// A client record's `provenBy` when it mirrors a lab-proven server record.
+pub const PROVEN_BY_MIRROR: &str = "mirror";
+
 /// The record to write: the candidate with each row's proven state, `verified` and what the proof covered.
 pub fn record(p: &Proof, candidate: &Value) -> Value {
     let mut r = candidate.clone();
@@ -456,6 +461,12 @@ pub fn record(p: &Proof, candidate: &Value) -> Value {
             o.insert("kinds".into(), Value::Object(kinds));
         }
         o.insert("verified".into(), Value::Bool(p.verified));
+        // review3 S5: what proved a verified record ("lab": kilnctl regproof judged fresh lab evidence; "mirror": --mirror of a
+        // lab-proven server record); never carried from the candidate (the gate copy's reflection-only one claims nothing)
+        o.remove("provenBy");
+        if p.verified {
+            o.insert("provenBy".into(), Value::String(if p.mirror_of.is_some() { PROVEN_BY_MIRROR } else { PROVEN_BY_LAB }.into()));
+        }
         o.insert("proof".into(), Value::String(p.summary()));
         if p.regmap_digest.is_empty() {
             o.remove("regmapDigest");
@@ -540,8 +551,8 @@ pub fn write_outputs(p: &Proof, record: Option<&Value>, out: &Path) -> Result<()
     Ok(())
 }
 
-/// Writes a verified record into a Kiln folder (`<kiln>/regmap/<side>/<exe sha256>.json`, what kiln.content reads) and a
-/// copy for the repository into `out`. Refuses an unverified proof. A verified record already there is kept unless
+/// Writes a verified record into a Kiln folder (`<kiln>/regmap/<side>/<exe sha256>.json`, what kiln.content reads, with
+/// `"markedLocally": true`) and a copy for the repository into `out` (without it). Refuses an unverified proof. A verified record already there is kept unless
 /// `replace` (a fuller proof of the same build); the replaced one stays beside it as `.json.bak`.
 /// What [`mark`] did.
 #[derive(Debug, Clone, PartialEq)]
@@ -564,9 +575,14 @@ pub fn mark(kiln_dir: &Path, p: &Proof, record: &Value, out: &Path, replace: boo
             std::fs::rename(&dst, dst.with_extension("json.bak")).with_context(|| format!("keeping {} as .bak", dst.display()))?;
         }
     }
-    let text = serde_json::to_string_pretty(record)? + "\n";
-    ids::write_whole(&dst, &text)?;
-    ids::write_whole(&out.join(format!("verified-regmap-{}-{}.json", p.side, p.exe_sha256)), &text)?;
+    // the instance's copy says it was marked here (review3 S4): when a Kiln update changes regmap/common under it, kiln.content
+    // advises a new proof on this server instead of a Kiln update; the copy to commit is the record as proven
+    let mut local = record.clone();
+    if let Some(o) = local.as_object_mut() {
+        o.insert("markedLocally".into(), Value::Bool(true));
+    }
+    ids::write_whole(&dst, &(serde_json::to_string_pretty(&local)? + "\n"))?;
+    ids::write_whole(&out.join(format!("verified-regmap-{}-{}.json", p.side, p.exe_sha256)), &(serde_json::to_string_pretty(record)? + "\n"))?;
     Ok(Marked::Written(dst))
 }
 
@@ -1517,13 +1533,16 @@ mod tests {
                                 "refusalReason": "not_exact: plans.cap is a whole number on this build", "readBack": 2, "rawAfter": [2]}));
         inp.suites[1].samples.retain(|x| x.field != "plans.cap");
         inp.suites[0].samples.extend([whole, refused]);
+        // the values export holds the cost for as many entries as the lab counts (review3 S1)
+        inp.values_new.as_mut().unwrap().registries.insert("plans".into(),
+            (0..141).map(|i| (format!("game:p{i}"), [("cap".to_string(), json!(2))].into())).collect());
         // the old producer (no counts): unproven, and the reason is not "no lab round trip"
         let p = prove(&inp, "T");
         let r = &p.rows["plans.cap"];
         assert_eq!(r.state, "unproven", "{r:?}");
         assert!(!r.reason.as_deref().unwrap_or_default().contains("no lab round trip"), "{r:?}");
         // the build has float configs the lab did not round-trip
-        inp.suites[0].kinds.insert("plans.cap".into(), [("sint32".to_string(), 141), ("float".to_string(), 2)].into());
+        inp.suites[0].kinds.insert("plans.cap".into(), [("sint32".to_string(), 139), ("float".to_string(), 2)].into());
         let r = prove(&inp, "T").rows["plans.cap"].clone();
         assert_eq!(r.state, "unproven");
         assert_eq!(r.reason.as_deref(), Some("fractional values are not proven on this build yet: no lab round trip of a fractional cost"));
@@ -1715,6 +1734,15 @@ mod tests {
         assert_eq!(mark(&kiln, &p, &rec, &out, false).unwrap(), Marked::Written(dst.clone()));
         assert_eq!(read_json(&dst).unwrap()["verified"], true);
         assert!(out.join(format!("verified-regmap-server-{SHA}.json")).is_file());
+        // review3 S4: the instance's copy says it was marked on this server (kiln.content then advises a new proof, not a
+        // Kiln update, when regmap/common changes under it); the copy to commit does not
+        assert_eq!(read_json(&dst).unwrap()["markedLocally"], true);
+        // review3 S5: a record kilnctl marks from fresh lab evidence says so (what --mirror requires); a candidate's own claim
+        // is never carried, and an unverified proof claims nothing
+        assert_eq!(rec["provenBy"], "lab");
+        let mut claimed = candidate();
+        claimed["provenBy"] = json!("lab");
+        assert!(read_json(&out.join(format!("verified-regmap-server-{SHA}.json"))).unwrap().get("markedLocally").is_none());
         // a verified record is kept unless the caller replaces it (a fuller proof of the same build); kept is no error
         let mut newer = rec.clone();
         newer["proof"] = json!("a later proof");
@@ -1729,6 +1757,7 @@ mod tests {
         let pb = prove(&bad, "T");
         let kiln2 = root.join("game2/kiln");
         assert!(mark(&kiln2, &pb, &record(&pb, &candidate()), &out, true).is_err());
+        assert!(record(&pb, &claimed).get("provenBy").is_none(), "an unverified proof is proven by nothing");
         assert!(!kiln2.exists());
         assert!(report_text(&pb).contains("NOT verified"));
         let _ = std::fs::remove_dir_all(&root);

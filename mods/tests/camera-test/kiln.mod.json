@@ -1,0 +1,5 @@
+{
+  "id": "camera-test", "name": "Maintained camera Mode acceptance", "version": "0.1.0", "apiVersion": "0.2",
+  "entryAssembly": "CameraTest.dll", "side": "server", "clients": "none",
+  "tests": { "autoRun": true, "timeoutSeconds": 120 }
+}

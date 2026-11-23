@@ -14,6 +14,8 @@
 //!   "generation": "live",                       // live | boot
 //!   "regmapDigest": "<sha256>",                 // the regmap/common the run used (regmap::digest); another one is set aside
 //!   "constants": { "gear.seed": 10, "gear.creep": 0.15, "gear.armorOffset": 23, "gear.armorGradient": 15 },
+//!   "kinds": { "items.manaCost": { "sint32": 138, "float": 0, "unknown": 0, "notInWorld": 55 } },   // impactConfig rows
+//!   "notInWorld": { "items.manaCost": ["game:...", ...] },  // the entries counted notInWorld (in the id table, not the world)
 //!   "samples": [ { "field": "items.maxStack", "entry": "game:...", "element": null,   // element: a list element's index
 //!                  "read": 20, "probe": 21, "readBack": 21,                          // through the schema
 //!                  "rawBefore": [20], "rawAfter": [21],                              // the row's paths, through reflection
@@ -23,6 +25,7 @@
 //! name, a bitmask member's list of game names, an optional enum's [switch, name]. Entry ids name the game's entries:
 //! suites are lab artefacts and stay outside the repository.
 use super::formula;
+use super::values;
 use super::regmap::{RegMap, Row};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
@@ -49,11 +52,16 @@ pub struct Suite {
     pub regmap_digest: String,
     #[serde(default)]
     pub constants: BTreeMap<String, f64>,
-    /// impactConfig rows: how many of the build's entries hold the config in each kind (`sint32`, `float`) and how many hold
-    /// it in a kind the lab could not read (`unknown`); only the kinds the build has need evidence (coordinator ruling,
-    /// 2026-11-23 ~1:20 PM)
+    /// impactConfig rows: how many of the build's entries hold the config in each kind (`sint32`, `float`), how many hold
+    /// it in a kind the lab could not read (`unknown`), and how many of the build's id table the lab's world does not hold
+    /// (`notInWorld`: nothing reads them there); only the kinds the build has need evidence (coordinator ruling,
+    /// 2026-11-23 ~1:20 PM). kilnctl compares the counts with the values export (review3 S1).
     #[serde(default)]
     pub kinds: BTreeMap<String, BTreeMap<String, u64>>,
+    /// impactConfig rows: the ids of the entries counted `notInWorld` (whether they hold the config is the values export's
+    /// to say)
+    #[serde(default)]
+    pub not_in_world: BTreeMap<String, Vec<String>>,
     /// fields the producer could not sample, with why in Kiln words (players read it as the unproven reason): for example
     /// drop tables the lab's world had not loaded
     #[serde(default)]
@@ -146,6 +154,8 @@ pub struct FieldResult {
 
 /// The impact-config kinds a proof knows, as the producer names them.
 pub const CONFIG_KINDS: [&str; 2] = ["sint32", "float"];
+/// The producer's count of id-table entries the lab's world does not hold (no live edit reaches them on this build).
+pub const NOT_IN_WORLD: &str = "notInWorld";
 /// A kind with no entry on the build: recorded, never a gap (a later build that has it must prove it).
 pub const NONE_ON_THIS_BUILD: &str = "none on this build";
 /// The `missing` texts of impactConfig rows (mod.rs turns them into the record's reasons).
@@ -358,7 +368,10 @@ fn sample_problems(row: &Row, x: &Sample, raw: Raw) -> Vec<String> {
 }
 
 /// Every mapped row of the regmap against the suites of this side and exe.
-pub fn check(map: &RegMap, side: &str, exe_sha256: &str, regmap_digest: &str, suites: &[Suite]) -> Report {
+///
+/// impactConfig rows are judged against the producer's kind counts, which must account for every entry `values` (the new
+/// build's values export) holds the config for (review3 S1).
+pub fn check(map: &RegMap, side: &str, exe_sha256: &str, regmap_digest: &str, suites: &[Suite], values: Option<&values::Export>) -> Report {
     let mut r = Report::default();
     let good = usable(side, exe_sha256, regmap_digest, suites, &mut r.problems);
     let rows: Vec<(String, &Row)> = super::regmap::qualified(map).into_iter().filter(|(_, _, _, row)| row.has_mapping()).map(|(q, _, _, row)| (q, row)).collect();
@@ -415,15 +428,44 @@ pub fn check(map: &RegMap, side: &str, exe_sha256: &str, regmap_digest: &str, su
         let mut kinds = BTreeMap::new();
         if row.conv == "impactConfig" {
             // the producer's count of the build's entries per config kind, from a suite of the row's generation
-            let counts = good.iter().filter(|s| want.is_none_or(|g| g == s.generation)).find_map(|s| s.kinds.get(&q));
+            let counts = good.iter().filter(|s| want.is_none_or(|g| g == s.generation)).find_map(|s| Some((s.kinds.get(&q)?, s)));
             match counts {
                 None => {
                     if !(sint_whole && sint_refusal && float_fraction) {
                         missing.push(MISSING_KINDS.into());
                     }
                 }
-                Some(c) => {
+                Some((c, suite)) => {
                     let n = |k: &str| c.get(k).copied().unwrap_or(0);
+                    // review3 S1: the counts decide "none on this build" only when they classify every entry the values
+                    // export holds the config for (in a kind, or not in the lab's world); any other difference is unknown
+                    let mut unexplained = 0;
+                    match values.and_then(|v| values::holders(v, &q)) {
+                        None => missing.push(format!("{MISSING_UNKNOWN} (no values export of this build to check the lab's counts against)")),
+                        Some(holders) => {
+                            let listed: std::collections::BTreeSet<&str> =
+                                suite.not_in_world.get(&q).map(|v| v.iter().map(String::as_str).collect()).unwrap_or_default();
+                            let off_world = holders.iter().filter(|h| listed.contains(h.as_str())).count() as u64;
+                            let in_world = holders.len() as u64 - off_world;
+                            let counted = n("sint32") + n("float") + n("unknown");
+                            if listed.len() as u64 != n(NOT_IN_WORLD) {
+                                missing.push(format!("{MISSING_UNKNOWN} (the lab counted {} entries outside its world but named {})",
+                                                     n(NOT_IN_WORLD), listed.len()));
+                            }
+                            unexplained = in_world.abs_diff(counted);
+                            if unexplained > 0 {
+                                missing.push(format!("{MISSING_UNKNOWN} ({unexplained} entries: the values export holds it for {in_world} entries in the \
+                                                      lab's world, the lab counted {counted})"));
+                            }
+                            if off_world > 0 && row.backend != "live" {
+                                // a boot edit reaches entries the world has not loaded: there the counts prove nothing
+                                missing.push(format!("{MISSING_UNKNOWN} ({off_world} entries outside the lab's world, which a boot edit reaches)"));
+                                unexplained += off_world;
+                            } else if off_world > 0 {
+                                kinds.insert(NOT_IN_WORLD.into(), format!("{off_world} entries not in the lab's world (no edit reaches them on this build)"));
+                            }
+                        }
+                    }
                     let proven = [("sint32", sint_whole && sint_refusal, MISSING_SINT32), ("float", float_fraction, MISSING_FLOAT)];
                     for (kind, have, gap) in proven {
                         let state = if n(kind) == 0 {
@@ -438,7 +480,14 @@ pub fn check(map: &RegMap, side: &str, exe_sha256: &str, regmap_digest: &str, su
                     }
                     if n("unknown") > 0 {
                         missing.push(format!("{MISSING_UNKNOWN} ({} entries)", n("unknown")));
-                        kinds.insert("unknown".into(), format!("{} entries", n("unknown")));
+                    }
+                    // review3 S2: a kind kilnctl does not know (a later producer or build) is never proven by the others
+                    for (kind, count) in c.iter().filter(|(k, v)| **v > 0 && !CONFIG_KINDS.contains(&k.as_str()) && *k != "unknown" && *k != NOT_IN_WORLD) {
+                        missing.push(format!("{MISSING_UNKNOWN} ({count} entries of kind {kind:?}, which kilnctl does not know)"));
+                        kinds.insert(kind.clone(), format!("not proven ({count} entries on this build; kilnctl does not know this kind)"));
+                    }
+                    if n("unknown") + unexplained > 0 {
+                        kinds.insert("unknown".into(), format!("{} entries", n("unknown") + unexplained));
                     }
                     if CONFIG_KINDS.iter().all(|k| n(k) == 0) && n("unknown") == 0 {
                         missing.push(MISSING_NONE.into());
@@ -475,6 +524,18 @@ pub(crate) mod tests {
     use serde_json::json;
 
     pub(crate) const SHA: &str = "1111111111111111111111111111111111111111111111111111111111111111";
+
+    /// The check without a values export (the rows these tests judge have no kind counts).
+    fn check(map: &RegMap, side: &str, exe_sha256: &str, regmap_digest: &str, suites: &[Suite]) -> Report {
+        super::check(map, side, exe_sha256, regmap_digest, suites, None)
+    }
+
+    /// A values export where `holders` entries of plans hold `cap` (and one entry does not).
+    fn cap_holders(holders: &[&str]) -> super::super::values::Export {
+        let mut plans: serde_json::Map<String, Value> = holders.iter().map(|h| (h.to_string(), json!({"cap": 2}))).collect();
+        plans.insert("game:capless".into(), json!({"other": 1}));
+        super::super::values::tests::export(SHA, "1", "none", json!({"plans": plans}))
+    }
 
     pub(crate) fn good_sample(field: &str) -> Value {
         let bytes = "ab".repeat(32);
@@ -732,9 +793,13 @@ pub(crate) mod tests {
         let refused = mk(json!({"configKind": "sint32", "probe": 2.5, "expectRefused": true, "refused": true,
                                 "refusalReason": "not_exact: value cannot be represented exactly", "refusalCode": "not_exact", "readBack": 2, "rawAfter": [2]}));
         let run = |samples: Vec<Value>, kinds: Value| {
+            // the values export holds as many entries as the lab counted (review3 S1: the counts must cover it)
+            let n: u64 = kinds.as_object().unwrap().values().filter_map(Value::as_u64).sum();
+            let names: Vec<String> = (0..n).map(|i| format!("game:e{i}")).collect();
+            let values = cap_holders(&names.iter().map(String::as_str).collect::<Vec<_>>());
             let suite = parse(&json!({"format": 1, "kind": KIND, "side": "server", "exeSha256": SHA, "generation": "live",
                                      "regmapDigest": DIGEST, "kinds": {"plans.cap": kinds}, "samples": samples}).to_string()).unwrap();
-            check(&map, "server", SHA, DIGEST, &[suite]).fields.remove("plans.cap").unwrap()
+            super::check(&map, "server", SHA, DIGEST, &[suite], Some(&values)).fields.remove("plans.cap").unwrap()
         };
         // a build with Sint32 configs only (f0d824be): the float kind is recorded, not required
         let f = run(vec![whole.clone(), refused.clone()], json!({"sint32": 141, "float": 0, "unknown": 0}));
@@ -761,6 +826,74 @@ pub(crate) mod tests {
                                   "regmapDigest": DIGEST, "samples": [whole, refused]}).to_string()).unwrap();
         let f = check(&map, "server", SHA, DIGEST, &[suite]).fields.remove("plans.cap").unwrap();
         assert!(!f.ok && f.missing.contains(&MISSING_KINDS.to_string()), "{f:?}");
+    }
+
+    /// review3 S1 (coordinator ruling): the counts never decide "none on this build" over a count with gaps. Every entry the
+    /// values export holds the config for is classified: counted in a kind, or named by the producer as not in the lab's
+    /// world (no live edit reaches it: recorded with its count, never blocking); any other difference is unknown and blocks.
+    #[test]
+    fn every_entry_that_holds_an_impact_config_is_classified() {
+        let mut map = map_with_float_cap();
+        let cap = map.get_mut("plans").unwrap().rows.get_mut("cap").unwrap();
+        cap.conv = "impactConfig".into();
+        cap.backend = "live".into();
+        let bytes = "ab".repeat(32);
+        let mk = |extra: Value| {
+            let mut s = json!({"field": "plans.cap", "entry": "game:h0", "read": 2, "rawBefore": [2],
+                               "reverted": true, "bytesBefore": bytes, "bytesAfter": bytes});
+            s.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+            s
+        };
+        let samples = vec![mk(json!({"configKind": "sint32", "probe": 3, "readBack": 3, "rawAfter": [3]})),
+                           mk(json!({"configKind": "sint32", "probe": 2.5, "expectRefused": true, "refused": true, "refusalCode": "not_exact",
+                                     "refusalReason": "not_exact: plans.cap is a whole number on this build", "readBack": 2, "rawAfter": [2]}))];
+        // five entries hold the config; h3 and h4 are in the build's id table but not in the lab's world
+        let values = cap_holders(&["game:h0", "game:h1", "game:h2", "game:h3", "game:h4"]);
+        let run = |map: &RegMap, generation: &str, kinds: Value, not_in_world: Option<Value>, values: Option<&super::super::values::Export>| {
+            let mut doc = json!({"format": 1, "kind": KIND, "side": "server", "exeSha256": SHA, "generation": generation,
+                                 "regmapDigest": DIGEST, "kinds": {"plans.cap": kinds}, "samples": samples.clone()});
+            if let Some(n) = not_in_world {
+                doc["notInWorld"] = json!({"plans.cap": n});
+            }
+            super::check(map, "server", SHA, DIGEST, &[parse(&doc.to_string()).unwrap()], values).fields.remove("plans.cap").unwrap()
+        };
+        let unknown = |f: &FieldResult| !f.ok && f.problems.is_empty() && f.missing.iter().any(|m| m.starts_with(MISSING_UNKNOWN));
+        // 3 counted in the world + 2 not in it (the producer names 3 entries outside the world; one holds no config): ok
+        let f = run(&map, "live", json!({"sint32": 3, "float": 0, "unknown": 0, "notInWorld": 3}),
+                    Some(json!(["game:h3", "game:h4", "game:capless"])), Some(&values));
+        assert!(f.ok, "{f:?}");
+        assert_eq!(f.kinds["float"], NONE_ON_THIS_BUILD);
+        assert!(f.kinds["notInWorld"].starts_with("2 entries"), "recorded with their count: {f:?}");
+        // the old producer (no notInWorld): the 2 entries it skipped are unaccounted for, so unknown
+        let f = run(&map, "live", json!({"sint32": 3, "float": 0, "unknown": 0}), None, Some(&values));
+        assert!(unknown(&f), "{f:?}");
+        assert!(f.kinds["unknown"].starts_with("2 entries"), "{f:?}");
+        // a count over the values export is no proof either
+        let f = run(&map, "live", json!({"sint32": 4, "float": 0, "unknown": 0, "notInWorld": 2}), Some(json!(["game:h3", "game:h4"])), Some(&values));
+        assert!(unknown(&f), "{f:?}");
+        // a notInWorld count that is not the entries it names
+        let f = run(&map, "live", json!({"sint32": 3, "float": 0, "unknown": 0, "notInWorld": 5}), Some(json!(["game:h3", "game:h4"])), Some(&values));
+        assert!(unknown(&f), "{f:?}");
+        // the "none on this build" of a kind: only over a complete count (the float holders the lab skipped stay unknown)
+        let f = run(&map, "live", json!({"sint32": 1, "float": 0, "unknown": 0, "notInWorld": 2}), Some(json!(["game:h3", "game:h4"])), Some(&values));
+        assert!(unknown(&f), "{f:?}");
+        // no values export to compare with
+        let f = run(&map, "live", json!({"sint32": 3, "float": 0, "unknown": 0, "notInWorld": 2}), Some(json!(["game:h3", "game:h4"])), None);
+        assert!(unknown(&f), "{f:?}");
+        // a boot edit reaches entries outside the world: there they are not proven
+        let mut boot = map.clone();
+        boot.get_mut("plans").unwrap().rows.get_mut("cap").unwrap().backend = "boot".into();
+        let f = run(&boot, "boot", json!({"sint32": 3, "float": 0, "unknown": 0, "notInWorld": 2}), Some(json!(["game:h3", "game:h4"])), Some(&values));
+        assert!(unknown(&f), "{f:?}");
+        // review3 S2: a kind kilnctl does not know is never proven (the counts alone match the export here)
+        let f = run(&map, "live", json!({"sint32": 3, "float": 0, "unknown": 0, "notInWorld": 2, "uint32": 1}),
+                    Some(json!(["game:h3", "game:h4"])), Some(&values));
+        assert!(unknown(&f) && f.missing.iter().any(|m| m.contains("uint32")), "{f:?}");
+        assert!(f.kinds["uint32"].starts_with("not proven"), "{f:?}");
+        // a known name with no entry is no problem
+        let f = run(&map, "live", json!({"sint32": 3, "float": 0, "unknown": 0, "notInWorld": 2, "uint32": 0}),
+                    Some(json!(["game:h3", "game:h4"])), Some(&values));
+        assert!(f.ok, "{f:?}");
     }
 
     #[test]

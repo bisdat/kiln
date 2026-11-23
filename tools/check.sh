@@ -123,7 +123,7 @@ fi
 t=$SECONDS
 if python3 -I "$repo/tools/registrygen/registrygen.py" --check >"$work/registry.log" 2>&1 &&
    python3 -I "$repo/tools/registrygen/regmap_check.py" >>"$work/registry.log" 2>&1; then
-  result registry OK $((SECONDS - t)) "$(grep '^registrygen: ' "$work/registry.log" | tail -1 | sed 's/^registrygen: //'); regmap routing checked"
+  result registry OK $((SECONDS - t)) "$(grep '^registrygen: ' "$work/registry.log" | tail -1 | sed 's/^registrygen: //'); regmap routing and record digests checked"
 else
   result registry FAILED $((SECONDS - t)) "the registry schemas or the files made from them:"
   head -40 "$work/registry.log"

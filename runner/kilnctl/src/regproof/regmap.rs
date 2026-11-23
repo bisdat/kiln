@@ -100,7 +100,8 @@ fn common_files(root: &Path) -> Result<Vec<std::path::PathBuf>> {
         .with_context(|| format!("reading {}", dir.display()))?
         .flatten()
         .map(|e| e.path())
-        .filter(|p| p.extension().is_some_and(|x| x == "json"))
+        // regular files only (a link followed), as kiln.content's load_dir (review3 N5)
+        .filter(|p| p.extension().is_some_and(|x| x == "json") && p.is_file())
         .collect();
     files.sort();
     Ok(files)
@@ -182,6 +183,8 @@ pub(crate) mod tests {
         std::fs::write(a.join("regmap/server/x.json"), "a record").unwrap();
         let want = kiln_manage::hash::sha256_hex(format!("items.json\n{}\nloot.json\n{}\n",
             kiln_manage::hash::sha256_hex(b"{\"rows\": {}}"), kiln_manage::hash::sha256_hex(b"{}")).as_bytes());
+        // review3 N5: regular files only, as kiln.content (a folder named like a file is not part of it)
+        std::fs::create_dir_all(a.join("regmap/common/folder.json")).unwrap();
         assert_eq!(digest(&a).unwrap(), want, "records are not part of it");
         assert_eq!(digest(&b).unwrap(), want);
         assert!(differences(&a, &b).unwrap().is_empty());

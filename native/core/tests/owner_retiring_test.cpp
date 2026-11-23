@@ -4,6 +4,8 @@
 // try_lock from inside the callback). The fault guard and the log are stubs.
 #include <windows.h>  // tests/stubs/windows.h
 
+#include <atomic>
+#include <chrono>
 #include <cstdarg>
 #include <cstdio>
 #include <stdexcept>
@@ -78,6 +80,23 @@ void KILN_CALL on_retiring(KilnOwner retiring, void* user) {
     if (s->do_throw) throw std::runtime_error("observer fault");
 }
 void KILN_CALL tick_fn(const KilnTickInfo*, void*) {}
+void KILN_CALL task_fn(void*) {}
+
+// An observer that waits, as kiln.camera's owner-retiring barrier does for callbacks still running on other threads
+// (DECISIONS.md, "Camera owner-retiring barrier"): bounded, so a registry lock held across the call fails the test
+// instead of hanging it.
+std::atomic<bool> g_wait_entered{false}, g_other_done{false}, g_wait_timed_out{false};
+void KILN_CALL waiting_observer(KilnOwner, void*) {
+    g_wait_entered = true;
+    const auto end = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!g_other_done.load()) {
+        if (std::chrono::steady_clock::now() > end) {
+            g_wait_timed_out = true;
+            return;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+}
 }  // namespace
 
 int main() {
@@ -152,6 +171,29 @@ int main() {
     const KilnOwner mod_g = reg::owner_create("mod:g");
     reg::owner_revoke(mod_g);
     check(seen.owners.size() == before, "nothing is called after the observer's owner is gone");
+
+    // a waiting observer on the revoking thread: another thread uses the registry meanwhile (owners, ticks, tasks),
+    // which needs both registry locks, so neither is held across the observer
+    {
+        const KilnOwner waiter = reg::owner_create("service:waiter"), mod_w = reg::owner_create("mod:w");
+        KilnHandle hw = 0;
+        reg::add_owner_retiring(waiter, &waiting_observer, nullptr, &hw);
+        std::thread revoker([&] { reg::owner_revoke(mod_w); });
+        const auto end = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (!g_wait_entered.load() && std::chrono::steady_clock::now() < end) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        const KilnOwner fresh = reg::owner_create("mod:fresh");
+        KilnHandle t = 0;
+        const bool tick_ok = reg::add_tick(fresh, KILN_TICK_PRE, &tick_fn, nullptr, &t) == KILN_OK;
+        const bool task_ok = reg::post(fresh, &task_fn, nullptr) == KILN_OK;
+        const bool alive = reg::owner_alive(fresh) && !reg::owner_alive(mod_w);
+        g_other_done = true;
+        revoker.join();
+        check(g_wait_entered.load() && !g_wait_timed_out.load() && tick_ok && task_ok && alive,
+              "while an observer waits on the revoking thread, another thread creates owners, subscribes and posts");
+        reg::remove_owner_retiring(hw);
+        reg::owner_revoke(fresh);
+        reg::owner_revoke(waiter);
+    }
 
     // kiln.internal.owners: grants live with the owner and go when it is revoked
     {

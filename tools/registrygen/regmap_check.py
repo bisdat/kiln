@@ -13,9 +13,11 @@ of the kind its conversion needs; an int field's schema range fits its storage t
 game's enum; a static array holds the schema's maxItems; the routing rule (regmap/README.md); rows name schema fields.
 A schema field with no row is listed as unmapped (not an error: it is refused per entry until a row exists). A root type
 the type source does not have (the committed dumps hold the ECS closure only, not the resource types) is listed as
-absent; --exe checks everything. Exit 0: no error.
+absent; --exe checks everything. Without --exe it also checks that every committed verified record (regmap/<side>/*.json)
+was proven on this regmap/common (its regmapDigest). Exit 0: no error.
 """
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -131,6 +133,46 @@ class Result:
     resolved: int = 0
     rows: dict = field(default_factory=dict)       # qualified field -> "ok" | "unmapped"
     layouts: dict = field(default_factory=dict)    # root type -> layout hash
+
+
+def common_digest(root):
+    """kilnctl regproof's regmapDigest of regmap/common (regmap/README.md): sha256 over "<file name>\n<sha256 of its
+    bytes>\n" for each regular *.json file, in name order; kiln.content computes the same at load."""
+    files = sorted((p for p in (Path(root) / "regmap" / "common").glob("*.json") if p.is_file()), key=lambda p: p.name.encode())
+    return hashlib.sha256("".join(f"{p.name}\n{hashlib.sha256(p.read_bytes()).hexdigest()}\n" for p in files).encode()).hexdigest()
+
+
+def record_problems(root):
+    """The committed build records that kiln.content would not enable (review3 S3): a verified record whose regmapDigest is
+    missing or is not this tree's regmap/common's. Such a record turns every registry edit off on its build, so an edit of
+    regmap/common needs a new proof (kilnctl regproof) and a new client mirror before it ships."""
+    out = []
+    digest = common_digest(root)
+    for side in ("server", "client"):
+        for p in sorted((Path(root) / "regmap" / side).glob("*.json")):
+            name = f"regmap/{side}/{p.name}"
+            try:
+                rec = json.loads(p.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as e:
+                out.append(f"{name}: not readable JSON ({e})")
+                continue
+            if "markedLocally" in rec:
+                out.append(f"{name}: an instance's copy (markedLocally) was committed; commit kilnctl regproof's --out copy "
+                           "(verified-regmap-*.json), or kiln.content tells every player to re-prove their own server")
+            if rec.get("verified") is not True:
+                continue
+            want = {"server": ("lab",), "client": ("mirror", "lab")}[side]
+            if rec.get("provenBy") not in want:
+                out.append(f"{name}: a verified {side} record is proven by {' or '.join(want)} (kilnctl regproof writes provenBy), "
+                           f"not {rec.get('provenBy')!r}: a reflection-only candidate proves nothing")
+            have = rec.get("regmapDigest")
+            if not have:
+                out.append(f"{name}: a verified record names no regmapDigest (kiln.content enables none of its rows)")
+            elif have != digest:
+                out.append(f"{name}: the record's regmapDigest {have[:12]} is not regmap/common's {digest[:12]}: regmap/common was "
+                           "edited after the proof, so every registry edit would be refused on this build; re-prove it "
+                           "(kilnctl regproof, then --mirror for the client) or revert the edit")
+    return out
 
 
 def load_regmap(root):
@@ -449,6 +491,11 @@ def main(argv=None):
                 if d.get("schema") == 2:
                     sources.append((f"sigdb/types/{side}/{p.name}", TypeDb.from_dump(d)))
     bad = 0
+    if not a.exe:
+        # the committed tree (tools/check.sh): every verified record is bound to this regmap/common
+        for e in record_problems(root):
+            print(f"regmap_check: {e}", file=sys.stderr)
+            bad += 1
     for label, db in sources:
         res = check(root, db)
         for e in res.errors:
