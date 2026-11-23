@@ -899,8 +899,8 @@ PackOut compile_pack(const std::vector<ModInput>& mods, const GameData& game) {
     const auto game_knowledge = [&]() {
         if (!game_read) {
             game_read = true;
-            std::string ignored;  // a missing resource fails the whole build below, as it always did
-            if (!read_required(game, kGuidKnowledge, kTypeKnowledge, &game_res.first, &game_res.second, &ignored)) game_res = {nullptr, 0};
+            if (!read_required(game, kGuidKnowledge, kTypeKnowledge, &game_res.first, &game_res.second, &out.shared_failure))
+                game_res = {nullptr, 0};
         }
         return game_res;
     };
@@ -1006,7 +1006,8 @@ PackOut compile_pack(const std::vector<ModInput>& mods, const GameData& game) {
     std::string err;
     const uint8_t* p = nullptr;
     size_t n = 0;
-    auto fail = [&](const std::string& why) {
+    auto fail = [&](const std::string& why, bool shared = false) {
+        if (shared) out.shared_failure = why;
         out.errors.push_back(why);
         out.ok = false;
         out.any = false;
@@ -1014,7 +1015,7 @@ PackOut compile_pack(const std::vector<ModInput>& mods, const GameData& game) {
         out.manifest["failed"] = why;  // nothing of any mod is built (a boot generation's required mods are left out by it)
         return out;
     };
-    if (!read_required(game, kGuidKnowledge, kTypeKnowledge, &p, &n, &err)) return fail(err);
+    if (!read_required(game, kGuidKnowledge, kTypeKnowledge, &p, &n, &err)) return fail(err, true);
     out.knowledge_source_size = n;
     if (!rebuild_knowledge(p, n, out.knowledge, &out.res_knowledge, &err)) return fail(err);
     uint32_t cw = 0, cp = 0;
@@ -1022,11 +1023,11 @@ PackOut compile_pack(const std::vector<ModInput>& mods, const GameData& game) {
         out.warnings.push_back("the game reserves its knowledge maps for " + std::to_string(kReservedWorld) + " world and " + std::to_string(kReservedPlayer) +
                                " player entries; there are now " + std::to_string(cw) + " and " + std::to_string(cp) + " objects (untested beyond that)");
     if (!out.quests.empty()) {
-        if (!read_required(game, kGuidJournal, kTypeJournal, &p, &n, &err)) return fail(err);
+        if (!read_required(game, kGuidJournal, kTypeJournal, &p, &n, &err)) return fail(err, true);
         if (!rebuild_journal(p, n, out.quests, &out.res_journal, &err)) return fail(err);
     }
     if (!out.npcs.empty()) {
-        if (!read_required(game, kGuidNpcs, kTypeNpcs, &p, &n, &err)) return fail(err);
+        if (!read_required(game, kGuidNpcs, kTypeNpcs, &p, &n, &err)) return fail(err, true);
         // the roster's maximum: 64, or 128 where kiln.knowledge can keep a second unlock page (asked only when needed,
         // so nothing is hooked for a roster that fits in 64)
         const uint64_t need = uint64_t{npc_count(p, n)} + out.npcs.size();

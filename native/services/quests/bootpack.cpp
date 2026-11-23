@@ -156,7 +156,8 @@ Result build(const std::vector<ModInput>& mods, const Backend& backend) {
                 catch (const std::exception& error) { stop(mod.id, std::string("native compilation failed: ") + error.what()); break; }
                 out.warnings.insert(out.warnings.end(), pack.warnings.begin(), pack.warnings.end());
                 if (pack.roster_refused) { stop(mod.id, pack.roster_refusal, true); break; }
-                if (pack.manifest.contains("failed")) { stop(mod.id, pack.manifest["failed"].get<std::string>()); break; }
+                if (!pack.shared_failure.empty()) { stop(mod.id, pack.shared_failure); break; }
+                if (pack.manifest.contains("failed")) { refuse(mod.id, pack.manifest["failed"].get<std::string>()); break; }
                 if (!pack.ok || !pack.errors.empty()) {
                     refuse(mod.id, pack.errors.empty() ? "native compilation refused the mod" : pack.errors.front());
                     break;

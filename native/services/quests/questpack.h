@@ -53,6 +53,7 @@ struct PackOut {
     bool any = false;          // something native to build
     bool ok = true;
     std::vector<std::string> errors, warnings;
+    std::string shared_failure;  // missing shared inputs stop startup; one mod's template/build failure does not
     std::vector<KnowledgeDef> knowledge;
     std::vector<JournalQuestDef> quests;
     std::vector<NpcDef> npcs;

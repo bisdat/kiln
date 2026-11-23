@@ -74,6 +74,8 @@ An unavailable dependency is a refusal, not a rendered fallback and not a releas
 Native packs compile separately in dependency order against the surviving effective resources. A refused pack withdraws
 only its `bootpack:<mod>` owner, restores its text-tag before-images without overwriting unrelated writers, and leaves
 earlier successful packs intact. Failed required native dependencies are excluded before their dependants compile.
+A missing template or a mod-specific build failure refuses only that pack; missing shared knowledge, journal or NPC
+collection inputs still stop startup, as does a roster overflow.
 An invariant failure stops startup through the existing named fault/notice path rather than continuing with a partial pack.
 Rollback records retain resource presence, length and a local 64-bit fingerprint, not full resource copies. The private
 compile snapshots are released after each pack. Repeated Kiln knowledge-map tails are compacted to the original input

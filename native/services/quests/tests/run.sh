@@ -28,6 +28,10 @@ ${CXX:-g++} -std=c++20 -O1 -g -pthread -Wall -Wextra -Wno-missing-field-initiali
   -I"$here/.." -I"$here/../../../third_party" \
   "$here/bootpack_memory_test.cpp" "$here/../bootpack.cpp" "$here/../questpack.cpp" "$here/../questbuild.cpp" -o "$out/bootpack_memory_test"
 ASAN_OPTIONS=detect_leaks=0 "$out/bootpack_memory_test"
+${CXX:-g++} -std=c++20 -O1 -g -pthread -Wall -Wextra -Wno-missing-field-initializers -fsanitize=address,undefined \
+  -I"$here/.." -I"$here/../../../third_party" \
+  "$here/bootpack_compile_test.cpp" "$here/../bootpack.cpp" "$here/../questpack.cpp" "$here/../questbuild.cpp" -o "$out/bootpack_compile_test"
+ASAN_OPTIONS=detect_leaks=0 "$out/bootpack_compile_test"
 ${CXX:-g++} -std=c++20 -O1 -g -pthread -Wall -Wextra -fsanitize=address,undefined \
   "$here/../../content/tests/boot_text_undo_test.cpp" -o "$out/boot_text_undo_test"
 ASAN_OPTIONS=detect_leaks=0 "$out/boot_text_undo_test"
