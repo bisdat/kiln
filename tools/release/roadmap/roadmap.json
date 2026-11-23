@@ -3134,8 +3134,8 @@
           "area": "api"
         },
         {
-          "title": "Crafting sources, dyes and HUD lists",
-          "text": "Mods can let players craft and dye from linked chests in any base or none, paid all or nothing in the game's own transaction, and add rows to the HUD's arrow and spell lists (thanks Fuzen777).",
+          "title": "Fuzen777's requests: crafting sources, equipment, HUD lists",
+          "text": "Mods can let players craft and dye from linked chests in any base or none, give items straight into an equipment slot, and add rows to the HUD's arrow and spell lists (thanks Fuzen777).",
           "area": "api"
         },
         {
