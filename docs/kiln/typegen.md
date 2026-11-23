@@ -240,8 +240,9 @@ public partial struct NetworkHealth : IGameComponent<NetworkHealth>
 
 ### 3.4 The public API record
 `Kiln.Game` is gated by the PublicApiAnalyzers like every mod-facing project. `PublicAPI.Shipped.txt` holds the nine
-dev.24 types, `ComponentTypes` and `Components` (never edited); `PublicAPI.Unshipped.txt` the hand-written additions
-(`Ecs`, `Ecs.ObjectReference`, `Ecs.GameGuid`, the three interfaces, `GameLayoutStamps`). The generated `Ecs.*`
+dev.24 types, `ComponentTypes` and `Components`, and the hand-written additions that have shipped (`Ecs`,
+`Ecs.ObjectReference`, `Ecs.GameGuid`, the three interfaces, `GameLayoutStamps`); `PublicAPI.Unshipped.txt` is empty
+until the next addition. The generated `Ecs.*`
 types follow the game and are outside the record: each generated file starts with `#nullable enable` and
 `#pragma warning disable RS0016`, and no generated member is in a PublicAPI file. A test fails when a hand-written file
 of Kiln.Game names RS0016. What guards the generated surface is the round trip (§3.9), the layout stamps and the

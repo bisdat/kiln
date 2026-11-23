@@ -174,7 +174,7 @@ Blocks.Define("ember-scavenger", new CreatureBlock { Body = Bodies.Vukah, Drops 
 - **`clients`.** A table asks nothing of players' games. The items in it ask what they ask.
 
 ## Rarity at creation (RarityRollBlock)
-Since 0.2.0-dev.29.19 (the equipment wave). Name item types and five weights, and the server rolls the item's rarity, Common to
+Since 0.2.0-dev.30 (the equipment wave). Name item types and five weights, and the server rolls the item's rarity, Common to
 Legendary, whenever the game makes one: a craft at a station or by hand, random loot in a container or on the ground, a
 random drop-table stack. The game then makes the item at that rarity itself: its enhancement slots (one more than the
 rank), the weapon socket chance of that rarity, its durability. So one item type with five perk slots covers common to
@@ -217,10 +217,10 @@ Blocks.Define("ember-rolls", new RarityRollBlock
   content pack's `gearRules`, not this block.
 
 ## Rarity upgrades (RarityUpgradeBlock)
-Since 0.2.0-dev.29.19 (the equipment wave). The rule of an upgrade a station, a command or a quest runs on an item: which items
+Since 0.2.0-dev.30 (the equipment wave). The rule of an upgrade a station, a command or a quest runs on an item: which items
 it takes, up to which rarity, and what each step costs. An upgraded item gets its next enhancement slot in place (the same
 item, its item data and affixes kept), which the player then unlocks at the workbench as usual. The upgrade itself is
-`Items.UpgradeRarity(player, item, "name")` ([../services/items.md](../services/items.md#upgrading-rarity-v8-since-020-dev2919));
+`Items.UpgradeRarity(player, item, "name")` ([../services/items.md](../services/items.md#upgrading-rarity-v8-since-020-dev30));
 a station that runs it when a player uses it is `InteractBlock.Upgrade` ([world-blocks.md](world-blocks.md#upgrade-stations)).
 ```csharp
 Blocks.Define("standard-upgrades", new RarityUpgradeBlock

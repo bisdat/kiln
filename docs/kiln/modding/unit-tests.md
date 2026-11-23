@@ -270,7 +270,7 @@ false)`; the fake then answers as the native service does without it. The table 
   destroys gear's item entity; a dry run changes nothing; a mod that unloads leaves its queued requests to run, unanswered,
   as kiln.items does. `Read`, `FindInventories`, `Lookup` and `All` read the fake.
   `player.Inventory.Count("…")`, `.Slots`, `.Put(item, n)` and `.Clear()` are the test's view and hand;
-  `kiln.Items.Calls` lists every give and take with what became of it. Gear (since 0.2.0-dev.29.19): every piece the
+  `kiln.Items.Calls` lists every give and take with what became of it. Gear (since 0.2.0-dev.30): every piece the
   fake makes has enhancement slots (rarity + 1; `kiln.Items.SetPerkSlots(item, n)` says how many perk slots its type
   fills), a level, a durability of 100 and a stamp, so `slot.Ref` (and a give result's `Ref`) name it for
   `Items.GearOf`, `SetRarity`, `SetEnhancements` and `SetLevel`; a write runs at the start of the next step with
