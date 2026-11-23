@@ -85,6 +85,8 @@ public sealed class CraftingSourcesTests
             var rows = h.Run(() => CraftStock.Build(player.Entity));
             Assert.NotNull(rows);
             Assert.Equal(new CraftStockRow(wood.Value, 6), Assert.Single(rows.Rows));
+            // #132: the 4 only the linked chest holds are named, so a production station's screen leaves them out
+            Assert.Equal(new CraftStockRow(wood.Value, 4), Assert.Single(rows.Linked));
             source.Dispose();
             Assert.Null(h.Run(() => CraftStock.Build(player.Entity)));
         }

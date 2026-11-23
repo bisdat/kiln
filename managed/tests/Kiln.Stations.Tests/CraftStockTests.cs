@@ -298,6 +298,105 @@ public sealed class CraftStockTests : IDisposable
         Assert.False(CraftStock.ApplyFill(new CraftStockFillAnswers([new FillAnswer(forge, 10)])));
     }
 
+    // ---- the part of a count only the player's linked crafting sources hold (GitHub #132) ----
+
+    private static CraftStockRows Linked(CraftStockRows rows, params (uint Item, uint Count)[] linked) =>
+        rows with { Linked = [.. linked.Select(r => new CraftStockRow(r.Item, r.Count))] };
+
+    [Fact]
+    public void A_snapshot_names_the_part_of_each_count_only_linked_sources_hold()
+    {
+        // coal: 8 from outputs, 3 in the bag, 4 in the chests, 6 only in linked sources; scrap: 2 in the bag
+        var rows = CraftStock.Compose([Scrap, Coal, Twig], D((Coal, 14)), D((Coal, 3), (Scrap, 2)), D((Coal, 4)), D((Coal, 6), (Twig, 0), (Logs, 9)));
+        Assert.Equal([new CraftStockRow(Coal, 21), new CraftStockRow(Scrap, 2)], rows!.Rows);
+        Assert.Equal([new CraftStockRow(Coal, 6)], rows.Linked);  // no row of its own, never more than the count
+        Assert.Empty(CraftStock.Compose([Coal], D((Coal, 8)), D(), D())!.Linked);
+        var at = CraftStock.From(null, false, D((Coal, 6)), lent => (0, [.. lent]), () => D((Coal, 1)), () => D(), out _, registered: true,
+            linked: D((Coal, 6)));
+        Assert.Equal([new CraftStockRow(Coal, 7)], at!.Rows);
+        Assert.Equal([new CraftStockRow(Coal, 6)], at.Linked);
+    }
+
+    [Fact]
+    public void The_linked_part_rides_after_the_rows_where_an_older_client_does_not_read()
+    {
+        var w = new NetWriter();
+        CraftStockRows.Encode(Linked(Rows((Coal, 15), (Scrap, 2)), (Coal, 6)), w);
+        var bytes = w.ToArray();
+        var r = new NetReader(bytes);
+        var back = CraftStockRows.Decode(ref r);
+        Assert.Equal(Rows((Coal, 15), (Scrap, 2)).Rows, back.Rows);
+        Assert.Equal([new CraftStockRow(Coal, 6)], back.Linked);
+        // an older client's decoder (0.2.0-dev.30.7 and before): the count, the rows, and nothing more is read
+        var old = new NetReader(bytes);
+        var n = old.UInt16();
+        var rows = new CraftStockRow[n];
+        for (var i = 0; i < n; i++) rows[i] = new CraftStockRow(old.UInt32(), old.UInt32());
+        Assert.Equal(back.Rows, rows);
+        // an older server's snapshot (no linked part): none is linked
+        var plain = new NetWriter();
+        plain.UInt16(1).UInt32(Coal).UInt32(4);
+        var pr = new NetReader(plain.ToArray());
+        var fromOld = CraftStockRows.Decode(ref pr);
+        Assert.Equal([new CraftStockRow(Coal, 4)], fromOld.Rows);
+        Assert.Empty(fromOld.Linked);
+        // a linked row for an item the snapshot does not count, or above its count, is not believed
+        var odd = new NetWriter();
+        odd.UInt16(1).UInt32(Coal).UInt32(4).UInt16(2).UInt32(Scrap).UInt32(3).UInt32(Coal).UInt32(9);
+        var or = new NetReader(odd.ToArray());
+        Assert.Equal([new CraftStockRow(Coal, 4)], CraftStockRows.Decode(ref or).Linked);
+    }
+
+    [Fact]
+    public void A_snapshot_that_only_moves_counts_between_linked_and_other_sources_is_sent_again()
+    {
+        Assert.NotEqual(CraftStock.Key(Linked(Rows((Coal, 9)), (Coal, 6))), CraftStock.Key(Linked(Rows((Coal, 9)), (Coal, 2))));
+        Assert.NotEqual(CraftStock.Key(Linked(Rows((Coal, 9)), (Coal, 6))), CraftStock.Key(Rows((Coal, 9))));
+        Assert.Equal(CraftStock.Key(Linked(Rows((Coal, 9)), (Coal, 6))), CraftStock.Key(Linked(Rows((Coal, 9)), (Coal, 6))));
+    }
+
+    [Fact]
+    public void A_production_station_screen_counts_no_linked_source_its_fill_cannot_take()
+    {
+        var applied = new List<CraftStockRows>();
+        CraftStock.HelloHook = _ => { };
+        CraftStock.ApplyHook = r =>
+        {
+            applied.Add(r);
+            return true;
+        };
+        CraftStock.ServerSideHook = () => true;
+        using var k = new KilnHarness();
+        k.Capabilities.Override(CraftStock.StockUiCapability, true);
+        var snapshot = Linked(Rows((Coal, 21), (Scrap, 2), (Twig, 5)), (Coal, 6), (Twig, 5));
+        // a production station's screen: its rows and their transfer buttons see the bag, the chests and the outputs
+        CraftStock.ClientChanged(Screen(ScreenKind.InGame), Factory());
+        CraftStock.ClientRows(snapshot);
+        Assert.Equal([new CraftStockRow(Coal, 15), new CraftStockRow(Scrap, 2)], applied[^1].Rows);
+        // a crafting menu (a crafting station's, the inventory's, an NPC's): its craft pays from the sources too
+        CraftStock.ClientChanged(Factory(), Screen(ScreenKind.Crafting));
+        Assert.Equal(snapshot.Rows, applied[^1].Rows);
+        var n = applied.Count;
+        CraftStock.ClientChanged(Screen(ScreenKind.Crafting), Screen(ScreenKind.Crafting));  // no change, nothing re-applied
+        Assert.Equal(n, applied.Count);
+        CraftStock.ClientChanged(Screen(ScreenKind.Crafting), Factory());
+        Assert.Equal([new CraftStockRow(Coal, 15), new CraftStockRow(Scrap, 2)], applied[^1].Rows);
+        CraftStock.ClientRows(Rows((Coal, 4)));  // an older server: no linked part, the snapshot as it is
+        Assert.Equal([new CraftStockRow(Coal, 4)], applied[^1].Rows);
+        // closed: the game's counts, also when the next screen is a factory's
+        CraftStock.ClientChanged(Factory(), Screen(ScreenKind.InGame));
+        Assert.Empty(applied[^1].Rows);
+        n = applied.Count;
+        CraftStock.ClientRows(snapshot);  // late: not kept
+        Assert.Equal(n, applied.Count);
+    }
+
+    private static GameScreen Factory() => Screen(ScreenKind.Crafting) with
+    {
+        Hud = HudScreen.FactoryCrafting,
+        Crafting = new CraftingScreen(true, 0, 0, false) { IsFactory = true, Station = new EntityId(1032) },
+    };
+
     // ---- the session ----
 
     [Fact]
