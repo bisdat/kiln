@@ -52,6 +52,16 @@ All overlap counts are diagnostic estimates derived from the genuine region AABB
 
 **Expected test-world observation after cleanup**: one genuine region, 113 retained chunks, 20 appended boxes; potentially all 113 intersect the genuine region. A discrepancy between `native_regions` and `live_build_zones` is especially useful to narrow the downstream issue.
 
+## Host regression tests
+
+On a Linux development checkout of this branch, with clang++ or g++ installed:
+
+```bash
+bash native/services/build/tests/test-transient.sh
+```
+
+This existing suite compiles `regions_test.cpp` directly, now covering partial 16 m chunk overlap, exact boundary touching, multiple altars, empty base lists, and invalid bounds. It does **not** execute the native Windows game hook and cannot certify runtime correctness. An actual Kiln DLL build and disposable-world verification are required before a fix can be accepted.
+
 ## Next work (not in this branch)
 
 1. Verify whether the actual active `BuildZoneSystem` list grows, or whether only saved `KILNBILD` region records affect the menu count and visible boundaries.
