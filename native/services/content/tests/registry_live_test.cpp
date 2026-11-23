@@ -32,6 +32,7 @@ alignas(16) uint8_t g_arena[1 << 20];  // the made-up game memory (real addresse
 size_t g_near = 1 << 19;
 Registry g_regs[5];
 std::map<std::string, std::string> g_files;  // pack file rel -> its text
+std::vector<size_t> g_write_limits; // test-only: successful writes allowed in each next batch (empty: no injected failure)
 }  // namespace
 uintptr_t A(size_t off) { return reinterpret_cast<uintptr_t>(g_arena) + off; }
 void logf(int, const char* fmt, ...) {
@@ -46,8 +47,14 @@ bool rd(uintptr_t address, void* out, size_t n) {
     std::memcpy(out, reinterpret_cast<const void*>(address), n);
     return true;
 }
-size_t write_batch(std::vector<Write>& writes, uintptr_t*) {
-    for (const Write& w : writes) std::memcpy(reinterpret_cast<void*>(w.addr), w.bytes, w.n);
+size_t write_batch(std::vector<Write>& writes, uintptr_t* failed) {
+    size_t limit = writes.size();
+    if (!g_write_limits.empty()) { limit = g_write_limits.front(); g_write_limits.erase(g_write_limits.begin()); }
+    for (size_t i = 0; i < writes.size(); ++i) {
+        const Write& w = writes[i];
+        if (i >= limit) { if (failed) *failed = w.addr; return i; }
+        std::memcpy(reinterpret_cast<void*>(w.addr), w.bytes, w.n);
+    }
     return writes.size();
 }
 void* near_alloc(uintptr_t, size_t n) {
@@ -186,6 +193,7 @@ registry::Result g_last_report;
 int g_reports = 0;
 
 void world() {
+    g_write_limits.clear();
     std::string e;
     store_reset(false, &e);
     std::memset(g_arena, 0, sizeof g_arena);

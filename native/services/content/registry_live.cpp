@@ -924,11 +924,67 @@ bool pump_retiring() {
     return changed;
 }
 
-void apply_changes(std::string* error) {
-    compose_changes();
+std::vector<uintptr_t> change_slots(uint64_t handle);
+uint32_t foreign_slots(const std::vector<uintptr_t>& slots);
+
+std::string binding_refusal(uint64_t handle) {
+    const std::string prefix = "live:" + std::to_string(handle) + ":";
+    const auto refusal = std::find_if(g.refused.begin(), g.refused.end(), [&](const auto& row) { return row.source.rfind(prefix, 0) == 0; });
+    return refusal == g.refused.end() ? std::string() : refusal->reason;
+}
+void prepare_bindings() {
     g.refused.clear(); g.refused_keys.clear();
     put_all();
-    store_flush(error);
+    // Evaluation can fail over this world's values even when the copied archive values admitted the edit.
+    // Fold every bound slot before any write, including dependent slots read by formulas and lists.
+    std::set<uintptr_t> seen;
+    for (const auto& [ref, field] : g.fields)
+        for (const auto& slot : field.slots)
+            if (seen.insert(slot.addr).second) {
+                uint8_t bytes[kSlotBytes] = {};
+                store_effective(slot.addr, slot.size, bytes);
+            }
+}
+bool reject_unbound_changes(uint64_t candidate, const std::string& write_error, std::vector<registry::Refusal>* rejected) {
+    std::vector<uint64_t> drop;
+    for (const auto& [handle, change] : g.changes) {
+        if (!change.order || handle == candidate) continue; // the committing caller rolls its own candidate back
+        std::string why = binding_refusal(handle);
+        if (why.empty() && foreign_slots(change_slots(handle))) why = "another writer's bytes were preserved";
+        if (why.empty()) why = write_error;
+        if (why.empty()) continue;
+        rejected->push_back({change.mod, "live:" + std::to_string(handle) + ":", registry::Stage::Alter, 0,
+            "live change " + std::to_string(handle) + " not applied in this world: " + why + "; the whole change was removed", ""});
+        drop.push_back(handle);
+    }
+    for (uint64_t handle : drop) g.changes.erase(handle);
+    return !drop.empty();
+}
+void apply_changes(std::string* error, uint64_t candidate = 0, bool keep_refused = false) {
+    std::vector<registry::Refusal> prior;
+    if (keep_refused) prior = std::move(g.refused); // changed pack sections can add their own restart diagnostics
+    std::vector<registry::Refusal> rejected;
+    std::string first_write_error, last_write_error;
+    compose_changes();
+    for (;;) {
+        prepare_bindings();
+        if (reject_unbound_changes(candidate, {}, &rejected)) { compose_changes(); continue; }
+        if (candidate && !binding_refusal(candidate).empty()) break; // fail before writing any part of this candidate
+        last_write_error.clear();
+        store_flush(&last_write_error);
+        if (first_write_error.empty()) first_write_error = last_write_error;
+        // A partial write failure (or foreign drift) removes the whole affected retained change and flushes
+        // the remaining layers again. No successful half-change is left waiting for the next world.
+        if (!reject_unbound_changes(candidate, last_write_error, &rejected)) break;
+        compose_changes();
+    }
+    if (!first_write_error.empty() && !last_write_error.empty()) {
+        for (auto& refusal : rejected) refusal.reason += "; rollback unverified: " + last_write_error;
+        if (!rejected.empty()) first_write_error += "; rollback unverified: " + last_write_error;
+    }
+    if (error) *error = first_write_error;
+    g.refused.insert(g.refused.end(), prior.begin(), prior.end());
+    g.refused.insert(g.refused.end(), rejected.begin(), rejected.end());
     report();
 }
 
@@ -1101,12 +1157,9 @@ void registry_live_apply(const std::vector<RegistrySection>& sections, const reg
     for (const RegistrySection& s : sections) g.section_of[s.rel] = {s.mod, s.source};
     g.applied = true;
     pump_retiring();
-    compose_changes();
-    put_all();
     std::string err;
-    store_flush(&err);
+    apply_changes(&err, 0, true);
     if (!err.empty()) LOGW("registry (live): writing: %s", err.c_str());
-    report();
 }
 
 void registry_live_publish() {
@@ -1312,7 +1365,7 @@ KilnResult registry_live_commit(KilnOwner owner, uint64_t handle, RegistryLiveRe
                 reply.reason = "the copied change will apply when a world loads";
             } else {
                 std::string error;
-                apply_changes(&error);
+                apply_changes(&error, handle);
                 const auto slots = change_slots(handle);
                 reply.skipped = foreign_slots(slots);
                 const auto own_refusal = std::find_if(g.refused.begin(), g.refused.end(), [&](const auto& row) {

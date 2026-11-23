@@ -60,6 +60,63 @@ void unrelated_live_binding_failure_isolated() {
           "an earlier live change's unbindable edit does not refuse another owner");
     check(reported("the entry is not in this world"), "the earlier change's binding refusal remains visible");
 }
+void pending_binding_failure_is_atomic() {
+    world(); g_files.clear(); stage({});
+    RegistryLiveReply reply;
+    const auto h = change(71, "a", "[{" + wood + R"("op":75},{"registry":"items","select":"game:material_t1_wood_logs","field":"manaCost","op":2}])", 1);
+    check(registry_live_commit(71, h, &reply) == KILN_OK && reply.outcome == RegistryLiveOutcome::PendingWorld && reply.accepted == 2,
+          "the complete pre-world change waits for live binding");
+    registry_live_world_begin(); apply_registry_files({});
+    check(at<uint32_t>(WOOD_AT) == 10, "a pending change with a binding failure applies none of its fields");
+    check(registry_live_status().active == 0, "the failed pending change is not retained as half applied");
+    check(reported("not applied in this world"), "the failed pending change has a named world-application refusal");
+    check(registry_live_revert(71, h, &reply) == KILN_ERR_NOT_FOUND, "a rejected pending handle is consumed");
+}
+void carried_binding_failure_is_atomic() {
+    fresh_live(); RegistryLiveReply reply;
+    const auto h = change(71, "a", "[{" + wood + R"("op":75},{"registry":"items","select":"game:sword_t2","field":"manaCost","op":20}])", 1);
+    registry_live_commit(71, h, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Applied && at<uint32_t>(WOOD_AT) == 75, "the process change binds in its first world");
+    registry_live_world_stop(); std::string error; store_reset(true, &error); world();
+    reg(KILN_CONTENT_ITEMS).by_id.erase(SWORD);
+    registry_live_world_begin(); apply_registry_files({});
+    check(at<uint32_t>(WOOD_AT) == 10 && registry_live_status().active == 0,
+          "a process change cannot carry only half its edits into the next world");
+    check(reported("not applied in this world"), "the failed carry-over is reported by mod and change");
+}
+void reapplied_binding_failure_is_atomic() {
+    fresh_live(); RegistryLiveReply reply;
+    const auto h = change(71, "a", "[{" + wood + R"("op":75},{"registry":"items","select":"game:sword_t2","field":"manaCost","op":20}])", 1);
+    registry_live_commit(71, h, &reply);
+    check(at<uint32_t>(WOOD_AT) == 75, "the change is initially fully applied");
+    reg(KILN_CONTENT_ITEMS).by_id.erase(SWORD);
+    apply_registry_files({});
+    check(at<uint32_t>(WOOD_AT) == 10 && registry_live_status().active == 0,
+          "a pack application cannot leave half a now-unbindable retained change");
+    check(reported("not applied in this world"), "the reapplication refusal remains visible");
+}
+void pending_evaluation_failure_is_atomic() {
+    world(); g_files.clear(); stage({}); RegistryLiveReply reply;
+    const auto h = change(71, "a", "[{" + wood + R"("op":75},{"registry":"items","select":"game:sword_t2","field":"manaCost","op":{"mul":1000}}])", 1);
+    registry_live_commit(71, h, &reply);
+    check(reply.outcome == RegistryLiveOutcome::PendingWorld && reply.accepted == 2, "archive values admit the pending relative change");
+    mem<float>(SWORD_AT + 0x40, 200.0f); mem<int32_t>(SWORD_AT + 0x44, 200);
+    registry_live_world_begin(); apply_registry_files({});
+    check(at<uint32_t>(WOOD_AT) == 10 && at<float>(SWORD_AT + 0x40) == 200.0f,
+          "a runtime evaluation failure is preflighted before any pending field writes");
+    check(registry_live_status().active == 0 && reported("not applied in this world"), "the failed runtime evaluation deactivates and reports the whole change");
+}
+void pending_write_failure_is_rolled_back() {
+    world(); g_files.clear(); stage({}); RegistryLiveReply reply;
+    const auto h = change(71, "a", "[{" + wood + R"("op":75},{"registry":"items","select":"game:sword_t2","field":"maxStack","op":9}])", 1);
+    registry_live_commit(71, h, &reply);
+    check(reply.outcome == RegistryLiveOutcome::PendingWorld, "the two-field change waits for a world");
+    g_write_limits = {1}; // one field really writes, then the second write fails; rollback is allowed to write normally
+    registry_live_world_begin(); apply_registry_files({});
+    check(at<uint32_t>(WOOD_AT) == 10 && at<uint32_t>(SWORD_AT) == 0,
+          "a partial pending write failure restores the fields that already wrote");
+    check(registry_live_status().active == 0 && reported("not applied in this world"), "a failed pending write is deactivated and reported");
+}
 void claims_and_binding_failure() {
     fresh_live(); RegistryLiveReply reply;
     auto a = change(71, "a", "[{" + wood + R"("op":50,"exclusive":true}])"); registry_live_commit(71, a, &reply);
@@ -155,6 +212,11 @@ int main() {
         {"packs_code_and_out_of_order_revert", packs_code_and_out_of_order_revert},
         {"unrelated_pack_binding_failure_isolated", unrelated_pack_binding_failure_isolated},
         {"unrelated_live_binding_failure_isolated", unrelated_live_binding_failure_isolated},
+        {"pending_binding_failure_is_atomic", pending_binding_failure_is_atomic},
+        {"carried_binding_failure_is_atomic", carried_binding_failure_is_atomic},
+        {"reapplied_binding_failure_is_atomic", reapplied_binding_failure_is_atomic},
+        {"pending_evaluation_failure_is_atomic", pending_evaluation_failure_is_atomic},
+        {"pending_write_failure_is_rolled_back", pending_write_failure_is_rolled_back},
         {"claims_and_binding_failure", claims_and_binding_failure},
         {"mapped_reads_have_no_write_side_effect", mapped_reads_have_no_write_side_effect},
         {"world_scope_and_admission", world_scope_and_admission},
