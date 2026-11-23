@@ -372,8 +372,9 @@ wrote) it is `Ready`. Put authored bodies in `blocks/*.json` to have them on the
 Players need the same bodies as the server, built the same way: having the mod installed is not enough. HELLO and
 WELCOME carry `kiln.npcbodies`, a hash of each Ready body's per-body closure hash ([network.md](../network.md#npc-bodies-at-the-join)),
 and the server refuses a player whose bodies differ, naming the first body that does. A player whose game defined a body
-after its start (`PendingRestart`) is refused with a restart-required reason. `modSync: off` lets them in with a warning
-in the server's log.
+after its start (`PendingRestart`) is refused with a restart-required reason. `modSync: off` waives this check, as it
+waives the player animation graph's: such a player joins (also with a late `PendingRestart` body) and the server only logs
+a warning. That player may lack a body the server spawns; keep `modSync` on for servers with authored bodies.
 
 Not verified in a real game yet: the server's model GUID from the body manifest against a player's cooked model, the
 event on a player's main thread, and a refusal for a different body shown on a player's screen. The tests cover them
