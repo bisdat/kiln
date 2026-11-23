@@ -445,23 +445,41 @@ Result8* __fastcall capture(Result8* out, void* character, void* opaque3, void* 
         refused_capture_slots |= 1u << slot;
     return ret;
 }
-Result8* __fastcall read_character(Result8* out, void* character, void* reader, void* context) {
-    auto ret = read_hook.call<Result8*>(out, character, reader, context);
-    Result8 r{};
-    if (read_slot < 0 || !storage_copy(&r, out, sizeof r) || r.error)
-        return ret;
+// After the game read a character inside JoinApply. The slot's previous character never survives the read: its
+// holders go and it is marked left, so a new occupant can neither use its storage nor pair a capture with it.
+void after_read(int slot, const void* character) {
     uint64_t w = 0, account = 0;
     uint32_t witness_flags = 0;
     std::array<uint8_t, 16> id{};
-    if (!character_witness(character, &w, main_baseline, &witness_flags) ||
-        !identity(static_cast<uint32_t>(read_slot), &account, &id))
-        return ret;
+    const bool parsed = character_witness(character, &w, main_baseline, &witness_flags);
+    const bool known = parsed && identity(static_cast<uint32_t>(slot), &account, &id);
     std::lock_guard lock(storage_mu);
-    auto old = model.players.find(static_cast<uint32_t>(read_slot));
-    if (old != model.players.end())
+    auto old = model.players.find(static_cast<uint32_t>(slot));
+    if (old != model.players.end()) {
         for (const auto& [k, h] : old->second.holders)
             garbage.push_back(h);
-    model.join(static_cast<uint32_t>(read_slot), account, id, w, step, witness_flags);
+        if ((!parsed || !known) && !(old->second.witness.flags & KIS_WITNESS_LEFT))
+            model.leave(static_cast<uint32_t>(slot));
+    }
+    if (!parsed) {
+        off(KILN_CAP_REASON_SYMBOL_MISSING,
+            "items.storage: a character read at a join does not match characters/struct.* (inventory layout)");
+        return;
+    }
+    if (!known) {
+        items_log(KILN_LOG_ERROR, "player-storage: no account or character id for slot %d; storage stays inactive "
+                                  "for this character", slot);
+        report("items.storage.persistence_health", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_FAULTED,
+               "a joining character has no account or character id");
+        return;
+    }
+    model.join(static_cast<uint32_t>(slot), account, id, w, step, witness_flags);
+}
+Result8* __fastcall read_character(Result8* out, void* character, void* reader, void* context) {
+    auto ret = read_hook.call<Result8*>(out, character, reader, context);
+    Result8 r{};
+    if (read_slot >= 0 && storage_copy(&r, out, sizeof r) && !r.error)
+        after_read(read_slot, character);
     return ret;
 }
 Result8* __fastcall join_apply(Result8* out, void* blob, void* server, uint32_t slot, void* setup) {
