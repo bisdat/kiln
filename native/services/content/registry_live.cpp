@@ -60,6 +60,7 @@ struct LiveState {
     registry::Result pending;  // the last application's report, waiting for registry_live_publish
     bool pending_set = false;
     bool pending_application = false;
+    bool pending_change = false;
     size_t skipped_logged = 0;  // store_skipped rows already in kiln.log
     registry::Result reported;
     bool have_report = false;
@@ -87,6 +88,11 @@ LiveState g;  // under store_mutex
 uint64_t g_next_change = 0, g_next_world = 0; // never reused, including after an install
 std::mutex g_retiring_mu;
 std::set<KilnOwner> g_retiring;
+thread_local bool g_transaction_active = false;
+struct TransactionScope {
+    TransactionScope() { g_transaction_active = true; }
+    ~TransactionScope() { g_transaction_active = false; }
+};
 bool retired(KilnOwner owner) {
     std::lock_guard lock(g_retiring_mu);
     return g.dead.count(owner) || g_retiring.count(owner);
@@ -893,6 +899,11 @@ void report(bool application = true) {
     g.pending_application |= application;
 }
 
+void queue_change_report() {
+    report(false);
+    g.pending_change = true;
+}
+
 // Each committed transaction is a later composition turn. Preserve claims and chains rather than flattening values.
 void compose_changes() {
     registry::Result result = g.stage_result;
@@ -960,7 +971,7 @@ bool reject_unbound_changes(uint64_t candidate, const std::string& write_error, 
     for (uint64_t handle : drop) g.changes.erase(handle);
     return !drop.empty();
 }
-void apply_changes(std::string* error, uint64_t candidate = 0, bool keep_refused = false) {
+void apply_changes(std::string* error, uint64_t candidate = 0, bool keep_refused = false, bool application = false) {
     std::vector<registry::Refusal> prior;
     if (keep_refused) prior = std::move(g.refused); // changed pack sections can add their own restart diagnostics
     std::vector<registry::Refusal> rejected;
@@ -985,7 +996,8 @@ void apply_changes(std::string* error, uint64_t candidate = 0, bool keep_refused
     if (error) *error = first_write_error;
     g.refused.insert(g.refused.end(), prior.begin(), prior.end());
     g.refused.insert(g.refused.end(), rejected.begin(), rejected.end());
-    report();
+    if (application) report();
+    else queue_change_report();
 }
 
 KilnResult change_of(KilnOwner owner, uint64_t handle, LiveState::Change** out) {
@@ -1134,6 +1146,7 @@ void registry_live_install(RegistryLive in) {
     g.have_report = false;
     g.pending_set = false;
     g.pending_application = false;
+    g.pending_change = false;
     g.tables_changed = false;
     g.skipped_logged = 0;
 }
@@ -1158,7 +1171,7 @@ void registry_live_apply(const std::vector<RegistrySection>& sections, const reg
     g.applied = true;
     pump_retiring();
     std::string err;
-    apply_changes(&err, 0, true);
+    apply_changes(&err, 0, true, true);
     if (!err.empty()) LOGW("registry (live): writing: %s", err.c_str());
 }
 
@@ -1176,9 +1189,12 @@ void registry_live_publish() {
         if (g.tables_changed && g.have_report) report(false);
         if (!g.in || !g.pending_set) return;
         r = std::move(g.pending);
+        const bool change = !application && g.pending_change && bool(g.in->changed);
+        fn = change ? g.in->changed : g.in->report;
+        if (change) application = g.world != 0; // changed() receives world presence, never a ready-event request
         g.pending_set = false;
         g.pending_application = false;
-        fn = g.in->report;
+        g.pending_change = false;
     }
     if (fn) fn(r, application);  // registry.json: the stage runner writes it, with no lock of kiln.content's held
 }
@@ -1309,8 +1325,9 @@ uint32_t foreign_slots(const std::vector<uintptr_t>& slots) {
 }
 
 KilnResult registry_live_commit(KilnOwner owner, uint64_t handle, RegistryLiveReply* out) {
+    if (g_transaction_active) return KILN_ERR_UNAVAILABLE;
+    TransactionScope transaction;
     RegistryLiveReply reply;
-    bool publish = false;
     {
         std::lock_guard lock(store_mutex());
         LiveState::Change* change = nullptr;
@@ -1324,7 +1341,7 @@ KilnResult registry_live_commit(KilnOwner owner, uint64_t handle, RegistryLiveRe
             reply.reason = change->refused.empty() ? "the transaction has no edits" : change->refused.front().reason;
             g.refused.insert(g.refused.end(), change->refused.begin(), change->refused.end());
             g.changes.erase(handle);
-            report(false); publish = true;
+            queue_change_report();
         } else if ((change->world && change->world != g.world) || (!g.world && (change->point == 2 || change->point == 4))) {
             reply.outcome = RegistryLiveOutcome::WorldRequired; reply.reason = "a world is required, or the draft's world has ended";
         } else {
@@ -1359,10 +1376,11 @@ KilnResult registry_live_commit(KilnOwner owner, uint64_t handle, RegistryLiveRe
                 g.changes.erase(handle); compose_changes();
                 reply.outcome = RegistryLiveOutcome::Refused; reply.reason = refusal;
                 g.refused.push_back({mod, prefix, registry::Stage::Alter, 0, refusal, ""});
-                report(false); publish = true;
+                queue_change_report();
             } else if (!g.world) {
                 reply.outcome = RegistryLiveOutcome::PendingWorld;
                 reply.reason = "the copied change will apply when a world loads";
+                queue_change_report();
             } else {
                 std::string error;
                 apply_changes(&error, handle);
@@ -1381,22 +1399,21 @@ KilnResult registry_live_commit(KilnOwner owner, uint64_t handle, RegistryLiveRe
                     reply.accepted = 0; ++reply.refused; reply.reason = "the live transaction was not committed: " + why;
                     if (!rollback.empty()) reply.reason += "; rollback unverified: " + rollback;
                     g.refused.push_back({mod, "live:" + std::to_string(handle), registry::Stage::Alter, 0, reply.reason, ""});
-                    report();
+                    queue_change_report();
                 } else {
                     reply.outcome = g.pending_tables.empty() ? RegistryLiveOutcome::Applied : RegistryLiveOutcome::PendingResource;
                 }
-                publish = true;
             }
         }
     }
-    if (publish) registry_live_publish();
     if (out) *out = reply;
     return KILN_OK;
 }
 
 KilnResult registry_live_revert(KilnOwner owner, uint64_t handle, RegistryLiveReply* out) {
+    if (g_transaction_active) return KILN_ERR_UNAVAILABLE;
+    TransactionScope transaction;
     RegistryLiveReply reply;
-    bool publish = false;
     {
         std::lock_guard lock(store_mutex());
         LiveState::Change* change = nullptr;
@@ -1411,10 +1428,8 @@ KilnResult registry_live_revert(KilnOwner owner, uint64_t handle, RegistryLiveRe
             reply.skipped = foreign_slots(slots);
             if (!error.empty()) { reply.outcome = RegistryLiveOutcome::Unverified; reply.reason = error; }
             else if (reply.skipped) { reply.outcome = RegistryLiveOutcome::Skipped; reply.reason = "another writer's bytes were left unchanged during revert"; }
-            publish = true;
-        } else if (active) compose_changes();
+        } else if (active) { compose_changes(); queue_change_report(); }
     }
-    if (publish) registry_live_publish();
     if (out) *out = reply;
     return KILN_OK;
 }

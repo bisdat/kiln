@@ -33,6 +33,7 @@ size_t g_near = 1 << 19;
 Registry g_regs[5];
 std::map<std::string, std::string> g_files;  // pack file rel -> its text
 std::vector<size_t> g_write_limits; // test-only: successful writes allowed in each next batch (empty: no injected failure)
+std::function<void()> g_before_write; // test-only: one callback just before a real batch writes
 }  // namespace
 uintptr_t A(size_t off) { return reinterpret_cast<uintptr_t>(g_arena) + off; }
 void logf(int, const char* fmt, ...) {
@@ -48,6 +49,7 @@ bool rd(uintptr_t address, void* out, size_t n) {
     return true;
 }
 size_t write_batch(std::vector<Write>& writes, uintptr_t* failed) {
+    if (g_before_write) { auto callback = std::move(g_before_write); g_before_write = {}; callback(); }
     size_t limit = writes.size();
     if (!g_write_limits.empty()) { limit = g_write_limits.front(); g_write_limits.erase(g_write_limits.begin()); }
     for (size_t i = 0; i < writes.size(); ++i) {
@@ -193,7 +195,7 @@ registry::Result g_last_report;
 int g_reports = 0;
 
 void world() {
-    g_write_limits.clear();
+    g_write_limits.clear(); g_before_write = {};
     std::string e;
     store_reset(false, &e);
     std::memset(g_arena, 0, sizeof g_arena);
@@ -716,6 +718,7 @@ void live_transactions() {
     check(registry_live_submit(77, h, ir, &reply, nullptr) == KILN_OK, "submit Kiln fields");
     check(registry_live_commit(77, h, &reply) == KILN_OK && reply.outcome == RegistryLiveOutcome::Applied, "commit the live transaction");
     check(at<uint32_t>(WOOD_AT) == 30, "the live change writes through the real store");
+    registry_live_publish();
     check(registry::report_json(registry_schema(), g_last_report, {}).dump().find("live:") != std::string::npos, "the live owner and transaction are in the report");
     check(registry_live_revert(78, h, &reply) == KILN_ERR_INVALID_ARGUMENT, "another owner cannot revert it");
     check(registry_live_revert(77, h, &reply) == KILN_OK && at<uint32_t>(WOOD_AT) == 10, "revert restores the layer below");

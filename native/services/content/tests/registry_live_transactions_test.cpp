@@ -58,6 +58,7 @@ void unrelated_live_binding_failure_isolated() {
     check(registry_live_commit(72, b, &reply) == KILN_OK, "second independent commit call succeeds");
     check(reply.outcome == RegistryLiveOutcome::Applied && reply.accepted == 1 && at<uint32_t>(WOOD_AT) == 30,
           "an earlier live change's unbindable edit does not refuse another owner");
+    registry_live_publish();
     check(reported("the entry is not in this world"), "the earlier change's binding refusal remains visible");
 }
 void pending_binding_failure_is_atomic() {
@@ -116,6 +117,59 @@ void pending_write_failure_is_rolled_back() {
     check(at<uint32_t>(WOOD_AT) == 10 && at<uint32_t>(SWORD_AT) == 0,
           "a partial pending write failure restores the fields that already wrote");
     check(registry_live_status().active == 0 && reported("not applied in this world"), "a failed pending write is deactivated and reported");
+}
+void commit_does_not_reenter_ready() {
+    fresh_live();
+    struct Probe { int depth = 0, max_depth = 0, reports = 0, applications = 0; bool reverting = false; uint64_t previous = 0; };
+    auto probe = std::make_shared<Probe>();
+    g.in->report = [probe](const registry::Result& result, bool application) {
+        g_last_report = result; ++probe->reports;
+        if (!application) return;
+        ++probe->applications;
+        if (probe->reverting || probe->depth >= 3) return; // bounded linear reproduction, never a recursive tree
+        ++probe->depth; probe->max_depth = std::max(probe->max_depth, probe->depth);
+        RegistryLiveReply reply;
+        if (probe->previous) {
+            probe->reverting = true; registry_live_revert(81, probe->previous, &reply); probe->reverting = false;
+        }
+        probe->previous = change(81, "reapply", "[{" + wood + R"("op":{"add":1}}])");
+        registry_live_commit(81, probe->previous, &reply);
+        --probe->depth;
+    };
+    RegistryLiveReply reply;
+    probe->previous = change(81, "reapply", "[{" + wood + R"("op":{"add":1}}])");
+    registry_live_commit(81, probe->previous, &reply);
+    check(probe->reports == 0 && probe->max_depth == 0, "commit returns before publishing, with no ready-callback recursion");
+    registry_live_publish();
+    check(probe->reports == 1 && probe->applications == 0, "the next pump publishes a transaction snapshot, not WORLDLOAD");
+}
+void revert_defers_its_snapshot() {
+    fresh_live(); RegistryLiveReply reply;
+    const auto h = change(71, "a", "[{" + wood + R"("op":50}])");
+    registry_live_commit(71, h, &reply); registry_live_publish();
+    auto reports = std::make_shared<int>(0);
+    g.in->report = [reports](const registry::Result& result, bool application) { g_last_report = result; if (!application) ++*reports; else *reports += 100; };
+    registry_live_revert(71, h, &reply);
+    check(*reports == 0 && at<uint32_t>(WOOD_AT) == 10, "revert writes its result but never dispatches a report callback inline");
+    registry_live_publish();
+    check(*reports == 1, "revert's next-pump snapshot is not a world-load notification");
+}
+void nested_transactions_are_refused() {
+    fresh_live(); RegistryLiveReply reply;
+    const auto outer = change(71, "a", "[{" + wood + R"("op":50}])");
+    const auto nested = change(72, "b", "[{" + wood + R"("op":80}])");
+    KilnResult commit_rc = KILN_OK, revert_rc = KILN_OK;
+    g_before_write = [&] {
+        RegistryLiveReply inner;
+        commit_rc = registry_live_commit(72, nested, &inner);
+        revert_rc = registry_live_revert(71, outer, &inner);
+    };
+    registry_live_commit(71, outer, &reply);
+    check(commit_rc == KILN_ERR_UNAVAILABLE && revert_rc == KILN_ERR_UNAVAILABLE,
+          "a write callback cannot reenter commit or revert while another transaction is in flight");
+    check(reply.outcome == RegistryLiveOutcome::Applied && at<uint32_t>(WOOD_AT) == 50,
+          "refusing nested transactions preserves the outer write and its handle");
+    registry_live_revert(72, nested, &reply); registry_live_revert(71, outer, &reply);
 }
 void claims_and_binding_failure() {
     fresh_live(); RegistryLiveReply reply;
@@ -196,6 +250,7 @@ void restart_is_per_edit_and_begin_is_bounded() {
     auto h = change(71, "a", "[{" + wood + R"("op":75},{"registry":"balance","select":"game:balance","field":"levelCap","op":60}])", 3);
     registry_live_commit(71, h, &reply);
     check(reply.outcome == RegistryLiveOutcome::Applied && reply.refused == 1 && at<uint32_t>(WOOD_AT) == 75, "restart-only refusal does not silently write or discard mapped live edits");
+    registry_live_publish();
     check(reported("RestartRequired"), "restart requirement is in registry.json");
     registry_live_revert(71, h, &reply);
     std::vector<uint64_t> drafts;
@@ -217,6 +272,9 @@ int main() {
         {"reapplied_binding_failure_is_atomic", reapplied_binding_failure_is_atomic},
         {"pending_evaluation_failure_is_atomic", pending_evaluation_failure_is_atomic},
         {"pending_write_failure_is_rolled_back", pending_write_failure_is_rolled_back},
+        {"commit_does_not_reenter_ready", commit_does_not_reenter_ready},
+        {"revert_defers_its_snapshot", revert_defers_its_snapshot},
+        {"nested_transactions_are_refused", nested_transactions_are_refused},
         {"claims_and_binding_failure", claims_and_binding_failure},
         {"mapped_reads_have_no_write_side_effect", mapped_reads_have_no_write_side_effect},
         {"world_scope_and_admission", world_scope_and_admission},

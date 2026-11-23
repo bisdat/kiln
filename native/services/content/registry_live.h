@@ -55,6 +55,8 @@ struct RegistryLive {
     // registry.json (S11 writes it): a world load or pack reload passes true for a new application.
     // A refresh for late drop tables passes false so it does not send another WORLDLOAD event.
     std::function<void(const registry::Result&, bool application)> report;
+    // A deferred transaction snapshot: generation +1, but never WORLDLOAD. The bool says whether a world exists.
+    std::function<void(const registry::Result&, bool world)> changed;
 };
 
 // One pack file's "registry" section, lowered (packs.cpp registry_sections).

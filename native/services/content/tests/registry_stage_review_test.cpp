@@ -260,6 +260,30 @@ void worldload_ready_event(const std::string& dir) {
     check(r.read(2, "items", "game:plank", "maxStack", &value) == KILN_OK && value == "42", "a late refresh updates the resolved view");
     check(r.generation() == generation && seen.size() == 2, "a late refresh keeps the generation and sends no ready event");
 }
+void transaction_snapshot_is_not_worldload(const std::string& dir) {
+    TreeView view = world();
+    Files files;
+    stage::Runner r(env_of(&view, &files, dir, &sections));
+    stage::LiveHandoff live;
+    r.set_live([&](const stage::LiveHandoff& h) { live = h; });
+    std::vector<stage::Phase> seen;
+    uint64_t handle = 0;
+    r.subscribe_ready(5, [&](stage::Phase phase, uint64_t) { seen.push_back(phase); return true; }, &handle);
+    r.run({}); r.finish({});
+    check(bool(live.changed), "the live handoff has a transaction snapshot publisher");
+    auto generation = r.generation();
+    live.changed(*live.result, false);
+    check(r.generation() == generation + 1 && r.phase() == stage::Phase::Start && seen.size() == 1,
+          "a pre-world transaction advances the snapshot generation without WORLDLOAD");
+    check(json::parse(files.report)["phase"] == "start", "the pre-world report does not claim a world loaded");
+    live.report(*live.result, true);
+    generation = r.generation();
+    live.changed(*live.result, true);
+    check(r.generation() == generation + 1 && seen.size() == 2,
+          "an in-world transaction advances the generation without another ready event");
+    check(json::parse(files.report)["phase"] == "worldLoad", "an in-world transaction preserves world report metadata");
+}
+
 // R6: the live handoff keeps what a hot reload must not lose (review finding 6): the refusals made outside compose, the restart
 // fields as the boot back-end wrote them, and the stage's mapping check
 void handoff_keeps_outside_refusals(const std::string& dir) {
@@ -623,6 +647,7 @@ int main(int argc, char** argv) {
         {"R2 id_table_overwritten", [&] { id_table_overwritten(dir); }},
         {"R3 submit_unbound_owner", [&] { submit_unbound_owner(dir); }},
         {"R4 worldload_ready_event", [&] { worldload_ready_event(dir); }},
+        {"P2 transaction_snapshot_is_not_worldload", [&] { transaction_snapshot_is_not_worldload(dir); }},
         {"R6 handoff_keeps_outside_refusals", [&] { handoff_keeps_outside_refusals(dir); }},
         {"R5 cache_misses_added_resource", [&] { cache_misses_added_resource(dir); }},
         {"P2 revoked_queue", [&] { revoked_queue(dir); }},

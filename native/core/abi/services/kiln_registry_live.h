@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: MIT
- * kiln.registry.live v1 (since mod API 0.2.16): explicit owner-scoped live registry changes. Kiln ids/fields only;
+ * kiln.registry.live v1 (since mod API 0.2.17): explicit owner-scoped live registry changes. Kiln ids/fields only;
  * kiln.registry v1 is unchanged. Layers are above packs/start-time registry edits and below Content.* code.
  * begin/submit draft copied IR; commit retains the change until revert, owner revoke or its world's end.
  * Later commits win and are reported. Revert recomposes the remaining layers, not an old memory snapshot.
@@ -25,7 +25,10 @@
  * must cover v1, larger records are accepted and size is set to v1. Refused edits are reported per edit. Runtime binding
  * or write failure rolls the candidate back; UNVERIFIED means rollback could not be proved, never success.
  * read returns actual live bytes through Kiln's field mappings; restart fields and pre-world reads use the kept stage
- * view. Select ids/schema/report/ready events through kiln.registry; live applications update its report/generation.
+ * view. Select ids/schema/report/ready events through kiln.registry. Transactions queue a report/generation update for
+ * the next registry pump; multiple updates may coalesce. They never send WORLDLOAD or dispatch ready callbacks from
+ * commit/revert. Only real world/pack applications send WORLDLOAD. Result.generation is the last published snapshot.
+ * A nested commit/revert while another transaction is in flight returns UNAVAILABLE.
  */
 #ifndef KILN_REGISTRY_LIVE_H
 #define KILN_REGISTRY_LIVE_H

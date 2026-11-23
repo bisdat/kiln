@@ -16,7 +16,7 @@ A faulted stage turn is dropped; a fault in either callback kind removes its sub
 
 ## Native live changes: kiln.registry.live v1
 
-Since mod API **0.2.16**, this is a separate 56-byte table, not an extension of the stage table. Its header is
+Since mod API **0.2.17**, this is a separate 56-byte table, not an extension of the stage table. Its header is
 `native/core/abi/services/kiln_registry_live.h`. It is supplied by kiln-content.dll on server and client.
 
 1. `begin(owner, entry_point, &handle)` creates an owner-bound draft.
@@ -65,8 +65,12 @@ slot to it for the rest of that world and names the skipped operation in the rep
 writer”; naming a ShroudForge runtime package needs the later owner-write journal integration. This is not a promise to
 identify arbitrary DLL writes.
 
-Live applications rewrite `kiln/state/registry.json` and advance `kiln.registry`'s ready generation outside the store
-lock. Writer sources identify the live handle and entry point. Waiting drafts do not pretend that game bytes changed.
+Transactions queue a rewrite of `kiln/state/registry.json` and advance `kiln.registry`'s snapshot generation at the next
+registry pump, outside the store lock; multiple updates before that pump may coalesce. They do not send `WORLDLOAD`
+or dispatch ready callbacks from `commit`/`revert`. Only real world/pack applications send that event. A result's
+`generation` is the last published snapshot, not a promise that its queued report has already been written. Nested
+`commit`/`revert` calls while a transaction is in flight return `UNAVAILABLE`. Writer sources identify the live handle
+and entry point. Waiting drafts do not pretend that game bytes changed.
 
 There are at most **64 open drafts**, **1,024 retained changes**, **4,096 edits per change**, **64 MiB of copied IR** in
 all changes, and the stage's existing 16 MiB/32-level document limit. Revert releases a handle. Handles and world tokens

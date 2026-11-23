@@ -455,6 +455,7 @@ void bind_service() {
         if (h.boot_fields) in.boot_fields = *h.boot_fields;
         in.check = h.check;
         in.report = h.report;
+        in.changed = h.changed;
         registry_live_install(std::move(in));
     });
     const KilnResult a = g_api->register_service(g_owner, KilnStr{KILN_REGISTRY_SERVICE, sizeof(KILN_REGISTRY_SERVICE) - 1}, &kTable);

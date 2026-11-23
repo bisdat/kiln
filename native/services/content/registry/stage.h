@@ -107,6 +107,8 @@ struct LiveHandoff {
     const std::vector<Refusal>* pre_refused = nullptr;
     const std::map<FieldRef, FieldOutcome>* boot_fields = nullptr;
     std::function<void(Batch*, std::vector<Refusal>*)> check;
+    // A transaction snapshot advances the report generation without pretending that another world loaded.
+    std::function<void(const Result&, bool world)> changed;
 };
 
 class Runner {

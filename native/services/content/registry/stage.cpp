@@ -971,7 +971,7 @@ void Runner::finish(const std::vector<BootOutcome>& outcomes) {
             std::lock_guard l2(d_->mu);
             refuse_unmapped(d_->rm, d_->schema, b, refused);
         };
-        live.report = [this](const Result& r, bool application) {
+        auto publish = [this](const Result& r, bool application, bool world_event, bool world) {
             std::vector<uint64_t> handles;
             uint64_t g2 = 0;
             std::string text;
@@ -980,9 +980,11 @@ void Runner::finish(const std::vector<BootOutcome>& outcomes) {
                 d_->result = r;
                 if (application) {
                     d_->meta.generation = ++d_->generation;
-                    d_->meta.world_load = true;
-                    phase_.store(Phase::WorldLoad);
+                    d_->meta.world_load = world;
                     g2 = d_->generation;
+                }
+                if (world_event) {
+                    phase_.store(Phase::WorldLoad);
                     for (const auto& [h, s] : d_->ready_subs) handles.push_back(h);
                 }
                 d_->meta.written = d_->env.now ? d_->env.now() : "";
@@ -990,10 +992,12 @@ void Runner::finish(const std::vector<BootOutcome>& outcomes) {
                 d_->report = doc2.dump();
                 text = doc2.dump(1);
             }
-            // outside the runner's lock (review finding 10): the file, then kiln_registry.h's WORLDLOAD event (finding 9)
+            // Outside the runner lock: transaction snapshots update the generation/file, never the ready event.
             if (d_->env.write_report) d_->env.write_report(text);
             notify_ready(handles, Phase::WorldLoad, g2);
         };
+        live.report = [publish](const Result& r, bool application) { publish(r, application, application, application); };
+        live.changed = [publish](const Result& r, bool world) { publish(r, true, false, world); };
     }
     if (!plan_rel.empty() && !d.env.write_data(plan_rel, plan_text)) d.log(1, "registry: the plan could not be written");
     if (d.env.write_report && !d.env.write_report(report_text)) d.log(1, "registry: state/registry.json could not be written");
