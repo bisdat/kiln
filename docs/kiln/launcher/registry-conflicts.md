@@ -30,6 +30,7 @@ are shown in evaluation order. This is intentionally not an export of the full h
 
 All report text is rendered as React text, never HTML. Mapping records, hashes, raw member paths, game addresses and
 function metadata are not presented. Rows the runtime marks `raw` (Advanced-tier raw paths: field rows, conflict lines
-and refused edits) keep their outcome but hide the path. Other field names are checked against Kiln's published
+and refused edits) keep their outcome but hide the path, and conflict or refusal text on a Kiln field that mentions a
+raw path a mod wrote shows "raw path (details hidden)" in its place. Other field names are checked against Kiln's published
 registry identifier lock: a name it does not know (a misspelled field, or a field of a newer Kiln) is shown as written,
 marked "Field unknown to this launcher", and a refusal keeps its native reason, which is what the mod author can act on. No game client is launched by this page.

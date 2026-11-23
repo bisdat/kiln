@@ -40,6 +40,16 @@ function count(x: unknown): number {
   if (!Number.isSafeInteger(x) || (x as number) < 0) throw new Error("Invalid registry report count.");
   return x as number;
 }
+// A raw member path a mod wrote can sit inside native text attached to a Kiln field (compose.cpp: "... over a's raw path
+// ItemDesc.m_stackSize", "items[x].maxStack and raw path X are one place", "raw path \"P\" is inside ...", place_text's
+// "items[x].P (raw)", a FieldRef's "items[x].raw:p"). Display text never names one.
+const RAW_HIDDEN = "raw path (details hidden)";
+export function redactRaw(s: string): string {
+  return s
+    .replace(/\braw paths? "(?:[^"\\]|\\.)*"(?:\s*(?:and|,)\s*"(?:[^"\\]|\\.)*")*/g, RAW_HIDDEN)
+    .replace(/\braw path (?!\(details hidden\))[^\s,;:()"]+/g, RAW_HIDDEN)
+    .replace(/[^\s"]*\.raw:[^\s,;:()"]+|[^\s"]+ \(raw\)/g, RAW_HIDDEN);
+}
 const omitted = (x: unknown): number => x === undefined ? 0 : count(x);
 const optional = (x: unknown): string => x === undefined ? "" : text(x);
 const owner = (x: unknown): string => x === null ? "Base" : text(x);
@@ -133,12 +143,12 @@ export function parseRegistryReport(input: string): RegistryReport {
       const registry = text(c.registry), prefix = `${registry}[${text(c.id)}].`;
       const raw = c.raw === true || !field.startsWith(prefix), unknown = !raw && !isKilnField(registry, field.slice(prefix.length));
       return { field: raw ? "Advanced field (details hidden)" : unknown ? `${field} (Field unknown to this launcher)` : field, kind: text(c.kind), winner: owner(c.winner), loser: c.loser === null ? "None" : text(c.loser),
-        certainty: certainty(c.certainty), text: raw ? "Advanced field conflict; mapping details hidden." : text(c.text) };
+        certainty: certainty(c.certainty), text: raw ? "Advanced field conflict; mapping details hidden." : redactRaw(text(c.text)) };
     }),
     refused: refused.slice(0, REPORT_LIMITS.rows).map(x => {
       // Only a refusal the runtime marks raw (an Advanced-tier raw path, report.cpp) is redacted. A name the lock does not
       // know (a typo, or a field of a newer Kiln) is what the author wrote, and the reason is the one thing they can act on.
-      const f = object(x), field = optional(f.field), registry = optional(f.registry), reason = text(f.reason);
+      const f = object(x), field = optional(f.field), registry = optional(f.registry), reason = redactRaw(text(f.reason));
       const raw = f.raw === true;
       const unknown = !raw && !!field && !isKilnField(registry, field);
       const place = [registry, optional(f.id), field].filter(Boolean).join(" · ");

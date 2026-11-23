@@ -116,6 +116,27 @@ describe("untrusted registry report", () => {
     expect(JSON.stringify(out.refused)).not.toContain("SecretSetup");
     expect(out.refused[0].field).toBe("Advanced field (details hidden)");
   });
+  test("a Kiln field's conflict text never names a raw path a mod wrote", () => {
+    const r = registryFixture();
+    const out = parse({ ...r, conflicts: [
+      { ...r.conflicts[0], kind: "overridden", text: "items[game:fixture_stack].maxStack: b sets 5 over a's raw path SecretDesc.m_stackSize (one place in the game on two scales; the later value wins)" },
+      { ...r.conflicts[0], kind: "exclusive", text: "Conflict (one place, two scales): items[game:fixture_stack].maxStack and raw path SecretDesc.m_stackSize are one place in the game, which Kiln converts between them; a writes raw path SecretDesc.m_stackSize there and no conversion of a relative change is known here: b's relative edit is refused (a value would win)" },
+    ] });
+    expect(JSON.stringify(out.conflicts)).not.toContain("SecretDesc");
+    expect(out.conflicts[0].text).toContain("raw path (details hidden)");
+    expect(out.conflicts[1].text).toContain("items[game:fixture_stack].maxStack and raw path (details hidden) are one place");
+  });
+  test("a Kiln field's refusal reason never names a raw path a mod wrote", () => {
+    const r = registryFixture();
+    const out = parse({ ...r, refused: [
+      { ...r.refused[1], reason: "Conflict (one place, two scales): items[game:fixture_stack].maxStack and raw path SecretDesc.m_stackSize are one place" },
+      { ...r.refused[1], field: "", reason: "game:x: raw path \"SecretDesc.Member\" does not resolve on this game build (no member)" },
+      { ...r.refused[1], field: "", reason: "items[game:x].raw:secretdesc.member: needs a restart; this edit was not applied" },
+      { ...r.refused[1], field: "", reason: "Conflict (exclusive): a also writes items[game:x].SecretDesc.Member (raw); the later edit is refused" },
+    ] });
+    expect(JSON.stringify(out.refused).toLowerCase()).not.toContain("secretdesc");
+    expect(out.refused[0].reason).toContain("items[game:fixture_stack].maxStack");
+  });
   test("HTML is kept as plain text, never interpreted", () => {
     const r = registryFixture(); r.refused[0].reason = '<img src=x onerror="alert(1)">';
     expect(parse(r).refused[0].reason).toBe(r.refused[0].reason);
