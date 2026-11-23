@@ -140,8 +140,8 @@ public sealed class RegistryStage
         public void Set(int field, int index, object? value)
         {
             var spec = Field(field);
-            if (!stage.Writable(phase)) return;
             if (spec.ReadOnly) throw new ArgumentException("the registry field is read-only");
+            if (!stage.Writable(phase)) return;
             var node = Json(value);
             var path = spec.Path.Replace("[]", $"[{index}]", StringComparison.Ordinal);
             if (spec.Type == RegistryFieldType.List && index >= 0) path += $"[{index}]";
@@ -168,6 +168,7 @@ public sealed class RegistryStage
         public void ListOp(int listField, RegistryListOp op, IReadOnlyList<object?> values)
         {
             var spec = Field(listField);
+            if (spec.ReadOnly) throw new ArgumentException("the registry field is read-only");
             if (!stage.Writable(phase)) return;
             var json = values.Select(Json).ToArray();
             var payload = new JsonObject { [op.ToString().ToLowerInvariant()] = op == RegistryListOp.Clear ? JsonValue.Create(true) : new JsonArray(json.Select(x => x?.DeepClone()).ToArray()) };

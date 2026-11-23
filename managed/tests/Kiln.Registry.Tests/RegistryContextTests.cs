@@ -131,6 +131,17 @@ public sealed class RegistryContextTests
         }
         finally { Config.Reset(); KilnPaths.Root = previous; KilnPaths.Config = null!; Directory.Delete(root, true); }
     }
+    [Theory]
+    [InlineData(RegistryPhase.Add)]
+    [InlineData(RegistryPhase.Final)]
+    public void ReadOnlyFieldsAreRejectedBeforeAWriteIsIgnoredInAnotherPass(RegistryPhase phase)
+    {
+        var context = Frame(Mod(), phase: phase); using var scope = context.Enter();
+        var registry = DataRegistry.For(context); var field = RegistrySchema.Find("items.hasArmor")!;
+        Assert.Throws<ArgumentException>(() => registry.Cells("items", "game:wood").Set(field.Id, -1, true));
+        Assert.Throws<ArgumentException>(() => registry.Cells("items", "game:wood").ListOp(field.Id, RegistryListOp.Clear, []));
+        Assert.Null(context.CaptureIr()); context.Close();
+    }
     [Fact]
     public void ResolvedViewsCannotWriteEvenInTheAlterPass()
     {
