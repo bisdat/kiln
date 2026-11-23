@@ -240,7 +240,9 @@ the old and new exe's reflection diffed per regmap row, the gear formulas checke
 suites (`registry-roundtrip`, live and boot generations) and values exports (`registry-values`) found by content in the
 gate copy's and the instance's `kiln/data/content/registry/proof/`, the values diffed with each base's origin, the ids
 checked against the previous build's. The regmap record is verified only when every step ran green; a field the lab gave
-no evidence for is `unproven` (kept off, with its reason), one the build changed is `changed`. Id tables and values
+no evidence for is `unproven` (kept off, with its reason), one the build changed is `changed`. Missing registry samples
+never fail the sigdb build gate or block its build mark. The producer's candidate regmap is deployed only in the gate
+copy; the source instance stays unchanged, and an element row stays unproven until its list row is proven. Id tables and values
 exports are kept per build in `$KILN_REGMAP_IDS` (default `~/.local/state/kiln/regmap-ids/`), never in the repository
 (kilnctl refuses an output or maintainer folder inside a Kiln tree; tables harvested from data folders are kept apart, in
 `<side>/harvested/`). The old build is the newest cached exe with a verified regmap record. `--first-build` waives the

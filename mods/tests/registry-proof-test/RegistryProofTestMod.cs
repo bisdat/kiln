@@ -34,7 +34,7 @@ public sealed unsafe class RegistryProofTestMod : Mod
         public ulong World, Generation;
         public fixed byte Reason[192];
     }
-    private const uint Manual = 4, Applied = 0, Reverted = 5;
+    private const uint Manual = 4, Applied = 0, Refused = 2, Reverted = 5;
     private static readonly string[] Live = { "items", "recipes", "loot", "drops" };
     private byte* _table;
     private ulong _owner;
@@ -106,7 +106,7 @@ public sealed unsafe class RegistryProofTestMod : Mod
         return reply;
     }
 
-    private static bool IsExactRefusal(Reply r) => r.Outcome == 2 && Why(r).StartsWith("not_exact: ", StringComparison.Ordinal);
+    private static bool IsExactRefusal(Reply r) => r.Outcome == Refused && Why(r).StartsWith("not_exact: ", StringComparison.Ordinal);
 
     private static string Why(Reply r) => Encoding.UTF8.GetString(r.Reason, 192).TrimEnd('\0');
 
@@ -185,7 +185,7 @@ public sealed unsafe class RegistryProofTestMod : Mod
             case "int": case "stackCount": case "formula":
                 return v is JsonValue n && n.TryGetValue<double>(out var d) ? JsonValue.Create((long)d + 1) : null;
             case "impactConfig": // float-config probe: fractional even when the current value happens to be whole
-                return v is JsonValue ic && ic.TryGetValue<double>(out var c) ? JsonValue.Create(Math.Floor(c) + 0.5) : null;
+                return v is JsonValue ic && ic.TryGetValue<double>(out var c) ? JsonValue.Create(Math.Floor(c) + (c == Math.Floor(c) + 0.5 ? 1.5 : 0.5)) : null;
             case "float":
                 return v is JsonValue f && f.TryGetValue<double>(out var x) ? JsonValue.Create(x == 0 ? 1.0 : Math.Round(x * 1.25, 4)) : null;
             case "time":
