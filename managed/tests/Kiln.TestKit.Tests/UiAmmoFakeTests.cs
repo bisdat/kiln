@@ -42,6 +42,31 @@ public sealed unsafe class UiAmmoFakeTests
     }
 
     [Fact]
+    public void AGameRowAtCountZeroIsNoStockSoAPickOfAModRowOfItsItemReachesPicked()
+    {
+        // The game keeps the row of a stack the player used up, at count 0 (GitHub issue 131): as native, only a game row
+        // with stock is the game's own.
+        using var kiln = new KilnHarness();
+        kiln.Step();
+        var picks = new List<AmmoListPick>();
+        kiln.AmmoList.Hold(AmmoListKind.Spell, Staff, R(0x40, 0), R(0x42, 2));
+        using var p = kiln.Run(() => Ui.AmmoList.Provide(AmmoListKind.Spell, c => [R(0x40, 7), R(0x41, 1)],
+            new AmmoListOptions { Mode = AmmoListMode.Replace }));
+        kiln.Run(() => Ui.AmmoList.Picked += picks.Add);
+        kiln.Step();
+        Assert.Equal([R(0x40, 7), R(0x41, 1)], kiln.AmmoList.Shown(AmmoListKind.Spell));
+        Assert.True(kiln.AmmoList.Pick(AmmoListKind.Spell, new ItemId(0x40)));
+        kiln.Step();
+        Assert.Equal([new AmmoListPick(AmmoListKind.Spell, new ItemId(0x40), 7)], picks);
+        kiln.AmmoList.SetGameRows(AmmoListKind.Spell, R(0x40, 3), R(0x42, 2));  // the player carries it again
+        kiln.Step();
+        Assert.Equal([R(0x40, 7), R(0x41, 1)], kiln.AmmoList.Shown(AmmoListKind.Spell));
+        Assert.False(kiln.AmmoList.Pick(AmmoListKind.Spell, new ItemId(0x40)));  // the game equips its own stock
+        kiln.Step();
+        Assert.Single(picks);
+    }
+
+    [Fact]
     public void ReplaceRowsAreBuiltAgainWhenTheHeldWeaponOrTheBackpackChanges()
     {
         using var kiln = new KilnHarness();
