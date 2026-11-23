@@ -3256,12 +3256,12 @@
         {
           "title": "Kiln registries: mods that outlast game updates",
           "area": "api",
-          "text": "Mods and data packs add to, change and remove entries in Kiln's own registries (items, recipes, loot, creatures, abilities and more) instead of touching the game's internals. Kiln translates them to the game, so after an Enshrouded update only Kiln needs an update, not every mod."
+          "text": "Mods and data packs edit items, recipes, loot, drops and balance by Kiln's stable names. Kiln translates fields for the running game build and refuses unproven edits. Mods can add items and recipes and hide recipes or loot without deleting their records."
         },
         {
-          "title": "One data stage for all mods",
+          "title": "One data stage and a Conflicts view",
           "area": "api",
-          "text": "Kiln reads the game's data once at start, every mod's changes apply on top in one ordered pass with conflicts shown in one place, and the result is ready before the game reads it: no per-start limits, and registries are complete from a mod's first line."
+          "text": "Kiln applies startup registry edits in load order and reports competing changes in the launcher's Conflicts view. Mods choose when supported runtime edits run; the report says which edits won and which were refused."
         },
         {
           "title": "Mods' own character values",
@@ -3326,7 +3326,34 @@
         {
           "title": "Camera control",
           "text": "Mods can play camera paths for cutscenes, set a follow camera, field of view and shake, and lock a player's camera mode for a time.",
-          "area": "api"
+          "area": "api",
+          "gamePending": true
+        },
+        {
+          "title": "Inventory owners, over-menu draws, and slider steps",
+          "text": "Mods can query the kinds of inventory owners, list a base's containers, draw world overlays over menus by request, and set the steps used by config sliders.",
+          "area": "api",
+          "gamePending": true
+        },
+        {
+          "title": "Item icons",
+          "text": "Item icon buttons keep their layout when scrolled out of view, and players can configure icon-cache limits.",
+          "area": "content",
+          "kind": "fix",
+          "gamePending": true
+        },
+        {
+          "title": "Clearer player-storage and crafting diagnostics",
+          "text": "Kiln reports which stage failed when a modded bag could not be set up and how far linked-stock payment got for a player craft.",
+          "area": "servers",
+          "kind": "improved",
+          "gamePending": true
+        },
+        {
+          "title": "Require a specific dev build",
+          "text": "Mods that require a named Kiln dev build refuse earlier builds instead of running on an older runtime.",
+          "area": "core",
+          "kind": "fix"
         }
       ]
     },

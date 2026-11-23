@@ -161,8 +161,9 @@ refusal writes none of its valid field edits**. Field-only drafts keep the exist
 composition-conflict and restart-field refusals can coexist with accepted live field edits. A binding/evaluation refusal or
 the candidate's own failed write, however, rolls back the whole Manual candidate; a failed rollback is `Unverified`.
 A pack reload preserves the original GameStart adds/removes, including changed/deleted operations and deleted files, while
-reporting `RestartRequired` for changed entry intent. Live field reloads continue normally. A runtime owner retiring does not
-remove a committed GameStart definition; restart without the mod to change process intent.
+reporting `RestartRequired` for changed entry intent. A retiring mod does not undo committed GameStart changes; restart
+without it to remove that intent. Live field reloads continue normally, but a later field edit that would leave a drop
+group protected by an active removal with no viable candidates is refused.
 
 **Compatibility and missing mods.** Before publishing an addition Kiln pins its registry kind, stable GUID and terminal game
 base in the install-wide, Kiln-owned `kiln/data/registry/entry-compat.json`, keyed by mod id and Kiln entry id (one record across

@@ -120,7 +120,7 @@ A button's `does` and a key's `does` are the same record: **exactly one** of the
 | `castAbility` | asks the **server** to cast an ability block of this mod (`"other-mod:name"` for another's), as its key would: its costs and cooldown apply, and a refusal is a toast | a message to the server |
 | `applyEffect` | applies an effect block, or an effect written in place, to the player, through a hidden ability `ui-apply.<name>` Kiln makes for it (one per effect) | a message to the server |
 | `openWindow`, `closeWindow` | opens or closes a window block of this mod (or `"other-mod:name"`'s) | this game |
-| `toggleWindow` (since 0.2.0-dev.31, mod API 0.2.16) | opens the window when it is closed, closes it when it is open; a key fires while a mod's own window has the input (not while one of its text fields has the keyboard), so the same key closes it; `"whileCapturing": true` only adds firing over the Kiln menu | this game |
+| `toggleWindow` (since 0.2.0-dev.31, mod API 0.2.17) | opens the window when it is closed, closes it when it is open; a key fires while a mod's own window has the input (not while one of its text fields has the keyboard), so the same key closes it; `"whileCapturing": true` only adds firing over the Kiln menu | this game |
 | `toast` | a short message in the corner of the screen | this game |
 
 Limits worth knowing:
@@ -162,7 +162,7 @@ block and say `was`, or the rebinding is lost.
 
 ## Richer windows (since 0.2.0-dev.31)
 
-Mod API 0.2.16. Window blocks also have text fields, tables, tabs, trees and pictures, a typed state of their own, a mod's own data,
+Mod API 0.2.17. Window blocks also have text fields, tables, tabs, trees and pictures, a typed state of their own, a mod's own data,
 live values of the player's game, and buttons that run a command on the joined server. `mods/samples/UiBlocks`'s
 `blocks/camp.json` uses every one of them (Ctrl+F9, or "Camp" in the pause menu).
 
