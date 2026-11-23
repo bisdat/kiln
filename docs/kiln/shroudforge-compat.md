@@ -31,7 +31,8 @@ evidence is separate from the older observations below; neither is a client rend
 `version.json` version `1.8.1`. Runtime ABI 12, the four bootstrap exports and the client (26430625) and server (26430253)
 profiles are unchanged. The merge's six conflicts and what each kept: the fork's `kiln/UPSTREAM-PATCHES.md`. The adapter
 accepts 1.8.0 and 1.8.1 beside 1.7.8 and 1.7.9, bundled and installed (`src/contract.h`). See section 11 for what 1.8.1
-adds next to Kiln.
+adds next to Kiln. 0.2.0-dev.30.7 pins fork branch `kiln-30.7-fixes` on top of `5bb133f0`: a working baseline that is not
+whole or not the source of the game files is never restored (section 5.0).
 
 ## 1. How ShroudForge loads (source facts)
 
@@ -134,6 +135,29 @@ its copy is complete: until then it is `<stem>.kfc.bak.partial` / `<stem>.kfc_re
 folder, flushed and then renamed, so a start that ends during the copy (the resource file is about 200 MiB) leaves a
 `.partial` file that nothing restores from, and one can stay behind after a killed start. With an SF installation in
 the game folder nothing changes: its Updater and recycle bin are used.
+
+**A working baseline that is not the source of the game files** (fork branch `kiln-30.7-fixes`, 0.2.0-dev.30.7). Before
+every startup pass SF copies `<stem>.kfc.bak` and `<stem>.kfc_resources.bak` over the game files. It checked only the
+header backup's version tag and archive format: a player's header backup from before a game update that kept the tag
+went back over the updated files, and the pass failed with "failed to fill whole buffer" (the old header pointed past
+the end of the resource file). Nothing tied the companion to its header either. Now `check_working_baseline`
+(`modules/mod-runtime/startup/verify_working_baseline.rs`) decides first:
+- it restores only a whole pair that is the source of the game files. Whole: both backups are the pair
+  `<stem>.kfc.baseline.json` recorded when it was made (size, last-write time and SHA-256 of each); a pair from before
+  that record must hold its header's resource data in its companion, and is recorded once restored. Source: the live
+  header is the header backup, or was built over it (its containers, resource chunks and contents unchanged, additions
+  only after them, as every incremental writer SF, EML and Kiln use writes).
+- it sets the pair aside (as after a game update; the record moves with it) and copies a new pair from the game files
+  when the pair is not their source (an update or Steam's file check wrote them), is of another game version (SF's own
+  rule), or is not whole while the game's header is the backup's own. SF's log, and so kiln.log's `[sf]` lines, says
+  `ShroudForge: its clean copy of the game data (<stem>.kfc.bak, <stem>.kfc_resources.bak) was not used: <why>. It was
+  set aside and a new clean copy was made from the game's current files`.
+- it refuses the pass when no clean copy is left: the game files carry mods built from a pair that is not whole, are
+  what SF's last pass left (its record of the pass, read before the pass removes it), or are not whole themselves. The
+  error ends "Verify the game files in Steam (or update the server files with SteamCMD's validate), then start again";
+  the recovery after the failed pass refuses the same pair and changes no file.
+Tests (Wine, `cargo xwin test`): `verify_working_baseline` (5), `baseline_record` (3) and two whole startup passes in
+`kiln_baseline_tests.rs` (red before the fix). Not run against a real game update or a real client.
 
 **Writes into values a mod created** (fork `63b8862`, branch `kiln-sf-eml`, on top of `112d939`). In the pregame pass a
 value a mod builds (a plain table put into game data, such as a recipe inserted into the recipe registry, or a whole
