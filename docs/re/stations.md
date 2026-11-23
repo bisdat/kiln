@@ -849,6 +849,11 @@ access-checked sources, using the iterator's own accessors, and calls the origin
 scoped removeItems hook may borrow: it rechecks the live source registry, permission, sparse transaction identity and
 commit guards, pays the bag first, and verifies a source take **before returning success to Tint**. Every hook-owned
 fault, error or remainder returns a payment failure, so Tint rolls back before the palette is written. The ordinary
-unmarked action is unchanged. Windows fake-transaction tests cover entry/debit revocation, player generations, wrong
-storage/missing accessors, commit guards and an injected SEH fault after a source debit; native palette tests cover the
-raw grid callback and both mids. These are not real-client execution evidence.
+unmarked action is unchanged and clears any outer Tint's thread-local payment route for the duration of a nested call.
+Vanilla grid callbacks likewise clear any outer palette's source-count scope, restoring it when the nested call returns.
+Before installing server or client hooks, Kiln compares qualified prologues/count instructions through `read_original`
+and refuses foreign or unreadable live code through `code_state`; registry-owned detours remain valid. The entry is
+installed only after the payment link, and an entry installation failure revokes that otherwise unused link.
+Windows fake-transaction tests cover entry/debit revocation, player generations, wrong storage/missing accessors,
+commit guards, nested routing, code qualification, partial installation and an injected SEH fault after a source debit;
+native palette tests cover the raw grid callback and both mids. These are not real-client execution evidence.

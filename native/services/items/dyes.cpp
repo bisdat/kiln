@@ -54,6 +54,28 @@ void fail(const char* name,const char* why){report(name,KILN_CAP_UNAVAILABLE,KIL
 bool read(void* out,const void* p,size_t n){__try {if(!p)return false;std::memcpy(out,p,n);return true;}__except(EXCEPTION_EXECUTE_HANDLER){return false;}}
 bool write(void* p,const void* in,size_t n){__try {if(!p)return false;std::memcpy(p,in,n);return true;}__except(EXCEPTION_EXECUTE_HANDLER){return false;}}
 template<class T> bool load(const void* p,size_t off,T* out){return p&&reinterpret_cast<uintptr_t>(p)<=UINTPTR_MAX-off&&read(out,static_cast<const uint8_t*>(p)+off,sizeof(T));}
+// Symbols describe the shipped executable, not another module's current edits. Compare file bytes and refuse
+// foreign/unreadable live code before installing a hook; registry-owned detours remain valid after revocation.
+template<size_t N> bool qualified(uintptr_t at,const uint8_t (&expected)[N],size_t extent=N){
+ const auto* h=kiln::hooks_v2(api);
+ if(!h||h->header.size<offsetof(KilnHooksApi,code_state)+sizeof(h->code_state)||!h->read_original||!h->code_state||!at)return false;
+ uint8_t original[N]{};uint32_t state=KILN_CODE_UNKNOWN;uint64_t generation=0;
+ return h->read_original(at,original,N)==KILN_OK&&std::memcmp(original,expected,N)==0&&
+  h->code_state(at,extent,&state,&generation)==KILN_OK&&(state==KILN_CODE_ORIGINAL||state==KILN_CODE_MANAGED);
+}
+bool server_code(uintptr_t entry,uintptr_t pay){
+ const uint8_t tint[]{0x48,0x89,0x5c,0x24,0x18,0x48,0x89,0x74,0x24,0x20,0x55,0x41,0x56,0x41,0x57};
+ const uint8_t remove[]{0x48,0x89,0x5c,0x24,0x08,0x48,0x89,0x74,0x24,0x18,0x48,0x89,0x7c,0x24,0x20};
+ return qualified(entry,tint,640)&&qualified(pay,remove,0x2c0);
+}
+bool client_code(){
+ const uint8_t grid[]{0x40,0x55,0x56,0x57,0x41,0x56,0x48,0x8d,0xac,0x24,0x18,0xf7,0xff,0xff};
+ const uint8_t build[]{0x40,0x55,0x53,0x57,0x41,0x54,0x41,0x56,0x48,0x8d,0x6c,0x24,0xc9};
+ const uint8_t row[]{0x89,0x43,0x10};
+ const uint8_t detail[]{0xc7,0x45,0xe8,0x01,0x00,0x00,0x00};
+ return qualified(grid_at,grid,3072)&&qualified(reinterpret_cast<uintptr_t>(build_fn),build)&&
+  qualified(row_at,row)&&qualified(detail_at,detail);
+}
 // Validate the very schema the input sender/receiver uses, not merely the reflected C++ type. A narrowed slot index
 // would invalidate the reserved-key protocol. All pointers and strings are read under the exception guard above.
 bool named(const void* p,const char* wanted){char text[64]{};size_t n=std::strlen(wanted);return n<sizeof text&&read(text,p,n+1)&&std::memcmp(text,wanted,n+1)==0;}
@@ -138,7 +160,8 @@ void call_entry(const uint64_t* action,const uint64_t* it,Route* active){
 }
 void hk_entry(const uint64_t* action,const uint64_t* it){
  uint64_t secondary=0;uint32_t item=0;
- if(!load(action,8,&secondary)||!token_item(secondary,&item))return entry_hook.original<EntryFn>()(action,it);
+ // A nested ordinary Tint must not borrow the outer reserved request's payment authority.
+ if(!load(action,8,&secondary)||!token_item(secondary,&item))return call_entry(action,it,nullptr);
  if(!server_ok.load()||faulted.load())return;
  uint64_t copy[2]{};Route active{};
  if(resolve_action(action,it,item,copy,&active))call_entry(copy,it,&active);
@@ -197,11 +220,12 @@ void draw_grid(void* state,const std::vector<Stock>* stock){
  __finally {drawing=previous;}
 }
 void hk_grid(void* state){
- if(!ui_ok.load()&&modified_state!=state)return grid_hook.original<GridFn>()(state);
+ // Even a vanilla nested grid needs its own scope: mids must not see an outer palette's source counts.
+ if(!ui_ok.load()&&modified_state!=state)return draw_grid(state,nullptr);
  try {
-  uint32_t player=0;if(!ui_player(&player))return grid_hook.original<GridFn>()(state);
+  uint32_t player=0;if(!ui_player(&player))return draw_grid(state,nullptr);
   auto stock=ui_ok.load()?current_offer(player):std::vector<Stock>{};
-  if(stock.empty()&&modified_state!=state)return grid_hook.original<GridFn>()(state);
+  if(stock.empty()&&modified_state!=state)return draw_grid(state,nullptr);
   uintptr_t selected_ptr=0;uint32_t selected=0;
   if(load(state,8,&selected_ptr)&&selected_ptr)load(reinterpret_cast<void*>(selected_ptr),8,&selected);
   if(!rebuild(state))throw 1;
@@ -221,7 +245,7 @@ void KILN_CALL client_pre(const KilnTickInfo*,void*){
  if(client_world.exchange(world)!=world){client_epoch.fetch_add(1);std::lock_guard lock(offer_mu);offer={};}
  bool wanted=false;{std::lock_guard lock(offer_mu);wanted=offer.player!=0&&offer.expires>GetTickCount64();}
  if(wanted&&ui_feature&&!ui_ok.load()&&!grid_hook){
-  if(!wire_valid()||!row_hook.install(api,items_owner(),row_at,&on_row,"dyes/client.RowCount")||
+  if(!wire_valid()||!client_code()||!row_hook.install(api,items_owner(),row_at,&on_row,"dyes/client.RowCount")||
      !detail_hook.install(api,items_owner(),detail_at,&on_detail,"dyes/client.DetailCount")||
      !grid_hook.install(api,items_owner(),grid_at,reinterpret_cast<void*>(&hk_grid),"dyes/client.PaletteGrid")){
    row_hook.revoke();detail_hook.revoke();fail("crafting.dye_ui","the qualified dye palette hooks could not be installed");ui_feature=false;
@@ -292,9 +316,9 @@ void dyes_register(){
  uintptr_t entry=0,pay=0;
  if(server_feature&&symbol("dyes/TintAction",&entry)&&symbol("items/InventoryRemoveItems",&pay)){
   // Install the payment link first: the entry must never translate a reserved key without its authoritative debit.
-  if(pay_hook.install(api,items_owner(),pay,reinterpret_cast<void*>(&hk_pay),"dyes/TintPay")&&
+  if(server_code(entry,pay)&&pay_hook.install(api,items_owner(),pay,reinterpret_cast<void*>(&hk_pay),"dyes/TintPay")&&
      entry_hook.install(api,items_owner(),entry,reinterpret_cast<void*>(&hk_entry),"dyes/TintAction"))server_ok.store(true);
-  else fail("crafting.dye_sources","the qualified tint entry/payment hooks could not be installed");
+  else {pay_hook.revoke();fail("crafting.dye_sources","the tint code could not be verified or its entry/payment hooks could not be installed");}
  }
  KilnHandle h=0;
  api->subscribe_world_tick(items_owner(),KILN_WORLD_SERVER,KILN_TICK_PRE,&server_pre,nullptr,&h);

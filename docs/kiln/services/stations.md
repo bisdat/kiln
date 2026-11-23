@@ -344,9 +344,9 @@ No temporary dye is transferred to the bag and no separate inventory transaction
 
 | Capability | Side and refusal |
 | --- | --- |
-| `crafting.dye_sources` | Server/host Tint entry and payment hooks. Missing tint/transaction/access symbols, changed sparse layouts, a narrowed slot-index wire field or a failed hook refuses source tint requests. |
+| `crafting.dye_sources` | Server/host Tint entry and payment hooks. Missing tint/transaction/access symbols, changed sparse layouts, a narrowed slot-index wire field, unavailable original-code checks, foreign/unreadable live code or a failed hook refuses source tint requests. |
 | `crafting.dye_sources_session` | Needs a running server world and available hooks; no session is pending. A joined client has no server world. |
-| `crafting.dye_ui` | Client palette/availability hooks and the full-byte slot-index wire contract. Wrong side, missing symbols/layouts or a failed hook leaves the game's own list. |
+| `crafting.dye_ui` | Client palette/availability hooks and the full-byte slot-index wire contract. Wrong side, missing symbols/layouts, unavailable original-code checks, foreign/unreadable live code or a failed hook leaves the game's own list. |
 | `crafting.dye_ui_session` | Needs this local player's live support/count announcement from a Kiln server. No server, older server, no client world or expired announcement means no source rows. |
 
 The TestKit's `h.Crafting.Dyes(player)` records filtered dye counts from the shared fake registrations, with the same

@@ -6,6 +6,20 @@
 namespace {
 int checks=0,failures=0,bag=0,chest=1,palette=0,calls=0,takes=0;
 bool allowed=true,registered=true,generation=true,deny=false,revoke_in_handler=false,remove_in_handler=false,seh_fault=false,commit_guard=false;
+bool inspect_ordinary=false,wrong_original=false,fail_entry=false;
+uint32_t live_code=KILN_CODE_ORIGINAL;
+int installs=0,code_reads=0,state_reads=0;
+std::map<uintptr_t,std::vector<uint8_t>> originals;
+KilnResult KILN_CALL original_code(uintptr_t at,void* out,size_t n){
+ ++code_reads;auto it=originals.find(at);if(it==originals.end()||it->second.size()<n)return KILN_ERR_UNAVAILABLE;
+ std::memcpy(out,it->second.data(),n);if(wrong_original)static_cast<uint8_t*>(out)[0]^=1;return KILN_OK;
+}
+KilnResult KILN_CALL code_state(uintptr_t,size_t,uint32_t* state,uint64_t* epoch){++state_reads;*state=live_code;*epoch=1;return KILN_OK;}
+KilnResult KILN_CALL symbol(KilnStr name,uintptr_t* out){
+ const std::string s(name.ptr,name.len);*out=s=="dyes/TintAction"?0x1000:s=="items/InventoryRemoveItems"?0x2000:0;return *out?KILN_OK:KILN_ERR_UNAVAILABLE;
+}
+KilnResult KILN_CALL tick_sub(KilnOwner,uint32_t,int32_t,KilnTickFn,void*,KilnHandle*){return KILN_OK;}
+KilnResult KILN_CALL world_sub(KilnOwner,KilnWorldEventFn,void*,KilnHandle*){return KILN_OK;}
 uint8_t registry[256]{},storage[64]{},info[0x800]{};
 void* returned_storage=storage;
 uint16_t types[kitems::A_COUNT]{1,2,3,4,5,6,7};
@@ -15,7 +29,7 @@ KilnApi fake_api{};KilnHooksApi fake_hooks{};
 void check(bool b,const char* s){++checks;std::printf("%s %s\n",b?"PASS":"FAIL",s);failures+=!b;}
 uint32_t KILN_CALL side(){return KILN_SIDE_CLIENT;}
 const void* KILN_CALL service(KilnStr name,uint32_t){return std::string(name.ptr,name.len)==KILN_HOOKS_SERVICE?&fake_hooks:nullptr;}
-KilnResult KILN_CALL raw(KilnOwner,uintptr_t target,const KilnHookOrder*,void*,void** next,KilnHandle* h){*next=reinterpret_cast<void*>(target);*h=1;return KILN_OK;}
+KilnResult KILN_CALL raw(KilnOwner,uintptr_t target,const KilnHookOrder*,void*,void** next,KilnHandle* h){++installs;if(fail_entry&&target==0x1000)return KILN_ERR_UNAVAILABLE;*next=reinterpret_cast<void*>(target);*h=1;return KILN_OK;}
 KilnResult KILN_CALL revoke(KilnHandle){return KILN_OK;}
 uintptr_t KILN_CALL caller(KilnHandle){return kitems::pay_ret;}
 void* __fastcall job_storage(void*){return returned_storage;}
@@ -28,7 +42,8 @@ kitems::Result12* __fastcall remove_one(kitems::Result12* out,void*,uint32_t hol
  if(n){--n;*out={};}else *out={0,{0,0,0},0,1};return out;
 }
 void __fastcall vanilla(const uint64_t* action,const uint64_t*){
- ++calls;check(KILN_SLOT_INDEX(action[1])<8,"server entry resolves the reserved key to a live ordinary slot");
+ ++calls;if(inspect_ordinary){check(kitems::route==nullptr,"an ordinary nested Tint cannot inherit a reserved-key payment route");return;}
+ check(KILN_SLOT_INDEX(action[1])<8,"server entry resolves the reserved key to a live ordinary slot");
  alignas(16) uint8_t tx[0x71b0]{};
  kitems::dyes::put(tx,0,reinterpret_cast<uint64_t>(ctx));kitems::dyes::put(tx,8,uint64_t(1));
  for(const auto& pair:std::initializer_list<std::pair<int,int>>{{4,kitems::A_INVENTORY},{0x14,kitems::A_EMPTY},{3,kitems::A_SETUP},{5,kitems::A_ITEMSTATE},{0x12,kitems::A_OWNER},{0x1d,kitems::A_SLOTSEL}})
@@ -91,6 +106,9 @@ int main(){
  reset();commit_guard=true;hk_entry(action,iterator);check(palette==0&&chest==1&&takes==0,"a commit that would roll back is refused before the palette write");
  reset();seh_fault=true;hk_entry(action,iterator);check(palette==0&&chest==1&&faulted.load(),"an SEH fault after a source debit rolls back before tinting");
  reset();server_ok.store(false);hk_entry(action,iterator);check(calls==0&&chest==1,"without an available Kiln server the reserved key never reaches vanilla");
+ reset();Route outer{1,123,ctx,storage};route=&outer;inspect_ordinary=true;
+ uint64_t ordinary[2]{action[0],KILN_SLOT_ID(1000,0)};hk_entry(ordinary,iterator);
+ check(route==&outer,"a nested ordinary Tint restores its caller's payment route");inspect_ordinary=false;route=nullptr;
  std::vector<dyes::Stock> stock{{123,3}};auto row=dyes::view(123,0);KilnRegisters r{};r.rax=5;r.rbx=reinterpret_cast<uintptr_t>(row.data());r.rflags=0x246;drawing=&stock;on_row(r);
  check(r.rax==8&&r.rflags==0x246,"palette row mid updates only the count register");r.rax=7;r.r15=123;on_detail(r);check(r.rax==10,"palette detail mid adds registered dye counts");
  drawing=nullptr;KilnRegisters before=r;on_row(r);on_detail(r);check(std::memcmp(&r,&before,sizeof r)==0,"client mids leave every register alone without a live supported offer");
@@ -111,6 +129,9 @@ int main(){
  hk_grid(state.data());check(drawn==1,"without a supported server announcement the palette hook adds no row");
  dyes_set_stock(1,rows,1);hk_grid(state.data());check(drawn==2&&dyes::id(ui_rows[1])==123&&dyes::key(ui_rows[1])==dyes::token(123)&&dyes::count(ui_rows[1])==2,"palette hook injects a reserved-key source dye and the live row mid supplies its count");
  dyes_set_stock(0,nullptr,0);hk_grid(state.data());check(drawn==1,"closing or losing the server offer rebuilds the unmodified game palette list");
+ std::vector<dyes::Stock> outer_drawing{{999,3}};drawing=&outer_drawing;ui_ok.store(false);modified_state=nullptr;
+ hk_grid(state.data());check(dyes::count(ui_rows[0])==0,"an ordinary nested grid cannot inherit an outer source-count offer");
+ check(drawing==&outer_drawing,"an ordinary nested grid restores its caller's drawing scope");drawing=nullptr;ui_ok.store(true);
  struct WireSchema {uintptr_t name=0,unused=0,fields=0;uint64_t count=1;};
  std::array<WireSchema,6> schemas{};std::array<std::array<uint8_t,64>,6> fields{};
  const char* names[]{"newestEntry","data","versionedActions","itemAction","secondarySlotId","slotIndex"};
@@ -118,5 +139,28 @@ int main(){
  dyes::put(fields[5].data(),24,uint64_t(4));uintptr_t root=reinterpret_cast<uintptr_t>(&schemas[0]);wire_at=reinterpret_cast<uintptr_t>(&root);
  check(wire_valid(),"full-u8 secondary slot wire schema qualifies");dyes::put(fields[5].data(),8,uint32_t(13));dyes::put(fields[5].data(),48,uint64_t(3));
  check(!wire_valid(),"a narrowed three-bit slot wire schema fails closed");
+ fake_api.symbol=&symbol;fake_api.subscribe_world_tick=&tick_sub;fake_api.subscribe_world=&world_sub;
+ originals[0x1000]={0x48,0x89,0x5c,0x24,0x18,0x48,0x89,0x74,0x24,0x20,0x55,0x41,0x56,0x41,0x57};
+ originals[0x2000]={0x48,0x89,0x5c,0x24,0x08,0x48,0x89,0x74,0x24,0x18,0x48,0x89,0x7c,0x24,0x20};
+ server_feature=true;server_ok.store(false);installs=0;dyes_register();
+ check(!server_ok.load()&&installs==0,"missing original-code APIs refuse both payment and entry hooks");
+ fake_hooks.read_original=&original_code;fake_hooks.code_state=&code_state;
+ live_code=KILN_CODE_FOREIGN;server_ok.store(false);installs=0;dyes_register();
+ check(!server_ok.load()&&installs==0,"foreign live tint code refuses both hooks before installation");
+ live_code=KILN_CODE_UNKNOWN;server_ok.store(false);installs=0;dyes_register();
+ check(!server_ok.load()&&installs==0,"unreadable live tint code refuses both hooks");
+ live_code=KILN_CODE_ORIGINAL;wrong_original=true;server_ok.store(false);installs=0;dyes_register();
+ check(!server_ok.load()&&installs==0,"mismatched file prologues refuse both hooks");
+ wrong_original=false;live_code=KILN_CODE_MANAGED;server_ok.store(false);installs=code_reads=state_reads=0;dyes_register();
+ check(server_ok.load()&&installs==2&&code_reads>=2&&state_reads>=2,"file-qualified registry-managed code permits both hooks");
+ entry_hook.revoke();pay_hook.revoke();fail_entry=true;server_ok.store(false);dyes_register();
+ check(!server_ok.load()&&!entry_hook&&!pay_hook,"entry installation failure revokes the unused payment link");fail_entry=false;
+ grid_at=0x3000;build_fn=reinterpret_cast<BuildFn>(0x4000);row_at=0x5000;detail_at=0x6000;
+ originals[grid_at]={0x40,0x55,0x56,0x57,0x41,0x56,0x48,0x8d,0xac,0x24,0x18,0xf7,0xff,0xff};
+ originals[0x4000]={0x40,0x55,0x53,0x57,0x41,0x54,0x41,0x56,0x48,0x8d,0x6c,0x24,0xc9};
+ originals[row_at]={0x89,0x43,0x10};originals[detail_at]={0xc7,0x45,0xe8,0x01,0x00,0x00,0x00};
+ check(client_code(),"file-qualified client grid builder and both count seams permit palette hooks");
+ live_code=KILN_CODE_FOREIGN;check(!client_code(),"foreign client palette code is refused");live_code=KILN_CODE_ORIGINAL;
+ originals[row_at][0]^=1;check(!client_code(),"a changed client count instruction is refused");
  std::printf("%d checks, %d failures\n",checks,failures);return failures?1:0;
 }
