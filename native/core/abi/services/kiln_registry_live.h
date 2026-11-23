@@ -22,7 +22,10 @@
  * first begin/read prepares it, outside kiln.content's store lock, from the game's bytes with Kiln's own writes taken back
  * out (another loader's writes stay); status/schema alone do not force archive decoding.
  * Drafts and committed handles are owner-bound; owner 0 is invalid;
- * revoked owners return REVOKED. Unknown/stale handles return NOT_FOUND, another owner's handle INVALID_ARGUMENT.
+ * revoked owners return REVOKED. Unknown/stale handles return NOT_FOUND, another owner's handle INVALID_ARGUMENT, and an
+ * IR whose "mod" is not the caller's bound mod INVALID_ARGUMENT (this table's form of PERMISSION). Submit or commit on a handle
+ * already committed returns UNAVAILABLE. A commit that accepts nothing (REFUSED, RESTART_REQUIRED) consumes the handle, as
+ * revert does; a WORLD_REQUIRED commit leaves the draft for the caller to revert.
  * Limits: 64 open drafts and 1024 retained changes in the process, 16 open drafts and 256 retained changes per owner (begin
  * returns UNAVAILABLE at any of them; kiln.log names the cap), 4096 edits per change, 64 MiB copied IR total. Revert releases
  * the handle.
