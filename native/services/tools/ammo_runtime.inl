@@ -215,7 +215,9 @@ void KILN_CALL pick(SelectorGroup* groups,void* input,uint8_t category,uint32_t 
             p=b->second.publication;original=b->second.original;
             for(uint32_t j=0;j<p->count;++j)if(p->rows[j].item==item){picked=p->rows[j];injected=true;break;}
             // A row the game listed itself is the game's own in either mode (vanilla equips it), whatever a probe says.
-            for(uint32_t j=0;j<original.value.game_count;++j)if(original.rows[j].item==item)injected=false;
+            // Not one it kept at count 0: a rebuild zeroes every row it keeps, adds stock only to matching rows and does
+            // not remove the rest, so a used-up stack's row stays listed at 0 (issue 131). The backpack below decides it.
+            for(uint32_t j=0;j<original.value.game_count;++j)if(original.rows[j].item==item&&original.rows[j].count)injected=false;
             break;
         }
     }
