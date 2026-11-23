@@ -89,7 +89,7 @@ extern "C" {
 
 #define KIS_MAX_SLOTS 64u          /* slots of one storage: 8 pages */
 #define KIS_MAX_PER_MOD 8u         /* registrations of one owner */
-#define KIS_MAX_SLOTS_PLAYER 256u  /* slots of all registered storages together (every player has each): 32 pages */
+#define KIS_MAX_SLOTS_PLAYER 256u  /* page-rounded capacity of all registrations: each charges roundup8(slots); at most 32 pages */
 #define KIS_MAX_FILTER_IDS 1024u   /* KilnStorageFilter.id_count */
 #define KIS_MAX_STORAGES 32u       /* distinct keys one character carries: registered and parked */
 #define KIS_MAX_ENTRIES 128u       /* entries of one capture or document */
@@ -154,6 +154,8 @@ enum {
     KIS_PARK_STALE = 17,       /* changed elsewhere since this server's copy (the server does not trust the client's
                                   copy, which is newer): kept, never instantiated, until an admin releases it */
     KIS_PARK_LOCKED = 18,      /* the document is from a newer Kiln: kept as it is */
+    KIS_PARK_RETURNED = 19,    /* server copy held: character items were likely returned outside Kiln. An admin should
+                              * release it only if that is wrong, through the orphan return path. */
 };
 
 /* KilnStorageRecord.reason of a record in a KIS_ENTRY_QUARANTINE entry */
@@ -213,6 +215,10 @@ enum {
     KIS_WITNESS_APPLIED = 2u,  /* the game's join apply made the player's own pages */
     KIS_WITNESS_RESTORED = 4u, /* restore was accepted for this join */
     KIS_WITNESS_LEFT = 8u,     /* the player left (the values stay until the slot is taken again) */
+    KIS_WITNESS_EXTRA_MAIN_PAGES = 0x10u, /* with READ: this join's character struct has more main Generic pages than
+                                         * the game itself creates for a character (native defines the baseline).
+                                         * A likely return outside Kiln: with an unpaired arriving character and no
+                                         * client copy resolving it, park the server copy, never delete it. */
 };
 
 /* KilnStorageEvent.kind */
@@ -444,7 +450,8 @@ typedef struct KilnItemsStorageApi {
     /* ---- public rows ---- */
 
     /* Registers one storage for every player. Copies the definition (key, filter ids). One live registration per full
-     * key; an owner holds at most KIS_MAX_PER_MOD, and all registrations together at most KIS_MAX_SLOTS_PLAYER slots.
+     * key; an owner holds at most KIS_MAX_PER_MOD. All registrations together charge at most KIS_MAX_SLOTS_PLAYER slots,
+     * each rounded up to an 8-slot page (at most 32 pages per player); def->slots remains the logical capacity.
      * Players already restored get the key's holder in the next sim step (their parked records of the key go in).
      * INVALID_ARGUMENT: a bad size, key, slot count, death rule, flags or id list (unsorted, duplicates, too many), or the
      * key is registered already; UNAVAILABLE: a quota is full; REVOKED: the owner is gone. *out_handle != 0 on OK. */
