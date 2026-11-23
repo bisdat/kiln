@@ -2205,14 +2205,18 @@ export interface ReportContents {
 }
 /** What the report would hold, built as report_save builds it; nothing is written. `exclude`: other mods' files left out. */
 export const reportPreview = (target: LogTarget | null, exclude: string[] = []) => call<ReportContents>("report_preview", { target, exclude });
+/** A chosen path, the native-dialog fallback, or the dialog-free Downloads action. */
+export type ReportSaveDestination = "chosen" | "automatic" | "downloads";
 /** Writes the support report zip (logs, state files, profile, listings, summary.txt; names and paths replaced) to
- *  `path`. `target` null: the system and the launcher only. `exclude`: other mods' files the player left out. */
-export const reportSave = (target: LogTarget | null, path: string, exclude: string[] = []) => call<ReportSaved>("report_save", { target, path, exclude });
+ *  `path`, with filesystem fallbacks. `automatic`: the dialog failed (Kiln's state folder, Downloads, home);
+ *  `downloads`: no dialog (Downloads, home). Both use only the filename from `path`. The result is the actual path.
+ *  `target` null: the system and the launcher only. `exclude`: other mods' files the player left out. */
+export const reportSave = (target: LogTarget | null, path: string, exclude: string[] = [], destination: ReportSaveDestination = "chosen") => call<ReportSaved>("report_save", { target, path, exclude, destination });
 /** A few lines for a forum post, redacted like the zip. */
 export const reportSummary = (target: LogTarget | null) => call<string>("report_summary", { target });
 /** What the window did with a support report that report_save never hears of (the Save dialog cancelled, an error
  *  shown), into launcher.log. Never throws: a note that cannot be written is dropped. */
-export type ReportNote = "opened" | "dialogCancelled" | "dialogChosen" | "failed";
+export type ReportNote = "opened" | "dialogCancelled" | "dialogChosen" | "dialogFailed" | "saveToDownloads" | "failed";
 export const reportNote = (note: ReportNote, detail?: string) => call<null>("report_note", { note, detail: detail ?? null }).catch(() => null);
 
 // saves.rs

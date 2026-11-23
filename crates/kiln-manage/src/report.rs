@@ -2746,6 +2746,157 @@ pub fn write_zip(report: &Report, out: &Path) -> crate::Result<u64> {
     std::fs::metadata(out).map(|m| m.len()).map_err(crate::util::io_at(out, "reading back"))
 }
 
+/// A chosen file, or the dialog-free destinations when a native file chooser cannot be used.
+#[cfg(feature = "zip")]
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SaveDestination {
+    #[default]
+    Chosen,
+    Automatic,
+    Downloads,
+}
+
+/// Existing launcher and user folders, supplied by the caller rather than the working directory.
+#[cfg(feature = "zip")]
+pub struct SaveFolders {
+    pub owned: PathBuf,
+    pub downloads: Vec<PathBuf>,
+    pub home: Option<PathBuf>,
+}
+
+/// Saves a report, retrying from Kiln's folder and falling back to Downloads/home. Returns the actual file and size.
+/// Automatic destinations get a new filename on collision: only the player's explicitly chosen file may be replaced.
+#[cfg(feature = "zip")]
+pub fn save_zip(report: &Report, out: &Path, destination: SaveDestination, folders: &SaveFolders, mut log: impl FnMut(String)) -> crate::Result<(PathBuf, u64)> {
+    save_zip_with(report, out, destination, folders, &mut log, &mut write_zip)
+}
+
+/// Direct writes stay atomic. If a folder refuses the adjacent temporary file or rename, build the zip in Kiln's
+/// state folder and copy it to the destination instead. Only Kiln's folder is created; a missing Downloads falls
+/// through to home. All path operations use native Paths, including Windows drive letters and redirected Downloads.
+#[cfg(feature = "zip")]
+fn save_zip_with(report: &Report, out: &Path, destination: SaveDestination, folders: &SaveFolders, log: &mut impl FnMut(String), write: &mut impl FnMut(&Report, &Path) -> crate::Result<u64>) -> crate::Result<(PathBuf, u64)> {
+    let name = out.file_name().ok_or_else(|| crate::Error::invalid("Choose a report file name."))?;
+    let mut paths = match destination {
+        SaveDestination::Chosen => vec![out.to_path_buf()],
+        SaveDestination::Automatic => vec![folders.owned.join(name)],
+        SaveDestination::Downloads => Vec::new(),
+    };
+    paths.extend(folders.downloads.iter().chain(folders.home.iter()).filter(|p| p.is_absolute()).map(|p| p.join(name)));
+    let mut tried = Vec::new();
+    let mut failures = Vec::new();
+    for path in paths {
+        if tried.contains(&path) { continue; }
+        tried.push(path.clone());
+        log(format!("support report: trying {}", path.display()));
+        let automatic = !matches!(destination, SaveDestination::Chosen) || path != out;
+        let path = if automatic {
+            let reserved = (|| {
+                if path.parent() == Some(folders.owned.as_path()) {
+                    std::fs::create_dir_all(&folders.owned).map_err(crate::util::io_at(&folders.owned, "creating Kiln's state folder"))?;
+                }
+                reserve_report_path(&path, log)
+            })();
+            match reserved {
+                Ok(path) => path,
+                Err(e) => {
+                    let message = format!("support report: reserving {} failed: {}", path.display(), e.message);
+                    log(message.clone());
+                    failures.push(message);
+                    continue;
+                }
+            }
+        } else { path };
+        let direct = (|| {
+            if path.parent() == Some(folders.owned.as_path()) {
+                std::fs::create_dir_all(&folders.owned).map_err(crate::util::io_at(&folders.owned, "creating Kiln's state folder"))?;
+            }
+            write(report, &path)
+        })();
+        match direct {
+            Ok(size) => {
+                log(format!("support report written to {} ({size} bytes)", path.display()));
+                return Ok((path, size));
+            }
+            Err(e) => {
+                let message = format!("support report: writing {} failed: {}", path.display(), e.message);
+                log(message.clone());
+                failures.push(message);
+            }
+        }
+        // An unpredictable, per-save path: concurrent saves cannot copy or delete each other's staged zip.
+        // This also helps a chosen file in Kiln's own folder when only its adjacent temporary filename is refused.
+        let stage = match crate::util::random_bytes::<16>() {
+            Ok(bytes) => folders.owned.join(format!(".kiln-report-{}.zip", crate::hash::hex(&bytes))),
+            Err(e) => {
+                let message = format!("support report: staging in {} for {} failed: {}", folders.owned.display(), path.display(), e.message);
+                log(message.clone());
+                failures.push(message);
+                if automatic { remove_report_temp(&path, log); }
+                continue;
+            }
+        };
+        log(format!("support report: trying staging file {} for {}", stage.display(), path.display()));
+        let copied = (|| {
+            std::fs::create_dir_all(&folders.owned).map_err(crate::util::io_at(&folders.owned, "creating Kiln's state folder"))?;
+            let size = write(report, &stage)?;
+            log(format!("support report: copying {} to {}", stage.display(), path.display()));
+            std::fs::copy(&stage, &path).map_err(crate::util::io_at(&path, "copying the report to"))?;
+            std::fs::OpenOptions::new().write(true).open(&path).and_then(|f| f.sync_all()).map_err(crate::util::io_at(&path, "flushing"))?;
+            let actual = std::fs::metadata(&path).map_err(crate::util::io_at(&path, "reading back"))?.len();
+            if actual != size { return Err(crate::Error::new(crate::ErrorCode::Io, format!("{}: copied report has {actual} bytes, expected {size}", path.display()))); }
+            Ok(size)
+        })();
+        remove_report_temp(&stage, log);
+        match copied {
+            Ok(size) => {
+                log(format!("support report written to {} ({size} bytes, copied from Kiln's state folder)", path.display()));
+                return Ok((path, size));
+            }
+            Err(e) => {
+                let message = format!("support report: staging {} and copying to {} failed: {}", stage.display(), path.display(), e.message);
+                log(message.clone());
+                failures.push(message);
+                if automatic { remove_report_temp(&path, log); }
+            }
+        }
+    }
+    let message = format!("The support report was NOT saved. {}", failures.join("; "));
+    log(message.clone());
+    Err(crate::Error::new(crate::ErrorCode::Io, message))
+}
+
+/// Reserve a new file without following or replacing an existing file/link, including a racing report save.
+#[cfg(feature = "zip")]
+fn reserve_report_path(path: &Path, log: &mut impl FnMut(String)) -> crate::Result<PathBuf> {
+    for n in 0..1000 {
+        let candidate = if n == 0 { path.to_path_buf() } else {
+            let mut name = path.file_stem().unwrap_or_default().to_os_string();
+            name.push(format!("-{n}.zip"));
+            path.with_file_name(name)
+        };
+        log(format!("support report: reserving {}", candidate.display()));
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&candidate) {
+            Ok(_) => return Ok(candidate),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                log(format!("support report: reserving {} failed: {e}; trying a new name", candidate.display()));
+            }
+            Err(e) => return Err(crate::util::io_at(&candidate, "reserving a report file")(e)),
+        }
+    }
+    Err(crate::Error::new(crate::ErrorCode::AlreadyExists, format!("{}: no free report filename", path.display())))
+}
+
+#[cfg(feature = "zip")]
+fn remove_report_temp(path: &Path, log: &mut impl FnMut(String)) {
+    if let Err(e) = std::fs::remove_file(path) {
+        if e.kind() != std::io::ErrorKind::NotFound {
+            log(format!("support report: removing temporary file {} failed: {e}", path.display()));
+        }
+    }
+}
+
 /// Each file's options in a report zip: deflated, the time of writing.
 #[cfg(feature = "zip")]
 fn zip_options() -> zip::write::SimpleFileOptions {

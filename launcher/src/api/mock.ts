@@ -83,6 +83,7 @@ const commandPlans: Record<string, CommandPlan[]> = typeof window === "undefined
 const commandCalls: string[] = [];
 /** report_save's `exclude` each time ("What's in this report"; tests: `__kilnMock.reportSaves()`). */
 const reportSaves: string[][] = [];
+const openedPaths: string[] = [];
 /** "Remove its settings too": each mod whose settings went ("<kind>/<id>"; tests: `__kilnMock.settingsRemoved()`). */
 const settingsRemoved: string[] = [];
 /** library_remove's `settings` / library_remove_settings (kiln_manage::mod_settings::remove): refused while the Library
@@ -1287,7 +1288,7 @@ const handlers: Record<string, Handler> = {
   app_locales: () => ({ dir: `${mockDataDir()}/locales`, files: [], errors: [] }),
   app_settings_get: () => settings,
   app_settings_set: (a) => (settings = { ...(a.settings as LauncherSettings) }),
-  app_open_path: () => null,
+  app_open_path: (a) => { openedPaths.push(S(a.path)); return null; },
   app_open_url: (a) => { if (!S(a.url).startsWith("https://")) reject("refused", "Only https links open."); openedUrls.push(S(a.url)); return null; },
   // the Discord app is "installed" with ?discordapp=1 (kiln_manage::community::open: the app link, else the web link)
   app_open_discord: (a) => {
@@ -1849,7 +1850,9 @@ const handlers: Record<string, Handler> = {
   report_save: (a) => {
     if (!S(a.path).trim()) reject("invalid_argument", "Choose where to save the report.");
     reportSaves.push(Array.isArray(a.exclude) ? a.exclude.map(String) : []);
-    const path = /\.zip$/i.test(S(a.path)) ? S(a.path) : `${S(a.path)}.zip`;
+    const name = /\.zip$/i.test(S(a.path)) ? S(a.path) : `${S(a.path)}.zip`;
+    const path = a.destination === "downloads" ? `/home/player/Downloads/${name.split(/[\\/]/).pop()}`
+      : a.destination === "automatic" ? `/home/player/.local/state/kiln/${name.split(/[\\/]/).pop()}` : name;
     return { path, size: 48_213, findings: mockReportFindings, errors: [] } satisfies ReportSaved;
   },
   report_preview: (a) => mockReportContents(a.exclude),
@@ -2422,6 +2425,7 @@ if (typeof window !== "undefined") (window as unknown as { __kilnMock?: unknown 
   gameRunning: (gameId = "client-steam") => !!live(gameId),
   /** Each report_save's `exclude`, in order. */
   reportSaves: () => reportSaves.map((x) => [...x]),
+  openedPaths: () => [...openedPaths],
   settingsRemoved: () => [...settingsRemoved],
   planCommand: (cmd: string, plan: CommandPlan) => { (commandPlans[cmd] ??= []).push(plan); },
   openGate: (name: string) => { const g = gateOf(name); g.open = true; g.waiters.splice(0).forEach((w) => w()); },

@@ -1835,3 +1835,160 @@ fn contents_counts_each_replacement_per_file() {
     assert_eq!(j["files"][0]["path"], "summary.txt");
     assert!(j["files"].as_array().unwrap().iter().any(|x| x["path"] == "game/kiln/logs/kiln.log" && x["replaced"]["home"] == 2 && x["group"] == "kiln"));
 }
+
+// ---------------------------------------------------------------- support report save destinations
+
+#[cfg(feature = "zip")]
+mod save_destinations {
+    use super::*;
+
+    fn folders(f: &Fx) -> SaveFolders {
+        let folders = SaveFolders { owned: f.root.join("state"), downloads: vec![f.root.join("Downloads")], home: Some(f.root.join("home")) };
+        std::fs::create_dir_all(&folders.downloads[0]).unwrap();
+        std::fs::create_dir_all(folders.home.as_ref().unwrap()).unwrap();
+        folders
+    }
+
+    fn check_zip(saved: &(PathBuf, u64), expected: &Path) {
+        assert_eq!(saved.0, expected);
+        assert_eq!(saved.1, std::fs::metadata(expected).unwrap().len());
+        let mut zip = zip::ZipArchive::new(std::fs::File::open(expected).unwrap()).unwrap();
+        assert!(zip.by_name("summary.txt").is_ok());
+    }
+
+    #[test]
+    fn direct_write_keeps_the_chosen_path() {
+        let f = Fx::healthy("save-direct");
+        let places = folders(&f);
+        let out = f.root.join("chosen.zip");
+        let mut log = Vec::new();
+        let saved = save_zip(&build(&f.input()), &out, SaveDestination::Chosen, &places, |s| log.push(s)).unwrap();
+        check_zip(&saved, &out);
+        assert!(!places.owned.exists(), "no staging needed");
+        assert!(log.iter().any(|s| s.contains("written to") && s.contains(&out.display().to_string())));
+    }
+
+    #[test]
+    fn failed_adjacent_temp_uses_owned_staging_then_copies_to_chosen_file() {
+        let f = Fx::healthy("save-copy");
+        let places = folders(&f);
+        let out = f.root.join("chosen.zip");
+        std::fs::write(&out, "old report").unwrap();
+        let mut log = Vec::new();
+        let mut write = |r: &Report, p: &Path| {
+            if p == out { return Err(crate::util::io_at(p, "creating adjacent temporary file")(std::io::Error::from(std::io::ErrorKind::PermissionDenied))); }
+            write_zip(r, p)
+        };
+        let saved = save_zip_with(&build(&f.input()), &out, SaveDestination::Chosen, &places, &mut |s| log.push(s), &mut write).unwrap();
+        check_zip(&saved, &out);
+        assert!(log.iter().any(|s| s.to_lowercase().contains("permission denied")), "{log:?}");
+        assert!(log.iter().any(|s| s.contains("copying") && s.contains(&out.display().to_string())), "{log:?}");
+        assert_eq!(std::fs::read_dir(&places.owned).unwrap().count(), 0, "staging is cleaned up");
+    }
+
+    #[test]
+    fn a_chosen_file_in_kilns_folder_can_also_use_staging_and_copy() {
+        let f = Fx::healthy("save-copy-owned");
+        let places = folders(&f);
+        std::fs::create_dir_all(&places.owned).unwrap();
+        let out = places.owned.join("chosen.zip");
+        let mut write = |r: &Report, p: &Path| {
+            if p == out { return Err(crate::Error::new(crate::ErrorCode::Permission, "adjacent temporary file refused")); }
+            write_zip(r, p)
+        };
+        let saved = save_zip_with(&build(&f.input()), &out, SaveDestination::Chosen, &places, &mut |_| {}, &mut write).unwrap();
+        check_zip(&saved, &out);
+        assert_eq!(std::fs::read_dir(&places.owned).unwrap().count(), 1, "only the saved report remains");
+    }
+
+    #[test]
+    fn chosen_write_and_copy_fail_then_downloads_is_used() {
+        let f = Fx::healthy("save-downloads");
+        let places = folders(&f);
+        let out = f.root.join("missing/report.zip");
+        let mut log = Vec::new();
+        let saved = save_zip(&build(&f.input()), &out, SaveDestination::Chosen, &places, |s| log.push(s)).unwrap();
+        check_zip(&saved, &places.downloads[0].join("report.zip"));
+        assert!(log.iter().any(|s| s.contains("copying") && s.contains("failed")), "{log:?}");
+        assert!(log.iter().any(|s| s.contains("os error")), "OS errors are kept: {log:?}");
+        assert_eq!(std::fs::read_dir(&places.owned).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn missing_downloads_falls_back_to_home_without_creating_downloads() {
+        let f = Fx::healthy("save-home");
+        let places = folders(&f);
+        std::fs::remove_dir(&places.downloads[0]).unwrap();
+        let saved = save_zip(&build(&f.input()), &f.root.join("missing/report.zip"), SaveDestination::Chosen, &places, |_| {}).unwrap();
+        check_zip(&saved, &places.home.as_ref().unwrap().join("report.zip"));
+        assert!(!places.downloads[0].exists());
+    }
+
+    #[test]
+    fn dialog_error_saves_in_kilns_folder_first() {
+        let f = Fx::healthy("save-dialog-owned");
+        let places = folders(&f);
+        let saved = save_zip(&build(&f.input()), Path::new("report.zip"), SaveDestination::Automatic, &places, |_| {}).unwrap();
+        check_zip(&saved, &places.owned.join("report.zip"));
+    }
+
+    #[test]
+    fn dialog_error_with_unwritable_owned_folder_uses_downloads() {
+        let f = Fx::healthy("save-dialog-downloads");
+        let places = folders(&f);
+        std::fs::write(&places.owned, "not a folder").unwrap();
+        let saved = save_zip(&build(&f.input()), Path::new("report.zip"), SaveDestination::Automatic, &places, |_| {}).unwrap();
+        check_zip(&saved, &places.downloads[0].join("report.zip"));
+    }
+
+    #[test]
+    fn dialog_error_with_no_owned_or_downloads_folder_uses_home() {
+        let f = Fx::healthy("save-dialog-home");
+        let places = folders(&f);
+        std::fs::write(&places.owned, "not a folder").unwrap();
+        std::fs::remove_dir(&places.downloads[0]).unwrap();
+        let saved = save_zip(&build(&f.input()), Path::new("report.zip"), SaveDestination::Automatic, &places, |_| {}).unwrap();
+        check_zip(&saved, &places.home.as_ref().unwrap().join("report.zip"));
+    }
+
+    #[test]
+    fn save_to_downloads_never_uses_the_working_directory_or_owned_destination() {
+        let f = Fx::healthy("save-button");
+        let places = folders(&f);
+        let saved = save_zip(&build(&f.input()), Path::new("report.zip"), SaveDestination::Downloads, &places, |_| {}).unwrap();
+        check_zip(&saved, &places.downloads[0].join("report.zip"));
+        assert!(!places.owned.exists());
+    }
+
+    #[test]
+    fn automatic_destinations_do_not_overwrite_existing_files() {
+        for destination in [SaveDestination::Automatic, SaveDestination::Downloads] {
+            let f = Fx::healthy(&format!("save-collision-{destination:?}"));
+            let places = folders(&f);
+            let dir = if matches!(destination, SaveDestination::Automatic) { &places.owned } else { &places.downloads[0] };
+            std::fs::create_dir_all(dir).unwrap();
+            let existing = dir.join("report.zip");
+            std::fs::write(&existing, b"keep this file").unwrap();
+            let saved = save_zip(&build(&f.input()), Path::new("report.zip"), destination, &places, |_| {}).unwrap();
+            assert_eq!(std::fs::read(&existing).unwrap(), b"keep this file");
+            check_zip(&saved, &dir.join("report-1.zip"));
+        }
+    }
+
+    #[test]
+    fn all_failures_are_logged_and_returned() {
+        let f = Fx::healthy("save-failed");
+        let mut places = folders(&f);
+        std::fs::write(&places.owned, "not a folder").unwrap();
+        std::fs::remove_dir(&places.downloads[0]).unwrap();
+        places.home = Some(f.root.join("missing-home"));
+        let mut log = Vec::new();
+        let err = save_zip(&build(&f.input()), Path::new("report.zip"), SaveDestination::Automatic, &places, |s| log.push(s)).unwrap_err();
+        for path in [&places.owned, &places.downloads[0], places.home.as_ref().unwrap()] {
+            assert!(err.message.contains(&path.display().to_string()), "{}", err.message);
+            assert!(log.iter().any(|s| s.contains("failed") && s.contains(&path.display().to_string())), "{log:?}");
+        }
+        assert!(err.message.contains("os error"));
+        assert!(log.last().unwrap().contains("NOT saved"));
+    }
+}

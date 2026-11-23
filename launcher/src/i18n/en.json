@@ -3881,6 +3881,8 @@
     "dialogTitle": "Save a support report",
     "saved": "Report saved",
     "savedFile": "{file}, {size}.",
+    "savedPath": "Saved to {path} ({size}).",
+    "saveDownloads": "Save to Downloads",
     "problems": {
       "one": "It found {count} problem.",
       "other": "It found {count} problems."
