@@ -1,0 +1,30 @@
+{
+  "format": 1,
+  "side": "client",
+  "comment": "Native slot background tints, since 0.2.17. Static contract on client 26430625 / 5d9ef2f1: SlotAppearance copies descriptor+0x48 {ABGR, strength} to generated appearance+0x30, which SlotBackground draws. Kiln copies the descriptor, never writes borrowed game memory. docs/re/game-ui.md.",
+  "symbols": {
+    "ui/SlotAppearance": {
+      "find": [
+        {
+          "pattern": "48 8B C4 48 89 58 10 48 89 68 18 48 89 70 20 57 41 54 41 55 41 56 41 57 48 81 EC B0 00 00 00 0F 29 70 C8 48 8B F9 0F 29 78 B8 45 33 E4 44 0F 29",
+          "offset": 0
+        }
+      ]
+    }
+  },
+  "constants": {},
+  "features": {
+    "ui.slots.tint": {
+      "symbols": [
+        "ui/SlotAppearance"
+      ],
+      "constants": [
+        "ui/view.stride",
+        "ui/view.inventoryPage",
+        "ui/view.slotIndex",
+        "ui/view.item",
+        "ui/view.pide"
+      ]
+    }
+  }
+}

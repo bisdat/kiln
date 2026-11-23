@@ -7969,6 +7969,22 @@
       },
       "sha256": "1dbcc49bc32aa9515e58ff8e13f043a81d774ac077ef5a199b289a84deb3319b"
     },
+    "native/core/abi/services/kiln_ui_tints.h": {
+      "function_macros": [],
+      "inline_helpers": [],
+      "layouts": {
+        "KilnUiTintsApi": {
+          "align": 8,
+          "fields": {
+            "header": 0,
+            "subscribe": 8,
+            "unsubscribe": 16
+          },
+          "size": 24
+        }
+      },
+      "sha256": "3cc455f7fa97e4b59a4136980c4bd2e0356ac71e21289f971c12dc05444aa78f"
+    },
     "native/core/abi/services/kiln_ui_values.h": {
       "function_macros": [],
       "inline_helpers": [],
@@ -9370,7 +9386,7 @@
   },
   "outputs": {
     "src/bindings.rs": "134028a6a9914076cab3f71f98d356141d4fe36c4d7f51bac6a11819501ed935",
-    "src/layout.rs": "abcb225676e55d198ed256cb206318f13da344c7cb88adb433c822144772743b",
+    "src/layout.rs": "686cd1deb31148fcd355b7e9e45d85c1e3a2e37c824d8c5f2e6abc957656f87c",
     "src/services/kiln_abilities.rs": "06a43042e5c96d6261a17b02eab35463b07a8ad83f63b2bb168bca5ff34e582e",
     "src/services/kiln_assets.rs": "e7fe4eb1c4d53ad31eeaf05be06f41c551a49362ad5bd4174465ec18a03effe0",
     "src/services/kiln_assets_vfx.rs": "90ed8ce5ad512bbf4f002db3277bc3b439d648ca437a58d4477eac4ce46c3b81",
@@ -9438,13 +9454,14 @@
     "src/services/kiln_ui_item_detail.rs": "196b73cac32c28c4a4971df8916aa8d81e90bfe515769965ade4cc7d18c13d18",
     "src/services/kiln_ui_slots.rs": "eadd1321046b93dc37ec1bcfbba00f94020ace6083d1f0ec3b0620bda021997b",
     "src/services/kiln_ui_snapshot.rs": "789a0d13f6a7a770b42537e758f3e4f10dd6e05480c445848930fb54bfd6de4e",
+    "src/services/kiln_ui_tints.rs": "25f47ba11c95eaff66d0864f1b3c1024c77260e0188d8883d69a70267f6a1f6a",
     "src/services/kiln_ui_values.rs": "a13a3afbfb1ec443322ba4ae250fe499d13ce599a438ba0b9652f8e572073627",
     "src/services/kiln_vfx.rs": "046191c4ab30f4ccd99a52f7fc654e7fb53d74aaa4acaa072c8f86a36f0037a0",
     "src/services/kiln_window_clock.rs": "0fedf0f1d97e6aa1959ec46a483181fb930a6f83025a813c31b77bd820a8fa71",
     "src/services/kiln_world.rs": "3cb0272179db9c198f154ce6c008837e4bb95245a2ec62993be78879c4b330b8",
     "src/services/kiln_world_budget.rs": "b196426492d0525df1317c08e4927f3f3ff35817990bed8f2b58c02d174bab98",
     "src/services/kiln_worldtables.rs": "3d423bb8cfd5235f82230a1942bbc334d86b55d343e5e5880c671a57d1469fce",
-    "src/services/mod.rs": "d361eed973f9d2de8c08c3188e1a19d39d0675f1068978ee97b2720a48d05a4d"
+    "src/services/mod.rs": "243c73b1da57be58c43cad9f28cc2fd8228c716c48df1a718349cf565d43c4cd"
   },
   "schema": 1,
   "target": "x86_64-pc-windows-msvc"

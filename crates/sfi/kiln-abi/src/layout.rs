@@ -5690,6 +5690,11 @@ const _: () = {
     assert!(core::mem::offset_of!(crate::services::kiln_ui_snapshot::KilnUiSnapshotApi, acquire) == 24);
     assert!(core::mem::offset_of!(crate::services::kiln_ui_snapshot::KilnUiSnapshotApi, copy) == 32);
     assert!(core::mem::offset_of!(crate::services::kiln_ui_snapshot::KilnUiSnapshotApi, release) == 40);
+    assert!(core::mem::size_of::<crate::services::kiln_ui_tints::KilnUiTintsApi>() == 24);
+    assert!(core::mem::align_of::<crate::services::kiln_ui_tints::KilnUiTintsApi>() == 8);
+    assert!(core::mem::offset_of!(crate::services::kiln_ui_tints::KilnUiTintsApi, header) == 0);
+    assert!(core::mem::offset_of!(crate::services::kiln_ui_tints::KilnUiTintsApi, subscribe) == 8);
+    assert!(core::mem::offset_of!(crate::services::kiln_ui_tints::KilnUiTintsApi, unsubscribe) == 16);
     assert!(core::mem::size_of::<crate::services::kiln_ui_values::KilnUiItemView>() == 120);
     assert!(core::mem::align_of::<crate::services::kiln_ui_values::KilnUiItemView>() == 8);
     assert!(core::mem::offset_of!(crate::services::kiln_ui_values::KilnUiItemView, size) == 0);

@@ -160,6 +160,16 @@ bool call_slots(KilnUiSlotsFn fn, const KilnUiSlotsFrame* f, const KilnUiVisible
         return false;
     }
 }
+bool call_tint(KilnUiTintFn fn, const KilnUiItemView* v, uint32_t* rgba, void* user, KilnResult* rc) {
+    crash::Capture cap{};
+    unsigned long code = 0;
+    __try { *rc = fn(v, rgba, user); return true; }
+    __except (crash::filter(GetExceptionInformation(), &cap, &code)) {
+        crash::report(cap, "kiln.ui.tints rule", reinterpret_cast<const void*>(fn));
+        return false;
+    }
+}
+
 bool call_slots_v2(KilnUiSlotsFnV2 fn, const KilnUiSlotsFrame* f, const KilnUiVisibleSlotV2* s, uint32_t n, void* user) {
     crash::Capture cap{};
     unsigned long code = 0;
@@ -402,6 +412,7 @@ void wire() {
     e.call_changed = &call_changed;
     e.call_slots = &call_slots;
     e.call_slots_v2 = &call_slots_v2;
+    e.call_tint = &call_tint;
     e.call_lines = &call_lines;
     e.call_gemforge = &call_gemforge;
     e.gemforge_abi = &gemforge_contract;
@@ -448,7 +459,7 @@ bool init() {
                                             "ui.values.hud",    "ui.values.tooltip_lines", "ui.slots.inspect",
                                             "ui.gemforge.inspect", "gems.sockets", "ui.gemforge.sources",
                                             "ui.tooltip.lines", "ui.tooltip.values", "ui.slots.click",
-                                            "ui.inventory.panels"};
+                                            "ui.inventory.panels", "ui.slots.tint"};
     if (!env().layout_supported())
         for (uint32_t k = 0; k < kLists; ++k)
             if (row_of(k)) disable_kind(k, "private UI layout is not measured for this client image");
@@ -484,3 +495,5 @@ KILN_SERVICE(ui_item_detail, KILN_UI_ITEM_DETAIL_SERVICE, KILN_UI_ITEM_DETAIL_VE
              kiln::uivalues::item_detail_table(), &inventory_init);
 
 KILN_SERVICE(ui_slots, KILN_UI_SLOTS_SERVICE, KILN_UI_SLOTS_VERSION, kiln::uivalues::slots_table(), &inventory_init);
+
+KILN_SERVICE(ui_tints, KILN_UI_TINTS_SERVICE, KILN_UI_TINTS_VERSION, kiln::uivalues::tints_table(), &inventory_init);

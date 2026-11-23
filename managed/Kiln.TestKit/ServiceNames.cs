@@ -82,6 +82,7 @@ internal static class ServiceNames
         "kiln.ui.slots",
         "kiln.ui.snapshot",
         "kiln.ui.tick",
+        "kiln.ui.tints",
         "kiln.ui.values",
         "kiln.vfx",
         "kiln.window_clock",

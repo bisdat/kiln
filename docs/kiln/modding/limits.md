@@ -174,3 +174,9 @@ From real-client test records. "Now" says what the tree does today.
 | Ragdolls | client physics; a creature has a `Dead` state only ([npc-blocks.md](npc-blocks.md#limits-and-costs)) | not planned |
 | Mounts and vehicles | researched (the dev.28 dossier): a server-driven mount that carries the player works in a lab; riding, flight, vehicles, pets and taming are in work | in work; real-game checks remain, no capability hold in dev.29 |
 | New terrain in world generation | researched (the dev.28 dossier): terrain overlays a mod places over the generated world are in work; whole generated regions need the baked-region format, which is not planned yet | overlays: dev.28; regions: not planned |
+
+### Native inventory tints (since 0.2.17)
+`ui.slots.tint`: client-only native slot backgrounds on the measured client layout. Rules share
+ui.values' 128 registrations per mod, run in registration order on the game UI thread and stop after five
+consecutive faults. No overlay or gameplay/network write; rarity, focus, icon and colour strength stay vanilla.
+Nested slot rendering passes through unchanged. Disposal/retirement stops future calls; an in-flight call may finish.

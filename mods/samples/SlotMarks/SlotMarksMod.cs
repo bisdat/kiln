@@ -80,7 +80,12 @@ public sealed class SlotMarksMod : Mod
         }
         try
         {
-            _subs.Add(Ui.Inventory.MarkWhen(s => s.Count >= 50 ? BigStack : null));
+            // Since 0.2.17: the game's own background colour, not a foreground rectangle.
+            // Retain the overlay example beside an older Kiln without kiln.ui.tints.
+            if (Capabilities.Is(Ui.Inventory.TintCapability))
+                _subs.Add(Ui.Inventory.TintWhen(s => s.Count >= 50 ? BigStack.Color : null));
+            else
+                _subs.Add(Ui.Inventory.MarkWhen(s => s.Count >= 50 ? BigStack : null));
         }
         catch (KilnUnavailableException e)
         {

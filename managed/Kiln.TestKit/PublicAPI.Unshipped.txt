@@ -219,3 +219,7 @@ Kiln.TestKit.HarnessUiSnapshot.Demands.get -> int
 Kiln.TestKit.HarnessUiSnapshot.Tokens.get -> int
 Kiln.TestKit.HarnessUiSnapshot.Publication.get -> ulong
 Kiln.TestKit.KilnHarness.UiSnapshot.get -> Kiln.TestKit.HarnessUiSnapshot!
+Kiln.TestKit.HarnessUiNativeTints
+Kiln.TestKit.HarnessUiNativeTints.HarnessUiNativeTints(Kiln.TestKit.KilnHarness! harness) -> void
+Kiln.TestKit.HarnessUiNativeTints.TintOf(Kiln.TestKit.FakeInventorySlot slot, Kiln.Color background) -> Kiln.Color
+Kiln.TestKit.KilnHarness.UiNativeTints.get -> Kiln.TestKit.HarnessUiNativeTints!

@@ -1578,3 +1578,18 @@ Client check: open an item's detail panel, then read its lines from a mod. Compa
 weapon across levels/rarities and upgrades, armor, food, gems/perks, stackable and chest items;
 reinspect after a language change, and leave/rejoin before reusing a saved identity. Run on both
 Proton and native Windows, with a vanilla peer confirming unchanged gameplay and game panels.
+
+## Native inventory background colours (since 0.2.17)
+`Ui.Inventory.TintWhen(rule, item)` changes the game's own slot background, without drawing an overlay.
+`ui.slots.tint` / `kiln.ui.tints` is client-only; registration and disposal work on any thread. Rules run on
+the game's UI thread in registration order over copied `UiItemView` values; return `null` to keep the
+earlier colour. Match `InventoryPage` and `SlotIndex` for stacks without an item entity. Empty slots are
+also offered when no item filter is supplied. Dispose or unload to restore the earlier/vanilla colour.
+The game's colour strength, rarity art, focus and input stay unchanged; a tint is never gameplay authority.
+```csharp
+using var tint = Ui.Inventory.TintWhen(slot =>
+    slot.Item == trackedItem ? new Color(80, 180, 255, 160) : null);
+```
+Five consecutive exceptions remove a rule; registration shares the 128-per-mod ui.values budget.
+An unmeasured game layout, missing signature or hook failure throws `KilnUnavailableException`;
+a full registration budget throws `InvalidOperationException`, as the existing slot subscriptions do.

@@ -67,6 +67,7 @@ pub mod kiln_ui_inventory;
 pub mod kiln_ui_item_detail;
 pub mod kiln_ui_slots;
 pub mod kiln_ui_snapshot;
+pub mod kiln_ui_tints;
 pub mod kiln_ui_values;
 pub mod kiln_vfx;
 pub mod kiln_window_clock;

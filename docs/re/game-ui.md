@@ -723,3 +723,16 @@ above (ItemSlot `0xc046c0` raw link, SlotGeometry mid `0xc05433`, GameUiFrame) a
   game's own entry renderer inside the game's layout scope, identified by return address) is the model.
 - **The game's own slot tint:** ItemSlot's descriptor `+0x7d` and context `+0x51` gate the fuel bar; the slot's background
   colour parameter is not mapped.
+
+### Native slot backgrounds (since 0.2.17)
+Client 26430625 / `5d9ef2f1`, static disassembly and focused Ghidra decompilation: `SlotAppearance`
+(`0xd1a430`, output, slot descriptor, input state, context) copies the descriptor's 8-byte colour at
+`+0x48` into generated appearance `+0x30`. It does not mutate the descriptor. `SlotBackground` (`0xd79380`)
+passes that field to the native rectangle drawing path; the rarity decoration and focus are separate.
+The slot descriptor is 0x90 bytes; the first pointer names the 0x48-byte ItemView. Colour storage is
+ABGR in a uint32 followed by a float strength, not Kiln's canonical RRGGBBAA.
+`kiln.ui.tints` copies the descriptor, runs ordered colour rules on a copied ItemView, replaces only
+the copy's colour word, then calls the original appearance builder. The strength and all other bytes
+stay unchanged. The layout is accepted only for that measured executable, independently of pattern policy.
+Host tests cover channel order, strength, borrowed-memory immutability, ordered rules and retirement.
+Actual native colours, rarity/focus layering and appearance at different UI scales remain unverified in-game.

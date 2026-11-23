@@ -33,6 +33,7 @@
 #include "services/kiln_ui_inventory.h"
 #include "services/kiln_ui_item_detail.h"
 #include "services/kiln_ui_slots.h"
+#include "services/kiln_ui_tints.h"
 #include "services/kiln_ui_values.h"
 
 namespace kiln::uivalues {
@@ -52,7 +53,7 @@ inline constexpr double kNewStringsPerSecond = 64;  // per mod
 inline constexpr double kNewStringsBurst = 128;
 
 // Registration lists: the value kinds (KilnUiValueKind), then these.
-enum : uint32_t { kListLines = kValueKinds, kListSlots, kListChanges, kListGemForge, kListValues, kListClicks, kLists };
+enum : uint32_t { kListLines = kValueKinds, kListSlots, kListChanges, kListGemForge, kListValues, kListClicks, kListTints, kLists };
 
 // The capability row of a list ("ui.values.hud" for the three HUD kinds).
 const char* row_of(uint32_t list);
@@ -121,7 +122,9 @@ struct Env {
     // kiln.inventory v2: kiln.ui's screen_target (the entity a chest, chest-style or factory screen is about, of its last
     // completed UI frame; 0 = none, an older kiln.ui, the constant not resolved).
     uint32_t (*screen_target)() = nullptr;
+    bool (*call_tint)(KilnUiTintFn, const KilnUiItemView*, uint32_t*, void*, KilnResult*) = nullptr;
 };
+const KilnUiTintsApi* tints_table();
 Env& env();
 void logf(int level, const char* fmt, ...);
 
@@ -263,6 +266,7 @@ bool load_view_layout(ViewLayout* out);  // false when a constant is missing or 
 // Fills identity, flags and values of `v` from a copied prefix. base_flags: KUI_DETAIL_COPY for a detail record (an
 // all-zero identity then makes it KUI_SYNTHETIC), 0 for a slot's or a model's view. server_entity stays 0.
 void fill_view(const uint8_t* raw, const ViewLayout& layout, uint32_t base_flags, KilnUiItemView* v);
+void complete_slot_view(KilnUiItemView* v);  // size, divisor and current client/screen metadata, UI thread
 void load_charge_layout();                  // once; the balancing offsets for units_per_charge
 uint32_t units_per_charge(uintptr_t play);  // max(1, the water charge amount) through play's balancing registry
 

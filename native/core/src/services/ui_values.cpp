@@ -34,9 +34,9 @@ constexpr KilnHandle kHandleMask = (1ull << 48) - 1;
 const char* const kRows[kLists] = {"ui.values.detail",        "ui.values.slot",   "ui.values.held",
                                    "ui.values.hud",           "ui.values.hud",    "ui.values.hud",
                                    "ui.values.tooltip_lines", "ui.slots.inspect", nullptr, "ui.gemforge.inspect",
-                                   "ui.tooltip.values", "ui.slots.click"};
+                                   "ui.tooltip.values", "ui.slots.click", "ui.slots.tint"};
 const char* const kListNames[kLists] = {"detail", "slot",  "held",  "health", "stamina",
-                                        "mana",   "lines", "slots", "changes", "gemforge", "values", "clicks"};
+                                        "mana",   "lines", "slots", "changes", "gemforge", "values", "clicks", "tints"};
 
 // Edit masks per value kind (chapter 05a §5.1).
 constexpr uint32_t kMask[kValueKinds] = {
