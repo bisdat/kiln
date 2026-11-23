@@ -664,6 +664,61 @@ bool parse_menu_group(const std::string& s, uint32_t* workshop, uint8_t group[16
     return true;
 }
 
+// An item clone and the worlds whose registries have it (store_mutex). A world claims it, with its session, before its
+// registry can hand the clone out (sync_world_pass). Kiln writes a published clone again only for a late kitbash
+// reference (retry_kitbash), and only on the thread of a world that claimed it in its current session; a clone the server
+// world claimed is written on the server world's thread alone (clone_writable).
+struct CloneRec {
+    uintptr_t at = 0;
+    uint32_t claim[KILN_WORLD_KINDS] = {};  // per world kind: the session whose registry has it (0: none)
+    size_t problems = 0;                    // its kitbash problems left (each clone resolves on its own)
+    bool retry = false;                     // one of them may resolve later ("the game has loaded")
+};
+
+// World `kind`, in session `session`, is about to put the clone into its registry. Only that world's own registration
+// sets its claim, and nothing but the server world's end (server_claim_live) retires a server world's claim: a client
+// registration never takes one away, whatever its snapshot of the session said.
+void claim_clone(CloneRec& c, uint32_t kind, uint32_t session) {
+    c.claim[kind] = session ? session : UINT32_MAX;  // the session is unknown: claimed all the same, and written by no world
+}
+
+// The newest server world stop kiln.content saw (on_world, on the server world's thread): its session in the high half,
+// the core's client session count at that moment in the low half. STOPPING comes while that world is still intact: the
+// core delivers it, clears its world pointer and only then calls the game's destructor, and its jobs may not be drained
+// yet. Nothing tells kiln.content when the destructor returned, so the stop only counts for a client world set up after
+// it: the game sets up a game's worlds after the last game's are destroyed (docs/re/client.md: leaving destroys the
+// client world, then the server world; hosting creates the server world, then the client world).
+std::atomic<uint64_t> g_server_stop{0};
+
+// Whether a server claim of session `s` still holds for a retry in client session `client`: its server world may still
+// hand the clone out, or read it. It ends when a newer server session began (the core starts one only for a new server
+// world, and that world claims the clone again before its registry has it), or when that world's STOPPING was seen and
+// `client` began after it (the client world of the same game, should one step on through the server world's teardown,
+// leaves the clone for the rest of its session). `server_now`: the core's server session count, read before the check
+// (a stale, lower count only keeps the claim). Without the destroy hook no STOPPING comes, and the core's "no step for
+// 3 s" is not evidence: a hosted server world stalled by a load or a save would look gone while it still hands the
+// clone out. Such a claim holds until a newer server session begins.
+bool server_claim_live(uint32_t s, uint32_t server_now, uint32_t client) {
+    if (!s) return false;
+    if (s == UINT32_MAX) return true;
+    if (s < server_now) return false;
+    const uint64_t stop = g_server_stop.load(std::memory_order_acquire);
+    return !(s <= static_cast<uint32_t>(stop >> 32) && client > static_cast<uint32_t>(stop));
+}
+
+// Whether the thread of world `kind`, in session `session`, may write the clone: that world claimed it in this session,
+// and a client world never writes one a server world's live claim holds. Hosting, both worlds' registries usually hold
+// the same clone (docs/re/content.md section 7), and the server world reads it on the GameServer thread while the main
+// thread steps the client world: no lock of Kiln's orders the two, so its writes belong to the server world's own step.
+bool clone_writable(const CloneRec& c, uint32_t kind, uint32_t session, uint32_t server_now) {
+    if (!session || session == UINT32_MAX || kind >= KILN_WORLD_KINDS || c.claim[kind] != session) return false;
+    return kind == KILN_WORLD_SERVER || !server_claim_live(c.claim[KILN_WORLD_SERVER], server_now, session);
+}
+
+bool any_retry(const std::unordered_map<uintptr_t, CloneRec>& clones) {
+    return std::any_of(clones.begin(), clones.end(), [](const auto& kv) { return kv.second.retry; });
+}
+
 struct Def {
     uint32_t kind = 0;  // KILN_CONTENT_ITEMS / RECIPES
     uint8_t guid[16] = {};
@@ -699,7 +754,7 @@ struct Def {
     uint8_t tag_guid[kTextSlots][16] = {};
     uint32_t tags[kTextSlots] = {};
     // items: clones per base ItemInfo (built for this version); recipes: the built RecipeInfo
-    std::unordered_map<uintptr_t, uintptr_t> clones;
+    std::unordered_map<uintptr_t, CloneRec> clones;
     uintptr_t info = 0;
     uint64_t info_version = ~0ull;
     uintptr_t loot_entry = 0;           // its LootableItemInfo (a copy of `like`'s), in the loot map and the rolls
@@ -712,7 +767,7 @@ struct Def {
     std::vector<std::string> warnings;  // parts of the definition that were skipped (kitbash problems, ...)
     std::vector<std::string> gear_notes;  // the definition's own choices that break what the recipe tooltip promises
     bool rolled = false;                  // items: "rolledLoot": keeps the base's generateRarity and level range
-    bool kitbash_retry = false;         // a reference was not loaded yet: tried again (kiln.assets may serve it later)
+    bool kitbash_retry = false;         // a clone's reference was not loaded yet: tried again (kiln.assets may serve it later)
     bool no_description = false;  // "description": "": none, rather than the base's
     size_t at = 0;                // its place in g_defs
     std::string listed;           // its entry in definitions(), as of listed_as (a fingerprint of what the entry shows)
@@ -1103,8 +1158,8 @@ void note_crafted(Def& d, const std::string& recipe) {
     const Field* lo = L.item.find("itemLevelRange.minLevel");
     const Field* hi = L.item.find("itemLevelRange.maxLevel");
     if (!gen || !rar || !mask || !lo || !hi) return;
-    for (auto& [base, clone] : d.clones) {
-        const auto* p = reinterpret_cast<const uint8_t*>(clone);
+    for (auto& [base, c] : d.clones) {  // reads only
+        const auto* p = reinterpret_cast<const uint8_t*>(c.at);
         if (!has_item_entity(p)) continue;
         const int rarity = p[rar->offset];
         if (p[gen->offset] && rarity < 5) {
@@ -1124,8 +1179,16 @@ void note_crafted(Def& d, const std::string& recipe) {
     }
 }
 
-uintptr_t build_clone(Def& d, uintptr_t base, WorldState& ws, std::string* why) {
+// The kitbash problems a later retry may resolve: a reference that is not loaded yet (kiln.assets may serve it later).
+bool late_problems(const std::vector<std::string>& problems) {
+    return std::any_of(problems.begin(), problems.end(),
+                       [](const std::string& w) { return w.find("the game has loaded") != std::string::npos; });
+}
+
+// *retry: this clone has a reference that may resolve later (late_problems).
+uintptr_t build_clone(Def& d, uintptr_t base, WorldState& ws, bool* retry, std::string* why) {
     PhaseTimer pt(PH_BUILD_CLONE);
+    *retry = false;
     const uint32_t size = L.item.size;
     const size_t total = size + d.name.size() + 1;
     auto* p = static_cast<uint8_t*>(near_alloc(base, total));
@@ -1195,8 +1258,7 @@ uintptr_t build_clone(Def& d, uintptr_t base, WorldState& ws, std::string* why) 
                 ko.problems.push_back(b.path + ": the other item's list is out of reach");
         if (ko.icon) std::memcpy(d.icon_guid, ko.icon_guid, 16);
         d.warnings = ko.problems;
-        d.kitbash_retry = std::any_of(ko.problems.begin(), ko.problems.end(),
-                                      [](const std::string& w) { return w.find("the game has loaded") != std::string::npos; });
+        *retry = late_problems(ko.problems);
         if (d.placeholder && !ko.problems.empty()) {
             // A placeholder keeps a missing mod's saved stacks: its references name that mod's own resources, which nothing
             // serves while it isn't loaded. Expected, so one line at Info (the missing-content summary says which mods). The
@@ -1672,18 +1734,24 @@ bool sync_world_pass(uint32_t kind, uintptr_t world) {
                 continue;
             }
             auto it = d.clones.find(base.info);
-            if (it != d.clones.end()) clone = it->second;
-            else {
+            if (it == d.clones.end()) {
                 std::string why;
-                clone = build_clone(d, base.info, ws, &why);
-                if (!clone) {
+                CloneRec c;
+                c.at = build_clone(d, base.info, ws, &c.retry, &why);
+                if (!c.at) {
                     fail_once(ws, kind, d, why);
                     continue;
                 }
-                d.clones.emplace(base.info, clone);
+                c.problems = d.warnings.size();
+                it = d.clones.emplace(base.info, c).first;
                 d.error.clear();
                 set_alias(d.guid, d.icon_guid);  // the UI's icon texture: the base item's, or "icon"'s
             }
+            clone = it->second.at;
+            // before this world's registry can hand it out: from here on only this world's thread writes it (and,
+            // claimed by the server world, the server world's thread alone)
+            claim_clone(it->second, kind, ws.session);
+            d.kitbash_retry = any_retry(d.clones);
         }
         auto had = ws.items.find(d.id);
         if (had != ws.items.end() && had->second == clone) continue;
@@ -2331,9 +2399,19 @@ void probe_owners(uint32_t kind) {
 uint64_t g_tick_count[KILN_WORLD_KINDS] = {};
 
 // References that were not loaded when a clone was built (a mod's resource that kiln.assets registers later): every
-// ~2 s the definition's kitbash is applied to its clones again; what resolves now is written. World thread.
-void retry_kitbash(WorldState& ws) {
+// ~2 s the definition's kitbash is applied again to the clones world `kind` may write (clone_writable); what resolves
+// now is written. On that world's thread, from its Pre. Hosting, a clone the server world claimed (usually the one clone
+// both worlds have) is the server world's to write: the client world's retry leaves it, and the server world's resolves
+// the references in its own world (in one process both worlds see the same items, and refs.cpp's other sources are
+// process-wide; only an item that failed to register in one world resolves in the other alone, and then the server
+// world's clone keeps what the server world can resolve). Nothing is handed from one world's thread to the other's:
+// each world finds, checks and writes in one store_mutex hold, against the definition's current clones, so a clone of
+// an older version or an earlier session is never written.
+void retry_kitbash(uint32_t kind, WorldState& ws) {
     if (!assets_api()) return;
+    KilnSessionInfo si{};
+    si.size = sizeof si;
+    const uint32_t server_now = g_api->session(&si) == KILN_OK ? si.sessions[KILN_WORLD_SERVER] : 0;  // 0: claims hold
     std::vector<DefPtr> todo;
     {
         std::lock_guard lock(store_mutex());
@@ -2345,7 +2423,9 @@ void retry_kitbash(WorldState& ws) {
     for (const DefPtr& dp : todo) {
         Def& d = *dp;
         std::lock_guard lock(store_mutex());
-        for (auto& [base, clone] : d.clones) {
+        for (auto& [base, c] : d.clones) {
+            if (!c.retry || !clone_writable(c, kind, ws.session, server_now)) continue;
+            const uintptr_t clone = c.at;
             auto* p = reinterpret_cast<uint8_t*>(clone);
             const ItemFind find = [&](const std::string& sel) -> uintptr_t {
                 NameRec r{};
@@ -2357,19 +2437,21 @@ void retry_kitbash(WorldState& ws) {
                 const KitbashModScope mod(d.placeholder || d.orphan ? nullptr : &d.mod, d.guid);
                 for (auto& [key, val] : d.kitbash.items()) kitbash(L.item, key, val, find, all, &ko, clone);
             }
-            if (ko.problems.size() >= d.warnings.size()) continue;
+            if (ko.problems.size() >= c.problems) continue;
             if (d.placeholder) placeholder_clear_programs(&ko);  // still unresolved: still none (build_item)
             for (const RefWrite& w : ko.writes) std::memcpy(p + w.f->offset, w.bytes, w.f->bytes);
             for (const BlobWrite& b : ko.blobs)
                 if (const int64_t rel = static_cast<int64_t>(b.data) - static_cast<int64_t>(clone + b.offset);
                     !b.data || (rel >= INT32_MIN && rel <= INT32_MAX))
                     set_blob(p, b.offset, reinterpret_cast<const void*>(b.data), b.data ? b.count : 0);
-            LOGI("new content: item %s: %zu reference(s) resolved late (served through kiln.assets); %zu problem(s) left",
-                 d.name.c_str(), d.warnings.size() - ko.problems.size(), ko.problems.size());
+            LOGI("new content: item %s: %zu reference(s) resolved late (served through kiln.assets) in the %s world's clone; %zu "
+                 "problem(s) left",
+                 d.name.c_str(), c.problems - ko.problems.size(), wname(kind), ko.problems.size());
+            c.problems = ko.problems.size();
+            c.retry = late_problems(ko.problems);
             d.warnings = ko.problems;
         }
-        d.kitbash_retry = std::any_of(d.warnings.begin(), d.warnings.end(),
-                                      [](const std::string& w) { return w.find("the game has loaded") != std::string::npos; });
+        d.kitbash_retry = any_retry(d.clones);
     }
 }
 
@@ -2392,7 +2474,7 @@ void world_tick(uint32_t kind, uintptr_t world, uint64_t step) {
     sync_world(kind, world);
     if (step % 25 == 0) probe_owners(kind);
     const bool fresh = templates_changed(kind);
-    if ((fresh || step % 50 == 7) && g_ws[kind].world == world && g_ws[kind].ireg) retry_kitbash(g_ws[kind]);
+    if ((fresh || step % 50 == 7) && g_ws[kind].world == world && g_ws[kind].ireg) retry_kitbash(kind, g_ws[kind]);
 }
 
 void KILN_CALL on_server_pre(const KilnTickInfo* t, void*) { world_tick(KILN_WORLD_SERVER, g_api->server_world(), t->step); }
@@ -3430,7 +3512,9 @@ void KILN_CALL on_client_pre(const KilnTickInfo* t, void*) {
     client_diag(w);
     sync_world(KILN_WORLD_CLIENT, w);
     const bool fresh = templates_changed(KILN_WORLD_CLIENT);
-    if ((fresh || t->step % 50 == 7) && g_ws[KILN_WORLD_CLIENT].world == w && g_ws[KILN_WORLD_CLIENT].ireg) retry_kitbash(g_ws[KILN_WORLD_CLIENT]);
+    // its own clones only: a clone the hosted server world has is written in the server world's Pre (retry_kitbash)
+    if ((fresh || t->step % 50 == 7) && g_ws[KILN_WORLD_CLIENT].world == w && g_ws[KILN_WORLD_CLIENT].ireg)
+        retry_kitbash(KILN_WORLD_CLIENT, g_ws[KILN_WORLD_CLIENT]);
     if (t->step % 25 == 0 && !g_api->world(KILN_WORLD_SERVER)) probe_owners(KILN_WORLD_CLIENT);
 }
 
@@ -3819,6 +3903,17 @@ void KILN_CALL on_world(const KilnWorldEvent* ev, void*) {
             g_early_world.store(0);
         }
         reset_ws(ev->kind, 0, 0);
+    }
+    if (ev->event == KILN_WORLD_STOPPING && ev->kind == KILN_WORLD_SERVER) {
+        // its claims on clones end for client worlds set up after this (server_claim_live)
+        KilnSessionInfo si{};
+        si.size = sizeof si;
+        const uint32_t client = g_api->session(&si) == KILN_OK ? si.sessions[KILN_WORLD_CLIENT] : UINT32_MAX;  // unknown: none
+        const uint64_t mine = (static_cast<uint64_t>(ev->session) << 32) | client;
+        uint64_t cur = g_server_stop.load(std::memory_order_relaxed);
+        while (ev->session > static_cast<uint32_t>(cur >> 32) &&
+               !g_server_stop.compare_exchange_weak(cur, mine, std::memory_order_acq_rel)) {
+        }
     }
     if (ev->event == KILN_WORLD_STOPPING) g_first_step_ms[ev->kind] = 0;
 }
