@@ -78,7 +78,7 @@ fn setup(t: &Path) -> (PathBuf, PathBuf) {
     put(&inp.join("record.json"), &json!({"regmap": 1, "side": "server", "exeSha256": NEW, "gameBuild": "101", "steamBuild": "2",
         "verified": true, "proof": "regmap_check.py --exe", "layouts": {"demo::Gadget": "0x00000007"},
         "rows": {"gadgets.size": "ok", "gadgets.cap": "ok", "gadgets.label": "ok"}, "aliases": {"renames": [], "removals": [], "suffixes": []}}));
-    put(&inp.join("ids-new.json"), &json!({"gadgets": {"g1": "game:a", "g2": "game:b"}}));
+    put(&inp.join("ids-new.json"), &json!({"format": 1, "side": "server", "exeSha256": NEW, "registries": {"gadgets": {"g1": "game:a", "g2": "game:b"}}}));
     // the lab's Kiln data folder: kiln.content's id tables, the proof producer's suites and values export
     let data = t.join("gate/kiln/data");
     put(&data.join(format!("content/registry/ids-server-{NEW}.json")), &table(NEW));
