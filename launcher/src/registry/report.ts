@@ -1,6 +1,13 @@
 // Format 1: schema/state-registry.schema.json, native/services/content/registry/report.cpp.
 // Only a bounded, display-only projection crosses into React. Unknown members are ignored.
+import published from "../../../schema/registry/ids.lock.json";
 export const REPORT_LIMITS = { bytes: 8 * 1024 * 1024, rows: 500, writers: 64, text: 2048, depth: 48 } as const;
+const kilnFields = new Map(Object.entries(published.registries).map(([name, spec]) => [name, new Set(Object.keys(spec.fields))]));
+function isKilnField(registry: string, field: string): boolean {
+  const normalized = field.replace(/\[(?:\d+|\*)\]/g, "[]");
+  const fields = kilnFields.get(registry);
+  return !!fields && (fields.has(normalized) || fields.has(normalized.replace(/\[\]$/, "")));
+}
 type ObjectRow = Record<string, unknown>;
 export interface RegistryWriter { owner: string; kind: string; stage: string; operation: string; value: string; certainty: string }
 export interface RegistryField {
@@ -99,14 +106,10 @@ export function parseRegistryReport(input: string): RegistryReport {
     total += Math.max(count(totals[key]), rows.length);
     left += count(truncated[key]) + Math.max(0, rows.length - REPORT_LIMITS.rows);
   }
-  const rawNames = new Set(fields.slice(0, REPORT_LIMITS.rows).filter(f => object(f).raw === true).map(f => text(object(f).field)));
-  const rawPlaces = new Set(fields.slice(0, REPORT_LIMITS.rows).filter(f => object(f).raw === true).map(f => {
-    const o = object(f); return `${text(o.registry)}[${text(o.id)}].${text(o.field)}`;
-  }));
   const fieldRows = fields.slice(0, REPORT_LIMITS.rows).map(x => {
     const f = object(x), b = object(f.base), chain = array(f.writers);
     const skip = Math.max(0, chain.length - REPORT_LIMITS.writers);
-    const raw = f.raw === true;
+    const raw = f.raw === true || !isKilnField(text(f.registry), text(f.field));
     return {
       registry: text(f.registry), id: text(f.id), field: raw ? "Advanced field (details hidden)" : text(f.field), applies: text(f.applies),
       baseOrigin: text(b.origin), base: value(b.value, b.entriesLeftOut), result: value(f.result, f.resultEntriesLeftOut), winner: owner(f.winner),
@@ -124,14 +127,17 @@ export function parseRegistryReport(input: string): RegistryReport {
     written, generation: count(r.generation), phase: text(r.phase), baseOrigin: text(base.origin), baseWriter: text(base.writer), verified: regmap.verified,
     fields: fieldRows,
     conflicts: conflicts.slice(0, REPORT_LIMITS.rows).map(x => {
-      const c = object(x), field = text(c.field), raw = rawPlaces.has(field);
+      const c = object(x), field = text(c.field);
+      const registry = text(c.registry), prefix = `${registry}[${text(c.id)}].`;
+      const raw = !field.startsWith(prefix) || !isKilnField(registry, field.slice(prefix.length));
       return { field: raw ? "Advanced field (details hidden)" : field, kind: text(c.kind), winner: owner(c.winner), loser: c.loser === null ? "None" : text(c.loser),
         certainty: certainty(c.certainty), text: raw ? "Advanced field conflict; mapping details hidden." : text(c.text) };
     }),
     refused: refused.slice(0, REPORT_LIMITS.rows).map(x => {
-      const f = object(x), raw = rawNames.has(optional(f.field));
+      const f = object(x), field = optional(f.field), registry = optional(f.registry);
+      const raw = !!field && !isKilnField(registry, field);
       return { owner: text(f.mod), field: raw ? "Advanced field (details hidden)" : [optional(f.registry), optional(f.id), optional(f.field)].filter(Boolean).join(" · "),
-        stage: text(f.stage), reason: raw ? "Advanced field refused; mapping details hidden." : text(f.reason) };
+        stage: text(f.stage), reason: raw ? `${text(f.reason).startsWith("RestartRequired:") ? "RestartRequired: " : text(f.reason).startsWith("Unproven:") ? "Unproven: " : ""}Advanced field (mapping details hidden).` : text(f.reason) };
     }),
     entries: [added, removed].flatMap((rows, index) => rows.slice(0, REPORT_LIMITS.rows).map(x => {
       const e = object(x); return { kind: index === 0 ? "Added" : "Removed", registry: text(e.registry), id: text(e.id) };

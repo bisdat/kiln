@@ -12,6 +12,7 @@ pub mod config;
 pub mod sfi_backend;
 pub mod launch;
 pub mod logs;
+pub mod registry;
 pub mod saves;
 pub mod editor;
 pub mod server;
@@ -106,6 +107,7 @@ pub const NAMES: &[&str] = &[
     "logs_follow",
     "logs_unfollow",
     "logs_crash_reports",
+    "registry_report_read",
     "saves_list",
     "saves_backups",
     "saves_backup",

@@ -67,6 +67,14 @@ describe("untrusted registry report", () => {
     expect(JSON.stringify(out)).not.toContain("DEADBEEF");
     expect(out.fields[0].field).toBe("Advanced field (details hidden)");
   });
+  test("raw conflict/refusal paths stay hidden even without a retained field row", () => {
+    const r = registryFixture();
+    const out = parse({ ...r, fields: [],
+      conflicts: [{ ...r.conflicts[0], field: "items[game:fixture_stack].SecretSetup.Offset", text: "SecretSetup.Offset changed" }],
+      refused: [{ ...r.refused[0], registry: "items", field: "SecretSetup.Offset", reason: "Unproven: SecretSetup.Offset (mapping missing)" }],
+    });
+    expect(JSON.stringify(out)).not.toContain("SecretSetup");
+  });
   test("HTML is kept as plain text, never interpreted", () => {
     const r = registryFixture(); r.refused[0].reason = '<img src=x onerror="alert(1)">';
     expect(parse(r).refused[0].reason).toBe(r.refused[0].reason);

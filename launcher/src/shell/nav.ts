@@ -15,6 +15,7 @@ export const NAV_MAIN: NavItem[] = [
   { get label() { return t("nav.catalog"); }, to: "/catalog" },
   { get label() { return t("nav.runtime"); }, to: "/runtime" },
   { get label() { return t("nav.logs"); }, to: "/logs" },
+  { label: "Conflicts", to: "/conflicts" },
   { get label() { return t("nav.saves"); }, to: "/saves" },
   { get label() { return t("nav.editor"); }, to: "/editor" },
   // Pack Studio (src/studio/): shown while Crucible is on (shell/AppShell.tsx)
