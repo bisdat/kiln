@@ -1474,7 +1474,8 @@ KilnResult registry_live_begin(KilnOwner owner, const std::string& mod, uint32_t
         return KILN_ERR_UNAVAILABLE;
     }
     LiveState::Change change;
-    change.owner = owner; change.mod = mod; change.point = point; change.world = g.world;
+    // A MOD_LOAD draft is no world's: begun in a world, it may still commit after that world ended (review4 nit).
+    change.owner = owner; change.mod = mod; change.point = point; change.world = point == KILN_REGISTRY_LIVE_MOD_LOAD ? 0 : g.world;
     *out = ++g_next_change;
     g.changes.emplace(*out, std::move(change));
     return KILN_OK;

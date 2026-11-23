@@ -172,6 +172,59 @@ void world_load_field_mid_world_is_named() {
     check(reply.outcome == RegistryLiveOutcome::Applied && reply.reason.empty(), "the WorldLoad point's own world-load field is not flagged");
     registry_live_revert(73, w, &reply);
 }
+// review2 S5: a drop-table change before the world has loaded the table is PendingResource, then applies on the table.
+void drop_table_change_is_pending_resource() {
+    fresh_live(); RegistryLiveReply reply;
+    const auto h = change(71, "a", R"([{"registry":"drops","select":"game:dt_wolf","field":"entries[*].count.max","op":{"mul":2}}])");
+    check(registry_live_commit(71, h, &reply) == KILN_OK && reply.outcome == RegistryLiveOutcome::PendingResource && reply.accepted == 1,
+          "a change to a drop table the world has not loaded waits for it");
+    check(at<uint32_t>(0x31018) == 3, "nothing is written before the table loads");
+    add_drop_table();
+    registry_live_table(g_regs[KILN_CONTENT_DROPS].entries[0]);
+    std::string err; store_flush(&err);
+    check(at<uint32_t>(0x31018) == 6 && at<uint32_t>(0x31058) == 6, "the table's stacks take the change once it loads");
+    check(registry_live_revert(71, h, &reply) == KILN_OK && reply.outcome == RegistryLiveOutcome::Reverted && at<uint32_t>(0x31018) == 3,
+          "revert restores the stacks");
+}
+// review2 S5: a formula transaction (power) writes its input, and its revert leaves another writer's bytes alone.
+void formula_transaction_with_foreign_write() {
+    fresh_live(); RegistryLiveReply reply;
+    const float before = at<float>(SWORD_AT + 8);
+    const auto h = change(71, "a", R"([{"registry":"items","select":"game:sword_t2","field":"power","op":{"mul":2}}])");
+    registry_live_commit(71, h, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Applied && at<float>(SWORD_AT + 8) != before, "power x2 writes damageSetup.dmgMod through the formula");
+    std::string value;
+    check(registry_live_read("items", "game:sword_t2", "power", &value) == KILN_OK, "the formula reads back");
+    mem<float>(SWORD_AT + 8, 7.0f); // another writer
+    registry_live_revert(71, h, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Skipped && at<float>(SWORD_AT + 8) == 7.0f, "the formula's revert preserves the foreign bytes");
+}
+// review2 S5: a world-bound draft begun in one world cannot be committed into the next; a MOD_LOAD draft is no world's
+// (review4 nit: begin no longer binds it to the world it was begun in).
+void draft_cannot_cross_worlds() {
+    fresh_live(); RegistryLiveReply reply;
+    const auto h = change(71, "a", "[{" + wood + R"("op":50}])", 4);
+    const auto process = change(72, "b", "[{" + wood + R"("op":60}])", 1);
+    registry_live_world_stop();
+    check(registry_live_commit(71, h, &reply) == KILN_ERR_NOT_FOUND, "the ended world's manual draft expired with it");
+    check(registry_live_commit(72, process, &reply) == KILN_OK && reply.outcome == RegistryLiveOutcome::PendingWorld,
+          "a MOD_LOAD draft begun in a world commits after it ended and waits for the next world");
+    std::string error; store_reset(true, &error); world(); registry_live_world_begin(); apply_registry_files({});
+    check(at<uint32_t>(WOOD_AT) == 60, "the next world applies it");
+    registry_live_revert(72, process, &reply);
+}
+// review2 S5: a MOD_LOAD change reverted before any world is removed from the composition only.
+void process_change_reverts_without_a_world() {
+    world(); g_files.clear(); stage({}); RegistryLiveReply reply;
+    const auto h = change(71, "a", "[{" + wood + R"("op":50}])", 1);
+    check(registry_live_commit(71, h, &reply) == KILN_OK && reply.outcome == RegistryLiveOutcome::PendingWorld, "pending before a world");
+    std::string value;
+    check(registry_live_read("items", "game:material_t1_wood_logs", "maxStack", &value) == KILN_OK && value == "50", "the pre-world read includes it");
+    check(registry_live_revert(71, h, &reply) == KILN_OK && reply.outcome == RegistryLiveOutcome::Reverted, "revert without a world");
+    check(registry_live_read("items", "game:material_t1_wood_logs", "maxStack", &value) == KILN_OK && value == "10", "the composition drops it");
+    registry_live_world_begin(); apply_registry_files({});
+    check(at<uint32_t>(WOOD_AT) == 10 && registry_live_status().active == 0, "the next world never applies it");
+}
 // review4 NM1: two retained changes, one slot each, the write of one of them fails at a reapplication: only that one is charged.
 void multi_change_write_failure_is_attributed_per_change() {
     fresh_live(); RegistryLiveReply reply;
@@ -898,6 +951,10 @@ int main() {
         {"rejected_process_change_returns_next_world", rejected_process_change_returns_next_world},
         {"foreign_slot_keeps_the_rest_of_a_retained_change", foreign_slot_keeps_the_rest_of_a_retained_change},
         {"pass_read_excludes_own_layers", pass_read_excludes_own_layers},
+        {"drop_table_change_is_pending_resource", drop_table_change_is_pending_resource},
+        {"formula_transaction_with_foreign_write", formula_transaction_with_foreign_write},
+        {"draft_cannot_cross_worlds", draft_cannot_cross_worlds},
+        {"process_change_reverts_without_a_world", process_change_reverts_without_a_world},
         {"retained_changes_are_capped_per_owner", retained_changes_are_capped_per_owner},
 
         {"world_load_field_mid_world_is_named", world_load_field_mid_world_is_named},
