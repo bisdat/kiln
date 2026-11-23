@@ -5,14 +5,24 @@ namespace Kiln;
 
 /// <summary>What an ability costs: mana, stamina and special-ability charge (attribute points; the game's own costs
 /// come from the same attributes). Paid when the cast starts.</summary>
+/// <param name="Mana">Mana points.</param>
+/// <param name="Stamina">Stamina points.</param>
+/// <param name="Special">Special-ability charge.</param>
 public readonly record struct AbilityCost(int Mana = 0, int Stamina = 0, int Special = 0)
 {
+    /// <summary>No cost.</summary>
     public static readonly AbilityCost None = default;
+    /// <summary>A cost of <paramref name="n"/> mana.</summary>
     public static AbilityCost OfMana(int n) => new(Mana: n);
+    /// <summary>A cost of <paramref name="n"/> stamina.</summary>
     public static AbilityCost OfStamina(int n) => new(Stamina: n);
+    /// <summary>A cost of <paramref name="n"/> special-ability charge.</summary>
     public static AbilityCost OfSpecial(int n) => new(Special: n);
+    /// <summary>Adds the costs part by part.</summary>
     public static AbilityCost operator +(AbilityCost a, AbilityCost b) => new(a.Mana + b.Mana, a.Stamina + b.Stamina, a.Special + b.Special);
+    /// <summary>True when no part is above 0.</summary>
     public bool IsFree => Mana <= 0 && Stamina <= 0 && Special <= 0;
+    /// <summary>"free", or the parts above 0, such as "40 mana, 5 stamina".</summary>
     public override string ToString() => IsFree ? "free" :
         string.Join(", ", new[] { Mana > 0 ? $"{Mana} mana" : null, Stamina > 0 ? $"{Stamina} stamina" : null,
             Special > 0 ? $"{Special} special" : null }.Where(s => s is not null));
@@ -47,7 +57,10 @@ public sealed class AbilityDefinition
 {
     /// <summary>"&lt;modid&gt;:&lt;name&gt;", e.g. "firenova:fire-nova".</summary>
     public required string Id { get; init; }
+    /// <summary>A name for players. Null: <see cref="Id"/> (see <see cref="Name"/>).</summary>
     public string? DisplayName { get; init; }
+    /// <summary>A line about the ability; the key's description on the Keys page. Null: <see cref="Name"/> is used
+    /// there.</summary>
     public string? Description { get; init; }
 
     /// <summary>The client's default key ("G", "Shift+F"); null = no key binding. Players remap it in the Kiln menu.</summary>
@@ -56,6 +69,7 @@ public sealed class AbilityDefinition
     /// <summary>A chat command that casts it (without the prefix, e.g. "nova"); null = only <c>/cast &lt;id&gt;</c>.</summary>
     public string? ChatCommand { get; init; }
 
+    /// <summary>What the cast costs; default free. Checked, then paid, when the cast starts.</summary>
     public AbilityCost Cost { get; init; }
 
     /// <summary>Kiln's cooldown per caster (the game has no cooldown system for players).</summary>
@@ -70,7 +84,10 @@ public sealed class AbilityDefinition
     /// plays it (<see cref="Abilities.PlaySequence"/>). Pick one whose own costs and spawns you want; null = none.</summary>
     public Guid? CastSequence { get; init; }
 
+    /// <summary>Where the ability aims. Default <see cref="AbilityTargeting.Self"/>.</summary>
     public AbilityTargeting Targeting { get; init; } = AbilityTargeting.Self;
+    /// <summary>Metres: how far ahead <see cref="AbilityTargeting.Forward"/> aims, and how far
+    /// <see cref="AbilityTargeting.NearestEnemy"/> looks. Default 20.</summary>
     public double Range { get; init; } = 20;
 
     /// <summary>Only players may cast it through keys and commands (server code may cast for any actor).</summary>
@@ -82,6 +99,7 @@ public sealed class AbilityDefinition
     /// <summary>The effect (server, tick thread). Await <see cref="AbilityCast.At"/> for timing.</summary>
     public required Func<AbilityCast, Task> OnCast { get; init; }
 
+    /// <summary><see cref="DisplayName"/>, or <see cref="Id"/> when it has none.</summary>
     public string Name => DisplayName ?? Id;
 }
 
@@ -97,10 +115,16 @@ public sealed class AbilityCast
         StartedMs = Environment.TickCount64;
     }
 
+    /// <summary>The ability being cast.</summary>
     public AbilityDefinition Ability { get; }
+    /// <summary>The caster.</summary>
     public EntityId Caster { get; }
+    /// <summary>How the cast was started.</summary>
     public CastOrigin Origin { get; }
+    /// <summary>The sim step the cast started in.</summary>
     public ulong Step { get; }
+    /// <summary>When the cast started, as <c>Environment.TickCount64</c> milliseconds: the time base of
+    /// <see cref="At"/>.</summary>
     public long StartedMs { get; }
 
     /// <summary>The target entity (NearestEnemy: the enemy; Self: the caster; Forward: none).</summary>
@@ -109,7 +133,9 @@ public sealed class AbilityCast
     /// <summary>The point the ability aims at.</summary>
     public WorldPosition Position { get; internal set; }
 
+    /// <summary>Where the caster stood when the cast started.</summary>
     public WorldPosition CasterPosition { get; internal set; }
+    /// <summary>The caster's yaw in degrees when the cast started.</summary>
     public float CasterYaw { get; internal set; }
 
     /// <summary>Completes on the tick thread once <paramref name="sinceStart"/> has passed since the cast started.</summary>
@@ -131,8 +157,14 @@ public sealed class AbilityCast
 }
 
 /// <summary>The outcome of a cast request.</summary>
+/// <param name="Ok">True when the cast started.</param>
+/// <param name="Reason">Why it was refused; null when <paramref name="Ok"/>.</param>
+/// <param name="CooldownLeft">A cast: the cooldown now running. A refusal for the cooldown: the time left. Zero
+/// otherwise.</param>
+/// <param name="Cast">The cast; null when it was refused.</param>
 public sealed record CastResult(bool Ok, string? Reason, TimeSpan CooldownLeft, AbilityCast? Cast = null) : IKilnResult
 {
+    /// <summary>A refusal with a reason, and the cooldown left when that is why.</summary>
     public static CastResult Refused(string reason, TimeSpan cooldown = default) => new(false, reason, cooldown);
 }
 
@@ -140,7 +172,9 @@ public sealed record CastResult(bool Ok, string? Reason, TimeSpan CooldownLeft, 
 public sealed class AbilityHandle : IDisposable
 {
     internal AbilityHandle(AbilityDefinition d) => Definition = d;
+    /// <summary>The ability's definition.</summary>
     public AbilityDefinition Definition { get; }
+    /// <summary>Takes the ability off: its key binding, HUD line and chat command go with it.</summary>
     public void Dispose() => AbilityRegistry.Remove(Definition.Id);
 }
 
@@ -502,6 +536,9 @@ public static partial class Abilities
     public static CastResult Cast(EntityId caster, string abilityId, CastOrigin origin = CastOrigin.Server) =>
         AbilityRegistry.CastNow(caster, abilityId, origin);
 
+    /// <summary>The time left on <paramref name="caster"/>'s cooldown for this ability; zero when there is
+    /// none.</summary>
     public static TimeSpan CooldownLeft(EntityId caster, string abilityId) => AbilityRegistry.CooldownLeft(caster, abilityId);
+    /// <summary>Ends <paramref name="caster"/>'s cooldown for this ability at once.</summary>
     public static void ResetCooldown(EntityId caster, string abilityId) => AbilityRegistry.ResetCooldown(caster, abilityId);
 }

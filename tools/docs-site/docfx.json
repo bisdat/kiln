@@ -24,7 +24,8 @@
       {
         "files": [
           "api/**.yml",
-          "api/index.md"
+          "api/index.md",
+          "api/services/*.md"
         ]
       },
       {

@@ -19,16 +19,26 @@ public sealed record RuleScope
     /// player rule set ends when its player leaves).</summary>
     public EntityId? Player { get; private init; }
 
+    /// <summary>True for an area scope: a sphere, a box or a cylinder.</summary>
     public bool IsArea => _kind is Kind.Sphere or Kind.Box or Kind.Cylinder;
 
+    /// <summary>Only the player with this entity id.</summary>
+    /// <param name="player">The player entity.</param>
+    /// <exception cref="ArgumentException"><paramref name="player"/> is <see cref="EntityId.None"/>.</exception>
     public static RuleScope ForPlayer(EntityId player) =>
         player.IsNone ? throw new ArgumentException("no player", nameof(player)) : new() { _kind = Kind.Player, Player = player };
 
     /// <summary>Every player in the world.</summary>
     public static RuleScope Everyone { get; } = new() { _kind = Kind.Everyone };
 
+    /// <summary>The players within <paramref name="radius"/> metres of <paramref name="center"/>.</summary>
+    /// <param name="center">The middle of the sphere.</param>
+    /// <param name="radius">The radius in metres; a negative value counts as 0.</param>
     public static RuleScope Sphere(WorldPosition center, double radius) => new() { _kind = Kind.Sphere, _a = center, _radius = Math.Max(radius, 0) };
 
+    /// <summary>The players inside the box between two corners (given in any order).</summary>
+    /// <param name="min">One corner of the box.</param>
+    /// <param name="max">The opposite corner.</param>
     public static RuleScope Box(WorldPosition min, WorldPosition max) =>
         new()
         {
@@ -65,6 +75,7 @@ public sealed record RuleScope
 
     private static double Sq(double v) => v * v;
 
+    /// <summary>The scope as text, for logs.</summary>
     public override string ToString() => _kind switch
     {
         Kind.Player => $"player {Player}",

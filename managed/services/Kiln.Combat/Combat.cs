@@ -16,13 +16,16 @@ namespace Kiln;
 /// <param name="Invulnerable">Kiln god mode is on for it.</param>
 public readonly record struct Health(int Current, int Max, bool Dead, bool HasActor, bool Invulnerable)
 {
+    /// <summary>Current health as a fraction of the maximum (0 when the maximum is 0 or less).</summary>
     public double Fraction => Max > 0 ? (double)Current / Max : 0;
+    /// <summary>The health as <c>current/max</c>, followed by <c>dead</c> and <c>god</c> when they apply.</summary>
     public override string ToString() => $"{Current}/{Max}{(Dead ? " dead" : "")}{(Invulnerable ? " god" : "")}";
 }
 
 /// <summary>Options for <see cref="Combat.Damage"/>.</summary>
 public sealed record DamageOptions
 {
+    /// <summary>Options with every setting at its default.</summary>
     public static readonly DamageOptions Default = new();
 
     /// <summary>Stagger of the target (none by default).</summary>
@@ -46,6 +49,7 @@ public sealed record DamageOptions
     public bool AsGameHit { get; init; }
 }
 
+/// <summary>Where a hit made by <see cref="Combat.Damage"/> or <see cref="Combat.Kill"/> stands.</summary>
 public enum HitState
 {
     /// <summary>Waiting for the engine's next hit conclusion (or held for EntityHurtEvent handlers).</summary>
@@ -58,9 +62,17 @@ public enum HitState
 
 /// <summary>Outcome of one <see cref="Combat.Damage"/> / <see cref="Combat.Kill"/> hit. A hit the game did not apply
 /// (<see cref="HitState.Dropped"/>) is the game's refusal: <see cref="Ok"/> false with <see cref="Reason"/>.</summary>
+/// <param name="State">Whether the hit is still waiting, was applied or was dropped.</param>
+/// <param name="Target">The entity the hit was aimed at.</param>
+/// <param name="Amount">The damage the hit asked for, after any <see cref="EntityHurtEvent"/> handler changed it. For a kill it is the target's health at the time (at least 1).</param>
+/// <param name="HealthBefore">The target's health before the hit; -1 when it could not be read.</param>
+/// <param name="HealthAfter">The target's health after the hit; -1 when it could not be read.</param>
+/// <param name="KillingBlow">The hit took the target from above 0 health to 0 or below.</param>
+/// <param name="Steps">How many sim steps passed from the request until the hit reached its state.</param>
 public sealed record HitResult(HitState State, EntityId Target, int Amount, int HealthBefore, int HealthAfter,
     bool KillingBlow, int Steps) : IKilnResult
 {
+    /// <summary>True when the engine applied the hit to the target (<see cref="HitState.Applied"/>).</summary>
     public bool Applied => State == HitState.Applied;
 
     /// <summary>The engine applied the hit (<see cref="Applied"/>). Since 0.2.0-dev.27.</summary>
@@ -73,12 +85,34 @@ public sealed record HitResult(HitState State, EntityId Target, int Amount, int 
         HitState.Pending => "pending: the engine has not concluded the hit yet",
         _ => "dropped: canceled by a handler, the target is invulnerable or gone, or the engine skipped it",
     };
+    /// <summary>A short description for logs: the target, the health before and after, and how many steps it took; or the hit's state when it was not applied.</summary>
     public override string ToString() => Applied
         ? $"hit {Target}: {HealthBefore} -> {HealthAfter}{(KillingBlow ? " (killing blow)" : "")} after {Steps} step(s)"
         : $"hit {Target} {State}";
 }
 
 /// <summary>Counters of kiln.combat (diagnostics).</summary>
+/// <param name="Health">Health reads and writes work on this build.</param>
+/// <param name="Hits">Damage and kill hits and the hit hooks work on this build.</param>
+/// <param name="Deaths">Death events work on this build.</param>
+/// <param name="Holding">Hits are being held for the listener right now (see <see cref="EntityHurtEvent"/>).</param>
+/// <param name="Interest">The mask of event kinds the listener asked for.</param>
+/// <param name="HitsSeen">Hits the engine produced that kiln.combat saw.</param>
+/// <param name="HitsHeld">Hits held for one step for the listener.</param>
+/// <param name="HitsReleased">Held hits let go to apply.</param>
+/// <param name="HitsCanceled">Held hits that handlers canceled.</param>
+/// <param name="HitsModified">Held hits whose amount a handler changed.</param>
+/// <param name="KilnHits">Hits from <see cref="Combat.Damage"/> and <see cref="Combat.Kill"/> that were applied.</param>
+/// <param name="GodBlocked">Hits dropped because the target was invulnerable.</param>
+/// <param name="GodRestored">Other health losses that god mode took back.</param>
+/// <param name="DeathsSeen">Deaths that kiln.combat reported.</param>
+/// <param name="EventsDelivered">Events delivered to the listener.</param>
+/// <param name="Invulnerable">How many entities are in god mode now.</param>
+/// <param name="GameDiedEvents">The game's own entity-died events kiln.combat read.</param>
+/// <param name="HitsDeferred">Damage hits moved to a later step (the engine applies at most 4 impacts per target per step).</param>
+/// <param name="DropsSeen">Loot containers seen at corpses.</param>
+/// <param name="DropsCanceled">Loot containers that handlers canceled (they are destroyed).</param>
+/// <param name="RepeatHits">Held hits not reported because they repeat an impact on a target that the engine skips.</param>
 public sealed record CombatStatus(bool Health, bool Hits, bool Deaths, bool Holding, uint Interest, ulong HitsSeen,
     ulong HitsHeld, ulong HitsReleased, ulong HitsCanceled, ulong HitsModified, ulong KilnHits, ulong GodBlocked,
     ulong GodRestored, ulong DeathsSeen, ulong EventsDelivered, uint Invulnerable, ulong GameDiedEvents,
@@ -90,14 +124,23 @@ public sealed record CombatStatus(bool Health, bool Hits, bool Deaths, bool Hold
     public bool Regeneration { get; init; }
     /// <summary>changeAttributeValue health gains reach <see cref="EntityHealEvent"/>.</summary>
     public bool AttributeHeals { get; init; }
+    /// <summary>Fall damage events kiln.combat saw (see <see cref="EntityFallEvent"/>).</summary>
     public ulong FallsSeen { get; init; }
+    /// <summary>Fall damage events that handlers canceled.</summary>
     public ulong FallsCanceled { get; init; }
+    /// <summary>Fall damage events whose damage a handler changed.</summary>
     public ulong FallsModified { get; init; }
+    /// <summary>Natural regeneration events kiln.combat saw (see <see cref="EntityHealEvent"/>).</summary>
     public ulong RegenSeen { get; init; }
+    /// <summary>Natural regeneration events that handlers canceled.</summary>
     public ulong RegenCanceled { get; init; }
+    /// <summary>Direct health gains (<c>changeAttributeValue</c>: potions, food, skills) kiln.combat saw.</summary>
     public ulong AttributeHealsSeen { get; init; }
+    /// <summary>Direct health gains that a handler canceled or changed, so Kiln corrected the health.</summary>
     public ulong AttributeHealsCorrected { get; init; }
+    /// <summary>Push-back and hit-reaction events kiln.combat saw (see <see cref="EntityKnockbackEvent"/>).</summary>
     public ulong KnockbacksSeen { get; init; }
+    /// <summary>Push-back and hit-reaction events that a handler changed or canceled.</summary>
     public ulong KnockbacksModified { get; init; }
 }
 

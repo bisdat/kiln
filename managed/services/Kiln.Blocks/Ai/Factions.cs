@@ -4,9 +4,21 @@
 namespace Kiln;
 
 /// <summary>What kiln.npcai reports: which hooks it has, what is set, how often the game asked and Kiln answered.</summary>
+/// <param name="Available">kiln.npcai is here and found the game's checks on this build, as <see cref="Factions.Available"/>.</param>
+/// <param name="Installed">Kiln's hooks on the game's relation checks are in place.</param>
+/// <param name="Relations">How many faction relations are set in the world's table.</param>
+/// <param name="CreatureRows">How many creatures have relations of their own.</param>
+/// <param name="Pairs">How many pairs of entities have a setting of their own (a sense filter's refusals set them).</param>
+/// <param name="Mapped">The mapped count kiln.npcai reports (the "mapped" in <see cref="ToString"/>).</param>
+/// <param name="Calls">How many times the game asked its relation checks.</param>
+/// <param name="Answered">How many of those calls Kiln answered itself.</param>
+/// <param name="ByPair">Calls answered from a setting on one pair of entities.</param>
+/// <param name="ByRow">Calls answered from a creature's own relations.</param>
+/// <param name="ByTable">Calls answered from the world's faction table.</param>
 public sealed record FactionStatus(bool Available, bool Installed, int Relations, int CreatureRows, int Pairs, int Mapped, ulong Calls, ulong Answered,
     ulong ByPair, ulong ByRow, ulong ByTable)
 {
+    /// <summary>One line with what kiln.npcai reports: its hooks, how much is set and how often the game asked.</summary>
     public override string ToString() =>
         $"kiln.npcai {(Available ? "on" : "off")}, hooks {(Installed ? "in" : "out")}: {Relations} relation(s), {CreatureRows} creature(s) with their own, {Pairs} pair(s), " +
         $"{Mapped} mapped; {Calls} call(s), {Answered} answered by Kiln (pair {ByPair}, creature {ByRow}, table {ByTable})";

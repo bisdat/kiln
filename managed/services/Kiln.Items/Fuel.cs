@@ -284,11 +284,17 @@ public static unsafe partial class Items
 }
 
 /// <summary>The water a container holds, in units (64 per charge).</summary>
+/// <param name="Units">The water the container holds now, in units.</param>
+/// <param name="Max">The most it can hold, in units.</param>
 public readonly record struct FuelLevel(int Units, int Max)
 {
+    /// <summary><see cref="Units"/> in charges (64 units each).</summary>
     public double Charges => Units / (double)Items.Fuel.UnitsPerCharge;
+    /// <summary><see cref="Max"/> in charges (64 units each).</summary>
     public double MaxCharges => Max / (double)Items.Fuel.UnitsPerCharge;
+    /// <summary>True when the container holds its maximum.</summary>
     public bool IsFull => Units >= Max;
+    /// <summary>Units and charges, held and maximum, for logs.</summary>
     public override string ToString() => $"{Units}/{Max} ({Charges:0.#}/{MaxCharges:0.#} charges)";
 }
 
@@ -304,9 +310,20 @@ public readonly record struct FuelChange(EntityId Container, ItemId Item, SlotId
 /// <summary>What a water write did. <see cref="Status"/> is <see cref="ItemsStatus.Done"/> also when nothing needed a
 /// change (<see cref="Changed"/> 0); <see cref="ItemsStatus.SlotChanged"/> when the entity holds no water;
 /// <see cref="ItemsStatus.NoInventory"/> when a holder has no inventory.</summary>
+/// <param name="Status">How it ended; see the type's summary.</param>
+/// <param name="Entity">The entity the write was for: a holder or the container itself.</param>
+/// <param name="Item">The item it was limited to; none when it was not limited.</param>
+/// <param name="Matched">How many containers it found.</param>
+/// <param name="Changed">How many of them it changed.</param>
+/// <param name="Changes">The containers it changed: before, after and maximum (only the first 16).</param>
+/// <param name="Message">Why it failed, in words; empty when there is nothing to add.</param>
+/// <param name="Steps">How many sim steps passed between the request and the write.</param>
+/// <param name="DryRun">True when nothing was written: the result says what would change.</param>
 public sealed record FuelResult(ItemsStatus Status, EntityId Entity, ItemId Item, int Matched, int Changed,
     IReadOnlyList<FuelChange> Changes, string Message, int Steps, bool DryRun) : IKilnResult
 {
+    /// <summary>True when <see cref="Status"/> is <see cref="ItemsStatus.Done"/>, also when nothing needed a
+    /// change.</summary>
     public bool Ok => Status == ItemsStatus.Done;
 
     // IKilnResult's reason is null when the change was made; the record's Message says why otherwise (since 0.2.0-dev.27)
@@ -315,6 +332,7 @@ public sealed record FuelResult(ItemsStatus Status, EntityId Entity, ItemId Item
     internal static FuelResult Fail(ItemsStatus s, EntityId e, ItemId item, string why) =>
         new(s, e, item, 0, 0, Array.Empty<FuelChange>(), why, 0, false);
 
+    /// <summary>The status and how many containers changed, for logs.</summary>
     public override string ToString() =>
         $"{Status}: {Changed} of {Matched} container(s) changed{(DryRun ? " (dry run)" : "")}{(Message.Length > 0 ? ": " + Message : "")}";
 }
@@ -329,6 +347,8 @@ public sealed record FuelRefill
     /// is.</summary>
     public int Limit { get; init; }
 
+    /// <summary>True when the policy keeps containers full every step (<see cref="UnitsPerSecond"/> is
+    /// infinite).</summary>
     public bool IsFull => double.IsPositiveInfinity(UnitsPerSecond);
 
     /// <summary>Full every step.</summary>
@@ -338,6 +358,7 @@ public sealed record FuelRefill
     public static FuelRefill ChargesPerSecond(double charges, int limitUnits = 0) =>
         new() { UnitsPerSecond = Math.Max(charges, 0.001) * Items.Fuel.UnitsPerCharge, Limit = Math.Max(limitUnits, 0) };
 
+    /// <summary>The policy and its limit, for logs.</summary>
     public override string ToString() =>
         (IsFull ? "keep full" : $"{UnitsPerSecond / Items.Fuel.UnitsPerCharge:0.##} charges/s") + (Limit > 0 ? $" up to {Limit} units" : "");
 }
@@ -353,11 +374,13 @@ public sealed class WaterRefilledEvent : KilnEvent
         Changes = changes;
     }
 
+    /// <summary>The refill policy that gave the water back.</summary>
     public FuelKeep Keep { get; }
 
     /// <summary>The holder (or the container itself) the policy is on.</summary>
     public EntityId Entity => Keep.Entity;
 
+    /// <summary>The containers it changed since the last event, with their units before and after.</summary>
     public IReadOnlyList<FuelChange> Changes { get; }
 
     /// <summary>Units given back, over every container.</summary>
@@ -366,6 +389,7 @@ public sealed class WaterRefilledEvent : KilnEvent
     /// <summary>Id of the mod that set the policy ("kiln" outside mod code).</summary>
     public string Origin => Keep.Origin;
 
+    /// <summary>The units given back, the entity, the policy and the mod, for logs.</summary>
     public override string ToString() => $"{Units} units back to {Changes.Count} container(s) of {Entity} ({Keep.Policy}) by {Origin}";
 }
 
@@ -409,10 +433,16 @@ public sealed class FuelKeep : IDisposable
         $"kiln.items' water refill {Id} ({Policy}) of {(Inventories ? $"the inventories of {Entity}" : Entity.ToString())}" +
         (Item.IsNone ? "" : $", {itemName ?? $"item 0x{Item.Value:x8}"} only") + $", set by {Origin}";
 
+    /// <summary>The holder or container the policy is on.</summary>
     public EntityId Entity { get; }
+    /// <summary>The item the policy is limited to; none for every container.</summary>
     public ItemId Item { get; }
+    /// <summary>True when <see cref="Entity"/> is a holder and the policy covers the containers in its inventories;
+    /// false when it is the container itself.</summary>
     public bool Inventories { get; }
+    /// <summary>How the water is given back.</summary>
     public FuelRefill Policy { get; }
+    /// <summary>True until the policy is disposed.</summary>
     public bool Active => Volatile.Read(ref _handle) != 0;
 
     /// <summary>Id of the mod that set it ("kiln" outside mod code).</summary>
@@ -440,6 +470,7 @@ public sealed class FuelKeep : IDisposable
         if (Events.HasSubscribers<WaterRefilledEvent>()) Events.Post(new WaterRefilledEvent(this, changes));
     }
 
+    /// <summary>Stops the policy. Calling it again does nothing.</summary>
     public void Dispose()
     {
         var h = Interlocked.Exchange(ref _handle, 0);

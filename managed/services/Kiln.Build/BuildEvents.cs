@@ -6,11 +6,17 @@ public enum BuildEditKind
 {
     /// <summary>Exact cells (<see cref="Build.Write(CellBox, ReadOnlySpan{Voxel}, BuildOptions?, ReadOnlySpan{bool})"/>).</summary>
     Write = 1,
+    /// <summary>A <see cref="Build.Dig"/> shape edit.</summary>
     Dig,
+    /// <summary>A <see cref="Build.Add"/> shape edit.</summary>
     Add,
+    /// <summary>A <see cref="Build.Flatten"/> shape edit.</summary>
     Flatten,
+    /// <summary>A <see cref="Build.Smooth"/> shape edit.</summary>
     Smooth,
+    /// <summary>A <see cref="Build.Paint"/> shape edit.</summary>
     Paint,
+    /// <summary>A <see cref="Build.Replace"/> shape edit.</summary>
     Replace,
     /// <summary>A schematic paste (cells and props).</summary>
     Paste,
@@ -38,6 +44,7 @@ public sealed class BuildEditingEvent : CancelableEvent
         Label = label;
     }
 
+    /// <summary>What kind of edit is about to run.</summary>
     public BuildEditKind Kind { get; }
 
     /// <summary>The cells the edit may change (props: the cell of the prop's position).</summary>
@@ -49,6 +56,7 @@ public sealed class BuildEditingEvent : CancelableEvent
     /// <summary>The mod that asked for it.</summary>
     public string Origin { get; }
 
+    /// <summary>The label of the edit (<see cref="BuildOptions.Label"/>); null when it has none.</summary>
     public string? Label { get; }
 }
 
@@ -71,20 +79,35 @@ public sealed class BuildEditEvent : KilnEvent
         JournalId = journalId;
     }
 
+    /// <summary>What kind of edit it was.</summary>
     public BuildEditKind Kind { get; }
+
+    /// <summary>The cells the edit covered (props: the cell of the prop's position).</summary>
     public CellBox Box { get; }
+
+    /// <summary>The player the edit was for, or none (Kiln itself).</summary>
     public EntityId Actor { get; }
+
+    /// <summary>The mod that asked for it.</summary>
     public string Origin { get; }
+
+    /// <summary>The label of the edit (<see cref="BuildOptions.Label"/>); null when it has none.</summary>
     public string? Label { get; }
 
     /// <summary>The voxel part (null for prop-only edits).</summary>
     public BuildResult? Result { get; }
 
+    /// <summary>The props the edit placed. They are taken from the journal entry, so the list is empty when the edit was not
+    /// journaled (<see cref="BuildOptions.Journal"/> false).</summary>
     public IReadOnlyList<EntityId> PropsPlaced { get; }
+
+    /// <summary>The props the edit removed. Like <see cref="PropsPlaced"/> it is empty when the edit was not journaled. For
+    /// an undo it lists the props that edit had placed.</summary>
     public IReadOnlyList<EntityId> PropsRemoved { get; }
 
     /// <summary>The journal entry (0 = not journaled).</summary>
     public long JournalId { get; }
 
+    /// <summary>True when cells changed (<see cref="BuildResult.Changed"/>) or the edit placed or removed props.</summary>
     public bool Changed => (Result?.Changed ?? false) || PropsPlaced.Count > 0 || PropsRemoved.Count > 0;
 }

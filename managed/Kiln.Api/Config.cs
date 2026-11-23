@@ -37,7 +37,9 @@ public sealed class ConfigChangedEvent : KilnEvent
         Source = source;
     }
 
+    /// <summary>The config that changed.</summary>
     public ConfigFile Config { get; }
+    /// <summary>The id of the mod that registered the config ("kiln" for Kiln's own).</summary>
     public string ModId => Config.ModId;
 
     /// <summary>Key paths ("pvp.enabled") whose running value changed.</summary>
@@ -47,10 +49,13 @@ public sealed class ConfigChangedEvent : KilnEvent
     /// stays until the mod reloads.</summary>
     public IReadOnlyList<string> PendingRestart { get; }
 
+    /// <summary>What changed the config.</summary>
     public ConfigChangeSource Source { get; }
 
+    /// <summary>True when the key path (compared without regard to case) is in <see cref="Changed"/>.</summary>
     public bool Has(string path) => Changed.Contains(path, StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>The config id and the changed key paths, with the ones that wait for a restart, for logs.</summary>
     public override string ToString() =>
         $"{Config.Id}: {string.Join(", ", Changed)}{(PendingRestart.Count > 0 ? $" (after restart: {string.Join(", ", PendingRestart)})" : "")}";
 }
@@ -58,6 +63,19 @@ public sealed class ConfigChangedEvent : KilnEvent
 /// <summary>One entry of a config, as of now. <c>Path</c> is the dotted key path ("pvp.enabled"); <c>Type</c> is
 /// "bool", "int", "float", "string", "enum", "duration" or "list&lt;...&gt;"; <c>Value</c> is the running value and
 /// <c>FileValue</c> the value in the file (they differ while a restart is pending).</summary>
+/// <param name="Path">The dotted key path ("pvp.enabled").</param>
+/// <param name="Type">"bool", "int", "float", "string", "enum", "duration" or "list&lt;...&gt;".</param>
+/// <param name="Comment">The text of the entry's <see cref="CommentAttribute"/>; null when it has none.</param>
+/// <param name="Default">The default value.</param>
+/// <param name="Value">The running value.</param>
+/// <param name="FileValue">The value in the file; it differs from <paramref name="Value"/> while a restart is
+/// pending.</param>
+/// <param name="Min">The lowest allowed value of a number or duration (its <see cref="RangeAttribute"/>); null when
+/// there is none.</param>
+/// <param name="Max">The highest allowed value; null when there is none.</param>
+/// <param name="Options">The names an enum entry (or a list of enums) accepts; empty for any other entry.</param>
+/// <param name="RequiresRestart">The entry has <see cref="RequiresRestartAttribute"/>.</param>
+/// <param name="Synced">The entry is marked <see cref="SyncedAttribute"/> (or sits in a section that is).</param>
 public sealed record ConfigEntry(string Path, string Type, string? Comment, object? Default, object? Value, object? FileValue,
     double? Min, double? Max, IReadOnlyList<string> Options, bool RequiresRestart, bool Synced)
 {
@@ -65,6 +83,8 @@ public sealed record ConfigEntry(string Path, string Type, string? Comment, obje
     /// <see cref="ConfigFile.IsFromServer"/>). <c>FileValue</c> is then this game's own value, which comes back on leave.</summary>
     public bool FromServer { get; init; }
 
+    /// <summary>True when the file's value differs from the running one, so the change waits for a reload or restart.
+    /// Never true for a value that came from the server.</summary>
     public bool PendingRestart => !FromServer && !ConfigSchema.ValueEquals(Value, FileValue);
 }
 
@@ -120,6 +140,7 @@ public abstract class ConfigFile
     /// <summary>The mod that registered it ("kiln" for Kiln's own).</summary>
     public string ModId { get; }
 
+    /// <summary>The kind of config: where it applies and which file it is.</summary>
     public ConfigKind Kind { get; }
 
     /// <summary>The config class.</summary>
@@ -360,6 +381,7 @@ public abstract class ConfigFile
         };
     }
 
+    /// <summary><see cref="Schema"/> as JSON text, indented unless <paramref name="indented"/> is false.</summary>
     public string SchemaJson(bool indented = true) => Schema().ToJsonString(new JsonSerializerOptions { WriteIndented = indented });
 
     /// <summary>The offline schema snapshot (schema/config-schema.schema.json): <see cref="Schema"/> without values,
@@ -463,6 +485,7 @@ public abstract class ConfigFile
     /// <summary>The values marked <see cref="SyncedAttribute"/>, as JSON.</summary>
     public string SyncedValuesJson() => ValuesJson(syncedOnly: true);
 
+    /// <summary>The id, the kind and the file path, for logs.</summary>
     public override string ToString() => $"{Id} ({Kind}, {FilePath})";
 
     // ---------------------------------------------------------------------------------------- internals ----------

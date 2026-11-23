@@ -13,6 +13,7 @@ public sealed class HarnessWorldTables
     private readonly KilnHarness _h;
     internal HarnessWorldTables(KilnHarness h)=>_h=h;
     private PoolFakeState State=>KitFakes.State<PoolFakeState>(_h);
+    /// <summary>How many accepted pool and brush definitions are pending: <see cref="PendingToolDefinitionsJson"/> copies them.</summary>
     public int PendingCount {get{lock(State.Gate)return State.Pending.Count;}}
     /// <summary>Scripts a placeable terrain item's item-to-cell mapping. It does not add membership to the immutable
     /// vanilla TerrainMaterials pool, so a non-member is still refused. Since 0.2.0-dev.30.5.</summary>
@@ -27,7 +28,9 @@ public sealed class HarnessWorldTables
     /// <summary>A copy of a pending sphere descriptor's raw fill bytes (x fastest, then y, then z), sampled at half-metre
     /// voxel centres as in the boot compiler. Null: no accepted descriptor. Not a live game resource. Since 0.2.0-dev.30.5.</summary>
     public byte[]? TerrainBrushCells(string mod,string key){lock(State.Gate)return State.ToolBrushes.TryGetValue(mod+":"+key,out var shape)?(byte[])shape.Cells.Clone():null;}
+    /// <summary>When true, the fake refuses new pool and brush definitions with a storage failure, as if it could not persist them. Default false.</summary>
     public bool StorageFails {get{lock(State.Gate)return State.StorageFails;}set{lock(State.Gate)State.StorageFails=value;}}
+    /// <summary>The readiness the fake's boot tables report. Default <see cref="CapacityReadiness.Ready"/>; any other value refuses new definitions as not ready and shows in the capacity queries.</summary>
     public CapacityReadiness Readiness {get{lock(State.Gate)return State.Readiness;}set{lock(State.Gate)State.Readiness=value;}}
     /// <summary>Configures one actual served boot row. Validation and entry counts match pool admission; this never claims UI ingestion.</summary>
     public void ServePool(string mod,string key,BuildingMaterialPoolBlock block)=>_h.Run(()=>{
@@ -38,7 +41,15 @@ public sealed class HarnessWorldTables
     });
     /// <summary>Configures a live or retained building/terrain material and its block item. A pool cannot use terrain, retained materials or item 0.</summary>
     public void Material(string mod,string key,uint item,bool roof=false,bool live=true,bool terrain=false){lock(State.Gate)State.Materials[mod+":"+key]=new(item,roof,live,terrain);}
+    /// <summary>Scripts a game (vanilla) material that a pool entry may name as its <c>gameMaterial</c>. The fake knows <c>WoodRough</c>, <c>StoneRough</c> and <c>RoofPlantFibre</c> already.</summary>
+    /// <param name="name">The game's name for the material.</param>
+    /// <param name="item">The item id of its block item.</param>
+    /// <param name="roof">True for a roof material.</param>
+    /// <param name="terrain">True for a terrain material.</param>
     public void GameMaterial(string name,uint item,bool roof=false,bool terrain=false){lock(State.Gate)State.Game[name]=new(item,roof,true,terrain);}
+    /// <summary>Declares that <paramref name="mod"/> depends on <paramref name="dependency"/>, as if its manifest listed it. A mod may use another mod's material only when it depends on that mod.</summary>
+    /// <param name="mod">The mod that depends on another.</param>
+    /// <param name="dependency">The id of the mod it depends on.</param>
     public void Dependency(string mod,string dependency){lock(State.Gate){if(!State.Dependencies.TryGetValue(mod,out var deps))State.Dependencies[mod]=deps=[];deps.Add(dependency);}}
     /// <summary>Models an occupied foreign pool ID so collision refusal can be tested without searching for an FNV collision.</summary>
     public void ReservePoolId(uint id){lock(State.Gate)State.OriginalIds.Add(id);}

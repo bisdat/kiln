@@ -96,9 +96,12 @@ public record ScreenEffect
 }
 
 /// <summary>A colour and how much of it: <c>"#ff4030"</c> is all of it.</summary>
+/// <param name="Color">The colour as <c>#rrggbb</c>.</param>
+/// <param name="Amount">How much of it, 0 to 1. Default 1.</param>
 [JsonConverter(typeof(ScreenColorConverter))]
 public sealed record ScreenColor(string Color, float Amount = 1)
 {
+    /// <summary>A colour in <c>#rrggbb</c> form, all of it (<see cref="Amount"/> 1).</summary>
     public static implicit operator ScreenColor(string color) => new(color);
 
     /// <summary><c>#rrggbb</c> as sRGB values from 0 to 1.</summary>
@@ -124,6 +127,7 @@ public sealed record ScreenVignette
     /// <summary>How far past <see cref="Radius"/> it takes to reach full, 0.001 to 2. Default 0.5.</summary>
     public float? Softness { get; init; }
 
+    /// <summary>The short form: a vignette of this <see cref="Amount"/>, in black.</summary>
     public static implicit operator ScreenVignette(float amount) => new() { Amount = amount };
 }
 

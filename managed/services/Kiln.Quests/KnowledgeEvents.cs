@@ -26,26 +26,37 @@ public sealed class KnowledgeChangedEvent : KilnEvent
 
     /// <summary>0 = the world map, else the player whose map changed.</summary>
     public EntityId Target { get; }
+    /// <summary>True when the world's map changed.</summary>
     public bool IsWorld => Target.IsNone;
     /// <summary>The player (null for the world, or if they left in the meantime).</summary>
     public Player? Player => Target.IsNone || !Players.Available ? null : Players.Find(Target);
+    /// <summary>The knowledge id that changed.</summary>
     public uint Id { get; }
     /// <summary>The catalog name ("npc:….unlock", "quest:0x…"), or null.</summary>
     public string? Name => Knowledge.NameOf(Id);
+    /// <summary>The value before the change.</summary>
     public uint OldValue { get; }
+    /// <summary>The value after the change.</summary>
     public uint NewValue { get; }
+    /// <summary>The knowledge object's type.</summary>
     public KnowledgeType Type { get; }
     /// <summary>The Kiln request that caused it (<see cref="KnowledgeResult.Request"/>), 0 = the game.</summary>
     public ulong Request { get; }
+    /// <summary>True when a Kiln request caused the change (<see cref="Request"/> is not 0).</summary>
     public bool ByKiln => Request != 0;
+    /// <summary>True when the value went from 0 to a non-zero value.</summary>
     public bool Gained => OldValue == 0 && NewValue != 0;
+    /// <summary>True when the value went from non-zero to 0 (a revoke).</summary>
     public bool Lost => OldValue != 0 && NewValue == 0;
+    /// <summary>The server-world step in which the game applied the change.</summary>
     public ulong Step { get; }
 
+    /// <summary>Which map changed, the id (and its name), the values, and the Kiln request if there was one.</summary>
     public override string ToString() =>
         $"{(IsWorld ? "world" : $"player {Target}")} 0x{Id:x8}{(Name is { } n ? $" ({n})" : "")}: {OldValue} -> {NewValue}{(ByKiln ? $" (Kiln request {Request})" : "")}";
 }
 
+/// <summary>What a player did with a dialogue line.</summary>
 public enum DialogueAction : byte
 {
     /// <summary>The player picked a line (or the dialogue opened: the client sends its greeting line).</summary>
@@ -72,22 +83,37 @@ public sealed class DialogueLineEvent : KilnEvent
         Step = step;
     }
 
+    /// <summary>The player's entity.</summary>
     public EntityId PlayerEntity { get; }
+    /// <summary>The player; null when they left in the meantime.</summary>
     public Player? Player => Players.Available ? Players.Find(PlayerEntity) : null;
     /// <summary>The NPC's entity.</summary>
     public EntityId Npc { get; }
+    /// <summary>The line's dialogue option id (also its "heard" knowledge id); 0 for a farewell, 1 for an option whose
+    /// requirement the client found missing.</summary>
     public uint LineId { get; }
+    /// <summary>Whether the player picked the line or stopped it.</summary>
     public DialogueAction Action { get; }
+    /// <summary>True when <see cref="LineId"/> is 0: a farewell (the server picks a random farewell line).</summary>
     public bool IsFarewell => LineId == 0;
+    /// <summary>True when <see cref="LineId"/> is 1: the client found the option's requirement missing, and the NPC plays
+    /// its refusal.</summary>
     public bool IsMissingRequirement => LineId == 1;
+    /// <summary>The server-world step of the choice.</summary>
     public ulong Step { get; }
 
+    /// <summary>The player, the action, the line and the NPC.</summary>
     public override string ToString() => $"player {PlayerEntity} {Action} line 0x{LineId:x8} of NPC {Npc}";
 }
 
 /// <summary>One knowledge operation (the game's KnowledgeUnlockOperation) and the player it is for.</summary>
+/// <param name="Id">The knowledge id.</param>
+/// <param name="Type">The knowledge object's type.</param>
+/// <param name="Value">The operation's value, as the game stores it; what it means follows <paramref name="Type"/>.</param>
+/// <param name="Player">The player entity the operation is for.</param>
 public readonly record struct KnowledgeOperation(uint Id, KnowledgeType Type, uint Value, EntityId Player)
 {
+    /// <summary>The id, the type and the value.</summary>
     public override string ToString() => $"0x{Id:x8} {Type} {Value}";
 }
 
@@ -118,9 +144,13 @@ public sealed class DialogueKnowledgeEvent : CancelableResultEvent
     }
 
     internal ulong Held { get; }
+    /// <summary>The player's entity.</summary>
     public EntityId PlayerEntity { get; }
+    /// <summary>The player; null when they left in the meantime.</summary>
     public Player? Player => Players.Available ? Players.Find(PlayerEntity) : null;
+    /// <summary>The NPC's entity.</summary>
     public EntityId Npc { get; }
+    /// <summary>The dialogue line's option id.</summary>
     public uint LineId { get; }
     /// <summary>What would run: the line's operations, then {line id, Bool, 1} ("heard").</summary>
     public IReadOnlyList<KnowledgeOperation> Operations { get; }
@@ -134,9 +164,13 @@ public sealed class DialogueKnowledgeEvent : CancelableResultEvent
     public double? Distance { get; }
     /// <summary>The server setting checkDialogue is on.</summary>
     public bool ChecksOn { get; }
+    /// <summary>True when the knowledge runs if no handler decides: false when the <c>checkDialogue</c> setting is on and
+    /// the line's requirement failed or the player is too far.</summary>
     public bool DefaultApplies => !(ChecksOn && (RequirementFailed || TooFar));
+    /// <summary>The server-world step of the choice.</summary>
     public ulong Step { get; }
 
+    /// <summary>The player, the line, the NPC, the operations and which checks failed.</summary>
     public override string ToString() =>
         $"player {PlayerEntity} line 0x{LineId:x8} of NPC {Npc}: {Operations.Count} op(s){(RequirementFailed ? ", requirement failed" : "")}{(TooFar ? $", too far ({Distance:0.0} m)" : "")}";
 }
@@ -164,14 +198,22 @@ public sealed class KnowledgeRequestEvent : CancelableResultEvent
     internal ulong HeldId { get; }
     /// <summary>The veto holds it: the decision of the handlers counts.</summary>
     public bool Held => HeldId != 0;
+    /// <summary>The entity of the player whose client sent the request.</summary>
     public EntityId PlayerEntity { get; }
+    /// <summary>The player; null when they left in the meantime.</summary>
     public Player? Player => Players.Available ? Players.Find(PlayerEntity) : null;
+    /// <summary>The knowledge id the client asked for.</summary>
     public uint Id { get; }
+    /// <summary>The catalog name of the id (<c>npc:…</c>, <c>quest:0x…</c>), or null.</summary>
     public string? Name => Knowledge.NameOf(Id);
+    /// <summary>The type of the object the client asked for.</summary>
     public KnowledgeType Type { get; }
+    /// <summary>The value the client sent.</summary>
     public uint Value { get; }
+    /// <summary>The server-world step of the request.</summary>
     public ulong Step { get; }
 
+    /// <summary>The player, the id, the type and the value, and whether the veto holds it.</summary>
     public override string ToString() => $"player {PlayerEntity} asks for 0x{Id:x8} {Type} {Value}{(Held ? " (held by the veto)" : "")}";
 }
 

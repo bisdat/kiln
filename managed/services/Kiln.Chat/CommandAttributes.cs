@@ -27,6 +27,7 @@ public sealed class CommandAttribute(string path) : Attribute
     /// <summary>"name" or "name sub ...".</summary>
     public string Path { get; } = path;
 
+    /// <summary>One line of help for the command.</summary>
     public string? Description { get; init; }
 
     /// <summary>Who may run it by default.</summary>
@@ -55,6 +56,7 @@ public sealed class TimeOfDayAttribute : Attribute;
 [AttributeUsage(AttributeTargets.Parameter)]
 public sealed class ChoiceAttribute(params string[] options) : Attribute
 {
+    /// <summary>The values the parameter may take.</summary>
     public string[] Options { get; } = options;
 }
 

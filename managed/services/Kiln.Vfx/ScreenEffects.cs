@@ -6,10 +6,14 @@ using System.Text;
 namespace Kiln;
 
 /// <summary>A playing screen effect: from <see cref="ScreenEffects"/>, for <see cref="ScreenEffects.Stop"/>.</summary>
+/// <param name="Value">The handle's number; 0 is <see cref="None"/>. The top bit marks a relayed handle (from server code).</param>
 public readonly record struct ScreenHandle(uint Value)
 {
+    /// <summary>No effect: the default value, what a play that did not start returns.</summary>
     public static readonly ScreenHandle None = default;
+    /// <summary>True for <see cref="None"/>.</summary>
     public bool IsNone => Value == 0;
+    /// <summary><c>none</c>, <c>#n</c>, or <c>relayed #n</c> for a handle from server code.</summary>
     public override string ToString() => IsNone ? "none" : (Value & ScreenRelay.RemoteBit) != 0 ? $"relayed #{Value & ~ScreenRelay.RemoteBit}" : $"#{Value}";
 }
 
@@ -18,9 +22,20 @@ public readonly record struct ScreenHandle(uint Value)
 /// <param name="Native">kiln.screen is in this process (a client).</param>
 /// <param name="Enabled">It is not switched off, by kiln/config/screen.json or by a failure.</param>
 /// <param name="Ready">The pass is built for the current swapchain: the next frame with an effect draws it.</param>
+/// <param name="Playing">How many effects are playing.</param>
 /// <param name="Transfer">How the swapchain's values are read: "linear", "sRGB" or "PQ".</param>
+/// <param name="Width">Width in pixels of the last swapchain drawn to.</param>
+/// <param name="Height">Height in pixels of the last swapchain drawn to.</param>
+/// <param name="Format">The Vulkan format (<c>VkFormat</c>) of the last swapchain drawn to.</param>
+/// <param name="Plays">Plays since start.</param>
+/// <param name="Refused">Plays refused: kiln.screen was off, or the most it can play at once were already playing.</param>
+/// <param name="Frames">Presented frames the pass drew into.</param>
 /// <param name="Skipped">Frames left alone because the GPU was still using that image.</param>
+/// <param name="PipelineMs">How long the pipeline took to build, in milliseconds.</param>
 /// <param name="Reason">Why it is off, "" when it isn't.</param>
+/// <param name="Relay">The relay channel <c>kiln:screen</c> is open.</param>
+/// <param name="Sent">Relay messages this process has sent.</param>
+/// <param name="Received">Relay messages this process has received.</param>
 public sealed record ScreenStatus(bool Available, bool Native, bool Enabled, bool Ready, int Playing, string Transfer, int Width, int Height, uint Format,
     long Plays, long Refused, long Frames, long Skipped, double PipelineMs, string Reason, bool Relay, long Sent, long Received);
 
@@ -121,6 +136,7 @@ public static unsafe class ScreenEffects
         return t != null && t->IsPlaying(h.Value) == 1;
     }
 
+    /// <summary>What kiln.screen and the relay are doing. On a dedicated server <see cref="ScreenStatus.Native"/> is false.</summary>
     [AnyThread]
     public static ScreenStatus Status()
     {

@@ -12,6 +12,9 @@ public static unsafe class Memory
         => TryRead<T>(address, out var v) ? v
             : throw new InvalidOperationException($"Memory.Read<{typeof(T).Name}> at 0x{address:X} faulted");
 
+    /// <summary>Reads <typeparamref name="T"/> from <paramref name="address"/> like <see cref="Read{T}"/> but returns
+    /// false instead of throwing when the memory is unreadable. Still throws when the calling mod is not
+    /// advanced.</summary>
     public static bool TryRead<T>(nuint address, out T value) where T : unmanaged
     {
         HooksGate.RequireAdvanced("Memory.Read");

@@ -7,15 +7,71 @@ using System.Text.Json.Serialization;
 namespace Kiln;
 
 /// <summary>Which vanity slot it goes in. It shows instead of the armour in that slot, and gives none of its stats.</summary>
-public enum CosmeticSlot { Head, UpperBody, Arms, LowerBody, Feet }
+public enum CosmeticSlot
+{
+    /// <summary>The head, where a helmet goes.</summary>
+    Head,
+    /// <summary>The upper body, where a chest piece goes.</summary>
+    UpperBody,
+    /// <summary>The arms, where gloves go.</summary>
+    Arms,
+    /// <summary>The lower body, where leg pieces go.</summary>
+    LowerBody,
+    /// <summary>The feet, where boots go.</summary>
+    Feet,
+}
 
 /// <summary>A body part or a worn piece a look hides while it is worn. Hidden, it is not drawn; hair and beards also have cuts for a hat or a hood: <see cref="Fit"/>.</summary>
 public enum BodyPart
 {
-    Head, Hair, EyeBrow, Beard, Neck, Collar, Chest, Waist, Crotch, UpperArms, LowerArms, Hands, UpperLegs, LowerLegs, Feet,
+    /// <summary>The head.</summary>
+    Head,
+    /// <summary>The hair.</summary>
+    Hair,
+    /// <summary>The eyebrows.</summary>
+    EyeBrow,
+    /// <summary>The beard.</summary>
+    Beard,
+    /// <summary>The neck.</summary>
+    Neck,
+    /// <summary>The collar.</summary>
+    Collar,
+    /// <summary>The chest.</summary>
+    Chest,
+    /// <summary>The waist.</summary>
+    Waist,
+    /// <summary>The crotch.</summary>
+    Crotch,
+    /// <summary>The upper arms.</summary>
+    UpperArms,
+    /// <summary>The lower arms.</summary>
+    LowerArms,
+    /// <summary>The hands.</summary>
+    Hands,
+    /// <summary>The upper legs.</summary>
+    UpperLegs,
+    /// <summary>The lower legs.</summary>
+    LowerLegs,
+    /// <summary>The feet.</summary>
+    Feet,
     /// <summary>The armour or cosmetic in a slot: a long coat can hide what is on the legs.</summary>
-    ArmorHead, ArmorUpperBody, ArmorArms, ArmorLowerBody, ArmorFeet,
-    RingLeft, RingRight, Shield, MainHand,
+    ArmorHead,
+    /// <summary>The armour or cosmetic in the upper body slot.</summary>
+    ArmorUpperBody,
+    /// <summary>The armour or cosmetic in the arms slot.</summary>
+    ArmorArms,
+    /// <summary>The armour or cosmetic in the lower body slot.</summary>
+    ArmorLowerBody,
+    /// <summary>The armour or cosmetic in the feet slot.</summary>
+    ArmorFeet,
+    /// <summary>The left ring.</summary>
+    RingLeft,
+    /// <summary>The right ring.</summary>
+    RingRight,
+    /// <summary>The shield.</summary>
+    Shield,
+    /// <summary>What is held in the main hand.</summary>
+    MainHand,
 }
 
 /// <summary>A fit: the flags the game raises for what a character wears and is. A look's <see cref="WornLook.Fits"/> are the flags it raises, so that the character's other parts change
@@ -24,6 +80,7 @@ public enum BodyPart
 [JsonConverter(typeof(FitConverter))]
 public enum Fit : uint
 {
+    /// <summary>No flags.</summary>
     None = 0,
     /// <summary>A female character. Every piece follows it.</summary>
     Female = 1u << 0,
@@ -33,20 +90,35 @@ public enum Fit : uint
     Hood = 1u << 2,
     /// <summary>The face's jaw shape, one of sixteen, raised by the character's head: a beard follows it with a morph target or a variant of that name.</summary>
     Jaw01 = 1u << 3,
+    /// <summary>The face's jaw shape 2 of sixteen, raised by the character's head, as <see cref="Jaw01"/>.</summary>
     Jaw02 = 1u << 4,
+    /// <summary>The face's jaw shape 3 of sixteen, raised by the character's head, as <see cref="Jaw01"/>.</summary>
     Jaw03 = 1u << 5,
+    /// <summary>The face's jaw shape 4 of sixteen, raised by the character's head, as <see cref="Jaw01"/>.</summary>
     Jaw04 = 1u << 6,
+    /// <summary>The face's jaw shape 5 of sixteen, raised by the character's head, as <see cref="Jaw01"/>.</summary>
     Jaw05 = 1u << 7,
+    /// <summary>The face's jaw shape 6 of sixteen, raised by the character's head, as <see cref="Jaw01"/>.</summary>
     Jaw06 = 1u << 8,
+    /// <summary>The face's jaw shape 7 of sixteen, raised by the character's head, as <see cref="Jaw01"/>.</summary>
     Jaw07 = 1u << 9,
+    /// <summary>The face's jaw shape 8 of sixteen, raised by the character's head, as <see cref="Jaw01"/>.</summary>
     Jaw08 = 1u << 10,
+    /// <summary>The face's jaw shape 9 of sixteen, raised by the character's head, as <see cref="Jaw01"/>.</summary>
     Jaw09 = 1u << 11,
+    /// <summary>The face's jaw shape 10 of sixteen, raised by the character's head, as <see cref="Jaw01"/>.</summary>
     Jaw10 = 1u << 12,
+    /// <summary>The face's jaw shape 11 of sixteen, raised by the character's head, as <see cref="Jaw01"/>.</summary>
     Jaw11 = 1u << 13,
+    /// <summary>The face's jaw shape 12 of sixteen, raised by the character's head, as <see cref="Jaw01"/>.</summary>
     Jaw12 = 1u << 14,
+    /// <summary>The face's jaw shape 13 of sixteen, raised by the character's head, as <see cref="Jaw01"/>.</summary>
     Jaw13 = 1u << 15,
+    /// <summary>The face's jaw shape 14 of sixteen, raised by the character's head, as <see cref="Jaw01"/>.</summary>
     Jaw14 = 1u << 16,
+    /// <summary>The face's jaw shape 15 of sixteen, raised by the character's head, as <see cref="Jaw01"/>.</summary>
     Jaw15 = 1u << 17,
+    /// <summary>The face's jaw shape 16 of sixteen, raised by the character's head, as <see cref="Jaw01"/>.</summary>
     Jaw16 = 1u << 18,
     /// <summary>Raised by an upper body piece that leaves the hips free: the legs change to suit it.</summary>
     NoArmor = 1u << 19,
@@ -67,8 +139,26 @@ public enum Fit : uint
 /// <summary>Where a rigid look sits: the game's slots on the player's skeleton, or <c>j&lt;index&gt;</c> for any joint. The model's origin is the joint and its axes are the character's: y up, facing +z.</summary>
 public static class WornAttach
 {
-    public const string Head = "Head", Chest = "Chest", Pelvis = "Pelvis", FootLeft = "FootL", FootRight = "FootR", HandLeft = "HandPalmL", HandRight = "HandPalmR",
-        KneeLeft = "KneeL", KneeRight = "KneeR", ArmLeft = "ArmL";
+    /// <summary>The head.</summary>
+    public const string Head = "Head";
+    /// <summary>The chest.</summary>
+    public const string Chest = "Chest";
+    /// <summary>The pelvis.</summary>
+    public const string Pelvis = "Pelvis";
+    /// <summary>The left foot.</summary>
+    public const string FootLeft = "FootL";
+    /// <summary>The right foot.</summary>
+    public const string FootRight = "FootR";
+    /// <summary>The palm of the left hand.</summary>
+    public const string HandLeft = "HandPalmL";
+    /// <summary>The palm of the right hand.</summary>
+    public const string HandRight = "HandPalmR";
+    /// <summary>The left knee.</summary>
+    public const string KneeLeft = "KneeL";
+    /// <summary>The right knee.</summary>
+    public const string KneeRight = "KneeR";
+    /// <summary>The left arm.</summary>
+    public const string ArmLeft = "ArmL";
 }
 
 /// <summary>What something looks like on the body: a model of your own or a game item's, what it hides and how the rest of the character fits around it. A part: inline, from
@@ -124,30 +214,43 @@ public sealed record WornLook : IBlock
 public sealed class ArmorLook
 {
     internal ArmorLook(PartRef<VisualBlock>? visual, PartRef<WornLook>? worn, string? name) { Visual = visual; Worn = worn; Name = name; }
+    /// <summary>The visual block (a game item's look), when the look was made from one. Null otherwise.</summary>
     public PartRef<VisualBlock>? Visual { get; }
+    /// <summary>The worn look, when the look was made from one. Null otherwise.</summary>
     public PartRef<WornLook>? Worn { get; }
     /// <summary>A block's name, of either kind: which one is found when the set is used.</summary>
     public string? Name { get; }
+    /// <summary>A visual block written in place.</summary>
     public static implicit operator ArmorLook(VisualBlock block) => new(block, null, null);
+    /// <summary>A worn look written in place.</summary>
     public static implicit operator ArmorLook(WornLook block) => new(null, block, null);
+    /// <summary>The visual block that <see cref="Blocks.Define{T}"/> returned.</summary>
     public static implicit operator ArmorLook(BlockHandle<VisualBlock> handle) => new(handle, null, null);
+    /// <summary>The worn look that <see cref="Blocks.Define{T}"/> returned.</summary>
     public static implicit operator ArmorLook(BlockHandle<WornLook> handle) => new(null, handle, null);
+    /// <summary>A look by block name, of either kind.</summary>
     public static implicit operator ArmorLook(string name) => new(null, null, name);
 }
 
 /// <summary>A piece for a vanity slot: it shows over what the player wears there, with no stats of its own and none taken away. Made exactly as its recipe says.</summary>
 public sealed record CosmeticBlock : IBlock, ITweakable
 {
+    /// <summary>The piece's name, as players read it in its tooltip. Required.</summary>
     public required string Name { get; init; }
+    /// <summary>The piece's description in its tooltip. Null: none.</summary>
     public string? Description { get; init; }
+    /// <summary>The vanity slot it goes in. Required.</summary>
     [JsonConverter(typeof(NamedEnumConverter<CosmeticSlot>))]
     public required CosmeticSlot Slot { get; init; }
+    /// <summary>What it looks like on the body. Required.</summary>
     public required PartRef<WornLook> Look { get; init; }
 
     /// <summary>Takes the game's dyes. They change what a material has a tint mask for: a game material does, a material block not yet.</summary>
     public bool Dyes { get; init; }
 
+    /// <summary>How it is crafted. Null: no recipe.</summary>
     public RecipeBlock? Recipe { get; init; }
+    /// <summary>Where else it can be found. Null: nowhere.</summary>
     public LootBlock? Loot { get; init; }
     /// <inheritdoc cref="WeaponBlock.Was"/>
     public string? Was { get; init; }

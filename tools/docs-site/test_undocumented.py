@@ -91,5 +91,65 @@ class InheritDoc(unittest.TestCase):
             self.assertEqual(undocumented.undocumented(api, xml), ["Kiln.Guid.ToString"])
 
 
+class CompilerMembers(unittest.TestCase):
+    """What the compiler writes is not a gap; a positional record's property is."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.api = Path(tmp.name)
+
+    def test_a_delegates_constructor_and_invoke_methods_are_the_compilers(self):
+        (self.api / "Kiln.Handler.yml").write_text(page(
+            item("Kiln.Handler", "Delegate", "Kiln", "A handler."),
+            item("Kiln.Handler.#ctor(System.Object,System.IntPtr)", "Constructor", "Kiln.Handler"),
+            item("Kiln.Handler.Invoke(Kiln.Thing)", "Method", "Kiln.Handler"),
+            item("Kiln.Handler.BeginInvoke(Kiln.Thing,System.AsyncCallback,System.Object)", "Method", "Kiln.Handler"),
+            item("Kiln.Handler.EndInvoke(System.IAsyncResult)", "Method", "Kiln.Handler"),
+            item("Kiln.Gen`1", "Delegate", "Kiln", "A generic handler."),
+            item("Kiln.Gen`1.Invoke(`0@)", "Method", "Kiln.Gen`1"),
+            item("Kiln.Gen`1.#ctor(System.Object,System.IntPtr)", "Constructor", "Kiln.Gen`1")), encoding="utf-8")
+        self.assertEqual(undocumented.undocumented(self.api), [])
+
+    def test_a_delegate_without_a_summary_and_a_class_with_an_invoke_method_are_listed(self):
+        (self.api / "Kiln.Handler.yml").write_text(page(
+            item("Kiln.Handler", "Delegate", "Kiln"),
+            item("Kiln.Handler.Invoke(Kiln.Thing)", "Method", "Kiln.Handler")), encoding="utf-8")
+        (self.api / "Kiln.Caller.yml").write_text(page(
+            item("Kiln.Caller", "Class", "Kiln", "A class."),
+            item("Kiln.Caller.Invoke(Kiln.Thing)", "Method", "Kiln.Caller"),
+            item("Kiln.Caller.BeginInvoke(Kiln.Thing)", "Method", "Kiln.Caller")), encoding="utf-8")
+        self.assertEqual(undocumented.undocumented(self.api),
+                         ["Kiln.Caller.BeginInvoke(Kiln.Thing)", "Kiln.Caller.Invoke(Kiln.Thing)", "Kiln.Handler"])
+
+    def test_a_generic_record_structs_members_are_the_compilers_but_its_property_is_not(self):
+        (self.api / "Kiln.Box-1.yml").write_text(page(
+            item("Kiln.Box`1", "Struct", "Kiln", "A box."),
+            item("Kiln.Box`1.Equals(Kiln.Box{`0})", "Method", "Kiln.Box`1"),
+            item("Kiln.Box`1.Equals(System.Object)", "Method", "Kiln.Box`1"),
+            item("Kiln.Box`1.GetHashCode", "Method", "Kiln.Box`1"),
+            item("Kiln.Box`1.ToString", "Method", "Kiln.Box`1"),
+            item("Kiln.Box`1.op_Equality(Kiln.Box{`0},Kiln.Box{`0})", "Operator", "Kiln.Box`1"),
+            item("Kiln.Box`1.op_Inequality(Kiln.Box{`0},Kiln.Box{`0})", "Operator", "Kiln.Box`1"),
+            item("Kiln.Box`1.Deconstruct(System.String@)", "Method", "Kiln.Box`1"),
+            item("Kiln.Box`1.Name", "Property", "Kiln.Box`1"),
+            item("Kiln.Box`1.Size", "Property", "Kiln.Box`1", "How big.")), encoding="utf-8")
+        self.assertEqual(undocumented.undocumented(self.api), ["Kiln.Box`1.Name"])
+
+    def test_a_positional_records_property_counts(self):
+        # `record Pair(int Left, int Right)` with a <param> for Left only: the compiler writes no summary for Right, and
+        # CS1591 stays silent; the list has it
+        (self.api / "Kiln.Pair.yml").write_text(page(
+            item("Kiln.Pair", "Struct", "Kiln", "Two numbers."),
+            item("Kiln.Pair.Equals(Kiln.Pair)", "Method", "Kiln.Pair"),
+            item("Kiln.Pair.Equals(System.Object)", "Method", "Kiln.Pair"),
+            item("Kiln.Pair.GetHashCode", "Method", "Kiln.Pair"),
+            item("Kiln.Pair.op_Equality(Kiln.Pair,Kiln.Pair)", "Operator", "Kiln.Pair"),
+            item("Kiln.Pair.op_Inequality(Kiln.Pair,Kiln.Pair)", "Operator", "Kiln.Pair"),
+            item("Kiln.Pair.Left", "Property", "Kiln.Pair", "The left one."),
+            item("Kiln.Pair.Right", "Property", "Kiln.Pair")), encoding="utf-8")
+        self.assertEqual(undocumented.undocumented(self.api), ["Kiln.Pair.Right"])
+
+
 if __name__ == "__main__":
     unittest.main()

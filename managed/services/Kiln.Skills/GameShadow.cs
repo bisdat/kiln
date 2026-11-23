@@ -20,10 +20,13 @@ public sealed class GameShadowState
 {
     /// <summary>"0x&lt;node id&gt;" -> level.</summary>
     public Dictionary<string, int> Levels { get; set; } = new(StringComparer.Ordinal);
+    /// <summary>Plus 1 for every change to <see cref="Levels"/>.</summary>
     public long Revision { get; set; }
 }
 
 /// <summary>Server to client: the local player's shadow levels.</summary>
+/// <param name="Levels">The player's shadow levels: <c>"0x&lt;node id&gt;"</c> to level.</param>
+/// <param name="Revision">Reserved: the server sends 0 and the client does not read it.</param>
 public sealed record GameShadowMessage(Dictionary<string, int> Levels, long Revision);
 
 internal static unsafe class GameShadow

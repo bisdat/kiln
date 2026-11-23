@@ -6,6 +6,8 @@
 namespace Kiln;
 
 /// <summary>The answer to a conversation request.</summary>
+/// <param name="Ok">True when the request was accepted; false when it was refused.</param>
+/// <param name="Reason">Why it was refused; empty when <paramref name="Ok"/>.</param>
 public sealed record ConversationResult(bool Ok, string Reason) : IKilnResult
 {
     // IKilnResult's reason is null when the action happened; this record's own Reason keeps its text ("" then).
@@ -13,10 +15,18 @@ public sealed record ConversationResult(bool Ok, string Reason) : IKilnResult
 
     internal static readonly ConversationResult Yes = new(true, "");
     internal static ConversationResult No(string why) => new(false, why);
+    /// <summary>"ok", or "refused:" and the reason.</summary>
     public override string ToString() => Ok ? "ok" : $"refused: {Reason}";
 }
 
 /// <summary>What a holder is being shown (tick thread; for tools and tests).</summary>
+/// <param name="Id">The conversation's id (unique for each opened conversation).</param>
+/// <param name="Dialogue">The dialogue's full id.</param>
+/// <param name="Node">The id of the node being shown.</param>
+/// <param name="Speaker">The speaker's name for this node: the node's own, else the NPC's. Null when neither is set.</param>
+/// <param name="Text">What the NPC says at this node.</param>
+/// <param name="Options">The options shown: each one's index in the node's option list and its text.</param>
+/// <param name="Npc">The NPC entity being talked to.</param>
 public sealed record ConversationView(long Id, string Dialogue, string Node, UiText? Speaker, UiText Text, IReadOnlyList<(int Index, UiText Text)> Options, EntityId Npc);
 
 /// <summary>Dialogue graphs: lines in the game's own NPC menu, or chat conversations for mods vanilla clients join.</summary>
@@ -80,6 +90,7 @@ public static class Dialogues
         foreach (var session in Sessions.Values.Where(s => ownsId ? s.Def.FullId == definition.FullId : ReferenceEquals(s.Def, definition)).ToArray()) CloseFor(session.Holder, true);
     }
 
+    /// <summary>Every dialogue defined now.</summary>
     public static IReadOnlyList<DialogueDefinition> Definitions
     {
         get

@@ -15,6 +15,7 @@ public enum NetDirection
     /// <summary>Server to client (handled on the client's main thread).</summary>
     ToClient = 2,
 
+    /// <summary>Both ways: the message is handled on whichever side receives it.</summary>
     Both = ToServer | ToClient,
 }
 
@@ -38,6 +39,9 @@ public enum NetPeerState
 }
 
 /// <summary>A mod as the other side reported it in the handshake.</summary>
+/// <param name="Id">The mod's id.</param>
+/// <param name="Version">The mod's version string.</param>
+/// <param name="Side">Where the mod runs (<see cref="ModSide"/>). A side the handshake sends that is not known reads as <see cref="ModSide.Server"/>.</param>
 public sealed record NetRemoteMod(string Id, string Version, ModSide Side);
 
 /// <summary>A message body type with its own codec (Forge: a message class with encode/decode).</summary>
@@ -50,12 +54,26 @@ public sealed record NetRemoteMod(string Id, string Version, ModSide Side);
 /// </code></example>
 public interface INetMessage<TSelf> where TSelf : INetMessage<TSelf>
 {
+    /// <summary>Writes this message's body.</summary>
+    /// <param name="w">The writer to write to.</param>
     void Encode(NetWriter w);
+    /// <summary>Reads a message body and builds the message from it.</summary>
+    /// <param name="r">The reader positioned at the start of the body.</param>
+    /// <returns>The decoded message.</returns>
+    /// <exception cref="NetFormatException">The body is truncated or has a bad value.</exception>
     static abstract TSelf Decode(ref NetReader r);
 }
 
+/// <summary>Reads a message of type <typeparamref name="T"/> from a message body.</summary>
+/// <typeparam name="T">The message type.</typeparam>
+/// <param name="reader">The reader positioned at the start of the body.</param>
+/// <returns>The decoded message.</returns>
 public delegate T NetDecoder<T>(ref NetReader reader);
 
+/// <summary>Handles a message whose id has no registered type, with its body as raw bytes (see <see cref="NetChannel.OnRaw"/>).</summary>
+/// <param name="context">Who sent the message and how to answer.</param>
+/// <param name="messageId">The message id the sender used.</param>
+/// <param name="body">The message body. The span is only valid during the call; copy what you need to keep.</param>
 public delegate void NetRawHandler(NetContext context, ushort messageId, ReadOnlySpan<byte> body);
 
 /// <summary>A connection: on the server, one client; on a client, the server (<see cref="IsServer"/>).</summary>
@@ -72,6 +90,7 @@ public sealed class NetPeer
     /// <summary>A lab test peer (tools/nettest).</summary>
     public bool IsLab => !IsServer && (Id & NetNative.PeerLab) != 0;
 
+    /// <summary>Where this peer stands: connecting, ready (handshake done), vanilla, rejected or closed.</summary>
     public NetPeerState State { get; internal set; }
 
     /// <summary>The player's platform name (server side; "server" on a client).</summary>
@@ -98,8 +117,14 @@ public sealed class NetPeer
     /// <summary>Last measured round trip (Kiln ping), null before the first.</summary>
     public TimeSpan? RoundTrip { get; internal set; }
 
+    /// <summary>When Kiln.Network first saw this connection (UTC).</summary>
     public DateTime ConnectedAt { get; } = DateTime.UtcNow;
 
+    /// <summary>Traffic counters for this peer. <c>MessagesIn</c> and <c>BytesIn</c> count whole messages received from it
+    /// (after reassembly; the bytes are message body bytes). <c>MessagesOut</c> counts messages sent to it, and
+    /// <c>BytesOut</c> the bytes of every frame sent to it (headers and fragments included). <c>Dropped</c> counts frames and
+    /// messages Kiln.Network refused from it: over its rate limit, malformed, or over a size limit. Kiln.Network updates
+    /// them; mods only read them.</summary>
     public long MessagesIn, MessagesOut, BytesIn, BytesOut, Dropped;
 
     /// <summary>Channel-12 frames this peer sent us (server side: one client; on a client: the server), every type,
@@ -152,6 +177,8 @@ public sealed class NetPeer
         public readonly DateTime Started = DateTime.UtcNow;
     }
 
+    /// <summary>A short description for logs: <c>server (State)</c> on a client, otherwise the player's name (or the peer id),
+    /// its state and its entity.</summary>
     public override string ToString() =>
         IsServer ? $"server ({State})" : $"{(Name.Length > 0 ? Name : $"peer 0x{Id:x}")} ({State}{(Player.IsNone ? "" : $", entity {Player}")})";
 }
@@ -166,11 +193,14 @@ public sealed class NetContext
         Direction = direction;
     }
 
+    /// <summary>The channel the message arrived on.</summary>
     public NetChannel Channel { get; }
 
     /// <summary>The client (server side) or the server (client side).</summary>
     public NetPeer Sender { get; }
 
+    /// <summary>Which way the message travelled: <see cref="NetDirection.ToServer"/> when it is handled on the server,
+    /// <see cref="NetDirection.ToClient"/> when it is handled on a client.</summary>
     public NetDirection Direction { get; }
 
     /// <summary>The sending player's entity (server side).</summary>
@@ -202,8 +232,11 @@ public sealed class NetChannel : IDisposable
         MaxMessageBytes = maxMessageBytes;
     }
 
+    /// <summary>The channel's name. Both sides must create the channel under the same name.</summary>
     public string Name { get; }
+    /// <summary>The channel's version. A peer that has the channel under another version gets nothing on it.</summary>
     public string Version { get; }
+    /// <summary>Whether a client lacking this channel counts as lacking the mod in the mod sync check.</summary>
     public bool Required { get; }
 
     /// <summary>Largest message on this channel (bytes, after encoding); never above the server's limit.</summary>
@@ -227,6 +260,9 @@ public sealed class NetChannel : IDisposable
         public required NetDirection Direction;
     }
 
+    /// <summary>Traffic counters for this channel, summed over all peers. <c>MessagesIn</c> and <c>BytesIn</c> count messages
+    /// received (the bytes are message body bytes), <c>MessagesOut</c> and <c>BytesOut</c> count messages sent, and
+    /// <c>DecodeErrors</c> counts received messages whose decoder threw. Kiln.Network updates them; mods only read them.</summary>
     public long MessagesIn, MessagesOut, BytesIn, BytesOut, DecodeErrors;
 
     /// <summary>Registers message type <typeparamref name="T"/> under <paramref name="id"/> with explicit codecs.</summary>
@@ -390,10 +426,26 @@ public sealed class NetChannel : IDisposable
     /// <summary>Closes the channel (also done when the owning mod unloads).</summary>
     public void Dispose() => NetEngine.Close(this);
 
+    /// <summary>The channel as <c>name vVersion</c>.</summary>
     public override string ToString() => $"{Name} v{Version}";
 }
 
 /// <summary>Counters of Kiln.Network and its transport.</summary>
+/// <param name="Available">The kiln.net transport works on this build.</param>
+/// <param name="ServerRole">This process has the server half of the transport.</param>
+/// <param name="ClientRole">This process has the client half of the transport.</param>
+/// <param name="LabTransport">The lab loopback UDP transport is open (tests only).</param>
+/// <param name="Peers">Connections now: the clients on a server, plus the server link on a client.</param>
+/// <param name="ReadyPeers">How many of <paramref name="Peers"/> have finished the Kiln handshake.</param>
+/// <param name="Channels">How many channels are open in this process.</param>
+/// <param name="MaxFrame">The largest frame the transport carries, in bytes (0 when the transport is unavailable).</param>
+/// <param name="FramesIn">Frames Kiln.Network has received since start.</param>
+/// <param name="FramesOut">Frames Kiln.Network has sent since start.</param>
+/// <param name="BytesIn">Bytes the transport has received.</param>
+/// <param name="BytesOut">Bytes the transport has sent.</param>
+/// <param name="Dropped">Inbound frames the transport dropped (queue full, rate limit, oversize).</param>
+/// <param name="SendFailures">Outbound frames the game refused (no socket, budget, too big) even after retries.</param>
+/// <param name="ConfigError">The last <c>network.json</c> load error, or null when it loaded or is absent.</param>
 public readonly record struct NetworkStatus(
     bool Available, bool ServerRole, bool ClientRole, bool LabTransport, int Peers, int ReadyPeers, int Channels,
     uint MaxFrame, long FramesIn, long FramesOut, long BytesIn, long BytesOut, long Dropped, long SendFailures,
@@ -475,6 +527,7 @@ public static class Network
     /// <see cref="NetPeer.Properties"/>. The provider runs when the handshake is built.</summary>
     public static void SetHandshakeProperty(string key, Func<string> provider) => NetEngine.SetProperty(key, provider);
 
+    /// <summary>The current transport and traffic counters.</summary>
     public static NetworkStatus Status => NetEngine.Status();
 
     // ---- server modpacks (docs/kiln/network.md "Server modpacks") ----

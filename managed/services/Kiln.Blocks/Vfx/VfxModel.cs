@@ -130,9 +130,11 @@ public sealed record LightBlock
     public string? Color { get; init; }
     /// <summary>Metres. Default 6.</summary>
     public float? Radius { get; init; }
+    /// <summary>How bright the light is.</summary>
     public float? Brightness { get; init; }
     /// <summary>Seconds. Default 0: until the effect is stopped.</summary>
     public float? Lifetime { get; init; }
+    /// <summary>Seconds it takes to come up at the start.</summary>
     public float? FadeIn { get; init; }
     /// <summary>Seconds, at the end of the lifetime or after the effect stops.</summary>
     public float? FadeOut { get; init; }
@@ -147,10 +149,14 @@ public sealed record LightBlock
 }
 
 /// <summary>A number, or a range to pick from: <c>0.5f</c>, <c>(0.4f, 0.9f)</c>.</summary>
+/// <param name="Min">The lowest value.</param>
+/// <param name="Max">The highest value.</param>
 [JsonConverter(typeof(VfxRangeConverter))]
 public readonly record struct VfxRange(float Min, float Max)
 {
+    /// <summary>A fixed value: the same minimum and maximum.</summary>
     public static implicit operator VfxRange(float value) => new(value, value);
+    /// <summary>A range to pick from, as a tuple <c>(min, max)</c>.</summary>
     public static implicit operator VfxRange((float Min, float Max) range) => new(range.Min, range.Max);
 }
 
@@ -161,9 +167,13 @@ public readonly record struct VfxValue
 {
     internal object Value { get; private init; }
 
+    /// <summary>A number, as a float.</summary>
     public static implicit operator VfxValue(float value) => new() { Value = value };
+    /// <summary>A colour as a string: <c>#rrggbb</c> or <c>#rrggbbaa</c>.</summary>
     public static implicit operator VfxValue(string colour) => new() { Value = colour };
+    /// <summary>A vector.</summary>
     public static implicit operator VfxValue(Vector3 value) => new() { Value = value };
+    /// <summary>A colour, written as <c>#rrggbbaa</c>.</summary>
     public static implicit operator VfxValue(Color value) => new() { Value = $"#{value.R:x2}{value.G:x2}{value.B:x2}{value.A:x2}" };
 
     /// <summary>A whole-number parameter, as the game's <c>count</c>. A plain number is a float.</summary>
@@ -177,7 +187,9 @@ public sealed record Shape
     internal string? Word { get; private init; }
     internal float Degrees { get; private init; }
 
+    /// <summary>Straight up along the effect's up.</summary>
     public static readonly Shape Up = new() { Word = "up" };
+    /// <summary>In any direction.</summary>
     public static readonly Shape Sphere = new() { Word = "sphere" };
     /// <summary>Away from the centre of the <see cref="ParticleBlock.Shape"/>: out of a sphere, along a disc's plane, across a line. Up at the very centre.</summary>
     public static readonly Shape Outward = new() { Word = "outward" };
@@ -224,9 +236,12 @@ public enum ParticleAlign
 }
 
 /// <summary>Advanced: a mod's own particle hooks (a hook module). <c>"shaders/build/swirl.spv"</c>, or with <see cref="Constants"/> that the hooks read as <c>c.user0</c> and <c>c.user1</c>.</summary>
+/// <param name="File">The hook module in the mod's folder, built with <c>kiln-vfxcook shader build</c> (<c>"shaders/build/swirl.spv"</c>).</param>
+/// <param name="Constants">Up to 8 finite numbers the hooks read as <c>c.user0</c> and <c>c.user1</c>. Null: none.</param>
 [JsonConverter(typeof(ParticleShaderConverter))]
 public sealed record ParticleShader(string File, IReadOnlyList<float>? Constants = null)
 {
+    /// <summary>A hook module by its file.</summary>
     public static implicit operator ParticleShader(string file) => new(file);
 }
 
@@ -239,10 +254,13 @@ public sealed record Curve
     internal float[]? Values { get; private init; }
     internal (float T, float Value)[]? KeyList { get; private init; }
 
+    /// <summary>From <paramref name="start"/> at the particle's birth to <paramref name="end"/> at the end of its life.</summary>
     public static Curve Linear(float start, float end) => new() { Line = (start, end) };
+    /// <summary>The values evenly spaced over the particle's life.</summary>
     public static Curve Of(params float[] values) => new() { Values = values };
     /// <summary>Values at times from 0 to 1, growing.</summary>
     public static Curve Keys(params (float T, float Value)[] keys) => new() { KeyList = keys };
+    /// <summary>A constant.</summary>
     public static implicit operator Curve(float value) => new() { Constant = value };
 }
 
@@ -254,29 +272,56 @@ public sealed record Gradient
     internal string[]? List { get; private init; }
     internal (float T, string Colour)[]? KeyList { get; private init; }
 
+    /// <summary>The colours (<c>#rrggbb</c>) evenly spaced over the particle's life.</summary>
     public static Gradient Of(params string[] colours) => new() { List = colours };
     /// <summary>Colours at times from 0 to 1, growing.</summary>
     public static Gradient Keys(params (float T, string Colour)[] keys) => new() { KeyList = keys };
+    /// <summary>One colour for the whole life.</summary>
     public static implicit operator Gradient(string colour) => new() { One = colour };
 }
 
 /// <summary>A PNG in the mod's folder. <see cref="Linear"/>: the image holds data, not colour.</summary>
+/// <param name="File">The PNG's path in the mod's folder.</param>
+/// <param name="Linear">True when the image holds data, not colour. Null: it holds colour.</param>
 [JsonConverter(typeof(VfxTextureConverter))]
 public sealed record VfxTexture(string File, bool? Linear = null)
 {
+    /// <summary>A PNG by its path in the mod's folder: the same as <c>new VfxTexture(file)</c>.</summary>
     public static implicit operator VfxTexture(string file) => new(file);
 }
 
 /// <summary>The texture is a grid of frames. Without <see cref="Fps"/> the grid plays once over a particle's life.</summary>
 public sealed record Flipbook
 {
+    /// <summary>How many frames lie across the texture.</summary>
     public int? Columns { get; init; }
+    /// <summary>How many frames lie down the texture.</summary>
     public int? Rows { get; init; }
+    /// <summary>Frames per second. Without it the grid plays once over a particle's life.</summary>
     public float? Fps { get; init; }
 }
 
-public enum Blend { Alpha, Additive }
-public enum Sampler { Wrap, Mirror, Clamp, ClampToZero }
+/// <summary>How a particle blends with what is behind it.</summary>
+public enum Blend
+{
+    /// <summary>Ordinary alpha blending. The default.</summary>
+    Alpha,
+    /// <summary>The particle's colour is added to the scene.</summary>
+    Additive,
+}
+/// <summary>How a particle's texture repeats beyond its edges.</summary>
+public enum Sampler
+{
+    /// <summary>The texture repeats.</summary>
+    Wrap,
+    /// <summary>The texture repeats, mirrored at each edge.</summary>
+    Mirror,
+    /// <summary>The edge pixels stretch beyond the texture.</summary>
+    Clamp,
+    /// <summary>Beyond the edge the sample is zero.</summary>
+    ClampToZero,
+}
+/// <summary>What a particle is drawn as.</summary>
 public enum ParticleMesh
 {
     /// <summary>Faces the camera.</summary>
@@ -293,6 +338,7 @@ public sealed class VfxBlockHandle : BlockHandle<VfxBlock>
     /// <summary>Whether this game has it now.</summary>
     public VfxBlockStatus Status { get; internal set; }
 
+    /// <summary>The effect's id, so a handle goes where <see cref="VfxId"/> does.</summary>
     public static implicit operator VfxId(VfxBlockHandle handle) => VfxId.Of(handle.Guid);
 }
 

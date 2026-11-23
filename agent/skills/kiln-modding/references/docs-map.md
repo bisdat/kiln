@@ -7,6 +7,12 @@ https://frostdev.io/kiln/downloads/0.2.0-dev.30.5/sdk/api/. Release builds publi
 It covers every public type and member with its XML docs, so look there when this skill or the wiki doesn't name a call.
 There is no "latest" URL: use the version the mod builds on.
 
+This skill's own guides to the C# API, by area ([api.md](api.md) is the index): [contract, threads and which assembly holds a
+type](api-contract.md#which-assembly-holds-a-type-kilnservices), [events, config, commands, players](api-events.md),
+[items and recipes](api-items.md), [gear and rarity](api-gear.md), [content, creatures, abilities](api-content.md),
+[world, block queries and building tools](api-world.md), [UI](api-ui.md), [network and client](api-network.md),
+[hooks and other engines](api-hooks.md).
+
 | Question | Page |
 |---|---|
 | Start a project | `first-mod`, `dev-kit` |
@@ -177,6 +183,9 @@ dev.30+ (pages in the repository's `docs/kiln/`):
 | dev.30.5+: terrain-only removal, a per-tool list of removable materials | `services/terrain-tool-carving.md` |
 | dev.30.5+: a mod's item or recipe tracked as game knowledge (`KnowledgeBlock`) | `modding/item-blocks.md` "Tracking"; reads and changes: `services/knowledge.md` |
 | dev.30.6+: block queries and controlled breaking (`Build.BlockAt`, `FindWall`, `BreakBox`) | `services/build-blocks.md` |
+| dev.30.6+: player crafting from linked chests, dye sources (`Crafting.AddSource`, #125) | `services/stations.md` "Player crafting sources"; [api-items.md](api-items.md#crafting-from-linked-containers-306-mod-api-0215) |
+| dev.30.6+: create and equip one stack in one step (`Items.GiveEquip`, #126) | `services/items.md` "Give straight into equipment"; [api-items.md](api-items.md#inventory-transfers-dev20) |
+| dev.30.6+: mods' rows in the HUD's arrow and spell lists (`Ui.AmmoList`, #127; client) | `ui.md` "The HUD's ammunition and spell lists"; `services/ui.md` "kiln.ui.ammo"; [api-ui.md](api-ui.md#game-ui-hud-keys) |
 
 dev.30+ samples: GearValues, RarityAnvil, SlotMarks.
 

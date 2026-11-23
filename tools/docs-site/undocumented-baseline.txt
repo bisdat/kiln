@@ -1,0 +1,4 @@
+# Public types and members of the API reference that have no XML summary and are tolerated: one uid per line (the form
+# tools/docs-site/undocumented.py prints). Empty since 0.2.0-dev.30.6: every public name is documented, and tools/check.sh
+# (stage `docs`) and tools/docs-site/build.sh (in every release) fail on a new gap. Do not add a name here to get past
+# the gate: write its doc comment. The dev.24 list (4,777 names) it replaced is in git history.

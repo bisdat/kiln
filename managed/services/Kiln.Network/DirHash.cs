@@ -16,7 +16,9 @@ public sealed class DirHashException(string message) : Exception(message);
 /// everything below them; symlinks and reparse points below the root are refused.</summary>
 public static class DirHash
 {
+    /// <summary>The prefix every kdh1 hash string starts with.</summary>
     public const string Prefix = "kdh1:";
+    /// <summary>The kdh1 of an empty folder.</summary>
     public const string Empty = "kdh1:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
     private static readonly EnumerationOptions Options = new()
