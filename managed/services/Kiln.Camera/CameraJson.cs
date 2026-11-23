@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: MIT
-// Authoring JSON is the typed record, not the native ABI or transport blob. All serialization uses generated
-// metadata and explicit converters: Numerics fields must never become {}, and times are exact integer milliseconds.
+// Authoring JSON is the typed record, not the native ABI or transport blob. Read and written by hand over JsonElement and
+// Utf8JsonWriter (no reflection, and no source generator: tools/ApiScan compiles the sources without generators):
+// Numerics fields are arrays and never {}, enums are exact names, times are exact integer milliseconds.
+using System.Buffers;
 using System.Numerics;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 
 namespace Kiln;
 
@@ -20,9 +21,7 @@ public sealed partial record CameraOverride
         try
         {
             using var doc = JsonDocument.Parse(json, new JsonDocumentOptions { AllowDuplicateProperties = false });
-            CameraJson.CheckShape(doc.RootElement);
-            var request = JsonSerializer.Deserialize(json, CameraJsonContext.Default.CameraOverride)
-                ?? throw new ArgumentException("camera JSON must be a request object", nameof(json));
+            var request = CameraJson.Read(doc.RootElement);
             CameraJson.Validate(request);
             return request;
         }
@@ -41,7 +40,7 @@ public sealed partial record CameraOverride
     public string ToJson()
     {
         CameraJson.Validate(this);
-        return JsonSerializer.Serialize(this, CameraJsonContext.Default.CameraOverride);
+        return CameraJson.Write(this);
     }
 }
 
@@ -51,98 +50,213 @@ internal static class CameraJson
         request.Mode is null ? CameraEndpoint.Local : CameraEndpoint.ServerMode,
         request.Mode is null ? EntityId.None : new EntityId(1), "camera JSON");
 
-    // Keep ignored computed properties out of the input too (JsonSerializer otherwise ignores LockRotation).
-    internal static void CheckShape(JsonElement root)
+    // ---- reading: every object lists its fields (an unknown one is refused, a computed one such as lockRotation too);
+    // a required field must be there and not null; an optional one may be absent, and null where the record allows null
+
+    internal static CameraOverride Read(JsonElement root)
     {
-        Only(root, "mode", "profile", "path", "lens", "shake", "duration", "priority", "blend", "inputPolicy");
-        if (Object(root, "mode", out var mode)) Only(mode, "mode", "transition");
-        if (Object(root, "profile", out var profile)) Only(profile, "follow", "distance", "offsetLocal", "offsetWorldY", "rotationMode", "rotation", "collision");
-        if (Object(root, "lens", out var lens)) Only(lens, "fieldOfViewDegrees");
-        if (Object(root, "shake", out var shake)) Only(shake, "amplitudeMetres", "frequencyHz", "falloff", "seed");
-        if (Object(root, "blend", out var blend)) Only(blend, "in", "out");
-        if (!Object(root, "path", out var path)) return;
-        Only(path, "keys");
-        if (!path.TryGetProperty("keys", out var keys) || keys.ValueKind != JsonValueKind.Array || keys.GetArrayLength() is < 1 or > CameraNative.MaxKeys)
-            throw new ArgumentException($"camera JSON: path.keys must have 1 to {CameraNative.MaxKeys} keys", "json");
-        foreach (var key in keys.EnumerateArray())
+        Fields(root, "request", "mode", "profile", "path", "lens", "shake", "duration", "priority", "blend", "inputPolicy");
+        return new CameraOverride(
+            Mode: Maybe(root, "mode", ReadMode),
+            Profile: Maybe(root, "profile", ReadProfile),
+            Path: Maybe(root, "path", ReadPath),
+            Lens: Maybe(root, "lens", l =>
+            {
+                Fields(l, "lens", "fieldOfViewDegrees");
+                return new CameraLens(Float(Required(l, "fieldOfViewDegrees")));
+            }),
+            Shake: Maybe(root, "shake", ReadShake),
+            Duration: Optional(root, "duration", Time, TimeSpan.Zero),
+            Priority: Optional(root, "priority", Int, 0),
+            Blend: Maybe(root, "blend", b =>
+            {
+                Fields(b, "blend", "in", "out");
+                return new CameraBlend(Time(Required(b, "in")), Time(Required(b, "out")));
+            }),
+            InputPolicy: Optional(root, "inputPolicy", Name<CameraInputPolicy>, CameraInputPolicy.VisualOnly));
+    }
+
+    private static CameraModeRequest ReadMode(JsonElement m)
+    {
+        Fields(m, "mode", "mode", "transition");
+        return new CameraModeRequest(Name<CameraMode>(Required(m, "mode")), Optional(m, "transition", Name<CameraTransitionOverride>, CameraTransitionOverride.None));
+    }
+
+    private static CameraProfile ReadProfile(JsonElement p)
+    {
+        Fields(p, "profile", "follow", "distance", "offsetLocal", "offsetWorldY", "rotationMode", "rotation", "collision");
+        return new CameraProfile(Entity(Required(p, "follow")), Float(Required(p, "distance")), Vector(Required(p, "offsetLocal")),
+            Optional(p, "offsetWorldY", Float, 0f), Optional(p, "rotationMode", Name<CameraRotationMode>, CameraRotationMode.FreeOrbit),
+            MaybeValue(p, "rotation", Rotation), Optional(p, "collision", Name<CameraCollisionPolicy>, CameraCollisionPolicy.None));
+    }
+
+    private static CameraPath ReadPath(JsonElement p)
+    {
+        Fields(p, "path", "keys");
+        var keys = Required(p, "keys");
+        if (keys.ValueKind != JsonValueKind.Array || keys.GetArrayLength() is < 1 or > CameraNative.MaxKeys)
+            throw Bad($"path.keys must have 1 to {CameraNative.MaxKeys} keys");
+        var list = new List<CameraKey>(keys.GetArrayLength());
+        foreach (var k in keys.EnumerateArray())
         {
-            Only(key, "at", "pose", "fieldOfViewDegrees");
-            if (Object(key, "pose", out var pose)) Only(pose, "position", "rotation");
+            Fields(k, "key", "at", "pose", "fieldOfViewDegrees");
+            var pose = Required(k, "pose");
+            Fields(pose, "pose", "position", "rotation");
+            list.Add(new CameraKey(Time(Required(k, "at")), new CameraPose(Position(Required(pose, "position")), Rotation(Required(pose, "rotation"))),
+                MaybeValue(k, "fieldOfViewDegrees", Float)));
         }
+        return new CameraPath(list);
     }
-    private static bool Object(JsonElement parent, string name, out JsonElement value) =>
-        parent.TryGetProperty(name, out value) && value.ValueKind != JsonValueKind.Null;
-    private static void Only(JsonElement value, params string[] names)
+
+    private static CameraShake ReadShake(JsonElement s)
     {
-        if (value.ValueKind != JsonValueKind.Object) throw new ArgumentException("camera JSON: expected an object", "json");
+        Fields(s, "shake", "amplitudeMetres", "frequencyHz", "falloff", "seed");
+        return new CameraShake(Float(Required(s, "amplitudeMetres")), Float(Required(s, "frequencyHz")), Time(Required(s, "falloff")),
+            Optional(s, "seed", e => e.ValueKind == JsonValueKind.Number && e.TryGetUInt32(out var v) ? v : throw Bad("seed must be an integer from 0 to 4294967295"), 0u));
+    }
+
+    private static ArgumentException Bad(string what) => new($"camera JSON: {what}", "json");
+
+    private static void Fields(JsonElement value, string what, params string[] names)
+    {
+        if (value.ValueKind != JsonValueKind.Object) throw Bad($"{what} must be an object");
         foreach (var p in value.EnumerateObject())
-            if (!names.Contains(p.Name, StringComparer.Ordinal)) throw new ArgumentException($"camera JSON: unknown field '{p.Name}'", "json");
+            if (!names.Contains(p.Name, StringComparer.Ordinal)) throw Bad($"unknown field '{p.Name}'");
     }
-}
 
-[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
-    GenerationMode = JsonSourceGenerationMode.Metadata, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-    IgnoreReadOnlyProperties = true, UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
-    RespectRequiredConstructorParameters = true, RespectNullableAnnotations = true, AllowDuplicateProperties = false,
-    Converters = [typeof(CameraPositionJson), typeof(CameraVectorJson), typeof(CameraQuaternionJson), typeof(CameraEntityJson), typeof(CameraTimeJson),
-        typeof(CameraModeJson), typeof(CameraTransitionJson), typeof(CameraInputJson), typeof(CameraRotationJson), typeof(CameraCollisionJson)])]
-[JsonSerializable(typeof(CameraOverride))]
-internal partial class CameraJsonContext : JsonSerializerContext;
+    private static JsonElement Required(JsonElement parent, string name) =>
+        parent.TryGetProperty(name, out var v) && v.ValueKind != JsonValueKind.Null ? v : throw Bad($"'{name}' is required");
 
-internal static class CameraJsonArray
-{
-    internal static double[] Read(ref Utf8JsonReader reader, int length)
+    private static T Optional<T>(JsonElement parent, string name, Func<JsonElement, T> read, T absent) =>
+        !parent.TryGetProperty(name, out var v) ? absent : v.ValueKind == JsonValueKind.Null ? throw Bad($"'{name}' must not be null") : read(v);
+
+    private static T? Maybe<T>(JsonElement parent, string name, Func<JsonElement, T> read) where T : class =>
+        parent.TryGetProperty(name, out var v) && v.ValueKind != JsonValueKind.Null ? read(v) : null;
+
+    private static T? MaybeValue<T>(JsonElement parent, string name, Func<JsonElement, T> read) where T : struct =>
+        parent.TryGetProperty(name, out var v) && v.ValueKind != JsonValueKind.Null ? read(v) : null;
+
+    private static double Finite(JsonElement e) =>
+        e.ValueKind == JsonValueKind.Number && e.TryGetDouble(out var d) && double.IsFinite(d) ? d : throw Bad("expected a finite number");
+
+    private static float Float(JsonElement e) => Finite(e) is var d and >= -float.MaxValue and <= float.MaxValue ? (float)d : throw Bad("number exceeds float range");
+
+    private static int Int(JsonElement e) => e.ValueKind == JsonValueKind.Number && e.TryGetInt32(out var v) ? v : throw Bad("expected a 32-bit integer");
+
+    private static EntityId Entity(JsonElement e) =>
+        e.ValueKind == JsonValueKind.Number && e.TryGetUInt32(out var id) ? new(id) : throw Bad("entity id must be a nonnegative uint32 integer");
+
+    private static TimeSpan Time(JsonElement e) =>
+        e.ValueKind == JsonValueKind.Number && e.TryGetInt64(out var ms) && ms is >= 0 and <= CameraNative.MaxDurationMs
+            ? TimeSpan.FromTicks(ms * TimeSpan.TicksPerMillisecond) : throw Bad("time must be integer milliseconds from 0 to 120000");
+
+    private static T Name<T>(JsonElement e) where T : struct, Enum =>
+        e.ValueKind == JsonValueKind.String && e.GetString() is { } s && Enum.TryParse<T>(s, ignoreCase: false, out var value) && Enum.GetName(value) == s
+            ? value : throw Bad($"expected an exact {typeof(T).Name} name");
+
+    private static double[] Numbers(JsonElement e, int length)
     {
-        if (reader.TokenType != JsonTokenType.StartArray) throw new JsonException($"expected an array of {length} finite numbers");
+        if (e.ValueKind != JsonValueKind.Array || e.GetArrayLength() != length) throw Bad($"expected an array of {length} finite numbers");
         var values = new double[length];
-        for (var i = 0; i < length; i++)
-            if (!reader.Read() || reader.TokenType != JsonTokenType.Number || !reader.TryGetDouble(out values[i]) || !double.IsFinite(values[i]))
-                throw new JsonException($"expected an array of {length} finite numbers");
-        if (!reader.Read() || reader.TokenType != JsonTokenType.EndArray) throw new JsonException($"expected exactly {length} numbers");
+        var i = 0;
+        foreach (var item in e.EnumerateArray()) values[i++] = Finite(item);
         return values;
     }
-    internal static float Float(double d) => d is >= -float.MaxValue and <= float.MaxValue ? (float)d : throw new JsonException("number exceeds float range");
-}
-internal sealed class CameraPositionJson : JsonConverter<WorldPosition>
-{
-    public override WorldPosition Read(ref Utf8JsonReader r, Type t, JsonSerializerOptions o) { var a = CameraJsonArray.Read(ref r, 3); return new(a[0], a[1], a[2]); }
-    public override void Write(Utf8JsonWriter w, WorldPosition p, JsonSerializerOptions o) { w.WriteStartArray(); w.WriteNumberValue(p.X); w.WriteNumberValue(p.Y); w.WriteNumberValue(p.Z); w.WriteEndArray(); }
-}
-internal sealed class CameraVectorJson : JsonConverter<Vector3>
-{
-    public override Vector3 Read(ref Utf8JsonReader r, Type t, JsonSerializerOptions o) { var a = CameraJsonArray.Read(ref r, 3); return new(CameraJsonArray.Float(a[0]), CameraJsonArray.Float(a[1]), CameraJsonArray.Float(a[2])); }
-    public override void Write(Utf8JsonWriter w, Vector3 p, JsonSerializerOptions o) { w.WriteStartArray(); w.WriteNumberValue(p.X); w.WriteNumberValue(p.Y); w.WriteNumberValue(p.Z); w.WriteEndArray(); }
-}
-internal sealed class CameraQuaternionJson : JsonConverter<Quaternion>
-{
-    public override Quaternion Read(ref Utf8JsonReader r, Type t, JsonSerializerOptions o) { var a = CameraJsonArray.Read(ref r, 4); return new(CameraJsonArray.Float(a[0]), CameraJsonArray.Float(a[1]), CameraJsonArray.Float(a[2]), CameraJsonArray.Float(a[3])); }
-    public override void Write(Utf8JsonWriter w, Quaternion q, JsonSerializerOptions o) { w.WriteStartArray(); w.WriteNumberValue(q.X); w.WriteNumberValue(q.Y); w.WriteNumberValue(q.Z); w.WriteNumberValue(q.W); w.WriteEndArray(); }
-}
-internal sealed class CameraEntityJson : JsonConverter<EntityId>
-{
-    public override EntityId Read(ref Utf8JsonReader r, Type t, JsonSerializerOptions o) => r.TokenType == JsonTokenType.Number && r.TryGetUInt32(out var id) ? new(id) : throw new JsonException("entity id must be a nonnegative uint32 integer");
-    public override void Write(Utf8JsonWriter w, EntityId id, JsonSerializerOptions o) => w.WriteNumberValue(id.Value);
-}
-internal sealed class CameraTimeJson : JsonConverter<TimeSpan>
-{
-    public override TimeSpan Read(ref Utf8JsonReader r, Type t, JsonSerializerOptions o) =>
-        r.TokenType == JsonTokenType.Number && r.TryGetInt64(out var ms) && ms is >= 0 and <= CameraNative.MaxDurationMs
-            ? TimeSpan.FromTicks(ms * TimeSpan.TicksPerMillisecond) : throw new JsonException("time must be integer milliseconds from 0 to 120000");
-    public override void Write(Utf8JsonWriter w, TimeSpan value, JsonSerializerOptions o)
+
+    private static float F(double d) => d is >= -float.MaxValue and <= float.MaxValue ? (float)d : throw Bad("number exceeds float range");
+    private static WorldPosition Position(JsonElement e) { var a = Numbers(e, 3); return new(a[0], a[1], a[2]); }
+    private static Vector3 Vector(JsonElement e) { var a = Numbers(e, 3); return new(F(a[0]), F(a[1]), F(a[2])); }
+    private static Quaternion Rotation(JsonElement e) { var a = Numbers(e, 4); return new(F(a[0]), F(a[1]), F(a[2]), F(a[3])); }
+
+    // ---- writing: the record's own order, null optional fields left out
+
+    internal static string Write(CameraOverride r)
     {
-        if (value.Ticks < 0 || value.Ticks % TimeSpan.TicksPerMillisecond != 0 || value.TotalMilliseconds > CameraNative.MaxDurationMs) throw new JsonException("time must be integer milliseconds from 0 to 120000");
-        w.WriteNumberValue(value.Ticks / TimeSpan.TicksPerMillisecond);
+        var buffer = new ArrayBufferWriter<byte>(256);
+        using (var w = new Utf8JsonWriter(buffer))
+        {
+            w.WriteStartObject();
+            if (r.Mode is { } m)
+            {
+                w.WriteStartObject("mode");
+                w.WriteString("mode", Name(m.Mode));
+                w.WriteString("transition", Name(m.Transition));
+                w.WriteEndObject();
+            }
+            if (r.Profile is { } p)
+            {
+                w.WriteStartObject("profile");
+                w.WriteNumber("follow", p.Follow.Value);
+                w.WriteNumber("distance", p.Distance);
+                Floats(w, "offsetLocal", p.OffsetLocal.X, p.OffsetLocal.Y, p.OffsetLocal.Z);
+                w.WriteNumber("offsetWorldY", p.OffsetWorldY);
+                w.WriteString("rotationMode", Name(p.RotationMode));
+                if (p.Rotation is { } q) Floats(w, "rotation", q.X, q.Y, q.Z, q.W);
+                w.WriteString("collision", Name(p.Collision));
+                w.WriteEndObject();
+            }
+            if (r.Path is { } path)
+            {
+                w.WriteStartObject("path");
+                w.WriteStartArray("keys");
+                foreach (var k in path.Keys)
+                {
+                    w.WriteStartObject();
+                    w.WriteNumber("at", Ms(k.At));
+                    w.WriteStartObject("pose");
+                    w.WriteStartArray("position");
+                    w.WriteNumberValue(k.Pose.Position.X);
+                    w.WriteNumberValue(k.Pose.Position.Y);
+                    w.WriteNumberValue(k.Pose.Position.Z);
+                    w.WriteEndArray();
+                    Floats(w, "rotation", k.Pose.Rotation.X, k.Pose.Rotation.Y, k.Pose.Rotation.Z, k.Pose.Rotation.W);
+                    w.WriteEndObject();
+                    if (k.FieldOfViewDegrees is { } fov) w.WriteNumber("fieldOfViewDegrees", fov);
+                    w.WriteEndObject();
+                }
+                w.WriteEndArray();
+                w.WriteEndObject();
+            }
+            if (r.Lens is { } lens)
+            {
+                w.WriteStartObject("lens");
+                w.WriteNumber("fieldOfViewDegrees", lens.FieldOfViewDegrees);
+                w.WriteEndObject();
+            }
+            if (r.Shake is { } s)
+            {
+                w.WriteStartObject("shake");
+                w.WriteNumber("amplitudeMetres", s.AmplitudeMetres);
+                w.WriteNumber("frequencyHz", s.FrequencyHz);
+                w.WriteNumber("falloff", Ms(s.Falloff));
+                w.WriteNumber("seed", s.Seed);
+                w.WriteEndObject();
+            }
+            w.WriteNumber("duration", Ms(r.Duration));
+            w.WriteNumber("priority", r.Priority);
+            if (r.Blend is { } b)
+            {
+                w.WriteStartObject("blend");
+                w.WriteNumber("in", Ms(b.In));
+                w.WriteNumber("out", Ms(b.Out));
+                w.WriteEndObject();
+            }
+            w.WriteString("inputPolicy", Name(r.InputPolicy));
+            w.WriteEndObject();
+        }
+        return System.Text.Encoding.UTF8.GetString(buffer.WrittenSpan);
     }
+
+    private static void Floats(Utf8JsonWriter w, string name, params float[] values)
+    {
+        w.WriteStartArray(name);
+        foreach (var v in values) w.WriteNumberValue(v);
+        w.WriteEndArray();
+    }
+
+    private static long Ms(TimeSpan t) =>
+        t.Ticks >= 0 && t.Ticks % TimeSpan.TicksPerMillisecond == 0 && t.TotalMilliseconds <= CameraNative.MaxDurationMs
+            ? t.Ticks / TimeSpan.TicksPerMillisecond : throw Bad("time must be integer milliseconds from 0 to 120000");
+
+    private static string Name<T>(T value) where T : struct, Enum => Enum.GetName(value) ?? throw Bad($"unknown {typeof(T).Name}");
 }
-internal abstract class CameraEnumJson<T> : JsonConverter<T> where T : struct, Enum
-{
-    public override T Read(ref Utf8JsonReader r, Type t, JsonSerializerOptions o) =>
-        r.TokenType == JsonTokenType.String && Enum.TryParse<T>(r.GetString(), ignoreCase: false, out var value) && Enum.GetName(value) == r.GetString()
-            ? value : throw new JsonException($"expected an exact {typeof(T).Name} name");
-    public override void Write(Utf8JsonWriter w, T value, JsonSerializerOptions o) => w.WriteStringValue(Enum.GetName(value) ?? throw new JsonException($"unknown {typeof(T).Name}"));
-}
-internal sealed class CameraModeJson : CameraEnumJson<CameraMode>;
-internal sealed class CameraTransitionJson : CameraEnumJson<CameraTransitionOverride>;
-internal sealed class CameraInputJson : CameraEnumJson<CameraInputPolicy>;
-internal sealed class CameraRotationJson : CameraEnumJson<CameraRotationMode>;
-internal sealed class CameraCollisionJson : CameraEnumJson<CameraCollisionPolicy>;

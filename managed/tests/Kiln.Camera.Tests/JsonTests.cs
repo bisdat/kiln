@@ -91,6 +91,26 @@ public sealed class JsonTests
     [InlineData("""{"profile":{"follow":-1,"distance":10,"offsetLocal":[0,0,0]}}""")]
     [InlineData("""{"path":{"keys":[{"at":0,"pose":{"position":[0,0,0],"rotation":[0,0,0,1]}},{"at":1,"pose":{"position":[0,0,0],"rotation":[0,0,0,1]},"fieldOfViewDegrees":40}]}}""")]
     public void Invalid_json_is_an_argument_error_before_any_native_access(string json) => Assert.Throws<ArgumentException>(() => Read(json));
+    // tools/ApiScan (gen-apis.sh) compiles Kiln.Camera's sources without source generators: a JsonSerializerContext
+    // would have no generated half there (CS0534), and the analyzer table could not be regenerated.
+    [Fact]
+    public void The_codec_needs_no_source_generator()
+    {
+        var generated = typeof(CameraOverride).Assembly.GetTypes().Where(t => t.IsSubclassOf(typeof(System.Text.Json.Serialization.JsonSerializerContext)));
+        Assert.Empty(generated);
+    }
+
+    [Fact]
+    public void Null_where_the_record_allows_it_is_absent_and_elsewhere_refused()
+    {
+        Assert.Equal(new CameraOverride(Lens: new CameraLens(40)), Read("""{"lens":{"fieldOfViewDegrees":40},"shake":null,"blend":null}"""));
+        Assert.Throws<ArgumentException>(() => Read("""{"lens":{"fieldOfViewDegrees":40},"duration":null}"""));
+        Assert.Throws<ArgumentException>(() => Read("""{"lens":{"fieldOfViewDegrees":null}}"""));
+        var profile = Read("""{"profile":{"follow":0,"distance":8,"offsetLocal":[0,1,0],"rotation":null}}""");
+        Assert.Null(profile.Profile!.Rotation);
+        Assert.Throws<ArgumentException>(() => Read("""{"profile":{"follow":0,"distance":8,"offsetLocal":[0,1,0],"collision":null}}"""));
+    }
+
     [Fact]
     public void Writing_does_not_round_fractional_milliseconds_or_invalid_values()
     {
