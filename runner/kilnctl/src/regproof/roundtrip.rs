@@ -481,6 +481,11 @@ pub fn check(map: &RegMap, side: &str, exe_sha256: &str, regmap_digest: &str, su
                     if n("unknown") > 0 {
                         missing.push(format!("{MISSING_UNKNOWN} ({} entries)", n("unknown")));
                     }
+                    // review3 S2: a kind kilnctl does not know (a later producer or build) is never proven by the others
+                    for (kind, count) in c.iter().filter(|(k, v)| **v > 0 && !CONFIG_KINDS.contains(&k.as_str()) && *k != "unknown" && *k != NOT_IN_WORLD) {
+                        missing.push(format!("{MISSING_UNKNOWN} ({count} entries of kind {kind:?}, which kilnctl does not know)"));
+                        kinds.insert(kind.clone(), format!("not proven ({count} entries on this build; kilnctl does not know this kind)"));
+                    }
                     if n("unknown") + unexplained > 0 {
                         kinds.insert("unknown".into(), format!("{} entries", n("unknown") + unexplained));
                     }
@@ -880,6 +885,15 @@ pub(crate) mod tests {
         boot.get_mut("plans").unwrap().rows.get_mut("cap").unwrap().backend = "boot".into();
         let f = run(&boot, "boot", json!({"sint32": 3, "float": 0, "unknown": 0, "notInWorld": 2}), Some(json!(["game:h3", "game:h4"])), Some(&values));
         assert!(unknown(&f), "{f:?}");
+        // review3 S2: a kind kilnctl does not know is never proven (the counts alone match the export here)
+        let f = run(&map, "live", json!({"sint32": 3, "float": 0, "unknown": 0, "notInWorld": 2, "uint32": 1}),
+                    Some(json!(["game:h3", "game:h4"])), Some(&values));
+        assert!(unknown(&f) && f.missing.iter().any(|m| m.contains("uint32")), "{f:?}");
+        assert!(f.kinds["uint32"].starts_with("not proven"), "{f:?}");
+        // a known name with no entry is no problem
+        let f = run(&map, "live", json!({"sint32": 3, "float": 0, "unknown": 0, "notInWorld": 2, "uint32": 0}),
+                    Some(json!(["game:h3", "game:h4"])), Some(&values));
+        assert!(f.ok, "{f:?}");
     }
 
     #[test]

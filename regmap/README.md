@@ -196,7 +196,7 @@ is in the id table but not in the lab's world, so nothing reads it, and its id i
 compares the counts with the values export (review3 S1): every entry the export holds the value for must be counted in a
 kind or listed as not in the world. Entries not in the world do not block a live row (no edit reaches them on this build;
 the record says how many, e.g. `"notInWorld": "3 entries not in the lab's world ..."`), but do block a boot row; any other
-difference between the counts and the export, or a missing export, counts as unknown and
+difference between the counts and the export, a kind name kilnctl does not know, or a missing export counts as unknown and
 leaves the row unproven. Evidence is required only for the kinds
 the build has (coordinator ruling, 2026-11-23): Sint32 configs need a Sint32 whole-number round trip and a fractional Sint32
 probe refused without changing the value or bytes; float configs need a float-config fractional round trip. A kind with no
