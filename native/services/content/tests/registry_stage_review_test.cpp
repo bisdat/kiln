@@ -288,6 +288,26 @@ void unused_live_base_is_lazy(const std::string& dir) {
           "the lazy copied model includes stable fields and ids for native/manual users");
     check(!a.base.raw, "the detached stable live snapshot retains no raw resolver into a destroyed model");
 }
+// review4 NS1: when Kiln.Host names a mod whose code uses the registry API, the stage decodes the stable base at
+// resources-ready (before kiln.content writes packs into resident resource pages), even with no stage edits.
+void registry_users_decode_at_the_stage(const std::string& dir) {
+    TreeView view = world(); Files files = warm_id_table(dir);
+    auto env = env_of(&view, &files, dir, &no_sections);
+    env.prepare_live = true;
+    auto source = env.source; int opens = 0;
+    env.source = [&](std::string* why) { ++opens; return source(why); };
+    stage::Runner runner(std::move(env)); stage::LiveHandoff live;
+    check(runner.set_order(R"([{"mod":"plain","version":"1.0.0"},{"mod":"author","version":"1.0.0","registry":true}])") == KILN_OK,
+          "the order may flag registry users");
+    runner.set_live([&](const stage::LiveHandoff& handoff) { live = handoff; });
+    runner.run({}); runner.finish({});
+    check(opens == 1 && !live.base->registries.empty() && live.decoded->count("items.maxStack"),
+          "a declared registry user makes the stage decode the full stable base at resources-ready");
+    check(!live.prepare, "no lazy first-use decode remains to read bytes Kiln wrote later");
+    std::string value;
+    check(runner.read(0, "items", "game:material_t1_wood_logs", "maxStack", &value) == KILN_OK && value == "10" && opens == 1,
+          "reads use the stage's base without opening the archive again");
+}
 void full_live_base_uses_cache(const std::string& dir) {
     TreeView view = world(); Files files;
     auto env = env_of(&view, &files, dir, &items_only); env.prepare_live = true;
@@ -752,6 +772,7 @@ int main(int argc, char** argv) {
         {"R4 worldload_ready_event", [&] { worldload_ready_event(dir); }},
         {"P2 transaction_snapshot_is_not_worldload", [&] { transaction_snapshot_is_not_worldload(dir); }},
         {"P2 unused_live_base_is_lazy", [&] { unused_live_base_is_lazy(dir); }},
+        {"NS1 registry_users_decode_at_the_stage", [&] { registry_users_decode_at_the_stage(dir); }},
         {"P2 full_live_base_uses_cache", [&] { full_live_base_uses_cache(dir); }},
         {"P2 full_live_cache_keeps_boot_targets", [&] { full_live_cache_keeps_boot_targets(dir); }},
         {"P2 lazy_base_waits_for_live_handoff", [&] { lazy_base_waits_for_live_handoff(dir); }},

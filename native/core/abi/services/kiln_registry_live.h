@@ -15,8 +15,10 @@
  * in their batch source. The managed context integration supplies that identity; there is no live-plan cache in v1.
  *
  * Threads: begin/submit/status any thread. commit/revert/read on the active world's thread while a world exists;
- * without a world they touch only owned archive/copied data, never world slots. The first begin/read may prepare the
- * cached stable base if no registry user needed it at startup; status/schema alone do not force archive decoding.
+ * without a world they touch only owned archive/copied data, never world slots. Kiln.Host names the mods whose code uses
+ * the registry API, and the stage then prepares the stable base at resources-ready. Otherwise (a native plugin alone) the
+ * first begin/read prepares it, outside kiln.content's store lock, from the game's bytes with Kiln's own writes taken back
+ * out (another loader's writes stay); status/schema alone do not force archive decoding.
  * Drafts and committed handles are owner-bound; owner 0 is invalid;
  * revoked owners return REVOKED. Unknown/stale handles return NOT_FOUND, another owner's handle INVALID_ARGUMENT.
  * Limits: 64 open drafts, 1024 retained changes, 4096 edits per change, 64 MiB copied IR total. Revert releases the handle.

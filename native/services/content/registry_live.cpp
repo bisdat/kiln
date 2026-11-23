@@ -1223,7 +1223,17 @@ void index_base() {
         if (bar != std::string::npos) g.kiln_of.emplace(num_key(key.substr(0, bar), num), key.substr(bar + 1));
     }
 }
-// Under store_mutex: preparation reads only owned archive data, never this world's mapped slots.
+// Under store_mutex: install a prepared copied base.
+void install_live_base(registry::stage::LiveData&& data) {
+    auto prepared = registry::prepare_base(data.base);
+    g.stage_result = data.result; g.in->result = std::move(data.result);
+    g.in->base = std::move(data.base); g.in->old = std::move(data.old);
+    g.in->ids = std::move(data.ids); g.in->nums = std::move(data.nums); g.in->decoded = std::move(data.decoded);
+    g.prepared = std::move(prepared);
+    index_base();
+    g.in->prepare = {};
+}
+// Under store_mutex (a pack application's late recomposition, whose caller holds the lock): prepare and install at once.
 bool prepare_live_base() {
     if (!g.in) return false;
     if (!g.in->prepare) return true;
@@ -1233,13 +1243,30 @@ bool prepare_live_base() {
         LOGW("registry (live): base unavailable: %s", why.c_str());
         return false;
     }
-    auto prepared = registry::prepare_base(data.base);
-    g.stage_result = data.result; g.in->result = std::move(data.result);
-    g.in->base = std::move(data.base); g.in->old = std::move(data.old);
-    g.in->ids = std::move(data.ids); g.in->nums = std::move(data.nums); g.in->decoded = std::move(data.decoded);
-    g.prepared = std::move(prepared);
-    index_base();
-    g.in->prepare = {};
+    install_live_base(std::move(data));
+    return true;
+}
+// Without store_mutex held: the first-use decode reads the archive (seconds on a cold cache) outside the store's lock, so
+// the world thread's other store users and the drop-table hooks are not stalled behind it (review4 NS1). The decode reads
+// the game's bytes with Kiln's own store writes taken back out (registry/pristine.h); a reinstall meanwhile discards it.
+bool ensure_live_base() {
+    decltype(RegistryLive::prepare) prepare;
+    std::shared_ptr<RegistryLive> in;
+    {
+        std::lock_guard lock(store_mutex());
+        if (!g.in) return false;
+        if (!g.in->prepare) return true;
+        prepare = g.in->prepare, in = g.in;
+    }
+    registry::stage::LiveData data;
+    std::string why;
+    if (!prepare(&data, &why)) {
+        LOGW("registry (live): base unavailable: %s", why.c_str());
+        return false;
+    }
+    std::lock_guard lock(store_mutex());
+    if (g.in != in) return g.in && !g.in->prepare;
+    if (g.in->prepare) install_live_base(std::move(data));
     return true;
 }
 
@@ -1374,9 +1401,14 @@ KilnResult registry_live_begin(KilnOwner owner, const std::string& mod, uint32_t
     if (!owner || !out || point < 1 || point > 4) return KILN_ERR_INVALID_ARGUMENT;
     std::string why;
     if (!registry::mod_id_ok(mod, &why)) return KILN_ERR_INVALID_ARGUMENT;
+    {
+        std::lock_guard lock(store_mutex());
+        if (retired(owner)) return KILN_ERR_REVOKED;
+    }
+    if (!ensure_live_base()) return KILN_ERR_UNAVAILABLE;
     std::lock_guard lock(store_mutex());
     if (retired(owner)) return KILN_ERR_REVOKED;
-    if (!prepare_live_base()) return KILN_ERR_UNAVAILABLE;
+    if (!g.in || g.in->prepare) return KILN_ERR_UNAVAILABLE;
     size_t drafts = 0;
     for (const auto& [h, c] : g.changes) drafts += !c.order;
     if (drafts >= 64 || g.changes.size() >= 1024) return KILN_ERR_UNAVAILABLE;
@@ -1590,9 +1622,15 @@ RegistryLiveStatus registry_live_status() {
 }
 
 KilnResult registry_live_read(const std::string& reg_name, const std::string& id, const std::string& field, std::string* out) {
+    if (!out) return KILN_ERR_UNAVAILABLE;
+    {
+        std::lock_guard lock(store_mutex());
+        if (!on_live_thread()) return KILN_ERR_WRONG_THREAD;
+    }
+    if (!ensure_live_base()) return KILN_ERR_UNAVAILABLE;
     std::lock_guard lock(store_mutex());
     if (!on_live_thread()) return KILN_ERR_WRONG_THREAD;
-    if (!out || !prepare_live_base()) return KILN_ERR_UNAVAILABLE;
+    if (!g.in || g.in->prepare) return KILN_ERR_UNAVAILABLE;
     const auto* reg_spec = g.in->schema->registry(reg_name);
     const auto* spec = reg_spec ? reg_spec->field(registry::generic_path(field)) : nullptr;
     const size_t bracket = field.find('[');

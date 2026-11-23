@@ -23,6 +23,7 @@
 #include "../include/kiln_registry_host.h"
 #include "../../../core/src/owners_internal.h"
 #include "kiln_boot_collector.hpp"
+#include "pristine.h"
 #include "services/kiln_assets.h"
 #include "services/kiln_caps.h"
 #include "services/kiln_launch.h"
@@ -59,6 +60,23 @@ const KilnAssetsApi* assets() {
 }
 kiln::boot_view::LiveView& live_view() {
     static kiln::boot_view::LiveView& v = *new kiln::boot_view::LiveView([]() -> const KilnAssetsApi* { return assets(); });
+    return v;
+}
+// The registry's base view: kiln.assets' live bytes with kiln.content's own store writes taken back out, so a base decoded
+// after packs applied is still the game's (review4 NS1). The resident range comes from resource_data (address only).
+PristineView& pristine_view() {
+    static PristineView& v = *new PristineView(
+        live_view(),
+        [](const KilnAssetKey& key, uintptr_t* at, size_t* len) {
+            const KilnAssetsApi* a = assets();
+            if (!a || a->header.size < offsetof(KilnAssetsApi, resource_data) + sizeof(void*) || !a->resource_data) return false;
+            const void* p = nullptr;
+            size_t n = 0;
+            if (a->resource_data(&key, &p, &n) != KILN_OK || !p) return false;
+            *at = reinterpret_cast<uintptr_t>(p), *len = n;
+            return true;
+        },
+        [](uintptr_t at, size_t len, uint8_t* bytes) { store_pristine(at, len, bytes); });
     return v;
 }
 
@@ -133,8 +151,9 @@ Env make_env() {
     e.source = [](std::string* why) -> std::unique_ptr<model::Source> {
         kiln::boot_view::LiveView& v = live_view();
         v.restart(); // each owned source is a new read generation; the prior stage/ledger source may be released
+        pristine_view().restart();
         if (!v.ready(why)) return nullptr;
-        return model::live_source(v, [](uint32_t type, std::vector<KilnAssetKey>* out) {
+        return model::live_source(pristine_view(), [](uint32_t type, std::vector<KilnAssetKey>* out) {
             const KilnAssetsApi* a = assets();
             if (!a) return false;
             size_t n = 0;

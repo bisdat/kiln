@@ -302,6 +302,9 @@ bool store_drop(KilnOwner owner, uintptr_t addr);  // removes one layer
 uint32_t store_drop_owner(KilnOwner owner);         // removes every layer of owner; returns slots affected
 bool store_original(uintptr_t addr, uint8_t n, uint8_t* out);  // original bytes if the slot exists
 void store_originals(uintptr_t addr, size_t size, uint8_t* out);  // out holds a copy of this memory: what rules changed in it goes back to the original
+// The same without the store's lock (a leaf lock only, safe under another subsystem's lock): bytes holds a copy of
+// [addr, addr + size); every slot fully inside it gets its original bytes back (review4 NS1, the registry's lazy base).
+void store_pristine(uintptr_t addr, size_t size, uint8_t* bytes);
 bool store_has(uintptr_t addr);
 // Writes every dirty slot's effective bytes (newest layer, else the original). Returns slots written.
 size_t store_flush(std::string* error);

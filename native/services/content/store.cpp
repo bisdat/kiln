@@ -41,6 +41,26 @@ std::vector<SkippedRaw> g_skipped;
 
 bool excluded(const Slot& s, const Layer& l) { return s.foreign && is_registry_seq(l.seq); }
 
+// The originals of the store's slots, mirrored under a leaf lock (review4 NS1): a registry base decoded at first use holds
+// the stage runner's lock and may not take g_mu (store -> runner is the lock order), but it must take Kiln's own writes
+// back out of the resident bytes it decodes (store_pristine). Kept in step with g_slots: added with a slot, dropped with it.
+std::mutex g_pristine_mu;  // leaf: nothing else is locked while it is held
+struct Pristine {
+    uint8_t n = 0;
+    uint8_t bytes[kSlotBytes] = {};
+};
+std::map<uintptr_t, Pristine> g_pristine;
+void pristine_put(uintptr_t addr, const Slot& s) {
+    std::lock_guard lock(g_pristine_mu);
+    Pristine& p = g_pristine[addr];
+    p.n = s.n;
+    std::memcpy(p.bytes, s.original, s.n);
+}
+void pristine_erase(uintptr_t addr) {
+    std::lock_guard lock(g_pristine_mu);
+    g_pristine.erase(addr);
+}
+
 // The slots holding an evaluated layer, by the entry they belong to: a formula's layer reads its entry's other fields, so
 // another layer put on or taken off one of them flushes (evaluates) the entry's evaluated slots again.
 std::map<std::pair<uint32_t, uint32_t>, std::set<uintptr_t>> g_evals;
@@ -256,6 +276,7 @@ bool put_layer(KilnOwner owner, uint64_t seq, uint32_t kind, uint32_t id, int32_
             return false;
         }
         std::memcpy(s.current, s.original, n);
+        pristine_put(addr, s);
     } else if (s.n != n) {
         return false;
     }
@@ -407,6 +428,10 @@ uint32_t store_reset(bool revert, std::string* error) {
     }
     if (revert) store_flush(error);
     g_slots.clear();
+    {
+        std::lock_guard leaf(g_pristine_mu);
+        g_pristine.clear();
+    }
     g_dirty.clear();
     g_txns.clear();
     g_skipped.clear();
@@ -423,6 +448,12 @@ void store_originals(uintptr_t addr, size_t size, uint8_t* out) {
     std::lock_guard lock(g_mu);
     for (auto it = g_slots.lower_bound(addr); it != g_slots.end() && it->first < addr + size; ++it)
         if (it->first + it->second.n <= addr + size) std::memcpy(out + (it->first - addr), it->second.original, it->second.n);
+}
+
+void store_pristine(uintptr_t addr, size_t size, uint8_t* bytes) {
+    std::lock_guard lock(g_pristine_mu);
+    for (auto it = g_pristine.lower_bound(addr); it != g_pristine.end() && it->first < addr + size; ++it)
+        if (it->first + it->second.n <= addr + size) std::memcpy(bytes + (it->first - addr), it->second.bytes, it->second.n);
 }
 
 bool store_original(uintptr_t addr, uint8_t n, uint8_t* out) {
@@ -505,7 +536,10 @@ size_t store_flush_checked(std::string* error, std::vector<uintptr_t>* unwritten
         if (max_stack && s.kind == KILN_CONTENT_ITEMS && s.field >= 0 && &items.schema.fields[static_cast<size_t>(s.field)] == max_stack)
             guard_maybe(*max_stack, s.kind, s.original, s.current);
         // a slot that is clean and back to the original goes (only a written slot can have become so)
-        if (s.layers.empty() && std::memcmp(s.current, s.original, s.n) == 0) g_slots.erase(it);
+        if (s.layers.empty() && std::memcmp(s.current, s.original, s.n) == 0) {
+            pristine_erase(it->first);
+            g_slots.erase(it);
+        }
     }
     if (!dirty.empty()) ++g_gen;
     return done;

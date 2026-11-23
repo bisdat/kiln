@@ -402,8 +402,11 @@ registry::stage::LiveData lazy_alias_data() {
     return data;
 }
 void begin_prepares_copied_base_once() {
-    fresh_live(); auto calls = std::make_shared<int>(0);
-    g.in->prepare = [calls](registry::stage::LiveData* out, std::string*) { ++*calls; *out = lazy_alias_data(); return true; };
+    fresh_live(); auto calls = std::make_shared<int>(0), locked = std::make_shared<int>(0);
+    // review4 NS1: the first-use decode reads the archive for seconds; it never holds the store lock the world thread needs
+    g.in->prepare = [calls, locked](registry::stage::LiveData* out, std::string*) {
+        ++*calls; *locked += tl_depth != 0; *out = lazy_alias_data(); return true;
+    };
     registry_live_status();
     check(*calls == 0, "status does not decode an unused registry");
     const auto h = change(71, "a", R"([{"registry":"items","select":"game:wood_alias","field":"maxStack","op":{"mul":3}}])");
@@ -415,10 +418,14 @@ void begin_prepares_copied_base_once() {
     std::string value;
     check(registry_live_read("items", "game:wood_alias", "maxStack", &value) == KILN_OK && value == "30" && *calls == 1,
           "reads reuse the first prepared model without another decode");
+    check(*locked == 0, "the first-use preparation ran outside the store lock");
 }
 void read_can_be_first_registry_use() {
     fresh_live(); auto calls = std::make_shared<int>(0);
-    g.in->prepare = [calls](registry::stage::LiveData* out, std::string*) { ++*calls; *out = lazy_alias_data(); return true; };
+    g.in->prepare = [calls](registry::stage::LiveData* out, std::string*) {
+        check(tl_depth == 0, "a read's first-use preparation runs outside the store lock");
+        ++*calls; *out = lazy_alias_data(); return true;
+    };
     const auto generation = store_generation(); std::string value;
     check(registry_live_read("items", "game:wood_alias", "maxStack", &value) == KILN_OK && value == "10" && *calls == 1,
           "a mapped read can prepare the copied model without beginning a transaction");

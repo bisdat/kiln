@@ -319,6 +319,7 @@ struct Runner::Impl {
     std::vector<std::string> rm_errs;
     bool rm_loaded = false;
     std::vector<std::pair<std::string, std::string>> order;  // Kiln.Host's (set_order)
+    bool registry_users = false;  // set_order named a mod whose code uses the registry API (review4 NS1)
     bool order_set = false;
     struct Sub {
         uint64_t owner = 0;
@@ -453,16 +454,19 @@ KilnResult Runner::set_order(const std::string& order_json) {
     if (!j.is_array()) return KILN_ERR_INVALID_ARGUMENT;
     std::vector<std::pair<std::string, std::string>> order;
     std::set<std::string> seen;
+    bool users = false;
     for (const auto& row : j) {
         if (!row.is_object() || !row.contains("mod") || !row["mod"].is_string()) return KILN_ERR_INVALID_ARGUMENT;
         const std::string mod = row["mod"].get<std::string>();
         if (!seen.insert(mod).second) return KILN_ERR_INVALID_ARGUMENT;
         order.emplace_back(mod, row.contains("version") && row["version"].is_string() ? row["version"].get<std::string>() : std::string());
+        users |= row.contains("registry") && row["registry"].is_boolean() && row["registry"].get<bool>();
     }
     std::lock_guard lk(d_->mu);
     if (phase_.load() != Phase::None) return KILN_ERR_UNAVAILABLE;
     d_->order = std::move(order);
     d_->order_set = true;
+    d_->registry_users = users;
     return KILN_OK;
 }
 
@@ -771,9 +775,17 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn, const std::vect
     const std::string ids_rel = "ids-" + d.env.side + "-" + d.env.exe_sha256 + ".json";
     const bool ids_missing = d.env.read_data && d.env.write_data && !d.env.exe_sha256.empty() && !d.env.read_data(ids_rel);
     const bool want_base = !inputs.empty();
-    const bool freeze_old = !want_base && d.env.prepare_live && !freeze.empty();
-    std::unique_ptr<model::Source> src = !want_base && !ids_missing && !freeze_old ? nullptr : d.env.source ? d.env.source(&why) : nullptr;
-    if (!want_base && d.env.prepare_live) d.lazy_old = old_fn; // production supplies owned document copies
+    // A mod whose code uses the registry API (Kiln.Host's set_order flag): decode the stable base here, at resources-ready,
+    // before kiln.content writes packs into resident resource pages, rather than at first use (review4 NS1).
+    bool users = false;
+    {
+        std::lock_guard lk(d.mu);
+        users = d.registry_users;
+    }
+    const bool eager = want_base || (users && d.env.prepare_live);
+    const bool freeze_old = !eager && d.env.prepare_live && !freeze.empty();
+    std::unique_ptr<model::Source> src = !eager && !ids_missing && !freeze_old ? nullptr : d.env.source ? d.env.source(&why) : nullptr;
+    if ((!eager || (!want_base && !src)) && d.env.prepare_live) d.lazy_old = old_fn; // production supplies owned document copies
     if (freeze_old) {
         for (const auto& [key, type] : freeze) {
             std::string error;
@@ -801,11 +813,12 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn, const std::vect
     std::unique_ptr<Inventory> inventory;  // before m: the model reads through it
     std::unique_ptr<model::Model> m;
     model::Need need = model::needs_of(d.schema, inputs);
-    if (d.env.prepare_live && want_base) need.all = true;
+    if (d.env.prepare_live && eager) need.all = true;
     bool hit = false;
     if (!src && !want_base) {
+        if (eager) d.log(1, "registry: the base could not be read at the stage (" + why + "); it is prepared at first use instead");
         d.meta.base.origin = "none";
-    } else if (!want_base) {
+    } else if (!eager) {
         if (ids_missing) {
             // Only the once-per-build id ledger: no stable field decode on unused starts.
             model::Model ids_model(*src, d.rm, d.schema);
@@ -896,7 +909,7 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn, const std::vect
     // A cache hit has not populated the model's entry locations yet. Locate boot targets before releasing its source.
     if (m) m->release();
     std::lock_guard lk(d.mu);
-    d.full_live = want_base && need.all && bool(src);
+    d.full_live = eager && need.all && bool(src);
     d.base = std::move(base);
     d.old = std::move(old);
     for (ModInput& in : inputs) {

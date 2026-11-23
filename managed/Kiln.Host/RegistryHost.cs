@@ -28,13 +28,20 @@ internal unsafe struct KilnRegistryHostApi
 
 internal static unsafe class RegistryHost
 {
-    /// <summary>The order as set_order takes it: [{"mod", "version"}], every mod once, in order.</summary>
-    internal static string OrderJson(IEnumerable<(string Id, string Version)> order)
+    /// <summary>The order as set_order takes it: [{"mod", "version"}], every mod once, in order. A mod whose code uses the
+    /// registry API carries "registry": true: the stage then decodes the game's base at resources-ready, before kiln.content
+    /// writes packs into resident resource pages (review4 NS1).</summary>
+    internal static string OrderJson(IEnumerable<(string Id, string Version)> order, ISet<string>? registryUsers = null)
     {
         var a = new JsonArray();
         var seen = new HashSet<string>(StringComparer.Ordinal);
         foreach (var (id, version) in order)
-            if (seen.Add(id)) a.Add(new JsonObject { ["mod"] = id, ["version"] = version });
+        {
+            if (!seen.Add(id)) continue;
+            var row = new JsonObject { ["mod"] = id, ["version"] = version };
+            if (registryUsers?.Contains(id) == true) row["registry"] = true;
+            a.Add(row);
+        }
         return a.ToJsonString();
     }
 
@@ -72,10 +79,12 @@ internal static unsafe class RegistryHost
                 return;
             }
             var order = mods.RegistryOrder();
-            var json = OrderJson(order.Select(m => (m.Id, m.Version)));
+            var users = mods.RegistryUsers();
+            var json = OrderJson(order.Select(m => (m.Id, m.Version)), users);
             var rc = NativeCalls.WithUtf8(json, s => t->SetOrder(s));
             log(rc == KilnAbi.Ok ? LogLevel.Info : LogLevel.Warn,
-                rc == KilnAbi.Ok ? $"registry: stage order = Kiln.Host load order, {order.Count} mod(s)" : $"registry: set_order refused the load order (rc {rc})");
+                rc == KilnAbi.Ok ? $"registry: stage order = Kiln.Host load order, {order.Count} mod(s), {users.Count} using the registry API"
+                                 : $"registry: set_order refused the load order (rc {rc})");
             if (mode is null) return;
             var m = mode.Equals("onBoot", StringComparison.OrdinalIgnoreCase) ? KilnRegistryHostApi.ModeOnBoot
                 : mode.Equals("resourcesReady", StringComparison.OrdinalIgnoreCase) ? KilnRegistryHostApi.ModeResourcesReady : uint.MaxValue;
@@ -133,5 +142,22 @@ internal sealed partial class ModManager
         var env = new ResolveEnvironment(_kilnVersion, _apiVersion, _options.Side, _options.HasFeature, ResolveEnvironment.NoneLoaded)
             { Hosting = _options.Side == ManifestSide.Client && _options.HostedServerMods, Capability = _options.Capability };
         return Resolver.Resolve(input, env).Order.Where(c => c.Manifest is not null).Select(c => (c.Manifest!.Id, c.Manifest!.Version)).ToList();
+    }
+
+    /// <summary>The mods whose code references the registry API (OnRegistry, Registry.Change/Read), from metadata only: the
+    /// stage prepares the game's base for them at resources-ready instead of at first use (review4 NS1).</summary>
+    internal HashSet<string> RegistryUsers()
+    {
+        var users = new HashSet<string>(StringComparer.Ordinal);
+        try
+        {
+            var candidates = RegistryCandidates();
+            var directories = candidates.Select(c => c.Directory).ToArray();
+            foreach (var (manifest, directory) in candidates)
+                if (manifest.HasCode && RegistryDeclarations.MightOverride(Path.Combine(directory, manifest.EntryAssembly), directories))
+                    users.Add(manifest.Id);
+        }
+        catch (Exception) { /* metadata only: an unreadable folder is no registry user, and the stage stays lazy */ }
+        return users;
     }
 }
