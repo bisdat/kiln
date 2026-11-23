@@ -328,10 +328,12 @@ with the installed helper for events. The fallback key is remappable in Kiln's K
 or empty configured bindings do not silently become F9, nor does a `toggleKey` that is not text (null, a number:
 ShroudForge refuses those too), which reports `menuKey` "" and a warning in kiln.log. Helper exit hands ownership to Kiln; stopped runtime removes
 the fallback binding. SF module-off and self-hosted behavior stay intact. An installed `shroudforge.exe` older than the
-runtime Kiln runs (by its install's `<game>/shroudforge/version.json`; the exe has no version resource), or of a
-version that cannot be read, opens neither window, since it refuses the newer settings that runtime writes (a 1.7.9 app
-beside the bundled 1.8.1: `Additional properties are not allowed ('uiTargets' was unexpected)`): kiln.log says so in one
-warning, Kiln's page takes the shortcut and mods load as before (0.2.0-dev.30.7, `src/helper_version.h`).
+runtime Kiln runs (by its install's `<game>/shroudforge/version.json`; the exe has no version resource) opens neither
+window, since it refuses the newer settings that runtime writes (a 1.7.9 app beside the bundled 1.8.1: `Additional
+properties are not allowed ('uiTargets' was unexpected)`): kiln.log says so in one warning, Kiln's page takes the
+shortcut and mods load as before (0.2.0-dev.30.7, `src/helper_version.h`). One whose version cannot be read (no
+`version.json`, no version in it, or text that is no version) starts its windows as before, and kiln.log says in one
+info line that they may fail if the app is older.
 
 Windowless native Wine tests exercise absent/installed/exited/disabled/self-hosted helpers, an app older, equal,
 newer or of unreadable version (`run.py` `app-*`; the comparison itself: `tests/test-helper-version.sh`) and repeated

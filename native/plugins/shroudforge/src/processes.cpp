@@ -118,19 +118,20 @@ void start_helper_processes(const std::filesystem::path& root, bool server, cons
     }
     const DWORD pid = GetCurrentProcessId();
     // An app older than the runtime refuses the settings that runtime writes, so its windows would fail: none starts,
-    // said once; Kiln's ShroudForge page takes the shortcut (helper_menu) and the mods load as they do.
+    // said once; Kiln's ShroudForge page takes the shortcut (helper_menu) and the mods load as they do. One whose version
+    // cannot be read starts them as before, said once too, since they fail if it is older.
     const std::string refusal = helper_windows_refusal(app_version, runtime_version);
-    bool refused = false;
+    const std::string note = refusal.empty() ? helper_windows_note(app_version, runtime_version) : std::string();
+    bool said = false;
     for (auto& h : g_helpers) {
         if (!sf_module_enabled(root, h.module)) {
             logf(KILN_LOG_INFO, "%s: switched off in ShroudForge's settings", h.what);
             continue;
         }
-        if (!refusal.empty()) {
-            if (!refused) logf(KILN_LOG_WARN, "%s", refusal.c_str());
-            refused = true;
-            continue;
-        }
+        if (!said && !refusal.empty()) logf(KILN_LOG_WARN, "%s", refusal.c_str());
+        if (!said && !note.empty()) logf(KILN_LOG_INFO, "%s", note.c_str());
+        said = true;
+        if (!refusal.empty()) continue;
         const std::wstring event_name = std::wstring(h.event_prefix) + std::to_wstring(pid);
         h.stop = CreateEventW(nullptr, TRUE, FALSE, event_name.c_str());
         if (!h.stop) continue;

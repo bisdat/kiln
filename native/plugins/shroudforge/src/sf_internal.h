@@ -25,7 +25,8 @@ std::filesystem::path sf_directory(const std::filesystem::path& root, const char
 // (MIT, bonsaibauer/shroudforge). Without the Modloader helper, retain its public Lua toggle event for Kiln.Ui.
 // Never create/consume that event while the real helper owns it (or when self-hosted). `runtime_version`: the version
 // of the runtime this start runs; `app_version`: the installed ShroudForge's, from <game>/shroudforge/version.json ("" when
-// unreadable). An app older than the runtime, or of a version that cannot be read, opens no window (helper_version.h).
+// unreadable). An app older than the runtime opens no window; one of a version that cannot be read opens them as before,
+// with one info line (helper_version.h).
 void start_helper_processes(const std::filesystem::path& root, bool server, const std::string& runtime_version,
                             const std::string& app_version);
 const char* helper_menu();  // helper | kiln | off | server | unavailable; also notices an exited helper
