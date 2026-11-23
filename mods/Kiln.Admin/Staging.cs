@@ -18,7 +18,24 @@ internal sealed class StagingError(string message) : Exception(message);
 internal static class Staging
 {
     public const int Format = 1, MaxFiles = 20000, MaxRelPath = 240, ResultsListed = 20;
-    private static readonly object Gate = new();  // one staging at a time
+    private static readonly object Gate = new();  // one change of kiln/staged at a time
+
+    /// <summary>The gate for an op on the tick thread (cancel, rollback): taken at once or refused, never waited for, so
+    /// a staging copy in progress on a pool thread can't stall the server's step.</summary>
+    private readonly struct Turn : IDisposable
+    {
+        private Turn(bool taken) => Taken = taken;
+        private bool Taken { get; }
+        public static Turn Now()
+        {
+            if (!Monitor.TryEnter(Gate)) throw new StagingError("an update is being staged right now; try again when it is done");
+            return new Turn(true);
+        }
+        public void Dispose()
+        {
+            if (Taken) Monitor.Exit(Gate);
+        }
+    }
     /// <summary>Kiln's own folders, which the manual update of a server pack install replaces whole
     /// (docs/kiln/dedicated-servers.md, "Updating Kiln").</summary>
     internal static readonly string[] PackFolders = ["kiln/dotnet/", "kiln/host/", "kiln/services/", "kiln/sigdb/"];
@@ -368,8 +385,9 @@ internal static class Staging
     /// A server pack install has no receipt: then the server's default components (what the pack holds), and what the
     /// manual update in dedicated-servers.md does: Kiln's own folders (<see cref="PackFolders"/>) end up exactly the new
     /// version's, nothing else is removed, and a receipt is written so the next update knows the install.</summary>
+    /// <param name="running">The Kiln version this server runs (Game.KilnVersion): the version replaced, when no receipt says it.</param>
     public static JsonObject StageKiln(string kiln, string? source, IReadOnlyDictionary<string, string>? expect, string? label,
-        string? bundleSha256, string by, CancellationToken ct = default)
+        string? bundleSha256, string by, CancellationToken ct = default, string? running = null)
     {
         lock (Gate)
         {
@@ -461,7 +479,7 @@ internal static class Staging
                         }
                     }
                 }
-                var installed = Text(receipt["runtime"], "version");
+                var installed = Text(receipt["runtime"], "version") ?? running;
                 if (writes.Count == 0 && removes.Count == 0 && installed == version) throw new StagingError($"Kiln {version} is installed already");
 
                 // the new receipt, written last by the start that applies it
@@ -558,7 +576,7 @@ internal static class Staging
     // ---- cancel, rollback, list ----
     public static JsonObject Cancel(string kiln, string? unitArg)
     {
-        lock (Gate)
+        using (Turn.Now())
         {
             var p = new Layout(kiln);
             var unit = Unit(unitArg);
@@ -583,7 +601,7 @@ internal static class Staging
 
     public static JsonObject Rollback(string kiln, string? unitArg, string by)
     {
-        lock (Gate)
+        using (Turn.Now())
         {
             var p = new Layout(kiln);
             var unit = Unit(unitArg);

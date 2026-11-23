@@ -368,11 +368,11 @@ public sealed class StagingTests : IDisposable
         Put(Path.Combine(Kiln, "plugins", "someone-elses.dll"), "a plugin");  // outside Kiln's own folders: kept
         var data = DataBefore();
         Bundle("pack", New());
-        var r = Staging.StageKiln(Kiln, "pack", null, null, null, "t");
+        var r = Staging.StageKiln(Kiln, "pack", null, null, null, "t", running: "0.2.0-dev.30.9");
         Assert.Contains("had no receipt", r["note"]!.GetValue<string>(), StringComparison.Ordinal);
         var doc = Read(Path.Combine(Staged, "kiln", "staged.json"));
         Assert.Null(doc["base"]!["receipt"]);  // kiln-core checks there is still no receipt when it applies
-        Assert.Null(doc["from"]);
+        Assert.Equal("0.2.0-dev.30.9", doc["from"]!.GetValue<string>());  // no receipt: the version this server runs
         var removes = ((JsonArray)doc["remove"]!).Select(x => x!["path"]!.GetValue<string>()).Order(StringComparer.Ordinal).ToList();
         Assert.Equal(new[] { "kiln/services/gone.dll", "kiln/services/kiln-old.dll" }, removes);
         var next = Read(Path.Combine(Staged, "kiln", "files", "kiln", ".install.json"));
@@ -385,6 +385,33 @@ public sealed class StagingTests : IDisposable
         Put(Path.Combine(_game, "dinput8.dll"), "MZ another loader");
         Assert.Contains("dinput8.dll is not the one Kiln installed",
             Assert.Throws<StagingError>(() => Staging.StageKiln(Kiln, "pack", null, null, null, "t")).Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Cancel_and_rollback_never_wait_for_a_staging_in_progress()
+    {
+        Put(Path.Combine(Staged, "rollback", "mod.m.json"), "{}");
+        using var copying = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        // a staging that holds the gate (a long copy on a pool thread)
+        var holder = Task.Run(() =>
+        {
+            var gate = typeof(Staging).GetField("Gate", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!.GetValue(null)!;
+            lock (gate)
+            {
+                copying.Set();
+                release.Wait(TimeSpan.FromSeconds(10));
+            }
+        });
+        Assert.True(copying.Wait(TimeSpan.FromSeconds(10)));
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        Assert.Contains("being staged right now", Assert.Throws<StagingError>(() => Staging.Cancel(Kiln, "mod.m")).Message, StringComparison.Ordinal);
+        Assert.Contains("being staged right now", Assert.Throws<StagingError>(() => Staging.Rollback(Kiln, "mod.m", "t")).Message, StringComparison.Ordinal);
+        Assert.True(watch.ElapsedMilliseconds < 1000, $"{watch.ElapsedMilliseconds} ms");
+        Assert.NotNull(Staging.List(Kiln)["units"]);  // the list never takes the gate
+        release.Set();
+        holder.Wait();
+        Assert.Equal(new[] { "rollback" }, Staging.Cancel(Kiln, "mod.m")["canceled"]!.AsArray().Select(x => x!.GetValue<string>()));
     }
 
     [Fact]

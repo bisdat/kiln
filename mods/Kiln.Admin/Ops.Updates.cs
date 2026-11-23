@@ -32,7 +32,8 @@ internal static partial class Ops
             {
                 "mod" => await Task.Run(() => Guard(() => Staging.StageMod(kiln, source, req["id"]?.GetValue<string>(), req["folder"]?.GetValue<string>(),
                     expect, label, by, token)), token),
-                "kiln" => await Task.Run(() => Guard(() => Staging.StageKiln(kiln, source, expect, label, req["sha256"]?.GetValue<string>(), by, token)), token),
+                "kiln" => await Task.Run(() => Guard(() => Staging.StageKiln(kiln, source, expect, label, req["sha256"]?.GetValue<string>(), by, token,
+                    running: Game.KilnVersion)), token),
                 _ => throw new AdminError("kind must be \"mod\" or \"kiln\""),
             };
             log.Info($"update staged for the next start: {result["unit"]} {result["staged"]?["version"]} ({by}{(label is null ? "" : ", " + label)})");
