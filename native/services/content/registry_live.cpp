@@ -1846,7 +1846,8 @@ KilnResult registry_live_read(const std::string& reg_name, const std::string& id
     if (identity.chain.empty()) identity.chain.push_back({});
     bind(ref, identity);
     const auto it = g.read_fields.find(ref);
-    if (it == g.read_fields.end()) return KILN_ERR_UNAVAILABLE;
+    // review2 N6: an id this world does not have is NOT_FOUND, as before a world; UNAVAILABLE is an unreadable field
+    if (it == g.read_fields.end()) return g.read_reason == "the entry is not in this world" ? KILN_ERR_NOT_FOUND : KILN_ERR_UNAVAILABLE;
     std::vector<SlotBytes> bytes(it->second.slots.size());
     for (size_t i = 0; i < bytes.size(); ++i) {
         const LiveSlot& slot = it->second.slots[i];

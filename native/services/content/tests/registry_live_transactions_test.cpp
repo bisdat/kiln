@@ -235,6 +235,15 @@ void world_stop_reports_without_its_live_rows() {
     registry_live_world_stop(); registry_live_publish();
     check(!has_live(), "after the world ends, registry.json no longer shows its live rows");
 }
+// review2 N6: a live read of an id the world does not have is NOT_FOUND, as before a world.
+void live_read_of_a_missing_entry_is_not_found() {
+    fresh_live(); std::string value;
+    check(registry_live_read("items", "game:nothing_here", "maxStack", &value) == KILN_ERR_NOT_FOUND, "an unknown id is NOT_FOUND");
+    reg(KILN_CONTENT_ITEMS).by_id.erase(SWORD);
+    check(registry_live_read("items", "game:sword_t2", "maxStack", &value) == KILN_ERR_NOT_FOUND, "an entry missing in this world is NOT_FOUND");
+    registry_live_world_stop();
+    check(registry_live_read("items", "game:nothing_here", "maxStack", &value) == KILN_ERR_NOT_FOUND, "as before a world");
+}
 // review4 NM1: two retained changes, one slot each, the write of one of them fails at a reapplication: only that one is charged.
 void multi_change_write_failure_is_attributed_per_change() {
     fresh_live(); RegistryLiveReply reply;
@@ -961,6 +970,8 @@ int main() {
         {"rejected_process_change_returns_next_world", rejected_process_change_returns_next_world},
         {"foreign_slot_keeps_the_rest_of_a_retained_change", foreign_slot_keeps_the_rest_of_a_retained_change},
         {"pass_read_excludes_own_layers", pass_read_excludes_own_layers},
+
+        {"live_read_of_a_missing_entry_is_not_found", live_read_of_a_missing_entry_is_not_found},
         {"world_stop_reports_without_its_live_rows", world_stop_reports_without_its_live_rows},
 
         {"drop_table_change_is_pending_resource", drop_table_change_is_pending_resource},
