@@ -285,6 +285,8 @@ There is no public bootpack or epoch API. Ordinary `Bodies.Villager` / `Bodies.F
 
 For an authored roster body:
 
+- Give it a private model/rig. Sharing that file or skeleton with an eager creature, look, unrelated body/animation,
+  or recipe graph/model is refused with both users named; the cook never removes the other user's assets.json entries.
 - Set `Size` explicitly: radius **0.05–4 m**, height **0.1–8 m**, both finite. The cooked model's floor must be
   within **0.05 m of Y0**, and its bounds must fit the radius-height box. Keep `Scale` unset or **1**, and
   `Colliders` unset or empty. Creature blocks retain their existing scale and collider support.

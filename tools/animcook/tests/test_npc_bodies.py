@@ -100,6 +100,62 @@ class NpcBodies(unittest.TestCase):
         (self.mod / "kiln.mod.json").write_text('{ // material id\n "id": "npc-mod", }')
         self.assertEqual(([], [], []), B.body_manifest(self.recipe, entries, True))
 
+    def test_a_shared_creature_rig_is_refused_before_its_manifest_changes(self):
+        import copy
+        npc = copy.deepcopy(self.doc["npcs"]["tobin"])
+        creature = copy.deepcopy(npc)
+        del creature["motions"]
+        self.doc = {"creatures": {"hostile": creature}}
+        self.write()
+        self.assertTrue(R.Run(self.recipe, TYPES).run(update_manifest=True)["ok"])
+        manifest = self.mod / "assets/assets.json"
+        before = manifest.read_bytes()
+        self.assertTrue(json.loads(before)["entries"])
+        self.doc["npcs"] = {"tobin": npc}
+        self.write()
+        with self.assertRaisesRegex((B.BlocksError, R.RecipeError), "tobin.*creature hostile"):
+            R.Run(self.recipe, TYPES).run(update_manifest=True)
+        self.assertEqual(before, manifest.read_bytes())
+
+    def test_an_unowned_animation_on_the_roster_rig_is_refused(self):
+        import copy
+        self.doc["animations"] = {"spare": copy.deepcopy(self.doc["npcs"]["tobin"]["animation"])}
+        self.write()
+        with self.assertRaisesRegex((B.BlocksError, R.RecipeError), "tobin.*animation spare"):
+            R.Run(self.recipe, TYPES).run(update_manifest=True)
+
+    def test_an_extra_recipe_graph_cannot_lose_its_eager_skeleton_and_clips(self):
+        graph = dict(B.plan(self.mod)["graphs"][0], name="legacy_graph")
+        steps = R.load(self.recipe)["steps"] + [graph]
+        self.recipe.write_text(json.dumps({"format": 1, "tool": "animcook", "steps": steps}))
+        with self.assertRaisesRegex((B.BlocksError, R.RecipeError), "tobin.*graph legacy_graph"):
+            R.Run(self.recipe, TYPES).run(update_manifest=True)
+
+    def test_a_look_cannot_take_the_roster_model_out_of_its_eager_manifest(self):
+        self.doc["looks"] = {"coat": {"model": "models/golem.glb"}}
+        self.write()
+        with self.assertRaisesRegex((B.BlocksError, R.RecipeError), "tobin.*look coat"):
+            R.Run(self.recipe, TYPES).run(update_manifest=True)
+
+    def test_an_extra_model_step_on_the_roster_rig_is_refused(self):
+        with self.assertRaisesRegex(B.BlocksError, "tobin.*model other_model"):
+            B.body_step(self.recipe, {"op": "model", "name": "other_model", "skeleton": "golem"})
+
+    def test_two_npcs_may_share_one_private_group(self):
+        import copy
+        self.doc["npcs"]["second"] = copy.deepcopy(self.doc["npcs"]["tobin"])
+        self.write()
+        self.assertTrue(R.Run(self.recipe, TYPES).run(update_manifest=True)["ok"])
+        self.assertEqual([], json.loads((self.mod / "assets/assets.json").read_text())["entries"])
+        self.assertEqual({"tobin", "second"}, set(json.loads((self.mod / "assets/npc-bodies.v1.json").read_text())["bodies"]))
+
+    def test_one_run_resolves_its_body_specs_once_not_per_step(self):
+        from unittest.mock import patch
+        run = R.Run(self.recipe, TYPES)
+        with patch.object(B, "npc_bodies", wraps=B.npc_bodies) as resolve:
+            self.assertTrue(run.run(update_manifest=True)["ok"])
+        self.assertEqual(1, resolve.call_count)
+
     def stage_model(self):
         # The model emitter's output is synthetic: the split seam needs no installed game.
         model = self.mod / "assets/cooked/models_golem.model.bin"

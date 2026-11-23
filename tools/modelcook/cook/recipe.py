@@ -486,7 +486,11 @@ def run(path, k, t, exe_sha256=None, update_manifest=False, given=None):
     except ImportError:
         AB = None
     deferred_files = set()
-    if AB is not None and AB.npc_bodies(mod_dir):
+    try:
+        body_specs = AB.npc_bodies(mod_dir) if AB is not None else {}
+    except AB.BlocksError as error:
+        raise RecipeError(str(error)) from error
+    if body_specs:
         _checked(p, CP.npc_manifest)
     own = None
     mod_files = {}  # what goes in the mod's folder rather than beside the recipe: blocks made from a glTF, and PNGs that were embedded in it
@@ -494,6 +498,10 @@ def run(path, k, t, exe_sha256=None, update_manifest=False, given=None):
         if st["op"] == "worn":
             st = W.as_model_step(st, base_dir.resolve(), mod_dir)
         op = st["op"]
+        try:
+            deferred = AB.body_step(p, st, body_specs) if AB is not None else False
+        except AB.BlocksError as error:
+            raise RecipeError(f"step {i} ({op}): {error}") from error
         base_id = st.get("base")
         if base_id not in inputs and not (op == "model" and base_id is None):
             raise RecipeError(f"step {i} ({op}): base {base_id!r} is not an input")
@@ -529,7 +537,7 @@ def run(path, k, t, exe_sha256=None, update_manifest=False, given=None):
                 guid, mode = S.model_identity(_model_guid(doc, st, inputs, p), inputs[base_id]["guid"] if base_id else None, st.get("mode"))
                 generated = S.model_entries(guid, mode, f"{out}/{stem}.bin", f"{out}/{stem}.blob")
                 entries.extend(generated)
-                if AB is not None and AB.body_step(p, st):
+                if deferred:
                     deferred_files.update(e["file"] for e in generated)
                 reports.append({"op": op, "step": i, "name": st.get("name") or stem, "guid": guid,
                                 "ok": True, "skipped": SKIPPED, "warnings": from_gltf})
@@ -547,7 +555,7 @@ def run(path, k, t, exe_sha256=None, update_manifest=False, given=None):
         r["step"] = i
         files.update(f)
         entries.extend(e)
-        if AB is not None and AB.body_step(p, st):
+        if deferred:
             deferred_files.update(entry["file"] for entry in e)
         reports.append(r)
 
@@ -580,7 +588,7 @@ def run(path, k, t, exe_sha256=None, update_manifest=False, given=None):
     body_missing, body_mismatched = [], []
     if AB is not None:
         try:
-            entries, body_missing, body_mismatched = AB.body_manifest(p, entries, update_manifest, deferred_files, TOOL)
+            entries, body_missing, body_mismatched = AB.body_manifest(p, entries, update_manifest, deferred_files, TOOL, body_specs)
         except AB.BlocksError as e:
             raise RecipeError(str(e)) from e
     # the committed assets.json must name every ordinary output exactly as cooked: a client's outputs on either side

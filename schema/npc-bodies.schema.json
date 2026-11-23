@@ -62,7 +62,9 @@
           "properties": {
             "key": { "type": "string" }, "body": { "$ref": "kiln-blocks.schema.json#/$defs/body" },
             "animation": { "$ref": "kiln-blocks.schema.json#/$defs/animation" }, "motions": { "$ref": "kiln-blocks.schema.json#/$defs/npcMotions" },
-            "skeletonName": { "type": "string" }, "graphName": { "type": "string" }, "modelName": { "type": "string" }
+            "skeletonName": { "type": "string" }, "animationName": { "type": "string", "description": "The private animation block's unbound base graph name." },
+            "bodyName": { "type": "string", "description": "The private body block name used by slot-bound graph variants." },
+            "graphName": { "type": "string" }, "modelName": { "type": "string" }
           }
         },
         "model": { "type": ["string", "null"], "format": "uuid" },

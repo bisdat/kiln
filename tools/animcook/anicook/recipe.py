@@ -426,7 +426,8 @@ class Run:
 
     def run(self, update_manifest=False, game_info=None, types_info=None):
         deferred_files = set()
-        if B.npc_bodies(B.mod_dir_of(self.p) or self.dir.parent):
+        body_specs = B.npc_bodies(B.mod_dir_of(self.p) or self.dir.parent)
+        if body_specs:
             try:
                 CP.npc_manifest(self.p)  # all paths checked before the first output is written
             except CP.Refused as e:
@@ -435,10 +436,11 @@ class Run:
             before = len(self.entries)
             fn = {"skeleton": self.skeleton_step, "clips": self.clips_step, "graph": self.graph_step}[st["op"]]
             try:
+                deferred = B.body_step(self.p, st, body_specs)
                 r = fn(st)
-            except (K.SkeletonError, G.GraphError, ValueError) as e:
+            except (B.BlocksError, K.SkeletonError, G.GraphError, ValueError) as e:
                 raise RecipeError(f"step {i} ({st['op']}): {e}") from e
-            if B.body_step(self.p, st):
+            if deferred:
                 deferred_files.update(e["file"] for e in self.entries[before:])
             r["step"] = i
             self.reports.append(r)
@@ -455,7 +457,7 @@ class Run:
         except CP.Refused as e:
             raise RecipeError(f"{self.p}: {e}") from e
         try:
-            normal, body_missing, body_mismatched = B.body_manifest(self.p, self.entries, update_manifest, deferred_files, TOOL)
+            normal, body_missing, body_mismatched = B.body_manifest(self.p, self.entries, update_manifest, deferred_files, TOOL, body_specs)
         except B.BlocksError as e:
             raise RecipeError(str(e)) from e
         man = json.loads(mp.read_text()) if mp.exists() else {"format": 1, "entries": []}

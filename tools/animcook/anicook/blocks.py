@@ -387,7 +387,7 @@ def npc_bodies(mod_dir):
     root = Path(mod_dir)
     if not (root / "blocks").is_dir():
         return {}
-    definitions = {s: {} for s in ("npcs", "bodies", "animations", "npcMotions")}
+    definitions = {s: {} for s in ("npcs", "creatures", "looks", "bodies", "animations", "npcMotions")}
     for f in sorted((root / "blocks").glob("*.json")):
         try:
             doc = json.loads(_relaxed(f.read_text()))
@@ -396,7 +396,10 @@ def npc_bodies(mod_dir):
         if not isinstance(doc, dict):
             continue
         for section, into in definitions.items():
-            for name, b in (doc.get(section) or {}).items():
+            group = doc.get(section)
+            if not isinstance(group, dict):
+                continue  # malformed block sections belong to the loader/linter, not this closure
+            for name, b in group.items():
                 # The existing block loader lets the later definition replace an earlier one (lint warns).
                 # Merely adding body planning must not turn ordinary duplicate body definitions into cook errors.
                 into[name] = b
@@ -436,8 +439,46 @@ def npc_bodies(mod_dir):
         if sk != (animation.get("skeleton") or stem(animation["clips"])):
             raise BlocksError(f"npcs.{name}.animation: body and animation must use the same skeleton")
         out[name] = {"key": npc.get("was") or name, "body": body, "animation": animation, "motions": motions,
-                     "skeletonName": sk, "graphName": f"{an}.{bn}" if body.get("slots") else an,
+                     "skeletonName": sk, "animationName": an, "bodyName": bn, "graphName": f"{an}.{bn}" if body.get("slots") else an,
                      "modelName": model_name(body["model"])}
+    if not out:
+        return out
+
+    def local_part(value, section):
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, str):
+            if ":" in value:
+                owner, value = value.split(":", 1)
+                if owner != _manifest_id(root):
+                    return None
+            return definitions[section].get(value)
+        return None
+
+    def shared_rig(block, spec):
+        if not isinstance(block, dict):
+            return False
+        source = block.get("model") or block.get("clips")
+        return isinstance(source, str) and ((block.get("skeleton") or stem(source)) == spec["skeletonName"] or
+                                           (block.get("model") and model_name(source) == spec["modelName"]))
+
+    # A deferred skeleton/model/clip cannot also satisfy an eager graph or creature. Refuse before either tool writes
+    # anything rather than silently stripping another block's resources from assets.json. NPCs may share their group.
+    owned = {id(spec[field]) for spec in out.values() for field in ("body", "animation")}
+    for name, spec in out.items():
+        for creature_name, creature in definitions["creatures"].items():
+            if not isinstance(creature, dict):
+                continue
+            if any(shared_rig(local_part(creature.get(field), section), spec)
+                   for field, section in (("body", "bodies"), ("animation", "animations"))):
+                raise BlocksError(f"npcs.{name}.body: this rig is also used by creature {creature_name}: give the roster body its own file/rig")
+        for look_name, look in definitions["looks"].items():
+            if isinstance(look, dict) and isinstance(look.get("model"), str) and model_name(look["model"]) == spec["modelName"]:
+                raise BlocksError(f"npcs.{name}.body: this model is also used by look {look_name}: give the roster body its own file/rig")
+        for section, kind in (("bodies", "body"), ("animations", "animation")):
+            for block_name, block in definitions[section].items():
+                if id(block) not in owned and shared_rig(block, spec):
+                    raise BlocksError(f"npcs.{name}.body: this rig is also used by {kind} {block_name}: give the roster body its own file/rig")
     return out
 
 
@@ -508,18 +549,27 @@ def _motion_shape(motions, where):
         raise BlocksError(f"{where}: unknown motion field")
 
 
-def body_step(recipe_path, step):
-    """Does a step contribute to an authored NPC closure? All graphs/clips on its skeleton join the same deferred group."""
-    specs = npc_bodies(mod_dir_of(recipe_path) or Path(recipe_path).parent.parent)
-    for spec in specs.values():
-        op = step.get("op")
-        if op == "model" and step.get("name") == spec["modelName"]:
-            return True
-        if op == "skeleton" and step.get("name") == spec["skeletonName"]:
-            return True
-        if op in ("clips", "graph") and step.get("skeleton") == spec["skeletonName"]:
-            return True
-    return False
+def body_step(recipe_path, step, specs=None):
+    """Select a private NPC closure; never take a shared eager model/graph's rig out of assets.json."""
+    if specs is None:
+        specs = npc_bodies(mod_dir_of(recipe_path) or Path(recipe_path).parent.parent)
+    op = step.get("op")
+    owners = [(name, spec) for name, spec in specs.items() if step.get("skeleton") == spec["skeletonName"]]
+    if op in ("model", "graph") and owners:
+        field = "modelName" if op == "model" else "graphName"
+        names = {spec[field] for _, spec in owners}
+        if op == "graph":
+            names.update(spec["animationName"] for _, spec in owners if "animationName" in spec)  # unbound private base graphs
+            # The existing planner also emits the slot-bound cross-product of animations and bodies on one rig.
+            names.update(f"{animation['animationName']}.{body['bodyName']}" for _, animation in owners for _, body in owners
+                         if "animationName" in animation and "bodyName" in body)
+        if step.get("name") not in names:
+            raise BlocksError(f"npcs.{owners[0][0]}.body: this rig is also used by {op} {step.get('name', '<unnamed>')}: give the roster body its own file/rig")
+        return True
+    return any((op == "model" and step.get("name") == spec["modelName"]) or
+               (op == "skeleton" and step.get("name") == spec["skeletonName"]) or
+               (op == "clips" and step.get("skeleton") == spec["skeletonName"])
+               for spec in specs.values())
 
 
 def _body_bindings(spec, graph, clips, where):
@@ -578,7 +628,7 @@ def _body_bindings(spec, graph, clips, where):
     return out
 
 
-def body_manifest(recipe_path, entries, update, selected=None, producer="modelcook"):
+def body_manifest(recipe_path, entries, update, selected=None, producer="modelcook", specs=None):
     """Split the current cook's entries, merge producer-owned chunks, hash every owned file. No game resource is published here.
 
     A partial two-tool cook is explicitly incomplete; missing model bytes on a server or unlowered material blocks cannot become Ready.
@@ -588,7 +638,8 @@ def body_manifest(recipe_path, entries, update, selected=None, producer="modelco
     import hashlib
     from . import cookpaths as CP
     root = mod_dir_of(recipe_path) or Path(recipe_path).parent.parent
-    specs = npc_bodies(root)
+    if specs is None:
+        specs = npc_bodies(root)
     if not specs and not (Path(root) / "assets/npc-bodies.v1.json").exists():
         return entries, [], []
     try:
