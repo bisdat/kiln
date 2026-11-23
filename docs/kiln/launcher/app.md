@@ -675,7 +675,9 @@ is a webview that never painted the page (a player on NVIDIA / X11 with 0.2.0-de
     also dies or times out, the next start forces nothing, turns the switch off, and writes
     `state/force-dmabuf-failed.json` with why and when. It does not alternate indefinitely between failed renderers.
   - `app_started` is only page readiness. `app_render_frame` reports visibility separately and confirms startup only
-    after two visible animation frames. Hidden/minimized starts are not considered failed visible attempts. A
+    after two consecutive visible animation frames, checking the native window is shown and not minimized as well as
+    the document. Hiding between callbacks resets that confirmation; the IPC independently rejects a hidden window.
+    Hidden/minimized starts are not considered failed visible attempts. A
     successful frame clears the pending guards after 10 seconds (or on a clean exit). Successful automatic SHM recovery
     is remembered in `state/force-dmabuf-recovered.json`, separately from a manual opt-in, keyed by the stable executable
     or AppImage path and GTK display backend. That working automatic renderer is used on subsequent matching starts.

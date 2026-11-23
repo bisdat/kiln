@@ -954,6 +954,9 @@ impl Watch {
     pub fn has_started(&self) -> bool {
         self.state.lock().unwrap_or_else(|e| e.into_inner()).started.is_some()
     }
+    pub fn has_window(&self) -> bool {
+        self.state.lock().unwrap_or_else(|e| e.into_inner()).window.is_some()
+    }
     pub fn page_painted(&self) -> bool {
         let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let first = !s.painted;
@@ -1175,7 +1178,7 @@ pub fn frame_painted(painted: bool, visible: bool) -> Option<String> {
             { log(&format!("could not update startup visibility: {}", e.message)); }
         }
     }
-    if !painted || !visible || !WATCH.page_painted() { return None; }
+    if !painted || !visible || !WATCH.has_window() || !WATCH.page_painted() { return None; }
     WATCH.page_started();
     std::thread::Builder::new().name("kiln-render-settle".into()).spawn(|| {
         std::thread::sleep(SETTLE);
@@ -2813,6 +2816,10 @@ mod tests {
             let args = if case == "software" { args(&[ARG_SOFTWARE]) } else if ["escape", "unwritable-escape"].contains(&case.as_str()) { args(&[ARG_NO_DMABUF]) } else { args(&[]) };
             prepare_for_driver(&args, case != "non-nvidia");
             match case.as_str() {
+                "never-shown" => {
+                    frame_painted(true, true);
+                    assert!(!WATCH.has_painted(), "a page cannot prove a window painted before one exists");
+                }
                 "failed-off-write" => {
                     assert_eq!(force().unwrap().step, Force::Shm);
                     std::fs::create_dir(force_failed(&dirs)).unwrap();
@@ -2834,6 +2841,7 @@ mod tests {
                     assert!(!expected_frame(&force_pending(&dirs), &context), "an intentional hidden window is no failed visible attempt");
                     frame_painted(false, true);
                     assert!(expected_frame(&force_pending(&dirs), &context));
+                    WATCH.window_created();
                     let note = frame_painted(true, true);
                     assert_eq!(note.is_some(), ["automatic", "sticky-dmabuf"].contains(&case.as_str()));
                     assert!(frame_painted(true, true).is_none(), "the explanation is shown once");
@@ -2863,6 +2871,7 @@ mod tests {
                         assert!(normal_pending(&dirs).is_file());
                         frame_painted(false, false);
                         assert!(!expected_frame(&normal_pending(&dirs), &context));
+                        WATCH.window_created();
                         frame_painted(true, true);
                         leaving();
                         assert!(!normal_pending(&dirs).exists());
@@ -2874,7 +2883,7 @@ mod tests {
             return;
         }
         let mut failures = Vec::new();
-        for case in ["success", "guard-denied", "software", "automatic", "non-nvidia", "manual-off", "escape", "shm-failed", "recovered", "fresh", "hidden", "other-backend", "recovered-off", "failed-recovered", "sticky-dmabuf", "restart-escape", "failed-off-write", "auto-guard-denied", "unwritable-escape", "user-software", "user-dmabuf", "corrupt-choice", "corrupt-recovered", "competing"] {
+        for case in ["success", "guard-denied", "software", "automatic", "non-nvidia", "manual-off", "escape", "shm-failed", "recovered", "fresh", "hidden", "other-backend", "recovered-off", "failed-recovered", "sticky-dmabuf", "restart-escape", "failed-off-write", "auto-guard-denied", "unwritable-escape", "user-software", "user-dmabuf", "corrupt-choice", "corrupt-recovered", "competing", "never-shown"] {
             let mut cmd = Command::new(std::env::current_exe().unwrap());
             cmd.args(["--exact", "render::tests::forced_startup_is_guarded_before_any_webkit_use", "--nocapture"])
                 .env(CASE, case);

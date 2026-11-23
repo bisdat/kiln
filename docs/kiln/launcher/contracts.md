@@ -1352,7 +1352,7 @@ Shared types (TypeScript names, defined in `commands.ts`; Rust in kiln-manage un
 | File | Command | Arguments | Returns |
 |---|---|---|---|
 | app | `app_info` | - | `AppInfo` {version, kiln, platform, arch, dataDir, commit, mock, noWebgl, deck: `DeckInfo`, distribution: "direct" \| "nexus", render?: `RenderInfo` (Linux), desktop?: `DesktopInfo` {on, installed, foreign, file} (Linux AppImage), sandbox?: `SandboxInfo` (Linux, dev.29.18), preview?: string[] (dev.29)} |
-| app | `app_render_frame` | painted: boolean, visible: boolean | string \| null (visibility updates alone are not success; two visible animation frames confirm startup; the first automatic recovery attempt returns its explanation once) |
+| app | `app_render_frame` | painted: boolean, visible: boolean | string \| null (visibility updates alone are not success; two consecutive visible animation frames in a shown, non-minimized main window confirm startup; the first automatic recovery attempt returns its explanation once) |
 | app | `app_started` | - | null (the page's first screen is up; once per start; ends the Linux render watchdog) |
 | app | `app_render_set` | software: boolean | `RenderInfo` (sets or clears `state/software-render.json` for the next start; `unsupported` off Linux) |
 | app | `app_render_force_set` | on: boolean | `RenderInfo` (dev.30.7; NVIDIA shared-memory drawing, off on clean starts; explicit off vetoes automatic recovery; `state/force-dmabuf.json`, next start; startup failure disables it; `unsupported` off Linux) |

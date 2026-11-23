@@ -108,3 +108,34 @@ test("frames while hidden are not painting success and confirmation waits for tw
   tell();
   expect(frames).toEqual([]);
 });
+
+test("hiding between callbacks invalidates the first visible frame", async () => {
+  const frames: (() => void)[] = [];
+  const events: string[] = [];
+  let hide: (() => void) | undefined;
+  const tell = startedReporter(async () => { events.push("ready"); }, (cb) => frames.push(cb), () => false,
+    (cb) => { hide = cb; }, async () => { events.push("painted"); });
+  tell();
+  frames.shift()?.(); // first visible frame
+  hide?.(); // hidden, then shown again before the second callback
+  frames.shift()?.();
+  expect(events).toEqual(["ready"]);
+  frames.shift()?.();
+  frames.shift()?.();
+  expect(events).toEqual(["ready", "painted"]);
+});
+
+test("a document that is visible while its native window is hidden cannot confirm painting", () => {
+  const frames: (() => void)[] = [];
+  const events: string[] = [];
+  let shown = false;
+  const tell = startedReporter(async () => { events.push("ready"); }, (cb) => frames.push(cb), () => false,
+    () => {}, async () => { events.push("painted"); }, () => shown);
+  tell();
+  frames.shift()?.();
+  shown = true; // becoming visible only for the second callback is not two visible frames
+  frames.shift()?.();
+  expect(events).toEqual(["ready"]);
+  frames.shift()?.();
+  expect(events).toEqual(["ready", "painted"]);
+});

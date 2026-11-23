@@ -406,7 +406,10 @@ pub async fn app_started() -> Result<(), Error> {
 /// Visibility and two visible animation frames, distinct from navigation/hidden-page readiness. A first automatic
 /// recovery attempt returns its explanation once, only when it has become visible.
 #[tauri::command]
-pub async fn app_render_frame(painted: bool, visible: bool) -> Result<Option<String>, Error> {
+pub async fn app_render_frame(window: tauri::WebviewWindow, painted: bool, visible: bool) -> Result<Option<String>, Error> {
+    // WebKit's document visibility alone need not track a hidden/minimized native window.
+    let visible = visible && window.label() == "main" && window.is_visible().unwrap_or(false)
+        && !window.is_minimized().unwrap_or(true);
     Ok(crate::render::frame_painted(painted, visible))
 }
 
