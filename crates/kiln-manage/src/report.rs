@@ -885,6 +885,7 @@ pub struct Finding {
     /// Stable name: `not-installed`, `proxy-not-kiln`, `files-missing`, `files-changed`, `not-loaded`,
     /// `proton-override`, `proton-chained-override`, `unknown-build`, `safe-idle`, `own-loader`, `loader-in-folder`, `unlisted-mods`,
     /// `mod-failed`, `hosted-mods`, `hosted-off`, `crash`, `profile-invalid`, `newer-mods`, `no-game`, `sf-startup-failed`, `sf-startup-skipped`,
+    /// `sf-mod-bundled-newer`,
     /// `optiscaler`, `install-blocked`; from the launcher ([`ReportInput::findings`]): `webkit-sandbox`, `launcher-files-missing`.
     pub id: String,
     pub level: Level,
@@ -2191,6 +2192,8 @@ pub fn build(input: &ReportInput) -> Report {
         }
     }
 
+    check_sf_mod_bundled_newer(&mut cx, game);
+
     // ---- raw files
     let mut state_files: Vec<String> = std::fs::read_dir(game.join(crate::paths::game::STATE))
         .into_iter()
@@ -2422,6 +2425,74 @@ fn greeneye_logs(cx: &mut Ctx, game: &Path, install: Option<&GameInstall>, dirs:
             "The logs of {} were left out: {} folder is not inside the game's greeneye folder or the launcher's Library \
              (or is reached through a link), and the report reads no other folder.",
             skipped.join(", "), if skipped.len() == 1 { "its" } else { "their" }));
+    }
+}
+
+/// Package metadata only: the shared ShroudForge reader, bounded and without following links into another folder.
+fn sf_report_versions(cx: &mut Ctx, game: &Path, root: &str) -> Vec<(crate::shroudforge::SfMod, crate::semver::SemVersion)> {
+    let mut dir = game.to_path_buf();
+    for part in root.split('/') {
+        dir.push(part);
+        match std::fs::symlink_metadata(&dir) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
+            Err(e) => { cx.err(root, e); return Vec::new(); }
+            Ok(m) if crate::quick::import_is_link(&m) => { cx.err(root, "a link, not followed"); return Vec::new(); }
+            Ok(m) if !m.is_dir() => { cx.err(root, "not a folder"); return Vec::new(); }
+            Ok(_) => {}
+        }
+    }
+    let entries = match std::fs::read_dir(&dir) {
+        Ok(rd) => rd,
+        Err(e) => { cx.err(root, e); return Vec::new(); }
+    };
+    let mut folders = Vec::new();
+    for entry in entries {
+        let entry = match entry { Ok(e) => e, Err(e) => { cx.err(root, e); continue; } };
+        let name = format!("{root}/{}", entry.file_name().to_string_lossy());
+        match std::fs::symlink_metadata(entry.path()) {
+            Ok(m) if crate::quick::import_is_link(&m) => cx.err(&name, "a link, not followed"),
+            Ok(m) if m.is_dir() => folders.push((name, entry.path())),
+            Ok(_) => {}
+            Err(e) => cx.err(&name, e),
+        }
+    }
+    folders.sort();
+    let mut mods = Vec::new();
+    'folder: for (name, folder) in folders {
+        for file in ["mod.json", "extended.mod.json"] {
+            let why = match std::fs::symlink_metadata(folder.join(file)) {
+                Err(e) if file == "extended.mod.json" && e.kind() == std::io::ErrorKind::NotFound => None,
+                Err(e) => Some(e.to_string()),
+                Ok(m) if crate::quick::import_is_link(&m) => Some("a link, not followed".into()),
+                Ok(m) if !m.is_file() => Some("not a file".into()),
+                Ok(_) => None,
+            };
+            if let Some(why) = why {
+                cx.err(&format!("{name}/{file}"), format!("could not read: {why}"));
+                continue 'folder;
+            }
+        }
+        match crate::shroudforge::read_mod(&folder) {
+            Ok(m) if crate::shroudforge::is_sf_mod(&folder) => match crate::semver::SemVersion::parse(&m.version) {
+                Ok(v) => mods.push((m, v)),
+                Err(e) => cx.err(&format!("{name}/mod.json"), e.message),
+            },
+            Ok(_) => {}
+            Err(e) => cx.err(&name, format!("could not read: {}", e.message)),
+        }
+    }
+    mods
+}
+
+/// An older copy in the player's mods folder is context, never a reason to change that copy or its switch.
+fn check_sf_mod_bundled_newer(cx: &mut Ctx, game: &Path) {
+    let own = sf_report_versions(cx, game, "mods");
+    let bundled = sf_report_versions(cx, game, "kiln/plugins/shroudforge/mods");
+    for (m, version) in own {
+        if let Some((newer, _)) = bundled.iter().find(|(b, v)| b.id == m.id && version.compare(v).is_lt()) {
+            cx.find("sf-mod-bundled-newer", Level::Info, format!(
+                "{} {} is older than the {} Kiln brings.", m.id, m.version, newer.version));
+        }
     }
 }
 

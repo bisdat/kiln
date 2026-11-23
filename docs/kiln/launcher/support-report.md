@@ -115,6 +115,7 @@ Each is one plain sentence. `problem` explains why mods don't load, `warning` ma
 | `loader-in-folder` | another engine's own loader under a proxy name the game loads (EML's `dbghelp.dll`, SET's `powrprof.dll` ...): a warning on Windows (it always runs), a note under Wine/Proton (only with an override). Left out when that engine's plugin already said it stood aside |
 | `unlisted-mods` | mod folders in the game folder that the active profile does not load (drop-ins off for Kiln's kinds and EML; a `mods.<engine>` list for the compat-hosted engines; ShroudForge and SET always read their folders) and that the profile does not list itself |
 | `sf-startup-failed` | ShroudForge's own record of its startup pass (`shroudforge/state.json` `assets`) says `failed` and is the last start's (`sf_startup::failure`: written in Kiln's last start by ShroudForge hosted or found there, not left by an earlier one): its words (redacted whole, then put on one line and cut), the switched-on mods that need the pass, and for the fault ShroudForge builds without the fix have under Wine and Proton (`os error 5`) what to change. The record's line is in summary.txt under "The last start" |
+| `sf-mod-bundled-newer` | a note (`info` in JSON): a ShroudForge mod in `<game>/mods` has an older semantic version than the same manifest id in `<game>/kiln/plugins/shroudforge/mods`, regardless of folder names. Text: `{id} {installed_version} is older than the {bundled_version} Kiln brings.` Equal or newer versions and mods with no bundled copy are not findings. Missing or unreadable manifests are listed under "Not readable" instead; no mod files or switches are changed |
 | `mod-failed` | `failed` in mods.json, native.json, boot.json's plugins, a chain entry `failed`/`missing`, or a mod in an engine's state file whose state says fail/error/refused; with the reasons |
 | `hosted-mods` | a note: Kiln mods `skipped` in mods.json with `side 'server': loads while this client hosts a world`: they start with the player's own world (single-player or co-op), so `skipped` in the menu is expected (docs/kiln/client.md, "Mods and sides") |
 | `hosted-off` | a warning: the same with kiln.json `"mods": {"hosted": false}`: they never start in this game |
@@ -165,7 +166,8 @@ values of such fields line by line.
 
 Never read into the report: saves and world data (`kiln/data/`), `kiln/config/` and the profile's config folder (mod
 settings, `network.json`), `kiln/data/kiln-admin/`, the contents of any mod (only names, sizes and times in the
-listings), Steam's files other than `config.vdf`'s compat tool, the launch options and `loginusers.vdf` (for the
+listings, and ShroudForge manifest ids and versions in the bundled-version finding; manifests themselves are not
+included), Steam's files other than `config.vdf`'s compat tool, the launch options and `loginusers.vdf` (for the
 names to replace). `summary.txt` ends with this list.
 
 What redaction cannot catch: a character or server name the player chose that appears in a log line other than the

@@ -387,6 +387,141 @@ fn file<'a>(r: &'a Report, name: &str) -> Option<&'a str> {
 
 // ---------------------------------------------------------------- findings
 
+fn sf_report_mod(f: &Fx, folder: &str, id: &str, version: &str) {
+    f.w(&format!("{folder}/mod.json"), serde_json::to_vec(&serde_json::json!({
+        "id": id, "name": "Unlimited Flight", "version": version, "capabilities": ["runtime"],
+    })).unwrap());
+    f.w(&format!("{folder}/extended.mod.json"), br#"{"schemaVersion":1,"enabled":true,"launcher":"SF"}"#);
+}
+
+const SF_OWN: &str = "mods/my-flight-copy";
+const SF_BUNDLED: &str = "kiln/plugins/shroudforge/mods/bundled-flight";
+
+#[test]
+fn sf_mod_bundled_newer_notes_older_copy_by_manifest_id_without_changing_it() {
+    let f = Fx::healthy("sf-bundled-older");
+    sf_report_mod(&f, SF_OWN, "sf-unlimited-flight", "1.2.0");
+    sf_report_mod(&f, SF_BUNDLED, "sf-unlimited-flight", "1.3.0");
+    let paths: Vec<_> = [SF_OWN, SF_BUNDLED].into_iter().flat_map(|d| ["mod.json", "extended.mod.json"]
+        .map(|n| f.game.join(d).join(n))).collect();
+    let before: Vec<_> = paths.iter().map(|p| std::fs::read(p).unwrap()).collect();
+
+    let r = build(&f.input());
+    let found: Vec<_> = r.findings.iter().filter(|x| x.id == "sf-mod-bundled-newer").collect();
+    assert_eq!(found.len(), 1, "{:?}", r.findings);
+    assert_eq!(found[0].level, Level::Info);
+    assert_eq!(found[0].text, "sf-unlimited-flight 1.2.0 is older than the 1.3.0 Kiln brings.");
+    assert!(r.summary.contains(&format!("[note] {}", found[0].text)));
+    let json: serde_json::Value = serde_json::from_str(file(&r, "report.json").unwrap()).unwrap();
+    let note = json["findings"].as_array().unwrap().iter().find(|x| x["id"] == "sf-mod-bundled-newer").unwrap();
+    assert_eq!(note["level"], "info", "notes use the existing serialized level");
+    assert!(r.errors.is_empty(), "{:?}", r.errors);
+    assert_eq!(paths.iter().map(|p| std::fs::read(p).unwrap()).collect::<Vec<_>>(), before);
+    assert!(!r.files.iter().any(|(n, _)| n.ends_with("/mod.json") || n.ends_with("/extended.mod.json")));
+}
+
+#[test]
+fn sf_mod_bundled_newer_equal_versions_do_not_fire() {
+    let f = Fx::healthy("sf-bundled-equal");
+    for (own, bundled) in [("1.3.0", "1.3.0"), ("1.3.0+player", "1.3.0+kiln")] {
+        sf_report_mod(&f, SF_OWN, "sf-unlimited-flight", own);
+        sf_report_mod(&f, SF_BUNDLED, "sf-unlimited-flight", bundled);
+        let r = build(&f.input());
+        assert!(!r.findings.iter().any(|x| x.id == "sf-mod-bundled-newer"), "{:?}", r.findings);
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+    }
+}
+
+#[test]
+fn sf_mod_bundled_newer_newer_copy_does_not_fire() {
+    let f = Fx::healthy("sf-bundled-newer");
+    sf_report_mod(&f, SF_OWN, "sf-unlimited-flight", "1.4.0");
+    sf_report_mod(&f, SF_BUNDLED, "sf-unlimited-flight", "1.3.0");
+    let r = build(&f.input());
+    assert!(!r.findings.iter().any(|x| x.id == "sf-mod-bundled-newer"), "{:?}", r.findings);
+    assert!(r.errors.is_empty(), "{:?}", r.errors);
+}
+
+#[test]
+fn sf_mod_bundled_newer_uses_semver_numeric_and_prerelease_precedence() {
+    let f = Fx::healthy("sf-bundled-semver");
+    for (own, bundled, fires) in [("1.9.0", "1.10.0", true), ("1.10.0", "1.9.0", false),
+        ("1.3.0-rc.2", "1.3.0-rc.10", true), ("1.3.0-rc.1", "1.3.0", true), ("1.3.0", "1.3.0-rc.1", false)] {
+        sf_report_mod(&f, SF_OWN, "sf-unlimited-flight", own);
+        sf_report_mod(&f, SF_BUNDLED, "sf-unlimited-flight", bundled);
+        let r = build(&f.input());
+        assert_eq!(r.findings.iter().any(|x| x.id == "sf-mod-bundled-newer"), fires, "{own} vs {bundled}: {:?}", r.findings);
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+    }
+}
+
+#[test]
+fn sf_mod_bundled_newer_no_matching_bundled_copy_does_not_fire() {
+    let f = Fx::healthy("sf-bundled-absent");
+    sf_report_mod(&f, SF_OWN, "sf-unlimited-flight", "1.2.0");
+    let r = build(&f.input());
+    assert!(!r.findings.iter().any(|x| x.id == "sf-mod-bundled-newer"));
+    assert!(r.errors.is_empty(), "{:?}", r.errors);
+    // Even a matching folder name is not a matching manifest id (ids are case-sensitive in this format).
+    sf_report_mod(&f, "kiln/plugins/shroudforge/mods/my-flight-copy", "SF-Unlimited-Flight", "1.3.0");
+    let r = build(&f.input());
+    assert!(!r.findings.iter().any(|x| x.id == "sf-mod-bundled-newer"));
+    assert!(r.errors.is_empty(), "{:?}", r.errors);
+}
+
+#[test]
+fn sf_mod_bundled_newer_bad_manifests_on_either_side_are_not_readable_not_findings() {
+    for folder in [SF_OWN, SF_BUNDLED] {
+        for fault in ["missing", "directory", "json", "id", "version", "semver", "extended"] {
+            let f = Fx::healthy("sf-bundled-bad-manifest");
+            sf_report_mod(&f, SF_OWN, "sf-unlimited-flight", "1.2.0");
+            sf_report_mod(&f, SF_BUNDLED, "sf-unlimited-flight", "1.3.0");
+            let manifest = format!("{folder}/mod.json");
+            match fault {
+                "missing" => f.rm(&manifest),
+                "directory" => {
+                    f.rm(&manifest);
+                    std::fs::create_dir(f.game.join(&manifest)).unwrap();
+                }
+                "json" => f.w(&manifest, b"not JSON"),
+                "id" => f.w(&manifest, br#"{"version":"1.2.0"}"#),
+                "version" => f.w(&manifest, br#"{"id":"sf-unlimited-flight"}"#),
+                "semver" => f.w(&manifest, br#"{"id":"sf-unlimited-flight","version":"broken"}"#),
+                "extended" => f.w(&format!("{folder}/extended.mod.json"), b"not JSON"),
+                _ => unreachable!(),
+            }
+            let r = build(&f.input());
+            assert!(!r.findings.iter().any(|x| x.id == "sf-mod-bundled-newer"), "{folder}: {fault}: {:?}", r.findings);
+            assert!(r.errors.iter().any(|e| e.contains(folder)), "{folder}: {fault}: {:?}", r.errors);
+            assert!(r.summary.contains("== Not readable =="), "{}", r.summary);
+            assert!(!r.summary.contains(&f.root.to_string_lossy().to_string()), "paths must be redacted");
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn sf_mod_bundled_newer_linked_inputs_are_not_followed() {
+    for folder in [SF_OWN, SF_BUNDLED] {
+        for input in ["root", "folder", "mod.json", "extended.mod.json"] {
+            let f = Fx::healthy("sf-bundled-link");
+            sf_report_mod(&f, SF_OWN, "sf-unlimited-flight", "1.2.0");
+            sf_report_mod(&f, SF_BUNDLED, "sf-unlimited-flight", "1.3.0");
+            let path = match input {
+                "root" => f.game.join(folder).parent().unwrap().to_path_buf(),
+                "folder" => f.game.join(folder),
+                name => f.game.join(folder).join(name),
+            };
+            let outside = f.root.join("linked-input");
+            std::fs::rename(&path, &outside).unwrap();
+            std::os::unix::fs::symlink(&outside, &path).unwrap();
+            let r = build(&f.input());
+            assert!(!r.findings.iter().any(|x| x.id == "sf-mod-bundled-newer"), "{folder}: {input}: {:?}", r.findings);
+            assert!(r.errors.iter().any(|e| e.contains("link")), "{folder}: {input}: {:?}", r.errors);
+        }
+    }
+}
+
 #[test]
 fn healthy_install_finds_nothing() {
     let f = Fx::healthy("healthy");
