@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: MIT
-// The fake kiln.ui.ammo (native/core/abi/services/kiln_ui_ammo.h, v1) under the real Ui.AmmoList of Kiln.Ui (0.2.0-dev.30.6,
-// GitHub issue 127). A test plays the game's side (KilnHarness.AmmoList: Hold a bow or a staff with the game's own rows,
-// change them, a new session, the client's item catalog per list) and the player's (Select, Pick). At the start of each
-// step (the next UI frame) Kiln.Ui's own code asks the providers when a list's context changed and publishes its snapshot
-// here; the native rules run: one owner per list, the context's serial and session, at most 64 rows, no item 0, no
-// duplicate, flags 0, items of the list's kind when the test named a catalog. Shown composes the game's rows with the
-// snapshot as the HUD would; the selection stays on its item; a pick of a mod row the game does not list is queued for
-// Ui.AmmoList.Picked (64 at most, the oldest dropped). The game's hook, its drawing and the equip request are not
-// modelled.
+// The fake kiln.ui.ammo (native/core/abi/services/kiln_ui_ammo.h, v1) under the real Ui.AmmoList of Kiln.Ui
+// (0.2.0-dev.30.6, GitHub issue 127). A test plays the game's side (KilnHarness.AmmoList: Hold a bow or a staff with
+// the game's own rows, change them, a new session, the client's item catalog per list) and the player's (Select, Pick).
+// At the start of each step (the next UI frame) Kiln.Ui's own code asks the providers when a list's context changed and
+// publishes its snapshot here; the native rules run: one owner per list, the context's serial and session, at most 64
+// rows, no item 0, no duplicate, flags 0, items of the list's kind when the test named a catalog. Shown composes the
+// game's rows with the snapshot as the HUD would; the selection stays on its item; a pick of a mod row the game does
+// not list with stock (a row it kept at count 0 is none) is queued for Ui.AmmoList.Picked (64 at most, the oldest
+// dropped). The game's hook, its drawing and the equip request are not modelled.
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
@@ -85,7 +85,8 @@ internal sealed unsafe class UiAmmoFake : IKitFake
             "when a list's context changed and publishes one snapshot, which the native rules check (one owner, the context's " +
             "serial and session, 64 rows, no duplicate or item 0, the list's item catalog). Shown and ModeOf read the list as " +
             "the HUD would compose it; the selection stays on its item (Select, Selected); Pick of a mod row the game does not " +
-            "list raises Ui.AmmoList.Picked at the next step for the mod that provided it. Offline: the game's hook, its " +
+            "list with stock (a row it kept at count 0 is none) raises Ui.AmmoList.Picked at the next step for the mod that " +
+            "provided it. Offline: the game's hook, its " +
             "drawing and its equip request."));
 
     internal static UiAmmoFakeState? State =>
