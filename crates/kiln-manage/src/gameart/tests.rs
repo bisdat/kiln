@@ -11,6 +11,27 @@ use super::*;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+#[test]
+fn failed_names_swap_rolls_back_the_whole_editor_generation() {
+    let data = Tmp::new("names-swap");
+    let dest = data.0.join("dest");
+    let staging = data.0.join("staging");
+    for dir in EDITOR_DIRS {
+        std::fs::create_dir_all(dest.join(dir)).unwrap();
+        std::fs::write(dest.join(dir).join("generation"), b"old").unwrap();
+        std::fs::create_dir_all(staging.join(dir)).unwrap();
+        std::fs::write(staging.join(dir).join("generation"), b"new").unwrap();
+    }
+    // A deterministic failure moving the last old directory, after fonts/icons/ui have been replaced.
+    let obstruction = dest.join(format!(".old-names-{}", std::process::id()));
+    std::fs::create_dir_all(&obstruction).unwrap();
+    std::fs::write(obstruction.join("keep"), b"occupied").unwrap();
+    assert!(swap_in(&staging, &dest, &EDITOR_DIRS).is_err());
+    for dir in EDITOR_DIRS {
+        assert_eq!(std::fs::read(dest.join(dir).join("generation")).unwrap(), b"old", "{dir} must roll back with names");
+    }
+}
+
 // ---------------------------------------------------------------- fixtures
 
 struct Tmp(PathBuf);
@@ -496,6 +517,32 @@ fn files_under(d: &Path) -> Vec<String> {
 }
 
 #[test]
+fn failed_names_generation_metadata_keeps_the_previous_cache() {
+    for blocked in [modded::ICON_INDEX, SOURCE_FILE] {
+        let game = Tmp::new("metadata-game");
+        let data = Tmp::new("metadata-data");
+        fake_client(&game.0, "77|^/test|2026-11-04T00:00:00Z", 0x3c9e_b3fa);
+        let dest = data.0.join("editor-assets");
+        for dir in EDITOR_DIRS {
+            std::fs::create_dir_all(dest.join(dir)).unwrap();
+            std::fs::write(dest.join(dir).join("old"), b"old generation").unwrap();
+        }
+        for file in [modded::ICON_INDEX, SOURCE_FILE] {
+            if file == blocked {
+                std::fs::create_dir_all(dest.join(file)).unwrap();
+                std::fs::write(dest.join(file).join("keep"), b"blocked").unwrap();
+            } else {
+                std::fs::write(dest.join(file), b"old metadata").unwrap();
+            }
+        }
+        let before: Vec<_> = files_under(&dest).into_iter().map(|p| (p.clone(), std::fs::read(dest.join(p)).unwrap())).collect();
+        assert!(extract_editor(&game.0, &dest, &EditorOptions { threads: Some(1), ..Default::default() }, None, &mut crate::task::NoProgress).is_err());
+        let after: Vec<_> = files_under(&dest).into_iter().map(|p| (p.clone(), std::fs::read(dest.join(p)).unwrap())).collect();
+        assert!(after == before, "{blocked}: metadata failure must preserve the complete old cache byte-for-byte");
+    }
+}
+
+#[test]
 fn extracts_the_editor_layout_with_builtin_layouts() {
     let game = Tmp::new("game");
     let data = Tmp::new("data");
@@ -504,6 +551,8 @@ fn extracts_the_editor_layout_with_builtin_layouts() {
     std::fs::create_dir_all(dest.join("icons")).unwrap();
     std::fs::write(dest.join("icons/stale_icon.webp"), b"old").unwrap();
     std::fs::write(dest.join("README.txt"), b"kept").unwrap();
+    std::fs::create_dir_all(dest.join("names")).unwrap();
+    std::fs::write(dest.join("names/names.json"), b"old names").unwrap();
     let mut reports = 0;
     let mut prog = |_f: Option<f32>, _m: &str| reports += 1;
     let info = extract_editor(&game.0, &dest, &EditorOptions { threads: Some(3), ..Default::default() }, Some("123".into()), &mut prog).unwrap();
@@ -521,6 +570,8 @@ fn extracts_the_editor_layout_with_builtin_layouts() {
     let files = files_under(&dest);
     assert!(files.contains(&"icons/Sword_T1_icon.webp".into()) && files.contains(&"icons/Tall_Thing_icon.webp".into()));
     assert!(!files.contains(&"icons/stale_icon.webp".into()), "old art replaced");
+    assert!(!files.contains(&"names/names.json".into()), "unsupported text layouts drop stale names");
+    assert!(info.problems.iter().any(|p| p.starts_with("names/names.json:")));
     assert!(files.contains(&"README.txt".into()), "other files kept");
     assert!(files.contains(&"ui/compass_player.webp".into()) && files.contains(&"ui/tinted/gem_3.webp".into()));
     assert!(files.contains(&"fonts/font00.otf".into()) && files.contains(&"fonts/font01.ttf".into()));
@@ -586,9 +637,12 @@ fn cancel_keeps_the_old_art_and_refuses_the_game_folder() {
     let dest = data.0.join("editor-assets");
     std::fs::create_dir_all(dest.join("icons")).unwrap();
     std::fs::write(dest.join("icons/keep_icon.webp"), b"old").unwrap();
+    std::fs::create_dir_all(dest.join("names")).unwrap();
+    std::fs::write(dest.join("names/names.json"), b"old names").unwrap();
     let e = extract_editor(&game.0, &dest, &EditorOptions { threads: Some(1), ..Default::default() }, None, &mut CancelAfter(4)).unwrap_err();
     assert_eq!(e.code, ErrorCode::Canceled);
-    assert_eq!(files_under(&dest), vec!["icons/keep_icon.webp".to_string()]);
+    assert_eq!(files_under(&dest), vec!["icons/keep_icon.webp".to_string(), "names/names.json".to_string()]);
+    assert_eq!(std::fs::read(dest.join("names/names.json")).unwrap(), b"old names");
     let e = extract_editor(&game.0, &game.0.join("kiln/art"), &EditorOptions::default(), None, &mut crate::task::NoProgress).unwrap_err();
     assert_eq!(e.code, ErrorCode::Refused);
     assert!(!game.0.join("kiln").exists());
@@ -610,10 +664,17 @@ fn source_json_reads_the_fetch_script_format() {
 // ---------------------------------------------------------------- the real client (opt-in, read-only)
 
 #[test]
-#[ignore]
+#[ignore = "requires an installed client and explicit scratch output"]
 fn real_client() {
-    let game = std::env::var_os("KILN_GAMEART_GAME").map(PathBuf::from).expect("KILN_GAMEART_GAME");
-    let out = std::env::var_os("KILN_GAMEART_OUT").map(PathBuf::from).expect("KILN_GAMEART_OUT");
+    let (Some(game), Some(out)) = (std::env::var_os("KILN_GAMEART_GAME"), std::env::var_os("KILN_GAMEART_OUT")) else {
+        eprintln!("SKIP: set KILN_GAMEART_GAME and KILN_GAMEART_OUT for the installed-client check");
+        return;
+    };
+    let (game, out) = (PathBuf::from(game), PathBuf::from(out));
+    if !game.join("enshrouded.kfc").is_file() || !game.join("enshrouded.exe").is_file() {
+        eprintln!("SKIP: no installed client at KILN_GAMEART_GAME");
+        return;
+    }
     let mut last = std::time::Instant::now();
     let mut prog = |f: Option<f32>, m: &str| {
         if last.elapsed().as_secs_f32() > 2.0 {
