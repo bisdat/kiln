@@ -1459,9 +1459,20 @@ KilnResult registry_live_begin(KilnOwner owner, const std::string& mod, uint32_t
     std::lock_guard lock(store_mutex());
     if (retired(owner)) return KILN_ERR_REVOKED;
     if (!g.in || g.in->prepare) return KILN_ERR_UNAVAILABLE;
-    size_t drafts = 0;
-    for (const auto& [h, c] : g.changes) drafts += !c.order;
-    if (drafts >= 64 || g.changes.size() >= 1024) return KILN_ERR_UNAVAILABLE;
+    // review2 S4: per-owner caps (16 open drafts, 256 retained changes) below the process-wide ones (64, 1,024), so one mod
+    // cannot starve the others. UNAVAILABLE either way; kiln.log names the cap once per owner.
+    size_t drafts = 0, own_drafts = 0, own_changes = 0;
+    for (const auto& [h, c] : g.changes) {
+        drafts += !c.order;
+        if (c.owner == owner) (c.order ? own_changes : own_drafts) += 1;
+    }
+    const char* cap = drafts >= 64 ? "the process-wide 64 open drafts" : g.changes.size() >= 1024 ? "the process-wide 1,024 retained changes"
+                    : own_drafts >= 16 ? "its 16 open drafts" : own_changes >= 256 ? "its 256 retained changes" : nullptr;
+    if (cap) {
+        static std::set<std::pair<KilnOwner, std::string>> warned;  // under store_mutex
+        if (warned.insert({owner, cap}).second) LOGW("registry (live): %s: begin refused (UNAVAILABLE): %s are in use", mod.c_str(), cap);
+        return KILN_ERR_UNAVAILABLE;
+    }
     LiveState::Change change;
     change.owner = owner; change.mod = mod; change.point = point; change.world = g.world;
     *out = ++g_next_change;

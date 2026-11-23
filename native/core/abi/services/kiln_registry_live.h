@@ -23,7 +23,9 @@
  * out (another loader's writes stay); status/schema alone do not force archive decoding.
  * Drafts and committed handles are owner-bound; owner 0 is invalid;
  * revoked owners return REVOKED. Unknown/stale handles return NOT_FOUND, another owner's handle INVALID_ARGUMENT.
- * Limits: 64 open drafts, 1024 retained changes, 4096 edits per change, 64 MiB copied IR total. Revert releases the handle.
+ * Limits: 64 open drafts and 1024 retained changes in the process, 16 open drafts and 256 retained changes per owner (begin
+ * returns UNAVAILABLE at any of them; kiln.log names the cap), 4096 edits per change, 64 MiB copied IR total. Revert releases
+ * the handle.
  * Entry add/remove and raw game paths are refused by this stable API (the existing Advanced APIs are unchanged).
  *
  * IR/schema/buffer rules are kiln_registry.h's. Reading text uses BUFFER_TOO_SMALL and the whole required length;

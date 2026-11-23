@@ -824,10 +824,26 @@ void restart_is_per_edit_and_begin_is_bounded() {
     registry_live_publish();
     check(reported("RestartRequired"), "restart requirement is in registry.json");
     registry_live_revert(71, h, &reply);
-    std::vector<uint64_t> drafts;
-    for (int i = 0; i < 64; ++i) { uint64_t n = 0; check(registry_live_begin(71, "a", 4, &n) == KILN_OK, "draft slot"); drafts.push_back(n); }
-    check(registry_live_begin(71, "a", 4, &h) == KILN_ERR_UNAVAILABLE, "draft bound is enforced");
-    for (auto n : drafts) registry_live_revert(71, n, &reply);
+    // review2 S4: per-owner caps below the process-wide ones, so one mod cannot starve the others
+    std::vector<std::pair<KilnOwner, uint64_t>> drafts;
+    for (int i = 0; i < 16; ++i) { uint64_t n = 0; check(registry_live_begin(71, "a", 4, &n) == KILN_OK, "draft slot"); drafts.push_back({71, n}); }
+    check(registry_live_begin(71, "a", 4, &h) == KILN_ERR_UNAVAILABLE, "one owner's 16-draft cap is enforced");
+    for (KilnOwner owner = 72; owner < 75; ++owner)
+        for (int i = 0; i < 16; ++i) { uint64_t n = 0; check(registry_live_begin(owner, "b", 4, &n) == KILN_OK, "another owner still has draft slots"); drafts.push_back({owner, n}); }
+    check(registry_live_begin(75, "c", 4, &h) == KILN_ERR_UNAVAILABLE, "the process-wide 64-draft bound is enforced");
+    for (auto [owner, n] : drafts) registry_live_revert(owner, n, &reply);
+}
+// review2 S4: one owner's retained changes are capped (256) below the process-wide 1,024.
+void retained_changes_are_capped_per_owner() {
+    fresh_live(); RegistryLiveReply reply;
+    for (unsigned i = 0; i < 256; ++i) {
+        const auto h = change(71, "a", "[{" + wood + R"("op":{"add":1}}])");
+        g.changes.at(h).order = ++g.next_order; // admitted without a world write each: the cap, not the store, is under test
+    }
+    uint64_t h = 0;
+    check(registry_live_begin(71, "a", 4, &h) == KILN_ERR_UNAVAILABLE, "an owner with 256 retained changes gets no new draft");
+    check(registry_live_begin(72, "b", 4, &h) == KILN_OK, "another owner is not starved");
+    registry_live_revert(72, h, &reply);
 }
 }
 int main() {
@@ -882,6 +898,8 @@ int main() {
         {"rejected_process_change_returns_next_world", rejected_process_change_returns_next_world},
         {"foreign_slot_keeps_the_rest_of_a_retained_change", foreign_slot_keeps_the_rest_of_a_retained_change},
         {"pass_read_excludes_own_layers", pass_read_excludes_own_layers},
+        {"retained_changes_are_capped_per_owner", retained_changes_are_capped_per_owner},
+
         {"world_load_field_mid_world_is_named", world_load_field_mid_world_is_named},
         {"entry_point_inexact_cost_drops_only_that_entry", entry_point_inexact_cost_drops_only_that_entry},
         {"entry_point_selector_refuses_per_entry", entry_point_selector_refuses_per_entry},
