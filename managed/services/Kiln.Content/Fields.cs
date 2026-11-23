@@ -21,12 +21,16 @@ public readonly record struct Field<T>(string Section, string Path)
     /// <c>Colliders[0].DataArray[0].Below&lt;float&gt;("shape.radius")</c>.</summary>
     public Field<TBelow> Below<TBelow>(string rest) => new(Section, FieldPath.Join(Path, rest));
 
+    /// <summary>The path.</summary>
     public override string ToString() => Path;
 }
 
 /// <summary>A field Kiln will not change: an identity field (ids, GUIDs) or a name. It can be read.</summary>
+/// <param name="Section">The catalog section it belongs to: <c>items</c>, <c>templates</c>, ...</param>
+/// <param name="Path">The string a data pack writes.</param>
 public readonly record struct ReadOnlyField<T>(string Section, string Path)
 {
+    /// <summary>The path.</summary>
     public override string ToString() => Path;
 }
 
@@ -36,8 +40,10 @@ public readonly struct FieldValue<T>
 {
     private FieldValue(T value) => Value = value;
 
+    /// <summary>The value.</summary>
     public T Value { get; }
 
+    /// <summary>A value of the field's type as a <see cref="FieldValue{T}"/>.</summary>
     public static implicit operator FieldValue<T>(T value) => new(value);
 }
 
@@ -62,6 +68,8 @@ public sealed class FieldValues : IReadOnlyDictionary<string, object>
     private readonly Dictionary<string, object> _values = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _sections = new(StringComparer.Ordinal);
 
+    /// <summary>Adds a value for a typed field. Throws <see cref="ArgumentNullException"/> for a null
+    /// value.</summary>
     public void Add<T>(Field<T> field, FieldValue<T> value)
     {
         _values[field.Path] = FieldConvert.ToJson(value.Value) ?? throw new ArgumentNullException(nameof(value), $"{field.Path} needs a value");
@@ -77,12 +85,19 @@ public sealed class FieldValues : IReadOnlyDictionary<string, object>
 
     internal IEnumerable<KeyValuePair<string, JsonNode>> Json => _values.Select(kv => new KeyValuePair<string, JsonNode>(kv.Key, (JsonNode)kv.Value));
 
+    /// <summary>The value of the field with this path.</summary>
     public object this[string key] => _values[key];
+    /// <summary>The paths of the fields.</summary>
     public IEnumerable<string> Keys => _values.Keys;
+    /// <summary>The values, as the JSON a data pack writes.</summary>
     public IEnumerable<object> Values => _values.Values;
+    /// <summary>How many fields there are.</summary>
     public int Count => _values.Count;
+    /// <summary>True when a value for this path was added.</summary>
     public bool ContainsKey(string key) => _values.ContainsKey(key);
+    /// <summary>Gets the value of the field with this path; false when there is none.</summary>
     public bool TryGetValue(string key, out object value) => _values.TryGetValue(key, out value!);
+    /// <summary>Every path with its value.</summary>
     public IEnumerator<KeyValuePair<string, object>> GetEnumerator() => _values.GetEnumerator();
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 }
