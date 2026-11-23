@@ -237,6 +237,17 @@ anything elsewhere, or lost items, is rolled back and `Refused`. The rules: `nat
 (`choose_destination`, `may_land`); the tests: `native/services/items/tests/move_test.cpp` (`issue109_logic`,
 `issue109_engine`); the guide: [modding/inventory.md](../modding/inventory.md#moving-items).
 
+**Moves inside one owner** (`from == to`: an equipment slot into the same player's backpack, one chest slot to another)
+are refused, `Invalid` ("from and to are the same entity") before anything runs, and kiln.items refuses them too
+(`KILN_ERR_INVALID_ARGUMENT`). Looked at again for GitHub issue #138 (0.2.0-dev.31) and kept, because nothing proves such a
+move safe: the move's ledger and its issue #109 guard (`build_ledger`, `may_land`, "rolled back: ... left the slot without
+arriving") compare the source owner's pages before and after with the target owner's, and with one owner both pairs are the
+same pages, so a stack leaving one slot and arriving in another reads as both, and "lost" or "astray" cannot be told from a
+good move; a worn item moved by the game's slot transfer is not the game's own unequip (`Items.Unequip`, which the game
+checks and replicates as the player's own); and no test or lab covers the game's transfer within one owner. To take off what
+a player wears: `Items.Unequip(player, EquipmentSlot.X)` (into a free backpack slot); to put it on: `Items.Equip`. Moving
+between two slots of one chest is not offered.
+
 C (header size >= `sizeof(KilnItemsApi)` of v3): `move` (a `KilnItemsMoveRequest`: STACK, QUICK_STACK or MOVE_ALL; callback with a
 `KilnItemsMoveResult` and its ledger, tick thread Pre), `container_name` (tick thread), `transfer_rule` / `transfer_listen` /
 `transfer_report` / `transfer_end` (the first registration installs the hooks), `status2`. A transfer handler runs inside the game's
