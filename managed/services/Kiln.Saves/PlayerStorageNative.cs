@@ -196,6 +196,9 @@ internal sealed unsafe class PlayerStorageNative : IPlayerStoragePersistence
         return Witness(player) is { } w ? "xxh3:" + w.Value.ToString("x16") : null;
     }
 
+    public CharacterKey? CharacterOf(EntityId player) =>
+        Witness(player) is { } w ? new CharacterKey(w.Account, StorageNative.CharacterOf(w.Character)) : null;
+
     public bool ExtraMainPages(EntityId player) => Witness(player) is { } w && (w.Flags & StorageNative.WitnessExtraMainPages) != 0;
 
     private IReadOnlyList<StorageNative.State> States(EntityId player)

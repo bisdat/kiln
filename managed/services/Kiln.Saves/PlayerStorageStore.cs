@@ -10,6 +10,8 @@ internal interface IPlayerStoragePersistence
     StorageFreeze? Freeze(CharacterKey character, EntityId player, uint generation);
     bool AutomaticRegistration => false;
     string? WitnessOf(EntityId player);
+    /// <summary>The character in game on this entity now (null: none, or not known).</summary>
+    CharacterKey? CharacterOf(EntityId player) => null;
     bool ExtraMainPages(EntityId player) => false;
     IReadOnlyDictionary<string, int> Registrations { get; }
     void Restore(EntityId player, JsonObject storages, bool paired, string source, long revision);
@@ -83,6 +85,12 @@ internal sealed class PlayerStorageStore(WorldStore owner)
         internal Dictionary<string, int> Bands = new(StringComparer.Ordinal);
         internal string Registration = "";
         internal string? Notice;
+        internal string? Name;
+        /// <summary>How an admin names this player in /playerstorage: never the entity id, which the next player in the
+        /// slot gets. The name (quoted when it has spaces or quotes), else the character id.</summary>
+        internal string Token => Name is { Length: > 0 } n
+            ? n.Any(c => char.IsWhiteSpace(c) || c is '"' or '\'' or '\\') ? "\"" + n.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"" : n
+            : Character.Id.ToString();
     }
 
     internal void Clear()
@@ -101,11 +109,11 @@ internal sealed class PlayerStorageStore(WorldStore owner)
         var lines = new List<string>();
         if (visit.Document.ReadOnly)
         {
-            lines.Add($"player {player.Value}, character {character}: storage saved by a newer Kiln, kept whole and read-only here");
+            lines.Add($"player {visit.Name ?? "(name unknown)"}, character {character}: storage saved by a newer Kiln, kept whole and read-only here");
             return lines;
         }
         var current = visit.Document.Data["current"]!;
-        lines.Add($"player {player.Value}, character {character}: revision {visit.Document.Revision}{(visit.Withheld ? $", held: {visit.HeldReason}" : "")}");
+        lines.Add($"player {visit.Name ?? "(name unknown)"}, character {character}: revision {visit.Document.Revision}{(visit.Withheld ? $", held: {visit.HeldReason}" : "")}");
         foreach (var (key, bag) in current["storages"]!.AsObject())
             lines.Add($"  {key}: {bag?["records"]?.AsArray().Count ?? 0} stack(s) in storage");
         foreach (var (key, bag) in current["parked"]!.AsObject())
@@ -114,11 +122,28 @@ internal sealed class PlayerStorageStore(WorldStore owner)
             {
                 2 => "more items than slots", 3 => "the storage's filter refuses them", _ => "its mod is not loaded",
             };
-            lines.Add($"  {key}: {bag?["records"]?.AsArray().Count ?? 0} stack(s) parked ({reason}); release: /{PlayerStorageCommand.Name} release {player.Value} {key}");
+            lines.Add($"  {key}: {bag?["records"]?.AsArray().Count ?? 0} stack(s) parked ({reason}); release: /{PlayerStorageCommand.Name} release {visit.Token} {key}");
         }
         if (visit.Document.Data["quarantine"]!.AsArray().Count is var quarantined and > 0)
             lines.Add($"  {quarantined} quarantined record(s): bytes kept, not releasable by this command");
         return lines;
+    }
+
+    /// <summary>A player of this world's storage visits by name (the /playerstorage token) or character id.</summary>
+    internal EntityId? FindPlayer(string text)
+    {
+        foreach (var (character, visit) in _visits)
+            if ((visit.Name is { Length: > 0 } n && string.Equals(n, text, StringComparison.OrdinalIgnoreCase))
+                || (Guid.TryParse(text, out var id) && id == character.Id)) return visit.Player;
+        return null;
+    }
+
+    /// <summary>Whether the player's storage visit is still the character in game on that entity (entity ids are reused by
+    /// the next player in the slot).</summary>
+    internal bool InGameAs(EntityId player)
+    {
+        if (Native is null || _visits.FirstOrDefault(v => v.Value.Player == player) is not { Value: not null, Key: var character }) return false;
+        return Native.CharacterOf(player) is { } now ? now == character : Native.WitnessOf(player) is not null;
     }
 
     /// <summary>Whether the character a player joined with has records parked under the key (a hold included).</summary>
@@ -140,7 +165,8 @@ internal sealed class PlayerStorageStore(WorldStore owner)
         }
     }
 
-    internal StorageChoice? Join(CharacterKey character, EntityId player, string witness, string? clientJson, bool trustClient, bool local = false)
+    internal StorageChoice? Join(CharacterKey character, EntityId player, string witness, string? clientJson, bool trustClient, bool local = false,
+        string? name = null)
     {
         owner.EnsureOpen();
         if (character.IsNone || character.IsAccountOnly || owner.LoadDeferred) return null;
@@ -206,7 +232,7 @@ internal sealed class PlayerStorageStore(WorldStore owner)
         foreach (var copy in servers) document.MergeReturns(copy);
         document.MergeReturns(client); // Evidence can withhold an untrusted copy, never add its item records or counter.
         foreach (var old in _visits.Where(v => v.Key != character && v.Value.Player == player).Select(v => v.Key).ToArray()) _visits.Remove(old);
-        var visit = _visits[character] = new Visit(player, document) { Local = local, Character = character,
+        var visit = _visits[character] = new Visit(player, document) { Local = local, Character = character, Name = name,
             Notice = choice is { Paired: false } ? "Storage restored without a matching character save (newest revision). See kiln.log for the source." : null };
         var returned = choice is { Paired: false, Source: "server" }
             && ((client is not null && client.LatestReturnRevision > 0 && !client.AcknowledgesAfterReturn(choice))
@@ -219,11 +245,11 @@ internal sealed class PlayerStorageStore(WorldStore owner)
         else if (!trustClient && choice is { Paired: false } && client is { ReadOnly: false } && client.Revision > choice.Revision)
             visit.Withheld = true;
         if (visit.Withheld)
-            visit.Notice = $"Your stored items on this server are held because your character changed outside Kiln. An admin can review /playerstorage list {player.Value} and release them with /playerstorage release {player.Value} <key>.";
+            visit.Notice = $"Your stored items on this server are held because your character changed outside Kiln. An admin can review /playerstorage list {visit.Token} and release them with /playerstorage release {visit.Token} <key>.";
         Restore(visit, choice?.Paired ?? true, choice?.Source ?? "new");
         if (visit.Withheld)
             foreach (var (key, bag) in visit.Document.Data["current"]!["parked"]!.AsObject())
-                SavesRuntime.Log(LogLevel.Warn, $"player-storage: player {player.Value}, character {character}, key {key}: {bag!["records"]!.AsArray().Count} stacks held ({bag["parkReason"]}); admin release: /playerstorage release {player.Value} {key}");
+                SavesRuntime.Log(LogLevel.Warn, $"player-storage: player {name ?? "(name unknown)"}, character {character}, key {key}: {bag!["records"]!.AsArray().Count} stacks held ({bag["parkReason"]}); admin release: /playerstorage release {visit.Token} {key}");
         return choice;
     }
 

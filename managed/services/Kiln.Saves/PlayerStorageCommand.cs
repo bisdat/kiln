@@ -114,6 +114,8 @@ internal static class PlayerStorageCommand
 
     private static EntityId PlayerOf(string text)
     {
+        // The name or character id the notice and the log print first; a live entity id or a connected player's name too.
+        if (SavesRuntime.Store.Storage.FindPlayer(text) is { } known) return known;
         if (uint.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out var id) && id != 0) return new EntityId(id);
         if (Players.Available && Players.Find(text) is { } p && !p.Entity.IsNone) return p.Entity;
         throw Usage($"no player '{text}'; usage: /{Name} list <player> | release <player> <key>");
@@ -131,29 +133,31 @@ internal static class PlayerStorageCommand
         var storage = SavesRuntime.Store.Storage;
         if (args[0] == "list")
         {
-            var lines = storage.Listing(player) ?? throw Usage($"player {player.Value} has no player storage on this server since the world loaded");
+            var lines = storage.Listing(player) ?? throw Usage($"{args[1]} has no player storage on this server since the world loaded");
             foreach (var line in lines) Reply(line);
             return;
         }
         var key = args[2];
         if (!storage.IsParked(player, key))
-            throw Usage($"player {player.Value} has nothing parked under {key} (/{Name} list {player.Value})");
+            throw Usage($"{args[1]} has nothing parked under {key} (/{Name} list {args[1]})");
+        if (!storage.InGameAs(player))
+            throw Usage($"{args[1]} is not in game now (a release puts the items in the player's backpack)");
         Task<MoveResult> task;
         try { task = Release(player, key, OrphanTarget.Backpack); }
         catch (Exception e) when (e is KilnUnavailableException or InvalidOperationException or ArgumentException)
         {
             throw Usage($"cannot release {key}: {e.Message}");
         }
-        SavesRuntime.Log(LogLevel.Warn, $"player-storage: an admin releases {key} of player {player.Value} to the backpack (/{Name})");
+        SavesRuntime.Log(LogLevel.Warn, $"player-storage: an admin releases {key} of {args[1]} (entity {player.Value} now) to the backpack (/{Name})");
         if (task.IsCompletedSuccessfully)
         {
-            Reply($"{key} of player {player.Value} to the backpack: {task.Result}");
-            SavesRuntime.Log(LogLevel.Info, $"player-storage: release of {key} for player {player.Value}: {task.Result}");
+            Reply($"{key} of {args[1]} to the backpack: {task.Result}");
+            SavesRuntime.Log(LogLevel.Info, $"player-storage: release of {key} for {args[1]}: {task.Result}");
             return;
         }
-        Reply($"{key} of player {player.Value} goes to the backpack (what does not fit stays parked); the result is logged");
+        Reply($"{key} of {args[1]} goes to the backpack (what does not fit stays parked); the result is logged");
         task.ContinueWith(t => SavesRuntime.Log(t.IsCompletedSuccessfully ? LogLevel.Info : LogLevel.Warn,
-            $"player-storage: release of {key} for player {player.Value}: {(t.IsCompletedSuccessfully ? t.Result.ToString() : t.Exception?.InnerException?.Message ?? "canceled")}"),
+            $"player-storage: release of {key} for {args[1]}: {(t.IsCompletedSuccessfully ? t.Result.ToString() : t.Exception?.InnerException?.Message ?? "canceled")}"),
             CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
     }
 

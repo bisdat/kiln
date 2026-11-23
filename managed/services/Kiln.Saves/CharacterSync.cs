@@ -317,7 +317,7 @@ internal static class CharacterSync
     {
         if (s.StorageJoined || !s.StorageWindow.Decided || SavesRuntime.Store.Storage.Native is not { } native) return;
         if (native.WitnessOf(s.Entity) is not { } witness) return;
-        try { SavesRuntime.Store.Storage.Join(s.Key, s.Entity, witness, s.StorageOffer, s.StorageTrusted, s.Local); }
+        try { SavesRuntime.Store.Storage.Join(s.Key, s.Entity, witness, s.StorageOffer, s.StorageTrusted, s.Local, s.Name); }
         catch (StorageRestoreDeferredException) { return; } // the next service step tries again
         catch (Exception e) when (e is InvalidDataException or InvalidOperationException or FormatException or OverflowException
             or JsonException or ArgumentException or KeyNotFoundException)
