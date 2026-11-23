@@ -77,6 +77,9 @@ earlier successful packs intact. Failed required native dependencies are exclude
 A missing template or a mod-specific build failure refuses only that pack; missing shared knowledge, journal or NPC
 collection inputs still stop startup, as does a roster overflow.
 An invariant failure stops startup through the existing named fault/notice path rather than continuing with a partial pack.
+Aborting a boot generation always releases its plan, removes successful withdrawals from the pending list, and clears
+its served-name metadata. A rollback failure remains a named restart-required fault, not a fresh build over partially
+withdrawn owners.
 Rollback records retain resource presence, length and a local 64-bit fingerprint, not full resource copies. The private
 compile snapshots are released after each pack. Repeated Kiln knowledge-map tails are compacted to the original input
 prefix plus the latest maps; a different effective blob from another writer starts a new prefix so its unknown data

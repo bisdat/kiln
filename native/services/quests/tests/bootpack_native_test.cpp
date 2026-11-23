@@ -6,6 +6,9 @@
 
 #include <algorithm>
 #include <map>
+#if defined(__SANITIZE_ADDRESS__)
+#include <sanitizer/asan_interface.h>
+#endif
 
 namespace {
 struct Layer { KilnOwner owner; KilnAssetKey key; kiln::qb::Bytes bytes; };
@@ -19,6 +22,7 @@ std::map<KilnOwner, std::map<uint32_t, std::string>> before_texts;
 KilnOwner next_owner = 100;
 std::string refused_mod;
 bool fail_legacy = false, broken_rollback = false;
+KilnOwner broken_owner = 0;
 const uint8_t base_npcs[] = {5, 0};
 
 bool key_equal(const KilnAssetKey& a, const KilnAssetKey& b) {
@@ -50,7 +54,7 @@ KilnResult KILN_CALL layered_put(KilnOwner owner, const KilnAssetKey* key, const
 }
 void KILN_CALL layered_revert(KilnOwner owner) {
     reverted.push_back(owner);
-    if (!broken_rollback) std::erase_if(layers, [&](const Layer& layer) { return layer.owner == owner; });
+    if (!broken_rollback && owner != broken_owner) std::erase_if(layers, [&](const Layer& layer) { return layer.owner == owner; });
 }
 KilnResult reply(const std::string& text, char* out, size_t capacity, size_t* size, KilnResult result = KILN_OK) {
     if (size) *size = text.size();
@@ -107,7 +111,7 @@ void reset(const char* name) {
     start(name);
     layers.clear(); puts.clear(); definitions.clear(); before_texts.clear(); reverted.clear();
     texts = {{42, "original text"}};
-    refused_mod.clear(); fail_legacy = false; broken_rollback = false;
+    refused_mod.clear(); fail_legacy = false; broken_rollback = false; broken_owner = 0;
     kiln::qb::t_bootpack_test = true;
     t_assets_api.resource_data = &layered_data;
     t_assets_api.resource_put = &layered_put;
@@ -116,6 +120,7 @@ void reset(const char* name) {
     t_api.owner_create = &create_owner;
     kiln_test_module = reinterpret_cast<void*>(1);
     kiln_test_proc = &find_proc;
+    g_pack_failure = {}; // the fixture starts a new process-equivalent boot state
 }
 std::vector<uint8_t> knowledge() {
     KilnAssetKey key{};
@@ -258,6 +263,64 @@ void test_early_abort() {
     CHECK(reverted.empty());
     CHECK(t_stops.empty());
 }
+void check_plan_deleted(const void* plan) {
+#if defined(__SANITIZE_ADDRESS__)
+    CHECK(__asan_address_is_poisoned(plan));
+#else
+    (void)plan;
+#endif
+}
+void test_partial_teardown_failure() {
+    reset("16f: a returning fatal teardown deletes its plan and retains only pending withdrawals");
+    mod("a-first", kGood); mod("b-second", kGood); mod("c-third", kGood);
+    boot_and_resource_init();
+    CHECK(g_pack_applied.size() == 3);
+    if (g_pack_applied.size() != 3) return;
+    const auto b = g_pack_applied[1].owner, c = g_pack_applied[2].owner;
+    broken_owner = b;
+    auto* plan = new BootPlan;
+    plan->built_early = true;
+    const void* address = plan;
+    destroy_boot(plan);
+    check_plan_deleted(address);
+    CHECK(content_stop({"b-second"}, "rollback invariant"));
+    CHECK(reverted == (std::vector<KilnOwner>{c, b}));
+    CHECK(g_pack_applied.size() == 2);
+    CHECK(std::none_of(g_pack_applied.begin(), g_pack_applied.end(), [&](const auto& pending) { return pending.owner == c; }));
+    CHECK(!g_built && g_names.empty() && g_served.empty());
+    CHECK(kiln::qb::ojson::parse(g_manifest).contains("failed"));
+    const int compiles = kiln::qb::t_compiles;
+    const auto withdrawals = reverted;
+    t_stops.clear();
+    build_once();
+    CHECK(kiln::qb::t_compiles == compiles && reverted == withdrawals);
+    CHECK(content_stop({"b-second"}, "rollback invariant")); // restart required, not a fresh build over half-withdrawn state
+}
+void test_disappeared_helper_teardown() {
+    reset("16f: a disappeared helper also deletes the aborted plan and latches the fault");
+    mod("a-first", kGood);
+    boot_and_resource_init();
+    auto* plan = new BootPlan;
+    plan->built_early = true;
+    kiln::qb::ModInput shipped;
+    shipped.id = "a-first";
+    shipped.documents = {kiln::qb::ojson::parse(kGood)};
+    plan->mods.push_back(std::move(shipped));
+    const void* address = plan;
+    kiln_test_module = nullptr;
+    destroy_boot(plan);
+    check_plan_deleted(address);
+    CHECK(content_stop({"a-first"}, "content helper disappeared"));
+    CHECK(!g_built && g_names.empty() && g_served.empty());
+    CHECK(g_pack_applied.size() == 1); // none was withdrawn
+    CHECK(reverted.empty());
+    CHECK(kiln::qb::ojson::parse(g_manifest).contains("failed"));
+    const int compiles = kiln::qb::t_compiles;
+    t_stops.clear();
+    build_once();
+    CHECK(kiln::qb::t_compiles == compiles && reverted.empty());
+    CHECK(content_stop({"a-first"}, "content helper disappeared"));
+}
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -272,6 +335,8 @@ int main(int argc, char** argv) {
     test_body_pack_exclusion();
     test_local_body_manifest_excludes_the_whole_pack();
     test_early_abort();
+    test_partial_teardown_failure();
+    test_disappeared_helper_teardown();
     std::error_code ec;
     fs::remove_all(t_root, ec);
     std::printf("bootpack native: %d checks, %d failed\n", g_checks, g_failures);

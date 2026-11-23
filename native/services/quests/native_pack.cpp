@@ -25,6 +25,7 @@
 #include <fstream>
 #include <functional>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <sstream>
 #include <unordered_map>
@@ -587,6 +588,7 @@ std::vector<std::string> shipping_now() {
 std::map<std::string, KilnOwner> g_pack_owners;
 std::vector<qb::bootpack::Applied> g_pack_applied;
 bool g_pack_used = false;
+Stop g_pack_failure;  // a failed abort requires a restart; never rebuild over partially withdrawn owners
 
 kc::bootpack::Call content_boot_bridge() {
     const HMODULE module = GetModuleHandleW(L"kiln-content.dll");
@@ -706,6 +708,7 @@ void build_per_mod(const std::vector<qb::ModInput>& mods, const qb::GameData& ga
 // served and the start must not go on. One mod's own errors set neither.
 void build_locked(const std::vector<qb::ModInput>* prepared = nullptr, const std::set<std::string>* required = nullptr,
                   std::vector<LeftOut>* left_out = nullptr, Stop* stop = nullptr) {
+    if (g_pack_failure.set) { if (stop) *stop = g_pack_failure; return; }
     if (g_built) return;
     g_built = true;
     const auto bridge = content_boot_bridge();
@@ -874,7 +877,8 @@ void build_once() {
     {
         std::lock_guard lock(g_mu);
         if (!A) A = static_cast<const KilnAssetsApi*>(g_api->service(kstr(KILN_ASSETS_SERVICE), 1));
-        if (!A || A->header.size < sizeof(KilnAssetsApi) || !A->resource_data || !A->resource_put) {
+        if (g_pack_failure.set) stop = g_pack_failure;
+        else if (!A || A->header.size < sizeof(KilnAssetsApi) || !A->resource_data || !A->resource_put) {
             if (!g_built) {
                 KW("native: kiln.assets is not available: mods' native quests and NPCs are off");
                 const auto* plan = g_boot ? static_cast<const BootPlan*>(kiln::boot::published(g_api, "knowledge")) : nullptr;
@@ -987,39 +991,50 @@ void native_pack_install() {
 
 namespace {
 void KILN_CALL destroy_boot(const void* p) {
-    const auto* plan = static_cast<const BootPlan*>(p);
-    if (plan->built_early) {  // what the early build served and defined goes with it
-        std::unique_lock lock(g_mu);
-        if (g_pack_used) {
-            qb::GameData game;
-            game.read = &res_read;
-            const auto bridge = content_boot_bridge();
-            if (!bridge) {
-                lock.unlock();
-                refuse_start(StartStop::Content, "boot pack rollback invariant: content helper disappeared", shipping(plan->mods));
-                return;
-            }
-            const auto backend = pack_backend(game, bridge, client_side());
-            for (auto entry = g_pack_applied.rbegin(); entry != g_pack_applied.rend(); ++entry) {
-                std::string why;
-                if (!qb::bootpack::withdraw(*entry, backend, &why)) {
-                    const std::string mod = entry->mod;
-                    lock.unlock();
-                    refuse_start(StartStop::Content, "bootpack:" + mod + ": rollback invariant failed: " + why, {mod});
-                    return;
-                }
-            }
-            g_pack_applied.clear();
-            g_pack_used = false;
-        } else {
-            if (A) A->revert_owner(g_owner);
-            if (const auto* C = static_cast<const KilnContentApi*>(g_api->service(KilnStr{"kiln.content", 12}, 4))) C->undefine_owner(g_owner);
-        }
+    const std::unique_ptr<const BootPlan> plan(static_cast<const BootPlan*>(p));
+    if (!plan->built_early) return;
+    std::unique_lock lock(g_mu);
+    const auto clear_built = [&] {
         g_built = false;
         g_names.clear();
-        g_manifest = "{\"mods\":[],\"errors\":[]}";
+        g_served.clear();
+        g_template_names.clear();
+        g_manifest = g_pack_failure.set
+            ? qb::ojson{{"mods", qb::ojson::array()}, {"errors", {g_pack_failure.why}}, {"failed", g_pack_failure.why}}.dump()
+            : "{\"mods\":[],\"errors\":[]}";
+    };
+    const auto failed = [&](const std::string& why, std::vector<std::string> mods) {
+        g_pack_failure = Stop{true, StartStop::Content, why, std::move(mods)};
+        clear_built();
+        const Stop fault = g_pack_failure;
+        KE("native: %s; mods: %s", fault.why.c_str(), kiln::knowledge::stop::list(fault.mods).c_str());
+        lock.unlock();
+        refuse_start(fault.kind, fault.why, fault.mods);
+    };
+    if (g_pack_used) {
+        qb::GameData game;
+        game.read = &res_read;
+        const auto bridge = content_boot_bridge();
+        if (!bridge) {
+            failed("boot pack rollback invariant: content helper disappeared", shipping(plan->mods));
+            return;
+        }
+        const auto backend = pack_backend(game, bridge, client_side());
+        while (!g_pack_applied.empty()) {
+            const auto& entry = g_pack_applied.back();
+            std::string why;
+            if (!qb::bootpack::withdraw(entry, backend, &why)) {
+                failed("bootpack:" + entry.mod + ": rollback invariant failed: " + why, {entry.mod});
+                return;
+            }
+            g_pack_applied.pop_back(); // a later failure must not retry owners already withdrawn
+        }
+        g_pack_used = false;
+    } else {
+        if (A) A->revert_owner(g_owner);
+        if (const auto* C = static_cast<const KilnContentApi*>(g_api->service(KilnStr{"kiln.content", 12}, 4))) C->undefine_owner(g_owner);
     }
-    delete plan;
+    clear_built();
 }
 
 KilnResult KILN_CALL prepare_boot(void*, const KilnBootPrepareInputV1* in, KilnBootPreparedV1* out, KilnBootIssueV1* issue) {
