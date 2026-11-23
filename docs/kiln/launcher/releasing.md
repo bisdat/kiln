@@ -748,11 +748,14 @@ publishing status.
   ([bundle.md](bundle.md), "The unpacked folder"); the file's `INSTALL-RUNTIME.txt` is the Nexus template filled with
   the version and the runtime's version (from the checkout nexus.py runs in, like the description), while GitHub and
   frostdev.io keep the zip and `runtime/INSTALL-RUNTIME.txt`. A runtime folder needs the kilnctl of 0.2.0-dev.30.9 or
-  later beside it: an older kilnctl takes only the zip. Before any upload, and in the dry run, every zip is refused when
-  an entry is an archive itself (`.zip`, `.7z`, `.rar`, `.tar`, `.tar.<compression>`, `.tgz`, `.gz`; not
-  `System.Formats.Tar.dll`). `.nupkg` and `.vsix` are zips Nexus takes (the SDK file has always carried them and is
-  available), and the launcher's `.deb` is fine too, so none of them counts. The server pack is the archive itself
-  and goes up as it is (its entries are checked the same way).
+  later beside it: an older kilnctl takes only the zip, so nexus.py builds no runtime file for a release whose kilnctl
+  or kilnctl.exe lacks the words its folder verify prints ("the folder holds nothing else"; re-uploading
+  0.2.0-dev.30.8's runtime file is refused). Before any upload, and in the dry run, every zip is refused when an entry is an archive
+  itself, by its name (`.zip`, `.7z`, `.rar`, `.tar`, `.tar.<compression>`, `.tgz`, `.gz`; not
+  `System.Formats.Tar.dll`) or by its first bytes under any other name (zip, 7z, rar, gzip, xz, bzip2, zstd, cab, lz4,
+  tar). `.nupkg` and `.vsix` are zips Nexus takes (the SDK file has always carried them and is available), and the
+  launcher's `.deb`, setup `.exe` and AppImage are fine too, so none of them counts. The server pack is the archive
+  itself and goes up as it is (its entries are checked the same way).
 - Uploads up to 100 MiB go in one part with their MD5 (`md5` in `POST /uploads`, `Content-MD5` on the `PUT`); larger
   ones use `POST /uploads/multipart` (S3 parts, their ETags, `CompleteMultipartUpload`). Then `finalise`, and the
   upload is polled until it is `available`.
@@ -774,7 +777,8 @@ publishing status.
   the dry run, a missing key; the launchers taken from nexus/ with its README, `archive_existing_file` on the
   launchers' new versions only, a folder without nexus/ refused, the server pack uploaded as it is; the runtime file
   with the bundle as a folder that matches its manifest, no nested archive, a runtime zip that breaks its manifest
-  refused, a zip with an archive inside never uploaded).
+  refused, a zip with an archive inside never uploaded, also one renamed, no runtime file with a kilnctl that takes
+  only the zip).
   `python3 -I tools/release/test_serverpack.py`: the server pack builder (only the server components, manifest paths
   and bytes, deterministic, safe names, tampered or unlisted files refused), also against the published dev.17 runtime
   zip when it is there (`KILN_SERVERPACK_RUNTIME`).

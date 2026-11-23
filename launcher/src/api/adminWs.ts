@@ -107,7 +107,9 @@ class Link {
       try {
         ws = new Ws(url);
       } catch (e) {
-        reject(kerr("admin_unavailable", t("api.adminWs.unreachable", { reason: e instanceof Error ? e.message : String(e) })));
+        // a browser's message may quote the URL, and with it a sign-in ticket in its query: the page shows it without one
+        const reason = (e instanceof Error ? e.message : String(e)).split(url).join(url.replace(/\?.*$/, ""));
+        reject(kerr("admin_unavailable", t("api.adminWs.unreachable", { reason })));
         return;
       }
       const link = new Link(ws);
@@ -145,7 +147,7 @@ class Link {
             stage = "open";
             clearTimeout(timer);
             link.ready = f;
-            link.limits = { ...DEFAULT_LIMITS, ...(isObj(f.limits) ? (f.limits as Partial<KapLimits>) : {}) };
+            link.limits = limitsOf(f.limits);
             link.startKeepalive();
             resolve(link);
           } else if (f.t === "error") {
@@ -270,6 +272,19 @@ class Link {
     try { this.send({ t: "bye", reason }); } catch { /* closed */ }
     try { this.ws.close(1000, reason); } catch { /* closed */ }
   }
+}
+
+/** `ready.limits`, each a number of at least 0, else its default (the launcher's hub reads them as unsigned integers):
+ *  a missing or odd value must neither refuse every request (`maxClientFrame: null`) nor stop the keepalive (NaN). */
+function limitsOf(v: unknown): KapLimits {
+  const l = { ...DEFAULT_LIMITS };
+  if (isObj(v)) {
+    for (const k of Object.keys(l) as (keyof KapLimits)[]) {
+      const x = v[k];
+      if (typeof x === "number" && Number.isFinite(x) && x >= 0) l[k] = x;
+    }
+  }
+  return l;
 }
 
 function decode(data: unknown): Frame | null {

@@ -70,6 +70,8 @@ pub fn create(stage: &Path, out: &Path, git: Option<String>, epoch: Option<i64>)
 /// the same rules (kiln_manage::bundle::verify).
 pub fn verify(bundle: &Path) -> Result<i32> {
     let m = kiln_manage::bundle::verify(bundle, &mut kiln_manage::task::NoProgress).km()?;
+    // tools/release/nexus.py finds "the folder holds nothing else" in a kilnctl that takes a bundle folder (it builds the
+    // Nexus runtime file, which holds the bundle as a folder, only then): keep these words
     let form = if kiln_manage::bundle::is_folder(bundle) { "the folder holds nothing else" } else { "the zip holds nothing else" };
     println!("ok: {} {} files, every size and sha256 matches kiln-runtime.json; {form}", m.version, m.files.len());
     for (name, c) in &m.components {

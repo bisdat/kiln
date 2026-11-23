@@ -11,15 +11,19 @@ archive), and no Nexus zip with an archive inside goes up (.nupkg and .vsix exce
   python3 -I tools/release/test_nexus.py
 """
 import base64
+import bz2
 import contextlib
 from email.message import Message
+import gzip
 import hashlib
 import importlib.util
 import io
 import json
+import lzma
 import os
 import re
 import shutil
+import tarfile
 import tempfile
 import threading
 import unittest
@@ -45,6 +49,7 @@ def launcher_fixture(dist, size):
 
 
 HELPER = "kiln/tools/eml-inspect/linux-x86_64/kiln-eml-inspect"  # bundle::EXECUTABLE_HELPER, packed 0755
+FOLDER_MARK = nexus.KILNCTL_FOLDER_MARK  # in a kilnctl that takes a bundle folder (0.2.0-dev.30.9 and later)
 
 
 def runtime_zip(version, listed=None, unlisted=None, changed=None):
@@ -344,8 +349,9 @@ class NexusTests(unittest.TestCase):
             f"windows/kiln-launcher_{version}_x64-setup.exe.sig": b"sig",
             f"runtime/kiln-runtime-{version}.zip": runtime_zip(version),
             "runtime/INSTALL-RUNTIME.txt": b"install\n",
-            "runtime/kilnctl": os.urandom(400),
-            "runtime/kilnctl.exe": os.urandom(400),
+            # a kilnctl that takes a bundle folder (what nexus.py looks for before it flattens the runtime)
+            "runtime/kilnctl": os.urandom(200) + FOLDER_MARK + os.urandom(200),
+            "runtime/kilnctl.exe": os.urandom(200) + FOLDER_MARK + os.urandom(200),
             "sdk/Kiln.Sdk.0.2.0.nupkg": os.urandom(300),
             "sdk/kiln": os.urandom(300),
             # folders for a web server (the NuGet feed, the API reference): not in the SDK zip
@@ -627,6 +633,53 @@ class NexusTests(unittest.TestCase):
             for n in fine:
                 z.writestr(n, b"x")
         nexus.refuse_nested_archives(good)
+
+    def test_an_archive_under_another_name_is_found_by_its_bytes(self):
+        tar = io.BytesIO()
+        with tarfile.open(fileobj=tar, mode="w") as t:
+            info = tarfile.TarInfo("a.txt")
+            info.size = 1
+            t.addfile(info, io.BytesIO(b"a"))
+        renamed = {"kiln/data/pack.dat": zip_bytes({"a.txt": b"a"}), "kiln/data/b.bin": b"7z\xbc\xaf\x27\x1c\x00\x04" + b"x" * 40,
+                   "kiln/data/c.pak": gzip.compress(b"abc"), "kiln/data/d.res": tar.getvalue(),
+                   "kiln/data/e.blob": bz2.compress(b"abc"), "kiln/data/f.db": lzma.compress(b"abc"), "kiln/data/g": b"Rar!\x1a\x07\x01\x00"}
+        # the kinds Nexus takes, files that only start like one, and executables (an installer holds an archive, but
+        # starts MZ or ELF)
+        fine = {"Kiln.Sdk.0.2.0.nupkg": zip_bytes({"a": b"a"}), "kiln-vscode-0.1.0.vsix": zip_bytes({"a": b"a"}),
+                "kiln-launcher.deb": b"!<arch>\ndebian-binary", "notes.txt": b"BZh is how bzip2 starts", "pk.txt": b"PK is a zip",
+                "kilnctl.exe": b"MZ" + zip_bytes({"a": b"a"}), "kilnctl": b"\x7fELF" + b"\x00" * 300}
+        bad = os.path.join(self.tmp, "renamed.zip")
+        with zipfile.ZipFile(bad, "w") as z:
+            for n, data in {**renamed, **fine}.items():
+                z.writestr(n, data)
+        found = nexus.nested_archives(bad)
+        self.assertEqual(sorted(f.split(" ")[0] for f in found), sorted(renamed), found)
+        self.assertIn("kiln/data/pack.dat (a zip archive by its bytes)", found)
+        self.assertIn("kiln/data/d.res (a tar archive by its bytes)", found)
+        # the runtime with one among the bundle's own files: not uploaded
+        rel = self.release("0.2.0-dev.10")
+        with open(os.path.join(rel, "runtime", "kiln-runtime-0.2.0-dev.10.zip"), "wb") as f:
+            f.write(runtime_zip("0.2.0-dev.10", listed={"kiln/data/pack.dat": zip_bytes({"a.txt": b"a"})}))
+        code, out, err = self.run_nexus(rel, "--only", "runtime", "--publish")
+        self.assertEqual(code, 2, out + err)
+        self.assertIn("kiln-runtime-0.2.0-dev.10/kiln/data/pack.dat (a zip archive by its bytes)", err)
+        self.assertEqual(self.mock.uploads, {})
+
+    def test_a_release_whose_kilnctl_takes_no_folder_gets_no_runtime_file(self):
+        # kilnctl 0.2.0-dev.30.8 and older install only the zip: the flattened file's install steps would fail with it
+        for old in ("kilnctl", "kilnctl.exe"):
+            rel = self.release("0.2.0-dev.9", server=True)
+            with open(os.path.join(rel, "runtime", old), "wb") as f:
+                f.write(os.urandom(400))
+            with self.assertRaises(nexus.Fail) as e:
+                nexus.make_zip(rel, "runtime", "0.2.0-dev.9", self.tmp)
+            self.assertIn(f"runtime/{old} does not take a bundle folder", str(e.exception))
+            self.assertFalse(os.path.exists(os.path.join(self.tmp, "kiln-runtime-standalone-0.2.0-dev.9.zip")))
+            # the other files of that release still go
+            nexus.make_zip(rel, "sdk", "0.2.0-dev.9", self.tmp)
+            code, out, err = self.run_nexus(rel, "--only", "runtime")
+            self.assertEqual(code, 2, out + err)
+            self.assertIn("does not take a bundle folder", err)
 
     def test_a_nexus_zip_with_an_archive_inside_is_never_uploaded(self):
         # the SDK zip with a zip among sdk/'s files

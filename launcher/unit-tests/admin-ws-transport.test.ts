@@ -133,6 +133,27 @@ describe("connecting", () => {
     const { t } = make({ url: () => { throw { code: "auth_failed", message: "signed out" }; } });
     await expect(t.connect("lab", "auto")).rejects.toMatchObject({ code: "auth_failed", message: "signed out" });
   });
+
+  test("a socket the browser refuses to make: admin_unavailable, and the message shows the URL without its ticket", async () => {
+    fake = fakeServer();
+    // as Chrome words it: the URL, query and all
+    class Refused { constructor(url: string) { throw new SyntaxError(`Failed to construct 'WebSocket': The URL '${url}' is invalid.`); } }
+    const { t } = make({ url: () => "ws://bad host/kap/lab?ticket=s3cret", WebSocket: Refused as never });
+    const err = (await t.connect("lab", "auto").catch((e: unknown) => e)) as { code: string; message: string };
+    expect(err.code).toBe("admin_unavailable");
+    expect(err.message).toContain("'ws://bad host/kap/lab'");
+    expect(err.message).not.toContain("s3cret");
+  });
+
+  test("limits that are not numbers keep their defaults: requests still go, the 1 MiB cap still holds", async () => {
+    fake = fakeServer();
+    fake.onOpen = (ws) => send(ws, { ...READY, limits: { maxFrame: "big", maxClientFrame: null, inflight: -1, pingS: "x", idleS: null } });
+    const { t } = make();
+    const s = await t.connect("lab", "auto");
+    expect(await t.call(s.session, "echo", { text: "hi" })).toEqual({ echo: { text: "hi" } });
+    await expect(t.call(s.session, "echo", { text: "x".repeat((1 << 20) + 1) })).rejects.toMatchObject({ code: "invalid_argument" });
+    expect(fake.frames.filter((f) => f.t === "req")).toHaveLength(1);
+  });
 });
 
 describe("requests", () => {

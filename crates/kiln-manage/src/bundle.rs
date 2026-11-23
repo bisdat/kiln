@@ -206,6 +206,22 @@ pub fn validate(m: &RuntimeManifest) -> Result<()> {
             problems.push(format!("{MANIFEST} cannot be a runtime file"));
         }
     }
+    // Windows (and macOS) folders do not tell names apart by case: two paths that differ only in it, or a file that is
+    // a folder of another path, would be one name there (the second written over the first, the receipt never
+    // matching what is on disk), from the zip or the folder alike
+    let mut folded: BTreeMap<String, &str> = BTreeMap::new();
+    for f in &m.files {
+        if let Some(other) = folded.insert(f.path.to_lowercase(), &f.path)
+            && other != f.path
+        {
+            problems.push(format!("{}: the same name as {other} where case does not count (Windows)", f.path));
+        }
+    }
+    for f in &m.files {
+        if let Some(file) = f.path.match_indices('/').find_map(|(i, _)| folded.get(&f.path[..i].to_lowercase())) {
+            problems.push(format!("{}: one of its folders is the file {file}", f.path));
+        }
+    }
     for (name, c) in &m.components {
         for r in &c.requires {
             if !m.components.contains_key(r) {
