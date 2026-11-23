@@ -13,7 +13,7 @@ public sealed class PlayerStorageStoreTests
         public StorageFreeze? Frozen = new("saved", PlayerStorageDocumentTests.Storages(1));
         public Dictionary<string, int> Definitions = new() { ["mod:bag"] = 8 };
         public IReadOnlyDictionary<string, int> Registrations => Definitions;
-        public StorageFreeze? Freeze(EntityId player, uint generation) => Frozen;
+        public StorageFreeze? Freeze(CharacterKey character, EntityId player, uint generation) => Frozen;
         public string? WitnessOf(EntityId player) => "join";
         public void Restore(EntityId player, JsonObject storages, bool paired, string source, long revision) => Restored = (JsonObject)storages.DeepClone();
         public void Park(EntityId player, JsonObject parked) => Parked = (JsonObject)parked.DeepClone();
@@ -58,7 +58,7 @@ public sealed class PlayerStorageStoreTests
             store.Join(character, new EntityId(1), "join", PlayerStorageDocumentTests.Doc("join", 1).Write(8), true);
             h.StageOnly(1);
             InstanceHarness.Written();
-            h.Restart(worldRevision, new FakeInstanceWorld(), unix: worldRevision == 0 ? 0 : 1001, tick: false);
+            h.Restart(worldRevision, new FakeInstanceWorld(), unix: worldRevision == 0 ? 0u : 1001u, tick: false);
             var chosen = store.Join(character, new EntityId(1), "saved", null, true);
             Assert.NotNull(chosen);
             Assert.True(chosen.Paired);
@@ -83,7 +83,8 @@ public sealed class PlayerStorageStoreTests
             persist.Frozen = new("second", PlayerStorageDocumentTests.Storages(2));
             h.Save(2);
             Assert.Equal("second", JsonNode.Parse(store.Carried(character)!)!["current"]!["witness"]!.GetValue<string>());
-            Assert.True(File.Exists(WorldStore.PendingPath(h.Root, 1)));
+            var document = PlayerStorageDocument.Read(store.Carried(character)!, character.Id);
+            Assert.True(PlayerStorageDocument.Choose("saved", document, null)!.Paired);
         }
         finally { store.Native = null; }
     }
@@ -107,6 +108,74 @@ public sealed class PlayerStorageStoreTests
             Assert.Null(store.Carried(character));
         }
         finally { store.Native = null; }
+    }
+
+    [Fact]
+    public void Repeated_write_failure_is_degraded_bounded_and_next_save_retries_fresh_pair()
+    {
+        using var h = new InstanceHarness();
+        var store = InstanceHarness.Store.Storage;
+        var persist = new Persist();
+        store.Native = persist;
+        var oldHook = WorldStore.IoHook;
+        try
+        {
+            var character = new CharacterKey(1, PlayerStorageDocumentTests.Character);
+            store.Join(character, new EntityId(1), "join", PlayerStorageDocumentTests.Doc("join", 1).Write(8), true);
+            WorldStore.IoHook = op => { if (op == "create") throw new IOException("injected storage disk failure"); };
+            h.Save(1);
+            h.Save(2);
+            Assert.NotNull(store.Failure);
+            Assert.Null(store.Carried(character));
+            var pending = (System.Collections.IDictionary)typeof(PlayerStorageStore).GetField("_pending", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(store)!;
+            Assert.True(pending.Count <= 2);
+            WorldStore.IoHook = oldHook;
+            persist.Frozen = new("fresh", PlayerStorageDocumentTests.Storages(3));
+            h.Save(3);
+            Assert.Null(store.Failure);
+            var saved = PlayerStorageDocument.Read(store.Carried(character)!, character.Id);
+            Assert.Equal("fresh", saved.Data["current"]!["witness"]!.GetValue<string>());
+        }
+        finally { WorldStore.IoHook = oldHook; store.Native = null; }
+    }
+
+    [Fact]
+    public void Captures_done_staging_rearms_barrier_and_timeout_never_publishes_unwritten_storage()
+    {
+        using var h = new InstanceHarness();
+        using var native = new FakeSavesTable();
+        using var reached = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        var store = InstanceHarness.Store.Storage;
+        var persist = new Persist { Frozen = null };
+        store.Native = persist;
+        var oldHook = WorldStore.IoHook;
+        try
+        {
+            var character = new CharacterKey(1, PlayerStorageDocumentTests.Character);
+            store.Join(character, new EntityId(1), "join", PlayerStorageDocumentTests.Doc("join", 1).Write(8), true);
+            h.StageOnly(1); // earlier snapshot has no current frozen capture
+            InstanceHarness.Written();
+            Assert.Equal(FakeSavesTable.Issued, FakeSavesTable.Done);
+            var tick = Environment.CurrentManagedThreadId;
+            WorldStore.IoHook = op =>
+            {
+                if (op == "create" && Environment.CurrentManagedThreadId != tick)
+                { reached.Set(); Assert.True(release.Wait(TimeSpan.FromSeconds(20))); }
+            };
+            persist.Frozen = new("capture", PlayerStorageDocumentTests.Storages(1));
+            InstanceHarness.Store.Stage(1, SaveReason.PlayerLeft, late: false, snapshot: true);
+            Assert.True(reached.Wait(TimeSpan.FromSeconds(10)));
+            Assert.True(FakeSavesTable.Issued > FakeSavesTable.Done);
+            Assert.Throws<TimeoutException>(() => FakeSavesTable.WaitLikeTheWorldWrite(TimeSpan.FromMilliseconds(25)));
+            // Existing bounded native wait is allowed to expire; world-written must not publish undurable storage.
+            InstanceHarness.Store.Commit(1, 1001, SaveReason.PlayerLeft);
+            Assert.NotNull(store.Failure);
+            Assert.Null(store.Carried(character));
+            release.Set();
+            InstanceHarness.Written();
+        }
+        finally { release.Set(); WorldStore.IoHook = oldHook; store.Native = null; InstanceHarness.Written(); }
     }
 
     [Fact]

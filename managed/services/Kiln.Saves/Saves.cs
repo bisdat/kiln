@@ -270,6 +270,10 @@ public static class Saves
     /// <summary>Last save, interval, counters; null when unavailable.</summary>
     public static SaveStatus? Status => SavesRuntime.Ensure() ? SavesRuntime.ReadStatus() : null;
 
+    /// <summary>The player-storage persistence degradation reason, or null. A failed pending write or a bounded stage
+    /// barrier timeout retains pairs in memory and retries on the next save; the next durable save clears this reason.</summary>
+    public static string? PlayerStoragePersistenceFailure => SavesRuntime.Store.Storage.Failure;
+
     /// <summary>Asks the game to save the world now (its own save, the one the 30 s timer makes). Completes on the tick
     /// thread when a save that started after this call is written (or failed: the game refuses while the world is not
     /// running; the request is dropped after 60 s). Call from mod code.</summary>

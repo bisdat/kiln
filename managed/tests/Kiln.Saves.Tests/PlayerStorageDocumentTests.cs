@@ -132,6 +132,27 @@ public sealed class PlayerStorageDocumentTests
     }
 
     [Fact]
+    public void Game_record_bytes_drive_every_optional_mirror_field()
+    {
+        var bytes = new byte[] { 0, 1, 0, 0, 0, 1, 0, 63, 9,
+            10, 0, 0, 0, 20, 0, 0, 0, 30, 0, 0, 0, 40, 0, 0, 0,
+            0x12, 0x34, 0x56, 0x78, 4, 2, 0x11, 0x22, 0x33, 0x44, 5 };
+        var raw = Doc("a", 1).Data;
+        raw["current"]!["storages"]!["mod:bag"]!["records"]![0]!["b64"] = Convert.ToBase64String(bytes);
+        var read = PlayerStorageDocument.Read(raw.ToJsonString(), Character);
+        var record = read.Data["current"]!["storages"]!["mod:bag"]!["records"]![0]!;
+        Assert.Equal(9, record["level"]!.GetValue<int>());
+        Assert.Equal(10u, record["durability"]!.GetValue<uint>());
+        Assert.Equal(20u, record["maxDurability"]!.GetValue<uint>());
+        Assert.Equal(30u, record["liquid"]!.GetValue<uint>());
+        Assert.Equal(40u, record["maxLiquid"]!.GetValue<uint>());
+        Assert.Equal("12345678", record["appearance"]!.GetValue<string>());
+        Assert.Equal(4, record["maxUpgrades"]!.GetValue<int>());
+        Assert.Equal(2, record["upgrades"]!.GetValue<int>());
+        Assert.Equal("1122334405", record["socket"]!.GetValue<string>());
+    }
+
+    [Fact]
     public void Bad_storage_record_and_history_are_isolated_with_original_bytes_and_reason()
     {
         var raw = Doc("a", 1).Data;
@@ -142,6 +163,19 @@ public sealed class PlayerStorageDocumentTests
         Assert.Single(doc.Data["current"]!["storages"]!["mod:bag"]!["records"]!.AsArray());
         Assert.Equal(3, doc.Data["quarantine"]!.AsArray().Count);
         Assert.All(doc.Data["quarantine"]!.AsArray(), q => { Assert.NotEmpty(q!["record"]!.GetValue<string>()); Assert.NotEmpty(q["reason"]!.GetValue<string>()); });
+    }
+
+    [Fact]
+    public void Bad_current_pair_does_not_hide_good_history()
+    {
+        var raw = Doc("good", 1).Data;
+        var history = (JsonObject)raw["current"]!.DeepClone();
+        history["revision"] = 1L;
+        raw["history"]!.AsArray().Add(history);
+        raw["current"]!["witness"] = new JsonObject();
+        var read = PlayerStorageDocument.Read(raw.ToJsonString(), Character);
+        Assert.True(PlayerStorageDocument.Choose("good", read, null)!.Paired);
+        Assert.Single(read.Data["quarantine"]!.AsArray());
     }
 
     [Fact]

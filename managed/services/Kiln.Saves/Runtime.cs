@@ -100,6 +100,8 @@ internal static unsafe class SavesRuntime
             Log(LogLevel.Info, $"Kiln.Saves: started (native events from seq {last + 1}; state {StateText(st?.State ?? 0)}, " +
                                $"world {GuidOf(st)?.ToString() ?? "unknown"} revision {st?.Revision ?? 0})");
             AttachItems();
+            PlayerStorageNative.Attach();
+            Store.Storage.ReportCapability();
             InstanceCapabilities.Refresh();
             InstanceCapabilities.ReportCarried();
             if (st is { } s0 && (s0.Features & SavesNative.CanSnapshotStage) == 0)
@@ -359,6 +361,8 @@ internal static unsafe class SavesRuntime
             if (Store.LoadDeferred && Store.RetryLoad()) LoadedAfterAll();
             Store.Entities.Tick();
             Store.Entities.HandOverServiceValues();
+            PlayerStorageNative.Attach();
+            Store.Storage.PollWrites();
             Store.Instances.Tick();
             InstanceCapabilities.Refresh();
         }

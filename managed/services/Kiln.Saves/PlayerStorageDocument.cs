@@ -48,7 +48,15 @@ internal sealed class PlayerStorageDocument
                 doc.Quarantine("current", data["current"], "pair must be an object");
                 data["current"] = Empty(character).Data["current"]!.DeepClone();
             }
-            else doc.CleanPair(current, false);
+            else
+            {
+                try { doc.CleanPair(current, false); }
+                catch (Exception e) when (Malformed(e))
+                {
+                    doc.Quarantine("current", current, e.Message);
+                    data["current"] = Empty(character).Data["current"]!.DeepClone();
+                }
+            }
             var history = data["history"] as JsonArray ?? new JsonArray();
             var clean = new JsonArray();
             foreach (var entry in history)
@@ -151,10 +159,7 @@ internal sealed class PlayerStorageDocument
                         if (slot < 0 || slot >= slots || used.Contains(slot)) throw new InvalidDataException("invalid or duplicate slot before decode");
                         var bytes = Convert.FromBase64String(Text(row["b64"]));
                         ValidateRecord(bytes, slot);
-                        var mirror = (JsonObject)row.DeepClone();
-                        mirror["item"] = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(1));
-                        mirror["n"] = BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(5));
-                        kept.Add(mirror);
+                        kept.Add(Mirror(row, bytes));
                         used.Add(slot);
                     }
                     catch (Exception e) when (Malformed(e)) { Quarantine(key, record, e.Message); }
@@ -177,7 +182,31 @@ internal sealed class PlayerStorageDocument
         return output;
     }
 
-    private static void ValidateRecord(byte[] b, int slot)
+    internal static JsonObject Mirror(JsonObject row, byte[] bytes)
+    {
+        var mirror = (JsonObject)row.DeepClone();
+        mirror["item"] = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(1));
+        mirror["n"] = (int)BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(5));
+        foreach (var name in new[] { "level", "durability", "maxDurability", "liquid", "maxLiquid", "appearance", "maxUpgrades", "upgrades", "socket" }) mirror.Remove(name);
+        var at = 8;
+        if ((bytes[7] & 1) != 0) mirror["level"] = (int)bytes[at++];
+        if ((bytes[7] & 2) != 0)
+        {
+            mirror["durability"] = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(at)); at += 4;
+            mirror["maxDurability"] = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(at)); at += 4;
+        }
+        if ((bytes[7] & 4) != 0)
+        {
+            mirror["liquid"] = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(at)); at += 4;
+            mirror["maxLiquid"] = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(at)); at += 4;
+        }
+        if ((bytes[7] & 8) != 0) { mirror["appearance"] = Convert.ToHexStringLower(bytes.AsSpan(at, 4)); at += 4; }
+        if ((bytes[7] & 16) != 0) { mirror["maxUpgrades"] = (int)bytes[at++]; mirror["upgrades"] = (int)bytes[at++]; }
+        if ((bytes[7] & 32) != 0) mirror["socket"] = Convert.ToHexStringLower(bytes.AsSpan(at, 5));
+        return mirror;
+    }
+
+    internal static void ValidateRecord(byte[] b, int slot)
     {
         if (b.Length < 8 || b[0] != slot || (b[7] & 0xc0) != 0) throw new InvalidDataException("invalid game item record");
         var size = 8 + ((b[7] & 1) != 0 ? 1 : 0) + ((b[7] & 2) != 0 ? 8 : 0) + ((b[7] & 4) != 0 ? 8 : 0)

@@ -5,3 +5,4 @@ Kiln.PlayerStorageSettings
 Kiln.PlayerStorageSettings.PlayerStorageSettings() -> void
 Kiln.PlayerStorageSettings.TrustClient.get -> bool
 Kiln.PlayerStorageSettings.TrustClient.init -> void
+static Kiln.Saves.PlayerStoragePersistenceFailure.get -> string?

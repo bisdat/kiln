@@ -316,6 +316,26 @@ internal sealed unsafe class WorldStore
         SavesRuntime.Log(LogLevel.Info, $"Kiln.Saves: world {WorldId} file revision {revision}: no mod data yet ({found.Count} manifests, none usable)");
     }
 
+    internal IReadOnlyList<string> PendingStorageValues(string scope)
+    {
+        if (Root is null || LoadDeferred) return [];
+        var root = Root;
+        if (!Writer.TryExclusive("reading pending player storage", SaveWriter.DrainLimit, () =>
+        {
+            var values = new List<string>();
+            foreach (var manifest in ListManifests(Path.Combine(root, "manifests")).Where(m => m.Pending))
+                if (TryLoadManifest(manifest.Path, out var bundles, out _))
+                    foreach (var (name, data) in bundles)
+                        if (name == scope && data["keys"]?[PlayerStorageStore.Key] is { } document) values.Add(document.ToJsonString());
+            return values;
+        }, out var result))
+        {
+            Storage.Failed("pending storage candidates unavailable while writer is busy");
+            throw new InvalidOperationException("player storage pending candidates are not available yet; restore deferred");
+        }
+        return result;
+    }
+
     private bool TryLoadManifest(string path, out List<(string scope, JsonObject doc)> bundles, out string error)
     {
         bundles = [];
@@ -539,6 +559,7 @@ internal sealed unsafe class WorldStore
         job.TickMs = System.Diagnostics.Stopwatch.GetElapsedTime(t0).TotalMilliseconds;
         _stagedGens.Add(gen);
         Generation = gen;
+        Storage.Track(job);
         Writer.Stage(job);
     }
 

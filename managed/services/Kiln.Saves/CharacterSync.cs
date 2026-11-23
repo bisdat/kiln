@@ -236,6 +236,11 @@ internal static class CharacterSync
         if (native.WitnessOf(s.Entity) is not { } witness) return;
         SavesRuntime.Store.Storage.Join(s.Key, s.Entity, witness, s.StorageOffer, s.StorageTrusted, s.Local);
         s.StorageJoined = true;
+        if (SavesRuntime.Store.Storage.Notice(s.Key) is { } notice)
+        {
+            if (s.Local) ShowStorageNotice(notice);
+            else if (s.Peer is not null && _channel is not null) _channel.SendTo(s.Peer, Answer(s, false, "player-storage: " + notice));
+        }
     }
 
     /// <summary>Handles what a client (or this machine's sidecar) offers.</summary>
@@ -497,9 +502,34 @@ internal static class CharacterSync
         ctx.Reply(new CharOffer(m.Character, file.Revision, mods));
     }
 
-    private static void OnResult(CharResult m, NetContext ctx) =>
+    private static void OnResult(CharResult m, NetContext ctx)
+    {
+        if (m.Reason.StartsWith("player-storage: ", StringComparison.Ordinal))
+        {
+            ShowStorageNotice(m.Reason["player-storage: ".Length..]);
+            return;
+        }
         SavesRuntime.Log(m.Accepted ? LogLevel.Info : LogLevel.Debug, $"characters: the server {(m.Accepted ? "took" : "did not take")} the offer: {m.Reason} (revision {m.Revision}" +
-                                                                       $"{(m.Kept.Count > 0 ? $", kept unread: {string.Join(", ", m.Kept)}" : "")}{(m.Dropped.Count > 0 ? $", dropped: {string.Join(", ", m.Dropped)}" : "")})");
+            $"{(m.Kept.Count > 0 ? $", kept unread: {string.Join(", ", m.Kept)}" : "")}{(m.Dropped.Count > 0 ? $", dropped: {string.Join(", ", m.Dropped)}" : "")})");
+    }
+
+    private static void ShowStorageNotice(string text)
+    {
+        SavesRuntime.Log(LogLevel.Warn, "player-storage: " + text);
+        // As with /instances' optional chat binding, persistence must not pull the UI into a server process.
+        try
+        {
+            var assembly = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(a => a.GetName().Name == "Kiln.Ui");
+            var ui = assembly?.GetType("Kiln.Ui");
+            var kind = assembly?.GetType("Kiln.ToastKind");
+            if (ui is null || kind is null) return;
+            ui.GetMethod("Toast", [typeof(string), kind, typeof(double)])?.Invoke(null, [text, Enum.Parse(kind, "Warning"), 10d]);
+        }
+        catch (Exception e) when (e is System.Reflection.TargetInvocationException or ArgumentException or TypeLoadException)
+        {
+            SavesRuntime.Log(LogLevel.Warn, "player-storage: in-game notice unavailable: " + e.Message);
+        }
+    }
 
     private static void OnUpdate(CharUpdate m, NetContext ctx)
     {
