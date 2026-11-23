@@ -249,14 +249,35 @@ int main(int argc, char** argv) {
             map::RegMap other;
             errs.clear();
             CHECK(map::load_dir(d.string(), "server", sha, &other, &errs) && other.has_build && other.build.verified);
-            CHECK(other.mapping("items", "rolled", &why) == Mapping::Unproven && why.find("another Kiln mapping") != std::string::npos);
+            CHECK(other.mapping("items", "rolled", &why) == Mapping::Unproven && why.find("differs from the one this build's record was proven on") != std::string::npos);
+            // review3 S4: a record of another mapping is not a verified one (status surfaces and capabilities)
+            CHECK(!other.verified() && why.find("a Kiln update is needed") != std::string::npos);
         }
+        CHECK(rm.verified());
         record(R"("regmapDigest": ")" + digest + R"(", )");
         std::ofstream(d / "common" / "items.json") << items << "\n";
         map::RegMap edited;
         errs.clear();
         CHECK(map::load_dir(d.string(), "server", sha, &edited, &errs) && edited.common_digest != digest);
-        CHECK(edited.mapping("items", "rolled", &why) == Mapping::Unproven && why.find("another Kiln mapping") != std::string::npos);
+        CHECK(edited.mapping("items", "rolled", &why) == Mapping::Unproven && why.find("differs from the one this build's record was proven on") != std::string::npos);
+        CHECK(!edited.verified() && why.find("a Kiln update is needed") != std::string::npos && why.find("((") == std::string::npos);
+        // review3 S4: the advice fits the case. This server's own record (kilnctl regproof --mark) after common changed: prove
+        // it again; a file in common that is not a registry's own (a copy left beside it): remove it, or repair Kiln
+        std::ofstream(d / "server" / (sha + ".json")) << R"({"regmap": 1, "side": "server", "exeSha256": ")" + sha +
+            R"(", "gameBuild": "1", "verified": true, "markedLocally": true, "regmapDigest": ")" + digest + R"(", "rows": {"items.rolled": "ok"}})";
+        map::RegMap local;
+        errs.clear();
+        CHECK(map::load_dir(d.string(), "server", sha, &local, &errs) && local.build.marked_locally && !has(errs, "markedLocally"));
+        CHECK(local.mapping("items", "rolled", &why) == Mapping::Unproven && why.find("kilnctl regproof") != std::string::npos &&
+              why.find("Kiln update") == std::string::npos);
+        std::ofstream(d / "common" / "items.json") << items;
+        std::ofstream(d / "common" / "items - Copy.json") << items;
+        map::RegMap stray;
+        errs.clear();
+        CHECK(map::load_dir(d.string(), "server", sha, &stray, &errs) && stray.stray_common.size() == 1);
+        CHECK(stray.mapping("items", "rolled", &why) == Mapping::Unproven && why.find("items - Copy.json") != std::string::npos &&
+              why.find("repair or reinstall Kiln") != std::string::npos && why.find("kilnctl") == std::string::npos);
+        fs::remove(d / "common" / "items - Copy.json");
         record(R"("regmapDigest": "not hex", )");
         map::RegMap bad;
         errs.clear();

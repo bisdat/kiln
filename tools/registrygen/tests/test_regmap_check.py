@@ -321,6 +321,15 @@ class Records(unittest.TestCase):
         t = self.tree_with_record()
         self.assertEqual(len(rc.record_problems(t.root)), 1)
 
+    def test_an_instance_marked_record_is_not_committed(self):
+        # review3 S4: kilnctl regproof --mark's instance copy says "markedLocally"; the tree takes the --out copy
+        t = Tree()
+        self.addCleanup(t.close)
+        t = self.tree_with_record(regmapDigest=rc.common_digest(t.root), markedLocally=True)
+        problems = rc.record_problems(t.root)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("markedLocally", problems[0])
+
     def test_an_unverified_record_enables_nothing_and_passes(self):
         t = self.tree_with_record(verified=False, regmapDigest="00" * 32)
         self.assertEqual(rc.record_problems(t.root), [])

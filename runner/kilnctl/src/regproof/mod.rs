@@ -540,8 +540,8 @@ pub fn write_outputs(p: &Proof, record: Option<&Value>, out: &Path) -> Result<()
     Ok(())
 }
 
-/// Writes a verified record into a Kiln folder (`<kiln>/regmap/<side>/<exe sha256>.json`, what kiln.content reads) and a
-/// copy for the repository into `out`. Refuses an unverified proof. A verified record already there is kept unless
+/// Writes a verified record into a Kiln folder (`<kiln>/regmap/<side>/<exe sha256>.json`, what kiln.content reads, with
+/// `"markedLocally": true`) and a copy for the repository into `out` (without it). Refuses an unverified proof. A verified record already there is kept unless
 /// `replace` (a fuller proof of the same build); the replaced one stays beside it as `.json.bak`.
 /// What [`mark`] did.
 #[derive(Debug, Clone, PartialEq)]
@@ -564,9 +564,14 @@ pub fn mark(kiln_dir: &Path, p: &Proof, record: &Value, out: &Path, replace: boo
             std::fs::rename(&dst, dst.with_extension("json.bak")).with_context(|| format!("keeping {} as .bak", dst.display()))?;
         }
     }
-    let text = serde_json::to_string_pretty(record)? + "\n";
-    ids::write_whole(&dst, &text)?;
-    ids::write_whole(&out.join(format!("verified-regmap-{}-{}.json", p.side, p.exe_sha256)), &text)?;
+    // the instance's copy says it was marked here (review3 S4): when a Kiln update changes regmap/common under it, kiln.content
+    // advises a new proof on this server instead of a Kiln update; the copy to commit is the record as proven
+    let mut local = record.clone();
+    if let Some(o) = local.as_object_mut() {
+        o.insert("markedLocally".into(), Value::Bool(true));
+    }
+    ids::write_whole(&dst, &(serde_json::to_string_pretty(&local)? + "\n"))?;
+    ids::write_whole(&out.join(format!("verified-regmap-{}-{}.json", p.side, p.exe_sha256)), &(serde_json::to_string_pretty(record)? + "\n"))?;
     Ok(Marked::Written(dst))
 }
 
@@ -1718,6 +1723,10 @@ mod tests {
         assert_eq!(mark(&kiln, &p, &rec, &out, false).unwrap(), Marked::Written(dst.clone()));
         assert_eq!(read_json(&dst).unwrap()["verified"], true);
         assert!(out.join(format!("verified-regmap-server-{SHA}.json")).is_file());
+        // review3 S4: the instance's copy says it was marked on this server (kiln.content then advises a new proof, not a
+        // Kiln update, when regmap/common changes under it); the copy to commit does not
+        assert_eq!(read_json(&dst).unwrap()["markedLocally"], true);
+        assert!(read_json(&out.join(format!("verified-regmap-server-{SHA}.json"))).unwrap().get("markedLocally").is_none());
         // a verified record is kept unless the caller replaces it (a fuller proof of the same build); kept is no error
         let mut newer = rec.clone();
         newer["proof"] = json!("a later proof");

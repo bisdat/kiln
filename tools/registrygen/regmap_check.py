@@ -156,6 +156,9 @@ def record_problems(root):
             except (OSError, ValueError) as e:
                 out.append(f"{name}: not readable JSON ({e})")
                 continue
+            if "markedLocally" in rec:
+                out.append(f"{name}: an instance's copy (markedLocally) was committed; commit kilnctl regproof's --out copy "
+                           "(verified-regmap-*.json), or kiln.content tells every player to re-prove their own server")
             if rec.get("verified") is not True:
                 continue
             have = rec.get("regmapDigest")

@@ -169,8 +169,13 @@ what the proof writes). kilnctl sets aside every suite whose digest is not the t
 of another mapping, and with an instance refuses to judge a tree whose regmap/common differs from the deployed
 `<game>/kiln/regmap/common`. The lab gate's copy starts with an empty `content/registry/proof/`. The record carries the
 digest it was proven on (`"regmapDigest"`); kiln.content computes the deployed regmap/common's digest when it loads the
-regmap and enables no row of a record whose digest differs, or that has none ("Unproven: ... its record was proven for
-another Kiln mapping than the one installed"): an edit of regmap/common needs a new proof (and a new client mirror).
+regmap and enables no row of a record whose digest differs, or that has none, and does not call that record verified
+(registry.json's `regmap.verified`, the registry capabilities: "unverified regmap record"). The refusal says why
+(review3 S4): "regmap/common differs from the one this build's record was proven on; a Kiln update is needed"; with files
+in regmap/common that are not a registry's own `<registry>.json` (a copy left beside one), it names them and says to remove
+them or repair or reinstall Kiln; for a server's own record (`"markedLocally": true`, which `kilnctl regproof --mark` adds
+to the instance's copy only, never to the `--out` copy that is committed) it says to run kilnctl regproof again. An edit of
+regmap/common needs a new proof (and a new client mirror).
 `regmap_check.py` without `--exe` (tools/check.sh's registry step) fails when a committed verified record has no digest or
 not this tree's, so such an edit cannot pass the checks unproven.
 

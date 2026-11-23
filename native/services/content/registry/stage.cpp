@@ -367,7 +367,7 @@ struct Runner::Impl {
 
     void report_caps() {
         if (!env.report_cap) return;
-        const bool verified_build = rm.has_build && rm.build.verified;
+        const bool verified_build = rm.verified();  // a record of another regmap/common enables nothing (review3 S4)
         auto publish = [&](const std::string& name, CapCoverage coverage, const std::string& detail) {
             const char* status = "unmapped on this game build";
             uint32_t reason = KILN_CAP_REASON_SYMBOL_MISSING;
@@ -769,7 +769,7 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn, const std::vect
     }
     d.meta.pid = d.env.pid;
     d.meta.kiln = d.env.kiln_version;
-    d.meta.regmap = {d.env.side, d.env.exe_sha256, d.rm.has_build ? "regmap/" + d.env.side + "/" + d.env.exe_sha256 + ".json" : "", d.rm.has_build && d.rm.build.verified};
+    d.meta.regmap = {d.env.side, d.env.exe_sha256, d.rm.has_build ? "regmap/" + d.env.side + "/" + d.env.exe_sha256 + ".json" : "", d.rm.verified()};
     d.meta.base.writer = d.env.writer;
     for (const ModInput& in : inputs) {
         json edits = json::array();

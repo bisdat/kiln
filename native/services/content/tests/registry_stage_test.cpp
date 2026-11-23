@@ -116,6 +116,10 @@ void registry_caps(const std::string& dir) {
     expect(unknown, "registry.items.power", KILN_CAP_REASON_POLICY, "unverified");
     const auto unverified_build = run("server", kExe, [](map::RegMap& rm) { rm.build.verified = false; });
     expect(unverified_build, "registry.items.power", KILN_CAP_REASON_POLICY, "unverified");
+    // review3 S4: a record proven on another regmap/common enables nothing and is not called a verified one
+    const auto other_mapping = run("server", kExe, [](map::RegMap& rm) { rm.build.regmap_digest = std::string(64, 'b'); });
+    expect(other_mapping, "registry.items.power", KILN_CAP_REASON_POLICY, "unverified regmap record");
+    expect(other_mapping, "registry.items", KILN_CAP_REASON_POLICY, "unverified regmap record");
     const auto incomplete = run("server", kExe, [](map::RegMap& rm) {
         rm.build.rows["items.power"] = map::BuildRow::Changed;
         rm.registries.erase("balance");
@@ -388,12 +392,29 @@ void bridge_write() {
 }
 }  // namespace
 
+// review3 S4: registry.json does not call a record verified when it was proven on another regmap/common (every row is off)
+void other_mapping_report(const std::string& dir) {
+    TreeView view = world();
+    Files files;
+    stage::Env e = env_of(&view, &files, dir, [](const Schema&) { return std::vector<stage::Env::DataFile>{}; });
+    e.regmap = [dir](map::RegMap* out, std::vector<std::string>* errs) {
+        const bool ok = map::load_dir(dir, "server", kExe, out, errs);
+        out->build.regmap_digest = std::string(64, 'b');
+        return ok;
+    };
+    stage::Runner r(std::move(e));
+    r.run([](model::Model& m) { return boothook::old_writes({}, m); });
+    r.finish({});
+    const json rep = json::parse(files.report);
+    check(rep["regmap"]["verified"] == false && rep["regmap"]["record"].is_string(), "registry.json: a record of another mapping is not verified");
+}
+
 int main(int argc, char** argv) {
     const std::string dir = argc > 1 ? argv[1] : "regmap";
     int failed = 0;
     const std::pair<const char*, std::function<void()>> groups[] = {
         {"one_start", [&] { one_start(dir); }}, {"host_order_and_code", [&] { host_order_and_code(dir); }}, {"id_table_without_content", [&] { id_table_without_content(dir); }}, {"bridge_write", [] { bridge_write(); }},
-        {"registry_caps", [&] { registry_caps(dir); }}};
+        {"registry_caps", [&] { registry_caps(dir); }}, {"other_mapping_report", [&] { other_mapping_report(dir); }}};
     for (const auto& [name, fn] : groups) {
         try {
             fn();
