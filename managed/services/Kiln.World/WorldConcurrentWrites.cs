@@ -294,8 +294,6 @@ public sealed class ComponentExchangedEvent : KilnEvent, IEntityEvent
 
 public static unsafe partial class WorldConcurrent
 {
-    internal const string WritesUrl = "https://github.com/frostdev-ops/kiln/blob/main/docs/kiln/services/world.md#world-writes-from-task-threads";
-
     /// <summary>The capability row kiln.world reports for the writes; its text says why they are off.</summary>
     public const string WriteCapability = "world.ecs_write";
 
