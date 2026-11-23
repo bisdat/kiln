@@ -37,6 +37,16 @@ test('restore warning names storage and server history only when present', async
   await expect(page.getByRole('dialog', { name: 'Return storage to this character?' })).toContainText('server keeps its own copy');
 });
 
+test('a character that changed since Kiln last saw its storage shows it but cannot return it', async ({ page }) => {
+  await page.goto('/?storage=unpaired#/editor');
+  await expect(page.locator('.k-page-title')).toContainText('Aldric');
+  await page.getByRole('tab', { name: 'Storage', exact: true }).click();
+  const storage = page.getByRole('region', { name: 'Player storage' });
+  await expect(storage).toContainText('This character changed since Kiln last saw its storage');
+  await expect(storage).toContainText('sample:bag');
+  await expect(page.getByRole('button', { name: 'Return to character' })).toBeDisabled();
+});
+
 test('running game and Steam characters cannot return storage', async ({ page }) => {
   await page.goto('/?storage=steam#/editor');
   await expect(page.locator('.k-page-title')).toContainText('Aldric');

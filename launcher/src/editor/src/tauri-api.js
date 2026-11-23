@@ -190,6 +190,7 @@ export default {
     if (await invoke('game_running')) throw new Error(launcherT('playerStorage.closeGame'));
     const s = await load(path, true); // never use a possibly stale editor session
     if (!s.storageSnapshot?.local) throw new Error(launcherT('playerStorage.localOnly'));
+    if (s.storage?.paired === false) throw new Error(launcherT('playerStorage.unpaired'));
     if (!s.storage?.canReturn) throw new Error(s.storage?.error ?? launcherT('playerStorage.unavailable'));
     const pc = s.save.blocks.find((b) => b.name === 'player_character');
     const c = readExactCharacter(pc.payload, pc.head.readUInt32LE(10));
@@ -200,11 +201,14 @@ export default {
       const written = readExactCharacter(payload, pc.head.readUInt32LE(10));
       const nextWitness = await inventoryWitness(written);
       if (nextWitness !== plan.sidecar.mods['kiln-items'].storage.current.witness) throw new Error('Returned inventory witness mismatch');
+      if (written.mainPages <= c.mainPages) throw new Error('Returned stacks must go to new backpack pages');
       const blocks = s.save.blocks.map((b) => b === pc ? { ...b, payload, changed: true } : b);
       const data = await sv2c.build({ header: s.save.header, blocks }, compress);
       await sv2c.parse(data, decompress, []);
       const result = await wrap(kiln.editorReturnStorage({ path, gameId: s.storageSnapshot.gameId, expectedSave: Array.from(s.bytes),
-        expectedSidecar: s.storageSnapshot.text, data: Array.from(data), sidecar: JSON.stringify(plan.sidecar),
+        // Only the storage value: the launcher splices it into the sidecar's exact bytes, so other mods' data is
+        // never re-encoded by JSON.parse/JSON.stringify (large integers, 1.0).
+        expectedSidecar: s.storageSnapshot.text, data: Array.from(data), storage: JSON.stringify(plan.sidecar.mods['kiln-items'].storage),
         oldWitness: await inventoryWitness(c), newWitness: nextWitness }));
       backup = result.backup;
     }

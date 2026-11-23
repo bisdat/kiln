@@ -230,7 +230,9 @@ export function editorMockHandlers(reject: Reject, gameRunning: () => boolean): 
     if (storageMode) {
       const character = "01010101-0101-0101-0101-010101010101";
       const rows = Array.from({ length: storageMode === "many" ? 64 : 3 }, (_, s) => ({ s, item: ITEM.steelArrow, n: 3, b64: writeItemRecord({ slot: s, itemId: ITEM.steelArrow, count: 3 }).toString('base64') }));
-      const current = { witness: await inventoryWitness(readExactCharacter(characterBlock(aldric(know)), 5)), worldRev: 10,
+      // ?storage=unpaired: the character changed since Kiln last saw it, so no pair matches its witness
+      const witness = storageMode === "unpaired" ? "xxh3:ffffffffffffffff" : await inventoryWitness(readExactCharacter(characterBlock(aldric(know)), 5));
+      const current = { witness, worldRev: 10,
         source: storageMode === "server" ? "server" : "local", storages: { "sample:bag": { slots: Math.max(8, rows.length), records: rows } }, parked: {} };
       storageTexts.set(`${saveDir}/character0.ksd`, JSON.stringify({ format: 1, character, revision: 10,
         mods: { "kiln-items": { storage: { v: 1, character, revision: 5, current, history: [], quarantine: [] } } } }));
@@ -307,10 +309,14 @@ export function editorMockHandlers(reject: Reject, gameRunning: () => boolean): 
     editor_return_storage: (a) => {
       if (gameRunning()) reject("game_running", "quit Enshrouded before returning storage");
       if (storageMode === "steam") reject("refused", "storage can only be returned to LOCAL characters");
-      const r = a.request as { path: string; expectedSave: number[]; expectedSidecar: string; sidecar: string; data: number[] };
+      const r = a.request as { path: string; expectedSave: number[]; expectedSidecar: string; storage: string; data: number[] };
       if (Buffer.compare(Buffer.from(file(r.path).bytes), Buffer.from(r.expectedSave)) || storageTexts.get(r.path) !== r.expectedSidecar) reject("refused", "character or storage changed; read it again");
       const backup = backupNow(r.path);
-      storageTexts.set(r.path, r.sidecar); // reduced current + full historical pair FIRST
+      // reduced current + full historical pair + return marker FIRST (the real backend splices exact bytes)
+      const sidecar = JSON.parse(r.expectedSidecar), storage = JSON.parse(r.storage);
+      sidecar.revision = Math.max(sidecar.revision, storage.revision) + 1;
+      sidecar.mods["kiln-items"].storage = storage;
+      storageTexts.set(r.path, JSON.stringify(sidecar));
       files.set(r.path, { bytes: Uint8Array.from(r.data), modified: Date.now() });
       return { backup };
     },

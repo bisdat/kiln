@@ -146,11 +146,15 @@ is on disk. Future document versions are locked and preserved. Malformed sidecar
 
 With the mod off, its records remain parked under their original full key. With Kiln removed, the copies remain in
 `kiln/data/characters` and `kiln/data/worlds`, but vanilla cannot use them. The launcher's offline return tool is a
-separate, explicit operation with the game closed and a backup: eligible base-game records go into the character's
-main pages within the game's page/record limits. Unsupported/custom records and quarantine remain stored. Its sidecar
-is published first with the reduced new pair and the actual old character's full historical pair, then the character
-is written atomically, so interruption before that write can still select the old pair. Returning is not an automatic
-migration of another mod's data; no Quiver & Spellbook import is included.
+separate, explicit operation with the game closed and a backup: eligible base-game records go into new main pages after
+the character's existing ones (never into empty cells, so the page count always rises), within the game's page/record
+limits. Unsupported/custom records and quarantine remain stored. It refuses a character that pairs with no storage copy
+("this character changed since Kiln last saw its storage") and changes nothing. Its sidecar is published first with the
+reduced new pair, the actual old character's full historical pair and a `returns` marker (`revision`, `fromWitness`,
+`toWitness`; newest first, at most 8, never trimmed), then the character is written atomically, so interruption before
+that write can still select the old pair. Servers read the marker to hold their own copy instead of handing returned
+items back. Only the storage value and the sidecar's revision change: other mods' data keeps its exact bytes. Returning
+is not an automatic migration of another mod's data; no Quiver & Spellbook import is included.
 
 ## Death and references
 

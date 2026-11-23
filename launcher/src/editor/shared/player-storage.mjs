@@ -9,6 +9,32 @@ const guid = (s) => typeof s === 'string' ? s.replaceAll('-', '').toLowerCase() 
 const clone = (v) => JSON.parse(JSON.stringify(v));
 const witness = (s) => typeof s === 'string' && /^xxh3:[0-9a-f]{16}$/.test(s);
 const revision = (v) => integer(v, Number.MAX_SAFE_INTEGER - 1, 'storage revision');
+// Thrown when the character on disk pairs with no storage copy: returning could duplicate or lose stacks.
+const UNPAIRED_RETURN = 'This character changed since Kiln last saw its storage';
+const MAX_RETURNS = 8;
+// Return markers ({revision, fromWitness, toWitness}) tell servers that items went back into this character outside
+// the game, so they hold their own copy instead of handing it back. Kiln.Saves reads them with the same rules.
+function returnsOf(doc) {
+  if (doc.returns === undefined || doc.returns === null) return [];
+  const bad = () => new Error('Invalid storage return marker');
+  if (!Array.isArray(doc.returns)) throw bad();
+  const text = (v) => typeof v === 'string' && v.length > 0 && v.length <= 64;
+  for (const m of doc.returns) {
+    if (!object(m) || !text(m.fromWitness) || !text(m.toWitness) || m.fromWitness === m.toWitness
+      || !Number.isSafeInteger(m.revision) || m.revision < 1 || m.revision > Number.MAX_SAFE_INTEGER - 1) throw bad();
+  }
+  return doc.returns;
+}
+const ordinal = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+// Newest revision first, exact duplicates once, at most eight: the order Kiln.Saves keeps.
+function boundedReturns(markers) {
+  const seen = new Set();
+  return markers.filter((m) => {
+    const key = JSON.stringify([m.revision, m.fromWitness, m.toWitness]);
+    return !seen.has(key) && seen.add(key);
+  }).sort((a, b) => b.revision - a.revision || ordinal(a.fromWitness, b.fromWitness) || ordinal(a.toWitness, b.toWitness))
+    .slice(0, MAX_RETURNS);
+}
 function documentOf(sidecar, id) {
   if (!object(sidecar) || sidecar.format !== 1 || guid(sidecar.character) !== guid(id)) throw new Error('Storage belongs to another character or format');
   const doc = sidecar.mods?.['kiln-items']?.storage;
@@ -17,6 +43,7 @@ function documentOf(sidecar, id) {
   if (doc.v !== 1) throw new Error('This storage needs a newer Kiln version');
   revision(sidecar.revision); revision(doc.revision);
   if (!object(doc.current) || !Array.isArray(doc.history) || doc.history.length > 8) throw new Error('Invalid storage history');
+  returnsOf(doc);
   return doc;
 }
 function candidates(doc) {
@@ -90,7 +117,8 @@ export async function storageView(c, sidecar, id) {
         if (!valid) { invalidRecords++; return []; }
         return [row];
       }) }));
-    return { hasStorage: true, readOnly: true, canReturn: true, groups, invalidRecords, paired: chosen.witness === actual, serverCopy: storageHasServerCopy(doc), quarantined: doc.quarantine?.length ?? 0 };
+    const paired = chosen.witness === actual;
+    return { hasStorage: true, readOnly: true, canReturn: paired, groups, invalidRecords, paired, serverCopy: storageHasServerCopy(doc), quarantined: doc.quarantine?.length ?? 0 };
   } catch (e) { return { hasStorage: true, readOnly: true, canReturn: false, groups: [], error: e.message }; }
 }
 
@@ -119,12 +147,15 @@ function trimOldestHistoryPair(history) {
 
 // A sidecar may be one atomic write ahead of the character. Always select using the on-disk
 // character's witness; blindly reading current could lose stacks after an interrupted return.
+// A character that pairs with no copy changed outside Kiln (or is an old backup beyond history): refuse.
 export async function planStorageReturn(c, sidecar, id, maxStackOf) {
   const doc = documentOf(sidecar, id);
   const beforeWitness = await inventoryWitness(c);
-  const chosen = selectStoragePair(doc, beforeWitness);
   const all = candidates(doc);
-  const nextRevision = Math.max(...all.map((p) => p.revision)) + 1;
+  if (!all.some((p) => p.witness === beforeWitness)) throw new Error(UNPAIRED_RETURN);
+  const chosen = selectStoragePair(doc, beforeWitness);
+  // The return's marker carries the new revision, so it must outrank every pair and every older marker.
+  const nextRevision = Math.max(...all.map((p) => p.revision), ...returnsOf(doc).map((m) => m.revision)) + 1;
   revision(nextRevision);
   const copy = clone(sidecar), nextDoc = copy.mods['kiln-items'].storage;
   const next = clone(chosen.entry);
@@ -157,11 +188,16 @@ export async function planStorageReturn(c, sidecar, id, maxStackOf) {
   }
   const remaining = groups.reduce((n, g) => n + g.storage.records.length, 0);
   if (!returned.length) return { character: c, sidecar, returned: 0, remaining, modItems, skipped };
+  // Returned stacks only ever go to NEW main pages after the existing ones, never into empty cells: a server sees the
+  // page count rise (its extra-main-pages signal) and the game never shrinks main pages, so the old witness cannot recur.
   const character = { ...c, mainPages: c.mainPages + Math.ceil(returned.length / 8), main: [...c.main, ...returned] };
   next.witness = await inventoryWitness(character);
   nextDoc.revision = nextRevision; nextDoc.current = next;
-  // First retain the FULL storage paired to the actual pre-write file, even if that file had
-  // no previous match (vanilla play), or matched the oldest alias. This pair must never be trimmed.
+  // Written in the same sidecar-first publication as the reduced pair. Byte trimming below never touches markers.
+  // The launcher's disk boundary rebuilds this list from the exact original bytes; this copy sizes the document.
+  nextDoc.returns = boundedReturns([{ revision: nextRevision, fromWitness: beforeWitness, toWitness: next.witness }, ...returnsOf(nextDoc)]);
+  // First retain the FULL storage paired to the actual pre-write file, even if it matched only
+  // the oldest alias. This pair must never be trimmed.
   const historical = [{ ...clone(chosen.entry), witness: beforeWitness, revision: chosen.revision },
     { ...clone(doc.current), revision: doc.revision }, ...clone(doc.history)];
   const history = [], seen = new Set([next.witness]);
