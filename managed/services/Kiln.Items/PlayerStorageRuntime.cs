@@ -195,6 +195,20 @@ internal static unsafe class PlayerStorageRuntime
         }
     }
 
+    /// <summary>A player's session ended (left, or the world stopped; null: every player's): Activate forgets the stacks it
+    /// moved into their backpack, so the next player in that slot (the same entity id) gets none of them back. Tick
+    /// thread.</summary>
+    internal static void ForgetActivations(uint? player)
+    {
+        lock (Gate)
+            foreach (var s in Registered)
+            {
+                if (player is null) s.Activated.Clear();
+                else
+                    foreach (var key in s.Activated.Keys.Where(k => k.Player == player).ToList()) s.Activated.Remove(key);
+            }
+    }
+
     /// <summary>The live registration of <paramref name="fullKey"/> that kiln.items.storage took; null when there is none.</summary>
     internal static PlayerStorage? Find(string fullKey)
     {

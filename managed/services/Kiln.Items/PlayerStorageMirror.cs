@@ -564,6 +564,7 @@ internal static class PlayerStorageMirror
         {
             if (Views[gone].Local) Changed(Store.Clear());
             Views.Remove(gone);
+            PlayerStorageRuntime.ForgetActivations(gone);  // the player's session ended
         }
     }
 
@@ -784,6 +785,7 @@ internal static class PlayerStorageMirror
         var local = Views.Values.Any(v => v.Local);
         Views.Clear();
         PickStates.Clear();
+        PlayerStorageRuntime.ForgetActivations(null);
         _lastPass = long.MinValue;
         if (local) Changed(Store.Clear());
     }

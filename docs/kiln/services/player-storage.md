@@ -174,8 +174,8 @@ stack it activated before for that slot back into the storage (one step each; ti
 the move, what the move put into the backpack goes back into the storage, no more than moved (a stack it topped up keeps
 the player's own items). A stack that cannot go back (storage full, filter) stays in the backpack, logged. The result is
 the equip's; `NoInventory` (not ready), `SlotChanged` (empty slot), `Refused` (not an arrow or spell, or one under way) or
-a failed move's status otherwise. Kiln remembers the activated cell per player and slot for the session only, and checks
-it still holds that item before moving it back. Each step runs on the tick thread as the storage's mod, also when the
+a failed move's status otherwise. Kiln remembers the activated cell per player and slot for the player's session only (it
+forgets it when the player leaves or the world stops), and checks it still holds that item before moving it back. Each step runs on the tick thread as the storage's mod, also when the
 call came from Kiln itself (a HUD pick): a mod that unloads meanwhile drops the rest.
 
 ## Capability and client boundaries
