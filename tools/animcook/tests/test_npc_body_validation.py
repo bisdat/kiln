@@ -68,6 +68,52 @@ class NpcBodyValidation(unittest.TestCase):
             second = json.loads((root / "assets/cooked/npc-bodies.v1.json").read_text())["entries"][0]["sourceHash"]
             self.assertNotEqual(first, second)
 
+    @staticmethod
+    def uri_fixture(root, uri):
+        for directory in ("models", "shared", "blocks", "assets/cooked"):
+            (root / directory).mkdir(parents=True, exist_ok=True)
+        recipe = root / "assets/cook.json"
+        recipe.write_text('{"format":1,"steps":[]}')
+        (root / "kiln.mod.json").write_text('{"id":"body-validation"}')
+        (root / "models/rig.gltf").write_text(json.dumps({"buffers": [{"uri": uri}]}))
+        spec, _, _ = fixture()
+        npc = {"name": "Tobin", "body": {"model": "models/rig.gltf", "size": {"radius": .75, "height": 2},
+               "slots": {"Root": "root", "Head": "head", "HandR": "hand"}},
+               "animation": dict(spec["animation"], clips="models/rig.gltf"), "motions": spec["motions"]}
+        (root / "blocks/npc.json").write_text(json.dumps({"npcs": {"tobin": npc}}))
+        (root / "assets/cooked/example.bin").write_bytes(b"synthetic resource")
+        entries = [{"kind": "resource", "guid": G.derive("body-validation", "test", "resource"),
+                    "type": "test", "part": 0, "file": "cooked/example.bin", "mode": "new"}]
+        return recipe, entries
+
+    def test_external_gltf_uris_decode_spaces_and_normalize_in_mod_parents(self):
+        for uri, file in (("rig%20data.bin", "models/rig data.bin"), ("../shared/rig.bin", "shared/rig.bin")):
+            with self.subTest(uri=uri), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                recipe, entries = self.uri_fixture(root, uri)
+                source = root / file
+                source.write_bytes(b"first authored source")
+                B.body_manifest(recipe, entries, True, producer="animcook")
+                cache = root / "assets/cooked/npc-bodies.v1.json"
+                first = json.loads(cache.read_text())["sourceHash"]
+                source.write_bytes(b"changed authored source")
+                B.body_manifest(recipe, entries, True, producer="animcook")
+                self.assertNotEqual(first, json.loads(cache.read_text())["sourceHash"])
+
+    def test_external_gltf_uris_still_refuse_a_decoded_escape_from_the_mod(self):
+        for uri in ("../../outside.bin", "%2e%2e/%2e%2e/outside.bin", "link/../in-mod.bin"):
+            with self.subTest(uri=uri), tempfile.TemporaryDirectory() as folder:
+                base = Path(folder)
+                root = base / "mod"
+                recipe, entries = self.uri_fixture(root, uri)
+                (base / "outside.bin").write_bytes(b"not a mod source")
+                (base / "outside").mkdir()
+                (root / "models/link").symlink_to(base / "outside", target_is_directory=True)
+                (root / "models/in-mod.bin").write_bytes(b"normalizing first must not bypass the link check")
+                with self.assertRaises(B.BlocksError):
+                    B.body_manifest(recipe, entries, True, producer="animcook")
+                self.assertFalse((root / "assets/cooked/npc-bodies.v1.json").exists())
+
     def test_complete_vector_uses_effective_cooked_duration_and_canonical_order(self):
         spec, graph, clips = fixture()
         vector = B._body_bindings(spec, graph, clips, "motions")

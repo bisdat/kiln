@@ -637,6 +637,7 @@ def body_manifest(recipe_path, entries, update, selected=None, producer="modelco
     Returns ordinary entries and missing/mismatched deferred entries for the cook report.
     """
     import hashlib
+    from urllib.parse import unquote
     from . import cookpaths as CP
     root = CP.mod_root(recipe_path)  # same lexical root as every checked path, including linked Steam libraries
     if specs is None:
@@ -662,7 +663,12 @@ def body_manifest(recipe_path, entries, update, selected=None, producer="modelco
                 for entry in document.get(section, []):
                     uri = entry.get("uri")
                     if isinstance(uri, str) and not uri.startswith("data:"):
-                        relative = (Path(file).parent / uri).as_posix()
+                        # URI parents are relative to the glTF, not forbidden mod-relative source syntax. Check the
+                        # raw decoded walk first (including link/..), then pass its contained spelling to source().
+                        parts, _ = CP._under(root, Path(root) / Path(file).parent / unquote(uri))
+                        if parts is None:
+                            raise CP.Refused(f"{file}: {uri!r}: an NPC dependency must belong to this mod")
+                        relative = Path(*parts).as_posix()
                         sources[relative] = hashlib.sha256(CP.source(recipe_path, relative).read_bytes()).hexdigest()
         source_hash = hashlib.sha256(json.dumps({"specs": specs, "sources": sources}, sort_keys=True,
                                                 separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()

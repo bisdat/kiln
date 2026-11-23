@@ -310,6 +310,8 @@ when a cook fails. The two cook tools merge their own contributions. Output hash
 `sourceHash` is derived from authored specs and sources for cross-machine agreement. A server marks renderer rows
 `skippedOnServer` with no borrowed output hash. An unfinished or renderer-skipped body remains incomplete.
 A shared cache receipt tracks the final two-tool result. None of this is a Ready status or evidence of body publication.
+External glTF buffer/image URIs are percent-decoded and resolved relative to the glTF; `../shared/...` is allowed only
+while it stays inside this mod. Escapes, nested links, and a `link/..` walk are refused before source hashing.
 
 Material-block and texture hashes are included as dependencies, but generated material JSON is not material-resource
 publication. The prepared material bridge is still required before that closure can be committed. No hot body or
