@@ -53,6 +53,8 @@ struct BaseModel {
         std::map<std::string, Value> fields;
         std::set<std::string> traits;
         std::string removed_in;  // not empty: the alias ledger says this game build removed it
+        // Internal flattened stack ranges, one per drop group. Never part of schema fields or author-facing values.
+        std::vector<std::pair<size_t, size_t>> drop_groups;
     };
     std::map<std::string, std::vector<Entry>> registries;  // entries in the registry's own order
     std::set<std::string> retired;                          // "<registry>|<id>" the ids ledger retired: never added again

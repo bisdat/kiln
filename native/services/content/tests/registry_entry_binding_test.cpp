@@ -71,6 +71,15 @@ int main() {
     registry_entries_prepare(&in);
     entry_check(queued.empty() && in.result.added.empty(), "definition failure refuses dependent recipes and forgets their unpublished definitions");
     entry_check(std::any_of(in.result.refused.begin(), in.result.refused.end(), [](const auto& r) { return r.registry == "recipes" && r.reason.find("injected item definition refusal") != std::string::npos; }), "definition failure root reaches dependent recipe refusal");
+    registry::Batch removal; refusals.clear();
+    entry_check(registry::parse_batch(registry::json{{"ir", 1}, {"mod", "a"}, {"stage", "alter"}, {"edits", {{{"registry", "items"}, {"entry", "remove"}, {"select", "game:material_t1_wood_logs"}}}}}, *in.schema, &removal, &refusals, &why), "removal gate fixture parses");
+    auto proof = *g_regmap;
+    auto unproven = removal; proof.build.rows["drops.entries[].chance"] = registry::map::BuildRow::Unproven;
+    registry::refuse_unmapped_edits(proof, *in.schema, &unproven, &refusals, true);
+    entry_check(unproven.edits.empty() && refusals.size() == 1 && refusals.front().reason.find("drop tables not proven on this build") != std::string::npos, "unproven drop rows refuse the whole item removal with the named reason");
+    proof.build.rows["drops.entries[].chance"] = registry::map::BuildRow::Ok; refusals.clear();
+    registry::refuse_unmapped_edits(proof, *in.schema, &removal, &refusals, true);
+    entry_check(removal.edits.size() == 1 && refusals.empty(), "proven drop rows admit removal to the group-safety preflight");
     std::printf("registry-entry-binding-test: %d checks, %d failed\n", entry_checks, failures);
     return failures ? 1 : 0;
 }

@@ -194,6 +194,9 @@ void values(const std::string& dir) {
 
 void needs_and_compose(const std::string& dir) {
     Fixture f(dir);
+    // Keep a viable stack in the affected group: removing its only stack is now refused, not guessed safe.
+    auto& root = f.view.values[g(300)]["rootGroup"];
+    root["stacks"].push_back(root["groups"][0]["stacks"][0]);
     std::vector<ModInput> mods(1);
     mods[0].id = "testmod";
     Batch b;
@@ -230,8 +233,12 @@ void needs_and_compose(const std::string& dir) {
     bool drop_gone = false;
     for (const EntryRef& x : r.removed) drop_gone = drop_gone || (x.registry == "drops" && x.id == "game:lootcontainer_enemy_a");
     const auto drops = r.fields.find(FieldRef{"drops", "game:lootcontainer_enemy_a", "entries"});
-    check(!drop_gone && drops != r.fields.end() && drops->second.result.list.size() == 1 && drops->second.result.list[0].leaf("item")->t == "game:sword_t1",
-          "the drop table naming it stays and only loses that element");
+    check(base.registries.at("drops")[0].drop_groups == std::vector<std::pair<size_t, size_t>>{{0, 2}, {2, 1}},
+          "the copied model retains group spans independently of flat author-facing values");
+    check(!drop_gone && drops != r.fields.end() && drops->second.result.list.size() == 3 &&
+          drops->second.result.list[0].leaf("chance")->as_double() == 0 && drops->second.result.list[0].leaf("weight")->as_double() == 0 &&
+          drops->second.result.list[1].leaf("item")->t == "game:sword_t1",
+          "the drop table and its indices stay; only the removed item's stack is disabled");
 }
 
 void encode_writes(const std::string& dir) {

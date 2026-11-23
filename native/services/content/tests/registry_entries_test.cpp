@@ -44,6 +44,47 @@ template<class R> static void descriptor(const R& r) {
         }
     } else CHECK(false, "added item has a binding descriptor");
 }
+template<class E> static void group(E& entry, size_t count) {
+    if constexpr (requires { entry.drop_groups; }) entry.drop_groups = {{0, count}};
+    else CHECK(false, "drop safety metadata retains group spans");
+}
+static Value drop(const char* id, double chance, double weight) {
+    Value v; v.kind = Value::Struct; v.keys = {"chance", "count.max", "item", "weight"};
+    v.list = {Value::number(chance), Value::integer(1), Value::text(id), Value::number(weight)}; return v;
+}
+static void drop_removal_cases() {
+    auto s = schema(); auto b = base();
+    auto& spec = s.registries["drops"]; spec.name = "drops"; spec.add = spec.remove = false;
+    FieldSpec list; list.name = "entries"; list.type = FieldType::List; spec.fields[list.name] = list;
+    for (const auto& [name, type] : std::vector<std::pair<std::string, FieldType>>{{"item", FieldType::Id}, {"chance", FieldType::Float}, {"weight", FieldType::Float}, {"count.max", FieldType::Int}}) {
+        FieldSpec f; f.name = "entries[]." + name; f.type = type; f.ref = name == "item" ? "items" : ""; spec.fields[f.name] = f;
+    }
+    link_elements(&s);
+    b.registries["items"].push_back({"game:stone", {{"maxStack", Value::integer(10)}}});
+    BaseModel::Entry table; table.id = "game:table";
+    table.fields["entries"] = Value::of_list({drop("game:wood", 1, 1), drop("game:stone", 1, 1)});
+    group(table, 2); b.registries["drops"] = {table};
+    const auto remove = input(s, json::array({{{"registry", "items"}, {"entry", "remove"}, {"select", "game:wood"}}}), Stage::Alter);
+    auto r = compose(s, b, {}, {remove});
+    const auto field = r.fields.find({"drops", "game:table", "entries"});
+    CHECK(field != r.fields.end() && field->second.result.list.size() == 2, "removed items retain physical drop slots and indices");
+    if (field != r.fields.end() && field->second.result.list.size() == 2)
+        CHECK(field->second.result.list[0].leaf("chance")->as_double() == 0 && field->second.result.list[0].leaf("weight")->as_double() == 0 && field->second.result.list[1].leaf("chance")->as_double() == 1, "only the removed item's chance and weight become inert");
+    const auto later = input(s, json::array({{{"registry", "drops"}, {"select", "game:table"}, {"field", "entries[0].chance"}, {"op", 1}}}), Stage::Alter);
+    const auto live = compose_after(s, b, r, {later});
+    const auto live_field = live.fields.find({"drops", "game:table", "entries"});
+    CHECK(live_field != live.fields.end() && live_field->second.result.list.size() == 2 && live_field->second.result.list[0].leaf("chance")->as_double() == 0, "later field edits cannot reactivate a hidden item");
+    CHECK(reason(live, "conflicts with removal"), "later edits to disabled drop leaves report the conflict");
+    b.registries["drops"][0].fields["entries"] = Value::of_list({drop("game:wood", 1, 1)});
+    group(b.registries["drops"][0], 1);
+    r = compose(s, b, {}, {remove});
+    CHECK(!has(r.removed, "items", "game:wood") && !has(r.removed, "loot", "game:wood") && !has(r.removed, "recipes", "game:board"), "a removal leaving an all-zero group is refused whole");
+    CHECK(reason(r, "nothing that can spawn"), "all-zero refusal names the unsafe group, not a guessed behavior");
+    bool final_sees = false; ModInput observer; observer.id = "observer";
+    observer.code = [&](Stage phase, const View& view, Batch*) { if (phase == Stage::Final) final_sees = view.exists("items", "game:wood"); };
+    (void)compose(s, b, {}, {remove, observer});
+    CHECK(final_sees, "Final reads see the accepted Alter view after unsafe removals are refused");
+}
 int main() {
     const auto s = schema(); const auto b = base();
     for (const auto& bad : {"a:x:y", "a:x/y", "a:x~12345678", "a:", "a:x y"}) {
@@ -65,6 +106,7 @@ int main() {
     r = compose(s, b, {}, {chain, remove});
     CHECK(!has(r.added, "items", "a:first") && !has(r.added, "items", "a:second") && !has(r.added, "recipes", "a:recipe"), "removed clone base refuses the full dependent chain");
     CHECK(reason(r, "like game:wood was removed by a") && reason(r, "a:second refused: like a:first refused:"), "clone refusal chains name their root cause");
+    drop_removal_cases();
     std::printf("registry-entries-test: %d passed, %d failed\n", passed, failed);
     return failed ? 1 : 0;
 }

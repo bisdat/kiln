@@ -1075,6 +1075,63 @@ std::string bounded(const std::string& text, const std::string& root) {
     return text.substr(0, cut) + " ... (root: " + r.substr(0, rc) + ")";
 }
 
+// An item removal is indivisible: do not hide its loot/recipes while leaving unsafe drop groups behind.
+std::map<EntryRef, std::string> unsafe_item_removals(const Ctx& c, const State& s) {
+    std::set<std::string> hidden;
+    for (const auto& ref : c.out.removed) if (ref.registry == "items") hidden.insert(ref.id);
+    std::map<EntryRef, std::string> bad;
+    if (hidden.empty() || !c.schema.registry("drops")) return bad;
+    if (!c.base.registries.count("drops")) {
+        for (const auto& id : hidden) bad[{"items", id}] = "drop tables were not read for removal safety on this build";
+        return bad;
+    }
+    for (const auto& table : c.base.registries.at("drops")) {
+        const Value value = s.current({"drops", table.id, "entries"});
+        if (value.kind != Value::List) continue;
+        auto hidden_id = [&](const Value& entry) -> std::string {
+            const auto* item = entry.leaf("item");
+            return item && item->kind == Value::Text && hidden.count(item->t) ? item->t : "";
+        };
+        bool touched = std::any_of(value.list.begin(), value.list.end(), [&](const auto& entry) { return !hidden_id(entry).empty(); });
+        if (!touched) continue;
+        size_t covered = 0; bool valid = true;
+        for (const auto& [first, count] : table.drop_groups) {
+            if (first != covered || first > value.list.size() || count > value.list.size() - first) { valid = false; break; }
+            covered += count;
+        }
+        if (!valid || table.drop_groups.empty() || covered != value.list.size()) {
+            for (const auto& entry : value.list) if (const auto id = hidden_id(entry); !id.empty())
+                bad[{"items", id}] = "drop grouping of " + table.id + " is not proven on this build";
+            continue;
+        }
+        for (const auto& [first, count] : table.drop_groups) {
+            std::set<std::string> removed;
+            bool viable = false;
+            for (size_t i = first; i < first + count; ++i) {
+                const auto& entry = value.list[i];
+                const auto id = hidden_id(entry);
+                if (!id.empty()) { removed.insert(id); continue; }
+                const auto* chance = entry.leaf("chance"); const auto* weight = entry.leaf("weight"); const auto* max = entry.leaf("count.max");
+                viable = viable || (chance && weight && max && chance->as_double() > 0 && weight->as_double() > 0 && max->as_double() > 0);
+            }
+            if (!viable) for (const auto& id : removed)
+                bad[{"items", id}] = "drop group of " + table.id + " would have nothing that can spawn with a positive weight; item removal was not applied";
+        }
+    }
+    return bad;
+}
+
+void refuse_unsafe_item_removals(Ctx& c, State& s) {
+    for (const auto& [ref, reason] : unsafe_item_removals(c, s)) {
+        const auto removal = c.out.removals.find(ref);
+        if (removal == c.out.removals.end()) continue;
+        c.out.refused.push_back({removal->second.mod, removal->second.source, removal->second.stage, removal->second.n,
+                                reason, "", ref.registry, ref.id, ""});
+        if (auto* entry = s.entry(ref.registry, ref.id)) { entry->removed = false; entry->removed_by.clear(); }
+        std::erase(c.out.removed, ref); c.out.removals.erase(removal);
+    }
+}
+
 void check_references(Ctx& c, State& s, bool fields_only = false) {
     std::map<std::string, std::vector<const FieldSpec*>> fields;  // registry -> its fields with references (lists, not leaf rows)
     for (const auto& [name, reg] : c.schema.registries)
@@ -1220,8 +1277,8 @@ void check_references(Ctx& c, State& s, bool fields_only = false) {
                     r.after = v;
                     kept.push_back(std::move(r));
                 }
+                fo.chain = std::move(kept); // every row was moved, even when no newly introduced reference was refused
                 if (!dropped_mods.empty()) {
-                    fo.chain = std::move(kept);
                     resummarize(fo);
                     fo.result = v;
                     fo.winner = fo.chain.empty() ? std::string() : fo.chain.back().who;
@@ -1241,6 +1298,40 @@ void check_references(Ctx& c, State& s, bool fields_only = false) {
                 if (gone.empty()) continue;
                 std::string root;
                 const std::string why = cause(*f, gone.front(), &root);
+                if (er.registry == "drops" && f->name == "entries") {
+                    // Physical slots never move. Check rows are last, so a later chance/weight edit cannot reactivate one.
+                    auto& fo = s.touch(fr);
+                    const Value current = fo.result;
+                    const auto rows = fo.chain;
+                    for (size_t i = 0; i < current.list.size(); ++i) {
+                        const auto* item = current.list[i].leaf("item");
+                        if (!item || item->kind != Value::Text || why_gone(c, s, "items", item->t).empty()) continue;
+                        const auto removal = c.out.removals.find({"items", item->t});
+                        const std::string remover = removal == c.out.removals.end() ? "the reference check" : removal->second.mod;
+                        for (const char* leaf : {"chance", "weight"}) {
+                            const FieldSpec* leaf_spec = f->element_field(leaf);
+                            if (!leaf_spec) continue;
+                            for (const auto& earlier : rows) {
+                                if (earlier.kind != WriterKind::Registry) continue;
+                                const bool targets = !earlier.element.on || ((earlier.element.all || earlier.element.index == i) && (earlier.element.leaf.empty() || earlier.element.leaf == leaf));
+                                const auto* wanted = earlier.after.kind == Value::List && i < earlier.after.list.size() ? earlier.after.list[i].leaf(leaf) : nullptr;
+                                if (!targets || !wanted || wanted->as_double() == 0) continue;
+                                const std::string reason = er.registry + " " + er.id + " entries[" + std::to_string(i) + "]." + leaf + " conflicts with removal of " + item->t + " by " + remover + "; removal wins";
+                                const bool seen = std::any_of(c.out.refused.begin(), c.out.refused.end(), [&](const auto& row) { return row.source == earlier.source && row.n == earlier.n && row.reason == reason; });
+                                if (!seen) c.out.refused.push_back({earlier.mod, earlier.source, earlier.stage, earlier.n, reason, "", er.registry, er.id, f->name});
+                            }
+                            ChainRow row; row.kind = WriterKind::Check; row.mod = remover; row.who = "removal of " + item->t;
+                            row.source = "removal:" + item->t; row.element = {true, "entries", false, static_cast<uint32_t>(i), leaf};
+                            row.element_spec = std::make_shared<const FieldSpec>(*leaf_spec); row.op.set = true; row.op.value = Value::number(0);
+                            Value next; std::string error;
+                            if (apply_row(row, fo.result, *f, &next, &error)) {
+                                fo.result = row.after = next; fo.winner = row.who; fo.chain.push_back(std::move(row)); note_row(fo);
+                            }
+                        }
+                    }
+                    c.out.lines.push_back({LineKind::Dropped, fr, "", "", er.registry + " " + er.id + ": stacks naming " + why + " disabled (physical slots retained)"});
+                    continue;
+                }
                 if (c.schema.registry(er.registry)->remove) {
                     e->removed = true;
                     e->removed_by = "the reference check";
@@ -1413,12 +1504,27 @@ static Result compose_impl(const Schema& schema, const BaseModel& base, const st
         fo.chain.push_back(std::move(r));
         note_row(fo);
     }
-    if (previous) s.fields = previous->fields; // summaries travel with the chains: exclusive/yield stay exact
+    if (previous) {
+        s.fields = previous->fields; // summaries travel with the chains: exclusive/yield stay exact
+        for (const auto& [ref, definition] : previous->definitions) {
+            if (!s.entry(ref.registry, ref.id) && !prepared) {
+                EntryState entry; entry.id = ref.id; entry.added = true; entry.like = definition.like;
+                entry.base = definition.values; entry.traits = definition.traits; s.add_entry(ref.registry, std::move(entry));
+            }
+            c.adders[ref] = {definition.mod, definition.source, definition.n};
+        }
+        for (const auto& ref : previous->removed) if (auto* entry = s.entry(ref.registry, ref.id)) {
+            entry->removed = true;
+            const auto removal = previous->removals.find(ref);
+            entry->removed_by = removal == previous->removals.end() ? "the reference check" : removal->second.mod;
+        }
+    }
     const bool any_code = std::any_of(mods.begin(), mods.end(), [](const ModInput& m) { return bool(m.code); });
     for (const Stage stage : {Stage::Add, Stage::Alter}) {
         std::optional<State> seen;  // what code reads during this stage: the state as the previous stage left it
         if (any_code) seen = s;
         for (const ModInput& m : mods) run_mod(c, s, m, stage, seen ? *seen : s);
+        if (!previous && stage == Stage::Alter) refuse_unsafe_item_removals(c, s);
     }
     // final: each mod on its own overlay over the post-alter state (its data files' selectors see add+alter and its own final
     // edits, never another mod's; its code reads the post-alter view; the post-alter state is not changed until every final
@@ -1476,6 +1582,7 @@ static Result compose_impl(const Schema& schema, const BaseModel& base, const st
         }
         run_edit(c, s, h.who, h.edit, true, &h.ids);
     }
+    if (!previous) refuse_unsafe_item_removals(c, s);
     check_references(c, s, prepared != nullptr);
     if (!previous) {
         for (const EntryRef& ref : out.added) {

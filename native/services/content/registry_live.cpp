@@ -143,7 +143,7 @@ std::string num_key(const std::string& registry, uint32_t num) { return registry
 std::vector<const ChainRow*> registry_rows(const registry::FieldOutcome& fo) {
     std::vector<const ChainRow*> out;
     for (const ChainRow& r : fo.chain)
-        if (r.kind == registry::WriterKind::Registry) out.push_back(&r);
+        if (r.kind == registry::WriterKind::Registry || r.kind == registry::WriterKind::Check) out.push_back(&r);
     return out;
 }
 

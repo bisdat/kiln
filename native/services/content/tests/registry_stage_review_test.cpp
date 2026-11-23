@@ -329,6 +329,20 @@ void full_live_base_uses_cache(const std::string& dir) {
     check(runner.read(0, "items", "game:material_t1_wood_logs", "maxStack", &value) == KILN_OK && value == "41",
           "changed resource bytes invalidate the full-model cache");
 }
+void cache_without_entry_metadata_is_rejected(const std::string& dir) {
+    TreeView first = world(); Files files;
+    auto env = env_of(&first, &files, dir, &items_only); env.prepare_live = true;
+    { stage::Runner runner(std::move(env)); runner.run({}); runner.finish({}); }
+    for (auto& [path, text] : files.data) if (path.starts_with("cache/")) {
+        auto cached = json::parse(text); cached["base"].erase("entryMetadata"); text = cached.dump();
+    }
+    TreeView second = world(); Files again; again.data = files.data;
+    auto next = env_of(&second, &again, dir, &items_only); next.prepare_live = true;
+    { stage::Runner runner(std::move(next)); runner.run({}); runner.finish({}); }
+    bool hit = false;
+    for (const auto& line : again.log) hit |= line.find("the cache holds") != std::string::npos;
+    check(!hit, "a cached base without entry/group metadata is never reused");
+}
 void lazy_base_waits_for_live_handoff(const std::string& dir) {
     TreeView view = world(); Files files = warm_id_table(dir);
     auto env = env_of(&view, &files, dir, &no_sections); env.prepare_live = true;
@@ -774,6 +788,7 @@ int main(int argc, char** argv) {
         {"P2 unused_live_base_is_lazy", [&] { unused_live_base_is_lazy(dir); }},
         {"NS1 registry_users_decode_at_the_stage", [&] { registry_users_decode_at_the_stage(dir); }},
         {"P2 full_live_base_uses_cache", [&] { full_live_base_uses_cache(dir); }},
+        {"P2 cache_without_entry_metadata_is_rejected", [&] { cache_without_entry_metadata_is_rejected(dir); }},
         {"P2 full_live_cache_keeps_boot_targets", [&] { full_live_cache_keeps_boot_targets(dir); }},
         {"P2 lazy_base_waits_for_live_handoff", [&] { lazy_base_waits_for_live_handoff(dir); }},
         {"P2 lazy_base_keeps_pre_patch_resource_bytes", [&] { lazy_base_keeps_pre_patch_resource_bytes(dir); }},

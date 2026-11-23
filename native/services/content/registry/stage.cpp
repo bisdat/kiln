@@ -107,6 +107,7 @@ json base_out(const BaseModel& b) {
             json row = {{"id", e.id}, {"fields", f}};
             if (!e.traits.empty()) row["traits"] = e.traits;
             if (!e.removed_in.empty()) row["removedIn"] = e.removed_in;
+            if (!e.drop_groups.empty()) row["dropGroups"] = e.drop_groups;
             a.push_back(std::move(row));
         }
         regs[reg] = std::move(a);
@@ -114,10 +115,10 @@ json base_out(const BaseModel& b) {
     json cover = json::object();
     for (const auto& [reg, m] : b.raw_cover)
         for (const auto& [k, c] : m) cover[reg][k] = {{"field", c.field}, {"converted", c.converted}};
-    return {{"registries", regs}, {"rawCover", cover}, {"retired", b.retired}};
+    return {{"entryMetadata", 1}, {"registries", regs}, {"rawCover", cover}, {"retired", b.retired}};
 }
 bool base_in(const json& j, BaseModel* b) {
-    if (!j.is_object() || !j.contains("registries") || !j["registries"].is_object()) return false;
+    if (!j.is_object() || j.value("entryMetadata", 0) != 1 || !j.contains("registries") || !j["registries"].is_object()) return false;
     for (auto it = j["registries"].begin(); it != j["registries"].end(); ++it) {
         auto& dst = b->registries[it.key()];
         for (const auto& row : it.value()) {
@@ -131,6 +132,7 @@ bool base_in(const json& j, BaseModel* b) {
             }
             if (row.contains("traits")) e.traits = row["traits"].get<std::set<std::string>>();
             if (row.contains("removedIn")) e.removed_in = row["removedIn"].get<std::string>();
+            if (row.contains("dropGroups")) e.drop_groups = row["dropGroups"].get<std::vector<std::pair<size_t, size_t>>>();
             dst.push_back(std::move(e));
         }
     }
@@ -215,7 +217,7 @@ std::string regmap_digest(const map::RegMap& rm) {
 // Stable full models share a family across mod sets; raw requests are never serialized into this cache.
 std::string cache_family(const Env& env, const map::RegMap& rm, const model::Need& need) {
     const json request = need.all && need.raw.empty() ? json{{"all", true}} : need_json(need);
-    return sha_hex(std::string(model::kDecoderVersion) + "\n" + env.kiln_version + "\n" + env.side + "\n" + env.exe_sha256 + "\n" +
+    return sha_hex(std::string(model::kDecoderVersion) + "\nentry-metadata-1\n" + env.kiln_version + "\n" + env.side + "\n" + env.exe_sha256 + "\n" +
         (rm.has_build ? (rm.build.verified ? "verified" : "unverified") : "none") + "\n" + regmap_digest(rm) + "\n" + request.dump());
 }
 std::string cache_path(const std::string& family) { return "cache/" + family.substr(0, 32) + ".json"; }
