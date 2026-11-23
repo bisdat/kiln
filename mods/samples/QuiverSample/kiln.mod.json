@@ -1,0 +1,10 @@
+{
+  "id": "quiversample",
+  "name": "Quiver sample",
+  "version": "1.0.0",
+  "apiVersion": "0.2",
+  "license": "MIT",
+  "entryAssembly": "QuiverSample.dll",
+  "side": "both",
+  "description": "Player storage sample: an 18-slot quiver for arrows and spells (it follows the game's tombstone rule) and an 8-slot satchel for anything, both kept with your character by Kiln. /quiver lists them; /quiver store moves ammunition from your backpack into the quiver, /quiver take gives a stack back, /quiver use equips one from the quiver, /quiver activate swaps it into your backpack first, /quiver stash and /quiver unstash use the satchel. The quiver's stacks show in the HUD's ammunition and spell lists, and picking one there equips it."
+}
