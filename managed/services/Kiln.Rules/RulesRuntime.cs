@@ -204,6 +204,7 @@ internal static unsafe class RulesRuntime
         }
         foreach (var r in theirs) r.Dispose();
         Creative.Forget();
+        UnlimitedFlight.Forget();
         Kiln.NoClip.Forget();
         ReturnStore.WorldClosing();  // the book of a memory-kept world goes with it (the world's data keeps its own)
         RulesNet.SetLocal(RulesNativePart.Default);
@@ -505,6 +506,7 @@ internal static unsafe class RulesRuntime
         {
             _retiring--;
         }
+        UnlimitedFlight.Forget(s.Entity);
         s.Clip = null;
         if (RulesNative.T is var t && t != null) t->Set(s.Entity.Value, null);
         lock (Gate) Spent.Remove(s.Entity);

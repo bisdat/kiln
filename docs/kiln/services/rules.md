@@ -305,6 +305,32 @@ hook, so the glide flies as before)` to the rules they list. The rules message c
 steering limit at its end: an older client reads the fields it knows (Kiln's channels ignore trailing bytes), a newer client
 reads 0 from an older server; an older server drops message 2 unread. The channel version stays 4.
 
+## Unlimited Flight
+Since 0.2.0-dev.30.7, Kiln.Rules includes `/unlimitedflight on|off|status`, **self only**, host/admin by default
+(permission node `kiln.command.unlimitedflight`, level Admin, through the existing command permission mechanism).
+It is independent of Creative, needs no separate mod, starts **off**, and adds no public API or ABI.
+
+`on` creates a Kiln-owned, player-scoped rule set containing **only** `UnlimitedGliding = true` and
+`GlideSteer = GlideSteerRule.Default`: no glider stamina drain, S pitches up, releasing holds the pitch, W dives.
+There is no boost or gravity change: upward pitch can trade speed for height. The player still needs an open glider,
+and the game's landing, hits, water and closing the glider still end it. It enables no free-character flight,
+building, crafting, invulnerability, general stamina refill or other Creative features.
+
+The server's existing `rules.json` limits (`allowUnlimitedGliding`, `allowGlideSteer`, `maxGlideSteerAngle`) and other
+rule sets still win. The gliding hook and the player's Kiln rules channel are needed for stamina; steering also needs
+the server's steering hook and that client's steering confirmation (the local host shares its hooks). `on` and
+`status` report the **current combined glide**, including partial availability, explicit policy denials, missing
+hooks, and steering waiting for the client's hook confirmation. A still-joining client is asked to retry; a client
+without the rules channel is refused. If neither requested effect can apply, `on` is refused and its new set is
+removed. A later denial leaves the existing request inactive and visible in `status`, until limits/support return
+or it is switched off. A joined game's local console is told to use server chat, not its local policy file.
+
+`off` disposes only this command's rule set, leaving Creative and every other rule set intact. On/off are idempotent.
+The set belongs to **Kiln even when a mod invokes the command** and outlives that caller's unload; the usual rules
+lifecycle removes it when the player leaves or the world closes. It is not persisted. In an offline hosted world,
+the [console folder](../commands.md#console-folder-and-kilnctl-cmd) runs these commands as the host's own character; there is no
+player-targeting form for a dedicated console. `/help unlimitedflight` lists the three forms.
+
 ## Gliding
 The game's glider is its own thrust against air drag, with gravity for the sink (docs/re/rules.md 7). Kiln wraps the
 glide step and changes nothing the game would not predict the same way (the math: `native/services/rules/glide_math.h`,
