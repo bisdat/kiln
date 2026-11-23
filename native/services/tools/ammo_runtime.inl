@@ -180,6 +180,21 @@ int backpack(uint32_t actor,uint32_t item) {
     }
     return found?1:0;
 }
+// Direct UI wishes need not have gone through C40c320's index update. Preserve only the picture's
+// identity here; do not write the game's pending/equip wish at +63c/+640 or ClientPlayerInput.
+bool select_identity(SelectorGroup* group,uint32_t selected) {
+    SelectorRow* data=nullptr;uint64_t count=0,capacity=0;
+    if(!read(data,&group->data)||!read(count,&group->count)||!read(capacity,&group->capacity)||count>capacity||count>KUA_CAPACITY||(!data&&count)){fault(nullptr);return false;}
+    for(uint64_t r=0;r<count;++r) {
+        uint32_t item=0;if(!read(item,&data[r].item)){fault(nullptr);return false;}
+        if(item==selected) {
+            const uint8_t yes=1;
+            if(!copy_game_value(&group->selected,&r,8)||!copy_game_value(&group->has_selected,&yes,1)){fault(group);return false;}
+            return true;
+        }
+    }
+    return false;
+}
 void KILN_CALL pick(SelectorGroup* groups,void* input,uint8_t category,uint32_t item,uint32_t version) try {
     kt::ToolPolicyScope no_impact_policy(nullptr);
     std::shared_ptr<const Publication> p;Observation original{};KilnUiAmmoRow picked{};bool injected=false;
@@ -200,7 +215,7 @@ void KILN_CALL pick(SelectorGroup* groups,void* input,uint8_t category,uint32_t 
     if(actual==1){pick_hook.call<void>(groups,input,category,item,version);return;}
     if(actual<0)return;
     std::lock_guard lock(mutex);
-    if(publications[category]!=p||!available())return;
+    if(publications[category]!=p||!available()||!select_identity(groups+category,item))return;
     if(pending.size()==KUA_CAPACITY)pending.pop_front();
     pending.emplace_back(p->owner,KilnUiAmmoPick{sizeof(KilnUiAmmoPick),p->kind,item,picked.count,picked.row,before.client_session,before.client_steps});
     // Deliberately do not call the continuation: no inventoryStockCycleAction version/item or pending native
@@ -214,12 +229,7 @@ void KILN_CALL finalizer(SelectorGroup* groups,void* a,void* b,void* c,void* d,v
     if(groups)for(unsigned i=0;i<2;++i)if(selected[i]) {
         std::lock_guard lock(mutex);const auto at=bindings.find(reinterpret_cast<uintptr_t>(groups+i));
         if(at==bindings.end())continue;
-        SelectorRow* data=nullptr;uint64_t count=0,capacity=0;
-        if(!read(data,&groups[i].data)||!read(count,&groups[i].count)||!read(capacity,&groups[i].capacity)||count>capacity||count>KUA_CAPACITY||(!data&&count)){fault(nullptr);continue;}
-        for(uint64_t r=0;r<count;++r) {
-            uint32_t item=0;if(!read(item,&data[r].item)){fault(nullptr);break;}
-            if(item==selected[i]) {const uint8_t yes=1;if(!copy_game_value(&groups[i].selected,&r,8)||!copy_game_value(&groups[i].has_selected,&yes,1))fault(groups+i);break;}
-        }
+        select_identity(groups+i,selected[i]);
     }
 }
 KilnResult KILN_CALL publish(KilnOwner owner,const KilnUiAmmoPublish* value) {

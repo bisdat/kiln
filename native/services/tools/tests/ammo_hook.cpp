@@ -78,6 +78,7 @@ int main() {
     std::swap(supplied[0],supplied[1]);CHECK(ammo::publish(7,&pub)==KILN_OK);selector(groups,const_cast<void*>(static_cast<const void*>(access)),0);
     groups[0].selected=1;ammo::finalizer(groups,nullptr,nullptr,nullptr,nullptr,nullptr);CHECK(groups[0].selected==1&&finalizer_calls==1);
     backpack_answer=0;equip_calls=0;ammo::pick(groups,nullptr,0,555,100);CHECK(equip_calls==0);
+    CHECK(groups[0].has_selected&&groups[0].data[groups[0].selected].item==555); // A direct click need not have updated the native index yet.
     KilnUiAmmoPick picks[64]{};uint32_t written=99;CHECK(ammo::take_picks(7,picks,64,&written)==KILN_OK&&written==1&&picks[0].item==555&&picks[0].row==3);
     backpack_answer=1;ammo::pick(groups,nullptr,0,555,101);CHECK(equip_calls==1); // A real stack uses the game, even for a provider row.
     backpack_answer=-1;ammo::pick(groups,nullptr,0,555,102);CHECK(equip_calls==1); // Unreadable is never equip permission.
