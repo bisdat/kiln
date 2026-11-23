@@ -49,7 +49,7 @@ internal static class NpcCompiler
                 low.Json["ai"] = name;
                 return new BlockHandle<AIBlock>(mod, name, BlockIds.Derive(mod, "ai", name), $"{mod}.{name}", ai);
             case BehaviourBlock bh:
-                CheckBehaviour(ctx, Liked(ctx, bh, null), "");
+                CheckBehaviour(ctx, Liked(ctx, bh, null), "", used: false);
                 low.Json["behaviour"] = name;
                 return new BlockHandle<BehaviourBlock>(mod, name, BlockIds.Derive(mod, "behaviour", name), $"{mod}.{name}", bh);
             case AttackBlock at:
@@ -57,7 +57,7 @@ internal static class NpcCompiler
                 low.Json["attack"] = name;
                 return new BlockHandle<AttackBlock>(mod, name, RuleIds.Derive(mod, "attack", at.Name ?? name), at.Name ?? name, at);
             case RuleBlock r:
-                CheckRule(ctx, r, "");
+                CheckRule(ctx, r, "", used: false);
                 low.Json["rule"] = name;
                 return new BlockHandle<RuleBlock>(mod, name, RuleIds.Derive(mod, "rule", r.Name ?? name), r.Name ?? name, r);
             case CreatureBlock c:
@@ -133,7 +133,9 @@ internal static class NpcCompiler
         foreach (var (c, i) in (b.Colliders ?? []).Select((c, i) => (c, i)))
         {
             if (c.Shape is not ("capsule" or "sphere")) throw new BlockError(ctx.Block, Join(path, $"colliders[{i}].shape"), $"\"{c.Shape}\": capsule or sphere");
-            if (c.Radius <= 0 || c.Height < 0 || c.Height < c.Radius * 2 && c.Shape == "capsule") throw new BlockError(ctx.Block, Join(path, $"colliders[{i}]"), "a radius above 0, a height of 0 or more, and a capsule at least as high as it is wide");
+            if (c.Radius <= 0 || c.Height < c.Radius * 2 && c.Shape == "capsule") throw new BlockError(ctx.Block, Join(path, $"colliders[{i}]"), "a radius above 0, a height of 0 or more, and a capsule at least as high as it is wide");
+            // a capsule below 0 is refused above (under twice its radius); a sphere's height is not used (lowered: length 0, offset its radius)
+            if (c.Height < 0) ctx.Tolerate(Join(path, $"colliders[{i}].height"), $"{c.Height} must be at least 0; a sphere does not use its height, so it is ignored");
         }
         if (b.Colliders is { Count: > 2 }) throw new BlockError(ctx.Block, Join(path, "colliders"), "at most two: one for hits, one for what it bumps into");
     }
@@ -159,8 +161,9 @@ internal static class NpcCompiler
         if (a.Template == null && a.Clips == null) throw new BlockError(ctx.Block, Join(path, "clips"), "an animation is a glTF of the mod with its clips, or a game creature's: say clips, or start from a premade (like)");
         if (a.Template != null)
         {
-            if (EngineClips(a).Any() || a.States.Count > 0 || a.Hit != null || a.Stagger != null || a.Layers is { Count: > 0 })
+            if (EngineClips(a).Any() || a.States.Count > 0 || a.Hit != null || a.Layers is { Count: > 0 })
                 throw new BlockError(ctx.Block, Join(path, "states"), $"the game's graph of {a.Template} is as it is: states of your own need clips of your own");
+            if (a.Stagger != null) ctx.Tolerate(Join(path, "stagger"), $"the game's graph of {a.Template} is as it is: its own stagger plays, and this one is ignored");
             return;
         }
         CheckFile(ctx, a.Clips!, Join(path, "clips"));
@@ -185,13 +188,17 @@ internal static class NpcCompiler
 
     private static void CheckClip(BlockContext ctx, Clip c, string path)
     {
-        if (c.Name is { Length: 0 } || c.Name == null && c.Blend == null) throw new BlockError(ctx.Block, path, "a glTF animation's name, or a blend");
-        if (c.BlendIn is < 0) throw new BlockError(ctx.Block, $"{path}.blendIn", $"{c.BlendIn} must be at least 0");
+        if (c.Name == null && c.Blend == null) throw new BlockError(ctx.Block, path, "a glTF animation's name, or a blend");
+        if (c.Name is { Length: 0 }) ctx.Tolerate(path, "a glTF animation's name, or a blend; no glTF animation has an empty name, so the cook makes no clip of it");
+        if (c.BlendIn is < 0) ctx.Tolerate($"{path}.blendIn", $"{c.BlendIn} must be at least 0; the cook writes it into the graph as written");
+        // refused on every clip, also a hit clip (0.2.0-dev.30.6 loaded one): at 0 or below the clip never ends, and the hit layer leaves its
+        // play state only at the clip's end, so after the first hit the creature would stay in that pose
         if (c.Speed is <= 0) throw new BlockError(ctx.Block, $"{path}.speed", $"{c.Speed} must be more than 0");
         if (c.Blend is { } b)
         {
             if (b.Clips.Count < 2) throw new BlockError(ctx.Block, $"{path}.blend.clips", "a blend mixes two animations or more");
             foreach (var k in b.Clips.Keys)
+                // refused also when not finite (0.2.0-dev.30.6 loaded "NaN" and "1e999"): the cook wrote it into the game's blend space, NaN weights
                 if (!double.TryParse(k, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var point) || !double.IsFinite(point))
                     throw new BlockError(ctx.Block, $"{path}.blend.clips", $"\"{k}\" is not a number: the input's value where that animation plays");
         }
@@ -201,7 +208,9 @@ internal static class NpcCompiler
     {
         foreach (var (field, v) in new[] { ("sight", a.Sight), ("aggro", a.Aggro), ("leash", a.Leash) })
             if (v is < 0 or > 1000) throw new BlockError(ctx.Block, Join(path, field), $"{v} is outside 0..1000 metres");
-        if (a.PickEvery is <= 0 or > 60) throw new BlockError(ctx.Block, Join(path, "pickEvery"), $"{a.PickEvery} must be more than 0 and at most 60 seconds");
+        // 0.2.0-dev.30.6 took 0 to 1000 and used it as written (0: a decision at every AI update), and so does this release
+        if (a.PickEvery is < 0 or > 1000) throw new BlockError(ctx.Block, Join(path, "pickEvery"), $"{a.PickEvery} must be more than 0 and at most 60 seconds");
+        if (a.PickEvery is 0 or > 60) ctx.Tolerate(Join(path, "pickEvery"), $"{a.PickEvery} must be more than 0 and at most 60 seconds; it is used as written{(a.PickEvery == 0 ? ": a decision at every AI update" : "")}");
         if (a.SightAngle is < 0 or > 180) throw new BlockError(ctx.Block, Join(path, "sightAngle"), $"{a.SightAngle} is outside 0..180 degrees");
         if (a.PickTargetName is { } n && NpcRuntime.Lookup(NpcRuntime.Targets, n) == null)
             throw new BlockError(ctx.Block, Join(path, "pickTarget"), $"no target picker \"{n}\": register it with Blocks.Target(\"{n}\", npc => ...) in OnLoad");
@@ -210,7 +219,9 @@ internal static class NpcCompiler
         AiLowering.Check(ctx, a, path);   // npcai's fields (Ai/AiLowering.cs)
     }
 
-    private static void CheckBehaviour(BlockContext ctx, BehaviourBlock b, string path)
+    /// <param name="used">A creature's behaviour (its rules are checked as it lowers them), or one on its own: its rules only warn, as
+    /// 0.2.0-dev.30.6 checked them only where a creature used it.</param>
+    private static void CheckBehaviour(BlockContext ctx, BehaviourBlock b, string path, bool used)
     {
         if (b.Brain != null && b.BrainName != null) throw new BlockError(ctx.Block, Join(path, "brain"), "a brain from code or by name, not both");
         if (b.BrainName is { } bn && NpcRuntime.Lookup(NpcRuntime.Brains, bn) == null)
@@ -222,7 +233,13 @@ internal static class NpcCompiler
         if (attacks.Count > 32) throw new BlockError(ctx.Block, Join(path, "attacks"), $"{attacks.Count} attacks: an arsenal holds 32");
         if ((b.Rules?.Count ?? 0) > 32) throw new BlockError(ctx.Block, Join(path, "rules"), $"{b.Rules!.Count} rules: an arsenal holds 32");
         foreach (var (rule, i) in (b.Rules ?? []).Select((r, i) => (r, i)))
-            CheckRule(ctx, ctx.Part(rule, Join(path, $"rules[{i}]")), Join(path, $"rules[{i}]"));
+        {
+            var at = Join(path, $"rules[{i}]");
+            if (used) CheckRule(ctx, ctx.Part(rule, at), at, used: true);
+            else
+                try { CheckRule(ctx, ctx.Part(rule, at), at, used: false); }
+                catch (BlockError e) { ctx.Tolerate(e.Field ?? at, $"{e.Problem}{UnusedRule}"); }
+        }
         var names = new HashSet<string>(StringComparer.Ordinal);
         for (var i = 0; i < attacks.Count; i++)
         {
@@ -252,15 +269,25 @@ internal static class NpcCompiler
         }
         if (a.Plays == null) throw new BlockError(ctx.Block, Join(path, "plays"), "the state the attack plays: one of the animation's");
         if (a.OnHit is not { Count: > 0 } && a.Delivery == null) throw new BlockError(ctx.Block, Join(path, "onHit"), "an attack that does nothing: give it onHit or a delivery");
-        if (a.OnHit != null && a.Delivery != null) throw new BlockError(ctx.Block, Join(path, "delivery"), "a delivery carries its own effects: onHit is for a blow");
+        if (a.OnHit is { Count: > 0 } && a.Delivery != null) throw new BlockError(ctx.Block, Join(path, "delivery"), "a delivery carries its own effects: onHit is for a blow");
+        if (a.OnHit != null && a.Delivery != null) ctx.Tolerate(Join(path, "onHit"), "a delivery carries its own effects: onHit is for a blow; this empty one is ignored");
     }
 
-    private static void CheckRule(BlockContext ctx, RuleBlock r, string path)
+    private const string UnusedRule = "; a rule is checked where a creature's behaviour uses it, and that creature is refused";
+
+    /// <param name="used">A creature lowers it: wrong values refuse the creature. A rule (or behaviour) block on its own only warns, as
+    /// 0.2.0-dev.30.6 checked a rule only where a creature used it.</param>
+    private static void CheckRule(BlockContext ctx, RuleBlock r, string path, bool used)
     {
-        if (r.Every <= 0 || r.Every > 3600) throw new BlockError(ctx.Block, Join(path, "every"), $"{r.Every} must be more than 0 and at most 3600 seconds");
-        if (r.Cooldown < 0) throw new BlockError(ctx.Block, Join(path, "cooldown"), $"{r.Cooldown} is less than 0");
-        if (r.Chance is < 0 or > 1) throw new BlockError(ctx.Block, Join(path, "chance"), $"{r.Chance} is outside 0..1");
-        if (r.Do.Count == 0) throw new BlockError(ctx.Block, Join(path, "do"), "a rule that does nothing");
+        void Bad(string field, string problem)
+        {
+            if (used) throw new BlockError(ctx.Block, Join(path, field), problem);
+            ctx.Tolerate(Join(path, field), problem + UnusedRule);
+        }
+        if (r.Every <= 0 || r.Every > 3600) Bad("every", $"{r.Every} must be more than 0 and at most 3600 seconds");
+        if (r.Cooldown < 0) Bad("cooldown", $"{r.Cooldown} is less than 0");
+        if (r.Chance is < 0 or > 1) Bad("chance", $"{r.Chance} is outside 0..1");
+        if (r.Do.Count == 0) Bad("do", "a rule that does nothing");
     }
 
     // ---- cooked files -----------------------------------------------------------------------------------------------
@@ -351,7 +378,7 @@ internal static class NpcCompiler
         var ai = PartOf(ctx, aiRef, new AIBlock { Template = game ?? AiDefault }, name, "ai");
         CheckAi(ctx, ai.Block, "ai");
         var bh = PartOf(ctx, bhRef, game != null ? new BehaviourBlock { Template = game } : Behaviours.None, name, "behaviour");
-        CheckBehaviour(ctx, bh.Block, "behaviour");
+        CheckBehaviour(ctx, bh.Block, "behaviour", used: true);
         return new Parts(body, anim, ai, bh);
     }
 
@@ -707,7 +734,7 @@ internal static class NpcCompiler
         {
             var r = ctx.Part(rules[i], $"behaviour.rules[{i}]");
             var path = $"behaviour.rules[{i}]";
-            CheckRule(ctx, r, path);
+            CheckRule(ctx, r, path, used: true);
             var when = r.When.Select((x, k) => NpcRules.Condition(x, mod, ctx, $"{path}.when[{k}]")).ToList();
             var actions = new List<RuleAction>();
             for (var k = 0; k < r.Do.Count; k++)
@@ -906,8 +933,9 @@ internal static class NpcCompiler
         }
 
         // the quests' NPC, as it is: the engine finds it, and its roster entry goes to the boot build
-        if (n.Place?.At is { Length: not 3 }) throw new BlockError(ctx.Block, "place.at", "takes [x, y, z]");
-        if (n.Place?.Distance is { Length: not 2 }) throw new BlockError(ctx.Block, "place.distance", "takes [min, max]");
+        // 0.2.0-dev.30.6 ignored either when not of its length (below), and so does this release
+        if (n.Place?.At is { Length: not 3 }) ctx.Tolerate("place.at", "takes [x, y, z]; it is ignored");
+        if (n.Place?.Distance is { Length: not 2 }) ctx.Tolerate("place.distance", "takes [min, max]; it is ignored");
         if (n.Place is { Exact: true, At: null }) throw new BlockError(ctx.Block, "place.exact", "exactly where? It needs place.at");
         var place = n.Place is { } pl ? new QuestPlace
         {
