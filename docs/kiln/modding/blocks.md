@@ -338,6 +338,7 @@ report each one as an error: fix them, a later release may refuse them.
 | A rule block (or a behaviour block's rules) with `every` outside 0..3600, `cooldown` below 0, `chance` outside 0..1 or an empty `do` | Nothing: a creature whose behaviour uses that rule is refused, as before |
 | A talent on its own with `column` or `row` outside 0..31 or `maxLevel` above 99 | Nothing: a tree with that talent is refused, as before |
 | An attack's empty `onHit: []` next to its `delivery` | Ignored: the delivery plays |
+| A game `sequence` attack's `length` outside 0..30, or `hitAt` below 0 or not below its `length` | Ignored: a game sequence plays as it is and uses neither |
 | `stagger` on the game's animation (`template`, or `like` a premade) | Ignored: the game's own stagger plays |
 | A sphere collider's `height` below 0 | Ignored: a sphere has no height |
 | A clip's `blendIn` below 0 | Cooked as written |
