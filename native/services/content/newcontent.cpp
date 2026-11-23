@@ -46,6 +46,7 @@
 #include "menulayout.h"  // kiln.stationmenus: station menu layouts and the own workshops' trees (own_build)
 #include "nlohmann/json.hpp"
 #include "recipe_water.h"
+#include "registry_live.h"
 #include "refs.h"
 #include "services/kiln_assets.h"
 #include "services/kiln_caps.h"  // the row content.text
@@ -736,6 +737,8 @@ struct Def {
     std::string display;  // recipes: the recipe name; items: texts["*"].name
     TextSet texts[kTextSlots];  // items: per slot, language key -> text ("*" = displayName / description / lore)
     json fields = json::object();
+    std::string registry_id;               // Kiln-internal stable entry identity, retained by sync/placeholders
+    json registry_fields = json::object(); // Kiln fields, translated before publishing each private clone
     json kitbash = json::object();  // items: reference keys (model, icon, perks, weaponType, refs, ...): refs.cpp
     json distribution = json::object();  // items: loot / drops / knowledge (distribution.cpp)
     std::vector<StackSpec> inputs, outputs;
@@ -776,6 +779,13 @@ struct Def {
     bool has_text(int slot) const { return !texts[slot].empty(); }
 };
 using DefPtr = std::shared_ptr<Def>;
+
+bool initialize_registry(Def& d, uintptr_t address, const Schema& schema, std::string* why) {
+    if (d.registry_id.empty()) return true;
+    Entry entry; entry.id = d.id; entry.name = d.name; entry.addr = address;
+    std::memcpy(entry.guid, d.guid, 16);
+    return registry_live_initialize_entry(d.kind, entry, d.registry_id, d.registry_fields, why, &schema);
+}
 
 // Definitions and clones share store_mutex(). A lock of their own deadlocked: the client world's setup held it and waited
 // for the store, while a job thread's first drop table held the store and waited for it.
@@ -1286,6 +1296,7 @@ uintptr_t build_clone(Def& d, uintptr_t base, WorldState& ws, bool* retry, std::
     }
 #endif
     settle_gear(d, p);
+    if (!initialize_registry(d, reinterpret_cast<uintptr_t>(p), L.item, why)) return 0;
     return reinterpret_cast<uintptr_t>(p);
 }
 
@@ -1506,6 +1517,7 @@ uintptr_t build_recipe(Def& d, WorldState& ws, std::string* why) {
     std::memcpy(name, d.name.data(), d.name.size());
     set_blob(p, L.r_dbg, name, static_cast<uint32_t>(d.name.size()));
     if (!apply_fields(L.recipe, d.fields, p, d.name.c_str(), why)) return 0;
+    if (!initialize_registry(d, reinterpret_cast<uintptr_t>(p), L.recipe, why)) return 0;
     return reinterpret_cast<uintptr_t>(p);
 }
 
@@ -4385,6 +4397,15 @@ KilnResult nc_define(KilnOwner owner, uint32_t kind, const std::string& text, bo
     d->mod = mod_of_label(d->owner_label);
     if (d->placeholder && j["placeholder"].contains("mod") && j["placeholder"]["mod"].is_string())
         d->mod = j["placeholder"]["mod"].get<std::string>();
+    if (j.contains("registryFields")) {
+        if (!j["registryFields"].is_object() || !j.contains("registryId") || !j["registryId"].is_string())
+            return fail("registryFields requires a stable registryId and an object of Kiln fields");
+        d->registry_id = j["registryId"].get<std::string>();
+        const std::string mod = d->registry_id.substr(0, d->registry_id.find(':'));
+        if (d->registry_id.find(':') == std::string::npos || (!d->mod.empty() && d->mod != mod))
+            return fail("registryId does not belong to the definition's mod");
+        d->registry_fields = j["registryFields"];
+    }
     d->source = source;
     d->pack = pack;
     j.erase("comment");

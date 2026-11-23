@@ -102,6 +102,10 @@ struct LiveState {
     std::map<registry::FieldRef, LiveField> read_fields;
     bool read_capture = false;                   // a pass read: put() keeps each slot's evaluation (review4 NS5)
     std::map<uintptr_t, LayerEval> read_evals;
+    const Entry* initializing_entry = nullptr; // unpublished, private clone; store_mutex protects this scoped override
+    const Schema* initializing_schema = nullptr;
+    registry::EntryRef initializing_ref;
+    std::map<uintptr_t, std::pair<uint8_t, LayerEval>> initialize_evals;
 };
 LiveState g;  // under store_mutex
 bool inactive_now(const LiveState::Change& c) { return c.inactive && c.inactive_world == g.world; }
@@ -165,6 +169,7 @@ void refuse(const registry::FieldRef& fr, const std::vector<const ChainRow*>& ro
 const Entry* find_entry(const std::string& registry, const std::string& id, std::string* guid_out) {
     const uint32_t kind = kind_of(registry);
     if (!kind) return nullptr;
+    if (g.initializing_entry && g.initializing_ref == registry::EntryRef{registry, id}) return g.initializing_entry;
     const Registry& r = reg(kind);
     const std::string key = registry + "|" + id;
     std::string guid;
@@ -277,7 +282,8 @@ std::string source_of(const Binding& b) {
 
 bool put(const std::shared_ptr<Binding>& b, int32_t field_index, int32_t sub, uintptr_t addr, uint8_t n, LayerEval ev) {
     if (g.reading) {
-        if (g.read_capture) g.read_evals.insert_or_assign(addr, std::move(ev));
+        if (g.initializing_entry) g.initialize_evals.insert_or_assign(addr, std::make_pair(n, std::move(ev)));
+        else if (g.read_capture) g.read_evals.insert_or_assign(addr, std::move(ev));
         return true;
     }
     LayerModScope scope(b->rows.back().mod);
@@ -286,14 +292,16 @@ bool put(const std::shared_ptr<Binding>& b, int32_t field_index, int32_t sub, ui
 
 bool put_at(const std::shared_ptr<Binding>& b, uint32_t kind, uint32_t id, int32_t field_index, int32_t sub, uintptr_t addr, uint8_t n, LayerEval ev) {
     if (g.reading) {
-        if (g.read_capture) g.read_evals.insert_or_assign(addr, std::move(ev));
+        if (g.initializing_entry) g.initialize_evals.insert_or_assign(addr, std::make_pair(n, std::move(ev)));
+        else if (g.read_capture) g.read_evals.insert_or_assign(addr, std::move(ev));
         return true;
     }
     LayerModScope scope(b->rows.back().mod);
     return store_put_eval(registry_owner(), registry_seq(++g.ordinal), kind, id, field_index, sub, addr, n, std::move(ev), source_of(*b));
 }
 
-int32_t index_of(uint32_t kind, const Field* f) { return static_cast<int32_t>(f - reg(kind).schema.fields.data()); }
+const Schema& binding_schema(uint32_t kind) { return g.initializing_schema ? *g.initializing_schema : reg(kind).schema; }
+int32_t index_of(uint32_t kind, const Field* f) { return static_cast<int32_t>(f - binding_schema(kind).fields.data()); }
 
 void track_scalar(const std::shared_ptr<Binding>& b, uintptr_t addr, const Field& f) {
     fields_target().insert_or_assign(b->ref, LiveField{b->spec, {{addr, f.bytes}},
@@ -581,7 +589,7 @@ bool perk_guid(const Value& v, uint8_t out[16]) {
 }
 
 void bind_perks(const std::shared_ptr<Binding>& b) {
-    const Schema& sc = reg(KILN_CONTENT_ITEMS).schema;
+    const Schema& sc = binding_schema(KILN_CONTENT_ITEMS);
     std::vector<Field> refs, ids;
     for (int i = 0; i < 5; ++i) {
         const Field* r = sc.find("perkReferences[" + std::to_string(i) + "]");
@@ -735,10 +743,10 @@ void bind(const registry::FieldRef& fr, const registry::FieldOutcome& fo) {
         return refuse(fr, rows, "the entry is not in this world");
     }
     b->entry = *e;
-    const Schema& sc = reg(b->kind).schema;
+    const Schema& sc = binding_schema(b->kind);
     if (raw) {
         const Field* f = sc.find(fr.field.substr(4));
-        if (!f || (!g.reading && !f->writable)) return refuse(fr, rows, "the member " + fo.raw + " is not a writable member on this game build");
+        if (!f || ((!g.reading || g.initializing_entry) && !f->writable)) return refuse(fr, rows, "the member " + fo.raw + " is not a writable member on this game build");
         return bind_scalar(b, f);
     }
     std::string reason;
@@ -759,7 +767,7 @@ void bind(const registry::FieldRef& fr, const registry::FieldOutcome& fo) {
             const Field* flat = sc.find(rw.paths[0].substr(0, rw.paths[0].size() - flag.size()));
             if (flat && flat->vt == KILN_CV_BOOL) f = flat;
         }
-        if (!f || (!g.reading && !f->writable)) return refuse(fr, rows, "the game member " + (rw.paths.empty() ? std::string("?") : rw.paths[0]) + " is not writable on this game build");
+        if (!f || ((!g.reading || g.initializing_entry) && !f->writable)) return refuse(fr, rows, "the game member " + (rw.paths.empty() ? std::string("?") : rw.paths[0]) + " is not writable on this game build");
         return bind_scalar(b, f);
     }
     if (conv == "formula") {
@@ -1331,6 +1339,59 @@ KilnOwner registry_owner() {
         set_owner_label(g.owner, "registry");
     }
     return g.owner;
+}
+
+bool registry_live_initialize_entry(uint32_t kind, const Entry& entry, const std::string& id,
+                                    const registry::json& fields, std::string* why, const Schema* native_schema) {
+    std::lock_guard lock(store_mutex());
+    const std::string registry = kind == KILN_CONTENT_ITEMS ? "items" : kind == KILN_CONTENT_RECIPES ? "recipes" : "";
+    if (!g.in || !g.in->schema || !g.in->regmap || registry.empty() || !fields.is_object())
+        return *why = "the stable entry mapper is unavailable", false;
+    if (g.reading || g.initializing_entry) return *why = "the stable entry mapper is busy", false;
+    struct Restore {
+        std::string reason = std::move(g.read_reason);
+        std::map<registry::FieldRef, LiveField> fields = std::move(g.read_fields);
+        ~Restore() {
+            g.initializing_entry = nullptr; g.initializing_schema = nullptr; g.initializing_ref = {}; g.initialize_evals.clear();
+            g.reading = false; g.read_reason = std::move(reason); g.read_fields = std::move(fields);
+        }
+    } restore;
+    g.reading = true; g.initializing_entry = &entry; g.initializing_schema = native_schema; g.initializing_ref = {registry, id};
+    const auto* rs = g.in->schema->registry(registry);
+    if (!rs) return *why = "no stable registry " + registry, false;
+    std::vector<std::pair<std::string, Value>> values;
+    for (auto it = fields.begin(); it != fields.end(); ++it) {
+        const auto* spec = rs->field(it.key());
+        if (!spec || spec->read_only || spec->applies == registry::Applies::Restart)
+            return *why = registry + "." + it.key() + " cannot initialize a content entry", false;
+        std::string reason;
+        if (g.in->regmap->mapping(registry, it.key(), &reason) != rmap::Mapping::Mapped)
+            return *why = registry + "." + it.key() + ": " + reason, false;
+        Value value;
+        if (!registry::value_of(it.value(), *spec, false, &value, why)) return false;
+        values.emplace_back(it.key(), std::move(value));
+    }
+    // Formula outputs depend on the final scalar inputs (level/speed). Other initializers run first.
+    const auto& rows = g.in->regmap->registries.at(registry).rows;
+    std::stable_sort(values.begin(), values.end(), [&](const auto& a, const auto& b) {
+        return (rows.at(a.first).conv == "formula") < (rows.at(b.first).conv == "formula");
+    });
+    for (const auto& [field, value] : values) {
+        registry::FieldOutcome fo; registry::ChainRow row;
+        row.op.set = true; row.op.value = value; row.mod = id.substr(0, id.find(':')); row.source = "entry initialization";
+        fo.chain.push_back(std::move(row));
+        g.read_reason.clear(); g.initialize_evals.clear();
+        bind({registry, id, field}, fo);
+        if (!g.read_reason.empty()) return *why = g.read_reason, false;
+        if (g.initialize_evals.empty()) return *why = registry + "." + field + " has no entry initializer", false;
+        for (const auto& [address, eval] : g.initialize_evals) {
+            SlotBytes before{}, after{};
+            if (!rd(address, before.data(), eval.first)) return *why = registry + "." + field + " is unreadable", false;
+            if (!eval.second(before.data(), eval.first, after.data(), why)) return false;
+            std::memcpy(reinterpret_cast<void*>(address), after.data(), eval.first);
+        }
+    }
+    return true;
 }
 
 void registry_live_install(RegistryLive in) {
