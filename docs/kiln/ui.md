@@ -360,10 +360,11 @@ var under = Ui.Inventory.Hovered;                      // the slot under the cur
 
 | Member | What | Row |
 |---|---|---|
-| `OnClick(options, handler)` | clicks matching `Button` (Left, Right) and `Modifiers` (exactly: Ctrl alone is not Ctrl+Shift); `Take` (default) keeps the press from the game, its release still reaches it. The handler runs on the client's main thread after the next UI frame. Dispose to stop | `ui.slots.click` |
+| `OnClick(options, handler)` | clicks matching `Button` (Left, Right) and `Modifiers` (exactly: Ctrl alone is not Ctrl+Shift); `Take` (default) keeps the press from the game, its release still reaches it. The handler runs on the client's main thread after the next UI frame. Dispose to stop. Since 0.2.0-dev.30.5 `Pad = KeyChord.Parse("Pad:LS")` (or `"Pad:LB+A"`) makes it a controller press on the `Selected` slot instead: `SlotClick.Button` is `SlotButton.Pad` and `SlotClick.Pad` the chord; `Take` keeps that button from the game until it is let go (the buttons held for a combination still reach it); the handler runs on the client's main thread after the next game UI frame; no selected slot, or a Kiln screen with the input: no click | `ui.slots.click` |
 | `Mark(item, mark)`, `Unmark(item)`, `ClearMarks()` | a mark on the item's slot wherever the game draws it (it follows the item: move it and the mark moves); `SlotMark(Color, Style = Border/Fill/Corner, Thickness = 3)` | `ui.slots.inspect` |
 | `MarkWhen(rule)` | a mark from a rule asked for each drawn slot (an item mark wins) | `ui.slots.inspect` |
-| `Hovered` | the slot under the cursor in the game's latest UI frame | `ui.slots.inspect` |
+| `Hovered` | the slot under the cursor in the game's latest UI frame (the mouse's only) | `ui.slots.inspect` |
+| `Selected` (0.2.0-dev.30.5) | the slot the game's own selection is on (a controller's: the focus of the game's UI navigation, which the d-pad and stick move), on a screen with a pointer, in a frame at most 250 ms old; with a mouse the game may move that focus with the pointer, so it can follow `Hovered` there. Not checked in a game yet: move focus between slots with the d-pad and confirm this follows it | `ui.slots.inspect` |
 
 **The item's identity.** `SlotClick.ItemEntity` (and `VisibleSlot.ClientEntity`) is the item's entity in this game's
 world. Only items with an item entity of their own have one: weapons, tools, armour, cans (the items `Items.Read` also
@@ -372,6 +373,13 @@ has none, so a click on it says `ItemEntity` 0 with its `Item` and `Slot.Count`;
 `Slot.InventoryPage`, `Slot.SlotIndex` and `Item`. For an item the server sent (every item in a player's, a chest's or a
 station's inventory) the entity is the server's own id of it: the game creates replicated entities with the server's id
 (`docs/re/network.md`, dossier chapter 05a section 6).
+Since 0.2.0-dev.30.5 (mod API 0.2.14, GitHub issue 121) Kiln also says so: `VisibleSlot.ServerEntity` (and so
+`SlotClick.Slot.ServerEntity`) is that id for every slot of the local player and of the open container (a storage chest,
+the chest-style transfer screen, a factory station: the entity the screen is about), so it equals the server's
+`InventorySlot.ItemEntity` there; `HolderFlags` bit 8 marks such a holder. It is `EntityId.None` for a plain stack and for
+any other holder. `VisibleSlot.Rarity` (an `ItemRarity?`) and `Level` (also on `SlotClick`) are the item's as the game
+drew the slot, the values its tooltip shows, captured on the game's main/UI thread and copied to render-thread mark
+rules: a `MarkWhen` rule can tell a Legendary staff from an Uncommon one without `Items.Read`. `Rarity` is null for an empty slot.
 `Holder`, `Slot.InventoryPage` and `Slot.SlotIndex` say where it was drawn. Send the id to your server half and check
 there that the item is in the sender's inventory or a container they may use (Kiln.Items) before acting: a click is a wish,
 never authority. Kiln Auto Loot's salvage marks work this way.
@@ -494,6 +502,12 @@ w.Toggle();   // Show / Hide / Open = true; the X button closes it too
     holds a NUL) is shown cut and is never changed (`InputText` shows it read-only);
   - layout: `CollapsingHeader`, `TreeNode`/`TreePop`, `SameLine`, `Spacing`, `Id(...)` scopes, tables
     (`BeginTable`, `Row`, `NextRow`/`NextColumn`), tabs (`BeginTabBar`/`BeginTab`), `BeginChild`;
+  - since 0.2.0-dev.31, mod API 0.2.16 (kiln.ui.blocks, what the richer
+    [UI blocks](modding/ui-blocks.md#richer-windows-since-020-dev31) draw with): `BeginControlledTab(label, select)` (a
+    tab code selects), `SetNextItemOpen(open)` (the next `TreeNode` opened or closed from code), `TextField(label, ref value, maxBytes, UiTextFieldFlags)` (`EnterReturns`, `ReadOnly`,
+    `Multiline`), and `LastItemState` right after a widget (`Active`, `Edited`, `Deactivated`, `DeactivatedAfterEdit`: a
+    field that lost the keyboard after an edit). `HasBlockWidgets` says whether this Kiln has them; without, they fall
+    back to `BeginTab`, nothing, `InputText` and `None`;
   - free drawing: `DrawText`, `DrawRect`, `MeasureText`;
   - the mouse (since 0.2.0-dev.30.3): `Pointer`, `ButtonHeld(UiMouseButton)`, `DragSource(kind, payload)` /
     `DropTarget(kind)` (see "The pointer, held buttons and drag and drop" below);
@@ -876,6 +890,23 @@ b.OnRelease = …;  b.IsDown;  b.TakePresses();  b.Consume = false;  b.WhileCapt
   - The mouse needs the kiln-ui.dll of the same release (kiln.ui v7). Next to an older kiln-ui.dll, which only a hand-mixed
     install has, the names still parse and `Register` works, but mouse bindings never fire and the Keys page takes keys
     only; kiln.log says so once ("this kiln-ui.dll is older than Kiln.Ui").
+- **A game controller** (0.2.0-dev.30.5, mod API 0.2.14, GitHub issue 119, thanks Fuzen777): `Pad:A`, `Pad:B`, `Pad:X`,
+  `Pad:Y`, `Pad:LB`, `Pad:RB`, `Pad:LT`, `Pad:RT` (the triggers), `Pad:LS`, `Pad:RS` (a stick pressed: L3, R3),
+  `Pad:Start`, `Pad:Back`, `Pad:Up`, `Pad:Down`, `Pad:Left`, `Pad:Right` (the d-pad), and combinations with the
+  shoulder buttons and triggers held: `Pad:LB+A`, `Pad:LT+RS`, `Pad:LB+RB+Y`. `KeyBindings.Register("fav.mark", "Pad:LS", …)`
+  works like a key; the player can put any binding on the pad on the Keys page.
+  - Kiln reads the pad where the game does (XInput: an Xbox pad, or any pad Steam Input presents as one), every
+    controller, at each poll of the game. A binding fires on the thread the game polls the pad from, during play and on
+    the game's own screens (the inventory too), never while a Kiln screen has the input (the pad navigates the screen).
+  - A matching binding keeps the button from the game (`Consume`) until it is let go: the game reads it as not pressed (a
+    trigger as not pulled). The buttons held for a combination (LB, RB, LT, RT) reach the game: `Pad:LB+A` keeps A, not LB.
+  - `KeyChord.IsPad`; pad chords use `KeyMods.PadLB`, `PadRB`, `PadLT`, `PadRT` and never mix with Ctrl, Shift or Alt
+    (`"Ctrl+Pad:A"` is refused with the reason). Codes: 0x200 and up (`KILN_UI_VK_PAD_*` in `kiln_ui.h`).
+  - The Kiln menu's own key is never a pad button (it is opened from the keyboard or a mouse button).
+  - On the Keys page: click the key, then press a pad button, or hold LB, RB, LT or RT and press another for a
+    combination; let go of LB, RB, LT or RT alone to bind that button.
+  - A Kiln older than 0.2.0-dev.30.5 does not know these names (`KeyChord.TryParse` says false; `Register` throws). Next to
+    an older kiln-ui.dll (a hand-mixed install) pad bindings register but never fire.
 - The player's choice is kept in `kiln/config/keybinds.json` (`{"bindings": {"mymod.toggle": "F9"}}`). The Kiln menu's
   **Keys** tab remaps keys by press: click the key, press the new one (a key, the middle or a side mouse button, or a
   notch of the wheel, with the modifiers held); a second click cancels. Left and right click keep working the page.
@@ -917,6 +948,9 @@ listener.Dispose();                           // or let the mod's unload end it
 - `Listen` is kiln.ui's key subscription (`subscribe_key_ex` in `kiln_ui.h`). With `KeyListenFlags.Mouse` (the default)
   it gets the middle and side mouse buttons and the wheel's notches too, as key bindings do; `KeyListenFlags.None` gets
   keyboard keys only. Next to an older kiln-ui.dll (a hand-mixed install) it gets keys only and `listener.Mouse` is false.
+  `KeyListenFlags.Pad` (0.2.0-dev.30.5) adds a game controller's buttons (`KeyPress.IsPad`, the pad's modifiers in
+  `KeyPress.Mods`), on the thread the game polls the pad from; true for a press keeps the button from the game until it is
+  let go. `listener.Pad` says whether it gets them.
 - It runs on the game's window thread while the message is handled, before the game gets the press: keep it short.
   Returning true keeps the press from the game. Every listener and Kiln's own key bindings get every press whatever
   another returned; kiln.ui keeps a press from the game when any of them asked.
@@ -1472,3 +1506,75 @@ aside while it is installed, whatever its ini says; the readout stays where Kiln
 ([graphics.md](graphics.md#living-next-to-other-tools)).
 
 The additive window size-constraints slot after v7 is described in the [UI service reference](services/ui.md).
+
+## Captured item detail (Since 0.2.0-dev.30.5)
+
+`Ui.Values.ItemDetail` reads **passive captures** of text and stat numbers the game constructed
+for a panel it actually built. It does not compute a view on demand for every item in a bag or
+chest. First use starts capture; **then inspect the item in the game's own panel**. Uninspected
+items return `Ok=false`, a reason, and no snapshot. There is no `UiDraw.ItemDetail` panel in
+this release: draw a name/id and the reason yourself when no capture exists, never invented
+weapon damage, armor, perks or food effects.
+
+```csharp
+// A completed visible-slot snapshot, not a server InventorySlot.ItemEntity.
+UiItemDetailResult result = Ui.Values.ItemDetail(slot.ClientEntity, slot.Item,
+    level: slot.Level, rarity: slot.Rarity);
+if (result.Snapshot is { } detail)
+    foreach (var line in detail.Lines)
+        UseGameText(line.Text); // Value is optional metadata, not a number to append again.
+else
+    UseFallback(slot.Item, result.Reason); // Names/known slot metadata only; no computed stats.
+
+// Latest inspected matching type variant, without a dummy entity argument:
+var variant = Ui.Values.ItemDetail(itemId, level: 25, rarity: ItemRarity.Rare);
+```
+
+`ItemDetail(EntityId entity, ItemId item = default, int? level = null, ItemRarity? rarity = null)`
+requires a **client presentation entity**, such as `VisibleSlot.ClientEntity`. Never pass an
+arbitrary server inventory entity: numeric equality is not proof of client identity. An exact
+entity query cannot borrow another instance's panel. For stacks without a client entity, use
+the item-type query. `ItemDetail(ItemId item, int? level = null, ItemRarity? rarity = null)`
+selects the most recently inspected matching variant. It may include that inspected instance's
+gems/perks: it is not a newly calculated pristine item type. With no level/rarity constraints,
+it selects the latest inspected variant of the type, not necessarily the one a mod intended.
+
+The client main/UI thread captures during the game's ItemDetail call. Mods can read on **any
+thread**, including a draw callback: reads copy immutable cached data under a mutex and never
+access live item/world memory. Snapshots and their line lists are owned copies and remain valid
+after replacement/eviction. `Lines` preserve construction order, with localized text and optional
+computed floats from the stat-draw seam (after tooltip value providers). The first text row of
+a stat draw carries `Value`; it is metadata, not another number to append to already formatted
+text. Number-only draws have empty text. Not every numeric string has typed float metadata.
+
+This is **presentation data, not gameplay authority or structured item stats**. Damage/element,
+armor, food effects, gem and perk descriptions are available only to the extent the panel
+constructs them as text through the captured seam. There are no typed damage/element/socket/
+perk/effect fields, icons, styling, models, or reliable unlocked-perk flags when the distinction
+is conveyed only by colour. Game-side line/number coverage still needs a real-client comparison.
+
+The cache keeps **64 instances/variants, including rejected captures**, in capture order; reads
+do not promote entries. A completed panel replaces the same client entity, or the same
+item+level+rarity for a capture without an entity. A rejected replacement invalidates its old
+capture too. Each panel is bounded to 64 rows, 4096 UTF-8 bytes per row and 32768 total bytes;
+invalid/oversized/empty panels are refused whole, never silently truncated. Reasons distinguish
+an uninspected/mismatched variant, an offline/no-local-player session, and a rejected panel.
+World/session changes, missing client state, or no local player clear the cache when next
+observed by a read or capture. **Language and other item-state changes do not automatically
+invalidate cached text**; reinspect after upgrades, socket/perk changes, breakage or a language
+change. Check the snapshot's session/frame/capture time when freshness matters. Already-owned
+snapshots are historical data and do not disappear on world exit.
+
+The `ui.item_detail` capability requires a measured client build and capture hooks. A missing or
+disabled capability throws `KilnUnavailableException`; this is different from a cache miss.
+See [the service contract](services/ui.md#captured-item-detail-since-020-dev305) for refusal codes.
+
+Offline, `KilnHarness.UiItemDetail.Capture(item, entity, level, rarity, lines)` supplies an owned
+recording; `Clear()` models a world change. Invalid recordings throw argument exceptions. The
+TestKit models exact identity/variant matching, byte budgets, copy ownership and 64-entry
+eviction, not the game's text builder, native capture failures, session lifecycle or renderer.
+
+Client check: open an item's detail panel, then read its lines from a mod. Compare the same
+weapon across levels/rarities and upgrades, armor, food, gems/perks, stackable and chest items;
+reinspect after a language change, and leave/rejoin before reusing a saved identity. Run on both
+Proton and native Windows, with a vanilla peer confirming unchanged gameplay and game panels.

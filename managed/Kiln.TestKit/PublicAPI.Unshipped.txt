@@ -136,3 +136,90 @@ Kiln.TestKit.KilnHarness.Routines.get -> Kiln.TestKit.HarnessRoutines!
 [KILNX031]Kiln.TestKit.HarnessRegistry.Author(Kiln.TestKit.ModHandle! mod, Kiln.RegistryEntryPoint point = Kiln.RegistryEntryPoint.GameStart, Kiln.RegistryPhase phase = Kiln.RegistryPhase.Alter, Kiln.RegistryWorld? world = null) -> string?
 [KILNX031]Kiln.TestKit.HarnessRegistry.Seed(string! registry, string! id, string! field, string! valueJson) -> void
 [KILNX031]Kiln.TestKit.KilnHarness.Registry.get -> Kiln.TestKit.HarnessRegistry!
+Kiln.TestKit.FakeVitals
+Kiln.TestKit.FakeVitals.FakeVitals() -> void
+Kiln.TestKit.FakeVitals.FakeVitals(uint Health, uint HealthMax, uint Stamina = 0, uint StaminaMax = 0, uint Mana = 0, uint ManaMax = 0) -> void
+Kiln.TestKit.FakeVitals.Deconstruct(out uint Health, out uint HealthMax, out uint Stamina, out uint StaminaMax, out uint Mana, out uint ManaMax) -> void
+Kiln.TestKit.FakeVitals.Equals(Kiln.TestKit.FakeVitals other) -> bool
+Kiln.TestKit.FakeVitals.Health.get -> uint
+Kiln.TestKit.FakeVitals.Health.init -> void
+Kiln.TestKit.FakeVitals.HealthMax.get -> uint
+Kiln.TestKit.FakeVitals.HealthMax.init -> void
+Kiln.TestKit.FakeVitals.Stamina.get -> uint
+Kiln.TestKit.FakeVitals.Stamina.init -> void
+Kiln.TestKit.FakeVitals.StaminaMax.get -> uint
+Kiln.TestKit.FakeVitals.StaminaMax.init -> void
+Kiln.TestKit.FakeVitals.Mana.get -> uint
+Kiln.TestKit.FakeVitals.Mana.init -> void
+Kiln.TestKit.FakeVitals.ManaMax.get -> uint
+Kiln.TestKit.FakeVitals.ManaMax.init -> void
+override Kiln.TestKit.FakeVitals.GetHashCode() -> int
+static Kiln.TestKit.FakeVitals.operator !=(Kiln.TestKit.FakeVitals left, Kiln.TestKit.FakeVitals right) -> bool
+static Kiln.TestKit.FakeVitals.operator ==(Kiln.TestKit.FakeVitals left, Kiln.TestKit.FakeVitals right) -> bool
+~override Kiln.TestKit.FakeVitals.Equals(object obj) -> bool
+~override Kiln.TestKit.FakeVitals.ToString() -> string
+Kiln.TestKit.FakeWorldPosition
+Kiln.TestKit.FakeWorldPosition.FakeWorldPosition() -> void
+Kiln.TestKit.FakeWorldPosition.FakeWorldPosition(double X, double Y, double Z) -> void
+Kiln.TestKit.FakeWorldPosition.Deconstruct(out double X, out double Y, out double Z) -> void
+Kiln.TestKit.FakeWorldPosition.Equals(Kiln.TestKit.FakeWorldPosition other) -> bool
+Kiln.TestKit.FakeWorldPosition.X.get -> double
+Kiln.TestKit.FakeWorldPosition.X.init -> void
+Kiln.TestKit.FakeWorldPosition.Y.get -> double
+Kiln.TestKit.FakeWorldPosition.Y.init -> void
+Kiln.TestKit.FakeWorldPosition.Z.get -> double
+Kiln.TestKit.FakeWorldPosition.Z.init -> void
+override Kiln.TestKit.FakeWorldPosition.GetHashCode() -> int
+static Kiln.TestKit.FakeWorldPosition.operator !=(Kiln.TestKit.FakeWorldPosition left, Kiln.TestKit.FakeWorldPosition right) -> bool
+static Kiln.TestKit.FakeWorldPosition.operator ==(Kiln.TestKit.FakeWorldPosition left, Kiln.TestKit.FakeWorldPosition right) -> bool
+~override Kiln.TestKit.FakeWorldPosition.Equals(object obj) -> bool
+~override Kiln.TestKit.FakeWorldPosition.ToString() -> string
+Kiln.TestKit.FakeWorldSlot
+Kiln.TestKit.FakeWorldSlot.FakeWorldSlot() -> void
+Kiln.TestKit.FakeWorldSlot.FakeWorldSlot(uint Item, uint Count, uint InventoryPage = 0, uint SlotIndex = 0, uint Pide = 0) -> void
+Kiln.TestKit.FakeWorldSlot.Deconstruct(out uint Item, out uint Count, out uint InventoryPage, out uint SlotIndex, out uint Pide) -> void
+Kiln.TestKit.FakeWorldSlot.Equals(Kiln.TestKit.FakeWorldSlot other) -> bool
+Kiln.TestKit.FakeWorldSlot.Item.get -> uint
+Kiln.TestKit.FakeWorldSlot.Item.init -> void
+Kiln.TestKit.FakeWorldSlot.Count.get -> uint
+Kiln.TestKit.FakeWorldSlot.Count.init -> void
+Kiln.TestKit.FakeWorldSlot.InventoryPage.get -> uint
+Kiln.TestKit.FakeWorldSlot.InventoryPage.init -> void
+Kiln.TestKit.FakeWorldSlot.SlotIndex.get -> uint
+Kiln.TestKit.FakeWorldSlot.SlotIndex.init -> void
+Kiln.TestKit.FakeWorldSlot.Pide.get -> uint
+Kiln.TestKit.FakeWorldSlot.Pide.init -> void
+override Kiln.TestKit.FakeWorldSlot.GetHashCode() -> int
+static Kiln.TestKit.FakeWorldSlot.operator !=(Kiln.TestKit.FakeWorldSlot left, Kiln.TestKit.FakeWorldSlot right) -> bool
+static Kiln.TestKit.FakeWorldSlot.operator ==(Kiln.TestKit.FakeWorldSlot left, Kiln.TestKit.FakeWorldSlot right) -> bool
+~override Kiln.TestKit.FakeWorldSlot.Equals(object obj) -> bool
+~override Kiln.TestKit.FakeWorldSlot.ToString() -> string
+Kiln.TestKit.FakeWorldSample
+Kiln.TestKit.FakeWorldSample.<Clone>$() -> Kiln.TestKit.FakeWorldSample!
+Kiln.TestKit.FakeWorldSample.FakeWorldSample() -> void
+Kiln.TestKit.FakeWorldSample.Equals(Kiln.TestKit.FakeWorldSample? other) -> bool
+Kiln.TestKit.FakeWorldSample.LocalPlayer.get -> uint
+Kiln.TestKit.FakeWorldSample.LocalPlayer.init -> void
+Kiln.TestKit.FakeWorldSample.Vitals.get -> Kiln.TestKit.FakeVitals?
+Kiln.TestKit.FakeWorldSample.Vitals.init -> void
+Kiln.TestKit.FakeWorldSample.Position.get -> Kiln.TestKit.FakeWorldPosition?
+Kiln.TestKit.FakeWorldSample.Position.init -> void
+Kiln.TestKit.FakeWorldSample.Inventory.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.FakeWorldSlot>?
+Kiln.TestKit.FakeWorldSample.Inventory.init -> void
+Kiln.TestKit.FakeWorldSample.HostHours.get -> double?
+Kiln.TestKit.FakeWorldSample.HostHours.init -> void
+Kiln.TestKit.FakeWorldSample.Unavailable.get -> System.Collections.Generic.IReadOnlyDictionary<Kiln.UiWorldFields, string!>?
+Kiln.TestKit.FakeWorldSample.Unavailable.init -> void
+override Kiln.TestKit.FakeWorldSample.Equals(object? obj) -> bool
+override Kiln.TestKit.FakeWorldSample.GetHashCode() -> int
+override Kiln.TestKit.FakeWorldSample.ToString() -> string!
+static Kiln.TestKit.FakeWorldSample.operator !=(Kiln.TestKit.FakeWorldSample? left, Kiln.TestKit.FakeWorldSample? right) -> bool
+static Kiln.TestKit.FakeWorldSample.operator ==(Kiln.TestKit.FakeWorldSample? left, Kiln.TestKit.FakeWorldSample? right) -> bool
+Kiln.TestKit.HarnessUiSnapshot
+Kiln.TestKit.HarnessUiSnapshot.Publish(Kiln.TestKit.FakeWorldSample! sample) -> ulong
+Kiln.TestKit.HarnessUiSnapshot.EndWorld() -> void
+Kiln.TestKit.HarnessUiSnapshot.Demanded.get -> Kiln.UiWorldFields
+Kiln.TestKit.HarnessUiSnapshot.Demands.get -> int
+Kiln.TestKit.HarnessUiSnapshot.Tokens.get -> int
+Kiln.TestKit.HarnessUiSnapshot.Publication.get -> ulong
+Kiln.TestKit.KilnHarness.UiSnapshot.get -> Kiln.TestKit.HarnessUiSnapshot!

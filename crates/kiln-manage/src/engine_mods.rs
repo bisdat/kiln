@@ -24,6 +24,7 @@ use crate::sfi_routing::Route;
 #[cfg(feature = "sfi-scan")]
 use crate::sfi_routing::Legacy;
 use crate::util::io_at;
+use crate::winpath::same_folder;
 use crate::{Error, ErrorCode, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -720,7 +721,7 @@ pub fn refuse_symlink_path(root: &Path, path: &Path) -> Result<()> {
     // The prefix length (in components) from which links are refused.
     let root_len = root.components().count();
     let bare_drive = matches!(root.components().last(), Some(std::path::Component::Prefix(_)));
-    let first_checked = if !path.starts_with(root) {
+    let first_checked = if crate::winpath::relative_folder(root, path).is_none() {
         0
     } else if path.components().count() > root_len && !bare_drive {
         root_len + 1
@@ -792,10 +793,23 @@ fn engine_lock(managed: &Path, root: &Path) -> Result<std::fs::File> {
 // exercise the Windows decision used by placement, without a Windows filesystem.
 fn sf_reads_parent(parent: &Path, root: &Path, windows: bool) -> bool {
     if windows {
-        crate::winpath::windows_same_folder(&parent.to_string_lossy(), &root.to_string_lossy())
+        #[cfg(windows)]
+        { same_folder(parent, root) }
+        #[cfg(not(windows))]
+        { crate::winpath::windows_same_folder(&parent.to_string_lossy(), &root.to_string_lossy()) }
     } else {
         crate::winpath::same_folder(parent, root)
     }
+}
+
+// Receipts, journals and the current game may use different spellings of the same Windows folder. Equality is
+// never permission to follow links: mutation paths still pass refuse_symlink_path and all receipt/content checks.
+fn in_folder(path: &Path, folder: &Path) -> bool {
+    path.parent().is_some_and(|parent| same_folder(parent, folder))
+}
+
+fn same_parent(a: &Path, b: &Path) -> bool {
+    a.parent().zip(b.parent()).is_some_and(|(a, b)| same_folder(a, b))
 }
 
 fn placements_file(game: &Path) -> PathBuf {
@@ -816,8 +830,10 @@ fn placements(game: &Path) -> Result<Vec<Placement>> {
             if plain.len() != s.len() { r.path = PathBuf::from(plain.into_owned()); }
         }
     }
-    let mut seen = std::collections::HashSet::new();
-    let mut kept: Vec<Placement> = entries.into_iter().rev().filter(|r| seen.insert(r.path.clone())).collect();
+    let mut kept: Vec<Placement> = Vec::new();
+    for receipt in entries.into_iter().rev() {
+        if !kept.iter().any(|r| same_folder(&r.path, &receipt.path)) { kept.push(receipt); }
+    }
     kept.reverse();
     Ok(kept)
 }
@@ -827,6 +843,8 @@ fn placements(game: &Path) -> Result<Vec<Placement>> {
 #[cfg(any(windows, test))]
 fn compatible_receipt_path(path: &str, kind: ModKind, game_folder: bool, sf_root: &str) -> String {
     if !game_folder && matches!(kind, ModKind::ShroudForge | ModKind::Eml) {
+        #[cfg(windows)]
+        if !in_folder(Path::new(path), Path::new(sf_root)) { return path.to_owned(); }
         if let Some(rest) = crate::winpath::windows_below(sf_root, path).filter(|rest| rest.len() == 1) {
             return format!("{}\\{}", sf_root.trim_end_matches(['\\', '/']), rest[0]);
         }
@@ -939,14 +957,19 @@ fn save_publications(game: &Path, all: &[Publication]) -> Result<()> {
 /// Records the publication `p` (replacing the last one at its path) before anything of it happens.
 fn begin_publication(game: &Path, p: Publication) -> Result<()> {
     let mut all = publications(game)?;
-    all.retain(|x| x.path != p.path);
+    all.retain(|x| !same_folder(&x.path, &p.path));
     all.push(p);
     save_publications(game, &all)
 }
 
+fn staging_name(dir: &Path) -> bool {
+    dir.file_name().and_then(|n| n.to_str()).and_then(|n| n.strip_prefix(".kiln-place-"))
+        .is_some_and(|tag| tag.len() == 12 && tag.bytes().all(|b| b.is_ascii_hexdigit()))
+}
+
 /// A game-side journal is untrusted input: it can name only a real placement and its sibling staging tree.
 fn validate_publication(game: &Path, p: &Publication, route: &Route) -> Result<()> {
-    if p.path != p.to.path { return Err(Error::invalid("publication and receipt paths differ")); }
+    if !same_folder(&p.path, &p.to.path) { return Err(Error::invalid("publication and receipt paths differ")); }
     if p.to.marker.format != 1 || !crate::manifest::is_mod_id(&p.to.marker.id)
         || p.from.as_ref().is_some_and(|f| f.format != 1 || f.kind != p.to.marker.kind || f.id != p.to.marker.id) {
         return Err(Error::invalid("publication markers do not identify the same mod"));
@@ -959,9 +982,7 @@ fn validate_publication(game: &Path, p: &Publication, route: &Route) -> Result<(
     refuse_symlink_path(game, &p.path)?;
     if let Some(parked) = &p.parked {
         let dir = parked.parent().ok_or_else(|| Error::invalid("parked copy without parent"))?;
-        let tag = dir.file_name().and_then(|n| n.to_str()).and_then(|n| n.strip_prefix(".kiln-place-"));
-        if parked.file_name().is_none_or(|n| n != "old") || dir.parent() != p.path.parent()
-            || !tag.is_some_and(|t| t.len() == 12 && t.bytes().all(|b| b.is_ascii_hexdigit())) {
+        if parked.file_name().is_none_or(|n| n != "old") || !same_parent(dir, &p.path) || !staging_name(dir) {
             return Err(Error::invalid("unsafe parked publication path"));
         }
         refuse_symlink_path(game, parked)?;
@@ -969,17 +990,47 @@ fn validate_publication(game: &Path, p: &Publication, route: &Route) -> Result<(
     Ok(())
 }
 
-/// The temporary folder a publication parked the old copy in (`<parent>/.kiln-place-<hex>/old`), deleted once the
-/// publication is finished; only that shape of folder, beside the copy, never through a link.
-fn drop_parked(game: &Path, p: &Publication, route: &Route) -> bool {
-    let Some(parked) = &p.parked else { return false };
-    let Some(dir) = parked.parent() else { return false };
-    let ours = dir.file_name().is_some_and(|n| n.to_string_lossy().starts_with(".kiln-place-")) && dir.parent() == p.path.parent();
-    if !ours || validate_publication(game, p, route).is_err() || !dir.is_dir() { return false; }
+/// Clean up the old copy after the replacement receipt was saved. Record the cleanup before deleting any files,
+/// so the staging sweep can finish it even after the publication journal moves on.
+fn drop_parked(game: &Path, p: &Publication, route: &Route) -> Result<bool> {
+    let Some(parked) = &p.parked else { return Ok(false) };
+    validate_publication(game, p, route)?;
+    match std::fs::symlink_metadata(parked) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(true),
+        Err(e) => return Err(io_at(parked, "inspecting")(e)),
+        Ok(meta) if !meta.is_dir() => return Ok(false),
+        Ok(_) => {}
+    }
     // A saved receipt alone does not prove the replacement survived. Never discard the only old tree.
-    if !p.path.is_dir() || marker(&p.path).as_ref() != Some(&p.to.marker) || !holds_receipt(&p.path, &p.to)
-        || marker(parked) != p.from { return false; }
-    std::fs::remove_dir_all(dir).is_ok()
+    if !p.path.is_dir() || !holds_receipt(&p.path, &p.to) || marker(&p.path).as_ref() != Some(&p.to.marker) {
+        return Ok(false);
+    }
+    let folder = parked.parent().expect("validated parent");
+    let Some(from) = &p.from else {
+        // The folder replaced had no marker: a Flame mod's folder holding only what the mod wrote, adopted with those
+        // files (they are in the new copy now). Nothing identifies it for a later sweep, so it goes whole, and only
+        // while the journal still names it.
+        if marker(parked).is_some() || !plain_staging_tree(parked) { return Ok(false); }
+        std::fs::remove_dir_all(parked).map_err(io_at(parked, "removing"))?;
+        if std::fs::remove_dir(folder).is_ok() && let Some(parent) = folder.parent() { let _ = crate::durable::flush_dir(parent); }
+        return Ok(true);
+    };
+    let s = Staging {
+        folder: folder.to_path_buf(),
+        path: p.path.clone(),
+        marker: p.to.marker.clone(),
+        game_folder: p.to.game_folder,
+        parked: Some(from.clone()),
+    };
+    let mut all = stagings(game)?;
+    if !all.contains(&s) {
+        refuse_symlink_path(game, &parked.join(MARKER))?;
+        if marker(parked).as_ref() != Some(from) { return Ok(false); }
+        all.retain(|entry| entry.folder != s.folder);
+        all.push(s.clone());
+        save_stagings(game, &all)?;
+    }
+    settle_staging(&s)
 }
 
 /// What a stop inside a publication left ([`copy_in_with`]), before anything looks at the copies ([`place`],
@@ -990,12 +1041,12 @@ fn drop_parked(game: &Path, p: &Publication, route: &Route) -> bool {
 /// A folder without a receipt is never adopted (a first placement stopped before its receipt stays the player's, as
 /// before). A receipt that moved on, or a copy that is neither, ends the
 /// record and nothing is touched: a mismatch is never resolved by trusting a receipt (`owned` still refuses it).
-fn recover_journal(game: &Path, receipts: &mut Vec<Placement>, route: &Route) -> Result<Vec<String>> {
+fn recover_journal(game: &Path, receipts: &mut Vec<Placement>, route: &Route) -> Result<(Vec<String>, Vec<Publication>)> {
     let all = publications(game)?;
     // A moved install can retain completed records keyed by its old absolute root. Never inspect or mutate
     // those paths; retain the record and report it, as with its old delivery receipts.
-    let moved = |p: &Publication| !p.path.starts_with(game) && check_placement_path(game, &p.to, route).is_err()
-        && receipts.iter().any(|r| r.path == p.path && r.marker == p.to.marker && r.files == p.to.files);
+    let moved = |p: &Publication| crate::winpath::relative_folder(game, &p.path).is_none() && check_placement_path(game, &p.to, route).is_err()
+        && receipts.iter().any(|r| same_folder(&r.path, &p.path) && r.marker == p.to.marker && r.files == p.to.files);
     let mut untouched = Vec::new();
     let mut notes = Vec::new();
     for p in &all {
@@ -1010,17 +1061,15 @@ fn recover_journal(game: &Path, receipts: &mut Vec<Placement>, route: &Route) ->
             notes.push(format!("{}: publication recovery left this folder untouched: {}", p.path.display(), e.message));
         }
     }
-    if all.is_empty() { return Ok(Vec::new()); }
     let (mut keep, mut changed, mut receipts_changed) = (Vec::new(), false, false);
     for mut p in all {
-        if untouched.contains(&p.path) { keep.push(p); continue; }
+        if untouched.iter().any(|path| same_folder(path, &p.path)) { keep.push(p); continue; }
         if refuse_symlink_path(game, &p.path).is_err() { changed = true; continue; }
-        let current = receipts.iter().find(|r| r.path == p.path);
+        let current = receipts.iter().find(|r| same_folder(&r.path, &p.path));
         if current.is_some_and(|r| r.marker == p.to.marker && r.files == p.to.files) {
             if !p.path.is_dir() && p.parked.as_ref().is_some_and(|old| old.is_dir()) {
                 return Err(Error::new(ErrorCode::Refused, format!("{}: published copy is missing; preserved its parked old copy for recovery", p.path.display())));
             }
-            if drop_parked(game, &p, route) { p.parked = None; changed = true; }
             keep.push(p);
             continue;
         }
@@ -1032,7 +1081,7 @@ fn recover_journal(game: &Path, receipts: &mut Vec<Placement>, route: &Route) ->
         let published = p.from.is_some() && p.path.is_dir() && marker(&p.path).as_ref() == Some(&p.to.marker)
             && holds_receipt(&p.path, &p.to);
         if published {
-            receipts.retain(|r| r.path != p.path);
+            receipts.retain(|r| !same_folder(&r.path, &p.path));
             receipts.push(p.to.clone());
             receipts_changed = true;
             keep.push(p);
@@ -1053,20 +1102,26 @@ fn recover_journal(game: &Path, receipts: &mut Vec<Placement>, route: &Route) ->
             let _ = std::fs::remove_dir(dir);
         }
     }
-    if receipts_changed {
-        save_placements(game, receipts)?;
-        for p in &mut keep {
-            if drop_parked(game, p, route) { p.parked = None; }
+    if receipts_changed { save_placements(game, receipts)?; }
+    for p in &mut keep {
+        if untouched.contains(&p.path) { continue; }
+        match drop_parked(game, p, route) {
+            Ok(true) => { p.parked = None; changed = true; }
+            Ok(false) => {}
+            Err(e) => {
+                let folder = p.parked.as_deref().and_then(Path::parent).expect("parked cleanup requires an old copy");
+                notes.push(staging_cleanup_note(folder, &e));
+            }
         }
     }
     if changed { save_publications(game, &keep)?; }
-    Ok(notes)
+    Ok((notes, keep))
 }
 
 /// [`recover_journal`], then [`sweep_staging`]: what a stop inside a placement left, before anything looks at the copies.
 fn recover_publications(game: &Path, receipts: &mut Vec<Placement>, route: &Route) -> Result<Vec<String>> {
-    let mut notes = recover_journal(game, receipts, route)?;
-    notes.extend(sweep_staging(game, route));
+    let (mut notes, journal) = recover_journal(game, receipts, route)?;
+    notes.extend(sweep_staging(game, route, &journal));
     Ok(notes)
 }
 
@@ -1090,8 +1145,8 @@ struct StagingRecord {
     folders: Vec<Staging>,
 }
 
-/// One staging folder: the folder, the copy it stages (its sibling), and the marker that copy gets.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// One staging folder and the identity of its replacement and any old copy cleared for deletion.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Staging {
     folder: PathBuf,
@@ -1099,6 +1154,8 @@ struct Staging {
     marker: Marker,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     game_folder: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    parked: Option<Marker>,
 }
 
 /// The largest staging record Kiln reads: far more entries than the folders a game ever keeps.
@@ -1150,7 +1207,7 @@ impl StagingGuard {
         let folder = parent.join(format!(".kiln-place-{}", crate::hash::hex(&crate::util::random_bytes::<6>()?)));
         let mut all = stagings(game)?;
         all.retain(|s| s.folder != folder);
-        all.push(Staging { folder: folder.clone(), path: dst.to_path_buf(), marker: m.clone(), game_folder });
+        all.push(Staging { folder: folder.clone(), path: dst.to_path_buf(), marker: m.clone(), game_folder, parked: None });
         save_stagings(game, &all)?;
         Ok(StagingGuard { game: game.to_path_buf(), folder })
     }
@@ -1182,23 +1239,22 @@ fn end_staging(game: &Path, folder: &Path) -> Result<()> {
 /// Is `s` a staging folder of the shape Kiln makes: `.kiln-place-<12 hex>`, directly beside the copy it stages, in that
 /// copy's engine mod folder (the one the copy's receipt would name), with no link on the way?
 fn staging_shape(game: &Path, s: &Staging, route: &Route) -> bool {
-    let tag = s.folder.file_name().and_then(|n| n.to_str()).and_then(|n| n.strip_prefix(".kiln-place-"));
-    if !tag.is_some_and(|t| t.len() == 12 && t.bytes().all(|b| b.is_ascii_hexdigit()))
+    if !staging_name(&s.folder)
         || s.folder.parent().is_none() || s.folder.parent() != s.path.parent()
         || !s.path.file_name().and_then(|n| n.to_str()).is_some_and(is_game_folder_name)
-        || s.marker.format != 1 || !crate::manifest::is_mod_id(&s.marker.id) {
+        || s.marker.format != 1 || !crate::manifest::is_mod_id(&s.marker.id)
+        || s.parked.as_ref().is_some_and(|old| old.format != 1 || old.kind != s.marker.kind || old.id != s.marker.id) {
         return false;
     }
     let r = Placement { path: s.path.clone(), marker: s.marker.clone(), files: Default::default(), extension: None, game_folder: s.game_folder };
     (check_placement_path(game, &r, route).is_ok() || other_route_folder(game, &r, route)) && refuse_symlink_path(game, &s.folder).is_ok()
 }
 
-/// A staged copy of the placement of `m`: a real folder with no link anywhere in it, and no marker yet (the stop came
-/// before it was written) or `m`'s.
-fn staged_copy(new: &Path, m: &Marker) -> bool {
+/// A staging tree may contain only regular files and directories.
+fn plain_staging_tree(root: &Path) -> bool {
     let real_dir = |p: &Path| std::fs::symlink_metadata(p).is_ok_and(|meta| meta.is_dir() && !crate::quick::import_is_link(&meta));
-    if !real_dir(new) { return false; }
-    let mut stack = vec![new.to_path_buf()];
+    if !real_dir(root) { return false; }
+    let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
         let Ok(entries) = std::fs::read_dir(&dir) else { return false };
         for e in entries {
@@ -1208,6 +1264,12 @@ fn staged_copy(new: &Path, m: &Marker) -> bool {
             if meta.is_dir() { stack.push(path); } else if !meta.is_file() { return false; }
         }
     }
+    true
+}
+
+/// A new copy may have been interrupted before its marker was written.
+fn staged_copy(new: &Path, m: &Marker) -> bool {
+    if !plain_staging_tree(new) { return false; }
     match std::fs::symlink_metadata(new.join(MARKER)) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => true,
         Ok(_) => marker(new).as_ref() == Some(m),
@@ -1215,41 +1277,91 @@ fn staged_copy(new: &Path, m: &Marker) -> bool {
     }
 }
 
-/// Takes out one recorded staging folder: its staged copy (`new`, [`staged_copy`]), then the empty folder. -> whether
-/// the folder is gone. A folder that holds anything else (the parked old copy the journal still needs, a file that is
-/// not Kiln's) is left as it is.
-fn settle_staging(s: &Staging) -> std::io::Result<bool> {
+/// Remove a verified old copy's contents before its marker, so a failure can be retried using the same identity.
+fn remove_parked_copy(old: &Path, expected: &Marker) -> Result<bool> {
+    if !plain_staging_tree(old) { return Ok(false); }
+    let marker_path = old.join(MARKER);
+    match std::fs::symlink_metadata(&marker_path) {
+        Ok(meta) if meta.is_file() && marker(old).as_ref() == Some(expected) => {}
+        // The cleanup may have stopped after deleting the marker. Only an empty directory can go at this point.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return match std::fs::remove_dir(old) {
+                Ok(()) => Ok(true),
+                Err(e) if e.kind() == std::io::ErrorKind::DirectoryNotEmpty => Ok(false),
+                Err(e) => Err(e.into()),
+            };
+        }
+        Ok(_) => return Ok(false),
+        Err(e) => return Err(e.into()),
+    }
+    for entry in std::fs::read_dir(old)? {
+        let entry = entry?;
+        if entry.file_name() == MARKER { continue; }
+        let path = entry.path();
+        if entry.file_type()?.is_dir() {
+            std::fs::remove_dir_all(path)?;
+        } else {
+            #[cfg(windows)]
+            crate::util::make_writable(&path)?;
+            std::fs::remove_file(path)?;
+        }
+    }
+    // The marker goes only once it is all that is left: a listing read while its entries go need not show each one,
+    // and a file deleted while another program has it open can stay listed until that program lets go of it.
+    if std::fs::read_dir(old)?.any(|e| !e.is_ok_and(|e| e.file_name() == MARKER)) {
+        return Err(Error::new(ErrorCode::Io, format!("{} still holds files", old.display())));
+    }
+    crate::durable::flush_dir(old)?;
+    crate::kept::crash_point(crate::kept::Step::ParkedContentsRemoved);
+    #[cfg(windows)]
+    crate::util::make_writable(&marker_path)?;
+    std::fs::remove_file(marker_path)?;
+    std::fs::remove_dir(old)?;
+    Ok(true)
+}
+
+/// Remove the one copy the record names, then its empty staging folder.
+fn settle_staging(s: &Staging) -> Result<bool> {
     let meta = match std::fs::symlink_metadata(&s.folder) {
         // (gone: its removal on disk before the entry goes, as at the end of a placement)
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             if let Some(parent) = s.folder.parent() { let _ = crate::durable::flush_dir(parent); }
             return Ok(true);
         }
-        Err(e) => return Err(e),
+        Err(e) => return Err(e.into()),
         Ok(meta) => meta,
     };
     if !meta.is_dir() || crate::quick::import_is_link(&meta) { return Ok(false); }
-    let mut new = None;
+    let expected = if s.parked.is_some() { "old" } else { "new" };
+    let mut copy = None;
     for e in std::fs::read_dir(&s.folder)? {
         let e = e?;
-        if e.file_name() != "new" { return Ok(false); }
-        new = Some(e.path());
+        if e.file_name() != expected { return Ok(false); }
+        copy = Some(e.path());
     }
-    if let Some(new) = new {
-        if !staged_copy(&new, &s.marker) { return Ok(false); }
-        std::fs::remove_dir_all(&new)?;
+    if let Some(copy) = copy {
+        if let Some(old) = &s.parked {
+            if !remove_parked_copy(&copy, old)? { return Ok(false); }
+        } else {
+            if !staged_copy(&copy, &s.marker) { return Ok(false); }
+            std::fs::remove_dir_all(&copy)?;
+        }
     }
     std::fs::remove_dir(&s.folder)?;
     if let Some(parent) = s.folder.parent() { let _ = crate::durable::flush_dir(parent); }
     Ok(true)
 }
 
+fn staging_cleanup_note(folder: &Path, error: &Error) -> String {
+    format!("{}: the temporary folder of a placement could not be removed yet ({}); Kiln tries again next time",
+        folder.display(), error.message)
+}
+
 /// The staging folders a stop inside a placement left ([`staging_file`]), after the journal's recovery put back or
 /// finished what it names. Only a folder the record names, of the shape Kiln makes ([`staging_shape`]), is looked at,
-/// and only its staged copy and then the empty folder go ([`settle_staging`]); never a parked old copy, never a folder
-/// the record does not name. An entry whose folder stays is kept for the next time. Never fails the operation asking:
-/// the notes say what could not be removed.
-fn sweep_staging(game: &Path, route: &Route) -> Vec<String> {
+/// and only its staged copy or an old copy cleared for deletion goes ([`settle_staging`]). While the journal still
+/// names an old copy, journal recovery verifies the replacement before each cleanup attempt.
+fn sweep_staging(game: &Path, route: &Route, journal: &[Publication]) -> Vec<String> {
     if std::fs::symlink_metadata(staging_file(game)).is_err() { return Vec::new(); }
     let all = match stagings(game) {
         Ok(all) => all,
@@ -1257,13 +1369,16 @@ fn sweep_staging(game: &Path, route: &Route) -> Vec<String> {
     };
     let (n, mut keep, mut notes) = (all.len(), Vec::new(), Vec::new());
     for s in all {
-        if !staging_shape(game, &s, route) { keep.push(s); continue; }
+        if !staging_shape(game, &s, route)
+            || s.parked.is_some() && journal.iter().any(|p| p.parked.as_deref() == Some(s.folder.join("old").as_path())) {
+            keep.push(s);
+            continue;
+        }
         match settle_staging(&s) {
             Ok(true) => {}
             Ok(false) => keep.push(s),
             Err(e) => {
-                notes.push(format!("{}: the temporary folder of an interrupted placement could not be removed yet ({e}); Kiln tries \
-                    again next time", s.folder.display()));
+                notes.push(staging_cleanup_note(&s.folder, &e));
                 keep.push(s);
             }
         }
@@ -1330,14 +1445,14 @@ fn other_route_folder(game: &Path, r: &Placement, route: &Route) -> bool {
     }
     let Some(parent) = r.path.parent() else { return false };
     let mods = game.join(crate::sfi_routing::INTERPRETER_MODS);
-    let first = |p: &Path| p.strip_prefix(game).ok().and_then(|rest| rest.components().next())
-        .map(|c| c.as_os_str().to_string_lossy().to_ascii_lowercase());
+    let first = |p: &Path| crate::winpath::relative_folder(game, p)
+        .and_then(|rest| rest.split('/').next().map(str::to_ascii_lowercase));
     match route {
         // (the same folder as Windows names it is not another: `Mods` there is `mods`)
-        Route::Interpreter(_) => !sf_reads_parent(parent, &mods, cfg!(windows)) && parent != game && parent.starts_with(game)
+        Route::Interpreter(_) => !sf_reads_parent(parent, &mods, cfg!(windows)) && !same_folder(parent, game) && crate::winpath::relative_folder(game, parent).is_some()
             && !matches!(first(parent).as_deref(), Some("shroudforge" | "kiln")) && refuse_symlink_path(game, &r.path).is_ok(),
         Route::Legacy(Legacy::Off) => false,
-        Route::Legacy(_) => r.marker.kind == ModKind::ShroudForge && parent == mods && interpreter_route_recorded(game)
+        Route::Legacy(_) => r.marker.kind == ModKind::ShroudForge && same_folder(parent, &mods) && interpreter_route_recorded(game)
             && !sf_reads_parent(&mods, &route.sf_mods(game), cfg!(windows)) && refuse_symlink_path(game, &r.path).is_ok(),
     }
 }
@@ -1375,11 +1490,11 @@ fn sweep_other_route(dirs: &DataDirs, profile: &crate::profile::Profile, game: &
     // the publications recorded at a swept folder are settled (recover_publications finished them first)
     if !swept.is_empty() {
         let all = publications(game)?;
-        let keep: Vec<Publication> = all.iter().filter(|p| !swept.contains(&p.path) || receipts.iter().any(|r| r.path == p.path)).cloned().collect();
+        let keep: Vec<Publication> = all.iter().filter(|p| !swept.iter().any(|path| same_folder(path, &p.path)) || receipts.iter().any(|r| same_folder(&r.path, &p.path))).cloned().collect();
         if keep.len() != all.len() { save_publications(game, &keep)?; }
     }
     if matches!(route, Route::Legacy(_)) && (sf_reads_parent(&mods, &root, cfg!(windows))
-        || !receipts.iter().any(|r| r.marker.kind == ModKind::ShroudForge && r.path.parent() == Some(mods.as_path()))) {
+        || !receipts.iter().any(|r| r.marker.kind == ModKind::ShroudForge && in_folder(&r.path, &mods))) {
         record_interpreter_route(game, false)?;
     }
     Ok(())
@@ -1463,7 +1578,7 @@ fn move_copy(game: &Path, receipts: &mut Vec<Placement>, r: &Placement, new: &Pa
         *receipts = next;
         return Err(e);
     }
-    let next: Vec<Placement> = receipts.iter().filter(|x| x.path != r.path).cloned().collect();
+    let next: Vec<Placement> = receipts.iter().filter(|x| !same_folder(&x.path, &r.path)).cloned().collect();
     save_placements(game, &next)?;
     *receipts = next;
     Ok(())
@@ -1516,7 +1631,7 @@ pub(crate) fn recover_placements(game_dir: &Path, route: &Route) -> Result<Vec<S
 fn settle_first_copies(game: &Path, receipts: &mut Vec<Placement>, route: &Route) -> Result<Vec<String>> {
     let mut notes = Vec::new();
     for p in publications(game)? {
-        if p.from.is_some() || p.parked.is_some() || receipts.iter().any(|r| r.path == p.path)
+        if p.from.is_some() || p.parked.is_some() || receipts.iter().any(|r| same_folder(&r.path, &p.path))
             || validate_publication(game, &p, route).is_err() || !p.path.is_dir()
             || marker(&p.path).as_ref() != Some(&p.to.marker) || !holds_receipt(&p.path, &p.to) {
             continue;
@@ -1721,7 +1836,7 @@ fn switch_eml_copy(game: &Path, receipts: &mut Vec<Placement>, dst: &Path, on: b
     refuse_symlink_path(game, &ext)?;
     let m = crate::shroudforge::read_mod(dst)?;
     let write = !(m.extended && m.enabled == on && m.repair.is_empty());
-    let index = receipts.iter().position(|r| r.path == dst);
+    let index = receipts.iter().position(|r| same_folder(&r.path, &dst));
     // a switch made by hand that Kiln takes as its own is recorded even when it already says `on`
     let adopt = m.extended && index.is_some_and(|i| adopted_switch(dst, &current_receipt(dst, &receipts[i])));
     if !write && !adopt { return Ok(false); }
@@ -1771,7 +1886,7 @@ fn switch_on_eml_copy(game: &Path, receipts: &mut Vec<Placement>, rep: &mut Plac
 /// it stays where it is, switched off in ShroudForge's file so ShroudForge does not run it either, and the result says
 /// why. Some(()) when it was kept so.
 fn keep_sf_values(dirs: &DataDirs, game: &Path, receipts: &mut Vec<Placement>, rep: &mut PlaceReport, tag: String, dst: &Path) -> Option<()> {
-    if !sf_values_changed(dirs, dst, receipts.iter().find(|r| r.path == dst)?) { return None; }
+    if !sf_values_changed(dirs, dst, receipts.iter().find(|r| same_folder(&r.path, &dst))?) { return None; }
     let off = match switch_eml_copy(game, receipts, dst, false) {
         Ok(_) => "Kiln switched it off in ShroudForge's settings".to_string(),
         Err(e) => format!("Kiln could not switch it off in ShroudForge's settings ({}), so ShroudForge may still run it", reason_at(dst, e.message)),
@@ -1843,7 +1958,7 @@ struct Owned {
 fn owned(game: &Path, entries: &[Placement], dst: &Path, kind: ModKind, id: &str) -> Result<Option<Owned>> {
     refuse_symlink_path(game, dst)?;
     if !dst.exists() { return Ok(None); }
-    let Some(receipt) = entries.iter().find(|r| r.path == dst && r.marker.kind == kind && r.marker.id == id) else { return Ok(None) };
+    let Some(receipt) = entries.iter().find(|r| same_folder(&r.path, &dst) && r.marker.kind == kind && r.marker.id == id) else { return Ok(None) };
     let receipt = &current_receipt(dst, receipt);
     let valid = receipt.marker.format == 1 && crate::manifest::is_mod_id(&receipt.marker.id)
         && marker(dst).as_ref() == Some(&receipt.marker);
@@ -2075,6 +2190,7 @@ struct Roots<'a> {
     data: &'a Path,
     /// The game folder (the destination is below it).
     game: &'a Path,
+    route: &'a Route,
 }
 
 /// Stage the entire replacement first, then rename the old copy aside; restore it if publication fails.
@@ -2189,12 +2305,15 @@ fn copy_in_with(roots: Roots, src: &Path, dst: &Path, m: &Marker, kept: &[(Strin
     let replaced = dst.exists();
     // the intent first, durably: a stop from here on is finished or put back before the next placement looks at the
     // copies (recover_publications)
-    begin_publication(roots.game, Publication { path: dst.to_path_buf(), from: if replaced { marker(dst) } else { None },
-        to: receipt.clone(), parked: replaced.then(|| old.clone()) })?;
+    let publication = Publication { path: dst.to_path_buf(), from: if replaced { marker(dst) } else { None },
+        to: receipt.clone(), parked: replaced.then(|| old.clone()) };
+    begin_publication(roots.game, publication.clone())?;
     if replaced && let Err(e) = crate::durable::rename_dir(dst, &old) {
         return Err(preserve_recovery(tmp, e));
     }
     if crate::kept::stop_here(crate::kept::Step::Parked) { std::mem::forget(tmp); panic!("injected crash at Parked"); }
+    #[cfg(all(test, windows))]
+    if replaced { placement_staging_tests::after_park(&old); }
     #[cfg(feature = "sfi-scan")]
     crate::sfi_activation::boundary(crate::sfi_activation::Boundary::PlacementParked);
     if let Err(e) = rename_in(&staged, dst) {
@@ -2211,7 +2330,7 @@ fn copy_in_with(roots: Roots, src: &Path, dst: &Path, m: &Marker, kept: &[(Strin
     #[cfg(feature = "sfi-scan")]
     crate::sfi_activation::boundary(crate::sfi_activation::Boundary::PlacementPublished);
     if let Err(error) = persist(&receipt) {
-        if placements(roots.game).is_ok_and(|rs| rs.iter().any(|r| r.path == receipt.path && r.marker == receipt.marker && r.files == receipt.files)) {
+        if placements(roots.game).is_ok_and(|rs| rs.iter().any(|r| same_folder(&r.path, &receipt.path) && r.marker == receipt.marker && r.files == receipt.files)) {
             return Err(preserve_recovery(tmp, error));
         }
         if let Err(e) = crate::durable::rename_dir(dst, &staged) {
@@ -2227,6 +2346,13 @@ fn copy_in_with(roots: Roots, src: &Path, dst: &Path, m: &Marker, kept: &[(Strin
     if crate::kept::stop_here(crate::kept::Step::ReceiptSaved) { std::mem::forget(tmp); panic!("injected crash at ReceiptSaved"); }
     #[cfg(feature = "sfi-scan")]
     crate::sfi_activation::boundary(crate::sfi_activation::Boundary::PlacementReceipt);
+    if replaced {
+        // The journal owns the parked copy now. A recursive temporary-directory drop could lose its marker.
+        tmp.keep();
+        if let Err(e) = drop_parked(roots.game, &publication, roots.route) {
+            warnings.push(staging_cleanup_note(&staging.folder, &e));
+        }
+    }
     let said = match (carry, done) {
         (Some(c), Some(done)) => carried(roots.game, m.kind, key, &c, &done, dst)?,
         _ => None,
@@ -2251,7 +2377,7 @@ fn remove_copy(game: &Path, dst: &Path, persist: impl FnOnce() -> Result<()>) ->
 
 /// Keep the shared list unchanged on a failed write: the folder transaction will roll that copy back.
 fn put_placement(game: &Path, receipts: &mut Vec<Placement>, receipt: &Placement) -> Result<()> {
-    let mut next = receipts.iter().filter(|r| r.path != receipt.path).cloned().collect::<Vec<_>>();
+    let mut next = receipts.iter().filter(|r| !same_folder(&r.path, &receipt.path)).cloned().collect::<Vec<_>>();
     next.push(receipt.clone());
     save_placements(game, &next)?;
     *receipts = next;
@@ -2261,7 +2387,7 @@ fn put_placement(game: &Path, receipts: &mut Vec<Placement>, receipt: &Placement
 /// Publish a removal's receipt only after the folder transaction succeeds. A later mod must never save the
 /// rolled-back removal of an earlier mod from this run.
 fn remove_placement(game: &Path, receipts: &mut Vec<Placement>, dst: &Path) -> Result<()> {
-    let next = receipts.iter().filter(|r| r.path != dst).cloned().collect::<Vec<_>>();
+    let next = receipts.iter().filter(|r| !same_folder(&r.path, &dst)).cloned().collect::<Vec<_>>();
     if std::fs::symlink_metadata(dst).is_ok() {
         remove_copy(game, dst, || save_placements(game, &next))?;
     } else {
@@ -2313,12 +2439,12 @@ fn check_placement_path(game_dir: &Path, receipt: &Placement, route: &Route) -> 
         ModKind::Emf => game_dir.join("emf/mods"),
         ModKind::Greeneye => game_dir.join(GREENEYE_MODS),
         ModKind::Dllmod => game_dir.join(crate::dllmod::RUN_FOLDER),
-        ModKind::Eml if dst.parent() == Some(route.sf_mods(game_dir).as_path()) => route.sf_mods(game_dir),
+        ModKind::Eml if in_folder(dst, &route.sf_mods(game_dir)) => route.sf_mods(game_dir),
         ModKind::Eml | ModKind::Flame | ModKind::Shroudtopia => game_dir.join("mods"),
         ModKind::Native | ModKind::Xhl if receipt.game_folder => game_dir.join(EML_GAME_MODS),
         _ => PathBuf::new(),
     };
-    if root.as_os_str().is_empty() || dst.parent() != Some(root.as_path()) {
+    if root.as_os_str().is_empty() || !in_folder(dst, &root) {
         return Err(Error::new(ErrorCode::Refused, "placement folder changed or is not an engine mod folder"));
     }
     Ok(())
@@ -2404,13 +2530,13 @@ pub fn unplace(dirs: &DataDirs, game_dir: &Path) -> Result<PlacementCleanup> {
         };
         if dst.exists() {
             remove_copy(game_dir, dst, || {
-                receipts.retain(|r| r.path != *dst);
+                receipts.retain(|r| !same_folder(&r.path, &dst));
                 save_placements(game_dir, &receipts)
             })?;
             report.removed.push(dst.clone());
             report.kept_files.extend(said);
         } else {
-            receipts.retain(|r| r.path != *dst);
+            receipts.retain(|r| !same_folder(&r.path, &dst));
             save_placements(game_dir, &receipts)?;
         }
     }
@@ -2426,7 +2552,7 @@ pub fn unplace(dirs: &DataDirs, game_dir: &Path) -> Result<PlacementCleanup> {
 fn switch_copy(game: &Path, receipts: &mut [Placement], dst: &Path, enabled: bool) -> Result<()> {
     refuse_symlink_path(game, &dst.join("extended.mod.json.tmp"))?;
     let current = std::fs::read_to_string(dst.join("extended.mod.json"))?;
-    let index = receipts.iter().position(|r| r.path == dst);
+    let index = receipts.iter().position(|r| same_folder(&r.path, &dst));
     let unchanged = index.is_some_and(|i| receipts[i].extension.as_deref() == Some(current.as_str()));
     crate::shroudforge::set_enabled(dst, enabled)?;
     if unchanged {
@@ -2978,7 +3104,7 @@ fn not_placed(rep: &mut PlaceReport, tag: String, dst: &Path, error: Error, runs
 
 /// The marker Kiln's receipt for `path` names.
 fn marker_at<'a>(receipts: &'a [Placement], path: &Path) -> Option<&'a Marker> {
-    receipts.iter().find(|r| r.path == path).map(|r| &r.marker)
+    receipts.iter().find(|r| same_folder(&r.path, path)).map(|r| &r.marker)
 }
 
 /// A reason for keeping `path`, without the path an error message starts with (the path is shown beside it).
@@ -3001,7 +3127,7 @@ fn place_with(dirs: &DataDirs, profile: &crate::profile::Profile, game_dir: &Pat
     // (a route change: Kiln's copies of ShroudForge-format mods leave the other route's folder)
     #[cfg(feature = "sfi-scan")]
     sweep_other_route(dirs, profile, game_dir, &mut receipts, &mut rep, route)?;
-    let roots = Roots { data: &dirs.root, game: game_dir };
+    let roots = Roots { data: &dirs.root, game: game_dir, route };
     // whether the game has XHL-Core ([`xhl_host`]): asked once, only for a folder XHL-Core would load
     let mut xhl_core: Option<bool> = None;
     for kind in [ModKind::ShroudForge, ModKind::Set] {
@@ -3126,7 +3252,7 @@ fn place_with(dirs: &DataDirs, profile: &crate::profile::Profile, game_dir: &Pat
                             sf_old_copy_follows(&mut rep, &mut receipts, &mut xhl_core, game_dir, &dst, tag(&m.id), m.enabled),
                         // the new copy is in place with its receipt, and a later step failed (the kept files it took
                         // back could not be tidied): it follows the profile as a placed one does
-                        Some(mk) if mk == want && receipts.iter().any(|r| r.path == dst && r.marker == want) =>
+                        Some(mk) if mk == want && receipts.iter().any(|r| same_folder(&r.path, &dst) && r.marker == want) =>
                             sf_plugin_ini(&mut rep, &mut xhl_core, game_dir, &dst, &tag(&m.id), m.enabled, false),
                         _ => {}
                     }
@@ -3146,7 +3272,7 @@ fn place_with(dirs: &DataDirs, profile: &crate::profile::Profile, game_dir: &Pat
             }
         }
         // Enumerate trusted receipts, never infer ownership by scanning arbitrary player folders.
-        let unlisted: Vec<_> = receipts.iter().filter(|r| r.marker.kind == kind && r.path.parent() == Some(root.as_path())
+        let unlisted: Vec<_> = receipts.iter().filter(|r| r.marker.kind == kind && in_folder(&r.path, &root)
             && !list.iter().any(|m| m.id == r.marker.id)).cloned().collect();
         for receipt in unlisted {
             let dst = &receipt.path;
@@ -3270,7 +3396,7 @@ fn place_with(dirs: &DataDirs, profile: &crate::profile::Profile, game_dir: &Pat
                         .ok().and_then(|src| same_mod_elsewhere(&mods, kind, &src, &dst))
                 };
                 let Some(own) = own.filter(|p| std::fs::symlink_metadata(p).is_ok_and(|x| x.is_dir()) && has_xhl_plugin_ini(p)
-                    && !receipts.iter().any(|r| r.path == *p) && !targets.iter().any(|(_, _, d, _)| d == p)) else { continue };
+                    && !receipts.iter().any(|r| same_folder(&r.path, p)) && !targets.iter().any(|(_, _, d, _)| d == p)) else { continue };
                 if *xhl_core.get_or_insert_with(|| xhl_host(game_dir).available) { own_xhl_folder_off(&mut rep, tag(&m.id), &own); }
             }
         }
@@ -3428,7 +3554,7 @@ fn place_with(dirs: &DataDirs, profile: &crate::profile::Profile, game_dir: &Pat
         // Kiln's copies the profile does not want there (switched off, gone from the profile, no loader, another folder).
         // XHL-Core's copies in kiln/chain are place_xhl_core_copies' below.
         let stale: Vec<_> = receipts.iter().filter(|r| !placing && r.marker.kind == kind && !is_xhl_core_copy(game_dir, r)
-            && !targets.iter().any(|(m, _, dst, _)| r.path == *dst && m.id == r.marker.id)).cloned().collect();
+            && !targets.iter().any(|(m, _, dst, _)| same_folder(&r.path, &dst) && m.id == r.marker.id)).cloned().collect();
         for receipt in stale {
             let dst = &receipt.path;
             let id = &receipt.marker.id;
@@ -3452,7 +3578,7 @@ fn place_with(dirs: &DataDirs, profile: &crate::profile::Profile, game_dir: &Pat
                     Ok(Mine::Yes(..)) if kind == ModKind::Eml && !xhl && keep_sf_values(dirs, game_dir, &mut receipts, &mut rep, tag(id), dst).is_some() => continue,
                     Ok(Mine::Yes(_, mut changed, added)) => {
                         if xhl && !changed.iter().any(|c| c == "extended.mod.json")
-                            && receipts.iter().find(|r| r.path == *dst).is_some_and(|r| sf_values_changed(dirs, dst, r)) {
+                            && receipts.iter().find(|r| same_folder(&r.path, &dst)).is_some_and(|r| sf_values_changed(dirs, dst, r)) {
                             changed.push("extended.mod.json".into());
                         }
                         let files = match read_settings(dst, &changed) {
@@ -3562,7 +3688,7 @@ fn place_run_folder(dirs: &DataDirs, profile: &crate::profile::Profile, game_dir
         }
     }
     let stale: Vec<Placement> = receipts.iter()
-        .filter(|r| !placing && r.marker.kind == kind && !r.game_folder && !wanted.contains(&r.path)).cloned().collect();
+        .filter(|r| !placing && r.marker.kind == kind && !r.game_folder && !wanted.iter().any(|path| same_folder(path, &r.path))).cloned().collect();
     for receipt in stale {
         if let Err(e) = remove_run_folder_copy(game_dir, receipts, rep, &receipt, route) {
             kept(rep, &receipt.marker.id, &receipt.path, &e.message);
@@ -3606,7 +3732,7 @@ fn place_run_folder_one(dirs: &DataDirs, game_dir: &Path, roots: Roots, kind: Mo
     };
     // Flame: the files a mod wrote into its folder while it ran from elsewhere are the player's, and the folder is the
     // one the mod reads: Kiln's copy goes into it and they stay in it (never a folder another receipt names)
-    let written = (have.is_none() && kind == ModKind::Flame && dst.is_dir() && !receipts.iter().any(|r| r.path == dst))
+    let written = (have.is_none() && kind == ModKind::Flame && dst.is_dir() && !receipts.iter().any(|r| same_folder(&r.path, &dst)))
         .then(|| written_files_only(dst)).flatten();
     if have.is_none() && dst.exists() && written.is_none() {
         rep.own.push(tag);
@@ -3640,7 +3766,7 @@ fn place_run_folder_one(dirs: &DataDirs, game_dir: &Path, roots: Roots, kind: Mo
         // later save of this run cannot record a copy that was rolled back
         copy_in(roots, &src, dst, &want, &[], true, carry, |receipt| {
             let mut next = receipts.clone();
-            next.retain(|r| r.path != dst);
+            next.retain(|r| !same_folder(&r.path, &dst));
             next.push(receipt.clone());
             save_placements(game_dir, &next)?;
             *receipts = next;
@@ -3675,7 +3801,7 @@ fn remove_run_folder_copy(game_dir: &Path, receipts: &mut Vec<Placement>, rep: &
     let dst = &receipt.path;
     let tag = format!("{}:{}", kind.as_str(), receipt.marker.id);
     // the list without this receipt, taken only once it is written (see place_run_folder_one)
-    let without = || receipts.iter().filter(|r| r.path != *dst).cloned().collect::<Vec<_>>();
+    let without = || receipts.iter().filter(|r| !same_folder(&r.path, &dst)).cloned().collect::<Vec<_>>();
     if !dst.exists() {
         let next = without();
         save_placements(game_dir, &next)?;
@@ -3727,7 +3853,7 @@ pub fn game_path_of(dirs: &DataDirs, kind: ModKind, m: &crate::profile::ProfileM
         if !m.enabled || !is_game_folder_name(&m.id) { return None; }
         let dst = game.join(folder).join(&m.id);
         let want = Marker { format: 1, kind, id: m.id.clone(), version: m.version.clone(), hash: m.hash.clone() };
-        let placed = placements(game).ok()?.iter().any(|r| r.path == dst && r.marker == want);
+        let placed = placements(game).ok()?.iter().any(|r| same_folder(&r.path, &dst) && r.marker == want);
         return (placed && marker(&dst).as_ref() == Some(&want)).then_some(dst);
     }
     let root = game.join(EML_GAME_MODS);
@@ -3870,7 +3996,7 @@ enum Mine {
 fn settings_changed(game: &Path, receipts: &[Placement], dst: &Path, kind: ModKind, id: &str) -> Result<Mine> {
     refuse_symlink_path(game, dst)?;
     if !dst.exists() { return Ok(Mine::Absent); }
-    let Some(receipt) = receipts.iter().find(|r| r.path == dst && r.marker.kind == kind && r.marker.id == id) else { return Ok(Mine::No) };
+    let Some(receipt) = receipts.iter().find(|r| same_folder(&r.path, &dst) && r.marker.kind == kind && r.marker.id == id) else { return Ok(Mine::No) };
     let receipt = &current_receipt(dst, receipt);
     if receipt.marker.format != 1 || !crate::manifest::is_mod_id(&receipt.marker.id) || marker(dst).as_ref() != Some(&receipt.marker) {
         return Ok(Mine::No);
@@ -4466,7 +4592,7 @@ pub fn xhl_core_copy_rel(id: &str) -> String {
 }
 
 fn is_xhl_core_copy(game: &Path, r: &Placement) -> bool {
-    r.marker.kind == ModKind::Native && !r.game_folder && r.path.parent() == xhl_core_copy(game, "id").parent()
+    r.marker.kind == ModKind::Native && !r.game_folder && same_parent(&r.path, &xhl_core_copy(game, "id"))
 }
 
 /// The files of XHL-Core's copy, `(file in the copy, bytes)`: the Library entry's files, the renamed DLLs under their
@@ -4525,7 +4651,7 @@ fn place_xhl_core_copy(dirs: &DataDirs, game: &Path, src: &Path, dlls: &[(String
     refuse_symlink_path(game, dst)?;
     let files = xhl_core_copy_files(src, &want.hash, dlls)?;
     let listed: std::collections::BTreeMap<String, String> = files.iter().map(|(rel, b)| (rel.clone(), crate::hash::sha256_hex(b))).collect();
-    let earlier = receipts.iter().find(|r| r.path == dst && is_xhl_core_copy(game, r)).cloned();
+    let earlier = receipts.iter().find(|r| same_folder(&r.path, &dst) && is_xhl_core_copy(game, r)).cloned();
     let ours = |rel: &str, have: &str| earlier.as_ref().and_then(|r| r.files.get(rel)).is_some_and(|h| h == have);
     let mut write = Vec::new();
     for (rel, bytes) in &files {
@@ -4580,7 +4706,7 @@ fn remove_xhl_core_copy(game: &Path, receipts: &mut Vec<Placement>, r: &Placemen
     for path in &remove {
         std::fs::remove_file(path).map_err(io_at(path, "removing"))?;
     }
-    let next: Vec<Placement> = receipts.iter().filter(|x| x.path != r.path).cloned().collect();
+    let next: Vec<Placement> = receipts.iter().filter(|x| !same_folder(&x.path, &r.path)).cloned().collect();
     save_placements(game, &next)?;
     *receipts = next;
     let mut folders: Vec<&Path> = remove.iter().flat_map(|p| p.ancestors().skip(1)).filter(|d| d.starts_with(&r.path)).collect();
@@ -4627,7 +4753,7 @@ fn place_xhl_core_copies(dirs: &DataDirs, profile: &crate::profile::Profile, gam
         }
     }
     if !prune { return Ok(()); }
-    let stale: Vec<Placement> = receipts.iter().filter(|r| is_xhl_core_copy(game, r) && !wanted.contains(&r.path)).cloned().collect();
+    let stale: Vec<Placement> = receipts.iter().filter(|r| is_xhl_core_copy(game, r) && !wanted.iter().any(|path| same_folder(path, &r.path))).cloned().collect();
     for r in stale {
         let tag = format!("native:{}", r.marker.id);
         match remove_xhl_core_copy(game, receipts, &r) {
@@ -4947,7 +5073,7 @@ mod route_scope_tests {
 
 #[cfg(test)]
 #[path = "placement_staging_tests.rs"]
-mod staging_tests;
+mod placement_staging_tests;
 
 #[cfg(test)]
 mod tests {
@@ -5015,6 +5141,71 @@ mod tests {
         let _ = std::fs::remove_dir_all(&t);
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn windows_receipts_refuse_case_distinct_game_folders() {
+        use std::os::windows::{fs::OpenOptionsExt, io::AsRawHandle};
+        use windows_sys::Win32::Storage::FileSystem::{
+            FILE_CASE_SENSITIVE_INFO, FILE_FLAG_BACKUP_SEMANTICS,
+            FILE_WRITE_ATTRIBUTES, FileCaseSensitiveInfo, SetFileInformationByHandle,
+        };
+        let t = std::env::temp_dir().join(format!("km-receipt-case-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&t);
+        std::fs::create_dir_all(&t).unwrap();
+        let directory = std::fs::OpenOptions::new().access_mode(FILE_WRITE_ATTRIBUTES)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS).open(&t).unwrap();
+        let info = FILE_CASE_SENSITIVE_INFO { Flags: 1 }; // FILE_CS_FLAG_CASE_SENSITIVE_DIR
+        let set = unsafe { SetFileInformationByHandle(directory.as_raw_handle(), FileCaseSensitiveInfo,
+            (&info as *const FILE_CASE_SENSITIVE_INFO).cast(), std::mem::size_of_val(&info) as u32) };
+        if set == 0 {
+            let error = std::io::Error::last_os_error();
+            drop(directory);
+            std::fs::remove_dir_all(&t).unwrap();
+            eprintln!("case-sensitive directories unavailable: {error}");
+            return;
+        }
+        drop(directory);
+        let (game, other) = (t.join("Game"), t.join("game"));
+        std::fs::create_dir_all(game.join("greeneye/sample")).unwrap();
+        std::fs::create_dir_all(other.join("greeneye/sample")).unwrap();
+        assert_ne!(game.canonicalize().unwrap(), other.canonicalize().unwrap());
+        let receipt = Placement {
+            path: other.join("greeneye/sample"),
+            marker: Marker { format: 1, kind: ModKind::Greeneye, id: "sample".into(), version: "1.0.0".into(), hash: "hash".into() },
+            files: Default::default(), extension: None, game_folder: false,
+        };
+        let valid = check_placement_path(&game, &receipt, &Route::Legacy(crate::sfi_routing::Legacy::Off)).is_ok();
+        let found = marker_at(std::slice::from_ref(&receipt), &game.join("greeneye/sample")).is_some();
+        let below = crate::winpath::relative_folder(&game, &receipt.path).is_some();
+        std::fs::remove_dir_all(&t).unwrap();
+        assert!(!valid, "a receipt in a different case-sensitive game is not authorized");
+        assert!(!found, "a different folder's receipt does not confer ownership");
+        assert!(!below, "link refusal must not skip components of a different root");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_receipts_use_the_same_paths_for_validation_and_lookup() {
+        let t = std::env::temp_dir().join(format!("km-receipt-spelling-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&t);
+        std::fs::create_dir_all(t.join("Game/greeneye/sample")).unwrap();
+        let game = t.join("Game").canonicalize().unwrap();
+        let plain = PathBuf::from(crate::winpath::plain_path(game.to_str().unwrap()).into_owned());
+        let route = Route::Legacy(crate::sfi_routing::Legacy::Off);
+        let receipt = Placement {
+            path: plain.join("greeneye/sample"),
+            marker: Marker { format: 1, kind: ModKind::Greeneye, id: "sample".into(), version: "1.0.0".into(), hash: "hash".into() },
+            files: Default::default(), extension: None, game_folder: false,
+        };
+        check_placement_path(&game, &receipt, &route).unwrap();
+        for path in [game.join("greeneye/sample"), PathBuf::from(plain.join("GREENEYE/SAMPLE").to_str().unwrap().to_uppercase())] {
+            assert_eq!(marker_at(std::slice::from_ref(&receipt), &path), Some(&receipt.marker));
+        }
+        let other = Placement { path: plain.join("greeneye2/sample"), ..receipt };
+        assert!(check_placement_path(&game, &other, &route).is_err(), "a sibling folder is not a placement root");
+        std::fs::remove_dir_all(t).unwrap();
+    }
+
     #[test]
     fn receipts_keep_the_older_launchers_shroudforge_spelling_on_disk() {
         let root = r"\\?\C:\Game\mods";
@@ -5028,11 +5219,25 @@ mod tests {
 
     #[test]
     fn sf_reads_parent_uses_windows_comparison_only_on_windows() {
-        let plain = Path::new(r"C:\Games\Enshrouded\mods");
-        let sf = Path::new(r"\\?\c:\games\enshrouded\MODS");
-        assert!(sf_reads_parent(plain, sf, true));
-        assert_eq!(sf_reads_parent(plain, sf, false), cfg!(windows));
-        assert!(!sf_reads_parent(Path::new(r"C:\Games\Enshrouded\mods2"), sf, true));
+        #[cfg(windows)]
+        {
+            let t = std::env::temp_dir().join(format!("km-sf-parent-{}", std::process::id()));
+            std::fs::create_dir_all(t.join("mods")).unwrap();
+            let sf = t.join("mods").canonicalize().unwrap();
+            let plain = PathBuf::from(crate::winpath::plain_path(sf.to_str().unwrap()).to_uppercase());
+            assert!(sf_reads_parent(&plain, &sf, true));
+            assert!(sf_reads_parent(&plain, &sf, false));
+            assert!(!sf_reads_parent(&t.join("mods2"), &sf, true));
+            std::fs::remove_dir_all(t).unwrap();
+        }
+        #[cfg(not(windows))]
+        {
+            let plain = Path::new(r"C:\Games\Enshrouded\mods");
+            let sf = Path::new(r"\\?\c:\games\enshrouded\MODS");
+            assert!(sf_reads_parent(plain, sf, true));
+            assert!(!sf_reads_parent(plain, sf, false));
+            assert!(!sf_reads_parent(Path::new(r"C:\Games\Enshrouded\mods2"), sf, true));
+        }
     }
 
     /// Receipts a launcher on Windows wrote while it read ShroudForge's `paths.mods` with the verbatim prefix (before
@@ -5502,7 +5707,7 @@ mod tests {
         std::fs::write(src.join("init.lua"), b"new").unwrap();
         std::fs::write(src.join("notes.txt"), b"new version's notes").unwrap();
         let marker = Marker { format: 1, kind: ModKind::Set, id: "test".into(), version: "2.0.0".into(), hash: crate::hash::dirhash(&src).unwrap() };
-        let roots = Roots { data: game, game };
+        let roots = Roots { data: game, game, route: &crate::sfi_routing::route_of(game) };
         let dst = game.join("shrouded_engine_tweaks/mods/test");
         let kept = kept_dir(game, ModKind::Set, "test");
         let old_copy = || {
@@ -5569,7 +5774,7 @@ mod tests {
         std::fs::create_dir_all(&src).unwrap();
         std::fs::write(src.join("init.lua"), b"code").unwrap();
         let marker = Marker { format: 1, kind: ModKind::Set, id: "test".into(), version: "1.0.0".into(), hash: crate::hash::dirhash(&src).unwrap() };
-        let roots = Roots { data: game, game };
+        let roots = Roots { data: game, game, route: &crate::sfi_routing::route_of(game) };
         let dst = game.join("shrouded_engine_tweaks/mods/test");
         let kept = kept_dir(game, ModKind::Set, "test");
         std::fs::create_dir_all(&kept).unwrap();
@@ -5645,7 +5850,7 @@ mod tests {
         std::fs::write(src.join("init.lua"), b"new").unwrap();
         std::fs::write(dst.join("init.lua"), b"old").unwrap();
         let marker = Marker { format: 1, kind: ModKind::Set, id: "test".into(), version: "1.0.0".into(), hash: crate::hash::dirhash(&src).unwrap() };
-        let roots = Roots { data: tmp.path(), game: tmp.path() };
+        let roots = Roots { data: tmp.path(), game: tmp.path(), route: &crate::sfi_routing::route_of(tmp.path()) };
         assert!(copy_in(roots, &src, &dst, &marker, &[], true, None, |_| Err(Error::invalid("injected receipt failure"))).is_err());
         assert_eq!(std::fs::read(dst.join("init.lua")).unwrap(), b"old");
         assert!(remove_copy(tmp.path(), &dst, || Err(Error::invalid("injected receipt failure"))).is_err());

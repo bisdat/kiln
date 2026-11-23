@@ -48,9 +48,12 @@ test("Roll back to the kept version, then Undo, then roll back twice", async ({ 
 });
 
 test("Settings > Library lists the kept version with its size, and Remove takes it out of the Library", async ({ page }) => {
-  await open(page, "/settings");
+  await open(page, "/settings/mods");
   const card = page.getByRole("region", { name: "Library" });
   await expect(card).toContainText("Kept for a roll back");
+  // the list opens on Show
+  await expect(card.getByRole("list", { name: "Kept versions" })).toHaveCount(0);
+  await card.getByRole("button", { name: "Show" }).click();
   const kept = card.getByRole("list", { name: "Kept versions" }).getByRole("listitem");
   await expect(kept).toHaveCount(1);
   await expect(kept).toContainText("Zoom Out 0.1.0");
@@ -67,7 +70,7 @@ test("Settings > Library lists the kept version with its size, and Remove takes 
 });
 
 test("Settings keeps the count of earlier versions", async ({ page }) => {
-  await open(page, "/settings");
+  await open(page, "/settings/mods");
   const input = page.locator("#st-keep-versions");
   await expect(input).toHaveValue("1");
   await input.fill("3");

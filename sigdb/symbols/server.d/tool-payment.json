@@ -1,0 +1,41 @@
+{
+  "format": 1,
+  "side": "server",
+  "comment": "Tool terrain placement costs inside the game's own building operation. Identical patterns on server 26430253 and client 26430625. CostBuild S228e80/C491960 emits one 24-byte material entry; Scale S229500/C491fe0 computes stock affordability, clears and rebuilds the list with fraction*volume when short. That exact list is applied once and copied into the player's native history before voxel mutation. Independent PE/Capstone evidence, not third-party implementation. Since 0.2.0-dev.30.5.",
+  "symbols": {
+    "tools/TerrainCostBuild": {
+      "find": [
+        { "pattern": "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 50 48 8B FA 0F 29 74 24 40 41 0F B6 50 {tools/cost.cell:d8} 48 8B E9 0F 28 F3 49 8B D8" }
+      ]
+    },
+    "@tools/TerrainCostBuild.list": {
+      "find": [
+        { "scope": { "symbol": "tools/TerrainCostBuild", "size": 164 }, "pattern": "0F B6 53 {tools/cost.cell:d8} 48 8B 8F F8 00 00 00 E8 ?? ?? ?? ?? 85 C0 74 21 33 C9 89 44 24 30 48 89 4C 24 20 48 8D 54 24 20 48 89 4C 24 28 48 8B CD 89 74 24 34 E8 {tools/MaterialListAppend:rel32}" }
+      ]
+    },
+    "@tools/MaterialListAppend.layout": {
+      "find": [
+        { "scope": { "symbol": "tools/MaterialListAppend", "size": 176 }, "pattern": "0F 11 04 C8 F2 0F 10 4F 10 F2 0F 11 4C C8 10 48 FF 43 08" }
+      ]
+    },
+    "tools/TerrainCostScale": {
+      "find": [
+        { "pattern": "48 89 5C 24 08 48 89 74 24 10 48 89 7C 24 18 41 56 48 83 EC 40 F3 0F 10 9C 24 80 00 00 00 49 8B F8 4C 8B 44 24 78 49 8B D9 0F 29 74 24 30 4C 8B F2 48 8B F1 E8 {tools/TerrainCostBuild:rel32}" }
+      ]
+    },
+    "@tools/TerrainCostScale.rebuild": {
+      "find": [
+        { "scope": { "symbol": "tools/TerrainCostScale", "size": 176 }, "pattern": "4C 8B 44 24 78 0F 28 D8 F3 0F 59 9C 24 80 00 00 00 49 8B D6 48 8B CE 48 C7 46 08 00 00 00 00 E8 {tools/TerrainCostBuild:rel32} 0F 28 C6" }
+      ]
+    }
+  },
+  "constants": {
+    "tools/cost.cell": { "min_votes": 2 }
+  },
+  "features": {
+    "tools.paid_terrain": {
+      "symbols": ["tools/TerrainCostBuild", "@tools/TerrainCostBuild.list", "tools/MaterialListAppend", "@tools/MaterialListAppend.layout", "tools/TerrainCostScale", "@tools/TerrainCostScale.rebuild"],
+      "constants": ["tools/cost.cell"]
+    }
+  }
+}

@@ -60,6 +60,14 @@ public sealed class UiBlocksTestMod : Mod
             Check(false, $"defining the C# twin: {e.Message}");
         }
         if (!Client.IsDedicatedServer) return;
+        try
+        {
+            UiCommandLab.Start(async () => await Context.Scheduler.NextTick(), (ok, what) => Check(ok, what), Info);
+        }
+        catch (Exception e)
+        {
+            Check(false, $"ui-command: the lab part did not start: {e}");
+        }
         Events.On<ImpactNativeEvent>(e => { if (e is ImpactBuffEvent b) _buffs.Add(b); });
         _ = Run();
     }
@@ -91,6 +99,7 @@ public sealed class UiBlocksTestMod : Mod
             Twins();
             Inert();
             Mistakes();
+            SampleOnServer();
             await Hidden();
         }
         catch (Exception e)
@@ -100,6 +109,24 @@ public sealed class UiBlocksTestMod : Mod
         foreach (var e in _spawned)
             if (World.Exists(e)) Spawn.Destroy(e);
         Log.Info($"ui-blocks-test done: {_pass} PASS, {_fail} FAIL");
+    }
+
+    // The UiBlocks sample beside this mod (the lab deploys both): on a dedicated server, with no overlay, every one of its
+    // windows compiles, the camp window that binds the mod's own data (mod.quests, mod.places) and its stat included (dev.31
+    // 09 review M1). Without the sample this says so and passes nothing.
+    private void SampleOnServer()
+    {
+        const string sample = "ui-blocks";
+        if (Mods.Get(sample) is not { State: ModState.Loaded })
+        {
+            Info($"sample: {sample} is not loaded here: its dedicated-server check is skipped");
+            return;
+        }
+        var report = Blocks.Report();
+        if (!Check(report.TryGetValue(sample, out var r), $"sample: {sample} has blocks on the dedicated server")) return;
+        Check(r.Errors.Count == 0, $"sample: {sample}'s blocks compile on a dedicated server with no errors ({r.Errors.Count}: {string.Join(" | ", r.Errors)})");
+        foreach (var window in (string[])["settings", "camp"])
+            Check(r.Blocks.Contains(window), $"sample: {sample}'s window {window} is defined on the dedicated server");
     }
 
     private static JsonObject? Window(string name) => JsonNode.Parse(Blocks.Lowered(name, Me) ?? "{}")?["window"] as JsonObject;

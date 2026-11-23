@@ -300,6 +300,56 @@ Kiln.ContentValueType.Guid = 5 -> Kiln.ContentValueType
 Kiln.ContentValueType.Int = 2 -> Kiln.ContentValueType
 Kiln.ContentValueType.None = 0 -> Kiln.ContentValueType
 Kiln.ContentValueType.Time = 4 -> Kiln.ContentValueType
+Kiln.CraftingGroupRef
+Kiln.CraftingGroupRef.CraftingGroupRef() -> void
+Kiln.CraftingGroupRef.CraftingGroupRef(uint workshop, System.Guid group, System.Guid set = default(System.Guid)) -> void
+Kiln.CraftingGroupRef.Equals(Kiln.CraftingGroupRef other) -> bool
+Kiln.CraftingGroupRef.Group.get -> System.Guid
+Kiln.CraftingGroupRef.Set.get -> System.Guid
+Kiln.CraftingGroupRef.Workshop.get -> uint
+Kiln.CraftingGroups
+Kiln.CraftingGroups.Alchemist
+Kiln.CraftingGroups.AlchemyStation
+Kiln.CraftingGroups.AncientResearcher
+Kiln.CraftingGroups.Bard
+Kiln.CraftingGroups.Beehive
+Kiln.CraftingGroups.Blacksmith
+Kiln.CraftingGroups.BlastFurnace
+Kiln.CraftingGroups.ButterChurn
+Kiln.CraftingGroups.Carpenter
+Kiln.CraftingGroups.CharcoalKiln
+Kiln.CraftingGroups.CoffeeBrewer
+Kiln.CraftingGroups.Collector
+Kiln.CraftingGroups.ColoringStation
+Kiln.CraftingGroups.CookingStation
+Kiln.CraftingGroups.DecorationWorkbench
+Kiln.CraftingGroups.DryingRack
+Kiln.CraftingGroups.EctoplasmPress
+Kiln.CraftingGroups.Farmer
+Kiln.CraftingGroups.Fisher
+Kiln.CraftingGroups.Forge
+Kiln.CraftingGroups.GrindingStones
+Kiln.CraftingGroups.Hand
+Kiln.CraftingGroups.HandSpindle
+Kiln.CraftingGroups.Hunter
+Kiln.CraftingGroups.InfusionAltar
+Kiln.CraftingGroups.KilnStation
+Kiln.CraftingGroups.Kitchen
+Kiln.CraftingGroups.Laboratory
+Kiln.CraftingGroups.Loom
+Kiln.CraftingGroups.LunarNewYearTrader
+Kiln.CraftingGroups.Mill
+Kiln.CraftingGroups.Oven
+Kiln.CraftingGroups.Roaster
+Kiln.CraftingGroups.SeafoodGrill
+Kiln.CraftingGroups.Seedbed
+Kiln.CraftingGroups.Smelter
+Kiln.CraftingGroups.SparkworksWorkbench
+Kiln.CraftingGroups.SpinningMachine
+Kiln.CraftingGroups.SpinningWheel
+Kiln.CraftingGroups.TableSaw
+Kiln.CraftingGroups.TanningStation
+Kiln.CraftingGroups.Workbench
 Kiln.DropStack
 Kiln.DropStack.Chance.get -> float
 Kiln.DropStack.Chance.init -> void
@@ -646,6 +696,8 @@ Kiln.RecipeDefinition.Inputs.get -> System.Collections.Generic.IReadOnlyList<Kil
 Kiln.RecipeDefinition.Inputs.init -> void
 Kiln.RecipeDefinition.Menu.get -> string?
 Kiln.RecipeDefinition.Menu.init -> void
+Kiln.RecipeDefinition.MenuGroup.get -> Kiln.CraftingGroupRef?
+Kiln.RecipeDefinition.MenuGroup.init -> void
 Kiln.RecipeDefinition.Name.get -> string!
 Kiln.RecipeDefinition.Name.init -> void
 Kiln.RecipeDefinition.Outputs.get -> System.Collections.Generic.IReadOnlyList<Kiln.RecipeIngredient>!
@@ -657,6 +709,8 @@ Kiln.RecipeDefinition.Station.get -> string?
 Kiln.RecipeDefinition.Station.init -> void
 Kiln.RecipeDefinition.StationItem.get -> string?
 Kiln.RecipeDefinition.StationItem.init -> void
+Kiln.RecipeDefinition.TrackCrafted.get -> bool
+Kiln.RecipeDefinition.TrackCrafted.init -> void
 Kiln.RecipeDefinition.Unlock.get -> Kiln.RecipeUnlock
 Kiln.RecipeDefinition.Unlock.init -> void
 Kiln.RecipeDefinition.Water.get -> int?
@@ -746,6 +800,130 @@ const Kiln.Content.GearCapability = "content.gear" -> string!
 const Kiln.Content.TextCapability = "content.text" -> string!
 const Kiln.ContentSync.ChannelName = "kiln:content" -> string!
 const Kiln.ContentSync.ChannelVersion = "1" -> string!
+const Kiln.CraftingGroups.Alchemist.Ammo = "0xc86873f9/a9502a9d-8b4a-47b1-89f8-84d6443c9fb2" -> string!
+const Kiln.CraftingGroups.Alchemist.Armor = "0xc86873f9/b50bb867-6d23-4d69-8c51-9e61212e2aec" -> string!
+const Kiln.CraftingGroups.Alchemist.MagicalWeapons = "0xc86873f9/8e76b57f-2fdb-4eff-b31b-85522f4c0d74" -> string!
+const Kiln.CraftingGroups.Alchemist.OtherFurniture = "0xc86873f9/a8419106-81c9-46e8-86ea-ef45c884ba21" -> string!
+const Kiln.CraftingGroups.Alchemist.ProductionPlace = "0xc86873f9/aa007b5a-f979-46fc-b4bc-4946f5cd684f" -> string!
+const Kiln.CraftingGroups.Alchemist.Resources = "0xc86873f9/cf73af1a-9618-422f-ba2f-32a332a23787" -> string!
+const Kiln.CraftingGroups.Alchemist.Supplies = "0xc86873f9/dc3627f7-773c-416c-a8c4-6e27a75eb1e1" -> string!
+const Kiln.CraftingGroups.Alchemist.ToolsAndComponents = "0xc86873f9/35b13ff3-9156-4ec5-99bc-bee7d4508116" -> string!
+const Kiln.CraftingGroups.Alchemist.Weapons = "0xc86873f9/2632c31c-37fe-48f6-b788-dfa649065edb" -> string!
+const Kiln.CraftingGroups.AlchemyStation.Resources = "0xd08b9300/cf73af1a-9618-422f-ba2f-32a332a23787" -> string!
+const Kiln.CraftingGroups.AncientResearcher.Armor = "0xfb819774/b50bb867-6d23-4d69-8c51-9e61212e2aec" -> string!
+const Kiln.CraftingGroups.AncientResearcher.Decorative = "0xfb819774/b9c387f3-04fc-4d02-b9f7-5b01b29282fc" -> string!
+const Kiln.CraftingGroups.AncientResearcher.ProductionPlace = "0xfb819774/aa007b5a-f979-46fc-b4bc-4946f5cd684f" -> string!
+const Kiln.CraftingGroups.AncientResearcher.Resources = "0xfb819774/cf73af1a-9618-422f-ba2f-32a332a23787" -> string!
+const Kiln.CraftingGroups.AncientResearcher.Weapons = "0xfb819774/2632c31c-37fe-48f6-b788-dfa649065edb" -> string!
+const Kiln.CraftingGroups.Bard.ComfortFurniture = "0xe672b030/84de1663-d5f4-4a39-95d2-7fc5a5d3a12b" -> string!
+const Kiln.CraftingGroups.Bard.Cosmetic = "0xe672b030/ed4a5a30-3917-45a1-9a70-bae4d6d6db2f" -> string!
+const Kiln.CraftingGroups.Bard.Decorative = "0xe672b030/b9c387f3-04fc-4d02-b9f7-5b01b29282fc" -> string!
+const Kiln.CraftingGroups.Bard.Essentials = "0xe672b030/8c91ca52-be38-468c-ae74-bc6a5ffab28e" -> string!
+const Kiln.CraftingGroups.Bard.Instruments = "0xe672b030/783600e0-270f-43a6-b7c3-90ded5aaf21c" -> string!
+const Kiln.CraftingGroups.Bard.OtherFurniture = "0xe672b030/a8419106-81c9-46e8-86ea-ef45c884ba21" -> string!
+const Kiln.CraftingGroups.Beehive.Resources = "0x269a27a7/cf73af1a-9618-422f-ba2f-32a332a23787" -> string!
+const Kiln.CraftingGroups.Beehive.Supplies = "0x269a27a7/dc3627f7-773c-416c-a8c4-6e27a75eb1e1" -> string!
+const Kiln.CraftingGroups.Blacksmith.Armor = "0x41bf48ce/b50bb867-6d23-4d69-8c51-9e61212e2aec" -> string!
+const Kiln.CraftingGroups.Blacksmith.Essentials = "0x41bf48ce/8c91ca52-be38-468c-ae74-bc6a5ffab28e" -> string!
+const Kiln.CraftingGroups.Blacksmith.ProductionPlace = "0x41bf48ce/aa007b5a-f979-46fc-b4bc-4946f5cd684f" -> string!
+const Kiln.CraftingGroups.Blacksmith.Resources = "0x41bf48ce/cf73af1a-9618-422f-ba2f-32a332a23787" -> string!
+const Kiln.CraftingGroups.Blacksmith.Survival = "0x41bf48ce/65e6c94a-31c7-4c1f-ba8d-feb85bb87d42" -> string!
+const Kiln.CraftingGroups.Blacksmith.ToolsAndComponents = "0x41bf48ce/35b13ff3-9156-4ec5-99bc-bee7d4508116" -> string!
+const Kiln.CraftingGroups.Blacksmith.Weapons = "0x41bf48ce/2632c31c-37fe-48f6-b788-dfa649065edb" -> string!
+const Kiln.CraftingGroups.BlastFurnace.Resources = "0x485ec29c/cf73af1a-9618-422f-ba2f-32a332a23787" -> string!
+const Kiln.CraftingGroups.ButterChurn.Resources = "0x6ad05fce/cf73af1a-9618-422f-ba2f-32a332a23787" -> string!
+const Kiln.CraftingGroups.ButterChurn.Supplies = "0x6ad05fce/dc3627f7-773c-416c-a8c4-6e27a75eb1e1" -> string!
+const Kiln.CraftingGroups.Carpenter.ComfortFurniture = "0xbddd74e6/84de1663-d5f4-4a39-95d2-7fc5a5d3a12b" -> string!
+const Kiln.CraftingGroups.Carpenter.Essentials = "0xbddd74e6/8c91ca52-be38-468c-ae74-bc6a5ffab28e" -> string!
+const Kiln.CraftingGroups.Carpenter.OtherFurniture = "0xbddd74e6/a8419106-81c9-46e8-86ea-ef45c884ba21" -> string!
+const Kiln.CraftingGroups.Carpenter.ProductionPlace = "0xbddd74e6/aa007b5a-f979-46fc-b4bc-4946f5cd684f" -> string!
+const Kiln.CraftingGroups.Carpenter.Resources = "0xbddd74e6/cf73af1a-9618-422f-ba2f-32a332a23787" -> string!
+const Kiln.CraftingGroups.Carpenter.ToolsAndComponents = "0xbddd74e6/35b13ff3-9156-4ec5-99bc-bee7d4508116" -> string!
+const Kiln.CraftingGroups.CharcoalKiln.Resources = "0x2546ae49/cf73af1a-9618-422f-ba2f-32a332a23787" -> string!
+const Kiln.CraftingGroups.CoffeeBrewer.Supplies = "0x6b8247d6/dc3627f7-773c-416c-a8c4-6e27a75eb1e1" -> string!
+const Kiln.CraftingGroups.Collector.Ammo = "0xad433e64/a9502a9d-8b4a-47b1-89f8-84d6443c9fb2" -> string!
+const Kiln.CraftingGroups.Collector.ComfortFurniture = "0xad433e64/84de1663-d5f4-4a39-95d2-7fc5a5d3a12b" -> string!
+const Kiln.CraftingGroups.Collector.Decorative = "0xad433e64/b9c387f3-04fc-4d02-b9f7-5b01b29282fc" -> string!
+const Kiln.CraftingGroups.Collector.Essentials = "0xad433e64/8c91ca52-be38-468c-ae74-bc6a5ffab28e" -> string!
+const Kiln.CraftingGroups.Collector.OtherFurniture = "0xad433e64/a8419106-81c9-46e8-86ea-ef45c884ba21" -> string!
+const Kiln.CraftingGroups.Collector.ProductionPlace = "0xad433e64/aa007b5a-f979-46fc-b4bc-4946f5cd684f" -> string!
+const Kiln.CraftingGroups.Collector.Resources = "0xad433e64/cf73af1a-9618-422f-ba2f-32a332a23787" -> string!
+const Kiln.CraftingGroups.Collector.Supplies = "0xad433e64/dc3627f7-773c-416c-a8c4-6e27a75eb1e1" -> string!
+const Kiln.CraftingGroups.ColoringStation.Resources = "0x3b51fb95/cf73af1a-9618-422f-ba2f-32a332a23787" -> string!
+const Kiln.CraftingGroups.CookingStation.Supplies = "0x39fbd98f/dc3627f7-773c-416c-a8c4-6e27a75eb1e1" -> string!
+const Kiln.CraftingGroups.DecorationWorkbench.Decorative = "0x8996a8c4/b9c387f3-04fc-4d02-b9f7-5b01b29282fc" -> string!
+const Kiln.CraftingGroups.DryingRack.Resources = "0x6b95dc33/cf73af1a-9618-422f-ba2f-32a332a23787" -> string!
+const Kiln.CraftingGroups.DryingRack.Supplies = "0x6b95dc33/dc3627f7-773c-416c-a8c4-6e27a75eb1e1" -> string!
+const Kiln.CraftingGroups.EctoplasmPress.Resources = "0x1abf2d27/cf73af1a-9618-422f-ba2f-32a332a23787" -> string!
+const Kiln.CraftingGroups.Farmer.AnimalHusbandry = "0xd9a35a6f/95a1cb62-ff2b-4b44-865f-0b6932c9fbe5" -> string!
+const Kiln.CraftingGroups.Farmer.Decorative = "0xd9a35a6f/b9c387f3-04fc-4d02-b9f7-5b01b29282fc" -> string!
+const Kiln.CraftingGroups.Farmer.Essentials = "0xd9a35a6f/8c91ca52-be38-468c-ae74-bc6a5ffab28e" -> string!
+const Kiln.CraftingGroups.Farmer.OtherFurniture = "0xd9a35a6f/a8419106-81c9-46e8-86ea-ef45c884ba21" -> string!
+const Kiln.CraftingGroups.Farmer.ProductionPlace = "0xd9a35a6f/aa007b5a-f979-46fc-b4bc-4946f5cd684f" -> string!
+const Kiln.CraftingGroups.Farmer.Resources = "0xd9a35a6f/cf73af1a-9618-422f-ba2f-32a332a23787" -> string!
+const Kiln.CraftingGroups.Farmer.Soil = "0xd9a35a6f/74c737bf-3f4f-4e29-b7fe-7037a1685949" -> string!
+const Kiln.CraftingGroups.Farmer.ToolsAndComponents = "0xd9a35a6f/35b13ff3-9156-4ec5-99bc-bee7d4508116" -> string!
+const Kiln.CraftingGroups.Fisher.Essentials = "0xc4acc104/8c91ca52-be38-468c-ae74-bc6a5ffab28e" -> string!
+const Kiln.CraftingGroups.Fisher.OtherFurniture = "0xc4acc104/a8419106-81c9-46e8-86ea-ef45c884ba21" -> string!
+const Kiln.CraftingGroups.Fisher.Resources = "0xc4acc104/cf73af1a-9618-422f-ba2f-32a332a23787" -> string!
+const Kiln.CraftingGroups.Fisher.Supplies = "0xc4acc104/dc3627f7-773c-416c-a8c4-6e27a75eb1e1" -> string!
+const Kiln.CraftingGroups.Forge.Resources = "0x8dca2c49/cf73af1a-9618-422f-ba2f-32a332a23787" -> string!
+const Kiln.CraftingGroups.GrindingStones.Resources = "0x056d94f8/cf73af1a-9618-422f-ba2f-32a332a23787" -> string!
+const Kiln.CraftingGroups.GrindingStones.TerrainMaterial = "0x056d94f8/6c66ad67-1cc5-45f2-badc-f94971b1f120" -> string!
+const Kiln.CraftingGroups.Hand.Armor = "0x00000000/b50bb867-6d23-4d69-8c51-9e61212e2aec" -> string!
+const Kiln.CraftingGroups.Hand.Essentials = "0x00000000/8c91ca52-be38-468c-ae74-bc6a5ffab28e" -> string!
+const Kiln.CraftingGroups.Hand.Supplies = "0x00000000/dc3627f7-773c-416c-a8c4-6e27a75eb1e1" -> string!
+const Kiln.CraftingGroups.Hand.Survival = "0x00000000/65e6c94a-31c7-4c1f-ba8d-feb85bb87d42" -> string!
+const Kiln.CraftingGroups.Hand.WaterUtilities = "0x00000000/1924563b-8056-4b8e-9317-9d848d084b3b" -> string!
+const Kiln.CraftingGroups.Hand.Weapons = "0x00000000/2632c31c-37fe-48f6-b788-dfa649065edb" -> string!
+const Kiln.CraftingGroups.HandSpindle.Resources = "0x73306967/cf73af1a-9618-422f-ba2f-32a332a23787" -> string!
+const Kiln.CraftingGroups.Hunter.Ammo = "0x841ad755/a9502a9d-8b4a-47b1-89f8-84d6443c9fb2" -> string!
+const Kiln.CraftingGroups.Hunter.Armor = "0x841ad755/b50bb867-6d23-4d69-8c51-9e61212e2aec" -> string!
+const Kiln.CraftingGroups.Hunter.ComfortFurniture = "0x841ad755/84de1663-d5f4-4a39-95d2-7fc5a5d3a12b" -> string!
+const Kiln.CraftingGroups.Hunter.Decorative = "0x841ad755/b9c387f3-04fc-4d02-b9f7-5b01b29282fc" -> string!
+const Kiln.CraftingGroups.Hunter.Essentials = "0x841ad755/8c91ca52-be38-468c-ae74-bc6a5ffab28e" -> string!
+const Kiln.CraftingGroups.Hunter.ProductionPlace = "0x841ad755/aa007b5a-f979-46fc-b4bc-4946f5cd684f" -> string!
+const Kiln.CraftingGroups.Hunter.Resources = "0x841ad755/cf73af1a-9618-422f-ba2f-32a332a23787" -> string!
+const Kiln.CraftingGroups.Hunter.Supplies = "0x841ad755/dc3627f7-773c-416c-a8c4-6e27a75eb1e1" -> string!
+const Kiln.CraftingGroups.Hunter.Survival = "0x841ad755/65e6c94a-31c7-4c1f-ba8d-feb85bb87d42" -> string!
+const Kiln.CraftingGroups.Hunter.Weapons = "0x841ad755/2632c31c-37fe-48f6-b788-dfa649065edb" -> string!
+const Kiln.CraftingGroups.InfusionAltar.Resources = "0x865085ea/cf73af1a-9618-422f-ba2f-32a332a23787" -> string!
+const Kiln.CraftingGroups.KilnStation.Decorative = "0x847eab53/b9c387f3-04fc-4d02-b9f7-5b01b29282fc" -> string!
+const Kiln.CraftingGroups.KilnStation.Resources = "0x847eab53/cf73af1a-9618-422f-ba2f-32a332a23787" -> string!
+const Kiln.CraftingGroups.Kitchen.Supplies = "0x07ce61f0/dc3627f7-773c-416c-a8c4-6e27a75eb1e1" -> string!
+const Kiln.CraftingGroups.Laboratory.Resources = "0x20b86c20/cf73af1a-9618-422f-ba2f-32a332a23787" -> string!
+const Kiln.CraftingGroups.Loom.Resources = "0x3a3cc728/cf73af1a-9618-422f-ba2f-32a332a23787" -> string!
+const Kiln.CraftingGroups.LunarNewYearTrader.ComfortFurniture = "0x8554479a/84de1663-d5f4-4a39-95d2-7fc5a5d3a12b" -> string!
+const Kiln.CraftingGroups.LunarNewYearTrader.Cosmetic = "0x8554479a/ed4a5a30-3917-45a1-9a70-bae4d6d6db2f" -> string!
+const Kiln.CraftingGroups.LunarNewYearTrader.Decorative = "0x8554479a/b9c387f3-04fc-4d02-b9f7-5b01b29282fc" -> string!
+const Kiln.CraftingGroups.LunarNewYearTrader.Fun = "0x8554479a/98541544-4d4f-432f-9102-f2481c912e2e" -> string!
+const Kiln.CraftingGroups.LunarNewYearTrader.MagicalWeapons = "0x8554479a/8e76b57f-2fdb-4eff-b31b-85522f4c0d74" -> string!
+const Kiln.CraftingGroups.LunarNewYearTrader.OtherFurniture = "0x8554479a/a8419106-81c9-46e8-86ea-ef45c884ba21" -> string!
+const Kiln.CraftingGroups.LunarNewYearTrader.Weapons = "0x8554479a/2632c31c-37fe-48f6-b788-dfa649065edb" -> string!
+const Kiln.CraftingGroups.Mill.Resources = "0x7251e0d8/cf73af1a-9618-422f-ba2f-32a332a23787" -> string!
+const Kiln.CraftingGroups.Oven.Resources = "0x1ee9f0bf/cf73af1a-9618-422f-ba2f-32a332a23787" -> string!
+const Kiln.CraftingGroups.Oven.Supplies = "0x1ee9f0bf/dc3627f7-773c-416c-a8c4-6e27a75eb1e1" -> string!
+const Kiln.CraftingGroups.Roaster.Resources = "0xa6ebcde3/cf73af1a-9618-422f-ba2f-32a332a23787" -> string!
+const Kiln.CraftingGroups.SeafoodGrill.Supplies = "0x7d96fde8/dc3627f7-773c-416c-a8c4-6e27a75eb1e1" -> string!
+const Kiln.CraftingGroups.Seedbed.Seedlings = "0xba67134f/c23c3be9-5824-4b9a-ba64-daeaa16771da" -> string!
+const Kiln.CraftingGroups.Smelter.Resources = "0xf5aab50a/cf73af1a-9618-422f-ba2f-32a332a23787" -> string!
+const Kiln.CraftingGroups.SparkworksWorkbench.Essentials = "0xe989624a/8c91ca52-be38-468c-ae74-bc6a5ffab28e" -> string!
+const Kiln.CraftingGroups.SparkworksWorkbench.SparkworksTools = "0xe989624a/4f2c4640-be1b-46cb-ba34-d8b926385a89" -> string!
+const Kiln.CraftingGroups.SpinningMachine.Resources = "0xd4796c9a/cf73af1a-9618-422f-ba2f-32a332a23787" -> string!
+const Kiln.CraftingGroups.SpinningMachine.Supplies = "0xd4796c9a/dc3627f7-773c-416c-a8c4-6e27a75eb1e1" -> string!
+const Kiln.CraftingGroups.SpinningWheel.Resources = "0xe26134b5/cf73af1a-9618-422f-ba2f-32a332a23787" -> string!
+const Kiln.CraftingGroups.SpinningWheel.Supplies = "0xe26134b5/dc3627f7-773c-416c-a8c4-6e27a75eb1e1" -> string!
+const Kiln.CraftingGroups.TableSaw.Resources = "0x1abf8143/cf73af1a-9618-422f-ba2f-32a332a23787" -> string!
+const Kiln.CraftingGroups.TanningStation.Resources = "0xa4b9eaa5/cf73af1a-9618-422f-ba2f-32a332a23787" -> string!
+const Kiln.CraftingGroups.Workbench.Blocks = "0x4da88f73/d66069c5-80f8-4e6d-9d73-30b3b145cd79" -> string!
+const Kiln.CraftingGroups.Workbench.ComfortFurniture = "0x4da88f73/84de1663-d5f4-4a39-95d2-7fc5a5d3a12b" -> string!
+const Kiln.CraftingGroups.Workbench.Decorative = "0x4da88f73/b9c387f3-04fc-4d02-b9f7-5b01b29282fc" -> string!
+const Kiln.CraftingGroups.Workbench.Essentials = "0x4da88f73/8c91ca52-be38-468c-ae74-bc6a5ffab28e" -> string!
+const Kiln.CraftingGroups.Workbench.Fun = "0x4da88f73/98541544-4d4f-432f-9102-f2481c912e2e" -> string!
+const Kiln.CraftingGroups.Workbench.OtherFurniture = "0x4da88f73/a8419106-81c9-46e8-86ea-ef45c884ba21" -> string!
+const Kiln.CraftingGroups.Workbench.RoadBlocks = "0x4da88f73/fa99ee99-ad44-4ebd-83ef-316ea970f273" -> string!
+const Kiln.CraftingGroups.Workbench.RoofBlocks = "0x4da88f73/61c837d4-b10e-4361-9c66-156e1fae187d" -> string!
+const Kiln.CraftingGroups.Workbench.TerrainMaterial = "0x4da88f73/6c66ad67-1cc5-45f2-badc-f94971b1f120" -> string!
 override Kiln.ContentChangedEvent.ToString() -> string!
 override Kiln.ContentConflict.Equals(object? obj) -> bool
 override Kiln.ContentConflict.GetHashCode() -> int
@@ -775,6 +953,8 @@ override Kiln.ContentStatus.ToString() -> string!
 override Kiln.ContentSyncStatus.GetHashCode() -> int
 override Kiln.ContentValue.GetHashCode() -> int
 override Kiln.ContentValue.ToString() -> string!
+override Kiln.CraftingGroupRef.GetHashCode() -> int
+override Kiln.CraftingGroupRef.ToString() -> string!
 override Kiln.DropStack.GetHashCode() -> int
 override Kiln.Field<T>.GetHashCode() -> int
 override Kiln.Field<T>.ToString() -> string!
@@ -884,6 +1064,11 @@ static Kiln.ContentSyncStatus.operator !=(Kiln.ContentSyncStatus left, Kiln.Cont
 static Kiln.ContentSyncStatus.operator ==(Kiln.ContentSyncStatus left, Kiln.ContentSyncStatus right) -> bool
 static Kiln.ContentValue.operator !=(Kiln.ContentValue left, Kiln.ContentValue right) -> bool
 static Kiln.ContentValue.operator ==(Kiln.ContentValue left, Kiln.ContentValue right) -> bool
+static Kiln.CraftingGroupRef.Parse(string! text) -> Kiln.CraftingGroupRef
+static Kiln.CraftingGroupRef.TryParse(string? text, out Kiln.CraftingGroupRef result) -> bool
+static Kiln.CraftingGroupRef.implicit operator Kiln.CraftingGroupRef(string! text) -> Kiln.CraftingGroupRef
+static Kiln.CraftingGroupRef.operator !=(Kiln.CraftingGroupRef left, Kiln.CraftingGroupRef right) -> bool
+static Kiln.CraftingGroupRef.operator ==(Kiln.CraftingGroupRef left, Kiln.CraftingGroupRef right) -> bool
 static Kiln.DropStack.operator !=(Kiln.DropStack left, Kiln.DropStack right) -> bool
 static Kiln.DropStack.operator ==(Kiln.DropStack left, Kiln.DropStack right) -> bool
 static Kiln.Field<T>.operator !=(Kiln.Field<T> left, Kiln.Field<T> right) -> bool
@@ -958,6 +1143,7 @@ static Kiln.TooltipValue.operator ==(Kiln.TooltipValue? left, Kiln.TooltipValue?
 ~override Kiln.ContentSyncStatus.Equals(object obj) -> bool
 ~override Kiln.ContentSyncStatus.ToString() -> string
 ~override Kiln.ContentValue.Equals(object obj) -> bool
+~override Kiln.CraftingGroupRef.Equals(object obj) -> bool
 ~override Kiln.DropStack.Equals(object obj) -> bool
 ~override Kiln.DropStack.ToString() -> string
 ~override Kiln.Field<T>.Equals(object obj) -> bool

@@ -42,7 +42,7 @@ pub struct KilnUiSlotClick {
     pub frame: u64,
     pub press_ms: u64,
     pub screen: KilnUiScreen,
-    pub slot: KilnUiVisibleSlot,
+    pub slot: KilnUiVisibleSlotV2,
 }
 
 #[repr(C)]
@@ -70,7 +70,7 @@ pub struct KilnUiSlotHit {
     pub pointer_screen: u32,
     pub session: u64,
     pub frame: u64,
-    pub slot: KilnUiVisibleSlot,
+    pub slot: KilnUiVisibleSlotV2,
 }
 
 #[repr(C)]

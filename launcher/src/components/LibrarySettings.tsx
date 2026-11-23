@@ -4,7 +4,7 @@
 // and everything else the launcher keeps, moved as one): ./DataFolderSettings.tsx. Below the numbers: the earlier versions
 // an update kept for a roll back (shell/rollback.ts), each with its size and a Remove; Clean up leaves those.
 import { useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import * as api from "../api/commands";
 import type { LibraryRef } from "../api/commands";
 import { useLibrary } from "../api/hooks";
@@ -13,12 +13,15 @@ import { keptSize, keptVersions, liveVersions, type KeptRow } from "../shell/rol
 import { Button, Card, ConfirmDanger, EmptyState, KeyValue, Modal, Skeleton, errorText, fmtAgo, fmtBytes, toast } from "../ui";
 import { DataFolderValue } from "./DataFolderSettings";
 
-export function LibraryCard() {
+/** `children`: rows of Settings' Library group under the numbers (Earlier versions to keep). */
+export function LibraryCard({ children }: { children?: ReactNode }) {
   const t = useT();
   const qc = useQueryClient();
   const lib = useLibrary(null);
   const [gc, setGc] = useState<LibraryRef[] | null>(null);
   const [drop, setDrop] = useState<KeptRow | null>(null);
+  // the kept versions' list opens on Show (Settings redesign: the numbers first)
+  const [showKept, setShowKept] = useState(false);
   const all = lib.data ?? [];
   // a kept version is no second copy of a mod: counted on its own line
   const versions = all.reduce((n, e) => n + liveVersions(e), 0);
@@ -41,10 +44,13 @@ export function LibraryCard() {
           ? several ? t("librarySettings.modsSeveral", { count: all.length, versions, several }) : t("librarySettings.modsVersions", { count: all.length, versions })
           : `${all.length}`],
         lib.data && [t("librarySettings.onDisk"), fmtBytes(bytes)],
-        kept.length > 0 && [t("librarySettings.kept"), t("librarySettings.keptCount", { count: kept.length, size: fmtBytes(keptBytes) })],
+        kept.length > 0 && [t("librarySettings.kept"), <span className="k-row" style={{ gap: 10 }}>
+          {t("librarySettings.keptCount", { count: kept.length, size: fmtBytes(keptBytes) })}
+          <button type="button" className="k-link" aria-expanded={showKept} onClick={() => setShowKept(!showKept)}>{showKept ? t("settings.hide") : t("settings.show")}</button>
+        </span>],
         [t("librarySettings.dataFolder"), <DataFolderValue />],
       ]} />
-      {kept.length > 0 && (
+      {kept.length > 0 && showKept && (
         <ul className="k-kept-list" aria-label={t("librarySettings.keptVersions")}>
           {kept.map((k) => (
             <li key={`${k.kind}/${k.id}/${k.version.hash}`} className="k-kept-row">
@@ -59,6 +65,7 @@ export function LibraryCard() {
           ))}
         </ul>
       )}
+      {children}
       <span className="k-hint">{t("librarySettings.hint")}</span>
       <ConfirmDanger open={!!drop} onClose={() => setDrop(null)} relaxable word={drop?.id ?? ""} action={t("common.remove")}
         title={drop ? t("librarySettings.removeVersionAsk", { name: drop.name, version: drop.version.version }) : ""}

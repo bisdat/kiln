@@ -150,6 +150,18 @@ internal static unsafe class UiNative
         public delegate* unmanaged[Cdecl]<byte> WheelActive;
     }
 
+    /// <summary>kiln.ui.blocks v1 (kiln_ui_blocks.h, 0.2.0-dev.31): controlled tabs and trees, the last item's edit state, a
+    /// text field with Kiln's own flags. A table of its own (kiln.ui does not grow while dev.30 is open).</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct BlocksTable
+    {
+        public ServiceHeader Header;
+        public delegate* unmanaged[Cdecl]<NativeStr, uint, byte> BeginTabItemEx;
+        public delegate* unmanaged[Cdecl]<byte, uint, void> SetNextItemOpen;
+        public delegate* unmanaged[Cdecl]<uint> ItemState;
+        public delegate* unmanaged[Cdecl]<NativeStr, byte*, nuint, uint, float, float, byte> InputTextEx;
+    }
+
     /// <summary>KilnUiCursor (kiln_ui.h v3).</summary>
     [StructLayout(LayoutKind.Sequential)]
     public struct Cursor
@@ -833,6 +845,7 @@ internal static unsafe class UiNative
 
     /// <summary>KILN_UI_KEYS_MOUSE (kiln_ui.h v7).</summary>
     public const uint KeysMouse = 1;
+    public const uint KeysPad = 2;  // 0.2.0-dev.30.5: KILN_UI_KEYS_PAD
 
     /// <summary>kiln.ui's subscribe_key_ex, or null on a table without it (a kiln-ui.dll older than 0.2.0-dev.27).</summary>
     public static delegate* unmanaged[Cdecl]<ulong, delegate* unmanaged[Cdecl]<Key*, void*, byte>, void*, uint, ulong*, int> SubscribeKeyExSlot
@@ -847,6 +860,8 @@ internal static unsafe class UiNative
 
     /// <summary>The key subscription gets mouse presses (kiln.ui v7): key bindings on the mouse can fire.</summary>
     public static bool MouseKeysAvailable { get; private set; }
+    /// <summary>kiln.ui hands Kiln.Ui a game controller's buttons (KILN_UI_KEYS_PAD, 0.2.0-dev.30.5).</summary>
+    public static bool PadKeysAvailable { get; internal set; }
 
     /// <summary>KilnCraftMenuApi (kiln_ui.h): kiln.content's crafting-menu extension point.</summary>
     [StructLayout(LayoutKind.Sequential)]
@@ -908,6 +923,31 @@ internal static unsafe class UiNative
 
     private static Table6* _table6;
 
+    /// <summary>kiln.ui.blocks v1, or null on a Kiln without it (tabs and trees of UI blocks are then off).</summary>
+    public static BlocksTable* Blocks
+    {
+        get
+        {
+            if (_blocks == null && !_blocksTried)
+            {
+                _blocksTried = true;
+                var t = Services.Get<BlocksTable>("kiln.ui.blocks", 1);
+                if (t != null && t->Header.Size >= (uint)sizeof(BlocksTable)) _blocks = t;
+            }
+            return _blocks;
+        }
+    }
+
+    private static BlocksTable* _blocks;
+    private static bool _blocksTried;
+
+    /// <summary>Tests: a fake kiln.ui.blocks (null: look the service up again).</summary>
+    internal static void SetBlocksForTests(BlocksTable* table)
+    {
+        _blocks = table;
+        _blocksTried = table != null;
+    }
+
     /// <summary>Forgets the cached tables (tests swap the backend).</summary>
     internal static void ResetForTests()
     {
@@ -916,12 +956,16 @@ internal static unsafe class UiNative
         _table3 = null;
         _table4 = null;
         _table6 = null;
+        _blocks = null;
+        _blocksTried = false;
         LooksOverride = null;
         ImageExOverride = null;
 
         SetTextsOverride = null;
         GraphicsOverride = null;
         MouseKeysAvailable = false;
+        PadKeysAvailable = false;
+        UiKeyDispatch.ResetForTests();
     }
 
     public static bool Available => T != null;
@@ -938,8 +982,11 @@ internal static unsafe class UiNative
             if (T->SubscribeFrame(0, &OnFrame, null, &f) != Ok) return false;
             // keys and, from kiln.ui v7, the mouse buttons and the wheel (subscribe_key gets keyboard keys only)
             var ex = SubscribeKeyExSlot;
-            if (ex != null ? ex(0, &OnKey, null, KeysMouse, &k) != Ok : T->SubscribeKey(0, &OnKey, null, &k) != Ok) return false;
+            // and, from 0.2.0-dev.30.5, a game controller's buttons (an older kiln-ui.dll refuses KeysPad: mouse and keys then)
+            var pad = ex != null && ex(0, &OnKey, null, KeysMouse | KeysPad, &k) == Ok;
+            if (!pad && (ex != null ? ex(0, &OnKey, null, KeysMouse, &k) != Ok : T->SubscribeKey(0, &OnKey, null, &k) != Ok)) return false;
             MouseKeysAvailable = ex != null;
+            PadKeysAvailable = pad;
             if (ex == null)
                 UiEngine.Log(LogLevel.Warn, "this kiln-ui.dll is older than Kiln.Ui (no subscribe_key_ex): key bindings on the mouse " +
                                             "(Mouse4, Ctrl+WheelUp, ...) register but do not fire, and the Keys page takes keys only");

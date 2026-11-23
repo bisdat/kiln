@@ -14,7 +14,9 @@ mod support;
 use kiln_abi::*;
 use kiln_sfi::lifecycle::*;
 use kiln_sfi::runtime::Families;
+use kiln_sfi::runtime::install::RuntimeHook;
 use kiln_sfi::runtime::overrides::{OverrideTrackers, session_world_kind};
+use kiln_sfi::runtime::world::context::{self, WorldContext};
 use kiln_sfi::worker::*;
 use mlua::{Lua, Table};
 use serde_json::json;
@@ -344,8 +346,36 @@ thread_local! {
 
 /// Like the production plan source: the trackers are the plan's cleanup and the family.
 struct TrackerPlan;
+
+struct HostedWorlds;
+impl RuntimeHook for HostedWorlds {
+    fn created(
+        &self,
+        cx: &WorkerContext<'_>,
+        runtime: &kiln_sfi::runtime::RuntimeContext,
+        side: Side,
+    ) {
+        let owner = cx.owner();
+        fake_services::bind_thread(owner);
+        let world = Rc::new(WorldContext::new(
+            runtime.services().clone(),
+            side,
+            Box::new(|_| 0),
+        ));
+        for (kind, generation) in [(KILN_WORLD_SERVER, 5), (KILN_WORLD_CLIENT, 3)] {
+            fake_services::set_world_session(owner, kind as u32, generation);
+            world.apply(WorldLifecycle {
+                world: kind as u32,
+                session: 1,
+                event: LifecycleEvent::Started,
+            });
+        }
+        runtime.facts().attach_world(world);
+    }
+}
+
 impl PlanSource for TrackerPlan {
-    fn plan(_: &WorkerContext<'_>) -> Result<RuntimePlan, String> {
+    fn plan(cx: &WorkerContext<'_>) -> Result<RuntimePlan, String> {
         let source: Rc<dyn PackageSource> = Rc::new(Source);
         let mut parsed = package::Package::parse(
             json!({"id": "alpha", "name": "alpha", "version": "1.0.0", "capabilities": ["runtime"]})
@@ -371,7 +401,7 @@ impl PlanSource for TrackerPlan {
         let trackers = OverrideTrackers::new();
         TRACKERS.with_borrow_mut(|slot| *slot = Some(trackers.clone()));
         Ok(RuntimePlan {
-            side: Side::Server,
+            side: tracker_side(cx.owner()),
             version: SourceVersion::Sf179,
             registry,
             plan: vec!["alpha".into()],
@@ -396,8 +426,8 @@ impl PlanSource for TrackerPlan {
         let trackers = TRACKERS
             .with_borrow_mut(Option::take)
             .expect("plan made the trackers");
-        Families::new(vec![
-            trackers.family(session_world_kind(Side::Server)),
+        let mut families = vec![
+            trackers.family(),
             kiln_sfi::runtime::Family::new("record", &[], move |lua, env, _, _, _| {
                 // The worker thread's owner-less fake members (game_world_session) answer for us.
                 fake_services::bind_thread(owner);
@@ -410,7 +440,22 @@ impl PlanSource for TrackerPlan {
                     })?,
                 )
             }),
-        ])
+        ];
+        if tracker_side(owner) == Side::Client {
+            families.push(
+                kiln_sfi::runtime::Family::new("hosted worlds", &[], |_, _, _, _, _| Ok(()))
+                    .with_hook(Rc::new(HostedWorlds)),
+            );
+        }
+        Families::new(families)
+    }
+}
+
+fn tracker_side(owner: KilnOwner) -> Side {
+    if SCENARIOS.lock().unwrap().get(&owner) == Some(&"host") {
+        Side::Client
+    } else {
+        Side::Server
     }
 }
 
@@ -434,7 +479,14 @@ fn start(mode: &'static str) -> Run {
         pool,
         shared,
     };
-    wait_for(&run, "applied true nil 1");
+    assert!(
+        eventually(WAIT, || records(run.owner)
+            .iter()
+            .any(|r| r.starts_with("applied true nil "))),
+        "{:?} / {:?}",
+        records(run.owner),
+        run.shared.status()
+    );
     run
 }
 
@@ -487,6 +539,38 @@ fn a_leave_after_a_world_change_writes_nothing_into_the_new_session() {
         records(run.owner),
         ["write 2", "applied true nil 1", "unload"]
     );
+}
+
+#[test]
+fn a_host_tracker_follows_the_server_world_and_checks_the_kind_on_restore() {
+    let _session = session_lock();
+    set_session_side(false);
+    set_session(KILN_WORLD_SERVER, 1);
+    set_session(KILN_WORLD_CLIENT, 1);
+    fake_services::set_cap(
+        context::CAPABILITY,
+        Some((kiln_abi::services::kiln_caps::KILN_CAP_AVAILABLE, 0)),
+    );
+
+    let host = start("host");
+    fake_services::set_world_session(host.owner, KILN_WORLD_CLIENT as u32, 5);
+    stop(&host);
+    let host_records = records(host.owner);
+
+    let joined = start("host");
+    fake_services::set_world_session(joined.owner, KILN_WORLD_CLIENT as u32, 5);
+    set_session(KILN_WORLD_SERVER, 0);
+    stop(&joined);
+    let joined_records = records(joined.owner);
+
+    set_session(KILN_WORLD_CLIENT, 0);
+    set_session_side(true);
+    fake_services::set_cap(context::CAPABILITY, None);
+    assert_eq!(
+        host_records,
+        ["write 2", "applied true nil 5", "unload", "write 1"]
+    );
+    assert_eq!(joined_records, ["write 2", "applied true nil 5", "unload"]);
 }
 
 /// A stop that interrupts a write in flight (it changed the value, then never returned): the

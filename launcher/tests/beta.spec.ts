@@ -29,7 +29,7 @@ const opened = (page: Page) => page.evaluate(() => (window as unknown as { __kil
 const updatesCard = (page: Page) => page.locator(".k-card", { has: page.getByRole("heading", { name: "Updates" }) });
 
 test("Settings names the channels for players: Release first, then Beta (test builds)", async ({ page }) => {
-  await open(page, "/settings");
+  await open(page, "/settings/online");
   const select = updatesCard(page).getByLabel("Channel");
   await expect(select).toHaveValue("dev");
   await expect(select.locator("option")).toHaveText(["Release", "Beta (test builds)"]);
@@ -37,7 +37,7 @@ test("Settings names the channels for players: Release first, then Beta (test bu
 });
 
 test("to the beta and back: one click each way, worlds and servers said first", async ({ page }) => {
-  await open(page, "/settings");
+  await open(page, "/settings/online");
   const card = updatesCard(page);
   await card.getByLabel("Channel").selectOption("beta");
   const ask = page.getByRole("dialog", { name: "Switch to the beta?" });
@@ -94,7 +94,7 @@ test("to the beta and back: one click each way, worlds and servers said first", 
 });
 
 test("a switch with nothing to switch to says so and installs nothing", async ({ page }) => {
-  await open(page, "/settings");
+  await open(page, "/settings/online");
   await mock(page, "channelOffer", "beta", null);
   await updatesCard(page).getByLabel("Channel").selectOption("beta");
   await page.getByRole("dialog", { name: "Switch to the beta?" }).getByRole("button", { name: "Switch now" }).click();
@@ -103,7 +103,7 @@ test("a switch with nothing to switch to says so and installs nothing", async ({
 });
 
 test("an install that cannot replace itself gets the download page", async ({ page }) => {
-  await open(page, "/settings");
+  await open(page, "/settings/online");
   await mock(page, "set", { install: { kind: "deb", inPlace: false, reason: "Installed from a .deb package: your package manager updates it." } });
   await updatesCard(page).getByLabel("Channel").selectOption("beta");
   const ask = page.getByRole("dialog", { name: "Switch to the beta?" });
@@ -165,7 +165,7 @@ test.describe("Deck mode", () => {
 });
 
 test("Nexus build: Settings says where test builds are, with no channel and no switch", async ({ page }) => {
-  await open(page, "/settings", "?dist=nexus");
+  await open(page, "/settings/online", "?dist=nexus");
   const card = updatesCard(page);
   await expect(card.getByLabel("Channel")).toHaveCount(0);
   await expect(card.getByTestId("nexus-beta")).toContainText("Test builds (beta)");

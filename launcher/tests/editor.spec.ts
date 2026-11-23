@@ -132,6 +132,7 @@ test("a save the game wrote after the editor read it is not overwritten", async 
   await expect(page.getByText("The game wrote this save after the editor read it.")).toBeVisible();
   await expect(say(page)).toContainText("Changes not saved");
   await page.getByRole("button", { name: "Read again" }).click();
+  await page.getByRole("dialog", { name: "Discard the changes?" }).getByRole("button", { name: "Discard and open" }).click();
   await expect(say(page)).toContainText("Level 25");
   await expect(page.getByText("The game wrote this save after the editor read it.")).toHaveCount(0);
 });
@@ -145,6 +146,36 @@ test("a save makes one Kiln backup of the save before it", async ({ page }) => {
   await page.getByRole("button", { name: "Backups" }).click();
   const dlg = page.getByRole("dialog", { name: "Backups for Aldric" });
   await expect(dlg.locator(".ke-bk-row > .k-sc")).toHaveText(["Kiln backup", "Game's copy", "Game's copy"]);
+});
+
+test("item level input and upgrades fit the save byte and round-trip through Save", async ({ page }) => {
+  await open(page);
+  await page.getByRole("button", { name: "Action bar slot 1: Eclipsed Blade", exact: true }).click();
+  const level = page.locator('.ke-insp input[aria-label="Level"]');
+  await expect(level).toHaveAttribute("max", "255");
+  await level.fill("256");
+  await level.press("Enter"); // complete values are committed while typing; blur/Enter normalize the text draft
+  await expect(level).toHaveValue("255");
+  await level.press("ArrowUp");
+  await expect(level).toHaveValue("255");
+  await page.getByRole("group", { name: "Upgrades", exact: true }).getByRole("button", { name: "4", exact: true }).click();
+  await expect(level).toHaveValue("255");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(say(page)).not.toContainText("Changes not saved");
+  // Save reloads the serialized bytes: a truncated byte would now show zero.
+  await expect(level).toHaveValue("255");
+});
+
+test("a Brazen Bull Helmet can be edited to level 35 despite the old catalog range", async ({ page }) => {
+  await open(page);
+  await page.getByRole("tab", { name: "Equipment", exact: true }).click();
+  await page.getByRole("button", { name: /Brazen Bull Helmet/ }).click();
+  const level = page.locator('.ke-insp input[aria-label="Level"]');
+  await level.fill("35");
+  await expect(level).toHaveValue("35");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(say(page)).not.toContainText("Changes not saved");
+  await expect(level).toHaveValue("35");
 });
 
 test("an open character without changes is read again once the game has written its save", async ({ page }) => {

@@ -19,7 +19,7 @@ const calls = (page: Page) => page.evaluate(() => (window as unknown as { __kiln
 const heldCalls = (all: string[]) => new Set(all.filter((c) => c !== "app_started"));
 const pick = (page: Page, path: string | null) => df(page, "pick", path);
 
-async function open(page: Page, url = "/#/settings") {
+async function open(page: Page, url = "/#/settings/mods") {
   await page.goto(url);
   await page.locator(".k-splash").waitFor({ state: "detached" });
 }
@@ -104,7 +104,7 @@ test("a move the player cancels: nothing changed, no restart", async ({ page }) 
 });
 
 test("a move that fails: the error, nothing changed, no restart", async ({ page }) => {
-  await open(page, "/?df=fail#/settings");
+  await open(page, "/?df=fail#/settings/mods");
   await pick(page, "/mnt/games");
   await change(page).click();
   await page.getByRole("dialog", { name: "Move the data folder?" }).getByRole("button", { name: "Move", exact: true }).click();
@@ -186,7 +186,7 @@ test.describe("a pointer to a folder that cannot be used", () => {
     await expect(page.getByText("This page failed")).toHaveCount(0);
     expect(heldCalls(await calls(page))).toEqual(new Set(["data_folder_get"]));
     // the same in a deep link and in a Deck start
-    await openBroken(page, "/?df=broken&deck=steamdeck#/settings");
+    await openBroken(page, "/?df=broken&deck=steamdeck#/settings/mods");
     await expect(page.locator(".k-app, .deck")).toHaveCount(0);
   });
 
@@ -240,7 +240,7 @@ test("the first start after a move: where the data is now, until OK", async ({ p
   await expect(n).toHaveCount(0);
   await expect.poll(() => calls(page)).toContain("data_folder_notice_ack");
   // the row shows the new place
-  await page.evaluate(() => { location.hash = "#/settings"; });
+  await page.evaluate(() => { location.hash = "#/settings/mods"; });
   await expect(page.getByTestId("data-folder-path")).toHaveText("/mnt/games/Kiln");
   await expect(page.getByRole("dialog", { name: "Data folder moved" })).toHaveCount(0);
 });
@@ -302,7 +302,7 @@ test.describe("an unfinished move's partial copy is removed at start", () => {
   const allowed = new Set(["app_info", "app_started", "task_list", "task_get", "task_cancel", "data_folder_get", "data_folder_restart", "deck_quit"]);
 
   test("only its dialog with the task's progress, then the launcher and the notice", async ({ page }) => {
-    await page.goto("/?df=undoing#/settings");
+    await page.goto("/?df=undoing#/settings/mods");
     const d = page.getByRole("dialog", { name: TITLE });
     await expect(d).toBeVisible({ timeout: 10_000 });
     await expect(d.getByTestId("data-folder-undo-path")).toHaveText("/mnt/games/Kiln");
@@ -336,7 +336,7 @@ test.describe("an unfinished move's partial copy is removed at start", () => {
     // the launcher is usable on the folder in use
     await n.getByRole("button", { name: "OK" }).click();
     await expect(page.locator(".k-app")).toBeVisible();
-    await page.evaluate(() => { location.hash = "#/settings"; });
+    await page.evaluate(() => { location.hash = "#/settings/mods"; });
     await expect(page.getByTestId("data-folder-path")).toHaveText(DATA);
     await expect(page.getByRole("region", { name: "Profiles" })).toBeVisible();
     await expect(change(page)).toBeDisabled();
@@ -363,7 +363,7 @@ test.describe("an unfinished move's partial copy is removed at start", () => {
 });
 
 test("a partial copy left from an earlier start: the Settings row says why there is no Change", async ({ page }) => {
-  await open(page, "/?df=pending#/settings");
+  await open(page, "/?df=pending#/settings/mods");
   await expect(change(page)).toBeDisabled();
   const why = "Part of an unfinished copy from the last move is still in /mnt/games/Kiln: Kiln removes it at the next start.";
   await expect(page.getByTestId("data-folder-why")).toHaveText(why);
@@ -371,7 +371,7 @@ test("a partial copy left from an earlier start: the Settings row says why there
 });
 
 test("another launcher is moving the data folder: only its dialog and Quit", async ({ page }) => {
-  await page.goto("/?df=elsewhere#/settings");
+  await page.goto("/?df=elsewhere#/settings/mods");
   const d = page.getByRole("dialog", { name: "Kiln is moving its data in another window" });
   await expect(d).toBeVisible();
   await expect(d.getByRole("button")).toHaveText(["Quit"]);
@@ -434,13 +434,13 @@ test("another data folder's profile in the game: said on Play and in Settings, n
   const line = page.locator(".k-hero").getByRole("link", { name: "Another data folder's profile is loaded in this game" });
   await expect(line).toBeVisible({ timeout: 8000 });
   await expect(line).toHaveAttribute("title", /of the data folder \/home\/player\/\.local\/share\/kiln/);
-  await page.evaluate(() => { location.hash = "#/settings"; });
+  await page.evaluate(() => { location.hash = "#/settings/mods"; });
   await expect(page.getByTestId("other-folder-profile")).toHaveText("Another data folder's profile is loaded in this game");
   await expect(page.getByRole("region", { name: "Profiles" })).not.toContainText("is loaded: the main screen shows it");
 });
 
 test("KILN_DATA_DIR set: the path and Open; Change is off with the reason", async ({ page }) => {
-  await open(page, "/?df=env#/settings");
+  await open(page, "/?df=env#/settings/mods");
   await expect(page.getByTestId("data-folder-path")).toHaveText("/srv/kiln-data");
   await expect(change(page)).toBeDisabled();
   await expect(change(page)).toHaveAttribute("title", "Set by KILN_DATA_DIR.");

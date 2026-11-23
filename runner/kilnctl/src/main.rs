@@ -13,6 +13,7 @@ mod pack;
 mod preflight;
 mod profiles;
 mod procs;
+mod regproof;
 mod report;
 mod run;
 mod server;
@@ -229,6 +230,65 @@ enum Cmd {
         baseline: bool,
         #[command(flatten)]
         gate: GateArgs,
+    },
+    /// The registry proof of a game build (reflection diff, formulas, the lab's round trip, values diff, aliases): writes
+    /// the regmap record (verified only when every step is green) and, with --mark, puts it into the instance
+    Regproof {
+        /// Instance name: its Kiln tree, exe, Kiln data folder and gate copy [default: none; then --tree]
+        name: Option<String>,
+        /// server | client
+        #[arg(long, default_value = "server")]
+        side: String,
+        /// The Kiln tree (regmap/, schema/, tools/) [default: the instance's kiln.source]
+        #[arg(long)]
+        tree: Option<PathBuf>,
+        /// The new build's exe, read as data and never run [default: the instance's]
+        #[arg(long)]
+        new_exe: Option<PathBuf>,
+        /// The build the regmap was last proven on [default: the newest cached exe whose build has a verified regmap
+        /// record, in the instance's kiln/regmap or the tree]
+        #[arg(long)]
+        old_exe: Option<PathBuf>,
+        /// The new build's reflection dump (kfc.py types --closure ... --json-out) instead of its exe
+        #[arg(long)]
+        new_refl: Option<PathBuf>,
+        /// The old build's reflection dump instead of its exe
+        #[arg(long)]
+        old_refl: Option<PathBuf>,
+        /// The candidate record (regmap_check.py --record) instead of running it
+        #[arg(long)]
+        record: Option<PathBuf>,
+        /// The new build's id table (regmap_check.py --ids-out)
+        #[arg(long)]
+        ids: Option<PathBuf>,
+        /// The previous build's id table [default: the lab's data folder, else the maintainer folder ($KILN_REGMAP_IDS)]
+        #[arg(long)]
+        prev_ids: Option<PathBuf>,
+        /// Lab outputs: files, or folders such as a Kiln data folder (round-trip suites, values exports, kiln.content's
+        /// id tables; repeatable) [default with an instance: its kiln/data and its gate copy's]
+        #[arg(long)]
+        evidence: Vec<PathBuf>,
+        /// The game's data build [default: the .kfc beside the new exe]
+        #[arg(long)]
+        game_build: Option<String>,
+        /// Steam's build id [default: the instance's app manifest]
+        #[arg(long)]
+        steam_build: Option<String>,
+        /// Output folder, outside the repository [default: <state>/regproof/<name>/<sha12>-<time>]
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// No earlier build to compare with (waives the old reflection, values and id table)
+        #[arg(long)]
+        first_build: bool,
+        /// A row whose reflection change a human reviewed (`items.speed`; repeatable)
+        #[arg(long)]
+        accept: Vec<String>,
+        /// Write the verified record into the instance's kiln/regmap/<side>/ (only when every step is green)
+        #[arg(long, requires = "name")]
+        mark: bool,
+        /// With --mark: replace a verified record of the same build (the old one stays as .json.bak)
+        #[arg(long, requires = "mark")]
+        replace: bool,
     },
     /// Back up the savegame folder to a timestamped tar.gz in the backup dir
     Backup { name: String },
@@ -502,6 +562,15 @@ fn dispatch(cmd: Cmd) -> anyhow::Result<i32> {
             return ops::port_cmd(&load(&name)?, old, new, &flow);
         }
         Cmd::Gate { name, baseline, gate } => return ops::gate_cmd(&load(&name)?, &gate.opts(), baseline),
+        Cmd::Regproof {
+            name, side, tree, new_exe, old_exe, new_refl, old_refl, record, ids, prev_ids, evidence, game_build, steam_build, out,
+            first_build, accept, mark, replace,
+        } => {
+            return regproof::cli(regproof::CliArgs {
+                name, side, tree, new_exe, old_exe, new_refl, old_refl, record, ids, prev_ids, evidence, game_build, steam_build, out,
+                first_build, accept, mark, replace,
+            });
+        }
         Cmd::Backup { name } => {
             ops::backup(&load(&name)?)?;
         }
@@ -574,7 +643,7 @@ fn data_use(cmd: &Cmd) -> lock::Use {
     match cmd {
         Cmd::Init { .. } | Cmd::Install { .. } | Cmd::Prefix { .. } | Cmd::Preflight { .. } | Cmd::Run { .. } => Use::None,
         Cmd::Start { .. } | Cmd::Stop { .. } | Cmd::Status { .. } | Cmd::Logs { .. } | Cmd::Port { .. } | Cmd::Gate { .. } => Use::None,
-        Cmd::List | Cmd::Cmd { .. } | Cmd::TickCompare { .. } => Use::None,
+        Cmd::List | Cmd::Cmd { .. } | Cmd::TickCompare { .. } | Cmd::Regproof { .. } => Use::None,
         Cmd::Deploy { bundle, .. } => if bundle.is_some() { Use::Whole } else { Use::None },
         Cmd::Update { .. } => Use::Part,
         Cmd::Backup { .. } | Cmd::Report { .. } | Cmd::Library { .. } | Cmd::Profile { .. } | Cmd::Client { .. } => Use::Whole,
@@ -642,6 +711,7 @@ mod data_use_tests {
             &["install", "s"], &["prefix", "s"], &["status", "s"], &["list"], &["deploy", "s"], &["bundle", "verify", "k.zip"],
             &["cmd", "s", "help"], &["tick-compare", "a.jsonl", "b.jsonl"], &["pack", "verify", "p.kilnpack"],
             &["pack", "check", "p.kilnpack"], &["pack", "check", "--index", "i.json", "--files", "f"],
+            &["regproof", "s"], &["regproof", "--tree", "k", "--new-exe", "x"],
         ] {
             assert_eq!(use_of(args), Use::None, "{args:?}");
         }

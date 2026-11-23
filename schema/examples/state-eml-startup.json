@@ -1,0 +1,30 @@
+{
+  "format": 1,
+  "pid": 5120,
+  "kilnEml": "0.1.0",
+  "eml": "0.2.0",
+  "phase": "running",
+  "file": "enshrouded",
+  "patched": 0,
+  "cached": false,
+  "restored": false,
+  "ms": 0.0,
+  "error": null,
+  "aside": null,
+  "mods": [],
+  "progress": {
+    "stage": "startup",
+    "label": "Preparing ShroudForge mods for Kiln's interpreter",
+    "doneBytes": 470810624,
+    "totalBytes": 0,
+    "filesDone": 0,
+    "filesTotal": 0,
+    "stageMs": 1400,
+    "quietMs": 0,
+    "startedMs": 1795325822000,
+    "updatedMs": 1795325824700,
+    "step": "verify",
+    "stepNumber": 3,
+    "steps": 5
+  }
+}

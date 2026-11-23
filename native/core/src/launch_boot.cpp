@@ -11,7 +11,9 @@
 //   build verified        boot.cpp's own build_verified answer, handed in (the value build_info serves later), for the
 //                         record
 // Then kiln/state/launch.json, once, for the launcher (no code in the process reads it).
+#include <fstream>
 #include <random>
+#include <utility>
 
 #include "common.h"
 #include "config.h"
@@ -28,6 +30,15 @@ const char* core_build_stamp();  // api.cpp: this core's build identity ("" with
 
 namespace kiln::launch {
 namespace {
+
+bool eml_r_present() {
+    constexpr std::streamoff max_proxy_size = 64u << 20;
+    std::ifstream dll(paths().game / L"dbghelp.dll", std::ios::binary | std::ios::ate);
+    const std::streamoff size = dll.tellg();
+    if (size <= 0 || size > max_proxy_size) return false;
+    std::string bytes(static_cast<size_t>(size), '\0');
+    return dll.seekg(0) && dll.read(bytes.data(), size) && eml_r_proxy(std::move(bytes));
+}
 
 // <game>/kiln/launch-plans/<name>: a plain file (no folder, no link) of at most kPlanMax bytes, never another path.
 // The handle is opened without following a link, and the file is checked through that handle.
@@ -142,6 +153,7 @@ Decision decide_at_boot(uint32_t side, const std::string& safe_idle) {
     in.held_text = hold.text;
     // The kiln-sfi.sf18 veto: the release policy alone (closed in every release and preview build).
     in.release_allows_180 = sfi_release_policy::release_allows_180();
+    in.eml_r_present = &eml_r_present;
     in.read_plan = &read_plan;
     return decide(in);
 }
@@ -191,6 +203,8 @@ void freeze_at_boot(uint32_t side, bool verified, const std::string& safe_idle) 
     }
     if (d.reason_code == KILN_LAUNCH_REASON_UNDECIDED)
         KLOG_E("launch %016llx: %s", static_cast<unsigned long long>(id), d.reason.c_str());
+    else if (d.reason_code == KILN_LAUNCH_REASON_EML_R_LOADER)
+        KLOG_W("launch %016llx: %s", static_cast<unsigned long long>(id), d.reason.c_str());
     else if (KILN_LAUNCH_REASON_REFUSED(d.reason_code))
         KLOG_W("launch %016llx: ShroudForge mods are off this start: %s", static_cast<unsigned long long>(id), d.reason.c_str());
     else if (d.backend == KILN_LAUNCH_BACKEND_NONE)

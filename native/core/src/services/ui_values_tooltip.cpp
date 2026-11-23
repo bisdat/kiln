@@ -219,7 +219,10 @@ void draw(DetailCopy& c, const KilnRegisters* r, bool at_after_stats) {
             std::isfinite(d.small_size) && d.small_size > 0)
             d.small = true;
         uintptr_t node = 0;
-        if (!env().draw_text || !env().draw_text(&d, &node)) {
+        c.suppress_capture = true;
+        const bool drawn = env().draw_text && env().draw_text(&d, &node);
+        c.suppress_capture = false;
+        if (!drawn) {
             lines_off("drawing a line into the game's item detail view faulted");
             return;
         }
@@ -250,6 +253,7 @@ void KILN_CALL on_content_end(KilnRegisters* r, void*) {
 thread_local DetailCopy* t_gate = nullptr;  // the occurrence whose stats block is drawing now
 using StatFn = void (*)(const void*, float);
 StatFn g_stat_next = nullptr;
+int g_stats_hooks_state = 0;
 
 // The value providers over one occurrence, once: the product of their scales (each sees the product before it).
 float run_values(const DetailCopy& c, float s) {
@@ -327,8 +331,8 @@ float occurrence_scale(DetailCopy& c) {
 void KILN_CALL on_stats_open(KilnRegisters* r, void*) {
     DetailCopy* c = current_detail();
     if (g_probe_on.load(std::memory_order_relaxed)) probe_site("gate", r);
-    t_gate = c && c->ok && g_values_on.load(std::memory_order_acquire) ? c : nullptr;
-    if (t_gate) occurrence_scale(*t_gate);
+    t_gate = c && c->ok && (g_values_on.load(std::memory_order_acquire) || item_detail_on()) ? c : nullptr;
+    if (t_gate && g_values_on.load(std::memory_order_acquire)) occurrence_scale(*t_gate);
 }
 
 void KILN_CALL on_stats_close(KilnRegisters*, void*) { t_gate = nullptr; }
@@ -341,7 +345,8 @@ void hk_stat_value(const void* label, float value) {
         g_scaled.fetch_add(1, std::memory_order_relaxed);
         value = after;
     }
-    g_stat_next(label, value);
+    if (c && c == current_detail() && item_detail_on()) item_detail_stat(*c, value, g_stat_next, label);
+    else g_stat_next(label, value);
 }
 
 // ---- installs ----
@@ -373,34 +378,37 @@ bool install_lines_natives(Allowed allowed) {
     return true;
 }
 
+// Shared hooks: capture must not install a second stat detour or pretend scaling is enabled.
+bool install_stats_hooks() { // g_mu held
+    if (g_stats_hooks_state) return g_stats_hooks_state > 0;
+    g_stats_hooks_state = -1;
+    uintptr_t gate = 0, h2 = 0, h4 = 0;
+    if (!load_view_layout(&g_l.view) || !sig_symbol("ui/DetailStatsBlockCall", &gate) ||
+        !sig_symbol("ui/DetailAfterStats", &h2) || !sig_symbol("ui/StatValueDraw", &h4) ||
+        !detail_hook_install()) return false;
+    KilnResult rc = env().hook_mid(gate, "ui.tooltip/DetailStatsBlockCall", &on_stats_open);
+    if (rc == KILN_OK) rc = env().hook_mid(h2, "ui.tooltip/DetailStatsBlockEnd", &on_stats_close);
+    if (rc == KILN_OK) rc = env().hook_raw(h4, "ui.tooltip/StatValueDraw", 0,
+        reinterpret_cast<void*>(&hk_stat_value), reinterpret_cast<void**>(&g_stat_next));
+    if (rc != KILN_OK || !g_stat_next) return false;
+    g_l.gate = gate; g_l.h4 = h4;
+    if (!g_l.h2) g_l.h2 = h2;
+    g_stats_hooks_state = 1;
+    return true;
+}
+
 bool install_values_natives(Allowed allowed) {
     std::lock_guard lk(g_mu);
     if (g_values_state) return g_values_state > 0;
     std::string why;
-    uintptr_t gate = 0, h2 = 0, h4 = 0;
     if (!env().layout_supported || !env().layout_supported()) why = "private UI layout is not measured for this client image";
     else if (!allowed(kValuesRow)) why = "the capability is off or held";
-    else if (!load_view_layout(&g_l.view)) why = "the item view constants did not resolve";
-    else if (!sig_symbol("ui/DetailStatsBlockCall", &gate) || !sig_symbol("ui/DetailAfterStats", &h2) ||
-             !sig_symbol("ui/StatValueDraw", &h4))
-        why = "a symbol of the detail view's stats block did not resolve";
-    else if (!detail_hook_install()) why = "the item detail view could not be hooked";
-    else {
-        KilnResult rc = env().hook_mid(gate, "ui.tooltip/DetailStatsBlockCall", &on_stats_open);
-        if (rc == KILN_OK) rc = env().hook_mid(h2, "ui.tooltip/DetailStatsBlockEnd", &on_stats_close);
-        if (rc == KILN_OK)
-            rc = env().hook_raw(h4, "ui.tooltip/StatValueDraw", 0, reinterpret_cast<void*>(&hk_stat_value),
-                                reinterpret_cast<void**>(&g_stat_next));
-        if (rc != KILN_OK || !g_stat_next) why = "hooking the stats block's number draw failed";
-    }
+    else if (!install_stats_hooks()) why = "hooking the stats block's number draw failed";
     if (!why.empty()) {
-        g_values_state = -1;
-        g_values_why = why;
+        g_values_state = -1; g_values_why = why;
         logf(KILN_LOG_WARN, "ui.tooltip: no tooltip values: %s; the game's own numbers show", why.c_str());
         return false;
     }
-    g_l.gate = gate, g_l.h4 = h4;
-    if (!g_l.h2) g_l.h2 = h2;
     g_values_state = 1;
     g_values_on.store(true, std::memory_order_release);
     logf(KILN_LOG_INFO, "ui.tooltip: tooltip values on (the item detail's stats block numbers)");
@@ -648,6 +656,11 @@ bool tooltip_lines_on() { return g_lines_on.load(std::memory_order_acquire); }
 bool tooltip_values_on() { return g_values_on.load(std::memory_order_acquire); }
 bool tooltip_probe_on() { return g_probe_on.load(std::memory_order_acquire); }
 
+bool item_detail_stats_install() {
+    std::lock_guard lk(tt::g_mu);
+    return tt::install_stats_hooks();
+}
+
 bool tooltip_lines_request() { return tt::install_lines_natives(&tt::row_allowed); }
 
 KilnResult tooltip_native_state(KilnUiTooltipNativeState* out) {
@@ -727,6 +740,7 @@ void tooltip_reset_for_tests() {
     g_lines_why.clear(), g_values_why.clear();
     g_probe = Probe{};
     g_stat_next = nullptr;
+    g_stats_hooks_state = 0;
 }
 
 }  // namespace kiln::uivalues

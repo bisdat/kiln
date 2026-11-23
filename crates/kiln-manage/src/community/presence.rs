@@ -504,6 +504,7 @@ mod tests {
         assert_eq!(older.get_pack, "Get this modpack");
     }
 
+    #[cfg(unix)]
     #[test]
     fn the_socket_is_looked_for_in_the_runtime_dir_flatpak_snap_then_the_temp_dirs() {
         let env = |k: &str| match k {
@@ -525,7 +526,17 @@ mod tests {
         let q = socket_paths(&none);
         assert_eq!(q.len(), 10);
         assert_eq!(q[0], PathBuf::from("/tmp/discord-ipc-0"));
-        assert_eq!(pipe_names()[0], r"\\.\pipe\discord-ipc-0");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn discord_pipes_are_tried_in_index_order() {
+        assert_eq!(pipe_names(), [
+            r"\\.\pipe\discord-ipc-0", r"\\.\pipe\discord-ipc-1", r"\\.\pipe\discord-ipc-2",
+            r"\\.\pipe\discord-ipc-3", r"\\.\pipe\discord-ipc-4", r"\\.\pipe\discord-ipc-5",
+            r"\\.\pipe\discord-ipc-6", r"\\.\pipe\discord-ipc-7", r"\\.\pipe\discord-ipc-8",
+            r"\\.\pipe\discord-ipc-9",
+        ]);
     }
 
     #[test]

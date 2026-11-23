@@ -54,6 +54,44 @@ public sealed class BakedModTests
         } finally {Directory.Delete(folder,true);}
     }
 
+    [Fact]
+    public void Building_tool_and_recipe_bake_the_policy_and_brush_tables_for_the_first_start()
+    {
+        var folder=Directory.CreateTempSubdirectory("kiln-tool-bake-").FullName;
+        try {
+            var assembly=typeof(ToolBakeMod).Assembly.Location;
+            File.Copy(assembly,Path.Combine(folder,Path.GetFileName(assembly)));
+            foreach(var file in Directory.GetFiles(Path.GetDirectoryName(assembly)!,"*.dll"))
+                if(!Path.GetFileName(file).StartsWith("Kiln.",StringComparison.Ordinal))File.Copy(file,Path.Combine(folder,Path.GetFileName(file)),true);
+            File.WriteAllText(Path.Combine(folder,"kiln.mod.json"),new JsonObject {
+                ["id"]="tool-bake-runtime",["version"]="1.0.0",["apiVersion"]=Mods.RuntimeApiVersion,["side"]="both",["clients"]="mod",
+                ["entryAssembly"]=Path.GetFileName(assembly),["entryType"]=typeof(ToolBakeMod).FullName
+            }.ToJsonString());
+            var result=Baker.Run(folder,new BakeOptions {WorldTables=true});
+            Assert.Empty(result.Warnings);
+            Assert.DoesNotContain(result.Notes,n=>n.Contains("not baked",StringComparison.Ordinal));
+            Assert.Contains("blocks.tables.json",result.Written);
+            var path=Path.Combine(folder,"blocks.tables.json");var first=File.ReadAllText(path);var tables=JsonNode.Parse(first)!;
+            Assert.Equal(8,(int?)tables["toolMaterialPools"]!["materials"]!["entries"]![0]!["terrainMaterial"]);
+            Assert.Equal("sphere",(string?)tables["toolBrushShapes"]!["small"]!["shape"]);
+            Assert.Equal(0.5,(double?)tables["toolBrushShapes"]!["small"]!["radius"]);
+            Assert.Null(tables["buildingMaterialPools"]);
+            var questFile=Baker.QuestsFile("tool-bake-runtime");
+            var questPath=Path.Combine(folder,questFile);var firstKnowledge=File.ReadAllText(questPath);
+            var knowledge=JsonNode.Parse(firstKnowledge)!["knowledge"]!;
+            Assert.Equal("pickup",(string?)knowledge["track.found"]!["track"]);
+            Assert.Equal("both",(string?)knowledge["track.found"]!["scope"]);
+            Assert.Equal($"0x{BlockIds.Fnv(BlockIds.Derive("tool-bake-runtime","item","tool")):x8}",(string?)knowledge["track.found"]!["id"]);
+            Assert.Equal("craft",(string?)knowledge["track.made"]!["track"]);
+            Assert.Equal("player",(string?)knowledge["track.made"]!["scope"]);
+            // Standalone recipe blocks use the same recipes/<name> key in the runtime RecipeDefinition.
+            Assert.Equal($"0x{BlockIds.Fnv(BlockIds.Derive("tool-bake-runtime","recipe","recipes/recipe")):x8}",(string?)knowledge["track.made"]!["id"]);
+            var second=Baker.Run(folder,new BakeOptions {WorldTables=true});
+            Assert.Empty(second.Warnings);Assert.Contains("blocks.tables.json",second.Unchanged);Assert.Equal(first,File.ReadAllText(path));
+            Assert.Contains(questFile.Replace('\\','/'),second.Unchanged);Assert.Equal(firstKnowledge,File.ReadAllText(questPath));
+        } finally {Directory.Delete(folder,true);}
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -476,5 +514,19 @@ public sealed class PoolBakeMod:Mod
         Blocks.Define("ice",new BuildingMaterialBlock{Name="Baked Ice"});
         var pool=Blocks.Define("walls",new BuildingMaterialPoolBlock{Name="Baked Walls",Materials=[new(Material:"ice"),new(GameMaterial:"WoodRough")]});
         Blocks.Define("shape",new BlueprintBlock{Name="Baked Shape",Cells=[["##"]],MaterialPool=pool});
+    }
+}
+
+public sealed class ToolBakeMod:Mod
+{
+    public override void OnLoad()
+    {
+        var pool=Blocks.Define("materials",new ToolMaterialPoolBlock {Name="Loose stone",Entries=[new("Build_TerrainMaterial_T1_Rubble",8,16)]});
+        var brush=Blocks.Define("small",new TerrainBrushBlock {Name="Small sphere",Radius=0.5});
+        var tool=Blocks.Define("tool",new BuildingToolBlock {Name="Terrain tool",MaterialPool=pool,Brushes=[brush],
+            Primary=new() {Mode=TerrainToolMode.Remove,RemoveMaterials=[8]},Secondary=new() {Mode=TerrainToolMode.Add}});
+        var recipe=Blocks.Define("recipe",new RecipeBlock {Output=tool,TrackCrafted=true,Needs=new Dictionary<ItemRef,int> { ["Build_TerrainMaterial_T1_Rubble"]=1 }});
+        Blocks.Define("found",new KnowledgeBlock {Trigger=KnowledgeTrigger.Pickup,Of=tool.Name});
+        Blocks.Define("made",new KnowledgeBlock {Trigger=KnowledgeTrigger.Craft,Of=recipe.Name});
     }
 }

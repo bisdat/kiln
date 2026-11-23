@@ -1,0 +1,50 @@
+#nullable enable
+Kiln.TerrainToolAction
+Kiln.TerrainToolAction.<Clone>$() -> Kiln.TerrainToolAction!
+Kiln.TerrainToolAction.Equals(Kiln.TerrainToolAction? other) -> bool
+Kiln.TerrainToolAction.Mode.get -> Kiln.TerrainToolMode
+Kiln.TerrainToolAction.Mode.init -> void
+Kiln.TerrainToolAction.RemoveMaterials.get -> System.Collections.Generic.IReadOnlyList<byte>!
+Kiln.TerrainToolAction.RemoveMaterials.init -> void
+Kiln.TerrainToolAction.TerrainOnly.get -> bool
+Kiln.TerrainToolAction.TerrainOnly.init -> void
+Kiln.TerrainToolAction.TerrainToolAction() -> void
+Kiln.TerrainToolMode
+Kiln.TerrainToolMode.Add = 2 -> Kiln.TerrainToolMode
+Kiln.TerrainToolMode.Remove = 1 -> Kiln.TerrainToolMode
+Kiln.ToolMaterialSnapshot
+Kiln.ToolMaterialSnapshot.Actor.get -> Kiln.EntityId
+Kiln.ToolMaterialSnapshot.Entries.get -> System.Collections.Generic.IReadOnlyList<Kiln.ToolMaterialStock!>!
+Kiln.ToolMaterialSnapshot.Revision.get -> ulong
+Kiln.ToolMaterialSnapshot.SelectedItem.get -> Kiln.ItemId?
+Kiln.ToolMaterialSnapshot.SelectedMaterial.get -> byte?
+Kiln.ToolMaterialSnapshot.Session.get -> ulong
+Kiln.ToolMaterialSnapshot.Tool.get -> Kiln.ItemId
+Kiln.ToolMaterialStock
+Kiln.ToolMaterialStock.<Clone>$() -> Kiln.ToolMaterialStock!
+Kiln.ToolMaterialStock.Backpack.get -> ulong
+Kiln.ToolMaterialStock.Backpack.init -> void
+Kiln.ToolMaterialStock.Deconstruct(out Kiln.ItemId Item, out byte TerrainMaterial, out int VoxelsPerItem, out ulong Backpack, out ulong MagicChests) -> void
+Kiln.ToolMaterialStock.Equals(Kiln.ToolMaterialStock? other) -> bool
+Kiln.ToolMaterialStock.Item.get -> Kiln.ItemId
+Kiln.ToolMaterialStock.Item.init -> void
+Kiln.ToolMaterialStock.MagicChests.get -> ulong
+Kiln.ToolMaterialStock.MagicChests.init -> void
+Kiln.ToolMaterialStock.TerrainMaterial.get -> byte
+Kiln.ToolMaterialStock.TerrainMaterial.init -> void
+Kiln.ToolMaterialStock.ToolMaterialStock(Kiln.ItemId Item, byte TerrainMaterial, int VoxelsPerItem, ulong Backpack, ulong MagicChests) -> void
+Kiln.ToolMaterialStock.VoxelsPerItem.get -> int
+Kiln.ToolMaterialStock.VoxelsPerItem.init -> void
+Kiln.ToolMaterials
+override Kiln.TerrainToolAction.Equals(object? obj) -> bool
+override Kiln.TerrainToolAction.GetHashCode() -> int
+override Kiln.TerrainToolAction.ToString() -> string!
+override Kiln.ToolMaterialStock.Equals(object? obj) -> bool
+override Kiln.ToolMaterialStock.GetHashCode() -> int
+override Kiln.ToolMaterialStock.ToString() -> string!
+static Kiln.TerrainToolAction.operator !=(Kiln.TerrainToolAction? left, Kiln.TerrainToolAction? right) -> bool
+static Kiln.TerrainToolAction.operator ==(Kiln.TerrainToolAction? left, Kiln.TerrainToolAction? right) -> bool
+static Kiln.ToolMaterialStock.operator !=(Kiln.ToolMaterialStock? left, Kiln.ToolMaterialStock? right) -> bool
+static Kiln.ToolMaterialStock.operator ==(Kiln.ToolMaterialStock? left, Kiln.ToolMaterialStock? right) -> bool
+static Kiln.ToolMaterials.Available.get -> bool
+static Kiln.ToolMaterials.TrySnapshot(Kiln.EntityId actor, Kiln.ItemId tool, out Kiln.ToolMaterialSnapshot? snapshot) -> bool

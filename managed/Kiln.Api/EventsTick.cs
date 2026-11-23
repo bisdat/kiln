@@ -70,7 +70,9 @@ internal static class ServiceTick
          // 0.2.0-dev.30.3: client.building_input where only Kiln.Client can say why it is off (an older kiln.client, no core)
          ("Kiln.Client", "Kiln.ClientStartup"),
          // 0.2.0-dev.31 (16a): station menus' runtime, so that "the mods' menus are declared" comes also without any menu
-         ("Kiln.Blocks", "Kiln.StationMenuStartup")];
+         ("Kiln.Blocks", "Kiln.StationMenuStartup"),
+         // dev.31 (09 S5): kiln:ui-command, the receiver of joined players' UI commands, also with no UI block mod
+         ("Kiln.Blocks", "Kiln.UiCommandStartup")];
 
     /// <summary>Of <see cref="AutoStart"/>, the services the host starts right before the mods load (their OnLoad runs
     /// before the first service tick): rows a mod reads in OnLoad and that depend on no mod. Kiln.World's

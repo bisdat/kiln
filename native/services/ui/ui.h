@@ -163,6 +163,9 @@ KilnResult keys_subscribe(KilnOwner owner, KilnUiKeyFn fn, void* user, uint32_t 
 KilnResult keys_unsubscribe(KilnHandle h);  // KILN_ERR_NOT_FOUND: not a key subscription
 bool keys_dispatch(const KilnUiKey& key, bool mouse);  // to the subscribers that get it; true = one of them took it
 bool keys_mouse_wanted();                  // a subscriber gets mouse presses (any thread)
+// 0.2.0-dev.30.5: to the subscribers whose flags hold `need` (0 = every one: a keyboard key); true = one of them took it
+bool keys_dispatch_to(const KilnUiKey& key, uint32_t need);
+bool keys_pad_wanted();                    // a subscriber gets pad presses (KILN_UI_KEYS_PAD; any thread)
 size_t keys_count();
 
 // ---- ui.cpp ----

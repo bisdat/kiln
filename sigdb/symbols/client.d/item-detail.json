@@ -1,0 +1,31 @@
+{
+  "format": 1,
+  "side": "client",
+  "comment": "ItemDetail text/value capture for Kiln windows (#120); reuses the measured item-view and tooltip seams. Capture is scoped to the existing ItemDetail hook.",
+  "symbols": {},
+  "features": {
+    "ui.item_detail": {
+      "symbols": [
+        "ui/ItemDetail",
+        "ui/NativeTextLine",
+        "ui/DetailStatsBlockCall",
+        "ui/DetailAfterStats",
+        "ui/StatValueDraw"
+      ],
+      "constants": [
+        "ui/view.stride",
+        "ui/view.inventoryPage",
+        "ui/view.slotIndex",
+        "ui/view.item",
+        "ui/view.count",
+        "ui/view.pide",
+        "ui/view.durability",
+        "ui/view.durabilityMax",
+        "ui/view.fuel",
+        "ui/view.fuelMax",
+        "ui/view.level",
+        "ui/view.rarity"
+      ]
+    }
+  }
+}

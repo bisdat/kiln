@@ -1,0 +1,217 @@
+{
+  "$schema": "../../../../schema/kiln-blocks.schema.json",
+  "comment": "The richer UI blocks of 0.2.0-dev.31 (docs/kiln/modding/ui-blocks.md): a text field, tabs with tables, a tree and a picture, the window's own state, the mod's own data (UiBlocksMod.cs publishes it), live values with where each comes from, a stat the server keeps, and a button that runs a command on the server as the player who presses it.",
+  "windows": {
+    "camp": {
+      "title": {
+        "en": "Camp",
+        "de": "Lager"
+      },
+      "width": 520,
+      "height": 460,
+      "menu": {
+        "text": "Camp (UI blocks sample)",
+        "in": "pause",
+        "order": 31
+      },
+      "state": {
+        "note": {
+          "type": "string",
+          "maxBytes": 128
+        },
+        "quest": {
+          "type": "string"
+        },
+        "open": {
+          "type": "stringSet",
+          "initial": [
+            "east"
+          ]
+        },
+        "tab": {
+          "type": "string"
+        }
+      },
+      "rows": [
+        {
+          "type": "separator",
+          "text": "Local (this game's own copy)"
+        },
+        {
+          "type": "text",
+          "text": "Health {world.local.health}/{world.local.healthMax}   Stamina {world.local.stamina}/{world.local.staminaMax}"
+        },
+        {
+          "type": "text",
+          "text": "Position {world.local.position.x:0.0}, {world.local.position.y:0.0}, {world.local.position.z:0.0}   ({world.local.inventoryCount} slots used, step {world.local.step})"
+        },
+        {
+          "type": "separator",
+          "text": "Hosted only"
+        },
+        {
+          "type": "text",
+          "text": "World hour {world.server.hours:0.00}",
+          "when": "world.server.available"
+        },
+        {
+          "type": "text",
+          "text": "World hour: not shown on a joined world (deferred)",
+          "color": "gray",
+          "when": "!world.server.available"
+        },
+        {
+          "type": "separator",
+          "text": "Server (synced to you)"
+        },
+        {
+          "type": "value",
+          "label": "Rests at the fire",
+          "bind": "stats.ui-blocks/rests",
+          "format": "0"
+        },
+        {
+          "type": "input",
+          "id": "note",
+          "label": "Note",
+          "bind": "state.note",
+          "maxBytes": 128,
+          "commit": "enter",
+          "tooltip": "Enter keeps it, Escape puts the old text back. Kept until you leave the world."
+        },
+        {
+          "type": "tabs",
+          "id": "tabs",
+          "selected": "state.tab",
+          "tabs": [
+            {
+              "id": "bag",
+              "label": "Bag",
+              "rows": [
+                {
+                  "type": "table",
+                  "id": "bag-table",
+                  "items": "world.local.inventory",
+                  "maxRows": 64,
+                  "columns": [
+                    {
+                      "id": "item",
+                      "label": "Item",
+                      "cell": "{row.item}"
+                    },
+                    {
+                      "id": "count",
+                      "label": "Count",
+                      "cell": "{row.count}"
+                    },
+                    {
+                      "id": "slot",
+                      "label": "Slot",
+                      "cell": "{row.inventoryPage}/{row.slotIndex}"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "quests",
+              "label": "Quests",
+              "rows": [
+                {
+                  "type": "table",
+                  "id": "quest-table",
+                  "items": "mod.quests",
+                  "selected": "state.quest",
+                  "columns": [
+                    {
+                      "id": "name",
+                      "label": "Quest",
+                      "cell": "{row.name}"
+                    },
+                    {
+                      "id": "reward",
+                      "label": "Reward",
+                      "cell": "{row.reward:0.##}"
+                    },
+                    {
+                      "id": "done",
+                      "label": "Done",
+                      "cell": "{row.done:yes|no}"
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "text": "Selected: {state.quest}",
+                  "when": "state.quest != \"\""
+                }
+              ]
+            },
+            {
+              "id": "map",
+              "label": "Map",
+              "rows": [
+                {
+                  "type": "tree",
+                  "id": "places",
+                  "nodes": "mod.places",
+                  "expanded": "state.open",
+                  "nodeRows": [
+                    {
+                      "type": "text",
+                      "text": "danger {node.danger}",
+                      "color": "orange"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "picture",
+              "label": "Picture",
+              "rows": [
+                {
+                  "type": "image",
+                  "id": "fire",
+                  "asset": "assets/ui/campfire.png",
+                  "width": 128,
+                  "height": 128,
+                  "tooltip": "A PNG of the mod's folder"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "button",
+          "label": "Rest at the fire",
+          "does": {
+            "command": "uiblocks-rest",
+            "commandTarget": "server"
+          },
+          "tooltip": "Runs /uiblocks-rest on the server as you"
+        },
+        {
+          "type": "button",
+          "label": "Clear the note",
+          "sameLine": true,
+          "does": {
+            "set": {
+              "bind": "state.note",
+              "to": ""
+            }
+          }
+        }
+      ]
+    }
+  },
+  "keyBindings": {
+    "open-camp": {
+      "key": "Ctrl+F9",
+      "description": "Open or close the camp window (UI blocks sample)",
+      "does": {
+        "toggleWindow": "camp"
+      }
+    }
+  }
+}

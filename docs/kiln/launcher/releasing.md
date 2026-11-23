@@ -177,10 +177,29 @@ Direct builds only (the Nexus Mods build has none, above).
   after (`selfupdate/cleanup.rs`).
 - **The notice** (header word Update, Updating, Restart, Updated; the notice under it is one line and its buttons):
   "Kiln <version>" Skip / Update (Download for an install that can't update itself), "Updating…" with a bar,
-  "Ready to restart" Later / Restart (held, with the reason as its tooltip, while another task runs).
+  "Ready to restart" Later / Restart (held, with the reason as its tooltip, while another task runs). From 0.2.0-dev.30.5
+  an update the player started restarts the launcher by itself after a 5 s countdown ("Restarting by itself in 5 s";
+  closing the notice, by Later, its dismiss, Escape or the header word, stops it). It does not while the game runs or
+  Pack Studio or an editor (the save editor, a mod's settings file, a server's settings) has unsaved work: the notice
+  says why it waited and the player restarts (`shell/updateApply.ts`, `shell/unsaved.ts`). A start of the game under
+  way (Play pressed, the warning before Play, Steam asked and no game yet) and a running task are waited for, then the
+  countdown starts. Restart is held while the game starts, and `update_restart` refuses then too (a start this launcher
+  tracks that has no game process yet), also for a channel switch's Restart now and the Deck's. A running game does not
+  hold a manual Restart: the next launcher's own install waits for the game to close. A channel switch keeps its own
+  dialog and its Restart now.
 - **After an update:** `<data>/update.json` remembers it, and the next start shows "Updated to <version>". The
-  launcher ships a runtime: when it is newer than the game's, "Update game" installs it into the game (the parts the
-  game has), held with "Close the game first" while the game runs. Updating the launcher while the game runs is fine.
+  launcher ships a runtime: when it is newer than the game's, it goes into the game by itself while the game is closed
+  (0.2.0-dev.30.5; the ordinary install with its backup and refusals, the parts the game has, a toast "Kiln <x>
+  installed. It came with the launcher update to <version>."), once per update and game, and the notice goes. Only the
+  shipped runtime (`update_status` `shippedRuntime`) goes in by itself; any other offer (a newer bundle in the Library)
+  stays Update game. While the game runs the notice
+  shows "Update game" held with "Close the game first" and says the runtime goes in when the game closes, which it then
+  does. A failed install keeps "Update game" (one automatic try per start). Updating the launcher while the game runs is
+  fine. The backend answers the window's first `update_status` only once the self-update read update.json (it waits up
+  to 10 s, once: when the start-up steps never run, later statuses answer at once), and the shipped runtime's import at
+  the start sends fresh game statuses and the update status, so the notice and its runtime are
+  there from the start (a player on 0.2.0-dev.30.3 got a notice without Update game until a poll his unfocused window
+  never sent).
 - **The game's Kiln after a switch back (0.2.0-dev.29):** a newer Kiln in the game than the launcher's own is left as it
   is and offers nothing (as before), with one exception: a test build of the launcher writes `kiln-launcher <version>
   beta <n>` as the receipt's installer, and when such a game meets a launcher that is no test build and ships an older

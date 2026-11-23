@@ -45,6 +45,7 @@
     <!-- More services -->
     <InternalsVisibleTo Include="Kiln.Assets" />
     <InternalsVisibleTo Include="Kiln.Build" />
+    <InternalsVisibleTo Include="Kiln.Tools" />
     <InternalsVisibleTo Include="Kiln.Emf" />
     <InternalsVisibleTo Include="Kiln.Abilities" />
     <InternalsVisibleTo Include="Kiln.Creatures" />

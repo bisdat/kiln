@@ -22,6 +22,7 @@ internal static class BlocksRows
         if (!ServiceCaps.Probe("kiln.boot"))
             ServiceCaps.Report("mods.boot", CapabilityState.Unavailable, CapabilityReason.Offline, "kiln.boot is not here (no Kiln core): no boot phase in this process");
         BlockCapabilities.Ensure();
+        UiBlocksCaps.Report();
         KindCapabilities.Ensure();
         AffixRuntime.RefreshCapabilities();
         UpgradeStations.ReportRow();  // blocks.upgrade_station follows items.gear.upgrade

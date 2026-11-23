@@ -6,7 +6,7 @@
 // words ("chatHistory": "Chat History") unless the card gives its own (`labels`).
 // The form never writes: it calls onChange(path, value) / onReset(path) and the page saves (config_set).
 import { Plus, X } from "lucide-react";
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Json, SchemaSnapshot, SnapshotEntry, ValidationError } from "../api/commands";
 import { rich, t as tr, useT } from "../i18n";
 import { IconButton } from "./Button";
@@ -28,6 +28,8 @@ export interface SchemaFormProps {
   /** Field labels by path, for a card whose key names do not read as words ("graphics.fpsCap": "Frame cap"); an entry
    *  without one is named from its key. */
   labels?: Record<string, string>;
+  /** A long comment shows its first clause, with More for the rest (Settings: one line of help per row). */
+  clamp?: boolean;
 }
 
 const DURATION = /^(\d+(\.\d+)?(ms|s|m|h|d))+$/;
@@ -78,7 +80,7 @@ const label = (path: string) => {
   return words.charAt(0).toUpperCase() + words.slice(1);
 };
 
-export function SchemaForm({ schema, values, onChange, onReset, errors = [], pending = [], disabled, filter, labels }: SchemaFormProps) {
+export function SchemaForm({ schema, values, onChange, onReset, errors = [], pending = [], disabled, filter, labels, clamp }: SchemaFormProps) {
   const t = useT();
   const groups = useMemo(() => {
     const secs = [...(schema.sections ?? [])].sort((a, b) => b.path.length - a.path.length);
@@ -107,7 +109,7 @@ export function SchemaForm({ schema, values, onChange, onReset, errors = [], pen
           )}
           {g.entries.map((e) => (
             <EntryRow key={e.path} entry={e} value={getPath(values, e.path)} onChange={onChange} onReset={onReset} disabled={disabled}
-              error={errors.find((x) => x.path === e.path)?.message} pending={pending.includes(e.path)} name={labels?.[e.path]} />
+              error={errors.find((x) => x.path === e.path)?.message} pending={pending.includes(e.path)} name={labels?.[e.path]} clamp={clamp} />
           ))}
         </div>
       ))}
@@ -125,9 +127,10 @@ interface RowProps {
   disabled?: boolean;
   /** The field's label (SchemaFormProps.labels); else from its key. */
   name?: string;
+  clamp?: boolean;
 }
 
-function EntryRow({ entry: e, value, onChange, onReset, error, pending, disabled, name: given }: RowProps) {
+function EntryRow({ entry: e, value, onChange, onReset, error, pending, disabled, name: given, clamp }: RowProps) {
   const t = useT();
   const name = given ?? label(e.path);
   const v = value === undefined ? e.default : value;
@@ -136,8 +139,18 @@ function EntryRow({ entry: e, value, onChange, onReset, error, pending, disabled
   const shownError = error ?? (changed ? local : null);
   const id = `sf-${e.path.replace(/[^a-z0-9]/gi, "-")}`;
   const set = (nv: Json) => { if (!same(nv, v)) onChange(e.path, nv); };
+  // the control is described by the entry's comment (a screen reader reads it with the control); the controls are of
+  // many kinds, so the attribute goes on the element itself
+  const row = useRef<HTMLDivElement>(null);
+  const help = e.comment ? `${id}-help` : null;
+  useEffect(() => {
+    const el = row.current?.querySelector<HTMLElement>(`#${CSS.escape(id)}`);
+    if (!el) return;
+    if (help) el.setAttribute("aria-describedby", help);
+    else if (el.getAttribute("aria-describedby")?.endsWith("-help")) el.removeAttribute("aria-describedby");
+  });
   return (
-    <div className={"k-sform-row" + (changed ? " changed" : "") + (shownError ? " invalid" : "")}>
+    <div className={"k-sform-row" + (changed ? " changed" : "") + (shownError ? " invalid" : "")} ref={row}>
       <div className="k-sform-meta">
         <div className="k-sform-label">
           <label htmlFor={id}>{name}</label>
@@ -145,7 +158,7 @@ function EntryRow({ entry: e, value, onChange, onReset, error, pending, disabled
           {e.synced && <span className="k-word-sm k-tone-info" title={t("ui.schemaForm.syncedTitle")}>{t("ui.schemaForm.synced")}</span>}
           {pending && <span className="k-word-sm k-tone-ember" title={t("ui.schemaForm.pendingTitle")}>{t("ui.schemaForm.pending")}</span>}
         </div>
-        {e.comment && <span className="k-hint">{e.comment}</span>}
+        {e.comment && <Comment id={`${id}-help`} text={e.comment} clamp={clamp} label={name} />}
         <span className="k-sform-key">{e.path}</span>
       </div>
       <div className="k-sform-control">
@@ -159,6 +172,86 @@ function EntryRow({ entry: e, value, onChange, onReset, error, pending, disabled
         )}
       </div>
     </div>
+  );
+}
+
+/** The longest line of help a row shows whole. */
+const LINE = 90;
+const foldWords = (s: string) => s.normalize("NFD").replace(/\p{M}+/gu, "").toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+const upperFirst = (s: string) => s.charAt(0).toLocaleUpperCase() + s.slice(1);
+
+/** Where `sep` first stands outside parentheses in `text`, from `from` on (-1: nowhere). */
+function outside(text: string, sep: string, from = 0): number {
+  let depth = 0;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === "(") depth++;
+    else if (c === ")") depth = Math.max(0, depth - 1);
+    if (depth === 0 && i >= from && text.startsWith(sep, i)) return i;
+  }
+  return -1;
+}
+
+/** `text` without its parentheses ("(0: off; 1 to 19 count as 20)"). */
+const unbracketed = (text: string) => {
+  let out = "", depth = 0;
+  for (const c of text) {
+    if (c === "(") depth++;
+    else if (c === ")") depth = Math.max(0, depth - 1);
+    else if (depth === 0) out += c;
+  }
+  return out.replace(/\s+([,.;:])/g, "$1").replace(/\s{2,}/g, " ").trim();
+};
+
+/** The part before a comment's colon only names its subject: it says when the entry applies ('With the look "theme"'),
+ *  repeats the row's name ("Kiln's frame cap" for Frame cap), or is a few words ("Chat history"). */
+function subjectOnly(subject: string, label?: string): boolean {
+  const s = foldWords(subject);
+  if (/^with\b/.test(s) || subject.trim().split(/\s+/).length <= 3) return true;
+  const l = label ? foldWords(label) : "";
+  return !!l && (s === l || s.endsWith(` ${l}`));
+}
+
+/** A clause of `text` short enough for one line: the text as it is, without its parentheses, or its first clause. */
+function oneLine(text: string, label?: string): string {
+  if (text.length <= LINE) return text;
+  const plain = unbracketed(text);
+  // the plain text, unless all it says is the row's name ("The theme" for Theme)
+  const bare = (s: string) => foldWords(s).replace(/^the /, "");
+  if (plain.length <= LINE && (!label || bare(plain) !== bare(label))) return plain;
+  let at = -1;
+  for (const sep of [": ", ". ", "; "]) {
+    const i = outside(plain, sep, 12);
+    if (i >= 12 && i <= LINE && (at < 0 || i < at)) at = i;
+  }
+  if (at > 0) return plain.slice(0, at) + (plain[at] === "." ? "." : "");
+  const cut = plain.lastIndexOf(" ", 80);
+  return `${plain.slice(0, cut > 20 ? cut : 80)}…`;
+}
+
+/** A long comment's line of help (null: the comment is short enough to show whole). The part before the colon is kept
+ *  when it says what the entry is ("A small readout in a corner of the game: …"); when it only names the subject
+ *  ('With the DLSS render size custom: render width…', "Kiln's frame cap: the game renders…", "Chat history: Up/Down…"),
+ *  the line is the clause after it. Either way the line is cut at its first clause, parentheses left out. */
+export function commentHead(text: string, label?: string): string | null {
+  if (text.length <= LINE) return null;
+  const colon = outside(text, ": ");
+  const body = colon > 0 && subjectOnly(text.slice(0, colon), label) ? upperFirst(text.slice(colon + 2).trim()) : text;
+  const head = oneLine(body, label);
+  return head === text ? null : head;
+}
+
+/** An entry's comment; with `clamp`, a long one shows one line (commentHead) and More. */
+function Comment({ id, text, clamp, label }: { id: string; text: string; clamp?: boolean; label?: string }) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const head = clamp ? commentHead(text, label) : null;
+  if (!head) return <span className="k-hint" id={id}>{text}</span>;
+  return (
+    <span className="k-hint">
+      <span id={id}>{open ? text : head}</span>
+      <button type="button" className="k-link k-sform-more" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? t("ui.schemaForm.less") : t("ui.schemaForm.more")}</button>
+    </span>
   );
 }
 

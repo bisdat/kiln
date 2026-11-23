@@ -57,8 +57,12 @@ struct Inputs {
     bool interpreter_held = true;              // interpreter_hold().held
     std::string held_text;                     // interpreter_hold().text
     bool release_allows_180 = false;           // the kiln-sfi.sf18 veto is open (sfi_release_policy.h: never in a release)
+    std::function<bool()> eml_r_present;       // checks game-folder dbghelp.dll, only when kiln is selected
     PlanReader read_plan;                      // asked only when kiln is selected and the profile names a plan
 };
+
+// The x64 dbghelp.dll carries an EML-R marker in ASCII or UTF-16LE (kiln-manage's engines.rs).
+bool eml_r_proxy(std::string bytes);
 
 // The idle class, in this order: safe idle known at boot, an invalid profile, play-once no-mods, kiln.json "plugins":
 // false. `safe_idle` is boot.cpp's safe-idle text when it is known before the freeze, else empty.

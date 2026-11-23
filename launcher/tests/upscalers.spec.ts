@@ -13,7 +13,7 @@ import { join } from "node:path";
 const SHOTS = join(import.meta.dirname, "..", "..", ".out", "launcher", "shots");
 
 async function open(page: Page, query: string) {
-  await page.goto(`/${query}#/settings`);
+  await page.goto(`/${query}#/settings/graphics`);
   await page.locator(".k-splash").waitFor({ state: "detached" });
 }
 type Call = { cmd: string; args: Record<string, unknown> };
@@ -28,10 +28,11 @@ async function shot(page: Page, name: string) {
   await page.screenshot({ path: join(SHOTS, `upscalers-${name}.png`) });
 }
 
-test("out of preview: the files are part of the Graphics card, and nothing is asked of a vendor by itself", async ({ page }) => {
+test("out of preview: the files are a group of Settings > Graphics, and nothing is asked of a vendor by itself", async ({ page }) => {
   await open(page, "");
-  const g = page.getByRole("region", { name: "Graphics" });
-  await expect(g).toBeVisible();
+  await expect(page.locator(".k-st-title")).toHaveText("Graphics");
+  const g = page.locator(".k-st-body");
+  await expect(g.getByRole("region", { name: "Kiln's graphics tools" })).toBeVisible();
   await expect(g.getByRole("region", { name: "Upscaler files" })).toBeVisible();
   await expect(g.getByText("Preview", { exact: true })).toHaveCount(0);
   expect((await vmock<Call[]>(page, "calls")).filter((c) => c.cmd !== "vendor_status")).toEqual([]);
@@ -55,6 +56,8 @@ test("a build whose files are not pinned offers nothing to download", async ({ p
   await open(page, "?vendor=unpinned");
   const s = section(page);
   await expect(s).toBeVisible();
+  // what the files are and how Kiln checks them: the group's More
+  await s.getByRole("button", { name: "More" }).click();
   await expect(s.getByTestId("upscalers-purpose")).toHaveText(
     "Kiln checks every file against the size and SHA-256 it pinned, and the game checks them again before it loads them. Remove deletes them again.");
   for (const name of ["AMD FSR", "Intel XeSS"]) {
@@ -159,7 +162,7 @@ test("a failed download says why, and Try again downloads it", async ({ page }) 
 async function again(page: Page) {
   await page.evaluate(() => { location.hash = "#/about"; });
   await expect(section(page)).toHaveCount(0);
-  await page.evaluate(() => { location.hash = "#/settings"; });
+  await page.evaluate(() => { location.hash = "#/settings/graphics"; });
   await expect(section(page)).toBeVisible();
 }
 

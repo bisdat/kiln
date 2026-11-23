@@ -882,6 +882,7 @@ pub fn inventory(inputs: &Inputs<'_>) -> Inventory {
                 entry.name = Some(m.name.clone());
                 entry.version = Some(m.version.to_string());
                 entry.kind = kind_of(&r);
+                switched_off(&mut entry, m);
                 if errors_by_dir
                     .get(&folder.directory)
                     .is_none_or(Vec::is_empty)
@@ -905,6 +906,8 @@ pub fn inventory(inputs: &Inputs<'_>) -> Inventory {
                     entry.name = Some(r.parsed().manifest.name.clone());
                     entry.version = Some(r.parsed().manifest.version.to_string());
                     entry.kind = kind_of(&r);
+                    // switched off wins over the hold: the plan says "disabled", never "skip"
+                    switched_off(&mut entry, &r.parsed().manifest);
                     entry.blockers.insert(0, Blocker {
                         code: "requires-1.8".into(),
                         detail: "uses ShroudForge 1.8 features; Kiln runs ShroudForge 1.7.9 packages only".into(),
@@ -1001,16 +1004,20 @@ pub fn inventory(inputs: &Inputs<'_>) -> Inventory {
         }
         inv.packages.push(entry);
     }
-    // A planned package that needs a blocked one is skipped with it (the package runs whole or not at all).
+    // A planned package that needs a blocked one is skipped with it (the package runs whole or not at all). A switched-off
+    // package is not "skipped" whatever blocks it: ShroudForge's planner already keeps out a dependent that requires it,
+    // and leaves it out of an optional edge. It never visits a switched-off package's own dependencies either, so no
+    // chain runs through one.
     let blocked: BTreeSet<String> = inv
         .packages
         .iter()
-        .filter(|p| !p.eligible())
+        .filter(|p| !p.eligible() && p.presence != Presence::Disabled)
         .filter_map(|p| p.id.clone())
         .collect();
     let deps: BTreeMap<String, Vec<String>> = inv
         .packages
         .iter()
+        .filter(|p| p.presence != Presence::Disabled)
         .filter_map(|p| {
             Some((
                 p.id.clone()?,
@@ -1036,6 +1043,17 @@ pub fn inventory(inputs: &Inputs<'_>) -> Inventory {
     inv.packages
         .sort_by_key(|p| p.directory.to_ascii_lowercase());
     inv
+}
+
+/// A package whose manifest ShroudForge 1.7.9 does not take (it needs 1.8, or discovery dropped it as a duplicate ID)
+/// but that a dialect reads, switched off: it stands as switched off (presence, targets), so its blockers never make it
+/// a skipped package. One that is switched on keeps its unknown presence.
+fn switched_off(entry: &mut PackageEntry, m: &sfi_package::package::manifest::Manifest) {
+    if !m.enabled {
+        entry.enabled = false;
+        entry.targets = targets(m.target);
+        entry.presence = Presence::Disabled;
+    }
 }
 
 fn chain_to_blocked(

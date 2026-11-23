@@ -630,7 +630,7 @@ public sealed class QuestLoweringTests
     public void The_sections_are_in_the_data_loaders_table()
     {
         var kinds = ((IEnumerable<(string Section, Func<ModBlocks, string, JsonElement, BlockHandle> Make)>)QuestBlockJson.Kinds).Select(k => k.Section);
-        Assert.Equal(["quests", "dialogues"], kinds);
+        Assert.Equal(["quests", "dialogues", "knowledge"], kinds);
         var shown = Compiler.Lower(Mod(), "lost-crates", Crates()).Low;
         Assert.Contains("quest lost-crates: 2 step(s), 3 reward(s)", shown.Summary());
         Assert.Contains("dialogue ilse-talk: 2 node(s)", Compiler.Lower(Mod(), "ilse-talk", Talk()).Low.Summary());

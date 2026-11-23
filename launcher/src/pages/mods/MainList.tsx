@@ -4,6 +4,7 @@
 // switch. Above the list: the filter (with many mods), Notes (what the last activation said about mod folders, when it
 // said something), Load order, Engines and Add mods. It scrolls inside the page.
 import { SfSelfHostedNotice } from "../../components/SfSelfHostedNotice";
+import { EmlRNotice } from "../../components/EmlRNotice";
 import { ShroudlinkNotice } from "../../components/ShroudlinkNotice";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, MoreHorizontal } from "lucide-react";
@@ -261,6 +262,7 @@ export function MainList({ game, mods, running }: { game: GameInstall; mods: Mod
   return (
     <div className={"k-mods" + (mods.rows.length ? "" : " empty") + (selecting ? " selecting" : "")} onKeyDown={keys}>
       <SfSelfHostedNotice profile={mods.profile} found={mods.found.data} />
+      <EmlRNotice found={mods.found.data} />
       <ShroudlinkNotice game={game} mods={mods} />
       <div className="k-mods-bar">
         {many && (

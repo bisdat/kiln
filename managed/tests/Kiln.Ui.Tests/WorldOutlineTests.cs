@@ -72,7 +72,8 @@ internal static unsafe class FakeRender
     private static int Add(ulong owner, uint entity, RenderNative.Outline* o, ulong* h)
     {
         if (AddRc != 0) return AddRc;
-        if (owner == 0 || entity == 0 || o == null || o->Size < 24 || (o->Rgba & 0xFF) == 0 || o->Reserved != 0 || (o->Flags & ~1u) != 0)
+        if (owner == 0 || entity == 0 || o == null || o->Size < 24 || (o->Rgba & 0xFF) == 0 || o->Reserved != 0 ||
+            (o->Flags & ~(Table->Base.Header.Version >= 3 ? 3u : 1u)) != 0)  // v3 (0.2.0-dev.30.5) takes THROUGH_WALLS
             return 1;
         var handle = NextHandle++;
         Added.Add((owner, entity, *o, handle));
@@ -116,13 +117,14 @@ internal static unsafe class FakeRender
         return 0;
     }
 
-    public sealed class Backend(HashSet<string> features, bool withTable = true) : IKilnBackend
+    public sealed class Backend(HashSet<string> features, bool withTable = true, bool withUi = false) : IKilnBackend
     {
         public string Version => "test";
         public bool IsTickThread => true;
         public bool HasFeature(string name) => features.Contains(name);
         public void Log(ulong owner, LogLevel level, string text) { }
-        public nint Service(string name, uint minVersion) => name == "kiln.render" && withTable ? (nint)Table : 0;
+        public nint Service(string name, uint minVersion) => name == "kiln.render" && withTable ? (nint)Table :
+            name == "kiln.ui" && withUi ? (nint)FakeUiTable.Table : 0;
         public ulong OwnerCreate(string id) => 99;
     }
 }
@@ -145,6 +147,7 @@ public sealed unsafe class WorldOutlineTests : IDisposable
     {
         Backend.Current = b;
         RenderNative.ResetForTests();
+        UiNative.ResetForTests();
         WorldOutlines.ResetForTests();
     }
 
@@ -153,7 +156,9 @@ public sealed unsafe class WorldOutlineTests : IDisposable
         WorldOutlines.ResetForTests();
         Backend.Current = _previous;
         RenderNative.ResetForTests();
+        UiNative.ResetForTests();
         FakeRender.Free();
+        FakeUiTable.Free();
     }
 
     private static ModContext NewMod(ulong owner) => HostAccess.CreateContext(
@@ -216,6 +221,31 @@ public sealed unsafe class WorldOutlineTests : IDisposable
     }
 
     [Fact]
+    public void ThroughWalls_asks_kiln_render_v3_for_the_position_and_refuses_an_older_one()
+    {
+        // 0.2.0-dev.30.5 (GitHub issue 111 follow-up): KILN_RENDER_OUTLINE_THROUGH_WALLS, outline_info's position (56 bytes)
+        Assert.Equal(56, sizeof(RenderNative.OutlineInfo));
+        Assert.Equal(32, (int)Marshal.OffsetOf<RenderNative.OutlineInfo>(nameof(RenderNative.OutlineInfo.X)));
+        PrepareSilhouettes([Ui.World.OutlineCapability, Ui.World.ThroughWallsCapability]);
+        using (var o = Ui.World.Outline(Chest, new OutlineOptions { ThroughWalls = true }))
+        {
+            Assert.Equal(RenderNative.OutlineThroughWalls, FakeRender.Added[^1].Opts.Flags);
+            Assert.True(o.Options.ThroughWalls);
+            Assert.Single(WorldOutlines.LiveThroughWalls());
+        }
+        Assert.Empty(WorldOutlines.LiveThroughWalls());
+        FakeRender.Table->Base.Header.Version = 2;
+        UiCaps.Rows.Refresh();
+        var e = Assert.Throws<KilnUnavailableException>(() => Ui.World.Outline(Chest, new OutlineOptions { ThroughWalls = true, Pulse = true }));
+        Assert.Equal(Ui.World.ThroughWallsCapability, e.Capability);
+        Assert.Equal(CapabilityReason.ServiceOlder, Capabilities.Get(e.Capability).Reason);
+        Assert.Single(FakeRender.Added); // no silent fallback request
+        using (Ui.World.Outline(Chest, new OutlineOptions { Pulse = true }))
+            Assert.Equal(RenderNative.OutlinePulse, FakeRender.Added[^1].Opts.Flags);
+        Assert.False(new OutlineOptions().ThroughWalls);
+    }
+
+    [Fact]
     public void A_default_outline_is_gold_steady_and_until_removed()
     {
         using var outline = Ui.World.Outline(Chest);
@@ -267,7 +297,7 @@ public sealed unsafe class WorldOutlineTests : IDisposable
         Assert.Equal(reasons.Count, Enum.GetValues<OutlineReason>().Length);
         foreach (var (r, v) in reasons) Assert.Equal(v, (int)r);
         Assert.Equal(24, sizeof(RenderNative.Outline));
-        Assert.Equal(24, sizeof(RenderNative.OutlineInfo));
+        Assert.Equal(56, sizeof(RenderNative.OutlineInfo));  // the position appended in 0.2.0-dev.30.5
         Assert.Equal(208, sizeof(RenderNative.OutlineStatus));
         Assert.Equal(112, sizeof(RenderNative.Table));
         Assert.Equal(152, sizeof(RenderNative.TableV2));
@@ -351,5 +381,151 @@ public sealed unsafe class WorldOutlineTests : IDisposable
         Assert.Equal(removed, FakeRender.Removed.Count);
         Assert.Equal(0, WorldOutlines.LiveCount);
         Assert.Throws<InvalidOperationException>(() => As(mod, () => Ui.World.Outline(Chest)));
+    }
+    private static int _silhouettePolylines;
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int SilhouetteStatus(RenderNative.Status* s) { s->Camera = 1; return 0; }
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int SilhouetteOffline(RenderNative.Status* s) => 3;
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int SilhouetteCamera(RenderNative.Camera* c)
+    {
+        *c = new() { Size = (uint)sizeof(RenderNative.Camera), Valid = 1, Available = 1, Qw = 1, FovY = MathF.PI / 3 };
+        return 0;
+    }
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static void SilhouettePolyline(float* xy, uint count, uint color, float width, int closed, int filled) => _silhouettePolylines++;
+    private static void DrawSilhouettes() => typeof(ThroughWalls).GetMethod("Draw",
+        System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!.Invoke(null,
+        [new UiDraw { Frame = new UiNative.Frame { Width = 1920, Height = 1080, DpiScale = 1 } }]);
+    private static void PrepareSilhouettes(HashSet<string> rows)
+    {
+        FakeUiTable.Install();
+        if (rows.Contains(Ui.World.ThroughWallsCapability)) rows.Add("render.camera");
+        Use(new FakeRender.Backend(rows, withUi: true));
+        FakeRender.Table->Base.Header.Version = 3;
+        FakeRender.Table->Base.GetStatus = &SilhouetteStatus;
+        FakeRender.Table->Base.GetCamera = &SilhouetteCamera;
+        FakeRender.Table->Base.Polyline = &SilhouettePolyline;
+        _silhouettePolylines = 0;
+    }
+    private static void Position(ulong handle, uint state, uint reason)
+    {
+        FakeRender.Set(handle, state, reason);
+        var (owner, info) = FakeRender.Infos[handle];
+        info.PositionOk = 1; info.Z = 10;
+        FakeRender.Infos[handle] = (owner, info);
+    }
+
+    [Theory]
+    [InlineData(0u, 4u, true)] // setting off
+    [InlineData(0u, 2u, true)] // another priority winner
+    [InlineData(0u, 1u, true)] // pending the next step
+    [InlineData(0u, 3u, true)] // no model
+    [InlineData(2u, 0u, true)] // the game's or another tool's highlight wins
+    [InlineData(1u, 0u, false)] // capability lost after the request
+    public void Silhouettes_respect_native_policy_winner_and_capability(uint state, uint reason, bool capability)
+    {
+        HashSet<string> rows = [Ui.World.OutlineCapability, Ui.World.ThroughWallsCapability];
+        PrepareSilhouettes(rows);
+        using var outline = Ui.World.Outline(Chest, new OutlineOptions { ThroughWalls = true });
+        Position(outline.Handle, state, reason);
+        if (!capability) Capabilities.Report(Ui.World.ThroughWallsCapability, CapabilityState.Unavailable, CapabilityReason.Policy, "silhouettes switched off by the test");
+        DrawSilhouettes();
+        Assert.Equal(0, _silhouettePolylines);
+    }
+
+    [Fact]
+    public void Silhouettes_draw_only_the_native_winner_and_can_resume()
+    {
+        PrepareSilhouettes([Ui.World.OutlineCapability, Ui.World.ThroughWallsCapability]);
+        using var low = Ui.World.Outline(Chest, new OutlineOptions { ThroughWalls = true });
+        using var high = Ui.World.Outline(Chest, new OutlineOptions { ThroughWalls = true, Priority = 5 });
+        Position(low.Handle, RenderNative.OutlineWaiting, (uint)OutlineReason.Outshone);
+        Position(high.Handle, RenderNative.OutlineShown, 0);
+        DrawSilhouettes();
+        Assert.Equal(2, _silhouettePolylines); // one fill and one edge, not two requests
+        Position(high.Handle, RenderNative.OutlineWaiting, (uint)OutlineReason.SwitchedOff);
+        DrawSilhouettes();
+        Assert.Equal(2, _silhouettePolylines);
+        Position(high.Handle, RenderNative.OutlineShown, 0);
+        DrawSilhouettes();
+        Assert.Equal(4, _silhouettePolylines);
+    }
+
+    [Fact]
+    public void Silhouette_support_tolerates_a_table_without_an_optional_status_probe()
+    {
+        PrepareSilhouettes([Ui.World.OutlineCapability, Ui.World.ThroughWallsCapability]);
+        FakeUiTable.Table->Base.Base.Base.Status = null;
+        Assert.True(UiCaps.ThroughWallsState().Ok);
+    }
+
+    [Fact]
+    public void Silhouette_support_is_refused_when_overlay_drawing_is_explicitly_off()
+    {
+        PrepareSilhouettes([Ui.World.OutlineCapability, Ui.World.ThroughWallsCapability]);
+        FakeUiTable.StatusError = "the overlay's drawing is off: disabled by the player";
+        var state = UiCaps.ThroughWallsState();
+        Assert.False(state.Ok);
+        Assert.Equal(CapabilityReason.Faulted, state.Reason);
+        Assert.Equal(FakeUiTable.StatusError, state.Why);
+    }
+
+    [Fact]
+    public void An_unavailable_silhouette_is_refused_with_its_capability_reason()
+    {
+        PrepareSilhouettes([Ui.World.OutlineCapability]);
+        Assert.False(Ui.World.ThroughWallsAvailable);
+        var e = Assert.Throws<KilnUnavailableException>(() => Ui.World.Outline(Chest, new OutlineOptions { ThroughWalls = true }));
+        Assert.Equal(Ui.World.ThroughWallsCapability, e.Capability);
+        Assert.Contains(Capabilities.Why(Ui.World.ThroughWallsCapability), e.Message);
+        Assert.Empty(FakeRender.Added);
+        Assert.Equal(0, WorldOutlines.LiveCount);
+        Assert.False(ThroughWalls.Drawing);
+        using var plain = Ui.World.Outline(Chest); // the normal highlight is still available
+    }
+
+    [Theory]
+    [InlineData(false, OutlineReason.Expired, true)]
+    [InlineData(false, OutlineReason.Despawned, true)]
+    [InlineData(false, OutlineReason.WorldEnded, true)]
+    [InlineData(true, OutlineReason.Removed, true)]
+    [InlineData(false, OutlineReason.Expired, false)]
+    [InlineData(true, OutlineReason.Removed, false)]
+    public void Ended_or_forgotten_silhouettes_retire_without_a_mod_state_read(bool missing, OutlineReason reason, bool canDraw)
+    {
+        HashSet<string> rows = [Ui.World.OutlineCapability, Ui.World.ThroughWallsCapability];
+        PrepareSilhouettes(rows);
+        var outline = Ui.World.Outline(Chest, new OutlineOptions { ThroughWalls = true });
+        if (missing) FakeRender.Infos.Remove(outline.Handle);
+        else FakeRender.Set(outline.Handle, RenderNative.OutlineEnded, (uint)reason);
+        if (!canDraw)
+        {
+            Capabilities.Report(Ui.World.ThroughWallsCapability, CapabilityState.Unavailable, CapabilityReason.Policy, "silhouettes switched off by the test");
+            FakeRender.Table->Base.GetStatus = &SilhouetteOffline;
+        }
+        DrawSilhouettes();
+        Assert.Equal(0, WorldOutlines.LiveCount);
+        Assert.False(ThroughWalls.Drawing);
+        Assert.Equal(0ul, outline.Handle); // retired before the mod reads State
+        Assert.Equal((OutlineState.Ended, reason), (outline.State, outline.Reason));
+        Assert.Equal(0, _silhouettePolylines);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Removing_the_last_silhouette_stops_drawing_without_another_frame(bool unload)
+    {
+        PrepareSilhouettes([Ui.World.OutlineCapability, Ui.World.ThroughWallsCapability]);
+        var mod = NewMod(72);
+        var outline = As(mod, () => Ui.World.Outline(Chest, new OutlineOptions { ThroughWalls = true }));
+        Assert.True(ThroughWalls.Drawing);
+        if (unload) mod.Retire();
+        else outline.Dispose();
+        Assert.Equal(0, WorldOutlines.LiveCount);
+        Assert.False(ThroughWalls.Drawing);
+        Assert.Equal((OutlineState.Ended, unload ? OutlineReason.ModUnloaded : OutlineReason.Removed), (outline.State, outline.Reason));
     }
 }

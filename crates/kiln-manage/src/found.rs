@@ -101,7 +101,7 @@ pub struct OwnLoader {
     pub engine: Engine,
     /// The engine's name ("EML (Enshrouded Mod Loader)").
     pub name: String,
-    /// The kinds whose game-folder mods it runs itself.
+    /// The Kiln mod kinds whose game-folder mods it runs itself. Empty for EML-R, whose mods Kiln does not manage.
     pub kinds: Vec<ModKind>,
     /// Its file, relative to the game (`dbghelp.dll`, `kiln/chain/eml-dinput8.dll`).
     pub file: String,
@@ -257,7 +257,7 @@ fn own_loaders(game: &Path) -> (Vec<OwnLoader>, bool) {
     let mut kiln = false;
     let mut push = |e: Engine, file: String| {
         let kinds = loader_kinds(e);
-        if !kinds.is_empty() && !out.iter().any(|l| l.engine == e && l.file.eq_ignore_ascii_case(&file)) {
+        if (e == Engine::EmlR || !kinds.is_empty()) && !out.iter().any(|l| l.engine == e && l.file.eq_ignore_ascii_case(&file)) {
             out.push(OwnLoader { engine: e, name: e.name().to_string(), kinds, file });
         }
     };

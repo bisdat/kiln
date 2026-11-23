@@ -1812,7 +1812,7 @@ mod tests {
     /// never offers to load it late, which would switch its MODS tab off. Another DLL in that place keeps the fix.
     #[test]
     fn the_shroudlink_addon_is_never_offered_late() {
-        let (_t, _dirs, install) = scratch_install("addon-late");
+        let (_t, _dirs, install) = scratch_absolute_install("addon-late");
         let chain = install.path.join("kiln/chain");
         std::fs::create_dir_all(&chain).unwrap();
         // the addon as Kiln's start knows it: its two exports, whatever the file is called and whatever text it holds
@@ -1836,7 +1836,7 @@ mod tests {
             assert!(v.hint.contains("shroudlink's client addon") && v.hint.contains("native UI disabled"), "{}", v.hint);
         }
         // the same addon chained from a profile (a native mod at its game-side path), also renamed before import
-        let game_side = format!("Z:{}", chain.join("shroudlink-client.dll").display()).replace('/', "\\");
+        let game_side = crate::winpath::to_game(&chain.join("shroudlink-client.dll"), &install).unwrap();
         let native = [ChainViewEntry { entry: entry(&game_side, Section::Profile, None, Some("shroudlink-client")), late: false, late_by: None, off_by: None, early_by: None, loader: false, gated: true }];
         assert_eq!(overlap_view(overlap("shroudlink-client.dll"), &native, &[], &gated).fix, "none");
         for f in ["hook-dinput8.dll", "other-dinput8.dll"] {
@@ -1848,7 +1848,7 @@ mod tests {
     /// The manual late switch refuses it too, with the reason; switching late off stays possible.
     #[test]
     fn the_shroudlink_addon_cannot_be_switched_late() {
-        let (_t, _dirs, install) = scratch_install("addon-switch");
+        let (_t, _dirs, install) = scratch_absolute_install("addon-switch");
         let chain = install.path.join("kiln/chain");
         std::fs::create_dir_all(&chain).unwrap();
         std::fs::write(chain.join("shroudlink-dinput8-2.dll"), crate::pe::build_test_dll(&["DirectInput8Create", "shroudlink_shutdown"], b"")).unwrap();
@@ -1862,25 +1862,20 @@ mod tests {
         assert!(err.message.contains("shroudlink's client addon") && err.message.contains("MODS tab"), "{}", err.message);
         assert!(!std::fs::read_to_string(install.path.join("kiln/chain.ini")).unwrap().contains("[late]"), "chain.ini unchanged");
         assert!(set_entry_late(&install, &mut p, &chained, false).is_ok(), "switching late off stays possible");
-        let game_side = format!("Z:{}", chain.join("shroudlink-dinput8-2.dll").display()).replace('/', "\\");
+        let game_side = crate::winpath::to_game(&chain.join("shroudlink-dinput8-2.dll"), &install).unwrap();
         let native = entry(&game_side, Section::Profile, None, Some("shroudlink-client"));
         assert!(set_entry_late(&install, &mut p, &native, true).is_err() && p.late.is_empty(), "{:?}", p.late);
         std::fs::write(chain.join("hook-dinput8.dll"), crate::pe::build_test_dll(&["DirectInput8Create"], b"")).unwrap();
-        let hook = entry(&format!("Z:{}", chain.join("hook-dinput8.dll").display()).replace('/', "\\"), Section::Profile, None, Some("hook"));
+        let hook_path = crate::winpath::to_game(&chain.join("hook-dinput8.dll"), &install).unwrap();
+        let hook = entry(&hook_path, Section::Profile, None, Some("hook"));
         assert!(set_entry_late(&install, &mut p, &hook, true).unwrap() && p.late == ["hook"]);
     }
 
     /// The view marks shroudlink's client addon in both shapes, a [chain] proxy and a profile's dllmain native, so the
     /// launcher offers no late switch for it; another proxy in the same place is not marked.
-    #[cfg(unix)]
     #[test]
     fn the_view_marks_the_shroudlink_addon_as_a_chain_entry_and_as_a_profile_native() {
-        let (t, dirs, mut install) = scratch_install("addon-view");
-        // Z mode, so the profile native's game-side path leads back to its Library DLL
-        let pfx = t.0.join("pfx");
-        std::fs::create_dir_all(pfx.join("dosdevices")).unwrap();
-        std::os::unix::fs::symlink("/", pfx.join("dosdevices/z:")).unwrap();
-        install.prefix = Some(pfx);
+        let (t, dirs, install) = scratch_absolute_install("addon-view");
         let addon = crate::pe::build_test_dll(&["DirectInput8Create", "shroudlink_shutdown"], b"");
         let chain = install.path.join("kiln/chain");
         std::fs::create_dir_all(&chain).unwrap();
@@ -1933,7 +1928,7 @@ mod tests {
 
     #[test]
     fn shroudlink_notice_native_versions_and_report() {
-        let (t, dirs, install) = scratch_install("sl-native-notice");
+        let (t, dirs, install) = scratch_absolute_install("sl-native-notice");
         let mut p = crate::profile::create(&dirs, "test", None).unwrap();
         p.mods.shroudlink.push(crate::profile::ProfileMod { id: "assistants".into(), version: "1".into(), hash: "abc".into(), enabled: true });
         let incoming = t.0.join("incoming");
@@ -1953,7 +1948,7 @@ mod tests {
         let folder = crate::library::path_of(&dirs, r).unwrap();
         let mut file: crate::profile::ProfileFile = serde_json::from_value(serde_json::json!({
             "format":1, "id":"test", "name":"test", "generation":1,
-            "mods":{"native":[{"id":r.id,"path":crate::winpath::unix_to_z(&folder).unwrap()}], "shroudlink":[{"id":"assistants","path":"mods"}]}
+            "mods":{"native":[{"id":r.id,"path":crate::winpath::to_game(&folder, &install).unwrap()}], "shroudlink":[{"id":"assistants","path":"mods"}]}
         })).unwrap();
         assert!(!shroudlink_report_missing(&dirs, &install, &file).unwrap());
         file.mods.native[0].enabled = false;
@@ -1989,6 +1984,27 @@ mod tests {
             exe_sha256: None, steam_flavor: None, path_mode: crate::game::PathMode::Copy, source: "manual".into(),
         };
         let dirs = DataDirs::at(t.0.join("data"));
+        (t, dirs, install)
+    }
+
+    fn scratch_absolute_install(tag: &str) -> (Scratch, DataDirs, GameInstall) {
+        use crate::game::{PathMode, Platform};
+        let (t, dirs, mut install) = scratch_install(tag);
+        #[cfg(windows)]
+        {
+            install.platform = Platform::Windows;
+            install.path_mode = PathMode::Native;
+        }
+        #[cfg(not(windows))]
+        {
+            let pfx = t.0.join("pfx");
+            std::fs::create_dir_all(pfx.join("dosdevices")).unwrap();
+            #[cfg(unix)]
+            std::os::unix::fs::symlink("/", pfx.join("dosdevices/z:")).unwrap();
+            install.platform = Platform::Proton;
+            install.prefix = Some(pfx);
+            install.path_mode = PathMode::Z;
+        }
         (t, dirs, install)
     }
 

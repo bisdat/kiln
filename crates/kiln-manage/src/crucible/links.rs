@@ -339,6 +339,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    // The desktop entry is registered only on Linux; Windows registers its own registry command.
+    #[cfg(unix)]
     #[test]
     fn the_desktop_entry_passes_the_link_as_one_argument() {
         let e = desktop_entry(Path::new("/opt/Kiln Launcher.AppImage")).unwrap();
