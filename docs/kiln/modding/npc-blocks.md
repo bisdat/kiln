@@ -321,6 +321,60 @@ publication. The prepared material bridge is still required before that closure 
 graph replacement is supported; body resources belong to the process's boot generation. `clients: mod` and
 `side: both` are required. Never override a vanilla template GUID to bypass content admission.
 
+On a dedicated server the cook makes no renderer output, so there is no `<model>.model.json` next to the graph. There
+the NPC block takes the model's GUID from the `keen::RenderModel` row of `assets/cooked/npc-bodies.v1.json` that is
+marked `skippedOnServer` (its file is `assets/cooked/<model path with / as _>.bin`), and it skips the bounds check:
+each player's game checks the bounds against its own cooked model. A game client always reads the sidecar.
+
+#### Is the body there? `NpcBodies.Status`
+
+New in **mod API 0.2.17** (dev.31). A handle from `Blocks.Define` never means the body was built: the game builds
+roster bodies once, at start. Ask:
+
+```csharp
+var status = NpcBodies.Status(tobinHandle);           // or NpcBodies.Status("my-mod:tobin") for a block without a handle
+if (!status.Ok) Log.Warn($"{status.BlockKey}: {status.State}: {status.Reason}");
+Events.On<NpcBodyBuildChangedEvent>(e => Log.Info($"{e.After.BlockKey}: {e.Before.State} -> {e.After.State}"));
+```
+
+| `State` | `Ok` | Meaning |
+|---|---|---|
+| `Ready` | true | this start's boot build published the body; `Template`, `Model`, `Graph` and `Generation` say what it built |
+| `Failed` | false | the boot build refused it, and `Reason` is the refusal (layout, dependency, ownership, roster, network clearance). A well-formed key with no build record at all is `Failed` with the reason `NoDefinition` |
+| `PendingRestart` | false | defined from C# after the start's build (below); `Reason` is `definition staged; restart required` |
+| `RemovalPendingRestart` | false | the mod was unloaded while the body was Ready. What the game built stays until the process ends; nothing live is taken away |
+| `Removed` | false | Ready at the previous start (the native ledger `kiln-quests/native/npc-bodies.ledger.json`) and gone now |
+
+`Status` runs on any thread. A key that is not `mod:block` and a handle that is not an NPC block's throw
+`ArgumentException`; with `blocks.npc_body` off it throws `KilnUnavailableException` naming `blocks.npc_body`. A bad
+block is still the compiler's `BlockError` when you define it: a native refusal is a status, never an exception.
+
+`NpcBodyBuildChangedEvent` comes **once per change of state or generation**, Failed and RemovalPendingRestart
+included. What the start built comes as a change from "no record" (`Before` is `Failed`/`NoDefinition`). On a
+dedicated server it is posted on the tick thread at the first service tick after the change; on a game client
+(`ClientSide` true) on the main thread before the client world's next step, so a handler there must not assume the
+server's tick. Observe only.
+
+#### Pending restart
+
+An NPC block with a body of its own defined in C# (`Blocks.Define` in `OnLoad`) is known only after the start's build
+has run. Kiln writes it for the next start (as every NPC block from code, above) and reports it `PendingRestart`
+until then. If the start already built that very body (the same model and graph, from the file an earlier start
+wrote) it is `Ready`. Put authored bodies in `blocks/*.json` to have them on the first start.
+
+#### The join check
+
+Players need the same bodies as the server, built the same way: having the mod installed is not enough. HELLO and
+WELCOME carry `kiln.npcbodies`, a hash of each Ready body's per-body closure hash ([network.md](../network.md#npc-bodies-at-the-join)),
+and the server refuses a player whose bodies differ, naming the first body that does. A player whose game defined a body
+after its start (`PendingRestart`) is refused with a restart-required reason. `modSync: off` lets them in with a warning
+in the server's log.
+
+Not verified in a real game yet: the server's model GUID from the body manifest against a player's cooked model, the
+event on a player's main thread, and a refusal for a different body shown on a player's screen. The tests cover them
+offline (`Kiln.Blocks.Tests`, `Kiln.Network.Tests`); the test kit scripts the start's rows with `KilnHarness.NpcBodies`
+([unit-tests.md](unit-tests.md)).
+
 ## Ids
 From the mod id and the block's name: the template, variant (`<mod>:<name>`), arsenal, attacks (`<mod>:attack:<name>`), sequences, phases and states
 (`<mod>:state:<name>`, the same id the cook gives the graph's state). The cooked graph is the animation block's name, or `<animation>.<body>` for a body

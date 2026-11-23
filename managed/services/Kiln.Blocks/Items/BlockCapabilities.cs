@@ -98,7 +98,10 @@ internal static class BlockCapabilities
 
     // Synchronous lowering tests may supply a row without changing the process-wide native capability table.
     [ThreadStatic] internal static Func<Row>? NpcBodyForTests;
-    internal static Row CurrentNpcBodyRow() => NpcBodyForTests?.Invoke() ?? NpcBodyRow(ServiceCaps.Probe("kiln.knowledge"), Capabilities.Get);
+    // The test kit's (Fakes/BootPack): process-wide, as the kit has no kiln.knowledge; a test switches the reported row off instead.
+    internal static Func<Row>? NpcBodyKit;
+    internal static Row CurrentNpcBodyRow() =>
+        NpcBodyForTests?.Invoke() ?? NpcBodyKit?.Invoke() ?? NpcBodyRow(ServiceCaps.Probe("kiln.knowledge"), Capabilities.Get);
 
     // ---- villager routines (0.2.0-dev.31; docs/kiln/services/routines.md) ------------------------------------------
     // routines.decisions is a sigdb feature kiln.routines serves (the villager task chooser and its sleep check); nothing

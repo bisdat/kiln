@@ -219,3 +219,9 @@ Kiln.TestKit.HarnessUiSnapshot.Demands.get -> int
 Kiln.TestKit.HarnessUiSnapshot.Tokens.get -> int
 Kiln.TestKit.HarnessUiSnapshot.Publication.get -> ulong
 Kiln.TestKit.KilnHarness.UiSnapshot.get -> Kiln.TestKit.HarnessUiSnapshot!
+Kiln.TestKit.HarnessNpcBodies
+Kiln.TestKit.HarnessNpcBodies.Clear() -> void
+Kiln.TestKit.HarnessNpcBodies.Failed(string! mod, string! npc, string! reason, ulong generation = 0) -> void
+Kiln.TestKit.HarnessNpcBodies.Ready(string! mod, string! npc, System.Guid template = default(System.Guid), System.Guid model = default(System.Guid), System.Guid graph = default(System.Guid), string? closure = null, ulong generation = 1) -> void
+Kiln.TestKit.HarnessNpcBodies.Removed(string! mod, string! npc, ulong generation = 0) -> void
+Kiln.TestKit.KilnHarness.NpcBodies.get -> Kiln.TestKit.HarnessNpcBodies!
