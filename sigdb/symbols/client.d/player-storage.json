@@ -1,0 +1,6 @@
+{
+  "format": 1,
+  "side": "client",
+  "extends": "server.d/player-storage.json",
+  "comment": "Hosted authority copy: all entry and layout patterns independently matched uniquely on client 26430625 (svn 1287369). See docs/re/player-storage.md."
+}
