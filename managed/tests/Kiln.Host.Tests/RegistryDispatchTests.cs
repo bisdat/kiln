@@ -166,6 +166,32 @@ public sealed class RegistryDispatchTests : ModsFixture
         finally { WorldConfigs.Reset(); }
     }
     [Fact]
+    public void AContextConstructionFailureDoesNotStarveOtherPendingAuthors()
+    {
+        using var native = new FakeRegistry(); using var manager = NewManager(native.Host);
+        using var dispatch = new RegistryDispatch(manager); dispatch.Prepare(100);
+        var first = Owner(native, "first"); var second = Owner(native, "second"); var seen = new List<string>();
+        dispatch.Loaded(new Author(_ => seen.Add("first")), first, Root, false);
+        dispatch.Loaded(new Author(_ => seen.Add("second")), second, Root, false);
+        native.StatusFailures = 1;
+        Assert.Null(Record.Exception(dispatch.FlushLoads));
+        Assert.Equal(new[] { "second", "second", "second" }, seen);
+        first.Retire(); second.Retire();
+    }
+    [Fact]
+    public void AWorldNotificationFaultDoesNotEscapeIntoTheSaveCaller()
+    {
+        var host = new FakeHost(); var previous = RegistryRuntime.WorldChanged;
+        WorldConfigs.Reset();
+        try
+        {
+            RegistryRuntime.WorldChanged = _ => throw new InvalidOperationException("notification fixture fault");
+            Assert.Null(Record.Exception(() => WorldConfigs.Announce(null)));
+            Assert.True(host.Has("notification fixture fault"), host.Dump());
+        }
+        finally { RegistryRuntime.WorldChanged = previous; WorldConfigs.Reset(); }
+    }
+    [Fact]
     public void AThrowingAutomaticAuthorIsNotCalledInLaterPasses()
     {
         using var native = new FakeRegistry(); using var manager = NewManager(native.Host);

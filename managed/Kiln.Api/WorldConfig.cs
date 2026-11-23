@@ -130,7 +130,9 @@ internal static class WorldConfigs
             }
         }
         if (any) Watch(directory);
-        RegistryRuntime.WorldChanged?.Invoke(directory); // registry world-load passes see this world's already-bound settings
+        // Registry dispatch is an observer, not a reason for a save open/adoption to fail.
+        try { RegistryRuntime.WorldChanged?.Invoke(directory); }
+        catch (Exception e) { Backend.Current.Log(0, LogLevel.Warn, $"registry: world settings notification failed: {e.Message}"); }
     }
 
     /// <summary>A mod that only uses per-world configs never touches Kiln.Saves, so nothing would start it: this does

@@ -232,10 +232,11 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
             {
                 if (!record.Context.Alive || record.Faulted) continue;
                 ulong handle = 0;
-                var context = Context(record.Context, point, phase, World(), record.Code, false, inputs[record]);
-                using var scope = context.Enter();
+                RegistryContext? context = null;
                 try
                 {
+                    context = Context(record.Context, point, phase, World(), record.Code, false, inputs[record]);
+                    using var scope = context.Enter();
                     record.Instance.OnRegistry(context);
                     var ir = context.CaptureIr(); context.Close();
                     if (ir is null) continue;
@@ -245,8 +246,8 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
                     else Remember(record, _native.Commit(record.Context.Owner, handle));
                     handle = 0;
                 }
-                catch (Exception e) { context.Close(); Fault(record, e); }
-                finally { if (handle != 0) try { _native.Revert(record.Context.Owner, handle); } catch { } }
+                catch (Exception e) { Fault(record, e); }
+                finally { context?.Close(); if (handle != 0) try { _native.Revert(record.Context.Owner, handle); } catch { } }
             }
             // Every final handler read the add+alter view, never another mod's final commit.
             foreach (var (record, handle) in finals)
