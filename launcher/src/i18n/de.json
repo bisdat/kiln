@@ -3441,7 +3441,13 @@
     "checkNow": "Jetzt prüfen",
     "testBuild": "Testversion {beta} von {current}.",
     "switchBack": "Zurück zur Release-Version",
-    "followBeta": "Du folgst der Beta: Die nächste Testversion kommt als Update."
+    "followBeta": "Du folgst der Beta: Die nächste Testversion kommt als Update.",
+    "checkingNow": "Suche nach Updates…",
+    "upToDateLine": "Kiln ist aktuell ({version})",
+    "availableLine": "Kiln {version} ist verfügbar",
+    "failedLine": "Prüfung fehlgeschlagen: {reason}",
+    "checkedAt": "geprüft: {time}",
+    "noAnswer": "kein Update-Server hat geantwortet"
   },
   "nav": {
     "play": "Spielen",

@@ -3925,7 +3925,13 @@
     "checkNow": "Check now",
     "testBuild": "Test build {beta} of {current}.",
     "switchBack": "Switch back to the release",
-    "followBeta": "Following the beta: the next test build comes as an update."
+    "followBeta": "Following the beta: the next test build comes as an update.",
+    "checkingNow": "Checking for updates…",
+    "upToDateLine": "Kiln is up to date ({version})",
+    "availableLine": "Kiln {version} is available",
+    "failedLine": "Check failed: {reason}",
+    "checkedAt": "checked {time}",
+    "noAnswer": "no update server answered"
   },
   "nav": {
     "play": "Play",
