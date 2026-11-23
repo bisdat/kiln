@@ -12,6 +12,8 @@ public sealed class TkRegistryMod : Mod
     public override void OnRegistry(RegistryContext context)
     {
         var registry = DataRegistry.For(context);
+        registry.Add(view => view.Items.AddLike(new("tk-registry:logs"), new("game:wood"), item => item.MaxStack = 17));
+        registry.Alter(view => view.Loot.Remove("game:wood"));
         _retained = registry.Items["game:wood"];
         _retained.MaxStack = _retained.MaxStack + 5;
     }

@@ -53,6 +53,8 @@ struct BaseModel {
         std::map<std::string, Value> fields;
         std::set<std::string> traits;
         std::string removed_in;  // not empty: the alias ledger says this game build removed it
+        // Internal flattened stack ranges, one per drop group. Never part of schema fields or author-facing values.
+        std::vector<std::pair<size_t, size_t>> drop_groups;
     };
     std::map<std::string, std::vector<Entry>> registries;  // entries in the registry's own order
     std::set<std::string> retired;                          // "<registry>|<id>" the ids ledger retired: never added again
@@ -154,14 +156,35 @@ struct ModInput {
     std::function<void(Stage, const View&, Batch*)> code;
 };
 
+// Kiln-internal binding data, never a game pointer or a public ABI record. Constructor values are the Add-only
+// baseline; values are the effective composed view. Later stages must not be baked into the native clone twice.
+struct EntryDefinition {
+    std::string like, base, mod, source;
+    uint32_t n = 0;
+    std::map<std::string, Value> constructor_values, values;
+    std::set<std::string> traits;
+};
+struct EntryRemoval {
+    std::string mod, source;
+    Stage stage = Stage::Alter;
+    uint32_t n = 0;
+    std::string reason;
+};
+
 struct Result {
     std::map<FieldRef, FieldOutcome> fields;  // every touched field
     std::vector<Line> lines;                  // in the order they happened
     std::vector<Refusal> refused;
     std::vector<EntryRef> added, removed;
+    std::map<EntryRef, EntryDefinition> definitions;
+    std::map<EntryRef, EntryRemoval> removals;
 };
 
 Result compose(const Schema& schema, const BaseModel& base, const std::vector<OldWrite>& old, const std::vector<ModInput>& mods);
+// A pack reload recomputes fields from their original baseline, but cannot invalidate an already established item removal.
+// The caller retains the original GameStart entry operations in mods.
+Result compose(const Schema& schema, const BaseModel& base, const std::vector<OldWrite>& old,
+               const std::vector<ModInput>& mods, const Result& established);
 // A later entry point: keep the earlier point's values, writer chains, exclusive/yield claims and report.
 // Live callers refuse entry add/remove; this continuation is for field/list edits only.
 Result compose_after(const Schema& schema, const BaseModel& base, const Result& previous, const std::vector<ModInput>& mods);
@@ -169,7 +192,7 @@ Result compose_after(const Schema& schema, const BaseModel& base, const Result& 
 // Prepared immutable base for repeated stable field/list-only turns (no entry operations, raw edits or code).
 // Build once when the copied base is installed; later turns use overlays rather than re-walking/copying that base.
 struct PreparedBase;
-std::shared_ptr<const PreparedBase> prepare_base(const BaseModel& base);
+std::shared_ptr<const PreparedBase> prepare_base(const BaseModel& base, const Result* entries = nullptr);
 Result compose_after(const Schema& schema, const BaseModel& base, const PreparedBase& prepared,
                      const Result& previous, const std::vector<ModInput>& mods);
 

@@ -315,7 +315,7 @@
   "entry": {
     "add": true,
     "remove": "hidden",
-    "removeDoc": "A removed item stays in the game's tables (saves keep their copies) but is hidden from loot, drops and recipes."
+    "removeDoc": "GameStart only. Retains records and usable saved copies in inventory, equipment and containers; hides random loot and dependent recipes, and disables direct-drop slots without resizing. Whole removal is refused for unproven drop/recipe dependencies, missing group metadata or a group with no surviving spawnable stack. Removal wins later registry chance/weight conflicts."
   },
   "raw": "allowed"
 }

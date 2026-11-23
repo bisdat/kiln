@@ -50,6 +50,8 @@
 #include "menulayout.h"  // kiln.stationmenus: station menu layouts and the own workshops' trees (own_build)
 #include "nlohmann/json.hpp"
 #include "recipe_water.h"
+#include "registry_live.h"
+#include "registry/visibility.h"
 #include "refs.h"
 #include "services/kiln_assets.h"
 #include "services/kiln_caps.h"  // the row content.text
@@ -88,6 +90,8 @@ const KilnAssetsApi* assets_api() {  // also used by refs.cpp
 
 
 namespace {
+std::shared_ptr<const registry::Visibility> g_visibility = std::make_shared<const registry::Visibility>();
+registry::FilterIo filter_io() { return {&rd, &near_alloc}; }
 
 // ============================================================================================= engine ==========
 struct NcEngine {
@@ -751,6 +755,9 @@ struct Def {
     std::string display;  // recipes: the recipe name; items: texts["*"].name
     TextSet texts[kTextSlots];  // items: per slot, language key -> text ("*" = displayName / description / lore)
     json fields = json::object();
+    std::string registry_id;               // Kiln-internal stable entry identity, retained by sync/placeholders
+    json registry_fields = json::object(); // Kiln fields, translated before publishing each private clone
+    std::vector<std::string> registry_dependencies; // stable identities that must register before this definition
     json kitbash = json::object();  // items: reference keys (model, icon, perks, weaponType, refs, ...): refs.cpp
     json distribution = json::object();  // items: loot / drops / knowledge (distribution.cpp)
     std::vector<StackSpec> inputs, outputs;
@@ -791,6 +798,13 @@ struct Def {
     bool has_text(int slot) const { return !texts[slot].empty(); }
 };
 using DefPtr = std::shared_ptr<Def>;
+
+bool initialize_registry(Def& d, uintptr_t address, const Schema& schema, std::string* why) {
+    if (d.registry_id.empty()) return true;
+    Entry entry; entry.id = d.id; entry.name = d.name; entry.addr = address;
+    std::memcpy(entry.guid, d.guid, 16);
+    return registry_live_initialize_entry(d.kind, entry, d.registry_id, d.registry_fields, why, &schema);
+}
 
 // Definitions and clones share store_mutex(). A lock of their own deadlocked: the client world's setup held it and waited
 // for the store, while a job thread's first drop table held the store and waited for it.
@@ -871,6 +885,26 @@ struct WorldState {
     bool find_late_said = false; // ... and the one for an item defined while this world runs
     size_t find_items = 0;       // items mods defined when that line went out
 };
+bool registry_dependencies_ready(const Def& definition, const WorldState& world, std::string* why) {
+    std::lock_guard lock(store_mutex());
+    for (const auto& dependency : definition.registry_dependencies) {
+        const auto bar = dependency.find('|');
+        if (bar == std::string::npos) return *why = "a registry dependency is malformed", false;
+        const uint32_t kind = dependency.substr(0, bar) == "items" ? KILN_CONTENT_ITEMS : KILN_CONTENT_RECIPES;
+        const auto found = std::find_if(g_defs.begin(), g_defs.end(), [&](const auto& candidate) {
+            return candidate->kind == kind && candidate->registry_id == dependency.substr(bar + 1);
+        });
+        if (found == g_defs.end()) return *why = "dependency " + dependency + " is not defined", false;
+        const auto& parent = **found;
+        const bool registered = kind == KILN_CONTENT_ITEMS ? world.items.count(parent.id) != 0 : world.recipes.count(parent.id) != 0;
+        if (!registered || !parent.error.empty()) {
+            const auto reason = parent.error.empty() ? "not registered in this world" : parent.error;
+            *why = "dependency " + dependency + " refused: " + reason.substr(0, 700);
+            return false;
+        }
+    }
+    return true;
+}
 WorldState g_ws[KILN_WORLD_KINDS];
 std::mutex g_ui_mu;  // the recipe-UI hook reads the client / server state from the UI thread
 
@@ -1301,6 +1335,7 @@ uintptr_t build_clone(Def& d, uintptr_t base, WorldState& ws, bool* retry, std::
     }
 #endif
     settle_gear(d, p);
+    if (!initialize_registry(d, reinterpret_cast<uintptr_t>(p), L.item, why)) return 0;
     return reinterpret_cast<uintptr_t>(p);
 }
 
@@ -1521,6 +1556,7 @@ uintptr_t build_recipe(Def& d, WorldState& ws, std::string* why) {
     std::memcpy(name, d.name.data(), d.name.size());
     set_blob(p, L.r_dbg, name, static_cast<uint32_t>(d.name.size()));
     if (!apply_fields(L.recipe, d.fields, p, d.name.c_str(), why)) return 0;
+    if (!initialize_registry(d, reinterpret_cast<uintptr_t>(p), L.recipe, why)) return 0;
     return reinterpret_cast<uintptr_t>(p);
 }
 
@@ -1729,6 +1765,12 @@ bool sync_world_pass(uint32_t kind, uintptr_t world) {
         note_registered(kind, world, ws);
         return true;
     }
+    // Missing-mod definitions can be the only registry user on a warm start. Resolve their stable references before
+    // construction takes the store lock; a recursive caller defers to the next ordinary world-thread sync pass.
+    for (const DefPtr& dp : defs) {
+        std::string why;
+        if (!registry_live_prepare_entry_identities(dp->registry_fields, &why)) return false;
+    }
     const bool active = active_world() == world;
     bool settled = true;
     uint32_t added_items = 0, added_recipes = 0, listed = 0, unlisted = 0;
@@ -1741,6 +1783,8 @@ bool sync_world_pass(uint32_t kind, uintptr_t world) {
             fail_once(ws, kind, d, d.lab_refuse);
             continue;
         }
+        std::string dependency;
+        if (!registry_dependencies_ready(d, ws, &dependency)) { fail_once(ws, kind, d, dependency); continue; }
         uintptr_t clone = 0;
         {
             std::lock_guard lock(store_mutex());
@@ -1799,6 +1843,7 @@ bool sync_world_pass(uint32_t kind, uintptr_t world) {
             continue;
         }
         ws.items[d.id] = clone;
+        d.error.clear();
         build_names(ws);
         ws.names[lower(d.name)] = NameRec{d.id, {}, clone};
         std::memcpy(ws.names[lower(d.name)].guid, d.guid, 16);
@@ -1826,6 +1871,8 @@ bool sync_world_pass(uint32_t kind, uintptr_t world) {
                 fail_once(ws, kind, d, d.lab_refuse);
                 continue;
             }
+            std::string dependency;
+            if (!registry_dependencies_ready(d, ws, &dependency)) { fail_once(ws, kind, d, dependency); continue; }
             uintptr_t info = 0;
             {
                 std::lock_guard lock(store_mutex());
@@ -1864,12 +1911,13 @@ bool sync_world_pass(uint32_t kind, uintptr_t world) {
                 }
                 std::lock_guard lock(g_ui_mu);
                 ws.recipes[d.id] = info;
+                d.error.clear();
                 if (active) add_kc_entry(KILN_CONTENT_RECIPES, d, info);
                 ++added_recipes;
             }
             // the workshop list: listed while the definition's owner is there
             auto lit = ws.listed.find(d.id);
-            const bool want = !d.orphan;
+            const bool want = !d.orphan; // registry visibility owns list layers; never mutate its compacted view here
             if (lit != ws.listed.end() && (!want || lit->second != info || ws.recipe_ws[d.id] != wid)) {
                 if (const uintptr_t arr = ws_array(ws.rreg, ws.recipe_ws[d.id])) ws_swap(arr, lit->second, 0);
                 std::lock_guard lock(g_ui_mu);
@@ -2098,6 +2146,7 @@ struct LootCache {
     uint64_t count = 0, gen = ~0ull;
     uintptr_t ext = 0;
     uint64_t ext_count = 0;
+    uint64_t visibility = 0;
 } g_loot_cache;
 
 std::atomic<uint64_t> g_loot_calls{0}, g_loot_extended{0};  // rolls that read the candidates / got the new items
@@ -2107,25 +2156,21 @@ LootSpan* __fastcall hk_lootitems(LootSpan* out, uintptr_t lreg) {
     g_loot_calls.fetch_add(1, std::memory_order_relaxed);
     if (!r || !r->data || !r->count || !LL.ok) return r;
     std::lock_guard lock(g_loot_mu);
-    if (lreg != g_loot_reg || g_loot_extra.empty()) return r;
+    const auto visibility = std::atomic_load(&g_visibility);
+    const std::vector<uintptr_t> extra = lreg == g_loot_reg ? g_loot_extra : std::vector<uintptr_t>{};
+    if (extra.empty() && visibility->loot.empty()) return r;
     g_loot_extended.fetch_add(1, std::memory_order_relaxed);
     LootCache& c = g_loot_cache;
-    if (c.src != r->data || c.count != r->count || c.gen != g_loot_gen || !c.ext) {
-        const size_t n = r->count + g_loot_extra.size();
-        auto* p = static_cast<uint8_t*>(near_alloc(r->data, n * LL.size));
-        if (!p || !rd(r->data, p, r->count * LL.size)) return r;
-        bool ok = true;
-        for (size_t i = 0; i < r->count && ok; ++i)
-            for (uint32_t o : LL.relocs) ok = ok && rebase(p + i * LL.size, r->data + i * LL.size, o);
-        for (size_t i = 0; i < g_loot_extra.size() && ok; ++i) {
-            uint8_t* e = p + (r->count + i) * LL.size;
-            ok = rd(g_loot_extra[i], e, LL.size);
-            for (uint32_t o : LL.relocs) ok = ok && rebase(e, g_loot_extra[i], o);
+    if (c.src != r->data || c.count != r->count || c.gen != g_loot_gen || c.visibility != visibility->generation || (!c.ext && c.ext_count)) {
+        std::string why;
+        const auto filtered = registry::filter_array(r->data, r->count, LL.size, LL.id, extra, LL.relocs, visibility->loot, filter_io(), &why);
+        if (!filtered) {
+            static bool said = false;
+            if (!said) LOGW("registry: random loot view refused: %s; returning no candidates", why.c_str());
+            said = true; r->data = 0; r->count = 0; return r;
         }
-        if (!ok) return r;
-        c = LootCache{r->data, r->count, g_loot_gen, reinterpret_cast<uintptr_t>(p), n};
-        LOGI("new content: random loot rolls see %zu item(s) (%llu of the game's + %zu new)", n,
-             static_cast<unsigned long long>(r->count), g_loot_extra.size());
+        c = LootCache{r->data, r->count, g_loot_gen, filtered->data, filtered->count, visibility->generation};
+        LOGI("new content: random loot rolls see %zu item(s) after registry visibility", filtered->count);
     }
     r->data = c.ext;
     r->count = c.ext_count;
@@ -4158,6 +4203,7 @@ struct ExtCache {
     std::vector<uintptr_t> added;
     uintptr_t ext = 0;
     uint64_t ext_count = 0;
+    uint64_t visibility = 0;
 };
 ExtCache g_ext[2];
 
@@ -4173,28 +4219,19 @@ Span* __fastcall hk_all(Span* out, uintptr_t rreg) {
             for (auto& [id, info] : ws.listed) added.push_back(info);
         }
     }
-    if (added.empty()) return r;
+    const auto visibility = std::atomic_load(&g_visibility);
+    if (added.empty() && visibility->recipes.empty()) return r;
     std::sort(added.begin(), added.end());
     ExtCache& c = g_ext[g_ws[KILN_WORLD_CLIENT].rreg == rreg ? 0 : 1];
-    if (c.reg != rreg || c.src != r->data || c.count != r->count || c.added != added || !c.ext) {
-        const size_t stride = L.recipe.size, n = r->count + added.size();
-        auto* p = static_cast<uint8_t*>(near_alloc(r->data, n * stride));
-        if (!p || !rd(r->data, p, r->count * stride)) return r;
-        bool ok = true;
-        for (size_t i = 0; i < r->count && ok; ++i)
-            for (uint32_t o : L.recipe_relocs) ok = ok && rebase(p + i * stride, r->data + i * stride, o);
-        for (size_t i = 0; i < added.size() && ok; ++i) {
-            uint8_t* e = p + (r->count + i) * stride;
-            ok = rd(added[i], e, stride);
-            for (uint32_t o : L.recipe_relocs) ok = ok && rebase(e, added[i], o);
+    if (c.reg != rreg || c.src != r->data || c.count != r->count || c.added != added || c.visibility != visibility->generation || (!c.ext && c.ext_count)) {
+        std::string why;
+        const auto filtered = registry::filter_array(r->data, r->count, L.recipe.size, L.r_id, added, L.recipe_relocs, visibility->recipes, filter_io(), &why);
+        if (!filtered) {
+            LOGW("registry: crafting recipe view refused: %s; returning no recipes", why.c_str());
+            r->data = 0; r->count = 0; return r;
         }
-        if (!ok) {
-            LOGW("new content: the crafting UI's recipe array could not be extended (out of reach)");
-            return r;
-        }
-        c = ExtCache{rreg, r->data, r->count, added, reinterpret_cast<uintptr_t>(p), n};
-        LOGI("new content: the crafting UI sees %zu recipe(s) (%llu of the game's + %zu new)", n,
-             static_cast<unsigned long long>(r->count), added.size());
+        c = ExtCache{rreg, r->data, r->count, added, filtered->data, filtered->count, visibility->generation};
+        LOGI("new content: the crafting UI sees %zu recipe(s) after registry visibility", filtered->count);
     }
     r->data = c.ext;
     r->count = c.ext_count;
@@ -4256,6 +4293,135 @@ bool valid_name(const std::string& s) {
 // links to it weakly (/alternatename), so either file builds without the other.
 extern "C" __declspec(dllexport) void kc_nc_set_texts(uint32_t tag, const char* json, size_t len) {
     if (tag && json && len) set_texts(tag, cm_texts(std::string(json, len)));
+}
+
+bool nc_registry_registered(uint32_t kind, const std::string& id, std::string* why) {
+    std::lock_guard lock(store_mutex());
+    const uint32_t world = active_kind();
+    if (world >= KILN_WORLD_KINDS || !active_world()) return *why = "entry registration waits for a world", false;
+    for (const auto& definition : g_defs) {
+        if (definition->kind != kind || definition->registry_id != id) continue;
+        const auto& registered = kind == KILN_CONTENT_ITEMS ? g_ws[world].items : g_ws[world].recipes;
+        if (definition->error.empty() && registered.count(definition->id)) return true;
+        return *why = definition->error.empty() ? "entry did not register in this world" : definition->error, false;
+    }
+    return *why = "entry has no queued content definition", false;
+}
+
+void nc_registry_record(uint32_t kind, const std::string& id, const std::string& fields_json) {
+    std::lock_guard lock(store_mutex());
+    const auto fields = json::parse(fields_json, nullptr, false);
+    if (!fields.is_object()) return;
+    for (const auto& definition : g_defs) {
+        if (definition->kind != kind || definition->registry_id != id) continue;
+        if (definition->body["registryFields"] == fields) continue;
+        // The constructor's registry_fields stays the GameStart baseline. Only the exported/save record follows live values.
+        definition->body["registryFields"] = fields;
+        definition->listed.clear();
+    }
+}
+
+bool nc_registry_supports(const std::string& registry, bool add, std::string* why) {
+    const bool client = g_api && g_api->side() == KILN_SIDE_CLIENT;
+    if (!N.on || !layouts()) return *why = "content definitions are unavailable on this build", false;
+    if (add && (registry == "items" || (registry == "recipes" && E.recipes))) return true;
+    if (!add && registry == "loot" && N.loot) return true;
+    if (!add && registry == "recipes" && E.recipes && (!client || N.recipe_ui)) return true;
+    if (!add && registry == "items" && N.loot && E.recipes && E.drops && (!client || N.recipe_ui)) return true;
+    return *why = registry + (add ? " add" : " remove") + " has no complete visibility backend on this build", false;
+}
+
+namespace {
+KilnOwner g_visibility_owner = 0;
+std::shared_ptr<const registry::Visibility> g_pending_visibility;
+std::set<uintptr_t> g_visibility_slots;
+uintptr_t g_visibility_world = 0;
+uint32_t g_visibility_session = 0;
+}
+void nc_registry_visibility(std::shared_ptr<const registry::Visibility> visibility) {
+    std::lock_guard lock(store_mutex());
+    // A private desired view: hooks keep the last verified view until every workshop write lands.
+    // Rebuild the layers over their original values, not an already compacted list.
+    if (g_visibility_owner) store_drop_owner(g_visibility_owner);
+    const auto before = std::atomic_load(&g_visibility);
+    const bool same = before->items == visibility->items && before->recipes == visibility->recipes && before->loot == visibility->loot;
+    g_pending_visibility = same ? before : std::move(visibility); // unrelated field commits must not invalidate immutable hook arrays
+}
+
+void nc_registry_publish_visibility() {
+    std::lock_guard lock(store_mutex());
+    if (!g_pending_visibility) return;
+    std::atomic_store(&g_visibility, std::move(g_pending_visibility)); // hook caches key the visibility generation
+}
+
+std::string nc_registry_verify_visibility(const std::vector<uintptr_t>& unwritten) {
+    std::lock_guard lock(store_mutex());
+    if (!g_pending_visibility || g_pending_visibility->recipes.empty()) return {};
+    for (const auto address : g_visibility_slots) {
+        Slot slot;
+        if (!store_slot_copy(address, &slot)) continue;
+        if (std::find(unwritten.begin(), unwritten.end(), address) != unwritten.end()) return "recipe visibility write failed; removal was not applied";
+        uint8_t now[kSlotBytes]{};
+        if (slot.foreign || !rd(address, now, slot.n) || std::memcmp(now, slot.current, slot.n) != 0)
+            return "another writer changed a recipe visibility slot; removal was not applied";
+    }
+    return {};
+}
+
+bool nc_registry_apply_visibility(std::string* why) {
+    std::lock_guard lock(store_mutex());
+    const auto visibility = g_pending_visibility ? g_pending_visibility : std::atomic_load(&g_visibility);
+    if (visibility->recipes.empty()) return true;
+    const uint32_t kind = active_kind();
+    if (kind >= KILN_WORLD_KINDS || !active_world()) return *why = "recipe visibility waits for a world", false;
+    const auto& ws = g_ws[kind];
+    if (g_visibility_world != ws.world || g_visibility_session != ws.session) {
+        g_visibility_slots.clear(); g_visibility_world = ws.world; g_visibility_session = ws.session;
+    }
+    if (!ws.rreg || !recipes_loaded(ws.rreg)) return *why = "recipe visibility waits for the world's recipe lists", false;
+    std::set<uintptr_t> lists;
+    for (const auto id : visibility->recipes) {
+        const auto recipe = map_get(ws.rreg + E.recipes_map, id);
+        uint32_t workshop = 0;
+        if (!recipe || !rdv(recipe + L.r_wid, workshop)) return *why = "a hidden recipe is not registered in this world", false;
+        if (const auto list = ws_array(ws.rreg, workshop)) lists.insert(list);
+    }
+    if (!g_visibility_owner) {
+        static constexpr char label[] = "registry:visibility";
+        g_visibility_owner = g_api->owner_create({label, sizeof label - 1});
+        if (!g_visibility_owner) return *why = "recipe visibility owner could not be created", false;
+        set_owner_label(g_visibility_owner, "registry visibility");
+    }
+    uint32_t ordinal = 0;
+    for (const auto list : lists) {
+        uint16_t count = 0;
+        if (!store_effective(list + N.ws_count, 2, reinterpret_cast<uint8_t*>(&count)) || count > N.ws_max) return *why = "recipe visibility list is unreadable", false;
+        std::vector<uint64_t> before(count);
+        for (size_t i = 0; i < count; ++i)
+            if (!store_effective(list + i * 8, 8, reinterpret_cast<uint8_t*>(&before[i]))) return *why = "recipe visibility list is unreadable", false;
+        std::map<uintptr_t, uint32_t> ids;
+        for (const auto recipe : before) {
+            uint32_t id = 0;
+            if (!recipe || !rdv(recipe + L.r_id, id)) return *why = "recipe visibility list has an unreadable entry", false;
+            ids[recipe] = id;
+        }
+        auto after = registry::visible_recipes(before, visibility->recipes, [&](uintptr_t p) { return std::optional<uint32_t>(ids.at(p)); });
+        if (after.size() == before.size()) continue;
+        const uint16_t remaining = static_cast<uint16_t>(after.size());
+        after.resize(count, 0);
+        for (size_t i = 0; i < count; ++i) {
+            if (after[i] == before[i]) continue;
+            uint8_t bytes[8]; std::memcpy(bytes, &after[i], 8);
+            g_visibility_slots.insert(list + i * 8);
+            if (!store_put(g_visibility_owner, registry_seq(0xFFF00000u + ++ordinal), KILN_CONTENT_RECIPES, 0, -1, -1,
+                           list + i * 8, 8, bytes, "registry hidden recipes")) return *why = "recipe visibility list could not be layered", false;
+        }
+        uint8_t bytes[2]; std::memcpy(bytes, &remaining, 2);
+        g_visibility_slots.insert(list + N.ws_count);
+        if (!store_put(g_visibility_owner, registry_seq(0xFFF00000u + ++ordinal), KILN_CONTENT_RECIPES, 0, -1, -1,
+                       list + N.ws_count, 2, bytes, "registry hidden recipes")) return *why = "recipe visibility count could not be layered", false;
+    }
+    return true;
 }
 
 KilnResult nc_define(KilnOwner owner, uint32_t kind, const std::string& text, bool pack, const std::string& source,
@@ -4406,6 +4572,22 @@ KilnResult nc_define(KilnOwner owner, uint32_t kind, const std::string& text, bo
     d->mod = mod_of_label(d->owner_label);
     if (d->placeholder && j["placeholder"].contains("mod") && j["placeholder"]["mod"].is_string())
         d->mod = j["placeholder"]["mod"].get<std::string>();
+    if (j.contains("registryFields")) {
+        if (!j["registryFields"].is_object() || !j.contains("registryId") || !j["registryId"].is_string())
+            return fail("registryFields requires a stable registryId and an object of Kiln fields");
+        d->registry_id = j["registryId"].get<std::string>();
+        const std::string mod = d->registry_id.substr(0, d->registry_id.find(':'));
+        if (d->registry_id.find(':') == std::string::npos || (!d->mod.empty() && d->mod != mod))
+            return fail("registryId does not belong to the definition's mod");
+        d->registry_fields = j["registryFields"];
+        if (j.contains("registryDependencies")) {
+            if (!j["registryDependencies"].is_array() || j["registryDependencies"].size() > 4096) return fail("registryDependencies is a bounded list of stable identities");
+            for (const auto& dependency : j["registryDependencies"]) {
+                if (!dependency.is_string()) return fail("registryDependencies contains a non-identity");
+                d->registry_dependencies.push_back(dependency.get<std::string>());
+            }
+        }
+    }
     d->source = source;
     d->pack = pack;
     j.erase("comment");

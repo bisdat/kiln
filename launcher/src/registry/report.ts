@@ -23,7 +23,7 @@ export interface RegistryRefusal { owner: string; field: string; stage: string; 
 export interface RegistryReport {
   written: string; generation: number; phase: string; baseOrigin: string; baseWriter: string; verified: boolean;
   fields: RegistryField[]; conflicts: RegistryConflict[]; refused: RegistryRefusal[];
-  entries: { kind: string; registry: string; id: string }[]; omitted: number; empty: boolean;
+  entries: { kind: string; registry: string; id: string; state: string; owner: string; source: string; reason: string }[]; omitted: number; empty: boolean;
   /** Earlier writers left out of field chains: native's truncated.writers plus this view's own 64-writer cut. */
   writersOmitted: number;
 }
@@ -180,7 +180,10 @@ export function parseRegistryReport(input: string): RegistryReport {
         stage: text(f.stage), reason: raw ? `${reason.startsWith("RestartRequired:") ? "RestartRequired: " : reason.startsWith("Unproven:") ? "Unproven: " : ""}${t("registry.advancedReason")}` : reason };
     }),
     entries: [added, removed].flatMap((rows, index) => rows.slice(0, REPORT_LIMITS.rows).map(x => {
-      const e = object(x); return { kind: index === 0 ? t("registry.added") : t("registry.removed"), registry: text(e.registry), id: text(e.id) };
+      const e = object(x);
+      const state = typeof e.state === "string" && ["pendingWorld", "registered", "hidden", "disabled"].includes(e.state) ? e.state : "";
+      return { kind: index === 0 ? t("registry.added") : t("registry.removed"), registry: text(e.registry), id: text(e.id), state,
+        owner: optional(e.mod), source: optional(e.source), reason: redactRaw(optional(e.reason)) };
     })),
     omitted: left, empty: total === 0,
   };

@@ -237,6 +237,7 @@ private:
     std::recursive_mutex m_;
 };
 StoreMutex& store_mutex();
+bool store_locked_here(); // internal admission for first-use work that must run outside the recursive lock
 
 // Where load time goes: inclusive time per phase (nested phases count in both), and the store lock's longest holds.
 enum Phase : uint8_t {
@@ -440,6 +441,14 @@ uint64_t gd_template_generation();                 // changes whenever a templat
 // runs here (server, and a client's own world), at that world's load, before the save is read. Ids are FNV-1a(GUID).
 // docs/kiln/services/content.md "New items and recipes", evidence docs/re/content.md section 7.
 void nc_boot();                                   // kiln_plugin_main: symbols, client hooks, world ticks
+namespace registry { struct Visibility; }
+bool nc_registry_supports(const std::string& registry, bool add, std::string* why);
+void nc_registry_visibility(std::shared_ptr<const registry::Visibility> visibility);
+bool nc_registry_apply_visibility(std::string* why); // store held, active world's thread
+std::string nc_registry_verify_visibility(const std::vector<uintptr_t>& unwritten);
+void nc_registry_publish_visibility(); // publish the immutable view only after verified store writes
+void nc_registry_record(uint32_t kind, const std::string& id, const std::string& fields_json); // copied effective placeholder/sync values
+bool nc_registry_registered(uint32_t kind, const std::string& id, std::string* why);
 void nc_world_ready(uintptr_t world, uint32_t kind);  // try_ready: the active world's registries just loaded
 void nc_world_stopping(uintptr_t world);          // world_reset, before the store is reset (world intact)
 void nc_packs_begin();                            // apply_packs, before apply_all_packs

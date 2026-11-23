@@ -1,4 +1,10 @@
 #nullable enable
+[KILNX031]Kiln.Registry.RegistryEntryOperations
+[KILNX031]static Kiln.Registry.RegistryEntryOperations.AddLike(this Kiln.Registry.RegistryEntries<Kiln.Registry.ItemEntry!>! entries, Kiln.Registry.RegistryId id, Kiln.Registry.RegistryId like, System.Action<Kiln.Registry.ItemEntry!>! configure) -> void
+[KILNX031]static Kiln.Registry.RegistryEntryOperations.AddLike(this Kiln.Registry.RegistryEntries<Kiln.Registry.RecipeEntry!>! entries, Kiln.Registry.RegistryId id, Kiln.Registry.RegistryId like, System.Action<Kiln.Registry.RecipeEntry!>! configure) -> void
+[KILNX031]static Kiln.Registry.RegistryEntryOperations.Remove(this Kiln.Registry.RegistryEntries<Kiln.Registry.ItemEntry!>! entries, string! pattern) -> void
+[KILNX031]static Kiln.Registry.RegistryEntryOperations.Remove(this Kiln.Registry.RegistryEntries<Kiln.Registry.RecipeEntry!>! entries, string! pattern) -> void
+[KILNX031]static Kiln.Registry.RegistryEntryOperations.Remove(this Kiln.Registry.RegistryEntries<Kiln.Registry.ItemLootEntry!>! entries, string! pattern) -> void
 [KILNX031]const Kiln.Registry.RegistrySchema.Format = 1 -> int
 [KILNX031]Kiln.Registry.BalanceDurability
 [KILNX031]Kiln.Registry.BalanceDurability.Growth.get -> double
@@ -396,6 +402,7 @@
 [KILNX031]Kiln.Registry.RegistryReady.World.get -> Kiln.RegistryWorld?
 [KILNX031]Kiln.Registry.RegistryReady.World.init -> void
 [KILNX031]Kiln.Registry.RegistryStage
+[KILNX031]Kiln.Registry.RegistryStage.Add(System.Action<Kiln.Registry.RegistryStage!>! entries) -> void
 [KILNX031]Kiln.Registry.RegistryStage.Alter(System.Action<Kiln.Registry.RegistryStage!>! edits) -> void
 [KILNX031]Kiln.Registry.RegistryStage.Balance.get -> Kiln.Registry.BalanceEntry!
 [KILNX031]Kiln.Registry.RegistryStage.Drops.get -> Kiln.Registry.RegistryEntries<Kiln.Registry.DropTableEntry!>!

@@ -107,6 +107,7 @@ json base_out(const BaseModel& b) {
             json row = {{"id", e.id}, {"fields", f}};
             if (!e.traits.empty()) row["traits"] = e.traits;
             if (!e.removed_in.empty()) row["removedIn"] = e.removed_in;
+            if (!e.drop_groups.empty()) row["dropGroups"] = e.drop_groups;
             a.push_back(std::move(row));
         }
         regs[reg] = std::move(a);
@@ -114,10 +115,10 @@ json base_out(const BaseModel& b) {
     json cover = json::object();
     for (const auto& [reg, m] : b.raw_cover)
         for (const auto& [k, c] : m) cover[reg][k] = {{"field", c.field}, {"converted", c.converted}};
-    return {{"registries", regs}, {"rawCover", cover}, {"retired", b.retired}};
+    return {{"entryMetadata", 1}, {"registries", regs}, {"rawCover", cover}, {"retired", b.retired}};
 }
 bool base_in(const json& j, BaseModel* b) {
-    if (!j.is_object() || !j.contains("registries") || !j["registries"].is_object()) return false;
+    if (!j.is_object() || j.value("entryMetadata", 0) != 1 || !j.contains("registries") || !j["registries"].is_object()) return false;
     for (auto it = j["registries"].begin(); it != j["registries"].end(); ++it) {
         auto& dst = b->registries[it.key()];
         for (const auto& row : it.value()) {
@@ -131,6 +132,7 @@ bool base_in(const json& j, BaseModel* b) {
             }
             if (row.contains("traits")) e.traits = row["traits"].get<std::set<std::string>>();
             if (row.contains("removedIn")) e.removed_in = row["removedIn"].get<std::string>();
+            if (row.contains("dropGroups")) e.drop_groups = row["dropGroups"].get<std::vector<std::pair<size_t, size_t>>>();
             dst.push_back(std::move(e));
         }
     }
@@ -216,7 +218,7 @@ std::string regmap_digest(const map::RegMap& rm) {
 // Stable full models share a family across mod sets; raw requests are never serialized into this cache.
 std::string cache_family(const Env& env, const map::RegMap& rm, const model::Need& need) {
     const json request = need.all && need.raw.empty() ? json{{"all", true}} : need_json(need);
-    return sha_hex(std::string(model::kDecoderVersion) + "\n" + env.kiln_version + "\n" + env.side + "\n" + env.exe_sha256 + "\n" +
+    return sha_hex(std::string(model::kDecoderVersion) + "\nentry-metadata-1\n" + env.kiln_version + "\n" + env.side + "\n" + env.exe_sha256 + "\n" +
         (rm.has_build ? (rm.build.verified ? "verified" : "unverified") : "none") + "\n" + regmap_digest(rm) + "\n" + request.dump());
 }
 std::string cache_path(const std::string& family) { return "cache/" + family.substr(0, 32) + ".json"; }
@@ -259,8 +261,19 @@ void write_base_cache(const Env& env, const std::string& family, model::Source& 
 }
 
 // ---- inputs ----
-void refuse_unmapped(const map::RegMap& rm, const Schema& schema, Batch* b, std::vector<Refusal>* refused) {
-    refuse_unmapped_edits(rm, schema, b, refused);
+void refuse_unmapped(const map::RegMap& rm, const Schema& schema, Batch* b, std::vector<Refusal>* refused,
+                     const std::function<bool(const std::string&, bool, std::string*)>& support = {}) {
+    refuse_unmapped_edits(rm, schema, b, refused, bool(support));
+    if (!support) return;
+    std::erase_if(b->edits, [&](const Edit& edit) {
+        if (edit.entry == EntryOp::None) return false;
+        std::string reason;
+        if (support(edit.registry, edit.entry == EntryOp::Add, &reason)) return false;
+        Refusal row{b->mod, b->source, b->stage, edit.n, reason, "", edit.registry, edit.add_id, ""};
+        if (edit.entry == EntryOp::Add) row.entry = edit.registry + "|" + edit.add_id;
+        else if (edit.select.exact()) row.id = edit.select.id;
+        refused->push_back(std::move(row)); return true;
+    });
 }
 
 std::vector<Env::DataFile> read_sections(const std::string& mod, const std::string& version,
@@ -413,6 +426,23 @@ struct Runner::Impl {
                 publish(field_cap_name(prefix, f.path), coverage, detail);
             }
             publish(prefix, best, std::to_string(verified_fields) + " of " + std::to_string(reg.count) + " fields verified on this side");
+        }
+        if (env.entry_support) for (const auto& [name, spec] : schema.registries) {
+            for (const bool add : {true, false}) {
+                if (add ? !spec.add : !spec.remove) continue;
+                std::string reason;
+                bool available = env.entry_support(name, add, &reason);
+                if (available && !add && name == "items") {
+                    for (const char* field : {"entries[].chance", "entries[].weight"})
+                        if (rm.mapping("drops", field, &reason) != map::Mapping::Mapped) { available = false; reason = "drop tables not proven on this build"; break; }
+                    if (available) for (const char* field : {"inputs", "outputs", "inputs[].item", "outputs[].item"})
+                        if (rm.mapping("recipes", field, &reason) != map::Mapping::Mapped) { available = false; reason = "recipe dependencies not proven on this build"; break; }
+                }
+                const std::string capability = "registry." + name + (add ? ".add" : ".remove");
+                env.report_cap(capability, available ? KILN_CAP_AVAILABLE : KILN_CAP_UNAVAILABLE,
+                    available ? KILN_CAP_REASON_NONE : KILN_CAP_REASON_POLICY,
+                    "GameStart only; " + (available ? std::string("entry backend ready") : reason));
+            }
         }
     }
 };
@@ -595,7 +625,7 @@ KilnResult Runner::submit(uint64_t owner, const std::string& owner_mod, const st
         b.edits.clear();
         return say(KILN_ERR_INVALID_ARGUMENT);
     }
-    refuse_unmapped(d_->rm, d_->schema, &b, &refused);
+    refuse_unmapped(d_->rm, d_->schema, &b, &refused, d_->env.entry_support);
     Batch* out = d_->turn->out;
     if (out->source.empty()) out->source = "code:" + b.mod;
     for (Edit& e : b.edits) {
@@ -736,7 +766,7 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn, const std::vect
     named.insert(named.end(), rest.begin(), rest.end());
     for (const std::string& m : named) {
         ModInput in = std::move(by_mod[m]);
-        for (Batch& b : in.batches) refuse_unmapped(d.rm, d.schema, &b, &in.refused);
+        for (Batch& b : in.batches) refuse_unmapped(d.rm, d.schema, &b, &in.refused, d.env.entry_support);
         inputs.push_back(std::move(in));
     }
     // the base
@@ -890,7 +920,7 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn, const std::vect
     uint32_t edits = 0;
     for (const auto& [ref, fo] : d.result.fields)
         for (const ChainRow& c : fo.chain) edits += c.kind == WriterKind::Registry;
-    d.counts.edits = edits + static_cast<uint32_t>(d.result.added.size());
+    d.counts.edits = edits + static_cast<uint32_t>(d.result.added.size() + d.result.removed.size());
     return boot;
 }
 
@@ -1025,7 +1055,7 @@ void Runner::finish(const std::vector<BootOutcome>& outcomes) {
         live = {&d.schema, &d.rm, &d.result, &d.ids, &d.nums, &d.base, &d.old, &d.inputs, &d.decoded, nullptr, &d.outside, &d.boot_fields, nullptr};
         live.check = [this](Batch* b, std::vector<Refusal>* refused) {
             std::lock_guard l2(d_->mu);
-            refuse_unmapped(d_->rm, d_->schema, b, refused);
+            refuse_unmapped(d_->rm, d_->schema, b, refused, d_->env.entry_support);
         };
         auto publish = [this](const Result& r, bool application, bool world_event, bool world) {
             std::vector<uint64_t> handles;
@@ -1034,6 +1064,11 @@ void Runner::finish(const std::vector<BootOutcome>& outcomes) {
             {
                 std::lock_guard l2(d_->mu);
                 d_->result = r;
+                d_->counts.refused = static_cast<uint32_t>(r.refused.size());
+                d_->counts.conflicts = static_cast<uint32_t>(r.lines.size());
+                d_->counts.edits = static_cast<uint32_t>(r.added.size() + r.removed.size());
+                for (const auto& [ref, field] : r.fields)
+                    for (const auto& row : field.chain) d_->counts.edits += row.kind == WriterKind::Registry;
                 if (application) {
                     d_->meta.generation = ++d_->generation;
                     d_->meta.world_load = world;
@@ -1150,6 +1185,11 @@ KilnResult Runner::read(uint32_t view, const std::string& registry, const std::s
         for (const EntryRef& e : d_->result.removed)
             if (e.registry == registry && e.id == ref.id) return KILN_ERR_NOT_FOUND;
         if (const auto it = d_->result.fields.find(ref); it != d_->result.fields.end()) return *out = it->second.result.to_json().dump(), KILN_OK;
+        if (const auto entry = d_->result.definitions.find({registry, ref.id}); entry != d_->result.definitions.end()) {
+            const auto value = entry->second.values.find(field);
+            if (value == entry->second.values.end()) return KILN_ERR_UNAVAILABLE;
+            return *out = value->second.to_json().dump(), KILN_OK;
+        }
     }
     const auto reg = d_->base.registries.find(registry);
     if (reg != d_->base.registries.end())
@@ -1211,7 +1251,10 @@ KilnResult Runner::select(uint32_t view, const std::string& registry, const std:
             if (e.removed_in.empty() && !removed.count(e.id)) take(e.id, e.traits);
     if (view == 2)
         for (const EntryRef& a : d_->result.added)
-            if (a.registry == registry) take(a.id, {});
+            if (a.registry == registry && !removed.count(a.id)) {
+                const auto definition = d_->result.definitions.find(a);
+                take(a.id, definition == d_->result.definitions.end() ? std::set<std::string>{} : definition->second.traits);
+            }
     return *out = ids.dump(), KILN_OK;
 }
 

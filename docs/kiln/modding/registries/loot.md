@@ -31,5 +31,5 @@ Groups of fields:
 ## Entries
 
 - Add (stage add, id `<your mod id>:<name>`): no.
-- Remove (disabled): A removed loot entry never drops as random loot (the item itself stays).
+- Remove (disabled): GameStart only. Excludes the entry from random-loot candidates, retaining its record and item. Recipes, direct drops and already-owned copies are unchanged.
 - Raw game paths in edits (the Advanced tier): allowed.

@@ -62,6 +62,7 @@ struct Env {
     std::function<bool(uint64_t owner)> owner_alive;
     std::function<void(uint64_t owner)> owner_gone; // queued live-layer cleanup, outside the runner lock
     bool prepare_live = false; // support a cached full stable base, deferred until the first registry user
+    std::function<bool(const std::string& registry, bool add, std::string* why)> entry_support;
     std::function<void(int level, const std::string& line)> log;  // 0 info, 1 warn, 2 error
     std::function<std::string()> now;                              // RFC 3339 UTC
     uint32_t pid = 0;

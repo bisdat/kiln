@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #pragma warning disable KILNX031
 using Kiln;
+using Kiln.Registry;
 using DataRegistry = Kiln.Registry.Registry;
 
 namespace RegistryEdits;
@@ -19,6 +20,14 @@ public sealed class RegistryEditsMod : Mod
         // Observed settings, code, point, pass and world identity contribute to context.Identity.
         var settings = Config.Register<Settings>().Value;
         var registry = DataRegistry.For(context);
+        if (context.EntryPoint == RegistryEntryPoint.GameStart)
+        {
+            // New identities and visibility are process decisions: never restate them at later entry points.
+            registry.Add(view => view.Items.AddLike(new("registry-edits:stout_logs"), new("game:material_t1_wood_logs"),
+                item => item.MaxStack = 100));
+            // This hides only random-loot candidates, not already-owned logs or their recipes/direct drops.
+            registry.Alter(view => view.Loot.Remove("game:material_t1_wood_logs"));
+        }
         registry.Alter(view => view.Items["game:material_t1_wood_logs"].MaxStack = settings.WoodStack);
         // A Final helper is explicit. Ordinary assignments target Alter and are ignored in Add/Final.
         // Do not retain context, entries or lists: their operations expire when this callback returns.

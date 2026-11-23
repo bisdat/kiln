@@ -78,7 +78,7 @@
   "entry": {
     "add": false,
     "remove": "disabled",
-    "removeDoc": "A removed loot entry never drops as random loot (the item itself stays)."
+    "removeDoc": "GameStart only. Excludes the entry from random-loot candidates, retaining its record and item. Recipes, direct drops and already-owned copies are unchanged."
   },
   "raw": "allowed"
 }

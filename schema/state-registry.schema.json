@@ -367,12 +367,15 @@
         "id"
       ],
       "properties": {
-        "registry": {
-          "type": "string"
-        },
-        "id": {
-          "type": "string"
-        }
+        "registry": { "type": "string" },
+        "id": { "type": "string" },
+        "state": { "enum": ["pendingWorld", "registered", "hidden", "disabled"] },
+        "mod": { "type": "string" },
+        "source": { "type": "string" },
+        "n": { "type": "integer", "minimum": 0 },
+        "like": { "type": "string" },
+        "base": { "type": "string" },
+        "reason": { "type": "string" }
       },
       "additionalProperties": false
     },

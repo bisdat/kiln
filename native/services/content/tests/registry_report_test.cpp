@@ -156,6 +156,13 @@ int main(int argc, char** argv) {
     CHECK(added && (*added)["base"].value("origin", "") == "added" && (*added).value("result", 0) == 2, "an added entry's base is reported as added");
     CHECK(doc.contains("added") && doc["added"].size() == 1 && doc["added"][0].value("id", "") == "blades:edge", "added entries listed");
 
+    CHECK(doc["added"][0].value("state", "") == "pendingWorld" && doc["added"][0].value("mod", "") == "blades" && doc["added"][0].value("like", "") == "game:weapon_t1_sword", "entry reports distinguish pending native registration and retain Kiln provenance");
+    auto entry_meta = meta; entry_meta.world_load = true;
+    CHECK(report_json(s, r, entry_meta)["added"][0].value("state", "") == "registered", "world entry reports identify registered additions");
+    Result hidden; hidden.removed.push_back({"recipes", "game:planks"}); hidden.removals[{"recipes", "game:planks"}] = {"hide", "content/hide.json", Stage::Alter, 2, "hidden by hide"};
+    const auto hidden_doc = report_json(s, hidden, entry_meta);
+    CHECK(hidden_doc["removed"][0].value("state", "") == "hidden" && hidden_doc["removed"][0].value("mod", "") == "hide" && hidden_doc["removed"][0].value("reason", "") == "hidden by hide", "removal reports expose accepted visibility outcome and its author, never a deletion claim");
+
     // ---- conflicts and refusals ----
     CHECK(count_kind(doc, "composedOn") == 2 && count_kind(doc, "exclusive") == 1, "conflicts: composed on the old pack and the archive writer's value; one exclusive");
     bool exclusive_ok = false, named_ok = false;

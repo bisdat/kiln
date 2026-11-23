@@ -825,6 +825,29 @@ void Model::fill(const Need& need, BaseModel* out) {
                 if (auto v = value(reg, i, fn, &w)) e.fields[fn] = std::move(*v);
                 else d_->note("registry: " + reg + "." + fn + " is not read on this build (" + w + "); an edit composes over no value");
             }
+            if (reg == "drops" && e.fields.count("entries")) {
+                // Safety metadata only: preserve grouping while the schema's list remains a flat walk.
+                // An empty/missing span vector makes an item removal fail closed, never assume an old cache had it.
+                const auto mapping = d_->rm.registries.find(reg);
+                if (mapping != d_->rm.registries.end()) {
+                    const auto row = mapping->second.rows.find("entries");
+                    json root; std::string error; size_t cursor = 0;
+                    std::function<bool(const json&, size_t)> groups = [&](const json& node, size_t depth) {
+                        if (!node.is_object() || depth > 8) return false;
+                        const auto* stacks = member_ci(node, "stacks");
+                        const auto* children = member_ci(node, "groups");
+                        if ((stacks && !stacks->is_array()) || (children && !children->is_array())) return false;
+                        const size_t n = stacks ? stacks->size() : 0;
+                        if (cursor + n > kMaxWalk) return false;
+                        e.drop_groups.emplace_back(cursor, n); cursor += n;
+                        if (children) for (const auto& child : *children) if (!groups(child, depth + 1)) return false;
+                        return true;
+                    };
+                    if (row == mapping->second.rows.end() || row->second.paths.empty() ||
+                        !src_.member((*es)[i].place, row->second.paths.front(), &root, &error) || !groups(root, 0) ||
+                        e.fields.at("entries").list.size() != cursor) e.drop_groups.clear();
+                }
+            }
             if (traits) {
                 std::string w;
                 auto has = [&](const char* f) {

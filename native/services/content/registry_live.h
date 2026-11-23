@@ -53,6 +53,16 @@ struct RegistryLive {
     std::function<void(registry::Batch*, std::vector<registry::Refusal>*)> check;
     // The GUID of an entry a mod added (S11 sets registry::model::added_guid: UUIDv5 of "registry:<registry>:<kiln id>").
     std::function<std::string(const std::string& registry, const std::string& kiln_id)> added_guid;
+    // Internal entry backend. Preparation is GameStart-only; native definitions are retained until restart.
+    std::function<bool(const registry::EntryRef&, const registry::json&, std::string*)> define_entry;
+    std::function<bool(const registry::EntryRef&, const registry::json&, std::string*)> pin_definition;
+    std::function<void(const registry::EntryRef&, const registry::json&)> record_entry;
+    std::function<bool(const registry::EntryRef&, std::string*)> entry_registered;
+    std::function<std::map<registry::EntryRef, std::string>(const registry::Result&, const std::map<std::string, uint32_t>&)> prepare_visibility;
+    std::function<std::string(const std::vector<uintptr_t>&)> verify_visibility;
+    std::function<void()> publish_visibility;
+    std::function<void(const registry::EntryRef&)> forget_entry;
+    std::map<registry::EntryRef, registry::json> entry_bodies;
     // registry.json (S11 writes it): a world load or pack reload passes true for a new application.
     // A refresh for late drop tables passes false so it does not send another WORLDLOAD event.
     std::function<void(const registry::Result&, bool application)> report;
@@ -79,6 +89,17 @@ const registry::Schema& registry_schema();  // the generated schema (schema_ir.h
 
 // The stage hands its result over (S11, resources-ready). Replaces what an earlier start installed.
 void registry_live_install(RegistryLive in);
+// First-use stable perk identities for saved definitions. Cold preparation needs the registration thread, outside store_mutex.
+bool registry_live_prepare_entry_identities(const registry::json& fields, std::string* why);
+// Initialize an unpublished, list-owning content clone with stable fields. No store layers or transactions are created;
+// a failure discards the clone before the game's id map can expose it. Called only on its world's registration thread.
+bool registry_live_initialize_entry(uint32_t kind, const Entry& entry, const std::string& id,
+                                    const registry::json& fields, std::string* why, const Schema* schema = nullptr);
+registry::json registry_entry_definition(const registry::EntryRef& ref, const registry::EntryDefinition& definition,
+                                         const RegistryLive& in, std::string* why);
+void registry_entries_prepare(RegistryLive* in);
+bool registry_entry_define_native(const registry::EntryRef&, const registry::json&, std::string* why);
+void registry_entry_forget_native(const registry::EntryRef&);
 // Snapshot the installed schema for lowering pack sections outside the store lock.
 std::shared_ptr<const registry::Schema> registry_live_schema();
 // With store_mutex held and the legacy pack layers applied, compare the lowered sections to the last application and

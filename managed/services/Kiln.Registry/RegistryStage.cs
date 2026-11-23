@@ -28,6 +28,7 @@ public sealed class RegistryStage
     internal readonly RegistryContext Context;
     private readonly JsonArray _edits = [];
     private readonly Dictionary<(string Registry, string Id, string Field), JsonNode?> _view = new();
+    private readonly Dictionary<(string Registry, string Id), (string Like, JsonObject Fields)> _added = new();
     private RegistryPhase _target = RegistryPhase.Alter;
     private static readonly IReadOnlyDictionary<int, RegistryFieldSpec> Specs = RegistrySchema.Fields.ToDictionary(x => x.Id);
     internal RegistryStage(RegistryContext context) { Context = context; context.Capture = Capture; }
@@ -42,6 +43,8 @@ public sealed class RegistryStage
     public RegistryEntries<DropTableEntry> Drops { get { Context.Ensure(); return new(this, "drops", static (id, cells) => new(id, cells)); } }
     /// <summary>The singleton balance table. Its restart fields are editable only at game start.</summary>
     public BalanceEntry Balance { get { Context.Ensure(); return new(new("game:balance"), Cells("balance", "game:balance")); } }
+    /// <summary>Authors new entries in the add pass. Entry creation is GameStart-only; later native points report RestartRequired.</summary>
+    public void Add(Action<RegistryStage> entries) { ArgumentNullException.ThrowIfNull(entries); In(RegistryPhase.Add, () => entries(this)); }
     /// <summary>Authors ordinary field edits, once in the alter pass.</summary>
     public void Alter(Action<RegistryStage> edits) { ArgumentNullException.ThrowIfNull(edits); In(RegistryPhase.Alter, () => edits(this)); }
     /// <summary>Authors final edits, once in the final automatic pass. Other mods' final edits are not in its read view.
@@ -73,8 +76,46 @@ public sealed class RegistryStage
     {
         Context.Ensure();
         var key = (registry, id, field);
-        if (!_view.TryGetValue(key, out var value)) _view[key] = value = JsonNode.Parse(Context.ReadValue(registry, id, field));
+        if (!_view.TryGetValue(key, out var value))
+        {
+            var source = _added.TryGetValue((registry, id), out var creation) ? creation.Like : id;
+            _view[key] = value = source != id ? Read(registry, source, field)?.DeepClone() : JsonNode.Parse(Context.ReadValue(registry, source, field));
+        }
         return value;
+    }
+    internal void AddEntry<T>(string registry, RegistryId id, RegistryId like, Func<RegistryId, IRegistryCells, T> create, Action<T> configure)
+    {
+        Context.Ensure(); ArgumentNullException.ThrowIfNull(configure);
+        if (id.Value is null || id.Mod != Context.ModId || id.Name.Contains('~')) throw new ArgumentException("a new entry uses the current mod's namespace and a fresh lower-case name", nameof(id));
+        if (like.Value is null) throw new ArgumentException("like is a stable Kiln id", nameof(like));
+        if (!Writable(RegistryPhase.Add)) return;
+        var ancestor = like.Value;
+        while (true)
+        {
+            if (ancestor == id.Value) throw new ArgumentException("a new entry's local clone chain is cyclic", nameof(like));
+            if (!_added.TryGetValue((registry, ancestor), out var parent)) break;
+            ancestor = parent.Like;
+        }
+        var key = (registry, id.Value);
+        if (_added.ContainsKey(key)) throw new ArgumentException("this callback already added that entry id", nameof(id));
+        var fields = new JsonObject(); _added.Add(key, (like.Value, fields));
+        try
+        {
+            configure(create(id, new EntryCells(this, registry, id.Value, RegistryPhase.Add)));
+            Record(new JsonObject { ["registry"] = registry, ["entry"] = "add", ["id"] = id.Value, ["like"] = like.Value, ["fields"] = fields });
+        }
+        catch
+        {
+            _added.Remove(key);
+            foreach (var cell in _view.Keys.Where(x => x.Registry == registry && x.Id == id.Value).ToArray()) _view.Remove(cell);
+            throw;
+        }
+    }
+    internal void RemoveEntry(string registry, string pattern)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(pattern);
+        if (!Writable(_target)) return;
+        Record(new JsonObject { ["registry"] = registry, ["entry"] = "remove", ["select"] = pattern });
     }
     private void Record(JsonObject edit)
     {
@@ -160,10 +201,16 @@ public sealed class RegistryStage
                 list = stage.Read(registry, id, spec.Path) as JsonArray;
                 if (list is null || index >= list.Count) throw new ArgumentOutOfRangeException(nameof(index));
             }
-            stage.Record(new JsonObject { ["registry"] = registry, ["select"] = id, ["field"] = path, ["op"] = node?.DeepClone() });
+            var adding = stage._added.TryGetValue((registry, id), out var creation);
+            if (!adding) stage.Record(new JsonObject { ["registry"] = registry, ["select"] = id, ["field"] = path, ["op"] = node?.DeepClone() });
             if (obj is not null) obj[spec.Path[(bracket + 3)..]] = node;
             else if (list is not null) list[index] = node;
             else stage._view[(registry, id, spec.Path)] = node;
+            if (adding)
+            {
+                var root = bracket >= 0 ? spec.Path[..bracket] : spec.Path;
+                creation.Fields[root] = stage._view[(registry, id, root)]?.DeepClone();
+            }
         }
         public int Count(int listField) => stage.Read(registry, id, Field(listField).Path) is JsonArray array ? array.Count : 0;
         public void ListOp(int listField, RegistryListOp op, IReadOnlyList<object?> values)
@@ -171,7 +218,7 @@ public sealed class RegistryStage
             var spec = Field(listField);
             if (spec.ReadOnly) throw new ArgumentException("the registry field is read-only");
             if (!stage.Writable(phase)) return;
-            var json = values.Select(Json).ToArray();
+            var json = values.Select(value => value is null && spec.Element == RegistryFieldType.Struct ? new JsonObject() : Json(value)).ToArray();
             var payload = new JsonObject { [op.ToString().ToLowerInvariant()] = op == RegistryListOp.Clear ? JsonValue.Create(true) : new JsonArray(json.Select(x => x?.DeepClone()).ToArray()) };
             var old = stage.Read(registry, id, spec.Path) as JsonArray ?? [];
             var next = op switch
@@ -182,7 +229,8 @@ public sealed class RegistryStage
                 RegistryListOp.Remove => new JsonArray(old.Where(x => !json.Any(v => JsonNode.DeepEquals(x, v))).Select(x => x?.DeepClone()).ToArray()),
                 _ => throw new ArgumentOutOfRangeException(nameof(op)),
             };
-            stage.Record(new JsonObject { ["registry"] = registry, ["select"] = id, ["field"] = spec.Path, ["list"] = payload });
+            if (stage._added.TryGetValue((registry, id), out var creation)) creation.Fields[spec.Path] = next.DeepClone();
+            else stage.Record(new JsonObject { ["registry"] = registry, ["select"] = id, ["field"] = spec.Path, ["list"] = payload });
             stage._view[(registry, id, spec.Path)] = next;
         }
     }
@@ -197,6 +245,8 @@ public sealed class RegistryEntries<T> where T : IRegistryEntry
     private readonly Func<RegistryId, IRegistryCells, T> _create;
     internal RegistryEntries(RegistryStage stage, string registry, Func<RegistryId, IRegistryCells, T> create)
         => (_stage, _registry, _create) = (stage, registry, create);
+    internal void AddLikeCore(RegistryId id, RegistryId like, Action<T> configure) => _stage.AddEntry(_registry, id, like, _create, configure);
+    internal void RemoveCore(string pattern) => _stage.RemoveEntry(_registry, pattern);
     /// <summary>One entry by its Kiln id.</summary>
     public T this[RegistryId id]
     {

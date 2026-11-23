@@ -1,0 +1,10 @@
+{
+  "id": "registry-entries-test",
+  "name": "Registry entry server lab checks",
+  "version": "0.1.0",
+  "apiVersion": "0.2",
+  "entryAssembly": "RegistryEntriesTest.dll",
+  "side": "server",
+  "clients": "none",
+  "description": "Dedicated-server checks of stable entry definitions, reads, timing, visibility and compatibility refusals."
+}

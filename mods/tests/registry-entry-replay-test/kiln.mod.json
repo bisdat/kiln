@@ -1,0 +1,10 @@
+{
+  "id": "registry-entry-replay-test",
+  "name": "Registry entry lazy placeholder checks",
+  "version": "0.1.0",
+  "apiVersion": "0.2",
+  "entryAssembly": "RegistryEntryReplayTest.dll",
+  "side": "server",
+  "clients": "none",
+  "description": "Observes native placeholder registration without referencing the registry API or forcing eager startup."
+}
