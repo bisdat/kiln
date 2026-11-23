@@ -96,7 +96,11 @@ which only sizes the search for candidates; see [creatures.md](creatures.md), "S
   skill node: `ImpactProgramReference`) take a loaded ImpactProgram's GUID; sequence references take a sequence's
   GUID or sub-sequence name, and a sibling `sequenceId` follows (FNV-1a of the GUID: `"sequences[0].sequence":
   "My_Cast"` on an item rebinds its trigger). A VFX reference (`VfxComponentResource.vfx`, a sequence's `VfxNotifierEvent`) takes a GUID and is not
-  checked on a server, which has no VFX; a client without kiln.vfx keeps only the VFX its game has, and a mod's becomes `"none"`. Other references stay read-only.
+  checked on a server, which has no VFX; a client without kiln.vfx keeps only the VFX its game has, and a mod's becomes `"none"`. An item tag
+  (`ItemInfo.tags[i].tag`, an `ItemTagReference`) is no resource: it takes a GUID that the item registry's tag list
+  (`ItemRegistryResource.itemTags`) holds, and any other GUID is refused (since 0.2.0-dev.30.7; before, every tag was
+  refused). A shape's `voxelObject` and a terrain shape's `terrainVoxelObject` take the GUID of a loaded or served
+  `keen::VoxelModelResource`. Other references stay read-only.
 - **Lists of rows**: `uiValues`, and a buff's `whileApplied` and `onCreate`, take a JSON list in place of the game's: `"whileApplied": [ { "slot": "Chest", "vfx": "<guid>",
   "offset.orientationOffset.w": 1 } ]`. A field a row does not name is zero, so a rotation has to say its `w`.
 

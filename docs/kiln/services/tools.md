@@ -39,7 +39,10 @@ A tool without an Add action may omit its material pool.
 
 A brush is a sphere of radius **0.25–8 metres**. Its own item identity, name and description are separate from the
 root tool. The tool owns its brush membership; declaring a brush part alone does not publish an orphan item into
-vanilla Overgrowth's family. A family has at most 64 distinct brushes. `Identity = BlockIdentity.Legacy(guid)` or
+vanilla Overgrowth's family. A family has at most 64 distinct brushes; the game's picker shows the first **16**, in
+the order the tool lists them (its brush list is a fixed 16-row array). Each brush item is based on vanilla
+`Building_Overgrowth_Shape_Small`; its radius is that item's own impact config `0x5258131e` (BrushRadius, the value the
+tool's programs read), written as the item rule `impactValues.0x5258131e`. `Identity = BlockIdentity.Legacy(guid)` or
 `Legacy(itemId)` preserves an existing saved item; `Was` preserves the derived identity after a Kiln key rename.
 `Icon` on the root accepts a PNG in the mod's folder.
 
@@ -94,16 +97,64 @@ restore it on return, including nested vanilla calls. Failed owned-row reads lea
 unchecked pointer or an inherited selection.
 
 The brush adapter is confined to the qualified frame drawer's call instruction. It requires the selected hotbar root
-and resolved item to match the registered held family, then rewrites only that call's owned include/ratio GUID values.
-Other query sites, vanilla tools, callbacks and nested unrelated frames inherit no admission. A unique tag alone is not
-sufficient. If this capability is unavailable, the ordinary picker has no established route to the tool's own brushes;
-do not assume that Add/Remove is usable through the normal menu.
+and resolved item to match the registered held family. The game's brush query scans only the item list
+`ItemRegistryResource.terraformingTools` in the game's data, never the runtime item registry, so a family's brushes
+(runtime items) are never in it, whatever their tags. On admission the adapter writes the family's own rows (item,
+ratio i+1 over 1) into that call's fresh, empty output and replaces its include/ratio GUID values with the family
+identity, which no listed item carries: the native query appends nothing and sorts the rows by ratio, which keeps the
+declared order. Brushes carry no family tag. Other query sites, vanilla tools, callbacks and nested unrelated frames
+inherit no admission. If this capability is unavailable, the ordinary picker has no established route to the tool's
+own brushes; do not assume that Add/Remove is usable through the normal menu.
+
+### Reading the brush picker trace
+
+Every way out of the adapter is counted on the client (relaxed counters; the frame hook never allocates, locks or
+logs). A client Post publisher turns a change of state into **one** `kiln.log` line and refreshes the
+`tools.brush_families` capability text (`Capabilities.Why("tools.brush_families")`, `kiln/state/capabilities.json`), at
+most once a second. When states change faster than that, the line names the state now and how many changes it covers.
+
+```text
+tools: brush picker: patched (the family's brushes were written into the picker); frames: no held family 212, patched 40 (3 rows)
+```
+
+| State | What it means | Look at |
+|---|---|---|
+| `disabled` | The adapter is not installed, or it retired after a write fault. | `tools.brush_families` reason. |
+| `no held family` | The picker drew without a registered family in hand: a vanilla tool, or no current held-item sample. Normal while a vanilla tool is held. | Shown while the mod's tool is held: the family was never defined (a `blocks:` error at content ready) or the held-item observer has no sample. |
+| `no identity` | The held family lost its identity record between two lookups (a removal racing the frame). | Mod reloads. |
+| `other frame` | Not the Overgrowth branch's registers (the Decay branch, or another layout). | The root tool's base. |
+| `not selected` / `not resolved` | The picker's selected hotbar item, or its resolved item, is not the held family's root. | Hotbar selection versus the held item. |
+| `output not fresh` / `tag mismatch` | The call's brush list or include/ratio tags are not the vanilla Overgrowth frame's. | Another mod patching the picker; a game update. |
+| `read fault` / `write fault` | Reading or writing the frame faulted; a write fault skips that query and retires the adapter. | A crash report next to it. |
+| `patched` | The family's rows were written; `(n rows)` is how many. `truncated to 16 rows` counts families with more brushes. | If the picker still shows no brush after this, the rows reached the query and the miss is past it. |
+
+No line at all while the tool's picker is open means the qualified frame drawer never reached this call.
 
 **Still unavailable:** the per-actor producer that separates backpack and magic-chest observations. Static qualification,
 filtering fixtures and native runner tests do not establish actual menu rendering, network behavior or the complete
-real-game tool. The item-presentation constructor's traced caller uses the selected hotbar model, which need not be the
+real-game tool. **Not yet seen in the real game:** the picker drawing a family's rows (0.2.0-dev.30.7 is the first
+release that writes them), the rows' icons and names, selecting a brush from them, and the brushes' terrain preview
+model (`equipment.terrainVoxelObject`, resolved for the first time in 0.2.0-dev.30.7). The item-presentation constructor's traced caller uses the selected hotbar model, which need not be the
 running action's item; its last item must never be cached as evidence of what the player holds.
+
+## Checks without the game
+
+`native/services/tools/tests/test-ammo.sh` runs the presentation fixtures on the host, among them the brush-frame
+adapter (`brush_frame.cpp`: rows, declared order, every refusal) and its trace (`brush_trace.cpp`).
+`test-tool-content.sh` runs what `ToolCompiler` hands kiln.content for a registered removal-only tool with three
+brushes (`ToolCompilerContentTests` with `KILN_TOOL_CONTENT_FIXTURE` set) through kiln.content's own resolvers, with the
+client's real reflection and game data that `extract_tool_content_inputs.py` writes into scratch storage (read-only
+from a game folder): definition fields and references, item rules, itemdata rules. Its negative controls are the three
+refusals of the first real-game run (a radius rule on a bare config id, a root GUID as an item tag, an unserved
+terrain model).
 
 Only the player runs the real-game check: confirm root/brush names, independent vanilla Overgrowth choices, all pool
 entries with backpack-only and magic-chest-only supplies, empty stock, switching between tools, inventory changes,
 selection after leaving/rejoining a world, paid placement/removal and the game's normal/remapped undo.
+
+## Changelog
+
+- **0.2.0-dev.30.7:** the picker lists a family's own brushes (the game's query scans only its data's
+  `terraformingTools` list, so they were never found); brush radii reach the game (`impactValues.0x5258131e`); no root
+  GUID is written as an item tag; brush terrain models resolve; the brush-frame trace in `kiln.log` and
+  `tools.brush_families`; the content check without the game. Thanks bisdat (kiln#130).
