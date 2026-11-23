@@ -7,14 +7,54 @@
 // says it started at once, or when it is hidden before its frames came: there is no black window anyone looks at, and
 // waiting would make the watchdog switch a working GPU off. This readiness does NOT confirm a painted frame:
 // app_render_frame reports visibility separately and acknowledges two visible frames, even after a hidden startup.
+//
+// The backend keeps its renderer state in the data folder (render.rs), so app_render_frame waits while the folder is
+// held: until the data folder gate (shell/DataFolderGate.tsx) lets the launcher mount, and while it shows a pointer to
+// a folder that cannot be used, another launcher's move or the removal of an unfinished move's copy. Once the hold ends,
+// the latest visibility goes out and two fresh visible frames confirm painting. app_started goes out in every case.
 import { useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import * as api from "../api/commands";
 import { t } from "../i18n";
 import { toast } from "../ui";
 
+/** Whether the data folder is held, as the data folder gate knows it (held until it has answered). `whenFree` runs its
+ *  callback at once when the folder is free, else when `set(false)` ends the hold. */
+export interface FolderHold {
+  held(): boolean;
+  set(held: boolean): void;
+  whenFree(cb: () => void): void;
+}
+
+export function folderHold(held = true): FolderHold {
+  const waiting: (() => void)[] = [];
+  return {
+    held: () => held,
+    set(next) {
+      held = next;
+      while (!held && waiting.length) waiting.shift()!();
+    },
+    whenFree(cb) {
+      if (held) waiting.push(cb);
+      else cb();
+    },
+  };
+}
+
+/** `send` at once while `hold` is free; while it is held, one `send` with the latest arguments once the hold ends. */
+export function afterHold<A extends unknown[]>(hold: FolderHold, send: (...a: A) => void): (...a: A) => void {
+  let queued: A | null = null;
+  return (...a) => {
+    if (!hold.held()) { send(...a); return; }
+    const first = queued === null;
+    queued = a;
+    if (first) hold.whenFree(() => { const q = queued!; queued = null; send(...q); });
+  };
+}
+
 /** A function that sends the ready call the first time it runs, after two frames (at once when `hidden()`, or when
- *  `onHidden` reports the page hidden before them), and never again. */
+ *  `onHidden` reports the page hidden before them), and never again. `painted` waits while `hold` is held: two fresh
+ *  visible frames after the hold ends confirm painting. */
 export function startedReporter(
   send: () => Promise<unknown>,
   frame: (cb: () => void) => void,
@@ -22,6 +62,7 @@ export function startedReporter(
   onHidden: (cb: () => void) => void = () => {},
   painted: () => Promise<unknown> = async () => {},
   shown: () => boolean | Promise<boolean> = () => true,
+  hold: FolderHold = folderHold(false),
 ): () => void {
   let told = false;
   let sent = false;
@@ -54,6 +95,8 @@ export function startedReporter(
           go();
           whileShown(() => {
             if (epoch !== visibilityEpoch) { frame(first); return; }
+            // the data folder is held: no frame report until it is free, then two fresh visible frames
+            if (hold.held()) { hold.whenFree(() => frame(first)); return; }
             painted().catch(() => {});
           });
         });
@@ -65,6 +108,11 @@ export function startedReporter(
 
 const pageHidden = () => typeof document !== "undefined" && document.visibilityState === "hidden";
 
+/** The data folder's hold for frame reports: DataFolderGate sets it (held until data_folder_get has answered). */
+export const dataFolderHold = folderHold();
+
+const reportVisibility = afterHold(dataFolderHold, (visible: boolean) => { api.appRenderFrame(false, visible).catch(() => {}); });
+
 export const tellStarted = startedReporter(
   () => api.appStarted(),
   (cb) => { requestAnimationFrame(() => cb()); },
@@ -72,7 +120,7 @@ export const tellStarted = startedReporter(
   (cb) => {
     const on = () => {
       const hidden = pageHidden();
-      api.appRenderFrame(false, !hidden).catch(() => {});
+      reportVisibility(!hidden);
       if (hidden) cb();
     };
     document.addEventListener("visibilitychange", on);
@@ -86,9 +134,11 @@ export const tellStarted = startedReporter(
     if (!api.isTauri()) return true;
     const window = getCurrentWindow();
     const visible = await window.isVisible() && !await window.isMinimized();
-    await api.appRenderFrame(false, visible).catch(() => {});
+    // while held, the frames after the hold's end report it
+    if (!dataFolderHold.held()) await api.appRenderFrame(false, visible).catch(() => {});
     return visible;
   },
+  dataFolderHold,
 );
 
 /** Mounted once at the root: its effect runs after React's first commit. */

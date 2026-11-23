@@ -1,7 +1,7 @@
 // The page tells the backend once that its first screen is up (src/shell/started.ts; the backend's render watchdog
 // falls back to software mode on Linux when that call never comes).
 import { expect, test } from "bun:test";
-import { startedReporter } from "../src/shell/started";
+import { afterHold, folderHold, startedReporter } from "../src/shell/started";
 
 function harness() {
   const sent: number[] = [];
@@ -138,4 +138,81 @@ test("a document that is visible while its native window is hidden cannot confir
   expect(events).toEqual(["ready"]);
   frames.shift()?.();
   expect(events).toEqual(["ready", "painted"]);
+});
+
+// The data folder held at the start (a pointer to a folder that cannot be used, another launcher's move, an unfinished
+// move's removal: shell/DataFolderGate.tsx): the backend keeps its renderer state there, so no frame report goes out.
+test("a held data folder: the ready call goes out, frame reports wait for the hold's end and two fresh visible frames", () => {
+  const frames: (() => void)[] = [];
+  const events: string[] = [];
+  const hold = folderHold();
+  const tell = startedReporter(async () => { events.push("ready"); }, (cb) => frames.push(cb), () => false, () => {},
+    async () => { events.push("painted"); }, () => true, hold);
+  tell();
+  frames.shift()?.();
+  frames.shift()?.();
+  // the watchdog still hears that the page is up
+  expect(events).toEqual(["ready"]);
+  // nothing waits on a frame while the folder is held
+  expect(frames).toEqual([]);
+  hold.set(false);
+  expect(events).toEqual(["ready"]);
+  frames.shift()?.();
+  expect(events).toEqual(["ready"]);
+  frames.shift()?.();
+  expect(events).toEqual(["ready", "painted"]);
+  expect(frames).toEqual([]);
+});
+
+test("a hold that never ends sends no frame report", () => {
+  const frames: (() => void)[] = [];
+  const events: string[] = [];
+  const hold = folderHold();
+  const tell = startedReporter(async () => { events.push("ready"); }, (cb) => frames.push(cb), () => false, () => {},
+    async () => { events.push("painted"); }, () => true, hold);
+  tell();
+  for (let i = 0; i < 6; i++) frames.shift()?.();
+  hold.set(true);
+  expect(events).toEqual(["ready"]);
+  expect(frames).toEqual([]);
+});
+
+test("the hold: at once when free, queued while held, held again after a late answer", () => {
+  const hold = folderHold();
+  const ran: string[] = [];
+  expect(hold.held()).toBe(true);
+  hold.whenFree(() => ran.push("a"));
+  hold.whenFree(() => ran.push("b"));
+  hold.set(true);
+  expect(ran).toEqual([]);
+  hold.set(false);
+  expect(ran).toEqual(["a", "b"]);
+  hold.whenFree(() => ran.push("c"));
+  expect(ran).toEqual(["a", "b", "c"]);
+  // the gate's late answer with a problem takes the window again
+  hold.set(true);
+  hold.whenFree(() => ran.push("d"));
+  expect(ran).toEqual(["a", "b", "c"]);
+  hold.set(false);
+  expect(ran).toEqual(["a", "b", "c", "d"]);
+  expect(folderHold(false).held()).toBe(false);
+});
+
+test("visibility reports while held: one, with the latest visibility, once the hold ends", () => {
+  const hold = folderHold();
+  const sent: boolean[] = [];
+  const report = afterHold(hold, (visible: boolean) => { sent.push(visible); });
+  report(true);
+  report(false);
+  report(true);
+  report(false);
+  expect(sent).toEqual([]);
+  hold.set(false);
+  expect(sent).toEqual([false]);
+  report(true);
+  expect(sent).toEqual([false, true]);
+  hold.set(true);
+  report(true);
+  hold.set(false);
+  expect(sent).toEqual([false, true, true]);
 });
