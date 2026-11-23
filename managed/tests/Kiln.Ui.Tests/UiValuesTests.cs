@@ -522,7 +522,8 @@ public sealed unsafe class UiValuesTests : IDisposable
         Assert.Equal(320, sizeof(UiValuesNative.TooltipDetails));
         Assert.Equal(296, sizeof(UiValuesNative.LineWriter));  // append_line appended in 0.2.0-dev.29.19
         Assert.Equal(280, (int)Marshal.OffsetOf<UiValuesNative.LineWriter>(nameof(UiValuesNative.LineWriter.Append)));
-        Assert.Equal(112, sizeof(UiValuesNative.VisibleSlot));
+        Assert.Equal(120, sizeof(UiValuesNative.VisibleSlot));  // level and rarity appended in 0.2.0-dev.30.5
+        Assert.Equal(112, (int)Marshal.OffsetOf<UiValuesNative.VisibleSlot>(nameof(UiValuesNative.VisibleSlot.Level)));
         Assert.Equal(120, sizeof(UiValuesNative.SlotsFrame));
     }
 
@@ -839,6 +840,26 @@ public sealed unsafe class UiValuesTests : IDisposable
     }
 
     [Fact]
+    public void Slots_carry_the_items_rarity_level_and_server_entity_as_drawn()
+    {
+        Frame(3);
+        FakeUiValues.SlotList![0].Available |= UiValuesNative.ItemValues;
+        FakeUiValues.SlotList[0].Level = 25;
+        FakeUiValues.SlotList[0].Rarity = 4;
+        FakeUiValues.SlotList[0].ClientEntity = 900;
+        FakeUiValues.SlotList[0].ServerEntity = 900;
+        FakeUiValues.SlotList[1].Available |= UiValuesNative.ItemValues;
+        FakeUiValues.SlotList[1].Rarity = 7;  // outside Common..Legendary
+        FakeUiValues.SlotList[1].Level = 3;
+        FakeUiValues.SlotList[2].Level = 9;   // no ItemValues bit: not the game's
+        FakeUiValues.SlotList[2].Rarity = 1;
+        var slots = Ui.Values.Slots().Snapshot!.Slots;
+        Assert.Equal((ItemRarity.Legendary, 25, new EntityId(900)), (slots[0].Rarity!.Value, slots[0].Level, slots[0].ServerEntity));
+        Assert.Equal(((ItemRarity?)null, 3), (slots[1].Rarity, slots[1].Level));
+        Assert.Equal(((ItemRarity?)null, 0), (slots[2].Rarity, slots[2].Level));
+    }
+
+    [Fact]
     public void Slots_copies_the_latest_frame_without_pixels_before_the_mapping_is_verified()
     {
         Frame(3);
@@ -886,11 +907,21 @@ public sealed unsafe class UiValuesTests : IDisposable
         Frame(2);
         var fn = (delegate* unmanaged[Cdecl]<UiValuesNative.SlotsFrame*, UiValuesNative.VisibleSlot*, uint, void*, void>)FakeUiValues.SlotsFn;
         var meta = FakeUiValues.SlotsMeta;
-        fixed (UiValuesNative.VisibleSlot* p = FakeUiValues.SlotList) fn(&meta, p, 2, (void*)FakeUiValues.SlotsUser);
+        fixed (UiValuesNative.VisibleSlot* p = FakeUiValues.SlotList)
+        {
+            byte* legacy = stackalloc byte[224];
+            for (var i = 0; i < 2; i++) Buffer.MemoryCopy(p + i, legacy + i * 112, 112, 112);
+            fn(&meta, (UiValuesNative.VisibleSlot*)legacy, 2, (void*)FakeUiValues.SlotsUser);
+        }
         var r = Assert.Single(got);
         Assert.Equal(2, r.Snapshot!.Slots.Count);
         reg.Dispose();
-        fixed (UiValuesNative.VisibleSlot* p = FakeUiValues.SlotList) fn(&meta, p, 2, (void*)FakeUiValues.SlotsUser);
+        fixed (UiValuesNative.VisibleSlot* p = FakeUiValues.SlotList)
+        {
+            byte* legacy = stackalloc byte[224];
+            for (var i = 0; i < 2; i++) Buffer.MemoryCopy(p + i, legacy + i * 112, 112, 112);
+            fn(&meta, (UiValuesNative.VisibleSlot*)legacy, 2, (void*)FakeUiValues.SlotsUser);
+        }
         Assert.Single(got);  // nothing after Dispose
         Assert.Contains(reg.Handle, FakeUiValues.Unsubscribed);
         Assert.Throws<ArgumentNullException>(() => Ui.Values.SubscribeSlots(null!));

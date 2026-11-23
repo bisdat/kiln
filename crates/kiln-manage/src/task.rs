@@ -4,6 +4,8 @@
 /// Receives progress from a long operation. `fraction` is 0..=1, or None when unknown.
 pub trait Progress {
     fn report(&mut self, fraction: Option<f32>, message: &str);
+    /// Marks a named stage independently of progress messages and fractions.
+    fn stage(&mut self, _id: &str) {}
     /// Polled between steps; an operation that sees true stops and returns `ErrorCode::Canceled`.
     fn canceled(&self) -> bool {
         false

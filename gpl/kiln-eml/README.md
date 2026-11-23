@@ -495,6 +495,54 @@ Each is marked `kiln-eml:` in the source.
     `startup-grant-missing` reason quotes it (`base-not-restored` first, else the first attempt's error, else the
     warning that ended the start). EML mode (Live) is unchanged. Tests: `m6_hosted_restore.rs`, ownership.rs
     `hosted_shroudforge_output_is_proven_by_its_whole_record_only`.
+39. `mod-loader-lua` `transaction.rs` (`validate_stage`, `sync_file`, `copy_counted`) and `ownership.rs` (`prepare_from`)
+    (kiln-eml's own code): a publication that is not cached no longer reads the game's containers back. The check of a
+    staged archive read every content of every container the header lists, the game's own included: 48 GiB on a client,
+    at every first kiln-mode start, every start whose packages or settings changed, and every EML run that was not cached
+    (a first kiln-mode start took 160 s for one small package; an 8 GiB synthetic archive took 30 s, 26 s of them in that
+    read). It still reads back and hashes every content of the stage's own containers and decodes every resource; the
+    contents of the baseline's containers that the baseline index lists at the same place are not all read: the writer
+    only appends containers, and the input witness holds the baseline's container files (identity, change time, length)
+    from the capture to the publication, checked before and after the validation and again before publishing. Four of
+    each container's (spread from its first to its last, each at most 4 MiB) are still read back and checked: neither
+    the witness nor the backup's own checks show that the baseline index describes the containers at all, and a backup
+    left from an earlier run over other game files passes those (seen in the field as "staged content hash mismatch",
+    which this keeps). Any other content in a baseline container is read and checked as before. A Deferred publication no longer
+    hashes the live resource file just to tell ShroudForge's handoff whether it changed (it hands nothing over). Staging
+    copies move 1 MiB at a time. A flush to the drive that takes two seconds or more logs which file and how long. Tests:
+    transaction.rs `validation_reads_the_stages_own_containers_back_and_not_the_baselines`,
+    `validation_refuses_a_baseline_whose_containers_hold_other_bytes_at_its_places`,
+    `validation_reads_a_baseline_containers_content_the_baseline_does_not_list_there`,
+    `baseline_samples_spread_from_the_first_content_to_the_last_and_skip_large_ones`, and `m6_startup_timing.rs`
+    (ignored: a client-sized archive, run by hand).
+40. `mod-loader-lua` `load.rs` (`create_backup_with`, `stale_backup`, `base_relation`, `containers_hold`,
+    `restore_backup_as`), `ownership.rs` (`header_is_kilns`, `readonly::base_relation`) and `kiln-eml/src/inspection.rs`
+    (note `baseline-stale`) (kiln-eml's own code): a working baseline of the live game build that does not describe the
+    game's data files is found before anything is staged. The backup's own checks (version, seal or live resource
+    prefix) pass a backup that is itself modded data: another mod loader or an earlier start can keep the modded pair it
+    found under the backup's names, a later start seals it again while it equals the live files, and after Steam's file
+    check (the game's own header and resource file back, the extra containers left) a container that backup lists can
+    hold other bytes. EML mode built the stage from it, and the stage's read-back refused every start with "staged
+    content hash mismatch" (0.2.0-dev.30.4; 0.2.0-dev.30.1 had no read-back and published it). Now `create_backup`
+    compares the two headers by the writer's rule (`base_relation`: every writer builds a header over a baseline by
+    keeping its containers, contents and resource chunks in place and appending): the live header is the backup or was
+    built over it (Under), and every container the backup lists is there at its size (`containers_hold`; the game itself
+    refuses another size), or the start is refused with what to do (verify the game files in Steam, then start again; if
+    the message comes back, move the three backup files out of the game folder). A backup built over the live header
+    (Over) is replaced by a new backup of the live files, before any seal is repaired or written, when no ownership
+    receipt lists the live header, no record of Kiln's bundled mod loader names it, and every container the live header
+    lists has its size; else refused. A smaller header must also be internally consistent (container content counts,
+    content ranges and resource ranges); a damaged live index missing entries cannot replace an intact backup. `restore_backup_as` puts back only a backup whose containers are at their sizes. The
+    inspector agrees for kiln mode: Over is the live set as a new baseline (note `baseline-stale`, origin
+    `rebaselined-unclassified`; the boot witness takes it through `create_backup`), unless a live file is still Kiln's
+    output; a backup that is neither is `baseline-corrupt`. A backup the live header itself was built over (a start without
+    the read-back published from it) passes the headers' comparison; the stage's sampled read-back (item 39) can refuse
+    it when a sampled content differs. That baseline-content refusal says what to do (`load::stage_refusal`, EML mode and
+    kiln mode's prepared stages); a mismatch in a newly staged container does not blame the backup. Tests: load.rs
+    `base_relation_follows_how_a_writer_builds_over_a_baseline`,
+    `a_backup_whose_containers_are_not_at_their_size_is_neither_built_from_nor_restored`,
+    `a_header_only_backup_built_over_the_game_files_is_replaced`, and `m6_stale_backup.rs` (the field's game folder
+    through the production runner and the inspector, and the read-back as the second layer).
 
 The plugin validates paths from each authorized root down (root included), leaving linked Steam/Wine layout
 ancestors alone; it also checks final resolved containment. Profile paths resolve against `<game>/kiln`.
@@ -622,14 +670,14 @@ set a kiln-mode start builds from, with its evidence, strongest first:
 | `receipt-baseline` | the backups present are exactly the receipt's `backups` (size and SHA-256) and pass the writer's checks |
 | `sealed-baseline` | no matching receipt; the backup pair matches its seal (`<stem>.kfc.bak.integrity`) for the live build |
 | `unsealed-baseline` | no seal (an older EML's pair), or a seal another writer left behind (other lengths, or a pair equal to the live files): the live resource file's prefix equals the backup's, as the writer checks |
-| `current-set` | no backup at all, a backup of another game build (note `baseline-outdated`, origin `rebaselined-unclassified`), or a receipt whose backups are all gone over live files that are not Kiln's output from it (note `receipt-stale`, origin `rebaselined-unclassified`): the validated live set |
+| `current-set` | no backup at all, a backup of another game build (note `baseline-outdated`, origin `rebaselined-unclassified`), a backup of this build that was built over the live header (an archive writer's output kept under the backup's name, by another mod loader or an earlier start; note `baseline-stale`, origin `rebaselined-unclassified`; refused as `baseline-corrupt` when a live file is still Kiln's output), or a receipt whose backups are all gone over live files that are not Kiln's output from it (note `receipt-stale`, origin `rebaselined-unclassified`): the validated live set |
 
 Refused, with no base: a receipt this build does not understand (`receipt-unknown`, kept as it is), a receipt whose
 baseline is gone while a live file is still Kiln's output from it (`baseline-missing`, naming that file; its text
 tells the user to verify the game files in Steam), a header-only or resources-only backup
 (`baseline-incomplete`; its text tells the user to verify the game files in Steam and move the leftover backup files
 out of the game folder, so that Kiln takes a new baseline), a receipt path holding something that is not a receipt
-this build reads (over the writer's 16 MiB cap, or not a regular file: `receipt-unknown`), a pair that fails its seal and the unsealed rule (`baseline-corrupt`), and any missing,
+this build reads (over the writer's 16 MiB cap, or not a regular file: `receipt-unknown`), a pair that fails its seal and the unsealed rule, a backup of this build that is neither the live header nor built under it, or one built over the live header while a live file is still Kiln's output (`baseline-corrupt`), and any missing,
 invalid, linked, unreadable or changed input (`missing`, `invalid`, `link`, `unreadable`, `changed`). Containers the
 live header does not list are reported (`retained-container`, note `unreferenced-containers`), never read or blocking.
 
@@ -652,7 +700,7 @@ calls a set vanilla, and true vanilla is Steam's file verification.
 | Token | Exact label | When |
 |---|---|---|
 | `first-managed-unclassified` | `unclassified: game files as found when Kiln first managed this install` | `current-set` with no backup present, or a receipt's `baseOrigin` with this token keyed to exactly this baseline |
-| `rebaselined-unclassified` | `unclassified: game files as found when Kiln took a new baseline after the game changed` | `current-set` because the backups present are of another game build (note `baseline-outdated`), or a receipt's `baseOrigin` with this token keyed to exactly this baseline |
+| `rebaselined-unclassified` | `unclassified: game files as found when Kiln took a new baseline after the game changed` | `current-set` because the backups present are of another game build (note `baseline-outdated`) or were built over the live header (note `baseline-stale`), or a receipt's `baseOrigin` with this token keyed to exactly this baseline |
 | `unrecorded` | `unrecorded: a working baseline from an earlier start; where its files came from was not recorded` | every other backup-based BASE |
 
 A receipt's `baseOrigin` (written by kiln mode, read here) is `{"token", "label", "baseline"}`, `baseline` mapping each of

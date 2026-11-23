@@ -101,6 +101,10 @@ internal interface IUiBackend
     void Toast(string text, ToastKind kind);
     void RequestCast(string abilityId);
     (bool Ok, string Message) RunCommand(string line);
+    /// <summary>This game's world session: a new one per hosted or joined world (window state resets). 0 in the menu before any.</summary>
+    ulong WorldSession => 0;
+    /// <summary>Hands a checked PNG to the overlay's image loader (tick thread); null when it cannot.</summary>
+    UiImage? LoadImage(byte[] png) => null;
 }
 
 internal static class UiRuntime
@@ -126,19 +130,35 @@ internal static class UiRuntime
         public IUiHud? Line;
         public long NextDue;
         public bool Faulted;
+        public UiDemandRegistration? Demand;
+        public UiWorldFields Demanded;
     }
 
     private static readonly object Gate = new();
     private static readonly Dictionary<string, ModUi> Mods_ = new(StringComparer.Ordinal);
     private static readonly HashSet<string> Noted = new(StringComparer.Ordinal);
     private static HudState[] _huds = [];
+    private static WindowRuntime[] _windows = [];
     private static IDisposable? _tick;
+    private static ulong _session;
+    private static bool _sessionSeen;
 
     /// <summary>The game's Kiln.Ui, or a fake in tests.</summary>
     internal static IUiBackend Backend = new KilnUiBackend();
 
     /// <summary>Milliseconds, for refresh rates and edits. Tests replace it.</summary>
     internal static Func<long> Clock = static () => Environment.TickCount64;
+
+    /// <summary>Where the windows' state and data events go (UiWindowStateChangedEvent, UiControlStateChangedEvent,
+    /// UiWindowStateResetEvent, UiBindingValueChangedEvent): the game's main thread in the client world's next step, as
+    /// Kiln's other client events (the Pump commits on the service tick, which is the server's thread on a host). With no
+    /// client world (a menu) they are posted at once. A full client queue drops the event as it drops Kiln's other client
+    /// events (ClientEvents logs it); it is never posted from the service tick after all. Tests replace it.</summary>
+    internal static Action<KilnEvent> PostEvent = static e =>
+    {
+        if (ClientEvents.Session == 0) Events.Post(e);
+        else ClientEvents.Enqueue(e);
+    };
 
     internal static Func<Action<ulong>, IDisposable> SubscribeTick = static tick => BlocksBridge.AddTick("kiln blocks ui", tick);
 
@@ -184,6 +204,7 @@ internal static class UiRuntime
                 if (m.Windows.Count + m.Huds.Count + m.Keys.Count == 0) Mods_.Remove(mod);
             }
             _huds = [.. Mods_.Values.SelectMany(x => x.Huds.Values)];
+            _windows = [.. Mods_.Values.SelectMany(x => x.Windows.Values)];
             if (Mods_.Count == 0) { _tick?.Dispose(); _tick = null; }
         }
     }
@@ -215,7 +236,14 @@ internal static class UiRuntime
             Problem(plan.Mod, $"window {plan.Name}: {e.Message}");
             return;
         }
-        rt.WhenAlive(() => { lock (Gate) Of(plan.Mod).Windows[plan.Name] = rt; });
+        rt.WhenAlive(() =>
+        {
+            lock (Gate)
+            {
+                Of(plan.Mod).Windows[plan.Name] = rt;
+                _windows = [.. Mods_.Values.SelectMany(x => x.Windows.Values)];
+            }
+        });
         EnsureTick();
         BlocksBridge.Log(LogLevel.Info, $"blocks: {plan.Mod}: ui: window {plan.Name} ready ({plan.Block.Kind.ToString().ToLowerInvariant()}, {plan.Rows.Count} row(s), refresh {plan.Block.Refresh}s)");
     }
@@ -231,7 +259,7 @@ internal static class UiRuntime
         lock (Gate) Of(plan.Mod).Huds.Remove(plan.Name, out old);
         old?.Lifetime.Dispose();
         var state = new HudState(plan);
-        state.Lifetime.WhenRetired(() => { state.Line?.Remove(); state.Line = null; });
+        state.Lifetime.WhenRetired(() => { state.Line?.Remove(); state.Line = null; Interlocked.Exchange(ref state.Demand, null)?.Dispose(); });
         state.Lifetime.WhenRetired(() => Retired(plan.Mod, m =>
         {
             if (m.Huds.TryGetValue(plan.Name, out var current) && ReferenceEquals(current, state)) m.Huds.Remove(plan.Name);
@@ -295,12 +323,15 @@ internal static class UiRuntime
     public static void Forget(string mod)
     {
         UiCompile.Forget(mod);
+        UiDataRegistry.Forget(mod);
+        UiStats.Forget(mod);
         ModUi? m;
         lock (Gate)
         {
             Noted.RemoveWhere(n => n.StartsWith(mod + ":", StringComparison.Ordinal));
             if (!Mods_.Remove(mod, out m)) return;
             _huds = [.. Mods_.Values.SelectMany(x => x.Huds.Values)];
+            _windows = [.. Mods_.Values.SelectMany(x => x.Windows.Values)];
         }
         foreach (var w in m.Windows.Values) w.Dispose();
         foreach (var h in m.Huds.Values) h.Lifetime.Dispose();
@@ -315,17 +346,39 @@ internal static class UiRuntime
 
     // ---- the service tick (tick thread) --------------------------------------------------------------------------------
 
-    private static void EnsureTick()
+    private static void EnsureTick(bool force = false)
     {
-        lock (Gate) if (Mods_.Count > 0) _tick ??= SubscribeTick(_ => Pump());
+        lock (Gate) if (Mods_.Count > 0 || force) _tick ??= SubscribeTick(_ => Pump());
     }
 
-    /// <summary>Queued commands, due config writes, and the HUD lines that are due. Cheap when nothing is: a clock read and a look at each line's due time.</summary>
+    /// <summary>Wakes the Pump for a state write or a data publication (any thread): it runs anyway once anything is registered.</summary>
+    internal static void WakeForData() => EnsureTick(force: true);
+
+    /// <summary>Queued commands, due config writes, state writes and data publications, the windows' live-value demand, and the HUD lines that are due.
+    /// Cheap when nothing is: a clock read and a look at each line's due time.</summary>
     internal static void Pump()
     {
         var now = Clock();
         UiActions.Drain();
         UiEdits.Flush(now);
+        UiDataRegistry.Commit();
+        var windows = _windows;
+        // a new world: every window's state goes back to its initial values (with a new session token)
+        ulong session = 0;
+        try { session = Backend.WorldSession; }
+        catch (Exception e) when (e is InvalidOperationException or TypeLoadException) { }
+        if (!_sessionSeen) { _sessionSeen = true; _session = session; }
+        else if (session != _session)
+        {
+            _session = session;
+            foreach (var w in windows) w.WhenAlive(w.State.Reset);
+        }
+        foreach (var w in windows)
+            w.WhenAlive(() =>
+            {
+                w.State.Commit();
+                w.UpdateDemand();
+            });
         var huds = _huds;
         for (var i = 0; i < huds.Length; i++)
             if (now >= huds[i].NextDue)
@@ -342,10 +395,18 @@ internal static class UiRuntime
         if (h.Faulted) return;
         try
         {
-            var snapshot = new Dictionary<string, object?>(StringComparer.Ordinal);
-            foreach (var b in p.Text.Bindings.Concat(p.When?.Bindings ?? []).DistinctBy(b => b.Name)) snapshot[b.Name] = UiBindings.Read(b);
-            object? Value(UiBinding b) => snapshot.TryGetValue(b.Name, out var x) ? x : null;
-            var text = p.When?.Test(Value) ?? true ? p.Text.Render(Backend.Language, Value) : "";
+            var ctx = new UiRefreshContext(new UiScope { Mod = p.Mod });
+            object? Value(UiBinding b) => ctx.Value(b);
+            var shown = p.When?.Test(Value) ?? true;
+            // a hidden line's condition still asks for its live values, or it could never become true
+            var want = (p.When?.World ?? UiWorldFields.None) | (shown ? p.Text.Bindings.Aggregate(UiWorldFields.None, (f, b) => f | b.World) : UiWorldFields.None);
+            if (want != h.Demanded || h.Demand is { Ok: false })  // changed, or refused before (a mod at its budget): ask again
+            {
+                Interlocked.Exchange(ref h.Demand, null)?.Dispose();
+                h.Demanded = want;
+                if (want != UiWorldFields.None) h.Demand = UiWorldSource.Demand(p.Mod, want);
+            }
+            var text = shown ? p.Text.Render(Backend.Language, Value) : "";
             if (text.Length == 0)
             {
                 // hidden costs nothing: no line, so no demand on the overlay
@@ -372,7 +433,17 @@ internal static class UiRuntime
         foreach (var m in mods) Forget(m);
         UiActions.Clear();
         UiEdits.Clear();
-        lock (Gate) Noted.Clear();
+        UiDataRegistry.ResetForTests();
+        UiStats.ResetForTests();
+        UiImages.ResetForTests();
+        UiWindowState.ResetForTests();
+        _sessionSeen = false;
+        lock (Gate)
+        {
+            Noted.Clear();
+            _tick?.Dispose();
+            _tick = null;
+        }
         Backend = backend;
         Clock = static () => Environment.TickCount64;
     }
@@ -463,6 +534,17 @@ internal sealed class KilnUiBackend : IUiBackend
     public void Toast(string text, ToastKind kind) => Hud.Toast(text, kind, 3.5);
 
     public void RequestCast(string abilityId) => AbilityRegistry.RequestCast(abilityId);
+
+    public ulong WorldSession
+    {
+        get
+        {
+            try { return Client.Available ? Client.ClientWorldSession : 0; }
+            catch (Exception e) when (e is InvalidOperationException or TypeLoadException) { return 0; }
+        }
+    }
+
+    public UiImage? LoadImage(byte[] png) => Ui.LoadImage(png);
 
     public (bool Ok, string Message) RunCommand(string line)
     {

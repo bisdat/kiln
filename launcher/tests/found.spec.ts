@@ -59,7 +59,7 @@ test("Add imports a mod from a folder its loader does not read, and it is on", a
 });
 
 test("a profile's folders and notes switch every engine's folder, grouped", async ({ page }) => {
-  await desktop(page, "/settings");
+  await desktop(page, "/settings/mods");
   await page.getByRole("region", { name: "Profiles" }).getByRole("listitem").filter({ hasText: "Vanilla plus" }).getByRole("button", { name: "More for Vanilla plus" }).click();
   await page.getByRole("menuitem", { name: "Folders and notes" }).click();
   const dlg = page.getByRole("dialog", { name: "Vanilla plus: folders and notes" });

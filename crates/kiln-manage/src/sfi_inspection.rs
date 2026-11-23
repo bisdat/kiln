@@ -88,8 +88,9 @@ const ROLES: [&str; 10] = [
     "base-seal",
     "receipt",
 ];
-const NOTES: [&str; 7] = [
+const NOTES: [&str; 8] = [
     "baseline-outdated",
+    "baseline-stale",
     "seal-outdated",
     "receipt-baseline-mismatch",
     "receipt-origin-ignored",

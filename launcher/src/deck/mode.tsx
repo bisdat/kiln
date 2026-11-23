@@ -10,9 +10,8 @@ import { useEffect, useState, type ReactNode } from "react";
 import { useLocation, useNavigate, type NavigateFunction } from "react-router-dom";
 import * as api from "../api/commands";
 import type { AppInfo, LauncherSettings, UiMode } from "../api/commands";
-import { qk, useAppInfo, useSettings } from "../api/hooks";
-import { Card, Segmented, Splash, toast } from "../ui";
-import { useT } from "../i18n";
+import { qk } from "../api/hooks";
+import { Splash, toast } from "../ui";
 
 export type Ui = "deck" | "desktop";
 export interface UiChoice {
@@ -106,26 +105,4 @@ export const saveUiMode = (qc: QueryClient, mode: UiMode | ((cur: UiMode) => UiM
 /** Goes to the other UI now (this start). */
 export function switchUi(nav: NavigateFunction, to: Ui) {
   nav(to === "deck" ? "/deck" : "/", { replace: true });
-}
-
-/** Desktop Settings: the Steam Deck UI (start in it: auto / always / never; open it now). */
-export function DeckModeCard() {
-  const t = useT();
-  const qc = useQueryClient();
-  const nav = useNavigate();
-  const s = useSettings();
-  const info = useAppInfo();
-  if (!s.data) return null;
-  const mode: UiMode = s.data.uiMode === "deck" || s.data.uiMode === "desktop" ? s.data.uiMode : "auto";
-  const d = info.data?.deck;
-  const forced = d?.forced;
-  return (
-    <Card title={t("deck.modeCard.title")} actions={<button type="button" className="k-btn k-btn-s" onClick={() => switchUi(nav, "deck")}>{t("deck.modeCard.open")}</button>}>
-      <Segmented<UiMode> aria-label={t("deck.modeCard.startIn")} value={mode} onChange={(v) => void saveUiMode(qc, v)}
-        options={[{ id: "auto", label: t("deck.modeCard.auto") }, { id: "deck", label: t("deck.modeCard.deck") }, { id: "desktop", label: t("deck.modeCard.desktop") }]} />
-      <span className="k-hint">
-        {forced ? t("deck.modeCard.forced", { flag: `--${forced}` }) : d?.detected ? t("deck.modeCard.found", { signals: d.signals.join(", ") }) : t("deck.modeCard.notFound")}
-      </span>
-    </Card>
-  );
 }

@@ -5,7 +5,8 @@
 //!
 //! One test in this file, on purpose: it sets KILN_OUT for the tools it starts (the made-up exe's reflection is there),
 //! and no other test may run beside that.
-#![cfg(feature = "cooktools")]
+// This scenario includes shared Proton Z: drive fixtures backed by Unix symbolic links.
+#![cfg(all(unix, feature = "cooktools"))]
 
 use kiln_manage::cook::{self, CookOptions, CookReason};
 use kiln_manage::cooktools::{self, Locate};

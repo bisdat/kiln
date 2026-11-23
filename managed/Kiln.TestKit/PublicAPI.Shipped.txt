@@ -200,6 +200,10 @@ Kiln.TestKit.FakeInventorySlot.Item.get -> uint
 Kiln.TestKit.FakeInventorySlot.Item.init -> void
 Kiln.TestKit.FakeInventorySlot.ItemEntity.get -> uint
 Kiln.TestKit.FakeInventorySlot.ItemEntity.init -> void
+Kiln.TestKit.FakeInventorySlot.Level.get -> int
+Kiln.TestKit.FakeInventorySlot.Level.init -> void
+Kiln.TestKit.FakeInventorySlot.Rarity.get -> Kiln.ItemRarity?
+Kiln.TestKit.FakeInventorySlot.Rarity.init -> void
 Kiln.TestKit.FakeInventorySlot.SlotIndex.get -> byte
 Kiln.TestKit.FakeInventorySlot.SlotIndex.init -> void
 Kiln.TestKit.FakeItemsCall
@@ -237,6 +241,8 @@ Kiln.TestKit.FakeOutline.Reason.get -> Kiln.OutlineReason
 Kiln.TestKit.FakeOutline.Reason.init -> void
 Kiln.TestKit.FakeOutline.State.get -> Kiln.OutlineState
 Kiln.TestKit.FakeOutline.State.init -> void
+Kiln.TestKit.FakeOutline.ThroughWalls.get -> bool
+Kiln.TestKit.FakeOutline.ThroughWalls.init -> void
 Kiln.TestKit.FakeOutlineSetting
 Kiln.TestKit.FakeOutlineSetting.GameFirst = 0 -> Kiln.TestKit.FakeOutlineSetting
 Kiln.TestKit.FakeOutlineSetting.ModsFirst = 1 -> Kiln.TestKit.FakeOutlineSetting
@@ -665,7 +671,12 @@ Kiln.TestKit.HarnessUiInventory.MarkOf(int index) -> Kiln.SlotMark?
 Kiln.TestKit.HarnessUiInventory.OpenBackpack(params Kiln.TestKit.FakeInventorySlot[]! slots) -> void
 Kiln.TestKit.HarnessUiInventory.OpenChest(Kiln.EntityId chest, params Kiln.TestKit.FakeInventorySlot[]! slots) -> void
 Kiln.TestKit.HarnessUiInventory.PanelsShown.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Kiln.TestKit.HarnessUiInventory.PressPad(string! chord) -> Kiln.TestKit.FakeSlotClickResult
 Kiln.TestKit.HarnessUiInventory.Screen.get -> Kiln.InventoryScreen?
+Kiln.TestKit.HarnessUiInventory.Select(int? index) -> void
+Kiln.TestKit.HarnessUiItemDetail
+Kiln.TestKit.HarnessUiItemDetail.Capture(Kiln.ItemId item, Kiln.EntityId entity, int level, Kiln.ItemRarity? rarity, params Kiln.UiItemDetailLine![]! lines) -> void
+Kiln.TestKit.HarnessUiItemDetail.Clear() -> void
 Kiln.TestKit.HarnessUiValues
 Kiln.TestKit.HarnessUiValues.Decisions.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.FakeUiDecision>!
 Kiln.TestKit.HarnessUiValues.DetailLines(Kiln.TestKit.FakeUiItem item) -> System.Collections.Generic.IReadOnlyList<string!>!
@@ -682,12 +693,15 @@ Kiln.TestKit.HarnessWorldTables.Dependency(string! mod, string! dependency) -> v
 Kiln.TestKit.HarnessWorldTables.GameMaterial(string! name, uint item, bool roof = false, bool terrain = false) -> void
 Kiln.TestKit.HarnessWorldTables.Material(string! mod, string! key, uint item, bool roof = false, bool live = true, bool terrain = false) -> void
 Kiln.TestKit.HarnessWorldTables.PendingCount.get -> int
+Kiln.TestKit.HarnessWorldTables.PendingToolDefinitionsJson(string! mod) -> string!
 Kiln.TestKit.HarnessWorldTables.Readiness.get -> Kiln.CapacityReadiness
 Kiln.TestKit.HarnessWorldTables.Readiness.set -> void
 Kiln.TestKit.HarnessWorldTables.ReservePoolId(uint id) -> void
 Kiln.TestKit.HarnessWorldTables.ServePool(string! mod, string! key, Kiln.BuildingMaterialPoolBlock! block) -> void
 Kiln.TestKit.HarnessWorldTables.StorageFails.get -> bool
 Kiln.TestKit.HarnessWorldTables.StorageFails.set -> void
+Kiln.TestKit.HarnessWorldTables.TerrainBrushCells(string! mod, string! key) -> byte[]?
+Kiln.TestKit.HarnessWorldTables.TerrainItem(string! name, uint item, byte cell) -> void
 Kiln.TestKit.KilnHarness
 Kiln.TestKit.KilnHarness.As(Kiln.TestKit.ModHandle! mod, System.Action! action) -> void
 Kiln.TestKit.KilnHarness.As<T>(Kiln.TestKit.ModHandle! mod, System.Func<T>! func) -> T
@@ -755,6 +769,7 @@ Kiln.TestKit.KilnHarness.Tasks.get -> Kiln.TestKit.HarnessTasks!
 Kiln.TestKit.KilnHarness.Terrain.get -> Kiln.TestKit.HarnessTerrain!
 Kiln.TestKit.KilnHarness.Time.get -> Kiln.TestKit.HarnessTime!
 Kiln.TestKit.KilnHarness.UiInventory.get -> Kiln.TestKit.HarnessUiInventory!
+Kiln.TestKit.KilnHarness.UiItemDetail.get -> Kiln.TestKit.HarnessUiItemDetail!
 Kiln.TestKit.KilnHarness.UiValues.get -> Kiln.TestKit.HarnessUiValues!
 Kiln.TestKit.KilnHarness.Unload(Kiln.TestKit.ModHandle! mod, bool checkCollected = true) -> void
 Kiln.TestKit.KilnHarness.World.get -> Kiln.TestKit.HarnessWorld!

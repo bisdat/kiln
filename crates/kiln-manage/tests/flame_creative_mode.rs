@@ -191,6 +191,10 @@ fn the_folder_creative_mode_wrote_under_an_older_kiln_takes_kilns_copy_and_keeps
     assert!(copy.join("logs/flame.log").is_file());
     assert!(a.kept_files.iter().any(|s| s.starts_with("flame:creative: ") && s.contains("notice.txt")), "the player is told: {a:?}");
     assert!(a.retained.is_empty(), "{a:?}");
+    // the folder Kiln's copy replaced (no marker: only what the mod wrote, now in the copy) leaves no temporary folder
+    let left: Vec<String> = std::fs::read_dir(g.path.join("mods")).unwrap().flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| n.starts_with(".kiln-place-")).collect();
+    assert!(left.is_empty(), "{left:?}");
     // they are the player's, not Kiln's: removing the mod keeps them
     let file = activate_with(&dirs, &g, &pid, vec![]);
     assert!(file.mods.flame.is_empty() && !copy.exists());

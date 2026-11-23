@@ -2,7 +2,7 @@
 // Reference: docs/kiln/launcher/design-system.md. Styles: ./ui.css (loaded once by theme/base.css).
 export { Button, IconButton, Spinner } from "./Button";
 export type { ButtonProps, ButtonVariant, ButtonSize, IconButtonProps } from "./Button";
-export { Card, Section, Panel, PageHeader, Page, SplitPage, KeyValue } from "./Card";
+export { Card, CardLevel, Section, Panel, PageHeader, Page, SplitPage, KeyValue } from "./Card";
 export type { CardProps, PanelProps, PageHeaderProps, KeyValueRow } from "./Card";
 export { StatusPill, Badge, Kbd, Banner } from "./StatusPill";
 export type { Tone, StatusPillProps, BannerProps } from "./StatusPill";

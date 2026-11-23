@@ -500,6 +500,7 @@
   },
   "keys": {
     "help_mouse": "Kliknij klawisz, potem naciśnij nowy: klawisz, środkowy lub boczny przycisk myszy albo obrót kółka, opcjonalnie z Ctrl, Shift lub Alt (lewego i prawego kliknięcia nie da się przypisać). Kliknij ponownie, aby anulować; Escape anuluje i zamyka menu. Usuń przypisanie zostawia akcję bez klawisza. Zapisywane w kiln/config/keybinds.json.",
+    "help_pad": "Działa też kontroler: kliknij klawisz i naciśnij przycisk pada albo przytrzymaj LB, RB, LT lub RT i naciśnij inny, aby utworzyć kombinację (Pad:LB+A); puść samo LB, RB, LT lub RT, aby przypisać ten przycisk.",
     "help": "Kliknij klawisz, potem naciśnij nowy. Kliknij ponownie, aby anulować; Escape anuluje i zamyka menu. Usuń przypisanie zostawia akcję bez klawisza. Zapisywane w kiln/config/keybinds.json.",
     "col_action": "Akcja",
     "col_key": "Klawisz",
@@ -509,7 +510,8 @@
     "reset": "Resetuj",
     "unbind": "Usuń przypisanie",
     "toast": {
-      "wheel_menu": "Klawisz menu Kiln nie może być na kółku ({key}): zamykałby menu podczas przewijania"
+      "wheel_menu": "Klawisz menu Kiln nie może być na kółku ({key}): zamykałby menu podczas przewijania",
+      "pad_menu": "Klawisz menu Kiln nie może być przyciskiem kontrolera ({key}): menu otwiera się klawiaturą lub przyciskiem myszy"
     }
   },
   "network": {

@@ -14,6 +14,7 @@ import { t } from '../../i18n';
 import { t as tv } from '../src/i18n.js';
 import { useDeckActions, useEditorEnv } from './env.jsx';
 import { readOnly } from './session.js';
+import { move as moveFocus } from '../../deck/focus';
 
 const ST = ui.skilltree;
 const C = 4000;
@@ -32,6 +33,8 @@ const BASE_ATTR = 10;
 
 export default function Skills({ model, setModel }) {
   const env = useEditorEnv();
+  const disabled = readOnly(model);
+  const [focused, setFocused] = useState(null);
   const levels = useMemo(() => new Map(model.skills.map((s) => [s.id, s.level])), [model.skills]);
   const active = (id) => byId.get(id)?.type === 'Root' || (levels.get(id) || 0) > 0;
   const stateOf = (n) => (active(n.id) ? 'on' : [...adj.get(n.id)].some(active) ? 'reach' : 'off');
@@ -62,7 +65,9 @@ export default function Skills({ model, setModel }) {
   const warnings = [...(readOnly(model) ? [t('editor.page.readOnlyError', { erro: tv(model.error || '') })] : []), ...problems];
 
   const setLevel = (id, lv) => {
-    const n = byId.get(id); const max = n.maxLevel || 1;
+    const n = byId.get(id);
+    if (disabled || !n || n.type === 'Root') return;
+    const max = n.maxLevel || 1;
     lv = Math.max(0, Math.min(max, lv));
     const list = model.skills.some((s) => s.id === id)
       ? model.skills.map((s) => (s.id === id ? { ...s, level: lv } : s))
@@ -128,7 +133,7 @@ export default function Skills({ model, setModel }) {
   // the Deck: the focused node is the one Y lowers, and the camera centres on it
   const follow = (n) => { setHover(n); setView((o) => ({ ...(o ?? v), x: n.x, y: n.y })); };
   useDeckActions(env.deck ? [
-    { button: 'y', label: t('editor.skills.minusLevel'), disabled: !hover || hover.type === 'Root' || !(levels.get(hover.id) > 0), run: () => { if (hover && hover.type !== 'Root') setLevel(hover.id, (levels.get(hover.id) || 0) - 1); } },
+    { button: 'y', label: t('editor.skills.minusLevel'), disabled: disabled || !hover || hover.type === 'Root' || !(levels.get(hover.id) > 0), run: () => { if (hover && hover.type !== 'Root') setLevel(hover.id, (levels.get(hover.id) || 0) - 1); } },
   ] : null);
 
   const linkKind = (a, b) => (active(a) && active(b) ? 'on' : active(a) || active(b) ? 'reach' : 'off');
@@ -141,7 +146,7 @@ export default function Skills({ model, setModel }) {
 
   return (
     <div className={'ke-tree' + (env.deck ? ' deck' : '')} ref={box} onPointerDown={down} onPointerMove={move}>
-      <svg className="ke-tree-svg" viewBox={vb} preserveAspectRatio="xMidYMid meet" aria-label={t('editor.skills.tree')} role="img">
+      <svg className="ke-tree-svg" viewBox={vb} preserveAspectRatio="xMidYMid meet" aria-label={t('editor.skills.tree')} role={env.deck ? 'img' : 'group'}>
         <defs>
           <radialGradient id="ke-hearth"><stop offset="0" stopColor="rgba(255,110,40,.16)" /><stop offset="1" stopColor="rgba(255,110,40,0)" /></radialGradient>
         </defs>
@@ -168,7 +173,21 @@ export default function Skills({ model, setModel }) {
           const ctx = (e) => { e.preventDefault(); if (!isRoot) setLevel(n.id, lv - 1); };
           return (
             <g key={n.id} className={`ke-node ${st}`} transform={`translate(${n.x} ${n.y})`} onClick={click} onContextMenu={ctx}
-              onPointerEnter={() => setHover(n)} onPointerLeave={() => setHover((h) => (h === n ? null : h))}>
+              role={env.deck ? undefined : 'button'} tabIndex={env.deck ? undefined : 0} aria-disabled={!env.deck && (disabled || isRoot) || undefined}
+              aria-label={env.deck ? undefined : isRoot ? nomeDe(n, '') : t('editor.skills.nodeLabel', { name: nomeDe(n, ''), level: lv, max: n.maxLevel || 1 })}
+              style={env.deck ? undefined : { outline: 'none' }}
+              onFocus={env.deck ? undefined : () => { setFocused(n.id); follow(n); }}
+              onBlur={env.deck ? undefined : () => { setFocused(null); setHover((h) => h === n ? null : h); }}
+              onKeyDown={env.deck ? undefined : (e) => {
+                if (e.ctrlKey || e.altKey || e.metaKey) return;
+                const dir = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down' }[e.key];
+                if (dir) { e.preventDefault(); moveFocus(e.currentTarget.ownerSVGElement, dir); }
+                else if (['Enter', ' ', '+', '=', '-', 'Backspace', 'Delete'].includes(e.key)) {
+                  e.preventDefault(); setLevel(n.id, lv + (['-', 'Backspace', 'Delete'].includes(e.key) ? -1 : 1));
+                }
+              }}
+              onPointerEnter={() => setHover(n)} onPointerLeave={() => setHover((h) => h === n ? byId.get(focused) ?? null : h)}>
+              {focused === n.id && <circle data-skill-focus="" r={Math.max(r * 1.5, 40)} fill="none" stroke="var(--k-gold-400)" strokeWidth={2 / v.z} pointerEvents="none" />}
               {st === 'on' && !isRoot && <circle r={r * 1.9} fill={`rgba(${rgb},.16)`} />}
               {isRoot ? (
                 <rect x={-r * 0.7} y={-r * 0.7} width={r * 1.4} height={r * 1.4} transform="rotate(45)" fill="#2a1a0e" stroke="#f9c74f" strokeWidth={6} />
@@ -231,8 +250,8 @@ export default function Skills({ model, setModel }) {
             const lv = levels.get(n.id) || 0;
             return (
               <button key={n.id} type="button" className="ke-tree-key" data-deck-id={`node-${n.id}`}
-                data-deck-a={n.type === 'Root' ? '-' : lv >= (n.maxLevel || 1) ? '-' : t('editor.skills.plusLevel')}
-                aria-label={`${nomeDe(n, '')}${n.type !== 'Root' ? `: ${lv}/${n.maxLevel || 1}` : ''}`}
+                data-deck-a={disabled || n.type === 'Root' ? '-' : lv >= (n.maxLevel || 1) ? '-' : t('editor.skills.plusLevel')}
+                aria-label={`${nomeDe(n, '')}${n.type !== 'Root' ? `: ${lv}/${n.maxLevel || 1}` : ''}`} aria-disabled={disabled || n.type === 'Root' || undefined}
                 style={{ left: (n.x - v.x) * v.z + size.w / 2 - r, top: (n.y - v.y) * v.z + size.h / 2 - r, width: 2 * r, height: 2 * r }}
                 onFocus={() => follow(n)} onClick={() => { if (n.type !== 'Root') setLevel(n.id, lv + 1); }} />
             );
@@ -245,7 +264,7 @@ export default function Skills({ model, setModel }) {
           <span className="k-sc" style={{ color: classOf(hover) }}>{t(`editor.skills.class.${CLASS[hover.class] ? hover.class.toLowerCase() : 'neutral'}`)}{hover.type !== 'Root' ? ` · ${t('editor.skills.cost', { n: hover.cost })}` : ''}{hover.maxLevel ? ` · ${t('editor.skills.maxN', { n: hover.maxLevel })}` : ''}</span>
           <strong className="ke-tree-tip-name">{nomeDe(hover, '')}</strong>
           {descricaoDe(hover) && <span className="ke-tree-tip-desc">{descricaoDe(hover).replace(/%k/g, '?')}</span>}
-          {hover.type !== 'Root' && <span className="ke-note">{env.deck ? t('editor.skills.deckHint') : t('editor.skills.hint')}</span>}
+          {hover.type !== 'Root' && <span className="ke-note">{env.deck ? t('editor.skills.deckHint') : t('editor.skills.keyboardHint')}</span>}
         </div>
       )}
     </div>

@@ -2,7 +2,8 @@
 // switches show it; the launcher makes "My mods" by itself), and here the player keeps others: every saved profile with
 // its mod count over every kind and the server it is for, which one is loaded, Load, "Save current as..." (a copy of
 // the loaded one), Rename, the folders and notes dialog, Delete (not the loaded one), and "No profile" (the game folder
-// decides). The modpack flow's "Server: <name>" profiles are listed here too; that flow loads them itself.
+// decides). The modpack flow's "Server: <name>" profiles are listed here too; that flow loads them itself. Crucible's
+// packs are a group of their own under it (pages/settings/sections/Mods.tsx).
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { MoreHorizontal } from "lucide-react";
 import { useState } from "react";
@@ -17,7 +18,7 @@ import { forgetProfileEdits, useProfileEdit } from "../pages/profiles/useProfile
 import { notifyLibraryChanged } from "../shell/libraryChanged";
 import { notifyActivation } from "../shell/notices";
 import { rich, useT } from "../i18n";
-import { CruciblePacksCard, PackLine, UninstallPackModal, packMenu } from "../crucible/Profiles";
+import { PackLine, UninstallPackModal, packMenu } from "../crucible/Profiles";
 import { useCrucibleOn, useInstances, useUpdates } from "../crucible/state";
 import type { PackInstance } from "../api/commands";
 import { Button, Card, ConfirmDanger, EmptyState, Field, Menu, Modal, Skeleton, TextInput, errorText, fmtAgo, notifyPlacementCleanup, toast } from "../ui";
@@ -60,7 +61,6 @@ export function ProfilesCard() {
   const cur = list.find((p) => p.id === loaded) ?? null;
 
   return (
-    <>
     <Card id="profiles" aria-label={t("profilesSettings.title")} title={t("profilesSettings.title")}
       sub={status.data?.otherFolderProfile
         ? <span className="k-tone-warn" title={otherFolderTitle(status.data.otherFolderProfile)} data-testid="other-folder-profile">{otherFolderProfile()}</span>
@@ -128,8 +128,6 @@ export function ProfilesCard() {
           catch (e) { toast.error(e); throw e; }
         }} />
     </Card>
-    {crucible && <CruciblePacksCard />}
-    </>
   );
 }
 

@@ -553,6 +553,47 @@ class RoundTrip(unittest.TestCase):
         self.assertEqual(sorted(l["auto"] for l in m["lines"]), ["advance:q.s", "start:q"])
         self.assertEqual([k["step"] for k in m["markers"]], ["s"])   # the NPC to go to is a place
 
+    def build_tracked(self, name, knowledge):
+        mod = self.work / name
+        (mod / "quests").mkdir(parents=True, exist_ok=True)
+        (mod / "kiln.mod.json").write_text(json.dumps({"id": name}))
+        (mod / "quests/x.json").write_text(json.dumps({"format": 1, "knowledge": knowledge}))
+        out = self.work / (name + "-out")
+        r = subprocess.run([str(self.exe), "--res", str(self.work / "res"), "--names", str(self.work / "names.json"),
+                            "--out", str(out), "--mod", str(mod)], capture_output=True, text=True)
+        return r, json.loads((out / "summary.json").read_text()), out
+
+    def test_tracked_items_and_recipes(self):
+        # a mod's item tracked as the game's items are (world: found, player: every flag, one knowledge per flag), its recipe as the
+        # game's recipes are (player Flags 1|2; 2 = crafted): the ids of another loader's tool and recipe
+        tool, recipe = 3205570361, 3289458456
+        r, s, out = self.build_tracked("tracker", {"tool": {"id": f"0x{tool:08x}", "track": "pickup"},
+                                                   "tool-recipe": {"id": f"0x{recipe:08x}", "track": "craft"}})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(s["errors"], [])
+        self.assertEqual(s["manifest"]["mods"][0]["knowledge"], {"tool": f"0x{tool:08x}", "tool-recipe": f"0x{recipe:08x}"})
+        b = (out / "knowledge.bin").read_bytes()
+        w = bucket_find(b, 0, 12, tool)
+        p = bucket_find(b, 0x18, 24, tool)
+        self.assertEqual((w[5], w[6], w[7], struct.unpack_from("<I", w, 8)[0]), (0, 0, 2, 1))           # no twin, world, Flags, found
+        self.assertEqual((p[5], p[6], p[7], struct.unpack_from("<I", p, 8)[0], p[0xc]), (0, 1, 2, 0xFFFF, 1))
+        self.assertIsNone(bucket_find(b, 0, 12, recipe))                                                  # a recipe has no world object
+        q = bucket_find(b, 0x18, 24, recipe)
+        self.assertEqual((q[5], q[6], q[7], struct.unpack_from("<I", q, 8)[0], q[0xc]), (0, 1, 2, 3, 0))
+        # the game's own bucket recipe, for comparison: what a tracked recipe copies
+        v = bucket_find(self.vanilla[GUID_KNOWLEDGE], 0x18, 24, 659625826)
+        self.assertEqual((v[7], struct.unpack_from("<I", v, 8)[0], v[0xc]), (2, 3, 0))
+
+    def test_tracked_refusals_are_the_mods_own(self):
+        for knowledge, word in (({"a": {"id": "0x27511762", "track": "craft"}}, "game's knowledge"),    # the bucket recipe: the game's
+                                ({"a": {"id": "0x00000000", "track": "pickup"}}, "not 0"),
+                                ({"a": {"id": "0x12345678", "track": "use"}}, "pickup or craft"),
+                                ({"a": {"id": "0x12345678", "track": "craft", "scope": "world"}}, "per player")):
+            with self.subTest(word=word):
+                r, s, _ = self.build_tracked("refused", knowledge)
+                self.assertTrue(any(word in e for e in s["errors"]), s["errors"])
+                self.assertFalse(s["manifest"]["mods"][0]["ok"])
+
     def test_sample(self):
         m = self.manifest("npcsample")
         guid = "299d68c5-10b9-4af9-91e0-194b308ee461"

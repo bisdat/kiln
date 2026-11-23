@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // kiln-eml: build privately, then publish the header last. While installing data the live header is vanilla,
 // whose containers and resource prefix are immutable. A crash at any publication boundary leaves a usable game.
-use std::{collections::BTreeMap, fs::{self, File, OpenOptions}, io::{self, Read, Seek, SeekFrom}, path::{Path, PathBuf}, rc::Rc};
+use std::{collections::BTreeMap, fs::{self, File, OpenOptions}, io::{self, Read, Seek, SeekFrom}, path::{Path, PathBuf}, rc::Rc, time::{Duration, Instant}};
+use crate::progress::archive_work::{self, Note};
 use kfc::{container::{KFCFile, KFCReader, KFCWriter, KFCWriteError}, guid::{ContentHash, ResourceId}, reflection::TypeRegistry};
 
 pub type Writer = KFCWriter<Rc<KFCFile>, Rc<TypeRegistry>>;
@@ -47,15 +48,36 @@ pub(crate) fn attributes_by_name(path: &Path) -> io::Result<u32> {
     Ok(attributes)
 }
 
+/// kiln-eml: a flush to the drive that takes longer than this gets a kiln.log line: a drive busy with another
+/// program's writes makes a start slow, and the line says where the time went.
+const SLOW_SYNC: Duration = Duration::from_secs(2);
+
+/// kiln-eml: `file.sync_all()`, with that line (`what`: the file, for the line).
+pub(crate) fn sync_file(file: &File, what: &Path) -> io::Result<()> {
+    let began = Instant::now();
+    file.sync_all()?;
+    slow_sync(began, what);
+    Ok(())
+}
+
+fn slow_sync(began: Instant, what: &Path) {
+    let took = began.elapsed();
+    if took >= SLOW_SYNC {
+        let name = what.file_name().map_or_else(|| what.display().to_string(), |n| n.to_string_lossy().into_owned());
+        tracing::warn!("Flushing {name} to the drive took {:.1} s: the drive is busy or slow, which makes this start slow", took.as_secs_f64());
+    }
+}
+
 pub(crate) fn sync_dir(dir: &Path) -> io::Result<()> {
-    #[cfg(unix)] { File::open(dir)?.sync_all()?; }
+    #[cfg(unix)] { sync_file(&File::open(dir)?, dir)?; }
     #[cfg(windows)] {
         if under_wine() {
             use std::os::windows::fs::OpenOptionsExt;
             // Wine's MoveFileEx ignores WRITE_THROUGH. A writable directory handle maps FlushFileBuffers to
             // fsync(dirfd), making the vanilla-header barrier and each subsequent rename durable on Unix too.
-            OpenOptions::new().read(true).write(true).custom_flags(0x02000000) // FILE_FLAG_BACKUP_SEMANTICS
-                .open(dir)?.sync_all()?;
+            let handle = OpenOptions::new().read(true).write(true).custom_flags(0x02000000) // FILE_FLAG_BACKUP_SEMANTICS
+                .open(dir)?;
+            sync_file(&handle, dir)?;
         }
     }
     #[cfg(not(any(unix, windows)))] { let _ = dir; }
@@ -109,7 +131,7 @@ pub fn replace(src: &Path, dst: &Path) -> io::Result<()> {
 /// A same-volume rename that can never replace an existing recovery file.
 pub(crate) fn move_new(src: &Path, dst: &Path) -> io::Result<()> {
     regular(src)?;
-    OpenOptions::new().read(true).write(true).open(src)?.sync_all()?;
+    sync_file(&OpenOptions::new().read(true).write(true).open(src)?, src)?;
     #[cfg(target_os = "linux")] {
         use std::{ffi::CString, os::unix::ffi::OsStrExt};
         unsafe extern "C" { fn renameat2(a: i32, src: *const std::ffi::c_char, b: i32, dst: *const std::ffi::c_char, flags: u32) -> i32; }
@@ -150,8 +172,8 @@ fn copy_via_temp(src: &Path, dst: &Path, own_record: bool) -> io::Result<()> {
         let mut f = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
         #[cfg(test)]
         TEMP_OPEN.with(|check| { if let Some(check) = check.take() { check(&tmp); } });
-        io::copy(&mut File::open(src)?, &mut f)?;
-        f.sync_all()?;
+        copy_counted(&mut File::open(src)?, &mut f)?;
+        sync_file(&f, dst)?;
         drop(f);
         failpoint!("temp.written", dst);
         replace(&tmp, dst)?;
@@ -170,6 +192,26 @@ fn copy_via_temp(src: &Path, dst: &Path, own_record: bool) -> io::Result<()> {
     result
 }
 
+/// kiln-eml: `io::copy` in 1 MiB steps, each counted for the startup pass's progress (`archive_work`). Windows' std
+/// copies 8 KiB at a time, a system call each way (and through Wine's file layer under Proton): the resource backup
+/// alone is over 200 MiB on a client.
+fn copy_counted(src: &mut File, dst: &mut File) -> io::Result<u64> {
+    use std::io::Write;
+    let mut buffer = vec![0u8; 1 << 20];
+    let mut copied = 0u64;
+    loop {
+        let n = match src.read(&mut buffer) {
+            Ok(0) => return Ok(copied),
+            Ok(n) => n,
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(e),
+        };
+        dst.write_all(&buffer[..n])?;
+        archive_work::add(n as u64);
+        copied += n as u64;
+    }
+}
+
 pub fn atomic_write(dst: &Path, bytes: &[u8]) -> io::Result<()> {
     use std::io::Write;
     let tmp = dst.with_extension(format!("kiln-{}", uuid::Uuid::new_v4()));
@@ -178,7 +220,7 @@ pub fn atomic_write(dst: &Path, bytes: &[u8]) -> io::Result<()> {
     let result = (|| {
         let mut f = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
         f.write_all(bytes)?;
-        f.sync_all()?;
+        sync_file(&f, dst)?;
         drop(f);
         failpoint!("temp.written", dst);
         replace(&tmp, dst)?;
@@ -755,12 +797,13 @@ impl PatchWriter {
 
     /// kiln-eml: finalize/close/flush/read-validate only. No ownership::prepare, SF access, or live replace.
     pub(crate) fn prepare(mut self) -> Result<PreparedArchive, KFCWriteError> {
+        archive_work::mark(Note::Checking);
         self.writer.take().ok_or_else(|| io::Error::other("archive writer already finalized"))?.finalize()?;
         failpoint!("prepare.finalized", self.stage);
         let target = self.target.as_ref().ok_or_else(|| io::Error::other("no captured archive target"))?;
         target.check(&self.game, &self.stage, self.held.as_ref())?;
         let files = self.stage_files()?;
-        for path in &files { OpenOptions::new().read(true).write(true).open(path)?.sync_all()?; }
+        for path in &files { sync_file(&OpenOptions::new().read(true).write(true).open(path)?, path)?; }
         sync_dir(self.at())?;
         failpoint!("prepare.synced", self.stage);
         // Bind validation to the SAME bytes, not a new digest taken only after the reader passed.
@@ -800,11 +843,12 @@ impl PatchWriter {
     }
     /// kiln-eml: the publication in a ShroudForge handoff mode, recording a BASE origin (`Publication`).
     fn publish_as(&self, publication: &crate::ownership::Publication, mut boundary: impl FnMut(usize) -> io::Result<()>) -> io::Result<()> {
+        archive_work::mark(Note::Publishing);
         let header = format!("{}.kfc", self.name);
         let mut data = self.children()?;
         data.retain(|p| p.file_name() != Some(std::ffi::OsStr::new(VANILLA_HEADER)));
         data.sort();
-        for p in &data { regular(p)?; OpenOptions::new().read(true).write(true).open(p)?.sync_all()?; }
+        for p in &data { regular(p)?; sync_file(&OpenOptions::new().read(true).write(true).open(p)?, p)?; }
         // SF's locks (when its prepared-output state was handed over) stay held until the patched header is live
         let mut prepared = crate::ownership::prepare_from(&self.game, self.at(), &self.name, &data, publication)?;
         // No old patched header may refer to the containers we are about to replace.
@@ -953,7 +997,13 @@ fn read_content(patch: &PatchWriter, index: &KFCFile, id: &ContentHash) -> io::R
     f.seek(SeekFrom::Start(entry.offset))?;
     let mut bytes = vec![0; id.size() as usize];
     f.read_exact(&mut bytes)?;
-    if ContentHash::from_data(&bytes) != *id { return Err(io::Error::other("staged content hash mismatch")); }
+    archive_work::add(bytes.len() as u64);
+    if ContentHash::from_data(&bytes) != *id {
+        let baseline = entry.container_index < patch.target.as_ref()
+            .ok_or_else(|| io::Error::other("missing baseline"))?.baseline.containers().len();
+        return Err(io::Error::other(if baseline { "staged content hash mismatch in baseline container" }
+            else { "staged content hash mismatch" }));
+    }
     Ok(Some(bytes))
 }
 
@@ -963,6 +1013,7 @@ fn same_prefix(a: &Path, b: &Path, len: u64) -> io::Result<()> {
     loop {
         let n = a.read(&mut x)?;
         b.read_exact(&mut y[..n])?;
+        archive_work::add(2 * n as u64);
         if x[..n] != y[..n] { return Err(io::Error::other("staged resources changed the immutable baseline prefix")); }
         if n == 0 { return Ok(()); }
     }
@@ -1018,9 +1069,60 @@ fn validate_stage(patch: &PatchWriter, base: &KFCFile) -> io::Result<KFCFile> {
         let bytes = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| reader.read_resource(id)))
             .map_err(|_| io::Error::other("invalid staged resource data"))??.ok_or_else(|| io::Error::other("resource has no chunk"))?;
         if bytes.len() as u64 != size { return Err(io::Error::other("staged resource decoded size mismatch")); }
+        archive_work::add(size);
     }
-    for id in file.contents().keys() { read_content(patch, &file, id)?; }
+    // kiln-eml: every content of the stage's own containers is read back and its hash checked, and so is any content of a
+    // baseline container that the baseline index does not list at the same place. The others, the game's own (the
+    // writer only appends containers: `container_path` refuses a stage file over a baseline one), are not all read
+    // again: that read was the whole game install (48 GiB on a client) at every publication that is not cached. The
+    // input witness holds those files (identity, change time, length) from the capture until the publication
+    // (`TargetSnapshot::check` before and after this validation, and again before publishing), but it cannot say that the
+    // baseline index described them in the first place, and neither can the backup's own checks (version and seal,
+    // `load::validate_backup`) or the containers' lengths: a backup left from an earlier run over other game files passes
+    // all of them (seen in the field). So a few contents of each baseline container (`baseline_samples`: spread from its
+    // first to its last) are read back and checked too; every content keeps its range check.
+    {
+        let mut in_place: BTreeMap<usize, Vec<(u64, u64, &ContentHash)>> = BTreeMap::new();
+        for (id, entry) in file.contents().iter() {
+            let baseline = entry.container_index < base.containers().len()
+                && base.contents().get(id).is_some_and(|b| (b.offset, b.flags, b.container_index) == (entry.offset, entry.flags, entry.container_index));
+            if baseline {
+                let info = file.containers().get(entry.container_index).ok_or_else(|| io::Error::other("content container missing"))?;
+                range(entry.offset, id.size() as u64, info.size)?;
+                in_place.entry(entry.container_index).or_default().push((entry.offset, id.size() as u64, id));
+            } else {
+                read_content(patch, &file, id)?;
+            }
+        }
+        for contents in in_place.values_mut() {
+            contents.sort_unstable_by_key(|&(offset, ..)| offset);
+            for id in baseline_samples(contents) { read_content(patch, &file, id)?; }
+        }
+    }
     Ok(file)
+}
+
+/// kiln-eml: how many contents of each baseline container validation reads back (`validate_stage`), and the largest one
+/// it picks: a few spread over a container show whether the baseline index still describes it, for a few MiB a
+/// container (a client's 48 GiB in about 60 containers: some 100 MiB).
+const BASELINE_SAMPLES: usize = 4;
+const BASELINE_SAMPLE_MAX: u64 = 4 << 20;
+
+/// The contents `validate_stage` reads back of one baseline container. `contents`: offset, size and id of those the
+/// baseline index lists there, sorted by offset. `BASELINE_SAMPLES` places spread from the first to the last, each the
+/// nearest content of at most `BASELINE_SAMPLE_MAX` bytes not picked yet; the smallest content when none near is.
+fn baseline_samples<'a>(contents: &[(u64, u64, &'a ContentHash)]) -> Vec<&'a ContentHash> {
+    let n = contents.len();
+    let places = BASELINE_SAMPLES.min(n);
+    let mut picked: Vec<usize> = Vec::with_capacity(places);
+    for k in 0..places {
+        let place = if places == 1 { 0 } else { k * (n - 1) / (places - 1) };
+        let near = (0..=64usize).flat_map(|d| [place.checked_sub(d), place.checked_add(d)]).flatten()
+            .find(|&i| i < n && contents[i].1 <= BASELINE_SAMPLE_MAX && !picked.contains(&i));
+        picked.extend(near);
+    }
+    if picked.is_empty() && let Some(i) = (0..n).min_by_key(|&i| contents[i].1) { picked.push(i); }
+    picked.into_iter().map(|i| contents[i].2).collect()
 }
 
 #[cfg(test)]
@@ -1194,6 +1296,133 @@ pub(crate) mod tests {
         assert_eq!(fs::read(game.join("g.kfc")).unwrap(), b"old");
         drop((w, lock));
         fs::remove_dir_all(game).unwrap();
+    }
+    /// kiln-eml: a new folder with an archive `g` of twenty 64-byte contents (`fill` + i) in one container.
+    fn twenty_contents(tag: &str, fill: u8) -> std::path::PathBuf {
+        use kfc::guid::ContentHash;
+        let game = std::env::temp_dir().join(format!("kiln-validate-{tag}-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&game).unwrap();
+        File::create(game.join("g.kfc")).unwrap();
+        File::create(game.join("g.kfc_resources")).unwrap();
+        let mut vanilla = Writer::new(&game, "g", Rc::new(TypeRegistry::default()), "fixture").unwrap();
+        for i in 0..20u8 {
+            let content = [fill.wrapping_add(i); 64];
+            vanilla.write_content(&ContentHash::from_data(&content), &content).unwrap();
+        }
+        vanilla.finalize().unwrap();
+        game
+    }
+    /// kiln-eml: flips the first byte of the content of `g_000.dat` that `index` lists second by place (one
+    /// `baseline_samples` does not pick out of twenty).
+    fn change_second_content(game: &Path, index: &KFCFile) {
+        let mut places: Vec<u64> = index.contents().values().iter().filter(|e| e.container_index == 0).map(|e| e.offset).collect();
+        places.sort_unstable();
+        let dat = game.join("g_000.dat");
+        let mut bytes = fs::read(&dat).unwrap();
+        bytes[places[1] as usize] ^= 0xff;
+        fs::write(&dat, &bytes).unwrap();
+    }
+    #[test]
+    fn baseline_samples_spread_from_the_first_content_to_the_last_and_skip_large_ones() {
+        let ids: Vec<ContentHash> = (0..20u8).map(|i| ContentHash::from_data(&[i; 8])).collect();
+        let at = |picked: Vec<&ContentHash>| picked.iter().map(|p| ids.iter().position(|id| id == *p).unwrap()).collect::<Vec<_>>();
+        let small: Vec<(u64, u64, &ContentHash)> = ids.iter().enumerate().map(|(i, id)| (i as u64 * 64, 64, id)).collect();
+        assert_eq!(at(baseline_samples(&small)), [0, 6, 12, 19]);
+        assert_eq!(at(baseline_samples(&small[..1])), [0]);
+        // the nearest one of at most BASELINE_SAMPLE_MAX bytes stands in for a large one at a place
+        let mut large = small.clone();
+        large[19].1 = BASELINE_SAMPLE_MAX + 1;
+        large[0].1 = BASELINE_SAMPLE_MAX + 1;
+        assert_eq!(at(baseline_samples(&large)), [1, 6, 12, 18]);
+        // none small enough: the smallest
+        let huge: Vec<(u64, u64, &ContentHash)> = ids.iter().enumerate().map(|(i, id)| (i as u64, BASELINE_SAMPLE_MAX + 20 - i as u64, id)).collect();
+        assert_eq!(at(baseline_samples(&huge)), [19]);
+        assert!(baseline_samples(&[]).is_empty());
+    }
+    // kiln-eml: validation reads the stage's own containers back and checks every content's hash there; of a baseline
+    // container's contents that the baseline lists at the same place (the game's own, held by the witness) it reads a few,
+    // not all (a client's containers hold 48 GiB).
+    #[test]
+    fn validation_reads_the_stages_own_containers_back_and_not_the_baselines() {
+        use kfc::guid::ContentHash;
+        let game = twenty_contents("reads", 0);
+        let types = Rc::new(TypeRegistry::default());
+        let dir = camino::Utf8Path::from_path(&game).unwrap();
+        crate::load::create_backup(dir.join("g.kfc")).unwrap();
+        let base = Rc::new(KFCFile::from_path(game.join("g.kfc.bak"), false).unwrap());
+        // a byte of a content of the game's own container that validation does not pick (never so in a real install: here
+        // it shows that validation does not read that whole container back)
+        change_second_content(&game, &base);
+        let mut patch = crate::load::create_writer(dir, "g", &types, &base).unwrap();
+        patch.write_content(&ContentHash::from_data(b"new content"), b"new content").unwrap();
+        patch.writer.take().unwrap().finalize().unwrap();
+        let index = validate_stage(&patch, &base).expect("the baseline's container is not read back whole");
+        assert_eq!(index.contents().len(), 21);
+        // the stage's own container is read back: a byte changed there is refused
+        let own = patch.at().join("g_001.dat");
+        let mut staged = fs::read(&own).unwrap();
+        staged[0] ^= 0xff;
+        fs::write(&own, &staged).unwrap();
+        let error = validate_stage(&patch, &base).unwrap_err();
+        assert_eq!(error.to_string(), "staged content hash mismatch");
+        let text = format!("{:#}", crate::load::stage_refusal("g")(error.into()));
+        assert!(!text.contains("move g.kfc.bak"), "the new container does not implicate the backup: {text}");
+        drop(patch);
+        fs::remove_dir_all(game).unwrap();
+    }
+    // kiln-eml: a working baseline whose index no longer describes the game's containers (a backup left from an earlier run,
+    // made over other game files: seen in the field as "staged content hash mismatch") passes the backup's own checks
+    // (version, seal) and the containers' lengths; validation reads a few of each baseline container's contents back and
+    // refuses it before anything is published.
+    #[test]
+    fn validation_refuses_a_baseline_whose_containers_hold_other_bytes_at_its_places() {
+        use kfc::guid::ContentHash;
+        let game = twenty_contents("stale", 0);
+        let types = Rc::new(TypeRegistry::default());
+        let dir = camino::Utf8Path::from_path(&game).unwrap();
+        crate::load::create_backup(dir.join("g.kfc")).unwrap();
+        // the game's container moved on after the backup was made (another build: every content at another place, the
+        // file longer, which the legacy check of a baseline container's length lets through)
+        let dat = game.join("g_000.dat");
+        let old = fs::read(&dat).unwrap();
+        fs::write(&dat, [vec![0x5a; 4096], old].concat()).unwrap();
+        let base = Rc::new(KFCFile::from_path(game.join("g.kfc.bak"), false).unwrap());
+        let mut patch = crate::load::create_writer(dir, "g", &types, &base).unwrap();
+        patch.write_content(&ContentHash::from_data(b"new content"), b"new content").unwrap();
+        patch.writer.take().unwrap().finalize().unwrap();
+        let error = validate_stage(&patch, &base).expect_err("a baseline that no longer describes its containers");
+        assert!(error.to_string().contains("staged content hash mismatch"), "{error}");
+        drop(patch);
+        fs::remove_dir_all(game).unwrap();
+    }
+    // kiln-eml: a content of one of the baseline's containers that the baseline index does not list at that place (a writer
+    // that only appends containers never stages one) is read back and its hash checked, as the stage's own are.
+    #[test]
+    fn validation_reads_a_baseline_containers_content_the_baseline_does_not_list_there() {
+        use kfc::guid::ContentHash;
+        // two archives of one container with twenty contents of the same sizes: the game's, and another one whose index
+        // stands in for a baseline that lists other contents there
+        let game = twenty_contents("unlisted", 0);
+        let other = twenty_contents("other", 100);
+        let types = Rc::new(TypeRegistry::default());
+        let dir = camino::Utf8Path::from_path(&game).unwrap();
+        crate::load::create_backup(dir.join("g.kfc")).unwrap();
+        let base = Rc::new(KFCFile::from_path(game.join("g.kfc.bak"), false).unwrap());
+        change_second_content(&game, &base);
+        let mut patch = crate::load::create_writer(dir, "g", &types, &base).unwrap();
+        patch.write_content(&ContentHash::from_data(b"new content"), b"new content").unwrap();
+        patch.writer.take().unwrap().finalize().unwrap();
+        // the game's baseline lists the changed content there and validation does not pick it: its range is checked only
+        validate_stage(&patch, &base).expect("listed at the same place by the baseline");
+        // a baseline that does not list it there: read back, and the changed byte is refused
+        let unlisted = KFCFile::from_path(other.join("g.kfc"), false).unwrap();
+        assert_eq!(unlisted.containers().iter().map(|c| (c.size, c.count)).collect::<Vec<_>>(),
+            base.containers().iter().map(|c| (c.size, c.count)).collect::<Vec<_>>(), "the same container layout");
+        let error = validate_stage(&patch, &unlisted).unwrap_err();
+        assert!(error.to_string().contains("staged content hash mismatch"), "{error}");
+        drop(patch);
+        fs::remove_dir_all(game).unwrap();
+        fs::remove_dir_all(other).unwrap();
     }
     #[test]
     fn real_kfc_is_readable_at_every_publication_boundary() {

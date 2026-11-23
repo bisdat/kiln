@@ -126,7 +126,7 @@ function Now({ card: c }: { card: SfBackendCard }) {
   const t = useT();
   const s = c.setting;
   return (
-    <div className="k-stack" style={{ gap: 6 }} data-testid="sf-backend-now" data-setting={s.kind}>
+    <div className="k-stack" style={{ gap: 6 }} data-testid="sf-backend-now" data-sf-kind={s.kind}>
       {c.unreadable && <Banner tone="err"><span data-testid="sf-backend-unreadable">{t(`${L}.unreadable`, { reason: c.unreadable })}</span></Banner>}
       {s.kind === "invalid" ? <Banner tone="err"><span data-testid="sf-backend-setting">{t(`${L}.set.invalid`, { value: s.value })}</span></Banner>
         : <span data-testid="sf-backend-setting">{s.kind === "default" ? t(`${L}.set.default`) : t(`${L}.set.${s.kind}`, { name: nameOf(t, s.backend) })}</span>}
@@ -135,6 +135,7 @@ function Now({ card: c }: { card: SfBackendCard }) {
       {(c.next.envOffNote || c.interpreterRoute === "env-off") && <Banner tone="warn"><span data-testid="sf-backend-env">{t(`${L}.envOff`)}</span></Banner>}
       {c.interpreterRoute === "missing" && <Banner tone="warn"><span data-testid="sf-backend-route">{t(`${L}.route.missing`)}</span></Banner>}
       {c.interpreterRoute === "own-loader" && <Banner tone="warn"><span data-testid="sf-backend-route">{t(`${L}.route.ownLoader`, { file: c.ownLoader ?? "" })}</span></Banner>}
+      {c.interpreterRoute === "eml-r" && <Banner tone="warn"><span data-testid="sf-backend-route">{t("emlRNotice.interpreter")}</span></Banner>}
       {c.last && (
         <span className="k-stack" style={{ gap: 1 }} data-testid="sf-backend-last">
           <span>{t(`${L}.last`, { name: nameOf(t, c.last.backend) })}</span>

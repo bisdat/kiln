@@ -1,7 +1,7 @@
-// Inventory: the backpack grid, the swap bar (Alt) and the action bar (1-8), with the inspector beside them. Drag to
-// move, double-click an empty slot to add, Delete removes, Ctrl+D duplicates, I opens the catalog. On the Deck (env.jsx):
-// focus picks the slot, A goes into the inspector (an empty slot: the catalog), Y moves the item (A puts it down, B
-// cancels), B in the inspector goes back to the slot. Slot keys and the layout are upstream's (shared/inventory.mjs).
+// Inventory: the backpack grid, swap bar (Alt) and action bar (1-8), with the inspector beside them. Drag or use
+// Move (M), arrows and Enter/Space to move or swap; Escape cancels. Enter inspects an item or opens the catalog for
+// an empty slot, Delete removes, Ctrl+D duplicates, I opens the catalog. On the Deck (env.jsx): focus picks the slot,
+// A enters the inspector/catalog, Y moves, B cancels/returns. Slot keys and layout are upstream's (shared/inventory.mjs).
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Button } from '../../ui';
 import { items, itemName } from '../src/gamedata.js';
@@ -11,7 +11,8 @@ import { t } from '../../i18n';
 import { Inspector } from './Inspector.jsx';
 import { Catalog } from './Catalog.jsx';
 import { Slot } from './parts.jsx';
-import { useDeckActions, useEditorEnv } from './env.jsx';
+import { gridKey, useDeckActions, useEditorEnv } from './env.jsx';
+import { readOnly } from './session.js';
 
 /** An item no table has (another mod keeps it in the slot): shown locked, kept untouched (the save is read-only). */
 const isModItem = (e) => !!e && !items[e.itemId];
@@ -22,48 +23,73 @@ export default function Inventory({ model, setModel }) {
   const [catalog, setCatalog] = useState(false);
   const [dragFrom, setDragFrom] = useState(null);
   const env = useEditorEnv();
-  // the Deck: the item being moved (its slot key), and the panel's element (A goes into it)
+  const disabled = readOnly(model);
   const [moving, setMoving] = useState(null);
   const insp = useRef(null);
+  const catalogReturn = useRef(null);
   const layout = inventoryLayout(model, items, capacities);
   const bySlot = new Map(layout.all.map((k) => [k, entryAt(model, k)]).filter(([, e]) => e));
   const entry = sel !== null ? bySlot.get(sel) : null;
   const firstFree = layout.all.find((k) => !bySlot.has(k)) ?? null;
-  const change = (edits) => setModel(replaceSlots(model, edits));
-  const remove = () => { if (entry) change([[sel, null]]); };
+  const slotEl = (key) => document.querySelector(`.ke-grid [data-deck-id="slot-${CSS.escape(key)}"]`);
+  const focusSlot = (key) => {
+    const focus = () => slotEl(key)?.focus();
+    if (env.deck) requestAnimationFrame(focus); else focus();
+  };
+  const change = (edits) => { if (!disabled) setModel(replaceSlots(model, edits)); };
+  const remove = () => { if (entry && !disabled) { change([[sel, null]]); focusSlot(sel); } };
   const target = sel !== null && !bySlot.has(sel) ? sel : firstFree;
-  const add = (e) => { if (target !== null) { change([[target, e]]); setSel(target); } };
-  const duplicate = () => { if (entry && firstFree !== null) { change([[firstFree, entry]]); setSel(firstFree); } };
+  const openCatalog = () => { if (!disabled && moving === null) { catalogReturn.current = document.activeElement; setCatalog(true); } };
+  const closeCatalog = () => { setCatalog(false); requestAnimationFrame(() => catalogReturn.current?.focus()); };
+  const add = (e) => {
+    if (target !== null && !disabled) { change([[target, e]]); setSel(target); catalogReturn.current = slotEl(target); }
+  };
+  const duplicate = () => {
+    if (entry && firstFree !== null && !disabled) { change([[firstFree, entry]]); setSel(firstFree); if (!env.deck) focusSlot(firstFree); }
+  };
   const move = (from, to) => {
-    if (from === to) return;
+    if (from === to || disabled) return;
     const a = bySlot.get(from), b = bySlot.get(to);
     if (!a) return;
     change([[from, b || null], [to, a]]);
     setSel(to);
   };
+  const startMove = () => { if (entry && !disabled) { setMoving(sel); slotEl(sel)?.focus(); } };
+  const cancelMove = () => { const source = moving; setMoving(null); if (source !== null) slotEl(source)?.focus(); };
+  // Changing to a read-only character must not leave a pending move or catalog mutation behind.
+  useEffect(() => { if (disabled) { setMoving(null); setCatalog(false); } }, [disabled]);
 
-  const slotEl = (key) => document.querySelector(`.ke-grid [data-deck-id="slot-${CSS.escape(key)}"]`);
-  const intoPanel = () => insp.current?.querySelector('button:not(:disabled), input, select')?.focus();
+  const intoPanel = () => insp.current?.querySelector('button:not(:disabled), input:not(:disabled), select:not(:disabled)')?.focus();
   const [inPanel, setInPanel] = useState(false);
   useDeckActions(env.deck ? [
-    moving ? { button: 'y', label: t('editor.page.cancel'), run: () => setMoving(null) }
-      : { button: 'y', label: t('editor.inventory.move'), disabled: !entry, run: () => { if (entry) setMoving(sel); } },
-  ] : null, moving ? { label: t('editor.page.cancel'), run: () => setMoving(null) }
+    moving !== null ? { button: 'y', label: t('editor.page.cancel'), run: cancelMove }
+      : { button: 'y', label: t('editor.inventory.move'), disabled: !entry || disabled, run: startMove },
+  ] : null, moving !== null ? { label: t('editor.page.cancel'), run: cancelMove }
     : inPanel ? { label: t('editor.page.back'), run: () => slotEl(sel)?.focus() } : null);
   const press = (key, e) => {
     setSel(key);
+    if (moving !== null) { move(moving, key); setMoving(null); slotEl(key)?.focus(); return; }
     if (!env.deck) return;
-    if (moving) { move(moving, key); setMoving(null); return; }
-    if (e) requestAnimationFrame(intoPanel); else setCatalog(true);
+    if (e) requestAnimationFrame(intoPanel); else openCatalog();
+  };
+  const slotKey = (ev, key, e) => {
+    if (env.deck || gridKey(ev) || ev.ctrlKey || ev.altKey || ev.metaKey) return;
+    if (ev.key === 'Enter' && moving === null) {
+      ev.preventDefault(); setSel(key);
+      if (e) intoPanel(); else openCatalog();
+    }
   };
 
   useEffect(() => {
     if (env.deck) return undefined;
     const k = (e) => {
-      if (catalog || e.target.closest?.('input, select, textarea, [role="dialog"]')) return;
-      if (e.key === 'Delete' && entry) remove();
-      if (e.key === 'i' || e.key === 'I') setCatalog(true);
-      if (e.ctrlKey && (e.key === 'd' || e.key === 'D')) { e.preventDefault(); duplicate(); }
+      if (e.defaultPrevented || catalog || e.target.closest?.('input, select, textarea, [role="dialog"]')) return;
+      if (e.key === 'Escape' && moving !== null) { e.preventDefault(); cancelMove(); return; }
+      if (e.ctrlKey && (e.key === 'd' || e.key === 'D')) { e.preventDefault(); duplicate(); return; }
+      if (e.ctrlKey || e.altKey || e.metaKey) return;
+      if (e.key === 'Delete' && entry && moving === null) { e.preventDefault(); remove(); }
+      if (e.key === 'i' || e.key === 'I') { e.preventDefault(); openCatalog(); }
+      if ((e.key === 'm' || e.key === 'M') && moving === null) { e.preventDefault(); startMove(); }
     };
     window.addEventListener('keydown', k);
     return () => window.removeEventListener('keydown', k);
@@ -74,14 +100,15 @@ export default function Inventory({ model, setModel }) {
     const mod = isModItem(e);
     return (
       <div key={key} className="ke-cell"
-        onDragOver={(ev) => { ev.preventDefault(); ev.dataTransfer.dropEffect = 'move'; }}
+        onDragOver={(ev) => { if (!disabled) { ev.preventDefault(); ev.dataTransfer.dropEffect = 'move'; } }}
         onDrop={(ev) => { ev.preventDefault(); const from = ev.dataTransfer.getData('text/plain') || dragFrom; if (from && bySlot.has(from)) move(from, key); setDragFrom(null); }}>
         <Slot entry={e} n={n} mod={mod} selected={sel === key || moving === key} drop={(dragFrom !== null && dragFrom !== key) || (moving !== null && moving !== key)} title={e ? itemName(e.itemId) : undefined}
-          label={mod ? `${placeOf(key)}: ${t('editor.inventory.modItem')}` : e ? `${itemName(e.itemId)}${e.count > 1 ? ` ×${e.count}` : ''}` : t('editor.inventory.slotEmpty', { n: slotNo(key) })}
-          deckId={`slot-${key}`} deckA={moving ? t('editor.inventory.putHere') : e ? t('editor.common.change') : t('editor.common.add')}
-          onFocus={env.deck ? () => { setSel(key); setInPanel(false); } : undefined}
-          onClick={() => press(key, e)} onDoubleClick={() => { if (!e && !env.deck) { setSel(key); setCatalog(true); } }}
-          drag={e ? { draggable: true, onDragStart: (ev) => { ev.dataTransfer.setData('text/plain', key); ev.dataTransfer.effectAllowed = 'move'; setDragFrom(key); }, onDragEnd: () => setDragFrom(null) } : undefined} />
+          label={`${placeOf(key)}: ${mod ? t('editor.inventory.modItem') : e ? `${itemName(e.itemId)}${e.count > 1 ? ` ×${e.count}` : ''}` : t('editor.common.empty')}`}
+          aria-pressed={sel === key} data-editor-cell="" onKeyDown={(ev) => slotKey(ev, key, e)}
+          deckId={`slot-${key}`} deckA={moving !== null ? t('editor.inventory.putHere') : e ? t('editor.common.change') : disabled ? '-' : t('editor.common.add')}
+          onFocus={() => { setSel(key); setInPanel(false); }}
+          onClick={() => press(key, e)} onDoubleClick={() => { if (!e && !env.deck) { setSel(key); openCatalog(); } }}
+          drag={e && !disabled ? { draggable: true, onDragStart: (ev) => { ev.dataTransfer.setData('text/plain', key); ev.dataTransfer.effectAllowed = 'move'; setDragFrom(key); }, onDragEnd: () => setDragFrom(null) } : undefined} />
       </div>
     );
   };
@@ -96,7 +123,8 @@ export default function Inventory({ model, setModel }) {
     if (scroller.current) ro.observe(scroller.current);
     return () => ro.disconnect();
   }, [layout.bag.length]);
-  // items no table has (another mod's, e.g. Hands-Free Lantern's hidden lantern in a bag slot): named by their place
+  const slotNo = (key) => (layout.bag.indexOf(key) >= 0 ? layout.bag.indexOf(key) + 1 : Number(key.split(':')[1]) + 1);
+  // The same container-aware names label slots, pending moves and catalog destinations.
   const placeOf = (key) => {
     const [c, s] = key.split(':'); const i = Number(s);
     if (c === 'main' && i >= 16 && i < 24) return t('editor.inventory.place.swap', { n: i - 15 });
@@ -104,7 +132,6 @@ export default function Inventory({ model, setModel }) {
     return t('editor.inventory.place.backpack', { n: slotNo(key) });
   };
   const modItems = layout.all.filter((k) => isModItem(bySlot.get(k)));
-  const slotNo = (key) => (layout.bag.indexOf(key) >= 0 ? layout.bag.indexOf(key) + 1 : Number(key.split(':')[1]) + 1);
 
   return (
     <div className="ke-split">
@@ -118,38 +145,41 @@ export default function Inventory({ model, setModel }) {
             <h2 className="k-card-title">{t('editor.tabs.inventory')}</h2>
             <span className="k-card-sub">{t('editor.inventory.slotsUsed', { n: used, total: layout.bag.length, count: layout.bag.length })}</span>
             <span className="k-spacer" />
-            {/* the Deck: A on an empty slot adds (a button above the grid would sit in the D-pad's way) */}
-            {!env.deck && <Button size="s" onClick={() => setCatalog(true)} title={t('editor.inventory.addItem') + ' (I)'}>{t('editor.inventory.addItem')}</Button>}
+            {/* the Deck: Y moves; A on an empty slot adds (buttons above the grid sit in the D-pad's way) */}
+            {!env.deck && <>
+              <Button size="s" onClick={openCatalog} disabled={disabled || moving !== null} title={t('editor.inventory.addItem') + ' (I)'}>{t('editor.inventory.addItem')}</Button>
+              <Button size="s" onClick={moving !== null ? cancelMove : startMove} disabled={disabled || (moving === null && !entry)} title={moving !== null ? 'Escape' : 'M'}>{moving !== null ? t('editor.page.cancel') : t('editor.inventory.move')}</Button>
+            </>}
           </header>
-          <div className={'ke-grid-scroll' + (more ? ' more' : '')} ref={scroller} onScroll={look}><div className="ke-grid">{layout.bag.map((k) => cell(k))}</div></div>
+          <div className={'ke-grid-scroll' + (more ? ' more' : '')} ref={scroller} onScroll={look}><div className="ke-grid" data-editor-grid="">{layout.bag.map((k) => cell(k))}</div></div>
         </section>
         <section className="ke-group">
           <header className="ke-group-head">
             <h2 className="k-card-title">{t('editor.inventory.swapBar')}</h2>
             <span className="k-card-sub">{t('editor.inventory.swapBarHint')}</span>
           </header>
-          <div className="ke-grid">{Array.from({ length: 8 }, (_, c) => cell(keyOf('main', 16 + c)))}</div>
+          <div className="ke-grid" data-editor-grid="">{Array.from({ length: 8 }, (_, c) => cell(keyOf('main', 16 + c)))}</div>
         </section>
         <section className="ke-group">
           <header className="ke-group-head"><h2 className="k-card-title">{t('editor.inventory.actionBar')}</h2></header>
-          <div className="ke-grid">{Array.from({ length: 8 }, (_, c) => cell(keyOf('main', 24 + c), c + 1))}</div>
+          <div className="ke-grid" data-editor-grid="">{Array.from({ length: 8 }, (_, c) => cell(keyOf('main', 24 + c), c + 1))}</div>
         </section>
-        <p className="ke-note">{env.deck ? t('editor.inventory.deckHint') : t('editor.inventory.hint')}</p>
+        <p className="ke-note" role={moving !== null ? 'status' : undefined}>{moving !== null && !env.deck ? t('editor.inventory.movingHint', { place: placeOf(moving) }) : env.deck ? t('editor.inventory.deckHint') : t('editor.inventory.hint')}</p>
       </div>
-      <div ref={insp} className="ke-insp-wrap" onFocus={env.deck ? () => setInPanel(true) : undefined} onBlur={env.deck ? (e) => { if (!e.currentTarget.contains(e.relatedTarget)) setInPanel(false); } : undefined}>
-      <Inspector entry={entry} onChange={(e) => change([[sel, e]])}
-        onRemove={() => { remove(); if (env.deck) requestAnimationFrame(() => slotEl(sel)?.focus()); }} onDuplicate={firstFree !== null ? duplicate : null}
+      <div ref={insp} className="ke-insp-wrap" onFocus={() => setInPanel(true)} onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setInPanel(false); }}>
+      <Inspector entry={entry} disabled={disabled} onChange={(e) => change([[sel, e]])}
+        onRemove={remove} onDuplicate={firstFree !== null ? duplicate : null}
         empty={sel === null ? (
           <div className="ke-empty"><span className="ke-empty-word">{t('editor.inventory.noneSelected')}</span><span className="ke-note">{t('editor.inventory.noneSelectedHint')}</span></div>
         ) : (
           <div className="ke-empty">
             <span className="ke-empty-word">{t('editor.inventory.slotEmpty', { n: slotNo(sel) })}</span>
             <span className="ke-note">{t('editor.inventory.emptyHint')}</span>
-            <Button onClick={() => setCatalog(true)}>{t('editor.inventory.pickItem')}</Button>
+            <Button onClick={openCatalog} disabled={disabled || moving !== null}>{t('editor.inventory.pickItem')}</Button>
           </div>
         )} />
       </div>
-      <Catalog open={catalog} target={target === null ? null : Number(target.split(':')[1])} onAdd={add} onClose={() => setCatalog(false)} level={model.level} />
+      <Catalog open={catalog} disabled={disabled} target={target === null ? null : Number(target.split(':')[1])} targetPlace={target === null ? null : placeOf(target)} onAdd={add} onClose={closeCatalog} level={model.level} />
     </div>
   );
 }

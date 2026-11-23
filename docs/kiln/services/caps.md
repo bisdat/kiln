@@ -352,6 +352,8 @@ The seven `ui.values.*` / `ui.slots.inspect` / `ui.gemforge.inspect` rows below 
 | `mods.boot.vfx` | service row | kiln.boot, at its start | — | Staging VFX and materials into a client's boot generation. Not in this build: `unavailable` (`service-missing`) on a client, where VFX and material files are built at start; `wrong-side` on a dedicated server (it renders none: an empty plan) |
 | `mods.boot.resource_patches` | native, static | kiln.content, at its start (and again with a note when a write of this start was not applied) | — | Fields of a game resource stated as resource patches (a boot mod's `OnBoot` or its blocks files) are written before the game reads its resources. Off without a boot phase in this process, and where kiln.assets' resources are off |
 | `kiln.ui.values` | service row | core | — | the in-core service is here (client only; on a server its init says no) |
+| `kiln.ui.item_detail` | service row (client), Since 0.2.0-dev.30.5 | core | — | Passive capture table v1 is present; not registered on a dedicated server. This does not mean any requested item has a cached panel |
+| `ui.item_detail` | sigdb feature (client), Since 0.2.0-dev.30.5 | core `kiln.ui.item_detail`; `wrong-side` on server, missing symbols/layout unavailable, `service-older` without table, `faulted` on hook failure | — | Passive game-panel text/stat-float captures, not on-demand computation; offline/no-session, uninspected and rejected panels return reasoned misses. Client check: inspect an item panel, then compare its lines read from a mod. Real-client proof pending |
 | `ui.values.detail` | sigdb feature (client), static | core (sigdb); kiln.ui.values lowers it (`faulted`) when its hook cannot be installed | — | providers can replace the item detail view's number, bar and label |
 | `ui.values.slot` | sigdb feature (client), static | core (sigdb); kiln.ui.values lowers it (`faulted`) | — | providers can replace the inventory slot bar |
 | `ui.values.hud` | sigdb feature (client), static | core (sigdb); kiln.ui.values lowers it (`faulted`) | — | providers can replace the local player's health, stamina and mana pairs; also the player-UI stage 09 reads |
@@ -537,6 +539,20 @@ steps.
 | `stats.ui` | managed, static | Kiln.ModValues | the stat source of UI blocks: client only (`wrong-side` on a server), needs kiln.ui |
 | `kiln.mod-values` | core (in-core service) | core | the native facade's table is here; its calls answer `unavailable` until Kiln.ModValues has bound the backend (through the Kiln-internal `kiln.internal.mod-values.backend`, which has no row) |
 
+Richer UI blocks ([../modding/ui-blocks.md](../modding/ui-blocks.md#richer-windows-since-020-dev31)), reported with Kiln.Blocks' rows and kiln.ui.snapshot's:
+
+| Row | Kind | Reported by | What it says |
+|---|---|---|---|
+| `ui.blocks.tables`, `ui.blocks.images`, `ui.blocks.state`, `ui.blocks.bindings` | managed, static | Kiln.Blocks | tables, pictures, window state and mods' own data: a player's game with an overlay (`wrong-side` on a dedicated server, `service-missing` without kiln.ui) |
+| `ui.blocks.input`, `ui.blocks.tabs`, `ui.blocks.trees` | managed, static | Kiln.Blocks | as above, and kiln.ui.blocks (`service-older` on a Kiln without it: a text field shows its value read-only) |
+| `ui.blocks.world` | managed | Kiln.Blocks (kiln.ui.snapshot) | `BlockUi.ReadWorld`/`DemandWorld` and `world.*` bindings: kiln.ui.snapshot is here (client only) |
+| `world.vitals`, `world.inventory` | managed | Kiln.Blocks (kiln.ui.snapshot) | the local player's vitals / own inventory: also needs `ui.values.hud` (05a's player-UI update) |
+| `world.position` | managed | Kiln.Blocks (kiln.ui.snapshot) | the local player's position: the core's GetEntityTransform on the client world |
+| `world.host_time` | managed | Kiln.Blocks (kiln.ui.snapshot) | the hosted world's hour: kiln.time; on a joined world the value is deferred, never read remotely |
+| `ui.command.server` | managed, session | Kiln.Blocks | `commandTarget: "server"` and `BlockUi.ExecuteOnServer`: available while the joined (or hosted) server's `kiln:ui-command` said hello; a vanilla or older server leaves it off |
+| `kiln.ui.blocks` | core (kiln-ui.dll) | core | the table of tab selection, tree open state, item edit state and text fields with Kiln's flags |
+| `kiln.ui.snapshot` | core (in-core service, client) | core | the live-values collector's table |
+
 ## Rows added in dev.31 (station menus)
 
 | Row | Kind | Reported by | Unconfirmed | What it says |
@@ -544,3 +560,9 @@ steps.
 | `stationmenus.store` | managed, static | Kiln.Content, at its start | - | kiln.content's table `kiln.stationmenus` is here: `StationMenus.Define` and `MenuBlock.Tabs` can store a layout (both sides, no game signature; `service-missing` with an older kiln.content) |
 | `stationmenus.render` | managed, static (refreshed) | Kiln.Content from kiln.stationmenus' info | `16a-c1`..`16a-c11` (CLIENT-CHECKS of dev.31 16a) | this game client builds a station's menu from its layout in the crafting-menu hook (`content.recipe_menu`, with the layout constants it needs); `wrong-side` on a dedicated server, the hook's reason otherwise |
 | `stationmenus.sync.v1` | managed, static (refreshed) | Kiln.Content | - | the channel `kiln:station-menu` v1 is open ([../sync.md](../sync.md#station-menus)): a server always (with `net.gate.hold_all` for the admission decider), a game client only while `stationmenus.render` is available |
+
+## Rows added in 0.2.0-dev.30.5 / mod API 0.2.14
+
+| Row | Kind | Reported by | Unconfirmed | What it says |
+|---|---|---|---|---|
+| `ui.world_outline.through_walls` | managed, static (since 0.2.0-dev.30.5) | Kiln.Ui, at its start and first use | Client check: toggle through-walls outlines, the off setting and competing requests | `OutlineOptions.ThroughWalls`' silhouette ([../render.md](../render.md#outlineoptions)): needs `ui.world_outline`, kiln.render v3 (the entity's position; `service-older` with a v2 kiln-ui.dll), `render.camera` and kiln.ui (`service-missing`; `faulted` when overlay drawing is explicitly off). Off: a new ThroughWalls request throws `KilnUnavailableException` with the row's reason; existing requests draw no silhouette |

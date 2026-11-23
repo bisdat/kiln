@@ -254,6 +254,7 @@ export function QuitDialog({ onClose }: { onClose: () => void }) {
         <DeckButton onClick={onClose}>{t("common.cancel")}</DeckButton>
         <DeckButton primary onClick={() => { onClose(); if (api.isTauri()) void api.deckQuit(); else toast.info(t("deck.dialogs.quit")); }}>{t("deck.dialogs.quit")}</DeckButton>
       </>}>
+      {edits.busy ? <p className="deck-note" data-testid="quit-busy">{t("deck.dialogs.busy")}</p> : null}
       {edits.dirty ? <p className="deck-note" data-testid="quit-unsaved">{edits.name != null ? t("deck.dialogs.unsavedNamed", { name: edits.name }) : t("deck.dialogs.unsaved")}</p> : null}
     </Dialog>
   );

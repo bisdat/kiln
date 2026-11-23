@@ -217,8 +217,9 @@ void hk_item_detail(void* detail, uint8_t flag) {
     c.ok = detail_wanted() && env().read(c.raw, reinterpret_cast<uintptr_t>(detail), sizeof c.raw);
     c.record = reinterpret_cast<uintptr_t>(detail);
     t_detail = &c;
-    if (c.ok) tooltip_detail_enter(c);
+    if (c.ok) { tooltip_detail_enter(c); item_detail_begin(c); }
     g_detail_next(detail, flag);
+    item_detail_end(c);
     t_detail = outer;
 }
 
@@ -302,7 +303,7 @@ bool detail_hook_install() {
     return true;
 }
 
-bool detail_wanted() { return any(kListLines) || tooltip_probe_on() || tooltip_values_on(); }
+bool detail_wanted() { return any(kListLines) || tooltip_probe_on() || tooltip_values_on() || item_detail_on(); }
 
 KilnResult tooltip_open(KilnOwner owner, KilnUiTooltipOpen* out) {
     if (const KilnResult rc = check_caller(owner)) return rc;

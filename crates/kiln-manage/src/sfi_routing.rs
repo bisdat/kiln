@@ -14,6 +14,7 @@
 //! - **ShroudForge's own loader** (a ShroudForge file under a proxy name next to the game, or a `kiln/chain.ini` or
 //!   `dinput8-chain.ini` line): it wins, and both Kiln backends stand aside (kiln-sfi checks again when it starts), so
 //!   its mods keep main's route into the mods folder ShroudForge's own config names.
+//! - **EML-R's own loader** also blocks Kiln's interpreter because EML-R may run packages in `<game>/mods`.
 //! - **The interpreter's route** ([`Route::Interpreter`]) changes two things and nothing else:
 //!   - ShroudForge's mods folder is `<game>/mods` ([`Route::sf_mods`]), the folder kiln-sfi and the launch plan read.
 //!     Nothing below `<game>/shroudforge` is read or written to place, switch, adopt, set a setting, recover or remove
@@ -48,8 +49,8 @@ pub struct Inputs {
     pub selected: Option<Backend>,
     /// `KILN_SHROUDFORGE=0`: every ShroudForge backend stands aside, the interpreter too.
     pub env_off: bool,
-    /// ShroudForge's own loader that may run in the game, its game-relative file.
-    pub own_loader: Option<String>,
+    /// A loader that may run ShroudForge mods in the game.
+    pub own_loader: Option<OwnLoader>,
     /// [`INTERPRETER_PLUGIN`] is there.
     pub interpreter: bool,
 }
@@ -74,7 +75,19 @@ pub enum Legacy {
     Refused,
     /// kiln.json selects the interpreter, and ShroudForge's own loader (this file) is installed: it runs them.
     OwnLoader(String),
+    /// kiln.json selects the interpreter, and EML-R's game-folder proxy may run those mods itself.
+    EmlR(String),
 }
+
+/// A loader that blocks the interpreter, with its game-relative file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OwnLoader {
+    ShroudForge(String),
+    EmlR(String),
+}
+
+pub const EML_R_BLOCK_REASON: &str =
+    "EML-R's own loader is in the game folder. It may run these mods itself, so Kiln's interpreter stands aside.";
 
 /// Whether the interpreter runs this start.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -93,8 +106,11 @@ pub fn decide(i: &Inputs) -> Route {
         Some(b) => return Route::Legacy(Legacy::Selected(b)),
         None => return Route::Legacy(Legacy::Refused),
     }
-    if let Some(file) = &i.own_loader {
-        return Route::Legacy(Legacy::OwnLoader(file.clone()));
+    if let Some(loader) = &i.own_loader {
+        return Route::Legacy(match loader {
+            OwnLoader::ShroudForge(file) => Legacy::OwnLoader(file.clone()),
+            OwnLoader::EmlR(file) => Legacy::EmlR(file.clone()),
+        });
     }
     Route::Interpreter(if i.env_off {
         Runner::EnvOff
@@ -144,7 +160,7 @@ pub const INTERPRETER_MISSING_NOTE: &str = "needs ShroudForge's runtime: kiln.js
 
 /// The route of the ShroudForge-format mods in `game` (a game or server folder), read now: kiln.json as the core reads
 /// it, the game's side from its executable, the environment of this process, and (only when kiln.json selects the
-/// interpreter) ShroudForge's own loader and [`INTERPRETER_PLUGIN`]. Nothing below `<game>/shroudforge` is read.
+/// interpreter) the own-loader blockers and [`INTERPRETER_PLUGIN`]. Nothing below `<game>/shroudforge` is read.
 pub fn route_of(game: &Path) -> Route {
     #[cfg(feature = "sfi-scan")]
     {
@@ -172,7 +188,7 @@ pub fn inputs_of(game: &Path) -> Inputs {
 
 /// The [`Inputs`] of `game` whose next start kiln.json resolves to `selection`: the answer the caller already has, read
 /// once with the side and the environment it knows (an activation: the install's kind, the launch-plan producer's
-/// answer, `crate::sfi_plan::produce_resolved`). Only a selected `kiln` reads more (ShroudForge's own loader,
+/// answer, `crate::sfi_plan::produce_resolved`). Only a selected `kiln` reads more (own-loader blockers,
 /// [`INTERPRETER_PLUGIN`]).
 #[cfg(feature = "sfi-scan")]
 pub fn inputs_from(game: &Path, selection: &crate::sfi_backend::Resolution) -> Inputs {
@@ -182,7 +198,7 @@ pub fn inputs_from(game: &Path, selection: &crate::sfi_backend::Resolution) -> I
         selected: selection.selected,
         env_off: selection.env_off_note.is_some(),
         own_loader: kiln
-            .then(|| crate::own_loaders::shroudforge_loader(game))
+            .then(|| crate::own_loaders::interpreter_blocker(game))
             .flatten(),
         interpreter: kiln && game.join(INTERPRETER_PLUGIN).is_file(),
     }
@@ -208,7 +224,7 @@ mod tests {
         Inputs {
             selected,
             env_off,
-            own_loader: own_loader.map(str::to_owned),
+            own_loader: own_loader.map(|file| OwnLoader::ShroudForge(file.into())),
             interpreter,
         }
     }

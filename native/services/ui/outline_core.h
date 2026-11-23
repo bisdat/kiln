@@ -252,7 +252,42 @@ public:
         out->entity = r->entity;
         out->group = r->group;
         out->merged = r->merged;
+        // 0.2.0-dev.30.5: a through-walls request that has not ended carries its entity's latest position
+        if ((r->flags & KILN_RENDER_OUTLINE_THROUGH_WALLS) && r->state != KILN_RENDER_OUTLINE_ENDED)
+            if (const auto it = positions_.find(r->entity); it != positions_.end()) {
+                out->position_ok = 1;
+                out->position_step = it->second.step;
+                for (int k = 0; k < 3; ++k) out->position[k] = it->second.p[k];
+            }
         return KILN_OK;
+    }
+
+    // ---- positions for through-walls requests (0.2.0-dev.30.5) ----
+    // The entities of live requests with KILN_RENDER_OUTLINE_THROUGH_WALLS (sorted, once each).
+    std::vector<KilnEntity> wall_entities() const {
+        std::lock_guard lk(mu_);
+        std::vector<KilnEntity> v;
+        for (const Request& r : live_)
+            if (r.flags & KILN_RENDER_OUTLINE_THROUGH_WALLS) v.push_back(r.entity);
+        std::sort(v.begin(), v.end());
+        v.erase(std::unique(v.begin(), v.end()), v.end());
+        return v;
+    }
+    // The entity's position this client step (ok false: not readable now, forgotten). A finite position in the game's
+    // range only (x and z in [-1000, 12000], y in [-1000, 5000] metres, as kiln.markers checks): anything else is not ok.
+    void set_position(KilnEntity e, bool ok, const double p[3], uint32_t step) {
+        std::lock_guard lk(mu_);
+        auto in = [](double v, double lo, double hi) { return v == v && v >= lo && v <= hi; };
+        if (!ok || !in(p[0], -1000, 12000) || !in(p[1], -1000, 5000) || !in(p[2], -1000, 12000)) {
+            positions_.erase(e);
+            return;
+        }
+        positions_[e] = Pos{{p[0], p[1], p[2]}, step};
+    }
+    // Forgets the positions of entities no through-walls request names any more.
+    void keep_positions(const std::vector<KilnEntity>& wall) {
+        std::lock_guard lk(mu_);
+        std::erase_if(positions_, [&](const auto& kv) { return !std::binary_search(wall.begin(), wall.end(), kv.first); });
     }
 
     KilnResult remove(KilnHandle h) {
@@ -488,6 +523,11 @@ private:
     }
 
     mutable std::mutex mu_;
+    struct Pos {
+        double p[3];
+        uint32_t step;
+    };
+    std::unordered_map<KilnEntity, Pos> positions_;  // through-walls requests' entities (0.2.0-dev.30.5)
     std::vector<Request> live_;
     std::deque<Request> ended_;
     Slot last_[2];

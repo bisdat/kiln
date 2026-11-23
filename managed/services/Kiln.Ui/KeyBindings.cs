@@ -15,6 +15,14 @@ public enum KeyMods
     Ctrl = 1,
     Shift = 2,
     Alt = 4,
+    /// <summary>A game controller's left shoulder button held (a pad chord: "Pad:LB+A"). Since 0.2.0-dev.30.5.</summary>
+    PadLB = 8,
+    /// <summary>The right shoulder button held. Since 0.2.0-dev.30.5.</summary>
+    PadRB = 16,
+    /// <summary>The left trigger pulled. Since 0.2.0-dev.30.5.</summary>
+    PadLT = 32,
+    /// <summary>The right trigger pulled. Since 0.2.0-dev.30.5.</summary>
+    PadRT = 64,
 }
 
 /// <summary>A key with modifiers, written like "F8", "Ctrl+K", "Shift+Alt+F2", "Insert", "Numpad5", "Backquote", "Key223", or a mouse
@@ -29,7 +37,14 @@ public enum KeyMods
 /// "Shift+Alt"). The punctuation names ("Backquote", "Minus", "Equals", "LeftBracket", "RightBracket", "Backslash",
 /// "Semicolon", "Quote", "Comma", "Period", "Slash", "IntlBackslash", "IntlRo", "NumpadComma") name the key at that place
 /// of a US keyboard on every layout: "Backquote" is the key left of 1 also where a UK, German or French layout gives it
-/// another virtual key. <see cref="VirtualKey"/> holds the US layout's code of that place.</para></summary>
+/// another virtual key. <see cref="VirtualKey"/> holds the US layout's code of that place.</para>
+/// <para>Since 0.2.0-dev.30.5 (mod API 0.2.14) a game controller's buttons too, written with "Pad:" in front: "Pad:A",
+/// "Pad:B", "Pad:X", "Pad:Y", "Pad:LB", "Pad:RB", "Pad:LT", "Pad:RT" (the triggers), "Pad:LS", "Pad:RS" (a stick pressed:
+/// L3, R3), "Pad:Start", "Pad:Back", "Pad:Up", "Pad:Down", "Pad:Left", "Pad:Right" (the d-pad), and combinations with the
+/// shoulder buttons and triggers held: "Pad:LB+A", "Pad:LT+RS", "Pad:LB+RB+Y" (<see cref="KeyMods.PadLB"/> ..
+/// <see cref="KeyMods.PadRT"/>). Their codes are 0x200 and up (kiln_ui.h KILN_UI_VK_PAD_*); a pad chord never mixes with
+/// Ctrl, Shift or Alt. The buttons work with the pad the game reads (XInput: an Xbox pad, or any pad Steam Input presents
+/// as one).</para></summary>
 public readonly record struct KeyChord(uint VirtualKey, KeyMods Mods)
 {
     public static readonly KeyChord None = default;
@@ -49,6 +64,8 @@ public readonly record struct KeyChord(uint VirtualKey, KeyMods Mods)
         chord = None;
         if (string.IsNullOrWhiteSpace(text)) return false;
         if (text.Trim().Equals("none", StringComparison.OrdinalIgnoreCase)) return true;
+        if (text.TrimStart().StartsWith(PadKeys.Prefix, StringComparison.OrdinalIgnoreCase)) return PadKeys.TryParse(text.Trim(), out chord);
+        if (text.Contains(PadKeys.Prefix, StringComparison.OrdinalIgnoreCase)) return false;  // "Ctrl+Pad:A": never mixed
         var mods = KeyMods.None;
         uint vk = 0;
         var parts = text.Split('+', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
@@ -85,12 +102,20 @@ public readonly record struct KeyChord(uint VirtualKey, KeyMods Mods)
         text is not null && text.Split('+', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).Any(Clicks.Contains)
             ? $"'{text}': the left and right mouse buttons cannot be bound (Kiln's screens need them); Mouse4, Mouse5, " +
               "MouseMiddle, WheelUp and WheelDown can, with Ctrl, Shift or Alt"
-            : $"unknown key '{text}' (examples: F8, Ctrl+K, Shift+Insert, Numpad5, Ctrl+WheelUp, Shift+Mouse4; the left and " +
-              "right mouse buttons cannot be bound)";
+            : text is not null && text.Contains(PadKeys.Prefix, StringComparison.OrdinalIgnoreCase)
+                ? $"'{text}': a controller binding is \"Pad:\" and a button, with LB, RB, LT or RT held if you like (Pad:LS, " +
+                  "Pad:LB+A, Pad:LT+RS); it does not take Ctrl, Shift or Alt"
+                : $"unknown key '{text}' (examples: F8, Ctrl+K, Shift+Insert, Numpad5, Ctrl+WheelUp, Shift+Mouse4, Pad:LB+A; the " +
+                  "left and right mouse buttons cannot be bound)";
+
+    /// <summary>A game controller's button (with the pad's shoulder buttons or triggers held): "Pad:LB+A". Since
+    /// 0.2.0-dev.30.5.</summary>
+    public bool IsPad => PadKeys.IsPad(VirtualKey);
 
     public override string ToString()
     {
         if (IsNone) return "None";
+        if (IsPad) return PadKeys.Name(VirtualKey, Mods);
         var s = "";
         if ((Mods & KeyMods.Ctrl) != 0) s += "Ctrl+";
         if ((Mods & KeyMods.Shift) != 0) s += "Shift+";
@@ -224,6 +249,69 @@ internal static class MouseKeys
     public static bool IsButton(uint vk) => vk is Middle or Mouse4 or Mouse5;
 }
 
+/// <summary>A game controller's buttons in a <see cref="KeyChord"/> (kiln_ui.h KILN_UI_VK_PAD_*, native/services/ui/pad_keys.h;
+/// 0.2.0-dev.30.5).</summary>
+internal static class PadKeys
+{
+    public const string Prefix = "Pad:";
+    public const uint First = 0x200, LB = 0x208, RB = 0x209, A = 0x20C, B = 0x20D, LT = 0x210, RT = 0x211, Last = 0x211;
+    public const KeyMods Mods = KeyMods.PadLB | KeyMods.PadRB | KeyMods.PadLT | KeyMods.PadRT;
+
+    /// <summary>pad_keys.h / kiln_ui.h: the code and its name (after "Pad:").</summary>
+    internal static readonly (uint Vk, string Name)[] Table =
+    [
+        (0x200, "Up"), (0x201, "Down"), (0x202, "Left"), (0x203, "Right"), (0x204, "Start"), (0x205, "Back"), (0x206, "LS"),
+        (0x207, "RS"), (0x208, "LB"), (0x209, "RB"), (0x20C, "A"), (0x20D, "B"), (0x20E, "X"), (0x20F, "Y"), (0x210, "LT"),
+        (0x211, "RT"),
+    ];
+
+    private static readonly (KeyMods Mod, string Name)[] ModNames =
+        [(KeyMods.PadLB, "LB"), (KeyMods.PadRB, "RB"), (KeyMods.PadLT, "LT"), (KeyMods.PadRT, "RT")];
+
+    public static bool IsPad(uint vk) => vk is >= First and <= Last && Table.Any(t => t.Vk == vk);
+
+    /// <summary>The modifier a held button gives (LB, RB, LT, RT), else None.</summary>
+    public static KeyMods ModOf(uint vk) => vk switch { LB => KeyMods.PadLB, RB => KeyMods.PadRB, LT => KeyMods.PadLT, RT => KeyMods.PadRT, _ => KeyMods.None };
+
+    public static string Name(uint vk, KeyMods mods)
+    {
+        var s = Prefix;
+        foreach (var (m, n) in ModNames)
+            if ((mods & m) != 0 && ModOf(vk) != m) s += n + "+";
+        foreach (var (code, n) in Table)
+            if (code == vk) return s + n;
+        return s + $"Button{vk}";
+    }
+
+    /// <summary>"Pad:LB+A": the last part is the button, the parts before it LB, RB, LT or RT held. "Pad:LB" alone is LB.</summary>
+    public static bool TryParse(string text, out KeyChord chord)
+    {
+        chord = KeyChord.None;
+        var body = text[Prefix.Length..];
+        if (body.Length == 0 || body.EndsWith('+')) return false;
+        var parts = body.Split('+', StringSplitOptions.TrimEntries);
+        var mods = KeyMods.None;
+        uint vk = 0;
+        for (var i = 0; i < parts.Length; i++)
+        {
+            var part = parts[i].StartsWith(Prefix, StringComparison.OrdinalIgnoreCase) ? parts[i][Prefix.Length..] : parts[i];
+            var code = Table.FirstOrDefault(t => t.Name.Equals(part, StringComparison.OrdinalIgnoreCase)).Vk;
+            if (code == 0) return false;
+            if (i == parts.Length - 1)
+            {
+                vk = code;
+                break;
+            }
+            var m = ModOf(code);
+            if (m == KeyMods.None || (mods & m) != 0) return false;  // only LB, RB, LT, RT are held, each once
+            mods |= m;
+        }
+        if (vk == 0 || (mods & ModOf(vk)) != 0) return false;  // "Pad:LB+LB"
+        chord = new KeyChord(vk, mods);
+        return true;
+    }
+}
+
 /// <summary>One registered key binding (Forge: a KeyMapping).</summary>
 public sealed class KeyBinding : IDisposable
 {
@@ -339,7 +427,7 @@ public static class KeyBindings
 
     public static bool Rebind(string id, KeyChord key)
     {
-        if (id == MenuId && MouseKeys.IsWheel(key.VirtualKey)) return false;
+        if (id == MenuId && (MouseKeys.IsWheel(key.VirtualKey) || key.IsPad)) return false;  // kiln.ui's menu key: keys and buttons
         Load();
         var b = Find(id);
         lock (Lock) _saved[id] = key.ToString();
@@ -365,7 +453,7 @@ public static class KeyBindings
             Load();
             lock (Lock)
                 return _saved.TryGetValue(MenuId, out var s) && KeyChord.TryParse(s, out var c) && !c.IsNone &&
-                       !MouseKeys.IsWheel(c.VirtualKey) ? c : MenuDefault;
+                       !MouseKeys.IsWheel(c.VirtualKey) && !c.IsPad ? c : MenuDefault;
         }
     }
 

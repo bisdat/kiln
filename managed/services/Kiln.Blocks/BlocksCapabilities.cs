@@ -24,6 +24,7 @@ internal static class BlocksRows
         var body = BlockCapabilities.CurrentNpcBodyRow();
         ServiceCaps.Report(BlockCapabilities.NpcBody, body.State, body.Reason, body.Text);
         BlockCapabilities.Ensure();
+        UiBlocksCaps.Report();
         KindCapabilities.Ensure();
         AffixRuntime.RefreshCapabilities();
         UpgradeStations.ReportRow();  // blocks.upgrade_station follows items.gear.upgrade

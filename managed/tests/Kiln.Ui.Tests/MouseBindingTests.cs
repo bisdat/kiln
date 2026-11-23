@@ -527,9 +527,12 @@ public sealed unsafe class KeySubscriptionTests : IDisposable
     private static int NewKeys(ulong o, delegate* unmanaged[Cdecl]<UiNative.Key*, void*, byte> f, void* u, uint flags, ulong* h)
     {
         lock (Calls) Calls.Add($"subscribe_key_ex {flags}");
+        if (_beforePad && (flags & ~1u) != 0) return -2;  // a kiln-ui.dll before 0.2.0-dev.30.5: KILN_ERR_INVALID_ARGUMENT
         *h = 3;
         return 0;
     }
+
+    private static bool _beforePad;
 
     /// <summary>The fake table grown to v7; <paramref name="size"/> says how much of it this kiln.ui has.</summary>
     private void InstallV7(int size)
@@ -560,8 +563,27 @@ public sealed unsafe class KeySubscriptionTests : IDisposable
     {
         InstallV7(sizeof(UiNative.Table7));
         Assert.True(UiNative.Subscribe());
-        lock (Calls) Assert.Equal(["subscribe_key_ex 1"], Calls);
+        lock (Calls) Assert.Equal(["subscribe_key_ex 3"], Calls);  // KILN_UI_KEYS_MOUSE | KILN_UI_KEYS_PAD (0.2.0-dev.30.5)
         Assert.True(UiNative.MouseKeysAvailable);
+        Assert.True(UiNative.PadKeysAvailable);
+    }
+
+    [Fact]
+    public void A_kiln_ui_before_the_pad_gives_Kiln_Ui_the_mouse_presses_without_it()
+    {
+        InstallV7(sizeof(UiNative.Table7));
+        _beforePad = true;
+        try
+        {
+            Assert.True(UiNative.Subscribe());
+            lock (Calls) Assert.Equal(["subscribe_key_ex 3", "subscribe_key_ex 1"], Calls);
+            Assert.True(UiNative.MouseKeysAvailable);
+            Assert.False(UiNative.PadKeysAvailable);
+        }
+        finally
+        {
+            _beforePad = false;
+        }
     }
 
     [Fact]

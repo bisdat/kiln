@@ -363,6 +363,37 @@ uint32_t model_of(KilnEntity e) {
     return rc == KILN_OK && need == 4 ? model : 0;  // NOT_FOUND: no ModelComponent (a voxel model, an effect)
 }
 
+// 0.2.0-dev.30.5: the positions of the entities of through-walls requests, each client step: the first WorldTransform of
+// keen::ecs::RenderTransform (176 bytes; three 32.32 fixed-point metres first), as kiln.markers' client anchors read it
+// (native/services/markers/world_read.h). Another size: not read (the layout moved; no silhouette rather than a wrong one).
+constexpr uint32_t kRenderTransformBytes = 176;
+uint32_t g_transform_hash = 0;
+void read_positions() {
+    const std::vector<KilnEntity> wall = g_book.wall_entities();
+    g_book.keep_positions(wall);
+    for (KilnEntity e : wall) {
+        double p[3] = {};
+        bool ok = false;
+        auto it = g_seen.find(e);
+        if (it == g_seen.end() || !it->second.open) {
+            model_of(e);  // opens it (and ends its requests when it left the client world)
+            it = g_seen.find(e);
+        }
+        if (g_transform_hash && it != g_seen.end() && it->second.open) {
+            uint8_t buf[kRenderTransformBytes];
+            uint32_t need = 0;
+            if (g_world->ecs_snapshot(g_owner, &it->second.ref, g_transform_hash, buf, sizeof buf, &need) == KILN_OK &&
+                need == kRenderTransformBytes) {
+                int64_t fixed[3];
+                std::memcpy(fixed, buf, sizeof fixed);
+                for (int k = 0; k < 3; ++k) p[k] = static_cast<double>(fixed[k]) * (1.0 / 4294967296.0);
+                ok = true;
+            }
+        }
+        g_book.set_position(e, ok, p, static_cast<uint32_t>(g_pre));
+    }
+}
+
 void KILN_CALL on_client_pre(const KilnTickInfo*, void*) {
     if (g_phase.load() == kFailed) return;
     ++g_pre;
@@ -410,6 +441,7 @@ void KILN_CALL on_client_pre(const KilnTickInfo*, void*) {
     g_read_unavailable = g_read_ok = false;
     if (live) {
         g_models.update(g_book.entities(), g_pre, &model_of, models);
+        read_positions();
     } else {
         g_models.clear();
         g_seen.clear();
@@ -467,6 +499,7 @@ void start() {
         }
         g_world = w;
         g_model_hash = w->component_hash(ks("ModelComponent"));
+        g_transform_hash = w->component_hash(ks("RenderTransform"));
         g_setting.store(kout::parse_setting(kiln_json_text()));
         static const char* const kSettings[] = {"game-first", "mods-first", "off"};
         KilnHandle h = 0;
@@ -505,7 +538,7 @@ bool outline_init() {
 KilnResult KILN_CALL outline_add(KilnOwner owner, KilnEntity entity, const KilnRenderOutline* o, KilnHandle* out) {
     if (out) *out = 0;
     if (!owner || !entity || !o || o->size < sizeof(KilnRenderOutline) || !out || !(o->rgba & 0xFF) ||
-        (o->flags & ~uint32_t{KILN_RENDER_OUTLINE_PULSE}) || o->reserved)
+        (o->flags & ~uint32_t{KILN_RENDER_OUTLINE_PULSE | KILN_RENDER_OUTLINE_THROUGH_WALLS}) || o->reserved)
         return KILN_ERR_INVALID_ARGUMENT;
     if (!g_resolved || g_api->side() != KILN_SIDE_CLIENT) return KILN_ERR_UNAVAILABLE;
     start();
@@ -522,10 +555,16 @@ KilnResult KILN_CALL outline_add(KilnOwner owner, KilnEntity entity, const KilnR
 }
 
 KilnResult KILN_CALL outline_info(KilnHandle h, KilnRenderOutlineInfo* out) {
-    if (!out || out->size < sizeof(KilnRenderOutlineInfo)) return KILN_ERR_INVALID_ARGUMENT;
-    std::memset(out, 0, sizeof *out);
-    out->size = sizeof *out;
-    return g_book.info(h, out);
+    // a caller built before 0.2.0-dev.30.5 passes the 24-byte record (through merged): answered without the position
+    constexpr uint32_t kOld = offsetof(KilnRenderOutlineInfo, position_ok);
+    if (!out || out->size < kOld) return KILN_ERR_INVALID_ARGUMENT;
+    KilnRenderOutlineInfo full{};
+    full.size = sizeof full;
+    const KilnResult rc = g_book.info(h, &full);
+    const uint32_t n = out->size >= sizeof full ? static_cast<uint32_t>(sizeof full) : kOld;
+    std::memcpy(out, &full, n);
+    out->size = n;
+    return rc;
 }
 
 KilnResult KILN_CALL outline_remove(KilnHandle h) { return g_book.remove(h); }

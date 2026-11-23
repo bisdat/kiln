@@ -265,7 +265,7 @@ fn set_state(entries: &mut [Entry], path: &Utf8Path, state: &str, reason: Option
 
 // A DLL keeps the per-install lock until process exit, so another Kiln process cannot rewrite files the game uses.
 // The host runner also serializes calls in-process. OS locks are released after a crash; the lock file is never deleted.
-static RUN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+pub(crate) static RUN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 /// The install locks this process holds, for its life. In this crate's unit tests each keeps its test-gate hold too
 /// (mod-loader-lua's test_gate.rs), dropped after the file. The file is shared (`held_lock`): a kiln-mode start's
 /// witness, pass and publication borrow the one lock taken in kiln-eml's early phase.
@@ -655,15 +655,27 @@ fn run_kiln(cfg: &RunConfig, kiln: &KilnMode, mods: Vec<Utf8PathBuf>, entries: V
         None => game_file_name(&cfg.game_dir),
     };
     use crate::startup_seam::{self as seam, Barriered};
+    // the launcher's start bar and kiln.log follow the pass step by step (progress.rs `PassSteps`): a slow drive makes a
+    // slow start, never one that looks hung
+    let steps = kiln.plan().ok().map(|plan| crate::progress::PassSteps::begin(cfg.progress.clone(), &out, plan.dialect()));
+    let observe = |point: crate::startup::Point<'_>| {
+        if let Some(steps) = &steps {
+            steps.observe(&point);
+        }
+    };
     let barrier = match kiln.plan() {
         Ok(_) => seam::barrier(&seam::BarrierPorts {
             cache_dir: &cfg.cache_dir,
             unlisted: &unlisted,
             wait: seam::TERMINAL_WAIT,
-            observe: &|_| {},
+            observe: &observe,
         }),
         Err(_) => Barriered::NoStart,
     };
+    // what the pass and each step took, for a start whose pass ran
+    if let (Some(line), Barriered::Done(_)) = (steps.and_then(crate::progress::PassSteps::finish), &barrier) {
+        tracing::info!("{line}");
+    }
     let (plan, finished) = match (kiln.plan(), barrier) {
         (Ok(plan), Barriered::Done(finished)) => (plan, finished),
         (plan, barrier) => {

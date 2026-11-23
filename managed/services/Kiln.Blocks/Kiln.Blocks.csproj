@@ -28,6 +28,7 @@
     <ProjectReference Include="../Kiln.Content/Kiln.Content.csproj" Private="false" />
     <ProjectReference Include="../Kiln.Assets/Kiln.Assets.csproj" Private="false" />
     <ProjectReference Include="../Kiln.Abilities/Kiln.Abilities.csproj" Private="false" />
+    <ProjectReference Include="../Kiln.Tools/Kiln.Tools.csproj" Private="false" />
     <ProjectReference Include="../Kiln.Spawn/Kiln.Spawn.csproj" Private="false" />
     <ProjectReference Include="../Kiln.World/Kiln.World.csproj" Private="false" />
     <ProjectReference Include="../Kiln.Audio/Kiln.Audio.csproj" Private="false" />
@@ -48,5 +49,7 @@
     <ProjectReference Include="../Kiln.Saves/Kiln.Saves.csproj" Private="false" />
     <ProjectReference Include="../Kiln.Queries/Kiln.Queries.csproj" Private="false" />
     <ProjectReference Include="../Kiln.CreatureControl/Kiln.CreatureControl.csproj" Private="false" />
+    <!-- UI blocks bind stats.<mod>/<id> to 05b's stat source (ModValuesStatSource, internal) -->
+    <ProjectReference Include="../Kiln.ModValues/Kiln.ModValues.csproj" Private="false" />
   </ItemGroup>
 </Project>

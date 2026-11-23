@@ -89,6 +89,7 @@ rules! {
     MOD_VALUE_DUPLICATE = "KL354", "mod-value-duplicate", Error, "a mod value id defined in two of a mod's mod-values files";
     MOD_VALUE_COUNT = "KL355", "mod-value-count", Error, "more than 128 mod values in one mod";
     MOD_VALUE_CARRIED_MAX = "KL356", "mod-value-carried-max", Warning, "a carried mod value with no max: a player's own copy can raise it to the 64-bit limit";
+    UI_ROW = "KL360", "ui-row", Error, "a window's row Kiln.Blocks refuses at load: an id two rows of the window share, or a text field in a window that does not take the keyboard";
 
     // KL4xx: references to the game's data (needs the game-data catalog)
     UNKNOWN_REF = "KL401", "unknown-reference", Warning, "a name, id or GUID the game (and the mods) do not have";

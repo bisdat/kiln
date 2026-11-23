@@ -23,9 +23,9 @@ export function isOlder(a: string, b: string, list: RuntimeBundle[]): boolean {
 }
 
 /** Runs `start` (a TaskId command) as the game's runtime change. True when it finished; false when it failed (the
- *  error is toasted and kept in useRuntimeChanges). */
+ *  error is toasted and kept in useRuntimeChanges). `lead`: a line before the done toast's own (why it ran). */
 export async function runRuntimeChange(qc: QueryClient, game: GameInstall, bundles: RuntimeBundle[], what: string, version: string | null, label: string,
-  start: () => Promise<string>): Promise<boolean> {
+  start: () => Promise<string>, lead?: string): Promise<boolean> {
   const { put } = useRuntimeChanges.getState();
   const gid = game.id;
   if (useRuntimeChanges.getState().last[gid]?.state === "running") {
@@ -37,7 +37,8 @@ export async function runRuntimeChange(qc: QueryClient, game: GameInstall, bundl
   let ok = false;
   try {
     // the error toast is said here: a file Windows refused (an antivirus, inbox 92) has plain words as its title
-    const r = await runTask<api.InstallResult | api.UninstallResult | null>(async () => { const id = await start(); put(gid, { ...base, taskId: id }); return id; }, { done: label, detail: installNote, quiet: true });
+    const detail = (x: api.InstallResult | api.UninstallResult | null) => [lead, installNote(x)].filter(Boolean).join(" ") || undefined;
+    const r = await runTask<api.InstallResult | api.UninstallResult | null>(async () => { const id = await start(); put(gid, { ...base, taskId: id }); return id; }, { done: label, detail, quiet: true });
     notifyInstall(r);
     put(gid, { ...(useRuntimeChanges.getState().last[gid] ?? base), state: "done" });
     if (r && "runtime" in r) {

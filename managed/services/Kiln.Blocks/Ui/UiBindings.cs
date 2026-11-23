@@ -4,8 +4,14 @@
 //   config.<path>             an entry of one of the mod's own configs; config.<config id>/<path> when two configs have the path
 //   "FPS {game.fps:0}"        a template: {name} or {name:format}, {{ and }} for braces
 //   "game.inGame && !config.x", "game.screen == InGame", "game.fps < 30"      a condition: terms joined by &&
+// Since 0.2.0-dev.31 (dossier 09 §4.3) the names are typed and exact: state.<key> (the window's state), mod.<id> (the mod's
+// own published data), world.local.* / world.server.* (kiln.ui.snapshot's immutable publication, UiWorldSnapshot.cs),
+// stats.<mod>/<id> (05b's synced copy), row.* and node.* (inside a table's cells and a tree's node rows). Values are exact
+// CLR boxes (bool, long, ulong, decimal, double, string, an immutable set, rows, a tree) or UiUnavailable: never one double
+// for every number. A new name that cannot be read now is Unavailable: it shows as a dash and fails every test.
 // Everything here is plain logic with no overlay in it, so it is checked when a block compiles and tested without a game. The values are read when a window
-// or a HUD line refreshes, never every frame.
+// or a HUD line refreshes, never every frame; a refresh reads them through one UiRefreshContext.
+using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Globalization;
 using System.Text;
@@ -13,14 +19,65 @@ using System.Text.RegularExpressions;
 
 namespace Kiln;
 
-internal enum UiValueType { Bool, Number, Text }
+/// <summary>A binding's type. Number is a finite double (float configs, game.fps); the exact types are the rest.</summary>
+internal enum UiValueType { Bool, Number, Text, Int64, UInt64, Decimal, StringSet, Rows, Tree }
+
+/// <summary>Where a binding's value comes from.</summary>
+internal enum UiSource { Game, Config, State, StateCount, Mod, WorldLocal, WorldServer, Stats, Row, Node, Available }
 
 /// <summary>A value a block names, with what is known of it when the block compiles.</summary>
 internal sealed record UiBinding(string Name, UiValueType Type, string? ConfigId = null, string? Path = null, string? EntryType = null, double? Min = null, double? Max = null,
     IReadOnlyList<string>? Options = null, bool ServerKind = false)
 {
     public bool IsConfig => ConfigId != null;
+    public UiSource Source { get; init; } = ConfigId != null ? UiSource.Config : UiSource.Game;
+    /// <summary>The state key, data id, world field, stat key (mod:id), stat part or row/node field.</summary>
+    public string? Key { get; init; }
+    public string? Part { get; init; }
+    /// <summary>Rows and trees: their fields (built-in ones included).</summary>
+    public IReadOnlyList<UiField>? Fields { get; init; }
+    /// <summary>state.*: the declaration.</summary>
+    public UiStateDefinition? State { get; init; }
+    /// <summary>What the live-values collector must gather for this name.</summary>
+    public UiWorldFields World { get; init; }
+    /// <summary>X.available: the binding it tests.</summary>
+    public UiBinding? Of { get; init; }
+    /// <summary>A name of the typed namespaces (dev.31): exact literals, Unavailable fails every test.</summary>
+    public bool Strict => Source is not (UiSource.Game or UiSource.Config);
+    /// <summary>Holds one value that a template can show.</summary>
+    public bool Scalar => Type is not (UiValueType.StringSet or UiValueType.Rows or UiValueType.Tree);
 }
+
+/// <summary>What a name may refer to where it is written: the window's state, a table row's or a tree node's fields.</summary>
+internal sealed class UiScope
+{
+    public required string Mod { get; init; }
+    public IReadOnlyDictionary<string, UiStateDefinition>? State { get; init; }
+    public IReadOnlyList<UiField>? RowFields { get; init; }
+    public IReadOnlyList<UiField>? NodeFields { get; init; }
+    public UiScope With(IReadOnlyList<UiField>? rowFields = null, IReadOnlyList<UiField>? nodeFields = null) =>
+        new() { Mod = Mod, State = State, RowFields = rowFields ?? RowFields, NodeFields = nodeFields ?? NodeFields };
+}
+
+/// <summary>A value that cannot be read now (no world, not published yet, deferred): shown as a dash, false in every test.</summary>
+internal sealed record UiUnavailable(string Reason)
+{
+    public static readonly UiUnavailable NoWorld = new("NoWorld");
+    public override string ToString() => "\u2014";
+}
+
+/// <summary>Rows of a table source, immutable, with the version they were published at.</summary>
+internal sealed record UiRowsValue(ImmutableArray<UiRowEntry> Rows, ulong Version)
+{
+    public static readonly UiRowsValue Empty = new(ImmutableArray<UiRowEntry>.Empty, 0);
+}
+
+internal sealed record UiRowEntry(string Key, ImmutableDictionary<string, object> Values);
+
+/// <summary>A tree source's nodes in drawing order (each node before its children), immutable.</summary>
+internal sealed record UiTreeValue(ImmutableArray<UiTreeEntry> Nodes, ulong Version);
+
+internal sealed record UiTreeEntry(string Key, string? Parent, UiText Label, int Depth, bool HasChildren, ImmutableDictionary<string, object> Values);
 
 /// <summary>The part of a config the UI needs: Kiln.Api's <see cref="ConfigFile"/> in the game, a fake in tests.</summary>
 internal interface IUiConfig
@@ -113,8 +170,12 @@ internal static class UiGameValues
 internal static class UiBindings
 {
     /// <summary>The value a name means, or <see cref="FormatException"/> saying what is wrong with it.</summary>
-    public static UiBinding Resolve(string mod, string spec)
+    public static UiBinding Resolve(string mod, string spec) => Resolve(new UiScope { Mod = mod }, spec);
+
+    /// <summary>The value a name means where it is written (<paramref name="scope"/>: the window's state, a row's fields).</summary>
+    public static UiBinding Resolve(UiScope scope, string spec)
     {
+        var mod = scope.Mod;
         spec = (spec ?? "").Trim();
         if (spec.StartsWith("game.", StringComparison.Ordinal))
         {
@@ -122,7 +183,16 @@ internal static class UiBindings
             return new UiBinding("game." + g.Name, g.Type);
         }
         if (spec.StartsWith("config.", StringComparison.Ordinal) && spec.Length > 7) return Config(mod, spec[7..]);
-        throw new FormatException($"\"{spec}\" is not a value: say game.<name> (one of {UiGameValues.Names}) or config.<path> (an entry of this mod's config)");
+        if (UiTypedNames.TryResolve(scope, spec, out var typed, out var problem)) return typed!;
+        if (problem != null) throw new FormatException(problem);
+        if (spec.EndsWith(".available", StringComparison.Ordinal) && spec.Length > 10)
+        {
+            var inner = Resolve(scope, spec[..^10]);
+            if (!inner.Strict) throw new FormatException($"\"{spec}\": .available goes with the typed names (state.*, mod.*, world.*, stats.*, row.*, node.*); {inner.Name} is always there");
+            return new UiBinding(spec, UiValueType.Bool) { Source = UiSource.Available, Of = inner, World = inner.World };
+        }
+        throw new FormatException($"\"{spec}\" is not a value: say game.<name> (one of {UiGameValues.Names}), config.<path> (an entry of this mod's config), "
+            + "state.<key>, mod.<id>, world.local.<name>, world.server.<name>, stats.<mod>/<id>, or row.<field> / node.<field> inside a table or tree");
     }
 
     private static UiBinding Config(string mod, string rest)
@@ -156,17 +226,21 @@ internal static class UiBindings
     private static UiValueType TypeOf(string entryType) => entryType switch
     {
         "bool" => UiValueType.Bool,
-        "int" or "float" => UiValueType.Number,
+        "int" => UiValueType.Int64,
+        "float" => UiValueType.Number,
         _ => UiValueType.Text,
     };
 
-    /// <summary>The binding's value as the UI handles it: a bool, a double or a string. Null when it cannot be read now (the config is gone, the game does not answer).</summary>
+    /// <summary>A game or config binding's value as the UI handles it: a bool, a long, a ulong, a decimal, a double or a
+    /// string. Null when it cannot be read now (the config is gone, the game does not answer). Typed names read through a
+    /// <see cref="UiRefreshContext"/>.</summary>
     public static object? Read(UiBinding b)
     {
         try
         {
-            if (!b.IsConfig) return Normalize(UiGameValues.Find(b.Name[5..])?.Read());
-            return UiConfigs.Find(b.ConfigId!)?.Get(b.Path!) is { } v ? Normalize(v) : null;
+            if (b.Source == UiSource.Game) return Normalize(UiGameValues.Find(b.Name[5..])?.Read());
+            if (b.Source == UiSource.Config) return UiConfigs.Find(b.ConfigId!)?.Get(b.Path!) is { } v ? Normalize(v) : null;
+            return new UiRefreshContext(new UiScope { Mod = "" }).Value(b);
         }
         catch (Exception e) when (e is KeyNotFoundException or InvalidOperationException or FileNotFoundException or TypeLoadException)
         {
@@ -180,7 +254,10 @@ internal static class UiBindings
         bool or string => v,
         double d => d,
         float f => (double)f,
-        sbyte or byte or short or ushort or int or uint or long or ulong or decimal => Convert.ToDouble(v, CultureInfo.InvariantCulture),
+        sbyte or short or int or long => Convert.ToInt64(v, CultureInfo.InvariantCulture),
+        byte or ushort or uint => Convert.ToInt64(v, CultureInfo.InvariantCulture),
+        ulong u => u <= long.MaxValue ? (long)u : u,
+        decimal m => m,
         Enum e => e.ToString(),
         TimeSpan t => Duration(t),
         System.Collections.IEnumerable list => "[" + string.Join(", ", list.Cast<object?>().Select(x => Text(Normalize(x), null))) + "]",
@@ -198,33 +275,84 @@ internal static class UiBindings
         return sb.ToString();
     }
 
-    /// <summary>A value as text, with a format: a number's .NET custom format ("0", "0.00"), a true/false's "yes|no".</summary>
+    /// <summary>A value as text, with a format: a number's .NET format ("0", "0.00", "N0"), a true/false's "yes|no". Exact
+    /// numbers are formatted as they are (never through a double); an unavailable value is a dash.</summary>
     public static string Text(object? v, string? format) => v switch
     {
         null => "",
+        UiUnavailable => "\u2014",
         bool b => format is { Length: > 0 } && format.IndexOf('|') is var bar and >= 0 ? (b ? format[..bar] : format[(bar + 1)..]) : b ? "true" : "false",
         double d => format is { Length: > 0 } ? d.ToString(format, CultureInfo.InvariantCulture) : d.ToString("0.##", CultureInfo.InvariantCulture),
+        long l => format is { Length: > 0 } ? l.ToString(format, CultureInfo.InvariantCulture) : l.ToString(CultureInfo.InvariantCulture),
+        ulong u => format is { Length: > 0 } ? u.ToString(format, CultureInfo.InvariantCulture) : u.ToString(CultureInfo.InvariantCulture),
+        decimal m => format is { Length: > 0 } ? m.ToString(format, CultureInfo.InvariantCulture) : UiCanonical.Text(m),
+        ImmutableArray<string> set => string.Join(", ", set),
+        UiRowsValue rows => rows.Rows.Length.ToString(CultureInfo.InvariantCulture),
+        UiTreeValue tree => tree.Nodes.Length.ToString(CultureInfo.InvariantCulture),
         _ => v.ToString() ?? "",
     };
+
+    internal const int MaxFormat = 128;
 
     /// <summary>Whether a format suits a value of this type, or the reason it does not.</summary>
     public static string? CheckFormat(UiValueType type, string? format)
     {
         if (string.IsNullOrEmpty(format)) return null;
+        if (format.Length > MaxFormat) return $"a format is at most {MaxFormat} characters";
         switch (type)
         {
-            case UiValueType.Number:
-                try { 1.5.ToString(format, CultureInfo.InvariantCulture); }
+            case UiValueType.Number or UiValueType.Int64 or UiValueType.UInt64 or UiValueType.Decimal:
+                try
+                {
+                    _ = type switch
+                    {
+                        UiValueType.Int64 => (-12L).ToString(format, CultureInfo.InvariantCulture),
+                        UiValueType.UInt64 => 12UL.ToString(format, CultureInfo.InvariantCulture),
+                        UiValueType.Decimal => 1.5m.ToString(format, CultureInfo.InvariantCulture),
+                        _ => 1.5.ToString(format, CultureInfo.InvariantCulture),
+                    };
+                }
                 catch (FormatException) { return $"\"{format}\" is not a number format (\"0\", \"0.00\", \"#,##0\")"; }
                 return null;
             case UiValueType.Bool:
                 return format.IndexOf('|') >= 0 ? null : $"\"{format}\": a true/false takes two words with a bar between, as \"yes|no\"";
+            case UiValueType.StringSet or UiValueType.Rows or UiValueType.Tree:
+                return "a set, rows or a tree is not one value: show its count (state.<key>/count) or its rows";
             default:
                 return $"a text takes no format (\"{format}\")";
         }
     }
 
-    public static bool Truthy(object? v) => v switch { bool b => b, double d => d != 0, string s => s.Length > 0, null => false, _ => true };
+    public static bool Truthy(object? v) => v switch
+    {
+        bool b => b,
+        double d => d != 0,
+        long l => l != 0,
+        ulong u => u != 0,
+        decimal m => m != 0,
+        string s => s.Length > 0,
+        UiUnavailable => false,
+        null => false,
+        _ => true,
+    };
+
+    /// <summary>An exact comparison of two numbers of any of the UI's numeric boxes; null when either is not a number.
+    /// long, ulong and decimal compare through decimal (exact for every long and ulong); doubles only with doubles.</summary>
+    public static int? CompareNumbers(object? a, object? b)
+    {
+        if (a is double da && b is double db) return da.CompareTo(db);
+        if (a is double || b is double)
+        {
+            // an old float config against a whole literal: as doubles, the way it always was
+            if (ToDouble(a) is { } x && ToDouble(b) is { } y) return x.CompareTo(y);
+            return null;
+        }
+        return ToDecimal(a) is { } ma && ToDecimal(b) is { } mb ? ma.CompareTo(mb) : null;
+    }
+
+    public static decimal? ToDecimal(object? v) => v switch { long l => l, ulong u => u, decimal m => m, _ => null };
+
+    public static double? ToDouble(object? v) => v switch { double d => d, long l => l, ulong u => u, decimal m => (double)m, _ => null };
 }
 
 /// <summary>A text with values in it: <c>FPS {game.fps:0}</c>. <c>{{</c> and <c>}}</c> are braces.</summary>
@@ -255,6 +383,7 @@ internal sealed class UiTemplate
             var format = colon >= 0 ? inner[(colon + 1)..] : null;
             if (name.Length == 0) throw new FormatException($"an empty {{}} at {i + 1} in \"{text}\": name a value, as {{game.fps}}");
             var binding = resolve(name);
+            if (!binding.Scalar) throw new FormatException($"{{{inner}}}: {binding.Name} is a set, rows or a tree, not one value{(binding.Type == UiValueType.StringSet ? $": show {binding.Name}/count" : "")}");
             if (UiBindings.CheckFormat(binding.Type, format) is { } problem) throw new FormatException($"{{{inner}}}: {problem}");
             if (literal.Length > 0) { t._parts.Add((literal.ToString(), null, null)); literal.Clear(); }
             t._parts.Add(("", binding, format));
@@ -307,7 +436,8 @@ internal sealed class UiLine
 }
 
 /// <summary>A condition: terms joined by &amp;&amp;. A term is a name (true when a bool is true, a number is not 0, a text is not empty), <c>!name</c>, or <c>name op value</c>
-/// with == != &lt; &lt;= &gt; &gt;= (the last four on numbers).</summary>
+/// with == != &lt; &lt;= &gt; &gt;= (the last four on numbers). A typed name (state.*, mod.*, world.*, stats.*, row.*, node.*) compares exactly, with a literal of its own type
+/// (an int64 with a whole number), and an unavailable value fails every term, ! and != too.</summary>
 internal sealed class UiCondition
 {
     private sealed record Term(UiBinding Binding, bool Not, string? Op, object? Literal);
@@ -328,6 +458,8 @@ internal sealed class UiCondition
             if (term.Length == 0 || !m.Success)
                 throw new FormatException($"\"{term}\" in \"{text}\" is not a condition: a name, !name, or name == value (== != < <= > >=), joined with &&");
             var binding = resolve(m.Groups["name"].Value);
+            if (!binding.Scalar)
+                throw new FormatException($"\"{term}\": {binding.Name} is a set, rows or a tree, not one value: test {binding.Name}.available{(binding.Type == UiValueType.StringSet ? $" or {binding.Name}/count" : "")}");
             var not = m.Groups["not"].Success;
             if (!m.Groups["op"].Success)
             {
@@ -338,27 +470,44 @@ internal sealed class UiCondition
             var op = m.Groups["op"].Value;
             var lit = m.Groups["lit"].Value.Trim();
             if (lit.Length >= 2 && lit[0] is '"' or '\'' && lit[^1] == lit[0]) lit = lit[1..^1];
-            object literal;
-            switch (binding.Type)
-            {
-                case UiValueType.Number:
-                    if (!double.TryParse(lit, NumberStyles.Float, CultureInfo.InvariantCulture, out var d))
-                        throw new FormatException($"{binding.Name} is a number: \"{term}\" compares it with \"{lit}\"");
-                    literal = d;
-                    break;
-                case UiValueType.Bool:
-                    if (op is not ("==" or "!=")) throw new FormatException($"{binding.Name} is true or false: \"{term}\" can only use == and !=");
-                    if (!bool.TryParse(lit, out var b)) throw new FormatException($"{binding.Name} is true or false: \"{term}\" compares it with \"{lit}\"");
-                    literal = b;
-                    break;
-                default:
-                    if (op is not ("==" or "!=")) throw new FormatException($"{binding.Name} is a text: \"{term}\" can only use == and !=");
-                    literal = lit;
-                    break;
-            }
-            c._terms.Add(new Term(binding, false, op, literal));
+            c._terms.Add(new Term(binding, false, op, Literal(binding, term, op, lit)));
         }
         return c;
+    }
+
+    private static object Literal(UiBinding binding, string term, string op, string lit)
+    {
+        switch (binding.Type)
+        {
+            case UiValueType.Number:
+                if (!double.TryParse(lit, NumberStyles.Float, CultureInfo.InvariantCulture, out var d) || !double.IsFinite(d))
+                    throw new FormatException($"{binding.Name} is a number: \"{term}\" compares it with \"{lit}\"");
+                return d;
+            case UiValueType.Int64 or UiValueType.UInt64 when !binding.Strict:
+                // an int config, as old blocks wrote it: any number, compared exactly
+                if (!decimal.TryParse(lit, NumberStyles.Float, CultureInfo.InvariantCulture, out var cm))
+                    throw new FormatException($"{binding.Name} is a number: \"{term}\" compares it with \"{lit}\"");
+                return cm;
+            case UiValueType.Int64:
+                if (!long.TryParse(lit, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var l))
+                    throw new FormatException($"{binding.Name} is a whole number (int64): \"{term}\" compares it with \"{lit}\", which is not one");
+                return l;
+            case UiValueType.UInt64:
+                if (!ulong.TryParse(lit, NumberStyles.None, CultureInfo.InvariantCulture, out var ul))
+                    throw new FormatException($"{binding.Name} is a whole number of 0 or more (uint64): \"{term}\" compares it with \"{lit}\", which is not one");
+                return ul;
+            case UiValueType.Decimal:
+                if (!decimal.TryParse(lit, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var dm))
+                    throw new FormatException($"{binding.Name} is a decimal: \"{term}\" compares it with \"{lit}\", which is not one (digits and a point, no exponent)");
+                return dm;
+            case UiValueType.Bool:
+                if (op is not ("==" or "!=")) throw new FormatException($"{binding.Name} is true or false: \"{term}\" can only use == and !=");
+                if (!bool.TryParse(lit, out var b)) throw new FormatException($"{binding.Name} is true or false: \"{term}\" compares it with \"{lit}\"");
+                return b;
+            default:
+                if (op is not ("==" or "!=")) throw new FormatException($"{binding.Name} is a text: \"{term}\" can only use == and !=");
+                return lit;
+        }
     }
 
     public bool Test(Func<UiBinding, object?> value)
@@ -366,19 +515,25 @@ internal sealed class UiCondition
         foreach (var t in _terms)
         {
             var v = value(t.Binding);
+            // a typed name that cannot be read now satisfies nothing, not even ! or !=
+            if (v is UiUnavailable || (v == null && t.Binding.Strict)) return false;
             bool ok;
             if (t.Op == null) ok = UiBindings.Truthy(v) != t.Not;
+            else if (UiBindings.CompareNumbers(v, t.Literal) is { } cmp)
+                ok = t.Op switch { "==" => cmp == 0, "!=" => cmp != 0, "<" => cmp < 0, "<=" => cmp <= 0, ">" => cmp > 0, _ => cmp >= 0 };
             else
                 ok = (v, t.Literal) switch
                 {
-                    (double a, double b) => t.Op switch { "==" => a == b, "!=" => a != b, "<" => a < b, "<=" => a <= b, ">" => a > b, _ => a >= b },
                     (bool a, bool b) => t.Op == "==" ? a == b : a != b,
-                    (string a, string b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase) == (t.Op == "=="),
-                    // a value that cannot be read now matches nothing, so "!=" holds and the rest do not
+                    (string a, string b) => string.Equals(a, b, t.Binding.Strict ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase) == (t.Op == "=="),
+                    // an old value that cannot be read now matches nothing, so "!=" holds and the rest do not
                     _ => t.Op == "!=",
                 };
             if (!ok) return false;
         }
         return true;
     }
+
+    /// <summary>The names a condition reads, all of them: a HUD line's or a row's demand counts a hidden term too.</summary>
+    public UiWorldFields World => _terms.Aggregate(UiWorldFields.None, (f, t) => f | t.Binding.World);
 }

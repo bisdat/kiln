@@ -239,6 +239,11 @@ pub fn forget_install_state(id: &str) {
     }
 }
 
+/// Every cached install status goes (the shipped runtime arrived: an update may be on offer now).
+pub fn forget_install_states() {
+    INSTALL_STATUS.lock().unwrap_or_else(|e| e.into_inner()).clear();
+}
+
 /// `game::status` with the launcher's Steam roots (same fields as kiln_manage::game::status_with).
 pub fn game_status(install: &GameInstall) -> Result<kiln_manage::game::GameStatus, Error> {
     let roots = steam_roots();

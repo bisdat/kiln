@@ -79,6 +79,10 @@ impl Ecs {
     /// kiln.world's `ecs_query` for entities of the family's world that have every component of `components`
     /// (hashes): the refs in ascending entity id, or ShroudForge's provider text.
     pub fn query_refs(&self, components: &[u32]) -> Result<Vec<KilnObjectRef>, &'static str> {
+        // A hosted scene in transition binds no world: the provider's query fails (resolve_engine_owners.cpp:56).
+        if self.scene_transitioning() {
+            return Err(text::QUERY_FAILED);
+        }
         let query = self
             .world()
             .and_then(|table| service_member!(table, KilnWorldApi, ecs_query))

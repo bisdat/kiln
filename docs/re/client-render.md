@@ -326,7 +326,11 @@ game's transparent entry passes. The calls of Group3/Group4 (Quick Deposit's and
 The group is a property of the instance drawn with the model (`RenderInstanceData`), so the highlight is depth-tested
 with it: what stands in front hides it. No palette field or instance flag draws it through walls on this build
 (`keen::GpuCulling2HighlightType` None/Mesh/Model/Batch is the culling debug view). Quick Deposit draws its own
-silhouettes in the UI for that; Kiln offers no through-walls mode.
+silhouettes in the UI for that. Kiln (0.2.0-dev.30.5, `OutlineOptions.ThroughWalls`) does the same in its own way: kiln.render
+reads the request's entity position from its `keen::ecs::RenderTransform` (176 bytes, the first WorldTransform's three
+32.32 fixed-point metres, as kiln.markers' client anchors) through kiln.world's ECS snapshot at each client Pre, and
+Kiln.Ui projects a box there and draws its hull on its UI layer. The model's own bounds (the 432-byte render instance's)
+were not mapped: the box is a fixed 1.2 m.
 
 ### Open (real-game checks)
 - Hover an outlined dynamic entity (a chest) with the building cursor, then move away: does Kiln's outline come back, or

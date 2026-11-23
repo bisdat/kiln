@@ -587,14 +587,46 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn windows_finds_own_exe_by_image_path() {
-        let me = std::env::current_exe().unwrap();
-        let (dir, name) = (me.parent().unwrap(), me.file_name().unwrap().to_str().unwrap());
-        let p = find_exe(dir, name).unwrap().expect("own process found by image path");
-        assert_eq!(p.pid, std::process::id());
+        use std::process::{Child, Command, Stdio};
+        let current = std::env::current_exe().unwrap();
+        if std::env::var_os("KILN_TEST_IMAGE_HELPER").as_deref() == current.file_name() {
+            std::io::copy(&mut std::io::stdin().lock(), &mut std::io::sink()).unwrap();
+            return;
+        }
+
+        struct Fixture {
+            dir: PathBuf,
+            child: Option<Child>,
+        }
+        impl Drop for Fixture {
+            fn drop(&mut self) {
+                if let Some(child) = &mut self.child {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                }
+                let _ = std::fs::remove_dir_all(&self.dir);
+            }
+        }
+
+        let id = crate::util::uuid_v4().unwrap();
+        let dir = std::env::temp_dir().join(format!("kiln-image-{id}"));
+        std::fs::create_dir(&dir).unwrap();
+        let mut fixture = Fixture { dir, child: None };
+        let name = format!("kiln-image-{id}.exe");
+        let image = fixture.dir.join(&name);
+        std::fs::copy(current, &image).unwrap();
+        fixture.child = Some(Command::new(&image)
+            .args(["--exact", "proc::tests::windows_finds_own_exe_by_image_path"])
+            .env("KILN_TEST_IMAGE_HELPER", &name)
+            .stdin(Stdio::piped()).stdout(Stdio::null()).spawn().unwrap());
+        let pid = fixture.child.as_ref().unwrap().id();
+
+        let p = find_exe(&fixture.dir, &name).unwrap().expect("helper found by image path");
+        assert_eq!(p.pid, pid);
         // the same name in another folder is not this process
-        assert!(find_exe(&std::env::temp_dir(), name).unwrap().is_none_or(|p| p.pid != std::process::id()));
+        assert!(find_exe(fixture.dir.parent().unwrap(), &name).unwrap().is_none_or(|p| p.pid != pid));
         // case-insensitive file name, as Windows treats it
-        assert_eq!(find_exe(dir, &name.to_ascii_uppercase()).unwrap().map(|p| p.pid), Some(std::process::id()));
+        assert_eq!(find_exe(&fixture.dir, &name.to_ascii_uppercase()).unwrap().map(|p| p.pid), Some(pid));
         assert!(!alive(u32::MAX - 3));
     }
 
