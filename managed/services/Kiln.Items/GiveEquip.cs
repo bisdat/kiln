@@ -7,7 +7,8 @@ public enum Replaced
 {
     /// <summary>Preserve it in a free backpack slot. NoRoom if none is free; nothing changes.</summary>
     Backpack = 0,
-    /// <summary>Remove it, reporting its item and count in the result.</summary>
+    /// <summary>Destroy it: the old stack, and for gear its item entity, is removed from the game, not moved or dropped
+    /// anywhere. The result reports its item, count and instance. Works with a full backpack.</summary>
     Take = 1,
 }
 

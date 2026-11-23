@@ -30,8 +30,9 @@ else Log.Info($"replaced {result.ReplacedCount} x {result.ReplacedItem}");
 
 - `Replaced.Backpack` (default) preserves the old stack and its instance in an empty Generic backpack slot.
   An occupied target with a full backpack returns `NoRoom` **before mutation**. An empty target still works.
-- `Replaced.Take` removes the old stack and reports `ReplacedItem` (an alias of `Replaced`), `ReplacedCount`, and
-  the old instance identity. It works with a full backpack. `ReplacedTo` is None for a taken stack.
+- `Replaced.Take` **destroys** the old stack: it and its item entity are removed from the game, not moved or
+  dropped anywhere. The result reports `ReplacedItem` (an alias of `Replaced`), `ReplacedCount`, and the old instance
+  identity. It works with a full backpack. `ReplacedTo` is None for a taken stack.
 - `DryRun = true` runs and rolls back the whole transaction. No inventory/selection changes, new item entity or
   `EquipChangedEvent` survives. The result reports the old stack and the predicted destination, but no new instance.
 - Always all-or-nothing: no partial give, no duplicated or missing item on an ordinary refusal. Count is 1..65535,
