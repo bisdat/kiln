@@ -320,6 +320,8 @@ internal sealed unsafe class WorldStore
     {
         if (Root is null || LoadDeferred) return [];
         var root = Root;
+        // A join during a save's write waits for the next service step instead of reading half-written manifests.
+        if (!Writer.Idle) throw new StorageRestoreDeferredException("the writer is busy; player storage restore deferred");
         if (!Writer.TryExclusive("reading pending player storage", TimeSpan.Zero, () =>
         {
             var values = new List<string>();
@@ -330,7 +332,7 @@ internal sealed unsafe class WorldStore
             return values;
         }, out var result))
         {
-            throw new InvalidOperationException("player storage pending candidates are not available yet; restore deferred");
+            throw new StorageRestoreDeferredException("player storage pending candidates are not available yet; restore deferred");
         }
         return result;
     }

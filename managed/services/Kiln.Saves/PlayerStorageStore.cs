@@ -19,6 +19,9 @@ internal interface IPlayerStoragePersistence
     IReadOnlyList<StorageInstanceHolder> InstanceHolders(EntityId player) => Holders(player).Select(h => new StorageInstanceHolder(h.Key, h.Value)).ToArray();
 }
 
+/// <summary>A storage restore that cannot run in this service step (the writer is busy): try again at the next one.</summary>
+internal sealed class StorageRestoreDeferredException(string message) : InvalidOperationException(message);
+
 internal readonly record struct StorageInstanceHolder(string Key, EntityId Holder, bool Temporary = false);
 internal sealed record StorageFreeze(string Witness, JsonObject Storages, JsonObject? Parked = null, JsonArray? Quarantine = null);
 
@@ -221,40 +224,54 @@ internal sealed class PlayerStorageStore(WorldStore owner)
         foreach (var (character, visit) in _visits)
         {
             if (visit.Document.ReadOnly) continue;
-            var registration = string.Join(";", Native.Registrations.OrderBy(x => x.Key).Select(x => $"{x.Key}={x.Value}"));
-            if (!visit.Restored || (!Native.AutomaticRegistration && visit.Registration != registration)) Restore(visit, true, "registration");
-            if (Native.Freeze(character, visit.Player, generation) is not { } frozen) continue;
-            var current = visit.Document.Data["current"]!.AsObject();
-            var next = PlayerStorageDocument.Read(visit.Document.Write(32, PlayerStorageDocument.ServerMaxBytes), character.Id, PlayerStorageDocument.ServerMaxBytes);
-            var frozenStorages = (JsonObject)frozen.Storages.DeepClone();
-            var frozenParked = frozen.Parked is null ? current["parked"]!.AsObject() : PreserveParked(current["parked"]!.AsObject(), frozen.Parked);
-            next.Capture(frozen.Witness, generation, frozenStorages, frozenParked);
-            if (frozen.Quarantine is not null)
-                foreach (var entry in frozen.Quarantine)
-                    if (!next.Data["quarantine"]!.AsArray().Any(old => JsonNode.DeepEquals(old, entry))) next.Data["quarantine"]!.AsArray().Add(entry?.DeepClone());
-            next.Data["current"]!["source"] = visit.Local && current["source"]?.GetValue<string>() != "server" ? "local" : "server";
-            var serverJson = next.Write(32, PlayerStorageDocument.ServerMaxBytes);
-            string? clientJson = null;
-            try { clientJson = next.Write(8); }
-            catch (InvalidDataException e)
+            try { StageVisit(generation, character, visit); }
+            catch (Exception e) when (e is InvalidDataException or InvalidOperationException or FormatException or OverflowException
+                or System.Text.Json.JsonException or ArgumentException or KeyNotFoundException)
             {
-                _carriedBlocked[generation] = $"character {character}: carried storage unchanged: {e.Message}";
+                // One character's storage must never stop the world's mod data from being staged. Its previous server
+                // and carried copies stay as they were; the next save tries again, and this save's commit says so.
+                _carriedBlocked[generation] = $"character {character}: storage not staged with generation {generation}: {e.Message}";
                 Failed(_carriedBlocked[generation]);
             }
-            var bundle = owner.GetBundleRaw(Prefix + character.Text, Mod);
-            // Seed once, including a missing durable copy; a later failed stage must never seed itself as committed.
-            _committedServer.TryAdd(character, bundle.Keys.GetValueOrDefault(Key)?.Json);
-            bundle.Keys[Key] = new WorldStore.Slot { Json = serverJson };
-            if (!_pendingServer.TryGetValue(generation, out var serverPending)) _pendingServer[generation] = serverPending = [];
-            serverPending[character] = serverJson;
-            visit.Document = next;
-            EnsureBands(visit);
-            if (!_pending.TryGetValue(generation, out var pending)) _pending[generation] = pending = [];
-            if (clientJson is not null) pending[character] = clientJson;
-            else pending.Remove(character);
-            foreach (var older in _pending.Keys.OrderByDescending(g => g).Skip(2).ToArray())
-            { _pending.Remove(older); _pendingServer.Remove(older); _carriedBlocked.Remove(older); }
         }
+    }
+
+    private void StageVisit(uint generation, CharacterKey character, Visit visit)
+    {
+        var native = Native!;
+        var registration = string.Join(";", native.Registrations.OrderBy(x => x.Key).Select(x => $"{x.Key}={x.Value}"));
+        if (!visit.Restored || (!native.AutomaticRegistration && visit.Registration != registration)) Restore(visit, true, "registration");
+        if (native.Freeze(character, visit.Player, generation) is not { } frozen) return;
+        var current = visit.Document.Data["current"]!.AsObject();
+        var next = PlayerStorageDocument.Read(visit.Document.Write(32, PlayerStorageDocument.ServerMaxBytes), character.Id, PlayerStorageDocument.ServerMaxBytes);
+        var frozenStorages = (JsonObject)frozen.Storages.DeepClone();
+        var frozenParked = frozen.Parked is null ? current["parked"]!.AsObject() : PreserveParked(current["parked"]!.AsObject(), frozen.Parked);
+        next.Capture(frozen.Witness, generation, frozenStorages, frozenParked);
+        if (frozen.Quarantine is not null)
+            foreach (var entry in frozen.Quarantine)
+                if (!next.Data["quarantine"]!.AsArray().Any(old => JsonNode.DeepEquals(old, entry))) next.Data["quarantine"]!.AsArray().Add(entry?.DeepClone());
+        next.Data["current"]!["source"] = visit.Local && current["source"]?.GetValue<string>() != "server" ? "local" : "server";
+        var serverJson = next.Write(32, PlayerStorageDocument.ServerMaxBytes);
+        string? clientJson = null;
+        try { clientJson = next.Write(8); }
+        catch (InvalidDataException e)
+        {
+            _carriedBlocked[generation] = $"character {character}: carried storage unchanged: {e.Message}";
+            Failed(_carriedBlocked[generation]);
+        }
+        var bundle = owner.GetBundleRaw(Prefix + character.Text, Mod);
+        // Seed once, including a missing durable copy; a later failed stage must never seed itself as committed.
+        _committedServer.TryAdd(character, bundle.Keys.GetValueOrDefault(Key)?.Json);
+        bundle.Keys[Key] = new WorldStore.Slot { Json = serverJson };
+        if (!_pendingServer.TryGetValue(generation, out var serverPending)) _pendingServer[generation] = serverPending = [];
+        serverPending[character] = serverJson;
+        visit.Document = next;
+        EnsureBands(visit);
+        if (!_pending.TryGetValue(generation, out var pending)) _pending[generation] = pending = [];
+        if (clientJson is not null) pending[character] = clientJson;
+        else pending.Remove(character);
+        foreach (var older in _pending.Keys.OrderByDescending(g => g).Skip(2).ToArray())
+        { _pending.Remove(older); _pendingServer.Remove(older); _carriedBlocked.Remove(older); }
     }
 
     private static JsonObject PreserveParked(JsonObject previous, JsonObject captured)
@@ -286,7 +303,6 @@ internal sealed class PlayerStorageStore(WorldStore owner)
         var current = visit.Document.Data["current"]!;
         var keys = current["storages"]!.AsObject().Select(x => x.Key).Union(current["parked"]!.AsObject().Select(x => x.Key))
             .Union(Native?.Registrations.Keys ?? []).Order(StringComparer.Ordinal).ToArray();
-        if (keys.Length > 32) throw new InvalidDataException("too many character storage instance bands");
         var bundle = owner.GetBundleRaw(Prefix + visit.Character.Text, Mod);
         var old = visit.Bands;
         if (old.Count == 0 && bundle.Keys.GetValueOrDefault("instanceBands")?.Json is { } json)
@@ -297,11 +313,18 @@ internal sealed class PlayerStorageStore(WorldStore owner)
         var assigned = new Dictionary<string, int>(StringComparer.Ordinal);
         var used = new HashSet<int>();
         foreach (var key in keys)
-            if (old.TryGetValue(key, out var band) && band is >= 0 and < 32 && used.Add(band)) assigned[key] = band;
+            if (old.TryGetValue(key, out var band) && band is >= 0 and < MaxBands && used.Add(band)) assigned[key] = band;
         foreach (var key in keys)
             if (!assigned.ContainsKey(key))
             {
-                var band = Enumerable.Range(0, 32).First(b => !used.Contains(b));
+                var band = Enumerable.Range(0, MaxBands).FirstOrDefault(b => !used.Contains(b), -1);
+                if (band < 0)
+                {
+                    // Not reachable within the document (32 keys) and registration (32 pages) limits; never a reason
+                    // to stop a join or a save. The key's items are then kept with their holder, not the character.
+                    SavesRuntime.Log(LogLevel.Warn, $"player-storage: {visit.Character}: no InstanceData band left for {key}");
+                    continue;
+                }
                 used.Add(band);
                 assigned[key] = band;
             }
@@ -309,7 +332,7 @@ internal sealed class PlayerStorageStore(WorldStore owner)
         bundle.Keys["instanceBands"] = new WorldStore.Slot { Json = System.Text.Json.JsonSerializer.Serialize(assigned) };
     }
 
-    internal const int BandBase = 1024, BandWidth = 128;
+    internal const int BandBase = 1024, BandWidth = 128, MaxBands = 64;
 
     /// <summary>Whether a character's InstanceData record in a storage band belongs to an item whose game record still
     /// waits in the storage document: parked (its mod is off, a hold) or quarantined. Such metadata must not age out

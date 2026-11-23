@@ -83,6 +83,8 @@ public sealed partial class PlayerStorageStoreTests
             client.Data["current"]!["parked"] = parked;
             store.Join(character, new EntityId(1), "join", client.Write(8), true);
             Assert.Equal(32, persist.Parked!.Count);
+            // Native keeps at most 32 keys per character: the new registration gets no holder, the capture carries the 32.
+            persist.Frozen = new("saved", new JsonObject(), (JsonObject)parked.DeepClone());
             OtherModData();
             h.Save(1);
             Assert.NotNull(h.Bundle(1, "other-mod/world"));
