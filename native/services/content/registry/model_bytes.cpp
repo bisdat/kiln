@@ -30,6 +30,22 @@ nlohmann::json plain(const gjson& g) {
     }
 }
 gd::Node node_of(const Node& n) { return gd::Node{static_cast<const gd::TType*>(n.type), n.addr}; }
+
+// A member as JSON. node_json shows an array of more than 16 bytes as "(N bytes)" (the gamedata API's dumps); a registry field
+// can be one (the balance table's per-flame-level altar and water-source counts are byte arrays): every element as its number.
+nlohmann::json json_of(const gd::Node& n, int depth) {
+    const gd::TType* t = n.t;
+    const gd::TType* el = t && t->inner() ? t->inner()->resolved() : nullptr;
+    if (t && el && el->kind == gd::K_U8 && (t->kind == gd::K_ARRAY || t->kind == gd::K_BLOBARRAY)) {
+        uintptr_t data = n.addr;
+        uint32_t count = t->count;
+        if (t->kind == gd::K_BLOBARRAY && !gd::blob_array(n.addr, &data, &count)) return nullptr;
+        nlohmann::json a = nlohmann::json::array();
+        for (uint32_t i = 0; i < count && i < 65536; ++i) a.push_back(reinterpret_cast<const uint8_t*>(data)[i]);
+        return a;
+    }
+    return plain(gd::node_json(n, depth));
+}
 }  // namespace
 
 bool root(const void* data, size_t len, const std::string& type, Node* out, std::string* why) {
@@ -51,14 +67,14 @@ bool elements(const Node& at, const std::string& path, std::vector<Node>* out, s
 }
 
 bool member(const Node& at, const std::string& path, nlohmann::json* out, std::string* why) {
-    if (path.empty()) return *out = plain(gd::node_json(node_of(at), kDepth)), true;
+    if (path.empty()) return *out = json_of(node_of(at), kDepth), true;
     std::vector<gd::Resolved> rs;
     std::string err;
     if (!gd::resolve(at.tmpl ? gd::Root::Template : gd::Root::Plain, node_of(at), path, &rs, &err) || rs.empty())
         return *why = err.empty() ? path + ": nothing there" : err, false;
-    if (rs.size() == 1) return *out = plain(gd::node_json(rs[0].node, kDepth)), true;
+    if (rs.size() == 1) return *out = json_of(rs[0].node, kDepth), true;
     nlohmann::json a = nlohmann::json::array();
-    for (const gd::Resolved& r : rs) a.push_back(plain(gd::node_json(r.node, kDepth)));
+    for (const gd::Resolved& r : rs) a.push_back(json_of(r.node, kDepth));
     *out = std::move(a);
     return true;
 }

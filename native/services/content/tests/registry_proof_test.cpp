@@ -19,6 +19,7 @@ namespace kc {
 bool guid_parse(const std::string& s, uint8_t out[16]);
 namespace rbtest {
 void balance_type();  // keen::BalancingTable {playerLevelCap u32 +0, skillPointsPerLevel u32 +4}, 8 bytes
+void byte_table_type();  // keen::ByteTable {altarsPerFlameLevel u8[21] +0, playerLevelCap u32 +24}, 28 bytes
 }
 }  // namespace kc
 
@@ -163,6 +164,33 @@ void boot_sample_on_bytes() {
     check(none.contains("error"), "a field without a row is an error sample");
 }
 
+// The balance table's per-flame-level altar and water-source counts are arrays of 21 bytes: the registry reads and writes
+// them as lists of numbers, never as the gamedata dumps' "(21 bytes)".
+void byte_array_lists() {
+    kc::rbtest::byte_table_type();
+    const Schema schema = generated_schema();
+    std::vector<uint8_t> base(28, 0);
+    for (int i = 0; i < 21; ++i) base[static_cast<size_t>(i)] = static_cast<uint8_t>(i < 4 ? 1 + i : 6);
+    const uint32_t cap = 50;
+    std::memcpy(base.data() + 24, &cap, 4);
+    json m;
+    std::string why;
+    check(model::bytes_member(base.data(), base.size(), "keen::ByteTable", "altarsPerFlameLevel", &m, &why) && m.is_array() && m.size() == 21 &&
+              m[0] == 1 && m[3] == 4 && m[20] == 6,
+          "a byte array member reads as its 21 numbers: " + m.dump() + " " + why);
+    std::vector<std::string> errs;
+    map::RegistryMap reg;
+    map::load_common(json::parse(R"({"regmap": 1, "registry": "balance",
+        "entries": {"kind": "single", "resourceType": "keen::ByteTable", "resourceGuid": "82706b40-61b1-4b8f-8b23-dcec6971bda1", "unnamed": "balance"},
+        "rows": {"altarsPerFlameLevel": {"paths": ["altarsPerFlameLevel"], "conv": "list", "read": "restart", "backend": "boot"}}})"), &reg, &errs);
+    check(errs.empty(), "the byte table's regmap loads");
+    const json s = proof::boot_sample(reg, *schema.registry("balance"), "altarsPerFlameLevel", "game:balance", key_of(kBalance, "keen::ByteTable"),
+                                      "keen::ByteTable", base);
+    check(!s.contains("error"), "the list round-trips in the boot generation: " + s.dump());
+    check(s["read"].size() == 21 && s["read"][0] == 1 && s["probe"][0] == 2 && s["readBack"] == s["probe"], "read, probe, read back: " + s.dump());
+    check(s["rawAfter"][0][0] == 2 && s["rawBefore"][0][0] == 1 && s["bytesBefore"] == s["bytesAfter"], "raw before and after, bytes back");
+}
+
 void with_the_request() {
     kc::rbtest::balance_type();
     const Schema schema = generated_schema();
@@ -220,6 +248,7 @@ int main() {
                                                        {"digest_contract", digest_contract},
                                                        {"probes", probes},
                                                        {"boot_sample_on_bytes", boot_sample_on_bytes},
+                                                       {"byte_array_lists", byte_array_lists},
                                                        {"with_the_request", with_the_request}};
     for (const auto& [name, fn] : groups) {
         try {

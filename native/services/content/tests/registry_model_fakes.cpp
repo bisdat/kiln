@@ -140,6 +140,19 @@ void balance_type() {
     bal.fields = {{"playerLevelCap", reinterpret_cast<uintptr_t>(&u32), 0}, {"skillPointsPerLevel", reinterpret_cast<uintptr_t>(&u32), 4}};
     named()["keen::BalancingTable"] = &bal;
 }
+// keen::ByteTable {altarsPerFlameLevel u8[21] +0, playerLevelCap u32 +24}: the real balance table's per-level counts are byte
+// arrays of more than 16 elements, which the gamedata dumps show as "(21 bytes)"
+void byte_table_type() {
+    using namespace kc::gd;
+    static TType u8, u32, arr, tab;
+    auto rec = [](const TType& t) { return reinterpret_cast<uintptr_t>(&t); };
+    u8.name = u8.brief = "uint8", u8.kind = K_U8, u8.size = 1;
+    u32.name = u32.brief = "uint32", u32.kind = K_U32, u32.size = 4;
+    arr.name = arr.brief = "keen::StaticArray<uint8,21>", arr.kind = K_ARRAY, arr.size = 21, arr.count = 21, arr.inner_rec = rec(u8);
+    tab.name = "keen::ByteTable", tab.brief = "ByteTable", tab.kind = K_STRUCT, tab.size = 28;
+    tab.fields = {{"altarsPerFlameLevel", rec(arr), 0}, {"playerLevelCap", rec(u32), 24}};
+    named()["keen::ByteTable"] = &tab;
+}
 }  // namespace rbtest
 }  // namespace kc
 
