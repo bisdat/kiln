@@ -7,7 +7,8 @@
 //   - probes: another value the schema allows, per kind;
 //   - a boot-generation sample on a resource's bytes by the boot back-end itself: read, probe written, read back, raw members,
 //     composed again without the probe (the base's bytes);
-//   - with the request: the boot suite and the values export written, in the formats kilnctl reads.
+//   - with the request: the boot suite and the values export written, in the formats kilnctl reads; the boot suite also reads
+//     the read-only rows of the registries without a boot row (the first entry that reads a value; none that reads: no sample).
 #include <cstdio>
 #include <cstring>
 #include <stdexcept>
@@ -66,13 +67,17 @@ struct TreeView final : kiln::boot_view::BaseView {
     }
 };
 
-// The registries of the test: items (a live and a read-only row) and balance (one resource; a boot and a read-only row).
+// The registries of the test: items (a live row, read-only rows, an unmapped row) and balance (one resource; a boot and a
+// read-only row).
 map::RegMap regmap() {
     std::vector<std::string> errs;
     map::RegMap rm;
     map::load_common(json::parse(R"({"regmap": 1, "registry": "items",
         "entries": {"kind": "resource", "resourceType": "keen::ItemInfo", "name": "debugName", "guid": "objectId", "id": "itemId"},
         "rows": {"maxStack": {"paths": ["maxStackSize"], "conv": "int", "read": "worldLoad", "backend": "live"},
+                 "levels.min": {"paths": ["maxStackSize"], "conv": "int", "read": "now", "backend": "none"},
+                 "levels.max": {"paths": ["levelCap"], "conv": "int", "read": "now", "backend": "none"},
+                 "rolled": {"paths": ["nowhere"], "conv": "bool", "read": "now", "backend": "none"},
                  "comfort": {"state": "unmapped", "reason": "not mapped yet"}}})"), &rm.registries["items"], &errs);
     map::load_common(json::parse(std::string(R"({"regmap": 1, "registry": "balance",
         "entries": {"kind": "single", "resourceType": "keen::BalancingTable", "resourceGuid": ")") + kBalance + R"(", "unnamed": "balance"},
@@ -200,6 +205,7 @@ void with_the_request() {
     };
     item(1, "Wood_Logs", 10);
     item(2, "Plank", 20);
+    view.values[g(2)]["levelCap"] = 7;  // only the second item has it: the first reads no levels.max
     view.add("keen::BalancingTable", kBalance, {{"playerLevelCap", 55}, {"skillPointsPerLevel", 4}});
     std::map<std::string, std::string> files;
     proof::Env e;
@@ -227,10 +233,20 @@ void with_the_request() {
     check(rt["format"] == 1 && rt["kind"] == "registry-roundtrip" && rt["generation"] == "boot" && rt["exeSha256"] == kExe &&
               rt["regmapDigest"] == "8ddfafff9317e303bff4f9f2c2f4a5eb1575391c0a58b1e30317e032f829d019",
           "the boot suite's head: " + rt.dump().substr(0, 300));
-    check(rt["samples"].size() == 2, "the boot field and the read-only field of balance (items has no boot field): " + rt["samples"].dump());
+    check(rt["samples"].size() == 4, "balance's boot and read-only fields, and the read-only items fields that read: " + rt["samples"].dump());
     bool probed = false;
-    for (const json& s : rt["samples"]) probed |= s["field"] == "balance.levelCap" && s["readBack"] == 56;
+    std::map<std::string, json> by;
+    for (const json& s : rt["samples"]) probed |= s["field"] == "balance.levelCap" && s["readBack"] == 56, by[s["field"]] = s;
     check(probed, "levelCap round-tripped in the boot generation");
+    const json& lo = by["items.levels.min"];
+    check(lo["entry"] == "game:wood_logs" && lo["read"] == 10 && lo["rawBefore"] == json::array({10}) && !lo.contains("probe") &&
+              !lo.contains("error") && lo["element"].is_null(),
+          "a read-only items field read from the first entry, raw by its member, never written: " + lo.dump());
+    const json& hi = by["items.levels.max"];
+    check(hi["entry"] == "game:plank" && hi["read"] == 7 && hi["rawBefore"] == json::array({7}) && !hi.contains("probe"),
+          "an entry that reads no value is passed over for the next: " + hi.dump());
+    check(!by.count("items.rolled") && !by.count("items.maxStack"),
+          "a read-only field no entry reads has no sample (unproven, not an error); a live field is the live suite's");
     const json v = json::parse(files.at("proof/values-server.json"));
     check(v["kind"] == "registry-values" && v["base"]["origin"] == "live" && v["base"]["writer"] == "none" && v["regmapDigest"] == rt["regmapDigest"],
           "the values export's head: " + v.dump().substr(0, 300));

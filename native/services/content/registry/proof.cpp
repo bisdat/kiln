@@ -24,6 +24,56 @@ std::pair<std::string, std::string> element_of(const std::string& field) {
     return {field.substr(0, at), field.substr(at + 3)};
 }
 
+// The read-only rows (back-end none) of a registry without a boot row, from the base: read through the schema (a list field's
+// first element) from the first of up to 64 entries that reads a value, raw by the base's members (a structured value is not
+// one member: the SHA-256 of the entry's resource, as the live suite gives it). An entry whose raw view cannot be read is passed
+// over; no entry that reads: no sample (kilnctl: unproven, never an error).
+void read_only(model::Model& m, model::Source& src, const Env& e, const map::RegistryMap& reg, const RegistrySpec& rs, json* samples) {
+    std::string why;
+    const std::vector<model::Entry>* es = m.entries(reg.registry, &why);
+    if (!es) return;
+    for (const auto& [f, row] : reg.rows) {
+        if (!mapped(row) || row.backend != map::Backend::None || !rs.field(f)) continue;
+        const auto [list, leaf] = element_of(f);
+        const std::string field = list.empty() ? f : list;
+        const auto wit = reg.rows.find(field);
+        if (wit == reg.rows.end() || wit->second.paths.empty()) continue;
+        static const char* const kCompared[] = {"int", "float", "bool", "time", "enum", "flags", "optionalEnum"};
+        const bool compared = std::find(std::begin(kCompared), std::end(kCompared), row.conv) != std::end(kCompared);
+        for (size_t i = 0; i < es->size() && i < 64; ++i) {
+            std::optional<Value> v = m.value(reg.registry, i, field, &why);
+            if (v && !list.empty()) {
+                const Value* l = v->kind == Value::List && !v->list.empty() ? v->list[0].leaf(leaf) : nullptr;
+                v = l ? std::optional<Value>(*l) : std::nullopt;
+            }
+            if (!v) continue;
+            json read = v->to_json();
+            if (read.is_null() || (read.is_array() && read.empty())) continue;
+            const model::Entry& en = (*es)[i];
+            std::vector<uint8_t> bytes;
+            const std::string sha = e.bytes && e.bytes(en.place.key, &bytes, &why) ? sha_of(bytes) : std::string();
+            json raw = json::array();
+            bool all = true;
+            for (const std::string& p : row.paths) {
+                json mv;
+                std::string w;
+                if (!compared) {
+                    all = all && !sha.empty();
+                    raw.push_back("resource:" + sha);
+                }
+                else if (src.member(en.place, list.empty() ? p : wit->second.paths[0] + "[0]." + p, &mv, &w) && !mv.is_null()) raw.push_back(mv);
+                else all = false;
+            }
+            if (!all) continue;
+            json s = {{"field", reg.registry + "." + f}, {"entry", en.id}, {"element", list.empty() ? json(nullptr) : json(0)}, {"read", read},
+                      {"rawBefore", raw}};
+            if (!sha.empty()) s["bytesBefore"] = sha;
+            samples->push_back(std::move(s));
+            break;
+        }
+    }
+}
+
 json roundtrip_doc(const Env& e, const std::string& generation, const std::string& digest, json samples) {
     return {{"format", 1}, {"kind", "registry-roundtrip"}, {"side", e.side}, {"exeSha256", e.exe_sha256}, {"generation", generation},
             {"regmapDigest", digest}, {"samples", std::move(samples)}};
@@ -196,7 +246,11 @@ std::vector<std::string> run(const Env& e) {
     for (const auto& [name, reg] : rm.registries) {
         const RegistrySpec* rs = e.schema->registry(name);
         const bool boot = std::any_of(reg.rows.begin(), reg.rows.end(), [](const auto& r) { return mapped(r.second) && r.second.backend == map::Backend::Boot; });
-        if (!rs || !boot) continue;
+        if (!rs) continue;
+        if (!boot) {
+            read_only(m, *src, e, reg, *rs, &samples);
+            continue;
+        }
         auto each = [&](auto fn) {
             for (const auto& [f, row] : reg.rows)
                 if (mapped(row) && (row.backend == map::Backend::Boot || row.backend == map::Backend::None)) fn(f);

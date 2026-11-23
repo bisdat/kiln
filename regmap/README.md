@@ -125,7 +125,8 @@ Both formats are format 1; kilnctl refuses another kind or format.
 `content/registry/proof/request.json` into its copy. With that file, and only then: kiln.content
 (`native/services/content/registry/proof.cpp`) writes `roundtrip-<side>-boot.json` and `values-<side>.json` at
 resources-ready, before any boot patch (boot fields round-tripped in memory on a copy of their resource by the boot
-back-end itself; every entry exported through the schema from the base); `mods/tests/registry-proof-test` writes
+back-end itself; the read-only fields of the other registries read from the base, the first entry that reads a value;
+every entry exported through the schema from the base); `mods/tests/registry-proof-test` writes
 `roundtrip-<side>-live.json` at the world's first content ready (each mapped live field of one entry that reads:
 kiln.registry.live begin/submit/commit/read/revert, raw reads by the game's member paths, the resource bytes hashed before
 the write and after the revert; a structured value's raw view is its resource's digest). A field it finds no probe for

@@ -11,7 +11,9 @@
 //                               generation made in memory on a copy of the entry's resource by the boot back-end itself
 //                               (boothook::write): read through the schema, a probe written, read back, the row's members
 //                               read raw through the game's reflection, and the generation composed again without the probe
-//                               (the bytes are the base's again)
+//                               (the bytes are the base's again); and every read-only field of the other registries, read
+//                               from the base (the first entry that reads a value), raw by the base's members (a structured
+//                               value: its resource's SHA-256), never written
 //   values-<side>.json          registry-values format 1: every entry of every registry read through the schema from the
 //                               base (kiln.assets' live bytes at resources-ready, before Kiln's boot patches), with the
 //                               base's origin and writer
