@@ -198,11 +198,11 @@ pub fn deploy(inst: &Instance, from: Option<&Path>, samples: bool, build: bool) 
     kiln::deploy(inst, from, samples, build)
 }
 
-/// `kilnctl deploy --bundle`: the runtime bundle's server components through kiln_manage::install (a first deploy: the
-/// defaults; an update: the installed ones plus every new or newly default component not turned off, see
-/// install::resolve_components; `samples` adds samples), then the instance's policy in kiln/kiln.json (kept when the
-/// file exists, like deploy).
-pub fn deploy_bundle(inst: &Instance, zip: &Path, samples: bool) -> Result<()> {
+/// `kilnctl deploy --bundle`: the runtime bundle's server components (its zip, or the folder it was unpacked to) through
+/// kiln_manage::install (a first deploy: the defaults; an update: the installed ones plus every new or newly default
+/// component not turned off, see install::resolve_components; `samples` adds samples), then the instance's policy in
+/// kiln/kiln.json (kept when the file exists, like deploy).
+pub fn deploy_bundle(inst: &Instance, bundle: &Path, samples: bool) -> Result<()> {
     refuse_running(inst, "deploying")?;
     if !inst.exe().exists() {
         bail!("{} missing (kilnctl install {})", inst.exe().display(), inst.name);
@@ -217,11 +217,11 @@ pub fn deploy_bundle(inst: &Instance, zip: &Path, samples: bool) -> Result<()> {
         let options = kiln_manage::install::InstallOptions {
             installer: Some(format!("kilnctl {}", env!("CARGO_PKG_VERSION"))), ..Default::default()
         };
-        let r = kiln_manage::install::install_adding(&dirs, &g, zip, &options, &["samples".into()], &mut crate::bundle::Printer::new())
+        let r = kiln_manage::install::install_adding(&dirs, &g, bundle, &options, &["samples".into()], &mut crate::bundle::Printer::new())
             .map_err(|e| anyhow::anyhow!(e.message))?;
         crate::bundle::print_receipt(&r, &g.path);
     } else {
-        crate::bundle::install_into(&g, zip, None, false)?;
+        crate::bundle::install_into(&g, bundle, None, false)?;
     }
     // the bundle's kiln.json is installed only when missing; the instance's policy goes in either way (in place)
     let kiln_json = kiln::kiln_dir(inst).join("kiln.json");

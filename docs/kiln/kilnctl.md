@@ -88,13 +88,13 @@ runtime opens assemblies through it, and every managed load then fails with `0x8
 | `gate <name> [--baseline] [--tests a,b] [--gate-port N]` | Boot `<name>-gate` (copy of the instance, policy any, self tests) and compare with the baseline |
 | `list` | Instances, ports, running or not |
 | `report [<name>] [--dir D] [--out FILE] [--print]` | A support report of an instance, a server or client folder, or (neither) the client Steam knows: one zip (`./kiln-report-<date>.zip`) with kiln.log, proxy.log, the state files, the profile, chain.ini, the receipt, listings of the folder and `summary.txt` with findings; home folder, user and machine names, Steam ids and IP addresses replaced. Prints the short summary. `--print`: summary.txt to the terminal, no zip. Only reads ([launcher/support-report.md](launcher/support-report.md)) |
-| `deploy <name> --bundle ZIP [--samples]` | Installs a runtime bundle instead of running deploy-server.sh: `kiln_manage::install` with the server components (`core`, `sigdb-server`, `admin`; `--samples` adds `samples`), receipt `kiln/.install.json`, then the instance's policy in `kiln/kiln.json` (in place). The tree equals deploy-server.sh's (tools/package/parity.sh) |
+| `deploy <name> --bundle BUNDLE [--samples]` | Installs a runtime bundle (its zip, or the folder it was unpacked to, below) instead of running deploy-server.sh: `kiln_manage::install` with the server components (`core`, `sigdb-server`, `admin`; `--samples` adds `samples`), receipt `kiln/.install.json`, then the instance's policy in `kiln/kiln.json` (in place). The tree equals deploy-server.sh's (tools/package/parity.sh) |
 | `bundle create STAGE [--out DIR] [--git SHA] [--epoch S]` | Zips a staging folder (`tools/package/stage.sh`) into `kiln-runtime-<VERSION>+<yyyymmdd>.<git>.zip`, deterministically (defaults: the source tree's HEAD and its commit time), then verifies it |
-| `bundle verify ZIP` | Every entry against `kiln-runtime.json` (size, sha256, no extra or unsafe entries); prints the components and verified builds |
-| `bundle install ZIP --dir D [--components a,b] [--switch-from-shroudforge] [--real]` | Install or upgrade into a game folder (client or server by its exe); a folder inside a Steam library needs `--real` |
+| `bundle verify BUNDLE` | Every entry against `kiln-runtime.json` (size, sha256, no extra or unsafe entries, no links); prints the components and verified builds. `BUNDLE`: the zip or the folder it was unpacked to (below) |
+| `bundle install BUNDLE --dir D [--components a,b] [--switch-from-shroudforge] [--real]` | Install or upgrade into a game folder (client or server by its exe); a folder inside a Steam library needs `--real` |
 | `bundle uninstall --dir D [--real]` | Removes the bundle's unchanged files, restores what it replaced byte-identically, keeps `kiln/` |
 | `client status [--dir D]` | The client Kiln sees (default: the Steam client, read-only): proxy class, receipt, chain.ini, active profile, running, play-once pending, Steam launch options and the `WINEDLLOVERRIDES` advice, the last `state/boot.json`. Exit 0 running, 3 not |
-| `client install ZIP`, `client uninstall` `[--dir D] [--real]` | `bundle install/uninstall` for the client; without `--dir` the Steam client folder, which needs `--real` |
+| `client install BUNDLE`, `client uninstall` `[--dir D] [--real]` | `bundle install/uninstall` for the client; without `--dir` the Steam client folder, which needs `--real` |
 | `client activate PROFILE \| --deactivate [--dir D] [--real]` | Profile activation: `kiln/profile.json`, chain.ini `[profile]`, `<configDir>/native.json` (Z: or copy mode) |
 | `client play-once vanilla\|no-mods\|profile\|clear [--profile P] [--dir D] [--real]` | Writes `kiln/play-once.ini` for the next start (profile: also `kiln/profile.once.json` + `kiln/chain/once.ini`). Never starts the game and never touches Steam's config |
 | `tick-compare BEFORE AFTER [--json]` | The before/after tick-cost report of two `tick-stats.jsonl` files (T12, below): per-world step time (the whole step, Pre + game step + Post, and the game step alone) and steps over budget, per-mod Pre/Post time (mean, p99, max) and share of the step, and per-mod task CPU/wall time, apply time and deferred items from the `tasks` section (T4) when a file has one. Text tables by default; `--json` prints one JSON document (`{ok, before, after, worlds, mods, tasks, notes}`). Malformed lines are skipped and counted; a mod or world of one file only is reported as such. Reads only the two files |
@@ -103,6 +103,19 @@ runtime opens assemblies through it, and every managed load then fails with `0x8
 | `library replace-dll native:ID FILE --profile P [--confirm]` | (dev.29) Makes a new Library build of a native DLL mod with one DLL swapped, as the launcher's "Replace DLL…" does; the build before it is kept for a roll back. `--confirm` accepts the two questions (another file name; another kind of DLL). Saves the profile only: the game folder follows at the profile's next activation ([launcher/catalog.md](launcher/catalog.md), "Replace DLL…") |
 | `pack build\|verify\|install\|update\|diff\|undo\|uninstall\|list\|server ...` | Crucible packs (`.kilnpack`): build one from a launcher profile, check one, install it as an instance, update an instance (three-way merge of its settings, `--resolve PATH#KEY=pack\|mine`), undo, remove, put a pack's server part on a server folder ([launcher/crucible.md](launcher/crucible.md)). `install`, `update` and `server` need `--yes`: a pack runs code from other people |
 | `profile create NAME [--copy-from P]`, `profile add P kind:id[@version]... [--disabled]`, `profile show P [--side S]` | Launcher profiles; `show` prints the resolved load order |
+
+### Runtime bundles: the zip or its folder
+Every command that takes a runtime bundle (`bundle verify`, `bundle install`, `client install`, `deploy --bundle`)
+takes its zip or the folder it was unpacked to: a folder is a bundle when `kiln-runtime.json` is at its root. The Nexus
+Mods runtime file carries the bundle that way (`kiln-runtime-<version>/` next to kilnctl), because Nexus cannot scan an
+archive inside an archive; GitHub and frostdev.io keep the zip. The folder is held to the zip's rules
+(`kiln_manage::bundle`, one set of checks for both): every listed file there with its size and sha256 (read through
+the same checked copy), nothing the manifest does not list, no unsafe name (the zip-slip guard), no link and no FIFO or
+other special file, and its file modes are never read (the archive inspector is installed 0755 as from the zip). Files
+a system or file manager adds (`.DS_Store`, `._*`, `__MACOSX/`, `Thumbs.db`, `ehthumbs.db`, `desktop.ini`) are
+refused like any other unlisted file; the message says what they are. Installing the folder gives the same files,
+`replaced[]` and uninstall as the zip; only the receipt's `runtime.sha256` (the zip's sha256) is left out, as there is
+no zip.
 
 ### Measuring a task change (tick-compare, T12)
 
