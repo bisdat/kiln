@@ -58,7 +58,7 @@ bool ModeBackend::stage(const Staged& st, uint32_t* reason, const char** text) {
         s->who = who;
         s->drops = 0;
     }
-    const uint64_t now = world_->now_ms();
+    const uint64_t now = world_->now_ns();
     Rev r;
     r.lease = st.lease;
     r.revision = st.revision;
@@ -71,15 +71,15 @@ bool ModeBackend::stage(const Staged& st, uint32_t* reason, const char** text) {
             free_if_idle(*s);
             return *reason = KILN_CAMERA_REASON_UNKNOWN_LEASE, false;
         }
-        r.start_ms = st.timing == KILN_CAMERA_RESTART_TIMELINE ? now : s->active.start_ms;
+        r.start_ns = st.timing == KILN_CAMERA_RESTART_TIMELINE ? now : s->active.start_ns;
     } else {
-        r.start_ms = now;
+        r.start_ns = now;
     }
     r.duration_ms = q.duration_ms;
     r.alive = st.alive;
     r.start_on_commit = !st.update || st.timing == KILN_CAMERA_RESTART_TIMELINE;
-    r.deadline_ms = r.start_on_commit ? std::numeric_limits<uint64_t>::max() : r.start_ms + q.duration_ms;
-    if (r.deadline_ms <= now) {
+    r.deadline_ns = r.start_on_commit ? std::numeric_limits<uint64_t>::max() : r.start_ns + uint64_t(q.duration_ms) * 1000000;
+    if (r.deadline_ns <= now) {
         free_if_idle(*s);
         *text = "the lease's clock goes on (Preserve) and the new duration is already over";
         return *reason = KILN_CAMERA_REASON_EXPIRED_UPDATE, false;
@@ -136,8 +136,8 @@ void ModeBackend::step() {
     const uint32_t epoch = core_->epoch(kServer);
     {
         std::lock_guard<std::mutex> lock(m_);
-        const uint64_t now = world_->now_ms();
-        now_ms_.store(now, std::memory_order_release);
+        const uint64_t now = world_->now_ns();
+        now_ns_.store(now, std::memory_order_release);
         stopped_.store(false, std::memory_order_release);
         live_epoch_.store(epoch, std::memory_order_release);
         for (Slot& s : slots_) {
@@ -162,14 +162,14 @@ void ModeBackend::step() {
                 free_if_idle(s);
                 continue;
             }
-            if (s.active.lease && now >= s.active.deadline_ms) {
+            if (s.active.lease && now >= s.active.deadline_ns) {
                 const KilnCameraLease id = s.active.lease;
                 if (s.ticket && s.ticket->lease == id) cut(s);
                 reports.push_back({Report::Ended, id, s.active.revision, KILN_CAMERA_END_EXPIRED, KILN_CAMERA_REASON_NONE, world_->step(), ""});
                 if (s.staged.lease == id) s.staged = Rev{};  // the core answers its update EXPIRED_UPDATE
                 s.active = Rev{};
             }
-            if (s.staged.lease && now >= s.staged.deadline_ms) {
+            if (s.staged.lease && now >= s.staged.deadline_ns) {
                 if (s.ticket && s.ticket->lease == s.staged.lease && s.ticket->revision == s.staged.revision) cut(s);
                 reports.push_back({Report::Rejected, s.staged.lease, s.staged.revision, KILN_CAMERA_REASON_EXPIRED_UPDATE, 0, 0, "the request's time ran out before it was written"});
                 s.staged = Rev{};
@@ -190,11 +190,11 @@ bool KILN_CALL ModeBackend::on_change(KilnEntity, void* data, uint32_t size, voi
     const Slot& s = self->slots_[t->slot];
     if (!data || size != kNccSize || s.cur_lease.load(std::memory_order_acquire) != t->lease ||
         s.cur_revision.load(std::memory_order_acquire) != t->revision || self->live_epoch_.load(std::memory_order_acquire) != t->epoch ||
-        (t->alive && !t->alive->load(std::memory_order_acquire)) || self->world_->now_ms() >= t->deadline_ms) {
+        (t->alive && !t->alive->load(std::memory_order_acquire)) || self->world_->now_ns() >= t->deadline_ns) {
         self->refusals_.fetch_add(1, std::memory_order_relaxed);
         return false;  // ended, replaced, expired or another world: the component stays as the game left it
     }
-    t->wrote_ms = self->world_->now_ms();
+    t->wrote_ns = self->world_->now_ns();
     std::memcpy(data, t->bytes, kNccSize);
     self->writes_.fetch_add(1, std::memory_order_relaxed);
     return true;
@@ -221,14 +221,14 @@ void ModeBackend::result(Ticket* t, const KilnWorldWriteResult& r) {
             delete t;  // retirement already invalidated it; Core::pre owns cancellation and its reason
             return;
         }
-        const uint64_t now = world_->now_ms();
-        now_ms_.store(now, std::memory_order_release);
+        const uint64_t now = world_->now_ns();
+        now_ns_.store(now, std::memory_order_release);
         const bool staged = s.staged.lease == t->lease && s.staged.revision == t->revision;
         const bool active = !staged && s.active.lease == t->lease && s.active.revision == t->revision;
         const uint64_t frame = world_->step();
         uint32_t status = r.status;
         // the guard said no to a write that is still current and in time: nothing outside could have changed it
-        if (status == KILN_WORLD_WRITE_REFUSED && (staged || active) && now < t->deadline_ms && t->epoch == live_epoch_.load()) status = KILN_WORLD_WRITE_FAULTED;
+        if (status == KILN_WORLD_WRITE_REFUSED && (staged || active) && now < t->deadline_ns && t->epoch == live_epoch_.load()) status = KILN_WORLD_WRITE_FAULTED;
         bool again = true;
         if (good(status)) {
             s.drops = 0;
@@ -236,8 +236,8 @@ void ModeBackend::result(Ticket* t, const KilnWorldWriteResult& r) {
                 // the first write of this revision is in the server state: Applied/Updated (an old holder ends first)
                 reports.push_back({Report::Committed, s.staged.lease, s.staged.revision, 0, 0, frame, ""});
                 if (s.staged.start_on_commit) {
-                    s.staged.start_ms = t->wrote_ms;
-                    s.staged.deadline_ms = t->wrote_ms + s.staged.duration_ms;
+                    s.staged.start_ns = t->wrote_ns;
+                    s.staged.deadline_ns = t->wrote_ns + uint64_t(s.staged.duration_ms) * 1000000;
                     s.staged.start_on_commit = false;
                 }
                 s.active = s.staged;
@@ -321,7 +321,7 @@ void ModeBackend::submit(Slot& s) {
     t->lease = r->lease;
     t->revision = r->revision;
     t->epoch = r->epoch;
-    t->deadline_ms = r->deadline_ms;
+    t->deadline_ns = r->deadline_ns;
     t->alive = r->alive;
     t->bytes[0] = 1;
     t->bytes[1] = r->camera_id;

@@ -65,7 +65,7 @@ struct FakeWorld : ModeWorld {
         uint64_t step = 0;
     };
     std::vector<Req> reqs;
-    uint64_t next_id = 1, now = 1000, steps = 0;
+    uint64_t next_id = 1, now = 1000, steps = 0, fraction_ns = 0;
     std::map<KilnEntity, Incarnation> players{{A, {1, 1}}, {B, {2, 1}}};
     std::map<KilnEntity, Bytes> ncc, stock{{A, {0, 7, 0}}, {B, {0, 9, 1}}};
     bool game_writes = true;               // the game's writer puts the stock bytes back every step
@@ -100,6 +100,7 @@ struct FakeWorld : ModeWorld {
         return true;
     }
     uint64_t now_ms() override { return now; }
+    uint64_t now_ns() override { return now * 1000000 + fraction_ns; }
     uint64_t step() override { return steps; }
     void log(int32_t, const std::string& t) override { logs.push_back(t); }
 
@@ -501,6 +502,20 @@ void test_timeline_begins_at_write() {
     CHECK(count("ended") == 0);
 }
 
+void test_submillisecond_origin() {
+    Rig r;
+    r.world.fraction_ns = 500000;
+    r.apply(kMod, A, 34, 2, 0, 1);
+    r.tick();  // first write at 1000.5 ms
+    r.world.now = 1001;
+    r.world.fraction_ns = 100000;  // elapsed 0.6 ms, not the authored 1 ms
+    r.tick();
+    CHECK(r.at(A) == kHeld);
+    r.world.fraction_ns = 600000;
+    r.tick();
+    CHECK(r.at(A) == r.world.stock[A]);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -508,11 +523,13 @@ int main(int argc, char** argv) {
         if (std::strcmp(argv[1], "retire") == 0) test_retire_before_next_pre();
         if (std::strcmp(argv[1], "expiry") == 0) test_expiry_inside_write();
         if (std::strcmp(argv[1], "timeline") == 0) test_timeline_begins_at_write();
+        if (std::strcmp(argv[1], "precision") == 0) test_submillisecond_origin();
         return 0;
     }
     test_retire_before_next_pre();
     test_expiry_inside_write();
     test_timeline_begins_at_write();
+    test_submillisecond_origin();
     test_maintained_and_isolated();
     test_update_and_supersede();
     test_end_cancels_queued_and_no_late_revision();

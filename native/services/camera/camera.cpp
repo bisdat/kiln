@@ -71,9 +71,11 @@ struct ServiceModeWorld : kcam::ModeWorld {
         *out = {p.joined_step, p.handle};
         return true;
     }
-    uint64_t now_ms() override {
-        // MSVC's steady_clock is QueryPerformanceCounter, independent of simulation time and pause.
-        return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
+    uint64_t now_ms() override { return now_ns() / 1000000; }
+    uint64_t now_ns() override {
+        // MSVC's steady_clock is QueryPerformanceCounter. Keep integer nanoseconds through deadline comparisons:
+        // truncating the origin to milliseconds would shorten a 1 ms lease by up to almost a millisecond.
+        return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
     }
     uint64_t step() override { return server_step; }
     void log(int32_t level, const std::string& text) override { g_env.log(level, text); }
