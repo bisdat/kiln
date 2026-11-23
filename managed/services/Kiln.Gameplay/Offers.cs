@@ -14,6 +14,9 @@ namespace Kiln;
 /// <summary>Prompt words (loca tag ids of the game) for <see cref="Offers.Add"/>. Values from EMF's emf_api.h (MIT).</summary>
 public static class OfferVerbs
 {
+    /// <summary>The loca tag id of the game's prompt word with this field's name (Use, Open, Talk, Read, Sit, Sleep,
+    /// Pet, Touch, Activate, Press, Enter, Inspect, Take, Collect, Rest, Release). Pass it as <c>verb</c> to
+    /// <see cref="Offers.Add"/>.</summary>
     public const uint Use = 0x26437C13u, Open = 0x0C2E4515u, Talk = 0xD9861C4Bu, Read = 0x631937DCu, Sit = 0xDFB7E778u,
         Sleep = 0xC4E0F1CBu, Pet = 0x6D5B6297u, Touch = 0x18A9222Cu, Activate = 0x811C5D9Eu, Press = 0x6F362030u,
         Enter = 0x785FF179u, Inspect = 0x260798EBu, Take = 0x33E582F6u, Collect = 0x9095E8BDu, Rest = 0x62F329EBu,
@@ -25,6 +28,7 @@ public static class OfferSequences
 {
     /// <summary>A short touch, no screen (the default).</summary>
     public const uint Touch = 0x3E5189BFu;
+    /// <summary>The button press sequence.</summary>
     public const uint ButtonPress = 0xAF614FD8u;
 }
 
@@ -42,6 +46,8 @@ public sealed record OfferOptions
 }
 
 /// <summary>Someone accepted an offer of yours.</summary>
+/// <param name="Player">The player who accepted the offer.</param>
+/// <param name="Entity">The entity the offer is on.</param>
 public readonly record struct OfferAccepted(EntityId Player, EntityId Entity);
 
 /// <summary>Where an offer stands.</summary>
