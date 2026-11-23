@@ -97,6 +97,8 @@ public:
 
     // The capability bits the hooks and the sampler make possible (KILN_CAMERA_CAP_LOCAL_*). Setup, or the client Pre.
     void set_serving(uint64_t bits) { serving_.store(bits, std::memory_order_release); }
+    // A write or the capture faulted in this client world: no visual write until the next one. Any thread.
+    bool faulted() const { return write_fault_.load(std::memory_order_acquire) || frames_->faulted(); }
 
     // ---- Backend ----
     uint64_t caps() const override;

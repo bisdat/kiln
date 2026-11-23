@@ -182,6 +182,7 @@ void report_rows() {
         if (have & bit) row(name, true, 0, "");
         else if (client_only && !g_client_side) row(name, false, KILN_CAP_REASON_WRONG_SIDE, kClientOnly);
         else if (!writes) row(name, false, KILN_CAP_REASON_SERVICE_OLDER, kNoObserver);
+        else if (uint32_t why = 0; const char* text = client_only ? kcam::local_why(bit, &why) : nullptr) row(name, false, why, text);
         else row(name, false, KILN_CAP_REASON_SERVICE_MISSING, kNoBackend);
     };
     write_row("camera.server_mode", mode, KILN_CAMERA_CAP_SERVER_MODE, false);
@@ -192,6 +193,7 @@ void report_rows() {
     write_row("camera.remote", remote, KILN_CAMERA_CAP_REMOTE, false);
     if (local & KILN_CAMERA_CAP_RENDERED_SNAPSHOT) row("camera.rendered_snapshot", true, 0, "");
     else if (!g_client_side) row("camera.rendered_snapshot", false, KILN_CAP_REASON_WRONG_SIDE, kClientOnly);
+    else if (uint32_t why = 0; const char* text = kcam::local_why(KILN_CAMERA_CAP_RENDERED_SNAPSHOT, &why)) row("camera.rendered_snapshot", false, why, text);
     else row("camera.rendered_snapshot", false, KILN_CAP_REASON_SERVICE_MISSING, kNoBackend);
     row("camera.resource_profile", false, KILN_CAP_REASON_POLICY, "reserved: stock camera resource profiles are not part of kiln.camera v1");
 }

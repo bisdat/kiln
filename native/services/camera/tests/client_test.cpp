@@ -102,10 +102,14 @@ void available(const char* name) {
     if (r.state != KILN_CAP_AVAILABLE) std::fprintf(stderr, "  row %s: state %u reason %u '%s'\n", name, r.state, r.reason, r.text.c_str());
     CHECK(r.state == KILN_CAP_AVAILABLE);
 }
-void unavailable(const char* name, uint32_t, const char* = nullptr) {
+void unavailable(const char* name, uint32_t reason, const char* words = nullptr) {
     const Row& r = rows[name];
-    if (r.state != KILN_CAP_UNAVAILABLE) std::fprintf(stderr, "  row %s: state %u reason %u '%s'\n", name, r.state, r.reason, r.text.c_str());
+    if (r.state != KILN_CAP_UNAVAILABLE || (reason != kAnyReason && r.reason != reason))
+        std::fprintf(stderr, "  row %s: state %u reason %u '%s'\n", name, r.state, r.reason, r.text.c_str());
     CHECK(r.state == KILN_CAP_UNAVAILABLE);
+    CHECK(reason == kAnyReason || r.reason == reason);
+    CHECK(!words || r.text.find(words) != std::string::npos);
+    CHECK(r.text.find("does not have it yet") == std::string::npos);  // a reason, never "not built"
 }
 
 // ---- kiln.client: the local player ----

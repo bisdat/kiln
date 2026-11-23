@@ -19,6 +19,7 @@
 
 #include "render_tx.h"
 #include "sampler.h"
+#include "services/kiln_caps.h"
 #include "services/kiln_client.h"
 #include "services/kiln_hooks.h"
 #include "services/kiln_types.h"
@@ -144,6 +145,26 @@ std::unique_ptr<LocalBackend> g_backend;
 bool g_sampling = false;    // GetComponent, kiln.client and RenderTransform's layout are there
 uint64_t g_serving = 0;     // the local bits the hooks and the sampler allow in a healthy world
 
+// Why each client bit is off from the start (index: the bit's position, 1..5), for its row.
+struct Why {
+    uint32_t reason = 0;
+    std::string text;
+};
+Why g_why[6];
+int bit_index(uint64_t bit) {
+    for (int i = 1; i < 6; ++i)
+        if (bit == (uint64_t(1) << i)) return i;
+    return 0;
+}
+// The first reason a bit gets is the one its row shows.
+void why_off(uint64_t bits, uint32_t reason, const std::string& text) {
+    for (int i = 1; i < 6; ++i)
+        if ((bits >> i & 1) && !g_why[i].reason) g_why[i] = Why{reason, text};
+}
+constexpr uint64_t kWriteBits = KILN_CAMERA_CAP_LOCAL_POSE | KILN_CAMERA_CAP_LOCAL_FOV | KILN_CAMERA_CAP_LOCAL_PROFILE | KILN_CAMERA_CAP_LOCAL_SHAKE;
+constexpr uint64_t kSampledBits = KILN_CAMERA_CAP_LOCAL_POSE | KILN_CAMERA_CAP_LOCAL_PROFILE | KILN_CAMERA_CAP_LOCAL_SHAKE;
+constexpr uint64_t kClientBits = kWriteBits | KILN_CAMERA_CAP_RENDERED_SNAPSHOT;
+
 // keen::ecs::RenderTransform as kiln.types reflects it: 176 bytes, a 56-byte WorldTransform `transform` at +0 with the
 // position (three s64) at +0, the orientation at +24 and the scale at +40. The sampler copies those 52 bytes only.
 std::string_view sv(KilnStr s) { return s.ptr ? std::string_view(s.ptr, s.len) : std::string_view(); }
@@ -229,11 +250,12 @@ void KILN_CALL on_world(const KilnWorldEvent* e, void*) {
 }
 
 // A mid hook through the table's mid2 slot, asked for by size (an older core's table may end earlier than this
-// build's; the full-size helper would refuse it).
-bool install(const KilnHooksApi* hooks, const char* symbol, KilnMidFn fn, const char* label) {
+// build's; the full-size helper would refuse it). `bits`: the client bits that are off without it.
+bool install(const KilnHooksApi* hooks, const char* symbol, KilnMidFn fn, const char* label, uint64_t bits) {
     uintptr_t at = 0;
     if (g_api->symbol(str(symbol), &at) != KILN_OK || !at) {
         logf(KILN_LOG_WARN, "camera: %s is not resolved on this game build", symbol);
+        why_off(bits, KILN_CAP_REASON_SYMBOL_MISSING, std::string("symbol ") + symbol + ": not resolved on this game build");
         return false;
     }
     KilnHookOrder order{};
@@ -242,7 +264,10 @@ bool install(const KilnHooksApi* hooks, const char* symbol, KilnMidFn fn, const 
     order.label = str(label);
     KilnHandle h = 0;
     const KilnResult rc = hooks->mid2(g_owner, at, &order, fn, nullptr, &h);
-    if (rc != KILN_OK) logf(KILN_LOG_WARN, "camera: kiln.hooks refused the hook at %s (%d)", symbol, static_cast<int>(rc));
+    if (rc != KILN_OK) {
+        logf(KILN_LOG_WARN, "camera: kiln.hooks refused the hook at %s (%d)", symbol, static_cast<int>(rc));
+        why_off(bits, KILN_CAP_REASON_FAULTED, std::string("kiln.hooks refused the hook at ") + symbol);
+    }
     return rc == KILN_OK;
 }
 
@@ -257,13 +282,19 @@ void local_start(const KilnApi* api, KilnOwner owner, Core* core, bool client_si
     RenderLayout layout;
     std::string why;
     const bool laid_out = RenderLayout::make([](const char* n, int64_t* out) { return g_api->constant(str(n), out) == KILN_OK; }, &layout, &why);
-    if (!laid_out) logf(KILN_LOG_WARN, "camera: the renderer's layout does not check out (%s): the client camera is off", why.c_str());
+    if (!laid_out) {
+        logf(KILN_LOG_WARN, "camera: the renderer's layout does not check out (%s): the client camera is off", why.c_str());
+        why_off(kClientBits, KILN_CAP_REASON_SYMBOL_MISSING, "the renderer's camera layout on this game build: " + why);
+    }
     g_frames.set_layout(laid_out ? layout : RenderLayout{});
 
     const auto* hooks = static_cast<const KilnHooksApi*>(api->service(str(KILN_HOOKS_SERVICE), 2));
     constexpr size_t kMid2End = offsetof(KilnHooksApi, mid2) + sizeof(void*);
     const bool mid2 = hooks && hooks->header.size >= kMid2End && hooks->mid2;
-    if (!mid2) logf(KILN_LOG_WARN, "camera: kiln.hooks has no ordered mid hooks: the client camera is off");
+    if (!mid2) {
+        logf(KILN_LOG_WARN, "camera: kiln.hooks has no ordered mid hooks: the client camera is off");
+        why_off(kClientBits, KILN_CAP_REASON_SERVICE_OLDER, "kiln.hooks has no ordered mid hooks (mid2)");
+    }
 
     // the local player and the sampler's GetComponent (the core's resolved symbol; no hook of its own)
     g_client = static_cast<const KilnClientApi*>(api->service(str(KILN_CLIENT_SERVICE), KILN_CLIENT_VERSION));
@@ -271,24 +302,42 @@ void local_start(const KilnApi* api, KilnOwner owner, Core* core, bool client_si
     std::string layout_why;
     g_sampling = g_client && g_client->header.size >= offsetof(KilnClientApi, state) + sizeof(void*) && g_client->state &&
                  api->symbol(str("GetComponent"), &get_component) == KILN_OK && get_component && render_transform_layout(&layout_why);
-    if (g_sampling) g_source.fn = reinterpret_cast<GetComponentFn>(get_component);
-    else logf(KILN_LOG_WARN, "camera: the client sampler is off (%s): no path, follow profile or shake", layout_why.empty() ? "no GetComponent or kiln.client" : layout_why.c_str());
+    if (g_sampling) {
+        g_source.fn = reinterpret_cast<GetComponentFn>(get_component);
+    } else {
+        const char* missing = !g_client ? "kiln.client is not here" : !get_component ? "symbol GetComponent: not resolved on this game build" : nullptr;
+        logf(KILN_LOG_WARN, "camera: the client sampler is off (%s): no path, follow profile or shake", missing ? missing : layout_why.c_str());
+        // checked after the hooks below: a missing hook is the first reason of those rows
+        layout_why = missing ? missing : "the player's position cannot be read: " + layout_why;
+    }
 
     KilnHandle h = 0;
     const bool lifecycle = api->subscribe_world(owner, &on_world, nullptr, &h) == KILN_OK;
+    if (!lifecycle) why_off(kClientBits, KILN_CAP_REASON_SERVICE_OLDER, "the client world's start and stop cannot be followed");
     const bool snapshot_row = api->feature(str("camera.rendered_snapshot"));
     const bool fov_row = api->feature(str("camera.local_fov")), pose_row = api->feature(str("camera.local_pose"));
     const bool profile_row = api->feature(str("camera.local_profile")), shake_row = api->feature(str("camera.local_shake"));
+    // a sigdb row that is off: its own reason (a symbol or a constant of it did not resolve on this game build)
+    const struct {
+        bool on;
+        uint64_t bit;
+        const char* row;
+    } sig[] = {{snapshot_row, KILN_CAMERA_CAP_RENDERED_SNAPSHOT, "camera.rendered_snapshot"}, {fov_row, KILN_CAMERA_CAP_LOCAL_FOV, "camera.local_fov"},
+               {pose_row, KILN_CAMERA_CAP_LOCAL_POSE, "camera.local_pose"}, {profile_row, KILN_CAMERA_CAP_LOCAL_PROFILE, "camera.local_profile"},
+               {shake_row, KILN_CAMERA_CAP_LOCAL_SHAKE, "camera.local_shake"}};
+    for (const auto& x : sig)
+        if (!x.on) why_off(x.bit, KILN_CAP_REASON_SYMBOL_MISSING, std::string("the sigdb row ") + x.row + " is off on this game build");
     // the backend exists before a hook can call it (it serves nothing until set_serving below)
     g_backend = std::make_unique<LocalBackend>(core, &g_frames, &g_board, &g_clock, &g_world);
     bool selection = false, captured = false;
     if (laid_out && mid2 && lifecycle && (snapshot_row || fov_row || pose_row || profile_row || shake_row)) {
         // the selection: a selection id per frame, and the one place a visual request is written
-        selection = install(hooks, "camera/RenderFovSelected", &mid_select, "camera/RenderFovSelected");
+        selection = install(hooks, "camera/RenderFovSelected", &mid_select, "camera/RenderFovSelected", kWriteBits);
         g_frames.set_selection_hooked(selection);
         // the capture: the snapshot, and the frame that confirms what the selection wrote
-        captured = install(hooks, "camera/VisualFrameReady", &mid_capture, "camera/VisualFrameReady");
+        captured = install(hooks, "camera/VisualFrameReady", &mid_capture, "camera/VisualFrameReady", kClientBits);
     }
+    if (!g_sampling) why_off(kSampledBits, layout_why.rfind("kiln.client", 0) == 0 ? KILN_CAP_REASON_SERVICE_MISSING : KILN_CAP_REASON_SYMBOL_MISSING, layout_why);
     g_snapshot = captured && snapshot_row;
     if (g_snapshot) core->set_local_read_caps(KILN_CAMERA_CAP_RENDERED_SNAPSHOT);
     // a write needs both hooks (Applied only after the capture saw it); the pose parts also the local player's samples
@@ -315,6 +364,23 @@ bool local_pre(const KilnTickInfo* tick) {
     }
     g_frames.set_sample_step(step);
     return g_backend->step();
+}
+
+const char* local_why(uint64_t bit, uint32_t* reason) {
+    const int i = bit_index(bit);
+    if (!i || !g_backend) return nullptr;
+    // a fault of this world first: it says when the row comes back
+    if ((bit & kWriteBits) && (g_serving & bit) && g_backend->faulted()) {
+        *reason = KILN_CAP_REASON_FAULTED;
+        return "a camera write or the frame capture faulted in this client world: off until the next world";
+    }
+    if ((bit & kSampledBits) && (g_serving & bit) && g_sampler.faulted()) {
+        *reason = KILN_CAP_REASON_FAULTED;
+        return "reading the player's or the target's position faulted in this client world: off until the next world";
+    }
+    if (!g_why[i].reason) return nullptr;
+    *reason = g_why[i].reason;
+    return g_why[i].text.c_str();
 }
 
 KilnResult local_get_visual(KilnCameraVisual* out, uint32_t* out_reason) {

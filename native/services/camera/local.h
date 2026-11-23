@@ -19,6 +19,10 @@ void local_start(const KilnApi* api, KilnOwner owner, Core* core, bool client_si
 bool local_pre(const KilnTickInfo* tick);
 // The table's get_visual.
 KilnResult local_get_visual(KilnCameraVisual* out, uint32_t* out_reason);
+// Why the client capability `bit` (a KILN_CAMERA_CAP_LOCAL_* or KILN_CAMERA_CAP_RENDERED_SNAPSHOT) is off here, for its
+// row: a KILN_CAP_REASON_* in *reason and the words (valid until the next call of local_start). Null: no reason known
+// on this side (a dedicated server, or the bit is on).
+const char* local_why(uint64_t bit, uint32_t* reason);
 
 }  // namespace kcam
 #endif
