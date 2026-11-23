@@ -5,7 +5,9 @@
 #include <cstring>
 #include <string>
 #include <vector>
+#include <map>
 #include "services/kiln_camera.h"
+#include "services/kiln_caps.h"
 #include "services/kiln_hooks.h"
 #include "services/kiln_players.h"
 #include "services/kiln_world.h"
@@ -19,7 +21,10 @@ static int checks;
 #define CHECK(x) do { ++checks; if (!(x)) { std::fprintf(stderr,"FAIL service:%d: %s\n",__LINE__,#x); std::exit(1); } } while(0)
 namespace {
 constexpr KilnOwner service_owner=10, author=20;
-KilnWorldApi world{}; KilnPlayersApi players{}; KilnHooksApi hooks{};
+KilnWorldApi world{}; KilnPlayersApi players{}; KilnHooksApi hooks{}; KilnCapsApi caps{};
+struct Row { uint32_t state=0, reason=0; };
+std::map<std::string,Row> rows;
+KilnResult declare_rc=KILN_OK; uint32_t write_state=KILN_WORLD_WRITES_READY; bool drop=false;
 const KilnCameraApi* camera;
 KilnWorldEventFn lifecycle; void* life_user;
 KilnTickFn pre; void* pre_user;
@@ -32,7 +37,13 @@ struct Job { uint64_t id; KilnWorldWriteRequest q; bool ran=false; };
 std::vector<Job> jobs;
 std::string str(KilnStr s) { return {s.ptr,s.len}; }
 KilnResult KILN_CALL declare(KilnOwner o,KilnStr id,const KilnStr* names,uint32_t n) {
- CHECK(o==service_owner && str(id)=="kiln.camera"); CHECK(n==1 && str(names[0])=="NetworkCameraControl"); ++declared; return KILN_OK;
+ CHECK(o==service_owner && str(id)=="kiln.camera"); CHECK(n==1 && str(names[0])=="NetworkCameraControl"); ++declared; return declare_rc;
+}
+KilnResult KILN_CALL info(KilnStr who,uint32_t component,KilnWorldWriteInfo* out) {
+ CHECK(str(who)=="kiln.camera" && component==0xd2c927b5u && out && out->size>=sizeof *out); out->state=write_state; return KILN_OK;
+}
+KilnResult KILN_CALL report(KilnOwner o,KilnStr name,uint32_t state,uint32_t reason,KilnStr) {
+ CHECK(o==service_owner); rows[str(name)]=Row{state,reason}; return KILN_OK;
 }
 KilnResult KILN_CALL submit(KilnOwner o,const KilnWorldWriteRequest* q,uint64_t* out) {
  CHECK(o==service_owner && str(q->mod_id)=="kiln.camera"); CHECK(q->entity==1 && q->component==0xd2c927b5u);
@@ -50,7 +61,7 @@ KilnResult KILN_CALL subscribe_owner(KilnOwner o,KilnOwnerRetiringFn f,void* u,K
  CHECK(o==service_owner); retiring=f; retiring_user=u; *h=2; return KILN_OK;
 }
 const void* KILN_CALL service(KilnStr name,uint32_t) {
- auto s=str(name); if(s=="kiln.world") return &world; if(s=="kiln.players") return &players; if(s=="kiln.hooks" && observer) return &hooks; return nullptr;
+ auto s=str(name); if(s=="kiln.world") return &world; if(s=="kiln.players") return &players; if(s=="kiln.hooks" && observer) return &hooks; if(s=="kiln.caps") return &caps; return nullptr;
 }
 KilnResult KILN_CALL publish(KilnOwner o,KilnStr name,const void* t) { CHECK(o==service_owner && str(name)=="kiln.camera"); camera=static_cast<const KilnCameraApi*>(t); return KILN_OK; }
 bool KILN_CALL feature(KilnStr s) { const auto name=str(s); return name=="world.lifecycle" || (name=="hooks.owner_cleanup" && observer); }
@@ -60,20 +71,26 @@ bool KILN_CALL on_thread(uint32_t kind) { return server_thread && kind==KILN_WOR
 KilnResult KILN_CALL sub_world(KilnOwner,KilnWorldEventFn fn,void* u,KilnHandle* h) { lifecycle=fn; life_user=u; *h=1; return KILN_OK; }
 KilnResult KILN_CALL sub_tick(KilnOwner,uint32_t kind,int32_t phase,KilnTickFn fn,void* u,KilnHandle* h) { CHECK(kind==KILN_WORLD_SERVER && phase==KILN_TICK_PRE); pre=fn; pre_user=u; *h=3; return KILN_OK; }
 void KILN_CALL done(const KilnCameraResult* r,void*) { CHECK(r->ok && r->commit_scope==KILN_CAMERA_COMMIT_SERVER_STATE); ++done_count; }
+KilnCameraChange last_change{};
+void KILN_CALL changed_last(const KilnCameraChange* c,void*) { last_change=*c; ++changes; }
 void KILN_CALL changed(const KilnCameraChange*,void*) { ++changes; }
 void event(uint32_t what,uint32_t epoch) { KilnWorldEvent e{}; e.kind=KILN_WORLD_SERVER; e.event=what; e.session=epoch; lifecycle(&e,life_user); }
 void tick() {
  auto due=std::move(jobs); jobs.clear();
- for(auto& j:due) { CHECK(j.ran); KilnWorldWriteResult r{}; r.size=sizeof r; r.ticket=j.id; r.status=KILN_WORLD_WRITE_DONE; j.q.callback(&r,j.q.user); }
+ for(auto& j:due) { CHECK(j.ran); KilnWorldWriteResult r{}; r.size=sizeof r; r.ticket=j.id; r.status=drop ? KILN_WORLD_WRITE_DROPPED : KILN_WORLD_WRITE_DONE; j.q.callback(&r,j.q.user); }
  KilnTickInfo t{}; t.step=++step; pre(&t,pre_user);
  ncc[0]=0; ncc[1]=7; ncc[2]=0;
- for(auto& j:jobs) { CHECK(!j.ran); CHECK(j.q.change(1,ncc,3,j.q.user)); j.ran=true; }
+ for(auto& j:jobs) { CHECK(!j.ran); if(!drop) CHECK(j.q.change(1,ncc,3,j.q.user)); j.ran=true; }  // an off program runs nothing
  CHECK(jobs.size()<=1);
 }
 }
 int main(int argc,char** argv) {
- if(argc>1) { observer=std::strcmp(argv[1],"no-observer")!=0; old_world=std::strcmp(argv[1],"old-world")==0; }
- world.header={old_world ? 8u : uint32_t(sizeof world),KILN_WORLD_VERSION}; world.write_declare=declare; world.write_submit=submit; world.write_cancel=cancel;
+ const std::string mode_arg=argc>1 ? argv[1] : "";
+ observer=mode_arg!="no-observer"; old_world=mode_arg=="old-world";
+ const bool refused=mode_arg=="declare-refused", program_off=mode_arg=="program-off";
+ if(refused) declare_rc=KILN_ERR_UNAVAILABLE;  // write_declare: tracked writes do not work on this build (sigdb rows missing)
+ world.header={old_world ? 8u : uint32_t(sizeof world),KILN_WORLD_VERSION}; world.write_declare=declare; world.write_submit=submit; world.write_cancel=cancel; world.write_info=info;
+ caps.header={sizeof caps,KILN_CAPS_VERSION}; caps.report=report;
  players.header={sizeof players,KILN_PLAYERS_VERSION}; players.get=get;
  hooks.header={sizeof hooks,KILN_HOOKS_VERSION}; hooks.subscribe_owner_retiring=subscribe_owner;
  KilnApi api{}; api.size=sizeof api; api.abi_version=KILN_ABI_VERSION; api.service=service; api.register_service=publish; api.feature=feature; api.log=log; api.side=side;
@@ -82,13 +99,39 @@ int main(int argc,char** argv) {
  CHECK(camera && camera->header.size==88 && camera->header.version==1);
  uint64_t mask=0; CHECK(camera->capabilities(KILN_CAMERA_SERVER_MODE,0,&mask)==KILN_OK);
  if(!observer || old_world) { CHECK(mask==0); CHECK(submits==0); std::printf("camera service fail-closed: PASS (%d checks)\n",checks); return 0; }
+ if(refused) {
+  CHECK(declared==1); CHECK(mask==0);
+  CHECK(rows["camera.server_mode"].state==KILN_CAP_UNAVAILABLE && rows["camera.server_mode"].reason==KILN_CAP_REASON_SERVICE_MISSING);
+  event(KILN_WORLD_STARTED,1);
+  KilnCameraRequest q{}; q.size=sizeof q; q.endpoint=KILN_CAMERA_SERVER_MODE; q.player_entity=1; q.parts=KILN_CAMERA_MODE; q.input_policy=KILN_CAMERA_STOCK_MODE; q.duration_ms=1000; q.camera_id=34;
+  KilnCameraLease l=0; CHECK(camera->apply(author,&q,&l,done,nullptr)==KILN_ERR_UNAVAILABLE);
+  tick(); tick(); CHECK(submits==0 && done_count==0);
+  std::printf("camera service declare refused: PASS (%d checks)\n",checks); return 0;
+ }
  CHECK(declared==1); CHECK(mask==KILN_CAMERA_CAP_SERVER_MODE);
- event(KILN_WORLD_STARTED,1); KilnHandle sub=0; CHECK(camera->subscribe(30,changed,nullptr,&sub)==KILN_OK);
+ CHECK(rows["camera.server_mode"].state==KILN_CAP_AVAILABLE);
+ event(KILN_WORLD_STARTED,1); KilnHandle sub=0; CHECK(camera->subscribe(30,program_off ? changed_last : changed,nullptr,&sub)==KILN_OK);
  KilnCameraRequest q{}; q.size=sizeof q; q.endpoint=KILN_CAMERA_SERVER_MODE; q.player_entity=1; q.parts=KILN_CAMERA_MODE; q.input_policy=KILN_CAMERA_STOCK_MODE; q.duration_ms=120000; q.camera_id=34; q.transition_override=2;
  KilnCameraLease lease=0; CHECK(camera->apply(author,&q,&lease,done,nullptr)==KILN_OK); CHECK(lease && done_count==0);
  tick(); tick(); CHECK(done_count==1 && changes==1);
  for(int i=0;i<20;++i) { tick(); CHECK(ncc[0]==1 && ncc[1]==34 && ncc[2]==2); }
  CHECK(done_count==1 && changes==1); CHECK(submits==22);
+ if(program_off) {
+  // kiln.world's program goes off in this world: the next result is DROPPED; the lease ends at once and the row goes off
+  write_state=KILN_WORLD_WRITES_OFF; drop=true;
+  tick(); tick();
+  CHECK(changes==2 && last_change.kind==KILN_CAMERA_ENDED && last_change.end_reason==KILN_CAMERA_END_CAPABILITY_LOST && last_change.lease==lease);
+  CHECK(camera->capabilities(KILN_CAMERA_SERVER_MODE,0,&mask)==KILN_OK && mask==0);
+  CHECK(rows["camera.server_mode"].state==KILN_CAP_UNAVAILABLE && rows["camera.server_mode"].reason==KILN_CAP_REASON_FAULTED);
+  KilnCameraLease l=0; CHECK(camera->apply(author,&q,&l,done,nullptr)==KILN_ERR_UNAVAILABLE);
+  // the next server world runs it again: the row comes back
+  write_state=KILN_WORLD_WRITES_READY; drop=false;
+  event(KILN_WORLD_STOPPING,1); event(KILN_WORLD_STARTED,2); tick();
+  CHECK(camera->capabilities(KILN_CAMERA_SERVER_MODE,0,&mask)==KILN_OK && mask==KILN_CAMERA_CAP_SERVER_MODE);
+  CHECK(rows["camera.server_mode"].state==KILN_CAP_AVAILABLE);
+  event(KILN_WORLD_STOPPING,2);
+  std::printf("camera service program off: PASS (%d checks)\n",checks); return 0;
+ }
  // Public dispatch requires a connected player, not just an entity with NCC.
  q.player_entity=2; KilnCameraLease absent=0; CHECK(camera->apply(21,&q,&absent,nullptr,nullptr)==KILN_ERR_NOT_FOUND);
  server_thread=false; CHECK(camera->end(author,lease,nullptr,nullptr)==KILN_ERR_WRONG_THREAD); server_thread=true;

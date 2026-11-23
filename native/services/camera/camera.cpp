@@ -79,6 +79,12 @@ struct ServiceModeWorld : kcam::ModeWorld {
     }
     uint64_t step() override { return server_step; }
     void log(int32_t level, const std::string& text) override { g_env.log(level, text); }
+    uint32_t write_state(uint32_t component, const std::string& who) override {
+        if (!world || world->header.size < offsetof(KilnWorldApi, write_info) + sizeof(world->write_info) || !world->write_info) return KILN_WORLD_WRITES_READY;
+        KilnWorldWriteInfo info{};
+        info.size = sizeof info;
+        return world->write_info(KilnStr{who.data(), who.size()}, component, &info) == KILN_OK ? info.state : static_cast<uint32_t>(KILN_WORLD_WRITES_READY);
+    }
 };
 ServiceModeWorld g_mode_world;
 kcam::ModeBackend g_mode(&g_core, &g_mode_world, 0xd2c927b5u, "kiln.camera");
@@ -183,7 +189,22 @@ void report_rows() {
         else if (!writes) row(name, false, KILN_CAP_REASON_SERVICE_OLDER, kNoObserver);
         else row(name, false, KILN_CAP_REASON_SERVICE_MISSING, kNoBackend);
     };
-    write_row("camera.server_mode", mode, KILN_CAMERA_CAP_SERVER_MODE, false);
+    if (!(mode & KILN_CAMERA_CAP_SERVER_MODE) && writes && g_mode.down() != kcam::ModeBackend::kUp) {
+        switch (g_mode.down()) {
+        case kcam::ModeBackend::kProgramOff:
+            row("camera.server_mode", false, KILN_CAP_REASON_FAULTED, "kiln.world's write program does not run in this server world (kiln.log says why)");
+            break;
+        case kcam::ModeBackend::kBroken:
+            row("camera.server_mode", false, KILN_CAP_REASON_FAULTED, "kiln.world refused the NetworkCameraControl write (not declared or out of range)");
+            break;
+        default:
+            row("camera.server_mode", false, KILN_CAP_REASON_SERVICE_MISSING,
+                "kiln.world's tracked writes or kiln.players cannot be used on this build (kiln.log says which)");
+            break;
+        }
+    } else {
+        write_row("camera.server_mode", mode, KILN_CAMERA_CAP_SERVER_MODE, false);
+    }
     write_row("camera.local_pose", local, KILN_CAMERA_CAP_LOCAL_POSE, true);
     write_row("camera.local_fov", local, KILN_CAMERA_CAP_LOCAL_FOV, true);
     write_row("camera.local_profile", local, KILN_CAMERA_CAP_LOCAL_PROFILE, true);

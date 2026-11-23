@@ -20,3 +20,5 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -pthrea
 "$out/service-test"
 "$out/service-test" no-observer
 "$out/service-test" old-world
+"$out/service-test" declare-refused
+"$out/service-test" program-off

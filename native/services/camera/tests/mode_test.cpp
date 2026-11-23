@@ -69,6 +69,7 @@ struct FakeWorld : ModeWorld {
     uint64_t next_id = 1, now = 1000, steps = 0, fraction_ns = 0;
     std::map<KilnEntity, Incarnation> players{{A, {1, 1}}, {B, {2, 1}}};
     std::map<KilnEntity, Bytes> ncc, stock{{A, {0, 7, 0}}, {B, {0, 9, 1}}};
+    uint32_t state = KILN_WORLD_WRITES_READY;  // write_info's state of NCC for kiln.camera
     bool cancel_wrong_thread = false;      // write_cancel answers WRONG_THREAD (inside the write program, off the tick thread)
     bool in_update = false;                // the write program's update runs: a cancel now drops the result only
     std::function<void()> mid_update;      // runs inside the update, after it took its batch (a program on the tick thread)
@@ -113,6 +114,10 @@ struct FakeWorld : ModeWorld {
     uint64_t now_ns() override { return now * 1000000 + fraction_ns; }
     uint64_t step() override { return steps; }
     void log(int32_t, const std::string& t) override { logs.push_back(t); }
+    uint32_t write_state(uint32_t component, const std::string& who) override {
+        CHECK(component == kNcc && who == "kiln.camera");
+        return state;
+    }
 
     // The sim step: the game's writer, then kiln_world_writes with every request not yet run.
     void sim() {
@@ -584,6 +589,53 @@ void test_cancel_in_pre_retires_until_next_step() {
     CHECK(count("ended") == 1);
 }
 
+// kiln.world's write program goes off at run time (refused, faulted, skipped): every request comes back DROPPED. The
+// row goes off at the first such answer and the held lease ends CapabilityLost at once, not after 20 drops; the next
+// server world asks again, and a world whose program is off from its start turns the row off in its first Pre.
+void test_program_off_turns_the_row_off() {
+    Rig r;
+    const auto id = r.apply(kMod, A, 34, 2);
+    r.tick(2);
+    CHECK(count("applied") == 1);
+    CHECK(r.mode.caps() == KILN_CAMERA_CAP_SERVER_MODE);
+    r.world.state = KILN_WORLD_WRITES_OFF;
+    r.world.force_status = KILN_WORLD_WRITE_DROPPED;
+    r.tick(2);
+    CHECK(r.mode.caps() == 0);
+    CHECK(r.mode.down() == ModeBackend::kProgramOff);
+    CHECK(count("ended") == 1);
+    CHECK(g_log.back() == L("ended %llu rev=1 end=%llu", id, KILN_CAMERA_END_CAPABILITY_LOST));
+    r.apply(kOther, A, 34, 2, 0, 120000, KILN_ERR_UNAVAILABLE);  // the row is off: refused at the call
+    r.tick(3);
+    CHECK(r.mode.tickets() == 0);
+    // the next server world has it again
+    r.world.state = KILN_WORLD_WRITES_READY;
+    r.world.force_status = 0xffffffffu;
+    r.core.world_stopping(kServer, 1);
+    r.core.world_started(kServer, 2);
+    r.tick();
+    CHECK(r.mode.caps() == KILN_CAMERA_CAP_SERVER_MODE);
+    const auto again = r.apply(kMod, A, 34, 2);
+    r.tick(2);
+    CHECK(g_log.back() == L("applied %llu rev=1 end=0", again));
+    // one whose program is off from its start: off in its first Pre, before any request
+    r.world.state = KILN_WORLD_WRITES_OFF;
+    r.core.world_stopping(kServer, 2);
+    r.core.world_started(kServer, 3);
+    r.pre();
+    CHECK(r.mode.caps() == 0);
+    // a staged request that meets an off program is refused FrameFault, not StaleWorld
+    r.world.state = KILN_WORLD_WRITES_READY;
+    r.core.world_stopping(kServer, 3);
+    r.core.world_started(kServer, 4);
+    r.tick();
+    const auto late = r.apply(kMod, A, 34, 2);
+    r.world.state = KILN_WORLD_WRITES_OFF;
+    r.world.force_status = KILN_WORLD_WRITE_DROPPED;
+    r.tick(2);
+    CHECK(g_log.back() == L("done %llu ok=0 reason=%llu rev=0 flags=0 scope=0", late, KILN_CAMERA_REASON_FRAME_FAULT));
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -597,6 +649,7 @@ int main(int argc, char** argv) {
     }
     test_cancel_while_change_can_still_run();
     test_cancel_in_pre_retires_until_next_step();
+    test_program_off_turns_the_row_off();
     test_retire_before_next_pre();
     test_expiry_inside_write();
     test_timeline_begins_at_write();

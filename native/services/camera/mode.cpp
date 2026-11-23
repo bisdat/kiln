@@ -25,8 +25,13 @@ ModeBackend::~ModeBackend() {
     for (Ticket* t : retired_) delete t;
 }
 
-uint64_t ModeBackend::caps() const {
-    return ready_.load(std::memory_order_acquire) && !broken_.load(std::memory_order_acquire) ? KILN_CAMERA_CAP_SERVER_MODE : 0;
+uint64_t ModeBackend::caps() const { return down() == kUp ? KILN_CAMERA_CAP_SERVER_MODE : 0; }
+
+ModeBackend::Down ModeBackend::down() const {
+    if (!ready_.load(std::memory_order_acquire)) return kNotReady;
+    if (broken_.load(std::memory_order_acquire)) return kBroken;
+    if (off_.load(std::memory_order_acquire)) return kProgramOff;
+    return kUp;
 }
 
 // ---- Backend (the core's lock is held; the server world's thread) -------------------------------------------------------
@@ -144,6 +149,12 @@ void ModeBackend::step() {
         // last step() has ended. Tickets cancelled from here on wait for the next one.
         for (Ticket* t : retired_) delete t;
         retired_.clear();
+        // Once per server world: does kiln.world's write program run in it? (A new world may have it again.)
+        if (epoch && epoch != checked_epoch_) {
+            checked_epoch_ = epoch;
+            off_.store(false, std::memory_order_release);
+            program_off();
+        }
         const uint64_t now = world_->now_ns();
         now_ns_.store(now, std::memory_order_release);
         stopped_.store(false, std::memory_order_release);
@@ -263,16 +274,18 @@ void ModeBackend::result(Ticket* t, const KilnWorldWriteResult& r) {
                 if (s.staged.lease == s.active.lease) s.staged = Rev{};
                 s.active = Rev{};
             }
-        } else if (status == KILN_WORLD_WRITE_DROPPED && ++s.drops < kMaxDrops) {
+        } else if (status == KILN_WORLD_WRITE_DROPPED && !program_off() && ++s.drops < kMaxDrops) {
             again = false;  // no write program ran it (between worlds, or behind a full update): the next Pre tries again
         } else if (staged || active) {
             // a write that cannot work: not declared, does not fit, faulted, or never runs
             if (status == KILN_WORLD_WRITE_NOT_DECLARED || status == KILN_WORLD_WRITE_OUT_OF_RANGE) broken_.store(true, std::memory_order_release);
-            const std::string why = text_of(r, "the tracked write failed");
+            const bool off = status == KILN_WORLD_WRITE_DROPPED && off_.load(std::memory_order_acquire);
+            const std::string why = off ? "kiln.world's write program does not run in this server world (kiln.log says why)" : text_of(r, "the tracked write failed");
             world_->log(KILN_LOG_ERROR, "camera: mode write of player " + std::to_string(s.player) + " failed (status " + std::to_string(r.status) + "): " + why);
             if (staged) {
                 reports.push_back({Report::Rejected, s.staged.lease, s.staged.revision,
-                                   status == KILN_WORLD_WRITE_DROPPED ? static_cast<uint32_t>(KILN_CAMERA_REASON_STALE_WORLD) : static_cast<uint32_t>(KILN_CAMERA_REASON_FRAME_FAULT),
+                                   status == KILN_WORLD_WRITE_DROPPED && !off ? static_cast<uint32_t>(KILN_CAMERA_REASON_STALE_WORLD)
+                                                                              : static_cast<uint32_t>(KILN_CAMERA_REASON_FRAME_FAULT),
                                    0, 0, why});
                 s.staged = Rev{};
             } else {
@@ -355,6 +368,14 @@ void ModeBackend::submit(Slot& s) {
     t->id = id;
     s.ticket = t;
     submits_.fetch_add(1, std::memory_order_relaxed);
+}
+
+bool ModeBackend::program_off() {
+    if (off_.load(std::memory_order_acquire)) return true;
+    if (world_->write_state(component_, who_) != KILN_WORLD_WRITES_OFF) return false;
+    off_.store(true, std::memory_order_release);
+    world_->log(KILN_LOG_ERROR, "camera: kiln.world's write program does not run in this server world (kiln.log says why): camera.server_mode is off until the next world");
+    return true;
 }
 
 void ModeBackend::free_if_idle(Slot& s) {

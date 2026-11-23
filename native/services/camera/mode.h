@@ -64,6 +64,12 @@ public:
     virtual uint64_t now_ns() { return now_ms() * UINT64_C(1000000); }
     virtual uint64_t step() = 0;
     virtual void log(int32_t level, const std::string& text) = 0;
+    // kiln.world's KILN_WORLD_WRITES_* state of `component` for `who` now (write_info). Any thread. OFF: the write program
+    // was refused, faulted or is skipped in this server world, so every request comes back DROPPED.
+    virtual uint32_t write_state(uint32_t component, const std::string& who) {
+        (void)component, (void)who;
+        return KILN_WORLD_WRITES_READY;
+    }
 };
 
 class ModeBackend final : public Backend {
@@ -77,6 +83,15 @@ public:
 
     // The component was declared and tracked writes work: the backend serves (caps() has SERVER_MODE).
     void set_ready(bool on) { ready_.store(on, std::memory_order_release); }
+
+    // Why caps() is 0 (for the capability row). Any thread.
+    enum Down : uint32_t {
+        kUp = 0,
+        kNotReady = 1,     // never declared: tracked writes, kiln.players or the declaration missing on this build
+        kBroken = 2,       // kiln.world refused the component as not declared or out of range: off for the session
+        kProgramOff = 3,   // kiln.world's write program does not run in this server world: off until the next one
+    };
+    Down down() const;
 
     // ---- Backend ----
     uint64_t caps() const override;
@@ -167,6 +182,7 @@ private:
     void cut(Slot& s);
     void submit(Slot& s);
     void free_if_idle(Slot& s);
+    bool program_off();  // asks kiln.world (write_state); sets off_ and logs once when it is off
     void flush(std::vector<Report>& reports);  // the lock is NOT held
 
     Core* core_;
@@ -175,6 +191,8 @@ private:
     const std::string who_;
     std::atomic<bool> ready_{false};
     std::atomic<bool> broken_{false};
+    std::atomic<bool> off_{false};          // the write program is off in the running server world (kProgramOff)
+    uint32_t checked_epoch_ = 0;            // the server world whose write state step() last asked for (the lock)
     std::atomic<uint32_t> live_epoch_{0};   // the change callback's epoch guard (0: no world)
     std::atomic<uint64_t> now_ns_{0};       // the change callback's clock (the last step's)
     std::atomic<bool> stopped_{false};      // world_stopped came (step() forgets that world's work by its epoch)
