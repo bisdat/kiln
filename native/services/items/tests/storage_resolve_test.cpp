@@ -75,7 +75,20 @@ void run(const std::string& side, const std::filesystem::path& exe, const Json& 
     resolve(doc, true);
     for (const auto& name : doc["features"]["items.storage"]["symbols"]) {
         Json damaged = doc;
-        damaged["symbols"][name.get<std::string>()]["find"] = Json::array({{{"pattern", "DE AD BE EF 01 23 45 67 89 AB CD EF 98 76 54 32"}}});
+        const auto key = name.get<std::string>();
+        if (!damaged["symbols"].contains(key)) {
+            for (auto& [symbol, definition] : damaged["symbols"].items()) {
+                for (auto& strategy : definition["find"]) {
+                    auto pattern = strategy["pattern"].get<std::string>();
+                    const std::string needle = "{" + key + ":";
+                    for (size_t at; (at = pattern.find(needle)) != std::string::npos;)
+                        pattern.replace(at, needle.size(), "{omitted:");
+                    strategy["pattern"] = pattern;
+                }
+            }
+        } else {
+            damaged["symbols"][key]["find"] = Json::array({{{"pattern", "DE AD BE EF 01 23 45 67 89 AB CD EF 98 76 54 32"}}});
+        }
         resolve(damaged, false);
     }
     // Change the required vote count: no constant can silently become an optional row.

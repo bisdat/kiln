@@ -50,8 +50,14 @@ def main():
         image = Image(path)
         symbols, constants, features = Resolver(image, doc).run()
         check(features.get('items.storage'), side + ' complete storage feature')
+        fixture = json.loads((ROOT / 'native/services/items/tests/storage-resolve-builds.json').read_text())[side]
         for name, rva in zip(NAMES, addresses):
+            check(int(fixture['symbols'][name], 16) == rva, f'{side} base address fixture {name}')
+        for name, value in fixture['symbols'].items():
+            rva = int(value, 16)
             check(symbols.get(name, {}).get('rva') == rva, f'{side} {name} = {rva:#x}')
+        for name, value in fixture['constants'].items():
+            check(constants.get(name, {}).get('ok') and constants[name]['value'] == value, f'{side} qualified {name} = {value:#x}')
         for name, value in FIELDS.items():
             check(constants.get(name, {}).get('ok') and constants[name]['value'] == value, f'{side} {name} = {value:#x}')
         stride = constants['characters/struct.equip1']['value'] - constants['characters/struct.equip0']['value']
@@ -61,7 +67,11 @@ def main():
         feature = doc['features']['items.storage']
         for section, key in [('symbols', n) for n in feature['symbols']] + [('constants', n) for n in feature['constants']]:
             changed = copy.deepcopy(doc)
-            if section == 'symbols':
+            if section == 'symbols' and key not in changed[section]:
+                for definition in changed[section].values():
+                    for strategy in definition.get('find', []):
+                        strategy['pattern'] = strategy['pattern'].replace('{' + key + ':', '{omitted:')
+            elif section == 'symbols':
                 changed[section][key] = {'find': [{'pattern': 'DE AD BE EF 01 23 45 67 89 AB CD EF 98 76 54 32'}]}
             else:
                 changed[section][key]['min_votes'] = 10000

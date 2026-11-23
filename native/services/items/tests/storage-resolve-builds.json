@@ -13,7 +13,15 @@
       "items/TombstoneCheck": "0x9471c0",
       "characters/Write": "0x743d00",
       "saves/CapturesDone": "0x71afd0",
-      "saves/PublishCharacters": "0x73b750"
+      "saves/PublishCharacters": "0x73b750",
+      "items/PageBuilder": "0x7b1ea0",
+      "items/PlayerItemsLoot": "0x1aa7a0",
+      "items/SourceEntityId": "0x65eec0",
+      "items/StorageDestroyEntity": "0x63e8a0",
+      "items/CmdDestroyEntity": "0x5fbe20",
+      "items/CommandCreateEntity": "0x5fb3d0",
+      "items/ClientInventoryTransfer": "0x19e860",
+      "items/PageTemplateGuid": "0x131f280"
     },
     "constants": {
       "characters/struct.main_pages": 7736,
@@ -23,7 +31,22 @@
       "characters/struct.equip1": 6820,
       "characters/struct.equip_last": 7660,
       "characters/struct.refs": 7720,
-      "items/record.stride": 56
+      "items/record.stride": 56,
+      "items/record.binding.dye": 14,
+      "items/record.binding.durability": 22,
+      "items/record.binding.fuel": 40,
+      "items/record.binding.level": 48,
+      "items/record.binding.perks_legacy": 58,
+      "items/record.binding.perks": 60,
+      "items/record.binding.gem": 88,
+      "items/guard.iter.player_input": 16,
+      "items/guard.pi.source_entity": 12,
+      "items/guard.pi.target_entity": 16,
+      "items/guard.pi.source_slot": 20,
+      "items/guard.pi.target_slot": 28,
+      "items/guard.pi.type": 36,
+      "items/guard.pi.flags": 37,
+      "items/guard.pi.amount": 38
     }
   },
   "client": {
@@ -40,7 +63,15 @@
       "items/TombstoneCheck": "0xe9ff80",
       "characters/Write": "0xe37300",
       "saves/CapturesDone": "0xe06430",
-      "saves/PublishCharacters": "0xe2d920"
+      "saves/PublishCharacters": "0xe2d920",
+      "items/PageBuilder": "0xe560f0",
+      "items/PlayerItemsLoot": "0x4094a0",
+      "items/SourceEntityId": "0x9c3030",
+      "items/StorageDestroyEntity": "0x9a2a10",
+      "items/CmdDestroyEntity": "0x9602d0",
+      "items/CommandCreateEntity": "0x95f880",
+      "items/ClientInventoryTransfer": "0x3fd580",
+      "items/PageTemplateGuid": "0x1dae268"
     },
     "constants": {
       "characters/struct.main_pages": 7736,
@@ -50,7 +81,22 @@
       "characters/struct.equip1": 6820,
       "characters/struct.equip_last": 7660,
       "characters/struct.refs": 7720,
-      "items/record.stride": 56
+      "items/record.stride": 56,
+      "items/record.binding.dye": 14,
+      "items/record.binding.durability": 22,
+      "items/record.binding.fuel": 40,
+      "items/record.binding.level": 48,
+      "items/record.binding.perks_legacy": 58,
+      "items/record.binding.perks": 60,
+      "items/record.binding.gem": 88,
+      "items/guard.iter.player_input": 16,
+      "items/guard.pi.source_entity": 12,
+      "items/guard.pi.target_entity": 16,
+      "items/guard.pi.source_slot": 20,
+      "items/guard.pi.target_slot": 28,
+      "items/guard.pi.type": 36,
+      "items/guard.pi.flags": 37,
+      "items/guard.pi.amount": 38
     }
   }
 }

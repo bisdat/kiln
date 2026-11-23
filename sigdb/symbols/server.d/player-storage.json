@@ -269,6 +269,231 @@
           "pattern": "48 6B D0 {items/record.stride:d8} 48 03 93 50 1E 00 00 E8 ?? ?? ?? ?? FF C6 3B B3 58 1E 00 00 72 ?? 48 8B 37 0F B7 AB B8 54 00 00 48 8B 46 10 48 83 C0 02 48 3B 46 08 76 ?? BA 02 00 00 00 48 8B CE E8 ?? ?? ?? ?? 48 8B 46 10 48 83 C0 02 48 3B 46 08 76 ?? B2 0B 48 8B CE E8 ?? ?? ?? ?? 48 8B 4E 10 48 8D 41 02 48 89 46 10 48 8B 06 66 89 2C 01 48 8B 37 0F B7 AB BA 54 00 00 48 8B 46 10 48 83 C0 02 48 3B 46 08 76 ?? BA 02 00 00 00 48 8B CE E8 ?? ?? ?? ?? 48 8B 46 10 48 83 C0 02 48 3B 46 08 76 ??"
         }
       ]
+    },
+    "items/PageBuilder": {
+      "find": [
+        {
+          "pattern": "48 89 5C 24 18 44 88 4C 24 20 48 89 54 24 10 48 89 4C 24 08 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 B0 F9 FF FF 48 81 EC 50 07 00 00 48 8B BD B8 06 00 00 41 8B F0 45 33 C0 4C 8B F2 48 8B D9 44 39 47 08 0F 84 ?? ?? ?? ??"
+        }
+      ]
+    },
+    "items/PlayerItemsLoot": {
+      "find": [
+        {
+          "pattern": "40 55 41 57 48 8D AC 24 D8 8C FF FF B8 28 74 00 00 E8 ?? ?? ?? ?? 48 2B E0 41 B8 C8 00 00 00 48 8D 54 24 40 4C 8B F9 E8 ?? ?? ?? ?? 41 B8 C8 00 00 00 48 8D 54 24 40 49 8B CF E8 ?? ?? ?? ?? 84 C0 0F 84 ?? ?? ?? ?? 48 89 9C 24 40 74 00 00 48 89 B4 24 20 74 00 00 48 89 BC 24 18 74 00 00 4C 89 A4 24 10 74 00 00"
+        }
+      ]
+    },
+    "items/SourceEntityId": {
+      "find": [
+        {
+          "pattern": "8B 41 08 4C 8B C2 85 C0 75 ?? 89 02 48 8B C2 C3 8D 50 FF 48 8B 01 48 03 D2 48 8B 88 30 08 00 00 8B 44 D1 04 41 89 00 49 8B C0 C3 CC CC CC CC CC"
+        }
+      ]
+    },
+    "items/StorageDestroyEntity": {
+      "find": [
+        {
+          "pattern": "48 89 5C 24 18 48 89 74 24 20 89 54 24 10 55 57 41 55 41 56 41 57 48 8D 6C 24 C9 48 81 EC B0 00 00 00 8B DA 45 0F B6 F9 45 0F B6 E8 48 8B F1 85 D2 0F 84 ?? ?? ?? ?? 48 8D B9 48 01 00 00 48 8B CF 48 8D 55 6F E8 ?? ?? ?? ??"
+        }
+      ]
+    },
+    "items/CmdDestroyEntity": {
+      "find": [
+        {
+          "pattern": "40 53 48 83 EC 30 41 8B D8 8B C2 45 85 C0 74 ?? 48 8D 51 10 89 44 24 20 41 B9 10 00 00 00 41 B0 01 E8 ?? ?? ?? ?? 48 85 C0 75 ?? 48 83 C4 30 5B C3 89 58 0C B0 01 48 83 C4 30 5B"
+        }
+      ]
+    },
+    "items/CommandCreateEntity": {
+      "find": [
+        {
+          "pattern": "48 89 5C 24 18 48 89 74 24 20 57 41 56 41 57 48 83 EC 50 4C 8B B4 24 90 00 00 00 33 F6 41 8B D9 4C 8B FA 48 8B F9 44 8B DE 4D 8B 56 20 4D 85 D2 74 ?? 4D 8B 4E 18 49 83 C1 10 66 0F 1F 44 00 00 41 0F B7 01 4D 8D 49 18"
+        }
+      ]
+    },
+    "items/ClientInventoryTransfer": {
+      "find": [
+        {
+          "pattern": "40 55 53 56 41 54 41 57 48 8D AC 24 C0 8D FF FF B8 40 73 00 00 E8 ?? ?? ?? ?? 48 2B E0 48 8B 72 10 4C 8B E1 48 8B 4A 70 4C 8B FA 0F 29 BC 24 20 73 00 00 8B 5E 08 48 85 C9 74 ?? 0F B6 42 6A 4C 8B 4A 60 4C 8B 42 58"
+        }
+      ]
+    },
+    "@items/PageTemplateGuid": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "items/PageBuilder",
+            "size": 1792
+          },
+          "pattern": "0F 10 05 {items/PageTemplateGuid:rel32} 8B DA 48 8D 44 24 60 48 89 44 24 38 48 8D 55 50 4C 89 44 24 58 48 C7 44 24 48 02 00 00 00 48 8D 04 5B"
+        }
+      ]
+    },
+    "@items/record.binding.dye": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "items/RecordFromStack",
+            "size": 3072
+          },
+          "pattern": "45 0F B7 45 {items/record.binding.dye:d8} 48 8D 4C 24 30 48 8B D6 E8 ?? ?? ?? ?? 48 8B 00 48 85 C0 74 ?? 8B 00 89 43 24 80 7B 28 00 75 ?? C6 43 28 01"
+        }
+      ]
+    },
+    "@items/record.binding.durability": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "items/RecordFromStack",
+            "size": 3072
+          },
+          "pattern": "45 0F B7 45 {items/record.binding.durability:d8} E8 ?? ?? ?? ?? 0F 10 00 48 8B 45 6F 66 48 0F 7E C7 48 85 FF 0F 84 ?? ?? ?? ?? F6 47 06 01 75 ?? 33 C9 41 B6 16 44 8B F9"
+        }
+      ]
+    },
+    "@items/record.binding.fuel": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "items/RecordFromStack",
+            "size": 3072
+          },
+          "pattern": "45 0F B7 45 {items/record.binding.fuel:d8} 48 8D 4C 24 30 48 8B D6 E8 ?? ?? ?? ?? 48 8B 38 48 85 FF 0F 84 ?? ?? ?? ?? F6 47 06 01 75 ?? 33 C0 41 B6 16 44 8B F8"
+        }
+      ]
+    },
+    "@items/record.binding.level": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "items/RecordFromStack",
+            "size": 3072
+          },
+          "pattern": "45 0F B7 45 {items/record.binding.level:d8} 48 8D 4C 24 30 48 8B D6 E8 ?? ?? ?? ?? 4C 8B BC 24 50 01 00 00 48 8B 38 48 85 FF 0F 84 ?? ?? ?? ?? F6 47 06 01 75 ?? C6 44 24 20 16 EB ??"
+        }
+      ]
+    },
+    "@items/record.binding.perks_legacy": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "items/RecordFromStack",
+            "size": 3072
+          },
+          "pattern": "45 0F B7 45 {items/record.binding.perks_legacy:d8} 48 8D 4C 24 30 48 8B D6 E8 ?? ?? ?? ?? 45 0F B7 45 3C 48 8D 4C 24 58 48 8B D6 48 8B 38 E8 ?? ?? ?? ?? 48 8B 08 48 85 C9 74 ??"
+        }
+      ]
+    },
+    "@items/record.binding.perks": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "items/RecordFromStack",
+            "size": 3072
+          },
+          "pattern": "45 0F B7 45 {items/record.binding.perks:d8} 48 8D 4C 24 58 48 8B D6 48 8B 38 E8 ?? ?? ?? ?? 48 8B 08 48 85 C9 74 ?? 80 7B 07 00 75 ?? C6 43 07 01 0F B6 01"
+        }
+      ]
+    },
+    "@items/record.binding.gem": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "items/RecordFromStack",
+            "size": 3072
+          },
+          "pattern": "45 0F B7 45 {items/record.binding.gem:d8} 48 8D 4C 24 30 48 8B D6 E8 ?? ?? ?? ?? 48 8B 30 48 85 F6 0F 84 ?? ?? ?? ?? 80 7B 34 00 75 ?? C6 43 34 01 83 3E 00 0F 84 ?? ?? ?? ??"
+        }
+      ]
+    },
+    "@items/guard.iter.player_input": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "items/ClientInventoryTransfer",
+            "size": 3072
+          },
+          "pattern": "48 8B 72 {items/guard.iter.player_input:d8} 4C 8B E1 48 8B 4A 70 4C 8B FA 0F 29 BC 24 20 73 00 00 8B 5E 08 48 85 C9 74 ?? 0F B6 42 6A 4C 8B 4A 60 4C 8B 42 58 88 44 24 28"
+        }
+      ]
+    },
+    "@items/guard.pi.source_entity": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "items/ClientInventoryTransfer",
+            "size": 3072
+          },
+          "pattern": "41 83 7E {items/guard.pi.source_entity:d8} 00 0F 85 ?? ?? ?? ?? 4D 8B 87 78 01 00 00 48 8D 4C 24 40 49 8B 56 14 4D 8B CC E8 ?? ?? ?? ?? 80 7C 24 40 00 0F 85 ?? ?? ?? ?? 49 8B 0C 24 8B 5C 24 48 49 8B BF 10 01 00 00 E8 ?? ?? ?? ?? 48 8B D0 48 8D 4D 58 44 8B CB 4C 8B C7 E8 ?? ?? ?? ??"
+        }
+      ]
+    },
+    "@items/guard.pi.target_entity": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "items/ClientInventoryTransfer",
+            "size": 3072
+          },
+          "pattern": "41 8B 5E {items/guard.pi.target_entity:d8} 49 8B BF 10 01 00 00 4C 8B 28 E8 ?? ?? ?? ?? 48 8B D0 48 8D 4D 40 44 8B CB 4C 8B C7 E8 ?? ?? ?? ?? 48 8B 00 4D 85 ED 0F 84 ?? ?? ?? ?? 48 85 C0 0F 84 ?? ?? ?? ?? 0F 57 C0 0F 29 B4 24 30 73 00 00 F3 48 0F 2A 00 0F 57 F6"
+        }
+      ]
+    },
+    "@items/guard.pi.source_slot": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "items/ClientInventoryTransfer",
+            "size": 3072
+          },
+          "pattern": "49 8B 56 {items/guard.pi.source_slot:d8} 4D 8B CC E8 ?? ?? ?? ?? 80 7C 24 40 00 0F 85 ?? ?? ?? ?? 49 8B 0C 24 8B 5C 24 48 49 8B BF 10 01 00 00 E8 ?? ?? ?? ?? 48 8B D0 48 8D 4D 58 44 8B CB 4C 8B C7 E8 ?? ?? ?? ?? 49 8B 0C 24 41 8B 5E 10 49 8B BF 10 01 00 00 4C 8B 28"
+        }
+      ]
+    },
+    "@items/guard.pi.target_slot": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "items/ClientInventoryTransfer",
+            "size": 3072
+          },
+          "pattern": "48 8B 56 {items/guard.pi.target_slot:d8} 4D 8B CC E8 ?? ?? ?? ?? 40 38 7C 24 40 0F 85 ?? ?? ?? ?? 8B 7C 24 48 48 8D 4C 24 50 E8 ?? ?? ?? ?? 49 8B 87 D8 00 00 00 8D 4F FF 48 89 44 24 60 81 F9 FE 03 00 00 49 8B 87 A8 00 00 00 44 8B C7 48 89 44 24 68 49 8B CC 49 8B 87 60 01 00 00 48 89 44 24 78"
+        }
+      ]
+    },
+    "@items/guard.pi.type": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "items/ClientInventoryTransfer",
+            "size": 3072
+          },
+          "pattern": "0F B6 4E {items/guard.pi.type:d8} 85 C9 0F 84 ?? ?? ?? ?? 83 E9 01 0F 84 ?? ?? ?? ?? 83 E9 01 0F 84 ?? ?? ?? ?? 83 E9 01 0F 84 ?? ?? ?? ?? 83 F9 01 0F 85 ?? ?? ?? ?? 83 7E 14 00 75 ?? 80 7E 18 00 0F 84 ?? ?? ?? ?? 48 8D 4C 24 50 E8 ?? ?? ?? ?? 49 8B 8F 60 01 00 00"
+        }
+      ]
+    },
+    "@items/guard.pi.flags": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "items/ClientInventoryTransfer",
+            "size": 3072
+          },
+          "pattern": "F6 46 {items/guard.pi.flags:d8} 01 4C 89 B4 24 88 73 00 00 0F 84 ?? ?? ?? ?? 4D 8B 77 10 41 83 7E 0C 00 0F 85 ?? ?? ?? ?? 4D 8B 87 78 01 00 00 48 8D 4C 24 40 49 8B 56 14 4D 8B CC E8 ?? ?? ?? ?? 80 7C 24 40 00 0F 85 ?? ?? ?? ?? 49 8B 0C 24 8B 5C 24 48 49 8B BF 10 01 00 00 E8 ?? ?? ?? ?? 48 8B D0"
+        }
+      ]
+    },
+    "@items/guard.pi.amount": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "items/ClientInventoryTransfer",
+            "size": 3072
+          },
+          "pattern": "0F B7 46 {items/guard.pi.amount:d8} 48 8D 55 70 44 8B 4E 10 48 8D 4C 24 40 4C 8B 46 14 C6 44 24 38 01 C6 44 24 30 01 C7 44 24 28 01 00 00 00 66 89 44 24 20 E8 ?? ?? ?? ?? EB ?? E8 ?? ?? ?? ?? 48 8D 54 24 50 48 8D 4D 70 E8 ?? ?? ?? ?? 44 8B 4E 10 48 8D 55 70 4C 8B 46 14"
+        }
+      ]
     }
   },
   "constants": {
@@ -295,6 +520,51 @@
     },
     "items/record.stride": {
       "min_votes": 2
+    },
+    "items/record.binding.dye": {
+      "min_votes": 1
+    },
+    "items/record.binding.durability": {
+      "min_votes": 1
+    },
+    "items/record.binding.fuel": {
+      "min_votes": 1
+    },
+    "items/record.binding.level": {
+      "min_votes": 1
+    },
+    "items/record.binding.perks_legacy": {
+      "min_votes": 1
+    },
+    "items/record.binding.perks": {
+      "min_votes": 1
+    },
+    "items/record.binding.gem": {
+      "min_votes": 1
+    },
+    "items/guard.iter.player_input": {
+      "min_votes": 1
+    },
+    "items/guard.pi.source_entity": {
+      "min_votes": 1
+    },
+    "items/guard.pi.target_entity": {
+      "min_votes": 1
+    },
+    "items/guard.pi.source_slot": {
+      "min_votes": 1
+    },
+    "items/guard.pi.target_slot": {
+      "min_votes": 1
+    },
+    "items/guard.pi.type": {
+      "min_votes": 1
+    },
+    "items/guard.pi.flags": {
+      "min_votes": 1
+    },
+    "items/guard.pi.amount": {
+      "min_votes": 1
     }
   },
   "features": {
@@ -328,7 +598,31 @@
         "@characters/Read.refs",
         "@characters/Write.refs",
         "@characters/Read.record.stride",
-        "@characters/Write.record.stride"
+        "@characters/Write.record.stride",
+        "items/PageBuilder",
+        "items/PlayerItemsLoot",
+        "items/SourceEntityId",
+        "items/StorageDestroyEntity",
+        "items/CmdDestroyEntity",
+        "items/CommandCreateEntity",
+        "items/ClientInventoryTransfer",
+        "@items/PageTemplateGuid",
+        "@items/record.binding.dye",
+        "@items/record.binding.durability",
+        "@items/record.binding.fuel",
+        "@items/record.binding.level",
+        "@items/record.binding.perks_legacy",
+        "@items/record.binding.perks",
+        "@items/record.binding.gem",
+        "@items/guard.iter.player_input",
+        "@items/guard.pi.source_entity",
+        "@items/guard.pi.target_entity",
+        "@items/guard.pi.source_slot",
+        "@items/guard.pi.target_slot",
+        "@items/guard.pi.type",
+        "@items/guard.pi.flags",
+        "@items/guard.pi.amount",
+        "items/PageTemplateGuid"
       ],
       "constants": [
         "characters/struct.main_pages",
@@ -338,7 +632,22 @@
         "characters/struct.equip1",
         "characters/struct.equip_last",
         "characters/struct.refs",
-        "items/record.stride"
+        "items/record.stride",
+        "items/record.binding.dye",
+        "items/record.binding.durability",
+        "items/record.binding.fuel",
+        "items/record.binding.level",
+        "items/record.binding.perks_legacy",
+        "items/record.binding.perks",
+        "items/record.binding.gem",
+        "items/guard.iter.player_input",
+        "items/guard.pi.source_entity",
+        "items/guard.pi.target_entity",
+        "items/guard.pi.source_slot",
+        "items/guard.pi.target_slot",
+        "items/guard.pi.type",
+        "items/guard.pi.flags",
+        "items/guard.pi.amount"
       ]
     }
   }
