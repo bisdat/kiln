@@ -22,6 +22,7 @@
 //! repository; id tables and values exports are kept per build in the maintainer folder ([`ids::Store`]).
 pub mod formula;
 pub mod ids;
+pub mod mirror;
 pub mod refl;
 pub mod regmap;
 pub mod roundtrip;
@@ -85,6 +86,9 @@ pub struct Proof {
     pub side: String,
     pub exe_sha256: String,
     pub old_exe_sha256: Option<String>,
+    /// a client record mirrored from this server build's proof ([`mirror`]), not proven by a lab of its own
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mirror_of: Option<String>,
     pub first_build: bool,
     pub refl: Option<refl::ReflDiff>,
     pub formula: formula::Report,
@@ -360,6 +364,22 @@ impl Proof {
     /// One line: what the proof covered (the record's "proof").
     pub fn summary(&self) -> String {
         let mut parts = Vec::new();
+        if let Some(server) = &self.mirror_of {
+            parts.push(format!("mirrors the server proof of {} (owner ruling: no client is run for a proof)", short(server)));
+            if let Some(r) = &self.refl {
+                let n = |s: refl::Status| r.rows.iter().filter(|(q, d)| !q.ends_with(".(entries)") && d.status == s).count();
+                parts.push(format!("layout {} rows the same as the server build's, {} differ", n(refl::Status::Same),
+                                   r.rows.iter().filter(|(q, d)| !q.ends_with(".(entries)") && d.status != refl::Status::Same).count()));
+            }
+            let (ok, n) = self.ok_rows();
+            let unproven = self.rows.values().filter(|r| r.state == "unproven").count();
+            parts.push(format!("rows ok {ok}/{n}{}", if unproven > 0 { format!(" ({unproven} unproven)") } else { String::new() }));
+            let mut s = format!("kilnctl regproof --mirror ({}): {}", self.when, parts.join("; "));
+            if !self.verified {
+                s.push_str(&format!("; NOT verified: {}", self.blockers.first().map(String::as_str).unwrap_or("?")));
+            }
+            return s;
+        }
         match &self.refl {
             Some(r) => {
                 let n = |s: refl::Status| r.rows.iter().filter(|(q, d)| !q.ends_with(".(entries)") && d.status == s).count();
@@ -543,6 +563,10 @@ pub struct Gather {
     pub steam_build: Option<String>,
     pub first_build: bool,
     pub accept: Vec<String>,
+    /// a client record mirrored from this server record ([`mirror`]); the server exe (or its reflection dump) beside it
+    pub mirror: Option<PathBuf>,
+    pub server_exe: Option<PathBuf>,
+    pub server_refl: Option<PathBuf>,
 }
 
 fn read_json(p: &Path) -> Result<Value> {
@@ -631,15 +655,24 @@ fn copy_tree(from: &Path, to: &Path) -> Result<()> {
 /// writes can be the candidate.
 fn run_record(g: &Gather, exe: &Path, new_sha: &str, previous: Option<&Path>, prev_ids: Option<&ids::IdTable>, problems: &mut Vec<String>,
               notes: &mut Vec<String>) -> Result<(Option<Value>, Option<ids::IdTable>)> {
+    run_record_with(g, exe, new_sha, previous, prev_ids, true, problems, notes)
+}
+
+/// [`run_record`]; without `with_entries` (a mirrored client record) the previous record's aliases are carried as they are.
+#[allow(clippy::too_many_arguments)]
+fn run_record_with(g: &Gather, exe: &Path, new_sha: &str, previous: Option<&Path>, prev_ids: Option<&ids::IdTable>, with_entries: bool,
+                   problems: &mut Vec<String>, notes: &mut Vec<String>) -> Result<(Option<Value>, Option<ids::IdTable>)> {
     let root = g.out.join("root");
     let _ = std::fs::remove_dir_all(&root);
     copy_tree(&g.tree.join("regmap/common"), &root.join("regmap/common"))?;
     copy_tree(&g.tree.join("schema"), &root.join("schema"))?;
     let entries = g.out.join("entries.json");
-    let st = python(&g.tree, "tools/registrygen/regmap_entries.py", &["--exe".as_ref(), exe.as_os_str(), "--out".as_ref(), entries.as_os_str()],
-                    &g.out, "entries.log");
-    let have_entries = matches!(&st, Ok(s) if s.success()) && entries.is_file();
-    if !have_entries {
+    let have_entries = with_entries && {
+        let st = python(&g.tree, "tools/registrygen/regmap_entries.py", &["--exe".as_ref(), exe.as_os_str(), "--out".as_ref(), entries.as_os_str()],
+                        &g.out, "entries.log");
+        matches!(&st, Ok(s) if s.success()) && entries.is_file()
+    };
+    if with_entries && !have_entries {
         problems.push(format!("regmap_entries.py did not read the new build's entries (the .kfc must be beside the exe; {})",
                               g.out.join("entries.log").display()));
     }
@@ -913,6 +946,49 @@ pub fn gather(g: &Gather) -> Result<Inputs> {
     Ok(inp)
 }
 
+/// Makes and finds what a mirrored client record needs: the server record, both exes' reflections, the client exe's candidate
+/// record (its aliases carried from the tree's record of that exe). Never writes into the Kiln tree.
+pub fn gather_mirror(g: &Gather) -> Result<mirror::MirrorInputs> {
+    ids::guard(&g.out, &g.tree)?;
+    std::fs::create_dir_all(&g.out).with_context(|| format!("creating {}", g.out.display()))?;
+    let server_path = g.mirror.as_ref().context("--mirror names the server record")?;
+    let map = regmap::load(&g.tree)?;
+    let mut inp = mirror::MirrorInputs { regmap_digest: regmap::digest(&g.tree)?, server: Some(read_json(server_path)?), ..Default::default() };
+    let client_sha = match (&g.new_exe, &g.new_refl) {
+        (Some(e), _) => crate::util::sha256(e)?,
+        (None, Some(d)) => refl::TypeDb::parse(&std::fs::read_to_string(d)?)?.exe_sha256,
+        _ => bail!("which client build? pass --new-exe (or --new-refl)"),
+    };
+    inp.client_sha = client_sha.to_ascii_lowercase();
+    let mut dump = |dump: &Option<PathBuf>, exe: &Option<PathBuf>, which: &str| -> Option<refl::TypeDb> {
+        let r = match (dump, exe) {
+            (Some(p), _) => std::fs::read_to_string(p).map_err(anyhow::Error::from).and_then(|t| refl::TypeDb::parse(&t)).with_context(|| format!("{}", p.display())),
+            (None, Some(e)) => dump_refl(g, &map, e, which),
+            _ => return None,
+        };
+        r.map_err(|e| inp.problems.push(format!("the {which} reflection: {e:#}"))).ok()
+    };
+    let server_refl = dump(&g.server_refl, &g.server_exe, "server");
+    let client_refl = dump(&g.new_refl, &g.new_exe, "client");
+    inp.server_refl = server_refl;
+    inp.client_refl = client_refl;
+    match (&g.record, &g.new_exe) {
+        (Some(r), _) => inp.candidate = Some(read_json(r)?),
+        (None, Some(exe)) => {
+            let previous = g.tree.join("regmap/client").join(format!("{}.json", inp.client_sha));
+            let previous = previous.is_file().then_some(previous);
+            if previous.is_none() {
+                inp.notes.push("the tree has no record of this client exe: the candidate carries no aliases".into());
+            }
+            let (rec, _) = run_record_with(g, exe, &inp.client_sha, previous.as_deref(), None, false, &mut inp.problems, &mut inp.notes)?;
+            inp.candidate = rec;
+        }
+        _ => {}
+    }
+    inp.map = map;
+    Ok(inp)
+}
+
 impl ids::Store {
     pub fn values_path(&self, side: &str, exe_sha256: &str) -> PathBuf {
         self.dir.join(side).join(format!("values-{side}-{exe_sha256}.json"))
@@ -1010,6 +1086,9 @@ pub struct CliArgs {
     pub accept: Vec<String>,
     pub mark: bool,
     pub replace: bool,
+    pub mirror: Option<PathBuf>,
+    pub server_exe: Option<PathBuf>,
+    pub server_refl: Option<PathBuf>,
 }
 
 /// A server instance's Kiln data folder and its gate copy's (where a lab boot of the new exe wrote its outputs).
@@ -1067,6 +1146,9 @@ pub fn cli(a: CliArgs) -> Result<i32> {
     if a.side != "server" && a.side != "client" {
         bail!("--side is server or client");
     }
+    if a.mirror.is_some() {
+        return mirror_cli(a);
+    }
     let inst = a.name.as_deref().map(crate::config::load).transpose()?;
     if inst.is_some() && a.side != "server" {
         bail!("an instance is a server; for the client side pass --tree and the client's exe and lab outputs");
@@ -1078,7 +1160,7 @@ pub fn cli(a: CliArgs) -> Result<i32> {
     let mut g = Gather {
         side: a.side.clone(), tree, deployed: inst.as_ref().map(crate::kiln::kiln_dir), out: PathBuf::new(), store: None, new_exe: a.new_exe, old_exe: a.old_exe, new_refl: a.new_refl,
         old_refl: a.old_refl, record: a.record, ids: a.ids, prev_ids: a.prev_ids, evidence: a.evidence, game_build: a.game_build,
-        steam_build: a.steam_build, first_build: a.first_build, accept: a.accept,
+        steam_build: a.steam_build, first_build: a.first_build, accept: a.accept, ..Default::default()
     };
     if let Some(i) = &inst {
         if g.new_exe.is_none() && g.new_refl.is_none() && g.record.is_none() {
@@ -1107,6 +1189,33 @@ pub fn cli(a: CliArgs) -> Result<i32> {
         println!("          - {b}");
     }
     Ok(if p.verified && (!a.mark || inst.is_some()) { 0 } else { 1 })
+}
+
+/// `kilnctl regproof --side client --mirror <server record>`: the client record from the server lab proof (owner ruling,
+/// [`mirror`]). Writes the record into `--out` (commit it as regmap/client/<exe sha256>.json); exit 0 when verified.
+fn mirror_cli(a: CliArgs) -> Result<i32> {
+    if a.side != "client" || a.name.is_some() || a.mark {
+        bail!("--mirror makes a client record from a server record: --side client, no instance, no --mark (commit the record from --out)");
+    }
+    let tree = a.tree.clone().context("which Kiln tree? pass --tree")?;
+    let mut g = Gather {
+        side: "client".into(), tree, new_exe: a.new_exe, new_refl: a.new_refl, record: a.record, game_build: a.game_build,
+        steam_build: a.steam_build, mirror: a.mirror, server_exe: a.server_exe, server_refl: a.server_refl, ..Default::default()
+    };
+    g.out = match a.out {
+        Some(o) => o,
+        None => default_out("client-mirror", g.new_exe.as_deref()),
+    };
+    let inp = gather_mirror(&g)?;
+    let p = mirror::mirror(&inp, &crate::util::fmt_utc(std::time::SystemTime::now()));
+    let rec = inp.candidate.as_ref().map(|c| record(&p, c));
+    write_outputs(&p, rec.as_ref(), &g.out)?;
+    println!("{}", p.summary());
+    for b in &p.blockers {
+        println!("          - {b}");
+    }
+    println!("regproof  {} (report {})", if p.verified { "VERIFIED" } else { "not verified" }, g.out.join("report.txt").display());
+    Ok(if p.verified { 0 } else { 1 })
 }
 
 /// The registry proof inside `kilnctl update` / `kilnctl port`, right after the lab gate (whose copy holds the lab's

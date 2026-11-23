@@ -96,6 +96,17 @@ the alias deltas below; the entries file and the id tables hold the game's names
 build folder; at run time kiln.content keeps the id table of the running build in its own data folder). Without
 `--entries` the previous record's aliases are carried as they are.
 
+**Client records mirror the server proof** (owner ruling, 2026-11-23): no game client is ever run for a proof. `kilnctl
+regproof --side client --tree <tree> --new-exe <client exe> --mirror regmap/server/<server sha>.json --server-exe <server
+exe> --game-build <b> --out <dir>` (both exes read as data) writes the client record into `<dir>`: a client row is `ok` only
+when the same row is `ok` in the verified server record AND the client exe's reflection gives the row the same layout as the
+server exe's (the members its paths walk, their types and offsets, the enum values it maps, and the registry's entry
+members). Every other mapped row is `unproven`: with the server's reason where the server proof left it unproven, else
+"layout differs from the proven server build". The mirror is `verified` only when the server record is verified and of the
+same game build and both reflections are of the two exes; its layouts and aliases are the client exe's own (regmap_check.py,
+the aliases carried from the tree's record of that exe). Commit `regmap-client-<sha>.json` from `<dir>` as
+`regmap/client/<sha>.json`, and mirror again whenever the server record changes.
+
 **Id tables kept per build.** kilnctl keeps one id table per game build in a maintainer folder, `$KILN_REGMAP_IDS`
 (default `~/.local/state/kiln/regmap-ids/<side>/ids-<side>-<exe sha256>.json`, beside each proven build's values export
 `values-<side>-<exe sha256>.json`), harvests the tables kiln.content wrote into a lab's or instance's data folder
