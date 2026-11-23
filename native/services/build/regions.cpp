@@ -14,8 +14,9 @@
 // kept chunks the entries of that same list do not save whole (every 4 m block), so the save keeps Kiln's edits outside
 // bases too, without a box (and a Flame Altar in the world list) for chunks a base saves already. The other two callers
 // get the game's list as its builder wrote it. When a game update breaks the world save's call-site pattern, every
-// caller gets the boxes, as up to 0.2.0-dev.30.8: a lost edit is worse than extra altars. Thanks bisdat (kiln#136) for
-// the covered-chunk filter and its bounds checks.
+// caller gets the boxes, as up to 0.2.0-dev.30.8: a lost edit is worse than extra altars. The game's voxel writer keeps
+// at most 4,096 stored chunks per record, so a base that touches more chunks does not count as saving any, and no Kiln
+// box covers more than 4,096 chunks. Thanks bisdat (kiln#136) for the covered-chunk filter and its bounds checks.
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -57,6 +58,11 @@ constexpr int kBlocks = kChunk / kBlock;  // blocks per chunk edge: 4, 64 blocks
 constexpr uint64_t kWholeChunk = ~uint64_t{0};
 constexpr size_t kEntry = 0x30;         // one entry of the game's region list
 constexpr uint64_t kMaxGameEntries = 256;  // far more than the game's base limit: a larger list is not read
+// The game's voxel writer collects a record's stored chunks into a fixed scratch array of 4,096 keys on its stack and
+// skips every chunk past it without a word, in hash order, so the loss is scattered over the whole record (server
+// 0x83d200, the array set up at 0x83d2f8, grow callback 0x832de0; client 0x10b89b0, 0x10b8aa8, 0x10ae690;
+// docs/re/build.md §12).
+constexpr double kWriterChunks = 4096;
 
 struct Box {
     int32_t lo[3], hi[3];  // chunk coordinates, inclusive
@@ -111,12 +117,21 @@ uint64_t blocks_saved_by(const std::array<int32_t, 3>& chunk, const RegionBounds
                     saved |= uint64_t{1} << (x + kBlocks * y + kBlocks * kBlocks * z);
     return saved;
 }
+// The 16 m chunk positions an entry's bounds touch, edges included (the serializer's first step): chunk c of an axis
+// touches [lo, hi] when 16c <= hi and lo <= 16c + 16. The most stored chunks the voxel writer can collect for it.
+double chunk_positions(const RegionBounds& b) {
+    double n = 1;
+    for (int axis = 0; axis < 3; ++axis) n *= std::floor(b.hi[axis] / 16.0) - std::ceil(b.lo[axis] / 16.0) + 2;
+    return n;
+}
 // Every block of the chunk is in the blob of some entry: the loader applies each blob's blocks and skips its empty ones,
-// so blocks two bases save between them count too.
+// so blocks two bases save between them count too. An entry whose bounds touch more chunk positions than the writer
+// collects may lose any of its chunks (a zone a mod made larger than 240 m, or exactly 240 m with faces on the 16 m
+// grid): it counts as saving none, and Kiln's kept chunks in it keep their boxes.
 bool chunk_saved_whole(const std::array<int32_t, 3>& chunk, const std::vector<RegionBounds>& native) {
     uint64_t saved = 0;
     for (const RegionBounds& b : native)
-        if ((saved |= blocks_saved_by(chunk, b)) == kWholeChunk) return true;
+        if (chunk_positions(b) <= kWriterChunks && (saved |= blocks_saved_by(chunk, b)) == kWholeChunk) return true;
     return false;
 }
 // The kept chunks the game's entries do not save whole: those outside every base, and those on a base's edge that reach
@@ -348,7 +363,28 @@ void load_locked() {
     KB_I("save regions: %zu chunk(s) kept for world %s (%s)", loaded, w.c_str(), reinterpret_cast<const char*>(g_file.u8string().c_str()));
 }
 
-// Greedy boxes over the chunk set: runs along x, merged across z when equal, then across y.
+// A Kiln box is a record of its own, and its bounds sit 0.05 m inside its chunks, so the chunks it covers are the
+// positions it touches: a box over the voxel writer's 4,096 is cut into slabs across its longest axis, as thick as the
+// other two axes allow (a slab still too large is cut again).
+void split_for_writer(const Box& b, std::vector<Box>& out) {
+    double extent[3], volume = 1;
+    for (int k = 0; k < 3; ++k) volume *= extent[k] = static_cast<double>(b.hi[k]) - b.lo[k] + 1;
+    if (volume <= kWriterChunks) {
+        out.push_back(b);
+        return;
+    }
+    const int axis = extent[0] >= extent[1] && extent[0] >= extent[2] ? 0 : extent[1] >= extent[2] ? 1 : 2;
+    const double cross = volume / extent[axis];
+    const int64_t step = cross >= kWriterChunks ? 1 : static_cast<int64_t>(kWriterChunks / cross);
+    for (int64_t lo = b.lo[axis]; lo <= b.hi[axis]; lo += step) {
+        Box slab = b;
+        slab.lo[axis] = static_cast<int32_t>(lo);
+        slab.hi[axis] = static_cast<int32_t>(std::min<int64_t>(lo + step - 1, b.hi[axis]));
+        split_for_writer(slab, out);
+    }
+}
+
+// Greedy boxes over the chunk set: runs along x, merged across z when equal, then across y; none over 4,096 chunks.
 std::vector<Box> boxes_for_chunks(const ChunkSet& chunks) {
     std::map<std::pair<int32_t, int32_t>, std::vector<int32_t>> rows;  // (y, z) -> sorted x
     for (const auto& c : chunks) rows[{c[1], c[2]}].push_back(c[0]);
@@ -402,7 +438,9 @@ std::vector<Box> boxes_for_chunks(const ChunkSet& chunks) {
         runs.clear();
         for (auto& [k, b] : coarse) runs.push_back(b);
     }
-    return runs;
+    std::vector<Box> boxes;
+    for (const Box& b : runs) split_for_writer(b, boxes);
+    return boxes;
 }
 std::vector<Box> boxes_locked() { return boxes_for_chunks(g_chunks); }
 
