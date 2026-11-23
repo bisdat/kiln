@@ -156,7 +156,7 @@ them it prints `SKIP` and exits 0:
 
 ```sh
 # 1. the compiler's export (any machine with the .NET SDK)
-KILN_TOOL_CONTENT_FIXTURE=$PWD/out/compiler.json dotnet test managed/tests/Kiln.Blocks.Tests --filter ToolCompilerContentTests
+mkdir -p out && KILN_TOOL_CONTENT_FIXTURE=$PWD/out/compiler.json dotnet test managed/tests/Kiln.Blocks.Tests --filter ToolCompilerContentTests
 # 2. an installed game, only read as files (KILN_GAME defaults to ~/.local/share/Steam/steamapps/common/Enshrouded;
 #    KILN_CLIENT_EXE names another copy of its client exe)
 KILN_GAME=<game folder> native/services/tools/tests/test-tool-content.sh out/tool-content out/compiler.json
