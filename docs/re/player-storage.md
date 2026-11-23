@@ -184,6 +184,8 @@ The inventory-addressed references in `ClientPlayerInputData` are:
 | ChangeWeaponGemAction | weaponPide, weaponGem, forgeEntityId |
 | PlayerCraftingAction | craftingStationId, waterSourceId |
 
+References the walk does not see (it reads each action's own fields only; client reflection, svn 1287369): `parryAction.targetEntityIds` (`StaticArray<EntityId,4>`, combat targets), `cursorInput.selectObjectAction.selectedObjectId` (a `GameObjectId` inside `ClientCursorInput`, which has its own `consumedCursorSelectObjectAction`), and the whole `fromAdminClient` group (`adminDestroyItemAction.inventorySlotId` and `adminPerkAction.inventorySlotId` address an inventory cell).
+
 Inspect the low u32 entity in each InventorySlotId too: the separate source/target entity fields may be zero while a slot directly names a storage page. For a literal all-entity-reference guard, the same reflection also identifies LoreVoiceoverAction.playerEntityId, TeleportAction.target, SelectDialogOptionAction.targetNpc, StopDialogOptionAction.targetNpc, FlameAltarAction.baseEntityId, ChangeLogicEntityConfigAction.logicEntityId and RedeemItemAction.targetEntityId. Only reject references to the exact tracked storage set; ordinary game targets remain unaffected.
 
 ### InventoryTransfer entry, for reference
