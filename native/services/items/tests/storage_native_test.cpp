@@ -740,6 +740,24 @@ void review_tests() {
     CHECK(kitems::state(51, life_two, 4, &state) == KILN_OK && state.status == KIS_STATE_READY);
     CHECK(!kitems::model.players.at(3).holders.count("life:one") && kitems::model.players.at(3).holders.count("life:two"));
 
+    // 6b. Clearing a storage's reference never clears a reference the player has since pointed at another cell.
+    const uint64_t bag_cell = KILN_SLOT_ID(5555, 2);
+    std::memcpy(components[{4, kHashSlotSelection}].data() + 14 * 8, &bag_cell, 8);
+    CHECK(kitems::set_ref(51, life_two, 4, 14, KIS_REF_CLEAR) == KILN_OK);
+    kitems::storage_program(access);
+    uint64_t selected = 0;
+    std::memcpy(&selected, components[{4, kHashSlotSelection}].data() + 14 * 8, 8);
+    CHECK(selected == bag_cell);
+    CHECK(kitems::set_ref(51, life_two, 4, 14, 3) == KILN_OK);
+    kitems::storage_program(access);
+    std::memcpy(&selected, components[{4, kHashSlotSelection}].data() + 14 * 8, 8);
+    const auto& life_holder = kitems::model.players.at(3).holders.at("life:two");
+    CHECK(selected == KILN_SLOT_ID(life_holder.pages[0], 3) && life_holder.refs[KIS_REF_ARROW] == 3);
+    CHECK(kitems::set_ref(51, life_two, 4, 14, KIS_REF_CLEAR) == KILN_OK);
+    kitems::storage_program(access);
+    std::memcpy(&selected, components[{4, kHashSlotSelection}].data() + 14 * 8, 8);
+    CHECK(selected == 0 && kitems::model.players.at(3).holders.at("life:two").refs[KIS_REF_ARROW] == KIS_REF_NONE);
+
     // 7. A character read at a join that does not parse: storage goes off (a layout mismatch, with a caps reason) and
     //    the slot's previous character keeps nothing a new occupant of the slot could use or pair.
     std::vector<uint8_t> character(0x5500);
