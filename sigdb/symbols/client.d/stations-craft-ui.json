@@ -9,6 +9,13 @@
         "stations/ResolveRecipeInputs",
         "content/RecipeFind"
       ]
+    },
+    "crafting.source_ui": {
+      "symbols": [
+        "rules/client.CraftableAmount",
+        "stations/ResolveRecipeInputs",
+        "content/RecipeFind"
+      ]
     }
   }
 }

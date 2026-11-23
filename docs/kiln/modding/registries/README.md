@@ -11,8 +11,10 @@ registry replaces raw data paths, not services.
 
 **Status in this release: experimental (`KILNX031`), schema version 0.1.0.** The schemas, the generated C# types (`Kiln.Registry`), the field
 catalog (`Kiln.Registry.RegistrySchema`) and these pages ship, and the registry stage reads a data pack's `registry` section at
-start (fields that apply now or at world load also follow a pack's hot reload). Entry add and remove are refused, each with
-its reason in kiln.log and registry.json, until their back-end ships; `Mod.OnRegistry` (C#) comes in a later release. Until a registry is marked stable its shape may change in any
+start (fields that apply now or at world load also follow a pack's hot reload). Since mod API **0.2.17**, C# mods can author
+through `Mod.OnRegistry(RegistryContext)` and use explicit owner-scoped live changes through `Kiln.Registry.Registry.Change`.
+Entry add and remove remain refused, each with its reason in kiln.log and registry.json, until their back-end ships.
+Until a registry is marked stable its shape may change in any
 release; from API 1.0.0 the stable registries' contract is frozen (additive only).
 
 **Versions.** Experimental schemas are 0.x; a schema reaches 1.0.0 when it is frozen with API 1.0.0. Within one breaking
@@ -33,6 +35,122 @@ matched. `schema/registry/ids.lock.json` keeps every field's contract and every 
 
 The per-registry pages are generated from `schema/registry/<registry>.json` by `tools/registrygen/registrygen.py`; edit
 the schema, never the page.
+
+## C# authoring (API 0.2.17)
+
+Reference `Registry` in `KilnServices` and opt into experimental diagnostic `KILNX031`. Published entry types remain in
+`Kiln.Registry`; the context and `Mod.OnRegistry` live in `Kiln.Api`. See the complete
+[RegistryEdits sample](../../../../mods/samples/RegistryEdits/RegistryEditsMod.cs).
+
+```csharp
+[RegistryEntryPoints(RegistryEntryPoint.GameStart | RegistryEntryPoint.WorldLoad)]
+public sealed class Stacks : Mod
+{
+    public override void OnRegistry(RegistryContext context)
+    {
+        var registry = Kiln.Registry.Registry.For(context);
+        registry.Alter(view => view.Items["game:material_t1_wood_logs"].MaxStack = 500);
+    }
+}
+```
+
+The class attribute is constant metadata; Kiln reads it without running the mod. No attribute on a real override means
+**GameStart**. Declaring points without an override (`KILN122`), zero/unknown flags, or automatic Manual (`KILN123`) is invalid.
+
+| Point | Invocation and inputs |
+|---|---|
+| `GameStart` | A retained author instance, once per Add/Alter/Final pass at resources-ready. Global settings only. It is not the transient `OnBoot` instance. |
+| `ModLoad` | Runtime instance after `OnLoad`, once the base registry exists. Global settings only, even when a world already exists. |
+| `WorldLoad` | Runtime instance for each native world token, including a new world with no save id yet. Per-world settings remain unavailable until bound. Adoption reauthors this point with the bound id, replacing its earlier id-less layers. |
+| `HotReload` | Replacement runtime instance, after the old owner's live changes are removed. When declared, it replaces `ModLoad` on reload; the two points never both run for the same replacement. A pass that replaces `ModLoad` keeps ModLoad's process lifetime (its layers follow the process into later worlds); if any of its phases read per-world settings, all of the pass's layers belong to that world and the pass runs again once the next world's settings are bound, replacing them. A `HotReload` pass of a mod without `ModLoad` is world-bound when a world exists. |
+| `Manual` | Explicit `Registry.Change`, not an automatic class flag. Requires an active world. |
+
+GameStart authors get the registry context, **not cross-mod runtime exports**. Declared dependencies still order the edits:
+a dependency's edits run first. A mod that needs another mod's runtime export chooses ModLoad or later. A declared export
+lookup at GameStart is refused with `RegistryContextError.RuntimeExportUnavailable` (assembly loading can wrap that error).
+Private helper assemblies in the mod's own folder remain loadable; they are not another mod's runtime export graph.
+
+Automatic points run all selected mods' Add, then Alter, then Final in load order. Ordinary property assignments are absolute and target
+Alter; `registry.Final(...)` and `registry.Items.Final(pattern, ...)` explicitly target Final. At GameStart, Final handlers read the
+Add+Alter view, never another mod's Final commit. A callback's own pending writes are projected into its typed read view;
+they are submitted only after successful return.
+
+**What runtime reads see.** A runtime point (`ModLoad`, `WorldLoad`, `HotReload`) works like GameStart's stage: every
+callback of one pass, in every phase, reads the same pre-pass values, whatever the load order, and a mod's reads leave out
+its own registry layers (its GameStart edits and its earlier live changes). So `item.MaxStack = item.MaxStack * 2` restates
+the mod's intent at each point (10 becomes 20 at ModLoad and stays 20 at WorldLoad) instead of doubling again, and two mods
+doing it in one pass both read 10. The pass's edits are committed only after every callback ran: all Adds, then all Alters,
+then all Finals, each in load order (dependencies first), so an earlier mod's Final still beats a later mod's Alter. Between
+passes the later commit wins (a ModLoad Final of 70 loses to a later Manual Alter of 80; reverting that restores 70).
+`Registry.Change` and `Registry.Read` read the live values as they are, the mod's own layers included.
+
+**Refusals per entry.** At ModLoad, WorldLoad and HotReload an edit that one selected entry cannot take refuses that entry
+alone, named in kiln.log and registry.json, and applies to the others: an exclusive claim on that entry, an entry missing
+in this world, a config the entry lacks, or a value its storage cannot hold exactly (an `items.manaCost x1.5` over
+`Select("*")` where one item stores whole numbers: that item's reason starts with `not_exact: `). The result is `Applied`
+with `Refused > 0` and the first reason. An entry refused at binding is left out for that world only; a ModLoad change
+tries it again in the next world. GameStart edits bind per entry the same way at world load (a conflict at the stage itself
+still refuses the edit). `Registry.Change` stays all-or-nothing: a binding or evaluation failure of any entry refuses the
+whole transaction with the same reason, and nothing of it is written. A throwing callback submits none of that turn's buffered edits and
+reverts that author's earlier commits from the same point. Other points' retained layers remain; a later point or world
+can retry the author. When Kiln itself cannot take the pass yet (its begin or commit is refused because the live back-end is
+still being installed, a budget is full, or the base is still being prepared), the point is not a fault: Kiln undoes that
+pass's commits and authors the same point again on a later tick (the next tick first, then backing off to 5 s), logged once;
+after ten tries it is logged as a fault with the real error. An exception from the author's own code is always a fault, a
+`KilnUnavailableException` from a read inside `OnRegistry` (an unmapped field, an entry without that config) included.
+`Select(pattern)` returns entries by Kiln id; list properties use the generated clear/append/remove/index APIs.
+All three passes are invoked even though entry creation is not yet exposed. Runtime points wait for the host tick;
+native resources-ready callbacks never execute runtime authors inline. Layers from distinct declared points compose:
+for example, a WorldLoad append stacks on a retained GameStart append. Prefer absolute assignments or list replacement
+when the same intended value is authored at several points.
+
+Contexts carry `EntryPoint`, `Phase`, `World` (Kiln token, kind and bound save id), and `Identity`. Code, point/pass,
+world identity and settings actually observed in that callback contribute to Identity; no executable plan cache is used.
+Global `Config.Register<T>()` and `WorldConfig<T>()` can be used as inputs; fallback authoring snapshots do not install
+watchers or write defaults. Register live settings in `OnLoad` to get ordinary change events. Per-world settings are
+refused at GameStart/ModLoad, and while a world's settings are unbound. Later points never write restart-only fields:
+they return/report `RestartRequired` rather than silently applying them.
+
+Keep copied values, not contexts/entries/lists. Their operations fail with `RegistryContextException.Code` after return
+(`Closed`), unload (`Unloaded`), on another thread (`WrongThread`), or a world switch (`WorldChanged`). Metadata and copied
+results remain snapshots. A resolved `Registry.Read(view => ...)` frame is expiring and read-only.
+
+### Explicit changes and ready
+
+Inside a loaded mod callback on the active world's thread:
+
+```csharp
+var change = Kiln.Registry.Registry.Change(view =>
+    view.Items["game:material_t1_wood_logs"].MaxStack = 500);
+if (!change.Result.Ok) Log.Warn(change.Result.Reason ?? "registry change not applied");
+// Keep the owner-bound handle if needed. Revert recomposes the remaining layers, not an old memory snapshot.
+var reverted = change.Revert();
+if (!reverted.Ok) Log.Warn(reverted.Reason ?? "registry revert not applied");
+```
+
+Inside `Registry.Change`, `Final(...)` is an ordinary Alter edit in that one transaction; it does not schedule a
+separate all-mod Final pass. The transaction still applies in commit order over earlier retained changes.
+
+`RegistryChangeResult` copies outcome, accepted/refused/skipped counts, world token, generation and reason. `Ok` means
+Applied or Reverted with no refused edits or skipped foreign bytes. PendingWorld/PendingResource do not claim bytes were
+changed. RestartRequired, WorldRequired, Refused, Skipped and Unverified stay distinct. A change is not disposable:
+only explicit `Revert()` on the tick thread or owner retirement removes its layer, never leaving a scope. Process ModLoad layers persist across worlds; world-bound layers expire with
+their world. Already committed GameStart layers stay until process restart, including through a runtime hot reload.
+
+Subscribe to `Registry.Ready` in `OnLoad` for copied stage/live ready notifications; the Host removes the handler at unload.
+Its `RegistryReady.Phase` uses `RegistryReadyPhase.Start` or `WorldLoad`, not the author's `RegistryPhase` passes.
+Notifications are posted through the owner's scheduler, never run inline on a native loader thread or inside a commit.
+A late subscriber likewise receives the last snapshot on its next tick. This event reports readiness/generation, not proof that
+every field in a transaction applied: inspect results and the registry report. `Registry.Available` checks the transport;
+per-field capability rows still decide whether a field is mapped.
+
+### Offline authoring tests
+
+`KilnHarness.Registry.Seed(registry, id, field, valueJson)` supplies copied JSON. `Author(mod, point, phase, world)` invokes
+one loaded instance's OnRegistry pass and returns copied IR (or null for no edits). Contexts expire before it returns.
+This is a recording-only fake: seed the next pass explicitly. It does not simulate live application, pass composition,
+mapping proof or automatic scheduling, and leaves native registry availability false. Host transport/lifecycle tests and
+native backend tests cover those separate paths; offline authoring is not real-game byte proof.
 
 ## Capabilities
 
@@ -99,6 +217,24 @@ At each start Kiln runs three stages, each across **all** mods (in the load orde
   loader wrote into the game's archive before Kiln, and are reported with them. Old mods are never refused because of a
   registry edit. Conflicts inside the registry and with Kiln's older paths are found for certain; other loaders' DLL
   patches and hooks are best-effort and labelled so.
+
+### Native callback and owner lifetime
+
+`kiln.registry` keeps submitted batches and callbacks under their caller's owner. Revoking that owner removes its queued
+batches (including parse refusals) and its stage/ready subscriptions, even before any world exists. Another live owner of
+the same mod keeps its own batches. Admission and dispatch also check the core's current owner state, so a retiring
+notification still being delivered cannot admit or start another callback into the dead owner.
+
+The stage takes the surviving queued batches at startup. Edits it already took remain until the next process start;
+revocation is not a rollback of committed registry layers. A stage callback already in flight may finish, but if its
+owner was revoked, that turn's uncommitted edits are dropped and the report names the reason. A fault in either kind of
+native callback removes that subscription; a faulted stage turn is dropped as well.
+
+Unsubscribe and revoke never wait for callback quiescence. A callback whose dispatch already started on another thread
+may still finish, so its native function and user state must stay valid until that dispatch has completed. Ready dispatch
+rechecks each subscription, including when an earlier callback in the same START or WORLDLOAD event unsubscribes or
+revokes a later one. These lifetime rules add no members to `kiln.registry`, which stays 88 bytes. Live transactions
+use the separate 56-byte `kiln.registry.live` v1 table. The managed Host owns these subscriptions and their retirement.
 
 ### Live values in the report
 

@@ -59,6 +59,21 @@ public sealed class ToolActionCompilerTests
         Assert.Equal(BlockIds.Fnv(plan.PrimarySequence),(uint)rules["sequences[1].sequenceId"]!);
         Assert.Null(item.Refs);
     }
+    [Fact] public void OnlyARemoveActionTurnsOffTheCursorMaterialCheckOfItsInput()
+    {
+        // Add on primary keeps the base brush's own check (the game's cursor then wants a selected, stocked material);
+        // a Remove takes nothing and asks for nothing, on whichever input it is bound to (kiln#133).
+        const string primary="equipment.cursorConfig.checkRequiredMaterialsOnPrimaryAction",secondary="equipment.cursorConfig.checkRequiredMaterialsOnSecondaryAction";
+        var f=Fixture();
+        var addFirst=Compiler.ApplyToolActions(f.Context,f.Low,new ItemDefinition{Guid=Guid.NewGuid(),Name="a",BaseOn="Building_Overgrowth_Shape_Small"},
+            Compiler.LowerToolActions(f.Context,f.Low,"shaper","Shaper",Add,Remove));
+        Assert.False(addFirst.Fields!.ContainsKey(primary));
+        Assert.False((bool)addFirst.Fields[secondary]);
+        var removeFirst=Compiler.ApplyToolActions(f.Context,f.Low,new ItemDefinition{Guid=Guid.NewGuid(),Name="b",BaseOn="Building_Overgrowth_Shape_Small"},
+            Compiler.LowerToolActions(f.Context,f.Low,"carver","Carver",Remove,Add));
+        Assert.False((bool)removeFirst.Fields![primary]);
+        Assert.False(removeFirst.Fields.ContainsKey(secondary));
+    }
     [Fact] public void ExportsBindingForTheRealNativeWriterFixture()
     {
         var path=Environment.GetEnvironmentVariable("KILN_TOOL_WRITER_FIXTURE");

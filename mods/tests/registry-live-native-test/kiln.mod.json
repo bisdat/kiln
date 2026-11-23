@@ -1,0 +1,11 @@
+{
+  "id": "registry-live-native-test",
+  "name": "Registry live native table lab checks",
+  "version": "0.1.0",
+  "apiVersion": "0.2",
+  "entryAssembly": "RegistryLiveNativeTest.dll",
+  "side": "server",
+  "clients": "none",
+  "advanced": true,
+  "description": "Lab-only native ABI check: begin/submit/commit/read/revert, code precedence, restart refusal, current world token. No raw game offsets or functions."
+}

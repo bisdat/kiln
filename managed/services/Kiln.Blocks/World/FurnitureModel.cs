@@ -78,32 +78,59 @@ public sealed record RequiresBlock
 }
 
 /// <summary>Day (the game's day phase, from 06:00 by default) or night.</summary>
-public enum DayPart { Day, Night }
+public enum DayPart
+{
+    /// <summary>Only by day: the game's day phase.</summary>
+    Day,
+    /// <summary>Only by night.</summary>
+    Night,
+}
 
 /// <summary>A prompt's word: the game's own, so every language has it. <see cref="Id"/> is the game's loca tag; <see cref="Reference"/> its GUID, where the game keeps one.</summary>
+/// <param name="Key">The name JSON uses for it, such as <c>"open"</c>.</param>
+/// <param name="Id">The game's loca tag.</param>
+/// <param name="Reference">The game's GUID of the word, or null where the game keeps none.</param>
 [JsonConverter(typeof(PremadeConverter<InteractVerb>))]
 public sealed record InteractVerb(string Key, uint Id, string? Reference = null) : IPremade
 {
+    /// <summary>The game's <c>open</c> prompt.</summary>
     public static readonly InteractVerb Open = new("open", 0x4e82e309, "0af70198-e619-46df-a6ce-65fb60878a59");
+    /// <summary>The game's <c>close</c> prompt.</summary>
     public static readonly InteractVerb Close = new("close", 0x3959a87f, "da5990c2-f8f0-413c-bb4d-fe057f4b4ca1");
+    /// <summary>The game's <c>use</c> prompt.</summary>
     public static readonly InteractVerb Use = new("use", 0xc22a47e8, "6f9f9f8b-b23a-48e2-a684-86f41cebddf1");
+    /// <summary>The game's <c>activate</c> prompt.</summary>
     public static readonly InteractVerb Activate = new("activate", 0xc3d944f7, "b7a2ef75-8469-4c5e-8268-b009016713a0");
+    /// <summary>The game's <c>deactivate</c> prompt.</summary>
     public static readonly InteractVerb Deactivate = new("deactivate", 0x4ac71b17, "2442f0e9-f3b8-4a68-bf0a-2abdbe57dd50");
+    /// <summary>The game's <c>flip</c> prompt.</summary>
     public static readonly InteractVerb Flip = new("flip", 0x65bbaf0f, "4ebf2d0d-a845-4d04-8049-39212ece043a");
+    /// <summary>The game's <c>read</c> prompt.</summary>
     public static readonly InteractVerb Read = new("read", 0x631937dc, "b6287321-1aa4-4eb9-a7e6-85cfa241e1c9");
+    /// <summary>The game's <c>sit</c> prompt.</summary>
     public static readonly InteractVerb Sit = new("sit", 0xdfb7e778);
+    /// <summary>The game's <c>sleep</c> prompt.</summary>
     public static readonly InteractVerb Sleep = new("sleep", 0xc4e0f1cb);
+    /// <summary>The game's <c>search</c> prompt.</summary>
     public static readonly InteractVerb Search = new("search", 0x9a599d0b);
+    /// <summary>The game's <c>inspect</c> prompt.</summary>
     public static readonly InteractVerb Inspect = new("inspect", 0x260798eb);
+    /// <summary>The game's <c>talk</c> prompt.</summary>
     public static readonly InteractVerb Talk = new("talk", 0xd9861c4b);
+    /// <summary>The game's <c>craft</c> prompt.</summary>
     public static readonly InteractVerb Craft = new("craft", 0xe0a9e31d);
+    /// <summary>The game's <c>collect</c> prompt.</summary>
     public static readonly InteractVerb Collect = new("collect", 0x9095e8bd);
+    /// <summary>The game's <c>harvest</c> prompt.</summary>
     public static readonly InteractVerb Harvest = new("harvest", 0x5e09f8d2);
+    /// <summary>The game's <c>drink</c> prompt.</summary>
     public static readonly InteractVerb Drink = new("drink", 0xc2f79d24);
     internal static readonly InteractVerb[] All = [Open, Close, Use, Activate, Deactivate, Flip, Read, Sit, Sleep, Search, Inspect, Talk, Craft, Collect, Harvest, Drink];
 }
 
 /// <summary>What a player plays when they use something: one of the game's sequences, or any sequence by GUID (<c>new InteractPlay("mine", guid)</c>; in JSON the GUID).</summary>
+/// <param name="Key">The name JSON uses for it, such as <c>"sit"</c>.</param>
+/// <param name="Sequence">The GUID of the sequence that plays.</param>
 [JsonConverter(typeof(InteractPlayConverter))]
 public sealed record InteractPlay(string Key, Guid Sequence) : IPremade
 {
@@ -132,7 +159,9 @@ public sealed record InteractPlay(string Key, Guid Sequence) : IPremade
 /// <summary>Where on the thing the player sits or lies, in its own axes: metres from its origin, and which way they face, in degrees about the vertical (0: its +z).</summary>
 public sealed record SpotBlock
 {
+    /// <summary>Metres from the thing's origin, in its own axes.</summary>
     public Vector3 At { get; init; }
+    /// <summary>Degrees about the vertical, which way the player faces. 0 is its +z.</summary>
     public double Facing { get; init; }
 }
 
@@ -190,7 +219,15 @@ public sealed record DoorBlock : PropBlock
 }
 
 /// <summary>A door's side: its front, its back, or both.</summary>
-public enum DoorSide { Both, Front, Back }
+public enum DoorSide
+{
+    /// <summary>Either side. For <see cref="DoorBlock.Opens"/>, away from whoever uses it; for <see cref="DoorBlock.Sides"/>, a player may use it from either side.</summary>
+    Both,
+    /// <summary>The front side: for <see cref="DoorBlock.Opens"/> always the front way, for <see cref="DoorBlock.Sides"/> only a player on the front side may use it.</summary>
+    Front,
+    /// <summary>The back side: for <see cref="DoorBlock.Opens"/> always the back way, for <see cref="DoorBlock.Sides"/> only a player on the back side may use it.</summary>
+    Back,
+}
 
 /// <summary>A bed: the game's sleep and rest (a player who sleeps in it gets the game's rested status, by the comfort around them), and comfort of the bed category. It starts from the game's wooden bed.
 /// <see cref="SpawnPoint"/> and <see cref="SkipsNight"/> are Kiln's, on the server: the game's beds do neither.</summary>

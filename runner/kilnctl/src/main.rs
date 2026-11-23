@@ -39,7 +39,7 @@ struct Cli {
 #[derive(Args, Clone)]
 struct GateArgs {
     /// Test mods (mods/tests/<id>), comma separated [default: world, players, chat, items, settings, gameplay,
-    /// hooks, combat, spawn, content]
+    /// hooks, combat, spawn, content, registry-proof (the registry proof's lab evidence)]
     #[arg(long, value_delimiter = ',')]
     tests: Option<Vec<String>>,
     /// UDP query port of the copy [default: the instance's + 1]
@@ -289,6 +289,17 @@ enum Cmd {
         /// With --mark: replace a verified record of the same build (the old one stays as .json.bak)
         #[arg(long, requires = "mark")]
         replace: bool,
+        /// A client record mirrored from this server build's verified record (owner ruling: no client is run for a
+        /// proof): a row is ok only where the server proof has it ok and the client exe's layout of it is the server's.
+        /// With --side client, --tree, the client's --new-exe and --server-exe (or --server-refl)
+        #[arg(long, conflicts_with_all = ["name", "mark"])]
+        mirror: Option<PathBuf>,
+        /// With --mirror: the proven server build's exe, read as data and never run
+        #[arg(long, requires = "mirror")]
+        server_exe: Option<PathBuf>,
+        /// With --mirror: the server exe's reflection dump instead of the exe
+        #[arg(long, requires = "mirror")]
+        server_refl: Option<PathBuf>,
     },
     /// Back up the savegame folder to a timestamped tar.gz in the backup dir
     Backup { name: String },
@@ -564,11 +575,11 @@ fn dispatch(cmd: Cmd) -> anyhow::Result<i32> {
         Cmd::Gate { name, baseline, gate } => return ops::gate_cmd(&load(&name)?, &gate.opts(), baseline),
         Cmd::Regproof {
             name, side, tree, new_exe, old_exe, new_refl, old_refl, record, ids, prev_ids, evidence, game_build, steam_build, out,
-            first_build, accept, mark, replace,
+            first_build, accept, mark, replace, mirror, server_exe, server_refl,
         } => {
             return regproof::cli(regproof::CliArgs {
                 name, side, tree, new_exe, old_exe, new_refl, old_refl, record, ids, prev_ids, evidence, game_build, steam_build, out,
-                first_build, accept, mark, replace,
+                first_build, accept, mark, replace, mirror, server_exe, server_refl,
             });
         }
         Cmd::Backup { name } => {

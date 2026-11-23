@@ -334,6 +334,13 @@
         }
       ]
     },
+    "items/SelectEquipment": {
+      "comment": "EquipItem's selection helper (out,tx,u8 remove,u32 player,SlotSelection*,u8 equipmentSlot,u64 cell,ItemInfo*,u32 pide). Queues op7, previous selection at op+0x28; commit applies, rollback restores. Server 26430253 0x1b28f0. Since 0.2.0-dev.30.6; docs/re/items.md section 21.",
+      "find": [{ "pattern": "48 89 6C 24 18 57 41 54 41 55 41 56 41 57 48 83 EC 30 4C 8B A4 24 98 00 00 00 4C 8D BA 98 00 00 00" }]
+    },
+    "@items/EquipItem.selection": {
+      "find": [{ "scope": { "symbol": "items/EquipItem", "size": 1536 }, "pattern": "4C 89 6C 24 38 48 89 7C 24 30 88 44 24 28 48 8B 44 24 70 48 89 44 24 20 E8 {items/SelectEquipment:rel32}" }]
+    },
     "items/EquipItem": {
       "comment": "the game's equip (EMF's equipItem): (Result12* out, tx, u64 inventorySlotId, u8 keen::EquipmentSlot) moves the stack in that slot into the equipment slot of the program's current entity (the player: ProgramContext +8, not the transaction's operator), inside the transaction; an EquipmentSlot of 24 or more lets the item pick its own slot. Error 0 ok, 0x11 refused (the item's EquipmentSlotType is not the slot's, or a move failed), 0x15 no item there, 0x1f the current entity has no SlotSelection or InventorySetup, or no free slot. Server 26430253 0x1b4e70, client 26430625 0x4152d0 (docs/re/items.md section 16)",
       "find": [
@@ -395,6 +402,10 @@
     "items/attr.level_max": { "min_votes": 1 }
   },
   "features": {
+    "items.give_equip": {
+      "requires": ["items.equip", "items.equip_sets", "items.move", "items.pide_options"],
+      "symbols": ["items/SelectEquipment", "@items/EquipItem.selection"]
+    },
     "items.transaction": {
       "symbols": ["items/InventoryTxCtor", "items/InventoryTxInit", "items/InventoryAddItems", "items/InventoryCommit",
                   "items/InventoryRollback", "items/InventoryFreeArrays", "items/ReadOther", "items/InventoryRemoveItems",

@@ -1,0 +1,10 @@
+{
+  "id": "registry-managed-test",
+  "name": "Managed registry lab checks",
+  "version": "0.1.0",
+  "apiVersion": "0.2",
+  "entryAssembly": "RegistryManagedTest.dll",
+  "side": "server",
+  "clients": "none",
+  "description": "Server-lab checks of retained authors, declared points, typed edits, manual atomicity/revert and hot reload dropping an edit."
+}

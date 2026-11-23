@@ -5,6 +5,12 @@ namespace Kiln;
 
 /// <summary>Owned material counts from the game's normal building supplies. Observation, never payment authority.
 /// Since 0.2.0-dev.30.5.</summary>
+/// <param name="Item">The pool entry's placement item.</param>
+/// <param name="TerrainMaterial">The terrain cell the item places (1 to 127).</param>
+/// <param name="VoxelsPerItem">How many voxels one item pays for (1 to 1,000,000); placement pays the ceiling of the
+/// added volume divided by it.</param>
+/// <param name="Backpack">How many of the item the player carries in the backpack.</param>
+/// <param name="MagicChests">How many of the item the connected magic chests hold.</param>
 public sealed record ToolMaterialStock(ItemId Item, byte TerrainMaterial, int VoxelsPerItem, ulong Backpack, ulong MagicChests);
 
 /// <summary>An immutable, bounded snapshot. It owns every entry and retains no game view. Since 0.2.0-dev.30.5.</summary>

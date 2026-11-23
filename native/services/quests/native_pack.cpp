@@ -850,6 +850,43 @@ void report_bootpack_rows() {
         bodies ? KILN_CAP_REASON_NONE : KILN_CAP_REASON_SERVICE_OLDER, KilnStr{body_why.data(), body_why.size()});
 }
 
+// 16f S5: the last build's body statuses, kept next to Kiln.Blocks' NPC files (kiln-quests/native/), so that a body which
+// was ready at the previous start and is no longer built at all is reported "removed" once. Not a replay of game state.
+qb::ojson body_ledger(const qb::ojson& rows, uint64_t generation) {
+    qb::ojson all = rows;
+    const std::string data = path_of(KILN_PATH_DATA);
+    if (data.empty()) return all;
+    const fs::path dir = fs::path(widen(data)) / L"kiln-quests" / L"native";
+    const fs::path file = dir / L"npc-bodies.ledger.json";
+    std::error_code ec;
+    const qb::ojson before = fs::exists(file, ec) ? qb::ojson::parse(read_file(file), nullptr, false) : qb::ojson();
+    if (before.is_object() && before.contains("bodies") && before["bodies"].is_array())
+        for (const auto& old : before["bodies"]) {
+            if (!old.is_object() || old.value("state", "") != "ready") continue;
+            const auto same = [&](const qb::ojson& row) { return row.value("mod", "") == old.value("mod", "") && row.value("npc", "") == old.value("npc", ""); };
+            if (std::any_of(rows.begin(), rows.end(), same)) continue;
+            all.push_back({{"mod", old.value("mod", "")}, {"npc", old.value("npc", "")}, {"key", old.value("key", "")}, {"state", "removed"},
+                           {"reason", "no longer built at this start"}, {"template", old.value("template", "")}, {"model", ""}, {"graph", ""},
+                           {"closure", old.value("closure", "")}, {"generation", generation}});
+        }
+    qb::ojson keep = qb::ojson::array();
+    for (const auto& row : rows)
+        keep.push_back({{"mod", row.value("mod", "")}, {"npc", row.value("npc", "")}, {"key", row.value("key", "")}, {"state", row.value("state", "")},
+                        {"template", row.value("template", "")}, {"closure", row.value("closure", "")}});
+    if (keep.empty() && !fs::exists(file, ec)) return all;  // no body ever: no file
+    fs::create_directories(dir, ec);
+    fs::path tmp = file;
+    tmp += L".tmp";
+    {
+        std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
+        f << qb::ojson{{"format", 1}, {"bodies", keep}}.dump(1);
+    }
+    ec.clear();
+    fs::rename(tmp, file, ec);
+    if (ec) KW("native: the NPC body ledger could not be written (%s): a body taken out is not reported as removed at the next start", ec.message().c_str());
+    return all;
+}
+
 void build_per_mod(const std::vector<qb::ModInput>& mods, const qb::GameData& game, kc::bootpack::Call bridge,
                    const std::set<std::string>* required, std::vector<LeftOut>* left_out, Stop* stop, bool client) {
     g_pack_used = true;
@@ -866,6 +903,7 @@ void build_per_mod(const std::vector<qb::ModInput>& mods, const qb::GameData& ga
     }
     for (const auto& error : result.errors) KW("native: %s", error.c_str());
     for (const auto& warning : result.warnings) KW("native: %s", warning.c_str());
+    result.manifest["bodies"] = body_ledger(result.bodies, result.generation);
     g_manifest = result.manifest.dump();
     g_pack_applied = std::move(result.applied);
     g_served = built(result.manifest["mods"]);

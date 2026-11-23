@@ -15,8 +15,6 @@
     <KilnServices>Client;World</KilnServices>
     <KilnFeatures>tasks.pool</KilnFeatures>
     <KilnGameIds>None</KilnGameIds>
-    <!-- WorldConcurrent is KILNX003 on dev30/integration until the experimental status ends (2d2d55a9); harmless after -->
-    <NoWarn>$(NoWarn);KILNX003</NoWarn>
   </PropertyGroup>
   <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.targets" />
   <Target Name="_TasksClientCheckSharedOut" AfterTargets="_KilnModFiles">

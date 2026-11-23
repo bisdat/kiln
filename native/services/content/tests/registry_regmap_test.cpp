@@ -9,6 +9,7 @@
 #include <sstream>
 #include <string>
 
+#include "../../../core/src/services/boot_gamedata.h"
 #include "../registry/regmap.h"
 #include "../registry/schema.g.h"
 
@@ -104,6 +105,30 @@ int main(int argc, char** argv) {
         map::BuildRecord bad;
         map::load_record(map::json::parse(R"({"regmap": 1, "side": "moon", "exeSha256": "xyz", "verified": "yes", "rows": {"items.maxStack": "fine"}})"), &bad, &errs);
         CHECK(has(errs, "side") && has(errs, "exeSha256") && has(errs, "verified") && has(errs, "items.maxStack"));
+        // kilnctl regproof: a row that only lacks lab evidence is "unproven", with its reason (kept off; not "changed")
+        std::vector<std::string> e2;
+        map::BuildRecord u;
+        CHECK(map::load_record(map::json::parse(R"({"regmap": 1, "side": "server", "exeSha256": "f0d824be7fcd48ebfe2458ff5c28da26060c2074e3ec1fcac587e5a1d508aeb2",
+            "verified": true, "rows": {"items.maxStack": "ok", "items.comfort": "unproven"},
+            "reasons": {"items.comfort": "no lab round trip of it on this build yet"}})"), &u, &e2));
+        CHECK(e2.empty() && u.rows.at("items.comfort") == map::BuildRow::Unproven &&
+              u.reasons.at("items.comfort") == "no lab round trip of it on this build yet");
+        std::vector<std::string> e3;
+        map::BuildRecord r3;
+        map::load_record(map::json::parse(R"({"regmap": 1, "side": "server", "exeSha256": "f0d824be7fcd48ebfe2458ff5c28da26060c2074e3ec1fcac587e5a1d508aeb2",
+            "verified": true, "rows": {}, "reasons": {"items.comfort": 3}})"), &r3, &e3);
+        CHECK(has(e3, "reasons.items.comfort"));
+        // The 400-byte display limit must not split a UTF-8 code point (registry state JSON uses strict UTF-8).
+        const std::string long_reason = std::string(399, 'a') + "é" + "more";
+        auto doc = map::json{{"regmap", 1}, {"side", "server"}, {"exeSha256", std::string(64, 'a')},
+                             {"verified", true}, {"rows", {{"items.comfort", "unproven"}}}, {"reasons", {{"items.comfort", long_reason}}}};
+        map::BuildRecord utf8;
+        std::vector<std::string> eu;
+        CHECK(map::load_record(doc, &utf8, &eu));
+        CHECK(utf8.reasons.at("items.comfort") == std::string(399, 'a'));
+        try { (void)map::json(utf8.reasons.at("items.comfort")).dump(); CHECK(true); }
+        catch (const map::json::exception&) { CHECK(false); }
+
     }
     // ---- the mapping state an edit gets on this build
     {
@@ -133,6 +158,14 @@ int main(int argc, char** argv) {
         CHECK(rm.mapping("items", "power", &why) == Mapping::Unmapped);        // no row at all
         CHECK(rm.mapping("items", "levels.min", &why) == Mapping::Unmapped);
         CHECK(rm.mapping("nowhere", "x", &why) == Mapping::Unmapped);
+        // unproven on this build (kilnctl regproof): kept off with the record's reason, never "a Kiln update is needed"
+        rm.build.rows["items.maxStack"] = map::BuildRow::Unproven;
+        rm.build.reasons["items.maxStack"] = "no lab round trip of it on this build yet";
+        CHECK(rm.mapping("items", "maxStack", &why) == Mapping::Unproven &&
+              why == "Unproven: items.maxStack is not proven for game build 1287369 (no lab round trip of it on this build yet); this edit was not applied");
+        rm.build.reasons.clear();
+        CHECK(rm.mapping("items", "maxStack", &why) == Mapping::Unproven && why.find("(no lab evidence on this build)") != std::string::npos);
+        rm.build.rows["items.maxStack"] = map::BuildRow::Ok;
         rm.build.verified = false;
         CHECK(rm.mapping("items", "maxStack", &why) == Mapping::Unproven);
     }
@@ -188,12 +221,19 @@ int main(int argc, char** argv) {
         fs::remove_all(d);
         fs::create_directories(d / "common");
         fs::create_directories(d / "server");
-        std::ofstream(d / "common" / "items.json") << R"({"regmap": 1, "registry": "items", "entries": {"kind": "resource", "resourceType": "keen::ItemInfo"},
+        const std::string items = R"({"regmap": 1, "registry": "items", "entries": {"kind": "resource", "resourceType": "keen::ItemInfo"},
             "rows": {"maxStack": {"paths": ["maxStackSize"], "conv": "int", "read": "restart", "backend": "live"},
                      "rolled": {"paths": ["generateRarity"], "conv": "bool", "read": "now", "backend": "live"}}})";
+        std::ofstream(d / "common" / "items.json") << items;
+        // kilnctl regproof's regmapDigest of this common folder: sha256 over "<file name>\n<sha256 of its bytes>\n"
+        namespace gd = kiln::boot_gd;
+        const std::string digest = gd::hex_of(gd::sha256("items.json\n" + gd::hex_of(gd::sha256(items)) + "\n"));
         const std::string sha(64, 'a');
-        std::ofstream(d / "server" / (sha + ".json")) << R"({"regmap": 1, "side": "server", "exeSha256": ")" + sha +
-                                                             R"(", "gameBuild": "1", "verified": true, "rows": {"items.maxStack": "ok", "items.rolled": "ok"}})";
+        auto record = [&](const std::string& digest_member) {
+            std::ofstream(d / "server" / (sha + ".json")) << R"({"regmap": 1, "side": "server", "exeSha256": ")" + sha +
+                R"(", "gameBuild": "1", "verified": true, )" + digest_member + R"("rows": {"items.maxStack": "ok", "items.rolled": "ok"}})";
+        };
+        record(R"("regmapDigest": ")" + digest + R"(", )");
         map::RegMap rm;
         std::vector<std::string> errs;
         CHECK(map::load_dir(d.string(), "server", sha, &rm, &errs));
@@ -201,6 +241,27 @@ int main(int argc, char** argv) {
         std::string why;
         CHECK(rm.mapping("items", "maxStack", &why) == Mapping::Unproven && why.find("routing rule") != std::string::npos);
         CHECK(rm.mapping("items", "rolled", &why) == Mapping::Mapped);
+        // review2 S1: a record proves the mapping it was proven on. Another digest, none, or a common file edited after the
+        // proof: no row is enabled, refused as Unproven naming the reason
+        CHECK(rm.common_digest == digest && rm.build.regmap_digest == digest);
+        for (const std::string& member : {R"("regmapDigest": ")" + std::string(64, 'b') + R"(", )", std::string()}) {
+            record(member);
+            map::RegMap other;
+            errs.clear();
+            CHECK(map::load_dir(d.string(), "server", sha, &other, &errs) && other.has_build && other.build.verified);
+            CHECK(other.mapping("items", "rolled", &why) == Mapping::Unproven && why.find("another Kiln mapping") != std::string::npos);
+        }
+        record(R"("regmapDigest": ")" + digest + R"(", )");
+        std::ofstream(d / "common" / "items.json") << items << "\n";
+        map::RegMap edited;
+        errs.clear();
+        CHECK(map::load_dir(d.string(), "server", sha, &edited, &errs) && edited.common_digest != digest);
+        CHECK(edited.mapping("items", "rolled", &why) == Mapping::Unproven && why.find("another Kiln mapping") != std::string::npos);
+        record(R"("regmapDigest": "not hex", )");
+        map::RegMap bad;
+        errs.clear();
+        map::load_dir(d.string(), "server", sha, &bad, &errs);
+        CHECK(has(errs, "regmapDigest"));
         fs::remove_all(d);
     }
     // ---- the repository's regmap: every file loads, every row routes as the schema says, the records are whole
@@ -216,6 +277,10 @@ int main(int argc, char** argv) {
             for (const std::string& e : errs) std::printf("  regmap: %s\n", e.c_str());
             CHECK(errs.empty());
             CHECK(one.has_build && one.build.verified && one.build.side == side);
+            // review2 S1: every committed verified record is bound to this tree's regmap/common (a common edit needs a new proof)
+            if (one.build.regmap_digest != one.common_digest)
+                std::printf("  regmap %s: the record's regmapDigest %s is not regmap/common's %s\n", side, one.build.regmap_digest.c_str(), one.common_digest.c_str());
+            CHECK(one.build.regmap_digest == one.common_digest);
             CHECK(one.registries.size() == 5);
             for (const auto& [name, reg] : one.registries) {
                 const auto r = map::check_routing(reg);
@@ -232,6 +297,17 @@ int main(int argc, char** argv) {
             }
             std::printf("regmap %s: %d mapped, %d unproven, %d unmapped\n", side, mapped, unproven, unmapped);
             CHECK(unmapped == 0 && mapped + unproven == static_cast<int>(std::size(gen::kFields)));
+            // review2 N9: the shipped behaviour of the records, not only their counts. A proven row applies; a row the game's
+            // read time is not traced for stays off with that reason; the client record mirrors the server proof row for row
+            // (owner ruling 2026-11-23: no client proof of its own), and keeps the server's reasons.
+            std::string why;
+            CHECK(one.mapping("items", "maxStack", &why) == Mapping::Mapped);
+            CHECK(one.mapping("items", "block", &why) == Mapping::Unproven && why.find("not traced") != std::string::npos);
+            if (std::string(side) == "client") {
+                CHECK(one.build.rows == rm.build.rows);
+                CHECK(one.build.reasons == rm.build.reasons);
+                CHECK(one.build.game_build == rm.build.game_build && one.build.regmap_digest == rm.build.regmap_digest);
+            }
             rm = std::move(one);
         }
         std::printf("regmap: %zu registries loaded from %s\n", rm.registries.size(), argv[1]);

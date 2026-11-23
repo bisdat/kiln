@@ -151,6 +151,11 @@ What a body of your own gets from the AI's creature, and what Kiln changes so it
 - `AttackBlock`: `Plays` a state, `Range`, `MinRange`, `Cooldown`, `Style`, `Chance`, `HitAt`, `OnHit` (what the blow does to everything in front within
   range, through `Angle` degrees) or a `Delivery` (a projectile, a cone, any of the spells' deliveries) for a ranged attack. Kiln makes its sequence: the
   attack's state from the start, the blow at `HitAt`, turning to the target before it. On a game body, `Sequence` plays one of the game's as it is.
+  `Angle` is the **whole cone aperture**, not a half-angle: more than 0 and at most 360 degrees. `359` really reaches 359 degrees (a one-degree gap behind);
+  `360` hits all around, including directly behind, with no directional test. Angles are never silently narrowed.
+  `Range` is more than 0 and at most 200 metres; `MinRange` is at least 0 and strictly less than `Range`.
+  `HitAt` is at least 0 and strictly less than `Length` when supplied; `Length` is more than 0 and at most 30 seconds.
+  The cooked clip's duration can impose a shorter limit at runtime. `kiln lint` checks the authored bounds and relationships before the block loads.
 - `RuleBlock`: `On` (when it is looked at), `Every`, `Cooldown`, `Chance`, `When` (all hold), `Do`. Conditions and actions are kiln.creatures'
   ([creatures.md](../services/creatures.md#rules-and-arsenals)): the game's kinds (`Is.HealthBelow`, `Is.TargetWithin`, `Is.Game(...)`, `Act.Game(...)`),
   Kiln's (`Is.InPhase`, `Is.Night`, `Act.SetPhase`, `Act.Attack`), your code (`Is.Custom`, `Act.Custom`), and `Act.Effect(effect)`: an effect block on the

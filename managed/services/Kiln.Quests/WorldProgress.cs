@@ -15,6 +15,7 @@ public static unsafe class WorldProgress
     /// <summary>The knowledge service is loaded (most facts are knowledge).</summary>
     public static bool Available => Knowledge.Available;
 
+    /// <summary>What world progress can read on this server and how far its index of the game's data is.</summary>
     public static WorldProgressStatus Status
     {
         get
@@ -206,14 +207,20 @@ public static unsafe class WorldProgress
     /// <summary>The roots at Elixir Wells.</summary>
     public static IReadOnlyList<ShroudRoot> ElixirWells => [.. ShroudRoots.Where(r => r.ElixirWell)];
 
+    /// <summary>Every Ancient Obelisk (empty until <see cref="PlacesReady"/>).</summary>
     public static IReadOnlyList<Obelisk> Obelisks => WorldIndex.Places?.Obelisks ?? [];
 
     /// <summary>Every boss placed in the world (empty until <see cref="BossesReady"/>).</summary>
     public static IReadOnlyList<Boss> Bosses => WorldIndex.Bosses ?? [];
 
+    /// <summary>A spire by id (<c>grassland</c>) or by its marker template name; null when there is none.</summary>
     public static Spire? Spire(string id) => Find(Spires, id, s => s.Id, s => s.Template);
+    /// <summary>A Flame Shrine or Sanctum by id (<c>grassland_flameshrine_01</c>) or by its marker template name; null
+    /// when there is none.</summary>
     public static FlameShrine? Shrine(string id) => Find(Shrines, id, s => s.Id, s => s.Template);
+    /// <summary>A Shroud Root by id; null when there is none.</summary>
     public static ShroudRoot? ShroudRoot(string id) => Find(ShroudRoots, id, r => r.Id, _ => null);
+    /// <summary>An Ancient Obelisk by id; null when there is none.</summary>
     public static Obelisk? Obelisk(string id) => Find(Obelisks, id, o => o.Id, _ => null);
 
     /// <summary>A boss by id (<c>enemy_boss_fog_dragon</c>), or the first of a template's placements by template name.</summary>
@@ -322,6 +329,7 @@ public static unsafe class WorldProgress
     /// <summary>One character's progress (a player in game). Tick thread for the reads.</summary>
     public static CharacterProgress For(Player player) => new(player.Entity);
 
+    /// <summary>One character's progress, as <see cref="For(Player)"/>.</summary>
     public static CharacterProgress For(EntityId player) => new(player);
 }
 
@@ -330,13 +338,20 @@ public sealed class CharacterProgress
 {
     internal CharacterProgress(EntityId player) => Player = player;
 
+    /// <summary>The player entity this progress is for.</summary>
     public EntityId Player { get; }
 
+    /// <summary>The spires unlocked as this character sees it.</summary>
     public IReadOnlyList<Spire> SpiresUnlocked => [.. WorldProgress.Spires.Where(s => s.Unlock.Holds(Player) == true)];
+    /// <summary>The spires whose top this character reached.</summary>
     public IReadOnlyList<Spire> SpireTopsReached => [.. WorldProgress.Spires.Where(s => s.TopReached?.Holds(Player) == true)];
+    /// <summary>The Flame Shrines and Sanctums this character found.</summary>
     public IReadOnlyList<FlameShrine> ShrinesFound => [.. WorldProgress.Shrines.Where(s => s.Discovery.Holds(Player) == true)];
+    /// <summary>The Shroud Roots this character destroyed.</summary>
     public IReadOnlyList<ShroudRoot> RootsDestroyed => [.. WorldProgress.ShroudRoots.Where(r => r.Destruction.Holds(Player) == true)];
+    /// <summary>The Ancient Obelisks this character read.</summary>
     public IReadOnlyList<Obelisk> ObelisksRead => [.. WorldProgress.Obelisks.Where(o => o.Reading.Holds(Player) == true)];
+    /// <summary>The bosses this character killed, among those whose kill the game records for a character.</summary>
     public IReadOnlyList<Boss> BossesKilled => [.. WorldProgress.Bosses.Where(b => b.Kill?.Holds(Player) == true)];
 
     /// <summary>The character's quests, vanilla and Kiln (<see cref="Quests.Of(EntityId)"/>).</summary>

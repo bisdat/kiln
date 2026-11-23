@@ -312,6 +312,19 @@ public sealed class UiRichBlockTests : IDisposable
         Define("w2", W(null, new TextRow { Text = "{stats.other/xp}" }));
     }
 
+    // The docs, the refusal text and UiStatImportRegistration name Blocks.ImportStat as the code path to an import: it must
+    // be a public member of Blocks, not of the internal per-mod record.
+    [Fact]
+    public void Blocks_ImportStat_is_public_on_Blocks()
+    {
+        var blocks = typeof(IBlock).Assembly.GetType("Kiln.Blocks", true)!;  // "Blocks" here is the test namespace
+        var m = blocks.GetMethod("ImportStat", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static, [typeof(ModValueKey)]);
+        Assert.NotNull(m);
+        Assert.Equal(typeof(UiStatImportRegistration), m!.ReturnType);
+        var x = Assert.Throws<System.Reflection.TargetInvocationException>(() => m.Invoke(null, [new ModValueKey("other", "xp")]));
+        Assert.IsType<InvalidOperationException>(x.InnerException);  // outside a mod's code
+    }
+
     [Fact]
     public void State_declarations_are_checked()
     {

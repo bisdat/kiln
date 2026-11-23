@@ -9,10 +9,30 @@ using System.Text.Json.Serialization;
 namespace Kiln;
 
 /// <summary>The six layers of a building surface. A block's side, top and bottom faces; its worn edges, and their top; a noise layer that breaks the rest up.</summary>
-public enum SurfacePart { Side, Top, Bottom, Edge, EdgeTop, Noise }
+public enum SurfacePart
+{
+    /// <summary>The sides of a block.</summary>
+    Side,
+    /// <summary>The top face.</summary>
+    Top,
+    /// <summary>The bottom face.</summary>
+    Bottom,
+    /// <summary>The worn edges.</summary>
+    Edge,
+    /// <summary>The top of the worn edges.</summary>
+    EdgeTop,
+    /// <summary>The layer the cooker mixes in by noise, to break up repeats.</summary>
+    Noise,
+}
 
 /// <summary>How the maps lie on a block. A roof material always maps as a roof.</summary>
-public enum SurfaceMapping { Default, Wood }
+public enum SurfaceMapping
+{
+    /// <summary>The default mapping.</summary>
+    Default,
+    /// <summary>The wood mapping.</summary>
+    Wood,
+}
 
 /// <summary>
 /// How a building material looks: walls, floors, ceilings and stairs of it.
@@ -114,7 +134,9 @@ public readonly record struct SurfaceValue
     internal string? File { get; private init; }
     internal float? Value { get; private init; }
 
+    /// <summary>A PNG by its path in the mod's folder; its red channel is the value.</summary>
     public static implicit operator SurfaceValue(string png) => new() { File = png };
+    /// <summary>A fixed value, 0 to 1.</summary>
     public static implicit operator SurfaceValue(float value) => new() { Value = value };
 }
 
@@ -133,6 +155,7 @@ public sealed record SurfaceEmissive
     /// <summary>How much it lights what is around it, through the game's global illumination. Default 4.</summary>
     public float? Gi { get; init; }
 
+    /// <summary>A map or a colour: a string that starts with <c>#</c> is the colour, any other is the map's path.</summary>
     public static implicit operator SurfaceEmissive(string mapOrColour) => mapOrColour.StartsWith('#') ? new() { Color = mapOrColour } : new() { Map = mapOrColour };
 }
 

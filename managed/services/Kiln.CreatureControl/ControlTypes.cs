@@ -159,6 +159,7 @@ public sealed class ControlChangedEvent : KilnEvent
     /// <summary>Why it changed: <see cref="ControlLeaseSnapshot.Result"/> of <see cref="After"/>.</summary>
     public ControlResultCode Cause => After.Result;
 
+    /// <summary>A one-line description: the lease, its old and new state, the cause, the transition sequence and the reason.</summary>
     public override string ToString() =>
         $"lease {Lease.Value}: {Before?.State.ToString() ?? "-"} -> {After.State} ({Cause}) seq {After.TransitionSequence}: {After.Reason}";
 }

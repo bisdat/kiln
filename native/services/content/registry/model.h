@@ -113,6 +113,9 @@ class Model {
 
     // The id table of every registry listed so far: "<registry>|<kiln id>" -> GUID text / 32-bit id (lane D's live back-end).
     void id_table(std::map<std::string, std::string>* ids, std::map<std::string, uint32_t>* nums) const;
+    // Lists every registry the per-build id table holds: the schema's and the reference tables R1's references name
+    // (templates, perks, input categories), whatever was decoded so far. Entries only: no field is decoded.
+    void list_all();
     // The same as kiln.content writes it at start (never into the repository): {"format":1, "side", "exeSha256", "decoder",
     // "registries": {"<registry>": {"<guid or #<num>>": "<kiln id>"}}}.
     json id_table_json() const;

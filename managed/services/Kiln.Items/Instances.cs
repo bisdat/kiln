@@ -498,6 +498,10 @@ internal static class ItemsStartup
         Items.ToolWear.WatchRules();
         // gear (the equipment wave): the game's own enhancement and level changes, read while a gear event has subscribers
         GearWatch.Start();
+        // player storage (0.2.0-dev.30.7): its events reach the bus from the first tick, also with no storage of this process's mods
+        PlayerStorageRuntime.Start();
+        // the owner's copy of their storages on their game (kiln:storage), on both sides before anyone joins
+        PlayerStorageMirror.Start();
         if (Environment.GetEnvironmentVariable("KILN_LAB_NO_ENTITY_SOURCES") == "1")
         {
             Backend.Current.Log(0, LogLevel.Warn, "kiln.items: KILN_LAB_NO_ENTITY_SOURCES=1: no item entity source (lab switch)");

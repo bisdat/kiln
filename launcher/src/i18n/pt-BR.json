@@ -3395,7 +3395,7 @@
       "saves": "Seus saves e mundos",
       "settings": "Configurações de mods e a pasta de configuração do Kiln (podem ter senhas de servidores)",
       "admin": "O token e o endereço do Kiln.Admin",
-      "mods": "O conteúdo dos seus mods (só nomes, tamanhos e datas dos arquivos)",
+      "mods": "O conteúdo dos seus mods (só são listados nomes de arquivos e pastas, tamanhos e datas, além dos IDs e versões dos manifestos do ShroudForge nos diagnósticos)",
       "steam": "Os arquivos da própria Steam"
     }
   },
@@ -3448,6 +3448,7 @@
     "catalog": "Catálogo",
     "runtime": "Runtime",
     "logs": "Logs",
+    "conflicts": "Conflitos",
     "saves": "Saves",
     "editor": "Editor",
     "servers": "Servidores",
@@ -6207,5 +6208,28 @@
       "vanilla": "Não são necessariamente os arquivos como a Steam os distribui. Para isso, use Verificar integridade dos arquivos do jogo na Steam (Propriedades do jogo, Arquivos instalados).",
       "unknown": "O Kiln não consegue dizer quais arquivos do jogo devolveria: {reason}."
     }
+  },
+  "playerStorage": {
+    "tab": "Armazenamento",
+    "title": "Armazenamento do jogador",
+    "readOnly": "Somente leitura. Estes itens ficam no Kiln, separados da mochila.",
+    "empty": "Este personagem não tem armazenamento do jogador.",
+    "return": "Devolver ao personagem",
+    "returnTitle": "Devolver o armazenamento a este personagem?",
+    "returnBody": "O Kiln faz um backup primeiro e adiciona o máximo de pilhas do jogo base que couber em páginas extras da mochila. Itens de mods e tudo mais ficam no armazenamento. O jogo e o Steam precisam estar fechados.",
+    "serverCopy": "Um servidor Kiln mantém sua própria cópia deste armazenamento. Se você entrar sem o Kiln, esse servidor pode devolver a cópia dele lá.",
+    "confirm": "Devolver itens",
+    "returning": "Devolvendo…",
+    "result": "{returned} pilhas devolvidas; {remaining} pilhas continuam no armazenamento.",
+    "closeGame": "Feche o Enshrouded e o Steam antes de devolver o armazenamento.",
+    "localOnly": "A devolução só está disponível para personagens LOCAL, não para saves do Steam Cloud.",
+    "saveFirst": "Salve ou descarte suas edições antes de devolver o armazenamento.",
+    "unavailable": "Não é possível devolver o armazenamento",
+    "restoreWarning": "Este personagem tem armazenamento do jogador. Um backup antigo pode corresponder a um armazenamento anterior; se esse par não estiver mais guardado, itens movidos desde aquele backup podem ser perdidos ou duplicados.",
+    "unpaired": "Este personagem mudou desde a última vez que o Kiln viu o armazenamento dele, então nada pode ser devolvido a ele. A cópia mais recente do armazenamento é exibida.",
+    "parked": "Mod desativado",
+    "kept": "kiln/data/characters e kiln/data/worlds são mantidos. Eles preservam o armazenamento do jogador até você instalar o Kiln novamente.",
+    "unreadable": "Alguns registros armazenados não podem ser exibidos. Eles ficam inalterados.",
+    "modItems": "{count} pilhas de itens de mods ficam no armazenamento: elas precisam do mod correspondente."
   }
 }

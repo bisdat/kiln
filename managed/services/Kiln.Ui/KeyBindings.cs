@@ -11,9 +11,13 @@ namespace Kiln;
 [Flags]
 public enum KeyMods
 {
+    /// <summary>No modifier.</summary>
     None = 0,
+    /// <summary>Control held.</summary>
     Ctrl = 1,
+    /// <summary>Shift held.</summary>
     Shift = 2,
+    /// <summary>Alt held.</summary>
     Alt = 4,
     /// <summary>A game controller's left shoulder button held (a pad chord: "Pad:LB+A"). Since 0.2.0-dev.30.5.</summary>
     PadLB = 8,
@@ -45,9 +49,13 @@ public enum KeyMods
 /// <see cref="KeyMods.PadRT"/>). Their codes are 0x200 and up (kiln_ui.h KILN_UI_VK_PAD_*); a pad chord never mixes with
 /// Ctrl, Shift or Alt. The buttons work with the pad the game reads (XInput: an Xbox pad, or any pad Steam Input presents
 /// as one).</para></summary>
+/// <param name="VirtualKey">The Windows virtual-key code of the key (the mouse buttons and the wheel have codes too, described above); 0 for none.</param>
+/// <param name="Mods">The modifiers held with it.</param>
 public readonly record struct KeyChord(uint VirtualKey, KeyMods Mods)
 {
+    /// <summary>No key (the default value); written "None".</summary>
     public static readonly KeyChord None = default;
+    /// <summary>True for <see cref="None"/>: no key.</summary>
     public bool IsNone => VirtualKey == 0;
 
     // Names of the left and right mouse buttons: known, so that the refusal can say why.
@@ -94,6 +102,8 @@ public readonly record struct KeyChord(uint VirtualKey, KeyMods Mods)
         return true;
     }
 
+    /// <summary>Parses "Ctrl+Shift+F8" like <see cref="TryParse"/>.</summary>
+    /// <exception cref="FormatException">The text is not a key; the message says why.</exception>
     public static KeyChord Parse(string text) =>
         TryParse(text, out var c) ? c : throw new FormatException(ParseError(text));
 
@@ -112,6 +122,7 @@ public readonly record struct KeyChord(uint VirtualKey, KeyMods Mods)
     /// 0.2.0-dev.30.5.</summary>
     public bool IsPad => PadKeys.IsPad(VirtualKey);
 
+    /// <summary>The chord as <see cref="TryParse"/> reads it: "Ctrl+K", "F8", "Pad:LB+A"; "None" for no key.</summary>
     public override string ToString()
     {
         if (IsNone) return "None";
@@ -326,6 +337,7 @@ public sealed class KeyBinding : IDisposable
         Owner = owner;
     }
 
+    /// <summary>The id the binding was registered under ("mymod.toggle").</summary>
     public string Id { get; }
     /// <summary>What the key does, as the Keys page shows it. Kiln's own bindings set it again when the language of
     /// Kiln's texts changes (internal set, any thread).</summary>
@@ -334,6 +346,7 @@ public sealed class KeyBinding : IDisposable
     /// <summary>Groups bindings in the Kiln menu (default: the mod's name).</summary>
     public string Category { get; internal set; }
 
+    /// <summary>The key the binding was registered with.</summary>
     public KeyChord Default { get; }
 
     /// <summary>The key in use (the player's choice from keybinds.json, else <see cref="Default"/>).</summary>
@@ -361,6 +374,7 @@ public sealed class KeyBinding : IDisposable
     /// mouse buttons always fire.</summary>
     public bool OnGameScreens { get; set; }
 
+    /// <summary>False: the binding does not fire. Default true.</summary>
     public bool Enabled { get; set; } = true;
 
     /// <summary>Held right now (Forge: isDown()). Never true for a binding on the wheel (a notch is a press without a
@@ -374,8 +388,10 @@ public sealed class KeyBinding : IDisposable
     internal ModContext? Owner { get; }
     internal bool Disposed;
 
+    /// <summary>Removes the binding.</summary>
     public void Dispose() => KeyBindings.Remove(this);
 
+    /// <summary>The id and the key in use: "mymod.toggle = F8".</summary>
     public override string ToString() => $"{Id} = {Key}";
 }
 
@@ -410,6 +426,7 @@ public static class KeyBindings
         return b;
     }
 
+    /// <summary>Every registered binding.</summary>
     public static IReadOnlyList<KeyBinding> All
     {
         get
@@ -418,6 +435,7 @@ public static class KeyBindings
         }
     }
 
+    /// <summary>The binding with this id, or null.</summary>
     public static KeyBinding? Find(string id) => All.FirstOrDefault(b => b.Id == id);
 
     /// <summary>Sets the key of <paramref name="id"/> and saves keybinds.json. "None" unbinds. False for an unknown
@@ -425,6 +443,7 @@ public static class KeyBindings
     /// can open the menu.</summary>
     public static bool Rebind(string id, string key) => KeyChord.TryParse(key, out var c) && Rebind(id, c);
 
+    /// <summary>Sets the key of <paramref name="id"/> and saves keybinds.json, like <see cref="Rebind(string, string)"/> with a chord already parsed.</summary>
     public static bool Rebind(string id, KeyChord key)
     {
         if (id == MenuId && (MouseKeys.IsWheel(key.VirtualKey) || key.IsPad)) return false;  // kiln.ui's menu key: keys and buttons
@@ -437,6 +456,7 @@ public static class KeyBindings
         return b != null || id == MenuId;
     }
 
+    /// <summary>Puts <paramref name="id"/> back on its default key and saves keybinds.json.</summary>
     public static void Reset(string id)
     {
         var b = Find(id);
@@ -471,6 +491,7 @@ public static class KeyBindings
         lock (Lock) _all = _all.Where(x => !ReferenceEquals(x.Owner, mod)).ToArray();
     }
 
+    /// <summary>The path of keybinds.json (the profile's config folder when one is active, else kiln/config); null when it cannot be worked out.</summary>
     public static string? FilePath
     {
         get

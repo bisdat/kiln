@@ -568,17 +568,16 @@ constexpr uint64_t kMaxCraftStock = 4096;  // a longer stock list than this is l
 
 // Who pays a craft before any station, in the game's order (InventoryPay): stock mode 2 pays the owner first and then
 // the base's stock list, mode 1 the list and then the owner. Each entity once: the owner can be one of the list's
-// chests, and counting it twice would hide a shortfall. False (the game's own payment) for any other mode (0 has no
-// base stock) and for a list longer than kMaxCraftStock, so outputs never pay before a chest the game would ask.
+// chests, and counting it twice would hide a shortfall. Mode 0 pays the owner alone (registered player sources may follow); false for an unknown mode and for a list longer than kMaxCraftStock, so outputs never pay before a chest the game would ask.
 inline bool craft_order(uint8_t mode, uint32_t owner, const uint32_t* list, uint64_t n, std::vector<uint32_t>* out) {
     out->clear();
-    if ((mode != 1 && mode != 2) || n > kMaxCraftStock || (n && !list)) return false;
+    if (mode > 2 || n > kMaxCraftStock || (n && !list)) return false;
     std::unordered_set<uint32_t> seen;
     auto push = [&](uint32_t e) {
         if (e && seen.insert(e).second) out->push_back(e);
     };
-    if (mode == 2) push(owner);
-    for (uint64_t i = 0; i < n; ++i) push(list[i]);
+    if (mode == 0 || mode == 2) push(owner);
+    if (mode != 0) for (uint64_t i = 0; i < n; ++i) push(list[i]);
     if (mode == 1) push(owner);
     return true;
 }
@@ -691,10 +690,40 @@ inline uint32_t fill_ui_status(uint32_t game, uint32_t type, uint32_t amount, co
 // Magic-chest cache, one widget for the crafting menu and the station screen). Only at the row's two call sites (`ret` is
 // one of them) and only for an item the snapshot names: the greater of the game's count and the snapshot's (the server's
 // bag, Magic chests and opted-in outputs). Everywhere else the game's own count.
+// The call sites of UiAvailableCount Kiln raises (docs/re/stations.md §10.3): the production station's row widget (two
+// calls), and the crafting menu's ingredient list and the per-option rows of its ingredient row (GitHub #132; the
+// crafting menu draws its own rows, not the factory's widget). Every other caller keeps the game's count.
+enum AvailSite : uint32_t { kAvailOther = 0, kAvailFactoryRow = 1, kAvailMenuList = 2, kAvailMenuOption = 3 };
+struct AvailSites {
+    uintptr_t row1 = 0, row2 = 0, list = 0, option = 0;  // return addresses; 0: not resolved (never matched)
+};
+inline uint32_t stock_ui_site(uintptr_t ret, const AvailSites& s) {
+    if (!ret) return kAvailOther;
+    if (ret == s.row1 || ret == s.row2) return kAvailFactoryRow;
+    if (ret == s.list) return kAvailMenuList;
+    if (ret == s.option) return kAvailMenuOption;
+    return kAvailOther;
+}
+// The count at a site, for an item the snapshot names (`have`): the greater of the game's and the snapshot's. The
+// crafting menu's list adds the game's count of the item in the view's fixed slot table (`fixed`) right after this call;
+// the snapshot already holds those stacks (the server reads every link of the player), so that call answers
+// max(game, have - fixed) and the row shows max(game + fixed, have).
+inline uint32_t stock_ui_site_count(uint32_t game, uint32_t site, bool named, uint64_t have, uint32_t fixed) {
+    if (site == kAvailOther || !named) return game;
+    const uint64_t want = site == kAvailMenuList ? (have > fixed ? have - fixed : 0) : have;
+    if (want <= game) return game;
+    return want > 0xffffffffull ? 0xffffffffu : static_cast<uint32_t>(want);
+}
+// Whether the list's answer needs the game's fixed-slot count at all (not when the game's own count wins anyway).
+inline bool stock_ui_needs_fixed(uint32_t site, bool named, uint64_t have, uint32_t game) {
+    return site == kAvailMenuList && named && have > game;
+}
+// The production station's row widget alone (its two calls), as before.
 inline uint32_t stock_ui_count(uint32_t game, uintptr_t ret, uintptr_t row1, uintptr_t row2, bool named, uint64_t have) {
-    if (!ret || (ret != row1 && ret != row2) || !named) return game;
-    if (have <= game) return game;
-    return have > 0xffffffffull ? 0xffffffffu : static_cast<uint32_t>(have);
+    AvailSites s;
+    s.row1 = row1;
+    s.row2 = row2;
+    return stock_ui_site_count(game, stock_ui_site(ret, s), named, have, 0);
 }
 
 // The fills to ask the server about: refused for missing materials, no answer yet. Oldest first, at most `cap` (the

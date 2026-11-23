@@ -45,6 +45,7 @@ public sealed class RenderFrameEvent : KilnEvent
     /// <summary>Screen size in pixels.</summary>
     public float Width { get; internal set; }
 
+    /// <summary>Screen height in pixels (<see cref="Width"/> is the width).</summary>
     public float Height { get; internal set; }
 
     /// <summary>UI scale (DPI); multiply your own pixel sizes by it.</summary>
@@ -108,6 +109,7 @@ public readonly struct RenderCamera
     /// <summary>A camera was written in the last half second (in game).</summary>
     public bool Valid { get; }
 
+    /// <summary>Where the camera is, in world metres.</summary>
     public WorldPosition Position { get; }
 
     /// <summary>Turns camera space into world space.</summary>
@@ -119,7 +121,9 @@ public readonly struct RenderCamera
     /// <summary>The game's own aspect value (projection uses the screen's width / height).</summary>
     public float Aspect { get; }
 
+    /// <summary>The near plane's distance, in metres.</summary>
     public float Near { get; }
+    /// <summary>The far plane's distance, in metres.</summary>
     public float Far { get; }
 
     /// <summary>Distance of the third-person camera from what it looks at (the character), metres.</summary>
@@ -128,12 +132,15 @@ public readonly struct RenderCamera
     /// <summary>Camera writes since the game started (one per client frame).</summary>
     public ulong Frame { get; }
 
+    /// <summary>Milliseconds since the game last wrote the camera.</summary>
     public uint AgeMs { get; }
 
     /// <summary>The view direction (unit vector, world space).</summary>
     public Vector3 Forward => (Vector3)RenderMath.Rotate(Rotation, 0, 0, 1);
 
+    /// <summary>The camera's right direction (unit vector, world space).</summary>
     public Vector3 Right => (Vector3)RenderMath.Rotate(Rotation, 1, 0, 0);
+    /// <summary>The camera's up direction (unit vector, world space).</summary>
     public Vector3 Up => (Vector3)RenderMath.Rotate(Rotation, 0, 1, 0);
 
     /// <summary>Compass heading of the view in degrees: 0 north (+z), 90 east (+x), 180 south, 270 west.</summary>
@@ -292,19 +299,38 @@ internal static class RenderMath
 /// <summary>Text alignment for <see cref="RenderDraw.Text"/>.</summary>
 public enum TextAlign
 {
-    Left, Center, Right,
+    /// <summary>The text starts at x.</summary>
+    Left,
+    /// <summary>The text is centred on x.</summary>
+    Center,
+    /// <summary>The text ends at x.</summary>
+    Right,
 }
 
 /// <summary>Text look for <see cref="RenderDraw.Text"/>.</summary>
 public enum TextStyle
 {
-    Plain, Shadow, Outline,
+    /// <summary>Plain text.</summary>
+    Plain,
+    /// <summary>Text with a drop shadow. The default of <see cref="RenderDraw.Text"/>.</summary>
+    Shadow,
+    /// <summary>Text with an outline.</summary>
+    Outline,
 }
 
 /// <summary>Marker shapes for <see cref="WorldDraw.Marker"/>.</summary>
 public enum MarkerShape
 {
-    Diamond, Circle, Square, Triangle, Cross,
+    /// <summary>A diamond.</summary>
+    Diamond,
+    /// <summary>A circle.</summary>
+    Circle,
+    /// <summary>A square.</summary>
+    Square,
+    /// <summary>A triangle.</summary>
+    Triangle,
+    /// <summary>A cross.</summary>
+    Cross,
 }
 
 /// <summary>Immediate-mode drawing in pixels (origin top left, y down) for a <see cref="RenderFrameEvent"/> handler. Drawn
@@ -320,11 +346,13 @@ public sealed unsafe class RenderDraw
     internal void End() => Volatile.Write(ref _thread, 0);
     private RenderNative.Table* T => Active ? RenderNative.T : null;
 
+    /// <summary>A line from (x0, y0) to (x1, y1) in pixels.</summary>
     public void Line(float x0, float y0, float x1, float y1, Color color, float thickness = 1)
     {
         if (T != null) T->Line(x0, y0, x1, y1, color.Rgba, thickness);
     }
 
+    /// <summary>A line from <paramref name="a"/> to <paramref name="b"/> in pixels.</summary>
     public void Line(Vector2 a, Vector2 b, Color color, float thickness = 1) => Line(a.X, a.Y, b.X, b.Y, color, thickness);
 
     /// <summary>A rectangle outline from (x0, y0) to (x1, y1).</summary>
@@ -333,6 +361,7 @@ public sealed unsafe class RenderDraw
         if (T != null) T->Rect(x0, y0, x1, y1, color.Rgba, rounding, thickness, 0);
     }
 
+    /// <summary>A filled rectangle from (x0, y0) to (x1, y1).</summary>
     public void FillRect(float x0, float y0, float x1, float y1, Color color, float rounding = 0)
     {
         if (T != null) T->Rect(x0, y0, x1, y1, color.Rgba, rounding, 1, 1);
@@ -344,16 +373,19 @@ public sealed unsafe class RenderDraw
         if (T != null) T->Circle(x, y, radius, color.Rgba, segments, thickness, 0);
     }
 
+    /// <summary>A filled circle; <paramref name="segments"/> 0 = automatic.</summary>
     public void FillCircle(float x, float y, float radius, Color color, int segments = 0)
     {
         if (T != null) T->Circle(x, y, radius, color.Rgba, segments, 1, 1);
     }
 
+    /// <summary>A triangle outline through three points.</summary>
     public void Triangle(Vector2 a, Vector2 b, Vector2 c, Color color, float thickness = 1)
     {
         if (T != null) T->Triangle(a.X, a.Y, b.X, b.Y, c.X, c.Y, color.Rgba, thickness, 0);
     }
 
+    /// <summary>A filled triangle through three points.</summary>
     public void FillTriangle(Vector2 a, Vector2 b, Vector2 c, Color color)
     {
         if (T != null) T->Triangle(a.X, a.Y, b.X, b.Y, c.X, c.Y, color.Rgba, 1, 1);
@@ -395,6 +427,7 @@ public sealed unsafe class RenderDraw
         T->Text(x, y, (color ?? Color.White).Rgba, size, flags, Utf8.Of(text));
     }
 
+    /// <summary>The size in pixels of <paramref name="text"/> at <paramref name="size"/> (0 = the overlay's font size); (0, 0) outside the handler.</summary>
     public (float Width, float Height) MeasureText(string text, float size = 0)
     {
         if (T == null) return (0, 0);
@@ -670,5 +703,13 @@ public static class Render
 
 /// <summary><see cref="Render.Stats"/>: handlers, frames posted, the time all handlers took (last frame and the slowest),
 /// handlers turned off, and the camera's state.</summary>
+/// <param name="Handlers">How many <see cref="RenderFrameEvent"/> handlers are subscribed.</param>
+/// <param name="Frames">Frames posted to them.</param>
+/// <param name="LastFrameMs">The time all handlers took in the last frame, in milliseconds.</param>
+/// <param name="MaxFrameMs">The longest time all handlers took in one frame, in milliseconds.</param>
+/// <param name="Disabled">How many handlers were turned off (over budget, stalls or exceptions).</param>
+/// <param name="Camera">The game's camera is found on this build (<see cref="Render.CameraAvailable"/>).</param>
+/// <param name="CameraValid">A camera was written lately (<see cref="RenderCamera.Valid"/>).</param>
+/// <param name="CameraFrames">Camera writes seen since the game started.</param>
 public readonly record struct RenderStats(int Handlers, long Frames, double LastFrameMs, double MaxFrameMs, int Disabled,
     bool Camera, bool CameraValid, long CameraFrames);

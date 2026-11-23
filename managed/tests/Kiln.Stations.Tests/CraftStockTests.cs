@@ -298,6 +298,54 @@ public sealed class CraftStockTests : IDisposable
         Assert.False(CraftStock.ApplyFill(new CraftStockFillAnswers([new FillAnswer(forge, 10)])));
     }
 
+    // ---- what a production station's screen counts (GitHub #132) ----
+
+    [Fact]
+    public void A_production_station_screen_counts_only_what_its_transfer_buttons_move()
+    {
+        var applied = new List<CraftStockRows>();
+        CraftStock.HelloHook = _ => { };
+        CraftStock.ApplyHook = r =>
+        {
+            applied.Add(r);
+            return true;
+        };
+        CraftStock.ServerSideHook = () => true;
+        using var k = new KilnHarness();
+        k.Capabilities.Override(CraftStock.StockUiCapability, true);
+        // coal: 8 in opted-in station outputs, 6 only in linked sources, 7 in the bag and the Magic chests
+        var snapshot = Rows((Coal, 21), (Scrap, 2), (Twig, 5));
+        CraftStockRow[] none = [new(Coal, 0), new(Scrap, 0), new(Twig, 0)];
+        // a production station's screen: its rows' transfer buttons are the game's item transfer (the bag and the Magic
+        // chests), so Kiln raises none of its rows; it names every item with none, which keeps the snapshot on for the
+        // "+1" / "+10" answers (they take outputs through the fill, not through the rows)
+        CraftStock.ClientChanged(Screen(ScreenKind.InGame), Factory());
+        CraftStock.ClientRows(snapshot);
+        Assert.Equal(none, applied[^1].Rows);
+        // a crafting menu (a crafting station's, the inventory's, an NPC's): its craft pays from outputs and links too
+        CraftStock.ClientChanged(Factory(), Screen(ScreenKind.Crafting));
+        Assert.Equal(snapshot.Rows, applied[^1].Rows);
+        var n = applied.Count;
+        CraftStock.ClientChanged(Screen(ScreenKind.Crafting), Screen(ScreenKind.Crafting));  // no change, nothing re-applied
+        Assert.Equal(n, applied.Count);
+        CraftStock.ClientChanged(Screen(ScreenKind.Crafting), Factory());
+        Assert.Equal(none, applied[^1].Rows);
+        CraftStock.ClientRows(Rows((Coal, 4)));  // a new snapshot on that screen, from a server of any version
+        Assert.Equal([new CraftStockRow(Coal, 0)], applied[^1].Rows);
+        // closed: the game's counts, also when the next screen is a factory's
+        CraftStock.ClientChanged(Factory(), Screen(ScreenKind.InGame));
+        Assert.Empty(applied[^1].Rows);
+        n = applied.Count;
+        CraftStock.ClientRows(snapshot);  // late: not kept
+        Assert.Equal(n, applied.Count);
+    }
+
+    private static GameScreen Factory() => Screen(ScreenKind.Crafting) with
+    {
+        Hud = HudScreen.FactoryCrafting,
+        Crafting = new CraftingScreen(true, 0, 0, false) { IsFactory = true, Station = new EntityId(1032) },
+    };
+
     // ---- the session ----
 
     [Fact]

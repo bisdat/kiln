@@ -48,6 +48,10 @@ MODS tab): a core an earlier hand installation left next to the game is the usua
 launcher names the same file before the start (engines.md, "Shroudlink client addon").
 As a backstop, both copies use shroudlink's per-process claim (`chestsort_server_<pid>`): whichever claims first runs
 and the other stays idle.
+shroudlink's own core hooks the event dispatcher (`gameplay/DeliverEvents`) outside Kiln's hook registry. When it does
+so before Kiln's services start, player storage does not run its client inventory guard on that code: `items.storage`
+is unavailable and its text names the module ([player storage](../services/player-storage.md)). kiln-shroudlink's own
+hook always comes after Kiln's services have started and chains onto Kiln's detour, so it does not stop storage.
 
 To move a server from shroudlink's proxy to Kiln: stop it, delete `steam_api64.dll` and rename `steam_api64_o.dll`
 back to `steam_api64.dll` (or verify the files in Steam), keep `shroudlink_mods/`, install Kiln.
@@ -266,7 +270,7 @@ Server-to-addon messages `Open`, `Close`, `Entries` (MODS menu), `SlotKeys`, `Ma
 `Toggle`, `ItemGrid`, `List`, `Tabs`; addon-to-server `SlotKey`, `Stored`, `Layout`, `ui_event` (`Click`, `Change`,
 `Submit`, `Menu`, `Closed`). All carried unchanged by shroudlink's link host; drawn by shroudlink's addon. Lab: "MODS
 menu entry", "backpack section offered", "notification: Wave answers with a HUD message", "chest categories window".
-Kiln C# equivalents: `Ui.AddWindow` (Kiln.Ui, needs Kiln in the client), `Menus.Add`, `Ui.AddHud`, `Ui.AddToast`;
+Kiln C# equivalents: `Ui.Window` / `Ui.Screen` (Kiln.Ui, needs Kiln in the client), `Ui.Menus.Add`, `Hud.Show`, `Hud.Toast`;
 slot marks and slot keys have no Kiln equivalent (gap).
 
 ### SDK helpers (compiled into each mod)

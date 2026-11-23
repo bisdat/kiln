@@ -13,6 +13,13 @@ namespace Kiln;
 /// <summary>A prop in a schematic: template, position relative to the schematic's low corner (metres), rotation and
 /// the item dismantling gives back (0 = the item that places the template; <see cref="uint.MaxValue"/> = none, what a
 /// captured prop without UsedItem gets).</summary>
+/// <param name="Template">The GUID of the prop's template; a paste places the prop by it.</param>
+/// <param name="Name">The name of the template when the prop was captured (a label: a paste uses
+/// <paramref name="Template"/>).</param>
+/// <param name="Offset">The prop's position in metres from the schematic's low corner.</param>
+/// <param name="Rotation">The prop's orientation as a quaternion.</param>
+/// <param name="ItemId">The item dismantling gives back: 0 is the item that places the template, <see cref="uint.MaxValue"/>
+/// is none.</param>
 public sealed record SchematicProp(Guid Template, string Name, Vector3 Offset, Quaternion Rotation, uint ItemId);
 
 /// <summary>How a paste writes cells.</summary>
@@ -33,6 +40,8 @@ public sealed class PasteOptions
     /// <summary>Extra offset in cells after rotation.</summary>
     public CellPos Offset { get; init; }
 
+    /// <summary>Whether the schematic's air overwrites the world: <see cref="PasteMode.Replace"/> (the default) or
+    /// <see cref="PasteMode.Merge"/>.</summary>
     public PasteMode Mode { get; init; }
 
     /// <summary>Place the schematic's props. Default true.</summary>
@@ -41,17 +50,37 @@ public sealed class PasteOptions
     /// <summary>Remove building props (UsedItem) already inside the target box first.</summary>
     public bool ClearProps { get; init; }
 
+    /// <summary>How the paste may act (<see cref="BuildFlags"/>), as for <see cref="BuildOptions.Flags"/>. Default none.</summary>
     public BuildFlags Flags { get; init; }
+
+    /// <summary>The player the paste is for (zones with <see cref="BuildFlags.RespectZones"/>, journal owner, events); none =
+    /// Kiln itself.</summary>
     public EntityId Actor { get; init; }
+
+    /// <summary>Record the paste as one journal entry so <see cref="Build.Undo"/> can revert it. Default true.</summary>
     public bool Journal { get; init; } = true;
+
+    /// <summary>How long the paste waits for the voxel tiles to stream in. Default 30 s.</summary>
     public TimeSpan LoadTimeout { get; init; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>Shown in the journal and events. Default: <c>paste</c> and the schematic's name.</summary>
     public string? Label { get; init; }
 }
 
 /// <summary>What a paste did.</summary>
+/// <param name="Box">The cells the paste covered.</param>
+/// <param name="Cells">The result of the cell write, with its refusal if there was one.</param>
+/// <param name="PropsPlaced">How many props were placed.</param>
+/// <param name="PropsFailed">How many props could not be placed.</param>
+/// <param name="PropsCleared">How many building props <see cref="PasteOptions.ClearProps"/> removed first.</param>
+/// <param name="JournalId">The id of the journal entry (<see cref="Build.UndoEntry(long, TimeSpan?)"/>); 0 when the paste was not
+/// journaled or recorded nothing.</param>
+/// <param name="Props">The entities of the props that were placed.</param>
 public sealed record PasteResult(CellBox Box, BuildResult Cells, int PropsPlaced, int PropsFailed, int PropsCleared, long JournalId,
     IReadOnlyList<EntityId> Props) : IKilnResult
 {
+    /// <summary>The paste was not refused and every prop was placed: <see cref="Cells"/> is not refused and
+    /// <see cref="PropsFailed"/> is 0.</summary>
     public bool Ok => !Cells.Refused && PropsFailed == 0;
 
     /// <summary>Why the paste is not ok: the cells' refusal (<see cref="BuildResult.Reason"/>), else how many props
@@ -68,20 +97,39 @@ public sealed class CaptureOptions
     /// <summary>The paste point, in cells from the low corner. Default: the bottom centre.</summary>
     public CellPos? Anchor { get; init; }
 
+    /// <summary>The schematic's name. Default: empty.</summary>
     public string? Name { get; init; }
+
+    /// <summary>The schematic's author. Default: empty.</summary>
     public string? Author { get; init; }
+
+    /// <summary>The schematic's description. Default: empty.</summary>
     public string? Description { get; init; }
+
+    /// <summary>How long <see cref="Schematic.CaptureAsync"/> waits for the voxel tiles to stream in. Default 30 s.</summary>
     public TimeSpan LoadTimeout { get; init; } = TimeSpan.FromSeconds(30);
 }
 
 /// <summary>A captured region: cells (x fastest, then y, then z) and props. Immutable once built.</summary>
 public sealed class Schematic
 {
+    /// <summary>The version of the .kschem format that Kiln writes and reads.</summary>
     public const int FormatVersion = 1;
     private static readonly byte[] Magic = "KSCHEM\r\n"u8.ToArray();
 
     private readonly Voxel[] _cells;
 
+    /// <summary>Builds a schematic from cells (x fastest, then y, then z). The array is used as it is, not copied: leave it
+    /// alone afterwards.</summary>
+    /// <param name="sizeX">The number of cells along x.</param>
+    /// <param name="sizeY">The number of cells along y.</param>
+    /// <param name="sizeZ">The number of cells along z.</param>
+    /// <param name="cells"><c>sizeX * sizeY * sizeZ</c> cells.</param>
+    /// <param name="props">The props, or none.</param>
+    /// <param name="anchor">The paste point in cells from the low corner; default the bottom centre.</param>
+    /// <param name="cellSize">The cell edge in metres; default 0.5.</param>
+    /// <exception cref="ArgumentException">A size is not positive, the schematic has more than 4194304 cells, or
+    /// <paramref name="cells"/> does not hold one cell per position.</exception>
     public Schematic(int sizeX, int sizeY, int sizeZ, Voxel[] cells, IReadOnlyList<SchematicProp>? props = null, CellPos? anchor = null,
         double cellSize = 0.5)
     {
@@ -97,24 +145,44 @@ public sealed class Schematic
         CellSize = cellSize;
     }
 
+    /// <summary>The number of cells along x.</summary>
     public int SizeX { get; }
+
+    /// <summary>The number of cells along y.</summary>
     public int SizeY { get; }
+
+    /// <summary>The number of cells along z.</summary>
     public int SizeZ { get; }
+
+    /// <summary>The cell edge in metres (the grid it was captured on; 0.5 by default).</summary>
     public double CellSize { get; }
+
+    /// <summary>The cells, x fastest, then y, then z: <c>index = (z * SizeY + y) * SizeX + x</c>.</summary>
     public ReadOnlySpan<Voxel> Cells => _cells;
+
+    /// <summary>The props, each with its position relative to the low corner.</summary>
     public IReadOnlyList<SchematicProp> Props { get; }
 
     /// <summary>The paste point in cells from the low corner (a paste puts this cell at the target position).</summary>
     public CellPos Anchor { get; }
 
+    /// <summary>The schematic's name, saved in the file. Default: empty.</summary>
     public string Name { get; init; } = "";
+
+    /// <summary>The schematic's author, saved in the file. Default: empty.</summary>
     public string Author { get; init; } = "";
+
+    /// <summary>A description, saved in the file. Default: empty.</summary>
     public string Description { get; init; } = "";
 
     /// <summary>Where it was captured (null for built or loaded ones without it).</summary>
     public JsonObject? Source { get; init; }
 
+    /// <summary>The number of cells: <c>SizeX * SizeY * SizeZ</c>.</summary>
     public long Count => _cells.Length;
+
+    /// <summary>The cell at <paramref name="x"/>, <paramref name="y"/>, <paramref name="z"/>, counted from the low corner.
+    /// The axes are not checked one by one: keep each inside the schematic's size.</summary>
     public Voxel this[int x, int y, int z] => _cells[(z * SizeY + y) * SizeX + x];
 
     /// <summary>Cells that hold matter (fill &gt; 0).</summary>
@@ -188,6 +256,7 @@ public sealed class Schematic
         File.Move(tmp, path, true);
     }
 
+    /// <summary>The schematic as .kschem bytes (what <see cref="Save"/> writes to a file).</summary>
     public byte[] ToBytes()
     {
         using var ms = new MemoryStream();
@@ -195,6 +264,7 @@ public sealed class Schematic
         return ms.ToArray();
     }
 
+    /// <summary>Writes the schematic as .kschem to a stream. The stream stays open.</summary>
     public void Write(Stream output)
     {
         var header = new JsonObject
@@ -243,12 +313,17 @@ public sealed class Schematic
         return Read(f);
     }
 
+    /// <summary>Reads a .kschem from bytes. Throws <see cref="InvalidDataException"/> when the data is not a .kschem of this
+    /// version or its size or cell data is bad.</summary>
     public static Schematic FromBytes(byte[] data)
     {
         using var ms = new MemoryStream(data);
         return Read(ms);
     }
 
+    /// <summary>Reads a .kschem from a stream, from its current position. The stream stays open. Throws
+    /// <see cref="InvalidDataException"/> when the data is not a .kschem of this version or its size or cell data is
+    /// bad.</summary>
     public static Schematic Read(Stream input)
     {
         using var r = new BinaryReader(input, Encoding.UTF8, true);

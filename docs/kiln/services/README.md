@@ -46,6 +46,7 @@ available is generated from a boot's `capabilities.json`: [../status.generated.m
 | [progression.md](progression.md) | kiln.progression: levels, experience, skill tree, skill points |
 | [quests.md](quests.md) | Kiln.Quests: the quest engine behind the game's own quest UI |
 | [replication.md](replication.md) | kiln.repl / Kiln.Replication: the network inspector: what the server sends each player (counters, watches on one entity, captures), read only |
+| [registry.md](registry.md) | kiln.registry / kiln.registry.live: Kiln-owned data fields, staged edits and explicit live changes with compare-before-write/revert |
 | [rules.md](rules.md) | Kiln.Rules: what players may do, and what it costs them |
 | [saves.md](saves.md) | kiln.saves: save events and persistent mod data |
 | [screen.md](screen.md) | kiln.screen / ScreenEffects: full-screen effects |
@@ -188,8 +189,8 @@ KILN_OUT=/path/to/build native/core/tests/test-build-stamp.sh      # the build m
 - The contract ([../modding/contract.md](../modding/contract.md)), as `Kiln.Example` and `Kiln.Spawn` show it: rows
   for what can be off beyond the table itself (`ServiceCapRows` with `ServiceCaps.Static` / `Session`, reported at the
   service's start when the service has rows of its own: a startup type in `ServiceTick.AutoStart` whose static
-  constructor calls `Rows.Ensure()`, like `GameplayStartup`; a row says "available" exactly when the call works, so a
-  hook that can be off is part of it),
+  constructor calls its rows' `ServiceCapRows.Ensure()`, like `GameplayStartup`; a row says "available" exactly when the
+  call works, so a hook that can be off is part of it),
   `[RequiresCapability]` on the members that throw for one, `[ServerOnly]` / `[ClientOnly]` and
   `[TickThreadOnly]` / `[AnyThread]` on every member that has a side or a thread, the game's refusal as a result
   record that implements `IKilnResult`, a bus event for every write that changed something (posted through

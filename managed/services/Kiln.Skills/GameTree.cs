@@ -158,11 +158,44 @@ internal static unsafe class SkillsNative
 }
 
 /// <summary>What kiln.skills does with the game's own tree right now.</summary>
+/// <param name="TreeExpansion">The tree-loading hook is on, so nodes Kiln defines can enter the game's tree (sigdb
+/// feature <c>skills.tree_load</c> and kiln.assets).</param>
+/// <param name="LoginGuard">The login guard is on: at a join, node ids the tree does not know are removed from the
+/// player's save instead of resetting the whole tree (feature <c>skills.login_guard</c>).</param>
+/// <param name="GameFunctions">The game's own skill functions were found on this build;
+/// <see cref="GameTree.Dump(bool)"/> and the simulation need them.</param>
+/// <param name="NodeTexts">Node texts reach the game's text tables (needs kiln.content); without it the like node's
+/// texts show.</param>
+/// <param name="GameNodes">Nodes in the game's own resource; 0 until the first world has read it.</param>
+/// <param name="GameLinks">Links in the game's own resource.</param>
+/// <param name="GameLevelMax">The highest level slot (<c>levelIndex</c>) the game's own nodes use (90 on svn
+/// 1287369).</param>
+/// <param name="Nodes">Nodes in the resource Kiln serves now: the game's plus the added ones.</param>
+/// <param name="Links">Links in the resource Kiln serves now.</param>
+/// <param name="AddedNodes">Nodes Kiln added to the game's.</param>
+/// <param name="AddedLinks">Links Kiln added to the game's.</param>
+/// <param name="FreeNodes">Native node slots still free: the game's cap of 256 nodes minus
+/// <paramref name="Nodes"/>.</param>
+/// <param name="FreeLevelSlots">Level slots still free of the game's 100 (a node with levels needs one).</param>
+/// <param name="Defined">Definitions known, of all mods.</param>
+/// <param name="Refused">Definitions that are not in the tree: errors, and nodes over the game's caps while the shadow
+/// table is off.</param>
+/// <param name="Pending">Definitions made after every live world read its tree; they go in at the next world.</param>
+/// <param name="WorldsServed">Tree loads Kiln has served.</param>
+/// <param name="Builds">Resources Kiln has built.</param>
+/// <param name="Refunded">Node ids the login guard has removed at joins since the game started (see
+/// <see cref="GameNodesRefundedEvent"/>).</param>
+/// <param name="Reason">Why something is off; empty when everything works.</param>
+/// <param name="ShadowNodes">Nodes past the game's caps in the tree Kiln serves (shadow nodes); 0 when the shadow hooks
+/// are off.</param>
+/// <param name="ShadowLevel">0 = the shadow hooks are off, 1 = on (server side), 2 = on, with the client's skill-tree
+/// screen hook as well. Same as <see cref="GameTree.ShadowLevel"/>.</param>
 public sealed record GameTreeStatus(bool TreeExpansion, bool LoginGuard, bool GameFunctions, bool NodeTexts, int GameNodes,
     int GameLinks, int GameLevelMax, int Nodes, int Links, int AddedNodes, int AddedLinks, int FreeNodes, int FreeLevelSlots,
     int Defined, int Refused, int Pending, int WorldsServed, int Builds, ulong Refunded, string Reason, int ShadowNodes = 0,
     int ShadowLevel = 0)
 {
+    /// <summary>A one-line summary of the tree, the node counts and what is on or off, for logs.</summary>
     public override string ToString() =>
         $"game tree: {Nodes} nodes ({GameNodes} + {AddedNodes} Kiln, {ShadowNodes} shadow), {Links} links, {FreeNodes} native node slots and {FreeLevelSlots} " +
         $"level slots free; {Defined} defined, {Refused} refused, {Pending} waiting for the next world; expansion " +
@@ -175,6 +208,8 @@ public sealed record GameTreeStatus(bool TreeExpansion, bool LoginGuard, bool Ga
 /// more): for more, use a Kiln tree (<see cref="TalentTree"/>).</summary>
 public sealed class GameNodeDefinition
 {
+    /// <summary>The node's fixed GUID. Make one once and never change it: the node's id and the saves derive from
+    /// it.</summary>
     public required Guid Guid { get; init; }
     /// <summary>A debug name (also how other Kiln nodes refer to this one).</summary>
     public required string Name { get; init; }
@@ -189,11 +224,17 @@ public sealed class GameNodeDefinition
     /// <summary>Absolute position in the game's tree units (the game's tree spans about 1700..6500); null = near
     /// <see cref="Near"/> (default: the first <see cref="From"/> node) plus <see cref="Offset"/>.</summary>
     public (float X, float Y)? Position { get; init; }
+    /// <summary>A node to place this one near, written like the entries of <see cref="From"/>; used when
+    /// <see cref="Position"/> is null. Default: the first <see cref="From"/> node, or the first <see cref="To"/> node
+    /// when <see cref="From"/> is empty.</summary>
     public string? Near { get; init; }
+    /// <summary>Where to put the node relative to <see cref="Near"/>, in the game's tree units, when
+    /// <see cref="Position"/> is null. Default: 140 across, 0 down.</summary>
     public (float X, float Y)? Offset { get; init; }
     /// <summary>Nodes that lead to this one ("0x&lt;id&gt;" of a game node, a node GUID, or a Kiln node's
     /// <see cref="Name"/>). The game unlocks along links in both directions.</summary>
     public IReadOnlyList<string> From { get; init; } = [];
+    /// <summary>Nodes this one leads to, written like the entries of <see cref="From"/>.</summary>
     public IReadOnlyList<string> To { get; init; } = [];
     /// <summary>A node whose effect (program, config values, tooltip values), icon and texts to copy.</summary>
     public string? Like { get; init; }
@@ -256,6 +297,23 @@ public sealed class GameNodeDefinition
 }
 
 /// <summary>A definition as kiln.skills holds it.</summary>
+/// <param name="Guid">The node's GUID.</param>
+/// <param name="Id">The node's id in the game (FNV-1a of the GUID's bytes).</param>
+/// <param name="Name">The node's debug name.</param>
+/// <param name="Owner">The id of the mod that defined it; empty when no mod did.</param>
+/// <param name="Source">Where the definition came from: <c>"code"</c> for
+/// <see cref="GameTree.Define(GameNodeDefinition[])"/> and <see cref="GameTree.DefineJson(string)"/>; otherwise how
+/// kiln.skills read it at boot: the path of a skills file, a <c>"boot:..."</c> entry, or <c>"cache:&lt;mod&gt;"</c> (a code
+/// definition read back from kiln.skills' cache).</param>
+/// <param name="State"><c>"defined"</c>, <c>"redefined"</c> (in a <see cref="GameTree.Define(GameNodeDefinition[])"/>
+/// report), <c>"pending"</c> (waits for the next world), <c>"in-tree"</c>, <c>"orphaned"</c> (its mod went away) or
+/// <c>"error"</c>.</param>
+/// <param name="Index">The node's index in the game's tree, which is its bit in the game's unlock masks (256 and up are
+/// shadow nodes); -1 when it is not in a tree, and always -1 in a <see cref="GameTree.Define(GameNodeDefinition[])"/>
+/// report.</param>
+/// <param name="LevelIndex">The slot of the node's level byte among the game's 100; -1 for a node without levels, one
+/// that is not in a tree, and in a <see cref="GameTree.Define(GameNodeDefinition[])"/> report.</param>
+/// <param name="Error">Why the definition is refused; null when it is not.</param>
 public sealed record GameNodeInfo(Guid Guid, uint Id, string Name, string Owner, string Source, string State, int Index,
     int LevelIndex, string? Error);
 
@@ -292,7 +350,9 @@ public sealed class GameNodesRefundedEvent : KilnEvent
     public EntityId Player { get; }
     /// <summary>The removed node ids and their levels.</summary>
     public IReadOnlyList<(uint Id, int Level)> Nodes { get; }
+    /// <summary>The server world's step the removal happened in; 0 when unknown.</summary>
     public ulong Step { get; }
+    /// <summary>How many nodes of which entity were refunded, for logs.</summary>
     public override string ToString() => $"{Nodes.Count} unknown game-tree node(s) of entity {Player} refunded";
 }
 
@@ -341,6 +401,8 @@ public static unsafe partial class GameTree
         throw ServiceCaps.Unavailable(Caps.Service, "kiln.skills is unavailable");
     }
 
+    /// <summary>What kiln.skills does with the game's tree right now; null when kiln.skills is not on this build or
+    /// does not answer.</summary>
     public static GameTreeStatus? Status
     {
         get

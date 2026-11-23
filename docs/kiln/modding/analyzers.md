@@ -24,6 +24,8 @@ come with code fixes.
 | [KILN109](#kiln109) | warning | client-world `EcsPrograms.TryBind` called off the game's main thread (since 0.2.0-dev.29) | services/world.md |
 | [KILN120](#kiln120) | warning | a Kiln result (`IKilnResult`) thrown away | contract.md, "The error rule" |
 | [KILN121](#kiln121) | warning | a `[RequiresCapability]` member used with nothing that asks for its row | contract.md; the attributes and the guard table (generated) |
+| [KILN122](#kiln122) | warning | registry points declared without a real OnRegistry override (API 0.2.17) | registries/README.md |
+| [KILN123](#kiln123) | warning | zero, Manual or unknown automatic registry flags (API 0.2.17) | registries/README.md |
 | [KILN199](#kiln199) | **error** | the value type of `Replication.Extension<T>` outside the rule (since 0.2.0-dev.31) | services/replication.md "Sidecars" |
 | [KILN194](#kiln194) | **error** | a path string the game doesn't have | the local catalog |
 | [KILN195](#kiln195) | warning | a config name no program of the game declares | the local catalog |
@@ -47,6 +49,18 @@ Other KILN codes:
   natives.json cannot be read or written, KILN037 when a hand-written entry of the same name is replaced.
 - **KILN180** to **KILN182** are the typed-hook generator's warnings (Kiln.Sigs, [../services/hooks.md](../services/hooks.md#typed-hooks-and-calls-detour_typed-kilnsigs-since-020-dev29)): a descriptor of the mod's sigdb fragment it cannot use (KILN180, with the reason: an unknown type, a struct return over 8 bytes without `sret`, more than 20 positions, two descriptions of one symbol that differ, two symbols with one class name), descriptors in a project without Kiln.Hooks (KILN181), a sigdb file that is not JSON (KILN182). A descriptor it reports is not generated.
 - **KL** codes are the data-file linter's (`kiln lint`).
+
+## KILN122
+
+`[RegistryEntryPoints(...)]` needs a real `Mod.OnRegistry(RegistryContext)` override (an inherited override counts).
+A hidden `new` method does not count. Kiln reads this constant metadata without executing mod code and refuses a declaration
+without an author. Remove the attribute or implement the override. Since API 0.2.17.
+
+## KILN123
+
+Automatic registry points are a nonzero combination of GameStart, ModLoad, WorldLoad and HotReload. Zero, unknown bits and
+Manual are invalid; use explicit `Registry.Change` for Manual transactions. Without the attribute an override defaults to
+GameStart. The Host repeats this validation when loading a mod. Since API 0.2.17.
 
 ## How it ships
 - **Package mode:** `Kiln.Sdk` carries the analyzers in `analyzers/dotnet/cs/`:
@@ -102,9 +116,9 @@ Kiln.Testing and every service, then reads their sources with Roslyn (`tools/Api
 - **Services:** the folders under `managed/services/` (22).
 - **Capability guards** (KILN121): the public static bool properties that answer what `Capabilities.Is("row")`
   answers, with their rows. See [KILN121](#kiln121), "Properties that ask the same question". 54 properties.
-- **Boot** (KILN035): `BootWorks`, the public members with a boot path of their own (`if (Game.InBoot) return …`:
-  `Config.Register`), which KILN035 leaves alone; `BootRefused`, the public members that reach
-  `if (Game.InBoot) throw …` (directly or through calls inside the same assembly, not through a member with a boot
+- **Boot** (KILN035): `BootWorks`, the public members with a boot path of their own (they return early while the
+  boot phase is open: `Config.Register`), which KILN035 leaves alone; `BootRefused`, the public members that throw
+  while the boot phase is open (directly or through calls inside the same assembly, not through a member with a boot
   path: a `ConfigFile.Changed` handler), which KILN035 reports.
 
 Run the script after changing Kiln.Api, Kiln.Testing or a service:
@@ -228,7 +242,7 @@ Context.Tasks.Run("loot-scan", async ctx =>
     var found = ScanNearbyContainers(area);            // a worker: compute and IO are fine here
     Chat.Broadcast("scan done");                       // KILN101: runs on a Kiln task worker (Context.Tasks.Run)
     await ctx.ToTick();
-    foreach (var c in found) Inventory.Transfer(c, player);   // on the tick after the hop
+    foreach (var c in found) await Items.MoveAll(c, player);   // on the tick after the hop
     await ctx.NextGateWindow();
     Chat.Broadcast("applied");                         // KILN101: NextGateWindow took the work back to a worker
 });
@@ -283,7 +297,7 @@ registered through Kiln:
 - event-bus subscriptions;
 - every service's static events and handles: Chat, Players, Network, Ui, Client, Gameplay, Commands, Hooks, …
 
-Each of those is tracked per mod and dropped in `ModContext.Retiring`. Kiln does not remove handlers on events that
+Each of those is tracked per mod and dropped when the mod unloads. Kiln does not remove handlers on events that
 belong to the BCL, to libraries, or to another mod's `exports`. Such a handler roots the mod's load context, so a
 copy of the old mod survives each `reload`, and the old code keeps reacting. `reload-test <id> <n>` shows the leak.
 
@@ -323,7 +337,7 @@ Not reported:
 - plain values such as strings and numbers.
 
 ```csharp
-Shared.Registry.Items.Add(this);          // KILN104: added to 'Registry.Items', static state of SharedLib
+Shared.Listeners.All.Add(this);           // KILN104: added to 'Listeners.All', static state of SharedLib
 AppContext.SetData("my-mod", settings);   // KILN104
 GCHandle.Alloc(this);                     // KILN104 (no Free in the type)
 ```
@@ -514,7 +528,7 @@ held by other (non-mod) code." A timer keeps calling into the unloaded mod and k
 thread inside the mod's code blocks the unload. Kiln's own handles are released on unload and are not reported:
 - `Commands.Register`, `Gameplay.Protect`, `Network` channels;
 - `Hooks`, `Ui` windows, `KeyBinding`s;
-- `Creatures.Register`, `Natives.OnDamage`, …
+- `CreatureVariants.Register`, `Natives.OnDamage`, …
 
 ```csharp
 System.Threading.Timer? _poll;
@@ -733,8 +747,8 @@ you compile.
 
 In a mod players install, use the documented API instead; `limits.md` lists what has none yet.
 
-The task-thread world reads and writes (`WorldConcurrent`) are not lab members: they have their own id,
-[KILNX003](#kilnx003), and `KILNX001` does not opt in to them.
+The task-thread world reads and writes (`WorldConcurrent`) are not lab members and need no experimental opt-in
+([retired KILNX003](#kilnx003)).
 
 <a id="kilnx002"></a>
 ## KILNX002: not yet proven in the game client
@@ -744,28 +758,16 @@ pass settles it). `[Experimental("KILNX002")]`; today the achievement guard (`St
 **Fix.** Opt in the same way with `KILNX002` when you accept that; the mark goes once the client pass confirms it.
 
 <a id="kilnx003"></a>
-## KILNX003: task-thread world reads and writes
-**What.** The code uses `WorldConcurrent` or one of its types (Kiln.World): the reads from a Kiln task (`Open`, `Read`,
-`ReadMany`, `Query`, `ConcurrentEntity`, `ReadStatus` and the rest) or the compare-exchange writes
-(`TryCompareExchange`, `WritePolicy`, `ExchangeResult<T>`, `ComponentExchangedEvent` and the rest). They are
-`[Experimental("KILNX003")]`: documented API for mods that shows in completion, but new. The compiler reports the use as
-an error. In unit tests, `FakeWorld.BusyReads` and `BusyWrites` (Kiln.TestKit) carry the same id.
+## KILNX003: task-thread world reads and writes (retired in 0.2.0-dev.30.7)
+**First availability.** The task-thread reads and compare-exchange writes (`WorldConcurrent` and its types,
+Kiln.World) and TestKit's `FakeWorld.BusyReads` / `BusyWrites` first shipped in 0.2.0-dev.29.18 with
+`[Experimental("KILNX003")]`. On those older SDKs, using them requires a `KILNX003` opt-in in `NoWarn`.
 
-**Since when.** 0.2.0-dev.29.18, the first release with `WorldConcurrent`. Pre-release builds of the task branch marked it
-`KILNX001`, the lab members' id: a project that opted in with `KILNX001` for it now opts in with `KILNX003` (and keeps
-`KILNX001` only if it also calls lab members).
-
-**Fix.** Opt in once in the mod's project file, and in its test project when the tests use them:
-
-```xml
-<PropertyGroup>
-  <NoWarn>$(NoWarn);KILNX003</NoWarn>
-</PropertyGroup>
-```
-
-They leave experimental once their in-game checks (services/world.md, "World reads from task threads" and "World writes
-from task threads") pass on both exact game builds; until then their shape can still change. The guide:
-[tasks.md](tasks.md#project-setup).
+**Stabilization.** Since 0.2.0-dev.30.7, mod API 0.2.16 (no longer experimental). Mod and test projects no longer
+need that opt-in. An existing `KILNX003` suppression is harmless and can go. `KILNX001` lab APIs and `KILNX002`
+client APIs retain their own opt-ins. Threading, bounds, capability checks and refusal behavior have not changed:
+KILN101 still reports tick-only API in task work, and KILN105 still reports task-unsafe uses, including escaped
+world reads and compare-exchange writes on the tick. See the [task guide](tasks.md#project-setup).
 
 ## KILNX031: registries
 **What.** The code uses `Kiln.Registry` (the registries' entry types such as `ItemEntry`, `RegistryId`, `RegistrySchema`)
@@ -934,11 +936,11 @@ No code fix: the manifest is not a source file, and a staged definition returns 
   assemblies).
 
 - a member Kiln refuses on the boot thread although it allows any thread otherwise: the generated `BootRefused` table
-  (`if (Game.InBoot) throw`, directly or through a call: adding a `ConfigFile.Changed` handler).
+  (it throws while the boot phase is open, directly or through a call: adding a `ConfigFile.Changed` handler).
 
 Not reported:
 - members marked `[BootThreadOnly]` (`BootDefinitions`, `boot.GameData.Read`);
-- members with a boot path of their own, the generated `BootWorks` table (`if (Game.InBoot) return ...`):
+- members with a boot path of their own, the generated `BootWorks` table (they return early while the boot phase is open):
   `Config.Register<T>()` reads the file and its defaults without writing in `OnBoot`, and reading its `Value` is a plain
   property ([config.md](../config.md#in-modonboot)). Writing the config (`Set`, `TrySet`, `Save`, `Reload`), a `Changed`
   handler and `Config.RegisterWorld` are still reported. KILN101 still counts `Config.Register` as a tick-thread member

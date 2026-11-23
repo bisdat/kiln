@@ -20,6 +20,8 @@ public static class DataHash
         return h;
     }
 
+    /// <summary>FNV-1a, 32 bit, of the UTF-8 bytes of <paramref name="text"/>.</summary>
+    /// <param name="text">The text to hash.</param>
     public static uint Fnv1a32(string text) => Fnv1a32(Encoding.UTF8.GetBytes(text));
 
     private static readonly uint[] Crc32Table = BuildCrc32();
@@ -33,6 +35,8 @@ public static class DataHash
         return c ^ 0xFFFFFFFF;
     }
 
+    /// <summary>CRC-32/ISO-HDLC of the UTF-8 bytes of <paramref name="text"/>.</summary>
+    /// <param name="text">The text to hash.</param>
     public static uint Crc32(string text) => Crc32(Encoding.UTF8.GetBytes(text));
 
     /// <summary>CRC-64/ECMA-182: polynomial 0x42F0E1EBA9EA3693, not reflected, init 0, no final XOR.</summary>
@@ -43,6 +47,8 @@ public static class DataHash
         return c;
     }
 
+    /// <summary>CRC-64/ECMA-182 of the UTF-8 bytes of <paramref name="text"/>.</summary>
+    /// <param name="text">The text to hash.</param>
     public static ulong Crc64(string text) => Crc64(Encoding.UTF8.GetBytes(text));
 
     private static uint[] BuildCrc32()

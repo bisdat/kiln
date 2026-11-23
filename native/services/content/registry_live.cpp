@@ -7,11 +7,16 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <iterator>
 #include <optional>
+#include <string_view>
 #include <tuple>
 #include <unordered_map>
 
 #include "registry/formulas.h"
+#include "registry/stage.h"
+#include "registry/unmapped.h"
+#include "services/kiln_registry_live.h"
 
 namespace kc {
 
@@ -24,6 +29,8 @@ using registry::FieldSpec;
 using registry::FieldType;
 using registry::Value;
 namespace rmap = registry::map;
+constexpr char kNotExact[] = KILN_REGISTRY_LIVE_REASON_NOT_EXACT ": ";
+bool not_exact_reason(const std::string& reason) { return reason.rfind(kNotExact, 0) == 0; }
 
 using SlotBytes = std::array<uint8_t, kSlotBytes>;
 struct LiveSlot {
@@ -58,13 +65,66 @@ struct LiveState {
     bool tables_changed = false;
     registry::Result pending;  // the last application's report, waiting for registry_live_publish
     bool pending_set = false;
+    bool pending_application = false;
+    bool pending_change = false;
     size_t skipped_logged = 0;  // store_skipped rows already in kiln.log
     registry::Result reported;
     bool have_report = false;
     uint32_t ordinal = 0;
     KilnOwner owner = 0;
+    struct Change {
+        KilnOwner owner = 0;
+        std::string mod;
+        uint32_t point = 0;
+        uint64_t world = 0, order = 0;
+        size_t bytes = 0;
+        std::vector<registry::Batch> batches;
+        std::vector<registry::Refusal> refused;
+        bool restart = false;
+        // Rejected at an application of this world (binding, evaluation or write failure): not composed until the world
+        // changes; the handle stays valid and a process change is tried again in the next world (review4 NS2).
+        bool inactive = false;
+        uint64_t inactive_world = 0;
+        // review4 NS6: an entry-point change (MOD_LOAD, WORLD_LOAD, HOT_RELOAD) refuses per entry. Entries refused at
+        // binding or evaluation in this world are left out of its composition until the world changes, with their rows.
+        std::map<std::pair<std::string, uint32_t>, std::set<std::string>> world_except;  // (source, n) -> Kiln ids
+        std::vector<registry::Refusal> world_rows;
+        uint64_t except_world = 0;
+    };
+    std::map<uint64_t, Change> changes;
+    std::set<KilnOwner> dead;
+    uint64_t world = 0, next_order = 0;
+    uint32_t world_kind = KILN_WORLD_KINDS;
+    registry::Result stage_result;
+    std::shared_ptr<const registry::PreparedBase> prepared;
+    bool reading = false;
+    std::string read_reason;
+    std::map<registry::FieldRef, LiveField> read_fields;
+    bool read_capture = false;                   // a pass read: put() keeps each slot's evaluation (review4 NS5)
+    std::map<uintptr_t, LayerEval> read_evals;
 };
 LiveState g;  // under store_mutex
+bool inactive_now(const LiveState::Change& c) { return c.inactive && c.inactive_world == g.world; }
+// Entry points refuse per entry like GameStart; a MANUAL transaction is all-or-nothing for binding and evaluation (review4 NS6).
+bool per_entry(const LiveState::Change& c) { return c.point != KILN_REGISTRY_LIVE_MANUAL; }
+uint64_t g_next_change = 0, g_next_world = 0; // never reused, including after an install
+std::mutex g_retiring_mu;
+std::set<KilnOwner> g_retiring;
+thread_local bool g_transaction_active = false;
+struct TransactionScope {
+    TransactionScope() { g_transaction_active = true; }
+    ~TransactionScope() { g_transaction_active = false; }
+};
+// All callers hold store_mutex, so the token, kind and admission decision are one snapshot.
+bool on_live_thread() {
+    return !g.world || (g.in && g.in->on_world_thread && g.in->on_world_thread(g.world_kind));
+}
+// All callers hold store_mutex; the leaf lock covers only incoming retirement notifications.
+bool retired(KilnOwner owner) {
+    std::lock_guard lock(g_retiring_mu);
+    return g.dead.count(owner) || g_retiring.count(owner);
+}
+auto& fields_target() { return g.reading ? g.read_fields : g.fields; }
 
 uint32_t kind_of(const std::string& registry) {
     if (registry == "items") return KILN_CONTENT_ITEMS;
@@ -85,12 +145,15 @@ std::vector<const ChainRow*> registry_rows(const registry::FieldOutcome& fo) {
 
 // One refusal per (field, reason): the edit that could not be written live.
 void refuse_rows(const registry::FieldRef& fr, const std::string& mod, const std::string& source, registry::Stage stage, uint32_t n, const std::string& why) {
+    if (g.reading) { g.read_reason = why; return; }
     const std::string key = fr.text() + "|" + why;
     if (!g.refused_keys.insert(key).second) return;
     registry::Refusal r;
     r.mod = mod, r.source = source, r.stage = stage, r.n = n;
+    r.registry = fr.registry, r.id = fr.id, r.raw = registry::is_raw_field(fr.field);
+    r.field = r.raw ? fr.field.substr(4) : fr.field;
     const bool said = why.size() >= 11 && why.compare(why.size() - 11, 11, "not applied") == 0;
-    r.reason = fr.text() + ": " + why + (said ? "" : "; this edit was not applied");
+    r.reason = not_exact_reason(why) ? why : fr.text() + ": " + why + (said ? "" : "; this edit was not applied");
     g.refused.push_back(std::move(r));
 }
 void refuse(const registry::FieldRef& fr, const std::vector<const ChainRow*>& rows, const std::string& why) {
@@ -182,6 +245,10 @@ bool in_range(const FieldSpec& spec, const Value& v, std::string* why) {
 
 gear::Constants constants() {
     std::map<std::string, double> balance;
+    if (auto it = g.in->base.registries.find("balance"); it != g.in->base.registries.end())
+        for (const auto& entry : it->second)
+            for (const auto& [field, value] : entry.fields)
+                if (field.rfind("gear.", 0) == 0 && value.numeric()) balance[field] = value.as_double();
     for (const auto& [fr, fo] : g.in->result.fields)
         if (fr.registry == "balance" && fr.field.rfind("gear.", 0) == 0 && fo.result.numeric()) balance[fr.field] = fo.result.as_double();
     return registry::formulas::constants_of(balance);
@@ -209,11 +276,19 @@ std::string source_of(const Binding& b) {
 }
 
 bool put(const std::shared_ptr<Binding>& b, int32_t field_index, int32_t sub, uintptr_t addr, uint8_t n, LayerEval ev) {
+    if (g.reading) {
+        if (g.read_capture) g.read_evals.insert_or_assign(addr, std::move(ev));
+        return true;
+    }
     LayerModScope scope(b->rows.back().mod);
     return store_put_eval(registry_owner(), registry_seq(++g.ordinal), b->kind, b->entry.id, field_index, sub, addr, n, std::move(ev), source_of(*b));
 }
 
 bool put_at(const std::shared_ptr<Binding>& b, uint32_t kind, uint32_t id, int32_t field_index, int32_t sub, uintptr_t addr, uint8_t n, LayerEval ev) {
+    if (g.reading) {
+        if (g.read_capture) g.read_evals.insert_or_assign(addr, std::move(ev));
+        return true;
+    }
     LayerModScope scope(b->rows.back().mod);
     return store_put_eval(registry_owner(), registry_seq(++g.ordinal), kind, id, field_index, sub, addr, n, std::move(ev), source_of(*b));
 }
@@ -221,7 +296,7 @@ bool put_at(const std::shared_ptr<Binding>& b, uint32_t kind, uint32_t id, int32
 int32_t index_of(uint32_t kind, const Field* f) { return static_cast<int32_t>(f - reg(kind).schema.fields.data()); }
 
 void track_scalar(const std::shared_ptr<Binding>& b, uintptr_t addr, const Field& f) {
-    g.fields.insert_or_assign(b->ref, LiveField{b->spec, {{addr, f.bytes}},
+    fields_target().insert_or_assign(b->ref, LiveField{b->spec, {{addr, f.bytes}},
         [b, f](const std::vector<SlotBytes>& bytes, std::vector<double>*) {
             return to_kiln(f, b->row ? &*b->row : nullptr, b->spec, bytes[0].data());
         }});
@@ -269,7 +344,7 @@ void bind_formula(const std::shared_ptr<Binding>& b, const std::vector<const Fie
         return (void)fail(b, "the field is not readable");
     std::vector<LiveSlot> slots;
     for (const Field& f : fs) slots.push_back({base + f.offset, f.bytes});
-    g.fields.insert_or_assign(b->ref, LiveField{b->spec, std::move(slots),
+    fields_target().insert_or_assign(b->ref, LiveField{b->spec, std::move(slots),
         [fs, formula = b->row->formula, c = constants()](const std::vector<SlotBytes>& bytes, std::vector<double>* effective) -> std::optional<Value> {
             std::vector<double> in;
             for (size_t i = 0; i < fs.size(); ++i) in.push_back(as_double(decode(fs[i], bytes[i].data())));
@@ -395,7 +470,7 @@ void bind_recipe_list(const std::shared_ptr<Binding>& b, uint32_t which) {
     };
     if (!put(b, -1, static_cast<int32_t>(which), header, 8, std::move(ev)))
         return (void)fail(b, "the recipe is not readable");
-    g.fields.insert_or_assign(b->ref, LiveField{b->spec, {{header, 8}},
+    fields_target().insert_or_assign(b->ref, LiveField{b->spec, {{header, 8}},
         [header, which](const std::vector<SlotBytes>& bytes, std::vector<double>*) -> std::optional<Value> {
             std::vector<KilnContentStack> stacks;
             if (!read_list(header, bytes[0].data(), which, &stacks)) return std::nullopt;
@@ -472,15 +547,16 @@ void bind_drops(const std::shared_ptr<Binding>& b) {
             if (!put(b, index_of(KILN_CONTENT_DROPS, fields[k]), static_cast<int32_t>(i), at, fields[k]->bytes, std::move(ev)))
                 fail(b, "a stack of the table is not readable");
             else
-                g.table_addrs[lower(guid_text(b->entry.guid))].push_back(at);
+                if (!g.reading) g.table_addrs[lower(guid_text(b->entry.guid))].push_back(at);
         }
     const std::string tg = lower(guid_text(b->entry.guid));
-    auto& tf = g.table_fields[tg];
+    std::vector<registry::FieldRef> read_only_fields;
+    auto& tf = g.reading ? read_only_fields : g.table_fields[tg];
     if (std::find(tf.begin(), tf.end(), b->ref) == tf.end()) tf.push_back(b->ref);
     std::vector<LiveSlot> slots;
     for (const DropStackRef& ref : refs)
         for (const Field& f : fs) slots.push_back({ref.addr + f.offset, f.bytes});
-    g.fields.insert_or_assign(b->ref, LiveField{b->spec, std::move(slots),
+    fields_target().insert_or_assign(b->ref, LiveField{b->spec, std::move(slots),
         [refs, fs](const std::vector<SlotBytes>& bytes, std::vector<double>*) {
             return drop_value(refs, fs, [&](size_t i, size_t k) -> const SlotBytes& { return bytes[i * fs.size() + k]; });
         }});
@@ -559,7 +635,7 @@ void bind_perks(const std::shared_ptr<Binding>& b) {
     }
     std::vector<LiveSlot> slots;
     for (const Field& f : refs) slots.push_back({base + f.offset, f.bytes});
-    g.fields.insert_or_assign(b->ref, LiveField{b->spec, std::move(slots),
+    fields_target().insert_or_assign(b->ref, LiveField{b->spec, std::move(slots),
         [](const std::vector<SlotBytes>& bytes, std::vector<double>*) {
             std::vector<Value> list;
             for (const SlotBytes& ref : bytes)
@@ -582,6 +658,9 @@ void bind_impact(const std::shared_ptr<Binding>& b, const std::string& path) {
     const Field vf = s.f;
     LayerEval ev = [b, vf](const uint8_t* below, uint8_t, uint8_t* out, std::string* why) {
         const Value v = registry::evaluate(b->rows, to_kiln(vf, nullptr, b->spec, below), b->spec);
+        if (vf.vt == KILN_CV_INT && v.numeric() && std::isfinite(v.as_double()) && std::trunc(v.as_double()) != v.as_double())
+            return fail(b, *why = std::string(kNotExact) + b->ref.registry + "." + b->ref.field + " of " + b->ref.id +
+                " is a whole number on this build; " + v.text_of() + " was not written");
         if (!in_range(b->spec, v, why) || !to_game(vf, nullptr, b->spec, v, out, why)) return fail(b, *why);
         return true;
     };
@@ -623,7 +702,11 @@ void bind_unlock(const std::shared_ptr<Binding>& b) {
         else std::memcpy(out, zero_bytes(below, n) ? orig : below, n);
         return true;
     };
-    if (!put(b, -1, kSubUnlock, at, static_cast<uint8_t>(size), std::move(ev))) fail(b, "the recipe is not readable");
+    if (!put(b, -1, kSubUnlock, at, static_cast<uint8_t>(size), std::move(ev))) return (void)fail(b, "the recipe is not readable");
+    fields_target().insert_or_assign(b->ref, LiveField{b->spec, {{at, static_cast<uint8_t>(size)}},
+        [size](const std::vector<SlotBytes>& bytes, std::vector<double>*) {
+            return Value::text(zero_bytes(bytes[0].data(), size) ? "always" : "game");
+        }});
 }
 
 // ---- one field ----
@@ -645,7 +728,8 @@ void bind(const registry::FieldRef& fr, const registry::FieldOutcome& fo) {
     const Entry* e = find_entry(fr.registry, fr.id, &guid);
     if (!e) {
         if (b->kind == KILN_CONTENT_DROPS && !guid.empty()) {  // the game loads drop tables as it needs them
-            g.pending_tables.push_back({fr, guid});
+            if (g.reading) g.read_reason = "the drop table has not loaded in this world";
+            else g.pending_tables.push_back({fr, guid});
             return;
         }
         return refuse(fr, rows, "the entry is not in this world");
@@ -654,7 +738,7 @@ void bind(const registry::FieldRef& fr, const registry::FieldOutcome& fo) {
     const Schema& sc = reg(b->kind).schema;
     if (raw) {
         const Field* f = sc.find(fr.field.substr(4));
-        if (!f || !f->writable) return refuse(fr, rows, "the member " + fo.raw + " is not a writable member on this game build");
+        if (!f || (!g.reading && !f->writable)) return refuse(fr, rows, "the member " + fo.raw + " is not a writable member on this game build");
         return bind_scalar(b, f);
     }
     std::string reason;
@@ -669,7 +753,13 @@ void bind(const registry::FieldRef& fr, const registry::FieldOutcome& fo) {
     const std::string& conv = rw.conv;
     if (conv == "int" || conv == "float" || conv == "bool" || conv == "time" || conv == "enum") {
         const Field* f = rw.paths.empty() ? nullptr : sc.find(rw.paths[0]);
-        if (!f || !f->writable) return refuse(fr, rows, "the game member " + (rw.paths.empty() ? std::string("?") : rw.paths[0]) + " is not writable on this game build");
+        // refl.cpp exposes a one-scalar struct (GemSlotOverride {isSet}) at its parent path.
+        constexpr std::string_view flag = ".isSet";
+        if (!f && conv == "bool" && !rw.paths.empty() && rw.paths[0].ends_with(flag)) {
+            const Field* flat = sc.find(rw.paths[0].substr(0, rw.paths[0].size() - flag.size()));
+            if (flat && flat->vt == KILN_CV_BOOL) f = flat;
+        }
+        if (!f || (!g.reading && !f->writable)) return refuse(fr, rows, "the game member " + (rw.paths.empty() ? std::string("?") : rw.paths[0]) + " is not writable on this game build");
         return bind_scalar(b, f);
     }
     if (conv == "formula") {
@@ -826,7 +916,7 @@ void live_row(registry::Result& r, const registry::FieldRef& ref, const LiveFiel
     fo.formula_inputs = std::move(formula_inputs);
 }
 
-void report() {
+void report(bool application = true) {
     g.tables_changed = false;
     registry::Result r = g.in->result;
     for (const auto& [ref, field] : g.fields) live_row(r, ref, field);
@@ -854,6 +944,222 @@ void report() {
     g.have_report = true;
     g.pending = std::move(r);  // written by registry_live_publish, outside the store's lock (review finding 10)
     g.pending_set = true;
+    g.pending_application |= application;
+}
+
+void queue_change_report() {
+    report(false);
+    g.pending_change = true;
+}
+
+// Each committed transaction is a later composition turn. Preserve claims and chains rather than flattening values.
+void compose_changes() {
+    registry::Result result = g.stage_result;
+    std::vector<const LiveState::Change*> ordered;
+    for (const auto& [h, change] : g.changes)
+        if (change.order && !retired(change.owner) && !inactive_now(change)) ordered.push_back(&change);
+    std::sort(ordered.begin(), ordered.end(), [](const auto* a, const auto* b) { return a->order < b->order; });
+    for (const auto* change : ordered) {
+        registry::ModInput input;
+        input.id = change->mod; input.batches = change->batches;
+        if (!change->world_except.empty() && change->except_world == g.world)
+            for (auto& batch : input.batches)
+                for (auto& edit : batch.edits)
+                    if (const auto it = change->world_except.find({batch.source, edit.n}); it != change->world_except.end())
+                        edit.select.except.insert(it->second.begin(), it->second.end());
+        result = registry::compose_after(*g.in->schema, g.in->base, *g.prepared, result, {input});
+        result.refused.insert(result.refused.end(), change->refused.begin(), change->refused.end());
+    }
+    g.in->result = std::move(result);
+}
+
+bool pump_retiring() {
+    std::set<KilnOwner> owners;
+    { std::lock_guard lock(g_retiring_mu); owners.swap(g_retiring); }
+    bool changed = false;
+    for (KilnOwner owner : owners) {
+        g.dead.insert(owner);
+        for (auto it = g.changes.begin(); it != g.changes.end();) {
+            if (it->second.owner != owner) { ++it; continue; }
+            changed |= it->second.order != 0;
+            it = g.changes.erase(it);
+        }
+    }
+    return changed;
+}
+
+std::vector<uintptr_t> change_slots(uint64_t handle);
+uint32_t foreign_slots(const std::vector<uintptr_t>& slots);
+
+std::string binding_refusal(uint64_t handle) {
+    const std::string prefix = "live:" + std::to_string(handle) + ":";
+    const auto refusal = std::find_if(g.refused.begin(), g.refused.end(), [&](const auto& row) { return row.source.rfind(prefix, 0) == 0; });
+    return refusal == g.refused.end() ? std::string() : refusal->reason;
+}
+void prepare_bindings() {
+    g.refused.clear(); g.refused_keys.clear();
+    put_all();
+    // Evaluation can fail over this world's values even when the copied archive values admitted the edit.
+    // Fold every bound slot before any write, including dependent slots read by formulas and lists.
+    std::set<uintptr_t> seen;
+    for (const auto& [ref, field] : g.fields)
+        for (const auto& slot : field.slots)
+            if (seen.insert(slot.addr).second) {
+                uint8_t bytes[kSlotBytes] = {};
+                store_effective(slot.addr, slot.size, bytes);
+            }
+}
+// The Kiln places of the bound fields on these slots ("items[game:x].maxStack"), for reasons that never carry a process
+// address (review4 nit): at most three, then a count.
+std::string places_of(const std::set<uintptr_t>& slots) {
+    std::string out;
+    size_t named = 0, more = 0;
+    for (const auto& [ref, field] : g.fields) {
+        if (std::none_of(field.slots.begin(), field.slots.end(), [&](const LiveSlot& s) { return slots.count(s.addr) != 0; })) continue;
+        if (named == 3) { ++more; continue; }
+        out += (named++ ? ", " : "") + ref.text();
+    }
+    if (!named) return "a game memory slot";
+    return more ? out + " and " + std::to_string(more) + " more" : out;
+}
+std::string write_failure(const std::set<uintptr_t>& slots) { return "the game memory write of " + places_of(slots) + " failed"; }
+std::set<uintptr_t> slots_in(const std::vector<uintptr_t>& slots, const std::set<uintptr_t>& of) {
+    std::set<uintptr_t> out;
+    for (uintptr_t a : slots) if (of.count(a)) out.insert(a);
+    return out;
+}
+// A retained change that cannot apply whole in this world is deactivated for this world only (review4 NS2): its handle
+// stays valid (revert works), a process change is tried again in the next world, and its owner's mod is named in the report.
+void reject_change(uint64_t handle, LiveState::Change& change, const std::string& why, std::vector<registry::Refusal>* rejected) {
+    change.inactive = true, change.inactive_world = g.world;
+    const std::string after = change.world ? "the change stays inactive for the rest of this world"
+                                           : "the change is kept and tried again when the next world loads";
+    const std::string reason = not_exact_reason(why)
+        ? why + "; live change " + std::to_string(handle) + " not applied in this world; " + after
+        : "live change " + std::to_string(handle) + " not applied in this world: " + why + "; " + after;
+    rejected->push_back({change.mod, "live:" + std::to_string(handle) + ":", registry::Stage::Alter, 0, reason, ""});
+}
+// Binding and evaluation failures only. A slot another writer took after Kiln's layer stays with that writer for the world
+// (ruling 2026-11-22 5:22 PM): the store leaves that one slot out and reports it, the change's other fields stay.
+bool reject_unbound_changes(uint64_t candidate, std::vector<registry::Refusal>* rejected) {
+    bool any = false;
+    for (auto& [handle, change] : g.changes) {
+        if (!change.order || handle == candidate || inactive_now(change)) continue; // the committing caller rolls its own candidate back
+        const std::string why = binding_refusal(handle);
+        if (why.empty()) continue;
+        reject_change(handle, change, why, rejected);
+        any = true;
+    }
+    return any;
+}
+// A failed write is charged per slot (review4 NM1): a retained change is rejected only when one of its own slots did not land,
+// never for another change's slot, an unrelated pack edit's slot or the committing candidate's own failure.
+bool reject_unwritten_changes(uint64_t candidate, const std::set<uintptr_t>& unwritten, std::vector<registry::Refusal>* rejected) {
+    bool any = false;
+    for (auto& [handle, change] : g.changes) {
+        if (!change.order || handle == candidate || inactive_now(change)) continue;
+        const std::set<uintptr_t> mine = slots_in(change_slots(handle), unwritten);
+        if (mine.empty()) continue;
+        reject_change(handle, change, write_failure(mine), rejected);
+        any = true;
+    }
+    return any;
+}
+// review4 NS6: an entry-point change whose binding or evaluation refused some entries (an inexact whole-number cost, an entry
+// missing in this world, a config the entry lacks) leaves those entries out for this world and applies the rest. True: an
+// entry was newly left out (the caller recomposes and binds again). A row without an entry falls back to the whole change.
+bool exclude_refused_entries() {
+    bool any = false;
+    for (auto& [handle, change] : g.changes) {
+        if (!change.order || inactive_now(change) || !per_entry(change)) continue;
+        const std::string prefix = "live:" + std::to_string(handle) + ":";
+        std::vector<const registry::Refusal*> rows;
+        for (const auto& r : g.refused)
+            if (r.source.rfind(prefix, 0) == 0) rows.push_back(&r);
+        if (rows.empty() || std::any_of(rows.begin(), rows.end(), [](const auto* r) { return r->id.empty(); })) continue;
+        if (change.except_world != g.world) change.world_except.clear(), change.world_rows.clear(), change.except_world = g.world;
+        for (const auto* r : rows)
+            if (change.world_except[{r->source, r->n}].insert(r->id).second) {
+                change.world_rows.push_back(*r);
+                any = true;
+            }
+    }
+    return any;
+}
+// A refusal row once: a pass that keeps the rows of an earlier pass binds again and would repeat the stage's own rows.
+void keep_row(const registry::Refusal& r) {
+    const bool seen = std::any_of(g.refused.begin(), g.refused.end(), [&](const registry::Refusal& x) {
+        return x.mod == r.mod && x.source == r.source && x.n == r.n && x.reason == r.reason;
+    });
+    if (!seen) g.refused.push_back(r);
+}
+struct ApplyOutcome {
+    std::string error;      // a write that did not land after every charge and retry (address-free); empty: all verified
+    std::string candidate;  // the committing candidate's own write failure; empty: none
+    std::string unbound;    // the candidate's binding or evaluation refusal (a MANUAL transaction refuses whole)
+    std::vector<registry::Refusal> entries;  // the candidate's entries refused alone in this world (review4 NS6)
+};
+// Bind, flush and charge failures. charge=false (a rollback, a revert, an owner's cleanup): a failed write is reported to the
+// caller as unverified and charged to no retained change. keep_refused: the rows found before this pass stay (a commit's
+// rollback keeps the rows of the changes its first pass rejected, review4 NM1).
+ApplyOutcome apply_changes(uint64_t candidate = 0, bool keep_refused = false, bool application = false, bool charge = true) {
+    std::vector<registry::Refusal> prior;
+    if (keep_refused) prior = std::move(g.refused); // changed pack sections can add their own restart diagnostics
+    std::vector<registry::Refusal> rejected;
+    ApplyOutcome out;
+    std::set<uintptr_t> unwritten;  // the last flush's
+    // A committing candidate has already composed/pruned its copied IR. Only recompose again if
+    // preflight removes another retained change; ordinary applications/reverts start from scratch.
+    if (!candidate) compose_changes();
+    for (;;) {
+        prepare_bindings();
+        if (exclude_refused_entries()) { compose_changes(); continue; }
+        if (reject_unbound_changes(candidate, &rejected)) { compose_changes(); continue; }
+        if (candidate && !binding_refusal(candidate).empty()) { out.unbound = binding_refusal(candidate); break; } // fail before writing any part of this candidate
+        std::vector<uintptr_t> missed;
+        std::string ignored;  // store_flush's text names a process address; reasons name Kiln places instead
+        store_flush_checked(&ignored, &missed);
+        unwritten = {missed.begin(), missed.end()};
+        if (unwritten.empty()) break;
+        if (candidate) {
+            const std::set<uintptr_t> mine = slots_in(change_slots(candidate), unwritten);
+            if (!mine.empty()) { out.candidate = write_failure(mine); break; } // the caller rolls the candidate back alone
+        }
+        // A retained change whose own slot failed is removed whole and the remaining layers are flushed again, so no
+        // successful half-change is left waiting for the next world.
+        if (!charge || !reject_unwritten_changes(candidate, unwritten, &rejected)) break;
+        compose_changes();
+    }
+    if (!unwritten.empty() && out.candidate.empty()) {
+        out.error = write_failure(unwritten);
+        for (auto& refusal : rejected) refusal.reason += "; rollback unverified: " + out.error;
+        if (charge) // a slot of no live change (a pack's or the stage's edit): named for the edit that owns it
+            for (const auto& [ref, field] : g.fields)
+                if (std::any_of(field.slots.begin(), field.slots.end(), [&](const LiveSlot& s) { return unwritten.count(s.addr) != 0; }))
+                    if (auto fo = g.in->result.fields.find(ref); fo != g.in->result.fields.end())
+                        refuse(ref, registry_rows(fo->second), "the game memory write failed; this edit was not applied");
+    }
+    for (const auto& r : prior) keep_row(r);
+    for (const auto& r : rejected) keep_row(r);
+    for (const auto& [handle, change] : g.changes)  // entries left out for this world keep their rows in every report of it
+        if (change.order && change.except_world == g.world && !inactive_now(change))
+            for (const auto& r : change.world_rows) {
+                keep_row(r);
+                if (handle == candidate) out.entries.push_back(r);
+            }
+    if (application) report();
+    else queue_change_report();
+    return out;
+}
+
+KilnResult change_of(KilnOwner owner, uint64_t handle, LiveState::Change** out) {
+    if (!owner) return KILN_ERR_INVALID_ARGUMENT;
+    if (retired(owner)) return KILN_ERR_REVOKED;
+    const auto it = g.changes.find(handle);
+    if (it == g.changes.end()) return KILN_ERR_NOT_FOUND;
+    if (it->second.owner != owner) return KILN_ERR_INVALID_ARGUMENT;
+    *out = &it->second;
+    return KILN_OK;
 }
 
 std::string edit_key(const registry::Edit& e) {
@@ -887,6 +1193,7 @@ void recompose(const std::vector<RegistrySection>& sections) {
                 for (const registry::Edit& e : bt.edits) before.insert(edit_key(e));
         std::erase_if(m.batches, [&](const registry::Batch& bt) { return is_data(bt.source); });
         std::erase_if(m.refused, [&](const registry::Refusal& r) { return is_data(r.source); });
+        std::vector<registry::Batch> data;
         for (const RegistrySection& s : sections) {
             if (s.mod != m.id) continue;
             const bool changed = stale.count(s.mod + "|" + s.source) != 0;
@@ -908,7 +1215,7 @@ void recompose(const std::vector<RegistrySection>& sections) {
                     g.refused.push_back(r);
                     return true;
                 });
-                m.batches.push_back(std::move(bt));
+                data.push_back(std::move(bt));
             }
             for (const registry::Refusal& r : s.refused) {
                 m.refused.push_back(r);
@@ -917,6 +1224,8 @@ void recompose(const std::vector<RegistrySection>& sections) {
             if (changed && !s.error.empty())
                 again.push_back({s.mod, s.rel, registry::Stage::Alter, 0, s.rel + ": " + s.error + "; nothing of this file's registry section was applied", ""});
         }
+        // Match Runner::run: data precedes queued code and recorded callback turns, on every recompose too.
+        m.batches.insert(m.batches.begin(), std::make_move_iterator(data.begin()), std::make_move_iterator(data.end()));
     }
     for (const RegistrySection& s : sections)  // a mod that had no registry content at the start
         if (std::none_of(mods.begin(), mods.end(), [&](const registry::ModInput& m) { return m.id == s.mod; })) {
@@ -948,7 +1257,68 @@ void recompose(const std::vector<RegistrySection>& sections) {
     });
     for (const auto& [fr, fo] : g.in->boot_fields) next.fields[fr] = fo;
     g.in->mods = std::move(mods);
+    g.stage_result = next;
     g.in->result = std::move(next);
+}
+
+
+void index_base() {
+    g.kiln_of.clear();
+    g.kiln_by_guid.clear();
+    for (const auto& [key, guid] : g.in->ids) {
+        const size_t bar = key.find('|');
+        if (bar != std::string::npos && !guid.empty()) g.kiln_by_guid.emplace(key.substr(0, bar) + "|" + lower(guid), key.substr(bar + 1));
+    }
+    for (const auto& [key, num] : g.in->nums) {
+        const size_t bar = key.find('|');
+        if (bar != std::string::npos) g.kiln_of.emplace(num_key(key.substr(0, bar), num), key.substr(bar + 1));
+    }
+}
+// Under store_mutex: install a prepared copied base.
+void install_live_base(registry::stage::LiveData&& data) {
+    auto prepared = registry::prepare_base(data.base);
+    g.stage_result = data.result; g.in->result = std::move(data.result);
+    g.in->base = std::move(data.base); g.in->old = std::move(data.old);
+    g.in->ids = std::move(data.ids); g.in->nums = std::move(data.nums); g.in->decoded = std::move(data.decoded);
+    g.prepared = std::move(prepared);
+    index_base();
+    g.in->prepare = {};
+}
+// Under store_mutex (a pack application's late recomposition, whose caller holds the lock): prepare and install at once.
+bool prepare_live_base() {
+    if (!g.in) return false;
+    if (!g.in->prepare) return true;
+    registry::stage::LiveData data;
+    std::string why;
+    if (!g.in->prepare(&data, &why)) {
+        LOGW("registry (live): base unavailable: %s", why.c_str());
+        return false;
+    }
+    install_live_base(std::move(data));
+    return true;
+}
+// Without store_mutex held: the first-use decode reads the archive (seconds on a cold cache) outside the store's lock, so
+// the world thread's other store users and the drop-table hooks are not stalled behind it (review4 NS1). The decode reads
+// the game's bytes with Kiln's own store writes taken back out (registry/pristine.h); a reinstall meanwhile discards it.
+bool ensure_live_base() {
+    decltype(RegistryLive::prepare) prepare;
+    std::shared_ptr<RegistryLive> in;
+    {
+        std::lock_guard lock(store_mutex());
+        if (!g.in) return false;
+        if (!g.in->prepare) return true;
+        prepare = g.in->prepare, in = g.in;
+    }
+    registry::stage::LiveData data;
+    std::string why;
+    if (!prepare(&data, &why)) {
+        LOGW("registry (live): base unavailable: %s", why.c_str());
+        return false;
+    }
+    std::lock_guard lock(store_mutex());
+    if (g.in != in) return g.in && !g.in->prepare;
+    if (g.in->prepare) install_live_base(std::move(data));
+    return true;
 }
 
 }  // namespace
@@ -966,22 +1336,21 @@ KilnOwner registry_owner() {
 void registry_live_install(RegistryLive in) {
     std::lock_guard lock(store_mutex());
     g.in = std::make_shared<RegistryLive>(std::move(in));
+    g.stage_result = g.in->result;
+    g.prepared = registry::prepare_base(g.in->base);
+    g.fields.clear(); g.pending_tables.clear(); g.table_fields.clear(); g.table_addrs.clear();
+    g.changes.clear(); g.dead.clear(); g.world = 0; g.world_kind = KILN_WORLD_KINDS;
+    { std::lock_guard retiring(g_retiring_mu); g_retiring.clear(); }
+
     if (!g.in->schema) g.in->schema = std::make_shared<const registry::Schema>(registry_schema());
     if (!g.in->regmap) g.in->regmap = std::make_shared<const rmap::RegMap>();
-    g.kiln_of.clear();
-    g.kiln_by_guid.clear();
-    for (const auto& [key, guid] : g.in->ids) {
-        const size_t bar = key.find('|');
-        if (bar != std::string::npos && !guid.empty()) g.kiln_by_guid.emplace(key.substr(0, bar) + "|" + lower(guid), key.substr(bar + 1));
-    }
-    for (const auto& [key, num] : g.in->nums) {
-        const size_t bar = key.find('|');
-        if (bar != std::string::npos) g.kiln_of.emplace(num_key(key.substr(0, bar), num), key.substr(bar + 1));
-    }
+    index_base();
     g.hashes.clear();
     g.applied = false;
     g.have_report = false;
     g.pending_set = false;
+    g.pending_application = false;
+    g.pending_change = false;
     g.tables_changed = false;
     g.skipped_logged = 0;
 }
@@ -993,10 +1362,12 @@ std::shared_ptr<const registry::Schema> registry_live_schema() {
 
 void registry_live_apply(const std::vector<RegistrySection>& sections, const registry::Schema* schema) {
     if (!g.in || g.in->schema.get() != schema) return;
+    const bool late = bool(g.in->prepare) && !sections.empty();
+    if (late && !prepare_live_base()) return;
     std::map<std::string, uint64_t> hashes;
     for (const RegistrySection& s : sections) hashes[s.rel] = s.hash;
     g.refused.clear(), g.refused_keys.clear();
-    if (g.applied && hashes != g.hashes) {
+    if (late || (g.applied && hashes != g.hashes)) {
         LOGI("registry: a data pack's registry section changed: composing the registry again");
         recompose(sections);
     }
@@ -1004,11 +1375,9 @@ void registry_live_apply(const std::vector<RegistrySection>& sections, const reg
     g.section_of.clear();
     for (const RegistrySection& s : sections) g.section_of[s.rel] = {s.mod, s.source};
     g.applied = true;
-    put_all();
-    std::string err;
-    store_flush(&err);
-    if (!err.empty()) LOGW("registry (live): writing: %s", err.c_str());
-    report();
+    pump_retiring();
+    const ApplyOutcome applied = apply_changes(0, true, true);
+    if (!applied.error.empty()) LOGW("registry (live): writing: %s", applied.error.c_str());
 }
 
 void registry_live_publish() {
@@ -1017,12 +1386,24 @@ void registry_live_publish() {
     bool application;
     {
         std::lock_guard lock(store_mutex());
-        application = g.pending_set;
-        if (g.tables_changed && g.have_report) report();
+        if (!on_live_thread()) return; // keep retirement and publication queued for the world's next tick
+        if (g.in && pump_retiring()) {
+            if (g.world) {
+                const ApplyOutcome cleanup = apply_changes(0, false, false, false);
+                if (!cleanup.error.empty()) LOGW("registry (live): owner cleanup: %s", cleanup.error.c_str());
+            }
+            else compose_changes();
+        }
+        application = g.pending_set && g.pending_application;
+        if (g.tables_changed && g.have_report) report(false);
         if (!g.in || !g.pending_set) return;
         r = std::move(g.pending);
+        const bool change = !application && g.pending_change && bool(g.in->changed);
+        fn = change ? g.in->changed : g.in->report;
+        if (change) application = g.world != 0; // changed() receives world presence, never a ready-event request
         g.pending_set = false;
-        fn = g.in->report;
+        g.pending_application = false;
+        g.pending_change = false;
     }
     if (fn) fn(r, application);  // registry.json: the stage runner writes it, with no lock of kiln.content's held
 }
@@ -1065,6 +1446,419 @@ std::optional<registry::Result> registry_live_result() {
     std::lock_guard lock(store_mutex());
     if (!g.have_report) return std::nullopt;
     return g.reported;  // a copy: the next application replaces it
+}
+
+KilnResult registry_live_begin(KilnOwner owner, const std::string& mod, uint32_t point, uint64_t* out) {
+    if (!owner || !out || point < 1 || point > 4) return KILN_ERR_INVALID_ARGUMENT;
+    std::string why;
+    if (!registry::mod_id_ok(mod, &why)) return KILN_ERR_INVALID_ARGUMENT;
+    {
+        std::lock_guard lock(store_mutex());
+        if (retired(owner)) return KILN_ERR_REVOKED;
+    }
+    if (!ensure_live_base()) return KILN_ERR_UNAVAILABLE;
+    std::lock_guard lock(store_mutex());
+    if (retired(owner)) return KILN_ERR_REVOKED;
+    if (!g.in || g.in->prepare) return KILN_ERR_UNAVAILABLE;
+    // review2 S4: per-owner caps (16 open drafts, 256 retained changes) below the process-wide ones (64, 1,024), so one mod
+    // cannot starve the others. UNAVAILABLE either way; kiln.log names the cap once per owner.
+    size_t drafts = 0, own_drafts = 0, own_changes = 0;
+    for (const auto& [h, c] : g.changes) {
+        drafts += !c.order;
+        if (c.owner == owner) (c.order ? own_changes : own_drafts) += 1;
+    }
+    const char* cap = drafts >= 64 ? "the process-wide 64 open drafts" : g.changes.size() >= 1024 ? "the process-wide 1,024 retained changes"
+                    : own_drafts >= 16 ? "its 16 open drafts" : own_changes >= 256 ? "its 256 retained changes" : nullptr;
+    if (cap) {
+        static std::set<std::pair<KilnOwner, std::string>> warned;  // under store_mutex
+        if (warned.insert({owner, cap}).second) LOGW("registry (live): %s: begin refused (UNAVAILABLE): %s are in use", mod.c_str(), cap);
+        return KILN_ERR_UNAVAILABLE;
+    }
+    LiveState::Change change;
+    // A MOD_LOAD draft is no world's: begun in a world, it may still commit after that world ended (review4 nit).
+    change.owner = owner; change.mod = mod; change.point = point; change.world = point == KILN_REGISTRY_LIVE_MOD_LOAD ? 0 : g.world;
+    *out = ++g_next_change;
+    g.changes.emplace(*out, std::move(change));
+    return KILN_OK;
+}
+
+KilnResult registry_live_submit(KilnOwner owner, uint64_t handle, const std::string& ir, RegistryLiveReply* out, std::string* report_text) {
+    std::lock_guard lock(store_mutex());
+    LiveState::Change* change = nullptr;
+    const KilnResult rc = change_of(owner, handle, &change);
+    if (rc != KILN_OK) return rc;
+    if (change->order) return KILN_ERR_UNAVAILABLE;
+    size_t bytes = 0, edits = change->refused.size();
+    for (const auto& [h, c] : g.changes) bytes += c.bytes;
+    for (const auto& b : change->batches) edits += b.edits.size();
+    if (ir.size() > 16u * 1024 * 1024 || bytes + ir.size() > 64u * 1024 * 1024) return KILN_ERR_INVALID_ARGUMENT;
+    registry::Batch batch;
+    std::vector<registry::Refusal> refused;
+    std::string why;
+    if (!registry::parse_batch(ir, *g.in->schema, &batch, &refused, &why)) {
+        if (report_text) *report_text = registry::json{{"error", why}}.dump();
+        return KILN_ERR_INVALID_ARGUMENT;
+    }
+    if (batch.mod != change->mod || edits + batch.edits.size() + refused.size() > 4096) return KILN_ERR_INVALID_ARGUMENT;
+    batch.source = "live:" + std::to_string(handle) + ":" + std::to_string(change->point) + ":" + std::to_string(change->batches.size()) + ":" + batch.source;
+    for (auto& row : refused) row.source = batch.source;
+    std::erase_if(batch.edits, [&](const registry::Edit& edit) {
+        std::string reason;
+        const auto* reg = g.in->schema->registry(edit.registry);
+        const auto* field = reg ? reg->field(edit.element.on ? edit.element.list : edit.field) : nullptr;
+        if (edit.entry != registry::EntryOp::None || !edit.raw.empty()) reason = "live changes use mapped Kiln fields, not entry add/remove or raw game paths";
+        else if (field && field->applies == registry::Applies::Restart) { change->restart = true; reason = "RestartRequired: " + edit.registry + "." + field->name + " is read at game start"; }
+        else if (field && !g.in->decoded.count(edit.registry + "." + field->name)) { change->restart = true; reason = "RestartRequired: the base did not read " + edit.registry + "." + field->name + " at start"; }
+        if (reason.empty()) return false;
+        refused.push_back({change->mod, batch.source, batch.stage, edit.n, reason, ""});
+        return true;
+    });
+    for (auto& edit : batch.edits) edit.per_entry = per_entry(*change);  // review4 NS6: entry points refuse per entry
+    if (g.in->check) g.in->check(&batch, &refused);
+    else registry::refuse_unmapped_edits(*g.in->regmap, *g.in->schema, &batch, &refused);  // review2 N7: production's guard
+    if (out) { *out = {}; out->accepted = static_cast<uint32_t>(batch.edits.size()); out->refused = static_cast<uint32_t>(refused.size()); out->world = g.world; }
+    if (report_text) {
+        registry::json rows = registry::json::array();
+        for (const auto& r : refused) rows.push_back({{"n", r.n}, {"reason", r.reason}});
+        *report_text = registry::json{{"accepted", batch.edits.size()}, {"refused", rows}}.dump();
+    }
+    change->bytes += ir.size(); change->batches.push_back(std::move(batch));
+    change->refused.insert(change->refused.end(), refused.begin(), refused.end());
+    return KILN_OK;
+}
+
+namespace {
+std::vector<uintptr_t> change_slots(uint64_t handle) {
+    std::vector<uintptr_t> slots;
+    const std::string source = "live:" + std::to_string(handle) + ":";
+    for (const auto& [ref, fo] : g.in->result.fields) {
+        const bool mine = std::any_of(fo.chain.begin(), fo.chain.end(), [&](const auto& row) { return row.source.rfind(source, 0) == 0; });
+        if (!mine) continue;
+        if (const auto it = g.fields.find(ref); it != g.fields.end())
+            for (const auto& slot : it->second.slots) slots.push_back(slot.addr);
+    }
+    return slots;
+}
+uint32_t foreign_slots(const std::vector<uintptr_t>& slots) {
+    std::set<uintptr_t> seen;
+    for (uintptr_t addr : slots) { Slot slot; if (store_slot_copy(addr, &slot) && slot.foreign) seen.insert(addr); }
+    return static_cast<uint32_t>(seen.size());
+}
+}
+
+namespace {
+// review2 S2: the worldLoad fields a change writes ("items.maxStack"), at most three, then a count.
+std::string world_load_fields(const LiveState::Change& change) {
+    std::set<std::string> names;
+    for (const auto& batch : change.batches)
+        for (const auto& edit : batch.edits) {
+            const auto* reg = g.in->schema->registry(edit.registry);
+            const auto* field = reg ? reg->field(edit.element.on ? edit.element.list : edit.field) : nullptr;
+            if (field && field->applies == registry::Applies::WorldLoad) names.insert(edit.registry + "." + field->name);
+        }
+    std::string out;
+    size_t n = 0;
+    for (const auto& name : names) {
+        if (n == 3) return out + " and " + std::to_string(names.size() - 3) + " more";
+        out += (n++ ? ", " : "") + name;
+    }
+    return out;
+}
+}  // namespace
+
+KilnResult registry_live_commit(KilnOwner owner, uint64_t handle, RegistryLiveReply* out) {
+    if (g_transaction_active) return KILN_ERR_UNAVAILABLE;
+    TransactionScope transaction;
+    RegistryLiveReply reply;
+    {
+        std::lock_guard lock(store_mutex());
+        if (!on_live_thread()) return KILN_ERR_WRONG_THREAD;
+        LiveState::Change* change = nullptr;
+        const KilnResult rc = change_of(owner, handle, &change);
+        if (rc != KILN_OK) return rc;
+        if (change->order) return KILN_ERR_UNAVAILABLE;
+        reply.world = g.world; reply.refused = static_cast<uint32_t>(change->refused.size());
+        for (const auto& b : change->batches) reply.accepted += static_cast<uint32_t>(b.edits.size());
+        if (!reply.accepted) {
+            reply.outcome = change->restart ? RegistryLiveOutcome::RestartRequired : RegistryLiveOutcome::Refused;
+            reply.reason = change->refused.empty() ? "the transaction has no edits" : change->refused.front().reason;
+            g.refused.insert(g.refused.end(), change->refused.begin(), change->refused.end());
+            g.changes.erase(handle);
+            queue_change_report();
+        } else if ((change->world && change->world != g.world) || (!g.world && (change->point == 2 || change->point == 4))) {
+            reply.outcome = RegistryLiveOutcome::WorldRequired; reply.reason = "a world is required, or the draft's world has ended";
+        } else {
+            change->world = change->point == 1 ? 0 : g.world;
+            change->order = ++g.next_order;
+            compose_changes();
+            const std::string prefix = "live:" + std::to_string(handle) + ":";
+            const bool entries = per_entry(*change);
+            std::set<std::pair<std::string, uint32_t>> refused_edits, entry_edits;
+            std::vector<registry::Refusal> refused_rows;
+            std::string refusal;
+            // Parse/mapping refusals were counted on submit and are not in accepted. Only composition refusals
+            // can reduce the accepted edit count here (exclusive, dependency or selector failures).
+            std::set<std::pair<std::string, uint32_t>> submitted;
+            for (const auto& row : change->refused) submitted.emplace(row.source, row.n);
+            for (const auto& row : g.in->result.refused)
+                if (row.source.rfind(prefix, 0) == 0 && !submitted.count({row.source, row.n})) {
+                    refused_rows.push_back(row);
+                    if (refusal.empty()) refusal = row.reason;
+                }
+            uint32_t entry_refusals = 0;
+            for (const auto& row : refused_rows) {
+                if (entries && !row.id.empty()) {  // review2 S3: an entry point drops that selected entry alone
+                    for (auto& batch : change->batches)
+                        if (batch.source == row.source)
+                            for (auto& edit : batch.edits)
+                                if (edit.n == row.n) edit.select.except.insert(row.id);
+                    entry_edits.emplace(row.source, row.n);
+                    change->refused.push_back(row);
+                    ++entry_refusals;
+                } else {
+                    refused_edits.emplace(row.source, row.n);
+                }
+            }
+            uint32_t newly_refused = static_cast<uint32_t>(refused_edits.size());
+            if (newly_refused || entry_refusals) {
+                for (auto& batch : change->batches)
+                    std::erase_if(batch.edits, [&](const auto& edit) { return refused_edits.count({batch.source, edit.n}) != 0; });
+                for (const auto& row : refused_rows)
+                    if (refused_edits.count({row.source, row.n})) change->refused.push_back(row);
+                compose_changes(); // a refused edit cannot activate later just because another handle was reverted
+            }
+            if (entry_refusals) {  // an edit whose every selected entry was refused applies nowhere: refused as a whole
+                std::set<std::pair<std::string, uint32_t>> present;
+                for (const auto& [ref, fo] : g.in->result.fields)
+                    for (const auto& row : fo.chain)
+                        if (row.source.rfind(prefix, 0) == 0) present.emplace(row.source, row.n);
+                uint32_t empty = 0;
+                for (auto& batch : change->batches)
+                    std::erase_if(batch.edits, [&](const auto& edit) {
+                        const bool gone = entry_edits.count({batch.source, edit.n}) && !present.count({batch.source, edit.n});
+                        empty += gone;
+                        return gone;
+                    });
+                if (empty) compose_changes();
+                newly_refused += empty;
+            }
+            reply.refused += static_cast<uint32_t>(refused_edits.size()) + entry_refusals;
+            reply.accepted -= std::min(reply.accepted, newly_refused);
+            if (entries && !refusal.empty()) reply.reason = refusal;
+            if (!reply.accepted) {
+                const std::string mod = change->mod;
+                g.changes.erase(handle); compose_changes();
+                reply.outcome = RegistryLiveOutcome::Refused; reply.reason = refusal;
+                g.refused.push_back({mod, prefix, registry::Stage::Alter, 0, refusal, ""});
+                queue_change_report();
+            } else if (!g.world) {
+                reply.outcome = RegistryLiveOutcome::PendingWorld;
+                reply.reason = "the copied change will apply when a world loads";
+                queue_change_report();
+            } else {
+                const ApplyOutcome applied = apply_changes(handle);
+                const auto slots = change_slots(handle);
+                reply.skipped = foreign_slots(slots);
+                // review4 NS6: an entry point's entries refused at binding (an inexact whole-number cost, ...) are left out
+                // alone and counted; the rest applies. Nothing left at all: refused like a whole transaction.
+                reply.refused += static_cast<uint32_t>(applied.entries.size());
+                if (!applied.entries.empty() && reply.reason.empty()) reply.reason = applied.entries.front().reason;
+                const bool nothing = !applied.entries.empty() && std::none_of(g.in->result.fields.begin(), g.in->result.fields.end(), [&](const auto& kv) {
+                    return std::any_of(kv.second.chain.begin(), kv.second.chain.end(), [&](const ChainRow& row) { return row.source.rfind(prefix, 0) == 0; });
+                });
+                if (!applied.candidate.empty() || !applied.unbound.empty() || reply.skipped || nothing) {
+                    const std::string why = !applied.candidate.empty() ? applied.candidate : !applied.unbound.empty() ? applied.unbound
+                        : nothing ? applied.entries.front().reason : "another writer owns a target slot";
+                    const std::string mod = change->mod;
+                    g.changes.erase(handle);
+                    // The rollback keeps the rows the first pass found (other changes it rejected) and charges no failed
+                    // write to a retained change: this is the candidate's own failure (review4 NM1).
+                    const ApplyOutcome rollback = apply_changes(0, true, false, false);
+                    reply.outcome = rollback.error.empty() ? (reply.skipped ? RegistryLiveOutcome::Skipped : RegistryLiveOutcome::Refused) : RegistryLiveOutcome::Unverified;
+                    reply.accepted = 0; ++reply.refused;
+                    reply.reason = not_exact_reason(why) ? why : "the live transaction was not committed: " + why;
+                    if (!rollback.error.empty()) reply.reason += "; rollback unverified: " + rollback.error;
+                    g.refused.push_back({mod, "live:" + std::to_string(handle), registry::Stage::Alter, 0, reply.reason, ""});
+                    queue_change_report();
+                } else {
+                    reply.outcome = g.pending_tables.empty() ? RegistryLiveOutcome::Applied : RegistryLiveOutcome::PendingResource;
+                    // review2 S2: a worldLoad field is in place before a world's save is read. Written into a running world by
+                    // any point but WORLD_LOAD, it is applied now and named: its full effect starts at the next world load.
+                    if (change->point != KILN_REGISTRY_LIVE_WORLD_LOAD)
+                        if (const std::string late = world_load_fields(*change); !late.empty()) {
+                            const std::string note = late + " applies at world load: written now, in full effect from the next world load "
+                                                            "(this world's save was already read)";
+                            if (reply.reason.empty()) reply.reason = note;
+                            LOGI("registry (live): %s: live change %llu: %s", change->mod.c_str(), static_cast<unsigned long long>(handle), note.c_str());
+                        }
+                }
+            }
+        }
+    }
+    if (out) *out = reply;
+    return KILN_OK;
+}
+
+KilnResult registry_live_revert(KilnOwner owner, uint64_t handle, RegistryLiveReply* out) {
+    if (g_transaction_active) return KILN_ERR_UNAVAILABLE;
+    TransactionScope transaction;
+    RegistryLiveReply reply;
+    {
+        std::lock_guard lock(store_mutex());
+        if (!on_live_thread()) return KILN_ERR_WRONG_THREAD;
+        LiveState::Change* change = nullptr;
+        const KilnResult rc = change_of(owner, handle, &change);
+        if (rc != KILN_OK) return rc;
+        const bool active = change->order != 0;
+        const auto slots = change_slots(handle);
+        g.changes.erase(handle);
+        reply.world = g.world; reply.outcome = RegistryLiveOutcome::Reverted;
+        if (active && g.world) {
+            const ApplyOutcome reverted = apply_changes(0, false, false, false);
+            reply.skipped = foreign_slots(slots);
+            if (!reverted.error.empty()) { reply.outcome = RegistryLiveOutcome::Unverified; reply.reason = reverted.error; }
+            else if (reply.skipped) { reply.outcome = RegistryLiveOutcome::Skipped; reply.reason = "another writer's bytes were left unchanged during revert"; }
+        } else if (active) { compose_changes(); queue_change_report(); }
+    }
+    if (out) *out = reply;
+    return KILN_OK;
+}
+
+void registry_live_owner_gone(KilnOwner owner) {
+    if (!owner) return;
+    std::lock_guard lock(g_retiring_mu); g_retiring.insert(owner);
+}
+void registry_live_world_begin(uint32_t kind) {
+    std::lock_guard lock(store_mutex()); g.world = ++g_next_world; g.world_kind = kind;
+}
+void registry_live_world_stop() {
+    std::lock_guard lock(store_mutex());
+    g.world = 0; g.world_kind = KILN_WORLD_KINDS;
+    std::erase_if(g.changes, [](const auto& item) { return item.second.world != 0; });
+    g.fields.clear(); g.pending_tables.clear(); g.table_addrs.clear(); g.table_fields.clear();
+    if (g.in) {
+        compose_changes();
+        queue_change_report();  // review2 N4: registry.json drops the ended world's live rows at the next pump
+    }
+}
+RegistryLiveStatus registry_live_status() {
+    std::lock_guard lock(store_mutex());
+    RegistryLiveStatus status; status.world = g.world; status.world_kind = g.world_kind;
+    for (const auto& [h, c] : g.changes) { if (!c.order) ++status.drafts; else if (!inactive_now(c)) ++status.active; }
+    return status;
+}
+
+KilnResult registry_live_read(const std::string& reg_name, const std::string& id, const std::string& field, std::string* out,
+                              const std::string& exclude_mod) {
+    if (!out) return KILN_ERR_UNAVAILABLE;
+    {
+        std::lock_guard lock(store_mutex());
+        if (!on_live_thread()) return KILN_ERR_WRONG_THREAD;
+    }
+    if (!ensure_live_base()) return KILN_ERR_UNAVAILABLE;
+    std::lock_guard lock(store_mutex());
+    if (!on_live_thread()) return KILN_ERR_WRONG_THREAD;
+    if (!g.in || g.in->prepare) return KILN_ERR_UNAVAILABLE;
+    const auto* reg_spec = g.in->schema->registry(reg_name);
+    const auto* spec = reg_spec ? reg_spec->field(registry::generic_path(field)) : nullptr;
+    const size_t bracket = field.find('[');
+    if (bracket != std::string::npos) {
+        const size_t close = field.find(']', bracket + 1);
+        if (close == std::string::npos || field.find('[', bracket + 1) != std::string::npos) return KILN_ERR_INVALID_ARGUMENT;
+        const std::string parent = field.substr(0, bracket), index = field.substr(bracket + 1, close - bracket - 1);
+        const std::string suffix = field.substr(close + 1);
+        if (!reg_spec || (!spec && !suffix.empty()) || (!suffix.empty() && (suffix[0] != '.' || suffix.size() == 1))) return KILN_ERR_INVALID_ARGUMENT;
+        std::string mapping_reason;
+        if (spec && g.in->regmap->mapping(reg_name, registry::generic_path(field), &mapping_reason) != rmap::Mapping::Mapped) return KILN_ERR_UNAVAILABLE;
+        std::string text;
+        const KilnResult rc = registry_live_read(reg_name, id, parent, &text, exclude_mod);
+        if (rc != KILN_OK) return rc;
+        const auto list = registry::json::parse(text, nullptr, false);
+        if (!list.is_array()) return KILN_ERR_INVALID_ARGUMENT;
+        auto leaf = [&](const registry::json& entry) -> std::optional<registry::json> {
+            if (suffix.empty()) return entry;
+            const std::string key = suffix.substr(1);
+            if (entry.is_object() && entry.contains(key)) return entry[key]; // schema struct leaves may contain dots
+            const registry::json* value = &entry;
+            size_t at = 0;
+            while (at < key.size()) {
+                size_t end = key.find('.', at); if (end == std::string::npos) end = key.size();
+                if (!value->is_object() || !value->contains(key.substr(at, end - at))) return std::nullopt;
+                value = &(*value)[key.substr(at, end - at)]; at = end + 1;
+            }
+            return *value;
+        };
+        if (index.empty() || index == "*") {
+            auto values = registry::json::array();
+            for (const auto& entry : list) { auto value = leaf(entry); if (!value) return KILN_ERR_UNAVAILABLE; values.push_back(*value); }
+            *out = values.dump(); return KILN_OK;
+        }
+        size_t n = 0;
+        for (char ch : index) { if (ch < '0' || ch > '9' || n > 4096) return KILN_ERR_INVALID_ARGUMENT; n = n * 10 + static_cast<size_t>(ch - '0'); }
+        if (n >= list.size()) return KILN_ERR_NOT_FOUND;
+        auto value = leaf(list[n]); if (!value) return KILN_ERR_UNAVAILABLE;
+        *out = value->dump(); return KILN_OK;
+    }
+    if (!spec) return KILN_ERR_INVALID_ARGUMENT;
+    std::string why;
+    if (g.in->regmap->mapping(reg_name, field, &why) != rmap::Mapping::Mapped) return KILN_ERR_UNAVAILABLE;
+    const registry::FieldRef ref{reg_name, id, field};
+    // review4 NS5: a runtime pass reads the value without the reading mod's own registry rows (its stage edits and live
+    // changes), so a read-derived assignment restates the mod's intent instead of stacking on its earlier layers.
+    const registry::FieldOutcome* own = nullptr;
+    if (!exclude_mod.empty())
+        if (auto it = g.in->result.fields.find(ref); it != g.in->result.fields.end() &&
+            std::any_of(it->second.chain.begin(), it->second.chain.end(), [&](const ChainRow& r) {
+                return r.kind == registry::WriterKind::Registry && r.mod == exclude_mod; }))
+            own = &it->second;
+    auto others = [&](const ChainRow& r) { return !(r.kind == registry::WriterKind::Registry && r.mod == exclude_mod); };
+    if (own && (!g.world || spec->applies == registry::Applies::Restart)) {
+        Value v = own->base;
+        for (const ChainRow& r : own->chain)
+            if (others(r)) v = registry::evaluate({r}, v, *spec);
+        *out = v.to_json().dump();
+        return KILN_OK;
+    }
+    if (!g.world || spec->applies == registry::Applies::Restart) {
+        if (auto it = g.in->result.fields.find(ref); it != g.in->result.fields.end()) { *out = it->second.result.to_json().dump(); return KILN_OK; }
+        if (auto reg = g.in->base.registries.find(reg_name); reg != g.in->base.registries.end())
+            for (const auto& entry : reg->second) if (entry.id == id) {
+                auto value = entry.fields.find(field);
+                if (value == entry.fields.end()) return KILN_ERR_UNAVAILABLE;
+                *out = value->second.to_json().dump(); return KILN_OK;
+            }
+        return KILN_ERR_NOT_FOUND;
+    }
+    struct ReadScope {
+        ReadScope() { g.reading = true; g.read_fields.clear(); g.read_reason.clear(); g.read_evals.clear(); }
+        ~ReadScope() { g.reading = false; g.read_capture = false; g.read_fields.clear(); g.read_evals.clear(); }
+    } scope;
+    registry::FieldOutcome identity;
+    if (own) {
+        for (const ChainRow& r : own->chain)
+            if (r.kind == registry::WriterKind::Registry && others(r)) identity.chain.push_back(r);
+        g.read_capture = true;
+    }
+    if (identity.chain.empty()) identity.chain.push_back({});
+    bind(ref, identity);
+    const auto it = g.read_fields.find(ref);
+    // review2 N6: an id this world does not have is NOT_FOUND, as before a world; UNAVAILABLE is an unreadable field
+    if (it == g.read_fields.end()) return g.read_reason == "the entry is not in this world" ? KILN_ERR_NOT_FOUND : KILN_ERR_UNAVAILABLE;
+    std::vector<SlotBytes> bytes(it->second.slots.size());
+    for (size_t i = 0; i < bytes.size(); ++i) {
+        const LiveSlot& slot = it->second.slots[i];
+        if (own) {  // the slot's layers with the other mods' rows in place of the registry's layer
+            const auto ev = g.read_evals.find(slot.addr);
+            if (!store_effective_without_registry(slot.addr, slot.size, ev != g.read_evals.end() ? &ev->second : nullptr, bytes[i].data()))
+                return KILN_ERR_UNAVAILABLE;
+        } else if (!rd(slot.addr, bytes[i].data(), slot.size)) {
+            return KILN_ERR_UNAVAILABLE;
+        }
+    }
+    auto value = it->second.decode(bytes, nullptr);
+    if (!value || (value->numeric() && !std::isfinite(value->as_double()))) return KILN_ERR_UNAVAILABLE;
+    *out = value->to_json().dump();
+    return KILN_OK;
 }
 
 }  // namespace kc

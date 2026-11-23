@@ -232,6 +232,14 @@ public sealed class HarnessItems
         return new ItemId(_harness.Run(() => Fake.AddItem(name, maxStack, category, rarity, gear, levelMin, levelMax, id).Id));
     }
 
+    /// <summary>Sets the equipment type a fake item fits (both ring slots share one type). Since 0.2.0-dev.30.6.</summary>
+    public void SetEquipmentSlotType(ItemId item, EquipmentSlot slot) => _harness.Run(() =>
+    {
+        var info = Fake.Item(item.Value) ?? throw new ArgumentException("no such item", nameof(item));
+        info.EquipmentSlotType = ItemsFake.EquipmentType(global::Kiln.Items.GameSlot(slot));
+        if (info.EquipmentSlotType == 0) throw new ArgumentException("not an equipment slot", nameof(slot));
+    });
+
     /// <summary>The id of an item the test added.</summary>
     /// <exception cref="ArgumentException">The game has no item of that name.</exception>
     public ItemId IdOf(string name) =>

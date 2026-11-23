@@ -697,16 +697,46 @@ are built on the client, from a cache of the base's Magic chests:
   (C `0x2bd366`).
 - `UiAvailableCount` (C `0xd397d0`, `u32 (u32 item, inventory view*, stock map*)`) is the UI's count: the item's stacks
   in the player's inventory view (72-byte entries at `+0x2d8`, item `+8`, count `+0x10`) plus, when `+0x828` is set, the
-  map's `u16`. The ingredient row widget (C `0xbb1850`, used by the crafting menu, C `0xc7883a` through C `0xbf4a90`, and
-  by the production station's screen, C `0xbb6562`) calls it twice: C `0xbb19b3` (return `0xbb19b8`) and C `0xbb2805`
-  (return `0xbb280a`), with `G38UiPlayData+0x2000` as the map. It has 9 other callers (other screens) that Kiln leaves alone.
+  map's `u16`. The ingredient row widget C `0xbb1850` calls it twice: C `0xbb19b3` (return `0xbb19b8`) and C `0xbb2805`
+  (return `0xbb280a`), with `G38UiPlayData+0x2000` as the map. It has 9 other callers (other screens).
+- **Correction (GitHub #132, read 2026-11-23, same client build; Ghidra 12.1.2 headless decompile without auto-analysis,
+  plus disassembly).** `0xbb1850` is not the crafting menu's row. The ingredient list C `0xbf4a90` (called by the crafting
+  menu C `0xc771d0` at C `0xc7883a`, by the production station's screen C `0xbb5b20` at C `0xbb6562`, and by C `0xbb2b10`,
+  `0xbf56c0`, `0xcb00c0`) switches on a style byte: style 4 (the station screen) draws each row with `0xbb1850`, whose
+  Available count is shown ("9999+" from 10000) and also passed to the row's transfer control (C `0xccbc10`; a press queues
+  UI command `0x39` {the screen's entity, item, u16 amount}: an item transfer into the station [inf], and the control's
+  "+N" follows that count [inf]: a real-game report saw "+1" / "+10 000" with linked stock counted); every other style (the crafting menus) counts each
+  row itself and draws it with C `0xbf1ea0`. The list's count: when its parameter's byte `+0x25` is set,
+  `UiAvailableCount(item, the bag's view, G38UiPlayData+0x2000)` at C `0xbf5090` (return `0xbf5095`), else the bag's
+  stacks inline; then **plus** `UiFixedSlotsCount(item, view)` (C `0xd39430`, call C `0xbf50e1`, `add edi,eax` at
+  C `0xbf50ee`): 0 unless the view's `+0x290` is set, else the item's stacks over the view's fixed slot table (24 view
+  indices at `+0x230`; positions 12, 14, 15, 17, 18, 19, 20 are left out). The row (C `0xbf1ea0`) shows that sum and, for a
+  category ingredient, each option's count, again `UiAvailableCount` behind the same `+0x25` byte (C `0xbf3527`, return
+  `0xbf352c`). The category option picker C `0xbf39b0` counts each option inline (the bag, the map's `u16` through
+  C `0xd28e70` while `+0x828` is set, plus `UiFixedSlotsCount` at C `0xbf3f93`); its extra count text calls
+  `UiAvailableCount` at C `0xbf423d` (return `0xbf4242`). So through 0.2.0-dev.30.7 the hook below raised only the station
+  screen's rows: no crafting menu's ingredient rows (inventory, NPC, a crafting station's) showed the snapshot; only their
+  craft count (`CraftableAmount`, §10.2) did. The flag `+0x25` comes from the menu's caller (`[param_1+8]+0x25` in
+  C `0xc771d0`); a report from a real game (a crafting station's menu showing "the bag and the base") puts it on the
+  `UiAvailableCount` side there. Static only.
 
 **What Kiln does (feature `stations.stock_ui`, Kiln clients).** kiln-items hooks `stations/client.UiAvailableCount` on
-demand (the same trigger as the fill query). Only for a call from the ingredient row's two sites
-(`stations/client.AvailableRowRet1` / `Ret2`, the game's return address as kiln.hooks reports it) and only for an item
-the server's snapshot names, it returns the greater of the game's count and the snapshot's (the server's bag, Magic
-chests and opted-in outputs, §10.5). Every other call and item is the game's. The cache maps are never written.
-`stations_logic.h` `stock_ui_count`, host-tested.
+demand (the same trigger as the fill query). Only for a call from the station screen's row (`stations/client.AvailableRowRet1`
+/ `Ret2`, the game's return address as kiln.hooks reports it) or, since 0.2.0-dev.30.8, from the crafting menu's list
+(`stations/client.AvailableListRet`) and its row's options (`stations/client.AvailableOptionRet`), and only for an item the
+snapshot kiln-items holds names, it returns the greater of the game's count and the snapshot's (§10.5). Since
+0.2.0-dev.30.8 Kiln.Blocks hands kiln-items, while a production station's screen is open (HUD FactoryCrafting), every
+item of the server's snapshot with count 0 (`set_craft_stock` keeps such a row: the snapshot stays on for the fill query
+above, and no count is raised): that screen's rows, the list's style-4 rows included, keep the game's counts, since their
+transfer control moves only what the bag and list A hold (§10.7). The list adds the fixed
+slots after the call, and the snapshot already holds those stacks (the server reads every link of the player, equipment
+included), so at the list Kiln first calls `stations/client.UiFixedSlotsCount` with the same item and view (only when the
+snapshot is above the game's count; a fault there leaves the game's count) and answers `max(game, snapshot - fixed)`: the
+row shows `max(game + fixed, snapshot)`. The option picker's inline counts and its `0xbf423d` text stay the game's. Every
+other call and item is the game's. The cache maps are never written. `stations_logic.h` `stock_ui_site`,
+`stock_ui_site_count`, host-tested; `tests/stock_ui_native_test.cpp` runs the hook on fake functions; the sigdb rows are
+checked on both exes by `tools/sigport/tests/test_stations_stock_ui.py` (client: each once, at these RVAs; server: none,
+it has no game UI).
 
 ### 10.4 Which transaction, which thread
 
@@ -770,3 +800,128 @@ The same run without the switch (control): every craft of the character `no_acce
 untouched. The first run of this branch had every player craft `other_world`: it read only `tx+0x68` (§10.4).
 Factories' own cycles show as `mode0` (about 11 a step in that save). Not run in a lab: anything on a client (C7 to C15).
 
+
+### 10.7 Player-registered sources (#125, since 0.2.0-dev.30.6)
+
+The existing `RecipePaid` adapter also accepts player-bound container registrations. They deliberately skip §8's
+source-base membership rule; they do not skip the game's per-player inventory permission. `source_access` rereads
+`[serverBases+0x10] + (player-1)*0xa0`, requires the id at +0 to match and bit2 of +0x9d (`CanAccessInventories`) to be
+set, then uses `inventory_matches(FIND_CONTAINERS)` (initialized InventorySetup, neither player nor NPC flags) and
+rejects any `FactoryStation` component through the game's guarded `GetComponent`, never kiln.world in the payment hook.
+Registration, counts and payment all enforce this: production stations lend only through #68's output-safe path,
+since `PayMaterial` would otherwise consume queued inputs too. A fault determining the container type fails closed. At
+registration it also captures the existing `players/InfoHandle` result (+4), and every snapshot rejects registrations
+whose login handle changed. A reused player entity slot cannot inherit the previous login's links. The mod chooses
+which containers it authorizes; this right is server-wide, not ownership of a source base.
+
+Mode0 is eligible only for a real registered player, with the bag as its normal order. Its bases words may both be null
+if `access_from_tx` still proves the server inventory storage; the cached server bases supplies only the player
+permission check. In other modes a refused BaseStockForPlayer leaves the normal list empty, as the game does, and
+station outputs are not added. Independently authorized registered sources can still cover the bag's shortfall.
+Per-item registered sources are merged before or after the existing output lenders, deduplicated against the normal
+order and one another, then passed through the same preflight and same-transaction `PayMaterial` loop. The only
+intercepted return remains `RecipePaid`; a fault/remainder returns4 for CraftRecipe's rollback.
+
+**Station crafts (GitHub #132, read 2026-11-23, server build, Ghidra decompile without auto-analysis).** A crafting
+station's menu (the decoration table's: HUD StationBasedCrafting) crafts through the same `CraftRecipeEvent` as the
+inventory: `handle_crafting_events` (S `0x8ad90`) builds the transaction with flags `0x04` (`| 0x20` when C `0x1b6e30`
+says so) and stock mode 2, the station at `CraftContext+4`, then `CraftRecipe` (S `0x210f00`). `RecipeApply` (S
+`0x19a1d0`) calls `RecipePayAlt` (S `0x19a9b0`, which subtracts a cached stock map from `tx+0x68` and pays the rest from
+the owner) only for transaction flag `0x40`, which this handler never sets; so a station craft reaches `InventoryPay` and
+returns to `RecipePaid` like any other, and the adapter above pays it from registered sources, the station itself left
+out (`exclude`). `craft_payment_test.cpp` covers a station's craft context. What a station's menu lacked was the client's
+ingredient counts (§10.3).
+
+**A production station's screen** counts in its rows only what the row transfer moves (0.2.0-dev.30.8): the row
+transfer (UI command `0x39`; on the server most likely `AutoTransferAction`'s item branch, `AutoTransferItem` from the
+player and base list A [inf]) is an item fill, which Kiln.Blocks leaves to the game (`SourceFill` passes `item != 0`), so
+it takes neither registered sources nor opted-in outputs. A Kiln client names every item with none there (§10.3) and the
+rows keep the game's counts, with a server of any version; the fill (§3.1, §8, §9) and its "+1" / "+10" still take
+opted-in outputs through the fill query's answers, which do not read the rows. From 0.2.0-dev.29.19 through
+0.2.0-dev.30.7 those rows counted opted-in outputs, and from 0.2.0-dev.30.6 registered sources too: the transfer control
+then offered amounts whose press moved nothing of them (GitHub #132).
+
+`source_stock(player, flags, ...)` runs on the server tick thread: flags0 returns filtered extra counts excluding
+current base stock and opted-in outputs already counted by `kiln:craftstock`; `KILN_CRAFT_SOURCE_STOCK_ALL` returns
+all filtered registered counts for consumers whose normal inventory view does not include that stock. Unknown flags
+refuse. Counts recheck the live player login, permission and container setup; they never authorize a payment.
+
+Verification here is offline: host registry/payment arithmetic, Windows tests of the actual guarded adapter with
+fake transactions, managed snapshot/lifetime tests and symbol resolution on the two pinned binaries. No new game
+client, server or lab was run for this change; the guided checks are in the public station service docs.
+
+### 10.8 Fills from registered sources (not built)
+
+A production station's fill could take from a player's registered sources the way it takes from named chests (§9): one
+more source list, per input with a shortfall after the bag, the Magic chests and named chests, through
+`AutoTransferRecipe(tx, {the player's registered containers that allow the item and pass source_access}, [stack_i with
+count 1], station, crafts = share_i, water 0, player 0)` inside the fill's one transaction, any code rolling it back. Not
+built: it needs a per-registration opt-in (public API), the server's handling of the button press with those sources (the
+press runs as the game's `AutoTransferAction` with the player's base list; Kiln.Blocks already runs a press as Kiln's fill
+when opted-in outputs are needed), the fill query's answers (§10.3) counting them, and the row transfer (UI command `0x39`,
+`AutoTransferItem`, C `0x3f7950` / S `0x198bf0`, not hooked by Kiln) handled the same way or kept the game's. The station
+screen's counts would then name that opted-in part apart from the rest of the linked share.
+
+## 12. Registered sources for dyes (GitHub #125)
+
+Static qualification on the same exact builds: server **26430253** (`f0d824be…`) and client **26430625** (`5d9ef2f1…`).
+Owned headless Ghidra projects (no automatic analysis), instruction reads, exact-build uniqueness/call-edge/schema tests
+and generator-refreshed sigdb records; no game or lab execution. Definitions: `server.d/dye-sources.json` and its client
+extension. Since 0.2.0-dev.30.6; request by Fuzen777. RVAs below.
+
+| Seam | Server | Client (hosted server code) |
+| --- | --- | --- |
+| `dyes/TintAction(action*, inventory_actions iterator*)` | `0x1a1230` | `0x3fff50` |
+| return from `InventoryRemoveItems(out, tx, player, dye, preferredSlot, 1)` | `0x1a13e8` | `0x400108` |
+| return from Tint's rollback | `0x1a1455` | `0x400175` |
+| return from Tint's commit | `0x1a1490` | `0x4001b0` |
+| slot-info resolver | `0x1445d0` | `0x3854f0` |
+
+Tint first resolves both requested slots, looks up both items, rejects a non-tintable target (flag `0x10000`) or a dye
+without `itemColorCombinationSetup.isSet` (`ItemInfo+0x748`), then opens its own inventory transaction. It does **not**
+call InventoryPay/RecipePaid. Its removeItems result's error and remainder are tested before a palette write; either
+failure branches to rollback. A successful payment writes/adds `ColorPaletteItem` (the existing component's store is
+S `0x1a1482` / C `0x4001a2`) and commits. The commit's deliberate rollback guards are the existing `@items/CommitGuards`:
+flags `tx+0xb0 & 0x40`, or no InventoryEmptyState accessor at `tx+0xa0` with touched inventories.
+
+The sparse setup is captured on both builds. Iterator `+0x160` is InventorySetup, `+0x148` Inventory, `+0x190`
+SlotSelection, `+0x168` ItemState, `+0x178` OwnerRelationship and `+0x158` InventoryEmptyState. Iterator `+0xc8` is copied
+to setup `+0xd8`, hence **tx `+0x70` has the server bases**; Fuel is absent. Kiln validates the used accessor type indices
+against this job storage's component map on every request, requires server storage kind0 **and the active server
+world's exact storage identity** cached at Pre, and never relies on the full-accessor cache. removeItems reads the named holder's setup through tx[3], expands its links, writes each page
+through tx[4] in the same job, and queues type1 operations keyed by page/slot in tx+0xf0. Thus a registered chest is
+reachable through this transaction's own accessors, and the game's rollback restores its debits.
+
+Client UI: screen `0xc0ace0` calls submenu `0xc09740`; palette builder `0xd14ce0` fills the 72-byte views at tint state
+`+0x90b80` (count `+0x90b88`) from the player/station models plus unlocked palettes. **Order (GitHub #132, decompiled
+2026-11-23):** the builder clears the list, adds the two models' stacks (C `0xd24a50` twice), then each unlocked palette it
+does not hold yet with count 0 (setting byte `+0x3c` from C `0xd64250`, also on a held one), sorts the whole list by the
+count at `+0x10`, most first (C `0xb0aed0`), sorts the part after the held stacks by byte `+0x3c`, highest first
+(C `0xb0b620`), and inserts the empty "no dye" row (item 0) at the front. Kiln's grid hook merges the linked dye counts
+after that build (a held row's count grows, a missing dye is appended), so since 0.2.0-dev.30.8 it sorts the rows after the
+leading item-0 row again by count, most first, stable: a linked dye joins the held ones by its count, equal counts and the
+count-0 rows keep the game's order (`dye_sources_logic.h` `order_with_sources`). Palette screen `0xc0b930` overwrites
+row counts from the two models' Generic-index views at `0xc0bf14` (eax count, rbx row, r15d item). Its selected palette's
+detail has a separate sum at `0xc0c302` (eax, r15d). Confirm `0xb2ceb0` emits command `0x6e`, copying the target key at
+command+4 and the selected palette key at command+0xc. The input writer preserves both keys unchanged.
+
+**No chest key is sent.** A server-announced source palette uses `{entityId = dye ItemId, slotIndex = 0xff}`. Both
+actual input wire schemas preserve that index as a full u8: C root `0x1fe0cf0` → ItemAction `0x1fdfdd0` → InventorySlotId
+`0x1fde3f8`; S root `0x14b0bb0` → ItemAction `0x14afc90` → InventorySlotId `0x14ae2b8`. The slotIndex field is kind4,
+fixed1, offset4, not a bitfield; client serializer `0x11f6420` writes eight bits, server decoder `0x9a77e0` reads eight
+without clamping. Kiln also validates the live schema path before enabling the hooks. Without the entry hook, the
+normal slot-info resolver refuses index255 (it requires <8), not a real source slot.
+
+The entry re-resolves that requested dye from the bag first, then this player's generation-bound, filtered,
+access-checked sources, using the iterator's own accessors, and calls the original on a shadow action. Only that call's
+scoped removeItems hook may borrow: it rechecks the live source registry, permission, sparse transaction identity and
+commit guards, pays the bag first, and verifies a source take **before returning success to Tint**. Every hook-owned
+fault, error or remainder returns a payment failure, so Tint rolls back before the palette is written. The ordinary
+unmarked action is unchanged and clears any outer Tint's thread-local payment route for the duration of a nested call.
+Vanilla grid callbacks likewise clear any outer palette's source-count scope, restoring it when the nested call returns.
+Before installing server or client hooks, Kiln compares qualified prologues/count instructions through `read_original`
+and refuses foreign or unreadable live code through `code_state`; registry-owned detours remain valid. The entry is
+installed only after the payment link, and an entry installation failure revokes that otherwise unused link.
+Windows fake-transaction tests cover entry/debit revocation, player generations, wrong storage/missing accessors,
+commit guards, nested routing, code qualification, partial installation and an injected SEH fault after a source debit;
+native palette tests cover the raw grid callback and both mids. These are not real-client execution evidence.

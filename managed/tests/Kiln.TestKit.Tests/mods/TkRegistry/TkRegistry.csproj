@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><NoWarn>$(NoWarn);KILNX031</NoWarn></PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../../services/Kiln.Registry/Kiln.Registry.csproj" Private="false" ExcludeAssets="runtime" />
+  </ItemGroup>
+</Project>

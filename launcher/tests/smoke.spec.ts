@@ -11,7 +11,7 @@ const SHOTS = join(import.meta.dirname, "..", "..", ".out", "launcher", "shots")
 
 /** The launcher's own routes: must render without console errors. */
 const CLIENT_ROUTES = [
-  "/", "/mods/order", "/mods/native", "/mods/engines", "/mods/configs", "/runtime", "/logs", "/saves", "/editor", "/settings", "/about", "/servers",
+  "/", "/mods/order", "/mods/native", "/mods/engines", "/mods/configs", "/runtime", "/logs", "/conflicts", "/saves", "/editor", "/settings", "/about", "/servers",
   // the places before dev.24: they redirect to the new ones
   "/profiles", "/profiles/ember-run/mods", "/profiles/ember-run/native", "/profiles/ember-run/emf", "/profiles/ember-run/configs",
   "/profiles/ember-run/saves", "/library",
@@ -673,7 +673,7 @@ test("schema form edits a config value", async ({ page }) => {
 
 test("every main page fits 1024×640 without a window scrollbar", async ({ page }) => {
   await page.setViewportSize({ width: 1024, height: 640 });
-  for (const r of ["/", "/mods/order", "/mods/native", "/mods/engines", "/runtime", "/logs", "/saves", "/settings", "/about", "/servers", "/servers/lab/overview", "/servers/lab/admin/items"]) {
+  for (const r of ["/", "/mods/order", "/mods/native", "/mods/engines", "/runtime", "/logs", "/conflicts", "/saves", "/settings", "/about", "/servers", "/servers/lab/overview", "/servers/lab/admin/items"]) {
     await open(page, r);
     await page.waitForTimeout(400);
     const over = await page.evaluate(() => ({ x: document.documentElement.scrollWidth > innerWidth + 1, y: document.documentElement.scrollHeight > innerHeight + 1 }));

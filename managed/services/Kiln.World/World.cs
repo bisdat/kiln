@@ -6,6 +6,9 @@ using System.Text;
 namespace Kiln;
 
 /// <summary>An entity's world transform: position in metres, rotation, scale.</summary>
+/// <param name="Position">Where the entity is, in metres.</param>
+/// <param name="Rotation">Its orientation.</param>
+/// <param name="Scale">Its scale on each axis.</param>
 public readonly record struct EntityTransform(WorldPosition Position, Quaternion Rotation, Vector3 Scale)
 {
     /// <summary>Heading about +Y (up) in degrees, 0..360.</summary>
@@ -21,6 +24,15 @@ public readonly record struct EntityTransform(WorldPosition Position, Quaternion
 }
 
 /// <summary>What kiln.world can do on this server build right now.</summary>
+/// <param name="Programs">True when registering programs works on this build.</param>
+/// <param name="WorldLive">True when a server world exists and its programs ran in the last step.</param>
+/// <param name="Teleport">True when <see cref="Kiln.Teleport"/> works on this build.</param>
+/// <param name="Find">True when entity search and <see cref="World.EntityCount"/> work on this build.</param>
+/// <param name="KilnPrograms">How many programs are registered through kiln.world (its own included).</param>
+/// <param name="EnginePrograms">How many programs are in the server world's table.</param>
+/// <param name="EngineMax">The table's capacity.</param>
+/// <param name="TeleportsPending">How many teleports are still waiting for their result.</param>
+/// <param name="WorldSteps">How many server-world steps kiln.world's own program ran in.</param>
 public readonly record struct WorldStatus(bool Programs, bool WorldLive, bool Teleport, bool Find, int KilnPrograms,
     int EnginePrograms, int EngineMax, int TeleportsPending, ulong WorldSteps);
 
@@ -86,6 +98,8 @@ public static unsafe partial class World
     [TickThreadOnly]
     public static WorldPosition? Position(EntityId entity) => TryGetPosition(entity, out var p) ? p : null;
 
+    /// <summary>Reads the entity's position like <see cref="Position"/>: false (and <paramref name="position"/> is
+    /// <c>default</c>) when it does not exist or has no transform.</summary>
     [TickThreadOnly]
     public static bool TryGetPosition(EntityId entity, out WorldPosition position)
     {

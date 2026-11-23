@@ -4,13 +4,11 @@
 // that changed, a short buffer, a component smaller than T); an ordinary miss never throws.
 using System.Buffers;
 using System.Collections.Concurrent;
-using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 
 namespace Kiln;
 
 /// <summary>How a <see cref="WorldConcurrent"/> read copies component bytes.</summary>
-[Experimental("KILNX003", UrlFormat = WorldConcurrent.Url)]
 public enum ReadMode
 {
     /// <summary>The default: a verified copy at any time. Kiln copies the bytes twice between identity checks and refuses
@@ -27,7 +25,6 @@ public enum ReadMode
 }
 
 /// <summary>The outcome of a <see cref="WorldConcurrent"/> read. 0 to 6 are kiln.world's own statuses.</summary>
-[Experimental("KILNX003", UrlFormat = WorldConcurrent.Url)]
 public enum ReadStatus
 {
     /// <summary>A complete, verified result.</summary>
@@ -70,7 +67,6 @@ public enum ReadStatus
 /// a handle: nothing is pinned, every read checks it again, and a read of an entity that is gone or replaced says
 /// <see cref="ReadStatus.Stale"/> or <see cref="ReadStatus.Absent"/>. Refs opened before the mod reloads are stale after
 /// it.</summary>
-[Experimental("KILNX003", UrlFormat = WorldConcurrent.Url)]
 public readonly struct ConcurrentEntity : IEquatable<ConcurrentEntity>
 {
     internal readonly EcsObjectRefNative Native;
@@ -117,7 +113,6 @@ public readonly struct ConcurrentEntity : IEquatable<ConcurrentEntity>
 
 /// <summary>A value read by <see cref="WorldConcurrent"/>, with its status. <see cref="Value"/> is <c>default</c> unless
 /// <see cref="Status"/> is <see cref="ReadStatus.Ok"/>.</summary>
-[Experimental("KILNX003", UrlFormat = WorldConcurrent.Url)]
 public readonly struct ConcurrentRead<T>
 {
     internal ConcurrentRead(ReadStatus status, T value)
@@ -140,7 +135,6 @@ public readonly struct ConcurrentRead<T>
 }
 
 /// <summary>The outcome of <see cref="WorldConcurrent.ReadBytes"/>.</summary>
-[Experimental("KILNX003", UrlFormat = WorldConcurrent.Url)]
 public readonly struct ConcurrentCopy
 {
     internal ConcurrentCopy(ReadStatus status, int written, int required)
@@ -162,7 +156,6 @@ public readonly struct ConcurrentCopy
 }
 
 /// <summary>The outcome of <see cref="WorldConcurrent.Query"/>.</summary>
-[Experimental("KILNX003", UrlFormat = WorldConcurrent.Url)]
 public readonly struct ConcurrentQueryResult
 {
     internal ConcurrentQueryResult(ReadStatus status, int count, int required)
@@ -184,7 +177,6 @@ public readonly struct ConcurrentQueryResult
 
 /// <summary>A query for <see cref="WorldConcurrent.Query"/>: the entities of one world that have every listed component,
 /// optionally within <see cref="Radius"/> metres of <see cref="Center"/>.</summary>
-[Experimental("KILNX003", UrlFormat = WorldConcurrent.Url)]
 public readonly struct EntityQuery
 {
     private readonly string[]? _components;
@@ -221,7 +213,6 @@ public readonly struct EntityQuery
 }
 
 /// <summary>The components one <see cref="WorldConcurrent.ReadMany"/> reads, in order. Make it once and keep it.</summary>
-[Experimental("KILNX003", UrlFormat = WorldConcurrent.Url)]
 public sealed class ComponentSet
 {
     private readonly string[] _names;
@@ -247,7 +238,6 @@ public sealed class ComponentSet
 
 /// <summary>Several components of one entity, from <see cref="WorldConcurrent.ReadMany"/>. Each component is verified on
 /// its own; the set is not one atomic read across components.</summary>
-[Experimental("KILNX003", UrlFormat = WorldConcurrent.Url)]
 public sealed class ConcurrentSnapshot
 {
     private readonly ReadStatus[] _status;
@@ -295,7 +285,7 @@ public sealed class ConcurrentSnapshot
 /// <summary>
 /// Entity and component reads from Kiln tasks (kiln.world's verified copies). Every read copies the bytes and checks
 /// the entity again around the copy, so it returns a complete value or says why not (<see cref="ReadStatus"/>); an
-/// ordinary miss never throws. Experimental (<c>KILNX003</c>): opt in with <c>&lt;NoWarn&gt;$(NoWarn);KILNX003&lt;/NoWarn&gt;</c>.
+/// ordinary miss never throws. Since 0.2.0-dev.30.7, mod API 0.2.16 (no longer experimental).
 /// </summary>
 /// <remarks>
 /// <para><b>Where.</b> Inside a Kiln task (its work on a worker, or after <c>await ctx.ToTick()</c>) and on the tick.
@@ -306,11 +296,8 @@ public sealed class ConcurrentSnapshot
 /// <para><b>Which world.</b> A dedicated server has the server world; a client has its client world, and the server world
 /// too while it hosts. The prediction world is never readable.</para>
 /// </remarks>
-[Experimental("KILNX003", UrlFormat = Url)]
 public static unsafe partial class WorldConcurrent
 {
-    internal const string Url = "https://github.com/frostdev-ops/kiln/blob/main/docs/kiln/services/world.md#world-reads-from-task-threads";
-
     /// <summary>The capability row kiln.world reports for these reads; its text says why they are off.</summary>
     public const string Capability = "world.ecs_read";
 

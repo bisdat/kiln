@@ -46,6 +46,7 @@ public static partial class Config
     [TickThreadOnly]
     public static WorldConfig<T> RegisterWorld<T>(string? name = null) where T : class, new()
     {
+        if (RegistryContext.Current is { } registry) return RegistryWorldInput<T>(registry, name);
         Game.AssertTickThread();
         var mod = ModContext.CurrentMod;
         if (mod is { Alive: false }) throw new InvalidOperationException("the mod is unloading");
@@ -129,6 +130,9 @@ internal static class WorldConfigs
             }
         }
         if (any) Watch(directory);
+        // Registry dispatch is an observer, not a reason for a save open/adoption to fail.
+        try { RegistryRuntime.WorldChanged?.Invoke(directory); }
+        catch (Exception e) { Backend.Current.Log(0, LogLevel.Warn, $"registry: world settings notification failed: {e.Message}"); }
     }
 
     /// <summary>A mod that only uses per-world configs never touches Kiln.Saves, so nothing would start it: this does

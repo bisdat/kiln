@@ -26,6 +26,8 @@ public sealed record RetargetBlock
 }
 
 /// <summary>A frame of one of the clip file's animations: <c>new("TPose")</c>.</summary>
+/// <param name="Animation">The name of one of the clip file's animations.</param>
+/// <param name="At">Seconds into it, from 0. Default 0.</param>
 public sealed record RetargetPose([property: JsonPropertyName("animation")] string Animation, double At = 0);
 
 internal static class Retargets

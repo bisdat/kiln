@@ -14,9 +14,11 @@ public readonly record struct VfxId
     private readonly Guid _guid;
     private readonly string? _game;
 
+    /// <summary>A VFX by GUID (the same as <see cref="Of(Guid)"/>).</summary>
     public VfxId(Guid guid) => _guid = guid;
     private VfxId(string game) => _game = game;
 
+    /// <summary>No VFX: the default value. Playing it does nothing.</summary>
     public static readonly VfxId None = default;
 
     /// <summary>The GUID. A game name resolves on first use, on the thread that may read the game's data; <see cref="Guid.Empty"/> until
@@ -27,6 +29,7 @@ public readonly record struct VfxId
     /// <summary>The name given to <see cref="Game"/>, or null.</summary>
     public string? GameName => _game;
 
+    /// <summary>True for <see cref="None"/>: no game name and an empty GUID.</summary>
     public bool IsNone => _game is null && _guid == Guid.Empty;
 
     /// <summary>One of the game's VFX by name. VFX have no names of their own, so a name is what uses it: a template that carries it
@@ -54,6 +57,7 @@ public readonly record struct VfxId
     /// <summary>A VFX of the mod <paramref name="modId"/>, whether or not that mod is here. Unknown to the game means it is ignored.</summary>
     public static VfxId Named(string modId, string name) => new(Derive(modId, "vfx", name));
 
+    /// <summary>The game name given to <see cref="Game"/>, or the GUID's text.</summary>
     public override string ToString() => _game ?? _guid.ToString();
 
     private static Guid Derive(string mod, string kind, string name)
@@ -72,29 +76,104 @@ public readonly record struct VfxId
 }
 
 /// <summary>A running (or finished) VFX. Kiln's id: never reused, safe to keep.</summary>
+/// <param name="Value">The handle's number; 0 is <see cref="None"/>. The top bit marks a server-side handle (<see cref="IsRemote"/>).</param>
 public readonly record struct VfxHandle(uint Value)
 {
+    /// <summary>No VFX: the default value, what a play that did not start returns.</summary>
     public static readonly VfxHandle None = default;
+    /// <summary>True for <see cref="None"/>.</summary>
     public bool IsNone => Value == 0;
 
     /// <summary>A server-side handle (the VFX was relayed to Kiln clients): it can be stopped and set, not observed.</summary>
     public bool IsRemote => (Value & VfxCore.RemoteBit) != 0;
 
+    /// <summary><c>#n</c>, or <c>remote#n</c> for a server-side handle.</summary>
     public override string ToString() => IsRemote ? $"remote#{Value & ~VfxCore.RemoteBit}" : $"#{Value}";
 }
 
-/// <summary>The game's attachment slots (keen::AttachmentSlot). A body that has no bone for a slot plays the effect nowhere.</summary>
+/// <summary>The game's attachment slots (keen::AttachmentSlot). A body that has no bone for a slot plays the effect nowhere.
+/// The game maps each slot to a joint of the body's skeleton through its animation graph, so which joint a slot is differs per body.</summary>
 public enum Slot : byte
 {
-    Root = 0, Head = 1, Chest = 2, Pelvis = 3, FootL = 4, FootR = 5, FootRL = 6, FootRR = 7, HandR = 8, HandL = 9, KneeR = 10, KneeL = 11,
-    ArmL = 12, Block = 13, HandPalmR = 14, HandPalmL = 15,
-    Generic00 = 16, Generic01 = 17, Generic02 = 18, Generic03 = 19, Generic04 = 20, Generic05 = 21, Generic06 = 22, Generic07 = 23,
-    Generic08 = 24, Generic09 = 25, Generic10 = 26, Generic11 = 27, Generic12 = 28, Generic13 = 29, Generic14 = 30, Generic15 = 31,
-    Generic16 = 32, Generic17 = 33, Generic18 = 34, Generic19 = 35,
+    /// <summary>The body's root. The default of <see cref="Vfx.PlayOn"/>.</summary>
+    Root = 0,
+    /// <summary>The head.</summary>
+    Head = 1,
+    /// <summary>The chest.</summary>
+    Chest = 2,
+    /// <summary>The pelvis.</summary>
+    Pelvis = 3,
+    /// <summary>The left foot.</summary>
+    FootL = 4,
+    /// <summary>The right foot.</summary>
+    FootR = 5,
+    /// <summary>The game's second left foot slot, the left one of the <c>FootRL</c> / <c>FootRR</c> pair.</summary>
+    FootRL = 6,
+    /// <summary>The game's second right foot slot, the right one of the <c>FootRL</c> / <c>FootRR</c> pair.</summary>
+    FootRR = 7,
+    /// <summary>The right hand.</summary>
+    HandR = 8,
+    /// <summary>The left hand.</summary>
+    HandL = 9,
+    /// <summary>The right knee.</summary>
+    KneeR = 10,
+    /// <summary>The left knee.</summary>
+    KneeL = 11,
+    /// <summary>The left arm. It has no right counterpart.</summary>
+    ArmL = 12,
+    /// <summary>The game's <c>Block</c> slot (a joint of the player's skeleton).</summary>
+    Block = 13,
+    /// <summary>The right palm.</summary>
+    HandPalmR = 14,
+    /// <summary>The left palm.</summary>
+    HandPalmL = 15,
+    /// <summary>One of the game's 20 generic slots (<c>Generic00</c>). Which joint, if any, it is depends on the body.</summary>
+    Generic00 = 16,
+    /// <summary>One of the game's 20 generic slots (<c>Generic01</c>). Which joint, if any, it is depends on the body.</summary>
+    Generic01 = 17,
+    /// <summary>One of the game's 20 generic slots (<c>Generic02</c>). Which joint, if any, it is depends on the body.</summary>
+    Generic02 = 18,
+    /// <summary>One of the game's 20 generic slots (<c>Generic03</c>). Which joint, if any, it is depends on the body.</summary>
+    Generic03 = 19,
+    /// <summary>One of the game's 20 generic slots (<c>Generic04</c>). Which joint, if any, it is depends on the body.</summary>
+    Generic04 = 20,
+    /// <summary>One of the game's 20 generic slots (<c>Generic05</c>). Which joint, if any, it is depends on the body.</summary>
+    Generic05 = 21,
+    /// <summary>One of the game's 20 generic slots (<c>Generic06</c>). Which joint, if any, it is depends on the body.</summary>
+    Generic06 = 22,
+    /// <summary>One of the game's 20 generic slots (<c>Generic07</c>). Which joint, if any, it is depends on the body.</summary>
+    Generic07 = 23,
+    /// <summary>One of the game's 20 generic slots (<c>Generic08</c>). Which joint, if any, it is depends on the body.</summary>
+    Generic08 = 24,
+    /// <summary>One of the game's 20 generic slots (<c>Generic09</c>). Which joint, if any, it is depends on the body.</summary>
+    Generic09 = 25,
+    /// <summary>One of the game's 20 generic slots (<c>Generic10</c>). Which joint, if any, it is depends on the body.</summary>
+    Generic10 = 26,
+    /// <summary>One of the game's 20 generic slots (<c>Generic11</c>). Which joint, if any, it is depends on the body.</summary>
+    Generic11 = 27,
+    /// <summary>One of the game's 20 generic slots (<c>Generic12</c>). Which joint, if any, it is depends on the body.</summary>
+    Generic12 = 28,
+    /// <summary>One of the game's 20 generic slots (<c>Generic13</c>). Which joint, if any, it is depends on the body.</summary>
+    Generic13 = 29,
+    /// <summary>One of the game's 20 generic slots (<c>Generic14</c>). Which joint, if any, it is depends on the body.</summary>
+    Generic14 = 30,
+    /// <summary>One of the game's 20 generic slots (<c>Generic15</c>). Which joint, if any, it is depends on the body.</summary>
+    Generic15 = 31,
+    /// <summary>One of the game's 20 generic slots (<c>Generic16</c>). Which joint, if any, it is depends on the body.</summary>
+    Generic16 = 32,
+    /// <summary>One of the game's 20 generic slots (<c>Generic17</c>). Which joint, if any, it is depends on the body.</summary>
+    Generic17 = 33,
+    /// <summary>One of the game's 20 generic slots (<c>Generic18</c>). Which joint, if any, it is depends on the body.</summary>
+    Generic18 = 34,
+    /// <summary>One of the game's 20 generic slots (<c>Generic19</c>). Which joint, if any, it is depends on the body.</summary>
+    Generic19 = 35,
 }
 
 /// <summary>Where an attached effect sits relative to its slot (keen::ecs::Offset). <paramref name="Local"/> is in the slot's own axes,
 /// <paramref name="World"/> in world axes, both in metres. The default is none.</summary>
+/// <param name="Local">Metres along the slot's own axes.</param>
+/// <param name="World">Metres along the world's axes.</param>
+/// <param name="Rotation">The offset's own rotation; null for none.</param>
 public readonly record struct Offset(Vector3 Local = default, Vector3 World = default, Quaternion? Rotation = null);
 
 /// <summary>Named parameters of an effect, set when it starts. A name or type the VFX does not have is ignored. Parameters are
@@ -103,24 +182,28 @@ public sealed class VfxParams
 {
     internal readonly List<VfxParam> Items = [];
 
+    /// <summary>Adds a float parameter. Returns this, to chain.</summary>
     public VfxParams Set(string name, float value)
     {
         Items.Add(VfxParam.Of(name, value));
         return this;
     }
 
+    /// <summary>Adds a vector parameter. Returns this, to chain.</summary>
     public VfxParams Set(string name, Vector3 value)
     {
         Items.Add(VfxParam.Of(name, value));
         return this;
     }
 
+    /// <summary>Adds a colour parameter. Returns this, to chain.</summary>
     public VfxParams Set(string name, Color value)
     {
         Items.Add(VfxParam.Of(name, value));
         return this;
     }
 
+    /// <summary>Adds an integer parameter. Returns this, to chain.</summary>
     public VfxParams Set(string name, int value)
     {
         Items.Add(VfxParam.Of(name, value));
@@ -175,23 +258,65 @@ public enum VfxState
 /// <summary>Why a VFX is <see cref="VfxState.Stopped"/> or <see cref="VfxState.Failed"/>.</summary>
 public enum VfxEndReason
 {
-    None = 0, Finished = 1, Stopped = 2, EntityGone = 3,
+    /// <summary>No reason: the VFX has not ended.</summary>
+    None = 0,
+    /// <summary>The FxController dropped it: its lifetime ran out and the instance went.</summary>
+    Finished = 1,
+    /// <summary>It was stopped: <see cref="Vfx.Stop"/>, <see cref="Vfx.StopAll"/>, or its mod unloading.</summary>
+    Stopped = 2,
+    /// <summary><see cref="Vfx.PlayOn"/>: the entity is not in the client world (any more).</summary>
+    EntityGone = 3,
     /// <summary>The game has no VFX with that GUID: ignored.</summary>
     UnknownVfx = 4,
+    /// <summary>The FxController gave no handle (its pool is full).</summary>
     StartFailed = 5,
     /// <summary>Waited 10 s for an FxController update: there is no client world, or the VFX system isn't ready.</summary>
     TimedOut = 6,
-    WorldEnded = 7, Fault = 8, Refused = 9,
+    /// <summary>The client world ended.</summary>
+    WorldEnded = 7,
+    /// <summary>A game call faulted: kiln.vfx plays nothing more this session.</summary>
+    Fault = 8,
+    /// <summary>Refused on purpose by a test flag (<c>VfxTestSeams</c>) for a GUID the game knows.</summary>
+    Refused = 9,
     /// <summary>No instance after 5 s: the body has no such slot, or the game's instance pool is full.</summary>
     NoInstance = 10,
 }
 
 /// <summary>Details of a VFX (client side).</summary>
+/// <param name="Handle">The handle asked about.</param>
+/// <param name="State">Where it stands.</param>
+/// <param name="Reason">Why it ended or never started; <see cref="VfxEndReason.None"/> while it has not ended.</param>
+/// <param name="FxHandle">The game's FxController handle for it; 0 for none.</param>
+/// <param name="Instance">The game's VFX instance behind it; 0 for none yet (for example an attachment that is not resolved yet).</param>
+/// <param name="Thread">The id of the thread that made the game call.</param>
+/// <param name="Entity">The entity it was played on (<see cref="Vfx.PlayOn"/>); <see cref="EntityId.None"/> for a play at a position.</param>
+/// <param name="Attached">A <see cref="Vfx.PlayOn"/> took effect: the effect is attached to the entity.</param>
+/// <param name="Unmatched">The entity could not be verified near the position (a relayed <see cref="Vfx.PlayOn"/>): the effect played at <paramref name="Position"/> without attaching.</param>
+/// <param name="StartDelay">Time from the request to the game's start of it; null until it started.</param>
+/// <param name="Lifetime">The length the play settled on; <see cref="Vfx.UntilStopped"/> for a loop; null when it is not known (before it started).</param>
+/// <param name="Position">The position it plays at.</param>
 public sealed record VfxInfo(
     VfxHandle Handle, VfxState State, VfxEndReason Reason, uint FxHandle, uint Instance, int Thread, EntityId Entity, bool Attached, bool Unmatched,
     TimeSpan? StartDelay, TimeSpan? Lifetime, WorldPosition Position);
 
 /// <summary>kiln.vfx's state. On a dedicated server <see cref="Native"/> is false and only the relay's numbers count.</summary>
+/// <param name="Available">The same as <see cref="Vfx.Available"/>.</param>
+/// <param name="Native">kiln.vfx is in this process (a client).</param>
+/// <param name="Guard">The guard is hooked and its map layout checked out.</param>
+/// <param name="Controller">An FxController update ran and no world has ended since.</param>
+/// <param name="SystemReady">The game's VFX system has entries in its map.</param>
+/// <param name="Simulated">A simulated game (labs and tests only).</param>
+/// <param name="Registered">How many VFX are in the game's map.</param>
+/// <param name="MapCapacity">The capacity of the game's VFX map.</param>
+/// <param name="Thread">The thread of the FxController update; 0 when not seen yet.</param>
+/// <param name="Live">Kiln's handles that are pending or playing.</param>
+/// <param name="Played">Kiln's plays that reached the FxController.</param>
+/// <param name="Failed">Kiln's plays that never started.</param>
+/// <param name="Refused">Requests the guard refused: ones that would have aborted the game.</param>
+/// <param name="Updates">FxController updates seen.</param>
+/// <param name="Relay">The relay channel <c>kiln:vfx</c> is open.</param>
+/// <param name="RelaySent">Relay messages this process has sent.</param>
+/// <param name="RelayReceived">Relay messages this process has received.</param>
 public sealed record VfxStatus(
     bool Available, bool Native, bool Guard, bool Controller, bool SystemReady, bool Simulated, uint Registered, uint MapCapacity, int Thread,
     uint Live, ulong Played, ulong Failed, ulong Refused, ulong Updates, bool Relay, long RelaySent, long RelayReceived);

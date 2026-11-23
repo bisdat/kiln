@@ -6,6 +6,15 @@ namespace Kiln.TestKit.Tests;
 
 public sealed class LifecycleWatchdogTests
 {
+    [Fact]
+    public async Task AFailedBootDoesNotPoisonTheNextHarness()
+    {
+        var error = await Record.ExceptionAsync(() => PlainCallsAndDisposalStopBlockedModCode("boot", "OnLoad"));
+        Assert.IsType<HarnessStoppedException>(error);
+        using var next = new KilnHarness(new KilnHarnessOptions { WaitForOtherHarness = TimeSpan.FromMilliseconds(100) });
+        next.Boot();
+    }
+
     [Theory]
     [InlineData("dispose-unload", "OnUnload")]
     [InlineData("dispose-event", "Stopping")]
@@ -14,12 +23,13 @@ public sealed class LifecycleWatchdogTests
     [InlineData("step", "Block")]
     public async Task PlainCallsAndDisposalStopBlockedModCode(string operation, string frame)
     {
-        var kiln = new KilnHarness(new KilnHarnessOptions
+        using var kiln = new KilnHarness(new KilnHarnessOptions
         {
             CallTimeout = TimeSpan.FromMilliseconds(250),
             StopTimeout = TimeSpan.FromMilliseconds(250),
         });
-        var mod = operation == "dispose-event" ? kiln.Load<TkStoppingBlockMod>(new ModManifest("tk-stuck"))
+        var mod = operation == "boot" ? kiln.Load<TkBootBlockMod>(new ModManifest("tk-stuck"))
+            : operation == "dispose-event" ? kiln.Load<TkStoppingBlockMod>(new ModManifest("tk-stuck"))
             : operation == "step" ? kiln.Load<TkTickBlockMod>(new ModManifest("tk-stuck"))
             : kiln.Load<TkUnloadBlockMod>(new ModManifest("tk-stuck"));
         if (operation != "step") kiln.Boot();

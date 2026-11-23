@@ -41,6 +41,26 @@ std::vector<SkippedRaw> g_skipped;
 
 bool excluded(const Slot& s, const Layer& l) { return s.foreign && is_registry_seq(l.seq); }
 
+// The originals of the store's slots, mirrored under a leaf lock (review4 NS1): a registry base decoded at first use holds
+// the stage runner's lock and may not take g_mu (store -> runner is the lock order), but it must take Kiln's own writes
+// back out of the resident bytes it decodes (store_pristine). Kept in step with g_slots: added with a slot, dropped with it.
+std::mutex g_pristine_mu;  // leaf: nothing else is locked while it is held
+struct Pristine {
+    uint8_t n = 0;
+    uint8_t bytes[kSlotBytes] = {};
+};
+std::map<uintptr_t, Pristine> g_pristine;
+void pristine_put(uintptr_t addr, const Slot& s) {
+    std::lock_guard lock(g_pristine_mu);
+    Pristine& p = g_pristine[addr];
+    p.n = s.n;
+    std::memcpy(p.bytes, s.original, s.n);
+}
+void pristine_erase(uintptr_t addr) {
+    std::lock_guard lock(g_pristine_mu);
+    g_pristine.erase(addr);
+}
+
 // The slots holding an evaluated layer, by the entry they belong to: a formula's layer reads its entry's other fields, so
 // another layer put on or taken off one of them flushes (evaluates) the entry's evaluated slots again.
 std::map<std::pair<uint32_t, uint32_t>, std::set<uintptr_t>> g_evals;
@@ -256,6 +276,7 @@ bool put_layer(KilnOwner owner, uint64_t seq, uint32_t kind, uint32_t id, int32_
             return false;
         }
         std::memcpy(s.current, s.original, n);
+        pristine_put(addr, s);
     } else if (s.n != n) {
         return false;
     }
@@ -314,6 +335,40 @@ bool store_effective(uintptr_t addr, uint8_t n, uint8_t* out) {
     if (it == g_slots.end()) return rd(addr, out, n);
     if (it->second.n != n) return false;
     fold(it->second, out);
+    return true;
+}
+
+bool store_effective_without_registry(uintptr_t addr, uint8_t n, const LayerEval* registry, uint8_t* out) {
+    if (n == 0 || n > kSlotBytes) return false;
+    std::lock_guard lock(g_mu);
+    auto it = g_slots.find(addr);
+    if (it == g_slots.end()) return rd(addr, out, n);
+    Slot& s = it->second;
+    if (s.n != n) return false;
+    if (s.foreign) return rd(addr, out, n);  // another writer owns it for this world: its bytes are what a reader sees
+    uint8_t v[kSlotBytes] = {};
+    std::memcpy(v, s.original, n);
+    bool applied = false;
+    auto apply_registry = [&] {
+        if (applied) return;
+        applied = true;
+        uint8_t r[kSlotBytes] = {};
+        std::string why;
+        if (registry && *registry && (*registry)(v, n, r, &why)) std::memcpy(v, r, n);
+    };
+    for (const Layer& l : s.layers) {
+        if (is_registry_seq(l.seq)) continue;      // the registry's own layer is replaced by the reader's evaluation
+        if (l.seq >= kRegistrySeq) apply_registry();  // code above the registry band still wins
+        if (l.eval) {
+            uint8_t r[kSlotBytes] = {};
+            std::string why;
+            if ((*l.eval)(v, n, r, &why)) std::memcpy(v, r, n);
+        } else {
+            std::memcpy(v, l.bytes, n);
+        }
+    }
+    apply_registry();
+    std::memcpy(out, v, n);
     return true;
 }
 
@@ -407,6 +462,10 @@ uint32_t store_reset(bool revert, std::string* error) {
     }
     if (revert) store_flush(error);
     g_slots.clear();
+    {
+        std::lock_guard leaf(g_pristine_mu);
+        g_pristine.clear();
+    }
     g_dirty.clear();
     g_txns.clear();
     g_skipped.clear();
@@ -425,6 +484,12 @@ void store_originals(uintptr_t addr, size_t size, uint8_t* out) {
         if (it->first + it->second.n <= addr + size) std::memcpy(out + (it->first - addr), it->second.original, it->second.n);
 }
 
+void store_pristine(uintptr_t addr, size_t size, uint8_t* bytes) {
+    std::lock_guard lock(g_pristine_mu);
+    for (auto it = g_pristine.lower_bound(addr); it != g_pristine.end() && it->first < addr + size; ++it)
+        if (it->first + it->second.n <= addr + size) std::memcpy(bytes + (it->first - addr), it->second.bytes, it->second.n);
+}
+
 bool store_original(uintptr_t addr, uint8_t n, uint8_t* out) {
     std::lock_guard lock(g_mu);
     auto it = g_slots.find(addr);
@@ -433,7 +498,9 @@ bool store_original(uintptr_t addr, uint8_t n, uint8_t* out) {
     return true;
 }
 
-size_t store_flush(std::string* error) {
+size_t store_flush(std::string* error) { return store_flush_checked(error, nullptr); }
+
+size_t store_flush_checked(std::string* error, std::vector<uintptr_t>* unwritten) {
     PhaseTimer pt(PH_FLUSH);
     std::lock_guard lock(g_mu);
     std::vector<Write> writes;
@@ -481,6 +548,11 @@ size_t store_flush(std::string* error) {
         PhaseTimer wt(PH_WRITE_BATCH);
         done = write_batch(writes, &failed);
     }
+    if (unwritten)  // each write whose bytes are not in memory now: attributed per slot by the caller (review4 NM1)
+        for (const Write& w : writes) {
+            uint8_t now[kSlotBytes] = {};
+            if (!rd(w.addr, now, w.n) || std::memcmp(now, w.bytes, w.n) != 0) unwritten->push_back(w.addr);
+        }
     if (failed && error) {
         char b[96];
         std::snprintf(b, sizeof b, "%zu of %zu writes failed (first at %p)", writes.size() - done, writes.size(),
@@ -498,7 +570,10 @@ size_t store_flush(std::string* error) {
         if (max_stack && s.kind == KILN_CONTENT_ITEMS && s.field >= 0 && &items.schema.fields[static_cast<size_t>(s.field)] == max_stack)
             guard_maybe(*max_stack, s.kind, s.original, s.current);
         // a slot that is clean and back to the original goes (only a written slot can have become so)
-        if (s.layers.empty() && std::memcmp(s.current, s.original, s.n) == 0) g_slots.erase(it);
+        if (s.layers.empty() && std::memcmp(s.current, s.original, s.n) == 0) {
+            pristine_erase(it->first);
+            g_slots.erase(it);
+        }
     }
     if (!dirty.empty()) ++g_gen;
     return done;

@@ -181,7 +181,7 @@ one mod per hot function (docs/kiln/hooks.md).
 | Quest objectives placed in the world | step `site`, `spawn`, `place`: voxel surface, outside bases, verified with retries | lab; in a client: manual test |
 | Custom data-driven progression flags | `quests/*.json` `knowledge`, `Knowledge.Resolve("<mod>:<name>")` | world: lab; player: manual test |
 | New villagers and NPC entity types, trades | `npcs.*.clone`, `roster`, `vendor` (shared workshop) | lab; looks and menu: manual test |
-| Villager AI commands | `Villagers.GoTo/Follow/Stay/Teleport`, `VillagerStateEvent` | Teleport: lab; rest: manual test |
+| Villager AI commands | `Villagers.Of(e)?.GoTo/Follow/Stay/Teleport` (instance members of `Villager`), `VillagerStateEvent` | Teleport: lab; rest: manual test |
 | NPC dialogue | dialogues with `voice`, any `if` | data: offline and lab; topics and voice: seen in a client |
 | Player capabilities per character | `CharacterData`, `Player.CharacterId` | lab; real id: manual test |
 | Data that follows the player between servers | `CharacterData.Carried`, channel `kiln:character` | server side: lab with fake peers; Kiln client: manual test |

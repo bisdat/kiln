@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // kiln.content registry stage: the stage runner (stage.h).
 #include "stage.h"
+#include "unmapped.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -206,45 +207,60 @@ std::string regmap_digest(const map::RegMap& rm) {
         json rows = json::object();
         for (const auto& [k, v] : rm.build.rows) rows[k] = static_cast<int>(v);
         j["build"] = {{"side", rm.build.side}, {"exe", rm.build.exe_sha256}, {"gameBuild", rm.build.game_build}, {"verified", rm.build.verified},
+                      {"regmapDigest", rm.build.regmap_digest}, {"commonDigest", rm.common_digest},
                       {"rows", rows}, {"layouts", rm.build.layouts}, {"pinned", rm.build.aliases.pinned}, {"removed", rm.build.aliases.removed}};
     }
     return sha_hex(j.dump());
 }
 
+// Stable full models share a family across mod sets; raw requests are never serialized into this cache.
+std::string cache_family(const Env& env, const map::RegMap& rm, const model::Need& need) {
+    const json request = need.all && need.raw.empty() ? json{{"all", true}} : need_json(need);
+    return sha_hex(std::string(model::kDecoderVersion) + "\n" + env.kiln_version + "\n" + env.side + "\n" + env.exe_sha256 + "\n" +
+        (rm.has_build ? (rm.build.verified ? "verified" : "unverified") : "none") + "\n" + regmap_digest(rm) + "\n" + request.dump());
+}
+std::string cache_path(const std::string& family) { return "cache/" + family.substr(0, 32) + ".json"; }
+bool read_base_cache(const Env& env, const std::string& family, model::Source& source, LiveData* out) {
+    if (!env.read_data) return false;
+    const auto text = env.read_data(cache_path(family));
+    if (!text) return false;
+    try {
+        const json c = json::parse(*text, nullptr, false);
+        if (!c.is_object() || c.value("family", std::string()) != family || !c.at("keys").is_array() || !c.at("lists").is_object()) return false;
+        for (auto it = c["lists"].begin(); it != c["lists"].end(); ++it) {
+            std::vector<KilnAssetKey> now; std::string why;
+            if (!it.value().is_string() || !source.list(it.key(), &now, &why) || keys_digest(now) != it.value().get<std::string>()) return false;
+        }
+        for (const auto& k : c["keys"]) {
+            KilnAssetKey key{}; std::string why;
+            if (!k.is_array() || k.size() != 2 || !key_parse(k[0].get<std::string>(), &key) || !source.touch(key, k[1].get<std::string>(), &why)) return false;
+        }
+        LiveData data;
+        if (source.digest() != c.value("digest", std::string()) || !base_in(c.at("base"), &data.base)) return false;
+        data.ids = c.at("ids").get<std::map<std::string, std::string>>();
+        data.nums = c.at("nums").get<std::map<std::string, uint32_t>>();
+        data.decoded = c.at("decoded").get<std::set<std::string>>();
+        *out = std::move(data);
+        if (env.log) env.log(0, "registry: the base of this start is the one the cache holds (" + std::to_string(c["keys"].size()) +
+            " resource(s), digest " + c.value("digest", std::string()).substr(0, 16) + "): not decoded again");
+        return true;
+    } catch (const std::exception&) { return false; } // damaged cache is a miss, never a partial model
+}
+void write_base_cache(const Env& env, const std::string& family, model::Source& source, const Inventory& inventory,
+                      const BaseModel& base, const std::map<std::string, std::string>& ids,
+                      const std::map<std::string, uint32_t>& nums, const std::set<std::string>& decoded) {
+    if (!env.write_data) return;
+    const std::string digest = source.digest();
+    if (digest.empty()) return;
+    json keys = json::array();
+    for (const auto& [key, type] : source.keys_read()) keys.push_back({key_text(key), type});
+    env.write_data(cache_path(family), json{{"format", 1}, {"family", family}, {"digest", digest}, {"keys", keys},
+        {"lists", inventory.lists()}, {"base", base_out(base)}, {"ids", ids}, {"nums", nums}, {"decoded", decoded}}.dump());
+}
+
 // ---- inputs ----
 void refuse_unmapped(const map::RegMap& rm, const Schema& schema, Batch* b, std::vector<Refusal>* refused) {
-    std::vector<Edit> kept;
-    for (Edit& e : b->edits) {
-        std::string reason;
-        auto unmapped = [&](const std::string& field) {
-            if (field.empty() || is_raw_field(field)) return false;
-            const RegistrySpec* rs = schema.registry(e.registry);
-            const FieldSpec* f = rs ? rs->field(field) : nullptr;
-            if (!f || f->read_only) return false;  // compose names an unknown or read-only field itself
-            return rm.mapping(e.registry, generic_path(field), &reason) != map::Mapping::Mapped;
-        };
-        bool bad = false;
-        // review finding 1 (ruling 2026-11-21): no back-end removes a game entry or creates a mod's in this release (P2 builds it):
-        // every entry add and remove is refused here, before composition, so nothing is reported as done and nothing is removed
-        // with it (a recipe needing a removed item stays); a reference to a refused add names this refusal
-        if (e.entry != EntryOp::None) {
-            bad = true;
-            reason = e.registry + " " + (e.entry == EntryOp::Add ? "add " + e.add_id : "remove " + e.select.id) +
-                     ": entry add and remove have no back-end in this release (no game entry is removed and no new entry is created); this edit was not applied";
-        } else if (e.entry == EntryOp::Add) {
-            for (const auto& [k, v] : e.add_fields) bad = bad || unmapped(k);
-        } else if (e.raw.empty() && e.entry != EntryOp::Remove) {
-            bad = unmapped(e.element.on ? (e.element.leaf.empty() ? e.element.list : e.element.list + "[]." + e.element.leaf) : e.field);
-        }
-        if (!bad) {
-            kept.push_back(std::move(e));
-            continue;
-        }
-        Refusal r{b->mod, b->source, b->stage, e.n, reason, ""};
-        if (e.entry == EntryOp::Add) r.entry = e.registry + "|" + lc(e.add_id);
-        refused->push_back(std::move(r));
-    }
-    b->edits = std::move(kept);
+    refuse_unmapped_edits(rm, schema, b, refused);
 }
 
 std::vector<Env::DataFile> read_sections(const std::string& mod, const std::string& version,
@@ -274,6 +290,7 @@ struct Runner::Impl {
     std::vector<std::string> rm_errs;
     bool rm_loaded = false;
     std::vector<std::pair<std::string, std::string>> order;  // Kiln.Host's (set_order)
+    bool registry_users = false;  // set_order named a mod whose code uses the registry API (review4 NS1)
     bool order_set = false;
     struct Sub {
         uint64_t owner = 0;
@@ -283,12 +300,19 @@ struct Runner::Impl {
     std::map<uint64_t, Sub> stage_subs;
     struct Ready {
         uint64_t owner = 0;
-        std::function<void(Phase, uint64_t)> fn;
+        ReadyFn fn;
     };
     std::map<uint64_t, Ready> ready_subs;
     uint64_t next_handle = 1;
-    std::map<std::string, std::vector<Batch>> queued;            // mod -> its submits before the stage
-    std::map<std::string, std::vector<Refusal>> queued_refused;
+    struct Queued {
+        uint64_t owner = 0;
+        Batch batch;
+        std::vector<Refusal> refused;
+    };
+    std::map<std::string, std::vector<Batch>> recorded; // successful callback turns kept for live recomposition
+    std::map<std::string, std::vector<Queued>> queued;  // mod -> its submits, retaining each caller's owner
+    std::set<uint64_t> gone;  // owner ids are never reused
+    bool alive(uint64_t owner) const { return !gone.count(owner) && (!env.owner_alive || env.owner_alive(owner)); }
     std::thread::id stage_thread;
     bool stage_thread_set = false;
     struct Turn {
@@ -300,7 +324,11 @@ struct Runner::Impl {
     std::optional<Turn> turn;
     // the stage's result
     BaseModel base;
-    Result result;
+    Result result, live_result;
+    bool full_live = false, installing_live = false;
+    std::unique_ptr<model::Source> lazy_source;
+    OldWritesFn lazy_old;
+    std::string lazy_error;
     std::vector<OldWrite> old;
     std::vector<ModInput> inputs;
     std::vector<Refusal> pre_refused;
@@ -318,6 +346,13 @@ struct Runner::Impl {
 
     void log(int level, const std::string& line) {
         if (env.log) env.log(level, line);
+    }
+    void revoked_queue(const std::string& mod, uint64_t owner, size_t batches, size_t edits, Stage stage) {
+        if (!batches) return;
+        const std::string why = "owner " + std::to_string(owner) + " was revoked; dropped " + std::to_string(batches) +
+            " queued batch(es), " + std::to_string(edits) + " edit(s) before the stage";
+        log(1, "registry: mod " + mod + " " + why);
+        pre_refused.push_back({mod, "owner:" + std::to_string(owner), stage, 0, why, ""});
     }
     bool load_regmap() {
         if (rm_loaded) return true;
@@ -390,16 +425,19 @@ KilnResult Runner::set_order(const std::string& order_json) {
     if (!j.is_array()) return KILN_ERR_INVALID_ARGUMENT;
     std::vector<std::pair<std::string, std::string>> order;
     std::set<std::string> seen;
+    bool users = false;
     for (const auto& row : j) {
         if (!row.is_object() || !row.contains("mod") || !row["mod"].is_string()) return KILN_ERR_INVALID_ARGUMENT;
         const std::string mod = row["mod"].get<std::string>();
         if (!seen.insert(mod).second) return KILN_ERR_INVALID_ARGUMENT;
         order.emplace_back(mod, row.contains("version") && row["version"].is_string() ? row["version"].get<std::string>() : std::string());
+        users |= row.contains("registry") && row["registry"].is_boolean() && row["registry"].get<bool>();
     }
     std::lock_guard lk(d_->mu);
     if (phase_.load() != Phase::None) return KILN_ERR_UNAVAILABLE;
     d_->order = std::move(order);
     d_->order_set = true;
+    d_->registry_users = users;
     return KILN_OK;
 }
 
@@ -415,6 +453,7 @@ KilnResult Runner::subscribe_stage(uint64_t owner, const std::string& mod, Stage
     std::string err;
     if (!owner || !fn || !handle || !mod_id_ok(mod, &err)) return KILN_ERR_INVALID_ARGUMENT;
     std::lock_guard lk(d_->mu);
+    if (!d_->alive(owner)) return KILN_ERR_REVOKED;
     if (phase_.load() != Phase::None) return KILN_ERR_UNAVAILABLE;
     for (const auto& [h, s] : d_->stage_subs)
         if (s.mod == mod) return KILN_ERR_INVALID_ARGUMENT;
@@ -423,9 +462,10 @@ KilnResult Runner::subscribe_stage(uint64_t owner, const std::string& mod, Stage
     return KILN_OK;
 }
 
-KilnResult Runner::subscribe_ready(uint64_t owner, std::function<void(Phase, uint64_t)> fn, uint64_t* handle) {
+KilnResult Runner::subscribe_ready(uint64_t owner, ReadyFn fn, uint64_t* handle) {
     if (!owner || !fn || !handle) return KILN_ERR_INVALID_ARGUMENT;
     std::lock_guard lk(d_->mu);
+    if (!d_->alive(owner)) return KILN_ERR_REVOKED;
     *handle = d_->next_handle++;
     d_->ready_subs[*handle] = {owner, std::move(fn)};
     return KILN_OK;
@@ -438,12 +478,50 @@ KilnResult Runner::unsubscribe(uint64_t handle) {
 }
 
 void Runner::owner_gone(uint64_t owner) {
-    std::lock_guard lk(d_->mu);
-    std::set<std::string> mods;
-    for (auto it = d_->stage_subs.begin(); it != d_->stage_subs.end();)
-        if (it->second.owner == owner) mods.insert(it->second.mod), it = d_->stage_subs.erase(it);
-        else ++it;
-    for (auto it = d_->ready_subs.begin(); it != d_->ready_subs.end();) it = it->second.owner == owner ? d_->ready_subs.erase(it) : std::next(it);
+    if (!owner) return;
+    {
+        std::lock_guard lk(d_->mu);
+        d_->gone.insert(owner);
+        for (auto it = d_->stage_subs.begin(); it != d_->stage_subs.end();)
+            it = it->second.owner == owner ? d_->stage_subs.erase(it) : std::next(it);
+        for (auto it = d_->ready_subs.begin(); it != d_->ready_subs.end();)
+            it = it->second.owner == owner ? d_->ready_subs.erase(it) : std::next(it);
+        for (auto it = d_->queued.begin(); it != d_->queued.end();) {
+            size_t batches = 0, edits = 0;
+            Stage stage = Stage::Alter;
+            std::erase_if(it->second, [&](const Impl::Queued& q) {
+                if (q.owner != owner) return false;
+                if (!batches) stage = q.batch.stage;
+                ++batches; edits += q.batch.edits.size() + q.refused.size();
+                return true;
+            });
+            d_->revoked_queue(it->first, owner, batches, edits, stage);
+            it = it->second.empty() ? d_->queued.erase(it) : std::next(it);
+        }
+    }
+    if (d_->env.owner_gone) d_->env.owner_gone(owner); // never call out while holding the runner lock
+}
+
+void Runner::notify_ready(const std::vector<uint64_t>& handles, Phase phase, uint64_t generation) {
+    for (const uint64_t h : handles) {
+        ReadyFn fn;
+        {
+            std::lock_guard lk(d_->mu);
+            const auto it = d_->ready_subs.find(h);
+            if (it == d_->ready_subs.end()) continue;  // removed by an earlier callback in this same snapshot
+            if (!d_->alive(it->second.owner)) {
+                d_->ready_subs.erase(it);
+                continue;
+            }
+            fn = it->second.fn;  // dispatch starts here; revoke/unsubscribe do not wait for an in-flight callback
+        }
+        if (fn(phase, generation)) continue;
+        {
+            std::lock_guard lk(d_->mu);
+            d_->ready_subs.erase(h);
+        }
+        d_->log(2, "registry: a ready callback faulted and was removed");
+    }
 }
 
 bool Runner::on_stage_thread() const {
@@ -469,6 +547,10 @@ KilnResult Runner::submit(uint64_t owner, const std::string& owner_mod, const st
     };
     {
         std::lock_guard lk(d_->mu);
+        if (!d_->alive(owner)) {
+            err = "the caller's owner is revoked: the batch is refused";
+            return say(KILN_ERR_REVOKED);
+        }
         if (!parse_batch(ir, d_->schema, &b, &refused, &err)) return say(KILN_ERR_INVALID_ARGUMENT);
     }
     if (owner_mod.empty()) {  // review finding 8: Kiln binds every batch to its owner's mod; an owner it cannot bind has none
@@ -482,12 +564,15 @@ KilnResult Runner::submit(uint64_t owner, const std::string& owner_mod, const st
         return say(KILN_ERR_INVALID_ARGUMENT);
     }
     std::lock_guard lk(d_->mu);
+    if (!d_->alive(owner)) {
+        err = "the caller's owner is revoked: the batch is refused";
+        b.edits.clear();
+        return say(KILN_ERR_REVOKED);
+    }
     const Phase ph = phase_.load();
     if (ph == Phase::None) {
         if (b.source.empty()) b.source = "code:" + b.mod;
-        d_->queued[b.mod].push_back(b);
-        auto& q = d_->queued_refused[b.mod];
-        q.insert(q.end(), refused.begin(), refused.end());
+        d_->queued[b.mod].push_back({owner, b, refused});
         return say(KILN_OK);
     }
     if (ph == Phase::Start || ph == Phase::WorldLoad) {
@@ -521,7 +606,9 @@ KilnResult Runner::submit(uint64_t owner, const std::string& owner_mod, const st
     return say(KILN_OK);
 }
 
-std::vector<BootResource> Runner::run(const OldWritesFn& old_fn) {
+std::vector<BootResource> Runner::run(const OldWritesFn& old_fn) { return run(old_fn, {}); }
+
+std::vector<BootResource> Runner::run(const OldWritesFn& old_fn, const std::vector<std::pair<KilnAssetKey, std::string>>& freeze) {
     Impl& d = *d_;
     std::vector<ModInput> inputs;
     {
@@ -577,13 +664,20 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn) {
     }
     {
         std::lock_guard lk(d.mu);
-        for (auto& [mod, bs] : d.queued) {
-            ModInput& in = by_mod[mod];
-            in.id = mod;
-            for (Batch& b : bs) in.batches.push_back(std::move(b));
+        // The stage takes the surviving queue here. Already-taken stage edits stay until the next start on revoke.
+        for (auto& [mod, qs] : d.queued) {
+            for (Impl::Queued& q : qs) {
+                if (!d.alive(q.owner)) {
+                    d.revoked_queue(mod, q.owner, 1, q.batch.edits.size() + q.refused.size(), q.batch.stage);
+                    continue;
+                }
+                ModInput& in = by_mod[mod];
+                in.id = mod;
+                in.batches.push_back(std::move(q.batch));
+                in.refused.insert(in.refused.end(), q.refused.begin(), q.refused.end());
+            }
         }
-        for (auto& [mod, rs] : d.queued_refused) by_mod[mod].refused.insert(by_mod[mod].refused.end(), rs.begin(), rs.end());
-        d.queued.clear(), d.queued_refused.clear();
+        d.queued.clear();
         d.pre_refused.insert(d.pre_refused.end(), skipped.begin(), skipped.end());
         for (const auto& [h, s] : d.stage_subs) {
             ModInput& in = by_mod[s.mod];
@@ -592,10 +686,16 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn) {
             const uint64_t handle = h;
             in.code = [this, mod, handle](Stage st, const View& v, Batch* out) {
                 StageFn fn;
+                uint64_t owner = 0;
                 {
                     std::lock_guard l2(d_->mu);
                     const auto it = d_->stage_subs.find(handle);
                     if (it == d_->stage_subs.end()) return;
+                    if (!d_->alive(it->second.owner)) {
+                        d_->stage_subs.erase(it);
+                        return;
+                    }
+                    owner = it->second.owner;
                     fn = it->second.fn;
                     d_->turn = Impl::Turn{mod, st, &v, out};
                     out->mod = mod;
@@ -606,14 +706,21 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn) {
                 const bool clean = fn(st, v);
                 std::lock_guard l2(d_->mu);
                 d_->turn.reset();
-                if (!clean) {
+                if (!d_->alive(owner)) {
+                    const size_t dropped = out->edits.size() - before;
+                    out->edits.resize(before);
+                    // As on fault, keep refusal diagnostics: another live owner may have submitted them.
+                    d_->stage_subs.erase(handle);
+                    d_->pre_refused.push_back({mod, "code:" + mod, st, 0,
+                        "the stage callback's owner was revoked; its " + std::to_string(dropped) + " edit(s) of this turn were dropped", ""});
+                } else if (!clean) {
                     const size_t dropped = out->edits.size() - before;
                     out->edits.resize(before);
                     d_->stage_subs.erase(handle);
                     d_->pre_refused.push_back({mod, "code:" + mod, st, 0,
                                                "the stage callback faulted; its " + std::to_string(dropped) + " edit(s) of this stage were dropped and it is not called again", ""});
                     d_->log(2, "registry: mod " + mod + "'s stage callback faulted in " + stage_name(st) + ": its edits of that turn are dropped, the callback is removed");
-                }
+                } else if (!out->edits.empty()) d_->recorded[mod].push_back(*out);
             };
         }
     }
@@ -638,7 +745,28 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn) {
     // running exe has no id table yet (work-bb 2026-11-21: kilnctl update needs one for every build)
     const std::string ids_rel = "ids-" + d.env.side + "-" + d.env.exe_sha256 + ".json";
     const bool ids_missing = d.env.read_data && d.env.write_data && !d.env.exe_sha256.empty() && !d.env.read_data(ids_rel);
-    std::unique_ptr<model::Source> src = inputs.empty() && !ids_missing ? nullptr : d.env.source ? d.env.source(&why) : nullptr;
+    const bool want_base = !inputs.empty();
+    // A mod whose code uses the registry API (Kiln.Host's set_order flag): decode the stable base here, at resources-ready,
+    // before kiln.content writes packs into resident resource pages, rather than at first use (review4 NS1).
+    bool users = false;
+    {
+        std::lock_guard lk(d.mu);
+        users = d.registry_users;
+    }
+    const bool eager = want_base || (users && d.env.prepare_live);
+    const bool freeze_old = !eager && d.env.prepare_live && !freeze.empty();
+    std::unique_ptr<model::Source> src = !eager && !ids_missing && !freeze_old ? nullptr : d.env.source ? d.env.source(&why) : nullptr;
+    if ((!eager || (!want_base && !src)) && d.env.prepare_live) d.lazy_old = old_fn; // production supplies owned document copies
+    if (freeze_old) {
+        for (const auto& [key, type] : freeze) {
+            std::string error;
+            if (!src || !src->touch(key, type, &error)) {
+                d.lazy_error = "the registry's pre-patch base could not be frozen: " + (error.empty() ? why : error);
+                d.log(1, "registry: " + d.lazy_error);
+                break;
+            }
+        }
+    }
     d.meta.pid = d.env.pid;
     d.meta.kiln = d.env.kiln_version;
     d.meta.regmap = {d.env.side, d.env.exe_sha256, d.rm.has_build ? "regmap/" + d.env.side + "/" + d.env.exe_sha256 + ".json" : "", d.rm.has_build && d.rm.build.verified};
@@ -655,24 +783,25 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn) {
     std::vector<OldWrite> old;
     std::unique_ptr<Inventory> inventory;  // before m: the model reads through it
     std::unique_ptr<model::Model> m;
-    const model::Need need = model::needs_of(d.schema, inputs);
+    model::Need need = model::needs_of(d.schema, inputs);
+    if (d.env.prepare_live && eager) need.all = true;
     bool hit = false;
-    if (!src && inputs.empty()) {
+    if (!src && !want_base) {
+        if (eager) d.log(1, "registry: the base could not be read at the stage (" + why + "); it is prepared at first use instead");
         d.meta.base.origin = "none";
-    } else if (inputs.empty()) {
-        // only the id table of this build
-        model::Model ids_model(*src, d.rm, d.schema);
-        for (const auto& [n, r] : d.schema.registries) {
-            std::string w;
-            ids_model.entries(n, &w);
+    } else if (!eager) {
+        if (ids_missing) {
+            // Only the once-per-build id ledger: no stable field decode on unused starts.
+            model::Model ids_model(*src, d.rm, d.schema);
+            ids_model.list_all();  // entries only (with the reference tables), no field decode
+            ids_model.id_table(&d.ids, &d.nums);
+            d.env.write_data(ids_rel, ids_model.id_table_json().dump());
+            d.log(0, "registry: the id table of this game build (" + d.env.side + " " + d.env.exe_sha256.substr(0, 8) + ") is written to the data folder (" +
+                         std::to_string(d.ids.size()) + " entries); no mod has registry content");
+            for (const auto& note : ids_model.take_notes()) d.log(0, "registry: " + note);
         }
-        ids_model.id_table(&d.ids, &d.nums);
-        d.env.write_data(ids_rel, ids_model.id_table_json().dump());
-        d.log(0, "registry: the id table of this game build (" + d.env.side + " " + d.env.exe_sha256.substr(0, 8) + ") is written to the data folder (" +
-                     std::to_string(d.ids.size()) + " entries); no mod has registry content");
-        for (const std::string& n : ids_model.take_notes()) d.log(0, "registry: " + n);
-        ids_model.release();
-        src.reset();
+        if (freeze_old) d.lazy_source = std::move(src);
+        else { src->release(); src.reset(); }
         d.meta.base.origin = "none";
     } else if (!src) {
         d.log(2, "registry: the stage has no base to read (" + why + "): nothing of the registry is applied in this start");
@@ -682,73 +811,31 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn) {
         inventory = std::make_unique<Inventory>(*src);
         m = std::make_unique<model::Model>(*inventory, d.rm, d.schema);
         d.meta.base.origin = src->name();
-        const std::string family = sha_hex(std::string(model::kDecoderVersion) + "\n" + d.env.kiln_version + "\n" + d.env.side + "\n" + d.env.exe_sha256 + "\n" +
-                                           (d.rm.has_build ? (d.rm.build.verified ? "verified" : "unverified") : "none") + "\n" + regmap_digest(d.rm) + "\n" +
-                                           need_json(need).dump());
-        const std::string cache_rel = "cache/" + family.substr(0, 32) + ".json";
-        // the cache: the same keys read again give the same digest -> the same base
-        if (!need.all && need.raw.empty() && !ids_missing && d.env.read_data)  // the id table is missing: decode, it is written below
-            if (auto text = d.env.read_data(cache_rel)) {
-                const json c = json::parse(*text, nullptr, false);
-                bool ok = c.is_object() && c.value("family", std::string()) == family && c.contains("keys") && c["keys"].is_array() &&
-                          c.contains("lists") && c["lists"].is_object();
-                // every type the cached decode listed lists the same keys now (a resource added or taken away misses)
-                for (auto it = ok ? c["lists"].begin() : c["keys"].end(); ok && it != c["lists"].end(); ++it) {
-                    std::vector<KilnAssetKey> now;
-                    std::string w;
-                    ok = it.value().is_string() && src->list(it.key(), &now, &w) && keys_digest(now) == it.value().get<std::string>();
-                }
-                for (const auto& k : ok ? c["keys"] : json::array()) {
-                    KilnAssetKey key{};
-                    std::string w;
-                    if (!k.is_array() || k.size() != 2 || !key_parse(k[0].get<std::string>(), &key) || !src->touch(key, k[1].get<std::string>(), &w)) {
-                        ok = false;
-                        break;
-                    }
-                }
-                BaseModel cached;
-                if (ok && src->digest() == c.value("digest", std::string()) && base_in(c["base"], &cached)) {
-                    base = std::move(cached);
-                    hit = true;
-                    for (auto it = c["ids"].begin(); it != c["ids"].end(); ++it) d.ids[it.key()] = it.value().get<std::string>();
-                    for (auto it = c["nums"].begin(); it != c["nums"].end(); ++it) d.nums[it.key()] = it.value().get<uint32_t>();
-                    for (const auto& f : c["decoded"]) d.decoded.insert(f.get<std::string>());
-                    d.log(0, "registry: the base of this start is the one the cache holds (" + std::to_string(c["keys"].size()) + " resource(s), digest " +
-                                 c.value("digest", std::string()).substr(0, 16) + "): not decoded again");
-                }
+        const std::string family = cache_family(d.env, d.rm, need);
+        if (need.raw.empty() && !ids_missing) {
+            LiveData cached;
+            hit = read_base_cache(d.env, family, *src, &cached);
+            if (hit) {
+                base = std::move(cached.base); d.ids = std::move(cached.ids);
+                d.nums = std::move(cached.nums); d.decoded = std::move(cached.decoded);
             }
+        }
         if (!hit) {
             m->fill(need, &base);
             // the id table of this build for kilnctl update: every R1 registry the first time this build starts with Kiln
             const bool want_all = ids_missing;
-            if (want_all)
-                for (const auto& [n, r] : d.schema.registries) {
-                    std::string w;
-                    m->entries(n, &w);
-                }
+            if (want_all) m->list_all();
             m->id_table(&d.ids, &d.nums);
             d.decoded = m->decoded();
             // review finding 4 (ruling 2026-11-21 19:11): written once per build, when missing, always with every registry
             if (d.env.write_data && want_all) d.env.write_data(ids_rel, m->id_table_json().dump());
-            const std::string digest = m->digest();
-            if (!need.all && need.raw.empty() && d.env.write_data && !digest.empty()) {
-                json keys = json::array();
-                for (const auto& [k, t] : m->keys_read()) keys.push_back({key_text(k), t});
-                json ids = d.ids, nums = d.nums;
-                d.env.write_data(cache_rel, json{{"format", 1}, {"family", family}, {"digest", digest}, {"keys", keys}, {"lists", inventory->lists()}, {"base", base_out(base)},
-                                                 {"ids", ids}, {"nums", nums}, {"decoded", d.decoded}}
-                                                .dump());
-            }
+            if (need.raw.empty()) write_base_cache(d.env, family, *src, *inventory, base, d.ids, d.nums, d.decoded);
         }
         if (old_fn) old = old_fn(*m);
         for (const std::string& n : m->take_notes()) d.log(0, "registry: " + n);
-        if (!need.all) m->release();  // the base is decoded: let the bytes go (stage callbacks may read any field: after them)
     }
     Result r;
-    if (src) {
-        r = compose(d.schema, base, old, inputs);
-        if (m) m->release();
-    }
+    if (src) r = compose(d.schema, base, old, inputs);
     // the edits refused before the stage are the report's too
     std::vector<Refusal> pre;
     for (const ModInput& in : inputs) pre.insert(pre.end(), in.refused.begin(), in.refused.end());
@@ -783,10 +870,18 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn) {
         }
         it->fields.push_back({ref, &reg->second, &row->second, *f, std::move(rows)});
     }
+    // A cache hit has not populated the model's entry locations yet. Locate boot targets before releasing its source.
+    if (m) m->release();
     std::lock_guard lk(d.mu);
+    d.full_live = eager && need.all && bool(src);
     d.base = std::move(base);
     d.old = std::move(old);
-    for (ModInput& in : inputs) in.code = nullptr;
+    for (ModInput& in : inputs) {
+        in.code = nullptr;
+        if (auto it = d.recorded.find(in.id); it != d.recorded.end())
+            in.batches.insert(in.batches.end(), it->second.begin(), it->second.end());
+    }
+    d.recorded.clear();
     d.inputs = std::move(inputs);
     d.result = std::move(r);
     d.boot = boot;
@@ -799,9 +894,58 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn) {
     return boot;
 }
 
+bool Runner::prepare_live(LiveData* out, std::string* why) {
+    std::lock_guard lock(d_->mu);
+    auto& d = *d_;
+    if (phase_.load() < Phase::Start || !d.env.prepare_live) { *why = "the registry stage is not ready"; return false; }
+    try {
+        if (!d.full_live) {
+            if (d.installing_live) { *why = "the registry live handoff is still in progress"; return false; }
+            if (!d.inputs.empty()) { *why = "the initial registry base failed; a restart is required"; return false; }
+            if (!d.lazy_error.empty()) { *why = d.lazy_error; return false; }
+            if (!d.lazy_source && d.env.source) d.lazy_source = d.env.source(why);
+            if (!d.lazy_source) return false;
+            std::unique_ptr<model::Source> consumed; // destroyed after the model and inventory below
+            {
+                auto& source = *d.lazy_source;
+                const std::string origin = source.name();
+                Inventory inventory(source);
+                model::Model model(inventory, d.rm, d.schema);
+                model::Need need; need.all = true;
+                const auto family = cache_family(d.env, d.rm, need);
+                LiveData data;
+                if (!read_base_cache(d.env, family, source, &data)) {
+                    model.fill(need, &data.base);
+                    model.id_table(&data.ids, &data.nums);
+                    data.decoded = model.decoded();
+                    write_base_cache(d.env, family, source, inventory, data.base, data.ids, data.nums, data.decoded);
+                }
+                data.old = d.lazy_old ? d.lazy_old(model) : d.old;
+                data.result = compose(d.schema, data.base, data.old, d.inputs);
+                data.result.refused.insert(data.result.refused.begin(), d.outside.begin(), d.outside.end());
+                // Stable live data must not carry the model's raw resolver beyond this owned read session.
+                data.base.raw = {};
+                for (const auto& note : model.take_notes()) d.log(0, "registry: " + note);
+                d.base = std::move(data.base); d.old = std::move(data.old);
+                d.live_result = std::move(data.result); d.result = d.live_result;
+                d.ids = std::move(data.ids); d.nums = std::move(data.nums); d.decoded = std::move(data.decoded);
+                d.meta.base.origin = origin;
+                model.release();
+                d.full_live = true; d.lazy_old = {};
+                consumed = std::move(d.lazy_source);
+            }
+        }
+        if (out) *out = {d.base, d.old, d.live_result, d.ids, d.nums, d.decoded};
+        return true;
+    } catch (const std::exception& error) {
+        *why = std::string("the copied registry base could not be prepared: ") + error.what();
+        return false;
+    }
+}
+
 void Runner::finish(const std::vector<BootOutcome>& outcomes) {
     Impl& d = *d_;
-    std::vector<std::function<void(Phase, uint64_t)>> ready;
+    std::vector<uint64_t> ready;
     LiveHandoff live;
     uint64_t gen = 0;
     std::string plan_rel, plan_text, report_text;  // written after the runner's lock is released (review finding 10)
@@ -877,14 +1021,14 @@ void Runner::finish(const std::vector<BootOutcome>& outcomes) {
                      " conflict line(s); restart fields are final (phase start)");
         phase_.store(Phase::Start);
         gen = d.generation;
-        for (const auto& [h, s] : d.ready_subs) ready.push_back(s.fn);
+        for (const auto& [h, s] : d.ready_subs) ready.push_back(h);
         live = {&d.schema, &d.rm, &d.result, &d.ids, &d.nums, &d.base, &d.old, &d.inputs, &d.decoded, nullptr, &d.outside, &d.boot_fields, nullptr};
         live.check = [this](Batch* b, std::vector<Refusal>* refused) {
             std::lock_guard l2(d_->mu);
             refuse_unmapped(d_->rm, d_->schema, b, refused);
         };
-        live.report = [this](const Result& r, bool application) {
-            std::vector<std::function<void(Phase, uint64_t)>> fns;
+        auto publish = [this](const Result& r, bool application, bool world_event, bool world) {
+            std::vector<uint64_t> handles;
             uint64_t g2 = 0;
             std::string text;
             {
@@ -892,34 +1036,46 @@ void Runner::finish(const std::vector<BootOutcome>& outcomes) {
                 d_->result = r;
                 if (application) {
                     d_->meta.generation = ++d_->generation;
-                    d_->meta.world_load = true;
-                    phase_.store(Phase::WorldLoad);
+                    d_->meta.world_load = world;
                     g2 = d_->generation;
-                    for (const auto& [h, s] : d_->ready_subs) fns.push_back(s.fn);
+                }
+                if (world_event) {
+                    phase_.store(Phase::WorldLoad);
+                    for (const auto& [h, s] : d_->ready_subs) handles.push_back(h);
                 }
                 d_->meta.written = d_->env.now ? d_->env.now() : "";
                 const json doc2 = ::kc::registry::report_json(d_->schema, d_->result, d_->meta);
                 d_->report = doc2.dump();
                 text = doc2.dump(1);
             }
-            // outside the runner's lock (review finding 10): the file, then kiln_registry.h's WORLDLOAD event (finding 9)
+            // Outside the runner lock: transaction snapshots update the generation/file, never the ready event.
             if (d_->env.write_report) d_->env.write_report(text);
-            for (const auto& fn : fns) fn(Phase::WorldLoad, g2);
+            notify_ready(handles, Phase::WorldLoad, g2);
         };
+        live.report = [publish](const Result& r, bool application) { publish(r, application, application, application); };
+        live.changed = [publish](const Result& r, bool world) { publish(r, true, false, world); };
+        if (d.env.prepare_live && !d.full_live) live.prepare = [this](LiveData* data, std::string* why) { return prepare_live(data, why); };
     }
     if (!plan_rel.empty() && !d.env.write_data(plan_rel, plan_text)) d.log(1, "registry: the plan could not be written");
     if (d.env.write_report && !d.env.write_report(report_text)) d.log(1, "registry: state/registry.json could not be written");
-    if (live_) live_(live);
-    else {
-        bool any = false;
-        for (const auto& [ref, fo] : d.result.fields) {
-            const RegistrySpec* rs = d.schema.registry(ref.registry);
-            const FieldSpec* f = rs && !is_raw_field(ref.field) ? rs->field(ref.field) : nullptr;
-            any = any || !f || f->applies != Applies::Restart;
+    // The installer copies borrowed handoff maps outside this lock (store -> runner is the lock order).
+    // Fail closed for polling readers until that copy completes; preparation must not mutate those maps concurrently.
+    { std::lock_guard lock(d.mu); d.installing_live = true; }
+    auto complete_handoff = [&d] { std::lock_guard lock(d.mu); d.installing_live = false; };
+    try {
+        if (live_) live_(live);
+        else {
+            bool any = false;
+            for (const auto& [ref, fo] : d.result.fields) {
+                const RegistrySpec* rs = d.schema.registry(ref.registry);
+                const FieldSpec* f = rs && !is_raw_field(ref.field) ? rs->field(ref.field) : nullptr;
+                any = any || !f || f->applies != Applies::Restart;
+            }
+            if (any) d.log(1, "registry: this build of kiln.content has no live back-end: now and worldLoad fields are composed and reported, not applied");
         }
-        if (any) d.log(1, "registry: this build of kiln.content has no live back-end: now and worldLoad fields are composed and reported, not applied");
-    }
-    for (const auto& fn : ready) fn(Phase::Start, gen);
+    } catch (...) { complete_handoff(); throw; }
+    complete_handoff();
+    notify_ready(ready, Phase::Start, gen);
 }
 
 uint64_t Runner::generation() const {
@@ -972,6 +1128,9 @@ bool Runner::field_info(const std::string& q, FieldInfo* out) {
 }
 
 KilnResult Runner::read(uint32_t view, const std::string& registry, const std::string& id, const std::string& field, std::string* out) {
+    if (view != 1 && phase_.load() >= Phase::Start && d_->env.prepare_live) {
+        std::string why; if (!prepare_live(nullptr, &why)) return KILN_ERR_UNAVAILABLE;
+    }
     std::lock_guard lk(d_->mu);
     const RegistrySpec* rs = d_->schema.registry(registry);
     if (!rs || view > 2 || (!rs->field(field) && !is_raw_field(field))) return KILN_ERR_INVALID_ARGUMENT;
@@ -1004,6 +1163,9 @@ KilnResult Runner::read(uint32_t view, const std::string& registry, const std::s
 }
 
 KilnResult Runner::select(uint32_t view, const std::string& registry, const std::string& selector, std::string* out) {
+    if (view != 1 && phase_.load() >= Phase::Start && d_->env.prepare_live) {
+        std::string why; if (!prepare_live(nullptr, &why)) return KILN_ERR_UNAVAILABLE;
+    }
     const json s = json::parse(selector, nullptr, false);
     std::string glob;
     std::vector<std::string> has, has_not;

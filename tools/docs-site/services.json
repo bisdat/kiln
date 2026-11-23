@@ -1,0 +1,1485 @@
+{
+  "format": 1,
+  "services": [
+    {
+      "assembly": "Kiln.Api",
+      "name": null,
+      "summary": "The API every mod compiles against, loaded once and shared by every mod",
+      "guides": [
+        "docs/kiln/modding/contract.md",
+        "docs/kiln/modding/lifecycle.md",
+        "docs/kiln/modding/README.md"
+      ],
+      "capabilities": [
+        {
+          "name": "events.pickup",
+          "members": 1
+        },
+        {
+          "name": "identity.entities",
+          "members": 11
+        },
+        {
+          "name": "mods.boot",
+          "members": 1
+        },
+        {
+          "name": "mods.boot.game_data",
+          "members": 1
+        },
+        {
+          "name": "types.impact_names",
+          "members": 3
+        },
+        {
+          "name": "world.programs.client",
+          "members": 1
+        }
+      ],
+      "samples": []
+    },
+    {
+      "assembly": "Kiln.Game",
+      "name": "Game",
+      "summary": "The game's ECS types (Kiln.Ecs.*), generated at build time from a layout dump of the game's reflection table, each with the engine's exact layout, and the legacy Kiln.GameTypes.* structs",
+      "guides": [
+        "docs/kiln/typegen.md"
+      ],
+      "capabilities": [],
+      "samples": [
+        "BigCan",
+        "FrostMark",
+        "LightsOut",
+        "WaterWorks"
+      ]
+    },
+    {
+      "assembly": "Kiln.Testing",
+      "name": "Testing",
+      "summary": "In-game tests for mods",
+      "guides": [
+        "docs/kiln/modding/testing.md"
+      ],
+      "capabilities": [],
+      "samples": [
+        "PlayerStates",
+        "SampleTests"
+      ]
+    },
+    {
+      "assembly": "Kiln.TestKit",
+      "name": null,
+      "summary": "Mod tests under `dotnet test`, with no game",
+      "guides": [
+        "docs/kiln/modding/unit-tests.md"
+      ],
+      "capabilities": [],
+      "samples": []
+    },
+    {
+      "assembly": "Kiln.Abilities",
+      "name": "Abilities",
+      "summary": "Scripted abilities, per-cast tweaks of the game's Impact programs, Kiln natives and runtime program registration",
+      "guides": [
+        "docs/kiln/services/abilities.md"
+      ],
+      "capabilities": [
+        {
+          "name": "abilities.buff_list",
+          "members": 1
+        },
+        {
+          "name": "abilities.buffs",
+          "members": 2
+        },
+        {
+          "name": "abilities.natives.attach",
+          "members": 1
+        },
+        {
+          "name": "abilities.natives.sync",
+          "members": 2
+        },
+        {
+          "name": "abilities.sequences",
+          "members": 3
+        },
+        {
+          "name": "gems.craft",
+          "members": 4
+        },
+        {
+          "name": "gems.read",
+          "members": 4
+        },
+        {
+          "name": "gems.sockets",
+          "members": 2
+        },
+        {
+          "name": "gems.sources",
+          "members": 2
+        },
+        {
+          "name": "kiln.decisions",
+          "members": 12
+        },
+        {
+          "name": "kiln.gamedata",
+          "members": 1
+        },
+        {
+          "name": "kiln.items",
+          "members": 1
+        },
+        {
+          "name": "world.ecs_read",
+          "members": 1
+        }
+      ],
+      "samples": [
+        "AbilityBlocks",
+        "CreatureAi",
+        "FireNova",
+        "FrostMark",
+        "GemEffects",
+        "ImpactSample",
+        "NewItems",
+        "PlayerStates",
+        "UiBlocks"
+      ]
+    },
+    {
+      "assembly": "Kiln.Assets",
+      "name": "Assets",
+      "summary": "Mod resources, overrides, icons and retextures",
+      "guides": [
+        "docs/kiln/services/assets.md"
+      ],
+      "capabilities": [
+        {
+          "name": "assets.blob_catalog",
+          "members": 1
+        },
+        {
+          "name": "assets.content",
+          "members": 4
+        },
+        {
+          "name": "assets.resources",
+          "members": 4
+        },
+        {
+          "name": "assets.textures",
+          "members": 1
+        },
+        {
+          "name": "assets.ui_icons",
+          "members": 2
+        },
+        {
+          "name": "kiln.decisions",
+          "members": 5
+        }
+      ],
+      "samples": [
+        "AssetSample",
+        "BlobCatalog",
+        "ModelSample",
+        "SoundSample"
+      ]
+    },
+    {
+      "assembly": "Kiln.Audio",
+      "name": "Audio",
+      "summary": "Sounds, music, voice-over and narration from mods, the server relay over the Kiln channel, cue overrides and the cooked audio index",
+      "guides": [
+        "docs/kiln/services/audio.md"
+      ],
+      "capabilities": [],
+      "samples": []
+    },
+    {
+      "assembly": "Kiln.Blocks",
+      "name": "Blocks",
+      "summary": "Building blocks for mods: a block says what the author means (a spell, a weapon, an effect, a status) and Kiln makes the game's resources from it",
+      "guides": [
+        "docs/kiln/modding/blocks.md"
+      ],
+      "capabilities": [
+        {
+          "name": "blocks.animated_held",
+          "members": 1
+        },
+        {
+          "name": "blocks.apply",
+          "members": 1
+        },
+        {
+          "name": "blocks.compile",
+          "members": 3
+        },
+        {
+          "name": "blocks.kinds",
+          "members": 1
+        },
+        {
+          "name": "blocks.move_followups",
+          "members": 2
+        },
+        {
+          "name": "blocks.vfx_registration",
+          "members": 2
+        },
+        {
+          "name": "blocks.weapon_moves",
+          "members": 5
+        },
+        {
+          "name": "gems.sources",
+          "members": 1
+        },
+        {
+          "name": "identity.entities",
+          "members": 14
+        },
+        {
+          "name": "items.tool_wear_debit",
+          "members": 1
+        },
+        {
+          "name": "kiln.npcai",
+          "members": 5
+        },
+        {
+          "name": "mods.boot",
+          "members": 3
+        },
+        {
+          "name": "saves.instance_data.sync",
+          "members": 2
+        },
+        {
+          "name": "stationmenus.store",
+          "members": 2
+        },
+        {
+          "name": "stations.control",
+          "members": 3
+        },
+        {
+          "name": "stations.fill",
+          "members": 1
+        },
+        {
+          "name": "stations.output_sources",
+          "members": 1
+        },
+        {
+          "name": "stations.read",
+          "members": 26
+        },
+        {
+          "name": "ui.blocks.state",
+          "members": 2
+        },
+        {
+          "name": "ui.blocks.world",
+          "members": 2
+        },
+        {
+          "name": "ui.command.server",
+          "members": 2
+        },
+        {
+          "name": "worldtables.budgets",
+          "members": 2
+        },
+        {
+          "name": "worldtables.material_pools",
+          "members": 3
+        }
+      ],
+      "samples": [
+        "AbilityBlocks",
+        "AffixSword",
+        "BigCan",
+        "BlockKinds",
+        "CosmeticSample",
+        "CreatureAi",
+        "CreatureBlocks",
+        "CreatureControlSample",
+        "FrostMark",
+        "FrostboltBlock",
+        "FurnitureBlocks",
+        "ItemBlocks",
+        "LootBlocks",
+        "MaterialSample",
+        "MaterialTweaks",
+        "MenuBlocks",
+        "ModelPhysics",
+        "NpcSample",
+        "RarityAnvil",
+        "ScreenEffects",
+        "StationBlocks",
+        "SurfaceSample",
+        "TerrainSample",
+        "UiBlocks",
+        "VfxSample",
+        "VillagerRoutine",
+        "WeaponMoves",
+        "boot-gallery"
+      ]
+    },
+    {
+      "assembly": "Kiln.Build",
+      "name": "Build",
+      "summary": "Voxels, props, schematics (.kschem), the paste journal, PlaceOnce (recorded in WorldData) and the /build commands",
+      "guides": [
+        "docs/kiln/services/build.md"
+      ],
+      "capabilities": [
+        {
+          "name": "build.base_limits",
+          "members": 1
+        },
+        {
+          "name": "build.block_info",
+          "members": 1
+        },
+        {
+          "name": "build.break_building",
+          "members": 1
+        },
+        {
+          "name": "build.find_wall",
+          "members": 1
+        },
+        {
+          "name": "kiln.build",
+          "members": 40
+        }
+      ],
+      "samples": [
+        "OreVein",
+        "RulesSample",
+        "Schematics",
+        "TerrainSample"
+      ]
+    },
+    {
+      "assembly": "Kiln.Chat",
+      "name": "Chat",
+      "summary": "Chat, and the command registry (typed commands, permissions, the console folder)",
+      "guides": [
+        "docs/kiln/services/chat.md"
+      ],
+      "capabilities": [
+        {
+          "name": "kiln.decisions",
+          "members": 6
+        }
+      ],
+      "samples": [
+        "AdminTools",
+        "AffixSword",
+        "BlobCatalog",
+        "CalmBell",
+        "Claims",
+        "CreatureAi",
+        "CreatureControlSample",
+        "CreatureTweaks",
+        "Decisions",
+        "EliteVukah",
+        "EngineRoom",
+        "FetchNearby",
+        "FrostMark",
+        "GemEffects",
+        "ItemData",
+        "ItemFallback",
+        "LightsOut",
+        "Loadouts",
+        "ModValues",
+        "NewItems",
+        "NpcSample",
+        "OreVein",
+        "QuietServer",
+        "QuiverSample",
+        "ReplWatch",
+        "RulesSample",
+        "SavedData",
+        "Schematics",
+        "SkyControl",
+        "SurvivorBeds",
+        "TerrainSample",
+        "TransformScale",
+        "UiBlocks",
+        "VillagerRoutine",
+        "equipment-sets"
+      ]
+    },
+    {
+      "assembly": "Kiln.Client",
+      "name": "Client",
+      "summary": "Side, session state, local player and the client world's tick",
+      "guides": [
+        "docs/kiln/modding/client-hooks.md",
+        "docs/kiln/services/client-building-input.md"
+      ],
+      "capabilities": [
+        {
+          "name": "identity.entities",
+          "members": 5
+        }
+      ],
+      "samples": [
+        "AffixSword",
+        "CreatureTweaks",
+        "MarkersSample",
+        "MaterialSample",
+        "ModValues",
+        "RenderSample",
+        "ShaderSample",
+        "UiSample",
+        "VfxSample"
+      ]
+    },
+    {
+      "assembly": "Kiln.Combat",
+      "name": "Combat",
+      "summary": "Health, damage, god mode and combat events for mods",
+      "guides": [
+        "docs/kiln/services/combat.md"
+      ],
+      "capabilities": [
+        {
+          "name": "combat.attributes",
+          "members": 3
+        },
+        {
+          "name": "kiln.decisions",
+          "members": 7
+        }
+      ],
+      "samples": [
+        "Decisions",
+        "EliteVukah",
+        "RuleVukah"
+      ]
+    },
+    {
+      "assembly": "Kiln.Content",
+      "name": "Content",
+      "summary": "Registries and data packs: items, recipes, random loot, drop tables",
+      "guides": [
+        "docs/kiln/services/content.md"
+      ],
+      "capabilities": [
+        {
+          "name": "content.gear",
+          "members": 24
+        },
+        {
+          "name": "content.new",
+          "members": 8
+        },
+        {
+          "name": "content.references",
+          "members": 3
+        },
+        {
+          "name": "gamedata.buff_budget",
+          "members": 1
+        },
+        {
+          "name": "gamedata.buff_registration",
+          "members": 3
+        },
+        {
+          "name": "gamedata.template_clones",
+          "members": 2
+        },
+        {
+          "name": "kiln.content",
+          "members": 44
+        },
+        {
+          "name": "kiln.gamedata",
+          "members": 44
+        }
+      ],
+      "samples": [
+        "BigStacks",
+        "Budgets",
+        "CreatureTweaks",
+        "GemEffects",
+        "GemSample",
+        "ItemFallback",
+        "MaterialSample",
+        "ModelSample",
+        "NewItems",
+        "NpcSample",
+        "PlayerStates",
+        "SpellTweaks",
+        "TypedFields"
+      ]
+    },
+    {
+      "assembly": "Kiln.CreatureControl",
+      "name": "CreatureControl",
+      "summary": "Leases on a creature's body, for the code that drives it",
+      "guides": [
+        "docs/kiln/services/creature-control.md"
+      ],
+      "capabilities": [
+        {
+          "name": "creature_control",
+          "members": 1
+        },
+        {
+          "name": "kiln.decisions",
+          "members": 4
+        }
+      ],
+      "samples": [
+        "CreatureControlSample"
+      ]
+    },
+    {
+      "assembly": "Kiln.Creatures",
+      "name": "Creatures",
+      "summary": "Catalog, per-creature values and private AI copies, variants, natural-spawn rules, AI events and commands, the /creature command tree",
+      "guides": [
+        "docs/kiln/services/creatures.md"
+      ],
+      "capabilities": [
+        {
+          "name": "creatures.arsenals",
+          "members": 3
+        },
+        {
+          "name": "kiln.creatures",
+          "members": 69
+        }
+      ],
+      "samples": [
+        "CreatureAi",
+        "CreatureBlocks",
+        "CreatureControlSample",
+        "EliteVukah",
+        "NpcSample",
+        "RuleVukah",
+        "VillagerRoutine"
+      ]
+    },
+    {
+      "assembly": "Kiln.DevTools",
+      "name": "DevTools",
+      "summary": "Kiln's developer tools over kiln.types: commands (/types, /type, /systems, /system, /component) and the Systems and Types windows in the game",
+      "guides": [],
+      "capabilities": [],
+      "samples": []
+    },
+    {
+      "assembly": "Kiln.Eml",
+      "name": "Eml",
+      "summary": "Kiln's own (MIT) ports of EML's data helpers, and the status of kiln-eml (the GPL-3 EML plugin, gpl/kiln-eml)",
+      "guides": [
+        "docs/kiln/services/eml-archive.md",
+        "docs/kiln/services/eml-startup.md",
+        "docs/kiln/services/eml-values.md"
+      ],
+      "capabilities": [],
+      "samples": []
+    },
+    {
+      "assembly": "Kiln.Example",
+      "name": "Example",
+      "summary": "A template service assembly",
+      "guides": [],
+      "capabilities": [
+        {
+          "name": "identity.entities",
+          "members": 1
+        }
+      ],
+      "samples": [
+        "Hello"
+      ]
+    },
+    {
+      "assembly": "Kiln.Gameplay",
+      "name": "Gameplay",
+      "summary": "Player/world interaction events on Kiln's bus (crafting, interaction, loot, pickups, building, terraforming, teleports, natural spawns) and protection zones",
+      "guides": [
+        "docs/kiln/services/gameplay.md"
+      ],
+      "capabilities": [
+        {
+          "name": "gameplay.emit",
+          "members": 1
+        },
+        {
+          "name": "gameplay.recipes",
+          "members": 2
+        },
+        {
+          "name": "gameplay.spawn_replace",
+          "members": 1
+        },
+        {
+          "name": "kiln.gameplay",
+          "members": 4
+        }
+      ],
+      "samples": [
+        "CalmBell",
+        "Claims",
+        "Decisions"
+      ]
+    },
+    {
+      "assembly": "Kiln.Hooks",
+      "name": "Hooks",
+      "summary": "Detours, mid hooks, memory, patches, pattern scan and sigdb lookups, for advanced mods",
+      "guides": [
+        "docs/kiln/services/hooks.md"
+      ],
+      "capabilities": [
+        {
+          "name": "hooks.foreign_modules",
+          "members": 3
+        },
+        {
+          "name": "hooks.typed",
+          "members": 2
+        },
+        {
+          "name": "kiln.decisions",
+          "members": 8
+        }
+      ],
+      "samples": [
+        "ClientHookSample",
+        "HookSample",
+        "TypedHookVolume"
+      ]
+    },
+    {
+      "assembly": "Kiln.Items",
+      "name": "Items",
+      "summary": "Give / take / read inventories, the item catalog",
+      "guides": [
+        "docs/kiln/services/items.md"
+      ],
+      "capabilities": [
+        {
+          "name": "identity.entities",
+          "members": 4
+        },
+        {
+          "name": "items.equip",
+          "members": 3
+        },
+        {
+          "name": "items.equip_sets",
+          "members": 4
+        },
+        {
+          "name": "items.fuel",
+          "members": 9
+        },
+        {
+          "name": "items.gear.armor",
+          "members": 1
+        },
+        {
+          "name": "items.gear.power",
+          "members": 1
+        },
+        {
+          "name": "items.gear.read",
+          "members": 3
+        },
+        {
+          "name": "items.gear.upgrade",
+          "members": 2
+        },
+        {
+          "name": "items.gear.write",
+          "members": 4
+        },
+        {
+          "name": "items.give_equip",
+          "members": 1
+        },
+        {
+          "name": "items.instances",
+          "members": 3
+        },
+        {
+          "name": "items.move",
+          "members": 6
+        },
+        {
+          "name": "items.names",
+          "members": 1
+        },
+        {
+          "name": "items.pide_options",
+          "members": 2
+        },
+        {
+          "name": "items.rename",
+          "members": 1
+        },
+        {
+          "name": "items.tool_wear_debit",
+          "members": 2
+        },
+        {
+          "name": "items.transfer",
+          "members": 3
+        },
+        {
+          "name": "kiln.decisions",
+          "members": 7
+        }
+      ],
+      "samples": [
+        "AffixSword",
+        "BigCan",
+        "Decisions",
+        "FetchNearby",
+        "FrostMark",
+        "GemEffects",
+        "ItemData",
+        "Loadouts",
+        "ModValues",
+        "NewItems",
+        "NpcSample",
+        "PlayerStates",
+        "QuiverSample",
+        "RarityAnvil",
+        "ReplWatch",
+        "SavedData",
+        "Schematics",
+        "SlotMarks",
+        "equipment-sets",
+        "quests-sample"
+      ]
+    },
+    {
+      "assembly": "Kiln.Markers",
+      "name": "Markers",
+      "summary": "Session-only markers by key on the game's map, Kiln's drawn compass strip and world labels, set by a client mod or sent by a server mod to Kiln clients; the icon catalog; change events",
+      "guides": [
+        "docs/kiln/services/markers.md"
+      ],
+      "capabilities": [
+        {
+          "name": "markers.anchors.client",
+          "members": 1
+        },
+        {
+          "name": "markers.anchors.server",
+          "members": 1
+        },
+        {
+          "name": "markers.catalog",
+          "members": 3
+        },
+        {
+          "name": "markers.local",
+          "members": 3
+        },
+        {
+          "name": "markers.nameplates",
+          "members": 1
+        },
+        {
+          "name": "markers.send",
+          "members": 4
+        }
+      ],
+      "samples": [
+        "MarkersSample"
+      ]
+    },
+    {
+      "assembly": "Kiln.ModValues",
+      "name": "ModValues",
+      "summary": "Mods' own per-character values (counters, currencies, experience with levels): a server-owned ledger saved with the character through Kiln.Saves' CharacterData, an owner-only copy for the player's Kiln client over channel kiln:mod-values, and the in-core native facade kiln.mod-values (native/core/abi/services/kiln_mod_values.h)",
+      "guides": [],
+      "capabilities": [
+        {
+          "name": "stats.definitions",
+          "members": 2
+        },
+        {
+          "name": "stats.own",
+          "members": 6
+        },
+        {
+          "name": "stats.sync",
+          "members": 1
+        }
+      ],
+      "samples": [
+        "ModValues",
+        "UiBlocks"
+      ]
+    },
+    {
+      "assembly": "Kiln.Network",
+      "name": "Network",
+      "summary": "Mod channels, the join handshake and mod sync (Forge's SimpleChannel + FML handshake)",
+      "guides": [
+        "docs/kiln/services/net-steam-messages.md"
+      ],
+      "capabilities": [
+        {
+          "name": "players.kick",
+          "members": 1
+        }
+      ],
+      "samples": [
+        "ModValues",
+        "NetSample",
+        "PlayerStates",
+        "ReplWatch",
+        "SlotMarks"
+      ]
+    },
+    {
+      "assembly": "Kiln.Permissions",
+      "name": "Permissions",
+      "summary": "Permission nodes, groups and overrides (Forge PermissionAPI)",
+      "guides": [],
+      "capabilities": [],
+      "samples": [
+        "AdminTools",
+        "SavedData"
+      ]
+    },
+    {
+      "assembly": "Kiln.PlayerAnim",
+      "name": "PlayerAnim",
+      "summary": "Mods' states in the player's animation graph, merged at boot",
+      "guides": [
+        "docs/kiln/services/playeranim.md"
+      ],
+      "capabilities": [
+        {
+          "name": "anim.player_states",
+          "members": 1
+        }
+      ],
+      "samples": [
+        "PlayerStates"
+      ]
+    },
+    {
+      "assembly": "Kiln.Players",
+      "name": "Players",
+      "summary": "Who is on the server",
+      "guides": [
+        "docs/kiln/services/players.md"
+      ],
+      "capabilities": [
+        {
+          "name": "identity.entities",
+          "members": 2
+        },
+        {
+          "name": "identity.players",
+          "members": 1
+        },
+        {
+          "name": "kiln.decisions",
+          "members": 11
+        },
+        {
+          "name": "kiln.progression",
+          "members": 10
+        },
+        {
+          "name": "players.bans",
+          "members": 3
+        },
+        {
+          "name": "players.kick",
+          "members": 1
+        },
+        {
+          "name": "players.positions",
+          "members": 1
+        }
+      ],
+      "samples": [
+        "AbilityBlocks",
+        "AdminTools",
+        "CalmBell",
+        "Claims",
+        "CreatureTweaks",
+        "FireNova",
+        "GemEffects",
+        "Loadouts",
+        "NetSample",
+        "NewItems",
+        "NpcSample",
+        "OreVein",
+        "QuietServer",
+        "ReplWatch",
+        "RulesSample",
+        "SavedData",
+        "SlotMarks",
+        "SurvivorBeds",
+        "equipment-sets",
+        "quests-sample"
+      ]
+    },
+    {
+      "assembly": "Kiln.Queries",
+      "name": "Queries",
+      "summary": "Read-only questions about the server world for mods: the first voxel surface on a segment, the ground below a point, voxel line of sight between two entities, and the entities whose origin is inside a sphere or a box",
+      "guides": [
+        "docs/kiln/services/queries.md"
+      ],
+      "capabilities": [
+        {
+          "name": "queries.ground",
+          "members": 1
+        },
+        {
+          "name": "queries.line_of_sight",
+          "members": 1
+        },
+        {
+          "name": "queries.overlap_origins",
+          "members": 2
+        },
+        {
+          "name": "queries.path",
+          "members": 3
+        },
+        {
+          "name": "queries.reachability",
+          "members": 1
+        },
+        {
+          "name": "queries.voxel_ray",
+          "members": 1
+        }
+      ],
+      "samples": [
+        "NpcSample"
+      ]
+    },
+    {
+      "assembly": "Kiln.Quests",
+      "name": "Quests",
+      "summary": "Knowledge (the game's journal and dialogue events), the quest engine (objectives, actions, places) and what it drives in the game's own journal, dialogue menu and map",
+      "guides": [
+        "docs/kiln/services/quests.md",
+        "docs/kiln/modding/quests.md"
+      ],
+      "capabilities": [
+        {
+          "name": "kiln.knowledge",
+          "members": 38
+        },
+        {
+          "name": "npcs.client_roster_read",
+          "members": 2
+        },
+        {
+          "name": "npcs.roster_budget",
+          "members": 1
+        },
+        {
+          "name": "npcs.roster_read",
+          "members": 2
+        },
+        {
+          "name": "stations.read",
+          "members": 4
+        },
+        {
+          "name": "survivors.assign",
+          "members": 3
+        },
+        {
+          "name": "survivors.recruit",
+          "members": 1
+        },
+        {
+          "name": "survivors.summon",
+          "members": 1
+        }
+      ],
+      "samples": [
+        "CreatureBlocks",
+        "NpcSample",
+        "SurvivorBeds",
+        "quests-sample"
+      ]
+    },
+    {
+      "assembly": "Kiln.Registry",
+      "name": "Registry",
+      "summary": "Kiln's registries (items, recipes, loot, drops, balance) as typed C# entries over Kiln-owned field names, generated from schema/registry/*.json by tools/registrygen/registrygen.py (Generated/*.g.cs; never edit those by hand)",
+      "guides": [],
+      "capabilities": [],
+      "samples": []
+    },
+    {
+      "assembly": "Kiln.Replication",
+      "name": "Replication",
+      "summary": "The game's replication, read only, and on lab servers the loopback harness (ReplicationLab)",
+      "guides": [
+        "docs/kiln/services/replication.md"
+      ],
+      "capabilities": [
+        {
+          "name": "repl.client",
+          "members": 2
+        },
+        {
+          "name": "repl.filter",
+          "members": 1
+        },
+        {
+          "name": "repl.itemremap",
+          "members": 1
+        },
+        {
+          "name": "repl.loopback",
+          "members": 5
+        },
+        {
+          "name": "repl.messages",
+          "members": 2
+        },
+        {
+          "name": "repl.observe",
+          "members": 2
+        },
+        {
+          "name": "repl.schema",
+          "members": 2
+        },
+        {
+          "name": "repl.sidecar",
+          "members": 1
+        },
+        {
+          "name": "repl.touch",
+          "members": 1
+        }
+      ],
+      "samples": [
+        "BigCan",
+        "ItemFallback",
+        "ReplWatch"
+      ]
+    },
+    {
+      "assembly": "Kiln.Rules",
+      "name": "Rules",
+      "summary": "Per-player rules from several mods, layered (scopes, owners, how values combine), applied by Kiln's hooks and services (flight, placement, costs, mining), and creative mode with its /creative command",
+      "guides": [
+        "docs/kiln/services/rules.md"
+      ],
+      "capabilities": [
+        {
+          "name": "identity.entities",
+          "members": 1
+        }
+      ],
+      "samples": [
+        "AdminTools",
+        "RulesSample"
+      ]
+    },
+    {
+      "assembly": "Kiln.Saves",
+      "name": "Saves",
+      "summary": "Save events, \"save now\", backups, and persistent mod data (WorldData, PlayerData, CharacterData, EntityData)",
+      "guides": [
+        "docs/kiln/services/saves.md"
+      ],
+      "capabilities": [
+        {
+          "name": "identity.entities",
+          "members": 9
+        },
+        {
+          "name": "kiln.saves",
+          "members": 40
+        },
+        {
+          "name": "saves.instance_data.sync",
+          "members": 3
+        }
+      ],
+      "samples": [
+        "AdminTools",
+        "AffixSword",
+        "ItemData",
+        "Loadouts",
+        "ModValues",
+        "SavedData",
+        "Schematics",
+        "UiBlocks"
+      ]
+    },
+    {
+      "assembly": "Kiln.Settings",
+      "name": "Settings",
+      "summary": "Reads and changes the running world's game settings (player, enemy and boss factors, durability, day and night length, weather, ...) without a restart",
+      "guides": [
+        "docs/kiln/services/settings.md"
+      ],
+      "capabilities": [
+        {
+          "name": "kiln.decisions",
+          "members": 10
+        }
+      ],
+      "samples": [
+        "CalmBell"
+      ]
+    },
+    {
+      "assembly": "Kiln.Sigs",
+      "name": "Sigs",
+      "summary": "The core's typed game functions: one class per signature descriptor (Kiln.Sigs.<Area>.<Name>: Detour, Call, Invoke) and the descriptors' structs",
+      "guides": [
+        "docs/kiln/services/hooks.md"
+      ],
+      "capabilities": [
+        {
+          "name": "hooks.typed",
+          "members": 24
+        },
+        {
+          "name": "sig/GetComponent",
+          "members": 1
+        },
+        {
+          "name": "sig/items/AttrFind",
+          "members": 1
+        },
+        {
+          "name": "sig/items/GetItemVolume",
+          "members": 1
+        },
+        {
+          "name": "sig/rules/QuatRotate",
+          "members": 1
+        },
+        {
+          "name": "sig/time/GetGameTime",
+          "members": 1
+        },
+        {
+          "name": "sig/time/SetTimeScale",
+          "members": 1
+        },
+        {
+          "name": "sig/weather/SampleAt",
+          "members": 1
+        }
+      ],
+      "samples": [
+        "ClientHookSample",
+        "TypedHookVolume"
+      ]
+    },
+    {
+      "assembly": "Kiln.Skills",
+      "name": "Skills",
+      "summary": "Nodes in the game's own skill tree and Kiln's talent trees: definitions, per-character state, effects, network and the screen",
+      "guides": [
+        "docs/kiln/services/skills.md"
+      ],
+      "capabilities": [
+        {
+          "name": "kiln.skills",
+          "members": 5
+        }
+      ],
+      "samples": [
+        "SkillTreeSample"
+      ]
+    },
+    {
+      "assembly": "Kiln.Spawn",
+      "name": "Spawn",
+      "summary": "Create and destroy server-world entities from templates (creatures, item drops, props), look templates up by name, and keep a per-world list of what Kiln spawned",
+      "guides": [
+        "docs/kiln/services/spawn.md"
+      ],
+      "capabilities": [
+        {
+          "name": "kiln.decisions",
+          "members": 2
+        },
+        {
+          "name": "spawn.components",
+          "members": 1
+        },
+        {
+          "name": "spawn.destroy",
+          "members": 2
+        },
+        {
+          "name": "spawn.entities",
+          "members": 3
+        },
+        {
+          "name": "ui.blocks.world",
+          "members": 9
+        }
+      ],
+      "samples": [
+        "CalmBell",
+        "CreatureControlSample",
+        "CreatureTweaks",
+        "EliteVukah",
+        "ImpactSample",
+        "LightsOut",
+        "NpcSample",
+        "Schematics",
+        "SurvivorBeds"
+      ]
+    },
+    {
+      "assembly": "Kiln.Systems",
+      "name": "Systems",
+      "summary": "The game's ECS programs by name, and your code before, after or instead of one",
+      "guides": [
+        "docs/kiln/services/systems.md"
+      ],
+      "capabilities": [
+        {
+          "name": "systems.define",
+          "members": 1
+        },
+        {
+          "name": "systems.wraps",
+          "members": 1
+        },
+        {
+          "name": "systems.wraps.typed",
+          "members": 1
+        }
+      ],
+      "samples": [
+        "WaterWorks"
+      ]
+    },
+    {
+      "assembly": "Kiln.Terrain",
+      "name": "Terrain",
+      "summary": "Bounded terrain overlays (a vein, a mound, a tunnel) applied once per world over several ticks, with a per-world ledger of who owns which 8-cell block at which version",
+      "guides": [
+        "docs/kiln/services/terrain.md"
+      ],
+      "capabilities": [
+        {
+          "name": "kiln.terrain",
+          "members": 1
+        },
+        {
+          "name": "terrain.overlays",
+          "members": 4
+        }
+      ],
+      "samples": [
+        "OreVein"
+      ]
+    },
+    {
+      "assembly": "Kiln.Time",
+      "name": "Time",
+      "summary": "Time of day and weather re-roll",
+      "guides": [
+        "docs/kiln/services/time.md"
+      ],
+      "capabilities": [
+        {
+          "name": "kiln.decisions",
+          "members": 9
+        },
+        {
+          "name": "time.speed",
+          "members": 2
+        },
+        {
+          "name": "time.weather_choose",
+          "members": 5
+        }
+      ],
+      "samples": [
+        "FireNova",
+        "SkyControl",
+        "VillagerRoutine"
+      ]
+    },
+    {
+      "assembly": "Kiln.Tools",
+      "name": "Tools",
+      "summary": "Declarative terrain actions and owned material observations for building tools (with Kiln.Blocks)",
+      "guides": [
+        "docs/kiln/services/tools.md"
+      ],
+      "capabilities": [],
+      "samples": []
+    },
+    {
+      "assembly": "Kiln.Ui",
+      "name": "Ui",
+      "summary": "Kiln windows (immediate mode over Dear ImGui), HUD text, toasts, key bindings (kiln/config/keybinds.json) and the Kiln menu",
+      "guides": [
+        "docs/kiln/services/ui.md"
+      ],
+      "capabilities": [
+        {
+          "name": "ui.ammo.list",
+          "members": 1
+        },
+        {
+          "name": "ui.ammo.pick",
+          "members": 1
+        },
+        {
+          "name": "ui.chest.buttons",
+          "members": 1
+        },
+        {
+          "name": "ui.gemforge.inspect",
+          "members": 2
+        },
+        {
+          "name": "ui.inventory.panels",
+          "members": 1
+        },
+        {
+          "name": "ui.item_detail",
+          "members": 2
+        },
+        {
+          "name": "ui.slots.click",
+          "members": 1
+        },
+        {
+          "name": "ui.slots.inspect",
+          "members": 2
+        },
+        {
+          "name": "ui.slots.tint",
+          "members": 1
+        },
+        {
+          "name": "ui.tooltip.values",
+          "members": 2
+        },
+        {
+          "name": "ui.values.detail",
+          "members": 1
+        },
+        {
+          "name": "ui.values.tooltip_lines",
+          "members": 5
+        },
+        {
+          "name": "ui.world_outline",
+          "members": 1
+        }
+      ],
+      "samples": [
+        "AffixSword",
+        "BigCan",
+        "ItemData",
+        "MarkersSample",
+        "MaterialSample",
+        "MenuButtons",
+        "ModValues",
+        "NetSample",
+        "RenderSample",
+        "ShaderSample",
+        "SkillTreeSample",
+        "SlotMarks",
+        "UiBlocks",
+        "UiSample",
+        "ValueBars",
+        "VfxSample",
+        "quests-sample"
+      ]
+    },
+    {
+      "assembly": "Kiln.Vfx",
+      "name": "Vfx",
+      "summary": "Play the game's VFX from code, on a position or attached to an entity and slot, and the server relay over the Kiln channel kiln:vfx",
+      "guides": [
+        "docs/kiln/services/vfx.md",
+        "docs/kiln/modding/vfx.md"
+      ],
+      "capabilities": [
+        {
+          "name": "vfx.budget",
+          "members": 1
+        }
+      ],
+      "samples": [
+        "MaterialSample",
+        "ScreenEffects",
+        "ShaderSample",
+        "VfxSample"
+      ]
+    },
+    {
+      "assembly": "Kiln.World",
+      "name": "World",
+      "summary": "Entity access and teleport for mods",
+      "guides": [
+        "docs/kiln/services/world.md"
+      ],
+      "capabilities": [
+        {
+          "name": "identity.entities",
+          "members": 8
+        },
+        {
+          "name": "world.tracked_writes",
+          "members": 5
+        }
+      ],
+      "samples": [
+        "Budgets",
+        "CalmBell",
+        "CreatureControlSample",
+        "CreatureTweaks",
+        "Decisions",
+        "FetchNearby",
+        "FrostMark",
+        "LightsOut",
+        "MaterialSample",
+        "NpcSample",
+        "PlayerStates",
+        "ReplWatch",
+        "SavedData",
+        "ShaderSample",
+        "SlotMarks",
+        "SurvivorBeds",
+        "TerrainSample",
+        "TransformScale",
+        "VfxSample",
+        "VillagerRoutine",
+        "WaterWorks"
+      ]
+    }
+  ]
+}

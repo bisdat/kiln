@@ -3395,7 +3395,7 @@
       "saves": "Deine Spielstände und Welten",
       "settings": "Mod-Einstellungen und Kilns Konfigurationsordner (dort können Serverpasswörter stehen)",
       "admin": "Token und Adresse von Kiln.Admin",
-      "mods": "Der Inhalt deiner Mods (nur Dateinamen, Größen und Datum)",
+      "mods": "Der Inhalt deiner Mods (aufgeführt werden nur Datei- und Ordnernamen, Größen und Datum sowie ShroudForge-Manifest-IDs und -Versionen in Hinweisen)",
       "steam": "Steams eigene Dateien"
     }
   },
@@ -3448,6 +3448,7 @@
     "catalog": "Katalog",
     "runtime": "Runtime",
     "logs": "Protokolle",
+    "conflicts": "Konflikte",
     "saves": "Spielstände",
     "editor": "Editor",
     "servers": "Server",
@@ -6207,5 +6208,28 @@
       "vanilla": "Das sind nicht unbedingt die Dateien, wie Steam sie liefert. Dafür nutze in Steam „Spieldateien auf Fehler überprüfen“ (Eigenschaften des Spiels, Installierte Dateien).",
       "unknown": "Kiln kann nicht sagen, welche Spieldateien es zurücksetzen würde: {reason}."
     }
+  },
+  "playerStorage": {
+    "tab": "Lager",
+    "title": "Spielerlager",
+    "readOnly": "Nur lesbar. Diese Gegenstände bleiben in Kiln, getrennt von deinem Rucksack.",
+    "empty": "Kein Spielerlager für diesen Charakter.",
+    "return": "Zum Charakter zurückgeben",
+    "returnTitle": "Lager an diesen Charakter zurückgeben?",
+    "returnBody": "Kiln erstellt zuerst eine Sicherung und fügt dann so viele Stapel aus dem Grundspiel wie möglich auf zusätzlichen Rucksackseiten hinzu. Mod-Gegenstände und alles andere bleiben im Lager. Das Spiel und Steam müssen geschlossen sein.",
+    "serverCopy": "Ein Kiln-Server behält eine eigene Kopie dieses Lagers. Wenn du ihm ohne Kiln beitrittst, kann er dir dort seine Kopie zurückgeben.",
+    "confirm": "Gegenstände zurückgeben",
+    "returning": "Wird zurückgegeben…",
+    "result": "{returned} Stapel zurückgegeben; {remaining} Stapel bleiben im Lager.",
+    "closeGame": "Schließe Enshrouded und Steam, bevor du das Lager zurückgibst.",
+    "localOnly": "Die Rückgabe ist nur für LOCAL-Charaktere verfügbar, nicht für Steam-Cloud-Spielstände.",
+    "saveFirst": "Speichere oder verwirf deine Änderungen, bevor du das Lager zurückgibst.",
+    "unavailable": "Lager kann nicht zurückgegeben werden",
+    "restoreWarning": "Dieser Charakter hat ein Spielerlager. Eine ältere Sicherung kann zu einem älteren Lager passen. Wird das passende Paar nicht mehr aufbewahrt, können seit dieser Sicherung verschobene Gegenstände verloren gehen oder dupliziert werden.",
+    "unpaired": "Dieser Charakter hat sich verändert, seit Kiln sein Lager zuletzt gesehen hat, daher kann nichts zurückgegeben werden. Die neueste Lagerkopie wird angezeigt.",
+    "parked": "Mod aus",
+    "kept": "kiln/data/characters und kiln/data/worlds bleiben erhalten. Sie bewahren das Spielerlager, bis du Kiln wieder installierst.",
+    "unreadable": "Einige gespeicherte Einträge können nicht angezeigt werden. Sie bleiben unverändert.",
+    "modItems": "{count} Stapel mit Mod-Gegenständen bleiben im Lager: Sie benötigen ihren Mod."
   }
 }

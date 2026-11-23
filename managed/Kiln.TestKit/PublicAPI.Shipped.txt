@@ -98,6 +98,23 @@ Kiln.TestKit.FakeControlCall.Result.get -> int
 Kiln.TestKit.FakeControlCall.Result.init -> void
 Kiln.TestKit.FakeControlCall.Step.get -> ulong
 Kiln.TestKit.FakeControlCall.Step.init -> void
+Kiln.TestKit.FakeCraftSourceRegistration
+Kiln.TestKit.FakeCraftSourceRegistration.<Clone>$() -> Kiln.TestKit.FakeCraftSourceRegistration!
+Kiln.TestKit.FakeCraftSourceRegistration.Container.get -> Kiln.EntityId
+Kiln.TestKit.FakeCraftSourceRegistration.Container.init -> void
+Kiln.TestKit.FakeCraftSourceRegistration.Deconstruct(out ulong Owner, out Kiln.EntityId Player, out Kiln.EntityId Container, out Kiln.CraftSourceOrder Order, out Kiln.CraftSourceFilter Filter, out System.Collections.Generic.IReadOnlyList<Kiln.ItemId>! Items) -> void
+Kiln.TestKit.FakeCraftSourceRegistration.Equals(Kiln.TestKit.FakeCraftSourceRegistration? other) -> bool
+Kiln.TestKit.FakeCraftSourceRegistration.FakeCraftSourceRegistration(ulong Owner, Kiln.EntityId Player, Kiln.EntityId Container, Kiln.CraftSourceOrder Order, Kiln.CraftSourceFilter Filter, System.Collections.Generic.IReadOnlyList<Kiln.ItemId>! Items) -> void
+Kiln.TestKit.FakeCraftSourceRegistration.Filter.get -> Kiln.CraftSourceFilter
+Kiln.TestKit.FakeCraftSourceRegistration.Filter.init -> void
+Kiln.TestKit.FakeCraftSourceRegistration.Items.get -> System.Collections.Generic.IReadOnlyList<Kiln.ItemId>!
+Kiln.TestKit.FakeCraftSourceRegistration.Items.init -> void
+Kiln.TestKit.FakeCraftSourceRegistration.Order.get -> Kiln.CraftSourceOrder
+Kiln.TestKit.FakeCraftSourceRegistration.Order.init -> void
+Kiln.TestKit.FakeCraftSourceRegistration.Owner.get -> ulong
+Kiln.TestKit.FakeCraftSourceRegistration.Owner.init -> void
+Kiln.TestKit.FakeCraftSourceRegistration.Player.get -> Kiln.EntityId
+Kiln.TestKit.FakeCraftSourceRegistration.Player.init -> void
 Kiln.TestKit.FakeEcall
 Kiln.TestKit.FakeEcall.Deconstruct(out string! Native, out uint Site) -> void
 Kiln.TestKit.FakeEcall.Equals(Kiln.TestKit.FakeEcall other) -> bool
@@ -482,6 +499,10 @@ Kiln.TestKit.FakeVoxelRay.To.get -> Kiln.WorldPosition
 Kiln.TestKit.FakeVoxelRay.To.init -> void
 Kiln.TestKit.FakeWorld
 Kiln.TestKit.FakeWorld.All.get -> System.Collections.Generic.IReadOnlyList<Kiln.EntityId>!
+Kiln.TestKit.FakeWorld.BusyReads.get -> int
+Kiln.TestKit.FakeWorld.BusyReads.set -> void
+Kiln.TestKit.FakeWorld.BusyWrites.get -> int
+Kiln.TestKit.FakeWorld.BusyWrites.set -> void
 Kiln.TestKit.FakeWorld.Create() -> Kiln.EntityId
 Kiln.TestKit.FakeWorld.Create(Kiln.WorldPosition position) -> Kiln.EntityId
 Kiln.TestKit.FakeWorld.Destroy(Kiln.EntityId entity) -> bool
@@ -517,6 +538,22 @@ Kiln.TestKit.FakeWorldWrite.Status.get -> Kiln.WorldWriteStatus
 Kiln.TestKit.FakeWorldWrite.Status.init -> void
 Kiln.TestKit.FakeWorldWrite.Step.get -> ulong
 Kiln.TestKit.FakeWorldWrite.Step.init -> void
+Kiln.TestKit.HarnessAmmoList
+Kiln.TestKit.HarnessAmmoList.Hold(Kiln.AmmoListKind kind, Kiln.ItemId weapon, params Kiln.AmmoListRow[]! gameRows) -> void
+Kiln.TestKit.HarnessAmmoList.KnownItems(Kiln.AmmoListKind kind, params Kiln.ItemId[]! items) -> void
+Kiln.TestKit.HarnessAmmoList.ModeOf(Kiln.AmmoListKind kind) -> Kiln.AmmoListMode?
+Kiln.TestKit.HarnessAmmoList.NewSession() -> void
+Kiln.TestKit.HarnessAmmoList.Pick(Kiln.AmmoListKind kind, Kiln.ItemId item) -> bool
+Kiln.TestKit.HarnessAmmoList.Player.get -> Kiln.EntityId
+Kiln.TestKit.HarnessAmmoList.Player.set -> void
+Kiln.TestKit.HarnessAmmoList.Provided(Kiln.AmmoListKind kind) -> System.Collections.Generic.IReadOnlyList<Kiln.AmmoListRow>!
+Kiln.TestKit.HarnessAmmoList.Publishes.get -> int
+Kiln.TestKit.HarnessAmmoList.Select(Kiln.AmmoListKind kind, Kiln.ItemId item) -> void
+Kiln.TestKit.HarnessAmmoList.Selected(Kiln.AmmoListKind kind) -> Kiln.ItemId?
+Kiln.TestKit.HarnessAmmoList.Session.get -> uint
+Kiln.TestKit.HarnessAmmoList.SetGameRows(Kiln.AmmoListKind kind, params Kiln.AmmoListRow[]! gameRows) -> void
+Kiln.TestKit.HarnessAmmoList.Shown(Kiln.AmmoListKind kind) -> System.Collections.Generic.IReadOnlyList<Kiln.AmmoListRow>!
+Kiln.TestKit.HarnessAmmoList.Unhold(Kiln.AmmoListKind kind) -> void
 Kiln.TestKit.HarnessAssets
 Kiln.TestKit.HarnessAssets.AddGameBlob(byte[]! bytes) -> string!
 Kiln.TestKit.HarnessAssets.CatalogGeneration.get -> ulong
@@ -548,6 +585,10 @@ Kiln.TestKit.HarnessComponentChanges.QueueOverflows.get -> ulong
 Kiln.TestKit.HarnessComponentChanges.QueuedFrames.get -> int
 Kiln.TestKit.HarnessComponentChanges.SetAttribute(Kiln.EntityId entity, Kiln.ObservedAttribute attribute, int current, int maximum) -> void
 Kiln.TestKit.HarnessComponentChanges.Watches.get -> int
+Kiln.TestKit.HarnessCrafting
+Kiln.TestKit.HarnessCrafting.Dyes(Kiln.EntityId player) -> System.Collections.Generic.IReadOnlyDictionary<Kiln.ItemId, long>!
+Kiln.TestKit.HarnessCrafting.Sources.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.FakeCraftSourceRegistration!>!
+Kiln.TestKit.HarnessCrafting.Stock(Kiln.EntityId player) -> System.Collections.Generic.IReadOnlyDictionary<Kiln.ItemId, long>!
 Kiln.TestKit.HarnessCreatureControl
 Kiln.TestKit.HarnessCreatureControl.Calls.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.FakeControlCall!>!
 Kiln.TestKit.HarnessCreatureControl.IsControlled(Kiln.EntityId body) -> bool
@@ -574,6 +615,7 @@ Kiln.TestKit.HarnessItems.IdOf(string! name) -> Kiln.ItemId
 Kiln.TestKit.HarnessItems.Of(Kiln.EntityId entity) -> Kiln.TestKit.FakeInventory?
 Kiln.TestKit.HarnessItems.PlayerInventories.get -> int
 Kiln.TestKit.HarnessItems.PlayerInventories.set -> void
+Kiln.TestKit.HarnessItems.SetEquipmentSlotType(Kiln.ItemId item, Kiln.EquipmentSlot slot) -> void
 Kiln.TestKit.HarnessItems.SetGear(Kiln.ItemInstanceRef item, int? enhancements = null, int? unlocked = null, int? level = null, int? durability = null) -> void
 Kiln.TestKit.HarnessItems.SetPerkSlots(Kiln.ItemId item, int slots) -> void
 Kiln.TestKit.HarnessItems.SetUpgradeRolls(params double[]! rolls) -> void
@@ -589,6 +631,17 @@ Kiln.TestKit.HarnessOutlines.SetState(Kiln.WorldOutline! outline, Kiln.OutlineSt
 Kiln.TestKit.HarnessOutlines.Setting.get -> Kiln.TestKit.FakeOutlineSetting
 Kiln.TestKit.HarnessOutlines.Setting.set -> void
 Kiln.TestKit.HarnessOutlines.Showing(Kiln.EntityId entity) -> Kiln.TestKit.FakeOutline?
+Kiln.TestKit.HarnessPlayerStorage
+Kiln.TestKit.HarnessPlayerStorage.Apply(Kiln.TestKit.FakePlayer! player) -> void
+Kiln.TestKit.HarnessPlayerStorage.Capture(Kiln.TestKit.FakePlayer! player, ulong witness) -> ulong
+Kiln.TestKit.HarnessPlayerStorage.CapturesDone() -> ulong
+Kiln.TestKit.HarnessPlayerStorage.Die(Kiln.TestKit.FakePlayer! player, Kiln.EntityId tombstone, Kiln.TestKit.HarnessTombstoneMode mode = Kiln.TestKit.HarnessTombstoneMode.AddBackpackMaterials) -> void
+Kiln.TestKit.HarnessPlayerStorage.Join(Kiln.TestKit.FakePlayer! player, ulong witness = 1) -> void
+Kiln.TestKit.HarnessPlayerStorage.JoinAndRestore(Kiln.TestKit.FakePlayer! player, params Kiln.TestKit.HarnessStorageCopy![]! storages) -> void
+Kiln.TestKit.HarnessPlayerStorage.Leave(Kiln.TestKit.FakePlayer! player) -> void
+Kiln.TestKit.HarnessPlayerStorage.Parked(Kiln.TestKit.FakePlayer! player, string! fullKey) -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.HarnessStorageRecord>!
+Kiln.TestKit.HarnessPlayerStorage.Quarantined(Kiln.TestKit.FakePlayer! player, string! fullKey) -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.HarnessStorageRecord>!
+Kiln.TestKit.HarnessPlayerStorage.Restore(Kiln.TestKit.FakePlayer! player, Kiln.PlayerStorageSource source = Kiln.PlayerStorageSource.New, bool paired = false, long revision = 0, params Kiln.TestKit.HarnessStorageCopy![]! storages) -> void
 Kiln.TestKit.HarnessPlayers
 Kiln.TestKit.HarnessPlayers.All.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.FakePlayer!>!
 Kiln.TestKit.HarnessPlayers.Join(string! name, ulong steamId = 0, Kiln.PlayerPermissions rights = Kiln.PlayerPermissions.None, bool isAdmin = false, Kiln.WorldPosition? position = null, uint userGroupId = 0) -> Kiln.TestKit.FakePlayer!
@@ -629,6 +682,32 @@ Kiln.TestKit.HarnessState.Running = 2 -> Kiln.TestKit.HarnessState
 Kiln.TestKit.HarnessState.Starting = 1 -> Kiln.TestKit.HarnessState
 Kiln.TestKit.HarnessState.Stopped = 3 -> Kiln.TestKit.HarnessState
 Kiln.TestKit.HarnessStoppedException
+Kiln.TestKit.HarnessStorageCopy
+Kiln.TestKit.HarnessStorageCopy.<Clone>$() -> Kiln.TestKit.HarnessStorageCopy!
+Kiln.TestKit.HarnessStorageCopy.Deconstruct(out string! FullKey, out int Slots, out System.Collections.Generic.IReadOnlyList<Kiln.TestKit.HarnessStorageRecord>! Records, out bool Parked) -> void
+Kiln.TestKit.HarnessStorageCopy.Equals(Kiln.TestKit.HarnessStorageCopy? other) -> bool
+Kiln.TestKit.HarnessStorageCopy.FullKey.get -> string!
+Kiln.TestKit.HarnessStorageCopy.FullKey.init -> void
+Kiln.TestKit.HarnessStorageCopy.HarnessStorageCopy(string! FullKey, int Slots, System.Collections.Generic.IReadOnlyList<Kiln.TestKit.HarnessStorageRecord>! Records, bool Parked = false) -> void
+Kiln.TestKit.HarnessStorageCopy.Parked.get -> bool
+Kiln.TestKit.HarnessStorageCopy.Parked.init -> void
+Kiln.TestKit.HarnessStorageCopy.Records.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.HarnessStorageRecord>!
+Kiln.TestKit.HarnessStorageCopy.Records.init -> void
+Kiln.TestKit.HarnessStorageCopy.Slots.get -> int
+Kiln.TestKit.HarnessStorageCopy.Slots.init -> void
+Kiln.TestKit.HarnessStorageRecord
+Kiln.TestKit.HarnessStorageRecord.Count.get -> int
+Kiln.TestKit.HarnessStorageRecord.Count.init -> void
+Kiln.TestKit.HarnessStorageRecord.Deconstruct(out int Slot, out Kiln.ItemId Item, out int Count, out int Level) -> void
+Kiln.TestKit.HarnessStorageRecord.Equals(Kiln.TestKit.HarnessStorageRecord other) -> bool
+Kiln.TestKit.HarnessStorageRecord.HarnessStorageRecord() -> void
+Kiln.TestKit.HarnessStorageRecord.HarnessStorageRecord(int Slot, Kiln.ItemId Item, int Count, int Level = 0) -> void
+Kiln.TestKit.HarnessStorageRecord.Item.get -> Kiln.ItemId
+Kiln.TestKit.HarnessStorageRecord.Item.init -> void
+Kiln.TestKit.HarnessStorageRecord.Level.get -> int
+Kiln.TestKit.HarnessStorageRecord.Level.init -> void
+Kiln.TestKit.HarnessStorageRecord.Slot.get -> int
+Kiln.TestKit.HarnessStorageRecord.Slot.init -> void
 Kiln.TestKit.HarnessTasks
 Kiln.TestKit.HarnessTasks.Live.get -> int
 Kiln.TestKit.HarnessTasks.Settle(int maxSteps = 1000, System.TimeSpan? timeout = null) -> int
@@ -660,6 +739,10 @@ Kiln.TestKit.HarnessTime.NightLength.get -> System.TimeSpan
 Kiln.TestKit.HarnessTime.NightLength.set -> void
 Kiln.TestKit.HarnessTime.Set(double hours) -> void
 Kiln.TestKit.HarnessTime.Speed.get -> double
+Kiln.TestKit.HarnessTombstoneMode
+Kiln.TestKit.HarnessTombstoneMode.AddBackpackMaterials = 0 -> Kiln.TestKit.HarnessTombstoneMode
+Kiln.TestKit.HarnessTombstoneMode.Everything = 1 -> Kiln.TestKit.HarnessTombstoneMode
+Kiln.TestKit.HarnessTombstoneMode.NoTombstone = 2 -> Kiln.TestKit.HarnessTombstoneMode
 Kiln.TestKit.HarnessUiInventory
 Kiln.TestKit.HarnessUiInventory.Click(int index, Kiln.SlotButton button = Kiln.SlotButton.Left, Kiln.SlotModifiers modifiers = Kiln.SlotModifiers.None) -> Kiln.TestKit.FakeSlotClickResult
 Kiln.TestKit.HarnessUiInventory.ClickSubscriptions.get -> int
@@ -703,6 +786,7 @@ Kiln.TestKit.HarnessWorldTables.StorageFails.set -> void
 Kiln.TestKit.HarnessWorldTables.TerrainBrushCells(string! mod, string! key) -> byte[]?
 Kiln.TestKit.HarnessWorldTables.TerrainItem(string! name, uint item, byte cell) -> void
 Kiln.TestKit.KilnHarness
+Kiln.TestKit.KilnHarness.AmmoList.get -> Kiln.TestKit.HarnessAmmoList!
 Kiln.TestKit.KilnHarness.As(Kiln.TestKit.ModHandle! mod, System.Action! action) -> void
 Kiln.TestKit.KilnHarness.As<T>(Kiln.TestKit.ModHandle! mod, System.Func<T>! func) -> T
 Kiln.TestKit.KilnHarness.Assets.get -> Kiln.TestKit.HarnessAssets!
@@ -714,6 +798,7 @@ Kiln.TestKit.KilnHarness.Combat.get -> Kiln.TestKit.HarnessCombat!
 Kiln.TestKit.KilnHarness.ComponentChanges.get -> Kiln.TestKit.HarnessComponentChanges!
 Kiln.TestKit.KilnHarness.ConfigDirectory.get -> string!
 Kiln.TestKit.KilnHarness.ControlDirectory.get -> string!
+Kiln.TestKit.KilnHarness.Crafting.get -> Kiln.TestKit.HarnessCrafting!
 Kiln.TestKit.KilnHarness.CreatureControl.get -> Kiln.TestKit.HarnessCreatureControl!
 Kiln.TestKit.KilnHarness.CurrentStep.get -> ulong
 Kiln.TestKit.KilnHarness.DataDirectory.get -> string!
@@ -745,6 +830,7 @@ Kiln.TestKit.KilnHarness.Mod(string! id) -> Kiln.TestKit.ModHandle!
 Kiln.TestKit.KilnHarness.ModsDirectory.get -> string!
 Kiln.TestKit.KilnHarness.OnMainThread(System.Action! work) -> void
 Kiln.TestKit.KilnHarness.Outlines.get -> Kiln.TestKit.HarnessOutlines!
+Kiln.TestKit.KilnHarness.PlayerStorage.get -> Kiln.TestKit.HarnessPlayerStorage!
 Kiln.TestKit.KilnHarness.Players.get -> Kiln.TestKit.HarnessPlayers!
 Kiln.TestKit.KilnHarness.Programs.get -> Kiln.TestKit.HarnessPrograms!
 Kiln.TestKit.KilnHarness.Queries.get -> Kiln.TestKit.HarnessQueries!
@@ -913,10 +999,6 @@ Kiln.TestKit.Xunit.KilnTestOrderer.OrderTestCases<TTestCase>(System.Collections.
 Kiln.TestKit.Xunit.KilnTestSuite<TMod>
 Kiln.TestKit.Xunit.KilnTestSuite<TMod>.KilnTest(string! name) -> void
 Kiln.TestKit.Xunit.KilnTestSuite<TMod>.KilnTestSuite() -> void
-[KILNX003]Kiln.TestKit.FakeWorld.BusyReads.get -> int
-[KILNX003]Kiln.TestKit.FakeWorld.BusyReads.set -> void
-[KILNX003]Kiln.TestKit.FakeWorld.BusyWrites.get -> int
-[KILNX003]Kiln.TestKit.FakeWorld.BusyWrites.set -> void
 const Kiln.TestKit.HarnessSpawn.PickupTemplate = "Base_LootPickup_Generic_Gravity" -> string!
 override Kiln.TestKit.BootRun.Equals(object? obj) -> bool
 override Kiln.TestKit.BootRun.GetHashCode() -> int
@@ -934,6 +1016,9 @@ override Kiln.TestKit.FakeChatMessage.ToString() -> string!
 override Kiln.TestKit.FakeControlCall.Equals(object? obj) -> bool
 override Kiln.TestKit.FakeControlCall.GetHashCode() -> int
 override Kiln.TestKit.FakeControlCall.ToString() -> string!
+override Kiln.TestKit.FakeCraftSourceRegistration.Equals(object? obj) -> bool
+override Kiln.TestKit.FakeCraftSourceRegistration.GetHashCode() -> int
+override Kiln.TestKit.FakeCraftSourceRegistration.ToString() -> string!
 override Kiln.TestKit.FakeEcall.GetHashCode() -> int
 override Kiln.TestKit.FakeHealth.ToString() -> string!
 override Kiln.TestKit.FakeHit.ToString() -> string!
@@ -971,6 +1056,10 @@ override Kiln.TestKit.FakeVoxelRay.GetHashCode() -> int
 override Kiln.TestKit.FakeWorldWrite.Equals(object? obj) -> bool
 override Kiln.TestKit.FakeWorldWrite.GetHashCode() -> int
 override Kiln.TestKit.FakeWorldWrite.ToString() -> string!
+override Kiln.TestKit.HarnessStorageCopy.Equals(object? obj) -> bool
+override Kiln.TestKit.HarnessStorageCopy.GetHashCode() -> int
+override Kiln.TestKit.HarnessStorageCopy.ToString() -> string!
+override Kiln.TestKit.HarnessStorageRecord.GetHashCode() -> int
 override Kiln.TestKit.KilnTestResult.Equals(object? obj) -> bool
 override Kiln.TestKit.KilnTestResult.GetHashCode() -> int
 override Kiln.TestKit.KilnTestResult.ToString() -> string!
@@ -991,6 +1080,8 @@ static Kiln.TestKit.FakeBlobRegistration.operator !=(Kiln.TestKit.FakeBlobRegist
 static Kiln.TestKit.FakeBlobRegistration.operator ==(Kiln.TestKit.FakeBlobRegistration left, Kiln.TestKit.FakeBlobRegistration right) -> bool
 static Kiln.TestKit.FakeControlCall.operator !=(Kiln.TestKit.FakeControlCall? left, Kiln.TestKit.FakeControlCall? right) -> bool
 static Kiln.TestKit.FakeControlCall.operator ==(Kiln.TestKit.FakeControlCall? left, Kiln.TestKit.FakeControlCall? right) -> bool
+static Kiln.TestKit.FakeCraftSourceRegistration.operator !=(Kiln.TestKit.FakeCraftSourceRegistration? left, Kiln.TestKit.FakeCraftSourceRegistration? right) -> bool
+static Kiln.TestKit.FakeCraftSourceRegistration.operator ==(Kiln.TestKit.FakeCraftSourceRegistration? left, Kiln.TestKit.FakeCraftSourceRegistration? right) -> bool
 static Kiln.TestKit.FakeEcall.operator !=(Kiln.TestKit.FakeEcall left, Kiln.TestKit.FakeEcall right) -> bool
 static Kiln.TestKit.FakeEcall.operator ==(Kiln.TestKit.FakeEcall left, Kiln.TestKit.FakeEcall right) -> bool
 static Kiln.TestKit.FakeImpactArg.Bool(bool value) -> Kiln.TestKit.FakeImpactArg!
@@ -1045,6 +1136,10 @@ static Kiln.TestKit.FakeVoxelRay.operator !=(Kiln.TestKit.FakeVoxelRay left, Kil
 static Kiln.TestKit.FakeVoxelRay.operator ==(Kiln.TestKit.FakeVoxelRay left, Kiln.TestKit.FakeVoxelRay right) -> bool
 static Kiln.TestKit.FakeWorldWrite.operator !=(Kiln.TestKit.FakeWorldWrite? left, Kiln.TestKit.FakeWorldWrite? right) -> bool
 static Kiln.TestKit.FakeWorldWrite.operator ==(Kiln.TestKit.FakeWorldWrite? left, Kiln.TestKit.FakeWorldWrite? right) -> bool
+static Kiln.TestKit.HarnessStorageCopy.operator !=(Kiln.TestKit.HarnessStorageCopy? left, Kiln.TestKit.HarnessStorageCopy? right) -> bool
+static Kiln.TestKit.HarnessStorageCopy.operator ==(Kiln.TestKit.HarnessStorageCopy? left, Kiln.TestKit.HarnessStorageCopy? right) -> bool
+static Kiln.TestKit.HarnessStorageRecord.operator !=(Kiln.TestKit.HarnessStorageRecord left, Kiln.TestKit.HarnessStorageRecord right) -> bool
+static Kiln.TestKit.HarnessStorageRecord.operator ==(Kiln.TestKit.HarnessStorageRecord left, Kiln.TestKit.HarnessStorageRecord right) -> bool
 static Kiln.TestKit.KilnHarness.ListTests(System.Reflection.Assembly! assembly) -> System.Collections.Generic.IReadOnlyList<string!>!
 static Kiln.TestKit.KilnTestOptions.Default.get -> Kiln.TestKit.KilnTestOptions!
 static Kiln.TestKit.KilnTestResult.operator !=(Kiln.TestKit.KilnTestResult? left, Kiln.TestKit.KilnTestResult? right) -> bool
@@ -1083,3 +1178,5 @@ virtual Kiln.TestKit.Xunit.KilnTestSuite<TMod>.WatchdogGrace.get -> System.TimeS
 ~override Kiln.TestKit.FakeVoxelAnswer.ToString() -> string
 ~override Kiln.TestKit.FakeVoxelRay.Equals(object obj) -> bool
 ~override Kiln.TestKit.FakeVoxelRay.ToString() -> string
+~override Kiln.TestKit.HarnessStorageRecord.Equals(object obj) -> bool
+~override Kiln.TestKit.HarnessStorageRecord.ToString() -> string

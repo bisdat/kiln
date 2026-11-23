@@ -29,14 +29,32 @@ public enum ContentSyncState
 }
 
 /// <summary>Result of <see cref="ContentSync.CheckRoundTrip"/>.</summary>
+/// <param name="Ok">True when every check passed.</param>
+/// <param name="Fields">How many changes this process's state exported.</param>
+/// <param name="Applied">How many of them were applied again with no change in the state.</param>
+/// <param name="Reset">How many were put back to the game's original to match a vanilla server.</param>
+/// <param name="Milliseconds">How long the check took.</param>
+/// <param name="Problems">What differed, one message each; empty when it passed.</param>
 public sealed record ContentRoundTrip(bool Ok, int Fields, int Applied, int Reset, double Milliseconds, IReadOnlyList<string> Problems)
 {
+    /// <summary>Whether it passed, the counts, the time and the problems.</summary>
     public override string ToString() =>
         $"{(Ok ? "ok" : "FAILED")}: {Fields} change(s) exported, {Applied} re-applied unchanged, {Reset} put back for a vanilla server, " +
         $"{Milliseconds:F1} ms{(Problems.Count > 0 ? "; " + string.Join("; ", Problems) : "")}";
 }
 
 /// <summary>Client side of the content sync, as of now.</summary>
+/// <param name="State">Where the sync stands.</param>
+/// <param name="StateId">The server's content state (the hash of its document); 0 when there is none.</param>
+/// <param name="ServerFields">How many changes the server sent.</param>
+/// <param name="Applied">How many of them were applied to this game's registries.</param>
+/// <param name="Reset">How many fields this game had changed on its own that were put back to the game's original to
+/// match the server.</param>
+/// <param name="Errors">How many errors the application had.</param>
+/// <param name="Bytes">The size of the server's document, uncompressed.</param>
+/// <param name="CompressedBytes">The size of the server's document as it was sent.</param>
+/// <param name="AppliedAt">When the changes were applied (UTC); null when they have not been.</param>
+/// <param name="Detail">A short text: how many changes came from the server, or why it failed.</param>
 public readonly record struct ContentSyncStatus(ContentSyncState State, uint StateId, int ServerFields, int Applied,
     int Reset, int Errors, int Bytes, int CompressedBytes, DateTime? AppliedAt, string Detail);
 
@@ -57,6 +75,8 @@ public sealed class ContentSyncedEvent : KilnEvent
         StateId = stateId;
     }
 
+    /// <summary>False when the server's changes were applied; true when they were taken off again after
+    /// leaving.</summary>
     public bool Restored { get; }
 
     /// <summary>Field / list changes taken from the server (on restore: fields put back).</summary>
@@ -65,6 +85,7 @@ public sealed class ContentSyncedEvent : KilnEvent
     /// <summary>Fields this game had changed on its own that were put back to the game's original to match the server.</summary>
     public int Reset { get; }
 
+    /// <summary>What went wrong while applying, one message each; empty when it all went in.</summary>
     public IReadOnlyList<string> Errors { get; }
 
     /// <summary>The server's content state (hash of its document).</summary>
@@ -74,7 +95,9 @@ public sealed class ContentSyncedEvent : KilnEvent
 /// <summary>Kiln's content sync (runs by itself with Kiln.Content and Kiln.Network).</summary>
 public static unsafe class ContentSync
 {
+    /// <summary>The name of the Kiln.Network channel the sync uses.</summary>
     public const string ChannelName = "kiln:content";
+    /// <summary>The version of the sync protocol on that channel.</summary>
     public const string ChannelVersion = "1";
     internal const ushort Format = 1;
     internal const byte CodecDeflate = 1;

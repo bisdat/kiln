@@ -1,4 +1,7 @@
 #nullable enable
+Kiln.AmmoKinds
+Kiln.AmmoKinds.Arrow = 1 -> Kiln.AmmoKinds
+Kiln.AmmoKinds.Spell = 2 -> Kiln.AmmoKinds
 Kiln.ClientTransfer
 Kiln.ClientTransfer.Amount.get -> Kiln.ClientTransferAmount
 Kiln.ClientTransfer.Amount.init -> void
@@ -96,8 +99,11 @@ Kiln.EquipResult.Ref.get -> Kiln.ItemInstanceRef
 Kiln.EquipResult.Ref.init -> void
 Kiln.EquipResult.Replaced.get -> Kiln.ItemId
 Kiln.EquipResult.Replaced.init -> void
+Kiln.EquipResult.ReplacedCount.get -> int
+Kiln.EquipResult.ReplacedCount.init -> void
 Kiln.EquipResult.ReplacedEntity.get -> Kiln.EntityId
 Kiln.EquipResult.ReplacedEntity.init -> void
+Kiln.EquipResult.ReplacedItem.get -> Kiln.ItemId
 Kiln.EquipResult.ReplacedRef.get -> Kiln.ItemInstanceRef
 Kiln.EquipResult.ReplacedRef.init -> void
 Kiln.EquipResult.ReplacedTo.get -> Kiln.SlotId
@@ -564,6 +570,14 @@ Kiln.GearWriteOptions.Equals(Kiln.GearWriteOptions? other) -> bool
 Kiln.GearWriteOptions.GearWriteOptions() -> void
 Kiln.GearWriteOptions.RefuseEquipped.get -> bool
 Kiln.GearWriteOptions.RefuseEquipped.init -> void
+Kiln.GiveEquipOptions
+Kiln.GiveEquipOptions.<Clone>$() -> Kiln.GiveEquipOptions!
+Kiln.GiveEquipOptions.DryRun.get -> bool
+Kiln.GiveEquipOptions.DryRun.init -> void
+Kiln.GiveEquipOptions.Equals(Kiln.GiveEquipOptions? other) -> bool
+Kiln.GiveEquipOptions.GiveEquipOptions() -> void
+Kiln.GiveEquipOptions.Replaced.get -> Kiln.Replaced
+Kiln.GiveEquipOptions.Replaced.init -> void
 Kiln.GiveOptions
 Kiln.GiveOptions.AllOrNothing = 2 -> Kiln.GiveOptions
 Kiln.GiveOptions.DryRun = 8 -> Kiln.GiveOptions
@@ -612,6 +626,7 @@ Kiln.InventoryKinds.All = Kiln.InventoryKinds.Containers | Kiln.InventoryKinds.P
 Kiln.InventoryKinds.Containers = 1 -> Kiln.InventoryKinds
 Kiln.InventoryKinds.NonEmpty = 8 -> Kiln.InventoryKinds
 Kiln.InventoryKinds.Npcs = 4 -> Kiln.InventoryKinds
+Kiln.InventoryKinds.PlayerStorage = 16 -> Kiln.InventoryKinds
 Kiln.InventoryKinds.Players = 2 -> Kiln.InventoryKinds
 Kiln.InventorySlot
 Kiln.InventorySlot.<Clone>$() -> Kiln.InventorySlot!
@@ -771,6 +786,7 @@ Kiln.ItemRarity.Rare = 2 -> Kiln.ItemRarity
 Kiln.ItemRarity.Uncommon = 1 -> Kiln.ItemRarity
 Kiln.Items
 Kiln.Items.Fuel
+Kiln.Items.PlayerStorages
 Kiln.Items.Transfers
 Kiln.ItemsGivenEvent
 Kiln.ItemsResult
@@ -827,6 +843,7 @@ Kiln.ItemsServiceStatus.Transactions.init -> void
 Kiln.ItemsStatus
 Kiln.ItemsStatus.Done = 0 -> Kiln.ItemsStatus
 Kiln.ItemsStatus.Dropped = 9 -> Kiln.ItemsStatus
+Kiln.ItemsStatus.Filtered = 10 -> Kiln.ItemsStatus
 Kiln.ItemsStatus.Invalid = 100 -> Kiln.ItemsStatus
 Kiln.ItemsStatus.NoInventory = 4 -> Kiln.ItemsStatus
 Kiln.ItemsStatus.NoRoom = 2 -> Kiln.ItemsStatus
@@ -932,6 +949,11 @@ Kiln.MoveResult.Steps.init -> void
 Kiln.MoveResult.Succeeded.get -> bool
 Kiln.MoveResult.To.get -> Kiln.EntityId
 Kiln.MoveResult.To.init -> void
+Kiln.OrphanTarget
+Kiln.OrphanTarget.Container.get -> Kiln.EntityId
+Kiln.OrphanTarget.Equals(Kiln.OrphanTarget other) -> bool
+Kiln.OrphanTarget.IsBackpack.get -> bool
+Kiln.OrphanTarget.OrphanTarget() -> void
 Kiln.PerkSlot
 Kiln.PerkSlot.<Clone>$() -> Kiln.PerkSlot!
 Kiln.PerkSlot.Available.get -> bool
@@ -954,6 +976,133 @@ Kiln.PlayerEquippingEvent.PlayerEquippingEvent(Kiln.DecisionId id, Kiln.EventEnt
 Kiln.PlayerEquippingEvent.PlayerKey.get -> Kiln.EventEntityKey
 Kiln.PlayerEquippingEvent.PriorCanceled.get -> bool
 Kiln.PlayerEquippingEvent.PriorCanceledBy.get -> string?
+Kiln.PlayerStorage
+Kiln.PlayerStorage.Activate(Kiln.EntityId player, int index) -> System.Threading.Tasks.Task<Kiln.EquipResult!>!
+Kiln.PlayerStorage.Client
+Kiln.PlayerStorage.Death.get -> Kiln.StorageDeath
+Kiln.PlayerStorage.EntityOf(Kiln.EntityId player) -> Kiln.EntityId
+Kiln.PlayerStorage.Filter.get -> Kiln.StorageFilter
+Kiln.PlayerStorage.FullKey.get -> string!
+Kiln.PlayerStorage.IsReady(Kiln.EntityId player) -> bool
+Kiln.PlayerStorage.Key.get -> string!
+Kiln.PlayerStorage.Read(Kiln.EntityId player) -> Kiln.InventoryContents?
+Kiln.PlayerStorage.Retrieve(Kiln.EntityId player, int index, int count = 0, Kiln.EntityId to = default(Kiln.EntityId)) -> System.Threading.Tasks.Task<Kiln.MoveResult!>!
+Kiln.PlayerStorage.Slot(Kiln.EntityId player, int index) -> Kiln.SlotId
+Kiln.PlayerStorage.Slots.get -> int
+Kiln.PlayerStorage.Status(Kiln.EntityId player) -> Kiln.PlayerStorageStatus!
+Kiln.PlayerStorage.Store(Kiln.EntityId player, Kiln.SlotId from, int count = 0) -> System.Threading.Tasks.Task<Kiln.MoveResult!>!
+Kiln.PlayerStorageAmmoOptions
+Kiln.PlayerStorageAmmoOptions.<Clone>$() -> Kiln.PlayerStorageAmmoOptions!
+Kiln.PlayerStorageAmmoOptions.Activate.get -> bool
+Kiln.PlayerStorageAmmoOptions.Activate.init -> void
+Kiln.PlayerStorageAmmoOptions.Equals(Kiln.PlayerStorageAmmoOptions? other) -> bool
+Kiln.PlayerStorageAmmoOptions.PlayerStorageAmmoOptions() -> void
+Kiln.PlayerStorageAmmoOptions.Replace.get -> bool
+Kiln.PlayerStorageAmmoOptions.Replace.init -> void
+Kiln.PlayerStorageAmmoProvider
+Kiln.PlayerStorageAmmoProvider.Active.get -> bool
+Kiln.PlayerStorageAmmoProvider.Dispose() -> void
+Kiln.PlayerStorageAmmoProvider.FullKey.get -> string!
+Kiln.PlayerStorageAmmoProvider.Kinds.get -> Kiln.AmmoKinds
+Kiln.PlayerStorageAmmoProvider.Options.get -> Kiln.PlayerStorageAmmoOptions!
+Kiln.PlayerStorageAmmoProvider.Shown.get -> bool
+Kiln.PlayerStorageAmmoProvider.WhyNotShown.get -> string?
+Kiln.PlayerStorageClientChangedEvent
+Kiln.PlayerStorageClientChangedEvent.Key.get -> string!
+Kiln.PlayerStorageClientChangedEvent.Rows.get -> System.Collections.Generic.IReadOnlyList<Kiln.PlayerStorageRow>!
+Kiln.PlayerStorageDeathEvent
+Kiln.PlayerStorageDeathEvent.Items.get -> int
+Kiln.PlayerStorageDeathEvent.Key.get -> string!
+Kiln.PlayerStorageDeathEvent.Moved.get -> int
+Kiln.PlayerStorageDeathEvent.Player.get -> Kiln.EntityId
+Kiln.PlayerStorageDeathEvent.Rule.get -> Kiln.StorageDeath
+Kiln.PlayerStorageDeathEvent.To.get -> Kiln.EntityId
+Kiln.PlayerStorageInfo
+Kiln.PlayerStorageInfo.<Clone>$() -> Kiln.PlayerStorageInfo!
+Kiln.PlayerStorageInfo.Deconstruct(out string! FullKey, out bool Registered, out int Slots, out Kiln.EntityId Holder, out Kiln.PlayerStorageStatus! Status) -> void
+Kiln.PlayerStorageInfo.Equals(Kiln.PlayerStorageInfo? other) -> bool
+Kiln.PlayerStorageInfo.FullKey.get -> string!
+Kiln.PlayerStorageInfo.FullKey.init -> void
+Kiln.PlayerStorageInfo.Holder.get -> Kiln.EntityId
+Kiln.PlayerStorageInfo.Holder.init -> void
+Kiln.PlayerStorageInfo.PlayerStorageInfo(string! FullKey, bool Registered, int Slots, Kiln.EntityId Holder, Kiln.PlayerStorageStatus! Status) -> void
+Kiln.PlayerStorageInfo.Registered.get -> bool
+Kiln.PlayerStorageInfo.Registered.init -> void
+Kiln.PlayerStorageInfo.Slots.get -> int
+Kiln.PlayerStorageInfo.Slots.init -> void
+Kiln.PlayerStorageInfo.Status.get -> Kiln.PlayerStorageStatus!
+Kiln.PlayerStorageInfo.Status.init -> void
+Kiln.PlayerStorageParkReason
+Kiln.PlayerStorageParkReason.Filter = 3 -> Kiln.PlayerStorageParkReason
+Kiln.PlayerStorageParkReason.Locked = 18 -> Kiln.PlayerStorageParkReason
+Kiln.PlayerStorageParkReason.Overflow = 2 -> Kiln.PlayerStorageParkReason
+Kiln.PlayerStorageParkReason.Requested = 16 -> Kiln.PlayerStorageParkReason
+Kiln.PlayerStorageParkReason.ReturnedOutsideKiln = 19 -> Kiln.PlayerStorageParkReason
+Kiln.PlayerStorageParkReason.Stale = 17 -> Kiln.PlayerStorageParkReason
+Kiln.PlayerStorageParkReason.Unregistered = 1 -> Kiln.PlayerStorageParkReason
+Kiln.PlayerStorageParkedEvent
+Kiln.PlayerStorageParkedEvent.Character.get -> System.Guid
+Kiln.PlayerStorageParkedEvent.Key.get -> string!
+Kiln.PlayerStorageParkedEvent.Player.get -> Kiln.EntityId
+Kiln.PlayerStorageParkedEvent.Reason.get -> Kiln.PlayerStorageParkReason
+Kiln.PlayerStorageParkedEvent.Stacks.get -> int
+Kiln.PlayerStorageRestoredEvent
+Kiln.PlayerStorageRestoredEvent.Character.get -> System.Guid
+Kiln.PlayerStorageRestoredEvent.Key.get -> string!
+Kiln.PlayerStorageRestoredEvent.Live.get -> bool
+Kiln.PlayerStorageRestoredEvent.Paired.get -> bool
+Kiln.PlayerStorageRestoredEvent.Player.get -> Kiln.EntityId
+Kiln.PlayerStorageRestoredEvent.Revision.get -> long
+Kiln.PlayerStorageRestoredEvent.Source.get -> Kiln.PlayerStorageSource
+Kiln.PlayerStorageRestoredEvent.Stacks.get -> int
+Kiln.PlayerStorageRow
+Kiln.PlayerStorageRow.Count.get -> int
+Kiln.PlayerStorageRow.Count.init -> void
+Kiln.PlayerStorageRow.Deconstruct(out string! Key, out int Index, out Kiln.ItemId Item, out int Count, out int Level, out uint Flags) -> void
+Kiln.PlayerStorageRow.Equals(Kiln.PlayerStorageRow other) -> bool
+Kiln.PlayerStorageRow.Flags.get -> uint
+Kiln.PlayerStorageRow.Flags.init -> void
+Kiln.PlayerStorageRow.Index.get -> int
+Kiln.PlayerStorageRow.Index.init -> void
+Kiln.PlayerStorageRow.Item.get -> Kiln.ItemId
+Kiln.PlayerStorageRow.Item.init -> void
+Kiln.PlayerStorageRow.Key.get -> string!
+Kiln.PlayerStorageRow.Key.init -> void
+Kiln.PlayerStorageRow.Level.get -> int
+Kiln.PlayerStorageRow.Level.init -> void
+Kiln.PlayerStorageRow.PlayerStorageRow() -> void
+Kiln.PlayerStorageRow.PlayerStorageRow(string! Key, int Index, Kiln.ItemId Item, int Count, int Level, uint Flags) -> void
+Kiln.PlayerStorageSource
+Kiln.PlayerStorageSource.Client = 3 -> Kiln.PlayerStorageSource
+Kiln.PlayerStorageSource.New = 1 -> Kiln.PlayerStorageSource
+Kiln.PlayerStorageSource.None = 0 -> Kiln.PlayerStorageSource
+Kiln.PlayerStorageSource.Server = 2 -> Kiln.PlayerStorageSource
+Kiln.PlayerStorageState
+Kiln.PlayerStorageState.Locked = 4 -> Kiln.PlayerStorageState
+Kiln.PlayerStorageState.None = 0 -> Kiln.PlayerStorageState
+Kiln.PlayerStorageState.Parked = 3 -> Kiln.PlayerStorageState
+Kiln.PlayerStorageState.Ready = 2 -> Kiln.PlayerStorageState
+Kiln.PlayerStorageState.Waiting = 1 -> Kiln.PlayerStorageState
+Kiln.PlayerStorageStatus
+Kiln.PlayerStorageStatus.<Clone>$() -> Kiln.PlayerStorageStatus!
+Kiln.PlayerStorageStatus.Deconstruct(out Kiln.PlayerStorageState State, out bool Paired, out Kiln.PlayerStorageSource Source, out int Stacks, out int Parked, out int Quarantined, out long Revision) -> void
+Kiln.PlayerStorageStatus.Equals(Kiln.PlayerStorageStatus? other) -> bool
+Kiln.PlayerStorageStatus.Paired.get -> bool
+Kiln.PlayerStorageStatus.Paired.init -> void
+Kiln.PlayerStorageStatus.Parked.get -> int
+Kiln.PlayerStorageStatus.Parked.init -> void
+Kiln.PlayerStorageStatus.PlayerStorageStatus(Kiln.PlayerStorageState State, bool Paired, Kiln.PlayerStorageSource Source, int Stacks, int Parked, int Quarantined, long Revision) -> void
+Kiln.PlayerStorageStatus.Quarantined.get -> int
+Kiln.PlayerStorageStatus.Quarantined.init -> void
+Kiln.PlayerStorageStatus.Restored.get -> bool
+Kiln.PlayerStorageStatus.Revision.get -> long
+Kiln.PlayerStorageStatus.Revision.init -> void
+Kiln.PlayerStorageStatus.Source.get -> Kiln.PlayerStorageSource
+Kiln.PlayerStorageStatus.Source.init -> void
+Kiln.PlayerStorageStatus.Stacks.get -> int
+Kiln.PlayerStorageStatus.Stacks.init -> void
+Kiln.PlayerStorageStatus.State.get -> Kiln.PlayerStorageState
+Kiln.PlayerStorageStatus.State.init -> void
 Kiln.RarityUpgradeRule
 Kiln.RarityUpgradeRule.<Clone>$() -> Kiln.RarityUpgradeRule!
 Kiln.RarityUpgradeRule.AllowEmptySlot.get -> bool
@@ -970,6 +1119,9 @@ Kiln.RarityUpgradeRule.Socket.get -> Kiln.SocketRule
 Kiln.RarityUpgradeRule.Socket.init -> void
 Kiln.RarityUpgradeRule.Steps.get -> System.Collections.Generic.IDictionary<Kiln.ItemRarity, Kiln.UpgradeStep!>!
 Kiln.RarityUpgradeRule.Steps.init -> void
+Kiln.Replaced
+Kiln.Replaced.Backpack = 0 -> Kiln.Replaced
+Kiln.Replaced.Take = 1 -> Kiln.Replaced
 Kiln.SetEquipmentChange
 Kiln.SetEquipmentChange.Deconstruct(out ulong ItemsTicket, out Kiln.InventorySnapshotToken Snapshot, out Kiln.EquipmentSet! Set, out bool DryRun) -> void
 Kiln.SetEquipmentChange.DryRun.get -> bool
@@ -1015,6 +1167,15 @@ Kiln.StackEquipment.Item.init -> void
 Kiln.StackEquipment.Source.get -> Kiln.SlotId
 Kiln.StackEquipment.Source.init -> void
 Kiln.StackEquipment.StackEquipment(Kiln.ItemId Item, Kiln.SlotId Source, int ExpectedCount) -> void
+Kiln.StorageDeath
+Kiln.StorageDeath.FollowGame = 2 -> Kiln.StorageDeath
+Kiln.StorageDeath.Grave = 1 -> Kiln.StorageDeath
+Kiln.StorageDeath.Keep = 0 -> Kiln.StorageDeath
+Kiln.StorageFilter
+Kiln.StorageFilter.And(Kiln.StorageFilter other) -> Kiln.StorageFilter
+Kiln.StorageFilter.Equals(Kiln.StorageFilter other) -> bool
+Kiln.StorageFilter.NoItemEntities() -> Kiln.StorageFilter
+Kiln.StorageFilter.StorageFilter() -> void
 Kiln.ToolDurabilityChangedEvent
 Kiln.ToolDurabilityChangedEvent.Actor.get -> Kiln.EntityId
 Kiln.ToolDurabilityChangedEvent.After.get -> int
@@ -1183,6 +1344,8 @@ const Kiln.Items.ContainerNameMaxChars = 48 -> int
 const Kiln.Items.Fuel.UnitsPerCharge = 64 -> int
 const Kiln.Items.MaxScale = 100 -> double
 const Kiln.Items.MinScale = 0.01 -> double
+const Kiln.PlayerStorage.Capability = "items.storage" -> string!
+const Kiln.PlayerStorage.Client.Capability = "items.storage.client" -> string!
 const Kiln.UpgradeStep.DefaultChance = 1 -> double
 const Kiln.UpgradeStep.DefaultOnFail = Kiln.UpgradeFail.KeepItemLoseCost -> Kiln.UpgradeFail
 override Kiln.ClientTransfer.GetHashCode() -> int
@@ -1267,6 +1430,9 @@ override Kiln.GearValuesResult.ToString() -> string!
 override Kiln.GearWriteOptions.Equals(object? obj) -> bool
 override Kiln.GearWriteOptions.GetHashCode() -> int
 override Kiln.GearWriteOptions.ToString() -> string!
+override Kiln.GiveEquipOptions.Equals(object? obj) -> bool
+override Kiln.GiveEquipOptions.GetHashCode() -> int
+override Kiln.GiveEquipOptions.ToString() -> string!
 override Kiln.InstanceEquipment.<Clone>$() -> Kiln.InstanceEquipment!
 override Kiln.InstanceEquipment.Equals(object? obj) -> bool
 override Kiln.InstanceEquipment.GetHashCode() -> int
@@ -1303,9 +1469,26 @@ override Kiln.MoveChange.GetHashCode() -> int
 override Kiln.MoveResult.Equals(object? obj) -> bool
 override Kiln.MoveResult.GetHashCode() -> int
 override Kiln.MoveResult.ToString() -> string!
+override Kiln.OrphanTarget.GetHashCode() -> int
+override Kiln.OrphanTarget.ToString() -> string!
 override Kiln.PerkSlot.Equals(object? obj) -> bool
 override Kiln.PerkSlot.GetHashCode() -> int
 override Kiln.PerkSlot.ToString() -> string!
+override Kiln.PlayerStorage.ToString() -> string!
+override Kiln.PlayerStorageAmmoOptions.Equals(object? obj) -> bool
+override Kiln.PlayerStorageAmmoOptions.GetHashCode() -> int
+override Kiln.PlayerStorageAmmoOptions.ToString() -> string!
+override Kiln.PlayerStorageAmmoProvider.ToString() -> string!
+override Kiln.PlayerStorageDeathEvent.ToString() -> string!
+override Kiln.PlayerStorageInfo.Equals(object? obj) -> bool
+override Kiln.PlayerStorageInfo.GetHashCode() -> int
+override Kiln.PlayerStorageInfo.ToString() -> string!
+override Kiln.PlayerStorageParkedEvent.ToString() -> string!
+override Kiln.PlayerStorageRestoredEvent.ToString() -> string!
+override Kiln.PlayerStorageRow.GetHashCode() -> int
+override Kiln.PlayerStorageStatus.Equals(object? obj) -> bool
+override Kiln.PlayerStorageStatus.GetHashCode() -> int
+override Kiln.PlayerStorageStatus.ToString() -> string!
 override Kiln.RarityUpgradeRule.Equals(object? obj) -> bool
 override Kiln.RarityUpgradeRule.GetHashCode() -> int
 override Kiln.RarityUpgradeRule.ToString() -> string!
@@ -1323,6 +1506,8 @@ override Kiln.StackEquipment.<Clone>$() -> Kiln.StackEquipment!
 override Kiln.StackEquipment.Equals(object? obj) -> bool
 override Kiln.StackEquipment.GetHashCode() -> int
 override Kiln.StackEquipment.ToString() -> string!
+override Kiln.StorageFilter.GetHashCode() -> int
+override Kiln.StorageFilter.ToString() -> string!
 override Kiln.ToolWearResult.Equals(object? obj) -> bool
 override Kiln.ToolWearResult.GetHashCode() -> int
 override Kiln.ToolWearResult.ToString() -> string!
@@ -1405,6 +1590,8 @@ static Kiln.GearValuesResult.operator ==(Kiln.GearValuesResult? left, Kiln.GearV
 static Kiln.GearWriteOptions.Default.get -> Kiln.GearWriteOptions!
 static Kiln.GearWriteOptions.operator !=(Kiln.GearWriteOptions? left, Kiln.GearWriteOptions? right) -> bool
 static Kiln.GearWriteOptions.operator ==(Kiln.GearWriteOptions? left, Kiln.GearWriteOptions? right) -> bool
+static Kiln.GiveEquipOptions.operator !=(Kiln.GiveEquipOptions? left, Kiln.GiveEquipOptions? right) -> bool
+static Kiln.GiveEquipOptions.operator ==(Kiln.GiveEquipOptions? left, Kiln.GiveEquipOptions? right) -> bool
 static Kiln.InstanceEquipment.operator !=(Kiln.InstanceEquipment? left, Kiln.InstanceEquipment? right) -> bool
 static Kiln.InstanceEquipment.operator ==(Kiln.InstanceEquipment? left, Kiln.InstanceEquipment? right) -> bool
 static Kiln.InventoryContents.operator !=(Kiln.InventoryContents? left, Kiln.InventoryContents? right) -> bool
@@ -1454,6 +1641,8 @@ static Kiln.Items.GearWriteAvailable.get -> bool
 static Kiln.Items.Get(Kiln.ItemId id) -> Kiln.ItemInfo?
 static Kiln.Items.Give(Kiln.EntityId target, Kiln.ItemId item, int count = 1, Kiln.Gear? gear = null, Kiln.GiveOptions options = Kiln.GiveOptions.None, Kiln.SlotId? slot = null) -> System.Threading.Tasks.Task<Kiln.ItemsResult!>!
 static Kiln.Items.Give(Kiln.EntityId target, string! item, int count = 1, Kiln.Gear? gear = null, Kiln.GiveOptions options = Kiln.GiveOptions.None) -> System.Threading.Tasks.Task<Kiln.ItemsResult!>!
+static Kiln.Items.GiveEquip(Kiln.EntityId player, Kiln.ItemId item, int count, Kiln.EquipmentSlot slot, Kiln.GiveEquipOptions? options = null) -> System.Threading.Tasks.Task<Kiln.EquipResult!>!
+static Kiln.Items.GiveEquipAvailable.get -> bool
 static Kiln.Items.GiveRecipeResult(Kiln.EntityId target, uint recipeId, int count = 1, Kiln.GiveOptions options = Kiln.GiveOptions.None) -> System.Threading.Tasks.Task<Kiln.ItemsResult!>!
 static Kiln.Items.Held(Kiln.EntityId player) -> Kiln.ItemInstanceRef
 static Kiln.Items.Lookup(string! nameOrId) -> Kiln.ItemInfo?
@@ -1461,10 +1650,13 @@ static Kiln.Items.Move(Kiln.EntityId from, Kiln.SlotId slot, Kiln.EntityId to, i
 static Kiln.Items.MoveAll(Kiln.EntityId from, Kiln.EntityId to, Kiln.MoveOptions options = Kiln.MoveOptions.None) -> System.Threading.Tasks.Task<Kiln.MoveResult!>!
 static Kiln.Items.MovesAvailable.get -> bool
 static Kiln.Items.PlanSet(Kiln.EntityId player, Kiln.EquipmentSet! set) -> Kiln.EquipmentSetPlanResult!
+static Kiln.Items.PlayerStorages.Of(Kiln.EntityId player) -> System.Collections.Generic.IReadOnlyList<Kiln.PlayerStorageInfo!>!
+static Kiln.Items.PlayerStorages.ReturnOrphans(Kiln.EntityId player, string! fullKey, Kiln.OrphanTarget target) -> System.Threading.Tasks.Task<Kiln.MoveResult!>!
 static Kiln.Items.PowerAvailable.get -> bool
 static Kiln.Items.QuickStack(Kiln.EntityId from, Kiln.EntityId to, Kiln.MoveOptions options = Kiln.MoveOptions.None) -> System.Threading.Tasks.Task<Kiln.MoveResult!>!
 static Kiln.Items.RarityOf(Kiln.ItemInstanceRef item) -> Kiln.ItemRarity?
 static Kiln.Items.Read(Kiln.EntityId entity) -> Kiln.InventoryContents?
+static Kiln.Items.RegisterPlayerStorage(string! key, int slots, Kiln.StorageFilter filter, Kiln.StorageDeath death = Kiln.StorageDeath.Keep) -> Kiln.PlayerStorage!
 static Kiln.Items.ResultPeekAvailable.get -> bool
 static Kiln.Items.Search(string! text, int max = 25) -> System.Collections.Generic.IReadOnlyList<Kiln.ItemInfo!>!
 static Kiln.Items.SetArmor(Kiln.ItemInstanceRef item, double scale) -> Kiln.GearValuesResult!
@@ -1502,8 +1694,24 @@ static Kiln.MoveChange.operator !=(Kiln.MoveChange left, Kiln.MoveChange right) 
 static Kiln.MoveChange.operator ==(Kiln.MoveChange left, Kiln.MoveChange right) -> bool
 static Kiln.MoveResult.operator !=(Kiln.MoveResult? left, Kiln.MoveResult? right) -> bool
 static Kiln.MoveResult.operator ==(Kiln.MoveResult? left, Kiln.MoveResult? right) -> bool
+static Kiln.OrphanTarget.Backpack.get -> Kiln.OrphanTarget
+static Kiln.OrphanTarget.Into(Kiln.EntityId container) -> Kiln.OrphanTarget
+static Kiln.OrphanTarget.operator !=(Kiln.OrphanTarget left, Kiln.OrphanTarget right) -> bool
+static Kiln.OrphanTarget.operator ==(Kiln.OrphanTarget left, Kiln.OrphanTarget right) -> bool
 static Kiln.PerkSlot.operator !=(Kiln.PerkSlot? left, Kiln.PerkSlot? right) -> bool
 static Kiln.PerkSlot.operator ==(Kiln.PerkSlot? left, Kiln.PerkSlot? right) -> bool
+static Kiln.PlayerStorage.Available.get -> bool
+static Kiln.PlayerStorage.Client.Available.get -> bool
+static Kiln.PlayerStorage.Client.ProvideAmmo(string! fullKey, Kiln.AmmoKinds kinds, Kiln.PlayerStorageAmmoOptions? options = null) -> Kiln.PlayerStorageAmmoProvider!
+static Kiln.PlayerStorage.Client.Rows(string! fullKey) -> System.Collections.Generic.IReadOnlyList<Kiln.PlayerStorageRow>!
+static Kiln.PlayerStorageAmmoOptions.operator !=(Kiln.PlayerStorageAmmoOptions? left, Kiln.PlayerStorageAmmoOptions? right) -> bool
+static Kiln.PlayerStorageAmmoOptions.operator ==(Kiln.PlayerStorageAmmoOptions? left, Kiln.PlayerStorageAmmoOptions? right) -> bool
+static Kiln.PlayerStorageInfo.operator !=(Kiln.PlayerStorageInfo? left, Kiln.PlayerStorageInfo? right) -> bool
+static Kiln.PlayerStorageInfo.operator ==(Kiln.PlayerStorageInfo? left, Kiln.PlayerStorageInfo? right) -> bool
+static Kiln.PlayerStorageRow.operator !=(Kiln.PlayerStorageRow left, Kiln.PlayerStorageRow right) -> bool
+static Kiln.PlayerStorageRow.operator ==(Kiln.PlayerStorageRow left, Kiln.PlayerStorageRow right) -> bool
+static Kiln.PlayerStorageStatus.operator !=(Kiln.PlayerStorageStatus? left, Kiln.PlayerStorageStatus? right) -> bool
+static Kiln.PlayerStorageStatus.operator ==(Kiln.PlayerStorageStatus? left, Kiln.PlayerStorageStatus? right) -> bool
 static Kiln.RarityUpgradeRule.operator !=(Kiln.RarityUpgradeRule? left, Kiln.RarityUpgradeRule? right) -> bool
 static Kiln.RarityUpgradeRule.operator ==(Kiln.RarityUpgradeRule? left, Kiln.RarityUpgradeRule? right) -> bool
 static Kiln.SetEquipmentChange.operator !=(Kiln.SetEquipmentChange? left, Kiln.SetEquipmentChange? right) -> bool
@@ -1515,6 +1723,13 @@ static Kiln.SlotId.operator !=(Kiln.SlotId left, Kiln.SlotId right) -> bool
 static Kiln.SlotId.operator ==(Kiln.SlotId left, Kiln.SlotId right) -> bool
 static Kiln.StackEquipment.operator !=(Kiln.StackEquipment? left, Kiln.StackEquipment? right) -> bool
 static Kiln.StackEquipment.operator ==(Kiln.StackEquipment? left, Kiln.StackEquipment? right) -> bool
+static Kiln.StorageFilter.Ammunition(Kiln.AmmoKinds kinds) -> Kiln.StorageFilter
+static Kiln.StorageFilter.Any.get -> Kiln.StorageFilter
+static Kiln.StorageFilter.Categories(params Kiln.ItemCategory[]! categories) -> Kiln.StorageFilter
+static Kiln.StorageFilter.Items(params Kiln.ItemId[]! items) -> Kiln.StorageFilter
+static Kiln.StorageFilter.Where(System.Func<Kiln.ItemInfo!, bool>! pick) -> Kiln.StorageFilter
+static Kiln.StorageFilter.operator !=(Kiln.StorageFilter left, Kiln.StorageFilter right) -> bool
+static Kiln.StorageFilter.operator ==(Kiln.StorageFilter left, Kiln.StorageFilter right) -> bool
 static Kiln.ToolWearResult.operator !=(Kiln.ToolWearResult? left, Kiln.ToolWearResult? right) -> bool
 static Kiln.ToolWearResult.operator ==(Kiln.ToolWearResult? left, Kiln.ToolWearResult? right) -> bool
 static Kiln.ToolWearState.operator !=(Kiln.ToolWearState? left, Kiln.ToolWearState? right) -> bool
@@ -1548,4 +1763,8 @@ virtual Kiln.EquipmentSetSelection.PrintMembers(System.Text.StringBuilder! build
 ~override Kiln.ItemLocation.Equals(object obj) -> bool
 ~override Kiln.MoveChange.Equals(object obj) -> bool
 ~override Kiln.MoveChange.ToString() -> string
+~override Kiln.OrphanTarget.Equals(object obj) -> bool
+~override Kiln.PlayerStorageRow.Equals(object obj) -> bool
+~override Kiln.PlayerStorageRow.ToString() -> string
 ~override Kiln.SlotId.Equals(object obj) -> bool
+~override Kiln.StorageFilter.Equals(object obj) -> bool

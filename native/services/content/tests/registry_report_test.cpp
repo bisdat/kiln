@@ -236,6 +236,34 @@ int main(int argc, char** argv) {
               "a refusal is in kiln.log even behind 120 conflicts: refusals come first within the cap");
     }
 
+    // ---- refusals of raw paths say raw (readers hide them); a misspelled Kiln field is not raw, so its reason stays readable ----
+    {
+        const Result rr = compose(s, b, {}, {mod("adv", {batch(s, "adv", "alter", R"([{"registry": "items", "select": {"id": "game:nothing"}, "raw": {"DamageSetup.DmgMod": {"mul": 2}}},
+                                                                                     {"registry": "items", "select": {"id": "game:nothing"}, "field": "maxStack", "op": 3}])")})});
+        const json d = report_json(s, rr, meta);
+        bool raw_ok = false, kiln_ok = false;
+        for (const json& x : d["refused"]) {
+            if (x.value("field", "") == "DamageSetup.DmgMod") raw_ok = x.value("raw", false);
+            if (x.value("field", "") == "maxStack") kiln_ok = !x.contains("raw");
+        }
+        CHECK(raw_ok, "a refused raw edit's row says raw: true");
+        CHECK(kiln_ok, "a refused Kiln field edit's row has no raw member");
+        Batch bt;
+        std::vector<Refusal> ir;
+        std::string err;
+        parse_batch(std::string(R"({"ir": 1, "mod": "adv", "stage": "alter", "source": "content/adv.json", "edits": [
+                         {"registry": "items", "select": {"id": "game:weapon_t1_sword"}, "raw": {"DamageSetup.DmgMod": {"pow": 2}}},
+                         {"registry": "items", "select": {"id": "game:weapon_t1_sword"}, "field": "maxStak", "op": 3}]})"),
+                    s, &bt, &ir, &err);
+        bool ir_raw = false, ir_typo = false;
+        for (const Refusal& x : ir) {
+            if (x.field == "DamageSetup.DmgMod") ir_raw = x.raw;
+            if (x.field == "maxStak") ir_typo = !x.raw && x.reason.find("maxStak") != std::string::npos;
+        }
+        CHECK(ir_raw, "the IR reader marks a refused raw edit raw");
+        CHECK(ir_typo, "a misspelled field is refused as itself, not raw, with a reason naming it");
+    }
+
     if (argc > 1) {
         std::ofstream out(argv[1]);
         out << doc.dump(2) << "\n";

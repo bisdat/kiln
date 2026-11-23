@@ -62,6 +62,8 @@ public readonly record struct DayTimeState(
     /// <summary>"HH:mm" of <see cref="Hours"/>.</summary>
     public string Clock => Time.Format(Hours);
 
+    /// <summary>A one-line description: the clock, day or night, the day and night lengths in minutes, the time scale and
+    /// the change counter.</summary>
     public override string ToString() =>
         $"{Clock} ({(IsDay ? "day" : "night")}, day {DayLength.TotalMinutes:F0} min, night {NightLength.TotalMinutes:F0} min, " +
         $"scale {TimeScale:F2}, counter {ChangeCounter})";
@@ -167,12 +169,17 @@ public static unsafe partial class Time
         return T->Get(&s) == Ok && s.WeatherChoiceReady != 0;
     }
 
+    /// <summary>True in the day phase, as of the last step (<see cref="DayTimeState.IsDay"/>).</summary>
     [AnyThread]
     [RequiresCapability(TimeCaps.Service)]
     public static bool IsDay => State.IsDay;
+    /// <summary>Real time the day phase lasts (game setting <c>dayTimeDuration</c>;
+    /// <see cref="DayTimeState.DayLength"/>).</summary>
     [AnyThread]
     [RequiresCapability(TimeCaps.Service)]
     public static TimeSpan DayLength => State.DayLength;
+    /// <summary>Real time the night phase lasts (game setting <c>nightTimeDuration</c>;
+    /// <see cref="DayTimeState.NightLength"/>).</summary>
     [AnyThread]
     [RequiresCapability(TimeCaps.Service)]
     public static TimeSpan NightLength => State.NightLength;

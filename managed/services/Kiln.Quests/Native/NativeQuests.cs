@@ -10,24 +10,100 @@ using System.Text.Json;
 
 namespace Kiln;
 
-/// <summary>A step's knowledge. <paramref name="Count"/>: the counter its journal line shows, of <paramref name="Total"/> (0: none).
-/// <paramref name="Ready"/>: a hand-in step: the player holds the items.</summary>
+/// <summary>A step's knowledge objects (the engine mirrors the step's state into them).</summary>
+/// <param name="Id">The step's id.</param>
+/// <param name="Visible">The knowledge id of the step's "visible" object: the journal shows the step.</param>
+/// <param name="Active">The knowledge id of the step's "active" object: the step is the current one.</param>
+/// <param name="Done">The knowledge id of the step's "done" object.</param>
+/// <param name="Count">The knowledge id of the counter its journal line shows; 0 when the step has no counter.</param>
+/// <param name="Total">What the counter counts up to (0: none).</param>
+/// <param name="Ready">The knowledge id of a hand-in step's "ready" object (the player holds the items); 0 when the step is not a hand-in.</param>
 public sealed record NativeStepInfo(string Id, uint Visible, uint Active, uint Done, uint Count = 0, int Total = 0, uint Ready = 0);
+
+/// <summary>A quest the boot build made for the game's journal.</summary>
+/// <param name="Mod">The id of the mod that defined it.</param>
+/// <param name="Id">The quest's id within its mod.</param>
+/// <param name="FullId">The quest's full id, <c>&lt;mod&gt;:&lt;id&gt;</c>.</param>
+/// <param name="Scope">The quest's scope as text: player, party or world.</param>
+/// <param name="EntryId">The quest's journal entry id (also its "rewarded" knowledge).</param>
+/// <param name="Started">The knowledge id of the quest's "started" object.</param>
+/// <param name="Active">The knowledge id of the quest's "active" object.</param>
+/// <param name="Done">The knowledge id of the quest's "done" object.</param>
+/// <param name="Steps">The quest's steps, in order.</param>
 public sealed record NativeQuestInfo(string Mod, string Id, string FullId, string Scope, uint EntryId, uint Started, uint Active, uint Done,
     IReadOnlyList<NativeStepInfo> Steps);
-/// <summary>A line in the game's menu. <paramref name="Auto"/>: a topic Kiln made for a giver without a dialogue ("start:quest", "advance:quest.step").</summary>
+
+/// <summary>A line in the game's menu.</summary>
+/// <param name="Mod">The id of the mod that defined it.</param>
+/// <param name="Dialogue">The dialogue's id.</param>
+/// <param name="Npc">The NPC the line is for.</param>
+/// <param name="Node">The id of the node the option is in.</param>
+/// <param name="Option">The option's index in the node.</param>
+/// <param name="Line">The game's dialogue line id (also its "heard" knowledge id).</param>
+/// <param name="Auto">A topic Kiln made for a giver without a dialogue ("start:quest", "advance:quest.step"); empty for a line from a dialogue.</param>
 public sealed record NativeLineInfo(string Mod, string Dialogue, string Npc, string Node, int Option, uint Line, string Auto = "");
+
+/// <summary>Where an NPC is put in the world.</summary>
+/// <param name="Spec">Where to look for the spot (the same keys as a step's site).</param>
+/// <param name="Yaw">The facing to place the NPC with.</param>
+/// <param name="Once">Place the NPC only once (JSON <c>once</c>).</param>
+/// <param name="Unlock">True: grant the game NPC's unlock first. False: do not. Null: the default (a game NPC's unlock is granted first; a clone in the roster waits for its own unlock).</param>
 public sealed record NativePlacement(QuestPlace Spec, float Yaw, bool Once, bool? Unlock);
+
+/// <summary>An NPC the boot build made or changed.</summary>
+/// <param name="Mod">The id of the mod that defined it.</param>
+/// <param name="Id">The NPC's id within its mod.</param>
+/// <param name="FullId">The NPC's full id, <c>&lt;mod&gt;:&lt;id&gt;</c>.</param>
+/// <param name="Template">The template name of the entity (of a clone: the base).</param>
+/// <param name="Guid">The NPC's GUID (a clone's own).</param>
+/// <param name="IsClone">The NPC is a new one: a copy of its template under its own GUID.</param>
+/// <param name="NpcId">The game's NPC id; 0 when the NPC has none.</param>
+/// <param name="Roster">The NPC is an entry of the game's NPC roster.</param>
+/// <param name="Unlock">The knowledge id of the NPC's unlock; 0 when none.</param>
+/// <param name="Place">Where the NPC is put in the world; null when the mod does not place it.</param>
+/// <param name="Dialogue">The id of the dialogue it opens; empty when none.</param>
+/// <param name="SummonItem">The NPC's summon item (a GUID or an item name); empty when none.</param>
 public sealed record NativeNpcInfo(string Mod, string Id, string FullId, string Template, Guid Guid, bool IsClone, uint NpcId, bool Roster,
     uint Unlock, NativePlacement? Place, string Dialogue, string SummonItem);
+
+/// <summary>A map marker the boot build made for a step.</summary>
+/// <param name="Mod">The id of the mod that defined it.</param>
+/// <param name="Quest">The quest's id.</param>
+/// <param name="Step">The step's id.</param>
+/// <param name="Template">The marker's template name.</param>
+/// <param name="Guid">The marker's GUID.</param>
+/// <param name="At">The marker's fixed position; null when it is moved to the step's place at run time.</param>
 public sealed record NativeMarkerInfo(string Mod, string Quest, string Step, string Template, Guid Guid, WorldPosition? At);
-/// <summary>A knowledge object the engine keeps for what a line's one knowledge check cannot say. <paramref name="Kind"/>: "if" (an
-/// option), "greeting", "available" (a quest with requirements).</summary>
+
+/// <summary>A knowledge object the engine keeps for what a line's one knowledge check cannot say.</summary>
+/// <param name="Mod">The id of the mod that defined it.</param>
+/// <param name="Id">The knowledge id of the object.</param>
+/// <param name="Kind">What it stands for: "if" (an option), "greeting", "available" (a quest with requirements) or "ready" (a hand-in).</param>
+/// <param name="Target">What it belongs to: the dialogue id ("if", "greeting"), the quest id ("available") or <c>quest.step</c> ("ready").</param>
+/// <param name="Node">The node id, for an option; empty otherwise.</param>
+/// <param name="Index">The option's or greeting's index; -1 when it has none.</param>
+/// <param name="Gate">The knowledge id of the node's gate: the condition is false until it is set. 0 when there is none.</param>
+/// <param name="Heard">The knowledge id of the line's "heard" object: the condition is false once it is set (a <c>once</c> topic). 0 when there is none.</param>
 public sealed record NativeComputed(string Mod, uint Id, string Kind, string Target, string Node, int Index, uint Gate, uint Heard);
+
+/// <summary>What the boot build made for one mod.</summary>
+/// <param name="Id">The mod's id.</param>
+/// <param name="Ok">The mod's native data was built. False: <paramref name="Errors"/> says why and nothing was built.</param>
+/// <param name="Knowledge">The mod's own knowledge objects: name to knowledge id.</param>
+/// <param name="Quests">The quests built for the game's journal.</param>
+/// <param name="Lines">The lines built for the game's menu.</param>
+/// <param name="Npcs">The NPCs built or changed.</param>
+/// <param name="Markers">The map markers built.</param>
+/// <param name="Errors">Why the mod's data was not built, as text lines.</param>
+/// <param name="Computed">The knowledge objects the engine keeps for conditions one knowledge check cannot say.</param>
 public sealed record NativeModInfo(string Id, bool Ok, IReadOnlyDictionary<string, uint> Knowledge, IReadOnlyList<NativeQuestInfo> Quests,
     IReadOnlyList<NativeLineInfo> Lines, IReadOnlyList<NativeNpcInfo> Npcs, IReadOnlyList<NativeMarkerInfo> Markers, IReadOnlyList<string> Errors,
     IReadOnlyList<NativeComputed> Computed);
+
 /// <summary>A knowledge value the engine's state asks for.</summary>
+/// <param name="Name">The knowledge object's name.</param>
+/// <param name="Id">The knowledge id.</param>
+/// <param name="Value">The value wanted.</param>
 public readonly record struct NativeWanted(string Name, uint Id, uint Value);
 
 /// <summary>What was built at boot from the mods' quests/*.json, and the run-time glue.</summary>
@@ -65,7 +141,9 @@ public static partial class NativeQuests
     /// <summary>Mirrored knowledge changes, dialogue options run, NPCs and markers placed.</summary>
     public static (ulong Mirrored, ulong Lines, ulong Placed) Counters => (_mirrored, _lines, _placed);
 
+    /// <summary>A mod's native data by mod id; null when the mod has none.</summary>
     public static NativeModInfo? Mod(string id) => Mods.FirstOrDefault(m => m.Id == id);
+    /// <summary>A quest the boot build made, by full id (<c>&lt;mod&gt;:&lt;id&gt;</c>); null when there is none.</summary>
     public static NativeQuestInfo? Quest(string fullId)
     {
         Load();
@@ -73,6 +151,7 @@ public static partial class NativeQuests
     }
     /// <summary>A mod's native object by name ("met_ilse", "q.lost_letter.active"); null when the build does not have it.</summary>
     public static uint? KnowledgeId(string mod, string name) => Mod(mod)?.Knowledge.TryGetValue(name, out var id) == true ? id : null;
+    /// <summary>An NPC the boot build made or changed, by full id; null when there is none.</summary>
     public static NativeNpcInfo? Npc(string fullId) => Mods.SelectMany(m => m.Npcs).FirstOrDefault(n => n.FullId == fullId);
 
     /// <summary>The game's journal shows this quest: it says native and the boot build made it.</summary>

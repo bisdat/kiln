@@ -18,6 +18,8 @@ namespace kc::rbytes {
 struct Node {
     const void* type = nullptr;  // gd::TType of the node
     uintptr_t addr = 0;
+    uintptr_t begin = 0;  // owning resource span (0 size: a live-memory node, guarded reads only)
+    size_t size = 0;
     bool tmpl = false;  // a keen::ecs::TemplateResource root: a path may start at a component by its type
 };
 // The root of a resource's bytes of the root type named type. false + *why: no such struct type on this build, or the bytes

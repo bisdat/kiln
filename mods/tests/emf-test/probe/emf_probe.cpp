@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// emf_probe: an EMF mod (EMF C API v46, emf_api.h only) that checks kiln-emf's EmfApi table in a lab and logs
+// emf_probe: an EMF mod (EMF C API v48, emf_api.h only) that checks kiln-emf's EmfApi table in a lab and logs
 // one "PASS <what>" / "FAIL <what>" line per check, then "emf-probe done: N PASS, M FAIL". Player-free: it uses a
 // villager of the copied world (teleport, put/take items), spawns one Vukah next to it and kills it (damage ->
 // EntityDiedEvent), changes and resets a world setting, asks for a save, runs its own command through
@@ -8,7 +8,7 @@
 // position for a moment, spawns a creature and saves the world.
 // v22-v26: the level curve and its refusals, change_component (ScaleComponent on a second Vukah), E-prompt offers
 // (offer / offer_active / offer_remove on it, spawn_offer), and the window / picture refusals of a dedicated server.
-// v28-v46: the two chat functions with flags, and the documented failure of every function Kiln does not carry yet.
+// v28-v48: the two chat functions with flags, and the documented failure of every function Kiln does not carry yet.
 #include <windows.h>
 
 #include <atomic>
@@ -225,7 +225,7 @@ void ws_cb(const char* key, double, void*) {
     if (key && std::strcmp(key, "experienceCombatFactor") == 0) ++g_ws_changes;
 }
 
-// ---- v28-v46 (EMF 0.6.3 to 0.6.14) on a dedicated server, inside a server world callback ----
+// ---- v28-v48 (EMF 0.6.3 to 0.6.20) on a dedicated server, inside a server world callback ----
 int g_v40_callbacks = 0;
 uint32_t g_on_hits = 0, g_on_hit_kills = 0;  // on_hit deliveries (v31, carried since 0.2.0-dev.30.3), killing blows
 void v40_checks(EmfWorld* w) {
@@ -307,10 +307,13 @@ void v40_checks(EmfWorld* w) {
     check(rb1 && !A->remove_building(w, &rb) && rb.refunded == 77 && rb.why[0] == 0 && !A->remove_building(w, nullptr),
           "remove_building is refused with a reason; a request that is too small, or none, is refused untouched", rb_why);
     EmfPathQuery q{};
-    q.size = sizeof q;
-    check(A->path_find(w, &q, [](EmfWorld*, uint32_t, const EmfPathResult*, const EmfPathPoint*, void*) { ++g_v40_callbacks; }, nullptr) == 0 &&
-              !A->path_cancel(1),
-          "paths: path_find answers 0, path_cancel false");
+    q.size = 52;  // a v47 mod's query (EMF 0.6.19's header: no as_entity)
+    const auto path_cb = [](EmfWorld*, uint32_t, const EmfPathResult*, const EmfPathPoint*, void*) { ++g_v40_callbacks; };
+    const bool p47 = A->path_find(w, &q, path_cb, nullptr) == 0;
+    q.size = sizeof q;  // v48 (EMF 0.6.20): 56 bytes, planned as the villager, from this world callback
+    q.as_entity = F.villager;
+    check(p47 && sizeof q == 56 && A->path_find(w, &q, path_cb, nullptr) == 0 && !A->path_cancel(1),
+          "paths: path_find answers 0 for a v47 and a v48 (as_entity) query, path_cancel false");
     check(A->door_state(w, F.villager) == EMF_DOOR_NONE && !A->door_set(w, F.villager, 1, 0) && !A->door_lock(w, F.villager, 1),
           "doors: door_state answers EMF_DOOR_NONE, door_set and door_lock false");
     EmfEnemyOrder eo{};
@@ -321,20 +324,48 @@ void v40_checks(EmfWorld* w) {
               A->enemy_move(w, &mo, [](EmfWorld*, uint32_t, uint32_t, void*) { ++g_v40_callbacks; }, nullptr) == 0 && mo.why[0] != 0 &&
               !A->enemy_move_cancel(1) && A->enemy_moving(w, F.villager) == 0,
           "enemy orders and moves answer 0 / false, with a reason in the order", std::string(eo.why));
-    // v43 (EMF 0.6.13) to v46 (0.6.14)
+    // v43 (EMF 0.6.13) to v47 (0.6.19); v48 (0.6.20) added no function (path_find's as_entity: above)
     uint32_t perms = 0x3F;
     check(!A->player_permissions(w, F.villager, &perms) && perms == 0, "player_permissions answers false with *perms 0");
+    // Non-destructive terrain-family checks: never assume the family is an unavailable stub.
     EmfBreakBlocks bb{};
     bb.size = sizeof bb;
-    bb.flags = EMF_BREAK_WORLD;  // v45
+    bb.flags = 0x80000000u; // guaranteed refusal even when all engine modes are qualified
     bb.radius = 1;
+    check(A->break_blocks(w, &bb, [](EmfWorld*, uint32_t, const EmfBreakResult*, void*) { ++g_v40_callbacks; }, nullptr) == 0 && bb.why[0],
+          "blocks: invalid break refuses with a reason and no callback", std::string(bb.why));
+    bb.size = 159;
+    std::memset(bb.why, 'x', sizeof bb.why);
+    const auto savedBreak = bb;
+    check(A->break_blocks(w, &bb, nullptr, nullptr) == 0 && std::memcmp(&bb, &savedBreak, sizeof bb) == 0,
+          "blocks: short break request stays untouched");
     EmfBlockInfo bi{};
     bi.size = sizeof bi;
     bi.world = -1;
-    const float from[3] = {0, 0, 0}, to[3] = {0, 10, 0};
-    check(A->break_blocks(w, &bb, [](EmfWorld*, uint32_t, const EmfBreakResult*, void*) { ++g_v40_callbacks; }, nullptr) == 0 &&
-              bb.why[0] != 0 && !A->block_at(w, 0, 0, 0, &bi) && !A->find_wall(w, from, to, &bi) && bi.world == -1,
-          "blocks: break_blocks answers 0 with a reason, block_at and find_wall false (out untouched)", std::string(bb.why));
+    const float from[3] = {static_cast<float>(F.vpos.x), static_cast<float>(F.vpos.y), static_cast<float>(F.vpos.z)};
+    const float to[3] = {from[0], from[1] + 10, from[2]};
+    const bool got = A->block_at(w, from[0], from[1], from[2], &bi);
+    if (got) check(bi.kind <= EMF_BLOCK_BUILDING && bi.material < 128 && bi.fill <= 255 && bi.hardness <= 5 &&
+                   bi.health >= 0 && bi.damage >= -1 && bi.damage <= 255 && bi.world >= -1 && bi.world <= 1,
+                   "blocks: block_at returns typed cell facts");
+    else skip("blocks: block_at", "unavailable or fixture cell not loaded; inspect build.block_info capability");
+    for (uint32_t flags : {0u, EMF_FIND_TERRAIN}) {
+        EmfBlockInfo hit{}; hit.size = sizeof hit; hit.world = -1;
+        const auto saved = hit;
+        bool found = A->find_wall_ex(w, from, to, flags, &hit);
+        check(found ? (hit.kind == EMF_BLOCK_BUILDING || (flags && hit.kind == EMF_BLOCK_TERRAIN && hit.world == 0))
+                    : std::memcmp(&hit, &saved, sizeof hit) == 0,
+              "blocks: find_wall_ex returns a matching wall or leaves output untouched");
+        if (!flags) {
+            EmfBlockInfo old{}; old.size = sizeof old; old.world = -1;
+            const bool oldFound = A->find_wall(w, from, to, &old);
+            check(oldFound == found && (!found || std::memcmp(&old, &hit, sizeof old) == 0),
+                  "blocks: find_wall equals find_wall_ex flags zero");
+        }
+    }
+    const auto savedInfo = bi;
+    check(!A->find_wall_ex(w, from, to, 0x80000000u, &bi) && std::memcmp(&bi, &savedInfo, sizeof bi) == 0,
+          "blocks: unknown find flags leave output untouched");
     EmfPathPoint vp{0, 0, 0, 0};
     EmfMoveOrder vm{};
     vm.size = sizeof vm;
@@ -346,6 +377,12 @@ void v40_checks(EmfWorld* w) {
     check(A->villager_move(w, &vm, [](EmfWorld*, uint32_t, uint32_t, void*) { ++g_v40_callbacks; }, nullptr) == 0 && vm.why[0] != 0 &&
               !A->villager_move_cancel(1) && A->villager_moving(w, F.villager) == 0,
           "villager moves answer 0 / false, with a reason in the order (also with EMF_MOVE_HOLD)", std::string(vm.why));
+    EmfMarker bar{};
+    bar.size = sizeof bar;
+    bar.id = "emf_probe.bar";
+    bar.flags = EMF_MARKER_BAR;
+    bar.bar = 0.5f;
+    check(!A->marker_set(&bar) && A->marker_send(1, &bar, 1) == 0, "marker bars are not carried yet");
     check(g_v40_callbacks == 0, "no callback of a function that is not carried was called");
 }
 
@@ -666,6 +703,19 @@ void on_tick(EmfWorld* w, void*) {
             float observed = 0; if (bytes && extra_size==4) std::memcpy(&observed,bytes,4);
             check(extra>1023 && observed==spawn_scale,"spawn_ex extra component visible on first read",std::to_string(observed));
             if (extra) A->destroy(w,extra);
+            const uint32_t turned = A->spawn_facing(w, kVukah, F.vpos.x + 18, F.vpos.y + 0.5, F.vpos.z, 90, &init, 1);
+            uint64_t transform_size = 0;
+            const void* transform = turned ? A->get_component(w, comp("CurrentTransform"), turned, &transform_size) : nullptr;
+            float rotation[4]{};
+            if (transform && transform_size == 56) std::memcpy(rotation, static_cast<const uint8_t*>(transform) + 24, sizeof rotation);
+            extra_size = 0;
+            bytes = turned ? A->get_component(w, comp("ScaleComponent"), turned, &extra_size) : nullptr;
+            observed = 0;
+            if (bytes && extra_size == 4) std::memcpy(&observed, bytes, 4);
+            check(turned > 1023 && std::abs(rotation[1] - 0.70710678f) < 0.001f &&
+                      std::abs(rotation[3] - 0.70710678f) < 0.001f && observed == spawn_scale,
+                  "spawn_facing: yaw and extra component visible on first read");
+            if (turned) A->destroy(w, turned);
         } else {
             skip("teleport / put / take / spawn", "no villager in this world");
         }
@@ -801,7 +851,7 @@ void on_tick(EmfWorld* w, void*) {
 extern "C" __declspec(dllexport) bool emf_mod_load(const EmfApi* api) {
     if (!api || api->version < 40 || api->size < sizeof(EmfApi)) return false;
     A = api;
-    check(api->version == 46 && api->size == sizeof(EmfApi) && sizeof(EmfApi) == 1144, "the table is EmfApi v46 of the SDK's size",
+    check(api->version == 48 && api->size == sizeof(EmfApi) && sizeof(EmfApi) == 1160, "the table is EmfApi v48 of the SDK's size",
           std::to_string(api->version) + ", " + std::to_string(api->size) + " bytes");
     bool all = true;
     for (size_t i = 0; i < (sizeof(EmfApi) - 8) / sizeof(void*); ++i)

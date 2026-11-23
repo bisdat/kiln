@@ -33,6 +33,10 @@ public static class WorldData
         return store.GetOrCreate<T>(s, mod, b.Scope, key, create: true);
     }
 
+    /// <summary>Reads the object stored under <paramref name="key"/> without creating one.</summary>
+    /// <returns>True when the key holds a value; <paramref name="value"/> is then the live object. False when there is none.</returns>
+    /// <exception cref="ArgumentException">The key is empty or longer than 200 characters.</exception>
+    /// <exception cref="InvalidDataException">The stored JSON does not read as <typeparamref name="T"/> (it is kept).</exception>
     [RequiresCapability("kiln.saves")]
     [TickThreadOnly]
     public static bool TryGet<T>(string key, [NotNullWhen(true)] out T? value) where T : class
@@ -63,6 +67,8 @@ public static class WorldData
         return b.Keys.Remove(WorldStore.CheckKey(key));
     }
 
+    /// <summary>Whether the calling mod has a value under <paramref name="key"/>.</summary>
+    /// <exception cref="ArgumentException">The key is empty or longer than 200 characters.</exception>
     [RequiresCapability("kiln.saves")]
     [TickThreadOnly]
     public static bool Contains(string key) => Bundle("WorldData.Contains").b.Keys.ContainsKey(WorldStore.CheckKey(key));
@@ -96,6 +102,9 @@ public static class WorldData
 /// entity uses this store (by the player's Steam id).</remarks>
 public static class PlayerData
 {
+    /// <summary>The object stored under <paramref name="key"/> for the player, created with <c>new T()</c> if there is none.</summary>
+    /// <exception cref="ArgumentException">The Steam id is 0, or the key is empty or longer than 200 characters.</exception>
+    /// <exception cref="InvalidDataException">The stored JSON does not read as <typeparamref name="T"/> (it is kept).</exception>
     [RequiresCapability("kiln.saves")]
     [TickThreadOnly]
     public static T Get<T>(ulong steamId, string key) where T : class, new()
@@ -106,6 +115,9 @@ public static class PlayerData
         return store.GetOrCreate<T>(s, mod, b.Scope, key, create: true);
     }
 
+    /// <summary>Reads the object stored under <paramref name="key"/> for the player without creating one.</summary>
+    /// <returns>True when the key holds a value; <paramref name="value"/> is then the live object. False when there is none.</returns>
+    /// <exception cref="ArgumentException">The Steam id is 0, or the key is empty or longer than 200 characters.</exception>
     [RequiresCapability("kiln.saves")]
     [TickThreadOnly]
     public static bool TryGet<T>(ulong steamId, string key, [NotNullWhen(true)] out T? value) where T : class
@@ -117,6 +129,9 @@ public static class PlayerData
         return true;
     }
 
+    /// <summary>Stores <paramref name="value"/> for the player under <paramref name="key"/> (replacing what was there).</summary>
+    /// <exception cref="ArgumentNullException"><paramref name="value"/> is null.</exception>
+    /// <exception cref="ArgumentException">The Steam id is 0, or the key is empty or longer than 200 characters.</exception>
     [RequiresCapability("kiln.saves")]
     [TickThreadOnly]
     public static void Set<T>(ulong steamId, string key, T value) where T : class
@@ -126,14 +141,18 @@ public static class PlayerData
         b.Keys[WorldStore.CheckKey(key)] = new WorldStore.Slot { Value = value, Type = typeof(T) };
     }
 
+    /// <summary>Removes the player's key (from the next save on).</summary>
+    /// <returns>True when the key existed.</returns>
     [RequiresCapability("kiln.saves")]
     [TickThreadOnly]
     public static bool Remove(ulong steamId, string key) => Bundle(steamId, "PlayerData.Remove").b.Keys.Remove(WorldStore.CheckKey(key));
 
+    /// <summary>Whether the player has a value under <paramref name="key"/>.</summary>
     [RequiresCapability("kiln.saves")]
     [TickThreadOnly]
     public static bool Contains(ulong steamId, string key) => Bundle(steamId, "PlayerData.Contains").b.Keys.ContainsKey(WorldStore.CheckKey(key));
 
+    /// <summary>The calling mod's keys for the player, a snapshot.</summary>
     [RequiresCapability("kiln.saves")]
     [TickThreadOnly]
     public static IReadOnlyList<string> Keys(ulong steamId) => Bundle(steamId, "PlayerData.Keys").b.Keys.Keys.ToList();
@@ -189,6 +208,10 @@ public static class EntityData
     /// only kiln.saves (<see cref="Saves.Available"/>).</summary>
     public static bool Available => Saves.Available && SpawnLink.Available;
 
+    /// <summary>The object the calling mod attached to the entity under <paramref name="key"/>, created with <c>new T()</c> if
+    /// there is none. For a player entity it is the player's <see cref="PlayerData"/>.</summary>
+    /// <exception cref="InvalidDataException">The stored JSON does not read as <typeparamref name="T"/> (it is kept).</exception>
+    /// <exception cref="KilnUnavailableException">The entity is not a player and kiln.spawn is unavailable.</exception>
     [RequiresCapability("kiln.saves")]
     [TickThreadOnly]
     public static T Get<T>(EntityId entity, string key) where T : class, new()
@@ -200,6 +223,9 @@ public static class EntityData
         return store.GetOrCreate<T>(s, mod, "entity/" + mod.Info.Id, key, create: true);
     }
 
+    /// <summary>Reads the object the calling mod attached to the entity under <paramref name="key"/> without creating one.</summary>
+    /// <returns>True when the key holds a value; <paramref name="value"/> is then the live object. False when there is none.</returns>
+    /// <exception cref="KilnUnavailableException">The entity is not a player and kiln.spawn is unavailable.</exception>
     [RequiresCapability("kiln.saves")]
     [TickThreadOnly]
     public static bool TryGet<T>(EntityId entity, string key, [NotNullWhen(true)] out T? value) where T : class
@@ -212,6 +238,9 @@ public static class EntityData
         return true;
     }
 
+    /// <summary>Attaches <paramref name="value"/> to the entity under <paramref name="key"/> (replacing what was there).</summary>
+    /// <exception cref="ArgumentNullException"><paramref name="value"/> is null.</exception>
+    /// <exception cref="KilnUnavailableException">The entity is not a player and kiln.spawn is unavailable.</exception>
     [RequiresCapability("kiln.saves")]
     [TickThreadOnly]
     public static void Set<T>(EntityId entity, string key, T value) where T : class
@@ -226,6 +255,9 @@ public static class EntityData
         keys![WorldStore.CheckKey(key)] = new WorldStore.Slot { Value = value, Type = typeof(T) };
     }
 
+    /// <summary>Removes the calling mod's key from the entity.</summary>
+    /// <returns>True when the key existed.</returns>
+    /// <exception cref="KilnUnavailableException">The entity is not a player and kiln.spawn is unavailable.</exception>
     [RequiresCapability("kiln.saves")]
     [TickThreadOnly]
     public static bool Remove(EntityId entity, string key)
@@ -235,6 +267,8 @@ public static class EntityData
         return keys != null && keys.Remove(WorldStore.CheckKey(key));
     }
 
+    /// <summary>Whether the calling mod has a value attached to the entity under <paramref name="key"/>.</summary>
+    /// <exception cref="KilnUnavailableException">The entity is not a player and kiln.spawn is unavailable.</exception>
     [RequiresCapability("kiln.saves")]
     [TickThreadOnly]
     public static bool Has(EntityId entity, string key)

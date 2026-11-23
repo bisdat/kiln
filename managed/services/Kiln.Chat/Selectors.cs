@@ -10,10 +10,18 @@ namespace Kiln;
 
 /// <summary>An entity a selector looked at: its template (null for unknown ones), where it is, and the player record
 /// for players.</summary>
+/// <param name="Entity">The entity's id.</param>
+/// <param name="Position">Where the entity is; null when it is not known.</param>
+/// <param name="TemplateName">The entity's template name; null for an unknown one.</param>
+/// <param name="DisplayName">The template's catalog display name; null when there is none.</param>
+/// <param name="Kind">The kind of template the entity has.</param>
+/// <param name="Player">The player record for a player; null for any other entity.</param>
 public readonly record struct SelectedEntity(EntityId Entity, WorldPosition? Position, string? TemplateName,
     string? DisplayName, TemplateKind Kind, Player? Player)
 {
+    /// <summary>True for a player (<see cref="Player"/> is not null).</summary>
     public bool IsPlayer => Player is not null;
+    /// <summary>A short description: the player's name or the template name, with the entity id.</summary>
     public override string ToString() => Player is { } p ? $"{p.Name} ({Entity})" : $"{TemplateName ?? "?"} ({Entity})";
 }
 
@@ -22,8 +30,11 @@ public enum SelectorSort
 {
     /// <summary>Whatever order the world lists them in.</summary>
     Arbitrary,
+    /// <summary>Closest first.</summary>
     Nearest,
+    /// <summary>Furthest first.</summary>
     Furthest,
+    /// <summary>In random order.</summary>
     Random,
 }
 
@@ -57,12 +68,19 @@ public sealed class EntitySelector
     /// <summary>The selector as written.</summary>
     public string Text { get; }
 
+    /// <summary>The lower bound of <c>distance=</c> in metres; null when not given.</summary>
     public double? MinDistance { get; private set; }
+    /// <summary>The upper bound of <c>distance=</c> in metres; null when not given.</summary>
     public double? MaxDistance { get; private set; }
+    /// <summary>The <c>x=</c> coordinate of the origin; null when not given (the source player's position is used).</summary>
     public double? X { get; private set; }
+    /// <summary>The <c>y=</c> coordinate of the origin; null when not given (the source player's position is used).</summary>
     public double? Y { get; private set; }
+    /// <summary>The <c>z=</c> coordinate of the origin; null when not given (the source player's position is used).</summary>
     public double? Z { get; private set; }
+    /// <summary>The <c>limit=</c> filter: the most matches to return; null when not given.</summary>
     public int? Limit { get; private set; }
+    /// <summary>The <c>sort=</c> filter; null when not given.</summary>
     public SelectorSort? Sort { get; private set; }
 
     /// <summary>Only players can match (@s @a @p @r, or @e[type=player]).</summary>
@@ -380,6 +398,7 @@ public sealed class EntitySelector
         yield return sb.ToString();
     }
 
+    /// <summary>The selector as written (<see cref="Text"/>).</summary>
     public override string ToString() => Text;
 }
 

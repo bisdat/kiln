@@ -344,3 +344,77 @@
 [KILNX031]static Kiln.Registry.RegistrySchema.Find(string! qualifiedField) -> Kiln.Registry.RegistryFieldSpec?
 [KILNX031]static Kiln.Registry.RegistrySchema.Versions.get -> System.Collections.Generic.IReadOnlyDictionary<string!, string!>!
 ~[KILNX031]override Kiln.Registry.RegistryId.Equals(object obj) -> bool
+[KILNX031]Kiln.Registry.Registry
+[KILNX031]Kiln.Registry.RegistryChange
+[KILNX031]Kiln.Registry.RegistryChange.Result.get -> Kiln.Registry.RegistryChangeResult!
+[KILNX031]Kiln.Registry.RegistryChange.Revert() -> Kiln.Registry.RegistryChangeResult!
+[KILNX031]Kiln.Registry.RegistryChangeOutcome
+[KILNX031]Kiln.Registry.RegistryChangeOutcome.Applied = 0 -> Kiln.Registry.RegistryChangeOutcome
+[KILNX031]Kiln.Registry.RegistryChangeOutcome.PendingResource = 8 -> Kiln.Registry.RegistryChangeOutcome
+[KILNX031]Kiln.Registry.RegistryChangeOutcome.PendingWorld = 1 -> Kiln.Registry.RegistryChangeOutcome
+[KILNX031]Kiln.Registry.RegistryChangeOutcome.Refused = 2 -> Kiln.Registry.RegistryChangeOutcome
+[KILNX031]Kiln.Registry.RegistryChangeOutcome.RestartRequired = 3 -> Kiln.Registry.RegistryChangeOutcome
+[KILNX031]Kiln.Registry.RegistryChangeOutcome.Reverted = 5 -> Kiln.Registry.RegistryChangeOutcome
+[KILNX031]Kiln.Registry.RegistryChangeOutcome.Skipped = 6 -> Kiln.Registry.RegistryChangeOutcome
+[KILNX031]Kiln.Registry.RegistryChangeOutcome.Unverified = 7 -> Kiln.Registry.RegistryChangeOutcome
+[KILNX031]Kiln.Registry.RegistryChangeOutcome.WorldRequired = 4 -> Kiln.Registry.RegistryChangeOutcome
+[KILNX031]Kiln.Registry.RegistryChangeResult
+[KILNX031]Kiln.Registry.RegistryChangeResult.<Clone>$() -> Kiln.Registry.RegistryChangeResult!
+[KILNX031]Kiln.Registry.RegistryChangeResult.Accepted.get -> uint
+[KILNX031]Kiln.Registry.RegistryChangeResult.Accepted.init -> void
+[KILNX031]Kiln.Registry.RegistryChangeResult.Deconstruct(out Kiln.Registry.RegistryChangeOutcome Outcome, out uint Accepted, out uint Refused, out uint Skipped, out ulong World, out ulong Generation, out string? Reason) -> void
+[KILNX031]Kiln.Registry.RegistryChangeResult.Equals(Kiln.Registry.RegistryChangeResult? other) -> bool
+[KILNX031]Kiln.Registry.RegistryChangeResult.Generation.get -> ulong
+[KILNX031]Kiln.Registry.RegistryChangeResult.Generation.init -> void
+[KILNX031]Kiln.Registry.RegistryChangeResult.Ok.get -> bool
+[KILNX031]Kiln.Registry.RegistryChangeResult.Outcome.get -> Kiln.Registry.RegistryChangeOutcome
+[KILNX031]Kiln.Registry.RegistryChangeResult.Outcome.init -> void
+[KILNX031]Kiln.Registry.RegistryChangeResult.Reason.get -> string?
+[KILNX031]Kiln.Registry.RegistryChangeResult.Reason.init -> void
+[KILNX031]Kiln.Registry.RegistryChangeResult.Refused.get -> uint
+[KILNX031]Kiln.Registry.RegistryChangeResult.Refused.init -> void
+[KILNX031]Kiln.Registry.RegistryChangeResult.RegistryChangeResult(Kiln.Registry.RegistryChangeOutcome Outcome, uint Accepted, uint Refused, uint Skipped, ulong World, ulong Generation, string? Reason) -> void
+[KILNX031]Kiln.Registry.RegistryChangeResult.Skipped.get -> uint
+[KILNX031]Kiln.Registry.RegistryChangeResult.Skipped.init -> void
+[KILNX031]Kiln.Registry.RegistryChangeResult.World.get -> ulong
+[KILNX031]Kiln.Registry.RegistryChangeResult.World.init -> void
+[KILNX031]Kiln.Registry.RegistryEntries<T>
+[KILNX031]Kiln.Registry.RegistryEntries<T>.Alter(string! pattern, System.Action<T>! edit) -> void
+[KILNX031]Kiln.Registry.RegistryEntries<T>.Final(string! pattern, System.Action<T>! edit) -> void
+[KILNX031]Kiln.Registry.RegistryEntries<T>.Select(string! pattern = "*") -> System.Collections.Generic.IReadOnlyList<T>!
+[KILNX031]Kiln.Registry.RegistryEntries<T>.this[Kiln.Registry.RegistryId id].get -> T
+[KILNX031]Kiln.Registry.RegistryEntries<T>.this[string! id].get -> T
+[KILNX031]Kiln.Registry.RegistryReady
+[KILNX031]Kiln.Registry.RegistryReady.<Clone>$() -> Kiln.Registry.RegistryReady!
+[KILNX031]Kiln.Registry.RegistryReady.Deconstruct(out Kiln.RegistryReadyPhase Phase, out ulong Generation, out Kiln.RegistryWorld? World) -> void
+[KILNX031]Kiln.Registry.RegistryReady.Equals(Kiln.Registry.RegistryReady? other) -> bool
+[KILNX031]Kiln.Registry.RegistryReady.Generation.get -> ulong
+[KILNX031]Kiln.Registry.RegistryReady.Generation.init -> void
+[KILNX031]Kiln.Registry.RegistryReady.Phase.get -> Kiln.RegistryReadyPhase
+[KILNX031]Kiln.Registry.RegistryReady.Phase.init -> void
+[KILNX031]Kiln.Registry.RegistryReady.RegistryReady(Kiln.RegistryReadyPhase Phase, ulong Generation, Kiln.RegistryWorld? World) -> void
+[KILNX031]Kiln.Registry.RegistryReady.World.get -> Kiln.RegistryWorld?
+[KILNX031]Kiln.Registry.RegistryReady.World.init -> void
+[KILNX031]Kiln.Registry.RegistryStage
+[KILNX031]Kiln.Registry.RegistryStage.Alter(System.Action<Kiln.Registry.RegistryStage!>! edits) -> void
+[KILNX031]Kiln.Registry.RegistryStage.Balance.get -> Kiln.Registry.BalanceEntry!
+[KILNX031]Kiln.Registry.RegistryStage.Drops.get -> Kiln.Registry.RegistryEntries<Kiln.Registry.DropTableEntry!>!
+[KILNX031]Kiln.Registry.RegistryStage.Final(System.Action<Kiln.Registry.RegistryStage!>! edits) -> void
+[KILNX031]Kiln.Registry.RegistryStage.Items.get -> Kiln.Registry.RegistryEntries<Kiln.Registry.ItemEntry!>!
+[KILNX031]Kiln.Registry.RegistryStage.Loot.get -> Kiln.Registry.RegistryEntries<Kiln.Registry.ItemLootEntry!>!
+[KILNX031]Kiln.Registry.RegistryStage.Recipes.get -> Kiln.Registry.RegistryEntries<Kiln.Registry.RecipeEntry!>!
+[KILNX031]override Kiln.Registry.RegistryChangeResult.Equals(object? obj) -> bool
+[KILNX031]override Kiln.Registry.RegistryChangeResult.GetHashCode() -> int
+[KILNX031]override Kiln.Registry.RegistryChangeResult.ToString() -> string!
+[KILNX031]override Kiln.Registry.RegistryReady.Equals(object? obj) -> bool
+[KILNX031]override Kiln.Registry.RegistryReady.GetHashCode() -> int
+[KILNX031]override Kiln.Registry.RegistryReady.ToString() -> string!
+[KILNX031]static Kiln.Registry.Registry.Available.get -> bool
+[KILNX031]static Kiln.Registry.Registry.Change(System.Action<Kiln.Registry.RegistryStage!>! edits) -> Kiln.Registry.RegistryChange!
+[KILNX031]static Kiln.Registry.Registry.For(Kiln.RegistryContext! context) -> Kiln.Registry.RegistryStage!
+[KILNX031]static Kiln.Registry.Registry.Read(System.Action<Kiln.Registry.RegistryStage!>! read) -> void
+[KILNX031]static Kiln.Registry.Registry.Ready -> System.Action<Kiln.Registry.RegistryReady!>!
+[KILNX031]static Kiln.Registry.RegistryChangeResult.operator !=(Kiln.Registry.RegistryChangeResult? left, Kiln.Registry.RegistryChangeResult? right) -> bool
+[KILNX031]static Kiln.Registry.RegistryChangeResult.operator ==(Kiln.Registry.RegistryChangeResult? left, Kiln.Registry.RegistryChangeResult? right) -> bool
+[KILNX031]static Kiln.Registry.RegistryReady.operator !=(Kiln.Registry.RegistryReady? left, Kiln.Registry.RegistryReady? right) -> bool
+[KILNX031]static Kiln.Registry.RegistryReady.operator ==(Kiln.Registry.RegistryReady? left, Kiln.Registry.RegistryReady? right) -> bool
