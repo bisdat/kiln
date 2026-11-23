@@ -19,6 +19,7 @@ namespace kc {  // registry_model_fakes.cpp (content.h cannot share a unit with 
 std::string guid_text(const uint8_t g[16]);
 bool guid_parse(const std::string& s, uint8_t out[16]);
 namespace rbtest {
+void byte_blob_type(uintptr_t unreadable);
 void item_type();  // keen::ItemInfo {itemId u32 +0, objectId Guid +4, maxStackSize u16 +0x14, debugName BlobString +0x18}, 40 bytes
 }
 }  // namespace kc
@@ -326,13 +327,34 @@ void live_bytes(const std::string& dir) {
     m.release();
     check(view.released && m.digest() == "live-digest", "released: the view let go; the digest is kept");
 }
+void byte_array_bounds(const std::string&) {
+    std::vector<uint8_t> bytes(65560, 7);
+    const int32_t rel = 16;
+    uint32_t count = 21;
+    std::memcpy(bytes.data(), &rel, 4);
+    std::memcpy(bytes.data() + 4, &count, 4);
+    kc::rbtest::byte_blob_type(0);
+    json out;
+    std::string why;
+    check(model::bytes_member(bytes.data(), bytes.size(), "test::ByteBlob", "values", &out, &why) && out.size() == 21, "a bounded byte blob reads");
+    check(model::bytes_member(bytes.data(), 24, "test::ByteBlob", "values", &out, &why) && out.is_null(), "a byte blob outside the resource is not read");
+    count = 65537;
+    std::memcpy(bytes.data() + 4, &count, 4);
+    check(model::bytes_member(bytes.data(), bytes.size(), "test::ByteBlob", "values", &out, &why) && out.is_null(), "a long byte array is refused, not truncated");
+    count = 21;
+    std::memcpy(bytes.data() + 4, &count, 4);
+    kc::rbtest::byte_blob_type(reinterpret_cast<uintptr_t>(bytes.data()) + 16);
+    check(model::bytes_member(bytes.data(), bytes.size(), "test::ByteBlob", "values", &out, &why) && out.is_null(), "a failed guarded byte read is null");
+    kc::rbtest::byte_blob_type(0);
+    check(model::bytes_member(bytes.data(), bytes.size(), "test::ByteBlob", "", &out, &why) && out["values"].size() == 21, "a nested byte array also reads as numbers");
+}
 }  // namespace
 
 int main(int argc, char** argv) {
     const std::string dir = argc > 1 ? argv[1] : "regmap";
     int failed = 0;
     const std::pair<const char*, void (*)(const std::string&)> groups[] = {
-        {"entries_and_ids", entries_and_ids}, {"values", values}, {"needs_and_compose", needs_and_compose},
+        {"byte_array_bounds", byte_array_bounds}, {"entries_and_ids", entries_and_ids}, {"values", values}, {"needs_and_compose", needs_and_compose},
         {"encode_writes", encode_writes},     {"id_table", id_table}, {"live_bytes", live_bytes}};
     for (const auto& [name, fn] : groups) {
         try {

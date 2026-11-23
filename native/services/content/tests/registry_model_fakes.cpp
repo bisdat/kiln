@@ -11,7 +11,9 @@
 
 namespace kc {
 void logf(int, const char*, ...) {}
+uintptr_t unreadable_test_address = 0;
 bool rd(uintptr_t address, void* out, size_t n) {
+    if (address == unreadable_test_address) return false;
     std::memcpy(out, reinterpret_cast<const void*>(address), n);
     return true;
 }
@@ -142,6 +144,16 @@ void balance_type() {
 }
 // keen::ByteTable {altarsPerFlameLevel u8[21] +0, playerLevelCap u32 +24}: the real balance table's per-level counts are byte
 // arrays of more than 16 elements, which the gamedata dumps show as "(21 bytes)"
+void byte_blob_type(uintptr_t unreadable) {
+    using namespace kc::gd;
+    unreadable_test_address = unreadable;
+    static TType u8, blob, tab;
+    u8.kind = K_U8, u8.size = 1;
+    blob.kind = K_BLOBARRAY, blob.size = 8, blob.inner_rec = reinterpret_cast<uintptr_t>(&u8);
+    tab.kind = K_STRUCT, tab.size = 8, tab.name = "test::ByteBlob";
+    tab.fields = {{"values", reinterpret_cast<uintptr_t>(&blob), 0}};
+    named()[tab.name] = &tab;
+}
 void byte_table_type() {
     using namespace kc::gd;
     static TType u8, u32, arr, tab;
