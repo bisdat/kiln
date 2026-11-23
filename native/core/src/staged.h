@@ -40,6 +40,7 @@ struct Summary {
     int rolled_back = 0;  // rollbacks applied (requested or automatic)
     int failed = 0;       // refused or failed (each logged with its reason)
     int recovered = 0;    // interrupted transactions finished or put back
+    int held = 0;         // staged updates that wait for free space (they stay staged)
 };
 
 inline constexpr int kFormat = 1;
@@ -73,6 +74,14 @@ bool rel_path_ok(const std::string& rel, std::string* why);
 bool kiln_path_ok(const std::string& rel, std::string* why);
 // A folder name under kiln/mods a staged mod may use: one path segment, at most 64 bytes, not starting with '.'.
 bool mod_folder_ok(const std::string& folder);
+
+// A start applies a staged update only when the volume of kiln/staged has this much free plus the size of the world's
+// savegame folder (enshrouded_server.json saveDirectory, default <game>/savegame); Kiln.Admin's update_stage asks the
+// same after its copy. Rollbacks never wait for it.
+inline constexpr uint64_t kFreeHeadroom = uint64_t{2} << 30;
+
+// Tests only: the free bytes of the volume holding `dir` (null in Kiln: the volume is asked).
+extern uint64_t (*g_free_bytes_hook)(const std::filesystem::path& dir);
 
 // Tests only: called after every change a transaction makes (a rename, a journal write); a test ends the process in it
 // to stand for a crash or a power cut at that point. Null in Kiln.

@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: MIT
+using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -23,6 +25,80 @@ internal static class Staging
     /// <summary>Tests only: called at named points of a staging ("manifest": kiln-runtime.json was read; "copy": the files are
     /// about to be copied), so a test can change the source in between. Null in Kiln.</summary>
     internal static Action<string>? TestStep { get; set; }
+
+    /// <summary>Tests only: the free bytes of the volume holding a folder. Null in Kiln: the volume is asked.</summary>
+    internal static Func<string, long>? TestFreeSpace { get; set; }
+
+    /// <summary>What a staging leaves free after its copy, besides the size of the world's savegame folder, so the world's
+    /// next save still fits (native/core/src/staged.h kFreeHeadroom: the start asks the same before it applies).</summary>
+    public const long FreeHeadroom = 2L << 30;
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "GetDiskFreeSpaceExW")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetDiskFreeSpaceEx(string directory, out ulong freeToCaller, out ulong total, out ulong totalFree);
+
+    /// <summary>The bytes free to this process on the volume holding <paramref name="dir"/> (its nearest folder that
+    /// exists: a folder mounted elsewhere, or under Wine another Linux filesystem, counts as its own volume); -1 when the
+    /// volume cannot be asked.</summary>
+    public static long FreeBytes(string dir)
+    {
+        var d = Path.GetFullPath(dir);
+        while (!Directory.Exists(d) && Path.GetDirectoryName(d) is { } up) d = up;
+        if (TestFreeSpace is { } test) return test(d);
+        try
+        {
+            if (OperatingSystem.IsWindows())
+                return GetDiskFreeSpaceEx(d, out var free, out _, out _) ? (long)Math.Min(free, long.MaxValue) : -1;
+            return new DriveInfo(d).AvailableFreeSpace;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return -1;
+        }
+    }
+
+    /// <summary>The world's savegame folder, as the game and Kiln.Saves find it: enshrouded_server.json
+    /// <c>saveDirectory</c>, else &lt;game&gt;/savegame.</summary>
+    internal static string SaveFolderOf(string game)
+    {
+        var dir = Path.Combine(game, "savegame");
+        if (ReadObject(Path.Combine(game, "enshrouded_server.json")) is { } cfg && Text(cfg, "saveDirectory") is { Length: > 0 } d)
+            dir = Path.IsPathRooted(d) ? d : Path.Combine(game, d);
+        return Path.GetFullPath(dir);
+    }
+
+    private static long FolderBytes(string dir)
+    {
+        if (!Directory.Exists(dir)) return 0;
+        long n = 0;
+        try
+        {
+            var options = new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = FileAttributes.ReparsePoint };
+            foreach (var f in new DirectoryInfo(dir).EnumerateFiles("*", options)) n += f.Length;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+        }
+        return n;
+    }
+
+    private static string Bytes(long n) => n >= 1L << 30
+        ? string.Create(CultureInfo.InvariantCulture, $"{n} bytes ({n / 1073741824.0:0.00} GiB)")
+        : string.Create(CultureInfo.InvariantCulture, $"{n} bytes ({n / 1048576.0:0.0} MiB)");
+
+    /// <summary>A copy of <paramref name="copy"/> bytes into kiln/staged must leave <see cref="FreeHeadroom"/> plus the
+    /// world's savegame folder free on that volume: a full disk would cost the world its next save. A volume that cannot
+    /// be asked holds nothing back.</summary>
+    private static void RoomFor(Layout p, long copy)
+    {
+        var free = FreeBytes(p.Staged);
+        if (free < 0) return;
+        var saves = FolderBytes(SaveFolderOf(p.Game));
+        var need = copy + FreeHeadroom + saves;
+        if (free >= need) return;
+        throw new StagingError($"not enough free space on the volume of kiln/staged: {Bytes(need)} needed (the copy, {Bytes(copy)}, then 2 GiB " +
+                               $"plus the world's savegame folder, {Bytes(saves)}, left free), {Bytes(free)} free");
+    }
 
     /// <summary>The gate for an op on the tick thread (cancel, rollback): taken at once or refused, never waited for, so
     /// a staging copy in progress on a pool thread can't stall the server's step.</summary>
@@ -370,10 +446,12 @@ internal static class Staging
             if (KilnOwns(p, $"kiln/mods/{folder}/"))
                 throw new StagingError($"kiln/mods/{folder} is part of Kiln (its install receipt lists it); it is updated with Kiln");
             RefuseBusy(p, unit, $"mod folder {folder}");
+            var sources = Walk(src);
+            RoomFor(p, sources.Sum(f => new FileInfo(f.Full).Length));
             var stage = NewStageDir(p);
             try
             {
-                var files = Walk(src).Select(f => Copy(f.Full, Path.Combine(stage, "files", f.Rel), f.Rel, ct)).ToList();
+                var files = sources.Select(f => Copy(f.Full, Path.Combine(stage, "files", f.Rel), f.Rel, ct)).ToList();
                 Expect(expect, files);
                 var from = Text(ReadObject(Path.Combine(p.Mods, folder, "kiln.mod.json"), lenient: true), "version");
                 var doc = new JsonObject
@@ -486,25 +564,33 @@ internal static class Staging
             var receiptFiles = (receipt["files"] as JsonArray ?? []).OfType<JsonObject>().ToList();
             string? ReceiptSha(string path) => receiptFiles.Where(r => Lower(Text(r, "path") ?? "") == Lower(path)).Select(r => Text(r, "sha256")).FirstOrDefault();
 
+            // the files that change (the ones this install has already, and the player's config files, are left out)
+            var plan = new List<(string Path, string Want, string From)>();
+            foreach (var f in selected)
+            {
+                ct.ThrowIfCancellationRequested();
+                var path = Text(f, "path")!;
+                var want = Text(f, "sha256") ?? "";
+                var target = Path.Combine(p.Game, path);
+                var config = f["config"] is JsonValue cv && cv.TryGetValue<bool>(out var isConfig) && isConfig;
+                if (File.Exists(target) && (config || string.Equals(Sha256Of(target), want, StringComparison.OrdinalIgnoreCase))) continue;
+                if (Lower(path) == "dinput8.dll" && File.Exists(target) &&
+                    (hasReceipt ? !string.Equals(Sha256Of(target), ReceiptSha(path), StringComparison.OrdinalIgnoreCase) : !IsKilnProxy(target)))
+                    throw new StagingError("dinput8.dll is not the one Kiln installed (another loader, or a changed file): update Kiln with kilnctl or the launcher");
+                var from = Path.Combine(src, path);
+                var info = new FileInfo(from);
+                if (!info.Exists || IsLink(info)) throw new StagingError($"the bundle has no file {path}");
+                plan.Add((path, want, from));
+            }
+            RoomFor(p, plan.Sum(x => new FileInfo(x.From).Length));
             var stage = NewStageDir(p);
             TestStep?.Invoke("copy");
             try
             {
                 var writes = new List<FileEntry>();
-                foreach (var f in selected)
+                foreach (var (path, want, from) in plan)
                 {
                     ct.ThrowIfCancellationRequested();
-                    var path = Text(f, "path")!;
-                    var want = Text(f, "sha256") ?? "";
-                    var target = Path.Combine(p.Game, path);
-                    var config = f["config"] is JsonValue cv && cv.TryGetValue<bool>(out var isConfig) && isConfig;
-                    if (File.Exists(target) && (config || string.Equals(Sha256Of(target), want, StringComparison.OrdinalIgnoreCase))) continue;
-                    if (Lower(path) == "dinput8.dll" && File.Exists(target) &&
-                        (hasReceipt ? !string.Equals(Sha256Of(target), ReceiptSha(path), StringComparison.OrdinalIgnoreCase) : !IsKilnProxy(target)))
-                        throw new StagingError("dinput8.dll is not the one Kiln installed (another loader, or a changed file): update Kiln with kilnctl or the launcher");
-                    var from = Path.Combine(src, path);
-                    var info = new FileInfo(from);
-                    if (!info.Exists || IsLink(info)) throw new StagingError($"the bundle has no file {path}");
                     var copied = Copy(from, Path.Combine(stage, "files", path), path, ct);
                     // the bytes copied, not only the ones hashed for the list a moment ago
                     if (expect is not null && (!expect.TryGetValue(path, out var listed) || !string.Equals(copied.Sha256, listed, StringComparison.OrdinalIgnoreCase)))

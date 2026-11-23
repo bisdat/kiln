@@ -20,6 +20,7 @@ public sealed class StagingTests : IDisposable
 
     public StagingTests()
     {
+        Staging.TestFreeSpace = _ => 1L << 50;  // hermetic: the test volume's free space never decides (the free-space tests set it)
         Directory.CreateDirectory(Path.Combine(Kiln, "mods"));
         // persistent state no staged change may touch (dev.31: kiln/data/registry)
         Put(Path.Combine(Kiln, "data", "kiln-network", "server-id"), "srv-4b8e2c\n");
@@ -28,6 +29,7 @@ public sealed class StagingTests : IDisposable
 
     public void Dispose()
     {
+        Staging.TestFreeSpace = null;
         try { Directory.Delete(_game, true); } catch (IOException) { }
     }
 
@@ -493,6 +495,60 @@ public sealed class StagingTests : IDisposable
         Assert.Equal(Path.Combine(game, "kiln"),
             Staging.KilnFolderOf(Path.Combine(game, "enshrouded_server.exe"), Path.Combine(game, "kiln", "profiles", "p1", "data", "kiln-admin")));
         Assert.Equal(Path.Combine(game, "kiln"), Staging.KilnFolderOf(null, Path.Combine(game, "kiln", "data", "kiln-admin")));
+    }
+
+    private const long GiB2 = 2L << 30;
+
+    [Fact]
+    public void Staging_leaves_2_GiB_plus_the_savegame_folder_free_after_its_copy()
+    {
+        // the world's next save must still fit: refused before anything is copied, and the error says how much is
+        // needed and how much is free
+        Put(Path.Combine(_game, "enshrouded_server.json"), """{"name": "lab", "saveDirectory": "./saves"}""");
+        Put(Path.Combine(_game, "saves", "world0.ksd"), new string('w', 1000));
+        Put(Path.Combine(_game, "saves", "backup", "world0.ksd"), new string('b', 24));
+        Put(Path.Combine(_game, "savegame", "unused.ksd"), new string('x', 5000));  // not the folder the server names
+        var files = ModFiles("m", "2.0.0");
+        Source("m2", files);
+        var copy = files.Values.Sum(t => (long)Encoding.UTF8.GetByteCount(t));
+        var need = copy + GiB2 + 1024;
+        string? asked = null;
+        Staging.TestFreeSpace = dir => { asked = dir; return need - 1; };
+        var e = Assert.Throws<StagingError>(() => Staging.StageMod(Kiln, "m2", null, "m", null, null, "t"));
+        Assert.Contains($"{need} bytes", e.Message, StringComparison.Ordinal);
+        Assert.Contains($"{need - 1} bytes", e.Message, StringComparison.Ordinal);
+        Assert.Contains("needed", e.Message, StringComparison.Ordinal);
+        Assert.Contains("free", e.Message, StringComparison.Ordinal);
+        Assert.True(asked is not null && Path.GetFullPath(asked).StartsWith(Path.GetFullPath(Kiln), StringComparison.Ordinal), asked);
+        Assert.False(Directory.Exists(Path.Combine(Staged, "mods", "m")));
+        Assert.Empty(Directory.EnumerateDirectories(Staged, ".stage-*"));
+        Staging.TestFreeSpace = _ => need;  // exactly enough
+        Staging.StageMod(Kiln, "m2", null, "m", null, null, "t");
+        Assert.True(File.Exists(Path.Combine(Staged, "mods", "m", "staged.json")));
+    }
+
+    [Fact]
+    public void A_Kiln_staging_counts_only_the_files_it_copies()
+    {
+        Installed(Old());
+        Put(Path.Combine(_game, "savegame", "world0.ksd"), new string('w', 4096));
+        Bundle("kiln-30.10", New());
+        // what it copies: the changed files of this install's components, and the new receipt is not counted
+        var copy = new[] { "proxy 2", "core 2", "new 2", "admin 2" }.Sum(t => (long)Encoding.UTF8.GetByteCount(t));
+        Staging.TestFreeSpace = _ => copy + GiB2 + 4096 - 1;
+        Assert.Contains("needed", Assert.Throws<StagingError>(() => Staging.StageKiln(Kiln, "kiln-30.10", null, null, null, "t")).Message,
+            StringComparison.Ordinal);
+        Assert.False(Directory.Exists(Path.Combine(Staged, "kiln")));
+        Staging.TestFreeSpace = _ => copy + GiB2 + 4096;
+        Staging.StageKiln(Kiln, "kiln-30.10", null, null, null, "t");
+        Assert.True(File.Exists(Path.Combine(Staged, "kiln", "staged.json")));
+    }
+
+    [Fact]
+    public void The_free_space_is_the_volumes()
+    {
+        Staging.TestFreeSpace = null;
+        Assert.True(Staging.FreeBytes(Path.Combine(Staged, "not", "made", "yet")) > 0);
     }
 
     [Fact]

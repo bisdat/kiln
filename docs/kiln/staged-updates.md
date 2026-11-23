@@ -95,6 +95,18 @@ be read, or whose paths are not its unit's, is left alone with an error.
 A mod folder switched off with `.disabled` stays switched off. The folder is replaced whole: a mod keeps its own data
 in `kiln/data/<id>` and `kiln/config`, which this does not touch.
 
+## Free space
+A full disk would cost the world its next save. The world's savegame folder is the one `enshrouded_server.json`'s
+`saveDirectory` names (by default `<server>/savegame`), and both checks below ask the volume that holds `kiln/staged`.
+- `update_stage` copies only when the volume still has 2 GiB plus the size of the world's savegame folder free after the
+  copy. Otherwise it refuses before it copies anything, and the error says how much is needed and how much is free.
+- At the start, a staged update is applied only while that volume has 2 GiB plus the savegame folder's size free. The
+  apply itself takes no room (it only renames), so this needs no room for the files. With less free, the update waits:
+  it stays staged and kiln.log says so (`staged: <unit>: the staged update to <v> waits for free space: ...`). It
+  doesn't count as a failed attempt, and the next start tries again.
+- Rollbacks never wait for free space: they bring back the version that worked.
+- When the volume can't be asked, nothing is held back.
+
 ## Rollback, and the automatic one
 - `update_rollback` writes `rollback/<unit>.json`. The next start swaps the current version with the kept one, so the
   version it rolled away from becomes the kept one.

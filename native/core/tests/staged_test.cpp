@@ -913,6 +913,73 @@ static void test_short_names() {
 }
 #endif
 
+// Free space: a start applies a staged update only when the volume of kiln/staged keeps 2 GiB plus the world's savegame
+// folder free; otherwise the update waits, staged, with a line in kiln.log (never dropped for it). Rollbacks never wait.
+static uint64_t g_fake_free = uint64_t{1} << 50;  // the test's free space (main installs the hook, children included)
+static uint64_t fake_free(const fs::path&) { return g_fake_free; }
+static void test_free_space() {
+    constexpr uint64_t kGiB2 = uint64_t{2} << 30;
+    const fs::path g = fresh("free-space");
+    write_tree(g / "kiln" / "mods" / "m", mod_files("m", "1.0.0"));
+    put(g / "enshrouded_server.json", R"({"name":"lab","saveDirectory":"./saves"})");
+    put(g / "saves" / "world0.ksd", std::string(1000, 'w'));
+    put(g / "saves" / "backup" / "world0.ksd", std::string(24, 'b'));
+    put(g / "savegame" / "unused.ksd", std::string(5000, 'x'));  // not the save folder enshrouded_server.json names
+    stage_mod(g, "m", "m", "2.0.0", mod_files("m", "2.0.0"));
+    g_fake_free = kGiB2 + 1023;  // one byte short of 2 GiB + 1024 bytes of saves
+    for (int i = 0; i < kMaxAttempts + 1; ++i) {
+        Log log;
+        const Summary s = boot(Kind::Mods, g, &log);
+        CHECK_MSG(s.held == 1 && s.applied == 0 && s.failed == 0, log.all());
+        CHECK_MSG(log.has("mod folder m: the staged update to 2.0.0 waits for free space") && log.has("2147484671 bytes") &&
+                      log.has("2147484672 bytes") && log.has("1024 bytes"),
+                  log.all());
+        CHECK(mod_view(g) == mod_files("m", "1.0.0") && there(staged(g) / "mods" / "m" / "staged.json"));
+        CHECK(!there(staged(g) / "attempts") && !there(staged(g) / "tx") && results(g).empty());
+    }
+    g_fake_free = kGiB2 + 1024;  // exactly enough
+    Log l2;
+    Summary s = boot(Kind::Mods, g, &l2);
+    CHECK_MSG(s.applied == 1 && s.held == 0 && mod_view(g) == mod_files("m", "2.0.0"), l2.all());
+    // a rollback never waits: it brings back the version that worked
+    g_fake_free = 0;
+    put(staged(g) / "rollback" / "mod.m.json", "{}");
+    Log l3;
+    s = boot(Kind::Mods, g, &l3);
+    CHECK_MSG(s.rolled_back == 1 && mod_view(g) == mod_files("m", "1.0.0"), l3.all());
+    fs::remove_all(g);
+
+    // a Kiln update waits the same way (the proxy's lines reach kiln.log); no enshrouded_server.json: <game>/savegame
+    const fs::path g2 = fresh("free-space-kiln");
+    setup_kiln(g2);
+    put(g2 / "savegame" / "world0.ksd", std::string(4096, 'w'));
+    auto with_save = [](Tree t) {
+        t["savegame/world0.ksd"] = std::string(4096, 'w');
+        return t;
+    };
+    g_fake_free = kGiB2 + 4095;
+    Log l4;
+    s = boot(Kind::Kiln, g2, &l4);
+    CHECK_MSG(s.held == 1 && kiln_view(g2) == with_save(kiln_old()) && there(staged(g2) / "kiln" / "staged.json"), l4.all());
+    CHECK_MSG(l4.has("Kiln: the staged update to 0.2.0-dev.30.10 waits for free space") && l4.has("4096 bytes"), l4.all());
+    g_fake_free = uint64_t{1} << 50;
+    Log l5;
+    s = boot(Kind::Kiln, g2, &l5);
+    CHECK_MSG(s.applied == 1 && kiln_view(g2) == with_save(kiln_new()), l5.all());
+    fs::remove_all(g2);
+
+    // the real free space of this volume (every runner keeps more than 2 GiB free)
+    const fs::path g3 = fresh("free-space-real");
+    write_tree(g3 / "kiln" / "mods" / "m", mod_files("m", "1.0.0"));
+    stage_mod(g3, "m", "m", "2.0.0", mod_files("m", "2.0.0"));
+    g_free_bytes_hook = nullptr;
+    Log l6;
+    s = boot(Kind::Mods, g3, &l6);
+    g_free_bytes_hook = &fake_free;
+    CHECK_MSG(s.applied == 1 && s.held == 0, l6.all());
+    fs::remove_all(g3);
+}
+
 static void test_interrupted_three_times() {
     const fs::path g = fresh("thrice");
     write_tree(g / "kiln" / "mods" / "m", mod_files("m", "1.0.0"));
@@ -1050,6 +1117,7 @@ static void test_crash_points() {
 }
 
 int main(int argc, char** argv) {
+    g_free_bytes_hook = &fake_free;  // hermetic: a test volume's free space never decides (test_free_space sets it)
 #ifdef _WIN32
     wchar_t self[MAX_PATH];
     GetModuleFileNameW(nullptr, self, MAX_PATH);
@@ -1081,6 +1149,7 @@ int main(int argc, char** argv) {
 #ifdef _WIN32
     test_short_names();
 #endif
+    test_free_space();
     test_interrupted_three_times();
     test_bad_journals();
     test_misc();

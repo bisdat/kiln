@@ -33,6 +33,7 @@
 #include <windows.h>
 #else
 #include <fcntl.h>
+#include <sys/statvfs.h>
 #include <unistd.h>
 #endif
 
@@ -42,6 +43,7 @@
 namespace kiln::staged {
 
 void (*g_step_hook)(const char* step) = nullptr;
+uint64_t (*g_free_bytes_hook)(const std::filesystem::path& dir) = nullptr;
 
 namespace {
 
@@ -1017,11 +1019,77 @@ bool requested_rollback(Ctx& c, const Unit& u) {
     return true;
 }
 
+// ---- free space ----
+constexpr uint64_t kUnknown = UINT64_MAX;
+// The bytes free to this process on the volume holding `dir` (the nearest folder of it that exists); kUnknown when the
+// volume cannot be asked.
+uint64_t free_bytes(fs::path dir) {
+    while (!dir.empty() && !is_dir(dir) && dir.has_parent_path() && dir.parent_path() != dir) dir = dir.parent_path();
+    if (g_free_bytes_hook) return g_free_bytes_hook(dir);
+#ifdef _WIN32
+    ULARGE_INTEGER avail{}, total{}, all{};
+    return GetDiskFreeSpaceExW(dir.c_str(), &avail, &total, &all) ? avail.QuadPart : kUnknown;
+#else
+    struct statvfs v{};
+    return ::statvfs(dir.c_str(), &v) == 0 ? static_cast<uint64_t>(v.f_bavail) * v.f_frsize : kUnknown;
+#endif
+}
+// The world's savegame folder, as the game and Kiln.Saves find it: enshrouded_server.json saveDirectory, else
+// <game>/savegame.
+fs::path save_dir(const Ctx& c) {
+    fs::path dir = c.env.game / "savegame";
+    json cfg;
+    std::string why;
+    if (read_json(c.env.game / "enshrouded_server.json", cfg, why) && cfg.contains("saveDirectory") && cfg["saveDirectory"].is_string()) {
+        const fs::path d = p8(cfg["saveDirectory"].get<std::string>());
+        dir = d.is_absolute() ? d : c.env.game / d;
+    }
+    return dir.lexically_normal();
+}
+uint64_t tree_bytes(const fs::path& dir) {
+    uint64_t n = 0;
+    std::error_code ec;
+    if (!is_dir(dir)) return 0;
+    for (fs::recursive_directory_iterator it(dir, fs::directory_options::skip_permission_denied, ec), end; !ec && it != end; it.increment(ec)) {
+        if (!is_file(it->path())) continue;
+        std::error_code e2;
+        const uintmax_t size = fs::file_size(it->path(), e2);
+        if (!e2) n += size;
+    }
+    return n;
+}
+std::string bytes_text(uint64_t n) {
+    char b[64];
+    if (n >= (uint64_t{1} << 30)) std::snprintf(b, sizeof b, "%llu bytes (%.2f GiB)", static_cast<unsigned long long>(n), n / 1073741824.0);
+    else std::snprintf(b, sizeof b, "%llu bytes (%.1f MiB)", static_cast<unsigned long long>(n), n / 1048576.0);
+    return b;
+}
+// A staged update waits while the volume of kiln/staged has less free than 2 GiB plus the world's savegame folder: the
+// apply itself needs no room (renames), but on a volume that full the world's next save is at risk, and an apply whose
+// journal could not be written would fail three starts in a row and be dropped. The update stays staged; kiln.log says
+// so. A volume that cannot be asked holds nothing back.
+bool room_to_apply(Ctx& c, const Unit& u, const std::string& version) {
+    const uint64_t free = free_bytes(c.abs(kStaged));
+    if (free == kUnknown) return true;
+    const uint64_t saves = tree_bytes(save_dir(c));
+    const uint64_t need = kFreeHeadroom + saves;
+    if (free >= need) return true;
+    c.log(Level::Warn, u.name() + ": the staged update to " + version + " waits for free space: the volume of kiln/staged has " +
+                           bytes_text(free) + " free; a start applies an update only with 2 GiB plus the world's savegame folder (" +
+                           bytes_text(saves) + ") free, " + bytes_text(need) + " in all. It stays staged; the next start tries again");
+    return false;
+}
+
 void staged_update(Ctx& c, const Unit& u) {
     Staged s;
     Tx tx;
     std::string why;
-    if (!load_staged(c, u, s, why) || !plan_update(c, u, s, tx, why)) {
+    const bool loaded = load_staged(c, u, s, why);
+    if (loaded && !room_to_apply(c, u, s.version)) {
+        ++c.sum.held;
+        return;
+    }
+    if (!loaded || !plan_update(c, u, s, tx, why)) {
         c.log(Level::Error, u.name() + ": the staged update" + (s.version.empty() ? "" : " to " + s.version) + " is refused and removed: " + why);
         record(c, u, record_id() + "-" + u.key(), "update", false, s.version, s.from, why);
         drop_staged(c, u);
