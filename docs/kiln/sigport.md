@@ -340,7 +340,9 @@ data folder; a dry run keeps nothing. Without a verified record every registry f
 `--new-refl`/`--old-refl`, `--record`, `--ids` as files) and `--evidence` (files or folders) does, for example for the
 client side (`--side client`, a copy of the client exe and the client's data folder). `--first-build` waives the previous
 build (refused where the side already has proven builds), `--accept <registry.field>` takes a reviewed reflection
-change, `--mark` writes into the instance and `--replace` replaces a verified record there.
+change, `--mark` writes into the instance and `--replace` replaces a verified record there. A client record is not proven
+by a client lab: `--side client --mirror <server record> --server-exe <server exe>` mirrors the server proof onto the client
+exe (a row is ok only where the server proved it and the client's layout of it is the server's; regmap/README.md).
 
 The lab half is the gate's default test `registry-proof-test` with kiln.content's proof producer: the gate writes
 `kiln/data/content/registry/proof/request.json` into its copy, and only then do they write the live and boot round-trip

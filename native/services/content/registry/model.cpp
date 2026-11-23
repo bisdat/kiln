@@ -918,6 +918,12 @@ void Model::id_table(std::map<std::string, std::string>* ids, std::map<std::stri
     }
 }
 
+void Model::list_all() {
+    std::string why;
+    for (const auto& [n, r] : d_->schema.registries) entries(n, &why);
+    for (const char* builtin_table : {"templates", "perks", "inputCategories"}) entries(builtin_table, &why);
+}
+
 json Model::id_table_json() const {
     json regs = json::object();
     for (const auto& [reg, R] : d_->regs) {

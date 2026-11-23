@@ -7,6 +7,6 @@ here=$(cd "$(dirname "$0")" && pwd)
 out=$KILN_OUT/content-tests
 mkdir -p "$out"
 echo "== registry-regmap-test (host)"
-g++ -std=c++20 -O1 -g -Wall -Wextra -Wno-unused-function -fsanitize=address,undefined -I"$here/../../../third_party" \
+g++ -std=c++20 -O1 -g -Wall -Wextra -Wno-unused-function -fsanitize=address,undefined -I"$here/../../../third_party" -I"$here/../../../core/abi" \
     "$here/registry_regmap_test.cpp" "$here/../registry/regmap.cpp" -o "$out/registry-regmap-test"
 "$out/registry-regmap-test" "$here/../../../../regmap" "$here/registry_ids_cases.json" "$out"

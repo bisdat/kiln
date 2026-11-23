@@ -39,6 +39,8 @@ inline constexpr const char* kRequest = "proof/request.json";
 struct Env {
     // under <data>/content/registry (stage.h Env's read_data / write_data)
     std::function<std::optional<std::string>(const std::string& rel)> read_data;
+    // the file is there (one file-system lookup, nothing read; review2 N1); without it requested() falls back to read_data
+    std::function<bool(const std::string& rel)> exists;
     std::function<bool(const std::string& rel, const std::string& text)> write_data;
     std::function<std::unique_ptr<model::Source>(std::string* why)> source;  // the base (live bytes at resources-ready)
     std::function<bool(const KilnAssetKey& key, std::vector<uint8_t>* out, std::string* why)> bytes;  // one resource's base bytes
@@ -59,6 +61,9 @@ std::string regmap_digest(std::vector<std::pair<std::string, std::string>> files
 // A value of the field other than v that the schema allows (a number moved within its range, the other bool, another enum
 // member, a list with its first number moved); nullopt when the kind has no probe here.
 std::optional<Value> probe_for(const FieldSpec& spec, const Value& v);
+// A boot back-end refusal that shows the mapping disagrees with the build (review2 S6): a member of the row's path is missing
+// or not a scalar. boot_sample files it as an error sample (kilnctl: changed); other refusals are missing evidence.
+bool disagreement(const std::string& why);
 // One boot-generation sample of field (a registry's field, or "<list>[].<leaf>" on element 0) of entry id, whose resource
 // (key, root type) has the base bytes given: a registry-roundtrip sample object, or null when the producer lacks evidence.
 json boot_sample(const map::RegistryMap& reg, const RegistrySpec& rs, const std::string& field, const std::string& id, const KilnAssetKey& key,
