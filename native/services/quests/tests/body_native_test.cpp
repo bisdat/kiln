@@ -251,6 +251,35 @@ void test_status_rows_and_removal() {
     CHECK(kiln::qb::ojson::parse(g_manifest)["bodies"].empty());
 }
 
+// review3 S1: a hand-edited ledger with a field of the wrong type, or no JSON at all, must not throw out of the ResourceInit hook. The
+// build goes on, says the ledger was damaged, and writes it anew.
+void test_a_damaged_ledger_is_named_and_written_anew() {
+    for (const char* damaged : {R"({"format":1,"bodies":[{"mod":"a-body","npc":"tobin","state":5}]})",
+                                R"({"format":1,"bodies":[{"mod":null,"npc":"tobin","state":"ready"}]})",
+                                R"({"format":1,"bodies":[{"mod":"gone","npc":"x","state":"ready","template":7,"closure":[]}]})",
+                                R"({"format":1,"bodies":"no"})", "not json", R"([1,2])"}) {
+        body_reset((std::string("16f review3 S1: a damaged ledger ") + damaged).c_str());
+        body_mod("a-body");
+        write(t_root / "data/kiln-quests/native/npc-bodies.ledger.json", damaged);
+        bool threw = false;
+        try {
+            boot_and_resource_init();
+        } catch (const std::exception& e) {
+            threw = true;
+            std::printf("the boot build threw: %s\n", e.what());
+        }
+        CHECK(!threw);
+        CHECK(t_stops.empty());
+        CHECK(g_names.count("a-body:k1") == 1);
+        const auto bodies = kiln::qb::ojson::parse(g_manifest)["bodies"];
+        CHECK(std::any_of(bodies.begin(), bodies.end(), [](const auto& row) { return row["mod"] == "a-body" && row["state"] == "ready"; }));
+        const auto ledger = kiln::qb::ojson::parse(read_file(t_root / "data/kiln-quests/native/npc-bodies.ledger.json"), nullptr, false);
+        CHECK(ledger.is_object() && ledger["bodies"].is_array() && ledger["bodies"].size() == 1 && ledger["bodies"][0]["state"] == "ready");
+    }
+    // a row of the wrong type is named once; the others still count
+    CHECK(logged("NPC body ledger"));
+}
+
 void test_refusals_leave_the_neighbour() {
     struct Case { const char* name; std::function<void()> arrange; const char* says; };
     const std::vector<Case> cases{
@@ -302,6 +331,7 @@ int main(int argc, char** argv) {
     test_server_admits_and_publishes();
     test_refusals_leave_the_neighbour();
     test_status_rows_and_removal();
+    test_a_damaged_ledger_is_named_and_written_anew();
     std::error_code ec;
     fs::remove_all(t_root, ec);
     std::printf("body native: %d checks, %d failed\n", g_checks, g_failures);

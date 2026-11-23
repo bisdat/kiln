@@ -845,40 +845,61 @@ void report_bootpack_rows() {
         bodies ? KILN_CAP_REASON_NONE : KILN_CAP_REASON_SERVICE_OLDER, KilnStr{body_why.data(), body_why.size()});
 }
 
+// A string member of a ledger or manifest row, "" when it is missing or of another type (a hand-edited file must not throw).
+std::string row_text(const qb::ojson& row, const char* key) {
+    const auto it = row.is_object() ? row.find(key) : row.end();
+    return it != row.end() && it->is_string() ? it->get<std::string>() : std::string();
+}
+
 // 16f S5: the last build's body statuses, kept next to Kiln.Blocks' NPC files (kiln-quests/native/), so that a body which
 // was ready at the previous start and is no longer built at all is reported "removed" once. Not a replay of game state.
+// A damaged file (not JSON, a field of another type: a hand edit) is named in the log, read as far as it can be, and written
+// anew from this start's rows; nothing of it may throw out of the game's resource init (review3 S1).
 qb::ojson body_ledger(const qb::ojson& rows, uint64_t generation) {
     qb::ojson all = rows;
-    const std::string data = path_of(KILN_PATH_DATA);
-    if (data.empty()) return all;
-    const fs::path dir = fs::path(widen(data)) / L"kiln-quests" / L"native";
-    const fs::path file = dir / L"npc-bodies.ledger.json";
-    std::error_code ec;
-    const qb::ojson before = fs::exists(file, ec) ? qb::ojson::parse(read_file(file), nullptr, false) : qb::ojson();
-    if (before.is_object() && before.contains("bodies") && before["bodies"].is_array())
-        for (const auto& old : before["bodies"]) {
-            if (!old.is_object() || old.value("state", "") != "ready") continue;
-            const auto same = [&](const qb::ojson& row) { return row.value("mod", "") == old.value("mod", "") && row.value("npc", "") == old.value("npc", ""); };
-            if (std::any_of(rows.begin(), rows.end(), same)) continue;
-            all.push_back({{"mod", old.value("mod", "")}, {"npc", old.value("npc", "")}, {"key", old.value("key", "")}, {"state", "removed"},
-                           {"reason", "no longer built at this start"}, {"template", old.value("template", "")}, {"model", ""}, {"graph", ""},
-                           {"closure", old.value("closure", "")}, {"generation", generation}});
+    try {
+        const std::string data = path_of(KILN_PATH_DATA);
+        if (data.empty()) return all;
+        const fs::path dir = fs::path(widen(data)) / L"kiln-quests" / L"native";
+        const fs::path file = dir / L"npc-bodies.ledger.json";
+        std::error_code ec;
+        const bool had = fs::exists(file, ec);
+        const qb::ojson before = had ? qb::ojson::parse(read_file(file), nullptr, false) : qb::ojson();
+        const bool shaped = before.is_object() && before.contains("bodies") && before["bodies"].is_array();
+        size_t damaged = had && !shaped ? 1 : 0;
+        if (shaped)
+            for (const auto& old : before["bodies"]) {
+                const std::string mod = row_text(old, "mod"), npc = row_text(old, "npc"), state = row_text(old, "state");
+                if (mod.empty() || npc.empty() || state.empty()) { ++damaged; continue; }
+                if (state != "ready") continue;
+                const auto same = [&](const qb::ojson& row) { return row_text(row, "mod") == mod && row_text(row, "npc") == npc; };
+                if (std::any_of(rows.begin(), rows.end(), same)) continue;
+                all.push_back({{"mod", mod}, {"npc", npc}, {"key", row_text(old, "key")}, {"state", "removed"},
+                               {"reason", "no longer built at this start"}, {"template", row_text(old, "template")}, {"model", ""}, {"graph", ""},
+                               {"closure", row_text(old, "closure")}, {"generation", generation}});
+            }
+        if (damaged)
+            KW("native: the NPC body ledger kiln-quests/native/npc-bodies.ledger.json is damaged (%s): it is written anew from this start's "
+               "bodies; a body taken out since the last start may not be reported removed",
+               shaped ? (std::to_string(damaged) + " row(s) without a mod, an NPC and a state as text").c_str() : "not a JSON object with a \"bodies\" list");
+        qb::ojson keep = qb::ojson::array();
+        for (const auto& row : rows)
+            keep.push_back({{"mod", row_text(row, "mod")}, {"npc", row_text(row, "npc")}, {"key", row_text(row, "key")}, {"state", row_text(row, "state")},
+                            {"template", row_text(row, "template")}, {"closure", row_text(row, "closure")}});
+        if (keep.empty() && !had) return all;  // no body ever: no file
+        fs::create_directories(dir, ec);
+        fs::path tmp = file;
+        tmp += L".tmp";
+        {
+            std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
+            f << qb::ojson{{"format", 1}, {"bodies", keep}}.dump(1);
         }
-    qb::ojson keep = qb::ojson::array();
-    for (const auto& row : rows)
-        keep.push_back({{"mod", row.value("mod", "")}, {"npc", row.value("npc", "")}, {"key", row.value("key", "")}, {"state", row.value("state", "")},
-                        {"template", row.value("template", "")}, {"closure", row.value("closure", "")}});
-    if (keep.empty() && !fs::exists(file, ec)) return all;  // no body ever: no file
-    fs::create_directories(dir, ec);
-    fs::path tmp = file;
-    tmp += L".tmp";
-    {
-        std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
-        f << qb::ojson{{"format", 1}, {"bodies", keep}}.dump(1);
+        ec.clear();
+        fs::rename(tmp, file, ec);
+        if (ec) KW("native: the NPC body ledger could not be written (%s): a body taken out is not reported as removed at the next start", ec.message().c_str());
+    } catch (const std::exception& e) {
+        KW("native: the NPC body ledger could not be read or written (%s): no body is reported removed at this start", e.what());
     }
-    ec.clear();
-    fs::rename(tmp, file, ec);
-    if (ec) KW("native: the NPC body ledger could not be written (%s): a body taken out is not reported as removed at the next start", ec.message().c_str());
     return all;
 }
 
