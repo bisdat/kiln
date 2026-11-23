@@ -929,6 +929,7 @@ internal static class NpcCompiler
         var body = PartOf<BodyBlock>(ctx, n.Body, null, name, "body");
         JsonObject? ownBody = null;
         var authored = body.Block.Model != null;
+        NpcBodyCapRows.Rows.Ensure();  // an NPC block is a first use of Kiln.Blocks: blocks.npc_body from here
         if (authored)
         {
             // The chassis is Kiln's choice, never an author-facing reflection/template recipe.

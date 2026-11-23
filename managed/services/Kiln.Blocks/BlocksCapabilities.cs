@@ -33,3 +33,14 @@ internal static class BlocksRows
         WorldTablesNative.ReportBudgetRows();
     }
 }
+
+/// <summary>blocks.npc_body from Kiln.Blocks' first NPC use (an NPC block's definition, <see cref="NpcBodies"/>), so that
+/// <c>Capabilities.Get</c> finds the row a mod asks for (BlocksRows reports it too, with the other rows, from their first use).</summary>
+internal static class NpcBodyCapRows
+{
+    internal static readonly ServiceCapRows Rows = new("kiln.blocks npc bodies", () =>
+    {
+        var body = BlockCapabilities.CurrentNpcBodyRow();
+        ServiceCaps.Report(BlockCapabilities.NpcBody, body.State, body.Reason, body.Text);
+    });
+}

@@ -102,6 +102,7 @@ public static class NpcBodies
 
     internal static void RequireCapability()
     {
+        NpcBodyCapRows.Rows.Ensure();  // blocks.npc_body exists from Kiln.Blocks' first NPC use: this is one (Capabilities.Get finds it)
         var row = BlockCapabilities.CurrentNpcBodyRow();
         if (row.State != CapabilityState.Available) throw new KilnUnavailableException(BlockCapabilities.NpcBody, row.Text);
         if (BlockCapabilities.NpcBodyForTests != null) return;  // a unit test's own row: the process table is not its business
