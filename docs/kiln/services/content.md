@@ -882,7 +882,8 @@ Client.Post(() =>
   group), or `like:<item>` (into every group of every table that drops that item, next to it). `countMin`,
   `countMax` (1..100000), `chance` (spawnProbability 0..1), `weight` (in a selector group). Tables load on demand: the
   stacks are added the first time the game uses a table, before that roll (the DefaultInventoryAcquire hook), and to
-  every table seen so far when definitions change. A plain group gets one more child group holding the new stacks
+  every table seen so far when definitions change. Another thread that uses the same table meanwhile waits until they
+  are in. A plain group gets one more child group holding the new stacks
   (each rolls its own chance; the group's own stacks stay where they are, so drop rules keep working on them); a
   selector group (one entry picked by weight) gets its stack list copied with the new stacks appended (at most 64
   entries, the game's limit; drop rules are applied to the copy again). The world's Loot Amount scales the counts as
