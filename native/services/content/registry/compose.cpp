@@ -385,6 +385,7 @@ bool select(const View& v, const Schema& schema, const State& s, const std::stri
     const bool upper = std::any_of(sel.id.begin(), sel.id.end(), [](char ch) { return ch >= 'A' && ch <= 'Z'; });
     const std::string id = sel.id.find(':') == std::string::npos && sel.id != "*" ? "game:" + lower(sel.id) : upper ? lower(sel.id) : sel.id;
     auto keep = [&](const std::string& e) {
+        if (sel.except.count(e)) return false;
         if (sel.where.is_object())
             for (const auto& [k, c] : sel.where.items()) {
                 const auto x = v.get({reg, e, k});
@@ -533,6 +534,7 @@ struct Who {
 };
 
 // One edit's writes over its entries: all or nothing. report: false while a mod's final runs on its own scratch copy.
+void refuse(Ctx& c, const Who& w, const Edit& e, const std::string& why);
 bool apply_targets(Ctx& c, State& s, const Who& w, const Edit& e, const std::vector<Target>& ts, bool report, std::string* why) {
     struct Step {
         const Target* t = nullptr;
@@ -552,7 +554,9 @@ bool apply_targets(Ctx& c, State& s, const Who& w, const Edit& e, const std::vec
         return false;
     };
     std::vector<Step> steps;
+    size_t refused_targets = 0;
     for (const Target& t : ts) {
+        const bool ok = [&]() -> bool {
         // one place on two scales (a raw member behind a field Kiln converts). D1 (work-bb's ruling): an absolute value wins over
         // the other scale's writers, reported (their chain is superseded); a relative change would have to be converted
         // through the field's mapping, which composition does not know here: refused
@@ -599,7 +603,7 @@ bool apply_targets(Ctx& c, State& s, const Who& w, const Edit& e, const std::vec
         if (e.yield && earlier) {
             st.yielded = true;
             steps.push_back(std::move(st));
-            continue;
+            return true;
         }
         if (!next_value(t, cur, &st.next, why)) return c.failed_id = t.ref.id, *why = t.ref.id + ": " + *why, false;
         if (last_other && (e.exclusive || excl)) {
@@ -622,7 +626,15 @@ bool apply_targets(Ctx& c, State& s, const Who& w, const Edit& e, const std::vec
             st.certainty = certainty_of(prev->kind);
         }
         steps.push_back(std::move(st));
+        return true;
+        }();
+        if (ok) continue;
+        if (!e.per_entry) return false;
+        // review4 NS6: this entry alone is refused (named), the edit goes on with the others
+        refuse(c, w, e, *why);
+        ++refused_targets;
     }
+    if (e.per_entry && refused_targets && steps.empty()) return true;  // every entry was refused, each named already
     for (Step& st : steps) {
         const Target& t = *st.t;
         if (st.yielded) {

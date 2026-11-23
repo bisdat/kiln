@@ -84,6 +84,11 @@ struct LiveState {
         // changes; the handle stays valid and a process change is tried again in the next world (review4 NS2).
         bool inactive = false;
         uint64_t inactive_world = 0;
+        // review4 NS6: an entry-point change (MOD_LOAD, WORLD_LOAD, HOT_RELOAD) refuses per entry. Entries refused at
+        // binding or evaluation in this world are left out of its composition until the world changes, with their rows.
+        std::map<std::pair<std::string, uint32_t>, std::set<std::string>> world_except;  // (source, n) -> Kiln ids
+        std::vector<registry::Refusal> world_rows;
+        uint64_t except_world = 0;
     };
     std::map<uint64_t, Change> changes;
     std::set<KilnOwner> dead;
@@ -99,6 +104,8 @@ struct LiveState {
 };
 LiveState g;  // under store_mutex
 bool inactive_now(const LiveState::Change& c) { return c.inactive && c.inactive_world == g.world; }
+// Entry points refuse per entry like GameStart; a MANUAL transaction is all-or-nothing for binding and evaluation (review4 NS6).
+bool per_entry(const LiveState::Change& c) { return c.point != KILN_REGISTRY_LIVE_MANUAL; }
 uint64_t g_next_change = 0, g_next_world = 0; // never reused, including after an install
 std::mutex g_retiring_mu;
 std::set<KilnOwner> g_retiring;
@@ -954,6 +961,11 @@ void compose_changes() {
     for (const auto* change : ordered) {
         registry::ModInput input;
         input.id = change->mod; input.batches = change->batches;
+        if (!change->world_except.empty() && change->except_world == g.world)
+            for (auto& batch : input.batches)
+                for (auto& edit : batch.edits)
+                    if (const auto it = change->world_except.find({batch.source, edit.n}); it != change->world_except.end())
+                        edit.select.except.insert(it->second.begin(), it->second.end());
         result = registry::compose_after(*g.in->schema, g.in->base, *g.prepared, result, {input});
         result.refused.insert(result.refused.end(), change->refused.begin(), change->refused.end());
     }
@@ -1052,6 +1064,27 @@ bool reject_unwritten_changes(uint64_t candidate, const std::set<uintptr_t>& unw
     }
     return any;
 }
+// review4 NS6: an entry-point change whose binding or evaluation refused some entries (an inexact whole-number cost, an entry
+// missing in this world, a config the entry lacks) leaves those entries out for this world and applies the rest. True: an
+// entry was newly left out (the caller recomposes and binds again). A row without an entry falls back to the whole change.
+bool exclude_refused_entries() {
+    bool any = false;
+    for (auto& [handle, change] : g.changes) {
+        if (!change.order || inactive_now(change) || !per_entry(change)) continue;
+        const std::string prefix = "live:" + std::to_string(handle) + ":";
+        std::vector<const registry::Refusal*> rows;
+        for (const auto& r : g.refused)
+            if (r.source.rfind(prefix, 0) == 0) rows.push_back(&r);
+        if (rows.empty() || std::any_of(rows.begin(), rows.end(), [](const auto* r) { return r->id.empty(); })) continue;
+        if (change.except_world != g.world) change.world_except.clear(), change.world_rows.clear(), change.except_world = g.world;
+        for (const auto* r : rows)
+            if (change.world_except[{r->source, r->n}].insert(r->id).second) {
+                change.world_rows.push_back(*r);
+                any = true;
+            }
+    }
+    return any;
+}
 // A refusal row once: a pass that keeps the rows of an earlier pass binds again and would repeat the stage's own rows.
 void keep_row(const registry::Refusal& r) {
     const bool seen = std::any_of(g.refused.begin(), g.refused.end(), [&](const registry::Refusal& x) {
@@ -1062,6 +1095,8 @@ void keep_row(const registry::Refusal& r) {
 struct ApplyOutcome {
     std::string error;      // a write that did not land after every charge and retry (address-free); empty: all verified
     std::string candidate;  // the committing candidate's own write failure; empty: none
+    std::string unbound;    // the candidate's binding or evaluation refusal (a MANUAL transaction refuses whole)
+    std::vector<registry::Refusal> entries;  // the candidate's entries refused alone in this world (review4 NS6)
 };
 // Bind, flush and charge failures. charge=false (a rollback, a revert, an owner's cleanup): a failed write is reported to the
 // caller as unverified and charged to no retained change. keep_refused: the rows found before this pass stay (a commit's
@@ -1077,8 +1112,9 @@ ApplyOutcome apply_changes(uint64_t candidate = 0, bool keep_refused = false, bo
     if (!candidate) compose_changes();
     for (;;) {
         prepare_bindings();
+        if (exclude_refused_entries()) { compose_changes(); continue; }
         if (reject_unbound_changes(candidate, &rejected)) { compose_changes(); continue; }
-        if (candidate && !binding_refusal(candidate).empty()) break; // fail before writing any part of this candidate
+        if (candidate && !binding_refusal(candidate).empty()) { out.unbound = binding_refusal(candidate); break; } // fail before writing any part of this candidate
         std::vector<uintptr_t> missed;
         std::string ignored;  // store_flush's text names a process address; reasons name Kiln places instead
         store_flush_checked(&ignored, &missed);
@@ -1104,6 +1140,12 @@ ApplyOutcome apply_changes(uint64_t candidate = 0, bool keep_refused = false, bo
     }
     for (const auto& r : prior) keep_row(r);
     for (const auto& r : rejected) keep_row(r);
+    for (const auto& [handle, change] : g.changes)  // entries left out for this world keep their rows in every report of it
+        if (change.order && change.except_world == g.world && !inactive_now(change))
+            for (const auto& r : change.world_rows) {
+                keep_row(r);
+                if (handle == candidate) out.entries.push_back(r);
+            }
     if (application) report();
     else queue_change_report();
     return out;
@@ -1458,6 +1500,7 @@ KilnResult registry_live_submit(KilnOwner owner, uint64_t handle, const std::str
         refused.push_back({change->mod, batch.source, batch.stage, edit.n, reason, ""});
         return true;
     });
+    for (auto& edit : batch.edits) edit.per_entry = per_entry(*change);  // review4 NS6: entry points refuse per entry
     if (g.in->check) g.in->check(&batch, &refused);
     else std::erase_if(batch.edits, [&](const registry::Edit& edit) {
         std::string reason;
@@ -1521,28 +1564,59 @@ KilnResult registry_live_commit(KilnOwner owner, uint64_t handle, RegistryLiveRe
             change->order = ++g.next_order;
             compose_changes();
             const std::string prefix = "live:" + std::to_string(handle) + ":";
-            std::set<std::pair<std::string, uint32_t>> refused_edits;
+            const bool entries = per_entry(*change);
+            std::set<std::pair<std::string, uint32_t>> refused_edits, entry_edits;
             std::vector<registry::Refusal> refused_rows;
             std::string refusal;
+            // Parse/mapping refusals were counted on submit and are not in accepted. Only composition refusals
+            // can reduce the accepted edit count here (exclusive, dependency or selector failures).
+            std::set<std::pair<std::string, uint32_t>> submitted;
+            for (const auto& row : change->refused) submitted.emplace(row.source, row.n);
             for (const auto& row : g.in->result.refused)
-                if (row.source.rfind(prefix, 0) == 0) {
-                    refused_edits.emplace(row.source, row.n);
+                if (row.source.rfind(prefix, 0) == 0 && !submitted.count({row.source, row.n})) {
                     refused_rows.push_back(row);
                     if (refusal.empty()) refusal = row.reason;
                 }
-            // Parse/mapping refusals were counted on submit and are not in accepted. Only composition refusals
-            // can reduce the accepted edit count here (exclusive, dependency or selector failures).
-            for (const auto& row : change->refused) refused_edits.erase({row.source, row.n});
-            const uint32_t newly_refused = static_cast<uint32_t>(refused_edits.size());
-            reply.refused += newly_refused;
-            reply.accepted -= std::min(reply.accepted, newly_refused);
-            if (newly_refused) {
+            uint32_t entry_refusals = 0;
+            for (const auto& row : refused_rows) {
+                if (entries && !row.id.empty()) {  // review2 S3: an entry point drops that selected entry alone
+                    for (auto& batch : change->batches)
+                        if (batch.source == row.source)
+                            for (auto& edit : batch.edits)
+                                if (edit.n == row.n) edit.select.except.insert(row.id);
+                    entry_edits.emplace(row.source, row.n);
+                    change->refused.push_back(row);
+                    ++entry_refusals;
+                } else {
+                    refused_edits.emplace(row.source, row.n);
+                }
+            }
+            uint32_t newly_refused = static_cast<uint32_t>(refused_edits.size());
+            if (newly_refused || entry_refusals) {
                 for (auto& batch : change->batches)
                     std::erase_if(batch.edits, [&](const auto& edit) { return refused_edits.count({batch.source, edit.n}) != 0; });
                 for (const auto& row : refused_rows)
                     if (refused_edits.count({row.source, row.n})) change->refused.push_back(row);
                 compose_changes(); // a refused edit cannot activate later just because another handle was reverted
             }
+            if (entry_refusals) {  // an edit whose every selected entry was refused applies nowhere: refused as a whole
+                std::set<std::pair<std::string, uint32_t>> present;
+                for (const auto& [ref, fo] : g.in->result.fields)
+                    for (const auto& row : fo.chain)
+                        if (row.source.rfind(prefix, 0) == 0) present.emplace(row.source, row.n);
+                uint32_t empty = 0;
+                for (auto& batch : change->batches)
+                    std::erase_if(batch.edits, [&](const auto& edit) {
+                        const bool gone = entry_edits.count({batch.source, edit.n}) && !present.count({batch.source, edit.n});
+                        empty += gone;
+                        return gone;
+                    });
+                if (empty) compose_changes();
+                newly_refused += empty;
+            }
+            reply.refused += static_cast<uint32_t>(refused_edits.size()) + entry_refusals;
+            reply.accepted -= std::min(reply.accepted, newly_refused);
+            if (entries && !refusal.empty()) reply.reason = refusal;
             if (!reply.accepted) {
                 const std::string mod = change->mod;
                 g.changes.erase(handle); compose_changes();
@@ -1557,11 +1631,16 @@ KilnResult registry_live_commit(KilnOwner owner, uint64_t handle, RegistryLiveRe
                 const ApplyOutcome applied = apply_changes(handle);
                 const auto slots = change_slots(handle);
                 reply.skipped = foreign_slots(slots);
-                const auto own_refusal = std::find_if(g.refused.begin(), g.refused.end(), [&](const auto& row) {
-                    return row.source.rfind(prefix, 0) == 0;
+                // review4 NS6: an entry point's entries refused at binding (an inexact whole-number cost, ...) are left out
+                // alone and counted; the rest applies. Nothing left at all: refused like a whole transaction.
+                reply.refused += static_cast<uint32_t>(applied.entries.size());
+                if (!applied.entries.empty() && reply.reason.empty()) reply.reason = applied.entries.front().reason;
+                const bool nothing = !applied.entries.empty() && std::none_of(g.in->result.fields.begin(), g.in->result.fields.end(), [&](const auto& kv) {
+                    return std::any_of(kv.second.chain.begin(), kv.second.chain.end(), [&](const ChainRow& row) { return row.source.rfind(prefix, 0) == 0; });
                 });
-                if (!applied.candidate.empty() || own_refusal != g.refused.end() || reply.skipped) {
-                    const std::string why = !applied.candidate.empty() ? applied.candidate : own_refusal != g.refused.end() ? own_refusal->reason : "another writer owns a target slot";
+                if (!applied.candidate.empty() || !applied.unbound.empty() || reply.skipped || nothing) {
+                    const std::string why = !applied.candidate.empty() ? applied.candidate : !applied.unbound.empty() ? applied.unbound
+                        : nothing ? applied.entries.front().reason : "another writer owns a target slot";
                     const std::string mod = change->mod;
                     g.changes.erase(handle);
                     // The rollback keeps the rows the first pass found (other changes it rejected) and charges no failed

@@ -24,6 +24,7 @@
 #include <cstdint>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -149,6 +150,9 @@ struct Selector {
     std::string id;  // an id or a case-insensitive glob over ids ("game:material_*"); "*" = every entry
     json where;      // {"<field>": "<cond>" | <value>}: every condition holds (on the view the stage gives)
     std::vector<std::string> has, has_not;  // traits
+    // Kiln-internal, never read from IR: entries this selector leaves out (lower-case Kiln ids). The live back-end sets it
+    // for an entry-point change whose edit was refused for that entry alone (review4 NS6, review2 S3).
+    std::set<std::string> except;
     bool exact() const { return id.find_first_of("*?") == std::string::npos; }
 };
 
@@ -183,6 +187,9 @@ struct Edit {
     std::map<std::string, Value> add_fields;
     std::vector<RawWrite> raw;  // not empty: an Advanced-tier edit of raw member paths (then field, op and list are unset)
     bool exclusive = false, yield = false;
+    // Kiln-internal, never read from IR: a target this edit cannot take (a conflict, a value that does not fit) refuses that
+    // entry alone, named, and the edit applies to the others (entry-point live changes, review4 NS6). Off: the whole edit.
+    bool per_entry = false;
 };
 
 struct Batch {

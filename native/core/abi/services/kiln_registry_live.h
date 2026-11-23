@@ -26,8 +26,13 @@
  *
  * IR/schema/buffer rules are kiln_registry.h's. Reading text uses BUFFER_TOO_SMALL and the whole required length;
  * submit's optional report never changes its result to BUFFER_TOO_SMALL. Result out is optional; when supplied, size
- * must cover v1, larger records are accepted and size is set to v1. Refused edits are reported per edit. Runtime binding
- * or write failure rolls the candidate back; UNVERIFIED means rollback could not be proved, never success.
+ * must cover v1, larger records are accepted and size is set to v1. Refused edits are reported per edit. MOD_LOAD,
+ * WORLD_LOAD and HOT_RELOAD changes refuse per entry, like the stage: a selected entry that cannot take an edit (an exclusive
+ * conflict, an entry missing in this world, a config it lacks, an inexact whole-number value with reason "not_exact: ") is
+ * refused alone, counted in refused, and the rest applies (APPLIED, reason = the first refusal); an entry refused at binding
+ * is left out for that world only. A MANUAL transaction is all-or-nothing: a binding or evaluation refusal of any entry
+ * refuses the whole commit. A candidate's own failed write rolls it back; UNVERIFIED means rollback could not be proved,
+ * never success.
  * A retained change that cannot apply at a later application (a binding or evaluation failure, or a failed write of one of
  * its own slots) is inactive for that world only: its handle stays valid, a MOD_LOAD change is tried again in the next world,
  * and registry.json names its mod. A failed write is charged to the change owning that slot, never to another change. A slot

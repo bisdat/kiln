@@ -82,7 +82,16 @@ the mod's intent at each point (10 becomes 20 at ModLoad and stays 20 at WorldLo
 doing it in one pass both read 10. The pass's edits are committed only after every callback ran: all Adds, then all Alters,
 then all Finals, each in load order (dependencies first), so an earlier mod's Final still beats a later mod's Alter. Between
 passes the later commit wins (a ModLoad Final of 70 loses to a later Manual Alter of 80; reverting that restores 70).
-`Registry.Change` and `Registry.Read` read the live values as they are, the mod's own layers included. A throwing callback submits none of that turn's buffered edits and
+`Registry.Change` and `Registry.Read` read the live values as they are, the mod's own layers included.
+
+**Refusals per entry.** At ModLoad, WorldLoad and HotReload an edit that one selected entry cannot take refuses that entry
+alone, named in kiln.log and registry.json, and applies to the others: an exclusive claim on that entry, an entry missing
+in this world, a config the entry lacks, or a value its storage cannot hold exactly (an `items.manaCost x1.5` over
+`Select("*")` where one item stores whole numbers: that item's reason starts with `not_exact: `). The result is `Applied`
+with `Refused > 0` and the first reason. An entry refused at binding is left out for that world only; a ModLoad change
+tries it again in the next world. GameStart edits bind per entry the same way at world load (a conflict at the stage itself
+still refuses the edit). `Registry.Change` stays all-or-nothing: a binding or evaluation failure of any entry refuses the
+whole transaction with the same reason, and nothing of it is written. A throwing callback submits none of that turn's buffered edits and
 reverts that author's earlier commits from the same point. Other points' retained layers remain; a later point or world
 can retry the author. When the registry itself is not available yet (`KilnUnavailableException`: its live back-end is still
 being installed, a budget is full, or the base is still being prepared), the point is not a fault: Kiln undoes that pass's

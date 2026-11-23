@@ -64,11 +64,16 @@ the existing Advanced `Content.*` and raw paths keep their previous behavior.
 `KilnRegistryLiveResult` is 232 bytes. Its outcome distinguishes applied, waiting for a world/resource, refused,
 restart-required, world-required, reverted, skipped by another writer, and unverified rollback. Accepted/refused/skipped
 counts and a reason accompany it. A native argument/owner/thread/handle error uses `KilnResult`; a valid request that
-cannot take effect uses the result outcome. A binding or write failure takes the candidate back; an unproved take-back
-is **Unverified**, not success.
+cannot take effect uses the result outcome. Mod load, world load and hot reload changes refuse **per entry**, like the
+stage: a selected entry that cannot take an edit (an exclusive conflict, an entry missing in this world, a config it
+lacks, an inexact whole-number value) is refused alone and counted, the rest applies, and the result is Applied with
+`refused > 0` and the first reason; an entry refused at binding is left out for that world only. A **Manual** transaction
+is all-or-nothing: a binding or evaluation refusal of any entry takes the whole candidate back. A candidate's own failed
+write takes it back too; an unproved take-back is **Unverified**, not success.
 
 Cost storage is checked per entry on the running build. A fractional mana/stamina cost for an entry with whole-number
-storage is refused, never rounded; float-config entries keep fractional values. The result uses `Refused` and its reason
+storage is refused, never rounded; float-config entries keep fractional values. A Manual transaction's result uses
+`Refused`; an entry point's result is Applied with that entry counted in `refused`. Either way the reason
 begins with the stable token **`not_exact: `**, followed by `items.<field> of <item> is a whole number on this build;
 <value> was not written`. Tools may match that token together with the refused outcome, rather than parsing human text;
 it is distinct from Unproven mapping refusals and transport errors. The native header exposes

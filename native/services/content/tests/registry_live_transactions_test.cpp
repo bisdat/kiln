@@ -213,20 +213,23 @@ void unrelated_live_binding_failure_isolated() {
     registry_live_publish();
     check(reported("the entry is not in this world"), "the earlier change's binding refusal remains visible");
 }
-void pending_binding_failure_is_atomic() {
+// review4 NS6 (ruling Nov 23): an entry-point change refuses per entry, like GameStart: the unbindable entry alone.
+void pending_binding_failure_drops_only_that_entry() {
     world(); g_files.clear(); stage({});
     RegistryLiveReply reply;
     const auto h = change(71, "a", "[{" + wood + R"("op":75},{"registry":"items","select":"game:material_t1_wood_logs","field":"manaCost","op":2}])", 1);
     check(registry_live_commit(71, h, &reply) == KILN_OK && reply.outcome == RegistryLiveOutcome::PendingWorld && reply.accepted == 2,
           "the complete pre-world change waits for live binding");
     registry_live_world_begin(); apply_registry_files({});
-    check(at<uint32_t>(WOOD_AT) == 10, "a pending change with a binding failure applies none of its fields");
-    check(registry_live_status().active == 0, "the failed pending change is not retained as half applied");
-    check(reported("not applied in this world"), "the failed pending change has a named world-application refusal");
-    check(registry_live_revert(71, h, &reply) == KILN_OK && reply.outcome == RegistryLiveOutcome::Reverted,
-          "a change rejected for this world keeps its handle (review4 NS2): the owner can still revert it");
+    check(at<uint32_t>(WOOD_AT) == 75 && registry_live_status().active == 1, "the bindable entry applies");
+    check(reported("items[game:material_t1_wood_logs].manaCost: the item has no such configuration") && !reported("not applied in this world"),
+          "only the unbindable entry is refused, named");
+    apply_registry_files({});
+    check(at<uint32_t>(WOOD_AT) == 75 && reported("the item has no such configuration"), "a later application in the world keeps both");
+    check(registry_live_revert(71, h, &reply) == KILN_OK && reply.outcome == RegistryLiveOutcome::Reverted && at<uint32_t>(WOOD_AT) == 10,
+          "the handle reverts what applied");
 }
-void carried_binding_failure_is_atomic() {
+void carried_binding_failure_drops_only_that_entry() {
     fresh_live(); RegistryLiveReply reply;
     const auto h = change(71, "a", "[{" + wood + R"("op":75},{"registry":"items","select":"game:sword_t2","field":"manaCost","op":20}])", 1);
     registry_live_commit(71, h, &reply);
@@ -234,15 +237,17 @@ void carried_binding_failure_is_atomic() {
     registry_live_world_stop(); std::string error; store_reset(true, &error); world();
     reg(KILN_CONTENT_ITEMS).by_id.erase(SWORD);
     registry_live_world_begin(); apply_registry_files({});
-    check(at<uint32_t>(WOOD_AT) == 10 && registry_live_status().active == 0,
-          "a process change cannot carry only half its edits into the next world");
-    check(reported("not applied in this world"), "the failed carry-over is reported by mod and change");
+    check(at<uint32_t>(WOOD_AT) == 75 && registry_live_status().active == 1, "the next world applies the entries it has");
+    check(reported("items[game:sword_t2].manaCost: the entry is not in this world"), "the missing entry is refused, named");
+    registry_live_world_stop(); store_reset(true, &error); world();
+    registry_live_world_begin(); apply_registry_files({});
+    check(at<uint32_t>(WOOD_AT) == 75 && at<float>(SWORD_AT + 0x40) == 20.0f, "a world that has the entry again applies it again");
 }
 void reapplied_binding_failure_is_atomic() {
     fresh_live(); RegistryLiveReply reply;
-    const auto h = change(71, "a", "[{" + wood + R"("op":75},{"registry":"items","select":"game:sword_t2","field":"manaCost","op":20}])", 1);
+    const auto h = change(71, "a", "[{" + wood + R"("op":75},{"registry":"items","select":"game:sword_t2","field":"manaCost","op":20}])", 4);
     registry_live_commit(71, h, &reply);
-    check(at<uint32_t>(WOOD_AT) == 75, "the change is initially fully applied");
+    check(at<uint32_t>(WOOD_AT) == 75, "the manual transaction is initially fully applied");
     reg(KILN_CONTENT_ITEMS).by_id.erase(SWORD);
     apply_registry_files({});
     check(at<uint32_t>(WOOD_AT) == 10 && registry_live_status().active == 0,
@@ -256,9 +261,10 @@ void pending_evaluation_failure_is_atomic() {
     check(reply.outcome == RegistryLiveOutcome::PendingWorld && reply.accepted == 2, "archive values admit the pending relative change");
     mem<float>(SWORD_AT + 0x40, 200.0f); mem<int32_t>(SWORD_AT + 0x44, 200);
     registry_live_world_begin(); apply_registry_files({});
-    check(at<uint32_t>(WOOD_AT) == 10 && at<float>(SWORD_AT + 0x40) == 200.0f,
-          "a runtime evaluation failure is preflighted before any pending field writes");
-    check(registry_live_status().active == 0 && reported("not applied in this world"), "the failed runtime evaluation deactivates and reports the whole change");
+    check(at<uint32_t>(WOOD_AT) == 75 && at<float>(SWORD_AT + 0x40) == 200.0f,
+          "a runtime evaluation failure refuses that entry before any write; the rest of the entry-point change applies");
+    check(registry_live_status().active == 1 && reported("items[game:sword_t2].manaCost: the result") && !reported("not applied in this world"),
+          "the failed evaluation is reported for its entry only");
 }
 void pending_write_failure_is_rolled_back() {
     world(); g_files.clear(); stage({}); RegistryLiveReply reply;
@@ -533,11 +539,65 @@ void pending_fractional_integer_cost_is_refused() {
     registry_live_commit(71, h, &reply);
     check(reply.outcome == RegistryLiveOutcome::PendingWorld, "a copied cost waits for its actual per-entry storage type");
     registry_live_world_begin(); apply_registry_files({});
-    check(at<int32_t>(impact_at("manaCost")) == 10 && registry_live_status().active == 0,
-          "world-load preflight deactivates the complete pending fractional integer change");
+    check(at<int32_t>(impact_at("manaCost")) == 10, "world-load binding refuses the inexact entry; nothing is rounded");
     bool exact = false;
     for (const auto& refusal : g_last_report.refused) exact |= refusal.reason.rfind("not_exact: ", 0) == 0;
     check(exact, "a pending change's rejection preserves the stable reason token");
+}
+// review4 NS6: an inexact whole-number cost at an entry point refuses that entry only, with the not_exact token.
+void entry_point_inexact_cost_drops_only_that_entry() {
+    for (uint32_t point = 1; point <= 3; ++point) {
+        fresh_live(); use_integer_impact("manaCost"); RegistryLiveReply reply;
+        const auto h = change(71, "a", "[{" + wood + "\"op\":75}," + cost_edit("manaCost", "2.5") + "]", point);
+        check(registry_live_commit(71, h, &reply) == KILN_OK && reply.outcome == RegistryLiveOutcome::Applied, "the pass applies");
+        check(reply.accepted == 2 && reply.refused == 1 && reply.reason.rfind("not_exact: ", 0) == 0,
+              "refused > 0 with the stable not_exact token for that entry");
+        check(at<uint32_t>(WOOD_AT) == 75 && at<int32_t>(impact_at("manaCost")) == 10, "the other entry applies, the cost is never rounded");
+        registry_live_publish();
+        bool exact = false;
+        for (const auto& r : g_last_report.refused) exact |= r.reason.rfind("not_exact: ", 0) == 0 && r.id == "game:sword_t2";
+        check(exact, "registry.json names the refused entry with the token");
+        registry_live_revert(71, h, &reply);
+        check(at<uint32_t>(WOOD_AT) == 10, "revert removes what applied");
+    }
+}
+// review4 NS6: a selector over every item at an entry point refuses the entries that cannot take the edit, one by one;
+// a MANUAL transaction with the same edit is refused whole.
+void entry_point_selector_refuses_per_entry() {
+    fresh_live(); use_integer_impact("manaCost"); RegistryLiveReply reply;
+    const std::string all = R"([{"registry":"items","select":"*","field":"manaCost","op":{"mul":1.5}}])";
+    const auto manual = change(70, "m", all, 4);
+    registry_live_commit(70, manual, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Refused && reply.accepted == 0 && at<int32_t>(impact_at("manaCost")) == 10,
+          "a manual transaction stays all-or-nothing");
+    const auto h = change(71, "a", all, 2);
+    check(registry_live_commit(71, h, &reply) == KILN_OK && reply.outcome == RegistryLiveOutcome::Applied && reply.accepted == 1 && reply.refused == 2,
+          "an entry point applies the entries that can take it and counts each refused entry");
+    check(at<int32_t>(impact_at("manaCost")) == 15, "the sword's whole-number cost 10 x 1.5 = 15 applies");
+    registry_live_revert(71, h, &reply);
+}
+// review2 S3: an exclusive conflict on one selected entry refuses that entry at an entry point; MANUAL refuses the edit.
+void selector_conflict_refuses_one_entry_at_entry_points() {
+    for (uint32_t point : {2u, 4u}) {
+        fresh_live(); RegistryLiveReply reply;
+        const auto a = change(70, "a", "[{" + wood + R"("op":50,"exclusive":true}])");
+        registry_live_commit(70, a, &reply);
+        const auto b = change(72, "b", R"([{"registry":"items","select":"game:material_*","field":"maxStack","op":70}])", point);
+        registry_live_commit(72, b, &reply);
+        if (point == 4) {
+            check(reply.outcome == RegistryLiveOutcome::Refused && reply.accepted == 0 && reply.refused == 1,
+                  "a manual wildcard edit with one exclusive conflict is refused as one edit");
+            check(at<uint32_t>(WOOD_AT) == 50 && at<uint32_t>(STONE_AT) == 50, "nothing of it applies");
+        } else {
+            check(reply.outcome == RegistryLiveOutcome::Applied && reply.accepted == 1 && reply.refused == 1 &&
+                  reply.reason.find("Conflict (exclusive)") != std::string::npos,
+                  "an entry point refuses the conflicting entry alone, with its reason");
+            check(at<uint32_t>(WOOD_AT) == 50 && at<uint32_t>(STONE_AT) == 70, "the other selected entry applies");
+        }
+        registry_live_revert(70, a, &reply);
+        check(at<uint32_t>(WOOD_AT) == 10 && at<uint32_t>(STONE_AT) == (point == 4 ? 50u : 70u),
+              "a refused entry never activates later when its conflicting owner leaves");
+    }
 }
 void flattened_socket_read_write_revert() {
     fresh_live(); RegistryLiveReply reply; std::string value;
@@ -760,8 +820,8 @@ int main() {
         {"packs_code_and_out_of_order_revert", packs_code_and_out_of_order_revert},
         {"unrelated_pack_binding_failure_isolated", unrelated_pack_binding_failure_isolated},
         {"unrelated_live_binding_failure_isolated", unrelated_live_binding_failure_isolated},
-        {"pending_binding_failure_is_atomic", pending_binding_failure_is_atomic},
-        {"carried_binding_failure_is_atomic", carried_binding_failure_is_atomic},
+        {"pending_binding_failure_drops_only_that_entry", pending_binding_failure_drops_only_that_entry},
+        {"carried_binding_failure_drops_only_that_entry", carried_binding_failure_drops_only_that_entry},
         {"reapplied_binding_failure_is_atomic", reapplied_binding_failure_is_atomic},
         {"pending_evaluation_failure_is_atomic", pending_evaluation_failure_is_atomic},
         {"pending_write_failure_is_rolled_back", pending_write_failure_is_rolled_back},
@@ -803,7 +863,10 @@ int main() {
         {"multi_change_write_failure_is_attributed_per_change", multi_change_write_failure_is_attributed_per_change},
         {"rejected_process_change_returns_next_world", rejected_process_change_returns_next_world},
         {"foreign_slot_keeps_the_rest_of_a_retained_change", foreign_slot_keeps_the_rest_of_a_retained_change},
-        {"pass_read_excludes_own_layers", pass_read_excludes_own_layers}};
+        {"pass_read_excludes_own_layers", pass_read_excludes_own_layers},
+        {"entry_point_inexact_cost_drops_only_that_entry", entry_point_inexact_cost_drops_only_that_entry},
+        {"entry_point_selector_refuses_per_entry", entry_point_selector_refuses_per_entry},
+        {"selector_conflict_refuses_one_entry_at_entry_points", selector_conflict_refuses_one_entry_at_entry_points}};
     for (auto [name, fn] : tests) try { fn(); std::printf("ok %s\n", name); } catch (const std::exception& e) { ++failed; std::printf("FAIL %s: %s\n", name, e.what()); }
     std::printf("registry live transactions: %d checks, %d failed groups\n", checks, failed);
     return failed ? 1 : 0;
