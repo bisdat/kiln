@@ -667,11 +667,12 @@ bool content_boot_call(kc::bootpack::Call bridge, uint32_t operation, KilnOwner 
 }
 
 // ---- 16f authored roster bodies: what admission reads on this machine ----------------------------------------------
-// Admission, lowering and the NPC motion closure (16f S3/S4) are built. The network clearance (16f S5: Ready and the
-// body's closure hash in the join handshake) is part of an authored body too: without it a client whose own admission
-// refused a body would meet a clone template it lacks. Until this build installs it every authored body mod is
-// refused with this reason (an implementation dependency, not a release gate).
-bool g_body_network_clearance = false;
+// Admission, lowering and the NPC motion closure (16f S3/S4) are built, and so is the network clearance (16f S5: Ready
+// and the body's closure hash in the join handshake, Kiln.Network's NpcBodyGate): without it a client whose own
+// admission refused a body would meet a clone template it lacks. Installed since the S6 lab (owner 2026-11-23); a
+// build without the managed gate sets this false, and every authored body mod is then refused with this reason (an
+// implementation dependency, not a release gate).
+bool g_body_network_clearance = true;
 const char* const kNoClearance =
     "authored roster bodies need the network clearance (Ready and the body's closure hash in the join handshake), which this build does not install yet";
 ka::bootpack::Call assets_body_bridge() {

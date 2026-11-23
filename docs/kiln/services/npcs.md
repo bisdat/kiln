@@ -62,15 +62,16 @@ KL210 as an error otherwise.
 `NpcBlock.Motions` names an `NpcMotionsBlock`: Kiln-owned motion roles bound to states of the body's cooked graph.
 The [authoring contract](../modding/npc-blocks.md#authored-roster-bodies-and-motions) covers the complete 27-binding
 Fisher vector, shared skeleton/slot checks, explicit size, and the deferred `assets/cooked/npc-bodies.v1.json` bundle.
-Native admission, body lowering and the NPC motion closure are built (below); the network clearance (Ready and the
-body's closure hash in the join handshake) is not installed yet, so every authored body is still refused with that reason.
-An unavailable dependency is a refusal, not a rendered fallback and not a release hold.
+Native admission, body lowering, the NPC motion closure and the network clearance (Ready and the body's closure hash in
+the join handshake) are built: a body in `blocks/*.json` is built at start. A player whose game did not build the same
+bodies is refused at the join (except under `modSync: off`). An unavailable dependency is a refusal, not a rendered
+fallback. Not verified in a real game yet: the player side (admission, the same closure, the body drawn and animated).
 
 | Capability | Needs | Current contract |
 |---|---|---|
 | `blocks.npc_body` | `kiln.knowledge`, `quests.boot_pack`, `quests.npc_body`, `quests.npc`, `assets.resources`, `assets.content` | Managed row; refuses authored-body definition with the missing dependency's reason. Ordinary game-body NPCs do not need it |
 | `quests.boot_pack` | Private native content rollback helper and the resource initialization hook | Per-mod compile/preflight and owner-isolated rollback through the existing boot path; no public bootpack or epoch API |
-| `quests.npc_body` | Native authored-body admission and lowering, the NPC motion closure, kiln.assets' private body registration, the network clearance | Unavailable while the network clearance is not installed (the row names it); a body mod is then refused whole. A game update that changes the verified Fisher layout makes the row unavailable (`symbol-missing`) with the changed type named |
+| `quests.npc_body` | Native authored-body admission and lowering, the NPC motion closure, kiln.assets' private body registration, the network clearance | Available where kiln.assets' private body registration is there; a body mod is refused whole otherwise. A game update that changes the verified Fisher layout makes the row unavailable (`symbol-missing`) with the changed type named |
 
 Native packs compile separately in dependency order against the surviving effective resources. A refused pack withdraws
 only its `bootpack:<mod>` owner, restores its text-tag before-images without overwriting unrelated writers, and leaves

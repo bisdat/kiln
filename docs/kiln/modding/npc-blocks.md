@@ -283,10 +283,10 @@ New authoring types in **mod API 0.2.17** (dev.31).
 
 The authoring contract accepts a `BodyBlock.Model`, an `AnimationBlock` and `NpcBlock.Motions` (a reusable
 `npcMotions` block or an inline `NpcMotionsBlock`). The chassis is Kiln's Fisher/Villager chassis; authors name
-Kiln slots and graph states, not game component paths. **Authoring support alone does not build a body:** `Define`
-refuses `body.model` with the `blocks.npc_body` dependency reason until `quests.boot_pack` and `quests.npc_body`
-are available. The internal per-mod rollback backend is present, but the native body builder is not yet installed.
-There is no public bootpack or epoch API. Ordinary `Bodies.Villager` / `Bodies.Fisher` NPCs retain their authoring format.
+Kiln slots and graph states, not game component paths. The game's start builds the body natively from the mod's
+`blocks/*.json` and its local cook (below), once per start, before any world. Where a dependency is missing,
+`Define` refuses `body.model` with the `blocks.npc_body` dependency reason and the boot build refuses the body's mod
+whole. There is no public bootpack or epoch API. Ordinary `Bodies.Villager` / `Bodies.Fisher` NPCs retain their authoring format.
 
 For an authored roster body:
 
@@ -380,8 +380,10 @@ waits for its restart (the handshake's `pending` key; this version sends none) i
 a warning. That player may lack a body the server spawns; keep `modSync` on for servers with authored bodies. A mod's
 `NetClientHandshakeEvent` handler cannot waive this check (it may refuse a player for reasons of its own).
 
-Not verified in a real game yet: the server's model GUID from the body manifest against a player's cooked model, the
-event on a player's main thread, and a refusal for a different body shown on a player's screen. The tests cover them
+Not verified in a real game yet: anything on a player's game (its admission of the body with kiln.vfx's materials, the
+same closure hash as the server's, the body drawn and its motions played), the event on a player's main thread, and a
+refusal shown on a player's screen. A dedicated server's build, its rows and the join decision were checked in a lab
+(`mods/tests/npc-body-test`, below). The tests cover them
 offline (`Kiln.Blocks.Tests`, `Kiln.Network.Tests`); the test kit scripts the start's rows with `KilnHarness.NpcBodies`
 ([unit-tests.md](unit-tests.md)).
 
