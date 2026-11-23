@@ -42,7 +42,7 @@ mod tests {
     struct Root(PathBuf);
     impl Root {
         fn new(name: &str) -> Self {
-            let root = PathBuf::from(std::env::var_os("KILN_REGISTRY_TEST_OUT").expect("test output folder"))
+            let root = std::env::var_os("KILN_REGISTRY_TEST_OUT").map(PathBuf::from).unwrap_or_else(std::env::temp_dir)
                 .join(format!("registry-reader-{}-{name}", std::process::id()));
             fs::create_dir_all(root.join("kiln/state")).unwrap();
             Self(root)

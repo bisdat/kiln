@@ -78,3 +78,17 @@ test("huge report is rejected without hanging navigation", async ({ page }) => {
   await page.getByRole("link", { name: "Play", exact: true }).click();
   await expect(page).toHaveURL(/#\/$/);
 });
+
+test("long field lists paginate, filter and disclose native omissions", async ({ page }) => {
+  const r = registryFixture();
+  await report(page, { ...r, fields: Array.from({ length: 30 }, (_, i) => ({ ...r.fields[0], id: `game:fixture_${i}` })), truncated: { ...r.truncated, fields: 20 } });
+  await expect(page.getByText("Partial report", { exact: true })).toBeVisible();
+  await expect(page.locator(".registry-field")).toHaveCount(25);
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(page.locator(".registry-field")).toHaveCount(5);
+  await page.getByRole("textbox", { name: "Filter fields or owners" }).fill("fixture_29");
+  await expect(page.locator(".registry-field")).toHaveCount(1);
+  await expect(page.locator(".registry-field")).toContainText("game:fixture_29");
+  await page.getByRole("textbox", { name: "Filter fields or owners" }).fill("not-present");
+  await expect(page.getByText("No displayed fields match this filter.", { exact: true })).toBeVisible();
+});

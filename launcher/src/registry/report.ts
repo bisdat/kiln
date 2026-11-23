@@ -154,6 +154,6 @@ export function reportFreshness(written: string, status?: { running: boolean; st
   if (!status.running) return "The game is not running; this is its last saved snapshot.";
   if (status.started && at < Date.parse(status.started)) return "The report predates the current game start.";
   if (now - at > 86_400_000) return "This snapshot is more than 24 hours old.";
-  if (!status.started) return "The current game start cannot be verified.";
+  if (!status.started || !Number.isFinite(Date.parse(status.started))) return "The current game start cannot be verified.";
   return null;
 }

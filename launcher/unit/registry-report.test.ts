@@ -94,5 +94,6 @@ describe("snapshot freshness", () => {
   test("old snapshot is stale even when the game is running", () => expect(reportFreshness(new Date(now - 86400001).toISOString(), { running: true }, now)).toContain("24 hours"));
   test("future clock is not presented as fresh", () => expect(reportFreshness(new Date(now + 600000).toISOString(), { running: true }, now)).not.toBeNull());
   test("unknown process state is explicit", () => expect(reportFreshness(written, undefined, now)).toContain("cannot be verified"));
+  test("invalid process-start timestamp cannot establish freshness", () => expect(reportFreshness(written, { running: true, started: "invalid" }, now)).toContain("cannot be verified"));
   test("snapshot from this start is not stale", () => expect(reportFreshness(written, { running: true, started: new Date(now - 2000).toISOString() }, now)).toBeNull());
 });
