@@ -493,3 +493,14 @@ kiln.world rows above).
 | Row | Kind | Reported by | Unconfirmed | What it says |
 |---|---|---|---|---|
 | `ui.world_outline.through_walls` | managed, static (since 0.2.0-dev.30.5) | Kiln.Ui, at its start and first use | Client check: toggle through-walls outlines, the off setting and competing requests | `OutlineOptions.ThroughWalls`' silhouette ([../render.md](../render.md#outlineoptions)): needs `ui.world_outline`, kiln.render v3 (the entity's position; `service-older` with a v2 kiln-ui.dll), `render.camera` and kiln.ui (`service-missing`; `faulted` when overlay drawing is explicitly off). Off: a new ThroughWalls request throws `KilnUnavailableException` with the row's reason; existing requests draw no silhouette |
+
+## Rows added in 0.2.0-dev.30.7 / mod API 0.2.16
+
+Player storage (the guide is `player-storage.md`): the service `kiln.items.storage` (core row
+`kiln.items.storage`, served by kiln-items.dll) and these rows.
+
+| Row | Kind | Reported by | Unconfirmed | What it says |
+|---|---|---|---|---|
+| `items.storage` | sigdb feature (`server.d/player-storage.json` and its client part), static | core (sigdb); kiln-items.dll lowers it (`symbol-missing` naming the first row or layout constant that did not check out, `faulted` when a hook could not be installed or a rebuild faulted, until restart); Kiln.Items lowers it (`service-missing`) where the `kiln.items.storage` table is not here (an older kiln-items.dll, the test kit without its fake), and (`wrong-side`) on a client that joined another's world | Real-game check of the player storage sample: store, save, rejoin, death | `Items.RegisterPlayerStorage`, `PlayerStorage`, `Items.PlayerStorages`, the storage events; members that need it throw `KilnUnavailableException("items.storage")` |
+| `items.storage.persist` | native, static | kiln-items.dll, at its start: unavailable with `items.storage`'s reason, or (`symbol-missing`) "no captures-done hook on this build" when the post-hook of the game's per-player save step does not resolve | as `items.storage` | the persist rows of `kiln.items.storage` (Kiln.Saves only, not for mods): storage contents are frozen at the game's character capture and written with the save before the world file and the character leave the server. Without it no storage is ever built (registrations wait), so no item can go where it would not be saved |
+| `items.storage.client` | managed, static | Kiln.Items, at its start | - | the owner's read-only copy of their storages on a game client (`PlayerStorage.Client.Rows`, `PlayerStorageClientChangedEvent`); unavailable (`service-missing`, "the kiln:storage mirror is not in this Kiln") in 0.2.0-dev.30.7: the rows are empty and the event never fires |

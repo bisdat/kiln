@@ -3954,6 +3954,247 @@
       },
       "sha256": "95dc56ec73156d04329d5309cf499acbc78c9c2980175a58a2be2eb03dffe117"
     },
+    "native/core/abi/services/kiln_items_storage.h": {
+      "function_macros": [],
+      "inline_helpers": [],
+      "layouts": {
+        "KilnItemsStorageApi": {
+          "align": 8,
+          "fields": {
+            "header": 0,
+            "holder": 16,
+            "list": 48,
+            "next_event": 56,
+            "park": 112,
+            "persist_bind": 72,
+            "register_storage": 8,
+            "release_frozen": 88,
+            "restore": 104,
+            "return_parked": 64,
+            "set_ref": 32,
+            "state": 24,
+            "status": 40,
+            "take_frozen": 80,
+            "unpark": 120,
+            "witness_of": 96
+          },
+          "size": 128
+        },
+        "KilnItemsStorageStatus": {
+          "align": 8,
+          "fields": {
+            "batches": 28,
+            "captures": 32,
+            "detail": 48,
+            "holders": 16,
+            "parked": 20,
+            "persist": 5,
+            "quarantined": 24,
+            "reason": 8,
+            "registrations": 12,
+            "restores": 40,
+            "session": 6,
+            "size": 0,
+            "stage_point": 7,
+            "storage": 4
+          },
+          "size": 208
+        },
+        "KilnStorageCapture": {
+          "align": 8,
+          "fields": {
+            "account": 56,
+            "changes": 48,
+            "character": 64,
+            "entry_count": 92,
+            "first_entry": 88,
+            "flags": 4,
+            "join": 16,
+            "player": 80,
+            "reason": 96,
+            "reserved": 100,
+            "revision": 40,
+            "seq": 8,
+            "size": 0,
+            "slot": 84,
+            "step": 24,
+            "witness": 32
+          },
+          "size": 104
+        },
+        "KilnStorageDef": {
+          "align": 8,
+          "fields": {
+            "death": 24,
+            "filter": 32,
+            "flags": 28,
+            "key": 8,
+            "size": 0,
+            "slots": 4
+          },
+          "size": 56
+        },
+        "KilnStorageDoc": {
+          "align": 8,
+          "fields": {
+            "account": 40,
+            "character": 48,
+            "entries": 64,
+            "entry_count": 12,
+            "flags": 4,
+            "record_count": 16,
+            "records": 72,
+            "reserved": 20,
+            "revision": 24,
+            "size": 0,
+            "source": 8,
+            "witness": 32
+          },
+          "size": 80
+        },
+        "KilnStorageEntry": {
+          "align": 4,
+          "fields": {
+            "count": 144,
+            "first": 140,
+            "key": 8,
+            "kind": 4,
+            "reason": 148,
+            "refs": 152,
+            "size": 0,
+            "slots": 136
+          },
+          "size": 160
+        },
+        "KilnStorageEvent": {
+          "align": 8,
+          "fields": {
+            "account": 88,
+            "character": 96,
+            "flags": 32,
+            "handle": 28,
+            "items": 44,
+            "join": 72,
+            "key": 112,
+            "kind": 4,
+            "player": 24,
+            "reason": 36,
+            "reserved": 60,
+            "revision": 64,
+            "seq": 8,
+            "size": 0,
+            "slot": 56,
+            "source": 52,
+            "stacks": 40,
+            "step": 16,
+            "tag": 80,
+            "target": 48
+          },
+          "size": 240
+        },
+        "KilnStorageFilter": {
+          "align": 8,
+          "fields": {
+            "categories": 4,
+            "flags": 8,
+            "id_count": 12,
+            "ids": 16,
+            "size": 0
+          },
+          "size": 24
+        },
+        "KilnStorageFrozenBatch": {
+          "align": 8,
+          "fields": {
+            "capture_count": 28,
+            "entry_count": 32,
+            "first_step": 40,
+            "flags": 4,
+            "last_step": 48,
+            "record_count": 36,
+            "revision": 24,
+            "saves_seq": 16,
+            "size": 0,
+            "tag": 8,
+            "unix_ms": 56,
+            "world_guid": 64
+          },
+          "size": 80
+        },
+        "KilnStorageRecord": {
+          "align": 4,
+          "fields": {
+            "count": 8,
+            "data": 16,
+            "flags": 3,
+            "item": 4,
+            "length": 2,
+            "level": 12,
+            "reason": 13,
+            "reserved": 14,
+            "slot": 0
+          },
+          "size": 80
+        },
+        "KilnStorageReturnResult": {
+          "align": 8,
+          "fields": {
+            "done": 28,
+            "kept": 36,
+            "message": 48,
+            "player": 16,
+            "requested": 24,
+            "reserved": 44,
+            "size": 0,
+            "stacks": 32,
+            "status": 4,
+            "steps": 40,
+            "target": 20,
+            "ticket": 8
+          },
+          "size": 208
+        },
+        "KilnStorageState": {
+          "align": 8,
+          "fields": {
+            "death": 172,
+            "handle": 136,
+            "holder": 148,
+            "key": 8,
+            "pages": 144,
+            "paired": 168,
+            "parked": 156,
+            "quarantined": 160,
+            "refs": 176,
+            "revision": 184,
+            "size": 0,
+            "slots": 140,
+            "source": 164,
+            "stacks": 152,
+            "status": 4
+          },
+          "size": 192
+        },
+        "KilnStorageWitness": {
+          "align": 8,
+          "fields": {
+            "account": 48,
+            "capture_seq": 40,
+            "captured": 32,
+            "character": 56,
+            "flags": 4,
+            "join": 8,
+            "player": 72,
+            "size": 0,
+            "slot": 76,
+            "step": 24,
+            "witness": 16
+          },
+          "size": 80
+        }
+      },
+      "sha256": "86a3b71c12329e4d632e23667f2ce944b743f8a977c5a3dcf9248f492fb76048"
+    },
     "native/core/abi/services/kiln_launch.h": {
       "function_macros": [
         "KILN_LAUNCH_REASON_IDLE",
@@ -8619,7 +8860,7 @@
   },
   "outputs": {
     "src/bindings.rs": "134028a6a9914076cab3f71f98d356141d4fe36c4d7f51bac6a11819501ed935",
-    "src/layout.rs": "d6669e43e56e8fcd4e593d8f4e3cc31b940c20aec01f80cd88dac7f9d75782de",
+    "src/layout.rs": "3dc22ef40787205d0bdca13c70c7e8ec96827979da99700111eb7bd0ac960825",
     "src/services/kiln_abilities.rs": "06a43042e5c96d6261a17b02eab35463b07a8ad83f63b2bb168bca5ff34e582e",
     "src/services/kiln_assets.rs": "e7fe4eb1c4d53ad31eeaf05be06f41c551a49362ad5bd4174465ec18a03effe0",
     "src/services/kiln_assets_vfx.rs": "90ed8ce5ad512bbf4f002db3277bc3b439d648ca437a58d4477eac4ce46c3b81",
@@ -8647,6 +8888,7 @@
     "src/services/kiln_gemcraft.rs": "07cb3321ad95f3ec8b694f78a02d561a14002338c8ee536b2df6fe17c8f1a4e6",
     "src/services/kiln_hooks.rs": "d3ff34a15e0da4580df5ffcdd09dafd5d31d949e3cafcfc3924bf9d2c729c1b6",
     "src/services/kiln_items.rs": "997cdc279dc7704128c8d47efff8cd395652e0b93679a9c34848d6c54b6d5519",
+    "src/services/kiln_items_storage.rs": "fc0e582b49d79ef7e563472ffeb2e4f628d7838e8b951eb42d2f2b505980f287",
     "src/services/kiln_launch.rs": "6ffbec313079a115faf49075248fc663d858f91a38d4a804f09c1deeae4dc61b",
     "src/services/kiln_log.rs": "86b18decab13965acd7a5e9d0c3166a80ac5441359f928717b8f4a02cd395df1",
     "src/services/kiln_net.rs": "a80d9ff754549a78c03fdc6423f97a582bacbcc11a114ce68a75ecefd873b9ca",
@@ -8684,7 +8926,7 @@
     "src/services/kiln_world.rs": "3cb0272179db9c198f154ce6c008837e4bb95245a2ec62993be78879c4b330b8",
     "src/services/kiln_world_budget.rs": "b196426492d0525df1317c08e4927f3f3ff35817990bed8f2b58c02d174bab98",
     "src/services/kiln_worldtables.rs": "3d423bb8cfd5235f82230a1942bbc334d86b55d343e5e5880c671a57d1469fce",
-    "src/services/mod.rs": "aacd2abadc1ea27e0c9217a772e301b285851e3379b55a1dac33374389a71f94"
+    "src/services/mod.rs": "d4bcfc8f4e42f199101bd43ddd02b3625ec0efecc731cdc8886688e6165036a3"
   },
   "schema": 1,
   "target": "x86_64-pc-windows-msvc"
