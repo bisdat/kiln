@@ -29,6 +29,7 @@
 #include "services/kiln_registry.h"
 #include "services/kiln_registry_live.h"
 #include "boot_hooks.h"
+#include "proof.h"
 #include "stage.h"
 #include "stage_owner.h"
 
@@ -181,6 +182,40 @@ Env make_env() {
         else LOGI("%s", line.c_str());
     };
     return e;
+}
+
+// The lab's registry proof (proof.h): nothing at all without <data>/content/registry/proof/request.json (one lookup). With
+// it, the base view the stage released is opened again for the proof's reads, still before any patch of this start is
+// written, and released again.
+void lab_proof() {
+    proof::Env e;
+    e.read_data = [](const std::string& rel) { return read_whole(data_root() / u8(rel)); };
+    if (!proof::requested(e)) return;
+    Env s = make_env();
+    e.write_data = s.write_data;
+    e.regmap = s.regmap;
+    e.log = s.log;
+    e.source = s.source;
+    e.side = s.side, e.exe_sha256 = s.exe_sha256, e.writer = s.writer;
+    e.schema = &registry_schema();
+    kiln::boot_view::LiveView& v = live_view();
+    v.restart();
+    e.bytes = [&v](const KilnAssetKey& key, std::vector<uint8_t>* out, std::string* why) {
+        std::string b;
+        if (v.bytes(key, size_t{256} << 20, &b, why) != KILN_OK) return false;
+        out->assign(b.begin(), b.end());
+        return true;
+    };
+    e.common_files = [] {
+        std::vector<std::pair<std::string, std::string>> out;
+        std::error_code ec;
+        for (const auto& f : fs::directory_iterator(u8(api_path(KILN_PATH_KILN)) / u8"regmap" / u8"common", ec))
+            if (f.path().extension() == L".json")
+                if (auto t = read_whole(f.path())) out.emplace_back(f.path().filename().string(), std::move(*t));
+        return out;
+    };
+    proof::run(e);
+    v.release();
 }
 
 // ---- the C tables ----
@@ -435,7 +470,11 @@ void bind_service() {
         return;  // never retain callbacks into mods without their owner's cleanup
     }
     static const boothook::Hooks hooks{
-        [](const std::vector<boothook::OldDoc>& docs) { return runner().run([&docs](model::Model& m) { return boothook::old_writes(docs, m); }); },
+        [](const std::vector<boothook::OldDoc>& docs) {
+            auto out = runner().run([&docs](model::Model& m) { return boothook::old_writes(docs, m); });
+            lab_proof();  // lab only: nothing without the request file (proof.h)
+            return out;
+        },
         &boothook::write, [](const std::vector<BootOutcome>& o) { runner().finish(o); }};
     boothook::set(&hooks);
     // the live back-end (registry_live.cpp, S9): now and worldLoad fields as store layers at each world load

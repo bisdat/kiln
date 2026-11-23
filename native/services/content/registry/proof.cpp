@@ -1,0 +1,248 @@
+// SPDX-License-Identifier: MIT
+// kiln.content registry stage: the lab's registry proof producer, its native half (proof.h).
+#include "proof.h"
+
+#include <algorithm>
+#include <cmath>
+
+#include "../../../core/src/services/boot_gamedata.h"
+#include "boot_hooks.h"
+
+namespace kc::registry::proof {
+
+namespace {
+
+std::string sha_of(const std::string& s) { return kiln::boot_gd::hex_of(kiln::boot_gd::sha256(s)); }
+std::string sha_of(const std::vector<uint8_t>& b) { return sha_of(std::string(b.begin(), b.end())); }
+
+bool mapped(const map::Row& r) { return r.state != map::RowState::Unmapped && !r.paths.empty(); }
+
+// "inputs[].count" -> ("inputs", "count"); a field of the entry -> ("", "")
+std::pair<std::string, std::string> element_of(const std::string& field) {
+    const size_t at = field.find("[].");
+    if (at == std::string::npos) return {};
+    return {field.substr(0, at), field.substr(at + 3)};
+}
+
+json roundtrip_doc(const Env& e, const std::string& generation, const std::string& digest, json samples) {
+    return {{"format", 1}, {"kind", "registry-roundtrip"}, {"side", e.side}, {"exeSha256", e.exe_sha256}, {"generation", generation},
+            {"regmapDigest", digest}, {"samples", std::move(samples)}};
+}
+
+}  // namespace
+
+bool requested(const Env& e) { return e.read_data && e.read_data(kRequest).has_value(); }
+
+std::string regmap_digest(std::vector<std::pair<std::string, std::string>> files) {
+    std::sort(files.begin(), files.end());
+    std::string text;
+    for (const auto& [name, bytes] : files) text += name + "\n" + sha_of(bytes) + "\n";
+    return sha_of(text);
+}
+
+std::optional<Value> probe_for(const FieldSpec& spec, const Value& v) {
+    auto moved = [&](double x, bool whole) -> std::optional<Value> {
+        const double up = whole ? x + 1 : (x == 0 ? 1.0 : x * 1.25), down = whole ? x - 1 : x * 0.75;
+        auto fits = [&](double y) { return std::isfinite(y) && y != x && (!spec.min || y >= *spec.min) && (!spec.max || y <= *spec.max); };
+        const double y = fits(up) ? up : fits(down) ? down : NAN;
+        if (std::isnan(y)) return std::nullopt;
+        return whole ? Value::integer(static_cast<int64_t>(y)) : Value::number(y);
+    };
+    switch (spec.type) {
+        case FieldType::Int: return v.numeric() ? moved(v.as_double(), true) : std::nullopt;
+        case FieldType::Float: return v.numeric() ? moved(v.as_double(), false) : std::nullopt;
+        case FieldType::Bool: return v.kind == Value::Bool ? std::optional<Value>(Value::boolean(!v.b)) : std::nullopt;
+        case FieldType::Enum:
+            for (const std::string& n : spec.enum_values)
+                if (n != v.t) return Value::text(n);
+            return std::nullopt;
+        case FieldType::List: {
+            if (v.kind != Value::List || v.list.empty()) return std::nullopt;
+            Value out = v;
+            Value& first = out.list[0];
+            if (spec.element == FieldType::Struct) {
+                for (size_t k = 0; k < first.keys.size(); ++k) {
+                    const FieldSpec* leaf = spec.element_field(first.keys[k]);
+                    if (!leaf || !first.list[k].numeric()) continue;
+                    if (auto p = probe_for(*leaf, first.list[k])) {
+                        first.list[k] = *p;
+                        return out;
+                    }
+                }
+                return std::nullopt;
+            }
+            FieldSpec el = spec;  // a list's min/max are its numbers'
+            el.type = spec.element;
+            auto p = probe_for(el, first);
+            if (!p) return std::nullopt;
+            first = *p;
+            return out;
+        }
+        default: return std::nullopt;
+    }
+}
+
+json boot_sample(const map::RegistryMap& reg, const RegistrySpec& rs, const std::string& field, const std::string& id, const KilnAssetKey& key,
+                 const std::string& type, const std::vector<uint8_t>& base) {
+    json s = {{"field", reg.registry + "." + field}, {"entry", id}, {"element", nullptr}};
+    auto fail = [&](const std::string& why) {
+        s["error"] = why;
+        return s;
+    };
+    const auto rit = reg.rows.find(field);
+    if (rit == reg.rows.end() || !mapped(rit->second)) return fail("the field has no mapped row");
+    const map::Row& row = rit->second;
+    const auto [list, leaf] = element_of(field);
+    const std::string written = list.empty() ? field : list;  // the field the boot back-end writes (a list for its elements)
+    const auto wit = reg.rows.find(written);
+    const FieldSpec* wspec = rs.field(written);
+    const FieldSpec* spec = rs.field(field);
+    if (wit == reg.rows.end() || !wspec || !spec) return fail("the schema or the regmap has no " + written);
+    const map::Row& wrow = wit->second;
+    if (!list.empty()) s["element"] = 0;
+    auto whole = [&](const std::vector<uint8_t>& b, std::string* why) {
+        model::MemberFn get = [&](const std::string& path, json* out, std::string* w) { return model::bytes_member(b.data(), b.size(), type, path, out, w); };
+        return model::decode(reg, wrow, *wspec, get, {}, {}, why);
+    };
+    auto value = [&](const std::optional<Value>& w, std::string* why) -> std::optional<Value> {
+        if (!w || list.empty()) return w;
+        if (w->kind != Value::List || w->list.empty()) return *why = "the list is empty", std::nullopt;
+        const Value* l = w->list[0].leaf(leaf);
+        if (!l) return *why = "its first element has no " + leaf, std::nullopt;
+        return *l;
+    };
+    auto raw = [&](const std::vector<uint8_t>& b) {
+        json a = json::array();
+        for (const std::string& p : row.paths) {
+            const std::string path = list.empty() ? p : wrow.paths.at(0) + "[0]." + p;
+            json m;
+            std::string w;
+            a.push_back(model::bytes_member(b.data(), b.size(), type, path, &m, &w) ? m : json(nullptr));
+        }
+        return a;
+    };
+    std::string why;
+    const std::optional<Value> wbefore = whole(base, &why);
+    const std::optional<Value> before = value(wbefore, &why);
+    if (!before) return fail("read through the schema: " + why);
+    s["read"] = before->to_json();
+    s["rawBefore"] = raw(base);
+    s["bytesBefore"] = sha_of(base);
+    if (row.backend != map::Backend::Boot || spec->read_only) return s;  // a read-only field: read, never written
+    // the probe, as the whole written field (a list keeps its other elements)
+    std::optional<Value> probe = probe_for(*spec, *before);
+    if (!probe) return fail("no probe value for this kind of field");
+    Value wprobe = *probe;
+    if (!list.empty()) {
+        wprobe = *wbefore;
+        Value& first = wprobe.list[0];
+        for (size_t k = 0; k < first.keys.size(); ++k)
+            if (first.keys[k] == leaf) first.list[k] = *probe;
+    }
+    s["probe"] = probe->to_json();
+    ChainRow set;
+    set.kind = WriterKind::Registry;
+    set.mod = set.who = "registry-proof";
+    set.source = "lab proof";
+    set.op.set = true;
+    set.op.value = wprobe;
+    stage::BootResource rb;
+    rb.key = key, rb.type = type;
+    rb.fields.push_back({FieldRef{reg.registry, id, written}, &reg, &wrow, *wspec, {set}});
+    std::vector<uint8_t> copy = base;
+    std::vector<stage::BootOutcome> out;
+    std::vector<std::string> notes;
+    boothook::write(key, type, &copy, rb, &out, &notes);
+    if (out.size() != 1 || !out[0].ok) return fail("the boot back-end did not write the probe: " + (out.empty() ? std::string("no outcome") : out[0].why));
+    const std::optional<Value> after = value(whole(copy, &why), &why);
+    s["readBack"] = after ? after->to_json() : json(nullptr);
+    s["rawAfter"] = raw(copy);
+    // the generation composed again without the probe: the base's bytes
+    std::vector<uint8_t> again = base;
+    rb.fields[0].rows.clear();
+    out.clear();
+    boothook::write(key, type, &again, rb, &out, &notes);
+    s["reverted"] = out.size() == 1 && out[0].ok;
+    s["bytesAfter"] = sha_of(again);
+    return s;
+}
+
+std::vector<std::string> run(const Env& e) {
+    std::vector<std::string> written;
+    if (!requested(e)) return written;
+    auto log = [&](int level, const std::string& line) {
+        if (e.log) e.log(level, "registry proof: " + line);
+    };
+    map::RegMap rm;
+    std::vector<std::string> errs;
+    if (!e.schema || !e.regmap || !e.regmap(&rm, &errs)) {
+        log(2, "the regmap cannot be read; nothing written");
+        return written;
+    }
+    std::string why;
+    std::unique_ptr<model::Source> src = e.source ? e.source(&why) : nullptr;
+    if (!src) {
+        log(2, "no base to read (" + why + "); nothing written");
+        return written;
+    }
+    const std::string digest = regmap_digest(e.common_files ? e.common_files() : std::vector<std::pair<std::string, std::string>>{});
+    model::Model m(*src, rm, *e.schema);
+    auto put = [&](const std::string& rel, const json& doc) {
+        if (e.write_data && e.write_data(rel, doc.dump())) written.push_back(rel);
+        else log(2, "could not write " + rel);
+    };
+    // the boot generation, in memory
+    json samples = json::array();
+    for (const auto& [name, reg] : rm.registries) {
+        const RegistrySpec* rs = e.schema->registry(name);
+        const bool boot = std::any_of(reg.rows.begin(), reg.rows.end(), [](const auto& r) { return mapped(r.second) && r.second.backend == map::Backend::Boot; });
+        if (!rs || !boot) continue;
+        auto each = [&](auto fn) {
+            for (const auto& [f, row] : reg.rows)
+                if (mapped(row) && (row.backend == map::Backend::Boot || row.backend == map::Backend::None)) fn(f);
+        };
+        const std::vector<model::Entry>* es = m.entries(name, &why);
+        std::vector<uint8_t> base;
+        std::string err;
+        if (!es || es->empty()) err = "no entry to sample (" + why + ")";
+        else if (reg.entries.kind == map::EntryKind::Array) err = "boot fields of array entries are not sampled";
+        else if (!e.bytes || !e.bytes((*es)[0].place.key, &base, &why)) err = "the entry's resource cannot be read (" + why + ")";
+        if (!err.empty()) {
+            each([&](const std::string& f) { samples.push_back({{"field", name + "." + f}, {"error", err}}); });
+            continue;
+        }
+        const model::Entry& en = (*es)[0];
+        each([&](const std::string& f) { samples.push_back(boot_sample(reg, *rs, f, en.id, en.place.key, en.place.type, base)); });
+    }
+    put("proof/roundtrip-" + e.side + "-boot.json", roundtrip_doc(e, "boot", digest, std::move(samples)));
+    // every entry of every registry through the schema, from the base
+    json regs = json::object();
+    for (const auto& [name, reg] : rm.registries) {
+        if (!e.schema->registry(name)) continue;
+        const std::vector<model::Entry>* es = m.entries(name, &why);
+        if (!es) {
+            log(1, name + ": its entries cannot be read (" + why + ")");
+            continue;
+        }
+        json entries = json::object();
+        for (size_t i = 0; i < es->size(); ++i) {
+            json fields = json::object();
+            for (const auto& [f, row] : reg.rows) {
+                if (!mapped(row) || f.find("[]") != std::string::npos) continue;  // a list's elements are in its value
+                std::string w;
+                if (auto v = m.value(name, i, f, &w)) fields[f] = v->to_json();
+            }
+            entries[(*es)[i].id] = std::move(fields);
+        }
+        regs[name] = std::move(entries);
+    }
+    put("proof/values-" + e.side + ".json",
+        json{{"format", 1}, {"kind", "registry-values"}, {"side", e.side}, {"exeSha256", e.exe_sha256},
+             {"gameBuild", rm.has_build ? rm.build.game_build : std::string()}, {"regmapDigest", digest},
+             {"base", {{"origin", src->name()}, {"writer", e.writer}}}, {"registries", std::move(regs)}});
+    m.release();
+    log(0, "wrote " + std::to_string(written.size()) + " file(s) under content/registry/proof (lab only)");
+    return written;
+}
+
+}  // namespace kc::registry::proof
