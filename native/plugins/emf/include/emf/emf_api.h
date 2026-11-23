@@ -1,5 +1,5 @@
 /* This file is EMF's public C API header, copied unchanged (below the line) from EMF (Enshrouded Modding Framework)
- * 0.6.19, sdk/include/emf/emf_api.h, for kiln-emf.dll (native/plugins/emf), which builds an EmfApi v47 table on Kiln's
+ * 0.6.20, sdk/include/emf/emf_api.h, for kiln-emf.dll (native/plugins/emf), which builds an EmfApi v48 table on Kiln's
  * services so unmodified EMF mods load on Kiln. Also in licenses/EMF-LICENSE.txt.
  *
  * MIT License
@@ -24,7 +24,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  * ------------------------------------------------------------------------------------------------------------------ */
-/* EMF (Enshrouded Modding Framework) C API, version 47 (see EMF_API_VERSION).
+/* EMF (Enshrouded Modding Framework) C API, version 48 (see EMF_API_VERSION).
  *
  * A mod is a DLL in <game>/emf/mods/ that exports:
  *     extern "C" __declspec(dllexport) bool emf_mod_load(const EmfApi* api);
@@ -52,7 +52,7 @@
 extern "C" {
 #endif
 
-#define EMF_API_VERSION 47
+#define EMF_API_VERSION 48
 
 /* World kinds (the byte at the entity storage + 8: world+0xE15DC8 on build 1273043, world+0xE179C8 on 1283531). */
 #define EMF_WORLD_SERVER 0
@@ -785,6 +785,16 @@ typedef struct EmfPathQuery {
     uint8_t closest;      /* 1 = fall back to the closest reachable point (the game's march does this) */
     uint8_t pad[3];
     uint32_t max_nodes;   /* 0 = 2000; at most 20000 (the game's own default is 500) */
+    /* API v48 (0.6.20; an older core ignores it: check emf::has_v48()): plan as this creature walks, from its
+       templates: the room and node rules of its PathWalker (the game's own rule), its PathFinder's highest steps, and
+       its behaviour's default moves (an enemy that can open doors: the door move too) and default costs per ground
+       type. Calm walking: an enemy in the game's Guard state or a fight adds its extended moves (jumps), and a roaming
+       one its road costs; add jumps with `moves` to plan for that. On top: this query's from, to, closest and
+       max_nodes; `moves` is added; max_jump_up/down, width and height as given (width and height 0 = the creature's).
+       With the door move the room across is 0 unless width is given (any room loses the door). Only from a world
+       callback on the server world passed to path_find. Refused when the entity has no DynamicPathFinder or
+       PathWalker (not a creature the game plans paths for). owner 0 = this creature. 0 = off. */
+    uint32_t as_entity;
 } EmfPathQuery;
 typedef struct EmfPathPoint {
     float x, y, z;
@@ -801,6 +811,13 @@ typedef struct EmfPathResult {
        point with move 5), else 0; `count` entries. NULL when no point is a door (or the game gave no usable list).
        Valid during the callback only. */
     const uint32_t* doors;
+    /* API v48 (0.6.20; read them only when `size` covers them): what the search planned with, after as_entity and this
+       query's own fields: why a path differs shows here. */
+    uint16_t moves;     /* EMF_PATH_* */
+    uint8_t jump_up;    /* metres; 0 = no limit */
+    uint8_t jump_down;
+    float width;        /* the room across, as the query's width (half-metre steps); 0 = none */
+    float height;       /* the room up, metres (half-metre steps); 0 = none */
 } EmfPathResult;
 typedef void (*EmfPathCallback)(EmfWorld* world, uint32_t id, const EmfPathResult* result, const EmfPathPoint* points,
                                 void* user);
@@ -1627,7 +1644,8 @@ typedef struct EmfApi {
      * EMF already open, or the feature is off on this game build. The grid exists where the world is loaded (near
      * players); a query elsewhere ends NO_START, NO_TARGET or OTHER (no answer in 10 s). Each query is a search in the
      * game's own jobs, shared with every walking creature: do not ask again every step (the game's own enemies ask
-     * at most every 0.5 s). Any thread. */
+     * at most every 0.5 s). Any thread; with q->as_entity (v48) only from a world callback (on_tick, run_on_world,
+     * on_event) on the server world passed to it, where the creature's templates are read. */
     uint32_t (*path_find)(EmfWorld* world, const EmfPathQuery* q, EmfPathCallback cb, void* user);
     /* Ends a query: its callback still comes, with EMF_PATH_CANCELLED. False for an unknown or answered id. */
     bool (*path_cancel)(uint32_t id);

@@ -138,7 +138,7 @@ def server_admin(results):
     bad = admin("settings.set", key="experienceCombatFactor", value=9, expected=cur)
     save = admin("save")
     results["server-admin"] = (
-        ping.get("ok") and ping["data"].get("api") == 47 and items.get("ok") and items["data"]["count"] > 4000 and sset.get("ok")
+        ping.get("ok") and ping["data"].get("api") == 48 and items.get("ok") and items["data"]["count"] > 4000 and sset.get("ok")
         and sres.get("ok") and not bad.get("ok") and save.get("ok"),
         f"ping api {ping['data'].get('api')}; items {items['data'].get('count')} (wood max stack {wood[0]['maxStack'] if wood else '?'}); "
         f"settings.set {new} {'ok' if sset.get('ok') else 'FAIL'} (read back {sset['data'].get('value')}), reset {'ok' if sres.get('ok') else 'FAIL'}, "
@@ -187,16 +187,16 @@ def report(results, mods, tail, log, ok_probe, ok_check):
         del results[m]  # not in this lab
     probe = grab(r"emf-probe done: (\d+ PASS, \d+ FAIL)")
     results["emf_probe"] = (probe is not None and probe.endswith(" 0 FAIL"), f"conformance probe: {probe}")
-    net = grab(r"EMF v47 lab probe done: (\d+ PASS, \d+ FAIL)")
+    net = grab(r"EMF v48 lab probe done: (\d+ PASS, \d+ FAIL)")
     if "emf_net_probe" in mods:
         results["emf_net_probe"] = (net is not None and net.endswith(" 0 FAIL"), f"mod messages probe: {net}")
-    # EMF's other shipped mods: the v47 table is a superset of every earlier one, so mods built for an older EMF load too
+    # EMF's other shipped mods: the v48 table is a superset of every earlier one, so mods built for an older EMF load too
     for m, rx in (("blessings", r"\[emf:blessings\] "), ("event_log", r"\[emf:event_log\] "), ("guid_dump", r"\[emf:guid_dump\] "),
                   ("model_probe", r"\[emf:model_probe\] "), ("model_survey", r"\[emf:model_survey\] "),
                   ("npc_explorer", r"\[emf:npc_explorer\] "), ("sample_mod", r"\[emf:sample_mod\] "),
                   ("sim_rate", r"\[emf:sim_rate\] "), ("write_test", r"\[emf:write_test\] ")):
         if m in mods:
-            results[m] = (mods[m]["status"] == "loaded" and has(rx), "loaded on the v47 table; " + (mods[m].get("reason") or "ready"))
+            results[m] = (mods[m]["status"] == "loaded" and has(rx), "loaded on the v48 table; " + (mods[m].get("reason") or "ready"))
     chk = grab(r"emf-check done: (\d+ PASS, \d+ FAIL)")
     results["(emf-check)"] = (chk is not None and chk.endswith(" 0 FAIL"), f"Kiln-side cross-check: {chk}")
 

@@ -20,6 +20,11 @@ int main() {
     CHECK(!emf_mod_load(&table));
     CHECK(registrations == 0);
     table.version = 47;
+    table.size = 1160;  // v47's table: the same size, an older version
+    CHECK(!emf_mod_load(&table));
+    CHECK(registrations == 0);
+    table.version = 48;
+    table.size = 1144;
     CHECK(!emf_mod_load(&table));
     CHECK(registrations == 0);
     table.size = 1160;
