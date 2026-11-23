@@ -459,8 +459,9 @@ public sealed class PlayerStorage
     /// fills its own player's copy directly.</para>
     /// <para>The copy is empty until the server restored the player's storages, on a server without Kiln, without the
     /// storage's mod, or where player storage is off; it empties when the game leaves the world.</para>
+    /// <para><see cref="Rows"/> is the game's; <see cref="ProvideAmmo"/> is made on both sides (its server half takes the
+    /// picks).</para>
     /// </remarks>
-    [ClientOnly]
     public static class Client
     {
         /// <summary>The capability row of the client copy: <c>items.storage.client</c>.</summary>
@@ -481,7 +482,7 @@ public sealed class PlayerStorage
         /// <summary>The local player's rows of storage <paramref name="fullKey"/> (<see cref="PlayerStorage.FullKey"/>), by
         /// slot: one per slot that holds something. Empty while the copy has none of that storage.</summary>
         /// <exception cref="KilnUnavailableException">The row <c>items.storage.client</c> is off.</exception>
-        [AnyThread, RequiresCapability(Capability)]
+        [ClientOnly, AnyThread, RequiresCapability(Capability)]
         public static IReadOnlyList<PlayerStorageRow> Rows(string fullKey)
         {
             ArgumentException.ThrowIfNullOrEmpty(fullKey);

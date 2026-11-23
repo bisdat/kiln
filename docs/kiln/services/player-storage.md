@@ -170,10 +170,13 @@ kiln.items accepts a storage slot only of the acting player's own storage, and c
 the equip puts back. `PlayerStorage.Activate(player, index)` is the fallback for a game that does not fire from a cell
 outside the backpack: it moves the arrow or spell stack into the backpack (`Items.Move`), equips it there, and moves the
 stack it activated before for that slot back into the storage (one step each; tick thread; `items.move` and
-`items.equip`). A stack that cannot go back (storage full, filter) stays in the backpack. The result is the equip's;
-`NoInventory` (not ready), `SlotChanged` (empty slot), `Refused` (not an arrow or spell) or a failed move's status
-otherwise. Kiln remembers the activated cell per player and slot for the session only, and checks it still holds that
-item before moving it back.
+`items.equip`). One runs at a time per player and slot (another is `Refused` while it does). When the equip fails after
+the move, what the move put into the backpack goes back into the storage, no more than moved (a stack it topped up keeps
+the player's own items). A stack that cannot go back (storage full, filter) stays in the backpack, logged. The result is
+the equip's; `NoInventory` (not ready), `SlotChanged` (empty slot), `Refused` (not an arrow or spell, or one under way) or
+a failed move's status otherwise. Kiln remembers the activated cell per player and slot for the session only, and checks
+it still holds that item before moving it back. Each step runs on the tick thread as the storage's mod, also when the
+call came from Kiln itself (a HUD pick): a mod that unloads meanwhile drops the rest.
 
 ## Capability and client boundaries
 
@@ -205,7 +208,8 @@ before and is sent nothing):
 - **Owner only, whole set, on change.** About four times a second the server builds each player's rows from their
   ready storages (any mod's, `Items.PlayerStorages.Of` + `Items.Read`) and sends that player the whole set when it
   differs from the last one sent. A game without the channel is skipped before anything is read. A hosting game's own
-  player gets the rows straight into its copy.
+  player gets the rows straight into its copy; when its world stops (`ServerStoppingEvent`) that copy empties, and the
+  views, the picks its HUD queued and the pick rates go with the world.
 - **Delivery.** An update not acknowledged after 5 s is sent again, each wait doubling up to 60 s. The game drops an
   update of its view whose seq is not newer than the one it applied, and starts over when the view changes.
 - **Limits, checked on the game before anything is applied** (a broken update is dropped whole): at most 32 storages,
@@ -214,7 +218,8 @@ before and is sent nothing):
 - **Server-authoritative.** No message from a game changes a storage. An Ack only stops resends. A Pick is a wish: it
   is read only for a storage whose own mod called `ProvideAmmo` on the server, at most 4 a second per player (8 at
   once), and only when the item is in the sender's own storage and is ammunition of the picked kind; anything else is
-  dropped and logged (at most once a minute per reason). A repeat of a pick that is under way is ignored.
+  dropped and logged (at most once a minute per reason, whatever item or key the game sent). A repeat of a pick that is
+  under way is ignored; a pick's outcome is logged on the tick thread.
 
 `PlayerStorage.Client.ProvideAmmo(fullKey, kinds, options)` returns a `PlayerStorageAmmoProvider` and does both halves
 of a quiver or spellbook, made in `OnLoad` on both sides:

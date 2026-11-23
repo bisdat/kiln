@@ -115,8 +115,12 @@ Log.Info(_ammo.ToString());   // "... shown", or why not here (a dedicated serve
   it and is ammunition of that list, at most 4 picks a second per player, then equips the first slot holding the item
   with `Items.Equip` (the stack stays in the storage).
 - `PlayerStorageAmmoOptions.Activate` uses `PlayerStorage.Activate` instead: the stack moves into the backpack and is
-  equipped there, and the one activated before goes back. Use it if the game does not fire from a stack outside the
-  backpack. Your own commands can call `Activate(player, index)` too.
+  equipped there, and the one activated before goes back (if the equip fails, the stack goes back instead). Use it if
+  the game does not fire from a stack outside the backpack. Your own commands can call `Activate(player, index)` too.
+
+A client half that reads `PlayerStorage.Client.Rows` itself on a game that joined another's world cannot ask
+`Items.Get` what an item is (that game has no item catalog): `PlayerStorageRow.Flags` carries the item's `AmmoKinds` as
+the server's catalog has it.
 
 A mod provides only its own storages, one provider per storage; dispose the provider to end both halves (it ends with
 the mod). The HUD's own rules apply: a pick of an item the player also carries in the backpack is the game's own.
