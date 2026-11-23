@@ -164,6 +164,25 @@ describe("untrusted registry report", () => {
     expect(JSON.stringify(out.refused).toLowerCase()).not.toContain("secretdesc");
     expect(out.refused[0].reason).toContain("items[game:fixture_stack].maxStack");
   });
+  test("field rows carry stable keys by registry, id and field (not by position)", () => {
+    const r = registryFixture();
+    const a = { ...r.fields[0], id: "game:a" }, b = { ...r.fields[0], id: "game:b" };
+    const one = parse({ ...r, fields: [a, b, b] }), two = parse({ ...r, fields: [b, a] });
+    expect(one.fields.map(f => f.key)).toEqual(["items|game:a|maxStack|0", "items|game:b|maxStack|0", "items|game:b|maxStack|1"]);
+    expect(two.fields[1].key).toBe(one.fields[0].key);
+  });
+  test("zero-width and bidi marks are removed and truncation never splits a surrogate pair", () => {
+    const r = registryFixture();
+    const out = parse({ ...r, refused: [{ ...r.refused[0], mod: "ev\u200bil\u200e\u200f\u061c\u2060\ufeff", reason: "x".repeat(REPORT_LIMITS.text - 1) + "😀tail" }] });
+    expect(out.refused[0].owner).toBe("evil");
+    expect(out.refused[0].reason).not.toMatch(/[\ud800-\udbff](?![\udc00-\udfff])/);
+  });
+  test("record members hidden from a value are marked, not silently dropped", () => {
+    const r = registryFixture();
+    const out = parse({ ...r, fields: [{ ...r.fields[0], result: { offset: 3, item: "game:x" } }] });
+    expect(out.fields[0].result).toContain("game:x");
+    expect(out.fields[0].result).toContain("1 hidden");
+  });
   test("HTML is kept as plain text, never interpreted", () => {
     const r = registryFixture(); r.refused[0].reason = '<img src=x onerror="alert(1)">';
     expect(parse(r).refused[0].reason).toBe(r.refused[0].reason);

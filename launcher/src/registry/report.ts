@@ -13,6 +13,8 @@ type ObjectRow = Record<string, unknown>;
 // certainty is the label in the current language; certain says whether Kiln observed it (the page's tone).
 export interface RegistryWriter { element: string; owner: string; kind: string; stage: string; operation: string; value: string; certainty: string; certain: boolean }
 export interface RegistryField {
+  /** registry|id|field|n (n: earlier rows with the same place): a React key that follows the row across pages and refetches. */
+  key: string;
   registry: string; id: string; field: string; applies: string; baseOrigin: string; base: string;
   result: string; winner: string; writers: RegistryWriter[]; writersOmitted: number; formulaInputs: string;
 }
@@ -35,8 +37,11 @@ function array(x: unknown): unknown[] {
 }
 function text(x: unknown): string {
   if (typeof x !== "string") throw new Error(t("registry.error.malformed", { part: "text" }));
-  // Raw addresses are not Kiln identifiers. Also remove terminal/bidi controls that could disguise an owner.
-  const s = x.slice(0, REPORT_LIMITS.text).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f‪-‮⁦-⁩]/g, "")
+  // Raw addresses are not Kiln identifiers. Also remove terminal/bidi/zero-width controls that could disguise an owner,
+  // and never cut a surrogate pair in half.
+  let cut = x.slice(0, REPORT_LIMITS.text);
+  if (/[\ud800-\udbff]$/.test(cut)) cut = cut.slice(0, -1);
+  const s = cut.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g, "")
     .replace(/\b(?:RVA|offset)\s*[:=]?\s*(?:0x[\da-f]+|\d+)\b|\b0x[\da-f]{6,}\b/gi, "[native detail hidden]");
   return s + (x.length > REPORT_LIMITS.text ? "…" : "");
 }
@@ -77,10 +82,11 @@ function value(x: unknown, leftOut: unknown = 0): string {
       return rows;
     }
     const o = object(v);
-    const keys = Object.keys(o).filter(k => !/^(raw|offset|rva|address|function|gameFunction)$/i.test(k));
+    const all = Object.keys(o), keys = all.filter(k => !/^(raw|offset|rva|address|function|gameFunction)$/i.test(k));
     const rows: ObjectRow = Object.create(null);
     for (const k of keys.slice(0, 16)) rows[text(k)] = bounded(o[k], depth + 1);
     if (keys.length > 16) rows["…"] = `${keys.length - 16} omitted`;
+    if (all.length > keys.length) rows["… hidden"] = `${all.length - keys.length} hidden`;
     return rows;
   }
   const result = text(JSON.stringify(bounded(x, 0)));
@@ -127,13 +133,18 @@ export function parseRegistryReport(input: string): RegistryReport {
     left += count(truncated[key]) + Math.max(0, rows.length - REPORT_LIMITS.rows);
   }
   let launcherWriterCut = 0;
+  const seen = new Map<string, number>();
   const fieldRows = fields.slice(0, REPORT_LIMITS.rows).map(x => {
     const f = object(x), b = object(f.base), chain = array(f.writers);
     const skip = Math.max(0, chain.length - REPORT_LIMITS.writers);
     launcherWriterCut += skip;
     const raw = f.raw === true, unknown = !raw && !isKilnField(text(f.registry), text(f.field));
+    const field = raw ? ADVANCED_FIELD() : unknown ? unknownField(text(f.field)) : text(f.field);
+    const place = `${text(f.registry)}|${text(f.id)}|${raw ? "raw" : text(f.field)}`, n = seen.get(place) ?? 0;  // never a raw path
+    seen.set(place, n + 1);
     return {
-      registry: text(f.registry), id: text(f.id), field: raw ? ADVANCED_FIELD() : unknown ? unknownField(text(f.field)) : text(f.field), applies: text(f.applies),
+      key: `${place}|${n}`,
+      registry: text(f.registry), id: text(f.id), field, applies: text(f.applies),
       baseOrigin: text(b.origin), base: value(b.value, b.entriesLeftOut), result: value(f.result, f.resultEntriesLeftOut), winner: owner(f.winner),
       formulaInputs: f.formulaInputs === undefined ? "" : value(f.formulaInputs),
       writersOmitted: omitted(f.writersLeftOut) + skip,

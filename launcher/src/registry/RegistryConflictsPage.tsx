@@ -60,7 +60,7 @@ function RegistryFor({ gameId }: { gameId: string }) {
           </Card>
           <Card title={t("registry.fields")} sub={t("registry.fieldsSub")}>
             <WellInput label={t("registry.filter")} value={filter} onChange={e => setFilter(e.target.value.slice(0, 256))} onClear={() => setFilter("")} />
-            <Rows key={filter} rows={fields} empty={filter ? t("registry.noMatch") : t("registry.noFields")} render={(x, i) => <FieldChain key={i} field={x} />} />
+            <Rows key={filter} rows={fields} empty={filter ? t("registry.noMatch") : t("registry.noFields")} render={x => <FieldChain key={x.key} field={x} />} />
           </Card>
           {r.entries.length > 0 && <Card title={t("registry.entries")}><Rows rows={r.entries} empty={t("registry.noEntries")} render={(x, i) => <p key={i}>{x.kind} · {x.registry} · {x.id}</p>} /></Card>}
         </>}
