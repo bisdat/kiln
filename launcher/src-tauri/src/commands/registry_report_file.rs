@@ -78,6 +78,18 @@ mod tests {
         assert!(read_report(&root.0).is_err());
     }
     #[cfg(unix)]
+    #[test] fn refuses_intermediate_directory_symlink_outside_game_folder() {
+        for dir in ["kiln", "kiln/state"] {
+            let root = Root::new(&format!("dirlink-{}", dir.replace('/', "-")));
+            let outside = Root::new(&format!("dirlink-outside-{}", dir.replace('/', "-")));
+            fs::write(outside.file(), "{\"format\":1}").unwrap();
+            fs::remove_dir_all(root.0.join(dir)).unwrap();
+            std::os::unix::fs::symlink(outside.0.join(dir), root.0.join(dir)).unwrap();
+            let err = read_report(&root.0).unwrap_err();
+            assert_eq!(err.kind(), io::ErrorKind::PermissionDenied, "{dir}: {err}");
+        }
+    }
+    #[cfg(unix)]
     #[test] fn refuses_symlink_outside_game_folder() {
         let root = Root::new("link");
         std::os::unix::fs::symlink("/dev/zero", root.file()).unwrap();

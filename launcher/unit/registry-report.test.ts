@@ -129,6 +129,13 @@ describe("untrusted registry report", () => {
     expect(out.conflicts[0].field).toBe("items[game:fixture_stack].futureField (Field unknown to this launcher)");
     expect(out.conflicts[0].text).toBe("stacker composes on earlier");
   });
+  test("a refusal on a Kiln element path keeps its reason verbatim", () => {
+    const r = registryFixture();
+    const reason = "Unproven: drops.entries[2].chance is not proven for this build (no verified mapping); this edit was not applied";
+    const out = parse({ ...r, refused: [{ mod: "loot", source: "", stage: "alter", n: 0, registry: "drops", id: "game:fixture_drops", field: "entries[2].chance", reason }] });
+    expect(out.refused[0].reason).toBe(reason);
+    expect(out.refused[0].field).toBe("drops · game:fixture_drops · entries[2].chance");
+  });
   test("a refusal the runtime marks raw stays hidden", () => {
     const r = registryFixture();
     const out = parse({ ...r, refused: [{ mod: "adv", source: "", stage: "alter", n: 0, registry: "items", field: "SecretSetup.Member", raw: true,
