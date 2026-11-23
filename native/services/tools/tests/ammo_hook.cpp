@@ -26,7 +26,8 @@ static bool nested_ammo;
 static SelectorGroup nested_groups[7];
 static bool entry_synthetic; // vanilla enumeration retains unmatched rows, so a synthetic row must be gone at entry
 static void KILN_CALL ammo_selector_fixture(SelectorGroup* groups,void* access,uint8_t current) {
-    entry_synthetic=false;for(uint64_t r=0;groups[0].data&&r<groups[0].count;++r)if(groups[0].data[r].item==555)entry_synthetic=true;
+    entry_synthetic=false; // only the fixture's own rows: the fault cases below leave groups[0].data unreadable
+    if(groups[0].data==groups[0].inline_rows)for(uint64_t r=0;r<groups[0].count&&r<64;++r)if(groups[0].data[r].item==555)entry_synthetic=true;
     vanilla_selector(groups,access,current);
     if(bad_rows)groups[0].data=reinterpret_cast<SelectorRow*>(1);
     if(readonly_rows)groups[0].data=readonly_rows;
@@ -109,7 +110,7 @@ int main() {
     page[0].item=999;page[0].count=9;page[1].item=1257792166u;page[1].count=3;
     DWORD old_protection=0;CHECK(VirtualProtect(page,4096,PAGE_READONLY,&old_protection));readonly_rows=page;
     CHECK(guarded_ammo(groups,const_cast<void*>(static_cast<const void*>(access)))&&ammo::failed()&&groups[0].count==0);
-    readonly_rows=nullptr;CHECK(VirtualFree(page,0,MEM_RELEASE));ammo::faulted.store(false);
+    readonly_rows=nullptr;groups[0].data=groups[0].inline_rows;CHECK(VirtualFree(page,0,MEM_RELEASE));ammo::faulted.store(false);
 #endif
     auto* const acc=const_cast<void*>(static_cast<const void*>(access));
     selector(groups,acc,0);CHECK(groups[0].count==2&&groups[0].data[0].item==555&&groups[0].data[1].item==999); // Replace {555,999}
