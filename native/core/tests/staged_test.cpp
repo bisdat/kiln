@@ -10,7 +10,10 @@
 //     write), for every k, in five scenarios; the next start must see the old version before it tries again (or the
 //     new one when the crash came after the commit) and end with the new version; a crash while putting back too;
 //   - a change interrupted three times is dropped; a rename that fails puts everything back; a damaged or foreign
-//     journal is left alone.
+//     journal is left alone;
+//   - kiln/data (persistent state: kiln-network/server-id, dev.31's registry/entry-compat.json, the admin token) is the
+//     same byte for byte after every stage, apply, crash, recovery and rollback, and no kept version holds any of it,
+//     even when a plan, a kept version or a journal names a path under it.
 // Built twice: on the host (POSIX paths, fork) and with clang-cl under Wine (the Win32 calls, CreateProcess):
 //   native/core/tests/test-staged.sh   native/core/tests/test-staged-wine.sh
 #include <algorithm>
@@ -163,9 +166,25 @@ static Tree kiln_new() {  // a.dll removed (unchanged), b.dll kept (the player c
     return {{"dinput8.dll", "proxy 2"},          {"kiln/kiln-core.dll", "core 2"}, {"kiln/host/new.dll", "new 2"},
             {"kiln/services/b.dll", "b 1 edited"}, {"kiln/.install.json", kReceipt2}};
 }
+// kiln/data: persistent Kiln state that no staged change may write, move or delete (dev.31 adds registry/ there).
+static Tree data_tree() {
+    return {{"kiln-network/server-id", "srv-4b8e2c\n"}, {"registry/entry-compat.json", "{\"format\":1,\"entries\":[]}"},
+            {"kiln-admin/admin-token", "token"}};
+}
+static void put_data(const fs::path& game) { write_tree(game / "kiln" / "data", data_tree()); }
+static void check_data(const fs::path& game, const std::string& label) {
+    CHECK_MSG(tree(game / "kiln" / "data") == data_tree(), label + ": kiln/data changed");
+    for (const auto& [rel, text] : tree(staged(game))) {
+        (void)text;
+        CHECK_MSG(rel.find("kiln/data") == std::string::npos && rel.find("server-id") == std::string::npos &&
+                      rel.find("entry-compat") == std::string::npos,
+                  label + ": kiln/staged holds a copy of kiln/data: " + rel);
+    }
+}
+
 static void setup_kiln(const fs::path& game) {
     write_tree(game, kiln_old());
-    put(game / "kiln" / "data" / "kiln-admin" / "admin-token", "token");  // the server's own files are never touched
+    put_data(game);  // the server's own files are never touched
     const Tree files = {{"dinput8.dll", "proxy 2"}, {"kiln/kiln-core.dll", "core 2"}, {"kiln/host/new.dll", "new 2"}, {"kiln/.install.json", kReceipt2}};
     const fs::path dir = staged(game) / "kiln";
     write_tree(dir / "files", files);
@@ -178,7 +197,7 @@ static void setup_kiln(const fs::path& game) {
 static Tree kiln_view(const fs::path& game) {
     Tree t = tree(game, "kiln/staged/");
     t.erase("enshrouded_server.exe");
-    t.erase("kiln/data/kiln-admin/admin-token");
+    for (auto it = t.begin(); it != t.end();) it = it->first.rfind("kiln/data/", 0) == 0 ? t.erase(it) : std::next(it);
     return t;
 }
 
@@ -247,6 +266,7 @@ struct Scenario {
 static void crash_everywhere(const Scenario& s) {
     // the clean run: how many changes, and where the commit is
     const fs::path clean = fresh(std::string("clean-") + s.name);
+    put_data(clean);
     s.setup(clean);
     CHECK_MSG(s.view(clean) == s.before, s.name);
     g_calls = 0;
@@ -262,14 +282,17 @@ static void crash_everywhere(const Scenario& s) {
         if (names[static_cast<size_t>(i)] == "commit") commit = i + 1;
     CHECK_MSG(commit > 0 && n > commit, s.name);
     CHECK_MSG(s.view(clean) == s.after, std::string(s.name) + ": " + log.all());
+    check_data(clean, s.name);
     if (s.after_checks) s.after_checks(clean);
     std::printf("  %s: %d changes (commit at %d)\n", s.name, n, commit);
 
     for (int k = 1; k <= n; ++k) {
         const std::string label = std::string(s.name) + " crash at " + std::to_string(k) + " (" + names[static_cast<size_t>(k - 1)] + ")";
         const fs::path g = fresh(std::string("crash-") + s.name + "-" + std::to_string(k));
+        put_data(g);
         s.setup(g);
         CHECK_MSG(run_child(s.kind, g, k) == 77, label);
+        check_data(g, label + ", right after the crash");
         // The next start: recovery first. Before the commit, the retry's journal must find the old version exactly.
         Tree at_retry;
         bool retried = false;
@@ -297,6 +320,7 @@ static void crash_everywhere(const Scenario& s) {
             CHECK_MSG(l2.has("had already committed"), label + ": " + l2.all());
         }
         CHECK_MSG(s.view(g) == s.after, label + ": " + l2.all());
+        check_data(g, label + ", after the recovery");
         CHECK_MSG(!there(staged(g) / "tx"), label);
         CHECK_MSG(!there(staged(g) / "attempts"), label);
         if (s.after_checks) s.after_checks(g);
@@ -304,12 +328,14 @@ static void crash_everywhere(const Scenario& s) {
         // a second crash, at the first change of the start that puts the first one back
         if (k > 1 && k < commit) {
             const fs::path g2 = fresh(std::string("crash2-") + s.name + "-" + std::to_string(k));
+            put_data(g2);
             s.setup(g2);
             CHECK_MSG(run_child(s.kind, g2, k) == 77, label + " (twice)");
             CHECK_MSG(run_child(s.kind, g2, 1) == 77, label + " (twice)");
             Log l3;
             boot(s.kind, g2, &l3);
             CHECK_MSG(s.view(g2) == s.after, label + " (twice): " + l3.all());
+            check_data(g2, label + " (twice)");
             CHECK_MSG(!there(staged(g2) / "tx"), label + " (twice)");
             fs::remove_all(g2);
         }
@@ -689,6 +715,66 @@ static void test_kiln_update() {
     fs::remove_all(g5);
 }
 
+// Plans, kept versions and journals that name kiln/data: each is refused and kiln/data stays byte for byte.
+static void test_kiln_data_untouched() {
+    auto expect_refused = [](const char* name, const std::function<void(const fs::path&)>& edit, const std::string& reason) {
+        const fs::path g = fresh(std::string("data-") + name);
+        setup_kiln(g);
+        edit(g);
+        Log log;
+        const Summary s = boot(Kind::Kiln, g, &log);
+        CHECK_MSG(s.failed == 1 && s.applied == 0 && log.has(reason), std::string(name) + ": " + log.all());
+        check_data(g, name);
+        fs::remove_all(g);
+    };
+    auto add_file = [](const fs::path& g, const std::string& path, const std::string& text) {
+        json doc = read_json(staged(g) / "kiln" / "staged.json");
+        doc["files"].push_back({{"path", path}, {"sha256", sha(text)}, {"size", text.size()}});
+        put(staged(g) / "kiln" / "files" / path, text);
+        put(staged(g) / "kiln" / "staged.json", doc.dump());
+    };
+    expect_refused("write", [&](const fs::path& g) { add_file(g, "kiln/data/kiln-network/server-id", "srv-hijacked\n"); }, "under kiln/data");
+    expect_refused("write-case", [&](const fs::path& g) { add_file(g, "Kiln/Data/registry/entry-compat.json", "{}"); }, "under kiln/data");
+    expect_refused("remove", [](const fs::path& g) {
+        json doc = read_json(staged(g) / "kiln" / "staged.json");
+        doc["remove"].push_back({{"path", "kiln/data/registry/entry-compat.json"}, {"sha256", sha(data_tree()["registry/entry-compat.json"])}});
+        put(staged(g) / "kiln" / "staged.json", doc.dump());
+    }, "under kiln/data");
+    expect_refused("whole-folder", [&](const fs::path& g) { add_file(g, "kiln/data", "a file in its place"); }, "under kiln/data");
+    // a kept version (previous/kiln) whose rollback would remove or replace kiln/data
+    for (const char* before : {"absent", "present"}) {
+        const fs::path g = fresh(std::string("data-kept-") + before);
+        setup_kiln(g);
+        boot(Kind::Kiln, g, nullptr);
+        confirm_kiln(g);
+        json kept = read_json(staged(g) / "previous" / "kiln" / "kept.json");
+        kept["entries"].push_back({{"path", "kiln/data/kiln-network/server-id"}, {"before", before}});
+        put(staged(g) / "previous" / "kiln" / "kept.json", kept.dump());
+        put(staged(g) / "previous" / "kiln" / "files" / "kiln" / "data" / "kiln-network" / "server-id", "srv-old\n");
+        put(staged(g) / "rollback" / "kiln.json", "{\"format\":1,\"unit\":\"kiln\"}");
+        Log log;
+        const Summary s = boot(Kind::Kiln, g, &log);
+        CHECK_MSG(s.failed == 1 && s.rolled_back == 0 && log.has("under kiln/data"), log.all());
+        CHECK(tree(g / "kiln" / "data") == data_tree());
+        CHECK(kiln_view(g) == kiln_new());
+        fs::remove_all(g);
+    }
+    // a hand-made journal that would move kiln/data away (and "put back" something else)
+    const fs::path g = fresh("data-journal");
+    write_tree(g, kiln_old());
+    put_data(g);
+    put(staged(g) / "tx" / "kiln" / "prev" / "files" / "kiln" / "data" / "kiln-network" / "server-id", "srv-other\n");
+    const json j = {{"format", 1}, {"id", "x"}, {"unit", "kiln"}, {"op", "update"}, {"version", "2"}, {"from", "1"}, {"phase", "applying"},
+                    {"steps", json::array({{{"target", "kiln/data/kiln-network/server-id"}, {"source", ""},
+                                            {"backup", "kiln/staged/tx/kiln/prev/files/kiln/data/kiln-network/server-id"}, {"had", true}}})}};
+    put(staged(g) / "tx" / "kiln" / "journal.json", j.dump());
+    Log log;
+    const Summary s = boot(Kind::Kiln, g, &log);
+    CHECK_MSG(s.failed == 1 && log.has("not this unit's"), log.all());
+    CHECK(tree(g / "kiln" / "data") == data_tree());
+    fs::remove_all(g);
+}
+
 static void test_interrupted_three_times() {
     const fs::path g = fresh("thrice");
     write_tree(g / "kiln" / "mods" / "m", mod_files("m", "1.0.0"));
@@ -851,6 +937,7 @@ int main(int argc, char** argv) {
     test_rename_failure_puts_back();
 #endif
     test_kiln_update();
+    test_kiln_data_untouched();
     test_interrupted_three_times();
     test_bad_journals();
     test_misc();
