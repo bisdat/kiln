@@ -538,7 +538,10 @@ public sealed class PlayerStorage
 /// <param name="Item">The item.</param>
 /// <param name="Count">How many (at least 1).</param>
 /// <param name="Level">Gear's level (0 for a plain stack).</param>
-/// <param name="Flags">Reserved: 0 in this version.</param>
+/// <param name="Flags">The item's <see cref="AmmoKinds"/> as the server's item catalog has it: 1 (<see cref="AmmoKinds.Arrow"/>)
+/// for arrows, 2 (<see cref="AmmoKinds.Spell"/>) for a spell, 0 for anything else; other bits are 0 in this version. A game
+/// that joined another's world has no item catalog of its own (<see cref="Items.Get"/> answers null there): this is how
+/// its client half tells ammunition apart.</param>
 public readonly record struct PlayerStorageRow(string Key, int Index, ItemId Item, int Count, int Level, uint Flags);
 
 /// <summary>Kiln restored a player's storage of one key at the join (or when a mod registered it while the player was on):

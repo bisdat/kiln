@@ -138,7 +138,10 @@ public sealed class PlayerStorageMirrorTests
     }
 
     private static StorageMirrorEntry E(string key, byte slots, params StorageMirrorRow[] rows) => new(key, slots, rows);
-    private static StorageMirrorRow R(byte slot, uint item, uint count, ushort level = 0) => new(slot, item, count, level, 0);
+    private static StorageMirrorRow R(byte slot, uint item, uint count, ushort level = 0, uint flags = 0) => new(slot, item, count, level, flags);
+    // rows as the server marks them (Flags: the item's AmmoKinds by its catalog)
+    private static StorageMirrorRow Arrows(byte slot, uint item, uint count) => R(slot, item, count, flags: (uint)AmmoKinds.Arrow);
+    private static StorageMirrorRow Spells(byte slot, uint item, uint count) => R(slot, item, count, flags: (uint)AmmoKinds.Spell);
 
     // ---- the wire ----
 
@@ -249,7 +252,7 @@ public sealed class PlayerStorageMirrorTests
         r.Give(q, r.Ada, r.Arrow, 40);
         r.Give(q, r.Ada, r.Spell, 3);
         r.Pass();
-        Assert.Equal([new PlayerStorageRow("quivers:quiver", 0, r.Arrow, 40, 0, 0), new PlayerStorageRow("quivers:quiver", 1, r.Spell, 3, 0, 0)],
+        Assert.Equal([new PlayerStorageRow("quivers:quiver", 0, r.Arrow, 40, 0, 1), new PlayerStorageRow("quivers:quiver", 1, r.Spell, 3, 0, 2)],
             r.Link.Games[r.Ada.Entity.Value].Rows("quivers:quiver"));
         Assert.Empty(r.Link.Games[r.Bo.Entity.Value].Rows("quivers:quiver"));  // Bo has his own, empty storage
         Assert.Equal(["quivers:quiver"], r.Link.Games[r.Bo.Entity.Value].Keys());
@@ -330,7 +333,7 @@ public sealed class PlayerStorageMirrorTests
         r.Pass();
         Assert.Empty(r.Link.Sent[r.Ada.Entity.Value]);  // nothing over the network
         Assert.True(r.Kiln.Run(() => PlayerStorage.Client.Available));
-        Assert.Equal([new PlayerStorageRow("quivers:quiver", 0, r.Arrow, 12, 0, 0)], r.Kiln.Run(() => PlayerStorage.Client.Rows("quivers:quiver")));
+        Assert.Equal([new PlayerStorageRow("quivers:quiver", 0, r.Arrow, 12, 0, 1)], r.Kiln.Run(() => PlayerStorage.Client.Rows("quivers:quiver")));
         r.Kiln.Step();
         var changed = Assert.Single(r.Changes);
         Assert.Equal(("quivers:quiver", 1), (changed.Key, changed.Rows.Count));
@@ -494,7 +497,7 @@ public sealed class PlayerStorageMirrorTests
         var bow = r.Kiln.Items.AddItem("Weapon_Bow_T1", 1, ItemCategory.Weapons, gear: true);
         var staff = r.Kiln.Items.AddItem("Weapon_Staff_T1", 1, ItemCategory.Weapons, gear: true);
         PlayerStorageMirror.Store.Apply(new StorageMirrorUpdate(4, 1,
-            [E("quivers:quiver", 18, R(0, r.Arrow.Value, 30), R(1, r.Spell.Value, 2), R(2, r.FireArrow.Value, 5), R(3, r.Arrow.Value, 9), R(4, r.Logs.Value, 50))]));
+            [E("quivers:quiver", 18, Arrows(0, r.Arrow.Value, 30), Spells(1, r.Spell.Value, 2), Arrows(2, r.FireArrow.Value, 5), Arrows(3, r.Arrow.Value, 9), R(4, r.Logs.Value, 50))]));
         using var ammo = r.Kiln.Run(() => As(r.Quivers, () => PlayerStorage.Client.ProvideAmmo("quivers:quiver", AmmoKinds.Arrow | AmmoKinds.Spell)));
         Assert.True(ammo.Shown, ammo.WhyNotShown);
         r.Kiln.AmmoList.Hold(AmmoListKind.Arrow, bow);
@@ -505,7 +508,7 @@ public sealed class PlayerStorageMirrorTests
         Assert.Equal(AmmoListMode.Append, r.Kiln.AmmoList.ModeOf(AmmoListKind.Arrow));
 
         // the copy changes: the rows follow
-        r.Kiln.Run(() => PlayerStorageMirror.Store.Apply(new StorageMirrorUpdate(4, 2, [E("quivers:quiver", 18, R(2, r.FireArrow.Value, 4))])));
+        r.Kiln.Run(() => PlayerStorageMirror.Store.Apply(new StorageMirrorUpdate(4, 2, [E("quivers:quiver", 18, Arrows(2, r.FireArrow.Value, 4))])));
         r.Kiln.Run(() => PlayerStorageAmmo.Changed("quivers:quiver"));
         r.Kiln.Step(2);
         Assert.Equal([new AmmoListRow(r.FireArrow, 4)], r.Kiln.AmmoList.Provided(AmmoListKind.Arrow));
@@ -571,7 +574,7 @@ public sealed class PlayerStorageMirrorTests
     {
         using var r = new Run();
         var bow = r.Kiln.Items.AddItem("Weapon_Bow_T1", 1, ItemCategory.Weapons, gear: true);
-        PlayerStorageMirror.Store.Apply(new StorageMirrorUpdate(4, 1, [E("quivers:quiver", 8, R(0, r.FireArrow.Value, 5))]));
+        PlayerStorageMirror.Store.Apply(new StorageMirrorUpdate(4, 1, [E("quivers:quiver", 8, Arrows(0, r.FireArrow.Value, 5))]));
         using var ammo = r.Kiln.Run(() => As(r.Quivers, () =>
             PlayerStorage.Client.ProvideAmmo("quivers:quiver", AmmoKinds.Arrow, new PlayerStorageAmmoOptions { Replace = true })));
         r.Kiln.AmmoList.Hold(AmmoListKind.Arrow, bow, new AmmoListRow(r.Arrow, 20));

@@ -186,9 +186,10 @@ Server storage availability does not imply a joined client can read it: the clie
 ## The client copy and the HUD's ammunition lists
 
 The owner's game holds a read-only copy of that player's storages: `PlayerStorage.Client.Rows(fullKey)` (one
-`PlayerStorageRow` per slot that holds something: key, index, item, count, level, flags 0) and
-`PlayerStorageClientChangedEvent` (one per storage whose rows changed, also when it went or the game left the world;
-tick thread: the main thread of a joined game, the server thread of a hosting one). Capability `items.storage.client`:
+`PlayerStorageRow` per slot that holds something: key, index, item, count, level, and flags: the item's `AmmoKinds` by
+the server's item catalog, 1 arrows, 2 a spell, 0 anything else; a game that joined another's world has no catalog of its
+own, `Items.Get` answers null there) and `PlayerStorageClientChangedEvent` (one per storage whose rows changed, also when
+it went or the game left the world; tick thread: the main thread of a joined game, the server thread of a hosting one). Capability `items.storage.client`:
 available where Kiln's channel is open (both sides), unavailable (`service-missing`) without kiln.net. It does not
 depend on `items.storage`: a game that joined another's world has no storage of its own but gets its copy.
 
@@ -197,7 +198,7 @@ before and is sent nothing):
 
 | Message | Direction | Fields |
 |---|---|---|
-| 1 Update | server → client | view (random per player session, nonzero), seq, then per storage: full key, slots, rows (slot, item, count, level, flags) |
+| 1 Update | server → client | view (random per player session, nonzero), seq, then per storage: full key, slots, rows (slot, item, count, level, flags: the item's `AmmoKinds` by the server's catalog) |
 | 2 Ack | client → server | view, seq of the update the game applied |
 | 3 Pick | client → server | full key, kind (1 arrow, 2 spell), item |
 
@@ -218,9 +219,9 @@ before and is sent nothing):
 `PlayerStorage.Client.ProvideAmmo(fullKey, kinds, options)` returns a `PlayerStorageAmmoProvider` and does both halves
 of a quiver or spellbook, made in `OnLoad` on both sides:
 
-- **Game client:** the storage's items whose game equipment slot type is arrow (6) or spell (7) become rows of
-  `Ui.AmmoList` (`ui.ammo.list`), one per item with the counts of its slots added up, in slot order, Append unless
-  `PlayerStorageAmmoOptions.Replace`. They are asked for again when the copy changes. A pick (`ui.ammo.pick`) of an
+- **Game client:** the storage's items the server marked as arrows or spells (its catalog's equipment slot type 6 or 7)
+  become rows of `Ui.AmmoList` (`ui.ammo.list`), one per item with the counts of its slots added up, in slot order,
+  Append unless `PlayerStorageAmmoOptions.Replace`. They are asked for again when the copy changes. A pick (`ui.ammo.pick`) of an
   item of that storage goes to the server; a hosting game queues it for its own server tick. Without the HUD lists only
   the server half runs; `Shown` and `WhyNotShown` say so.
 - **Server:** after the checks above, the first slot holding the item is equipped with `Items.Equip` as the storage's

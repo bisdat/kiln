@@ -8,6 +8,8 @@
 // mod's) and, when they differ from what it sent, sends that player the whole set; never another player's.
 //
 //   server -> client  Update  v1: [view, seq] [storages: key, slots, rows: slot, item, count, level, flags]
+//                     flags: the item's AmmoKinds by the server's item catalog (1 arrows, 2 a spell, 0 anything else); a
+//                     game that joined another's world has no catalog of its own to tell
 //   client -> server  Ack     v1: [view, seq] the update the game applied
 //   client -> server  Pick    v1: [key, kind, item] a pick of a row ProvideAmmo showed: a wish the server checks
 //
@@ -436,13 +438,14 @@ internal static class PlayerStorageMirror
     }
 
     /// <summary>The game: the rows of <paramref name="fullKey"/> whose item is ammunition of <paramref name="kind"/>, one
-    /// per item (counts added up), in slot order. For the HUD's list (any thread).</summary>
+    /// per item (counts added up), in slot order. For the HUD's list (any thread). The kind is the server's mark
+    /// (<see cref="PlayerStorageRow.Flags"/>): a game that joined another's world has no item catalog.</summary>
     internal static List<(ItemId Item, int Count)> AmmoRows(string fullKey, AmmoKinds kind)
     {
         var list = new List<(ItemId Item, int Count)>();
         foreach (var r in Store.Rows(fullKey))
         {
-            if (KindOf(r.Item) != kind) continue;
+            if ((r.Flags & (uint)kind) == 0) continue;
             var i = list.FindIndex(x => x.Item == r.Item);
             if (i < 0) list.Add((r.Item, r.Count));
             else list[i] = (r.Item, (int)Math.Min(int.MaxValue, (long)list[i].Count + r.Count));
@@ -468,7 +471,7 @@ internal static class PlayerStorageMirror
     }
 
     /// <summary>The game's equipment slot type of ammunition (the item's <see cref="ItemInfo.EquipSlot"/>): 6 arrows, 7
-    /// spells (docs/re/items.md, 0x936c30).</summary>
+    /// spells (docs/re/items.md, 0x936c30). The server's catalog (a game that joined another's world has none: 0).</summary>
     internal static AmmoKinds KindOf(ItemId item) => Items.Get(item)?.EquipSlot switch
     {
         6 => AmmoKinds.Arrow,
@@ -583,7 +586,8 @@ internal static class PlayerStorageMirror
                 if (s.IsEmpty || s.Count <= 0 || !pages.TryGetValue(s.Slot.Inventory.Value, out var page)) continue;
                 var index = page * 8 + s.Slot.Index;
                 if (index >= info.Slots) continue;
-                rows.Add(new StorageMirrorRow((byte)index, s.Item.Value, (uint)s.Count, (ushort)Math.Clamp(s.Level, 0, ushort.MaxValue), 0));
+                rows.Add(new StorageMirrorRow((byte)index, s.Item.Value, (uint)s.Count, (ushort)Math.Clamp(s.Level, 0, ushort.MaxValue),
+                    (uint)KindOf(s.Item)));
             }
             rows.Sort((a, b) => a.Slot.CompareTo(b.Slot));
             if (total + rows.Count > StorageMirrorUpdate.MaxRows) break;
