@@ -139,6 +139,9 @@ pub fn prove(inp: &Inputs, when: &str) -> Proof {
             }
         }
     }
+    if inp.old_exe_sha.as_deref().is_some_and(|o| o.eq_ignore_ascii_case(&inp.new_exe_sha)) {
+        p.blockers.push(format!("the old and the new build are the same exe ({}): nothing to compare it with", short(&inp.new_exe_sha)));
+    }
     // 1. reflection
     if inp.new_refl.is_none() {
         p.blockers.push("no reflection dump of the new exe".into());
@@ -587,7 +590,7 @@ fn copy_tree(from: &Path, to: &Path) -> Result<()> {
     std::fs::create_dir_all(to)?;
     for e in std::fs::read_dir(from).with_context(|| format!("reading {}", from.display()))?.flatten() {
         let (src, dst) = (e.path(), to.join(e.file_name()));
-        if e.file_type()?.is_dir() {
+        if std::fs::metadata(&src)?.is_dir() {
             copy_tree(&src, &dst)?;
         } else {
             std::fs::copy(&src, &dst).with_context(|| format!("copying {}", src.display()))?;
@@ -656,26 +659,47 @@ fn run_record(g: &Gather, exe: &Path, new_sha: &str, previous: Option<&Path>, pr
     Ok((Some(read_json(&rec)?), table))
 }
 
-/// A lab output by its content: a round-trip suite, a values export or an id table.
-fn classify(p: &Path, inp: &mut Inputs, notes: &mut Vec<String>) {
-    let Ok(v) = read_json(p) else { return };
-    let kind = v.get("kind").and_then(Value::as_str).unwrap_or_default();
+/// The largest lab file kilnctl reads (a values export of every registry is tens of MiB).
+const LAB_FILE_MAX: u64 = 256 << 20;
+
+/// A lab output by its content: a round-trip suite, a values export or an id table. `strict` (a file under proof/, or one
+/// given by name): a file that cannot be read is a problem, not skipped.
+fn classify(p: &Path, inp: &mut Inputs, notes: &mut Vec<String>, strict: bool) {
+    match std::fs::metadata(p) {
+        Ok(m) if m.len() > LAB_FILE_MAX => {
+            inp.problems.push(format!("{}: larger than {} MiB, not read", p.display(), LAB_FILE_MAX >> 20));
+            return;
+        }
+        Err(e) => {
+            inp.problems.push(format!("{}: {e}", p.display()));
+            return;
+        }
+        _ => {}
+    }
+    let v = match read_json(p) {
+        Ok(v) => v,
+        Err(e) if strict => {
+            inp.problems.push(format!("{e:#} (a lab file that cannot be read proves nothing)"));
+            return;
+        }
+        Err(_) => return,
+    };
+    let kind = v.get("kind").and_then(Value::as_str).unwrap_or_default().to_string();
     let sha = v.get("exeSha256").and_then(Value::as_str).unwrap_or_default().to_ascii_lowercase();
     let old = inp.old_exe_sha.clone().unwrap_or_default();
-    let text = v.to_string();
-    match kind {
-        roundtrip::KIND => match roundtrip::parse(&text) {
+    match kind.as_str() {
+        roundtrip::KIND => match roundtrip::from_value(v) {
             Ok(s) => inp.suites.push(s),
             Err(e) => inp.problems.push(format!("{}: {e:#}", p.display())),
         },
-        values::KIND => match values::parse(&text) {
+        values::KIND => match values::from_value(v) {
             Ok(e) if sha == inp.new_exe_sha => inp.values_new = Some(e),
             Ok(e) if !old.is_empty() && sha == old => inp.values_old = Some(e),
             Ok(_) => notes.push(format!("{}: a values export of another build, set aside", p.display())),
             Err(e) => inp.problems.push(format!("{}: {e:#}", p.display())),
         },
         _ if v.get("format").is_some() && v.get("registries").is_some_and(Value::is_object) => {
-            match ids::IdTable::parse(&text, &inp.side, &sha) {
+            match ids::IdTable::from_value(&v, &inp.side, &sha) {
                 Ok(t) if t.side == inp.side && sha == inp.new_exe_sha => inp.native_ids = Some(t),
                 Ok(t) if t.side == inp.side && !old.is_empty() && sha == old && inp.prev_ids.is_none() => inp.prev_ids = Some(t),
                 _ => {}
@@ -736,6 +760,12 @@ pub fn gather(g: &Gather) -> Result<Inputs> {
             (None, Some(e)) => Some(dump_refl(g, &inp.map, e, which)),
             _ => None,
         };
+        let want = if which == "new" { Some(inp.new_exe_sha.clone()) } else { inp.old_exe_sha.clone() };
+        if let (Some(Ok(d)), Some(w)) = (&db, &want) {
+            if !d.exe_sha256.is_empty() && !d.exe_sha256.eq_ignore_ascii_case(w) {
+                inp.problems.push(format!("the {which} reflection dump is of exe {}, not the {which} exe {}", short(&d.exe_sha256), short(w)));
+            }
+        }
         match db {
             Some(Ok(d)) if which == "new" => inp.new_refl = Some(d),
             Some(Ok(d)) => inp.old_refl = Some(d),
@@ -745,7 +775,33 @@ pub fn gather(g: &Gather) -> Result<Inputs> {
     }
     // the previous build's table: given, else the store's
     if let Some(p) = &g.prev_ids {
-        inp.prev_ids = Some(ids::IdTable::parse(&std::fs::read_to_string(p)?, &g.side, inp.old_exe_sha.as_deref().unwrap_or_default())?);
+        let t = ids::IdTable::parse(&std::fs::read_to_string(p)?, &g.side, inp.old_exe_sha.as_deref().unwrap_or_default())?;
+        match &inp.old_exe_sha {
+            Some(old) if !t.exe_sha256.eq_ignore_ascii_case(old) || t.side != g.side => {
+                inp.problems.push(format!("the previous build's id table {} is of {} {}, not of the old exe {}", p.display(), t.side, short(&t.exe_sha256), short(old)));
+            }
+            None => inp.problems.push("a previous build's id table without an old build (--old-exe or --old-refl) cannot be checked".into()),
+            _ => {}
+        }
+        inp.prev_ids = Some(t);
+    }
+    // --first-build skips the id history: refused where this side already has a proven build
+    if g.first_build {
+        let mut earlier: Vec<String> = [Some(g.tree.clone()), g.deployed.clone()].into_iter().flatten()
+            .flat_map(|r| json_files(&r.join("regmap").join(&g.side)))
+            .filter_map(|p| read_json(&p).ok()?.get("exeSha256")?.as_str().map(str::to_string))
+            .filter(|s| !s.eq_ignore_ascii_case(&inp.new_exe_sha))
+            .collect();
+        earlier.extend(json_files(&store.dir.join(&g.side)).into_iter()
+            .filter_map(|p| p.file_stem()?.to_str()?.strip_prefix(&format!("ids-{}-", g.side)).map(str::to_string))
+            .filter(|s| !s.eq_ignore_ascii_case(&inp.new_exe_sha)));
+        earlier.sort();
+        earlier.dedup();
+        if !earlier.is_empty() {
+            inp.problems.push(format!("--first-build, but the {} side already has proven builds ({}): the id history would be skipped; \
+                                       prove against the last of them instead", g.side,
+                                      earlier.iter().map(|s| short(s)).collect::<Vec<_>>().join(", ")));
+        }
     }
     // the lab's outputs
     let mut notes = Vec::new();
@@ -753,21 +809,26 @@ pub fn gather(g: &Gather) -> Result<Inputs> {
         if e.is_dir() {
             let reg = e.join("content/registry");
             if reg.is_dir() {
-                for h in ids::harvest(e, &store)? {
+                let harvested = ids::harvest(e, &store)?;
+                inp.problems.extend(harvested.problems);
+                for h in harvested.tables {
                     if h.differs {
                         notes.push(format!("the store's id table of {} {} differs from the one in {} (the store's is kept)", h.side, short(&h.exe_sha256), e.display()));
                     }
                 }
-                for p in json_files(&reg).into_iter().chain(json_files(&reg.join("proof"))) {
-                    classify(&p, &mut inp, &mut notes);
+                for p in json_files(&reg) {
+                    classify(&p, &mut inp, &mut notes, false);
+                }
+                for p in json_files(&reg.join("proof")) {
+                    classify(&p, &mut inp, &mut notes, true);
                 }
             } else {
                 for p in json_files(e) {
-                    classify(&p, &mut inp, &mut notes);
+                    classify(&p, &mut inp, &mut notes, false);
                 }
             }
         } else if e.is_file() {
-            classify(e, &mut inp, &mut notes);
+            classify(e, &mut inp, &mut notes, true);
         } else {
             inp.problems.push(format!("evidence {} does not exist", e.display()));
         }
@@ -1292,6 +1353,14 @@ mod tests {
     }
 
     #[test]
+    fn the_old_and_the_new_build_are_two_builds() {
+        let mut inp = with_power_samples(inputs());
+        inp.old_exe_sha = Some(SHA.into());
+        let p = prove(&inp, "T");
+        assert!(!p.verified && p.blockers.iter().any(|b| b.contains("same exe")), "{:?}", p.blockers);
+    }
+
+    #[test]
     fn a_values_export_of_another_mapping_proves_nothing() {
         let mut inp = with_power_samples(inputs());
         inp.values_new.as_mut().unwrap().regmap_digest = "e2".repeat(32);
@@ -1488,6 +1557,35 @@ mod tests {
         assert!(inp.notes.iter().any(|n| n.contains("errors")), "{:?}", inp.notes);
         // nothing of python lands in the tree (python3 -B)
         assert!(!g.tree.join("tools/registrygen/__pycache__").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Inputs named by file are tied to their builds; --first-build is refused where the side has proven builds; lab files
+    /// that cannot be read are named.
+    #[test]
+    fn gather_ties_inputs_to_their_builds_and_names_bad_lab_files() {
+        let root = scratch("ties");
+        let (g, sha) = fake_tools(&root, &writing_check(0));
+        // a reflection dump of another exe beside the new exe
+        let mismatch = gather(&Gather { new_refl: Some(g.old_refl.clone().unwrap()), ..g.clone() }).unwrap();
+        assert!(mismatch.problems.iter().any(|p| p.contains("reflection dump") && p.contains("new")), "{:?}", mismatch.problems);
+        // a previous table of another build
+        let prev = root.join("prev.json");
+        std::fs::write(&prev, json!({"format": 1, "side": "server", "exeSha256": sha, "registries": {"gadgets": {}}}).to_string()).unwrap();
+        let wrong = gather(&Gather { prev_ids: Some(prev), ..g.clone() }).unwrap();
+        assert!(wrong.problems.iter().any(|p| p.contains("previous build's id table")), "{:?}", wrong.problems);
+        // --first-build where this side already has a proven build (the tree's record of the build itself does not count)
+        std::fs::write(g.tree.join(format!("regmap/server/{OLD}.json")), json!({"regmap": 1, "side": "server", "exeSha256": OLD, "verified": true}).to_string()).unwrap();
+        let first = gather(&Gather { first_build: true, old_refl: None, ..g.clone() }).unwrap();
+        assert!(first.problems.iter().any(|p| p.contains("--first-build")), "{:?}", first.problems);
+        // a truncated suite and an oversized file under proof/ are named, not skipped
+        let data = root.join("gate/kiln/data/content/registry/proof");
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::write(data.join("live.json"), "{\"format\": 1, \"kind\": \"registry-round").unwrap();
+        std::fs::File::create(data.join("huge.json")).unwrap().set_len(300 << 20).unwrap();
+        let bad = gather(&Gather { evidence: vec![root.join("gate/kiln/data")], ..g.clone() }).unwrap();
+        assert!(bad.problems.iter().any(|p| p.contains("live.json")), "{:?}", bad.problems);
+        assert!(bad.problems.iter().any(|p| p.contains("huge.json") && p.contains("MiB")), "{:?}", bad.problems);
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -82,8 +82,13 @@ pub struct Sample {
 }
 
 /// A suite file; refuses another kind or format.
+#[cfg(test)]
 pub fn parse(text: &str) -> Result<Suite> {
-    let s: Suite = serde_json::from_str(text).context("not a round-trip suite")?;
+    from_value(serde_json::from_str(text).context("not JSON")?)
+}
+
+pub fn from_value(v: Value) -> Result<Suite> {
+    let s: Suite = serde_json::from_value(v).context("not a round-trip suite")?;
     if s.kind != KIND || s.format != 1 {
         bail!("not a {KIND} file of format 1 (kind {:?}, format {})", s.kind, s.format);
     }

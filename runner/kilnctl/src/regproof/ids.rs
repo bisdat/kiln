@@ -34,15 +34,22 @@ impl IdTable {
     /// kiln.content's form (`{"format": 1, "side", "exeSha256", "decoder", "registries"}`) or regmap_check.py --ids-out's
     /// (`{<registry>: {<guid>: <id>}}`, then side and exe come from the caller).
     pub fn parse(text: &str, side: &str, exe_sha256: &str) -> Result<IdTable> {
-        let v: Value = serde_json::from_str(text).context("not JSON")?;
+        Self::from_value(&serde_json::from_str(text).context("not JSON")?, side, exe_sha256)
+    }
+
+    pub fn from_value(v: &Value, side: &str, exe_sha256: &str) -> Result<IdTable> {
         let obj = v.as_object().context("an id table is a JSON object")?;
         let native = obj.contains_key("format") && obj.get("registries").is_some_and(Value::is_object);
         let text_of = |k: &str, d: &str| obj.get(k).and_then(Value::as_str).unwrap_or(d).to_string();
         let (side, exe_sha256, decoder, regs) = if native {
             (text_of("side", side), text_of("exeSha256", exe_sha256), obj.get("decoder").and_then(Value::as_str).map(str::to_string), &obj["registries"])
         } else {
-            (side.to_string(), exe_sha256.to_string(), None, &v)
+            (side.to_string(), exe_sha256.to_string(), None, v)
         };
+        // a table names its build: it becomes a file name in the maintainer folder
+        if native && (!valid_side(&side) || !valid_sha(&exe_sha256)) {
+            bail!("the table's side {side:?} or exeSha256 {exe_sha256:?} is not a side and an exe's SHA-256");
+        }
         let mut registries = Tables::new();
         for (reg, t) in regs.as_object().context("no registries")? {
             let t = t.as_object().with_context(|| format!("{reg}: not an object of GUID -> id"))?;
@@ -69,6 +76,15 @@ impl IdTable {
         o.insert("registries".into(), serde_json::to_value(&self.registries).unwrap_or_default());
         Value::Object(o).to_string()
     }
+}
+
+pub fn valid_side(s: &str) -> bool {
+    s == "server" || s == "client"
+}
+
+/// 64 lower-case hex digits.
+pub fn valid_sha(s: &str) -> bool {
+    s.len() == 64 && s.bytes().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
 }
 
 pub fn file_name(side: &str, exe_sha256: &str) -> String {
@@ -98,6 +114,9 @@ impl Store {
     }
     /// Keeps a proven table; None when the store already holds one of this build (never overwritten).
     pub fn put(&self, t: &IdTable) -> Result<Option<PathBuf>> {
+        if !valid_side(&t.side) || !valid_sha(&t.exe_sha256) {
+            bail!("an id table of side {:?} and exe {:?} is not kept", t.side, t.exe_sha256);
+        }
         let p = self.path(&t.side, &t.exe_sha256);
         if p.exists() {
             return Ok(None);
@@ -155,15 +174,37 @@ pub struct Harvested {
 }
 
 /// Every table kiln.content wrote into a data folder, kept in the store.
-pub fn harvest(data_dir: &Path, store: &Store) -> Result<Vec<Harvested>> {
+/// What [`harvest`] found: the tables kept, and the files it could not take (named, not fatal).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Harvest {
+    pub tables: Vec<Harvested>,
+    pub problems: Vec<String>,
+}
+
+pub fn harvest(data_dir: &Path, store: &Store) -> Result<Harvest> {
     let dir = data_dir.join("content/registry");
-    let Ok(rd) = std::fs::read_dir(&dir) else { return Ok(Vec::new()) };
+    let Ok(rd) = std::fs::read_dir(&dir) else { return Ok(Harvest::default()) };
     let mut names: Vec<String> = rd.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
     names.sort();
-    let mut out = Vec::new();
+    let (mut out, mut problems) = (Vec::new(), Vec::new());
     for n in names {
         let Some((side, sha)) = n.strip_prefix("ids-").and_then(|x| x.strip_suffix(".json")).and_then(|x| x.split_once('-')) else { continue };
-        let t = read_table(&dir.join(&n), side, sha)?;
+        let p = dir.join(&n);
+        if !valid_side(side) || !valid_sha(sha) {
+            problems.push(format!("{}: not the name of a build's id table (ids-<server|client>-<exe sha256>.json); not taken", p.display()));
+            continue;
+        }
+        let t = match read_table(&p, side, sha) {
+            Ok(t) if t.side == side && t.exe_sha256 == sha => t,
+            Ok(t) => {
+                problems.push(format!("{}: the table inside is of {} {}, not of the build its name says; not taken", p.display(), t.side, t.exe_sha256));
+                continue;
+            }
+            Err(e) => {
+                problems.push(format!("{e:#}; not taken"));
+                continue;
+            }
+        };
         let (stored, differs) = match store.get_any(side, sha) {
             None => {
                 write_whole(&store.harvested_path(side, sha), &t.to_json())?;
@@ -174,7 +215,7 @@ pub fn harvest(data_dir: &Path, store: &Store) -> Result<Vec<Harvested>> {
         };
         out.push(Harvested { side: side.into(), exe_sha256: sha.into(), stored, differs });
     }
-    Ok(out)
+    Ok(Harvest { tables: out, problems })
 }
 
 /// Refuses a folder for id tables or proof outputs inside the Kiln tree or any Kiln checkout (a folder with `.git`
@@ -222,8 +263,10 @@ pub fn merged(computed: &IdTable, native: Option<&IdTable>) -> IdTable {
             t.decoder = n.decoder.clone();
         }
         for (reg, nt) in &n.registries {
+            let uncovered = t.registries.get(reg).is_none_or(|e| e.is_empty());
             let e = t.registries.entry(reg.clone()).or_default();
-            for (k, id) in nt {
+            // a GUID entry regmap_entries.py missed in a registry it covers stays missing (the agreement check sees it)
+            for (k, id) in nt.iter().filter(|(k, _)| uncovered || k.starts_with('#')) {
                 e.entry(k.clone()).or_insert_with(|| id.clone());
             }
         }
@@ -395,10 +438,10 @@ pub(crate) mod tests {
 
     #[test]
     fn parses_both_table_forms_and_writes_kiln_contents() {
-        let native = r##"{"format": 1, "side": "server", "exeSha256": "ab", "decoder": "kiln-model 1",
+        let native = r##"{"format": 1, "side": "server", "exeSha256": "abababababababababababababababababababababababababababababababab", "decoder": "kiln-model 1",
                          "registries": {"gadgets": {"0A-B": "game:a", "#7": "game:item_00000007"}}}"##;
         let t = IdTable::parse(native, "client", "zz").unwrap();
-        assert_eq!((t.side.as_str(), t.exe_sha256.as_str(), t.decoder.as_deref()), ("server", "ab", Some("kiln-model 1")));
+        assert_eq!((t.side.as_str(), t.exe_sha256.as_str(), t.decoder.as_deref()), ("server", "ab".repeat(32).as_str(), Some("kiln-model 1")));
         assert_eq!(t.registries["gadgets"]["0a-b"], "game:a", "GUIDs folded to lower case");
         assert_eq!(t.registries["gadgets"]["#7"], "game:item_00000007");
         let bare = IdTable::parse(r#"{"gadgets": {"g1": "game:a"}}"#, "server", NEW).unwrap();
@@ -435,7 +478,7 @@ pub(crate) mod tests {
         deploy(&old, &data).unwrap();
         deploy(&table(NEW, &[("g1", "game:other")]), &data).unwrap();
         std::fs::write(data.join("content/registry/notes.json"), "{}").unwrap();
-        let h = harvest(&data, &store).unwrap();
+        let h = harvest(&data, &store).unwrap().tables;
         assert_eq!(h, [
             Harvested { side: "server".into(), exe_sha256: NEW.into(), stored: false, differs: true },
             Harvested { side: "server".into(), exe_sha256: OLD.into(), stored: true, differs: false },
@@ -444,8 +487,40 @@ pub(crate) mod tests {
         assert!(store.harvested_path("server", OLD).is_file());
         assert_eq!(store.get_any("server", OLD).unwrap().unwrap(), old);
         assert_eq!(store.get("server", NEW).unwrap().unwrap(), t, "the store's table is kept");
-        assert!(harvest(&root.join("nowhere"), &store).unwrap().is_empty());
+        assert!(harvest(&root.join("nowhere"), &store).unwrap().tables.is_empty());
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A data folder is written by the game (and mods under Wine): names inside a table never choose where kilnctl writes.
+    #[test]
+    fn harvest_takes_only_tables_whose_names_match_and_names_the_rest() {
+        let root = scratch("hostile");
+        let store = Store { dir: root.join("store") };
+        let reg = root.join("data/content/registry");
+        std::fs::create_dir_all(&reg).unwrap();
+        let w = |n: &str, v: Value| std::fs::write(reg.join(n), v.to_string()).unwrap();
+        w(&format!("ids-server-{NEW}.json"), json!({"format": 1, "side": "../../x", "exeSha256": NEW, "registries": {}}));
+        w(&format!("ids-server-{OLD}.json"), json!({"format": 1, "side": "client", "exeSha256": OLD, "registries": {}}));
+        w("ids-server-nothex.json", json!({"format": 1, "side": "server", "exeSha256": "nothex", "registries": {}}));
+        std::fs::write(reg.join(format!("ids-client-{NEW}.json")), "{ truncated").unwrap();
+        let h = harvest(&root.join("data"), &store).unwrap();
+        assert!(h.tables.is_empty(), "{:?}", h.tables);
+        assert_eq!(h.problems.len(), 4, "{:?}", h.problems);
+        assert!(!root.join("x").exists() && !root.join("store/x").exists());
+        assert!(IdTable::parse(&json!({"format": 1, "side": "../../x", "exeSha256": NEW, "registries": {}}).to_string(), "server", NEW).is_err());
+        assert!(IdTable::parse(&json!({"format": 1, "side": "server", "exeSha256": "ab", "registries": {}}).to_string(), "server", NEW).is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn merged_fills_only_entries_without_a_guid_and_uncovered_registries() {
+        let computed = table(NEW, &[("g1", "game:a")]);
+        let mut native = table(NEW, &[("g1", "game:a"), ("g2", "game:b"), ("#9", "game:n")]);
+        native.registries.insert("cats".into(), BTreeMap::from([("c1".to_string(), "game:wood".to_string())]));
+        let m = merged(&computed, Some(&native));
+        assert!(!m.registries["gadgets"].contains_key("g2"), "an entry regmap_entries.py missed stays missing: {m:?}");
+        assert_eq!(m.registries["gadgets"]["#9"], "game:n");
+        assert_eq!(m.registries["cats"]["c1"], "game:wood");
     }
 
     #[test]

@@ -56,7 +56,11 @@ pub struct Export {
 }
 
 pub fn parse(text: &str) -> Result<Export> {
-    let e: Export = serde_json::from_str(text).context("not a values export")?;
+    from_value(serde_json::from_str(text).context("not JSON")?)
+}
+
+pub fn from_value(v: Value) -> Result<Export> {
+    let e: Export = serde_json::from_value(v).context("not a values export")?;
     if e.kind != KIND || e.format != 1 {
         bail!("not a {KIND} file of format 1 (kind {:?}, format {})", e.kind, e.format);
     }

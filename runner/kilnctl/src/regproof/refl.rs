@@ -85,7 +85,7 @@ impl TypeDb {
             });
             types.insert(name.to_string(), Type {
                 name: name.to_string(),
-                kind: t.get("kind").and_then(num).unwrap_or(0) as u32,
+                kind: t.get("kind").and_then(num).and_then(|k| u32::try_from(k).ok()).unwrap_or(0),
                 size: t.get("size").and_then(num).unwrap_or(0),
                 layout: t.get("layout").and_then(num),
                 inner: t.get("inner").and_then(Value::as_str).map(str::to_string),
