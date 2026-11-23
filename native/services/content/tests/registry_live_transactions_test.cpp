@@ -412,6 +412,44 @@ void flattened_socket_foreign_revert_is_skipped() {
     check(reply.outcome == RegistryLiveOutcome::Skipped && at<uint8_t>(WOOD_AT + 0x98) == 2,
           "a socket revert preserves another writer's bytes");
 }
+void unlock_read_has_no_write_side_effect() {
+    fresh_live(); std::string value;
+    const auto generation = store_generation(); const auto owners = store_owners();
+    check(registry_live_read("recipes", "game:plank_recipe", "unlock", &value) == KILN_OK && registry::json::parse(value) == "game",
+          "unlock reads the existing nonzero knowledge requirement through the live table");
+    check(store_generation() == generation && store_owners() == owners,
+          "unlock reads create neither store layers nor writes");
+    mem<uint32_t>(PLANK_AT + 0x50, 0);
+    check(registry_live_read("recipes", "game:plank_recipe", "unlock", &value) == KILN_OK && registry::json::parse(value) == "game",
+          "unlock checks the whole query, not only its first word");
+    mem<uint32_t>(PLANK_AT + 0x58, 0);
+    check(registry_live_read("recipes", "game:plank_recipe", "unlock", &value) == KILN_OK && registry::json::parse(value) == "always",
+          "an entirely empty query reads as always");
+}
+void unlock_write_read_revert() {
+    fresh_live(); RegistryLiveReply reply; std::string value;
+    const auto h = change(71, "a", R"([{"registry":"recipes","select":"game:plank_recipe","field":"unlock","op":"always"}])");
+    registry_live_commit(71, h, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Applied && at<uint32_t>(PLANK_AT + 0x50) == 0, "unlock writes already work");
+    check(registry_live_read("recipes", "game:plank_recipe", "unlock", &value) == KILN_OK && registry::json::parse(value) == "always",
+          "unlock reads observe the cleared knowledge requirement");
+    registry_live_revert(71, h, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Reverted && at<uint32_t>(PLANK_AT + 0x50) == 0x12345678 && at<uint32_t>(PLANK_AT + 0x58) == 7,
+          "unlock revert restores the original query bytes");
+    check(registry_live_read("recipes", "game:plank_recipe", "unlock", &value) == KILN_OK && registry::json::parse(value) == "game",
+          "unlock reads observe the restored query");
+}
+void unlock_foreign_revert_is_skipped() {
+    fresh_live(); RegistryLiveReply reply; std::string value;
+    const auto h = change(71, "a", R"([{"registry":"recipes","select":"game:plank_recipe","field":"unlock","op":"always"}])");
+    registry_live_commit(71, h, &reply);
+    mem<uint32_t>(PLANK_AT + 0x50, 123);
+    check(registry_live_read("recipes", "game:plank_recipe", "unlock", &value) == KILN_OK && registry::json::parse(value) == "game",
+          "unlock reads actual outside bytes, not its cached intended value");
+    registry_live_revert(71, h, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Skipped && at<uint32_t>(PLANK_AT + 0x50) == 123,
+          "unlock revert preserves another writer's whole query slot");
+}
 void claims_and_binding_failure() {
     fresh_live(); RegistryLiveReply reply;
     auto a = change(71, "a", "[{" + wood + R"("op":50,"exclusive":true}])"); registry_live_commit(71, a, &reply);
@@ -532,6 +570,9 @@ int main() {
         {"flattened_socket_read_write_revert", flattened_socket_read_write_revert},
         {"staged_flattened_socket_binds", staged_flattened_socket_binds},
         {"flattened_socket_foreign_revert_is_skipped", flattened_socket_foreign_revert_is_skipped},
+        {"unlock_read_has_no_write_side_effect", unlock_read_has_no_write_side_effect},
+        {"unlock_write_read_revert", unlock_write_read_revert},
+        {"unlock_foreign_revert_is_skipped", unlock_foreign_revert_is_skipped},
         {"claims_and_binding_failure", claims_and_binding_failure},
         {"mapped_reads_have_no_write_side_effect", mapped_reads_have_no_write_side_effect},
         {"world_scope_and_admission", world_scope_and_admission},

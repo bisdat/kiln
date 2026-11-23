@@ -201,6 +201,7 @@ int g_reports = 0;
 
 void world() {
     g_write_limits.clear(); g_before_write = {}; g_integer_impacts.clear();
+    g_registry_type_size = [](const char* q) -> uint32_t { return std::string(q) == "keen::KnowledgeQueryData" ? 12u : 0u; };
     std::string e;
     store_reset(false, &e);
     std::memset(g_arena, 0, sizeof g_arena);
@@ -614,7 +615,6 @@ void every_live_kind() {
 // knowledge requirement, "game" keeps it), loot stack sizes
 void perks_costs_unlock_loot() {
     world();
-    g_registry_type_size = [](const char* q) -> uint32_t { return std::string(q) == "keen::KnowledgeQueryData" ? 12u : 0u; };
     g_files = {{"m/content/a.json", R"({"registry": {"alter": [
         {"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "perks", "list": {"append": ["game:perk_b"]}},
         {"registry": "items", "select": {"id": "game:sword_t2"}, "field": "manaCost", "op": {"mul": 1.5}},

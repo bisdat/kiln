@@ -679,7 +679,11 @@ void bind_unlock(const std::shared_ptr<Binding>& b) {
         else std::memcpy(out, zero_bytes(below, n) ? orig : below, n);
         return true;
     };
-    if (!put(b, -1, kSubUnlock, at, static_cast<uint8_t>(size), std::move(ev))) fail(b, "the recipe is not readable");
+    if (!put(b, -1, kSubUnlock, at, static_cast<uint8_t>(size), std::move(ev))) return (void)fail(b, "the recipe is not readable");
+    fields_target().insert_or_assign(b->ref, LiveField{b->spec, {{at, static_cast<uint8_t>(size)}},
+        [size](const std::vector<SlotBytes>& bytes, std::vector<double>*) {
+            return Value::text(zero_bytes(bytes[0].data(), size) ? "always" : "game");
+        }});
 }
 
 // ---- one field ----
