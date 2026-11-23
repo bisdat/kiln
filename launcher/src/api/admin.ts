@@ -40,7 +40,7 @@ export interface KapLimits {
 export type KapFrame =
   | { t: "hello"; proto: string; nonce: string; kiln?: string; admin?: string; server: { id?: string | null; name?: string | null }; auth: string[] }
   | { t: "auth"; proto: string; cnonce: string; mac: string; client?: string }
-  | { t: "ready"; session: string; mac: string; ops: string[]; topics: string[]; limits: KapLimits }
+  | { t: "ready"; session: string; mac: string; ops: string[]; topics: string[]; limits: KapLimits; restart?: KapRestart }
   | { t: "req"; id: number; op: string; args: Record<string, Json> }
   | { t: "res"; id: number; ok: boolean; op: string; ms?: number; data?: Json; error?: string; code?: KapErrorCode }
   | { t: "sub"; id: number; topic: string; everyMs?: number }
@@ -51,8 +51,17 @@ export type KapFrame =
   | { t: "error"; code: KapErrorCode; message: string; id?: number }
   | { t: "bye"; reason: string };
 
-/** Topics Kiln.Admin offers (ready.topics lists the server's). */
-export type AdminTopic = "state" | "log";
+/** ready.restart / admin_info.restart (0.2.0-dev.30.9): does a stop asked for with server_restart come back? */
+export interface KapRestart {
+  supported: "supported" | "unknown";
+  /** "kilnctl" (its systemd unit restarts the server) or null */
+  via: string | null;
+  /** kilnctl run's exit code after such a stop (75), or null */
+  code: number | null;
+}
+
+/** Topics Kiln.Admin offers (ready.topics lists the server's). "metrics": AdminMetrics every 2 s (since 30.9). */
+export type AdminTopic = "state" | "log" | "metrics";
 
 export interface AdminPos {
   x: number;
@@ -116,7 +125,9 @@ export type KnownOp =
   | "commands_describe" | "command_complete" | "events_stats" | "mods" | "mod_load" | "mod_reload" | "mod_unload" | "mod_test"
   | "crash_reports"
   // Connection and session state
-  | "admin_info" | "network_status" | "network_reload" | "native_status" | "log_tail" | "admin_token_rotate";
+  | "admin_info" | "network_status" | "network_reload" | "native_status" | "log_tail" | "admin_token_rotate"
+  // Restart and one-time login (0.2.0-dev.30.9; check with useHasOp)
+  | "server_restart" | "server_restart_cancel" | "login_mint" | "login_redeem";
 
 // ---------------------------------------------------------------- the hub (one session per server)
 

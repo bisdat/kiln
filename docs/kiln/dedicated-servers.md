@@ -168,6 +168,15 @@ The process then exits with a code that says so; restarting gives the same stop,
 - Kiln's own tools never restart on it: `kilnctl run` passes the status on and starts nothing again, `kilnctl start`
   waits for the world and reports the failed start, and the Kiln Launcher restarts a server only when you press Restart.
 
+### Restarts from an admin tool
+
+Since 0.2.0-dev.30.9 an admin tool (Kiln Web Admin, through Kiln.Admin's `server_restart`) can restart the server: a
+countdown in chat, a save, then the same stop as Ctrl-C. Whether the server comes back depends on what runs it:
+- **kilnctl's systemd unit** (`kiln@.service`): yes. `kilnctl run` exits 75 after such a stop, and the unit restarts the
+  server 15 s later. A unit of your own needs `Restart=on-failure` (or `always`) for that.
+- **Anything else** (the Kiln Launcher, a hosting panel, a script): the server stops and exits 0, as after Ctrl-C. The
+  admin tool says "restart: unknown" there and offers a stop instead. Start the server again from your host.
+
 ### What a slow start is doing
 
 Since 0.2.0-dev.27 Kiln keeps `kiln/state/progress.json` up to date while the server starts: the step it is in, what
