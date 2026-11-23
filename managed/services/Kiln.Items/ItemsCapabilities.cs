@@ -46,6 +46,7 @@ public static unsafe partial class Items
         /// <summary>sigdb: the game's equip and unequip (kiln.items v5, <see cref="Items.Equip"/>, <see cref="Items.Unequip"/>);
         /// Kiln.Items lowers it when the table is older, kiln.world is missing, or kiln.items turned equip off.</summary>
         public const string Equip = "items.equip";
+        public const string GiveEquip = "items.give_equip";
 
         /// <summary>sigdb: equipment sets (kiln.items v6, <see cref="Items.CaptureSet"/>): the equip functions and the
         /// commit's own rollback guards; Kiln.Items lowers it when the table is older, equip or item instances are off,
@@ -113,6 +114,7 @@ public static unsafe partial class Items
     // The rows that are fixed once the service has started. A sigdb row is only lowered, never raised.
     private static void ReportCapabilities()
     {
+        RefreshGiveEquip();
         var t = T;  // Services.Get puts the reason on kiln.items when the table is missing or older
         if (t == null)
         {
@@ -182,6 +184,7 @@ public static unsafe partial class Items
                 if (step % 25 != 0) return;
                 RefreshMoves();
                 RefreshEquip();
+                RefreshGiveEquip();
                 RefreshEquipSets();
                 SetHeartbeat(step);
             });

@@ -170,10 +170,10 @@ public sealed class ItemsFakeTests
     {
         // kiln.items v9: sizeof(KilnItemsApi) == 384 (gear_write at 296, P5's rarity_rolls/roll_status, P3's gear_upgrade, P7's scales,
         // then v9's container_rename and rename_status at 368), native items.cpp
-        Assert.Equal((384, 40, 44, 296, 192), (Unsafe.SizeOf<ItemsAbi.FullTable>(), Unsafe.SizeOf<ItemsAbi.GearRequest>(), Unsafe.SizeOf<ItemsAbi.GearState>(),
+        Assert.Equal((392, 40, 44, 296, 192), (Unsafe.SizeOf<ItemsAbi.FullTable>(), Unsafe.SizeOf<ItemsAbi.GearRequest>(), Unsafe.SizeOf<ItemsAbi.GearState>(),
             Unsafe.SizeOf<ItemsAbi.GearResult>(), Unsafe.SizeOf<ItemsAbi.GearStatus>()));
         var native = typeof(Items).Assembly.GetType("Kiln.ItemsNative", true)!;
-        Assert.Equal(Unsafe.SizeOf<ItemsAbi.FullTable>(), Mirror.Size(native, "TableV9"));
+        Assert.Equal(Unsafe.SizeOf<ItemsAbi.FullTable>(), Mirror.Size(native, "TableWithGiveEquip"));
         Assert.Equal((272, 192, 184), (Unsafe.SizeOf<ItemsAbi.RenameRequest>(), Unsafe.SizeOf<ItemsAbi.RenameResult>(), Unsafe.SizeOf<ItemsAbi.RenameStatus>()));  // v9
         Assert.Equal(Unsafe.SizeOf<ItemsAbi.RenameRequest>(), Mirror.Size(native, "RenameRequest"));
         Assert.Equal(Unsafe.SizeOf<ItemsAbi.RenameResult>(), Mirror.Size(native, "RenameResult"));

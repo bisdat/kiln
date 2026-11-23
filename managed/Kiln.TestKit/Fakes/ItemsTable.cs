@@ -10,7 +10,7 @@ namespace Kiln.TestKit;
 
 /// <summary>Mirror of <c>kiln_items.h</c>'s v1 table, the v8 gear functions and the structs they use. The sizes are pinned
 /// by tests to Kiln.Items' private mirrors (ItemsNative).</summary>
-internal static unsafe class ItemsAbi
+internal static unsafe partial class ItemsAbi
 {
     public const string Service = "kiln.items";
     // the whole v9 table: v1, the gear functions (v8) and container renames (v9) are modelled; water (v2), instances (v4),
@@ -293,6 +293,7 @@ internal static unsafe class ItemsAbi
         // v9 (0.2.0-dev.30.3): container_rename, rename_status
         public delegate* unmanaged[Cdecl]<ulong, RenameRequest*, delegate* unmanaged[Cdecl]<RenameResult*, void*, void>, void*, ulong*, RenameResult*, int> ContainerRename;
         public delegate* unmanaged[Cdecl]<RenameStatus*, int> RenameStatusOf;
+        public delegate* unmanaged[Cdecl]<ulong, GiveEquipRequest*, nint, void*, ulong*, int> GiveEquip;
     }
 
     // ---- v9: renaming a container (KilnItemsRenameRequest, -Result, -Status; KILN_ITEMS_NAME_*, KILN_ITEMS_RENAME_*) ----
@@ -339,7 +340,7 @@ internal static unsafe class ItemsAbi
 
 /// <summary>The C# functions behind the fake <c>kiln.items</c> table: give, take, cancel, read, find_inventories, the item
 /// catalog and status (v1), gear_write, gear_read and gear_status (v8), and stubs for v2 to v7 that answer unavailable.</summary>
-internal static unsafe class ItemsTable
+internal static unsafe partial class ItemsTable
 {
     private static ItemsAbi.Table* _table;
 
@@ -390,6 +391,7 @@ internal static unsafe class ItemsTable
         full->ScaleStatusOf = &ScaleStatusOf;
         full->ContainerRename = &ContainerRename;  // v9
         full->RenameStatusOf = &RenameStatusOf;
+        full->GiveEquip = &GiveEquip;
         _table = t;
         return (nint)t;
     }
@@ -786,6 +788,9 @@ internal static unsafe class ItemsTable
 internal sealed record FakeItem(uint Id, Guid Guid, string Name, int MaxStack, ItemCategory Category, ItemRarity Rarity, bool Gear, int LevelMin,
     int LevelMax, nint NameUtf8, int NameLength)
 {
+    /// <summary>The equipment type configured by HarnessItems.SetEquipmentSlotType; 0 means not equippable.</summary>
+    public byte EquipmentSlotType { get; set; }
+
     /// <summary>Gear: how many of the type's five perk slots are filled (its last filled one + 1): the highest rarity + 1
     /// a gear write gives without FORCE_SLOT. Every slot unless the test says (HarnessItems.SetPerkSlots).</summary>
     public int PerkSlots { get; set; } = 5;
@@ -830,7 +835,7 @@ internal sealed unsafe partial class ItemsFake
     // The sigdb features of the v1 table the kit models, and those of the later tables it does not.
     public const string TransactionFeature = "items.transaction", ReadFeature = "items.read", ProgramFeature = "items.program";
 
-    public static readonly string[] Features = [TransactionFeature, ReadFeature, ProgramFeature, GearFeature, PowerFeature, ArmorFeature, RenameFeature];
+    public static readonly string[] Features = [TransactionFeature, ReadFeature, ProgramFeature, GearFeature, PowerFeature, ArmorFeature, RenameFeature, GiveEquipFeature];
 
     public static readonly string[] OfflineRows = ["items.fuel", "items.move", "items.names", "items.transfer", "items.moves", "items.instances",
         "items.equip", "items.equip_sets", "items.pide_options", "items.result_peek", "items.recipe"];
@@ -926,6 +931,8 @@ internal sealed unsafe partial class ItemsFake
             _scales.Clear();
             _names.Clear();
             _renamePending.Clear();
+            _giveEquipPending.Clear();
+            _equipment.Clear();
         }
     }
 
@@ -1160,7 +1167,7 @@ internal sealed unsafe partial class ItemsFake
         lock (_lock)
         {
             var job = _pending.FirstOrDefault(j => j.Ticket == ticket && j.Done != 0);
-            if (job is null) return CancelGear(ticket) || CancelUpgrade(ticket) || CancelRename(ticket);
+            if (job is null) return CancelGear(ticket) || CancelUpgrade(ticket) || CancelRename(ticket) || CancelGiveEquip(ticket);
             job.Done = 0;
             return true;
         }
@@ -1173,6 +1180,7 @@ internal sealed unsafe partial class ItemsFake
         CancelGearOwner(owner);
         CancelUpgradeOwner(owner);
         CancelRenameOwner(owner);
+        foreach (var q in _giveEquipPending.Where(q => q.Owner == owner)) q.Done = 0;
     }
 
     private const int MaxPending = 1024;  // items.cpp kMaxPending
@@ -1256,6 +1264,7 @@ internal sealed unsafe partial class ItemsFake
         RunGear(step);
         RunUpgrades(step);
         RunRenames(step);
+        RunGiveEquips(step);
     }
 
     private const uint ErrorNoItem = 0x15, ErrorNoSetup = 0x16;

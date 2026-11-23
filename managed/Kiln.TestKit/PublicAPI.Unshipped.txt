@@ -1,1 +1,2 @@
 #nullable enable
+Kiln.TestKit.HarnessItems.SetEquipmentSlotType(Kiln.ItemId item, Kiln.EquipmentSlot slot) -> void
