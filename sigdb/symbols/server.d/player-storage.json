@@ -1,0 +1,345 @@
+{
+  "format": 1,
+  "side": "server",
+  "comment": "Player storage: same-svn server 26430253 and client 26430625, independently byte-scanned on both. Character layout captured independently from reader and writer; equipment stride is derived from equip1-equip0, with equip_last checked against 15 strides. Missing or disagreeing rows disable items.storage. See docs/re/player-storage.md. Static qualification only; no game or lab execution. Since 0.2.0-dev.30.7.",
+  "symbols": {
+    "characters/Capture": {
+      "find": [
+        {
+          "pattern": "4C 89 4C 24 20 4C 89 44 24 18 48 89 4C 24 08 55 53 56 57 41 54 41 56 41 57 48 8D 6C 24 C0 48 81 EC 40 01 00 00 4C 8B E1 49 8B F9 48 8B CA 48 8B F2 E8 ?? ?? ?? ?? 4C 8B BD B0 00 00 00 48 8D 4D 00 4C 8B B5 A0 00 00 00"
+        }
+      ]
+    },
+    "characters/Read": {
+      "find": [
+        {
+          "pattern": "48 89 5C 24 18 48 89 74 24 20 57 41 54 41 55 41 56 41 57 48 83 EC 20 4C 8B F9 4D 8B E9 48 8B CA 49 8B F8 48 8B F2 E8 ?? ?? ?? ?? 48 8B CF E8 ?? ?? ?? ?? 88 06 48 8D 56 04 48 8B 0F 41 B8 04 00 00 00"
+        }
+      ]
+    },
+    "characters/JoinApply": {
+      "find": [
+        {
+          "pattern": "4C 89 44 24 18 48 89 4C 24 08 55 53 56 57 41 54 41 55 41 56 48 8D AC 24 70 9C FF FF B8 90 64 00 00 E8 ?? ?? ?? ?? 48 2B E0 33 F6 C7 85 BC 06 00 00 00 00 80 3F 33 C0 48 89 B5 E8 06 00 00 48 89 85 A0 06 00 00 0F 57 C0 89 85 A8 06 00 00"
+        }
+      ]
+    },
+    "items/RecordFromStack": {
+      "find": [
+        {
+          "pattern": "48 89 4C 24 08 55 53 56 57 41 54 41 55 41 56 48 8D 6C 24 F1 48 81 EC 00 01 00 00 44 88 4A 04 48 8B DA 41 8B 00 89 42 08 41 0F B7 40 04 66 89 02 49 8D 40 08 8B 10 48 89 45 57 85 D2"
+        }
+      ]
+    },
+    "items/RecordWrite": {
+      "find": [
+        {
+          "pattern": "48 89 5C 24 08 48 89 74 24 10 48 89 7C 24 18 41 56 48 83 EC 20 48 8B 39 48 8B DA 0F B6 72 04 4C 8B F1 48 8B 47 10 48 FF C0 48 3B 47 08 76 ?? BA 01 00 00 00 48 8B CF E8 ?? ?? ?? ?? 48 8B 47 10 48 FF C0 48 3B 47 08 76 ??"
+        }
+      ]
+    },
+    "items/RecordRead": {
+      "find": [
+        {
+          "pattern": "48 89 5C 24 10 48 89 74 24 18 57 48 83 EC 20 48 8B DA 48 8B F1 48 8D 51 04 41 B8 01 00 00 00 48 8B 0B E8 ?? ?? ?? ?? 48 8B 0B 48 8D 56 08 41 B8 04 00 00 00 E8 ?? ?? ?? ?? 48 8B 0B 41 B8 02 00 00 00 48 8B D6 E8 ?? ?? ?? ?? 48 8B CB E8 ?? ?? ?? ??"
+        }
+      ]
+    },
+    "items/PideFromRecord": {
+      "find": [
+        {
+          "pattern": "40 55 57 41 57 48 8D AC 24 00 FE FF FF 48 81 EC 00 03 00 00 0F 29 B4 24 E0 02 00 00 4D 8B F9 41 0F 10 B0 4C 05 00 00 48 8B F9 66 0F 6F C6 66 49 0F 7E F0 66 0F 73 D8 08 66 48 0F 7E C0 4C 0B C0 75 ?? 8B 05 ?? ?? ?? ?? E9 ?? ?? ?? ?? 48 8D 45 D8 4C 89 A4 24 38 03 00 00 45 33 E4"
+        }
+      ]
+    },
+    "items/CreateEntity": {
+      "find": [
+        {
+          "pattern": "4C 8B C2 48 81 C1 C0 79 E1 00 8B 15 ?? ?? ?? ?? 45 33 C9 E9 ?? ?? ?? ?? CC CC CC CC CC CC CC CC 48 83 EC 58 0F 10 02 8B 15 ?? ?? ?? ?? 33 C0 41 0F 10 08 48 81 C1 C0 79 E1 00 89 44 24 20"
+        }
+      ]
+    },
+    "saves/EcsSnapshot": {
+      "find": [
+        {
+          "pattern": "48 89 4C 24 08 55 53 56 57 41 54 41 55 41 56 41 57 48 8D 6C 24 A8 48 81 EC 58 01 00 00 4C 8B F1 48 8B FA 48 8D 4D C0 E8 ?? ?? ?? ?? 49 8B 06 4C 8D A7 C0 79 E1 00 41 B1 08 C6 44 24 20 00 BA 30 00 00 00"
+        }
+      ]
+    },
+    "items/TombstoneCheck": {
+      "find": [
+        {
+          "pattern": "48 89 54 24 10 48 89 4C 24 08 55 56 41 54 41 55 41 56 41 57 48 8D AC 24 58 FF FF FF 48 81 EC A8 01 00 00 45 33 E4 4D 8B F1 80 BD 18 01 00 00 02 49 8B F0 4C 8B EA 4C 8B F9 75 ?? 44 88 61 08 48 8B C1 44 89 61 04"
+        }
+      ]
+    },
+    "characters/Write": {
+      "find": [
+        {
+          "pattern": "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 41 54 41 55 41 56 41 57 48 83 EC 30 48 8B 32 49 8B D8 41 0F B6 28 48 8B FA 0F 29 74 24 20 4C 8B E1 48 8B 46 10 48 FF C0 48 3B 46 08 76 ?? BA 01 00 00 00"
+        }
+      ]
+    },
+    "saves/CapturesDone": {
+      "find": [
+        {
+          "pattern": "48 89 5C 24 18 55 56 57 41 54 41 55 41 56 41 57 48 8D 6C 24 D9 48 81 EC A0 00 00 00 49 8B D8 4C 8B EA 4C 8B F1 E8 ?? ?? ?? ?? 84 C0 75 ?? 66 90 E8 ?? ?? ?? ?? 49 8B CE E8 ?? ?? ?? ??"
+        }
+      ]
+    },
+    "saves/PublishCharacters": {
+      "find": [
+        {
+          "pattern": "48 89 5C 24 10 48 89 4C 24 08 55 56 57 41 54 41 55 41 56 41 57 48 8D 6C 24 F0 48 81 EC 10 01 00 00 49 8B 70 40 4C 8B EA 33 D2 4D 8B E0 48 8B D9 8B 06 3C 01 0F 84 ?? ?? ?? ?? 48 8B 86 D8 01 00 00"
+        }
+      ]
+    },
+    "@characters/Read.main_pages": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "characters/Read",
+            "size": 2560
+          },
+          "pattern": "48 8D 96 {characters/struct.main_pages:d32} 41 B8 01 00 00 00 E8 ?? ?? ?? ?? 45 33 F6 80 BE 38 1E 00 00 10 0F 87 ?? ?? ?? ?? 48 8B CF E8 ?? ?? ?? ?? 44 0F B6 E0 44 89 A6 40 1E 00 00 44 89 B6 3C 1E 00 00 3C F8 0F 87 ?? ?? ?? ?? 48 8B 0F 48 8D 96 44 1E 00 00 41 B8 01 00 00 00 E8 ?? ?? ?? ?? 80 BE 44 1E 00 00 10 0F 87 ?? ?? ?? ?? 48 8B CF E8 ?? ?? ?? ?? 0F B6 C0 44 89 A6 48 1E 00 00 44 03 E0 89 86 4C 1E 00 00 41 81 FC F8 00 00 00 0F 87 ?? ?? ?? ?? 40 32 ED 45 85 E4 0F 84 ?? ?? ?? ?? 48 8D 9E 50 1E 00 00 66 0F 1F 84 00 00 00 00 00 48 8B 53 08 48 FF C2 48 89 54 24 58 48 3B 53 10 76 ?? 48 8B 43 18 48 85 C0 0F 84 ?? ?? ?? ??"
+        }
+      ]
+    },
+    "@characters/Write.main_pages": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "characters/Write",
+            "size": 4352
+          },
+          "pattern": "0F B6 AB {characters/struct.main_pages:d32} 48 8B 46 10 48 FF C0 48 3B 46 08 76 ?? BA 01 00 00 00 48 8B CE E8 ?? ?? ?? ?? 48 8B 46 10 48 FF C0 48 3B 46 08 76 ?? B2 0B 48 8B CE E8 ?? ?? ?? ?? 48 8B 4E 10 48 8D 41 01 48 89 46 10 48 8B 06 40 88 2C 01 48 8B 37 0F B6 AB 40 1E 00 00 48 8B 46 10 48 FF C0 48 3B 46 08 76 ?? BA 01 00 00 00 48 8B CE E8 ?? ?? ?? ?? 48 8B 46 10 48 FF C0 48 3B 46 08 76 ?? B2 0B 48 8B CE E8 ?? ?? ?? ?? 48 8B 4E 10 48 8D 41 01 48 89 46 10 48 8B 06"
+        }
+      ]
+    },
+    "@characters/Read.extra_pages": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "characters/Read",
+            "size": 2560
+          },
+          "pattern": "48 8D 96 {characters/struct.extra_pages:d32} 41 B8 01 00 00 00 E8 ?? ?? ?? ?? 80 BE 44 1E 00 00 10 0F 87 ?? ?? ?? ?? 48 8B CF E8 ?? ?? ?? ?? 0F B6 C0 44 89 A6 48 1E 00 00 44 03 E0 89 86 4C 1E 00 00 41 81 FC F8 00 00 00 0F 87 ?? ?? ?? ?? 40 32 ED 45 85 E4 0F 84 ?? ?? ?? ?? 48 8D 9E 50 1E 00 00 66 0F 1F 84 00 00 00 00 00 48 8B 53 08 48 FF C2 48 89 54 24 58 48 3B 53 10 76 ?? 48 8B 43 18 48 85 C0 0F 84 ?? ?? ?? ?? 48 F7 DA 45 33 C0 48 8B CB FF D0 84 C0 75 ?? 49 8B CE EB ?? 45 33 F6 41 C6 07 27 E9 ?? ?? ?? ?? 48 6B 4B 08 38 48 03 0B 44 88 71 03"
+        }
+      ]
+    },
+    "@characters/Write.extra_pages": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "characters/Write",
+            "size": 4352
+          },
+          "pattern": "0F B6 AB {characters/struct.extra_pages:d32} 48 8B 46 10 48 FF C0 48 3B 46 08 76 ?? BA 01 00 00 00 48 8B CE E8 ?? ?? ?? ?? 48 8B 46 10 48 FF C0 48 3B 46 08 76 ?? B2 0B 48 8B CE E8 ?? ?? ?? ?? 48 8B 4E 10 48 8D 41 01 48 89 46 10 48 8B 06 40 88 2C 01 48 8B 37 0F B6 AB 4C 1E 00 00 48 8B 46 10 48 FF C0 48 3B 46 08 76 ?? BA 01 00 00 00 48 8B CE E8 ?? ?? ?? ?? 48 8B 46 10 48 FF C0 48 3B 46 08 76 ?? B2 0B 48 8B CE E8 ?? ?? ?? ?? 48 8B 4E 10 48 8D 41 01 48 89 46 10 48 8B 06"
+        }
+      ]
+    },
+    "@characters/Read.list": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "characters/Read",
+            "size": 2560
+          },
+          "pattern": "48 8D 9E {characters/struct.list:d32} 66 0F 1F 84 00 00 00 00 00 48 8B 53 08 48 FF C2 48 89 54 24 58 48 3B 53 10 76 ?? 48 8B 43 18 48 85 C0 0F 84 ?? ?? ?? ?? 48 F7 DA 45 33 C0 48 8B CB FF D0 84 C0 75 ?? 49 8B CE EB ?? 45 33 F6 41 C6 07 27 E9 ?? ?? ?? ?? 48 6B 4B 08 38 48 03 0B 44 88 71 03 44 88 71 07 44 88 71 14 44 88 71 20 44 88 71 28 44 88 71 34 48 FF 43 08 48 8B D7 E8 ?? ?? ?? ?? 40 FE C5 40 0F B6 C5 41 3B C4 72 ?? 48 8B 0F 48 8D 96 B8 54 00 00 41 B8 02 00 00 00 E8 ?? ?? ?? ??"
+        }
+      ]
+    },
+    "@characters/Write.list": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "characters/Write",
+            "size": 4352
+          },
+          "pattern": "48 03 93 {characters/struct.list:d32} E8 ?? ?? ?? ?? FF C6 3B B3 58 1E 00 00 72 ?? 48 8B 37 0F B7 AB B8 54 00 00 48 8B 46 10 48 83 C0 02 48 3B 46 08 76 ?? BA 02 00 00 00 48 8B CE E8 ?? ?? ?? ?? 48 8B 46 10 48 83 C0 02 48 3B 46 08 76 ?? B2 0B 48 8B CE E8 ?? ?? ?? ?? 48 8B 4E 10 48 8D 41 02 48 89 46 10 48 8B 06 66 89 2C 01 48 8B 37 0F B7 AB BA 54 00 00 48 8B 46 10 48 83 C0 02 48 3B 46 08 76 ?? BA 02 00 00 00 48 8B CE E8 ?? ?? ?? ?? 48 8B 46 10 48 83 C0 02 48 3B 46 08 76 ?? B2 0B"
+        }
+      ]
+    },
+    "@characters/Read.equip0": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "characters/Read",
+            "size": 2560
+          },
+          "pattern": "48 8D 8E {characters/struct.equip0:d32} 80 79 38 00 75 ?? C6 41 03 00 C6 41 07 00 C6 41 14 00 C6 41 20 00 C6 41 28 00 C6 41 34 00 C6 41 38 01 48 8B D7 E8 ?? ?? ?? ?? 8B C3 D1 E8 A8 01 74 ?? 48 8D 8E A4 1A 00 00 80 79 38 00 75 ?? C6 41 03 00 C6 41 07 00 C6 41 14 00 C6 41 20 00 C6 41 28 00 C6 41 34 00 C6 41 38 01 48 8B D7 E8 ?? ?? ?? ?? 8B C3 C1 E8 02 A8 01 74 ?? 48 8D 8E E0 1A 00 00 80 79 38 00 75 ?? C6 41 03 00 C6 41 07 00 C6 41 14 00 C6 41 20 00 C6 41 28 00"
+        }
+      ]
+    },
+    "@characters/Write.equip0": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "characters/Write",
+            "size": 4352
+          },
+          "pattern": "48 8D 93 {characters/struct.equip0:d32} 48 8B CF E8 ?? ?? ?? ?? 80 BB DC 1A 00 00 00 74 ?? 48 8D 93 A4 1A 00 00 48 8B CF E8 ?? ?? ?? ?? 80 BB 18 1B 00 00 00 74 ?? 48 8D 93 E0 1A 00 00 48 8B CF E8 ?? ?? ?? ?? 80 BB 54 1B 00 00 00 74 ?? 48 8D 93 1C 1B 00 00 48 8B CF E8 ?? ?? ?? ?? 80 BB 90 1B 00 00 00 74 ?? 48 8D 93 58 1B 00 00 48 8B CF E8 ?? ?? ?? ?? 80 BB CC 1B 00 00 00 74 ?? 48 8D 93 94 1B 00 00 48 8B CF E8 ?? ?? ?? ?? 80 BB 08 1C 00 00 00 74 ?? 48 8D 93 D0 1B 00 00 48 8B CF E8 ?? ?? ?? ?? 80 BB 44 1C 00 00 00 74 ?? 48 8D 93 0C 1C 00 00 48 8B CF E8 ?? ?? ?? ?? 80 BB 80 1C 00 00 00 74 ??"
+        }
+      ]
+    },
+    "@characters/Read.equip1": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "characters/Read",
+            "size": 2560
+          },
+          "pattern": "48 8D 8E {characters/struct.equip1:d32} 80 79 38 00 75 ?? C6 41 03 00 C6 41 07 00 C6 41 14 00 C6 41 20 00 C6 41 28 00 C6 41 34 00 C6 41 38 01 48 8B D7 E8 ?? ?? ?? ?? 8B C3 C1 E8 02 A8 01 74 ?? 48 8D 8E E0 1A 00 00 80 79 38 00 75 ?? C6 41 03 00 C6 41 07 00 C6 41 14 00 C6 41 20 00 C6 41 28 00 C6 41 34 00 C6 41 38 01 48 8B D7 E8 ?? ?? ?? ?? 8B C3 C1 E8 03 A8 01 74 ?? 48 8D 8E 1C 1B 00 00 80 79 38 00 75 ?? C6 41 03 00 C6 41 07 00 C6 41 14 00 C6 41 20 00 C6 41 28 00"
+        }
+      ]
+    },
+    "@characters/Write.equip1": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "characters/Write",
+            "size": 4352
+          },
+          "pattern": "48 8D 93 {characters/struct.equip1:d32} 48 8B CF E8 ?? ?? ?? ?? 80 BB 18 1B 00 00 00 74 ?? 48 8D 93 E0 1A 00 00 48 8B CF E8 ?? ?? ?? ?? 80 BB 54 1B 00 00 00 74 ?? 48 8D 93 1C 1B 00 00 48 8B CF E8 ?? ?? ?? ?? 80 BB 90 1B 00 00 00 74 ?? 48 8D 93 58 1B 00 00 48 8B CF E8 ?? ?? ?? ?? 80 BB CC 1B 00 00 00 74 ?? 48 8D 93 94 1B 00 00 48 8B CF E8 ?? ?? ?? ?? 80 BB 08 1C 00 00 00 74 ?? 48 8D 93 D0 1B 00 00 48 8B CF E8 ?? ?? ?? ?? 80 BB 44 1C 00 00 00 74 ?? 48 8D 93 0C 1C 00 00 48 8B CF E8 ?? ?? ?? ?? 80 BB 80 1C 00 00 00 74 ?? 48 8D 93 48 1C 00 00 48 8B CF E8 ?? ?? ?? ?? 80 BB BC 1C 00 00 00 74 ??"
+        }
+      ]
+    },
+    "@characters/Read.equip_last": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "characters/Read",
+            "size": 2560
+          },
+          "pattern": "48 8D 8E {characters/struct.equip_last:d32} 80 79 38 00 75 ?? C6 41 03 00 C6 41 07 00 C6 41 14 00 C6 41 20 00 C6 41 28 00 C6 41 34 00 C6 41 38 01 48 8B D7 E8 ?? ?? ?? ?? 8B C3 C1 E8 10 A8 01 74 ?? 48 8B CF E8 ?? ?? ?? ?? 66 89 86 28 1E 00 00 80 BE 2A 1E 00 00 00 75 ?? C6 86 2A 1E 00 00 01 8B C3 C1 E8 11 A8 01 74 ?? 48 8B CF E8 ?? ?? ?? ?? 66 89 86 2C 1E 00 00 80 BE 2E 1E 00 00 00 75 ?? C6 86 2E 1E 00 00 01 8B C3 C1 E8 12 A8 01 74 ?? 48 8B CF E8 ?? ?? ?? ?? 66 89 86 30 1E 00 00 80 BE 32 1E 00 00 00"
+        }
+      ]
+    },
+    "@characters/Write.equip_last": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "characters/Write",
+            "size": 4352
+          },
+          "pattern": "48 8D 93 {characters/struct.equip_last:d32} 48 8B CF E8 ?? ?? ?? ?? 80 BB 2A 1E 00 00 00 74 ?? 48 8B 37 0F B7 AB 28 1E 00 00 48 8B 46 10 48 83 C0 02 48 3B 46 08 76 ?? BA 02 00 00 00 48 8B CE E8 ?? ?? ?? ?? 48 8B 46 10 48 83 C0 02 48 3B 46 08 76 ?? B2 0B 48 8B CE E8 ?? ?? ?? ?? 48 8B 4E 10 48 8D 41 02 48 89 46 10 48 8B 06 66 89 2C 01 80 BB 2E 1E 00 00 00 74 ?? 48 8B 37 0F B7 AB 2C 1E 00 00 48 8B 46 10 48 83 C0 02 48 3B 46 08 76 ?? BA 02 00 00 00 48 8B CE E8 ?? ?? ?? ?? 48 8B 46 10 48 83 C0 02 48 3B 46 08"
+        }
+      ]
+    },
+    "@characters/Read.refs": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "characters/Read",
+            "size": 2560
+          },
+          "pattern": "66 89 86 {characters/struct.refs:d16} 00 00 80 BE 2A 1E 00 00 00 75 ?? C6 86 2A 1E 00 00 01 8B C3 C1 E8 11 A8 01 74 ?? 48 8B CF E8 ?? ?? ?? ?? 66 89 86 2C 1E 00 00 80 BE 2E 1E 00 00 00 75 ?? C6 86 2E 1E 00 00 01 8B C3 C1 E8 12 A8 01 74 ?? 48 8B CF E8 ?? ?? ?? ?? 66 89 86 30 1E 00 00 80 BE 32 1E 00 00 00 75 ?? C6 86 32 1E 00 00 01 8B C3 C1 E8 13 A8 01 74 ?? 48 8B CF E8 ?? ?? ?? ?? 66 89 86 34 1E 00 00 80 BE 36 1E 00 00 00 75 ?? C6 86 36 1E 00 00 01 41 83 7D 08 03 73 ?? 8B C3 C1 E8 14 A8 01 74 ??"
+        }
+      ]
+    },
+    "@characters/Write.refs": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "characters/Write",
+            "size": 4352
+          },
+          "pattern": "0F B7 AB {characters/struct.refs:d32} 48 8B 46 10 48 83 C0 02 48 3B 46 08 76 ?? BA 02 00 00 00 48 8B CE E8 ?? ?? ?? ?? 48 8B 46 10 48 83 C0 02 48 3B 46 08 76 ?? B2 0B 48 8B CE E8 ?? ?? ?? ?? 48 8B 4E 10 48 8D 41 02 48 89 46 10 48 8B 06 66 89 2C 01 80 BB 2E 1E 00 00 00 74 ?? 48 8B 37 0F B7 AB 2C 1E 00 00 48 8B 46 10 48 83 C0 02 48 3B 46 08 76 ?? BA 02 00 00 00 48 8B CE E8 ?? ?? ?? ?? 48 8B 46 10 48 83 C0 02 48 3B 46 08 76 ?? B2 0B 48 8B CE E8 ?? ?? ?? ?? 48 8B 4E 10 48 8D 41 02"
+        }
+      ]
+    },
+    "@characters/Read.record.stride": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "characters/Read",
+            "size": 2560
+          },
+          "pattern": "48 6B 4B 08 {items/record.stride:d8} 48 03 0B 44 88 71 03 44 88 71 07 44 88 71 14 44 88 71 20 44 88 71 28 44 88 71 34 48 FF 43 08 48 8B D7 E8 ?? ?? ?? ?? 40 FE C5 40 0F B6 C5 41 3B C4 72 ?? 48 8B 0F 48 8D 96 B8 54 00 00 41 B8 02 00 00 00 E8 ?? ?? ?? ?? 48 8B 0F 48 8D 96 BA 54 00 00 41 B8 02 00 00 00 E8 ?? ?? ?? ?? 48 8B 0F 48 8D 96 D8 54 00 00 41 B8 01 00 00 00 E8 ?? ?? ?? ?? 48 8B CF E8 ?? ?? ?? ?? 24 01 48 8D 96 C8 54 00 00 88 86 D9 54 00 00 41 B8 04 00 00 00 48 8B 0F E8 ?? ?? ?? ?? 48 8B 0F 48 8D 96 CC 54 00 00 41 B8 04 00 00 00 E8 ?? ?? ?? ?? 48 8B 0F"
+        }
+      ]
+    },
+    "@characters/Write.record.stride": {
+      "find": [
+        {
+          "scope": {
+            "symbol": "characters/Write",
+            "size": 4352
+          },
+          "pattern": "48 6B D0 {items/record.stride:d8} 48 03 93 50 1E 00 00 E8 ?? ?? ?? ?? FF C6 3B B3 58 1E 00 00 72 ?? 48 8B 37 0F B7 AB B8 54 00 00 48 8B 46 10 48 83 C0 02 48 3B 46 08 76 ?? BA 02 00 00 00 48 8B CE E8 ?? ?? ?? ?? 48 8B 46 10 48 83 C0 02 48 3B 46 08 76 ?? B2 0B 48 8B CE E8 ?? ?? ?? ?? 48 8B 4E 10 48 8D 41 02 48 89 46 10 48 8B 06 66 89 2C 01 48 8B 37 0F B7 AB BA 54 00 00 48 8B 46 10 48 83 C0 02 48 3B 46 08 76 ?? BA 02 00 00 00 48 8B CE E8 ?? ?? ?? ?? 48 8B 46 10 48 83 C0 02 48 3B 46 08 76 ??"
+        }
+      ]
+    }
+  },
+  "constants": {
+    "characters/struct.main_pages": {
+      "min_votes": 2
+    },
+    "characters/struct.extra_pages": {
+      "min_votes": 2
+    },
+    "characters/struct.list": {
+      "min_votes": 2
+    },
+    "characters/struct.equip0": {
+      "min_votes": 2
+    },
+    "characters/struct.equip1": {
+      "min_votes": 2
+    },
+    "characters/struct.equip_last": {
+      "min_votes": 2
+    },
+    "characters/struct.refs": {
+      "min_votes": 2
+    },
+    "items/record.stride": {
+      "min_votes": 2
+    }
+  },
+  "features": {
+    "items.storage": {
+      "symbols": [
+        "characters/Capture",
+        "characters/Read",
+        "characters/JoinApply",
+        "items/RecordFromStack",
+        "items/RecordWrite",
+        "items/RecordRead",
+        "items/PideFromRecord",
+        "items/CreateEntity",
+        "saves/EcsSnapshot",
+        "items/TombstoneCheck",
+        "characters/Write",
+        "saves/CapturesDone",
+        "saves/PublishCharacters",
+        "@characters/Read.main_pages",
+        "@characters/Write.main_pages",
+        "@characters/Read.extra_pages",
+        "@characters/Write.extra_pages",
+        "@characters/Read.list",
+        "@characters/Write.list",
+        "@characters/Read.equip0",
+        "@characters/Write.equip0",
+        "@characters/Read.equip1",
+        "@characters/Write.equip1",
+        "@characters/Read.equip_last",
+        "@characters/Write.equip_last",
+        "@characters/Read.refs",
+        "@characters/Write.refs",
+        "@characters/Read.record.stride",
+        "@characters/Write.record.stride"
+      ],
+      "constants": [
+        "characters/struct.main_pages",
+        "characters/struct.extra_pages",
+        "characters/struct.list",
+        "characters/struct.equip0",
+        "characters/struct.equip1",
+        "characters/struct.equip_last",
+        "characters/struct.refs",
+        "items/record.stride"
+      ]
+    }
+  }
+}
