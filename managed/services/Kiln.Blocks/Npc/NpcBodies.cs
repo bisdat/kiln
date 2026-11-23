@@ -208,6 +208,10 @@ public static class NpcBodies
     {
         if (IsClient())
         {
+            // review3 N7: nothing new since the last flush, nothing to post to the main thread
+            var rows = NpcBodyRows.All;
+            lock (Gate)
+                if (_version == _flushed && ReferenceEquals(rows, _flushedRows)) return;
             if (Interlocked.Exchange(ref _posted, 1) != 0) return;
             // Kiln's work, not the mod whose definition or unload led here: Client.Post drops a mod's work when the mod unloads
             var outer = ModContext.CurrentMod;

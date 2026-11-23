@@ -159,6 +159,8 @@ public sealed class NpcBodyGateTests : IDisposable
     {
         var text = NpcBodyGate.Difference([$"m:tobin:{A}"], new Dictionary<string, string>())!;
         Assert.Contains("the server has the NPC body m:tobin and your game doesn't", text);
+        // review3 N5: a dedicated server skips the bounds check a player's game makes, so the player's own log may say why
+        Assert.Contains("your game's kiln.log says why it did not build it", text);
     }
 
     [Fact]

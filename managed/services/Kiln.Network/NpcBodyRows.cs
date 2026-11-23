@@ -93,7 +93,24 @@ internal static unsafe class NpcBodyRows
         var buf = new byte[(int)n + 1];
         fixed (byte* p = buf)
             if (t->NativeManifest(p, (nuint)buf.Length, &n) != 0 || n > (nuint)buf.Length) return null;
-        return _native = System.Text.Encoding.UTF8.GetString(buf, 0, (int)n);
+        var text = System.Text.Encoding.UTF8.GetString(buf, 0, (int)n);
+        // kept for the process only once the boot build wrote its rows (review3 N1): a read before it must not freeze "no bodies"
+        if (HasBodies(text)) _native = text;
+        return text;
+    }
+
+    internal static bool HasBodies(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return false;
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            return doc.RootElement.ValueKind == JsonValueKind.Object && doc.RootElement.TryGetProperty("bodies", out _);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
     }
 
     /// <summary>The rows of a manifest. A missing "bodies" key (an older native build), a document that is not JSON and a row without a

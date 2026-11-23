@@ -147,7 +147,7 @@ std::string read_block_file(const fs::path& path) {
 // NpcCompiler.NpcFile writes for an NPC block, the same ids (UUIDv5 of <mod>:npc:<name>, <mod>:item:<name>.tool) and the same body premades.
 // An NPC block written in code is not visible here: Kiln.Blocks writes it to the data folder, and the game builds it from the next start.
 qb::ojson npcs_from_blocks(const std::string& mod, const std::vector<qb::ojson>& docs, bool* authored_body = nullptr,
-                           std::string* body_refusal = nullptr) {
+                           std::string* body_refusal = nullptr, std::vector<std::string>* refused_bodies = nullptr) {
     struct Premade {
         const char *key, *tmpl, *workshop, *tool;
     };
@@ -217,8 +217,10 @@ qb::ojson npcs_from_blocks(const std::string& mod, const std::vector<qb::ojson>&
             Body b;
             const bool resolved = n.contains("body") && body_of(n["body"], &b);
             if (authored_body && (b.own || n.contains("motions"))) *authored_body = true;
-            if (b.own && !resolved && body_refusal && body_refusal->empty())
-                *body_refusal = "npcs." + name + ".body: an authored roster body uses the Fisher/Villager chassis only";
+            if (b.own && !resolved && body_refusal) {
+                if (body_refusal->empty()) *body_refusal = "npcs." + name + ".body: an authored roster body uses the Fisher/Villager chassis only";
+                if (refused_bodies) refused_bodies->push_back(name);  // left out below: its status row still says why
+            }
             if (!n.contains("name") || !n["name"].is_string() || !resolved) continue;  // Kiln.Blocks says what is wrong
             const std::string key = n.contains("was") && n["was"].is_string() ? n["was"].get<std::string>() : name;
             const std::string clone = qb::guid_text(qb::derive_guid(mod, "npc", key));
@@ -410,8 +412,10 @@ void collect_mods(std::vector<qb::ModInput>* mods, bool client, const kiln::boot
         ec.clear();
         bool authored_body = false;
         std::string body_refusal;
+        std::vector<std::string> refused_bodies;
         const qb::ojson block_npcs = block_docs.empty() ? qb::ojson::object()
-                                                        : npcs_from_blocks(mf["id"].get<std::string>(), block_docs, &authored_body, &body_refusal);
+                                                        : npcs_from_blocks(mf["id"].get<std::string>(), block_docs, &authored_body, &body_refusal,
+                                                                           &refused_bodies);
         const fs::path body_manifest = base / L"assets" / L"cooked" / L"npc-bodies.v1.json";
         if (fs::exists(body_manifest, ec)) {
             const auto bundle = qb::parse_blocks_json(read_block_file(body_manifest));
@@ -427,6 +431,7 @@ void collect_mods(std::vector<qb::ModInput>* mods, bool client, const kiln::boot
         m.authored_body = authored_body;
         m.dir = dir;
         m.body_refusal = body_refusal;
+        m.refused_bodies = refused_bodies;
         if (mf.contains("dependencies")) {
             const auto& dependencies = mf["dependencies"];
             if (dependencies.is_object()) {
@@ -676,7 +681,9 @@ bool read_mod_file(const std::string& dir, const std::string& file, size_t max, 
     for (size_t from = 0;;) {
         const size_t end = file.find('/', from);
         at /= widen(file.substr(from, end == std::string::npos ? std::string::npos : end - from));
-        if (fs::is_symlink(at, ec)) { *why = "a link is on its path"; return false; }
+        // a link, and on Windows a junction (MSVC's file_type::junction, neither a folder nor a file here): review3 N2
+        const fs::file_status st = fs::symlink_status(at, ec);
+        if (fs::is_symlink(st) || (fs::exists(st) && !fs::is_directory(st) && !fs::is_regular_file(st))) { *why = "a link is on its path"; return false; }
         if (end == std::string::npos) break;
         from = end + 1;
     }

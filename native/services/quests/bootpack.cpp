@@ -61,7 +61,16 @@ bool body_keys(const ojson& assets, std::vector<Key>* out, std::string* why) {
         Key key;
         const std::string type = entry.value("type", "");
         if (!parse_guid(entry.value("guid", ""), &key.guid) || type.empty()) { *why = "an admitted body resource has no key"; return false; }
-        key.type = type.rfind("0x", 0) == 0 ? static_cast<uint32_t>(std::stoul(type, nullptr, 16)) : fnv1a(type.data(), type.size());
+        if (type.rfind("0x", 0) == 0) {  // review3 N8: at most 8 hex digits, the same key on every platform (never stoul's long)
+            const std::string digits = type.substr(2);
+            if (digits.empty() || digits.size() > 8 || digits.find_first_not_of("0123456789abcdefABCDEF") != std::string::npos) {
+                *why = "an admitted body resource's type " + type + " is not a 32-bit 0x hash";
+                return false;
+            }
+            key.type = static_cast<uint32_t>(std::stoul(digits, nullptr, 16));
+        } else {
+            key.type = fnv1a(type.data(), type.size());
+        }
         out->push_back(key);
     }
     return true;
@@ -341,6 +350,9 @@ Result build(const std::vector<ModInput>& mods, const Backend& backend) {
             out.bodies.push_back({{"mod", mod.id}, {"npc", body.value("block", id)}, {"key", id}, {"state", "failed"}, {"reason", reason},
                                   {"template", ""}, {"model", ""}, {"graph", ""}, {"closure", ""}, {"generation", out.generation}});
         });
+        for (const auto& name : mod.refused_bodies)  // left out at collection (another chassis): Status says why, not NoDefinition
+            out.bodies.push_back({{"mod", mod.id}, {"npc", name}, {"key", name}, {"state", "failed"}, {"reason", reason},
+                                  {"template", ""}, {"model", ""}, {"graph", ""}, {"closure", ""}, {"generation", out.generation}});
     }
     out.manifest["bodies"] = out.bodies;
     out.manifest["mods"] = std::move(manifest_mods);

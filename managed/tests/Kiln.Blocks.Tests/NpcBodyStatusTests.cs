@@ -281,6 +281,7 @@ public sealed class NpcBodyStatusTests
         var e = Assert.Single(s.Events);
         Assert.True(e.ClientSide);
         NpcBodies.Kick();
+        Assert.Single(s.Posted);  // review3 N7: nothing changed since, so nothing is posted to the main thread
         s.Posted[^1]();
         Assert.Single(s.Events);
     }

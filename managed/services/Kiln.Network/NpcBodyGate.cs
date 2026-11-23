@@ -111,7 +111,8 @@ internal static class NpcBodyGate
             if (!has)
             {
                 if (!complete) continue;  // beyond the list the client sent: unknown, not missing
-                detail = $"the server has the NPC body {name} and your game doesn't";
+                // a dedicated server skips the bounds check a player's game makes (review3 N5): the player's log may say why
+                detail = $"the server has the NPC body {name} and your game doesn't (if you have its mod, your game's kiln.log says why it did not build it)";
                 break;
             }
             if (!string.Equals(s, c, StringComparison.Ordinal))

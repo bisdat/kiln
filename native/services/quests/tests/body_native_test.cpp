@@ -337,8 +337,10 @@ void test_refusals_leave_the_neighbour() {
         CHECK(owns_layers("b-ordinary"));
         if (!logged(c.says)) std::printf("expected a log line with: %s\n", c.says);
         CHECK(logged(c.says));
-        // S5: every body the refused mod names is a failed row carrying the refusal (a chassis refusal names no body)
+        // S5: every body the refused mod names is a failed row carrying the refusal (review3 N3: also one collection dropped, another
+        // chassis), so NpcBodies.Status says why rather than NoDefinition
         const auto manifest = kiln::qb::ojson::parse(g_manifest);
+        CHECK(!manifest["bodies"].empty());
         for (const auto& row : manifest["bodies"]) {
             CHECK(row["state"] == "failed" && row["mod"] == "a-body" && row["closure"] == "");
             CHECK(row["reason"].get<std::string>().find(c.says) != std::string::npos);
