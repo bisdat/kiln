@@ -56,7 +56,16 @@ internal static partial class Ops
             ["bridge"] = bridge.Directory,
             ["ops"] = new JsonArray([.. bridge.OpNames.Select(o => (JsonNode)o)]),
             ["topics"] = new JsonArray([.. TcpAdmin.Topics.Select(t => (JsonNode)t)]),
+            ["restart"] = RestartJson(),
         };
+    }
+
+    /// <summary>{supported, via, code, request: the restart under way or the last one | null}.</summary>
+    private static JsonObject RestartJson()
+    {
+        var o = (Restart?.Support ?? RestartSupport.FromEnvironment()).ToJson();
+        o["request"] = Restart?.Info();
+        return o;
     }
 
     /// <summary>Server id and name for hello/endpoint.json: Kiln.Network's, else the files it keeps.</summary>

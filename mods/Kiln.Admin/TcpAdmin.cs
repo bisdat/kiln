@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 // KAP/1, the Kiln Admin Protocol over TCP (docs/kiln/launcher/admin-protocol.md): u32 LE length + one UTF-8 JSON
 // object per frame, an HMAC-SHA256 handshake keyed by kiln/data/kiln-admin/admin-token, then req/res through the same
-// op table as the file bridge (Bridge.Execute), sub/push of state and kiln.log lines, ping/pong and bye.
+// op table as the file bridge (Bridge.Execute), sub/push of state, kiln.log lines and metrics, ping/pong and bye.
 //
 // Threads: one accept thread, one reader and one writer thread per connection, one housekeeping thread (pings, idle
-// and op timeouts, log tailing). Ops never run on those: requests queue up and drain on the tick thread in Pre (at most
+// and op timeouts, log tailing, metrics pushes). Ops never run on those: requests queue up and drain on the tick thread in Pre (at most
 // 32 per step, oldest first). Every thread polls with short timeouts and is joined on unload, so a mod reload leaves
 // nothing behind (reload-test kiln-admin).
 using System.Collections.Concurrent;
@@ -28,7 +28,7 @@ internal sealed class TcpAdmin : IDisposable
     public const int PingS = 15, IdleS = 45, HandshakeS = 5;
     private const long SlowClientBytes = 4L << 20;
     private const int LogLinesPerPush = 256;
-    public static readonly string[] Topics = ["state", "log"];
+    public static readonly string[] Topics = ["state", "log", "metrics"];
 
     private readonly Bridge _bridge;
     private readonly Logger _log;
@@ -46,6 +46,9 @@ internal sealed class TcpAdmin : IDisposable
     private readonly long _started = Environment.TickCount64;
     private LogTail? _tail;
     private volatile string? _lastState;  // the latest state.json text, pushed at once to a new "state" subscriber
+    private volatile bool _wantsMetrics;
+    private MetricsWindow? _metricsReady;  // the tick thread's newest window, for the housekeeping thread (Interlocked)
+    private readonly ProcessProbe _probe = new();  // housekeeping thread only
 
     public int Port { get; private set; }
     public string? EndpointFile { get; private set; }
@@ -53,6 +56,16 @@ internal sealed class TcpAdmin : IDisposable
 
     /// <summary>Set on the tick thread while a KAP request's op runs synchronously (admin_token_rotate needs it).</summary>
     public object? CurrentCaller { get; private set; }
+
+    /// <summary>The <c>client</c> name the caller of the running op gave in its auth frame; null outside a KAP op.</summary>
+    public string? CurrentCallerName => (CurrentCaller as Conn)?.ClientName;
+
+    /// <summary>Some connection is subscribed to "metrics" (read on the tick thread every step: the sampler and the
+    /// Post handler run only then).</summary>
+    public bool WantsMetrics => _wantsMetrics;
+
+    /// <summary>What <c>ready.restart</c> says (set at load: whether a restart comes back, and how).</summary>
+    public JsonObject? RestartInfo { get; set; }
 
     public double UptimeSeconds => (Environment.TickCount64 - _started) / 1000.0;
 
@@ -76,8 +89,8 @@ internal sealed class TcpAdmin : IDisposable
         public readonly AutoResetEvent Signal = new(false);
         public long OutBytes;
         public volatile bool Ready, Closed, CloseAfterFlush;
-        public bool SubState, SubLog;
-        public long SeqState, SeqLog;
+        public bool SubState, SubLog, SubMetrics;
+        public long SeqState, SeqLog, SeqMetrics;
         public string Session = "", Nonce = "", ClientName = "";
         public readonly long Connected = Environment.TickCount64;
         public long LastRecv = Environment.TickCount64, LastSend = Environment.TickCount64, LastPing = Environment.TickCount64;
@@ -456,7 +469,8 @@ internal sealed class TcpAdmin : IDisposable
         }
         finally
         {
-            if (!c.CloseAfterFlush) Close(c, why);
+            // while stopping, Stop() sends bye{reason} and closes after the flush; closing here could drop that bye
+            if (!c.CloseAfterFlush && !_stopping) Close(c, why);
         }
     }
 
@@ -501,6 +515,7 @@ internal sealed class TcpAdmin : IDisposable
                 ["maxFrame"] = MaxServerFrame, ["maxClientFrame"] = MaxClientFrame, ["inflight"] = MaxInflight,
                 ["pingS"] = PingS, ["idleS"] = IdleS,
             },
+            ["restart"] = RestartInfo?.DeepClone(),
         });
         c.Ready = true;
         _log.Info($"KAP {c}: session {c.Session} ready");
@@ -625,10 +640,15 @@ internal sealed class TcpAdmin : IDisposable
                 bool was;
                 lock (c.Lock)
                 {
-                    was = topic == "state" ? c.SubState : c.SubLog;
-                    if (topic == "state") c.SubState = on;
-                    else c.SubLog = on;
+                    was = topic switch { "state" => c.SubState, "log" => c.SubLog, _ => c.SubMetrics };
+                    switch (topic)
+                    {
+                        case "state": c.SubState = on; break;
+                        case "log": c.SubLog = on; break;
+                        default: c.SubMetrics = on; break;
+                    }
                 }
+                if (topic == "metrics") UpdateWantsMetrics();
                 if (topic == "log" && on) EnsureTail();
                 Send(c, new JsonObject { ["t"] = "res", ["id"] = id, ["ok"] = true, ["op"] = t });
                 if (topic == "state" && on && !was && _lastState is { } last)
@@ -682,11 +702,44 @@ internal sealed class TcpAdmin : IDisposable
             try
             {
                 House();
+                if (Interlocked.Exchange(ref _metricsReady, null) is { } w) PushMetrics(w);
             }
             catch (Exception e)
             {
                 _log.Warn($"KAP housekeeping: {e.Message}");
             }
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------- metrics
+
+    private void UpdateWantsMetrics()
+    {
+        var any = false;
+        lock (_conns)
+            foreach (var c in _conns)
+                if (c.SubMetrics && !c.Closed) any = true;
+        _wantsMetrics = any;
+    }
+
+    /// <summary>Tick thread, every 2 s while someone is subscribed: the window that just ended (never waits; the
+    /// housekeeping thread adds the process figures and pushes it within 200 ms).</summary>
+    public void OfferMetrics(MetricsWindow w) => Interlocked.Exchange(ref _metricsReady, w);
+
+    /// <summary>Housekeeping thread: one "metrics" push, serialized once, to every subscriber.</summary>
+    internal void PushMetrics(MetricsWindow w)
+    {
+        Conn[] all;
+        lock (_conns) all = [.. _conns];
+        string? data = null;
+        foreach (var c in all)
+        {
+            bool sub;
+            lock (c.Lock) sub = c.SubMetrics;
+            if (!c.Ready || !sub || c.Closed) continue;
+            data ??= MetricsJson.Data(w, _probe.Read());
+            var seq = Interlocked.Increment(ref c.SeqMetrics);
+            Enqueue(c, Encoding.UTF8.GetBytes("{\"t\":\"push\",\"topic\":\"metrics\",\"seq\":" + seq + ",\"data\":" + data + "}"), push: true);
         }
     }
 
@@ -878,6 +931,7 @@ internal sealed class TcpAdmin : IDisposable
         try { c.Client.Close(); } catch (Exception) { }
         bool removed;
         lock (_conns) removed = _conns.Remove(c);
+        if (c.SubMetrics) UpdateWantsMetrics();
         if (removed && c.Ready) _log.Info($"KAP {c}: closed{(why is null ? "" : " (" + why + ")")}");
     }
 
