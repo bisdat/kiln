@@ -282,6 +282,10 @@ internal sealed class StorageAmmoAcceptor(string key, AmmoKinds kinds, bool acti
     public readonly AmmoKinds Kinds = kinds;
     public readonly bool Activate = activate;
     public readonly ModContext? Mod = mod;
+
+    // the picks under way, by player and item (lock it): a repeat of one is ignored. Kept with the provider, so a pick
+    // its mod's unload dropped holds back no pick of the next provider.
+    public readonly HashSet<(uint Player, uint Item)> Pending = [];
 }
 
 /// <summary>Both halves of the client copy: the server's sender and pick check, the game's copy and its picks.</summary>
@@ -318,13 +322,12 @@ internal static class PlayerStorageMirror
         public StorageMirrorEntry[] Built = [];
     }
 
-    // a player's picks: the rate (a token bucket) and the picks under way; by player entity (a slot + 1: bounded), kept
-    // apart from the views so that a view started over never refills the bucket
+    // a player's pick rate (a token bucket), by player entity, kept apart from the views so that a view started over never
+    // refills the bucket
     private sealed class PickState(long now)
     {
         public double Tokens = PickBurst;
         public long TokensMs = now;
-        public readonly HashSet<(string Key, uint Item)> Pending = [];
     }
 
     private static readonly Dictionary<uint, View> Views = new();
@@ -663,35 +666,60 @@ internal static class PlayerStorageMirror
             Refuse(player, m, $"item {item} is not in the storage");
             return;
         }
-        if (!state.Pending.Add((m.Key, m.Item))) return;  // the same pick is under way: a repeat
+        lock (acceptor.Pending)
+            if (!acceptor.Pending.Add((player.Value, m.Item))) return;  // the same pick is under way: a repeat
+        // The work is the storage's mod's: its requests run as that mod (its unload drops them), and each await of it comes
+        // back to the tick thread through the mod's scheduler. Kiln's own passes, where picks arrive, have no
+        // synchronization context, and kiln.items completes its tasks off the step.
         var outer = ModContext.CurrentMod;
-        ModContext.CurrentMod = acceptor.Mod;  // the work is the storage's mod's (its unload drops the task)
-        Task<EquipResult> task;
+        var outerSync = SynchronizationContext.Current;
+        ModContext.CurrentMod = acceptor.Mod;
+        if (acceptor.Mod is { } mod) SynchronizationContext.SetSynchronizationContext(mod.Scheduler.SynchronizationContext);
         try
         {
-            var slot = kind == AmmoKinds.Arrow ? EquipmentSlot.Arrow : EquipmentSlot.Spell;
-            task = acceptor.Activate ? storage.Activate(player, index)
-                : EquipHook is { } hook ? hook(player, found.Slot, slot, found.ItemEntity)
-                : Items.Equip(player, found.Slot, slot, EquipOptions.None, found.ItemEntity);
-        }
-        catch (Exception e) when (e is KilnUnavailableException or InvalidOperationException or ArgumentException)
-        {
-            state.Pending.Remove((m.Key, m.Item));
-            Refuse(player, m, e.Message);
-            return;
+            Task<EquipResult> task;
+            try
+            {
+                var slot = kind == AmmoKinds.Arrow ? EquipmentSlot.Arrow : EquipmentSlot.Spell;
+                task = acceptor.Activate ? storage.Activate(player, index)
+                    : EquipHook is { } hook ? hook(player, found.Slot, slot, found.ItemEntity)
+                    : Items.Equip(player, found.Slot, slot, EquipOptions.None, found.ItemEntity);
+            }
+            catch (Exception e) when (e is KilnUnavailableException or InvalidOperationException or ArgumentException)
+            {
+                lock (acceptor.Pending) acceptor.Pending.Remove((player.Value, m.Item));
+                Refuse(player, m, e.Message);
+                return;
+            }
+            _ = Finish(task, acceptor, storage, player, m, index);
         }
         finally
         {
             ModContext.CurrentMod = outer;
+            SynchronizationContext.SetSynchronizationContext(outerSync);
         }
-        var pending = state.Pending;
-        task.ContinueWith(t =>
+    }
+
+    // A pick's outcome, on the tick thread (the await comes back through the storage mod's scheduler): logged, and the
+    // pick is no longer under way.
+    private static async Task Finish(Task<EquipResult> task, StorageAmmoAcceptor acceptor, PlayerStorage storage, EntityId player,
+        StorageAmmoPick m, int index)
+    {
+        string line;
+        try
         {
-            pending.Remove((m.Key, m.Item));
-            var line = t.IsCompletedSuccessfully ? t.Result.ToString() : t.Exception?.InnerException?.Message ?? "canceled";
-            Backend.Current.Log(storage.Owner, LogLevel.Info, $"player-storage: {m.Key} pick by {player}: {item} from slot {index}" +
-                (acceptor.Activate ? " (activate)" : "") + $": {line}");
-        }, TaskContinuationOptions.ExecuteSynchronously);
+            line = (await task).ToString();
+        }
+        catch (Exception e)
+        {
+            line = e is OperationCanceledException ? "canceled" : e.Message;
+        }
+        finally
+        {
+            lock (acceptor.Pending) acceptor.Pending.Remove((player.Value, m.Item));
+        }
+        Backend.Current.Log(storage.Owner, LogLevel.Info, $"player-storage: {m.Key} pick by {player}: {new ItemId(m.Item)} from slot {index}" +
+            (acceptor.Activate ? " (activate)" : "") + $": {line}");
     }
 
     private static readonly Dictionary<string, long> RefusalLogged = new(StringComparer.Ordinal);

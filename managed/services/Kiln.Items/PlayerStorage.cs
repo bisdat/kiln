@@ -405,9 +405,10 @@ public sealed class PlayerStorage
     /// </summary>
     /// <returns>The equip's result, one step after the last move: <see cref="ItemsStatus.NoInventory"/> while the storage is
     /// not ready, <see cref="ItemsStatus.SlotChanged"/> for an empty slot, <see cref="ItemsStatus.Refused"/> for an item
-    /// that is no arrow or spell, a failed move's status (nothing equipped; <see cref="ItemsStatus.NoRoom"/>: the backpack
-    /// is full), or the equip's. A stack that cannot go back (the storage is full, its filter refuses it) stays in the
-    /// backpack.</returns>
+    /// that is no arrow or spell, or while another <c>Activate</c> of this storage for the same player and slot is under
+    /// way, a failed move's status (nothing equipped; <see cref="ItemsStatus.NoRoom"/>: the backpack is full), or the
+    /// equip's. When the equip fails, what the move put into the backpack goes back into the storage. A stack that cannot
+    /// go back (the storage is full, its filter refuses it) stays in the backpack.</returns>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="index"/> is outside the storage.</exception>
     /// <exception cref="KilnUnavailableException">The row <c>items.move</c> or <c>items.equip</c> is off.</exception>
     [ServerOnly, TickThreadOnly, RequiresCapability(Items.Caps.Move), RequiresCapability(Items.Caps.Equip)]
@@ -422,14 +423,17 @@ public sealed class PlayerStorage
         var kind = PlayerStorageMirror.KindOf(stack.Item);
         if (kind == 0)
             return Task.FromResult(EquipResult.Fail(ItemsStatus.Refused, player, null, false, slot, $"{stack.Item} is no arrow or spell", false));
-        foreach (var row in (string[])[Items.Caps.Move, Items.Caps.Equip])
-            if (!Capabilities.Is(row)) throw ServiceCaps.Unavailable(row);
+        if (!PlayerStorageActivation.Hooked)
+            foreach (var row in (string[])[Items.Caps.Move, Items.Caps.Equip])
+                if (!Capabilities.Is(row)) throw ServiceCaps.Unavailable(row);
         var holder = EntityOf(player);
         return PlayerStorageActivation.Run(this, player, holder, slot, stack, kind);
     }
 
-    // the stack Activate last moved into the backpack, per player and kind: it goes back at the next Activate
+    // the stack Activate last moved into the backpack, per player and kind: it goes back at the next Activate; and the
+    // activations under way (tick thread)
     internal readonly Dictionary<(uint Player, AmmoKinds Kind), (SlotId Cell, ItemId Item)> Activated = [];
+    internal readonly HashSet<(uint Player, AmmoKinds Kind)> Activating = [];
 
     /// <summary>Where the storage stands for <paramref name="player"/>. Any thread.</summary>
     [AnyThread]
@@ -666,35 +670,77 @@ public sealed class PlayerStorageClientChangedEvent : KilnEvent
 }
 
 // Activate's steps (outside the unsafe Items class: C# allows no await in an unsafe context). Each runs on the tick thread
-// one step after the one before, as the storage's mod.
+// one step after the one before, as the storage's mod; one at a time per player and equipment slot.
 internal static class PlayerStorageActivation
 {
     /// <summary>Tests: kiln.items' move and equip (the test kit has neither); null: Items.Move and Items.Equip.</summary>
     internal static Func<EntityId, SlotId, EntityId, int, MoveOptions, Task<MoveResult>>? MoveHook;
     internal static Func<EntityId, SlotId, EquipmentSlot, Task<EquipResult>>? EquipHook;
 
+    /// <summary>Tests: the hooks stand in for items.move and items.equip.</summary>
+    internal static bool Hooked => MoveHook is not null && EquipHook is not null;
+
     public static async Task<EquipResult> Run(PlayerStorage storage, EntityId player, EntityId holder, SlotId slot, InventorySlot stack, AmmoKinds kind)
     {
         var equipSlot = kind == AmmoKinds.Arrow ? EquipmentSlot.Arrow : EquipmentSlot.Spell;
-        var mod = ModContext.CurrentMod;
-        var moved = await As(mod, () => Items.Move(holder, slot, player));
-        if (!moved.Succeeded || moved.Changes.Count == 0)
-            return EquipResult.Fail(moved.Succeeded ? ItemsStatus.Refused : moved.Status, player, equipSlot, false, slot,
-                $"the stack did not move into the backpack: {(moved.Message.Length > 0 ? moved.Message : moved.Status.ToString())}", false);
-        var cell = moved.Changes[0].To;
-        var equipped = await As(mod, () => Items.Equip(player, cell, equipSlot));
-        if (!equipped.Ok) return equipped;
         var key = (player.Value, kind);
-        if (storage.Activated.TryGetValue(key, out var before) && before.Cell != cell && before.Item != stack.Item &&
-            Items.Read(player)?.Slots.FirstOrDefault(s => s.Slot == before.Cell) is { IsEmpty: false } old && old.Item == before.Item)
+        if (!storage.Activating.Add(key))
+            return EquipResult.Fail(ItemsStatus.Refused, player, equipSlot, false, slot,
+                $"another Activate of {storage.FullKey} for this player's {equipSlot} slot is under way", false);
+        // Every await below comes back to the tick thread through the mod's scheduler: the caller may be one of Kiln's own
+        // passes (a pick from the player's game), which have no synchronization context, and kiln.items completes its
+        // tasks off the step. The async builder gives the caller its own context back when this method first returns.
+        var mod = ModContext.CurrentMod ?? storage.Mod;
+        if (mod is not null) SynchronizationContext.SetSynchronizationContext(mod.Scheduler.SynchronizationContext);
+        try
         {
-            var back = await As(mod, () => Items.Move(player, before.Cell, holder, 0, MoveOptions.Equipped));
-            if (!back.Succeeded)
-                Backend.Current.Log(storage.Owner, LogLevel.Info, $"player-storage: {storage.FullKey}: the stack activated before stays in the backpack ({back})");
+            var moved = await As(mod, () => Move(holder, slot, player, 0, MoveOptions.None));
+            if (!moved.Succeeded || moved.Changes.Count == 0)
+                return EquipResult.Fail(moved.Succeeded ? ItemsStatus.Refused : moved.Status, player, equipSlot, false, slot,
+                    $"the stack did not move into the backpack: {(moved.Message.Length > 0 ? moved.Message : moved.Status.ToString())}", false);
+            var cell = moved.Changes[0].To;
+            var equipped = await As(mod, () => Equip(player, cell, equipSlot));
+            if (!equipped.Ok)
+            {
+                await PutBack(storage, mod, player, holder, moved.Changes);
+                return equipped;
+            }
+            if (storage.Activated.TryGetValue(key, out var before) && before.Cell != cell && before.Item != stack.Item &&
+                Items.Read(player)?.Slots.FirstOrDefault(s => s.Slot == before.Cell) is { IsEmpty: false } old && old.Item == before.Item)
+            {
+                var back = await As(mod, () => Move(player, before.Cell, holder, 0, MoveOptions.Equipped));
+                if (!back.Succeeded)
+                    Backend.Current.Log(storage.Owner, LogLevel.Info, $"player-storage: {storage.FullKey}: the stack activated before stays in the backpack ({back})");
+            }
+            storage.Activated[key] = (cell, stack.Item);
+            return equipped;
         }
-        storage.Activated[key] = (cell, stack.Item);
-        return equipped;
+        finally
+        {
+            storage.Activating.Remove(key);
+        }
     }
+
+    // The equip failed after the move: what the move put into the backpack goes back into the storage, and no more (a
+    // stack it topped up keeps the player's own items). What cannot go back stays in the backpack, logged.
+    private static async Task PutBack(PlayerStorage storage, ModContext? mod, EntityId player, EntityId holder, IReadOnlyList<MoveChange> changes)
+    {
+        foreach (var c in changes)
+        {
+            var now = Items.Read(player)?.Slots.FirstOrDefault(s => s.Slot == c.To);
+            var n = now is { IsEmpty: false } && now.Item == c.Item ? Math.Min(c.Amount, now.Count) : 0;
+            if (n <= 0) continue;
+            var back = await As(mod, () => Move(player, c.To, holder, n, MoveOptions.Equipped));
+            if (!back.Succeeded)
+                Backend.Current.Log(storage.Owner, LogLevel.Info, $"player-storage: {storage.FullKey}: the equip failed and {n} of {c.Item} stay in the backpack ({back})");
+        }
+    }
+
+    private static Task<MoveResult> Move(EntityId from, SlotId slot, EntityId to, int count, MoveOptions options) =>
+        MoveHook is { } hook ? hook(from, slot, to, count, options) : Items.Move(from, slot, to, count, options);
+
+    private static Task<EquipResult> Equip(EntityId player, SlotId from, EquipmentSlot slot) =>
+        EquipHook is { } hook ? hook(player, from, slot) : Items.Equip(player, from, slot);
 
     // a step's request as the mod that asked (an await continuation runs with no mod on the thread)
     private static Task<T> As<T>(ModContext? mod, Func<Task<T>> request)
