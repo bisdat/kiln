@@ -67,6 +67,14 @@ pub fn from_value(v: Value) -> Result<Export> {
     Ok(e)
 }
 
+/// The entries that hold a field (`<registry>.<field>`): its value is there and not null. None when the export has no such
+/// registry (it cannot say).
+pub fn holders(e: &Export, qualified: &str) -> Option<Vec<String>> {
+    let (registry, field) = qualified.split_once('.')?;
+    let entries = e.registries.get(registry)?;
+    Some(entries.iter().filter(|(_, v)| v.get(field).is_some_and(|x| !x.is_null())).map(|(k, _)| k.clone()).collect())
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct FieldChange {
     pub registry: String,

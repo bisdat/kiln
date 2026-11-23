@@ -177,7 +177,8 @@ another Kiln mapping than the one installed"): an edit of regmap/common needs a 
 { "format": 1, "kind": "registry-roundtrip", "side": "server", "exeSha256": "<sha256>", "generation": "live",  // live | boot
   "regmapDigest": "<sha256>",                                        // the regmap/common the run used (below)
   "constants": { "gear.seed": 10, "gear.creep": 0.15, "gear.armorOffset": 23, "gear.armorGradient": 15 },
-  "kinds": { "items.manaCost": { "sint32": 141, "float": 0, "unknown": 0 } },   // live: impact config kinds per row
+  "kinds": { "items.manaCost": { "sint32": 138, "float": 0, "unknown": 0, "notInWorld": 55 } },   // live: impact config kinds per row
+  "notInWorld": { "items.manaCost": ["game:...", ...] },             // live: the entries counted notInWorld
   "unsampled": { "drops.entries": "no drop table was loaded in the lab's world (...)" },  // live: why, in Kiln words
   "samples": [ { "field": "items.maxStack", "entry": "game:...", "element": null,     // element: a list element's index
                  "read": 20, "probe": 21, "readBack": 21,                            // through the schema
@@ -189,8 +190,14 @@ name, a bitmask's list of game names, an optional enum's [switch, name]. A probe
 read-only field is read, never written; the bytes are the entry's resource before the write and after the revert.
 
 For `impactConfig` rows the live producer identifies the raw config type, never guesses it from a whole value, and
-counts every entry of the id table per config kind (the suite's `"kinds": {"items.manaCost": {"sint32": 141, "float": 0,
-"unknown": 0}}`; `unknown`: the entry holds the value but its kind cannot be read). Evidence is required only for the kinds
+counts every entry of the id table per config kind (the suite's `"kinds": {"items.manaCost": {"sint32": 138, "float": 0,
+"unknown": 0, "notInWorld": 55}}`; `unknown`: the entry holds the value but its kind cannot be read; `notInWorld`: the entry
+is in the id table but not in the lab's world, so nothing reads it, and its id is listed under `"notInWorld"`). kilnctl
+compares the counts with the values export (review3 S1): every entry the export holds the value for must be counted in a
+kind or listed as not in the world. Entries not in the world do not block a live row (no edit reaches them on this build;
+the record says how many, e.g. `"notInWorld": "3 entries not in the lab's world ..."`), but do block a boot row; any other
+difference between the counts and the export, or a missing export, counts as unknown and
+leaves the row unproven. Evidence is required only for the kinds
 the build has (coordinator ruling, 2026-11-23): Sint32 configs need a Sint32 whole-number round trip and a fractional Sint32
 probe refused without changing the value or bytes; float configs need a float-config fractional round trip. A kind with no
 entry is recorded in the record's `"kinds"` as "none on this build" and does not block the row (a later build that has it

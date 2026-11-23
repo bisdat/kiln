@@ -161,7 +161,7 @@ pub fn prove(inp: &Inputs, when: &str) -> Proof {
         _ => {}
     }
     // 3. round trip (before the formulas: they use its samples)
-    p.roundtrip = roundtrip::check(&inp.map, &inp.side, &inp.new_exe_sha, &inp.regmap_digest, &inp.suites);
+    p.roundtrip = roundtrip::check(&inp.map, &inp.side, &inp.new_exe_sha, &inp.regmap_digest, &inp.suites, inp.values_new.as_ref());
     if !p.roundtrip.complete {
         p.blockers.push(format!("the round-trip suite is incomplete: no {} generation of this build (the lab's proof producer writes one per generation)",
                                 p.roundtrip.missing.join(" and no ")));
@@ -1517,13 +1517,16 @@ mod tests {
                                 "refusalReason": "not_exact: plans.cap is a whole number on this build", "readBack": 2, "rawAfter": [2]}));
         inp.suites[1].samples.retain(|x| x.field != "plans.cap");
         inp.suites[0].samples.extend([whole, refused]);
+        // the values export holds the cost for as many entries as the lab counts (review3 S1)
+        inp.values_new.as_mut().unwrap().registries.insert("plans".into(),
+            (0..141).map(|i| (format!("game:p{i}"), [("cap".to_string(), json!(2))].into())).collect());
         // the old producer (no counts): unproven, and the reason is not "no lab round trip"
         let p = prove(&inp, "T");
         let r = &p.rows["plans.cap"];
         assert_eq!(r.state, "unproven", "{r:?}");
         assert!(!r.reason.as_deref().unwrap_or_default().contains("no lab round trip"), "{r:?}");
         // the build has float configs the lab did not round-trip
-        inp.suites[0].kinds.insert("plans.cap".into(), [("sint32".to_string(), 141), ("float".to_string(), 2)].into());
+        inp.suites[0].kinds.insert("plans.cap".into(), [("sint32".to_string(), 139), ("float".to_string(), 2)].into());
         let r = prove(&inp, "T").rows["plans.cap"].clone();
         assert_eq!(r.state, "unproven");
         assert_eq!(r.reason.as_deref(), Some("fractional values are not proven on this build yet: no lab round trip of a fractional cost"));
