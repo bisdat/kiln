@@ -2,6 +2,8 @@ import { afterEach, expect, test } from 'bun:test';
 import { registerLocale, setLanguage } from '../src/i18n';
 import { itemName, skillName, nomeConhecimento, items } from '../src/editor/src/gamedata.js';
 import { setGameNames, gameName, gameLanguage } from '../src/editor/kiln/game-names.js';
+// @ts-ignore: mounted editor components are plain JavaScript.
+import { allItems, filterItems } from '../src/editor/kiln/Catalog.jsx';
 
 const table = { format: 1, languages: {
   'en-us': { items: { '61577244': 'Game Diamond' }, skills: { '29426941': 'Game Hook' }, knowledge: { '40769': 'Game Recipe' } },
@@ -30,6 +32,19 @@ test('falls back to game English, then the existing table, including without ext
   expect(nomeConhecimento({ n: 'old flag' }, 42)).toBe('old flag');
   setGameNames(null);
   expect(itemName(61577244)).toBe(items[61577244].en);
+});
+
+test('catalog matches width variants and Latin accents without changing displayed names', () => {
+  registerLocale('ja', {}); setLanguage('ja');
+  setGameNames({ format: 1, languages: {
+    'ja-jp': { items: { 61577244: 'テスト ＡＢＣ ｶﾀｶﾅ' } },
+    'en-us': { items: { 61577244: 'Fixture Café' } },
+  } });
+  const all = allItems();
+  for (const q of ['abc', 'カタカナ', 'cafe', 'CAFÉ']) {
+    expect(filterItems(all, { q }).map((it: { id: number }) => it.id)).toContain(61577244);
+  }
+  expect(all.find((it: { id: number }) => it.id === 61577244).name).toBe('テスト ＡＢＣ ｶﾀｶﾅ');
 });
 
 test('missing, blank and invalid tables do not displace fallback names', () => {

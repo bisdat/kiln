@@ -10,6 +10,7 @@ import { t, useLanguage } from '../../i18n';
 import { t as tv, localeAtual } from '../src/i18n.js';
 import { useEditorEnv } from './env.jsx';
 import { readOnly } from './session.js';
+import { gameSearch } from './game-names.js';
 
 const KIND = { i: 'editor.knowledge.kinds.item', r: 'editor.knowledge.kinds.recipe', o: 'editor.knowledge.kinds.misc' };
 // upstream's state words (shared/knowledge.mjs) are Portuguese keys: tv words them in the launcher's language
@@ -45,11 +46,11 @@ export default function Knowledge({ model, setModel }) {
   // A selection belongs to the current filter, never to rows the player can no longer see.
   const filter = (setter, value) => { setter(value); setSel(new Set()); setAsk(false); };
   const list = useMemo(() => {
-    const n = Number(above), s = q.trim().toLowerCase();
+    const n = Number(above), s = gameSearch(q.trim());
     return (model.knowledge ?? [])
       .map((k) => ({ ...k, info: map[k.id], ...naming(map[k.id], k.id) }))
       .filter((k) => kinds.includes(k.info?.t ?? 'o') && (above === '' || (k.info?.l ?? 0) > n)
-        && (!s || (k.name ?? '').toLowerCase().includes(s) || englishKnowledgeName(k.info, k.id).toLowerCase().includes(s) || (k.raw ?? '').toLowerCase().includes(s) || String(k.id).includes(s)))
+        && (!s || gameSearch(k.name).includes(s) || gameSearch(englishKnowledgeName(k.info, k.id)).includes(s) || gameSearch(k.raw).includes(s) || String(k.id).includes(s)))
       .sort((a, b) => (b.info?.l ?? 0) - (a.info?.l ?? 0) || (a.name ?? '').localeCompare(b.name ?? '', localeAtual()));
   }, [model.knowledge, q, above, kinds, language]);
   if (!model.knowledge) return <div className="ke-empty"><span className="ke-empty-word">{t('editor.knowledge.noBlock')}</span></div>;

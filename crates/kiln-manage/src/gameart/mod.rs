@@ -250,30 +250,47 @@ pub(crate) fn clean_leftovers(dest: &Path) {
         for e in rd.flatten() {
             let n = e.file_name().to_string_lossy().into_owned();
             if n.starts_with(".extract-") || n.starts_with(".old-") {
-                let _ = std::fs::remove_dir_all(e.path());
+                let _ = std::fs::remove_dir_all(e.path()).or_else(|_| std::fs::remove_file(e.path()));
             }
         }
     }
 }
 
-/// Moves `staging/<d>` over `dest/<d>` for each folder (the old one is removed after the swap).
+/// Replaces a generation's staged files/folders, retaining the old paths until every move succeeds.
 pub(crate) fn swap_in(staging: &Path, dest: &Path, dirs: &[&str]) -> Result<()> {
     let stamp = std::process::id();
-    for d in dirs {
-        let new = staging.join(d);
-        let cur = dest.join(d);
-        if !new.exists() {
-            std::fs::create_dir_all(&new).map_err(crate::util::io_at(&new, "creating"))?;
+    let mut moved = Vec::new();
+    let result = (|| {
+        for d in dirs {
+            let new = staging.join(d);
+            let cur = dest.join(d);
+            if !new.exists() {
+                std::fs::create_dir_all(&new).map_err(crate::util::io_at(&new, "creating"))?;
+            }
+            let old = dest.join(format!(".old-{d}-{stamp}"));
+            let had_old = cur.exists();
+            if had_old && cur.is_dir() != new.is_dir() {
+                return Err(Error::new(ErrorCode::Conflict, "Game art cache entry has the wrong type.").with_detail(cur.display().to_string()));
+            }
+            if had_old {
+                std::fs::rename(&cur, &old).map_err(crate::util::io_at(&cur, "moving"))?;
+            }
+            // Keep every old directory until the complete generation (including names) is installed.
+            moved.push((new.clone(), cur.clone(), old, had_old, false));
+            std::fs::rename(&new, &cur).map_err(crate::util::io_at(&cur, "replacing"))?;
+            moved.last_mut().unwrap().4 = true;
         }
-        let old = dest.join(format!(".old-{d}-{stamp}"));
-        if cur.exists() {
-            std::fs::rename(&cur, &old).map_err(crate::util::io_at(&cur, "moving"))?;
+        Ok(())
+    })();
+    if result.is_err() {
+        for (new, cur, old, had_old, installed) in moved.into_iter().rev() {
+            if installed { let _ = std::fs::rename(&cur, &new); }
+            if had_old { let _ = std::fs::rename(&old, &cur); }
         }
-        if let Err(e) = std::fs::rename(&new, &cur) {
-            let _ = std::fs::rename(&old, &cur);
-            return Err(crate::util::io_at(&cur, "replacing")(e));
-        }
-        let _ = std::fs::remove_dir_all(&old);
+        return result;
+    }
+    for (_, _, old, had_old, _) in moved {
+        if had_old { let _ = std::fs::remove_dir_all(&old).or_else(|_| std::fs::remove_file(&old)); }
     }
     Ok(())
 }
@@ -328,14 +345,13 @@ pub fn extract_editor(
         }
         if p.canceled() { return Err(Error::new(ErrorCode::Canceled, "Canceled.")); }
         p.report(Some(0.99), "Putting the art in place");
-        swap_in(&staging, dest, &EDITOR_DIRS)?;
         // guid -> icon name of every item icon (the mod overlay resolves GUID icon aliases with it)
         let index: std::collections::BTreeMap<String, String> = textures
             .iter()
             .filter(|t| t.key.part == 0 && t.name.ends_with("_icon") && editor::safe_name(&t.name))
             .map(|t| (t.key.guid_text(), t.name.trim_end_matches("_icon").to_string()))
             .collect();
-        crate::util::write_json_atomic(&dest.join(modded::ICON_INDEX), &index)?;
+        crate::util::write_json_atomic(&staging.join(modded::ICON_INDEX), &index)?;
         let mut problems: Vec<String> = plan.missing.clone();
         problems.extend(rep.failed.iter().cloned());
         problems.extend(name_problem);
@@ -359,7 +375,10 @@ pub fn extract_editor(
             tool: Some(format!("kiln-manage {} gameart", crate::VERSION)),
             problems,
         };
-        write_source(dest, &info)?;
+        write_source(&staging, &info)?;
+        let mut paths = EDITOR_DIRS.to_vec();
+        paths.extend([modded::ICON_INDEX, SOURCE_FILE]);
+        swap_in(&staging, dest, &paths)?;
         Ok(info)
     })();
     let _ = std::fs::remove_dir_all(&staging);

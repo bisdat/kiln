@@ -163,6 +163,7 @@ fn read_loca_inner(s: &Src, all_languages: bool) -> Result<Loca> {
     let mut languages = Vec::new();
     let mut en = BTreeMap::new();
     let mut tables = BTreeMap::new();
+    let mut last_error = None;
     for (i, l) in v["languages"].as_array().cloned().unwrap_or_default().iter().enumerate() {
         let name = l["language"].as_str().map(str::to_string).unwrap_or_else(|| format!("lang{i}"));
         let code = lang_code(&name);
@@ -172,13 +173,21 @@ fn read_loca_inner(s: &Src, all_languages: bool) -> Result<Loca> {
                 size: h["size"].as_u64().unwrap_or(0) as u32,
                 h: [h["hash0"].as_u64().unwrap_or(0) as u32, h["hash1"].as_u64().unwrap_or(0) as u32, h["hash2"].as_u64().unwrap_or(0) as u32],
             };
-            let table = loca_table(&s.kfc.read_content(&ch)?, id_off, text_off, stride)?;
+            let table = match s.kfc.read_content(&ch).and_then(|blob| loca_table(&blob, id_off, text_off, stride)) {
+                Ok(table) => table,
+                // An unavailable language must not discard the healthy languages (especially English).
+                Err(e) if all_languages => { last_error = Some(e); continue; }
+                Err(e) => return Err(e),
+            };
             if en.is_empty() || code == "en-us" {
                 en = table.clone();
             }
             if all_languages { tables.insert(code.clone(), table); }
         }
         languages.push(code);
+    }
+    if all_languages && tables.is_empty() {
+        if let Some(e) = last_error { return Err(e); }
     }
     Ok(Loca { en, languages, tables })
 }

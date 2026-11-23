@@ -395,6 +395,11 @@ mod build {
 
     /// Items, perks, templates, a skill tree, buffs, recipes, loca; reflection for exactly those fields.
     pub fn fake_game(dir: &Path) {
+        fake_game_languages(dir, 0);
+    }
+
+    // 0: healthy only, 1: missing second language content, 2: malformed second language content.
+    fn fake_game_languages(dir: &Path, broken_language: u8) {
         use super::super::decode::*;
         let mut t = vec![
             rec("keen::uint8", 1, K_U8),
@@ -601,7 +606,14 @@ mod build {
         let mut coll = Blob::new(40);
         let mut lang = vec![0u8; 40];
         lang[8..24].copy_from_slice(&loca_hash.to_bytes());
-        coll.array(0x20, &lang, 1);
+        let bad_hash = ContentHash { size: 4, h: [4, 5, 6] };
+        if broken_language != 0 {
+            let mut broken = vec![0u8; 40];
+            broken[..4].copy_from_slice(&1u32.to_le_bytes()); // de-DE
+            broken[8..24].copy_from_slice(&bad_hash.to_bytes());
+            lang.extend_from_slice(&broken);
+        }
+        coll.array(0x20, &lang, if broken_language != 0 { 2 } else { 1 });
 
         let item = |n: u8, id: u32, name_tag: u8, dbg: &str, cat: u8| {
             let mut b = Blob::new(0x40);
@@ -745,7 +757,9 @@ mod build {
         ];
         // layout hashes as the exe's records have them (0, ItemInfo 0x07009d37): exe and data of one build
         let layouts: Vec<(u32, u32)> = res.iter().map(|r| (r.type_hash, if r.type_hash == th("keen::ItemInfo") { 0x0700_9d37 } else { 0 })).collect();
-        build_kfc(dir, "enshrouded", "4242|^/test|2026-11-04T00:00:00Z", &res, &[(loca_hash, lb.0.clone())], &layouts);
+        let mut contents = vec![(loca_hash, lb.0.clone())];
+        if broken_language == 2 { contents.push((bad_hash, vec![0u8; 4])); }
+        build_kfc(dir, "enshrouded", "4242|^/test|2026-11-04T00:00:00Z", &res, &contents, &layouts);
     }
 
     struct Tmp(PathBuf);
@@ -760,6 +774,18 @@ mod build {
     impl Drop for Tmp {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn editor_names_keep_healthy_languages_when_another_table_is_unreadable() {
+        for broken_language in [1, 2] {
+            let game = Tmp::new("broken-language");
+            fake_game_languages(&game.0, broken_language);
+            let src = super::super::extract::Src::open(&game.0).unwrap();
+            let tables = super::super::extract::read_loca_all(&src).unwrap();
+            assert!(!tables["en-us"][&0x77].is_empty());
+            assert!(!tables.contains_key("de-de"));
         }
     }
 

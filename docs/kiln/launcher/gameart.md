@@ -108,12 +108,20 @@ knowledge flags have no shipped display name; they keep the editor's existing la
 The names folder is staged and swapped alongside icons, UI and fonts; `.source.json` records `nameLanguages` and
 includes the names in its byte count. Recipe 3 makes older art outdated so `useExtractTask` prepares names too.
 If the text layout is unsupported, extraction still makes art, records the problem, and drops stale cached names.
-Canceled extraction leaves the old names and art alone.
+Canceled extraction leaves the old names and art alone. If one language's content is unreadable, the other languages
+remain available and the missing language falls back normally. The icon index and `.source.json` are staged too;
+a swap failure rolls back the whole generation, including its metadata.
 
 Both editor shells load the table through the existing `kiln-asset` protocol before mounting their views. Names use
 the launcher's current locale (`de` → `de-de`, `zh-CN` → `zh-cn`, etc.), then the game's English, then the existing
 editor table (including its Portuguese/English fallback). No extraction behaves as before. Add item and Knowledge
 search the displayed name and English; the catalog also retains its existing Portuguese/debug-name search.
+Search folds case, compatibility width forms and Latin accents without changing the displayed text or saved ids.
+
+### Editor names changelog
+- **0.2.0-dev.30.6:** The save editor uses item, skill and recipe names from the installed game in the launcher's
+  language, with English and legacy fallbacks. Thanks to MagicFox (XHL), Kiln's Simplified Chinese translator, for
+  requesting this improvement.
 
 ### Check against the Save Editor's own set (client 26430625)
 - Files: the editor ships 4,587; this extraction writes 5,235 (4,367 icons, 793 UI, 51 tinted, 12 fonts, + the

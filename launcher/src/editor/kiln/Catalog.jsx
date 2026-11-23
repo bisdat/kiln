@@ -12,6 +12,7 @@ import { items, newEntry, itemName, englishItemName } from '../src/gamedata.js';
 import { rarityColor } from '../src/ui.js';
 import { t, useLanguage } from '../../i18n';
 import { localeAtual } from '../src/i18n.js';
+import { gameSearch } from './game-names.js';
 import { Slot, Stepper, categoryWord, iconOf, rarityWord, tierOf } from './parts.jsx';
 import { aboveStack, amountLimit, MAX_AMOUNT } from './amounts.js';
 import { gridKey, radioKey, useEditorEnv } from './env.jsx';
@@ -39,13 +40,13 @@ export const allItems = () => {
     // dyes (ColorPalette) are ordinary backpack stacks the player carries; Customization entries are unlocks the game
     // keeps elsewhere, so the editor never adds those as items
     .filter(([, it]) => it.category !== 'Customization' && (it.pt || it.en))
-    .map(([id, it]) => ({ id: Number(id), ...it, name: itemName(id), r: BASE_RARITY[it.rarity] || 1, tier: tierOf(Number(id)), q: `${itemName(id)} ${englishItemName(id)} ${it.pt || ''} ${it.en || ''} ${it.debug}`.toLowerCase() }))
+    .map(([id, it]) => ({ id: Number(id), ...it, name: itemName(id), r: BASE_RARITY[it.rarity] || 1, tier: tierOf(Number(id)), q: gameSearch(`${itemName(id)} ${englishItemName(id)} ${it.pt || ''} ${it.en || ''} ${it.debug}`) }))
     .sort((a, b) => by(a.name, b.name));
 };
 /** The catalog's items with a search and filters, in the list's (name) order. */
 export function filterItems(all, { cat = 'all', q = '', rar = 0, tier = 0 }) {
   const f = CATEGORIES.find((c) => c[0] === cat)[2];
-  const s = q.trim().toLowerCase();
+  const s = gameSearch(q.trim());
   return all.filter((it) => f(it) && (!s || it.q.includes(s)) && (!rar || it.r === rar) && (!tier || it.tier === tier));
 }
 const LIMIT = 280;
