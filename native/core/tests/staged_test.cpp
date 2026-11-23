@@ -1116,6 +1116,148 @@ static void test_crash_points() {
     crash_everywhere(kiln_auto);
 }
 
+// ---- review of 30.9 (round 5) ----
+// Journals copied at named steps of a change (test_replayed_journals): the "applying" one and the "committed" one.
+static fs::path g_tap_game;
+static std::string g_tap_applying, g_tap_committed;
+static void tap_hook(const char* step) {
+    const fs::path j = staged(g_tap_game) / "tx" / "kiln" / "journal.json";
+    if (std::strcmp(step, "journal") == 0) g_tap_applying = read(j);
+    if (std::strcmp(step, "commit") == 0) g_tap_committed = read(j);
+}
+
+static void test_replayed_journals() {
+    // An "applying" journal from another time put back next to the files of the change it describes, which has long
+    // finished: putting back only the steps that still look like its own would take out kiln/host/new.dll (added) and
+    // leave the replaced files new, a mix of two versions. It is not followed at all.
+    const fs::path g = fresh("replay-applying");
+    setup_kiln(g);
+    g_tap_game = g;
+    g_step_hook = &tap_hook;
+    Log l1;
+    Summary s = boot(Kind::Kiln, g, &l1);
+    g_step_hook = nullptr;
+    CHECK_MSG(s.applied == 1 && kiln_view(g) == kiln_new() && !g_tap_applying.empty() && !g_tap_committed.empty(), l1.all());
+    CHECK(confirm_kiln(g));
+    put(staged(g) / "tx" / "kiln" / "journal.json", g_tap_applying);
+    Log l2;
+    s = boot(Kind::Kiln, g, &l2);
+    CHECK_MSG(kiln_view(g) == kiln_new(), l2.all());
+    CHECK_MSG(l2.has("does not match the files") && s.rolled_back == 0 && s.applied == 0, l2.all());
+    CHECK(there(staged(g) / "tx" / "kiln" / "journal.json"));  // left for a person to look at
+    fs::remove_all(g);
+
+    // A "committed" journal whose tidying-up a start could not finish, then that start booted the new Kiln ("booting") and
+    // crashed: the next start finishes the change again and must keep "booting", so the automatic rollback still comes.
+    const fs::path g2 = fresh("replay-committed");
+    setup_kiln(g2);
+    g_tap_game = g2;
+    g_step_hook = &tap_hook;
+    boot(Kind::Kiln, g2, nullptr);
+    g_step_hook = nullptr;
+    CHECK(read_json(staged(g2) / "probation" / "kiln.json").value("state", "") == "booting");
+    put(staged(g2) / "tx" / "kiln" / "journal.json", g_tap_committed);
+    Log l3;
+    s = boot(Kind::Kiln, g2, &l3);
+    CHECK_MSG(s.recovered == 1 && s.rolled_back == 1 && kiln_view(g2) == kiln_old(), l3.all());
+    CHECK_MSG(l3.has("did not get as far as loading the mods"), l3.all());
+    fs::remove_all(g2);
+
+    // A mod whose committed journal is finished again keeps Kiln.Host's "failed": rolled back once
+    const fs::path g3 = fresh("replay-committed-mod");
+    write_tree(g3 / "kiln" / "mods" / "m", mod_files("m", "1.0.0"));
+    stage_mod(g3, "m", "m", "2.0.0", mod_files("m", "2.0.0"));
+    std::string committed;
+    g_tap_game = g3;
+    g_step_hook = [](const char* step) {
+        if (std::strcmp(step, "commit") == 0) g_tap_committed = read(staged(g_tap_game) / "tx" / "mod.m" / "journal.json");
+    };
+    boot(Kind::Mods, g3, nullptr);
+    g_step_hook = nullptr;
+    committed = g_tap_committed;
+    json p = read_json(staged(g3) / "probation" / "mod.m.json");
+    p["state"] = "failed";
+    p["error"] = "OnLoad threw";
+    put(staged(g3) / "probation" / "mod.m.json", p.dump());
+    put(staged(g3) / "tx" / "mod.m" / "journal.json", committed);
+    Log l4;
+    s = boot(Kind::Mods, g3, &l4);
+    CHECK_MSG(s.rolled_back == 1 && mod_view(g3) == mod_files("m", "1.0.0"), l4.all());
+    // and an update staged after the change, next to that journal, stays staged
+    const fs::path g4 = fresh("replay-keeps-new-staging");
+    write_tree(g4 / "kiln" / "mods" / "m", mod_files("m", "1.0.0"));
+    stage_mod(g4, "m", "m", "2.0.0", mod_files("m", "2.0.0"));
+    boot(Kind::Mods, g4, nullptr);
+    stage_mod(g4, "m", "m", "3.0.0", mod_files("m", "3.0.0"));
+    put(staged(g4) / "tx" / "mod.m" / "journal.json", committed);
+    Log l5;
+    boot(Kind::Mods, g4, &l5);
+    CHECK_MSG(mod_view(g4) == mod_files("m", "3.0.0"), l5.all());
+    fs::remove_all(g3);
+    fs::remove_all(g4);
+}
+
+static void test_deep_json() {
+    // A record nested a million deep (damage, or a hand-made file) is refused before it is parsed: never a crash of the
+    // proxy on the game's main thread, at every start.
+    const std::string deep = std::string(1000000, '[') + std::string(1000000, ']');
+    const fs::path g = fresh("deep-json");
+    setup_kiln(g);
+    boot(Kind::Kiln, g, nullptr);
+    put(staged(g) / "probation" / "kiln.json", "{\"unit\":\"kiln\",\"state\":\"booting\",\"x\":" + deep + "}");
+    Log l1;
+    boot(Kind::Kiln, g, &l1);
+    CHECK_MSG(l1.has("nested deeper than 64 levels") && !there(staged(g) / "probation" / "kiln.json"), l1.all());
+    CHECK(kiln_view(g) == kiln_new());
+    put(staged(g) / "tx" / "kiln" / "journal.json", "{\"format\":1,\"x\":" + deep + "}");
+    Log l2;
+    const Summary s = boot(Kind::Kiln, g, &l2);
+    CHECK_MSG(s.failed == 1 && l2.has("cannot be used") && kiln_view(g) == kiln_new(), l2.all());
+    fs::remove_all(g);
+    // 64 levels still read
+    const fs::path g2 = fresh("deep-json-64");
+    write_tree(g2 / "kiln" / "mods" / "m", mod_files("m", "1.0.0"));
+    stage_mod(g2, "m", "m", "2.0.0", mod_files("m", "2.0.0"), [](json& doc) {
+        json v = json::array();
+        for (int i = 0; i < 62; ++i) v = json::array({v});
+        doc["deep"] = v;  // 1 (the object) + 63 arrays
+    });
+    Log l3;
+    CHECK_MSG(boot(Kind::Mods, g2, &l3).applied == 1, l3.all());
+    fs::remove_all(g2);
+}
+
+#ifndef _WIN32
+static void test_staged_is_a_link() {
+    // kiln/staged itself a link (a junction on Windows) to a folder elsewhere: nothing staged there is applied, nothing
+    // there is removed, and the unit stays as it is
+    const fs::path g = fresh("staged-link");
+    write_tree(g / "kiln" / "mods" / "m", mod_files("m", "1.0.0"));
+    const fs::path elsewhere = g / "elsewhere";
+    fs::create_directories(elsewhere);
+    fs::create_directory_symlink(elsewhere, staged(g));
+    stage_mod(g, "m", "m", "2.0.0", mod_files("m", "2.0.0"));
+    fs::create_directories(elsewhere / ".stage-0011223344556677" / "files");
+    Log log;
+    const Summary s = boot(Kind::Mods, g, &log);
+    CHECK_MSG(s.applied == 0 && s.failed == 1 && log.has("must be a plain folder"), log.all());
+    CHECK(mod_view(g) == mod_files("m", "1.0.0"));
+    CHECK(there(elsewhere / "mods" / "m" / "staged.json") && there(elsewhere / ".stage-0011223344556677"));
+    fs::remove_all(g);
+    // one of its folders a link: kiln/staged/previous (where a kept version would be renamed to)
+    const fs::path g2 = fresh("staged-previous-link");
+    write_tree(g2 / "kiln" / "mods" / "m", mod_files("m", "1.0.0"));
+    stage_mod(g2, "m", "m", "2.0.0", mod_files("m", "2.0.0"));
+    fs::create_directories(g2 / "other");
+    fs::create_directory_symlink(g2 / "other", staged(g2) / "previous");
+    Log l2;
+    const Summary s2 = boot(Kind::Mods, g2, &l2);
+    CHECK_MSG(s2.applied == 0 && l2.has("must be a plain folder") && mod_view(g2) == mod_files("m", "1.0.0"), l2.all());
+    CHECK(fs::is_empty(g2 / "other"));
+    fs::remove_all(g2);
+}
+#endif
+
 int main(int argc, char** argv) {
     g_free_bytes_hook = &fake_free;  // hermetic: a test volume's free space never decides (test_free_space sets it)
 #ifdef _WIN32
@@ -1154,6 +1296,11 @@ int main(int argc, char** argv) {
     test_bad_journals();
     test_misc();
     test_crash_points();
+    test_replayed_journals();
+    test_deep_json();
+#ifndef _WIN32
+    test_staged_is_a_link();
+#endif
 
     fs::remove_all(g_scratch);
     if (failures) {
