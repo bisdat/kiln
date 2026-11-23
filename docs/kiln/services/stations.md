@@ -43,6 +43,16 @@ every server frame (`PlayerBasesSystemServer`, up to 16) with, for each, the con
   does Kiln, and `Bases.Stock` does not count them (players will expect it to: say so in your mod).
 - **Water sources**: wells and water barrels that hold water now.
 
+`Bases.Chests(id)` (since 0.2.0-dev.31, GitHub issue #138) lists the base's chests, ordinary ones too: its crafting-stock
+containers (`InventoryOwnerKind.BaseStorage` in this base's list) and the containers of no proven kind
+(`InventoryOwnerKind.Unknown`, [items.md](items.md#inventory-owners-and-their-kinds-since-020-dev31)) that the game's own
+position lookup (`Bases.Of`) puts in this base; never a player, an NPC, a player's storage or a production station. Empty for
+an id no base has now. No component of the game tells a chest from another plain container and Kiln does not guess from
+names, so a non-chest container with an inventory would be listed too, as are the base's refilling fruit trees (in its
+crafting stock). Being listed grants nothing: check the player's permission yourself before taking from or depositing into
+a chest for them. It reads every container of the world and looks up each one's base: poll it every few seconds. Needs
+`stations.read` and `items.inventory_kinds`; server only, tick thread.
+
 ```csharp
 foreach (BaseInfo b in Bases.All)
     Log.Info($"{b} \"{b.Name}\"");                      // id, altars, storage, water, stations; the altar's name (read when asked)

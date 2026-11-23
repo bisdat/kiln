@@ -98,6 +98,7 @@ public sealed class ConformanceTests : ContractTest
         ["identity.players"] = "Kiln.Host's Capabilities.Start, following IdentitySources.Players",
         ["identity.entities"] = "Kiln.Host's Capabilities.Start, following the entity sources",
         ["saves.instance_data.sync"] = "Kiln.Saves (InstanceSync), with InstanceData's other rows",
+        ["items.inventory_kinds"] = "Kiln.Items at its start (Kiln.Blocks' Bases.Chests reads Items.FindInventoryOwners)",
         ["items.tool_wear_debit"] = "Kiln.Items, with its other rows (ToolBlock.WearPerDebit in Kiln.Blocks names it; the rule is Kiln.Items')",
         ["stationmenus.store"] = "Kiln.Content's StationMenuCaps, at its start (MenuBlock.Tabs and StationMenus.Define in Kiln.Blocks name it; the store is kiln.content's)",
     };

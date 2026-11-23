@@ -94,6 +94,9 @@ public static unsafe partial class Items
         /// <see cref="Items.SetArmor"/>.</summary>
         public const string GearArmor = "items.gear.armor";
 
+        /// <summary>Kiln.Items' row: the kiln.items.inventory_kinds table is here (<see cref="Items.FindInventoryOwners"/>).</summary>
+        public const string InventoryKinds = InventoryKindsCapability;
+
         // sigdb rows the ones above need
         public const string Transaction = "items.transaction";
         public const string Read = "items.read";
@@ -118,6 +121,7 @@ public static unsafe partial class Items
     private static void ReportCapabilities()
     {
         PlayerStorageRuntime.ReportCapabilities();  // kiln.items.storage is a table of its own: its rows do not follow kiln.items'
+        ReportInventoryKinds();                     // so is kiln.items.inventory_kinds (0.2.0-dev.31)
         RefreshGiveEquip();
         var t = T;  // Services.Get puts the reason on kiln.items when the table is missing or older
         if (t == null)
@@ -444,6 +448,20 @@ public static unsafe partial class Items
             if (Capabilities.Get(n) is { State: CapabilityState.Unavailable, Reason: not CapabilityReason.Unknown } row)
                 return (row.Reason, n == Caps.Service ? $"kiln.items is unavailable: {row.ReasonText}" : $"needs {n}: {row.ReasonText}");
         return (fallback, detail.Length > 0 ? detail : "kiln.items turned it off (see kiln.log)");
+    }
+
+    // items.inventory_kinds: the table of its own and kiln.items (its find runs find_inventories); fixed once reported.
+    private static void ReportInventoryKinds()
+    {
+        if (InventoryKindsNative.T != null && T != null)
+        {
+            Capabilities.Report(Caps.InventoryKinds, CapabilityState.Available);
+            return;
+        }
+        var (reason, text) = T == null
+            ? Cause(CapabilityReason.ServiceMissing, "kiln.items is not loaded", Caps.Service)
+            : (CapabilityReason.ServiceMissing, "kiln.items.inventory_kinds is not loaded (an older kiln-items.dll)");
+        Capabilities.Report(Caps.InventoryKinds, CapabilityState.Unavailable, reason, text);
     }
 
     // `name` is off although its sigdb row may say it resolved: kiln.items' own checks said no.

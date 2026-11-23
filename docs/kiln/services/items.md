@@ -104,7 +104,35 @@ await Items.TakeSlot(chest, inv.Slots[3]);                         // exactly wh
 
 // Containers in the world (one pass over the entities; tick thread)
 IReadOnlyList<EntityId> chests = Items.FindInventories(InventoryKinds.Containers | InventoryKinds.NonEmpty);
+
+// ... with what each one is, as far as Kiln can prove it (since 0.2.0-dev.31)
+foreach (var (entity, kind) in Items.FindInventoryOwners(InventoryKinds.Containers))
+    if (kind == InventoryOwnerKind.ProductionStation) Log.Info($"station {entity}");
 ```
+
+### Inventory owners and their kinds (since 0.2.0-dev.31)
+`Items.FindInventoryOwners(InventoryKinds kinds = InventoryKinds.Containers)` → `IReadOnlyList<InventoryOwnerInfo>`: the
+entities `FindInventories(kinds)` finds (the same flags and order; player storage holders only with
+`InventoryKinds.PlayerStorage`), each as `InventoryOwnerInfo(EntityId Entity, InventoryOwnerKind Kind)`. Server world, tick
+thread; capability `items.inventory_kinds` (`Items.InventoryKindsCapability`). `FindInventories` and `Bases.Storage` are
+unchanged. Thanks to Fuzen777 for the request (#138).
+
+`InventoryOwnerKind` is only what a component of the game or Kiln's own registry proves; Kiln never guesses from a
+template's name. The codes are stable and only ever added to (an unknown code reads as `Unknown`):
+
+| Code | Kind | Proven by |
+|---|---|---|
+| 0 | `Unknown` | nothing: ordinary storage chests are here (no component tells a chest from another plain container), and a base's storage while the game's bases cannot be read (`stations.read` off) |
+| 1 | `Player` | the game's `InventorySetup.inventoryFlags` IsPlayer |
+| 2 | `Npc` | `InventorySetup.inventoryFlags` IsNpc (a villager) |
+| 3 | `PlayerStorage` | a holder of `Items.RegisterPlayerStorage` (kiln.items.storage's registry) |
+| 4 | `ProductionStation` | the entity carries the game's `FactoryStation` (what `Stations` reads) |
+| 5 | `BaseStorage` | in a base's crafting stock as the game's `PlayerBasesSystemServer` lists it this frame (`Bases.Storage`): a Magic storage chest, or a player-planted refilling fruit tree or palm (the game marks both alike) |
+
+The first that holds, in this order. The base's chests, ordinary and Magic: `Bases.Chests(BaseId)`
+([stations.md](stations.md)). Native: `kiln.items.inventory_kinds` v1 (`kiln_items_inventory_kinds.h`): `find(flags, rows,
+capacity, &count)` with rows of 8 bytes `{u32 entity, u32 kind}`, `find_inventories`' flags and guards, `*count` = all that
+match, `KILN_ERR_BUFFER_TOO_SMALL` past `capacity` (the first `capacity` rows written), capacity 0 asks for the count.
 
 - `Give(target, ItemId|string, count = 1, Gear? = null, GiveOptions = None, SlotId? slot = null)` →
   `Task<ItemsResult>`. Options: `Notify` (player popup + PickupEvent), `AllOrNothing`, `NoMerge`, `DryRun` (run and
@@ -208,6 +236,17 @@ empty one: `Items.Equip`), else `Refused`; a move that put
 anything elsewhere, or lost items, is rolled back and `Refused`. The rules: `native/services/items/moves.h`
 (`choose_destination`, `may_land`); the tests: `native/services/items/tests/move_test.cpp` (`issue109_logic`,
 `issue109_engine`); the guide: [modding/inventory.md](../modding/inventory.md#moving-items).
+
+**Moves inside one owner** (`from == to`: an equipment slot into the same player's backpack, one chest slot to another)
+are refused, `Invalid` ("from and to are the same entity") before anything runs, and kiln.items refuses them too
+(`KILN_ERR_INVALID_ARGUMENT`). Looked at again for GitHub issue #138 (0.2.0-dev.31) and kept, because nothing proves such a
+move safe: the move's ledger and its issue #109 guard (`build_ledger`, `may_land`, "rolled back: ... left the slot without
+arriving") compare the source owner's pages before and after with the target owner's, and with one owner both pairs are the
+same pages, so a stack leaving one slot and arriving in another reads as both, and "lost" or "astray" cannot be told from a
+good move; a worn item moved by the game's slot transfer is not the game's own unequip (`Items.Unequip`, which the game
+checks and replicates as the player's own); and no test or lab covers the game's transfer within one owner. To take off what
+a player wears: `Items.Unequip(player, EquipmentSlot.X)` (into a free backpack slot); to put it on: `Items.Equip`. Moving
+between two slots of one chest is not offered.
 
 C (header size >= `sizeof(KilnItemsApi)` of v3): `move` (a `KilnItemsMoveRequest`: STACK, QUICK_STACK or MOVE_ALL; callback with a
 `KilnItemsMoveResult` and its ledger, tick thread Pre), `container_name` (tick thread), `transfer_rule` / `transfer_listen` /

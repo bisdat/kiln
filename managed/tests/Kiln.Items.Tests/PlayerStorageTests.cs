@@ -317,6 +317,10 @@ public sealed class PlayerStorageTests
         Assert.DoesNotContain(holder, r.Kiln.Run(() => Items.FindInventories(InventoryKinds.All)));
         Assert.Equal(new[] { holder }, r.Kiln.Run(() => Items.FindInventories(InventoryKinds.PlayerStorage)));
         Assert.DoesNotContain(holder, r.Kiln.Run(() => Items.Read(r.Ada.Entity))!.Inventories.Select(i => i.Inventory));
+        // FindInventoryOwners (0.2.0-dev.31): the same opt-in, and the holder's kind
+        Assert.DoesNotContain(r.Kiln.Run(() => Items.FindInventoryOwners(InventoryKinds.All)), o => o.Entity == holder);
+        Assert.Equal([new InventoryOwnerInfo(holder, InventoryOwnerKind.PlayerStorage)],
+            r.Kiln.Run(() => Items.FindInventoryOwners(InventoryKinds.PlayerStorage)));
     }
 
     [Fact]

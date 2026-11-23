@@ -326,10 +326,12 @@ public sealed class ItemIconsTests : IDisposable
     public void TheCacheStaysWellUnderTheOverlaysImageBudget()
     {
         // the overlay's descriptor pool held 64 sets while this cache allowed 512 textures: past 64 a texture got no set and
-        // was drawn with a null one. The cache (plus the placeholder) takes at most half of what kiln.ui lets exist: the rest
-        // are mods' own pictures (Ui.LoadImage) and Kiln's.
+        // was drawn with a null one. Since 0.2.0-dev.31 (GitHub issue #138) the cache, the placeholder and the icons freed but
+        // not destroyed yet (the churn reserve) leave at least ItemIconLimits.ModReserve images to mods' own pictures
+        // (Ui.LoadImage) and Kiln's, at any setting (ItemIconLimitsTests); before, the cache took at most half.
         var max = OverlayMaxImages();
-        Assert.True(ItemIcons.MaxEntries + 1 <= max / 2, $"{ItemIcons.MaxEntries} icons + the placeholder against {max} overlay images");
+        Assert.True(ItemIcons.MaxEntries + 1 + ItemIconLimits.ChurnReserve + ItemIconLimits.ModReserve <= max,
+            $"{ItemIcons.MaxEntries} icons + the placeholder + the churn reserve against {max} overlay images");
 
         // 700 distinct icons, drawn 100 at a time as a list scrolls, then all at once: never more images than the cache allows
         var live = new HashSet<ulong>();

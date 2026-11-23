@@ -612,6 +612,42 @@ internal static unsafe partial class ItemsTable
 
     private static ItemsFake? Fake => FakeTables.Active(ItemsAbi.Service)?.ItemsFake;
 
+    // ---- kiln.items.inventory_kinds v1 (0.2.0-dev.31, GitHub issue #138): find_inventories' matches with their kinds ----
+
+    private static InventoryKindsNative.Table* _kinds;
+
+    /// <summary>The fake kiln.items.inventory_kinds table (process lifetime): find with kiln.items' guards and the bounded
+    /// buffer of kiln_items_inventory_kinds.h; the kinds are the fake's (FakeInventory.Kind).</summary>
+    public static nint CreateKinds()
+    {
+        if (_kinds != null) return (nint)_kinds;
+        var t = (InventoryKindsNative.Table*)NativeMemory.AllocZeroed((nuint)sizeof(InventoryKindsNative.Table));
+        t->Header = new ServiceHeader { Size = (uint)sizeof(InventoryKindsNative.Table), Version = InventoryKindsNative.Version };
+        t->Find = &FindKinds;
+        return (nint)(_kinds = t);
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int FindKinds(uint flags, InventoryKindsNative.Row* out_, uint capacity, uint* count)
+    {
+        try
+        {
+            if (count != null) *count = 0;
+            if ((out_ == null && capacity > 0) || (flags & ~(0xFu | StorageNative.FindPlayerStorage)) != 0) return FakeTables.InvalidArgument;
+            if (Fake is not { } f || FakeTables.Off(ItemsFake.ReadFeature)) return FakeTables.Unavailable;
+            if (!FakeTables.OnTickThread) return FakeTables.WrongThread;
+            var found = f.Find(flags);
+            if (count != null) *count = (uint)found.Count;
+            for (var i = 0; i < found.Count && i < capacity; i++)
+                out_[i] = new InventoryKindsNative.Row { Entity = found[i], Kind = (uint)f.KindOf(found[i]) };
+            return found.Count > capacity ? FakeTables.BufferTooSmall : FakeTables.Ok;
+        }
+        catch
+        {
+            return FakeTables.Internal;
+        }
+    }
+
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int Give(ulong owner, ItemsAbi.Request* request, delegate* unmanaged[Cdecl]<ItemsAbi.Result*, void*, void> done, void* user, ulong* ticket) =>
         Submit(false, owner, request, done, user, ticket);
@@ -858,6 +894,8 @@ internal sealed unsafe partial class ItemsFake
         public FakePlayer? Player;
         // a player storage's holder (Fakes/ItemsStorage): found only with KILN_ITEMS_FIND_PLAYER_STORAGE, its filter on gives
         public bool Storage;
+        // kiln.items.inventory_kinds: what the test says a container is (null: Unknown, as an ordinary chest)
+        public InventoryOwnerKind? Kind;
         public Func<uint, bool>? Accepts;
 
         public ulong SlotId(int i) => Links[i / 8] | ((ulong)(uint)(i % 8) << 32);
@@ -1060,6 +1098,17 @@ internal sealed unsafe partial class ItemsFake
             _inventories[e] = inv;
             return inv;
         }
+    }
+
+    /// <summary>The kind kiln.items.inventory_kinds answers for an owner Find found: a holder, a player, else the test's.</summary>
+    public InventoryOwnerKind KindOf(uint entity)
+    {
+        var inv = Of(entity);
+        lock (_lock)
+            return inv is null ? InventoryOwnerKind.Unknown
+                : inv.Storage ? InventoryOwnerKind.PlayerStorage
+                : inv.IsPlayer ? InventoryOwnerKind.Player
+                : inv.Kind ?? InventoryOwnerKind.Unknown;
     }
 
     public List<uint> Find(uint flags)

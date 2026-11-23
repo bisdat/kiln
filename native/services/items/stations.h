@@ -28,4 +28,10 @@ void stations_world_closed();
 // kiln_plugin_main: publishes kiln.stations (also when its features are off: status says why).
 KilnResult stations_publish(const KilnApi* api, KilnOwner owner);
 
+// kiln.items.inventory_kinds (GitHub issue #138), tick thread. Every base's crafting-stock containers as the game lists
+// them this frame, sorted and unique; false when the game's bases cannot be read here (stations.read off, no server world).
+bool stations_base_stock(std::vector<KilnEntity>* out);
+// The entity carries keen::ecs::FactoryStation (a production station as kiln.stations reads it).
+bool stations_is_factory(KilnEntity e);
+
 }  // namespace kitems

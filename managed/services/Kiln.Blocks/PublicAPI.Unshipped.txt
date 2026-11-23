@@ -1397,3 +1397,4 @@ Kiln.NpcBodyBuildChangedEvent.Before.get -> Kiln.NpcBodyBuildResult!
 Kiln.NpcBodyBuildChangedEvent.After.get -> Kiln.NpcBodyBuildResult!
 Kiln.NpcBodyBuildChangedEvent.ClientSide.get -> bool
 override Kiln.NpcBodyBuildChangedEvent.ToString() -> string!
+static Kiln.Bases.Chests(Kiln.BaseId id) -> System.Collections.Generic.IReadOnlyList<Kiln.EntityId>!

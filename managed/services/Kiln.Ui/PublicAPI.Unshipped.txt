@@ -19,3 +19,4 @@ const Kiln.Ui.Inventory.TintCapability = "ui.slots.tint" -> string!
 static Kiln.Ui.Inventory.TintWhen(System.Func<Kiln.UiItemView, Kiln.Color?>! rule, Kiln.ItemId item = default(Kiln.ItemId)) -> System.IDisposable!
 const Kiln.Ui.Inventory.ChestButtonCapability = "ui.chest.buttons" -> string!
 static Kiln.Ui.Inventory.AddChestButton(string! caption, System.Action<Kiln.InventoryScreen>! handler) -> System.IDisposable!
+Kiln.RenderFrameEvent.WorldOverMenus.get -> Kiln.WorldDraw!

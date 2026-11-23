@@ -41,6 +41,7 @@ internal static class FakeTables
         KitBackend.Instance.RegisterTable(ChatAbi.Service, ChatTable.Create());
         Features(ChatFake.Features);
         KitBackend.Instance.RegisterTable(ItemsAbi.Service, ItemsTable.Create());
+        KitBackend.Instance.RegisterTable(InventoryKindsNative.Service, ItemsTable.CreateKinds());  // 0.2.0-dev.31
         Features(ItemsFake.Features);
         foreach (var row in ItemsFake.OfflineRows) Offline(row, "kiln.items' fake in the test kit models give, take, read, the catalog and gear writes only");
         KitBackend.Instance.RegisterTable(CombatAbi.Service, CombatTable.Create());

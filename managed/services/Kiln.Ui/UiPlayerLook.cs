@@ -104,10 +104,18 @@ internal static unsafe class PlayerLook
     private static void Reload()
     {
         LookSettings s;
+        ItemIconLimits icons;
         lock (FileLock)
         {
             _stamp = Stamp();
             s = Read(KilnJson, w => UiEngine.Log(LogLevel.Warn, "kiln.json: " + w));
+            icons = ItemIconLimits.Read(KilnJson, w => UiEngine.Log(LogLevel.Warn, "kiln.json: " + w));
+        }
+        // the item icon cache's limits (GitHub issue #138): kiln.json "ui": {"item_icons": {...}}
+        if (icons.MaxIcons != ItemIcons.MaxEntries || icons.MaxBytes != ItemIcons.MaxBytes)
+        {
+            ItemIcons.Configure(icons);
+            UiEngine.Log(LogLevel.Info, $"item icons: at most {icons.MaxIcons} icons, {icons.MaxMib} MiB (kiln.json)");
         }
         if (s == _current) return;
         _current = s;

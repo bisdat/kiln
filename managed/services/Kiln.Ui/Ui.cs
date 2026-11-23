@@ -301,17 +301,14 @@ public sealed unsafe partial class UiDraw
     }
 
     /// <summary>An image as a button; true when clicked. An item's icon (<see cref="Ui.ItemImage"/>) is a button while it
-    /// loads too (on its placeholder).</summary>
+    /// loads too (on its placeholder). Scrolled out of its window, an item's icon is not read and the button keeps the place
+    /// it takes when shown (the image's box plus the frame padding; since 0.2.0-dev.31).</summary>
     public bool ImageButton(string id, UiImage image, float width = 0, float height = 0)
     {
         ArgumentNullException.ThrowIfNull(image);
         if (!UiNative.HasGameUi) return false;
         float w = width > 0 ? width : image.Width * Scale, h = height > 0 ? height : image.Height * Scale;
-        if (image.Item is not null && !IconOnScreen(w, h))
-        {
-            T->Dummy(w, h);  // scrolled out of its window: neither loaded nor drawn
-            return false;
-        }
+        if (image.Item is not null && !IconOnScreen(w, h)) return ClippedIconButton(id, w, h, trim: false);
         var handle = image.Item is { } item ? ItemIcons.Handle(item, Math.Max(w, h), out _, out _) : image.Handle;
         if (handle == 0)
         {
@@ -328,12 +325,8 @@ public sealed unsafe partial class UiDraw
         ArgumentNullException.ThrowIfNull(image);
         if (!UiNative.HasGameUi) return false;
         float w = width > 0 ? width : image.Width * Scale, h = height > 0 ? height : image.Height * Scale;
-        if (image.Item is not null && !IconOnScreen(w, h))
-        {
-            T->Dummy(w, h);
-            return false;
-        }
-        var handle = image.Item is { } item ? ItemIcons.Handle(item, ItemIcons.TrimmedPixels(Math.Max(w, h)), out _, out _) : image.Handle;
+        if (image.Item is not null && !IconOnScreen(w, h)) return ClippedIconButton(id, w, h, trim: true);
+        var handle = image.Item is { } item ? ItemIcons.Handle(item, ItemIcons.TrimmedPixels(item, Math.Max(w, h)), out _, out _) : image.Handle;
         if (handle == 0)
         {
             if (image.Item is not null) return Button(id + "##icon", w, h);
@@ -372,6 +365,24 @@ public sealed unsafe partial class UiDraw
         ItemIconBox(item, s, s, trim: true);
     }
 
+    /// <summary>
+    /// An item icon's button scrolled out of its window (GitHub issue #138): its icon is neither read nor asked for, and the
+    /// button takes exactly the place it takes when shown. The visible button is kiln.ui's image_button (or image_ex's trimmed
+    /// button): ImGui's ImageButton, whose box is the image's plus the frame padding on each side, with no text baseline. A
+    /// Dummy of the image's size (as before 0.2.0-dev.31) was smaller by the padding, so a grid's rows moved as they scrolled
+    /// in. The same native call with the placeholder (already loaded, the picture a loading icon shows) reserves the very same
+    /// rectangle under the style and DPI in use; ImGui clips it, so nothing is drawn. Without the placeholder (no overlay images
+    /// at all) the visible button is the plain fallback button, and so is this one.
+    /// </summary>
+    private bool ClippedIconButton(string id, float w, float h, bool trim)
+    {
+        var placeholder = ItemIcons.Placeholder();
+        if (placeholder == 0) return Button(id + "##icon", w, h);
+        if (trim && UiNative.DrawImageEx(id, placeholder, UiNative.ImageDrawTrim | UiNative.ImageDrawFit, w, h, 0, 0, 0, 0, out var clicked))
+            return clicked;
+        return T->ImageButton(Utf8.Of(id), placeholder, w, h) != 0;
+    }
+
     /// <summary>Whether a box of w x h at the cursor shows in the current window (an icon scrolled out of a list is neither
     /// loaded nor drawn). True when the layout calls are missing.</summary>
     private bool IconOnScreen(float w, float h)
@@ -393,7 +404,7 @@ public sealed unsafe partial class UiDraw
             return;
         }
         var px = Math.Max(width, height);
-        var handle = ItemIcons.Handle(item, trim ? ItemIcons.TrimmedPixels(px) : px, out var iw, out var ih);
+        var handle = ItemIcons.Handle(item, trim ? ItemIcons.TrimmedPixels(item, px) : px, out var iw, out var ih);
         if (handle == 0)
         {
             T->Dummy(width, height);  // keeps the layout: no overlay image could be made

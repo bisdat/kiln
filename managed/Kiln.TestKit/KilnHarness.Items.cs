@@ -126,6 +126,19 @@ public sealed class FakeInventory
     /// <summary>The entity whose inventory it is.</summary>
     public EntityId Owner => new(_inv.Owner);
 
+    /// <summary>What kiln.items.inventory_kinds answers for this container (<see cref="global::Kiln.Items.FindInventoryOwners"/>):
+    /// <see cref="InventoryOwnerKind.Unknown"/> by default, as for an ordinary chest; set it to model a production station or
+    /// a base's Magic chest. A player's inventory is always <see cref="InventoryOwnerKind.Player"/>, a player storage holder
+    /// <see cref="InventoryOwnerKind.PlayerStorage"/>. Since 0.2.0-dev.31.</summary>
+    public InventoryOwnerKind Kind
+    {
+        get => _harness.Run(() => Fake.KindOf(_inv.Owner));
+        set => _harness.Run(() =>
+        {
+            lock (Fake.Lock) _inv.Kind = value;
+        });
+    }
+
     /// <summary>Every slot, empty ones included, in the order <see cref="global::Kiln.Items.Read"/> lists them.</summary>
     public IReadOnlyList<FakeSlot> Slots => _harness.Run(() =>
     {

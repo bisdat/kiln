@@ -11,6 +11,15 @@ namespace Kiln;
 /// <see cref="World"/> (world positions) during the handler.
 /// </summary>
 /// <remarks>
+/// <para><b>Game menus:</b> since 0.2.0-dev.31, <see cref="World"/> draws nothing while one of the game's menus covers the world
+/// (map, inventory, crafting, storage, character, journal, skill tree, NPC dialog, pause and settings, and the main menu,
+/// loading and cinematic screens): its markers, labels, icons, lines, boxes and rings are left out for that frame. Its
+/// projection (<see cref="WorldDraw.ToScreen"/>, <see cref="WorldDraw.Ready"/>) and return values stay as they were, so a mod's
+/// own logic does not change. On the HUD, in the text chat, on a screen Kiln does not know and while the game's screen is not
+/// known it draws as before. <see cref="WorldOverMenus"/> draws over the menus too, and <see cref="Draw"/> (pixels) is never
+/// hidden.</para>
+/// </remarks>
+/// <remarks>
 /// <para><b>Thread:</b> the game's render thread (the thread presenting frames), not the tick thread. Read only what your
 /// mod keeps itself (copies, snapshots); act on the game with <c>Client.Post</c> (client world) or
 /// <c>Context.Scheduler.Post</c> (server world); post bus events with <c>Events.Enqueue</c>.</para>
@@ -30,7 +39,8 @@ public sealed class RenderFrameEvent : KilnEvent
     internal RenderFrameEvent()
     {
         Draw = new RenderDraw();
-        World = new WorldDraw(this);
+        World = new WorldDraw(this, overMenus: false);
+        WorldOverMenus = new WorldDraw(this, overMenus: true);
     }
 
     /// <summary>Overlay frames since the game started.</summary>
@@ -61,14 +71,26 @@ public sealed class RenderFrameEvent : KilnEvent
     /// or is false when the camera is not found on this game build).</summary>
     public RenderCamera Camera { get; internal set; }
 
-    /// <summary>The game's screen (main menu, in game, map, ...).</summary>
-    public GameScreen Screen => Ui.Screens.Current;
+    /// <summary>The game's screen (main menu, in game, map, ...): the one read for this frame (since 0.2.0-dev.31; read again at
+    /// each call before).</summary>
+    public GameScreen Screen => ScreenSnapshot ?? Ui.Screens.Current;
+
+    /// <summary>The game's screen read once for this frame; null: not known (no game UI integration, or the read failed).</summary>
+    internal GameScreen? ScreenSnapshot { get; set; }
+
+    /// <summary>A known game menu covers the world this frame: <see cref="World"/> submits nothing.</summary>
+    internal bool OverGameMenu => ScreenSnapshot is { } s && WorldDraw.HiddenOn(s.Kind);
 
     /// <summary>Drawing in pixels, under Kiln's windows and over the game's picture.</summary>
     public RenderDraw Draw { get; }
 
-    /// <summary>Drawing at world positions with <see cref="Camera"/>.</summary>
+    /// <summary>Drawing at world positions with <see cref="Camera"/>. Draws nothing while a game menu (map, inventory, crafting,
+    /// ...) is open; see <see cref="WorldOverMenus"/>.</summary>
     public WorldDraw World { get; }
+
+    /// <summary>Drawing at world positions like <see cref="World"/>, but also while a game menu (map, inventory, crafting, ...)
+    /// covers the world: for a mod that means to draw there. Since 0.2.0-dev.31.</summary>
+    public WorldDraw WorldOverMenus { get; }
 }
 
 /// <summary>The game's camera: where it is, where it looks, its lens.</summary>
@@ -454,7 +476,7 @@ public sealed unsafe class RenderDraw
         ArgumentNullException.ThrowIfNull(image);
         int iw = image.Width, ih = image.Height;
         var px = Math.Max(Math.Abs(x1 - x0), Math.Abs(y1 - y0));
-        var handle = image.Item is { } item ? ItemIcons.Handle(item, ItemIcons.TrimmedPixels(px), out iw, out ih) : image.Handle;
+        var handle = image.Item is { } item ? ItemIcons.Handle(item, ItemIcons.TrimmedPixels(item, px), out iw, out ih) : image.Handle;
         if (T == null || handle == 0) return;
         var q = UiNative.ImageOpaqueRect(handle, out var rx, out var ry, out var rw, out var rh)
             ? ImageTrim.Fit(rx, ry, rw, rh, iw, ih, x0, y0, x1, y1)
@@ -486,13 +508,30 @@ public sealed unsafe class RenderDraw
 }
 
 /// <summary>Drawing at world positions (metres) with the frame's camera. Nothing is drawn while the camera is not valid,
-/// and points behind the camera are skipped (lines and boxes are cut at the near plane).</summary>
+/// and points behind the camera are skipped (lines and boxes are cut at the near plane). <see cref="RenderFrameEvent.World"/>
+/// also draws nothing while a game menu covers the world (since 0.2.0-dev.31; the projection and the return values are the
+/// same either way); <see cref="RenderFrameEvent.WorldOverMenus"/> draws there too.</summary>
 [ClientOnly]
 public sealed class WorldDraw
 {
     private readonly RenderFrameEvent _frame;
+    private readonly bool _overMenus;
 
-    internal WorldDraw(RenderFrameEvent frame) => _frame = frame;
+    internal WorldDraw(RenderFrameEvent frame, bool overMenus = false)
+    {
+        _frame = frame;
+        _overMenus = overMenus;
+    }
+
+    /// <summary>The game screens that cover the world: the in-game menus and the screens outside a world. Not the HUD, the
+    /// text chat, a screen Kiln does not know (<see cref="ScreenKind.Other"/>) or no screen known (<see cref="ScreenKind.None"/>).</summary>
+    internal static bool HiddenOn(ScreenKind kind) => kind is ScreenKind.Title or ScreenKind.MainMenu or ScreenKind.Loading or
+        ScreenKind.Cinematic or ScreenKind.Credits or ScreenKind.PauseMenu or ScreenKind.Settings or ScreenKind.Inventory or
+        ScreenKind.Map or ScreenKind.Journal or ScreenKind.Character or ScreenKind.Crafting or ScreenKind.SkillTree or
+        ScreenKind.Storage or ScreenKind.Dialog;
+
+    /// <summary>This view submits its primitives this frame (not hidden by a game menu).</summary>
+    internal bool Submits => _overMenus || !_frame.OverGameMenu;
 
     private RenderDraw D => _frame.Draw;
     private RenderCamera Cam => _frame.Camera;
@@ -546,7 +585,7 @@ public sealed class WorldDraw
     public bool Marker(WorldPosition p, Color color, float size = 10, MarkerShape shape = MarkerShape.Diamond, bool outline = true)
     {
         if (!ToScreen(p, out var s)) return false;
-        DrawShape(s, color, size * _frame.Scale, shape, outline);
+        if (Submits) DrawShape(s, color, size * _frame.Scale, shape, outline);
         return true;
     }
 
@@ -599,7 +638,7 @@ public sealed class WorldDraw
         TextStyle style = TextStyle.Outline)
     {
         if (!ToScreen(p, out var s)) return false;
-        D.Text(s.X, s.Y - offsetY * _frame.Scale, text, color, size, TextAlign.Center, style, middle: true);
+        if (Submits) D.Text(s.X, s.Y - offsetY * _frame.Scale, text, color, size, TextAlign.Center, style, middle: true);
         return true;
     }
 
@@ -610,14 +649,14 @@ public sealed class WorldDraw
         if (!ToScreen(p, out var s) || image.Width <= 0) return false;
         var w = size * _frame.Scale;
         var h = w * image.Height / image.Width;
-        D.Image(image, s.X - w / 2, s.Y - h / 2, s.X + w / 2, s.Y + h / 2, tint);
+        if (Submits) D.Image(image, s.X - w / 2, s.Y - h / 2, s.X + w / 2, s.Y + h / 2, tint);
         return true;
     }
 
     /// <summary>A line between two world points, cut where it passes behind the camera.</summary>
     public void Line(WorldPosition a, WorldPosition b, Color color, float thickness = 2)
     {
-        if (!Ready) return;
+        if (!Ready || !Submits) return;
         var va = Cam.ToCameraSpace(a);
         var vb = Cam.ToCameraSpace(b);
         CameraLine(va, vb, color, thickness);
@@ -632,7 +671,7 @@ public sealed class WorldDraw
     /// <summary>The edges of an axis-aligned box between two corners.</summary>
     public void Box(WorldPosition min, WorldPosition max, Color color, float thickness = 2)
     {
-        if (!Ready) return;
+        if (!Ready || !Submits) return;
         Span<(double X, double Y, double Z)> c = stackalloc (double, double, double)[8];
         for (var i = 0; i < 8; i++)
             c[i] = Cam.ToCameraSpace(new WorldPosition((i & 1) != 0 ? max.X : min.X, (i & 2) != 0 ? max.Y : min.Y, (i & 4) != 0 ? max.Z : min.Z));
@@ -649,7 +688,7 @@ public sealed class WorldDraw
     /// height).</summary>
     public void Circle(WorldPosition center, double radius, Color color, float thickness = 2, int segments = 48)
     {
-        if (!Ready || radius <= 0) return;
+        if (!Ready || !Submits || radius <= 0) return;
         segments = Math.Clamp(segments, 8, 256);
         var prev = Cam.ToCameraSpace(new WorldPosition(center.X + radius, center.Y, center.Z));
         for (var i = 1; i <= segments; i++)

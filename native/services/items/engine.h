@@ -261,6 +261,8 @@ bool scan_inventories(uintptr_t world, uint32_t flags, KilnEntity* ids, uint32_t
                       unsigned long* code);
 // Inventory filter for one entity (used with kiln.world's find).
 bool inventory_matches(uintptr_t world, KilnEntity e, uint32_t flags, bool* match, unsigned long* code);
+// InventorySetup.inventoryFlags of one entity (kiln.items.inventory_kinds); false: no setup, or a fault.
+bool inventory_setup_flags(uintptr_t world, KilnEntity e, uint8_t* flags);
 
 // Catalog rows copied out of the item registry.
 struct RawItem {

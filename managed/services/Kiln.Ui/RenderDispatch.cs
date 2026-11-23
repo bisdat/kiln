@@ -130,6 +130,8 @@ internal static class RenderDispatch
         ev.MenuOpen = f.MenuOpen != 0;
         ev.Capturing = f.Capturing != 0;
         ev.Camera = new RenderCamera(RenderNative.ReadCamera());
+        // one read of the game's screen for the whole frame: World hides over its menus, WorldOverMenus does not
+        ev.ScreenSnapshot = Ui.Screens.TryRead(out var screen) ? screen : null;
         Dispatch(ev, subs);
     }
 
