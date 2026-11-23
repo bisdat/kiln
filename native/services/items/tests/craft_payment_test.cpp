@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 // The actual RecipePaid adapter on fake server transactions. No game, no live world.
 #include "../stations.cpp"
+#include <cstdarg>
 #include <map>
+#include <string>
 namespace fixture {
 std::map<uint32_t,std::map<uint32_t,uint32_t>> inventory;
 bool server_storage = true, fail_take = false;
@@ -35,7 +37,10 @@ bool read_inventory(uintptr_t,void*,KilnEntity e,ReadOut* out,unsigned long*) {
     return true;
 }
 uintptr_t items_server_world() { return 1; }
-void items_log(int,const char*,...) {}
+std::vector<std::string> logs; // every kiln.log line the adapter wrote
+void items_log(int,const char* fmt,...) {
+    char b[1024]; va_list a; va_start(a,fmt); std::vsnprintf(b,sizeof b,fmt,a); va_end(a); logs.emplace_back(b);
+}
 uint64_t current_step() { return 1; }
 const KilnApi* items_api() { return g_api; }
 KilnOwner items_owner() { return 10; }
@@ -167,5 +172,49 @@ int main() {
     g_registered.remove(10,station_link);
     reset();g_registered.remove(10,handle);
     CHECK(craft_pay_impl(tx,&costs,1,1,nullptr,0x1234,&code)==0 && fixture::paid.empty());
+    // #132 follow-up (hosting client): the client world's own dry runs (RecipeApply on its own transaction, every recipe
+    // the crafting menu counts) must not use up the lines that say why the server world's craft was left to the game.
+    auto logged=[&](const char* s) { for(const auto& l:logs) if(l.find(s)!=std::string::npos) return true; return false; };
+    reset();CHECK(t_add_source(10,&request,&handle)==KILN_OK && handle!=0);
+    uint8_t client_bases[0x400]={};uint8_t dry[0x100]={};wr(dry,0x70,client_bases);
+    for(int i=0;i<20;++i) CHECK(craft_pay_impl(dry,&costs,1,1,nullptr,0x1234,&code)==0);
+    logs.clear();fixture::server_storage=false;
+    CHECK(craft_pay_impl(tx,&costs,1,1,nullptr,0x1234,&code)==0 && fixture::paid.empty());
+    CHECK(logged("the server world's craft transaction"));
+    fixture::server_storage=true;
+    // one line per player craft, at its end, saying how far it got (kiln.gameplay's CraftRecipe hook brackets the call)
+    reset();logs.clear();
+    kiln_stations_set_craft_context(3000,1);
+    CHECK(craft_pay_impl(tx,&costs,1,1,nullptr,0x1234,&code)==1 && code==0);
+    kiln_stations_set_craft_context(0,0);
+    kiln_stations_craft_done(1,3000,0x77,0);
+    CHECK(logged("player 1's craft of recipe 0x00000077 at station 3000: paid 2 item(s)"));
+    // refused before its payment: the game never asked (a requirement, or the station's props)
+    logs.clear();
+    kiln_stations_set_craft_context(3000,1);kiln_stations_set_craft_context(0,0);kiln_stations_craft_done(1,3000,0x77,4);
+    CHECK(logged("refused without reaching the recipe payment"));
+    // the payment saw another login's links
+    reset();logs.clear();wr(infos,4,uint32_t{99});
+    kiln_stations_set_craft_context(3000,1);
+    CHECK(craft_pay_impl(tx,&costs,1,1,nullptr,0x1234,&code)==0 && fixture::paid.empty());
+    kiln_stations_set_craft_context(0,0);kiln_stations_craft_done(1,3000,0x77,4);
+    CHECK(logged("earlier login"));
+    wr(infos,4,uint32_t{0});
+    // short even with the linked source: nothing taken, the line says by how much
+    reset();logs.clear();fixture::inventory={{1,{{7,0}}},{2000,{{7,1}}}};
+    kiln_stations_set_craft_context(3000,1);
+    CHECK(craft_pay_impl(tx,&costs,1,1,nullptr,0x1234,&code)==0 && fixture::paid.empty());
+    kiln_stations_set_craft_context(0,0);kiln_stations_craft_done(1,3000,0x77,4);
+    CHECK(logged("short by 2"));
+    // a factory's own cycle and a craft outside any context say nothing
+    reset();logs.clear();
+    kiln_stations_set_craft_context(3000,1);kiln_stations_set_craft_context(0,0);kiln_stations_craft_done(3000,3000,0x77,0);
+    kiln_stations_craft_done(1,3000,0x77,0);
+    CHECK(!logged("'s craft of recipe"));
+    g_registered.remove(10,handle);
+    // a player with nothing linked and no station opted in: the game's craft, no line
+    logs.clear();
+    kiln_stations_set_craft_context(3000,1);kiln_stations_set_craft_context(0,0);kiln_stations_craft_done(1,3000,0x77,4);
+    CHECK(!logged("'s craft of recipe"));
     std::printf("craft payment: %d checks, %d failed\n",checks,failed);return failed?1:0;
 }
