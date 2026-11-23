@@ -42,6 +42,9 @@ thread_local bool fault_in_kernel = false;
 uint32_t props = 0xabcdef01;
 struct Cell { uint8_t material, fill; };
 struct Cells { std::vector<Cell> cells; };
+// The game kernel's removal report: the descriptor's pointer at +0x80, the float total at +0x18 (both builds,
+// @tools/TerrainCarveKernel.report). Kiln reads them only as the sigdb captures tools/carve.report(_total).
+constexpr size_t game_report = 0x80, game_report_total = 0x18;
 
 bool vanilla_kernel(void* brush, void* data, void* unknown, const int32_t* origin, const uint32_t* dims) {
     ++kernel_calls;
@@ -65,8 +68,8 @@ bool vanilla_kernel(void* brush, void* data, void* unknown, const int32_t* origi
         }
     // Like the game's kernel, add what it carved to the report the descriptor names (+0x80, total at +0x18).
     uintptr_t report = 0;
-    std::memcpy(&report, static_cast<uint8_t*>(brush) + report_offset, sizeof report);
-    if (carved && report) *reinterpret_cast<float*>(report + report_total_offset) += 1.5f;
+    std::memcpy(&report, static_cast<uint8_t*>(brush) + game_report, sizeof report);
+    if (carved && report) *reinterpret_cast<float*>(report + game_report_total) += 1.5f;
     return false; // The wrapper must preserve the game's return, not turn it into unconditional success.
 }
 bool vanilla_dispatch(void*, void*, void* data, const int32_t* origin, const uint32_t* dims,
@@ -105,6 +108,16 @@ KilnResult KILN_CALL symbol(KilnStr name, uintptr_t* out) {
 #endif
     return KILN_OK;
 }
+// The report layout as sigdb captures it; missing (or naming the coefficient table) in the report-layout scenarios.
+KilnResult KILN_CALL constant(KilnStr name, int64_t* out) {
+    const std::string n(name.ptr, name.len);
+    if (n != "tools/carve.report" && n != "tools/carve.report_total") return KILN_ERR_NOT_FOUND;
+    if (scenario == "no-report-layout") return KILN_ERR_NOT_FOUND;
+    *out = n == "tools/carve.report" ? (scenario == "bad-report-layout" ? int64_t(coefficient_offset) : int64_t(game_report))
+                                     : int64_t(game_report_total);
+    return KILN_OK;
+}
+bool report_layout_scenario() { return scenario == "no-report-layout" || scenario == "bad-report-layout"; }
 KilnResult KILN_CALL raw_detour(KilnOwner owner, uintptr_t target, const KilnHookOrder*, void* handler,
                                void** continuation, KilnHandle* handle) {
     CHECK(owner != 9 && owner == live_child);
@@ -245,6 +258,7 @@ int main(int argc, char** argv) {
     if (scenario == "no-original") hooks.read_original = nullptr;
     if (scenario == "no-code-state") hooks.code_state = nullptr;
     KilnApi api{}; api.size = sizeof api; api.build_info = &build_info; api.symbol = &symbol; api.service = &service;
+    api.constant = &constant;
     api.owner_create = &owner_create; api.owner_revoke = &owner_revoke;
     if (scenario == "no-owner-create") api.owner_create = nullptr;
     if (scenario == "no-owner-revoke") api.owner_revoke = nullptr;
@@ -265,7 +279,7 @@ int main(int argc, char** argv) {
         std::printf("terrain hooks %s: %d checks passed\n", scenario.c_str(), checks.load());
         return 0;
     }
-    if (scenario != "client" && scenario != "server" && scenario != "managed-code") {
+    if (scenario != "client" && scenario != "server" && scenario != "managed-code" && !report_layout_scenario()) {
         CHECK(reported_kernel == 0 && reported_buildings == 0);
         CHECK(installs == (refuse_kernel ? 1 : refuse_dispatch ? 2 : refuse_buildings ? 3 : 0));
         CHECK(revoked == (refuse_buildings ? 2 : refuse_dispatch ? 1 : 0));
@@ -396,12 +410,15 @@ int main(int argc, char** argv) {
     concurrent_kernel = nullptr;
     CHECK(active == &policy);
     // The stroke's trace (kiln#133): inside a stroke the filtered kernel notes whether an allowed cell is minable and
-    // whether the game's own report grew; outside one it notes nothing. The report stays the game's to write.
+    // whether the game's own report grew; outside one it notes nothing. The report stays the game's to write. Without
+    // the report layout from sigdb (or with one naming the coefficient table) every stroke stays unmeasured.
     {
+        const bool layout = !report_layout_scenario();
         struct Report { float* data; uint64_t capacity; uint8_t material, pad[7]; float total, tail; } report{nullptr, 256, 0, {}, 0, 0};
+        static_assert(offsetof(Report, total) == game_report_total);
         BrushCopy reporting = brush;
         const auto* named = &report;
-        std::memcpy(reporting.bytes.data() + report_offset, &named, sizeof named);
+        std::memcpy(reporting.bytes.data() + game_report, &named, sizeof named);
         expected_brush = reporting.bytes.data();
         Cells rubble{{{8,255}}}, ground{{{9,255}}};
         CHECK(!installed_kernel(reporting.bytes.data(), &rubble, &props, origin, dims)); // no stroke: nothing noted
@@ -409,10 +426,12 @@ int main(int argc, char** argv) {
         kiln::tools::StrokeTally removed, unmatched, unmeasured;
         {kiln::tools::StrokeScope stroke(&removed);rubble.cells = {{8,255}};
          CHECK(!installed_kernel(reporting.bytes.data(), &rubble, &props, origin, dims));}
-        CHECK(removed.kernels == 1 && removed.removable && removed.removed && removed.measured && report.total == 3.0f);
+        CHECK(removed.kernels == 1 && removed.removable && removed.removed == layout && removed.measured == layout &&
+              report.total == 3.0f && rubble.cells[0].fill == 224);
         {kiln::tools::StrokeScope stroke(&unmatched);
          CHECK(!installed_kernel(reporting.bytes.data(), &ground, &props, origin, dims));}
-        CHECK(unmatched.kernels == 1 && unmatched.removable && !unmatched.removed && unmatched.measured && ground.cells[0].fill == 255);
+        CHECK(unmatched.kernels == 1 && unmatched.removable && !unmatched.removed && unmatched.measured == layout &&
+              ground.cells[0].fill == 255);
         expected_brush = brush.bytes.data();
         {kiln::tools::StrokeScope stroke(&unmeasured);rubble.cells = {{8,255}};
          CHECK(!installed_kernel(brush.bytes.data(), &rubble, &props, origin, dims));}

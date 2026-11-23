@@ -115,17 +115,29 @@ int main() {
         CHECK(filter_brush(short_table.bytes.data(), allow, result, filtered, copy_memory, &removable) && !removable);
         removable = true;
         CHECK(!filter_brush(d.bytes.data(), allow, result, filtered, unreadable, &removable) && !removable);
-        // The report: the descriptor's pointer at +0x80, the float total at +0x18.
+        // The report: the descriptor's pointer at +0x80, the float total at +0x18 on both builds, read only through the
+        // layout sigdb captures from the kernel (tools/carve.report, tools/carve.report_total).
         struct Report { float* data; uint64_t capacity; uint8_t material, pad[7]; float total, tail; } report{nullptr, 256, 0, {}, 2.5f, 0};
-        static_assert(offsetof(Report, total) == report_total_offset);
+        static_assert(offsetof(Report, total) == 0x18);
+        const ReportLayout game{0x80, 0x18};
+        CHECK(report_layout_ok(game));
         float total = 0;
         const void* none = nullptr;
-        std::memcpy(result.bytes.data() + report_offset, &none, sizeof none);
-        CHECK(!report_total(result, copy_memory, total)); // no report named
+        std::memcpy(result.bytes.data() + 0x80, &none, sizeof none);
+        CHECK(!report_total(result, game, copy_memory, total)); // no report named
         const auto* named = &report;
-        std::memcpy(result.bytes.data() + report_offset, &named, sizeof named);
-        CHECK(report_total(result, copy_memory, total) && total == 2.5f);
-        CHECK(!report_total(result, unreadable, total));
+        std::memcpy(result.bytes.data() + 0x80, &named, sizeof named);
+        CHECK(report_total(result, game, copy_memory, total) && total == 2.5f);
+        CHECK(!report_total(result, game, unreadable, total));
+        CHECK(!report_total(result, game, nullptr, total));
+        // An unresolved, misaligned or out-of-descriptor layout, or one naming the coefficient table Kiln rewrote, is
+        // never read.
+        for (const ReportLayout bad : {ReportLayout{}, ReportLayout{-1, 0x18}, ReportLayout{0x80, -1}, ReportLayout{0x84, 0x18},
+                                       ReportLayout{0x8c, 0x18}, ReportLayout{0x90, 0x18}, ReportLayout{0x70, 0x18},
+                                       ReportLayout{0x78, 0x18}, ReportLayout{0x80, 0x1a}, ReportLayout{0x80, 0x2000}}) {
+            total = -1;
+            CHECK(!report_layout_ok(bad) && !report_total(result, bad, copy_memory, total) && total == -1);
+        }
     }
     std::printf("terrain carve: %d checks passed\n", checks);
 }

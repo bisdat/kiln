@@ -12,11 +12,18 @@ namespace kiln::tools::carve {
 constexpr size_t brush_size = 0x90;
 constexpr size_t coefficient_offset = 0x70;
 constexpr size_t coefficient_count_offset = 0x78;
-// The kernel's removal report: removed volume per material (data +0) and in total (float at +0x18). The kernel adds to
-// it for every cell it carves, so a stroke that grew it removed terrain (docs/re/terrain-tool-carve.md).
-constexpr size_t report_offset = 0x80;
-constexpr size_t report_total_offset = 0x18;
 struct alignas(16) BrushCopy { std::array<uint8_t, brush_size> bytes; };
+// The kernel's removal report: the descriptor names it at +report, and the kernel adds every cell it carves to the
+// float total at report +total, so a stroke that grew the total removed terrain (docs/re/terrain-tool-carve.md). Both
+// offsets come only from sigdb, captured from the kernel's own accumulation on each build (tools/carve.report and
+// tools/carve.report_total, @tools/TerrainCarveKernel.report); -1 while they are unresolved.
+struct ReportLayout { int64_t report = -1, total = -1; };
+// A pointer inside the descriptor copy that is not the coefficient table Kiln rewrites, and an aligned float.
+inline bool report_layout_ok(const ReportLayout& layout) {
+    return layout.report >= 0 && !(layout.report & 7) && uint64_t(layout.report) + sizeof(uintptr_t) <= brush_size &&
+           uint64_t(layout.report) != coefficient_offset && uint64_t(layout.report) != coefficient_count_offset &&
+           layout.total >= 0 && !(layout.total & 3) && layout.total <= 0x1000;
+}
 using CopyMemory = bool (*)(void*, const void*, size_t);
 
 // removable (optional): whether an allowed cell kept a positive coefficient, the only kind the kernel carves.
@@ -41,11 +48,16 @@ inline bool filter_brush(const void* original, const uint8_t (&remove_cells)[32]
     std::memcpy(brush.bytes.data() + coefficient_count_offset, &owned_count, sizeof owned_count);
     return true;
 }
-// The report's total before or after the kernel; false when the descriptor names no report or it cannot be read.
-inline bool report_total(const BrushCopy& brush, CopyMemory copy, float& total) {
+// The report's total before or after the kernel; false without a qualified layout, when the descriptor names no report,
+// or when it cannot be read (copy is the guarded read).
+inline bool report_total(const BrushCopy& brush, const ReportLayout& layout, CopyMemory copy, float& total) {
+    if (!copy || !report_layout_ok(layout)) return false;
     uintptr_t report = 0;
-    std::memcpy(&report, brush.bytes.data() + report_offset, sizeof report);
-    return report && copy && copy(&total, reinterpret_cast<const void*>(report + report_total_offset), sizeof total);
+    std::memcpy(&report, brush.bytes.data() + layout.report, sizeof report);
+    float value = 0;
+    if (!report || !copy(&value, reinterpret_cast<const void*>(report + uintptr_t(layout.total)), sizeof value)) return false;
+    total = value;
+    return true;
 }
 } // namespace kiln::tools::carve
 
