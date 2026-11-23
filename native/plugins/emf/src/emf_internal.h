@@ -9,6 +9,7 @@
 //   api_core.cpp  the EmfApi table: log, worlds, components, entities, ticks, build, mod info, stubs
 //   api_game.cpp  items, destroy, chat, saves, combat, teleport, world settings, HUD/notify
 //   api_spawn.cpp spawn, spawn_ex, spawn_facing through kiln.spawn (creation-time yaw and components)
+//   api_terrain.cpp v44/v45/v47 block queries and queued sphere/column breaks through kiln.build
 //   api_events.cpp on_event and mod programs through kiln.world
 //   api_hooks.cpp resolve / hook / patterns / write_memory, the EMF signature -> sigdb alias table
 //   commands.cpp  EMF commands from players' chat (kiln.chat) and <game>/emf/commands.txt
@@ -41,6 +42,8 @@
 
 #include "emf/emf_api.h"
 #include "kiln_api.h"
+#include "services/kiln_build.h"
+#include "services/kiln_caps.h"
 #include "services/kiln_chat.h"
 #include "services/kiln_client.h"
 #include "services/kiln_combat.h"
@@ -68,6 +71,8 @@ extern KilnOwner g_owner;
 extern uint32_t g_side;  // KILN_SIDE_*
 
 struct Services {
+    const KilnBuildApi* build = nullptr;
+    const KilnCapsApi* caps = nullptr;
     const KilnWorldApi* world = nullptr;
     const KilnClientApi* client = nullptr;
     const KilnHooksApi* hooks = nullptr;
@@ -222,6 +227,12 @@ void fill_windows(EmfApi* t);     // api_windows.cpp (v24, v26; it also fills th
 void fill_wheel(EmfApi* t);       // api_wheel.cpp (v10)
 void fill_attributes(EmfApi* t);  // api_attributes.cpp (v18)
 void fill_net(EmfApi* t);  // api_net.cpp (v27, EMF's wire protocol over the game's chat)
+void fill_terrain(EmfApi* t); // v44/v45/v47 translation onto kiln.build
+void terrain_server_pre();
+void terrain_after_step(EmfWorld* w, uint8_t kind);
+void terrain_world_stopping(); // cancellations delivered at the next server Post, not on the destroying thread
+void terrain_world_started();
+std::string terrain_status_json();
 void fill_v40(EmfApi* t);  // api_v40.cpp (v28-v47, without the two chat functions of api_game.cpp)
 void net_on_ready();
 void net_server_pre();

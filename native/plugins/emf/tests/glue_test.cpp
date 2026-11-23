@@ -37,6 +37,9 @@ static Mod *active_mod = &mod;
 Mod *caller_mod(const void *) { return active_mod; }
 Mod *mod_of_address(const void *) { return active_mod; }
 void logf(int, const char *, ...) {}
+void note_call(const char*) {}
+void mark_status_dirty() {}
+uint64_t now_ms() { return 100; }
 std::vector<std::string> mod_lines;  // every mod_logf line, for the window log checks
 void mod_logf(const Mod *, int, const char *fmt, ...) {
     char buf[4096];
@@ -1122,7 +1125,7 @@ static void test_v46() {
     CHECK(refusals == refused_before + 4 && unsupported_calls - before == counted && v46_callbacks == 0);
 }
 
-// v47 terrain and marker additions keep their documented unavailable answers.
+// A missing kiln.build and the unimplemented markers keep their documented unavailable answers.
 static void test_v47() {
     EmfApi t{};
     fill_v40(&t);

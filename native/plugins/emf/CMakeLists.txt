@@ -19,6 +19,7 @@ kiln_plugin(emf
     src/api_net.cpp
     src/api_net_client.cpp
     src/api_portraits.cpp
+    src/api_terrain.cpp
     src/api_v40.cpp
     src/api_hits.cpp
     src/hits_model.cpp
@@ -59,3 +60,9 @@ add_executable(emf-spawn-test tests/spawn_test.cpp src/api_spawn.cpp)
 target_include_directories(emf-spawn-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include"
     "${CMAKE_CURRENT_SOURCE_DIR}/src" "${CMAKE_SOURCE_DIR}/core/abi" "${CMAKE_SOURCE_DIR}/services/players")
 set_target_properties(emf-spawn-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/emf-test")
+
+# Production terrain adapter with fake services; no game or engine code in the test.
+add_executable(emf-terrain-test tests/terrain_test.cpp src/api_terrain.cpp)
+target_include_directories(emf-terrain-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src" "${CMAKE_SOURCE_DIR}/core/abi" "${CMAKE_SOURCE_DIR}/services/players")
+set_target_properties(emf-terrain-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/emf-test")

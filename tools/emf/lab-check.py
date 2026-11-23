@@ -70,7 +70,7 @@ def wait_for(pattern, timeout):
 
 
 def admin(op, **fields):
-    args = [sys.executable, REPO / "tools/emf/admin-op.py", L, op] + [f"{k}={json.dumps(v)}" for k, v in fields.items()]
+    args = [sys.executable, "-I", REPO / "tools/emf/admin-op.py", L, op] + [f"{k}={json.dumps(v)}" for k, v in fields.items()]
     r = sh(*args)
     try:
         return json.loads(r.stdout.strip().splitlines()[-1])
@@ -199,6 +199,15 @@ def report(results, mods, tail, log, ok_probe, ok_check):
             results[m] = (mods[m]["status"] == "loaded" and has(rx), "loaded on the v47 table; " + (mods[m].get("reason") or "ready"))
     chk = grab(r"emf-check done: (\d+ PASS, \d+ FAIL)")
     results["(emf-check)"] = (chk is not None and chk.endswith(" 0 FAIL"), f"Kiln-side cross-check: {chk}")
+
+    blocks = status.get("blocks", {})
+    block_keys = ("accepted", "waiting", "callbacksPending", "completed", "cancelled", "failed", "partial")
+    results["(blocks)"] = (
+        all(isinstance(blocks.get(k), int) and blocks[k] >= 0 for k in block_keys)
+        and blocks.get("faulted") is False
+        and has(r"PASS blocks: invalid break refuses with a reason and no callback")
+        and has(r"PASS blocks: find_wall equals find_wall_ex flags zero"),
+        f"non-destructive translation probe; queue/status {blocks}; real breaks require the owner checklist")
 
     unsup = status.get("unsupported", {})
     print(f"{'mod':14} {'loads':9} {'works':5}  evidence")

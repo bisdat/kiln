@@ -321,21 +321,48 @@ void v40_checks(EmfWorld* w) {
               A->enemy_move(w, &mo, [](EmfWorld*, uint32_t, uint32_t, void*) { ++g_v40_callbacks; }, nullptr) == 0 && mo.why[0] != 0 &&
               !A->enemy_move_cancel(1) && A->enemy_moving(w, F.villager) == 0,
           "enemy orders and moves answer 0 / false, with a reason in the order", std::string(eo.why));
-    // v43 (EMF 0.6.13) to v47 (0.6.14)
+    // v43 (EMF 0.6.13) to v47 (0.6.19)
     uint32_t perms = 0x3F;
     check(!A->player_permissions(w, F.villager, &perms) && perms == 0, "player_permissions answers false with *perms 0");
+    // Non-destructive terrain-family checks: never assume the family is an unavailable stub.
     EmfBreakBlocks bb{};
     bb.size = sizeof bb;
-    bb.flags = EMF_BREAK_WORLD | EMF_BREAK_TERRAIN;  // v45, v47
+    bb.flags = 0x80000000u; // guaranteed refusal even when all engine modes are qualified
     bb.radius = 1;
+    check(A->break_blocks(w, &bb, [](EmfWorld*, uint32_t, const EmfBreakResult*, void*) { ++g_v40_callbacks; }, nullptr) == 0 && bb.why[0],
+          "blocks: invalid break refuses with a reason and no callback", std::string(bb.why));
+    bb.size = 159;
+    std::memset(bb.why, 'x', sizeof bb.why);
+    const auto savedBreak = bb;
+    check(A->break_blocks(w, &bb, nullptr, nullptr) == 0 && std::memcmp(&bb, &savedBreak, sizeof bb) == 0,
+          "blocks: short break request stays untouched");
     EmfBlockInfo bi{};
     bi.size = sizeof bi;
     bi.world = -1;
-    const float from[3] = {0, 0, 0}, to[3] = {0, 10, 0};
-    check(A->break_blocks(w, &bb, [](EmfWorld*, uint32_t, const EmfBreakResult*, void*) { ++g_v40_callbacks; }, nullptr) == 0 &&
-              bb.why[0] != 0 && !A->block_at(w, 0, 0, 0, &bi) && !A->find_wall(w, from, to, &bi) && !A->find_wall_ex(w, from, to, EMF_FIND_TERRAIN, &bi) &&
-              !A->find_wall_ex(w, from, to, 0, &bi) && !A->find_wall_ex(w, from, to, 0x80000000u, &bi) && bi.world == -1,
-          "blocks: break_blocks answers 0 with a reason, block_at, find_wall and find_wall_ex false (out untouched)", std::string(bb.why));
+    const float from[3] = {static_cast<float>(F.vpos.x), static_cast<float>(F.vpos.y), static_cast<float>(F.vpos.z)};
+    const float to[3] = {from[0], from[1] + 10, from[2]};
+    const bool got = A->block_at(w, from[0], from[1], from[2], &bi);
+    if (got) check(bi.kind <= EMF_BLOCK_BUILDING && bi.material < 128 && bi.fill <= 255 && bi.hardness <= 5 &&
+                   bi.health >= 0 && bi.damage >= -1 && bi.damage <= 255 && bi.world >= -1 && bi.world <= 1,
+                   "blocks: block_at returns typed cell facts");
+    else skip("blocks: block_at", "unavailable or fixture cell not loaded; inspect build.block_info capability");
+    for (uint32_t flags : {0u, EMF_FIND_TERRAIN}) {
+        EmfBlockInfo hit{}; hit.size = sizeof hit; hit.world = -1;
+        const auto saved = hit;
+        bool found = A->find_wall_ex(w, from, to, flags, &hit);
+        check(found ? (hit.kind == EMF_BLOCK_BUILDING || (flags && hit.kind == EMF_BLOCK_TERRAIN && hit.world == 0))
+                    : std::memcmp(&hit, &saved, sizeof hit) == 0,
+              "blocks: find_wall_ex returns a matching wall or leaves output untouched");
+        if (!flags) {
+            EmfBlockInfo old{}; old.size = sizeof old; old.world = -1;
+            const bool oldFound = A->find_wall(w, from, to, &old);
+            check(oldFound == found && (!found || std::memcmp(&old, &hit, sizeof old) == 0),
+                  "blocks: find_wall equals find_wall_ex flags zero");
+        }
+    }
+    const auto savedInfo = bi;
+    check(!A->find_wall_ex(w, from, to, 0x80000000u, &bi) && std::memcmp(&bi, &savedInfo, sizeof bi) == 0,
+          "blocks: unknown find flags leave output untouched");
     EmfPathPoint vp{0, 0, 0, 0};
     EmfMoveOrder vm{};
     vm.size = sizeof vm;

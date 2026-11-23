@@ -171,13 +171,14 @@ void KILN_CALL on_world_event(const KilnWorldEvent* e, void*) {
     if (!e || e->kind >= KILN_WORLD_KINDS) return;
     if (e->event == KILN_WORLD_STARTED) {
         net_world_started(static_cast<uint8_t>(e->kind));
-        if (e->kind == KILN_WORLD_SERVER) components_world_started();
+        if (e->kind == KILN_WORLD_SERVER) { components_world_started(); terrain_world_started(); }
         windows_world_started(static_cast<uint8_t>(e->kind));
         return;
     }
     if (e->event != KILN_WORLD_STOPPING) return;
     net_world_stopping(static_cast<uint8_t>(e->kind));
     if (e->kind == KILN_WORLD_SERVER) {
+        terrain_world_stopping();
         events_world_stopping();
         components_world_stopping();
     }
@@ -214,6 +215,8 @@ void KILN_CALL on_ready(void*) {
     note_chain_lists();
 
     // services (in-core and DLL services are all published by now)
+    S.build = service<KilnBuildApi>(KILN_BUILD_SERVICE, 1);
+    S.caps = service<KilnCapsApi>(KILN_CAPS_SERVICE, 1);
     S.world = service<KilnWorldApi>(KILN_WORLD_SERVICE, 1);
     S.client = service<KilnClientApi>(KILN_CLIENT_SERVICE, 1);
     S.hooks = service<KilnHooksApi>(KILN_HOOKS_SERVICE, 1);
@@ -260,6 +263,7 @@ void KILN_CALL on_ready(void*) {
 }
 
 void KILN_CALL on_unload(void*) {
+    terrain_world_stopping();
     net_shutdown();
     events_shutdown();
     program_hooks_shutdown();
@@ -292,6 +296,8 @@ void install_ticks() {
 // change (a fault, an unsupported call) is written within 5 s either way. A Pre over 100 ms says which part took it.
 void dispatch_server_pre() {
     g_pre_parts.begin(qpc_ns());
+    terrain_server_pre();
+    g_pre_parts.part("blocks", qpc_ns());
     net_server_pre();
     g_pre_parts.part("net", qpc_ns());
     game_server_pre(&g_pre_parts);
@@ -359,6 +365,7 @@ void write_status() {
                 {"mods", mods}};
     if (g_stepped_aside.empty()) {
         try {
+            doc["blocks"] = json::parse(terrain_status_json());
             doc["unsupported"] = json::parse(unsupported_json());
             doc["commands"] = json::parse(commands_json());
             doc["signatures"] = json::parse(aliases_json());

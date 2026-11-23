@@ -245,6 +245,68 @@ typedef struct KilnBuildGridSpec {
                               builds), y 2^31 - 8 (the engine has no y bound; KilnBuildGrid's 8192 is Kiln's own) */
 } KilnBuildGridSpec;
 
+/* Block queries and controlled breaking. Since 0.2.0-dev.30.6. All three rows are server tick only.
+ * Provenance compares with the shipped world, NOT ownership: a ruin rebuilt with the same material is Natural.
+ * A building's fill byte is paint, so fill=0 is still a building. Metadata/damage -1 means unknown.
+ * Missing qualified engine seams refuse; no unrestricted editing fallback. */
+enum { KILN_BUILD_BLOCK_AIR = 0, KILN_BUILD_BLOCK_TERRAIN = 1, KILN_BUILD_BLOCK_BUILDING = 2 };
+enum { KILN_BUILD_PROVENANCE_UNKNOWN = -1, KILN_BUILD_PROVENANCE_PLAYER = 0, KILN_BUILD_PROVENANCE_NATURAL = 1 };
+enum {
+    KILN_BUILD_BLOCK_NONE = 0, KILN_BUILD_BLOCK_SYMBOL_MISSING = 1,
+    KILN_BUILD_BLOCK_WRONG_SIDE = 4, KILN_BUILD_BLOCK_OFFLINE = 8, KILN_BUILD_BLOCK_NO_SESSION = 9,
+    KILN_BUILD_BLOCK_INVALID = 16, KILN_BUILD_BLOCK_WRONG_THREAD = 17, KILN_BUILD_BLOCK_NOT_LOADED = 18,
+    KILN_BUILD_BLOCK_ZONE = 19, KILN_BUILD_BLOCK_BASE = 20, KILN_BUILD_BLOCK_FAULTED = 21,
+    KILN_BUILD_BLOCK_UNVERIFIED = 22
+};
+enum { KILN_BUILD_FIND_PLAYER_TERRAIN = 1u, KILN_BUILD_FIND_TERRAIN = 2u };
+typedef struct KilnBuildBlockInfo {
+    uint32_t size, refusal;       /* in: sizeof record; out: KILN_BUILD_BLOCK_* refusal */
+    uint32_t kind, material, fill; /* material: raw voxel id, 128..255 for buildings; fill: raw high byte */
+    int32_t provenance;          /* KILN_BUILD_PROVENANCE_*; Unknown when baked cells cannot be read */
+    int32_t hardness, health, damage; /* hardness 0..4, 5 Unbreakable; health points; damage 0..255 or -1 */
+    uint32_t reserved;
+    KilnVec3 center;             /* centre of the cell in world metres */
+} KilnBuildBlockInfo;
+enum {
+    KILN_BUILD_BREAK_INSTANT = 1u, KILN_BUILD_BREAK_DROPS = 2u,
+    KILN_BUILD_BREAK_WORLD = 4u,  /* include natural and unknown-provenance BUILDINGS only */
+    KILN_BUILD_BREAK_TERRAIN = 8u, /* include player-placed terrain only; natural/unknown terrain always spared */
+    KILN_BUILD_BREAK_PROTECTED_SPHERE = 16u /* sphere selection, with building radius shrunk off protected cells */
+};
+enum {
+    KILN_BUILD_BREAK_R_MAY_HAVE_CHANGED = 1u, /* damage mutator/writer entered: partial changes possible; no rollback */
+    KILN_BUILD_BREAK_R_VERIFIED = 2u         /* removed is verified by readback; otherwise it is a lower bound */
+};
+typedef struct KilnBuildBreak {
+    uint32_t size, flags;       /* KILN_BUILD_BREAK_*; unknown bits refused */
+    int32_t origin[3];
+    uint32_t dims[3];           /* loaded exact cell box, at most 4096 cells total */
+    int32_t damage[5];          /* 0..100000 by hardness; all zero = T4 pickaxe: 100,100,95,60,50 */
+    uint32_t reserved;
+    uint8_t materials[32];      /* bitset of RAW voxel ids; all zero = all breakable materials */
+    const uint8_t* selection;   /* optional byte per cell: zero leaves it alone (x fastest, then y, z) */
+    KilnEntity actor;
+    uint32_t build_flags;       /* KILN_BUILD_F_* except UNLOADED/ALLOW_ALTARS; usual zone/base/persistence rules */
+    KilnStr origin_mod;
+    double terrain_health_scale; /* material-health multiplier for accumulated terrain hits; 0 defaults to 1; (0,1e6] */
+    double terrain_heal_seconds; /* forget terrain damage after this inactivity; 0 defaults to 20; (0,86400] */
+    KilnVec3 sphere_center;      /* PROTECTED_SPHERE: metres; selection clips to the original sphere */
+    double sphere_radius;       /* >0; protection scan must fit 4096 cells, including sphere_margin */
+    double sphere_margin;       /* >=0; scan radius+margin, shrink building radius to nearest protected centre-margin */
+    double sphere_minimum;      /* >=0; skip buildings if shrunk radius is below this; terrain uses original sphere */
+} KilnBuildBreak;
+typedef struct KilnBuildBreakResult {
+    uint32_t size, refusal, flags, reserved;
+    uint64_t considered, damaged, removed, dropped;
+    uint64_t protected_cells, unknown_cells, unbreakable_cells, excluded_cells;
+    KilnBuildResult write;      /* underlying writer report; cells_changed may be PLANNED on a failed write */
+} KilnBuildBreakResult;
+
+/* Damage follows the game's mining setting: floor(255*damage[hardness]/health) per hit, healing after 20 seconds;
+ * cracks and drops require their qualified engine seams. INSTANT still spares Unbreakable. Drops use each material's
+ * item/rate, with remainders per server session. Any requested unavailable mode refuses ALL before mutation.
+ * No compensation: once the writer starts, errors may leave committed blocks. Read flags/write before retrying.
+ * Normal policy preflight refuses the complete box, not a best-effort subset. */
 typedef struct KilnBuildApi {
     KilnServiceHeader header; /* { sizeof(KilnBuildApi), KILN_BUILD_VERSION } */
 
@@ -308,20 +370,35 @@ typedef struct KilnBuildApi {
      * every other field is written on KILN_OK only. Any thread but a world's own. */
     KilnResult(KILN_CALL* grid_for_session)(KilnOwner owner, uint64_t expected_session, KilnStr id,
                                             KilnBuildGridSpec* out);
+
+    /* Since 0.2.0-dev.30.6: raw info succeeds with unknown optional metadata/provenance (-1).
+     * find_wall: buildings by default, optional terrain; first crossed cell, including start, at most 64 metres.
+     * PLAYER_TERRAIN skips cells of unknown provenance; the entire mode refuses when provenance is unqualified.
+     * NOT_FOUND with refusal NONE means a clear line. Invalid/short output records are left alone. */
+    KilnResult(KILN_CALL* block_at)(KilnVec3 position, KilnBuildBlockInfo* out);
+    KilnResult(KILN_CALL* find_wall)(KilnVec3 from, KilnVec3 to, uint32_t flags, KilnBuildBlockInfo* out);
+    KilnResult(KILN_CALL* break_box)(const KilnBuildBreak* request, KilnBuildBreakResult* out);
 } KilnBuildApi;
 
 #ifdef __cplusplus
 }
+static_assert(offsetof(KilnBuildApi, block_at) == 160 && offsetof(KilnBuildApi, find_wall) == 168 &&
+                  offsetof(KilnBuildApi, break_box) == 176, "block rows append to kiln.build");
+static_assert(sizeof(KilnBuildBlockInfo) == 64 && sizeof(KilnBuildBreak) == 184 &&
+                  sizeof(KilnBuildBreakResult) == 136 && offsetof(KilnBuildBreak, terrain_health_scale) == 120 &&
+                  offsetof(KilnBuildBreak, terrain_heal_seconds) == 128 && offsetof(KilnBuildBreak, sphere_center) == 136 &&
+                  offsetof(KilnBuildBreak, sphere_radius) == 160 && offsetof(KilnBuildBreak, sphere_margin) == 168 &&
+                  offsetof(KilnBuildBreak, sphere_minimum) == 176, "block records x64 layout");
 static_assert(offsetof(KilnBuildApi, terrain_budget_charge) == 144, "kiln.build v1 ends its dev.29 members at 152");
-static_assert(offsetof(KilnBuildApi, grid_for_session) == 152 && sizeof(KilnBuildApi) == 160,
-              "grid_for_session is appended at 152 (table 160 bytes, x64)");
+static_assert(offsetof(KilnBuildApi, grid_for_session) == 152 && sizeof(KilnBuildApi) == 184,
+              "grid_for_session stays at 152 (table 184 bytes, x64)");
 static_assert(sizeof(KilnBuildGridSpec) == 96 && offsetof(KilnBuildGridSpec, id) == 8 &&
                   offsetof(KilnBuildGridSpec, origin) == 24 && offsetof(KilnBuildGridSpec, cell_size) == 48 &&
                   offsetof(KilnBuildGridSpec, maximum) == 72,
               "KilnBuildGridSpec layout");
 #else
-_Static_assert(offsetof(KilnBuildApi, grid_for_session) == 152 && sizeof(KilnBuildApi) == 160,
-               "grid_for_session is appended at 152 (table 160 bytes, x64)");
+_Static_assert(offsetof(KilnBuildApi, grid_for_session) == 152 && sizeof(KilnBuildApi) == 184,
+               "grid_for_session stays at 152 (table 184 bytes, x64)");
 _Static_assert(sizeof(KilnBuildGridSpec) == 96 && offsetof(KilnBuildGridSpec, maximum) == 72, "KilnBuildGridSpec layout");
 #endif
 #endif
