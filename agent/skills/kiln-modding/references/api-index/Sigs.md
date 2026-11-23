@@ -101,6 +101,117 @@
 - `const SizeOf = 8 -> int` — The struct's size in bytes.
 - `Value -> int` — `value` (s32) at +0x0.
 
+## Sigs.Routines.DecideTask `0.2.16` — The game function `routines/DecideTask` as a typed hook and call: `void (ptr ctx, u8 phase)` (sigdb descriptor; its code reads [rcx, rdx]).
+- `const Capability = "sig/routines/DecideTask" -> string` — The descriptor's capability row: on when the symbol resolved and its code fits the descriptor.
+- `static readonly Descriptor -> SigDescriptor` — The descriptor as kiln.hooks takes it.
+- `static Detour(Sigs.Routines.DecideTask.Handler handler, int priority = 0) -> HookResult` — Hooks the function: `handler` runs on every call, on the calling thread (game worker threads too), in priority order...
+- `const Symbol = "routines/DecideTask" -> string` — The sigdb symbol.
+
+## Sigs.Routines.DecideTask.Call `0.2.16` — One call of the function in flight, inside a `Handler`: its arguments (read and write; a narrow integer is masked to its type), `Call.CallOriginal` and `Call.Skip`.
+- `CallOriginal() -> void` — Runs the rest of the hook chain and the game's function once, with the arguments as they are now; a second call does...
+- `Ctx { get; set; } -> nint` — Argument 1 `ctx` (ptr, rcx).
+- `OriginalCalled { get; } -> bool` — Whether `Call.CallOriginal` ran.
+- `Phase { get; set; } -> byte` — Argument 2 `phase` (u8, rdx).
+- `Skip() -> void` — Ends the call without the game's function: the caller gets nothing.
+
+## Sigs.Routines.DecideTask.Handler `0.2.16` — A handler of the function: it gets the call in flight by reference.
+- `Invoke(ref Sigs.Routines.DecideTask.Call call) -> void`
+
+## Sigs.Routines.FinishState `0.2.16` — The game function `routines/FinishState` as a typed hook and call: `bool (ptr ctx, u8 condition)` (sigdb descriptor; its code reads [rcx, rdx]).
+- `const Capability = "sig/routines/FinishState" -> string` — The descriptor's capability row: on when the symbol resolved and its code fits the descriptor.
+- `static readonly Descriptor -> SigDescriptor` — The descriptor as kiln.hooks takes it.
+- `static Detour(Sigs.Routines.FinishState.Handler handler, int priority = 0) -> HookResult` — Hooks the function: `handler` runs on every call, on the calling thread (game worker threads too), in priority order...
+- `const Symbol = "routines/FinishState" -> string` — The sigdb symbol.
+
+## Sigs.Routines.FinishState.Call `0.2.16` — One call of the function in flight, inside a `Handler`: its arguments (read and write; a narrow integer is masked to its type), its `Call.Result`, `Call.CallOriginal`...
+- `CallOriginal() -> void` — Runs the rest of the hook chain and the game's function once, with the arguments as they are now; a second call does...
+- `Condition { get; set; } -> byte` — Argument 2 `condition` (u8, rdx).
+- `Ctx { get; set; } -> nint` — Argument 1 `ctx` (ptr, rcx).
+- `OriginalCalled { get; } -> bool` — Whether `Call.CallOriginal` ran.
+- `Result { get; set; } -> bool` — The return value (bool, rax): zero until the original ran or the handler set it; what the caller gets.
+- `Skip() -> void` — Ends the call without the game's function: the caller gets `Call.Result` as the handler set it.
+
+## Sigs.Routines.FinishState.Handler `0.2.16` — A handler of the function: it gets the call in flight by reference.
+- `Invoke(ref Sigs.Routines.FinishState.Call call) -> void`
+
+## Sigs.Routines.ProcessCommands `0.2.16` — The game function `routines/ProcessCommands` as a typed hook and call: `void (ptr ctx)` (sigdb descriptor; its code reads [rcx]).
+- `const Capability = "sig/routines/ProcessCommands" -> string` — The descriptor's capability row: on when the symbol resolved and its code fits the descriptor.
+- `static readonly Descriptor -> SigDescriptor` — The descriptor as kiln.hooks takes it.
+- `static Detour(Sigs.Routines.ProcessCommands.Handler handler, int priority = 0) -> HookResult` — Hooks the function: `handler` runs on every call, on the calling thread (game worker threads too), in priority order...
+- `const Symbol = "routines/ProcessCommands" -> string` — The sigdb symbol.
+
+## Sigs.Routines.ProcessCommands.Call `0.2.16` — One call of the function in flight, inside a `Handler`: its arguments (read and write; a narrow integer is masked to its type), `Call.CallOriginal` and `Call.Skip`.
+- `CallOriginal() -> void` — Runs the rest of the hook chain and the game's function once, with the arguments as they are now; a second call does...
+- `Ctx { get; set; } -> nint` — Argument 1 `ctx` (ptr, rcx).
+- `OriginalCalled { get; } -> bool` — Whether `Call.CallOriginal` ran.
+- `Skip() -> void` — Ends the call without the game's function: the caller gets nothing.
+
+## Sigs.Routines.ProcessCommands.Handler `0.2.16` — A handler of the function: it gets the call in flight by reference.
+- `Invoke(ref Sigs.Routines.ProcessCommands.Call call) -> void`
+
+## Sigs.Routines.SetDecision `0.2.16` — The game function `routines/SetDecision` as a typed hook and call: `void (ptr ctx, u8 decision)` (sigdb descriptor; its code reads [rcx, rdx]).
+- `const Capability = "sig/routines/SetDecision" -> string` — The descriptor's capability row: on when the symbol resolved and its code fits the descriptor.
+- `static readonly Descriptor -> SigDescriptor` — The descriptor as kiln.hooks takes it.
+- `static Detour(Sigs.Routines.SetDecision.Handler handler, int priority = 0) -> HookResult` — Hooks the function: `handler` runs on every call, on the calling thread (game worker threads too), in priority order...
+- `const Symbol = "routines/SetDecision" -> string` — The sigdb symbol.
+
+## Sigs.Routines.SetDecision.Call `0.2.16` — One call of the function in flight, inside a `Handler`: its arguments (read and write; a narrow integer is masked to its type), `Call.CallOriginal` and `Call.Skip`.
+- `CallOriginal() -> void` — Runs the rest of the hook chain and the game's function once, with the arguments as they are now; a second call does...
+- `Ctx { get; set; } -> nint` — Argument 1 `ctx` (ptr, rcx).
+- `Decision { get; set; } -> byte` — Argument 2 `decision` (u8, rdx).
+- `OriginalCalled { get; } -> bool` — Whether `Call.CallOriginal` ran.
+- `Skip() -> void` — Ends the call without the game's function: the caller gets nothing.
+
+## Sigs.Routines.SetDecision.Handler `0.2.16` — A handler of the function: it gets the call in flight by reference.
+- `Invoke(ref Sigs.Routines.SetDecision.Call call) -> void`
+
+## Sigs.Routines.SetState `0.2.16` — The game function `routines/SetState` as a typed hook and call: `void (ptr ctx, u8 state)` (sigdb descriptor; its code reads [rcx, rdx]).
+- `const Capability = "sig/routines/SetState" -> string` — The descriptor's capability row: on when the symbol resolved and its code fits the descriptor.
+- `static readonly Descriptor -> SigDescriptor` — The descriptor as kiln.hooks takes it.
+- `static Detour(Sigs.Routines.SetState.Handler handler, int priority = 0) -> HookResult` — Hooks the function: `handler` runs on every call, on the calling thread (game worker threads too), in priority order...
+- `const Symbol = "routines/SetState" -> string` — The sigdb symbol.
+
+## Sigs.Routines.SetState.Call `0.2.16` — One call of the function in flight, inside a `Handler`: its arguments (read and write; a narrow integer is masked to its type), `Call.CallOriginal` and `Call.Skip`.
+- `CallOriginal() -> void` — Runs the rest of the hook chain and the game's function once, with the arguments as they are now; a second call does...
+- `Ctx { get; set; } -> nint` — Argument 1 `ctx` (ptr, rcx).
+- `OriginalCalled { get; } -> bool` — Whether `Call.CallOriginal` ran.
+- `Skip() -> void` — Ends the call without the game's function: the caller gets nothing.
+- `State { get; set; } -> byte` — Argument 2 `state` (u8, rdx).
+
+## Sigs.Routines.SetState.Handler `0.2.16` — A handler of the function: it gets the call in flight by reference.
+- `Invoke(ref Sigs.Routines.SetState.Call call) -> void`
+
+## Sigs.Routines.SleepCheck `0.2.16` — The game function `routines/SleepCheck` as a typed hook and call: `bool (ptr ctx)` (sigdb descriptor; its code reads [rcx]).
+- `const Capability = "sig/routines/SleepCheck" -> string` — The descriptor's capability row: on when the symbol resolved and its code fits the descriptor.
+- `static readonly Descriptor -> SigDescriptor` — The descriptor as kiln.hooks takes it.
+- `static Detour(Sigs.Routines.SleepCheck.Handler handler, int priority = 0) -> HookResult` — Hooks the function: `handler` runs on every call, on the calling thread (game worker threads too), in priority order...
+- `const Symbol = "routines/SleepCheck" -> string` — The sigdb symbol.
+
+## Sigs.Routines.SleepCheck.Call `0.2.16` — One call of the function in flight, inside a `Handler`: its arguments (read and write; a narrow integer is masked to its type), its `Call.Result`, `Call.CallOriginal`...
+- `CallOriginal() -> void` — Runs the rest of the hook chain and the game's function once, with the arguments as they are now; a second call does...
+- `Ctx { get; set; } -> nint` — Argument 1 `ctx` (ptr, rcx).
+- `OriginalCalled { get; } -> bool` — Whether `Call.CallOriginal` ran.
+- `Result { get; set; } -> bool` — The return value (bool, rax): zero until the original ran or the handler set it; what the caller gets.
+- `Skip() -> void` — Ends the call without the game's function: the caller gets `Call.Result` as the handler set it.
+
+## Sigs.Routines.SleepCheck.Handler `0.2.16` — A handler of the function: it gets the call in flight by reference.
+- `Invoke(ref Sigs.Routines.SleepCheck.Call call) -> void`
+
+## Sigs.Routines.VillagerWorker `0.2.16` — The game function `routines/VillagerWorker` as a typed hook and call: `void (ptr ctx)` (sigdb descriptor; its code reads [rcx]).
+- `const Capability = "sig/routines/VillagerWorker" -> string` — The descriptor's capability row: on when the symbol resolved and its code fits the descriptor.
+- `static readonly Descriptor -> SigDescriptor` — The descriptor as kiln.hooks takes it.
+- `static Detour(Sigs.Routines.VillagerWorker.Handler handler, int priority = 0) -> HookResult` — Hooks the function: `handler` runs on every call, on the calling thread (game worker threads too), in priority order...
+- `const Symbol = "routines/VillagerWorker" -> string` — The sigdb symbol.
+
+## Sigs.Routines.VillagerWorker.Call `0.2.16` — One call of the function in flight, inside a `Handler`: its arguments (read and write; a narrow integer is masked to its type), `Call.CallOriginal` and `Call.Skip`.
+- `CallOriginal() -> void` — Runs the rest of the hook chain and the game's function once, with the arguments as they are now; a second call does...
+- `Ctx { get; set; } -> nint` — Argument 1 `ctx` (ptr, rcx).
+- `OriginalCalled { get; } -> bool` — Whether `Call.CallOriginal` ran.
+- `Skip() -> void` — Ends the call without the game's function: the caller gets nothing.
+
+## Sigs.Routines.VillagerWorker.Handler `0.2.16` — A handler of the function: it gets the call in flight by reference.
+- `Invoke(ref Sigs.Routines.VillagerWorker.Call call) -> void`
+
 ## Sigs.Rules.QuatRotate `0.2.4` — The game function `rules/QuatRotate` as a typed hook and call: `ptr (ptr output, ptr rotation, ptr vector)` (sigdb descriptor; its code reads [rcx, rdx, r8]).
 - `const Capability = "sig/rules/QuatRotate" -> string` — The descriptor's capability row: on when the symbol resolved and its code fits the descriptor.
 - `static readonly Descriptor -> SigDescriptor` — The descriptor as kiln.hooks takes it.

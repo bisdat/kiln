@@ -2,48 +2,6 @@
 
 One line per row: header, `Table.row`, @offset, mod API, comment (native.md says more).
 
-## services/kiln_gamedata.h — service `kiln.gamedata`
-### KilnGamedataApi — 160 bytes
-- kiln_gamedata.h `KilnGamedataApi.status` @8 — JSON {ready, sections: {name: {available, count, changed}}, configs, externals, definitions, detail}.
-- kiln_gamedata.h `KilnGamedataApi.count` @16
-- kiln_gamedata.h `KilnGamedataApi.entry_at` @24
-- kiln_gamedata.h `KilnGamedataApi.find` @32 — key: name (exact, then ignoring case), "0x" id, GUID ("\<guid>#k" sub-sequences), "template:\<name>"...
-- kiln_gamedata.h `KilnGamedataApi.get` @40 — A leaf's current value and the game's original.
-- kiln_gamedata.h `KilnGamedataApi.get_json` @48 — Any node as JSON: {"path", "type", "value", "original" (leaves), "writable", "address", "config"}.
-- kiln_gamedata.h `KilnGamedataApi.set` @56
-- kiln_gamedata.h `KilnGamedataApi.set_json` @64 — value_json: any JSON value for the path (fans out over [*] and objects). report: {"applied", "errors"}.
-- kiln_gamedata.h `KilnGamedataApi.reset` @72 — Takes owner's layers of that path (and below) off.
-- kiln_gamedata.h `KilnGamedataApi.fields` @80 — Every leaf below 'prefix' (empty: the whole entry) as a JSON array [{"path", "type", "value"...
-- kiln_gamedata.h `KilnGamedataApi.dump` @88 — Writes entries as JSON (key empty: the whole section, one entry per line) to path (empty...
-- kiln_gamedata.h `KilnGamedataApi.configs` @96 — The config vocabulary: [{"id": "0xaf236ece", "names": ["ManaCost"], "programs": n, "type": "..."}].
-- kiln_gamedata.h `KilnGamedataApi.register_section` @104
-- kiln_gamedata.h `KilnGamedataApi.unregister_section` @112
-- kiln_gamedata.h `KilnGamedataApi.define` @120 — Clones (data-pack "add" lists): a JSON object {"guid", "name", "base", "fields": {...}}; report as...
-- kiln_gamedata.h `KilnGamedataApi.definitions` @128
-- kiln_gamedata.h `KilnGamedataApi.buff_budget` @136 `0.2.4` — buff clones that answer: appended since 0.2.0-dev.29 (version stays 1).
-- kiln_gamedata.h `KilnGamedataApi.define_buff_result` @144 `0.2.4` — Defines a buff clone (clone_json as define(): {"guid", "name", "base", "fields", "displayName"...
-- kiln_gamedata.h `KilnGamedataApi.buff_registration` @152 `0.2.4` — The answer for registration_id now (what became of the definition since: registered, superseded by a later...
-
-## services/kiln_gameplay.h — service `kiln.gameplay`
-### KilnGameplayApi — 144 bytes
-- kiln_gameplay.h `KilnGameplayApi.subscribe` @8 — kinds_mask: bit (1 \<\< KILN_GAMEPLAY_*).
-- kiln_gameplay.h `KilnGameplayApi.unsubscribe` @16
-- kiln_gameplay.h `KilnGameplayApi.zone_add` @24 — Zones. *out_id never 0.
-- kiln_gameplay.h `KilnGameplayApi.zone_update` @32
-- kiln_gameplay.h `KilnGameplayApi.zone_remove` @40
-- kiln_gameplay.h `KilnGameplayApi.zone_denies` @48 — Would 'action' (one KILN_GAMEPLAY_DENY_* bit) by 'player' at 'position' be denied? *out_zone = the zone.
-- kiln_gameplay.h `KilnGameplayApi.inject` @56 — Queues one request event; Kiln's program sends it in the next step, so it is seen (and may be canceled) in...
-- kiln_gameplay.h `KilnGameplayApi.watch` @64 — Adds / removes an entity to the teleport watch list (players are always watched).
-- kiln_gameplay.h `KilnGameplayApi.status` @72
-- kiln_gameplay.h `KilnGameplayApi.recipe` @80 — Recipes.
-- kiln_gameplay.h `KilnGameplayApi.workshop_recipes` @88 — The recipe ids a workshop offers; *out_count = how many (BUFFER_TOO_SMALL when more than capacity).
-- kiln_gameplay.h `KilnGameplayApi.entity_filter` @96 — Which KILN_GAMEPLAY_ENTITY_* categories ENTITY_JOINED / ENTITY_LEFT report (0 = none: the hooks only test...
-- kiln_gameplay.h `KilnGameplayApi.spawn_replace` @104 — Natural-spawn template replacement, decided inside random_spawner's QueueSpawn call (worker thread, from...
-- kiln_gameplay.h `KilnGameplayApi.spawn_replace_clear` @112 — Removes every replacement rule of 'owner' (a mod unloading).
-- kiln_gameplay.h `KilnGameplayApi.component_change` @120 `0.2.0` — Queues one change of an interaction-offer component on 'entity' (never a player).
-- kiln_gameplay.h `KilnGameplayApi.request_build` @128 `0.2.4` — First-use build interest, AnyThread.
-- kiln_gameplay.h `KilnGameplayApi.request_hooks` @136 `0.2.4` — AnyThread.
-
 ## services/kiln_gemcraft.h — service `kiln.gemcraft`
 ### KilnGemcraftApi — 120 bytes
 - kiln_gemcraft.h `KilnGemcraftApi.status` @8 `0.2.5`
@@ -182,6 +140,49 @@ One line per row: header, `Table.row`, @offset, mod API, comment (native.md says
 ### KilnLogApi — 16 bytes
 - kiln_log.h `KilnLogApi.line_time` @8 `0.2.4` — In a KilnLogLineFn callback, on Kiln's log thread: when the game logged the line being delivered (see above).
 
+## services/kiln_markers.h — service `kiln.markers`, `kiln.markers.bridge`
+### KilnMarkersApi — 144 bytes
+- kiln_markers.h `KilnMarkersApi.bind_owner` @8 `0.2.16` — bind_owner: KILN_OK (also again with the same namespace); KILN_ERR_INVALID_ARGUMENT: owner 0, a namespace...
+- kiln_markers.h `KilnMarkersApi.release_owner` @16 `0.2.16`
+- kiln_markers.h `KilnMarkersApi.catalog_count` @24 `0.2.16` — The icon catalog: 0 and 0 while it warms up. catalog_at: KILN_ERR_NOT_FOUND past the end. catalog_resolve...
+- kiln_markers.h `KilnMarkersApi.catalog_at` @32 `0.2.16`
+- kiln_markers.h `KilnMarkersApi.catalog_resolve` @40 `0.2.16`
+- kiln_markers.h `KilnMarkersApi.world_epoch` @48 `0.2.16` — world_epoch: the service's epoch of that world kind's current world, 0 when there is none.
+- kiln_markers.h `KilnMarkersApi.capture_anchor` @56 `0.2.16`
+- kiln_markers.h `KilnMarkersApi.release_anchor` @64 `0.2.16`
+- kiln_markers.h `KilnMarkersApi.set_local` @72 `0.2.16` — The local store (client): validate, reserve, intern and commit under a short lock; no game call, no callback.
+- kiln_markers.h `KilnMarkersApi.remove_local` @80 `0.2.16`
+- kiln_markers.h `KilnMarkersApi.clear_local` @88 `0.2.16`
+- kiln_markers.h `KilnMarkersApi.send` @96 `0.2.16` — Server layers (recipient 0 = the broadcast layer).
+- kiln_markers.h `KilnMarkersApi.unsend` @104 `0.2.16`
+- kiln_markers.h `KilnMarkersApi.clear_sent` @112 `0.2.16`
+- kiln_markers.h `KilnMarkersApi.suppress_sent` @120 `0.2.16`
+- kiln_markers.h `KilnMarkersApi.subscribe` @128 `0.2.16` — subscribe: every change of every publisher, as immutable copies valid for the call.
+- kiln_markers.h `KilnMarkersApi.unsubscribe` @136 `0.2.16`
+### KilnMarkersBridgeApi — 48 bytes
+- kiln_markers.h `KilnMarkersBridgeApi.attach` @8 `0.2.16`
+- kiln_markers.h `KilnMarkersBridgeApi.peer_up` @16 `0.2.16`
+- kiln_markers.h `KilnMarkersBridgeApi.peer_down` @24 `0.2.16`
+- kiln_markers.h `KilnMarkersBridgeApi.receive` @32 `0.2.16`
+- kiln_markers.h `KilnMarkersBridgeApi.pump` @40 `0.2.16`
+
+## services/kiln_markers_lab.h — service `kiln.markers.lab`
+### KilnMarkersLabApi — 32 bytes
+- kiln_markers_lab.h `KilnMarkersLabApi.follow_now` @8 `0.2.16` — The follow read of the owner's lease now, as a world's Post does it for a stored record (the lease's world...
+- kiln_markers_lab.h `KilnMarkersLabApi.stats` @16 `0.2.16` — Counters (any thread).
+- kiln_markers_lab.h `KilnMarkersLabApi.create_raw` @24 `0.2.16` — The game's immediate create on the server world with requested_id (0: the engine picks one), the template...
+
+## services/kiln_mod_values.h — service `kiln.mod-values`
+### KilnModValuesApi — 72 bytes
+- kiln_mod_values.h `KilnModValuesApi.owner_namespace` @8 `0.2.16` — The owner's namespace as UTF-8 with a NUL. *required (not NULL) gets the bytes it needs, NUL included (at...
+- kiln_mod_values.h `KilnModValuesApi.describe` @16 `0.2.16` — Makes local_id known in the owner's namespace without activating it (labels, formats, kind for UI before...
+- kiln_mod_values.h `KilnModValuesApi.define` @24 `0.2.16` — Describes and activates local_id (stats.own, server tick thread).
+- kiln_mod_values.h `KilnModValuesApi.read` @32 `0.2.16` — A character's value, also of a character that is offline (stats.own, server tick thread).
+- kiln_mod_values.h `KilnModValuesApi.change` @40 `0.2.16` — Changes a value of the owner's own namespace for a character in game (stats.own, server tick thread)....
+- kiln_mod_values.h `KilnModValuesApi.read_synced` @48 `0.2.16` — Client, any thread (stats.sync): this player's copy of a value as the server last sent it, read with the...
+- kiln_mod_values.h `KilnModValuesApi.subscribe` @56 `0.2.16` — fn(change, user) for each event of event_scope whose key passes qualified_filter: "namespace:id" (one...
+- kiln_mod_values.h `KilnModValuesApi.unsubscribe` @64 `0.2.16` — Any thread.
+
 ## services/kiln_net.h — service `kiln.net`
 ### KilnNetApi — 184 bytes
 - kiln_net.h `KilnNetApi.status` @8
@@ -315,6 +316,19 @@ One line per row: header, `Table.row`, @offset, mod API, comment (native.md says
 - kiln_queries.h `KilnQueriesApi.path_poll` @40 `0.2.3`
 - kiln_queries.h `KilnQueriesApi.path_retire` @48 `0.2.3`
 
+## services/kiln_registry.h — service `kiln.registry`
+### KilnRegistryApi — 88 bytes
+- kiln_registry.h `KilnRegistryApi.status` @8 `0.2.16` — Where the registry stands, as one snapshot.
+- kiln_registry.h `KilnRegistryApi.schema_json` @16 `0.2.16` — The registry schemas (schema/registry/\<registry>.json: registries, fields with type, range, unit, applies...
+- kiln_registry.h `KilnRegistryApi.field_info` @24 `0.2.16` — One field: "\<registry>.\<field>" ("items.maxStack", "items.damage.fire").
+- kiln_registry.h `KilnRegistryApi.subscribe_stage` @32 `0.2.16` — A mod's turn in each stage (the native form of C#'s Mod.OnRegistry; Kiln.Host uses it for every Kiln mod...
+- kiln_registry.h `KilnRegistryApi.submit` @40 `0.2.16` — One IR batch (schema/registry-ir.schema.json) of owner's.
+- kiln_registry.h `KilnRegistryApi.read` @48 `0.2.16` — One field of one entry in a view (KILN_REGISTRY_VIEW_*), as JSON (a number, true/false, a name, an id, a...
+- kiln_registry.h `KilnRegistryApi.select` @56 `0.2.16` — The ids a selector names in a view, as a JSON array in the registry's order. selector_json: an IR...
+- kiln_registry.h `KilnRegistryApi.report_json` @64 `0.2.16` — The body of state/registry.json for the current generation (schema/state-registry.schema.json): every...
+- kiln_registry.h `KilnRegistryApi.subscribe_ready` @72 `0.2.16` — fn runs at START, on the stage thread right after the stage, and at each WORLDLOAD (each application of...
+- kiln_registry.h `KilnRegistryApi.unsubscribe` @80 `0.2.16` — Removes a subscription of subscribe_stage or subscribe_ready.
+
 ## services/kiln_render.h — service `kiln.render`
 ### KilnRenderApi — 152 bytes
 - kiln_render.h `KilnRenderApi.status` @8 `0.2.0`
@@ -336,20 +350,54 @@ One line per row: header, `Table.row`, @offset, mod API, comment (native.md says
 - kiln_render.h `KilnRenderApi.outline_clear` @136 `0.2.13`
 - kiln_render.h `KilnRenderApi.outline_status` @144 `0.2.13`
 
-## services/kiln_repl.h — service `kiln.repl`
+## services/kiln_repl.h — service `kiln.repl`, `kiln.repl.lab`, `kiln.repl.net`
 ### KilnReplApi — 104 bytes
 - kiln_repl.h `KilnReplApi.capabilities` @8 `0.2.3`
-- kiln_repl.h `KilnReplApi.stats_enable` @16 `0.2.3` — Reference-counted per owner: the first enable installs the stats hooks and zeroes the counters, the last...
-- kiln_repl.h `KilnReplApi.peer_stats` @24 `0.2.3` — KILN_ERR_BUFFER_TOO_SMALL
-- kiln_repl.h `KilnReplApi.watch` @32 `0.2.3`
-- kiln_repl.h `KilnReplApi.remove` @40 `0.2.3` — any handle this service returned
+- kiln_repl.h `KilnReplApi.stats_enable` @16 `0.2.3` — Reference-counted per owner (an owner holds one reference; enabling twice is once): the first enable of...
+- kiln_repl.h `KilnReplApi.peer_stats` @24 `0.2.3` — One row per machine and channel with anything counted; *count = the rows (also with...
+- kiln_repl.h `KilnReplApi.watch` @32 `0.2.3` — What 'peer_or_all' (KILN_REPL_ALL_MACHINES, or a peer handle as peer_stats names it, a fake's too) is sent...
+- kiln_repl.h `KilnReplApi.remove` @40 `0.2.3` — Any handle this service returned; any thread.
 - kiln_repl.h `KilnReplApi.component_info` @48 `0.2.3` — The registry's facts about a component, from the live world (cached at its first Pre).
-- kiln_repl.h `KilnReplApi.capture` @56 `0.2.3`
+- kiln_repl.h `KilnReplApi.capture` @56 `0.2.3` — Since 0.2.0-dev.31: writes everything 'peer' is sent for 'seconds' (1..600) as JSON lines...
 - kiln_repl.h `KilnReplApi.lab_add_fakes` @64 `0.2.3` — lab: the loopback harness; since 0.2.0-dev.28; check header.size ---- Adds 'count' (1..16) fakes on the...
 - kiln_repl.h `KilnReplApi.lab_force_relevant` @72 `0.2.3` — Makes 'entity' relevant to fake 'machine' on both channels, from the next frame on (at most 64 per fake).
 - kiln_repl.h `KilnReplApi.lab_remove_fakes` @80 `0.2.3` — Stops the fakes and lets the game free their replication objects (the world's slot bits go).
 - kiln_repl.h `KilnReplApi.lab_stats` @88 `0.2.3`
 - kiln_repl.h `KilnReplApi.lab_decoded` @96 `0.2.3` — The newest state the harness decoded for 'entity' on fake 'machine''s client channel: the bytes of...
+### KilnReplLabApi — 24 bytes
+- kiln_repl.h `KilnReplLabApi.payload` @8 `0.2.16` — The payload (the bytes after the message header) of the newest message of 'kind' (KILN_REPL_KIND_CREATE or...
+- kiln_repl.h `KilnReplLabApi.hook_cost` @16 `0.2.16` — What kiln.repl's own hook code costs (measured on lab servers only), since the last call with reset =...
+### KilnReplNetApi — 144 bytes
+- kiln_repl.h `KilnReplNetApi.capabilities` @8 `0.2.16`
+- kiln_repl.h `KilnReplNetApi.remove` @16 `0.2.16` — Any handle this table returned (track, filter, message hook); any thread; takes effect before the next...
+- kiln_repl.h `KilnReplNetApi.track` @24 `0.2.16` — Tracking.
+- kiln_repl.h `KilnReplNetApi.peer_entities` @32 `0.2.16` — The entities in the peer's client-channel state map (relevant to it now). *count = how many (also with...
+- kiln_repl.h `KilnReplNetApi.filter_add` @40 `0.2.16` — Filters: fn edits component component_hash of every snapshot sent to peers (peer_count 0 = every peer) on...
+- kiln_repl.h `KilnReplNetApi.filter_set_peers` @48 `0.2.16` — Another peer set for a filter; touches the entities whose output changes.
+- kiln_repl.h `KilnReplNetApi.touch` @56 `0.2.16` — Marks e for re-sending on the client channel without changing a byte (the touch program runs in the next...
+- kiln_repl.h `KilnReplNetApi.remap_set` @64 `0.2.16` — The item remap.
+- kiln_repl.h `KilnReplNetApi.remap_peers` @72 `0.2.16` — The peers the remap applies to (vanilla peers, Kiln peers without the content); touches what changes.
+- kiln_repl.h `KilnReplNetApi.remap_stats` @80 `0.2.16`
+- kiln_repl.h `KilnReplNetApi.message_hook` @88 `0.2.16` — Message hooks on the game's channels (not 4, 5, 12, 14, 17): directions KILN_REPL_SEND | KILN_REPL_RECEIVE.
+- kiln_repl.h `KilnReplNetApi.message_inject` @96 `0.2.16` — Sends data to peer on channel as a game message: the schema channels a peer's machine socket carries (1...
+- kiln_repl.h `KilnReplNetApi.schema_find` @104 `0.2.16` — The game's message codec. schema_find: a message schema by its name (*out_size its struct's bytes).
+- kiln_repl.h `KilnReplNetApi.schema_fields` @112 `0.2.16`
+- kiln_repl.h `KilnReplNetApi.schema_decode` @120 `0.2.16` — Decodes length bytes into out (zeroed first; out_size at least the schema's size).
+- kiln_repl.h `KilnReplNetApi.schema_encode` @128 `0.2.16`
+- kiln_repl.h `KilnReplNetApi.peers` @136 `0.2.16` — Each machine's peer as the last Pre saw it (kiln_repl.h "Machines and peers"): out_peers[m] the peer...
+
+## services/kiln_routines.h — service `kiln.routines`
+### KilnRoutinesApi — 88 bytes
+- kiln_routines.h `KilnRoutinesApi.assign` @8 `0.2.16` — Queues "bind this plan to the villager".
+- kiln_routines.h `KilnRoutinesApi.remove` @16 `0.2.16` — Queues "take the routine off the villager".
+- kiln_routines.h `KilnRoutinesApi.resume` @24 `0.2.16` — Queues "end the manual suspension".
+- kiln_routines.h `KilnRoutinesApi.inspect` @32 `0.2.16` — The villager's snapshot as JSON (not NUL-terminated).
+- kiln_routines.h `KilnRoutinesApi.revoke_owner` @40 `0.2.16` — The owner is going (its mod unloads): at the next Pre its queued changes are dropped without a call and...
+- kiln_routines.h `KilnRoutinesApi.subscribe_events` @48 `0.2.16` — Framework only (Kiln.Blocks): the events above.
+- kiln_routines.h `KilnRoutinesApi.unsubscribe_events` @56 `0.2.16`
+- kiln_routines.h `KilnRoutinesApi.restore` @64 `0.2.16` — Framework only (Kiln.Blocks, when a world is ready after a restart): queues "bind this saved assignment...
+- kiln_routines.h `KilnRoutinesApi.set_revision_floor` @72 `0.2.16` — Framework only: the next revision the world gives is above floor (the highest revision a saved world ever...
+- kiln_routines.h `KilnRoutinesApi.claim_mod` @80 `0.2.16` — Framework only: 'owner' is the owner mod 'mod_id''s calls come with (see Owners above).
 
 ## services/kiln_rules.h — service `kiln.rules`
 ### KilnRulesApi — 72 bytes
@@ -414,40 +462,13 @@ One line per row: header, `Table.row`, @offset, mod API, comment (native.md says
 - kiln_spawn.h `KilnSpawnApi.world_state` @120 — thread-safe.
 - kiln_spawn.h `KilnSpawnApi.capabilities` @128 — thread-safe.
 
-## services/kiln_stations.h — service `kiln.stations`
-### KilnStationsApi — 288 bytes
-- kiln_stations.h `KilnStationsApi.status` @8 `0.2.6`
-- kiln_stations.h `KilnStationsApi.base_count` @16 `0.2.6` — The game's bases. base_at: index 0..count-1. base_of: the base the entity stands in (KILN_ERR_NOT_FOUND...
-- kiln_stations.h `KilnStationsApi.base_at` @24 `0.2.6`
-- kiln_stations.h `KilnStationsApi.base_of` @32 `0.2.6`
-- kiln_stations.h `KilnStationsApi.base_at_position` @40 `0.2.6`
-- kiln_stations.h `KilnStationsApi.base_storage` @48 `0.2.6` — A base's crafting-stock containers / water sources in the game's order; its stock summed per item (stock...
-- kiln_stations.h `KilnStationsApi.base_water` @56 `0.2.6`
-- kiln_stations.h `KilnStationsApi.base_stock` @64 `0.2.6`
-- kiln_stations.h `KilnStationsApi.stations` @72 `0.2.6` — Production stations: base_index -1 = all, else those in that base.
-- kiln_stations.h `KilnStationsApi.station_read` @80 `0.2.6` — KILN_ERR_NOT_FOUND: the entity has no FactoryStation.
-- kiln_stations.h `KilnStationsApi.recipe` @88 `0.2.6` — Recipes: KILN_ERR_NOT_FOUND for an unknown id. recipe_inputs: the game's own resolution with choices (NULL...
-- kiln_stations.h `KilnStationsApi.recipe_inputs` @96 `0.2.6`
-- kiln_stations.h `KilnStationsApi.category` @104 `0.2.6` — Ingredient categories (22 in the game's data): the options of one (item, scaling); category_at walks them.
-- kiln_stations.h `KilnStationsApi.category_at` @112 `0.2.6`
-- kiln_stations.h `KilnStationsApi.workshop_recipes` @120 `0.2.6` — The recipes of a workshop (a station's Crafting.workshopId).
-- kiln_stations.h `KilnStationsApi.plan` @128 `0.2.6` — What a FILL request would do now (no game function runs).
-- kiln_stations.h `KilnStationsApi.submit` @136 `0.2.6` — Queues an action.
-- kiln_stations.h `KilnStationsApi.cancel` @144 `0.2.6` — Drops an action's callback (the action may still run).
-- kiln_stations.h `KilnStationsApi.watch` @152 `0.2.6` — Events are collected while any watch is on (each on() needs an off()); they cost a scan every 32 steps and...
-- kiln_stations.h `KilnStationsApi.events` @160 `0.2.6` — Events with seq > after, oldest first (the last 1024 are kept).
-- kiln_stations.h `KilnStationsApi.last_seq` @168 `0.2.6`
-- kiln_stations.h `KilnStationsApi.set_output_source` @176 `0.2.9` — since 0.2.0-dev.29.17 (header.size tells whether these are here) ---- Station outputs as crafting stock...
-- kiln_stations.h `KilnStationsApi.output_sources` @184 `0.2.9` — The opted-in stations, in the order a fill uses them (entity order).
-- kiln_stations.h `KilnStationsApi.max_chests` @192 `0.2.9` — KILN_STATIONS_MAX_CHESTS.
-- kiln_stations.h `KilnStationsApi.collect` @200 `0.2.9` — Moves a station's finished stacks, each through kiln.items' move (the game's slot transfer...
-- kiln_stations.h `KilnStationsApi.base_stock_with_stations` @208 `0.2.9` — base_stock plus the finished outputs still in this base's production stations (Bases.StockWithStations).
-- kiln_stations.h `KilnStationsApi.set_craft_stock` @216 `0.2.9` — A Kiln client's snapshot of the crafting stock its crafting menu may count: per item, the player's bag...
-- kiln_stations.h `KilnStationsApi.craft_items` @224 `0.2.9` — The items a Kiln client must have counted to raise a recipe's count with station outputs: every input (an...
-- kiln_stations.h `KilnStationsApi.set_fill_answers` @232 `0.2.11` — the station screen's fill buttons for Kiln clients, GitHub #68 (since 0.2.0-dev.29.19; header.size tells)...
-- kiln_stations.h `KilnStationsApi.fill_asks` @240 `0.2.11` — The fills the station screen asked the game about while the snapshot was on, that the game refused for...
-- kiln_stations.h `KilnStationsApi.add_source` @248 `0.2.15` — player crafting sources, since 0.2.0-dev.30.6; capability crafting.sources ---- Tick thread, server world.
-- kiln_stations.h `KilnStationsApi.remove_source` @256 `0.2.15` — Any thread.
-- kiln_stations.h `KilnStationsApi.cancel_sources` @264 `0.2.15` — Any thread: remove this owner's registrations (also called by kiln.items.cancel_owner).
-- kiln_stations.h `KilnStationsApi.source_stock` @272 `0.2.15` — Tick thread: the registered sources' filtered extra counts, beyond the bag, current base stock and...
-- kiln_stations.h `KilnStationsApi.set_dye_stock` @280 `0.2.15` — Since 0.2.0-dev.30.6: a Kiln server's supported dye-source announcement for the local player.
+## services/kiln_station_menus.h — service `kiln.stationmenus`
+### KilnStationMenusApi — 72 bytes
+- kiln_station_menus.h `KilnStationMenusApi.info` @8 `0.2.16`
+- kiln_station_menus.h `KilnStationMenusApi.define` @16 `0.2.16` — Stores 'record' as owner's layer for its definition id. *out: the layer's handle (the same for a...
+- kiln_station_menus.h `KilnStationMenusApi.remove` @24 `0.2.16` — Removes a layer.
+- kiln_station_menus.h `KilnStationMenusApi.export_layouts` @32 `0.2.16` — The effective local layouts: {"format":1,"generation":N,"menus":[records sorted by workshopId]}. *out_len...
+- kiln_station_menus.h `KilnStationMenusApi.remote_replace` @40 `0.2.16` — Replaces the whole remote collection with 'snapshot' ({"format":1,"generation":N,"menus":[records]})...
+- kiln_station_menus.h `KilnStationMenusApi.remote_clear` @48 `0.2.16` — No remote collection any more (left the server): local layers show again.
+- kiln_station_menus.h `KilnStationMenusApi.set_pending` @56 `0.2.16` — on 1: a mod's own workshops list nothing (waiting for the server's menus); 0: as their layouts say.
+- kiln_station_menus.h `KilnStationMenusApi.drain_applied` @64 `0.2.16` — What the menu hook built or refused since the last call, oldest first: a JSON array of {"definition"...

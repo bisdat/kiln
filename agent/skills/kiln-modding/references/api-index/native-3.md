@@ -2,6 +2,44 @@
 
 One line per row: header, `Table.row`, @offset, mod API, comment (native.md says more).
 
+## services/kiln_stations.h — service `kiln.stations`
+### KilnStationsApi — 288 bytes
+- kiln_stations.h `KilnStationsApi.status` @8 `0.2.6`
+- kiln_stations.h `KilnStationsApi.base_count` @16 `0.2.6` — The game's bases. base_at: index 0..count-1. base_of: the base the entity stands in (KILN_ERR_NOT_FOUND...
+- kiln_stations.h `KilnStationsApi.base_at` @24 `0.2.6`
+- kiln_stations.h `KilnStationsApi.base_of` @32 `0.2.6`
+- kiln_stations.h `KilnStationsApi.base_at_position` @40 `0.2.6`
+- kiln_stations.h `KilnStationsApi.base_storage` @48 `0.2.6` — A base's crafting-stock containers / water sources in the game's order; its stock summed per item (stock...
+- kiln_stations.h `KilnStationsApi.base_water` @56 `0.2.6`
+- kiln_stations.h `KilnStationsApi.base_stock` @64 `0.2.6`
+- kiln_stations.h `KilnStationsApi.stations` @72 `0.2.6` — Production stations: base_index -1 = all, else those in that base.
+- kiln_stations.h `KilnStationsApi.station_read` @80 `0.2.6` — KILN_ERR_NOT_FOUND: the entity has no FactoryStation.
+- kiln_stations.h `KilnStationsApi.recipe` @88 `0.2.6` — Recipes: KILN_ERR_NOT_FOUND for an unknown id. recipe_inputs: the game's own resolution with choices (NULL...
+- kiln_stations.h `KilnStationsApi.recipe_inputs` @96 `0.2.6`
+- kiln_stations.h `KilnStationsApi.category` @104 `0.2.6` — Ingredient categories (22 in the game's data): the options of one (item, scaling); category_at walks them.
+- kiln_stations.h `KilnStationsApi.category_at` @112 `0.2.6`
+- kiln_stations.h `KilnStationsApi.workshop_recipes` @120 `0.2.6` — The recipes of a workshop (a station's Crafting.workshopId).
+- kiln_stations.h `KilnStationsApi.plan` @128 `0.2.6` — What a FILL request would do now (no game function runs).
+- kiln_stations.h `KilnStationsApi.submit` @136 `0.2.6` — Queues an action.
+- kiln_stations.h `KilnStationsApi.cancel` @144 `0.2.6` — Drops an action's callback (the action may still run).
+- kiln_stations.h `KilnStationsApi.watch` @152 `0.2.6` — Events are collected while any watch is on (each on() needs an off()); they cost a scan every 32 steps and...
+- kiln_stations.h `KilnStationsApi.events` @160 `0.2.6` — Events with seq > after, oldest first (the last 1024 are kept).
+- kiln_stations.h `KilnStationsApi.last_seq` @168 `0.2.6`
+- kiln_stations.h `KilnStationsApi.set_output_source` @176 `0.2.9` — since 0.2.0-dev.29.17 (header.size tells whether these are here) ---- Station outputs as crafting stock...
+- kiln_stations.h `KilnStationsApi.output_sources` @184 `0.2.9` — The opted-in stations, in the order a fill uses them (entity order).
+- kiln_stations.h `KilnStationsApi.max_chests` @192 `0.2.9` — KILN_STATIONS_MAX_CHESTS.
+- kiln_stations.h `KilnStationsApi.collect` @200 `0.2.9` — Moves a station's finished stacks, each through kiln.items' move (the game's slot transfer...
+- kiln_stations.h `KilnStationsApi.base_stock_with_stations` @208 `0.2.9` — base_stock plus the finished outputs still in this base's production stations (Bases.StockWithStations).
+- kiln_stations.h `KilnStationsApi.set_craft_stock` @216 `0.2.9` — A Kiln client's snapshot of the crafting stock its crafting menu may count: per item, the player's bag...
+- kiln_stations.h `KilnStationsApi.craft_items` @224 `0.2.9` — The items a Kiln client must have counted to raise a recipe's count with station outputs: every input (an...
+- kiln_stations.h `KilnStationsApi.set_fill_answers` @232 `0.2.11` — the station screen's fill buttons for Kiln clients, GitHub #68 (since 0.2.0-dev.29.19; header.size tells)...
+- kiln_stations.h `KilnStationsApi.fill_asks` @240 `0.2.11` — The fills the station screen asked the game about while the snapshot was on, that the game refused for...
+- kiln_stations.h `KilnStationsApi.add_source` @248 `0.2.15` — player crafting sources, since 0.2.0-dev.30.6; capability crafting.sources ---- Tick thread, server world.
+- kiln_stations.h `KilnStationsApi.remove_source` @256 `0.2.15` — Any thread.
+- kiln_stations.h `KilnStationsApi.cancel_sources` @264 `0.2.15` — Any thread: remove this owner's registrations (also called by kiln.items.cancel_owner).
+- kiln_stations.h `KilnStationsApi.source_stock` @272 `0.2.15` — Tick thread: the registered sources' filtered extra counts, beyond the bag, current base stock and...
+- kiln_stations.h `KilnStationsApi.set_dye_stock` @280 `0.2.15` — Since 0.2.0-dev.30.6: a Kiln server's supported dye-source announcement for the local player.
+
 ## services/kiln_steamguard.h — service `kiln.steamguard`
 ### KilnSteamGuardApi — 40 bytes
 - kiln_steamguard.h `KilnSteamGuardApi.status` @8 `0.2.1` — The guard's state.
@@ -13,6 +51,20 @@ One line per row: header, `Table.row`, @offset, mod API, comment (native.md says
 ### KilnSurfacesApi — 24 bytes
 - kiln_surfaces.h `KilnSurfacesApi.state` @8
 - kiln_surfaces.h `KilnSurfacesApi.status_json` @16 — JSON: state, each surface with its slot and status, errors, warnings, the streamed-texture count.
+
+## services/kiln_survivors.h — service `kiln.survivors`
+### KilnSurvivorsApi — 96 bytes
+- kiln_survivors.h `KilnSurvivorsApi.status` @8 `0.2.16` — any thread
+- kiln_survivors.h `KilnSurvivorsApi.count` @16 `0.2.16` — Roster entries (count(): 0 before the world's catalog is built).
+- kiln_survivors.h `KilnSurvivorsApi.at` @24 `0.2.16`
+- kiln_survivors.h `KilnSurvivorsApi.get` @32 `0.2.16` — By NpcId.
+- kiln_survivors.h `KilnSurvivorsApi.of_entity` @40 `0.2.16` — The NpcId of a live NPC entity.
+- kiln_survivors.h `KilnSurvivorsApi.bed_occupant` @48 `0.2.16` — The NpcId a bed is assigned to (the bed's side), 0 when free.
+- kiln_survivors.h `KilnSurvivorsApi.base_at` @56 `0.2.16` — The base whose build zone holds 'position': its id (for SUMMON) and its altar; *abandoned 1 when abandoned.
+- kiln_survivors.h `KilnSurvivorsApi.submit` @64 `0.2.16` — KILN_ERR_UNAVAILABLE: the operation's capability is off (status() says why).
+- kiln_survivors.h `KilnSurvivorsApi.result` @72 `0.2.16` — KILN_ERR_NOT_FOUND while it runs, and after it was forgotten (10 minutes, the last 256).
+- kiln_survivors.h `KilnSurvivorsApi.progress` @80 `0.2.16`
+- kiln_survivors.h `KilnSurvivorsApi.events` @88 `0.2.16` — Events with sequence > after, oldest first; *out_count written.
 
 ## services/kiln_tasks.h — service `kiln.tasks`
 ### KilnTasksApi — 56 bytes
@@ -237,6 +289,18 @@ One line per row: header, `Table.row`, @offset, mod API, comment (native.md says
 - kiln_ui_ammo.h `KilnUiAmmoApi.context` @16 `0.2.15` — Any thread, owned copy, set out->size.
 - kiln_ui_ammo.h `KilnUiAmmoApi.take_picks` @24 `0.2.15` — Client main/UI thread.
 
+## services/kiln_ui_blocks.h — service `kiln.ui.blocks`
+### KilnUiBlocksApi — 40 bytes
+- kiln_ui_blocks.h `KilnUiBlocksApi.begin_tab_item_ex` @8 `0.2.16`
+- kiln_ui_blocks.h `KilnUiBlocksApi.set_next_item_open` @16 `0.2.16`
+- kiln_ui_blocks.h `KilnUiBlocksApi.item_state` @24 `0.2.16`
+- kiln_ui_blocks.h `KilnUiBlocksApi.input_text_ex` @32 `0.2.16`
+
+## services/kiln_ui_chest.h — service `kiln.ui.chest`
+### KilnUiChestApi — 24 bytes
+- kiln_ui_chest.h `KilnUiChestApi.subscribe` @8 `0.2.16` — OK+out.ok=0: budget (REGISTRATION_BUDGET/TEXT_BUDGET) or duplicate caption (REJECTED).
+- kiln_ui_chest.h `KilnUiChestApi.unsubscribe` @16 `0.2.16`
+
 ## services/kiln_ui_inventory.h — service `kiln.ui.inventory`
 ### KilnUiInventoryApi — 48 bytes
 - kiln_ui_inventory.h `KilnUiInventoryApi.subscribe_clicks` @8 `0.2.12` — fn(click) for presses matching filter.
@@ -252,6 +316,19 @@ One line per row: header, `Table.row`, @offset, mod API, comment (native.md says
 ## services/kiln_ui_slots.h — service `kiln.ui.slots`
 ### KilnUiSlotsApi — 16 bytes
 - kiln_ui_slots.h `KilnUiSlotsApi.subscribe` @8 `0.2.14` — record_size must be sizeof(KilnUiVisibleSlotV2) = 120.
+
+## services/kiln_ui_snapshot.h — service `kiln.ui.snapshot`
+### KilnUiSnapshotApi — 48 bytes
+- kiln_ui_snapshot.h `KilnUiSnapshotApi.demand_add` @8 `0.2.16`
+- kiln_ui_snapshot.h `KilnUiSnapshotApi.demand_remove` @16 `0.2.16`
+- kiln_ui_snapshot.h `KilnUiSnapshotApi.acquire` @24 `0.2.16`
+- kiln_ui_snapshot.h `KilnUiSnapshotApi.copy` @32 `0.2.16`
+- kiln_ui_snapshot.h `KilnUiSnapshotApi.release` @40 `0.2.16`
+
+## services/kiln_ui_tints.h — service `kiln.ui.tints`
+### KilnUiTintsApi — 24 bytes
+- kiln_ui_tints.h `KilnUiTintsApi.subscribe` @8 `0.2.16` — item_filter=0: all slots.
+- kiln_ui_tints.h `KilnUiTintsApi.unsubscribe` @16 `0.2.16`
 
 ## services/kiln_ui_values.h — service `kiln.ui.values`
 ### KilnUiValuesApi — 152 bytes

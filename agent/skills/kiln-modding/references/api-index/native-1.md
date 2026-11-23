@@ -128,6 +128,10 @@ One line per row: header, `Table.row`, @offset, mod API, comment (native.md says
 - kiln_audio.h `KilnAudioApi.narrate` @88
 - kiln_audio.h `KilnAudioApi.status_json` @96 — Diagnostics as JSON (status, live handles, the game's SoundStart threads). out_len gets the full length.
 
+## services/kiln_base_rules.h — service `kiln.base_rules`
+### KilnBaseRulesApi — 16 bytes
+- kiln_base_rules.h `KilnBaseRulesApi.state` @8 `0.2.16`
+
 ## services/kiln_boot.h — service `kiln.boot`
 ### KilnBootApiV1 — 104 bytes
 - kiln_boot.h `KilnBootApiV1.status` @8 `0.2.3` — The boot phase.
@@ -423,3 +427,45 @@ One line per row: header, `Table.row`, @offset, mod API, comment (native.md says
 ## services/kiln_example.h — service `kiln.example`
 ### KilnExampleApi — 16 bytes
 - kiln_example.h `KilnExampleApi.steps` @8
+
+## services/kiln_gamedata.h — service `kiln.gamedata`
+### KilnGamedataApi — 160 bytes
+- kiln_gamedata.h `KilnGamedataApi.status` @8 — JSON {ready, sections: {name: {available, count, changed}}, configs, externals, definitions, detail}.
+- kiln_gamedata.h `KilnGamedataApi.count` @16
+- kiln_gamedata.h `KilnGamedataApi.entry_at` @24
+- kiln_gamedata.h `KilnGamedataApi.find` @32 — key: name (exact, then ignoring case), "0x" id, GUID ("\<guid>#k" sub-sequences), "template:\<name>"...
+- kiln_gamedata.h `KilnGamedataApi.get` @40 — A leaf's current value and the game's original.
+- kiln_gamedata.h `KilnGamedataApi.get_json` @48 — Any node as JSON: {"path", "type", "value", "original" (leaves), "writable", "address", "config"}.
+- kiln_gamedata.h `KilnGamedataApi.set` @56
+- kiln_gamedata.h `KilnGamedataApi.set_json` @64 — value_json: any JSON value for the path (fans out over [*] and objects). report: {"applied", "errors"}.
+- kiln_gamedata.h `KilnGamedataApi.reset` @72 — Takes owner's layers of that path (and below) off.
+- kiln_gamedata.h `KilnGamedataApi.fields` @80 — Every leaf below 'prefix' (empty: the whole entry) as a JSON array [{"path", "type", "value"...
+- kiln_gamedata.h `KilnGamedataApi.dump` @88 — Writes entries as JSON (key empty: the whole section, one entry per line) to path (empty...
+- kiln_gamedata.h `KilnGamedataApi.configs` @96 — The config vocabulary: [{"id": "0xaf236ece", "names": ["ManaCost"], "programs": n, "type": "..."}].
+- kiln_gamedata.h `KilnGamedataApi.register_section` @104
+- kiln_gamedata.h `KilnGamedataApi.unregister_section` @112
+- kiln_gamedata.h `KilnGamedataApi.define` @120 — Clones (data-pack "add" lists): a JSON object {"guid", "name", "base", "fields": {...}}; report as...
+- kiln_gamedata.h `KilnGamedataApi.definitions` @128
+- kiln_gamedata.h `KilnGamedataApi.buff_budget` @136 `0.2.4` — buff clones that answer: appended since 0.2.0-dev.29 (version stays 1).
+- kiln_gamedata.h `KilnGamedataApi.define_buff_result` @144 `0.2.4` — Defines a buff clone (clone_json as define(): {"guid", "name", "base", "fields", "displayName"...
+- kiln_gamedata.h `KilnGamedataApi.buff_registration` @152 `0.2.4` — The answer for registration_id now (what became of the definition since: registered, superseded by a later...
+
+## services/kiln_gameplay.h — service `kiln.gameplay`
+### KilnGameplayApi — 144 bytes
+- kiln_gameplay.h `KilnGameplayApi.subscribe` @8 — kinds_mask: bit (1 \<\< KILN_GAMEPLAY_*).
+- kiln_gameplay.h `KilnGameplayApi.unsubscribe` @16
+- kiln_gameplay.h `KilnGameplayApi.zone_add` @24 — Zones. *out_id never 0.
+- kiln_gameplay.h `KilnGameplayApi.zone_update` @32
+- kiln_gameplay.h `KilnGameplayApi.zone_remove` @40
+- kiln_gameplay.h `KilnGameplayApi.zone_denies` @48 — Would 'action' (one KILN_GAMEPLAY_DENY_* bit) by 'player' at 'position' be denied? *out_zone = the zone.
+- kiln_gameplay.h `KilnGameplayApi.inject` @56 — Queues one request event; Kiln's program sends it in the next step, so it is seen (and may be canceled) in...
+- kiln_gameplay.h `KilnGameplayApi.watch` @64 — Adds / removes an entity to the teleport watch list (players are always watched).
+- kiln_gameplay.h `KilnGameplayApi.status` @72
+- kiln_gameplay.h `KilnGameplayApi.recipe` @80 — Recipes.
+- kiln_gameplay.h `KilnGameplayApi.workshop_recipes` @88 — The recipe ids a workshop offers; *out_count = how many (BUFFER_TOO_SMALL when more than capacity).
+- kiln_gameplay.h `KilnGameplayApi.entity_filter` @96 — Which KILN_GAMEPLAY_ENTITY_* categories ENTITY_JOINED / ENTITY_LEFT report (0 = none: the hooks only test...
+- kiln_gameplay.h `KilnGameplayApi.spawn_replace` @104 — Natural-spawn template replacement, decided inside random_spawner's QueueSpawn call (worker thread, from...
+- kiln_gameplay.h `KilnGameplayApi.spawn_replace_clear` @112 — Removes every replacement rule of 'owner' (a mod unloading).
+- kiln_gameplay.h `KilnGameplayApi.component_change` @120 `0.2.0` — Queues one change of an interaction-offer component on 'entity' (never a player).
+- kiln_gameplay.h `KilnGameplayApi.request_build` @128 `0.2.4` — First-use build interest, AnyThread.
+- kiln_gameplay.h `KilnGameplayApi.request_hooks` @136 `0.2.4` — AnyThread.

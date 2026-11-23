@@ -182,6 +182,7 @@ enum: None, Female, Hat, Hood, Jaw01, Jaw02, Jaw03, Jaw04, Jaw05, Jaw06, Jaw07, 
 - `Holds { get; init; } -> int?` — A `ItemKind.WateringCan`'s or `ItemKind.WaterPouch`'s capacity, in charges as the game counts them: the game's...
 - `Identity { get; init; } -> BlockIdentity?` `0.2.14` — A fixed GUID (and so game id) in place of the one Kiln derives from the mod and the name...
 - `Kind { get; init; } -> ItemKind?` — Null: a `ItemBlock.Tool` makes a tool, `ItemBlock.Ammo` an arrow, `ItemBlock.Feeds` food, `ItemBlock.Heals` or...
+- `LargeHolds { get; init; } -> bool` `0.2.16` — Lets `ItemBlock.Holds` go past 1,023, up to 65,535 charges.
 - `Level { get; init; } -> int?` — The tooltip's level, for what has one.
 - `Loot { get; init; } -> LootBlock?` — Where else it can be found.
 - `Name { get; init; } -> string` — The item's name, as players read it in its tooltip.
@@ -194,6 +195,7 @@ enum: None, Female, Hat, Hood, Jaw01, Jaw02, Jaw03, Jaw04, Jaw05, Jaw06, Jaw07, 
 - `Texts { get; init; } -> IReadOnlyDictionary<string, ItemTexts>?` — Texts per language: `["de"] = new ItemTexts { Name = "..." }`.
 - `Tool { get; init; } -> ToolBlock?` — What a tool does.
 - `Tweak { get; init; } -> FieldValues` — Game fields this block does not cover, set on the item it makes: `Tweak = { { GameFields.Items.MaxStackSize, 5 } }`.
+- `VanillaLook { get; init; } -> string?` `0.2.16` — The game item players without this mod see in its place (a vanilla client, a Kiln client without this mod's...
 - `Visual { get; init; } -> PartRef<VisualBlock>?` — What it looks like.
 - `Was { get; init; } -> string?` — The name this block had before a rename.
 
@@ -335,6 +337,7 @@ enum: Common, Uncommon, Rare, Epic, Legendary
 - `Identity { get; init; } -> BlockIdentity?` `0.2.14` — A fixed GUID (and so recipe id) in place of the one Kiln derives: `BlockIdentity.Legacy(guid)`, for a recipe another...
 - `Makes { get; init; } -> int` — How many one craft gives.
 - `MenuGroup { get; init; } -> CraftingGroupRef?` `0.2.14` — The tab of the game's crafting menu that lists it, one the game has: `CraftingGroups.Carpenter.Essentials`.
+- `MenuKey { get; init; } -> string?` `0.2.16` — Its name in the menu of a station with tabs of its own (`MenuBlock.Tabs`, `StationMenus.Define`): letters, digits...
 - `Needs { get; init; } -> IDictionary<ItemRef, int>` — Item and count: `GameItems` constants, or an item this mod defines.
 - `NeedsProps { get; init; } -> IReadOnlyList<PropRef>?` — Props that have to stand near the station: blocks that `PropBlock.Provides` one, by handle or name...
 - `Output { get; init; } -> ItemRef?` — What it makes: in a station's `StationBlock.Recipes`, and in a recipe block of its own, where it is needed.

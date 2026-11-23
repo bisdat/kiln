@@ -204,7 +204,7 @@ enum: Items, Recipes, Loot, Drops
 - `const ChannelName = "kiln:content" -> string` — The name of the Kiln.Network channel the sync uses.
 - `const ChannelVersion = "1" -> string` — The version of the sync protocol on that channel.
 - `static CheckRoundTrip() -> ContentRoundTrip` — A self-check of the sync format on this process's own registries (tick thread; a lab / diagnostic tool, also usable...
-- `static Serving { get; } -> (uint StateId, uint Fields, int Bytes, int Parts)?` — Server side: the content state being served (id, fields, document bytes), or null.
+- `static Serving { get; } -> (uint StateId, uint Fields, int Bytes, int Parts)?`
 - `static Status { get; } -> ContentSyncStatus` — Client side: what the content sync did last.
 
 ## ContentSyncedEvent — Client: a Kiln server's content changes were applied to this game's registries (`ContentSyncedEvent.Restored` false), or taken off again after leaving (true).
@@ -668,6 +668,7 @@ enum: Cut, Pierce, Blunt, Fire, Ice, Shroud, Lightning, Poison, Healing, Wood, S
 - `RolledLoot { get; init; } -> bool` — Opt-in for a rolled loot item: keeps the base's `generateRarity` and level range (a loot weapon: levels 1..55), so a...
 - `Source { get; init; } -> string?` — Where to get it, in the tooltip (all languages).
 - `Texts { get; init; } -> IReadOnlyDictionary<string, ItemTexts>?` — Texts per language (`"en"`, `"de"`, `"pt-BR"`, `"*"` = every language).
+- `VanillaLook { get; init; } -> string?` `0.2.16` — The game item players without this item see in its place (a vanilla client, a Kiln client that lacks this mod's...
 - `VisualModels { get; init; } -> IReadOnlyList<(uint Mask, string Model)>?` — A worn item's models for what the character wears and is, the game's `equipment.visualModels`: the client draws the...
 - `WeaponType { get; init; } -> string?` — The weapon category (skills and bonuses that apply to a weapon type): `"item:<name>"` or a weapon category GUID.
 
@@ -764,6 +765,22 @@ enum: Cut, Pierce, Blunt, Fire, Ice, Shroud, Lightning, Poison, Healing, Wood, S
 
 ## RecipeUnlock — How a new recipe is unlocked in the crafting UI.
 enum: Always, LikeBase
+
+## StationMenuAppliedEvent `0.2.16` — Client: a station's menu was built from its layout, or refused (`StationMenuAppliedEvent.Ok` false, `StationMenuAppliedEvent.Reason`: `IconSourceMissing`...
+- `DefinitionId { get; } -> Guid`
+- `FromServer { get; } -> bool` — The layout came from the server (a joined game).
+- `Generation { get; } -> ulong`
+- `Ok { get; } -> bool`
+- `Reason { get; } -> string`
+- `Session { get; } -> Guid` — The server's session of the layout (`Guid.Empty` for a local one).
+- `Workshop { get; } -> uint`
+
+## StationMenuDefinitionChangedEvent `0.2.16` — A station's menu layout was accepted, replaced or taken off (another layer, or the game's own layout, shows again).
+- `DefinitionId { get; } -> Guid` — The definition (the layer): `BlockIds.Derive(mod, "menu-layout", key)`.
+- `Generation { get; } -> ulong` — The local collection's generation after the change.
+- `ModId { get; } -> string` — The mod that defined the layer.
+- `Removed { get; } -> bool` — True: the layer was taken off.
+- `Workshop { get; } -> uint` — The station's own workshop id.
 
 ## Texts — The game's English texts by loca tag.
 - `static Available { get; } -> bool` — True when a table is loaded (this loads it on the first call).

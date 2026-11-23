@@ -1,5 +1,24 @@
 # Build (Kiln.Build)
 
+## AltarSize `0.2.16` — The build zone of one altar level: the full size of the box an altar of that level lets players build in.
+- `AltarSize(int AltarLevel, Vector3 Size)`
+- `AltarLevel { get; init; } -> int` — The altar level, 1 to 5 (an altar's upgrades; the game's table has a 0 for "no altar").
+- `Size { get; init; } -> Vector3` — The full size in metres on each axis (x, y, z).
+
+## BaseLimits `0.2.16` — How many Flame Altars the world may have and how large their build zones are in this start: the game's own table and the one the game runs with (after every mod's...
+- `BaseLimits(int FlameLevel, int CurrentAltars, int OriginalCount, int EffectiveCount, IReadOnlyList<AltarSize> OriginalSizes, IReadOnlyList<AltarSize> EffectiveSizes)`
+- `AppliedRules { get; init; } -> IReadOnlyList<string>` — The base rules in this start's table, as `mod:name`, in load order (empty without any, and when Kiln could not write...
+- `CurrentAltars { get; init; } -> int` — Flame Altars the world has now (the game's progress count).
+- `EffectiveCount { get; init; } -> int` — The count at `FlameLevel` in the table the game runs with.
+- `EffectiveCounts { get; init; } -> IReadOnlyList<int>` — The count the game runs with at every Flame level (index = Flame level, from 0).
+- `EffectiveSizes { get; init; } -> IReadOnlyList<AltarSize>` — The build-zone sizes the game runs with, altar levels 1 to 5.
+- `FlameLevel { get; init; } -> int` — The world's Flame level now.
+- `OriginalCount { get; init; } -> int` — The game's own count at `FlameLevel`.
+- `OriginalCounts { get; init; } -> IReadOnlyList<int>` — The game's own count at every Flame level (index = Flame level, from 0).
+- `OriginalSizes { get; init; } -> IReadOnlyList<AltarSize>` — The game's own build-zone sizes, altar levels 1 to 5.
+- `PatchedBy { get; init; } -> IReadOnlyList<string>` — Mods whose own resource patches of the game's balancing table are in this start's table (a mod that changes the...
+- `RegistryChanged { get; init; } -> IReadOnlyList<string>` — Values a registry edit changed after the base rules (the registry stage composes on the rules' result and wins), one...
+
 ## BlockBreakFlags `0.2.15` — Controlled breaking options.
 enum: None, Instant, Drops, WorldBuildings, PlayerTerrain
 
@@ -69,6 +88,7 @@ enum: None, SymbolMissing, ServiceMissing, ServiceOlder, WrongSide, Offline, NoS
 ## Build — Changes the world the way the game saves and replicates it, so vanilla clients see the result: voxel cells (terrain and building blocks), shape edits (dig, add...
 - `static Add(BuildShape shape, byte material, BuildOptions? options = null) -> Task<BuildResult>` — Fills the shape with `material` (a voxel material id, e.g. from `Build.MaterialOf`).
 - `static Available { get; } -> bool` — True when kiln.build runs on this game build (capability `kiln.build`).
+- `static BaseLimits { get; } -> BaseLimits?` `0.2.16` — How many Flame Altars the world may have now and how large their build zones are: the game's own numbers and the...
 - `static Bases { get; } -> IReadOnlyList<PlayerBase>` — Player bases (the game's base build zones, rebuilt every step).
 - `static BlockAt(WorldPosition position) -> BlockQueryResult` `0.2.15` — Reads a loaded cell on the server tick.
 - `static BoxAround(WorldPosition center, double halfX, double halfY, double halfZ) -> CellBox` — The cells covering `center` +/- half extents (metres).

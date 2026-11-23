@@ -1,42 +1,5 @@
 # Quests (Kiln.Quests): part 2 of 2
 
-## NativeQuests — What was built at boot from the mods' quests/*.json, and the run-time glue.
-- `static Counters { get; } -> (ulong Mirrored, ulong Lines, ulong Placed)` — Mirrored knowledge changes, dialogue options run, NPCs and markers placed.
-- `static GetClientRosterWorld() -> RosterWorldResult` `0.2.4` — This process's client world as a token for `NativeQuests.GetClientUnlock` and `NativeQuests.GetRosterBudget`; as...
-- `static GetClientUnlock(uint npcId, CapacityWorldToken clientWorld) -> NpcUnlockResult` `0.2.4` — The unlock state of `npcId` in the client world `clientWorld` names; as `NativeQuests.GetUnlock`.
-- `static GetRosterBudget(CapacityWorldToken world) -> CapacityQueryResult` `0.2.4` — The roster entries of the world `world` names: `CapacityInfo.Capacity` 64, or 128 where Kiln's second page is...
-- `static GetServerRosterWorld() -> RosterWorldResult` `0.2.4` — This process's server world (a dedicated server's, or a hosting client's) as a token for `NativeQuests.GetUnlock`...
-- `static GetUnlock(uint npcId, CapacityWorldToken serverWorld) -> NpcUnlockResult` `0.2.4` — The unlock state of the roster entry `npcId` in the server world `serverWorld` names, from the snapshot of that...
-- `static Holds(NativeComputed c, QuestHolder holder) -> bool` — What the engine says now of a line's computed knowledge, for a holder (`NativeModInfo.Computed`).
-- `static KnowledgeId(string mod, string name) -> uint?` — A mod's native object by name ("met_ilse", "q.lost_letter.active"); null when the build does not have it.
-- `static ManifestJson { get; } -> string` — The manifest as the service wrote it (JSON).
-- `static Mod(string id) -> NativeModInfo?` — A mod's native data by mod id; null when the mod has none.
-- `static Mods { get; } -> IReadOnlyList<NativeModInfo>` — Every mod with native data (a mod with errors is listed with Ok = false and built nothing).
-- `static Npc(string fullId) -> NativeNpcInfo?` — An NPC the boot build made or changed, by full id; null when there is none.
-- `static Quest(string fullId) -> NativeQuestInfo?` — A quest the boot build made, by full id (`<mod>:<id>`); null when there is none.
-- `static Resync(QuestHolder holder, bool quiet = false) -> void` — Writes a holder's knowledge again from the engine's records: every quest, what differs.
-- `const RosterPage = 64 -> int` `0.2.4` — The roster's maximum the game's own value allows: 64 entries, the game's included.
-- `static ShownByGame(QuestDefinition q) -> bool` — The game's journal shows this quest: it says native and the boot build made it.
-- `static Start() -> void` — Starts the mirror, the dialogue options and the placement (the engine calls this; idempotent).
-- `static Wanted(string fullQuestId, QuestHolder holder) -> IReadOnlyList<NativeWanted>` — What the game's knowledge should hold for a holder in a quest, as the engine sees it now.
-
-## NativeStepInfo — A step's knowledge objects (the engine mirrors the step's state into them).
-- `NativeStepInfo(string Id, uint Visible, uint Active, uint Done, uint Count = 0, int Total = 0, uint Ready = 0)`
-- `Active { get; init; } -> uint` — The knowledge id of the step's "active" object: the step is the current one.
-- `Count { get; init; } -> uint` — The knowledge id of the counter its journal line shows; 0 when the step has no counter.
-- `Done { get; init; } -> uint` — The knowledge id of the step's "done" object.
-- `Id { get; init; } -> string` — The step's id.
-- `Ready { get; init; } -> uint` — The knowledge id of a hand-in step's "ready" object (the player holds the items); 0 when the step is not a hand-in.
-- `Total { get; init; } -> int` — What the counter counts up to (0: none).
-- `Visible { get; init; } -> uint` — The knowledge id of the step's "visible" object: the journal shows the step.
-
-## NativeWanted — A knowledge value the engine's state asks for.
-- `NativeWanted()`
-- `NativeWanted(string Name, uint Id, uint Value)`
-- `Id { get; init; } -> uint` — The knowledge id.
-- `Name { get; init; } -> string` — The knowledge object's name.
-- `Value { get; init; } -> uint` — The value wanted.
-
 ## NpcUnlockResult `0.2.4` — One roster entry's unlock state in one world's snapshot.
 - `NpcUnlockResult(bool Ok, string? Reason, uint NpcId, bool? Unlocked, ushort? KnowledgeVersion, CapacityWorldToken World, ulong SnapshotRevision)`
 - `KnowledgeVersion { get; init; } -> ushort?` — The engine's knowledge version the snapshot was computed at; null when not `Ok`.
@@ -492,6 +455,86 @@ enum: Shrine, Sanctum
 - `Rescue { get; init; } -> ProgressFact` — The fact that the survivor is rescued.
 - `Rescued { get; } -> bool?` — Whether the survivor is rescued in this world (tick thread; null when it cannot be read).
 - `RescuedFor(Player player) -> bool?` — Whether the survivor is rescued as this character sees it (the world's value, or its own twin in personal...
+
+## SurvivorAssignmentChangedEvent `0.2.16` — A survivor's bed changed: by `Survivors.AssignBed`/`Survivors.UnassignBed` (`SurvivorEvent.ByKiln`), or by the game (a player's summon tool, a destroyed bed, the...
+- `NewBed { get; } -> EntityId` — The bed after; None when it has none now.
+- `OldBed { get; } -> EntityId` — The bed before; None when it had none.
+
+## SurvivorAssignmentOptions `0.2.16` — How a bed assignment is authorized.
+- `SurvivorAssignmentOptions(EntityId Actor, SurvivorAuthorization Authorization = SurvivorAuthorization.PlayerPermissions)`
+- `Actor { get; init; } -> EntityId` — The player acting (PlayerPermissions); `EntityId.None` with TrustedServer.
+- `Authorization { get; init; } -> SurvivorAuthorization` — PlayerPermissions (the default) or TrustedServer.
+- `static Trusted { get; } -> SurvivorAssignmentOptions` — TrustedServer with no actor: for server code that is its own authority.
+
+## SurvivorAuthorization `0.2.16` — Who answers for a bed assignment (`SurvivorAssignmentOptions`).
+enum: PlayerPermissions, TrustedServer
+
+## SurvivorCompletion `0.2.16` — How a survivor request ended.
+enum: Done, NoChange, Refused, TimedOut, Partial, WorldEnded, Indeterminate
+
+## SurvivorEffects `0.2.16` — What a survivor request really wrote (`SurvivorResult.Effects`).
+enum: None, KnowledgeWritten, RegistryConfirmed, ToolGiven, EntityCreated, HomeMoved, BedChanged
+
+## SurvivorEvent `0.2.16` — The base of the survivor events: the survivor, its state before and after, the request (0: the game).
+- `After { get; } -> SurvivorInfo` — Its state after the change.
+- `Before { get; } -> SurvivorInfo` — Its state before the change.
+- `ByKiln { get; } -> bool` — True when a Kiln request made the change.
+- `Request { get; } -> ulong` — The kiln.survivors request that made it; 0 when the game made it (a player, the game's upkeep).
+- `Step { get; } -> ulong` — The server-world step.
+- `Survivor { get; } -> SurvivorId` — The survivor.
+
+## SurvivorId `0.2.16` — A survivor: the game's roster id of an NPC (its NpcId, FNV-1a-32 of the NPC template's GUID; the same value as `Villager.NpcId`).
+- `SurvivorId()`
+- `SurvivorId(uint Value)`
+- `Value { get; init; } -> uint` — The NpcId.
+
+## SurvivorInfo `0.2.16` — A roster survivor as the world has it now.
+- `SurvivorInfo(SurvivorId Id, string DebugName, bool Unlocked, ItemId SummonTool, EntityId Entity, EntityId Bed, Guid? BaseId, WorldPosition? Home)`
+- `BaseId { get; init; } -> Guid?` — The base whose build zone holds its home; null when none.
+- `Bed { get; init; } -> EntityId` — Its bed (the NPC's side of the relation); None when it has none or is not in the world.
+- `DebugName { get; init; } -> string` — The roster's debug name (the NPC template's name), e.g. "NPC_Workshop_Blacksmith_Assistant_01".
+- `Entity { get; init; } -> EntityId` — The live NPC; `EntityId.None` when it is not in the world.
+- `Home { get; init; } -> WorldPosition?` — The point it lives around (set by Summon and by the game's summon tool); null when not in the world.
+- `Id { get; init; } -> SurvivorId` — Its NpcId.
+- `SummonTool { get; init; } -> ItemId` — The item that summons it; `ItemId` 0 when it has none.
+- `Unlocked { get; init; } -> bool` — Recruited for the world (the game's NPC registry).
+
+## SurvivorRecruitedEvent `0.2.16` — A survivor was recruited for the world by `Survivors.RecruitWorld` or `Survivors.Summon` (the NPC registry confirmed the unlock).
+
+## SurvivorRecruitOptions `0.2.16` — Options of `Survivors.RecruitWorld`.
+- `SurvivorRecruitOptions(Player? GiveToolTo = null)`
+- `GiveToolTo { get; init; } -> Player?` — A player in game who gets one summon tool after the unlock; null for none.
+
+## SurvivorResult `0.2.16` — The end of a survivor request.
+- `SurvivorResult(bool Ok, string? Reason, SurvivorInfo Before, SurvivorInfo After, bool AfterKnown, SurvivorEffects Effects, SurvivorCompletion Completion, EntityId DisplacedNpc, int Steps)`
+- `After { get; init; } -> SurvivorInfo` — A readback at the end (`AfterKnown`), else the last confirmed state.
+- `AfterKnown { get; init; } -> bool` — After is a readback.
+- `Before { get; init; } -> SurvivorInfo` — The survivor when the request was taken.
+- `Completion { get; init; } -> SurvivorCompletion` — How it ended.
+- `DisplacedNpc { get; init; } -> EntityId` — AssignBed: the NPC that lost the bed; None when none.
+- `Effects { get; init; } -> SurvivorEffects` — What was really written.
+- `Ok { get; init; } -> bool` — Done or NoChange.
+- `Reason { get; init; } -> string?` — "Code: words" when not Ok (codes in docs/kiln/services/survivors.md).
+- `Steps { get; init; } -> int` — World updates from acceptance to the end.
+
+## Survivors `0.2.16` — The game's roster survivors: read, recruit, summon, beds.
+- `static AssignBed(SurvivorId id, EntityId bed, SurvivorAssignmentOptions options) -> Task<SurvivorResult>` — Assigns a bed to a survivor: both ends of the game's relation are written in one step (saved and sent to players...
+- `const AssignCapability = "survivors.assign" -> string` — The capability of `Survivors.AssignBed` and `Survivors.UnassignBed`.
+- `static BaseAt(WorldPosition position) -> Guid?` — The base whose build zone holds `position` (the id `Survivors.Summon` takes); null when no loaded base zone holds it.
+- `static BedOccupant(EntityId bed) -> SurvivorId?` — The survivor a bed is assigned to (the bed's side of the relation); null when it is free.
+- `static Find(SurvivorId id) -> SurvivorInfo?` — The survivor with this id, live; null when no roster entry has it.
+- `static List() -> IReadOnlyList<SurvivorInfo>` — Every roster entry with its live state, in roster order.
+- `static Of(EntityId npc) -> SurvivorInfo?` — The survivor a live NPC entity is; null when it is none (not a roster NPC, or no such entity).
+- `const ReadCapability = "survivors.read" -> string` — The capability of the reads.
+- `const RecruitCapability = "survivors.recruit" -> string` — The capability of `Survivors.RecruitWorld`.
+- `static RecruitWorld(SurvivorId id, SurvivorRecruitOptions? options = null) -> Task<SurvivorResult>` — Recruits a survivor for the world, as its rescue does: its unlock is written, the game's NPC registry must confirm...
+- `static Summon(SurvivorId id, Guid baseId, WorldPosition position, float yawDegrees = 0) -> Task<SurvivorResult>` — Brings a survivor to a point in a base: a survivor already in the world is moved there and that becomes its home...
+- `const SummonCapability = "survivors.summon" -> string` — The capability of `Survivors.Summon`.
+- `static UnassignBed(SurvivorId id, SurvivorAssignmentOptions options) -> Task<SurvivorResult>` — Takes a survivor's bed away: both ends are cleared (and any stale bed that still names it).
+
+## SurvivorSummonedEvent `0.2.16` — A survivor was brought into a base (`Survivors.Summon`).
+
+## SurvivorToolGivenEvent `0.2.16` — A survivor's summon tool went into a player's inventory (`Survivors.RecruitWorld`).
 
 ## WorldDifficulty — The world's difficulty: the server's preset and the game settings in effect (kiln.settings).
 - `WorldDifficulty(string? Preset, IReadOnlyDictionary<string, object> Settings)`

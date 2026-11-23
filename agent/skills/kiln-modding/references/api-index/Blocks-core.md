@@ -9,6 +9,13 @@ enum: Enemies, Friends
 - `Radius { get; init; } -> float` — Metres.
 - `Vfx { get; init; } -> VfxRef?` — A VFX where the area is, once.
 
+## BaseRulesBlock `0.2.16` — Base rules: room for more Flame Altars and larger build zones, without the game's names.
+- `BuildAreaPercent { get; init; } -> int?` — Every altar level's build zone at this share of the game's own size (100 to 200 percent), at most 256 metres on an...
+- `ExtraAltars { get; init; } -> int` — This many more Flame Altars than the game's own number at every Flame level (0 to 15); the result is at most 16.
+- `const MaxAltars = 16 -> int` — The most Flame Altars a rule can ask for: the game counts no more than 16.
+- `MinimumAltars { get; init; } -> int?` — At least this many Flame Altars at every Flame level (1 to 16); null leaves the game's numbers as the floor.
+- `Sizes { get; init; } -> IReadOnlyList<AltarSize>?` — At least this full size for an altar of the given level (1 to 5), on each axis: finite, 0.5 to 256 metres, a...
+
 ## BlockApplicationChangedEvent `0.2.3` — A block of an external kind changed state for its mod: applied, refused, or gone.
 - `After { get; } -> BlockApplyResult` — Where the plan stands now.
 - `Before { get; } -> BlockApplyResult` — Where the plan stood before the change.
@@ -136,6 +143,20 @@ enum: PendingContent, Applied, Refused, Removed
 - `static RegisterKind<T>(BlockKindDescriptor descriptor, IBlockKind<T> compiler) -> BlockKindResult` `0.2.3` — Registers a block kind as the calling mod's: a record of the mod's own (`T`) and the pure compiler that turns it...
 - `static Report() -> IReadOnlyDictionary<string, (IReadOnlyList<string> Blocks, IReadOnlyList<string> Errors)>` — The mods with blocks, each with its block names and the errors of its data files.
 - `static Warnings(string? mod = null) -> IReadOnlyList<string>` — What is not wrong but may not be what was meant: a block renamed without `Was`.
+
+## BlockUi `0.2.16` — UI blocks at run time: a window's state (`WindowBlock.State`), a mod's own data for tables and trees (`Bindings`), the live game values windows show, and commands run...
+- `static CommandStatus(string nonce, ulong requestId) -> Task<UiCommandResult>` — The state of a request `BlockUi.ExecuteOnServer` sent: from this game's receipt when its answer was final, else...
+- `static DemandWorld(UiWorldFields fields) -> UiDemandRegistration` — Asks kiln-core to collect `fields` (any combination of `UiWorldFields`) until the registration is disposed or the...
+- `static ExecuteOnServer(string literalCommand, CancellationToken cancellation = default(CancellationToken)) -> Task<UiCommandResult>` — Runs `literalCommand` on the server this game joined, as this game's player there (the server takes the player from...
+- `static ReadWorld() -> UiWorldReadResult` — The newest publication of live game values: the local player's health, stamina and mana as the game has them (before...
+- `static SetState(WindowRef window, string key, UiStateValue value, UiStateVersion? expected = null) -> Task<UiStateResult>` — Sets one state entry of one of this mod's windows.
+- `static State(WindowRef window) -> UiStateReadResult` — The state of one of this mod's windows: its declared entries and its tab bars' and trees' own state, at one version.
+- `const StateCapability = "ui.blocks.state" -> string` — The capability of window state and of these calls.
+
+## BlockUi.Bindings `0.2.16` — A mod's own data for its UI blocks: define a source (a scalar, rows or a tree with typed fields) before the blocks that bind it as `mod.<id>`, on every side, then...
+- `const Capability = "ui.blocks.bindings" -> string` — The capability of mods' own data.
+- `static Define(string id, UiDataSchema schema) -> UiDataRegistration` — Declares a data source of this mod (at most 64).
+- `static Publish(string id, UiDataSnapshot snapshot) -> Task<UiDataPublishResult>` — Publishes a snapshot of a source: copied and checked at once, committed at Kiln's next service tick...
 
 ## `BootBlockId<T>` `0.2.3` — A staged definition's name: what other definitions and data files name it by (`BootBlockId.QualifiedName`).
 - `BootBlockId(string Mod, string Kind, string Name)`
@@ -490,6 +511,43 @@ enum: Debuff, Buff
 - `static implicit operator TemplateRef(Guid guid) -> TemplateRef` — A template by its GUID.
 - `static implicit operator TemplateRef(string value) -> TemplateRef` — A template by name: a `GameTemplates` constant, or a template's GUID as text.
 - `Value { get; init; } -> string` — A `GameTemplates` constant, or a template's GUID as text.
+
+## UiCommandCode `0.2.16` — Why a request to the server ended as it did.
+enum: None, PermissionDenied, ParseFailure, CanceledByCommandEvent, QueueFull, RateLimited, ExpiredBeforeStart, CanceledBeforeStart, TooLateToCancel, AssociationChanged, HandlerFailure, RunningTimeout, ReplayExpired, ProtocolConflict, UnknownRequest, CanceledBeforeSend, CanceledAfterStart, TimedOutUnknown
+
+## UiCommandCompletedEvent `0.2.16` — A wait of `BlockUi.ExecuteOnServer` (or of a block's server command) ended: exactly one per request.
+- `Result { get; } -> UiCommandResult` — What the wait ended with (the same result its task returned).
+
+## UiCommandOutcome `0.2.16` — Whether a command ran, as far as this game can know.
+enum: NotSent, NotStarted, Completed, Unknown
+
+## UiCommandResult `0.2.16` — A request's outcome or state.
+- `UiCommandResult(bool Ok, string? Reason, IReadOnlyList<string> Output, ulong RequestId, string Nonce, UiCommandState State, UiCommandOutcome Outcome, UiCommandCode Code, bool Truncated)`
+- `Code { get; init; } -> UiCommandCode` — Why it ended as it did.
+- `Nonce { get; init; } -> string` — The connection's challenge the request was sent under (for `BlockUi.CommandStatus`).
+- `Ok { get; init; } -> bool` — The command ran and succeeded.
+- `Outcome { get; init; } -> UiCommandOutcome` — Whether it ran, as far as this game can know.
+- `Output { get; init; } -> IReadOnlyList<string>` — What the command answered, at most 16 lines and 4096 bytes.
+- `Reason { get; init; } -> string?` — Why not, in plain words (the command's own error text where it gave one); null when `Ok`.
+- `RequestId { get; init; } -> ulong` — The request's id on its connection; 0 when nothing was sent.
+- `State { get; init; } -> UiCommandState` — Where the request stands.
+- `Truncated { get; init; } -> bool` — The server cut `Output` to fit.
+
+## UiCommandState `0.2.16` — Where a request to the server stands.
+enum: Queued, Started, RunningOverBudget, Final
+
+## UiCommandStatusChangedEvent `0.2.16` — News of a request from the server: it was queued, started, ran over its budget, or ended (also after its wait ended: a late final answer).
+- `Nonce { get; } -> string` — The connection's challenge the request was sent under.
+- `RequestId { get; } -> ulong` — The request's id.
+- `Result { get; } -> UiCommandResult?` — The final result once `UiCommandStatusChangedEvent.State` is `UiCommandState.Final`; null before.
+- `State { get; } -> UiCommandState` — Its state now.
+
+## UiCommandTarget `0.2.16` — Where a command of a button or a key runs (`UiAction.CommandTarget`).
+enum: Local, Server
+
+## UiWorldSnapshotChangedEvent `0.2.16` — A new publication of live game values (`BlockUi.ReadWorld`) is there.
+- `NewSnapshot { get; } -> UiWorldSnapshot` — The new publication.
+- `OldPublication { get; } -> ulong` — The publication this subscriber's feed saw before (0 for the first one).
 
 ## VfxRef — A VFX and where it shows: the slot on every field that shows one (`EffectBlock.Vfx`, `CastBlock.Vfx`, `ProjectileBlock.Vfx`, `StatusBlock.Vfx`, `AreaBlock.Vfx`, an...
 - `VfxRef(string name)` — A VFX by name: a `VfxBlock` of this mod, `"other-mod:name"` for another mod's, or `"game:name"` for one of the...

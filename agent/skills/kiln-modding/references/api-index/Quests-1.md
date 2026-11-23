@@ -557,3 +557,40 @@ enum: Bool, Counter, Flags, None
 - `Scope { get; init; } -> string` — The quest's scope as text: player, party or world.
 - `Started { get; init; } -> uint` — The knowledge id of the quest's "started" object.
 - `Steps { get; init; } -> IReadOnlyList<NativeStepInfo>` — The quest's steps, in order.
+
+## NativeQuests — What was built at boot from the mods' quests/*.json, and the run-time glue.
+- `static Counters { get; } -> (ulong Mirrored, ulong Lines, ulong Placed)` — Mirrored knowledge changes, dialogue options run, NPCs and markers placed.
+- `static GetClientRosterWorld() -> RosterWorldResult` `0.2.4` — This process's client world as a token for `NativeQuests.GetClientUnlock` and `NativeQuests.GetRosterBudget`; as...
+- `static GetClientUnlock(uint npcId, CapacityWorldToken clientWorld) -> NpcUnlockResult` `0.2.4` — The unlock state of `npcId` in the client world `clientWorld` names; as `NativeQuests.GetUnlock`.
+- `static GetRosterBudget(CapacityWorldToken world) -> CapacityQueryResult` `0.2.4` — The roster entries of the world `world` names: `CapacityInfo.Capacity` 64, or 128 where Kiln's second page is...
+- `static GetServerRosterWorld() -> RosterWorldResult` `0.2.4` — This process's server world (a dedicated server's, or a hosting client's) as a token for `NativeQuests.GetUnlock`...
+- `static GetUnlock(uint npcId, CapacityWorldToken serverWorld) -> NpcUnlockResult` `0.2.4` — The unlock state of the roster entry `npcId` in the server world `serverWorld` names, from the snapshot of that...
+- `static Holds(NativeComputed c, QuestHolder holder) -> bool` — What the engine says now of a line's computed knowledge, for a holder (`NativeModInfo.Computed`).
+- `static KnowledgeId(string mod, string name) -> uint?` — A mod's native object by name ("met_ilse", "q.lost_letter.active"); null when the build does not have it.
+- `static ManifestJson { get; } -> string` — The manifest as the service wrote it (JSON).
+- `static Mod(string id) -> NativeModInfo?` — A mod's native data by mod id; null when the mod has none.
+- `static Mods { get; } -> IReadOnlyList<NativeModInfo>` — Every mod with native data (a mod with errors is listed with Ok = false and built nothing).
+- `static Npc(string fullId) -> NativeNpcInfo?` — An NPC the boot build made or changed, by full id; null when there is none.
+- `static Quest(string fullId) -> NativeQuestInfo?` — A quest the boot build made, by full id (`<mod>:<id>`); null when there is none.
+- `static Resync(QuestHolder holder, bool quiet = false) -> void` — Writes a holder's knowledge again from the engine's records: every quest, what differs.
+- `const RosterPage = 64 -> int` `0.2.4` — The roster's maximum the game's own value allows: 64 entries, the game's included.
+- `static ShownByGame(QuestDefinition q) -> bool` — The game's journal shows this quest: it says native and the boot build made it.
+- `static Start() -> void` — Starts the mirror, the dialogue options and the placement (the engine calls this; idempotent).
+- `static Wanted(string fullQuestId, QuestHolder holder) -> IReadOnlyList<NativeWanted>` — What the game's knowledge should hold for a holder in a quest, as the engine sees it now.
+
+## NativeStepInfo — A step's knowledge objects (the engine mirrors the step's state into them).
+- `NativeStepInfo(string Id, uint Visible, uint Active, uint Done, uint Count = 0, int Total = 0, uint Ready = 0)`
+- `Active { get; init; } -> uint` — The knowledge id of the step's "active" object: the step is the current one.
+- `Count { get; init; } -> uint` — The knowledge id of the counter its journal line shows; 0 when the step has no counter.
+- `Done { get; init; } -> uint` — The knowledge id of the step's "done" object.
+- `Id { get; init; } -> string` — The step's id.
+- `Ready { get; init; } -> uint` — The knowledge id of a hand-in step's "ready" object (the player holds the items); 0 when the step is not a hand-in.
+- `Total { get; init; } -> int` — What the counter counts up to (0: none).
+- `Visible { get; init; } -> uint` — The knowledge id of the step's "visible" object: the journal shows the step.
+
+## NativeWanted — A knowledge value the engine's state asks for.
+- `NativeWanted()`
+- `NativeWanted(string Name, uint Id, uint Value)`
+- `Id { get; init; } -> uint` — The knowledge id.
+- `Name { get; init; } -> string` — The knowledge object's name.
+- `Value { get; init; } -> uint` — The value wanted.
