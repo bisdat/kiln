@@ -774,6 +774,11 @@ pub fn gather(g: &Gather) -> Result<Inputs> {
             (None, Some(e)) => Some(dump_refl(g, &inp.map, e, which)),
             _ => None,
         };
+        if let (Some(p), Some(Ok(d))) = (dump, &db) {
+            if d.exe_sha256.is_empty() {
+                inp.problems.push(format!("the {which} reflection dump {} names no exe (exe_sha256): it cannot be tied to the {which} build", p.display()));
+            }
+        }
         let want = if which == "new" { Some(inp.new_exe_sha.clone()) } else { inp.old_exe_sha.clone() };
         if let (Some(Ok(d)), Some(w)) = (&db, &want) {
             if !d.exe_sha256.is_empty() && !d.exe_sha256.eq_ignore_ascii_case(w) {
@@ -881,7 +886,12 @@ pub fn gather(g: &Gather) -> Result<Inputs> {
         _ => {}
     }
     if let Some(p) = &g.ids {
-        inp.new_ids = Some(ids::IdTable::parse(&std::fs::read_to_string(p)?, &g.side, &inp.new_exe_sha)?);
+        let v = read_json(p)?;
+        if v.get("exeSha256").and_then(Value::as_str).is_none() || v.get("side").and_then(Value::as_str).is_none() {
+            inp.problems.push(format!("the id table {} names no build (no side and exeSha256): give it in kiln.content's form, \
+                                       {{\"format\": 1, \"side\", \"exeSha256\", \"registries\"}}", p.display()));
+        }
+        inp.new_ids = Some(ids::IdTable::from_value(&v, &g.side, &inp.new_exe_sha)?);
     }
     inp.problems.retain(|x| !x.is_empty());
     if !notes.is_empty() {
@@ -1614,6 +1624,14 @@ mod tests {
         // a reflection dump of another exe beside the new exe
         let mismatch = gather(&Gather { new_refl: Some(g.old_refl.clone().unwrap()), ..g.clone() }).unwrap();
         assert!(mismatch.problems.iter().any(|p| p.contains("reflection dump") && p.contains("new")), "{:?}", mismatch.problems);
+        // a reflection dump that names no exe cannot be tied to its build
+        std::fs::write(root.join("dumps/anon.json"), json!({"types": []}).to_string()).unwrap();
+        let anon = gather(&Gather { old_refl: Some(root.join("dumps/anon.json")), ..g.clone() }).unwrap();
+        assert!(anon.problems.iter().any(|p| p.contains("old reflection dump") && p.contains("names no exe")), "{:?}", anon.problems);
+        // a bare id table (GUID -> id, no side, no exe) given as the new build's
+        std::fs::write(root.join("bare-ids.json"), json!({"gadgets": {"g1": "game:a"}}).to_string()).unwrap();
+        let bare = gather(&Gather { ids: Some(root.join("bare-ids.json")), ..g.clone() }).unwrap();
+        assert!(bare.problems.iter().any(|p| p.contains("names no build")), "{:?}", bare.problems);
         // a previous table of another build
         let prev = root.join("prev.json");
         std::fs::write(&prev, json!({"format": 1, "side": "server", "exeSha256": sha, "registries": {"gadgets": {}}}).to_string()).unwrap();

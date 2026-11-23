@@ -234,40 +234,29 @@ pub fn guard(dir: &Path, tree: &Path) -> Result<()> {
     Ok(())
 }
 
-/// `.` and `..` taken out by the letters of the path (a `..` past a folder that does not exist yet would stop the walk
-/// below and hide where the path really goes).
-fn lexical(p: &Path) -> PathBuf {
-    let mut out = PathBuf::new();
-    for c in p.components() {
+/// An absolute path as the kernel will resolve it: the longest prefix of the path as written that exists is canonicalized
+/// (its links and the ".." after them followed, as a later create_dir_all would), and only the part that does not exist yet
+/// has its "." and ".." taken out by the letters (review N1: "link/../out" with a link into the tree).
+fn absolute(p: &Path) -> PathBuf {
+    use std::path::Component;
+    let p = if p.is_absolute() { p.to_path_buf() } else { std::env::current_dir().unwrap_or_default().join(p) };
+    let comps: Vec<Component> = p.components().collect();
+    let mut cut = comps.len();
+    while cut > 0 && !comps[..cut].iter().collect::<PathBuf>().exists() {
+        cut -= 1;
+    }
+    let prefix: PathBuf = comps[..cut].iter().collect();
+    let mut out = prefix.canonicalize().unwrap_or(prefix);
+    for c in &comps[cut..] {
         match c {
-            std::path::Component::ParentDir => {
+            Component::ParentDir => {
                 out.pop();
             }
-            std::path::Component::CurDir => {}
+            Component::CurDir => {}
             other => out.push(other.as_os_str()),
         }
     }
     out
-}
-
-/// An absolute path with the existing part's links resolved (the rest may not exist yet).
-fn absolute(p: &Path) -> PathBuf {
-    let p = lexical(&if p.is_absolute() { p.to_path_buf() } else { std::env::current_dir().unwrap_or_default().join(p) });
-    let (mut base, mut rest) = (p.clone(), Vec::new());
-    while !base.exists() {
-        match (base.parent(), base.file_name()) {
-            (Some(parent), Some(name)) => {
-                rest.push(name.to_os_string());
-                base = parent.to_path_buf();
-            }
-            _ => break,
-        }
-    }
-    let mut c = base.canonicalize().unwrap_or(base);
-    for n in rest.iter().rev() {
-        c.push(n);
-    }
-    c
 }
 
 /// The new build's table to check and keep: regmap_check.py's (its pins applied) with kiln.content's entries it does not
@@ -561,6 +550,16 @@ pub(crate) mod tests {
         // ".." that walks back into the tree through a folder that does not exist
         assert!(guard(&root.join("missing/../kiln/out"), &tree).is_err(), "lexical .. into the tree");
         assert!(guard(&root.join("missing/x/../../kiln/out"), &tree).is_err());
+        // a link into the tree followed by "..": the kernel follows the link first (review N1)
+        let home = root.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(tree.join("sub")).unwrap();
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(tree.join("sub"), home.join("link")).unwrap();
+            assert!(guard(&home.join("link/../out"), &tree).is_err(), "link/.. resolves into the tree");
+            assert!(guard(&home.join("link/../../elsewhere"), &tree).is_ok(), "link/../.. leaves it");
+        }
         // an unpacked Kiln tree without .git
         let unpacked = root.join("unpacked");
         std::fs::create_dir_all(unpacked.join("regmap/common")).unwrap();
