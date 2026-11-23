@@ -322,11 +322,28 @@ void revoked_queue(const std::string& dir) {
     check(r.submit(78, "bigmod", kept, nullptr, nullptr, nullptr) == KILN_OK, "queue live owner of the same mod");
     r.owner_gone(77);
     r.owner_gone(77);  // idempotent
+    size_t warnings = 0;
+    for (const auto& line : files.log)
+        if (line.find("bigmod") != std::string::npos && line.find("owner 77") != std::string::npos &&
+            line.find("1 queued batch") != std::string::npos && line.find("2 edit") != std::string::npos) ++warnings;
+    check(warnings == 1, "one immediate warning names the mod, owner and dropped counts, even after repeated revoke");
     r.run({}); r.finish({});
     std::string value;
     const KilnResult rc = r.read(2, "items", "game:plank", "maxStack", &value);
     check(rc == KILN_OK && value == "40", "revocation drops the dead owner's queue, not the live owner's (got " + value + ")");
-    check(r.counts().refused == 0, "the dead owner's parse refusals go with its queued batch");
+    check(r.counts().refused == 1 && files.report.find("queued batch") != std::string::npos,
+          "discarding accepted queued work leaves a revocation diagnostic in the report");
+    check(files.report.find("notAField") == std::string::npos, "the dead owner's original parse refusals go with its queued batch");
+}
+
+void revoked_only_queue(const std::string& dir) {
+    TreeView view = world(); Files files;
+    stage::Runner r(env_of(&view, &files, dir, &no_sections));
+    check(r.submit(77, "bigmod", R"({"ir":1,"mod":"bigmod","stage":"alter","edits":[{"registry":"items","select":"game:plank","field":"maxStack","op":99}]})",
+                   nullptr, nullptr, nullptr) == KILN_OK, "queue the only input");
+    r.owner_gone(77); r.run({}); r.finish({});
+    check(r.counts().edits == 0 && r.counts().refused == 1 && files.report.find("queued batch") != std::string::npos,
+          "a completely emptied queue still reports why its accepted input disappeared");
 }
 
 void revoked_registration(const std::string& dir) {
@@ -441,6 +458,7 @@ void core_dead_before_notification(const std::string& dir) {
     check(r.subscribe_ready(77, [](stage::Phase, uint64_t) { return true; }, &h) == KILN_ERR_REVOKED, "core liveness is checked on admission");
     r.run({}); r.finish({});
     check(calls == 0 && r.counts().edits == 0, "dead owners are not dispatched or drained while notification is pending");
+    check(files.report.find("queued batch") != std::string::npos, "core-dead queued work is diagnosed even before retirement notification");
 }
 
 void worldload_snapshot_revoke(const std::string& dir) {
@@ -490,6 +508,7 @@ int main(int argc, char** argv) {
         {"R6 handoff_keeps_outside_refusals", [&] { handoff_keeps_outside_refusals(dir); }},
         {"R5 cache_misses_added_resource", [&] { cache_misses_added_resource(dir); }},
         {"P2 revoked_queue", [&] { revoked_queue(dir); }},
+        {"P2 revoked_only_queue", [&] { revoked_only_queue(dir); }},
         {"P2 revoked_registration", [&] { revoked_registration(dir); }},
         {"P2 ready_snapshot_revoke", [&] { ready_snapshot_revoke(dir); }},
         {"P2 ready_snapshot_unsubscribe", [&] { ready_snapshot_unsubscribe(dir); }},

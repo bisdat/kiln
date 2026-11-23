@@ -326,6 +326,13 @@ struct Runner::Impl {
     void log(int level, const std::string& line) {
         if (env.log) env.log(level, line);
     }
+    void revoked_queue(const std::string& mod, uint64_t owner, size_t batches, size_t edits, Stage stage) {
+        if (!batches) return;
+        const std::string why = "owner " + std::to_string(owner) + " was revoked; dropped " + std::to_string(batches) +
+            " queued batch(es), " + std::to_string(edits) + " edit(s) before the stage";
+        log(1, "registry: mod " + mod + " " + why);
+        pre_refused.push_back({mod, "owner:" + std::to_string(owner), stage, 0, why, ""});
+    }
     bool load_regmap() {
         if (rm_loaded) return true;
         rm_loaded = true;
@@ -449,16 +456,24 @@ KilnResult Runner::unsubscribe(uint64_t handle) {
 void Runner::owner_gone(uint64_t owner) {
     if (!owner) return;
     {
-    std::lock_guard lk(d_->mu);
-    d_->gone.insert(owner);
-    for (auto it = d_->stage_subs.begin(); it != d_->stage_subs.end();)
-        it = it->second.owner == owner ? d_->stage_subs.erase(it) : std::next(it);
-    for (auto it = d_->ready_subs.begin(); it != d_->ready_subs.end();)
-        it = it->second.owner == owner ? d_->ready_subs.erase(it) : std::next(it);
-    for (auto it = d_->queued.begin(); it != d_->queued.end();) {
-        std::erase_if(it->second, [owner](const Impl::Queued& q) { return q.owner == owner; });
-        it = it->second.empty() ? d_->queued.erase(it) : std::next(it);
-    }
+        std::lock_guard lk(d_->mu);
+        d_->gone.insert(owner);
+        for (auto it = d_->stage_subs.begin(); it != d_->stage_subs.end();)
+            it = it->second.owner == owner ? d_->stage_subs.erase(it) : std::next(it);
+        for (auto it = d_->ready_subs.begin(); it != d_->ready_subs.end();)
+            it = it->second.owner == owner ? d_->ready_subs.erase(it) : std::next(it);
+        for (auto it = d_->queued.begin(); it != d_->queued.end();) {
+            size_t batches = 0, edits = 0;
+            Stage stage = Stage::Alter;
+            std::erase_if(it->second, [&](const Impl::Queued& q) {
+                if (q.owner != owner) return false;
+                if (!batches) stage = q.batch.stage;
+                ++batches; edits += q.batch.edits.size() + q.refused.size();
+                return true;
+            });
+            d_->revoked_queue(it->first, owner, batches, edits, stage);
+            it = it->second.empty() ? d_->queued.erase(it) : std::next(it);
+        }
     }
     if (d_->env.owner_gone) d_->env.owner_gone(owner); // never call out while holding the runner lock
 }
@@ -626,7 +641,10 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn) {
         // The stage takes the surviving queue here. Already-taken stage edits stay until the next start on revoke.
         for (auto& [mod, qs] : d.queued) {
             for (Impl::Queued& q : qs) {
-                if (!d.alive(q.owner)) continue;
+                if (!d.alive(q.owner)) {
+                    d.revoked_queue(mod, q.owner, 1, q.batch.edits.size() + q.refused.size(), q.batch.stage);
+                    continue;
+                }
                 ModInput& in = by_mod[mod];
                 in.id = mod;
                 in.batches.push_back(std::move(q.batch));
