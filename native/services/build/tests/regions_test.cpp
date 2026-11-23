@@ -460,6 +460,91 @@ int main() {
             }
         }
     }
+    {
+        // The game's voxel writer collects at most 4,096 stored chunks per record and skips the rest without a word, in
+        // hash order (docs/re/build.md §12): a base entry whose bounds touch more chunk positions than that may lose any
+        // chunk, so Kiln's kept chunks inside it keep their own boxes.
+        const kb::RegionBounds at_limit{{0.5f, 0.5f, 0.5f}, {255.5f, 255.5f, 255.5f}};  // 16 x 16 x 16 positions
+        const kb::RegionBounds over_limit{{0.5f, 1.f, 0.5f}, {271.5f, 15.f, 3855.5f}};  // 17 x 1 x 241 = 4,097
+        check(kb::chunk_positions(at_limit) == 4096 && kb::chunk_positions(over_limit) == 4097,
+              "chunk positions an entry touches: 4,096 and 4,097");
+        const kb::ChunkSet inside{{5, 0, 5}, {8, 0, 7}};
+        check(kb::chunks_outside_regions(inside, {at_limit}).empty(),
+              "an entry at 4,096 chunk positions saves the kept chunks wholly inside it: no box");
+        check(kb::chunks_outside_regions(inside, {over_limit}) == inside,
+              "an entry at 4,097 chunk positions may lose any chunk: every kept chunk in it needs a box");
+        const kb::RegionBounds grid_240{{5888.f, 1000.5f, 1000.5f}, {6128.f, 1240.5f, 1240.5f}};  // x faces on the 16 m grid
+        const kb::RegionBounds grid_239{{5888.f, 1000.5f, 1000.5f}, {6127.f, 1239.5f, 1239.5f}};
+        check(kb::chunk_positions(grid_240) == 17 * 16 * 16 && kb::chunk_positions(grid_239) <= 4096,
+              "a 240 m base with faces on the chunk grid touches 4,352 chunk positions, a 239 m one at most 4,096");
+        check(kb::chunks_outside_regions({{375, 70, 70}}, {grid_240}).size() == 1 &&
+                  kb::chunks_outside_regions({{375, 70, 70}}, {grid_239}).empty(),
+              "a kept chunk inside the grid-aligned 240 m base gets a box, inside the 239 m one none");
+        auto save_with = [&](const kb::ChunkSet& chunks, const float* lo, const float* hi, std::vector<uint8_t>& store) {
+            kb::g_chunks = chunks;
+            kb::g_boxes_stale = true;
+            FakeList l = regions_test::make_list(store);
+            if (lo) regions_test::add_entry(l, base_id, lo, hi);
+            kb::after_save_regions(0x1000, ok, &l.a, sites);
+            return l;
+        };
+        {
+            std::vector<uint8_t> s1, s2;
+            const float l1[3] = {0.5f, 0.5f, 0.5f}, h1[3] = {255.5f, 255.5f, 255.5f};
+            const float l2[3] = {0.5f, 1.f, 0.5f}, h2[3] = {271.5f, 15.f, 3855.5f};
+            FakeList a = save_with(inside, l1, h1, s1), b = save_with(inside, l2, h2, s2);
+            check(regions_test::kiln_entries(a.a) == 0 && regions_test::every_chunk_saved(a.a, inside, true),
+                  "world save, a base at 4,096 chunk positions: no box, the base's record keeps the kept chunks");
+            check(regions_test::kiln_entries(b.a) == 2 && regions_test::every_chunk_saved(b.a, inside, true),
+                  "world save, a base at 4,097 chunk positions: a box for each kept chunk in it");
+        }
+        {
+            // the lab's 288 m altar (6,498 stored chunks, 2,402 skipped by the writer): Kiln's kept chunks in it, even at
+            // its centre, keep their boxes
+            std::vector<uint8_t> store;
+            const float lo[3] = {5856.25f, 1056.f, 5856.25f}, hi[3] = {6144.25f, 1344.f, 6144.25f};
+            const kb::ChunkSet in_288{{375, 75, 375}, {370, 70, 380}, {381, 80, 367}};
+            FakeList l = save_with(in_288, lo, hi, store);
+            check(kb::chunk_positions(kb::RegionBounds{{lo[0], lo[1], lo[2]}, {hi[0], hi[1], hi[2]}}) == 19 * 20 * 19,
+                  "the 288 m altar touches 7,220 chunk positions");
+            check(regions_test::kiln_entries(l.a) == 3 && regions_test::every_chunk_saved(l.a, in_288, false),
+                  "a 288 m base: every kept chunk in it, the centre too, is in a Kiln box the writer keeps whole");
+        }
+        {
+            // Kiln's own boxes are records too: none may cover more than 4,096 chunk positions
+            kb::ChunkSet solid;
+            for (int32_t x = 0; x < 17; ++x)
+                for (int32_t y = 0; y < 16; ++y)
+                    for (int32_t z = 0; z < 16; ++z) solid.insert({1000 + x, y, 1000 + z});
+            const auto boxes = kb::boxes_for_chunks(solid);
+            uint64_t volume = 0, most = 0;
+            bool within = true;
+            for (const auto& b : boxes) {
+                const uint64_t v =
+                    uint64_t(b.hi[0] - b.lo[0] + 1) * uint64_t(b.hi[1] - b.lo[1] + 1) * uint64_t(b.hi[2] - b.lo[2] + 1);
+                volume += v;
+                most = std::max(most, v);
+                const int32_t lo[3] = {1000, 0, 1000}, hi[3] = {1016, 15, 1015};
+                for (int k = 0; k < 3; ++k) within = within && b.lo[k] >= lo[k] && b.hi[k] <= hi[k];
+            }
+            check(boxes.size() == 2 && most <= 4096 && volume == solid.size() && within,
+                  "a solid block of 17 x 16 x 16 kept chunks: two boxes of at most 4,096 chunks, together exactly the block");
+            std::vector<uint8_t> store;
+            FakeList l = save_with(solid, nullptr, nullptr, store);
+            check(regions_test::max_kiln_positions(l.a) <= 4096 && regions_test::every_chunk_saved(l.a, solid, false),
+                  "world save: no Kiln box over 4,096 chunk positions, every chunk of the block saved");
+            // the coarse boxes too (over 64 runs: one box per 128 m column), here 8 x 131 x 8 chunks high
+            kb::ChunkSet scattered;
+            for (int32_t k = 0; k < 66; ++k) scattered.insert({k % 8, 2 * k, (k / 8) % 8});
+            std::vector<uint8_t> store2;
+            FakeList l2 = save_with(scattered, nullptr, nullptr, store2);
+            check(regions_test::kiln_entries(l2.a) >= 3 && regions_test::max_kiln_positions(l2.a) <= 4096 &&
+                      regions_test::every_chunk_saved(l2.a, scattered, false),
+                  "scattered edits in one 128 m column: its coarse box is cut at 4,096 chunk positions, every chunk saved");
+        }
+        kb::g_chunks = kept;
+        kb::g_boxes_stale = true;
+    }
     kb::g_chunks = kept;
     kb::g_boxes_stale = true;
     kb::regions_flush();
