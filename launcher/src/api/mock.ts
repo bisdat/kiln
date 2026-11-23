@@ -1128,6 +1128,14 @@ let render: RenderInfo = RENDER_Q === "software" ? { mode: "software", why: "res
 const X11_Q = typeof location !== "undefined" ? new URLSearchParams(location.search).get("x11") : null;
 if (X11_Q) render = { ...render, x11: { on: X11_Q === "restart" || X11_Q === "marker", why: X11_Q as NonNullable<RenderInfo["x11"]>["why"], auto: X11_Q !== "off",
   ...(X11_Q === "yours" ? { yours: "wayland" } : {}) } };
+// `?nvidia=blocked|on|failed`: Ubuntu WebKit's NVIDIA block found (switch off), the switch on, or the launcher turned
+// it off after a forced start died
+const NVIDIA_Q = typeof location !== "undefined" ? new URLSearchParams(location.search).get("nvidia") : null;
+const TURNED_OFF = "The launcher turned this off by itself: its start at 2026-11-22T21:04:10Z (Kiln Launcher 0.2.0-dev) with GPU drawing forced on NVIDIA ended before its page had started (2026-11-22T21:04:30Z)";
+render = { ...render, force: NVIDIA_Q === "blocked" ? { on: false, step: "off", why: "off", blocked: true }
+  : NVIDIA_Q === "on" ? { on: true, step: "shm", why: "on", blocked: false }
+  : NVIDIA_Q === "failed" ? { on: false, step: "off", why: "off", blocked: true, failedWhy: TURNED_OFF }
+  : { on: false, step: "off", why: "off", blocked: false } };
 // WebKit's sandbox (sandbox.rs): a default start does not use it; `?sandbox=off` as after a message's "off" on a
 // system where bwrap cannot start
 const SANDBOX_UNUSED = "WebKitGTK's GTK 3 API, which the launcher uses, runs it only when WEBKIT_FORCE_SANDBOX=1 is set";
@@ -1262,6 +1270,10 @@ const handlers: Record<string, Handler> = {
   },
   app_render_x11_set: (a) => {
     if (render.x11) render = { ...render, x11: { ...render.x11, auto: !!a.on } };
+    return { ...render };
+  },
+  app_render_force_set: (a) => {
+    if (render.force) render = { ...render, force: { ...render.force, on: !!a.on, failedWhy: undefined } };
     return { ...render };
   },
   app_sandbox_set: (a) => {

@@ -425,6 +425,13 @@ pub async fn app_render_x11_set(on: bool) -> Result<crate::render::RenderInfo, E
     crate::state::blocking(move || crate::render::set_x11_auto(on)).await
 }
 
+/// Settings, "Force GPU drawing on NVIDIA": on sets WEBKIT_FORCE_DMABUF_RENDERER=1 from the next start (past Ubuntu
+/// WebKit's NVIDIA block), off leaves the block alone. Linux only (else `unsupported`).
+#[tauri::command]
+pub async fn app_render_force_set(on: bool) -> Result<crate::render::RenderInfo, Error> {
+    crate::state::blocking(move || crate::render::set_force(on)).await
+}
+
 /// Settings, "WebKit's sandbox": on removes the marker, off writes it; applies at the next start. Linux only (else
 /// `unsupported`).
 #[tauri::command]

@@ -173,6 +173,22 @@ export interface RenderInfo {
   markerWhy?: string;
   /** X11 (XWayland) in this start: only on a Wayland session with XWayland (render.rs, 0.2.0-dev.30). */
   x11?: X11Info;
+  /** Settings' "Force GPU drawing on NVIDIA" and this start's step past Ubuntu WebKit's NVIDIA block (render.rs,
+   *  0.2.0-dev.30.7). */
+  force?: ForceInfo;
+}
+export interface ForceInfo {
+  /** Settings' switch (off unless the player turned it on). */
+  on: boolean;
+  /** This start: nothing forced, or WEBKIT_FORCE_DMABUF_RENDERER=1 with WEBKIT_DMABUF_RENDERER_FORCE_SHM=1. */
+  step: "off" | "shm";
+  /** Why: the switch off or on; the start before with it failed (the launcher turns the switch off); the user's own
+   *  variables; no DMA-BUF renderer in this start (software mode, its off switch). */
+  why: "off" | "on" | "failed" | "yours" | "unused";
+  /** Why the launcher turned the switch off by itself, and when. */
+  failedWhy?: string;
+  /** This start found Ubuntu WebKit's NVIDIA block behind WebKit drawing without the GPU. */
+  blocked: boolean;
 }
 export interface X11Info {
   /** This start draws through X11 (the launcher set GDK_BACKEND=x11). */
@@ -1439,6 +1455,7 @@ export const appRenderReport = (report: PageRender) => call<null>("app_render_re
 export const appRenderSet = (software: boolean) => call<RenderInfo>("app_render_set", { software });
 /** Settings, "Switch to X11 when drawing is slow on Wayland": on lets the launcher switch by itself, off keeps Wayland (Linux). */
 export const appRenderX11Set = (on: boolean) => call<RenderInfo>("app_render_x11_set", { on });
+export const appRenderForceSet = (on: boolean) => call<RenderInfo>("app_render_force_set", { on });
 /** Settings, "WebKit's sandbox": on removes the marker, off writes it, for the next start (Linux). */
 export const appSandboxSet = (on: boolean) => call<SandboxInfo>("app_sandbox_set", { on });
 /** (dev.30) The folder a file dialog of `kind` opens in, or "<folder>/<fileName>" (src-tauri/src/dialog_folder.rs; ui/dialogFolder.ts):
@@ -2485,7 +2502,7 @@ export const COMMANDS = [
   "report_save", "report_summary", "report_preview", "report_note",
   "data_folder_get", "data_folder_size", "data_folder_check", "data_folder_move", "data_folder_use", "data_folder_reset",
   "data_folder_notice_ack", "data_folder_restart",
-  "app_started", "app_render_set", "app_render_x11_set", "app_render_report",
+  "app_started", "app_render_set", "app_render_x11_set", "app_render_force_set", "app_render_report",
   "updates_check",
   "app_desktop_set",
   "app_locales",

@@ -99,3 +99,25 @@ test("the X11 switch shows only on Wayland, turns off and on, and a user's GDK_B
   await expect(page.getByRole("switch", { name })).toBeDisabled();
   await expect(await rowOf(page, page.getByRole("switch", { name }))).toContainText("Your GDK_BACKEND=wayland decides.");
 });
+
+test("Force GPU drawing on NVIDIA is off by default, names the block, turns on, and says its steps", async ({ page }) => {
+  const name = "Force GPU drawing on NVIDIA";
+  await page.goto("/?nvidia=blocked#/settings/advanced");
+  const sw = page.getByRole("switch", { name });
+  await expect(sw).not.toBeChecked();
+  const card = await rowOf(page, sw);
+  await expect(card).toContainText("The Linux launcher bundles Ubuntu's WebKit, which draws without the GPU on every NVIDIA card.");
+  await expect(card).toContainText("It is off by default");
+  await expect(card).toContainText("This start draws without the GPU because of that block: turn this on to try the GPU.");
+  await card.locator(".k-toggle").click();
+  await expect(sw).toBeChecked();
+  await expect(page.locator(".k-toast", { hasText: "The next start draws past Ubuntu WebKit's NVIDIA block" })).toBeVisible();
+  await card.locator(".k-toggle").click();
+  await expect(sw).not.toBeChecked();
+  await expect(page.locator(".k-toast", { hasText: "The next start leaves Ubuntu WebKit's NVIDIA block alone" })).toBeVisible();
+  expect(await calls(page, "app_render_force_set")).toBe(2);
+  await page.goto("/?nvidia=failed#/settings/advanced");
+  await expect(page.getByRole("switch", { name })).not.toBeChecked();
+  await expect(await rowOf(page, page.getByRole("switch", { name }))).toContainText("The launcher turned this off by itself: its start at 2026-11-22T21:04:10Z");
+});
+

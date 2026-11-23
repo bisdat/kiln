@@ -29,8 +29,8 @@ export function AdvancedSection() {
   );
 }
 
-/** On Linux: "Draw the launcher without the GPU" (the render marker, render.rs) and, on Wayland, "Switch to X11 when
- *  drawing is slow on Wayland" (render.rs' X11 switch). */
+/** On Linux: "Draw the launcher without the GPU" (the render marker, render.rs), on Wayland "Switch to X11 when drawing
+ *  is slow on Wayland" (render.rs' X11 switch), and "Force GPU drawing on NVIDIA" (past Ubuntu WebKit's NVIDIA block). */
 function DrawingGroup() {
   const t = useT();
   const qc = useQueryClient();
@@ -45,14 +45,22 @@ function DrawingGroup() {
     qc.setQueryData(qk.appInfo, (cur: api.AppInfo | undefined) => (cur ? { ...cur, render: next } : cur));
     toast.ok(on ? t("settings.render.x11NextOn") : t("settings.render.x11NextOff"));
   }).catch((e) => toast.error(e));
+  const setForce = (on: boolean) => api.appRenderForceSet(on).then((next) => {
+    qc.setQueryData(qk.appInfo, (cur: api.AppInfo | undefined) => (cur ? { ...cur, render: next } : cur));
+    toast.ok(on ? t("settings.render.forceNextOn") : t("settings.render.forceNextOff"));
+  }).catch((e) => toast.error(e));
   const next = t("settings.tag.nextStart");
   return (
-    <Group id="drawing" items={["noGpu", "x11"]} hint={t("settings.groups.drawingHint")}>
+    <Group id="drawing" items={["noGpu", "x11", "forceDmabuf"]} hint={t("settings.groups.drawingHint")}>
       <SettingRow id="noGpu" htmlFor="st-no-gpu" tag={next}
         control={<Toggle id="st-no-gpu" checked={render.marker} onChange={(on) => void setRender(on)} />} />
       {render.x11 && (
         <SettingRow id="x11" htmlFor="st-x11" tag={next}
           control={<Toggle id="st-x11" checked={render.x11.auto} disabled={render.x11.why === "yours"} onChange={(on) => void setX11(on)} />} />
+      )}
+      {render.force && (
+        <SettingRow id="forceDmabuf" htmlFor="st-force-dmabuf" tag={next}
+          control={<Toggle id="st-force-dmabuf" checked={render.force.on} disabled={render.force.why === "yours"} onChange={(on) => void setForce(on)} />} />
       )}
     </Group>
   );

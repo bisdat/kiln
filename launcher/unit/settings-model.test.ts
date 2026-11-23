@@ -7,7 +7,7 @@ import { join } from "node:path";
 import type { AppInfo, SchemaSnapshot } from "../src/api/commands";
 import snapshot from "../src/data/kiln-json.snapshot.json";
 import { GROUPS, SECTIONS, bestHit, countBySection, fold, keyWords, markParts, matchItem, queryWords, resolveAnchor, search, sectionFor, snippet, type SettingsCtx } from "../src/pages/settings/model";
-import { KILN_GAME_PATHS, buildIndex, kilnGroupOf, kilnSchema } from "../src/pages/settings/searchIndex";
+import { KILN_GAME_PATHS, buildIndex, forceHint, kilnGroupOf, kilnSchema } from "../src/pages/settings/searchIndex";
 
 const SRC = join(import.meta.dirname, "..", "src");
 const schema = snapshot as unknown as SchemaSnapshot;
@@ -46,7 +46,7 @@ test("/settings opens a route's section, a group's anchor's, else the last one s
 
 const info = {
   version: "0.2.0-dev", kiln: "", platform: "linux", arch: "x64", dataDir: "/d", commit: null, mock: true,
-  render: { mode: "gpu", why: "default", marker: false, x11: { auto: true, on: false, why: "wayland" } },
+  render: { mode: "gpu", why: "default", marker: false, x11: { auto: true, on: false, why: "wayland" }, force: { on: false, step: "off", why: "off", blocked: true } },
   sandbox: { marker: false, webkit: "unused", why: "default" }, desktop: { on: true, installed: true, file: "/a/kiln.desktop", foreign: false },
   deck: { detected: false, signals: [] },
 } as unknown as AppInfo;
@@ -107,4 +107,30 @@ test("every row a section draws has its words in the index", () => {
   for (const i of buildIndex(full)) expect(GROUPS.find((g) => g.id === i.group)?.section, i.id).toBe(i.section);
   // the Nexus build's update line
   expect(buildIndex({ ...full, dist: "nexus" }).some((i) => i.id === "updates.nexus")).toBe(true);
+});
+
+test("Force GPU drawing on NVIDIA: found by NVIDIA, off by default, and it says what this start does", () => {
+  expect(search(buildIndex(full), "NVIDIA").map((i) => i.id)).toContain("forceDmabuf");
+  expect(search(buildIndex(full), "WEBKIT_FORCE_DMABUF_RENDERER").map((i) => i.id)).toEqual(["forceDmabuf"]);
+  const turnedOff = "The launcher turned this off by itself: its start at 2026-11-22T21:04:10Z ended before its page had started";
+  const hints = {
+    blocked: forceHint({ on: false, step: "off", why: "off", blocked: true }),
+    off: forceHint({ on: false, step: "off", why: "off", blocked: false }),
+    on: forceHint({ on: true, step: "shm", why: "on", blocked: false }),
+    failed: forceHint({ on: true, step: "off", why: "failed", blocked: true }),
+    turnedOff: forceHint({ on: false, step: "off", why: "off", blocked: true, failedWhy: turnedOff }),
+  };
+  for (const h of Object.values(hints)) {
+    expect(h).toContain("It is off by default");
+    expect(h).toContain("WEBKIT_DMABUF_RENDERER_FORCE_SHM=1");
+    // never the other way round, never root
+    expect(h).not.toMatch(/WEBKIT_DISABLE_DMABUF_RENDERER|chmod|sudo|\broot\b/);
+  }
+  expect(hints.blocked).toContain("because of that block: turn this on to try the GPU");
+  expect(hints.off).toContain("leaves the block as it is");
+  expect(hints.on).toContain("draws past the block");
+  expect(hints.failed).toContain("The start before with it failed, so this start forces nothing and the switch goes off.");
+  // the launcher's note says why it turned the switch off, while the switch is off
+  expect(hints.turnedOff).toContain(`${turnedOff}.`);
+  expect(forceHint({ on: true, step: "shm", why: "on", blocked: false, failedWhy: turnedOff })).not.toContain(turnedOff);
 });

@@ -272,6 +272,7 @@ pub fn run() {
             commands::app::app_started,
             commands::app::app_render_set,
             commands::app::app_render_x11_set,
+            commands::app::app_render_force_set,
             commands::app::app_render_report,
             commands::updates::updates_check,
             commands::app::app_desktop_set,

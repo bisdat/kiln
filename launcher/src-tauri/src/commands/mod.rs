@@ -226,6 +226,7 @@ pub const NAMES: &[&str] = &[
     "app_started",
     "app_render_set",
     "app_render_x11_set",
+    "app_render_force_set",
     "app_render_report",
     "updates_check",
     "app_desktop_set",
