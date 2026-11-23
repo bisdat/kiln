@@ -261,10 +261,10 @@ with tempfile.TemporaryDirectory(prefix='kiln-sf-fixtures-', dir=build.parent) a
     # them (a player's 1.7.9 app beside the bundled 1.8.1: "Additional properties are not allowed ('uiTargets' was
     # unexpected)"). Kiln's default, the bundled runtime, here 1.8.1; the app's version is its install's version.json.
     tail = " than the ShroudForge Kiln runs (1.8.1): update ShroudForge to use its Modloader and World Editor windows. Mods still load."
-    def app_windows(started, version=None):
+    def app_windows(started, version=None, runtime='1.8.1'):
         def verify(status, calls, out):
             menu_is('helper' if started else 'kiln')(status, calls, out)
-            assert status['version'] == '1.8.1', status
+            assert status['version'] == runtime, status
             lines = [l for l in out.splitlines() if "ShroudForge's own app (version " in l]
             if started:
                 assert not lines, out
@@ -290,9 +290,10 @@ with tempfile.TemporaryDirectory(prefix='kiln-sf-fixtures-', dir=build.parent) a
          versions=dict(bundled_181, shroudforge='1.8.1'), verify=app_windows(True))
     case('app-newer', extra_env=client, helper=True, use_installed=False,
          versions=dict(bundled_181, shroudforge='1.8.2'), verify=app_windows(True))
-    # the player's own runtime chosen ("Use my installed ShroudForge"): app and runtime are one install, as before
+    # the player's own runtime chosen ("Use my installed ShroudForge"): app and runtime are one install, so its windows
+    # start as before, even beside a newer bundled runtime (compared with the runtime that runs, not the bundled one)
     case('app-installed-runtime', extra_env=client, helper=True,
-         versions={'shroudforge': '1.8.1', 'kiln/plugins/shroudforge': '1.8.1'}, verify=app_windows(True))
+         versions={'shroudforge': '1.7.9', 'kiln/plugins/shroudforge': '1.8.1'}, verify=app_windows(True, runtime='1.7.9'))
 
     # ---- dev.24: mod shortcuts from Kiln's host key feed (the fork's kiln/abi/input_host.h, kiln.ui v5) ----
     # host.cpp's fake kiln.ui plays play_script(): window keys before the first raw keyboard record, raw keys with their
