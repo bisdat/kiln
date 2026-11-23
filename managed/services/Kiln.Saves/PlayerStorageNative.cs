@@ -38,6 +38,7 @@ internal sealed unsafe class PlayerStorageNative : IPlayerStoragePersistence
         _bound = adapter;
         SavesRuntime.Store.Storage.Native = adapter;
         CharacterSync.EnsureStarted();
+        PlayerStorageCommand.Ensure();
         return true;
     }
 

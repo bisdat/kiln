@@ -93,6 +93,38 @@ internal sealed class PlayerStorageStore(WorldStore owner)
         Failure = null;
     }
     internal string? Carried(CharacterKey character) => _committed.GetValueOrDefault(character);
+
+    /// <summary>The /playerstorage listing of the character a player joined with, or null when this world has none.</summary>
+    internal IReadOnlyList<string>? Listing(EntityId player)
+    {
+        if (_visits.FirstOrDefault(v => v.Value.Player == player) is not { Value: { } visit, Key: var character }) return null;
+        var lines = new List<string>();
+        if (visit.Document.ReadOnly)
+        {
+            lines.Add($"player {player.Value}, character {character}: storage saved by a newer Kiln, kept whole and read-only here");
+            return lines;
+        }
+        var current = visit.Document.Data["current"]!;
+        lines.Add($"player {player.Value}, character {character}: revision {visit.Document.Revision}{(visit.Withheld ? $", held: {visit.HeldReason}" : "")}");
+        foreach (var (key, bag) in current["storages"]!.AsObject())
+            lines.Add($"  {key}: {bag?["records"]?.AsArray().Count ?? 0} stack(s) in storage");
+        foreach (var (key, bag) in current["parked"]!.AsObject())
+        {
+            var reason = bag?["parkReason"]?.GetValue<string>() ?? PlayerStorageDocument.ParkReason(bag!.AsObject()) switch
+            {
+                2 => "more items than slots", 3 => "the storage's filter refuses them", _ => "its mod is not loaded",
+            };
+            lines.Add($"  {key}: {bag?["records"]?.AsArray().Count ?? 0} stack(s) parked ({reason}); release: /{PlayerStorageCommand.Name} release {player.Value} {key}");
+        }
+        if (visit.Document.Data["quarantine"]!.AsArray().Count is var quarantined and > 0)
+            lines.Add($"  {quarantined} quarantined record(s): bytes kept, not releasable by this command");
+        return lines;
+    }
+
+    /// <summary>Whether the character a player joined with has records parked under the key (a hold included).</summary>
+    internal bool IsParked(EntityId player, string key) =>
+        _visits.Values.FirstOrDefault(v => v.Player == player) is { Document.ReadOnly: false } visit
+        && visit.Document.Data["current"]?["parked"]?[key]?["records"] is System.Text.Json.Nodes.JsonArray { Count: > 0 };
     internal string? Notice(CharacterKey character) => _visits.GetValueOrDefault(character)?.Notice;
 
     internal PlayerStorageDocument? Read(CharacterKey character)
