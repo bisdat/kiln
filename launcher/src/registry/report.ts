@@ -1,6 +1,7 @@
 // Format 1: schema/state-registry.schema.json, native/services/content/registry/report.cpp.
 // Only a bounded, display-only projection crosses into React. Unknown members are ignored.
 import published from "../../../schema/registry/ids.lock.json";
+import { t } from "../i18n";
 export const REPORT_LIMITS = { bytes: 8 * 1024 * 1024, containers: 8 * 1024 * 1024 / 16, rows: 500, writers: 64, text: 2048, depth: 48 } as const;
 const kilnFields = new Map(Object.entries(published.registries).map(([name, spec]) => [name, new Set(Object.keys(spec.fields))]));
 function isKilnField(registry: string, field: string): boolean {
@@ -9,12 +10,13 @@ function isKilnField(registry: string, field: string): boolean {
   return !!fields && (fields.has(normalized) || fields.has(normalized.replace(/\[\]$/, "")));
 }
 type ObjectRow = Record<string, unknown>;
-export interface RegistryWriter { owner: string; kind: string; stage: string; operation: string; value: string; certainty: string }
+// certainty is the label in the current language; certain says whether Kiln observed it (the page's tone).
+export interface RegistryWriter { owner: string; kind: string; stage: string; operation: string; value: string; certainty: string; certain: boolean }
 export interface RegistryField {
   registry: string; id: string; field: string; applies: string; baseOrigin: string; base: string;
   result: string; winner: string; writers: RegistryWriter[]; writersOmitted: number; formulaInputs: string;
 }
-export interface RegistryConflict { field: string; kind: string; winner: string; loser: string; certainty: string; text: string }
+export interface RegistryConflict { field: string; kind: string; winner: string; loser: string; certainty: string; certain: boolean; text: string }
 export interface RegistryRefusal { owner: string; field: string; stage: string; reason: string }
 export interface RegistryReport {
   written: string; generation: number; phase: string; baseOrigin: string; baseWriter: string; verified: boolean;
@@ -24,22 +26,22 @@ export interface RegistryReport {
   writersOmitted: number;
 }
 function object(x: unknown): ObjectRow {
-  if (x === null || typeof x !== "object" || Array.isArray(x)) throw new Error("Invalid registry report object.");
+  if (x === null || typeof x !== "object" || Array.isArray(x)) throw new Error(t("registry.error.malformed", { part: "object" }));
   return x as ObjectRow;
 }
 function array(x: unknown): unknown[] {
-  if (!Array.isArray(x)) throw new Error("Invalid registry report list.");
+  if (!Array.isArray(x)) throw new Error(t("registry.error.malformed", { part: "list" }));
   return x;
 }
 function text(x: unknown): string {
-  if (typeof x !== "string") throw new Error("Invalid registry report text.");
+  if (typeof x !== "string") throw new Error(t("registry.error.malformed", { part: "text" }));
   // Raw addresses are not Kiln identifiers. Also remove terminal/bidi controls that could disguise an owner.
   const s = x.slice(0, REPORT_LIMITS.text).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f‪-‮⁦-⁩]/g, "")
     .replace(/\b(?:RVA|offset)\s*[:=]?\s*(?:0x[\da-f]+|\d+)\b|\b0x[\da-f]{6,}\b/gi, "[native detail hidden]");
   return s + (x.length > REPORT_LIMITS.text ? "…" : "");
 }
 function count(x: unknown): number {
-  if (!Number.isSafeInteger(x) || (x as number) < 0) throw new Error("Invalid registry report count.");
+  if (!Number.isSafeInteger(x) || (x as number) < 0) throw new Error(t("registry.error.malformed", { part: "count" }));
   return x as number;
 }
 // A raw member path a mod wrote can sit inside native text attached to a Kiln field (compose.cpp: "... over a's raw path
@@ -54,10 +56,12 @@ export function redactRaw(s: string): string {
 }
 const omitted = (x: unknown): number => x === undefined ? 0 : count(x);
 const optional = (x: unknown): string => x === undefined ? "" : text(x);
-const owner = (x: unknown): string => x === null ? "Base" : text(x);
+const owner = (x: unknown): string => x === null ? t("registry.baseOwner") : text(x);
 function certainty(x: unknown): string {
-  return x === "certain" ? "Certain" : x === "named" ? "Named from journal" : x === "bestEffort" ? "Best-effort drift" : "Unknown";
+  return t(`registry.certainty.${x === "certain" || x === "named" || x === "bestEffort" ? x : "unknown"}`);
 }
+const ADVANCED_FIELD = () => t("registry.advancedField");
+const unknownField = (field: string) => t("registry.unknownField", { field });
 
 // Values may contain lists/records, but never recursively stringify an untrusted tree wholesale.
 function value(x: unknown, leftOut: unknown = 0): string {
@@ -86,9 +90,8 @@ function value(x: unknown, leftOut: unknown = 0): string {
 
 // The native writer caps rows, not bytes (report.cpp: 20,000 fields x 64 writers x 64-entry lists can pass 8 MiB): say
 // where the whole file is, rather than only that it is too large.
-const TOO_LARGE = "Registry report exceeds the 8 MiB limit this view reads. Open kiln/state/registry.json in the game folder to read it in full.";
 function checkEnvelope(input: string) {
-  if (input.length > REPORT_LIMITS.bytes || new TextEncoder().encode(input).length > REPORT_LIMITS.bytes) throw new Error(TOO_LARGE);
+  if (input.length > REPORT_LIMITS.bytes || new TextEncoder().encode(input).length > REPORT_LIMITS.bytes) throw new Error(t("registry.error.tooLarge"));
   // Work is bounded by the byte cap: JSON.parse is linear in it. What costs memory beyond the text are containers (each
   // object/list is an allocation), so those are capped in proportion to the byte cap: one per 16 bytes. A native report
   // spends far more than that per container (about 60 bytes for a field row), so any real report up to 8 MiB passes, while
@@ -101,8 +104,8 @@ function checkEnvelope(input: string) {
       else if (c === '"') quoted = false;
     } else if (c === '"') quoted = true;
     else if (c === "{" || c === "[") {
-      if (++depth > REPORT_LIMITS.depth) throw new Error("Registry report nesting limit exceeded.");
-      if (++containers > REPORT_LIMITS.containers) throw new Error("Registry report structure limit exceeded.");
+      if (++depth > REPORT_LIMITS.depth) throw new Error(t("registry.error.nesting"));
+      if (++containers > REPORT_LIMITS.containers) throw new Error(t("registry.error.structure"));
     } else if (c === "}" || c === "]") depth--;
   }
 }
@@ -110,13 +113,13 @@ function checkEnvelope(input: string) {
 export function parseRegistryReport(input: string): RegistryReport {
   checkEnvelope(input);
   let parsed: unknown;
-  try { parsed = JSON.parse(input); } catch { throw new Error("Registry report is not valid JSON."); }
+  try { parsed = JSON.parse(input); } catch { throw new Error(t("registry.error.notJson")); }
   const r = object(parsed);
-  if (r.format !== 1) throw new Error("Unsupported registry report format (expected 1).");
+  if (r.format !== 1) throw new Error(t("registry.error.format"));
   const written = text(r.written);
-  if (!/^\d{4}-\d\d-\d\dT/.test(written) || !Number.isFinite(Date.parse(written))) throw new Error("Invalid registry report timestamp.");
+  if (!/^\d{4}-\d\d-\d\dT/.test(written) || !Number.isFinite(Date.parse(written))) throw new Error(t("registry.error.malformed", { part: "timestamp" }));
   const base = object(r.base), regmap = object(r.regmap), totals = object(r.counts), truncated = object(r.truncated);
-  if (typeof regmap.verified !== "boolean") throw new Error("Invalid registry mapping status.");
+  if (typeof regmap.verified !== "boolean") throw new Error(t("registry.error.malformed", { part: "regmap.verified" }));
   const fields = array(r.fields), conflicts = array(r.conflicts), refused = array(r.refused), added = array(r.added), removed = array(r.removed);
   let left = 0, total = 0;
   for (const [key, rows] of Object.entries({ fields, conflicts, refused, added, removed })) {
@@ -130,15 +133,15 @@ export function parseRegistryReport(input: string): RegistryReport {
     launcherWriterCut += skip;
     const raw = f.raw === true, unknown = !raw && !isKilnField(text(f.registry), text(f.field));
     return {
-      registry: text(f.registry), id: text(f.id), field: raw ? "Advanced field (details hidden)" : unknown ? `${text(f.field)} (Field unknown to this launcher)` : text(f.field), applies: text(f.applies),
+      registry: text(f.registry), id: text(f.id), field: raw ? ADVANCED_FIELD() : unknown ? unknownField(text(f.field)) : text(f.field), applies: text(f.applies),
       baseOrigin: text(b.origin), base: value(b.value, b.entriesLeftOut), result: value(f.result, f.resultEntriesLeftOut), winner: owner(f.winner),
       formulaInputs: f.formulaInputs === undefined ? "" : value(f.formulaInputs),
       writersOmitted: omitted(f.writersLeftOut) + skip,
       writers: chain.slice(skip).map(x => {
         const w = object(x);
-        return { owner: optional(w.who) || optional(w.mod) || "Kiln reference check", kind: text(w.kind), stage: optional(w.stage),
-          operation: w.list !== undefined ? value(w.list, w.listEntriesLeftOut) : w.op !== undefined ? value(w.op, w.opEntriesLeftOut) : "Reference check",
-          value: value(w.value, w.valueEntriesLeftOut), certainty: certainty(w.certainty) };
+        return { owner: optional(w.who) || optional(w.mod) || t("registry.referenceCheck"), kind: text(w.kind), stage: optional(w.stage),
+          operation: w.list !== undefined ? value(w.list, w.listEntriesLeftOut) : w.op !== undefined ? value(w.op, w.opEntriesLeftOut) : t("registry.referenceOp"),
+          value: value(w.value, w.valueEntriesLeftOut), certainty: certainty(w.certainty), certain: w.certainty === "certain" };
       }),
     };
   });
@@ -149,8 +152,8 @@ export function parseRegistryReport(input: string): RegistryReport {
       const c = object(x), field = text(c.field);
       const registry = text(c.registry), prefix = `${registry}[${text(c.id)}].`;
       const raw = c.raw === true || !field.startsWith(prefix), unknown = !raw && !isKilnField(registry, field.slice(prefix.length));
-      return { field: raw ? "Advanced field (details hidden)" : unknown ? `${field} (Field unknown to this launcher)` : field, kind: text(c.kind), winner: owner(c.winner), loser: c.loser === null ? "None" : text(c.loser),
-        certainty: certainty(c.certainty), text: raw ? "Advanced field conflict; mapping details hidden." : redactRaw(text(c.text)) };
+      return { field: raw ? ADVANCED_FIELD() : unknown ? unknownField(field) : field, kind: text(c.kind), winner: owner(c.winner), loser: c.loser === null ? t("registry.noOwner") : text(c.loser),
+        certainty: certainty(c.certainty), certain: c.certainty === "certain", text: raw ? t("registry.advancedConflict") : redactRaw(text(c.text)) };
     }),
     refused: refused.slice(0, REPORT_LIMITS.rows).map(x => {
       // Only a refusal the runtime marks raw (an Advanced-tier raw path, report.cpp) is redacted. A name the lock does not
@@ -159,11 +162,11 @@ export function parseRegistryReport(input: string): RegistryReport {
       const raw = f.raw === true;
       const unknown = !raw && !!field && !isKilnField(registry, field);
       const place = [registry, optional(f.id), field].filter(Boolean).join(" · ");
-      return { owner: text(f.mod), field: raw ? "Advanced field (details hidden)" : unknown ? `${place} (Field unknown to this launcher)` : place,
-        stage: text(f.stage), reason: raw ? `${reason.startsWith("RestartRequired:") ? "RestartRequired: " : reason.startsWith("Unproven:") ? "Unproven: " : ""}Advanced field (mapping details hidden).` : reason };
+      return { owner: text(f.mod), field: raw ? ADVANCED_FIELD() : unknown ? unknownField(place) : place,
+        stage: text(f.stage), reason: raw ? `${reason.startsWith("RestartRequired:") ? "RestartRequired: " : reason.startsWith("Unproven:") ? "Unproven: " : ""}${t("registry.advancedReason")}` : reason };
     }),
     entries: [added, removed].flatMap((rows, index) => rows.slice(0, REPORT_LIMITS.rows).map(x => {
-      const e = object(x); return { kind: index === 0 ? "Added" : "Removed", registry: text(e.registry), id: text(e.id) };
+      const e = object(x); return { kind: index === 0 ? t("registry.added") : t("registry.removed"), registry: text(e.registry), id: text(e.id) };
     })),
     omitted: left, empty: total === 0,
   };
@@ -172,11 +175,11 @@ export function parseRegistryReport(input: string): RegistryReport {
 /** No PID equality: the native report has a Windows PID even under Proton. Never call a snapshot live telemetry. */
 export function reportFreshness(written: string, status?: { running: boolean; started?: string | null }, now = Date.now()): string | null {
   const at = Date.parse(written);
-  if (!Number.isFinite(at) || at > now + 60_000) return "The report clock cannot be verified.";
-  if (!status) return "The current game process cannot be verified.";
-  if (!status.running) return "The game is not running; this is its last saved snapshot.";
-  if (status.started && at < Date.parse(status.started)) return "The report predates the current game start.";
-  if (now - at > 86_400_000) return "This snapshot is more than 24 hours old.";
-  if (!status.started || !Number.isFinite(Date.parse(status.started))) return "The current game start cannot be verified.";
+  if (!Number.isFinite(at) || at > now + 60_000) return t("registry.fresh.clock");
+  if (!status) return t("registry.fresh.process");
+  if (!status.running) return t("registry.fresh.stopped");
+  if (status.started && at < Date.parse(status.started)) return t("registry.fresh.previousStart");
+  if (now - at > 86_400_000) return t("registry.fresh.old");
+  if (!status.started || !Number.isFinite(Date.parse(status.started))) return t("registry.fresh.start");
   return null;
 }

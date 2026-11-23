@@ -3448,6 +3448,7 @@
     "catalog": "Katalog",
     "runtime": "Runtime",
     "logs": "Protokolle",
+    "conflicts": "Konflikte",
     "saves": "Spielstände",
     "editor": "Editor",
     "servers": "Server",

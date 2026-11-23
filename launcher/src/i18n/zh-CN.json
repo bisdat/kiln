@@ -3273,6 +3273,7 @@
     "catalog": "模组目录",
     "runtime": "运行时",
     "logs": "日志",
+    "conflicts": "冲突",
     "saves": "存档",
     "editor": "编辑器",
     "servers": "服务器",

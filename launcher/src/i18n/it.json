@@ -3448,6 +3448,7 @@
     "catalog": "Catalogo",
     "runtime": "Runtime",
     "logs": "Log",
+    "conflicts": "Conflitti",
     "saves": "Salvataggi",
     "editor": "Editor",
     "servers": "Server",

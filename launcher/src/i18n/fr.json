@@ -3448,6 +3448,7 @@
     "catalog": "Catalogue",
     "runtime": "Runtime",
     "logs": "Journaux",
+    "conflicts": "Conflits",
     "saves": "Sauvegardes",
     "editor": "Éditeur",
     "servers": "Serveurs",
