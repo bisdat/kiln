@@ -474,28 +474,38 @@ void KILN_CALL on_client_pre(const KilnTickInfo* tick, void*) {
 // ---- drop tables: the game's DefaultInventoryResource acquire ----
 kiln::RawHook g_acquire_hook;
 
+// A table the game has just loaded, on the thread that acquired it, before that caller walks it: registered and patched
+// (pack rules, new items' stacks) once. A table counts as seen only once its patch is in memory: a second caller of a
+// table another thread is still patching (two job threads rolling it in one step; in a hosted game also the main thread,
+// whose prediction world acquires drop tables) waits for the store lock instead of walking a half-written table.
 void note_table(const uint8_t guid[16], uintptr_t data) {
     {
         std::lock_guard lock(g_seen_mu);
-        if (!g_seen.insert(data).second) return;
+        if (g_seen.count(data)) return;
     }
     const bool job = !g_api->on_world_thread(g_kind.load());
     timing_mark_job_thread(job);
     PhaseTimer pt(PH_DROP_TABLE);
     std::lock_guard lock(store_mutex());
     timing_mark_job_thread(false);
+    if (!g_ready.load()) return;  // the world went away while this caller waited (world_reset): nothing to patch or mark
+    const auto seen = [&] {
+        std::lock_guard l(g_seen_mu);
+        g_seen.insert(data);
+    };
     Registry& D = reg(KILN_CONTENT_DROPS);
     Entry e;
     std::memcpy(e.guid, guid, 16);
     e.id = fnv1a(guid, 16);
     e.addr = data;
     e.name = guid_text(guid);
-    if (D.get(e.id)) return;
+    if (D.get(e.id)) return seen();
     D.add(e);
     drops_table_loaded(D.entries.back());  // old packs' drop rules, new items' stacks, the registry's layers (registry_live.cpp)
     std::string err;
     store_flush(&err);
     g_modified_stale = true;
+    seen();  // after the flush: a caller that finds the table seen walks the patched table
     if (!err.empty()) LOGW("drop table %s: %s", e.name.c_str(), err.c_str());
 }
 

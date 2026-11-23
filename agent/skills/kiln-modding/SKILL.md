@@ -15,11 +15,11 @@ Enshrouded is a trademark of Keen Games GmbH. Kiln is unofficial.
 
 1. Read the page for what you're using: https://frostdev.io/kiln/wiki. [references/docs-map.md](references/docs-map.md) says
    which one.
-2. The current build is **0.2.0-dev.29.19**, with mod API 0.2.11 and the matching 0.2.0-dev.29.19 MDK. A mark like
-   **dev.20+**, **dev.28+** or **dev.29.19+** means that runtime and its MDK or newer; check the installed build
-   (`Mods.RuntimeApiVersion`). Which build added what, and what a real game has shown:
-   [references/versions.md](references/versions.md). Much of dev.28 to dev.29.19 ran only on test servers, in host tests
-   or under Wine: take the verification status from the release notes' "Checked" and "Not yet" text and never claim more.
+2. The current build, its mod API and the MDK to use are in [references/versions.md](references/versions.md), which also
+   says which build added what and what a real game has shown. A mod can read the running Kiln's mod API at run time as
+   `Mods.RuntimeApiVersion`. A mark like **dev.20+**, **dev.28+** or **dev.29.19+** means that runtime and its MDK or
+   newer; check the installed build (`Mods.RuntimeApiVersion`). Much of dev.28 to dev.29.19 ran only on test servers,
+   in host tests or under Wine: take the verification status from the release notes' "Checked" and "Not yet" text and never claim more.
    Server/offline verification does not establish client rendering, input or multiplayer behavior. The official
    launcher has Nexus integration switched off: import downloaded archives by hand.
 3. Decide the side and what players need, before writing code:

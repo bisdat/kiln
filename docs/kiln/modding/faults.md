@@ -3,7 +3,7 @@
 ## Fault policy
 An exception that escapes a mod's code on the tick thread is a **fault** of that mod: tick handlers (Pre/Post),
 game-log handlers, scheduled work (`Scheduler.Post`, `await` continuations, `async void`), IMC handlers, event-bus
-handlers (`Events.HandlerFaulted`), `OnLoad`, and unobserved `Task` exceptions whose stack is in the mod's assembly.
+handlers (`[Subscribe]` methods, `Events.On<T>`), `OnLoad`, and unobserved `Task` exceptions whose stack is in the mod's assembly.
 Each fault is logged with its stack; the other handlers and mods carry on.
 
 After `fault_limit` faults within `fault_window_s` seconds the mod is **disabled**: its registrations are revoked

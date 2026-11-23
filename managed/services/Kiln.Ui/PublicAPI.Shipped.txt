@@ -1,4 +1,51 @@
 #nullable enable
+Kiln.AmmoListContext
+Kiln.AmmoListContext.GameLists(Kiln.ItemId item) -> bool
+Kiln.AmmoListContext.GameRows.get -> System.Collections.Generic.IReadOnlyList<Kiln.AmmoListRow>!
+Kiln.AmmoListContext.Held.get -> Kiln.ItemId
+Kiln.AmmoListContext.Kind.get -> Kiln.AmmoListKind
+Kiln.AmmoListContext.Player.get -> Kiln.EntityId
+Kiln.AmmoListContext.Revision.get -> ulong
+Kiln.AmmoListContext.Session.get -> uint
+Kiln.AmmoListContext.Truncated.get -> bool
+Kiln.AmmoListKind
+Kiln.AmmoListKind.Arrow = 1 -> Kiln.AmmoListKind
+Kiln.AmmoListKind.Spell = 2 -> Kiln.AmmoListKind
+Kiln.AmmoListMode
+Kiln.AmmoListMode.Append = 1 -> Kiln.AmmoListMode
+Kiln.AmmoListMode.Replace = 2 -> Kiln.AmmoListMode
+Kiln.AmmoListOptions
+Kiln.AmmoListOptions.<Clone>$() -> Kiln.AmmoListOptions!
+Kiln.AmmoListOptions.AmmoListOptions() -> void
+Kiln.AmmoListOptions.Equals(Kiln.AmmoListOptions? other) -> bool
+Kiln.AmmoListOptions.Mode.get -> Kiln.AmmoListMode
+Kiln.AmmoListOptions.Mode.init -> void
+Kiln.AmmoListPick
+Kiln.AmmoListPick.<Clone>$() -> Kiln.AmmoListPick!
+Kiln.AmmoListPick.AmmoListPick(Kiln.AmmoListKind Kind, Kiln.ItemId Item, int Count) -> void
+Kiln.AmmoListPick.Count.get -> int
+Kiln.AmmoListPick.Count.init -> void
+Kiln.AmmoListPick.Deconstruct(out Kiln.AmmoListKind Kind, out Kiln.ItemId Item, out int Count) -> void
+Kiln.AmmoListPick.Equals(Kiln.AmmoListPick? other) -> bool
+Kiln.AmmoListPick.Item.get -> Kiln.ItemId
+Kiln.AmmoListPick.Item.init -> void
+Kiln.AmmoListPick.Kind.get -> Kiln.AmmoListKind
+Kiln.AmmoListPick.Kind.init -> void
+Kiln.AmmoListProvider
+Kiln.AmmoListProvider.Active.get -> bool
+Kiln.AmmoListProvider.Dispose() -> void
+Kiln.AmmoListProvider.Kinds.get -> Kiln.AmmoListKind
+Kiln.AmmoListProvider.Mode.get -> Kiln.AmmoListMode
+Kiln.AmmoListProvider.Refresh() -> void
+Kiln.AmmoListRow
+Kiln.AmmoListRow.AmmoListRow() -> void
+Kiln.AmmoListRow.AmmoListRow(Kiln.ItemId Item, int Count) -> void
+Kiln.AmmoListRow.Count.get -> int
+Kiln.AmmoListRow.Count.init -> void
+Kiln.AmmoListRow.Deconstruct(out Kiln.ItemId Item, out int Count) -> void
+Kiln.AmmoListRow.Equals(Kiln.AmmoListRow other) -> bool
+Kiln.AmmoListRow.Item.get -> Kiln.ItemId
+Kiln.AmmoListRow.Item.init -> void
 Kiln.Color
 Kiln.Color.A.get -> byte
 Kiln.Color.A.init -> void
@@ -610,6 +657,7 @@ Kiln.TooltipPlace
 Kiln.TooltipPlace.AfterStats = 1 -> Kiln.TooltipPlace
 Kiln.TooltipPlace.End = 0 -> Kiln.TooltipPlace
 Kiln.Ui
+Kiln.Ui.AmmoList
 Kiln.Ui.Crafting
 Kiln.Ui.Inventory
 Kiln.Ui.Menus
@@ -1500,6 +1548,8 @@ Kiln.WorldOutline.Entity.get -> Kiln.EntityId
 Kiln.WorldOutline.Options.get -> Kiln.OutlineOptions!
 Kiln.WorldOutline.Reason.get -> Kiln.OutlineReason
 Kiln.WorldOutline.State.get -> Kiln.OutlineState
+const Kiln.Ui.AmmoList.ListCapability = "ui.ammo.list" -> string!
+const Kiln.Ui.AmmoList.PickCapability = "ui.ammo.pick" -> string!
 const Kiln.Ui.Inventory.ClickCapability = "ui.slots.click" -> string!
 const Kiln.Ui.Inventory.MarkCapability = "ui.slots.inspect" -> string!
 const Kiln.Ui.Inventory.PanelCapability = "ui.inventory.panels" -> string!
@@ -1521,6 +1571,13 @@ const Kiln.UiWheel.HoldCtrl = 17 -> uint
 const Kiln.UiWheel.HoldShift = 16 -> uint
 const Kiln.UiWheel.MaxEntries = 64 -> int
 const Kiln.UiWheel.PageEntries = 8 -> int
+override Kiln.AmmoListOptions.Equals(object? obj) -> bool
+override Kiln.AmmoListOptions.GetHashCode() -> int
+override Kiln.AmmoListOptions.ToString() -> string!
+override Kiln.AmmoListPick.Equals(object? obj) -> bool
+override Kiln.AmmoListPick.GetHashCode() -> int
+override Kiln.AmmoListPick.ToString() -> string!
+override Kiln.AmmoListRow.GetHashCode() -> int
 override Kiln.Color.GetHashCode() -> int
 override Kiln.CraftingPanelOptions.Equals(object? obj) -> bool
 override Kiln.CraftingPanelOptions.GetHashCode() -> int
@@ -1624,6 +1681,12 @@ override Kiln.VisibleSlotsResult.ToString() -> string!
 override Kiln.VisibleSlotsSnapshot.Equals(object? obj) -> bool
 override Kiln.VisibleSlotsSnapshot.GetHashCode() -> int
 override Kiln.VisibleSlotsSnapshot.ToString() -> string!
+static Kiln.AmmoListOptions.operator !=(Kiln.AmmoListOptions? left, Kiln.AmmoListOptions? right) -> bool
+static Kiln.AmmoListOptions.operator ==(Kiln.AmmoListOptions? left, Kiln.AmmoListOptions? right) -> bool
+static Kiln.AmmoListPick.operator !=(Kiln.AmmoListPick? left, Kiln.AmmoListPick? right) -> bool
+static Kiln.AmmoListPick.operator ==(Kiln.AmmoListPick? left, Kiln.AmmoListPick? right) -> bool
+static Kiln.AmmoListRow.operator !=(Kiln.AmmoListRow left, Kiln.AmmoListRow right) -> bool
+static Kiln.AmmoListRow.operator ==(Kiln.AmmoListRow left, Kiln.AmmoListRow right) -> bool
 static Kiln.Color.FromRgba(uint rgba) -> Kiln.Color
 static Kiln.Color.operator !=(Kiln.Color left, Kiln.Color right) -> bool
 static Kiln.Color.operator ==(Kiln.Color left, Kiln.Color right) -> bool
@@ -1696,6 +1759,10 @@ static Kiln.StatusLines.WriteToLog(Kiln.Logger? log = null) -> void
 static Kiln.TooltipLine.operator !=(Kiln.TooltipLine left, Kiln.TooltipLine right) -> bool
 static Kiln.TooltipLine.operator ==(Kiln.TooltipLine left, Kiln.TooltipLine right) -> bool
 static Kiln.Ui.AddConfigPage(string! modId, System.Action<Kiln.UiDraw!>! draw) -> System.IDisposable!
+static Kiln.Ui.AmmoList.Available.get -> bool
+static Kiln.Ui.AmmoList.Picked -> System.Action<Kiln.AmmoListPick!>?
+static Kiln.Ui.AmmoList.PicksAvailable.get -> bool
+static Kiln.Ui.AmmoList.Provide(Kiln.AmmoListKind kinds, System.Func<Kiln.AmmoListContext!, System.Collections.Generic.IReadOnlyList<Kiln.AmmoListRow>!>! rows, Kiln.AmmoListOptions? options = null) -> Kiln.AmmoListProvider!
 static Kiln.Ui.Available.get -> bool
 static Kiln.Ui.Crafting.AddPanel(Kiln.UiText! title, System.Action<Kiln.UiDraw!, Kiln.CraftingScreen>! draw, Kiln.CraftingPanelOptions? options = null) -> System.IDisposable!
 static Kiln.Ui.Crafting.AddSubcategory(uint workshop, int tab, Kiln.UiText! label, System.Collections.Generic.IEnumerable<uint>! recipes) -> Kiln.CraftingMenuAddition?
@@ -1850,6 +1917,8 @@ virtual Kiln.UiBarProvider.Invoke(in Kiln.UiValueContext context, in Kiln.UiItem
 virtual Kiln.UiTooltipLinesProvider.Invoke(in Kiln.UiValueContext context, in Kiln.UiItemView item) -> Kiln.UiTooltipLines!
 virtual Kiln.UiTooltipProvider.Invoke(in Kiln.UiValueContext context, in Kiln.UiItemView item) -> Kiln.UiTooltipDecision!
 virtual Kiln.UiTooltipValuesProvider.Invoke(in Kiln.UiValueContext context, in Kiln.UiItemView item) -> Kiln.UiTooltipScale!
+~override Kiln.AmmoListRow.Equals(object obj) -> bool
+~override Kiln.AmmoListRow.ToString() -> string
 ~override Kiln.Color.Equals(object obj) -> bool
 ~override Kiln.Color.ToString() -> string
 ~override Kiln.CraftingScreen.Equals(object obj) -> bool

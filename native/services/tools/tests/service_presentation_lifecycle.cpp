@@ -3,6 +3,7 @@
 // packages and host are recording fakes: no game is launched and no executable memory is patched.
 #include "../tools.cpp"
 #include "services/kiln_client.h"
+#include "services/kiln_world.h"
 #include <algorithm>
 #include <cstdlib>
 #include <iostream>
@@ -19,6 +20,10 @@ std::map<std::string,uintptr_t> addresses;
 std::map<uintptr_t,std::vector<uint8_t>> originals;
 KilnHooksApi hooks{};
 KilnClientApi client{};
+KilnWorldApi world_service{};
+uint64_t KILN_CALL world_session(uint32_t){return 0;}
+KilnResult KILN_CALL entity_open(KilnOwner,uint64_t,uint32_t,uint64_t,KilnEntity,KilnObjectRef*){return KILN_ERR_UNAVAILABLE;}
+KilnResult KILN_CALL snapshot(KilnOwner,const KilnObjectRef*,uint32_t,void*,uint32_t,uint32_t*){return KILN_ERR_UNAVAILABLE;}
 bool drained=false,observer_tick=false,observer_world=false;
 unsigned hook_retirements=0,owner_retirements=0;
 std::string text(KilnStr s) {return {s.ptr,s.len};}
@@ -35,7 +40,7 @@ KilnResult KILN_CALL build(KilnBuildInfo* out) {
     std::strcpy(out->exe_sha256,"5d9ef2f140b8ed49e30dbee655841b89d08baec20f799a1817e171a18a850c77");return KILN_OK;
 }
 const void* KILN_CALL service(KilnStr name,uint32_t) {
-    const auto s=text(name);if(s==KILN_HOOKS_SERVICE)return &hooks;if(s==KILN_CLIENT_SERVICE)return &client;return nullptr;
+    const auto s=text(name);if(s==KILN_HOOKS_SERVICE)return &hooks;if(s==KILN_CLIENT_SERVICE)return &client;if(s==KILN_WORLD_SERVICE)return &world_service;return nullptr;
 }
 KilnResult KILN_CALL symbol(KilnStr name,uintptr_t* out) {
     const auto i=addresses.find(text(name));if(i==addresses.end())return KILN_ERR_NOT_FOUND;*out=i->second;return KILN_OK;
@@ -81,7 +86,7 @@ KilnResult KILN_CALL client_unsubscribe(KilnHandle handle) {CHECK(drained&&handl
 KilnResult KILN_CALL state(KilnClientState* out) {*out={};out->size=sizeof *out;out->side=KILN_SIDE_CLIENT;out->flags=KILN_CLIENT_LIFECYCLE;return KILN_OK;}
 bool KILN_CALL client_thread() {return true;}
 uintptr_t KILN_CALL client_world() {return 0;}
-KilnResult KILN_CALL register_service(KilnOwner owner,KilnStr name,const void*) {CHECK(owner==parent&&text(name)==KILN_TOOLS_SERVICE);return KILN_OK;}
+KilnResult KILN_CALL register_service(KilnOwner owner,KilnStr name,const void*) {CHECK(owner==parent&&(text(name)==KILN_TOOLS_SERVICE||text(name)==KILN_UI_AMMO_SERVICE));return KILN_OK;}
 size_t position(const char* event) {const auto i=std::find(events.begin(),events.end(),event);CHECK(i!=events.end());return size_t(i-events.begin());}
 }
 bool kiln_tools_impact_install(const KilnApi*,KilnOwner owner,KilnToolAreaCheck) noexcept {CHECK(owner==fixture::parent);fixture::record("impact");return true;}
@@ -112,6 +117,12 @@ int main() {
     addresses["tools/BrushQueryFrame"]=0x50007;
     bytes("tools/BrushQuery",0x60000,"4C 89 44 24 18 48 89 54 24 10 55 53 56 41 54 41 55 41 57 48 8D 6C 24 D1 48 81 EC C8 00 00 00");
     const int32_t relative=0x60000-(0x50007+5);std::memcpy(originals[0x50000].data()+8,&relative,4);
+    bytes("ui/AmmoItemLookup",0x80000,"89 4C 24 08 48 83 EC 28 85 C9 74 1B 48 8D 4A 38 48 8D 54 24 30 E8 ?? ?? ?? ?? 48 85 C0 74 08 48 8B 00");
+    bytes("ui/AmmoItemMap",0x90000,"48 89 5C 24 08 48 89 7C 24 10 83 79 54 00 4C 8B C9 48 8B 59 10 74 53 44 8B 1A 48 8D 43 FF 48 8B 79 08 49 23 C3");
+    const int32_t map_relative=0x90000-(0x80000+26);std::memcpy(originals[0x80000].data()+22,&map_relative,4);
+    bytes("ui/AmmoFinalizer",0xa0000,"48 89 5C 24 08 48 89 74 24 10 48 89 7C 24 18 55 41 54 41 55 41 56 41 57 48 8B EC 48 83 EC 50 4C 8B 6D 50 49 8B F1 4C 8B 65 58");
+    bytes("ui/AmmoPick",0xb0000,"4C 8B D9 41 80 F8 07 0F 83 91 00 00 00 48 8D 0D ?? ?? ?? ?? 41 0F B6 C0 8B 84 81 F0 C1 40 00 48 03 C1 FF E0");
+    world_service.header={sizeof world_service,KILN_WORLD_VERSION};world_service.game_world_session=&world_session;world_service.entity_open=&entity_open;world_service.ecs_snapshot=&snapshot;
     addresses["GetComponent"]=0x70000; // Observer resolves this, but callbacks are not executed in this wiring test.
     fixture::hooks.header={sizeof fixture::hooks,KILN_HOOKS_VERSION};fixture::hooks.raw_detour=&raw;fixture::hooks.mid2_checked=&mid;
     fixture::hooks.read_original=&read_original;fixture::hooks.code_state=&code_state;fixture::hooks.subscribe_owner_retiring=&retiring;
@@ -130,6 +141,7 @@ int main() {
     CHECK(position("retiring subscription")<position("tools/TerrainConfigLookup"));
     CHECK(position("tools/TerrainConfigLookup")<position("tools/MaterialPreview"));
     CHECK(position("held Post")<position("tools/MaterialSelector")&&position("tools/MaterialSelector")<position("tools/BrushQueryFrame"));
+    CHECK(position("tools/MaterialSelector")<position("ui/AmmoFinalizer")&&position("ui/AmmoFinalizer")<position("ui/AmmoPick"));
     const auto installed=events.size();info.on_unload(nullptr);
     CHECK(events.size()==installed+1&&events.back()=="close and drain");CHECK(!hook_retirements&&!owner_retirements&&observer_tick&&observer_world);
     drained=true;info.on_unload(nullptr);

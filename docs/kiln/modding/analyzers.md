@@ -102,9 +102,9 @@ Kiln.Testing and every service, then reads their sources with Roslyn (`tools/Api
 - **Services:** the folders under `managed/services/` (22).
 - **Capability guards** (KILN121): the public static bool properties that answer what `Capabilities.Is("row")`
   answers, with their rows. See [KILN121](#kiln121), "Properties that ask the same question". 54 properties.
-- **Boot** (KILN035): `BootWorks`, the public members with a boot path of their own (`if (Game.InBoot) return …`:
-  `Config.Register`), which KILN035 leaves alone; `BootRefused`, the public members that reach
-  `if (Game.InBoot) throw …` (directly or through calls inside the same assembly, not through a member with a boot
+- **Boot** (KILN035): `BootWorks`, the public members with a boot path of their own (they return early while the
+  boot phase is open: `Config.Register`), which KILN035 leaves alone; `BootRefused`, the public members that throw
+  while the boot phase is open (directly or through calls inside the same assembly, not through a member with a boot
   path: a `ConfigFile.Changed` handler), which KILN035 reports.
 
 Run the script after changing Kiln.Api, Kiln.Testing or a service:
@@ -283,7 +283,7 @@ registered through Kiln:
 - event-bus subscriptions;
 - every service's static events and handles: Chat, Players, Network, Ui, Client, Gameplay, Commands, Hooks, …
 
-Each of those is tracked per mod and dropped in `ModContext.Retiring`. Kiln does not remove handlers on events that
+Each of those is tracked per mod and dropped when the mod unloads. Kiln does not remove handlers on events that
 belong to the BCL, to libraries, or to another mod's `exports`. Such a handler roots the mod's load context, so a
 copy of the old mod survives each `reload`, and the old code keeps reacting. `reload-test <id> <n>` shows the leak.
 
@@ -514,7 +514,7 @@ held by other (non-mod) code." A timer keeps calling into the unloaded mod and k
 thread inside the mod's code blocks the unload. Kiln's own handles are released on unload and are not reported:
 - `Commands.Register`, `Gameplay.Protect`, `Network` channels;
 - `Hooks`, `Ui` windows, `KeyBinding`s;
-- `Creatures.Register`, `Natives.OnDamage`, …
+- `CreatureVariants.Register`, `Natives.OnDamage`, …
 
 ```csharp
 System.Threading.Timer? _poll;
@@ -934,11 +934,11 @@ No code fix: the manifest is not a source file, and a staged definition returns 
   assemblies).
 
 - a member Kiln refuses on the boot thread although it allows any thread otherwise: the generated `BootRefused` table
-  (`if (Game.InBoot) throw`, directly or through a call: adding a `ConfigFile.Changed` handler).
+  (it throws while the boot phase is open, directly or through a call: adding a `ConfigFile.Changed` handler).
 
 Not reported:
 - members marked `[BootThreadOnly]` (`BootDefinitions`, `boot.GameData.Read`);
-- members with a boot path of their own, the generated `BootWorks` table (`if (Game.InBoot) return ...`):
+- members with a boot path of their own, the generated `BootWorks` table (they return early while the boot phase is open):
   `Config.Register<T>()` reads the file and its defaults without writing in `OnBoot`, and reading its `Value` is a plain
   property ([config.md](../config.md#in-modonboot)). Writing the config (`Set`, `TrySet`, `Save`, `Reload`), a `Changed`
   handler and `Config.RegisterWorld` are still reported. KILN101 still counts `Config.Register` as a tick-thread member

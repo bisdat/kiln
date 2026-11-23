@@ -1005,9 +1005,59 @@
       "dlsstweaks": "DLSSTweaks",
       "nvngx": "其他 DLSS 加载器（游戏目录中有 nvngx.dll）",
       "ngx_patched": "其他工具已接管 DLSS",
-      "overlay_off": "Kiln 叠加层已关闭"
+      "overlay_off": "Kiln 叠加层已关闭",
+      "upscaler": "其他超分辨率工具（游戏目录中有 AMD 或 Intel 的超分辨率组件，或游戏的 FSR 3 渲染流程已被修改）"
     },
-    "saved": "设置保存在 kiln/kiln.json，也可在启动器的设置页调整。"
+    "saved": "设置保存在 kiln/kiln.json，也可在启动器的设置页调整。",
+    "upscaler": {
+      "caption": "通过 FSR 3 使用其他超分辨率技术",
+      "choice": "超分辨率技术",
+      "game": "游戏自带的 FSR 3",
+      "amd": "AMD FSR",
+      "xess": "Intel XeSS",
+      "amd_mode": "AMD FSR 版本",
+      "amd_auto": "自动（暂用 FSR 3.1）",
+      "amd_fsr3": "FSR 3.1",
+      "amd_fsr4": "FSR 4（实验性）",
+      "amd_hint": "在确认 FSR 4 可在本游戏正常使用之前，「自动」会使用 FSR 3.1。选择「FSR 4（实验性）」后，由 AMD 根据显卡和驱动选择版本，支持时使用 FSR 4，否则使用 FSR 3.1。FSR 4 可能让暗处过暗。",
+      "hint": "在游戏图形设置中选择 FSR 3 后，Kiln 会用这里选定的超分辨率技术代替它。正在世界中使用 FSR 3 时，修改立即生效。其他情况下，修改会在载入世界时生效。AMD FSR 和 Intel XeSS 需要厂商组件，可在 Kiln 启动器的「设置」→「图形」中下载。",
+      "files": {
+        "present": "{name} {version} 组件文件位于 {folder}。",
+        "missing": "尚未下载 {name} 组件。请关闭游戏，再从 Kiln 启动器的「设置」→「图形」下载。下载前会继续使用游戏自带的 FSR 3。",
+        "changed": "{folder} 中的 {name} 组件文件有缺失或已变更。请关闭游戏，再从 Kiln 启动器的「设置」→「图形」重新下载。重新下载前会继续使用游戏自带的 FSR 3。"
+      },
+      "running": {
+        "off": "Kiln 当前未接管游戏的 FSR 3。",
+        "not_fsr": "当前未使用 FSR 3。可能尚未在游戏图形设置中选择 FSR 3，或尚未载入世界。",
+        "game_fsr3": "正在使用游戏自带的 FSR 3。",
+        "amd_fsr4": "AMD FSR 4 正在代替游戏自带的 FSR 3。",
+        "amd_fsr31": "AMD FSR 3.1 正在代替游戏自带的 FSR 3。",
+        "xess": "Intel XeSS 正在代替游戏自带的 FSR 3。",
+        "unknown": "Kiln 的组件版本不一致，暂时无法识别 FSR 3 选项实际使用的超分辨率技术。"
+      },
+      "size": "渲染分辨率 {render}，输出分辨率 {output}。",
+      "size_version": "版本 {version}，渲染分辨率 {render}，输出分辨率 {output}。",
+      "amd_fsr3_auto": "当前显卡或驱动不支持 FSR 4，AMD 已选用 FSR 3.1。",
+      "detail": "详细信息 · {detail}",
+      "restart_now": "重启游戏后可使用 {upscaler}。重启前会继续使用游戏自带的 FSR 3。",
+      "reason": {
+        "restart": "重启游戏后可使用 {upscaler}，Kiln 会在游戏启动时完成初始化。",
+        "files_missing": "{upscaler} 的组件尚未下载，当前使用游戏自带的 FSR 3。",
+        "files_bad": "{upscaler} 有文件的大小或 SHA-256 校验值与预期不符。Kiln 已跳过加载，请重新下载组件。",
+        "load_failed": "{upscaler} 有文件加载失败，当前使用游戏自带的 FSR 3。",
+        "device": "你的显卡或驱动缺少 {upscaler} 所需的 Vulkan 功能，当前使用游戏自带的 FSR 3。",
+        "create_failed": "{upscaler} 在当前分辨率下初始化失败，已改用游戏自带的 FSR 3。",
+        "runtime_failed": "{upscaler} 处理画面时出错。重启游戏前将使用游戏自带的 FSR 3。",
+        "fault": "{upscaler} 或 Kiln 的相关代码发生故障。重启游戏前将使用游戏自带的 FSR 3。",
+        "aside": "Kiln 沿用游戏自带的 FSR 3（{tools}）。",
+        "no_signatures": "Kiln 尚未适配此游戏版本的 FSR 3，当前使用游戏自带的 FSR 3。待 Kiln 发布适配更新后即可使用替代技术。",
+        "inputs": "游戏提供的图像数据不符合 {upscaler} 的要求，当前使用游戏自带的 FSR 3。",
+        "unavailable": "当前 Kiln 版本或系统不支持 {upscaler}，将使用游戏自带的 FSR 3。",
+        "waiting": "{upscaler} 已就绪。在游戏图形设置中选择 FSR 3 并载入世界后即可使用。",
+        "no_vulkan": "本次运行未检测到游戏初始化图形设备。请重启游戏以启用 {upscaler}。",
+        "unknown": "{upscaler} 未能运行（新版 Kiln 的原因代码 {number}），当前使用游戏自带的 FSR 3。"
+      }
+    }
   },
   "native": {
     "menu": {
@@ -1035,7 +1085,11 @@
       "unknown": "DLSS：下次启动游戏后读取，当前输出 {output}",
       "aside": "Kiln 未接管超分辨率（{tools}），输出 {output}",
       "cap": "帧率上限 {fps} fps",
-      "cap_aside": "限帧 {fps} fps 未生效（{tools}）"
+      "cap_aside": "限帧 {fps} fps 未生效（{tools}）",
+      "upscale": "FSR 3 选项 · {upscaler} · {render} → {output}",
+      "game_fsr3": "游戏自带的 FSR 3",
+      "upscale_why": "{upscaler} 未生效（{why}）",
+      "upscale_restart": "重启游戏后可使用 {upscaler}"
     }
   }
 }

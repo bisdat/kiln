@@ -16,8 +16,8 @@ import Inventory from './Inventory.jsx';
 import Skills from './Skills.jsx';
 import Knowledge from './Knowledge.jsx';
 
-// the editor's own words are the launcher's (launcher/src/i18n, "editor.*", in the launcher's language); item and skill
-// names are the game's, English outside Portuguese (the game data ships both)
+// The editor's UI words are the launcher's. Names resolve from the locally extracted game translations;
+// keep upstream's English mode as the legacy fallback when no extraction is available.
 definirIdioma('en');
 
 export const TABS = [['char', 'editor.tabs.equipment'], ['inv', 'editor.tabs.inventory'], ['skills', 'editor.tabs.skills'], ['know', 'editor.tabs.knowledge']];

@@ -1,5 +1,5 @@
 kiln_service(items items.cpp engine.cpp pide.cpp moves.cpp xfer.cpp names.cpp stamps.cpp instances.cpp equip.cpp wear.cpp toolwear.cpp toolwear_table.cpp
-             setsnap.cpp sets.cpp setexec.cpp gems.cpp stations.cpp gear.cpp scale.cpp rename.cpp)
+             setsnap.cpp sets.cpp setexec.cpp gems.cpp stations.cpp gear.cpp scale.cpp rename.cpp dyes.cpp)
 # gems.cpp: the offered gems' tokens come from the system's random generator
 target_link_libraries(kiln-items PRIVATE bcrypt)
 
@@ -57,3 +57,18 @@ set_target_properties(items-rename-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${C
 add_executable(items-stations-test tests/stations_test.cpp)
 target_include_directories(items-stations-test PRIVATE "${CMAKE_SOURCE_DIR}/core/abi")
 set_target_properties(items-stations-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/items-tests")
+
+add_executable(items-craft-sources-test tests/craft_sources_test.cpp)
+target_include_directories(items-craft-sources-test PRIVATE "${CMAKE_SOURCE_DIR}/core/abi")
+set_target_properties(items-craft-sources-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/items-tests")
+
+add_executable(items-craft-payment-test tests/craft_payment_test.cpp)
+target_include_directories(items-craft-payment-test PRIVATE "${CMAKE_SOURCE_DIR}/core/abi" "${CMAKE_SOURCE_DIR}/third_party")
+set_target_properties(items-craft-payment-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/items-tests")
+
+add_executable(items-dye-sources-test tests/dye_sources_test.cpp)
+target_include_directories(items-dye-sources-test PRIVATE "${CMAKE_SOURCE_DIR}/core/abi")
+set_target_properties(items-dye-sources-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/items-tests")
+add_executable(items-dyes-native-test tests/dyes_native_test.cpp)
+target_include_directories(items-dyes-native-test PRIVATE "${CMAKE_SOURCE_DIR}/core/abi" "${CMAKE_SOURCE_DIR}/third_party")
+set_target_properties(items-dyes-native-test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/items-tests")

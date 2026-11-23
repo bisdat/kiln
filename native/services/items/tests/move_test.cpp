@@ -39,7 +39,12 @@ uint64_t g_test_step = 1;
 uint64_t current_step() { return g_test_step; }  // v4: an entry's age (instances.cpp)
 // engine.cpp's give path calls these; this test never gives, and pide.cpp has its own test (pide_test.cpp)
 void pide_commit(void* tx, void(KILN_CALL* commit)(void*), uint32_t, uint8_t, uint32_t) { commit(tx); }
-void pide_commit(void* tx, void(KILN_CALL* commit)(void*), const PideOptions&) { commit(tx); }
+bool g_initial_equipped=false;
+void pide_commit(void* tx, void(KILN_CALL* commit)(void*), const PideOptions& o) {
+    const bool previous=g_initial_equipped;
+    g_initial_equipped=o.equipped && o.equipped_slot;
+    __try { commit(tx); } __finally { g_initial_equipped=previous; }
+}
 }  // namespace kitems
 
 using namespace kitems;
@@ -1574,9 +1579,299 @@ void issue109_engine() {
     reset_world();
 }
 
+// GiveEquip exercises the production engine path with delayed creation, as InventoryCommit does.
+bool ge_equip_fail = false, ge_guard = false;
+int ge_commits = 0, ge_rollbacks = 0, ge_frees = 0;
+bool ge_free_fault = false, ge_preflight_fault = false, ge_steal_replaced = false;
+bool ge_spill = false, ge_move_new = false, ge_empty_guard = false, ge_invalid_pide = false;
+int ge_fault = 0;
+void ge_maybe_fault(int stage) {
+    if (ge_fault==stage) { ge_fault=0; RaiseException(EXCEPTION_ACCESS_VIOLATION,0,0,nullptr); }
+}
+void* __fastcall ge_find(uint32_t item, void* items) {
+    if (ge_preflight_fault) { ge_preflight_fault=false; RaiseException(EXCEPTION_ACCESS_VIOLATION,0,0,nullptr); }
+    return fake_item_find(item,items);
+}
+Result12* __fastcall ge_remove(Result12* out, void* tx, uint32_t owner, uint32_t item, uint64_t slot, uint32_t count) {
+    fake_remove(out,tx,owner,item,slot,count); ge_maybe_fault(3); return out;
+}
+uint64_t ge_target = 0;
+Result12* __fastcall ge_transfer(Result12* out, void* tx, uint64_t dst, uint64_t src, int32_t mode) {
+    const auto pide = pide_at(KILN_SLOT_INVENTORY(src), KILN_SLOT_INDEX(src));
+    const auto item = item_at(KILN_SLOT_INVENTORY(src), KILN_SLOT_INDEX(src));
+    fake_transfer(out, tx, dst, src, mode);
+    if (!out->error && out->value && pide) push_op(5, dst, item, static_cast<uint16_t>(out->value), pide);
+    ge_maybe_fault(2);
+    return out;
+}
+void* __fastcall ge_ctor(void* tx) {
+    fake_tx_ctor(tx);
+    g_ops.clear();
+    g_oplist = reinterpret_cast<OpList*>(static_cast<uint8_t*>(tx) + E.tx_ops);
+    *g_oplist = {};
+    return tx;
+}
+void __fastcall ge_init(void* tx, const void*) {
+    auto* b = static_cast<uint8_t*>(tx);
+    b[E.tx_guard_flags] = ge_guard ? 0x40 : 0;
+    if (ge_empty_guard) {
+        const uint64_t zero=0, one=1;
+        std::memcpy(b+E.tx_empty_state,&zero,8); std::memcpy(b+E.tx_touched_count,&one,8);
+    }
+    ge_maybe_fault(1);
+}
+Result12* __fastcall ge_add(Result12* out, void*, uint32_t, uint64_t slot, uint32_t item, uint32_t count,
+                           OptU32*, OptU8*, OptF32*) {
+    *out = {};
+    if (g_add_fails) return out->error = 0x27, out;
+    push_op(0, ge_spill ? KILN_SLOT_ID(101,7) : slot, item, static_cast<uint16_t>(count), 0);
+    put(KILN_SLOT_INVENTORY(slot), KILN_SLOT_INDEX(slot), item, count, 0); // no pide until commit
+    ge_maybe_fault(4);
+    return out;
+}
+Result12* __fastcall ge_select(Result12* out, void*, uint8_t remove, uint32_t, const void*, uint8_t slot,
+                               uint64_t cell, const void* info, uint32_t pide) {
+    *out={};
+    if(ge_equip_fail) return out->error=0x11,out;
+    uint32_t item; std::memcpy(&item,info,4);
+    push_op(7,remove ? 0 : cell,item,0,pide);
+    g_ops[g_ops.size()-kOpStride+0x27]=slot;
+    ge_target=cell;
+    ge_maybe_fault(5);
+    return out;
+}
+Result12* __fastcall ge_equip(Result12* out, void* tx, uint64_t source, uint8_t slot) {
+    *out = {};
+    if (ge_equip_fail) return out->error = 0x11, out;
+    uint64_t target=0;
+    std::memcpy(&target,comp(T_SEL,P,216).data()+selection_index(slot)*8,8);
+    if(!target) { // vanilla's chooser sees the pending source as occupied: it chooses another free cell
+        for(int i=0;i<8;++i) if(!count_at(100,i)) { target=KILN_SLOT_ID(100,i); break; }
+    }
+    if(!target) return out->error=0x1f,out;
+    if(source!=target) ge_transfer(out,tx,target,source,0);
+    const auto item=item_at(KILN_SLOT_INVENTORY(target),KILN_SLOT_INDEX(target));
+    ge_select(out,tx,0,P,comp(T_SEL,P,216).data(),slot,target,g_item_bytes[item%8],
+              pide_at(KILN_SLOT_INVENTORY(target),KILN_SLOT_INDEX(target)));
+    if (ge_steal_replaced) put(101,3,0,0);
+    if (ge_move_new) {
+        put(100,7,item_at(KILN_SLOT_INVENTORY(target),KILN_SLOT_INDEX(target)),count_at(KILN_SLOT_INVENTORY(target),KILN_SLOT_INDEX(target)));
+        put(KILN_SLOT_INVENTORY(target),KILN_SLOT_INDEX(target),0,0);
+    }
+    return out;
+}
+void __fastcall ge_commit(void*) {
+    ++ge_commits;
+    ge_maybe_fault(6);
+    for (size_t i = 0; i < g_ops.size(); i += kOpStride) {
+        const auto* op = g_ops.data() + i;
+        uint64_t slot; uint32_t item;
+        std::memcpy(&slot, op, 8); std::memcpy(&item, op + 8, 4);
+        if(op[0x26]==7) {
+            std::memcpy(comp(T_SEL,P,216).data()+selection_index(op[0x27])*8,&slot,8);
+            uint32_t existing; std::memcpy(&existing,op+0x20,4);
+            if(existing) {
+                auto& state=comp(T_ITEMSTATE,existing,20);
+                if (slot) state[0x0e] |= 8; else state[0x0e] &= ~8;
+            }
+            continue;
+        }
+        if (op[0x26] == 1 && op[0x30]) {
+            uint32_t existing; std::memcpy(&existing, op + 0x20, 4);
+            for (auto it=g_comps.begin(); it!=g_comps.end();) {
+                if (it->first.second==existing) it=g_comps.erase(it); else ++it;
+            }
+            continue;
+        }
+        if (op[0x26] == 5) {
+            uint32_t existing; std::memcpy(&existing, op + 0x20, 4);
+            auto& state=comp(T_ITEMSTATE,existing,20); std::memcpy(state.data(),&slot,8);
+            auto& owner=comp(T_OWNER,existing,4); const auto entity=KILN_SLOT_INVENTORY(slot);
+            std::memcpy(owner.data(),&entity,4);
+            continue;
+        }
+        if(op[0x26]!=0 || !(*reinterpret_cast<uint32_t*>(g_item_bytes[item % 8] + E.item_flags) & 2)) continue;
+        if (ge_invalid_pide) {
+            put(KILN_SLOT_INVENTORY(slot), KILN_SLOT_INDEX(slot), item, 1, UINT32_MAX);
+            continue;
+        }
+        const auto pide = g_next_pide++;
+        put(KILN_SLOT_INVENTORY(slot), KILN_SLOT_INDEX(slot), item, 1, pide);
+        auto& state = comp(T_ITEMSTATE, pide, kItemStateSize);
+        std::memcpy(state.data(), &slot, 8);
+        std::memcpy(state.data() + 8, &item, 4);
+        state[0x0e] = g_initial_equipped ? 0x48 : 0x40;
+        state[0x10] = 2; state[0x11] = 3; // instance data only exists after commit
+        const auto entity=KILN_SLOT_INVENTORY(slot);
+        std::memcpy(comp(T_OWNER,pide,4).data(),&entity,4);
+        ge_maybe_fault(7);
+    }
+}
+void __fastcall ge_rollback(void* tx) { ++ge_rollbacks; fake_tx_rollback(tx); ge_maybe_fault(8); }
+void __fastcall ge_free(void*) {
+    ++ge_frees;
+    if (ge_free_fault) { ge_free_fault=false; RaiseException(EXCEPTION_ACCESS_VIOLATION,0,0,nullptr); }
+}
+void give_equip_test() {
+    E.tx_ctor = &ge_ctor; E.tx_init = &ge_init; E.add_items = &ge_add; E.remove_items = &ge_remove; E.item_find = &ge_find;
+    E.equip_item = &ge_equip; E.select_equipment=&ge_select; E.commit = &ge_commit; E.rollback = &ge_rollback; E.free_arrays = &ge_free;
+    E.slot_transfer = &ge_transfer;
+    E.tx_ops = 0x100; E.tx_guard_flags = 0x170; E.tx_empty_state = 0xa0; E.tx_touched_count = 0x178;
+    g_item_bytes[SWORD % 8][0x104] = 37;
+    std::memcpy(g_item_bytes[SWORD%8],&SWORD,4);
+    auto reset = [&] {
+        reset_world();
+        make_setup(P, {100,101});
+        comp(T_SETUP, P,84)[0x40] = 2;
+        comp(T_SEL,P,216);
+        for (int k=0;k<8;++k) put(101,k,WOOD,250);
+        ge_commits=ge_rollbacks=ge_frees=0; ge_equip_fail=ge_guard=g_add_fails=false;
+        ge_target=0; ge_free_fault=ge_preflight_fault=ge_steal_replaced=false; ge_fault=0;
+        ge_spill=ge_move_new=ge_empty_guard=ge_invalid_pide=false;
+    };
+    auto run = [&](uint32_t flags=0, uint8_t slot=10, uint32_t item=SWORD, uint32_t count=1) {
+        alignas(16) uint8_t tx[512]{};
+        FakeTx access; Access a; access_from_tx(&access,&a);
+        KilnItemsGiveEquipRequest r{sizeof r,P,item,count,flags,slot,{}};
+        KilnItemsEquipResult out{};
+        unsigned long code = 0;
+        if (!run_give_equip(a,r,tx,&out,&code)) out.status=KILN_ITEMS_UNAVAILABLE;
+        return out;
+    };
+    reset(); auto r=run();
+    check(r.status==KILN_ITEMS_DONE && r.to && r.to==ge_target && r.pide && pide_at(KILN_SLOT_INVENTORY(r.to),KILN_SLOT_INDEX(r.to))==r.pide,
+          "give-equip: full backpack, empty target: created pide lands in final equipped slot");
+    const auto route_state=comp(T_ITEMSTATE,r.pide,20), route_owner=comp(T_OWNER,r.pide,4), route_selection=comp(T_SEL,P,216);
+    check(comp(T_ITEMSTATE,r.pide,20)[0x0e]==0x48 && comp(T_ITEMSTATE,r.pide,20)[0x10]==2 && comp(T_ITEMSTATE,r.pide,20)[0x11]==3 && ge_commits==1 && ge_frees==1,
+          "give-equip: one commit creates proper instance data, arrays freed once");
+    // A pre-existing identical item in the backpack, equipped through the fixture's vanilla move + op7 path.
+    reset(); put(101,0,SWORD,1,777);
+    const uint64_t source=KILN_SLOT_ID(101,0);
+    auto& vanilla_state=comp(T_ITEMSTATE,777,20);
+    std::memcpy(vanilla_state.data(),&source,8); std::memcpy(vanilla_state.data()+8,&SWORD,4);
+    vanilla_state[0x0e]=0x40; vanilla_state[0x10]=2; vanilla_state[0x11]=3;
+    alignas(16) uint8_t vanilla_tx[512]{}; ge_ctor(vanilla_tx); Result12 vanilla_out{};
+    ge_equip(&vanilla_out,vanilla_tx,source,10); ge_commit(vanilla_tx);
+    check(vanilla_out.error==0 && comp(T_ITEMSTATE,777,20)==route_state && comp(T_OWNER,777,4)==route_owner &&
+          comp(T_SEL,P,216)==route_selection,
+          "give-equip: empty route matches vanilla fixture selection, ItemState bytes (equipped, rarity, level, contained slot) and owner");
+    reset(); const uint64_t eq=KILN_SLOT_ID(100,0); put(100,0,SWORD,1,77); std::memcpy(comp(T_SEL,P,216).data()+80,&eq,8);
+    const auto before=g_comps;
+    r=run(); check(r.status==KILN_ITEMS_NO_ROOM && g_comps==before && ge_frees==0,
+          "give-equip: occupied target and full Backpack refuses before mutation");
+    r=run(KILN_ITEMS_GIVE_EQUIP_TAKE);
+    check(r.status==KILN_ITEMS_DONE && r.replaced==SWORD && r.reserved[0]==1 && !r.replaced_to && pide_at(100,0)!=77,
+          "give-equip: Take works with full backpack and reports removed item and count");
+    reset(); put(100,0,SWORD,1,77); std::memcpy(comp(T_SEL,P,216).data()+80,&eq,8); put(101,3,0,0);
+    auto& old_state = comp(T_ITEMSTATE,77,20);
+    std::memcpy(old_state.data(), &eq, 8); std::memcpy(old_state.data()+8, &SWORD, 4);
+    old_state[0x0e]=0x49; old_state[0x10]=4; old_state[0x11]=5;
+    auto expected_old = old_state;
+    const uint64_t old_destination = KILN_SLOT_ID(101,3);
+    std::memcpy(expected_old.data(), &old_destination, 8); expected_old[0x0e] &= ~8;
+    r=run(); check(r.status==KILN_ITEMS_DONE && r.replaced_to==old_destination && pide_at(101,3)==77,
+          "give-equip: Backpack preserves old instance in a free Generic slot");
+    check(comp(T_ITEMSTATE,77,20)==expected_old && *reinterpret_cast<uint32_t*>(comp(T_OWNER,77,4).data())==101,
+          "give-equip: the replaced Backpack instance is unequipped, preserving every other ItemState byte and owner");
+    reset(); put(100,0,SWORD,1,77); std::memcpy(comp(T_SEL,P,216).data()+80,&eq,8); put(101,3,0,0);
+    const auto before_lost = g_comps;
+    E.slot_transfer = &fake_transfer_eats;
+    r=run(); E.slot_transfer = &ge_transfer;
+    check(r.status==KILN_ITEMS_REFUSED && g_comps==before_lost && ge_commits==0 && ge_rollbacks==1,
+          "give-equip: a transfer that loses the replaced item rolls back before adding the new stack");
+    reset(); put(100,0,SWORD,1,77); std::memcpy(comp(T_SEL,P,216).data()+80,&eq,8); put(101,3,0,0);
+    const auto before_late_loss=g_comps; ge_steal_replaced=true;
+    r=run();
+    check(r.status==KILN_ITEMS_REFUSED && g_comps==before_late_loss && ge_commits==0 && ge_rollbacks==1,
+          "give-equip: the replaced item is guarded again after the final equip operation");
+    for (int fault=0;fault<4;++fault) {
+        reset(); put(100,0,SWORD,1,77); std::memcpy(comp(T_SEL,P,216).data()+80,&eq,8);
+        const auto baseline=g_comps; const auto ids=g_next_pide;
+        g_add_fails=fault==0; ge_equip_fail=fault==1; ge_guard=fault==2;
+        r=run(KILN_ITEMS_GIVE_EQUIP_TAKE | (fault==3 ? KILN_ITEMS_GIVE_EQUIP_DRY_RUN : 0));
+        check(g_comps==baseline && g_next_pide==ids && ge_commits==0 && ge_rollbacks==1 && ge_frees==1 &&
+              ((fault==3)==(r.status==KILN_ITEMS_DONE)),
+              "give-equip: add/equip/guard refusal or DryRun restores old bytes and creates no orphan");
+    }
+    reset();
+    ge_preflight_fault=true;
+    const auto before_preflight_fault=g_comps;
+    r=run();
+    check(r.status==KILN_ITEMS_UNAVAILABLE && g_comps==before_preflight_fault && ge_rollbacks==0 && ge_frees==0,
+          "give-equip: a preflight read fault never rolls back a prior transaction in the reused buffer");
+    reset(); ge_invalid_pide=true;
+    r=run();
+    check(r.status==KILN_ITEMS_UNAVAILABLE && ge_commits==1 && ge_rollbacks==0,
+          "give-equip: the invalid item-entity sentinel cannot pass the committed-gear invariant as Done");
+    reset(); ge_free_fault=true;
+    r=run();
+    check(r.status==KILN_ITEMS_UNAVAILABLE && ge_commits==1 && ge_rollbacks==0 && ge_frees==1 && pide_at(100,0)!=0,
+          "give-equip: a cleanup fault after commit cannot roll back the item or free arrays twice");
+    for (int stage=1; stage<=8; ++stage) {
+        reset(); put(100,0,SWORD,1,77); std::memcpy(comp(T_SEL,P,216).data()+80,&eq,8);
+        auto& state=comp(T_ITEMSTATE,77,20); std::fill(state.begin(),state.end(),0x59);
+        comp(T_OWNER,77,4); comp(T_FUEL,77,24);
+        if (stage==2) put(101,3,0,0);
+        const auto fault_baseline=g_comps;
+        ge_fault=stage;
+        r=run(stage==2 ? 0 : stage==8 ? KILN_ITEMS_GIVE_EQUIP_TAKE|KILN_ITEMS_GIVE_EQUIP_DRY_RUN : KILN_ITEMS_GIVE_EQUIP_TAKE);
+        if (stage==6 || stage==7) {
+            check(r.status==KILN_ITEMS_UNAVAILABLE && ge_commits==1 && ge_rollbacks==0 && ge_frees==1,
+                  "give-equip: a commit fault is explicit, never rolled back or committed twice, arrays freed once");
+        } else {
+            check(r.status==KILN_ITEMS_UNAVAILABLE && g_comps==fault_baseline && ge_commits==0 && ge_rollbacks==1 && ge_frees==1,
+                  "give-equip: init/evacuate/take/add/select/rollback faults restore every old byte and free once");
+        }
+    }
+    for (int fault=0; fault<3; ++fault) {
+        reset(); put(100,0,SWORD,1,77); std::memcpy(comp(T_SEL,P,216).data()+80,&eq,8);
+        const auto before_guard=g_comps; const auto next_id=g_next_pide;
+        ge_spill=fault==0; ge_move_new=fault==1; ge_empty_guard=fault==2;
+        r=run(KILN_ITEMS_GIVE_EQUIP_TAKE);
+        check(r.status==KILN_ITEMS_REFUSED && g_comps==before_guard && g_next_pide==next_id && ge_commits==0 && ge_rollbacks==1 && ge_frees==1,
+              "give-equip: spilled creation, a moved final stack and the missing-empty-accessor commit guard all roll back");
+    }
+    reset(); std::memcpy(comp(T_SEL,P,216).data()+80,&eq,8);
+    r=run();
+    check(r.status==KILN_ITEMS_DONE && r.to==eq && !r.replaced && ge_commits==1,
+          "give-equip: an already selected but empty equipment cell is the final creation cell");
+    reset(); std::memcpy(comp(T_SEL,P,216).data()+88,&eq,8);
+    r=run();
+    check(r.status==KILN_ITEMS_DONE && r.to==KILN_SLOT_ID(100,1),
+          "give-equip: a cell reserved by another equipment selection is never reused");
+    reset(); const auto before_bad_count=g_comps;
+    r=run(0,10,SWORD,2);
+    check(r.status==KILN_ITEMS_REFUSED && g_comps==before_bad_count && ge_frees==0,
+          "give-equip: more than one gear item is refused before mutation");
+    r=run(0,10,0xdeadbeef,1);
+    check(r.status==KILN_ITEMS_UNKNOWN_ITEM && g_comps==before_bad_count && ge_frees==0,
+          "give-equip: an unknown item is refused before mutation");
+    reset(); const auto base=g_comps;
+    r=run(0,5); check(r.status==KILN_ITEMS_REFUSED && g_comps==base && ge_frees==0,
+          "give-equip: slot type mismatch refused before transaction");
+    r=run(0,23); check(r.status==KILN_ITEMS_REFUSED && std::strstr(r.message,"backpack items") && ge_frees==0,
+          "give-equip: bag slot refuses clearly before transaction");
+    for(int k=0;k<8;++k) put(100,k,WOOD,250);
+    const auto full=g_comps; r=run(); check(r.status==KILN_ITEMS_NO_ROOM && g_comps==full && ge_frees==0,
+          "give-equip: no empty unselected equipment slot refuses without mutation");
+    for (uint8_t slot=14; slot<=16; ++slot) for (uint32_t flags : {0u,KILN_ITEMS_GIVE_EQUIP_TAKE,KILN_ITEMS_GIVE_EQUIP_DRY_RUN}) {
+        reset(); set_item(ARROW,99,false,slot_type_of(slot),8);
+        const uint64_t selected=KILN_SLOT_ID(101,0);
+        put(101,0,ARROW,20); put(101,3,0,0);
+        std::memcpy(comp(T_SEL,P,216).data()+slot*8,&selected,8);
+        const auto before_stack=g_comps;
+        r=run(flags,slot,ARROW,50);
+        check(r.status==KILN_ITEMS_DONE && r.to==selected && r.reserved[0]==20 && !r.pide &&
+              ((flags&KILN_ITEMS_GIVE_EQUIP_DRY_RUN) ? g_comps==before_stack : count_at(101,0)==50) &&
+              ((flags&KILN_ITEMS_GIVE_EQUIP_TAKE) ? !r.replaced_to : r.replaced_to==KILN_SLOT_ID(101,3)),
+              "give-equip: worn Generic-cell arrows/spells/bait support Backpack, Take and nonmutating DryRun with exact old count");
+    }
+}
+
 int main(int argc, char** argv) {
     setup_engine();
     const std::string mode = argc > 1 ? argv[1] : "all";
+    if (mode == "give-equip") { give_equip_test(); return failures ? EXIT_FAILURE : EXIT_SUCCESS; }
     if (mode == "review") {
         review_tests();
         std::printf("items move test (%s): %d failure(s)\n", mode.c_str(), failures);

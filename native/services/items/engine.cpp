@@ -6,6 +6,7 @@
 #include "instances.h"
 #include "pide.h"
 #include "upgrade_logic.h"
+#include "equip_logic.h"
 
 #include <windows.h>
 
@@ -1471,6 +1472,190 @@ NoteLease::~NoteLease() {
     if (!note_) return;
     if (slot_ >= 0) g_note_busy[slot_].store(false, std::memory_order_release);
     else delete note_;
+}
+
+
+namespace {
+struct GiveEquipTxState {
+    bool constructed = false;
+    bool finalizing = false;
+    bool freeing = false;
+    bool committing = false;
+};
+}
+
+// Create at the FINAL slot. InventoryCommit creates a pide at its op-0 slot: moving a pending creation to another
+// slot first is unsafe. Evacuate the old stack before add, then Equip sees source == destination and still runs its
+// type checks and selection update. No backpack slot is needed for an empty target or TAKE.
+static void give_equip_run(const Access& a, const KilnItemsGiveEquipRequest& r, uint8_t* tx, KilnItemsEquipResult* res,
+                           GiveEquipTxState* state) {
+    auto fail = [&](int status, const char* why) {
+        res->status = status;
+        std::snprintf(res->message, sizeof res->message, "%s", why);
+    };
+    if (r.equipment_slot == 23) return fail(KILN_ITEMS_REFUSED, "backpack items can't be given straight into the bag slot yet");
+    std::vector<PageSet> pages(2);
+    bool initialized = false;
+    if (!read_pages(a, r.player, &pages[0], &initialized) || !initialized)
+        return fail(KILN_ITEMS_NO_INVENTORY, "the player has no initialized inventory");
+    PtrSize selection_part{};
+    E.read_other(&selection_part,a.storage,a.acc[A_SLOTSEL],r.player);
+    const auto* selection=static_cast<const uint8_t*>(selection_part.ptr);
+    if (!selection || selection_part.size<216) return fail(KILN_ITEMS_NO_INVENTORY, "the player has no equipment selection");
+    uint64_t selected[kEquipSlots]{};
+    for (uint32_t i=0; i<kEquipSlots; ++i) selected[i] = rd<uint64_t>(selection,i*8) & 0xffffffffffull;
+    const auto* info = static_cast<const uint8_t*>(E.item_find(r.item,a.items));
+    if (!info) return fail(KILN_ITEMS_UNKNOWN_ITEM, "the item is not in the registry");
+    if (info[0x104] != slot_type_of(r.equipment_slot))
+        return fail(KILN_ITEMS_REFUSED, "the item does not fit that equipment slot: the game refused it");
+    const bool gear = (rd<uint32_t>(info,E.item_flags)&2) != 0;
+    if ((gear && r.count!=1) || r.count>rd<uint16_t>(info,E.item_max_stack))
+        return fail(KILN_ITEMS_REFUSED, "count must fit one equipment stack (one item for gear)");
+    const int index = selection_index(r.equipment_slot);
+    if (index < 0) return fail(KILN_ITEMS_REFUSED, "not a physical equipment slot");
+    auto at = [](const PageSet& ps,uint64_t slot) -> const Stack* {
+        for (uint32_t i=0;i<ps.n;++i)
+            if (ps.p[i].entity==KILN_SLOT_INVENTORY(slot) && KILN_SLOT_INDEX(slot)<8) return &ps.p[i].s[KILN_SLOT_INDEX(slot)];
+        return nullptr;
+    };
+    const uint8_t category = r.equipment_slot<5 ? kLinkCustomization : kLinkEquipment;
+    uint64_t target = selected[index];
+    Stack old{};
+    if (target) {
+        const Stack* stack=at(pages[0],target);
+        bool correct_page=false;
+        for(uint32_t i=0;i<pages[0].n;++i)
+            if(pages[0].p[i].entity==KILN_SLOT_INVENTORY(target) &&
+               (pages[0].cat[i]==category || (r.equipment_slot>=14 && r.equipment_slot<=16 && pages[0].cat[i]==kLinkGeneric)))
+                correct_page=true; // arrows, spells and bait are equipped where they lie, including Generic cells
+        if (!stack || !correct_page) return fail(KILN_ITEMS_SLOT_CHANGED,"the equipment selection does not name an equipment page");
+        if (!is_empty(*stack)) old=*stack;
+    } else {
+        for (uint32_t i=0;!target && i<pages[0].n;++i) {
+            if(pages[0].cat[i]!=category) continue;
+            for(const Stack& stack:pages[0].p[i].s) {
+                if (!is_empty(stack) || std::find(selected,selected+kEquipSlots,stack.slot)!=selected+kEquipSlots) continue;
+                target=stack.slot; break;
+            }
+        }
+    }
+    if (!target) return fail(KILN_ITEMS_NO_ROOM,"no empty unselected equipment slot is available");
+    uint64_t backpack=0;
+    const bool take=(r.flags&KILN_ITEMS_GIVE_EQUIP_TAKE)!=0, dry=(r.flags&KILN_ITEMS_GIVE_EQUIP_DRY_RUN)!=0;
+    if(old.item && !take) {
+        for(uint32_t i=0;!backpack && i<pages[0].n;++i) {
+            if(pages[0].cat[i]!=kLinkGeneric) continue;
+            for(const Stack& stack:pages[0].p[i].s) if(is_empty(stack)) { backpack=stack.slot; break; }
+        }
+        if(!backpack) return fail(KILN_ITEMS_NO_ROOM,"no free slot in the player's backpack for the replaced item");
+    }
+    const uint32_t old_pide = pide_of(old);
+    const auto* old_info = old_pide && !take ? E.item_find(old.item, a.items) : nullptr;
+    if (old_pide && !take && !old_info) return fail(KILN_ITEMS_REFUSED, "the replaced equipment's item type cannot be read");
+    alignas(16) uint8_t setup[kSetupBlock];
+    fill_setup_for(a,r.player,0x80,setup); // no merge, no notification or InventoryFull before a possible rollback
+    E.tx_ctor(tx); state->constructed=true; E.tx_init(tx,setup);
+    Result12 out{};
+    bool ok=true;
+    const char* why="the game refused deselecting the old equipment";
+    if (old_pide && !take) {
+        // Transfer's op5 changes containment/owner, not IsEquipped. Op7 is the game's only unequip-state write.
+        E.select_equipment(&out,tx,1,r.player,selection,r.equipment_slot,target,old_info,old_pide);
+        ok=out.error==0;
+    }
+    if(ok && old.item) {
+        why="the game refused evacuating the old equipment";
+        if(take) E.remove_items(&out,tx,r.player,old.item,target,old.count);
+        else E.slot_transfer(&out,tx,backpack,target,0);
+        ok=out.error==0 && (take ? out.value==0 : out.value==old.count);
+        const auto* st=stack_at(a,target);
+        ok=ok && st && rd<uint32_t>(st,4)==0;
+        if (ok && !take) {
+            const auto* moved=stack_at(a,backpack);
+            ok=moved && rd<uint32_t>(moved,0)==old.item && rd<uint32_t>(moved,4)==old.count &&
+                rd<uint32_t>(moved,8)==old.pide;
+        }
+    }
+    if(ok) {
+        OptU32 level{}; OptU8 rarity{}; OptF32 fuel{};
+        E.add_items(&out,tx,r.player,target,r.item,r.count,&level,&rarity,&fuel);
+        ok=out.error==0 && out.value==0;
+        const auto* st=stack_at(a,target);
+        ok=ok && st && rd<uint32_t>(st,0)==r.item && rd<uint32_t>(st,4)==r.count;
+        // A preferred-slot give may spill: every creation must be exactly the final equipped stack.
+        const Ops ops=ops_of(tx); uint32_t amount=0;
+        for(uint64_t i=0;i<ops.n && ops.p;++i) {
+            const auto* op=ops.p+i*kOpStride;
+            if(op[0x26]!=0) continue;
+            ok=ok && rd<uint64_t>(op,0)==target && rd<uint32_t>(op,8)==r.item;
+            amount+=rd<uint16_t>(op,0x24);
+        }
+        ok=ok && amount==r.count;
+        why="the new stack could not be created entirely in its equipment slot";
+    }
+    if(ok) {
+        if (selected[index]) E.equip_item(&out,tx,target,r.equipment_slot);
+        else E.select_equipment(&out,tx,0,r.player,selection,r.equipment_slot,target,info,0);
+        ok=out.error==0;
+        const auto* st=stack_at(a,target);
+        ok=ok && st && rd<uint32_t>(st,0)==r.item && rd<uint32_t>(st,4)==r.count;
+        why="the game refused equipping the new stack";
+    }
+    if (ok && backpack) {
+        const auto* moved=stack_at(a,backpack);
+        ok=moved && rd<uint32_t>(moved,0)==old.item && rd<uint32_t>(moved,4)==old.count && rd<uint32_t>(moved,8)==old.pide;
+        if (!ok) why="the replaced stack moved before the equipment commit";
+    }
+    const bool guarded=(tx[E.tx_guard_flags]&0x40)!=0 ||
+        (rd<uint64_t>(tx,E.tx_empty_state)==0 && rd<uint64_t>(tx,E.tx_touched_count)!=0);
+    if(ok && guarded) { ok=false; why="the inventory commit would roll back"; }
+    res->game_error=out.error;
+    state->finalizing=true;
+    if(ok && !dry) {
+        PideOptions options; options.item=r.item; options.equipped=true; options.equipped_slot=target;
+        state->committing=true;
+        pide_commit(tx,E.commit,options);
+    } else E.rollback(tx);
+    state->freeing=true;
+    E.free_arrays(tx);
+    if(!ok) return fail(KILN_ITEMS_REFUSED,why);
+    res->item=r.item; res->to=target; res->from=0;
+    res->replaced=old.item; res->replaced_pide=pide_of(old); res->reserved[0]=old.count;
+    res->replaced_to=backpack;
+    res->replaced_stamp=stamp_for(res->replaced_pide,old.item);
+    if(!dry) {
+        const auto* st=stack_at(a,target);
+        const auto* sel=static_cast<const uint8_t*>(other(a,A_SLOTSEL,r.player));
+        if(!st || rd<uint32_t>(st,0)!=r.item || rd<uint32_t>(st,4)!=r.count ||
+           !sel || (rd<uint64_t>(sel,index*8)&0xffffffffffull)!=target ||
+           (gear && (!rd<uint32_t>(st,8) || rd<uint32_t>(st,8)==UINT32_MAX))) {
+            // Invariant failure: the caller disables equipment; never roll back after commit.
+            return fail(KILN_ITEMS_UNAVAILABLE,"the committed equipment did not match the request; equipment is off until restart");
+        }
+        res->pide=rd<uint32_t>(st,8); if(res->pide==UINT32_MAX) res->pide=0;
+        res->stamp=stamp_for(res->pide,r.item);
+        if(take && res->replaced_pide) stamp_destroyed(res->replaced_pide,old.item);
+    }
+    res->status=KILN_ITEMS_DONE;
+}
+
+bool run_give_equip(const Access& a, const KilnItemsGiveEquipRequest& r, uint8_t* tx, KilnItemsEquipResult* result, unsigned long* code) {
+    GiveEquipTxState state{};
+    __try { give_equip_run(a, r, tx, result, &state); return true; }
+    __except (*code = GetExceptionCode(), EXCEPTION_EXECUTE_HANDLER) {
+        // A preflight fault has no transaction. A commit may have already queued instances: never roll it back.
+        if (state.constructed && !state.finalizing) {
+            __try { E.rollback(tx); } __except (EXCEPTION_EXECUTE_HANDLER) {}
+        }
+        if (state.constructed && !state.freeing) {
+            __try { E.free_arrays(tx); } __except (EXCEPTION_EXECUTE_HANDLER) {}
+        }
+        result->status=KILN_ITEMS_UNAVAILABLE;
+        std::snprintf(result->message,sizeof result->message,
+            state.committing ? "the inventory commit or its cleanup faulted (0x%08lx); items may have changed; equipment is off until restart"
+                             : "the give-and-equip transaction faulted (0x%08lx); equipment is off until restart", *code);
+        return false;
+    }
 }
 
 }  // namespace kitems

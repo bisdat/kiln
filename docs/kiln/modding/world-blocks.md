@@ -283,7 +283,7 @@ The save-boundary test stages the real WorldData bundle from the first of two it
 Another fixture queues a grant from the request-time save event: the initial stage sees an empty inventory, and the final Post stage must journal the subsequent simulation's commit before its callback. The committed manifest and a restart must preserve exactly one grant.
 
 ## Upgrade stations
-Since 0.2.0-dev.29.19 (the equipment wave). A placed thing whose use raises an item's rarity: `Upgrade` on its interaction runs one
+Since 0.2.0-dev.30 (the equipment wave). A placed thing whose use raises an item's rarity: `Upgrade` on its interaction runs one
 step of a rarity upgrade rule (`RarityUpgradeBlock`, [item-blocks.md](item-blocks.md#rarity-upgrades-rarityupgradeblock)) on the
 server, paid by the player. Sample: `mods/samples/RarityAnvil` (C#, and `blocks/twins.json` as data).
 
@@ -328,12 +328,12 @@ Blocks.Define("rarity-forge", new PropBlock
   rings are worn, not held: use `choose` or code for them). `choose` opens a window on the player's game that lists every piece of
   gear they carry with its next step, cost and chance, and an Upgrade button for each one the rule takes and they can pay for; the
   window comes again after each upgrade with the new prices. A player whose game cannot show it (no Kiln, or a Kiln older than
-  0.2.0-dev.29.19) gets `held` instead.
+  0.2.0-dev.30) gets `held` instead.
 - **`range`** (1 to 64 metres, default 6): with `choose`, how far from the station the player may stand when the pick arrives.
 - **What the player plays**: without `plays` the hand on it (`toggle`), which replaces what the look's own use did: a station
   kind's crafting menu does not open. `plays` says otherwise. An upgrade and a `toggle` together are refused.
 - **What the server checks**: everything. The rule, the cost and the chance are `Items.UpgradeRarity`'s
-  ([../services/items.md](../services/items.md#upgrading-rarity-v8-since-020-dev2919)): `GearUpgradingEvent` handlers can change the
+  ([../services/items.md](../services/items.md#upgrading-rarity-v8-since-020-dev30)): `GearUpgradingEvent` handlers can change the
   price or cancel, and the server rolls the chance. A window's pick is taken only for an item the server listed in that window
   (a token per player, for 2 minutes), from a player still within `range` of that station, for an item still in their inventory.
   Nothing a player's game sends can name another item, another price or another rule.

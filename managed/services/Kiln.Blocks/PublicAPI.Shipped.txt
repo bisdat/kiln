@@ -1203,6 +1203,26 @@ Kiln.CraftGoal.Item.get -> Kiln.ItemRef?
 Kiln.CraftGoal.Item.init -> void
 Kiln.CraftGoal.Recipe.get -> string?
 Kiln.CraftGoal.Recipe.init -> void
+Kiln.CraftSourceFilter
+Kiln.CraftSourceFilter.Allow = 1 -> Kiln.CraftSourceFilter
+Kiln.CraftSourceFilter.Deny = 0 -> Kiln.CraftSourceFilter
+Kiln.CraftSourceHandle
+Kiln.CraftSourceHandle.Container.get -> Kiln.EntityId
+Kiln.CraftSourceHandle.Dispose() -> void
+Kiln.CraftSourceHandle.IsDisposed.get -> bool
+Kiln.CraftSourceHandle.Player.get -> Kiln.EntityId
+Kiln.CraftSourceOptions
+Kiln.CraftSourceOptions.CraftSourceOptions() -> void
+Kiln.CraftSourceOptions.Filter.get -> Kiln.CraftSourceFilter
+Kiln.CraftSourceOptions.Filter.init -> void
+Kiln.CraftSourceOptions.Items.get -> System.Collections.Generic.IReadOnlyCollection<Kiln.ItemId>?
+Kiln.CraftSourceOptions.Items.init -> void
+Kiln.CraftSourceOptions.Order.get -> Kiln.CraftSourceOrder
+Kiln.CraftSourceOptions.Order.init -> void
+Kiln.CraftSourceOrder
+Kiln.CraftSourceOrder.AfterStationOutputs = 1 -> Kiln.CraftSourceOrder
+Kiln.CraftSourceOrder.BeforeStationOutputs = 0 -> Kiln.CraftSourceOrder
+Kiln.Crafting
 Kiln.CreatureBlock
 Kiln.CreatureBlock.<Clone>$() -> Kiln.CreatureBlock!
 Kiln.CreatureBlock.AI.get -> Kiln.PartRef<Kiln.AIBlock!>?
@@ -4455,6 +4475,8 @@ const Kiln.Affixes.DataKey = "affixes" -> string!
 const Kiln.Affixes.DataMod = "kiln-affixes" -> string!
 const Kiln.Affixes.MaxPerItem = 8 -> int
 const Kiln.Bases.Capability = "stations.read" -> string!
+const Kiln.Crafting.SourceUiCapability = "crafting.source_ui" -> string!
+const Kiln.Crafting.SourcesCapability = "crafting.sources" -> string!
 const Kiln.Stations.ControlCapability = "stations.control" -> string!
 const Kiln.Stations.CraftSourcesCapability = "stations.craft_sources" -> string!
 const Kiln.Stations.CraftUiCapability = "stations.craft_ui" -> string!
@@ -5462,6 +5484,7 @@ static Kiln.CosmeticBlock.operator !=(Kiln.CosmeticBlock? left, Kiln.CosmeticBlo
 static Kiln.CosmeticBlock.operator ==(Kiln.CosmeticBlock? left, Kiln.CosmeticBlock? right) -> bool
 static Kiln.CraftGoal.operator !=(Kiln.CraftGoal? left, Kiln.CraftGoal? right) -> bool
 static Kiln.CraftGoal.operator ==(Kiln.CraftGoal? left, Kiln.CraftGoal? right) -> bool
+static Kiln.Crafting.AddSource(Kiln.EntityId player, Kiln.EntityId container, Kiln.CraftSourceOptions? options = null) -> Kiln.CraftSourceHandle!
 static Kiln.CreatureBlock.operator !=(Kiln.CreatureBlock? left, Kiln.CreatureBlock? right) -> bool
 static Kiln.CreatureBlock.operator ==(Kiln.CreatureBlock? left, Kiln.CreatureBlock? right) -> bool
 static Kiln.CreatureStats.operator !=(Kiln.CreatureStats? left, Kiln.CreatureStats? right) -> bool

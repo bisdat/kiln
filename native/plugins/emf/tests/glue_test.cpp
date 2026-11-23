@@ -37,6 +37,9 @@ static Mod *active_mod = &mod;
 Mod *caller_mod(const void *) { return active_mod; }
 Mod *mod_of_address(const void *) { return active_mod; }
 void logf(int, const char *, ...) {}
+void note_call(const char*) {}
+void mark_status_dirty() {}
+uint64_t now_ms() { return 100; }
 std::vector<std::string> mod_lines;  // every mod_logf line, for the window log checks
 void mod_logf(const Mod *, int, const char *fmt, ...) {
     char buf[4096];
@@ -923,7 +926,7 @@ static void test_v40(KilnApi &api) {
         if (!slots[i] && i != offsetof(EmfApi, chat_tell_ex) / sizeof(void *) &&
             i != offsetof(EmfApi, chat_broadcast_ex) / sizeof(void *) && i != offsetof(EmfApi, on_hit) / sizeof(void *))
             ++empty;
-    CHECK(n - first == 52 && empty == 0);  // v28-v40: 45; v43: 1, v44: 3, v46: 3
+    CHECK(n - first == 54 && empty == 1 && !t.spawn_facing);  // spawn_facing is filled by fill_spawn, not fill_v40
     CHECK(!t.chat_tell_ex && !t.chat_broadcast_ex && !t.net_peer && !t.on_hit);
 
     auto *w = reinterpret_cast<EmfWorld *>(worlds[0]);
@@ -1120,6 +1123,44 @@ static void test_v46() {
     CHECK(t.villager_move(w, &mo, move_cb, nullptr) == 0 && mo.why[0] == 0);
     CHECK(t.villager_move(w, nullptr, move_cb, nullptr) == 0);
     CHECK(refusals == refused_before + 4 && unsupported_calls - before == counted && v46_callbacks == 0);
+}
+
+// A missing kiln.build and the unimplemented markers keep their documented unavailable answers.
+static void test_v47() {
+    EmfApi t{};
+    fill_v40(&t);
+    CHECK(t.find_wall_ex);
+    if (!t.find_wall_ex) return;
+    auto *w = reinterpret_cast<EmfWorld *>(worlds[0]);
+    const float from[3] = {0, 0, 0}, to[3] = {10, 0, 0};
+    EmfBlockInfo info;
+    std::memset(&info, 0x5a, sizeof info);
+    for (uint32_t size : {0u, 39u, 40u, 44u}) {
+        info.size = size;
+        const auto saved = info;
+        for (uint32_t flags : {0u, EMF_FIND_TERRAIN, 0x80000000u}) {
+            CHECK(!t.find_wall_ex(w, from, to, flags, &info));
+            CHECK(std::memcmp(&saved, &info, sizeof info) == 0);
+        }
+    }
+    CHECK(!t.find_wall_ex(nullptr, nullptr, nullptr, EMF_FIND_TERRAIN, nullptr));
+    CHECK(unsupported_fns.count("find_wall_ex") == 1);
+    EmfBreakBlocks bb{};
+    bb.size = sizeof bb;
+    bb.flags = EMF_BREAK_INSTANT | EMF_BREAK_DROPS | EMF_BREAK_WORLD | EMF_BREAK_TERRAIN;
+    CHECK(t.break_blocks(w, &bb, [](EmfWorld *, uint32_t, const EmfBreakResult *, void *) { ++v46_callbacks; }, nullptr) == 0);
+    CHECK(std::string(bb.why) == "not available on this game version" && v46_callbacks == 0);
+    bb.size = 159;
+    std::memset(bb.why, 'x', sizeof bb.why);
+    const auto saved = bb;
+    CHECK(t.break_blocks(w, &bb, nullptr, nullptr) == 0 && std::memcmp(&saved, &bb, sizeof bb) == 0);
+    EmfMarker marker{};
+    marker.size = sizeof marker;
+    marker.id = "test.bar";
+    marker.flags = EMF_MARKER_BAR;
+    marker.bar = 0.5f;
+    CHECK(!t.marker_set(&marker) && t.marker_send(7, &marker, 1) == 0);
+    CHECK(unsupported_fns.count("marker_set") == 1 && unsupported_fns.count("marker_send") == 1);
 }
 
 static void test_wheel_and_right_clicks(KilnUiApi &ui) {
@@ -1390,6 +1431,7 @@ int main(int argc, char **argv) {
     test_wheel_and_right_clicks(ui);
     test_v40(api);
     test_v46();
+    test_v47();
     windows_shutdown();
     CHECK(live_images == 0);
     std::printf("glue_test: %d checks, %d failures\n", checks, failures);

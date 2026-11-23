@@ -1,9 +1,9 @@
 # EMF mods on Kiln (kiln-emf)
 
-Kiln loads unmodified mods for **EMF** (Enshrouded Modding Framework, MIT; API versions through EMF 0.6.14 / v46)
-through the plugin `kiln/plugins/kiln-emf.dll`. It supplies an `EmfApi` v46 table built on Kiln's services:
-of 142 C slots, 76 are full, 17 partial, and 49 (functions EMF added between 0.6.3 and 0.6.8, and in 0.6.13 and 0.6.14)
-answer "not available on Kiln yet" ([what that means for a mod](#mods-built-for-emf-063-to-0614)). v41, v42 and v45
+Kiln loads unmodified mods for **EMF** (Enshrouded Modding Framework, MIT; API versions through EMF 0.6.19 / v47)
+through the plugin `kiln/plugins/kiln-emf.dll`. It supplies an `EmfApi` v47 table built on Kiln's services:
+of 144 C slots, 80 are full, 19 partial, and 45 (functions EMF added between 0.6.3 and 0.6.19)
+answer "not available on Kiln yet" ([what that means for a mod](#mods-built-for-emf-063-to-0619)). v41, v42 and v45
 (EMF 0.6.10, 0.6.11 and 0.6.14) added no function. API coverage is not a guarantee for every mod
 pairing or player-facing feature. Every function and its evidence: [emf-parity.md](emf-parity.md). You keep your EMF
 DLL mods and EMF's Lua mods; you do not need EMF's own `dinput8.dll` or `emf_core.dll`.
@@ -52,7 +52,7 @@ Evidence, design and the mapping of each function: [docs/re/emf-compat.md](../re
 ### Which mods load
 - **Switch:** `enabled` in the ini decides. Without a value, `mod.json`'s `"enabled"` decides (default on). A
   profile entry with `enabled: false` is always off.
-- **API version:** `"emf": N` above 40 is refused ("needs EMF API vN"). Older API prefixes are accepted; individual mods remain subject to the compatibility limits below.
+- **API version:** `"emf": N` above 47 is refused ("needs EMF API vN"). Older API prefixes are accepted; individual mods remain subject to the compatibility limits below.
 - **Side:** `"side": "client"` mods do nothing on a dedicated server, so the server skips them (clock). Everything
   else loads everywhere, as in EMF.
 - **Dependencies:** `depends` / `dependencies` take EMF's version ranges (`^1.2`, `~1.2`, `>=1.0 <2`, `1.2.x`,
@@ -75,7 +75,9 @@ Evidence, design and the mapping of each function: [docs/re/emf-compat.md](../re
 
 <a id="mods-built-for-emf-063-to-0611"></a>
 
-### Mods built for EMF 0.6.3 to 0.6.14
+<a id="mods-built-for-emf-063-to-0614"></a>
+
+### Mods built for EMF 0.6.3 to 0.6.19
 A mod built with EMF's SDK does not start on a host whose table is smaller than the one it was built with. Kiln
 served EMF 0.6.0's table until 0.2.0-dev.26, so every EMF DLL built since 0.6.3 stayed off ("this mod was built for
 EMF API v40; the core is v27"), and with EMF's `lua` mod every Lua mod of a current EMF. Since 0.2.0-dev.27 the table
@@ -93,13 +95,28 @@ EMF 0.6.13 (API v43) and 0.6.14 (v44 to v46) grew the table to 1144 bytes: the g
 own ruins) and villager moves (`villager_move`, `villager_move_cancel`, `villager_moving`). A mod built with EMF
 0.6.14's SDK, among them EMF's `lua` mod 1.39 (and with it every Lua mod), Night Raids 1.2 and Villager Jobs 1.5.2,
 stayed off on Kiln's 1088-byte table ("this mod was built for EMF API v46; the core is v42: update EMF (the mod stays
-off)"). kiln-emf now serves the v46 table, so that check lets them start (not yet run on Kiln), and a `mod.json`
+off)"). kiln-emf serves that prefix, so that check lets them start (not yet run on Kiln), and a `mod.json`
 that says `"emf": 43` to `46` loads. The
-seven new functions are not carried yet: `player_permissions` answers false, `break_blocks` and `villager_move` refuse
-with their reason (also a villager move with a hold), `block_at` and `find_wall` answer false. Read from their 0.6.14
-source (not seen in a game): Villager Jobs gives jobs to EMF's own admins (`[chat] admins`) but not to the game's
-admins (`player_permissions`); Night Raids' raiders find no wall to break and break none (`find_wall`,
-`break_blocks`).
+block queries and queued sphere/column breaking now translate onto `kiln.build` (since 0.2.0-dev.30.6).
+`player_permissions` and villager moves still give their documented unavailable answers. Night Raids can query
+building walls and player-placed terrain through the adapter; its real gameplay needs the check below.
+
+EMF 0.6.19 (API v47) appends `find_wall_ex` and `spawn_facing` (1160 bytes). The whole table is served so the SDK's
+size/version check accepts Lua 1.40, Night Raids 1.3.0 and Beastmaster 1.19.0, which otherwise report "built for EMF
+API v47; the core is v46". Their gameplay has not been checked. `spawn_facing` forwards yaw and extra components
+through `kiln.spawn` at creation, not a later teleport. `block_at` returns cell facts including natural/player/unknown
+provenance and raw material hardness/health;
+`find_wall_ex(..., EMF_FIND_TERRAIN)` includes only player-placed terrain. Breaks never remove natural/unknown terrain,
+even with `EMF_BREAK_WORLD`. Damage uses native building cracks and caller-configured terrain health ×250 / 20-second
+healing. `EMF_BREAK_DROPS` still refuses the whole request (id 0, the documented unavailable reason, no callback).
+`EMF_MARKER_BAR` remains unavailable. Kiln clears exactly selected cells, unlike EMF's possible isolated-terrain
+cleanup just outside the box. Ruin protection still shrinks building spheres as EMF does; terrain keeps the original
+radius and its own natural/unknown-cell protection. Spheres crossing a grid edge skip only the outside cells;
+wholly outside or unloaded spheres are successful no-ops. A non-fault refusal fails only that request, not later
+requests in the step. This follows EMF 0.6.19 `src/core/block_glue.cpp:447-535` (unreadable cells/spheres) and
+`src/core/block_service.cpp:83-105` (only a kernel fault fails the remaining batch). A full terrain damage map reports
+`EMF_BREAK_FAILED` for that request without disabling later breaks; earlier successful hits/removals remain counted. See
+[the v47 table](emf-parity.md#v47-emf-0619).
 
 Kiln does not carry every function EMF added since. Carried: chat lines without a speaker (`chat_tell_ex`,
 `chat_broadcast_ex`; on Kiln every line a mod sends shows without a name, also a plain one), `world_to_screen` and,
@@ -107,8 +124,8 @@ since 0.2.0-dev.30.3, hit observers (`on_hit`, Lua `emf.on_hit`: every hit the s
 or placed object arrives after the server's step, as on EMF; fall, shroud, cold and drowning damage do not arrive on
 Kiln yet, and the mod's log says so once). Not yet: player join/leave/death events, item names and the game's
 language, character names, changing hits (`on_hit_before`, hit rules), buffs, markers, map clicks and map actions, canvases and the
-minimap's parts, `remove_building`, paths, doors, enemy orders and move orders, a player's game permissions, block
-breaking and villager moves. A mod that calls one of those gets
+minimap's parts, `remove_building`, paths, doors, enemy orders and move orders, a player's game permissions
+and villager moves. A mod that calls one of those gets
 EMF's documented "not available" answer, as on a game build EMF does not know: the rest of the mod runs. `kiln.log`
 says once per mod and function `emf: <mod> called <fn>, not supported (not available on Kiln yet)`, and
 `kiln/state/emf.json` lists the calls under `unsupported`.
@@ -218,9 +235,9 @@ plain detour and the log says `outside the game exe`. `kiln-emf`'s own hooks (Ch
 v27 client chat bridge) are links too, `ChatLogAdd` after `kiln.chat`'s.
 
 ## Compatibility by function
-The full table for EmfApi v46 (142 functions, and EMF's Lua API) is [emf-parity.md](emf-parity.md); v28 to v40 are
+The full table for EmfApi v47 (144 functions, and EMF's Lua API) is [emf-parity.md](emf-parity.md); v28 to v40 are
 in [its own table there](emf-parity.md#v28-to-v40-emf-063-to-068), v43 to v46 in
-[another](emf-parity.md#v43-to-v46-emf-0613-to-0614). v22-v27 in short:
+[another](emf-parity.md#v43-to-v46-emf-0613-to-0614), and [v47 here](emf-parity.md#v47-emf-0619). v22-v27 in short:
 player level and XP through `kiln.progression`; `change_component` and E-prompt offers through kiln-emf's own
 `kiln.world` program; mod windows and pictures through `kiln.ui` in the game client (refused on a dedicated server, as
 in EMF). API v27 adds mod messaging on the official `#!emf1` wire; joined-client handshake and gameplay still need checks.
@@ -269,9 +286,13 @@ listed. **No** means it logs `emf: <mod> called <fn>, not supported` once and re
 | `wheel_open` | full | radial wheel through `kiln.ui`; host checks pass, client drawing/input still need a player |
 
 ## Client checklist (needs a joined player)
-- A mod of a current EMF runs with no EMF installed: put EMF 0.6.14's `lua` mod (1.39.0) and a Lua mod (Kill Counter) in
+- A mod of a current EMF runs with no EMF installed: put EMF 0.6.19's `lua` mod (1.40.0) and a Lua mod (Kill Counter) in
   `emf/mods`, start through Kiln, and kill something: the counter's line shows. `kiln.log` has
   `[emf:lua] ... loaded` and no `built for EMF API` line.
+- Turned spawns: on a disposable world, ask a v47 mod to spawn a door/target at yaw 0 and 90 degrees with the
+  same extra components. Check both the visible facing and a creature's interaction with the target, not just its
+  drawn transform. Check terrain queries and no-drops breaks with the guided block-family check below; marker bars
+  still log their unavailable answer without changes.
 - The mod check on join: join a server that runs EMF 0.6.8 with `[net] mods_check=refuse` and a mod with a channel,
   with the same mods in your own game. You stay connected after 60 s; `kiln.log` has `EMF mods check: against the
   server's mods: same mods`. With a mod missing on your side that the server requires, one note names it.
@@ -308,3 +329,28 @@ listed. **No** means it logs `emf: <mod> called <fn>, not supported` once and re
 - v22: blessings' level reward (`set_level`) queues the level for the next step; nonzero XP towards that level follows
   after the result, several steps later (see [parity limits](emf-parity.md)). Given XP
   levels the player up with the game's own level-up message.
+
+## Guided block-family check (since 0.2.0-dev.30.6)
+
+Use a disposable copied world and EMF Lua 1.40 or a small C API test mod; only the owner runs this check. Record
+`kiln.log`, `state/emf.json.blocks` and the `build.*` capability rows. Do not use a valued save for destructive checks.
+
+1. In a callback on the host/server world, query `block_at` on air, an unpainted player building block, a natural
+   ruin, natural ground and Stone/dirt placed where the shipped world had air. Expect kind/material/fill, raw
+   hardness/health and `world` 0/1/-1 as appropriate; paint 0 must not make a building empty. A joined-only client
+   cannot perform server queries or breaks.
+2. Trace the same line with `find_wall` and `find_wall_ex(..., EMF_FIND_TERRAIN)` (Lua's `{terrain = true}`). The first
+   ignores terrain; the second stops at the first player-terrain cell before the wall, but passes natural ground.
+3. Queue an instant sphere and a column without drops. Confirm no edit/callback inside `break_blocks`, at most eight
+   spheres run per step, and one result after the executing step on the server thread. With `EMF_BREAK_TERRAIN`, only
+   player-placed ground is removed. Natural ground remains with `EMF_BREAK_WORLD` too; nearby ruins are protected
+   unless that flag is set. Check excluded sphere corners remain untouched and edits save/reload and replicate.
+4. Repeat without instant mode: building cracks advance; player terrain uses material health ×250 and heals after
+   20 seconds without a hit (`block_at.damage` remains -1 for terrain). Check Unbreakable cells never go. If a mode's
+   capability is unavailable, expect id 0 with a reason, no callback and no partial damage.
+5. Ask for drops: expect id 0 and `not available on this game version`, no edit or callback. Queue more than eight
+   spheres, then close the world; waiting requests cancel at the next server Post, without editing the next world.
+6. Optionally use Night Raids 1.3.0 with a disposable player-block and player-Stone wall: verify wall discovery and
+   requests/callbacks. Any unavailable drop request is a refusal, not evidence that a raid broke a wall successfully.
+
+The adapter and Windows stand-in tests do not establish game effects, saving, replication or mod gameplay.
