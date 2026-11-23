@@ -151,7 +151,8 @@ them. The decision, server side, after the player-animation check:
   `<mod>:<npc>` and your game doesn't" (or "your game has ... and this server doesn't", or "... is built differently on
   your game"), then "Join with the same mods, and restart if you just changed them.";
 - a `kiln.npcbodies.pending` key: refused with a restart-required reason, whatever the hash;
-- `modSync: off`: joins, and the server's log says `joins with other NPC bodies (modSync off)`.
+- `modSync: off`: joins, and the server's log says `joins with other NPC bodies (modSync off)`;
+- a mod's `NetClientHandshakeEvent` handler cannot let such a client in: only `modSync: off` waives this check.
 
 Not verified in a real game yet: the refusal reaching a real player's screen, and two real starts producing the same
 hash for the same mod files. The decision is covered offline by `Kiln.Network.Tests` (`NpcBodyGateTests`).

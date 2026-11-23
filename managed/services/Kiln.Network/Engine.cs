@@ -524,6 +524,7 @@ internal static class NetEngine
             else Log(LogLevel.Warn, $"{p.Name} joins with another player animation graph (modSync off): {graph}");
         }
         // Authored NPC bodies built differently (or one waiting for the client's restart) draw another body: the same rule.
+        string? bodyRefusal = null;
         if (NpcBodyGate.Difference(hello.Properties) is { } bodies)
         {
             if (_config.ModSync != ModSyncPolicy.Off)
@@ -531,6 +532,7 @@ internal static class NetEngine
                 reason = refuse ? reason + " " + bodies : bodies;
                 refuse = true;
                 refusedFor = [.. refusedFor, bodies];
+                bodyRefusal = bodies;
             }
             else Log(LogLevel.Warn, $"{p.Name} joins with other NPC bodies (modSync off): {bodies}");
         }
@@ -539,6 +541,13 @@ internal static class NetEngine
             var ev = Events.Post(new NetClientHandshakeEvent(p, missing, extra, refuse) { Reason = reason });
             refuse = ev.Refuse || ev.Canceled;
             if (refuse) reason = ev.Reason.Length > 0 ? ev.Reason : reason.Length > 0 ? reason : "Refused by the server.";
+        }
+        // A client without the server's bodies meets clone templates it does not have: only the operator's modSync off waives that (the
+        // ruled waiver), never a mod's handler (review3 S3). A handler may refuse in its own words; the body check's are kept then too.
+        if (bodyRefusal != null && !(refuse && reason.Contains(bodyRefusal, StringComparison.Ordinal)))
+        {
+            reason = refuse && reason.Length > 0 ? reason + " " + bodyRefusal : bodyRefusal;
+            refuse = true;
         }
         // Mandatory protocols (NetAdmission): checked after everything a policy or a handshake handler can waive, so
         // neither modSync nor a handler lets a client without one in.

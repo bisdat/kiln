@@ -291,6 +291,30 @@ public sealed class NpcBodyGateTests : IDisposable
         Assert.Contains("restart required", LastReject()!.Reason);
     }
 
+    // review3 S3: a client without the server's bodies meets clone templates it lacks. Only the operator's modSync off waives the check
+    // (the ruling); a mod's handshake handler may refuse more, never let such a client in.
+    [Fact]
+    public void A_handshake_handler_cannot_waive_the_body_check()
+    {
+        Server(Row("m", "tobin", "ready", A));
+        using var waive = Events.On<NetClientHandshakeEvent>(e => { e.Refuse = false; e.Reason = ""; });
+        var p = Up();
+        Hello(NpcBodyGate.Properties([$"m:tobin:{B}"], []));
+        Assert.Equal(NetPeerState.Rejected, p.State);
+        Assert.Contains("the NPC body m:tobin is built differently on your game", LastReject()!.Reason);
+    }
+
+    [Fact]
+    public void A_handshake_handler_still_refuses_a_client_with_the_same_bodies_in_its_own_words()
+    {
+        Server(Row("m", "tobin", "ready", A));
+        using var refuse = Events.On<NetClientHandshakeEvent>(e => { e.Refuse = true; e.Reason = "not today"; });
+        var p = Up();
+        Hello(NpcBodyGate.Properties([$"m:tobin:{A}"], []));
+        Assert.Equal(NetPeerState.Rejected, p.State);
+        Assert.Equal("not today", LastReject()!.Reason);
+    }
+
     [Fact]
     public void Under_modsync_off_it_joins_and_the_log_says_so()
     {

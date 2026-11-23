@@ -375,7 +375,8 @@ WELCOME carry `kiln.npcbodies`, a hash of each Ready body's per-body closure has
 and the server refuses a player whose bodies differ, naming the first body that does. A player whose game says a body
 waits for its restart (the handshake's `pending` key; this version sends none) is refused with a restart-required reason.
 `modSync: off` waives this check, as it waives the player animation graph's: such a player joins and the server only logs
-a warning. That player may lack a body the server spawns; keep `modSync` on for servers with authored bodies.
+a warning. That player may lack a body the server spawns; keep `modSync` on for servers with authored bodies. A mod's
+`NetClientHandshakeEvent` handler cannot waive this check (it may refuse a player for reasons of its own).
 
 Not verified in a real game yet: the server's model GUID from the body manifest against a player's cooked model, the
 event on a player's main thread, and a refusal for a different body shown on a player's screen. The tests cover them
