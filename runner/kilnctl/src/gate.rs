@@ -142,6 +142,9 @@ pub fn verdict(r: &GateResult, baseline: Option<&GateResult>) -> (bool, Vec<Stri
         why.push("Kiln did not hook SimStep (sigdb or policy problem; see kiln/logs/kiln.log of the gate)".into());
     }
     for (t, x) in &r.tests {
+        // Evidence production is not a self-test of the sigdb build. regproof judges every row fail-closed;
+        // missing evidence (including an older/broken producer) must not prevent sigport marking a new build.
+        if t == "registry-proof-test" { continue; }
         if !x.summary {
             why.push(format!("{t}: no summary line (did not finish, or did not load)"));
             continue;
@@ -235,6 +238,33 @@ pub fn proof_request(tests: &[String]) -> Option<(&'static str, String)> {
     tests.iter().any(|t| t == "registry-proof-test").then(|| {
         ("kiln/data/content/registry/proof/request.json", "{\"format\": 1, \"by\": \"kilnctl gate\"}\n".to_string())
     })
+}
+
+/// A reflection-checked candidate ONLY in the disposable gate copy: an unknown build's live guard can then
+/// produce evidence. Never enables rows in the source instance or writes a proven record back from the copy.
+fn proof_candidate(source: &Path, copy: &Path) -> Result<()> {
+    let kiln = copy.join("kiln");
+    if !kiln.join("data/content/registry/proof/request.json").is_file() { return Ok(()); }
+    let root = kiln.join("data/content/registry/proof/candidate");
+    std::fs::create_dir_all(root.join("regmap"))?;
+    cp(&[kiln.join("regmap/common").as_os_str(), root.join("regmap").as_os_str()])?;
+    cp(&[source.join("schema").as_os_str(), root.as_os_str()])?;
+    let exe = copy.join("enshrouded_server.exe");
+    let sha = util::sha256(&exe)?;
+    let output = Command::new("python3").arg(source.join("tools/registrygen/regmap_check.py"))
+        .arg("--root").arg(&root).arg("--exe").arg(&exe).args(["--record", "--side", "server"])
+        .current_dir(source).output().context("checking the gate copy's candidate regmap")?;
+    std::fs::write(root.join("regmap_check.log"), [&output.stdout[..], &output.stderr[..]].concat())?;
+    if !matches!(output.status.code(), Some(0 | 1)) { bail!("regmap_check.py failed ({})", output.status); }
+    let candidate = root.join("regmap/server").join(format!("{sha}.json"));
+    let record: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&candidate)?)?;
+    if record["verified"] != true || record["side"] != "server" || record["exeSha256"] != sha {
+        bail!("regmap_check.py produced no verified candidate for the gate copy's exe");
+    }
+    let dst = kiln.join("regmap/server");
+    std::fs::create_dir_all(&dst)?;
+    std::fs::copy(candidate, dst.join(format!("{sha}.json")))?;
+    Ok(())
 }
 
 /// Lays out `<dir>.gate` and writes the `<name>-gate` instance file. The instance is only read.
@@ -350,6 +380,9 @@ pub fn prepare(inst: &Instance, o: &GateOpts) -> Result<Instance> {
         std::fs::create_dir_all(&dst)?;
         std::fs::copy(rec, dst.join(rec.file_name().context("record name")?))?;
     }
+    if let Err(e) = proof_candidate(&inst.kiln.source, &gdir) {
+        println!("gate: registry proof unproven: no candidate in the copy ({e:#})");
+    }
     for t in &o.tests {
         let built = build_test(inst, t)?;
         install_mod(&built, &gdir.join("kiln/mods").join(t))?;
@@ -424,7 +457,7 @@ pub fn print(r: &GateResult) {
         }
     }
     println!("gate: {}{}", if r.green { "GREEN" } else { "RED" },
-        r.baseline.as_ref().map(|b| format!(" (baseline {b})")).unwrap_or_else(|| " (no baseline: every FAIL counts)".into()));
+        r.baseline.as_ref().map(|b| format!(" (baseline {b})")).unwrap_or_else(|| " (no baseline: self-test FAILs count; registry evidence is judged per row)".into()));
     for w in &r.reasons {
         println!("gate:   {w}");
     }
@@ -478,6 +511,58 @@ mod tests {
         assert!(!r["world-test"].summary);
         assert_eq!((r["net-test"].pass, r["net-test"].fail), (7, 0));
         assert_eq!((r["chat-test"].pass, r["chat-test"].fail), (50, 0));
+    }
+
+    #[test]
+    fn candidate_regmap_is_requested_and_written_only_in_the_copy() {
+        let dir = std::env::temp_dir().join(format!("kilnctl-proof-candidate-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (source, copy) = (dir.join("source"), dir.join("copy"));
+        std::fs::create_dir_all(source.join("tools/registrygen")).unwrap();
+        std::fs::create_dir_all(source.join("schema")).unwrap();
+        std::fs::write(source.join("schema/marker"), "schema").unwrap();
+        std::fs::create_dir_all(copy.join("kiln/regmap/common")).unwrap();
+        std::fs::write(copy.join("kiln/regmap/common/test.json"), "{}").unwrap();
+        std::fs::write(copy.join("enshrouded_server.exe"), "fake exe, read only").unwrap();
+        let sha = util::sha256(&copy.join("enshrouded_server.exe")).unwrap();
+        let target = copy.join(format!("kiln/regmap/server/{sha}.json"));
+        proof_candidate(&source, &copy).unwrap(); // no request: even a missing checker is not opened
+        assert!(!target.exists());
+        std::fs::write(source.join("tools/registrygen/regmap_check.py"), r#"
+import argparse, hashlib, json
+from pathlib import Path
+p = argparse.ArgumentParser()
+for name in ('root', 'exe', 'side'): p.add_argument('--' + name)
+p.add_argument('--record', action='store_true')
+a = p.parse_args()
+r = Path(a.root)
+assert (r / 'schema/marker').read_text() == 'schema'
+assert (r / 'regmap/common/test.json').is_file()
+h = hashlib.sha256(Path(a.exe).read_bytes()).hexdigest()
+d = r / 'regmap/server'
+d.mkdir(parents=True)
+(d / (h + '.json')).write_text(json.dumps({'regmap': 1, 'side': a.side, 'exeSha256': h, 'verified': True, 'rows': {'test.x': 'ok'}}))
+"#).unwrap();
+        let request = copy.join("kiln/data/content/registry/proof/request.json");
+        std::fs::create_dir_all(request.parent().unwrap()).unwrap();
+        std::fs::write(&request, "{}").unwrap();
+        proof_candidate(&source, &copy).unwrap();
+        assert!(target.is_file());
+        assert!(!source.join("regmap/server").exists(), "no candidate in the source tree or instance");
+        std::fs::remove_dir_all(&copy).unwrap();
+        assert!(!target.exists(), "candidate expires with the gate copy");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn missing_registry_evidence_does_not_block_the_build_mark() {
+        let log = "[kiln] tick: SimStep hooked\n[mod:registry-proof-test] registry-proof-test: SUMMARY registry-proof-test: 0 PASS, 1 FAIL\n";
+        let (active, sigdb, tests) = parse_log(log, &["registry-proof-test".into()]);
+        let r = GateResult { kiln_active: active, sigdb, tests, ..Default::default() };
+        assert!(verdict(&r, None).0, "registry evidence is judged per row, not as the sigport build gate: {:?}", verdict(&r, None));
+        let mut other = r;
+        other.tests.insert("content-test".into(), TestResult { summary: true, fail: 1, ..Default::default() });
+        assert!(!verdict(&other, None).0, "ordinary self-test failures still block the build mark");
     }
 
     #[test]

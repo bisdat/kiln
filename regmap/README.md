@@ -121,6 +121,14 @@ A row is `ok` when every step proved it, `unproven` when only lab evidence is mi
 its files into `<game>/kiln/data/content/registry/proof/`; kilnctl finds them (and kiln.content's id tables) by content.
 Both formats are format 1; kilnctl refuses another kind or format.
 
+**The producer** (lab only). Registry evidence is diagnostic, not a sigdb self-test: no samples, missing state/ids,
+or a producer failure never blocks the sigport build mark. `regproof` still judges the rows fail-closed; no evidence is
+`unproven`, and a disproof is `changed`, never `ok`. Internal producer breakage remains a FAIL in the log.
+Before boot, the gate runs `regmap_check.py --record` against the **copy's** exe and deployed common mapping and installs
+that reflection-checked candidate only into the disposable copy. This lets the live guard sample a new build without
+requiring an already-proven record. It never copies the candidate into the source instance; it expires with the copy.
+If candidate generation fails, the gate logs no evidence and the live guard stays closed.
+
 **The producer** (lab only). The lab gate (`kilnctl gate`, whose default tests include `registry-proof-test`) writes
 `content/registry/proof/request.json` into its copy. With that file, and only then: kiln.content
 (`native/services/content/registry/proof.cpp`) writes `roundtrip-<side>-boot.json` and `values-<side>.json` at
