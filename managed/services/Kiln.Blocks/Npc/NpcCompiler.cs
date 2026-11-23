@@ -958,6 +958,9 @@ internal static class NpcCompiler
             // one of a data file the game's start-up build reads from the mod's folder itself (native_pack.cpp): only one from code is written for the next start
             if (!fromData) NpcFiles.Put(mod, key, file);
             else NpcFiles.Forget(mod, key);
+            // a body of its own from code is built at the next start: PendingRestart until then (NpcBodies.Status)
+            if (ownBody == null || fromData) NpcBodies.FromData(mod, name);
+            else NpcBodies.StagedFromCode(mod, name, cloneGuid, Guid.Parse((string)ownBody["model"]!), Guid.Parse((string)ownBody["graph"]!));
         });
         return new BlockHandle<NpcBlock>(mod, name, cloneGuid, cloneName, n);
     }
