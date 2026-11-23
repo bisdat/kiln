@@ -1,0 +1,5 @@
+# The launcher's install stays hoisted (one flat node_modules), as before it became a workspace with the admin pages'
+# package (src/admin, @kiln/admin-ui): Bun's default for workspaces is the isolated linker, which would change every
+# package's place on disk for the launcher's tools (vite, Playwright, Tauri's CLI).
+[install]
+linker = "hoisted"
