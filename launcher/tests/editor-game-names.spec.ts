@@ -96,6 +96,31 @@ test('adding by a Chinese name writes only the chosen id and the expected serial
   await context.close();
 });
 
+test('a launcher language change drops the Knowledge selection made by the previous names', async ({ browser }) => {
+  const context = await browser.newContext({ locale: 'zh-CN' });
+  const page = await context.newPage();
+  await page.addInitScript(() => Object.defineProperty(navigator, 'languages', { get: () => ['zh-CN'] }));
+  await page.route('**/assets-local/editor/names/names.json*', (route) => route.fulfill({ json: names }));
+  await page.goto('/#/editor');
+  await expect(page.locator('.ke .k-page-title')).toContainText('Aldric', { timeout: 15000 });
+  await page.getByRole('tab').filter({ hasText: zh.editor.tabs.knowledge }).click();
+  await page.locator('[data-deck-id="know-search"]').fill('测试配方');
+  const rows = page.locator('.ke-know-body [role="row"]');
+  await expect(rows).toHaveCount(1);
+  await rows.first().locator('input[type="checkbox"]').check();
+  const remove = page.locator('[data-deck-id="know-remove"]');
+  await expect(remove).toBeEnabled();
+  // English shows 'Fixture Recipe': the Chinese query no longer matches, so the selected row is hidden.
+  await page.evaluate(async () => {
+    const path = '/src/i18n/index.ts';
+    const i18n = await import(/* @vite-ignore */ path);
+    i18n.setLanguage('en');
+  });
+  await expect(rows).toHaveCount(0);
+  await expect(remove).toBeDisabled();
+  await context.close();
+});
+
 for (const extracted of [false, true]) {
   test(`desktop: ${extracted ? 'missing Chinese uses extracted English' : 'no extracted names keeps existing English'}`, async ({ browser }) => {
     const context = await browser.newContext({ locale: 'zh-CN' });

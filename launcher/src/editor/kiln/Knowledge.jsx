@@ -1,7 +1,7 @@
 // Knowledge: what the character has seen, picked up and unlocked (items, recipes). Pick entries and remove them;
 // removing a high-level material also closes the recipes that need it. Upstream: src/Conhecimento.jsx.
 // On the Deck (env.jsx) the level filter is set on the number pad; the search takes Steam's keyboard.
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Button, Modal } from '../../ui';
 import { estadoTexto } from '../shared/knowledge.mjs';
 import map from '../data/conhecimento.json';
@@ -45,6 +45,9 @@ export default function Knowledge({ model, setModel }) {
   const disabled = readOnly(model);
   // A selection belongs to the current filter, never to rows the player can no longer see.
   const filter = (setter, value) => { setter(value); setSel(new Set()); setAsk(false); };
+  // Search matches the names in the launcher's language: a language change re-filters the rows, so it drops the
+  // selection as any other filter change does (Remove must never count rows the search no longer shows).
+  useEffect(() => { setSel((p) => p.size ? new Set() : p); setAsk(false); }, [language]);
   const list = useMemo(() => {
     const n = Number(above), s = gameSearch(q.trim());
     return (model.knowledge ?? [])
