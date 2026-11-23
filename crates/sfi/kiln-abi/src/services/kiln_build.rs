@@ -7,6 +7,7 @@ pub type KilnVoxel = u16;
 pub const KILN_BUILD_BLOCK_AIR: i32 = 0;
 pub const KILN_BUILD_BLOCK_BASE: i32 = 20;
 pub const KILN_BUILD_BLOCK_BUILDING: i32 = 2;
+pub const KILN_BUILD_BLOCK_DAMAGE_MAP_FULL: i32 = 24;
 pub const KILN_BUILD_BLOCK_FAULTED: i32 = 21;
 pub const KILN_BUILD_BLOCK_INVALID: i32 = 16;
 pub const KILN_BUILD_BLOCK_NONE: i32 = 0;

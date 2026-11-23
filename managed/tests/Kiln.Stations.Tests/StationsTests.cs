@@ -323,7 +323,13 @@ public sealed unsafe class StationsTests : IDisposable
         Assert.Equal(72, (int)Marshal.OffsetOf<StationsNative.Event>("Position"));
         Assert.Equal(96, (int)Marshal.OffsetOf<StationsNative.Event>("Base"));
         Assert.Equal(188, sizeof(StationsNative.Status));
-        Assert.Equal(8 + 30 * 8, sizeof(StationsNative.Table));
+        Assert.Equal(288, sizeof(StationsNative.Table));
+        Assert.Equal(32, sizeof(StationsNative.SourceRequest));
+        Assert.Equal(248, (int)Marshal.OffsetOf<StationsNative.Table>("AddSource"));
+        Assert.Equal(256, (int)Marshal.OffsetOf<StationsNative.Table>("RemoveSource"));
+        Assert.Equal(264, (int)Marshal.OffsetOf<StationsNative.Table>("CancelSources"));
+        Assert.Equal(272, (int)Marshal.OffsetOf<StationsNative.Table>("SourceStock"));
+        Assert.Equal(280, (int)Marshal.OffsetOf<StationsNative.Table>("SetDyeStock"));
         Assert.Equal(8 + 24 * 8, StationsNative.TableChests);
         Assert.Equal(8 + 25 * 8, StationsNative.TableCollect);
         Assert.Equal(8 + 26 * 8, StationsNative.TableStock);

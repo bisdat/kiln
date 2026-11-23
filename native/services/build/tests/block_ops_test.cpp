@@ -12,12 +12,13 @@ namespace {
 using Key = std::tuple<int32_t,int32_t,int32_t>;
 std::map<Key,KilnVoxel> cells;
 int writes=0, reads=0,damage_calls=0; bool loaded=true, fail_write=false, unknown=false, unbreakable=false,deny=false,hard_health=false;
-bool writer_verified=true,corrupt_unselected=false;
+bool writer_verified=true,corrupt_unselected=false,bounded_reads=false;
 std::map<Key,uint8_t> damage;
 bool get_damage(void*,const int32_t* c,uint8_t,uint8_t* out){*out=damage[{c[0],c[1],c[2]}];return true;}
-bool add_damage(void*,const int32_t* c,uint8_t,uint8_t increment,double,uint8_t* out){++damage_calls;auto& d=damage[{c[0],c[1],c[2]}];d=static_cast<uint8_t>(std::min(255,static_cast<int>(d)+increment));*out=d;return true;}
+uint32_t add_damage(void*,const int32_t* c,uint8_t,uint8_t increment,double,uint8_t* out){++damage_calls;auto& d=damage[{c[0],c[1],c[2]}];d=static_cast<uint8_t>(std::min(255,static_cast<int>(d)+increment));*out=d;return KILN_BUILD_BLOCK_NONE;}
 KilnResult read(void*,const int32_t* o,const uint32_t* d,KilnVoxel* out,size_t) {
     ++reads; if(!loaded) return KILN_ERR_UNAVAILABLE;
+    if(bounded_reads)for(int a=0;a<3;++a)if(o[a]<0 || int64_t(o[a])+d[a]>16)return KILN_ERR_INVALID_ARGUMENT;
     size_t i=0; for(uint32_t z=0;z<d[2];++z) for(uint32_t y=0;y<d[1];++y) for(uint32_t x=0;x<d[0];++x)
         out[i++]=cells[{o[0]+x,o[1]+y,o[2]+z}];
     return KILN_OK;
@@ -33,7 +34,7 @@ KilnResult write(void*,const KilnBuildWrite* w,KilnBuildResult* r) {
     r->flags=KILN_BUILD_R_CHANGED|(writer_verified?KILN_BUILD_R_VERIFIED:0); r->blocks_written=1;
     return fail_write?KILN_ERR_INTERNAL:KILN_OK;
 }
-Source source() { Source s{}; s.cell_size=.5; s.read=&read; s.write=&write; s.metadata=&facts; s.provenance=&provenance; return s; }
+Source source() { Source s{}; s.cell_size=.5; s.read=&read; s.write=&write; s.metadata=&facts; s.provenance=&provenance; if(bounded_reads)for(auto& max:s.maximum)max=16; return s; }
 int total=0,fail=0;
 void check(bool b,const char* name) { ++total;if(!b){++fail;std::fprintf(stderr,"FAIL %s\n",name);} }
 KilnBuildBreak request() { KilnBuildBreak q{};q.size=sizeof q;q.flags=KILN_BUILD_BREAK_INSTANT;q.dims[0]=4;q.dims[1]=q.dims[2]=1;return q; }
@@ -155,7 +156,34 @@ int main() {
     for(int x=0;x<65536;++x)admitted=terrain.add(100,{x,0,0},2,1,20,accumulated) && admitted;
     check(admitted,"terrain map admits its full documented capacity");
     check(!terrain.add(101,{-1,0,0},2,1,20,accumulated),"full live terrain map reports failure instead of silently evicting damage");
-    check(terrain.add(101,{0,0,0},2,1,20,accumulated) && accumulated==2,"full terrain map still accumulates existing cells");
+    // Exercise the real full accumulator through the production break loop, not only its helper.
+    s=source();s.context=&terrain;s.mining_factor=1;
+    s.damage_get=[](void* p,const int32_t* c,uint8_t m,uint8_t* out){*out=static_cast<TerrainDamage*>(p)->get(101,{c[0],c[1],c[2]},m);return true;};
+    s.damage_add=[](void* p,const int32_t* c,uint8_t m,uint8_t n,double expiry,uint8_t* out)->uint32_t{bool full=false;return static_cast<TerrainDamage*>(p)->add(101,{c[0],c[1],c[2]},m,n,expiry,*out,&full)?KILN_BUILD_BLOCK_NONE:full?KILN_BUILD_BLOCK_DAMAGE_MAP_FULL:KILN_BUILD_BLOCK_FAULTED;};
+    q=request();q.flags=KILN_BUILD_BREAK_TERRAIN;q.dims[0]=1;q.origin[0]=-1;q.damage[2]=1;
+    cells.clear();cells[{-1,0,0}]=KILN_VOXEL_MAKE(2,255);before=writes;
+    check(break_box(s,&q,&r)==KILN_ERR_UNAVAILABLE && r.refusal==24,"full terrain damage map is a capacity refusal, not a fault");
+    check(!(r.flags&KILN_BUILD_BREAK_R_MAY_HAVE_CHANGED) && r.damaged==0 && writes==before+1 && cells[{-1,0,0}]!=0,
+        "first-cell capacity refusal has no changes and only the policy dry run");
+    q.origin[0]=0;cells[{0,0,0}]=KILN_VOXEL_MAKE(2,255);
+    check(break_box(s,&q,&r)==KILN_OK && r.damaged==1,"capacity refusal does not disable later damage to tracked cells");
+    check(terrain.add(101,{0,0,0},2,1,20,accumulated) && accumulated==4,"full terrain map still accumulates existing cells");
+    q.origin[0]=65535;q.dims[0]=2;cells[{65535,0,0}]=cells[{65536,0,0}]=KILN_VOXEL_MAKE(2,255);
+    check(break_box(s,&q,&r)==KILN_ERR_UNAVAILABLE && r.refusal==KILN_BUILD_BLOCK_DAMAGE_MAP_FULL && r.damaged==1 &&
+        (r.flags&KILN_BUILD_BREAK_R_MAY_HAVE_CHANGED) && terrain.get(101,{65535,0,0},2)==3,
+        "capacity refusal preserves earlier damage and honestly reports partial state");
     check(terrain.add(20000000101LL,{-1,0,0},2,1,20,accumulated) && accumulated==1,"expired terrain entries release map capacity");
+    bounded_reads=true;s=source();
+    for(int axis=0;axis<3;++axis)for(bool high:{false,true}) {
+        q=request();q.flags|=KILN_BUILD_BREAK_PROTECTED_SPHERE;
+        for(int a=0;a<3;++a){q.origin[a]=2;q.dims[a]=5;}
+        q.origin[axis]=high?13:0;q.dims[axis]=3;
+        double center[3]={2.25,2.25,2.25};center[axis]=high?7.75:.25;
+        q.sphere_center={center[0],center[1],center[2]};q.sphere_radius=1;q.sphere_margin=.01;q.sphere_minimum=.25;
+        int32_t target[3]={4,4,4};target[axis]=high?15:0;
+        cells.clear();cells[{target[0],target[1],target[2]}]=KILN_VOXEL_MAKE(143,0);
+        check(break_box(s,&q,&r)==KILN_OK && r.removed==1,"sphere protection scan clips to valid cells at every grid face");
+    }
+    bounded_reads=false;
     std::printf("block ops: %d passed, %d failed\n",total-fail,fail);return fail?1:0;
 }

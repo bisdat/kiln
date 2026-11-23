@@ -106,6 +106,23 @@ public sealed class BlockApiTests
         Assert.Contains("restart",r.Reason!,StringComparison.OrdinalIgnoreCase);
     }
     [Fact]
+    public void DamageMapCapacityIsARetryableRefusalNotARestartFault()
+    {
+        FakeBuildTable.BlockRows(true); FakeBuildTable.BreakRefusalCode = 24;
+        try
+        {
+            using var kit = new KilnHarness(); kit.Step(2);
+            kit.Run(() =>
+            {
+                var r = Build.BreakBox(new CellBox(0,0,0,1,1,1),new BlockBreakOptions { Build = new() { Journal = false } });
+                Assert.False(r.Ok); Assert.Equal(BlockRefusal.DamageMapFull,r.Refusal);
+                Assert.Contains("heal",r.Reason!,StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain("restart",r.Reason!,StringComparison.OrdinalIgnoreCase);
+            });
+        }
+        finally { FakeBuildTable.BlockRows(false); }
+    }
+    [Fact]
     public void OptionsDefaultToDamageNotUnrestrictedInstantEditing()
     {
         var o=new BlockBreakOptions();Assert.Equal(BlockBreakFlags.None,o.Flags);
