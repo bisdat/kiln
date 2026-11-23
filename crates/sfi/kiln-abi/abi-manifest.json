@@ -973,7 +973,7 @@
           "size": 72
         }
       },
-      "sha256": "13b8b3bed188b600deb74e8b407f43338f7f6da14b04dee12ca8e9ecf4566db4"
+      "sha256": "d918425d6c8fd40c87b753daf2fa5ab1cd01f41bf6e698378da3d902bb095bd0"
     },
     "native/core/abi/services/kiln_capacity.h": {
       "function_macros": [],
@@ -8523,7 +8523,7 @@
     "src/services/kiln_assets_vfx.rs": "90ed8ce5ad512bbf4f002db3277bc3b439d648ca437a58d4477eac4ce46c3b81",
     "src/services/kiln_audio.rs": "52a49e9a14975f3abecbe7200bb2dce40c0af7fd54f50faf7890befe559d8d7c",
     "src/services/kiln_boot.rs": "0b39658851db27fcdc6b7b5345ebd269fedaed2e7f837df0dd00be2e17ef501d",
-    "src/services/kiln_build.rs": "c66c6dfabec060ac660415ee5e7f5ae01fd97986f9f95ebb24eb35b501b7e35b",
+    "src/services/kiln_build.rs": "aa7aa753e9a3cc411b48d3e1cb32144efaf5c60bf3bdaf9818ca295dcbd008c9",
     "src/services/kiln_capacity.rs": "1fce521cbd490bd4f58c65e527a9c668067d9f909420b7f3d8713b3216af92f5",
     "src/services/kiln_caps.rs": "98d4b069c4331afcbbdfcadee61e85920bc25cce16fd3134c4b5c5e74fe58c44",
     "src/services/kiln_chat.rs": "79e3b08c8c6678ece24cdbfd1cc62011acf5501a5185f4b323db61e459c0b4e7",

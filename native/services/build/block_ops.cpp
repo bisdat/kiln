@@ -146,16 +146,25 @@ KilnResult break_box(const Source& s,const KilnBuildBreak* q,KilnBuildBreakResul
             if(!cell(s,{q->sphere_center.x-reach,q->sphere_center.y-reach,q->sphere_center.z-reach},lo) ||
                !cell(s,{q->sphere_center.x+reach,q->sphere_center.y+reach,q->sphere_center.z+reach},hi))
                 return fail(KILN_ERR_INVALID_ARGUMENT,KILN_BUILD_BLOCK_INVALID);
-            uint32_t dims[3];uint64_t n=1;
+            uint32_t dims[3]{};uint64_t n=1;
             for(int a=0;a<3;++a) {
+                // Outside-grid sentinels are not world cells. Clip only this read, never the sphere geometry
+                // or the requested write box (EMF block_glue.cpp:447-492 skips cells it cannot judge).
+                if(s.maximum[a]) {
+                    lo[a]=std::max(lo[a],0);
+                    hi[a]=std::min(hi[a],static_cast<int32_t>(std::min<uint64_t>(s.maximum[a]-1,INT32_MAX)));
+                }
                 const int64_t d=static_cast<int64_t>(hi[a])-lo[a]+1;
-                if(d<=0 || d>4096)return fail(KILN_ERR_INVALID_ARGUMENT,KILN_BUILD_BLOCK_INVALID);
+                if(d<=0){n=0;break;}
+                if(d>4096)return fail(KILN_ERR_INVALID_ARGUMENT,KILN_BUILD_BLOCK_INVALID);
                 dims[a]=static_cast<uint32_t>(d);n*=dims[a];
                 if(n>4096)return fail(KILN_ERR_INVALID_ARGUMENT,KILN_BUILD_BLOCK_INVALID);
             }
             std::vector<KilnVoxel> nearby(n);
-            rc=s.read(s.context,lo,dims,nearby.data(),nearby.size());
-            if(rc!=KILN_OK)return fail(rc,read_refusal(rc));
+            if(n) {
+                rc=s.read(s.context,lo,dims,nearby.data(),nearby.size());
+                if(rc!=KILN_OK)return fail(rc,read_refusal(rc));
+            }
             double nearest=reach+1;size_t j=0;
             // EMF's shrink_off_world, block_rules.cpp:71-92: protection sees the full r+margin sphere, independent
             // of the edit mask; only configured/material-selected breakable buildings participate.
@@ -227,9 +236,11 @@ KilnResult break_box(const Source& s,const KilnBuildBreak* q,KilnBuildBreakResul
             const int32_t c[3]={q->origin[0]+static_cast<int32_t>(x),q->origin[1]+static_cast<int32_t>(y),q->origin[2]+static_cast<int32_t>(z)};
             uint8_t old_damage=0,new_damage=0;const auto m=KILN_VOXEL_MATERIAL(before[i]);
             if(!s.damage_get(s.context,c,m,&old_damage))return fail(KILN_ERR_INTERNAL,KILN_BUILD_BLOCK_FAULTED);
+            const auto why=s.damage_add(s.context,c,m,increments[i],q->terrain_heal_seconds==0?20:q->terrain_heal_seconds,&new_damage);
+            // Capacity admission never enters a mutator. Retain uncertainty from any earlier hits in this box.
+            if(why==KILN_BUILD_BLOCK_DAMAGE_MAP_FULL)return fail(KILN_ERR_UNAVAILABLE,why);
             r.flags|=KILN_BUILD_BREAK_R_MAY_HAVE_CHANGED;
-            if(!s.damage_add(s.context,c,m,increments[i],q->terrain_heal_seconds==0?20:q->terrain_heal_seconds,&new_damage))
-                return fail(KILN_ERR_INTERNAL,KILN_BUILD_BLOCK_FAULTED);
+            if(why!=KILN_BUILD_BLOCK_NONE)return fail(KILN_ERR_INTERNAL,KILN_BUILD_BLOCK_FAULTED);
             if(new_damage>old_damage)++r.damaged;
             mask[i]=new_damage==255?1:0;
             if(mask[i])++selected;

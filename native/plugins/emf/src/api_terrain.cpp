@@ -216,9 +216,14 @@ bool raster(const Sphere& s, const KilnBuildGrid& grid, KilnBuildBreak& r, std::
     const double center[3] = {s.x,s.y,s.z}, origin[3] = {grid.origin.x,grid.origin.y,grid.origin.z};
     size_t cells = 1;
     for (int a = 0; a < 3; ++a) {
-        const double lo = std::floor((center[a] - s.radius - origin[a]) / grid.cell_size);
-        const double hi = std::floor((center[a] + s.radius - origin[a]) / grid.cell_size);
-        if (!std::isfinite(lo) || !std::isfinite(hi) || lo < INT32_MIN || hi > INT32_MAX || hi < lo || hi-lo > 4095) return false;
+        double lo = std::floor((center[a] - s.radius - origin[a]) / grid.cell_size);
+        double hi = std::floor((center[a] + s.radius - origin[a]) / grid.cell_size);
+        if (!std::isfinite(lo) || !std::isfinite(hi) || lo < INT32_MIN || hi > INT32_MAX || hi < lo || hi-lo > 4095 ||
+            grid.cells_max[a] <= grid.cells_min[a]) return false;
+        // EMF block_glue.cpp:496-535 judges readable cells only. Keep the original sphere, but never submit
+        // outside cells to Kiln's guarded writer. A disjoint sphere is a successful no-op, not a failed request.
+        lo = std::max(lo, double(grid.cells_min[a])); hi = std::min(hi, double(grid.cells_max[a])-1);
+        if (hi < lo) { r.dims[0] = r.dims[1] = r.dims[2] = 0; return true; }
         r.origin[a] = static_cast<int32_t>(lo); r.dims[a] = static_cast<uint32_t>(hi-lo+1);
         cells *= r.dims[a]; if (cells > 4096) return false;
     }
@@ -258,6 +263,7 @@ void terrain_server_pre() {
             KilnBuildGrid grid{}; grid.size = sizeof grid;
             const char* unavailable = mode_unavailable(d.request.spec.flags);
             bool ok = !unavailable && S.build->grid(&grid) == KILN_OK;
+            bool capacity = false;
             if (world_ended(expected)) d.result.status = EMF_BREAK_CANCELLED;
             std::string mod = "emf:" + (d.request.mod ? d.request.mod->id : std::string("unknown"));
             for (const auto& s : d.request.spheres) {
@@ -268,6 +274,7 @@ void terrain_server_pre() {
                 r.sphere_margin = .01; r.sphere_minimum = .25;
                 std::vector<uint8_t> mask;
                 if (!raster(s, grid, r, mask)) { ok = false; break; }
+                if (!r.dims[0] || !r.dims[1] || !r.dims[2]) continue;
                 // STOPPING may run on another thread after this batch was extracted. Do not enter a later
                 // sphere (or a replacement session); completed sphere counts are retained without replay.
                 if (world_ended(expected)) { d.result.status = EMF_BREAK_CANCELLED; break; }
@@ -286,15 +293,18 @@ void terrain_server_pre() {
                 ok = rc == KILN_OK && result.refusal == KILN_BUILD_BLOCK_NONE;
                 const bool partial = (result.flags & KILN_BUILD_BREAK_R_MAY_HAVE_CHANGED) &&
                                      (!ok || !(result.flags & KILN_BUILD_BREAK_R_VERIFIED));
-                if (partial || result.refusal == KILN_BUILD_BLOCK_FAULTED || result.refusal == KILN_BUILD_BLOCK_UNVERIFIED) {
+                capacity = result.refusal == KILN_BUILD_BLOCK_DAMAGE_MAP_FULL;
+                if (!capacity && (partial || result.refusal == KILN_BUILD_BLOCK_FAULTED || result.refusal == KILN_BUILD_BLOCK_UNVERIFIED)) {
                     { std::lock_guard lock(g_mutex); g_faulted = true; if (partial) ++g_partial; }
                     refuse(d.request.mod, "break_blocks", "a write may have partially committed; reported removals are a lower bound; not retried", true);
-                    ok = false;
+                    // EMF block_service.cpp:100-105 fails the rest of the batch only after a kernel fault.
+                    ok = false; failed = true;
                 }
             }
             if (!ok && d.result.status == EMF_BREAK_DONE) {
-                d.result.status = EMF_BREAK_FAILED; failed = true;
-                refuse(d.request.mod, "break_blocks", unavailable ? unavailable : "kiln.build refused the queued break; not retried", true);
+                d.result.status = EMF_BREAK_FAILED;
+                refuse(d.request.mod, "break_blocks", capacity ? "terrain damage map is full; this request failed; retry after damage heals" :
+                    unavailable ? unavailable : "kiln.build refused the queued break; not retried", true);
             }
         }
         done.push_back(std::move(d));

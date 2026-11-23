@@ -85,7 +85,9 @@ values 100,100,95,60,50. Default flags request damage mode, **not** unrestricted
   `TerrainHealthScale` (default **1**) multiplying material health and `TerrainHealAfter` (default **20 seconds**)
   controlling inactivity expiry. The caller chooses both; an adapter requiring a 250-fold health scale passes 250
   explicitly. Values expire, clear on world unload/session change/material change, and are forgotten after verified
-  removal. There are no terrain crack visuals. Full-map admission can fail; no rollback of prior hits is promised.
+  removal. There are no terrain crack visuals. A full live map refuses a new cell with `DamageMapFull` (native
+  `KILN_BUILD_BLOCK_DAMAGE_MAP_FULL`), not an engine fault; writes stay enabled and tracked cells can still take damage.
+  Retry after damage expires. `MayHaveChanged` is clear if no hit ran, but prior hits in the same box are not rolled back.
 - Before any damage mutation, the whole candidate mask is dry-run through the guarded writer's policies. A refused
   preflight damages nothing. Once damage starts, a later failure may leave both damage state and committed cells.
 
