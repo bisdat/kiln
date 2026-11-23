@@ -476,7 +476,7 @@ public sealed unsafe class RenderDraw
         ArgumentNullException.ThrowIfNull(image);
         int iw = image.Width, ih = image.Height;
         var px = Math.Max(Math.Abs(x1 - x0), Math.Abs(y1 - y0));
-        var handle = image.Item is { } item ? ItemIcons.Handle(item, ItemIcons.TrimmedPixels(px), out iw, out ih) : image.Handle;
+        var handle = image.Item is { } item ? ItemIcons.Handle(item, ItemIcons.TrimmedPixels(item, px), out iw, out ih) : image.Handle;
         if (T == null || handle == 0) return;
         var q = UiNative.ImageOpaqueRect(handle, out var rx, out var ry, out var rw, out var rh)
             ? ImageTrim.Fit(rx, ry, rw, rh, iw, ih, x0, y0, x1, y1)

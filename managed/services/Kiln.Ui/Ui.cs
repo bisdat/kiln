@@ -326,7 +326,7 @@ public sealed unsafe partial class UiDraw
         if (!UiNative.HasGameUi) return false;
         float w = width > 0 ? width : image.Width * Scale, h = height > 0 ? height : image.Height * Scale;
         if (image.Item is not null && !IconOnScreen(w, h)) return ClippedIconButton(id, w, h, trim: true);
-        var handle = image.Item is { } item ? ItemIcons.Handle(item, ItemIcons.TrimmedPixels(Math.Max(w, h)), out _, out _) : image.Handle;
+        var handle = image.Item is { } item ? ItemIcons.Handle(item, ItemIcons.TrimmedPixels(item, Math.Max(w, h)), out _, out _) : image.Handle;
         if (handle == 0)
         {
             if (image.Item is not null) return Button(id + "##icon", w, h);
@@ -404,7 +404,7 @@ public sealed unsafe partial class UiDraw
             return;
         }
         var px = Math.Max(width, height);
-        var handle = ItemIcons.Handle(item, trim ? ItemIcons.TrimmedPixels(px) : px, out var iw, out var ih);
+        var handle = ItemIcons.Handle(item, trim ? ItemIcons.TrimmedPixels(item, px) : px, out var iw, out var ih);
         if (handle == 0)
         {
             T->Dummy(width, height);  // keeps the layout: no overlay image could be made

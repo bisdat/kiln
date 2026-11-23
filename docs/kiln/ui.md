@@ -684,7 +684,11 @@ changes (checked every 2 seconds), so a change in the launcher shows while the g
   "background": 0.55,   // the translucent look's window background opacity, 0.1 to 1
   "opacity": 1,         // Kiln's whole overlay, text included, 0.3 to 1
   "scale": 1,           // the overlay's size on top of the display's scale, 0.75 to 1.5
-  "language": "auto"    // Kiln's own texts: auto (the game's text language) or a tag, "zh-CN" (Kiln's language, below)
+  "language": "auto",   // Kiln's own texts: auto (the game's text language) or a tag, "zh-CN" (Kiln's language, below)
+  "item_icons": {       // the item icon cache (since 0.2.0-dev.31; "Item icons" below)
+    "max_icons": 512,   // icons held at once, 64 to 512
+    "max_mib": 48       // their pixels in MiB (RGBA8 textures on the GPU), 8 to 128
+  }
 }
 ```
 - `translucent` is the game's look with the windows' backgrounds (windows, title bars, panels, the Kiln menu's backdrop
@@ -798,10 +802,19 @@ if (img != null && ui.ImageButton("pick", img, 40 * ui.Scale, 40 * ui.Scale)) Pi
   mip level to RGBA; kiln.ui uploads it as an overlay image). Kiln ships no game art and writes the pixels nowhere.
 - **Cost**: nothing until a mod draws an icon. The first draw of an item at a size loads it on a worker thread (most take
   well under a millisecond; the first frames show the placeholder). Kiln keeps the level that fits the size drawn (32, 64,
-  128 or 256 pixels; a picture with no level that size, such as a mod's one-level PNG icon, is scaled down to it), at most 256
-  icons and 24 MiB: past that the icons not drawn for a second are dropped first and read again when drawn; while every icon
-  in the cache is drawn now, a new one waits on the placeholder without being read. An icon scrolled out of its window is
-  neither read nor drawn. An icon shows once the overlay has uploaded it (a frame or two; at most 8 new pictures a frame); one
+  128 or 256 pixels; a picture with no level that size, such as a mod's one-level PNG icon, is scaled down to it), by default
+  at most 512 icons and 48 MiB (since 0.2.0-dev.31; 256 and 24 MiB before): past that the icons not drawn for a second are
+  dropped first and read again when drawn; while every icon in the cache is drawn now, a new one waits on the placeholder
+  without being read. The player sets the limits in kiln.json, `"ui": {"item_icons": {"max_icons": 64..512, "max_mib":
+  8..128}}` (read again while the game runs). The MiB are the icons' pixels, which is what their textures take on the GPU (one
+  level, RGBA8, a 64-pixel icon 16 KiB, a 256-pixel one 256 KiB): not the overlay's whole memory, and no frame-time budget.
+  kiln.ui lets 960 overlay images exist at once: the icons, the placeholder and up to 128 icons freed in the last quarter
+  second (kiln.ui destroys a freed texture at its next frame) stay under 641, so at least 319 are left for mods' own
+  pictures (`Ui.LoadImage`) at any setting; while 128 were freed in the last quarter second, a new icon waits a moment rather
+  than push another out. Measured: a grid of 300 icons on screen at 64 pixels (or 40 trimmed) is held whole at the defaults
+  (256 held only part of it); 40-pixel trimmed icons at a UI scale of 2 read the 256 level (256 KiB each), where 48 MiB holds
+  192 of them: a mod with large trimmed grids at 4K may want `max_mib` 64 or more. An icon scrolled out of its window is
+  neither read nor drawn; its `ImageButton` keeps the size it has when shown (the frame padding included, since 0.2.0-dev.31). An icon shows once the overlay has uploaded it (a frame or two; at most 8 new pictures a frame); one
   the overlay could not upload stays the placeholder and is read again later. Whatever fails is tried again later, less often
   each time. A new client world (another server) drops them all. `Ui.ItemImage` returns one shared object per item: keep it
   or ask each frame; its `Dispose` does nothing.
@@ -825,7 +838,10 @@ if (img != null && ui.ImageButton("pick", img, 40 * ui.Scale, 40 * ui.Scale)) Pi
   ```
   The art's bounds (pixels with alpha 16 or more) are found once, when the icon is loaded; the art keeps its aspect ratio
   and is centred, and the box taken stays the size asked for (the layout is the same as untrimmed). A trimmed icon reads a
-  sharper level (twice the size drawn: 40 pixels reads the 128 level), so the magnified art stays crisp. The placeholder
+  sharper level, so the magnified art stays crisp: the first time twice the size drawn (40 pixels reads the 128 level), and
+  once a level of that item was read (since 0.2.0-dev.31) the level at which its art's longer side has the pixels drawn: art
+  that fills 3/4 of its icon drawn 40 pixels wide reads the 64 level (not a larger one), art that fills 1/4 reads the 256
+  level (not a stretched 128). The placeholder
   fills the box. `ItemIcon`, `Image` and `ImageButton` draw exactly as before. (Own names, not overloads: a method group
   released in dev.26 gains no overload.)
 - **Part of an image** (since 0.2.0-dev.29.16): `ui.ImagePart(img, width, height, u0, v0, u1, v1)` and
