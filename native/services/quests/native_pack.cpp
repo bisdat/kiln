@@ -903,6 +903,28 @@ qb::ojson body_ledger(const qb::ojson& rows, uint64_t generation) {
     return all;
 }
 
+// One line per authored body for the server's operator (NpcBodies.Status reads the same rows).
+void report_bodies(const qb::ojson& bodies) {
+    for (const auto& row : bodies) {
+        const std::string state = row_text(row, "state"), reason = row_text(row, "reason");
+        const std::string built = state == "ready" ? " (template " + row_text(row, "template") + ", closure " + row_text(row, "closure") + ")" : "";
+        KI("native: NPC body %s:%s: %s%s%s", row_text(row, "mod").c_str(), row_text(row, "npc").c_str(), state.c_str(), built.c_str(),
+           reason.empty() ? "" : (": " + reason).c_str());
+    }
+}
+
+// review3 S2: a start with no mod of native content builds nothing, but a body Ready at the previous start is still gone now: the
+// ledger says so (once) and the manifest carries its removed row for NpcBodies.Status.
+void bodies_without_mods() {
+    const qb::ojson bodies = body_ledger(qb::ojson::array(), 0);
+    if (bodies.empty()) return;
+    report_bodies(bodies);
+    qb::ojson manifest = qb::ojson::parse(g_manifest, nullptr, false);
+    if (!manifest.is_object()) manifest = qb::ojson{{"mods", qb::ojson::array()}, {"errors", qb::ojson::array()}};
+    manifest["bodies"] = bodies;
+    g_manifest = manifest.dump();
+}
+
 void build_per_mod(const std::vector<qb::ModInput>& mods, const qb::GameData& game, kc::bootpack::Call bridge,
                    const std::set<std::string>* required, std::vector<LeftOut>* left_out, Stop* stop, bool client) {
     g_pack_used = true;
@@ -920,6 +942,7 @@ void build_per_mod(const std::vector<qb::ModInput>& mods, const qb::GameData& ga
     for (const auto& error : result.errors) KW("native: %s", error.c_str());
     for (const auto& warning : result.warnings) KW("native: %s", warning.c_str());
     result.manifest["bodies"] = body_ledger(result.bodies, result.generation);
+    report_bodies(result.manifest["bodies"]);
     g_manifest = result.manifest.dump();
     g_pack_applied = std::move(result.applied);
     g_served = built(result.manifest["mods"]);
@@ -984,7 +1007,10 @@ void build_locked(const std::vector<qb::ModInput>* prepared = nullptr, const std
             return;
         }
     }
-    if (mods.empty()) return;
+    if (mods.empty()) {
+        if (bridge) bodies_without_mods();
+        return;
+    }
     // every required mod in the build that did not come out whole (its entry's errors, or the whole build's)
     std::string whole;  // why the whole build is not served
     auto required_left_out = [&](const qb::ojson& manifest_mods) {

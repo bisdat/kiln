@@ -280,6 +280,25 @@ void test_a_damaged_ledger_is_named_and_written_anew() {
     CHECK(logged("NPC body ledger"));
 }
 
+// review3 S2: the body mod was the only mod with native content. The next start collects no mod at all and must still say that the body
+// is gone, and write the ledger without it.
+void test_removed_when_no_native_mod_is_left() {
+    body_reset("16f review3 S2: first start: the body mod alone");
+    body_mod("a-body");
+    boot_and_resource_init();
+    const std::string ledger = read_file(t_root / "data/kiln-quests/native/npc-bodies.ledger.json");
+    CHECK(ledger.find("\"ready\"") != std::string::npos);
+    body_reset("16f review3 S2: next start: no mod with native content");
+    write(t_root / "data/kiln-quests/native/npc-bodies.ledger.json", ledger);
+    boot_and_resource_init();
+    const auto bodies = kiln::qb::ojson::parse(g_manifest)["bodies"];
+    CHECK(bodies.is_array() && bodies.size() == 1);
+    if (bodies.is_array() && bodies.size() == 1) CHECK(bodies[0]["state"] == "removed" && bodies[0]["mod"] == "a-body" && bodies[0]["npc"] == "tobin");
+    CHECK(logged("NPC body a-body:tobin: removed"));
+    const auto after = kiln::qb::ojson::parse(read_file(t_root / "data/kiln-quests/native/npc-bodies.ledger.json"), nullptr, false);
+    CHECK(after.is_object() && after["bodies"].is_array() && after["bodies"].empty());
+}
+
 void test_refusals_leave_the_neighbour() {
     struct Case { const char* name; std::function<void()> arrange; const char* says; };
     const std::vector<Case> cases{
@@ -332,6 +351,7 @@ int main(int argc, char** argv) {
     test_refusals_leave_the_neighbour();
     test_status_rows_and_removal();
     test_a_damaged_ledger_is_named_and_written_anew();
+    test_removed_when_no_native_mod_is_left();
     std::error_code ec;
     fs::remove_all(t_root, ec);
     std::printf("body native: %d checks, %d failed\n", g_checks, g_failures);
