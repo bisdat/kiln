@@ -1162,9 +1162,8 @@ def index_text(upcoming, info, experimental, ntab, nrows, files, native, service
     out.append("")
     if experimental:
         out.append("Left out as experimental: " + "; ".join("%s %s %d" % (i, a, n) for (i, a), n in sorted(experimental.items())) +
-                   ". KILNX001 is lab and test API. KILNX002 (Kiln.Client SteamGuard) and KILNX003 (Kiln.World WorldConcurrent) are "
-                   "real but unproven: a mod opts in with `NoWarn` for the id, and they may change in any release "
-                   "(docs/kiln/services/steamguard.md, docs/kiln/services/world.md).")
+                   ". KILNX001 is lab and test API. KILNX002 (Kiln.Client SteamGuard) is real but unproven: a mod opts in "
+                   "with `NoWarn` for the id, and it may change in any release (docs/kiln/services/steamguard.md).")
         out.append("")
     return "\n".join(out)
 

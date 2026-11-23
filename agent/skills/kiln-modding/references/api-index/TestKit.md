@@ -393,6 +393,8 @@ enum: Entity, Item, Destroy, Cleanup
 
 ## TestKit.FakeWorld `0.2.2` — The fake world of a harness (`KilnHarness.Entities`): entities with components laid out by Kiln.Game's types, under the real Kiln.World.
 - `All { get; } -> IReadOnlyList<EntityId>` — Every entity made here (and every fake player's entity that was given a component), by id.
+- `BusyReads { get; set; } -> int` `0.2.16` — The next `value` frame-quiet reads from tasks (`ReadMode.FrameQuiet`) answer `ReadStatus.Busy`, as when a server...
+- `BusyWrites { get; set; } -> int` `0.2.16` — The next `value` compare-exchanges from tasks (`WorldConcurrent.TryCompareExchange`) meet the engine's gate taken...
 - `Create() -> EntityId` — Makes an entity with no component and no position.
 - `Create(WorldPosition position) -> EntityId` — Makes an entity that stands at `position`: its `CurrentTransform` (identity rotation, scale 1), which...
 - `Destroy(EntityId entity) -> bool` — Takes an entity and its components out of the world.
@@ -525,6 +527,18 @@ enum: Entity, Item, Destroy, Cleanup
 - `Join(string name, ulong steamId = 0, PlayerPermissions rights = PlayerPermissions.None, bool isAdmin = false, WorldPosition? position = null, uint userGroupId = 0) -> TestKit.FakePlayer` — A player connects and logs in: in game, with an entity (slot + 1), at the start of the next step.
 - `Slots { get; } -> int` — Player slots of the server (16, as a dedicated server of this game has).
 
+## TestKit.HarnessPlayerStorage `0.2.16` — The fake kiln.items.storage of a harness (`KilnHarness.PlayerStorage`): Kiln.Items' player storage runs its own code on it.
+- `Apply(TestKit.FakePlayer player) -> void` — The join made the player's own pages: a restored player's storages are built now.
+- `Capture(TestKit.FakePlayer player, ulong witness) -> ulong` — The game captured `player`'s character in a world save (with this witness): Kiln froze the storages into the save's...
+- `CapturesDone() -> ulong` — The save's captures are done: the batch completes and the persistence owner's stage runs.
+- `Die(TestKit.FakePlayer player, EntityId tombstone, TestKit.HarnessTombstoneMode mode = TestKit.HarnessTombstoneMode.AddBackpackMaterials) -> void` — The player died; the game made `tombstone` (none: no tombstone) under `mode`.
+- `Join(TestKit.FakePlayer player, ulong witness = 1) -> void` — The game read `player`'s character at the join, with this inventory witness.
+- `JoinAndRestore(TestKit.FakePlayer player, params TestKit.HarnessStorageCopy[] storages) -> void` — `HarnessPlayerStorage.Join`, `HarnessPlayerStorage.Restore` with `storages` (none: a new character), and...
+- `Leave(TestKit.FakePlayer player) -> void` — The player left: the storages' inventories go.
+- `Parked(TestKit.FakePlayer player, string fullKey) -> IReadOnlyList<TestKit.HarnessStorageRecord>` — The player's parked records of a storage, as Kiln holds them now.
+- `Quarantined(TestKit.FakePlayer player, string fullKey) -> IReadOnlyList<TestKit.HarnessStorageRecord>` — The player's quarantined records of a storage (Kiln could not use them; kept).
+- `Restore(TestKit.FakePlayer player, PlayerStorageSource source = PlayerStorageSource.New, bool paired = false, long revision = 0, params TestKit.HarnessStorageCopy[] storages) -> void` — Restores the copy Kiln.Saves chose for `player`'s join (once per join): an empty one with `PlayerStorageSource.New`.
+
 ## TestKit.HarnessPrograms `0.2.4` — The fake world's programs (`KilnHarness.Programs`).
 - `Add(string name, TestKit.FakeProgramLists lists, Action<TestKit.FakeProgramSlice>? update = null) -> void` — Declares one of the game's programs in the fake server world, after the ones declared before (its index).
 - `Add<T>(Action<TestKit.FakeProgramSlice>? update = null) -> void` — Declares the program of Kiln.Game's typed view `T` (`Ecs.Programs.FuelSetup`): its name and lists are the view's...
@@ -557,6 +571,25 @@ enum: Created, Starting, Running, Stopped, Disposed, Abandoned
 
 ## TestKit.HarnessStoppedException `0.2.1` — The harness's tick thread was given up on (a test blocked it and the watchdog stopped the harness): no call works any more.
 
+## TestKit.HarnessStorageCopy `0.2.16` — One storage of a restored copy in a test (`HarnessPlayerStorage.Restore`).
+- `HarnessStorageCopy(string FullKey, int Slots, IReadOnlyList<TestKit.HarnessStorageRecord> Records, bool Parked = false)`
+- `FullKey { get; init; } -> string` — "\<mod id>:\<name>".
+- `Parked { get; init; } -> bool` — Saved as parked (no mod had it registered then) rather than live.
+- `Records { get; init; } -> IReadOnlyList<TestKit.HarnessStorageRecord>` — Its stacks.
+- `Slots { get; init; } -> int` — The slots it had when it was saved.
+
+## TestKit.HarnessStorageRecord `0.2.16` — One record of a player storage in a test: a stack in a slot.
+- `HarnessStorageRecord()`
+- `HarnessStorageRecord(int Slot, ItemId Item, int Count, int Level = 0)`
+- `Count { get; init; } -> int` — How many.
+- `Deconstruct(out int Slot, out ItemId Item, out int Count, out int Level) -> void`
+- `Equals(TestKit.HarnessStorageRecord other) -> bool`
+- `Item { get; init; } -> ItemId` — The item.
+- `Level { get; init; } -> int` — Gear's level (0 for a plain stack).
+- `static operator !=(TestKit.HarnessStorageRecord left, TestKit.HarnessStorageRecord right) -> bool`
+- `static operator ==(TestKit.HarnessStorageRecord left, TestKit.HarnessStorageRecord right) -> bool`
+- `Slot { get; init; } -> int` — The slot in the storage (0 to slots - 1).
+
 ## TestKit.HarnessTasks `0.2.10` — The Kiln tasks of a harness's mods (`KilnHarness.Tasks`).
 - `Live { get; } -> int` — The tasks that have not ended yet (and ended ones with a hop still to run).
 - `Settle(int maxSteps = 1000, TimeSpan? timeout = null) -> int` — Runs the mods' tasks to their end: waits while their work runs on the workers, and steps the server whenever all of...
@@ -584,6 +617,9 @@ enum: Created, Starting, Running, Stopped, Disposed, Abandoned
 - `NightLength { get; set; } -> TimeSpan` — How long the night phase lasts in real time (nightTimeDuration, 2 to 60 minutes; default 12).
 - `Set(double hours) -> void` — Sets the time of day as the game's own admin menu does (setTimeOfDay: the clock restarts in its first cycle), with...
 - `Speed { get; } -> double` — The speed the clock runs at (1: the game's; what a mod's `Time.SetSpeed` holds).
+
+## TestKit.HarnessTombstoneMode `0.2.16` — The game's tombstone setting at a death (`HarnessPlayerStorage.Die`).
+enum: AddBackpackMaterials, Everything, NoTombstone
 
 ## TestKit.HarnessUiInventory `0.2.12` — The fake kiln.ui.inventory of a harness (`KilnHarness.UiInventory`): Ui.Inventory's own code runs on it.
 - `Click(int index, SlotButton button = SlotButton.Left, SlotModifiers modifiers = SlotModifiers.None) -> TestKit.FakeSlotClickResult` — The player presses `button` with `modifiers` on drawn slot `index`.
@@ -676,6 +712,7 @@ enum: Created, Starting, Running, Stopped, Disposed, Abandoned
 - `OnMainThread(Action work) -> void` `0.2.10` — Runs `work` on the game client's main thread, where the client world steps (#82): a task started there belongs to...
 - `Outlines { get; } -> TestKit.HarnessOutlines` `0.2.13` — The fake kiln.render's outlines of this harness (Ui.World.Outline): what mods outlined, and the game's side of it...
 - `Players { get; } -> TestKit.HarnessPlayers` — The players on this server: `HarnessPlayers.Join` one, `FakePlayer.Leave`.
+- `PlayerStorage { get; } -> TestKit.HarnessPlayerStorage` `0.2.16` — The fake kiln.items.storage of this harness: the game's side of player storage (joins, restores, saves, leaves, deaths).
 - `Programs { get; } -> TestKit.HarnessPrograms` `0.2.4` — The game's ECS programs in the harness's fake server world (kiln.world v4): the ones a test declares, which...
 - `Queries { get; } -> TestKit.HarnessQueries` `0.2.3` — The fake kiln.queries of this harness: what a voxel ray answers, and the rays mods asked for.
 - `ReadLogFile() -> string` `0.2.11` — The text of `KilnHarness.LogFile` as written so far ("" when it was not created).

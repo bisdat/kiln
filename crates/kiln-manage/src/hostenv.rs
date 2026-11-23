@@ -22,11 +22,20 @@ const OWN: [&str; 4] = ["APPDIR", "APPIMAGE", "ARGV0", "OWD"];
 /// The Linux launcher's software mode (launcher/src-tauri/src/render.rs) sets these for its own webview, and names the
 /// ones it set (not the user's own) in [`RENDER_SET`], comma-separated; so does its choice against WebKit's DMA-BUF
 /// renderer (`WEBKIT_DISABLE_DMABUF_RENDERER`, 0.2.0-dev.29.19: set only where that renderer failed), and its switch to
-/// X11 on Wayland (`GDK_BACKEND=x11`, 0.2.0-dev.30: only where WebKit drew without the GPU on Wayland). They are the
-/// launcher's, not the host's: a Steam it starts would draw its own window in software (or without DMA-BUF), so a
-/// program of the host never gets them.
-pub const RENDER_VARS: [&str; 5] =
-    ["WEBKIT_DISABLE_COMPOSITING_MODE", "WEBKIT_SKIA_ENABLE_CPU_RENDERING", "LIBGL_ALWAYS_SOFTWARE", "WEBKIT_DISABLE_DMABUF_RENDERER", "GDK_BACKEND"];
+/// X11 on Wayland (`GDK_BACKEND=x11`, 0.2.0-dev.30: only where WebKit drew without the GPU on Wayland), and its opt-in
+/// past Ubuntu WebKit's NVIDIA block (`WEBKIT_FORCE_DMABUF_RENDERER`, with the shared-memory step
+/// `WEBKIT_DMABUF_RENDERER_FORCE_SHM`, 0.2.0-dev.30.7). They are the launcher's, not the host's: a Steam, game or server
+/// it starts would draw its own window in software (or without DMA-BUF, or past a driver guard it never asked to pass),
+/// so a program of the host never gets them.
+pub const RENDER_VARS: [&str; 7] = [
+    "WEBKIT_DISABLE_COMPOSITING_MODE",
+    "WEBKIT_SKIA_ENABLE_CPU_RENDERING",
+    "LIBGL_ALWAYS_SOFTWARE",
+    "WEBKIT_DISABLE_DMABUF_RENDERER",
+    "GDK_BACKEND",
+    "WEBKIT_FORCE_DMABUF_RENDERER",
+    "WEBKIT_DMABUF_RENDERER_FORCE_SHM",
+];
 pub const RENDER_SET: &str = "KILN_LAUNCHER_RENDER_SET";
 /// (dev.29.18) The Linux launcher turns WebKit's process sandbox off for its own webview when the player chose so
 /// (launcher/src-tauri/src/sandbox.rs) and names the variable in [`SANDBOX_SET`] when it set it (not the player's own).
@@ -243,6 +252,36 @@ mod tests {
             assert_eq!(of(&c, RENDER_SET), Some(&None));
         }
         assert!(changes(vars(&[("WEBKIT_DISABLE_DMABUF_RENDERER", "1")])).is_empty(), "the user's own value goes along");
+    }
+
+    /// (dev.30.7) The opt-in past Ubuntu WebKit's NVIDIA block (WEBKIT_FORCE_DMABUF_RENDERER, with its shared-memory
+    /// step WEBKIT_DMABUF_RENDERER_FORCE_SHM) is the launcher's own: the game, a server or Steam it starts never gets it.
+    #[test]
+    fn the_launchers_forced_dmabuf_variables_stay_with_the_launcher() {
+        let ours = vars(&[
+            (RENDER_SET, "WEBKIT_FORCE_DMABUF_RENDERER,WEBKIT_DMABUF_RENDERER_FORCE_SHM"),
+            ("WEBKIT_FORCE_DMABUF_RENDERER", "1"),
+            ("WEBKIT_DMABUF_RENDERER_FORCE_SHM", "1"),
+        ]);
+        for env in [ours.clone(), ours.iter().cloned().chain(seen()).collect()] {
+            let c = changes(env);
+            for name in ["WEBKIT_FORCE_DMABUF_RENDERER", "WEBKIT_DMABUF_RENDERER_FORCE_SHM"] {
+                assert_eq!(of(&c, name), Some(&None), "{name}: {c:?}");
+            }
+            assert_eq!(of(&c, RENDER_SET), Some(&None));
+        }
+        // the user's own values (not in the list) go along as before
+        assert!(changes(vars(&[("WEBKIT_FORCE_DMABUF_RENDERER", "1"), ("WEBKIT_DMABUF_RENDERER_FORCE_SHM", "1")])).is_empty());
+        // and a program really started for the host (a server's Wine, Steam through xdg-open) sees neither
+        let mut cmd = Command::new("sh");
+        for (k, v) in &ours {
+            cmd.env(k, v);
+        }
+        clean_with(&mut cmd, ours.iter().cloned().chain(seen()));
+        let out = cmd.arg("-c")
+            .arg("printf %s \"${WEBKIT_FORCE_DMABUF_RENDERER-unset} ${WEBKIT_DMABUF_RENDERER_FORCE_SHM-unset} ${KILN_LAUNCHER_RENDER_SET-unset}\"")
+            .output().unwrap();
+        assert_eq!(String::from_utf8_lossy(&out.stdout), "unset unset unset");
     }
 
     /// (dev.29.18) WebKit's sandbox turned off for the launcher's own page: a browser or Steam the launcher starts gets

@@ -369,6 +369,29 @@ rpm: rpm versions can't hold the `-` of `X.Y.Z-dev.N`.
 Builds reuse `<repo>/.out/release-work` (`--work`): a fixed export path keeps the compiler caches warm. Pinned
 downloads (the .NET runtime, netcoredbg) are cached in `~/.cache/kiln-release`.
 
+**One run per work folder and per `KILN_GLIBC_DIR`.** A run holds `<work>/.release.lock` and
+`KILN_GLIBC_DIR/.release.lock` (not with `--host-build`, which builds Linux in the work folder) from its start until
+it ends, however it ends (`flock` on an open file, `tools/release/lib/run-locks.sh`). A second run on either stops at
+once, before it removes or writes anything (the `--force` removal of `--out` included), with exit 1 and a line naming
+the lock and the run holding it (pid, release, out folder, start time), e.g. `release: another release builds in
+KILN_GLIBC_DIR=... (its lock: .../.release.lock; held by: pid 4242 release 0.2.0-dev.30.7, out ..., since ...)`. Two
+releases at once (a trial beside a release) need their own `--work` and their own `KILN_GLIBC_DIR`. Why: the
+0.2.0-dev.30 T1b trial shared `KILN_GLIBC_DIR` with another run and shipped the kilnctl that run built minutes later in
+the same cargo folder. A build the run started and left behind keeps the lock open; when the run named in the file is
+gone, the message says so (`fuser -v <lock>` finds the process). The lock files stay; an unheld one is harmless.
+Other users of a `KILN_GLIBC_DIR` (`linux-build/run.sh` by hand, a client test build) take no lock: give them
+another folder while a release runs.
+
+**Fresh file times and the run's own Linux CLIs.** `git archive` gives every exported file the commit's time, and Cargo
+counts a crate as built when none of its inputs is newer than its last build, so a reused cargo folder
+(`<work>/cargo`, `KILN_GLIBC_DIR/cargo`) that last built a later commit kept that commit's code for an older export.
+After the source tarballs (which keep the commit's time) every file of the export gets the time of the export: each
+run rebuilds the workspace crates (crates.io dependencies are not judged by file times), slower but right for a
+release. kilnctl, kiln and kiln-eml-inspect (Linux) are copied into `<work>/linux-bin` right after their build; the
+runtime bundle, the stage, the folder and the checks take those copies, never the cargo target folder. Tests:
+`python3 -I tools/release/test_release_locks.py` (a second run refused on a held work folder or `KILN_GLIBC_DIR`,
+before anything is changed; the file times; Cargo keeping an older-dated change and rebuilding it after the reset).
+
 ## Linux builds (the Ubuntu 22.04 container)
 Every Linux ELF file of a release (the launcher's AppImage, deb and rpm, `kilnctl`, `kiln`) is compiled and bundled
 in a Docker container, Ubuntu 22.04 with glibc 2.35 (`tools/release/linux-build/`). Why: a Linux binary needs the
@@ -393,7 +416,7 @@ cannot be inspected or exceeds the nesting limit (32). Source, Windows and updat
   no host HOME or signing environment is passed. Its HOME, CARGO_HOME and cargo
   target dir live in `KILN_GLIBC_DIR` (default `<repo>/.out/glibc`: `home/` holds Tauri's downloaded AppImage tools,
   `cargo-home/` the crates, `cargo/` the Linux build), separate from the host's own cargo builds, so later runs are
-  incremental. Symlinked host directories retain their requested paths inside the container; commands and compiler
+  incremental. One release at a time per `KILN_GLIBC_DIR` (its `.release.lock`, see "The release folder"). Symlinked host directories retain their requested paths inside the container; commands and compiler
   flags preserve spaces. Run as the release owner, not root. The wrapper removes its container on failure or a
   catchable signal. Caches and build/log evidence stay for reuse; the unpacked notices scratch directory is removed.
   It needs ~3 GB, the image ~2.4 GB of Docker's disk; on the build machine `.out/glibc` is a link to `/mnt/Dongus/kiln-glibc`, off the root

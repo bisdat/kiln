@@ -3092,7 +3092,21 @@
       "x11Software": "Not used while the launcher draws without the GPU.",
       "x11Yours": "Your GDK_BACKEND={value} decides.",
       "x11NextOn": "The launcher may switch to X11 by itself",
-      "x11NextOff": "The next start stays on Wayland"
+      "x11NextOff": "The next start stays on Wayland",
+      "force": "Force GPU drawing on NVIDIA",
+      "forceIntro": "The Linux launcher bundles Ubuntu's WebKit, which draws without the GPU on every NVIDIA card. This switch lifts that block (WEBKIT_FORCE_DMABUF_RENDERER=1 with shared memory, WEBKIT_DMABUF_RENDERER_FORCE_SHM=1). It is off on clean starts: some NVIDIA drivers crash or show a black window with it. If a normal NVIDIA start fails to paint, the next start may try shared memory once and remember it if it works. Turning this switch off explicitly disables that recovery too. If a shared-memory start fails, the launcher turns it off by itself. Applies at the next start.",
+      "forceOff": "This start leaves the block as it is.",
+      "forceBlocked": "This start draws without the GPU because of that block: turn this on to try the GPU.",
+      "forceOn": "This start draws past the block.",
+      "forceFailed": "The start before with it failed, so this start forces nothing and the switch goes off.",
+      "recoveryTitle": "Launcher drawing recovered",
+      "forceRecovery": "The previous normal NVIDIA startup never confirmed a visible frame. This start is trying shared-memory GPU drawing once; a successful visible start is remembered for this installation and display backend.",
+      "forceRecovered": "Shared memory is the last working automatic renderer for this installation and display backend. Turning this switch off disables automatic recovery too.",
+      "forceUnguarded": "The startup crash guard could not be written, so this start forces nothing and the switch goes off.",
+      "forceUnused": "Not used without NVIDIA, while drawing without the GPU, or without WebKit's DMA-BUF renderer.",
+      "forceYours": "Your own WEBKIT_FORCE_DMABUF_RENDERER or WEBKIT_DMABUF_RENDERER_FORCE_SHM decides.",
+      "forceNextOn": "The next start draws past Ubuntu WebKit's NVIDIA block",
+      "forceNextOff": "The next start leaves Ubuntu WebKit's NVIDIA block alone"
     },
     "dev": {
       "mock": "Developer: mock data fallback",
@@ -3419,6 +3433,7 @@
       "updateState": "This launcher",
       "noGpu": "For a window that stays black.",
       "x11": "Much faster on a HiDPI screen, less sharp.",
+      "forceDmabuf": "For NVIDIA cards. Off by default.",
       "sandbox": "Keep it on unless the window will not open."
     },
     "tag": {
@@ -3862,7 +3877,7 @@
       "saves": "Your saves and worlds",
       "settings": "Mod settings and Kiln's config folder (they can hold server passwords)",
       "admin": "Kiln.Admin's token and address",
-      "mods": "What's inside your mods (only file names, sizes and dates)",
+      "mods": "What's inside your mods (only file and folder names, sizes and dates are listed, plus ShroudForge manifest IDs and versions in findings)",
       "steam": "Steam's own files"
     }
   },
@@ -3870,6 +3885,8 @@
     "dialogTitle": "Save a support report",
     "saved": "Report saved",
     "savedFile": "{file}, {size}.",
+    "savedPath": "Saved to {path} ({size}).",
+    "saveDownloads": "Save to Downloads",
     "problems": {
       "one": "It found {count} problem.",
       "other": "It found {count} problems."
@@ -6703,5 +6720,28 @@
       "vanilla": "These are not necessarily the files as Steam ships them. For those, use Verify integrity of game files in Steam (the game's Properties, Installed Files).",
       "unknown": "Kiln cannot tell which game files it would put back: {reason}."
     }
+  },
+  "playerStorage": {
+    "tab": "Storage",
+    "title": "Player storage",
+    "readOnly": "Read-only. These items wait in Kiln, separate from your backpack.",
+    "empty": "No player storage for this character.",
+    "return": "Return to character",
+    "returnTitle": "Return storage to this character?",
+    "returnBody": "Kiln makes a backup first, then adds as many base-game stacks as fit in extra backpack pages. Mod items and anything else stay in storage. The game and Steam must be closed.",
+    "serverCopy": "A Kiln server keeps its own copy of this storage. If you join it without Kiln, that server can give its copy back there.",
+    "confirm": "Return items",
+    "returning": "Returning…",
+    "result": "Returned {returned} stacks; {remaining} stacks remain in storage.",
+    "closeGame": "Close Enshrouded and Steam before returning storage.",
+    "localOnly": "Return is only available for LOCAL characters, not Steam Cloud saves.",
+    "saveFirst": "Save or discard your edits before returning storage.",
+    "unavailable": "Storage cannot be returned",
+    "restoreWarning": "This character has player storage. An older backup may pair with older storage; if its pair is no longer kept, items moved since that backup could be lost or duplicated.",
+    "unpaired": "No saved pair matches this character. The newest storage copy is shown.",
+    "parked": "Mod off",
+    "kept": "kiln/data/characters and kiln/data/worlds stay. They keep player storage safe until you install Kiln again.",
+    "unreadable": "Some stored records cannot be shown. They are left unchanged.",
+    "modItems": "{count} stacks of mod items stay in storage: they need their mod."
   }
 }

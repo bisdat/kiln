@@ -13,6 +13,10 @@ import { createXXHash3 } from "hash-wasm";
 import type { EditorBackup, KilnError } from "./commands";
 import items from "../editor/data/items.json";
 import capacities from "../editor/data/backpack-capacities.json";
+// @ts-ignore: shared browser codec
+import { readExactCharacter, writeItemRecord } from "../editor/shared/character-exact.mjs";
+// @ts-ignore
+import { inventoryWitness } from "../editor/shared/storage-witness.mjs";
 
 type Handler = (args: Record<string, unknown>) => unknown;
 type Reject = (code: KilnError["code"], message: string) => never;
@@ -57,17 +61,17 @@ function characterBlock(c: Character): Buffer {
   const worn = [...c.worn].sort((a, b) => a[0] - b[0]);
   // two more lit bits than worn pieces: the weapons, kept elsewhere in the block (as in real saves)
   const mask = worn.reduce((m, [bit]) => m | (1 << bit), 0) | (1 << 16) | (1 << 17);
-  const mid = Buffer.alloc(16);
-  mid.writeUInt32LE(mask >>> 0, 12);
+  const mid = Buffer.alloc(8); // buff count, then equipment mask
+  mid.writeUInt32LE(mask >>> 0, 4);
   // The container's pages describe the worn backpack's capacity, not whether any stacks currently occupy it.
   const backpack = c.worn.map(([, e]) => (items as Record<string, { slot?: string; debug: string }>)[e.itemId]).find((it) => it?.slot === "Backpack");
   const extraPages = Math.ceil(((capacities as Record<string, number>)[backpack?.debug ?? ""] ?? 0) / 8);
-  const between = Buffer.from([11, 0, 0, 0, 0, 0, 0x05, c.main.length, extraPages, c.extra.length]);
+  const between = Buffer.from([0, 0, 1, 0, 0x05, c.main.length, extraPages, c.extra.length]);
   return Buffer.concat([
     Buffer.alloc(0x3a), top, skills, mid,
     ...worn.map(([, e], i) => entry({ ...e, slot: i })), between,
     ...[...c.main].sort((a, b) => a.slot - b.slot).map(entry), ...c.extra.map(entry),
-    Buffer.alloc(24),
+    Buffer.alloc(22),
   ]);
 }
 
@@ -94,12 +98,14 @@ export async function sv2cFile(blocks: [string, Buffer][]): Promise<Uint8Array> 
   xxh3 ??= await createXXHash3();
   const header = Buffer.alloc(0x30);
   header.write("SV2C", 0, 4, "latin1");
+  header.fill(1, 12, 28); // synthetic GUID, no real character identity
   const parts = [header];
   let pos = header.length;
   const entries: { off: number; size: number; hash: number; name: Buffer }[] = [];
   for (const [name, payload] of blocks) {
     const head = Buffer.alloc(14);
     head.write("S2BH", 0, 4, "latin1"); // byte 9 = 0: not compressed
+    head.writeUInt32LE(name === "player_character" ? 5 : 3, 10);
     const raw = Buffer.concat([head, payload]);
     entries.push({ off: pos, size: raw.length, hash: hash32(raw), name: Buffer.from(name, "utf8") });
     parts.push(raw);
@@ -200,6 +206,9 @@ interface Stored { bytes: Uint8Array; modified: number }
 
 export function editorMockHandlers(reject: Reject, gameRunning: () => boolean): Record<string, Handler> {
   const mode = typeof location !== "undefined" ? new URLSearchParams(location.search).get("editor") : null;
+  const storageMode = typeof location !== "undefined" ? new URLSearchParams(location.search).get("storage") : null;
+  const saveDir = storageMode && storageMode !== "steam" ? "/fixtures/Saved Games/Enshrouded/0" : DIR;
+  const storageTexts = new Map<string, string>();
   const files = new Map<string, Stored>();
   const backups = new Map<string, { kind: string; label: string; path: string; modified: number; bytes: Uint8Array }[]>();
   let ready: Promise<void> | null = null;
@@ -212,12 +221,20 @@ export function editorMockHandlers(reject: Reject, gameRunning: () => boolean): 
         ? [["character_data", characterData(c.name)], ["player_character", characterBlock(c)], ["player_knowledge", knowledgeBlock(c.knowledge)]]
         : [["character_data", characterData(broken!)], ["player_character", Buffer.alloc(0x60)], ["player_knowledge", knowledgeBlock([])]];
       const bytes = await sv2cFile(blocks);
-      const path = `${DIR}/${file}`;
+      const path = `${saveDir}/${file}`;
       files.set(path, { bytes, modified: t0 - ago });
       // the game's own rolling copies (remote/backup/<file>.backup-N)
-      backups.set(path, [1, 2].map((n) => ({ kind: "game", label: `${file}.backup-${n}`, path: `${DIR}/backup/${file}.backup-${n}`, modified: t0 - ago - n * 600_000, bytes })));
+      backups.set(path, [1, 2].map((n) => ({ kind: "game", label: `${file}.backup-${n}`, path: `${saveDir}/backup/${file}.backup-${n}`, modified: t0 - ago - n * 600_000, bytes })));
     };
     await make("character0.ksd", aldric(know), 0);
+    if (storageMode) {
+      const character = "01010101-0101-0101-0101-010101010101";
+      const rows = Array.from({ length: storageMode === "many" ? 64 : 3 }, (_, s) => ({ s, item: ITEM.steelArrow, n: 3, b64: writeItemRecord({ slot: s, itemId: ITEM.steelArrow, count: 3 }).toString('base64') }));
+      const current = { witness: await inventoryWitness(readExactCharacter(characterBlock(aldric(know)), 5)), worldRev: 10,
+        source: storageMode === "server" ? "server" : "local", storages: { "sample:bag": { slots: Math.max(8, rows.length), records: rows } }, parked: {} };
+      storageTexts.set(`${saveDir}/character0.ksd`, JSON.stringify({ format: 1, character, revision: 10,
+        mods: { "kiln-items": { storage: { v: 1, character, revision: 5, current, history: [], quarantine: [] } } } }));
+    }
     await make("character1.ksd", brienne(know), 3600_000);
     await make("character2.ksd", mordred(know), 7200_000);
     await make("character3.ksd", null, 9000_000, "Cedric");
@@ -234,7 +251,7 @@ export function editorMockHandlers(reject: Reject, gameRunning: () => boolean): 
   const sv2c = (b: Uint8Array) => b.length >= 0x30 && String.fromCharCode(...b.slice(0, 4)) === "SV2C";
   // tests: the game writes a save the editor has open (`file` gets the bytes of `from`, and the time of now)
   if (typeof window !== "undefined") (window as unknown as { __kilnMockEditor?: unknown }).__kilnMockEditor = {
-    gameWrote: async (name: string, from: string) => { await prepare(); files.set(`${DIR}/${name}`, { bytes: file(`${DIR}/${from}`).bytes, modified: Date.now() }); },
+    gameWrote: async (name: string, from: string) => { await prepare(); files.set(`${saveDir}/${name}`, { bytes: file(`${saveDir}/${from}`).bytes, modified: Date.now() }); },
   };
   return {
     editor_list_saves: async () => {
@@ -282,6 +299,20 @@ export function editorMockHandlers(reject: Reject, gameRunning: () => boolean): 
       backupNow(String(a.target));
       files.set(String(a.target), { bytes: b.bytes, modified: Date.now() });
       return null;
+    },
+    editor_storage_read: async (a) => {
+      await prepare();
+      return { character: "01010101-0101-0101-0101-010101010101", gameId: "mock-client", text: storageTexts.get(String(a.path)) ?? null, local: storageMode !== "steam" };
+    },
+    editor_return_storage: (a) => {
+      if (gameRunning()) reject("game_running", "quit Enshrouded before returning storage");
+      if (storageMode === "steam") reject("refused", "storage can only be returned to LOCAL characters");
+      const r = a.request as { path: string; expectedSave: number[]; expectedSidecar: string; sidecar: string; data: number[] };
+      if (Buffer.compare(Buffer.from(file(r.path).bytes), Buffer.from(r.expectedSave)) || storageTexts.get(r.path) !== r.expectedSidecar) reject("refused", "character or storage changed; read it again");
+      const backup = backupNow(r.path);
+      storageTexts.set(r.path, r.sidecar); // reduced current + full historical pair FIRST
+      files.set(r.path, { bytes: Uint8Array.from(r.data), modified: Date.now() });
+      return { backup };
     },
     editor_open_backups: () => null,
   };

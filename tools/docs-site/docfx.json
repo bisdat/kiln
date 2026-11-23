@@ -46,6 +46,13 @@
         ]
       }
     ],
+    "resource": [
+      {
+        "files": [
+          "api/toc/*.json"
+        ]
+      }
+    ],
     "overwrite": [
       {
         "files": [
@@ -55,13 +62,19 @@
     ],
     "template": [
       "default",
-      "modern"
+      "modern",
+      "template"
     ],
+    "fileMetadata": {
+      "kilnGuide": {
+        "modding/**.md": true
+      }
+    },
     "output": "_site",
     "globalMetadata": {
       "_appName": "Kiln",
-      "_appTitle": "Kiln modding",
-      "_enableSearch": true,
+      "_appTitle": "Kiln API reference",
+      "_enableSearch": false,
       "_disableContribution": true
     },
     "disableGitFeatures": true
