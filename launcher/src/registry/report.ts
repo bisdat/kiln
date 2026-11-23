@@ -1,7 +1,7 @@
 // Format 1: schema/state-registry.schema.json, native/services/content/registry/report.cpp.
 // Only a bounded, display-only projection crosses into React. Unknown members are ignored.
 import published from "../../../schema/registry/ids.lock.json";
-export const REPORT_LIMITS = { bytes: 8 * 1024 * 1024, rows: 500, writers: 64, text: 2048, depth: 48 } as const;
+export const REPORT_LIMITS = { bytes: 8 * 1024 * 1024, containers: 8 * 1024 * 1024 / 16, rows: 500, writers: 64, text: 2048, depth: 48 } as const;
 const kilnFields = new Map(Object.entries(published.registries).map(([name, spec]) => [name, new Set(Object.keys(spec.fields))]));
 function isKilnField(registry: string, field: string): boolean {
   const normalized = field.replace(/\[(?:\d+|\*)\]/g, "[]");
@@ -74,7 +74,11 @@ function value(x: unknown, leftOut: unknown = 0): string {
 
 function checkEnvelope(input: string) {
   if (input.length > REPORT_LIMITS.bytes || new TextEncoder().encode(input).length > REPORT_LIMITS.bytes) throw new Error("Registry report exceeds the 8 MiB limit.");
-  let depth = 0, quoted = false, escape = false, tokens = 0;
+  // Work is bounded by the byte cap: JSON.parse is linear in it. What costs memory beyond the text are containers (each
+  // object/list is an allocation), so those are capped in proportion to the byte cap: one per 16 bytes. A native report
+  // spends far more than that per container (about 60 bytes for a field row), so any real report up to 8 MiB passes, while
+  // a document of empty lists/objects meant to inflate memory does not. Separators are not counted (at most one per byte).
+  let depth = 0, quoted = false, escape = false, containers = 0;
   for (const c of input) {
     if (quoted) {
       if (escape) escape = false;
@@ -83,10 +87,8 @@ function checkEnvelope(input: string) {
     } else if (c === '"') quoted = true;
     else if (c === "{" || c === "[") {
       if (++depth > REPORT_LIMITS.depth) throw new Error("Registry report nesting limit exceeded.");
-      tokens++;
+      if (++containers > REPORT_LIMITS.containers) throw new Error("Registry report structure limit exceeded.");
     } else if (c === "}" || c === "]") depth--;
-    else if (c === "," || c === ":") tokens++;
-    if (tokens > 200_000) throw new Error("Registry report structure limit exceeded.");
   }
 }
 

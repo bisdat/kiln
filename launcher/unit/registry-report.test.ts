@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { emptyRegistryFixture, registryFixture } from "../tests/fixtures/registryReport";
+import { emptyRegistryFixture, nativeShapedReport, registryFixture } from "../tests/fixtures/registryReport";
 import { parseRegistryReport, reportFreshness, REPORT_LIMITS } from "../src/registry/report";
 
 const parse = (r: unknown) => parseRegistryReport(JSON.stringify(r));
@@ -29,6 +29,23 @@ describe("untrusted registry report", () => {
     expect(() => parseRegistryReport(text)).toThrow();
   });
   test("rejects oversized input before JSON parsing", () => expect(() => parseRegistryReport(" ".repeat(REPORT_LIMITS.bytes + 1))).toThrow("8 MiB"));
+  test("a native-shaped 5,000-field report (about 1.4 MiB) parses", () => {
+    const text = JSON.stringify(nativeShapedReport(5000));
+    expect(text.length).toBeGreaterThan(1024 * 1024);
+    const out = parseRegistryReport(text);
+    expect(out.fields.length).toBe(REPORT_LIMITS.rows);
+    expect(out.omitted).toBe(5000 - REPORT_LIMITS.rows);
+  });
+  test("a native-shaped report at the native field cap (20,000 rows) parses and counts what is left out", () => {
+    const text = JSON.stringify(nativeShapedReport(20_000, 1, 26_000));
+    expect(text.length).toBeLessThanOrEqual(REPORT_LIMITS.bytes);
+    const out = parseRegistryReport(text);
+    expect(out.fields.length).toBe(REPORT_LIMITS.rows);
+    expect(out.omitted).toBe(26_000 - REPORT_LIMITS.rows);
+  });
+  test("hostile structure within the byte cap stays bounded", () => {
+    expect(() => parseRegistryReport("[" + "[],".repeat(1_000_000) + "[]]")).toThrow("structure limit");
+  });
   test("caps nesting before JSON parsing", () => expect(() => parseRegistryReport("[".repeat(70) + "0" + "]".repeat(70))).toThrow("nesting"));
   test("ignores unknown members without rendering them", () => {
     expect(JSON.stringify(parse({ ...registryFixture(), offset: "0xDEADBEEF", gameFunction: "SecretFunction" }))).not.toContain("SecretFunction");

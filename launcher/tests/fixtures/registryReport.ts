@@ -26,3 +26,28 @@ export function emptyRegistryFixture() {
   const r = registryFixture();
   return { ...r, fields: [], conflicts: [], refused: [], counts: { fields: 0, conflicts: 0, refused: 0, added: 0, removed: 0 } };
 }
+/** A report in the shape native/services/content/registry/report.cpp writes for a large rebalance mod set: `count` field
+ * rows (all retained up to the native cap of 20,000), each with `writers` registry writers. Synthetic names only. */
+export function nativeShapedReport(count: number, writers = 1, total = count) {
+  const r = registryFixture();
+  const fields = Array.from({ length: count }, (_, n) => {
+    const id = `game:fixture_item_${String(n).padStart(5, "0")}`;
+    return {
+      registry: "items", id, field: n % 2 ? "maxStack" : "weight", applies: "worldLoad",
+      base: { origin: "archive", value: 10 + (n % 50) },
+      writers: Array.from({ length: writers }, (_, w) => ({
+        kind: "registry", mod: `rebalance_${w}`, stage: "alter", source: "content/rebalance.json", n: n * writers + w,
+        op: { mul: 1.5 }, value: 15 + (n % 50) + w, certainty: "certain",
+      })),
+      result: 15 + (n % 50) + writers - 1, winner: `rebalance_${writers - 1}`,
+    };
+  });
+  return {
+    ...r, kiln: "0.2.0-dev.31",
+    regmap: { side: "client", exeSha256: "f".repeat(64), record: `regmap/client/${"f".repeat(64)}.json`, verified: true },
+    order: Array.from({ length: writers }, (_, w) => ({ mod: `rebalance_${w}`, version: "1.0.0", editsHash: "9c1f" })),
+    fields, conflicts: [], refused: [],
+    counts: { fields: total, conflicts: 0, refused: 0, added: 0, removed: 0 },
+    truncated: { fields: total - count, conflicts: 0, refused: 0, added: 0, removed: 0, writers: 0 },
+  };
+}

@@ -20,7 +20,7 @@ The page refreshes the snapshot periodically and also offers an explicit refresh
 `registry_report_read({ gameId: string })` returns a UTF-8 string, or `null` when no file exists, using the launcher's
 normal structured error on I/O failure. The caller cannot supply a path. The native reader resolves the known game
 folder, refuses non-regular files and paths outside it, and caps both the metadata size and actual read at **8 MiB**.
-The frontend separately caps bytes before parsing, JSON nesting at 48, and structural separators at 200,000.
+The frontend separately caps bytes before parsing, JSON nesting at 48, and containers (objects and lists) at one per 16 bytes of the byte cap (524,288); separators are not counted, so any real report up to 8 MiB parses.
 Unknown format-1 members are ignored; unsupported formats and malformed consumed rows are errors.
 
 The view retains at most 500 rows per report section, 64 final writers per field, 2,048 characters per text value,
