@@ -33,6 +33,7 @@ std::string current_world() { return identity; }
 #include <vector>
 
 namespace regions_test {
+namespace {  // regions.cpp's types live in an anonymous namespace: so do these
 // A game array {data, count, capacity, grow} over memory the test owns; grow is the game's contract: (array,
 // -required count, mode) -> true once capacity >= the required count.
 struct FakeList {
@@ -70,7 +71,7 @@ FakeList make_list(std::vector<uint8_t>& store) {
     return l;
 }
 bool is_kiln(const uint8_t* e) { return std::memcmp(e, "KILNBILD", 8) == 0; }
-// The voxel serializer's rule (docs/re/build.md §5): a stored 32-cell chunk goes into the blob of every entry whose
+// The voxel serializer's rule (docs/re/build.md §12): a stored 32-cell chunk goes into the blob of every entry whose
 // bounds its 16 m box touches (min <= max on every axis, edges included).
 bool saved_by(const std::array<int32_t, 3>& c, const uint8_t* e) {
     float lo[3], hi[3];
@@ -101,5 +102,6 @@ uint64_t kiln_entries(const kb::GameArray& a) {
     for (uint64_t i = 0; i < a.count; ++i) n += is_kiln(a.data + i * 0x30);
     return n;
 }
+}  // namespace
 }  // namespace regions_test
 #endif

@@ -21,11 +21,15 @@ void check(bool ok, const char* text) {
     else { ++failed; std::fprintf(stderr, "FAIL: %s\n", text); }
 }
 uint8_t* g_noaccess = nullptr;  // one page nobody may touch
-bool grow_into_fresh(kb::GameArray* a, int64_t neg_required, uint8_t) {  // a new buffer; the old entries are not copied
+// A new buffer with room for 64 entries, once: the old (unreadable) entries are not copied, Kiln's appends stay.
+bool grow_into_fresh(kb::GameArray* a, int64_t neg_required, uint8_t) {
     static std::vector<uint8_t> fresh;
-    fresh.assign(static_cast<size_t>(-neg_required) * 0x30, 0);
+    const uint64_t need = static_cast<uint64_t>(-neg_required);
+    if (a->data == fresh.data() && need <= a->capacity) return true;
+    if (need > 64) return false;
+    fresh.assign(64 * 0x30, 0);
     a->data = fresh.data();
-    a->capacity = static_cast<uint64_t>(-neg_required);
+    a->capacity = 64;
     return true;
 }
 bool grow_faults(kb::GameArray*, int64_t, uint8_t) {
