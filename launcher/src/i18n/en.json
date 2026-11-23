@@ -6738,7 +6738,7 @@
     "saveFirst": "Save or discard your edits before returning storage.",
     "unavailable": "Storage cannot be returned",
     "restoreWarning": "This character has player storage. An older backup may pair with older storage; if its pair is no longer kept, items moved since that backup could be lost or duplicated.",
-    "unpaired": "No saved pair matches this character. The newest storage copy is shown.",
+    "unpaired": "This character changed since Kiln last saw its storage, so nothing can be returned to it. The newest storage copy is shown.",
     "parked": "Mod off",
     "kept": "kiln/data/characters and kiln/data/worlds stay. They keep player storage safe until you install Kiln again.",
     "unreadable": "Some stored records cannot be shown. They are left unchanged.",

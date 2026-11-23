@@ -25,4 +25,8 @@ done
 # the approved builds of kiln.toolwear against the program catalog (no Wine, no game)
 echo "== wear_catalog_test.py"
 python3 "$here/wear_catalog_test.py" || fail=1
+# the player storage sigdb rows on read-only exe copies (KILN_SERVER_EXE / KILN_CLIENT_EXE, read as files, never run);
+# a side without a copy of the qualified build is skipped with a message
+echo "== storage_sigdb_test.py"
+python3 -I "$here/storage_sigdb_test.py" || fail=1
 exit $fail

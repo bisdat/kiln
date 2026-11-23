@@ -6225,7 +6225,7 @@
     "saveFirst": "Salva o scarta le modifiche prima di restituire il deposito.",
     "unavailable": "Impossibile restituire il deposito",
     "restoreWarning": "Questo personaggio ha un deposito. Un vecchio backup può corrispondere a un deposito precedente; se la coppia non è più conservata, gli oggetti spostati dopo quel backup potrebbero andare persi o essere duplicati.",
-    "unpaired": "Nessuna coppia salvata corrisponde a questo personaggio. Viene mostrata la copia più recente del deposito.",
+    "unpaired": "Questo personaggio è cambiato dall'ultima volta che Kiln ha visto il suo deposito, quindi non gli si può restituire nulla. Viene mostrata la copia più recente del deposito.",
     "parked": "Mod disattivata",
     "kept": "kiln/data/characters e kiln/data/worlds vengono conservati. Mantengono al sicuro il deposito finché non reinstalli Kiln.",
     "unreadable": "Alcuni record del deposito non possono essere mostrati. Rimangono invariati.",

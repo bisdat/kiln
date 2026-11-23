@@ -2242,7 +2242,8 @@ export const editorListBackups = (target: string) => call<EditorBackup[]>("edito
 export const editorRestoreBackup = (src: string, target: string) => call<null>("editor_restore_backup", { src, target });
 export const editorOpenBackups = () => call<null>("editor_open_backups");
 export interface EditorStorageSnapshot { character: string; gameId: string; text: string | null; local: boolean }
-export interface EditorStorageReturn { path: string; gameId: string; expectedSave: number[]; expectedSidecar: string; data: number[]; sidecar: string; oldWitness: string; newWitness: string }
+/** `storage` is the planned `mods["kiln-items"].storage` value only; the backend writes it into the exact sidecar bytes. */
+export interface EditorStorageReturn { path: string; gameId: string; expectedSave: number[]; expectedSidecar: string; data: number[]; storage: string; oldWitness: string; newWitness: string }
 export const editorStorageRead = (path: string, gameId: string | null = null) => call<EditorStorageSnapshot | null>("editor_storage_read", { path, gameId });
 export const editorReturnStorage = (request: EditorStorageReturn) => call<{ backup: string }>("editor_return_storage", { request });
 

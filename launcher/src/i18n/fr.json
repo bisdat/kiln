@@ -6225,7 +6225,7 @@
     "saveFirst": "Enregistrez ou abandonnez vos modifications avant de rendre le stockage.",
     "unavailable": "Impossible de rendre le stockage",
     "restoreWarning": "Ce personnage possède un stockage. Une ancienne copie de secours peut correspondre à un stockage plus ancien ; si cette paire n’est plus conservée, les objets déplacés depuis cette copie risquent d’être perdus ou dupliqués.",
-    "unpaired": "Aucune paire enregistrée ne correspond à ce personnage. La copie de stockage la plus récente est affichée.",
+    "unpaired": "Ce personnage a changé depuis la dernière fois que Kiln a vu son stockage : rien ne peut lui être rendu. La copie de stockage la plus récente est affichée.",
     "parked": "Mod désactivé",
     "kept": "kiln/data/characters et kiln/data/worlds sont conservés. Ils préservent le stockage jusqu’à la réinstallation de Kiln.",
     "unreadable": "Certains enregistrements stockés ne peuvent pas être affichés. Ils restent inchangés.",

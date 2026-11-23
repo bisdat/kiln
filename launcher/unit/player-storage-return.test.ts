@@ -33,6 +33,15 @@ test('return adds main pages, retains all record fields, removes returned record
   expect(writeExactCharacter(result.character)).not.toEqual(writeExactCharacter(c));
 });
 
+test('the sidecar revision rises by one, never to the storage revision', async () => {
+  // CharacterSync's revision decides whether a server takes the other mods' progress; the storage counter is unrelated.
+  const { c, envelope, doc } = await fixture();
+  doc.revision = 500;
+  const result = await plan(c, envelope);
+  expect(result.sidecar.mods['kiln-items'].storage.revision).toBe(501);
+  expect(result.sidecar.revision).toBe(91);
+});
+
 test('new witness matches the written file; the old historical storage cannot return twice', async () => {
   const { c, envelope } = await fixture();
   const a = await plan(c, envelope);
@@ -54,7 +63,8 @@ test('partial room returns what fits; the remainder and its refs stay', async ()
 });
 
 test('full page budget returns nothing and never changes sidecar or revision', async () => {
-  const { c, envelope } = await fixture(); c.mainPages = 16;
+  const { c, envelope, doc } = await fixture(); c.mainPages = 16;
+  doc.current.witness = await inventoryWitness(c);
   const before = JSON.stringify(envelope);
   const a = await plan(c, envelope);
   expect(a.returned).toBe(0); expect(a.remaining).toBe(3); expect(JSON.stringify(a.sidecar)).toBe(before);
@@ -132,16 +142,96 @@ test('sidecar-first crash points, repeat after interruption, and old backup rest
   expect((await storageView(c, retry.sidecar, id)).groups[0].records).toHaveLength(3);
 });
 
-test('an unpaired old file gets an explicit full pair before publication, including when history is full', async () => {
+test('a character that pairs with no storage copy refuses, changes nothing and cannot be returned from the view', async () => {
   const { c, envelope, doc } = await fixture();
   doc.current.witness = 'xxh3:ffffffffffffffff';
   doc.history = Array.from({ length: 8 }, (_, i) => ({ ...structuredClone(doc.current), witness: `xxh3:${i.toString(16).padStart(16, '0')}`, revision: i })) as any;
+  const before = JSON.stringify(envelope), bytes = writeExactCharacter(c);
+  await expect(plan(c, envelope)).rejects.toThrow('This character changed since Kiln last saw its storage');
+  expect(JSON.stringify(envelope)).toBe(before);
+  expect(writeExactCharacter(c)).toEqual(bytes);
+  const view = await storageView(c, envelope, id);
+  expect(view.paired).toBe(false); expect(view.canReturn).toBe(false);
+  expect(view.groups[0].records).toHaveLength(3);
+});
+
+test('a character paired by the oldest history pair gets that full pair pinned first, even when history is full', async () => {
+  const { c, envelope, doc } = await fixture();
+  doc.current.witness = 'xxh3:ffffffffffffffff';
+  doc.history = Array.from({ length: 8 }, (_, i) => ({ ...structuredClone(doc.current), witness: `xxh3:${i.toString(16).padStart(16, '0')}`, revision: 8 - i })) as any;
+  (doc.history[7] as any).witness = await inventoryWitness(c);
   const a = await plan(c, envelope);
   expect(a.sidecar.mods['kiln-items'].storage.history[0].witness).toBe(await inventoryWitness(c));
   expect(a.sidecar.mods['kiln-items'].storage.history).toHaveLength(8);
   const beforeCharacterWrite = await storageView(c, a.sidecar, id);
   expect(beforeCharacterWrite.paired).toBe(true);
   expect(beforeCharacterWrite.groups[0].records).toHaveLength(3);
+});
+
+test('every return that moves a stack adds new main pages and never fills empty cells of existing pages', async () => {
+  for (const [n, pages] of [[1, 1], [8, 1], [9, 2]]) {
+    const { c, envelope } = await fixture(n);
+    expect(c.main.length).toBeLessThan(c.mainPages * 8); // the existing pages have empty cells
+    const a = await plan(c, envelope);
+    expect(a.returned).toBe(n);
+    expect(a.character.mainPages).toBe(c.mainPages + pages);
+    expect(a.character.main.slice(0, c.main.length)).toEqual(c.main);
+    expect(a.character.main.slice(c.main.length).map((r: any) => r.slot)).toEqual(Array.from({ length: n }, (_, i) => c.mainPages * 8 + i));
+    const written = readExactCharacter(writeExactCharacter(a.character));
+    expect(written.mainPages).toBeGreaterThan(c.mainPages);
+  }
+});
+
+const marker = (revision: number, n: number) => ({ revision, fromWitness: `xxh3:${n.toString(16).padStart(16, '0')}`, toWitness: `xxh3:${(n + 1).toString(16).padStart(16, '0')}` });
+
+test('a return records its marker in the same sidecar: new revision, actual old witness, written witness', async () => {
+  const { c, envelope, doc } = await fixture();
+  (doc as any).returns = [marker(7, 0xa0)];
+  const a = await plan(c, envelope);
+  const next = a.sidecar.mods['kiln-items'].storage;
+  const written = readExactCharacter(writeExactCharacter(a.character));
+  expect(next.returns[0]).toEqual({ revision: next.revision, fromWitness: await inventoryWitness(c), toWitness: await inventoryWitness(written) });
+  expect(next.returns.slice(1)).toEqual([marker(7, 0xa0)]);
+  expect(next.current.witness).toBe(next.returns[0].toWitness);
+  // A retry after an interrupted character write keeps the first marker too.
+  const retry = await plan(c, a.sidecar);
+  const again = retry.sidecar.mods['kiln-items'].storage;
+  expect(again.returns.map((m: any) => m.revision)).toEqual([again.revision, next.revision, 7]);
+});
+
+test('markers keep the newest 8, newest first, and the new marker outranks every older marker revision', async () => {
+  const { c, envelope, doc } = await fixture();
+  (doc as any).returns = [103, 100, 107, 101, 106, 102, 105, 104].map((r) => marker(r, r));
+  const a = await plan(c, envelope);
+  const next = a.sidecar.mods['kiln-items'].storage;
+  expect(next.revision).toBe(108);
+  expect(next.returns.map((m: any) => m.revision)).toEqual([108, 107, 106, 105, 104, 103, 102, 101]);
+  expect(next.current.witness).toBe(await inventoryWitness(a.character));
+});
+
+test('byte trimming drops old history pairs but never a return marker', async () => {
+  const { c, envelope, doc } = await fixture();
+  (doc as any).returns = Array.from({ length: 7 }, (_, i) => marker(i + 1, i));
+  (doc.current as any).padding = 'c'.repeat(10000);
+  doc.history = [
+    { ...structuredClone(doc.current), witness: 'xxh3:0000000000000002', revision: 2, padding: 'b'.repeat(20000) },
+    { ...structuredClone(doc.current), witness: 'xxh3:0000000000000000', revision: 0, padding: 'a'.repeat(26000) },
+  ] as any;
+  expect(Buffer.byteLength(JSON.stringify(doc))).toBeLessThanOrEqual(65536);
+  const a = await plan(c, envelope);
+  const next = a.sidecar.mods['kiln-items'].storage;
+  expect(Buffer.byteLength(JSON.stringify(next))).toBeLessThanOrEqual(65536);
+  expect(next.history.some((e: any) => e.witness === 'xxh3:0000000000000000')).toBe(false);
+  expect(next.returns).toHaveLength(8);
+  expect(next.returns.slice(1)).toEqual((doc as any).returns.slice().reverse());
+});
+
+test('malformed return markers refuse instead of being dropped', async () => {
+  for (const returns of ['x', [marker(0, 1)], [{ revision: 3, fromWitness: 'same', toWitness: 'same' }], [{ revision: 3, fromWitness: '', toWitness: 'b' }], [{ revision: 3, fromWitness: 'a'.repeat(65), toWitness: 'b' }], [null]]) {
+    const { c, envelope, doc } = await fixture();
+    (doc as any).returns = returns;
+    await expect(plan(c, envelope)).rejects.toThrow('Invalid storage return marker');
+  }
 });
 
 test('return trims oldest historical pairs to fit 64 KiB while protecting the full pre-return entry', async () => {

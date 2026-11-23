@@ -6225,7 +6225,7 @@
     "saveFirst": "Salve ou descarte suas edições antes de devolver o armazenamento.",
     "unavailable": "Não é possível devolver o armazenamento",
     "restoreWarning": "Este personagem tem armazenamento do jogador. Um backup antigo pode corresponder a um armazenamento anterior; se esse par não estiver mais guardado, itens movidos desde aquele backup podem ser perdidos ou duplicados.",
-    "unpaired": "Nenhum par salvo corresponde a este personagem. A cópia mais recente do armazenamento é exibida.",
+    "unpaired": "Este personagem mudou desde a última vez que o Kiln viu o armazenamento dele, então nada pode ser devolvido a ele. A cópia mais recente do armazenamento é exibida.",
     "parked": "Mod desativado",
     "kept": "kiln/data/characters e kiln/data/worlds são mantidos. Eles preservam o armazenamento do jogador até você instalar o Kiln novamente.",
     "unreadable": "Alguns registros armazenados não podem ser exibidos. Eles ficam inalterados.",

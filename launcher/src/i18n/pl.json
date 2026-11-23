@@ -6519,7 +6519,7 @@
     "saveFirst": "Zapisz lub odrzuć zmiany przed zwróceniem zawartości schowka.",
     "unavailable": "Nie można zwrócić zawartości schowka",
     "restoreWarning": "Ta postać ma schowek gracza. Starsza kopia zapasowa może pasować do starszego schowka. Jeśli pasująca para nie jest już przechowywana, przedmioty przeniesione od czasu tej kopii mogą zostać utracone lub powielone.",
-    "unpaired": "Żadna zapisana para nie pasuje do tej postaci. Pokazano najnowszą kopię schowka.",
+    "unpaired": "Ta postać zmieniła się, odkąd Kiln ostatnio widział jej schowek, więc nie można jej nic zwrócić. Pokazano najnowszą kopię schowka.",
     "parked": "Mod wyłączony",
     "kept": "kiln/data/characters i kiln/data/worlds pozostają. Chronią schowek gracza do czasu ponownej instalacji Kiln.",
     "unreadable": "Niektórych zapisanych rekordów nie można wyświetlić. Pozostają bez zmian.",
