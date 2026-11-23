@@ -73,7 +73,6 @@ export function inventoryHeader(c) {
 
 export function readExactCharacter(bytes, version = 5) {
   integer(version, 5, 'character version');
-  if (version < 3) throw new Error('Legacy character versions are read-only');
   const r = new Reader(bytes);
   r.take(version >= 5 ? 38 : 37); // gender, nine u32 fields, optional proportions flag
   r.take(20); // five stored attributes
@@ -91,23 +90,26 @@ export function readExactCharacter(bytes, version = 5) {
   }
   const prefix = Buffer.from(r.bytes.subarray(0, r.offset));
   const mask = r.uint(4);
-  if (mask & ~0xfffff) throw new Error('Unknown equipment mask bits');
+  if (mask & ~(version < 3 ? 0xffffff : 0xfffff)) throw new Error('Unknown equipment mask bits');
   const equipment = Array.from({ length: 16 }, (_, i) => mask & (1 << i) ? readRecord(r) : null);
   const references = Array.from({ length: 4 }, (_, i) => mask & (1 << (16 + i)) ? r.uint(2) : null);
+  const legacy = version < 3 ? Array.from({ length: 4 }, (_, i) => mask & (1 << (20 + i)) ? r.uint(2) : null) : [];
   const mainPages = r.uint(1), mainCount = r.uint(1), backpackPages = r.uint(1), extraCount = r.uint(1);
   if (mainPages > 16 || backpackPages > 16 || mainCount + extraCount > 248) throw new Error('Character inventory exceeds game limits');
   const main = Array.from({ length: mainCount }, () => readRecord(r));
   const extra = Array.from({ length: extraCount }, () => readRecord(r));
   const tail = Buffer.from(r.take(22)); // two actionbar page indices, selection, flag, four material ids
   if (r.offset !== r.bytes.length) throw new Error('Unknown trailing character data');
-  return { version, level, xp, skills, equipment, references, mainPages, backpackPages, main, extra, _prefix: prefix, _tail: tail };
+  return { version, level, xp, skills, equipment, references, mainPages, backpackPages, main, extra, _prefix: prefix, _tail: tail, _legacyReferences: legacy };
 }
 
 export function writeExactCharacter(c) {
   const header = inventoryHeader(c);
-  const mask = inventoryMask(c);
+  const legacy = c.version < 3 ? c._legacyReferences : [];
+  const mask = inventoryMask(c) | legacy.reduce((m, ref, i) => m | (ref != null ? 1 << (20 + i) : 0), 0);
   if (!Buffer.isBuffer(c._prefix) || !Buffer.isBuffer(c._tail) || c._tail.length !== 22) throw new Error('Missing exact character envelope');
   return Buffer.concat([c._prefix, uintBytes(mask, 4), ...c.equipment.filter((e) => e != null).map(writeItemRecord),
-    ...c.references.filter((r) => r != null).map((r) => uintBytes(r, 2, 'reference')), header,
+    ...c.references.filter((r) => r != null).map((r) => uintBytes(r, 2, 'reference')),
+    ...legacy.filter((r) => r != null).map((r) => uintBytes(r, 2, 'legacy reference')), header,
     ...c.main.map(writeItemRecord), ...c.extra.map(writeItemRecord), c._tail]);
 }

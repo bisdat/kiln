@@ -79,3 +79,27 @@ for (const path of fixtureRoot ? files(fixtureRoot) : ['real character snapshots
     expect(buildCharacter(old)).toEqual(pc.payload);
   });
 }
+
+test('browser mock fixtures use the exact game field order too', async () => {
+  const { editorMockHandlers } = await import('../src/api/mockEditor');
+  const h = editorMockHandlers((_c, msg) => { throw new Error(msg); }, () => false);
+  const files = await h.editor_list_saves({}) as { path: string }[];
+  const bytes = await h.editor_read_file({ path: files[0].path });
+  await sv2c.init();
+  const save = await sv2c.parse(new Uint8Array(bytes as ArrayBuffer), () => { throw Error('compressed'); }, ['player_character']);
+  const pc = save.blocks.find((b: any) => b.name === 'player_character');
+  expect(writeExactCharacter(readExactCharacter(pc.payload, pc.head.readUInt32LE(10)))).toEqual(pc.payload);
+});
+
+test('pre-3 legacy reference mask bits are consumed and byte-preserved, not inventory records', () => {
+  const bytes = characterBytes({ version: 2 });
+  const maskOffset = 37 + 20 + 8 + 4 + 4;
+  const mask = bytes.readUInt32LE(maskOffset) | (1 << 20) | (1 << 23);
+  const modified = Buffer.from(bytes); modified.writeUInt32LE(mask, maskOffset);
+  const afterRefs = maskOffset + 4 + row(0).length + row(1, 63).length + 4;
+  const legacy = Buffer.concat([modified.subarray(0, afterRefs), Buffer.from([0x34, 0x12, 0xff, 0xff]), modified.subarray(afterRefs)]);
+  const c = readExactCharacter(legacy, 2);
+  expect(c._legacyReferences).toEqual([0x1234, null, null, 0xffff]);
+  expect(c.main).toHaveLength(1);
+  expect(writeExactCharacter(c)).toEqual(legacy);
+});

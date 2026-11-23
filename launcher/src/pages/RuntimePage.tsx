@@ -157,6 +157,7 @@ export default function RuntimePage() {
       <ConfirmDanger open={uninstall} onClose={() => setUninstall(false)} title={t("runtime.uninstallAsk")} word={t("common.confirmWord.uninstall")} action={t("runtime.uninstall")}
         message={<>
           <p>{t("runtime.uninstallFiles")}</p>
+          <p>{t("playerStorage.kept")}</p>
           <p>{t("runtime.uninstallEml")}</p>
         </>}
         onConfirm={() => { setUninstall(false); return go(t("runtime.uninstall"), null, t("runtime.removed"), () => api.runtimeUninstall(game.id)); }} />
