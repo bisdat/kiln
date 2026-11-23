@@ -144,6 +144,36 @@ test('an unpaired old file gets an explicit full pair before publication, includ
   expect(beforeCharacterWrite.groups[0].records).toHaveLength(3);
 });
 
+test('return trims oldest historical pairs to fit 64 KiB while protecting the full pre-return entry', async () => {
+  const { c, envelope, doc } = await fixture();
+  (doc.current as any).padding = 'c'.repeat(10000);
+  doc.history = [
+    { ...structuredClone(doc.current), witness: 'xxh3:0000000000000002', revision: 2, padding: 'b'.repeat(20000),
+      pairs: [{ witness: 'xxh3:0000000000000001', revision: 1 }] },
+    { ...structuredClone(doc.current), witness: 'xxh3:0000000000000000', revision: 0, padding: 'a'.repeat(27000) },
+  ] as any;
+  expect(Buffer.byteLength(JSON.stringify(doc))).toBeLessThanOrEqual(65536);
+  const a = await plan(c, envelope);
+  const next = a.sidecar.mods['kiln-items'].storage;
+  expect(a.returned).toBe(3);
+  expect(Buffer.byteLength(JSON.stringify(next))).toBeLessThanOrEqual(65536);
+  expect(next.history[0].witness).toBe(await inventoryWitness(c));
+  expect(next.history[0].storages).toEqual(doc.current.storages);
+  expect(next.history[0].padding).toBe(doc.current.padding);
+  expect(next.history.some((e: any) => e.witness === 'xxh3:0000000000000002')).toBe(true);
+  expect(next.history.some((e: any) => e.witness === 'xxh3:0000000000000000')).toBe(false);
+  expect((await storageView(c, a.sidecar, id)).groups[0].records).toHaveLength(3);
+});
+
+test('oversized current plus the protected pre-return entry refuses without mutating inputs', async () => {
+  const { c, envelope, doc } = await fixture();
+  (doc.current as any).padding = 'x'.repeat(33000);
+  const before = JSON.stringify(envelope), bytes = writeExactCharacter(c);
+  await expect(plan(c, envelope)).rejects.toThrow('too large');
+  expect(JSON.stringify(envelope)).toBe(before);
+  expect(writeExactCharacter(c)).toEqual(bytes);
+});
+
 test('source metadata gates the server-copy warning; worldRev alone is not remote provenance', async () => {
   const { c, envelope, doc } = await fixture();
   expect((await storageView(c, envelope, id)).serverCopy).toBe(false);

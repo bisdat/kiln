@@ -94,6 +94,29 @@ export async function storageView(c, sidecar, id) {
   } catch (e) { return { hasStorage: true, readOnly: true, canReturn: false, groups: [], error: e.message }; }
 }
 
+// Drop one oldest pair outside the pinned pre-return entry. An alias can be older than
+// its group's primary witness, so trimming whole groups would discard newer pairs too.
+function trimOldestHistoryPair(history) {
+  let oldest = null;
+  for (let i = 1; i < history.length; i++) {
+    const entry = history[i];
+    for (const [alias, pair] of [[-1, entry], ...(entry.pairs ?? []).map((p, index) => [index, p])]) {
+      if (!oldest || pair.revision < oldest.revision) oldest = { i, alias, revision: pair.revision };
+    }
+  }
+  if (!oldest) return false;
+  const entry = history[oldest.i];
+  if (oldest.alias >= 0) entry.pairs.splice(oldest.alias, 1);
+  else if (entry.pairs?.length) {
+    const promoted = entry.pairs.shift();
+    entry.witness = promoted.witness; entry.revision = promoted.revision;
+    if (promoted.worldRev === undefined) delete entry.worldRev;
+    else entry.worldRev = promoted.worldRev;
+  } else history.splice(oldest.i, 1);
+  if (!entry.pairs?.length) delete entry.pairs;
+  return true;
+}
+
 // A sidecar may be one atomic write ahead of the character. Always select using the on-disk
 // character's witness; blindly reading current could lose stacks after an interrupted return.
 export async function planStorageReturn(c, sidecar, id, maxStackOf) {
@@ -156,6 +179,11 @@ export async function planStorageReturn(c, sidecar, id, maxStackOf) {
   nextDoc.history = history;
   copy.revision = Math.max(sidecar.revision, nextRevision) + 1;
   revision(copy.revision);
-  if (Buffer.byteLength(JSON.stringify(nextDoc), 'utf8') > 65536) throw new Error('Storage history is too large to return safely');
+  let bytes = Buffer.byteLength(JSON.stringify(nextDoc), 'utf8'), droppedPairs = 0;
+  while (bytes > 65536 && trimOldestHistoryPair(history)) {
+    droppedPairs++; bytes = Buffer.byteLength(JSON.stringify(nextDoc), 'utf8');
+  }
+  if (bytes > 65536) throw new Error('Storage is too large to return safely while keeping the original character pair');
+  if (droppedPairs) console.info(`player-storage: ${id}: trimmed ${droppedPairs} old history pairs; ${bytes} bytes`);
   return { character, sidecar: copy, returned: returned.length, remaining, modItems, skipped };
 }
