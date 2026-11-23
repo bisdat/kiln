@@ -122,6 +122,19 @@ static void click_away(char* buf, size_t cap, uint32_t flags, float h = 0) {
     field_frame(buf, cap, flags, h);
 }
 
+// A fresh Dear ImGui context (its shared text copy starts empty, so ASan sees a write past it).
+static void new_context() {
+    if (ImGui::GetCurrentContext()) ImGui::DestroyContext();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO();
+    io.IniFilename = nullptr;
+    io.DisplaySize = ImVec2(800, 600);
+    unsigned char* pixels = nullptr;
+    int fw = 0, fh = 0;
+    io.Fonts->AddFontDefault();
+    io.Fonts->GetTexDataAsRGBA32(&pixels, &fw, &fh);
+}
+
 int main() {
     // ---- outside a frame (and before any ImGui context): nothing, and never into ImGui ----
     CHECK(!kui_draw::t_begin_tab_item_ex(S("Bag"), KUI_TAB_SELECT));
@@ -131,14 +144,7 @@ int main() {
     CHECK(!kui_draw::t_input_text_ex(S("f"), outside, sizeof outside, 0, 0, 0));
     CHECK(std::strcmp(outside, "keep") == 0);
 
-    ImGui::CreateContext();
-    ImGuiIO& io = ImGui::GetIO();
-    io.IniFilename = nullptr;
-    io.DisplaySize = ImVec2(800, 600);
-    unsigned char* pixels = nullptr;
-    int fw = 0, fh = 0;
-    io.Fonts->AddFontDefault();
-    io.Fonts->GetTexDataAsRGBA32(&pixels, &fw, &fh);
+    new_context();
 
     // ---- tabs ----
     CHECK(tabs_frame(-1) == 0);  // the first tab by default
@@ -167,7 +173,7 @@ int main() {
     click_field(note, sizeof note, 0);
     f = field_frame(note, sizeof note, 0);
     CHECK(f.state & KUI_ITEM_ACTIVE);
-    io.AddInputCharactersUTF8("ab");
+    ImGui::GetIO().AddInputCharactersUTF8("ab");
     f = field_frame(note, sizeof note, 0);
     CHECK(f.changed && (f.state & KUI_ITEM_EDITED) && (f.state & KUI_ITEM_ACTIVE));
     CHECK(std::strcmp(note, "ab") == 0);
@@ -186,7 +192,7 @@ int main() {
 
     // ---- ENTER_RETURNS: typing returns false, Enter returns true ----
     click_field(note, sizeof note, KUI_INPUT_ENTER_RETURNS);
-    io.AddInputCharactersUTF8("c");
+    ImGui::GetIO().AddInputCharactersUTF8("c");
     f = field_frame(note, sizeof note, KUI_INPUT_ENTER_RETURNS);
     CHECK(!f.changed && (f.state & KUI_ITEM_EDITED));
     CHECK(std::strcmp(note, "abc") == 0 || !std::printf("  note is \"%s\"\n", note));
@@ -198,7 +204,7 @@ int main() {
 
     // ---- blur also ends an edit (the field loses the keyboard when the player clicks elsewhere) ----
     click_field(note, sizeof note, 0);
-    io.AddInputCharactersUTF8("d");
+    ImGui::GetIO().AddInputCharactersUTF8("d");
     field_frame(note, sizeof note, 0);
     move(400, 350);
     g_dt = 1.0f;
@@ -212,7 +218,7 @@ int main() {
     // ---- READ_ONLY: active, but typing changes nothing ----
     char shown_only[16] = "fixed";
     click_field(shown_only, sizeof shown_only, KUI_INPUT_READ_ONLY);
-    io.AddInputCharactersUTF8("zz");
+    ImGui::GetIO().AddInputCharactersUTF8("zz");
     f = field_frame(shown_only, sizeof shown_only, KUI_INPUT_READ_ONLY);
     CHECK(!f.changed && !(f.state & KUI_ITEM_EDITED));
     CHECK(std::strcmp(shown_only, "fixed") == 0);
@@ -237,7 +243,7 @@ int main() {
     // ---- capacity: the text is cut to capacity - 1 bytes, never inside a character ----
     char small[6] = "";
     click_field(small, sizeof small, 0);
-    io.AddInputCharactersUTF8("ab\xc3\xa9\xc3\xa9");  // "abéé": 6 bytes, room for 5
+    ImGui::GetIO().AddInputCharactersUTF8("ab\xc3\xa9\xc3\xa9");  // "abéé": 6 bytes, room for 5
     field_frame(small, sizeof small, 0);
     CHECK(std::strcmp(small, "ab\xc3\xa9") == 0);
     click_away(small, sizeof small, 0);
@@ -250,7 +256,7 @@ int main() {
     CHECK(ImGui::GetActiveID() != 0);
     const int activated = GImGui->InputTextState.TextA.Size;
     for (int i = 0; i < 64; ++i) {
-        io.AddInputCharacter('a' + (i % 26));
+        ImGui::GetIO().AddInputCharacter('a' + (i % 26));
         field_frame(big.data(), big.size(), 0);
     }
     CHECK(GImGui->InputTextState.TextA.Size == activated);
@@ -258,7 +264,7 @@ int main() {
     CHECK(std::strlen(big.data()) == 7);  // the capacity at activation, 8 bytes with the NUL
     click_away(big.data(), big.size(), 0);
     click_field(big.data(), big.size(), 0);  // activated again: the whole new capacity
-    io.AddInputCharactersUTF8("xyz");
+    ImGui::GetIO().AddInputCharactersUTF8("xyz");
     field_frame(big.data(), big.size(), 0);
     CHECK(std::strlen(big.data()) == 10);
     click_away(big.data(), big.size(), 0);
@@ -266,11 +272,43 @@ int main() {
     std::memset(big.data(), 0, big.size());
     click_field(big.data(), 64, 0);
     for (int i = 0; i < 20; ++i) {
-        io.AddInputCharacter('k');
+        ImGui::GetIO().AddInputCharacter('k');
         field_frame(big.data(), 6, 0);
     }
     CHECK(std::strlen(big.data()) <= 5);
     click_away(big.data(), 6, 0);
+
+    // ---- re-initialised while active (review recheck N1): ImGui resizes its shared copy of the text only when an editable
+    // field is activated, and again (to this frame's capacity) when an active field changes between read-only and
+    // editable or between one line and several. The activation capacity must not be forced in such a frame: a field
+    // clicked while read-only inherits another field's small copy, and turning editable would copy its text past it. ----
+    new_context();
+    char tiny[8] = "";
+    click_field(tiny, sizeof tiny, 0);  // an editable 8-byte field: ImGui's copy is now 9 bytes
+    ImGui::GetIO().AddInputCharactersUTF8("abc");
+    field_frame(tiny, sizeof tiny, 0);
+    click_away(tiny, sizeof tiny, 0);
+    std::vector<char> flip(4097, 0);
+    std::memset(flip.data(), 'a', 300);
+    click_field(flip.data(), flip.size(), KUI_INPUT_READ_ONLY);  // a long value shown read-only, clicked: active
+    CHECK(ImGui::GetActiveID() != 0);
+    std::memset(flip.data(), 0, flip.size());
+    std::memset(flip.data(), 'b', 100);
+    field_frame(flip.data(), flip.size(), 0);  // the value fits now: editable while it still has the keyboard
+    CHECK(GImGui->InputTextState.TextA.Size >= 101);
+    CHECK(std::strlen(flip.data()) == 100);
+    ImGui::GetIO().AddInputCharactersUTF8("c");
+    field_frame(flip.data(), flip.size(), 0);
+    CHECK(std::strlen(flip.data()) == 101);
+    click_away(flip.data(), flip.size(), 0);
+    // one line to several while active: re-initialised too
+    std::vector<char> lines2(4097, 0);
+    click_field(lines2.data(), 8, 0);  // activated with 8 bytes
+    std::memset(lines2.data(), 'm', 100);
+    field_frame(lines2.data(), lines2.size(), KUI_INPUT_MULTILINE, 60);
+    CHECK(GImGui->InputTextState.TextA.Size >= 101);
+    CHECK(std::strlen(lines2.data()) == 100);
+    click_away(lines2.data(), lines2.size(), KUI_INPUT_MULTILINE, 60);
 
     // ---- no buffer: false, nothing drawn into ----
     begin_frame();
