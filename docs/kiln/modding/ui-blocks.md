@@ -120,6 +120,7 @@ A button's `does` and a key's `does` are the same record: **exactly one** of the
 | `castAbility` | asks the **server** to cast an ability block of this mod (`"other-mod:name"` for another's), as its key would: its costs and cooldown apply, and a refusal is a toast | a message to the server |
 | `applyEffect` | applies an effect block, or an effect written in place, to the player, through a hidden ability `ui-apply.<name>` Kiln makes for it (one per effect) | a message to the server |
 | `openWindow`, `closeWindow` | opens or closes a window block of this mod (or `"other-mod:name"`'s) | this game |
+| `toggleWindow` (since 0.2.0-dev.31, mod API 0.2.16) | opens the window when it is closed, closes it when it is open; a key fires while a mod's own window has the input (not while one of its text fields has the keyboard), so the same key closes it; `"whileCapturing": true` only adds firing over the Kiln menu | this game |
 | `toast` | a short message in the corner of the screen | this game |
 
 Limits worth knowing:
@@ -159,6 +160,98 @@ A line whose condition is false, or whose text is empty, is **not on the screen 
 The id is `<mod>:<name>`, so the player's choice in the Kiln menu's Keys tab, kept in `kiln/config/keybinds.json`, survives a restart. Rename the
 block and say `was`, or the rebinding is lost.
 
+## Richer windows (since 0.2.0-dev.31)
+
+Mod API 0.2.16. Window blocks also have text fields, tables, tabs, trees and pictures, a typed state of their own, a mod's own data,
+live values of the player's game, and buttons that run a command on the joined server. `mods/samples/UiBlocks`'s
+`blocks/camp.json` uses every one of them (Ctrl+F9, or "Camp" in the pause menu).
+
+### New rows
+
+| `type` | What | Fields |
+|---|---|---|
+| `input` | A text field on a text config entry or a string state entry. What is typed is a draft: Enter writes it (with `commit: "blur"`, the default, also leaving the field); Escape puts the old text back. Only in an interactive window or a screen. | `id`, `label`, `bind`, `maxBytes` (2..4096 UTF-8 bytes, default 256), `commit` (`blur`, `enter`), `multiline` |
+| `table` | The rows of `world.local.inventory` or of a mod's own rows source, in its order, told apart by key. A cell is a template over the row's fields: `{row.count}`. With `selected` a click selects a row. | `id`, `items`, `columns` (1..16 of `{id, label, cell}`), `maxRows` (1..512, default 128; more rows show a notice, never a cut list), `selected` |
+| `tabs` | Tabs with their own rows; the first visible tab at first. A hidden or removed selected tab moves to the first visible one. | `id`, `tabs` (1..16 of `{id, label, rows, when}`), `selected` |
+| `tree` | Nodes of a mod's own tree source (`nodes`) or written in the block (`roots`, with `fields`). Under an open branch and each leaf, `nodeRows` (up to 8 text or value rows) show `{node.<field>}`. | `id`, `nodes` or `roots`, `fields`, `nodeRows`, `selected`, `expanded` (a stringSet entry) |
+| `image` | A PNG of the mod's folder. | `id`, `asset` (relative, no `..`, no URL), `width`, `height` (0: the picture's own), `does` |
+
+New rows need an `id` (`[a-z][a-z0-9_-]{0,63}`, not `r` followed by digits: the older rows use those), unique in the window with nested rows counted. Limits: 200 rows in
+all, 8 levels of nesting, 16 columns, 16 tabs, 512 table rows or tree nodes. Every limit, a repeated id and a wrong name is
+a compile error naming the field.
+
+### A window's state
+
+`state` declares typed entries the window's rows bind as `state.<key>`: `bool`, `int64`, `decimal` (`scale` 0..6,
+never rounded), `string` (`maxBytes`), `stringSet` (what a tree's `expanded` holds). In JSON int64 and decimal
+numbers are strings (`"initial": "9007199254740993"`), so no tool rounds them. State is kept while the player stays in
+one world (closing and opening the window keeps it), starts again in the next world and is never saved: a config is the
+place for what must last. A toggle, a slider (int64 within the slider's range, decimal within ±1,000,000), a text field
+and `toggle` / `set` actions write it. At most 64 entries and 256 KiB per window, 2 MiB per mod. Every write keeps the
+entry's declaration: a tabs row's `selected` entry must hold its longest tab id (a compile error otherwise), and a widget's
+write past `maxBytes`, `maxItems` or a range (a long table row key, a third expanded branch with `maxItems: 2`) is refused,
+with one warning in the log.
+
+From C#: `BlockUi.State(window)` reads one of the mod's own windows at one version, `BlockUi.SetState(window, key, value,
+expected)` writes one entry. Writes commit in order at Kiln's next service tick (the server's thread on a host); a
+changed write advances the revision once and posts `UiWindowStateChangedEvent` (a tab bar or tree that keeps its own
+state: `UiControlStateChangedEvent`); writing the value an entry has is accepted and changes nothing. A new world posts
+`UiWindowStateResetEvent` with a new session token, and writes asked for before it are refused `StaleSession`. These
+events, and `UiBindingValueChangedEvent`, come on the game's main thread in the client world's next step (at once in a
+menu, where there is no client world), so a handler may touch the client's own state.
+
+### A mod's own data
+
+`BlockUi.Bindings.Define(id, schema)` declares a scalar, rows or a tree source with typed fields (at most 16; `key`,
+and for trees `parent`, `label`, `depth` are built in), before the blocks that bind it as `mod.<id>`. Define it on every
+side: a dedicated server has no overlay, but it checks and keeps the windows that bind it. `Publish` needs an overlay
+(`ui.blocks.bindings`; guard it with `Ui.Available`).
+`BlockUi.Bindings.Publish(id, snapshot)` copies a snapshot at once and commits it at Kiln's next service tick
+(`UiBindingValueChangedEvent`); a newer publication before the commit makes the older one `Superseded`. Rows with a
+repeated key, and a tree with a repeated key, a missing parent, a loop or more than 8 levels are refused whole: the last
+publication stays. 64 sources, 512 rows or nodes and 64 KiB a publication, 256 KiB per mod. A mod reads only its own
+sources.
+
+### Values and where they come from
+
+| Name | Type | Comes from |
+|---|---|---|
+| `state.<key>`, `state.<key>/count` | the declared type; count of a stringSet | the window's state |
+| `mod.<id>` | the source's schema | the mod's last committed publication |
+| `world.local.available`, `player`, `session`, `step` | bool, whole numbers | this game's client world (they come with any publication; on their own they ask for the vitals group, the cheapest one) |
+| `world.local.health`, `healthMax`, `stamina`, `staminaMax`, `mana`, `manaMax` | whole numbers | the values the game itself computed, before any mod's HUD change |
+| `world.local.position.x`, `.y`, `.z` | decimal metres (6 places) | the local player's position in this game's world |
+| `world.local.inventory`, `inventoryCount` | rows (`key`, `item`, `itemId`, `count`, `pide`, `inventoryPage`, `slotIndex`), a count | the local player's own nonempty slots |
+| `world.server.available`, `world.server.hours` | bool, decimal hours | **only when this game hosts the world**; on a joined world the hour is not shown (deferred) |
+| `stats.<mod>/<id>` (`/level`, `/revision`, `/available`) | decimal (raw / 10^scale), whole numbers, bool | 05b's synced copy ([mod-values](../services/mod-values.md)); another mod's stat needs `Blocks.ImportStat` or `"statImports"` and its own read policy |
+| `row.<field>`, `node.<field>` | the field's type | a table's row (in its cells), a tree's node (in its node rows) |
+
+Numbers are exact: an int64 like 9007199254740993 shows and compares as it is, and a condition compares a name with a
+literal of its own type (`state.n > 0.5` on an int64 is a compile error; old `config.*` conditions keep working). A
+value that cannot be read now (no world yet, not published, a field the game build does not offer) shows as `—` and
+fails every test, `!` and `!=` too; `<name>.available` tests it. Live values are collected by Kiln's core on the right
+world's own thread into one immutable snapshot (at most every 100 ms, while an open window or a HUD line's condition asks
+for them); a window never reads the game's world itself. `BlockUi.ReadWorld()` and `BlockUi.DemandWorld(fields)` give
+mods the same snapshot.
+
+### Commands on the joined server
+
+`"commandTarget": "server"` on a `command` action (or `BlockUi.ExecuteOnServer(line)`) sends the line to the server
+this game joined (or hosts) over the optional channel `kiln:ui-command`. The server runs it as the pressing player, whom
+it knows from the connection, through the command's own permission and cancel rules: nothing in the message names a
+player, an account or an admin flag. The player sees the command's own reply or refusal as a toast. Each request runs at
+most once (a repeated id answers from the server's memory and never runs again), and the server limits each player to 4
+requests a second, 64 waiting and 2 running; a request that waited 5 s is not run. No answer within 15 s says so: the
+command may or may not have run, and Kiln never sends it again by itself. **A server without Kiln (or an older Kiln) has
+no channel: the button says "This server cannot run UI commands" and nothing runs, never on this game's own console.**
+
+### Text fields and the keyboard
+
+A text field is only allowed where the window takes the keyboard (an interactive window, a screen). While such a window
+is open the overlay keeps key presses and typed characters from the game and its chat; key releases still reach the game,
+so no movement key stays held. Tab moves to the next widget, Enter and Escape as above. A text is cut at a character to its
+`maxBytes` before anything is written, and never holds a NUL.
+
 ## What it costs
 
 - **A closed window costs nothing.** It is not drawn and reads nothing.
@@ -186,14 +279,13 @@ The other blocks of the file still load. KILN110/111/112 in C#: a window name th
 ## What it does not do
 
 Cut on purpose, because Kiln.Ui cannot do it yet or it would not be a block:
-- **No text fields, tables, tabs, images, trees or free drawing** in a window. Those are `Ui.Window` and `Ui.Screen` in C#
-  ([../ui.md](../ui.md)), and a block window can sit beside one.
-- **No values from the game's world:** health, mana, position, inventory, time of day. They need the world's thread and a snapshot; `game.*` has only what is safe from anywhere.
-- **No state of its own.** A toggle or slider edits a config entry, never a variable of the window.
+- **No free drawing** in a window. That is `Ui.Window` and `Ui.Screen` in C# ([../ui.md](../ui.md)), and a block window can sit beside one.
+- **No values of a joined server's world** (its time of day, authoritative inventory or vitals): `world.server.*` is for the world this game hosts. A mod's stats reach a joined client through [mod values](../services/mod-values.md).
+- **State is never saved,** and `mod.<id>` is the mod's own: another mod's data is not readable (stats are, by their read policy).
 - **No `||` in a condition, and no arithmetic.** Compare a value with a number; do not compute.
 - **A window's title is fixed in the language the game had when it opened** (a window is made again when it is next opened in another language); a screen's title follows by itself.
 - **The overlay's wrapped text has no colour.**
-- **`command` does not send a chat command to a joined server** (above).
+- **`command` without `commandTarget: "server"` does not reach a joined server** (above); with it, a server without Kiln runs nothing.
 
 ## Client checklist
 
@@ -206,5 +298,11 @@ What only a game with the mod can confirm (the unit tests and the dedicated-serv
 6. Open the Kiln menu's **Keys** tab: `ui-blocks:open-settings` is there under the mod's name, and rebinding it keeps through a restart.
 7. Join a server, open **Settings** with a server config bound: the row reads as text, not a widget.
 8. Switch the game's language: the menu entries and the screen's title follow; a window's title follows at its next opening.
+9. (0.2.0-dev.31, Camp window, Ctrl+F9 opens and closes it) Type non-ASCII text in **Note**, use Backspace, Tab and Enter: nothing reaches the chat; walk (hold W), open Camp with Ctrl+F9 while holding W, let go: the character stops; Escape puts the old text back.
+10. Switch tabs, open and close a branch of **Map**, select a quest, see the picture; close and open the window: all kept; leave the world and come back: reset.
+11. The local values follow the game (health, position, slots used); **World hour** shows when hosting and says "not shown" on a joined world.
+12. **Rest at the fire** on a joined Kiln server with the mod: the server log shows the player as the command's source, the toast says the reply, **Rests at the fire** goes up. On a vanilla server: the "cannot run UI commands" toast and nothing else.
+
+The guided checks for the owner's two-client pass are in the package's CLIENT-CHECKS.md (09-ui-blocks).
 
 The lab (`mods/tests/ui-blocks-test`, a dedicated server) shows the rest: `ui-blocks-test: PASS ...` lines, and `ui-blocks-test done: N PASS, 0 FAIL`.

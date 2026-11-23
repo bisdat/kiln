@@ -7699,6 +7699,24 @@
       },
       "sha256": "56c03ac30f001d80e59f22a709d34e837eedd1f8d9d0a19f60b3a5cf565d5d0e"
     },
+    "native/core/abi/services/kiln_ui_blocks.h": {
+      "function_macros": [],
+      "inline_helpers": [],
+      "layouts": {
+        "KilnUiBlocksApi": {
+          "align": 8,
+          "fields": {
+            "begin_tab_item_ex": 8,
+            "header": 0,
+            "input_text_ex": 32,
+            "item_state": 24,
+            "set_next_item_open": 16
+          },
+          "size": 40
+        }
+      },
+      "sha256": "bb0d8325b75a3e72991683ee57db77918bcc2f339e4e4090f60069ec8cc48942"
+    },
     "native/core/abi/services/kiln_ui_inventory.h": {
       "function_macros": [],
       "inline_helpers": [],
@@ -7866,6 +7884,90 @@
         }
       },
       "sha256": "3e9ca881a7dc6538ef28aaa13b276ee7b29ce31f1589f1ce602bbfee012d5746"
+    },
+    "native/core/abi/services/kiln_ui_snapshot.h": {
+      "function_macros": [],
+      "inline_helpers": [],
+      "layouts": {
+        "KilnUiDemandResult": {
+          "align": 8,
+          "fields": {
+            "handle": 16,
+            "ok": 4,
+            "reason": 8,
+            "reserved": 12,
+            "size": 0
+          },
+          "size": 24
+        },
+        "KilnUiInventoryRow": {
+          "align": 4,
+          "fields": {
+            "count": 16,
+            "holder": 0,
+            "inventory_page": 4,
+            "item": 12,
+            "pide": 20,
+            "slot_index": 8
+          },
+          "size": 24
+        },
+        "KilnUiSnapshotAcquire": {
+          "align": 8,
+          "fields": {
+            "capture_ms": 32,
+            "ok": 4,
+            "publication": 24,
+            "reason": 8,
+            "reserved": 12,
+            "size": 0,
+            "token": 16
+          },
+          "size": 40
+        },
+        "KilnUiSnapshotApi": {
+          "align": 8,
+          "fields": {
+            "acquire": 24,
+            "copy": 32,
+            "demand_add": 8,
+            "demand_remove": 16,
+            "header": 0,
+            "release": 40
+          },
+          "size": 48
+        },
+        "KilnUiWorldValues": {
+          "align": 8,
+          "fields": {
+            "available_mask": 4,
+            "health": 68,
+            "health_max": 72,
+            "inventory_count": 12,
+            "local_capture_ms": 56,
+            "local_player": 64,
+            "local_session": 40,
+            "local_step": 48,
+            "mana": 84,
+            "mana_max": 88,
+            "publication": 32,
+            "requested_mask": 8,
+            "server_capture_ms": 136,
+            "server_hours": 144,
+            "server_session": 120,
+            "server_step": 128,
+            "size": 0,
+            "stamina": 76,
+            "stamina_max": 80,
+            "unavailable_reason": 16,
+            "x_fixed": 96,
+            "y_fixed": 104,
+            "z_fixed": 112
+          },
+          "size": 152
+        }
+      },
+      "sha256": "1dbcc49bc32aa9515e58ff8e13f043a81d774ac077ef5a199b289a84deb3319b"
     },
     "native/core/abi/services/kiln_ui_values.h": {
       "function_macros": [],
@@ -9268,7 +9370,7 @@
   },
   "outputs": {
     "src/bindings.rs": "134028a6a9914076cab3f71f98d356141d4fe36c4d7f51bac6a11819501ed935",
-    "src/layout.rs": "1ffadb93b7980dc2f7975c8a161168993c1783e161ee713ea1b67703fc0868ab",
+    "src/layout.rs": "abcb225676e55d198ed256cb206318f13da344c7cb88adb433c822144772743b",
     "src/services/kiln_abilities.rs": "06a43042e5c96d6261a17b02eab35463b07a8ad83f63b2bb168bca5ff34e582e",
     "src/services/kiln_assets.rs": "e7fe4eb1c4d53ad31eeaf05be06f41c551a49362ad5bd4174465ec18a03effe0",
     "src/services/kiln_assets_vfx.rs": "90ed8ce5ad512bbf4f002db3277bc3b439d648ca437a58d4477eac4ce46c3b81",
@@ -9331,16 +9433,18 @@
     "src/services/kiln_toolwear.rs": "bfb7c79cc8ddea86236700983a4deac4d08826a8f4d3ac5648c2fc9e346dcbcb",
     "src/services/kiln_types.rs": "e6eaf5e97d0c284ec9fb98e78e9b2d3c1fb129d0cac1a899009730e2641942eb",
     "src/services/kiln_ui.rs": "c5552e5fe6bf0400ef939eeeefa479a0ef827cb15467694a341f0e612be61451",
+    "src/services/kiln_ui_blocks.rs": "cf0d0e1760465229c8b1c2f2e0c6a0a9764476feffa231677c78f87c5921d011",
     "src/services/kiln_ui_inventory.rs": "0d926c07d14e7a23eb2fd6a29ee444804087d41d9290db17d3bdd4ad192e0d49",
     "src/services/kiln_ui_item_detail.rs": "196b73cac32c28c4a4971df8916aa8d81e90bfe515769965ade4cc7d18c13d18",
     "src/services/kiln_ui_slots.rs": "eadd1321046b93dc37ec1bcfbba00f94020ace6083d1f0ec3b0620bda021997b",
+    "src/services/kiln_ui_snapshot.rs": "789a0d13f6a7a770b42537e758f3e4f10dd6e05480c445848930fb54bfd6de4e",
     "src/services/kiln_ui_values.rs": "a13a3afbfb1ec443322ba4ae250fe499d13ce599a438ba0b9652f8e572073627",
     "src/services/kiln_vfx.rs": "046191c4ab30f4ccd99a52f7fc654e7fb53d74aaa4acaa072c8f86a36f0037a0",
     "src/services/kiln_window_clock.rs": "0fedf0f1d97e6aa1959ec46a483181fb930a6f83025a813c31b77bd820a8fa71",
     "src/services/kiln_world.rs": "3cb0272179db9c198f154ce6c008837e4bb95245a2ec62993be78879c4b330b8",
     "src/services/kiln_world_budget.rs": "b196426492d0525df1317c08e4927f3f3ff35817990bed8f2b58c02d174bab98",
     "src/services/kiln_worldtables.rs": "3d423bb8cfd5235f82230a1942bbc334d86b55d343e5e5880c671a57d1469fce",
-    "src/services/mod.rs": "b516f48a876c58c779e068b6014723ea5a87c82a7b66028a4bf2fa6e9d88243a"
+    "src/services/mod.rs": "d361eed973f9d2de8c08c3188e1a19d39d0675f1068978ee97b2720a48d05a4d"
   },
   "schema": 1,
   "target": "x86_64-pc-windows-msvc"

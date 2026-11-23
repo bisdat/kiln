@@ -158,6 +158,11 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -pthread -fsanitize=address,undefined \
 g++ -std=c++20 -O1 -g -Wall -Wextra -Wno-unused-function -fsanitize=address,undefined \
     -I"$here/../../../core/abi" -I"$imgui" "$here/pointer_drag_test.cpp" "${objs[@]}" -o "$out/pointer_drag_test"
 "$out/pointer_drag_test"
+# kiln.ui.blocks' slots for the richer UI blocks: controlled tabs and trees, item state, text fields with Kiln's flags
+# (draw_slots_blocks.inl, 0.2.0-dev.31, dossier 09)
+g++ -std=c++20 -O1 -g -Wall -Wextra -Wno-unused-function -fsanitize=address,undefined \
+    -I"$here/../../../core/abi" -I"$imgui" "$here/blocks_slots_test.cpp" "${objs[@]}" -o "$out/blocks_slots_test"
+"$out/blocks_slots_test"
 # the looks: the game's colours through reflection, the player's look, themes, mod fonts (style.cpp, look_palette.h, font_budget.h)
 g++ -std=c++20 -O1 -g -Wall -Wextra -Wno-unused-function -pthread -fsanitize=address,undefined \
     -I"$here/stubs" -I"$here/.." -I"$here/../../../core/abi" -I"$imgui" -I"$here/../../../third_party" \

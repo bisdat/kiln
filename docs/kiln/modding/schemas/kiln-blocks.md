@@ -68,6 +68,7 @@ A mod's blocks: spells, weapons, wands, armor, items, stations, statuses, effect
 | `seats` | object |  | Seats: the game's sitting, comfort of the chair category. |
 | `sounds` | object |  | Sounds of the mod's own: clips and how they play. kiln cook writes their steps into assets/cook.json (tools/soundcook blocks) and cooks them. An effect, a station or code plays one by its name. Players need the mod (clients "mod"). |
 | `spells` | object |  | Staff spells. A charge is one item in the stack. |
+| `statImports` | array of string |  | Other mods' stats this mod's UI blocks show as stats.<mod>/<id> (since 0.2.0-dev.31): a declared type, not a permission. |
 | `stations` | object |  | Stations a player builds: a workbench, or a forge or rack that works on its own. |
 | `statuses` | object |  | Buffs and debuffs, made of effects. |
 | `strengths` | object |  | Parts: what it takes to dig a material. Use one by name wherever a field takes a strength. |
@@ -911,9 +912,10 @@ Its kind follows from what you fill in: tool, ammo, feeds, heals or onUse, else 
 | `flow` | number |  | How fast a water container fills and pours (at a lake, a well or a barrel, onto crops and soil), as a multiple of the game's own: what one step moves, 32 for the can, 16 for the pouch, about 20 steps a second. The game has no rate for filling alone. Default: 1. min 0.25 max 8 |
 | `fuel` | number |  | Seconds it burns in a fire. |
 | `heals` | integer |  | Health using it gives at once; the tooltip's number. |
-| `holds` | integer |  | A water container's capacity, in charges: the game's watering can holds 100, its pouch 20 sips. At most 1023: players' games are sent the water as charges x 64 in 16 bits. Default: the kind's own. min 1 max 1023 |
+| `holds` | integer |  | A water container's capacity, in charges: the game's watering can holds 100, its pouch 20 sips. At most 1023 (players' games are sent the water as charges x 64 in 16 bits) unless largeHolds. Default: the kind's own. min 1 max 65535 |
 | `identity` | [identity](#identity) |  |  |
 | `kind` | `"material"` \| `"consumable"` \| `"food"` \| `"ammo"` \| `"tool"` \| `"watering-can"` \| `"water-pouch"` |  | watering-can and water-pouch: the game's water containers; holds and flow are theirs. |
+| `largeHolds` | boolean |  | Lets holds go past 1023, up to 65535: every player's game shows the container full until it is down to 1023 unless a mod sends the true value (a replicated extension). Default: false. |
 | `level` | [level](#level) |  |  |
 | `loot` | [loot](#loot) |  |  |
 | `name` | string | yes | min length 1 |
@@ -926,6 +928,7 @@ Its kind follows from what you fill in: tool, ammo, feeds, heals or onUse, else 
 | `texts` | object |  | Texts per language (en, de, pt-BR, ...). |
 | `tool` | [tool](#tool) |  |  |
 | `tweak` | [tweak](#tweak) |  |  |
+| `vanillaLook` | string |  | The game item players without this mod see in its place (a vanilla client, a Kiln client without the mod's content): a game item of the same kind, by debug name. Default: none (an empty slot). |
 | `visual` | [visualRef](#visualref) |  |  |
 | `was` | [name](#name) |  |  |
 
@@ -1020,11 +1023,18 @@ Changes a game material in place: what it takes to dig it, its pictures, or both
 
 ## menu
 
-The crafting menu a station opens: an existing station's, which lists the station's recipes among its own.
+The crafting menu a station opens: an existing station's, which lists the station's recipes among its own; or, with tabs, a menu a station with a workshop of its own lays out itself.
 
 | Key | Type | Required | Notes |
 |---|---|---|---|
-| `like` | `"workbench"` \| `"carpenter"` \| `"kitchen"` \| `"forge"` \| `"oven"` \| `"alchemy"` \| `"drying-rack"` \| `"charcoal-kiln"` \| `"kiln"` \| `"smelter"` \| `"fireplace"` \| `"grinder"` \| `"tannery"` \| `"table-saw"` |  | Default: the station's kind. |
+| `like` | `"workbench"` \| `"carpenter"` \| `"kitchen"` \| `"forge"` \| `"oven"` \| `"alchemy"` \| `"drying-rack"` \| `"charcoal-kiln"` \| `"kiln"` \| `"smelter"` \| `"fireplace"` \| `"grinder"` \| `"tannery"` \| `"table-saw"` |  | Default: the station's kind. With tabs: the menu whose tabs lend theirs their icons. |
+| `tabs` | array of [stationMenuTab](#stationmenutab) |  | The menu in tabs of its own (since 0.2.0-dev.31; capability stationmenus.store). Only for a station with a workshop of its own: the game's stations keep the game's tabs. Recipes are named by their menuKey; one that no tab lists is still made, but not shown. max items 15 |
+
+## menuKey
+
+A key in a station's menu: letters, digits, '.', '_' and '-', at most 64, no colon. Pattern `^[A-Za-z0-9._-]{1,64}$`.
+
+Type: string
 
 ## modelChain
 
@@ -1458,6 +1468,7 @@ How something is crafted.
 | `identity` | [identity](#identity) |  |  |
 | `makes` | integer |  | How many one craft gives. For a spell: charges. min 1 max 65535 |
 | `menuGroup` | string |  | The tab of the game's crafting menu that lists it, one the game has (CraftingGroups in C#): "0x<workshop>/<tab GUID>", or with "/<subcategory GUID>". Its workshop is the station's ("hand": 0x00000000). Default: Kiln picks the place (since 0.2.0-dev.30.5). |
+| `menuKey` | [menuKey](#menukey) |  | Its name in the menu of a station with tabs of its own (menu.tabs): one recipe of the mod per key at a station. Only for a recipe at a station with a workshop of its own; it changes nothing of the recipe itself. |
 | `needs` | object |  | Item -> count: a game item, an item of this mod by its block name, or "other-mod:name". |
 | `needsProps` | array of string |  | Props that have to stand near a manual station: blocks with provides, by name ("other-mod:name" for another mod's). The game's automated factory path has no nearby-prop context, so factory block recipes refuse this field. max items 8 |
 | `output` | [itemRef](#itemref) |  | What it makes: in a station's list of recipes, and in a recipes block of its own, where it is needed. Elsewhere a recipe makes the block it is on. |
@@ -1687,6 +1698,27 @@ A station a player builds: a prop that makes things. With processing it works on
 | `visual` | [visualRef](#visualref) |  | Its look: like (a game item that places something: model, collision and how it places), or model (item:<name>, or the GUID of a model your assets/assets.json serves). |
 | `was` | [name](#name) |  |  |
 
+## stationMenuSet
+
+A set of recipes in a tab.
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `heading` | [uiText](#uitext) |  | The heading over the set; none on a tab's first set. |
+| `key` | [menuKey](#menukey) | yes | Unique in its tab. |
+| `recipes` | array of string | yes | The recipes it lists, in this order, by their menuKey: "key" for the station's mod, "other-mod:key" for another's. Each one once in the menu, at most 512 in a tab. max items 512 |
+
+## stationMenuTab
+
+A tab of a station's menu: its name, the icon it borrows, and its sets of recipes.
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `iconFromTab` | integer |  | The icon of the n-th tab (0 the first) of the menu the station is like, as the game shipped it. -1 (the default): the first. min -1 max 14 |
+| `key` | [menuKey](#menukey) | yes | Unique in the menu; the tab's id follows from it, so keep it. |
+| `name` | [uiText](#uitext) | yes | What the tab says. A language map: at most 35 languages, each text 1 to 4096 bytes. |
+| `sets` | array of [stationMenuSet](#stationmenuset) | yes | Its sets of recipes. The first has no heading: the tab's name heads it. max items 28 |
+
 ## status
 
 A buff or debuff, shown in the game's buff bar. It lasts its seconds, or while a player is in a state.
@@ -1901,22 +1933,24 @@ Type: object
 
 ## uiAction
 
-What a button or a key does: exactly one of command, toggle, set, castAbility, applyEffect, openWindow, closeWindow, toast. Runs on the player's game, never on a dedicated server.
+What a button or a key does: exactly one of command, toggle, set, castAbility, applyEffect, openWindow, closeWindow, toggleWindow, toast (a command may add commandTarget). Runs on the player's game, never on a dedicated server.
 
 | Key | Type | Required | Notes |
 |---|---|---|---|
 | `applyEffect` | [effectRef](#effectref) |  | Applies an effect to the player, through a hidden ability named ui-apply.<name>. The server needs the mod. |
 | `castAbility` | [ref](#ref) |  | Asks the server to cast an ability of this mod (or "other-mod:name"), as its key would. The server needs the mod. |
 | `closeWindow` | [ref](#ref) |  | Closes a window block. |
-| `command` | string |  | A command line of this game's command registry, as the console runs it: as the host's own character when this game hosts the world, else as the console. It does not reach a server this game joined. min length 1 max length 256 |
+| `command` | string |  | A command line of this game's command registry, as the console runs it: as the host's own character when this game hosts the world, else as the console. It does not reach a server this game joined, unless commandTarget is server. min length 1 max length 256 |
+| `commandTarget` | `"local"` \| `"server"` |  | Where the command runs: local (the default) as above, or server: on the server this game joined (or hosts), as this game's player there, with that player's rights. Only with command. A server without Kiln's kiln:ui-command runs nothing (a toast says so). |
 | `openWindow` | [ref](#ref) |  | Opens a window block of this mod (or "other-mod:name"). |
 | `set` | [uiSet](#uiset) |  |  |
 | `toast` | [uiText](#uitext) |  | A short message in the corner of the screen. |
 | `toggle` | [uiBind](#uibind) |  | Flips a true/false config entry. |
+| `toggleWindow` | [ref](#ref) |  | Opens a window block when it is closed, closes it when it is open (since 0.2.0-dev.31). A key fires while a mod's window has the input (not while its text field has the keyboard), so it also closes the window; whileCapturing only adds firing over the Kiln menu. |
 
 ## uiBind
 
-A value: game.<name> (fps, frameMs, state, inGame, screen, language, clock) or config.<path> of this mod's config (config.<config id>/<path> when two configs have the path). Pattern `^(game\|config)\.[A-Za-z0-9_.\-/]+$`.
+A value: state.<key> (the window's state), mod.<id> (the mod's own data), world.local.<name> / world.server.<name> (live game values), stats.<mod>/<id>, or game.<name> (fps, frameMs, state, inGame, screen, language, clock) or config.<path> of this mod's config (config.<config id>/<path> when two configs have the path).
 
 Type: string
 
@@ -1925,6 +1959,21 @@ Type: string
 #rrggbb, #rrggbbaa, or white, black, gray, red, green, yellow, orange, cyan.
 
 Type: string
+
+## uiColumn
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `cell` | [uiText](#uitext) | yes | A template over the row's fields: {row.<field>}. |
+| `id` | string | yes | The row's id, unique in the window (nested rows included). Pattern `^[a-z][a-z0-9_-]{0,63}$`. |
+| `label` | [uiText](#uitext) | yes |  |
+
+## uiField
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `id` | string | yes | The row's id, unique in the window (nested rows included). Pattern `^[a-z][a-z0-9_-]{0,63}$`. |
+| `type` | `"bool"` \| `"int64"` \| `"uInt64"` \| `"decimal"` \| `"float64"` \| `"string"` | yes |  |
 
 ## uiMenu
 
@@ -1938,9 +1987,9 @@ An entry in the game's pause menu and/or main menu that opens the window.
 
 ## uiRow
 
-One line of a window. "type" says which: text, value, toggle, slider, choice, separator, button.
+One line of a window. "type" says which: text, value, toggle, slider, choice, separator, button, and (since 0.2.0-dev.31) input, table, tabs, tree, image.
 
-Type: [uiRowText](#uirowtext) or [uiRowValue](#uirowvalue) or [uiRowToggle](#uirowtoggle) or [uiRowSlider](#uirowslider) or [uiRowChoice](#uirowchoice) or [uiRowSeparator](#uirowseparator) or [uiRowButton](#uirowbutton)
+Type: [uiRowText](#uirowtext) or [uiRowValue](#uirowvalue) or [uiRowToggle](#uirowtoggle) or [uiRowSlider](#uirowslider) or [uiRowChoice](#uirowchoice) or [uiRowSeparator](#uirowseparator) or [uiRowButton](#uirowbutton) or [uiRowInput](#uirowinput) or [uiRowTable](#uirowtable) or [uiRowTabs](#uirowtabs) or [uiRowTree](#uirowtree) or [uiRowImage](#uirowimage)
 
 ## uiRowButton
 
@@ -1966,6 +2015,39 @@ A drop-down on an enum config entry, with its options.
 | `sameLine` | boolean |  | On the same line as the row before it. |
 | `tooltip` | [uiText](#uitext) |  | Shown while the pointer rests on the row's widget. May show values like a text row does. |
 | `type` | `"choice"` | yes |  |
+| `when` | [uiWhen](#uiwhen) |  |  |
+
+## uiRowImage
+
+A PNG of the mod's folder (since 0.2.0-dev.31): at most 8 MiB and 2048 x 2048; 8 pictures and 32 MiB of pixels per mod.
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `asset` | string | yes | A relative path in the mod's folder, no "..". A file that must exist. |
+| `does` | [uiAction](#uiaction) |  |  |
+| `height` | number |  | min 0 max 4096 |
+| `id` | string | yes | The row's id, unique in the window (nested rows included); not r followed by digits (an older row's place). Pattern `^(?!r[0-9]+$)[a-z][a-z0-9_-]{0,63}$`. |
+| `sameLine` | boolean |  | On the same line as the row before it. |
+| `tooltip` | [uiText](#uitext) |  | Shown while the pointer rests on the row's widget. May show values like a text row does. |
+| `type` | `"image"` | yes |  |
+| `when` | [uiWhen](#uiwhen) |  |  |
+| `width` | number |  | min 0 max 4096 |
+
+## uiRowInput
+
+A text field (since 0.2.0-dev.31) on a text config entry or a string state entry: a draft until Enter (or, with commit blur, leaving the field) writes it; Escape puts the old text back. Only in an interactive window or a screen.
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `bind` | [uiBind](#uibind) | yes |  |
+| `commit` | `"blur"` \| `"enter"` |  | blur (default): Enter or leaving the field writes it. enter: only Enter. |
+| `id` | string | yes | The row's id, unique in the window (nested rows included); not r followed by digits (an older row's place). Pattern `^(?!r[0-9]+$)[a-z][a-z0-9_-]{0,63}$`. |
+| `label` | [uiText](#uitext) | yes |  |
+| `maxBytes` | integer |  | At most this many UTF-8 bytes. Default 256. min 2 max 4096 |
+| `multiline` | boolean |  | Several lines; Enter is a new line (commit blur). |
+| `sameLine` | boolean |  | On the same line as the row before it. |
+| `tooltip` | [uiText](#uitext) |  | Shown while the pointer rests on the row's widget. May show values like a text row does. |
+| `type` | `"input"` | yes |  |
 | `when` | [uiWhen](#uiwhen) |  |  |
 
 ## uiRowSeparator
@@ -1995,6 +2077,36 @@ A slider on a whole-number or decimal config entry. A drag writes the config onc
 | `type` | `"slider"` | yes |  |
 | `when` | [uiWhen](#uiwhen) |  |  |
 
+## uiRowTable
+
+A table (since 0.2.0-dev.31) of world.local.inventory or a mod's own rows source (mod.<id>), in the source's order, told apart by key.
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `columns` | array of [uiColumn](#uicolumn) | yes | min items 1 max items 16 |
+| `id` | string | yes | The row's id, unique in the window (nested rows included); not r followed by digits (an older row's place). Pattern `^(?!r[0-9]+$)[a-z][a-z0-9_-]{0,63}$`. |
+| `items` | string | yes | Pattern `^(world\.local\.inventory\|mod\.[a-z][a-z0-9_-]{0,63})$`. |
+| `maxRows` | integer |  | Default 128; a source with more shows a notice. min 1 max 512 |
+| `sameLine` | boolean |  | On the same line as the row before it. |
+| `selected` | string |  | A string state entry that holds the selected row's key. Pattern `^state\.[a-z][a-z0-9_-]{0,63}$`. |
+| `tooltip` | [uiText](#uitext) |  | Shown while the pointer rests on the row's widget. May show values like a text row does. |
+| `type` | `"table"` | yes |  |
+| `when` | [uiWhen](#uiwhen) |  |  |
+
+## uiRowTabs
+
+Tabs (since 0.2.0-dev.31), each with its own rows.
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `id` | string | yes | The row's id, unique in the window (nested rows included); not r followed by digits (an older row's place). Pattern `^(?!r[0-9]+$)[a-z][a-z0-9_-]{0,63}$`. |
+| `sameLine` | boolean |  | On the same line as the row before it. |
+| `selected` | string |  | A string state entry that holds the selected tab's id. Pattern `^state\.[a-z][a-z0-9_-]{0,63}$`. |
+| `tabs` | array of [uiTab](#uitab) | yes | min items 1 max items 16 |
+| `tooltip` | [uiText](#uitext) |  | Shown while the pointer rests on the row's widget. May show values like a text row does. |
+| `type` | `"tabs"` | yes |  |
+| `when` | [uiWhen](#uiwhen) |  |  |
+
 ## uiRowText
 
 A line of text. {game.fps:0} and {config.clock.scale:0.00} in it show a value (refreshed at the window's pace); {{ and }} are braces.
@@ -2022,6 +2134,24 @@ A checkbox on a true/false config entry. A click writes the config.
 | `type` | `"toggle"` | yes |  |
 | `when` | [uiWhen](#uiwhen) |  |  |
 
+## uiRowTree
+
+A tree (since 0.2.0-dev.31): a mod's own tree source (nodes) or one written here (roots).
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `expanded` | string |  | A stringSet state entry that holds the open branches. Pattern `^state\.[a-z][a-z0-9_-]{0,63}$`. |
+| `fields` | array of [uiField](#uifield) |  | max items 16 |
+| `id` | string | yes | The row's id, unique in the window (nested rows included); not r followed by digits (an older row's place). Pattern `^(?!r[0-9]+$)[a-z][a-z0-9_-]{0,63}$`. |
+| `nodeRows` | array of [uiRowText](#uirowtext) or [uiRowValue](#uirowvalue) |  | max items 8 |
+| `nodes` | string |  | Pattern `^mod\.[a-z][a-z0-9_-]{0,63}$`. |
+| `roots` | array of [uiTreeNode](#uitreenode) |  | min items 1 |
+| `sameLine` | boolean |  | On the same line as the row before it. |
+| `selected` | string |  | A string state entry that holds the selected node's key. Pattern `^state\.[a-z][a-z0-9_-]{0,63}$`. |
+| `tooltip` | [uiText](#uitext) |  | Shown while the pointer rests on the row's widget. May show values like a text row does. |
+| `type` | `"tree"` | yes |  |
+| `when` | [uiWhen](#uiwhen) |  |  |
+
 ## uiRowValue
 
 A label and a value that cannot be edited here: Label: value.
@@ -2036,6 +2166,12 @@ A label and a value that cannot be edited here: Label: value.
 | `type` | `"value"` | yes |  |
 | `when` | [uiWhen](#uiwhen) |  |  |
 
+## uiScalar
+
+A field value: true/false, a number (whole numbers read exactly), or a string (also for an int64 or decimal field, written exactly).
+
+Type: boolean or number or string
+
 ## uiSet
 
 A config entry and the value to give it: true or false, a number in its range, or an option of an enum.
@@ -2045,11 +2181,35 @@ A config entry and the value to give it: true or false, a number in its range, o
 | `bind` | [uiBind](#uibind) | yes |  |
 | `to` | boolean \| number \| string | yes |  |
 
+## uiStateDefinition
+
+A window's state entry (since 0.2.0-dev.31). int64 and decimal numbers are strings ("12", "1.5").
+
+Type: object
+
+## uiTab
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `id` | string | yes | The row's id, unique in the window (nested rows included). Pattern `^[a-z][a-z0-9_-]{0,63}$`. |
+| `label` | [uiText](#uitext) | yes |  |
+| `rows` | array of [uiRow](#uirow) | yes | min items 1 |
+| `when` | [uiWhen](#uiwhen) |  |  |
+
 ## uiText
 
 A text: plain, or one per language ({ "en": "Save", "de": "Speichern" }, "*" for every other language). The game's language picks it: the exact key ("pt-br"), the primary language ("pt"), then "en", then "*".
 
 Type: string or object
+
+## uiTreeNode
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `children` | array of [uiTreeNode](#uitreenode) |  |  |
+| `key` | string | yes | Pattern `^[A-Za-z0-9._:-]{1,128}$`. |
+| `label` | [uiText](#uitext) | yes |  |
+| `values` | object |  |  |
 
 ## uiWhen
 
@@ -2226,6 +2386,7 @@ A window or a screen of rows: text, values, buttons, toggles, sliders, choices a
 | `position` | array of number |  | A window: where its centre is, [x, y] as 0..1 of the screen. min items 2 max items 2 |
 | `refresh` | number |  | Seconds between updates of the values and conditions it shows. Default 0.25. min 0.1 max 3600 |
 | `rows` | array of [uiRow](#uirow) | yes | min items 1 max items 200 |
+| `state` | object |  | The window's own typed state (since 0.2.0-dev.31), bound as state.<key>: kept while the player stays in one world, never saved. |
 | `title` | [uiText](#uitext) | yes |  |
 | `titleBar` | boolean |  | Default true. |
 | `width` | number |  | Pixels at UI scale 1. 0: a window fits its rows, a screen is 720 wide. min 0 max 4096 |

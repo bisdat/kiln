@@ -502,6 +502,12 @@ w.Toggle();   // Show / Hide / Open = true; the X button closes it too
     holds a NUL) is shown cut and is never changed (`InputText` shows it read-only);
   - layout: `CollapsingHeader`, `TreeNode`/`TreePop`, `SameLine`, `Spacing`, `Id(...)` scopes, tables
     (`BeginTable`, `Row`, `NextRow`/`NextColumn`), tabs (`BeginTabBar`/`BeginTab`), `BeginChild`;
+  - since 0.2.0-dev.31, mod API 0.2.16 (kiln.ui.blocks, what the richer
+    [UI blocks](modding/ui-blocks.md#richer-windows-since-020-dev31) draw with): `BeginControlledTab(label, select)` (a
+    tab code selects), `SetNextItemOpen(open)` (the next `TreeNode` opened or closed from code), `TextField(label, ref value, maxBytes, UiTextFieldFlags)` (`EnterReturns`, `ReadOnly`,
+    `Multiline`), and `LastItemState` right after a widget (`Active`, `Edited`, `Deactivated`, `DeactivatedAfterEdit`: a
+    field that lost the keyboard after an edit). `HasBlockWidgets` says whether this Kiln has them; without, they fall
+    back to `BeginTab`, nothing, `InputText` and `None`;
   - free drawing: `DrawText`, `DrawRect`, `MeasureText`;
   - the mouse (since 0.2.0-dev.30.3): `Pointer`, `ButtonHeld(UiMouseButton)`, `DragSource(kind, payload)` /
     `DropTarget(kind)` (see "The pointer, held buttons and drag and drop" below);

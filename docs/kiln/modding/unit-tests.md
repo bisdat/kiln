@@ -423,6 +423,32 @@ public void FilledChestsPulseGreen()
 }
 ```
 
+- **Live game values** (`kiln.UiSnapshot`, since 0.2.0-dev.31, mod API 0.2.16) <a id="live-game-values"></a>. Kiln.Blocks'
+  `BlockUi.ReadWorld` and `DemandWorld` (and a window's `world.*` bindings) run on the kit's kiln.ui.snapshot, so a mod
+  that reads the local player's health, position or inventory is tested offline. The test is the game's collector:
+  `kiln.UiSnapshot.Publish(new FakeWorldSample { Vitals = new FakeVitals(413, 500), Position = new FakeWorldPosition(1.5,
+  -2, 3.25), Inventory = [new FakeWorldSlot(Item: 0xAA, Count: 1)], HostHours = 13.5 })` makes the newest publication at
+  once. Only what something demanded is in it (`Demanded`, `Demands` show what the mod asked for); a group the sample
+  leaves out, or that nobody demanded, is `NoSnapshot`, and `Unavailable` gives a group another reason
+  (`StaleSource`, `LayoutOff` ...). More than 512 slots is `Budget`; the hour on a `HarnessSide.JoinedClient` harness is
+  `DeferredSource`. `EndWorld()` is a world change: the publication goes, every token is revoked, `ReadWorld` answers
+  `NoWorld` until the next `Publish`. `Tokens` counts reads not released. `kiln.Capabilities.Override("ui.blocks.world",
+  false)` makes `ReadWorld` and `DemandWorld` throw `KilnUnavailableException`. Not modelled: the game's collector (05a's
+  stage, the client world's step, GetEntityTransform, kiln.time), the 100 ms cadence, the 1000 ms age and the 2 s token
+  life; the fake answers on every harness side. Window state, a mod's own data (`BlockUi.Bindings`) and Server-target
+  commands need kiln.ui and kiln.net, which the kit does not fake: test their logic without the kit.
+
+```csharp
+[Fact]
+public void TheHealthLineShowsTheGamesHealth()
+{
+    using var kiln = new KilnHarness();
+    kiln.Load<MyMod>();   // its OnLoad: BlockUi.DemandWorld(UiWorldFields.LocalVitals)
+    kiln.UiSnapshot.Publish(new FakeWorldSample { Vitals = new FakeVitals(413, 500) });
+    Assert.Equal("413 / 500", kiln.Run(MyMod.HealthText));   // reads BlockUi.ReadWorld()
+}
+```
+
 - **Quests and talent trees** need no fake: Kiln.Quests' quest engine and Kiln.Skills' talent trees are Kiln's own
   managed code, and they run on the fake players and saves. A quest a mod defines is started, advanced and completed
   for a fake player through `Quests.Start`, `Advance` and `Complete`, with `QuestStartedEvent`, `QuestStepEvent` and
@@ -575,6 +601,7 @@ time with them sees almost none pass between steps, and an `await Task.Delay(...
 | The game's inventory slots | recording fake | `kiln.ui.inventory`, `ui.slots.click`, `ui.slots.inspect`, `ui.inventory.panels` | Ui.Inventory's own code on the kit's kiln.ui.inventory: OnClick handlers subscribe with their button, exact modifiers and Take; a test draws a screen's slots (KilnHarness.UiInventory.Draw), hovers one (Hovered) and clicks it (Click): only on a screen with a pointer, the matching handlers get the click with the slot's item and entity, Taken when one asked for it. Marks and MarkWhen rules are Kiln.Ui's (MarkOf: what a drawn slot would show); Ui.Values.Slots reads the drawn frame. The screen a Draw draws on is the open one: Ui.Inventory.Screen and ScreenChanged follow it (OpenBackpack, OpenChest with the chest's entity, CloseScreen), and PanelsShown names the AddPanel panels that would show there (their screens and When). Offline: the game's drawing and hooks, the pixel mapping (no panel is drawn or placed), the 250 ms frame age. |
 | Captured item detail (Since 0.2.0-dev.30.5) | recording fake | `kiln.ui.item_detail`, `ui.item_detail` | Owned text/stat-float recordings, exact client identity or item+level+rarity lookup, strict UTF-8 byte budgets, worker reads and 64-entry capture-order eviction. UiItemDetail.Capture/Clear supply captures and model a world change. Not modelled: game text construction, native capture failures, session lifecycle, hooks or drawing. |
 | Expanded slot subscriptions | recording fake | `kiln.ui.slots` | Negotiated 120-byte slot frames from UiInventory.Draw, including rarity and level. Legacy kiln.ui.values subscribers retain 112-byte records. Not modelled: game drawing, hooks or pixel mapping. |
+| Live game values (BlockUi.ReadWorld) | recording fake | `kiln.ui.snapshot`, `ui.blocks.world`, `world.vitals`, `world.position`, `world.inventory`, `world.host_time` | Kiln.Blocks' own BlockUi.ReadWorld, DemandWorld and the world.* bindings on the kit's kiln.ui.snapshot: demands join into the groups a publication carries (64 per mod, 1024 in all), a test publishes the local player's vitals, position, own inventory and the hosted world's hour (KilnHarness.UiSnapshot.Publish): what nobody demanded is NoSnapshot, more than 512 slots is Budget, the hour on a JoinedClient harness is DeferredSource. A read pins one whole publication (2 tokens per mod, 128 in all; an undersized copy writes nothing and the retry gets the same one); EndWorld clears it and revokes every token (NoWorld until the next Publish). Offline: the game's collector (05a's stage, the client world's Post, GetEntityTransform, kiln.time), the 100 ms cadence, the 1000 ms age and the 2 s token life; the fake answers on every side, a dedicated server's harness included. Window state, mods' own data and Server-target commands need kiln.ui and kiln.net, which the kit does not fake. |
 | Values in the game UI | recording fake | `kiln.ui.values`, `ui.values.detail`, `ui.values.slot`, `ui.values.held`, `ui.values.hud`, `ui.values.tooltip_lines` | Ui.Values' own code on the kit's kiln.ui.values: providers register (ItemBar, SlotBar, HeldBar, Hud, TooltipLines) and a test draws a value or a detail view (KilnHarness.UiValues.Draw, DetailLines) over a fake item: the providers run in order over the accumulated value, edits are checked by the kind's masks, refusals and faults are recorded (Decisions). Offline: the game's drawing and hooks, change events and the Item details window. Slot frames (ui.slots.inspect): the frames a test draws with KilnHarness.UiInventory.Draw. |
 | Systems | recording fake | `systems.wraps`, `systems.wraps.typed` | Kiln.Systems' own code on the kit's kiln.world v4. The programs are the ones the test declares (KilnHarness.Programs.Add, or Add<T> with a Kiln.Game view: its lists and contract); each step runs each one once per archetype of the fake world's entities that have its read, write and with components (of the types the world knows; template data is not matched), on the tick thread: Befores high priority first, then the Replace or the declared update, then the Afters in reverse. Per-entity stages iterate the slice and read and write the entities' components in the fake world; marks are recorded (KilnHarness.Programs.Marks), WhenArchetype decides by the entity's component set, the contract is FNV-1a-32 of the lists. The 1 ms stage budget excludes the original; ten consecutive overruns disable it. Managed faults use the real mod policy. Not modelled: the game's workers and its scheduling order between programs, singleton slots (empty), attribute formulas (Changed() validates and changes nothing), native faults, client and prediction worlds, boot reservations (systems.define offline), native SET. |
 | WorldTables | recording fake | `kiln.worldtables`, `worldtables.budgets`, `worldtables.material_pools` | Scripted immutable boot pools, budgets, refusal and receipts; pending tool-policy pools validated against the decoded 56-item vanilla terrain pool and item-to-cell mapping; computed spherical brush descriptors and fill bytes; recorded recipes for pending tools (kiln.content stays unavailable). No extra game-visible tool pool rows or live tool actions. New calls cannot register into the closed boot registry. No game resource ingestion, selector, renderer, save remap, or actual network handshake is modelled. |
@@ -629,6 +656,7 @@ time with them sees almost none pass between steps, and an `await Task.Delay(...
 | kiln.tools | unavailable | `kiln.tools` | no fake: the service finds no native table, so its own Available is false and its row says offline |
 | kiln.toolwear | unavailable | `kiln.toolwear` | no fake: the service finds no native table, so its own Available is false and its row says offline |
 | kiln.ui | unavailable | `kiln.ui` | no fake: the service finds no native table, so its own Available is false and its row says offline |
+| kiln.ui.blocks | unavailable | `kiln.ui.blocks` | no fake: the service finds no native table, so its own Available is false and its row says offline |
 | kiln.ui.tick | unavailable | `kiln.ui.tick` | no fake: the service finds no native table, so its own Available is false and its row says offline |
 | kiln.vfx | unavailable | `kiln.vfx` | no fake: the service finds no native table, so its own Available is false and its row says offline |
 | kiln.world.budget | unavailable | `kiln.world.budget` | no fake: the service finds no native table, so its own Available is false and its row says offline |

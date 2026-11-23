@@ -9,8 +9,8 @@ const SCHEMA: &str = include_str!("../../../../schema/kiln-blocks.schema.json");
 
 /// Top-level schema properties that are no section of blocks. `resourcePatches` (08-onboot S10) and `baseRules` (0.2.0-dev.31) are
 /// read by kiln.boot's patches collector, not by Kiln.Blocks, and their names do not share the blocks' name space, so the
-/// duplicate-name rule must not see them.
-const NOT_SECTIONS: &[&str] = &["$schema", "format", "comment", "resourcePatches", "baseRules"];
+/// duplicate-name rule must not see them. `statImports` (0.2.0-dev.31) is a list of other mods' stats the UI blocks show, no block kind.
+const NOT_SECTIONS: &[&str] = &["$schema", "format", "comment", "resourcePatches", "baseRules", "statImports"];
 
 fn schema_sections() -> BTreeSet<String> {
     let v: serde_json::Value = serde_json::from_str(SCHEMA).expect("kiln-blocks.schema.json parses");

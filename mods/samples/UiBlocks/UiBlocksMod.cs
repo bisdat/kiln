@@ -80,5 +80,56 @@ public sealed class UiBlocksMod : Mod
         // the player can move this in the Kiln menu's Keys tab
         Blocks.Define("open-settings", new KeyBindingBlock { Key = "F8", Description = "Open the UI blocks sample", Does = new UiAction { OpenWindow = "settings" } });
         Blocks.Define("toggle-status", new KeyBindingBlock { Key = "Ctrl+F8", Description = "Show or hide the status line", Does = new UiAction { Toggle = "config.status.show" } });
+
+        // blocks/camp.json's window reads the mod's own data as mod.quests and mod.places: defined here, before the data files
+        // compile, on every side (a dedicated server checks the window too); published only where a window can show it
+        CampData(publish: Ui.Available);
+    }
+
+    public override void OnUnload()
+    {
+        _quests?.Dispose();
+        _places?.Dispose();
+    }
+
+    private UiDataRegistration? _quests, _places;
+
+    // The mod's own rows and tree for the camp window (since 0.2.0-dev.31). Define works on every side; Publish needs an
+    // overlay (ui.blocks.bindings): it copies at once and the window shows the last committed publication at its next refresh.
+    private void CampData(bool publish)
+    {
+        _quests = BlockUi.Bindings.Define("quests", new UiDataSchema(UiDataShape.Rows,
+            Fields: [new("name", UiScalarType.String), new("reward", UiScalarType.Decimal), new("done", UiScalarType.Bool)]));
+        _places = BlockUi.Bindings.Define("places", new UiDataSchema(UiDataShape.Tree, Fields: [new("danger", UiScalarType.Int64)]));
+        if (!publish) return;
+        static Dictionary<string, UiScalar> Quest(string name, decimal reward, bool done) => new()
+        {
+            ["name"] = new UiScalar.String(name), ["reward"] = new UiScalar.Decimal(reward), ["done"] = new UiScalar.Bool(done),
+        };
+        _ = BlockUi.Bindings.Publish("quests", new UiDataSnapshot.Rows(
+        [
+            new("spring", Quest("Find the spring", 12.5m, false)),
+            new("wolves", Quest("Drive off the wolves", 40m, false)),
+            new("bridge", Quest("Mend the bridge", 7.25m, true)),
+        ]));
+        static Dictionary<string, UiScalar> Danger(long d) => new() { ["danger"] = new UiScalar.Int64(d) };
+        _ = BlockUi.Bindings.Publish("places", new UiDataSnapshot.Tree(
+        [
+            new("east", null, "Eastern hills", Danger(1)),
+            new("east.mill", "east", "Old mill", Danger(2)),
+            new("east.cave", "east", "Crystal cave", Danger(4)),
+            new("west", null, UiText.Of(("en", "Western marsh"), ("de", "Westliches Moor")), Danger(3)),
+        ]));
+    }
+
+    // The camp window's "Rest at the fire" button runs this on the server as the player who pressed it (commandTarget
+    // server): the player comes from the connection, the stat goes up, and the window shows the new value once it syncs.
+    [Command("uiblocks-rest", Description = "rest at the fire: +1 rest (UI blocks sample)")]
+    private void Rest(CommandContext c)
+    {
+        if (!c.Source.IsPlayer) throw new CommandException("only a player rests");
+        var r = ModValues.Add(CharacterData.KeyOf(c.Source.Player), ModValues.Key("rests"), 1);
+        if (!r.Ok) throw new CommandException($"not counted: {r.Reason}");
+        c.Reply($"You rest by the fire ({ModValues.Format(r.After!)} rests).");
     }
 }

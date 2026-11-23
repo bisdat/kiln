@@ -9,7 +9,9 @@
     <Version>0.1.0</Version>
     <Description>A settings window (F8 and the pause menu) on the mod's own config, a status line on the HUD, a button that casts an ability and one that applies an effect.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <KilnServices>Blocks;Ui;Abilities</KilnServices>
+    <KilnServices>Blocks;Ui;Abilities;Chat;ModValues;Saves</KilnServices>
+    <!-- the default folders, and mod-values/ (the camp window's stat) -->
+    <KilnModFolders>content;assets;skills;quests;blocks;icons;impact;audio;vfx;models;mod-values</KilnModFolders>
   </PropertyGroup>
   <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.targets" />
 </Project>

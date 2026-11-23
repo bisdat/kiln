@@ -536,6 +536,20 @@ steps.
 | `stats.ui` | managed, static | Kiln.ModValues | the stat source of UI blocks: client only (`wrong-side` on a server), needs kiln.ui |
 | `kiln.mod-values` | core (in-core service) | core | the native facade's table is here; its calls answer `unavailable` until Kiln.ModValues has bound the backend (through the Kiln-internal `kiln.internal.mod-values.backend`, which has no row) |
 
+Richer UI blocks ([../modding/ui-blocks.md](../modding/ui-blocks.md#richer-windows-since-020-dev31)), reported with Kiln.Blocks' rows and kiln.ui.snapshot's:
+
+| Row | Kind | Reported by | What it says |
+|---|---|---|---|
+| `ui.blocks.tables`, `ui.blocks.images`, `ui.blocks.state`, `ui.blocks.bindings` | managed, static | Kiln.Blocks | tables, pictures, window state and mods' own data: a player's game with an overlay (`wrong-side` on a dedicated server, `service-missing` without kiln.ui) |
+| `ui.blocks.input`, `ui.blocks.tabs`, `ui.blocks.trees` | managed, static | Kiln.Blocks | as above, and kiln.ui.blocks (`service-older` on a Kiln without it: a text field shows its value read-only) |
+| `ui.blocks.world` | managed | Kiln.Blocks (kiln.ui.snapshot) | `BlockUi.ReadWorld`/`DemandWorld` and `world.*` bindings: kiln.ui.snapshot is here (client only) |
+| `world.vitals`, `world.inventory` | managed | Kiln.Blocks (kiln.ui.snapshot) | the local player's vitals / own inventory: also needs `ui.values.hud` (05a's player-UI update) |
+| `world.position` | managed | Kiln.Blocks (kiln.ui.snapshot) | the local player's position: the core's GetEntityTransform on the client world |
+| `world.host_time` | managed | Kiln.Blocks (kiln.ui.snapshot) | the hosted world's hour: kiln.time; on a joined world the value is deferred, never read remotely |
+| `ui.command.server` | managed, session | Kiln.Blocks | `commandTarget: "server"` and `BlockUi.ExecuteOnServer`: available while the joined (or hosted) server's `kiln:ui-command` said hello; a vanilla or older server leaves it off |
+| `kiln.ui.blocks` | core (kiln-ui.dll) | core | the table of tab selection, tree open state, item edit state and text fields with Kiln's flags |
+| `kiln.ui.snapshot` | core (in-core service, client) | core | the live-values collector's table |
+
 ## Rows added in dev.31 (station menus)
 
 | Row | Kind | Reported by | Unconfirmed | What it says |
