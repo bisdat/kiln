@@ -142,17 +142,20 @@ int main() {
     check(bytes("FILTER") == journal_before,
           "save-time filtering does not modify the persistent kept-chunk JSON");
 
-    // ---- which caller gets Kiln's boxes: the world save only (and, so no edit goes unsaved, a caller Kiln does not know)
+    // ---- which caller gets Kiln's boxes: the world save only, when its call site resolved
     const kb::CallSites sites{0x1000, 0x2000, 0x3000};
     check(kb::classify_caller(0x1000, sites) == kb::Caller::WorldSave, "the save's call site is the world save");
     check(kb::classify_caller(0x2000, sites) == kb::Caller::BaseZones, "the ECS publish step's call site is base zones");
     check(kb::classify_caller(0x3000, sites) == kb::Caller::BaseQuery, "the ECS query callback's call site is base query");
     check(kb::classify_caller(0x4000, sites) == kb::Caller::Unknown, "any other return address is unknown");
     check(kb::classify_caller(0x1000, kb::CallSites{}) == kb::Caller::Unknown, "unresolved call sites make every caller unknown");
-    check(kb::kiln_boxes_for(kb::Caller::WorldSave) && kb::kiln_boxes_for(kb::Caller::Unknown),
-          "the world save and an unknown caller get Kiln's boxes");
-    check(!kb::kiln_boxes_for(kb::Caller::BaseZones) && !kb::kiln_boxes_for(kb::Caller::BaseQuery),
-          "the base zones the game's systems and clients use never get Kiln's boxes");
+    check(kb::kiln_boxes_for(kb::Caller::WorldSave, sites) && !kb::kiln_boxes_for(kb::Caller::Unknown, sites),
+          "world save call site resolved: the world save gets Kiln's boxes, a caller Kiln does not know none");
+    check(!kb::kiln_boxes_for(kb::Caller::BaseZones, sites) && !kb::kiln_boxes_for(kb::Caller::BaseQuery, sites),
+          "world save call site resolved: the base zones the game's systems and clients use get no Kiln boxes");
+    for (kb::Caller c : {kb::Caller::WorldSave, kb::Caller::BaseZones, kb::Caller::BaseQuery, kb::Caller::Unknown})
+        check(kb::kiln_boxes_for(c, kb::CallSites{0, 0x2000, 0x3000}),
+              "world save call site unresolved: every caller gets Kiln's boxes, as up to 30.8");
 
     // ---- the game's list after its builder returned, as the hook sees it
     using regions_test::FakeList;
@@ -194,9 +197,16 @@ int main() {
     }
     {
         std::vector<uint8_t> store;
+        const int warnings = kb::warnings;
         FakeList l = run(0x4000, store, alo, ahi);
-        check(regions_test::kiln_entries(l.a) == 4 && regions_test::every_chunk_saved(l.a, kept, true),
-              "an unknown caller gets the same boxes as the world save (no edit goes unsaved)");
+        check(l.a.count == 1 && regions_test::kiln_entries(l.a) == 0,
+              "world save call site resolved: an unknown caller gets no Kiln boxes");
+        check(kb::warnings == warnings + 1 && kb::last_warning.find("none of its three known callers") != std::string::npos &&
+                  kb::last_warning.find("adds no boxes") != std::string::npos,
+              "an unknown caller is reported once, saying it gets no boxes");
+        std::vector<uint8_t> store2;
+        run(0x4000, store2, alo, ahi);
+        check(kb::warnings == warnings + 1, "an unknown caller is reported only once");
     }
     {
         // a save in the first steps after a load sees the altar's 40 m bounds: its chunks outside them get boxes
@@ -380,10 +390,75 @@ int main() {
         kb::after_save_regions(0x1000, ok, &a1.a, no_save);
         kb::after_save_regions(0x2000, ok, &a2.a, no_save);
         kb::after_save_regions(0x1000, ok, &a3.a, same);
-        check(regions_test::kiln_entries(a1.a) == 4 && regions_test::kiln_entries(a2.a) == 0,
-              "world save site unresolved: the save's call is unknown and gets the boxes, the base zones still do not");
+        check(regions_test::kiln_entries(a1.a) == 4 && regions_test::kiln_entries(a2.a) == 4,
+              "world save site unresolved: the save's call gets the boxes, and so do the base zones (as up to 30.8)");
         check(kb::classify_caller(0x1000, same) == kb::Caller::WorldSave && regions_test::kiln_entries(a3.a) == 4,
               "three names on one address: the world save wins, so the save keeps its boxes");
+    }
+    {
+        // A game update that breaks the call-site patterns (the sigdb names build/RetSaveRegions*): who gets Kiln's boxes,
+        // the warning in kiln.log when kiln.build starts, and the text of its kiln.caps row. The game still calls from its
+        // three sites (0x1000 world save, 0x2000 base zones, 0x3000 base query); 0x4000 is a caller Kiln never knew.
+        const std::string save_name = "build/RetSaveRegionsWorldSave", zones_name = "build/RetSaveRegionsBaseZones",
+                          query_name = "build/RetSaveRegionsBaseQuery";
+        struct Case {
+            const char* what;
+            kb::CallSites sites;
+            bool boxes[4];  // world save, base zones, base query, another caller
+            std::vector<std::string> missing;
+        };
+        const Case cases[] = {
+            {"all resolved", {0x1000, 0x2000, 0x3000}, {true, false, false, false}, {}},
+            {"base zones missing", {0x1000, 0, 0x3000}, {true, false, false, false}, {zones_name}},
+            {"base query missing", {0x1000, 0x2000, 0}, {true, false, false, false}, {query_name}},
+            {"world save missing", {0, 0x2000, 0x3000}, {true, true, true, true}, {save_name}},
+            {"all missing", {0, 0, 0}, {true, true, true, true}, {save_name, zones_name, query_name}},
+        };
+        for (const Case& c : cases) {
+            const std::string what = c.what;
+            auto says = [](const std::string& text, const std::string& part) { return text.find(part) != std::string::npos; };
+            const int warnings = kb::warnings, reports = kb::cap_reports;
+            kb::last_info.clear();
+            kb::last_warning.clear();
+            kb::announce_sites(c.sites);
+            const bool all = c.missing.empty();
+            check(kb::warnings == warnings + (all ? 0 : 1),
+                  (what + ": a warning in kiln.log exactly when a name is missing").c_str());
+            check(kb::cap_reports == reports + 1, (what + ": kiln.build reports its kiln.caps row").c_str());
+            const std::string& line = all ? kb::last_info : kb::last_warning;
+            for (const std::string& name : {save_name, zones_name, query_name}) {
+                const bool listed = std::find(c.missing.begin(), c.missing.end(), name) != c.missing.end();
+                check(says(line, name) == listed,
+                      (what + ": kiln.log names " + name + " exactly when it is missing").c_str());
+                check(says(kb::cap_text, name) == listed,
+                      (what + ": the row names " + name + " exactly when it is missing").c_str());
+            }
+            if (!all) {
+                check(says(line, "not resolved") && says(kb::cap_text, "not resolved"),
+                      (what + ": the warning and the row say the names did not resolve").c_str());
+            }
+            if (c.sites.world_save) {
+                check(kb::cap_available && says(kb::cap_text, "world save's region list only") &&
+                          says(line, "world save's region list only"),
+                      (what + ": row available; Kiln's boxes go into the world save's list only").c_str());
+            } else {
+                check(!kb::cap_available && says(kb::cap_text, "every caller") && says(kb::cap_text, "0.2.0-dev.30.8") &&
+                          says(line, "every caller") && says(line, "Flame Altar"),
+                      (what + ": row unavailable; every caller gets Kiln's boxes, as up to 0.2.0-dev.30.8").c_str());
+            }
+            const uintptr_t rets[4] = {0x1000, 0x2000, 0x3000, 0x4000};
+            const char* who[4] = {"the world save", "the base zones", "the base query", "another caller"};
+            for (int i = 0; i < 4; ++i) {
+                std::vector<uint8_t> store;
+                FakeList l = regions_test::make_list(store);
+                regions_test::add_entry(l, base_id, alo, ahi);
+                kb::after_save_regions(rets[i], ok, &l.a, c.sites);
+                const bool got = c.boxes[i]
+                                     ? regions_test::kiln_entries(l.a) == 4 && regions_test::every_chunk_saved(l.a, kept, true)
+                                     : l.a.count == 1 && regions_test::kiln_entries(l.a) == 0;
+                check(got, (what + ": " + who[i] + (c.boxes[i] ? " gets Kiln's boxes" : " gets none")).c_str());
+            }
+        }
     }
     kb::g_chunks = kept;
     kb::g_boxes_stale = true;

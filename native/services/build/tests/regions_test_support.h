@@ -3,6 +3,7 @@
 // the rest of kiln.build when it is compiled alone (KILN_REGIONS_HOST_TEST), and a game-like region list to hand it.
 // Include once before "../regions.cpp" with KILN_REGIONS_SUPPORT_STUBS defined, and once after it without.
 #ifdef KILN_REGIONS_SUPPORT_STUBS
+#include <cstdarg>
 #include <cstdint>
 #include <cstdio>
 #include <string>
@@ -21,10 +22,33 @@ std::string identity;
 std::string detail;
 void set_detail(const char* text) { detail = text; }
 std::string current_world() { return identity; }
+// kiln.log: the newest line of each level as regions.cpp formatted it
+std::string last_info, last_warning;
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((format(printf, 3, 4)))
+#endif
+void log_line(std::string& line, int* count, const char* fmt, ...) {
+    char buf[1024];
+    va_list ap;
+    va_start(ap, fmt);
+    std::vsnprintf(buf, sizeof buf, fmt, ap);
+    va_end(ap);
+    line = buf;
+    if (count) ++*count;
+}
+// kiln.caps: the newest report of the row about the save-region builder's callers
+int cap_reports = 0;
+bool cap_available = false;
+std::string cap_text;
+void report_callers_row(bool available, const std::string& text) {
+    ++cap_reports;
+    cap_available = available;
+    cap_text = text;
+}
 }
 #define KILN_REGIONS_HOST_TEST
-#define KB_I(...) ((void)0)
-#define KB_W(...) ((void)++::kb::warnings)
+#define KB_I(...) ::kb::log_line(::kb::last_info, nullptr, __VA_ARGS__)
+#define KB_W(...) ::kb::log_line(::kb::last_warning, &::kb::warnings, __VA_ARGS__)
 #define KB_E(...) ((void)++::kb::errors)
 #else
 #include <array>
