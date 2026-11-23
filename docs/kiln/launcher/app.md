@@ -666,7 +666,10 @@ is a webview that never painted the page (a player on NVIDIA / X11 with 0.2.0-de
     GPU start writes `state/nvidia-frame-pending.json`. If that start expected a visible window but never confirmed a
     painted frame, the **next** start tries both SHM variables once. Internal DMA-BUF fallback markers do not prevent
     this attempt; explicit software/no-DMA-BUF flags, environment overrides, a manual off choice, and non-NVIDIA
-    machines do. Once visible, the recovery attempt explains why it was chosen.
+    machines do. A corrupt/unreadable preference is treated as off, and only a valid, matching success record can
+    remember SHM. Once visible, the recovery attempt explains why it was chosen. A process-held
+    `state/render-startup.lock` keeps a second launcher from treating a live attempt as a crash or changing its markers;
+    if that lock is unavailable, this start applies no SHM override or automatic renderer restart.
   - The SHM attempt has a different guard, `state/force-dmabuf-pending.json`, written before either variable is set or
     WebKit is used (including the sandbox probe). If it cannot write that guard, it forces nothing. If this attempt
     also dies or times out, the next start forces nothing, turns the switch off, and writes

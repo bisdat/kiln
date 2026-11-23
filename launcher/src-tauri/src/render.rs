@@ -358,7 +358,12 @@ pub fn force_chosen(path: &Path) -> bool {
 
 /// None differs from an explicit manual off: only an unset preference may recover automatically.
 fn force_setting(path: &Path) -> Option<bool> {
-    kiln_manage::util::read_json::<ForceChoice>(path).ok().flatten().map(|c| c.on)
+    match kiln_manage::util::read_json::<ForceChoice>(path) {
+        Ok(Some(c)) if c.format == 1 => Some(c.on),
+        Ok(None) => None,
+        // A damaged or unreadable preference is not permission to try an unsafe renderer again.
+        _ => Some(false),
+    }
 }
 
 pub fn normal_pending(d: &DataDirs) -> PathBuf { d.root.join("state/nvidia-frame-pending.json") }
@@ -407,6 +412,26 @@ fn write_startup_guard(path: &Path, context: &str, visible: bool, why: &str) -> 
 fn expected_frame(path: &Path, context: &str) -> bool {
     if !path.is_file() { return false; }
     kiln_manage::util::read_json::<StartupGuard>(path).ok().flatten().is_none_or(|g| g.context == context && g.visible)
+}
+
+/// Unlike a crash breadcrumb, a damaged success record proves nothing.
+fn confirmed_frame(path: &Path, context: &str) -> bool {
+    kiln_manage::util::read_json::<StartupGuard>(path).ok().flatten()
+        .is_some_and(|g| g.marker.format == 1 && g.context == context && g.visible)
+}
+
+/// Keep the lock for this process's lifetime. A second launcher must neither mistake a live attempt for a crash nor
+/// overwrite/clear its breadcrumbs. The OS releases this lock on a crash or exec; the lock file itself stays put.
+#[cfg(target_os = "linux")]
+fn own_renderer_state(dirs: &DataDirs) -> Result<(), Error> {
+    let path = dirs.root.join("state/render-startup.lock");
+    let dir = path.parent().unwrap();
+    std::fs::create_dir_all(dir).map_err(kiln_manage::util::io_at(dir, "creating renderer state"))?;
+    let file = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(false)
+        .open(&path).map_err(kiln_manage::util::io_at(&path, "opening renderer startup lock"))?;
+    file.try_lock().map_err(|e| Error::invalid(format!("Renderer startup state is unavailable: {e}")))?;
+    let _ = RENDER_LOCK.set(file);
+    Ok(())
 }
 
 pub fn write_force_choice(path: &Path, on: bool) -> Result<(), Error> {
@@ -997,6 +1022,9 @@ static FORCE_PENDING: Mutex<Option<PathBuf>> = Mutex::new(None);
 static FORCE_LEFT: OnceLock<(PathBuf, String)> = OnceLock::new();
 /// Why this start could not arm its guard: the switch goes off once the data folder opens.
 static FORCE_GUARD_ERROR: OnceLock<String> = OnceLock::new();
+#[cfg(target_os = "linux")]
+static RENDER_LOCK: OnceLock<std::fs::File> = OnceLock::new();
+static RENDER_OWNER: OnceLock<bool> = OnceLock::new();
 static RENDER_CONTEXT: OnceLock<String> = OnceLock::new();
 static NORMAL_PENDING: Mutex<Option<PathBuf>> = Mutex::new(None);
 /// The [`FORCE_RESTARTED`] value this start was given: a later restart keeps it ([`Relaunch::keeping`]).
@@ -1076,6 +1104,7 @@ fn clear_pending(when: &str) {
 /// earlier start left (then that one goes), or for this start's watchdog restart when its marker could not be written
 /// then. Before the gate a start only reads the data folder (and writes its own pending marker).
 pub fn after_gate() {
+    if RENDER_OWNER.get() == Some(&false) { return; }
     x11_note(None, true);
     force_after_gate();
     if WATCH.has_painted() { finish_frame("the data folder opened after a visible frame"); }
@@ -1137,6 +1166,7 @@ pub fn leaving() {
 /// intentionally hidden page; the frontend acknowledges painting only after two visible animation frames.
 pub fn frame_painted(painted: bool, visible: bool) -> Option<String> {
     choice()?; // Only Linux has renderer startup guards.
+    if RENDER_OWNER.get() == Some(&false) { return None; }
     if let Some(context) = RENDER_CONTEXT.get() {
         for pending in [&NORMAL_PENDING, &FORCE_PENDING] {
             let pending = pending.lock().unwrap_or_else(|e| e.into_inner());
@@ -1158,6 +1188,7 @@ pub fn frame_painted(painted: bool, visible: bool) -> Option<String> {
 }
 
 fn finish_frame(when: &str) {
+    if RENDER_OWNER.get() == Some(&false) { return; }
     let Ok(dirs) = crate::state::dirs() else { return };
     if force().is_some_and(|f| matches!(f.why, ForceWhy::Recovery | ForceWhy::Recovered))
         && force_setting(&force_choice(&dirs)).is_none()
@@ -1690,14 +1721,21 @@ fn prepare_for_driver(args: &[String], nvidia: bool) {
     // Ubuntu WebKit's NVIDIA block: Settings' switch; a forced start before this one that died (its guard was left) or
     // whose page was late (the watchdog's restart) forces nothing now and turns the switch off once the data folder opens;
     // the user's own variables (ours were taken back above) always win
+    let owns_state = dirs.as_ref().is_some_and(|dd| match own_renderer_state(dd) {
+        Ok(()) => true,
+        Err(e) => { log(&format!("not changing renderer startup state: {}", e.message)); false }
+    });
+    let _ = RENDER_OWNER.set(owns_state);
     let context = startup_context(x.on);
     let _ = RENDER_CONTEXT.set(context.clone());
-    let force_left = dirs.as_ref().map(force_pending).filter(|p| expected_frame(p, &context)).map(|p| { let why = force_crash_why(&p); (p, why) });
+    let force_left = dirs.as_ref().filter(|_| owns_state).map(force_pending).filter(|p| expected_frame(p, &context)).map(|p| { let why = force_crash_why(&p); (p, why) });
     let force_yours = [FORCE_VAR, SHM_VAR].iter().any(|k| std::env::var_os(k).is_some());
-    let setting = dirs.as_ref().and_then(|dd| force_setting(&force_choice(dd)));
-    let recovered = dirs.as_ref().is_some_and(|dd| expected_frame(&force_recovered(dd), &context));
-    let normal_failed = dirs.as_ref().is_some_and(|dd| expected_frame(&normal_pending(dd), &context));
-    let automatic = nvidia && setting.is_none() && (normal_failed || recovered) && !force_yours
+    let setting = if owns_state { dirs.as_ref().and_then(|dd| force_setting(&force_choice(dd))) } else { Some(false) };
+    let recovered = owns_state && dirs.as_ref().is_some_and(|dd| confirmed_frame(&force_recovered(dd), &context));
+    let normal_failed = owns_state && dirs.as_ref().is_some_and(|dd| expected_frame(&normal_pending(dd), &context));
+    let render_yours = kiln_manage::hostenv::RENDER_VARS.iter().chain([ENV, DMABUF_ENV].iter())
+        .any(|k| std::env::var_os(k).is_some());
+    let automatic = owns_state && !render_yours && c.why == Why::Default && nvidia && setting.is_none() && (normal_failed || recovered) && !force_yours
         && force_left.is_none() && force_restarted.is_none() && c.mode == Mode::Gpu;
     // Internal sticky/restart DMA-BUF fallbacks must not prevent the one SHM attempt. Explicit user choices still win.
     if automatic {
@@ -1868,6 +1906,7 @@ pub fn prepare(_args: &[String]) {}
 /// window and WebKit start: after crate::sandbox's message (whose restart or Quit is no crash).
 #[cfg(target_os = "linux")]
 pub fn watch() {
+    if RENDER_OWNER.get() == Some(&false) { return; }
     let Some(c) = choice().cloned() else { return };
     let d = dmabuf().cloned().unwrap_or(Dmabuf { on: false, why: DmabufWhy::Software, ignored: None });
     let f = force().cloned().unwrap_or(ForceDmabuf { step: Force::Off, why: ForceWhy::Unused });
@@ -2761,6 +2800,16 @@ mod tests {
             if case == "sticky-dmabuf" { write_marker_file(&dmabuf_marker(&dirs), "an internal fallback").unwrap(); }
             if ["guard-denied", "auto-guard-denied"].contains(&case.as_str()) { std::fs::create_dir(force_pending(&dirs)).unwrap(); }
             if case == "unwritable-escape" { std::fs::create_dir(force_choice(&dirs)).unwrap(); }
+            if case == "corrupt-choice" { std::fs::write(force_choice(&dirs), b"{").unwrap(); }
+            if case == "corrupt-recovered" {
+                clear_marker_file(&normal_pending(&dirs)).unwrap();
+                std::fs::write(force_recovered(&dirs), b"{").unwrap();
+            }
+            let _competing = if case == "competing" {
+                let file = std::fs::File::create(dirs.root.join("state/render-startup.lock")).unwrap();
+                file.try_lock().unwrap();
+                Some(file)
+            } else { None };
             let args = if case == "software" { args(&[ARG_SOFTWARE]) } else if ["escape", "unwritable-escape"].contains(&case.as_str()) { args(&[ARG_NO_DMABUF]) } else { args(&[]) };
             prepare_for_driver(&args, case != "non-nvidia");
             match case.as_str() {
@@ -2825,7 +2874,7 @@ mod tests {
             return;
         }
         let mut failures = Vec::new();
-        for case in ["success", "guard-denied", "software", "automatic", "non-nvidia", "manual-off", "escape", "shm-failed", "recovered", "fresh", "hidden", "other-backend", "recovered-off", "failed-recovered", "sticky-dmabuf", "restart-escape", "failed-off-write", "auto-guard-denied", "unwritable-escape"] {
+        for case in ["success", "guard-denied", "software", "automatic", "non-nvidia", "manual-off", "escape", "shm-failed", "recovered", "fresh", "hidden", "other-backend", "recovered-off", "failed-recovered", "sticky-dmabuf", "restart-escape", "failed-off-write", "auto-guard-denied", "unwritable-escape", "user-software", "user-dmabuf", "corrupt-choice", "corrupt-recovered", "competing"] {
             let mut cmd = Command::new(std::env::current_exe().unwrap());
             cmd.args(["--exact", "render::tests::forced_startup_is_guarded_before_any_webkit_use", "--nocapture"])
                 .env(CASE, case);
@@ -2837,6 +2886,8 @@ mod tests {
             // A user's DMA-BUF=0 must not make the opt-in apply in software mode.
             if case == "software" { cmd.env(DMABUF_VAR, "0"); }
             if case == "restart-escape" { cmd.env(FORCE_RESTARTED, "off"); }
+            if case == "user-software" { cmd.env("LIBGL_ALWAYS_SOFTWARE", "1"); }
+            if case == "user-dmabuf" { cmd.env(DMABUF_VAR, "0"); }
             let out = cmd.output().unwrap();
             if !out.status.success() {
                 failures.push(format!("{case}: {}\n{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr)));
