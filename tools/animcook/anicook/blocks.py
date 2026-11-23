@@ -644,9 +644,20 @@ def body_manifest(recipe_path, entries, update, selected=None, producer="modelco
         specs = npc_bodies(root)
     if not specs and not (root / "assets/cooked/npc-bodies.v1.json").exists():
         return entries, [], []
+    def object_value(value, where):
+        if not isinstance(value, dict):
+            raise BlocksError(f"{where}: an object is required")
+        return value
+
+    def object_rows(value, where):
+        if not isinstance(value, list):
+            raise BlocksError(f"{where}: an array of objects is required")
+        return [object_value(row, f"{where}[{i}]") for i, row in enumerate(value)]
+
     try:
         path = CP.npc_manifest(recipe_path)
-        old = json.loads(path.read_text()) if path.exists() else {"format": 1, "entries": [], "bodies": {}}
+        old = object_value(json.loads(path.read_text()) if path.exists() else {"format": 1, "entries": [], "bodies": {}}, "npc-bodies.v1")
+        old_entries = object_rows(old.get("entries", []), "npc-bodies.v1.entries")
         sources = {}
         for file in sorted({s[field][key] for s in specs.values() for field, key in (("body", "model"), ("animation", "clips"))}):
             raw = CP.source(recipe_path, file).read_bytes()
@@ -657,10 +668,11 @@ def body_manifest(recipe_path, entries, update, selected=None, producer="modelco
                 document = json.loads(raw[20:20 + int.from_bytes(raw[12:16], "little")].rstrip(b"\0 \t\r\n"))
             else:
                 document = json.loads(raw)
+            document = object_value(document, file)
             # An external glTF buffer/image can change without changing the glTF JSON. Both producers must then
             # rebuild their part; hashing only the container would let one reuse an obsolete model or rig.
             for section in ("buffers", "images"):
-                for entry in document.get(section, []):
+                for entry in object_rows(document.get(section, []), f"{file}.{section}"):
                     uri = entry.get("uri")
                     if isinstance(uri, str) and not uri.startswith("data:"):
                         # URI parents are relative to the glTF, not forbidden mod-relative source syntax. Check the
@@ -694,7 +706,7 @@ def body_manifest(recipe_path, entries, update, selected=None, producer="modelco
             else:
                 raise BlocksError(f"{row['file']}: {producer} did not produce this body resource")
             deferred.append(row)
-        wanted = [dict(e) for e in old.get("entries", []) if e.get("producer") != producer] + deferred if specs else []
+        wanted = [dict(e) for e in old_entries if e.get("producer") != producer] + deferred if specs else []
         wanted.sort(key=lambda e: (e["file"], e.get("kind", ""), e.get("type", "")))
         # Only the tool that rebuilt a file can establish its expected hash. Validate the other producer's bytes,
         # but never bless corruption by replacing that producer's expected digest (or mutating the old manifest).
@@ -705,14 +717,14 @@ def body_manifest(recipe_path, entries, update, selected=None, producer="modelco
                 foreign_mismatched.append(e)
             # Hashes prove this machine's outputs only. Cross-machine agreement uses authored sourceHash, not these bytes.
         bodies = {}
-        recipe = json.loads(Path(recipe_path).read_text())
+        recipe = object_value(json.loads(Path(recipe_path).read_text()), str(recipe_path))
         cooked_dir = Path(recipe_path).parent / recipe.get("out", "cooked")
         anim_current = any(e.get("producer") == "animcook" and e.get("sourceHash") == source_hash for e in wanted)
         model_current = any(e.get("producer") == "modelcook" and e.get("sourceHash") == source_hash for e in wanted)
 
         def metadata(file):
             checked = CP.cooked(recipe_path, file, "an NPC body's metadata")
-            return json.loads(checked.read_text()) if checked.is_file() else None
+            return object_value(json.loads(checked.read_text()), checked.name) if checked.is_file() else None
 
         for name, spec in specs.items():
             graph = metadata(cooked_dir / f"{spec['graphName']}.graph.json")
@@ -733,8 +745,10 @@ def body_manifest(recipe_path, entries, update, selected=None, producer="modelco
                     dependency(file.relative_to(root).as_posix())
             from .graphgen import derive
             for material_file in sorted((Path(root) / "blocks").glob("*.json")):
-                document = json.loads(_relaxed(CP.source(recipe_path, material_file.relative_to(root).as_posix()).read_text()))
-                for key, block in (document.get("materials") or {}).items():
+                document = object_value(json.loads(_relaxed(CP.source(recipe_path, material_file.relative_to(root).as_posix()).read_text())), material_file.name)
+                material_blocks = object_value(document.get("materials") or {}, f"{material_file.name}.materials")
+                for key, block in material_blocks.items():
+                    block = object_value(block, f"{material_file.name}.materials.{key}")
                     if not model or derive(graph["mod"] if graph else _manifest_id(root), "material", block.get("was") or key) not in model.get("materials", []):
                         continue
                     item = dependency(material_file.relative_to(root).as_posix())
@@ -760,7 +774,7 @@ def body_manifest(recipe_path, entries, update, selected=None, producer="modelco
                             "complete": bool(model and graph and bindings and anim_current and model_current and wanted and
                                              all(e.get("sha256") and e.get("sourceHash") == source_hash for e in wanted) and not materials)}
         doc = {"format": 1, "sourceHash": source_hash, "entries": wanted, "bodies": bodies}
-        have = {(e["kind"], e["file"]): e for e in old.get("entries", [])}
+        have = {(e["kind"], e["file"]): e for e in old_entries}
         missing = [e for e in deferred if (e["kind"], e["file"]) not in have]
         mismatch = [e for e in deferred if (e["kind"], e["file"]) in have and have[(e["kind"], e["file"])] != e]
         if update:

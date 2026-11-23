@@ -114,6 +114,48 @@ class NpcBodyValidation(unittest.TestCase):
                     B.body_manifest(recipe, entries, True, producer="animcook")
                 self.assertFalse((root / "assets/cooked/npc-bodies.v1.json").exists())
 
+    def test_malformed_body_cache_sources_metadata_and_materials_are_diagnostics(self):
+        cases = [
+            ("cache root", "assets/cooked/npc-bodies.v1.json", [], "npc-bodies.v1"),
+            ("cache entry", "assets/cooked/npc-bodies.v1.json", {"format": 1, "entries": [1], "bodies": {}}, "entries"),
+            ("glTF root", "models/rig.gltf", [], "rig.gltf"),
+            ("buffer entry", "models/rig.gltf", {"buffers": [False]}, "buffers"),
+            ("image entry", "models/rig.gltf", {"images": [1]}, "images"),
+            ("buffer container", "models/rig.gltf", {"buffers": 42}, "buffers"),
+            ("material document", "blocks/material.json", [], "material.json"),
+            ("material section", "blocks/material.json", {"materials": ["surface"]}, "materials"),
+            ("material block", "blocks/material.json", {"materials": {"surface": []}}, "materials.surface"),
+            ("model metadata", "@model", [], "model.json"),
+            ("graph metadata", "@graph", [], "graph.json"),
+            ("clip metadata", "assets/cooked/clips.json", [], "clips.json"),
+        ]
+        for case, target, payload, field in cases:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                recipe, entries = self.uri_fixture(root, "rig.bin")
+                (root / "models/rig.bin").write_bytes(b"synthetic authored buffer")
+                spec = B.npc_bodies(root)["tobin"]
+                model = "assets/cooked/" + spec["modelName"].replace("/", "_") + ".model.json"
+                graph = "assets/cooked/" + spec["graphName"] + ".graph.json"
+                (root / model).write_text(json.dumps({"guid": G.derive("body-validation", "model", "rig"),
+                    "materials": [G.derive("body-validation", "material", "surface")]}))
+                target = model if target == "@model" else graph if target == "@graph" else target
+                (root / target).write_text(json.dumps(payload))
+                cache = root / "assets/cooked/npc-bodies.v1.json"
+                before = cache.read_bytes() if cache.exists() else None
+                with self.assertRaises(B.BlocksError) as error:
+                    B.body_manifest(recipe, entries, True, producer="animcook")
+                self.assertIn(field, str(error.exception))
+                self.assertEqual(before, cache.read_bytes() if cache.exists() else None)
+
+    def test_a_malformed_part_section_does_not_crash_an_ordinary_mod_plan(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "blocks").mkdir()
+            (root / "blocks/parts.json").write_text('{"npcMotions":["not a part map"]}')
+            self.assertEqual({}, B.npc_bodies(root))
+            self.assertEqual([], B.plan(root)["models"])
+
     def test_complete_vector_uses_effective_cooked_duration_and_canonical_order(self):
         spec, graph, clips = fixture()
         vector = B._body_bindings(spec, graph, clips, "motions")
