@@ -10,8 +10,13 @@
 # config is copied to $KILN_OUT/docs-work, where docfx writes api/ and docfx.log.
 # Steps: docfx metadata over the stage; annotate.py turns the thread, side and [RequiresCapability] attributes it finds
 # in that metadata into a visible line in a copy of the XML docs; docfx metadata again over the copy (api/);
-# undocumented.py against undocumented-dev24.txt, or the file KILN_DOCS_BASELINE names (a warning; with
-# KILN_DOCS_STRICT=1 an error, before docfx build); docfx build.
+# undocumented.py against undocumented-baseline.txt (no names today: any public type or member without an XML summary
+# stops the build), or the file KILN_DOCS_BASELINE names; docfx build. The undocumented gate is strict: KILN_DOCS_STRICT=0
+# makes it a warning (only for looking at a tree that has gaps). release.sh runs this with KILN_DOCS_STRICT=1.
+#   KILN_OUT=<build dir> [KILN_DOCS_STAGE=<folder of Kiln.*.dll and Kiln.*.xml>] tools/docs-site/build.sh --gate-only
+# runs only the first docfx metadata pass and the undocumented gate, over KILN_DOCS_STAGE (default $KILN_OUT/mdk-stage; it
+# must hold the XML docs: nothing is built or packed) and into $KILN_OUT/docs-gate-work: tools/check.sh's stage `docs`. The
+# annotate pass leaves a member with no summary without one (it gets a <remarks> line), so the gate sees the same names.
 # docfx's runtimeconfig also asks for ASP.NET Core, which only `docfx serve` needs and which an SDK-only machine lacks, so
 # it runs from a private copy that names just Microsoft.NETCore.App.
 set -euo pipefail
@@ -19,29 +24,39 @@ here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../.." && pwd)
 out=${KILN_OUT:?set KILN_OUT to your build folder}
 out=$(mkdir -p "$out" && cd "$out" && pwd)
+gate_only=0
+if [[ ${1:-} == --gate-only ]]; then gate_only=1; shift; fi
 site=${1:-$out/docs-site}
 [[ $site == /* ]] || site=$PWD/$site
 tools=$out/tools/docfx
 work=$out/docs-work
-stage=$out/mdk-stage
+((gate_only)) && work=$out/docs-gate-work
+stage=${KILN_DOCS_STAGE:-$out/mdk-stage}
 version=2.78.3
-if [[ -d $site && -n $(command ls -A "$site") && ! -f $site/xrefmap.yml ]]; then
+if ((!gate_only)) && [[ -d $site && -n $(command ls -A "$site") && ! -f $site/xrefmap.yml ]]; then
   echo "$site is not empty and holds no docs site: not replacing it" >&2
   exit 1
 fi
 # the API reference reads the assemblies and XML docs pack.sh builds: no MSBuild workspace, whose assemblies docfx does
 # not find on this SDK
-[[ -f $stage/Kiln.Api.xml ]] || KILN_OUT=$out "$repo/managed/Kiln.Sdk/pack.sh"
+if [[ ! -f $stage/Kiln.Api.xml ]]; then
+  ((gate_only)) && { echo "gate-only: no Kiln.Api.xml in $stage (KILN_DOCS_STAGE): nothing to check" >&2; exit 2; }
+  KILN_OUT=$out "$repo/managed/Kiln.Sdk/pack.sh"
+fi
 [[ -x $tools/docfx ]] || dotnet tool install docfx --version "$version" --tool-path "$tools" >/dev/null
 rm -rf "$work" && mkdir -p "$work"
 cp "$here"/index.md "$here"/toc.yml "$here"/filterConfig.yml "$work"/
-cp -r "$here/apidoc" "$work/apidoc"                   # overwrite files: text added to an API page (Kiln.Ecs)
-python3 -I "$here/stage-guide.py" "$repo" "$work"    # docfx wants its sources below the config
+if ((!gate_only)); then
+  cp -r "$here/apidoc" "$work/apidoc"                   # overwrite files: text added to an API page (Kiln.Ecs)
+  python3 -I "$here/stage-guide.py" "$repo" "$work"    # docfx wants its sources below the config
+fi
 cp -r "$stage" "$work/stage"                          # annotate.py rewrites the XML docs of this copy
 # Kiln.TestKit (mod tests) is packed from a stage of its own; its dll and docs join, with Kiln.Host.dll only for docfx to
 # resolve its references (docfx.json leaves Kiln.Host out of the reference)
-for f in "$out"/testkit-stage/Kiln.{TestKit.dll,TestKit.xml,Host.dll}; do [[ -f $f ]] && cp "$f" "$work/stage/"; done
-[[ -f $work/stage/Kiln.TestKit.dll ]] || echo "no Kiln.TestKit in $out/testkit-stage: the reference leaves it out" >&2
+if ((!gate_only)); then
+  for f in "$out"/testkit-stage/Kiln.{TestKit.dll,TestKit.xml,Host.dll}; do [[ -f $f ]] && cp "$f" "$work/stage/"; done
+  [[ -f $work/stage/Kiln.TestKit.dll ]] || echo "no Kiln.TestKit in $out/testkit-stage: the reference leaves it out" >&2
+fi
 sed -e "s#MDK_STAGE#$work/stage#" "$here/docfx.json" > "$work/docfx.json"
 sed -e "s#MDK_STAGE#$work/stage#" -e 's#"dest": "api"#"dest": "api-raw"#' "$here/docfx.json" > "$work/docfx-raw.json"
 cd "$work"
@@ -68,13 +83,18 @@ log=$work/docfx.log
 docfx() { NO_COLOR=1 dotnet exec "$run/docfx.dll" "$@"; }
 # pass one only tells annotate.py the attributes; its warnings come again in pass two
 docfx metadata docfx-raw.json >"$work/docfx-raw.log" 2>&1 || { tail -40 "$work/docfx-raw.log" >&2; exit 1; }
-python3 -I "$here/annotate.py" "$work/api-raw" "$work/stage"
-rm -rf "$work/api-raw"
-docfx metadata docfx.json 2>&1 | tee "$log"
-baseline=${KILN_DOCS_BASELINE:-$here/undocumented-dev24.txt}
+if ((gate_only)); then
+  api=$work/api-raw
+else
+  python3 -I "$here/annotate.py" "$work/api-raw" "$work/stage"
+  rm -rf "$work/api-raw"
+  docfx metadata docfx.json 2>&1 | tee "$log"
+  api=$work/api
+fi
+baseline=${KILN_DOCS_BASELINE:-$here/undocumented-baseline.txt}
 [[ -f $baseline ]] || { echo "no baseline file $baseline" >&2; exit 1; }
 rc=0
-missing=$(python3 -I "$here/undocumented.py" --baseline "$baseline" --xml "$work/stage" "$work/api") || rc=$?
+missing=$(python3 -I "$here/undocumented.py" --baseline "$baseline" --xml "$work/stage" "$api") || rc=$?
 if ((rc != 0 && rc != 3)); then
   echo "undocumented.py failed (exit $rc): stopping the docs build" >&2
   exit 1
@@ -83,10 +103,11 @@ n=$(grep -c . <<<"$missing" || true)
 if ((n)); then
   printf 'undocumented: %s public types and members have no XML summary and are not in %s:\n%s\n' \
     "$n" "$(basename "$baseline")" "$missing" >&2
-  [[ ${KILN_DOCS_STRICT:-} == 1 ]] && { echo "KILN_DOCS_STRICT=1: failing on them" >&2; exit 1; }
+  [[ ${KILN_DOCS_STRICT:-1} == 1 ]] && { echo "KILN_DOCS_STRICT=1: failing on them (KILN_DOCS_STRICT=0 only warns)" >&2; exit 1; }
 else
   echo "undocumented: none beyond $(basename "$baseline")"
 fi
+((gate_only)) && exit 0
 rm -rf "$site"
 docfx build docfx.json --output "$site" 2>&1 | tee -a "$log"
 # the manifest names this build folder and only docfx's own tools read it; the source maps are a third of the size
