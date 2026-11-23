@@ -83,6 +83,46 @@ void rejected_rows_survive_the_rollback_pass() {
     check(report_names("a", "the entry is not in this world") && report_names("c", "not committed"),
           "the rejected retained change's row reaches registry.json together with the candidate's");
 }
+// review4 NS2 (R3): a process (MOD_LOAD) change rejected "in this world" is tried again in every later world.
+void rejected_process_change_returns_next_world() {
+    fresh_live(); RegistryLiveReply reply;
+    const auto h = change(71, "a", "[{" + wood + R"("op":75},{"registry":"items","select":"game:sword_t2","field":"manaCost","op":20}])", 1);
+    registry_live_commit(71, h, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Applied && at<uint32_t>(WOOD_AT) == 75, "world 1 applies the process change");
+    registry_live_world_stop(); std::string error; store_reset(true, &error); world();
+    g_write_limits = {0}; // world 2 cannot write the change's slots
+    registry_live_world_begin(); apply_registry_files({});
+    check(at<uint32_t>(WOOD_AT) == 10 && registry_live_status().active == 0, "world 2 rejects it whole");
+    check(reported("not applied in this world"), "world 2 reports the rejection by change");
+    registry_live_world_stop(); store_reset(true, &error); world(); // world 3 writes normally
+    registry_live_world_begin(); apply_registry_files({});
+    check(registry_live_status().active == 1 && at<uint32_t>(WOOD_AT) == 75,
+          "a process change refused only 'in this world' applies again in a later world");
+    check(registry_live_revert(71, h, &reply) == KILN_OK && at<uint32_t>(WOOD_AT) == 10, "and its handle still reverts it");
+}
+// review4 NS2 (R4): another writer changes ONE slot of a retained two-field change; an unrelated owner's commit keeps the
+// change's untouched field (ruling 2026-11-22 5:22 PM: only the drifted slot stays with that writer for the world).
+void foreign_slot_keeps_the_rest_of_a_retained_change() {
+    fresh_live(); RegistryLiveReply reply;
+    const auto a = change(71, "a", "[{" + wood + R"("op":50},{)" + stone + R"("op":70}])", 1);
+    registry_live_commit(71, a, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Applied && at<uint32_t>(WOOD_AT) == 50 && at<uint32_t>(STONE_AT) == 70, "a applied");
+    mem<uint32_t>(WOOD_AT, 33); // another writer takes the wood slot
+    const auto b = change(72, "b", "[{" + sword + R"("op":9}])");
+    registry_live_commit(72, b, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Applied, "the unrelated commit applies");
+    check(at<uint32_t>(WOOD_AT) == 33, "the foreign wood bytes are preserved");
+    check(at<uint32_t>(STONE_AT) == 70 && registry_live_status().active == 2,
+          "a's untouched stone edit stays; only the drifted slot is left to the other writer");
+    apply_registry_files({}); // a later application in the same world (a pack reload) keeps it too
+    check(at<uint32_t>(WOOD_AT) == 33 && at<uint32_t>(STONE_AT) == 70 && registry_live_status().active == 2,
+          "a later application in the same world keeps the change's other field");
+    check(reported("was written by another writer") && !reported("not applied in this world"),
+          "the drifted slot is reported, the change is not rejected");
+    registry_live_world_stop(); std::string error; store_reset(true, &error); world();
+    registry_live_world_begin(); apply_registry_files({});
+    check(at<uint32_t>(WOOD_AT) == 50 && at<uint32_t>(STONE_AT) == 70, "the next world applies the whole process change again");
+}
 // review4 NM1: two retained changes, one slot each, the write of one of them fails at a reapplication: only that one is charged.
 void multi_change_write_failure_is_attributed_per_change() {
     fresh_live(); RegistryLiveReply reply;
@@ -152,7 +192,8 @@ void pending_binding_failure_is_atomic() {
     check(at<uint32_t>(WOOD_AT) == 10, "a pending change with a binding failure applies none of its fields");
     check(registry_live_status().active == 0, "the failed pending change is not retained as half applied");
     check(reported("not applied in this world"), "the failed pending change has a named world-application refusal");
-    check(registry_live_revert(71, h, &reply) == KILN_ERR_NOT_FOUND, "a rejected pending handle is consumed");
+    check(registry_live_revert(71, h, &reply) == KILN_OK && reply.outcome == RegistryLiveOutcome::Reverted,
+          "a change rejected for this world keeps its handle (review4 NS2): the owner can still revert it");
 }
 void carried_binding_failure_is_atomic() {
     fresh_live(); RegistryLiveReply reply;
@@ -721,7 +762,9 @@ int main() {
         {"candidate_write_failure_keeps_other_owners", candidate_write_failure_keeps_other_owners},
         {"unrelated_application_write_failure_keeps_live", unrelated_application_write_failure_keeps_live},
         {"rejected_rows_survive_the_rollback_pass", rejected_rows_survive_the_rollback_pass},
-        {"multi_change_write_failure_is_attributed_per_change", multi_change_write_failure_is_attributed_per_change}};
+        {"multi_change_write_failure_is_attributed_per_change", multi_change_write_failure_is_attributed_per_change},
+        {"rejected_process_change_returns_next_world", rejected_process_change_returns_next_world},
+        {"foreign_slot_keeps_the_rest_of_a_retained_change", foreign_slot_keeps_the_rest_of_a_retained_change}};
     for (auto [name, fn] : tests) try { fn(); std::printf("ok %s\n", name); } catch (const std::exception& e) { ++failed; std::printf("FAIL %s: %s\n", name, e.what()); }
     std::printf("registry live transactions: %d checks, %d failed groups\n", checks, failed);
     return failed ? 1 : 0;

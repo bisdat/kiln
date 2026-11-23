@@ -80,6 +80,10 @@ struct LiveState {
         std::vector<registry::Batch> batches;
         std::vector<registry::Refusal> refused;
         bool restart = false;
+        // Rejected at an application of this world (binding, evaluation or write failure): not composed until the world
+        // changes; the handle stays valid and a process change is tried again in the next world (review4 NS2).
+        bool inactive = false;
+        uint64_t inactive_world = 0;
     };
     std::map<uint64_t, Change> changes;
     std::set<KilnOwner> dead;
@@ -92,6 +96,7 @@ struct LiveState {
     std::map<registry::FieldRef, LiveField> read_fields;
 };
 LiveState g;  // under store_mutex
+bool inactive_now(const LiveState::Change& c) { return c.inactive && c.inactive_world == g.world; }
 uint64_t g_next_change = 0, g_next_world = 0; // never reused, including after an install
 std::mutex g_retiring_mu;
 std::set<KilnOwner> g_retiring;
@@ -936,7 +941,7 @@ void compose_changes() {
     registry::Result result = g.stage_result;
     std::vector<const LiveState::Change*> ordered;
     for (const auto& [h, change] : g.changes)
-        if (change.order && !retired(change.owner)) ordered.push_back(&change);
+        if (change.order && !retired(change.owner) && !inactive_now(change)) ordered.push_back(&change);
     std::sort(ordered.begin(), ordered.end(), [](const auto* a, const auto* b) { return a->order < b->order; });
     for (const auto* change : ordered) {
         registry::ModInput input;
@@ -1002,38 +1007,42 @@ std::set<uintptr_t> slots_in(const std::vector<uintptr_t>& slots, const std::set
     for (uintptr_t a : slots) if (of.count(a)) out.insert(a);
     return out;
 }
-void reject_change(uint64_t handle, const LiveState::Change& change, const std::string& why, std::vector<registry::Refusal>* rejected) {
+// A retained change that cannot apply whole in this world is deactivated for this world only (review4 NS2): its handle
+// stays valid (revert works), a process change is tried again in the next world, and its owner's mod is named in the report.
+void reject_change(uint64_t handle, LiveState::Change& change, const std::string& why, std::vector<registry::Refusal>* rejected) {
+    change.inactive = true, change.inactive_world = g.world;
+    const std::string after = change.world ? "the change stays inactive for the rest of this world"
+                                           : "the change is kept and tried again when the next world loads";
     const std::string reason = not_exact_reason(why)
-        ? why + "; live change " + std::to_string(handle) + " not applied in this world; the whole change was removed"
-        : "live change " + std::to_string(handle) + " not applied in this world: " + why + "; the whole change was removed";
+        ? why + "; live change " + std::to_string(handle) + " not applied in this world; " + after
+        : "live change " + std::to_string(handle) + " not applied in this world: " + why + "; " + after;
     rejected->push_back({change.mod, "live:" + std::to_string(handle) + ":", registry::Stage::Alter, 0, reason, ""});
 }
+// Binding and evaluation failures only. A slot another writer took after Kiln's layer stays with that writer for the world
+// (ruling 2026-11-22 5:22 PM): the store leaves that one slot out and reports it, the change's other fields stay.
 bool reject_unbound_changes(uint64_t candidate, std::vector<registry::Refusal>* rejected) {
-    std::vector<uint64_t> drop;
-    for (const auto& [handle, change] : g.changes) {
-        if (!change.order || handle == candidate) continue; // the committing caller rolls its own candidate back
-        std::string why = binding_refusal(handle);
-        if (why.empty() && foreign_slots(change_slots(handle))) why = "another writer's bytes were preserved";
+    bool any = false;
+    for (auto& [handle, change] : g.changes) {
+        if (!change.order || handle == candidate || inactive_now(change)) continue; // the committing caller rolls its own candidate back
+        const std::string why = binding_refusal(handle);
         if (why.empty()) continue;
         reject_change(handle, change, why, rejected);
-        drop.push_back(handle);
+        any = true;
     }
-    for (uint64_t handle : drop) g.changes.erase(handle);
-    return !drop.empty();
+    return any;
 }
 // A failed write is charged per slot (review4 NM1): a retained change is rejected only when one of its own slots did not land,
 // never for another change's slot, an unrelated pack edit's slot or the committing candidate's own failure.
 bool reject_unwritten_changes(uint64_t candidate, const std::set<uintptr_t>& unwritten, std::vector<registry::Refusal>* rejected) {
-    std::vector<uint64_t> drop;
-    for (const auto& [handle, change] : g.changes) {
-        if (!change.order || handle == candidate) continue;
+    bool any = false;
+    for (auto& [handle, change] : g.changes) {
+        if (!change.order || handle == candidate || inactive_now(change)) continue;
         const std::set<uintptr_t> mine = slots_in(change_slots(handle), unwritten);
         if (mine.empty()) continue;
         reject_change(handle, change, write_failure(mine), rejected);
-        drop.push_back(handle);
+        any = true;
     }
-    for (uint64_t handle : drop) g.changes.erase(handle);
-    return !drop.empty();
+    return any;
 }
 // A refusal row once: a pass that keeps the rows of an earlier pass binds again and would repeat the stage's own rows.
 void keep_row(const registry::Refusal& r) {
@@ -1576,7 +1585,7 @@ void registry_live_world_stop() {
 RegistryLiveStatus registry_live_status() {
     std::lock_guard lock(store_mutex());
     RegistryLiveStatus status; status.world = g.world; status.world_kind = g.world_kind;
-    for (const auto& [h, c] : g.changes) { if (c.order) ++status.active; else ++status.drafts; }
+    for (const auto& [h, c] : g.changes) { if (!c.order) ++status.drafts; else if (!inactive_now(c)) ++status.active; }
     return status;
 }
 

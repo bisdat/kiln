@@ -26,6 +26,10 @@
  * submit's optional report never changes its result to BUFFER_TOO_SMALL. Result out is optional; when supplied, size
  * must cover v1, larger records are accepted and size is set to v1. Refused edits are reported per edit. Runtime binding
  * or write failure rolls the candidate back; UNVERIFIED means rollback could not be proved, never success.
+ * A retained change that cannot apply at a later application (a binding or evaluation failure, or a failed write of one of
+ * its own slots) is inactive for that world only: its handle stays valid, a MOD_LOAD change is tried again in the next world,
+ * and registry.json names its mod. A failed write is charged to the change owning that slot, never to another change. A slot
+ * another writer took after Kiln's layer stays with that writer for the world; the change's other fields stay applied.
  * read returns actual live bytes through Kiln's field mappings; restart fields use the kept start-time composition,
  * and pre-world reads include composed pending process changes. Select ids/schema/report/ready events through kiln.registry. Transactions queue a report/generation update for
  * the next registry pump; multiple updates may coalesce. They never send WORLDLOAD or dispatch ready callbacks from
