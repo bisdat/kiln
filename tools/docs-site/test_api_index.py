@@ -622,6 +622,17 @@ class ServicesTable(unittest.TestCase):
             for p in pages:
                 self.assertTrue((self.root / "docs/kiln" / p).is_file(), f"{asm}: docs/kiln/{p}")
 
+    def test_every_publicapi_record_has_a_services_row(self):
+        # the generator stops on a missing row (exit 2); this names the gap in the suite, before anyone generates
+        recorded = {a for a, _ in ai.Tree(self.root).projects()}
+        missing = sorted(recorded - set(ai.SERVICES))
+        self.assertEqual(missing, [], "these assemblies have a PublicAPI record but no row in SERVICES "
+                                      "(tools/docs-site/api_index.py): add each one's KilnServices entry, purpose, "
+                                      "skill guides and docs/kiln pages: " + ", ".join(missing))
+        stale = sorted(set(ai.SERVICES) - recorded)
+        self.assertEqual(stale, [], "SERVICES names assemblies without a PublicAPI record: remove their rows: "
+                                    + ", ".join(stale))
+
     def test_the_entry_of_a_service_is_its_assembly_name(self):
         for asm, (entry, *_rest) in ai.SERVICES.items():
             if not entry.startswith("("):

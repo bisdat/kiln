@@ -74,6 +74,8 @@ SERVICES = {
                     ["blocks.md", "api-gear.md", "gameplay.md"], ["modding/blocks.md", "modding/item-blocks.md", "modding/world-blocks.md", "services/stations.md"]),
     "Kiln.Build": ("Build", "World edits the game saves and replicates: cells, shapes, schematics, block queries and breaking",
                    ["api-world.md"], ["services/build.md", "services/build-blocks.md"]),
+    "Kiln.Camera": ("Camera", "Camera overrides as leases: stock camera modes the server holds, visual cameras on Kiln clients, projection",
+                    [], ["services/camera.md"]),
     "Kiln.Chat": ("Chat", "Chat lines, commands and selectors", ["api-events.md"], ["services/chat.md"]),
     "Kiln.Client": ("Client", "The local player's side: BuildingInput, client ticks and posts (SteamGuard is experimental)",
                     ["api-network.md"], ["services/client-building-input.md", "services/steamguard.md"]),
