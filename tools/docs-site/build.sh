@@ -112,7 +112,7 @@ n=$(grep -c . <<<"$missing" || true)
 if ((n)); then
   printf 'undocumented: %s public types and members have no XML summary and are not in %s:\n%s\n' \
     "$n" "$(basename "$baseline")" "$missing" >&2
-  [[ ${KILN_DOCS_STRICT:-1} == 1 ]] && { echo "KILN_DOCS_STRICT=1: failing on them (KILN_DOCS_STRICT=0 only warns)" >&2; exit 1; }
+  [[ ${KILN_DOCS_STRICT:-1} == 1 ]] && { echo "KILN_DOCS_STRICT=1: failing on them. Fix: write a /// <summary> for each name above (a positional record's property: a <param> on the record); do not add names to $(basename "$baseline"). tools/check.sh (stage docs) finds them before a release; KILN_DOCS_STRICT=0 only warns, outside release.sh" >&2; exit 1; }
 else
   echo "undocumented: none beyond $(basename "$baseline")"
 fi

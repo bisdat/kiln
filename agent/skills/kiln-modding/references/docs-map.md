@@ -2,8 +2,8 @@
 
 The wiki: https://frostdev.io/kiln/wiki/<page>.
 
-The generated API reference: https://frostdev.io/kiln/downloads/<version>/sdk/api/, for example
-https://frostdev.io/kiln/downloads/0.2.0-dev.30.5/sdk/api/. Release builds publish one (a few older versions have none).
+The generated API reference of the newest release: https://frostdev.io/kiln/api/. Each release keeps its own copy at
+https://frostdev.io/kiln/downloads/<version>/sdk/api/ (a few older versions have none).
 It covers every public type and member with its XML docs, so look there when this skill or the wiki doesn't name a call.
 There is no "latest" URL: use the version the mod builds on.
 
@@ -97,6 +97,7 @@ dev.26+ (pages in the repository's `docs/kiln/`):
 | Unit tests with no game (`Kiln.TestKit`) | `modding/unit-tests.md` |
 | Guided client checks (`[ClientCheck]`) | `modding/testing.md`; the pack: `client-pass.md` |
 | The achievement guard (`Kiln.SteamGuard`) | `services/steamguard.md` |
+| Persistent per-player bags, quivers and spellbooks (dev.30.7+, mod API 0.2.16) | `modding/player-storage.md`, `services/player-storage.md` |
 | Data on one item (`InstanceData`) | `modding/inventory.md` "Data on one item"; `services/saves.md`, `services/items.md` |
 | A mod's own player animation states (`assets/player-states.json`) | `modding/animations.md` "Player states"; `services/playeranim.md` |
 | Weapon moves, animated held models, clips reworked at cook time | `modding/item-blocks.md` "Moves"; `modding/animations.md` "Clips reworked" |

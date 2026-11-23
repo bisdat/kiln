@@ -162,12 +162,19 @@ public static unsafe partial class Items
             info.AvailableSlots, invs, list);
     }
 
-    /// <summary>Entities with an initialized inventory of these kinds (one pass over the world's entities).</summary>
+    /// <summary>Entities with an initialized inventory of these kinds (one pass over the world's entities). Players'
+    /// storages only with <see cref="InventoryKinds.PlayerStorage"/> (since 0.2.0-dev.30.7).</summary>
     [RequiresCapability(Caps.Service)]
     [TickThreadOnly]
     public static IReadOnlyList<EntityId> FindInventories(InventoryKinds kinds = InventoryKinds.Containers)
     {
         var t = Require("Items.FindInventories");
+        // without kiln.items.storage there is no holder to find, and a kiln.items of its time does not know the flag
+        if ((kinds & InventoryKinds.PlayerStorage) != 0 && StorageNative.T == null)
+        {
+            kinds &= ~InventoryKinds.PlayerStorage;
+            if ((kinds & InventoryKinds.All) == 0) return [];
+        }
         var cap = 4096u;
         while (true)
         {

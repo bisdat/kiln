@@ -461,8 +461,14 @@ typedef struct KilnItemsStorageApi {
                                    uint32_t index);
     /* The service's state. Set out->size first. */
     KilnResult(KILN_CALL* status)(KilnItemsStorageStatus* out);
-    /* Every key of the player: its registrations (any status) and its parked keys, sorted by key. BUFFER_TOO_SMALL with
-     * *out_count = needed; NOT_FOUND: no such connected player. Set out[i].size first (out[0].size is enough). */
+    /* Every key of the player: its registrations (any status) and its parked keys, sorted by key. While returning parked
+     * records, an extra row exposes the temporary holder for Kiln.Saves' InstanceData tracking: original key,
+     * status KIS_STATE_PARKED, holder != 0, handle 0, slots 64, pages 8. It can coexist with the ordinary READY or PARKED
+     * row of the same key (permanent PARKED rows always have holder 0). At most one temporary holder per player; it stays
+     * listed through the inventory transaction and tracker notices, until cleanup at the subsequent safe Post stage.
+     * Raw callers must accept duplicate keys; the managed public Of view omits temporary rows. No layout change.
+     * BUFFER_TOO_SMALL with *out_count = needed; NOT_FOUND: no such connected player.
+     * Set out[i].size first (out[0].size is enough). */
     KilnResult(KILN_CALL* list)(KilnEntity player, KilnStorageState* out, uint32_t capacity, uint32_t* out_count);
     /* The oldest event with seq > after_seq (the queue keeps the newest 256). NOT_FOUND: none. Set out->size first. */
     KilnResult(KILN_CALL* next_event)(uint64_t after_seq, KilnStorageEvent* out);
