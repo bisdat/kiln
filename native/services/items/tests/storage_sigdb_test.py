@@ -49,6 +49,41 @@ def check(ok, text):
 ENV = {'server': 'KILN_SERVER_EXE', 'client': 'KILN_CLIENT_EXE'}
 
 
+def call_contracts(image, side, sha, symbols):
+    """kiln#135: which pointer each structural storage call takes, read from the code. A World is what Kiln's
+    server_world() returns; its entity storage (kiln.items' Access::storage) sits at world + world.storage."""
+    build = json.loads((ROOT / 'sigdb/builds' / side / (sha + '.json')).read_text())
+    world_storage = int(build['constants']['world.storage'], 16)
+    entities = int(build['constants']['world/storage.entities'], 16)
+    img = image.img
+    u32 = lambda at: struct.unpack_from('<I', img, at)[0]
+    rel = lambda at, size: at + size + struct.unpack_from('<i', img, at + size - 4)[0]
+    # items/CreateEntity: mov r8, rdx; add rcx, world.storage; mov edx, [.rdata 0]; xor r9d, r9d; jmp spawn/CreateEntity
+    ce = symbols['items/CreateEntity']['rva']
+    check(img[ce:ce + 6] == bytes.fromhex('4C8BC24881C1') and u32(ce + 6) == world_storage,
+          f'{side} items/CreateEntity adds world.storage to its first argument: it takes the World, not the storage')
+    check(img[ce + 10:ce + 12] == bytes.fromhex('8B15') and u32(rel(ce + 10, 6)) == 0 and
+          img[ce + 16:ce + 19] == bytes.fromhex('4533C9'), f'{side} items/CreateEntity requests id 0, no mask')
+    check(img[ce + 19] == 0xE9 and rel(ce + 19, 5) == int(build['symbols']['spawn/CreateEntity'], 16),
+          f'{side} items/CreateEntity tail-calls spawn/CreateEntity with the storage')
+    # spawn/DestroyEntity (= items/StorageDestroyEntity) indexes the storage's entity map directly: it takes the storage
+    de = symbols['items/StorageDestroyEntity']['rva']
+    at = img.find(bytes.fromhex('488DB9'), de, de + 0x40)
+    check(at > 0 and u32(at + 3) == entities, f'{side} items/StorageDestroyEntity takes the entity storage')
+    # RecordFromStack finds a PIDE stack's row through EntityRef +8 at + world.storage + storage.entities: a World
+    rfs = symbols['items/RecordFromStack']['rva']
+    calls = [m for m in range(rfs, rfs + 0x600) if img[m:m + 6] == bytes.fromhex('498B4C2408E8')]
+    check(calls and all(img[rel(c + 5, 5):rel(c + 5, 5) + 9] == bytes.fromhex('40534883EC20488D99') and
+                        u32(rel(c + 5, 5) + 9) == world_storage + entities for c in calls),
+          f'{side} EntityRef +8 is the World (RecordFromStack row lookup)')
+    # PideFromRecord: r15 = its context (4th argument); every items/CreateEntity call takes rcx = [r15], context +0
+    pfr = symbols['items/PideFromRecord']['rva']
+    check(img.find(bytes.fromhex('4D8BF9'), pfr, pfr + 0x40) > 0, f'{side} PideFromRecord keeps its context in r15')
+    creates = [c for c in range(pfr, pfr + 0x900) if img[c] == 0xE8 and rel(c, 5) == ce]
+    check(len(creates) == 2 and all(img.find(bytes.fromhex('498B0F'), c - 0x40, c) > 0 for c in creates),
+          f'{side} PideFromRecord hands its context +0 to items/CreateEntity: context +0 is the World')
+
+
 def copies():
     """{side: (path, named on the command line)} of the exe copies that exist; the others are reported as skipped."""
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
@@ -98,6 +133,7 @@ def main():
             check(constants.get(name, {}).get('ok') and constants[name]['value'] == value, f'{side} qualified {name} = {value:#x}')
         for name, value in FIELDS.items():
             check(constants.get(name, {}).get('ok') and constants[name]['value'] == value, f'{side} {name} = {value:#x}')
+        call_contracts(image, side, sha, symbols)
         stride = constants['characters/struct.equip1']['value'] - constants['characters/struct.equip0']['value']
         check(stride == 0x3c and constants['characters/struct.equip_last']['value'] ==
               constants['characters/struct.equip0']['value'] + 15 * stride, side + ' derived equipment stride and endpoint')

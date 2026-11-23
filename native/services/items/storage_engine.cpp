@@ -40,11 +40,11 @@ void* component(uintptr_t world, uint32_t hash, uint32_t entity, size_t size, ui
         return nullptr;
     }
 }
-NativeCall make(void* storage, const CreateDesc* d) {
+NativeCall make(uintptr_t world, const CreateDesc* d) {
     NativeCall result{};
     result.called = true;
     __try {
-        result.value = S.create(storage, d);
+        result.value = S.create(world, d);
     } __except (capture(GetExceptionCode(), &result.error)) {
         result.value = 0;
     }
@@ -222,7 +222,14 @@ bool create_holder(const Access& a, uint32_t player, uint32_t slots, Holder* out
         return false;
     };
     result.stage = HolderStage::Preconditions;
-    if (!S.structural_gate || !S.create || !S.destroy || !a.storage || !player || !slots || slots > KIS_MAX_SLOTS)
+    if (!S.structural_gate || !S.create || !S.destroy || !S.server_world || !a.storage || !player || !slots ||
+        slots > KIS_MAX_SLOTS)
+        return failed();
+    // items/CreateEntity takes the World and finds the entity storage itself: hand it the live server World that owns
+    // this storage, never the storage (#135) and never another world's.
+    const uintptr_t world = world_of(a.storage);
+    result.stage = HolderStage::World;
+    if (!world || world != S.server_world())
         return failed();
     result.stage = HolderStage::Gate;
     if (!S.structural_gate())
@@ -239,7 +246,7 @@ bool create_holder(const Access& a, uint32_t player, uint32_t slots, Holder* out
     d.components = cs;
     d.count = 2;
     result.stage = HolderStage::RootCreate;
-    result.native = make(a.storage, &d);
+    result.native = make(world, &d);
     uint32_t root = result.native.value;
     if (result.native.error || !root || root <= kMaxPlayer || root == UINT32_MAX)
         return failed(); // never try to delete a reserved/unknown id
@@ -252,7 +259,7 @@ bool create_holder(const Access& a, uint32_t player, uint32_t slots, Holder* out
         cs[0] = {kHashInventory, 0, inv, 96};
         result.stage = HolderStage::PageCreate;
         result.page = i; // zero based; pages counts only accepted ids
-        result.native = make(a.storage, &d);
+        result.native = make(world, &d);
         uint32_t id = result.native.value;
         if (result.native.error || !id || id <= kMaxPlayer || id == UINT32_MAX)
             return failed();
@@ -261,7 +268,6 @@ bool create_holder(const Access& a, uint32_t player, uint32_t slots, Holder* out
         put(setup, i * 4, id);
         setup[64 + i] = 4;
     }
-    const auto world = reinterpret_cast<uintptr_t>(a.storage) - E.world_storage;
     result.stage = HolderStage::SetupLookup;
     result.page = UINT32_MAX;
     auto p = component(world, kHashInventorySetup, root, 84, &result.error, &result.setup_size);
@@ -294,7 +300,7 @@ static bool destroy_holder_impl(const Access& a, const Holder* h, HolderCleanup*
         }
         return removed;
     };
-    uintptr_t world = reinterpret_cast<uintptr_t>(a.storage) - E.world_storage;
+    const uintptr_t world = world_of(a.storage);
     uint8_t setup[84]{};
     const bool root_present = component_copy(world, kHashInventorySetup, h->entity, setup, sizeof setup);
     if (root_present && setup[kSetupFlags] != 0)
@@ -367,7 +373,7 @@ bool insert_record(const Access& a, const Holder& h, const KilnStorageRecord& in
         return false;
     }
     uint32_t page = h.pages[record.slot / 8];
-    uintptr_t world = reinterpret_cast<uintptr_t>(a.storage) - E.world_storage;
+    const uintptr_t world = world_of(a.storage);
     auto inv = static_cast<uint8_t*>(component(world, kHashInventory, page, 96));
     uint32_t old[3]{};
     if (!inv || !copy(old, inv + (record.slot % 8) * 12, 12)) {
@@ -386,8 +392,9 @@ bool insert_record(const Access& a, const Holder& h, const KilnStorageRecord& in
             *reason = KIS_QUARANTINE_REBUILD;
             return false;
         }
+        // PideFromRecord hands context +0 to items/CreateEntity (client 0xe507e4, server 0x7ac3e4): the World.
         uint8_t ctx[80]{};
-        put(ctx, 0, a.storage);
+        put(ctx, 0, world);
         put(ctx, 64, a.items);
         put(ctx, 72, a.attributes);
         pide = rebuild_record(memory, h.entity, info, ctx);
@@ -432,9 +439,9 @@ bool insert_record(const Access& a, const Holder& h, const KilnStorageRecord& in
     return true;
 }
 bool freeze_holder(const Holder& h, void* attrs, void* bindings, EntityRef* ref, Entry* out) {
-    if (!S.convert || !S.write || !ref || !ref->storage)
+    if (!S.convert || !S.write || !ref || !ref->world)
         return false;
-    const auto world = reinterpret_cast<uintptr_t>(ref->storage) - E.world_storage;
+    const uintptr_t world = ref->world; // the game's own reference names the World (characters/CapturesDone)
     out->records.clear();
     for (size_t p = 0; p < h.pages.size(); ++p) {
         uint32_t inv[24]{};

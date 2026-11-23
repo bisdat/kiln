@@ -45,7 +45,33 @@ unsigned creates = 0, destroys = 0, writes = 0, converts = 0;
             std::printf("FAIL %d %s\n", __LINE__, #__VA_ARGS__);                                                       \
         }                                                                                                              \
     } while (0)
-uint32_t __fastcall create(void*, const CreateDesc* d) {
+// The World as the game lays it out (#135): its entity storage sits at world + world.storage (0xe179c0 on both
+// qualified builds) and starts with the component registry. Only the storage's first pages are committed: a game call
+// handed the storage where it wants the World (items/CreateEntity, PideFromRecord's context, an EntityRef,
+// GetComponent) reaches world + 2 * world.storage, reserved and never committed, and faults with 0xc0000005 as on the
+// hosting player's PC.
+constexpr int64_t kWorldStorage = 0xe179c0;
+uint8_t fake_registry[64]{};
+uint8_t* world_block() {
+    static uint8_t* base = [] {
+        auto b = static_cast<uint8_t*>(VirtualAlloc(nullptr, 2 * kWorldStorage + 0x10000, MEM_RESERVE, PAGE_NOACCESS));
+        auto page = reinterpret_cast<uintptr_t>(b + kWorldStorage) & ~uintptr_t(0xfff);
+        VirtualAlloc(reinterpret_cast<void*>(page), 0x2000, MEM_COMMIT, PAGE_READWRITE);
+        void* registry = fake_registry;
+        std::memcpy(b + kWorldStorage, &registry, sizeof registry); // storage +0: the registry; +8 kind 0 (server)
+        return b;
+    }();
+    return base;
+}
+uintptr_t game_world() { return reinterpret_cast<uintptr_t>(world_block()); }
+void* game_storage() { return world_block() + kWorldStorage; }
+// What every World-taking game function reads first: the registry at world + world.storage.
+bool reached_registry(uintptr_t world) {
+    return *reinterpret_cast<void* const volatile*>(world + static_cast<uintptr_t>(E.world_storage)) == fake_registry;
+}
+uint32_t __fastcall create(uintptr_t world, const CreateDesc* d) {
+    // items/CreateEntity adds world.storage and spawn/CreateEntity reads the storage's registry before anything else
+    CHECK(reached_registry(world) && world == game_world());
     ++creates;
     CHECK(d->flags == 4 && d->requested == 0 && d->count == 2);
     CHECK(std::memcmp(d->guid, default_inventory_guid, 16) == 0);
@@ -72,7 +98,8 @@ uint32_t __fastcall create(void*, const CreateDesc* d) {
     }
     return e;
 }
-uint8_t __fastcall destroy(void*, uint32_t e, uint8_t mode, uint8_t skip) {
+uint8_t __fastcall destroy(void* storage, uint32_t e, uint8_t mode, uint8_t skip) {
+    CHECK(storage == game_storage()); // spawn/DestroyEntity: lea rdi, [rcx + storage.entities]
     CHECK(mode == 1 && skip == 0);
     ++destroys;
     if (destroy_fault)
@@ -92,7 +119,7 @@ bool gate() {
     }
     return gate_open;
 }
-PtrSize* __fastcall get(PtrSize* out, uintptr_t, uint32_t hash, uint32_t entity) {
+PtrSize* lookup(PtrSize* out, uint32_t hash, uint32_t entity) {
     if (entity > kMaxPlayer && hash == kHashInventorySetup) {
         if (setup_lookup_mode == 1) {
             *out = {};
@@ -113,18 +140,29 @@ PtrSize* __fastcall get(PtrSize* out, uintptr_t, uint32_t hash, uint32_t entity)
     *out = i == components.end() ? PtrSize{} : PtrSize{i->second.data(), i->second.size()};
     return out;
 }
+// GetComponent and WriteComponentTick take the World (lea rdi, [rdx + world.storage]).
+PtrSize* __fastcall get(PtrSize* out, uintptr_t world, uint32_t hash, uint32_t entity) {
+    CHECK(reached_registry(world) && world == game_world());
+    return lookup(out, hash, entity);
+}
 PtrSize* __fastcall tick_write(PtrSize* out, uintptr_t world, uint32_t hash, uint32_t entity) {
     return get(out, world, hash, entity);
 }
-PtrSize* __fastcall other(PtrSize* out, void*, uint64_t hash, uint32_t e) {
-    return get(out, 0, static_cast<uint32_t>(hash), e);
+// The program accessors take the entity storage.
+PtrSize* __fastcall other(PtrSize* out, void* storage, uint64_t hash, uint32_t e) {
+    CHECK(storage == game_storage());
+    return lookup(out, static_cast<uint32_t>(hash), e);
 }
 PtrSize* __fastcall write_other(PtrSize* out, void* storage, void*, uint64_t hash, uint32_t e, uint8_t) {
     return other(out, storage, hash, e);
 }
 void* __fastcall tracker(void*) { return reinterpret_cast<void*>(1); }
 uint8_t __fastcall flag(void*) { return 0; }
-Result8* __fastcall convert(Result8* out, void* r, const void* stack, uint8_t slot, void*, void*, EntityRef*) {
+Result8* __fastcall convert(Result8* out, void* r, const void* stack, uint8_t slot, void*, void*, EntityRef* ref) {
+    // RecordFromStack looks a PIDE stack's row up at ref->world + world.storage + storage.entities
+    const uint32_t pide = static_cast<const uint32_t*>(stack)[2];
+    if (pide && pide != ref->id)
+        CHECK(reached_registry(ref->world) && ref->world == game_world());
     ++converts;
     Record v{};
     v.item = static_cast<const uint32_t*>(stack)[0];
@@ -146,7 +184,9 @@ void __fastcall reader(void* out, void* stream) {
     b[3] = b[1];
 }
 uint32_t __fastcall rebuild(const void*, uint32_t owner, const void*, const void* context) {
-    CHECK(kitems::storage::read<void*>(context, 0) == reinterpret_cast<void*>(1));
+    // PideFromRecord hands context +0 to items/CreateEntity
+    const auto world = kitems::storage::read<uintptr_t>(context, 0);
+    CHECK(reached_registry(world) && world == game_world());
     auto& old = components[{relocate_page, kHashInventory}];
     retired_pages.push_back(std::move(old));
     old.assign(96, 0);
@@ -227,7 +267,9 @@ bool read_pages(const Access&, uint32_t entity, PageSet* out, bool* initialized)
 }
 } // namespace kitems
 namespace {
-uintptr_t KILN_CALL server() { return 1; }
+uintptr_t server_override = 0; // another world than the program's: a stale access
+uintptr_t KILN_CALL server() { return server_override ? server_override : game_world(); }
+uintptr_t server_world_now() { return server(); }
 bool KILN_CALL on_tick() { return true; }
 KilnGamedataApi fake_gamedata{};
 int64_t authored_slots = 40;
@@ -380,7 +422,7 @@ void service_tests() {
     components[{100, kHashInventorySetup}][83] = 1;
     components[{101, kHashInventory}].assign(96, 0);
     Access access{};
-    access.storage = reinterpret_cast<void*>(1);
+    access.storage = game_storage();
     E.tx_size = 16;
     std::unique_lock service_lock(kitems::storage_mu);
     kitems::return_post(access, service_lock);
@@ -467,12 +509,7 @@ void service_tests() {
     kitems::world_api = &fake_world;
     kitems::death_before_wrap = 1;
     kitems::death_after_wrap = 2;
-    uint8_t storage_bytes[16]{};
-    uint8_t registry_bytes[16]{};
-    void* registry = registry_bytes;
-    std::memcpy(storage_bytes, &registry, sizeof registry);
     kitems::structural_access = access;
-    kitems::structural_access.storage = storage_bytes;
     E.component_map_find = +[](void*, const uint32_t*) -> uint16_t* {
         static uint16_t index = 0;
         return &index;
@@ -605,12 +642,8 @@ void review_tests() {
     kitems::world_api = &fake_world;
     kitems::death_before_wrap = 1;
     kitems::death_after_wrap = 2;
-    uint8_t storage_bytes[16]{};
-    uint8_t registry_bytes[16]{};
-    void* registry = registry_bytes;
-    std::memcpy(storage_bytes, &registry, sizeof registry);
     Access access{};
-    access.storage = storage_bytes;
+    access.storage = game_storage();
     access.ctx = reinterpret_cast<void*>(2);
     access.job = reinterpret_cast<void*>(3);
     for (int i = 0; i < A_COUNT; ++i)
@@ -645,7 +678,7 @@ void review_tests() {
     {
         // a capture between the unload and the next Post already obeys the bound
         std::vector<Entry> frozen;
-        EntityRef ref{1, 0, 0, 0, storage_bytes, nullptr};
+        EntityRef ref{1, 0, 0, 0, game_world(), nullptr};
         std::lock_guard lock(kitems::storage_mu);
         CHECK(kitems::freeze(kitems::model.players.at(0), nullptr, kitems::bindings.data(), &ref, &frozen));
         unsigned parked_entries = 0, parked = 0, full = 0;
@@ -856,15 +889,12 @@ void holder_retry_tests() {
     kitems::world_api = &world;
     kitems::death_before_wrap = 1;
     kitems::death_after_wrap = 2;
-    uint8_t storage_bytes[16]{};
-    void* registry = storage_bytes + 8;
-    std::memcpy(storage_bytes, &registry, sizeof registry);
     E.component_map_find = +[](void*, const uint32_t*) -> uint16_t* {
         static uint16_t index = 0;
         return &index;
     };
     auto prepare = [&] {
-        kitems::structural_access.storage = storage_bytes;
+        kitems::structural_access.storage = game_storage();
         review_player(1);
         auto join = kitems::model.join(0, 55, {}, 19, 1);
         auto entry = review_entry("retry:bag", KIS_ENTRY_PARKED, 9, KIS_PARK_HELD, 0, 1);
@@ -1018,6 +1048,127 @@ void holder_retry_tests() {
     readonly_setup = nullptr;
     kitems::world_api = nullptr;
     kitems::storage_reset();
+}
+
+// ---- kiln#135: items/CreateEntity, PideFromRecord's context and an EntityRef take the World, not its storage ----
+// Fuzen777's hosted world (client 5d9ef2f140b8, dev.31 beta 1): stage=root-create native=fault raw=0
+// native_error=0xc0000005, before anything existed. The old adapter handed items/CreateEntity the storage; the
+// wrapper adds world.storage itself, so the game read world + 2 * world.storage. Same on a dedicated server: no lab
+// ever built a holder, because no player joins a lab.
+void world_convention_tests() {
+    using namespace kitems;
+    using namespace kitems::storage;
+    kitems::storage_reset();
+    kitems::model = Model{};
+    kitems::enabled = true;
+    kitems::stage_point = true;
+    kitems::garbage.clear();
+    kitems::returned.clear();
+    CHECK(kitems::bind(0, &review_stage, &review_hints, nullptr) == KILN_OK);
+    Access a{};
+    a.storage = game_storage();
+    a.ctx = reinterpret_cast<void*>(2);
+    a.job = reinterpret_cast<void*>(3);
+    for (int i = 0; i < A_COUNT; ++i)
+        a.acc[i] = i == A_SETUP ? kHashInventorySetup : i == A_INVENTORY ? kHashInventory : kHashSlotSelection;
+    CreateDesc d{};
+    std::memcpy(d.guid, default_inventory_guid, 16);
+    d.flags = 4;
+    uint8_t setup[84]{};
+    uint32_t owner = 1;
+    ComponentDesc cs[]{{kHashInventorySetup, 0, setup, 84}, {0xd7361788u, 0, &owner, 4}};
+    d.components = cs;
+    d.count = 2;
+
+    // 1. The old call, the storage where the World goes: the game's fault, through the same guard, nothing created.
+    const auto creates_before = creates;
+    const NativeCall old_call = make(reinterpret_cast<uintptr_t>(game_storage()), &d);
+    std::printf("  #135 old call: native=%s raw=%u native_error=0x%08x\n",
+                old_call.error ? "fault" : "returned", old_call.value, old_call.error);
+    CHECK(old_call.called && old_call.value == 0 && old_call.error == 0xc0000005u && creates == creates_before);
+
+    // 2. The adapter now hands it the World: root and pages are built.
+    Holder h;
+    HolderBuild build;
+    CHECK(create_holder(a, 1, 9, &h, &build) && build.stage == HolderStage::None && h.pages.size() == 2 &&
+          creates == creates_before + 3);
+
+    // 3. A storage that is not the live server world's: refused before any native call, and not retryable.
+    server_override = game_world() + 0x10000;
+    Holder refused;
+    HolderBuild refused_build;
+    CHECK(!create_holder(a, 1, 9, &refused, &refused_build) && refused_build.stage == HolderStage::World &&
+          !refused_build.native.called && !refused_build.retryable() && creates == creates_before + 3 &&
+          !refused.entity);
+    server_override = 0;
+
+    // 4. PIDE stacks: a reference naming the World freezes them (the game's own reference from CapturesDone does);
+    //    one naming the storage faults inside the converter's guard and the freeze fails closed.
+    Holder held;
+    held.entity = 7000;
+    held.slots = 8;
+    held.pages = {7001};
+    uint32_t pide_stack[]{123, 1, 5000};
+    components[{7001, kHashInventory}].assign(96, 0);
+    std::memcpy(components[{7001, kHashInventory}].data(), pide_stack, 12);
+    const auto converts_before = converts;
+    EntityRef game_ref{1, 0, 0, 0, game_world(), nullptr};
+    Entry frozen;
+    CHECK(freeze_holder(held, nullptr, nullptr, &game_ref, &frozen) && frozen.records.size() == 1 &&
+          converts == converts_before + 1);
+    EntityRef storage_ref{1, 0, 0, 0, reinterpret_cast<uintptr_t>(game_storage()), nullptr};
+    Entry not_frozen;
+    CHECK(!freeze_holder(held, nullptr, nullptr, &storage_ref, &not_frozen));
+    components.erase({7001, kHashInventory});
+    if (h.entity)
+        CHECK(destroy_holder(a, &h));
+
+    // 5. Post with a program access from another world than the server's: off, no native call, and it says so.
+    KilnWorldApi fake_world_api{};
+    fake_world_api.header = {sizeof fake_world_api, 1};
+    fake_world_api.game_wrap_info = +[](KilnHandle, KilnGameWrapInfo* out) -> KilnResult {
+        out->state = KILN_WRAP_ACTIVE;
+        out->disabled = KILN_WRAP_OK;
+        return KILN_OK;
+    };
+    kitems::world_api = &fake_world_api;
+    kitems::death_before_wrap = 1;
+    kitems::death_after_wrap = 2;
+    E.component_map_find = +[](void*, const uint32_t*) -> uint16_t* {
+        static uint16_t index = 0;
+        return &index;
+    };
+    review_player(1);
+    review_register(90, "world:bag", 9);
+    auto join = kitems::model.join(0, 55, {}, 31, 1);
+    auto doc = review_doc(55, KIS_SOURCE_NEW, nullptr, 0, nullptr, 0);
+    CHECK(kitems::restore(0, 0, join, &doc) == KILN_OK);
+    kitems::model.applied(0, 1);
+    kitems::structural_access = a;
+    server_override = game_world() + 0x10000;
+    const auto destroys_before = destroys;
+    kitems::post(nullptr, nullptr);
+    CHECK(!kitems::enabled && creates == creates_before + 3 && destroys == destroys_before &&
+          kitems::model.players.at(0).holders.empty() &&
+          kitems::detail.find("is not the server world's") != std::string::npos &&
+          kitems::detail.find("no native call") != std::string::npos);
+    server_override = 0;
+
+    // 6. The same join with the access of the live server world: the holder is built at the first Post.
+    kitems::enabled = true;
+    kitems::storage_reset();
+    review_register(91, "world:pack", 9);
+    join = kitems::model.join(0, 55, {}, 32, 1);
+    CHECK(kitems::restore(0, 0, join, &doc) == KILN_OK);
+    kitems::model.applied(0, 1);
+    kitems::structural_access = a;
+    kitems::post(nullptr, nullptr);
+    if (!kitems::enabled)
+        std::printf("  #135 post: %s\n", kitems::detail.c_str());
+    CHECK(kitems::enabled && kitems::model.players.at(0).holders.count("world:pack") == 1);
+    kitems::world_api = nullptr;
+    kitems::storage_reset();
+    kitems::model = Model{};
 }
 
 // The leave timeout: a leaving player whose entity still exists keeps its holders past 250 steps (the game's leave save
@@ -1394,6 +1545,8 @@ int main() {
     E.job_tracker = &tracker;
     E.job_write_flag = &flag;
     E.setup_initialized = 83;
+    E.world_storage = kWorldStorage;
+    S.server_world = &server_world_now;
     S.create = &create;
     S.destroy = &destroy;
     S.convert = &convert;
@@ -1410,7 +1563,7 @@ int main() {
     item_bytes[0x104] = 6;
     item_bytes[0x54c] = 1;
     Access a{};
-    a.storage = reinterpret_cast<void*>(1);
+    a.storage = game_storage();
     a.ctx = reinterpret_cast<void*>(2);
     a.job = reinterpret_cast<void*>(3);
     for (int i = 0; i < A_COUNT; ++i)
@@ -1461,7 +1614,7 @@ int main() {
     destroys = deletes_before;
     uint32_t stack[]{1, 5, 0};
     std::memcpy(components[{h.pages[0], kHashInventory}].data(), stack, 12);
-    EntityRef ref{1, 0, 0, 0, a.storage, nullptr};
+    EntityRef ref{1, 0, 0, 0, game_world(), nullptr};
     Entry entry;
     CHECK(freeze_holder(h, nullptr, nullptr, &ref, &entry));
     CHECK(entry.records.size() == 1 && entry.records[0].count == 5 && entry.records[0].length == 8 && writes == 1 &&
@@ -1505,7 +1658,7 @@ int main() {
     CHECK(!insert_record(a, h, padded_saved, &why_rebuild) && why_rebuild == KIS_QUARANTINE_SLOT &&
           components == before_padding);
     const auto main_setup = components[{1, kHashInventorySetup}];
-    CHECK(clear_holder_references(1, 1, h));
+    CHECK(clear_holder_references(game_world(), 1, h));
     CHECK(kitems::storage::read<uint64_t>(components[{1, kHashSlotSelection}].data(), 14 * 8) == 0 &&
           components[{1, kHashInventorySetup}] == main_setup);
     std::puts("  adapter: full cleanup");
@@ -1567,6 +1720,8 @@ int main() {
     review_tests();
     std::puts("storage native: holder_retry_tests");
     holder_retry_tests();
+    std::puts("storage native: world_convention_tests");
+    world_convention_tests();
     std::puts("storage native: leave_timeout_tests");
     leave_timeout_tests();
     std::puts("storage native: guard_ready_tests");

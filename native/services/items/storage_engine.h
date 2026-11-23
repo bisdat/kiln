@@ -7,11 +7,21 @@ struct Result8 {
     uint8_t error = 0, pad[3]{};
     uint32_t value = 0;
 };
+// Two pointers, never interchangeable (#135): Access::storage is the world's entity storage, at world + world.storage
+// (E.world_storage); a World is what api->server_world() returns. Game calls that add world.storage themselves take the
+// World: GetComponent, WriteComponentTick, items/CreateEntity, PideFromRecord's context +0 and an EntityRef. Calls that
+// take the storage: the program accessors (read/write_other), spawn/DestroyEntity, gameplay/DeliverEvents.
+inline uintptr_t world_of(const void* storage) {
+    return storage ? reinterpret_cast<uintptr_t>(storage) - static_cast<uintptr_t>(E.world_storage) : 0;
+}
+// The game's entity reference. +8 is the World, not its entity storage: characters/CapturesDone fills it with the world
+// it also looks player rows up in, and RecordFromStack resolves a stack's PIDE row through it at
+// world + world.storage + storage.entities (client 0x9b2780, server 0x64e610).
 struct EntityRef {
     uint32_t id;
     uint8_t kind, pad;
     uint16_t family;
-    void* storage;
+    uintptr_t world;
     void* row;
 };
 struct ComponentDesc {
@@ -41,8 +51,12 @@ struct ItemTraits {
 };
 bool item_traits(void* registry, uint32_t item, ItemTraits*);
 using RebuildFn = uint32_t(__fastcall*)(const void*, uint32_t, const void*, const void*);
-using CreateFn = uint32_t(__fastcall*)(void*, const CreateDesc*);
-using DestroyFn = uint8_t(__fastcall*)(void*, uint32_t, uint8_t, uint8_t);
+// items/CreateEntity is the World wrapper (client 0x984e50, server 0x620ce0): mov r8, rdx; add rcx, world.storage;
+// mov edx, [.rdata 0]; xor r9d, r9d; jmp spawn/CreateEntity(storage, 0, desc, nullptr). Handed the entity storage, the
+// game reads world + 2 * world.storage, past the end of the 0x15fd3c0-byte World: the access violation of #135.
+using CreateFn = uint32_t(__fastcall*)(uintptr_t world, const CreateDesc*);
+// spawn/DestroyEntity takes the entity storage itself (lea rdi, [rcx + storage.entities]).
+using DestroyFn = uint8_t(__fastcall*)(void* storage, uint32_t, uint8_t, uint8_t);
 struct EngineStorage {
     Layout layout{};
     ConvertFn convert = nullptr;
@@ -53,6 +67,7 @@ struct EngineStorage {
     CreateFn create = nullptr;
     DestroyFn destroy = nullptr;
     bool (*structural_gate)() = nullptr;
+    uintptr_t (*server_world)() = nullptr; // the live server World: create_holder hands the game only this one
 };
 extern EngineStorage S;
 inline constexpr uint8_t default_inventory_guid[]{0x6d, 0x71, 0xdf, 0xcd, 0x7c, 0xde, 0x73, 0x4a,
@@ -73,7 +88,7 @@ struct HolderCleanup {
     uint32_t calls = 0, succeeded = 0, failed_entity = 0;
     NativeCall last{}, first_failed{};
 };
-enum class HolderStage { None, Preconditions, Gate, RootCreate, PageCreate, SetupLookup, SetupCopy };
+enum class HolderStage { None, Preconditions, World, Gate, RootCreate, PageCreate, SetupLookup, SetupCopy };
 struct HolderBuild {
     HolderStage stage = HolderStage::None;
     uint32_t page = UINT32_MAX, root = 0, pages = 0, error = 0;

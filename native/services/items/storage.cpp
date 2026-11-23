@@ -158,6 +158,7 @@ void off(uint32_t why, const std::string& text) {
 const char* holder_stage(HolderStage stage) {
     switch (stage) {
     case HolderStage::Preconditions: return "preconditions";
+    case HolderStage::World: return "world";
     case HolderStage::Gate: return "gate";
     case HolderStage::RootCreate: return "root-create";
     case HolderStage::PageCreate: return "page-create";
@@ -218,6 +219,7 @@ bool structural_gate() {
     return in_post && api && api->on_tick_thread() && api->server_world() &&
            kspawn::structural_gate(true, world_api, types_api) == kspawn::Gate::Ok;
 }
+uintptr_t live_server_world() { return api ? api->server_world() : 0; }
 bool symbol(const char* name, uintptr_t* out) {
     if (api->symbol(str(name), out) == KILN_OK && *out)
         return true;
@@ -1134,7 +1136,7 @@ void return_post(const Access& a, std::unique_lock<std::recursive_mutex>& lock) 
         }
         if (q.phase == 2) {
             Entry kept;
-            EntityRef ref{found->witness.player, 0, 0, 0, a.storage, nullptr};
+            EntityRef ref{found->witness.player, 0, 0, 0, world_of(a.storage), nullptr};
             if (!freeze_return(q, a.attributes, bindings.data(), &ref, &kept)) {
                 off(KILN_CAP_REASON_FAULTED, "items.storage: parked-return freeze failed");
                 return;
@@ -1334,7 +1336,7 @@ bool park_holder(const Access& a, uint32_t slot, uint64_t join, const std::strin
     // a park never lowers a reason: live records that join a held bag become held with it
     why = parked_reason(*found, key, why);
     Entry e = entry_for(key, KIS_ENTRY_PARKED, holder.slots, why);
-    EntityRef ref{found->witness.player, 0, 0, 0, a.storage, nullptr};
+    EntityRef ref{found->witness.player, 0, 0, 0, world_of(a.storage), nullptr};
     if (!freeze_holder(holder, a.attributes, bindings.data(), &ref, &e)) {
         off(KILN_CAP_REASON_FAULTED, "items.storage: park freeze failed; holder retained");
         return false;
@@ -1418,6 +1420,17 @@ void post_body() {
             return;
         }
         ++i;
+    }
+    // Every structural call below runs on the program's entity storage and hands the game its World: both must be the
+    // live server world's (storage_reset drops the access of a world that closed, so this never waits on anything).
+    if (world_of(a.storage) != api->server_world()) {
+        char text[200]{};
+        std::snprintf(text, sizeof text,
+                      "items.storage: the program's entity storage %p is not the server world's (world %p); no native "
+                      "call",
+                      a.storage, reinterpret_cast<void*>(api->server_world()));
+        off(KILN_CAP_REASON_FAULTED, text);
+        return;
     }
     if (!build_bindings(a)) {
         off(KILN_CAP_REASON_SYMBOL_MISSING, "items.storage: cannot rebuild converter component bindings");
@@ -1793,6 +1806,7 @@ void storage_init() {
     api = items_api();
     storage_guards.store(&guards);
     S.structural_gate = &structural_gate;
+    S.server_world = &live_server_world;
     uintptr_t capture_at = 0, read_at = 0, join_at = 0, stage_at = 0, transfer_at = 0, template_at = 0;
     std::array<int64_t, 8> layout{};
     detail = "sigdb items.storage or kiln.items transactions/read unavailable";
