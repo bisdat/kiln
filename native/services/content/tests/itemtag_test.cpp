@@ -2,8 +2,11 @@
 // kiln#130: an item tag reference (ItemInfo.tags[i].tag, an ItemTagReference) through gd::parse_leaf, the leaf encoder of
 // every itemdata rule and data-pack item path. The game data cooks no keen::ItemTag resource: the tags it knows are the
 // item registry's list (ItemRegistryResource.itemTags {tagGuid, labelId}). So a tag the list holds is accepted, any other
-// GUID (a root item's identity among them) is refused by name, and the list is read through the reflection only. Hand-made
-// types and bytes on the host; no game.
+// GUID (a root item's identity among them) is refused by name, and the list is read through the reflection only.
+// Voxel models (equipment.voxelObject, equipment.terrainVoxelObject): both editor types are cooked as one
+// keen::VoxelModelResource {size, data, isTerrain} under the item's GUID, and the game data never mixes them (144 items
+// name 67 shape models, isTerrain clear; 11 name 11 terrain models, isTerrain set). So each field takes only its own
+// kind, read through the reflection. Hand-made types and bytes on the host; no game.
 #include "../gamedata_walk.cpp"
 
 #include <cstdarg>
@@ -79,6 +82,10 @@ uintptr_t rec(const TType& t) { return reinterpret_cast<uintptr_t>(&t); }
 // The client's reflection (26430625): ItemTagReference -> ObjectReference<ItemTag>; ItemRegistryResource.itemTags at +8,
 // a BlobArray of 20-byte ItemTagInfo {tagGuid +0, labelId +16}.
 TType guid_t, u32, item_tag, obj_ref, tag_ref, info, info_list, registry;
+// keen::VoxelModelResource (client 26430625): size uint3 +0, data BlobArray<uint8> +12, isTerrain bool +20; 24 bytes.
+TType u8, uint3, bytes_t, model, shape_def, terrain_def, shape_ref, terrain_ref;
+std::vector<uint8_t> shape_model(24, 0), terrain_model(24, 0);
+const uint8_t shape_key[16] = {0x5a, 1}, terrain_key[16] = {0x7e, 2};
 std::vector<uint8_t> resource(4096, 0);
 bool registry_listed = true;
 const uint8_t registry_key[16] = {0x72, 0xab, 0x1c, 0xb6};
@@ -92,6 +99,17 @@ void types() {
     info_list.name = "keen::BlobArray<keen::ItemTagInfo>", info_list.kind = K_BLOBARRAY, info_list.size = 8, info_list.inner_rec = rec(info);
     registry.name = "keen::ItemRegistryResource", registry.kind = K_STRUCT, registry.size = 72, registry.hash = 0x72ab1cb6u;
     registry.fields = {{"itemRefs", rec(info_list), 0}, {"itemTags", rec(info_list), 8}};
+    u8.name = "keen::bool", u8.kind = K_BOOL, u8.size = 1;
+    uint3.name = "keen::uint3", uint3.kind = K_STRUCT, uint3.size = 12;
+    bytes_t.name = "keen::BlobArray<keen::uint8>", bytes_t.kind = K_BLOBARRAY, bytes_t.size = 8, bytes_t.inner_rec = rec(u8);
+    model.name = "keen::VoxelModelResource", model.kind = K_STRUCT, model.size = 24, model.hash = 0xe53afbafu;
+    model.fields = {{"size", rec(uint3), 0}, {"data", rec(bytes_t), 12}, {"isTerrain", rec(u8), 20}};
+    shape_def.name = "keen::VoxelObjectDefinition", shape_def.kind = K_STRUCT;
+    terrain_def.name = "keen::TerrainVoxelObjectDefinition", terrain_def.kind = K_STRUCT;
+    shape_ref.name = "keen::ObjectReference<keen::VoxelObjectDefinition>", shape_ref.kind = K_REF, shape_ref.size = 16, shape_ref.inner_rec = rec(shape_def);
+    terrain_ref.name = "keen::ObjectReference<keen::TerrainVoxelObjectDefinition>", terrain_ref.kind = K_REF, terrain_ref.size = 16,
+    terrain_ref.inner_rec = rec(terrain_def);
+    terrain_model[20] = 1;
 }
 // itemTags: three tags (vanilla Overgrowth's brush tag among them), labels after each GUID
 void lay_out(uint32_t n) {
@@ -111,7 +129,7 @@ void lay_out(uint32_t n) {
 namespace kc::gd {
 const TType* type_hash(uint32_t h) { return h == registry.hash ? &registry : nullptr; }
 const TType* type_named(const std::string& n) {
-    for (const TType* t : {&registry, &tag_ref, &obj_ref, &info, &item_tag})
+    for (const TType* t : {&registry, &tag_ref, &obj_ref, &info, &item_tag, &model, &shape_def, &terrain_def, &shape_ref, &terrain_ref})
         if (t->name == n) return t;
     return nullptr;
 }
@@ -124,6 +142,12 @@ bool res_list(uint32_t type, std::vector<std::array<uint8_t, 16>>* out) {
     return true;
 }
 uintptr_t res_data(const uint8_t g[16], uint32_t type, uint64_t* size) {
+    if (type == model.hash) {  // a loaded (or served) voxel model of either kind; nothing else answers for that type
+        std::vector<uint8_t>* m = !std::memcmp(g, shape_key, 16) ? &shape_model : !std::memcmp(g, terrain_key, 16) ? &terrain_model : nullptr;
+        if (!m) return 0;
+        if (size) *size = m->size();
+        return reinterpret_cast<uintptr_t>(m->data());
+    }
     if (type != registry.hash || std::memcmp(g, registry_key, 16)) return 0;  // no keen::ItemTag resource exists
     if (size) *size = resource.size();
     return reinterpret_cast<uintptr_t>(resource.data());
@@ -139,6 +163,37 @@ bool encode(const std::string& value, uint8_t out[16]) {
     bool reset = false;
     err.clear();
     return parse_leaf(f, kc::gjson(value), original, out, &reset, &err) && !reset;
+}
+// The 36-character text guid_parse above reads (its first three groups little-endian, as the game's GUIDs).
+std::string guid36(const uint8_t g[16]) {
+    char t[40];
+    std::snprintf(t, sizeof t, "%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x", unsigned(g[0] | g[1] << 8 | g[2] << 16 | unsigned(g[3]) << 24),
+                  unsigned(g[4] | g[5] << 8), unsigned(g[6] | g[7] << 8), g[8], g[9], g[10], g[11], g[12], g[13], g[14], g[15]);
+    return t;
+}
+bool encode_model(const char* field, const uint8_t g[16], uint8_t out[16]) {
+    kc::Field f;
+    f.path = std::string("equipment.") + field, f.bytes = 16, f.vt = KILN_CV_GUID, f.ref = true;
+    f.type_name = std::string(field) == "terrainVoxelObject" ? terrain_ref.name : shape_ref.name;
+    const uint8_t original[16] = {};
+    bool reset = false;
+    err.clear();
+    return parse_leaf(f, kc::gjson(guid36(g)), original, out, &reset, &err) && !reset;
+}
+void voxel_models() {
+    uint8_t out[16];
+    check(encode_model("terrainVoxelObject", terrain_key, out) && !std::memcmp(out, terrain_key, 16),
+          "a terrain shape's model (isTerrain set) is a terrainVoxelObject (it was refused as an unloaded editor type)");
+    check(encode_model("voxelObject", shape_key, out) && !std::memcmp(out, shape_key, 16), "a shape's model (isTerrain clear) is a voxelObject");
+    check(!encode_model("terrainVoxelObject", shape_key, out) && err.find("isTerrain") != std::string::npos,
+          "a shape's model is no terrain model: refused, saying why");
+    check(!encode_model("voxelObject", terrain_key, out) && err.find("isTerrain") != std::string::npos,
+          "a terrain model is no shape's model: refused, saying why");
+    const uint8_t nobody[16] = {0x11};
+    check(!encode_model("terrainVoxelObject", nobody, out) && !encode_model("voxelObject", nobody, out), "a model nobody loads or serves is refused");
+    model.fields = {{"size", rec(uint3), 0}, {"data", rec(bytes_t), 12}};
+    check(!encode_model("terrainVoxelObject", terrain_key, out), "a build whose model type has no isTerrain field: refused, no offset guessed");
+    model.fields = {{"size", rec(uint3), 0}, {"data", rec(bytes_t), 12}, {"isTerrain", rec(u8), 20}};
 }
 void tags() {
     uint8_t out[16], want[16];
@@ -165,6 +220,7 @@ int main() {
     types();
     try {
         tags();
+        voxel_models();
         std::printf("itemtag-test: %d checks passed, 0 failed\n", checks);
         return 0;
     } catch (const std::exception& e) {
