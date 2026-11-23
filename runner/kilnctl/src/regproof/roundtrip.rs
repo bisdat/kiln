@@ -215,6 +215,7 @@ fn same(conv: &str, a: &Value, b: &Value) -> bool {
 /// How the raw member values differ from a Kiln value, per conversion; None when they agree.
 fn raw_mismatch(row: &Row, raw: &[Value], kiln: &Value) -> Option<String> {
     let first = raw.first().unwrap_or(&Value::Null);
+    if first.is_null() && row.conv != "optionalEnum" { return None; } // missing comparison, not a wrong value
     let agree = match row.conv.as_str() {
         "int" => num(first).is_some() && num(first) == num(kiln),
         "float" | "impactConfig" => num(first).zip(num(kiln)).is_some_and(|(a, b)| close(a, b)),
@@ -227,8 +228,9 @@ fn raw_mismatch(row: &Row, raw: &[Value], kiln: &Value) -> Option<String> {
             want.is_some() && names(first) == want
         }
         "optionalEnum" => match kiln.as_str() {
-            Some("none") => truthy(first) == Some(false),
-            Some(k) => truthy(first) == Some(true) && raw.get(1).and_then(Value::as_str) == row.values.get(k).map(String::as_str),
+            Some("none") => first.is_null() || truthy(first) == Some(false),
+            Some(k) => (first.is_null() || truthy(first) == Some(true)) &&
+                raw.get(1).is_none_or(|v| v.is_null() || v.as_str() == row.values.get(k).map(String::as_str)),
             None => false,
         },
         _ => true,
@@ -302,6 +304,13 @@ fn sample_problems(row: &Row, x: &Sample, raw: Raw) -> Vec<String> {
         b => p.push(format!("{e}: read back {} after writing {probe}", show(b))),
     }
     raw_check("after", &x.raw_after, probe, &mut p);
+    if raw == Raw::Compared {
+        if let (Some(before), Some(after)) = (&x.raw_before, &x.raw_after) {
+            if before.iter().zip(after).any(|(a, b)| !a.is_null() && b.is_null()) {
+                p.push(format!("{e}: a raw member became unreadable after the write"));
+            }
+        }
+    }
     // structured values are proven through Kiln's own mapping both ways: the game's members must at least have moved
     if raw == Raw::SchemaOnly && !same(&row.conv, probe, read) {
         if let (Some(a), Some(b)) = (&x.raw_before, &x.raw_after) {
@@ -347,13 +356,11 @@ pub fn check(map: &RegMap, side: &str, exe_sha256: &str, regmap_digest: &str, su
             for x in s.samples.iter().filter(|x| x.field == q) {
                 // a member the lab could not read raw: no evidence for the comparison (missing), not a wrong value
                 let null = |v: &Option<Vec<Value>>| v.as_ref().is_some_and(|v| v.iter().any(Value::is_null));
-                if raw == Raw::Compared && x.error.is_none() && (null(&x.raw_before) || null(&x.raw_after)) {
-                    unread = true;
-                    continue;
-                }
+                let incomplete = raw == Raw::Compared && (null(&x.raw_before) || null(&x.raw_after));
+                unread |= incomplete;
                 samples += 1;
-                let p = sample_problems(row, x, raw);
-                if p.is_empty() {
+                let p = sample_problems(row, x, raw); // still judge read-back, revert, bytes, and readable members
+                if p.is_empty() && !incomplete {
                     passed += 1;
                     let right_generation = want.is_none_or(|g| g == s.generation);
                     in_generation |= right_generation;
@@ -369,7 +376,7 @@ pub fn check(map: &RegMap, side: &str, exe_sha256: &str, regmap_digest: &str, su
         }
         let where_ = want.map(|g| format!(" in a {g} generation")).unwrap_or_default();
         let mut missing = Vec::new();
-        if samples == 0 && unread {
+        if !in_generation && unread {
             missing.push(format!("the lab could read no raw value of the field's members{where_}: the field is not proven on this build"));
         } else if samples == 0 {
             missing.push(format!("no round-trip sample{where_}: the field is not proven on this build"));
@@ -547,6 +554,25 @@ pub(crate) mod tests {
             assert!(!x.ok, "{field} ({word}) should fail: {x:?}");
             assert!(x.problems.iter().any(|p| p.contains(word)), "{field}: {word:?} not in {:?}", x.problems);
             assert!(r.fields.iter().filter(|(q, _)| q.as_str() != field).all(|(_, o)| o.ok), "only {field} fails");
+        }
+    }
+
+    #[test]
+    fn unreadable_raw_members_do_not_hide_failed_steps() {
+        for step in ["readBack", "reverted", "bytes", "became unreadable"] {
+            let mut suites = full();
+            edit(&mut suites, "gadgets.size", |s| {
+                s.raw_before = Some(vec![Value::Null]);
+                s.raw_after = Some(vec![Value::Null]);
+                match step {
+                    "readBack" => s.read_back = Some(json!(999)),
+                    "reverted" => s.reverted = Some(false),
+                    "bytes" => s.bytes_after = Some("different".into()),
+                    _ => s.raw_before = Some(vec![json!(20)]),
+                }
+            });
+            let f = &check(&map_with_float_cap(), "server", SHA, DIGEST, &suites).fields["gadgets.size"];
+            assert!(!f.problems.is_empty(), "{step} is a disproof even with unreadable raw values: {f:?}");
         }
     }
 
