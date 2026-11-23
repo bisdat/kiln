@@ -73,6 +73,13 @@ public sealed record EquipResult(
     /// <summary><see cref="Replaced"/> as one particular item.</summary>
     public ItemInstanceRef ReplacedRef { get; init; }
 
+    /// <summary>The stack replaced by GiveEquip; an alias of Replaced. Since 0.2.0-dev.30.6.</summary>
+    public ItemId ReplacedItem => Replaced;
+
+    /// <summary>GiveEquip: the number in the old stack (also on DryRun); 0 for ordinary Equip and Unequip.
+    /// Since 0.2.0-dev.30.6.</summary>
+    public int ReplacedCount { get; init; }
+
     /// <summary>The outcome in one line, for a log.</summary>
     public override string ToString() =>
         $"{(Unequipped ? "unequip" : "equip")} {Status} player {Player} slot {Slot?.ToString() ?? "?"} item {Item} {From} -> {To}" +
@@ -366,6 +373,7 @@ public static unsafe partial class Items
         {
             Ref = ItemRefs.Of(n.Pide, n.Item, n.Stamp),
             ReplacedRef = ItemRefs.Of(n.ReplacedPide, n.Replaced, n.ReplacedStamp),
+            ReplacedCount = checked((int)n.Reserved[0]),
         };
     }
 

@@ -826,3 +826,44 @@ ActorInput usedItem PIDE `+0x44` because LabUseItem omitted it; this is controll
 swing/harvest/build acceptance. Supported primitive is **per debit**, not once per physical action. Client prediction,
 bars, break/repair/save regressions remain untested. Scratch signature `items.tool_wear_debit` is not a shipped API;
 full service/status/dedup designs remain in chapter 16b.
+
+
+## 21. Atomic give-and-equip (since 0.2.0-dev.30.6) **[dis] [fixture]**
+
+Target: server 26430253 (`f0d824be…`), client 26430625. No game process was run for this addition.
+
+**Why not Give then Equip:** `InventoryCommit` op 0 (`0x1afebc..0x1b0078`) calls `createPide` on the
+op's slot. Before commit only item/count exist. `SlotTransfer` appends transfer/remap ops; moving that pending creation
+can leave creation targeting its old cell. Kiln never patches these private queue records.
+
+**The game's selection helper:** server `0x1b28f0` (`items/SelectEquipment`), called by `EquipItem` at `0x1b5422`:
+`EquipResult8*(out, tx, u8 remove, u32 player, SlotSelection*, u8 equipmentSlot, u64 cell, ItemInfo*, u32 pide)`.
+It checks the special item flag 4/accessor, appends a zeroed 0x34-byte **op 7**, and records the destination (+0),
+item (+8), pide (+0x20), logical slot (+0x27) and old selection (+0x28). Selection is not changed here. The normal
+non-backpack Equip path is slot-type validation, moveStack, then this helper; it writes no Equipment visual/impact
+component and sends no additional equipment event in this branch. The special flag's own helper behaviour is retained.
+
+- Commit's op7 branch `0x1b030b..0x1b038d` gets the current player's tracked SlotSelection and sets that logical
+  slot to op.slot. A nonzero op.pide also sets ItemState.IsEquipped. Rollback's op7 branch `0x1b87b3..0x1b87ee`
+  restores op.previous_slot; it creates no entity. Op0's rollback removes the pending stack; createPide only runs on commit.
+- A new pide is not known when op7 is queued. `createPide` supplies a **local** 20-byte ItemState override whose
+  initial flags include 0x40, not IsEquipped. Kiln's existing thread-local/scoped spawn-options hook ORs 0x08 into
+  that local override for GiveEquip only. Other bytes and other creations are unchanged; the scope is restored even
+  when commit faults. `createPide` itself supplies contained slot, inventory OwnerRelationship, level, perks,
+  durability and other default components, exactly as for a normal Give.
+- Empty logical target: choose an empty unselected cell in the proper Equipment/Customization page, Add there,
+  then call the game's helper to select **that same cell**. Calling Equip here would choose another empty cell
+  after Add (`0x1b5041..0x1b51d9`), reintroducing the pending-create move.
+- Occupied logical target: evacuate the previous stack with the game's transfer to a preflighted empty Generic
+  cell, or its removeItems for Take; Add directly at the selected final cell; run Equip with source=target.
+  Reject any spill or movement of the newly added stack. Check the commit's rollback guards, finalize once, free once.
+  Bag slot 23 is refused before mutation because its nested inventory only exists after creation.
+
+**Fixture proof, not live-game proof:** `move_test.cpp give-equip` runs the production engine path with delayed
+pide creation. It compares the resulting selection, all ItemState bytes (slot/item/flags/rarity/level) and inventory owner
+against the fixture's vanilla transfer+selection of identical existing gear. It checks full-backpack empty/Take success,
+Backpack preflight refusal, replacement identity/count, no free equipment cell, type mismatch, add/equip/commit-guard
+failure and dry-run rollback with identical original component bytes and no orphan. `pide_test.cpp` tests the real
+scoped hook's initial equipped bit, isolation to the requested item, ordinary later creation and fault cleanup.
+Derived stats, impact recalculation, visual replication, persistence, real backpack topology and live-player effects
+remain **unverified** and require the guided in-game check; fixture equality is not evidence of execution in the game.

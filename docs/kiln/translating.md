@@ -9,7 +9,7 @@ translation does not have yet shows in English, so a translation can be partial 
 
 | Language | Tag | State |
 |---|---|---|
-| Simplified Chinese (简体中文) | `zh-CN` | by XiaoHuLi666 (XHL), since 0.2.0-dev.29.18 |
+| Simplified Chinese (简体中文) | `zh-CN` | by MagicFox (XHL), since 0.2.0-dev.29.18; updated for 0.2.0-dev.30.5 |
 | German (Deutsch) | `de` | machine translation, waiting for native speakers (0.2.0-dev.29.19): [notes and glossary](translations/de.md), [review issue](https://github.com/frostdev-ops/kiln/issues/90) |
 | Russian (Русский) | `ru` | machine translation, waiting for native speakers (0.2.0-dev.29.19): [notes and glossary](translations/ru.md), [review issue](https://github.com/frostdev-ops/kiln/issues/91) |
 | French (Français) | `fr` | machine translation, waiting for native speakers (0.2.0-dev.29.19): [notes and glossary](translations/fr.md), [review issue](https://github.com/frostdev-ops/kiln/issues/92) |

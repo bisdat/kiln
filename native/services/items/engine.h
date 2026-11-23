@@ -87,6 +87,10 @@ using MoveAllFn = Result12*(__fastcall*)(Result12* out, void* tx, uint32_t from,
 // player is the running program's current entity (ProgramContext + 8), not an argument.
 using EquipFn = Result12*(__fastcall*)(Result12* out, void* tx, uint64_t slot, uint8_t equipment_slot);
 
+// The selection half of EquipItem, queues op7; it never moves the stack or commits (docs/re/items.md section 21).
+using SelectEquipmentFn = Result12*(__fastcall*)(Result12*, void* tx, uint8_t remove, uint32_t player,
+                                                 const void* selection, uint8_t slot, uint64_t cell, const void* info, uint32_t pide);
+
 // ---- what the service resolved at boot ----
 struct Engine {
     TxCtorFn tx_ctor = nullptr;
@@ -120,6 +124,8 @@ struct Engine {
     uintptr_t write_component_tick = 0;  // feature items.rename: the rename handler's tracked write (WriteOther, the world's tracker)
     EquipFn equip_item = nullptr;      // feature items.equip (v5)
     EquipFn unequip_item = nullptr;
+    SelectEquipmentFn select_equipment = nullptr;
+    bool give_equip_ok = false;
     // feature items.equip_sets (v6): the commit's own rollback conditions, captured from InventoryCommit's first bytes
     // (sigdb @items/CommitGuards): flags byte (bit 0x40 = roll back), the InventoryEmptyState accessor's slot, the touched
     // inventories' count. A set refuses before the commit when either would make the commit roll back by itself.
@@ -224,6 +230,9 @@ struct FuelJob {
 // Fills `a` on success; on a failed check writes the reason to why[160] and returns ok=false.
 bool verify_access(const uint64_t* it, const int* singleton_slots, const int* acc_slots, const int* event_slots,
                    void* ctx, Access* a, bool* ok, char* why, unsigned long* code);
+
+// With the equipment program's current player entity; owns fault cleanup and never rolls back after commit starts.
+bool run_give_equip(const Access& a, const KilnItemsGiveEquipRequest& r, uint8_t* tx, KilnItemsEquipResult* result, unsigned long* code);
 
 // Runs one give / take inside the program update. tx: E.tx_size bytes, 16-aligned.
 bool run_job(const Access& a, const Job& job, uint8_t* tx, KilnItemsResult* res, unsigned long* code);

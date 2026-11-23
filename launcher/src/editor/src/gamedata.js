@@ -5,14 +5,13 @@ import { campoDeNome, localeAtual, t } from './i18n.js';
 import { copiarEstatisticas } from './itemstats.js';
 import { MAX_ITEM_LEVEL, newItemLevels } from '../kiln/levels.js';
 
+import { currentLocale } from '../../i18n';
+import { gameName } from '../kiln/game-names.js';
+
 export { items, skills };
 
-// O jogo traz cada nome em português e em inglês, os dois da localização oficial dele, e
-// `data/items.json` guarda os dois por item. Então não traduzimos nome de item à mão: lemos o campo
-// do idioma escolhido. O outro idioma serve de reserva para as entradas sem nome.
-// Exportado porque quem já tem o objeto em mãos (uma lista de catálogo, o nó sob o cursor) não
-// deve voltar à tabela pelo id só para ler o nome — e nunca deve ler `.pt` direto: foi assim que
-// a árvore de habilidades e o catálogo continuaram em português com a interface em inglês.
+// The vendored Portuguese/English names remain the fallback when game art has not been extracted.
+// Item/skill ids resolve the installed game's names first; don't use this object-only fallback for skill nodes.
 export const nomeDe = (o, reserva) => {
   if (!o) return reserva;
   const campo = campoDeNome();
@@ -21,7 +20,8 @@ export const nomeDe = (o, reserva) => {
 
 // Kiln: an id with no entry (an item of a mod that is gone) is named "Unknown item (0x…)"
 export const nomeDesconhecido = (id) => t('Item desconhecido (0x{h})', { h: ((Number(id) || 0) >>> 0).toString(16).padStart(8, '0') });
-export const itemName = (id) => nomeDe(items[id], items[id]?.debug || nomeDesconhecido(id));
+export const itemName = (id) => gameName('items', id, currentLocale()) || nomeDe(items[id], items[id]?.debug || nomeDesconhecido(id));
+export const englishItemName = (id) => gameName('items', id, 'en') || items[id]?.en || items[id]?.debug || '';
 
 // Kiln: items added by Kiln mods (the launcher's overlay, <art>/modded/items.json; docs/kiln/launcher/gameart.md).
 // Each new item copies its base item's entry (category, slot, stack, levels) and gets its own name, rarity and icon;
@@ -71,15 +71,17 @@ export function mergeModded(overlay, versao = '') {
 
 // A descrição do nó é guardada em `desc` e `descEn`, e não em `pt`/`en` como o nome.
 export const descricaoDe = (no) => (campoDeNome() === 'pt' ? no?.desc : no?.descEn) || no?.desc || '';
-export const skillName = (id) => nomeDe(skills.nodes[id], `#${id}`);
+export const skillName = (id) => gameName('skills', id, currentLocale()) || nomeDe(skills.nodes[id], `#${id}`);
 
-// O conhecimento quase sempre é um item ou a receita de um item, e aí o nome sai do `items.json`
-// no idioma escolhido. Só as entradas sem item por trás levam o nome gravado, que existe num
-// idioma só.
+// Knowledge uses the game's recipe/item name by knowledge id, then the known item's name.
+// Miscellaneous flags with no shipped loca tag keep the existing label.
 export const nomeConhecimento = (info, id) => {
+  const name = gameName('knowledge', id, currentLocale());
+  if (name) return name;
   if (info?.i !== undefined) return itemName(info.i);
   return info?.n ?? `#${id}`;
 };
+export const englishKnowledgeName = (info, id) => gameName('knowledge', id, 'en') || (info?.i !== undefined ? englishItemName(info.i) : info?.n) || '';
 
 export const ATRIBUTOS = ['Constituição', 'Espírito', 'Resistência', 'Força', 'Destreza', 'Inteligência'];
 

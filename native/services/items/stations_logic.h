@@ -568,17 +568,16 @@ constexpr uint64_t kMaxCraftStock = 4096;  // a longer stock list than this is l
 
 // Who pays a craft before any station, in the game's order (InventoryPay): stock mode 2 pays the owner first and then
 // the base's stock list, mode 1 the list and then the owner. Each entity once: the owner can be one of the list's
-// chests, and counting it twice would hide a shortfall. False (the game's own payment) for any other mode (0 has no
-// base stock) and for a list longer than kMaxCraftStock, so outputs never pay before a chest the game would ask.
+// chests, and counting it twice would hide a shortfall. Mode 0 pays the owner alone (registered player sources may follow); false for an unknown mode and for a list longer than kMaxCraftStock, so outputs never pay before a chest the game would ask.
 inline bool craft_order(uint8_t mode, uint32_t owner, const uint32_t* list, uint64_t n, std::vector<uint32_t>* out) {
     out->clear();
-    if ((mode != 1 && mode != 2) || n > kMaxCraftStock || (n && !list)) return false;
+    if (mode > 2 || n > kMaxCraftStock || (n && !list)) return false;
     std::unordered_set<uint32_t> seen;
     auto push = [&](uint32_t e) {
         if (e && seen.insert(e).second) out->push_back(e);
     };
-    if (mode == 2) push(owner);
-    for (uint64_t i = 0; i < n; ++i) push(list[i]);
+    if (mode == 0 || mode == 2) push(owner);
+    if (mode != 0) for (uint64_t i = 0; i < n; ++i) push(list[i]);
     if (mode == 1) push(owner);
     return true;
 }

@@ -80,11 +80,30 @@ public sealed class SlotMarksMod : Mod
         }
         try
         {
-            _subs.Add(Ui.Inventory.MarkWhen(s => s.Count >= 50 ? BigStack : null));
+            // Since 0.2.17: the game's own background colour, not a foreground rectangle.
+            // Retain the overlay example beside an older Kiln without kiln.ui.tints.
+            if (Capabilities.Is(Ui.Inventory.TintCapability))
+                _subs.Add(Ui.Inventory.TintWhen(s => s.Count >= 50 ? BigStack.Color : null));
+            else
+                _subs.Add(Ui.Inventory.MarkWhen(s => s.Count >= 50 ? BigStack : null));
         }
         catch (KilnUnavailableException e)
         {
             Log.Info($"slotmarks: no slot marks here: {e.Message}");
+        }
+        try
+        {
+            // Since 0.2.17: a game-drawn button in the chest's own row. The server still validates the wish.
+            _subs.Add(Ui.Inventory.AddChestButton("Count chest", screen =>
+            {
+                _chestLine = "asking the server...";
+                if (_ch is null || !_ch.SendToServer(new ChestCountRequest(screen.Container.Value)))
+                    _chestLine = "not connected to a server with slotmarks";
+            }));
+        }
+        catch (Exception e) when (e is KilnUnavailableException or InvalidOperationException)
+        {
+            Log.Info($"slotmarks: no native chest button here: {e.Message}");
         }
         try
         {

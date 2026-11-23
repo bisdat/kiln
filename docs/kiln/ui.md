@@ -472,6 +472,56 @@ two chest screens (before 0.2.0-dev.30: factories only).
 **Not in this version:** a button inside the game's chest screen where Enlarge sits (drawn by the game's own button
 renderer), the game's own slot colours (marks are drawn over the slot), the gamepad's focused slot.
 
+## The HUD's ammunition and spell lists (0.2.0-dev.30.6)
+
+`Ui.AmmoList` (client only; since 0.2.0-dev.30.6, mod API 0.2.15; GitHub issue 127, thanks Fuzen777) lets a mod add rows
+to the list a bow's arrows or a staff's spells are picked from, or put its rows in place of the game's: a quiver mod shows
+the arrows its server keeps for the player, a spell-book mod the spells it grants. Native: `kiln.ui.ammo`
+(`native/core/abi/services/kiln_ui_ammo.h`, served by kiln-tools); capability rows `ui.ammo.list` (`Provide`) and
+`ui.ammo.pick` (`Picked`).
+
+```csharp
+// after the game's rows: the arrows the server keeps in this player's quiver (the mod's own data)
+using var quiver = Ui.AmmoList.Provide(AmmoListKind.Arrow, ctx =>
+    myQuiver.Select(q => new AmmoListRow(q.Item, q.Count)).ToList());
+myQuiverChanged += () => quiver.Refresh();             // Kiln cannot see the mod's own data change: ask again
+
+// the player (or the game's automatic selection) picked a quiver row the backpack does not hold: the game did nothing
+Ui.AmmoList.Picked += pick => SendToMyServer(pick.Item); // the server half checks it, then swaps the stack in
+
+// in place of the game's spells, for both lists at once (one call per list; ctx.Kind says which)
+Ui.AmmoList.Provide(AmmoListKind.Arrow | AmmoListKind.Spell, ctx => MyRows(ctx.Kind, ctx.Held, ctx.GameRows),
+    new AmmoListOptions { Mode = AmmoListMode.Replace });
+```
+
+- **When the rows are asked for.** The provider runs as your mod on the game's UI thread, never inside the game's own
+  code: once when the list is first built, then whenever its `AmmoListContext` changes (the held weapon `Held`, the
+  game's own rows or counts `GameRows`, as the game last built them, the session) or `Refresh()` is called. Kiln copies the rows and hands the game an
+  immutable snapshot, so the HUD may show the previous context's rows for one frame. Keep it a lookup.
+- **Order and composition.** Rows show in the order returned. All providers of a list are composed in registration
+  order; the first row of an item wins, item 0 is left out, a negative count shows as 0. A list holds 64 rows in all:
+  in `Append` the mods' rows fit in what the game's rows leave (none when the game shows 64 itself); in `Replace` the
+  mods have all 64. `ctx.Truncated` says Kiln cut rows at 64 (the game's own list was longer, so `GameRows` are its first
+  64, or the list shown last was longer).
+  `Append` (the default) leaves out an item the game already lists (its row keeps the real count); `Replace` shows only
+  the mods' rows, and one provider asking for it replaces the whole list. A provider that throws adds no rows that time;
+  rows the game refuses (an item that is not an arrow, or not a spell, for that list) drop that provider's rows only.
+  Both go to the mod's log.
+- **Selection.** The game keeps its selection on the same item when the rows change.
+- **Picks.** A row whose item the game lists itself (in `Replace` too) or the player carries is the game's own: it
+  equips it as always. Any other mod row raises `Picked` for the mod that provided it (on the UI thread at the next UI
+  frame; an earlier session's picks are dropped), and the game does nothing. `Picked` is a selection wish, not proof of
+  a click: the game's own automatic selection (the weapon's current ammunition is not in a replaced list, so it selects
+  the first or the kept row) raises it too. Kiln never moves an item; your server half validates the wish (the player
+  owns the item, the weapon takes it) and ignores repeats.
+- **Refusals.** `Provide` throws `KilnUnavailableException` when `ui.ammo.list` is off (a server, a game build Kiln has
+  not measured, an older kiln-tools); subscribing to `Picked` throws it when `ui.ammo.pick` is off. `Ui.AmmoList.Available`
+  and `PicksAvailable` ask first, `Capabilities.Why(Ui.AmmoList.ListCapability)` says why. Disposing the last provider of
+  a list, or unloading the mod, shows the game's own list again.
+- **Unit tests.** The test kit's `KilnHarness.AmmoList` plays the game's side (`Hold` a bow or staff with the game's
+  rows, `SetGameRows`, `NewSession`, `KnownItems`), shows what the HUD would (`Shown`, `Provided`, `ModeOf`, `Selected`)
+  and picks a row (`Pick`, raised at the next `Step`).
+
 ## Outlines on entities in the world (0.2.0-dev.30.3)
 
 `Ui.World.Outline(entity, options)` (client only, any thread) lights an entity's model with the game's own highlight:
@@ -1578,3 +1628,37 @@ Client check: open an item's detail panel, then read its lines from a mod. Compa
 weapon across levels/rarities and upgrades, armor, food, gems/perks, stackable and chest items;
 reinspect after a language change, and leave/rejoin before reusing a saved identity. Run on both
 Proton and native Windows, with a vanilla peer confirming unchanged gameplay and game panels.
+
+## Native inventory background colours (since 0.2.17)
+`Ui.Inventory.TintWhen(rule, item)` changes the game's own slot background, without drawing an overlay.
+`ui.slots.tint` / `kiln.ui.tints` is client-only; registration and disposal work on any thread. Rules run on
+the game's UI thread in registration order over copied `UiItemView` values; return `null` to keep the
+earlier colour. Match `InventoryPage` and `SlotIndex` for stacks without an item entity. Empty slots are
+also offered when no item filter is supplied. Dispose or unload to restore the earlier/vanilla colour.
+The game's colour strength, rarity art, focus and input stay unchanged; a tint is never gameplay authority.
+```csharp
+using var tint = Ui.Inventory.TintWhen(slot =>
+    slot.Item == trackedItem ? new Color(80, 180, 255, 160) : null);
+```
+Five consecutive exceptions remove a rule; registration shares the 128-per-mod ui.values budget.
+An unmeasured game layout, missing signature or hook failure throws `KilnUnavailableException`;
+a full registration budget throws `InvalidOperationException`, as the existing slot subscriptions do.
+
+## Native chest-row buttons (since 0.2.17)
+`Ui.Inventory.AddChestButton(caption, handler)` puts a game-drawn entry in a storage chest's own action
+row. It is not an overlay panel, and does not borrow or simulate any vanilla input action. The game's
+entry renderer handles its drawing, input and focus. Registration/disposal work on any thread; the callback
+runs on the game UI thread after the chest builder returns. The `InventoryScreen.Container` is read from
+the current chest, not a cached screen from a previous frame. Send it to a server half which validates
+permissions and distance before acting: a client button is a wish, never authority.
+```csharp
+using var button = Ui.Inventory.AddChestButton("Count chest", screen =>
+    channel.SendToServer(new CountChestRequest(screen.Container.Value)));
+```
+Capability `ui.chest.buttons`, independent native table `kiln.ui.chest` v1. There are four active buttons
+total; captions must be unique among them and contain 1..128 UTF-8 bytes without NUL. They are literal text:
+dispose/re-register to change the caption or localize it. Registrations also share ui.values' 128/mod limit,
+and captions use its bounded permanent text store. A budget/duplicate refusal throws `InvalidOperationException`;
+missing capability/layout/hooks throw `KilnUnavailableException`. Unload or five consecutive callback faults
+removes a button. Commerce and factory screens, an unknown chest target, or a missing client session draw no
+mod button. Actual row sizing, visual placement and controller navigation remain unverified in-game.

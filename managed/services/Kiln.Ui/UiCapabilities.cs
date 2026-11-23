@@ -28,7 +28,7 @@ internal static unsafe class UiCaps
     [
         "ui.values.detail", "ui.values.slot", "ui.values.held", "ui.values.hud", "ui.values.tooltip_lines",
         "ui.slots.inspect", "ui.gemforge.inspect", "ui.gemforge.sources", "ui.tooltip.lines", "ui.tooltip.values", "ui.slots.click",
-        "ui.inventory.panels",
+        "ui.inventory.panels", "ui.slots.tint", "ui.chest.buttons",
     ];
 
     internal static readonly ServiceCapRows Rows = new(Service, Report);
@@ -55,8 +55,15 @@ internal static unsafe class UiCaps
         if (UiValuesNative.T != null && UiInventoryNative.T2 == null)
             ServiceCaps.LowerOff(Ui.Inventory.PanelCapability, CapabilityReason.ServiceOlder,
                 "kiln.ui.inventory has no screen_view (v2: an older kiln-core)");
+        // Ui.AmmoList (0.2.0-dev.30.6): kiln-tools serves kiln.ui.ammo; without its table neither row can work
+        if (UiAmmoNative.T == null)
+            ServiceCaps.LowerFeatures(UiAmmoNative.Service, Ui.AmmoList.ListCapability, Ui.AmmoList.PickCapability);
         if (UiItemDetailNative.T == null)
             ServiceCaps.LowerOff(Ui.Values.ItemDetailCapability, CapabilityReason.ServiceOlder, "kiln.ui.item_detail is not available");
+        if (UiNativeChest.T == null)
+            ServiceCaps.LowerOff(Ui.Inventory.ChestButtonCapability, CapabilityReason.ServiceOlder, "kiln.ui.chest is not available");
+        if (UiNativeTints.T == null)
+            ServiceCaps.LowerOff(Ui.Inventory.TintCapability, CapabilityReason.ServiceOlder, "kiln.ui.tints is not available");
         // Collected lines have one production consumer: the overlay's Item details window.
         ServiceCaps.LowerFeatures(Service, "ui.values.tooltip_lines");
         if (!RenderNative.Available) ServiceCaps.LowerFeatures(Render, "render.camera", Ui.World.OutlineCapability);

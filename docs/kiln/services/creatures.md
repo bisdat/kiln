@@ -313,7 +313,7 @@ var thrower = Arsenals.Define("thrower", new ArsenalSpec
         new ArsenalRule { Name = "rally", Every = 1, Cooldown = 20,
             If = [Is.Game("StateConstrain", ("states", new[] { "Combat" })), Is.HealthBelow(0.5)],
             Do = [Act.Custom(npc => Combat.Heal(npc.Entity, npc.HealthMax / 4))] },
-        new ArsenalRule { Name = "night", Every = 2, If = [Is.Night, Is.Custom(npc => Weather.IsStorm)], Do = [Act.Attack("long-throw")] },
+        new ArsenalRule { Name = "night", Every = 2, If = [Is.Night, Is.Custom(npc => Time.Weather.Any(l => l.Current?.Effect is WeatherEffect.Rain or WeatherEffect.Blizzard))], Do = [Act.Attack("long-throw")] },
     ],
 });
 creature.Arsenal = thrower.Id;

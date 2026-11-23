@@ -1297,7 +1297,8 @@
       "quitTitle": "退出 Kiln？",
       "quit": "退出",
       "unsavedNamed": "你在存档编辑器中对 {name} 的修改尚未保存。",
-      "unsaved": "存档编辑器中的角色改动尚未保存。"
+      "unsaved": "存档编辑器中的角色改动尚未保存。",
+      "busy": "存档编辑器正在保存，请等保存完成后再退出。"
     },
     "dataFolder": {
       "title": "数据目录",
@@ -1507,7 +1508,11 @@
         "other": "共 {count} 个模组"
       },
       "noModsHere": "这里没有模组",
-      "listAria": "模组与文件夹"
+      "listAria": "模组与文件夹",
+      "updatedOne": "已更新 {name}：{from} → {to}",
+      "updatedName": "已更新 {name}",
+      "updatedMany": "已更新 {count} 个模组",
+      "addedAndUpdated": "已添加 {added} 个模组，更新 {updated} 个"
     },
     "kiln": {
       "readingFolder": "正在读取游戏目录。",
@@ -1580,7 +1585,9 @@
       "restoreGoes": "启动器会先恢复加入测试版前的配置方案和设置，再重新启动。",
       "settingsStay": "将保留当前配置方案和设置。",
       "noCopy": "测试版启用前的备份不完整：{warnings}",
-      "downloadingDots": "正在下载…"
+      "downloadingDots": "正在下载…",
+      "upscaler": "游戏内 FSR 3 选项使用的超分辨率技术",
+      "upscalerNow": "当前生效的超分辨率技术"
     }
   },
   "mods": {
@@ -2011,7 +2018,76 @@
       "off": "关闭",
       "policy": "策略",
       "game": "游戏版本",
-      "process": "进程"
+      "process": "进程",
+      "stages": "启动阶段",
+      "stage": {
+        "stopping": "正在停止",
+        "preparing": "正在准备",
+        "wine": "Wine",
+        "process": "服务器进程",
+        "world": "加载世界",
+        "running": "运行中"
+      },
+      "stageHint": {
+        "stopping": "先保存世界",
+        "remote": "kilnctl 通过 SSH 启动服务器",
+        "preparing": "检查目录和 Kiln 配置",
+        "wine": "准备 Wine 运行器和前缀",
+        "process": "启动 enshrouded_server.exe",
+        "world": "游戏正在加载世界",
+        "running": "玩家可以加入"
+      },
+      "elapsed": "已用时",
+      "left": "预计还需 {left}。上次启动用时 {last}。",
+      "longer": "已超过上次启动耗时（{last}）。可在控制台查看当前进度。",
+      "stoppingFirst": "正在停止服务器",
+      "stoppingHint": "重启时会先保存世界并停止服务器，再重新启动。",
+      "srStage": "{name} 正在启动，当前阶段为「{stage}」。",
+      "srStopping": "{name} 正在重启，目前正在停止服务器。",
+      "stageState": "（{state}）",
+      "noLast": "启动器首次记录此服务器的启动耗时。显示「运行中」后，玩家即可加入。",
+      "whileStarts": "启动期间",
+      "can": {
+        "watch": "查看完整输出",
+        "watchHint": "控制台会实时显示启动输出。",
+        "leave": "离开此页",
+        "leaveHint": "服务器会继续启动。状态圆点会显示服务器状态，启动完成后会收到通知。",
+        "stop": "停止",
+        "stopHint": "中止启动并关闭服务器。",
+        "join": "运行后可加入",
+        "joinHint": "世界仍在加载。"
+      },
+      "kilnUpdate": "Kiln 更新",
+      "kilnUpdateRunning": "Kiln {latest} 已发布，当前版本为 {current}。更新时会先停服，装好后重启，期间在线玩家会断开连接。",
+      "kilnUpdateStopped": "Kiln {latest} 已发布，当前版本为 {current}。服务器已停止，本次只安装更新。",
+      "stat": {
+        "players": "玩家",
+        "notRunning": "未运行",
+        "health": "运行状况",
+        "stepsPerS": "模拟步/秒",
+        "p99": "99% 的模拟步在 {ms} 毫秒内完成",
+        "noTicks": "暂无模拟步耗时数据",
+        "uptime": "运行时长",
+        "startedIn": "启动用时 {time}",
+        "versions": "Kiln",
+        "noKiln": "未安装",
+        "isOut": "可更新至 {latest}。",
+        "game": "游戏版本 {version}。"
+      },
+      "sections": "页面导航",
+      "link": {
+        "consoleLive": "实时输出与 Kiln 命令",
+        "consoleLast": "上次运行的输出",
+        "playersOff": "服务器运行时可用",
+        "mods": {
+          "other": "{count} 个模组"
+        },
+        "backups": {
+          "other": "{count} 份备份，最近一次 {ago}"
+        },
+        "noBackups": "暂无备份",
+        "settings": "UDP 端口 {port}、难度、用户组"
+      }
     },
     "head": {
       "installKiln": "安装 Kiln",
@@ -2115,7 +2191,78 @@
       "newServer": "新建服务器",
       "noServers": "暂无服务器",
       "noServersHint": "使用 SteamCMD 安装服务器，或导入现有目录。",
-      "namePlaceholder": "余烬群岛"
+      "namePlaceholder": "余烬群岛",
+      "durD": "{d}天{h}时",
+      "backupTitle": "正在备份 {name}",
+      "stepBackup": "备份存档",
+      "health": "运行状况",
+      "kiln": "Kiln",
+      "runsOn": "运行方式",
+      "actions": "快捷操作",
+      "overSsh": "{host}（SSH）",
+      "since": "于 {time} 停止",
+      "updateWord": "更新",
+      "updateTitle": "Kiln {version} 已发布",
+      "perSecond": "{rate}/秒",
+      "healthTitle": "最近一分钟每秒执行 {rate} 个模拟步",
+      "healthLabel": {
+        "other": "最近 {count} 分钟的模拟步速率，当前每秒 {rate} 步"
+      },
+      "console": "控制台",
+      "moreFor": "{name} 的更多操作",
+      "startNamed": "启动 {name}",
+      "stopNamed": "停止 {name}",
+      "consoleNamed": "打开 {name} 的控制台",
+      "updateNamed": "更新 {name} 的 Kiln",
+      "stepOf": "{step}（{n}/{count}）",
+      "word": {
+        "starting": "正在启动",
+        "stopping": "正在停止",
+        "restarting": "正在重启",
+        "updating": "正在更新",
+        "installing": "正在安装",
+        "backingUp": "正在备份"
+      },
+      "say": {
+        "count": {
+          "other": "共 {count} 台服务器。"
+        },
+        "full": "{count}{rest}",
+        "join1": "{a}。",
+        "join2": "{a}。{b}。",
+        "join3": "{a}。{b}。{c}。",
+        "busyStart": "{name} 正在启动",
+        "busyStop": "{name} 正在停止",
+        "busyRestart": "{name} 正在重启",
+        "busyUpdate": "{name} 正在更新游戏文件",
+        "busyDeploy": "{name} 正在更新 Kiln",
+        "busyCreate": "{name} 正在安装",
+        "busyBackup": "{name} 正在备份",
+        "busyMany": "有 {count} 台服务器正在执行操作",
+        "runningPlayers": {
+          "other": "{name} 运行中，{count} 人在线"
+        },
+        "runningNobody": "{name} 运行中，暂无玩家在线",
+        "runningMany": {
+          "other": "{servers} 台服务器运行中，共 {count} 人在线"
+        },
+        "runningManyNobody": "{servers} 台服务器运行中，暂无玩家在线",
+        "noneRunning": "目前没有服务器在运行",
+        "updateOne": "{name} 的 Kiln 有更新",
+        "updateMany": "有 {count} 台服务器可更新 Kiln"
+      },
+      "banner": {
+        "title": "有更新",
+        "updatingTitle": "正在更新",
+        "failedTitle": "更新失败",
+        "single": "Kiln {version} 已发布。{name} 当前版本为 {current}，已停服，本次只安装更新。",
+        "oneRunning": "Kiln {version} 已发布。{name} 当前版本为 {current}，将先停服，更新后重启。",
+        "several": "Kiln {version} 已发布。{names} 仍在使用旧版 Kiln。",
+        "updateOne": "更新 {name}",
+        "updateAll": "全部更新（{count} 台）",
+        "running": "正在更新 {name}。{step}（{n}/{count}）",
+        "failed": "{name} 的 Kiln 更新失败。{reason}"
+      }
     },
     "modpackOffer": {
       "thisServer": "此服务器",
@@ -2295,6 +2442,146 @@
       "from": "{description}（来自 {owner}）",
       "noDescription": "暂无说明。",
       "needs": "需要 {node}（{permission}）"
+    },
+    "activity": {
+      "done": "已完成",
+      "failed": "失败",
+      "canceled": "已取消",
+      "timeTitle": "耗时",
+      "dismiss": "关闭进度面板",
+      "step": {
+        "pending": "等待中",
+        "running": "进行中",
+        "done": "已完成",
+        "failed": "失败",
+        "canceled": "已取消",
+        "skipped": "已跳过"
+      },
+      "waiting": "正在等待服务器的首条输出…",
+      "noReason": "操作已中止，未说明原因。可到控制台查看详情。",
+      "tryAgain": "重试",
+      "console": "打开控制台",
+      "hideDetails": "隐藏详情",
+      "showDetails": {
+        "other": "显示详情（{count} 行）"
+      },
+      "startTitle": "正在启动 {name}",
+      "stopTitle": "正在停止 {name}",
+      "restartTitle": "正在重启 {name}",
+      "updateGameTitle": "正在更新 {name} 的游戏文件",
+      "deployTitle": "正在为 {name} 安装 Kiln {version}",
+      "updateKilnTitle": "正在将 {name} 的 Kiln 更新至 {version}",
+      "stepStop": "停止服务器",
+      "stepStart": "启动服务器",
+      "stepStartAgain": "再次启动服务器",
+      "stepRestart": "重启服务器",
+      "stepUpdateGame": "更新游戏文件（SteamCMD）",
+      "stepDeploy": "安装 Kiln {version}",
+      "stoppingButton": "正在停止…",
+      "installedNow": "当前已安装 Kiln {version}。",
+      "notInstalled": "此服务器尚未安装 Kiln。",
+      "bundleHint": "选择要安装的 Kiln 版本。",
+      "runningNote": "服务器正在运行。将先保存世界并停止服务器，安装 Kiln 后再启动。",
+      "startAfter": "安装后启动服务器",
+      "planLabel": "操作步骤",
+      "installStopsFirst": "服务器正在运行，将先停止，安装后再启动。",
+      "updating": "正在更新。",
+      "busyButton": "处理中…",
+      "stopWaiting": "停止等待",
+      "cancel": "取消",
+      "srRunning": "{title}。{step}",
+      "srDone": "操作已完成（{title}）。{result}。",
+      "srFailed": "操作失败（{title}）。{reason}",
+      "srCanceled": "操作已取消（{title}）。",
+      "linesLabel": "本次操作的完整输出",
+      "failedMarker": "上次操作失败（{reason}）"
+    },
+    "frame": {
+      "live": "实时",
+      "allServers": "‹ 所有服务器",
+      "switch": "其他服务器",
+      "switchItem": "{name}，{state}",
+      "unknown": "状态未知",
+      "updating": "正在更新"
+    },
+    "recent": {
+      "title": "最近操作",
+      "hint": "此启动器在各服务器上的操作记录，最近的排在前面。",
+      "label": "最近操作",
+      "none": "暂无记录。启动、停止、更新 Kiln 和备份等操作会显示在这里。",
+      "noReason": "未说明原因",
+      "what": {
+        "start": "启动",
+        "stop": "停止",
+        "restart": "重启",
+        "update": "更新游戏",
+        "deploy": "安装 Kiln",
+        "create": "安装服务器",
+        "backup": "备份",
+        "remove": "移除"
+      },
+      "step": {
+        "stop": "停止",
+        "deploy": "安装",
+        "start": "启动",
+        "update": "更新",
+        "create": "安装"
+      },
+      "started": "已启动，用时 {time}。",
+      "startedKiln": "已使用 Kiln {kiln} 启动，用时 {time}。",
+      "stopped": "已手动停止，保存耗时 {time}。",
+      "restarted": "已重启，用时 {time}。",
+      "gameUpdated": "游戏文件已更新，用时 {time}。",
+      "kilnUpdated": "Kiln 已从 {from} 更新至 {kiln}（{steps}，用时 {time}）。",
+      "kilnInstalled": "已安装 Kiln {kiln}，用时 {time}。",
+      "kilnInstalledSteps": "已安装 Kiln {kiln}（{steps}，用时 {time}）。",
+      "created": "服务器已安装，用时 {time}。",
+      "createdKiln": "服务器和 Kiln {kiln} 已安装，用时 {time}。",
+      "createdStarted": "服务器已安装并启动，用时 {time}。",
+      "createdKilnStarted": "服务器和 Kiln {kiln} 已安装，服务器已启动，共用时 {time}。",
+      "backedUp": "已备份，用时 {time}。",
+      "removed": "已从启动器移除，文件仍保留在磁盘上。",
+      "failed": "{what}失败（用时 {time}）。{reason}",
+      "canceled": "已取消{what}（已用时 {time}）。"
+    },
+    "wizard": {
+      "title": "新建服务器",
+      "flowTitle": "正在安装 {name}",
+      "stepper": "安装步骤",
+      "s1": "基本设置",
+      "s2": "安装服务器",
+      "s3": "安装 Kiln",
+      "s4": "启动",
+      "notChosen": "（未选）",
+      "stepCreate": "安装服务器文件（SteamCMD）",
+      "stepCopy": "复制游戏文件并用 SteamCMD 校验",
+      "stepCopyOnly": "复制游戏文件",
+      "idTaken": "{name} 已使用此 ID。",
+      "nameLongBytes": "名称最多 64 字节，非 ASCII 字符每个占 2 至 4 字节。",
+      "idMadeUp": "名称中没有可用于生成 ID 的字母或数字。已自动分配 ID，也可手动修改。",
+      "folderBad": "请输入绝对路径（以 / 开头，Windows 下可用盘符开头）。",
+      "portBad": "请输入 1024 至 65535 之间的端口。",
+      "portFree": "可用",
+      "portTakenWord": "已占用",
+      "portTaken": "与 {name} 使用同一端口，两台服务器无法同时运行。",
+      "copyNone": "直接用 SteamCMD 下载",
+      "copyServer": "{name}（{dir}）",
+      "copyOther": "选择其他目录…",
+      "copyFolder": "来源目录",
+      "kilnToggle": "服务器文件就绪后安装 Kiln {version}",
+      "kilnHint": "建议安装。也可稍后从服务器的 ··· 菜单安装。",
+      "kilnNone": "服务器文件就绪后安装 Kiln",
+      "kilnNoneHint": "暂无 Kiln 运行时包。请先到「运行时」页面导入。",
+      "startToggle": "安装完成后启动服务器",
+      "keepsGoing": "关闭窗口后仍会继续安装，可在服务器列表查看进度。",
+      "cancelInstall": "取消安装",
+      "elapsed": "已用时",
+      "ready": "服务器已就绪。",
+      "readyRunning": "服务器已就绪，正在运行。",
+      "readyHint": "共用时 {time}。在服务器页面可打开控制台、查看设置和管理模组。",
+      "open": "打开服务器页面",
+      "failedAt": "「{step}」这一步未能完成。",
+      "halfMadeRetry": "{id} 已列在服务器列表中，安装尚未完成。选择「重试」可在原目录完成安装。也可通过 ··· 菜单从列表移除（保留文件），再重新安装。"
     }
   },
   "play": {
@@ -2652,7 +2939,22 @@
       "services": "服务、Kiln.Host",
       "mods": "随后加载模组",
       "backedUp": "已备份，未链式加载：{files}"
-    }
+    },
+    "repair": "修复",
+    "filesMissing": "Kiln 文件缺失",
+    "filesMissingText": {
+      "other": "Kiln 缺少 {count} 个文件：{files}"
+    },
+    "filesMissingAntivirus": {
+      "other": "这些文件可能已被杀毒软件移除。"
+    },
+    "filesMissingRepair": {
+      "other": "点击「修复」可补回缺失的文件。"
+    },
+    "filesMissingNoBundle": {
+      "other": "下方没有 Kiln {version} 的安装包。请更新 Kiln，或添加这个版本的安装包来补齐文件。"
+    },
+    "antivirusHelp": "查看杀毒软件误报处理方法"
   },
   "settings": {
     "title": "设置",
@@ -2764,7 +3066,10 @@
         "nvngx": "游戏目录中有其他 DLSS 加载器（{file}）",
         "unknown": "游戏目录中有其他图形工具（{file}）",
         "frameCap": "Kiln 暂不应用帧率上限和 DLSS 设置，性能监控照常显示。",
-        "dlss": "Kiln 暂不应用 DLSS 设置，帧率上限和性能监控仍可用。"
+        "dlss": "Kiln 暂不应用 DLSS 设置，帧率上限和性能监控仍可用。",
+        "frameCapUpscaler": "Kiln 暂停应用帧率上限、DLSS 设置和超分辨率选项，性能监控照常显示。",
+        "upscaler": "游戏目录中有其他超分辨率工具的文件（{file}）",
+        "upscalerOnly": "Kiln 暂停应用超分辨率选项，帧率上限、DLSS 设置和性能监控仍可用。"
       },
       "labels": {
         "fpsCap": "帧率上限",
@@ -2776,6 +3081,85 @@
         "dlssPerformanceScale": "DLSS 渲染比例（性能）",
         "dlssUltraPerformanceScale": "DLSS 渲染比例（超级性能）",
         "readout": "性能监控"
+      },
+      "sub": "游戏中也可按 Insert，在 Kiln 菜单的「图形」页调整。帧率上限和性能监控立即生效。DLSS 设置在游戏下次初始化 DLSS 时生效，超分辨率选项在游戏下次初始化 FSR 时生效。",
+      "upscaler": {
+        "title": "通过 FSR 3 使用其他超分辨率技术",
+        "label": "超分辨率技术",
+        "hint": "在游戏图形设置中选择 FSR 3 后，Kiln 会用这里选定的超分辨率技术代替它。正在世界中使用 FSR 3 时，修改立即生效。其他情况下，修改会在载入世界时生效。若在游戏运行期间首次选择替代技术，需重启游戏。",
+        "choice": {
+          "game": "游戏自带的 FSR 3",
+          "amd": "AMD FSR",
+          "xess": "Intel XeSS"
+        },
+        "choiceHint": {
+          "game": "沿用游戏自带的 FSR 3。",
+          "amd": "使用 AMD FSR 3.1，也可在显卡和驱动支持时试用 FSR 4。需要 AMD 组件（70 MB）。",
+          "xess": "可在 Intel、AMD 和 NVIDIA 显卡上使用 XeSS。需要 Intel 组件（74 MB）。"
+        },
+        "amdLabel": "AMD FSR 版本",
+        "amd": {
+          "auto": "自动（暂用 FSR 3.1）",
+          "fsr3": "FSR 3.1",
+          "fsr4": "FSR 4（实验性）"
+        },
+        "amdHint": "在确认 FSR 4 可在本游戏正常使用之前，「自动」会使用 FSR 3.1。选择「FSR 4（实验性）」后，由 AMD 根据显卡和驱动选择版本，支持时使用 FSR 4，否则使用 FSR 3.1。FSR 4 可能让暗处过暗。",
+        "heading": {
+          "now": "当前",
+          "last": "上次运行",
+          "plan": "下次游玩"
+        },
+        "offer": "尚未下载 {name} 组件。下载前会继续使用游戏自带的 FSR 3。",
+        "offerDamaged": "{name} 的部分文件缺失或已变更。重新下载前会继续使用游戏自带的 FSR 3。",
+        "offerRunning": "请关闭游戏后再下载。游戏运行期间，启动器不会改动游戏目录中的文件。",
+        "running": {
+          "off": "Kiln 当前未接管游戏的 FSR 3。",
+          "notFsr": "当前未使用 FSR 3。可能尚未在游戏图形设置中选择 FSR 3，或尚未载入世界。",
+          "gameFsr3": "正在使用游戏自带的 FSR 3。",
+          "amdFsr4": "AMD FSR 4 正在代替游戏自带的 FSR 3。",
+          "amdFsr31": "AMD FSR 3.1 正在代替游戏自带的 FSR 3。",
+          "xess": "Intel XeSS 正在代替游戏自带的 FSR 3。",
+          "unknown": "Kiln 的组件版本不一致，暂时无法识别 FSR 3 选项实际使用的超分辨率技术。"
+        },
+        "version": "版本 {version}。",
+        "amdFsr3Auto": "当前显卡或驱动不支持 FSR 4，AMD 已选用 FSR 3.1。",
+        "changedNow": "已改选 {upscaler}，将在游戏下次初始化 FSR 或重启后生效。",
+        "restartNow": "重启游戏后可使用 {upscaler}。重启前会继续使用游戏自带的 FSR 3。",
+        "detail": "详细信息 · {detail}",
+        "plan": {
+          "amd": "在游戏图形设置中选择 FSR 3 后，Kiln 将改用 AMD FSR 3.1。也可选择试用 FSR 4。",
+          "amdFsr3": "在游戏图形设置中选择 FSR 3 后，Kiln 将改用 AMD FSR 3.1。",
+          "amdFsr4": "在游戏图形设置中选择 FSR 3 后，Kiln 将改用 AMD FSR。显卡和驱动支持时使用 FSR 4，否则使用 FSR 3.1。实验性的 FSR 4 可能让暗处过暗。",
+          "xess": "在游戏图形设置中选择 FSR 3 后，Kiln 将改用 Intel XeSS。"
+        },
+        "reason": {
+          "restart": "重启游戏后可使用 {upscaler}，Kiln 会在游戏启动时完成初始化。",
+          "filesMissing": "{upscaler} 的组件尚未下载，当前使用游戏自带的 FSR 3。",
+          "filesBad": "{upscaler} 有文件的大小或 SHA-256 校验值与预期不符。Kiln 已跳过加载，请重新下载组件。",
+          "loadFailed": "{upscaler} 有文件加载失败，当前使用游戏自带的 FSR 3。",
+          "device": "你的显卡或驱动缺少 {upscaler} 所需的 Vulkan 功能，当前使用游戏自带的 FSR 3。",
+          "createFailed": "{upscaler} 在当前分辨率下初始化失败，已改用游戏自带的 FSR 3。",
+          "runtimeFailed": "{upscaler} 处理画面时出错。重启游戏前将使用游戏自带的 FSR 3。",
+          "fault": "{upscaler} 或 Kiln 的相关代码发生故障。重启游戏前将使用游戏自带的 FSR 3。",
+          "aside": "Kiln 沿用游戏自带的 FSR 3（{tools}）。",
+          "noSignatures": "Kiln 尚未适配此游戏版本的 FSR 3，当前使用游戏自带的 FSR 3。待 Kiln 发布适配更新后即可使用替代技术。",
+          "inputs": "游戏提供的图像数据不符合 {upscaler} 的要求，当前使用游戏自带的 FSR 3。",
+          "unavailable": "当前 Kiln 版本或系统不支持 {upscaler}，将使用游戏自带的 FSR 3。",
+          "waiting": "{upscaler} 已就绪。在游戏图形设置中选择 FSR 3 并载入世界后即可使用。",
+          "noVulkan": "本次运行未检测到游戏初始化图形设备。请重启游戏以启用 {upscaler}。",
+          "unknown": "{upscaler} 未能运行（新版 Kiln 的原因代码 {number}），当前使用游戏自带的 FSR 3。"
+        },
+        "tools": {
+          "optiscaler": "OptiScaler",
+          "streamline": "NVIDIA Streamline（帧生成模组）",
+          "vkfg": "DLSS 帧生成模组（EnshroudedVKFG.ini）",
+          "dlsstweaks": "DLSSTweaks",
+          "nvngx": "其他 DLSS 加载器（游戏目录中有 nvngx.dll）",
+          "ngxPatched": "其他工具已接管 DLSS",
+          "overlayOff": "Kiln 叠加层已关闭",
+          "upscaler": "其他超分辨率工具（游戏目录中有 AMD 或 Intel 的超分辨率组件，或游戏的 FSR 3 渲染流程已被修改）",
+          "unknown": "其他图形工具"
+        }
       }
     },
     "upscalers": {
@@ -2836,7 +3220,11 @@
         "unreadable": "读取许可条款失败",
         "privacy": "Kiln 仅向 {host} 请求下载文件。{host} 可看到你的 IP 地址，以及请求中标明的 Kiln 名称和版本。",
         "agree": "同意并下载"
-      }
+      },
+      "title": "超分辨率组件",
+      "sub": "下载 AMD 或 Intel 的超分辨率组件后，可通过游戏的 FSR 3 选项使用它们。Kiln 仅在你主动下载时获取组件，文件存入游戏目录下的 kiln/vendor。",
+      "purpose": "启动器会用预设的文件大小和 SHA-256 校验值核对每个文件，游戏加载组件前会再次核对。点击「移除」即可删除组件文件。",
+      "gameRunning": "请关闭游戏后再下载或移除组件。游戏运行期间，启动器不会改动游戏目录中的文件。"
     },
     "art": {
       "icons": "{count:N0} 个图标",
@@ -2864,7 +3252,177 @@
       "noMarkers": "无标记数据"
     },
     "typeToConfirm": "移除模组时输入名称确认",
-    "typeToConfirmHint": "关闭后点击「移除」即会移除模组。卸载 Kiln、移除配置方案、服务器或备份仍需确认。"
+    "typeToConfirmHint": "关闭后点击「移除」即会移除模组。卸载 Kiln、移除配置方案、服务器或备份仍需确认。",
+    "sections": {
+      "general": {
+        "title": "常规",
+        "say": "启动器语言为 {language}。在这里也可设置火焰动画、Steam Deck 模式和应用菜单入口。"
+      },
+      "mods": {
+        "title": "模组与配置方案",
+        "say": "当前游戏已加载配置方案「{name}」。在这里也可设置新模组的默认行为，并管理模组库和数据文件夹。",
+        "sayNone": "当前游戏未加载配置方案，将按游戏文件夹中的模组配置运行。"
+      },
+      "game": {
+        "title": "游戏与 Kiln",
+        "say": "已在「{game}」中安装 Kiln {version}。",
+        "sayNoKiln": "「{game}」尚未安装 Kiln，请前往「运行时」页安装。",
+        "sayNoGame": "尚未找到游戏。点击「检测」，或手动添加游戏文件夹。"
+      },
+      "graphics": {
+        "title": "图形",
+        "say": "为「{game}」调整 Kiln 的帧率上限、DLSS 设置和超分辨率选项。",
+        "sayServer": "图形设置仅适用于游戏客户端。"
+      },
+      "online": {
+        "title": "更新与联网",
+        "say": "在这里管理需要联网的功能，包括启动器更新、Nexus Mods 和「社区」页面。"
+      },
+      "advanced": {
+        "title": "高级",
+        "say": "启动器或游戏出现异常，或技术支持要求调整时，可在此更改高级设置。"
+      }
+    },
+    "summary": {
+      "fireOn": "火焰已开启",
+      "fireOff": "火焰已关闭",
+      "deck": {
+        "auto": "自动进入 Deck 模式",
+        "deck": "始终进入 Deck 模式",
+        "desktop": "关闭 Deck 模式"
+      },
+      "loaded": "已加载「{name}」",
+      "mods": {
+        "other": "{count} 个模组"
+      },
+      "noProfile": "未加载配置方案",
+      "kiln": "Kiln {version}",
+      "noKiln": "未安装 Kiln",
+      "noGame": "未找到游戏",
+      "noClient": "未找到游戏客户端",
+      "upscaler": {
+        "game": "游戏自带的 FSR 3",
+        "amd": "AMD FSR",
+        "xess": "Intel XeSS"
+      },
+      "cap": "限帧 {fps} fps",
+      "noCap": "不限帧",
+      "nexusBuild": "在 Nexus Mods 获取更新",
+      "nexusOut": "Nexus Mods 未登录",
+      "advanced": "界面渲染、沙箱、kiln.json"
+    },
+    "groups": {
+      "look": "外观",
+      "computer": "本机设置",
+      "adding": "添加与移除模组",
+      "kiln": "游戏内 Kiln 设置",
+      "kilnHint": "游戏中也可按 Insert 打开 Kiln 菜单调整。",
+      "graphics": "Kiln 图形工具",
+      "graphicsHint": "游戏中也可按 Insert，在 Kiln 菜单的「图形」页调整。",
+      "graphicsMore": "帧率上限和性能监控立即生效。DLSS 设置在游戏下次初始化 DLSS 时生效，超分辨率选项在游戏下次初始化 FSR 时生效。",
+      "updates": "启动器更新",
+      "community": "Discord",
+      "sends": "Kiln 发送的数据",
+      "drawing": "启动器渲染",
+      "drawingHint": "设置 Linux 上 WebKit 渲染启动器窗口的方式。下次启动生效。",
+      "protection": "安全",
+      "steam": "Steam 文件夹",
+      "kilnjson": "Kiln 配置文件",
+      "developer": "开发者选项"
+    },
+    "rows": {
+      "languageLauncher": "设置启动器的界面语言，立即生效。",
+      "languageGame": "用于游戏内 Kiln 的菜单和提示。",
+      "fire": "在「开始游戏」按钮上显示火焰动画。关闭后使用普通按钮。",
+      "fireMore": "火焰动画使用 WebGL 绘制。关闭后可降低显卡负担。",
+      "deck": "选择「自动」后，Steam Deck 上会自动进入 Deck 模式。",
+      "desktop": "在任务栏和程序坞中也显示 Kiln 图标。",
+      "folderNotes": "每条新提示只显示一次。",
+      "folderNotesMore": "包括 Kiln 保持原样的文件夹、保留的模组文件和你自己的文件夹。关闭后，只有已停用模组仍可能从原文件夹加载时才会提醒。可在模组列表上方的「提示」查看全部记录。",
+      "dailyUpdates": "查看模组指定的页面，仅提示更新。",
+      "typeToConfirm": "关闭后，点击即可移除模组。",
+      "keepVersions": "每个模组单独保留，可在模组菜单中回退。设为 0 则不保留。",
+      "keepVersionsMore": "更新模组时，Kiln 会保留旧版本和当时的设置。",
+      "games": "列出启动器已识别的游戏安装。",
+      "addFolder": "添加 Steam 中未列出的游戏文件夹。",
+      "defaultGame": "点击「开始游戏」时默认启动的游戏。",
+      "savesKeep": "每款游戏分别计算，超过上限后优先移除最旧的备份。",
+      "amd": "选择「自动」暂时会使用 FSR 3.1。",
+      "upscalerGroup": "在游戏图形设置中选择 FSR 3 后，Kiln 会用这里选定的超分辨率技术代替它。",
+      "upscalers": "仅在你主动下载时获取 AMD 和 Intel 的组件。",
+      "channel": "选择正式版或测试版（Beta）。",
+      "updateState": "当前启动器",
+      "noGpu": "启动器窗口持续黑屏时可使用此项。",
+      "x11": "可让高分辨率屏幕上的界面渲染更快，但画面会变得不那么清晰。",
+      "sandbox": "建议保持开启，除非启动器窗口打不开。"
+    },
+    "tag": {
+      "nextStart": "下次启动生效",
+      "thisGame": "当前游戏"
+    },
+    "more": "更多",
+    "less": "收起",
+    "show": "显示",
+    "hide": "隐藏",
+    "for": "适用游戏",
+    "version": "启动器 {version}",
+    "noClient": "未找到游戏",
+    "noClientHint": "图形设置需要游戏客户端，请在「游戏与 Kiln」中添加。",
+    "noClientServer": "未找到游戏客户端",
+    "noClientServerHint": "图形设置只对游戏客户端生效。请在「游戏与 Kiln」中添加游戏客户端。",
+    "openGames": "打开「游戏与 Kiln」",
+    "failed": "此设置页面加载失败",
+    "nav": {
+      "label": "设置分类",
+      "groups": "「{section}」下的设置分组",
+      "hits": {
+        "other": "「{section}」有 {count} 项匹配"
+      }
+    },
+    "search": {
+      "label": "搜索设置",
+      "key": "Ctrl+F",
+      "clear": "清除搜索",
+      "title": "搜索结果",
+      "found": {
+        "other": "找到 {count} 项与「{query}」匹配的设置。"
+      },
+      "allIn": "结果均在「{section}」中。",
+      "change": {
+        "other": "可以直接在此修改，也可跳转到相应页面。"
+      },
+      "none": "没有与「{query}」匹配的设置。",
+      "foot": "按启动器当前语言搜索设置名称、简要说明和「更多」中的内容。按 Enter 跳转到最匹配的设置，按 Esc 清除搜索。",
+      "inMore": "出自「更多」",
+      "openIn": "转到「{section}」"
+    },
+    "kilnGame": {
+      "labels": {
+        "look": "外观",
+        "theme": "主题",
+        "background": "窗口背景",
+        "scale": "界面大小",
+        "chatHistory": "聊天记录",
+        "chatCompletion": "聊天自动补全",
+        "outlines": "模组绘制的轮廓"
+      }
+    },
+    "kilnFile": {
+      "labels": {
+        "opacity": "Kiln 界面整体不透明度",
+        "overlay": "Kiln 叠加层",
+        "policy": "允许 Kiln 接入的游戏版本",
+        "logLevel": "kiln.log 日志级别",
+        "clr": ".NET 与托管模组",
+        "plugins": "Kiln 插件",
+        "nativePolicy": "原生模组加载条件",
+        "faultLimit": "停用模组的错误次数",
+        "faultWindow": "错误次数统计时段",
+        "stopTimeout": "模组停止时限",
+        "testTimeout": "模组测试时限",
+        "crashReports": "崩溃报告"
+      }
+    }
   },
   "configEditor": {
     "unavailable": "配置不可用",
@@ -3307,7 +3865,9 @@
       "backups": "备份",
       "saves": "存档",
       "modpack": "整合包",
-      "crashes": "崩溃记录"
+      "crashes": "崩溃记录",
+      "console": "控制台",
+      "worldRules": "世界设置"
     },
     "notices": {
       "keptTitle": "部分模组文件夹已保留",
@@ -3424,7 +3984,13 @@
       "kilnInstalled": "已安装 Kiln {version}",
       "switchBackDetail": "游戏此前安装了测试版 Kiln {from}。此启动器配套的是正式版。",
       "switchBackFailed": "未能安装 Kiln {to}，游戏将使用原有测试版 Kiln {from} 启动。",
-      "directly": "已直接启动游戏。"
+      "directly": "已直接启动游戏。",
+      "applyingProfile": "正在应用配置方案…",
+      "installingKiln": "正在安装 Kiln…",
+      "removingKiln": "正在移除 Kiln…",
+      "applyingAria": "{what}（{title}）",
+      "stopWaiting": "停止等待",
+      "stopWaitingTip": "Steam 尚未启动游戏。如果你已在 Steam 取消启动，可点此恢复「开始游戏」按钮。此操作只会结束等待。"
     },
     "startProgress": {
       "quietMods": "游戏已进入菜单。Kiln 会在游戏请求时加载模组，有些电脑要等到进入世界才会加载。",
@@ -3619,7 +4185,9 @@
       "runsCode": "将在你的电脑上运行代码",
       "trustOnly": "请只安装来源可信的整合包。",
       "trustToggle": "我信任此整合包，并同意安装其中的模组",
-      "closeGame": "请先关闭游戏。"
+      "closeGame": "请先关闭游戏。",
+      "updatedFromTo": "已更新 {name}：{from} → {to}",
+      "addedAndUpdated": "已添加：{added}；已更新：{updated}"
     },
     "errorBoundary": {
       "title": "页面加载失败",
@@ -3882,7 +4450,18 @@
       "updatedTo": "已更新至 {build}",
       "switchBack": "此游戏当前使用测试版 Kiln {from}，本次将安装 Kiln {to}。",
       "closeGame": "请先关闭游戏",
-      "updateGame": "更新游戏中的 Kiln"
+      "updateGame": "更新游戏中的 Kiln",
+      "restartingIn": "{seconds} 秒后自动重启启动器",
+      "holdGame": "游戏正在运行，启动器会等你手动重启。游戏退出后才会安装新版 Kiln。",
+      "holdLaunch": "游戏正在启动，启动器将暂缓重启。",
+      "holdWriting": "存档编辑器正在保存，启动器将等保存完成后再重启。",
+      "holdStudio": "Pack Studio 里还有未保存的更改。请先保存，再重启启动器。",
+      "holdEditor": "编辑器里还有未保存的更改。请先保存，再重启启动器。",
+      "lookingAtGame": "正在检查游戏中安装的 Kiln 版本…",
+      "applying": "正在为游戏安装 Kiln {version}…",
+      "afterGame": "游戏正在运行，退出后会安装 Kiln {version}。",
+      "afterSteam": "Steam 正在更新游戏，更新完成后会安装 Kiln {version}。",
+      "appliedLead": "此版本随启动器 {build} 更新一同提供。"
     },
     "useMods": {
       "notLoadedNow": "当前加载的配置方案已不再是 {name}",
@@ -3892,6 +4471,30 @@
     },
     "parts": {
       "unavailable": "{side} 端无法使用组件 {name}"
+    },
+    "ownFiles": {
+      "title": {
+        "other": "启动器文件缺失"
+      },
+      "text": {
+        "other": "启动器目录中缺少 {files}，可能已被杀毒软件隔离。请从隔离区恢复文件并添加排除项，或重新安装启动器。"
+      }
+    },
+    "runtimeBlocked": {
+      "file": "Windows 阻止了 Kiln 写入 {file}。",
+      "why": "可能是杀毒软件或其他程序阻止了写入。",
+      "fix": "请在杀毒软件中将游戏目录加入排除项，然后重试。",
+      "raw": "详细信息：{error}"
+    },
+    "closeGuard": {
+      "title": "关闭 Kiln？",
+      "busy": "存档编辑器正在保存，请等保存完成后再关闭 Kiln。",
+      "studio": "Pack Studio 里还有未保存的更改。现在关闭 Kiln 会丢失这些更改。",
+      "editor": "编辑器里还有未保存的更改。现在关闭 Kiln 会丢失这些更改。",
+      "saveEditor": "你在存档编辑器中对角色所做的更改尚未保存。现在关闭 Kiln 会丢失这些更改。",
+      "saveEditorNamed": "你在存档编辑器中对 {name} 所做的更改尚未保存。现在关闭 Kiln 会丢失这些更改。",
+      "close": "仍然关闭",
+      "stay": "继续使用 Kiln"
     }
   },
   "format": {
@@ -3976,7 +4579,9 @@
       "default": "默认值 {value}",
       "resetLabel": "将 {name} 恢复为默认值",
       "removeItem": "移除 {item}",
-      "addItem": "添加 {type}"
+      "addItem": "添加 {type}",
+      "more": "展开说明",
+      "less": "收起说明"
     },
     "taskProgress": {
       "titleFailed": "{title}失败",
@@ -4002,6 +4607,10 @@
       "keptFoldersDetail": "{detail}。这些模组仍可能通过 Kiln 或其他加载器运行。请先关闭游戏，再检查或移出列出的文件夹以停用它们。已有设置会保留。",
       "showLess": "收起",
       "showAll": "显示全部"
+    },
+    "banner": {
+      "hide": "收起",
+      "show": "展开"
     }
   },
   "api": {
@@ -4289,6 +4898,13 @@
       },
       "afterHours": {
         "other": "{count} 小时"
+      },
+      "send": "发送给 Kiln 支持团队",
+      "crashTitle": "游戏意外退出",
+      "crash": "游戏启动后运行了 {after}，于 {time} 意外退出。Kiln 已生成崩溃报告。",
+      "crashReport": "查看崩溃报告",
+      "afterSeconds": {
+        "other": "{count} 秒"
       }
     },
     "send": {
@@ -4298,7 +4914,100 @@
         "discord": "Discord 给出的原因：{reason}。问题出在 Kiln 这边，不是你的网络连接。你的报告已保留：请稍后再试，或保存报告后自己发帖。",
         "discordNoReason": "问题出在 Kiln 这边，不是你的网络连接。你的报告已保留：请稍后再试，或保存报告后自己发帖。",
         "discordLimitTitle": "Discord 要求 Kiln 支持稍等",
-        "discordLimit": "Discord 限制了 Kiln 支持发帖的频率，目前已达到上限。这不是你的网络连接问题。你的报告已保留：请在 {wait}后再试。"
+        "discordLimit": "Discord 限制了 Kiln 支持发帖的频率，目前已达到上限。这不是你的网络连接问题。你的报告已保留：请在 {wait}后再试。",
+        "offlineTitle": "当前离线",
+        "offline": "草稿已保留。联网后可以继续发送，也可以先保存报告，自己发帖。",
+        "relayTitle": "暂时连不上 Kiln 支持服务",
+        "relay": "frostdev.io 暂无响应。草稿已保留，请几分钟后重试。",
+        "notMemberTitle": "尚未加入 Kiln Discord",
+        "notMember": "支持团队会在 Discord 上回复。请先加入 Kiln Discord，再回到启动器发送报告。",
+        "joined": "我已加入",
+        "rateTitle": "报告发送过于频繁",
+        "rate": "过去一小时内你已发送 {sent} 份报告。可以先等回复，或在 Discord 的上一条帖子中补充说明。{wait}后可以再次发送。",
+        "rateDay": "过去 24 小时内你已发送 {sent} 份报告。可以先等回复，或在 Discord 的上一条帖子中补充说明。{wait}后可以再次发送。",
+        "rateNetwork": "过去 24 小时内，你所在网络发送的报告过多，暂时停止接收。{wait}后可以再次发送。",
+        "openLast": "打开我的上一条帖子",
+        "tooNewTitle": "Discord 账户注册未满 3 天",
+        "tooNew": "Kiln 支持服务只接收注册满 3 天的 Discord 账户发来的报告。草稿已保留，可以等到符合条件后发送，也可以现在保存报告。",
+        "staleTitle": "报告已重新生成",
+        "stale": "上次生成报告已超过 30 分钟，启动器已生成新报告。请重新核对发送内容，再点击「发送」。",
+        "bigTitle": "报告压缩包过大",
+        "big": "报告大小为 {size}，发送上限为 {limit}。可以先选择「仅发送帖子」，再把保存的报告通过 Discord 发给 Kiln 团队。",
+        "sendWithout": "仅发送帖子",
+        "saveReport": "保存报告",
+        "stillNot": "还没有检测到你加入 Kiln Discord。请通过邀请链接加入，然后点击「我已加入」。"
+      },
+      "title": "发送给 Kiln 支持团队",
+      "checking": "正在读取配置信息",
+      "line": "用一句话描述问题",
+      "linePh": {
+        "noload": "上次更新游戏后，Kiln 就没有加载",
+        "mod": "Big Stacks 没有改变物品堆叠上限",
+        "crash": "我一打开地图，游戏就崩溃",
+        "launcher": "启动器打开后是黑屏",
+        "server": "我的服务器拒绝使用 Kiln 的玩家加入",
+        "something": "简短描述你遇到的问题"
+      },
+      "lineCount": "{count} / {max}",
+      "lineNeeded": "请先用一句话描述问题。",
+      "kind": "问题类型",
+      "more": "补充说明（选填）",
+      "morePh": "问题出现时你在做什么？之前可以正常使用吗？试过哪些办法？",
+      "next": "核对发送内容",
+      "known": {
+        "word": "已知问题",
+        "fixes": "可以先试试这个办法，问题仍然存在时再继续发送报告。",
+        "copy": "复制这行内容",
+        "copied": "已复制",
+        "action": {
+          "mods": "查看我的模组",
+          "runtime": "打开「运行时」页",
+          "logs": "打开「日志」页",
+          "settings": "打开设置"
+        }
+      },
+      "check": {
+        "title": "核对发送内容",
+        "public": "在 #support 公开发布",
+        "publicHint": "Kiln 机器人会发布帖子并提及你，收到回复时 Discord 会通知你。",
+        "postTitle": "标题",
+        "words": "你的说明",
+        "noWords": "无",
+        "kind": "问题类型",
+        "tags": "标签",
+        "found": "诊断结果",
+        "versions": "版本信息",
+        "level": {
+          "problem": "问题",
+          "warning": "警告",
+          "info": "提示"
+        },
+        "zip": "报告压缩包",
+        "zipHint": "{size}，共 {count} 个文件，包含 Kiln 日志和状态文件、配置方案、启动器日志及游戏目录的文件清单。",
+        "showFiles": "显示文件",
+        "hideFiles": "隐藏文件",
+        "who": "谁可以查看报告压缩包？",
+        "team": "仅 Kiln 团队",
+        "teamHint": "会发送到只有 Kiln 团队能查看的频道，并在 30 天后从该频道删除。",
+        "everyone": "#support 的所有人",
+        "everyoneHint": "会附在帖子上，其他玩家也可以查看。",
+        "noZip": "不发送压缩包",
+        "noZipHint": "只发布帖子。Kiln 团队之后可能会向你索要压缩包。",
+        "redacted": "报告各文件中的用户名、设备名、Steam 名称、Steam ID 和 IP 地址均已替换。报告不含存档或模组设置，日志里仍可能出现你自定义的角色名或服务器名。",
+        "as": "以 {name} 的身份发帖",
+        "send": "发送给 Kiln 支持团队",
+        "signInToSend": "用 Discord 登录后发送",
+        "signInHint": "发送前需要用 Discord 登录。登录期间会保留草稿。",
+        "sending": "正在发送"
+      },
+      "sent": {
+        "title": "已发送",
+        "text": "「{title}」已发布到 #support。",
+        "team": "报告压缩包仅发给了 Kiln 团队。",
+        "public": "报告压缩包已附在帖子上。",
+        "none": "帖子已发布，未附报告压缩包。",
+        "replies": "回复会显示在「社区」页，Discord 也会通知你。",
+        "open": "在 Discord 打开"
       }
     },
     "tester": {
@@ -4306,8 +5015,62 @@
         "discordTitle": "Discord 没有接受这些结果",
         "discord": "Discord 给出的原因：{reason}。问题出在 Kiln 这边，不是你的网络连接。你的结果已保留：请稍后再试。",
         "discordNoReason": "问题出在 Kiln 这边，不是你的网络连接。你的结果已保留：请稍后再试。",
-        "discordLimit": "Discord 限制了 Kiln 支持发帖的频率，目前已达到上限。你的结果已保留：请在 {wait}后再试。"
-      }
+        "discordLimit": "Discord 限制了 Kiln 支持发帖的频率，目前已达到上限。你的结果已保留：请在 {wait}后再试。",
+        "title": "测试 {build}",
+        "say": "已填写 {done} / {count} 项。截止日期为 {until}。",
+        "open": "打开测试清单",
+        "for": "适用于 {what}",
+        "result": {
+          "worked": "通过",
+          "failed": "未通过",
+          "skipped": "无法测试",
+          "none": "尚未测试"
+        },
+        "note": "一句简短说明（选填）",
+        "notePh": "遇到了什么情况？",
+        "attach": "附上诊断报告",
+        "attachHint": "报告压缩包仅发给 Kiln 团队，与发送给支持团队的报告处理方式相同。",
+        "sendResults": "发送测试结果",
+        "sent": "结果已发出（{ago}），Kiln 团队尚未查看。",
+        "read": "Kiln 团队的 {name} 已查看你的测试结果（{ago}）。",
+        "replied": "团队也已在 Discord 的版本帖中回复。",
+        "openPost": "打开版本帖",
+        "noPlan": "目前没有测试版任务。下一次测试会显示在这里。",
+        "hidden": {
+          "other": "另有 {count} 项供其他硬件测试。"
+        },
+        "sentToast": "测试结果已发送",
+        "sentToastDetail": "测试结果已发到 #testing 的版本帖中。团队查看后会标记为已读。",
+        "how": "测试方法",
+        "untried": "请逐项测试，或将相应项目标为「无法测试」。",
+        "more": "此测试版的更多操作"
+      },
+      "title": "参与 Kiln 测试",
+      "pitch": "Kiln 团队需要更多硬件来测试接下来的画面功能，包括 AMD RX 6000 系列及更新显卡（FSR 4）、Intel Arc 显卡（XeSS）、NVIDIA RTX 40 和 50 系列显卡（帧生成），以及 Steam Deck。",
+      "yours": "这台电脑可测试 {what}。",
+      "yoursDeck": "这台 Steam Deck 可用于测试掌机上的运行表现。",
+      "any": "任何电脑都能帮上忙，每个测试版都需要几位玩家参与试用。",
+      "volunteer": "报名参加测试",
+      "you": "你已成为测试员。",
+      "joinText": "测试员可获得 Kiln Discord 的 Tester 身份组，以及每个测试版和对应的简短测试清单。每个版本大约需要 15 分钟。",
+      "hwTitle": "启动器将共享这台电脑的以下信息",
+      "hwTitleDeck": "启动器将共享这台 Steam Deck 的以下信息",
+      "hwHint": "点击「报名」时才会发给 Kiln 团队，方便团队了解你可以测试哪些功能。",
+      "gpu": "显卡",
+      "driver": "驱动",
+      "vram": "显存",
+      "os": "系统",
+      "runner": "游戏运行方式",
+      "covers": "可测试的功能",
+      "beta": "将启动器切换到测试频道",
+      "betaHint": "你可以随时在「设置」中切回正式频道。",
+      "send": "报名",
+      "done": "报名成功",
+      "doneDetail": "你已获得 Tester 身份组。每个测试版的测试清单都会显示在「社区」页。",
+      "leave": "停止测试",
+      "leaveDone": "已退出测试计划",
+      "signInFirst": "报名需要用 Discord 登录，以便在 Kiln Discord 获得 Tester 身份组。",
+      "unknown": "未知"
     },
     "presence": {
       "pack": {
@@ -4315,7 +5078,8 @@
         "hint": "当你游玩来自 Crucible 的整合包时：显示它的名称，以及一个打开整合包页面的“获取这个整合包”按钮。在这台电脑上制作的整合包永远不会显示名称。",
         "never": "永远不会显示：服务器名称、世界名称或你的角色。游玩 Crucible 整合包时，会显示它的名称和页面。",
         "state": {
-          "other": "{pack}（{count} 个模组）"
+          "other": "{pack}（{count} 个模组）",
+          "one": "{pack}（{count} 个模组）"
         },
         "getPack": "获取这个整合包",
         "example": "余烬之旅",
@@ -4323,10 +5087,259 @@
         "turnOff": "隐藏我的整合包",
         "onToast": "你的 Crucible 整合包会显示在 Discord 上",
         "offToast": "你的 Crucible 整合包不再显示在 Discord 上"
-      }
+      },
+      "title": "游戏动态",
+      "label": "在 Discord 个人资料中显示 Kiln",
+      "hint": "游玩时会显示你正在使用 Kiln 玩《雾锁王国》，以及启用的模组数量和游玩时长。",
+      "on": "已开启，将在游玩时显示。",
+      "off": "已关闭。",
+      "noDiscord": "本机的 Discord 尚未运行。打开 Discord 后即可显示。",
+      "noDiscordDeck": "这台 Steam Deck 上的 Discord 尚未运行。打开 Discord 后即可显示。",
+      "preview": "其他人在你的 Discord 个人资料中看到的效果",
+      "never": "服务器名、世界名、你的角色和所用模组的名称都不会显示。",
+      "playing": "正在玩",
+      "name": "Kiln",
+      "details": "使用 Kiln 游玩《雾锁王国》",
+      "state": {
+        "one": "已启用 {count} 个模组",
+        "other": "已启用 {count} 个模组"
+      },
+      "elapsed": "已游玩 {time}",
+      "getKiln": "获取 Kiln",
+      "joinDiscord": "加入 Kiln Discord",
+      "onToast": "游戏动态已开启",
+      "offToast": "游戏动态已关闭"
     },
     "privacy": {
-      "presencePack": "开启“显示我的 Crucible 整合包”后，还会显示你正在游玩的 Crucible 整合包名称，以及它在 frostdev.io 上页面的链接。在这台电脑上制作的整合包永远不会显示名称。"
+      "presencePack": "开启“显示我的 Crucible 整合包”后，还会显示你正在游玩的 Crucible 整合包名称，以及它在 frostdev.io 上页面的链接。在这台电脑上制作的整合包永远不会显示名称。",
+      "title": "发送和保留的信息",
+      "never": "你可以先查看将发送的信息，确认并点击按钮后才会发送。",
+      "signInTitle": "登录时",
+      "signIn": "Kiln 会获取你的 Discord 用户 ID、用户名和头像，frostdev.io 会在你登录期间保留这些信息。邮箱、密码、消息、好友和服务器信息都不会被获取。",
+      "join": "如果勾选「同时加入 Kiln Discord」，frostdev.io 会在登录时将你加入该服务器，仅操作一次。",
+      "reportTitle": "发送报告时",
+      "reportPublic": "你填写的标题和说明、问题类型、诊断结果、版本信息、启用的模组数量和 Discord 用户名会公开发布在 #support。",
+      "reportTeam": "报告压缩包默认仅 Kiln 团队可见，你可以选择其他发送方式。发到团队频道的压缩包会在 30 天后删除。",
+      "presenceTitle": "游戏动态",
+      "presence": "开启游戏动态后，游玩时只有本机的 Discord 应用会收到动态信息。动态会显示你正在用 Kiln 游玩《雾锁王国》，以及启用的模组数量和游玩时长。服务器名、世界名、角色和所用模组的名称都不会发送。",
+      "testerTitle": "报名参加测试时",
+      "tester": "Kiln 团队会收到本机的显卡、驱动、显存、系统及游戏运行方式。测试结果会发到 #testing 对应版本的帖子中，随结果附上的诊断报告仅发给 Kiln 团队。",
+      "keptTitle": "frostdev.io 保留的信息",
+      "kept": "退出登录时会删除登录凭据的指纹，连续 90 天未使用也会删除。frostdev.io 保留你的 Discord ID 和帖子列表，供启动器显示回复。用户名和头像在你登录期间保留，参加测试时还会保留硬件信息。Steam Deck 的登录验证码及来源网络信息保留 10 分钟，发送限额的计数保留一天。帖子标为已解决或关闭 90 天后会从列表中移除。选择「退出并删除资料」会一次清除上述信息。frostdev.io 不存储报告压缩包。",
+      "undoTitle": "管理已共享的信息",
+      "undo": "你可以退出登录、选择「退出并删除资料」、在帖子菜单中删除帖子、停止测试或关闭游戏动态。",
+      "forgetAsk": "退出登录并删除资料？",
+      "forgetText": "frostdev.io 会删除你的用户名、ID、硬件信息、帖子列表和 Kiln 团队收到的报告压缩包。Discord 上的帖子需要另行删除。",
+      "alsoDelete": "同时删除我在 Discord 上的求助帖",
+      "forgetFailedTitle": "仅在本机退出了登录",
+      "forgetFailed": "frostdev.io 未收到删除请求，资料仍然保留在服务器上。请重新登录后选择「退出并删除资料」，或联系 admin@frostdev.io。",
+      "ai": "Kiln 团队会用 AI 助手阅读求助帖和报告，许多回复也由 AI 助手撰写。所用助手列在隐私说明中。",
+      "page": "完整隐私说明",
+      "terms": "使用条款",
+      "pageUrl": "frostdev.io/kiln/privacy"
+    },
+    "signIn": {
+      "title": "用 Discord 登录",
+      "text": "浏览器会通过 frostdev.io 打开 Discord 登录页。请在网页上批准 Kiln 的授权请求，再回到启动器。",
+      "gets": "Kiln 只会获取你的 Discord 用户名、ID 和头像。你的邮箱、消息、好友和服务器信息都不会被读取。",
+      "joinHint": "Discord 还会请你授权 Kiln 将你加入社区服务器。",
+      "open": "打开登录页",
+      "waitingTitle": "请在浏览器中完成登录",
+      "waiting": "请在打开的网页上授权 Kiln，启动器会自动继续。",
+      "waitingWord": "等待 Discord 确认",
+      "again": "重新打开登录页",
+      "done": "已登录为 {name}",
+      "doneDetail": "现在可以直接向 Kiln 支持团队发送报告。",
+      "canceled": "你已在 Discord 页面取消登录。",
+      "expired": "登录已超过 10 分钟，请重试。",
+      "denied": "Discord 登录授权未获批准。",
+      "offline": "当前离线，请联网后登录。",
+      "relay": "frostdev.io 暂无响应，请几分钟后重试。",
+      "tooMany": "过去一小时内，你所在网络的登录请求过多。请在 {wait}后重试。",
+      "retry": "重试",
+      "tabDone": "登录成功。可以关闭此标签页并返回启动器。",
+      "tabFailed": "登录未完成。可以关闭此标签页并返回启动器。"
+    },
+    "kind": {
+      "noload": "Kiln 未加载",
+      "mod": "模组运行异常",
+      "crash": "游戏崩溃",
+      "launcher": "启动器问题",
+      "server": "服务器问题",
+      "something": "其他问题"
+    },
+    "nav": "社区",
+    "navCount": {
+      "other": "Kiln 支持团队发来 {count} 条新回复"
+    },
+    "title": "社区",
+    "say": {
+      "out": "可在 Kiln 的 Discord 社区向团队和其他玩家求助。社区功能可按需使用。",
+      "in": "已登录为 {name}。",
+      "unread": {
+        "other": "已登录为 {name}。Kiln 支持团队发来 {count} 条新回复。"
+      },
+      "offline": "当前离线，显示截至 {time} 的帖子记录。",
+      "offlineOut": "当前离线，联网后即可使用此页面。",
+      "relay": "暂时连不上 Kiln 支持服务，显示截至 {time} 的帖子记录。"
+    },
+    "join": "加入 Kiln Discord",
+    "openDiscord": "打开 Kiln Discord",
+    "help": {
+      "title": "寻求帮助",
+      "sub": "Kiln 支持团队会在 Discord 的 #support 频道回复。",
+      "text": "启动器会根据你填写的说明和诊断结果生成求助帖，你也可以将日志发给 Kiln 团队。",
+      "send": "发送诊断报告",
+      "save": "去保存报告",
+      "needsSignIn": "你可以先写报告，发送时再用 Discord 登录。"
+    },
+    "posts": {
+      "title": "你的求助帖",
+      "emptyOut": "登录后可在这里查看你的帖子和回复。",
+      "empty": "还没有帖子。你发送的报告及其回复会显示在这里。",
+      "status": {
+        "waiting": "等待回复",
+        "replied": "有新回复",
+        "repliedSeen": "已回复",
+        "solved": "已解决",
+        "closed": "已关闭"
+      },
+      "lastReply": "{name} 已回复（{ago}）。",
+      "lastReplyTeam": "Kiln 团队的 {name} 已回复（{ago}）。",
+      "noReply": "报告已发出（{ago}），暂时没有回复。",
+      "replies": {
+        "other": "{count} 条回复"
+      },
+      "open": "在 Discord 打开",
+      "more": "「{title}」的更多操作",
+      "copyLink": "复制链接",
+      "fixed": "标为已解决",
+      "fixedDone": "帖子状态已更新",
+      "fixedDetail": "帖子已加上「已解决」标签。感谢反馈。",
+      "delete": "删除我的帖子",
+      "deleteAsk": "删除这篇帖子？",
+      "deleteText": "这篇帖子和回复将从 Discord 删除，Kiln 团队保留的报告压缩包也会删除。",
+      "deleted": "帖子已删除",
+      "copied": "链接已复制",
+      "asOf": "截至 {time}"
+    },
+    "news": {
+      "title": "最新消息",
+      "all": "所有版本",
+      "offline": "联网后会加载最新消息。"
+    },
+    "events": {
+      "title": "活动",
+      "empty": "目前没有已安排的活动。"
+    },
+    "links": {
+      "title": "相关链接",
+      "docs": "Kiln 文档",
+      "issues": "在 GitHub 反馈问题",
+      "nexus": "Nexus Mods 上的 Kiln",
+      "download": "下载页面"
+    },
+    "account": {
+      "title": "Discord",
+      "out": "尚未登录。",
+      "outHint": "登录后，启动器可以替你发布报告，并在这里显示回复。启动器不会读取你的消息，也看不到你加入了哪些服务器。",
+      "signIn": "用 Discord 登录",
+      "alsoJoin": "同时加入 Kiln Discord",
+      "member": "已加入 Kiln Discord",
+      "notMember": "尚未加入 Kiln Discord",
+      "tester": "测试员",
+      "signOut": "退出登录",
+      "forget": "退出并删除资料",
+      "signedOut": "已退出登录",
+      "signedOutDetail": "启动器已清除本机保存的 Discord 账户信息。",
+      "whatIsSent": "发送和保留的信息"
+    },
+    "notify": {
+      "label": "收到 Kiln 支持回复时通知我",
+      "hint": "即使启动器在后台运行，也会收到系统通知。",
+      "title": "Kiln 支持团队已回复",
+      "detail": "{by} 回复了「{title}」。"
+    },
+    "deck": {
+      "tab": "社区",
+      "on": "开",
+      "off": "关",
+      "turnOn": "开启",
+      "turnOff": "关闭",
+      "sayOut": "需要时可在 Discord 向 Kiln 团队求助。",
+      "signInSub": "用手机扫码登录",
+      "accountSub": "已登录，已加入 Kiln Discord。",
+      "accountSubOut": "已登录，尚未加入 Kiln Discord。",
+      "sendSub": "将日志发给 Kiln 团队",
+      "joinSub": "用手机扫码加入",
+      "presenceSub": "游玩时在 Discord 个人资料中显示 Kiln",
+      "privacySub": "查看此页面可能发送的信息",
+      "testerSub": "测试版和测试清单",
+      "testerSubOn": "已填写 {done} / {count} 项",
+      "support": "支持",
+      "discord": "Discord",
+      "qr": {
+        "title": "用手机登录",
+        "step1": "用手机相机扫描二维码。",
+        "step2": "在打开的网页上用 Discord 登录。",
+        "step3": "确认网页上显示的验证码是 {code}，然后点击「Approve」（批准）。",
+        "noCamera": "也可以在任意设备上打开 frostdev.io/link 并输入验证码。",
+        "waiting": "等待手机确认，验证码剩余 {left}。",
+        "expired": "验证码已过期。",
+        "denied": "你已在手机上拒绝授权，登录未完成。",
+        "newCode": "获取新验证码",
+        "privacy": "访问 frostdev.io/kiln/privacy 可查看授权范围。"
+      },
+      "joinQr": {
+        "title": "加入 Kiln Discord",
+        "text": "用手机扫码，在 Discord 中打开邀请。"
+      },
+      "postQr": "用手机扫码查看帖子。",
+      "privacyQr": "用手机扫码阅读隐私说明。",
+      "when": {
+        "title": "什么时候出现问题？",
+        "start": "· 按下「游玩」时",
+        "menu": "· 在主菜单时",
+        "load": "· 载入世界时",
+        "play": "· 游玩过程中",
+        "join": "· 加入服务器时",
+        "another": "· 在其他时候"
+      },
+      "titles": {
+        "noload": "Kiln 未加载",
+        "mod": "模组运行异常",
+        "crash": "游戏崩溃",
+        "launcher": "启动器出现问题",
+        "server": "我的服务器出现问题",
+        "something": "遇到其他问题"
+      },
+      "what": "遇到了什么问题？",
+      "check": "核对并发送",
+      "type": "输入",
+      "edit": "更改",
+      "typeTitle": "输入补充说明",
+      "typeHint": "Steam 屏幕键盘会自动打开，也可以按 Steam + X 打开。",
+      "wordsNone": "尚未填写（选填）",
+      "zipRow": "报告压缩包",
+      "whatIsSent": "将发送的信息",
+      "next": "下一步",
+      "pick": "选择",
+      "toggle": "更改",
+      "done": "完成",
+      "holdDelete": "长按删除我的帖子",
+      "postSay": "{status}，{replies}。",
+      "noteWhy": {
+        "title": "遇到了什么情况？",
+        "crashed": "游戏崩溃了",
+        "wrong": "画面显示异常",
+        "slow": "运行缓慢或有卡顿",
+        "missing": "找不到这个选项",
+        "type": "输入简短说明"
+      }
+    },
+    "settings": {
+      "show": "显示「社区」页",
+      "showHint": "在启动器中显示 Kiln 的 Discord 社区。关闭后会隐藏「社区」页、Steam Deck 的社区选项卡，以及所有向 Kiln 支持团队发送报告的入口。启动器也会停止与 Discord 交互。"
     }
   },
   "crucible": {
@@ -4678,7 +5691,7 @@
         "loot": "战利品",
         "drops": "掉落",
         "added": "新物品",
-        "raw": "Raw JSON"
+        "raw": "原始 JSON"
       },
       "lint": {
         "line": "数据检查：{errors}，{warnings}",
@@ -4799,13 +5812,13 @@
         "waterPhBase": "同基础配方",
         "waterPhGame": "同游戏",
         "waterUnit": "份/每次制作",
-        "waterTank": "{station}的水箱可装 {max} 份：保持装满才能制作。",
-        "waterOver": "超过{station}水箱的容量（{max}）：制作站永远不会开始这个配方。",
-        "waterNoTank": "{station}没有水箱：永远不会开始需要水的配方。",
+        "waterTank": "{station}的水箱最多可装 {max} 份水。制作时请确保水量充足。",
+        "waterOver": "配方需水量超过{station}的水箱容量（{max} 份），无法开始制作。",
+        "waterNoTank": "{station}没有水箱，无法制作需要用水的配方。",
         "waterMenu": "从菜单制作：游戏从玩家的盛水容器以及基地的水井和水桶中取水。",
         "oldWater": "有一项材料是游戏的旧物品“水”（一个水壶）：每次制作会消耗 {count} 个该物品，而不是制作站水箱里的水。",
         "useTank": "改用水箱里的水",
-        "useTankTip": "移除“水”物品材料，并改为需要同样数量的水箱水",
+        "useTankTip": "把作为材料的「水」换成等量的水箱供水。",
         "itemAria": "物品",
         "countAria": "数量",
         "category": "类别 {id} 的任意物品",
@@ -5074,9 +6087,9 @@
       "cancel": "取消",
       "back": "返回",
       "readOnlyError": "只读：{erro}",
-      "pointsRaised": "你提高了已用技能点（{antes} → {depois}）。请在「技能」页输入技能点总数，以便编辑器检查；超过总数时，游戏会重置整个技能树。",
+      "pointsRaised": "已分配的技能点从 {antes} 增至 {depois}。请在「技能」页输入角色的技能点总数，供编辑器核对。分配点数超出角色的技能点总数时，游戏会重置整个技能树。",
       "notWritten": "未保存。{problemas}",
-      "gameWroteSince": "编辑器读取此存档后，游戏又写入了它。请重新读取，以编辑当前的存档（此处的改动会丢失）。"
+      "gameWroteSince": "编辑器读取后，游戏已更新此存档。请重新读取最新存档后再编辑，当前未保存的更改会丢失。"
     },
     "tabs": {
       "equipment": "装备",
@@ -5099,7 +6112,7 @@
       "restoredBody": "{arquivo}（{quando}）。还原前的存档已保留为备份。",
       "restoreTitle": "还原此备份？",
       "restoreBody": "当前存档会保留为备份。",
-      "kindGame": "游戏副本",
+      "kindGame": "游戏自动备份",
       "kindKiln": "Kiln 备份",
       "beforeSave": "保存前"
     },
@@ -5108,7 +6121,7 @@
       "empty": "空",
       "change": "更改",
       "add": "添加",
-      "tierN": "{n} 阶",
+      "tierN": "第 {n} 阶",
       "rarity": "稀有度",
       "amount": "数量",
       "aboveStack": "超过游戏的堆叠上限 {n}：适用于装有提高堆叠上限模组的世界",
@@ -5124,10 +6137,10 @@
     "equipment": {
       "xp": "本级经验",
       "attrsHint": "属性来自技能树节点（在「技能」页编辑）。",
-      "attrsFlameHint": "游戏还会加上随灵火等级提升的节点和装备加成；这两者都不保存在角色存档中。",
+      "attrsFlameHint": "游戏中还会计入随灵火等级变化的技能加成和装备加成。角色存档中不直接记录这两类加成。",
       "emptyHint": "空栏位。请在游戏中装备；这里可以编辑或卸下已穿戴的装备。",
       "backpackFull": {
-        "other": "不会卸下 {item}：这会删除它的容器以及其中保存的 {count} 格物品。请先在游戏中清空。"
+        "other": "{item} 的额外栏位中还保存着 {count} 条物品记录。卸下背包会删除这些记录，请先在游戏中清空背包。"
       },
       "groups": {
         "armour": "护甲",
@@ -5147,7 +6160,7 @@
         "feet": "脚部",
         "ring": "戒指",
         "shield": "盾牌",
-        "hook": "钩爪",
+        "hook": "抓钩",
         "glider": "滑翔翼",
         "backpack": "背包",
         "slot": "栏位 {n}"
@@ -5161,23 +6174,23 @@
         "other": "{n}/{total} 格"
       },
       "addItem": "添加物品",
-      "swapBar": "切换栏",
-      "swapBarHint": "按 Alt 与快捷栏互换",
-      "actionBar": "快捷栏",
-      "deckHint": "A 更改物品 · Y 移动物品 · 在空格上按 A 添加物品",
+      "swapBar": "备用动作栏",
+      "swapBarHint": "游戏中按 Alt 可切换两组动作栏",
+      "actionBar": "当前动作栏",
+      "deckHint": "按 A 编辑物品 · 按 Y 移动物品 · 在空栏位按 A 添加物品",
       "hint": "拖动或 M 移动 · 方向键选择 · Enter 查看/添加 · Delete 删除 · Ctrl+D 复制",
-      "movingHint": "正在移动{place}。选择目标后按 Enter 或空格移动或交换。Escape 取消。",
+      "movingHint": "正在移动{place}中的物品。选中目标栏位后，按 Enter 或空格移动或交换。按 Esc 取消。",
       "noneSelected": "未选择物品。",
       "noneSelectedHint": "选择一个格子以查看和更改其中的物品。",
       "emptyHint": "从物品目录中选择要放到这里的物品。",
       "pickItem": "选择物品",
-      "notFound": "在此背包中未找到任何物品，编辑器也无法确定它在此存档中的位置。如果游戏在这里显示了物品，说明它们未能被读取：无法添加任何物品。把此存档的副本发给我们有助于修复此问题。",
+      "notFound": "编辑器未读到物品，也无法确认物品栏在存档中的位置，因此不能添加物品。若游戏中能看到物品，可将此存档的副本发给 Kiln 团队协助排查。",
       "modItem": "模组物品，保持不变",
       "hiddenModItem": "{place}存放着另一个模组的隐藏物品（ID {id}）；Kiln 会原样保留它。",
       "place": {
         "backpack": "背包第 {n} 格",
-        "swap": "切换栏第 {n} 格",
-        "action": "动作栏第 {n} 格"
+        "swap": "备用动作栏第 {n} 格",
+        "action": "当前动作栏第 {n} 格"
       }
     },
     "inspector": {
@@ -5199,13 +6212,13 @@
       "repair": "修复",
       "water": "水量",
       "fill": "装满",
-      "duplicateHint": "将物品复制到第一个空格",
+      "duplicateHint": "复制物品并放入第一个空栏位",
       "duplicate": "复制",
       "attributes": "属性",
       "physicalArmour": "物理护甲",
       "magicalArmour": "魔法护甲",
       "raisesSkill": "提升 {no} 的技能等级",
-      "unknownLines": "没有数值的属性会按尚未测定的公式随物品等级变化；编辑器不会显示无法确认的数值。"
+      "unknownLines": "未标出数值的属性会随物品等级变化。编辑器尚未确认换算方式，因此暂不显示这些数值。"
     },
     "parts": {
       "full": "已满",
@@ -5220,12 +6233,12 @@
         "other": "{count} 个物品"
       },
       "categories": "分类",
-      "searchDeck": "按名称搜索（Steam + X：键盘）",
+      "searchDeck": "按名称搜索（Steam + X 打开屏幕键盘）",
       "search": "按名称搜索…",
       "searchLabel": "搜索",
       "type": "输入",
       "allRarities": "全部",
-      "tier": "阶",
+      "tier": "物品等阶",
       "targetFull": "目标：物品栏已满",
       "target": "目标：{place}",
       "pickHint": "请选择物品。",
@@ -5239,15 +6252,15 @@
         "consumables": "消耗品",
         "materials": "材料",
         "tools": "工具",
-        "building": "建筑",
+        "building": "建造",
         "dyes": "染料",
-        "cosmetics": "装饰品与收藏品"
+        "cosmetics": "外观装饰与收集品"
       }
     },
     "knowledge": {
       "noBlock": "此存档没有知识数据。",
       "search": "按名称或 id 搜索",
-      "above": "高于等级",
+      "above": "等级高于",
       "allLevels": "全部",
       "show": "显示",
       "filter": {
@@ -5258,11 +6271,11 @@
       },
       "removeN": "移除 {n} 项",
       "removeTitle": "移除 {n} 条知识记录？",
-      "removeBody": "依赖这些记录的配方也可能关闭。更改仅在保存时写入。",
+      "removeBody": "依赖这些知识记录的配方可能会重新锁定。点击「保存」后才会写入存档。",
       "kind": "类型",
       "name": "名称",
       "state": "状态",
-      "id": "id {id}",
+      "id": "编号 {id}",
       "kinds": {
         "item": "物品",
         "recipe": "配方",
@@ -5275,7 +6288,7 @@
         "other": "{count} 条名称未知"
       },
       "shownLimit": "仅显示前 400 条；使用搜索或等级筛选查看其余条目。",
-      "hint": "移除高等级材料会关闭依赖它的配方。配方不保存在存档中：游戏会根据知识重新计算，本地和服务器世界中都是如此。"
+      "hint": "移除高等级材料的知识记录会重新锁定依赖该材料的配方。本地和服务器都会按角色的知识记录重新计算配方解锁状态，存档中不单独记录配方的解锁状态。"
     },
     "skills": {
       "total": "技能点总数",
@@ -5286,7 +6299,7 @@
       "available": "可用",
       "enterTotal": "输入总数…",
       "changeTotal": "点击更改总数",
-      "totalFromGame": "总计 {total}：超过1级的等级数×2＋已清除的雾霾根系和灵药井。此值由计算得出，不存于存档中。",
+      "totalFromGame": "技能点总数 {total}。从 2 级起，每升一级获得 2 点，再加上清理瘴气根和魔药之井获得的技能点。总数根据角色进度计算，存档中不直接记录。",
       "totalHint": "技能点总数（已用 + 可用，与游戏中显示的一致）：",
       "zoomIn": "放大",
       "zoomOut": "缩小",
@@ -5313,14 +6326,14 @@
     },
     "art": {
       "preparing": "正在准备游戏图像…",
-      "needsClient": "游戏图像需要 Enshrouded 客户端（设置 → 游戏）。",
+      "needsClient": "读取游戏素材需要《雾锁王国》客户端。请在桌面模式的「设置」→「游戏与 Kiln」中添加游戏客户端。",
       "notFound": "未找到游戏图像。请运行 {script}。"
     },
     "game": {
       "tree": {
         "aboveMax": "{no}：等级 {nivel} 超过上限 {max}",
         "orphans": "与技能树其余部分不相连的节点：{nos}",
-        "overTotal": "已用技能点（{usados}）超过角色总数（{total}）"
+        "overTotal": "已分配的技能点（{usados}）超过角色的技能点总数（{total}）"
       },
       "unknownItem": "未知物品（0x{h}）",
       "errors": {
@@ -5332,19 +6345,19 @@
         "sameSlot": "两个物品位于物品栏的同一格",
         "knowledge": "知识条目无效",
         "knowledgeRepeated": "知识条目 id 重复",
-        "closeGame": "保存前请关闭 Enshrouded：否则游戏会覆盖编辑内容。",
+        "closeGame": "请退出《雾锁王国》后再保存。游戏运行时会覆盖这些改动。",
         "notOpen": "存档未打开编辑",
         "noEquipment": "编辑器在此存档中找不到装备和物品栏",
         "skillList": "编辑器无法识别此存档的技能列表",
-        "notSave": "不是 Enshrouded 存档",
-        "inventoryUnsure": "编辑器无法确定此存档的背包位置：不能向其中写入物品。",
+        "notSave": "当前文件不是《雾锁王国》的存档",
+        "inventoryUnsure": "编辑器无法确认物品栏在存档中的位置，因此不能向物品栏写入物品。",
         "modData": "此存档包含编辑器无法写入的模组数据（{mods}）：只读，以保持模组数据不变。",
-        "inventoryUnread": "编辑器无法确定地读取此角色的背包（背包、切换栏和动作栏）：只读，以免覆盖其内容。"
+        "inventoryUnread": "编辑器未能准确识别角色的物品栏（背包、备用动作栏和当前动作栏）。此存档仅供查看，以免覆盖现有物品。"
       },
-      "saveFileFilter": "Enshrouded 存档",
+      "saveFileFilter": "《雾锁王国》存档",
       "rarity": {
         "none": "无稀有度",
-        "common": "普通",
+        "common": "常见",
         "uncommon": "罕见",
         "rare": "稀有",
         "epic": "史诗",
@@ -5357,10 +6370,10 @@
         "consumable": "消耗品",
         "ammunition": "弹药",
         "tool": "工具",
-        "building": "建筑",
+        "building": "建造",
         "blueprint": "蓝图",
-        "collectible": "收藏品",
-        "cosmetic": "装饰品",
+        "collectible": "收集品",
+        "cosmetic": "外观装饰",
         "gem": "宝石"
       },
       "attribute": {
@@ -5372,13 +6385,13 @@
         "intelligence": "智力"
       },
       "classes": {
-        "survivor": "生存者",
+        "survivor": "幸存者",
         "beastmaster": "驯兽师",
         "ranger": "游侠",
         "assassin": "刺客",
-        "trickster": "诡术师",
+        "trickster": "诈术师",
         "wizard": "巫师",
-        "healer": "治疗者",
+        "healer": "治疗师",
         "battlemage": "战斗法师",
         "tank": "坦克",
         "warrior": "战士",
@@ -5530,5 +6543,10 @@
       "vanilla": "这些不一定是 Steam 发布时的文件。如需那些文件，请在 Steam 中使用“验证游戏文件的完整性”（游戏属性，已安装文件）。",
       "unknown": "Kiln 无法判断它会还原哪些游戏文件：{reason}。"
     }
+  },
+  "emlRNotice": {
+    "title": "已检测到 EML-R 加载器（{file}）",
+    "text": "EML-R 启动时会按自己的列表加载模组，即使在 Kiln 当前配置方案里关闭这些模组也一样。",
+    "interpreter": "只要游戏目录里有 EML-R 加载器，Kiln 就会暂停使用自己的 ShroudForge 解释器，避免重复加载模组。"
   }
 }
