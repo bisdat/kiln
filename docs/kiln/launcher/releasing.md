@@ -537,6 +537,39 @@ Every release, minor patches (0.2.0-dev.29.N) and majors (0.2.0-dev.30) alike, m
 
 Tests: `python3 -I tools/release/test_roadmap.py` (offline; git, ssh, npm and curl stubbed).
 
+### The API history ledger
+`managed/api-history.tsv` says which release first shipped every public API entry, and the mod API version of that
+release. The agent API index and the "Since mod API 0.2.x" lines of the API reference read it. Tab-separated, one header
+line, Unix newlines, sorted by `kind`, `project`, `entry`:
+
+| Column | Holds |
+|---|---|
+| `kind` | `managed` or `native` |
+| `project` | the assembly (`Kiln.Blocks`); native: the header under `native/core/abi` (`services/kiln_stations.h`) |
+| `entry` | the exact line of `PublicAPI.Shipped.txt` / `PublicAPI.Unshipped.txt`; native: `<header>:<Table>:<row>`, a function-pointer row of a `Kiln*Api` struct |
+| `release` | `0.2.0-dev.30.5` (`<=0.2.0-dev.26`: that release or an earlier one) |
+| `mod_api` | `Kiln.Mods.ApiVersion` at that release, `0.2.14` (`<=0.2.1`) |
+
+The record starts at the first release tag that has it: PublicAPI files at 0.2.0-dev.26, the native headers at
+0.2.0-dev.10, so what stood there then is `<=`. Lines still in `PublicAPI.Unshipped.txt` have no row: they get
+theirs when `promote` moves them. A beta tag is no release, and a line's row is never removed: a member made
+experimental or forwarded keeps the row of its old line, and the new line (`[KILNX001]...`, `... (forwarded,
+contained in ...)`) has its own, dated by the change. The `const Kiln.Mods.ApiVersion = "..."` line is not in the ledger
+(every bump rewrites it).
+
+- `tools/release/api-gate.sh promote --if-same-as <commit> --release $V` (release.sh does this after good checks) moves
+  the lines and appends their rows, plus every native row of the released commit's headers that has none. Commit
+  `managed/api-history.tsv` with the moved PublicAPI files, as release.sh's closing text says. Without `--release` the
+  name is the release tag on the commit, else promote refuses.
+- `tools/release/api-gate.sh history --check` exits 1 unless the ledger equals what the release tags say (no missing,
+  extra or wrong row; needs the tags: `git fetch --tags`), is in canonical order and format, and has a row for every
+  line of every `PublicAPI.Shipped.txt`. Rows of a release with no tag yet (promoted, waiting for its tag) are accepted
+  when the record has their entries.
+- `history --seed` writes the whole ledger from the tags (a few seconds, the same file every time); `history --append
+  --release $V [--mod-api X.Y.Z]` adds the rows of a promote that did not run.
+
+Tests: `python3 -I tools/release/test_apihistory.py`.
+
 ### Cutting a beta (a test build for the Discord testers)
 A test build is a release folder of its own, built from a pushed commit like a release, that moves only the beta
 channel. Nothing of it announces a release: no Nexus Mods build or upload, no notes page or download page entry, no

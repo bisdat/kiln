@@ -994,11 +994,11 @@ if ((worktree)); then
 elif [[ $channel == beta ]]; then
   note "API record: a test build ($name) ships no API; the Unshipped.txt lines stay for the release"
 elif ((!checks)) || printf '%s\n' "${results[@]}" | grep -q '^FAIL'; then
-  note "API record: not promoted (the checks failed or did not run); after a good release run tools/release/api-gate.sh promote"
+  note "API record: not promoted (the checks failed or did not run); after a good release run tools/release/api-gate.sh promote --release $version"
 else
   step "API record: Unshipped.txt lines into Shipped.txt"
-  if "$here/api-gate.sh" promote --if-same-as "$full" 2>&1 | tee -a "$log"; then
-    api_moved=$(git -C "$repo" status --porcelain -- ':(glob)managed/**/PublicAPI.*.txt' | wc -l)
+  if "$here/api-gate.sh" promote --if-same-as "$full" --release "$version" 2>&1 | tee -a "$log"; then
+    api_moved=$(git -C "$repo" status --porcelain -- ':(glob)managed/**/PublicAPI.*.txt' managed/api-history.tsv | wc -l)
   else
     note "API record: not promoted (above); the release itself is fine"
   fi
@@ -1043,8 +1043,9 @@ if ((!api_compat)); then
 fi
 if ((api_moved)); then
   cat <<EOF | tee -a "$log"
-  The API record: $api_moved PublicAPI file(s) changed in $repo (this release's API moved from Unshipped.txt into
-  Shipped.txt). Commit them: git -C "$repo" commit -m "api: ship the API of $version" -- ':(glob)managed/**/PublicAPI.*.txt'
+  The API record: $api_moved file(s) changed in $repo (this release's API moved from Unshipped.txt into Shipped.txt, and
+  its rows went into the API history ledger). Commit them:
+  git -C "$repo" commit -m "api: ship the API of $version" -- ':(glob)managed/**/PublicAPI.*.txt' managed/api-history.tsv
 EOF
 fi
 if printf '%s\n' "${results[@]}" | grep -q '^FAIL'; then exit 1; fi
