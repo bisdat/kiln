@@ -198,6 +198,26 @@ public sealed class RegistryContextTests
         owner.Retire();
     }
 
+    private static int RetirementHandlers(ModContext owner) =>
+        (typeof(ModContext).GetField("Retiring", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .GetValue(owner) as Delegate)?.GetInvocationList().Length ?? 0;
+    [Fact]
+    public void ReadySubscriptionsShareOneOwnerHookAndRemoveItWithTheLastHandler()
+    {
+        var owner = Mod(); var context = Frame(owner, RegistryEntryPoint.ModLoad);
+        var before = RetirementHandlers(owner);
+        Action<RegistryReady> first = _ => { }, second = _ => { };
+        using (context.Enter())
+        {
+            DataRegistry.Ready += first; DataRegistry.Ready += second;
+            Assert.Equal(before + 1, RetirementHandlers(owner));
+            DataRegistry.Ready -= first; Assert.Equal(before + 1, RetirementHandlers(owner));
+            DataRegistry.Ready -= second; Assert.Equal(before, RetirementHandlers(owner));
+            for (var i = 0; i < 10; ++i) { DataRegistry.Ready += first; DataRegistry.Ready -= first; }
+            Assert.Equal(before, RetirementHandlers(owner));
+        }
+        context.Close(); owner.Retire();
+    }
     [Fact]
     public void CatchingAFailedListReadDoesNotLeaveABufferedEdit()
     {

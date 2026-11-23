@@ -83,6 +83,7 @@ public static partial class Registry
 {
     private static readonly object ReadyGate = new();
     private static readonly List<(ModContext Owner, Action<RegistryReady> Handler)> Handlers = [];
+    private static readonly Dictionary<ModContext, Action> ReadyRetirements = [];
     private static RegistryReady? _lastReady;
     static Registry()
     {
@@ -103,11 +104,35 @@ public static partial class Registry
             if (RegistryContext.Current?.EntryPoint == RegistryEntryPoint.GameStart)
                 throw new RegistryContextException(RegistryContextError.ReadOnly, "register runtime ready handlers in OnLoad, not a game-start author");
             RegistryReady? last;
-            lock (ReadyGate) { Handlers.Add((mod, value)); last = _lastReady; }
-            mod.Retiring += () => { lock (ReadyGate) Handlers.RemoveAll(x => ReferenceEquals(x.Owner, mod)); };
+            lock (ReadyGate)
+            {
+                Handlers.Add((mod, value)); last = _lastReady;
+                if (!ReadyRetirements.ContainsKey(mod))
+                {
+                    Action retirement = () => DropReadyOwner(mod);
+                    ReadyRetirements.Add(mod, retirement); mod.Retiring += retirement;
+                }
+            }
             if (last is not null) mod.Scheduler.Post(() => ModInvoke.Run(mod, () => value(last), "registry ready"));
         }
-        remove { if (value is not null) lock (ReadyGate) Handlers.RemoveAll(x => x.Handler == value && ReferenceEquals(x.Owner, ModContext.CurrentMod)); }
+        remove
+        {
+            if (value is null) return;
+            var owner = ModContext.CurrentMod;
+            lock (ReadyGate)
+            {
+                Handlers.RemoveAll(x => x.Handler == value && ReferenceEquals(x.Owner, owner));
+                if (owner is not null && !Handlers.Any(x => ReferenceEquals(x.Owner, owner))) DropReadyOwner(owner);
+            }
+        }
+    }
+    private static void DropReadyOwner(ModContext owner)
+    {
+        lock (ReadyGate)
+        {
+            Handlers.RemoveAll(x => ReferenceEquals(x.Owner, owner));
+            if (ReadyRetirements.Remove(owner, out var retirement)) owner.Retiring -= retirement;
+        }
     }
     /// <summary>An explicit, buffered live transaction. A throwing handler submits nothing. Restart fields return RestartRequired.</summary>
     [TickThreadOnly, RequiresCapability("kiln.registry.live")]
