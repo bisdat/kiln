@@ -148,7 +148,8 @@ permission rules apply. It always acts on **your own character**: there is no pl
   `unlimitedflight status` acts as the host. A dedicated console has no character; a joined game's local console must
   use server chat instead.
 - This is **not** free-character flight and grants no building permissions, free crafting, invulnerability, general
-  stamina refill or other Creative rules. It never changes the server's limits. See [Rules](services/rules.md#unlimited-flight).
+  stamina refill or other Creative rules. It never changes the server's limits, and it is not the ShroudForge-format
+  mod SF Unlimited Flight. See [Rules](services/rules.md#unlimited-flight).
 
 ### `/creative [on|off] [player]`, `/creative status` (Kiln.Rules)
 Creative mode for one player: the `creative` rules preset (Kiln.Rules: Kiln's own, or the server's

@@ -331,6 +331,11 @@ lifecycle removes it when the player leaves or the world closes. It is not persi
 the [console folder](../commands.md#console-folder-and-kilnctl-cmd) runs these commands as the host's own character; there is no
 player-targeting form for a dedicated console. `/help unlimitedflight` lists the three forms.
 
+It is not the ShroudForge-format mod SF Unlimited Flight. With both on, a glider that SF Unlimited Flight steers keeps
+SF's steering, and once Kiln's glider steering has been asked for in a game, SF Unlimited Flight's Upward Gliding refuses
+to switch on ([Steering the glider](#steering-the-glider-glidesteer),
+[ShroudForge compatibility](../shroudforge-compat.md)).
+
 ## Gliding
 The game's glider is its own thrust against air drag, with gravity for the sink (docs/re/rules.md 7). Kiln wraps the
 glide step and changes nothing the game would not predict the same way (the math: `native/services/rules/glide_math.h`,
