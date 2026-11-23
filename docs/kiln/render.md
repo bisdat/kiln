@@ -114,7 +114,7 @@ The camera is the local player's view as the client writes it each frame (positi
 hook on the game's main thread (feature `render.camera`). Points drawn this way follow the scene; camera shake (a glider's
 wobble) is not in it, so markers may tremble a little against the scene there. The camera expires 500 ms after its last
 write, including when returning to the main menu or loading. On a game build where the camera is not found,
-`Render.CameraAvailable` is false, `Camera.Valid` stays false and world drawing does nothing; screen drawing still works.
+`Render.CameraAvailable` is false, `RenderCamera.Valid` stays false and world drawing does nothing; screen drawing still works.
 
 ## C (native plugins)
 `kiln_render.h`: draw inside a kiln.ui frame callback (`kiln_ui.h` `subscribe_frame`); call `acquire_frames` so a frame

@@ -87,8 +87,8 @@ showed the lease; it ends at T0 + `Duration` and the next frame is the game's ow
 lines, rotations the short way round, keyed lenses linear in degrees; before the first key and after the last the
 camera holds that key; no splines, no looping. `Update` replaces the whole request: `Preserve` evaluates the new one at
 the time already elapsed (refused `ExpiredUpdate` when no time is left, `InsufficientLifetime` when less is left than
-the new blends, and the old revision stays), `Restart` starts a new T0. Blends use smoothstep: `Blend.In` from what
-was on screen (the game's view on a fresh request, the previous visual on an update or a takeover), `Blend.Out` over
+the new blends, and the old revision stays), `Restart` starts a new T0. Blends use smoothstep: `CameraBlend.In` from what
+was on screen (the game's view on a fresh request, the previous visual on an update or a takeover), `CameraBlend.Out` over
 the duration's last part toward the game's fresh view; `Camera.End` blends the last shown view out to the game's view
 and completes after that. Parts a replacement drops go back to the game's view at once.
 
