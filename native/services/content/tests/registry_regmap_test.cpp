@@ -325,8 +325,24 @@ int main(int argc, char** argv) {
             CHECK(one.mapping("items", "maxStack", &why) == Mapping::Mapped);
             CHECK(one.mapping("items", "block", &why) == Mapping::Unproven && why.find("not traced") != std::string::npos);
             if (std::string(side) == "client") {
-                CHECK(one.build.rows == rm.build.rows);
-                CHECK(one.build.reasons == rm.build.reasons);
+                // review3 N4: row for row only where the client's layout of the registry's root type is the server's (a
+                // later client layout may differ legitimately: those rows are unproven); never ok where the server is not
+                int same_layout = 0;
+                for (const auto& [q, state] : one.build.rows) {
+                    const auto reg = one.registries.find(q.substr(0, q.find('.')));
+                    CHECK(reg != one.registries.end());
+                    if (reg == one.registries.end()) continue;
+                    const std::string& root = reg->second.entries.resource_type;
+                    const auto cl = one.build.layouts.find(root), sl = rm.build.layouts.find(root);
+                    const auto server_row = rm.build.rows.find(q);
+                    CHECK(state != map::BuildRow::Ok || (server_row != rm.build.rows.end() && server_row->second == map::BuildRow::Ok));
+                    if (cl == one.build.layouts.end() || sl == rm.build.layouts.end() || cl->second != sl->second) continue;
+                    ++same_layout;
+                    CHECK(server_row != rm.build.rows.end() && server_row->second == state);
+                    const auto cr = one.build.reasons.find(q), sr = rm.build.reasons.find(q);
+                    CHECK((cr == one.build.reasons.end()) == (sr == rm.build.reasons.end()) && (cr == one.build.reasons.end() || cr->second == sr->second));
+                }
+                std::printf("regmap client: %d of %zu rows compared row for row (same layout as the server's)\n", same_layout, one.build.rows.size());
                 CHECK(one.build.game_build == rm.build.game_build && one.build.regmap_digest == rm.build.regmap_digest);
             }
             rm = std::move(one);
