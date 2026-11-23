@@ -71,29 +71,41 @@ FakeList make_list(std::vector<uint8_t>& store) {
     return l;
 }
 bool is_kiln(const uint8_t* e) { return std::memcmp(e, "KILNBILD", 8) == 0; }
-// The voxel serializer's rule (docs/re/build.md §12): a stored 32-cell chunk goes into the blob of every entry whose
-// bounds its 16 m box touches (min <= max on every axis, edges included).
-bool saved_by(const std::array<int32_t, 3>& c, const uint8_t* e) {
+// The voxel serializer's rule (docs/re/build.md §12), in floats as the game computes it: a stored 32-cell chunk goes
+// into the blob of every entry whose bounds its 16 m box touches, but there only its 4 m blocks (8 cells a side, 64 per
+// chunk, bit x + 4y + 16z) whose own box touches the bounds keep their cells (edges included); every other block is
+// written empty, and the loader leaves an empty block as the world generates it.
+uint64_t blocks_saved_by(const std::array<int32_t, 3>& c, const uint8_t* e) {
     float lo[3], hi[3];
     std::memcpy(lo, e + 0x10, 12);
     std::memcpy(hi, e + 0x20, 12);
     for (int k = 0; k < 3; ++k) {
-        const float clo = static_cast<float>(c[k]) * 16.0f, chi = clo + 16.0f;
-        if (!(clo <= hi[k] && lo[k] <= chi)) return false;
+        const float clo = static_cast<float>(c[k] * 32) * 0.5f, chi = clo + 16.0f;
+        if (!(clo <= hi[k] && lo[k] <= chi)) return 0;
     }
-    return true;
+    uint64_t saved = 0;
+    for (int b = 0; b < 64; ++b) {
+        bool in = true;
+        for (int k = 0; k < 3; ++k) {
+            const float blo = static_cast<float>((b >> (2 * k)) & 3) * 4.0f + static_cast<float>(c[k] * 32) * 0.5f;
+            if (!(blo <= hi[k] && lo[k] <= blo + 4.0f)) in = false;
+        }
+        if (in) saved |= uint64_t{1} << b;
+    }
+    return saved;
 }
-// Every kept chunk is in some entry's blob; with `no_redundant`, no Kiln entry touches a chunk a game entry saves.
+constexpr uint64_t kWholeChunk = ~uint64_t{0};
+// Every block of every kept chunk is in some entry's blob. With `no_redundant`, no Kiln entry touches a chunk the
+// game's entries save whole already (a chunk they save only in part needs Kiln's box for the rest).
 bool every_chunk_saved(const kb::GameArray& a, const std::set<std::array<int32_t, 3>>& kept, bool no_redundant) {
     for (const auto& c : kept) {
-        bool by_game = false, by_kiln = false;
+        uint64_t by_game = 0, by_kiln = 0;
         for (uint64_t i = 0; i < a.count; ++i) {
             const uint8_t* e = a.data + i * 0x30;
-            if (!saved_by(c, e)) continue;
-            (is_kiln(e) ? by_kiln : by_game) = true;
+            (is_kiln(e) ? by_kiln : by_game) |= blocks_saved_by(c, e);
         }
-        if (!by_game && !by_kiln) return false;
-        if (no_redundant && by_game && by_kiln) return false;
+        if ((by_game | by_kiln) != kWholeChunk) return false;
+        if (no_redundant && by_game == kWholeChunk && by_kiln) return false;
     }
     return true;
 }
