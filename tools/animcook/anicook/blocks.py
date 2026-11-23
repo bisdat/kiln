@@ -628,19 +628,20 @@ def _body_bindings(spec, graph, clips, where):
     return out
 
 
-def body_manifest(recipe_path, entries, update, selected=None, producer="modelcook", specs=None):
+def body_manifest(recipe_path, entries, update, selected=None, producer="modelcook", specs=None, server=False):
     """Split the current cook's entries, merge producer-owned chunks, hash every owned file. No game resource is published here.
 
-    A partial two-tool cook is explicitly incomplete; missing model bytes on a server or unlowered material blocks cannot become Ready.
-    Paths inside the boot manifest are mod-relative (ordinary assets.json remains assets-relative, unchanged for old mods).
+    This is a machine-local cache under assets/cooked, never an identity-counted authored file. Output hashes prove only
+    local bytes; sourceHash is derived from authored specs and sources for cross-machine agreement. A partial two-tool cook,
+    server-skipped renderer output, or unlowered material blocks cannot become Ready. Paths remain mod-relative.
     Returns ordinary entries and missing/mismatched deferred entries for the cook report.
     """
     import hashlib
     from . import cookpaths as CP
-    root = mod_dir_of(recipe_path) or Path(recipe_path).parent.parent
+    root = CP.mod_root(recipe_path)  # same lexical root as every checked path, including linked Steam libraries
     if specs is None:
         specs = npc_bodies(root)
-    if not specs and not (Path(root) / "assets/npc-bodies.v1.json").exists():
+    if not specs and not (root / "assets/cooked/npc-bodies.v1.json").exists():
         return entries, [], []
     try:
         path = CP.npc_manifest(recipe_path)
@@ -679,9 +680,13 @@ def body_manifest(recipe_path, entries, update, selected=None, producer="modelco
             # Model blob patches use the same path base as the manifest.
             if row.get("patch"):
                 row["patch"] = [dict(p, blob=CP.cooked(recipe_path, p["blob"], "an NPC body's blob").relative_to(root).as_posix()) for p in row["patch"]]
-            previous = next((x for x in old.get("entries", []) if x.get("producer") == producer and x.get("kind") == row["kind"] and
-                             x.get("file") == row["file"] and x.get("sourceHash") == source_hash), {})
-            row["sha256"] = hashlib.sha256(file.read_bytes()).hexdigest() if file.is_file() else previous.get("sha256")
+            if server and producer == "modelcook":
+                row["skippedOnServer"] = True
+                row["sha256"] = None  # no renderer output was made here; never borrow an author's expected bytes
+            elif file.is_file():
+                row["sha256"] = hashlib.sha256(file.read_bytes()).hexdigest()
+            else:
+                raise BlocksError(f"{row['file']}: {producer} did not produce this body resource")
             deferred.append(row)
         wanted = [dict(e) for e in old.get("entries", []) if e.get("producer") != producer] + deferred if specs else []
         wanted.sort(key=lambda e: (e["file"], e.get("kind", ""), e.get("type", "")))
@@ -690,10 +695,9 @@ def body_manifest(recipe_path, entries, update, selected=None, producer="modelco
         foreign_mismatched = []
         for e in wanted:
             file = CP.cooked(recipe_path, Path(root) / e["file"], "an NPC body's asset")
-            if e.get("producer") != producer and file.is_file() and hashlib.sha256(file.read_bytes()).hexdigest() != e.get("sha256"):
+            if e.get("producer") != producer and not e.get("skippedOnServer") and file.is_file() and hashlib.sha256(file.read_bytes()).hexdigest() != e.get("sha256"):
                 foreign_mismatched.append(e)
-            # A server does not cook RenderModel bytes. Keep the shipped expected hash for unchanged sources;
-            # readiness and receipts are checked by the boot consumer, never inferred from this manifest.
+            # Hashes prove this machine's outputs only. Cross-machine agreement uses authored sourceHash, not these bytes.
         bodies = {}
         recipe = json.loads(Path(recipe_path).read_text())
         cooked_dir = Path(recipe_path).parent / recipe.get("out", "cooked")
@@ -706,11 +710,8 @@ def body_manifest(recipe_path, entries, update, selected=None, producer="modelco
 
         for name, spec in specs.items():
             graph = metadata(cooked_dir / f"{spec['graphName']}.graph.json")
-            model = metadata(cooked_dir / f"{spec['modelName'].replace('/', '_')}.model.json")
-            previous = old.get("bodies", {}).get(name)
-            if model is None and previous and previous.get("spec") == spec and wanted == old.get("entries", []) and all(e.get("sourceHash") == source_hash for e in wanted):
-                bodies[name] = previous  # preserve the author's complete expected bundle on a server, byte for byte
-                continue
+            skipped_model = any(e.get("producer") == "modelcook" and e.get("skippedOnServer") for e in wanted)
+            model = None if skipped_model else metadata(cooked_dir / f"{spec['modelName'].replace('/', '_')}.model.json")
             clips = metadata(cooked_dir / "clips.json")
             bindings = _body_bindings(spec, graph, clips, f"npcs.{name}.motions") if graph and clips and anim_current else []
             materials, dependencies = [], {}
@@ -720,6 +721,8 @@ def body_manifest(recipe_path, entries, update, selected=None, producer="modelco
                 dependencies[rel] = {"file": rel, "sha256": hashlib.sha256(checked.read_bytes()).hexdigest()}
                 return dependencies[rel]
             for file in (cooked_dir / f"{spec['graphName']}.graph.json", cooked_dir / f"{spec['modelName'].replace('/', '_')}.model.json", cooked_dir / "clips.json"):
+                if skipped_model and file.name == f"{spec['modelName'].replace('/', '_')}.model.json":
+                    continue
                 if file.is_file():
                     dependency(file.relative_to(root).as_posix())
             from .graphgen import derive
@@ -745,12 +748,12 @@ def body_manifest(recipe_path, entries, update, selected=None, producer="modelco
             if model and graph and anim_current and model_current and model.get("skeleton") != graph.get("skeleton"):
                 raise BlocksError(f"npcs.{name}.body.model: model and graph skeletons differ")
             # G2: material JSON hashes are dependencies, NOT evidence of lowered material resource bytes.
-            bodies[name] = {"key": spec["key"], "spec": spec, "model": model.get("guid") if model else None,
+            bodies[name] = {"key": spec["key"], "sourceHash": source_hash, "spec": spec, "model": model.get("guid") if model else None,
                             "graph": graph.get("guid") if graph else None, "skeleton": graph.get("skeleton") if graph else None,
                             "bindings": bindings, "materialBlocks": materials, "files": [dependencies[k] for k in sorted(dependencies)],
                             "complete": bool(model and graph and bindings and anim_current and model_current and wanted and
                                              all(e.get("sha256") and e.get("sourceHash") == source_hash for e in wanted) and not materials)}
-        doc = {"format": 1, "entries": wanted, "bodies": bodies}
+        doc = {"format": 1, "sourceHash": source_hash, "entries": wanted, "bodies": bodies}
         have = {(e["kind"], e["file"]): e for e in old.get("entries", [])}
         missing = [e for e in deferred if (e["kind"], e["file"]) not in have]
         mismatch = [e for e in deferred if (e["kind"], e["file"]) in have and have[(e["kind"], e["file"])] != e]
@@ -762,3 +765,16 @@ def body_manifest(recipe_path, entries, update, selected=None, producer="modelco
         return normal, missing, mismatch + foreign_mismatched
     except (CP.Refused, OSError, ValueError) as e:
         raise BlocksError(f"npc-bodies.v1: {e}") from e
+
+
+def body_receipt(recipe_path, game):
+    """One receipt family for the shared local cache, so the second producer cannot stale the first one's receipt."""
+    from . import cookpaths as CP
+    try:
+        path = CP.npc_manifest(recipe_path)
+        if path.is_file():
+            # The cache itself is the stable recipe key even when different cook.json files contribute to the same mod.
+            return CP.receipt(game, path, "npc-bodies", {path: path.read_bytes()})
+        return None
+    except CP.Refused as error:
+        raise BlocksError(f"npc-bodies.v1 receipt: {error}") from error

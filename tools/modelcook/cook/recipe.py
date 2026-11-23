@@ -588,7 +588,7 @@ def run(path, k, t, exe_sha256=None, update_manifest=False, given=None):
     body_missing, body_mismatched = [], []
     if AB is not None:
         try:
-            entries, body_missing, body_mismatched = AB.body_manifest(p, entries, update_manifest, deferred_files, TOOL, body_specs)
+            entries, body_missing, body_mismatched = AB.body_manifest(p, entries, update_manifest, deferred_files, TOOL, body_specs, server=server)
         except AB.BlocksError as e:
             raise RecipeError(str(e)) from e
     # the committed assets.json must name every ordinary output exactly as cooked: a client's outputs on either side
@@ -646,7 +646,13 @@ def run(path, k, t, exe_sha256=None, update_manifest=False, given=None):
     _checked(report_file, CP.write, report_bytes)
     # what this cook wrote into assets/cooked, recorded in the game it read: what that game's kiln.assets loads (cookpaths.receipt)
     try:
-        CP.receipt(CP.game_dir_of(getattr(k, "path", None)), p, "modelcook.looks" if doc.get("looks") else TOOL, {**outputs, report_file: report_bytes})
+        game_dir = CP.game_dir_of(getattr(k, "path", None))
+        CP.receipt(game_dir, p, "modelcook.looks" if doc.get("looks") else TOOL, {**outputs, report_file: report_bytes})
+        if ok and AB is not None:
+            try:
+                AB.body_receipt(p, game_dir)
+            except AB.BlocksError as error:
+                raise RecipeError(str(error)) from error
     except (CP.Refused, OSError) as e:
         raise RecipeError(f"{p}: the cook's receipt (what this game loads of it) could not be written: {e}") from e
     return report

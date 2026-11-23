@@ -62,10 +62,10 @@ class NpcBodyValidation(unittest.TestCase):
             (root / "assets/cooked/example.bin").write_bytes(b"synthetic resource")
             entries = [{"kind": "resource", "guid": G.derive("body-validation", "test", "resource"), "type": "test", "part": 0, "file": "cooked/example.bin", "mode": "new"}]
             B.body_manifest(recipe, entries, True, producer="animcook")
-            first = json.loads((root / "assets/npc-bodies.v1.json").read_text())["entries"][0]["sourceHash"]
+            first = json.loads((root / "assets/cooked/npc-bodies.v1.json").read_text())["entries"][0]["sourceHash"]
             buffer.write_bytes(b"changed authored rig")
             B.body_manifest(recipe, entries, True, producer="animcook")
-            second = json.loads((root / "assets/npc-bodies.v1.json").read_text())["entries"][0]["sourceHash"]
+            second = json.loads((root / "assets/cooked/npc-bodies.v1.json").read_text())["entries"][0]["sourceHash"]
             self.assertNotEqual(first, second)
 
     def test_complete_vector_uses_effective_cooked_duration_and_canonical_order(self):

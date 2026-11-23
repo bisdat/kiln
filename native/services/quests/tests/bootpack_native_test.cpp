@@ -222,6 +222,19 @@ void test_body_pack_exclusion() {
         CHECK(logged(helper ? "authored roster-body lowering is not installed" : "whole body-dependent native pack is excluded"));
     }
 }
+void test_local_body_manifest_excludes_the_whole_pack() {
+    for (bool helper : {false, true}) {
+        reset("16f: a machine-local cooked body manifest keeps the whole native pack body-dependent");
+        if (!helper) kiln_test_module = nullptr;
+        mod("a-body", kGood); mod("b-ordinary", kGood);
+        write(t_root / "mods/a-body/assets/cooked/npc-bodies.v1.json", R"({"format":1,"bodies":{"n":{}}})");
+        boot_and_resource_init();
+        CHECK(t_stops.empty());
+        CHECK(g_names.count("a-body:k1") == 0);
+        CHECK(g_names.count("b-ordinary:k1") == 1);
+        CHECK(logged(helper ? "authored roster-body lowering is not installed" : "whole body-dependent native pack is excluded"));
+    }
+}
 void test_early_abort() {
     reset("16f: enclosing OnBoot abort withdraws successful packs in reverse order");
     mod("a-first", kGood); mod("b-second", kGood);
@@ -257,6 +270,7 @@ int main(int argc, char** argv) {
     test_rollback_fault_is_named();
     test_dependencies_and_cycles();
     test_body_pack_exclusion();
+    test_local_body_manifest_excludes_the_whole_pack();
     test_early_abort();
     std::error_code ec;
     fs::remove_all(t_root, ec);

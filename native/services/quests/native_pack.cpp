@@ -376,7 +376,7 @@ void collect_mods(std::vector<qb::ModInput>* mods, bool client, const kiln::boot
         ec.clear();
         bool authored_body = false;
         const qb::ojson block_npcs = block_docs.empty() ? qb::ojson::object() : npcs_from_blocks(mf["id"].get<std::string>(), block_docs, &authored_body);
-        const fs::path body_manifest = base / L"assets" / L"npc-bodies.v1.json";
+        const fs::path body_manifest = base / L"assets" / L"cooked" / L"npc-bodies.v1.json";
         if (fs::exists(body_manifest, ec)) {
             const auto bundle = qb::parse_blocks_json(read_block_file(body_manifest));
             authored_body = authored_body || !bundle.is_object() || !bundle.contains("bodies") || !bundle["bodies"].is_object() || !bundle["bodies"].empty();

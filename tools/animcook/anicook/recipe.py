@@ -483,7 +483,10 @@ class Run:
         try:
             CP.write(report_file, report_bytes)
             # what this cook wrote into assets/cooked, recorded in the game it read: what that game's kiln.assets loads (cookpaths.receipt)
-            CP.receipt(CP.game_dir_of(getattr(self.k, "path", None)), self.p, TOOL, {**outputs, report_file: report_bytes})
-        except (CP.Refused, OSError) as e:
+            game_dir = CP.game_dir_of(getattr(self.k, "path", None))
+            CP.receipt(game_dir, self.p, TOOL, {**outputs, report_file: report_bytes})
+            if ok:
+                B.body_receipt(self.p, game_dir)
+        except (B.BlocksError, CP.Refused, OSError) as e:
             raise RecipeError(f"{self.p}: the cook's report or receipt could not be written: {e}") from e
         return rep

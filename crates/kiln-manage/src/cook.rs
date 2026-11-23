@@ -1727,6 +1727,39 @@ mod tests {
         (game, folder)
     }
 
+    /// The local NPC manifest is part of the cooked tree: a later tool failure restores it and its receipt, without
+    /// changing any identity-counted bytes. No special own_files entry or production rollback change is needed.
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_cook_restores_the_local_npc_manifest_and_identity() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = crate::library::TempDir::new(&std::env::temp_dir(), "cook-npc-rollback").unwrap();
+        let (game, folder) = cooked_mod(d.path());
+        let manifest = folder.join("assets/cooked/npc-bodies.v1.json");
+        let original = br#"{"format":1,"bodies":{"npc":{"sourceHash":"authored-source"}}}"#;
+        std::fs::write(&manifest, original).unwrap();
+        let digest = crate::hash::hex(&sha2::Sha256::digest(original));
+        crate::util::write_json_atomic(&receipts_dir(&game).join("npc.json"), &serde_json::json!({
+            "format": 1, "tool": "npc-bodies", "mod": folder, "recipe": "assets/cook.json",
+            "files": { "cooked/npc-bodies.v1.json": digest }
+        })).unwrap();
+        let identity = crate::hash::mod_identity(&folder).unwrap();
+        let interpreter = d.path().join("renderer-then-fail");
+        let marker = d.path().join("renderer-ran");
+        let root = folder.to_string_lossy().replace('\'', "'\\''");
+        let mark = marker.to_string_lossy().replace('\'', "'\\''");
+        std::fs::write(&interpreter, format!("#!/bin/sh\nmkdir -p '{root}/assets/cooked'\nprintf '%s' 'partial manifest' > '{root}/assets/cooked/npc-bodies.v1.json'\nprintf ran > '{mark}'\nexit 1\n")).unwrap();
+        std::fs::set_permissions(&interpreter, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let opts = CookOptions { game: Some(game.clone()), force: true, clean: true, ..CookOptions::default() };
+        let report = cook_folder_watched(&fake_tools(&d.path().join("t"), interpreter.to_str().unwrap()), &folder, &opts,
+            &mut |_, _| {}, &|| false).unwrap();
+        assert!(!report.ok && marker.is_file(), "the failing tool actually wrote its partial manifest");
+        assert_eq!(std::fs::read(&manifest).unwrap(), original, "the exact last-good manifest is restored");
+        assert_eq!(check_receipts(&game, &folder), (2, true), "both last-good receipts still prove their bytes");
+        assert_eq!(crate::hash::mod_identity(&folder).unwrap(), identity);
+        assert!(left_over(&folder).is_empty());
+    }
+
     /// A clean cook whose tool fails and whose putting back fails too (a sharing violation, a permission) leaves its
     /// set-aside; the next cook, whose tool fails as well, makes that set-aside's cooked folder assets/cooked again (it
     /// was missing) and puts back what it set aside itself: the files and receipts of the last good cook are there. A

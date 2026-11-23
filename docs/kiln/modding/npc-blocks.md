@@ -304,10 +304,12 @@ For an authored roster body:
   target needs a single cooked clip, with finite positive effective duration; blends are refused for these bindings.
 
 The cook writes this group's resource/blob keys, file hashes, canonical bindings and effective durations to
-`assets/npc-bodies.v1.json`, described by `schema/npc-bodies.schema.json`. It removes those entries from the eager
-`assets/assets.json` group. The two cook tools merge their own contributions; an unfinished two-tool build is
-explicitly incomplete. A server that skips renderer-only outputs preserves a shipped manifest's expected hashes
-for unchanged inputs. This is **not** a Ready status or evidence that a body was published.
+`assets/cooked/npc-bodies.v1.json`, described by `schema/npc-bodies.schema.json`. It removes those entries from the eager
+`assets/assets.json` group. This is a machine-local cache, excluded from mod identity and restored with the cooked tree
+when a cook fails. The two cook tools merge their own contributions. Output hashes prove this machine's bytes only;
+`sourceHash` is derived from authored specs and sources for cross-machine agreement. A server marks renderer rows
+`skippedOnServer` with no borrowed output hash. An unfinished or renderer-skipped body remains incomplete.
+A shared cache receipt tracks the final two-tool result. None of this is a Ready status or evidence of body publication.
 
 Material-block and texture hashes are included as dependencies, but generated material JSON is not material-resource
 publication. The prepared material bridge is still required before that closure can be committed. No hot body or

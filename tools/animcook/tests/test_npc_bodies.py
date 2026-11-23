@@ -46,7 +46,7 @@ class NpcBodies(unittest.TestCase):
         self.assertTrue(rep["ok"], rep)
         ordinary = json.loads((self.mod / "assets/assets.json").read_text())
         self.assertEqual(ordinary["entries"], [])
-        bundle = json.loads((self.mod / "assets/npc-bodies.v1.json").read_text())
+        bundle = json.loads((self.mod / "assets/cooked/npc-bodies.v1.json").read_text())
         body = bundle["bodies"]["tobin"]
         self.assertEqual(len(body["bindings"]), 27)
         self.assertTrue(all(b["durationNs"] > 0 for b in body["bindings"]))
@@ -62,7 +62,7 @@ class NpcBodies(unittest.TestCase):
         run = R.Run(self.recipe, TYPES)
         self.assertTrue(run.run(update_manifest=True)["ok"])
         self.assertEqual(json.loads((self.mod / "assets/assets.json").read_text())["entries"], run.entries)
-        self.assertFalse((self.mod / "assets/npc-bodies.v1.json").exists())
+        self.assertFalse((self.mod / "assets/cooked/npc-bodies.v1.json").exists())
 
     def test_commented_manifest_does_not_break_a_creature_only_cook(self):
         self.doc["creatures"] = self.doc.pop("npcs")
@@ -147,7 +147,7 @@ class NpcBodies(unittest.TestCase):
         self.write()
         self.assertTrue(R.Run(self.recipe, TYPES).run(update_manifest=True)["ok"])
         self.assertEqual([], json.loads((self.mod / "assets/assets.json").read_text())["entries"])
-        self.assertEqual({"tobin", "second"}, set(json.loads((self.mod / "assets/npc-bodies.v1.json").read_text())["bodies"]))
+        self.assertEqual({"tobin", "second"}, set(json.loads((self.mod / "assets/cooked/npc-bodies.v1.json").read_text())["bodies"]))
 
     def test_one_run_resolves_its_body_specs_once_not_per_step(self):
         from unittest.mock import patch
@@ -165,7 +165,8 @@ class NpcBodies(unittest.TestCase):
         side = {"guid": "8bb42bf4-b129-511d-b210-f91bff63d45a", "skeleton": json.loads((self.mod / "assets/cooked/tobin.animation.tobin.body.graph.json").read_text())["skeleton"],
                 "boundingBox": {"min": {"x": -0.2, "y": 0, "z": -0.2}, "max": {"x": 0.2, "y": 1.8, "z": 0.2}}, "materials": []}
         (self.mod / "assets/cooked/models_golem.model.json").write_text(json.dumps(side))
-        entries = [{"kind": "resource", "guid": side["guid"], "type": "keen::RenderModel", "part": 0, "file": "cooked/models_golem.model.bin", "mode": "new"}, {"kind": "blob", "file": "cooked/models_golem.render.blob"}]
+        from cook.steps import model_entries
+        entries = model_entries(side["guid"], "new", "cooked/models_golem.model.bin", "cooked/models_golem.render.blob")
         return entries
 
     def test_both_cooks_merge_the_same_deferred_group(self):
@@ -173,35 +174,35 @@ class NpcBodies(unittest.TestCase):
         entries = self.stage_model()
         normal, missing, mismatched = B.body_manifest(self.recipe, entries, True)
         self.assertEqual((normal, missing, mismatched), ([], [], []))
-        bundle = json.loads((self.mod / "assets/npc-bodies.v1.json").read_text())
+        bundle = json.loads((self.mod / "assets/cooked/npc-bodies.v1.json").read_text())
         self.assertTrue(bundle["bodies"]["tobin"]["complete"])
         self.assertTrue(all(e["file"].startswith("assets/") for e in bundle["entries"]))
-        before = (self.mod / "assets/npc-bodies.v1.json").read_bytes()
+        before = (self.mod / "assets/cooked/npc-bodies.v1.json").read_bytes()
         B.body_manifest(self.recipe, entries, True)
-        self.assertEqual(before, (self.mod / "assets/npc-bodies.v1.json").read_bytes())
+        self.assertEqual(before, (self.mod / "assets/cooked/npc-bodies.v1.json").read_bytes())
 
-    def test_a_server_preserves_the_shipped_expected_manifest_when_render_bytes_are_skipped(self):
+    def test_missing_renderer_outputs_cannot_reuse_an_authors_complete_body(self):
         R.Run(self.recipe, TYPES).run(update_manifest=True)
         entries = self.stage_model()
         B.body_manifest(self.recipe, entries, True)
-        path = self.mod / "assets/npc-bodies.v1.json"
-        # Pin an old timestamp: the test does not rely on filesystem clock granularity.
-        import os
-        os.utime(path, ns=(1_000_000_000, 1_000_000_000))
-        before, stamp = path.read_bytes(), path.stat().st_mtime_ns
+        path = self.mod / "assets/cooked/npc-bodies.v1.json"
+        source_id = json.loads(path.read_text())["bodies"]["tobin"]["sourceHash"]
         for name in ("models_golem.model.bin", "models_golem.render.blob", "models_golem.model.json"):
             (self.mod / "assets/cooked" / name).unlink()
         self.assertTrue(R.Run(self.recipe, TYPES).run(update_manifest=True)["ok"])
-        self.assertEqual(before, path.read_bytes(), "animcook must preserve the author's model hashes and metadata")
-        self.assertEqual(([], [], []), B.body_manifest(self.recipe, entries, True))
-        self.assertEqual(before, path.read_bytes(), "the server's skipped model step must not replace expected hashes with null")
-        self.assertEqual(stamp, path.stat().st_mtime_ns, "an unchanged shipped manifest must not be rewritten")
+        self.assertFalse(json.loads(path.read_text())["bodies"]["tobin"]["complete"])
+        self.assertEqual(([], [], []), B.body_manifest(self.recipe, entries, True, server=True))
+        bundle = json.loads(path.read_text())
+        model_rows = [e for e in bundle["entries"] if e["producer"] == "modelcook"]
+        self.assertTrue(all(e["skippedOnServer"] and e["sha256"] is None for e in model_rows))
+        self.assertEqual(source_id, bundle["bodies"]["tobin"]["sourceHash"])
+        self.assertFalse(bundle["bodies"]["tobin"]["complete"])
 
     def test_an_unrelated_cook_cannot_bless_corrupt_model_bytes_by_rehashing_them(self):
         R.Run(self.recipe, TYPES).run(update_manifest=True)
         entries = self.stage_model()
         B.body_manifest(self.recipe, entries, True)
-        path = self.mod / "assets/npc-bodies.v1.json"
+        path = self.mod / "assets/cooked/npc-bodies.v1.json"
         before = path.read_bytes()
         (self.mod / "assets/cooked/models_golem.model.bin").write_bytes(b"corrupt, not the modelcook output")
         report = R.Run(self.recipe, TYPES).run(update_manifest=True)
@@ -218,13 +219,15 @@ class NpcBodies(unittest.TestCase):
         self.doc["npcs"]["tobin"]["body"]["size"]["radius"] = 1
         self.write()
         R.Run(self.recipe, TYPES).run(update_manifest=True)
-        bundle = json.loads((self.mod / "assets/npc-bodies.v1.json").read_text())
+        bundle = json.loads((self.mod / "assets/cooked/npc-bodies.v1.json").read_text())
         self.assertFalse(bundle["bodies"]["tobin"]["complete"])
 
     def test_manifest_does_not_follow_a_link(self):
         target = self.mod / "outside.json"
         target.write_text("untouched")
-        (self.mod / "assets/npc-bodies.v1.json").symlink_to(target)
+        path = self.mod / "assets/cooked/npc-bodies.v1.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.symlink_to(target)
         with self.assertRaises((B.BlocksError, R.RecipeError)):
             R.Run(self.recipe, TYPES).run(update_manifest=True)
         self.assertEqual(target.read_text(), "untouched")

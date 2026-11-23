@@ -12,7 +12,8 @@ every folder and file a cook is about to write is checked here before the first 
   send the files elsewhere. Links above the mod's folder are the system's and the player's (a Steam library reached through one).
 
 Outside assets/cooked a cook writes two files of the mod, and only by their exact place: assets/assets.json (the manifest) and
-blocks/<name>.materials.json (the material blocks made from a glTF).
+blocks/<name>.materials.json (the material blocks made from a glTF). The machine-local NPC body manifest is
+assets/cooked/npc-bodies.v1.json, so identity excludes it and a failed cook restores it with the cooked tree.
 
 A path is judged as it is written: a ".." right after a link would climb out of wherever the link leads, so it is refused before the
 path is normalised. A cook writes to the path a check returned (normalised, every component checked), never to the one it was given,
@@ -147,13 +148,13 @@ def source(recipe_path, relative):
 
 
 def npc_manifest(recipe_path):
-    """The boot-only body manifest, never the eager assets loader's manifest; same path and link checks."""
+    """The machine-local body manifest, excluded from identity and restored with the cooked tree; no links."""
     mod = mod_root(recipe_path)
-    target = Path(mod) / "assets" / "npc-bodies.v1.json"
+    target = Path(mod) / "assets" / "cooked" / "npc-bodies.v1.json"
     parts, full = _under(mod, target)
-    expected = ("assets", "npc-bodies.v1.json")
+    expected = ("assets", "cooked", "npc-bodies.v1.json")
     if parts is None or tuple(_spelled(mod, parts)) != expected:
-        raise Refused(f"the NPC body manifest is {full}: it must be the mod's own assets/npc-bodies.v1.json, without links")
+        raise Refused(f"the NPC body manifest is {full}: it must be the mod's own assets/cooked/npc-bodies.v1.json, without links")
     return Path(mod).joinpath(*expected)
 
 

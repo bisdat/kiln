@@ -61,7 +61,7 @@ KL210 as an error otherwise.
 
 `NpcBlock.Motions` names an `NpcMotionsBlock`: Kiln-owned motion roles bound to states of the body's cooked graph.
 The [authoring contract](../modding/npc-blocks.md#authored-roster-bodies-and-motions) covers the complete 27-binding
-Fisher vector, shared skeleton/slot checks, explicit size, and the deferred `assets/npc-bodies.v1.json` bundle.
+Fisher vector, shared skeleton/slot checks, explicit size, and the deferred `assets/cooked/npc-bodies.v1.json` bundle.
 The authoring and boot-rollback slices do **not** supply native body lowering or atomic cross-service publication.
 An unavailable dependency is a refusal, not a rendered fallback and not a release hold.
 
