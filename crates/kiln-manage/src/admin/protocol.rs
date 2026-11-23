@@ -187,7 +187,7 @@ pub struct Endpoint {
 }
 
 /// Topics a Kiln.Admin server may offer (`ready.topics` says which it does).
-pub const TOPICS: &[&str] = &["state", "log"];
+pub const TOPICS: &[&str] = &["state", "log", "metrics"];
 
 /// How long a server takes at most to answer `op` (admin-protocol.md section 4).
 pub fn op_budget(op: &str) -> std::time::Duration {

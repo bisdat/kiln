@@ -210,9 +210,32 @@ bool read_text(const fs::path& file, uintmax_t max, std::string& out, std::strin
     if (in.bad()) return why = "cannot read " + s8(file.filename()), false;
     return true;
 }
+// The nesting of a JSON text (arrays and objects, outside strings) is at most `max`: the parser keeps its own stack, but
+// copying or writing a value back recurses once per level, and the proxy runs this on the game's main thread before
+// anything else, where a damaged record nested a million deep would end every start.
+bool nesting_ok(std::string_view text, int max) {
+    int depth = 0;
+    bool in_string = false, escaped = false;
+    for (const char ch : text) {
+        if (in_string) {
+            if (escaped) escaped = false;
+            else if (ch == '\\') escaped = true;
+            else if (ch == '"') in_string = false;
+        } else if (ch == '"') {
+            in_string = true;
+        } else if (ch == '[' || ch == '{') {
+            if (++depth > max) return false;
+        } else if (ch == ']' || ch == '}') {
+            --depth;
+        }
+    }
+    return true;
+}
 bool read_json(const fs::path& file, json& out, std::string& why, bool comments = false) {
     std::string text;
     if (!read_text(file, kMaxManifest, text, why)) return false;
+    if (!nesting_ok(text, kMaxJsonDepth))
+        return why = s8(file.filename()) + " is nested deeper than " + std::to_string(kMaxJsonDepth) + " levels", false;
     out = json::parse(text, nullptr, false, comments);
     if (out.is_discarded() || !out.is_object()) return why = s8(file.filename()) + " is not a JSON object", false;
     return true;
@@ -750,7 +773,33 @@ bool read_journal(Ctx& c, const Unit& u, const fs::path& file, Tx& tx, std::stri
 
 // Puts every step back, last first. Each step's state comes from what exists now, so this may run after any crash,
 // including one in an earlier run of itself.
+// Where a step stands, from what exists: not begun, its target moved to the backup, its source placed. Anything else
+// means the journal does not describe these files (one from another time, restored next to newer files).
+enum class StepState { NotBegun, BackedUp, Placed, Mismatch };
+StepState step_state(const Ctx& c, const Step& s) {
+    const bool tp = present(c.abs(s.target)), bp = present(c.abs(s.backup));
+    if (s.source.empty()) {  // a removal (planned only for a target that was there)
+        if (!s.had) return StepState::Mismatch;
+        return tp && !bp ? StepState::NotBegun : !tp && bp ? StepState::BackedUp : StepState::Mismatch;
+    }
+    const bool sp = present(c.abs(s.source));
+    if (s.had) {
+        if (tp && !bp && sp) return StepState::NotBegun;
+        if (!tp && bp && sp) return StepState::BackedUp;
+        if (tp && bp && !sp) return StepState::Placed;
+        return StepState::Mismatch;
+    }
+    if (bp) return StepState::Mismatch;
+    return !tp && sp ? StepState::NotBegun : tp && !sp ? StepState::Placed : StepState::Mismatch;
+}
+
 bool undo_steps(Ctx& c, const Tx& tx, std::string& err) {
+    // Every step first: putting back only the steps that look like this journal's would mix two versions (the new files
+    // of a finished change taken out, its replaced ones left in), so a journal that does not match is not followed at all.
+    for (const auto& s : tx.steps)
+        if (step_state(c, s) == StepState::Mismatch)
+            return err = "the journal does not match the files (" + s.target + " is not where a crash in this change could leave it: a " +
+                         "journal from another time?); nothing of it is put back", false;
     for (auto it = tx.steps.rbegin(); it != tx.steps.rend(); ++it) {
         const Step& s = *it;
         const fs::path t = c.abs(s.target), b = c.abs(s.backup);
@@ -790,13 +839,27 @@ bool finish(Ctx& c, const Unit& u, const Tx& tx, std::string& err) {
         hook("finish-prev");
     }
     if (tx.op == "update") {
-        drop_staged(c, u);
+        // what this change staged goes; an update staged later for the same unit (next to a journal from another time) stays
+        const fs::path sjf = c.abs(u.staged_dir()) / "staged.json";
+        json sj;
+        std::string swhy;
+        if (!present(sjf) || !read_json(sjf, sj, swhy) || str(sj, "version") == tx.version) drop_staged(c, u);
+        else c.log(Level::Warn, u.name() + ": the update to " + str(sj, "version") + " staged after this change stays staged");
         hook("finish-staged");
         if (!tx.probation.is_null()) {
-            json p = tx.probation;
-            p["applied"] = tx.started;
-            std::string werr;
-            if (!write_json(probation_file(c, u), p, werr)) c.log(Level::Warn, u.name() + ": the probation record was not written: " + werr);
+            // A finish run again (a start found this change committed but not tidied up) keeps the verdict a later step
+            // already wrote for this same change (Kiln: "booting"; a mod: "loading" or "failed"): writing the record anew
+            // would forget a failed start, and the automatic rollback would never come.
+            const fs::path pf = probation_file(c, u);
+            json cur;
+            std::string rwhy;
+            const bool ours = present(pf) && read_json(pf, cur, rwhy) && str(cur, "unit") == u.key() && str(cur, "applied") == tx.started;
+            if (!ours) {
+                json p = tx.probation;
+                p["applied"] = tx.started;
+                std::string werr;
+                if (!write_json(pf, p, werr)) c.log(Level::Warn, u.name() + ": the probation record was not written: " + werr);
+            }
         }
     } else {
         remove_file(rollback_file(c, u));
@@ -1106,6 +1169,19 @@ void staged_update(Ctx& c, const Unit& u) {
 
 void run_unit(Ctx& c, const Unit& u) {
     if (!recover(c, u)) return;
+    // A new change only through plain folders: kiln/, kiln/staged and the unit's folders in it must not be links,
+    // junctions or files (their contents would be elsewhere, where a rename lands outside the server folder or fails
+    // across volumes three starts in a row). An open transaction was finished or put back above all the same.
+    {
+        std::string why;
+        if (!ancestors_plain(c, u.staged_dir() + "/staged.json", why) || !ancestors_plain(c, u.tx_dir() + "/journal.json", why) ||
+            !ancestors_plain(c, u.previous_dir() + "/kept.json", why) || !ancestors_plain(c, std::string(kStaged) + "/probation/x", why) ||
+            !ancestors_plain(c, std::string(kStaged) + "/rollback/x", why)) {
+            c.log(Level::Error, u.name() + ": " + why + "; its staged changes are not applied: kiln/staged must be a plain folder in the server folder");
+            ++c.sum.failed;
+            return;
+        }
+    }
     bool rolled = false;
     const fs::path pf = probation_file(c, u);
     if (present(pf)) {
@@ -1189,8 +1265,9 @@ Summary boot_mods(const Env& env) {
     }
     // Kiln.Admin stages into kiln/staged/.stage-<random> and renames it into place: one left here was interrupted.
     std::error_code ec;
-    for (fs::directory_iterator it(root, ec), end; !ec && it != end; it.increment(ec))
-        if (starts_with(s8(it->path().filename()), ".stage-")) remove_tree(it->path());
+    if (!is_link(root))
+        for (fs::directory_iterator it(root, ec), end; !ec && it != end; it.increment(ec))
+            if (starts_with(s8(it->path().filename()), ".stage-")) remove_tree(it->path());
     return c.sum;
 }
 

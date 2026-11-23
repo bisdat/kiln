@@ -67,9 +67,6 @@ internal static partial class Ops
         });
     }
 
-    private static string By(JsonObject req) =>
-        req["by"] is JsonValue v && v.TryGetValue<string>(out var s) && s.Length is > 0 and <= 120 ? s : "kiln-admin";
-
     private static Dictionary<string, string>? ExpectedFiles(JsonObject req)
     {
         if (req["files"] is null) return null;

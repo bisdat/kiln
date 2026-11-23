@@ -100,6 +100,53 @@ internal static class Staging
                                $"plus the world's savegame folder, {Bytes(saves)}, left free), {Bytes(free)} free");
     }
 
+    /// <summary>The folders the start renames through (kiln/, kiln/staged and its parts) are plain folders: a link or a
+    /// junction there puts the staged files somewhere else, where the start's renames land outside the server folder or
+    /// fail across volumes (the start refuses such a unit too: staged.cpp run_unit).</summary>
+    private static void PlainStaged(Layout p)
+    {
+        foreach (var dir in new[]
+                 {
+                     p.Kiln, p.Staged, Path.Combine(p.Staged, "mods"), Path.Combine(p.Staged, "kiln"), Path.Combine(p.Staged, "tx"),
+                     Path.Combine(p.Staged, "previous"), Path.Combine(p.Staged, "previous", "mods"), Path.Combine(p.Staged, "rollback"),
+                 })
+        {
+            var info = new DirectoryInfo(dir);
+            if (File.Exists(dir) || (info.Exists && IsLink(info)))
+                throw new StagingError($"{dir} is a link, a junction or a file: staged updates need kiln/staged as a plain folder in the server folder");
+        }
+    }
+
+    /// <summary>The longest full path a Windows start may use (MAX_PATH less its terminator): the proxy and kiln-core run in
+    /// the game's process, whose file calls take no longer paths. Wine has no such limit. Tests set it.</summary>
+    internal static int? TestMaxPath { get; set; }
+
+    private static readonly Lazy<bool> UnderWine = new(() =>
+        OperatingSystem.IsWindows() && NativeLibrary.TryLoad("ntdll.dll", out var ntdll) && NativeLibrary.TryGetExport(ntdll, "wine_get_version", out _));
+
+    private static int? MaxPath => TestMaxPath ?? (OperatingSystem.IsWindows() && !UnderWine.Value ? 259 : null);
+
+    /// <summary>Every full path the start will use for these files (the staged copy, the kept copy in tx/ and previous/,
+    /// the target) fits Windows' MAX_PATH; refused at once otherwise, rather than failing three starts in a row.</summary>
+    private static void PathsFit(Layout p, string unit, IEnumerable<string> rels)
+    {
+        if (MaxPath is not { } max) return;
+        var kiln = unit == "kiln";
+        foreach (var rel in rels)
+        {
+            var native = rel.Replace('/', Path.DirectorySeparatorChar);
+            var paths = kiln
+                ? new[] { Path.Combine(p.StagedDir(unit), "files", native), Path.Combine(p.TxDir(unit), "prev", "files", native),
+                          Path.Combine(p.PreviousDir(unit), "files", native), Path.Combine(p.Game, native) }
+                : new[] { Path.Combine(p.StagedDir(unit), "files", native), Path.Combine(p.TxDir(unit), "prev", "files", native),
+                          Path.Combine(p.PreviousDir(unit), "files", native), Path.Combine(p.Mods, unit["mod.".Length..], native) };
+            var longest = paths.MaxBy(x => x.Length)!;
+            if (longest.Length > max)
+                throw new StagingError($"{rel}: the start would use {longest} ({longest.Length} characters), longer than Windows' {max}: " +
+                                       "move the server to a shorter folder");
+        }
+    }
+
     /// <summary>The gate for an op on the tick thread (cancel, rollback): taken at once or refused, never waited for, so
     /// a staging copy in progress on a pool thread can't stall the server's step.</summary>
     private readonly struct Turn : IDisposable
@@ -441,12 +488,14 @@ internal static class Staging
             folder ??= FolderOf(p, mid) ?? mid;
             if (!ModFolderOk(folder)) throw new StagingError($"{JsonSerializer.Serialize(folder)} cannot be a folder under kiln/mods (pass folder)");
             var unit = "mod." + folder;
+            PlainStaged(p);
             if (OtherName(p.Mods, folder))
                 throw new StagingError($"kiln/mods/{folder} is another folder there by its Windows short name: pass the folder's own name");
             if (KilnOwns(p, $"kiln/mods/{folder}/"))
                 throw new StagingError($"kiln/mods/{folder} is part of Kiln (its install receipt lists it); it is updated with Kiln");
             RefuseBusy(p, unit, $"mod folder {folder}");
             var sources = Walk(src);
+            PathsFit(p, unit, sources.Select(f => f.Rel));
             RoomFor(p, sources.Sum(f => new FileInfo(f.Full).Length));
             var stage = NewStageDir(p);
             try
@@ -518,6 +567,7 @@ internal static class Staging
         {
             var p = new Layout(kiln);
             var src = Source(p, source);
+            PlainStaged(p);
             RefuseBusy(p, "kiln", "Kiln");
             // read once: the bytes the list is checked on are the bytes the plan is made from
             var (manifest, manifestSha) = ReadManifest(Path.Combine(src, "kiln-runtime.json"));
@@ -582,6 +632,7 @@ internal static class Staging
                 if (!info.Exists || IsLink(info)) throw new StagingError($"the bundle has no file {path}");
                 plan.Add((path, want, from));
             }
+            PathsFit(p, "kiln", plan.Select(x => x.Path).Append("kiln/.install.json"));
             RoomFor(p, plan.Sum(x => new FileInfo(x.From).Length));
             var stage = NewStageDir(p);
             TestStep?.Invoke("copy");
@@ -621,6 +672,7 @@ internal static class Staging
                         }
                     }
                 }
+                PathsFit(p, "kiln", removes.Select(r => Text(r, "path") ?? ""));  // kept in tx/ and previous/ as well
                 var installed = Text(receipt["runtime"], "version") ?? running;
                 if (writes.Count == 0 && removes.Count == 0 && installed == version) throw new StagingError($"Kiln {version} is installed already");
 
@@ -747,6 +799,7 @@ internal static class Staging
         {
             var p = new Layout(kiln);
             var unit = Unit(unitArg);
+            PlainStaged(p);
             var kept = ReadObject(Path.Combine(p.PreviousDir(unit), "kept.json"))
                        ?? throw new StagingError($"no earlier version of {unit} is kept (only a change made by a staged update can be rolled back)");
             RefuseBusy(p, unit, unit);

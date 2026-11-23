@@ -600,4 +600,53 @@ public sealed class StagingTests : IDisposable
         Assert.Equal("24", results[0]!["id"]!.GetValue<string>());  // newest first
         Assert.Equal(Path.Combine(Path.GetFullPath(Kiln), "staged", "incoming"), l["incoming"]!.GetValue<string>());
     }
+
+    [Fact]
+    public void A_kiln_staged_that_is_a_link_or_junction_is_refused()
+    {
+        // kiln/staged moved to another place (another disk) behind a link: the start's renames would land outside the
+        // server folder or fail across volumes, so nothing is staged there and no rollback is requested
+        var elsewhere = Path.Combine(_game, "elsewhere");
+        Directory.CreateDirectory(Path.Combine(elsewhere, "incoming"));
+        foreach (var (rel, text) in ModFiles("m", "2.0.0")) Put(Path.Combine(elsewhere, "incoming", "m-2", rel), text);
+        try
+        {
+            Directory.CreateSymbolicLink(Staged, elsewhere);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            Assert.Skip("this account cannot make a link here");
+        }
+        var e1 = Assert.Throws<StagingError>(() => Staging.StageMod(Kiln, "m-2", "m", null, null, null, "t"));
+        Assert.Contains("plain folder", e1.Message, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(Path.Combine(elsewhere, "mods")));
+        Assert.Empty(Directory.EnumerateDirectories(elsewhere, ".stage-*"));
+        Put(Path.Combine(elsewhere, "previous", "mods", "m", "kept.json"), """{"format":1,"unit":"mod.m","version":"1.0.0","replacedBy":"2.0.0","entries":[]}""");
+        Assert.Contains("plain folder", Assert.Throws<StagingError>(() => Staging.Rollback(Kiln, "mod.m", "t")).Message, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(Path.Combine(elsewhere, "rollback")));
+    }
+
+    [Fact]
+    public void A_path_longer_than_windows_allows_is_refused_at_staging()
+    {
+        // the start runs in the game's process, whose file calls take no path over MAX_PATH on Windows: refused now,
+        // with what to do, rather than failing three starts in a row
+        var src = Source("m-2", ModFiles("m", "2.0.0"));
+        var longest = Path.Combine(Staged, "previous", "mods", "m", "files", "kiln.mod.json").Length;
+        try
+        {
+            Staging.TestMaxPath = longest - 1;
+            var e = Assert.Throws<StagingError>(() => Staging.StageMod(Kiln, "m-2", "m", null, null, null, "t"));
+            Assert.Contains("longer than Windows'", e.Message, StringComparison.Ordinal);
+            Assert.Contains("kiln.mod.json", e.Message, StringComparison.Ordinal);
+            Assert.False(Directory.Exists(Path.Combine(Staged, "mods")));
+            Staging.TestMaxPath = longest;
+            Assert.Equal("mod.m", Staging.StageMod(Kiln, "m-2", "m", null, null, null, "t")["unit"]!.GetValue<string>());
+        }
+        finally
+        {
+            Staging.TestMaxPath = null;
+        }
+        Assert.True(Directory.Exists(src));
+    }
 }

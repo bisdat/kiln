@@ -34,6 +34,13 @@ apply Kiln updates. kiln-core then logs a warning that a Kiln update is still wa
 | `results/<id>.json` | one record per change, or refusal (the newest 50 are kept) | the start |
 | `.stage-<random>/` | `update_stage` building a unit before it renames it into place; kiln-core removes any left at the next start | `update_stage` |
 
+`kiln/`, `kiln/staged` and the folders in it must be plain folders in the server folder. When one of them is a link
+or a junction (staging moved to another disk, say), an open change is still finished or put back, but nothing new is
+applied, and kiln.log says why at every start; Kiln.Admin refuses to stage or to request a rollback there. On Windows
+(not under Wine) Kiln.Admin also refuses a file whose full path at the start (staged, kept in `tx` or `previous`, or
+in place) would be longer than 259 characters: the start runs in the game's process, whose file calls take no longer
+paths.
+
 Units are `kiln` and `mod.<folder>`. A folder name is a single path segment of at most 64 bytes that does not start
 with `.`. Nothing in this process reads or writes `kiln/data`: no source comes from there, no change, kept version or
 rollback touches it, and no plan, kept version or journal that names a path under it is followed.
@@ -90,7 +97,12 @@ records are written to a temp file, flushed and renamed. A start that finds a jo
 `committed`) or puts every step back (phase `applying`). What it puts back is read from which of target, backup and
 source exist, so a crash while putting back is safe too. In every case the unit is the old version or the new one,
 never a mix. A change that is interrupted or fails three starts in a row is dropped and logged. A journal that can't
-be read, or whose paths are not its unit's, is left alone with an error.
+be read, whose paths are not its unit's, or that does not match the files (a step neither begun, backed up nor placed: a
+journal from another time, restored next to newer files) is left alone with an error: putting back only some of its
+steps would mix two versions. A start that finishes a committed change again keeps the verdict a later step already
+wrote for it (the probation's `booting`, `loading` or `failed`), and an update staged after it stays staged. Every
+JSON file read here may nest at most 64 levels; a deeper one counts as unreadable (the proxy reads them on the game's
+main thread before anything else).
 
 A mod folder switched off with `.disabled` stays switched off. The folder is replaced whole: a mod keeps its own data
 in `kiln/data/<id>` and `kiln/config`, which this does not touch.

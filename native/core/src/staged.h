@@ -49,6 +49,7 @@ inline constexpr size_t kResultsKept = 50;  // results/*.json kept, newest first
 inline constexpr size_t kMaxFiles = 20000;  // files in one staged unit
 inline constexpr size_t kMaxRelPath = 240;  // bytes of one relative path
 inline constexpr uintmax_t kMaxManifest = 16u << 20;  // bytes of staged.json, kept.json, journal.json
+inline constexpr int kMaxJsonDepth = 64;  // nesting of any JSON file read here (the proxy runs on the game's main thread)
 
 // The proxy: unit "kiln" (a staged Kiln update, its rollback, its automatic rollback). Cheap when kiln/staged is absent.
 Summary boot_kiln(const Env& env);
