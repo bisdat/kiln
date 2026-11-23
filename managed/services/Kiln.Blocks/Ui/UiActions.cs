@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 // What a button or a key does, and how a toggle or a slider writes a config. A button is clicked on the render thread and a key pressed on the window thread; neither may touch
 // the game's world or write a config file, so what needs the tick thread is queued for UiRuntime.Pump (the service tick: the world's step in a world, the UI frame in a menu).
-//   command       Commands.Execute on the tick thread, as the console folder runs a line (the host's own character on a hosting game, else the console)
+//   command       Commands.Execute on the tick thread, as the console folder runs a line (the host's own character on a hosting game, else the console);
+//                 commandTarget server: a request on kiln:ui-command to the joined server, from any thread (UiCommandClient), its outcome a toast
 //   toggle, set   an edit: shown at once, written to the config on the tick thread (a slider waits until it rests)
 //   castAbility   the request a key of an ability makes: a message to the server, from any thread
 //   open, close   the window's surface, from any thread
@@ -18,18 +19,22 @@ internal static class UiActions
     private static readonly Queue<Job> Jobs = new();
 
     /// <summary>Runs an action. Never throws: what goes wrong is a toast and a log line.</summary>
-    public static void Run(ActionPlan plan, string mod, string source, UiLifetime? lifetime = null)
+    public static void Run(ActionPlan plan, string mod, string source, UiLifetime? lifetime = null, UiWindowState? state = null)
     {
-        if (lifetime != null) lifetime.Run(() => RunCore(plan, mod, source, lifetime));
-        else RunCore(plan, mod, source, null);
+        if (lifetime != null) lifetime.Run(() => RunCore(plan, mod, source, lifetime, state));
+        else RunCore(plan, mod, source, null, state);
     }
 
-    private static void RunCore(ActionPlan plan, string mod, string source, UiLifetime? lifetime)
+    private static void RunCore(ActionPlan plan, string mod, string source, UiLifetime? lifetime, UiWindowState? state)
     {
         try
         {
             switch (plan)
             {
+                case CommandPlan { Target: UiCommandTarget.Server } c:
+                    // the joined server, as this game's player: never this game's console (no hello = nothing sent, a toast)
+                    UiCommandClient.RunFromAction(c.Line, mod, lifetime);
+                    break;
                 case CommandPlan c:
                     Enqueue(() => RunCommand(c.Line, mod), lifetime);
                     break;
@@ -41,13 +46,21 @@ internal static class UiActions
                 case SetPlan s:
                     UiEdits.Set(s.Config, s.Value, immediate: true, lifetime);
                     break;
+                case StateTogglePlan st when state != null:
+                    // from what is queued, if anything: two quick clicks flip twice
+                    var now = state.View().TryGetValue(st.Key, out var cur) && cur is UiStateValue.Bool { Value: true };
+                    state.Enqueue(UiWindowState.WriteKind.Value, st.Key, new UiStateValue.Bool(!now), null, null, UiStateChangeCause.Action, wantResult: false);
+                    break;
+                case StateSetPlan ss when state != null:
+                    state.Enqueue(UiWindowState.WriteKind.Value, ss.Key, ss.Value, null, null, UiStateChangeCause.Action, wantResult: false);
+                    break;
                 case CastPlan c:
                     UiRuntime.Backend.RequestCast(c.AbilityId);
                     break;
                 case WindowActionPlan w:
                     if (UiRuntime.FindWindow(w.Mod, w.Window) is { } window)
                     {
-                        if (w.Open) window.Open();
+                        if (w.Toggle ? !window.IsOpen : w.Open) window.Open();
                         else window.Close();
                     }
                     else UiRuntime.Backend.Toast(KilnText.T("blocks.toast.no_window", ("window", $"{w.Mod}:{w.Window}")), ToastKind.Warning);

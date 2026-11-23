@@ -23,9 +23,10 @@
 //! to ShroudForge's busy reason). A row latches exactly when its text contains
 //! "uncertain", ShroudForge's own rule; the tests hold every row to it.
 //!
-//! The latch belongs to one runtime-create (the worker thread's), shared by every package.
+//! The session fault belongs to one runtime-create and is shared by every package. The known
+//! native resource latch also reaches reloaded VMs because the provider remains latched.
 
-use std::cell::Cell;
+use std::{cell::Cell, rc::Rc};
 
 /// A write outcome Kiln reported, in Kiln's terms.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -109,11 +110,29 @@ pub struct WriteFault {
 #[derive(Debug, Default)]
 pub struct WriteFaultLatch {
     fault: Cell<Option<WriteFault>>,
+    resource_latched: Rc<Cell<bool>>,
 }
 
 impl WriteFaultLatch {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// A reloaded VM starts with no session fault. The native resource latch survives the reload.
+    pub(super) fn for_reload(&self) -> Self {
+        Self {
+            fault: Cell::new(None),
+            resource_latched: self.resource_latched.clone(),
+        }
+    }
+
+    /// Records that the native loaded-resource provider has latched writes for the process.
+    pub(super) fn record_resource_latch(&self) {
+        self.resource_latched.set(true);
+    }
+
+    pub(super) fn resource_latched(&self) -> bool {
+        self.resource_latched.get()
     }
 
     /// A write in session `session` of world `world_kind` (`game_world_session`, the
@@ -123,6 +142,9 @@ impl WriteFaultLatch {
     /// reason of a session stays.
     pub fn report(&self, world_kind: u32, session: u64, outcome: WriteOutcome) -> &'static str {
         let row = reason(outcome);
+        if outcome == WriteOutcome::ResourceWriteUncertain {
+            self.record_resource_latch();
+        }
         if row.latches && session != 0 {
             let same = self
                 .fault

@@ -16,10 +16,12 @@ interface UpdateStore {
   setOpen: (open: boolean) => void;
 }
 
-/** The notice opens by itself for something new: an update found, an update just installed. */
+/** The notice opens by itself for something new: an update found, an update ready (it says when the launcher restarts
+ *  by itself, or why it waits; a channel switch has its own dialog), an update just installed. */
 function autoKey(s: UpdateStatus): string | null {
   if (s.justUpdated) return `updated:${s.justUpdated.to}`;
   if (s.phase === "available" && s.available) return `available:${s.available.version}`;
+  if (s.phase === "ready" && s.ready && !s.switching) return `ready:${s.ready.version}`;
   return null;
 }
 

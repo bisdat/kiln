@@ -44,6 +44,8 @@ pub const ORIGINS: [(&str, &str); 3] = [
 /// The note of a receipt whose working baseline is gone over game files that are not Kiln's output from
 /// it; the base is then the live set, rebaselined, and a kiln-mode start sets the receipt aside as a recovery copy.
 pub const RECEIPT_STALE: &str = "receipt-stale";
+/// The note of a backup of this game build that was built over the live header (`classify`): the live set is the base.
+pub const BASELINE_STALE: &str = "baseline-stale";
 /// A header larger than this is not read into memory (real client headers are a few tens of MiB).
 const HEADER_LIMIT: u64 = 512 << 20;
 const SEAL_LIMIT: u64 = 1024;
@@ -203,6 +205,7 @@ fn reason(code: &'static str, file: Option<&str>) -> Reason {
         "baseline-incomplete" => format!("the working baseline is incomplete ({f} is missing): verify the game files in Steam, then start again"),
         "baseline-corrupt" => "the working baseline does not match its seal or the game's own files: verify the game files in Steam, then start again".into(),
         "baseline-outdated" => "the working baseline is from another game build; the game files as found are the base".into(),
+        "baseline-stale" => "the working baseline was built over the game files as found (another mod loader or an earlier start kept modded data under the backup's name): it is not their backup, and the game files as found are the base".into(),
         "seal-outdated" => "the working baseline's seal is out of date; the backups were checked against the game's own files instead".into(),
         "receipt-baseline-mismatch" => "Kiln's ownership receipt names other backups than the ones present (another program replaced them)".into(),
         "receipt-stale" => "Kiln's ownership receipt names a working baseline that is no longer in the game folder, and none of the game files is Kiln's output from it: a Kiln start keeps that receipt as a recovery copy and takes the game files as found as a new baseline".into(),
@@ -806,6 +809,10 @@ fn classify(r: &mut Reader<'_>, options: &Options, out: &mut Inspection) -> Resu
 
     // BASE evidence.
     let mut notes = Vec::new();
+    let relation = match &base_header {
+        Some((_, Some(header))) if same_build => Some(readonly::base_relation(&header.file, &live.file)),
+        _ => None,
+    };
     let backup_based = match (&base_header, same_build) {
         (None, _) => {
             let left: Vec<&str> = [
@@ -830,6 +837,22 @@ fn classify(r: &mut Reader<'_>, options: &Options, out: &mut Inspection) -> Resu
         }
         (Some(_), false) => {
             notes.push("baseline-outdated");
+            None
+        }
+        // A backup of this build built over the live header (an archive writer's output kept under the backup's name,
+        // by another mod loader or from an earlier start) is not the base: the live set is (note `baseline-stale`), the
+        // writer's rule (load.rs `stale_backup`), unless a live file is still Kiln's output. One that is neither the live
+        // header nor built under it does not describe the game's files (`baseline-corrupt`).
+        (Some((_, Some(_))), true) if relation != Some(readonly::BaseRelation::Under) => {
+            if relation == Some(readonly::BaseRelation::Other) {
+                return Err(fault("baseline-corrupt", &bak));
+            }
+            if let Some(view) = &receipt {
+                if let Some(file) = kiln_output_live(r, stem, view, &input_files)? {
+                    return Err(fault("baseline-corrupt", &file));
+                }
+            }
+            notes.push(BASELINE_STALE);
             None
         }
         (Some((header_read, Some(header))), true) => {
@@ -941,7 +964,7 @@ fn classify(r: &mut Reader<'_>, options: &Options, out: &mut Inspection) -> Resu
             sha256: frame(&input_files),
             // backups of another build, or a receipt whose backups are gone, mean the install was managed before:
             // not "first managed"
-            origin: if notes.contains(&"baseline-outdated") || notes.contains(&RECEIPT_STALE) {
+            origin: if notes.contains(&"baseline-outdated") || notes.contains(&RECEIPT_STALE) || notes.contains(&BASELINE_STALE) {
                 Origin {
                     token: REBASELINED,
                     label: REBASELINED_LABEL,

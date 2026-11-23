@@ -16,6 +16,7 @@ internal static partial class Compiler
     {
         QuestBlock q => QuestCompiler.DefineQuest(ctx, low, name, q),
         DialogueBlock d => QuestCompiler.DefineDialogue(ctx, low, name, d),
+        KnowledgeBlock k => KnowledgeBlocks.Define(ctx, low, name, k),
         _ => null,
     };
 }
@@ -30,6 +31,7 @@ internal static class QuestCompiler
             {
                 case QuestHandle quest: Quests.ForgetBlock(quest.Definition); break;
                 case DialogueHandle dialogue: Dialogues.ForgetBlock(dialogue.Definition); break;
+                case KnowledgeHandle knowledge: NativeExport.Untrack(mod.Id, KnowledgeBlocks.Entry(knowledge.Name)); break;
             }
     }
 

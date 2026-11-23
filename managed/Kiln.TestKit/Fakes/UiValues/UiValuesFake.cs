@@ -182,7 +182,7 @@ internal sealed unsafe class UiValuesFake : IKitFake
 
     internal static UiValuesFakeState? State => KitBackend.Instance.Harness is { } h ? KitFakes.State<UiValuesFakeState>(h) : null;
 
-    private static int Add(ulong owner, uint list, uint item, void* fn, void* user, UiValuesAbi.Registration* r)
+    internal static int Add(ulong owner, uint list, uint item, void* fn, void* user, UiValuesAbi.Registration* r)
     {
         if (r == null || r->Size < (uint)sizeof(UiValuesAbi.Registration) || fn == null || owner == 0) return FakeTables.InvalidArgument;
         var row = list switch { 0 => "ui.values.detail", 1 => "ui.values.slot", 2 => "ui.values.held", UiValuesAbi.Lines => "ui.values.tooltip_lines", UiValuesAbi.Slots => UiValuesAbi.SlotsRow, _ => "ui.values.hud" };

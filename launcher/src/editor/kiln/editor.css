@@ -2,18 +2,25 @@
    skill icons. Rarity is the game's colour (--r, from data/ui.json): a glaze line under a slot, a halo behind an icon. */
 
 .ke { gap: 14px; }
-.ke-body { flex: 1; min-height: 0; display: flex; }
+/* A wrapped title or status must not squeeze the working views to a sliver. Let the desktop sheet scroll instead. */
+.ke.k-page { overflow: auto; }
+.ke.k-page > .ke-body { flex: 1 0 320px; }
+.ke > .k-page-head { flex-wrap: wrap; }
+.ke > .k-page-head > div:first-child { flex: 1 1 420px; }
+.ke > .k-page-head > .k-page-actions { flex: 0 1 auto; max-width: 100%; margin-left: auto; }
+.ke-body { flex: 1; min-width: 0; min-height: 0; display: flex; container-type: inline-size; }
 /* a read-only save (session.readOnly): what it holds shows, the controls that would change it are dimmed (a change is not
    taken: session.setModel) */
 .ke-readonly .ke-form dd, .ke-readonly .ke-insp-foot .k-btn, .ke-readonly .ke-facts .ke-step, .ke-readonly .ke-know-bar .k-btn-danger,
 .ke-readonly .ke-group-head .k-btn, .ke-readonly .ke-empty .k-btn { opacity: .45; pointer-events: none; }
 .ke-split { flex: 1; min-width: 0; min-height: 0; display: flex; }
-.ke-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 14px; padding: 2px 28px 16px 0; overflow: auto; }
+.ke-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 14px; padding: 4px 28px 16px 4px; overflow: auto; scroll-padding: 4px; }
 .ke-group { display: flex; flex-direction: column; gap: 8px; min-height: 0; flex: none; }
-.ke-group-grow { flex: 0 1 auto; }
+/* Keep the heading and at least one complete slot row when the surrounding well is short. */
+.ke-group-grow { flex: 0 1 auto; min-height: 112px; }
 .ke-main > .ke-group { align-self: flex-start; max-width: 100%; }
 .ke-group-head { display: flex; align-items: baseline; gap: 12px; min-height: 32px; }
-.ke-grid-scroll { min-height: 0; overflow: auto; flex: 0 1 auto; padding: 2px; margin: -2px; }
+.ke-grid-scroll { min-height: 72px; overflow: auto; flex: 0 1 auto; padding: 4px; margin: -4px; scroll-padding: 4px; }
 .ke-grid-scroll.more { -webkit-mask-image: linear-gradient(#000 calc(100% - 26px), transparent); mask-image: linear-gradient(#000 calc(100% - 26px), transparent); }
 .ke-grid { --s: 64px; display: grid; grid-template-columns: repeat(8, var(--s)); gap: 6px; }
 .ke-cell { width: var(--s); height: var(--s); }
@@ -23,7 +30,7 @@
 .ke-main > .ke-note:last-child { margin-top: auto; }
 
 /* ---------------------------------------------------------------- a slot */
-.ke-slot { --s: 64px; position: relative; flex: none; display: block; width: var(--s); height: var(--s); padding: 0; border: 0; border-radius: 8px; cursor: pointer;
+.ke-slot { --s: 64px; position: relative; flex: none; display: block; scroll-margin: 4px; width: var(--s); height: var(--s); padding: 0; border: 0; border-radius: 8px; cursor: pointer;
   background: var(--k-well); box-shadow: inset 0 0 0 1px var(--k-line); color: var(--k-text-0); transition: box-shadow .15s, background .15s; }
 .ke-slot.full { background: radial-gradient(circle at 50% 46%, color-mix(in srgb, var(--r, transparent) 20%, transparent), transparent 68%), var(--k-well); }
 .ke-slot.full::after { content: ""; position: absolute; left: 9px; right: 9px; bottom: 0; height: 2px; border-radius: 2px; background: var(--r, transparent); opacity: .9; }
@@ -152,7 +159,8 @@
 .ke-node-lv.on { fill: var(--k-gold-300); }
 .ke-tree-class { font-family: var(--k-font-label); font-weight: 500; font-size: 80px; letter-spacing: .012em; opacity: .8; pointer-events: none; }
 .ke-tree-points, .ke-tree-attrs { position: absolute; left: 14px; padding: 10px 14px; border-radius: 10px; background: rgba(17, 12, 9, .88); box-shadow: inset 0 0 0 1px var(--k-line); cursor: default; }
-.ke-tree-points { top: 14px; display: flex; flex-direction: column; gap: 6px; }
+.ke-tree-points { top: 14px; display: flex; flex-direction: column; gap: 6px; max-width: min(430px, calc(100% - 200px)); }
+.ke-tree-from-game { max-width: 100%; }
 .ke-tree-points > div { display: flex; align-items: baseline; gap: 12px; }
 .ke-tree-points b, .ke-tree-avail { font-weight: 600; font-size: 22px; line-height: 1; color: var(--k-text-0); }
 .ke-tree-avail { padding: 0; border: 0; background: none; cursor: pointer; font-family: inherit; color: var(--k-gold-300); }
@@ -173,27 +181,42 @@
 .ke-tree-tip-desc { font-size: 16px; line-height: 1.3; color: var(--k-text-1); white-space: pre-line; }
 
 /* ---------------------------------------------------------------- the character switch, backups */
-.ke-who { position: relative; }
-.ke-who-btn { all: unset; cursor: pointer; display: inline; }
-.ke-who-btn svg { display: inline-block; width: 24px; height: 24px; margin-left: 12px; vertical-align: .08em; fill: none; stroke: var(--k-text-2); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+.ke-who { position: relative; min-width: 0; max-width: 100%; }
+.ke-who-btn { all: unset; cursor: pointer; display: inline-flex; align-items: flex-end; max-width: 100%; }
+.ke-who-btn > span { min-width: 0; overflow-wrap: anywhere; }
+.ke-who-btn svg { display: block; flex: none; width: 24px; height: 24px; margin: 0 0 .08em 12px; fill: none; stroke: var(--k-text-2); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
   transition: transform .35s var(--k-spring), stroke .15s; }
 .ke-who-btn:hover svg { stroke: var(--k-gold-400); transform: translateY(3px); }
 .ke-who-btn:focus-visible { outline: 2px solid var(--k-gold-400); outline-offset: 2px; }
 .ke-who-pop { left: 0; top: calc(100% + 4px); width: 360px; }
 .ke-who-pop .k-menu-item { flex-direction: column; align-items: flex-start; gap: 1px; font-size: 17.5px; }
 .ke-bk { display: flex; flex-direction: column; max-height: 380px; overflow: auto; }
-.ke-bk-row { display: grid; grid-template-columns: 150px 180px minmax(0, 1fr) 176px; gap: 12px; align-items: center; min-height: 46px; box-shadow: inset 0 -1px 0 var(--k-line); }
+.ke-bk-row { display: grid; grid-template-columns: minmax(70px, .7fr) minmax(110px, 1fr) minmax(150px, 1.4fr) auto; gap: 12px; align-items: center; min-height: 46px; padding: 8px 0; box-shadow: inset 0 -1px 0 var(--k-line); }
+.ke-bk-row > span { min-width: 0; overflow-wrap: anywhere; }
+.ke-bk-row > .k-mono { overflow: visible; white-space: normal; text-overflow: clip; }
 
 /* ---------------------------------------------------------------- the catalog dialog */
 .ke-cat { display: grid; grid-template-columns: 206px minmax(0, 1fr) 240px; gap: 24px; height: min(560px, calc(100vh - 210px)); min-height: 0; }
-.ke-cat-rail { display: flex; flex-direction: column; gap: 3px; min-height: 0; overflow: auto; }
+.ke-cat-rail { display: flex; flex-direction: column; gap: 3px; min-height: 0; overflow: auto; padding: 6px; scroll-padding: 6px; }
 .ke-cat-rail .k-sub { border: 0; background: none; cursor: pointer; font-family: inherit; text-align: left; white-space: normal; line-height: 1.2; padding: 2px 0; }
-.ke-cat-n { margin-left: auto; font-size: 13.5px; color: var(--k-text-3); }
+.ke-cat-n { margin-left: auto; font-size: 13.5px; color: var(--k-text-2); }
 .ke-cat-main { display: flex; flex-direction: column; gap: 10px; min-width: 0; min-height: 0; }
 .ke-cat-filters { display: flex; flex-direction: column; gap: 6px; }
 .ke-cat-filters .k-seg { align-items: center; }
 .ke-cat-filters .k-seg button { display: inline-flex; align-items: center; gap: 7px; }
-.ke-cat-grid { flex: 1; min-height: 0; overflow: auto; display: grid; grid-template-columns: repeat(auto-fill, 58px); gap: 6px; align-content: start; padding: 2px; }
+.ke-cat-grid { flex: 1; min-height: 0; overflow: auto; display: grid; grid-template-columns: repeat(auto-fill, 58px); gap: 6px; align-content: start; padding: 4px; scroll-padding: 4px; }
 .ke-cat-pick { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; min-height: 0; }
 .ke-cat-pick > .k-row { align-self: stretch; }
 .ke-cat-qty { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+
+/* Below the width needed by eight slots and the inspector, keep the whole grid and put the inspector below it.
+   One shared scroller makes both reachable even at the launcher's minimum height. The inspector keeps its own
+   bounded well for long item details; neither horizontal clipping nor a second, hidden inventory column is needed. */
+@container (max-width: 1020px) {
+  .ke-split { flex-direction: column; overflow: auto; scroll-padding: 8px; }
+  .ke-main { flex: none; width: 100%; padding: 4px 4px 18px; overflow: visible; }
+  .ke-main > .ke-group { align-self: stretch; }
+  .ke-grid-scroll { flex: none; max-height: 280px; }
+  .ke-insp { width: 100%; min-height: 240px; max-height: min(520px, 65vh); padding: 18px 4px; box-shadow: inset 0 1px 0 var(--k-line); }
+  .ke-group-head { flex-wrap: wrap; }
+}

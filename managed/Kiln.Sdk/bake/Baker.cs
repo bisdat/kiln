@@ -106,6 +106,10 @@ internal static class Baker
                       "start, the first included, so they are not baked (docs/kiln/modding/baked.md)");
                 foreach (var issue in run.Issues) result.Warnings.Add($"OnBoot: {issue.Code} {issue.Kind}/{issue.Key}: {issue.Reason}");
             }
+            // Items, recipes and clones are rebuilt by the mod at runtime, not boot-table bake outputs. Let their
+            // declarative blocks lower without a game's content registry while recording explicitly opted-in tables.
+            // The override lives only on this harness's tick thread and is restored before the harness is disposed.
+            using var declarations = options.WorldTables ? new BakeDeclarations(harness) : null;
             var handle = harness.LoadFolder(folder);
             try
             {

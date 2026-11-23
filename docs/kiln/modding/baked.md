@@ -135,6 +135,12 @@ Each refusal is a line in kiln.log (`vfx: <id>: blocks/<file>: not read: ...`), 
   those definitions do not depend on runtime settings, the world, available services or client/server conditions: the
   baked definitions win at every start, even if the runtime code changes or omits them. Data files and `OnBoot` are
   first-start routes without running `OnLoad` in the bake. Turning this option off removes an earlier SDK artifact.
+  Since 0.2.0-dev.30.5, this includes `ToolMaterialPoolBlock` policy metadata and the `toolBrushShapes` descriptors
+  computed for a `BuildingToolBlock`. They remain pending during the offline run, but ship in `blocks.tables.json`
+  for admission by the first boot merge. Tool pools do not create extra game-visible material-pool rows.
+  With this option, item, recipe and clone blocks may lower without a live content registry: those declarations are
+  rebuilt at runtime, not baked as live items or recipes. Calls that actually read or change the game's content still
+  require the game and can prevent a bake. No native tool action, picker, payment or undo is tested by the bake.
 
 ## Checked
 - `managed/tests/Kiln.Sdk.Tests` (25 tests):

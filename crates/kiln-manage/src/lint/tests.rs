@@ -270,6 +270,79 @@ fn block_png_paths_refuse_links_and_windows_aliases_before_opening() {
     }
 }
 
+/// A mod folder (clients "mod") with one blocks file and other files, linted whole: (code, pointer, severity) of each finding
+/// at warning or above.
+fn blocks_findings(name: &str, blocks: &str, files: &[(&str, &[u8])]) -> Vec<(String, String, Severity)> {
+    let dir = std::env::temp_dir().join(format!("kiln-lint-ui-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("blocks")).unwrap();
+    std::fs::write(dir.join("kiln.mod.json"), r#"{"id":"ui-test","name":"UI test","version":"1.0.0","apiVersion":"0.2","side":"both","clients":"mod","license":"MIT"}"#).unwrap();
+    std::fs::write(dir.join("blocks/ui.json"), blocks).unwrap();
+    for (f, bytes) in files {
+        std::fs::create_dir_all(dir.join(f).parent().unwrap()).unwrap();
+        std::fs::write(dir.join(f), bytes).unwrap();
+    }
+    let r = lint_paths(std::slice::from_ref(&dir), &LintOptions { no_catalog: true, ..Default::default() });
+    let out = r.diagnostics.iter().filter(|d| d.severity >= Severity::Warning).map(|d| (d.code.clone(), d.pointer.clone().unwrap_or_default(), d.severity)).collect();
+    std::fs::remove_dir_all(&dir).unwrap();
+    out
+}
+
+/// A 1x1 PNG's signature and header chunk (what lint and Kiln.Blocks read before anything is decoded).
+const PNG_1X1: &[u8] = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR\0\0\0\x01\0\0\0\x01\x08\x06\0\0\0\x1f\x15\xc4\x89";
+
+fn found(f: &[(String, String, Severity)], code: &str, pointer: &str) -> bool {
+    f.iter().any(|(c, p, s)| c == code && p == pointer && *s == Severity::Error)
+}
+
+/// Kiln.Blocks refuses a window whose rows share an id (nested rows of tabs and trees included); lint says it first. Two
+/// windows may use the same ids, and tab ids are the tabs row's own.
+#[test]
+fn ui_row_ids_are_unique_in_a_window() {
+    let f = blocks_findings("ids", r#"{"format":1,"windows":{
+      "a":{"title":"A","state":{"note":{"type":"string"},"open":{"type":"stringSet"}},"rows":[
+        {"type":"input","id":"note","label":"Note","bind":"state.note"},
+        {"type":"tabs","id":"t","tabs":[{"id":"note","label":"One","rows":[{"type":"image","id":"note","asset":"pic.png"}]}]},
+        {"type":"tree","id":"places","nodes":"mod.places","expanded":"state.open","nodeRows":[{"type":"image","id":"t","asset":"pic.png"}]}]},
+      "b":{"title":"B","state":{"note":{"type":"string"}},"rows":[{"type":"input","id":"note","label":"Note","bind":"state.note"}]}}}"#,
+        &[("pic.png", PNG_1X1)]);
+    assert!(found(&f, "KL360", "/windows/a/rows/1/tabs/0/rows/0/id"), "{f:?}");
+    assert!(found(&f, "KL360", "/windows/a/rows/2/nodeRows/0/id"), "{f:?}");
+    assert_eq!(f.iter().filter(|x| x.0 == "KL360").count(), 2, "a tab's id is not a row's, window b is its own: {f:?}");
+}
+
+/// A text field takes the keyboard: only an interactive window or a screen has it (Kiln.Blocks refuses the window otherwise).
+#[test]
+fn ui_text_field_needs_the_keyboard() {
+    let f = blocks_findings("keys", r#"{"format":1,"windows":{
+      "panel":{"title":"P","interactive":false,"state":{"n":{"type":"string"}},"rows":[{"type":"input","id":"n","label":"N","bind":"state.n"}]},
+      "screen":{"title":"S","kind":"screen","state":{"n":{"type":"string"}},"rows":[{"type":"tabs","id":"t","tabs":[{"id":"a","label":"A","rows":[{"type":"input","id":"n","label":"N","bind":"state.n"}]}]}]},
+      "win":{"title":"W","state":{"n":{"type":"string"}},"rows":[{"type":"input","id":"n","label":"N","bind":"state.n"}]}}}"#, &[]);
+    assert!(found(&f, "KL360", "/windows/panel/rows/0"), "{f:?}");
+    assert_eq!(f.iter().filter(|x| x.0 == "KL360").count(), 1, "a screen and an interactive window take the keyboard: {f:?}");
+}
+
+/// An image row's asset is a PNG of the mod's folder: lint checks the path, that the file is there and that it is a PNG.
+#[test]
+fn ui_image_asset_is_a_png_of_the_mod() {
+    let row = |id: &str, asset: &str| format!(r#"{{"type":"image","id":"{id}","asset":"{asset}"}}"#);
+    let blocks = format!(r#"{{"format":1,"windows":{{"w":{{"title":"W","rows":[{},{},{},{}]}}}}}}"#,
+        row("up", "../pic.png"), row("gone", "missing.png"), row("text", "fake.png"), row("ok", "ui/pic.png"));
+    let f = blocks_findings("images", &blocks, &[("ui/pic.png", PNG_1X1), ("fake.png", b"not a png at all, just text")]);
+    assert!(found(&f, "KL106", "/windows/w/rows/0/asset"), "{f:?}");
+    assert!(found(&f, "KL501", "/windows/w/rows/1/asset"), "{f:?}");
+    assert!(found(&f, "KL503", "/windows/w/rows/2/asset"), "{f:?}");
+    assert!(!f.iter().any(|x| x.1.starts_with("/windows/w/rows/3")), "{f:?}");
+}
+
+/// statImports is a list of "mod:id" names beside the sections, no block kind.
+#[test]
+fn ui_stat_imports_are_mod_id_names() {
+    let f = blocks_findings("stats", r#"{"format":1,"statImports":["fishing:catches","bad"],"windows":{"w":{"title":"W","rows":[{"type":"text","text":"x"}]}}}"#, &[]);
+    assert!(found(&f, "KL106", "/statImports/1"), "{f:?}");
+    assert!(!f.iter().any(|x| x.1 == "/statImports/0" || x.1 == "/statImports"), "{f:?}");
+}
+
 #[test]
 fn line_and_column() {
     let t = "ab\ncé d".as_bytes();

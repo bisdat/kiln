@@ -317,3 +317,59 @@ No table change. Player side: [ui.md](../ui.md#frame-generation-mods-and-drawing
 game's highlight groups Group1 and Group2, which Kiln colours itself. Managed: `Ui.World.Outline`, `WorldOutline`,
 `OutlineOptions` (Kiln.Ui). Capability `ui.world_outline`. Usage and the C table: [../render.md](../render.md#outlines-since-020-dev303);
 RE: [../../re/client-render.md](../../re/client-render.md#highlight-groups-outlines).
+
+## Captured item detail (Since 0.2.0-dev.30.5)
+
+`kiln.ui.item_detail` is a **new v1 table**, not an append to `kiln.ui` or `kiln.ui.values`.
+Its only function, `copy(owner, query, snapshot, lines, capacity)`, is callable on any thread;
+see `native/core/abi/services/kiln_ui_item_detail.h`. Check header size/version and function
+pointer. Records are size-tagged: query 20 bytes, snapshot 56 bytes, line 4112 bytes (4096
+length-delimited UTF-8 bytes plus size, flags, value and byte count). The x64 table is 16 bytes,
+with `copy` at offset 8. No existing table layout changes.
+
+This is **passive capture**, not on-demand item computation or a new drawing API. First use
+installs capture. The client's main/UI thread copies text constructed inside the current
+ItemDetail call; Kiln-injected tooltip lines are excluded. Any-thread readers copy completed
+immutable records under a mutex, not live item/world memory. Stat numbers are captured after
+tooltip value providers, with numeric metadata on the first constructed text row. Text already
+contains the game's formatted numbers; do not append the metadata again. A number-only draw
+gets empty text and a float. No opaque label is reinterpreted as a string.
+
+A query's `entity` is a CLIENT presentation id, never an arbitrary server inventory entity.
+Entity queries match only that instance. `entity=0` queries `item` plus optional level/rarity
+(`UINT32_MAX` means unspecified), choosing the latest matching capture. This may include the
+inspected instance's gems/perks, not pristine item-type defaults. No typed semantic stat,
+socket, perk-unlocked or food-effect model is supplied; colour/icon-only information is absent.
+
+The last 64 captures/refusals are retained in capture order; reads do not promote entries.
+A completed panel replaces the same entity, or item+level+rarity for entity=0, even on rejection.
+Session/world changes, missing client state or no local player clear captures on next read or
+capture. Language and item-state changes require reinspection; they are not automatically
+observed. A snapshot already copied by a caller remains historical data. Limits: 64 lines,
+4096 UTF-8 bytes per line, 32768 total bytes; reject invalid/oversized/empty panels whole.
+
+`KILN_OK` with `ok=0` is a miss: `snapshot.reserved` carries 0 (no matching capture), 1 (offline,
+missing client state or no active local-player session), or 2 (rejected panel: empty, invalid
+text/number, read failure or budget). A short destination gets `BUFFER_TOO_SMALL` and required
+`count`, with no partial rows. `UNAVAILABLE` means wrong side, missing symbols/layout, disabled
+capability or hook failure; `REVOKED` means retired owner; invalid/short records, owner zero,
+empty query or null rows with nonzero capacity get `INVALID_ARGUMENT`.
+
+Capability `ui.item_detail` is client-only (`wrong-side` on a server); missing build symbols/
+constants make it unavailable, missing table lowers it to `service-older`, and hook failure to
+`faulted`. Offline/no-session and per-item misses are result reasons, not permanent capability
+failures. Client check: inspect a real item panel and compare the text and numbers read by a
+mod on Proton and native Windows. **Real-client hook coverage remains unverified.**
+
+Managed API, cache/fallback contract and sample: [the UI guide](../ui.md#captured-item-detail-since-020-dev305).
+
+## Negotiated slot subscriptions (dev.30.5 review correction)
+
+The released `KilnUiVisibleSlot` and `kiln.ui.values.subscribe_slots` callback stay frozen at
+112 bytes per row. `KilnUiVisibleSlotV2` is 120 bytes, adding level and rarity at 112/116.
+A new **`kiln.ui.slots` v1** table has `subscribe(owner, record_size, fn, user, out)`; it accepts
+only `record_size == 120` and delivers typed V2 rows. An unknown negotiation is refused.
+Unsubscribe through the existing kiln.ui.values handle registry. Capability: `ui.slots.inspect`.
+No existing table grows. Size-aware `copy_slots` still supports both strides through the first
+output row's size. `Ui.Values.SubscribeSlots` prefers the negotiated table and expands frozen
+112-byte callbacks when running on an older core. TestKit models both callback layouts.

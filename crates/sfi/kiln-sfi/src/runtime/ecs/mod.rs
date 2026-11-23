@@ -174,6 +174,15 @@ impl Ecs {
     pub fn runtime(&self) -> Option<EcsRuntime> {
         self.runtime.borrow().clone()
     }
+    /// A hosting client's scene is in transition ([`RuntimeFacts::ecs_world`](crate::runtime::RuntimeFacts::ecs_world)):
+    /// the provider binds no world then, so no handle opens or reads and no query runs. Mods get the provider's own
+    /// answers (not ready, entity unavailable), never the resident client world.
+    fn scene_transitioning(&self) -> bool {
+        self.runtime
+            .borrow()
+            .as_ref()
+            .is_some_and(|runtime| runtime.facts.ecs_scene().is_err())
+    }
     /// kiln-sfi's owner (0 without the runtime-create's part).
     pub fn owner(&self) -> KilnOwner {
         self.runtime.borrow().as_ref().map_or(0, |r| r.owner)
@@ -216,6 +225,9 @@ impl Ecs {
     /// The ref a handle names, if this VM gave it, it is of the newest world and session seen, and of the world the
     /// ECS binds now (a handle of the world a client hosted reads nothing once it joined another).
     pub fn object(&self, handle: u32) -> Option<KilnObjectRef> {
+        if self.scene_transitioning() {
+            return None;
+        }
         self.handles
             .get(handle)
             .filter(|object| object.world_kind == self.world_kind())
@@ -224,6 +236,9 @@ impl Ecs {
     /// `entity_open` of entity id `entity` in the family's world, live session, as a handle: kiln.world's result
     /// when it refuses (or KILN_ERR_UNAVAILABLE without the member), and 0 is never a handle.
     pub fn open(&self, entity: KilnEntity) -> Result<u32, kiln_abi::KilnResult> {
+        if self.scene_transitioning() {
+            return Err(kiln_abi::KILN_ERR_UNAVAILABLE);
+        }
         let owner = self.owner();
         let open = self
             .world()

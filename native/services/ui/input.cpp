@@ -33,8 +33,10 @@
 #include "backends/imgui_impl_win32.h"
 #include "imgui.h"
 #include "key_hold.h"
+#include "pad_slots.h"
 #include "key_names.h"
 #include "mouse_press.h"
+#include "pad_keys.h"
 #include "safetyhook.hpp"
 #include "ui.h"
 #include "raw_input_source.h"
@@ -906,20 +908,17 @@ void* patch_iat(HMODULE mod, const char* dll, const char* name, void* hook) {
 // the Kiln menu has the input, the game gets an idle pad (no buttons, sticks centred: whatever it held is released),
 // and Kiln feeds the pad to ImGui's gamepad navigation (d-pad / left stick move, A activates, LB/RB switch tabs);
 // B closes the top Kiln screen like Escape.
-struct PadState {
-    WORD buttons;
-    BYTE lt, rt;
-    SHORT lx, ly, rx, ry;
-};
+// Each user's state, a stick back at centre included, and the pad that last moved (pad_slots.h, kiln#123).
+using kiln::ui::PadState;
 struct XState {
     DWORD packet;
     PadState pad;
 };
 SafetyHookInline g_xinput_hook;
 std::mutex g_pad_mu;
-PadState g_pad{};
-bool g_pad_seen = false;
-WORD g_pad_prev[4] = {};
+kiln::ui::PadSlots g_pads;
+WORD g_pad_prev[4] = {}; // protected by g_pad_mu
+kui::pad::Controllers g_pad_buttons;
 PadState g_pad_fed{};
 bool g_pad_fed_any = false;
 
@@ -936,20 +935,63 @@ void synth_escape() {
     dispatch_key(k);
 }
 
+// The pad's buttons as key presses (0.2.0-dev.30.5, pad_keys.h) for the subscribers with KILN_UI_KEYS_PAD, on the thread
+// the game polls the pad from. Each controller has one synchronized tracker across all polling threads.
+// Returns the buttons kept from the game (hidden until their release); a kept B is reported in *b_kept.
+uint32_t pad_presses(DWORD user, const PadState& pad, bool captured, bool* b_kept, bool connected = true) {
+    if (!keys_pad_wanted()) {  // nobody listens: no presses, nothing kept (a hold that began with a listener ends here)
+        g_pad_buttons.reset(user);
+        return 0;
+    }
+    auto deliver = [&](uint32_t vk, bool down, uint32_t mods) {
+        KilnUiKey k{};
+        k.size = sizeof k;
+        k.vk = vk;
+        k.mods = mods;
+        k.down = down ? 1 : 0;
+        k.text_input = g_text_input.load() ? 1 : 0;
+        k.captured = captured ? 1 : 0;
+        const bool keep = keys_dispatch_to(k, KILN_UI_KEYS_PAD);
+        return down && keep;
+    };
+    const uint32_t kept = connected ? g_pad_buttons.step(user, kui::pad::held(pad.buttons, pad.lt, pad.rt), deliver)
+                                    : g_pad_buttons.disconnect(user, deliver);
+    *b_kept = (kept & 0x2000u) != 0;
+    return kept;
+}
+
 DWORD WINAPI hk_xinput_get_state(DWORD user, XState* st) {
     const DWORD r = g_xinput_hook.call<DWORD>(user, st);
-    if (r != ERROR_SUCCESS || !st || user >= 4) return r;
-    if (!capturing()) {
-        g_pad_prev[user] = st->pad.buttons;
+    if (user >= 4) return r;
+    if (r != ERROR_SUCCESS || !st) {
+        bool ignored = false;
+        pad_presses(user, {}, false, &ignored, false); // disconnect is a release, not a permanently held binding
+        std::lock_guard<std::mutex> lk(g_pad_mu);
+        g_pad_prev[user] = 0;
+        // unplugged (or no pad there): nothing of it may stay held in Kiln's screens (only this pad's slot goes idle)
+        g_pads.clear(user);
+        return r;
+    }
+    const bool cap = capturing();
+    bool b_kept = false;
+    const uint32_t kept = pad_presses(user, st->pad, cap, &b_kept);
+    if (!cap) {
+        {
+            std::lock_guard<std::mutex> lk(g_pad_mu);
+            g_pad_prev[user] = st->pad.buttons;
+        }
+        kui::pad::hide(kept, &st->pad.buttons, &st->pad.lt, &st->pad.rt);  // a kept press never reaches the game
         return r;
     }
     const WORD b = st->pad.buttons;
-    const bool b_edge = (b & 0x2000) && !(g_pad_prev[user] & 0x2000);  // XINPUT_GAMEPAD_B
-    g_pad_prev[user] = b;
+    bool b_edge = false;
     {
+        PadState fed = st->pad;
+        kui::pad::hide(kept, &fed.buttons, &fed.lt, &fed.rt);  // nor Kiln's screens' navigation (the Keys page took it)
         std::lock_guard<std::mutex> lk(g_pad_mu);
-        if (b || st->pad.lx > 8000 || st->pad.lx < -8000 || st->pad.ly > 8000 || st->pad.ly < -8000 || !g_pad_seen) g_pad = st->pad;
-        g_pad_seen = true;
+        b_edge = (b & 0x2000) && !(g_pad_prev[user] & 0x2000) && !b_kept; // a kept B is not Escape
+        g_pad_prev[user] = b;
+        g_pads.update(user, fed);
     }
     std::memset(&st->pad, 0, sizeof st->pad);  // the game sees an idle pad while Kiln has the input
     if (b_edge) synth_escape();
@@ -960,8 +1002,8 @@ void feed_pad(ImGuiIO& io) {
     PadState p{};
     {
         std::lock_guard<std::mutex> lk(g_pad_mu);
-        if (!g_pad_seen) return;
-        p = g_pad;
+        if (!g_pads.seen()) return;
+        p = g_pads.followed();
     }
     io.BackendFlags |= ImGuiBackendFlags_HasGamepad;
     if (g_pad_fed_any && std::memcmp(&p, &g_pad_fed, sizeof p) == 0) return;
@@ -981,7 +1023,7 @@ void feed_pad(ImGuiIO& io) {
     key(ImGuiKey_GamepadFaceLeft, 0x4000);
     key(ImGuiKey_GamepadFaceUp, 0x8000);
     auto axis = [&](ImGuiKey k, float v) {
-        const float dz = 8000.0f / 32767.0f;
+        const float dz = static_cast<float>(kiln::ui::kLeftDeadZone) / 32767.0f;  // the state is settled: 0 inside it
         const float a = v < dz ? 0.0f : std::min(1.0f, (v - dz) / (1.0f - dz));
         io.AddKeyAnalogEvent(k, a > 0.1f, a);
     };
@@ -1265,6 +1307,9 @@ void input_capture_changed() {
         if (!cap) {
             io.ClearInputKeys();
             g_pad_fed_any = false;
+            // the next screen starts from what the pads do then, not from the press that closed this one
+            std::lock_guard<std::mutex> lk(g_pad_mu);
+            g_pads.reset();
         }
     }
     if (g_real_clip_cursor) {

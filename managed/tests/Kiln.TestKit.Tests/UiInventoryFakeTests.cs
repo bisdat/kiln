@@ -73,6 +73,69 @@ public sealed unsafe class UiInventoryFakeTests
     }
 
     [Fact]
+    public void AChestSlotCarriesTheItemsRarityLevelAndServerEntity()
+    {
+        using var kiln = new KilnHarness();
+        kiln.Step();
+        var clicks = new List<SlotClick>();
+        using var a = kiln.Run(() => Ui.Inventory.OnClick(new SlotClickOptions { Button = SlotButton.Right, Modifiers = SlotModifiers.Shift }, clicks.Add));
+        var staff = new FakeInventorySlot(0xCC, 1, ItemEntity: 950, Holder: 99, InventoryPage: 0x6000) { Rarity = ItemRarity.Legendary, Level = 25 };
+        kiln.UiInventory.OpenChest(new EntityId(99), staff, Wood);
+        Assert.Equal([staff, Wood], kiln.UiInventory.Drawn);
+        Assert.Equal(new FakeSlotClickResult(1, true), kiln.UiInventory.Click(0, SlotButton.Right, SlotModifiers.Shift));
+        var c = Assert.Single(clicks);
+        Assert.Equal((ItemRarity.Legendary, 25, new EntityId(950)), (c.Rarity!.Value, c.Level, c.Slot.ServerEntity));
+        var slots = kiln.Run(() => Ui.Values.Slots()).Snapshot!.Slots;
+        Assert.Equal(((ItemRarity?)null, 0, EntityId.None), (slots[1].Rarity, slots[1].Level, slots[1].ServerEntity));  // a plain stack
+    }
+
+    [Fact]
+    public void APadPressOnTheSelectedSlotIsAClick()
+    {
+        // 0.2.0-dev.30.5 (GitHub issue 119 c): SlotClickOptions.Pad, the press kept from the game
+        using var kiln = new KilnHarness();
+        kiln.Step();
+        var got = new List<SlotClick>();
+        var watched = new List<SlotClick>();
+        using var a = kiln.Run(() => Ui.Inventory.OnClick(new SlotClickOptions { Pad = KeyChord.Parse("Pad:LS") }, got.Add));
+        using var b = kiln.Run(() => Ui.Inventory.OnClick(new SlotClickOptions { Pad = KeyChord.Parse("Pad:LB+A"), Take = false }, watched.Add));
+        kiln.UiInventory.OpenChest(new EntityId(99), Sword, Wood);
+        Assert.Equal(new FakeSlotClickResult(0, false), kiln.UiInventory.PressPad("Pad:LS"));  // nothing selected yet
+        kiln.UiInventory.Select(0);
+        Assert.Equal(new FakeSlotClickResult(1, true), kiln.UiInventory.PressPad("Pad:LS"));
+        var c = Assert.Single(got);
+        Assert.Equal((SlotButton.Pad, (KeyChord?)KeyChord.Parse("Pad:LS"), new ItemId(0xAA), new EntityId(900), true, HudScreen.StorageChest),
+            (c.Button, c.Pad, c.Item, c.ItemEntity, c.Taken, c.Screen.Hud));
+        Assert.Null(c.Pointer);
+        Assert.Equal(new FakeSlotClickResult(0, false), kiln.UiInventory.PressPad("Pad:RS"));
+        Assert.Equal(new FakeSlotClickResult(1, false), kiln.UiInventory.PressPad("Pad:LB+A"));  // watched: the game keeps it
+        Assert.Equal(new ItemId(0xAA), Assert.Single(watched).Item);
+        Assert.Throws<ArgumentException>(() => kiln.Run(() => Ui.Inventory.OnClick(new SlotClickOptions { Pad = KeyChord.Parse("F8") }, _ => { })));
+        kiln.UiInventory.Draw(HudScreen.InGame, Sword);
+        kiln.UiInventory.Select(0);
+        Assert.Equal(new FakeSlotClickResult(0, false), kiln.UiInventory.PressPad("Pad:LS"));  // the play view: never
+    }
+
+    [Fact]
+    public void SelectedIsTheSlotTheGamesSelectionIsOn()
+    {
+        using var kiln = new KilnHarness();
+        kiln.Step();
+        kiln.UiInventory.OpenBackpack(Sword, Wood);
+        Assert.Null(kiln.Run(() => Ui.Inventory.Selected));
+        kiln.UiInventory.Select(1);
+        Assert.Equal(new ItemId(0xBB), kiln.Run(() => Ui.Inventory.Selected)!.Item);
+        kiln.UiInventory.Hover(0);  // the mouse elsewhere: Hovered and Selected are apart
+        Assert.Equal(new ItemId(0xAA), kiln.Run(() => Ui.Inventory.Hovered)!.Item);
+        Assert.Equal(new ItemId(0xBB), kiln.Run(() => Ui.Inventory.Selected)!.Item);
+        kiln.UiInventory.Select(null);
+        Assert.Null(kiln.Run(() => Ui.Inventory.Selected));
+        kiln.UiInventory.Draw(HudScreen.InGame, Sword);  // the hotbar in the play view: no selection there
+        kiln.UiInventory.Select(0);
+        Assert.Null(kiln.Run(() => Ui.Inventory.Selected));
+    }
+
+    [Fact]
     public void AClickReachesTheMatchingHandlersWithTheItemsIdentity()
     {
         using var kiln = new KilnHarness();
@@ -171,5 +234,15 @@ public sealed unsafe class UiInventoryFakeTests
         {
             kiln.Run(Ui.Inventory.ClearMarks);
         }
+    }
+    [Fact]
+    public void Old_slot_hit_records_do_not_touch_the_tail_canary()
+    {
+        using var kiln = new KilnHarness(); kiln.Step(); kiln.UiInventory.Draw(HudScreen.Backpack, Sword); kiln.UiInventory.Hover(0);
+        var table = (nint*)KitBackend.Instance.Service("kiln.ui.inventory", 1);
+        byte* bytes = stackalloc byte[176]; new Span<byte>(bytes, 176).Fill(0xA5); *(uint*)bytes = 144;
+        Assert.Equal(0, ((delegate* unmanaged[Cdecl]<ulong, float, float, float, float, void*, int>)table[2])(1, -1, -1, 0, 0, bytes));
+        Assert.Equal(1u, ((uint*)bytes)[1]);
+        for (var i = 144; i < 176; i++) Assert.Equal((byte)0xA5, bytes[i]);
     }
 }

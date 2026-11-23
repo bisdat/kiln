@@ -9,6 +9,7 @@ import { UiModeGate } from "./deck/mode";
 import { SnapshotGate } from "./shell/SnapshotGate";
 import { DataFolderGate } from "./shell/DataFolderGate";
 import { Started } from "./shell/started";
+import { installCloseGuard } from "./shell/closeGuard";
 import { setLanguage } from "./i18n";
 import "./i18n/locales";
 import { LanguageSync, storedLanguage } from "./i18n/LanguageSync";
@@ -22,6 +23,9 @@ if (!isTauri()) await loadMock();
 
 // the language the last start chose, before the first render (settings load later: i18n/LanguageSync.tsx)
 setLanguage(storedLanguage());
+
+// closing the window while work would be lost asks first (the desktop app only: shell/closeGuard.ts)
+installCloseGuard();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

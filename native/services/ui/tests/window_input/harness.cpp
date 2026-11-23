@@ -1455,7 +1455,9 @@ void mouse_subscribers() {
     check(bindings.lines.size() == 2 && old_plugin.lines.size() == 2, "a keyboard key reaches both");
     KeyLog bad;
     KilnHandle bad_h = 0;
-    check(kui::keys_subscribe(13, &key_collect, &bad, 2, &bad_h) == KILN_ERR_INVALID_ARGUMENT &&
+    check(kui::keys_subscribe(13, &key_collect, &bad, KILN_UI_KEYS_PAD, &bad_h) == KILN_OK &&
+              kui::keys_unsubscribe(bad_h) == KILN_OK, "subscribe_key_ex accepts the controller flag");
+    check(kui::keys_subscribe(13, &key_collect, &bad, 4, &bad_h) == KILN_ERR_INVALID_ARGUMENT &&
               kui::keys_subscribe(13, &key_collect, &bad, KILN_UI_KEYS_MOUSE | 0x80000000u, &bad_h) == KILN_ERR_INVALID_ARGUMENT &&
               kui::keys_subscribe(13, nullptr, &bad, KILN_UI_KEYS_MOUSE, &bad_h) == KILN_ERR_INVALID_ARGUMENT,
           "subscribe_key_ex refuses flags it does not know and a missing callback");

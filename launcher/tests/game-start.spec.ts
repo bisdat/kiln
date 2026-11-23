@@ -79,7 +79,7 @@ test("a folder no Steam library knows is custom, starts directly by default and 
 });
 
 test("Settings' game list marks a custom folder and its unknown build", async ({ page }) => {
-  await start(page, null, "/settings");
+  await start(page, null, "/settings/game");
   const folder = page.getByPlaceholder("…/common/Enshrouded");
   await folder.scrollIntoViewIfNeeded();
   await folder.fill("/games/Enshrouded 2025");

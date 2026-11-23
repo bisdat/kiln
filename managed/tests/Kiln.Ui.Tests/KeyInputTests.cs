@@ -129,6 +129,22 @@ public sealed unsafe class KeyInputTests : IDisposable
     }
 
     [Fact]
+    public void KeyListenFlags_Pad_gives_a_listener_the_controllers_buttons()
+    {
+        // 0.2.0-dev.30.5 (GitHub issue 119): KILN_UI_KEYS_PAD; a pad press carries the pad's modifiers only
+        InstallV7(sizeof(UiNative.Table7));
+        var got = new List<KeyPress>();
+        using var l = KeyInput.Listen(p => { got.Add(p); return p.IsPad; }, KeyListenFlags.Mouse | KeyListenFlags.Pad);
+        Assert.True(l.Ok && l.Mouse && l.Pad);
+        lock (Calls) Assert.Equal(["subscribe_key_ex owner 0 flags 3"], Calls);
+        Assert.Equal(1, Send(0x20C, mods: 8));  // A with LB held: kept
+        Assert.Equal(new KeyPress(0x20C, 0, KeyMods.PadLB, true, false, false, false), got[0]);
+        Assert.Equal("Pad:LB+A", got[0].Chord.ToString());
+        Assert.Equal(0, Send('K', 0x25, mods: 1 | 8));  // a keyboard key never carries pad bits
+        Assert.Equal(KeyMods.Ctrl, got[1].Mods);
+    }
+
+    [Fact]
     public void Keyboard_only_asks_kiln_ui_for_no_mouse()
     {
         InstallV7(sizeof(UiNative.Table7));
@@ -136,7 +152,7 @@ public sealed unsafe class KeyInputTests : IDisposable
         Assert.True(l.Ok);
         Assert.False(l.Mouse);
         lock (Calls) Assert.Equal(["subscribe_key_ex owner 0 flags 0"], Calls);
-        Assert.Throws<ArgumentOutOfRangeException>(() => KeyInput.Listen(_ => false, (KeyListenFlags)2));
+        Assert.Throws<ArgumentOutOfRangeException>(() => KeyInput.Listen(_ => false, (KeyListenFlags)4));
         Assert.Throws<ArgumentNullException>(() => KeyInput.Listen(null!));
     }
 

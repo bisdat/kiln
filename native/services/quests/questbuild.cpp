@@ -313,7 +313,7 @@ bool rebuild_knowledge(const uint8_t* res, size_t len, const std::vector<Knowled
             *err = t;
             return false;
         }
-        const bool twin = d.world && d.player;
+        const bool twin = d.world && d.player && !d.separate;
         if (d.world) {
             std::vector<uint8_t> o(kWorldObj);
             wr32(o.data(), d.id);
@@ -329,7 +329,8 @@ bool rebuild_knowledge(const uint8_t* res, size_t len, const std::vector<Knowled
             o[5] = twin ? 1 : 0;
             o[6] = 1;
             o[7] = d.type;
-            wr32(o.data() + 8, d.expected_flags);
+            wr32(o.data() + 8, d.separate ? d.player_flags : d.expected_flags);
+            o[0xc] = d.per_flag;  // isAdditionalPlayerKnowledgePerFlag
             wr32(o.data() + 0x10, d.experience_id);
             o[0x14] = d.skill_points;
             player.push_back(std::move(o));

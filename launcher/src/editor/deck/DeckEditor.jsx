@@ -4,11 +4,12 @@
 // Deck dialogs, a number pad for numbers, a list for choices, focus instead of hover.
 //   A: the focused control · B: back (out of the inspector, a move, else Home) · X: Save · Y: the view's own (Move,
 //   −1 level) · L2 / R2: previous / next part · L1 / R1: the Deck's tabs · the buttons at the top: Characters, Backups,
-//   Discard, Save.
+//   Undo, Redo, Discard, Save. L3 / R3: Undo / Redo (also in the help line).
 // Text: the catalog's and knowledge's search fields take Steam's keyboard (Steam + X), as Help says for Steam's own
 // fields; nothing needs typing, the number pad sets every number.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DeckButton, Dialog, Row, Screen, Word } from '../../deck/ui';
+import { Undo2, Redo2 } from 'lucide-react';
 import { GameArtAuto } from '../../components/GameArt';
 import { toast } from '../../ui';
 import { api } from '../src/platform.js';
@@ -16,8 +17,8 @@ import { t, useLanguage } from '../../i18n';
 import { dataHora } from '../src/i18n.js';
 import { EditorEnv } from '../kiln/env.jsx';
 import { useEditorArt } from '../kiln/art.js';
-import { canSave, discard, openSave, readOnly, restoreBackup, saveModel, setModel, startSession, useSession } from '../kiln/session.js';
-import { BACKUP_KIND, TABS, backupName, sayOf } from '../kiln/EditorApp.jsx';
+import { canSave, canUndo, canRedo, undo, redo, historyTitle, startHistoryControls, discard, mutationsBlocked, openSave, readOnly, restoreBackup, saveModel, setModel, startSession, useSession } from '../kiln/session.js';
+import { BACKUP_KIND, TABS, backupGroups, backupName, sayOf, useBusyEditorDialogs } from '../kiln/EditorApp.jsx';
 import Equipment from '../kiln/Equipment.jsx';
 import Inventory from '../kiln/Inventory.jsx';
 import Skills from '../kiln/Skills.jsx';
@@ -30,13 +31,16 @@ export default function DeckEditor() {
   useLanguage();
   const art = useEditorArt(root);
   const s = useSession();
-  const { model, saves, status, dirty, saving } = s;
+  const { model, saves, status, dirty, saving, restoring } = s;
+  const blocked = mutationsBlocked(s);
+  useBusyEditorDialogs(blocked);
   const [tab, setTab] = useState('inv');
   const [view, setView] = useState(null); // the open view's actions and back (env.setActions)
   const [pad, setPad] = useState(null);
   const [choice, setChoice] = useState(null);
   const [dialog, setDialog] = useState(null); // 'characters' | 'backups' | 'discard' | {open: path}
   useEffect(() => startSession(), []);
+  useEffect(() => startHistoryControls(), []);
   // the screen's first focus lands on the header before the character is read: once the views are there, the first slot
   // (or the part's first stop) takes it, unless the player has moved on already
   const placed = useRef(false);
@@ -80,14 +84,35 @@ export default function DeckEditor() {
   const edit = model && !model.readOnly;
   const actions = [
     { button: 'x', label: t('editor.page.save'), run: () => void save(), disabled: !canSave(s) },
-    ...(edit ? view?.actions ?? [] : []),
+    { button: 'ls', label: t('editor.page.history.undo'), run: undo, disabled: !canUndo(s) },
+    { button: 'rs', label: t('editor.page.history.redo'), run: redo, disabled: !canRedo(s) },
+    ...(edit ? (view?.actions ?? []).map((a) => ({ ...a, disabled: blocked || a.disabled })) : []),
     ...(edit ? [{ button: 'lt', label: word(at - 1), run: () => go(-1) }, { button: 'rt', label: word(at + 1), run: () => go(1) }] : []),
   ];
   const back = edit && view?.back ? view.back : null;
   const stale = !!(status?.again && model);
+  const open = (path, reread = false) => {
+    if (saving || restoring) return;
+    if (dirty && (reread || path !== model?.path)) setDialog({ open: path });
+    else { setDialog(null); if (reread || s.opening || path !== model?.path) void openSave(path); }
+  };
+  const browse = async () => { const path = await api.browseSave(); if (path) open(path); };
 
   return (
     <EditorEnv.Provider value={env}>
+      {/* Keep history compact and let the action group wrap when its localized labels no longer fit. An
+          overflowing hint row can otherwise scroll a pointer target between press and release. */}
+      <style>{`
+        .dke-buttons [data-deck-id="ed-undo"], .dke-buttons [data-deck-id="ed-redo"] {
+          width: 3.25rem; padding: 0; display: grid; place-items: center;
+        }
+        .deck-hints [data-hint="ls"], .deck-hints [data-hint="rs"] {
+          padding: 0 .25rem; gap: .25rem; font-size: 1rem;
+        }
+        .deck:has(.deck-editor) .deck-hints-right {
+          max-width: 100%; flex-wrap: wrap; justify-content: flex-end;
+        }
+      `}</style>
       <GameArtAuto only="editor" />
       <Screen name="editor" className="deck-editor" actions={actions} back={back?.run} backLabel={back?.label}>
         <div ref={root} className="kiln-editor-deck">
@@ -99,16 +124,18 @@ export default function DeckEditor() {
               </p>
             </div>
             <div className="dke-buttons">
-              <DeckButton id="ed-characters" a={t('editor.page.open')} onClick={() => setDialog('characters')}>{t('editor.page.characters')}</DeckButton>
-              <DeckButton id="ed-backups" a={t('editor.page.open')} disabled={!model} onClick={() => setDialog('backups')}>{t('editor.page.backups')}</DeckButton>
-              {dirty && <DeckButton id="ed-discard" onClick={() => setDialog('discard')}>{t('editor.page.discard')}</DeckButton>}
+              <DeckButton id="ed-characters" disabled={saving || restoring} a={t('editor.page.open')} onClick={() => setDialog('characters')}>{t('editor.page.characters')}</DeckButton>
+              <DeckButton id="ed-backups" a={t('editor.page.open')} disabled={!model || blocked} onClick={() => setDialog('backups')}>{t('editor.page.backups')}</DeckButton>
+              {dirty && <DeckButton id="ed-discard" disabled={blocked} onClick={() => setDialog('discard')}>{t('editor.page.discard')}</DeckButton>}
+              <DeckButton id="ed-undo" aria-label={t('editor.page.history.undo')} a={t('editor.page.history.undo')} disabled={!canUndo(s)} onClick={undo}><span title={historyTitle(s, 'undo')}><Undo2 size={22} aria-hidden="true" /></span></DeckButton>
+              <DeckButton id="ed-redo" aria-label={t('editor.page.history.redo')} a={t('editor.page.history.redo')} disabled={!canRedo(s)} onClick={redo}><span title={historyTitle(s, 'redo')}><Redo2 size={22} aria-hidden="true" /></span></DeckButton>
               <DeckButton id="ed-save" primary disabled={!canSave(s)} onClick={() => void save()}>{saving ? t('editor.page.saving') : t('editor.page.save')}</DeckButton>
             </div>
           </header>
           {(status || art.hint) && (
             <p className="deck-line dke-status" role="status">
               {status && <Word tone={status.tone === 'err' ? 'err' : 'warn'}>{status.text}</Word>}
-              {stale && <DeckButton id="ed-reread" onClick={() => void openSave(model.path)}>{t('editor.page.readAgain')}</DeckButton>}
+              {stale && <DeckButton id="ed-reread" disabled={blocked} onClick={() => open(model.path, true)}>{t('editor.page.readAgain')}</DeckButton>}
               {!status && art.hint && <span className="deck-dim">{art.hint}</span>}
             </p>
           )}
@@ -122,7 +149,7 @@ export default function DeckEditor() {
             </nav>
           )}
           {edit && art.ready && (
-            <div className={'ke ke-body dke-body' + (readOnly(model) ? ' ke-readonly' : '')} key={`${model.path}:${art.gen}`}>
+            <div inert={blocked ? '' : undefined} aria-busy={blocked || undefined} className={'ke ke-body dke-body' + (readOnly(model) ? ' ke-readonly' : '')} key={`${model.path}:${art.gen}`}>
               {tab === 'char' && <Equipment model={model} setModel={setModel} />}
               {tab === 'inv' && <Inventory model={model} setModel={setModel} />}
               {tab === 'skills' && <Skills model={model} setModel={setModel} />}
@@ -131,7 +158,8 @@ export default function DeckEditor() {
           )}
           {!edit && saves !== null && (
             <div className="dke-empty">
-              {saves.length > 0 && <DeckButton id="ed-pick" primary onClick={() => setDialog('characters')}>{t('editor.page.pickCharacterButton')}</DeckButton>}
+              <DeckButton id="ed-open-file" primary disabled={saving || restoring} onClick={() => void browse()}>{t('editor.page.openFile')}</DeckButton>
+              {saves.length > 0 && <DeckButton id="ed-pick" onClick={() => setDialog('characters')}>{t('editor.page.pickCharacterButton')}</DeckButton>}
             </div>
           )}
         </div>
@@ -140,23 +168,23 @@ export default function DeckEditor() {
       {choice && <Choice {...choice} onClose={() => setChoice(null)} />}
       {dialog === 'characters' && (
         <Characters model={model} saves={saves ?? []} onClose={() => setDialog(null)}
-          onPick={(path) => { if (dirty && path !== model?.path) setDialog({ open: path }); else { setDialog(null); if (path !== model?.path) void openSave(path); } }} />
+          onPick={open} />
       )}
       {dialog === 'backups' && model && <Backups model={model} dirty={dirty} onClose={() => setDialog(null)} />}
       {dialog === 'discard' && (
-        <Dialog name="editor-discard" title={t('editor.page.discardTitle')} onClose={() => setDialog(null)}
+        <Dialog name="editor-discard" locked={blocked} title={t('editor.page.discardTitle')} onClose={() => setDialog(null)}
           buttons={<>
-            <DeckButton onClick={() => setDialog(null)}>{t('editor.page.cancel')}</DeckButton>
-            <DeckButton id="discard-confirm" primary onClick={() => { setDialog(null); discard(); }}>{t('editor.page.discard')}</DeckButton>
+            <DeckButton disabled={blocked} onClick={() => setDialog(null)}>{t('editor.page.cancel')}</DeckButton>
+            <DeckButton id="discard-confirm" disabled={blocked} primary onClick={() => { setDialog(null); discard(); }}>{t('editor.page.discard')}</DeckButton>
           </>}>
           <p className="deck-note">{t('editor.page.discardBody', { nome: model?.name ?? '' })}</p>
         </Dialog>
       )}
       {dialog?.open && (
-        <Dialog name="editor-switch" title={t('editor.page.discardTitle')} onClose={() => setDialog(null)}
+        <Dialog name="editor-switch" locked={blocked} title={t('editor.page.discardTitle')} onClose={() => setDialog(null)}
           buttons={<>
-            <DeckButton onClick={() => setDialog(null)}>{t('editor.page.cancel')}</DeckButton>
-            <DeckButton id="switch-confirm" primary onClick={() => { const p = dialog.open; setDialog(null); void openSave(p); }}>{t('editor.page.discardAndOpen')}</DeckButton>
+            <DeckButton disabled={blocked} onClick={() => setDialog(null)}>{t('editor.page.cancel')}</DeckButton>
+            <DeckButton id="switch-confirm" disabled={blocked} primary onClick={() => { const p = dialog.open; setDialog(null); void openSave(p); }}>{t('editor.page.discardAndOpen')}</DeckButton>
           </>}>
           <p className="deck-note">{t('editor.page.discardBody', { nome: model?.name ?? '' })}</p>
         </Dialog>
@@ -268,23 +296,21 @@ function Backups({ model, dirty, onClose }) {
   const [list, setList] = useState(null);
   const [err, setErr] = useState(null);
   const [confirm, setConfirm] = useState(null);
-  const [busy, setBusy] = useState(false);
+  const busy = useSession(mutationsBlocked);
   useEffect(() => { api.listBackups(model.path).then(setList).catch((e) => { setList([]); setErr(e.message); }); }, []);
   const restore = async (b) => {
-    setBusy(true);
     try {
-      await restoreBackup(b);
+      if (!await restoreBackup(b)) return;
       toast.ok(t('editor.backups.restored'));
       setConfirm(null); onClose();
     } catch (e) { setErr(e.message); setConfirm(null); }
-    setBusy(false);
   };
   if (confirm) {
     return (
       <Dialog name="editor-restore" title={t('editor.backups.restoreTitle')} onClose={() => setConfirm(null)} locked={busy}
         buttons={<>
           <DeckButton onClick={() => setConfirm(null)} disabled={busy}>{t('editor.page.cancel')}</DeckButton>
-          <DeckButton id="restore-confirm" primary disabled={busy} onClick={() => void restore(confirm)}>{t('editor.backups.restore')}</DeckButton>
+          <DeckButton id="restore-confirm" primary disabled={busy} onClick={() => void restore(confirm)}>{busy ? t('editor.backups.restoring') : t('editor.backups.restore')}</DeckButton>
         </>}>
         <p className="deck-note">{BACKUP_KIND[confirm.kind] ? t(BACKUP_KIND[confirm.kind]) : confirm.kind} · {dataHora(confirm.modified)}. {t('editor.backups.restoreBody')}{dirty ? ` ${t('editor.backups.dropsChanges')}` : ''}</p>
       </Dialog>
@@ -296,9 +322,14 @@ function Backups({ model, dirty, onClose }) {
       <div className="deck-list deck-scroll">
         {list === null && <p className="deck-note">{t('editor.backups.looking')}</p>}
         {list?.length === 0 && !err && <p className="deck-note">{t('editor.backups.none')}</p>}
-        {list?.map((b) => (
+        {backupGroups(list).map(({ legacy, entries }) => (
+          <section key={String(legacy)} data-backup-group={legacy ? 'legacy' : 'matching'}>
+            {legacy && <><h3 className="deck-label">{t('editor.backups.legacyTitle')}</h3><p className="deck-note">{t('editor.backups.legacyHint')}</p></>}
+            {entries.map((b) => (
           <Row key={b.path} id={`bk-${b.path}`} title={dataHora(b.modified)} sub={`${BACKUP_KIND[b.kind] ? t(BACKUP_KIND[b.kind]) : b.kind} · ${backupName(b)}`} a={t('editor.backups.restore')}
             onClick={() => setConfirm(b)} />
+            ))}
+          </section>
         ))}
       </div>
     </Dialog>

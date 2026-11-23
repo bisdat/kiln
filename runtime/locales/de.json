@@ -490,6 +490,7 @@
   },
   "keys": {
     "help_mouse": "Klicke auf eine Taste und drücke dann die neue: eine Taste, die mittlere oder eine Seitentaste der Maus oder eine Drehung des Mausrads, wenn du willst mit Ctrl, Shift oder Alt (Links- und Rechtsklick lassen sich nicht belegen). Klicke erneut, um abzubrechen; Escape bricht ab und schließt das Menü. Lösen lässt eine Aktion ohne Taste. Gespeichert in kiln/config/keybinds.json.",
+    "help_pad": "Ein Controller geht auch: Klicke auf eine Tastenbelegung und drücke eine Pad-Taste, oder halte LB, RB, LT oder RT und drücke eine weitere für eine Kombination (Pad:LB+A); drücke LB, RB, LT oder RT allein und lasse die Taste los, um sie zu belegen.",
     "help": "Klicke auf eine Taste und drücke dann die neue. Klicke erneut, um abzubrechen; Escape bricht ab und schließt das Menü. Lösen lässt eine Aktion ohne Taste. Gespeichert in kiln/config/keybinds.json.",
     "col_action": "Aktion",
     "col_key": "Taste",
@@ -499,7 +500,8 @@
     "reset": "Zurücksetzen",
     "unbind": "Lösen",
     "toast": {
-      "wheel_menu": "Die Taste des Kiln-Menüs kann nicht auf dem Mausrad liegen ({key}): Sie würde das Menü schließen, während du darin scrollst"
+      "wheel_menu": "Die Taste des Kiln-Menüs kann nicht auf dem Mausrad liegen ({key}): Sie würde das Menü schließen, während du darin scrollst",
+      "pad_menu": "Die Taste des Kiln-Menüs kann keine Controller-Taste sein ({key}): Das Menü öffnet sich über die Tastatur oder eine Maustaste"
     }
   },
   "network": {

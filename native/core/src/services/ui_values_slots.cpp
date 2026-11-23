@@ -35,7 +35,7 @@ namespace {
 
 constexpr uint32_t kSlotsBudget = 4096;
 constexpr size_t kSlotResultBytes = 0x20;
-constexpr size_t kRecordMin = offsetof(KilnUiVisibleSlot, holder);  // the chapter's record (88 bytes)
+constexpr size_t kRecordMin = offsetof(KilnUiVisibleSlotV2, holder);  // the chapter's record (88 bytes)
 
 struct SlotsLayout {
     ViewLayout view;
@@ -64,7 +64,7 @@ struct PageInfo {
     uint32_t holder = 0, ordinal = 0;
 };
 struct FrameCollector {
-    std::vector<KilnUiVisibleSlot>* slots = nullptr;  // reused buffer of the UI thread
+    std::vector<KilnUiVisibleSlotV2>* slots = nullptr;  // reused buffer of the UI thread
     bool overflow = false;
     bool holders_read = false;
     bool holders_valid = false;
@@ -128,7 +128,7 @@ void record(FrameCollector& f, const SlotCollector& c, uintptr_t out) {
         f.overflow = true;
         return;
     }
-    KilnUiVisibleSlot s{};
+    KilnUiVisibleSlotV2 s{};
     s.size = sizeof s;
     s.occurrence = static_cast<uint32_t>(f.slots->size());
     float outer[4];
@@ -157,6 +157,11 @@ void record(FrameCollector& f, const SlotCollector& c, uintptr_t out) {
         s.count = v.count;
         s.client_entity = v.client_entity;
         s.view_flags = v.flags;
+        if (v.item != 0) {  // dev.30.5 (#121): the level and rarity the game draws the slot with (the tooltip's values)
+            s.level = v.level;
+            s.rarity = v.rarity;
+            s.available |= KUI_ITEM_VALUES;
+        }
         if (!f.holders_read) {
             f.holders_read = true;
             f.holders_valid = read_holders(*f.pages);  // UiApp exists only while the frame runs
@@ -203,6 +208,12 @@ void publish(FrameCollector& f, uintptr_t sys10) {
         m.frame = screen.frame;
     }
     m.capture_ms = env().tick_ms ? env().tick_ms() : 0;
+    // the open container (dev.30.5): kiln.ui's screen_target, published inside the chain for this frame, only on the
+    // screens it is read for (22 storage chest, 41 the chest-style transfer screen, 28 a factory station)
+    uint32_t container = 0;
+    if (m.screen.size && m.screen.ui_state == KILN_UI_STATE_PLAY &&
+        (m.screen.hud_screen == 22 || m.screen.hud_screen == 41 || m.screen.hud_screen == 28) && env().screen_target)
+        container = env().screen_target();
     const uintptr_t sys = sys10 - static_cast<uintptr_t>(g_sl.frame_arg);
     float vp[4] = {};
     if (sys10 && game_read(sys + g_sl.canvas_w, &m.canvas_width) && game_read(sys + g_sl.canvas_h, &m.canvas_height) &&
@@ -243,6 +254,15 @@ void publish(FrameCollector& f, uintptr_t sys10) {
                 if (!(s.holder_flags & KUI_HOLDER_KNOWN)) continue;
                 s.holder_serial = r.holders[s.holder].first;
                 if (now.local_player && s.holder == now.local_player) s.holder_flags |= KUI_HOLDER_LOCAL_PLAYER;
+                // dev.30.5 (#121): the local player and the open container are the server's entities of those ids, and
+                // so are their item entities (a joined client keeps every replicated id and makes none of its own)
+                if (s.holder && ((s.holder_flags & KUI_HOLDER_LOCAL_PLAYER) || s.holder == container)) {
+                    s.holder_flags |= KUI_HOLDER_SERVER_PROVEN;
+                    if ((s.view_flags & KUI_CLIENT_ENTITY) && s.client_entity) {
+                        s.server_entity = s.client_entity;
+                        s.view_flags |= KUI_SERVER_ENTITY;
+                    }
+                }
             }
         }
         for (auto& s : frame->slots)
@@ -257,19 +277,29 @@ void publish(FrameCollector& f, uintptr_t sys10) {
     for (const auto& sp : *subs) {
         Provider& p = *sp;
         if (!provider_live(p)) continue;
-        if (env().call_slots &&
-            env().call_slots(reinterpret_cast<KilnUiSlotsFn>(p.fn), &m, frame->slots.data(), m.count, p.user))
-            succeeded(p);
-        else
-            fault(p, "faulted");
+        bool called = false;
+        if (p.flags == sizeof(KilnUiVisibleSlotV2)) {
+            called = env().call_slots_v2 && env().call_slots_v2(reinterpret_cast<KilnUiSlotsFnV2>(p.fn),
+                &m, frame->slots.data(), m.count, p.user);
+        } else {
+            std::vector<KilnUiVisibleSlot> legacy(m.count);
+            for (uint32_t i = 0; i < m.count; ++i) {
+                std::memcpy(&legacy[i], &frame->slots[i], sizeof(KilnUiVisibleSlot));
+                legacy[i].size = sizeof(KilnUiVisibleSlot);
+                legacy[i].available &= ~KUI_ITEM_VALUES;
+            }
+            called = env().call_slots && env().call_slots(reinterpret_cast<KilnUiSlotsFn>(p.fn),
+                &m, legacy.data(), m.count, p.user);
+        }
+        if (called) succeeded(p); else fault(p, "faulted");
     }
 }
 
 void hk_frame(void* sys10, void* p2) {
-    thread_local std::vector<KilnUiVisibleSlot>* t_buffer = nullptr;  // never freed: no TLS destructor in kiln-core
+    thread_local std::vector<KilnUiVisibleSlotV2>* t_buffer = nullptr;  // never freed: no TLS destructor in kiln-core
     thread_local std::unordered_map<uint32_t, PageInfo>* t_pages = nullptr;
     if (!t_buffer) {
-        t_buffer = new std::vector<KilnUiVisibleSlot>;
+        t_buffer = new std::vector<KilnUiVisibleSlotV2>;
         t_buffer->reserve(256);
         t_pages = new std::unordered_map<uint32_t, PageInfo>;
     }
@@ -336,8 +366,8 @@ struct SlotsInstaller {
 }  // namespace
 
 KilnResult slots_copy(KilnOwner owner, uint64_t expected_session, uint64_t expected_frame, KilnUiSlotsFrame* frame,
-                      KilnUiVisibleSlot* slots, uint32_t capacity, uint32_t* required) {
-    const uint32_t stride = capacity ? slots[0].size : static_cast<uint32_t>(sizeof(KilnUiVisibleSlot));
+                      KilnUiVisibleSlotV2* slots, uint32_t capacity, uint32_t* required) {
+    const uint32_t stride = capacity ? slots[0].size : static_cast<uint32_t>(sizeof(KilnUiVisibleSlotV2));
     if (capacity && stride < kRecordMin) return KILN_ERR_INVALID_ARGUMENT;
     if (!env().client_side || !env().client_side()) return KILN_ERR_UNAVAILABLE;
     if (!env().owner_alive(owner)) return KILN_ERR_REVOKED;
@@ -376,10 +406,10 @@ KilnResult slots_copy(KilnOwner owner, uint64_t expected_session, uint64_t expec
     *required = pick->meta.count;
     if (!pick->meta.ok) return KILN_OK;
     if (capacity < pick->meta.count) return KILN_ERR_BUFFER_TOO_SMALL;
-    const size_t n = std::min<size_t>(stride, sizeof(KilnUiVisibleSlot));
+    const size_t n = std::min<size_t>(stride, sizeof(KilnUiVisibleSlotV2));
     auto* out = reinterpret_cast<uint8_t*>(slots);
     for (uint32_t i = 0; i < pick->meta.count; ++i) {
-        KilnUiVisibleSlot s = pick->slots[i];
+        KilnUiVisibleSlotV2 s = pick->slots[i];
         s.size = static_cast<uint32_t>(n);
         std::memcpy(out + static_cast<size_t>(i) * stride, &s, n);
     }

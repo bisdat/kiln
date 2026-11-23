@@ -64,7 +64,7 @@
       "description": "dev.22, only with phase running: what the run is doing before the game's window exists.",
       "required": ["stage", "label", "doneBytes", "totalBytes", "filesDone", "filesTotal", "stageMs", "startedMs", "updatedMs"],
       "properties": {
-        "stage": { "enum": ["starting", "checking", "prepare", "mods", "writing", "saving"] },
+        "stage": { "enum": ["starting", "checking", "prepare", "mods", "writing", "saving", "startup"], "description": "startup (dev.30.5): a kiln-mode start's startup pass, which applies the startup data of the ShroudForge mods Kiln's interpreter runs; step says where it is." },
         "label": { "type": "string", "description": "The stage for a person: \"Checking the game data\"." },
         "doneBytes": { "type": "integer", "minimum": 0, "description": "Bytes read in this stage so far." },
         "totalBytes": { "type": "integer", "minimum": 0, "description": "Bytes the stage announced it will read (0: not known; the bar has no total)." },
@@ -74,7 +74,10 @@
         "quietMs": { "type": "integer", "minimum": 0, "description": "While a file is being read: milliseconds since a byte came. A large value is a read the drive is not answering." },
         "stageMs": { "type": "integer", "minimum": 0, "description": "How long the stage has lasted." },
         "startedMs": { "type": "integer", "minimum": 0, "description": "When the run began, milliseconds since 1970." },
-        "updatedMs": { "type": "integer", "minimum": 0, "description": "When this was written." }
+        "updatedMs": { "type": "integer", "minimum": 0, "description": "When this was written." },
+        "step": { "enum": ["checking", "mods", "verify", "write", "save"], "description": "Stage startup only: checking the game files, running the mods, checking the prepared game data, writing the game data, saving the result. doneBytes counts the bytes of the game's files read or written in this step." },
+        "stepNumber": { "type": "integer", "minimum": 1, "description": "Stage startup only: the step's number, 1 to steps." },
+        "steps": { "type": "integer", "minimum": 1, "description": "Stage startup only: how many steps there are (5; a start the startup cache serves ends after the first)." }
       }
     }
   }
