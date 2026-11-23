@@ -354,9 +354,10 @@ enum: Waiting, Shown, GameHighlight, Ended
 - `Height { get; } -> float` — Screen height in pixels (`RenderFrameEvent.Width` is the width).
 - `MenuOpen { get; } -> bool` — The Kiln menu is open.
 - `Scale { get; } -> float` — UI scale (DPI); multiply your own pixel sizes by it.
-- `Screen { get; } -> GameScreen` — The game's screen (main menu, in game, map, ...).
+- `Screen { get; } -> GameScreen` — The game's screen (main menu, in game, map, ...): the one read for this frame (since 0.2.0-dev.31; read again at...
 - `Width { get; } -> float` — Screen size in pixels.
 - `World { get; } -> WorldDraw` — Drawing at world positions with `RenderFrameEvent.Camera`.
+- `WorldOverMenus { get; } -> WorldDraw` `0.2.17` — Drawing at world positions like `RenderFrameEvent.World`, but also while a game menu (map, inventory, crafting, ...)...
 
 ## RenderStats — `Render.Stats`: handlers, frames posted, the time all handlers took (last frame and the slowest), handlers turned off, and the camera's state.
 - `RenderStats()`
@@ -495,9 +496,9 @@ enum: End, AfterStats
 - `static MenuAvailable { get; } -> bool` — The menu extension works on this build (kiln.craftmenu: the client's kiln.content).
 
 ## Ui.Inventory `0.2.12` — The game's own inventory slots (backpack, chests, stations): marks and clicks; panels beside the backpack and chest screens, and which of them is open with the...
-- `static AddChestButton(string caption, Action<InventoryScreen> handler) -> IDisposable` `0.2.16` — Adds a native game entry to the storage chest's action row, not a Kiln overlay panel.
+- `static AddChestButton(string caption, Action<InventoryScreen> handler) -> IDisposable` `0.2.17` — Adds a native game entry to the storage chest's action row, not a Kiln overlay panel.
 - `static AddPanel(UiText title, Action<UiDraw, InventoryScreen> draw, InventoryPanelOptions? options = null) -> IDisposable` — A Kiln panel docked beside the game's backpack and chest screens while they are open (Kiln.Ui's widgets, the...
-- `const ChestButtonCapability = "ui.chest.buttons" -> string` `0.2.16` — A game-drawn button in the storage chest's own action row.
+- `const ChestButtonCapability = "ui.chest.buttons" -> string` `0.2.17` — A game-drawn button in the storage chest's own action row.
 - `static ClearMarks() -> void` — Removes every mark of your mod.
 - `const ClickCapability = "ui.slots.click" -> string` — The capability row of `Inventory.OnClick`.
 - `static Hovered { get; } -> VisibleSlot?` — The slot under the cursor in the game's latest UI frame (null: none, or not known).
@@ -509,8 +510,8 @@ enum: End, AfterStats
 - `static Screen { get; } -> InventoryScreen?` — The game's backpack or chest screen open now, or null (any thread).
 - `static ScreenChanged -> Action<InventoryScreen?, InventoryScreen?>?` — (previous, current) on the game's UI thread right after the UI frame in which a backpack or chest screen opened...
 - `static Selected { get; } -> VisibleSlot?` `0.2.14` — The slot the game's own selection is on in its latest UI frame, on a screen with a pointer (the backpack and...
-- `const TintCapability = "ui.slots.tint" -> string` `0.2.16` — Native background colour rules for the game's own inventory slots.
-- `static TintWhen(Func<UiItemView, Color?> rule, ItemId item = default(ItemId)) -> IDisposable` `0.2.16` — Changes the game's own slot background, not an overlay mark.
+- `const TintCapability = "ui.slots.tint" -> string` `0.2.17` — Native background colour rules for the game's own inventory slots.
+- `static TintWhen(Func<UiItemView, Color?> rule, ItemId item = default(ItemId)) -> IDisposable` `0.2.17` — Changes the game's own slot background, not an overlay mark.
 - `static Unmark(EntityId item) -> void` — Removes your mod's mark from the item's slots (see `Inventory.Mark`).
 
 ## Ui.Menus — Entries in the game's own menus (Forge: adding buttons in ScreenEvent.Init): `Ui.Menus.Add`.

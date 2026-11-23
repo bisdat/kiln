@@ -81,6 +81,7 @@ internal static partial class KilnApis
         "M:Kiln.Bans.Add(System.UInt64,System.String,System.Nullable{System.TimeSpan})", // Bans.Add(ulong, string, TimeSpan?): Game.AssertTickThread
         "M:Kiln.Bans.Remove(System.UInt64)", // Bans.Remove(ulong): Game.AssertTickThread
         "M:Kiln.Bases.At(Kiln.WorldPosition)", // Bases.At(WorldPosition): via StationsCore.CheckRead(string)
+        "M:Kiln.Bases.Chests(Kiln.BaseId)", // Bases.Chests(BaseId): via StationsCore.CheckRead(string)
         "M:Kiln.Bases.FindRoomFor(Kiln.BaseId,Kiln.ItemId)", // Bases.FindRoomFor(BaseId, ItemId): via Bases.Storage(BaseId, bool)
         "M:Kiln.Bases.Get(Kiln.BaseId)", // Bases.Get(BaseId): via StationsCore.CheckRead(string)
         "M:Kiln.Bases.Of(Kiln.EntityId)", // Bases.Of(EntityId): via StationsCore.CheckRead(string)
@@ -428,6 +429,7 @@ internal static partial class KilnApis
         "M:Kiln.Items.EquipSet(Kiln.EquipmentSetPlan,Kiln.EquipOptions)", // Items.EquipSet(EquipmentSetPlan, EquipOptions): Services.RequireTickThread
         "M:Kiln.Items.Equipped(Kiln.EntityId,Kiln.EquipmentSlot)", // Items.Equipped(EntityId, EquipmentSlot): Services.RequireTickThread
         "M:Kiln.Items.FindInventories(Kiln.InventoryKinds)", // Items.FindInventories(InventoryKinds): via Items.Require(string)
+        "M:Kiln.Items.FindInventoryOwners(Kiln.InventoryKinds)", // Items.FindInventoryOwners(InventoryKinds): Services.RequireTickThread
         "M:Kiln.Items.Fuel.Add(Kiln.EntityId,System.Int32,System.Boolean)", // Items.Fuel.Add(EntityId, int, bool): via Items.Fuel.Submit(EntityId, uint, int, ItemId, bool, int)
         "M:Kiln.Items.Fuel.Fill(Kiln.EntityId,System.Boolean)", // Items.Fuel.Fill(EntityId, bool): via Items.Fuel.Submit(EntityId, uint, int, ItemId, bool, int)
         "M:Kiln.Items.Fuel.FillAll(Kiln.EntityId,Kiln.ItemId,System.Boolean)", // Items.Fuel.FillAll(EntityId, ItemId, bool): via Items.Fuel.Submit(EntityId, uint, int, ItemId, bool, int)

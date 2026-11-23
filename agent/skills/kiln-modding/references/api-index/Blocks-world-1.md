@@ -38,6 +38,7 @@
 - `static At(WorldPosition position) -> BaseInfo?` — The base a position lies in (the game's own lookup); null when none.
 - `static Available { get; } -> bool` — True when kiln.stations reads here (a server world, stations.read on).
 - `const Capability = "stations.read" -> string` — The capability row of the reads.
+- `static Chests(BaseId id) -> IReadOnlyList<EntityId>` `0.2.17` — The base's chests (since 0.2.0-dev.31, GitHub issue #138): its ordinary storage containers and its Magic chests...
 - `static FindRoomFor(BaseId id, ItemId item) -> EntityId?` — A crafting-stock container of the base that takes deposits (`Bases.Storage` with deposit) for `item`: one that holds...
 - `static Get(BaseId id) -> BaseInfo?` — The base with this id; null when none has it now.
 - `static Of(EntityId entity) -> BaseInfo?` — The base the entity stands in (the game's own lookup by position); null when none.
@@ -294,9 +295,9 @@ enum: Soft, SlightlyHard, ModeratelyHard, Hard, VeryHard, Unbreakable
 
 ## MenuBlock — The crafting menu a station opens.
 - `Like { get; init; } -> StationKind?` — The station whose menu it opens.
-- `Tabs { get; init; } -> IReadOnlyList<StationMenuTabBlock>?` `0.2.16` — The menu in tabs of its own: each tab a name, the icon of a tab of the menu it is `MenuBlock.Like`, and sets of...
+- `Tabs { get; init; } -> IReadOnlyList<StationMenuTabBlock>?` `0.2.17` — The menu in tabs of its own: each tab a name, the icon of a tab of the menu it is `MenuBlock.Like`, and sets of...
 
-## MenuDefinitionResult `0.2.16` — What `StationMenus.Define` answered.
+## MenuDefinitionResult `0.2.17` — What `StationMenus.Define` answered.
 - `Generation { get; init; } -> ulong` — The generation of this game's station menus after the call.
 - `Ok { get; init; } -> bool` — The layout is stored and shows on the station's menu.
 - `Reason { get; init; } -> string` — Why not, a word first: `PendingContent` (a recipe it lists is not in the game yet: try again after the next content...

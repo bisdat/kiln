@@ -43,6 +43,22 @@ enum: Real, RecordingFake, Unavailable
 - `Override { get; init; } -> bool` — True for an override of a hash, false for an added blob.
 - `Owner { get; init; } -> ulong` — The native owner it was registered under (the mod's).
 
+## TestKit.FakeCameraCall `0.2.17` — A camera call that reached the fake kiln.camera (one the service would have answered through its callback; a call it turns away at once is not recorded).
+- `FakeCameraCall()`
+- `FakeCameraCall(ulong Step, TestKit.FakeCameraCallKind Kind, ulong Lease, uint Endpoint, EntityId Player, uint Parts, uint DurationMs, int Priority, uint Refusal)`
+- `DurationMs { get; init; } -> uint` — The request's duration; 0 for an end.
+- `Endpoint { get; init; } -> uint` — 1 a server mode lock, 2 the local view, 3 a remote view (`CameraEndpoint`'s numbers).
+- `Kind { get; init; } -> TestKit.FakeCameraCallKind` — Which call.
+- `Lease { get; init; } -> ulong` — The lease's number: the new one for an apply.
+- `Parts { get; init; } -> uint` — The request's parts as the service's bits: 1 mode, 2 path, 4 profile, 8 shake, 16 lens.
+- `Player { get; init; } -> EntityId` — The player whose camera it is; none for the local view.
+- `Priority { get; init; } -> int` — The request's priority; 0 for an end.
+- `Refusal { get; init; } -> uint` — 0 when the fake accepted it, else the reason's number (`CameraReason`).
+- `Step { get; init; } -> ulong` — The step it was made in.
+
+## TestKit.FakeCameraCallKind `0.2.17` — What a camera call asked of the fake kiln.camera.
+enum: Apply, Update, End
+
 ## TestKit.FakeChatLine `0.2.2` — A line in a fake player's chat (`FakePlayer.Chat`), or a server line a mod sent (`HarnessChat.Sent`).
 - `ModId { get; } -> string?` — The mod that sent a server line; null for a player's typed line and for Kiln's own lines.
 - `Speaker { get; } -> string?` — Who speaks it: a player's name for a typed line or `Chat.Say`; null for a notice (`Chat.Tell`, `Chat.Broadcast`...
@@ -160,6 +176,7 @@ enum: Queued, Held, Applied, Dropped
 - `Clear() -> void` — Empties every slot, as if the game had (gear's item entities go too).
 - `Count(ItemId item) -> int` — How many of `item` the inventory holds.
 - `Count(string name) -> int` — How many of the item named `name` (as `HarnessItems.AddItem` named it) it holds.
+- `Kind { get; set; } -> InventoryOwnerKind` `0.2.17` — What kiln.items.inventory_kinds answers for this container (`Items.FindInventoryOwners`)...
 - `Owner { get; } -> EntityId` — The entity whose inventory it is.
 - `Put(ItemId item, int count = 1) -> int` — Puts `count` x `item` in, as if the game had (stacks first, then empty slots; no transaction, no event).
 - `Slots { get; } -> IReadOnlyList<TestKit.FakeSlot>` — Every slot, empty ones included, in the order `Items.Read` lists them.
@@ -228,7 +245,7 @@ enum: GameFirst, ModsFirst, Off
 - `To { get; init; } -> WorldPosition` — Where the route should end.
 - `VerticalSpace { get; init; } -> double` — The free space the route needs upwards, in metres.
 
-## TestKit.FakePhysicsCookHost `0.2.16` — A stand-in for `kiln cook`'s physics step in unit tests: the two cook features (`modelcook.cloth`, `modelcook.chains2`, on since 0.2.0-dev.31...
+## TestKit.FakePhysicsCookHost `0.2.17` — A stand-in for `kiln cook`'s physics step in unit tests: the two cook features (`modelcook.cloth`, `modelcook.chains2`, on since 0.2.0-dev.31...
 - `FakePhysicsCookHost(params string[] experimental)` — A host for a recipe whose `"experimental"` key lists `experimental`.
 - `static ContentHashOf(byte[] bytes) -> string` — A new content blob's hash as kiln.assets derives it: the size and the first 12 bytes of SHA-256 as three...
 - `Cook(string model, IEnumerable<string> needs, IReadOnlyDictionary<string, byte[]> outputs, string? refusal = null) -> TestKit.PhysicsCookResult` — One model's cook: refused (nothing committed, nothing registered) when a feature it `needs` is off or when `refusal`...
@@ -288,7 +305,7 @@ enum: GameFirst, ModsFirst, Off
 - `Program { get; init; } -> string` — The program.
 - `Step { get; init; } -> ulong` — The world's step.
 
-## TestKit.FakeReplComponent `0.2.16` — A component of the fake world's registry (`HarnessRepl.AddComponent`): what `Replication.Component` reads, and how a message's component is named and flagged.
+## TestKit.FakeReplComponent `0.2.17` — A component of the fake world's registry (`HarnessRepl.AddComponent`): what `Replication.Component` reads, and how a message's component is named and flagged.
 - `FakeReplComponent(string Name, ushort Index, ushort Size, bool Replicated = true, bool Versioned = false, bool CustomCodec = false, bool ClientChannel = true, bool PredictionChannel = false)`
 - `ClientChannel { get; init; } -> bool` — It may travel on the client channel.
 - `CustomCodec { get; init; } -> bool` — The game packs it with a codec of its own (ReplSent.PackedByGame).
@@ -299,7 +316,7 @@ enum: GameFirst, ModsFirst, Off
 - `Size { get; init; } -> ushort` — Bytes of one component.
 - `Versioned { get; init; } -> bool` — A version byte travels with it.
 
-## TestKit.FakeReplItemSite `0.2.16` — A field or strided array of little-endian item IDs in a scripted replication component.
+## TestKit.FakeReplItemSite `0.2.17` — A field or strided array of little-endian item IDs in a scripted replication component.
 - `FakeReplItemSite()`
 - `FakeReplItemSite(string component, ushort offset, ushort count = 1, ushort stride = 0)`
 - `Component { get; } -> string` — The component registered with `HarnessRepl.AddComponent`.
@@ -307,10 +324,10 @@ enum: GameFirst, ModsFirst, Off
 - `Offset { get; } -> ushort` — The first item's byte offset.
 - `Stride { get; } -> ushort` — Byte spacing between IDs when the count is greater than one.
 
-## TestKit.FakeReplKind `0.2.16` — What a replication message did to an entity, as kiln.repl numbers it.
+## TestKit.FakeReplKind `0.2.17` — What a replication message did to an entity, as kiln.repl numbers it.
 enum: Create, Update
 
-## TestKit.FakeReplMessage `0.2.16` — One create or update message about an entity (`HarnessRepl.Send`, `HarnessRepl.Receive`).
+## TestKit.FakeReplMessage `0.2.17` — One create or update message about an entity (`HarnessRepl.Send`, `HarnessRepl.Receive`).
 - `FakeReplMessage(EntityId Entity, TestKit.FakeReplKind Kind, uint Tick)`
 - `BaselineTick { get; init; } -> uint` — An update's baseline tick (0: the template).
 - `Channel { get; init; } -> byte` — The channel: 4 (client, the default) or 5 (prediction).
@@ -421,7 +438,7 @@ enum: Entity, Item, Destroy, Cleanup
 - `SlotIndex { get; init; } -> byte` — The slot's index on its page; valid with flag 4.
 - `UnitsPerCharge { get; init; } -> uint` — The detail view's divisor for fuel (at least 1; default 1).
 
-## TestKit.FakeVitals `0.2.16` — The local player's health, stamina and mana and their maxima, as the game has them.
+## TestKit.FakeVitals `0.2.17` — The local player's health, stamina and mana and their maxima, as the game has them.
 - `FakeVitals()`
 - `FakeVitals(uint Health, uint HealthMax, uint Stamina = 0, uint StaminaMax = 0, uint Mana = 0, uint ManaMax = 0)`
 - `Deconstruct(out uint Health, out uint HealthMax, out uint Stamina, out uint StaminaMax, out uint Mana, out uint ManaMax) -> void`
@@ -469,14 +486,14 @@ enum: Entity, Item, Destroy, Cleanup
 - `TryGet<T>(EntityId entity, out T value) -> bool` — The entity's component; false when it has none (or one of another size).
 - `Writes { get; } -> IReadOnlyList<TestKit.FakeWorldWrite>` — Every tracked write a mod asked for that reached the world, in the order they ran, with what became of each (a write...
 
-## TestKit.FakeWorldPosition `0.2.16` — The local player's position, in metres (the publication carries it in 32.32 fixed point).
+## TestKit.FakeWorldPosition `0.2.17` — The local player's position, in metres (the publication carries it in 32.32 fixed point).
 - `FakeWorldPosition()`
 - `FakeWorldPosition(double X, double Y, double Z)`
 - `X { get; init; } -> double`
 - `Y { get; init; } -> double`
 - `Z { get; init; } -> double`
 
-## TestKit.FakeWorldSample `0.2.16` — What a test publishes through `HarnessUiSnapshot.Publish`: each group it gives is in the publication when something demanded it.
+## TestKit.FakeWorldSample `0.2.17` — What a test publishes through `HarnessUiSnapshot.Publish`: each group it gives is in the publication when something demanded it.
 - `HostHours { get; init; } -> double?` — The hour of the world this game hosts (`UiWorldFields.HostTime`).
 - `Inventory { get; init; } -> IReadOnlyList<TestKit.FakeWorldSlot>?` — The own inventory's nonempty slots (`UiWorldFields.LocalInventory`), in any order: the publication sorts them by...
 - `LocalPlayer { get; init; } -> uint` — The local player's entity (each inventory slot's holder).
@@ -484,7 +501,7 @@ enum: Entity, Item, Destroy, Cleanup
 - `Unavailable { get; init; } -> IReadOnlyDictionary<UiWorldFields, string>?` — Groups that are missing for a reason of their own, by one `UiWorldFields` bit each.
 - `Vitals { get; init; } -> TestKit.FakeVitals?` — Health, stamina and mana (`UiWorldFields.LocalVitals`).
 
-## TestKit.FakeWorldSlot `0.2.16` — One nonempty slot of the local player's own inventory.
+## TestKit.FakeWorldSlot `0.2.17` — One nonempty slot of the local player's own inventory.
 - `FakeWorldSlot()`
 - `FakeWorldSlot(uint Item, uint Count, uint InventoryPage = 0, uint SlotIndex = 0, uint Pide = 0)`
 - `Count { get; init; } -> uint`
@@ -534,6 +551,15 @@ enum: Entity, Item, Destroy, Cleanup
 - `Run(string folder, bool commit = true) -> TestKit.BootRun` — Runs the OnBoot of the mod in `folder` (a built mod folder with a kiln.mod.json that has `"boot"`) and, with...
 - `Runs { get; } -> IReadOnlyList<TestKit.BootRun>` — Every run of this harness, in order.
 - `SetRecord(string key, string valueJson, Guid resourceId = default(Guid), uint typeHash = 0, int part = 0) -> void` — A record `boot.GameData.Read()` answers: its value as camelCase JSON.
+
+## TestKit.HarnessCamera `0.2.17` — The fake kiln.camera of a harness (`KilnHarness.Camera`): Kiln.Camera's own code runs on it.
+- `Calls { get; } -> IReadOnlyList<TestKit.FakeCameraCall>` — Every camera call the fake answered through its callback, in order.
+- `End(ulong lease, uint endReason) -> bool` — Ends an applied lease by itself, as the service would for `endReason` (`CameraEndReason`'s numbers: 2 expired, 3...
+- `Expire(ulong lease) -> bool` — Lets a lease run out, as its duration would: its change event (ended, expired) goes out at the next step.
+- `KilnClient(EntityId player, ulong parts = 30) -> void` — Makes `player`'s client a Kiln client that offers `parts` (`CameraCapability`'s local part bits: 2 pose, 4 lens, 8...
+- `Leases { get; } -> IReadOnlyList<ulong>` — The numbers of the leases that hold a camera now.
+- `RefuseNext(uint reason) -> void` — The next apply or update that the lease rules would accept is refused with `reason` instead (`CameraReason`'s...
+- `StopWorld() -> int` — The world stops: at the next step every applied lease ends `WorldStopped` and a waiting apply or update is answered...
 
 ## TestKit.HarnessCapabilities `0.2.1` — The capability rows mods see offline (`KilnHarness.Capabilities`): every Kiln service the kit has no fake for is unavailable with reason `offline`, so a mod's own...
 - `All { get; } -> IReadOnlyList<TestKit.CapabilityRow>` — Every row, sorted by name.

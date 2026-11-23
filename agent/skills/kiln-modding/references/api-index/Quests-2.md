@@ -456,26 +456,26 @@ enum: Shrine, Sanctum
 - `Rescued { get; } -> bool?` — Whether the survivor is rescued in this world (tick thread; null when it cannot be read).
 - `RescuedFor(Player player) -> bool?` — Whether the survivor is rescued as this character sees it (the world's value, or its own twin in personal...
 
-## SurvivorAssignmentChangedEvent `0.2.16` — A survivor's bed changed: by `Survivors.AssignBed`/`Survivors.UnassignBed` (`SurvivorEvent.ByKiln`), or by the game (a player's summon tool, a destroyed bed, the...
+## SurvivorAssignmentChangedEvent `0.2.17` — A survivor's bed changed: by `Survivors.AssignBed`/`Survivors.UnassignBed` (`SurvivorEvent.ByKiln`), or by the game (a player's summon tool, a destroyed bed, the...
 - `NewBed { get; } -> EntityId` — The bed after; None when it has none now.
 - `OldBed { get; } -> EntityId` — The bed before; None when it had none.
 
-## SurvivorAssignmentOptions `0.2.16` — How a bed assignment is authorized.
+## SurvivorAssignmentOptions `0.2.17` — How a bed assignment is authorized.
 - `SurvivorAssignmentOptions(EntityId Actor, SurvivorAuthorization Authorization = SurvivorAuthorization.PlayerPermissions)`
 - `Actor { get; init; } -> EntityId` — The player acting (PlayerPermissions); `EntityId.None` with TrustedServer.
 - `Authorization { get; init; } -> SurvivorAuthorization` — PlayerPermissions (the default) or TrustedServer.
 - `static Trusted { get; } -> SurvivorAssignmentOptions` — TrustedServer with no actor: for server code that is its own authority.
 
-## SurvivorAuthorization `0.2.16` — Who answers for a bed assignment (`SurvivorAssignmentOptions`).
+## SurvivorAuthorization `0.2.17` — Who answers for a bed assignment (`SurvivorAssignmentOptions`).
 enum: PlayerPermissions, TrustedServer
 
-## SurvivorCompletion `0.2.16` — How a survivor request ended.
+## SurvivorCompletion `0.2.17` — How a survivor request ended.
 enum: Done, NoChange, Refused, TimedOut, Partial, WorldEnded, Indeterminate
 
-## SurvivorEffects `0.2.16` — What a survivor request really wrote (`SurvivorResult.Effects`).
+## SurvivorEffects `0.2.17` — What a survivor request really wrote (`SurvivorResult.Effects`).
 enum: None, KnowledgeWritten, RegistryConfirmed, ToolGiven, EntityCreated, HomeMoved, BedChanged
 
-## SurvivorEvent `0.2.16` — The base of the survivor events: the survivor, its state before and after, the request (0: the game).
+## SurvivorEvent `0.2.17` — The base of the survivor events: the survivor, its state before and after, the request (0: the game).
 - `After { get; } -> SurvivorInfo` — Its state after the change.
 - `Before { get; } -> SurvivorInfo` — Its state before the change.
 - `ByKiln { get; } -> bool` — True when a Kiln request made the change.
@@ -483,12 +483,12 @@ enum: None, KnowledgeWritten, RegistryConfirmed, ToolGiven, EntityCreated, HomeM
 - `Step { get; } -> ulong` — The server-world step.
 - `Survivor { get; } -> SurvivorId` — The survivor.
 
-## SurvivorId `0.2.16` — A survivor: the game's roster id of an NPC (its NpcId, FNV-1a-32 of the NPC template's GUID; the same value as `Villager.NpcId`).
+## SurvivorId `0.2.17` — A survivor: the game's roster id of an NPC (its NpcId, FNV-1a-32 of the NPC template's GUID; the same value as `Villager.NpcId`).
 - `SurvivorId()`
 - `SurvivorId(uint Value)`
 - `Value { get; init; } -> uint` — The NpcId.
 
-## SurvivorInfo `0.2.16` — A roster survivor as the world has it now.
+## SurvivorInfo `0.2.17` — A roster survivor as the world has it now.
 - `SurvivorInfo(SurvivorId Id, string DebugName, bool Unlocked, ItemId SummonTool, EntityId Entity, EntityId Bed, Guid? BaseId, WorldPosition? Home)`
 - `BaseId { get; init; } -> Guid?` — The base whose build zone holds its home; null when none.
 - `Bed { get; init; } -> EntityId` — Its bed (the NPC's side of the relation); None when it has none or is not in the world.
@@ -499,13 +499,13 @@ enum: None, KnowledgeWritten, RegistryConfirmed, ToolGiven, EntityCreated, HomeM
 - `SummonTool { get; init; } -> ItemId` — The item that summons it; `ItemId` 0 when it has none.
 - `Unlocked { get; init; } -> bool` — Recruited for the world (the game's NPC registry).
 
-## SurvivorRecruitedEvent `0.2.16` — A survivor was recruited for the world by `Survivors.RecruitWorld` or `Survivors.Summon` (the NPC registry confirmed the unlock).
+## SurvivorRecruitedEvent `0.2.17` — A survivor was recruited for the world by `Survivors.RecruitWorld` or `Survivors.Summon` (the NPC registry confirmed the unlock).
 
-## SurvivorRecruitOptions `0.2.16` — Options of `Survivors.RecruitWorld`.
+## SurvivorRecruitOptions `0.2.17` — Options of `Survivors.RecruitWorld`.
 - `SurvivorRecruitOptions(Player? GiveToolTo = null)`
 - `GiveToolTo { get; init; } -> Player?` — A player in game who gets one summon tool after the unlock; null for none.
 
-## SurvivorResult `0.2.16` — The end of a survivor request.
+## SurvivorResult `0.2.17` — The end of a survivor request.
 - `SurvivorResult(bool Ok, string? Reason, SurvivorInfo Before, SurvivorInfo After, bool AfterKnown, SurvivorEffects Effects, SurvivorCompletion Completion, EntityId DisplacedNpc, int Steps)`
 - `After { get; init; } -> SurvivorInfo` — A readback at the end (`AfterKnown`), else the last confirmed state.
 - `AfterKnown { get; init; } -> bool` — After is a readback.
@@ -517,7 +517,7 @@ enum: None, KnowledgeWritten, RegistryConfirmed, ToolGiven, EntityCreated, HomeM
 - `Reason { get; init; } -> string?` — "Code: words" when not Ok (codes in docs/kiln/services/survivors.md).
 - `Steps { get; init; } -> int` — World updates from acceptance to the end.
 
-## Survivors `0.2.16` — The game's roster survivors: read, recruit, summon, beds.
+## Survivors `0.2.17` — The game's roster survivors: read, recruit, summon, beds.
 - `static AssignBed(SurvivorId id, EntityId bed, SurvivorAssignmentOptions options) -> Task<SurvivorResult>` — Assigns a bed to a survivor: both ends of the game's relation are written in one step (saved and sent to players...
 - `const AssignCapability = "survivors.assign" -> string` — The capability of `Survivors.AssignBed` and `Survivors.UnassignBed`.
 - `static BaseAt(WorldPosition position) -> Guid?` — The base whose build zone holds `position` (the id `Survivors.Summon` takes); null when no loaded base zone holds it.
@@ -532,9 +532,9 @@ enum: None, KnowledgeWritten, RegistryConfirmed, ToolGiven, EntityCreated, HomeM
 - `const SummonCapability = "survivors.summon" -> string` — The capability of `Survivors.Summon`.
 - `static UnassignBed(SurvivorId id, SurvivorAssignmentOptions options) -> Task<SurvivorResult>` — Takes a survivor's bed away: both ends are cleared (and any stale bed that still names it).
 
-## SurvivorSummonedEvent `0.2.16` — A survivor was brought into a base (`Survivors.Summon`).
+## SurvivorSummonedEvent `0.2.17` — A survivor was brought into a base (`Survivors.Summon`).
 
-## SurvivorToolGivenEvent `0.2.16` — A survivor's summon tool went into a player's inventory (`Survivors.RecruitWorld`).
+## SurvivorToolGivenEvent `0.2.17` — A survivor's summon tool went into a player's inventory (`Survivors.RecruitWorld`).
 
 ## WorldDifficulty — The world's difficulty: the server's preset and the game settings in effect (kiln.settings).
 - `WorldDifficulty(string? Preset, IReadOnlyDictionary<string, object> Settings)`

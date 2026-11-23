@@ -1,6 +1,6 @@
 # ModValues (Kiln.ModValues)
 
-## ModValueCauses `0.2.16` — Why a `ModValueChangedEvent` was posted (its `ModValueChangedEvent.Cause`).
+## ModValueCauses `0.2.17` — Why a `ModValueChangedEvent` was posted (its `ModValueChangedEvent.Cause`).
 - `const Changed = "changed" -> string` — Add, Spend or Set.
 - `const EpochReset = "epoch-reset" -> string` — A higher carry epoch reset carried progress.
 - `const Imported = "imported" -> string` — A client's carried copy raised the value (maximum merge).
@@ -8,7 +8,7 @@
 - `const Migrated = "migrated" -> string` — A higher definition version converted the saved value (scale, bounds, levels, kind, partition).
 - `const Reset = "reset" -> string` — Reset to the initial value.
 
-## ModValueChangedEvent `0.2.16` — A value of a character changed on the server (tick thread, after the change).
+## ModValueChangedEvent `0.2.17` — A value of a character changed on the server (tick thread, after the change).
 - `ModValueChangedEvent(CharacterKey character, ModValueKey key, ModValueSnapshot? before, ModValueSnapshot? after, string cause, ulong requestId)`
 - `After { get; } -> ModValueSnapshot?`
 - `Before { get; } -> ModValueSnapshot?` — Null when the value did not exist before (`ModValueCauses.Initialized`).
@@ -17,7 +17,7 @@
 - `Key { get; } -> ModValueKey`
 - `RequestId { get; } -> ulong` — The native caller's request id; 0 for managed calls.
 
-## ModValueDefinition `0.2.16` — A definition as Kiln knows it (described or active): what a UI needs to show a value.
+## ModValueDefinition `0.2.17` — A definition as Kiln knows it (described or active): what a UI needs to show a value.
 - `ModValueDefinition(ModValueKey Key, ModValueKind Kind, UiText Label, UiText NumberFormat, long Min, long Max, long Initial, int Scale, IReadOnlyList<long> Thresholds, ModValuePersistence Persistence, uint Version, uint CarryEpoch, ModValueReadPolicy ReadPolicy, IReadOnlyList<string> ReadMods, ModValueSyncPolicy Sync, bool Active)`
 - `Active { get; init; } -> bool`
 - `CarryEpoch { get; init; } -> uint`
@@ -36,42 +36,42 @@
 - `Thresholds { get; init; } -> IReadOnlyList<long>`
 - `Version { get; init; } -> uint`
 
-## ModValueDefinitionChangedEvent `0.2.16` — A definition was described, activated or retired (its mod unloaded).
+## ModValueDefinitionChangedEvent `0.2.17` — A definition was described, activated or retired (its mod unloaded).
 - `ModValueDefinitionChangedEvent(ModValueKey key, ModValueDefinition? definition, string change)`
 - `Change { get; } -> string` — "described", "activated" or "retired".
 - `Definition { get; } -> ModValueDefinition?` — Null when retired.
 - `Key { get; } -> ModValueKey`
 
-## ModValueDefinitionResult `0.2.16` — Result of `ModValues.Describe` and `ModValues.Define`.
+## ModValueDefinitionResult `0.2.17` — Result of `ModValues.Describe` and `ModValues.Define`.
 - `ModValueDefinitionResult(bool Ok, string? Reason, ModValueKey? Key)`
 - `Key { get; init; } -> ModValueKey?`
 - `Ok { get; init; } -> bool`
 - `Reason { get; init; } -> string?`
 
-## ModValueImportedEvent `0.2.16` — A client's carried offer was applied (tick thread): how many values went up, stayed, were rejected.
+## ModValueImportedEvent `0.2.17` — A client's carried offer was applied (tick thread): how many values went up, stayed, were rejected.
 - `ModValueImportedEvent(CharacterKey character, int applied, int unchanged, int rejected)`
 - `Applied { get; } -> int`
 - `Character { get; } -> CharacterKey`
 - `Rejected { get; } -> int`
 - `Unchanged { get; } -> int`
 
-## ModValueImportingEvent `0.2.16` — A client offered its carried copy of values (progress from other worlds).
+## ModValueImportingEvent `0.2.17` — A client offered its carried copy of values (progress from other worlds).
 - `ModValueImportingEvent(CharacterKey character, IReadOnlyList<ModValueKey> offered)`
 - `Character { get; } -> CharacterKey`
 - `Offered { get; } -> IReadOnlyList<ModValueKey>` — The keys in the offer (also ones that will be rejected).
 - `Reason { get; set; } -> string` — Logged and counted when canceled.
 
-## ModValueKey `0.2.16` — A value's name: the defining mod's id and the value's id, written "mod:id".
+## ModValueKey `0.2.17` — A value's name: the defining mod's id and the value's id, written "mod:id".
 - `ModValueKey()`
 - `ModValueKey(string Mod, string Id)`
 - `Id { get; init; } -> string` — The value's id: `[a-z][a-z0-9._-]{0,63}`.
 - `Mod { get; init; } -> string` — The defining mod's id (lowercase), or a native owner's namespace ("native." and 32 hex digits).
 - `static TryParse(string? text, out ModValueKey key) -> bool` — Reads "mod:id" (exactly one colon, no spaces).
 
-## ModValueKind `0.2.16` — What a mod value is.
+## ModValueKind `0.2.17` — What a mod value is.
 enum: Counter, Currency, Experience
 
-## ModValueOptions `0.2.16` — How a mod value behaves: the same fields as a `mod-values/*.json` entry.
+## ModValueOptions `0.2.17` — How a mod value behaves: the same fields as a `mod-values/*.json` entry.
 - `ModValueOptions(ModValueKind Kind, UiText Label, long Min = 0, long Max = 9223372036854775807, long? Initial = null, int Scale = 0, IReadOnlyList<long>? Thresholds = null, UiText? NumberFormat = null, ModValuePersistence Persistence = ModValuePersistence.World, bool TrustClientImports = false, uint Version = 1, uint CarryEpoch = 1, ModValueReadPolicy ReadPolicy = ModValueReadPolicy.OwnerOnly, IReadOnlyList<string>? ReadMods = null, ModValueSyncPolicy Sync = ModValueSyncPolicy.OwnerMod, bool AllowPartitionMove = false, bool ResetOnKindChange = false)`
 - `AllowPartitionMove { get; init; } -> bool` — With a new version: move a value between World and Carried instead of holding it.
 - `CarryEpoch { get; init; } -> uint` — Carried only: raise it to reset carried progress everywhere.
@@ -91,19 +91,19 @@ enum: Counter, Currency, Experience
 - `TrustClientImports { get; init; } -> bool` — Required for Carried: the value may come in from a client's copy (by maximum).
 - `Version { get; init; } -> uint` — Raise it when you change kind, bounds, scale, thresholds, initial or persistence.
 
-## ModValuePersistence `0.2.16` — Where a value lives.
+## ModValuePersistence `0.2.17` — Where a value lives.
 enum: World, Carried
 
-## ModValueReadPolicy `0.2.16` — Which mods may read a value (cooperative protection between mods, not a sandbox).
+## ModValueReadPolicy `0.2.17` — Which mods may read a value (cooperative protection between mods, not a sandbox).
 enum: OwnerOnly, Public, AllowList
 
-## ModValueReadResult `0.2.16` — Result of `ModValues.Read` and `ModValues.Synced`.
+## ModValueReadResult `0.2.17` — Result of `ModValues.Read` and `ModValues.Synced`.
 - `ModValueReadResult(bool Ok, string? Reason, ModValueSnapshot? Value)`
 - `Ok { get; init; } -> bool`
 - `Reason { get; init; } -> string?`
 - `Value { get; init; } -> ModValueSnapshot?`
 
-## ModValueReasons `0.2.16` — The reasons a mod value call is refused (`IKilnResult.Reason`).
+## ModValueReasons `0.2.17` — The reasons a mod value call is refused (`IKilnResult.Reason`).
 - `const AccessDenied = "AccessDenied" -> string`
 - `const BoundExceeded = "BoundExceeded" -> string`
 - `const Budget = "Budget" -> string` — A limit: 128 definitions per mod, revision numbers exhausted.
@@ -120,14 +120,14 @@ enum: OwnerOnly, Public, AllowList
 - `const StaleRevision = "StaleRevision" -> string`
 - `const Undefined = "Undefined" -> string`
 
-## ModValueResult `0.2.16` — Result of a change.
+## ModValueResult `0.2.17` — Result of a change.
 - `ModValueResult(bool Ok, string? Reason, ModValueSnapshot? Before, ModValueSnapshot? After)`
 - `After { get; init; } -> ModValueSnapshot?`
 - `Before { get; init; } -> ModValueSnapshot?`
 - `Ok { get; init; } -> bool`
 - `Reason { get; init; } -> string?`
 
-## ModValues `0.2.16` — A mod's own per-character values: counters, currencies, and experience with levels.
+## ModValues `0.2.17` — A mod's own per-character values: counters, currencies, and experience with levels.
 - `static Add(CharacterKey character, ModValueKey key, long amount, ModValueVersion? expected = null) -> ModValueResult` — Adds `amount` (an award; a counter also takes a negative amount).
 - `static Define(string id, ModValueOptions options) -> ModValueDefinitionResult` — Activates the calling mod's value `id` on the server (describes it too).
 - `static Definition(ModValueKey key) -> ModValueDefinition?` — A known definition (described here, active on a server, or received from the server): label, format, kind, levels.
@@ -140,7 +140,7 @@ enum: OwnerOnly, Public, AllowList
 - `static Spend(CharacterKey character, ModValueKey key, long amount, ModValueVersion? expected = null) -> ModValueResult` — Spends a positive `amount` of a currency.
 - `static Synced(ModValueKey key) -> ModValueReadResult` — Client: this player's copy of a value, as the server last sent it (any thread).
 
-## ModValueSnapshot `0.2.16` — One value of one character, as of one moment (a copy: changing nothing).
+## ModValueSnapshot `0.2.17` — One value of one character, as of one moment (a copy: changing nothing).
 - `ModValueSnapshot(Guid World, CharacterKey Character, ModValueKey Key, long Value, int Level, int Scale, ModValueKind Kind, ModValuePersistence Persistence, uint DefinitionVersion, uint CarryEpoch, ulong ValueRevision, ulong PartitionRevision)`
 - `CarryEpoch { get; init; } -> uint`
 - `Character { get; init; } -> CharacterKey`
@@ -156,13 +156,13 @@ enum: OwnerOnly, Public, AllowList
 - `Version { get; } -> ModValueVersion` — The version to pass back for compare-and-set.
 - `World { get; init; } -> Guid`
 
-## ModValuesSnapshotPublishedEvent `0.2.16` — A whole update of the client's synced copy is in place (after its `ModValueSyncedEvent`s).
+## ModValuesSnapshotPublishedEvent `0.2.17` — A whole update of the client's synced copy is in place (after its `ModValueSyncedEvent`s).
 - `ModValuesSnapshotPublishedEvent(string nonce, ulong sequence, bool full)`
 - `Full { get; } -> bool` — A full replacement (a new stream, a resync) rather than a change.
 - `Nonce { get; } -> string`
 - `Sequence { get; } -> ulong`
 
-## ModValueSyncedEvent `0.2.16` — The client's synced copy of a value changed (main thread, after the whole update is in place).
+## ModValueSyncedEvent `0.2.17` — The client's synced copy of a value changed (main thread, after the whole update is in place).
 - `ModValueSyncedEvent(ModValueKey key, ModValueSnapshot? before, ModValueSnapshot? after, string nonce, ulong sequence)`
 - `After { get; } -> ModValueSnapshot?`
 - `Before { get; } -> ModValueSnapshot?`
@@ -170,10 +170,10 @@ enum: OwnerOnly, Public, AllowList
 - `Nonce { get; } -> string` — The stream's id (new for each server, world and character).
 - `Sequence { get; } -> ulong`
 
-## ModValueSyncPolicy `0.2.16` — What the owning player's Kiln client receives.
+## ModValueSyncPolicy `0.2.17` — What the owning player's Kiln client receives.
 enum: None, OwnerMod, Readers
 
-## ModValueVersion `0.2.16` — A value's revision in one world: for compare-and-set.
+## ModValueVersion `0.2.17` — A value's revision in one world: for compare-and-set.
 - `ModValueVersion()`
 - `ModValueVersion(Guid World, ulong ValueRevision)`
 - `ValueRevision { get; init; } -> ulong`

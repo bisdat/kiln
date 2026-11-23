@@ -105,6 +105,10 @@
           "members": 3
         },
         {
+          "name": "blocks.npc_body",
+          "members": 1
+        },
+        {
           "name": "gems.craft",
           "members": 4
         },
@@ -130,10 +134,6 @@
         },
         {
           "name": "kiln.items",
-          "members": 1
-        },
-        {
-          "name": "world.ecs_read",
           "members": 1
         }
       ],
@@ -228,6 +228,10 @@
           "members": 2
         },
         {
+          "name": "blocks.npc_body",
+          "members": 2
+        },
+        {
           "name": "blocks.vfx_registration",
           "members": 2
         },
@@ -242,6 +246,10 @@
         {
           "name": "identity.entities",
           "members": 14
+        },
+        {
+          "name": "items.inventory_kinds",
+          "members": 1
         },
         {
           "name": "items.tool_wear_debit",
@@ -277,7 +285,7 @@
         },
         {
           "name": "stations.read",
-          "members": 26
+          "members": 27
         },
         {
           "name": "ui.blocks.state",
@@ -318,6 +326,7 @@
         "MaterialTweaks",
         "MenuBlocks",
         "ModelPhysics",
+        "NpcBody",
         "NpcSample",
         "RarityAnvil",
         "ScreenEffects",
@@ -368,6 +377,39 @@
       ]
     },
     {
+      "assembly": "Kiln.Camera",
+      "name": "Camera",
+      "summary": "Camera overrides for mods",
+      "guides": [
+        "docs/kiln/services/camera.md"
+      ],
+      "capabilities": [
+        {
+          "name": "camera.local",
+          "members": 1
+        },
+        {
+          "name": "camera.rendered_snapshot",
+          "members": 1
+        },
+        {
+          "name": "camera.server",
+          "members": 1
+        },
+        {
+          "name": "camera.server_mode",
+          "members": 1
+        },
+        {
+          "name": "camera.service",
+          "members": 3
+        }
+      ],
+      "samples": [
+        "CameraSample"
+      ]
+    },
+    {
       "assembly": "Kiln.Chat",
       "name": "Chat",
       "summary": "Chat, and the command registry (typed commands, permissions, the console folder)",
@@ -385,6 +427,7 @@
         "AffixSword",
         "BlobCatalog",
         "CalmBell",
+        "CameraSample",
         "Claims",
         "CreatureAi",
         "CreatureControlSample",
@@ -434,6 +477,7 @@
       ],
       "samples": [
         "AffixSword",
+        "CameraSample",
         "CreatureTweaks",
         "MarkersSample",
         "MaterialSample",
@@ -716,6 +760,10 @@
         {
           "name": "items.instances",
           "members": 3
+        },
+        {
+          "name": "items.inventory_kinds",
+          "members": 1
         },
         {
           "name": "items.move",
@@ -1029,9 +1077,42 @@
       "assembly": "Kiln.Registry",
       "name": "Registry",
       "summary": "Kiln's registries (items, recipes, loot, drops, balance) as typed C# entries over Kiln-owned field names, generated from schema/registry/*.json by tools/registrygen/registrygen.py (Generated/*.g.cs; never edit those by hand)",
-      "guides": [],
-      "capabilities": [],
-      "samples": []
+      "guides": [
+        "docs/kiln/services/registry.md"
+      ],
+      "capabilities": [
+        {
+          "name": "kiln.registry",
+          "members": 2
+        },
+        {
+          "name": "kiln.registry.live",
+          "members": 2
+        },
+        {
+          "name": "registry.items.add",
+          "members": 1
+        },
+        {
+          "name": "registry.items.remove",
+          "members": 1
+        },
+        {
+          "name": "registry.loot.remove",
+          "members": 1
+        },
+        {
+          "name": "registry.recipes.add",
+          "members": 1
+        },
+        {
+          "name": "registry.recipes.remove",
+          "members": 1
+        }
+      ],
+      "samples": [
+        "RegistryEdits"
+      ]
     },
     {
       "assembly": "Kiln.Replication",

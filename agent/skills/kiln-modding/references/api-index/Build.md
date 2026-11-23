@@ -1,11 +1,11 @@
 # Build (Kiln.Build)
 
-## AltarSize `0.2.16` — The build zone of one altar level: the full size of the box an altar of that level lets players build in.
+## AltarSize `0.2.17` — The build zone of one altar level: the full size of the box an altar of that level lets players build in.
 - `AltarSize(int AltarLevel, Vector3 Size)`
 - `AltarLevel { get; init; } -> int` — The altar level, 1 to 5 (an altar's upgrades; the game's table has a 0 for "no altar").
 - `Size { get; init; } -> Vector3` — The full size in metres on each axis (x, y, z).
 
-## BaseLimits `0.2.16` — How many Flame Altars the world may have and how large their build zones are in this start: the game's own table and the one the game runs with (after every mod's...
+## BaseLimits `0.2.17` — How many Flame Altars the world may have and how large their build zones are in this start: the game's own table and the one the game runs with (after every mod's...
 - `BaseLimits(int FlameLevel, int CurrentAltars, int OriginalCount, int EffectiveCount, IReadOnlyList<AltarSize> OriginalSizes, IReadOnlyList<AltarSize> EffectiveSizes)`
 - `AppliedRules { get; init; } -> IReadOnlyList<string>` — The base rules in this start's table, as `mod:name`, in load order (empty without any, and when Kiln could not write...
 - `CurrentAltars { get; init; } -> int` — Flame Altars the world has now (the game's progress count).
@@ -88,7 +88,7 @@ enum: None, SymbolMissing, ServiceMissing, ServiceOlder, WrongSide, Offline, NoS
 ## Build — Changes the world the way the game saves and replicates it, so vanilla clients see the result: voxel cells (terrain and building blocks), shape edits (dig, add...
 - `static Add(BuildShape shape, byte material, BuildOptions? options = null) -> Task<BuildResult>` — Fills the shape with `material` (a voxel material id, e.g. from `Build.MaterialOf`).
 - `static Available { get; } -> bool` — True when kiln.build runs on this game build (capability `kiln.build`).
-- `static BaseLimits { get; } -> BaseLimits?` `0.2.16` — How many Flame Altars the world may have now and how large their build zones are: the game's own numbers and the...
+- `static BaseLimits { get; } -> BaseLimits?` `0.2.17` — How many Flame Altars the world may have now and how large their build zones are: the game's own numbers and the...
 - `static Bases { get; } -> IReadOnlyList<PlayerBase>` — Player bases (the game's base build zones, rebuilt every step).
 - `static BlockAt(WorldPosition position) -> BlockQueryResult` `0.2.15` — Reads a loaded cell on the server tick.
 - `static BoxAround(WorldPosition center, double halfX, double halfY, double halfZ) -> CellBox` — The cells covering `center` +/- half extents (metres).

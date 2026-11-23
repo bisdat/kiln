@@ -1,4 +1,4 @@
-# Native ABI rows (mod API 0.2.16): part 1 of 3
+# Native ABI rows (mod API 0.2.17): part 1 of 3
 
 One line per row: header, `Table.row`, @offset, mod API, comment (native.md says more).
 
@@ -130,7 +130,7 @@ One line per row: header, `Table.row`, @offset, mod API, comment (native.md says
 
 ## services/kiln_base_rules.h — service `kiln.base_rules`
 ### KilnBaseRulesApi — 16 bytes
-- kiln_base_rules.h `KilnBaseRulesApi.state` @8 `0.2.16`
+- kiln_base_rules.h `KilnBaseRulesApi.state` @8 `0.2.17`
 
 ## services/kiln_boot.h — service `kiln.boot`
 ### KilnBootApiV1 — 104 bytes
@@ -171,6 +171,19 @@ One line per row: header, `Table.row`, @offset, mod API, comment (native.md says
 - kiln_build.h `KilnBuildApi.block_at` @160 `0.2.15` — Since 0.2.0-dev.30.6: raw info succeeds with unknown optional metadata/provenance (-1). find_wall...
 - kiln_build.h `KilnBuildApi.find_wall` @168 `0.2.15`
 - kiln_build.h `KilnBuildApi.break_box` @176 `0.2.15`
+
+## services/kiln_camera.h — service `kiln.camera`
+### KilnCameraApi — 88 bytes
+- kiln_camera.h `KilnCameraApi.capabilities` @8 `0.2.17` — Which KILN_CAMERA_CAP_* work for 'endpoint' (KILN_CAMERA_SERVER_MODE, ...).
+- kiln_camera.h `KilnCameraApi.apply` @16 `0.2.17` — A new lease.
+- kiln_camera.h `KilnCameraApi.update` @24 `0.2.17` — Replaces the lease's whole request (not a merge).
+- kiln_camera.h `KilnCameraApi.end` @32 `0.2.17` — Ends a lease of 'owner'.
+- kiln_camera.h `KilnCameraApi.subscribe` @40 `0.2.17` — Every change of every lease.
+- kiln_camera.h `KilnCameraApi.unsubscribe` @48 `0.2.17`
+- kiln_camera.h `KilnCameraApi.get_visual` @56 `0.2.17` — The camera of the newest frame.
+- kiln_camera.h `KilnCameraApi.bind_transport` @64 `0.2.17` — Framework-private: one bridge at a time; the table is copied. unbind after the bridge drained its work.
+- kiln_camera.h `KilnCameraApi.unbind_transport` @72 `0.2.17`
+- kiln_camera.h `KilnCameraApi.transport_ended` @80 `0.2.17` — The client ended a remote lease by itself.
 
 ## services/kiln_caps.h — service `kiln.caps`
 ### KilnCapsApi — 64 bytes
@@ -469,20 +482,3 @@ One line per row: header, `Table.row`, @offset, mod API, comment (native.md says
 - kiln_gameplay.h `KilnGameplayApi.component_change` @120 `0.2.0` — Queues one change of an interaction-offer component on 'entity' (never a player).
 - kiln_gameplay.h `KilnGameplayApi.request_build` @128 `0.2.4` — First-use build interest, AnyThread.
 - kiln_gameplay.h `KilnGameplayApi.request_hooks` @136 `0.2.4` — AnyThread.
-
-## services/kiln_gemcraft.h — service `kiln.gemcraft`
-### KilnGemcraftApi — 120 bytes
-- kiln_gemcraft.h `KilnGemcraftApi.status` @8 `0.2.5`
-- kiln_gemcraft.h `KilnGemcraftApi.submit` @16 `0.2.5` — Queues a code action.
-- kiln_gemcraft.h `KilnGemcraftApi.cancel` @24 `0.2.5` — Drops a code action's callback (the action may still run).
-- kiln_gemcraft.h `KilnGemcraftApi.hold` @32 `0.2.5` — Holds players' new forge actions for the next 'steps' steps (1..250; 0 stops at once: what is held runs).
-- kiln_gemcraft.h `KilnGemcraftApi.held` @40 `0.2.5` — The actions held since the last call (each once). *out_count = how many were written...
-- kiln_gemcraft.h `KilnGemcraftApi.decide` @48 `0.2.5` — The answer for a held action (player, version): cancel 1 = refuse it, 0 = let it run.
-- kiln_gemcraft.h `KilnGemcraftApi.watch` @56 `0.2.5` — 1: players' actions that ran are reported by crafted() (code actions always are).
-- kiln_gemcraft.h `KilnGemcraftApi.crafted` @64 `0.2.5` — The actions that ran since the last call, players' (while watched) and code's (DONE only), and every...
-- kiln_gemcraft.h `KilnGemcraftApi.extras` @72 `0.2.7` — appended in 0.2.0-dev.29.15 (header.size covers them) ---- Which appended parts run here...
-- kiln_gemcraft.h `KilnGemcraftApi.offer` @80 `0.2.7` — Offers gems to players (any number of players and holders in one call): each gets a new token and its expiry.
-- kiln_gemcraft.h `KilnGemcraftApi.withdraw` @88 `0.2.7` — Withdraws the owner's offers (owner 0: every owner's) to 'player' (0: every player) in 'holder' (0: every...
-- kiln_gemcraft.h `KilnGemcraftApi.sources` @96 `0.2.7` — The live offers to 'player' (every owner's), in offer order.
-- kiln_gemcraft.h `KilnGemcraftApi.payers` @104 `0.2.7` — Who would pay for 'player' with pay_from / pay_holder now, in order (what a request resolves in the step...
-- kiln_gemcraft.h `KilnGemcraftApi.forge_material` @112 `0.2.7` — The forge's own upgrade material (ShroudForge.upgradeMaterial), what payers other than the player pay in.

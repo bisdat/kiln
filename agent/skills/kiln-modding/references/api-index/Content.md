@@ -668,7 +668,7 @@ enum: Cut, Pierce, Blunt, Fire, Ice, Shroud, Lightning, Poison, Healing, Wood, S
 - `RolledLoot { get; init; } -> bool` — Opt-in for a rolled loot item: keeps the base's `generateRarity` and level range (a loot weapon: levels 1..55), so a...
 - `Source { get; init; } -> string?` — Where to get it, in the tooltip (all languages).
 - `Texts { get; init; } -> IReadOnlyDictionary<string, ItemTexts>?` — Texts per language (`"en"`, `"de"`, `"pt-BR"`, `"*"` = every language).
-- `VanillaLook { get; init; } -> string?` `0.2.16` — The game item players without this item see in its place (a vanilla client, a Kiln client that lacks this mod's...
+- `VanillaLook { get; init; } -> string?` `0.2.17` — The game item players without this item see in its place (a vanilla client, a Kiln client that lacks this mod's...
 - `VisualModels { get; init; } -> IReadOnlyList<(uint Mask, string Model)>?` — A worn item's models for what the character wears and is, the game's `equipment.visualModels`: the client draws the...
 - `WeaponType { get; init; } -> string?` — The weapon category (skills and bonuses that apply to a weapon type): `"item:<name>"` or a weapon category GUID.
 
@@ -766,7 +766,7 @@ enum: Cut, Pierce, Blunt, Fire, Ice, Shroud, Lightning, Poison, Healing, Wood, S
 ## RecipeUnlock — How a new recipe is unlocked in the crafting UI.
 enum: Always, LikeBase
 
-## StationMenuAppliedEvent `0.2.16` — Client: a station's menu was built from its layout, or refused (`StationMenuAppliedEvent.Ok` false, `StationMenuAppliedEvent.Reason`: `IconSourceMissing`...
+## StationMenuAppliedEvent `0.2.17` — Client: a station's menu was built from its layout, or refused (`StationMenuAppliedEvent.Ok` false, `StationMenuAppliedEvent.Reason`: `IconSourceMissing`...
 - `DefinitionId { get; } -> Guid`
 - `FromServer { get; } -> bool` — The layout came from the server (a joined game).
 - `Generation { get; } -> ulong`
@@ -775,7 +775,7 @@ enum: Always, LikeBase
 - `Session { get; } -> Guid` — The server's session of the layout (`Guid.Empty` for a local one).
 - `Workshop { get; } -> uint`
 
-## StationMenuDefinitionChangedEvent `0.2.16` — A station's menu layout was accepted, replaced or taken off (another layer, or the game's own layout, shows again).
+## StationMenuDefinitionChangedEvent `0.2.17` — A station's menu layout was accepted, replaced or taken off (another layer, or the game's own layout, shows again).
 - `DefinitionId { get; } -> Guid` — The definition (the layer): `BlockIds.Derive(mod, "menu-layout", key)`.
 - `Generation { get; } -> ulong` — The local collection's generation after the change.
 - `ModId { get; } -> string` — The mod that defined the layer.

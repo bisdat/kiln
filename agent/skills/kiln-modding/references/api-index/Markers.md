@@ -1,25 +1,25 @@
 # Markers (Kiln.Markers)
 
-## MarkerAnchor `0.2.16` — A lease on one incarnation of an entity, for `MarkerSpec.Follow` (from `Markers.CaptureAnchorAsync` on a client, `Markers.CaptureServerAnchor` on the server).
+## MarkerAnchor `0.2.17` — A lease on one incarnation of an entity, for `MarkerSpec.Follow` (from `Markers.CaptureAnchorAsync` on a client, `Markers.CaptureServerAnchor` on the server).
 - `Dispose() -> void` — Releases the caller's lease.
 - `Entity { get; } -> EntityId` — The entity at capture (diagnostic only: the lease follows that incarnation, not the id).
 - `WorldEpoch { get; } -> ulong` — kiln.markers' epoch of that world (diagnostic).
 - `WorldKind { get; } -> uint` — The world kind it belongs to: 0 the server world, 2 the client's world (diagnostic).
 
-## MarkerAnchorResult `0.2.16` — What became of a capture, by Kiln's error rule: a bad argument throws `ArgumentException`, a capability that is off throws `KilnUnavailableException` naming it, and a...
+## MarkerAnchorResult `0.2.17` — What became of a capture, by Kiln's error rule: a bad argument throws `ArgumentException`, a capability that is off throws `KilnUnavailableException` naming it, and a...
 - `MarkerAnchorResult(bool Ok, string? Reason, MarkerAnchor? Anchor)`
 - `Anchor { get; init; } -> MarkerAnchor?` — The caller's lease when `MarkerAnchorResult.Ok`; dispose it when it is no longer needed.
 - `Ok { get; init; } -> bool` — True when `Anchor` holds a new lease.
 - `Reason { get; init; } -> string?` — Why not, starting with the refusal's name: `NotFound` (no such entity, or it has no position in that world yet: not...
 
-## MarkerCatalogChangedEvent `0.2.16` — The icon catalog became ready (or could not be read).
+## MarkerCatalogChangedEvent `0.2.17` — The icon catalog became ready (or could not be read).
 - `Count { get; } -> int` — Its icons.
 - `Generation { get; } -> ulong` — The catalog's generation (1 for the first one; it does not change for the life of the process).
 - `Ready { get; } -> bool` — The catalog can be read now.
 - `Reason { get; } -> string?` — Why native map icons stay off with a ready catalog, or why it could not be read; null otherwise.
 - `Role { get; } -> uint` — Whose catalog: 0 the server's, 1 this client's.
 
-## MarkerChangedEvent `0.2.16` — One accepted change of a marker's logical value (not of its visibility).
+## MarkerChangedEvent `0.2.17` — One accepted change of a marker's logical value (not of its visibility).
 - `Affected { get; } -> int` — Records changed: 1, or the count a `MarkerChangeKind.Cleared` stands for.
 - `Audience { get; } -> MarkerSource` — Whose record: a local one, a server layer's, or a received one.
 - `Cause { get; } -> string` — Why: `Api` (a call), `OwnerRetired` (its mod unloaded), `WorldStopped`, `PeerLeft`, `Snapshot` or `LinkStale`.
@@ -32,16 +32,16 @@
 - `Sequence { get; } -> ulong` — The order of accepted changes (rising).
 - `WorldEpoch { get; } -> ulong` — kiln.markers' epoch of the world the record belongs to.
 
-## MarkerChangeKind `0.2.16` — What a `MarkerChangedEvent` reports.
+## MarkerChangeKind `0.2.17` — What a `MarkerChangedEvent` reports.
 enum: Added, Updated, Removed, Cleared
 
-## MarkerIcon `0.2.16` — A marker type of the game's icon catalog (`Icons`), by its id.
+## MarkerIcon `0.2.17` — A marker type of the game's icon catalog (`Icons`), by its id.
 - `MarkerIcon()`
 - `MarkerIcon(uint Id)`
 - `Id { get; init; } -> uint` — The game's marker type id; 0 is `MarkerIcon.None`.
 - `static None { get; } -> MarkerIcon` — No icon: for markers without the `MarkerSurface.Map` surface (a map marker needs one).
 
-## MarkerIconInfo `0.2.16` — One icon of the catalog.
+## MarkerIconInfo `0.2.17` — One icon of the catalog.
 - `MarkerIconInfo(MarkerIcon Icon, string Key, string Alias, string TextureName, Guid Texture, uint Flags, MarkerSurface Surfaces)`
 - `Alias { get; init; } -> string` — Its friendly name: the texture name without a leading `mapmarker_`, lower-cased (`well_plant`).
 - `Flags { get; init; } -> uint` — The type's metadata: 1 has an image, 2 shows a label, 4 shows a range, 8 above the fog of war, 16 a custom-pin type...
@@ -51,16 +51,16 @@ enum: Added, Updated, Removed, Cleared
 - `Texture { get; init; } -> Guid` — The icon image's GUID.
 - `TextureName { get; init; } -> string` — The icon texture's name in the game.
 
-## MarkerIconResult `0.2.16` — The answer of `Icons.Resolve`, by Kiln's error rule.
+## MarkerIconResult `0.2.17` — The answer of `Icons.Resolve`, by Kiln's error rule.
 - `MarkerIconResult(bool Ok, string? Reason, MarkerIconInfo? Icon)`
 - `Icon { get; init; } -> MarkerIconInfo?` — The icon; null unless `MarkerIconResult.Ok`.
 - `Ok { get; init; } -> bool` — True when the name named exactly one icon.
 - `Reason { get; init; } -> string?` — Why not: `NotFound`, `Ambiguous` (an alias of several types: use the key) or `CatalogNotReady`; null when...
 
-## MarkerMapLabel `0.2.16` — What the native map shows for a marker's text.
+## MarkerMapLabel `0.2.17` — What the native map shows for a marker's text.
 enum: None, NativeTooltip
 
-## MarkerResult `0.2.16` — What became of a marker request, by Kiln's error rule: a bad argument throws `ArgumentException`, a capability that is off throws `KilnUnavailableException` naming...
+## MarkerResult `0.2.17` — What became of a marker request, by Kiln's error rule: a bad argument throws `ArgumentException`, a capability that is off throws `KilnUnavailableException` naming...
 - `MarkerResult(bool Ok, string? Reason, bool Committed, int Queued, int Refused, int Affected)`
 - `Affected { get; init; } -> int` — Records changed: 0 for a value identical to the stored one or an empty clear.
 - `Committed { get; init; } -> bool` — The store holds the request (also when it was identical to what it held).
@@ -69,7 +69,7 @@ enum: None, NativeTooltip
 - `Reason { get; init; } -> string?` — Why not, starting with the refusal's name (`NotFound`, `Full`, `NotReady`, `CatalogNotReady`, `RequiresClient`...
 - `Refused { get; init; } -> int` — Server sends: connected recipients that cannot take it (a vanilla client, a pending handshake).
 
-## Markers `0.2.16` — Markers by key on the game's map, Kiln's drawn compass strip and world labels.
+## Markers `0.2.17` — Markers by key on the game's map, Kiln's drawn compass strip and world labels.
 - `static CaptureAnchorAsync(EntityId entity, CancellationToken cancel = default(CancellationToken)) -> Task<MarkerAnchorResult>` — Captures a lease on the current incarnation of a client-world entity, for a marker that follows it...
 - `static CaptureServerAnchor(EntityId entity) -> MarkerAnchorResult` — Captures a lease on the current incarnation of a server-world entity, now (the tick thread, a dedicated server or...
 - `static CatalogChanged -> Action<MarkerCatalogChangedEvent>?` — The icon catalog became ready, or could not be read (`MarkerCatalogChangedEvent.Ready` false with a reason).
@@ -84,15 +84,15 @@ enum: None, NativeTooltip
 - `static Unsend(EntityId player, string id) -> MarkerResult` — Removes the calling mod's sent marker `id` from one layer: `player EntityId.None` removes the broadcast one...
 - `static VisibilityChanged -> Action<MarkerVisibilityChangedEvent>?` — A marker's admission on this client changed (`MarkerVisibilityChangedEvent`), raised at the client world's step on...
 
-## Markers.Icons `0.2.16` — The game's map marker types with an icon image, by canonical key and alias.
+## Markers.Icons `0.2.17` — The game's map marker types with an icon image, by canonical key and alias.
 - `static All { get; } -> IReadOnlyList<MarkerIconInfo>` — Every icon, sorted by id; empty while warming up.
 - `static IsReady { get; } -> bool` — Whether the catalog has warmed up.
 - `static Resolve(string name) -> MarkerIconResult` — The icon a name names: its canonical key (`type:ffe5e444`) or an exact alias (`well_plant`).
 
-## MarkerSource `0.2.16` — Whose record a marker is.
+## MarkerSource `0.2.17` — Whose record a marker is.
 enum: Local, ServerBroadcast, ServerTarget, Received
 
-## MarkerSpec `0.2.16` — One marker, by key.
+## MarkerSpec `0.2.17` — One marker, by key.
 - `MarkerSpec(string Id, WorldPosition Position, string Text, MarkerIcon Icon, MarkerSurface Surfaces = MarkerSurface.Map | MarkerSurface.Compass, MarkerAnchor? Follow = null, float Height = 0, float MaxDistance = 0, int Priority = 0, uint Rgba = 4294967295, MarkerMapLabel MapLabel = MarkerMapLabel.None)`
 - `Follow { get; init; } -> MarkerAnchor?` — An entity to follow instead of a fixed position (a lease from `CaptureAnchorAsync`); null for a fixed marker.
 - `static FromJson(Json.JsonElement json) -> MarkerSpec` — Reads a marker from a JSON element (one object of a larger document); the rules of `MarkerSpec.FromJson`.
@@ -109,10 +109,10 @@ enum: Local, ServerBroadcast, ServerTarget, Received
 - `Text { get; init; } -> string` — The text drawn on the compass and world surfaces: at most 128 bytes of UTF-8 on one line, no control characters; may...
 - `ToJson() -> string` — This marker as one JSON object in the form `MarkerSpec.FromJson` reads: every field written, the icon as its...
 
-## MarkerSurface `0.2.16` — Where a marker is shown.
+## MarkerSurface `0.2.17` — Where a marker is shown.
 enum: Map, Compass, World
 
-## MarkerVisibilityChangedEvent `0.2.16` — A marker's admission changed on this client: which of its requested surfaces it has now and why not the others.
+## MarkerVisibilityChangedEvent `0.2.17` — A marker's admission changed on this client: which of its requested surfaces it has now and why not the others.
 - `After { get; } -> MarkerSurface` — The surfaces it has now.
 - `Audience { get; } -> MarkerSource` — A local marker or a received one.
 - `Before { get; } -> MarkerSurface` — The surfaces it had before this event (none for `MarkerVisibilityChangedEvent.Initial`).
@@ -129,5 +129,5 @@ enum: Map, Compass, World
 - `World { get; } -> MarkerVisibilityReason` — The world-label surface's reason.
 - `WorldEpoch { get; } -> ulong` — kiln.markers' epoch of the client world.
 
-## MarkerVisibilityReason `0.2.16` — Why a requested surface of a marker is or is not admitted (`MarkerVisibilityChangedEvent`).
+## MarkerVisibilityReason `0.2.17` — Why a requested surface of a marker is or is not admitted (`MarkerVisibilityChangedEvent`).
 enum: Ready, MapCapacity, SurfaceBudget, CameraUnavailable, BehindCamera, OutOfRange, FollowMissing, AnchorEnded, WorldInactive, CapabilityOff, SourceStale, InvalidPosition, Removed, NotRequested

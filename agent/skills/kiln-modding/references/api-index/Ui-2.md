@@ -45,7 +45,7 @@ enum: Text, TextDisabled, WindowBg, ChildBg, Border, FrameBg, FrameBgHovered, Fr
 ## UiDraw — Immediate-mode drawing inside a Kiln window or a frame handler (a small wrapper over Dear ImGui).
 - `BeginChild(string id, float width = 0, float height = 0) -> bool` — A scrolling region (call `UiDraw.EndChild` always).
 - `BeginChild(string id, float width, float height, UiChildFlags flags, UiWindowFlags windowFlags = UiWindowFlags.None) -> bool` — A child region (call `UiDraw.EndChild` always).
-- `BeginControlledTab(string label, bool select) -> bool` `0.2.16` — A tab of a tab bar (`UiDraw.BeginTabBar`) that code can select: with `select` it becomes the selected tab (from this...
+- `BeginControlledTab(string label, bool select) -> bool` `0.2.17` — A tab of a tab bar (`UiDraw.BeginTabBar`) that code can select: with `select` it becomes the selected tab (from this...
 - `BeginTab(string label) -> bool` — A tab of the tab bar; true while it is the selected one (then draw its contents and call `UiDraw.EndTab`).
 - `BeginTabBar(string id) -> bool` — Starts a tab bar; true when it is shown (then add tabs with `UiDraw.BeginTab` and end it with `UiDraw.EndTabBar`).
 - `BeginTable(string id, params string[] columns) -> bool` — A table; returns false when hidden (then skip the rows).
@@ -74,7 +74,7 @@ enum: Text, TextDisabled, WindowBg, ChildBg, Border, FrameBg, FrameBgHovered, Fr
 - `Font(UiFont font) -> UiDraw.FontChoice` — Text drawn inside the scope uses `font` at the current size: `using (ui.Font(UiFont.GameBold)) ui.Text("MODS");`.
 - `FontSize(float size) -> UiDraw.FontScope` — Text drawn inside the scope uses `size` pixels at UI scale 1 (the scale applies on top)...
 - `FrameNumber { get; } -> ulong` — Overlay frames since start.
-- `HasBlockWidgets { get; } -> bool` `0.2.16` — Whether this Kiln has the calls below (kiln.ui.blocks); without it they fall back to the plain ones and a tab or...
+- `HasBlockWidgets { get; } -> bool` `0.2.17` — Whether this Kiln has the calls below (kiln.ui.blocks); without it they fall back to the plain ones and a tab or...
 - `HasLayout { get; } -> bool` — This kiln.ui has the layout calls in this file (version 3).
 - `Height { get; } -> float` — Screen height in pixels (`UiDraw.Width` is the width).
 - `HeldMods { get; } -> KeyMods` — The modifier keys held now.
@@ -92,7 +92,7 @@ enum: Text, TextDisabled, WindowBg, ChildBg, Border, FrameBg, FrameBgHovered, Fr
 - `ItemIconTrimmed(ItemId item, float size) -> void` `0.2.8` — Draws the game's own icon of `item` like `UiDraw.ItemIcon`, but only its art (since 0.2.0-dev.29.16): the game's...
 - `KeyPressed(UiKey key, bool repeat = false, bool claim = false) -> bool` — `key` went down this frame (only while Kiln has the input).
 - `LastItem { get; } -> UiItem` — The rectangle and state of the widget drawn last.
-- `LastItemState { get; } -> UiItemState` `0.2.16` — The edit state of the widget drawn last; `UiItemState.None` on a Kiln without kiln.ui.blocks.
+- `LastItemState { get; } -> UiItemState` `0.2.17` — The edit state of the widget drawn last; `UiItemState.None` on a Kiln without kiln.ui.blocks.
 - `Look(UiStyle style) -> UiDraw.LookScope` — Switches the look (the player's, the game's, Kiln's) for the windows begun inside the scope...
 - `MeasureText(string text, float size = 0) -> (float Width, float Height)` — The size in pixels of `text` at `size` (0 = the current font size).
 - `MeasureText(string text, float size, float wrap) -> (float Width, float Height)` — The size of `text` in the current font (size 0 = current size), wrapped at `wrap` when > 0.
@@ -115,7 +115,7 @@ enum: Text, TextDisabled, WindowBg, ChildBg, Border, FrameBg, FrameBgHovered, Fr
 - `Separator() -> void` — A horizontal line.
 - `Separator(string text) -> void` — A horizontal line with `text` in it.
 - `SetCursor(float x, float y) -> void` — Moves the next widget to (x, y), window-local like `UiCursor.X`.
-- `SetNextItemOpen(bool open) -> void` `0.2.16` — Opens or closes the next `UiDraw.TreeNode` this frame, whatever the player did before.
+- `SetNextItemOpen(bool open) -> void` `0.2.17` — Opens or closes the next `UiDraw.TreeNode` this frame, whatever the player did before.
 - `Slider(string label, ref float value, float min, float max) -> bool` — A slider for a float between `min` and `max`; true on the frame `value` changed.
 - `Slider(string label, ref int value, int min, int max) -> bool` — A slider for an integer between `min` and `max`; true on the frame `value` changed.
 - `SmallButton(string label) -> bool` — A small button (no frame padding, fits a line of text); true on the frame it is clicked.
@@ -124,7 +124,7 @@ enum: Text, TextDisabled, WindowBg, ChildBg, Border, FrameBg, FrameBgHovered, Fr
 - `Text(Color color, string text) -> void` — A line of text in `color`.
 - `Text(string text) -> void` — A line of text.
 - `TextDisabled(string text) -> void` — A line of text in the look's disabled (greyed) colour.
-- `TextField(string label, ref string value, int maxBytes, UiTextFieldFlags flags = UiTextFieldFlags.None, float width = 0, float height = 0) -> bool` `0.2.16` — A text field editing `value` (at most `maxBytes` UTF-8 bytes, 2..65536), with `flags` and a size in pixels (0: the...
+- `TextField(string label, ref string value, int maxBytes, UiTextFieldFlags flags = UiTextFieldFlags.None, float width = 0, float height = 0) -> bool` `0.2.17` — A text field editing `value` (at most `maxBytes` UTF-8 bytes, 2..65536), with `flags` and a size in pixels (0: the...
 - `TextWrapped(string text) -> void` — Text that wraps at the right edge of the window.
 - `Theme(UiTheme theme) -> UiDraw.LookScope` `0.2.8` — Switches to a mod's theme for the windows begun (and the text drawn) inside the scope...
 - `Tooltip(string text) -> void` — Shows `text` as a tooltip while the previous widget is hovered.
@@ -208,7 +208,7 @@ enum: Default, Game, GameBold
 - `Rarity { get; init; } -> ItemRarity?` — The item's rarity, when known.
 - `Session { get; init; } -> ulong` — The client session of the capture.
 
-## UiItemState `0.2.16` — What the widget drawn last is doing (`UiDraw.LastItemState`).
+## UiItemState `0.2.17` — What the widget drawn last is doing (`UiDraw.LastItemState`).
 enum: None, Active, Deactivated, DeactivatedAfterEdit, Edited
 
 ## UiItemView `0.2.3` — What the game drew the value for, copied for the callback.
@@ -358,7 +358,7 @@ enum: WindowPadding, FramePadding, ItemSpacing, ItemInnerSpacing, FrameRounding,
 - `Languages { get; } -> IReadOnlyCollection<string>` — The languages given ("en", "de", "*", ...).
 - `static Of(params (string Language, string Text)[] texts) -> UiText` — `UiText.Of(("en", "Mods"), ("de", "Mods"), ("fr", "Mods"))`.
 
-## UiTextFieldFlags `0.2.16` — How `UiDraw.TextField` behaves.
+## UiTextFieldFlags `0.2.17` — How `UiDraw.TextField` behaves.
 enum: None, EnterReturns, ReadOnly, Multiline
 
 ## UiTheme `0.2.8` — A mod's theme (`Themes.Define`): give it to your windows (`UiWindowOptions.Theme`, `UiScreenOptions.Theme`, `CraftingPanelOptions.Theme`) or use it inside your own...

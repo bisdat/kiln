@@ -104,8 +104,8 @@ enum: Normal, Retaliate, CounterAttack, StunBreak, Special, Initiate, InitiateFo
 - `static readonly Vukah -> BodyBlock` — The Vukah's body.
 
 ## BodyBlock — What a creature is: a model of yours on its skeleton (cooked when the mod builds), or a game creature's body (`Bodies`).
-- `Chains { get; init; } -> IReadOnlyList<ModelChainBlock>?` `0.2.16` — Joint chains of `BodyBlock.Model`'s skeleton the game swings, cooked into the model when the mod builds.
-- `Cloth { get; init; } -> IReadOnlyList<ModelClothBlock>?` `0.2.16` — Primitives of `BodyBlock.Model` the game simulates as cloth, cooked into the model when the mod builds (a body in...
+- `Chains { get; init; } -> IReadOnlyList<ModelChainBlock>?` `0.2.17` — Joint chains of `BodyBlock.Model`'s skeleton the game swings, cooked into the model when the mod builds.
+- `Cloth { get; init; } -> IReadOnlyList<ModelClothBlock>?` `0.2.17` — Primitives of `BodyBlock.Model` the game simulates as cloth, cooked into the model when the mod builds (a body in...
 - `Colliders { get; init; } -> IReadOnlyList<ColliderBlock>?` — Its collision: the first shape for hits, the second for what it bumps into; one shape is both.
 - `Key { get; init; } -> string` — How JSON names a premade.
 - `Like { get; init; } -> string?` — In JSON, the premade this one starts from.
@@ -140,15 +140,15 @@ enum: Normal, Retaliate, CounterAttack, StunBreak, Special, Initiate, InitiateFo
 - `Speed { get; init; } -> double?` — Plays faster (above 1) or slower.
 - `Then { get; init; } -> AnimState?` — Moves on to this state of the same animation when its clip ends.
 
-## ClothCapsuleBlock `0.2.16` — A capsule collider of cloth: two spheres and the space between them.
+## ClothCapsuleBlock `0.2.17` — A capsule collider of cloth: two spheres and the space between them.
 - `ClothCapsuleBlock(ClothSphereBlock A, ClothSphereBlock B)`
 - `A { get; init; } -> ClothSphereBlock`
 - `B { get; init; } -> ClothSphereBlock`
 
-## ClothColliderBlock `0.2.16` — A shape a body's cloth does not pass through: a `ClothSphereBlock` or a `ClothCapsuleBlock`.
+## ClothColliderBlock `0.2.17` — A shape a body's cloth does not pass through: a `ClothSphereBlock` or a `ClothCapsuleBlock`.
 - `ClothColliderBlock(ClothColliderBlock original)`
 
-## ClothSphereBlock `0.2.16` — A sphere collider of cloth, in the model's bind pose: metres, glTF axes (y up), as the model file has them.
+## ClothSphereBlock `0.2.17` — A sphere collider of cloth, in the model's bind pose: metres, glTF axes (y up), as the model file has them.
 - `ClothSphereBlock(double X, double Y, double Z, double Radius, string? Joint = null)`
 - `Joint { get; init; } -> string?` — The skeleton joint it follows with all its weight (the joint's name, or `j<index>`).
 - `Radius { get; init; } -> double` — Metres, above 0 and at most 8.
@@ -185,11 +185,11 @@ enum: Normal, Retaliate, CounterAttack, StunBreak, Special, Initiate, InitiateFo
 - `Level { get; init; } -> int?` — 1..60: its health and damage follow from it as the game scales them.
 - `Takes { get; init; } -> IDictionary<DamageKind, double>` — Damage it takes of a kind, 1 as normal, 0 immune.
 
-## IdleTask `0.2.16` — Stand idle, for the time the game's villager rolls for an idle.
+## IdleTask `0.2.17` — Stand idle, for the time the game's villager rolls for an idle.
 
 ## INpcBlock — The blocks of a creature: what `Blocks.Define` takes for them asks players' games for no more than the parts need.
 
-## InspectTask `0.2.16` — Find something nearby to look at or work on, walk to it and interact (the game's "inspect").
+## InspectTask `0.2.17` — Find something nearby to look at or work on, walk to it and interact (the game's "inspect").
 
 ## LayerBlock — An animation played over the states: always, or each time an overlay fires (the engine fires `hit` on a hit reaction).
 - `Blend { get; init; } -> BlendSpace?` — Several animations mixed by an input, in place of `LayerBlock.Clip`.
@@ -203,7 +203,7 @@ enum: Normal, Retaliate, CounterAttack, StunBreak, Special, Initiate, InitiateFo
 - `Speed { get; init; } -> double?` — Plays faster (above 1) or slower.
 - `Weight { get; init; } -> double?` — How strongly the layer applies.
 
-## ModelChainBlock `0.2.16` — A chain of the skeleton's joints the game swings (its chains2): from `ModelChainBlock.RootJoint`, whose parent stays animated, to `ModelChainBlock.TipJoint` along one...
+## ModelChainBlock `0.2.17` — A chain of the skeleton's joints the game swings (its chains2): from `ModelChainBlock.RootJoint`, whose parent stays animated, to `ModelChainBlock.TipJoint` along one...
 - `BendStiffness { get; init; } -> double` — The game's own coefficient, [0, 1000000].
 - `Damping { get; init; } -> double` — [0, 0.99].
 - `ParticleMassKg { get; init; } -> double` — The mass of one moving joint in kg (not of the chain), [0.001, 100].
@@ -212,7 +212,7 @@ enum: Normal, Retaliate, CounterAttack, StunBreak, Special, Initiate, InitiateFo
 - `Stiffness { get; init; } -> double` — The game's own coefficient, [1, 1000000].
 - `TipJoint { get; init; } -> string` — The last joint, below the root.
 
-## ModelClothBlock `0.2.16` — One primitive of a body's model the game simulates as cloth.
+## ModelClothBlock `0.2.17` — One primitive of a body's model the game simulates as cloth.
 - `Colliders { get; init; } -> IReadOnlyList<ClothColliderBlock>` — What it does not pass through.
 - `Damping { get; init; } -> double` — [0, 0.99].
 - `Gravity { get; init; } -> double` — m/s2 downwards, [0, 50].
@@ -225,14 +225,15 @@ enum: Normal, Retaliate, CounterAttack, StunBreak, Special, Initiate, InitiateFo
 
 ## NpcBlock — A friendly NPC: a creature with a conversation (`NpcBlock.Talk`, the quests' `DialogueDefinition`), wares and a place in the roster.
 - `AI { get; init; } -> PartRef<AIBlock>?` — Not supported: setting it is refused.
-- `Animation { get; init; } -> PartRef<AnimationBlock>?` — Not supported: setting it is refused, as an NPC moves like the game's villagers.
+- `Animation { get; init; } -> PartRef<AnimationBlock>?` — Only with an authored roster body (`BodyBlock.Model`): its cooked clips and graph.
 - `Behaviour { get; init; } -> PartRef<BehaviourBlock>?` — Not supported: setting it is refused.
-- `Body { get; init; } -> PartRef<BodyBlock>` — The body, as a block or the name of one defined once.
+- `Body { get; init; } -> PartRef<BodyBlock>` — The body, as a block or the name of one defined once: a game NPC's (`Bodies.Villager`, `Bodies.Fisher`), or an...
+- `Motions { get; init; } -> PartRef<NpcMotionsBlock>?` `0.2.17` — The authored graph states for this roster body's sit, sleep, dialogue and navigation motions.
 - `Name { get; init; } -> string` — The name players read, in English; `NpcBlock.Names` adds the other languages.
 - `Names { get; init; } -> IDictionary<string, string>?` — Its names in other languages: `{ ["de"] = "Tobin der Wanderer" }`.
 - `Place { get; init; } -> NpcPlace?` — Where it is put in the world.
 - `Roster { get; init; } -> RosterBlock?` — Its place in the game's roster of NPCs.
-- `Routine { get; init; } -> PartRef<RoutineBlock>?` `0.2.16` — Its day plan: a routine of this mod (a handle from `Blocks.Define`, or its name), or a plan written here, which...
+- `Routine { get; init; } -> PartRef<RoutineBlock>?` `0.2.17` — Its day plan: a routine of this mod (a handle from `Blocks.Define`, or its name), or a plan written here, which...
 - `Talk { get; init; } -> DialogueDefinition?` — What it says: a dialogue (`Dialogues.Define`), or the handle of a `DialogueBlock`...
 - `TalkName { get; init; } -> string?` — A dialogue by name, in JSON `"talk"`: a `DialogueBlock` of this mod by its block name, or one of the mod's...
 - `Vendor { get; init; } -> VendorBlock?` — What it sells, at its workshop.
@@ -247,6 +248,30 @@ Extension members (C# 14): call them on the receiver (`Act.X`, `Blocks.X`), not 
 - `Act.Effect(EffectRef effect, NpcEffectOn on = NpcEffectOn.Target) -> RuleAction` — Runs an effect block: on the creature's combat target (it did it), or on itself.
 - `Blocks.Spawn(string creature, WorldPosition at, float yawDegrees = 0, CreatureSpawnOptions? options = null) -> Task<EntityId>` — Spawns a creature block of this mod (or `"other-mod:name"`) with all its parts.
 - `Blocks.Target(string name, Func<NpcView, EntityId> pick) -> void` — A target picker for data files: `"pickTarget": "name"`.
+
+## NpcBodies `0.2.17` — The build status of NPC blocks with a body of their own (`body.model`): whether this start's boot build made it, why not, or whether it waits for a restart.
+- `static Status(BlockHandle<NpcBlock> npc) -> NpcBodyBuildResult` — The status of the NPC block `npc`.
+- `static Status(string qualifiedBlockKey) -> NpcBodyBuildResult` — The status of the NPC block `qualifiedBlockKey`, `mod:block`: also for a block whose definition failed (no handle).
+
+## NpcBodyBuildChangedEvent `0.2.17` — An NPC body's build status changed (`NpcBodies`): one event per change of state or generation, Failed and RemovalPendingRestart included.
+- `After { get; } -> NpcBodyBuildResult` — The status now.
+- `Before { get; } -> NpcBodyBuildResult` — The status before the change.
+- `ClientSide { get; } -> bool` — Raised on a game client's main thread (else on a dedicated server's tick thread).
+
+## NpcBodyBuildResult `0.2.17` — An NPC body's build status.
+- `NpcBodyBuildResult(bool Ok, string? Reason, NpcBodyBuildState State, string ModId, string BlockKey, Guid Template, Guid Model, Guid Graph, ulong Generation)`
+- `BlockKey { get; init; } -> string`
+- `Generation { get; init; } -> ulong`
+- `Graph { get; init; } -> Guid`
+- `Model { get; init; } -> Guid`
+- `ModId { get; init; } -> string`
+- `Ok { get; init; } -> bool`
+- `Reason { get; init; } -> string?`
+- `State { get; init; } -> NpcBodyBuildState`
+- `Template { get; init; } -> Guid`
+
+## NpcBodyBuildState `0.2.17` — Where an NPC block's body of its own stands (`NpcBodies.Status`).
+enum: PendingRestart, Ready, Failed, RemovalPendingRestart, Removed
 
 ## NpcBrain — Your code in place of the game's AI, for each creature whose behaviour names it: `Behaviour = new BehaviourBlock { Brain = () => new MyBrain() }`.
 - `virtual Start(NpcControl npc) -> void` — Once, when it takes the creature over.
@@ -275,6 +300,20 @@ Extension members (C# 14): call them on the receiver (`Act.X`, `Blocks.X`), not 
 
 ## NpcEffectOn — Where a rule's effect lands.
 enum: Target, Self
+
+## NpcMotionBinding `0.2.17` — Binds one chassis motion to an authored graph state.
+- `NpcMotionBinding(NpcMotionRole Role, int Variant, AnimState State, Guid? InteractionKey = null)`
+- `InteractionKey { get; init; } -> Guid?`
+- `Role { get; init; } -> NpcMotionRole`
+- `State { get; init; } -> AnimState`
+- `Variant { get; init; } -> int`
+
+## NpcMotionRole `0.2.17` — A roster villager's motion.
+enum: Sit, Sleep, Inspect, Greet, Talk, Reaction0, Reaction1, Refuse, IdleGesture0, IdleGesture1, Interaction, GreetingExtra, Farewell, DialogOption, AttentionGreeting, TurnLeftSmall, TurnLeftBig, TurnRightSmall, TurnRightBig, Jump, Door
+
+## NpcMotionsBlock `0.2.17` — A complete roster body's motion bindings.
+- `Bindings { get; init; } -> IReadOnlyList<NpcMotionBinding>` — One binding per role and variant, never last-wins.
+- `OptionalFallback { get; init; } -> AnimState?` — A state to clamp/hold for missing optional motions.
 
 ## NpcOcclusionMode `0.2.3` — What stands between a brain and what it sees.
 enum: DistanceAndFaction, Voxels
@@ -324,7 +363,7 @@ enum: DistanceAndFaction, Voxels
 - `Animation { get; init; } -> string` — The name of one of the clip file's animations.
 - `At { get; init; } -> double` — Seconds into it, from 0.
 
-## RoamTask `0.2.16` — Walk to a random spot around home, by the villager's own roaming range.
+## RoamTask `0.2.17` — Walk to a random spot around home, by the villager's own roaming range.
 
 ## RosterBlock — A place in the game's roster of NPCs: unlocked, summoned with a tool, given a bed.
 - `Description { get; init; } -> string?` — The roster page's text about it.
@@ -332,35 +371,35 @@ enum: DistanceAndFaction, Voxels
 - `SummonTool { get; init; } -> string?` — What the tool that summons it is called under its name ("Tobin's Whistle").
 - `UnlockedBy { get; init; } -> string?` — A knowledge name of the mod's quests that unlocks it; null: always.
 
-## RoutineAssignmentChangedEvent `0.2.16` — A villager's routine assignment changed: assigned, replaced, suspended by a manual command, resumed, or removed.
+## RoutineAssignmentChangedEvent `0.2.17` — A villager's routine assignment changed: assigned, replaced, suspended by a manual command, resumed, or removed.
 - `After { get; } -> RoutineSnapshot` — The assignment after it (state `RoutineAssignmentState.Removed` for a removal).
 - `Before { get; } -> RoutineSnapshot?` — The assignment before the change; null when the villager had none.
 - `Reason { get; } -> string` — What happened: `Assigned`, `Replaced`, `ManualSuspended` (a Reset or GoTo command reached the villager), `Resumed`...
 - `Teardown { get; } -> bool` — The world is stopping: see the remarks.
 
-## RoutineAssignmentState `0.2.16` — Where a villager's routine assignment stands.
+## RoutineAssignmentState `0.2.17` — Where a villager's routine assignment stands.
 enum: Assigned, ManualSuspended, PendingSpawn, VersionMismatch, Removed
 
-## RoutineBlock `0.2.16` — A day plan for a villager: `RoutineBlock.Windows` of the game day, each with a task, and the `RoutineBlock.Fallback` for the minutes no window covers.
+## RoutineBlock `0.2.17` — A day plan for a villager: `RoutineBlock.Windows` of the game day, each with a task, and the `RoutineBlock.Fallback` for the minutes no window covers.
 - `Fallback { get; init; } -> RoutineTask` — The task for a minute no window covers, and after a `SleepTask` the game does not allow now: `VanillaTask` (the...
 - `Version { get; init; } -> uint` — The version of the plan's content, 1 or more.
 - `Was { get; init; } -> string?` — The block name this plan had before a rename: its identity stays `<mod>:<Was>`, so saved assignments still find it.
 - `Windows { get; init; } -> IReadOnlyList<RoutineWindow>` — The windows of the day, at most 64.
 
-## RoutineResult `0.2.16` — The answer to a change of a villager's routine (assign, remove, resume).
+## RoutineResult `0.2.17` — The answer to a change of a villager's routine (assign, remove, resume).
 - `RoutineResult(bool Ok, string? Reason, uint NpcId, ulong Revision)`
 - `NpcId { get; init; } -> uint` — The villager.
 - `Ok { get; init; } -> bool` — True when the change happened or was already in effect.
 - `Reason { get; init; } -> string?` — Why not: `OwnedBy:<mod>` (another mod's routine is on this villager), `WorldStopped`, `Revoked`, `QueueFull`.
 - `Revision { get; init; } -> ulong` — The assignment's revision after the change: it rises with every change of the assignment and never falls.
 
-## Routines `0.2.16` — Villager routines: bind a day plan (`RoutineBlock`, defined with `Blocks.Define` or in the `routines` section of blocks/*.json) to a villager.
+## Routines `0.2.17` — Villager routines: bind a day plan (`RoutineBlock`, defined with `Blocks.Define` or in the `routines` section of blocks/*.json) to a villager.
 - `static Assign(Villager npc, BlockHandle<RoutineBlock> plan) -> Task<RoutineResult>` — Binds `plan` to `npc`, or replaces the calling mod's plan on it.
 - `static Inspect(Villager npc) -> RoutineSnapshot?` — The routine on `npc` now (any mod's), or null when it has none.
 - `static Remove(Villager npc) -> Task<RoutineResult>` — Takes the calling mod's routine off `npc`: the game chooses for it again.
 - `static Resume(Villager npc) -> Task<RoutineResult>` — Ends the suspension a manual command put on `npc`'s routine: it decides again at the villager's next decision...
 
-## RoutineSnapshot `0.2.16` — A villager's routine at one moment.
+## RoutineSnapshot `0.2.17` — A villager's routine at one moment.
 - `RoutineSnapshot(uint NpcId, string Owner, string Key, uint PlanVersion, ulong Revision, RoutineAssignmentState Assignment, int WindowIndex, ulong Invocation, RoutineTask? Task, RoutineTaskState TaskState, VillagerState NativeState, string? LastReason)`
 - `Assignment { get; init; } -> RoutineAssignmentState` — Where the assignment stands.
 - `Invocation { get; init; } -> ulong` — The serial of the current task: each task the routine starts has the next one.
@@ -375,10 +414,10 @@ enum: Assigned, ManualSuspended, PendingSpawn, VersionMismatch, Removed
 - `TaskState { get; init; } -> RoutineTaskState` — Where it stands.
 - `WindowIndex { get; init; } -> int` — The window of the current task; -1: the fallback, or no task.
 
-## RoutineTask `0.2.16` — What a villager does in a window: one of the game's own villager tasks.
+## RoutineTask `0.2.17` — What a villager does in a window: one of the game's own villager tasks.
 - `RoutineTask(RoutineTask original)`
 
-## RoutineTaskChangedEvent `0.2.16` — A task of a villager's routine changed state: chosen at a decision, started, completed, refused by the game (no seat, no bed, sleep not allowed now), or suspended.
+## RoutineTaskChangedEvent `0.2.17` — A task of a villager's routine changed state: chosen at a decision, started, completed, refused by the game (no seat, no bed, sleep not allowed now), or suspended.
 - `From { get; } -> RoutineTaskState`
 - `Invocation { get; } -> ulong` — The task's serial: every task a routine starts has its own.
 - `Key { get; } -> string` — The plan's identity, `<mod>:<name>`.
@@ -390,10 +429,10 @@ enum: Assigned, ManualSuspended, PendingSpawn, VersionMismatch, Removed
 - `Teardown { get; } -> bool` — The world is stopping.
 - `To { get; } -> RoutineTaskState`
 
-## RoutineTaskState `0.2.16` — Where one task of a routine stands.
+## RoutineTaskState `0.2.17` — Where one task of a routine stands.
 enum: None, Chosen, Started, Completed, Refused, Suspended
 
-## RoutineWindow `0.2.16` — One window of a `RoutineBlock`: from `StartMinute` up to, not including, `EndMinute`, in minutes of the game day (0..1439; 0 is midnight).
+## RoutineWindow `0.2.17` — One window of a `RoutineBlock`: from `StartMinute` up to, not including, `EndMinute`, in minutes of the game day (0..1439; 0 is midnight).
 - `RoutineWindow(int StartMinute, int EndMinute, RoutineTask Task, int Priority = 0, bool AllDay = false)`
 - `AllDay { get; init; } -> bool` — The whole day; then both minutes are 0.
 - `EndMinute { get; init; } -> int` — The first minute after the window.
@@ -416,9 +455,9 @@ enum: None, Chosen, Started, Completed, Refused, Suspended
 - `static readonly Sphere -> Shape` — In any direction.
 - `static readonly Up -> Shape` — Straight up along the effect's up.
 
-## SitTask `0.2.16` — Find a seat nearby, walk to it and sit.
+## SitTask `0.2.17` — Find a seat nearby, walk to it and sit.
 
-## SleepTask `0.2.16` — Go to the assigned bed and sleep, when the game lets this villager sleep now (its own sleep and wake times).
+## SleepTask `0.2.17` — Go to the assigned bed and sleep, when the game lets this villager sleep now (its own sleep and wake times).
 
 ## SpawnBlock — Where a creature turns up by itself: in place of the game's creatures of a template.
 - `Chance { get; init; } -> double` — 0..1 of them.
@@ -429,7 +468,7 @@ enum: None, Chosen, Started, Completed, Refused, Suspended
 ## Sphere — A sphere.
 - `static Of(double radius) -> ColliderBlock` — A sphere collider of this radius in metres.
 
-## VanillaTask `0.2.16` — The game's own choice: its sleep check, its social targets and its weighted pick run as without a plan.
+## VanillaTask `0.2.17` — The game's own choice: its sleep check, its social targets and its weighted pick run as without a plan.
 
 ## VendorBlock — What an NPC sells: item -> its price.
 - `Gives { get; init; } -> IDictionary<ItemRef, int>?` — How many one trade gives, per item; 1 when left out.

@@ -73,24 +73,24 @@
 - `static readonly Workbench -> StationKind` — The game's workbench.
 - `Workshop { get; init; } -> string` — The game's workshop, `0x...`: what decides the recipes it runs.
 
-## StationMenuDefinition `0.2.16` — A layout of a station's menu that a mod lays over it at run time: `StationMenus.Define`.
+## StationMenuDefinition `0.2.17` — A layout of a station's menu that a mod lays over it at run time: `StationMenus.Define`.
 - `Key { get; init; } -> string` — The layout's key in your mod: letters, digits, '.', '_' and '-', at most 64.
 - `Tabs { get; init; } -> IReadOnlyList<StationMenuTabBlock>` — The tabs, 1 to 15.
 
-## StationMenuRegistration `0.2.16` — A layout `StationMenus.Define` laid over a station's menu.
+## StationMenuRegistration `0.2.17` — A layout `StationMenus.Define` laid over a station's menu.
 - `DefinitionId { get; } -> Guid` — The layout's id: the same for your mod and the definition's key on every machine.
 - `Dispose() -> void` — Takes the layout off.
 - `Generation { get; } -> ulong` — The generation of this game's station menus now: it goes up by one with each change of any of them.
 
-## StationMenus `0.2.16` — Station menus with tabs of their own, laid out at run time.
+## StationMenus `0.2.17` — Station menus with tabs of their own, laid out at run time.
 - `static Define(BlockHandle<StationBlock> station, StationMenuDefinition definition) -> MenuDefinitionResult` — Lays `definition` over the menu of `station`, as a layer of the calling mod.
 
-## StationMenuSetBlock `0.2.16` — A set of recipes in a tab, under a heading of its own.
+## StationMenuSetBlock `0.2.17` — A set of recipes in a tab, under a heading of its own.
 - `Heading { get; init; } -> UiText?` — The heading over the set.
 - `Key { get; init; } -> string` — The set's key: letters, digits, '.', '_' and '-', at most 64.
 - `Recipes { get; init; } -> IReadOnlyList<StationRecipeRef>` — The recipes it lists, in this order, by their `RecipeBlock.MenuKey`.
 
-## StationMenuTabBlock `0.2.16` — A tab of a station's crafting menu: its name, the icon it borrows, and its sets of recipes, in this order.
+## StationMenuTabBlock `0.2.17` — A tab of a station's crafting menu: its name, the icon it borrows, and its sets of recipes, in this order.
 - `IconFromTab { get; init; } -> int` — The icon of the n-th tab (0 the first) of the menu the station is like (`MenuBlock.Like`, else its kind's), as the...
 - `Key { get; init; } -> string` — The tab's key: letters, digits, '.', '_' and '-', at most 64.
 - `Name { get; init; } -> UiText` — What the tab says: one text for every language, or one per language (at most 35, each 1 to 4096 bytes).
@@ -133,7 +133,7 @@ enum: Craft, Fill, Select, UseAllOptions, Stop, Water
 - `WaterCharges { get; init; } -> int` — Water one craft uses (charges; 0: none).
 - `Workshop { get; init; } -> uint` — The workshop it belongs to (a station runs the recipes of its `StationInfo.Workshop`).
 
-## StationRecipeRef `0.2.16` — A recipe in a station's menu, by its `RecipeBlock.MenuKey`: `"key"` for a recipe of the mod that defines the station, `"other-mod:key"` for another mod's.
+## StationRecipeRef `0.2.17` — A recipe in a station's menu, by its `RecipeBlock.MenuKey`: `"key"` for a recipe of the mod that defines the station, `"other-mod:key"` for another mod's.
 - `StationRecipeRef()`
 - `StationRecipeRef(string Value)`
 - `static implicit operator StationRecipeRef(string value) -> StationRecipeRef` — A recipe by its key, or `"other-mod:key"`.

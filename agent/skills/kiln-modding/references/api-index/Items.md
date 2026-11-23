@@ -388,6 +388,15 @@ enum: None, Customization, Equipment, Currency, Generic, Virtual
 ## InventoryKinds — Which kinds of inventory owner `Items.FindInventories` looks for.
 enum: Containers, Players, Npcs, NonEmpty, PlayerStorage `0.2.16`, All
 
+## InventoryOwnerInfo `0.2.17` — An inventory owner and its kind (`Items.FindInventoryOwners`).
+- `InventoryOwnerInfo()`
+- `InventoryOwnerInfo(EntityId Entity, InventoryOwnerKind Kind)`
+- `Entity { get; init; } -> EntityId` — The entity that owns the inventory.
+- `Kind { get; init; } -> InventoryOwnerKind` — What it is, as far as Kiln can prove it.
+
+## InventoryOwnerKind `0.2.17` — What an inventory owner is, as far as Kiln can prove it (`Items.FindInventoryOwners`).
+enum: Unknown, Player, Npc, PlayerStorage, ProductionStation, BaseStorage
+
 ## InventorySlot — One slot of an inventory.
 - `InventorySlot(SlotId Slot, ItemId Item, int Count, EntityId ItemEntity, int Level, ItemRarity? Rarity, InventoryCategory Category, int Link, bool IsGear, bool IsEquipped, bool IsBroken, ushort ItemState)`
 - `Category { get; init; } -> InventoryCategory` — The category of the inventory link the slot sits in.
@@ -495,6 +504,7 @@ enum: Common, Uncommon, Rare, Epic, Legendary
 - `static EquipSet(EntityId player, EquipmentSet set, EquipOptions options = EquipOptions.None) -> Task<EquipmentSetResult>` `0.2.4` — Changes `player`'s equipment to `set` in one inventory transaction: every slot the set names changes, or none does...
 - `static EquipSet(EquipmentSetPlan plan, EquipOptions options = EquipOptions.None) -> Task<EquipmentSetResult>` `0.2.4` — Applies a plan of `Items.PlanSet`: the set it was made for, checked against the snapshot it holds (anything that...
 - `static FindInventories(InventoryKinds kinds = InventoryKinds.Containers) -> IReadOnlyList<EntityId>` — Entities with an initialized inventory of these kinds (one pass over the world's entities).
+- `static FindInventoryOwners(InventoryKinds kinds = InventoryKinds.Containers) -> IReadOnlyList<InventoryOwnerInfo>` `0.2.17` — The entities with an initialized inventory of these kinds, as `Items.FindInventories` finds them (the same flags...
 - `static GearOf(ItemInstanceRef item) -> GearState?` `0.2.12` — One item's rarity, enhancements, level and durability now, as the server's world has them; null when the item is...
 - `static GearOptionsAvailable { get; } -> bool` — This build supports `Gear.Unlocked` and `Gear.GemSlot` (capability `items.pide_options`; a give with them is...
 - `static GearReadAvailable { get; } -> bool` `0.2.12` — True when `Items.GearOf` can read (capability `items.gear.read`).
@@ -506,6 +516,7 @@ enum: Common, Uncommon, Rare, Epic, Legendary
 - `static GiveEquipAvailable { get; } -> bool` `0.2.15` — Whether give-and-equip can run in this server session.
 - `static GiveRecipeResult(EntityId target, uint recipeId, int count = 1, GiveOptions options = GiveOptions.None) -> Task<ItemsResult>` — Creates the outputs of a recipe in `target`'s inventory through the game's own recipe result function, exactly as...
 - `static Held(EntityId player) -> ItemInstanceRef` — The item in `player`'s hand: what the running action uses, else the selected action-bar slot (as the game picks it).
+- `const InventoryKindsCapability = "items.inventory_kinds" -> string` `0.2.17` — The capability row of `Items.FindInventoryOwners`: the kiln.items.inventory_kinds table is here.
 - `static Lookup(string nameOrId) -> ItemInfo?` — Finds an item by id ("0x2b0cf1d5", "722268629"), debug name ("Material_T1_Wood_Logs") or display name ("Wood Logs")...
 - `const MaxScale = 100 -> double` `0.2.12` — The highest power or armour multiplier.
 - `const MinScale = 0.01 -> double` `0.2.12` — The lowest power or armour multiplier.

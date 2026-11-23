@@ -13,12 +13,18 @@
 - `SetPerkSlots(ItemId item, int slots) -> void` `0.2.12` — Says how many of a gear item's five perk slots its type fills (its last filled one + 1; default 5): gear made...
 - `SetUpgradeRolls(params double[] rolls) -> void` `0.2.12` — Names the rolls of the upgrades that follow (`Items.UpgradeRarity`), in order, each 0 (inclusive) to 1 (exclusive)...
 
-## TestKit.HarnessModValues `0.2.16` — Kiln.ModValues offline: which characters are in game, the world id, and the records as JSON.
+## TestKit.HarnessModValues `0.2.17` — Kiln.ModValues offline: which characters are in game, the world id, and the records as JSON.
 - `static Character(int n) -> CharacterKey` — A character id for tests: account 0x1111..., id n.
 - `Join(CharacterKey character) -> void` — The character is in game: its values are initialized now (on the tick thread, as Kiln does at the character's first...
 - `Leave(CharacterKey character) -> void` — The character left: its values stay (readable), writes are refused (CharacterUnavailable).
 - `Record(CharacterKey character, string mod, string partition = "world") -> string?` — The records of a character and owning mod as stored ("world", "carried-authority", "carried"), or null.
 - `World { get; set; } -> Guid` — The world's id (revisions and compare-and-set are per world).
+
+## TestKit.HarnessNpcBodies `0.2.17` — What the game's start built of NPC blocks with a body of their own (`KilnHarness.NpcBodies`).
+- `Clear() -> void` — No rows: a start that built no bodies.
+- `Failed(string mod, string npc, string reason, ulong generation = 0) -> void` — The start's boot build refused `npc` of `mod` for `reason`: Failed.
+- `Ready(string mod, string npc, Guid template = default(Guid), Guid model = default(Guid), Guid graph = default(Guid), string? closure = null, ulong generation = 1) -> void` — The start built `npc` of `mod`: Ready.
+- `Removed(string mod, string npc, ulong generation = 0) -> void` — `npc` of `mod` was Ready at the previous start and is gone now: Removed.
 
 ## TestKit.HarnessOutlines `0.2.13` — The fake kiln.render's outlines of a harness (`KilnHarness.Outlines`): Ui.World.Outline's own code runs on it.
 - `All { get; } -> IReadOnlyList<TestKit.FakeOutline>` — Every request this harness got, oldest first, ended ones too.
@@ -66,7 +72,7 @@
 - `Voxels { get; set; } -> Func<TestKit.FakeVoxelRay, TestKit.FakeVoxelAnswer>?` — What a voxel ray answers.
 - `WithoutSpawnTime(EntityId entity) -> void` — Makes `entity` an anchor without a SpawnTime marker (as a saved entity or an item is in the game): a path request...
 
-## TestKit.HarnessRepl `0.2.16` — The fake kiln.repl of a harness (`KilnHarness.Repl`): Kiln.Replication's own code runs on it.
+## TestKit.HarnessRepl `0.2.17` — The fake kiln.repl of a harness (`KilnHarness.Repl`): Kiln.Replication's own code runs on it.
 - `AddComponent(TestKit.FakeReplComponent component) -> void` — Adds a component to the world's registry (what Replication.Component reads from the first step, and what a message's...
 - `Connect(uint machine, uint peer) -> void` — A player connects on machine slot `machine` (1 to 16) with peer handle `peer` (kiln.net's peer id).
 - `ConnectFake(uint machine, uint? labPeer = null) -> uint` — A lab's loopback fake on machine slot `machine`: its peer is `0x80000000 | machine`, or `labPeer` when a kiln.net...
@@ -84,7 +90,7 @@
 - `StopWorld() -> void` — The server world stops: every watch still on gets ENDED "world stopped" at the start of the next step; the peers and...
 - `WatchSlots { get; } -> int` — kiln.repl's watch slots in use: live watches, and ended ones not removed yet (a slot is free at the step after its...
 
-## TestKit.HarnessReplNet `0.2.16` — The fixture and recordings behind Kiln.Replication's filters, touches, item remap and game message hooks.
+## TestKit.HarnessReplNet `0.2.17` — The fixture and recordings behind Kiln.Replication's filters, touches, item remap and game message hooks.
 - `ConfigureItemRemap(IReadOnlyList<TestKit.FakeReplItemSite> sites, IReadOnlyCollection<ItemId> gameItems, IReadOnlyDictionary<ItemId, ItemId> lookAlikes) -> void` — Replaces the item remap fixture.
 - `Connect(uint machine, uint peer, bool vanilla = true) -> NetPeer` — Connects a peer to `KilnHarness.Repl` and gives it an identity for replication callbacks and injection.
 - `DriveMessage(uint peer, GameChannel channel, MessageDirection direction, ReadOnlySpan<byte> bytes) -> byte[]?` — Runs the registered handlers on a scripted game message and returns the resulting bytes, or null if dropped.
@@ -92,7 +98,7 @@
 - `Touches { get; } -> IReadOnlyList<EntityId>` — Touch requests in call order, including requests for missing entities or entities without a carrier.
 - `ValidateSend { get; set; } -> Func<GameChannel, ReadOnlyMemory<byte>, bool>?` — Supplies the test's verdict for injected bytes and send rewrites.
 
-## TestKit.HarnessRoutines `0.2.16` — The fake kiln.routines of a harness (`KilnHarness.Routines`): Kiln.Blocks' own code (`Routines.Assign`, `Remove`, `Resume`, `Inspect`...
+## TestKit.HarnessRoutines `0.2.17` — The fake kiln.routines of a harness (`KilnHarness.Routines`): Kiln.Blocks' own code (`Routines.Assign`, `Remove`, `Resume`, `Inspect`...
 - `Decide(uint npcId) -> string?` — The villager `npcId` reaches a decision.
 - `Finish(uint npcId, bool ok, string? reason = null) -> void` — The game ends the villager's current task state: done (`ok`) or failed (no seat, no path; `reason`, default...
 - `Queued { get; } -> int` — How many changes wait for the next step.
@@ -164,7 +170,7 @@ enum: Created, Starting, Running, Stopped, Disposed, Abandoned
 ## TestKit.HarnessTombstoneMode `0.2.16` — The game's tombstone setting at a death (`HarnessPlayerStorage.Die`).
 enum: AddBackpackMaterials, Everything, NoTombstone
 
-## TestKit.HarnessUiChest `0.2.16` — Models registrations and callbacks, not the game's row renderer.
+## TestKit.HarnessUiChest `0.2.17` — Models registrations and callbacks, not the game's row renderer.
 - `HarnessUiChest(TestKit.KilnHarness harness)`
 - `Buttons { get; } -> IReadOnlyList<string>` — Captions shown for the open storage chest, in registration order.
 - `Press(int index) -> bool` — Activates one visible button by its zero-based registration order.
@@ -188,11 +194,11 @@ enum: AddBackpackMaterials, Everything, NoTombstone
 - `Capture(ItemId item, EntityId entity, int level, ItemRarity? rarity, params UiItemDetailLine[] lines) -> void` — Records a completed panel (owned copy).
 - `Clear() -> void` — Forgets every recorded panel, as on a client world change.
 
-## TestKit.HarnessUiNativeTints `0.2.16` — Evaluates Ui.Inventory.TintWhen without drawing.
+## TestKit.HarnessUiNativeTints `0.2.17` — Evaluates Ui.Inventory.TintWhen without drawing.
 - `HarnessUiNativeTints(TestKit.KilnHarness harness)`
 - `TintOf(TestKit.FakeInventorySlot slot, Color background) -> Color` — Runs the rules over this copied slot (including plain stacks or empty slots).
 
-## TestKit.HarnessUiSnapshot `0.2.16` — The fake kiln.ui.snapshot of a harness (`KilnHarness.UiSnapshot`): Kiln.Blocks' BlockUi.ReadWorld, BlockUi.DemandWorld and the block runtime's `world.*` bindings run...
+## TestKit.HarnessUiSnapshot `0.2.17` — The fake kiln.ui.snapshot of a harness (`KilnHarness.UiSnapshot`): Kiln.Blocks' BlockUi.ReadWorld, BlockUi.DemandWorld and the block runtime's `world.*` bindings run...
 - `Demanded { get; } -> UiWorldFields` — The groups the live demands ask for together (what the next publication carries).
 - `Demands { get; } -> int` — Demands held now (all mods, Kiln.Blocks' windows and HUD lines included).
 - `EndWorld() -> void` — A world or session change (the menu, a loading screen, a rejoin): the publication goes and every token is revoked at...
@@ -234,6 +240,7 @@ enum: AddBackpackMaterials, Everything, NoTombstone
 - `Assets { get; } -> TestKit.HarnessAssets` `0.2.3` — The kit's kiln.assets of this harness: the game's content index the blob catalog reads, and the content blobs mods...
 - `Boot() -> void` — Loads the waiting mods and starts the server (the first step) when that has not happened yet.
 - `BootPhase { get; } -> TestKit.HarnessBootPhase` `0.2.3` — The boot phase of this harness (Mod.OnBoot): run a boot mod's OnBoot as a start does, read what it staged and why it...
+- `Camera { get; } -> TestKit.HarnessCamera` `0.2.17` — The fake kiln.camera of this harness: the camera requests mods made, and leases a test lets run out.
 - `Capabilities { get; } -> TestKit.HarnessCapabilities` — Capability rows as mods see them offline, and the test's overrides.
 - `Chat { get; } -> TestKit.HarnessChat` `0.2.2` — The server's text chat as the kit's fake of kiln.chat keeps it: what the players typed and every server line mods sent.
 - `Combat { get; } -> TestKit.HarnessCombat` `0.2.2` — Health, hits and deaths in this server's fake world as the kit's fake of kiln.combat keeps them: the test gives...
@@ -269,7 +276,8 @@ enum: AddBackpackMaterials, Everything, NoTombstone
 - `MenuFrame() -> int` `0.2.12` — One UI frame of the game's main menu, for the tasks (#83): on the game's main thread, while no world runs (after...
 - `Mod(string id) -> TestKit.ModHandle` — The handle of a mod this harness was given (by id).
 - `ModsDirectory { get; } -> string` — `kiln/mods`: where the harness puts each mod's folder.
-- `ModValues { get; } -> TestKit.HarnessModValues` `0.2.16` — The fake of Kiln.ModValues' world store and live characters (created and installed on first use).
+- `ModValues { get; } -> TestKit.HarnessModValues` `0.2.17` — The fake of Kiln.ModValues' world store and live characters (created and installed on first use).
+- `NpcBodies { get; } -> TestKit.HarnessNpcBodies` `0.2.17` — The boot build's NPC body rows this harness's game reports: script what the start built, then test...
 - `OnMainThread(Action work) -> void` `0.2.10` — Runs `work` on the game client's main thread, where the client world steps (#82): a task started there belongs to...
 - `Outlines { get; } -> TestKit.HarnessOutlines` `0.2.13` — The fake kiln.render's outlines of this harness (Ui.World.Outline): what mods outlined, and the game's side of it...
 - `Players { get; } -> TestKit.HarnessPlayers` — The players on this server: `HarnessPlayers.Join` one, `FakePlayer.Leave`.
@@ -278,10 +286,10 @@ enum: AddBackpackMaterials, Everything, NoTombstone
 - `Queries { get; } -> TestKit.HarnessQueries` `0.2.3` — The fake kiln.queries of this harness: what a voxel ray answers, and the rays mods asked for.
 - `ReadLogFile() -> string` `0.2.11` — The text of `KilnHarness.LogFile` as written so far ("" when it was not created).
 - `Reload(TestKit.ModHandle mod, bool checkCollected = true) -> TestKit.ModHandle` — Reloads `mod` from its folder with its dependents (they unload first and load again after it), as the control...
-- `Repl { get; } -> TestKit.HarnessRepl` `0.2.16` — The fake kiln.repl of this harness (the network inspector, Kiln.Replication): the peers on the server's machine...
-- `ReplNet { get; } -> TestKit.HarnessReplNet` `0.2.16` — Script and inspect the fake kiln.repl.net service used by Kiln.Replication.
+- `Repl { get; } -> TestKit.HarnessRepl` `0.2.17` — The fake kiln.repl of this harness (the network inspector, Kiln.Replication): the peers on the server's machine...
+- `ReplNet { get; } -> TestKit.HarnessReplNet` `0.2.17` — Script and inspect the fake kiln.repl.net service used by Kiln.Replication.
 - `ReportWorldRunning() -> void` — The game says its world runs (the line Kiln's lifecycle waits for): with `KilnHarnessOptions.WaitForWorldRunning`...
-- `Routines { get; } -> TestKit.HarnessRoutines` `0.2.16` — The kit's fake kiln.routines of this harness: the game time and the villagers' decisions a test plays, for the...
+- `Routines { get; } -> TestKit.HarnessRoutines` `0.2.17` — The kit's fake kiln.routines of this harness: the game time and the villagers' decisions a test plays, for the...
 - `Run(Action action) -> void` — Runs `action` on the tick thread, as Kiln (no mod).
 - `Run<T>(Func<T> func) -> T` — Runs `func` on the tick thread, as Kiln (no mod), and returns its result.
 - `RunCommand(CommandSource source, string line) -> CommandResult` — Runs a command line as `source` (see `KilnHarness.RunCommand`).
@@ -299,11 +307,11 @@ enum: AddBackpackMaterials, Everything, NoTombstone
 - `Tasks { get; } -> TestKit.HarnessTasks` `0.2.10` — Kiln tasks (`ModContext.Tasks`) of the mods under this harness: they run on the kit's task pool, whose workers are...
 - `Terrain { get; } -> TestKit.HarnessTerrain` `0.2.3` — The fake world behind Kiln.Terrain in this harness: its cells, bases and what overlays wrote.
 - `Time { get; } -> TestKit.HarnessTime` `0.2.2` — The server's day/night clock as the kit's fake of kiln.time runs it on the harness's virtual time.
-- `UiChest { get; } -> TestKit.HarnessUiChest` `0.2.16` — Offline native chest-button registrations and activations.
+- `UiChest { get; } -> TestKit.HarnessUiChest` `0.2.17` — Offline native chest-button registrations and activations.
 - `UiInventory { get; } -> TestKit.HarnessUiInventory` `0.2.12` — The fake kiln.ui.inventory of this harness: draw a screen's slots, hover and click one, and ask what mark a drawn...
 - `UiItemDetail { get; } -> TestKit.HarnessUiItemDetail` `0.2.14` — Recordings of the game's item-detail text and values (no game renderer is simulated).
-- `UiNativeTints { get; } -> TestKit.HarnessUiNativeTints` `0.2.16` — Offline native-background tint rules; no game drawing.
-- `UiSnapshot { get; } -> TestKit.HarnessUiSnapshot` `0.2.16` — The fake kiln.ui.snapshot of this harness (since 0.2.0-dev.31): publish the live game values that BlockUi.ReadWorld...
+- `UiNativeTints { get; } -> TestKit.HarnessUiNativeTints` `0.2.17` — Offline native-background tint rules; no game drawing.
+- `UiSnapshot { get; } -> TestKit.HarnessUiSnapshot` `0.2.17` — The fake kiln.ui.snapshot of this harness (since 0.2.0-dev.31): publish the live game values that BlockUi.ReadWorld...
 - `UiValues { get; } -> TestKit.HarnessUiValues` `0.2.3` — The fake kiln.ui.values of this harness: draw a value or an item detail view through the registered Ui.Values providers.
 - `Unload(TestKit.ModHandle mod, bool checkCollected = true) -> void` — Unloads `mod`, and first every mod that depends on it (reverse order), as the control command `unload` does.
 - `World { get; } -> TestKit.HarnessWorld` — The world this server runs: its id, its saves, its sidecar folder.
@@ -402,7 +410,7 @@ enum: AddBackpackMaterials, Everything, NoTombstone
 - `Version { get; set; } -> string` — The mod's version (semantic versioning); default 1.0.0.
 - `Writes(params string[] components) -> TestKit.ModManifest` `0.2.2` — The component types the mod writes through the game's write tracking (`"writes"`: short names such as `Fuel`): what...
 
-## TestKit.PhysicsCookResult `0.2.16` — What `FakePhysicsCookHost.Cook` did: `PhysicsCookResult.Ok` with the files it committed, or the reason it refused.
+## TestKit.PhysicsCookResult `0.2.17` — What `FakePhysicsCookHost.Cook` did: `PhysicsCookResult.Ok` with the files it committed, or the reason it refused.
 - `PhysicsCookResult(bool Ok, string? Reason, IReadOnlyList<string> Files)`
 - `Files { get; init; } -> IReadOnlyList<string>` — The files committed by this cook, in the order given.
 - `Ok { get; init; } -> bool` — The files were committed and registered.

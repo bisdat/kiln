@@ -1,4 +1,4 @@
-# Native ABI rows (mod API 0.2.16): part 3 of 3
+# Native ABI rows (mod API 0.2.17): part 3 of 3
 
 One line per row: header, `Table.row`, @offset, mod API, comment (native.md says more).
 
@@ -54,17 +54,17 @@ One line per row: header, `Table.row`, @offset, mod API, comment (native.md says
 
 ## services/kiln_survivors.h — service `kiln.survivors`
 ### KilnSurvivorsApi — 96 bytes
-- kiln_survivors.h `KilnSurvivorsApi.status` @8 `0.2.16` — any thread
-- kiln_survivors.h `KilnSurvivorsApi.count` @16 `0.2.16` — Roster entries (count(): 0 before the world's catalog is built).
-- kiln_survivors.h `KilnSurvivorsApi.at` @24 `0.2.16`
-- kiln_survivors.h `KilnSurvivorsApi.get` @32 `0.2.16` — By NpcId.
-- kiln_survivors.h `KilnSurvivorsApi.of_entity` @40 `0.2.16` — The NpcId of a live NPC entity.
-- kiln_survivors.h `KilnSurvivorsApi.bed_occupant` @48 `0.2.16` — The NpcId a bed is assigned to (the bed's side), 0 when free.
-- kiln_survivors.h `KilnSurvivorsApi.base_at` @56 `0.2.16` — The base whose build zone holds 'position': its id (for SUMMON) and its altar; *abandoned 1 when abandoned.
-- kiln_survivors.h `KilnSurvivorsApi.submit` @64 `0.2.16` — KILN_ERR_UNAVAILABLE: the operation's capability is off (status() says why).
-- kiln_survivors.h `KilnSurvivorsApi.result` @72 `0.2.16` — KILN_ERR_NOT_FOUND while it runs, and after it was forgotten (10 minutes, the last 256).
-- kiln_survivors.h `KilnSurvivorsApi.progress` @80 `0.2.16`
-- kiln_survivors.h `KilnSurvivorsApi.events` @88 `0.2.16` — Events with sequence > after, oldest first; *out_count written.
+- kiln_survivors.h `KilnSurvivorsApi.status` @8 `0.2.17` — any thread
+- kiln_survivors.h `KilnSurvivorsApi.count` @16 `0.2.17` — Roster entries (count(): 0 before the world's catalog is built).
+- kiln_survivors.h `KilnSurvivorsApi.at` @24 `0.2.17`
+- kiln_survivors.h `KilnSurvivorsApi.get` @32 `0.2.17` — By NpcId.
+- kiln_survivors.h `KilnSurvivorsApi.of_entity` @40 `0.2.17` — The NpcId of a live NPC entity.
+- kiln_survivors.h `KilnSurvivorsApi.bed_occupant` @48 `0.2.17` — The NpcId a bed is assigned to (the bed's side), 0 when free.
+- kiln_survivors.h `KilnSurvivorsApi.base_at` @56 `0.2.17` — The base whose build zone holds 'position': its id (for SUMMON) and its altar; *abandoned 1 when abandoned.
+- kiln_survivors.h `KilnSurvivorsApi.submit` @64 `0.2.17` — KILN_ERR_UNAVAILABLE: the operation's capability is off (status() says why).
+- kiln_survivors.h `KilnSurvivorsApi.result` @72 `0.2.17` — KILN_ERR_NOT_FOUND while it runs, and after it was forgotten (10 minutes, the last 256).
+- kiln_survivors.h `KilnSurvivorsApi.progress` @80 `0.2.17`
+- kiln_survivors.h `KilnSurvivorsApi.events` @88 `0.2.17` — Events with sequence > after, oldest first; *out_count written.
 
 ## services/kiln_tasks.h — service `kiln.tasks`
 ### KilnTasksApi — 56 bytes
@@ -291,15 +291,15 @@ One line per row: header, `Table.row`, @offset, mod API, comment (native.md says
 
 ## services/kiln_ui_blocks.h — service `kiln.ui.blocks`
 ### KilnUiBlocksApi — 40 bytes
-- kiln_ui_blocks.h `KilnUiBlocksApi.begin_tab_item_ex` @8 `0.2.16`
-- kiln_ui_blocks.h `KilnUiBlocksApi.set_next_item_open` @16 `0.2.16`
-- kiln_ui_blocks.h `KilnUiBlocksApi.item_state` @24 `0.2.16`
-- kiln_ui_blocks.h `KilnUiBlocksApi.input_text_ex` @32 `0.2.16`
+- kiln_ui_blocks.h `KilnUiBlocksApi.begin_tab_item_ex` @8 `0.2.17`
+- kiln_ui_blocks.h `KilnUiBlocksApi.set_next_item_open` @16 `0.2.17`
+- kiln_ui_blocks.h `KilnUiBlocksApi.item_state` @24 `0.2.17`
+- kiln_ui_blocks.h `KilnUiBlocksApi.input_text_ex` @32 `0.2.17`
 
 ## services/kiln_ui_chest.h — service `kiln.ui.chest`
 ### KilnUiChestApi — 24 bytes
-- kiln_ui_chest.h `KilnUiChestApi.subscribe` @8 `0.2.16` — OK+out.ok=0: budget (REGISTRATION_BUDGET/TEXT_BUDGET) or duplicate caption (REJECTED).
-- kiln_ui_chest.h `KilnUiChestApi.unsubscribe` @16 `0.2.16`
+- kiln_ui_chest.h `KilnUiChestApi.subscribe` @8 `0.2.17` — OK+out.ok=0: budget (REGISTRATION_BUDGET/TEXT_BUDGET) or duplicate caption (REJECTED).
+- kiln_ui_chest.h `KilnUiChestApi.unsubscribe` @16 `0.2.17`
 
 ## services/kiln_ui_inventory.h — service `kiln.ui.inventory`
 ### KilnUiInventoryApi — 48 bytes
@@ -319,16 +319,16 @@ One line per row: header, `Table.row`, @offset, mod API, comment (native.md says
 
 ## services/kiln_ui_snapshot.h — service `kiln.ui.snapshot`
 ### KilnUiSnapshotApi — 48 bytes
-- kiln_ui_snapshot.h `KilnUiSnapshotApi.demand_add` @8 `0.2.16`
-- kiln_ui_snapshot.h `KilnUiSnapshotApi.demand_remove` @16 `0.2.16`
-- kiln_ui_snapshot.h `KilnUiSnapshotApi.acquire` @24 `0.2.16`
-- kiln_ui_snapshot.h `KilnUiSnapshotApi.copy` @32 `0.2.16`
-- kiln_ui_snapshot.h `KilnUiSnapshotApi.release` @40 `0.2.16`
+- kiln_ui_snapshot.h `KilnUiSnapshotApi.demand_add` @8 `0.2.17`
+- kiln_ui_snapshot.h `KilnUiSnapshotApi.demand_remove` @16 `0.2.17`
+- kiln_ui_snapshot.h `KilnUiSnapshotApi.acquire` @24 `0.2.17`
+- kiln_ui_snapshot.h `KilnUiSnapshotApi.copy` @32 `0.2.17`
+- kiln_ui_snapshot.h `KilnUiSnapshotApi.release` @40 `0.2.17`
 
 ## services/kiln_ui_tints.h — service `kiln.ui.tints`
 ### KilnUiTintsApi — 24 bytes
-- kiln_ui_tints.h `KilnUiTintsApi.subscribe` @8 `0.2.16` — item_filter=0: all slots.
-- kiln_ui_tints.h `KilnUiTintsApi.unsubscribe` @16 `0.2.16`
+- kiln_ui_tints.h `KilnUiTintsApi.subscribe` @8 `0.2.17` — item_filter=0: all slots.
+- kiln_ui_tints.h `KilnUiTintsApi.unsubscribe` @16 `0.2.17`
 
 ## services/kiln_ui_values.h — service `kiln.ui.values`
 ### KilnUiValuesApi — 152 bytes
