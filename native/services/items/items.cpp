@@ -42,6 +42,8 @@
 #include "sets.h"
 #include "setsvc.h"
 #include "toolwear.h"
+#include "storage.h"
+#include "storage_guard.h"
 #include "wear.h"
 #include "kiln_api.h"
 #include "kiln_hook.hpp"
@@ -548,7 +550,7 @@ void program_body(void* ctx, const uint64_t* it) {
     if (g_program.load() == KILN_ITEMS_PROGRAM_BROKEN) return;
     if (g_verified) {  // idle steps cost one lock: nothing to check or run
         std::lock_guard lock(g_mu);
-        if (g_pending.empty() && g_fuel_pending.empty() && g_keeps.empty() && g_move_pending.empty()) return;
+        if (g_pending.empty() && g_fuel_pending.empty() && g_keeps.empty() && g_move_pending.empty() && !storage_work()) return;
     }
     unsigned long code = 0;
     Access a{};
@@ -579,6 +581,7 @@ void program_body(void* ctx, const uint64_t* it) {
             if (a.acc[i] != g_access.acc[i] || a.items != g_access.items) return broken("the program's accessors changed");
     }
 
+    storage_program(a);
     run_fuel_jobs(a);
     run_move_jobs(a);
 
@@ -1156,10 +1159,14 @@ bool g_closed = false;  // tick thread
 void KILN_CALL on_world(const KilnWorldEvent* ev, void*) {
     if (ev->kind != KILN_WORLD_SERVER) return;
     if (ev->event == KILN_WORLD_STOPPING) {
+        storage_reset();
         drop_world("the game is closing it");
         g_closed = true;
     } else if (ev->event == KILN_WORLD_STARTED) {
-        if (ev->session > 1 && !g_closed) drop_world("a new server world started");
+        if (ev->session > 1 && !g_closed) {
+            storage_reset();
+            drop_world("a new server world started");
+        }
         g_closed = false;
     }
 }
@@ -1172,6 +1179,7 @@ void KILN_CALL on_pre(const KilnTickInfo* tick, void*) {
         std::memcpy(&bits, &dt, 4);
         g_step_dt_bits.store(bits, std::memory_order_relaxed);
     }
+    storage_pre(tick->step);
     xfer_set_step(tick->step);
     instances_pre(g_world.load() ? g_world.load() : g_api->server_world(), tick->step);  // v4: the id counter check, prune
     poll_world_program();
@@ -1471,6 +1479,7 @@ void KILN_CALL t_cancel_owner(KilnOwner owner) {
     // Draining a running transfer callback must not hold the request mutex: that callback may queue a request.
     xfer_end_owner(owner);
     craft_sources_cancel_owner(owner);
+    storage_cancel_owner(owner);
 }
 
 KilnResult KILN_CALL t_read(KilnEntity entity, KilnItemsInventory* info, KilnItemsSlot* slots, uint32_t capacity,
@@ -1499,7 +1508,7 @@ KilnResult KILN_CALL t_read(KilnEntity entity, KilnItemsInventory* info, KilnIte
 
 KilnResult KILN_CALL t_find(uint32_t flags, KilnEntity* out, uint32_t capacity, uint32_t* out_count) {
     if (out_count) *out_count = 0;
-    if ((capacity && !out) || (flags & ~0xFu)) return KILN_ERR_INVALID_ARGUMENT;
+    if ((capacity && !out) || (flags & ~0x1Fu)) return KILN_ERR_INVALID_ARGUMENT;
     if (!E.read_ok) return KILN_ERR_UNAVAILABLE;
     if (!g_api->on_tick_thread()) return KILN_ERR_WRONG_THREAD;
     const uintptr_t world = g_world.load();
@@ -2216,6 +2225,7 @@ void resolve() {
 void register_main();
 
 void KILN_CALL on_ready(void*) {
+    storage_ready();
     note_setup(kiln_component_changes_find(g_api), g_owner);  // 07 S7: this service's writes are named in component watches
     register_main();
     // v5: equip runs in a program of its own, an entity program over the player characters: kiln.world only
@@ -2289,6 +2299,7 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     info->version = KilnStr{"6", 1};
     info->on_ready = &on_ready;
     resolve();
+    storage_init();
     selftest_init();
     sets_lab_init();  // v6: the equipment sets' lab switches (kiln/data/kiln.items/sets-*), read once
     KilnHandle h = 0;
