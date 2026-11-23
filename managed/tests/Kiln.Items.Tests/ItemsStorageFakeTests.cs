@@ -76,6 +76,8 @@ public sealed unsafe class ItemsStorageFakeTests : IDisposable
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static void OnStage(uint kind, void* user)
     {
+        // This callback tests the save stage; holder housekeeping has a separate callback below.
+        if (kind != StorageNative.EventBatch) return;
         // the stage reads the newest BATCH event and takes the batch, as Kiln.Saves does
         var self = _self!;
         StorageNative.Event e = default;
@@ -88,6 +90,27 @@ public sealed unsafe class ItemsStorageFakeTests : IDisposable
             if (e.Kind == StorageNative.EventBatch) tag = e.Tag;
         }
         Stages.Add((kind, tag));
+    }
+
+    private static readonly List<(uint Kind, ulong Seq, uint Target, uint Handle, bool Readable, int Stacks)> Housekeeping = [];
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static void OnHousekeeping(uint kind, void* user)
+    {
+        var self = _self!;
+        StorageNative.Event newest = default;
+        ulong after = 0;
+        while (true)
+        {
+            StorageNative.Event e = default;
+            e.Size = (uint)sizeof(StorageNative.Event);
+            if (self._t->NextEvent(after, &e) != StorageNative.Ok) break;
+            after = e.Seq;
+            newest = e;
+        }
+        var memory = self._fake.World as StorageFakeMemory;
+        Housekeeping.Add((kind, newest.Seq, newest.Target, newest.Handle, memory?.Exists(newest.Target) == true,
+            self._fake.World.ReadHolder(newest.Target, StorageNative.MaxSlots).Count));
     }
 
     private void Bind(ulong owner = Saves)
@@ -253,6 +276,59 @@ public sealed unsafe class ItemsStorageFakeTests : IDisposable
         Assert.Equal(flags | StorageNative.WitnessApplied, Witness(3).Flags);
         _fake.JoinRead(3, Account, Character, 0x1234);  // a later join does not inherit the signal
         Assert.Equal(StorageNative.WitnessRead, Witness(3).Flags);
+    }
+
+    [Theory]
+    [InlineData(StorageNative.StageParked, 101u, StorageNative.EventParked)]
+    [InlineData(StorageNative.StageRestored, 0u, StorageNative.EventRestored)]
+    public void ScriptedHousekeepingQueuesTheRawEventBeforePumpingTheStage(uint kind, uint handle, uint eventKind)
+    {
+        _self = this;
+        Housekeeping.Clear();
+        ulong last;
+        Assert.Equal(StorageNative.Ok, _t->PersistBind(Saves, &OnHousekeeping, null, &last));
+        _fake.JoinRead(0, Account, Character, 7);
+        _fake.JoinApply(0, 1);
+        _fake.EmitHousekeeping(kind, 0, "a:bag", 0x1234, handle);
+        var hint = Assert.Single(Housekeeping);
+        Assert.Equal((kind, 0x1234u, handle), (hint.Kind, hint.Target, hint.Handle));
+        var raw = Assert.Single(Events().Where(e => e.Kind == eventKind));
+        Assert.Equal((hint.Seq, 1u, 0u, Account), (raw.Seq, raw.Player, raw.Slot, raw.Account));
+        Assert.Equal(Character, StorageNative.CharacterOf(raw.Character));
+        Assert.Equal("a:bag", StorageNative.Text(raw.Key, StorageNative.KeyMax));
+        if (eventKind == StorageNative.EventRestored) Assert.NotEqual(0u, raw.Flags & StorageNative.EventLive);
+    }
+
+    [Fact]
+    public void LifecycleHousekeepingSeesTheOldHolderBeforeDestroyAndRebuiltItemsAfterUnpark()
+    {
+        _self = this;
+        Housekeeping.Clear();
+        ulong last;
+        Assert.Equal(StorageNative.Ok, _t->PersistBind(Saves, &OnHousekeeping, null, &last));
+        var handle = Register(ModA, "a:bag", 8);
+        var join = _fake.JoinRead(0, Account, Character, 7);
+        Assert.Equal(StorageNative.Ok, Restore(0, join, 0, StorageNative.SourceServer, 4, Account, Character,
+            Live("a:bag", 8, (0, 0x77, 10))));
+        _fake.JoinApply(0, 1);
+        uint holder;
+        Assert.Equal(StorageNative.Ok, _t->Holder(ModA, handle, 1, &holder));
+        var restored = Assert.Single(Housekeeping);
+        Assert.Equal((StorageNative.StageRestored, holder, true, 1),
+            (restored.Kind, restored.Target, restored.Readable, restored.Stacks));
+        Park(1, "a:bag", StorageNative.ParkRequested);
+        _fake.Step();
+        var parked = Housekeeping[1];
+        Assert.Equal((StorageNative.StageParked, holder, true, 1),
+            (parked.Kind, parked.Target, parked.Readable, parked.Stacks));
+        Assert.False(((StorageFakeMemory)_fake.World).Exists(holder));
+        Unpark(1, "a:bag");
+        _fake.Step();
+        Assert.Equal(StorageNative.Ok, _t->Holder(ModA, handle, 1, &holder));
+        var rebuilt = Housekeeping[2];
+        Assert.Equal((StorageNative.StageRestored, holder, true, 1),
+            (rebuilt.Kind, rebuilt.Target, rebuilt.Readable, rebuilt.Stacks));
+        Assert.Equal(3, Housekeeping.Count);
     }
 
     [Fact]
