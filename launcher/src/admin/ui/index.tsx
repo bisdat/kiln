@@ -3,13 +3,45 @@
 // design system's Modal and ConfirmDanger), health bars, stat tiles, avatars and formatters. Styles: ../admin.css.
 import { useEffect, useState, type KeyboardEvent, type ReactNode } from "react";
 import { create } from "zustand";
-import type { KilnError } from "../../api/commands";
+import type { KilnError } from "../../api/shared";
 import { formatLocale, t as tr, useT } from "../../i18n";
-import { Banner, Button, ConfirmDanger, Modal, TextInput, toast as uiToast } from "../../ui";
+import { Button } from "../../ui/Button";
+import { TextInput } from "../../ui/Form";
+import { ConfirmDanger, Modal } from "../../ui/Modal";
+import { Banner } from "../../ui/StatusPill";
+import { toast as uiToast } from "../../ui/Toast";
 // with the pieces, so admin pages mounted outside the admin routes (the server's Configs and Mods) are styled too
 import "../admin.css";
 
-export * from "../../ui";
+// The design system (src/ui/index.ts) without its launcher-only parts (task progress, drop zones and file dialogs reach
+// the launcher's commands and Tauri): the admin pages are also the package @kiln/admin-ui, used outside the launcher.
+export { Button, IconButton, Spinner } from "../../ui/Button";
+export type { ButtonProps, ButtonVariant, ButtonSize, IconButtonProps } from "../../ui/Button";
+export { Card, CardLevel, Section, Panel, PageHeader, Page, SplitPage, KeyValue } from "../../ui/Card";
+export type { CardProps, PanelProps, PageHeaderProps, KeyValueRow } from "../../ui/Card";
+export { StatusPill, Badge, Kbd, Banner } from "../../ui/StatusPill";
+export type { Tone, StatusPillProps, BannerProps } from "../../ui/StatusPill";
+export { EmptyState, Skeleton } from "../../ui/EmptyState";
+export { Tabs, NavTabs, Segmented } from "../../ui/Tabs";
+export type { TabItem, NavTabItem } from "../../ui/Tabs";
+export { Table, NameId } from "../../ui/Table";
+export type { Column, TableProps } from "../../ui/Table";
+export { Field, TextInput, TextArea, Select, NumberInput, Slider, Toggle, WellInput, FlameToggle, escClearsFilter } from "../../ui/Form";
+export type { FieldProps, ToggleProps, SliderProps, SelectProps, NumberInputProps, WellInputProps } from "../../ui/Form";
+export { Modal, ConfirmDanger, ArchText, typeToConfirm, setTypeToConfirm } from "../../ui/Modal";
+export type { ModalProps, ConfirmDangerProps } from "../../ui/Modal";
+export { toast, Toaster, useToasts, openLines } from "../../ui/Toast";
+export type { ToastAction, ToastOptions } from "../../ui/Toast";
+export { LogView, classifyLine } from "../../ui/LogView";
+export type { LogViewProps, LogLevel } from "../../ui/LogView";
+export { JsonView } from "../../ui/JsonView";
+export { SchemaForm, parseDuration, getPath, checkValue } from "../../ui/SchemaForm";
+export type { SchemaFormProps } from "../../ui/SchemaForm";
+export { SortableList } from "../../ui/SortableList";
+export { Menu, useRowContextMenu } from "../../ui/Menu";
+export type { MenuItem } from "../../ui/Menu";
+export { PathText } from "../../ui/PathText";
+export { fmtBytes, fmtAgo, fmtTime, shortHash, errorText, installNote, splitPath } from "../../ui/format";
 
 export const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(" ");
 

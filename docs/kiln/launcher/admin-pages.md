@@ -2,7 +2,9 @@
 
 The Kiln Launcher's server administration: live tools as launcher pages, on Kiln.Admin's op table over
 KAP/1 ([admin-protocol.md](admin-protocol.md)). Code: `launcher/src/admin/**`,
-`launcher/src/api/admin.ts`, `launcher/vite.admin.config.ts`, `tools/launcher/{mock-admin.py,admin-shots.mjs}`.
+`launcher/src/api/{admin,adminTauri,adminWs,shared}.ts`, `launcher/vite.admin.config.ts`,
+`tools/launcher/{mock-admin.py,admin-shots.mjs}`. The same pages are the package `@kiln/admin-ui` for web pages (Kiln
+Web Admin): see "The @kiln/admin-ui package" below.
 
 ## Mounting
 `<AdminRoutes/>` (`src/admin/index.tsx`) reads `:id` from the route (or takes `serverId`), opens the server's shared
@@ -37,7 +39,9 @@ backup names, field paths, amounts 1..10000, spawn counts 1..20, radius 1..2000 
 1..40, config paths and list sizes); Kiln.Admin validates again and its message is shown as is.
 
 ## Hooks (`src/api/admin.ts`)
-Both forms work: without a server id the hooks use the nearest `<AdminProvider>`.
+Both forms work: without a server id the hooks use the nearest `<AdminProvider>`. The hub reaches Kiln.Admin through
+an `AdminTransport` (`configureAdmin({transport, host})`): in the launcher `src/api/adminTauri.ts` (the Tauri commands
+`admin_*` and the `kiln://admin` event, installed by `src/main.tsx`), in a web page `src/api/adminWs.ts`.
 
 | Hook | Returns |
 |---|---|
@@ -47,15 +51,17 @@ Both forms work: without a server id the hooks use the nearest `<AdminProvider>`
 | `useAdminCaller([serverId])` | `(op, args) => Promise<data>`; rejects with KilnError (`op_failed` with the op's message; `unsupported` for an op the server lacks) |
 | `useAdminCall(op, {invalidates?, ...mutation options})` | a TanStack mutation: `mutate(args)` |
 | `useAdminQuery(op, args?, options?)` | a TanStack query keyed by server, op, args and session (a reconnect refetches); disabled until the op is available |
-| `callAdmin`, `invalidateAdmin`, `reconnectAdmin(serverId, transport?)`, `onAdminState`, `onAdminTopic` | the same outside React |
+| `useKap([serverId])`, `kapOps(call)` | typed calls of the newer ops: `adminInfo`, `serverRestart`, `serverRestartCancel`, `loginMint`, `loginRedeem`, `updateList`, `updateStage`, `updateCancel`, `updateRollback` (each a KAP request; check with `useHasOp`) |
+| `callAdmin`, `invalidateAdmin`, `reconnectAdmin(serverId, kind?)`, `onAdminState`, `onAdminTopic` | the same outside React |
+| `configureAdmin({transport, host})`, `adminTransport()`, `adminHost()` | the transport seam and the app around the pages (below) |
 
-The hub follows the Rust AdminHub: `admin_connect` returns the server's one session (stable across its
-internal reconnects); `kiln://admin` `{kind:'closed', retry:true}` shows "Reconnecting…" until `{kind:'ready',
-transport, ops, topics}`; `retry:false` is final (the Reconnect button); without `retry` (an older backend) the hub
-reconnects itself after 10 s. A failed `admin_connect` (server stopped, no endpoint) is retried with backoff 1..30 s
-while a page is open. `admin_call` `not_found` (session forgotten) reconnects; `admin_unavailable` shows reconnecting.
-Switching transport closes the session first (`admin_disconnect`, then `admin_connect`). The transport choice is kept
-per server in localStorage.
+The hub follows the Rust AdminHub, and every transport behaves like it: `connect` (`admin_connect`) returns the
+server's one session (stable across its internal reconnects); the event `{kind:'closed', retry:true}` shows
+"Reconnecting…" until `{kind:'ready', transport, ops, topics}`; `retry:false` is final (the Reconnect button); without
+`retry` (an older backend) the hub reconnects itself after 10 s. A failed connect (server stopped, no endpoint) is
+retried with backoff 1..30 s while a page is open. A call's `not_found` (session forgotten) reconnects;
+`admin_unavailable` shows reconnecting. Switching the transport kind (auto, tcp, file, ssh: the kinds the transport
+offers; a web page has none to pick) closes the session first. The kind is kept per server in localStorage.
 
 ## What the launcher remembers per server
 `src/admin/history.ts` (localStorage `kiln.admin.history.v1.<serverId>`), fed by every state push of every connected
@@ -96,3 +102,41 @@ live overlays on the plain world plane; Spawn falls back to the enemy types the 
   (`call`, `watch`), `capture --server <dir>` (a local capture, paths made anonymous), `synthesize [--from capture]`
   (the committed synthetic fixture) and `selftest`.
 - Screenshots: `node tools/launcher/admin-shots.mjs [--server lab] [--prefix mock-]` → `.out/launcher/admin-shots/`.
+
+## The @kiln/admin-ui package
+The admin pages are also a workspace package for web pages: Kiln Web Admin (`~/Work/kiln-mods/kiln-webadmin`, its
+DESIGN.md section 4) serves them from inside the server, so both panels get every page. Nothing is published.
+
+| | |
+|---|---|
+| Sources | `launcher/src/admin/**` and what its entry reaches: `src/api/{admin,adminWs,shared}.ts`, the design system's Tauri-free modules (`src/ui/*` without TaskProgress, DropZone, dialogFolder), `src/i18n`, `src/theme` |
+| Entry | `src/admin/web.ts`: the pages (`AdminRoutes`, `ADMIN_PAGES`, each page), the hub and hooks, `configureAdmin`, `createWebSocketTransport`, `kapOps`/`useKap`, the KAP and op types, `ConfirmHost`, `Toaster`, the languages |
+| Package | `launcher/packages/admin-ui/package.json` (`@kiln/admin-ui`, a Bun workspace of `launcher/`; `launcher/bunfig.toml` keeps the install hoisted): `exports` `.` = `dist/admin-ui.js` + `dist/types/admin/web.d.ts`, `./style.css` = `dist/admin-ui.css` |
+| Build | `bun run build:admin-ui` in `launcher/` (`vite.admin-ui.config.ts`, `tsconfig.admin-ui.json`, `scripts/admin-ui-dist.ts`): an ES module with React, React Router, TanStack Query (peer dependencies), zustand, leaflet, lucide-react and react-virtual as imports; the stylesheet with the theme, fonts and leaflet's CSS. The last step fails when the bundle or its declarations reach Tauri, the command layer or the mock, or a package the package.json does not declare |
+| Not in it | the launcher's own server pages that use the admin hooks (Overview, the console `pages/servers/ServerConsole.tsx`, Mods `pages/servers/ServerModsPage.tsx`; Configs is in it as `AdminConfigsPage`), the browser mock (`src/admin/mock`, launcher dev only) |
+
+A web page sets the transport and renders the pages in its own providers:
+```tsx
+import { AdminRoutes, ConfirmHost, Toaster, configureAdmin, createWebSocketTransport } from "@kiln/admin-ui";
+import "@kiln/admin-ui/style.css";
+configureAdmin({ transport: createWebSocketTransport({ url: (serverId) => `wss://${location.host}/kap/${serverId}` }) });
+// <QueryClientProvider><HashRouter><Route path="servers/:id/admin/*" element={<AdminRoutes />} /> ... <ConfirmHost /><Toaster />
+```
+`createWebSocketTransport({url, WebSocket?, backoffMs?, handshakeMs?, callTimeoutMs?})`: `url` may be a function, called
+at every (re)connect so the host can hand out a fresh ticket; one that throws `{code: "auth_failed"}` ends the session.
+The protocol on the socket: [admin-protocol.md](admin-protocol.md) section 12.
+
+The host seam (`configureAdmin`'s `host`, all optional): `assetsRoot()` (where the map art is: the launcher's
+`kiln-asset` protocol in a release build; default `/assets-local/`), `useArtStatus()` (a hook: the launcher's Game
+art state, so the map probes again), `crashReportsFromDisk(serverId)` (the launcher reads a stopped server's crash
+reports), `restartManagedServer(serverId)` (the launcher restarts a server it manages: its Tauri command
+`server_restart`). Without them the pages leave those parts out: no folder crash list, no "Restart now" for a staged
+restore. Kiln.Admin's op `server_restart` is something else, a KAP request (`kapOps(call).serverRestart`), and the
+names never meet: the WebSocket transport has no way to reach a launcher command
+(`unit-tests/admin-{tauri,ws}-transport.test.ts`).
+
+Checks: `unit-tests/admin-ui-package.test.ts` (what the entry reaches, by value and by type), `admin-hub.test.ts` (the
+hub over a fake transport), `admin-tauri-transport.test.ts` (the launcher's transport at Tauri's invoke),
+`admin-ws-transport.test.ts` (a fake KAP-over-WebSocket server); `tests/admin-ui-web.spec.ts` runs the pages in a plain
+page (`src/admin/harness/index.html?kap=<ws url>`, served by the launcher's dev server, not part of a build) against
+the browser mock's world behind a fake socket, with a Tauri stand-in that must never be called.
