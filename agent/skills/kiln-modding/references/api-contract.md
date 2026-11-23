@@ -68,9 +68,10 @@ if (!r.Ok) c.Reply($"not equipped: {r.Reason}");                                
   [versions.md](versions.md)). `Mods.ApiVersion` is obsolete: a const, copied into your mod at build time. Release
   builds carry their full version (`0.2.0-dev.30.6`).
 - **`[Experimental]` ids:** `KILNX001` lab and test members (hidden; a build error unless the project adds it to
-  `NoWarn`), `KILNX002` API not yet proven in a real client, `KILNX003` (dev.29.18+) the task-thread world reads and
-  writes (`WorldConcurrent` and its types; opt in with `KILNX003`, not `KILNX001`). dev.28's `KILNX028` (capacity
-  types) is not needed from dev.29 on. None is covered by the additive-API promise.
+  `NoWarn`), `KILNX002` API not yet proven in a real client. Neither is covered by the additive-API promise.
+  The task-thread world reads and writes (`WorldConcurrent` and its types) first shipped in dev.29.18 under
+  `KILNX003`. Since 0.2.0-dev.30.7, mod API 0.2.16 (no longer experimental). No opt-in is needed now.
+  dev.28's `KILNX028` (capacity types) is not needed from dev.29 on.
 
 ## The mod
 ```csharp
