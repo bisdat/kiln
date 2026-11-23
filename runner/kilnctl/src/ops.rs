@@ -738,8 +738,7 @@ pub fn port_flow(inst: &Instance, old: Option<PathBuf>, new: &Path, f: &FlowArgs
     }
     let green = gate_res.as_ref().is_some_and(|r| r.green);
     if !rep.complete {
-        next.push(format!("the port is incomplete: low confidence {:?}, lost {:?} (see {})", rep.low, rep.lost,
-            rep.out.join("report.txt").display()));
+        next.push(incomplete_reason(&rep));
     }
     next.extend(next_for_sigs(&rep));
     if !rep.defs_unchanged {
@@ -784,6 +783,18 @@ pub fn port_flow(inst: &Instance, old: Option<PathBuf>, new: &Path, f: &FlowArgs
         if next.is_empty() { "nothing left to do".to_string() } else { next.iter().map(|n| format!("- {n}")).collect::<Vec<_>>().join("\n") });
     std::fs::write(rep.out.join("NEXT.txt"), text)?;
     Ok(FlowOutcome { marked, summary })
+}
+
+/// NEXT.txt's line for an incomplete port: the names below the confidence, the lost ones, and each must-port name the
+/// port could not take to the new exe (tools/sigport/must_port.json), which alone makes a port incomplete.
+pub fn incomplete_reason(rep: &sigport::PortReport) -> String {
+    let mut s = format!("the port is incomplete: low confidence {:?}, lost {:?} (see {})", rep.low, rep.lost,
+        rep.out.join("report.txt").display());
+    for l in &rep.must_port {
+        s.push_str("; ");
+        s.push_str(l);
+    }
+    s
 }
 
 /// NEXT.txt lines for the port's descriptor reviews. They do not stop a mark. A review can also flag changed code

@@ -169,9 +169,24 @@ bool kiln_boxes_for(Caller c, const CallSites& s) { return !s.world_save || c ==
 
 // Another mod's detour in front of Kiln's (on the builder, or a caller of it) changes the return address Kiln's hook
 // sees, so a call is also placed by the return addresses below it on the stack. Where one lies: in the game exe, in one
-// of Kiln's own modules (kiln-core.dll, kiln-*.dll: another Kiln link on the builder), or anywhere else: another module
-// (named) or memory no module holds (a hook's relay or stub).
-enum class Place { Game, Kiln, Other };
+// of Kiln's own modules (kiln-core.dll, kiln-*.dll: another Kiln link on the builder), in one of the system's
+// (system_module: Windows' or Wine's ntdll, kernel32 and kernelbase, the C runtime: a thread's start, never a mod's hook),
+// or anywhere else: another module (named) or memory no module holds (a hook's relay or stub).
+enum class Place { Game, Kiln, System, Other };
+// The modules every thread starts in (ntdll!RtlUserThreadStart, kernel32!BaseThreadInitThunk) and the C runtime's, the
+// same names under Wine. A worker thread's stack reaches them within a few frames: counted as another module, a
+// base-zone or base-query call whose own site did not resolve would get Kiln's boxes, and past 16 zones the game's base
+// areas go wrong. No mod's detour lives in them.
+bool system_module(const std::string& file) {
+    static constexpr const char* names[] = {"ntdll.dll",        "kernel32.dll",       "kernelbase.dll", "ucrtbase.dll",
+                                            "msvcrt.dll",       "vcruntime140.dll",   "vcruntime140_1.dll",
+                                            "msvcp140.dll"};
+    std::string low = file;
+    for (char& c : low) c = static_cast<char>(c >= 'A' && c <= 'Z' ? c + 32 : c);
+    for (const char* n : names)
+        if (low == n) return true;
+    return false;
+}
 struct Frame {
     uintptr_t at = 0;
     Place place = Place::Game;
@@ -180,9 +195,9 @@ struct Frame {
 };
 constexpr size_t kWalkFrames = 8;  // return addresses looked at, from the one Kiln's hook returns to
 // How a call was placed: its return address is a known site, or a deeper frame is; or no known site within
-// kWalkFrames and a frame outside the game exe and Kiln (another module's code is on the way: it may be the world
-// save), or a walk that did not get past the return address; or only the game's own frames (a caller Kiln does not
-// know).
+// kWalkFrames (or above the first system frame, where the walk ends) and a frame outside the game exe, Kiln and the
+// system (another module's code is on the way: it may be the world save), or a walk that did not get past the return
+// address; or only the game's own frames (a caller Kiln does not know).
 enum class Found { Site, Deeper, Foreign, Unwalked, GameOnly };
 struct CallerVerdict {
     Caller kind = Caller::Unknown;
@@ -199,17 +214,26 @@ CallerVerdict judge_caller(uintptr_t ret, const std::vector<Frame>& frames, cons
     if (v.kind == Caller::Unknown) {
         v.how = Found::GameOnly;
         const size_t n = std::min(frames.size(), kWalkFrames);
-        for (size_t i = 0; i < n && v.kind == Caller::Unknown; ++i)
+        // the walk ends at the first frame in a system module: below it lies the thread's start, not the call chain
+        // that reached the builder (and under Wine nothing that unwinds cleanly)
+        size_t m = 0;
+        while (m < n && frames[m].place != Place::System) ++m;
+        for (size_t i = 0; i < m && v.kind == Caller::Unknown; ++i)
             if ((v.kind = classify_caller(frames[i].at, s)) != Caller::Unknown) {
                 v.how = Found::Deeper;
                 v.via = frames[i];
             }
-        for (size_t i = 0; i < n && v.kind == Caller::Unknown; ++i)
+        for (size_t i = 0; i < m && v.kind == Caller::Unknown; ++i)
             if (frames[i].place == Place::Other) {
                 v.how = Found::Foreign;
                 v.via = frames[i];
                 break;
             }
+        // the builder called straight from a system module: no game code placed it, so it may be the world save
+        if (v.kind == Caller::Unknown && n > 0 && m == 0) {
+            v.how = Found::Foreign;
+            v.via = frames[0];
+        }
         if (v.how == Found::GameOnly && n < 2) v.how = Found::Unwalked;
     }
     v.boxes = v.kind != Caller::Unknown ? kiln_boxes_for(v.kind, s) : !s.world_save || v.how != Found::GameOnly;
@@ -259,7 +283,7 @@ Frame place_of(uintptr_t at) {
         it = names.emplace(b, text[0] ? text : "an unnamed module").first;
     }
     f.module = it->second;
-    f.place = kiln_module(f.module) ? Place::Kiln : Place::Other;
+    f.place = kiln_module(f.module) ? Place::Kiln : system_module(f.module) ? Place::System : Place::Other;
     return f;
 }
 // The stack below the caller of this function, from `ret` (the return address Kiln's hook returns to) down, at most

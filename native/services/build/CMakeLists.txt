@@ -28,3 +28,7 @@ endforeach()
 # fault. No game or world boot.
 add_executable(build-regions-win EXCLUDE_FROM_ALL tests/regions_win_test.cpp)
 set_target_properties(build-regions-win PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/tests")
+# Its stand-in for another mod's DLL on the stack (othermod.dll, next to it): neither the game, Kiln nor the system.
+add_library(build-regions-win-othermod SHARED EXCLUDE_FROM_ALL tests/regions_win_othermod.cpp)
+set_target_properties(build-regions-win-othermod PROPERTIES OUTPUT_NAME othermod RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/tests")
+add_dependencies(build-regions-win build-regions-win-othermod)
