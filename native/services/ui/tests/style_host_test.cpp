@@ -353,6 +353,39 @@ static void images() {
         CHECK(near(ImGui::GetItemRectSize().x, 40 + 2 * pad.x) && near(ImGui::GetItemRectSize().y, 40 + 2 * pad.y));
         CHECK(near(q.uv0.x, 0.25f) && near(q.p0.x - at.x, pad.x + 20 / 3.f, 0.01f) && near(q.p1.y - q.p0.y, 40));
         CHECK(near(ImGui::GetStyle().FramePadding.x, pad.x));  // popped
+        // GitHub issue #138 (0.2.0-dev.31): Kiln.Ui draws an item icon's button scrolled out of its window with the
+        // placeholder instead of the icon. An image button's place is the image's box plus the frame padding whatever image
+        // it shows, shown or clipped, plain or trimmed, at any padding (the UI scale): the same rectangle and the same advance
+        // as the icon's own button. A Dummy of the box (a clipped one before) was smaller by the padding.
+        for (const float k : {1.0f, 2.0f}) {
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(pad.x * k, pad.y * k));
+            const ImVec2 kp = ImGui::GetStyle().FramePadding;
+            struct Took {
+                ImVec2 size;
+                float advance;
+            };
+            auto took = [](auto draw) {
+                const float y = ImGui::GetCursorPosY();
+                draw();
+                return Took{ImGui::GetItemRectSize(), ImGui::GetCursorPosY() - y};
+            };
+            const Took shown = took([&] { kui::image_button("##icon138", icon, 40, 40); });
+            const Took other = took([&] { kui::image_button("##ph138", solid, 40, 40); });
+            const Took trimmed = took([&] { kui::image_draw_ex("##trim138", solid, KILN_UI_IMAGE_DRAW_TRIM | KILN_UI_IMAGE_DRAW_FIT, 40, 40, 0, 0, 0, 0); });
+            const Took dummy = took([&] { ImGui::Dummy(ImVec2(40, 40)); });
+            CHECK(near(shown.size.x, 40 + 2 * kp.x) && near(shown.size.y, 40 + 2 * kp.y));
+            CHECK(near(other.size.x, shown.size.x) && near(other.size.y, shown.size.y) && near(other.advance, shown.advance));
+            CHECK(near(trimmed.size.x, shown.size.x) && near(trimmed.size.y, shown.size.y) && near(trimmed.advance, shown.advance));
+            CHECK(kp.y <= 0 || dummy.advance < shown.advance - 1);
+            // clipped (far below the window): nothing drawn, the same advance
+            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 5000);
+            const int vtx = ImGui::GetWindowDrawList()->VtxBuffer.Size;
+            const Took clipped = took([&] { kui::image_button("##clip138", solid, 40, 40); });
+            CHECK(ImGui::GetWindowDrawList()->VtxBuffer.Size == vtx);
+            CHECK(near(clipped.advance, shown.advance));
+            ImGui::SetCursorPosY(0);
+            ImGui::PopStyleVar();
+        }
         // no such image: nothing at all
         const int before = ImGui::GetWindowDrawList()->VtxBuffer.Size;
         CHECK(!kui::image_draw_ex(nullptr, 0xdead, KILN_UI_IMAGE_DRAW_TRIM, 40, 40, 0, 0, 0, 0));
