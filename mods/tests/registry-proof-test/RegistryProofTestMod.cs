@@ -155,6 +155,22 @@ public sealed unsafe class RegistryProofTestMod : Mod
         return null;
     }
 
+    /// <summary>An item's impact config member (<c>impactValues.0x&lt;config id&gt;.value</c>) as the game has it now, through
+    /// kiln.gamedata (kiln.content's flat schema has no config paths): its kind tells a Sint32 config from a float one. Null
+    /// when the item has no such config or kiln.gamedata cannot read it (no evidence, never guessed).</summary>
+    private static ContentValue? ConfigValue(ContentEntry e, string path)
+    {
+        try
+        {
+            foreach (var g in new[] { Content.ItemData.Get(e.Guid), Content.ItemData.Get(e.Name) })
+                if (g is not null && g.Guid == e.Guid) return g.Get(path);
+        }
+        catch (Exception) { }
+        return null;
+    }
+
+    private static JsonNode? ConfigRaw(ContentEntry e, string path) => ConfigValue(e, path) is { } v ? RawValue(v) : null;
+
     /// <summary>The paths a member is read raw by, in order: the path itself, and for "<c>x.isSet</c>" also "<c>x</c>",
     /// where reflection exposes a struct whose only scalar is that flag (GemSlotOverride {isSet}, items.socket), as
     /// kiln.registry.live binds it.</summary>
@@ -360,7 +376,7 @@ public sealed unsafe class RegistryProofTestMod : Mod
         // a structured value (list, reference, unlock...) is not one scalar member: its raw view is the entry's resource bytes;
         // a scalar of a recipe's list element (outputs[].count), which Content.Get does not address, from the game's stacks
         JsonArray RawOf(ContentEntry e, AssetKey? key) =>
-            new(rawPaths.Select((p, i) => Raw(e, conv == "impactConfig" ? configPath : p) ?? (registry == "recipes" && element && Compared.Contains(conv) ? StackRaw(e, listPath, paths[i]) : null)
+            new(rawPaths.Select((p, i) => (conv == "impactConfig" ? ConfigRaw(e, configPath) : Raw(e, p)) ?? (registry == "recipes" && element && Compared.Contains(conv) ? StackRaw(e, listPath, paths[i]) : null)
                 ?? (Compared.Contains(conv) ? null : JsonValue.Create("resource:" + BytesSha(key)))).ToArray());
         var tries = 0;
         var why = new SortedDictionary<string, int>(StringComparer.Ordinal); // why the entries tried gave no sample (the log, when none did)
@@ -372,8 +388,8 @@ public sealed unsafe class RegistryProofTestMod : Mod
             if (mode.Length > 0)
             {
                 ContentValueType kind;
-                try { kind = e.Get(configPath).Type; }
-                catch (Exception) { Skip("config kind unreadable"); continue; }
+                if (ConfigValue(e, configPath) is not { } cv) { Skip("config kind unreadable"); continue; }
+                kind = cv.Type;
                 if (kind != (mode == "float" ? ContentValueType.Float : ContentValueType.Int)) continue;
             }
             var readText = Read(registry, id, element ? list : field, out var rc);
