@@ -2,8 +2,8 @@
 
 The wiki: https://frostdev.io/kiln/wiki/<page>.
 
-The generated API reference: https://frostdev.io/kiln/downloads/<version>/sdk/api/, for example
-https://frostdev.io/kiln/downloads/0.2.0-dev.30.5/sdk/api/. Release builds publish one (a few older versions have none).
+The generated API reference of the newest release: https://frostdev.io/kiln/api/. Each release keeps its own copy at
+https://frostdev.io/kiln/downloads/<version>/sdk/api/ (a few older versions have none).
 It covers every public type and member with its XML docs, so look there when this skill or the wiki doesn't name a call.
 There is no "latest" URL: use the version the mod builds on.
 
