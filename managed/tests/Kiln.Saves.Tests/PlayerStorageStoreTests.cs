@@ -92,6 +92,41 @@ public sealed class PlayerStorageStoreTests
     }
 
     [Fact]
+    public void Last_committed_pair_stays_a_candidate_when_failed_stages_outlive_history_depth()
+    {
+        using var h = new InstanceHarness();
+        var store = InstanceHarness.Store.Storage;
+        var persist = new Persist();
+        store.Native = persist;
+        try
+        {
+            var character = new CharacterKey(1, PlayerStorageDocumentTests.Character);
+            store.Join(character, new EntityId(1), "join", PlayerStorageDocumentTests.Doc("join", 1).Write(8), true);
+            h.Save(1); // last published character and last committed world
+            for (var i = 0; i < 34; i++)
+            {
+                persist.Frozen = new("failed-" + i, PlayerStorageDocumentTests.Storages(i % 8));
+                h.StageOnly(2); // repeated failed writes keep the same target world revision
+            }
+            InstanceHarness.Written();
+            var failedRevision = store.Read(character)!.Revision;
+            var choice = store.Join(character, new EntityId(1), "saved", null, true)!;
+            Assert.True(choice.Paired);
+            Assert.Equal("saved", choice.Pair["witness"]!.GetValue<string>());
+            persist.Frozen = new("recovered", PlayerStorageDocumentTests.Storages(4));
+            h.Save(2);
+            Assert.True(store.Read(character)!.Revision > failedRevision);
+            var fields = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
+            var pinned = (System.Collections.IDictionary)typeof(PlayerStorageStore).GetField("_committedServer", fields)!.GetValue(store)!;
+            var waiting = (System.Collections.IDictionary)typeof(PlayerStorageStore).GetField("_pendingServer", fields)!.GetValue(store)!;
+            Assert.Equal(1, pinned.Count);
+            Assert.Equal("recovered", JsonNode.Parse((string)pinned[character]!)!["current"]!["witness"]!.GetValue<string>());
+            Assert.Equal(0, waiting.Count);
+        }
+        finally { store.Native = null; }
+    }
+
+    [Fact]
     public void Waiting_save_and_leave_cannot_turn_missing_capture_into_empty_storage()
     {
         using var h = new InstanceHarness();

@@ -381,7 +381,9 @@ internal sealed class PlayerStorageDocument
                 merged["records"] = new JsonArray(live["records"]!.AsArray().Concat(overflow["records"]!.AsArray()).Select(r => r!.DeepClone()).ToArray());
                 var refs = live["refs"] as JsonObject ?? new JsonObject();
                 var allRefs = (JsonObject)refs.DeepClone();
-                if (overflow["refs"] is JsonObject more) foreach (var (name, value) in more) allRefs[name] = value?.DeepClone();
+                if (overflow["refs"] is JsonObject more)
+                    foreach (var (name, value) in more)
+                        if (!allRefs.ContainsKey(name)) allRefs[name] = value?.DeepClone();
                 merged["refs"] = allRefs;
             }
             if (merged["parkReason"] is not null || !registrations.TryGetValue(key, out var slots)) { waiting[key] = merged; continue; }

@@ -30,6 +30,8 @@ internal sealed class PlayerStorageStore(WorldStore owner)
     private readonly Dictionary<CharacterKey, Visit> _visits = [];
     private readonly Dictionary<uint, Dictionary<CharacterKey, string>> _pending = [];
     private readonly Dictionary<CharacterKey, string> _committed = [];
+    private readonly Dictionary<CharacterKey, string?> _committedServer = [];
+    private readonly Dictionary<uint, Dictionary<CharacterKey, string>> _pendingServer = [];
     private readonly Dictionary<uint, (EntityId Player, int Offset)> _instanceOwners = [];
     private readonly HashSet<uint> _ordinaryHolders = [];
     private readonly Dictionary<uint, SaveWriter.StageJob> _stages = [];
@@ -80,7 +82,7 @@ internal sealed class PlayerStorageStore(WorldStore owner)
 
     internal void Clear()
     {
-        _visits.Clear(); _pending.Clear(); _committed.Clear(); _stages.Clear(); _carriedBlocked.Clear();
+        _visits.Clear(); _pending.Clear(); _committed.Clear(); _committedServer.Clear(); _pendingServer.Clear(); _stages.Clear(); _carriedBlocked.Clear();
         _instanceOwners.Clear(); _ordinaryHolders.Clear();
         while (_outcomes.TryDequeue(out _)) { }
         Failure = null;
@@ -108,6 +110,8 @@ internal sealed class PlayerStorageStore(WorldStore owner)
         _committed.Remove(character); // A travelling offer must never be overwritten by this world's old carried update.
         var servers = new List<PlayerStorageDocument>();
         if (Read(character) is { } stored) servers.Add(stored);
+        if (_committedServer.TryGetValue(character, out var durable) && durable is not null)
+            servers.Add(PlayerStorageDocument.Read(durable, character.Id, PlayerStorageDocument.ServerMaxBytes));
         foreach (var json in owner.PendingStorageValues(Prefix + character.Text))
         {
             try { servers.Add(PlayerStorageDocument.Read(json, character.Id, PlayerStorageDocument.ServerMaxBytes)); }
@@ -136,14 +140,29 @@ internal sealed class PlayerStorageStore(WorldStore owner)
             : PlayerStorageDocument.Read(selected.Write(32, PlayerStorageDocument.ServerMaxBytes), character.Id, PlayerStorageDocument.ServerMaxBytes);
         if (choice is not null)
         {
-            // Keep the chosen copy's history, including its old current when a historical pair won.
             var previous = (JsonObject)document.Data["current"]!.DeepClone();
-            previous["revision"] = document.Revision;
-            document.Data["history"]!.AsArray().Insert(0, previous);
-            document.Data["current"] = choice.Pair.DeepClone();
-            document.Data["current"]!.AsObject().Remove("pairs");
-            document.Data["revision"] = trustClient ? Math.Max(server?.Revision ?? 0, client?.Revision ?? 0) : server?.Revision ?? 0;
-            // Pair aliases describe this content only, and must not be carried over from another selected candidate.
+            var promoted = (JsonObject)choice.Pair.DeepClone();
+            promoted.Remove("revision");
+            if (JsonNode.DeepEquals(previous["storages"], promoted["storages"]) && JsonNode.DeepEquals(previous["parked"], promoted["parked"]))
+            {
+                // Share the payload without discarding recovery information: an older character may need any alias.
+                var selectedWitness = promoted["witness"]!.GetValue<string>();
+                var aliases = new JsonArray();
+                foreach (var pair in PlayerStorageDocument.Pairs(previous, document.Revision).Concat(PlayerStorageDocument.Pairs(choice.Pair, choice.Revision))
+                    .Where(p => p.Witness != selectedWitness).GroupBy(p => p.Witness).Select(g => g.OrderByDescending(p => p.Revision).First()))
+                    aliases.Add(new JsonObject { ["witness"] = pair.Witness, ["revision"] = pair.Revision, ["worldRev"] = pair.WorldRev });
+                if (aliases.Count > 0) promoted["pairs"] = aliases;
+                else promoted.Remove("pairs");
+            }
+            else
+            {
+                // The chosen historical payload differs: keep the old current and the chosen copy's history.
+                previous["revision"] = document.Revision;
+                document.Data["history"]!.AsArray().Insert(0, previous);
+                promoted.Remove("pairs");
+            }
+            document.Data["current"] = promoted;
+            document.Data["revision"] = Math.Max(servers.Select(d => d.Revision).DefaultIfEmpty(0).Max(), trustClient ? client?.Revision ?? 0 : 0);
             SavesRuntime.Log(choice.Paired ? LogLevel.Info : LogLevel.Warn,
                 $"player-storage: {character}: {(choice.Paired ? "paired" : "unpaired: newest revision; character changed outside Kiln")}, {choice.Source}, revision {choice.Revision}");
         }
@@ -204,13 +223,19 @@ internal sealed class PlayerStorageStore(WorldStore owner)
                 _carriedBlocked[generation] = $"character {character}: carried storage unchanged: {e.Message}";
                 Failed(_carriedBlocked[generation]);
             }
-            owner.GetBundleRaw(Prefix + character.Text, Mod).Keys[Key] = new WorldStore.Slot { Json = serverJson };
+            var bundle = owner.GetBundleRaw(Prefix + character.Text, Mod);
+            // Seed once, including a missing durable copy; a later failed stage must never seed itself as committed.
+            _committedServer.TryAdd(character, bundle.Keys.GetValueOrDefault(Key)?.Json);
+            bundle.Keys[Key] = new WorldStore.Slot { Json = serverJson };
+            if (!_pendingServer.TryGetValue(generation, out var serverPending)) _pendingServer[generation] = serverPending = [];
+            serverPending[character] = serverJson;
             visit.Document = next;
             EnsureBands(visit);
             if (!_pending.TryGetValue(generation, out var pending)) _pending[generation] = pending = [];
             if (clientJson is not null) pending[character] = clientJson;
             else pending.Remove(character);
-            foreach (var older in _pending.Keys.OrderByDescending(g => g).Skip(2).ToArray()) { _pending.Remove(older); _carriedBlocked.Remove(older); }
+            foreach (var older in _pending.Keys.OrderByDescending(g => g).Skip(2).ToArray())
+            { _pending.Remove(older); _pendingServer.Remove(older); _carriedBlocked.Remove(older); }
         }
     }
 
@@ -311,10 +336,13 @@ internal sealed class PlayerStorageStore(WorldStore owner)
             return;
         }
         _pending.Remove(generation);
+        if (_pendingServer.Remove(generation, out var serverDocuments))
+            foreach (var (character, json) in serverDocuments) _committedServer[character] = json;
         if (_carriedBlocked.Remove(generation, out var blocked)) Failed(blocked);
         else Failure = null;
         ReportCapability();
         foreach (var (character, json) in pending) _committed[character] = json;
-        foreach (var older in _pending.Keys.Where(g => g < generation).ToArray()) _pending.Remove(older);
+        foreach (var older in _pending.Keys.Where(g => g < generation).ToArray())
+        { _pending.Remove(older); _pendingServer.Remove(older); _carriedBlocked.Remove(older); }
     }
 }
