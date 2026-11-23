@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import { registerLocale, setLanguage } from '../src/i18n';
 import { itemName, skillName, nomeConhecimento, items } from '../src/editor/src/gamedata.js';
-import { setGameNames, gameName, gameLanguage } from '../src/editor/kiln/game-names.js';
+import { setGameNames, gameName, gameLanguage, gameSearch } from '../src/editor/kiln/game-names.js';
 // @ts-ignore: mounted editor components are plain JavaScript.
 import { allItems, filterItems } from '../src/editor/kiln/Catalog.jsx';
 
@@ -45,6 +45,18 @@ test('catalog matches width variants and Latin accents without changing displaye
     expect(filterItems(all, { q }).map((it: { id: number }) => it.id)).toContain(61577244);
   }
   expect(all.find((it: { id: number }) => it.id === 61577244).name).toBe('テスト ＡＢＣ ｶﾀｶﾅ');
+});
+
+test('search folding leaves ASCII ids and English intact and folds a capital dotted I', () => {
+  expect(gameSearch('61577244')).toBe('61577244');
+  expect(gameSearch('Fixture Diamond')).toBe('fixture diamond');
+  expect(gameSearch('Fixture_Debug_T1')).toBe('fixture_debug_t1');
+  expect(gameSearch('１２３')).toBe('123');
+  // Turkish capital dotted I: NFD splits it into I + U+0307 before lower-casing, so it folds to plain 'i'.
+  expect(gameSearch('İksir Fixture')).toBe('iksir fixture');
+  expect(gameSearch('İksir Fixture').includes(gameSearch('iksir'))).toBe(true);
+  // CJK voicing marks are kept (only U+0300-036F combining Latin marks are dropped).
+  expect(gameSearch('ガ')).toBe('ガ'.normalize('NFD'));
 });
 
 test('missing, blank and invalid tables do not displace fallback names', () => {

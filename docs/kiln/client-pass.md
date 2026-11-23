@@ -54,6 +54,17 @@ assets built first: their descriptions say so).
 | `cosmetic-sample` | `mods/samples/CosmeticSample` | session 2 only: the hood and the cape |
 | `roster-cap-fixture` | `mods/tests/roster-cap-fixture` (data only) | `17-roster-client`: 93 new roster NPCs, so the roster holds 128; it changes the Survivors directory of every world it is in, so load it for that check. `17-roster.refused-start`: the same fixture with `kiln/control/roster.fail-install`, a start that must stop before any world |
 
+**Optional driver** (test only, never shipped): `mods/tests/client-pass-driver` (id `client-pass-driver`, side `server`,
+an admin command) does a check's in-game action through the game's own requests (`Gameplay.Inject`: the
+AcceptOfferedInteractionEvent that pressing E sends, and CraftRecipeEvent), so the tester or a computer-use agent does
+only what needs the screen. Run `/drive where` first (the player's place, the held item and the offered things near),
+then `/drive anvil [n]`, `forge`, `fill-can` (each picks only a thing of that name, never a chest),
+`use [radius|e<entity>]` (the nearest offered thing), `craft [item] [n]` (default `rarity-anvil.anvil-blade` x 10, for
+`equip.c10`), `provoke` (a 1-point hit, so the nearest enemy attacks you: `equip-p7.armor`, with creative mode off),
+`step-away [m]` (`equip.c2`) or `held`. Each action logs one `client-pass-driver:` line in kiln.log. Build it with
+`dotnet build mods/tests/client-pass-driver`. It does not drive your own weapon swings, the workbench's enhancement
+unlock, durability wear or any UI check.
+
 **Frameworks profile** (sessions 3 to 5): `client-pass` and one mod of each framework you have: an EML mod, a
 ShroudForge mod (one that writes its own settings helps `launcher.kept-mod-files`), a Greeneye mod, Flame (Creative
 Mode), a Shroudtopia mod, an Enshwick pack, shroudlink's singleplayer zip, kiln-emf with an EMF mod that has portraits

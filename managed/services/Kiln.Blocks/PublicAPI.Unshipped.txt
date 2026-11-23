@@ -1,1 +1,24 @@
 #nullable enable
+Kiln.CraftSourceFilter
+Kiln.CraftSourceFilter.Allow = 1 -> Kiln.CraftSourceFilter
+Kiln.CraftSourceFilter.Deny = 0 -> Kiln.CraftSourceFilter
+Kiln.CraftSourceHandle
+Kiln.CraftSourceHandle.Container.get -> Kiln.EntityId
+Kiln.CraftSourceHandle.Dispose() -> void
+Kiln.CraftSourceHandle.IsDisposed.get -> bool
+Kiln.CraftSourceHandle.Player.get -> Kiln.EntityId
+Kiln.CraftSourceOptions
+Kiln.CraftSourceOptions.CraftSourceOptions() -> void
+Kiln.CraftSourceOptions.Filter.get -> Kiln.CraftSourceFilter
+Kiln.CraftSourceOptions.Filter.init -> void
+Kiln.CraftSourceOptions.Items.get -> System.Collections.Generic.IReadOnlyCollection<Kiln.ItemId>?
+Kiln.CraftSourceOptions.Items.init -> void
+Kiln.CraftSourceOptions.Order.get -> Kiln.CraftSourceOrder
+Kiln.CraftSourceOptions.Order.init -> void
+Kiln.CraftSourceOrder
+Kiln.CraftSourceOrder.AfterStationOutputs = 1 -> Kiln.CraftSourceOrder
+Kiln.CraftSourceOrder.BeforeStationOutputs = 0 -> Kiln.CraftSourceOrder
+Kiln.Crafting
+const Kiln.Crafting.SourceUiCapability = "crafting.source_ui" -> string!
+const Kiln.Crafting.SourcesCapability = "crafting.sources" -> string!
+static Kiln.Crafting.AddSource(Kiln.EntityId player, Kiln.EntityId container, Kiln.CraftSourceOptions? options = null) -> Kiln.CraftSourceHandle!

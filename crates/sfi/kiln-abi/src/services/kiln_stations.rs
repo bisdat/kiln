@@ -4,6 +4,7 @@
 use crate::*;
 pub use super::kiln_items::*;
 pub type KilnStationDoneFn = Option<unsafe extern "C" fn(*const KilnStationResult, *mut core::ffi::c_void)>;
+pub const KILN_CRAFT_SOURCE_STOCK_ALL: i32 = 1;
 pub const KILN_STATIONS_MAX_ALTARS: u32 = 16;
 pub const KILN_STATIONS_MAX_BASES: u32 = 16;
 pub const KILN_STATIONS_MAX_CHANGES: u32 = 32;
@@ -308,6 +309,18 @@ pub struct KilnStationsStatus {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
+pub struct KilnCraftSourceRequest {
+    pub size: u32,
+    pub player: KilnEntity,
+    pub container: KilnEntity,
+    pub order: u32,
+    pub filter: u32,
+    pub item_count: u32,
+    pub items: *const KilnItemId,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
 pub struct KilnStationsApi {
     pub header: KilnServiceHeader,
     pub status: Option<unsafe extern "C" fn(*mut KilnStationsStatus) -> KilnResult>,
@@ -340,6 +353,11 @@ pub struct KilnStationsApi {
     pub craft_items: Option<unsafe extern "C" fn(*const KilnItemId, u32, *mut KilnItemId, u32, *mut u32) -> KilnResult>,
     pub set_fill_answers: Option<unsafe extern "C" fn(*const KilnStationFillAnswer, u32) -> KilnResult>,
     pub fill_asks: Option<unsafe extern "C" fn(*mut KilnStationFillKey, u32, *mut u32) -> KilnResult>,
+    pub add_source: Option<unsafe extern "C" fn(KilnOwner, *const KilnCraftSourceRequest, *mut u64) -> KilnResult>,
+    pub remove_source: Option<unsafe extern "C" fn(KilnOwner, u64) -> KilnResult>,
+    pub cancel_sources: Option<unsafe extern "C" fn(KilnOwner)>,
+    pub source_stock: Option<unsafe extern "C" fn(KilnEntity, u32, *mut KilnStationStack, u32, *mut u32) -> KilnResult>,
+    pub set_dye_stock: Option<unsafe extern "C" fn(KilnEntity, *const KilnStationStack, u32) -> KilnResult>,
 }
 
 #[repr(C)]

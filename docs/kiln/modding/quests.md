@@ -188,7 +188,7 @@ public sealed class MyMod : Mod
             ],
             Rewards = [QuestAction.Experience(500), QuestAction.Code(ctx => Pay(ctx))],
         });
-        Quests.RegisterPredicate("mymod.isNight", c => Time.IsNight);
+        Quests.RegisterPredicate("mymod.isNight", c => !Time.IsDay);
     }
 
     [Subscribe] private void OnBell(BellRungEvent e) => Quests.Signal("mymod.bell", QuestHolder.Of(e.Player));

@@ -158,5 +158,9 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* host
     if(!host || host->abi_version!=KILN_ABI_VERSION || host->size<sizeof(KilnApi) || !info)return KILN_ERR_UNAVAILABLE;
     api=host;service_owner=owner;
     info->id=str(KILN_TOOLS_SERVICE);info->version=str("1");info->on_ready=&ready;info->on_unload=&shutdown;
-    return api->register_service(owner,str(KILN_TOOLS_SERVICE),&table);
+    const auto result=api->register_service(owner,str(KILN_TOOLS_SERVICE),&table);
+#if KILN_TOOLS_PRESENTATION
+    if(result==KILN_OK)return api->register_service(owner,str(KILN_UI_AMMO_SERVICE),kiln_tools_ammo_api());
+#endif
+    return result;
 }

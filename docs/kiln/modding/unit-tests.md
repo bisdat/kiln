@@ -270,7 +270,7 @@ false)`; the fake then answers as the native service does without it. The table 
   destroys gear's item entity; a dry run changes nothing; a mod that unloads leaves its queued requests to run, unanswered,
   as kiln.items does. `Read`, `FindInventories`, `Lookup` and `All` read the fake.
   `player.Inventory.Count("…")`, `.Slots`, `.Put(item, n)` and `.Clear()` are the test's view and hand;
-  `kiln.Items.Calls` lists every give and take with what became of it. Gear (since 0.2.0-dev.29.19): every piece the
+  `kiln.Items.Calls` lists every give and take with what became of it. Gear (since 0.2.0-dev.30): every piece the
   fake makes has enhancement slots (rarity + 1; `kiln.Items.SetPerkSlots(item, n)` says how many perk slots its type
   fills), a level, a durability of 100 and a stamp, so `slot.Ref` (and a give result's `Ref`) name it for
   `Items.GearOf`, `SetRarity`, `SetEnhancements` and `SetLevel`; a write runs at the start of the next step with
@@ -391,6 +391,35 @@ public void CtrlClickAsksToMarkTheItem()
     kiln.UiInventory.Draw(HudScreen.Backpack, new FakeInventorySlot(Item: 0xAA, ItemEntity: 900));
     Assert.Equal(new FakeSlotClickResult(1, Taken: true), kiln.UiInventory.Click(0, SlotButton.Left, SlotModifiers.Ctrl));
     Assert.Equal(new FakeSlotClickResult(0, false), kiln.UiInventory.Click(0));   // a plain click is the game's
+}
+```
+
+- **The HUD's ammunition and spell lists** (`kiln.AmmoList`, since 0.2.0-dev.30.6) <a id="ammo-lists"></a>.
+  Ui.AmmoList's own code runs on the kit's kiln.ui.ammo, so a mod's rows and its picks are tested offline. The test plays
+  the game: `kiln.AmmoList.Hold(AmmoListKind.Arrow, bow, new AmmoListRow(arrow, 20))` builds the list for a held weapon
+  with the game's own rows, `SetGameRows` changes them (the backpack changed), `Unhold` puts the weapon away,
+  `NewSession` starts another session (snapshots and queued picks cleared), `KnownItems` names the items of a kind (a row
+  of any other item is refused, as the game refuses it), `Player` sets the context's player. Each `Step()` is a UI frame:
+  the providers of a list whose context changed are asked and their composed rows published. `Shown(kind)` is the list
+  as the HUD would show it (the game's rows, then or instead the mods'), `Provided(kind)` the mods' rows, `ModeOf(kind)`
+  Append, Replace or null (the game's list as is), `Publishes` counts the snapshots. `Select` and `Selected` model the
+  selection, which stays on its item when the rows change. `Pick(kind, item)` is the player's pick: true when it is a mod
+  row the game does not list, which `Ui.AmmoList.Picked` gets at the next `Step()` (for the mod that provided it); false
+  when the game equips it itself. Switch `ui.ammo.list` or `ui.ammo.pick` off with `kiln.Capabilities.Override` to test
+  a mod's refusal path. Not modelled: the game's hook and drawing, its equip request, the server half.
+
+```csharp
+[Fact]
+public void QuiverArrowsFollowTheBackpacksAndAPickAsksTheServer()
+{
+    using var kiln = new KilnHarness();
+    kiln.Load<MyMod>();   // its OnLoad: Ui.AmmoList.Provide(AmmoListKind.Arrow, ...) and Ui.AmmoList.Picked += ...
+    kiln.Step();
+    kiln.AmmoList.Hold(AmmoListKind.Arrow, new ItemId(0xB0), new AmmoListRow(new ItemId(0x10), 20));
+    kiln.Step();
+    Assert.Equal(new AmmoListRow(new ItemId(0x30), 12), kiln.AmmoList.Shown(AmmoListKind.Arrow)[1]);
+    Assert.True(kiln.AmmoList.Pick(AmmoListKind.Arrow, new ItemId(0x30)));   // not in the backpack: the mod's
+    kiln.Step();                                                             // Picked runs here
 }
 ```
 
@@ -539,7 +568,9 @@ time with them sees almost none pass between steps, and an `await Task.Delay(...
 | Decisions | recording fake | `kiln.decisions`, `kiln.window_clock` | Kiln.Api's own dispatcher of decisions on the kit's kiln.decisions and kiln.window_clock: the service's broker rule for rule (request ids, frozen batches that a read does not consume, answers that are taken once, the deadlines: two more steps for a held action, the same step for a client's input, 4096 open requests, 8192 kept outcomes), one DecisionCompletedEvent per decision, and a world that ends (KilnHarness.Decisions.RestartWorld: what is open ends WorldEnded, the next world has the next epoch). KilnHarness.Decisions.Outcomes records every decision's end. An entity's identity comes from the harness's fake world (a life serial per world and entity; no player sessions). Decisions.ReevaluatePickup forgets the walk-over pickups a handler canceled (drop and receiver; once the harness says the build holds walk-over pickups). Offline: the game's side of every decision (no death, pickup or equipment change is held here: the events that need one are faked with their services), the sampled exposures of walk-over pickups (a receiver leaving and coming back, a changed amount) |
 | Queries | recording fake | `kiln.queries`, `queries.voxel_ray`, `queries.ground`, `queries.line_of_sight`, `queries.overlap_origins` | Kiln.Queries' own code on the kit's kiln.queries. A voxel ray answers what the test scripts (KilnHarness.Queries.Voxels; without a script every ray is unavailable): there are no voxels offline, so no test here says what the game's ray would hit. The rules around the ray are the service's: bad numbers throw, the budget (KilnHarness.Queries.MaxRaysPerStep, 64) refuses with BudgetExceeded and starts again each step, refusals keep their reasons. EntitiesInSphere and EntitiesInBox read the harness's fake world: entity origins, closed shapes, nearest first. RequestPath, FindPath, CancelPath and CanReach run on a fake queue with the service's rules (8 open per mod and 32 in all, counting results not yet delivered; one terminal per request; an anchor that goes ends OwnerGone): a request answers after KilnHarness.Queries.PathSteps steps what the test scripts (KilnHarness.Queries.Paths; without a script a straight walking route to the target). There is no path grid offline. |
 | Outlines in the world | recording fake | `kiln.render`, `ui.world_outline` | Ui.World.Outline's own code on the kit's kiln.render v3: each request is recorded with its entity, colour, pulse, priority, duration and ThroughWalls flag (KilnHarness.Outlines.All, Live, Of, Showing); at the start of the next step the native rules decide its state: on one entity the highest priority, then the newest, shows and the others wait (Outshone); the game's own highlight shows instead (GameHighlight) unless the player's setting is mods-first; off keeps every request waiting; an entity without a model waits (HideModel); two colours at once and a third shares the nearest (ColorShared); a duration ends on the harness's virtual time. Despawn and EndWorld end requests, SetState pins one. Offline: the game's highlight itself, RenderFrameEvent's drawing (the draw functions do nothing; Render.Available is false without kiln.ui) and the camera (render.camera). |
+| Player crafting sources | recording fake | `kiln.stations`, `crafting.sources` | Player/container registrations, copied allow/deny filters, order metadata, per-player counts, inventory permission, disposal and mod unload. No game RecipePaid hook, base stock, station outputs or client screens are simulated. |
 | Terrain | recording fake | `kiln.terrain`, `terrain.overlays`, `terrain.baked`, `terrain.biomes` | Kiln.Terrain's own code on an in-memory world (KilnHarness.Terrain): flat ground, the cells a test sets, base boxes, one ledger per mod and world id, and Kiln's witness of the kept plans with the world file's revision (SaveWorld, LoseLedger: a lost ledger is refused, a first install over matching ground is not). Inspect, Apply, Forget and Applied run as in the game: batches, the ledger's rules, conflicts, Terrain.Changed. Not modelled: streaming (tiles are loaded unless the test says not), the game's save itself (the ledger lives in the harness, not in the fake kiln.saves), kiln.build's own events (its transient journal is modelled: Restart puts transient cells back), and time: from code that is not a mod's, every batch runs in the same step. terrain.baked and terrain.biomes are off, as in the game. |
+| The HUD's ammunition and spell lists | recording fake | `kiln.ui.ammo`, `ui.ammo.list`, `ui.ammo.pick` | Ui.AmmoList's own code on the kit's kiln.ui.ammo: a test holds a bow or a staff with the game's own rows (KilnHarness.AmmoList.Hold, SetGameRows, Unhold, NewSession, KnownItems); at each step Kiln.Ui asks the providers when a list's context changed and publishes one snapshot, which the native rules check (one owner, the context's serial and session, 64 rows, no duplicate or item 0, the list's item catalog). Shown and ModeOf read the list as the HUD would compose it; the selection stays on its item (Select, Selected); Pick of a mod row the game does not list raises Ui.AmmoList.Picked at the next step for the mod that provided it. Offline: the game's hook, its drawing and its equip request. |
 | The game's inventory slots | recording fake | `kiln.ui.inventory`, `ui.slots.click`, `ui.slots.inspect`, `ui.inventory.panels` | Ui.Inventory's own code on the kit's kiln.ui.inventory: OnClick handlers subscribe with their button, exact modifiers and Take; a test draws a screen's slots (KilnHarness.UiInventory.Draw), hovers one (Hovered) and clicks it (Click): only on a screen with a pointer, the matching handlers get the click with the slot's item and entity, Taken when one asked for it. Marks and MarkWhen rules are Kiln.Ui's (MarkOf: what a drawn slot would show); Ui.Values.Slots reads the drawn frame. The screen a Draw draws on is the open one: Ui.Inventory.Screen and ScreenChanged follow it (OpenBackpack, OpenChest with the chest's entity, CloseScreen), and PanelsShown names the AddPanel panels that would show there (their screens and When). Offline: the game's drawing and hooks, the pixel mapping (no panel is drawn or placed), the 250 ms frame age. |
 | Captured item detail (Since 0.2.0-dev.30.5) | recording fake | `kiln.ui.item_detail`, `ui.item_detail` | Owned text/stat-float recordings, exact client identity or item+level+rarity lookup, strict UTF-8 byte budgets, worker reads and 64-entry capture-order eviction. UiItemDetail.Capture/Clear supply captures and model a world change. Not modelled: game text construction, native capture failures, session lifecycle, hooks or drawing. |
 | Expanded slot subscriptions | recording fake | `kiln.ui.slots` | Negotiated 120-byte slot frames from UiInventory.Draw, including rarity and level. Legacy kiln.ui.values subscribers retain 112-byte records. Not modelled: game drawing, hooks or pixel mapping. |
@@ -583,7 +614,6 @@ time with them sees almost none pass between steps, and an `await Task.Delay(...
 | kiln.screen | unavailable | `kiln.screen` | no fake: the service finds no native table, so its own Available is false and its row says offline |
 | kiln.settings | unavailable | `kiln.settings` | no fake: the service finds no native table, so its own Available is false and its row says offline |
 | kiln.skills | unavailable | `kiln.skills` | no fake: the service finds no native table, so its own Available is false and its row says offline |
-| kiln.stations | unavailable | `kiln.stations` | no fake: the service finds no native table, so its own Available is false and its row says offline |
 | kiln.steamguard | unavailable | `kiln.steamguard` | no fake: the service finds no native table, so its own Available is false and its row says offline |
 | kiln.surfaces | unavailable | `kiln.surfaces` | no fake: the service finds no native table, so its own Available is false and its row says offline |
 | kiln.tasks | unavailable | `kiln.tasks` | no fake: the service finds no native table, so its own Available is false and its row says offline |

@@ -111,7 +111,11 @@ even with `EMF_BREAK_WORLD`. Damage uses native building cracks and caller-confi
 healing. `EMF_BREAK_DROPS` still refuses the whole request (id 0, the documented unavailable reason, no callback).
 `EMF_MARKER_BAR` remains unavailable. Kiln clears exactly selected cells, unlike EMF's possible isolated-terrain
 cleanup just outside the box. Ruin protection still shrinks building spheres as EMF does; terrain keeps the original
-radius and its own natural/unknown-cell protection. See
+radius and its own natural/unknown-cell protection. Spheres crossing a grid edge skip only the outside cells;
+wholly outside or unloaded spheres are successful no-ops. A non-fault refusal fails only that request, not later
+requests in the step. This follows EMF 0.6.19 `src/core/block_glue.cpp:447-535` (unreadable cells/spheres) and
+`src/core/block_service.cpp:83-105` (only a kernel fault fails the remaining batch). A full terrain damage map reports
+`EMF_BREAK_FAILED` for that request without disabling later breaks; earlier successful hits/removals remain counted. See
 [the v47 table](emf-parity.md#v47-emf-0619).
 
 Kiln does not carry every function EMF added since. Carried: chat lines without a speaker (`chat_tell_ex`,
