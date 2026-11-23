@@ -792,10 +792,7 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn, const std::vect
         if (ids_missing) {
             // Only the once-per-build id ledger: no stable field decode on unused starts.
             model::Model ids_model(*src, d.rm, d.schema);
-            for (const auto& [n, r] : d.schema.registries) {
-                std::string error;
-                ids_model.entries(n, &error);
-            }
+            ids_model.list_all();  // entries only (with the reference tables), no field decode
             ids_model.id_table(&d.ids, &d.nums);
             d.env.write_data(ids_rel, ids_model.id_table_json().dump());
             d.log(0, "registry: the id table of this game build (" + d.env.side + " " + d.env.exe_sha256.substr(0, 8) + ") is written to the data folder (" +
@@ -826,11 +823,7 @@ std::vector<BootResource> Runner::run(const OldWritesFn& old_fn, const std::vect
             m->fill(need, &base);
             // the id table of this build for kilnctl update: every R1 registry the first time this build starts with Kiln
             const bool want_all = ids_missing;
-            if (want_all)
-                for (const auto& [n, r] : d.schema.registries) {
-                    std::string w;
-                    m->entries(n, &w);
-                }
+            if (want_all) m->list_all();
             m->id_table(&d.ids, &d.nums);
             d.decoded = m->decoded();
             // review finding 4 (ruling 2026-11-21 19:11): written once per build, when missing, always with every registry

@@ -110,7 +110,9 @@ the aliases carried from the tree's record of that exe). Commit `regmap-client-<
 **Id tables kept per build.** kilnctl keeps one id table per game build in a maintainer folder, `$KILN_REGMAP_IDS`
 (default `~/.local/state/kiln/regmap-ids/<side>/ids-<side>-<exe sha256>.json`, beside each proven build's values export
 `values-<side>-<exe sha256>.json`), harvests the tables kiln.content wrote into a lab's or instance's data folder
-(`<game>/kiln/data/content/registry/ids-<side>-<exe sha256>.json`) and deploys the new build's table there. The kept table
+(`<game>/kiln/data/content/registry/ids-<side>-<exe sha256>.json`; kiln.content writes it once per build when it is missing,
+also on a start without registry content, with every schema registry and the reference tables templates, perks and input
+categories, entries only) and deploys the new build's table there. The kept table
 is regmap_check.py's (its pins applied) plus kiln.content's entries regmap_check.py does not cover (loot entries, keyed
 `#<id>`; input categories). Only a verified proof keeps its tables and export, and a kept one is never overwritten;
 tables harvested from data folders are kept apart, under `<side>/harvested/`. kilnctl refuses a maintainer or output
