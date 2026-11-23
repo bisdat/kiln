@@ -1,0 +1,6 @@
+{
+  "registry": {
+    "alter": [{ "registry": "items", "select": "registry-entries-test:logs", "field": "maxStack", "op": { "mul": 2 } }],
+    "final": [{ "registry": "items", "select": "registry-entries-test:logs_child", "field": "maxStack", "op": { "add": 3 } }]
+  }
+}
