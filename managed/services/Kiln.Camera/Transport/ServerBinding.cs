@@ -102,9 +102,11 @@ internal sealed class ServerBinding
     private long _lastHeartbeat;
     private Pending? _pending;
     private readonly List<(Action<TransportResult> Done, TransportResult Result)> _results = [];
-    // the lease the client holds as far as the server knows: what heartbeats authorize
-    private (ulong Lease, ulong Revision, ulong Owner)? _active;
-    private long _activeHeard;
+    // the lease the client holds as far as the server knows: what heartbeats authorize. DurationMs is its request's, and
+    // _activeSince the server's clock at the ACK that started its timeline (Apply or a Restart update): the client's
+    // reported times are clamped to the Duration, and the bookkeeping never outlives _activeSince + Duration (+ grace)
+    private (ulong Lease, ulong Revision, ulong Owner, uint DurationMs)? _active;
+    private long _activeHeard, _activeSince;
     private uint _activeRemaining;
     private readonly HashSet<ulong> _excluded = [];   // leases a timeout took out of the heartbeat
     // rate limit: a token bucket of RateBurst refilled at RatePerSecond (Apply and Update; End is never refused)
@@ -288,8 +290,9 @@ internal sealed class ServerBinding
             case CameraMessage.Status when _state == ServerBindingState.Bound && CameraWire.TryStatus(body, out var status) && status.Binding == _binding:
                 if (_active is { } a && status.Lease == a.Lease && status.Revision == a.Revision)
                 {
+                    // a client's number, so never more than the lease's own Duration (Tick also caps it at _activeSince + Duration)
                     _activeHeard = _o.Clock();
-                    _activeRemaining = status.RemainingMs;
+                    _activeRemaining = Math.Min(status.RemainingMs, a.DurationMs);
                 }
                 break;
         }
@@ -333,6 +336,14 @@ internal sealed class ServerBinding
             return;  // late, duplicate (a replayed ACK), or for something already given up
         _pending = null;
         var now = _o.Clock();
+        // The client's numbers are not trusted: its times are clamped to the Duration it was sent (an ok Apply/Update), else
+        // to the protocol's longest lease; the flags to the defined result flags (the decoder refuses others too)
+        var visual = ack.Ok && p.Op != TransportOp.End;
+        var bound = visual ? p.Request!.DurationMs : CameraWireAbi.MaxDurationMs;
+        var elapsed = Math.Min(ack.ElapsedMs, bound);
+        var remaining = Math.Min(ack.RemainingMs, bound);
+        var scope = ack.Scope;
+        var flags = ack.Flags & (CameraWireAbi.FlagMayHaveApplied | CameraWireAbi.FlagAlreadyEnded);
         if (ack.Ok)
         {
             if (p.Op == TransportOp.End)
@@ -341,12 +352,15 @@ internal sealed class ServerBinding
             }
             else
             {
-                _active = (p.Lease, p.Revision, p.Owner);
+                // a Preserve update keeps the lease's timeline (and so its start); Apply and Restart begin a new one
+                if (p.Op != TransportOp.UpdatePreserve || _active is not { } cur || cur.Lease != p.Lease) _activeSince = now;
+                _active = (p.Lease, p.Revision, p.Owner, bound);
                 _activeHeard = now;
-                _activeRemaining = ack.RemainingMs;
+                _activeRemaining = remaining;
+                scope = CameraWireAbi.CommitClientFrame;  // a successful remote visual result is ClientFrame committed (§4.6)
             }
         }
-        Queue(p, new TransportResult(ack.Ok, ack.Reason, ack.Scope, ack.Flags, ack.Frame, ack.ElapsedMs, ack.RemainingMs,
+        Queue(p, new TransportResult(ack.Ok, ack.Reason, scope, flags, ack.Frame, elapsed, remaining,
             ack.Diagnostic.Length == 0 ? null : ack.Diagnostic, p.Lease, p.Revision));
     }
 
@@ -393,9 +407,10 @@ internal sealed class ServerBinding
             var (lease, revision) = Authorized();
             _o.Send(CameraMessage.Heartbeat, CameraWire.Heartbeat(new HeartbeatMessage(_binding, ++_heartbeats, _serial, lease, revision)));
         }
-        if (_active is { } a && now - _activeHeard >= _activeRemaining + CleanupGraceMs)
+        if (_active is { } a && now - Math.Min(_activeHeard + _activeRemaining, _activeSince + a.DurationMs) >= CleanupGraceMs)
         {
-            // bookkeeping only: the client expires by itself; no word from it for its remaining time plus the grace
+            // bookkeeping only: the client expires by itself; no word from it for its remaining time plus the grace, and
+            // never later than the lease's Duration after its timeline started plus the grace, whatever Status says
             _active = null;
             _o.OnEnded?.Invoke(new RemoteEnded(a.Lease, a.Revision, CameraEndReasons.Expired, CameraReasons.None, 0));
         }

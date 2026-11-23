@@ -540,4 +540,54 @@ public sealed class ProtocolTests
         Assert.Throws<ArgumentOutOfRangeException>(() => rig.Server.Submit((TransportOp)9, 5, 1000, 1, Requests.Lens(), _ => { }));
         Assert.Equal(0, rig.Count(CameraMessage.Apply));
     }
+
+    [Fact]
+    public void An_Ack_cannot_stretch_a_lease_past_its_duration_and_an_ok_visual_answer_is_ClientFrame()
+    {
+        var rig = Bound(r => r.Endpoint.Auto = false);
+        rig.Submit(TransportOp.Apply, lease: 1000, request: Requests.Lens(durationMs: 2000));
+        rig.Pump();
+        Assert.True(CameraWire.TryHeaderOnly(rig.SentToClient.Last(m => m.Id == CameraMessage.Apply).Body, CameraWireAbi.MaxBody, out var h));
+        // a hostile client answers by itself: ServerState scope and the largest elapsed and remaining times the wire holds
+        rig.DropToServer = (_, _) => true;
+        rig.DropToClient = (_, _) => true;
+        rig.Server.Receive(CameraMessage.Ack, CameraWire.Ack(new AckMessage(h, true, CameraReasons.None, CameraWireAbi.CommitServerState,
+            0, 9, uint.MaxValue, uint.MaxValue, "")));
+        rig.Server.Tick();
+        var r = Last(rig);
+        Assert.True(r.Ok);
+        Assert.Equal(CameraWireAbi.CommitClientFrame, r.Scope);       // a remote visual success is ClientFrame, whatever the client wrote
+        Assert.Equal((2000u, 2000u), (r.ElapsedMs, r.RemainingMs));   // never more than the request's Duration
+        // the bookkeeping lets the silent lease go after its Duration plus the 3 s grace, not after ~49 days
+        rig.Advance(4900, 100);
+        Assert.Empty(rig.Ended);
+        rig.Advance(100, 100);
+        var e = Assert.Single(rig.Ended);
+        Assert.Equal((1000ul, CameraEndReasons.Expired), (e.Lease, e.EndReason));
+        rig.Advance(1000);
+        Assert.True(CameraWire.TryHeartbeat(rig.SentToClient.Last(m => m.Id == CameraMessage.Heartbeat).Body, out var hb));
+        Assert.Equal(0ul, hb.Lease);                                  // and the heartbeat no longer authorizes it
+    }
+
+    [Fact]
+    public void A_Status_cannot_keep_a_lease_past_its_own_duration()
+    {
+        var rig = Bound();
+        rig.Submit(TransportOp.Apply, lease: 1000, request: Requests.Lens(durationMs: 2000));
+        rig.Tick();   // the ACK arrives now
+        Assert.True(Last(rig).Ok);
+        rig.DropToServer = (_, _) => true;   // the honest client is cut off; a hostile one keeps saying its lease has time left
+        rig.DropToClient = (_, _) => true;
+        var binding = rig.Server.Binding;
+        byte[] Status(ulong seq, uint remaining) => CameraWire.Status(new StatusMessage(binding, seq, 1000, 1, 0, remaining));
+        for (var t = 0; t < 4900; t += 100)
+        {
+            rig.Server.Receive(CameraMessage.Status, Status((ulong)t + 1, t % 200 == 0 ? uint.MaxValue : 2000u));
+            rig.Advance(100, 100);
+        }
+        Assert.Empty(rig.Ended);             // Duration 2000 + grace 3000 after the ACK: not yet
+        rig.Server.Receive(CameraMessage.Status, Status(5000, 2000));
+        rig.Advance(100, 100);
+        Assert.Equal(CameraEndReasons.Expired, Assert.Single(rig.Ended).EndReason);
+    }
 }
