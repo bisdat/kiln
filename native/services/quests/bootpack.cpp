@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "bootpack.h"
+#include "../../core/abi/services/kiln_capacity_util.hpp"
 
 #include <algorithm>
 #include <cstring>
@@ -66,6 +67,21 @@ bool body_keys(const ojson& assets, std::vector<Key>* out, std::string* why) {
     return true;
 }
 
+std::string sha256_hex(const std::string& text) {
+    const auto digest = kiln::capacity::sha256(text);
+    std::string out;
+    kiln::capacity::detail::hex(out, digest.data(), digest.size());
+    return out;
+}
+// Each NPC of the mod's documents with a body object: (document NPC id, the body).
+template <class F> void each_body(const ModInput& mod, F f) {
+    for (const auto& document : mod.documents) {
+        if (!document.is_object() || !document.contains("npcs") || !document["npcs"].is_object()) continue;
+        for (const auto& [id, npc] : document["npcs"].items())
+            if (npc.is_object() && npc.contains("body") && npc["body"].is_object()) f(id, npc);
+    }
+}
+
 void unique_ids(std::vector<uint32_t>* ids) {
     std::sort(ids->begin(), ids->end());
     ids->erase(std::unique(ids->begin(), ids->end()), ids->end());
@@ -90,8 +106,17 @@ bool withdraw(const Applied& applied, const Backend& backend, std::string* why) 
     }
 }
 
+std::string body_closure(const ojson& body) {
+    const std::string bindings = body.contains("bindings") ? body["bindings"].dump() : "[]";
+    return sha256_hex("16f-body-v1:fisher:" + body.value("closure", "") + ":" + sha256_hex(bindings) + ":" + body.value("model", "") + ":" +
+                      body.value("graph", "") + ":" + (body.contains("size") ? body["size"].dump() : ""));
+}
+
 Result build(const std::vector<ModInput>& mods, const Backend& backend) {
+    static uint64_t builds = 0;
     Result out;
+    out.generation = ++builds;
+    std::map<std::string, ModInput> admitted_inputs;  // committed authored-body mods: their admitted documents
     ojson manifest_mods = ojson::array();
     std::set<std::string> failed;
     Guid knowledge_guid{};
@@ -281,6 +306,7 @@ Result build(const std::vector<ModInput>& mods, const Backend& backend) {
                         fingerprint(pack.res_knowledge.data(), pack.res_knowledge.size())};
                 }
                 out.applied.push_back(std::move(applied));
+                if (mod.authored_body) admitted_inputs[mod.id] = *input;
                 out.manifest = pack.manifest;
                 for (const auto& entry : pack.manifest.value("mods", ojson::array())) manifest_mods.push_back(entry);
                 if (!pack.roster_kiln_ids.empty() && out.roster_kiln_ids.empty()) out.roster_boot_ids = pack.roster_boot_ids;
@@ -297,6 +323,32 @@ Result build(const std::vector<ModInput>& mods, const Backend& backend) {
         if (out.stopped) break;
     }
     unique_ids(&out.roster_kiln_ids);
+    // 16f S5: the status of every authored body this build saw, for NpcBodies.Status and the join handshake
+    for (const auto& mod : mods) {
+        if (!mod.authored_body) continue;
+        if (const auto found = admitted_inputs.find(mod.id); found != admitted_inputs.end()) {
+            each_body(found->second, [&](const std::string& id, const ojson& npc) {
+                const ojson& body = npc["body"];
+                const ojson clone = npc.value("clone", ojson());
+                const std::string tpl = clone.is_object() && clone.contains("guid") && clone["guid"].is_string() ? clone["guid"].get<std::string>()
+                                                                                                                 : guid_text(derive_guid(mod.id, "npc", id));
+                out.bodies.push_back({{"mod", mod.id}, {"npc", body.value("block", id)}, {"key", id}, {"state", "ready"}, {"reason", ""},
+                                      {"template", tpl}, {"model", body.value("model", "")}, {"graph", body.value("graph", "")},
+                                      {"closure", body_closure(body)}, {"generation", out.generation}});
+            });
+            continue;
+        }
+        std::string reason;
+        for (const auto& error : out.errors)
+            if (error.rfind("bootpack:" + mod.id + ": ", 0) == 0) { reason = error; break; }
+        if (reason.empty()) reason = out.stopped ? out.reason : "bootpack:" + mod.id + ": not built";
+        each_body(mod, [&](const std::string& id, const ojson& npc) {
+            const ojson& body = npc["body"];
+            out.bodies.push_back({{"mod", mod.id}, {"npc", body.value("block", id)}, {"key", id}, {"state", "failed"}, {"reason", reason},
+                                  {"template", ""}, {"model", ""}, {"graph", ""}, {"closure", ""}, {"generation", out.generation}});
+        });
+    }
+    out.manifest["bodies"] = out.bodies;
     out.manifest["mods"] = std::move(manifest_mods);
     out.manifest["errors"] = out.errors;
     out.manifest["bootpack"] = {{"mode", "per-mod-rollback"}, {"committed", out.applied.size()}};

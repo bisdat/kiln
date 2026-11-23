@@ -161,7 +161,7 @@ bool admit_block(const ModInput& mod, const Env& env, const std::string& name, o
     if (!own_graph) return fail("its graph is not one of the cook's body resources; cook the mod again");
     const ojson size = member(member(wanted, "body"), "size");
     *body = {{"model", guid_text(model)}, {"graph", guid_text(graph)}, {"size", size}, {"bindings", bindings},
-             {"closure", cache->source_hash}};
+             {"closure", cache->source_hash}, {"block", name}};
     return true;
 }
 
@@ -177,7 +177,7 @@ bool admit_code(const Env& env, const std::string& name, ojson* body, std::strin
     if (env.client && !env.served(model, fnv1a(kModelType, std::strlen(kModelType)))) return fail("its cooked model is not served on this game client; cook the mod");
     const ojson bindings = member(*body, "bindings");
     *body = {{"model", guid_text(model)}, {"graph", guid_text(graph)}, {"size", size},
-             {"bindings", bindings.is_array() ? bindings : ojson::array()}, {"closure", ""}};
+             {"bindings", bindings.is_array() ? bindings : ojson::array()}, {"closure", ""}, {"block", name}};
     return true;
 }
 }  // namespace

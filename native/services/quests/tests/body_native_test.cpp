@@ -207,6 +207,48 @@ void test_server_admits_and_publishes() {
         CHECK(body->value("closure", "") == std::string(64, 'c'));
     }
     CHECK(g_layout_checked && g_layout_ok);
+    // S5: the manifest's status row and the persisted ledger
+    const auto bodies = kiln::qb::ojson::parse(g_manifest)["bodies"];
+    CHECK(bodies.size() == 1);
+    if (bodies.size() == 1) {
+        const auto& row = bodies[0];
+        CHECK(row["mod"] == "a-body" && row["npc"] == "tobin" && row["key"] == "tobin" && row["state"] == "ready" && row["reason"] == "");
+        CHECK(row["template"] == kiln::qb::guid_text(kiln::qb::derive_guid("a-body", "npc", "tobin")));
+        CHECK(row["model"] == kModelGuid && row["graph"] == kGraphGuid);
+        CHECK(row["closure"].get<std::string>().size() == 64 && row["generation"].get<uint64_t>() > 0);
+    }
+    const auto ledger = kiln::qb::ojson::parse(read_file(t_root / "data/kiln-quests/native/npc-bodies.ledger.json"), nullptr, false);
+    CHECK(ledger.is_object() && ledger["bodies"].size() == 1 && ledger["bodies"][0]["state"] == "ready");
+}
+
+void test_status_rows_and_removal() {
+    body_reset("16f S5: a refused body is a failed row with its reason; a body taken out is reported removed once");
+    body_mod("a-body");
+    mod("b-ordinary", kGood);
+    g_body_network_clearance = false;
+    boot_and_resource_init();
+    auto bodies = kiln::qb::ojson::parse(g_manifest)["bodies"];
+    CHECK(bodies.size() == 1 && bodies[0]["state"] == "failed");
+    if (bodies.size() == 1) CHECK(bodies[0]["reason"].get<std::string>().find("need the network clearance") != std::string::npos);
+
+    body_reset("16f S5: first start with the body");
+    body_mod("a-body");
+    boot_and_resource_init();
+    const std::string ledger = read_file(t_root / "data/kiln-quests/native/npc-bodies.ledger.json");
+    CHECK(!ledger.empty());
+    body_reset("16f S5: the next start without the body mod reports it removed");
+    write(t_root / "data/kiln-quests/native/npc-bodies.ledger.json", ledger);
+    mod("b-ordinary", kGood);
+    boot_and_resource_init();
+    bodies = kiln::qb::ojson::parse(g_manifest)["bodies"];
+    CHECK(bodies.size() == 1);
+    if (bodies.size() == 1) CHECK(bodies[0]["state"] == "removed" && bodies[0]["mod"] == "a-body" && bodies[0]["npc"] == "tobin");
+    body_reset("16f S5: and the start after that no longer mentions it");
+    write(t_root / "data/kiln-quests/native/npc-bodies.ledger.json", read_file(t_root / "data/kiln-quests/native/npc-bodies.ledger.json"));
+    mod("b-ordinary", kGood);
+    write(t_root / "data/kiln-quests/native/npc-bodies.ledger.json", R"({"format":1,"bodies":[]})");
+    boot_and_resource_init();
+    CHECK(kiln::qb::ojson::parse(g_manifest)["bodies"].empty());
 }
 
 void test_refusals_leave_the_neighbour() {
@@ -243,6 +285,12 @@ void test_refusals_leave_the_neighbour() {
         CHECK(owns_layers("b-ordinary"));
         if (!logged(c.says)) std::printf("expected a log line with: %s\n", c.says);
         CHECK(logged(c.says));
+        // S5: every body the refused mod names is a failed row carrying the refusal (a chassis refusal names no body)
+        const auto manifest = kiln::qb::ojson::parse(g_manifest);
+        for (const auto& row : manifest["bodies"]) {
+            CHECK(row["state"] == "failed" && row["mod"] == "a-body" && row["closure"] == "");
+            CHECK(row["reason"].get<std::string>().find(c.says) != std::string::npos);
+        }
     }
 }
 }  // namespace
@@ -253,6 +301,7 @@ int main(int argc, char** argv) {
     g_api = &t_api;
     test_server_admits_and_publishes();
     test_refusals_leave_the_neighbour();
+    test_status_rows_and_removal();
     std::error_code ec;
     fs::remove_all(t_root, ec);
     std::printf("body native: %d checks, %d failed\n", g_checks, g_failures);

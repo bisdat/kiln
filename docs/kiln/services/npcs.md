@@ -130,6 +130,17 @@ in the template afterwards (a reference path a game update added). The sequence,
 checked against kiln.types together with the body's. The clones are new keys published with the template under
 `bootpack:<mod>`; the game's own sequences are never changed.
 
+### Body status
+
+The boot build's manifest (kiln.knowledge `native_manifest`, read by Kiln.Quests/Kiln.Blocks) carries a `bodies` array,
+one row per authored-body NPC: `mod`, `npc` (the block name), `key` (`was` or the name), `state` (`ready`, `failed`,
+`removed`), `reason` (the refusal, empty when ready), `template` (the clone's GUID), `model`, `graph`, `closure` and
+`generation`. `closure` is the body's network identity: a SHA-256 over its authored-source hash, its binding vector, its
+cooked model and graph ids, its size and the verified chassis; never over machine-local cooked bytes or process handles.
+A failed mod's rows carry its refusal. The native build keeps the last build's rows in
+`<Kiln data>/kiln-quests/native/npc-bodies.ledger.json`; a body that was ready there and is not built at all at the next
+start (its mod or NPC taken out) is reported once as `removed`. The ledger records statuses only, never game state.
+
 Generated material-block/texture hashes describe dependencies only; they must not be mistaken for prepared material
 resource bytes. No Ready status, hot body replacement, or safe missing-model fallback is promised by a cooked manifest.
 Both sides need the mod. A vanilla peer must be refused or have the new NPC withheld by normal content admission;

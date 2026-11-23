@@ -55,7 +55,12 @@ struct Result {
     std::vector<std::string> stopped_mods;
     std::vector<uint32_t> roster_boot_ids, roster_kiln_ids;
     size_t knowledge = 0, quests = 0, npcs = 0, templates = 0, texts = 0;
+    // 16f S5: one row per authored-body NPC of the build (state "ready" or "failed"; docs/kiln/services/npcs.md "Body status")
+    ojson bodies = ojson::array();
+    uint64_t generation = 0;
 };
+// The network identity of one admitted body: its authored sources, its binding vector and the verified chassis.
+std::string body_closure(const ojson& admitted_body);
 
 Result build(const std::vector<ModInput>& mods, const Backend& backend);
 // Reverse order only: an earlier shared-table layer is not withdrawn from under a later committed layer.
