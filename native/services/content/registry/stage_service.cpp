@@ -185,8 +185,8 @@ Env make_env() {
 }
 
 // The lab's registry proof (proof.h): nothing at all without <data>/content/registry/proof/request.json (one lookup). With
-// it, the base view the stage released is opened again for the proof's reads, still before any patch of this start is
-// written, and released again.
+// it, the proof reads the base still before any patch of this start is written (the view the stage released is opened
+// again for it, and released again).
 void lab_proof() {
     proof::Env e;
     e.read_data = [](const std::string& rel) { return read_whole(data_root() / u8(rel)); };
@@ -198,8 +198,11 @@ void lab_proof() {
     e.source = s.source;
     e.side = s.side, e.exe_sha256 = s.exe_sha256, e.writer = s.writer;
     e.schema = &registry_schema();
+    // the stage released the view after its reads (a start with nothing to read leaves it open): open it again only then
     kiln::boot_view::LiveView& v = live_view();
-    v.restart();
+    std::string closed;
+    const bool reopened = !v.ready(&closed);
+    if (reopened) v.restart();
     e.bytes = [&v](const KilnAssetKey& key, std::vector<uint8_t>* out, std::string* why) {
         std::string b;
         if (v.bytes(key, size_t{256} << 20, &b, why) != KILN_OK) return false;
@@ -215,7 +218,7 @@ void lab_proof() {
         return out;
     };
     proof::run(e);
-    v.release();
+    if (reopened) v.release();
 }
 
 // ---- the C tables ----
