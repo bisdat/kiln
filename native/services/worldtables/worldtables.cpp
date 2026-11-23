@@ -379,11 +379,9 @@ void read_mod(const std::string& dir, const fs::path& pending_root, const kiln::
             if (own) strict(label, label + ": not valid JSON");
             continue;
         }
-        if (!doc.is_object() ||
-            (!doc.contains("buildingMaterialPools") && !doc.contains("materialTweaks") && !doc.contains("buildingMaterials") && !doc.contains("blueprints") &&
-             !doc.contains("toolBrushShapes") && !doc.contains("toolMaterialPools") && !doc.contains("terrainMaterials") && !doc.contains("craftingProps") &&
-             !doc.contains("props") && !doc.contains("stations") && !doc.contains("containers") && !doc.contains("doors") && !doc.contains("beds") && !doc.contains("seats")))
-            continue;
+        // every object document goes to read_blocks, which reads its own sections and leaves the rest alone: a list of section
+        // names here would have to follow every reader there (one that did not skipped tool-only documents, GitHub #129)
+        if (!doc.is_object()) continue;
         read_blocks(doc, &mf);
         g_errors.insert(g_errors.end(), mf.errors.begin(), mf.errors.end());
         if (own && !mf.errors.empty())
