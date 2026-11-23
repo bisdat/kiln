@@ -46,11 +46,33 @@ thread_local Route* route=nullptr;
 thread_local const std::vector<Stock>* drawing=nullptr;
 thread_local void* modified_state=nullptr;
 KilnStr str(const char* s){return {s,std::strlen(s)};}
-void report(const char* name,uint32_t state,uint32_t reason,const char* why){
- const auto* caps=static_cast<const KilnCapsApi*>(api?api->service(str(KILN_CAPS_SERVICE),1):nullptr);
- if(caps&&caps->report)caps->report(items_owner(),str(name),state,reason,str(why));
+enum Cap {SourceCap,UiCap,SourceSessionCap,UiSessionCap};
+const char* const cap_names[]{"crafting.dye_sources","crafting.dye_ui","crafting.dye_sources_session","crafting.dye_ui_session"};
+struct CapReport {
+ bool valid=false;const KilnCapsApi* caps=nullptr;KilnOwner owner=0;
+ uint32_t state=0,reason=0;const char* text=nullptr;uint64_t session=0;uintptr_t world=0;
+};
+std::array<CapReport,4> cap_cache{};
+std::mutex cap_mu;
+struct CapReporter {
+ const KilnCapsApi* caps=static_cast<const KilnCapsApi*>(api&&api->service?api->service(str(KILN_CAPS_SERVICE),1):nullptr);
+ KilnOwner owner=items_owner();
+ void report(Cap cap,uint32_t state,uint32_t reason,const char* why,uint64_t session=0,uintptr_t world=0)const{
+  // Palette faults and world callbacks can both report; keep their delivery cache synchronized.
+  std::lock_guard lock(cap_mu);auto& old=cap_cache[cap];
+  if(!caps||caps->header.size<offsetof(KilnCapsApi,report)+sizeof(caps->report)||!caps->report){old.valid=false;return;}
+  if(old.valid&&old.caps==caps&&old.owner==owner&&old.state==state&&old.reason==reason&&
+     old.session==session&&old.world==world&&std::strcmp(old.text,why)==0)return;
+  // Cache only delivered reports. A rejection must retry even if the desired state returns to an older value.
+  old.valid=false;
+  if(caps->report(owner,str(cap_names[cap]),state,reason,str(why))==KILN_OK)old={true,caps,owner,state,reason,why,session,world};
+ }
+ void fail(Cap cap,const char* why)const{report(cap,KILN_CAP_UNAVAILABLE,KILN_CAP_REASON_FAULTED,why);}
+};
+uint64_t session_id(uint32_t kind){
+ KilnSessionInfo s{};s.size=sizeof s;
+ return api&&api->session&&api->session(&s)==KILN_OK?s.sessions[kind]:0;
 }
-void fail(const char* name,const char* why){report(name,KILN_CAP_UNAVAILABLE,KILN_CAP_REASON_FAULTED,why);}
 bool read(void* out,const void* p,size_t n){__try {if(!p)return false;std::memcpy(out,p,n);return true;}__except(EXCEPTION_EXECUTE_HANDLER){return false;}}
 bool write(void* p,const void* in,size_t n){__try {if(!p)return false;std::memcpy(p,in,n);return true;}__except(EXCEPTION_EXECUTE_HANDLER){return false;}}
 template<class T> bool load(const void* p,size_t off,T* out){return p&&reinterpret_cast<uintptr_t>(p)<=UINTPTR_MAX-off&&read(out,static_cast<const uint8_t*>(p)+off,sizeof(T));}
@@ -236,11 +258,12 @@ void hk_grid(void* state){
   merge(&rows,stock);if(!replace_rows(state,rows,selected))throw 1;
   modified_state=stock.empty()?nullptr:state;
   draw_grid(state,&stock);
- }catch(...){ui_ok.store(false);fail("crafting.dye_ui","a dye palette view faulted; source rows are disabled until restart");}
+ }catch(...){ui_ok.store(false);CapReporter{}.fail(UiCap,"a dye palette view faulted; source rows are disabled until restart");}
 }
 void on_row(KilnRegisters& r){if(drawing){uint32_t item=0;if(load(reinterpret_cast<void*>(r.rbx),8,&item))r.rax=available(static_cast<uint32_t>(r.rax),extra(*drawing,item));}}
 void on_detail(KilnRegisters& r){if(drawing)r.rax=available(static_cast<uint32_t>(r.rax),extra(*drawing,static_cast<uint32_t>(r.r15)));}
 void KILN_CALL client_pre(const KilnTickInfo*,void*){
+ const CapReporter caps;
  const uintptr_t world=api->world(KILN_WORLD_CLIENT);
  if(client_world.exchange(world)!=world){client_epoch.fetch_add(1);std::lock_guard lock(offer_mu);offer={};}
  bool wanted=false;{std::lock_guard lock(offer_mu);wanted=offer.player!=0&&offer.expires>GetTickCount64();}
@@ -248,27 +271,29 @@ void KILN_CALL client_pre(const KilnTickInfo*,void*){
   if(!wire_valid()||!client_code()||!row_hook.install(api,items_owner(),row_at,&on_row,"dyes/client.RowCount")||
      !detail_hook.install(api,items_owner(),detail_at,&on_detail,"dyes/client.DetailCount")||
      !grid_hook.install(api,items_owner(),grid_at,reinterpret_cast<void*>(&hk_grid),"dyes/client.PaletteGrid")){
-   row_hook.revoke();detail_hook.revoke();fail("crafting.dye_ui","the qualified dye palette hooks could not be installed");ui_feature=false;
+   row_hook.revoke();detail_hook.revoke();caps.fail(UiCap,"the qualified dye palette hooks could not be installed");ui_feature=false;
   }else ui_ok.store(true);
  }
- report("crafting.dye_ui_session",wanted&&ui_ok.load()?KILN_CAP_AVAILABLE:KILN_CAP_PENDING,wanted&&ui_ok.load()?KILN_CAP_REASON_NONE:KILN_CAP_REASON_SESSION,
-        wanted?"waiting for the dye palette hooks":"no live dye-source announcement from a Kiln server");
+ caps.report(UiSessionCap,wanted&&ui_ok.load()?KILN_CAP_AVAILABLE:KILN_CAP_PENDING,wanted&&ui_ok.load()?KILN_CAP_REASON_NONE:KILN_CAP_REASON_SESSION,
+        wanted?"waiting for the dye palette hooks":"no live dye-source announcement from a Kiln server",session_id(KILN_WORLD_CLIENT),world);
 }
 void KILN_CALL server_pre(const KilnTickInfo*,void*){
+ const CapReporter caps;
  const uintptr_t world=api->world(KILN_WORLD_SERVER);
  const bool live=world!=0;
  active_server_storage.store(world?reinterpret_cast<void*>(world+E.world_storage):nullptr,std::memory_order_release);
- report("crafting.dye_sources_session",live&&server_ok.load()&&!faulted.load()?KILN_CAP_AVAILABLE:KILN_CAP_PENDING,
-        live&&server_ok.load()&&!faulted.load()?KILN_CAP_REASON_NONE:KILN_CAP_REASON_SESSION,"waiting for an available server world");
- if(faulted.load())fail("crafting.dye_sources","a source payment faulted; all source dye requests are refused until restart");
+ caps.report(SourceSessionCap,live&&server_ok.load()&&!faulted.load()?KILN_CAP_AVAILABLE:KILN_CAP_PENDING,
+        live&&server_ok.load()&&!faulted.load()?KILN_CAP_REASON_NONE:KILN_CAP_REASON_SESSION,"waiting for an available server world",session_id(KILN_WORLD_SERVER),world);
+ if(faulted.load())caps.fail(SourceCap,"a source payment faulted; all source dye requests are refused until restart");
 }
 void KILN_CALL world_event(const KilnWorldEvent* e,void*){
  if(e->event!=KILN_WORLD_STOPPING)return;
+ const CapReporter caps;
  if(e->kind==KILN_WORLD_CLIENT){
   client_world.store(0);client_epoch.fetch_add(1);{std::lock_guard lock(offer_mu);offer={};}
-  report("crafting.dye_ui_session",KILN_CAP_PENDING,KILN_CAP_REASON_SESSION,"no client world or live dye-source announcement");
+  caps.report(UiSessionCap,KILN_CAP_PENDING,KILN_CAP_REASON_SESSION,"no client world or live dye-source announcement");
  }
- if(e->kind==KILN_WORLD_SERVER){active_server_storage.store(nullptr,std::memory_order_release);report("crafting.dye_sources_session",KILN_CAP_PENDING,KILN_CAP_REASON_SESSION,"no server world");}
+ if(e->kind==KILN_WORLD_SERVER){active_server_storage.store(nullptr,std::memory_order_release);caps.report(SourceSessionCap,KILN_CAP_PENDING,KILN_CAP_REASON_SESSION,"no server world");}
 }
 bool symbol(const char* name,uintptr_t* out){return api->symbol(str(name),out)==KILN_OK&&*out;}
 bool layout_is(const char* name,int64_t expected){int64_t got=0;return api->constant(str(name),&got)==KILN_OK&&got==expected;}
@@ -299,6 +324,7 @@ KilnResult KILN_CALL dyes_set_stock(KilnEntity player,const KilnStationStack* ro
 }
 void dyes_resolve(){
  api=items_api();uintptr_t actor=0,build=0,entry=0,pay=0;
+ const CapReporter caps;
  server_feature=api->feature(str("crafting.dye_sources"))&&server_layout()&&E.read_ok&&E.tx_ok&&symbol("dyes/TintAction",&entry)&&
   symbol("items/InventoryRemoveItems",&pay)&&symbol("dyes/TintPayRet",&pay_ret)&&symbol("dyes/ProgramEntity",&actor)&&symbol("dyes/WireRoot",&wire_at)&&wire_valid();
  actor_fn=reinterpret_cast<ActorFn>(actor);
@@ -306,19 +332,20 @@ void dyes_resolve(){
   ui_feature=api->feature(str("crafting.dye_ui"))&&layout_is("dyes/ui.palettes",0x90b80)&&layout_is("dyes/ui.palette_count",0x90b88)&&symbol("dyes/client.PaletteGrid",&grid_at)&&symbol("dyes/client.PaletteBuild",&build)&&
    symbol("dyes/client.RowCount",&row_at)&&symbol("dyes/client.DetailCount",&detail_at)&&symbol("ui/UiApp",&app_at)&&symbol("dyes/WireRoot",&wire_at)&&wire_valid();
   build_fn=reinterpret_cast<BuildFn>(build);
- }else report("crafting.dye_ui",KILN_CAP_UNAVAILABLE,KILN_CAP_REASON_WRONG_SIDE,"the dye palette screen runs only in a game client");
- if(!server_feature)report("crafting.dye_sources",KILN_CAP_UNAVAILABLE,KILN_CAP_REASON_SYMBOL_MISSING,"the tint transaction, sparse accessors or full-u8 input schema did not qualify");
- if(api->side()==KILN_SIDE_CLIENT&&!ui_feature)report("crafting.dye_ui",KILN_CAP_UNAVAILABLE,KILN_CAP_REASON_SYMBOL_MISSING,"the palette screen or full-u8 input schema did not qualify");
- report("crafting.dye_sources_session",KILN_CAP_PENDING,KILN_CAP_REASON_SESSION,"no server world yet");
- report("crafting.dye_ui_session",KILN_CAP_PENDING,KILN_CAP_REASON_SESSION,"no live dye-source announcement from a Kiln server");
+ }else caps.report(UiCap,KILN_CAP_UNAVAILABLE,KILN_CAP_REASON_WRONG_SIDE,"the dye palette screen runs only in a game client");
+ if(!server_feature)caps.report(SourceCap,KILN_CAP_UNAVAILABLE,KILN_CAP_REASON_SYMBOL_MISSING,"the tint transaction, sparse accessors or full-u8 input schema did not qualify");
+ if(api->side()==KILN_SIDE_CLIENT&&!ui_feature)caps.report(UiCap,KILN_CAP_UNAVAILABLE,KILN_CAP_REASON_SYMBOL_MISSING,"the palette screen or full-u8 input schema did not qualify");
+ caps.report(SourceSessionCap,KILN_CAP_PENDING,KILN_CAP_REASON_SESSION,"no server world yet");
+ caps.report(UiSessionCap,KILN_CAP_PENDING,KILN_CAP_REASON_SESSION,"no live dye-source announcement from a Kiln server");
 }
 void dyes_register(){
+ const CapReporter caps;
  uintptr_t entry=0,pay=0;
  if(server_feature&&symbol("dyes/TintAction",&entry)&&symbol("items/InventoryRemoveItems",&pay)){
   // Install the payment link first: the entry must never translate a reserved key without its authoritative debit.
   if(server_code(entry,pay)&&pay_hook.install(api,items_owner(),pay,reinterpret_cast<void*>(&hk_pay),"dyes/TintPay")&&
      entry_hook.install(api,items_owner(),entry,reinterpret_cast<void*>(&hk_entry),"dyes/TintAction"))server_ok.store(true);
-  else {pay_hook.revoke();fail("crafting.dye_sources","the tint code could not be verified or its entry/payment hooks could not be installed");}
+  else {pay_hook.revoke();caps.fail(SourceCap,"the tint code could not be verified or its entry/payment hooks could not be installed");}
  }
  KilnHandle h=0;
  api->subscribe_world_tick(items_owner(),KILN_WORLD_SERVER,KILN_TICK_PRE,&server_pre,nullptr,&h);
