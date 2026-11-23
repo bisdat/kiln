@@ -107,4 +107,23 @@ public sealed class BlockRangeTests
             Assert.Contains(mod.Programs.Values, p => p.Blob.AsSpan().IndexOf(share) >= 0);
         }
     }
+
+    [Fact]
+    public void An_attack_with_a_length_of_zero_is_refused_for_its_length()
+    {
+        var mod = new ModBlocks("length-test", 1) { ManifestClients = "mod" };
+        var error = Assert.Throws<BlockError>(() => Compiler.Lower(mod, "slam", new AttackBlock { Plays = AnimState.Idle, Length = 0, OnHit = [new EffectBlock { Heal = 1 }] }));
+        Assert.Equal("length", error.Field);
+        Assert.Contains("more than 0 and at most 30", error.Problem, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void An_angle_that_is_not_a_number_is_refused_rather_than_reaching_all_around()
+    {
+        var mod = new ModBlocks("nan-test", 1) { ManifestClients = "mod" };
+        var attack = new AttackBlock { Plays = AnimState.Idle, Angle = double.NaN, OnHit = [new EffectBlock { Heal = 1 }] };
+        Assert.Equal("angle", Assert.Throws<BlockError>(() => Compiler.Lower(mod, "slam", attack)).Field);
+        var cone = new AbilityBlock { Name = "Cone", Delivery = new ConeBlock { Range = 8, Angle = float.NaN, Effects = [new EffectBlock { Heal = 1 }] } };
+        Assert.Equal("delivery.angle", Assert.Throws<BlockError>(() => Compiler.Lower(mod, "cone", cone)).Field);
+    }
 }

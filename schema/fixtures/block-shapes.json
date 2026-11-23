@@ -96,5 +96,10 @@
   {"name": "screen autoResize", "section": "windows", "type": "WindowBlock", "block": {"title": "Window", "rows": [{"type": "text", "text": "Hello"}], "kind": "screen", "autoResize": true}, "valid": false, "schemaValid": false, "probe": "lower"},
   {"name": "screen alpha", "section": "windows", "type": "WindowBlock", "block": {"title": "Window", "rows": [{"type": "text", "text": "Hello"}], "kind": "screen", "alpha": 1}, "valid": false, "schemaValid": false, "probe": "lower"},
   {"name": "screen interactive", "section": "windows", "type": "WindowBlock", "block": {"title": "Window", "rows": [{"type": "text", "text": "Hello"}], "kind": "screen", "interactive": false}, "valid": false, "schemaValid": false, "probe": "lower"},
-  {"name": "drop place default maximum", "section": "items", "type": "ItemBlock", "block": {"name": "Thing", "loot": {"tables": [{"dropsLike": "Material_T1_Twigs", "countMin": 2}]}}, "valid": false, "schemaValid": true, "probe": "lower"}
+  {"name": "drop place default maximum", "section": "items", "type": "ItemBlock", "block": {"name": "Thing", "loot": {"tables": [{"dropsLike": "Material_T1_Twigs", "countMin": 2}]}}, "valid": false, "schemaValid": true, "probe": "lower"},
+  {"name": "drive body path", "section": "bodies", "type": "BodyBlock", "block": {"model": "C:/body.glb"}, "valid": false, "schemaValid": false, "probe": "lower"},
+  {"name": "backslash rooted body path", "section": "bodies", "type": "BodyBlock", "block": {"model": "\\body.glb"}, "valid": false, "schemaValid": false, "probe": "lower"},
+  {"name": "drive relative clip path", "section": "animations", "type": "AnimationBlock", "block": {"clips": "c:body.glb", "idle": "Idle"}, "valid": false, "schemaValid": false, "probe": "lower"},
+  {"name": "backslash folder body path", "section": "bodies", "type": "BodyBlock", "block": {"model": "models\\body.glb"}, "valid": true, "schemaValid": true, "probe": "lower"},
+  {"name": "game animation stagger", "section": "animations", "type": "AnimationBlock", "block": {"template": "Enemy_Vukah_Melee", "stagger": "Stagger"}, "valid": false, "schemaValid": false, "probe": "lower"}
 ]
