@@ -90,7 +90,9 @@ int main() {
     revised.forget_entry = [&](const auto& ref) { queued.erase(ref); };
     registry_entries_prepare(&revised);
     entry_check(revised.result.added.size() == 1 && revised.result.definitions.count({"recipes", "a:recipe"}), "a refused field reference preserves the independently valid recipe definition");
-    entry_check(queued.at({"recipes", "a:recipe"}) == revised.entry_bodies.at({"recipes", "a:recipe"}), "recomposition refreshes an already queued definition whose invalid later field edit was removed");
+    entry_check(queued.at({"recipes", "a:recipe"}) == registry_entry_definition({"recipes", "a:recipe"}, revised.result.definitions.at({"recipes", "a:recipe"}), revised, &why) &&
+                revised.entry_bodies.at({"recipes", "a:recipe"})["registryFields"]["outputs"][0]["item"] == "game:sword_t2",
+                "recomposition retains a valid native constructor and a separate restored effective reference baseline after a later definition failure");
     registry::Batch removal; refusals.clear();
     entry_check(registry::parse_batch(registry::json{{"ir", 1}, {"mod", "a"}, {"stage", "alter"}, {"edits", {{{"registry", "items"}, {"entry", "remove"}, {"select", "game:material_t1_wood_logs"}}}}}, *in.schema, &removal, &refusals, &why), "removal gate fixture parses");
     auto proof = *g_regmap;
