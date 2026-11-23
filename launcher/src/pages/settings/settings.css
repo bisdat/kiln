@@ -1,0 +1,130 @@
+/* Settings (pages/SettingsPage.tsx; mockup A, "Section list"): the list of sections on the left, one section (or the
+   search's hits) on the right as titled groups of rows. Tokens: theme/tokens.css; shared words: ui/ui.css. */
+.k-settings.k-page { padding: 0; gap: 0; }
+.k-st { flex: 1; min-height: 0; display: grid; grid-template-columns: 268px minmax(0, 1fr); }
+
+/* ---- the list */
+.k-st-rail { display: flex; flex-direction: column; gap: 14px; min-height: 0; overflow-y: auto; padding: 20px 16px 18px 26px;
+  box-shadow: inset -1px 0 0 var(--k-line); }
+.k-st-rail .k-st-pagename { margin: 0; padding-left: 2px; font-family: var(--k-font-display); font-weight: 600; font-size: 46px; line-height: .95; color: var(--k-name); }
+.k-st-rail .k-well { flex: none; }
+.k-st-rail .k-kbd { flex: none; }
+.k-st-nav ul { list-style: none; margin: 0; padding: 0; }
+.k-st-nav > ul { display: flex; flex-direction: column; gap: 2px; }
+.k-st-sec { position: relative; display: flex; flex-direction: column; min-width: 0; border-radius: var(--k-radius-s); }
+.k-st-sec > a { position: relative; display: flex; flex-direction: column; min-width: 0; padding: 7px 12px 8px 22px; border-radius: var(--k-radius-s);
+  color: inherit; text-decoration: none; transition: background .15s; }
+.k-st-sec > a:hover { background: var(--k-warm-1); }
+.k-st-sec-name { font-family: var(--k-font-label); font-weight: 500; letter-spacing: .012em; font-size: 19.5px; line-height: 1.2; color: var(--k-ash-1h); }
+.k-st-sec-line { font-size: 15px; color: var(--k-text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.k-st-sec.on { background: var(--k-warm-2); }
+.k-st-sec.on > a:hover { background: none; }
+.k-st-sec.on .k-st-sec-name { color: var(--k-bright); }
+.k-st-sec.on > a::before { content: ""; position: absolute; left: 8px; top: 16px; width: 7px; height: 7px; background: var(--k-gold-400);
+  transform: rotate(45deg); box-shadow: 0 0 8px rgba(249, 199, 79, .7); }
+.k-st-sec.dim .k-st-sec-name { color: var(--k-text-2); }
+.k-st-sec:has(.k-st-count) > a { padding-right: 34px; }
+.k-st-count { position: absolute; right: 10px; top: 9px; font-family: var(--k-font-mono); font-stretch: 90%; font-size: 15px; color: var(--k-ember-300); }
+.k-st-sec.last { margin-top: 17px; }
+.k-st-sec.last::before { content: ""; position: absolute; left: 10px; right: 10px; top: -9px; height: 1px; background: var(--k-line); }
+.k-st-nav .k-st-subs { display: flex; flex-direction: column; gap: 2px; margin: 0 10px 9px 22px; }
+.k-st-subs button { all: unset; box-sizing: border-box; display: block; width: 100%; padding: 1px 0 1px 12px; cursor: pointer;
+  font-size: 16px; line-height: 1.35; color: var(--k-text-1); box-shadow: inset 1px 0 0 var(--k-line-strong);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: color .15s, box-shadow .15s; }
+.k-st-subs button:hover, .k-st-subs button.on { color: var(--k-bright); }
+.k-st-subs button.on { box-shadow: inset 1px 0 0 var(--k-line-hot); }
+.k-st-subs button:focus-visible { outline: 2px solid var(--k-gold-400); outline-offset: 2px; }
+.k-st-foot { margin: auto 0 0; padding: 6px 0 0 2px; font-size: 15px; color: var(--k-text-2); }
+.k-st-foot .k-mono { font-size: 14.5px; }
+
+/* ---- the open section */
+.k-st-main { position: relative; min-width: 0; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 22px; padding: 22px 30px 40px 38px; }
+.k-st-head { flex: none; display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; max-width: 800px; }
+.k-st-head-text { min-width: 0; }
+.k-st-title { margin: 0; font-family: var(--k-font-display); font-weight: 600; font-size: 54px; line-height: .95; color: var(--k-name); overflow-wrap: anywhere; }
+.k-st-say { margin: 5px 0 0; font-size: 20px; line-height: 1.25; color: var(--k-say); text-wrap: pretty; }
+.k-st-for { flex: none; display: inline-flex; align-items: center; gap: 10px; padding-top: 10px; }
+.k-st-for .k-sc { font-size: 16px; color: var(--k-text-2); }
+.k-st-body { flex: none; display: flex; flex-direction: column; gap: 28px; max-width: 800px; min-width: 0; }
+.k-st-notes { max-width: 800px; }
+
+/* a group: a small-caps head with its line beside it, a rule under it, then its rows */
+.k-st-body .k-card-head { min-height: 30px; padding: 0 2px 7px; box-shadow: inset 0 -1px 0 var(--k-line-strong); align-items: center; }
+.k-st-body .k-card-titles { justify-content: flex-start; align-items: baseline; gap: 2px 12px; }
+.k-st-body .k-card-title { font-size: 19.5px; white-space: nowrap; }
+.k-st-body .k-card-sub { min-width: 0; }
+.k-st-group { gap: 0; }
+.k-st-group > .k-card-body { gap: 0; }
+.k-st-group > .k-card-body > .k-banner { margin: 8px 0 4px; }
+.k-st-cardgroup > .k-card > .k-card-body { padding-top: 10px; }
+.k-st-ghint { min-width: 0; }
+
+/* a row: name, one line of help with More, a tag; the control on the right */
+.k-st-row { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 24px;
+  padding: 10px 4px 11px 2px; box-shadow: inset 0 -1px 0 var(--k-line); }
+.k-st-row:last-child { box-shadow: none; }
+.k-st-row.wide { grid-template-columns: minmax(0, 1fr); }
+.k-st-row.wide > .k-st-ctl { justify-self: stretch; }
+.k-st-row.wide > .k-st-ctl > * { flex: 1; min-width: 0; }
+.k-st-path > :first-child .k-input { min-width: 0; }
+.k-st-meta { display: flex; flex-direction: column; min-width: 0; }
+.k-st-lab { display: flex; align-items: baseline; gap: 4px 10px; flex-wrap: wrap; }
+.k-st-name { font-size: 17.5px; line-height: 1.25; color: var(--k-text-0); }
+label.k-st-name { cursor: pointer; }
+.k-st-when { font-family: var(--k-font-label); font-weight: 500; font-size: 15px; letter-spacing: .012em; color: var(--k-text-2); white-space: nowrap; }
+.k-st-hint { margin-top: 2px; font-size: 15.5px; line-height: 1.3; color: var(--k-text-2); overflow-wrap: anywhere; }
+.k-st-more { margin-left: 6px; font-size: 15px; white-space: nowrap; color: var(--k-ember-300); }
+.k-st-ghint .k-st-more { font-size: 15px; }
+.k-st-mtext { grid-column: 1 / -1; max-width: 700px; margin: 2px 0 6px; padding: 4px 0 2px 12px; font-size: 15.5px; line-height: 1.38; color: var(--k-text-1);
+  box-shadow: inset 1px 0 0 var(--k-line-strong); overflow-wrap: anywhere; }
+.k-st-mtext .k-mono { font-size: 14.5px; }
+.k-st-mextra { margin-top: 6px; color: var(--k-text-2); }
+.k-st-p { margin: 0 0 6px; }
+.k-st-p:last-child { margin-bottom: 0; }
+.k-st-ctl { display: flex; align-items: center; gap: 10px; justify-self: end; min-width: 0; }
+.k-st-ctl .k-select { width: 230px; max-width: 100%; }
+.k-st-ctl .k-toggle { padding: 4px 0; }
+.k-st-path { width: min(440px, 100%); flex-wrap: nowrap; }
+.k-st-items .k-list-item { padding: 9px 4px 10px 2px; }
+.k-st-note { display: block; padding: 10px 2px; }
+.k-st-status { padding: 10px 2px 4px; }
+.k-st-quote { font-style: italic; }
+.k-st-mark { padding: 0 1px; border-radius: 3px; background: rgba(255, 143, 69, .24); color: var(--k-bright); }
+.k-st-body .k-sform-row { padding: 10px 4px 11px 2px; }
+.k-st-body .k-sform-row:last-child { box-shadow: none; }
+.k-st-body .k-sform { max-width: none; }
+.k-st-body .k-sform-label > label { font-size: 17.5px; }
+.k-st-body .k-kv { padding: 4px 2px 8px; }
+
+/* a search's hit: where it lives, and "Open in <section>" */
+.k-st-crumb { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 16px; font-family: var(--k-font-label); font-weight: 500; letter-spacing: .012em;
+  font-size: 17px; color: var(--k-text-2); }
+.k-st-crumb b { font-weight: 500; color: var(--k-head); }
+.k-st-crumb .k-link { font-family: var(--k-font-ui); font-size: 15.5px; letter-spacing: 0; color: var(--k-ember-300); }
+.k-st-cardgroup > .k-st-crumb { margin-bottom: 8px; }
+.k-st-searchfoot { margin: 0; padding: 0 2px; font-size: 15.5px; color: var(--k-text-2); }
+
+/* a jump's row or group, flushed with ember for 2 s (a deep link, a search's Enter or "Open in") */
+.k-st-flush { position: relative; }
+.k-st-flush::after { content: ""; position: absolute; inset: -2px -6px; border-radius: var(--k-radius-s); pointer-events: none;
+  background: linear-gradient(90deg, rgba(255, 106, 26, .17), rgba(255, 106, 26, .05) 75%); box-shadow: inset 0 0 0 1px rgba(255, 143, 69, .38);
+  animation: k-st-flush 2s ease-out forwards; }
+@keyframes k-st-flush { 0% { opacity: 0; } 8%, 55% { opacity: 1; } 100% { opacity: 0; } }
+
+/* 1280×800 (the Steam Deck's desktop): a narrower list */
+@media (max-width: 1340px) {
+  .k-st { grid-template-columns: 244px minmax(0, 1fr); }
+  .k-st-rail { padding-left: 22px; }
+  .k-st-sec > a { padding-left: 20px; }
+  .k-st-sec-name { font-size: 18.5px; }
+  .k-st-main { padding: 20px 26px 32px 30px; }
+}
+/* the 1024×640 minimum: the list keeps its sections and drops their live lines */
+@media (max-width: 1100px), (max-height: 700px) {
+  .k-st-sec-line { display: none; }
+  .k-st-sec > a { padding-top: 5px; padding-bottom: 6px; }
+  .k-st-rail { gap: 12px; padding-top: 16px; }
+  .k-st-rail .k-st-pagename { font-size: 40px; }
+  .k-st-title { font-size: 48px; }
+  .k-st-say { font-size: 18.5px; }
+}

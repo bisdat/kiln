@@ -13,10 +13,12 @@
 //! `WAYLAND_DISPLAY` names a socket that does not exist (console::NO_DISPLAY), so not even a crash dialog opens.
 //! A start returns when the game log says the world runs (`LoadEcsScene to Run`) or fails.
 
+use super::game::LogWatch;
 use super::instance::{ServerInstance, ServerRunner};
 use super::{ServerState, ServerStatus};
 use crate::task::Progress;
 use crate::{Error, ErrorCode, Result};
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -75,6 +77,10 @@ pub fn status(instance: &ServerInstance) -> Result<ServerStatus> {
     if instance.runner == ServerRunner::Remote {
         return remote_status(instance);
     }
+    local_status(instance, super::console::capture_path(instance).as_deref())
+}
+
+fn local_status(instance: &ServerInstance, capture: Option<&Path>) -> Result<ServerStatus> {
     let dir = instance.local_dir()?;
     let pid = pid(instance);
     // boot.json stays after the server exits (and survives an uninstall), endpoint.json after a crash: they describe
@@ -91,13 +97,8 @@ pub fn status(instance: &ServerInstance) -> Result<ServerStatus> {
     let up = pid.and_then(uptime);
     let state = match pid {
         None => ServerState::Stopped,
-        Some(_) => {
-            // the world runs once the log says so after this process started
-            let log = log_path(instance).ok().and_then(|p| super::game::read_log(&p));
-            let ready = log.as_deref().and_then(super::game::last_state).is_some_and(|s| s.contains("Run"))
-                || log.as_deref().is_some_and(|t| t.contains(super::game::READY));
-            if ready { ServerState::Running } else { ServerState::Starting }
-        }
+        Some(_) if world_runs(instance, dir, started) => ServerState::Running,
+        Some(_) => ServerState::Starting,
     };
     let players = if state == ServerState::Running {
         super::query::query(&format!("127.0.0.1:{}", instance.query_port), Duration::from_millis(600)).ok().map(|q| q.players)
@@ -109,12 +110,29 @@ pub fn status(instance: &ServerInstance) -> Result<ServerStatus> {
         state,
         pid,
         uptime_s: up.map(|d| d.as_secs()),
+        last_start_s: capture.and_then(|p| read_last_start(p, dir)),
         players,
         kiln: boot.as_ref().map(|b| b.kiln.clone()),
         installed: installed_kiln(dir),
         boot,
         endpoint,
     })
+}
+
+#[derive(Deserialize, Serialize)]
+struct LastStart {
+    // A detected Steam server id can be reassigned to a different install.
+    dir: PathBuf,
+    duration_s: u64,
+}
+
+fn last_start_path(capture: &Path) -> PathBuf {
+    capture.with_extension("start.json")
+}
+
+pub(super) fn read_last_start(capture: &Path, dir: &Path) -> Option<u64> {
+    let saved = crate::util::read_json::<LastStart>(&last_start_path(capture)).ok()??;
+    (saved.dir == dir).then_some(saved.duration_s)
 }
 
 /// Kiln in a server folder: its install receipt's runtime version, else the version of a Kiln proxy put there without
@@ -127,6 +145,30 @@ pub fn installed_kiln(dir: &Path) -> Option<String> {
     (c.kind == crate::pe::ProxyKind::Kiln).then(|| c.version.unwrap_or_else(|| "unknown".into()))
 }
 
+/// Kiln's log in a server folder; Kiln renames the last run's to kiln.prev.log when it starts.
+const KILN_LOG: &str = "kiln/logs/kiln.log";
+
+/// Kiln's own line once the server world ticks (`tick: server world 0x… started (session 1, thread 388)`).
+fn kiln_world_started(log: &str) -> bool {
+    log.lines().any(|l| l.contains("tick: server world") && l.contains(" started"))
+}
+
+/// The world of a running local server runs (the same two signs a start waits for, [`wait_ready`]): the game log says so,
+/// or this run's kiln.log does. Kiln's line can reach disk well before the game flushes its log (on Windows especially),
+/// and a start that ended on it must not read as starting again afterwards. A kiln.log not written since the process
+/// started (`started`; None: unknown) is the last run's and counts for nothing.
+pub(super) fn world_runs(instance: &ServerInstance, dir: &Path, started: Option<SystemTime>) -> bool {
+    let log = log_path(instance).ok().and_then(|p| super::game::read_log(&p));
+    if log.as_deref().and_then(super::game::last_state).is_some_and(|s| s.contains("Run"))
+        || log.as_deref().is_some_and(|t| t.contains(super::game::READY))
+    {
+        return true;
+    }
+    let kiln = dir.join(KILN_LOG);
+    let written = std::fs::metadata(&kiln).and_then(|m| m.modified()).ok();
+    started.zip(written).is_some_and(|(s, w)| w >= s) && super::game::read_log(&kiln).is_some_and(|t| kiln_world_started(&t))
+}
+
 fn remote_status(instance: &ServerInstance) -> Result<ServerStatus> {
     let r = instance.remote.as_ref().ok_or_else(|| Error::invalid("remote server without ssh details"))?;
     let ep = crate::admin::discover::remote_endpoint(r).ok().flatten();
@@ -135,6 +177,7 @@ fn remote_status(instance: &ServerInstance) -> Result<ServerStatus> {
         state: if ep.is_some() { ServerState::Running } else { ServerState::Unknown },
         pid: None,
         uptime_s: None,
+        last_start_s: None,
         players: None,
         kiln: ep.as_ref().and_then(|e| e.kiln.clone()),
         installed: None,
@@ -143,61 +186,86 @@ fn remote_status(instance: &ServerInstance) -> Result<ServerStatus> {
     })
 }
 
-/// Waits for the world after a start (the log line after `since`), reporting log progress.
-fn wait_ready(instance: &ServerInstance, since: SystemTime, progress: &mut dyn Progress, exited: &mut dyn FnMut() -> Option<String>) -> Result<ServerStatus> {
-    let t0 = Instant::now();
-    let log = log_path(instance)?;
-    // Kiln's own line for the same moment: on Windows the game's log can reach the disk long after the world runs
-    // (a start task then ended only when Stop made the server flush it)
-    let kiln_log = instance.local_dir().ok().map(|d| d.join("kiln/logs/kiln.log"));
+/// Log positions captured before the runner starts a local server.
+pub struct StartLogs {
+    game: LogWatch,
+    kiln: LogWatch,
+}
+
+/// Waits for a new readiness line, reporting progress from the game log. Stage "world" once the process writes a log
+/// (the game's, or Kiln's from inside it): until then the start is at "process", the process spawned and Wine (or
+/// Windows) bringing it up.
+fn wait_ready(instance: &ServerInstance, mut logs: StartLogs, spawned: Instant, progress: &mut dyn Progress, exited: &mut dyn FnMut() -> Option<String>) -> Result<()> {
+    let mut loading = false;
     loop {
         if progress.canceled() {
             return Err(Error::new(ErrorCode::Canceled, "stopped waiting (the server keeps starting)"));
         }
-        if let Some(k) = &kiln_log
-            && std::fs::metadata(k).and_then(|m| m.modified()).is_ok_and(|m| m >= since)
-            && std::fs::read_to_string(k).is_ok_and(|t| t.lines().any(|l| l.contains("tick: server world") && l.contains(" started")))
-        {
-            progress.report(Some(1.0), &format!("{} runs ({:.0} s)", instance.id, t0.elapsed().as_secs_f64()));
-            return status(instance);
+        // Kiln's own readiness line can reach disk before the game flushes its log, especially on Windows.
+        let kiln = logs.kiln.poll();
+        if kiln.as_deref().is_some_and(kiln_world_started) {
+            return Ok(());
         }
-        let fresh = std::fs::metadata(&log).and_then(|m| m.modified()).is_ok_and(|m| m >= since);
-        if fresh {
-            if let Some(text) = super::game::read_log(&log) {
-                if text.contains(super::game::READY) {
-                    progress.report(Some(1.0), &format!("{} runs ({:.0} s)", instance.id, t0.elapsed().as_secs_f64()));
-                    return status(instance);
-                }
-                if let Some(last) = text.lines().rev().find(|l| !l.trim().is_empty()) {
-                    let secs = t0.elapsed().as_secs_f32();
-                    progress.report(Some((secs / 60.0).min(0.95)), last.trim().chars().take(140).collect::<String>().as_str());
-                }
+        let game = logs.game.poll();
+        if !loading && [&kiln, &game].into_iter().any(|t| t.as_deref().is_some_and(|t| !t.trim().is_empty())) {
+            loading = true;
+            progress.stage("world");
+        }
+        if let Some(text) = game {
+            if text.contains(super::game::READY) {
+                return Ok(());
+            }
+            if let Some(last) = text.lines().rev().find(|l| !l.trim().is_empty()) {
+                let secs = spawned.elapsed().as_secs_f32();
+                progress.report(Some((secs / 60.0).min(0.95)), last.trim().chars().take(140).collect::<String>().as_str());
             }
         }
         if let Some(why) = exited() {
             return Err(Error::new(ErrorCode::Io, format!("{} exited during the start: {why}", instance.id)));
         }
-        if t0.elapsed() > START_TIMEOUT {
-            return Err(Error::new(ErrorCode::Timeout, format!("no \"{}\" in {} after {} s; the server keeps running", super::game::READY, log.display(), START_TIMEOUT.as_secs())));
+        if spawned.elapsed() > START_TIMEOUT {
+            return Err(Error::new(ErrorCode::Timeout, format!("no \"{}\" in {} after {} s; the server keeps running", super::game::READY, logs.game.path().display(), START_TIMEOUT.as_secs())));
         }
         std::thread::sleep(Duration::from_millis(500));
     }
 }
 
+/// Shared by all local runners once the child has spawned and its pid is known.
+pub(super) fn await_start(instance: &ServerInstance, logs: StartLogs, capture: &Path, spawned: Instant, message: &str,
+                          progress: &mut dyn Progress, exited: &mut dyn FnMut() -> Option<String>) -> Result<ServerStatus> {
+    progress.stage("process");
+    progress.report(Some(0.02), message);
+    wait_ready(instance, logs, spawned, progress, exited)?;
+    let elapsed = spawned.elapsed();
+    let mut status = local_status(instance, Some(capture))?;
+    let record = LastStart { dir: instance.local_dir()?.to_path_buf(), duration_s: elapsed.as_secs() };
+    let saved = serde_json::to_vec(&record)
+        .map_err(Error::from)
+        .and_then(|bytes| crate::util::write_atomic_exclusive(&last_start_path(capture), &bytes));
+    let mut message = format!("{} runs ({:.0} s)", instance.id, elapsed.as_secs_f64());
+    match saved {
+        Ok(()) => status.last_start_s = Some(record.duration_s),
+        Err(e) => message.push_str(&format!("; could not save start duration: {}", e.message)),
+    }
+    progress.stage("running");
+    progress.report(Some(1.0), &message);
+    Ok(status)
+}
+
 /// Returns when the world runs (or fails).
 pub fn start(instance: &ServerInstance, progress: &mut dyn Progress) -> Result<ServerStatus> {
     // the start's preparation, then the runner
-    start_via(None, instance, progress, &mut |instance, since, notes, progress| match instance.runner {
-        ServerRunner::Kilnctl => start_kilnctl(instance, since, notes, progress),
-        ServerRunner::Steam if cfg!(windows) => start_windows(instance, since, notes, progress),
-        ServerRunner::Steam => start_steam(instance, since, notes, progress),
-        ServerRunner::Windows => start_windows(instance, since, notes, progress),
+    start_via(None, instance, progress, &mut |instance, logs, notes, progress| match instance.runner {
+        ServerRunner::Kilnctl => start_kilnctl(instance, logs, notes, progress),
+        ServerRunner::Steam if cfg!(windows) => start_windows(instance, logs, notes, progress),
+        ServerRunner::Steam => start_steam(instance, logs, notes, progress),
+        ServerRunner::Windows => start_windows(instance, logs, notes, progress),
         ServerRunner::Remote => unreachable!("a remote start runs kilnctl there"),
     })
 }
 
-/// What starts a local server: its runner, given the start's time, the notes for the head of its capture and progress.
-pub type Spawn<'a> = dyn FnMut(&ServerInstance, SystemTime, &[String], &mut dyn Progress) -> Result<ServerStatus> + 'a;
+/// What starts a local server: its runner, given the log positions before launch, capture notes and progress.
+pub type Spawn<'a> = dyn FnMut(&ServerInstance, StartLogs, &[String], &mut dyn Progress) -> Result<ServerStatus> + 'a;
 
 /// [`start`] with the data folder (None: located when a start needs it) and what starts the server (tests pass a fake
 /// runner). A local start of a folder whose kiln.json asks for Kiln's interpreter writes its active profile again first
@@ -206,19 +274,20 @@ pub type Spawn<'a> = dyn FnMut(&ServerInstance, SystemTime, &[String], &mut dyn 
 /// built without its `sfi` feature, starts as before), and nothing here reads or writes the remote folder.
 pub fn start_via(dirs: Option<&crate::paths::DataDirs>, instance: &ServerInstance, progress: &mut dyn Progress,
                  spawn: &mut Spawn<'_>) -> Result<ServerStatus> {
-    if instance.runner != ServerRunner::Remote {
-        if let Some(p) = pid(instance) {
-            return Err(Error::new(ErrorCode::Conflict, format!("{} is running already (pid {p})", instance.id)));
-        }
-        let dir = instance.local_dir()?;
-        if !dir.join(super::game::EXE).exists() {
-            return Err(Error::not_found(format!("{} has no {} (install it first)", dir.display(), super::game::EXE)));
-        }
-    }
+    progress.stage("preparing");
     if instance.runner == ServerRunner::Remote {
-        return remote_kilnctl(instance, "start").and_then(|_| status(instance));
+        remote_kilnctl(instance, "start")?;
+        progress.stage("running");
+        return status(instance);
     }
-    let mut prepared = prepare_local(dirs, instance.local_dir()?)?;
+    if let Some(p) = pid(instance) {
+        return Err(Error::new(ErrorCode::Conflict, format!("{} is running already (pid {p})", instance.id)));
+    }
+    let dir = instance.local_dir()?;
+    if !dir.join(super::game::EXE).exists() {
+        return Err(Error::not_found(format!("{} has no {} (install it first)", dir.display(), super::game::EXE)));
+    }
+    let mut prepared = prepare_local(dirs, dir)?;
     let notes = prepared.as_ref().map(|h| h.lines()).unwrap_or_default();
     for n in &notes {
         progress.report(None, n);
@@ -228,8 +297,20 @@ pub fn start_via(dirs: Option<&crate::paths::DataDirs>, instance: &ServerInstanc
     if let Some(h) = prepared.as_mut() {
         h.release();
     }
-    let since = SystemTime::now() - Duration::from_secs(1);
-    spawn(instance, since, &notes, progress)
+    let logs = StartLogs {
+        game: LogWatch::new(log_path(instance)?),
+        kiln: LogWatch::new(dir.join(KILN_LOG)),
+    };
+    // the runner and its prefix: only where a Wine runs the server (not a Windows server, nor a Steam install on Windows)
+    if uses_wine(instance.runner) {
+        progress.stage("wine");
+    }
+    spawn(instance, logs, &notes, progress)
+}
+
+/// A local start of this runner goes through Wine (the "wine" stage).
+pub fn uses_wine(runner: ServerRunner) -> bool {
+    matches!(runner, ServerRunner::Kilnctl) || (matches!(runner, ServerRunner::Steam) && cfg!(unix))
 }
 
 /// Before a local start of the server folder `dir`: None when its kiln.json asks for no Kiln interpreter
@@ -254,7 +335,7 @@ pub fn prepare_local(dirs: Option<&crate::paths::DataDirs>, dir: &Path) -> Resul
 
 #[cfg(all(unix, feature = "server"))]
 // the notes of the start's preparation
-fn start_kilnctl(instance: &ServerInstance, since: SystemTime, pre: &[String], progress: &mut dyn Progress) -> Result<ServerStatus> {
+fn start_kilnctl(instance: &ServerInstance, logs: StartLogs, pre: &[String], progress: &mut dyn Progress) -> Result<ServerStatus> {
     let inst = instance.kilnctl_instance()?;
     let runner = crate::wine::resolve(&inst.wine, &crate::util::home())?;
     if !inst.prefix.join("system.reg").exists() {
@@ -269,13 +350,13 @@ fn start_kilnctl(instance: &ServerInstance, since: SystemTime, pre: &[String], p
     headless(&mut cmd);
     cmd.arg(format!("./{}", super::game::EXE)).current_dir(&inst.dir);
     let mut child = spawn_detached(&mut cmd, log).map_err(|e| Error::new(ErrorCode::Io, format!("starting {}: {e}", runner.wine.display())))?;
-    progress.report(Some(0.02), &format!("started {} ./{} (wine pid {}), output in {}", runner.label, super::game::EXE, child.id(), run_log.display()));
-    let t0 = Instant::now();
+    let spawned = Instant::now();
+    let message = format!("started {} ./{} (wine pid {}), output in {}", runner.label, super::game::EXE, child.id(), run_log.display());
     let prefix = inst.prefix.clone();
-    let r = wait_ready(instance, since, progress, &mut || {
+    let r = await_start(instance, logs, &run_log, spawned, &message, progress, &mut || {
         // wine's launcher exits once the server runs on its own; only "no server process at all" is a failure
         if let Ok(Some(st)) = child.try_wait() {
-            if t0.elapsed() > Duration::from_secs(20) && super::procs::find_server(&prefix).is_none() {
+            if spawned.elapsed() > Duration::from_secs(20) && super::procs::find_server(&prefix).is_none() {
                 return Some(format!("wine exited ({st}), no server process; see the Console (or {})", run_log.display()));
             }
         }
@@ -288,7 +369,7 @@ fn start_kilnctl(instance: &ServerInstance, since: SystemTime, pre: &[String], p
 }
 
 #[cfg(not(all(unix, feature = "server")))]
-fn start_kilnctl(_instance: &ServerInstance, _since: SystemTime, _pre: &[String], _progress: &mut dyn Progress) -> Result<ServerStatus> {
+fn start_kilnctl(_instance: &ServerInstance, _logs: StartLogs, _pre: &[String], _progress: &mut dyn Progress) -> Result<ServerStatus> {
     Err(Error::new(ErrorCode::Unsupported, "kilnctl instances run on Linux"))
 }
 
@@ -326,7 +407,7 @@ const STEAM_SCRUB: &[&str] = &[
 
 /// A Steam install started without Steam (proton.rs): the build's wine, Steam's prefix, the launch options.
 #[cfg(unix)]
-fn start_steam(instance: &ServerInstance, since: SystemTime, pre: &[String], progress: &mut dyn Progress) -> Result<ServerStatus> {
+fn start_steam(instance: &ServerInstance, logs: StartLogs, pre: &[String], progress: &mut dyn Progress) -> Result<ServerStatus> {
     let dir = instance.local_dir()?.to_path_buf();
     let plan = super::proton::plan(instance)?;
     let mut notes = vec![format!(
@@ -350,12 +431,12 @@ fn start_steam(instance: &ServerInstance, since: SystemTime, pre: &[String], pro
     headless(&mut cmd);
     cmd.arg(format!("./{}", super::game::EXE)).args(&plan.args).current_dir(&dir);
     let mut child = spawn_detached(&mut cmd, out).map_err(|e| Error::new(ErrorCode::Io, format!("starting {}: {e}", plan.wine.display())))?;
-    progress.report(Some(0.02), &format!("started {} ./{} with {} (wine pid {}), output in {}", plan.wine.display(), super::game::EXE, plan.tool, child.id(), cap.display()));
-    let t0 = Instant::now();
+    let spawned = Instant::now();
+    let message = format!("started {} ./{} with {} (wine pid {}), output in {}", plan.wine.display(), super::game::EXE, plan.tool, child.id(), cap.display());
     let prefix = plan.prefix.clone();
-    let r = wait_ready(instance, since, progress, &mut || {
+    let r = await_start(instance, logs, &cap, spawned, &message, progress, &mut || {
         if let Ok(Some(st)) = child.try_wait() {
-            if t0.elapsed() > Duration::from_secs(20) && super::procs::find_server(&prefix).is_none() && super::procs::servers_in_dir(&dir).is_empty() {
+            if spawned.elapsed() > Duration::from_secs(20) && super::procs::find_server(&prefix).is_none() && super::procs::servers_in_dir(&dir).is_empty() {
                 return Some(format!("wine exited ({st}), no server process; see the Console (or {})", cap.display()));
             }
         }
@@ -368,7 +449,7 @@ fn start_steam(instance: &ServerInstance, since: SystemTime, pre: &[String], pro
 }
 
 #[cfg(not(unix))]
-fn start_steam(_instance: &ServerInstance, _since: SystemTime, _pre: &[String], _progress: &mut dyn Progress) -> Result<ServerStatus> {
+fn start_steam(_instance: &ServerInstance, _logs: StartLogs, _pre: &[String], _progress: &mut dyn Progress) -> Result<ServerStatus> {
     Err(Error::new(ErrorCode::Unsupported, "a Steam install starts like a Windows server here"))
 }
 
@@ -396,18 +477,21 @@ pub fn spawn_windowless(exe: &Path, dir: &Path, args: &[String], output: std::fs
 }
 
 #[cfg(windows)]
-fn start_windows(instance: &ServerInstance, since: SystemTime, pre: &[String], progress: &mut dyn Progress) -> Result<ServerStatus> {
+fn start_windows(instance: &ServerInstance, logs: StartLogs, pre: &[String], progress: &mut dyn Progress) -> Result<ServerStatus> {
     let dir = instance.local_dir()?;
     let exe = dir.join(super::game::EXE);
     let notes: Vec<String> = std::iter::once(format!("{} in {} (no window)", exe.display(), dir.display())).chain(pre.iter().cloned()).collect();
     let (cap, out) = super::console::open_capture(instance, &notes)?;
     let mut child = spawn_windowless(&exe, dir, &[], out).map_err(|e| Error::new(ErrorCode::Io, format!("starting {}: {e}", super::game::EXE)))?;
-    progress.report(Some(0.02), &format!("started {} (pid {}), output in {}", super::game::EXE, child.id(), cap.display()));
-    wait_ready(instance, since, progress, &mut || child.try_wait().ok().flatten().map(|st| format!("exited ({st}); see the Console")))
+    let spawned = Instant::now();
+    let message = format!("started {} (pid {}), output in {}", super::game::EXE, child.id(), cap.display());
+    await_start(instance, logs, &cap, spawned, &message, progress, &mut || {
+        child.try_wait().ok().flatten().map(|st| format!("exited ({st}); see the Console"))
+    })
 }
 
 #[cfg(not(windows))]
-fn start_windows(_instance: &ServerInstance, _since: SystemTime, _pre: &[String], _progress: &mut dyn Progress) -> Result<ServerStatus> {
+fn start_windows(_instance: &ServerInstance, _logs: StartLogs, _pre: &[String], _progress: &mut dyn Progress) -> Result<ServerStatus> {
     Err(Error::new(ErrorCode::Unsupported, "a Windows server runs on Windows"))
 }
 
@@ -747,6 +831,7 @@ pub fn ctrl_c(pid: u32) -> Result<()> {
 }
 
 pub fn restart(instance: &ServerInstance, progress: &mut dyn Progress) -> Result<ServerStatus> {
+    progress.stage("stopping");
     stop(instance, &mut super::instance::Scaled { inner: progress, from: 0.0, to: 0.4 })?;
     start(instance, &mut super::instance::Scaled { inner: progress, from: 0.4, to: 1.0 })
 }

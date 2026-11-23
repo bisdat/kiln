@@ -115,8 +115,15 @@ fn route_of_reads_the_selection_as_the_core_reads_it() {
             "kiln, ShroudForge's own loader",
             Some(KILN.into()),
             true,
-            vec![("dbghelp.dll", sf_dll.clone())],
+            vec![("dbghelp.dll", sf_dll.clone()), ("mods/eml-r.json", b"{}".to_vec())],
             Route::Legacy(Legacy::OwnLoader("dbghelp.dll".into())),
+        ),
+        (
+            "kiln, EML-R's own loader",
+            Some(KILN.into()),
+            true,
+            vec![("DbgHelp.dll", kiln_manage::pe::build_test_dll(&[], b"shroudforge eml_r.dll"))],
+            Route::Legacy(Legacy::EmlR("DbgHelp.dll".into())),
         ),
         (
             "kiln, ShroudForge's bootstrap under another case",

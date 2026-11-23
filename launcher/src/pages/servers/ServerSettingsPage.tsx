@@ -9,6 +9,7 @@ import * as api from "../../api/commands";
 import { Banner, Button, Card, Field, IconButton, NumberInput, Page, Select, Skeleton, Slider, TextArea, TextInput, Toggle, errorText, toast } from "../../ui";
 import { sk, type GameSettingSpec, type ServerSettingsX } from "./serverApi";
 import { useT } from "../../i18n";
+import { useMarkUnsaved } from "../../shell/unsaved";
 
 type Json = Record<string, unknown>;
 interface Group { name: string; originalName?: string; password: string; reservedSlots: number; [perm: string]: unknown }
@@ -55,6 +56,7 @@ export default function ServerSettingsPage() {
   const schema = q.data?.schema;
   const groups = (cur.userGroups as Group[] | undefined) ?? [];
   const dirty = Object.keys(edit).length > 0;
+  useMarkUnsaved("editor", dirty);
   const set = (k: string, v: unknown) => setEdit((e) => ({ ...e, [k]: v }));
   const setGame = (k: string, v: unknown) => setEdit((e) => ({ ...e, gameSettings: { ...((e.gameSettings as Json) ?? {}), [k]: v }, gameSettingsPreset: "Custom" }));
   const setGroups = (g: Group[]) => set("userGroups", g.map((x) => ({ ...x, originalName: x.originalName ?? x.name })));

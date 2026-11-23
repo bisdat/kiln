@@ -338,10 +338,13 @@ impl Assets {
             s if s == KILN_ECS_OK as u32 && result == KILN_OK => Ok(()),
             s if s == KILN_ECS_CONFLICT as u32 => Err(text::WRITE_CONFLICT.into()),
             // kiln.assets' writes were latched by an earlier uncertain write: nothing was attempted now, so this write
-            // fails as ShroudForge's latched provider answers (its status 0) and latches nothing new
+            // fails as the latched provider answers (its status 0) without a new session fault.
             s if s == KILN_ECS_UNCERTAIN as u32
                 && reply.why_code == KILN_ECS_WRITE_WHY_TARGET_LATCHED as u32 =>
             {
+                if let Some(facts) = &self.facts {
+                    facts.write_faults().record_resource_latch();
+                }
                 Err(text::WRITE_FAILED.into())
             }
             s if s == KILN_ECS_UNCERTAIN as u32 => Err(self.report_uncertain(session)),

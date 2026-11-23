@@ -7,6 +7,14 @@
   "x-kiln-docs": "docs/kiln/modding/blocks.md",
   "required": ["format"],
   "properties": {
+    "statImports": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[^:]+:[^:]+$"
+      },
+      "description": "Other mods' stats this mod's UI blocks show as stats.<mod>/<id> (since 0.2.0-dev.31): a declared type, not a permission."
+    },
     "$schema": { "type": "string" },
     "format": { "const": 1 },
     "comment": {},
@@ -31,6 +39,9 @@
       "propertyNames": { "$ref": "#/$defs/name" },
       "additionalProperties": { "$ref": "#/$defs/materialTweak" }
     },
+    "buildingTools": {"type": "object", "propertyNames": {"$ref": "#/$defs/name"}, "additionalProperties": {"$ref": "#/$defs/buildingTool"}},
+    "terrainBrushes": {"type": "object", "propertyNames": {"$ref": "#/$defs/name"}, "additionalProperties": {"$ref": "#/$defs/terrainBrush"}},
+    "toolMaterialPools": {"type": "object", "propertyNames": {"$ref": "#/$defs/name"}, "additionalProperties": {"$ref": "#/$defs/toolMaterialPool"}},
     "buildingMaterialPools": { "type": "object", "propertyNames": { "$ref": "#/$defs/name" }, "additionalProperties": { "$ref": "#/$defs/buildingMaterialPool" } },
     "buildingMaterials": {
       "type": "object",
@@ -175,6 +186,7 @@
         "$ref": "#/$defs/quest"
       }
     },
+    "knowledge": {"type": "object", "description": "The game's tracking of the mod's items (found) and recipes (crafted once), as it tracks its own: built into the game's knowledge table at start, from the next start or the first when Kiln.Sdk baked it. Needs \"clients\": \"mod\" (since 0.2.0-dev.30.5).", "propertyNames": {"$ref": "#/$defs/name"}, "additionalProperties": {"$ref": "#/$defs/knowledge"}},
     "dialogues": {
       "type": "object",
       "description": "Conversations in the game's own NPC menu, for an NPC block's talk or a quest NPC's dialogue. Needs \"clients\": \"mod\".",
@@ -247,6 +259,10 @@
   },
   "additionalProperties": false,
   "$defs": {
+    "terrainBrush": {"type": "object", "required": ["name", "radius"], "additionalProperties": false, "properties": {"name": {"type": "string", "minLength": 1, "maxLength": 1024}, "description": {"type": "string", "maxLength": 16384}, "identity": {"$ref": "#/$defs/identity"}, "was": {"$ref": "#/$defs/name"}, "shape": {"const": "sphere"}, "radius": {"type": "number", "minimum": 0.25, "maximum": 8}}},
+    "toolMaterialPool": {"type": "object", "required": ["name", "entries"], "additionalProperties": false, "properties": {"name": {"type": "string", "minLength": 1, "maxLength": 1024}, "was": {"$ref": "#/$defs/name"}, "entries": {"type": "array", "minItems": 1, "maxItems": 64, "items": {"type": "object", "required": ["item", "terrainMaterial", "voxelsPerItem"], "additionalProperties": false, "properties": {"item": {"$ref": "#/$defs/ref"}, "terrainMaterial": {"type": "integer", "minimum": 1, "maximum": 127}, "voxelsPerItem": {"type": "integer", "minimum": 1, "maximum": 1000000}}}}}},
+    "terrainToolAction": {"type": "object", "required": ["mode"], "additionalProperties": false, "properties": {"mode": {"enum": ["remove", "add"]}, "removeMaterials": {"type": "array", "uniqueItems": true, "items": {"type": "integer", "minimum": 1, "maximum": 127}}, "terrainOnly": {"const": true}}},
+    "buildingTool": {"type": "object", "required": ["name", "brushes", "primary", "secondary"], "additionalProperties": false, "properties": {"name": {"type": "string", "minLength": 1, "maxLength": 1024}, "description": {"type": "string", "maxLength": 16384}, "identity": {"$ref": "#/$defs/identity"}, "was": {"$ref": "#/$defs/name"}, "materialPool": {"$ref": "#/$defs/ref"}, "brushes": {"type": "array", "minItems": 1, "maxItems": 64, "uniqueItems": true, "items": {"$ref": "#/$defs/ref"}}, "primary": {"$ref": "#/$defs/terrainToolAction"}, "secondary": {"$ref": "#/$defs/terrainToolAction"}, "icon": {"type": "string", "minLength": 1}}},
     "buildingMaterialPool": {"type": "object", "required": ["name", "materials"], "additionalProperties": false, "properties": {"name": {"type": "string", "minLength": 1}, "roof": {"type": "boolean"}, "was": {"type": "string", "minLength": 1}, "materials": {"type": "array", "minItems": 1, "maxItems": 64, "items": {"oneOf": [{"type": "object", "required": ["material"], "additionalProperties": false, "properties": {"material": {"type": "string", "minLength": 1}}}, {"type": "object", "required": ["gameMaterial"], "additionalProperties": false, "properties": {"gameMaterial": {"type": "string", "minLength": 1}}}]}}}},
 
     "baseRule": {
@@ -849,7 +865,33 @@
         "sheltered": { "type": "boolean", "description": "A player crafts it only under a roof. A station that works on its own never checks a roof, so its recipes refuse it." },
         "comfort": { "type": "integer", "minimum": 0, "description": "The comfort level it asks of whoever makes it." },
         "menuKey": { "$ref": "#/$defs/menuKey", "description": "Its name in the menu of a station with tabs of its own (menu.tabs): one recipe of the mod per key at a station. Only for a recipe at a station with a workshop of its own; it changes nothing of the recipe itself." },
-        "needsProps": { "type": "array", "maxItems": 8, "items": { "type": "string", "minLength": 1 }, "description": "Props that have to stand near a manual station: blocks with provides, by name (\"other-mod:name\" for another mod's). The game's automated factory path has no nearby-prop context, so factory block recipes refuse this field." }
+        "needsProps": { "type": "array", "maxItems": 8, "items": { "type": "string", "minLength": 1 }, "description": "Props that have to stand near a manual station: blocks with provides, by name (\"other-mod:name\" for another mod's). The game's automated factory path has no nearby-prop context, so factory block recipes refuse this field." },
+        "identity": { "$ref": "#/$defs/identity" },
+        "menuGroup": { "type": "string", "pattern": "^0[xX][0-9a-fA-F]{1,8}/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})?$", "description": "The tab of the game's crafting menu that lists it, one the game has (CraftingGroups in C#): \"0x<workshop>/<tab GUID>\", or with \"/<subcategory GUID>\". Its workshop is the station's (\"hand\": 0x00000000). Default: Kiln picks the place (since 0.2.0-dev.30.5)." },
+        "trackCrafted": { "type": "boolean", "description": "Keeps the game's \"crafted once\" mark of the recipe; a knowledge block with trigger craft puts it in the game's knowledge table (since 0.2.0-dev.30.5)." }
+      },
+      "additionalProperties": false
+    },
+    "identity": {
+      "type": "object",
+      "description": "A fixed GUID (and so game id) in place of the one Kiln derives, for an item or recipe another loader made: one of legacy and legacyId (since 0.2.0-dev.30.5).",
+      "properties": {
+        "legacy": { "type": "string", "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", "description": "The GUID the other loader gave it; the game id is FNV-1a of it." },
+        "legacyId": { "anyOf": [{ "type": "integer", "minimum": 1, "maximum": 4294967295 }, { "type": "string", "pattern": "^0[xX][0-9a-fA-F]{1,8}$" }], "description": "Only the game id, when the GUID is not known." }
+      },
+      "minProperties": 1,
+      "maxProperties": 1,
+      "additionalProperties": false
+    },
+    "knowledge": {
+      "type": "object",
+      "required": ["trigger"],
+      "description": "The game's tracking of one of the mod's items or recipes. One of of and identity.",
+      "properties": {
+        "trigger": { "enum": ["pickup", "craft"], "description": "pickup: an item found (the world's and each player's knowledge); craft: a recipe crafted once (each player's)." },
+        "of": { "type": "string", "minLength": 1, "description": "An item block of this mod (pickup: the item; craft: its own recipe), or a recipe block (craft). The recipe says trackCrafted." },
+        "identity": { "$ref": "#/$defs/identity", "description": "The tracked item's or recipe's identity, in place of of." },
+        "scope": { "enum": ["player", "world", "both"], "description": "Whose knowledge. Default: both for an item, player for a recipe (always player)." }
       },
       "additionalProperties": false
     },
@@ -1271,7 +1313,8 @@
         "flow": { "type": "number", "minimum": 0.25, "maximum": 8, "description": "How fast a water container fills and pours (at a lake, a well or a barrel, onto crops and soil), as a multiple of the game's own: what one step moves, 32 for the can, 16 for the pouch, about 20 steps a second. The game has no rate for filling alone. Default: 1." },
         "recipe": { "$ref": "#/$defs/recipe" },
         "loot": { "$ref": "#/$defs/loot" },
-        "was": { "$ref": "#/$defs/name" }
+        "was": { "$ref": "#/$defs/name" },
+        "identity": { "$ref": "#/$defs/identity" }
       },
       "additionalProperties": false
     },
@@ -3836,8 +3879,8 @@
     },
     "uiBind": {
       "type": "string",
-      "pattern": "^(game|config)\\.[A-Za-z0-9_.\\-/]+$",
-      "description": "A value: game.<name> (fps, frameMs, state, inGame, screen, language, clock) or config.<path> of this mod's config (config.<config id>/<path> when two configs have the path)."
+      "pattern": "^(game|config|state|mod|world|stats|row|node)\\.[A-Za-z0-9_.\\-/:]+$",
+      "description": "A value: state.<key> (the window's state), mod.<id> (the mod's own data), world.local.<name> / world.server.<name> (live game values), stats.<mod>/<id>, or game.<name> (fps, frameMs, state, inGame, screen, language, clock) or config.<path> of this mod's config (config.<config id>/<path> when two configs have the path)."
     },
     "uiSet": {
       "type": "object",
@@ -3862,15 +3905,22 @@
     },
     "uiAction": {
       "type": "object",
-      "description": "What a button or a key does: exactly one of command, toggle, set, castAbility, applyEffect, openWindow, closeWindow, toast. Runs on the player's game, never on a dedicated server.",
+      "description": "What a button or a key does: exactly one of command, toggle, set, castAbility, applyEffect, openWindow, closeWindow, toggleWindow, toast (a command may add commandTarget). Runs on the player's game, never on a dedicated server.",
       "minProperties": 1,
-      "maxProperties": 1,
+      "dependentRequired": { "commandTarget": ["command"] },
+      "if": { "required": ["commandTarget"] },
+      "then": { "maxProperties": 2 },
+      "else": { "maxProperties": 1 },
       "properties": {
         "command": {
           "type": "string",
           "minLength": 1,
           "maxLength": 256,
-          "description": "A command line of this game's command registry, as the console runs it: as the host's own character when this game hosts the world, else as the console. It does not reach a server this game joined."
+          "description": "A command line of this game's command registry, as the console runs it: as the host's own character when this game hosts the world, else as the console. It does not reach a server this game joined, unless commandTarget is server."
+        },
+        "commandTarget": {
+          "enum": ["local", "server"],
+          "description": "Where the command runs: local (the default) as above, or server: on the server this game joined (or hosts), as this game's player there, with that player's rights. Only with command. A server without Kiln's kiln:ui-command runs nothing (a toast says so)."
         },
         "toggle": {
           "$ref": "#/$defs/uiBind",
@@ -3895,6 +3945,10 @@
           "$ref": "#/$defs/ref",
           "description": "Closes a window block."
         },
+        "toggleWindow": {
+          "$ref": "#/$defs/ref",
+          "description": "Opens a window block when it is closed, closes it when it is open (since 0.2.0-dev.31). A key fires while a mod's window has the input (not while its text field has the keyboard), so it also closes the window; whileCapturing only adds firing over the Kiln menu."
+        },
         "toast": {
           "$ref": "#/$defs/uiText",
           "description": "A short message in the corner of the screen."
@@ -3903,7 +3957,7 @@
       "additionalProperties": false
     },
     "uiRow": {
-      "description": "One line of a window. \"type\" says which: text, value, toggle, slider, choice, separator, button.",
+      "description": "One line of a window. \"type\" says which: text, value, toggle, slider, choice, separator, button, and (since 0.2.0-dev.31) input, table, tabs, tree, image.",
       "oneOf": [
         {
           "$ref": "#/$defs/uiRowText"
@@ -3925,6 +3979,21 @@
         },
         {
           "$ref": "#/$defs/uiRowButton"
+        },
+        {
+          "$ref": "#/$defs/uiRowInput"
+        },
+        {
+          "$ref": "#/$defs/uiRowTable"
+        },
+        {
+          "$ref": "#/$defs/uiRowTabs"
+        },
+        {
+          "$ref": "#/$defs/uiRowTree"
+        },
+        {
+          "$ref": "#/$defs/uiRowImage"
         }
       ]
     },
@@ -4173,6 +4242,531 @@
       },
       "additionalProperties": false
     },
+    "uiRowInput": {
+      "type": "object",
+      "required": [
+        "type",
+        "id",
+        "label",
+        "bind"
+      ],
+      "description": "A text field (since 0.2.0-dev.31) on a text config entry or a string state entry: a draft until Enter (or, with commit blur, leaving the field) writes it; Escape puts the old text back. Only in an interactive window or a screen.",
+      "properties": {
+        "type": {
+          "const": "input"
+        },
+        "when": {
+          "$ref": "#/$defs/uiWhen"
+        },
+        "sameLine": {
+          "type": "boolean",
+          "description": "On the same line as the row before it."
+        },
+        "tooltip": {
+          "$ref": "#/$defs/uiText",
+          "description": "Shown while the pointer rests on the row's widget. May show values like a text row does."
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^(?!r[0-9]+$)[a-z][a-z0-9_-]{0,63}$",
+          "description": "The row's id, unique in the window (nested rows included); not r followed by digits (an older row's place)."
+        },
+        "label": {
+          "$ref": "#/$defs/uiText"
+        },
+        "bind": {
+          "$ref": "#/$defs/uiBind"
+        },
+        "maxBytes": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 4096,
+          "description": "At most this many UTF-8 bytes. Default 256."
+        },
+        "commit": {
+          "enum": [
+            "blur",
+            "enter"
+          ],
+          "description": "blur (default): Enter or leaving the field writes it. enter: only Enter."
+        },
+        "multiline": {
+          "type": "boolean",
+          "description": "Several lines; Enter is a new line (commit blur)."
+        }
+      },
+      "additionalProperties": false
+    },
+    "uiColumn": {
+      "type": "object",
+      "required": [
+        "id",
+        "label",
+        "cell"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+          "description": "The row's id, unique in the window (nested rows included)."
+        },
+        "label": {
+          "$ref": "#/$defs/uiText"
+        },
+        "cell": {
+          "$ref": "#/$defs/uiText",
+          "description": "A template over the row's fields: {row.<field>}."
+        }
+      },
+      "additionalProperties": false
+    },
+    "uiRowTable": {
+      "type": "object",
+      "required": [
+        "type",
+        "id",
+        "items",
+        "columns"
+      ],
+      "description": "A table (since 0.2.0-dev.31) of world.local.inventory or a mod's own rows source (mod.<id>), in the source's order, told apart by key.",
+      "properties": {
+        "type": {
+          "const": "table"
+        },
+        "when": {
+          "$ref": "#/$defs/uiWhen"
+        },
+        "sameLine": {
+          "type": "boolean",
+          "description": "On the same line as the row before it."
+        },
+        "tooltip": {
+          "$ref": "#/$defs/uiText",
+          "description": "Shown while the pointer rests on the row's widget. May show values like a text row does."
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^(?!r[0-9]+$)[a-z][a-z0-9_-]{0,63}$",
+          "description": "The row's id, unique in the window (nested rows included); not r followed by digits (an older row's place)."
+        },
+        "items": {
+          "type": "string",
+          "pattern": "^(world\\.local\\.inventory|mod\\.[a-z][a-z0-9_-]{0,63})$"
+        },
+        "columns": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/uiColumn"
+          }
+        },
+        "maxRows": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 512,
+          "description": "Default 128; a source with more shows a notice."
+        },
+        "selected": {
+          "type": "string",
+          "pattern": "^state\\.[a-z][a-z0-9_-]{0,63}$",
+          "description": "A string state entry that holds the selected row's key."
+        }
+      },
+      "additionalProperties": false
+    },
+    "uiTab": {
+      "type": "object",
+      "required": [
+        "id",
+        "label",
+        "rows"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+          "description": "The row's id, unique in the window (nested rows included)."
+        },
+        "label": {
+          "$ref": "#/$defs/uiText"
+        },
+        "rows": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/uiRow"
+          }
+        },
+        "when": {
+          "$ref": "#/$defs/uiWhen"
+        }
+      },
+      "additionalProperties": false
+    },
+    "uiRowTabs": {
+      "type": "object",
+      "required": [
+        "type",
+        "id",
+        "tabs"
+      ],
+      "description": "Tabs (since 0.2.0-dev.31), each with its own rows.",
+      "properties": {
+        "type": {
+          "const": "tabs"
+        },
+        "when": {
+          "$ref": "#/$defs/uiWhen"
+        },
+        "sameLine": {
+          "type": "boolean",
+          "description": "On the same line as the row before it."
+        },
+        "tooltip": {
+          "$ref": "#/$defs/uiText",
+          "description": "Shown while the pointer rests on the row's widget. May show values like a text row does."
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^(?!r[0-9]+$)[a-z][a-z0-9_-]{0,63}$",
+          "description": "The row's id, unique in the window (nested rows included); not r followed by digits (an older row's place)."
+        },
+        "tabs": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/uiTab"
+          }
+        },
+        "selected": {
+          "type": "string",
+          "pattern": "^state\\.[a-z][a-z0-9_-]{0,63}$",
+          "description": "A string state entry that holds the selected tab's id."
+        }
+      },
+      "additionalProperties": false
+    },
+    "uiField": {
+      "type": "object",
+      "required": [
+        "id",
+        "type"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+          "description": "The row's id, unique in the window (nested rows included)."
+        },
+        "type": {
+          "enum": [
+            "bool",
+            "int64",
+            "uInt64",
+            "decimal",
+            "float64",
+            "string"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "uiScalar": {
+      "oneOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "string"
+        }
+      ],
+      "description": "A field value: true/false, a number (whole numbers read exactly), or a string (also for an int64 or decimal field, written exactly)."
+    },
+    "uiTreeNode": {
+      "type": "object",
+      "required": [
+        "key",
+        "label"
+      ],
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+        },
+        "label": {
+          "$ref": "#/$defs/uiText"
+        },
+        "children": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/uiTreeNode"
+          }
+        },
+        "values": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/uiScalar"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "uiRowTree": {
+      "type": "object",
+      "required": [
+        "type",
+        "id"
+      ],
+      "description": "A tree (since 0.2.0-dev.31): a mod's own tree source (nodes) or one written here (roots).",
+      "properties": {
+        "type": {
+          "const": "tree"
+        },
+        "when": {
+          "$ref": "#/$defs/uiWhen"
+        },
+        "sameLine": {
+          "type": "boolean",
+          "description": "On the same line as the row before it."
+        },
+        "tooltip": {
+          "$ref": "#/$defs/uiText",
+          "description": "Shown while the pointer rests on the row's widget. May show values like a text row does."
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^(?!r[0-9]+$)[a-z][a-z0-9_-]{0,63}$",
+          "description": "The row's id, unique in the window (nested rows included); not r followed by digits (an older row's place)."
+        },
+        "nodes": {
+          "type": "string",
+          "pattern": "^mod\\.[a-z][a-z0-9_-]{0,63}$"
+        },
+        "roots": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/uiTreeNode"
+          }
+        },
+        "fields": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/uiField"
+          }
+        },
+        "nodeRows": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/uiRowText"
+              },
+              {
+                "$ref": "#/$defs/uiRowValue"
+              }
+            ]
+          }
+        },
+        "selected": {
+          "type": "string",
+          "pattern": "^state\\.[a-z][a-z0-9_-]{0,63}$",
+          "description": "A string state entry that holds the selected node's key."
+        },
+        "expanded": {
+          "type": "string",
+          "pattern": "^state\\.[a-z][a-z0-9_-]{0,63}$",
+          "description": "A stringSet state entry that holds the open branches."
+        }
+      },
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "required": [
+            "nodes"
+          ]
+        },
+        {
+          "required": [
+            "roots"
+          ]
+        }
+      ]
+    },
+    "uiRowImage": {
+      "type": "object",
+      "required": [
+        "type",
+        "id",
+        "asset"
+      ],
+      "description": "A PNG of the mod's folder (since 0.2.0-dev.31): at most 8 MiB and 2048 x 2048; 8 pictures and 32 MiB of pixels per mod.",
+      "properties": {
+        "type": {
+          "const": "image"
+        },
+        "when": {
+          "$ref": "#/$defs/uiWhen"
+        },
+        "sameLine": {
+          "type": "boolean",
+          "description": "On the same line as the row before it."
+        },
+        "tooltip": {
+          "$ref": "#/$defs/uiText",
+          "description": "Shown while the pointer rests on the row's widget. May show values like a text row does."
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^(?!r[0-9]+$)[a-z][a-z0-9_-]{0,63}$",
+          "description": "The row's id, unique in the window (nested rows included); not r followed by digits (an older row's place)."
+        },
+        "asset": {
+          "type": "string",
+          "pattern": "^(?![A-Za-z][A-Za-z0-9+.-]*:)(?![\\\\/])(?![\\s\\S]*(^|[\\\\/])\\.\\.([\\\\/]|$))[^:]*\\.[Pp][Nn][Gg]$",
+          "x-kiln-file": "mod",
+          "x-kiln-file-kind": "png",
+          "x-kiln-message": "a PNG in the mod's folder by a path relative to it (no full path, no '..', no URL)",
+          "description": "A relative path in the mod's folder, no \"..\"."
+        },
+        "width": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 4096
+        },
+        "height": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 4096
+        },
+        "does": {
+          "$ref": "#/$defs/uiAction"
+        }
+      },
+      "additionalProperties": false
+    },
+    "uiStateDefinition": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "description": "A window's state entry (since 0.2.0-dev.31). int64 and decimal numbers are strings (\"12\", \"1.5\").",
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "const": "bool"
+            },
+            "initial": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": [
+            "initial"
+          ],
+          "properties": {
+            "type": {
+              "const": "int64"
+            },
+            "initial": {
+              "type": "string",
+              "pattern": "^-?(0|[1-9][0-9]*)$"
+            },
+            "min": {
+              "type": "string",
+              "pattern": "^-?(0|[1-9][0-9]*)$"
+            },
+            "max": {
+              "type": "string",
+              "pattern": "^-?(0|[1-9][0-9]*)$"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": [
+            "initial"
+          ],
+          "properties": {
+            "type": {
+              "const": "decimal"
+            },
+            "initial": {
+              "type": "string",
+              "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+            },
+            "min": {
+              "type": "string",
+              "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+            },
+            "max": {
+              "type": "string",
+              "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+            },
+            "scale": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 6
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "string"
+            },
+            "initial": {
+              "type": "string"
+            },
+            "maxBytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4096
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "required": [
+            "initial"
+          ],
+          "properties": {
+            "type": {
+              "const": "stringSet"
+            },
+            "initial": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string"
+              }
+            },
+            "maxItems": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 512
+            },
+            "maxItemBytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 128
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
     "uiColor": {
       "type": "string",
       "pattern": "^(#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?|white|black|gray|grey|red|green|yellow|orange|cyan)$",
@@ -4278,6 +4872,17 @@
         },
         "menu": {
           "$ref": "#/$defs/uiMenu"
+        },
+        "state": {
+          "type": "object",
+          "maxProperties": 64,
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/uiStateDefinition"
+          },
+          "description": "The window's own typed state (since 0.2.0-dev.31), bound as state.<key>: kept while the player stays in one world, never saved."
         },
         "rows": {
           "type": "array",

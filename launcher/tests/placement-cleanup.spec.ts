@@ -3,7 +3,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 /** Settings, Profiles: Load on a profile's row ("No profile" too). */
 async function loadInSettings(page: Page, name: string) {
-  await page.evaluate(() => { location.hash = "#/settings"; });
+  await page.evaluate(() => { location.hash = "#/settings/mods"; });
   await page.getByRole("region", { name: "Profiles" }).getByRole("listitem").filter({ hasText: name }).getByRole("button", { name: "Load" }).click();
 }
 
@@ -105,7 +105,7 @@ test("Settings, Profiles' Load shows what the activation kept in the game folder
 
 test("a profile saved in Settings and loaded from its toast shows what the activation kept in the game folder", async ({ page }) => {
   await page.clock.install();
-  await page.goto("/#/settings");
+  await page.goto("/#/settings/mods");
   await page.locator(".k-splash").waitFor({ state: "detached" });
   await page.getByRole("region", { name: "Profiles" }).getByRole("button", { name: "Save current as…" }).click();
   const dialog = page.getByRole("dialog", { name: "Save current as" });

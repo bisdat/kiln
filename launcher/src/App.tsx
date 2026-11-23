@@ -29,6 +29,7 @@ import { CommunityRoute } from "./community/CommunityPage";
 // Server and admin pages load lazily: a page that is mid-edit (or broken) fails alone, inside the shell's error
 // boundary, instead of blanking the launcher.
 const ServerOverviewPage = lazy(() => import("./pages/servers/ServerOverviewPage"));
+const ServerConsolePage = lazy(() => import("./pages/servers/ServerConsolePage"));
 const ServerSettingsPage = lazy(() => import("./pages/servers/ServerSettingsPage"));
 const ServerModsPage = lazy(() => import("./pages/servers/ServerModsPage"));
 const ServerConfigsPage = lazy(() => import("./pages/servers/ServerConfigsPage"));
@@ -87,7 +88,8 @@ export default function App() {
         <Route path="studio" element={<StudioPage />} />
         <Route path="studio/:packId" element={<StudioPage />} />
         <Route path="studio/:packId/:tab" element={<StudioPage />} />
-        <Route path="settings" element={<SettingsPage />} />
+        {/* /settings/<section>: one section of Settings (pages/settings/model.ts); /settings#<group> opens a group's section */}
+        <Route path="settings/:section?" element={<SettingsPage />} />
         <Route path="about" element={<AboutPage />} />
         <Route path="community" element={<CommunityRoute />} />
         <Route path="servers" element={<ServersPage />} />
@@ -96,6 +98,7 @@ export default function App() {
         <Route path="servers/:id" element={<ServerLayout />}>
           <Route index element={<Navigate to="overview" replace />} />
           <Route path="overview" element={<ServerOverviewPage />} />
+          <Route path="console" element={<ServerConsolePage />} />
           <Route path="settings" element={<ServerSettingsPage />} />
           <Route path="mods" element={<ServerModsPage />} />
           <Route path="configs" element={<ServerConfigsPage />} />

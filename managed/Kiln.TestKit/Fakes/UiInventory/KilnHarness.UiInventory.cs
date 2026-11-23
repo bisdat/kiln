@@ -11,9 +11,18 @@ public sealed partial class KilnHarness
 }
 
 /// <summary>A slot as the game would draw it: the item, the stack, the item's entity (the server's id of it: what
-/// <c>SlotClick.ItemEntity</c> carries), the inventory that holds it, its page and index.</summary>
+/// <c>SlotClick.ItemEntity</c> carries), the inventory that holds it, its page and index; since 0.2.0-dev.30.5 the item's
+/// <see cref="Rarity"/> and <see cref="Level"/> as the game draws them (VisibleSlot.Rarity / Level). A slot with a Holder
+/// and an ItemEntity also carries it as VisibleSlot.ServerEntity (the fake takes every holder for the player or the open
+/// container, the two Kiln proves in a game).</summary>
 public readonly record struct FakeInventorySlot(uint Item, uint Count = 1, uint ItemEntity = 0, uint Holder = 0, uint InventoryPage = 0,
-    byte SlotIndex = 0);
+    byte SlotIndex = 0)
+{
+    /// <summary>The item's rarity as drawn (null: none). Since 0.2.0-dev.30.5.</summary>
+    public ItemRarity? Rarity { get; init; }
+    /// <summary>The item's level as drawn. Since 0.2.0-dev.30.5.</summary>
+    public int Level { get; init; }
+}
 
 /// <summary>What a <see cref="HarnessUiInventory.Click"/> did: how many handlers got it, and whether the game would not
 /// have seen the press (a handler asked to take it).</summary>
@@ -59,7 +68,10 @@ public sealed class HarnessUiInventory
         {
             lock (State.Lock)
                 return State.Slots is { } s
-                    ? s.Select(v => new FakeInventorySlot(v.Item, v.Count, v.ClientEntity, v.Holder, v.InventoryPage, (byte)v.SlotIndex)).ToArray()
+                    ? s.Select(v => new FakeInventorySlot(v.Item, v.Count, v.ClientEntity, v.Holder, v.InventoryPage, (byte)v.SlotIndex)
+                    {
+                        Rarity = VisibleSlot.RarityOf(v.Available, v.Rarity), Level = VisibleSlot.LevelOf(v.Available, v.Level),
+                    }).ToArray()
                     : [];
         }
     }
@@ -74,13 +86,22 @@ public sealed class HarnessUiInventory
         for (var i = 0; i < slots.Length; i++)
         {
             var s = slots[i];
+            var proven = s.Holder != 0 && s.ItemEntity != 0;  // the player's or the open container's (see FakeInventorySlot)
             drawn[i] = new UiValuesNative.VisibleSlot
             {
                 Size = (uint)sizeof(UiValuesNative.VisibleSlot), Available = UiValuesNative.OuterRect, Occurrence = (uint)i,
                 InventoryPage = s.InventoryPage, SlotIndex = s.SlotIndex, Item = s.Item, Count = s.Count, ClientEntity = s.ItemEntity,
                 ViewFlags = (s.ItemEntity != 0 ? 1u : 0u) | 4u, Holder = s.Holder, HolderFlags = s.Holder != 0 ? 1u : 0u,
+                Level = (uint)Math.Max(0, s.Level), Rarity = s.Rarity is { } r ? (uint)r : 0xFFu,
                 OuterUi = new UiValuesNative.Rect { X = 10 + 90 * (i % 8), Y = 20 + 90 * (i / 8), Width = 80, Height = 80 },
             };
+            if (s.Item != 0) drawn[i].Available |= UiValuesNative.ItemValues;
+            if (proven)
+            {
+                drawn[i].ServerEntity = s.ItemEntity;
+                drawn[i].ViewFlags |= UiValuesNative.ViewServerEntity;
+                drawn[i].HolderFlags |= UiValuesNative.HolderServerProven;
+            }
         }
         UiValuesNative.SlotsFrame frame = default;
         frame.Size = (uint)sizeof(UiValuesNative.SlotsFrame);
@@ -99,10 +120,20 @@ public sealed class HarnessUiInventory
         if (FakeTables.Off(UiValuesAbi.SlotsRow) || UiValuesFake.State is not { } vs) return;
         UiValuesFakeState.Reg[] subs;
         lock (vs.Lock) subs = vs.Regs.Where(r => r.List == UiValuesAbi.Slots).ToArray();
+        var legacy = new byte[drawn.Length * 112];
+        fixed (byte* packed = legacy)
         fixed (UiValuesNative.VisibleSlot* p = drawn)
+        {
+            for (var i = 0; i < drawn.Length; i++)
+            {
+                Buffer.MemoryCopy(p + i, packed + i * 112, 112, 112);
+                ((uint*)(packed + i * 112))[0] = 112;
+                ((uint*)(packed + i * 112))[1] &= ~UiValuesNative.ItemValues;
+            }
             foreach (var r in subs)
                 ((delegate* unmanaged[Cdecl]<UiValuesNative.SlotsFrame*, UiValuesNative.VisibleSlot*, uint, void*, void>)r.Fn)(
-                    &frame, p, frame.Count, (void*)r.User);
+                    &frame, r.Item == 120 ? p : (UiValuesNative.VisibleSlot*)packed, frame.Count, (void*)r.User);
+        }
     }
 
     /// <summary>The player opens the backpack with these slots drawn (the backpack screen, HUD Backpack).</summary>
@@ -131,6 +162,28 @@ public sealed class HarnessUiInventory
     /// in the order they were added).</summary>
     public IReadOnlyList<string> PanelsShown => UiInventoryScreens.Showing();
 
+    /// <summary>The game's own selection (a controller's: what Ui.Inventory.Selected reads, since 0.2.0-dev.30.5) rests on
+    /// drawn slot <paramref name="index"/> (null: on none), as the game marks it in the slot draw's state byte 0. A
+    /// <see cref="Draw"/> starts with none.</summary>
+    public unsafe void Select(int? index)
+    {
+        var st = State;
+        lock (st.Lock)
+        {
+            var slots = st.Slots ?? [];
+            if (index is { } i)
+            {
+                ArgumentOutOfRangeException.ThrowIfNegative(i);
+                ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(i, slots.Length);
+            }
+            for (var k = 0; k < slots.Length; k++)
+            {
+                slots[k].Available |= UiValuesNative.NativeState;
+                slots[k].NativeState[0] = k == index ? (byte)1 : (byte)0;
+            }
+        }
+    }
+
     /// <summary>The cursor rests on drawn slot <paramref name="index"/> (null: on none): what Ui.Inventory.Hovered reads.</summary>
     public void Hover(int? index)
     {
@@ -154,6 +207,20 @@ public sealed class HarnessUiInventory
     public FakeSlotClickResult Click(int index, SlotButton button = SlotButton.Left, SlotModifiers modifiers = SlotModifiers.None)
     {
         var (n, taken) = UiInventoryFake.Press(State, index, (uint)button, (uint)modifiers);
+        return new FakeSlotClickResult(n, taken);
+    }
+
+    /// <summary>The player presses a controller chord (<c>"Pad:LS"</c>, <c>"Pad:LB+A"</c>) while the game's selection rests on a
+    /// drawn slot (<see cref="Select"/>): every <c>SlotClickOptions.Pad</c> handler of that chord gets it as a click on that
+    /// slot (<c>SlotButton.Pad</c>), in subscription order. This helper also delivers the next simulated UI frame on the harness thread. Nothing (Delivered 0, the game
+    /// gets the press) without a selected slot, on a screen without a pointer, or while a row is off. Since
+    /// 0.2.0-dev.30.5.</summary>
+    public FakeSlotClickResult PressPad(string chord)
+    {
+        var c = KeyChord.Parse(chord);
+        if (!c.IsPad) throw new ArgumentException($"{chord} is not a controller chord (Pad:LS, Pad:LB+A)", nameof(chord));
+        var taken = UiInventoryBridge.PadPress(c, out var n);
+        UiKeyDispatch.Drain(); // simulate the next game UI frame on the harness thread
         return new FakeSlotClickResult(n, taken);
     }
 

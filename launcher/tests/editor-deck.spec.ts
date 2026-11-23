@@ -228,9 +228,14 @@ test.describe("the save editor in Deck mode", () => {
     await pad(page, "down");
     await walk(page, "right", "value-Level", 3);
     await pad(page, "a");
+    // The vendored catalog has an older cap for this helmet; only the byte bound limits edits.
+    await expect(num).toContainText("255");
     await typeNumber(page, "35");
     await expect(page.locator('[data-deck-id="value-Level"]')).toHaveText("35");
     await expect(say(page)).toContainText("Not saved");
+    await pad(page, "x");
+    await expect(page.locator(".deck-toast")).toContainText("Saved");
+    await expect(page.locator('[data-deck-id="value-Level"]')).toHaveText("35");
   });
 
   test("the skill tree and knowledge with the pad", async ({ page }) => {
@@ -334,6 +339,8 @@ test.describe("the save editor in Deck mode", () => {
     const bk = page.locator('[data-deck-dialog="editor-backups"]');
     await expect(bk.locator(".deck-row")).toHaveCount(2);
     await expect(bk).toContainText("Game's copy");
+    // Rows arrive before the dialog's asynchronous first-focus pass; A without focus only selects the first row.
+    await expect.poll(() => focused(page)).toMatch(/^bk-/);
     await shot(page, "backups");
     await pad(page, "a");
     const confirm = page.locator('[data-deck-dialog="editor-restore"]');

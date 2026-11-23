@@ -159,7 +159,7 @@ test("Undo of All off says it cannot when another profile was loaded since, and 
   await expect.poll(async () => (await profileMods(page)).native.filter((m) => m.enabled).length).toBe(0);
   const ember = await api<{ generation: number; mods: Mods }>(page, "profileGet", "ember-run");
   const vanilla = await api<{ generation: number }>(page, "profileGet", "vanilla-plus");
-  await page.evaluate(() => { location.hash = "#/settings"; });
+  await page.evaluate(() => { location.hash = "#/settings/mods"; });
   const sec = page.getByRole("region", { name: "Profiles" });
   await sec.getByRole("listitem").filter({ hasText: "Vanilla plus" }).getByRole("button", { name: "Load" }).click();
   await expect(sec.getByRole("listitem").filter({ hasText: "Vanilla plus" })).toContainText("Loaded", { timeout: 10_000 });
@@ -258,7 +258,7 @@ test("removing a mod is one click with a plain confirmation", async ({ page }) =
 });
 
 test("Settings > Profiles saves the current set under a new name, loads another, and the main list follows", async ({ page }) => {
-  await desktop(page, "/settings");
+  await desktop(page, "/settings/mods");
   const sec = page.getByRole("region", { name: "Profiles" });
   await expect(sec.getByRole("listitem").filter({ hasText: "Ember run" })).toContainText("Loaded");
   await sec.getByRole("button", { name: "Save current as…" }).click();
@@ -392,7 +392,7 @@ test("a right click on a row opens its menu where the pointer is", async ({ page
   await expect(page.getByRole("menuitem", { name: "Load the game-folder EML mods" })).toBeVisible();
   await page.keyboard.press("Escape");
   // Settings, Profiles: a profile's row
-  await desktop(page, "/settings");
+  await desktop(page, "/settings/mods");
   await page.getByRole("region", { name: "Profiles" }).getByRole("listitem").filter({ hasText: "Vanilla plus" }).click({ button: "right" });
   await expect(page.getByRole("menuitem", { name: "Rename" })).toBeVisible();
   // a field keeps the webview's own menu (copy, paste): nothing of Kiln's opens
@@ -451,7 +451,7 @@ test("switching mods raises a folder note once, Notes reads it again, and the se
   await expect(dialog).toContainText(NEW);
   await dialog.getByRole("button", { name: "Done" }).click();
   // off in Settings: a new note is not raised, the first notice of a folder that may still run a mod that is off is
-  await page.evaluate(() => { location.hash = "#/settings"; });
+  await page.evaluate(() => { location.hash = "#/settings/mods"; });
   await page.getByText("Show notes about mod folders", { exact: true }).click();
   await expect(page.getByRole("switch", { name: /^Show notes about mod folders/ })).not.toBeChecked();
   await expect.poll(() => page.evaluate(async () => (await (await import("/src/api/commands.ts")).appSettingsGet()).modFolderNotes)).toBe(false);

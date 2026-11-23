@@ -490,6 +490,7 @@
   },
   "keys": {
     "help_mouse": "Haz clic en una tecla y pulsa la nueva: una tecla, el botón central o un botón lateral del ratón, o un giro de la rueda, con Ctrl, Shift o Alt si quieres (el clic izquierdo y el derecho no se pueden asignar). Vuelve a hacer clic para cancelar; Escape cancela y cierra el menú. Desasignar deja una acción sin tecla. Se guarda en kiln/config/keybinds.json.",
+    "help_pad": "También funciona un mando: haz clic en una asignación de tecla y pulsa un botón del mando, o mantén LB, RB, LT o RT y pulsa otro para una combinación (Pad:LB+A); pulsa y suelta LB, RB, LT o RT solo para asignar ese botón.",
     "help": "Haz clic en una tecla y pulsa la nueva. Vuelve a hacer clic para cancelar; Escape cancela y cierra el menú. Desasignar deja una acción sin tecla. Se guarda en kiln/config/keybinds.json.",
     "col_action": "Acción",
     "col_key": "Tecla",
@@ -499,7 +500,8 @@
     "reset": "Restablecer",
     "unbind": "Desasignar",
     "toast": {
-      "wheel_menu": "La tecla del menú de Kiln no puede estar en la rueda ({key}): cerraría el menú al desplazarte por él"
+      "wheel_menu": "La tecla del menú de Kiln no puede estar en la rueda ({key}): cerraría el menú al desplazarte por él",
+      "pad_menu": "La tecla del menú de Kiln no puede ser un botón del mando ({key}): el menú se abre con el teclado o un botón del ratón"
     }
   },
   "network": {

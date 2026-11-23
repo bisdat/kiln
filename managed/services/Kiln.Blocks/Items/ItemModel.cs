@@ -433,6 +433,9 @@ public sealed record ItemBlock : IBlock, ITweakable
     public LootBlock? Loot { get; init; }
     /// <inheritdoc cref="WeaponBlock.Was"/>
     public string? Was { get; init; }
+    /// <summary>A fixed GUID (and so game id) in place of the one Kiln derives from the mod and the name: <c>BlockIdentity.Legacy(guid)</c>, for an item another loader
+    /// made, so the stacks players have are this item. Null: derived. Since 0.2.0-dev.30.5 (mod API 0.2.14).</summary>
+    public BlockIdentity? Identity { get; init; }
 
     /// <summary>Game fields this block does not cover, set on the item it makes: <c>Tweak = { { GameFields.Items.MaxStackSize, 5 } }</c>. It wins over what the block sets.</summary>
     [JsonConverter(typeof(ItemTweakConverter))]
@@ -586,6 +589,16 @@ public sealed record RecipeBlock : IBlock
     /// <summary>Its name in the menu of a station with tabs of its own (<see cref="MenuBlock.Tabs"/>, <see cref="StationMenus.Define"/>): letters, digits, '.', '_' and '-',
     /// at most 64, no colon. One recipe of your mod per key at a station. Only for a recipe at a station with a workshop of its own; it changes nothing of the recipe itself.</summary>
     public string? MenuKey { get; init; }
+    /// <summary>A fixed GUID (and so recipe id) in place of the one Kiln derives: <c>BlockIdentity.Legacy(guid)</c>, for a recipe another loader made. Null: derived.
+    /// Since 0.2.0-dev.30.5 (mod API 0.2.14).</summary>
+    public BlockIdentity? Identity { get; init; }
+    /// <summary>The tab of the game's crafting menu that lists it, one the game has: <c>CraftingGroups.Carpenter.Essentials</c>. Its workshop is the
+    /// <see cref="Station"/>'s (<see cref="Stations.Hand"/>: <c>CraftingGroups.Hand</c>). Null: Kiln picks the place, beside recipes that make the same kind of
+    /// thing. A player's menu without that tab lists it there too, and the recipe's definition warns. Since 0.2.0-dev.30.5 (mod API 0.2.14).</summary>
+    public CraftingGroupRef? MenuGroup { get; init; }
+    /// <summary>Keeps the game's "crafted once" mark of the recipe, as its own recipes have it; a <see cref="KnowledgeBlock"/> with <see cref="KnowledgeTrigger.Craft"/> puts the
+    /// recipe in the game's knowledge table, which the mark reads. False: no mark. Since 0.2.0-dev.30.5 (mod API 0.2.14).</summary>
+    public bool TrackCrafted { get; init; }
 }
 
 public static partial class Stations

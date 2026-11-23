@@ -853,12 +853,57 @@ Guid derive_guid(const std::string& mod, const std::string& kind, const std::str
     return uuid5(ns, mod + ":" + kind + ":" + name);
 }
 
+// A knowledge entry that tracks one of the mod's items or recipes under its own id (since 0.2.0-dev.30.5; Kiln.Blocks KnowledgeBlock):
+//   {"id": "0x<item or recipe id>", "track": "pickup" | "craft", "scope": "world" | "player" | "both"}
+// pickup: as the game's items, a world object (Flags, flag 1: found in the world) and a player object (Flags, every flag, one knowledge per
+// flag); craft: as the game's recipes, a player object (Flags 1 and 2; 2 = crafted, what the recipe's completion query reads). The scope
+// leaves one of them out; a recipe has no world object. An id the game has, or that another mod tracks, is this mod's error.
+void tracked_knowledge(Ctx& c, const std::string& k, const ojson& v, std::pair<const uint8_t*, size_t> game,
+                       std::map<uint32_t, std::string>& claimed) {
+    const std::string track = str(v, "track"), text = str(v, "id");
+    if (track != "pickup" && track != "craft") return c.err("knowledge " + k + ": track must be pickup or craft (with an id)");
+    uint32_t id = 0;
+    if (text.size() < 3 || text.size() > 10 || text[0] != '0' || (text[1] != 'x' && text[1] != 'X') ||
+        text.find_first_not_of("0123456789abcdefABCDEF", 2) != std::string::npos || !(id = static_cast<uint32_t>(std::stoul(text.substr(2), nullptr, 16))))
+        return c.err("knowledge " + k + ": id must be the tracked item's or recipe's id, \"0x...\" (not 0)");
+    const bool pickup = track == "pickup";
+    const std::string scope = str(v, "scope", pickup ? "both" : "player");
+    if (scope != "world" && scope != "player" && scope != "both") return c.err("knowledge " + k + ": scope must be world, player or both");
+    if (!pickup && scope != "player") return c.err("knowledge " + k + ": a recipe is tracked per player: its scope is player");
+    KnowledgeDef d;
+    d.id = id, d.type = kFlags, d.name = c.mod->id + ":" + k, d.separate = true;
+    d.world = scope != "player", d.player = scope != "world";
+    d.expected_flags = 1;                                // the world object: found
+    d.player_flags = pickup ? 0xFFFFu : 3u, d.per_flag = pickup ? 1 : 0;
+    if (game.first && ((d.world && knowledge_find(game.first, game.second, false, id)) || (d.player && knowledge_find(game.first, game.second, true, id))))
+        return c.err("knowledge " + k + ": " + hex32(id) + " is in the game's knowledge already (one of its items or recipes?)");
+    if (auto it = claimed.find(id); it != claimed.end() && it->second != d.name)
+        return c.err("knowledge " + k + ": " + hex32(id) + " is tracked by " + it->second + " already");
+    if (c.knowledge.count(id)) return c.err("knowledge " + k + ": " + hex32(id) + " twice in this mod");
+    claimed[id] = d.name;
+    c.knowledge[id] = d;
+    c.m_knowledge[k] = hex32(id);
+    c.names[k] = id;
+}
+
 PackOut compile_pack(const std::vector<ModInput>& mods, const GameData& game) {
     PackOut out;
     out.manifest = ojson::object();
     ojson m_mods = ojson::array();
     std::map<uint32_t, std::string> tags;
     std::vector<Ctx::Tpl> all_templates;
+    // tracked items and recipes: the game's knowledge resource, read once when a mod asks, and the ids mods took ("mod:name")
+    std::map<uint32_t, std::string> claimed;
+    bool game_read = false;
+    std::pair<const uint8_t*, size_t> game_res{nullptr, 0};
+    const auto game_knowledge = [&]() {
+        if (!game_read) {
+            game_read = true;
+            std::string ignored;  // a missing resource fails the whole build below, as it always did
+            if (!read_required(game, kGuidKnowledge, kTypeKnowledge, &game_res.first, &game_res.second, &ignored)) game_res = {nullptr, 0};
+        }
+        return game_res;
+    };
     for (const ModInput& mod : mods) {
         Ctx c{game, out};
         c.mod = &mod;
@@ -897,6 +942,10 @@ PackOut compile_pack(const std::vector<ModInput>& mods, const GameData& game) {
             for (const ojson& doc : mod.documents) {
                 for (const auto& [k, v] : section(doc, "knowledge").items()) {
                     native = true;
+                    if (v.is_object() && (v.contains("track") || v.contains("id"))) {
+                        tracked_knowledge(c, k, v, game_knowledge(), claimed);
+                        continue;
+                    }
                     const std::string scope = str(v, "scope", "player"), type = str(v, "type", "bool");
                     const uint8_t ty = type == "counter" ? kCounter : type == "flags" ? kFlags : kBool;
                     if (type != "bool" && type != "counter" && type != "flags") c.err("knowledge " + k + ": type must be bool, counter or flags");

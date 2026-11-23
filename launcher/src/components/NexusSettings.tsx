@@ -1,21 +1,18 @@
-// Nexus account consent happens in the user's browser; credentials stay in the backend.
+// Settings > Updates & online > Nexus Mods (`#nexus`): the account and the Mod Manager Download links. Nexus account
+// consent happens in the user's browser; credentials stay in the backend.
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink } from "lucide-react";
-import { useEffect, useRef } from "react";
-import { useLocation } from "react-router-dom";
 import * as nx from "../api/nexus";
 import { useNexusAccount } from "../shell/catalogInstall";
 import { useT } from "../i18n";
 import { Badge, Button, Card, Skeleton, Toggle, errorText, runTask, toast } from "../ui";
+import { SettingRow } from "../pages/settings/parts";
 
 export function NexusCard() {
   const t = useT();
   const qc = useQueryClient();
   const account = useNexusAccount();
   const handler = useQuery({ queryKey: nx.nk.handler, queryFn: nx.nexusHandlerStatus, retry: false });
-  const loc = useLocation();
-  const anchor = useRef<HTMLSpanElement>(null);
-  useEffect(() => { if (loc.hash === "#nexus") anchor.current?.scrollIntoView({ block: "start", behavior: "smooth" }); }, [loc.hash, account.isSuccess]);
   const done = (a: nx.NexusAccount) => {
     qc.setQueryData(nx.nk.account, a);
     for (const k of [["nexus_search"], ["nexus_mod"], nx.nk.installed]) qc.invalidateQueries({ queryKey: k });
@@ -27,7 +24,6 @@ export function NexusCard() {
   const h = handler.data;
   return (
     <Card title={t("nexusSettings.title")} sub={t("nexusSettings.sub")}>
-      <span id="nexus" ref={anchor} />
       {account.isLoading ? <Skeleton lines={2} /> : account.error ? <span className="k-hint">{errorText(account.error)}</span> : a && (
         <div className="k-stack" style={{ gap: 10 }}>
           <span className="k-row" style={{ gap: 8, flexWrap: "wrap" }} data-testid="nexus-account">
@@ -45,12 +41,10 @@ export function NexusCard() {
         </div>
       )}
       {h && (
-        <Toggle checked={h.registered} disabled={!h.supported || setHandler.isPending} onChange={(on) => setHandler.mutate(on)} label={t("nexusSettings.handler")}
-          hint={!h.supported ? t("nexusSettings.handlerUnsupported") : [
-            t("nexusSettings.handlerHint"),
-            h.previous ? t("nexusSettings.handlerPrevious", { program: h.previous }) : t("nexusSettings.handlerAlone"),
-            h.registered && !h.active ? t("nexusSettings.handlerTaken") : null,
-          ].filter(Boolean).join(" ")} />
+        <SettingRow id="nexus.handler" htmlFor="st-nxm"
+          hint={!h.supported ? t("nexusSettings.handlerUnsupported") : h.registered && !h.active ? `${t("nexusSettings.handlerHint")} ${t("nexusSettings.handlerTaken")}` : undefined}
+          more={h.supported ? (h.previous ? t("nexusSettings.handlerPrevious", { program: h.previous }) : t("nexusSettings.handlerAlone")) : undefined}
+          control={<Toggle id="st-nxm" checked={h.registered} disabled={!h.supported || setHandler.isPending} onChange={(on) => setHandler.mutate(on)} />} />
       )}
     </Card>
   );

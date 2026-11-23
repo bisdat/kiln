@@ -81,13 +81,18 @@ public sealed record WindowBlock : IUiBlock
     /// <summary>An entry in the game's pause menu and/or main menu that opens it.</summary>
     public UiMenu? Menu { get; init; }
     public required IReadOnlyList<UiRow> Rows { get; init; }
+    /// <summary>The window's own typed state, by key (<c>[a-z][a-z0-9_-]{0,63}</c>): what its rows bind as
+    /// <c>state.&lt;key&gt;</c> (since 0.2.0-dev.31). Kept while the player stays in one world, reset in the next, never saved.
+    /// At most 64 entries and 256 KiB. Null: none.</summary>
+    public IReadOnlyDictionary<string, UiStateDefinition>? State { get; init; }
 
     /// <summary>A note in a data file, ignored.</summary>
     [EditorBrowsable(EditorBrowsableState.Never)]
     public JsonElement Comment { init { } }
 }
 
-/// <summary>One line of a window. <c>"type"</c> in JSON says which: text, value, toggle, slider, choice, separator, button.</summary>
+/// <summary>One line of a window. <c>"type"</c> in JSON says which: text, value, toggle, slider, choice, separator, button, and
+/// (since 0.2.0-dev.31) input, table, tabs, tree, image.</summary>
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "type", UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FailSerialization)]
 [JsonDerivedType(typeof(TextRow), "text")]
 [JsonDerivedType(typeof(ValueRow), "value")]
@@ -96,6 +101,11 @@ public sealed record WindowBlock : IUiBlock
 [JsonDerivedType(typeof(ChoiceRow), "choice")]
 [JsonDerivedType(typeof(SeparatorRow), "separator")]
 [JsonDerivedType(typeof(ButtonRow), "button")]
+[JsonDerivedType(typeof(InputRow), "input")]
+[JsonDerivedType(typeof(TableRow), "table")]
+[JsonDerivedType(typeof(TabsRow), "tabs")]
+[JsonDerivedType(typeof(TreeRow), "tree")]
+[JsonDerivedType(typeof(ImageRow), "image")]
 public abstract record UiRow
 {
     /// <summary>Shown only while this is true: <c>"game.inGame"</c>, <c>"!game.inGame"</c>, <c>"config.clock.show"</c>, <c>"game.screen == InGame"</c>, <c>"game.fps &lt; 30"</c>, joined with <c>&amp;&amp;</c>.</summary>
@@ -171,14 +181,132 @@ public sealed record ButtonRow : UiRow
     public required UiAction Does { get; init; }
 }
 
+/// <summary>When a text field writes what was typed: when it loses the keyboard (and on Enter), or on Enter only.</summary>
+public enum UiInputCommit
+{
+    /// <summary>On Enter, and when the field loses the keyboard (Tab, a click elsewhere). Escape puts the old text back.</summary>
+    Blur = 0,
+    /// <summary>On Enter only; leaving the field without Enter puts the old text back.</summary>
+    Enter = 1,
+}
+
+/// <summary>A text field (since 0.2.0-dev.31) on a text config entry or a string state entry. What is typed is a draft
+/// until it is committed (<see cref="Commit"/>); Escape puts the committed text back. Only in an interactive window or a
+/// screen: those take the keyboard, so nothing typed reaches the game or its chat.</summary>
+public sealed record InputRow : UiRow
+{
+    /// <summary>The row's id, unique in the window: <c>[a-z][a-z0-9_-]{0,63}</c>.</summary>
+    public required string Id { get; init; }
+    [JsonConverter(typeof(UiBlockTextConverter))]
+    public required UiText Label { get; init; }
+    /// <summary><c>config.&lt;path&gt;</c> of a text entry, or <c>state.&lt;key&gt;</c> of a string state entry.</summary>
+    public required string Bind { get; init; }
+    /// <summary>At most this many UTF-8 bytes (2..4096); a longer text is cut at a character before anything is written.</summary>
+    public int MaxBytes { get; init; } = 256;
+    public UiInputCommit Commit { get; init; } = UiInputCommit.Blur;
+    /// <summary>Several lines (Enter is a new line; the text is committed when the field loses the keyboard).</summary>
+    public bool Multiline { get; init; }
+}
+
+/// <summary>A column of a <see cref="TableRow"/>: its id, heading and cell, a template that reads the row's fields as
+/// <c>{row.&lt;field&gt;}</c> (and any other value).</summary>
+public sealed record UiColumn(
+    string Id,
+    [property: JsonConverter(typeof(UiBlockTextConverter))] UiText Label,
+    [property: JsonConverter(typeof(UiBlockTextConverter))] UiText Cell);
+
+/// <summary>A table (since 0.2.0-dev.31) of the rows of a data source: <c>world.local.inventory</c> or a mod's own
+/// <c>mod.&lt;id&gt;</c> rows. Rows keep the source's order and are told apart by their key. With <see cref="Selected"/>
+/// bound to a string state entry, a click selects a row.</summary>
+public sealed record TableRow : UiRow
+{
+    /// <summary>The row's id, unique in the window.</summary>
+    public required string Id { get; init; }
+    /// <summary>The rows: <c>world.local.inventory</c> or <c>mod.&lt;id&gt;</c> of a rows source.</summary>
+    public required string Items { get; init; }
+    /// <summary>1 to 16 columns.</summary>
+    public required IReadOnlyList<UiColumn> Columns { get; init; }
+    /// <summary>At most this many rows (1..512); a source with more shows a notice instead of a cut list.</summary>
+    public int MaxRows { get; init; } = 128;
+    /// <summary><c>state.&lt;key&gt;</c> of a string entry that holds the selected row's key ("" = none). Null: rows cannot be selected.</summary>
+    public string? Selected { get; init; }
+}
+
+/// <summary>A tab of a <see cref="TabsRow"/>.</summary>
+public sealed record UiTab(
+    string Id,
+    [property: JsonConverter(typeof(UiBlockTextConverter))] UiText Label,
+    IReadOnlyList<UiRow> Rows,
+    string? When = null);
+
+/// <summary>Tabs (since 0.2.0-dev.31): each tab shows its own rows. The first visible tab is selected at first. With
+/// <see cref="Selected"/> bound to a string state entry the selected tab's id is in it; otherwise the window keeps it.</summary>
+public sealed record TabsRow : UiRow
+{
+    /// <summary>The row's id, unique in the window.</summary>
+    public required string Id { get; init; }
+    /// <summary>1 to 16 tabs with ids unique in the row.</summary>
+    public required IReadOnlyList<UiTab> Tabs { get; init; }
+    /// <summary><c>state.&lt;key&gt;</c> of a string entry that holds the selected tab's id.</summary>
+    public string? Selected { get; init; }
+}
+
+/// <summary>A node of a tree written in the block (<see cref="TreeRow.Roots"/>).</summary>
+public sealed record UiTreeNodeDefinition(
+    string Key,
+    [property: JsonConverter(typeof(UiBlockTextConverter))] UiText Label,
+    IReadOnlyList<UiTreeNodeDefinition>? Children = null,
+    IReadOnlyDictionary<string, UiScalar>? Values = null);
+
+/// <summary>A tree (since 0.2.0-dev.31): nodes from a mod's own <c>mod.&lt;id&gt;</c> tree source (<see cref="Nodes"/>) or
+/// written here (<see cref="Roots"/>, with <see cref="Fields"/> for their values). Branches open and close; under an open
+/// branch and under each leaf, <see cref="NodeRows"/> (text and value rows) can show the node's fields as
+/// <c>{node.&lt;field&gt;}</c>.</summary>
+public sealed record TreeRow : UiRow
+{
+    /// <summary>The row's id, unique in the window.</summary>
+    public required string Id { get; init; }
+    /// <summary><c>mod.&lt;id&gt;</c> of a tree source. Exactly one of this and <see cref="Roots"/>.</summary>
+    public string? Nodes { get; init; }
+    /// <summary>The tree written in the block.</summary>
+    public IReadOnlyList<UiTreeNodeDefinition>? Roots { get; init; }
+    /// <summary>The fields of <see cref="Roots"/>' values (with a source, the source's schema says them).</summary>
+    public IReadOnlyList<UiField>? Fields { get; init; }
+    /// <summary>Up to 8 text or value rows drawn under an open branch's label and under each leaf.</summary>
+    public IReadOnlyList<UiRow>? NodeRows { get; init; }
+    /// <summary><c>state.&lt;key&gt;</c> of a string entry that holds the selected node's key. Null: nodes cannot be selected.</summary>
+    public string? Selected { get; init; }
+    /// <summary><c>state.&lt;key&gt;</c> of a stringSet entry that holds the open branches' keys. Null: the window keeps them.</summary>
+    public string? Expanded { get; init; }
+}
+
+/// <summary>A PNG picture of the mod's folder (since 0.2.0-dev.31), loaded once when the block is defined: at most 8 MiB,
+/// 2048 x 2048 pixels, and 8 pictures / 32 MiB of pixels per mod.</summary>
+public sealed record ImageRow : UiRow
+{
+    /// <summary>The row's id, unique in the window.</summary>
+    public required string Id { get; init; }
+    /// <summary>A path in the mod's folder ("ui/map.png"): relative, no "..", no URL.</summary>
+    public required string Asset { get; init; }
+    /// <summary>Pixels at UI scale 1; 0: the picture's own width.</summary>
+    public float Width { get; init; }
+    /// <summary>Pixels at UI scale 1; 0: the picture's own height.</summary>
+    public float Height { get; init; }
+    /// <summary>What a click on the picture does.</summary>
+    public UiAction? Does { get; init; }
+}
+
 /// <summary>
 /// What a button or a key does: exactly one of these. They run on the player's game, never on a dedicated server.
 /// </summary>
 public sealed record UiAction
 {
     /// <summary>A command line of this game's command registry, as the console runs it ("reload", "/mymod-reset 5"): as the host's own character when this game hosts the world, else
-    /// as the console. It does not reach a server this game joined: use <see cref="CastAbility"/> for what the server must do.</summary>
+    /// as the console. It does not reach a server this game joined, unless <see cref="CommandTarget"/> is <see cref="UiCommandTarget.Server"/>.</summary>
     public string? Command { get; init; }
+    /// <summary>Where <see cref="Command"/> runs: <see cref="UiCommandTarget.Local"/> (null, the default) as above, or <see cref="UiCommandTarget.Server"/>: on the server this
+    /// game joined (or hosts), as this game's player there, with that player's rights (<see cref="BlockUi.ExecuteOnServer"/>; the outcome is a toast). Only with a command.</summary>
+    public UiCommandTarget? CommandTarget { get; init; }
     /// <summary>Flips a true/false config entry: <c>"config.clock.show"</c>.</summary>
     public string? Toggle { get; init; }
     /// <summary>Sets a config entry to a value.</summary>
@@ -189,6 +317,10 @@ public sealed record UiAction
     public EffectRef? ApplyEffect { get; init; }
     public WindowRef? OpenWindow { get; init; }
     public WindowRef? CloseWindow { get; init; }
+    /// <summary>Opens the window when it is closed and closes it when it is open (since 0.2.0-dev.31): one key for both. A
+    /// key fires while a mod's own window has the input (not while one of its text fields has the keyboard), so it also
+    /// closes the window it opened; <see cref="KeyBindingBlock.WhileCapturing"/> only adds firing over the Kiln menu.</summary>
+    public WindowRef? ToggleWindow { get; init; }
     /// <summary>A short message in the corner of the screen.</summary>
     [JsonConverter(typeof(UiBlockTextConverter))]
     public UiText? Toast { get; init; }

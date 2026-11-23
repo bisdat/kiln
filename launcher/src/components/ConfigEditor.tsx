@@ -9,6 +9,7 @@ import type { ConfigDocument, ConfigTarget, Json } from "../api/commands";
 import { qk } from "../api/hooks";
 import { useT } from "../i18n";
 import { Badge, Button, Card, EmptyState, Segmented, SchemaForm, Skeleton, TextArea, TextInput, errorText, fmtAgo, toast } from "../ui";
+import { useMarkUnsaved } from "../shell/unsaved";
 
 /** `initial`: the file, or the mod id whose file, to open first (the main list's Configs). */
 export function ConfigEditor({ target, readOnly, initial }: { target: ConfigTarget; readOnly?: boolean; initial?: string }) {
@@ -81,6 +82,7 @@ function RawEditor({ doc, readOnly, onSave }: { doc: ConfigDocument; readOnly?: 
   const [busy, setBusy] = useState(false);
   useEffect(() => setText(doc.text), [doc.text]);
   const dirty = text !== doc.text;
+  useMarkUnsaved("editor", dirty && !readOnly);
   return (
     <div className="k-stack">
       <TextArea aria-label={t("configEditor.file")} rows={18} value={text} onChange={(e) => setText(e.target.value)} readOnly={readOnly} spellCheck={false} />

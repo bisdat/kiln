@@ -477,6 +477,7 @@
         "code": {
           "enum": [
             "baseline-outdated",
+            "baseline-stale",
             "seal-outdated",
             "receipt-baseline-mismatch",
             "receipt-origin-ignored",

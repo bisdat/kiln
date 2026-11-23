@@ -982,10 +982,11 @@ fn install_staged(dirs: &DataDirs, install: &GameInstall, bundle: &Path, bundle_
                 });
             }
         }
-        // every other loader under its own proxy name keeps running next to Kiln: left in place, said once
+        // every other loader under its own proxy name is left in place, said once
         for slot in crate::engines::scan_proxies(game_dir).iter().filter(|s| !s.name.eq_ignore_ascii_case(PROXY)) {
             if let Some(e) = crate::engines::Engine::of_proxy(slot.class.kind) {
-                progress.report(None, &format!("{} ({}) stays in place and keeps running next to Kiln", slot.name, e.name()));
+                let detail = if e == crate::engines::Engine::EmlR { "stays in place" } else { "stays in place and keeps running next to Kiln" };
+                progress.report(None, &format!("{} ({}) {detail}", slot.name, e.name()));
             }
         }
         // 2. every other file, dinput8.dll last. Every path that existed before is recorded: identical bytes (and

@@ -187,21 +187,25 @@ export function licenseFacts(c: VendorComponent): [string, string][] {
 
 /** Settings, Graphics: the upscaler files' list (`#upscalers`), under the choice. `running`: the game runs, so the
  *  launcher neither downloads nor removes (vendor_download and vendor_remove refuse): the buttons wait, and say why. */
-export function UpscalerFilesList({ files, running }: { files: UpscalerFiles; running?: boolean }) {
+export function UpscalerFilesList({ files, running, bare }: { files: UpscalerFiles; running?: boolean;
+  /** Only the list (Settings' "Upscaler files" group has the title, the line and More). */
+  bare?: boolean }) {
   const t = useT();
   const st = files.status;
+  const list = st.isLoading ? <Skeleton lines={2} /> : st.error ? <EmptyState title={t("settings.upscalers.unreadable")} hint={errorText(st.error)} /> : (
+    <ul className="k-upscalers" aria-label={t("settings.upscalers.title")}>
+      {st.data!.components.map((c) => (
+        <UpscalerRowView key={c.id} c={c} row={files.row(c)} running={running} onDownload={() => files.download(c)} onRemove={() => files.remove(c)} onCancel={() => files.cancel(c)} />
+      ))}
+    </ul>
+  );
+  if (bare) return list;
   return (
     <section id="upscalers" className="k-stack" style={{ gap: 6 }} aria-label={t("settings.upscalers.title")}>
       <span className="k-panel-title">{t("settings.upscalers.title")}</span>
       <span className="k-hint">{t("settings.upscalers.sub")}</span>
       <p className="k-hint" data-testid="upscalers-purpose">{t("settings.upscalers.purpose")}</p>
-      {st.isLoading ? <Skeleton lines={2} /> : st.error ? <EmptyState title={t("settings.upscalers.unreadable")} hint={errorText(st.error)} /> : (
-        <ul className="k-upscalers" aria-label={t("settings.upscalers.title")}>
-          {st.data!.components.map((c) => (
-            <UpscalerRowView key={c.id} c={c} row={files.row(c)} running={running} onDownload={() => files.download(c)} onRemove={() => files.remove(c)} onCancel={() => files.cancel(c)} />
-          ))}
-        </ul>
-      )}
+      {list}
     </section>
   );
 }

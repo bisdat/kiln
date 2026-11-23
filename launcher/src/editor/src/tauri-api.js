@@ -11,6 +11,8 @@ import * as know from '../shared/knowledge.mjs';
 import items from '../data/items.json';
 import skills from '../data/skills.json';
 import { t } from './i18n.js';
+import { t as launcherT } from '../../i18n';
+import { itemLevelsFit } from '../kiln/levels.js';
 
 // Kiln: commands reject with a KilnError {code, message}; the editor shows e.message, so wrap it in an Error.
 const wrap = (p) => p.catch((e) => {
@@ -90,6 +92,7 @@ function checkModel(m) {
     for (const e of list) {
       if (!isItem(e.itemId)) throw new Error(t('Item desconhecido: {id}', { id: e.itemId }));
       if (!ints(e.slot, 255) || !ints(e.count, 65535)) throw new Error(t('Slot ou quantidade inválidos'));
+      if (!itemLevelsFit(e)) throw new Error(launcherT('editor.inspector.invalidLevels'));
     }
   }
   const slots = m.main.map((e) => e.slot);
@@ -126,10 +129,11 @@ export default {
   // Kiln: no Guardian server copies here (see the header)
   serverState: () => ({ configurado: false, erro: null }),
   serverStamp: async () => null,
-  async openSave(path) {
+  async openSave(path, isCurrent = () => true) {
     const s = await load(path);
-    sessions.set(path, s);
     const { modified } = await invoke('file_info', { path });
+    // A superseded read must not replace the opaque save blocks that the current model will be written over.
+    if (isCurrent()) sessions.set(path, s);
     return publicModel(path, modified, s);
   },
   async browseSave() {

@@ -45,6 +45,9 @@ pub enum ProxyKind {
     Emf,
     /// EML's loader (dbghelp.dll, or dinput8.dll as its fallback).
     Eml,
+    /// Enshrouded Mod Loader - Revamped (dbghelp.dll).
+    #[serde(rename = "eml-r")]
+    EmlR,
     /// Shrouded Engine Tweaks (powrprof.dll).
     Set,
     /// Enshwick's stub (powrprof.dll).

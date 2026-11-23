@@ -94,6 +94,11 @@ pub struct ServerSpec {
     /// Skip SteamCMD (the files are there already, e.g. reflinked from an up-to-date install). Default false.
     #[serde(default)]
     pub skip_steamcmd: bool,
+    /// Finish a create that failed half way (the wizard's Try again): the id may name a server already when it is the
+    /// one an earlier create of this spec left, in the same folder and not running ([`resumable`]); its instance file
+    /// is kept and the rest runs again. Default false.
+    #[serde(default)]
+    pub resume: bool,
 }
 
 impl ServerInstance {
@@ -275,17 +280,77 @@ pub fn create(spec: &ServerSpec, progress: &mut dyn Progress) -> Result<ServerIn
     if !spec.dir.is_absolute() {
         return Err(Error::invalid(format!("{} must be an absolute path", spec.dir.display())));
     }
-    if list()?.iter().any(|s| s.id == spec.id) {
-        return Err(Error::new(ErrorCode::AlreadyExists, format!("a server '{}' exists", spec.id)));
-    }
-    if spec.dir.join(super::game::EXE).exists() && spec.reflink_from.is_some() {
+    let resuming = match list()?.into_iter().find(|s| s.id == spec.id) {
+        Some(s) if spec.resume => {
+            resumable(&s, spec)?;
+            true
+        }
+        Some(_) => return Err(Error::new(ErrorCode::AlreadyExists, format!("a server '{}' exists", spec.id))),
+        None => false,
+    };
+    // a half-made server's folder holds the files its first try copied: the copy goes over them
+    if !resuming && spec.dir.join(super::game::EXE).exists() && spec.reflink_from.is_some() {
         return Err(Error::new(ErrorCode::AlreadyExists, format!("{} already holds a server; import it instead", spec.dir.display())));
     }
-    create_platform(spec, progress)
+    create_platform(spec, resuming, progress)
+}
+
+/// `existing` (the server the spec's id names) is one a create of `spec` can finish: what a create makes here (a kilnctl
+/// instance; on Windows a launcher record), in the spec's folder, not running. Never a Steam library install, a remote
+/// server or an imported folder of another kind.
+pub(crate) fn resumable(existing: &ServerInstance, spec: &ServerSpec) -> Result<()> {
+    let id = &spec.id;
+    let made_here = if cfg!(windows) { existing.runner == ServerRunner::Windows } else { existing.runner == ServerRunner::Kilnctl };
+    if existing.kind == InstanceKind::Remote || !made_here {
+        return Err(Error::new(ErrorCode::AlreadyExists, format!("a server '{id}' exists (not one an install left half made)")));
+    }
+    if !existing.dir.as_deref().is_some_and(|d| same_dir(d, &spec.dir)) {
+        let at = existing.dir.as_deref().map(|d| d.display().to_string()).unwrap_or_default();
+        return Err(Error::new(ErrorCode::AlreadyExists, format!("a server '{id}' exists in {at}; trying again finishes one in the same folder only")));
+    }
+    if let Some(p) = super::run::pid(existing) {
+        return Err(Error::new(ErrorCode::Conflict, format!("{id} is running (pid {p})")));
+    }
+    Ok(())
 }
 
 #[cfg(all(unix, feature = "server"))]
-fn create_platform(spec: &ServerSpec, progress: &mut dyn Progress) -> Result<ServerInstance> {
+fn create_platform(spec: &ServerSpec, resuming: bool, progress: &mut dyn Progress) -> Result<ServerInstance> {
+    let file = instance_file(&spec.id);
+    // trying again: the first try's instance file stays (its Wine was pinned then)
+    let inst = if resuming && file.exists() {
+        let inst = load(&spec.id)?;
+        progress.report(Some(0.02), &format!("instance file {} (kept from the first try)", file.display()));
+        inst
+    } else {
+        write_instance(spec, &file, progress)?
+    };
+    std::fs::create_dir_all(&inst.dir).map_err(crate::util::io_at(&inst.dir, "creating"))?;
+    if let Some(src) = &spec.reflink_from {
+        progress.report(Some(0.03), &format!("copying the game files from {} (reflink)", src.display()));
+        reflink_copy(src, &inst.dir)?;
+    }
+    if !spec.skip_steamcmd {
+        super::steamcmd::install(&inst.dir, &mut Scaled { inner: progress, from: 0.05, to: 0.8 })?;
+    } else if !inst.exe().exists() {
+        return Err(Error::not_found(format!("{} is missing and SteamCMD was skipped", inst.exe().display())));
+    }
+    progress.report(Some(0.82), "writing enshrouded_server.json");
+    let cfg = inst.server_json();
+    if !cfg.exists() {
+        std::fs::write(&cfg, super::game::default_config(spec.name.trim(), spec.port)?).map_err(crate::util::io_at(&cfg, "writing"))?;
+    }
+    super::settings::set_name_port(&cfg, spec.name.trim(), spec.port)?;
+    progress.report(Some(0.85), "creating the Wine prefix (wineboot)");
+    super::run::make_prefix(&inst)?;
+    progress.report(Some(1.0), &format!("server {} ready in {}", spec.id, inst.dir.display()));
+    Ok(from_kilnctl(&inst))
+}
+
+/// The kilnctl instance file of a new server (the Wine pinned now), written before anything else: the server is listed
+/// from then on, also when a later step fails.
+#[cfg(all(unix, feature = "server"))]
+fn write_instance(spec: &ServerSpec, file: &Path, progress: &mut dyn Progress) -> Result<Instance> {
     let home = crate::util::home();
     let mut wine = WineSpec::parse(spec.wine.as_deref().unwrap_or("ge"), &home)?;
     if wine == WineSpec::GeLatest {
@@ -316,38 +381,21 @@ fn create_platform(spec: &ServerSpec, progress: &mut dyn Progress) -> Result<Ser
         policy,
         samples: false,
     });
-    let file = instance_file(&spec.id);
-    let inst = parse(&spec.id, &file, &text, &home)?;
+    let inst = parse(&spec.id, file, &text, &home)?;
     std::fs::create_dir_all(instances_dir())?;
     if file.exists() {
         return Err(Error::new(ErrorCode::AlreadyExists, format!("{} exists", file.display())));
     }
-    std::fs::write(&file, &text).map_err(crate::util::io_at(&file, "writing"))?;
+    std::fs::write(file, &text).map_err(crate::util::io_at(file, "writing"))?;
     progress.report(Some(0.02), &format!("instance file {}", file.display()));
-    std::fs::create_dir_all(&inst.dir).map_err(crate::util::io_at(&inst.dir, "creating"))?;
-    if let Some(src) = &spec.reflink_from {
-        progress.report(Some(0.03), &format!("copying the game files from {} (reflink)", src.display()));
-        reflink_copy(src, &inst.dir)?;
-    }
-    if !spec.skip_steamcmd {
-        super::steamcmd::install(&inst.dir, &mut Scaled { inner: progress, from: 0.05, to: 0.8 })?;
-    } else if !inst.exe().exists() {
-        return Err(Error::not_found(format!("{} is missing and SteamCMD was skipped", inst.exe().display())));
-    }
-    progress.report(Some(0.82), "writing enshrouded_server.json");
-    let cfg = inst.server_json();
-    if !cfg.exists() {
-        std::fs::write(&cfg, super::game::default_config(spec.name.trim(), spec.port)?).map_err(crate::util::io_at(&cfg, "writing"))?;
-    }
-    super::settings::set_name_port(&cfg, spec.name.trim(), spec.port)?;
-    progress.report(Some(0.85), "creating the Wine prefix (wineboot)");
-    super::run::make_prefix(&inst)?;
-    progress.report(Some(1.0), &format!("server {} ready in {}", spec.id, inst.dir.display()));
-    Ok(from_kilnctl(&inst))
+    Ok(inst)
 }
 
+/// Windows: the launcher record is written last, so a create that fails half way leaves no server behind
+/// (`resuming` changes nothing here).
 #[cfg(not(all(unix, feature = "server")))]
-fn create_platform(spec: &ServerSpec, progress: &mut dyn Progress) -> Result<ServerInstance> {
+fn create_platform(spec: &ServerSpec, resuming: bool, progress: &mut dyn Progress) -> Result<ServerInstance> {
+    let _ = resuming;
     if !cfg!(windows) {
         return Err(Error::new(ErrorCode::Unsupported, "kiln-manage was built without the server feature"));
     }
@@ -534,6 +582,9 @@ pub(crate) struct Scaled<'a> {
 impl Progress for Scaled<'_> {
     fn report(&mut self, fraction: Option<f32>, message: &str) {
         self.inner.report(fraction.map(|f| self.from + f.clamp(0.0, 1.0) * (self.to - self.from)), message)
+    }
+    fn stage(&mut self, id: &str) {
+        self.inner.stage(id);
     }
     fn canceled(&self) -> bool {
         self.inner.canceled()

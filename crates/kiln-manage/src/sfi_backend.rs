@@ -341,6 +341,8 @@ pub enum InterpreterRoute {
     Missing,
     /// ShroudForge's own loader is in the game: it runs them, and both Kiln backends stand aside.
     OwnLoader,
+    /// EML-R's own loader is in the game and may run the same mods.
+    EmlR,
 }
 
 /// The last start as the core froze it (`kiln/state/launch.json`; docs/kiln/services/launch.md).
@@ -368,7 +370,7 @@ pub struct Card {
     /// With `kiln` selected for the next start: what it meets in the game folder.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub interpreter_route: Option<InterpreterRoute>,
-    /// ShroudForge's own loader in the game (its game-relative file), read only with `kiln` selected.
+    /// The game-relative path of the loader blocking the interpreter, read only with `kiln` selected.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub own_loader: Option<String>,
     /// kiln.json cannot be read or does not parse: why. Nothing is written until it is fixed.
@@ -440,24 +442,23 @@ pub fn card_bytes(game: &Path, bytes: Option<&[u8]>, side: RunSide, env: &Env) -
     let next = resolve_parts(doc.as_ref(), config, side, env);
     #[cfg_attr(not(feature = "sfi-scan"), allow(unused_mut))]
     let (mut interpreter_route, mut own_loader) = (None, None);
-    // without sfi-scan no kiln-mode activation runs and ShroudForge's own loader is not looked for: the setting only
+    // Without sfi-scan the card shows the setting without probing for interpreter blockers.
     #[cfg(feature = "sfi-scan")]
     if next.selected == Some(Backend::Kiln) {
-        own_loader = crate::own_loaders::shroudforge_loader(game);
-        let route = crate::sfi_routing::decide(&crate::sfi_routing::Inputs {
-            selected: next.selected,
-            env_off: next.env_off_note.is_some(),
-            own_loader: own_loader.clone(),
-            interpreter: game.join(crate::sfi_routing::INTERPRETER_PLUGIN).is_file(),
-        });
-        use crate::sfi_routing::{Route, Runner};
-        interpreter_route = Some(match route {
-            Route::Interpreter(Runner::Ready) => InterpreterRoute::Ready,
-            Route::Interpreter(Runner::EnvOff) => InterpreterRoute::EnvOff,
-            Route::Interpreter(Runner::Missing) => InterpreterRoute::Missing,
-            // the only main route a selected kiln can get
-            Route::Legacy(_) => InterpreterRoute::OwnLoader,
-        });
+        use crate::sfi_routing::{Legacy, Route, Runner};
+        let route = crate::sfi_routing::route_from(game, &next);
+        (interpreter_route, own_loader) = match route {
+            Route::Interpreter(Runner::Ready) => (Some(InterpreterRoute::Ready), None),
+            Route::Interpreter(Runner::EnvOff) => (Some(InterpreterRoute::EnvOff), None),
+            Route::Interpreter(Runner::Missing) => (Some(InterpreterRoute::Missing), None),
+            Route::Legacy(Legacy::EmlR(file)) => {
+                (Some(InterpreterRoute::EmlR), Some(file))
+            }
+            Route::Legacy(Legacy::OwnLoader(file)) => {
+                (Some(InterpreterRoute::OwnLoader), Some(file))
+            }
+            Route::Legacy(_) => (None, None),
+        };
     }
     Card {
         setting: SettingView::of(read_setting(doc.as_ref())),

@@ -35,8 +35,11 @@ internal static class DataClients
         ["rarityRolls"] = None, ["rarityUpgrades"] = None,
         // built by every player's game from the mod's own files
         ["vfx"] = Mod, ["windows"] = Mod, ["hudLines"] = Mod, ["keyBindings"] = Mod, ["sounds"] = Mod, ["materials"] = Mod, ["talents"] = Mod, ["talentTrees"] = Mod, ["buildingMaterialPools"] = Mod, ["buildingMaterials"] = Mod, ["blueprints"] = Mod, ["npcs"] = Mod, ["terrainMaterials"] = Mod,
+        ["buildingTools"] = Mod, ["terrainBrushes"] = Mod, ["toolMaterialPools"] = Mod,
         // the game's own journal and NPC menu, built from the mod's files at start
         ["quests"] = Mod, ["dialogues"] = Mod,
+        // the game's knowledge table (a tracked item or recipe), built from the mod's files at start
+        ["knowledge"] = Mod,
     };
 
     /// <summary>The fields whose value can name the mod's own file, cue, VFX or key ([ClientsModWhen], and what the compilers check):

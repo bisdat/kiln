@@ -132,7 +132,9 @@ Type: string
 | Key | Type | Required | Notes |
 |---|---|---|---|
 | `expectedFlags` | integer |  | Flags: the mask of flags that exist; a grant of another flag is dropped by the game. min 0 |
+| `id` | string |  | With track: the id of the item or recipe tracked, in place of one derived from the name (since 0.2.0-dev.30.5). Pattern `^0[xX][0-9a-fA-F]{1,8}$`. |
 | `scope` | `"world"` \| `"player"` \| `"both"` |  | world: shared progress. player (default): per character. both: a world object with a player twin (a player grant also sets the world's). |
+| `track` | `"pickup"` \| `"craft"` |  | Tracks one of the mod's items (pickup: the world's and the player's knowledge of finding it, as the game's items have) or recipes (craft: the player's "crafted once", as the game's recipes have) under its id. Needs id; scope defaults to both for pickup, and is player for craft (since 0.2.0-dev.30.5). |
 | `type` | `"bool"` \| `"counter"` \| `"flags"` |  | bool (default), counter, flags. |
 
 ## near
