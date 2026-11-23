@@ -156,12 +156,12 @@ struct ModInput {
     std::function<void(Stage, const View&, Batch*)> code;
 };
 
-// Kiln-internal binding data, never a game pointer or a public ABI record. Values are the final stable view;
-// like/base are Kiln ids. The backend resolves them before it creates a real content definition.
+// Kiln-internal binding data, never a game pointer or a public ABI record. Constructor values are the Add-only
+// baseline; values are the effective composed view. Later stages must not be baked into the native clone twice.
 struct EntryDefinition {
     std::string like, base, mod, source;
     uint32_t n = 0;
-    std::map<std::string, Value> values;
+    std::map<std::string, Value> constructor_values, values;
     std::set<std::string> traits;
 };
 struct EntryRemoval {

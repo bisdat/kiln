@@ -34,6 +34,7 @@ int main() {
     registry::EntryDefinition d;
     d.mod = "a"; d.like = d.base = "game:material_t1_wood_logs";
     d.values["maxStack"] = registry::Value::integer(99);
+    d.constructor_values = d.values;
     auto body = registry_entry_definition({"items", "a:logs"}, d, in, &why);
     entry_check(body.is_object(), "stable added item lowers through the existing definition shape");
     if (body.is_object()) {

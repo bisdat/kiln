@@ -1425,7 +1425,7 @@ std::shared_ptr<const PreparedBase> prepare_base(const BaseModel& base, const Re
         for (const auto& [ref, definition] : entries->definitions) {
             if (prepared->state.entry(ref.registry, ref.id)) continue;
             EntryState entry; entry.id = ref.id; entry.added = true; entry.like = definition.like;
-            entry.base = definition.values; entry.traits = definition.traits;
+            entry.base = definition.constructor_values; entry.traits = definition.traits;
             prepared->state.add_entry(ref.registry, std::move(entry));
         }
         for (const auto& ref : entries->removed) if (auto* entry = prepared->state.entry(ref.registry, ref.id)) {
@@ -1522,7 +1522,7 @@ static Result compose_impl(const Schema& schema, const BaseModel& base, const st
         for (const auto& [ref, definition] : previous->definitions) {
             if (!s.entry(ref.registry, ref.id) && !prepared) {
                 EntryState entry; entry.id = ref.id; entry.added = true; entry.like = definition.like;
-                entry.base = definition.values; entry.traits = definition.traits; s.add_entry(ref.registry, std::move(entry));
+                entry.base = definition.constructor_values; entry.traits = definition.traits; s.add_entry(ref.registry, std::move(entry));
             }
             c.adders[ref] = {definition.mod, definition.source, definition.n};
         }
@@ -1532,11 +1532,19 @@ static Result compose_impl(const Schema& schema, const BaseModel& base, const st
             entry->removed_by = removal == previous->removals.end() ? "the reference check" : removal->second.mod;
         }
     }
+    std::map<EntryRef, std::map<std::string, Value>> constructors;
     const bool any_code = std::any_of(mods.begin(), mods.end(), [](const ModInput& m) { return bool(m.code); });
     for (const Stage stage : {Stage::Add, Stage::Alter}) {
         std::optional<State> seen;  // what code reads during this stage: the state as the previous stage left it
         if (any_code) seen = s;
         for (const ModInput& m : mods) run_mod(c, s, m, stage, seen ? *seen : s);
+        if (!previous && stage == Stage::Add) for (const auto& ref : out.added) {
+            const auto* entry = s.entry(ref.registry, ref.id);
+            if (!entry) continue;
+            auto& values = constructors[ref]; values = entry->base;
+            for (auto f = s.fields.lower_bound({ref.registry, ref.id, ""}); f != s.fields.end() && f->first.registry == ref.registry && f->first.id == ref.id; ++f)
+                if (!is_raw_field(f->first.field)) values[f->first.field] = f->second.result;
+        }
         if (!previous && stage == Stage::Alter) refuse_unsafe_item_removals(c, s);
     }
     // final: each mod on its own overlay over the post-alter state (its data files' selectors see add+alter and its own final
@@ -1611,6 +1619,7 @@ static Result compose_impl(const Schema& schema, const BaseModel& base, const st
             }
             d.mod = adder->second.mod; d.source = adder->second.source; d.n = adder->second.n;
             d.traits = e->traits;
+            d.constructor_values = constructors.at(ref);
             d.values = e->base;
             for (auto f = s.fields.lower_bound({ref.registry, ref.id, ""}); f != s.fields.end() && f->first.registry == ref.registry && f->first.id == ref.id; ++f)
                 if (!is_raw_field(f->first.field)) d.values[f->first.field] = f->second.result;

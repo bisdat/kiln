@@ -34,7 +34,7 @@ registry::json registry_entry_definition(const registry::EntryRef& ref, const re
     if (!d.like.starts_with("game:")) dependencies.insert(ref.registry + "|" + d.like);
     const auto* spec = in.schema->registry(ref.registry);
     if (!spec) return fail("unknown registry " + ref.registry);
-    for (const auto& [field, value] : d.values) {
+    for (const auto& [field, value] : d.constructor_values) {
         const auto* f = spec->field(field);
         if (!f || f->read_only || field.find('[') != std::string::npos || value.kind == registry::Value::None) continue;
         std::string reason;
@@ -45,8 +45,8 @@ registry::json registry_entry_definition(const registry::EntryRef& ref, const re
     if (ref.registry == "items") body["rolledLoot"] = true; // the stable effective values, not newcontent's gear defaults
     else {
         for (const char* list : {"inputs", "outputs"}) {
-            const auto value = d.values.find(list);
-            if (value == d.values.end() || value->second.kind != registry::Value::List || value->second.list.empty())
+            const auto value = d.constructor_values.find(list);
+            if (value == d.constructor_values.end() || value->second.kind != registry::Value::List || value->second.list.empty())
                 return fail(std::string("recipes.") + list + " needs at least one stack for an added recipe");
             json stacks = json::array();
             for (const auto& stack : value->second.list) {
@@ -71,9 +71,9 @@ registry::json registry_entry_definition(const registry::EntryRef& ref, const re
             }
             body[list] = std::move(stacks);
         }
-        if (auto it = d.values.find("duration"); it != d.values.end()) body["duration"] = it->second.to_json();
-        const auto unlock = d.values.find("unlock");
-        body["unlock"] = unlock != d.values.end() && unlock->second.t == "always" ? "always" : "base";
+        if (auto it = d.constructor_values.find("duration"); it != d.constructor_values.end()) body["duration"] = it->second.to_json();
+        const auto unlock = d.constructor_values.find("unlock");
+        body["unlock"] = unlock != d.constructor_values.end() && unlock->second.t == "always" ? "always" : "base";
         // Recipe construction already owns these lists/values, including during early registration before RL is populated.
         for (const char* field : {"inputs", "outputs", "duration", "unlock"}) body["registryFields"].erase(field);
     }
