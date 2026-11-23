@@ -42,6 +42,52 @@ public sealed class ProtocolTests
         Assert.Equal(CameraWireAbi.RemoteParts, rig.Server.ClientCaps);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void A_Hello_for_another_player_cannot_bind_or_replace_this_connection(bool bound)
+    {
+        var rig = new Rig();
+        if (bound) rig.Bind();
+        else rig.Server.PeerReady();
+        var before = rig.Server.Binding;
+        rig.Server.Receive(CameraMessage.Hello, CameraWire.Hello(new HelloMessage(CameraWireAbi.Protocol, 0xBAD, 3, 43,
+            CameraWireAbi.RemoteParts, CameraWireAbi.MaxKeys, CameraWireAbi.MaxBody)));
+        Assert.Equal(before, rig.Server.Binding);
+        Assert.Equal(bound ? ServerBindingState.Bound : ServerBindingState.Waiting, rig.Server.State);
+        Assert.Empty(rig.Ended);
+        if (!bound) rig.Bind();  // the invalid hello did not poison a later valid one
+        Assert.Equal(rig.Server.Binding, rig.Client.Binding);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void A_Welcome_for_another_player_cannot_bind_or_clear_the_local_lease(bool bound)
+    {
+        var rig = new Rig();
+        rig.Bind();
+        if (bound)
+        {
+            rig.Submit(TransportOp.Apply, lease: 1000);
+            rig.Tick();
+        }
+        else
+        {
+            rig.Client = rig.NewClient(0xC11E47, 3);
+            rig.Client.Start();
+        }
+        Assert.True(CameraWire.TryWelcome(rig.SentToClient.Last(m => m.Id == CameraMessage.Welcome).Body, out var welcome));
+        var before = rig.Client.Binding;
+        rig.Client.Receive(CameraMessage.Welcome, CameraWire.Welcome(welcome with { Player = 43, Token = welcome.Token + 1 }));
+        Assert.Equal(before, rig.Client.Binding);
+        Assert.Equal(bound ? ClientBindingState.Bound : ClientBindingState.Hello, rig.Client.State);
+        Assert.Equal(bound ? 1000ul : 0ul, rig.Client.ActiveLease);
+        Assert.Empty(rig.Endpoint.Released);
+        if (!bound) rig.Client.Receive(CameraMessage.Welcome, CameraWire.Welcome(welcome));
+        Assert.Equal(rig.Server.Binding, rig.Client.Binding);
+    }
+
     [Fact]
     public void A_request_round_trips_to_a_client_frame()
     {
@@ -592,7 +638,7 @@ public sealed class ProtocolTests
     }
 
     private static byte[] HelloFrom(ulong nonce) =>
-        CameraWire.Hello(new HelloMessage(CameraWireAbi.Protocol, nonce, 3, 1001, CameraWireAbi.RemoteParts, CameraWireAbi.MaxKeys, CameraWireAbi.MaxBody));
+        CameraWire.Hello(new HelloMessage(CameraWireAbi.Protocol, nonce, 3, 42, CameraWireAbi.RemoteParts, CameraWireAbi.MaxKeys, CameraWireAbi.MaxBody));
 
     [Fact]
     public void A_new_client_world_rebinds_at_most_once_a_second_and_the_rest_change_nothing()

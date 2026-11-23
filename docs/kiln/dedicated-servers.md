@@ -317,7 +317,9 @@ When a mod leaves `clients` out, Kiln guesses it from the mod's `side` (a server
 but by default only a value the mod states makes the server turn players away. The joining rules can be changed in
 `kiln/config/network.json` (`modSync`); see [network.md](network.md). `modSync: off` also waives the join checks that
 compare what each side built from the same mods (the player animation graph, and NPCs with a body of their own,
-`kiln.npcbodies`): such a player joins, and the server only logs a warning. Keep it on for servers with authored NPC bodies.
+`kiln.npcbodies`): such a player joins, and the server only logs a warning. A player whose game lacks a body the server
+spawns may then crash when that NPC reaches them: the game crashes on an entity of a template it doesn't have (see
+[network.md](network.md#clients-without-kiln)). Keep it on for servers with authored NPC bodies.
 
 **Modpacks.** Players get `mod` mods from your server's modpack: you build it in the Kiln Launcher (Servers > your
 server > Modpack), upload the zip anywhere players can download over https, and enter the link. Kiln then offers it
