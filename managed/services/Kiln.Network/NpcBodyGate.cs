@@ -5,7 +5,7 @@
 // made Ready, and the per-body closure hash it computed (the canonical body and motion spec, the owned files' hashes and the chassis
 // layout; native/services/quests). HELLO and WELCOME carry "kiln.npcbodies", the SHA-256 (lower-case hex) of the sorted lines
 // "mod:npc:closure" of this side's Ready bodies joined with '\n' (empty when there is none), and "kiln.npcbodies.count"; the list itself
-// goes along (at most MaxNames lines) so the refusal can name the first body that differs. A peer that sends no key (an older Kiln)
+// goes along (at most MaxNames lines and MaxValueBytes bytes) so the refusal can name the first body that differs. A peer that sends no key (an older Kiln)
 // counts as having none. A client that defined a body from code after its start (PendingRestart: NpcBodies) says so in
 // "kiln.npcbodies.pending" and is refused with a restart-required reason, as the chapter's late client is. The server refuses as
 // PlayerGraphGate does: modSync off is the operator's call (a warning in the log). Reads its rows from NpcBodyRows, so it needs no
@@ -22,6 +22,11 @@ internal static class NpcBodyGate
         KeyPending = "kiln.npcbodies.pending";
     /// <summary>At most this many lines go into the handshake; the count says how many there are.</summary>
     public const int MaxNames = 64;
+
+    /// <summary>The list values' budget in bytes, as BootGate's: a HELLO or WELCOME value over 4096 bytes is refused by the decoder
+    /// (Wire.ReadProps), which drops the whole frame. Whole lines go in until the next would pass it; the count and the hash still cover
+    /// every body, and a list shorter than the count is read as incomplete (<see cref="Describe"/>).</summary>
+    public const int MaxValueBytes = 2048;
 
     /// <summary>The sorted "mod:npc:closure" lines of these rows' Ready bodies.</summary>
     internal static List<string> Lines(IEnumerable<NpcBodyRow> rows) =>
@@ -45,9 +50,25 @@ internal static class NpcBodyGate
             [KeyHash] = Hash(lines),
             [KeyCount] = lines.Count.ToString(CultureInfo.InvariantCulture),
         };
-        if (lines.Count > 0) d[KeyList] = PlayerGraphGate.Join(lines.Take(MaxNames));
-        if (late.Count > 0) d[KeyPending] = PlayerGraphGate.Join(late.Take(MaxNames));
+        if (lines.Count > 0) d[KeyList] = Within(lines);
+        if (late.Count > 0) d[KeyPending] = Within(late);
         return d;
+    }
+
+    /// <summary>The first lines that fit <see cref="MaxValueBytes"/> (at most <see cref="MaxNames"/>), joined as PlayerGraphGate joins.
+    /// A line that alone is longer than the budget ends the list there.</summary>
+    internal static string Within(IEnumerable<string> lines)
+    {
+        var kept = new List<string>();
+        var bytes = 0;
+        foreach (var line in lines.Take(MaxNames))
+        {
+            var add = Encoding.UTF8.GetByteCount(PlayerGraphGate.Join([line])) + (kept.Count > 0 ? 1 : 0);
+            if (bytes + add > MaxValueBytes) break;
+            kept.Add(line);
+            bytes += add;
+        }
+        return PlayerGraphGate.Join(kept);
     }
 
     /// <summary>Null when a client with these handshake properties built the same bodies as this server and has none waiting for a

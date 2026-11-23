@@ -231,6 +231,66 @@ public sealed class NpcBodyGateTests : IDisposable
         Assert.Contains("restart required", LastReject()!.Reason);
     }
 
+    // ------------------------------------------------------------------------------------------------ many bodies (16f review3 M1)
+
+    // 64 Ready bodies with long block names: a "mod:npc:closure" line is about 150 bytes, so all of them are about 9.6 KB, more than a
+    // HELLO or WELCOME value may be (Wire.ReadProps: 4096 bytes). The lists are cut by bytes (BootGate's 2048); the count and the hash
+    // still cover every body.
+    private static (JsonObject[] Rows, List<string> Lines) Many(string closure)
+    {
+        var rows = new List<JsonObject>();
+        var lines = new List<string>();
+        for (var i = 0; i < 64; i++)
+        {
+            var npc = $"a-villager-with-a-rather-long-block-name-to-fill-the-handshake-{i:00}";
+            rows.Add(Row("kiln-equipment-and-more", npc, "ready", closure));
+            lines.Add($"kiln-equipment-and-more:{npc}:{closure}");
+        }
+        lines.Sort(StringComparer.Ordinal);
+        return (rows.ToArray(), lines);
+    }
+
+    [Fact]
+    public void Sixty_four_long_named_bodies_join_and_the_list_stays_within_the_budget()
+    {
+        var (rows, lines) = Many(A);
+        Server(rows);
+        var props = NpcBodyGate.Properties();
+        Assert.True(Encoding.UTF8.GetByteCount(props[NpcBodyGate.KeyList]) <= 2048, $"{Encoding.UTF8.GetByteCount(props[NpcBodyGate.KeyList])} bytes");
+        Assert.Equal("64", props[NpcBodyGate.KeyCount]);
+        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('\n', lines)))), props[NpcBodyGate.KeyHash]);
+        var listed = PlayerGraphGate.Split(props[NpcBodyGate.KeyList]);
+        Assert.True(listed.Count > 0);
+        Assert.Equal(lines.Take(listed.Count), listed);  // whole lines, in order
+        var p = Up();
+        Hello(NpcBodyGate.Properties(lines, []));
+        Assert.Equal(NetPeerState.Ready, p.State);
+        Assert.Equal(props[NpcBodyGate.KeyHash], LastWelcome()!.Properties[NpcBodyGate.KeyHash]);
+    }
+
+    [Fact]
+    public void Sixty_four_long_named_bodies_that_differ_are_refused_with_a_reason()
+    {
+        Server(Many(A).Rows);
+        var p = Up();
+        Hello(NpcBodyGate.Properties(Many(B).Lines, []));
+        Assert.Equal(NetPeerState.Rejected, p.State);
+        Assert.Contains("is built differently on your game", LastReject()!.Reason);
+    }
+
+    [Fact]
+    public void A_long_pending_list_stays_within_the_budget_and_is_refused()
+    {
+        var late = Enumerable.Range(0, 64).Select(i => $"kiln-equipment-and-more:a-villager-defined-from-code-with-a-long-name-{i:00}").ToList();
+        var props = NpcBodyGate.Properties([], late);
+        Assert.True(Encoding.UTF8.GetByteCount(props[NpcBodyGate.KeyPending]) <= 2048, $"{Encoding.UTF8.GetByteCount(props[NpcBodyGate.KeyPending])} bytes");
+        Server();
+        var p = Up();
+        Hello(props);
+        Assert.Equal(NetPeerState.Rejected, p.State);
+        Assert.Contains("restart required", LastReject()!.Reason);
+    }
+
     [Fact]
     public void Under_modsync_off_it_joins_and_the_log_says_so()
     {
