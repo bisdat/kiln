@@ -240,10 +240,11 @@ internal static class NpcCompiler
         if (a.MinRange is { } min && (min < 0 || min >= a.Range)) throw new BlockError(ctx.Block, Join(path, "minRange"), $"{min} must be at least 0 and less than its range {a.Range}");
         if (a.Cooldown is < 0) throw new BlockError(ctx.Block, Join(path, "cooldown"), $"{a.Cooldown} is less than 0");
         if (a.Chance is < 0 or > 1) throw new BlockError(ctx.Block, Join(path, "chance"), $"{a.Chance} is outside 0..1");
-        if (a.Angle is <= 0 or > 360) throw new BlockError(ctx.Block, Join(path, "angle"), $"{a.Angle} must be more than 0 and at most 360 degrees");
+        // NaN fails every comparison: written this way it is refused, not taken for a full circle
+        if (!(a.Angle > 0 && a.Angle <= 360)) throw new BlockError(ctx.Block, Join(path, "angle"), $"{a.Angle} must be more than 0 and at most 360 degrees");
+        if (a.Length is <= 0 or > 30) throw new BlockError(ctx.Block, Join(path, "length"), $"{a.Length} must be more than 0 and at most 30 seconds");
         if (a.HitAt < 0) throw new BlockError(ctx.Block, Join(path, "hitAt"), $"{a.HitAt} must be at least 0 seconds");
         if (a.Length is { } len && a.HitAt >= len) throw new BlockError(ctx.Block, Join(path, "hitAt"), $"{a.HitAt} must be less than the attack's length {len} seconds");
-        if (a.Length is <= 0 or > 30) throw new BlockError(ctx.Block, Join(path, "length"), $"{a.Length} must be more than 0 and at most 30 seconds");
         if (a.Sequence != null)
         {
             if (a.Plays != null || a.OnHit != null || a.Delivery != null) throw new BlockError(ctx.Block, Join(path, "sequence"), "a game sequence plays as it is: no plays, onHit or delivery with it");

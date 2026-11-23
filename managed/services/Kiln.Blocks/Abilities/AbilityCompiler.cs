@@ -70,7 +70,8 @@ internal static partial class Compiler
                 break;
             case ConeBlock c:
                 Positive(c.Range, "range");
-                if (c.Angle is <= 0 or > 360) throw new BlockError(ctx.Block, $"{path}.angle", $"{c.Angle} must be more than 0 and at most 360 degrees");
+                // NaN fails every comparison: written this way it is refused, not taken for a full circle
+                if (!(c.Angle > 0 && c.Angle <= 360)) throw new BlockError(ctx.Block, $"{path}.angle", $"{c.Angle} must be more than 0 and at most 360 degrees");
                 Does(c.Effects);
                 break;
             case BeamBlock b:
