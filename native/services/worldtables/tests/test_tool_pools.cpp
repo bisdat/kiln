@@ -78,5 +78,22 @@ int main() {
     CHECK(rows.base[24]==0); // Terrain brush uses fill bytes, not compressed building bits.
     ArrayView fills; CHECK(array_at(merged,uint32_t(rows.base-merged.data()+16),1,&fills));
     CHECK(fills.count==8);
+    // read_mod hands every object document to read_blocks: one with none of its sections gives nothing and no error.
+    for (const char* text : {R"({"format":1})", R"({"format":1,"items":{"x":{"name":"X"}},"spells":{"y":{}},"comment":"z"})",
+                             R"({"strengths":{"s":{"hardness":"soft"}},"surfaces":{"t":{}}})"}) {
+        ModFile none; none.mod="tool-test"; none.clients="mod";
+        read_blocks(parse_relaxed(text),&none);
+        CHECK(none.errors.empty() && none.pools.empty() && none.shapes.empty() && none.tweaks.empty() && none.materials.empty() && none.craft_props.empty());
+    }
+    // An empty tool section is nothing to do and a malformed one one error naming it, as the other world-table sections.
+    for (const char* section : {"toolMaterialPools", "toolBrushShapes", "buildingMaterialPools", "blueprints", "buildingMaterials", "materialTweaks", "terrainMaterials", "craftingProps"}) {
+        ModFile empty_section; empty_section.mod="tool-test"; empty_section.clients="mod";
+        read_blocks(ojson{{section, ojson::object()}},&empty_section);
+        CHECK(empty_section.errors.empty() && empty_section.pools.empty() && empty_section.shapes.empty() && empty_section.materials.empty());
+        ModFile malformed; malformed.mod="tool-test"; malformed.clients="mod";
+        read_blocks(ojson{{section, ojson::array()}},&malformed);
+        CHECK(malformed.errors.size()==1 && malformed.errors[0].find(std::string(section)+": expected block name -> ")!=std::string::npos);
+        CHECK(malformed.pools.empty() && malformed.shapes.empty() && malformed.materials.empty());
+    }
     std::cout<<"tool registry: "<<checks<<" checks passed\n";
 }
