@@ -155,7 +155,7 @@ internal sealed unsafe class ItemsStorageFake : IDisposable
         public required Guid Character;
         public required ulong Step;
         public uint Player;
-        public bool Applied, Restored, Built, Left, Locked, Paired;
+        public bool Applied, Restored, Built, Left, Locked, Paired, ExtraMainPages;
         public uint Source;
         public ulong Revision, DocWitness, Changes, LastHash;
         public bool HashSeen;
@@ -230,13 +230,16 @@ internal sealed unsafe class ItemsStorageFake : IDisposable
 
     // ---- the game's side ----
 
-    /// <summary>The game read a joining character for <paramref name="slot"/>: a new join with W_g. Returns its serial.</summary>
-    public ulong JoinRead(uint slot, ulong account, Guid character, ulong witness)
+    /// <summary>The game read a joining character for <paramref name="slot"/>: a new join with W_g. Returns its serial.
+    /// <paramref name="extraMainPages"/> scripts the native witness signal for this join; the fake does not infer a
+    /// page-count baseline.</summary>
+    public ulong JoinRead(uint slot, ulong account, Guid character, ulong witness, bool extraMainPages = false)
     {
         lock (_lock)
         {
             if (_joins.TryGetValue(slot, out var old) && !old.Left) DropHolders(old);
-            var j = new Join { Slot = slot, Serial = _nextJoin++, WitnessG = witness, Account = account, Character = character, Step = StepNow };
+            var j = new Join { Slot = slot, Serial = _nextJoin++, WitnessG = witness, Account = account, Character = character, Step = StepNow,
+                ExtraMainPages = extraMainPages };
             _joins[slot] = j;
             Post(StorageNative.EventJoined, j, 0, "", (ref StorageNative.Event e) => e.Join = j.Serial);
             return j.Serial;
@@ -460,7 +463,8 @@ internal sealed unsafe class ItemsStorageFake : IDisposable
         {
             if (_registrations.Any(r => r.Key == key)) return StorageNative.InvalidArgument;
             if (_registrations.Count(r => r.Owner == owner) >= StorageNative.MaxPerMod) return StorageNative.Unavailable;
-            if (_registrations.Sum(r => r.Slots) + (int)def->Slots > StorageNative.MaxSlotsPlayer) return StorageNative.Unavailable;
+            if (_registrations.Sum(r => (r.Slots + 7) / 8 * 8) + ((int)def->Slots + 7) / 8 * 8 > StorageNative.MaxSlotsPlayer)
+                return StorageNative.Unavailable;
             var reg = new Registration
             {
                 Handle = _nextHandle++, Owner = owner, Key = key, Slots = (int)def->Slots, Death = def->Death,
@@ -710,7 +714,8 @@ internal sealed unsafe class ItemsStorageFake : IDisposable
             *out_ = default;
             out_->Size = size;
             out_->Flags = StorageNative.WitnessRead | (j.Applied ? StorageNative.WitnessApplied : 0) |
-                          (j.Restored ? StorageNative.WitnessRestored : 0) | (j.Left ? StorageNative.WitnessLeft : 0);
+                          (j.Restored ? StorageNative.WitnessRestored : 0) | (j.Left ? StorageNative.WitnessLeft : 0) |
+                          (j.ExtraMainPages ? StorageNative.WitnessExtraMainPages : 0);
             out_->Join = j.Serial;
             out_->Value = j.WitnessG;
             out_->Step = j.Step;
@@ -752,7 +757,7 @@ internal sealed unsafe class ItemsStorageFake : IDisposable
             if (e.Size < (uint)sizeof(StorageNative.Entry) || !KeyRule.IsMatch(key) || e.Kind is not (StorageNative.EntryLive or StorageNative.EntryParked) ||
                 (ulong)e.First + e.Count > doc->RecordCount || e.Slots > StorageNative.MaxSlots ||
                 (e.Kind == StorageNative.EntryLive && !liveKeys.Add(key)) ||
-                (e.Kind == StorageNative.EntryParked && e.Reason is not (>= 1 and <= 3) and not (>= StorageNative.ParkHeld and <= StorageNative.ParkLocked)))
+                (e.Kind == StorageNative.EntryParked && e.Reason is not (>= 1 and <= 3) and not (>= StorageNative.ParkHeld and <= StorageNative.ParkReturned)))
                 return StorageNative.InvalidArgument;
             keys.Add(key);
             var recs = new List<StorageFakeRecord>();
