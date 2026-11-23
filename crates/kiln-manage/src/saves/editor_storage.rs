@@ -446,6 +446,22 @@ mod tests {
     }
 
     #[test]
+    fn storage_return_raises_the_sidecar_revision_by_one_whatever_the_storage_revision() {
+        // The top-level revision is CharacterSync's: it decides whether a server takes this sidecar's OTHER mods' progress.
+        // Jumping it to the storage document's (unrelated, faster) counter would let this copy's older progress replace a
+        // server's newer one. Storage itself never follows that revision.
+        let mut f = Fixture::new();
+        let mut old = side_doc(f.request.expected_sidecar.as_bytes());
+        old["mods"]["kiln-items"]["storage"]["revision"] = 500.into();
+        f.set_expected_sidecar(&old.to_string());
+        f.planned(|doc| { doc["revision"] = 501.into(); doc["history"][0]["revision"] = 500.into(); });
+        return_for_install(&f.install, &f.request).unwrap();
+        let side = side_doc(&f.sidecar());
+        assert_eq!(side["revision"], 11);
+        assert_eq!(side["mods"]["kiln-items"]["storage"]["revision"], 501);
+    }
+
+    #[test]
     fn storage_return_writes_the_return_marker_with_the_reduced_pair() {
         let f = Fixture::new();
         return_for_install(&f.install, &f.request).unwrap();

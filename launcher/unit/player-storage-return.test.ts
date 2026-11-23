@@ -33,6 +33,15 @@ test('return adds main pages, retains all record fields, removes returned record
   expect(writeExactCharacter(result.character)).not.toEqual(writeExactCharacter(c));
 });
 
+test('the sidecar revision rises by one, never to the storage revision', async () => {
+  // CharacterSync's revision decides whether a server takes the other mods' progress; the storage counter is unrelated.
+  const { c, envelope, doc } = await fixture();
+  doc.revision = 500;
+  const result = await plan(c, envelope);
+  expect(result.sidecar.mods['kiln-items'].storage.revision).toBe(501);
+  expect(result.sidecar.revision).toBe(91);
+});
+
 test('new witness matches the written file; the old historical storage cannot return twice', async () => {
   const { c, envelope } = await fixture();
   const a = await plan(c, envelope);
