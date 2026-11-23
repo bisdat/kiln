@@ -192,7 +192,10 @@ KilnResult KILN_CALL get_default(uint32_t section, uint32_t id, KilnStr path, Ki
     original->i = authored_slots;
     return KILN_OK;
 }
+KilnCapsApi fake_caps{};
 const void* KILN_CALL service(KilnStr name, uint32_t) {
+    if (fake_caps.header.size && std::string(name.ptr, name.len) == KILN_CAPS_SERVICE)
+        return &fake_caps;
     return fake_gamedata.header.size && std::string(name.ptr, name.len) == KILN_GAMEDATA_SERVICE ? &fake_gamedata
                                                                                                  : nullptr;
 }
@@ -752,6 +755,26 @@ void review_tests() {
     kitems::world_api = nullptr;
     kitems::storage_reset();
 }
+std::vector<std::string> caps_reported;
+KilnResult KILN_CALL record_caps(KilnOwner, KilnStr name, uint32_t, uint32_t, KilnStr) {
+    caps_reported.emplace_back(name.ptr, name.len);
+    return KILN_OK;
+}
+// items.storage.client belongs to the managed kiln:storage mirror; the native service must not report it as well.
+void init_caps_test() {
+    fake_caps.header = {sizeof fake_caps, 1};
+    fake_caps.report = &record_caps;
+    fake_api.feature = +[](KilnStr) -> bool { return false; };
+    fake_api.subscribe_tick = +[](KilnOwner, int32_t, KilnTickFn, void*, KilnHandle* out) -> KilnResult {
+        *out = 1;
+        return KILN_OK;
+    };
+    fake_api.register_service = +[](KilnOwner, KilnStr, const void*) -> KilnResult { return KILN_OK; };
+    kitems::storage_init();
+    CHECK(std::count(caps_reported.begin(), caps_reported.end(), "items.storage") == 1);
+    CHECK(std::count(caps_reported.begin(), caps_reported.end(), "items.storage.client") == 0);
+    fake_caps = {};
+}
 } // namespace
 int main() {
     using namespace kitems;
@@ -926,6 +949,7 @@ int main() {
     CHECK(!character_witness(reinterpret_cast<void*>(1), &hash));
     service_tests();
     review_tests();
+    init_caps_test(); // last: storage_init replaces the structural gate the tests above use
     std::printf("storage native: %d checks, %d failed\n", checks, failed);
     return failed ? 1 : 0;
 }
