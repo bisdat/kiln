@@ -313,6 +313,19 @@ pub fn prove(inp: &Inputs, when: &str) -> Proof {
         }
         p.rows.insert(q, RowVerdict { state: state.into(), why, reason });
     }
+    // Reading an element recurses through its list row at run time. Proving the leaf alone cannot enable it.
+    for (q, registry, field, _) in regmap::qualified(&inp.map) {
+        let Some(list) = regmap::list_of(field) else { continue; };
+        let parent = format!("{}.{}", registry.registry, list);
+        if p.rows.get(&parent).is_none_or(|r| r.state != "ok") {
+            if let Some(row) = p.rows.get_mut(&q).filter(|r| r.state == "ok") {
+                let reason = format!("its list field {parent} is not proven on this build");
+                row.state = "unproven".into();
+                row.why.push(reason.clone());
+                row.reason = Some(reason);
+            }
+        }
+    }
     for a in &accepted {
         if !regmap::qualified(&inp.map).iter().any(|(q, ..)| q == *a) {
             p.notes.push(format!("--accept {a}: no such row"));
@@ -1277,6 +1290,24 @@ mod tests {
         assert_eq!(p2.rows["gadgets.size"].state, "changed");
         assert!(p2.rows["gadgets.size"].why[0].starts_with("round trip:"), "{:?}", p2.rows["gadgets.size"]);
         assert_eq!(p2.rows["gadgets.size"].reason, None);
+    }
+
+    #[test]
+    fn element_rows_require_their_list_row_to_be_ok() {
+        for cause in ["missing sample", "common unproven", "changed"] {
+            let mut inp = with_power_samples(inputs());
+            match cause {
+                "missing sample" => for suite in &mut inp.suites { suite.samples.retain(|x| x.field != "plans.parts"); },
+                "common unproven" => inp.map.get_mut("plans").unwrap().rows.get_mut("parts").unwrap().state = Some("unproven".into()),
+                _ => for suite in &mut inp.suites {
+                    for x in suite.samples.iter_mut().filter(|x| x.field == "plans.parts") { x.reverted = Some(false); }
+                },
+            }
+            let p = prove(&inp, "T");
+            assert_ne!(p.rows["plans.parts"].state, "ok");
+            assert_eq!(p.rows["plans.parts[].count"].state, "unproven", "{cause}: {:?}", p.rows["plans.parts[].count"]);
+            assert_eq!(record(&p, &candidate())["rows"]["plans.parts[].count"], "unproven");
+        }
     }
 
     /// Owner ruling (coordinator, 2026-11-22): a row that only lacks lab evidence is Unproven with its reason and stays

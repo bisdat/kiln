@@ -78,6 +78,7 @@ map::RegMap regmap() {
         "rows": {"maxStack": {"paths": ["maxStackSize"], "conv": "int", "read": "worldLoad", "backend": "live"},
                  "levels.min": {"paths": ["maxStackSize"], "conv": "int", "read": "now", "backend": "none"},
                  "levels.max": {"paths": ["levelCap"], "conv": "int", "read": "now", "backend": "none"},
+                 "hasDamage": {"paths": ["damageSetup.isSet"], "conv": "bool", "read": "now", "backend": "none"},
                  "rolled": {"paths": ["nowhere"], "conv": "bool", "read": "now", "backend": "none"},
                  "comfort": {"state": "unmapped", "reason": "not mapped yet"}}})"), &rm.registries["items"], &errs);
     map::load_common(json::parse(std::string(R"({"regmap": 1, "registry": "balance",
@@ -214,7 +215,7 @@ void with_the_request() {
     const Schema schema = generated_schema();
     TreeView view;
     auto item = [&](int n, const std::string& name, int stack) {
-        view.add("keen::ItemInfo", g(n), {{"itemId", 1000 + n}, {"objectId", g(n)}, {"debugName", name}, {"maxStackSize", stack}});
+        view.add("keen::ItemInfo", g(n), {{"itemId", 1000 + n}, {"objectId", g(n)}, {"debugName", name}, {"maxStackSize", stack}, {"damageSetup", {{"isSet", n == 2}}}});
     };
     item(1, "Wood_Logs", 10);
     item(2, "Plank", 20);
@@ -246,7 +247,7 @@ void with_the_request() {
     check(rt["format"] == 1 && rt["kind"] == "registry-roundtrip" && rt["generation"] == "boot" && rt["exeSha256"] == kExe &&
               rt["regmapDigest"] == "8ddfafff9317e303bff4f9f2c2f4a5eb1575391c0a58b1e30317e032f829d019",
           "the boot suite's head: " + rt.dump().substr(0, 300));
-    check(rt["samples"].size() == 4, "balance's boot and read-only fields, and the read-only items fields that read: " + rt["samples"].dump());
+    check(rt["samples"].size() == 5, "balance's boot and read-only fields, and the read-only items fields that read: " + rt["samples"].dump());
     bool probed = false;
     std::map<std::string, json> by;
     for (const json& s : rt["samples"]) probed |= s["field"] == "balance.levelCap" && s["readBack"] == 56, by[s["field"]] = s;
@@ -258,6 +259,8 @@ void with_the_request() {
     const json& hi = by["items.levels.max"];
     check(hi["entry"] == "game:plank" && hi["read"] == 7 && hi["rawBefore"] == json::array({7}) && !hi.contains("probe"),
           "an entry that reads no value is passed over for the next: " + hi.dump());
+    check(by["items.hasDamage"]["entry"] == "game:plank" && by["items.hasDamage"]["read"] == true,
+          "read-only bool evidence prefers true, not zero padding: " + by["items.hasDamage"].dump());
     check(!by.count("items.rolled") && !by.count("items.maxStack"),
           "a read-only field no entry reads has no sample (unproven, not an error); a live field is the live suite's");
     const json v = json::parse(files.at("proof/values-server.json"));

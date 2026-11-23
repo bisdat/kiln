@@ -40,36 +40,42 @@ void read_only(model::Model& m, model::Source& src, const Env& e, const map::Reg
         if (wit == reg.rows.end() || wit->second.paths.empty()) continue;
         static const char* const kCompared[] = {"int", "float", "bool", "time", "enum", "flags", "optionalEnum"};
         const bool compared = std::find(std::begin(kCompared), std::end(kCompared), row.conv) != std::end(kCompared);
-        for (size_t i = 0; i < es->size() && i < 64; ++i) {
-            std::optional<Value> v = m.value(reg.registry, i, field, &why);
-            if (v && !list.empty()) {
-                const Value* l = v->kind == Value::List && !v->list.empty() ? v->list[0].leaf(leaf) : nullptr;
-                v = l ? std::optional<Value>(*l) : std::nullopt;
-            }
-            if (!v) continue;
-            json read = v->to_json();
-            if (read.is_null() || (read.is_array() && read.empty())) continue;
-            const model::Entry& en = (*es)[i];
-            std::vector<uint8_t> bytes;
-            const std::string sha = e.bytes && e.bytes(en.place.key, &bytes, &why) ? sha_of(bytes) : std::string();
-            json raw = json::array();
-            bool all = true;
-            for (const std::string& p : row.paths) {
-                json mv;
-                std::string w;
-                if (!compared) {
-                    all = all && !sha.empty();
-                    raw.push_back("resource:" + sha);
+        const bool prefer_true = rs.field(f)->type == FieldType::Bool;
+        bool sampled = false;
+        for (int pass = 0; pass < (prefer_true ? 2 : 1) && !sampled; ++pass) {
+            for (size_t i = 0; i < es->size() && i < 64; ++i) {
+                std::optional<Value> v = m.value(reg.registry, i, field, &why);
+                if (v && !list.empty()) {
+                    const Value* l = v->kind == Value::List && !v->list.empty() ? v->list[0].leaf(leaf) : nullptr;
+                    v = l ? std::optional<Value>(*l) : std::nullopt;
                 }
-                else if (src.member(en.place, list.empty() ? p : wit->second.paths[0] + "[0]." + p, &mv, &w) && !mv.is_null()) raw.push_back(mv);
-                else all = false;
+                if (!v) continue;
+                json read = v->to_json();
+                if (read.is_null() || (read.is_array() && read.empty())) continue;
+                if (prefer_true && read.is_boolean() && read.get<bool>() != (pass == 0)) continue;
+                const model::Entry& en = (*es)[i];
+                std::vector<uint8_t> bytes;
+                const std::string sha = e.bytes && e.bytes(en.place.key, &bytes, &why) ? sha_of(bytes) : std::string();
+                json raw = json::array();
+                bool all = true;
+                for (const std::string& p : row.paths) {
+                    json mv;
+                    std::string w;
+                    if (!compared) {
+                        all = all && !sha.empty();
+                        raw.push_back("resource:" + sha);
+                    }
+                    else if (src.member(en.place, list.empty() ? p : wit->second.paths[0] + "[0]." + p, &mv, &w) && !mv.is_null()) raw.push_back(mv);
+                    else all = false;
+                }
+                if (!all) continue;
+                json s = {{"field", reg.registry + "." + f}, {"entry", en.id}, {"element", list.empty() ? json(nullptr) : json(0)}, {"read", read},
+                          {"rawBefore", raw}};
+                if (!sha.empty()) s["bytesBefore"] = sha;
+                samples->push_back(std::move(s));
+                sampled = true;
+                break;
             }
-            if (!all) continue;
-            json s = {{"field", reg.registry + "." + f}, {"entry", en.id}, {"element", list.empty() ? json(nullptr) : json(0)}, {"read", read},
-                      {"rawBefore", raw}};
-            if (!sha.empty()) s["bytesBefore"] = sha;
-            samples->push_back(std::move(s));
-            break;
         }
     }
 }

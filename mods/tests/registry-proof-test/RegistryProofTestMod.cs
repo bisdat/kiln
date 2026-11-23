@@ -342,7 +342,9 @@ public sealed unsafe class RegistryProofTestMod : Mod
         var tries = 0;
         var why = new SortedDictionary<string, int>(StringComparer.Ordinal); // why the entries tried gave no sample (the log, when none did)
         void Skip(string reason) => why[reason] = why.GetValueOrDefault(reason) + 1;
-        foreach (var (e, id) in entries.Take(400))
+        var candidates = entries.Take(400);
+        if (backend != "live" && conv == "bool") candidates = candidates.OrderByDescending(x => Read(registry, x.Id, element ? list : field) == "true");
+        foreach (var (e, id) in candidates)
         {
             if (mode.Length > 0)
             {
