@@ -120,9 +120,9 @@ results remain snapshots. A resolved `Registry.Read(view => ...)` frame is expir
 
 | Registry | Add | Remove |
 |---|---|---|
-| `items` | `Items.AddLike(id, like, configure)` | Hide from random-loot candidates and recipes; disable direct-drop slots that name the item. |
-| `recipes` | `Recipes.AddLike(id, like, configure)` | Hide from station lists and the all-recipes/crafting view. |
-| `loot` | Not supported | `Loot.Remove(pattern)` excludes random-loot candidates; it does not remove the item, its recipes or direct drops. |
+| `items` | `AddLike(id, like, configure)` on the stage's Items collection | Hide from random-loot candidates and recipes; disable direct-drop slots that name the item. |
+| `recipes` | `AddLike(id, like, configure)` on the stage's Recipes collection | Hide from station lists and the all-recipes/crafting view. |
+| `loot` | Not supported | `Remove(pattern)` on the stage's Loot collection excludes random-loot candidates; it does not remove the item, its recipes or direct drops. |
 | `drops`, `balance` | Not supported | Not supported; ordinary mapped field/list edits remain separate. |
 
 ```csharp

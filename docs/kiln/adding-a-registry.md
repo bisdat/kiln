@@ -6,9 +6,8 @@ five hit and the fix that is in the code now, and when a new registry is done. M
 [modding/registries/README.md](modding/registries/README.md); the native tables are [services/registry.md](services/registry.md);
 the mapping and its proof are [regmap/README.md](../../regmap/README.md) and [sigport.md](sigport.md#the-registry-proof-kilnctl-regproof).
 
-Written against dev.31 (registry P1 + P2 slices 1-4 and 6, the proof producer and the client mirror). Entry add/remove
-(P2 slice 5) is being finished; section 4 describes it as planned and ruled, and gets a touch-up when it merges.
-`file:line` references are to that tree; line numbers drift, the function and test names do not.
+Written against dev.31, including entry operations, the proof producer and the client mirror. `file:line` references
+are to that tree; line numbers drift, the function and test names do not.
 
 ## 1. What a registry is, and what is shared
 
@@ -304,13 +303,13 @@ Each row: the symptom we saw, why, the fix that is in now, and the code or test 
 Regmap reasons are player-facing (P31's rule for records): `regmap_check.py:324-330`. A reason must say what is not
 known in Kiln words, without nested parentheses (kiln.content wraps it in parentheses).
 
-## 4. Entry add and remove (being finished: P2 slice 5)
+## 4. Entry add and remove
 
-Today (integration) every entry add and remove is refused per edit with a reason (`unmapped.h`). Slice 5 is on
-`dev31/registry-entries` (S5a-S5d committed; S5e admission, managed API, docs, launcher, lab in progress). Its plan
-(SLICE5-PLAN.md in the wave folder) and rulings, for a registry that wants entries:
+Data packs and C# use the same entry operations. C# authoring starts in `RegistryStage.Add` and uses the typed
+`AddLike` and `Remove` extensions in `managed/services/Kiln.Registry/RegistryEntryOperations.cs`. The existing
+registry tables carry the entry requests; a collection with no entry backend refuses the edit with a reason.
 
-| Topic | Ruling / design |
+| Topic | Contract |
 |---|---|
 | Scope | add: items, recipes; remove: items, recipes, loot. Loot add and drops/balance add/remove stay refused with reasons |
 | When | entry operations are GameStart-only; later entry points return RestartRequired |
@@ -318,10 +317,16 @@ Today (integration) every entry add and remove is refused per edit with a reason
 | Definitions | through kiln.content's existing definition paths (`nc_define`/newcontent) under per-mod internal owners |
 | Remove | hide, never delete: the record and lookup stay so owned copies keep working; removed from loot, drops and recipe lists |
 | Drop slots | removal makes stack slots inert (spawnProbability 0 and weight 0 layers), slots and indexes kept, reported disabled; gated on proven drops rows on the running build, otherwise the item removal is refused whole ("drop tables not proven on this build"); a group that would become all zero is refused; a later live edit of a disabled slot conflicts and the removal wins while active (ruling 4:35 PM) |
-| Group spans | the filtered views keep group spans; the cache format was bumped for it |
+| Group spans | group spans are copied `BaseModel` metadata (`entryMetadata: 1` in the cache), not a filtered array; physical drop arrays never shrink |
 | Dependencies | refusal closes to a fixed point: a new entry referencing a refused/removed/missing entry is refused whole, and that propagates; existing recipes needing a hidden item are hidden with the reason, never made input-free |
 | Persistence | `MissingContent` placeholders keep stable metadata, the flattened base and effective fields; the entry structure is pinned in `kiln/data/registry/entry-compat.json` (per mod, entry and registry; cross-process lock, atomic write, a corrupt row fails closed for that entry); a reused id with another structural base needs a new id |
 | Manual | a Manual draft with any entry-operation refusal commits nothing (ruling 8:40 PM); its field-only refusals stay as in P19 |
+
+Keep the Add-stage values separate from the values after Alter and Final. The clone starts with inherited values and
+its Add overrides; later layers apply once, and removing a layer restores the Add baseline. Save the effective values
+for placeholders, not the constructor baseline. Test with a relative edit and with a reload that removes a layer.
+Replay saved references even when no registry mod is installed: that path can need stable IDs on an otherwise lazy
+start. Recheck group viability when later field edits touch a group with disabled drop slots, not just when hiding it.
 
 For the next registry: decide early whether entries can be added or removed at all. If yes, the registry needs a
 definition path in kiln.content (clone from a `like`), a hide path that keeps records, an implicit dependency rule to

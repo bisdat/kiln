@@ -245,7 +245,8 @@ arriving") compare the source owner's pages before and after with the target own
 same pages, so a stack leaving one slot and arriving in another reads as both, and "lost" or "astray" cannot be told from a
 good move; a worn item moved by the game's slot transfer is not the game's own unequip (`Items.Unequip`, which the game
 checks and replicates as the player's own); and no test or lab covers the game's transfer within one owner. To take off what
-a player wears: `Items.Unequip(player, EquipmentSlot.X)` (into a free backpack slot); to put it on: `Items.Equip`. Moving
+a player wears: for example, `Items.Unequip(player, EquipmentSlot.ArmourHead)` (into a free backpack slot); to put it on:
+`Items.Equip`. Moving
 between two slots of one chest is not offered.
 
 C (header size >= `sizeof(KilnItemsApi)` of v3): `move` (a `KilnItemsMoveRequest`: STACK, QUICK_STACK or MOVE_ALL; callback with a
