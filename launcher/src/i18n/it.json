@@ -3395,7 +3395,7 @@
       "saves": "I tuoi salvataggi e i tuoi mondi",
       "settings": "Le impostazioni delle mod e la cartella di configurazione di Kiln (possono contenere password dei server)",
       "admin": "Token e indirizzo di Kiln.Admin",
-      "mods": "Il contenuto delle tue mod (solo nomi, dimensioni e date dei file)",
+      "mods": "Il contenuto delle tue mod (sono elencati solo nomi di file e cartelle, dimensioni e date, più ID e versioni dei manifest ShroudForge nelle segnalazioni)",
       "steam": "I file di Steam stesso"
     }
   },
