@@ -23,6 +23,12 @@ public sealed class RegistryFaultingAuthor : Mod
     public override void OnRegistry(RegistryContext context) => throw new InvalidOperationException("registry startup fixture fault");
 }
 
+public sealed class RegistryExportAuthor : Mod
+{
+    public RegistryExportAuthor() => _ = Type.GetType("Fixture.Export, RuntimeOnlyExport", throwOnError: true);
+    public override void OnRegistry(RegistryContext context) { }
+}
+
 public sealed class RegistryStartupTests : ModsFixture
 {
     [Theory]
@@ -49,6 +55,27 @@ public sealed class RegistryStartupTests : ModsFixture
         var directory = WriteManifest(id, manifest.ToJsonString());
         File.Copy(typeof(RegistryStartupTests).Assembly.Location, Path.Combine(directory, "Kiln.Host.Tests.dll"));
         return directory;
+    }
+    [Fact]
+    public void ARealCollectibleExportRefusalKeepsItsActionableHintThroughLoaderWrappers()
+    {
+        var dependency = InstallAuthor("dependency", typeof(RegistryStartupAuthor));
+        var dependencyFile = Path.Combine(dependency, Kiln.Host.Manifest.FileName);
+        var dependencyManifest = JsonNode.Parse(File.ReadAllText(dependencyFile))!;
+        dependencyManifest["exports"] = new JsonArray("RuntimeOnlyExport.dll");
+        File.WriteAllText(dependencyFile, dependencyManifest.ToJsonString());
+        File.Copy(typeof(RegistryStartupTests).Assembly.Location, Path.Combine(dependency, "RuntimeOnlyExport.dll"));
+        var author = InstallAuthor("export-author", typeof(RegistryExportAuthor));
+        var authorFile = Path.Combine(author, Kiln.Host.Manifest.FileName);
+        var authorManifest = JsonNode.Parse(File.ReadAllText(authorFile))!;
+        authorManifest["dependencies"] = new JsonObject { ["dependency"] = "*" };
+        File.WriteAllText(authorFile, authorManifest.ToJsonString());
+        File.Copy(typeof(RegistryStartupTests).Assembly.Location, Path.Combine(author, "RuntimeOnlyExport.dll")); // private copy cannot bypass the export guard
+        using var native = new FakeRegistry { Phase = 0 }; using var manager = NewManager(native.Host);
+        manager.PrepareRegistry(100);
+        Assert.True(native.Host.Has("export-author game-start author"), native.Host.Dump());
+        Assert.True(native.Host.Has("ModLoad or later"), native.Host.Dump());
+        Assert.Equal(2, native.Subscriptions); // failed author retired; dependency and ready remain
     }
     [Fact]
     public void MalformedCandidatesAndAStageFaultLeaveOtherCollectibleAuthorsRunning()

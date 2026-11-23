@@ -352,7 +352,13 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
             RegistryRuntime.LastReady = null;
         }
     }
-    private void Log(string where, Exception e) => mods.Host.Log(LogLevel.Error, $"registry: {where}: {e.GetType().Name}: {e.Message}; this callback's uncommitted edits were discarded");
+    private void Log(string where, Exception e)
+    {
+        // Assembly loading and Activator wrap the typed export refusal; keep its entry-point guidance visible.
+        for (Exception? cause = e; cause is not null; cause = cause.InnerException)
+            if (cause is RegistryContextException) { e = cause; break; }
+        mods.Host.Log(LogLevel.Error, $"registry: {where}: {e.GetType().Name}: {e.Message}; this callback's uncommitted edits were discarded");
+    }
 }
 
 internal sealed partial class ModManager
