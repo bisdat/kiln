@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from peimg import Image  # noqa: E402
 from sides import SECTIONS, compose, merged  # noqa: E402
 from sigdb_check import HOLE, Resolver  # noqa: E402
+import must_port  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[2]
 SYMBOLS = REPO / "sigdb" / "symbols"
@@ -535,9 +536,12 @@ def newest(records):
     return max(records, key=lambda r: (r[1].get("steam_build", 0), r[0].name))
 
 
-def check(sides=("server", "client"), symbols_dir=SYMBOLS, builds_dir=BUILDS):
-    """-> (ok, lines). The newest record of each side must list every declared name once, each with a valid level."""
+def check(sides=("server", "client"), symbols_dir=SYMBOLS, builds_dir=BUILDS, must_port_list=must_port.LIST):
+    """-> (ok, lines). The newest record of each side must list every declared name once, each with a valid level, and
+    every must-port name of the side (tools/sigport/must_port.json) must be declared and resolved. A malformed must-port
+    list raises must_port.ListError."""
     ok, lines = True, []
+    entries = must_port.load(must_port_list)
     for side in sides:
         files = sorted((Path(builds_dir) / side).glob("*.json"))
         if not files:
@@ -585,15 +589,21 @@ def check(sides=("server", "client"), symbols_dir=SYMBOLS, builds_dir=BUILDS):
             for name, svc in listed[section].items():
                 if name not in declarer[section]:
                     bad.append(f"{section[:-1]} {name} is listed under {svc} but sigdb no longer declares it")
+        must = must_port.record_failures(entries, side, declarer, top, tag)
         counts = "; ".join(count_text(declarer, captured, s, sum(1 for n in declarer[s] if n in listed[s])) for s in SECTIONS)
         lv = ", ".join(f"{k} {levels[k]}" for k in NAME_LEVELS if k in levels)
-        if bad:
+        if bad or must:
             ok = False
             lines.append(f"FAIL {tag}: {counts}; levels {lv or '-'}")
-            lines += [f"  {b}" for b in bad]
-            lines.append(f"  fix: python3 tools/sigport/build_record.py {side} <exe> --refresh")
+            lines += [f"  {b}" for b in bad + must]
+            if bad:
+                lines.append(f"  fix: python3 tools/sigport/build_record.py {side} <exe> --refresh")
+            if must:
+                lines.append("  fix: a must-port name (tools/sigport/must_port.json) must stay declared and resolve: port its "
+                             "pattern to this build (tools/sigport/port.py), then refresh the record")
         else:
-            lines.append(f"ok   {tag}: {counts}; each once, levels {lv}")
+            n = len(must_port.for_side(entries, side))
+            lines.append(f"ok   {tag}: {counts}; each once, levels {lv}; {n} must-port name(s) resolved")
     return ok, lines
 
 
@@ -623,8 +633,13 @@ def main_check(argv):
     ap.add_argument("sides", nargs="*", choices=["server", "client"], default=None)
     ap.add_argument("--symbols", default=str(SYMBOLS), help=argparse.SUPPRESS)
     ap.add_argument("--builds", default=str(BUILDS), help=argparse.SUPPRESS)
+    ap.add_argument("--must-port", default=str(must_port.LIST), help=argparse.SUPPRESS)
     a = ap.parse_args(argv)
-    ok, lines = check(a.sides or ("server", "client"), a.symbols, a.builds)
+    try:
+        ok, lines = check(a.sides or ("server", "client"), a.symbols, a.builds, a.must_port)
+    except must_port.ListError as e:
+        print(f"build_record.py check: {e}", file=sys.stderr)
+        return 2
     print("\n".join(lines))
     return 0 if ok else 1
 

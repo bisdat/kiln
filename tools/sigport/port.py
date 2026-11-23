@@ -27,8 +27,13 @@ pass in Python) and the descriptor is checked against the new code as the core w
 now reads other argument positions, or a descriptor the core would refuse, is listed in the report as
 "sig needs review: <symbol>: was [...], is [...]" (kilnctl copies the list into NEXT.txt). A review does not make the
 port incomplete: the symbol resolves, only its typed hooks and calls stay off (sig/<symbol>) until the descriptor is fixed.
-Exit status: 0 every symbol and constant that resolved on the old exe is ported with confidence >= --min-confidence;
-1 some are missing or below it (see the report); 2 bad input.
+Must-port names (tools/sigport/must_port.json, must_port.py): a listed name the input definitions declare must resolve
+on the new exe at --min-confidence or better, also when the old exe did not resolve it; otherwise the port is
+incomplete. report.json has summary.must_port ({checked, not_declared, failed}), report.txt and stderr (also with
+--quiet) a "must-port" line per failure, and the candidate record's sigport section the failures.
+Exit status: 0 every symbol and constant that resolved on the old exe is ported with confidence >= --min-confidence
+and every must-port name the definitions declare is ported; 1 some are missing or below it (see the report); 2 bad
+input (a malformed must-port list too).
 """
 import argparse
 import bisect
@@ -44,6 +49,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from build_record import codeview  # noqa: E402
+import must_port  # noqa: E402
 from defs import Editor, Tree, new_overlay  # noqa: E402
 from exeinfo import DEFAULT_CACHE, Exe, norm_token  # noqa: E402
 from matcher import Matcher, _shape, align  # noqa: E402
@@ -972,6 +978,8 @@ def main(argv=None):
     ap.add_argument("--svn", type=int)
     ap.add_argument("--record-to", help="also write the candidate record into this builds folder when it has none "
                                         "for the new sha (e.g. sigdb/builds)")
+    ap.add_argument("--must-port", default=str(must_port.LIST),
+                    help="the must-port list (default tools/sigport/must_port.json)")
     ap.add_argument("--quiet", action="store_true")
     a = ap.parse_args(argv)
     log = (lambda *_: None) if a.quiet else (lambda m: print(f"sigport: {m}", file=sys.stderr))
@@ -984,6 +992,11 @@ def main(argv=None):
         tree = Tree(a.defs)
     except (OSError, json.JSONDecodeError) as e:
         print(f"sigport: cannot load {a.defs}: {e}", file=sys.stderr)
+        return 2
+    try:
+        must_entries = must_port.load(a.must_port)
+    except must_port.ListError as e:
+        print(f"sigport: {e}", file=sys.stderr)
         return 2
     for p in tree.problems:
         log(f"definitions: {p}")
@@ -1054,6 +1067,7 @@ def main(argv=None):
     cported = [n for n in cneed if rconsts[n]["ok_new"] and rconsts[n]["confidence"] >= a.min_confidence]
     clow = [n for n in cneed if rconsts[n]["ok_new"] and rconsts[n]["confidence"] < a.min_confidence]
     clost = [n for n in cneed if not rconsts[n]["ok_new"]]
+    must = must_port.port_check(must_entries, side, rsyms, rconsts, feats, a.min_confidence)
     changed = [s.tag for s in P.strats if s.new_pattern and s.conf >= a.min_confidence and
                (s.new_pattern != s.pattern or (s.new_offset or 0) != s.offset or s.new_size)]
     feats_old = P.old_feats
@@ -1074,7 +1088,8 @@ def main(argv=None):
         "sigs": {"described": len(rsigs), "need_review": len(sig_review)},
         "sig_review": sig_review,
         "matcher": P.M.stats(),
-        "complete": not (low or lost or clow or clost),
+        "must_port": must,
+        "complete": not (low or lost or clow or clost or must["failed"]),
     }
     report = {"tool": "sigport port", "version": TOOL_VERSION, "date": datetime.datetime.now().isoformat(timespec="seconds"),
               "side": side, "defs": str(Path(a.defs).resolve()),
@@ -1100,7 +1115,7 @@ def main(argv=None):
                    + ("" if summary["defs_unchanged"] else f"; needs symbols.patch ({len(changed)} strategies)"))
     rec["sigport"] = {"from": old.sha, "report": str((out / "report.json").resolve()),
                       "defs_unchanged": summary["defs_unchanged"], "complete": summary["complete"],
-                      "low_confidence": low + clow, "lost": lost + clost}
+                      "low_confidence": low + clow, "lost": lost + clost, "must_port": must["failed"]}
     rec["features"] = {k: bool(v) for k, v in sorted(feats.items())}
     rec["symbols"] = {k: hex(v["rva"]) for k, v in sorted(syms.items()) if not k.startswith("@") and v.get("ok")}
     rec["constants"] = {k: hex(v["value"]) for k, v in sorted(consts.items()) if v.get("ok")}
@@ -1120,6 +1135,8 @@ def main(argv=None):
         f"{len(changed)} strategies changed; report {out / 'report.txt'}")
     if mism:
         log(f"WARNING: the written tree resolves differently for {mism}")
+    for line in must["failed"]:
+        print(f"sigport: {line}", file=sys.stderr)  # with --quiet too: this port must not be taken as complete
     print(out)
     return 0 if summary["complete"] else 1
 
@@ -1194,6 +1211,12 @@ def render_text(r):
     L.append(f"constants {s['constants']['ported']}/{s['constants']['resolved_old']} ported; low confidence: "
              f"{', '.join(s['constants']['low_confidence']) or '-'}; lost: {', '.join(s['constants']['lost']) or '-'}")
     L.append(f"features  lost: {', '.join(s['features']['lost']) or '-'}")
+    mp = s.get("must_port")
+    if mp:
+        L.append(f"must-port {len(mp['checked']) - len(mp['failed'])}/{len(mp['checked'])} ported"
+                 + (f"; not in these definitions: {', '.join(mp['not_declared'])}" if mp["not_declared"] else ""))
+        for line in mp["failed"]:
+            L.append(f"          {line}")
     L.append(f"patterns  {len(s['strategies_changed'])} strategies changed"
              + ("" if s["defs_unchanged"] else " (symbols.patch)") + f"; matcher {s['matcher']}")
     if s["fixed_constants_changed"]:
