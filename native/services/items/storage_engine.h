@@ -67,6 +67,8 @@ bool destroy_holder(const Access&, const Holder*);
 bool insert_record(const Access&, const Holder&, const KilnStorageRecord&, uint32_t* reason);
 bool freeze_holder(const Holder&, void* attributes, void* bindings, EntityRef*, Entry*);
 bool clear_holder_references(uintptr_t world, uint32_t player, const Holder&);
-bool reference_write(const Access&, uint32_t player, uint32_t equip, uint64_t slot, bool only_empty = false);
+// only_empty: write only when the slot points nowhere; only_from: write only when it points into one of these pages.
+bool reference_write(const Access&, uint32_t player, uint32_t equip, uint64_t slot, bool only_empty = false,
+                     const std::vector<uint32_t>* only_from = nullptr);
 bool component_copy(uintptr_t world, uint32_t hash, uint32_t entity, void* out, size_t size);
 } // namespace kitems::storage

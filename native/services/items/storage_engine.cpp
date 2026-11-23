@@ -449,7 +449,8 @@ bool clear_holder_references(uintptr_t world, uint32_t player, const Holder& h) 
         return false;
     }
 }
-bool reference_write(const Access& a, uint32_t player, uint32_t equip, uint64_t slot, bool only_empty) {
+bool reference_write(const Access& a, uint32_t player, uint32_t equip, uint64_t slot, bool only_empty,
+                     const std::vector<uint32_t>* only_from) {
     if (equip != 12 && equip != 14 && equip != 15 && equip != 16)
         return false;
     __try {
@@ -457,7 +458,11 @@ bool reference_write(const Access& a, uint32_t player, uint32_t equip, uint64_t 
         E.write_other(&p, a.storage, E.job_tracker(a.job), a.acc[A_SLOTSEL], player, E.job_write_flag(a.ctx));
         if (!p.ptr || p.size < 216)
             return false;
-        if (only_empty && read<uint64_t>(p.ptr, equip * 8) != 0)
+        const auto current = read<uint64_t>(p.ptr, equip * 8);
+        if (only_empty && current != 0)
+            return true;
+        if (only_from &&
+            std::find(only_from->begin(), only_from->end(), KILN_SLOT_INVENTORY(current)) == only_from->end())
             return true;
         std::memcpy(static_cast<uint8_t*>(p.ptr) + equip * 8, &slot, 8);
         return true;

@@ -105,8 +105,8 @@ bool dropped_capture_batch = false;
 uint32_t refused_capture_slots = 0;
 std::vector<ClientActionLayout> client_actions;
 uint32_t input_size = 0, consumed_size = 0;
-uint32_t main_baseline = 5;
-bool baseline_authored = false;
+std::atomic<uint32_t> main_baseline{5}; // read by the join's read hook outside the model mutex
+std::atomic<bool> baseline_authored{false};
 KilnHandle retiring_subscription = 0;
 KilnStr str(const char* s) { return {s, std::strlen(s)}; }
 bool same(KilnStr s, const char* text) {
@@ -146,11 +146,11 @@ void off(uint32_t why, const std::string& text) {
     report("items.storage", KILN_CAP_UNAVAILABLE, why, text.c_str());
 }
 void resolve_main_baseline() {
-    const auto old_baseline = main_baseline;
-    const bool old_authored = baseline_authored;
+    const uint32_t old_baseline = main_baseline.load();
+    const bool old_authored = baseline_authored.load();
     static bool reported = false;
-    main_baseline = 5;
-    baseline_authored = false;
+    uint32_t pages = 5;
+    bool authored = false;
     auto gd = static_cast<const KilnGamedataApi*>(api->service(str(KILN_GAMEDATA_SERVICE), 1));
     if (gd && gd->header.size >= offsetof(KilnGamedataApi, get) + sizeof(gd->get) && gd->find && gd->get) {
         KilnGdEntry entry{};
@@ -160,18 +160,21 @@ void resolve_main_baseline() {
             gd->get(KILN_GD_TEMPLATES, entry.id, str("InventorySetup.genericSlotCount"), &current, &original) ==
                 KILN_OK &&
             original.type == KILN_CV_INT && original.i > 0 && original.i <= 128) {
-            main_baseline = static_cast<uint32_t>((original.i + 7) / 8);
-            baseline_authored = true;
+            pages = static_cast<uint32_t>((original.i + 7) / 8);
+            authored = true;
         }
     }
-    if (reported && old_baseline == main_baseline && old_authored == baseline_authored)
+    // one store each: the join's read hook never sees a half-updated baseline
+    main_baseline = pages;
+    baseline_authored = authored;
+    if (reported && old_baseline == pages && old_authored == authored)
         return;
     reported = true;
-    items_log(KILN_LOG_INFO, "player-storage: main-page baseline %u (%s)", main_baseline,
-              baseline_authored ? "1_Player original InventorySetup" : "baseline from the authored default");
+    items_log(KILN_LOG_INFO, "player-storage: main-page baseline %u (%s)", pages,
+              authored ? "1_Player original InventorySetup" : "baseline from the authored default");
     report("items.storage.main_page_baseline", KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE,
-           baseline_authored ? "1_Player original InventorySetup.genericSlotCount"
-                             : "5 pages: baseline from the authored default");
+           authored ? "1_Player original InventorySetup.genericSlotCount"
+                    : "5 pages: baseline from the authored default");
 }
 bool structural_gate() {
     return in_post && api && api->on_tick_thread() && api->server_world() &&
@@ -1939,7 +1942,9 @@ void storage_program(const Access& a) {
                                           q.index / 8 >= h->second.pages.size())))
             continue;
         uint64_t cell = q.index == KIS_REF_CLEAR ? 0 : KILN_SLOT_ID(h->second.pages[q.index / 8], q.index % 8);
-        if (reference_write(a, p->second.witness.player, q.equip, cell, q.only_empty)) {
+        // clearing touches the reference only while it still points into this storage
+        if (reference_write(a, p->second.witness.player, q.equip, cell, q.only_empty,
+                            q.index == KIS_REF_CLEAR ? &h->second.pages : nullptr)) {
             unsigned ref = q.equip == 12 ? 0 : q.equip == 14 ? 1 : q.equip == 15 ? 2 : 3;
             h->second.refs[ref] = q.index == KIS_REF_CLEAR ? KIS_REF_NONE : static_cast<uint16_t>(q.index);
             ++p->second.changes;
