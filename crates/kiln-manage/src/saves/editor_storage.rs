@@ -447,6 +447,33 @@ mod tests {
         }
     }
 
+    /// The planner's real request (launcher/unit/player-storage-golden.test.ts) through this disk boundary: the exact
+    /// sidecar a return writes, pinned as tests/fixtures/player-storage/return-sidecar.json for Kiln.Saves' pairing tests.
+    /// KILN_UPDATE_FIXTURES=1 rewrites it after an intended change.
+    #[test]
+    fn storage_return_golden_is_the_sidecar_kiln_saves_reads() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/player-storage");
+        let request: serde_json::Value = serde_json::from_slice(&std::fs::read(dir.join("return-request.json")).unwrap()).unwrap();
+        let text = request["expectedSidecar"].as_str().unwrap();
+        let r = ReturnRequest { path: String::new(), game_id: String::new(), expected_save: Vec::new(), expected_sidecar: text.into(),
+            data: Vec::new(), storage: request["storage"].as_str().unwrap().into(),
+            old_witness: request["oldWitness"].as_str().unwrap().into(), new_witness: request["newWitness"].as_str().unwrap().into() };
+        let old: serde_json::Value = serde_json::from_str(text).unwrap();
+        let id = old["character"].as_str().unwrap().to_owned();
+        let built = build_sidecar(text, &old, &serde_json::from_str(&r.storage).unwrap(), &r).unwrap();
+        let next: serde_json::Value = serde_json::from_str(&built).unwrap();
+        validate_pair(&old, &next, &r, &id).unwrap();
+        // Other mods' bytes (and a sibling of the storage value) are the original text.
+        assert!(built.contains(r#""other-mod":{"ticks":638712345678901234567,"steam":76561198000000001,"ratio":1.0,"e":1E2}"#), "{built}");
+        assert!(built.ends_with(r#","note":1.0}}}"#), "{built}");
+        assert_eq!(next["revision"], 18);
+        assert_eq!(next["mods"]["kiln-items"]["storage"]["returns"][0],
+            json!({"revision": 43, "fromWitness": r.old_witness, "toWitness": r.new_witness}));
+        let golden = dir.join("return-sidecar.json");
+        if std::env::var("KILN_UPDATE_FIXTURES").as_deref() == Ok("1") { std::fs::write(&golden, &built).unwrap(); }
+        assert_eq!(std::fs::read_to_string(&golden).unwrap(), built);
+    }
+
     #[test]
     fn storage_return_raises_the_sidecar_revision_by_one_whatever_the_storage_revision() {
         // The top-level revision is CharacterSync's: it decides whether a server takes this sidecar's OTHER mods' progress.
