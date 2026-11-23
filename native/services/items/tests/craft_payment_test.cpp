@@ -14,6 +14,10 @@ bool in_base=false;
 void* expected_tx=nullptr;
 bool wrong_tx=false;
 bool production_station=false, component_fault=false;
+std::vector<uint32_t> stock_list;                              // the base's Magic chests BaseStockForPlayer hands back
+std::vector<uint32_t> calls;                                   // every PayMaterial call, in order (entity)
+uint32_t refuse=0; uint8_t refuse_error=0x0b;                  // PayMaterial answers this entity with an error byte
+std::map<uint32_t,std::map<uint32_t,uint32_t>> counted_as;     // what the transaction's accessors show, when it differs
 }
 namespace kitems {
 Engine E{};
@@ -50,7 +54,8 @@ bool read_pages(const Access&,KilnEntity e,PageSet* out,bool* initialized) {
     *out = {}; *initialized = fixture::inventory.count(e) != 0;
     if (!*initialized) return false;
     out->n = 1; out->p[0].entity = e; size_t i=0;
-    for (auto [item,count] : fixture::inventory[e]) { if(i==8)break; out->p[0].s[i++] = {0,item,count,0}; }
+    const auto& view = fixture::counted_as.count(e) ? fixture::counted_as[e] : fixture::inventory[e];
+    for (auto [item,count] : view) { if(i==8)break; out->p[0].s[i++] = {0,item,count,0}; }
     return true;
 }
 void player_guard(const Access&,KilnEntity e,PlayerGuard* out) { *out = {}; out->is_player = e <= 1023; }
@@ -59,9 +64,14 @@ bool inventory_matches(uintptr_t,KilnEntity e,uint32_t,bool* match,unsigned long
 namespace {
 using namespace kitems;
 BaseHit* __fastcall base_at(BaseHit* hit,void*,const float*) { *hit={}; hit->error=fixture::in_base?0:0x1f;return hit; }
-void __fastcall base_stock(StockErr* err,StockLists* stock,uint64_t,uint64_t,void*,uint32_t) { *err={};err->error=fixture::stock_error;*stock={}; }
+void __fastcall base_stock(StockErr* err,StockLists* stock,uint64_t,uint64_t,void*,uint32_t) {
+    *err={};err->error=fixture::stock_error;*stock={};
+    if(!err->error){stock->items=fixture::stock_list.data();stock->nitems=fixture::stock_list.size();}
+}
 PayOut* __fastcall pay(PayOut* out,void* tx,uint32_t entity,uint32_t item,uint32_t n) {
     if(tx!=fixture::expected_tx)fixture::wrong_tx=true;
+    fixture::calls.push_back(entity);
+    if(fixture::refuse && entity==fixture::refuse) {*out={};out->error=fixture::refuse_error;out->left=0;return out;}
     if(fixture::fail_take && entity==2000) RaiseException(0xe1230001,0,0,nullptr);
     auto& count=fixture::inventory[entity][item]; const auto take=std::min(n,count); count-=take;
     if(take)fixture::paid.push_back(entity);
@@ -216,5 +226,69 @@ int main() {
     logs.clear();
     kiln_stations_set_craft_context(3000,1);kiln_stations_set_craft_context(0,0);kiln_stations_craft_done(1,3000,0x77,4);
     CHECK(!logged("'s craft of recipe"));
+    // ---- GitHub #132 (beta 1, a hosting player): the bag and the Magic chests pay first, linked sources only the rest ----
+    // A hosting client's server-world craft: stock mode 2 (the payer, then the base's Magic chests), crafted at a station,
+    // the payer standing in the base with CanAccessInventories, one link registered by a mod. Both words a bases system can
+    // sit in (+0x68, +0x70) are run. Every PayMaterial call is recorded, so "no lender call" is checked, not inferred.
+    {
+        constexpr uint32_t PAYER=1, CHEST=2100, LINKED=2000, ITEM=7;
+        uint8_t five[24]={};wr(five,0x10,ITEM);wr(five,0x14,uint32_t{5});
+        struct {void* ptr;uint64_t n;} cost5{five,1};
+        fixture::stock_error=0;fixture::stock_list={CHEST};fixture::in_base=true;fixture::server_storage=true;
+        infos[0x9d]=2;wr(infos,4,uint32_t{0});
+        uint64_t link=0;
+        CHECK(t_add_source(10,&request,&link)==KILN_OK && link!=0);
+        for (LogLimit* l : {&g_log_craft,&g_log_paid,&g_log_refused,&g_log_left}) l->budget=1000;  // every line of this block
+        auto lent_calls=[&]{return (size_t)std::count(fixture::calls.begin(),fixture::calls.end(),LINKED);};
+        auto line_with=[&](const char* s)->std::string{for(const auto& l:logs) if(l.find(s)!=std::string::npos) return l; return {};};
+        for (int word : {0x68, 0x70}) {
+            uint8_t htx[0x100]={};wr(htx,word,bases);htx[0xb1]=2;fixture::expected_tx=htx;
+            auto craft=[&](uint32_t bag,uint32_t chest,uint32_t linked,uint32_t* rc) {
+                fixture::inventory={{PAYER,{{ITEM,bag}}},{CHEST,{{ITEM,chest}}},{LINKED,{{ITEM,linked}}}};
+                fixture::paid.clear();fixture::calls.clear();logs.clear();*rc=99;
+                kiln_stations_set_craft_context(4417,1);
+                const int r=craft_pay_impl(htx,&cost5,PAYER,1,nullptr,0x1234,rc);
+                kiln_stations_set_craft_context(0,0);kiln_stations_craft_done(PAYER,4417,0x3ef55875,r?*rc:0);
+                return r;
+            };
+            uint32_t rc=0;
+            // (a) the bag covers everything: the game's own payment, no PayMaterial call from Kiln at all, no linked line
+            CHECK(craft(5,0,10,&rc)==0 && fixture::calls.empty() && lent_calls()==0);
+            CHECK(line_with("additional crafting sources").empty() && line_with("from linked sources").empty());
+            CHECK(!line_with("covered by the bag").empty() && !line_with("counted 5; the payer's bag: held 5").empty());
+            CHECK(fixture::inventory[LINKED][ITEM]==10 && fixture::inventory[PAYER][ITEM]==5);
+            // ... the bag and a Magic chest together cover it: still the game's, no lender call
+            CHECK(craft(3,2,10,&rc)==0 && fixture::calls.empty() && line_with("additional crafting sources").empty());
+            // (b) a partial bag: the bag, then the Magic chest, then the link for exactly the shortfall (2)
+            CHECK(craft(2,1,10,&rc)==1 && rc==0);
+            CHECK(fixture::calls==std::vector<uint32_t>({PAYER,CHEST,LINKED}) && fixture::paid==std::vector<uint32_t>({PAYER,CHEST,LINKED}));
+            CHECK(fixture::inventory[PAYER][ITEM]==0 && fixture::inventory[CHEST][ITEM]==0 && fixture::inventory[LINKED][ITEM]==8);
+            CHECK(!line_with("a craft paid 2 from additional crafting sources").empty());
+            CHECK(!line_with("paid 2 item(s) from linked sources or opted-in station outputs (the bag and the base's Magic chests: "
+                             "counted 3, paid 3; the payer's bag: held 2, paid 2)").empty());
+            // (c) a true shortfall, empty bag and chest: #125's linked payment unchanged, the whole cost and no more
+            CHECK(craft(0,0,10,&rc)==1 && rc==0 && fixture::inventory[LINKED][ITEM]==5 && lent_calls()==1);
+            CHECK(fixture::calls==std::vector<uint32_t>({PAYER,CHEST,LINKED}));  // the bag and the chest were asked first
+            CHECK(!line_with("a craft paid 5 from additional crafting sources").empty());
+            CHECK(!line_with("counted 0, paid 0; the payer's bag: held 0, paid 0)").empty());
+            // ... a link that cannot cover the shortfall: nothing taken
+            CHECK(craft(1,0,3,&rc)==0 && fixture::calls.empty() && !line_with("short by 1").empty());
+            // (d) a failing lender rolls the whole payment back (4), the bag's take included
+            fixture::fail_take=true;
+            CHECK(craft(2,0,10,&rc)==1 && rc==4 && !line_with("rolled back").empty());
+            fixture::fail_take=false;
+            // (e) the beta-1 log line ("paid 5 from additional crafting sources") with the bag holding all 5 in the transaction's
+            // view: never, even when the game's PayMaterial would refuse the bag; the count alone leaves it to the game
+            fixture::refuse=PAYER;
+            CHECK(craft(5,0,10,&rc)==0 && fixture::calls.empty() && line_with("additional crafting sources").empty());
+            // (f) the bag was counted to hold 3 but its take was refused: the link must not pay more than the counted
+            // shortfall (2); the craft rolls back (4) and the line says what the game refused
+            fixture::counted_as={{PAYER,{{ITEM,3}}}};
+            CHECK(craft(0,0,10,&rc)==1 && rc==4 && fixture::inventory[LINKED][ITEM]==10 && lent_calls()==0);
+            CHECK(!line_with("paid less than they were counted to hold").empty() && !line_with("refused 1 take(s), last error 0x0b").empty());
+            fixture::counted_as.clear();fixture::refuse=0;
+        }
+        g_registered.remove(10,link);fixture::stock_list.clear();fixture::expected_tx=tx;
+    }
     std::printf("craft payment: %d checks, %d failed\n",checks,failed);return failed?1:0;
 }

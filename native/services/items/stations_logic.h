@@ -758,14 +758,18 @@ enum CraftWhy : uint32_t {
     kCraftWhyShort = 2,      // a line's shortfall is more than this base's opted-in outputs hold
     kCraftWhyFault = 3,      // a take faulted
     kCraftWhyRemainder = 4,  // a line was still short after every source paid (the counts did not hold)
+    kCraftWhyGamePaidLess = 5,  // the game's own sources paid less of a line than they were counted to hold (#132)
 };
 
 // One craft paid as the game's InventoryPay pays it, with the opted-in outputs as the very last source. Every line is
 // counted first: `have(entity, item)` for the game's own sources in `order`, `lent` for the stations. Kiln pays only
 // when some line is short of the game's own sources and the outputs cover every line's shortfall (all or nothing);
 // otherwise it takes nothing and the game pays (or refuses) as always. It pays line by line: the game's sources in their
-// order as far as they pay, then that line's lenders for what is left. `pay(entity, item, &left)` takes up to *left of
-// the item from the entity and lowers *left; false when it faulted. *from_outputs: what the lenders paid.
+// order as far as they pay, then that line's lenders for what is left, never more than the shortfall counted before the
+// first take (GitHub #132: linked sources and outputs pay only what the bag and the Magic chests cannot; when those paid
+// less than they were counted to hold, the craft rolls back instead of taking the difference from the lenders).
+// `pay(entity, item, &left)` takes up to *left of the item from the entity and lowers *left; false when it faulted.
+// *from_outputs: what the lenders paid.
 template <class Have, class Pay>
 int craft_pay(std::vector<CraftCost>* lines, const std::vector<uint32_t>& order, const CraftLent& lent, Have have, Pay pay,
               uint64_t* from_outputs, uint32_t* why) {
@@ -802,7 +806,11 @@ int craft_pay(std::vector<CraftCost>* lines, const std::vector<uint32_t>& order,
                 return kCraftRollback;  // a take may already be in the transaction: the caller rolls it back
             }
         }
-        if (left && takes[i]) {
+        if (left > takes[i]) {
+            *why = kCraftWhyGamePaidLess;
+            return kCraftRollback;  // the bag's or a chest's takes are in the transaction: the caller rolls them back
+        }
+        if (left) {
             const auto by = lent.by.find(line.item);
             if (by != lent.by.end())
                 for (uint32_t e : by->second) {
@@ -1120,7 +1128,34 @@ struct CraftTrace {
     uint8_t stage = kTraceNone;
     uint64_t from = 0;
     const char* why = nullptr;  // kTraceLeft: a string literal
+    // What the game's own sources did (GitHub #132; set once the payment counted them, `counted` false before):
+    // `game_counted` what the bag and the base's Magic chests were counted to pay of the cost, `game_paid` what their
+    // takes paid; `payer_held` what the payer's own inventories held of the cost's items, `payer_paid` what was taken
+    // from them; `pay_refusals` the takes the game's PayMaterial answered with an error byte (`last_refusal`: the last).
+    bool counted = false;
+    uint64_t game_counted = 0, game_paid = 0, payer_held = 0, payer_paid = 0;
+    uint32_t pay_refusals = 0;
+    uint8_t last_refusal = 0;
 };
+// The game's own sources as the payment saw them: "; bag and Magic chests counted X, paid Y; the payer's bag held Z, paid W"
+// (paid only once something was taken), and the PayMaterial refusals when there were any.
+inline std::string craft_trace_sources(const CraftTrace& t, bool paid) {
+    if (!t.counted) return {};
+    char b[256];
+    auto u = [](uint64_t v) { return static_cast<unsigned long long>(v); };
+    if (paid)
+        std::snprintf(b, sizeof b, " (the bag and the base's Magic chests: counted %llu, paid %llu; the payer's bag: held %llu, paid %llu",
+                      u(t.game_counted), u(t.game_paid), u(t.payer_held), u(t.payer_paid));
+    else
+        std::snprintf(b, sizeof b, " (the bag and the base's Magic chests: counted %llu; the payer's bag: held %llu", u(t.game_counted),
+                      u(t.payer_held));
+    std::string s = b;
+    if (t.pay_refusals) {
+        std::snprintf(b, sizeof b, "; the game refused %u take(s), last error 0x%02x", t.pay_refusals, static_cast<unsigned>(t.last_refusal));
+        s += b;
+    }
+    return s + ")";
+}
 // A line only for a player's craft (operator 1..1023, not a station crafting into itself) while some crafting source
 // could pay it (a link registered for that player, or a station opted in).
 inline bool craft_trace_wanted(uint32_t op, uint32_t station, bool sources) {
@@ -1132,7 +1167,7 @@ inline std::string craft_trace_text(const CraftTrace& t, uint32_t op, uint32_t r
         std::snprintf(head, sizeof head, "player %u's craft of recipe 0x%08x at station %u: ", op, recipe, station);
     else
         std::snprintf(head, sizeof head, "player %u's craft of recipe 0x%08x by hand: ", op, recipe);
-    char body[320];
+    char body[640];
     const unsigned long long n = static_cast<unsigned long long>(t.from);
     switch (t.stage) {
     case kTraceNone:
@@ -1163,16 +1198,20 @@ inline std::string craft_trace_text(const CraftTrace& t, uint32_t op, uint32_t r
         std::snprintf(body, sizeof body, "left to the game: %s", t.why ? t.why : "no reason recorded");
         break;
     case kTraceCovered:
-        std::snprintf(body, sizeof body, "covered by the bag and the base's Magic chests: the game's own payment");
+        std::snprintf(body, sizeof body, "covered by the bag and the base's Magic chests: the game's own payment%s",
+                      craft_trace_sources(t, false).c_str());
         break;
     case kTraceShort:
-        std::snprintf(body, sizeof body, "short by %llu even with linked sources and opted-in station outputs: nothing taken", n);
+        std::snprintf(body, sizeof body, "short by %llu even with linked sources and opted-in station outputs: nothing taken%s", n,
+                      craft_trace_sources(t, false).c_str());
         break;
     case kTracePaid:
-        std::snprintf(body, sizeof body, "paid %llu item(s) from linked sources or opted-in station outputs", n);
+        std::snprintf(body, sizeof body, "paid %llu item(s) from linked sources or opted-in station outputs%s", n,
+                      craft_trace_sources(t, true).c_str());
         break;
     case kTraceRollback:
-        std::snprintf(body, sizeof body, "a take from crafting sources failed: the craft was rolled back, nothing moved");
+        std::snprintf(body, sizeof body, "%s: the craft was rolled back, nothing moved%s",
+                      t.why ? t.why : "a take from crafting sources failed", craft_trace_sources(t, true).c_str());
         break;
     default:
         std::snprintf(body, sizeof body, "payment stage %u", static_cast<unsigned>(t.stage));

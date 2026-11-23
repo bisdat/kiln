@@ -733,14 +733,16 @@ void one_pay_impl(void* p) {
     j->out = {};
     if (PayOut* r = G.pay(&j->out, j->tx, j->entity, j->item, j->count); r && r != &j->out) j->out = *r;
 }
-// False: the call faulted (the transaction may already hold a take).
-bool pay_one(void* tx, uint32_t entity, uint32_t item, uint32_t* left) {
+// False: the call faulted (the transaction may already hold a take). *refused: the game's error byte (0: none).
+bool pay_one(void* tx, uint32_t entity, uint32_t item, uint32_t* left, uint8_t* refused = nullptr) {
+    if (refused) *refused = 0;
     if (!*left || !entity) return true;
     OnePay j{tx, entity, item, *left, {}};
     unsigned long code = 0;
     if (!guard(&one_pay_impl, &j, &code)) return false;
     // The game ignores the out value when the error byte is set and tries the next source (InventoryPay).
     if (j.out.error == 0) *left = j.out.left;
+    else if (refused) *refused = j.out.error;
     return true;
 }
 
@@ -1131,8 +1133,31 @@ int craft_pay_impl(void* tx, void* costs, uint32_t owner, uint32_t multiplier, v
 
     uint64_t from = 0;
     uint32_t why = 0;
+    // What the game's own sources did, for the lines below (GitHub #132: a craft paid from linked sources while the
+    // player said the bag held everything; these say what the bag was counted to hold and what its takes paid).
+    uint64_t game_paid = 0, payer_paid = 0;
+    uint32_t refusals = 0;
+    uint8_t last_refusal = 0;
     const int verdict = craft_pay(&lines, order, lent, have,
-                                  [&](uint32_t e, uint32_t item, uint32_t* left) { return pay_one(tx, e, item, left); }, &from, &why);
+                                  [&](uint32_t e, uint32_t item, uint32_t* left) {
+                                      const uint32_t before = *left;
+                                      uint8_t refused = 0;
+                                      if (!pay_one(tx, e, item, left, &refused)) return false;
+                                      if (refused) ++refusals, last_refusal = refused;
+                                      if (std::find(order.begin(), order.end(), e) != order.end()) {
+                                          game_paid += before - *left;
+                                          if (e == owner) payer_paid += before - *left;
+                                      }
+                                      return true;
+                                  }, &from, &why);
+    uint64_t game_counted = 0, payer_held = 0;
+    for (const CraftCost& c : lines) game_counted += c.game, payer_held += have(owner, c.item);
+    if (t_trace.active) {
+        t_trace.counted = true;
+        t_trace.game_counted = game_counted, t_trace.game_paid = game_paid;
+        t_trace.payer_held = payer_held, t_trace.payer_paid = payer_paid;
+        t_trace.pay_refusals = refusals, t_trace.last_refusal = last_refusal;
+    }
     if (verdict == kCraftGame) {
         (why == kCraftWhyCovered ? CS.covered : CS.short_).fetch_add(1, std::memory_order_relaxed);
         if (why == kCraftWhyShort) {
@@ -1153,15 +1178,24 @@ int craft_pay_impl(void* tx, void* costs, uint32_t owner, uint32_t multiplier, v
         CS.from_outputs.fetch_add(static_cast<uint32_t>(std::min<uint64_t>(from, 0xffffffffu)), std::memory_order_relaxed);
         trace(kTracePaid, from);
         if (const uint32_t n = g_log_paid.take())
-            LOGI("stations: a craft paid %llu from additional crafting sources (base %d, payer %u)%s",
-                 static_cast<unsigned long long>(from), base, owner, n > 1 ? " (more held back)" : "");
+            LOGI("stations: a craft paid %llu from additional crafting sources (base %d, payer %u; the bag and Magic chests "
+                 "counted %llu, paid %llu; the payer's bag held %llu, paid %llu; %u take(s) refused, last error 0x%02x)%s",
+                 static_cast<unsigned long long>(from), base, owner, static_cast<unsigned long long>(game_counted),
+                 static_cast<unsigned long long>(game_paid), static_cast<unsigned long long>(payer_held),
+                 static_cast<unsigned long long>(payer_paid), refusals, static_cast<unsigned>(last_refusal),
+                 n > 1 ? " (more held back)" : "");
         *code = 0;
         return 1;
     }
     CS.rollback.fetch_add(1, std::memory_order_relaxed);
-    trace(kTraceRollback);
-    LOGW("stations: a craft paid from additional sources rolled back (%s; base %d, payer %u): nothing moved",
-         why == kCraftWhyFault ? "a take faulted" : "a line stayed short", base, owner);
+    const char* const rolled = why == kCraftWhyFault ? "a take faulted"
+                               : why == kCraftWhyGamePaidLess ? "the bag and the Magic chests paid less than they were counted to hold"
+                                                              : "a line stayed short";
+    trace(kTraceRollback, from, rolled);
+    LOGW("stations: a craft paid from additional sources rolled back (%s; base %d, payer %u; counted %llu, paid %llu; "
+         "%u take(s) refused, last error 0x%02x): nothing moved", rolled, base, owner,
+         static_cast<unsigned long long>(game_counted), static_cast<unsigned long long>(game_paid), refusals,
+         static_cast<unsigned>(last_refusal));
     *code = 4;  // a take may already be queued: CraftRecipe rolls the transaction back
     return 1;
 }
