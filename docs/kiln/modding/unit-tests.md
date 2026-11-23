@@ -392,6 +392,35 @@ public void CtrlClickAsksToMarkTheItem()
 }
 ```
 
+- **The HUD's ammunition and spell lists** (`kiln.AmmoList`, since 0.2.0-dev.30.6) <a id="ammo-lists"></a>.
+  Ui.AmmoList's own code runs on the kit's kiln.ui.ammo, so a mod's rows and its picks are tested offline. The test plays
+  the game: `kiln.AmmoList.Hold(AmmoListKind.Arrow, bow, new AmmoListRow(arrow, 20))` builds the list for a held weapon
+  with the game's own rows, `SetGameRows` changes them (the backpack changed), `Unhold` puts the weapon away,
+  `NewSession` starts another session (snapshots and queued picks cleared), `KnownItems` names the items of a kind (a row
+  of any other item is refused, as the game refuses it), `Player` sets the context's player. Each `Step()` is a UI frame:
+  the providers of a list whose context changed are asked and their composed rows published. `Shown(kind)` is the list
+  as the HUD would show it (the game's rows, then or instead the mods'), `Provided(kind)` the mods' rows, `ModeOf(kind)`
+  Append, Replace or null (the game's list as is), `Publishes` counts the snapshots. `Select` and `Selected` model the
+  selection, which stays on its item when the rows change. `Pick(kind, item)` is the player's pick: true when it is a mod
+  row the game does not list, which `Ui.AmmoList.Picked` gets at the next `Step()` (for the mod that provided it); false
+  when the game equips it itself. Switch `ui.ammo.list` or `ui.ammo.pick` off with `kiln.Capabilities.Override` to test
+  a mod's refusal path. Not modelled: the game's hook and drawing, its equip request, the server half.
+
+```csharp
+[Fact]
+public void QuiverArrowsFollowTheBackpacksAndAPickAsksTheServer()
+{
+    using var kiln = new KilnHarness();
+    kiln.Load<MyMod>();   // its OnLoad: Ui.AmmoList.Provide(AmmoListKind.Arrow, ...) and Ui.AmmoList.Picked += ...
+    kiln.Step();
+    kiln.AmmoList.Hold(AmmoListKind.Arrow, new ItemId(0xB0), new AmmoListRow(new ItemId(0x10), 20));
+    kiln.Step();
+    Assert.Equal(new AmmoListRow(new ItemId(0x30), 12), kiln.AmmoList.Shown(AmmoListKind.Arrow)[1]);
+    Assert.True(kiln.AmmoList.Pick(AmmoListKind.Arrow, new ItemId(0x30)));   // not in the backpack: the mod's
+    kiln.Step();                                                             // Picked runs here
+}
+```
+
 - **Outlines in the world** (`kiln.Outlines`, since 0.2.0-dev.30.3) <a id="outlines"></a>. `Ui.World.Outline`'s own code
   runs on the kit's kiln.render, so what a mod outlines is tested offline. `kiln.Outlines.All` lists every request the
   harness got (`FakeOutline`: entity, colour, pulse, priority, duration, state, reason, group, `ColorShared`, the mod

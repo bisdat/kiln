@@ -472,6 +472,53 @@ two chest screens (before 0.2.0-dev.30: factories only).
 **Not in this version:** a button inside the game's chest screen where Enlarge sits (drawn by the game's own button
 renderer), the game's own slot colours (marks are drawn over the slot), the gamepad's focused slot.
 
+## The HUD's ammunition and spell lists (0.2.0-dev.30.6)
+
+`Ui.AmmoList` (client only; since 0.2.0-dev.30.6, mod API 0.2.15; GitHub issue 127, thanks Fuzen777) lets a mod add rows
+to the list a bow's arrows or a staff's spells are picked from, or put its rows in place of the game's: a quiver mod shows
+the arrows its server keeps for the player, a spell-book mod the spells it grants. Native: `kiln.ui.ammo`
+(`native/core/abi/services/kiln_ui_ammo.h`, served by kiln-tools); capability rows `ui.ammo.list` (`Provide`) and
+`ui.ammo.pick` (`Picked`).
+
+```csharp
+// after the game's rows: the arrows the server keeps in this player's quiver (the mod's own data)
+using var quiver = Ui.AmmoList.Provide(AmmoListKind.Arrow, ctx =>
+    myQuiver.Select(q => new AmmoListRow(q.Item, q.Count)).ToList());
+myQuiverChanged += () => quiver.Refresh();             // Kiln cannot see the mod's own data change: ask again
+
+// the player (or the game's automatic selection) picked a quiver row the backpack does not hold: the game did nothing
+Ui.AmmoList.Picked += pick => SendToMyServer(pick.Item); // the server half checks it, then swaps the stack in
+
+// in place of the game's spells, for both lists at once (one call per list; ctx.Kind says which)
+Ui.AmmoList.Provide(AmmoListKind.Arrow | AmmoListKind.Spell, ctx => MyRows(ctx.Kind, ctx.Held, ctx.GameRows),
+    new AmmoListOptions { Mode = AmmoListMode.Replace });
+```
+
+- **When the rows are asked for.** The provider runs as your mod on the game's UI thread, never inside the game's own
+  code: once when the list is first built, then whenever its `AmmoListContext` changes (the held weapon `Held`, the
+  game's own rows or counts `GameRows`, the session) or `Refresh()` is called. Kiln copies the rows and hands the game an
+  immutable snapshot, so the HUD may show the previous context's rows for one frame. Keep it a lookup.
+- **Order and composition.** Rows show in the order returned. All providers of a list are composed in registration
+  order; the first row of an item wins, item 0 is left out, a negative count shows as 0, a list holds at most 64 rows.
+  `Append` (the default) leaves out an item the game already lists (its row keeps the real count); `Replace` shows only
+  the mods' rows, and one provider asking for it replaces the whole list. A provider that throws adds no rows that time;
+  rows the game refuses (an item that is not an arrow, or not a spell, for that list) drop that provider's rows only.
+  Both go to the mod's log.
+- **Selection.** The game keeps its selection on the same item when the rows change.
+- **Picks.** A row whose item the player carries is the game's own: it equips it as always. Any other mod row raises
+  `Picked` for the mod that provided it (on the UI thread at the next UI frame; an earlier session's picks are dropped),
+  and the game does nothing. `Picked` is a selection wish, not proof of a click: the game's own automatic selection (the
+  weapon's current ammunition is not in a replaced list, so it selects the first or the kept row) raises it too. Kiln
+  never moves an item; your server half validates the wish (the player owns the item, the weapon takes it) and ignores
+  repeats.
+- **Refusals.** `Provide` throws `KilnUnavailableException` when `ui.ammo.list` is off (a server, a game build Kiln has
+  not measured, an older kiln-tools); subscribing to `Picked` throws it when `ui.ammo.pick` is off. `Ui.AmmoList.Available`
+  and `PicksAvailable` ask first, `Capabilities.Why(Ui.AmmoList.ListCapability)` says why. Disposing the last provider of
+  a list, or unloading the mod, shows the game's own list again.
+- **Unit tests.** The test kit's `KilnHarness.AmmoList` plays the game's side (`Hold` a bow or staff with the game's
+  rows, `SetGameRows`, `NewSession`, `KnownItems`), shows what the HUD would (`Shown`, `Provided`, `ModeOf`, `Selected`)
+  and picks a row (`Pick`, raised at the next `Step`).
+
 ## Outlines on entities in the world (0.2.0-dev.30.3)
 
 `Ui.World.Outline(entity, options)` (client only, any thread) lights an entity's model with the game's own highlight:

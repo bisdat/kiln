@@ -1,1 +1,18 @@
 #nullable enable
+Kiln.TestKit.HarnessAmmoList
+Kiln.TestKit.HarnessAmmoList.Hold(Kiln.AmmoListKind kind, Kiln.ItemId weapon, params Kiln.AmmoListRow[]! gameRows) -> void
+Kiln.TestKit.HarnessAmmoList.KnownItems(Kiln.AmmoListKind kind, params Kiln.ItemId[]! items) -> void
+Kiln.TestKit.HarnessAmmoList.ModeOf(Kiln.AmmoListKind kind) -> Kiln.AmmoListMode?
+Kiln.TestKit.HarnessAmmoList.NewSession() -> void
+Kiln.TestKit.HarnessAmmoList.Pick(Kiln.AmmoListKind kind, Kiln.ItemId item) -> bool
+Kiln.TestKit.HarnessAmmoList.Player.get -> Kiln.EntityId
+Kiln.TestKit.HarnessAmmoList.Player.set -> void
+Kiln.TestKit.HarnessAmmoList.Provided(Kiln.AmmoListKind kind) -> System.Collections.Generic.IReadOnlyList<Kiln.AmmoListRow>!
+Kiln.TestKit.HarnessAmmoList.Publishes.get -> int
+Kiln.TestKit.HarnessAmmoList.Select(Kiln.AmmoListKind kind, Kiln.ItemId item) -> void
+Kiln.TestKit.HarnessAmmoList.Selected(Kiln.AmmoListKind kind) -> Kiln.ItemId?
+Kiln.TestKit.HarnessAmmoList.Session.get -> uint
+Kiln.TestKit.HarnessAmmoList.SetGameRows(Kiln.AmmoListKind kind, params Kiln.AmmoListRow[]! gameRows) -> void
+Kiln.TestKit.HarnessAmmoList.Shown(Kiln.AmmoListKind kind) -> System.Collections.Generic.IReadOnlyList<Kiln.AmmoListRow>!
+Kiln.TestKit.HarnessAmmoList.Unhold(Kiln.AmmoListKind kind) -> void
+Kiln.TestKit.KilnHarness.AmmoList.get -> Kiln.TestKit.HarnessAmmoList!
