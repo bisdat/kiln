@@ -7,6 +7,7 @@
 #include "pide.h"
 #include "upgrade_logic.h"
 #include "equip_logic.h"
+#include "storage_guard.h"
 
 #include <windows.h>
 
@@ -303,6 +304,8 @@ void run_give(const Access& a, const Job& job, uint8_t* tx, KilnItemsResult* res
         return fail(res, KILN_ITEMS_SLOT_CHANGED, "the slot (inventory %u) is not one of entity %u's slots",
                     KILN_SLOT_INVENTORY(r.slot), r.entity);
     const bool gear = (rd<uint32_t>(info, E.item_flags) & 2u) != 0;
+    if (!storage_accepts(r.entity, r.item, gear, r.slot))
+        return fail(res, KILN_ITEMS_FILTERED, "the player storage filter refuses item 0x%08x", r.item);
     if (replace && !gear) return fail(res, KILN_ITEMS_REFUSED, "item 0x%08x is no gear (no item entity to re-create)", r.item);
     if (replace && !replace_source_ok(a, r, res)) return;
     const bool player = r.entity >= 1 && r.entity <= kMaxPlayer;
@@ -325,6 +328,13 @@ void run_give(const Access& a, const Job& job, uint8_t* tx, KilnItemsResult* res
     Result12 out{};
     E.add_items(&out, tx, r.entity, r.slot, r.item, r.count, &level, &rarity, &fuel);
     const Ops ops = ops_of(tx);
+    for (uint64_t i = 0; i < ops.n && ops.p; ++i) {
+        const uint8_t* op = ops.p + i * kOpStride;
+        if (op[0x26] == 0 && !storage_accepts(r.entity, rd<uint32_t>(op, 8), gear, rd<uint64_t>(op, 0))) {
+            E.rollback(tx); E.free_arrays(tx);
+            return fail(res, KILN_ITEMS_FILTERED, "the add would exceed the player storage's filter or slots");
+        }
+    }
     uint32_t queued = 0;
     for (uint64_t i = 0; i < ops.n && ops.p; ++i) {
         const uint8_t* op = ops.p + i * kOpStride;
@@ -415,6 +425,13 @@ void run_recipe(const Access& a, const KilnItemsRequest& r, uint8_t* tx, KilnIte
     for (uint64_t i = 0; i < ops.n && ops.p; ++i) {
         const uint8_t* op = ops.p + i * kOpStride;
         if (op[0x26] == 0) add_change(res, rd<uint64_t>(op, 0), rd<uint32_t>(op, 8), rd<uint16_t>(op, 0x24), 0);
+    }
+    for (uint64_t i = 0; i < ops.n && ops.p; ++i) {
+        const uint8_t* op = ops.p + i * kOpStride;
+        if (op[0x26] == 0 && !storage_accepts(r.entity, rd<uint32_t>(op, 8), false, rd<uint64_t>(op, 0))) {
+            E.rollback(tx); E.free_arrays(tx); res->change_count = 0;
+            return fail(res, KILN_ITEMS_FILTERED, "recipe outputs fail the player storage filter");
+        }
     }
     res->game_error = rc;
     const bool dry = (r.flags & KILN_ITEMS_DRY_RUN) != 0;
@@ -559,8 +576,11 @@ bool matches(uintptr_t world, KilnEntity e, uint32_t flags) {
     const auto* setup = static_cast<const uint8_t*>(component(world, kHashInventorySetup, e, kSetupSize));
     if (!setup || !setup[E.setup_initialized]) return false;
     const uint8_t f = setup[kSetupFlags];
+    const bool holder = storage_holder(e);
+    if (holder && !(flags & KILN_ITEMS_FIND_PLAYER_STORAGE)) return false;
     const uint32_t kinds = flags & 7u;
-    if (kinds) {
+    if (!holder && !kinds && (flags & KILN_ITEMS_FIND_PLAYER_STORAGE)) return false;
+    if (kinds && !holder) {
         const bool player = (f & 1u) != 0, npc = (f & 2u) != 0;
         const bool ok = ((flags & KILN_ITEMS_FIND_PLAYERS) && player) || ((flags & KILN_ITEMS_FIND_NPCS) && npc) ||
                         ((flags & KILN_ITEMS_FIND_CONTAINERS) && !player && !npc);
@@ -910,6 +930,8 @@ uint32_t move_stack_impl(const Access& a, void* tx, KilnEntity from, uint64_t sl
     if (!info) return move_why(mo, KILN_ITEMS_REFUSED, "item 0x%08x is not in the item registry", first.item), 0;
     const uint32_t max_stack = rd<uint16_t>(info, E.item_max_stack);
     const bool gear = pide_of(first) != 0 || (rd<uint32_t>(info, E.item_flags) & 2u) != 0;
+    if (!storage_accepts(to, first.item, gear, to_slot))
+        return move_why(mo, KILN_ITEMS_FILTERED, "the player storage filter refuses this stack"), 0;
     const uint32_t want = count ? count : first.count;
     if (want > first.count) return move_why(mo, KILN_ITEMS_NOT_ENOUGH, "the slot holds %u, not %u", first.count, want), 0;
     // where it may land (issue #109): a person's Generic pages, the worn backpack's included, never an equipment,
@@ -936,6 +958,7 @@ uint32_t move_stack_impl(const Access& a, void* tx, KilnEntity from, uint64_t sl
             break;
         }
         if (where != DestKind::Found) break;
+        if (!storage_accepts(to, first.item, gear, dst)) break;
         alignas(8) Result12 r[3] = {};
         E.slot_transfer(&r[0], tx, dst, slot, whole ? 0 : 2);
         if (r[0].error != 0) {
@@ -980,6 +1003,11 @@ LedgerTotals fill_changes(KilnItemsMoveResult* res, const std::vector<PageSet>& 
 }
 
 void run_move_impl(const Access& a, const KilnItemsMoveRequest& r, uint8_t* tx, KilnItemsMoveResult* res) {
+    if (!storage_mutable(r.from) || !storage_mutable(r.to))
+        return move_fail(res, KILN_ITEMS_UNAVAILABLE, "player storage persistence is unavailable");
+    if ((r.from >= 1 && r.from <= 16 && !storage_actor(r.to, r.from)) ||
+        (r.to >= 1 && r.to <= 16 && !storage_actor(r.from, r.to)))
+        return move_fail(res, KILN_ITEMS_REFUSED, "the storage belongs to another player");
     if (!E.slot_transfer || !E.quick_stack || !E.move_all)
         return move_fail(res, KILN_ITEMS_UNAVAILABLE, "the game's slot transfer is not available on this build");
     std::vector<PageSet> v(4);
@@ -988,6 +1016,11 @@ void run_move_impl(const Access& a, const KilnItemsMoveRequest& r, uint8_t* tx, 
         return move_fail(res, KILN_ITEMS_NO_INVENTORY, "entity %u has no initialized inventory", r.from);
     if (!read_pages_impl(a, r.to, &v[2], &init_t) || !init_t)
         return move_fail(res, KILN_ITEMS_NO_INVENTORY, "entity %u has no initialized inventory", r.to);
+    if (r.kind != KILN_MOVE_STACK && storage_contains(r.to)) {
+        for (uint32_t i = 0; i < v[0].n; ++i) for (const auto& stack : v[0].p[i].s)
+            if (!is_empty(stack) && !storage_accepts(r.to, stack.item, pide_of(stack) != 0))
+                return move_fail(res, KILN_ITEMS_FILTERED, "a stack fails the player storage filter");
+    }
     const bool dry = (r.flags & KILN_ITEMS_MOVE_DRY_RUN) != 0;
     alignas(16) uint8_t s[kSetupBlock];
     fill_setup_for(a, 0, 0, s);
@@ -1050,6 +1083,12 @@ void run_move_impl(const Access& a, const KilnItemsMoveRequest& r, uint8_t* tx, 
                               "rolled back: %u item(s) left the slot without arriving in entity %u", totals.lost, r.to);
         }
     }
+    for (const Change& c : landed) {
+        if (!storage_accepts(r.to, c.item, c.pide != 0, c.to_slot)) {
+            res->status = KILN_ITEMS_FILTERED;
+            std::snprintf(res->message, sizeof res->message, "the move fails the player storage filter or slot limit");
+        }
+    }
     const bool ok = res->status == KILN_ITEMS_DONE || res->status == KILN_ITEMS_PARTIAL;
     // A canceled quick stack / move all still commits what a handler moved itself first (shroudlink's `on_transfer`
     // moves are the mods' own, whatever the game's transfer then does); nothing moved: nothing to commit.
@@ -1064,6 +1103,7 @@ void run_move_impl(const Access& a, const KilnItemsMoveRequest& r, uint8_t* tx, 
         }
         return;
     }
+    if (!ok) { res->done = 0; res->change_count = 0; return; }
     res->canceled = canceled ? 1 : 0;
     if (game_error) {
         res->done = 0;
@@ -1125,6 +1165,9 @@ bool verify_access(const uint64_t* it, const int* sing, const int* accs, const i
 }
 
 bool run_job(const Access& a, const Job& job, uint8_t* tx, KilnItemsResult* res, unsigned long* code) {
+    if (!storage_mutable(job.r.entity) || !storage_mutable(KILN_SLOT_INVENTORY(job.r.slot))) {
+        fail(res, KILN_ITEMS_UNAVAILABLE, "player storage persistence is unavailable"); return true;
+    }
     __try {
         if (job.take) run_take(a, job.r, tx, res);
         else if (job.r.flags & KILN_ITEMS_RECIPE) run_recipe(a, job.r, tx, res);

@@ -18,6 +18,14 @@ internal sealed class BlockContext(ModBlocks mod, string block)
     /// <summary>What this block lowers to, for what a field adds on the way: a VFX's carrier template.</summary>
     public Lowered? Low { get; set; }
 
+    /// <summary>What is wrong with the block but loaded in 0.2.0-dev.30.6 without harm: it still loads, as it did then, and says so in
+    /// one warning when it is committed (BlockCompat). <c>kiln lint</c> and the schema report each as an error.</summary>
+    public List<(string Field, string Problem)> Tolerated { get; } = new();
+
+    /// <summary>Notes a field that loaded in 0.2.0-dev.30.6 and still loads, as it did then. <paramref name="problem"/>: what is wrong,
+    /// and what the value does.</summary>
+    public void Tolerate(string field, string problem) => Tolerated.Add((field, problem));
+
     public EffectBlock Effect(EffectRef r, string path)
     {
         if (r.Name == null) return r.Inline!;
@@ -181,6 +189,12 @@ internal static partial class Compiler
             _ => DefineItemBlock(ctx, low, name, block) ?? DefineAbilityBlock(ctx, low, name, block) ?? DefineScreenBlock(ctx, low, name, block) ?? DefineNpcBlock(ctx, low, name, block) ?? DefineQuestBlock(ctx, low, name, block) ?? DefineUiBlock(ctx, low, name, block) ?? throw new BlockError(label, null, $"{typeof(T).Name} is not a block Kiln can compile yet"),
         };
         if (block is ITweakable { Tweak.Count: > 0 } tweak) low.Tweak(label, block is StatusBlock ? "buffs" : block is PerkBlock ? "perks" : "items", handle.GameName, tweak.Tweak);
+        if (ctx.Tolerated.Count > 0)
+        {
+            low.Tolerated.AddRange(ctx.Tolerated);
+            var notes = ctx.Tolerated.ToList();
+            low.AfterCommit(() => BlockCompat.Warn(mod, label, notes));
+        }
         return (handle, low, label);
     }
 
@@ -208,6 +222,9 @@ internal static partial class Compiler
     {
         if (string.IsNullOrWhiteSpace(s.Name)) throw new BlockError(ctx.Block, "name", "a status needs a name players can read");
         if (s.While == null && s.Seconds <= 0) throw new BlockError(ctx.Block, "seconds", $"{s.Seconds} must be more than 0");
+        // 0.2.0-dev.30.6 refused it only with onTick (the status program's wait); without, nothing reads it
+        if (s.TickEvery <= 0 && s.OnTick is { Count: > 0 }) throw new BlockError(ctx.Block, "tickEvery", $"{s.TickEvery} must be more than 0");
+        if (s.TickEvery <= 0) ctx.Tolerate("tickEvery", $"{s.TickEvery} must be more than 0; the status has no onTick, so nothing reads it");
         if (s.Seconds < 0) throw new BlockError(ctx.Block, "seconds", $"{s.Seconds} is less than 0");
         var key = s.Was ?? name;
         var guid = BlockIds.Derive(ctx.Mod.Id, "buff", key);
@@ -403,6 +420,9 @@ internal sealed class Lowered(ModBlocks mod)
     private readonly HashSet<Guid> _carriers = new();
 
     public JsonObject Json { get; } = new();
+
+    /// <summary>The block's fields that loaded in 0.2.0-dev.30.6 and still load with a warning (<see cref="BlockContext.Tolerated"/>).</summary>
+    public List<(string Field, string Problem)> Tolerated { get; } = new();
 
     private JsonArray Arr(string key) => (Json[key] ??= new JsonArray()).AsArray();
 

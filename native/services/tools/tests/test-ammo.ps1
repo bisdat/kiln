@@ -11,7 +11,7 @@ $discovery = Start-Process -FilePath $vswhere -ArgumentList '-latest','-products
 if ($discovery.ExitCode -ne 0) { throw 'MSVC toolchain discovery failed' }
 $vs = (Get-Content -Raw "$out\vswhere.txt").Trim()
 if (-not $vs) { throw 'No installed MSVC toolchain' }
-$tests = @('ammo_abi','ammo_list','ammo_allocation','ammo_scope','ammo_sources','ammo_hook','presentation','presentation_api','presentation_admission','brush_frame','held_state','held_observer','service_presentation_lifecycle')
+$tests = @('ammo_abi','ammo_list','ammo_allocation','ammo_scope','ammo_sources','ammo_hook','presentation','presentation_api','presentation_admission','brush_frame','brush_trace','held_state','held_observer','service_presentation_lifecycle')
 $lines = @('@echo off', "call `"$vs\VC\Auxiliary\Build\vcvars64.bat`" >nul", 'if errorlevel 1 exit /b 1', "cd /d `"$out`"")
 foreach ($test in $tests) {
     $extra = if ($test -eq 'service_presentation_lifecycle') { "`"$here\..\hooks\presentation.cpp`"" } else { '' }
