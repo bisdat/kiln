@@ -380,7 +380,8 @@ void read_mod(const std::string& dir, const fs::path& pending_root, const kiln::
             continue;
         }
         if (!doc.is_object() ||
-            (!doc.contains("buildingMaterialPools") && !doc.contains("materialTweaks") && !doc.contains("buildingMaterials") && !doc.contains("blueprints") && !doc.contains("terrainMaterials") && !doc.contains("craftingProps") &&
+            (!doc.contains("buildingMaterialPools") && !doc.contains("materialTweaks") && !doc.contains("buildingMaterials") && !doc.contains("blueprints") &&
+             !doc.contains("toolBrushShapes") && !doc.contains("toolMaterialPools") && !doc.contains("terrainMaterials") && !doc.contains("craftingProps") &&
              !doc.contains("props") && !doc.contains("stations") && !doc.contains("containers") && !doc.contains("doors") && !doc.contains("beds") && !doc.contains("seats")))
             continue;
         read_blocks(doc, &mf);
