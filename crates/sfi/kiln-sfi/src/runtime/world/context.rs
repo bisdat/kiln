@@ -93,6 +93,8 @@ pub const CAPABILITY: &str = "world.lifecycle";
 /// `context_active`'s reason without a live context (read_world_context.rs:40).
 pub const NOT_ACTIVE: &str = "active voxel world context is not available";
 
+const ECS_SCENE_TRANSITIONING: &str = "ecs-active-scene-is-transitioning";
+
 /// What kind of world the live context is (`ContextKind`, track_world_context.cpp:216-226).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ContextKind {
@@ -175,18 +177,29 @@ impl WorldContext {
     /// The world ShroudForge's ECS binds now, its local authority's when there is one (1.7.9
     /// engine-context/resolve_engine_owners.cpp:65,133): on a server the server world; on a client the hosted server
     /// world while it hosts (single player included), else the client world (a joined client's replicated copies).
-    /// With that world's live session ([`Self::read_world`]'s checks), 0 without one.
-    pub fn ecs_world(&self) -> (u32, u64) {
+    /// With that world's live session ([`Self::read_world`]'s checks), 0 outside a world. A hosting client whose hosted
+    /// world is not live (starting or stopping) answers the resolver's transition refusal (resolve_engine_owners.cpp:56):
+    /// the ECS is then not ready and binds no world, never the resident client world. A server never refuses here.
+    pub fn ecs_world(&self) -> Result<(u32, u64), &'static str> {
         let server = KILN_WORLD_SERVER as u32;
-        if self.side == Side::Client {
-            let hosted = self.read_world(server);
-            if hosted.active() {
-                return (server, hosted.session);
-            }
-            let client = KILN_WORLD_CLIENT as u32;
-            return (client, self.read_world(client).session);
+        let hosted = self.read_world(server);
+        if self.side == Side::Server || hosted.kind == ContextKind::Direct {
+            return Ok((server, hosted.session));
         }
-        (server, self.read_world(server).session)
+
+        let client = KILN_WORLD_CLIENT as u32;
+        let joined = self.read_world(client);
+        if joined.kind == ContextKind::ClientReadOnly {
+            return Ok((client, joined.session));
+        }
+        if joined.kind == ContextKind::Direct
+            || self.services.session().is_some_and(|session| {
+                session.lifecycle != 0 && session.state == KILN_SESSION_HOST as u32
+            })
+        {
+            return Err(ECS_SCENE_TRANSITIONING);
+        }
+        Ok((client, 0))
     }
 
     /// The live context of world kind `world` of this process, with every check of [`Self::read`] (a dedicated

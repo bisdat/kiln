@@ -153,6 +153,8 @@ pub enum Engine {
     #[serde(rename = "shroudforge")]
     ShroudForge,
     Eml,
+    #[serde(rename = "eml-r")]
+    EmlR,
     Set,
     Enshwick,
     Greeneye,
@@ -203,6 +205,9 @@ pub const ENGINES: &[EngineInfo] = &[
     EngineInfo { engine: Engine::Emf, word: "emf", name: "EMF", proxies: &["dinput8.dll"],
         exports: &["emf_loader_identity", "emf_loader_play_once"], texts: &["emf-loader-7d3c9f"],
         what: "the Enshrouded Modding Framework" },
+    // EML-R's proxy names its config or runtime and can also contain the broader ShroudForge and EML texts.
+    EngineInfo { engine: Engine::EmlR, word: "eml-r", name: "Enshrouded Mod Loader - Revamped", proxies: &["dbghelp.dll"],
+        exports: &[], texts: &["eml-r.json", "eml_r.dll"], what: "a DLL and Lua mod loader" },
     EngineInfo { engine: Engine::ShroudForge, word: "shroudforge", name: "ShroudForge",
         proxies: &["dinput8.dll", "dbghelp.dll", "winmm.dll"], exports: &["ShroudforgeSetDinput8Provider"],
         texts: &["shroudforge"], what: "a Lua mod loader" },
@@ -282,6 +287,7 @@ impl Engine {
             Engine::Emf => ProxyKind::Emf,
             Engine::ShroudForge => ProxyKind::ShroudForge,
             Engine::Eml => ProxyKind::Eml,
+            Engine::EmlR => ProxyKind::EmlR,
             Engine::Set => ProxyKind::Set,
             Engine::Enshwick => ProxyKind::Enshwick,
             Engine::Greeneye => ProxyKind::Greeneye,
@@ -787,7 +793,7 @@ pub fn engine_kind(engine: Engine) -> DetectKind {
         Engine::Dllmod => DetectKind::Dllmod,
         Engine::UltimateAsiLoader => DetectKind::Asi,
         Engine::ReShade => DetectKind::Reshade,
-        Engine::OptiScaler => DetectKind::Proxy,
+        Engine::OptiScaler | Engine::EmlR => DetectKind::Proxy,
         Engine::ModLoaderProxy | Engine::Aldrich | Engine::LiveMap | Engine::SharedXp | Engine::ChainLoader
             | Engine::NativeFolders => DetectKind::Proxy,
     }
@@ -1222,6 +1228,7 @@ mod tests {
         assert_eq!(kind_of(&[d8], b"..EMF-LOADER-7d3c9f.."), ProxyKind::Emf);
         assert_eq!(kind_of(&[d8], b"x shroudforge\\config"), ProxyKind::ShroudForge);
         assert_eq!(kind_of(&["MiniDumpWriteDump"], b"EML_LOG_FILE_PATH"), ProxyKind::Eml);
+        assert_eq!(kind_of(&["MiniDumpWriteDump"], &utf16("mods\\eml_r\\EML_R.DLL")), ProxyKind::EmlR);
         assert_eq!(kind_of(&["PowerGetActiveScheme"], b"shrouded_engine_tweaks\\plugins"), ProxyKind::Set);
         assert_eq!(kind_of(&["PowerGetActiveScheme"], b"mods\\enshwick\\enshwick.dll"), ProxyKind::Enshwick);
         assert_eq!(kind_of(&["MiniDumpWriteDump"], b"Greeneye Loader 1.2.2"), ProxyKind::Greeneye);

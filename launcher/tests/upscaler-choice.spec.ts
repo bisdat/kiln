@@ -21,7 +21,7 @@ const vmock = <T,>(page: Page, fn: string, ...args: unknown[]) =>
 const kilnJson = async (page: Page) => (await mock<{ graphics?: Record<string, unknown> }>(page, "kilnJsonValues")).graphics ?? {};
 
 async function open(page: Page) {
-  await page.goto("/#/settings");
+  await page.goto("/#/settings/graphics");
   await page.locator(".k-splash").waitFor({ state: "detached" });
 }
 /** Leaves the page and comes back (the mock keeps its state; a reload would forget it): the page reads again. */
@@ -30,7 +30,7 @@ async function again(page: Page, away: string, back: string) {
   await page.waitForTimeout(150);
   await page.evaluate((h) => { location.hash = h; }, back);
 }
-const block = (page: Page) => page.getByRole("group", { name: "Behind the game's FSR 3" });
+const block = (page: Page) => page.getByRole("region", { name: "Behind the game's FSR 3" });
 const files = (page: Page) => page.getByRole("region", { name: "Upscaler files" });
 
 const state = (upscaler: Record<string, unknown>) => ({
@@ -114,7 +114,7 @@ test.describe("desktop: Settings, Graphics", () => {
     await open(page);
     await mock(page, "setKilnJson", "graphics", { upscaler: "amd", amdUpscaler: "auto" });
     await vmock(page, "install", "amd-fsr", "2.4.0");
-    await again(page, "#/about", "#/settings");
+    await again(page, "#/about", "#/settings/graphics");
     const b = block(page);
     await expect(b.getByLabel("Upscaler")).toHaveValue("amd");
     await mock(page, "setGraphicsState", state({ running: "amdFsr4", version: "4.1.2" }));
@@ -157,7 +157,7 @@ test.describe("desktop: Settings, Graphics", () => {
     await mock(page, "setKilnJson", "graphics", { upscaler: "xess" });
     await vmock(page, "install", "intel-xess", "3.0.2");
     await mock(page, "setGraphicsStepAside", [{ kind: "optiscaler", file: "dxgi.dll", frameCap: true, upscaler: true }]);
-    await again(page, "#/about", "#/settings");
+    await again(page, "#/about", "#/settings/graphics");
     const b = block(page);
     await expect(b.getByTestId("upscaler-status-line")).toHaveText(["Kiln steps aside for OptiScaler, so it does not change the game's FSR 3."]);
     await expect(page.getByTestId("graphics-step-aside")).toHaveText(

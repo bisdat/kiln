@@ -941,10 +941,12 @@ internal static partial class KilnApis
         "P:Kiln.Time.Available=kiln.time", // T != null: Services.Get("kiln.time")
         "P:Kiln.Time.CanSetSpeed=kiln.time", // via Kiln.Time.HasScale
         "P:Kiln.Time.WeatherChoiceAvailable=kiln.time,time.weather_choose", // T3 != null: Services.Get("kiln.time"); Is("time.weather_choose")
+        "P:Kiln.ToolMaterials.Available=tools.material_snapshot", // Is("tools.material_snapshot")
         "P:Kiln.Ui.Available=kiln.ui", // via Kiln.UiNative.Available
         "P:Kiln.Ui.Crafting.MenuAvailable=kiln.craftmenu", // UiNative.Craft != null: Services.Get("kiln.craftmenu")
         "P:Kiln.Ui.ItemIconsAvailable=kiln.assets", // via Kiln.ResourceStore.HasTextureRgba
         "P:Kiln.Ui.World.OutlinesAvailable=ui.world_outline", // Is("ui.world_outline")
+        "P:Kiln.Ui.World.ThroughWallsAvailable=ui.world_outline.through_walls", // Is("ui.world_outline.through_walls")
         "P:Kiln.UiWheel.Available=kiln.ui", // UiNative.T2 != null: Services.Get("kiln.ui")
         "P:Kiln.UiWheel.IsAnyOpen=kiln.ui", // t != null: Services.Get("kiln.ui")
         "P:Kiln.UpgradeStation.Available=blocks.upgrade_station", // Is("blocks.upgrade_station")
@@ -996,6 +998,7 @@ internal static partial class KilnApis
         "Systems",
         "Terrain",
         "Time",
+        "Tools",
         "Ui",
         "Vfx",
         "World",

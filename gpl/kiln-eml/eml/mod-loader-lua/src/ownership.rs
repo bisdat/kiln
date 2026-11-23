@@ -79,7 +79,10 @@ thread_local! { static DISPLACED: std::cell::RefCell<Vec<String>> = const { std:
 /// `reset_read`: kiln-eml builds from the vanilla backup, so this start's game data does not have their patches. (It
 /// publishes only in a start where ShroudForge does not run: hosted ShroudForge makes it stand aside.)
 pub(crate) fn displaced() -> Vec<String> { DISPLACED.with(|d| d.borrow().clone()) }
-fn count(n: usize) { READ.with(|r| r.set(r.get() + n as u64)); }
+fn count(n: usize) {
+    READ.with(|r| r.set(r.get() + n as u64));
+    crate::progress::archive_work::add(n as u64);
+}
 
 pub(crate) fn digest(root: &Path, path: &Path) -> io::Result<Digest> {
     checked_path(root, path)?;
@@ -308,6 +311,9 @@ pub mod readonly {
     }
     impl Default for SealCrc { fn default() -> Self { Self::new() } }
 
+    /// kiln-eml: how a working baseline's header relates to the live header (the writer's rule, `load::base_relation`).
+    pub use crate::load::{base_relation, BaseRelation};
+
     /// A seal's recorded (length, CRC-64) of the header backup and the resource backup; None when it is not one.
     pub fn seal(bytes: &[u8]) -> Option<((u64, u64), (u64, u64))> {
         #[derive(Deserialize)]
@@ -400,6 +406,21 @@ impl<'a> Live<'a> {
             _ => Ok(None),
         }
     }
+}
+
+/// kiln-eml: the live header is one Kiln's ownership receipt lists for its current or previous generation, whatever
+/// backups the receipt names: Kiln's own output, never a game file to take a backup of. Reads the receipt, and hashes the
+/// live header only when a listed one has its length. Err: a receipt Kiln does not understand, or an unreadable header.
+pub(crate) fn header_is_kilns(root: &Path, stem: &str) -> io::Result<bool> {
+    let Some(receipt) = read_receipt(root, stem)? else { return Ok(false) };
+    let name = format!("{stem}.kfc");
+    let header = root.join(&name);
+    let size = fs::metadata(&header)?.len();
+    let listed: Vec<&Digest> = std::iter::once(&receipt.files).chain(receipt.previous.as_ref())
+        .filter_map(|generation| generation.get(&name)).filter(|d| d.size == size).collect();
+    if listed.is_empty() { return Ok(false); }
+    let live = digest(root, &header)?;
+    Ok(listed.into_iter().any(|d| *d == live))
 }
 
 /// Exact output and original working-baseline proof. Legacy performance caches never authorize restoration.
@@ -628,7 +649,9 @@ pub(crate) fn prepare_from(root: &Path, from: &Path, stem: &str, files: &[PathBu
                 collisions.insert(name.to_owned(), current.unwrap());
             }
         }
-        if live.size(name)? != Some(expected.size) || live.digest(name)?.as_ref() != Some(&expected) { changed = true; }
+        // kiln-eml: whether the live file is already this one only matters to ShroudForge's handoff (Live); a Deferred
+        // publication hands nothing over, so it does not hash the live resource file to find out
+        if !deferred && (live.size(name)? != Some(expected.size) || live.digest(name)?.as_ref() != Some(&expected)) { changed = true; }
         output.insert(name.to_owned(), expected);
     }
     if !output.contains_key(&format!("{stem}.kfc")) || !output.contains_key(&format!("{stem}.kfc_resources")) {

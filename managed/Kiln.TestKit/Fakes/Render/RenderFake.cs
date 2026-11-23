@@ -55,7 +55,7 @@ internal sealed unsafe class RenderFake : IKitFake
         {
             var v2 = (RenderNative.TableV2*)NativeMemory.AllocZeroed((nuint)sizeof(RenderNative.TableV2));
             var t = &v2->Base;
-            t->Header = new ServiceHeader { Size = (uint)sizeof(RenderNative.TableV2), Version = 2 };
+            t->Header = new ServiceHeader { Size = (uint)sizeof(RenderNative.TableV2), Version = 3 };  // v3: through walls (0.2.0-dev.30.5)
             t->GetStatus = &Status;
             t->AcquireFrames = &AcquireFrames;
             t->Release = &Release;
@@ -104,8 +104,8 @@ internal sealed unsafe class RenderFake : IKitFake
 
     public void AddCoverage(List<CoverageRow> rows) =>
         rows.Add(new CoverageRow("Outlines in the world", CoverageKind.RecordingFake, [Service, OutlineRow],
-            "Ui.World.Outline's own code on the kit's kiln.render v2: each request is recorded with its entity, colour, pulse, " +
-            "priority and duration (KilnHarness.Outlines.All, Live, Of, Showing); at the start of the next step the native rules " +
+            "Ui.World.Outline's own code on the kit's kiln.render v3: each request is recorded with its entity, colour, pulse, " +
+            "priority, duration and ThroughWalls flag (KilnHarness.Outlines.All, Live, Of, Showing); at the start of the next step the native rules " +
             "decide its state: on one entity the highest priority, then the newest, shows and the others wait (Outshone); the " +
             "game's own highlight shows instead (GameHighlight) unless the player's setting is mods-first; off keeps every " +
             "request waiting; an entity without a model waits (HideModel); two colours at once and a third shares the nearest " +
@@ -245,7 +245,7 @@ internal sealed unsafe class RenderFake : IKitFake
         {
             if (h != null) *h = 0;
             if (owner == 0 || entity == 0 || o == null || h == null || o->Size < (uint)sizeof(RenderNative.Outline) ||
-                (o->Rgba & 0xFF) == 0 || (o->Flags & ~RenderNative.OutlinePulse) != 0 || o->Reserved != 0)
+                (o->Rgba & 0xFF) == 0 || (o->Flags & ~(RenderNative.OutlinePulse | RenderNative.OutlineThroughWalls)) != 0 || o->Reserved != 0)
                 return FakeTables.InvalidArgument;
             if (FakeTables.Off(OutlineRow) || KitBackend.Instance.Harness is not { } harness || State is not { } st)
                 return FakeTables.Unavailable;
@@ -274,18 +274,28 @@ internal sealed unsafe class RenderFake : IKitFake
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int OutlineInfo(ulong handle, RenderNative.OutlineInfo* o)
     {
-        if (o == null || o->Size < (uint)sizeof(RenderNative.OutlineInfo)) return FakeTables.InvalidArgument;
-        if (State is not { } st) return FakeTables.NotFound;
-        lock (st.Lock)
-        {
-            if (Find(st, handle) is not { } r) return FakeTables.NotFound;
-            o->State = r.State;
-            o->Reason = r.Reason;
-            o->Entity = r.Entity;
-            o->Group = r.Group;
-            o->Merged = r.Merged;
-        }
-        return FakeTables.Ok;
+        // v3's position tail is optional: native outline_info still accepts the v2 24-byte prefix, and never writes a
+        // partial position record. Unmodelled positions stay zero even when the caller's buffer contained old data.
+        const uint oldSize = 24;
+        if (o == null || o->Size < oldSize) return FakeTables.InvalidArgument;
+        var size = o->Size >= (uint)sizeof(RenderNative.OutlineInfo) ? (uint)sizeof(RenderNative.OutlineInfo) : oldSize;
+        RenderNative.OutlineInfo full = new() { Size = size };
+        var rc = FakeTables.NotFound;
+        if (State is { } st)
+            lock (st.Lock)
+            {
+                if (Find(st, handle) is { } r)
+                {
+                    full.State = r.State;
+                    full.Reason = r.Reason;
+                    full.Entity = r.Entity;
+                    full.Group = r.Group;
+                    full.Merged = r.Merged;
+                    rc = FakeTables.Ok;
+                }
+            }
+        Buffer.MemoryCopy(&full, o, size, size);
+        return rc;
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]

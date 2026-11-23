@@ -1,0 +1,11 @@
+{
+  "format": 1,
+  "side": "client",
+  "extends": "server.d/tools_terrain.json",
+  "comment": "Client 26430625 terrain dispatch uses a different relative kernel call than server 26430253. The call-site anchor is unique per side; the shared original-entry prologue is checked again before installation. Evidence: docs/re/terrain-tool-carve.md.",
+  "symbols": {
+    "tools/TerrainCarveDispatch": {
+      "find": [{"pattern": "4C 8D 45 80 48 89 44 24 20 E8 48 70 00 00 84 C0 0F 84", "offset": -1242}]
+    }
+  }
+}

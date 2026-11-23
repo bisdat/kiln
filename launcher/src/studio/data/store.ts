@@ -6,6 +6,7 @@ import { create } from "zustand";
 import * as api from "../../api/commands";
 import type { LintReport, StudioPickHit } from "../../api/commands";
 import { sk } from "../state";
+import { setUnsaved } from "../../shell/unsaved";
 
 export const dk = {
   texts: (id: string) => ["studio_layer_texts", id] as const,
@@ -88,6 +89,8 @@ export const useDrafts = create<DraftStore>((set) => ({
   by: {},
   set: (key, d) => set((s) => { const by = { ...s.by }; if (d) by[key] = d; else delete by[key]; return { by }; }),
 }));
+// an unsaved draft holds the launcher update's own restart (shell/unsaved.ts)
+useDrafts.subscribe((s) => setUnsaved("studio-drafts", Object.values(s.by).some((d) => d.dirty) ? "studio" : null));
 
 /** An editor's value: its unsaved draft, else what the file holds now. */
 export function useDraft<T>(key: string, fileText: string | undefined, derive: (text: string | undefined) => T) {

@@ -514,7 +514,7 @@ public sealed unsafe class ItemIconPathTests : IDisposable
         var node = Assert.Single(LowerBoot(dir, staged)["docs"]!["skills"]!.AsArray())!["document"]!["nodes"]![0]!;
         Loaded(dir);
         var runtime = (string?)Compiler.Lower(NewMod(Boot), "boot-talent", BlockJson.Parse<TalentBlock>(json)).Low.Json["node"]!["iconFile"];
-        Assert.Equal(Path.Combine(dir, "icons/token.png"), runtime);
+        Assert.Equal(Path.GetFullPath(Path.Combine(dir, "icons/token.png")), runtime);
         Assert.Equal(runtime, (string?)node["iconFile"]);
     }
 

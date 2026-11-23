@@ -77,7 +77,7 @@ test("import → switch on → the load order of every kind", async ({ page }) =
   const errors = await collectErrors(page, async () => {
     // the power user's way: Settings "Switch new mods on" off, a drop joins the list switched off (the default, a drop
     // that is on at once: tests/firstrun.spec.ts)
-    await open(page, "/settings");
+    await open(page, "/settings/mods");
     await page.getByText("Switch new mods on", { exact: true }).click();
     await expect(page.getByRole("switch", { name: /^Switch new mods on/ })).not.toBeChecked();
     await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Play" }).click();
@@ -201,6 +201,23 @@ test("while kiln-eml prepares the game data the launch status says how far it is
   // Kiln boots (boot.json is written): the launch status moves on
   await expect(page.locator(".k-head-state")).toHaveText(/^Running/, { timeout: 8000 });
   await expect(hero.getByText("Preparing the game data for EML mods")).toHaveCount(0);
+  await page.evaluate(() => (window as unknown as M).__kilnMock.setPreStart(null));
+  await page.evaluate(() => (window as unknown as M).__kilnMock.stopGame());
+  await expect(page.locator(".k-head-state")).toHaveText("Stopped");
+});
+
+test("while a kiln-mode start prepares its ShroudForge mods the launch status names the step", async ({ page }) => {
+  type M = { __kilnMock: { stopGame: () => void; setPreStart: (p: unknown) => void } };
+  await open(page, "/");
+  await page.evaluate(() => (window as unknown as M).__kilnMock.setPreStart({
+    stage: "startup", label: "Preparing ShroudForge mods for Kiln's interpreter", doneBytes: 470810624, totalBytes: 0, filesDone: 0,
+    filesTotal: 0, quietMs: 0, step: "verify", stepNumber: 3, steps: 5,
+    message: "Preparing ShroudForge mods for Kiln's interpreter: checking the prepared game data (3 of 5).",
+  }));
+  await page.locator(".k-door").click();
+  const hero = page.locator(".k-hero");
+  await expect(hero.getByText("Preparing ShroudForge mods for Kiln's interpreter: checking the prepared game data (3 of 5).")).toBeVisible();
+  await expect(hero.getByText("Waiting for Kiln to boot.")).toHaveCount(0);
   await page.evaluate(() => (window as unknown as M).__kilnMock.setPreStart(null));
   await page.evaluate(() => (window as unknown as M).__kilnMock.stopGame());
   await expect(page.locator(".k-head-state")).toHaveText("Stopped");
@@ -359,7 +376,7 @@ test("a server without Kiln offers Install Kiln on Overview; one with Kiln offer
   const more = page.getByRole("button", { name: "More server actions" });
   const banner = page.locator(".k-banner").filter({ hasText: "Kiln isn't installed" });
   // running with Kiln: no banner, the menu updates it
-  await expect(page.locator(".k-overview")).toBeVisible();
+  await expect(page.locator(".k-sov")).toBeVisible();
   await expect(banner).toHaveCount(0);
   await more.click();
   await expect(page.getByRole("menuitem", { name: "Update Kiln…" })).toBeVisible();
@@ -373,21 +390,22 @@ test("a server without Kiln offers Install Kiln on Overview; one with Kiln offer
   await page.keyboard.press("Escape");
   await banner.getByRole("button", { name: "Install Kiln" }).click();
   await page.getByRole("dialog", { name: "Install Kiln" }).getByRole("button", { name: "Install" }).click();
-  const done = page.locator(".k-toast").filter({ hasText: "Kiln 0.2.0-dev+20261104.0f1ffa6 installed" });
-  await expect(done).toBeVisible({ timeout: 8000 });
-  await expect(done.locator(".k-toast-detail")).toHaveCount(0);
+  // the result shows in the server's activity panel (a toast only when the server's page is not open)
+  const done = page.locator(".k-sact[data-state=done] .k-sact-result");
+  await expect(done).toHaveText("Kiln 0.2.0-dev+20261104.0f1ffa6 installed", { timeout: 8000 });
+  await expect(done.locator(".k-muted")).toHaveCount(0);
   await expect(banner).toHaveCount(0);
   await more.click();
   await expect(page.getByRole("menuitem", { name: "Update Kiln…" })).toBeVisible();
   await page.keyboard.press("Escape");
-  // running without Kiln: the banner says why its button waits
+  // running without Kiln: installing stops it first and starts it again, said on the banner (servers revamp part 1)
   await page.evaluate(() => (window as unknown as M).__kilnMock.setServer({ running: true, installed: null }));
-  await expect(banner.locator(".k-banner-text")).toHaveText("Stop the server to install it.");
-  await expect(banner.getByRole("button", { name: "Install Kiln" })).toBeDisabled();
+  await expect(banner.locator(".k-banner-text")).toHaveText("The server is running: installing stops it first and starts it again afterwards.");
+  await expect(banner.getByRole("button", { name: "Install Kiln" })).toBeEnabled();
 });
 
 test("the loaded profile is chosen in Settings, Profiles", async ({ page }) => {
-  await open(page, "/settings");
+  await open(page, "/settings/mods");
   const sec = page.getByRole("region", { name: "Profiles" });
   const row = sec.getByRole("listitem").filter({ hasText: "Vanilla plus" });
   await row.getByRole("button", { name: "Load" }).click();
@@ -526,8 +544,8 @@ test("OptiScaler next to the game says what Kiln's overlay does on Play", async 
 
 test("Settings, Graphics edits kiln.json's graphics section and says which tools Kiln steps aside for", async ({ page }) => {
   type Mock = { __kilnMock: { kilnJsonValues: () => { graphics?: Record<string, unknown> }; setGraphicsStepAside: (t: unknown) => void } };
-  await open(page, "/settings");
-  const card = page.getByRole("region", { name: "Graphics" });
+  await open(page, "/settings/graphics");
+  const card = page.getByRole("region", { name: "Kiln's graphics tools" });
   await expect(card).toBeVisible();
   for (const key of ["graphics.fpsCap", "graphics.dlssPreset", "graphics.dlssScale", "graphics.dlssRenderScale", "graphics.dlssQualityScale",
     "graphics.dlssBalancedScale", "graphics.dlssPerformanceScale", "graphics.dlssUltraPerformanceScale", "graphics.readout"])
@@ -545,8 +563,8 @@ test("Settings, Graphics edits kiln.json's graphics section and says which tools
   await expect.poll(() => page.evaluate(() => (window as unknown as Mock).__kilnMock.kilnJsonValues().graphics?.readout)).toBe(true);
   await card.getByRole("button", { name: "Reset DLSS render preset to its default" }).click();
   await expect.poll(() => page.evaluate(() => (window as unknown as Mock).__kilnMock.kilnJsonValues().graphics?.dlssPreset)).toBeUndefined();
-  // the preview's DLSSTweaks, then OptiScaler: one line each
-  const lines = card.getByTestId("graphics-step-aside");
+  // the preview's DLSSTweaks, then OptiScaler: one line each, at the top of the section
+  const lines = page.getByTestId("graphics-step-aside");
   await expect(lines).toHaveText(["DLSSTweaks is installed (dlsstweaks.ini): Kiln's DLSS settings step aside; the frame cap and the readout still work."]);
   await page.evaluate(() => (window as unknown as Mock).__kilnMock.setGraphicsStepAside([
     { kind: "optiscaler", file: "dxgi.dll", frameCap: true }, { kind: "nvngx", file: "nvngx.dll", frameCap: false },
@@ -571,7 +589,7 @@ test("Settings, kiln.json: the Developer debugging switch writes developer_debug
 
 test("destructive actions need the typed word, in the arch", async ({ page }) => {
   // a profile's Delete (Settings, Profiles) keeps its typed word whatever "Type a mod's name to remove it" says
-  await open(page, "/settings");
+  await open(page, "/settings/mods");
   const sec = page.getByRole("region", { name: "Profiles" });
   await sec.getByRole("button", { name: "Save current as…" }).click();
   await page.getByRole("dialog", { name: "Save current as" }).getByLabel("Name").fill("Throwaway");
@@ -611,29 +629,34 @@ test("a state push from the Emberwatch Lua mod (empty lists as {}) does not brea
 // element, capped by this instead.
 const LOAD = { timeout: 30_000 };
 
-test("one grouped list per server: Run, World, Data, Files", async ({ page }) => {
+test("seven section tabs per server, and a section's pages as a second row", async ({ page }) => {
   await open(page, "/servers/lab/admin/players");
-  const list = page.getByRole("navigation", { name: "Server" });
-  await expect(list).toBeVisible(LOAD);
-  for (const g of ["Run", "World", "Data", "Files"]) await expect(list.getByRole("group", { name: g })).toBeVisible();
-  await expect(list.getByRole("link")).toHaveCount(21);
-  await expect(list.getByRole("link", { name: "Players" })).toHaveAttribute("aria-current", "page");
-  await list.getByRole("link", { name: "Map", exact: true }).click();
+  const tabs = page.getByRole("navigation", { name: "Server" });
+  await expect(tabs).toBeVisible(LOAD);
+  await expect(tabs.getByRole("link")).toHaveText([/^Overview/, /^Console/, /^Players/, /^World/, /^Mods/, /^Backups/, /^Settings/]);
+  await expect(tabs.getByRole("link", { name: /^Players/ })).toHaveAttribute("aria-current", "page");
+  const sub = page.getByRole("navigation", { name: "Players" });
+  await expect(sub.getByRole("link")).toHaveText(["Players", "Permissions", "Combat"]);
+  await tabs.getByRole("link", { name: /^World/ }).click();
   await expect(page).toHaveURL(/#\/servers\/lab\/admin\/map$/);
-  await expect(list.getByRole("link", { name: "Map", exact: true })).toHaveAttribute("aria-current", "page");
-  // server pages and admin pages share the list
-  await list.getByRole("link", { name: "Backups", exact: true }).click();
+  await page.getByRole("navigation", { name: "World" }).getByRole("link", { name: "Zones" }).click();
+  await expect(page).toHaveURL(/#\/servers\/lab\/admin\/zones$/);
+  // on a section's other page its tab is still the current one (and the page's own in the second row)
+  await expect(tabs.getByRole("link", { name: /^World/ })).toHaveAttribute("aria-current", "page");
+  await expect(tabs.locator("[aria-current]")).toHaveCount(1);
+  await expect(page.getByRole("navigation", { name: "World" }).getByRole("link", { name: "Zones" })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("navigation", { name: "World" }).getByRole("link", { name: "Map" })).not.toHaveAttribute("aria-current", /./);
+  await tabs.getByRole("link", { name: /^Backups/ }).click();
   await expect(page).toHaveURL(/#\/servers\/lab\/backups$/);
-  // the merged pages: the old admin routes land on them (the router redirects them; the admin pages' bundle is not
-  // waited for), then the page loads
+  // old links still land: the merged admin routes redirect; the console has its own page now
   await open(page, "/servers/lab/admin/console");
-  await expect(page).toHaveURL(/#\/servers\/lab\/overview$/);
+  await expect(page).toHaveURL(/#\/servers\/lab\/console$/);
   await expect(page.getByRole("log", { name: "Server console" })).toBeVisible(LOAD);
   await open(page, "/servers/lab/admin/mods");
   await expect(page).toHaveURL(/#\/servers\/lab\/mods$/);
-  // the list fits 800 high without scrolling
-  const box = await list.evaluate((el) => ({ scroll: el.scrollHeight, client: el.clientHeight }));
-  expect(box.scroll).toBeLessThanOrEqual(box.client + 1);
+  await open(page, "/servers/lab/ticks");
+  await expect(page.getByRole("navigation", { name: "Console" }).getByRole("link", { name: "Tick stats" })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("navigation", { name: "Server" }).getByRole("link", { name: /^Console/ })).toHaveAttribute("aria-current", "page");
 });
 
 test("schema form edits a config value", async ({ page }) => {

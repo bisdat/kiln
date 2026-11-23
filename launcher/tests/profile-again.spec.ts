@@ -27,7 +27,7 @@ test("a profile deleted and made again under the same name takes the next switch
     await expect.poll(async () => (await profileMods(page)).shroudforge[0].enabled).toBe(on === "true");
   }
   // Settings: another profile loaded, Ember run deleted, a new one saved under its name and loaded
-  await page.evaluate(() => { location.hash = "#/settings"; });
+  await page.evaluate(() => { location.hash = "#/settings/mods"; });
   const sec = page.getByRole("region", { name: "Profiles" });
   await sec.getByRole("listitem").filter({ hasText: "Vanilla plus" }).getByRole("button", { name: "Load" }).click();
   await expect(sec.getByRole("listitem").filter({ hasText: "Vanilla plus" })).toContainText("Loaded", { timeout: 10_000 });

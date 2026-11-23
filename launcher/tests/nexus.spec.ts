@@ -43,7 +43,7 @@ test("Nexus build: no update word or notice in the header, even when an update s
 });
 
 test("Nexus build: Settings and About show only 'New versions: Nexus Mods', which opens the Kiln page", async ({ page }) => {
-  await open(page, "/settings");
+  await open(page, "/settings/online");
   const card = page.locator(".k-card", { has: page.getByRole("heading", { name: "Updates" }) });
   await expect(card.getByTestId("nexus-versions")).toHaveText("New versions: Nexus Mods");
   await expect(card.getByRole("button", { name: "Check now" })).toHaveCount(0);
@@ -103,7 +103,7 @@ test("direct build: the update UI stays and the Nexus line is absent", async ({ 
   await expect(page.getByText("Up to date ·")).toBeVisible();
   await expect(page.getByRole("button", { name: "Check now" })).toBeVisible();
   await expect(page.getByTestId("nexus-page")).toHaveCount(0);
-  await open(page, "/settings", "/");
+  await open(page, "/settings/online", "/");
   const card = page.locator(".k-card", { has: page.getByRole("heading", { name: "Updates" }) });
   await expect(card.getByRole("switch", { name: /Check automatically/ })).toBeChecked();
   await expect(card.getByTestId("nexus-versions")).toHaveCount(0);

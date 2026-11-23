@@ -2,7 +2,7 @@
 -- Adapted from ShroudForge (MIT, Copyright (c) 2026 bonsaibauer)
 -- Source (identical in both pins): modules/mod-runtime/lua/ingame/overrides/
 -- track_runtime_overrides.lua:1-210. ShroudForge's tracker, unchanged except the lines marked
--- "Kiln:": an owned entry remembers the live world session it was bound in (beside the
+-- "Kiln:": an owned entry remembers the live world kind and session it was bound in (beside the
 -- entry, so the public owned/blocked/touched/details shapes stay ShroudForge's), and restore never
 -- writes into another nonzero session. There a non-shared entry is dropped without a write (the
 -- storage went with its world, as begin_update's reset does) and a shared one waits with
@@ -15,22 +15,26 @@ local world_changed = "World changed before shared values were restored. Restart
 
 local function new(get_session)
     local self = {owned={}, blocked={}, writes=0, waiting_count=0, details={}}
-    -- Kiln: the nonzero live session each owned entry was bound in (weak keys: the entry is
+    -- Kiln: the world kind and nonzero session each owned entry was bound in (weak keys: the entry is
     -- held by owned while it matters).
     local bound = setmetatable({}, {__mode="k"})
-    local function live_session() return get_session and get_session() end
+    local previous_kind
+    local function live_session()
+        if get_session then return get_session() end
+    end
 
     function self:begin_update()
         self.writes, self.waiting_count, self.details = 0, 0, {}
         self.touched = {}
-        local current = get_session and get_session()
+        local kind, current = live_session()
         if current and current ~= 0 then
-            if self.session and current ~= self.session then
+            if self.session and (current ~= self.session or (previous_kind and previous_kind ~= kind)) then
                 if self:has_shared_ownership() then
                     self.fault = world_changed
                 else self:reset() end
             end
             self.session = current
+            previous_kind = kind
         end
     end
 
@@ -157,8 +161,8 @@ local function new(get_session)
             shared=shared or adapter.shared, claim=claim}
         if fresh then
             -- Kiln: read the live session once, when the entry is bound.
-            local session = live_session()
-            if session and session ~= 0 then bound[entry] = session end
+            local kind, session = live_session()
+            if session and session ~= 0 then bound[entry] = {kind=kind, session=session} end
         end
         entry.adapter = adapter
         self.owned[key] = entry
@@ -174,8 +178,9 @@ local function new(get_session)
         if self.fault then self:waiting(self.fault) return end
         if entry.uncertain then self:waiting("Uncertain write requires inspection: " .. entry.setting) return end
         -- Kiln: never into another world session (read once per restore; 0 is no world end).
-        local session, current = bound[entry], live_session()
-        if session and current and current ~= 0 and current ~= session then
+        local previous = bound[entry]
+        local kind, current = live_session()
+        if previous and current and current ~= 0 and (current ~= previous.session or kind ~= previous.kind) then
             if entry.shared then self:waiting(world_changed) return end
             release(key, entry)
             return

@@ -23,6 +23,8 @@ macro_rules! failpoint {
 pub use cache::FingerprintStats;
 // kiln-eml: what a run is doing, for the people waiting for it (progress.rs).
 pub use progress::{Event, Progress, ProgressGuard, Sink, Stage, Timing};
+// kiln-eml: the startup pass's progress from the archive work itself (progress.rs)
+pub use progress::archive_work;
 
 mod runner;
 mod definition;
@@ -167,7 +169,7 @@ fn run_steps(
 
     if let Some(staged) = executed.staged.take() {
         // Same error text as EML's `finalize`: an I/O failure of the publisher is a KFCWriteError.
-        let prepared = staged.writer.prepare()?;
+        let prepared = staged.writer.prepare().map_err(load::stage_refusal(&staged.completion.file_name))?;
         let generation = staged.completion.generation;
         published = Some((publish(prepared, generation, env.game_dir().as_std_path(), &staged.completion.file_name, &ownership::Publication::default())
             .map_err(kfc::container::KFCWriteError::from)?, staged.completion));

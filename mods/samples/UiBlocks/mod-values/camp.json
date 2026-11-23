@@ -1,0 +1,14 @@
+{
+  "format": 1,
+  "values": {
+    "rests": {
+      "kind": "counter",
+      "label": {
+        "en": "Rests at the fire"
+      },
+      "numberFormat": "N0",
+      "readPolicy": "ownerOnly",
+      "sync": "ownerMod"
+    }
+  }
+}

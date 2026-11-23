@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <set>
@@ -445,6 +446,66 @@ void read_blocks(const ojson& doc, ModFile* out) {
             out->pools.push_back(std::move(p));
         }
     }
+    if (auto section = doc.find("toolMaterialPools"); section != doc.end()) {
+        if (!section->is_object()) err("toolMaterialPools: expected block name -> block");
+        else for (auto it = section->begin(); it != section->end(); ++it) {
+            PoolDefinition p; p.mod = out->mod; p.block = it.key(); p.tool = true; p.dependencies = out->dependencies;
+            const auto& j = it.value();
+            auto bad = [&](const std::string& why) { p.valid = false; err("block toolMaterialPool " + p.block + ": " + why); };
+            if (!valid_name(p.block) || !j.is_object()) bad("expected a named pool object");
+            std::string was;
+            if (j.is_object()) {
+                for (auto f = j.begin(); f != j.end(); ++f) {
+                    if (f.key() == "name") { if (!f->is_string() || f->get<std::string>().empty()) bad("name is required"); }
+                    else if (f.key() == "was") { if (!f->is_string() || !valid_name(f->get<std::string>())) bad("invalid was"); else was = f->get<std::string>(); }
+                    else if (f.key() != "entries") bad("unknown field " + f.key());
+                }
+                if (!j.contains("name")) bad("name is required");
+                if (!j.contains("entries") || !j["entries"].is_array() || j["entries"].empty() || j["entries"].size() > kPoolCapacity)
+                    bad("entries takes 1..64 terrain items");
+                else for (const auto& e : j["entries"]) {
+                    PoolEntry entry;
+                    if (!e.is_object() || e.size() != 3 || !e.contains("item") || !e["item"].is_string() || e["item"].get<std::string>().empty() ||
+                        !e.contains("terrainMaterial") || !e["terrainMaterial"].is_number_integer() || e["terrainMaterial"].get<int64_t>() < 1 || e["terrainMaterial"].get<int64_t>() > 127 ||
+                        !e.contains("voxelsPerItem") || !e["voxelsPerItem"].is_number_integer() || e["voxelsPerItem"].get<int64_t>() < 1 || e["voxelsPerItem"].get<int64_t>() > 1000000)
+                        bad("each entry takes item, terrainMaterial (1..127), voxelsPerItem (1..1000000)");
+                    else { entry.item = e["item"].get<std::string>(); Guid guid; if (Guid::parse(entry.item, &guid)) entry.item = std::to_string(item_id_of(guid)); entry.terrain_material = e["terrainMaterial"].get<uint32_t>(); entry.voxels_per_item = e["voxelsPerItem"].get<uint32_t>(); }
+                    p.entries.push_back(std::move(entry));
+                }
+            }
+            if (out->clients != "mod") bad("requires clients: mod");
+            p.guid = derive_guid(p.mod, "toolmaterialpool", was.empty() ? p.block : was);
+            p.definition = nlohmann::json::parse(j.dump()).dump();
+            out->pools.push_back(std::move(p));
+        }
+    }
+    // Computed brush descriptors emitted by Kiln.Blocks. These do not make ordinary BlueprintBlock
+    // accept terrain data: a separate section owns the raw-fill shape contract.
+    if (auto section = doc.find("toolBrushShapes"); section != doc.end()) {
+        if (!section->is_object()) err("toolBrushShapes: expected block name -> shape");
+        else for (auto it = section->begin(); it != section->end(); ++it) {
+            const auto& j = it.value();
+            auto bad = [&](const std::string& why) { err("block terrainBrush " + it.key() + ": " + why); };
+            Shape shape; shape.mod = out->mod; shape.block = it.key(); shape.terrain_brush = true;
+            if (!valid_name(it.key()) || !j.is_object() || j.size() != 3 || !j.contains("item") || !j["item"].is_string() ||
+                !Guid::parse(j["item"].get<std::string>(), &shape.item) || shape.item.zero() || !j.contains("shape") || j["shape"] != "sphere" ||
+                !j.contains("radius") || !j["radius"].is_number()) { bad("expected item GUID, sphere shape and radius"); continue; }
+            const double radius = j["radius"].get<double>();
+            if (!std::isfinite(radius) || radius < 0.25 || radius > 8 || out->clients != "mod") { bad("radius is 0.25..8 metres; requires clients: mod"); continue; }
+            const auto side = static_cast<uint32_t>(std::ceil(radius * 4)); // half-metre cells, diameter 2r
+            shape.x = shape.y = shape.z = side; shape.item_id = item_id_of(shape.item);
+            shape.bits.resize(size_t(side) * side * side, 0);
+            // Sample each voxel centre; a terrain brush's registry payload contains fill bytes, not material ids.
+            for (uint32_t z = 0; z < side; ++z) for (uint32_t y = 0; y < side; ++y) for (uint32_t x = 0; x < side; ++x) {
+                const double dx = (double(x) + 0.5 - double(side) / 2) * 0.5;
+                const double dy = (double(y) + 0.5 - double(side) / 2) * 0.5;
+                const double dz = (double(z) + 0.5 - double(side) / 2) * 0.5;
+                if (dx * dx + dy * dy + dz * dz <= radius * radius) shape.bits[x + side * (y + side * z)] = 255;
+            }
+            shape.definition = nlohmann::json::parse(j.dump()).dump();
+            out->shapes.push_back(std::move(shape));
+        }
+    }
     read_crafting_props(doc, out);
 }
 
@@ -840,8 +901,9 @@ std::string handshake_hash(const std::vector<Placed>& placed, const std::vector<
     std::sort(sorted.begin(),sorted.end(),[](const auto& a,const auto& b){return a.guid.text()<b.guid.text();});
     u32(uint32_t(sorted.size()));
     for(const auto& pool:sorted) {
-        bytes(pool.guid.b.data(),16);u32(item_id_of(pool.guid));u32(pool.roof?1:0);u32(uint32_t(pool.items.size()));
+        bytes(pool.guid.b.data(),16);u32(item_id_of(pool.guid));u32((pool.roof?1u:0u) | (pool.tool?2u:0u));u32(uint32_t(pool.items.size()));
         for(uint32_t item:pool.items)u32(item);
+        if (pool.tool) { for (uint32_t cell : pool.terrain_materials) u32(cell); for (uint32_t rate : pool.voxels_per_item) u32(rate); }
     }
     std::vector<Shape> bindings;
     for(const auto& shape:shapes)if(!shape.pool.zero())bindings.push_back(shape);
@@ -1126,21 +1188,54 @@ bool pool_ref(const std::string& text, const std::string& owner, const std::stri
     return text==(mod==owner?key:mod+":"+key) || text==mod+":"+key;
 }
 }
+bool terrain_pool_items(const Bytes& pools, const Layouts& L, std::set<uint32_t>* items, std::string* why) {
+    items->clear();
+    const auto fail=[&](const char* reason){*why=reason;return false;};
+    if(L.pool_stride!=24 || L.pool_id!=4 || L.pool_materials!=8 || L.pool_name!=16)
+        return fail("vanilla terrain pool: reflected row layout is unavailable or unsupported");
+    ArrayView rows;if(!array_at(pools,L.pools,L.pool_stride,&rows))return fail("vanilla terrain pool: registry does not read");
+    bool found=false;std::set<uint32_t> members;
+    for(uint32_t i=0;i<rows.count;++i) {
+        const size_t rec=size_t(rows.base-pools.data())+size_t(i)*L.pool_stride;
+        const int32_t rel=rd<int32_t>(pools.data()+rec+L.pool_name);
+        const uint32_t len=rd<uint32_t>(pools.data()+rec+L.pool_name+4);
+        const int64_t at=int64_t(rec+L.pool_name)+rel;
+        if(!rel || at<=0 || uint64_t(at)+len>pools.size())return fail("vanilla terrain pool: unreadable pool name");
+        if(std::string(reinterpret_cast<const char*>(pools.data()+at),len)!="TerrainMaterials")continue;
+        // FNV of 256c43ba-dd20-4369-b3bf-f49c671a59ec, qualified against three shipped terrain blueprints.
+        if(found || rd<uint32_t>(pools.data()+rec+L.pool_id)!=851579436u)return fail("vanilla terrain pool: duplicate row or changed pool identity");
+        found=true;ArrayView list;
+        if(!array_at(pools,uint32_t(rec+L.pool_materials),4,&list) || !list.count || list.count>kPoolCapacity)
+            return fail("vanilla terrain pool: unreadable or oversized material list");
+        for(uint32_t n=0;n<list.count;++n) {
+            const auto item=rd<uint32_t>(list.base+size_t(n)*4);
+            if(!item || !members.insert(item).second)return fail("vanilla terrain pool: null or duplicate material item");
+        }
+    }
+    if(!found)return fail("vanilla terrain pool: TerrainMaterials is unavailable");
+    *items=std::move(members);return true;
+}
 std::map<std::string, PoolGameMaterial> pool_game_materials(const std::vector<GameBlockItem>& items, const Bytes& registry,
-                                                              const RegistryInfo& info, const Layouts& L) {
+                                                              const RegistryInfo& info, const Layouts& L, bool include_tools,
+                                                              const std::set<uint32_t>& vanilla_terrain) {
     // The member is the item that places the material: the one the game's own build-menu pools list. Not the config's
     // materialItem: that is the material's loot (Wood Logs for Rough Wood, the Stone terrain item for Rough Stone), and
     // materials share it.
     std::map<std::string, PoolGameMaterial> out;
     for (const auto& it : items) {
-        const std::string name = material_name(it.debug_name);
-        if (name.empty() || !it.item_id) continue;
-        const auto at = info.building_at.find(it.cell);
-        if (at == info.building_at.end()) continue;
-        const PoolGameMaterial m{it.item_id, registry[at->second + L.building.roof] != 0};
-        const auto [have, fresh] = out.emplace(name, m);
-        // two block items of one name: neither is chosen behind the author's back
-        if (!fresh && have->second.item != m.item) have->second = {0, m.roof, true};
+        if (!it.item_id) continue;
+        const auto terrain = info.terrain_at.find(it.cell), building = info.building_at.find(it.cell);
+        if (terrain == info.terrain_at.end() && building == info.building_at.end()) continue;
+        if (building == info.building_at.end() && !include_tools) continue;
+        const bool roof = building != info.building_at.end() && L.building.roof != UINT32_MAX && registry[building->second + L.building.roof] != 0;
+        const PoolGameMaterial m{it.item_id, roof, false, it.cell, vanilla_terrain.count(it.item_id)!=0};
+        auto add = [&](const std::string& key) {
+            if (key.empty()) return;
+            const auto [have, fresh] = out.emplace(key, m);
+            if (!fresh && (have->second.item != m.item || have->second.cell != m.cell)) have->second = {0, m.roof, true, -1};
+        };
+        add(material_name(it.debug_name));
+        if (include_tools && terrain != info.terrain_at.end()) { add(it.debug_name); add(std::to_string(it.item_id)); }
     }
     return out;
 }
@@ -1150,7 +1245,7 @@ PoolResolution resolve_pools(const std::vector<PoolDefinition>& definitions, con
     std::set<uint32_t> ids;
     std::map<uint32_t,size_t> counts;for(const auto& d:definitions)++counts[item_id_of(d.guid)];
     for(const auto& d:definitions) {
-        MaterialPool p{d.guid,d.mod+":"+d.block,d.roof,{}};
+        MaterialPool p{d.guid,d.mod+":"+d.block,d.roof,{}}; p.tool = d.tool;
         bool ok=true;
         std::vector<std::string> problems;  // every one, each a sentence naming its entry: an author fixes a file once
         std::set<Guid> mine;                // what this pool takes out of the game's lists, if it is accepted
@@ -1162,7 +1257,7 @@ PoolResolution resolve_pools(const std::vector<PoolDefinition>& definitions, con
         };
         const auto argument=[&](const std::string& text){
             fail(text);
-            if(!r.arguments_invalid) r.argument_reason="block buildingMaterialPool "+d.block+" (mod "+d.mod+"): "+text;
+            if(!r.arguments_invalid) r.argument_reason=std::string(d.tool?"block toolMaterialPool ":"block buildingMaterialPool ")+d.block+" (mod "+d.mod+"): "+text;
             r.arguments_invalid=true;
         };
         if(!d.valid) fail("its definition has errors (each named on its own line)");
@@ -1173,7 +1268,22 @@ PoolResolution resolve_pools(const std::vector<PoolDefinition>& definitions, con
         if(d.entries.size()<=kPoolCapacity) for(size_t i=0;i<d.entries.size();++i) {
             const auto& e=d.entries[i];
             uint32_t item=0; bool roof=false;
-            if(!e.material.empty() && !e.game_material.empty()) fail(entry(i)+": it takes exactly one of material and gameMaterial");
+            if (d.tool) {
+                const auto found = game.find(e.item);
+                if (found == game.end() || found->second.ambiguous || !found->second.item)
+                    fail("entries[" + std::to_string(i) + "]: no unambiguous placeable terrain item " + e.item);
+                else if (found->second.cell < 1 || found->second.cell >= 128 || uint32_t(found->second.cell) != e.terrain_material)
+                    fail("entries[" + std::to_string(i) + "]: item does not place the declared terrain material");
+                else if (!found->second.vanilla_terrain)
+                    argument("entries[" + std::to_string(i) + "].item: " + e.item + " is not a member of the qualified vanilla TerrainMaterials pool; tool pools are policy subsets, not new game rows");
+                else if (!e.voxels_per_item || e.voxels_per_item > 1000000)
+                    argument("entries[" + std::to_string(i) + "]: voxelsPerItem must be 1..1000000");
+                else item = found->second.item;
+                if (std::find(p.terrain_materials.begin(), p.terrain_materials.end(), e.terrain_material) != p.terrain_materials.end())
+                    argument("entries[" + std::to_string(i) + "]: duplicate terrain material");
+                p.terrain_materials.push_back(e.terrain_material); p.voxels_per_item.push_back(e.voxels_per_item);
+            }
+            else if(!e.material.empty() && !e.game_material.empty()) fail(entry(i)+": it takes exactly one of material and gameMaterial");
             else if(!e.material.empty()) {
                 const Material* found=nullptr;
                 for(const auto& m:materials) if(pool_ref(e.material,d.mod,m.mod,m.block,m.guid)) { found=&m; break; }
@@ -1186,6 +1296,7 @@ PoolResolution resolve_pools(const std::vector<PoolDefinition>& definitions, con
             } else {
                 auto it=game.find(e.game_material);
                 if(it==game.end()) fail(entry(i)+": the game has no building material of that name");
+                else if(it->second.cell > 0 && it->second.cell < 128) fail(entry(i)+": it is a terrain material; a pool lists building materials");
                 else if(it->second.ambiguous) fail(entry(i)+": the game has more than one block item for that material");
                 else if(!it->second.item) fail(entry(i)+": the game's material has no block item");
                 else { item=it->second.item; roof=it->second.roof; }
@@ -1206,7 +1317,7 @@ PoolResolution resolve_pools(const std::vector<PoolDefinition>& definitions, con
         } else {
             std::string why;
             for(size_t i=0;i<problems.size();++i) why+=(i?"; ":"")+problems[i];
-            r.errors.push_back("block buildingMaterialPool "+d.block+" (mod "+d.mod+"): refused: "+why);
+            r.errors.push_back(std::string(d.tool?"block toolMaterialPool ":"block buildingMaterialPool ")+d.block+" (mod "+d.mod+"): refused: "+why);
         }
     }
     return r;
@@ -1221,6 +1332,7 @@ void bind_shape_pools(std::vector<Shape>* shapes, const std::vector<PoolDefiniti
         const std::string head="block blueprint "+sh.block+" (mod "+sh.mod+"): refused: its materialPool \""+sh.material_pool+"\"";
         std::string why;
         if(!d) why=head+" names no pool of this mod or of a declared dependency";
+        else if(d->tool) why=head+" names a tool policy, not a game-visible building material pool";
         else if(d->mod!=sh.mod && !sh.dependencies.count(d->mod)) why=head+" belongs to mod "+d->mod+", which mod "+sh.mod+" does not declare as a dependency";
         else if(d->roof!=sh.roof) why=head+(sh.roof?": the shape is a roof shape and the pool a wall pool; Roof must agree":": the shape is a wall shape and the pool a roof pool; Roof must agree");
         else if(std::none_of(pools.begin(),pools.end(),[&](const auto& p){return p.guid==d->guid;})) why=head+" was refused (its own line says why)";
@@ -1295,7 +1407,7 @@ bool merge_pools(const Bytes& game, const Layouts& L, const std::vector<Placed>&
 }
 
 namespace {
-struct PoolRows { ArrayView rows; std::optional<uint32_t> wall, roof; };
+struct PoolRows { ArrayView rows; std::optional<uint32_t> wall, roof, terrain; };
 // The writer's checks of the game's pool table and of the accepted pools, before anything is written.
 std::string pool_rows(const Bytes& game, const Layouts& L, const std::vector<MaterialPool>& groups, PoolRows* out) {
     // This is the measured row contract. Do not guess new fields on another executable.
@@ -1320,6 +1432,7 @@ std::string pool_rows(const Bytes& game, const Layouts& L, const std::vector<Mat
         if (!names.insert(name).second) return "custom material pools: duplicate existing pool name";
         if (name == kWallPool) out->wall = rd<uint32_t>(game.data() + rec + L.pool_slot);
         if (name == kRoofPool) out->roof = rd<uint32_t>(game.data() + rec + L.pool_slot);
+        if (name == "TerrainMaterials") out->terrain = rd<uint32_t>(game.data() + rec + L.pool_slot);
         projected += 24 + 4 * uint64_t(kPoolCapacity) + 3;  // its row again, and room for every appended item
     }
     for (const auto& g : groups) {
@@ -1330,7 +1443,17 @@ std::string pool_rows(const Bytes& game, const Layouts& L, const std::vector<Mat
         if (g.items.empty() || g.items.size() > kPoolCapacity) return "custom material pools: expected 1..64 entries";
         std::set<uint32_t> unique(g.items.begin(), g.items.end());
         if (unique.count(0) || unique.size() != g.items.size()) return "custom material pools: null or duplicate item id";
-        if (!(g.roof ? out->roof : out->wall)) return "custom material pools: wall/roof equipment slot unavailable";
+        if (!(g.tool ? out->terrain : g.roof ? out->roof : out->wall)) return "custom material pools: equipment slot unavailable";
+        if (g.tool) {
+            if(g.terrain_materials.size()!=g.items.size() || g.voxels_per_item.size()!=g.items.size())
+                return "tool material policy: entry metadata mismatch";
+            std::set<uint32_t> vanilla;std::string why;
+            if(!terrain_pool_items(game,L,&vanilla,&why))return why;
+            for(size_t i=0;i<g.items.size();++i)
+                if(!vanilla.count(g.items[i]) || !g.terrain_materials[i] || g.terrain_materials[i]>=128 || !g.voxels_per_item[i] || g.voxels_per_item[i]>1000000)
+                    return "tool material policy: entry is not a valid vanilla TerrainMaterials member";
+            continue; // Policy metadata only. Never append a row or repeat the game's magic-stock enumeration.
+        }
         projected += 24 + 3 + 4 * uint64_t(g.items.size()) + 3 + g.name.size() + 1;
     }
     if (projected > INT32_MAX) return "custom material pools: resource exceeds relative-offset range";
@@ -1410,7 +1533,8 @@ bool merge_pools(const Bytes& game, const Layouts& L, const std::vector<Placed>&
     for (const auto& p : placed)
         if (p.m.terrain || !grouped.count(p.m.guid)) vanilla.push_back(p);
     Bytes next;
-    if (groups.empty()) {
+    if (const auto bad=check_custom_pools(game,L,groups);!bad.empty()) {*why=bad;return false;}
+    if (std::none_of(groups.begin(),groups.end(),[](const auto& g){return !g.tool;})) {
         if (!merge_pools(game, L, vanilla, &next, why)) return false;
         *out = std::move(next);
         return true;
@@ -1421,7 +1545,8 @@ bool merge_pools(const Bytes& game, const Layouts& L, const std::vector<Placed>&
     const ArrayView& rows = table.rows;
     const std::optional<uint32_t>& wall_slot = table.wall;
     const std::optional<uint32_t>& roof_slot = table.roof;
-    std::vector<MaterialPool> sorted = groups;
+    std::vector<MaterialPool> sorted;
+    for(const auto& group:groups)if(!group.tool)sorted.push_back(group);
     std::sort(sorted.begin(), sorted.end(), [](const auto& a, const auto& b) { return a.guid.text() < b.guid.text(); });
     if (!merge_pools(game, L, vanilla, &next, why)) return false;
     // Keep the original payload in place; clone the row array and rebase both inner pointers.
@@ -1620,7 +1745,7 @@ bool merge_shapes(const Bytes& table, const Layouts& L, const std::vector<Shape>
         wr<uint32_t>(out->data() + e + L.bp_size + 8, s.z);
         wr<int32_t>(out->data() + e + L.bp_data, static_cast<int32_t>(int64_t(cells_at) - int64_t(e + L.bp_data)));
         wr<uint32_t>(out->data() + e + L.bp_data + 4, static_cast<uint32_t>(s.bits.size()));
-        (*out)[e + L.bp_compressed] = 1;
+        (*out)[e + L.bp_compressed] = s.terrain_brush ? 0 : 1;
         pad4(out);
     }
     wr<int32_t>(out->data() + L.blueprints, static_cast<int32_t>(at - L.blueprints));
@@ -1633,13 +1758,14 @@ Bytes voxel_model(const Shape& s, const ModelLayout& M) {
     wr<uint32_t>(b.data() + M.size_field, s.x);
     wr<uint32_t>(b.data() + M.size_field + 4, s.y);
     wr<uint32_t>(b.data() + M.size_field + 8, s.z);
-    b[M.terrain] = 0;
+    b[M.terrain] = s.terrain_brush ? 1 : 0;
     pad4(&b);
     const size_t at = b.size();
     const uint32_t n = s.x * s.y * s.z;
     b.resize(at + n, 0);
     for (uint32_t i = 0; i < n; ++i)
-        if ((s.bits[i / 8] >> (i % 8)) & 1) b[at + i] = s.roof ? kRoofCell : kFullCell;
+        if (s.terrain_brush) b[at + i] = s.bits[i];
+        else if ((s.bits[i / 8] >> (i % 8)) & 1) b[at + i] = s.roof ? kRoofCell : kFullCell;
     wr<int32_t>(b.data() + M.data, static_cast<int32_t>(at - M.data));
     wr<uint32_t>(b.data() + M.data + 4, n);
     return b;

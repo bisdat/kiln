@@ -1,13 +1,16 @@
 // Mock answers for the self-update commands (update.rs), merged into ./mock.ts's handlers. Up to date by default;
 // tests and the dev console change it through window.__kilnUpdateMock:
 //   offer("0.2.0-dev.43", "notes")        the next check finds this version (and the notice opens)
-//   justUpdated("0.2.0-dev.42")           as after a restart into an update this launcher installed
+//   justUpdated("0.2.0-dev.42")           as after a restart into an update this launcher installed (`?justUpdated=<from>`:
+//                                         from the first status on, as the backend's start says it)
 //   failNextInstall([{source, step, message}])  the next download fails at these sources
 //   set({...})                            any part of the status, then kiln://update
 //   calls()                               the update_* commands called so far (the Nexus build's UI calls none)
 //   beta(3, "0.2.0-dev.43")               (dev.29) this build is test build 3 of that version (with a "before beta" copy)
 //   channelOffer("dev", "0.2.0-dev.42")   (dev.29) what a switch to that channel installs (null: it has nothing else)
 //   switches()                            (dev.29) the update_switch calls so far ({channel, restore})
+// `shippedRuntime` is the mock's bundle 0.2.0-dev+20261104.0f1ffa6 (the runtime this launcher ships, 30.5). update_restart
+// refuses while `gameBusy` says a game starts (selfupdate.rs restart_refusal; a running game does not hold it).
 // `?dist=nexus` (the Nexus Mods build): like the backend without the self-update feature (commands/update.rs): the
 // status is "disabled", update_check changes nothing, update_install and update_restart reject with `unsupported`.
 import { parseBuild } from "./channel";
@@ -17,21 +20,28 @@ import { NEXUS_PAGE } from "./distribution";
 type Emit = (name: string, payload: unknown) => void;
 type Args = Record<string, unknown>;
 
-/** `channelSetting`: the mock settings' `updateChannel` (the backend reads settings.json for the channel each time). */
-export function updateMockHandlers(emit: Emit, distribution: Distribution = "direct", channelSetting: () => string | null | undefined = () => null): Record<string, (a: Args) => unknown> {
+/** The runtime the mock launcher ships (a bundle of the mock's runtime list). */
+export const MOCK_SHIPPED_RUNTIME = "0.2.0-dev+20261104.0f1ffa6";
+
+/** `channelSetting`: the mock settings' `updateChannel` (the backend reads settings.json for the channel each time).
+ *  `gameBusy`: why the restart waits (a game starts), null when it does not. */
+export function updateMockHandlers(emit: Emit, distribution: Distribution = "direct", channelSetting: () => string | null | undefined = () => null,
+  gameBusy: () => KilnError | null = () => null): Record<string, (a: Args) => unknown> {
   const now = () => new Date().toISOString();
   const nexus = distribution === "nexus";
   const noSelfUpdate = "This build comes from Nexus Mods and does not update itself: new versions are on the Kiln page there.";
   let status: UpdateStatus = nexus ? {
     current: "0.2.0-dev.42", distribution: "nexus", channel: "dev", auto: false, install: { kind: "appimage", inPlace: false, reason: noSelfUpdate },
     page: NEXUS_PAGE, phase: "disabled", checked: null, available: null, failures: [], progress: null,
-    ready: null, skipped: null, justUpdated: null, taskId: null, error: null, buildChannel: "dev", beta: null, switching: null, beforeBeta: null,
+    ready: null, skipped: null, justUpdated: null, shippedRuntime: null, taskId: null, error: null, buildChannel: "dev", beta: null, switching: null, beforeBeta: null,
   } : {
     current: "0.2.0-dev.42", distribution: "direct", channel: "dev", auto: true, install: { kind: "appimage", inPlace: true, reason: null },
     page: "https://frostdev.io/kiln", phase: "upToDate", checked: now(), available: null, failures: [], progress: null,
-    ready: null, skipped: null, justUpdated: null, taskId: null, error: null, buildChannel: "dev", beta: null, switching: null, beforeBeta: null,
+    ready: null, skipped: null, justUpdated: null, shippedRuntime: MOCK_SHIPPED_RUNTIME, taskId: null, error: null, buildChannel: "dev", beta: null, switching: null, beforeBeta: null,
   };
   // what a switch to each channel installs (update_switch); the release line has the build before this one
+  const fromQuery = typeof location !== "undefined" && !nexus ? new URLSearchParams(location.search).get("justUpdated") : null;
+  if (fromQuery) status.justUpdated = { from: fromQuery, to: status.current, at: now(), source: "frostdev.io", notes: null };
   const channelOffers: Partial<Record<UpdateChannel, string | null>> = { dev: "0.2.0-dev.41", beta: "0.2.0-dev.43+beta.1" };
   const switchCalls: { channel: UpdateChannel; restore: boolean }[] = [];
   let restoreOnRestart = false;
@@ -137,6 +147,8 @@ export function updateMockHandlers(emit: Emit, distribution: Distribution = "dir
     },
     update_restart: () => {
       if (status.phase !== "ready" || !status.ready) throw { code: "conflict", message: "No update is ready." } satisfies KilnError;
+      const busy = gameBusy();
+      if (busy) throw busy;
       const to = status.ready.version;
       const from = status.beta ? `${status.current}+beta.${status.beta}` : status.current;
       const b = parseBuild(to);

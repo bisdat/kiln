@@ -41,13 +41,24 @@ int main() {
     {
         Region r;
         CHECK(space.query(reinterpret_cast<uintptr_t>(&g_fail), &r) && !r.free && r.size > 0, "query of a global");
-        const uintptr_t front = space.front(lim.granularity);
+        // front(n) is a released probe, not a reservation: a one-granule hole need not hold four granules, and
+        // another thread can take it before reserve. Probe the size we need and retry that race, not a failed check.
+        const uintptr_t size = 4 * lim.granularity;
+        uintptr_t front = 0, at = 0;
+        bool front_free = false;
+        for (unsigned attempt = 0; attempt < 16 && !at; ++attempt) {
+            front = space.front(size);
+            front_free = front && space.query(front, &r) && r.free;
+            if (front_free) at = space.reserve(front, size);
+        }
         CHECK(front != 0, "front");
-        CHECK(space.query(front, &r) && r.free, "the front is free");
-        const uintptr_t at = space.reserve(front, 4 * lim.granularity);
-        CHECK(at == front, "reserve exactly at the front (%llx)", (unsigned long long)at);
+        CHECK(front_free, "the front is free before reservation");
+        CHECK(at != 0 && at == front, "reserve exactly at the front (%llx)", (unsigned long long)at);
+        if (!at) return 1;
         CHECK(space.reserve(front, lim.granularity) == 0, "a taken address is refused");
-        CHECK(space.commit(front, lim.granularity), "commit");
+        const bool committed = space.commit(front, lim.granularity);
+        CHECK(committed, "commit");
+        if (!committed) return 1;
         std::memset(reinterpret_cast<void*>(front), 0xAB, lim.granularity);
         CHECK(space.query(front, &r) && !r.free, "reserved is not free");
         CHECK(space.query(~uintptr_t(0) - 0xFFF, &r) == false, "beyond the top of the address space");

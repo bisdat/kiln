@@ -15,6 +15,8 @@ use fixture::support::{session_lock, set_session, set_session_side};
 use fixture::*;
 use kiln_abi::services::kiln_caps::{KILN_CAP_AVAILABLE, KILN_CAP_REASON_NONE};
 use kiln_sfi::runtime::ecs::cas::text as cas;
+use kiln_sfi::runtime::ecs::catalog::text::NOT_READY;
+use kiln_sfi::runtime::ecs::entities::text as q;
 use kiln_sfi::runtime::unavailable::NO_RESOURCE_READ;
 use kiln_sfi::runtime::world::context::WorldContext;
 use kiln_sfi::worker::{LifecycleEvent, WorldLifecycle};
@@ -143,6 +145,38 @@ fn a_hosting_client_reads_and_writes_the_hosted_server_world() {
     assert_eq!(
         s.reason(&format!("ecs.get_template({h})")),
         NO_RESOURCE_READ
+    );
+}
+
+#[test]
+fn a_host_transition_does_not_bind_the_resident_client_world() {
+    let p = process(Side::Client, world_of(CLIENT, 3));
+    p.start(SERVER, 1, 5);
+    p.start(CLIENT, 1, 3);
+    assert_eq!(p.s.facts.ecs_world(), (SERVER, 5));
+
+    // The hosted world has begun stopping, but the core still reports both worlds: the hosted scene is not ready,
+    // so the provider binds no world (resolve_engine_owners.cpp:56) and nothing reads the resident client world.
+    p.context.apply(WorldLifecycle {
+        world: SERVER,
+        session: 1,
+        event: LifecycleEvent::Stopping,
+    });
+    assert_eq!(
+        p.context.ecs_world(),
+        Err("ecs-active-scene-is-transitioning")
+    );
+    assert_eq!(p.s.facts.ecs_world(), (SERVER, 0));
+    let facts = p.s.facts.provider_facts();
+    assert!(!facts.ready && !facts.can_write && !facts.resource_can_write);
+    assert_eq!(p.s.ecs.open(7), Err(KILN_ERR_UNAVAILABLE));
+    assert_eq!(p.s.ecs.query_refs(&[1]).err(), Some(q::QUERY_FAILED));
+    // Mods get the provider's own answers, not the resolver's reason.
+    p.sync_facts();
+    assert_eq!(p.s.reason("ecs.query('keen::ecs::Health')"), NOT_READY);
+    assert_eq!(
+        p.s.reason("ecs.resolve(7)"),
+        format!("{}7", q::ENTITY_UNAVAILABLE)
     );
 }
 

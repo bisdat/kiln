@@ -11,6 +11,8 @@
 import { Buffer } from "buffer";
 import { createXXHash3 } from "hash-wasm";
 import type { EditorBackup, KilnError } from "./commands";
+import items from "../editor/data/items.json";
+import capacities from "../editor/data/backpack-capacities.json";
 
 type Handler = (args: Record<string, unknown>) => unknown;
 type Reject = (code: KilnError["code"], message: string) => never;
@@ -57,7 +59,10 @@ function characterBlock(c: Character): Buffer {
   const mask = worn.reduce((m, [bit]) => m | (1 << bit), 0) | (1 << 16) | (1 << 17);
   const mid = Buffer.alloc(16);
   mid.writeUInt32LE(mask >>> 0, 12);
-  const between = Buffer.from([11, 0, 0, 0, 0, 0, 0x05, c.main.length, c.extra.length ? 1 : 0, c.extra.length]);
+  // The container's pages describe the worn backpack's capacity, not whether any stacks currently occupy it.
+  const backpack = c.worn.map(([, e]) => (items as Record<string, { slot?: string; debug: string }>)[e.itemId]).find((it) => it?.slot === "Backpack");
+  const extraPages = Math.ceil(((capacities as Record<string, number>)[backpack?.debug ?? ""] ?? 0) / 8);
+  const between = Buffer.from([11, 0, 0, 0, 0, 0, 0x05, c.main.length, extraPages, c.extra.length]);
   return Buffer.concat([
     Buffer.alloc(0x3a), top, skills, mid,
     ...worn.map(([, e], i) => entry({ ...e, slot: i })), between,

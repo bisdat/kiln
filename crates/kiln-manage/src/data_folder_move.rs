@@ -1601,7 +1601,16 @@ impl Copier<'_> {
                 continue;
             }
             let src = it.names.iter().fold(self.from.to_path_buf(), |p, n| p.join(n));
-            let same = self.files.get(&rel).is_some_and(|c| c.key.is_some() && c.key == FileKey::of(&src));
+            let same = self.files.get(&rel).is_some_and(|c| {
+                if c.key.is_some() && c.key == FileKey::of(&src) { return true; }
+                #[cfg(windows)]
+                if c.key.is_none() {
+                    // Some filesystems have no reliable change time. Re-read the source, never assume it is stable;
+                    // rewritten records are compared to their original bytes, not the new root's rewritten text.
+                    return sha256_of(&src).as_deref() == Some(c.line.source_sha256.as_deref().unwrap_or(&c.line.sha256));
+                }
+                false
+            });
             if !same {
                 changed.insert(rel);
                 redo.push(it);
@@ -3251,6 +3260,51 @@ pub fn acknowledge(env: &DataEnv) -> Result<()> {
 mod tests {
     use super::*;
 
+    #[cfg(windows)]
+    #[test]
+    fn keyless_source_files_are_rechecked_by_content() {
+        let t = std::env::temp_dir().join(format!("km-move-keyless-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&t);
+        let (from, to) = (t.join("from"), t.join("to"));
+        std::fs::create_dir_all(&from).unwrap();
+        std::fs::create_dir_all(&to).unwrap();
+        let mut files = BTreeMap::new();
+        for (name, rewritten) in [("plain.bin", false), ("rewritten.json", true)] {
+            std::fs::write(from.join(name), b"old!").unwrap();
+            std::fs::write(to.join(name), if rewritten { b"new!" } else { b"old!" }).unwrap();
+            files.insert(name.into(), Copied {
+                line: RecordedFile { path: name.into(), size: 4,
+                    sha256: crate::hash::sha256_hex(if rewritten { b"new!" } else { b"old!" }),
+                    source_sha256: rewritten.then(|| crate::hash::sha256_hex(b"old!")), linked: false },
+                key: None, // a filesystem without reliable change time
+            });
+        }
+        let mut c = Copier { from: &from, to: &to, olds: vec![from.clone()], link: false, style: PathStyle::Windows,
+            inject: None, total: 8, done_bytes: 8, done_files: 2, real_files: 2, files,
+            made_dirs: BTreeSet::new(), rewritten: vec!["rewritten.json".into()], held: None, died: false };
+        let entries = vec!["plain.bin".into(), "rewritten.json".into()];
+        let (redo, changed) = c.changes(&entries).unwrap();
+        assert!(redo.is_empty() && changed.is_empty(), "stable keyless files must let the move finish: {changed:?}");
+        for name in &entries {
+            let path = from.join(name);
+            let mtime = std::fs::metadata(&path).unwrap().modified().unwrap();
+            std::fs::write(&path, b"edit").unwrap();
+            std::fs::File::options().write(true).open(&path).unwrap().set_modified(mtime).unwrap();
+        }
+        let (redo, changed) = c.changes(&entries).unwrap();
+        assert_eq!(redo.len(), 2, "a same-size, same-mtime edit is not skipped without a key");
+        assert_eq!(changed.len(), 2);
+        // A late write after the switch must stay in the old root, even though it has no cache key.
+        let mut cleanup = Cleanup::refused(&from, String::new());
+        for name in &entries {
+            remove_old_file(&from.join(name), false, &c.files[name].line, &to.join(name), &from, &to, None, &mut cleanup);
+            assert_eq!(std::fs::read(from.join(name)).unwrap(), b"edit");
+        }
+        assert_eq!(cleanup.removed_files, 0);
+        assert_eq!(cleanup.kept.len(), 2);
+        std::fs::remove_dir_all(t).unwrap();
+    }
+
     /// The decision of rule 3 from crafted identities (what a bind mount gives, which needs root to make outside a
     /// user namespace; also the Windows file index and link count).
     #[test]
@@ -3291,18 +3345,30 @@ mod tests {
 
     #[test]
     fn root_fields_are_rewritten_only_below_the_old_root() {
-        let old = PathBuf::from("/data/kiln");
-        let new = Path::new("/mnt/big/kiln");
-        let text = "{\n  \"id\": \"isles\",\n  \"backupDir\": \"/data/kiln/backups/servers/isles\",\n  \"stopTimeoutS\": 90\n}\n";
-        let out = rewrite_root_field(text, "backupDir", std::slice::from_ref(&old), new).unwrap();
-        assert_eq!(out, text.replace("/data/kiln/backups", "/mnt/big/kiln/backups"), "only that field, the rest byte for byte");
-        assert_eq!(rewrite_root_field(text, "backupDir", &[PathBuf::from("/data/kil")], new), None, "a name prefix is not the root");
-        assert_eq!(rewrite_root_field("{\"backupDir\": \"/srv/isles.backups\"}", "backupDir", &[old.clone()], new), None);
-        assert_eq!(rewrite_root_field("{\"backupDir\": null}", "backupDir", &[old.clone()], new), None);
-        assert_eq!(rewrite_root_field("{\"other\": 1}", "backupDir", &[old.clone()], new), None);
-        let exact = rewrite_root_field("{\"file\":\"/data/kiln\"}", "file", &[old], new).unwrap();
+        #[cfg(windows)]
+        let (old, new, partial, outside, from, to) = (
+            r"C:\Data\Kiln", r"D:\Big\Kiln", r"C:\Data\Kil", r"C:\isles.backups",
+            r"c:\data\kiln\backups\servers\isles", r"D:\Big\Kiln\backups\servers\isles",
+        );
+        #[cfg(not(windows))]
+        let (old, new, partial, outside, from, to) = (
+            "/data/kiln", "/mnt/big/kiln", "/data/kil", "/srv/isles.backups",
+            "/data/kiln/backups/servers/isles", "/mnt/big/kiln/backups/servers/isles",
+        );
+        let olds = [PathBuf::from(old)];
+        let new = Path::new(new);
+        let json_path = |p: &str| serde_json::to_string(p).unwrap();
+        let text = |path| format!("{{\n  \"id\": \"isles\",\n  \"backupDir\": {},\n  \"stopTimeoutS\": 90\n}}\n", json_path(path));
+        let input = text(from);
+        let out = rewrite_root_field(&input, "backupDir", &olds, new).unwrap();
+        assert_eq!(out, text(to), "only that field, the rest byte for byte");
+        assert_eq!(rewrite_root_field(&input, "backupDir", &[PathBuf::from(partial)], new), None, "a name prefix is not the root");
+        assert_eq!(rewrite_root_field(&text(outside), "backupDir", &olds, new), None);
+        assert_eq!(rewrite_root_field("{\"backupDir\": null}", "backupDir", &olds, new), None);
+        assert_eq!(rewrite_root_field("{\"other\": 1}", "backupDir", &olds, new), None);
+        let exact = rewrite_root_field(&format!("{{\"file\":{}}}", json_path(old)), "file", &olds, new).unwrap();
         let v: serde_json::Value = serde_json::from_str(&exact).unwrap();
-        assert_eq!(v["file"], "/mnt/big/kiln");
+        assert_eq!(v["file"], new.to_str().unwrap());
     }
 
     #[test]

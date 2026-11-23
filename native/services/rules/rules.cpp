@@ -57,6 +57,7 @@
 
 #include "glide_math.h"
 #include "glide_steer_math.h"
+#include "material_scaling.h"
 
 static_assert(sizeof(KilnRulesPlayer) == 56);
 static_assert(sizeof(KilnRulesStatus) == 256 && offsetof(KilnRulesStatus, detail) == 64 &&
@@ -233,6 +234,8 @@ using ActorStateTestFn = bool(__fastcall*)(void* actor, uint8_t flag);
 using CursorFlagsFn = void(__fastcall*)(uint32_t* flags, void* cctx, void* query, int64_t* xf, uint8_t a, uint8_t b,
                                         uint32_t c);
 using ApplyMaterialsFn = bool(__fastcall*)(uint8_t* cost, int64_t* list, uint8_t take);
+using ExactHistoryFn = bool(KILN_CALL*)(const void* materials);
+std::atomic<ExactHistoryFn> g_exact_history{nullptr};
 using DamageFn = uint8_t*(__fastcall*)(uint8_t* out, void* settings, void* setup, uint8_t hardness, uint8_t cls);
 using TerraformFn = uint8_t*(__fastcall*)(uint8_t* out, void** args, int64_t* ctx);
 using GlideStepFn = void(__fastcall*)(uint8_t* it);
@@ -750,7 +753,9 @@ bool scale(uint8_t* cost, int64_t* list, uint8_t take, uintptr_t ret, Entry* cop
     KilnRulesPlayer s;
     if (!player_rules(player, &s)) return false;
     const float m = take ? s.build_cost : s.build_refund;
-    if (m == 1.0f || !from_building(ret)) return false;
+    const bool building = m != 1.0f && from_building(ret);
+    const auto exact = g_exact_history.load(std::memory_order_acquire);
+    if (!kiln::rules::scale_materials(m, building, building && exact && exact(list))) return false;
     const auto* src = reinterpret_cast<const Entry*>(list[0]);
     const uint64_t n = static_cast<uint64_t>(list[1]);
     if (!src || n > kMaxEntries) return false;
@@ -1555,6 +1560,12 @@ void arm_payments() {
 }  // namespace
 
 #ifndef KILN_RULES_HOST_TEST
+// Private tools-DLL bridge, installed after every service has loaded. The predicate retains only native history
+// descriptor identities, not list data; a stopped world clears them before another session can reuse addresses.
+extern "C" KILN_EXPORT void KILN_CALL kiln_rules_exact_history(ExactHistoryFn predicate) {
+    g_exact_history.store(predicate, std::memory_order_release);
+}
+
 extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api, KilnOwner owner, KilnPluginInfo* info) {
     if (api->abi_version != KILN_ABI_VERSION || api->size < sizeof(KilnApi)) return KILN_ERR_UNAVAILABLE;
     g_api = api;

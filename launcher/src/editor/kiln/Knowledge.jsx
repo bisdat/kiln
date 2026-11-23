@@ -2,13 +2,14 @@
 // removing a high-level material also closes the recipes that need it. Upstream: src/Conhecimento.jsx.
 // On the Deck (env.jsx) the level filter is set on the number pad; the search takes Steam's keyboard.
 import React, { useMemo, useState } from 'react';
-import { Button } from '../../ui';
+import { Button, Modal } from '../../ui';
 import { estadoTexto } from '../shared/knowledge.mjs';
 import map from '../data/conhecimento.json';
 import { items, nomeConhecimento } from '../src/gamedata.js';
 import { t } from '../../i18n';
 import { t as tv, localeAtual } from '../src/i18n.js';
 import { useEditorEnv } from './env.jsx';
+import { readOnly } from './session.js';
 
 const KIND = { i: 'editor.knowledge.kinds.item', r: 'editor.knowledge.kinds.recipe', o: 'editor.knowledge.kinds.misc' };
 // upstream's state words (shared/knowledge.mjs) are Portuguese keys: tv words them in the launcher's language
@@ -38,6 +39,10 @@ export default function Knowledge({ model, setModel }) {
   const [above, setAbove] = useState('');
   const [kinds, setKinds] = useState('ir');
   const [sel, setSel] = useState(() => new Set());
+  const [ask, setAsk] = useState(false);
+  const disabled = readOnly(model);
+  // A selection belongs to the current filter, never to rows the player can no longer see.
+  const filter = (setter, value) => { setter(value); setSel(new Set()); setAsk(false); };
   const list = useMemo(() => {
     const n = Number(above), s = q.trim().toLowerCase();
     return (model.knowledge ?? [])
@@ -48,7 +53,12 @@ export default function Knowledge({ model, setModel }) {
   }, [model.knowledge, q, above, kinds]);
   if (!model.knowledge) return <div className="ke-empty"><span className="ke-empty-word">{t('editor.knowledge.noBlock')}</span></div>;
   const toggle = (id) => setSel((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
-  const remove = () => { setModel({ ...model, knowledge: model.knowledge.filter((k) => !sel.has(k.id)) }); setSel(new Set()); };
+  // All edits still go through the session's one setModel path, ready for session-wide undo/redo.
+  const remove = () => {
+    if (disabled) return;
+    setModel({ ...model, knowledge: model.knowledge.filter((k) => !sel.has(k.id)) });
+    setSel(new Set()); setAsk(false);
+  };
   const unnamed = model.knowledge.filter((k) => !map[k.id]).length;
   const shown = list.slice(0, SHOWN);
   const allOn = shown.length > 0 && shown.every((k) => sel.has(k.id));
@@ -57,27 +67,27 @@ export default function Knowledge({ model, setModel }) {
   return (
     <div className="ke-know">
       <div className="ke-know-bar">
-        <input className="k-input" style={{ width: 280 }} data-deck-id="know-search" placeholder={t('editor.knowledge.search')} value={q} onChange={(e) => setQ(e.target.value)} aria-label={t('editor.knowledge.search')} />
+        <input className="k-input" style={{ width: 280 }} data-deck-id="know-search" placeholder={t('editor.knowledge.search')} value={q} onChange={(e) => filter(setQ, e.target.value)} aria-label={t('editor.knowledge.search')} />
         {env.deck ? (
           <button type="button" className="k-well compact ke-know-above" data-deck-id="know-above" data-deck-a={t('editor.common.change')}
-            onClick={() => env.askNumber({ title: t('editor.knowledge.above'), value: Number(above) || 0, min: 0, max: 99, presets: [{ label: t('editor.knowledge.allLevels'), value: 0 }], onDone: (n) => setAbove(n ? String(n) : '') })}>
+            onClick={() => env.askNumber({ title: t('editor.knowledge.above'), value: Number(above) || 0, min: 0, max: 99, presets: [{ label: t('editor.knowledge.allLevels'), value: 0 }], onDone: (n) => filter(setAbove, n ? String(n) : '') })}>
             <span className="k-label">{t('editor.knowledge.above')}</span><span className="k-mono">{above === '' ? t('editor.knowledge.allLevels') : above}</span>
           </button>
         ) : (
           <label className="k-well compact" style={{ width: 168 }}><span className="k-label">{t('editor.knowledge.above')}</span>
-            <input type="number" value={above} placeholder={t('editor.knowledge.allLevels')} onChange={(e) => setAbove(e.target.value)} /></label>
+            <input type="number" value={above} placeholder={t('editor.knowledge.allLevels')} onChange={(e) => filter(setAbove, e.target.value)} /></label>
         )}
         <span className="k-seg" role="radiogroup" aria-label={t('editor.knowledge.show')}>
           {[['ir', 'editor.knowledge.filter.itemsRecipes'], ['i', 'editor.knowledge.filter.items'], ['r', 'editor.knowledge.filter.recipes'], ['iro', 'editor.knowledge.filter.everything']].map(([v, label]) => (
-            <button key={v} type="button" role="radio" aria-checked={kinds === v} className={kinds === v ? 'on' : ''} onClick={() => setKinds(v)}>{t(label)}</button>
+            <button key={v} type="button" role="radio" aria-checked={kinds === v} className={kinds === v ? 'on' : ''} onClick={() => filter(setKinds, v)}>{t(label)}</button>
           ))}
         </span>
         <span className="k-spacer" />
-        <Button size="s" variant="danger" disabled={!sel.size} onClick={remove} data-deck-id="know-remove">{sel.size ? t('editor.knowledge.removeN', { n: sel.size }) : t('editor.common.remove')}</Button>
+        <Button size="s" variant="danger" disabled={disabled || !sel.size} onClick={() => sel.size > 1 ? setAsk(true) : remove()} data-deck-id="know-remove">{sel.size ? t('editor.knowledge.removeN', { n: sel.size }) : t('editor.common.remove')}</Button>
       </div>
       <div className="ke-know-table" role="table" aria-label={t('editor.tabs.knowledge')}>
         <div className="ke-know-row head" role="row">
-          <span role="columnheader"><input type="checkbox" className="k-check" checked={allOn} aria-label={t('editor.common.all')}
+          <span role="columnheader"><input type="checkbox" className="k-check" disabled={disabled} checked={allOn} aria-label={t('editor.common.all')}
             ref={(el) => { if (el) el.indeterminate = someOn; }}
             onChange={() => setSel((p) => { const n = new Set(p); for (const k of shown) { if (allOn) n.delete(k.id); else n.add(k.id); } return n; })} /></span>
           <span role="columnheader">{t('editor.knowledge.kind')}</span><span role="columnheader">{t('editor.knowledge.name')}</span>
@@ -86,7 +96,7 @@ export default function Knowledge({ model, setModel }) {
         <div className="ke-know-body">
           {shown.map((k) => (
             <label key={k.id} className={'ke-know-row' + (sel.has(k.id) ? ' on' : '')} role="row">
-              <span role="cell"><input type="checkbox" className="k-check" checked={sel.has(k.id)} onChange={() => toggle(k.id)} data-deck-id={`know-${k.id}`} aria-label={k.name ?? t('editor.knowledge.id', { id: k.id })} /></span>
+              <span role="cell"><input type="checkbox" className="k-check" disabled={disabled} checked={sel.has(k.id)} onChange={() => toggle(k.id)} data-deck-id={`know-${k.id}`} aria-label={k.name ?? t('editor.knowledge.id', { id: k.id })} /></span>
               <span role="cell" className={`k-sc ke-kind ${k.info?.t ?? 'o'}`}>{t(KIND[k.info?.t ?? 'o'])}</span>
               <span role="cell" className="ke-know-name">
                 {k.name ? <span className="k-ellipsis">{k.name}</span> : <span className="k-mono k-muted">{t('editor.knowledge.id', { id: k.id })}</span>}
@@ -99,6 +109,20 @@ export default function Knowledge({ model, setModel }) {
           {!list.length && <div className="ke-note" style={{ padding: 12 }}>{t('editor.common.noMatch')}</div>}
         </div>
       </div>
+      {ask && (env.deck ? (
+        <env.Dialog name="editor-knowledge-remove" title={t('editor.knowledge.removeTitle', { n: sel.size })} onClose={() => setAsk(false)}>
+          <p className="deck-note">{t('editor.knowledge.removeBody')}</p>
+          <div className="k-row" style={{ justifyContent: 'flex-end', gap: 8 }}>
+            <Button data-deck-id="know-cancel" onClick={() => setAsk(false)}>{t('editor.page.cancel')}</Button>
+            <Button variant="danger" disabled={disabled || !sel.size} data-deck-id="know-confirm" onClick={remove}>{t('editor.knowledge.removeN', { n: sel.size })}</Button>
+          </div>
+        </env.Dialog>
+      ) : (
+        <Modal open title={t('editor.knowledge.removeTitle', { n: sel.size })} onClose={() => setAsk(false)}
+          footer={<><Button data-autofocus onClick={() => setAsk(false)}>{t('editor.page.cancel')}</Button><Button variant="danger" disabled={disabled || !sel.size} onClick={remove}>{t('editor.knowledge.removeN', { n: sel.size })}</Button></>}>
+          <p>{t('editor.knowledge.removeBody')}</p>
+        </Modal>
+      ))}
       <p className="ke-note">
         {t('editor.knowledge.count', { n: list.length, total: model.knowledge.length, count: model.knowledge.length })}
         {unnamed ? ` · ${t('editor.knowledge.unnamed', { count: unnamed })}` : ''}

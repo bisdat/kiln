@@ -639,6 +639,32 @@ const char* const kTextPurpose[kTextSlots] = {"kiln.item.name", "kiln.item.capti
                                               "kiln.item.lore", "kiln.item.acquisitionHint", "kiln.item.primaryAction",
                                               "kiln.item.secondaryAction", "kiln.item.tertiaryAction"};
 
+// "0x<workshop>/<tab GUID>[/<list GUID>]" (Kiln.Content CraftingGroupRef's text form). The tab's GUID is never zero; no list: the first.
+bool parse_menu_group(const std::string& s, uint32_t* workshop, uint8_t group[16], uint8_t set[16]) {
+    const size_t a = s.find('/');
+    if (a == std::string::npos || a < 3 || a > 10 || s[0] != '0' || (s[1] != 'x' && s[1] != 'X')) return false;
+    uint32_t w = 0;
+    for (size_t i = 2; i < a; ++i) {
+        const char c = static_cast<char>(std::tolower(static_cast<unsigned char>(s[i])));
+        if (!std::isxdigit(static_cast<unsigned char>(c))) return false;
+        w = (w << 4) | static_cast<uint32_t>(c <= '9' ? c - '0' : c - 'a' + 10);
+    }
+    const size_t b = s.find('/', a + 1);
+    const std::string tab = s.substr(a + 1, b == std::string::npos ? std::string::npos : b - a - 1);
+    uint8_t g[16] = {}, t[16] = {};
+    if (tab.size() != 36 || !guid_parse(lower(tab), g)) return false;
+    static const uint8_t zero[16] = {};
+    if (!std::memcmp(g, zero, 16)) return false;
+    if (b != std::string::npos) {
+        const std::string list = s.substr(b + 1);
+        if (list.size() != 36 || !guid_parse(lower(list), t)) return false;
+    }
+    *workshop = w;
+    std::memcpy(group, g, 16);
+    std::memcpy(set, t, 16);
+    return true;
+}
+
 struct Def {
     uint32_t kind = 0;  // KILN_CONTENT_ITEMS / RECIPES
     uint8_t guid[16] = {};
@@ -646,6 +672,12 @@ struct Def {
     std::string guid_s, name, base, station;
     uint32_t menu_workshop = 0;  // recipes: "menu": the workshop whose crafting menu lists it, when that is not its own
     std::string station_item;    // recipes at a workshop of a mod's own: "stationItem", the item that places its station (its name titles the workshop)
+    // recipes: "menuGroup" (since 0.2.0-dev.30.5), a tab of a crafting menu the game has and a list in it: "0x<workshop>/<tab GUID>[/<list GUID>]"
+    bool has_group = false;
+    uint32_t group_workshop = 0;
+    uint8_t group_id[16] = {}, group_set[16] = {};  // the set all zero: the tab's first list
+    std::string group_text;
+    bool track_crafted = false;  // recipes: "trackCrafted" (since 0.2.0-dev.30.5): the game's "crafted once" query on the recipe's own id, not cleared
     std::string display;  // recipes: the recipe name; items: texts["*"].name
     TextSet texts[kTextSlots];  // items: per slot, language key -> text ("*" = displayName / description / lore)
     json fields = json::object();
@@ -1196,6 +1228,39 @@ uintptr_t build_clone(Def& d, uintptr_t base, WorldState& ws, std::string* why) 
 }
 
 // ============================================================================================= recipes =========
+// The game's "crafted once" completion query of a recipe (since 0.2.0-dev.30.5), as its own recipes have it: the player's knowledge object
+// of the recipe id has flag 2 (keen::KnowledgeQueryData {knowledgeOrQueryId = recipe id, compareValue 2, compareOperator Equals, type
+// SimpleFlag, isExplicitPlayerKnowledgeQuery}; the object itself, Flags with expectedFlags 3, comes from kiln-quests' boot build of a
+// knowledge block). Offsets and enum values from the game's reflection.
+bool crafted_query(uint8_t* q, uint32_t size, uint32_t recipe, std::string* why) {
+    static const int64_t at_id = field_offset("keen::KnowledgeQueryData", "knowledgeOrQueryId");
+    static const int64_t at_value = field_offset("keen::KnowledgeQueryData", "compareValue");
+    static const int64_t at_op = field_offset("keen::KnowledgeQueryData", "compareOperator");
+    static const int64_t at_type = field_offset("keen::KnowledgeQueryData", "type");
+    static const int64_t at_explicit = field_offset("keen::KnowledgeQueryData", "isExplicitPlayerKnowledgeQuery");
+    const auto value_of = [](const char* type, const char* name) -> int64_t {
+        std::vector<std::pair<std::string, int64_t>> values;
+        if (enum_values(type, &values))
+            for (const auto& [n, v] : values)
+                if (n == name) return v;
+        return -1;
+    };
+    static const int64_t equals = value_of("keen::CompareOperator", "Equals");
+    static const int64_t simple_flag = value_of("keen::KnowledgeQueryDataType", "SimpleFlag");
+    if (at_id < 0 || at_value < 0 || at_op < 0 || at_type < 0 || at_explicit < 0 || equals < 0 || simple_flag < 0 || at_value + 4 > size ||
+        at_id + 4 > size || at_op >= size || at_type >= size || at_explicit >= size) {
+        *why = "the game's reflection does not describe keen::KnowledgeQueryData as Kiln knows it";
+        return false;
+    }
+    const uint32_t flag = 2;
+    std::memcpy(q + at_id, &recipe, 4);
+    std::memcpy(q + at_value, &flag, 4);
+    q[at_op] = static_cast<uint8_t>(equals);
+    q[at_type] = static_cast<uint8_t>(simple_flag);
+    q[at_explicit] = 1;
+    return true;
+}
+
 uintptr_t build_recipe(Def& d, WorldState& ws, std::string* why) {
     PhaseTimer pt(PH_BUILD_RECIPE);
     uintptr_t tmpl = 0;
@@ -1365,7 +1430,14 @@ uintptr_t build_recipe(Def& d, WorldState& ws, std::string* why) {
         if (!recipe_water::write(p, d.water, wf ? static_cast<int64_t>(wf->offset) : -1, wf ? wf->bytes : 0, why)) return 0;
     }
     if (!d.unlock_base) std::memset(p + L.r_know, 0, L.know_size);  // no knowledge needed (docs: "Unlock")
-    std::memset(p + L.r_done, 0, L.know_size);                       // no "crafted once" tracking
+    std::memset(p + L.r_done, 0, L.know_size);                       // no "crafted once" tracking, unless asked for:
+    if (d.track_crafted) {
+        std::string w;
+        if (!crafted_query(p + L.r_done, L.know_size, d.id, &w)) {
+            const std::string text = "trackCrafted: " + w + "; the recipe is not tracked";
+            if (std::find(d.warnings.begin(), d.warnings.end(), text) == d.warnings.end()) d.warnings.push_back(text);
+        }
+    }
     if (!d.display.empty()) std::memcpy(p + L.r_name, d.tag_guid[0], 16);
     else std::memset(p + L.r_name, 0, 16);
     char* name = reinterpret_cast<char*>(p + name_at);
@@ -2419,6 +2491,27 @@ uint32_t own_workshop(const Def& d) {
     return guid_parse(lower(d.station.substr(9)), g) ? fnv1a(g, 16) : 0;
 }
 
+// A definition's "menuGroup" that the menu it shows in does not have: said once per definition version, in its warnings and the log; the
+// recipe is listed where the rules above put it.
+void menu_group_missing(const DefPtr& def, uint32_t wid, bool layout) {
+    std::string why;
+    if (!layout) why = "the game's reflection has no crafting menu tab ids here";
+    else if (def->group_workshop != wid) {
+        char b[160];
+        std::snprintf(b, sizeof b, "it is a tab of workshop 0x%08x's menu, and the recipe shows in 0x%08x's", def->group_workshop, wid);
+        why = b;
+    } else {
+        why = "that menu has no such tab or list";
+    }
+    const std::string text = "menuGroup " + def->group_text + ": " + why + "; listed where Kiln's own rules put it";
+    {
+        std::lock_guard lock(store_mutex());
+        if (std::find(def->warnings.begin(), def->warnings.end(), text) != def->warnings.end()) return;
+        def->warnings.push_back(text);
+    }
+    LOGW("new content: recipe %s: %s", def->name.c_str(), text.c_str());
+}
+
 void menu_sync(const WorldState& ws) {
     if (!N.menu || !ws.rreg || !ws.ireg) return;
     const uint64_t version = g_version.load();
@@ -2506,10 +2599,18 @@ void menu_sync(const WorldState& ws) {
         }
         const bool my_placed = places_thing(static_cast<uintptr_t>(map_get(ws.ireg + E.items_map, my_item)));
         uintptr_t by_like = 0, by_placed = 0;
+        // "menuGroup" (since 0.2.0-dev.30.5): the tab (FbUiCraftingRecipeGroup.groupId) and its list (FbUiCraftingRecipeSet.recipeSetId, zero:
+        // the tab's first) the definition names, in the menu it shows in; the offsets come from the game's reflection
+        static const int64_t g_id_at = field_offset("keen::FbUiCraftingRecipeGroup", "groupId");
+        static const int64_t s_id_at = field_offset("keen::FbUiCraftingRecipeSet", "recipeSetId");
+        const bool want_group = def && def->has_group && def->group_workshop == wid && g_id_at >= 0 && s_id_at >= 0;
+        uintptr_t by_group = 0;
         std::map<uintptr_t, std::pair<uint32_t, uint32_t>> where;  // subcategory header -> tab, subcategory
         for (uint32_t c = 0; c < cl.count && c < 256; ++c) {
             const uintptr_t cat = cl.data + c * static_cast<uintptr_t>(N.cat_stride);
             if (kiln_groups.count(cat)) continue;
+            uint8_t tab_id[16] = {};
+            const bool group_tab = want_group && rd(cat + static_cast<uintptr_t>(g_id_at), tab_id, 16) && !std::memcmp(tab_id, def->group_id, 16);
             const BlobRef subs = blob_at(cat + N.cat_subs);
             for (uint32_t k = 0; k < subs.count && k < 256; ++k) {
                 const uintptr_t sub = subs.data + k * static_cast<uintptr_t>(N.sub_stride);
@@ -2517,6 +2618,8 @@ void menu_sync(const WorldState& ws) {
                 if (kiln_headers.count(hdr)) continue;
                 last = hdr;
                 where[hdr] = {c, k};
+                uint8_t set_id[16] = {};
+                if (group_tab && !by_group && rd(sub + static_cast<uintptr_t>(s_id_at), set_id, 16) && !std::memcmp(set_id, def->group_set, 16)) by_group = hdr;
                 auto it = g_menu.find(hdr);
                 const BlobRef ids = it != g_menu.end() ? BlobRef{it->second.orig_off ? hdr + it->second.orig_off : 0, it->second.orig_count}
                                                        : blob_at(hdr);
@@ -2539,7 +2642,8 @@ void menu_sync(const WorldState& ws) {
                 if (same > best) best = same, by_cat = hdr;
             }
         }
-        const uintptr_t target = by_base ? by_base : by_like ? by_like : by_placed ? by_placed : by_cat ? by_cat : last;
+        if (def && def->has_group && !by_group) menu_group_missing(def, wid, g_id_at >= 0 && s_id_at >= 0);
+        const uintptr_t target = by_group ? by_group : by_base ? by_base : by_like ? by_like : by_placed ? by_placed : by_cat ? by_cat : last;
         // a station's own workshop: its own menu lists it, in this place of the menu it takes its tabs from, and that menu doesn't
         const uint32_t own = def ? own_workshop(*def) : 0;
         if (own && target) {
@@ -4134,6 +4238,17 @@ KilnResult nc_define(KilnOwner owner, uint32_t kind, const std::string& text, bo
         d->station_item = str_of(j, "stationItem");
         if (!d->station_item.empty() && d->station.rfind("workshop:", 0) != 0)
             return fail("\"stationItem\" names the item that places a workshop of a mod's own: the recipe's \"station\" is \"workshop:<guid>\"");
+        if (j.contains("trackCrafted")) {
+            if (!j["trackCrafted"].is_boolean()) return fail("\"trackCrafted\" must be true or false");
+            d->track_crafted = j["trackCrafted"].get<bool>();
+        }
+        if (j.contains("menuGroup")) {
+            const std::string g = str_of(j, "menuGroup");
+            if (!parse_menu_group(g, &d->group_workshop, d->group_id, d->group_set))
+                return fail("\"menuGroup\" must be \"0x<workshop>/<tab GUID>\" or \"0x<workshop>/<tab GUID>/<subcategory GUID>\": a tab of a crafting menu the game has");
+            d->has_group = true;
+            d->group_text = g;
+        }
         std::string err;
         for (const char* k : {"inputs", "outputs"}) {
             if (!j.contains(k) || !j[k].is_array() || j[k].empty() || j[k].size() > 32)

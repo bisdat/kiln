@@ -13,9 +13,11 @@ use tauri::AppHandle;
 
 pub use imp::UpdateStatus;
 
-/// The update state now (also sent as `kiln://update` at every change).
+/// The update state now (also sent as `kiln://update` at every change). Asked before the start-up steps set it up, it
+/// waits for them (at most 10 s; crate::selfupdate::wait_started).
 #[tauri::command]
 pub async fn update_status(app: AppHandle) -> Result<UpdateStatus, Error> {
+    imp::wait_started().await;
     Ok(imp::status(&app))
 }
 
@@ -67,6 +69,10 @@ mod imp {
 
     pub fn status(_: &AppHandle) -> UpdateStatus {
         selfupdate::status()
+    }
+
+    pub async fn wait_started() {
+        let _ = tauri::async_runtime::spawn_blocking(|| selfupdate::wait_started(std::time::Duration::from_secs(10))).await;
     }
 
     pub async fn check(app: &AppHandle) -> UpdateStatus {
@@ -145,6 +151,8 @@ mod imp {
         pub ready: Option<()>,
         pub skipped: Option<String>,
         pub just_updated: Option<()>,
+        /// Always null: nothing goes into the game by itself after an update (there is none).
+        pub shipped_runtime: Option<()>,
         pub task_id: Option<String>,
         pub error: Option<Error>,
     }
@@ -185,6 +193,7 @@ mod imp {
             ready: None,
             skipped: None,
             just_updated: None,
+            shipped_runtime: None,
             task_id: None,
             error: None,
         }
@@ -193,6 +202,9 @@ mod imp {
     pub fn status<R: Runtime>(app: &AppHandle<R>) -> UpdateStatus {
         disabled(&app.package_info().version.to_string())
     }
+
+    /// Nothing to wait for: the status is the same from the first moment.
+    pub async fn wait_started() {}
 
     pub async fn check<R: Runtime>(app: &AppHandle<R>) -> UpdateStatus {
         status(app)

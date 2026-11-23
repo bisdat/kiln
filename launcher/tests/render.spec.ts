@@ -1,10 +1,19 @@
 // The page's ready call (shell/started.ts), Settings' "Draw the launcher without the GPU" and "Switch to X11 when drawing
 // is slow on Wayland" (render.rs), in mock mode.
 // The dev server runs React in development, where StrictMode runs the first commit's effects twice.
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 type Mock = { calls: () => string[] };
 const calls = (page: Page, cmd: string) => page.evaluate((c) => (window as unknown as { __kilnMock: Mock }).__kilnMock.calls().filter((x) => x === c).length, cmd);
+
+/** The Settings row of a switch, with its More text open (Settings' rows: one line of help, More for the rest). */
+async function rowOf(page: Page, sw: Locator) {
+  const r = page.locator(".k-st-row", { has: sw });
+  await expect(r).toBeVisible();
+  const more = r.getByRole("button", { name: "More" });
+  if (await more.count()) await more.click();
+  return r;
+}
 
 test("the page says it started exactly once, in the desktop and the Deck UI", async ({ page }) => {
   for (const at of ["/#/", "/#/deck"]) {
@@ -23,40 +32,42 @@ test("the page says it started exactly once, in the desktop and the Deck UI", as
 });
 
 test("Settings sets and clears the marker for the next start and says how this start draws", async ({ page }) => {
-  await page.goto("/#/settings");
+  await page.goto("/#/settings/advanced");
   const sw = page.getByRole("switch", { name: "Draw the launcher without the GPU" });
   await expect(sw).not.toBeChecked();
-  const card = page.locator(".k-toggle", { has: sw });
+  const card = await rowOf(page, sw);
   await expect(card).toContainText("Applies at the next start. This start draws with the GPU.");
-  await card.click();
+  await card.locator(".k-toggle").click();
   await expect(sw).toBeChecked();
   await expect(page.locator(".k-toast", { hasText: "The next start draws without the GPU" })).toBeVisible();
   await expect(card).toContainText("Turned on in Settings");
   expect(await calls(page, "app_render_set")).toBe(1);
-  await card.click();
+  await card.locator(".k-toggle").click();
   await expect(sw).not.toBeChecked();
 });
 
 test("after the fallback, Settings says why and the fire is the CSS one", async ({ page }) => {
-  await page.goto("/?render=software#/settings");
+  await page.goto("/?render=software#/settings/advanced");
   const sw = page.getByRole("switch", { name: "Draw the launcher without the GPU" });
   await expect(sw).toBeChecked();
-  await expect(page.locator(".k-toggle", { has: sw })).toContainText("This start draws without the GPU: the page did not start with it. The launcher turned this on by itself");
+  await expect(await rowOf(page, sw)).toContainText("This start draws without the GPU: the page did not start with it. The launcher turned this on by itself");
+  // the fire (Settings, General) says why it is off
+  await page.goto("/?render=software#/settings/general");
   const fire = page.getByRole("switch", { name: "Animated fire" });
   await expect(fire).toBeDisabled();
-  await expect(page.locator(".k-toggle", { has: fire })).toContainText("Off while the launcher draws without the GPU.");
+  await expect(page.locator(".k-st-row", { has: fire })).toContainText("Off while the launcher draws without the GPU.");
   await page.goto("/?render=software#/");
   await page.locator(".k-splash").waitFor({ state: "detached" });
   await expect(page.locator(".k-app")).not.toHaveAttribute("data-gl", /.*/);
 });
 
 test("a start drawing without the GPU because of the marker says it stays so until the switch is off", async ({ page }) => {
-  await page.goto("/?render=marker#/settings");
+  await page.goto("/?render=marker#/settings/advanced");
   const sw = page.getByRole("switch", { name: "Draw the launcher without the GPU" });
   await expect(sw).toBeChecked();
-  const card = page.locator(".k-toggle", { has: sw });
+  const card = await rowOf(page, sw);
   await expect(card).toContainText("This start draws without the GPU because this switch is on, and every start does until you turn it off. The launcher turned this on by itself");
-  await card.click();
+  await card.locator(".k-toggle").click();
   await expect(sw).not.toBeChecked();
   await expect(page.locator(".k-toast", { hasText: "The next start draws with the GPU" })).toBeVisible();
   await expect(card).not.toContainText("The launcher turned this on by itself");
@@ -68,23 +79,23 @@ test("a start drawing without the GPU because of the marker says it stays so unt
 
 test("the X11 switch shows only on Wayland, turns off and on, and a user's GDK_BACKEND wins", async ({ page }) => {
   const name = "Switch to X11 when drawing is slow on Wayland";
-  await page.goto("/#/settings");
+  await page.goto("/#/settings/advanced");
   await expect(page.getByRole("switch", { name: "Draw the launcher without the GPU" })).toBeVisible();
   await expect(page.getByRole("switch", { name })).toHaveCount(0);
-  await page.goto("/?x11=restart#/settings");
+  await page.goto("/?x11=restart#/settings/advanced");
   const sw = page.getByRole("switch", { name });
   await expect(sw).toBeChecked();
-  const card = page.locator(".k-toggle", { has: sw });
+  const card = await rowOf(page, sw);
   await expect(card).toContainText("Applies at the next start. This start draws through X11.");
-  await card.click();
+  await card.locator(".k-toggle").click();
   await expect(sw).not.toBeChecked();
   await expect(page.locator(".k-toast", { hasText: "The next start stays on Wayland" })).toBeVisible();
-  await card.click();
+  await card.locator(".k-toggle").click();
   await expect(sw).toBeChecked();
   expect(await calls(page, "app_render_x11_set")).toBe(2);
-  await page.goto("/?x11=tried#/settings");
-  await expect(page.locator(".k-toggle", { has: page.getByRole("switch", { name }) })).toContainText("X11 was tried and did not help");
-  await page.goto("/?x11=yours#/settings");
+  await page.goto("/?x11=tried#/settings/advanced");
+  await expect(await rowOf(page, page.getByRole("switch", { name }))).toContainText("X11 was tried and did not help");
+  await page.goto("/?x11=yours#/settings/advanced");
   await expect(page.getByRole("switch", { name })).toBeDisabled();
-  await expect(page.locator(".k-toggle", { has: page.getByRole("switch", { name }) })).toContainText("Your GDK_BACKEND=wayland decides.");
+  await expect(await rowOf(page, page.getByRole("switch", { name }))).toContainText("Your GDK_BACKEND=wayland decides.");
 });

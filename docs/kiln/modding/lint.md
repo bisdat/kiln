@@ -759,6 +759,17 @@ mod-values/a.json:12:5: warning KL356: value open-carried: a carried value witho
 Fix: give `max` the highest value the mod can really reach (for an experience value, its last threshold or a little
 above: past it no level is gained). An explicit `max`, also the default written out, ends the warning.
 
+### KL360 ui-row
+Error. A window's row that Kiln.Blocks refuses when it loads the mod (since 0.2.0-dev.31, [ui-blocks.md](ui-blocks.md#richer-windows-since-020-dev31)):
+an `id` that another row of the same window already has (rows inside tabs and a tree's `nodeRows` included; a tab's own `id`
+only has to differ from its tabs row's other tabs), or an `input` row in a window that does not take the keyboard
+(`"interactive": false`). Two windows may use the same ids. Each row's own shape is the schema's.
+```text
+blocks/camp.json:14:47: error KL360: window camp: "note" is the id of another row of this window: ids are unique in a window, nested rows included (Kiln.Blocks refuses the window)
+blocks/camp.json:30:9: error KL360: window panel: a text field needs the keyboard: put it in an interactive window or a screen (interactive: false only shows; Kiln.Blocks refuses the window)
+```
+Fix: give the row an id of its own, or move the text field to an interactive window or a screen.
+
 ## KL4xx: references to the game's data
 
 ### KL401 unknown-reference

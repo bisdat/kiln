@@ -103,7 +103,7 @@ test.describe("desktop", () => {
     await expect(page).toHaveURL(/#\/$/);
     await expect(nav(page).getByRole("link", { name: /^Community\b/ })).toHaveCount(0);
     await expect(page.getByTestId("nav-community-count")).toHaveCount(0);
-    await page.goto("/?mock=1&discord=hidden,in#/settings");
+    await page.goto("/?mock=1&discord=hidden,in#/settings/online");
     const toggle = page.getByTestId("community-shown").getByRole("switch");
     await expect(toggle).not.toBeChecked();
     await page.waitForTimeout(500);

@@ -57,7 +57,9 @@ extern "C" {
 #endif
 
 #define KILN_RENDER_SERVICE "kiln.render"
-#define KILN_RENDER_VERSION 2u /* v2 appends outline .. outline_status after image (0.2.0-dev.30.3) */
+#define KILN_RENDER_VERSION 3u /* v2 appends outline .. outline_status after image (0.2.0-dev.30.3); v3 (0.2.0-dev.30.5) adds no
+                                  member: KILN_RENDER_OUTLINE_THROUGH_WALLS and outline_info's position (a v2 table refuses
+                                  the flag) */
 
 /* text flags */
 enum {
@@ -99,6 +101,12 @@ typedef struct KilnRenderStatus {
 /* KilnRenderOutline.flags */
 enum {
     KILN_RENDER_OUTLINE_PULSE = 1u, /* the colour breathes (1.2 s period, 40 % to 100 % brightness) */
+    /* 0.2.0-dev.30.5: also seen through walls. The game's highlight is depth-tested with the model (no flag of the game
+     * draws it through walls: docs/re/client-render.md "Through walls"), so kiln.render only reads the entity's position
+     * for this request at each client step (its RenderTransform's first WorldTransform, as kiln.markers' client anchors
+     * do; outline_info's position) and Kiln.Ui draws a screen-space silhouette on its own UI layer. A kiln-core before
+     * 0.2.0-dev.30.5 refuses the flag (KILN_ERR_INVALID_ARGUMENT). */
+    KILN_RENDER_OUTLINE_THROUGH_WALLS = 2u,
 };
 /* KilnRenderOutlineInfo.state */
 enum {
@@ -139,6 +147,12 @@ typedef struct KilnRenderOutlineInfo {
     KilnEntity entity;
     uint32_t group;     /* the game's highlight group this request's colour uses now (4 or 5), 0 when none */
     uint32_t merged;    /* 1: more than two colours are in use, this one shows with another's group */
+    /* 0.2.0-dev.30.5 (record 56 bytes; a 24-byte record is still answered, without these): for a THROUGH_WALLS request, the
+     * entity's position in metres at the latest client step (position_ok 1), else position_ok 0 (no such request, the
+     * entity not here or its transform not readable now) and the position zero. position_step: the client step it is of. */
+    uint32_t position_ok;
+    uint32_t position_step;
+    double position[3];
 } KilnRenderOutlineInfo;
 
 typedef struct KilnRenderOutlineStatus {
@@ -207,7 +221,8 @@ typedef struct KilnRenderApi {
 
 #ifdef __cplusplus
 static_assert(sizeof(KilnRenderOutline) == 24, "KilnRenderOutline is 24 bytes");
-static_assert(sizeof(KilnRenderOutlineInfo) == 24, "KilnRenderOutlineInfo is 24 bytes");
+static_assert(offsetof(KilnRenderOutlineInfo, position_ok) == 24 && sizeof(KilnRenderOutlineInfo) == 56,
+              "KilnRenderOutlineInfo: 24 bytes through merged, the position appended (56)");
 static_assert(sizeof(KilnRenderOutlineStatus) == 208, "KilnRenderOutlineStatus is 208 bytes");
 static_assert(offsetof(KilnRenderApi, image) == 104, "v1 ends with image at 104 (112 bytes)");
 static_assert(offsetof(KilnRenderApi, outline) == 112, "v2 outlines are appended at 112");

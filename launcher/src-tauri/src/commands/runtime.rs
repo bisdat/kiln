@@ -47,6 +47,20 @@ pub fn import_shipped(app: &AppHandle) {
         Ok(None) => {}
         Err(e) => eprintln!("shipped Kiln runtime {}: {e}", zip.display()),
     }
+    // a game status made before the shipped runtime was known or copied in said "nothing to update": after a launcher
+    // update the "Updated to" notice and Play's note waited for the next poll, which an unfocused window never sends.
+    // Fresh game statuses go out now, and the update status with the shipped runtime's version (the only one the window
+    // installs by itself after an update).
+    crate::state::forget_install_states();
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let games = dirs().and_then(|d| kiln_manage::game::known(&d)).unwrap_or_default();
+        for g in games {
+            crate::watch::emit_status(&app, &g.id);
+        }
+        #[cfg(feature = "self-update")]
+        crate::selfupdate::emit_if_started(&app);
+    });
 }
 
 #[tauri::command]

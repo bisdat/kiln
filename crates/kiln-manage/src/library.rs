@@ -1265,11 +1265,18 @@ impl TempDir {
     pub fn path(&self) -> &Path {
         &self.0
     }
+
+    /// Leave this folder for its recorded cleanup.
+    pub(crate) fn keep(mut self) {
+        self.0.clear();
+    }
 }
 
 impl Drop for TempDir {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
+        if !self.0.as_os_str().is_empty() {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
     }
 }
 

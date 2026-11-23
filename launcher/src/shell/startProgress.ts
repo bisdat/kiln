@@ -61,10 +61,30 @@ export function basisText(tl: StartTimeline): string {
   return tl.estimate.same ? t("shell.startProgress.basisSame", { count: n }) : t("shell.startProgress.basisOther", { count: n });
 }
 
+/** The steps of a kiln-mode start's startup pass (kiln-eml progress.rs PassStep), by the state file's `step`. */
+const SF_STEPS: Record<string, () => string> = {
+  checking: () => t("shell.startProgress.sfStepChecking"),
+  mods: () => t("shell.startProgress.sfStepMods"),
+  verify: () => t("shell.startProgress.sfStepVerify"),
+  write: () => t("shell.startProgress.sfStepWrite"),
+  save: () => t("shell.startProgress.sfStepSave"),
+};
+
+/** What kiln-eml says before the game's window exists (`launch_prestart`): a kiln-mode start's startup pass in the
+ *  launcher's language, by its step ("Preparing ShroudForge mods for Kiln's interpreter: checking the prepared game data
+ *  (3 of 5)."); anything else as kiln-manage worded it. */
+export function preStartLine(prep: PreStart): string {
+  if (prep.stage !== "startup" || prep.label === "Preparing the game data for EML mods") return prep.message;
+  const word = prep.step && Object.hasOwn(SF_STEPS, prep.step) ? SF_STEPS[prep.step] : undefined;
+  if (!word) return t("shell.startProgress.sfStartup");
+  const n = prep.stepNumber ?? 0, total = prep.steps ?? 0;
+  return n > 0 && total >= n ? t("shell.startProgress.sfStartupStep", { step: word(), n, total }) : t("shell.startProgress.sfStartupStepOnly", { step: word() });
+}
+
 /** "Starting Kiln's services: kiln-vfx, building 85 materials (14 of 31)". */
 export function stepLine(s: StartStep, prep?: PreStart | null): string {
   // kiln-eml's own progress is the detail of the early plugins (it is the finer source there)
-  if (s.id === "early-plugins" && prep) return prep.message.replace(/\.$/, "");
+  if (s.id === "early-plugins" && prep) return preStartLine(prep).replace(/\.$/, "");
   const detail = s.detail ? s.detail.replace(/: /g, ", ") : "";
   const counted = s.id !== "cook" && !!s.total;
   const done = Math.min(s.done ?? 0, s.total ?? 0), total = s.total;

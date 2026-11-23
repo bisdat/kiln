@@ -604,3 +604,24 @@ fn the_plan_is_read_through_a_handle_without_following_a_link() {
         assert!(!reparse(&open_no_follow(&file).unwrap().metadata().unwrap()));
     }
 }
+
+#[test]
+fn startup_progress_names_the_plans_mod_format() {
+    for (tag, packages, label) in [
+        ("progress-sf", vec![p("a", "mods/a", "shroudforge", &["patch"], "candidate")], "Preparing ShroudForge mods for Kiln's interpreter"),
+        ("progress-eml", vec![p("a", "mods/a", "eml", &["patch"], "candidate")], "Preparing the game data for EML mods"),
+        ("progress-none", vec![], "Preparing the game data for EML mods"),
+    ] {
+        let install = Install::new(tag);
+        let cfg = RunConfig {
+            game_dir: install.game.clone(), cache_dir: install.kiln().join("eml/cache"),
+            file_name: Some("enshrouded".into()), kiln: Some(Arc::new(install.mode(&strict_plan(&packages)))),
+            progress: Some(Arc::new(crate::progress::Display::with_window(Some(install.kiln().join("state")), None))),
+            ..Default::default()
+        };
+        runner::run(&cfg, Vec::new(), Vec::new());
+        let state: serde_json::Value = serde_json::from_slice(&std::fs::read(install.kiln().join("state/eml.json")).unwrap()).unwrap();
+        assert_eq!(state["progress"]["stage"], "startup");
+        assert_eq!(state["progress"]["label"], label, "{tag}");
+    }
+}

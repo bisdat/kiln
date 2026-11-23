@@ -16,6 +16,6 @@ export function useFound(gameId: GameId | null | undefined, profileId: ProfileId
 
 /** The loaders line: "EML's own loader (dbghelp.dll) is in the game folder and loads its mods itself." */
 export function loaderLine(r: FoundReport, kinds?: ModKind[]) {
-  return r.loaders.filter((l) => !kinds || l.kinds.some((k) => kinds.includes(k)))
+  return r.loaders.filter((l) => l.kinds.some((k) => !kinds || kinds.includes(k)))
     .map((l) => t("profiles.gameFolder.loaderLine", { name: l.engine === "eml" ? "EML" : l.name, file: l.file }));
 }

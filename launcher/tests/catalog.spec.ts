@@ -131,7 +131,7 @@ test.describe("desktop", () => {
     await expect(card(page, "Lantern Glow")).toBeVisible();
     await shot(page, "desktop-signedout");
 
-    await open(page, "?nexus=signedout", "/settings");
+    await open(page, "?nexus=signedout", "/settings/online");
     const c = page.locator(".k-card", { has: page.getByRole("heading", { name: "Nexus Mods" }) });
     await expect(c.getByTestId("nexus-account")).toContainText("Not signed in.");
     await expect(c.getByRole("textbox")).toHaveCount(0);
@@ -141,6 +141,8 @@ test.describe("desktop", () => {
     expect((await opened(page)).some((url) => url.startsWith("https://users.nexusmods.com/oauth/authorize"))).toBeTruthy();
     const sw = c.getByRole("switch");
     await expect(sw).not.toBeChecked();
+    // where other games' links go: the row's More
+    await c.locator('[data-setting="nexus.handler"]').getByRole("button", { name: "More" }).click();
     await expect(c).toContainText("Other games' links go to Vortex");
     await c.getByText("Mod Manager Download links").click();
     await expect(sw).toBeChecked();
@@ -151,7 +153,7 @@ test.describe("desktop", () => {
   });
 
   test("denied browser consent leaves the account signed out", async ({ page }) => {
-    await open(page, "?nexus=denied", "/settings");
+    await open(page, "?nexus=denied", "/settings/online");
     const c = page.locator(".k-card", { has: page.getByRole("heading", { name: "Nexus Mods" }) });
     const signIn = c.getByRole("button", { name: "Sign in to Nexus Mods", exact: true });
     await signIn.click();
@@ -162,7 +164,7 @@ test.describe("desktop", () => {
   });
 
   test("unregistered development build cannot request consent", async ({ page }) => {
-    await open(page, "?nexus=unconfigured", "/settings");
+    await open(page, "?nexus=unconfigured", "/settings/online");
     const c = page.locator(".k-card", { has: page.getByRole("heading", { name: "Nexus Mods" }) });
     await expect(c).toContainText("Nexus Mods sign-in is not available in this build.");
     await expect(c.getByRole("button", { name: "Sign in to Nexus Mods", exact: true })).toBeDisabled();

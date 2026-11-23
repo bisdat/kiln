@@ -148,7 +148,9 @@ pub fn freeze_copy(dir: &Path, name: &str, src: &Path) -> Result<(String, u64)> 
 /// Makes an already written file of the folder frozen (flush, read-only) and returns its hash and size.
 pub fn freeze_existing(dir: &Path, name: &str) -> Result<(String, u64)> {
     let path = dir.join(name);
-    let f = std::fs::OpenOptions::new().read(true).open(&path).map_err(crate::util::io_at(&path, "reading"))?;
+    // FlushFileBuffers requires write access on Windows. Keep the flush: the caller may have only written the
+    // artifact, and its contents must reach disk before it becomes a frozen input to the publication record.
+    let f = std::fs::OpenOptions::new().read(true).write(cfg!(windows)).open(&path).map_err(crate::util::io_at(&path, "reading"))?;
     f.sync_all().map_err(crate::util::io_at(&path, "flushing"))?;
     drop(f);
     let mut perm = std::fs::metadata(&path).map_err(crate::util::io_at(&path, "reading"))?.permissions();

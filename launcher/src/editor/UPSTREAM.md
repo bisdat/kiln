@@ -52,8 +52,15 @@ item), `parts.jsx` (the slot, with a neutral square for an item that has no icon
 its rules (equipment mask order, socket bytes, level includes upgrades, the tree checks before a write). Game art
 appears only as item and skill icons. Two rules differ: an amount may go above the item's stack size, up to the
 65535 the save holds, with a note (a mod may have raised stack sizes, which the editor cannot know; upstream stopped
-at the vanilla stack). And the level warning compares the base level (level minus
-upgrades) with the item's maxLevel, as the game writes a level-10 hat with 5 upgrades as level 15. The UI speaks the
+at the vanilla stack). Level edits use `kiln/levels.js` to keep the total level, including applied upgrades,
+within the save's byte (0..255). The vendored `data/items.json` can predate the game's current level ranges and
+cannot account for mods, so its `maxLevel` is not an edit limit, including for gems, catalog items and templates.
+The instance's own `maxUpgrades` bounds upgrade edits, as upstream's `src/ItemEditor.jsx` describes; no catalog
+rarity or fixed five-upgrade limit replaces that saved capacity. Upstream's README documents that the saved level
+already includes upgrades: a level-10 hat with 5 upgrades is level 15, not 10.
+These limits apply only to edits and newly created items (including templates), never when loading, displaying,
+moving or duplicating an existing entry. The write check rejects only non-byte item levels/upgrades, not values
+above catalog limits; existing saves remain byte-identical if those fields are not edited. The UI speaks the
 launcher's language: Kiln's files call the launcher's `t("editor.…")` (`launcher/src/i18n/*.json`, the `editor` keys, checked
 by `bun scripts/i18n-check.ts --source`), upstream's texts go through `src/i18n.js` and `launcher-keys.json`. Item and skill
 names stay the game's (`definirIdioma('en')`: English outside Portuguese). The Kiln strings at the end of `src/i18n/en.json`

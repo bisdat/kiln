@@ -9,9 +9,9 @@
   "verified": true,
   "note": "runtime-verified in labs on this exe, 2026-11-11, Kiln 0.2.0-dev+20261112.68988ae, policy any, standard lab save copied fresh for each group, one group per boot (or per run of boots): the running core resolved sigdb 447/447 symbols (355 defined, 92 captured), 542/542 constants (493 defined, 49 captured) and 146/146 features, each to the same value as the offline resolve (compared per name from sigdb-report.json); base world 24/0, players 30/0, chat+time 50/0, hooks 17/0, content 33/0, newcontent 24/0; api 74/0; settings 70/0; items 95/0 (kiln.items self-test on); combat 203/0 (watch-all); spawn 57/0 over 3 boots; gameplay 48/0; creatures 63/0; assets 17/0; rules 53/0; pacing 21/0; types 32/0 + types-peer 8/0; progression 45/0 (no player); net 168/0 with nettest 95 PASS, 0 FAIL; quests 188/0 over 3 boots; skills 124/0 over 2 boots; characters 53/0 over 3 boots; gamedata 71/0 over 2 boots (reload, restart); saves 54/0 over 8 boots (SIGINT, kill -9 x3, restore, game backup); build 79/0 over 4 boots; placeholder 34/0 over 4 boots (kill -9). Failing, so their names stay static: abilities 70/3, 70/3, 71/2 over three runs (the bow shot is refused by the core's PlaySequence guard every time, the Greet emote ran 73/66/79 steps of the 80 the test wants, the staff cast 38/35 then passed, the PC under heavy load); npcai 25/6 twice (force ready unavailable on four spawned creatures, the peacekeeper's relations not applied). Not run: emf (its probe needs third-party EMF mods). Levels: lab 1093 names in 24 services, static 42 (abilities, npcai, emf). With this record under verified-only: build verified, SimStep hooked, every server service loaded (27; audio, screen, ui and vfx skipped as client-only), 0 error lines.",
   "declared": {
-    "symbols": 641,
-    "constants": 731,
-    "features": 198
+    "symbols": 657,
+    "constants": 739,
+    "features": 202
   },
   "features": {
     "abilities.attributes": true,
@@ -194,6 +194,10 @@
     "time.sync_probe": true,
     "time.weather": true,
     "time.weather_choose": true,
+    "tools.build_area": true,
+    "tools.history": true,
+    "tools.material_lookup": true,
+    "tools.paid_terrain": true,
     "types.events": true,
     "types.systems": true,
     "weather.sample": true,
@@ -614,6 +618,16 @@
     "time/WeatherStartPhenomenon": "0xa22830",
     "time/WeatherUpdate": "0xa23800",
     "time/WeatherUpdateLayers": "0xa233d0",
+    "tools/BuildAreaIntersects": "0x94af20",
+    "tools/HistoryBegin": "0x230260",
+    "tools/HistoryDiscard": "0x230c00",
+    "tools/MaterialListAppend": "0x22e630",
+    "tools/RemoveBuildingVoxels": "0x227bc0",
+    "tools/TerrainCarveDispatch": "0xa32bf0",
+    "tools/TerrainCarveKernel": "0xa3a180",
+    "tools/TerrainConfigLookup": "0x9464b0",
+    "tools/TerrainCostBuild": "0x228e80",
+    "tools/TerrainCostScale": "0x229500",
     "types/ProgramRunner": "0x64ac00",
     "weather/SampleAt": "0xa21940",
     "world/CurrentEntityId": "0x65b870",
@@ -1293,6 +1307,14 @@
     "time/weather.res_layers": "0x5c",
     "time/weather.res_phenomena": "0x6c",
     "time/weather.res_phenomenon_stride": "0xb0",
+    "tools/area.abandoned": "0x46",
+    "tools/area.access_zones": "0x88",
+    "tools/area.bases": "0x10",
+    "tools/area.count": "0x18",
+    "tools/area.owner_kind": "0x45",
+    "tools/area.shape": "0x44",
+    "tools/cost.cell": "0x28",
+    "tools/history.materials": "0x110",
     "types/events.map": "0xe16db8",
     "types/events.streams": "0x7b9e58",
     "world.jobs": "0xe17960",
@@ -3328,6 +3350,86 @@
         "time.weather": "lab",
         "time.weather_choose": "static"
       }
+    },
+    "tool-payment": {
+      "level": "static",
+      "date": "2026-11-22",
+      "evidence": "resolved offline (tools/sigport/build_record.py)",
+      "symbols": {
+        "@tools/MaterialListAppend.layout": "static",
+        "@tools/TerrainCostBuild.list": "static",
+        "@tools/TerrainCostScale.rebuild": "static",
+        "tools/MaterialListAppend": "static",
+        "tools/TerrainCostBuild": "static",
+        "tools/TerrainCostScale": "static"
+      },
+      "constants": {
+        "tools/cost.cell": "static"
+      },
+      "features": {
+        "tools.paid_terrain": "static"
+      }
+    },
+    "tools-presentation": {
+      "level": "static",
+      "date": "2026-11-22",
+      "evidence": "resolved offline (tools/sigport/build_record.py)",
+      "symbols": {
+        "tools/TerrainConfigLookup": "static"
+      },
+      "constants": {},
+      "features": {
+        "tools.material_lookup": "static"
+      }
+    },
+    "tools_area": {
+      "level": "static",
+      "date": "2026-11-22",
+      "evidence": "resolved offline (tools/sigport/build_record.py)",
+      "symbols": {
+        "@tools/BuildArea.access": "static",
+        "@tools/BuildArea.fields": "static",
+        "tools/BuildAreaIntersects": "static"
+      },
+      "constants": {
+        "tools/area.abandoned": "static",
+        "tools/area.access_zones": "static",
+        "tools/area.bases": "static",
+        "tools/area.count": "static",
+        "tools/area.owner_kind": "static",
+        "tools/area.shape": "static"
+      },
+      "features": {
+        "tools.build_area": "static"
+      }
+    },
+    "tools_history": {
+      "level": "static",
+      "date": "2026-11-22",
+      "evidence": "resolved offline (tools/sigport/build_record.py)",
+      "symbols": {
+        "@tools/HistoryBegin.materials": "static",
+        "tools/HistoryBegin": "static",
+        "tools/HistoryDiscard": "static"
+      },
+      "constants": {
+        "tools/history.materials": "static"
+      },
+      "features": {
+        "tools.history": "static"
+      }
+    },
+    "tools_terrain": {
+      "level": "static",
+      "date": "2026-11-22",
+      "evidence": "resolved offline (tools/sigport/build_record.py)",
+      "symbols": {
+        "tools/RemoveBuildingVoxels": "static",
+        "tools/TerrainCarveDispatch": "static",
+        "tools/TerrainCarveKernel": "static"
+      },
+      "constants": {},
+      "features": {}
     },
     "types": {
       "level": "lab",

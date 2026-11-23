@@ -490,6 +490,7 @@
   },
   "keys": {
     "help_mouse": "Click a key, then press the new one: a key, the middle or a side mouse button, or a turn of the wheel, with Ctrl, Shift or Alt if you like (left and right click can't be bound). Click it again to cancel; Escape cancels and closes the menu. Unbind leaves an action without a key. Saved to kiln/config/keybinds.json.",
+    "help_pad": "A controller works too: click a key binding, then press a pad button, or hold LB, RB, LT or RT and press another for a combination (Pad:LB+A); press and release LB, RB, LT or RT alone to bind that button.",
     "help": "Click a key, then press the new one. Click it again to cancel; Escape cancels and closes the menu. Unbind leaves an action without a key. Saved to kiln/config/keybinds.json.",
     "col_action": "Action",
     "col_key": "Key",
@@ -499,7 +500,8 @@
     "reset": "Reset",
     "unbind": "Unbind",
     "toast": {
-      "wheel_menu": "The Kiln menu's key can't be on the wheel ({key}): it would close the menu as you scroll it"
+      "wheel_menu": "The Kiln menu's key can't be on the wheel ({key}): it would close the menu as you scroll it",
+      "pad_menu": "The Kiln menu's key can't be a controller button ({key}): the menu is opened from the keyboard or a mouse button"
     }
   },
   "network": {
@@ -888,6 +890,18 @@
       "too_many": "too many commands waiting: slow down",
       "command_failed": "{command} failed",
       "server_value": "{config}: {path} is the server's: it can be changed after leaving"
+    },
+    "ui": {
+      "too_much_text": "This window has more text than it can show (1 MiB at most).",
+      "no_picture": "(no picture: {reason})",
+      "unavailable": "\u2014 ({reason})",
+      "too_many_rows": "{count} rows: more than this table shows ({max})"
+    },
+    "ui_command": {
+      "unavailable": "This server cannot run UI commands (no Kiln, or an older Kiln): nothing was run.",
+      "busy": "The server refused: too many commands, try again.",
+      "expired": "The command was not run: it waited too long.",
+      "no_answer": "No answer from the server: the command may or may not have run."
     }
   },
   "abilities": {

@@ -94,12 +94,18 @@ mod tests {
         assert_eq!(v["gameId"], "client-a");
         assert_eq!(v["setting"], serde_json::json!({"kind": "inherited", "backend": "installed"}));
         assert_eq!(v["next"]["selected"], "installed");
-        assert!(v["interpreterHeld"].as_str().is_some_and(|h| h.starts_with("game test pending: ")), "{v}");
+        assert_eq!(v["next"]["reason"], "kiln.json shroudforge.useInstalled: true (the older setting): installed");
+        // Kiln's interpreter is a normal choice in this build (its gate list has no kiln-sfi.interpreter row)
+        assert_eq!(v.get("interpreterHeld"), None, "{v}");
         assert!(v["revision"].as_str().is_some_and(|r| r.len() == 64), "{v}");
         let p = sfi_backend::preview(&g, Some(Backend::Kiln), RunSide::Client, &Env::default()).unwrap();
         let v = serde_json::to_value(BackendPreview { game_id: "client-a".into(), preview: p }).unwrap();
-        assert_eq!((v["gameId"].as_str(), v["backend"].as_str(), v.get("next")), (Some("client-a"), Some("kiln"), None));
-        assert!(v["refused"].as_str().is_some_and(|r| r.contains("kiln-sfi.interpreter")), "{v}");
+        assert_eq!((v["gameId"].as_str(), v["backend"].as_str(), v.get("refused")), (Some("client-a"), Some("kiln"), None), "{v}");
+        assert_eq!((v["next"]["selected"].as_str(), v["next"]["reason"].as_str()),
+                   (Some("kiln"), Some("kiln.json shroudforge.backend: \"kiln\"")), "{v}");
+        assert_eq!(v["unchanged"], false);
+        // a preview writes nothing
+        assert_eq!(std::fs::read_to_string(g.join("kiln/kiln.json")).unwrap(), r#"{"shroudforge": {"useInstalled": true}}"#);
         let _ = std::fs::remove_dir_all(&g);
     }
 }
