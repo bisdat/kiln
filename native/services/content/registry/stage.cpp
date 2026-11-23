@@ -207,6 +207,7 @@ std::string regmap_digest(const map::RegMap& rm) {
         json rows = json::object();
         for (const auto& [k, v] : rm.build.rows) rows[k] = static_cast<int>(v);
         j["build"] = {{"side", rm.build.side}, {"exe", rm.build.exe_sha256}, {"gameBuild", rm.build.game_build}, {"verified", rm.build.verified},
+                      {"regmapDigest", rm.build.regmap_digest}, {"commonDigest", rm.common_digest},
                       {"rows", rows}, {"layouts", rm.build.layouts}, {"pinned", rm.build.aliases.pinned}, {"removed", rm.build.aliases.removed}};
     }
     return sha_hex(j.dump());

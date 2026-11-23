@@ -90,6 +90,9 @@ pub struct Proof {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mirror_of: Option<String>,
     pub first_build: bool,
+    /// the regmap/common the proof judged ([`regmap::digest`]): the record carries it as `regmapDigest`, and kiln.content
+    /// enables no row of a record whose digest is not the deployed common's (review2 S1)
+    pub regmap_digest: String,
     pub refl: Option<refl::ReflDiff>,
     pub formula: formula::Report,
     pub roundtrip: roundtrip::Report,
@@ -120,6 +123,7 @@ pub fn prove(inp: &Inputs, when: &str) -> Proof {
         exe_sha256: inp.new_exe_sha.clone(),
         old_exe_sha256: inp.old_exe_sha.clone(),
         first_build: inp.first_build,
+        regmap_digest: inp.regmap_digest.clone(),
         ..Default::default()
     };
     p.blockers.extend(inp.problems.iter().cloned());
@@ -451,6 +455,11 @@ pub fn record(p: &Proof, candidate: &Value) -> Value {
         }
         o.insert("verified".into(), Value::Bool(p.verified));
         o.insert("proof".into(), Value::String(p.summary()));
+        if p.regmap_digest.is_empty() {
+            o.remove("regmapDigest");
+        } else {
+            o.insert("regmapDigest".into(), Value::String(p.regmap_digest.clone()));
+        }
     }
     r
 }
@@ -1355,6 +1364,7 @@ mod tests {
         assert_eq!(rec["rows"]["plans.cap"], "ok");
         assert_eq!(rec["aliases"], candidate()["aliases"], "the candidate's aliases are kept");
         assert_eq!(rec["layouts"], candidate()["layouts"]);
+        assert_eq!(rec["regmapDigest"], crate::regproof::regmap::tests::DIGEST, "the record is bound to the mapping it was proven on");
         let s = rec["proof"].as_str().unwrap();
         assert!(s.starts_with("kilnctl regproof (T): reflection 7 same"), "{s}");
         assert!(s.contains("rows ok 7/7"), "{s}");

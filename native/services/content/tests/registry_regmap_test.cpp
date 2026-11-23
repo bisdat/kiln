@@ -9,6 +9,7 @@
 #include <sstream>
 #include <string>
 
+#include "../../../core/src/services/boot_gamedata.h"
 #include "../registry/regmap.h"
 #include "../registry/schema.g.h"
 
@@ -220,12 +221,19 @@ int main(int argc, char** argv) {
         fs::remove_all(d);
         fs::create_directories(d / "common");
         fs::create_directories(d / "server");
-        std::ofstream(d / "common" / "items.json") << R"({"regmap": 1, "registry": "items", "entries": {"kind": "resource", "resourceType": "keen::ItemInfo"},
+        const std::string items = R"({"regmap": 1, "registry": "items", "entries": {"kind": "resource", "resourceType": "keen::ItemInfo"},
             "rows": {"maxStack": {"paths": ["maxStackSize"], "conv": "int", "read": "restart", "backend": "live"},
                      "rolled": {"paths": ["generateRarity"], "conv": "bool", "read": "now", "backend": "live"}}})";
+        std::ofstream(d / "common" / "items.json") << items;
+        // kilnctl regproof's regmapDigest of this common folder: sha256 over "<file name>\n<sha256 of its bytes>\n"
+        namespace gd = kiln::boot_gd;
+        const std::string digest = gd::hex_of(gd::sha256("items.json\n" + gd::hex_of(gd::sha256(items)) + "\n"));
         const std::string sha(64, 'a');
-        std::ofstream(d / "server" / (sha + ".json")) << R"({"regmap": 1, "side": "server", "exeSha256": ")" + sha +
-                                                             R"(", "gameBuild": "1", "verified": true, "rows": {"items.maxStack": "ok", "items.rolled": "ok"}})";
+        auto record = [&](const std::string& digest_member) {
+            std::ofstream(d / "server" / (sha + ".json")) << R"({"regmap": 1, "side": "server", "exeSha256": ")" + sha +
+                R"(", "gameBuild": "1", "verified": true, )" + digest_member + R"("rows": {"items.maxStack": "ok", "items.rolled": "ok"}})";
+        };
+        record(R"("regmapDigest": ")" + digest + R"(", )");
         map::RegMap rm;
         std::vector<std::string> errs;
         CHECK(map::load_dir(d.string(), "server", sha, &rm, &errs));
@@ -233,6 +241,27 @@ int main(int argc, char** argv) {
         std::string why;
         CHECK(rm.mapping("items", "maxStack", &why) == Mapping::Unproven && why.find("routing rule") != std::string::npos);
         CHECK(rm.mapping("items", "rolled", &why) == Mapping::Mapped);
+        // review2 S1: a record proves the mapping it was proven on. Another digest, none, or a common file edited after the
+        // proof: no row is enabled, refused as Unproven naming the reason
+        CHECK(rm.common_digest == digest && rm.build.regmap_digest == digest);
+        for (const std::string& member : {R"("regmapDigest": ")" + std::string(64, 'b') + R"(", )", std::string()}) {
+            record(member);
+            map::RegMap other;
+            errs.clear();
+            CHECK(map::load_dir(d.string(), "server", sha, &other, &errs) && other.has_build && other.build.verified);
+            CHECK(other.mapping("items", "rolled", &why) == Mapping::Unproven && why.find("another Kiln mapping") != std::string::npos);
+        }
+        record(R"("regmapDigest": ")" + digest + R"(", )");
+        std::ofstream(d / "common" / "items.json") << items << "\n";
+        map::RegMap edited;
+        errs.clear();
+        CHECK(map::load_dir(d.string(), "server", sha, &edited, &errs) && edited.common_digest != digest);
+        CHECK(edited.mapping("items", "rolled", &why) == Mapping::Unproven && why.find("another Kiln mapping") != std::string::npos);
+        record(R"("regmapDigest": "not hex", )");
+        map::RegMap bad;
+        errs.clear();
+        map::load_dir(d.string(), "server", sha, &bad, &errs);
+        CHECK(has(errs, "regmapDigest"));
         fs::remove_all(d);
     }
     // ---- the repository's regmap: every file loads, every row routes as the schema says, the records are whole
@@ -248,6 +277,10 @@ int main(int argc, char** argv) {
             for (const std::string& e : errs) std::printf("  regmap: %s\n", e.c_str());
             CHECK(errs.empty());
             CHECK(one.has_build && one.build.verified && one.build.side == side);
+            // review2 S1: every committed verified record is bound to this tree's regmap/common (a common edit needs a new proof)
+            if (one.build.regmap_digest != one.common_digest)
+                std::printf("  regmap %s: the record's regmapDigest %s is not regmap/common's %s\n", side, one.build.regmap_digest.c_str(), one.common_digest.c_str());
+            CHECK(one.build.regmap_digest == one.common_digest);
             CHECK(one.registries.size() == 5);
             for (const auto& [name, reg] : one.registries) {
                 const auto r = map::check_routing(reg);

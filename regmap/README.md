@@ -69,6 +69,8 @@ game's member and type names go in `evidence` only. regmap_check.py refuses a re
   "layouts": { "keen::ItemInfo": "0x07009d37" },          // the reflection's layout hash of each root type
   "rows": { "items.maxStack": "ok" },                      // ok | changed | unproven | unmapped
   "reasons": { "items.comfort": "no lab round trip of it on this build yet" },   // unproven rows only, in Kiln words
+  "kinds": { "items.manaCost": { "sint32": "proven (141 entries on this build)", "float": "none on this build" } },
+  "regmapDigest": "<sha256>",                              // the regmap/common it was proven on (rows enabled only on it)
   "aliases": { "renames": [], "removals": [], "suffixes": [] } }
 ```
 
@@ -154,11 +156,14 @@ the write and after the revert; a structured value's raw view is its resource's 
 gets no sample and stays unproven (kiln.log says why: "registry-proof-test: no sample of <field>"). Without the request file neither does anything (kiln.content looks the file up once
 per start). The test mod is never shipped (`tools/package/stage.sh` builds no `mods/tests`).
 
-`regmapDigest` ties a lab file to the mapping the run used: sha256 (lower-case hex) over `<file name>\n<sha256 of its
+`regmapDigest` ties a lab file, and the record a proof writes, to the mapping the run used: sha256 (lower-case hex) over `<file name>\n<sha256 of its
 bytes>\n` for each `regmap/common/*.json` of the game's Kiln folder, in name order (build records are left out: they are
 what the proof writes). kilnctl sets aside every suite whose digest is not the tree's, refuses a new build's values export
 of another mapping, and with an instance refuses to judge a tree whose regmap/common differs from the deployed
-`<game>/kiln/regmap/common`. The lab gate's copy starts with an empty `content/registry/proof/`.
+`<game>/kiln/regmap/common`. The lab gate's copy starts with an empty `content/registry/proof/`. The record carries the
+digest it was proven on (`"regmapDigest"`); kiln.content computes the deployed regmap/common's digest when it loads the
+regmap and enables no row of a record whose digest differs, or that has none ("Unproven: ... its record was proven for
+another Kiln mapping than the one installed"): an edit of regmap/common needs a new proof (and a new client mirror).
 
 `registry-roundtrip`, one file per side and generation:
 ```jsonc

@@ -43,7 +43,8 @@ fn short(s: &str) -> &str {
 
 /// The client record's rows from the server proof and the two reflections.
 pub fn mirror(inp: &MirrorInputs, when: &str) -> Proof {
-    let mut p = Proof { when: when.to_string(), side: "client".into(), exe_sha256: inp.client_sha.clone(), ..Default::default() };
+    let mut p = Proof { when: when.to_string(), side: "client".into(), exe_sha256: inp.client_sha.clone(), regmap_digest: inp.regmap_digest.clone(),
+                        ..Default::default() };
     p.blockers.extend(inp.problems.iter().cloned());
     p.notes.extend(inp.notes.iter().cloned());
     let empty = Value::Null;
@@ -63,7 +64,7 @@ pub fn mirror(inp: &MirrorInputs, when: &str) -> Proof {
             Some(d) if !d.eq_ignore_ascii_case(&inp.regmap_digest) => p.blockers.push(format!(
                 "the server record was proven on another mapping (regmapDigest {}, this tree's regmap/common is {})", short(d), short(&inp.regmap_digest))),
             Some(_) => {}
-            None => p.notes.push("the server record names no regmapDigest: it is not tied to the mapping it was proven on".into()),
+            None => p.blockers.push("the server record names no regmapDigest: it is not tied to the mapping it was proven on".into()),
         }
     }
     match &inp.server_refl {
@@ -188,6 +189,7 @@ mod tests {
 
     fn server_record() -> Value {
         json!({"regmap": 1, "side": "server", "exeSha256": SERVER, "gameBuild": "101", "verified": true, "proof": "kilnctl regproof (lab)",
+               "regmapDigest": DIGEST,
                "rows": {"gadgets.size": "ok", "gadgets.tier": "ok", "gadgets.power": "unproven", "gadgets.label": "ok", "gadgets.glow": "unmapped",
                         "plans.parts": "ok", "plans.parts[].count": "ok", "plans.cap": "changed"},
                "reasons": {"gadgets.power": "no lab round trip of it on this build yet"},
@@ -240,6 +242,7 @@ mod tests {
         assert_eq!(rec["reasons"]["gadgets.power"], "no lab round trip of it on this build yet");
         assert_eq!(rec["aliases"], client_candidate()["aliases"], "the client's own aliases and layouts are kept");
         assert_eq!(rec["layouts"], client_candidate()["layouts"]);
+        assert_eq!(rec["regmapDigest"], DIGEST, "the mirror is bound to the same mapping");
         let s = rec["proof"].as_str().unwrap();
         assert!(s.contains("mirror") && s.contains(&SERVER[..12]) && s.contains("rows ok 5/7 (2 unproven)"), "{s}");
     }
@@ -282,6 +285,7 @@ mod tests {
             (|i| i.server.as_mut().unwrap()["verified"] = json!(false), "not verified"),
             (|i| i.server.as_mut().unwrap()["side"] = json!("client"), "not a server build"),
             (|i| i.server.as_mut().unwrap()["regmapDigest"] = json!("e2".repeat(32)), "another mapping"),
+            (|i| { i.server.as_mut().unwrap().as_object_mut().unwrap().remove("regmapDigest"); }, "names no regmapDigest"),
             (|i| i.server_refl = None, "server exe"),
             (|i| i.server_refl = Some(db(old_types(), CLIENT)), "server reflection dump"),
             (|i| i.client_refl = None, "client exe"),

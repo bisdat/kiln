@@ -10,6 +10,8 @@
 #include <set>
 #include <sstream>
 
+#include "../../../core/src/services/boot_gamedata.h"
+
 #include "schema.g.h"
 
 namespace kc::registry::map {
@@ -167,6 +169,10 @@ bool load_record(const json& doc, BuildRecord* out, std::vector<std::string>* er
     if (out->exe_sha256.size() != 64 || !std::all_of(out->exe_sha256.begin(), out->exe_sha256.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); }))
         errs->push_back("record: exeSha256 is the exe's SHA-256 in 64 lower-case hex digits");
     out->game_build = str(doc, "gameBuild"), out->steam_build = str(doc, "steamBuild"), out->proof = str(doc, "proof");
+    out->regmap_digest = str(doc, "regmapDigest");
+    if (doc.contains("regmapDigest") && (out->regmap_digest.size() != 64 ||
+                                         !std::all_of(out->regmap_digest.begin(), out->regmap_digest.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); })))
+        errs->push_back("record: regmapDigest is the sha256 of the regmap/common it was proven on, 64 lower-case hex digits");
     if (!doc.contains("verified") || !doc["verified"].is_boolean()) errs->push_back("record: verified is true or false");
     else out->verified = doc["verified"].get<bool>();
     const json layouts = doc.value("layouts", json::object());
@@ -244,6 +250,16 @@ bool load_dir(const std::string& dir, const std::string& side, const std::string
         if (e.is_regular_file() && e.path().extension() == ".json") files.push_back(e.path());
     if (ec) return errs->push_back(dir + "/common: " + ec.message()), false;
     std::sort(files.begin(), files.end());
+    // the deployed mapping's digest (kilnctl regproof's regmapDigest): which mapping a record's proof holds for
+    std::string digest_text;
+    for (const fs::path& p : files) {
+        std::ifstream f(p, std::ios::binary);
+        std::stringstream ss;
+        ss << f.rdbuf();
+        const std::u8string name = p.filename().u8string();
+        digest_text += std::string(name.begin(), name.end()) + "\n" + kiln::boot_gd::hex_of(kiln::boot_gd::sha256(ss.str())) + "\n";
+    }
+    out->common_digest = kiln::boot_gd::hex_of(kiln::boot_gd::sha256(digest_text));
     for (const fs::path& p : files) {
         json doc;
         if (!read_json(p, &doc, errs)) continue;
@@ -294,6 +310,12 @@ Mapping RegMap::mapping(const std::string& registry, const std::string& field, s
     }
     if (!has_build || !build.verified) {
         *reason = "Unproven: " + q + " is not proven for " + build_name + " (no verified regmap record for it yet; a Kiln update is needed)" + kNotApplied;
+        return Mapping::Unproven;
+    }
+    if (build.regmap_digest != common_digest) {
+        // the record's proof holds for the mapping it was proven on, not for an edited one (review2 S1)
+        *reason = "Unproven: " + q + " is not proven for " + build_name + " (its record was proven for another Kiln mapping than the one " +
+                  "installed; a Kiln update is needed)" + kNotApplied;
         return Mapping::Unproven;
     }
     const auto b = build.rows.find(q);
