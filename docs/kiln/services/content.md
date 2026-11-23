@@ -730,6 +730,10 @@ section 8.
   placeholder's, whose references name its missing mod's resources, are one Info line per item instead). A
   reference that was not loaded is tried again every ~2 s (kiln.assets may register it later), and at once when a
   template clone goes into a world (a joined client gets its items before the templates in the same content state).
+  Each world tries again for the clones in its own registry, on its own thread; in a game that hosts its world, a clone
+  the server world has (usually the one clone both worlds share) is written in the server world's Pre only, never from
+  the client world's step, as long as that server world may still read it: a client world set up after it stopped, or
+  a newer server world, takes the clone over (without the world-stop hook only a newer server world).
 - **Game items**: the same keys work as layers on registered items: data-pack rules (`"Weapon_X": {"@refs": true,
   "visual": "item:Weapon_Y"}`, or the document option `"options": {"refs": true}`), C# `entry.SetRef("visual",
   "item:Weapon_Y", allowGameItem: true)` / `SetPerks([...])` / `SetRefJson(key, json)`, C `set_ref(owner, kind, id,

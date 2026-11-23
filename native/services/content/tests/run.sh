@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
 # kiln.content: the game's own texts (text_test.cpp, host: the loca hook, text() and text_info() over a fake lookup); content transactions (txn_test.cpp, host: store.cpp over a made-up memory with failing writes); the hook on the
-# game's item lookup only when it is needed (itemfind_test.cpp, host: newcontent.cpp over a fake kiln.hooks table); a sequence clone's names in a later world of the process (seqnames_test.cpp, host); the buff room (buffroom_test.cpp, host: the 4,096 reservation, its fallback, checked sizes, the map the game reads); near memory
+# game's item lookup only when it is needed (itemfind_test.cpp, host: newcontent.cpp over a fake kiln.hooks table); a late
+# kitbash reference written only by the world that has the clone, a hosted server world's clone only in server Pre
+# (lateref_test.cpp, host, and under ThreadSanitizer); a sequence clone's names in a later world of the process (seqnames_test.cpp, host); the buff room (buffroom_test.cpp, host: the 4,096 reservation, its fallback, checked sizes, the map the game reads); near memory
 # (nearmem.cpp): the policy against simulated address spaces on the host (near_test.cpp: the layout of GitHub issue 14,
 # the Wine layout, no free hole, budget, top and bottom of the address space), then the Windows side (nearwin.h) on a
 # real fragmented address space under Wine, no game, with the walk's timing (near_win_test.cpp).
@@ -29,6 +31,7 @@ bash "$here/walk_test.sh"
 bash "$here/pending_test.sh"
 bash "$here/apply_report_test.sh"
 bash "$here/itemfind_test.sh"
+bash "$here/lateref_test.sh"
 bash "$here/menugroup_test.sh"
 bash "$here/text_test.sh"
 echo "== gear-test (host)"
