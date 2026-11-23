@@ -29,7 +29,9 @@ const KilnWorldApi* world_api = nullptr;
 const KilnTypesApi* types_api = nullptr;
 const KilnPlayersApi* players_api = nullptr;
 const KilnSavesApi* saves_api = nullptr;
-kiln::RawHook capture_hook, read_hook, join_hook, stage_hook, transfer_hook;
+kiln::RawHook capture_hook, read_hook, join_hook, stage_hook;
+// The client guard's continuation: kiln.hooks writes it before the link can be reached, and never frees it.
+void* transfer_next = nullptr;
 KilnStorageStageFn stage_fn = nullptr;
 void* stage_user = nullptr;
 std::atomic<bool> enabled{false};
@@ -199,13 +201,42 @@ template <class F> bool function(const char* name, F* out) {
     *out = reinterpret_cast<F>(at);
     return true;
 }
-bool qualified(uintptr_t at) {
-    auto hooks = kiln::hooks_v2(api);
-    uint32_t state = KILN_CODE_UNKNOWN;
-    uint64_t epoch = 0;
-    return hooks && hooks->header.size >= offsetof(KilnHooksApi, code_state) + sizeof(hooks->code_state) &&
-           hooks->code_state && hooks->code_state(at, 16, &state, &epoch) == KILN_OK &&
-           (state == KILN_CODE_ORIGINAL || state == KILN_CODE_MANAGED);
+// The module that holds an address (its file name, never the path, and the offset), or an empty name (a hook's relay or
+// stub memory, or nothing mapped).
+ModulePlace module_place(uintptr_t at) {
+    HMODULE m = nullptr;
+    wchar_t path[MAX_PATH]{};
+    if (!at ||
+        !GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                            reinterpret_cast<LPCWSTR>(at), &m) ||
+        !GetModuleFileNameW(m, path, MAX_PATH))
+        return {};
+    const wchar_t* name = path;
+    for (const wchar_t* c = path; *c; ++c)
+        if (*c == L'\\' || *c == L'/')
+            name = c + 1;
+    char text[MAX_PATH * 3]{};
+    if (!WideCharToMultiByte(CP_UTF8, 0, name, -1, text, sizeof text, nullptr, nullptr) || !text[0])
+        return {};
+    return {text, static_cast<uint64_t>(at - reinterpret_cast<uintptr_t>(m))};
+}
+// Live code Kiln may chain a hook on: the exe file's, or changed only by Kiln's own hook registry (another Kiln owner's
+// detour, which the new link joins). Otherwise detail says why, where another module's jump leads (through its relay)
+// and what to do, with the bytes kiln.hooks saw.
+bool qualified(uintptr_t at, const char* name) {
+    const auto* hooks = kiln::hooks_v2(api);
+    const auto v = code_verdict(hooks, at);
+    if (v.ok)
+        return true;
+    uintptr_t to = 0;
+    ModulePlace where;
+    if (v.jump) {
+        auto read = [hooks](uintptr_t a, void* out, size_t n) { return hooks->read && hooks->read(a, out, n) == KILN_OK; };
+        to = follow_jumps(v.jump, read, &module_place);
+        where = module_place(to);
+    }
+    detail = code_refusal(name, v, to, where);
+    return false;
 }
 bool field(const char* type, const char* name, uint32_t* out, uint32_t wanted) {
     if (!types_api)
@@ -589,84 +620,6 @@ void __fastcall captures_done(void* save2, void* storage, void* context) {
         }
     }
 }
-bool type_info(const KilnType* t, KilnTypeInfo* out) {
-    out->size = sizeof *out;
-    return t && types_api->type_info(t, out) == KILN_OK;
-}
-bool type_field(const KilnType* t, const char* name, KilnTypeField* out) {
-    KilnTypeInfo i{};
-    if (!type_info(t, &i))
-        return false;
-    for (uint32_t n = 0; n < i.field_count; ++n)
-        if (types_api->type_field(t, n, out) == KILN_OK && same(out->name, name))
-            return true;
-    return false;
-}
-bool client_layout() {
-    const auto* pi = types_api->type_by_name(str("PlayerInput"));
-    const auto* scpi = types_api->type_by_name(str("ServerConsumedPlayerInput"));
-    KilnTypeInfo p{}, c{};
-    KilnTypeField group{};
-    if (!type_info(pi, &p) || !type_info(scpi, &c) || !type_field(pi, "fromClient", &group) || p.type_size > 16384 ||
-        c.type_size > 16384)
-        return false;
-    input_size = p.type_size;
-    consumed_size = c.type_size;
-    KilnTypeInfo gi{};
-    if (!type_info(group.type, &gi))
-        return false;
-    std::set<std::string> guarded;
-    for (uint32_t n = 0; n < gi.field_count; ++n) {
-        KilnTypeField action{};
-        if (types_api->type_field(group.type, n, &action) != KILN_OK)
-            return false;
-        KilnTypeInfo ai{};
-        if (!type_info(action.type, &ai))
-            return false;
-        ClientActionLayout l{};
-        l.offset = static_cast<uint32_t>(group.offset + action.offset);
-        l.size = ai.type_size;
-        for (uint32_t k = 0; k < ai.field_count; ++k) {
-            KilnTypeField f{};
-            KilnTypeInfo fi{};
-            if (types_api->type_field(action.type, k, &f) != KILN_OK || !type_info(f.type, &fi))
-                return false;
-            if (same(fi.qualified_name, "keen::ecs::EntityId") || same(fi.qualified_name, "keen::InventorySlotId")) {
-                if (f.offset > l.size || fi.type_size > l.size - f.offset || (fi.type_size != 4 && fi.type_size != 8))
-                    return false;
-                l.refs.push_back(static_cast<uint32_t>(f.offset));
-            }
-        }
-        if (l.refs.empty())
-            continue;
-        KilnTypeField version{}, used{};
-        if (!type_field(action.type, "versionData", &version))
-            return false;
-        KilnTypeInfo vi{};
-        if (!type_info(version.type, &vi) || vi.type_size != 4 || version.offset > l.size ||
-            4 > l.size - version.offset)
-            return false;
-        l.version = l.offset + static_cast<uint32_t>(version.offset);
-        std::string name(action.name.ptr, action.name.len), consumed = "consumed" + name;
-        if (consumed.size() > 8 && consumed[8] >= 'a' && consumed[8] <= 'z')
-            consumed[8] -= 32;
-        if (!type_field(scpi, consumed.c_str(), &used))
-            return false;
-        KilnTypeInfo ui{};
-        if (!type_info(used.type, &ui) || ui.type_size != 4 || used.offset > c.type_size ||
-            4 > c.type_size - used.offset || l.offset > p.type_size || l.size > p.type_size - l.offset || l.size > 160)
-            return false;
-        l.consumed = static_cast<uint32_t>(used.offset);
-        client_actions.push_back(l);
-        guarded.insert(name);
-    }
-    for (const char* name :
-         {"inventoryTransferAction", "sortInventoryAction", "areaDepositPermissionAction", "upgradeStorageAction",
-          "changeEquipmentAction", "swapEquipmentSetAction", "itemAction", "weaponGemAction", "playerCraftingAction"})
-        if (!guarded.count(name))
-            return false;
-    return true;
-}
 bool get_component_pair(uintptr_t world, uint32_t player, PtrSize* pi, PtrSize* used) {
     __try {
         E.get_component(pi, world, hash_name("PlayerInput"), player);
@@ -740,7 +693,8 @@ void guard_client_inputs(uintptr_t storage) {
     }
 }
 uintptr_t __fastcall client_guard(uintptr_t storage, uintptr_t rdx, uintptr_t r8, uintptr_t r9) {
-    auto result = transfer_hook.call<uintptr_t>(storage, rdx, r8, r9);
+    using Deliver = uintptr_t(__fastcall*)(uintptr_t, uintptr_t, uintptr_t, uintptr_t);
+    auto result = reinterpret_cast<Deliver>(transfer_next)(storage, rdx, r8, r9);
     guard_client_inputs(storage);
     return result;
 }
@@ -1803,7 +1757,8 @@ void storage_init() {
         ok = symbol("characters/Capture", &capture_at) && symbol("characters/Read", &read_at) &&
              symbol("characters/JoinApply", &join_at) && symbol("gameplay/DeliverEvents", &transfer_at);
     if (ok)
-        ok = qualified(capture_at) && qualified(read_at) && qualified(join_at) && qualified(transfer_at);
+        ok = qualified(capture_at, "characters/Capture") && qualified(read_at, "characters/Read") &&
+             qualified(join_at, "characters/JoinApply") && qualified(transfer_at, "gameplay/DeliverEvents");
     if (ok) {
         ok = capture_hook.install(api, items_owner(), capture_at, reinterpret_cast<void*>(&capture),
                                   "characters/Capture") &&
@@ -1815,7 +1770,7 @@ void storage_init() {
             detail = "items.storage: character hook installation failed";
     }
     stage_point =
-        ok && symbol("saves/CapturesDone", &stage_at) && qualified(stage_at) &&
+        ok && symbol("saves/CapturesDone", &stage_at) && qualified(stage_at, "saves/CapturesDone") &&
         stage_hook.install(api, items_owner(), stage_at, reinterpret_cast<void*>(&captures_done), "saves/CapturesDone");
     if (!stage_point)
         report("items.storage.persist", KILN_CAP_UNAVAILABLE, KILN_CAP_REASON_SYMBOL_MISSING,
@@ -1835,6 +1790,49 @@ void storage_init() {
 }
 namespace {
 void KILN_CALL storage_owner_retiring(KilnOwner, void*);
+const char* result_name(KilnResult rc) {
+    switch (rc) {
+    case KILN_ERR_INVALID_ARGUMENT: return "invalid argument";
+    case KILN_ERR_NOT_FOUND: return "not found";
+    case KILN_ERR_UNAVAILABLE: return "unavailable: kiln.log says why";
+    case KILN_ERR_REVOKED: return "revoked";
+    case KILN_ERR_INTERNAL: return "internal";
+    default: return "error";
+    }
+}
+// The client inventory guard: a post link on gameplay/DeliverEvents, in Kiln's hook registry. On a refusal detail says
+// which check failed: the sigdb feature, the symbol, the live code, the reflected client input layout or the install.
+bool install_client_guard(const KilnHooksApi* hooks) {
+    uintptr_t at = 0;
+    if (!api->feature(str("players.client_action_hold"))) {
+        detail = "sigdb feature players.client_action_hold is off on this build";
+        return false;
+    }
+    if (!symbol("gameplay/DeliverEvents", &at) || !qualified(at, "gameplay/DeliverEvents"))
+        return false;
+    ClientLayout layout;
+    if (auto why = client_layout(types_api, &layout); !why.empty()) {
+        detail = "client input layout: " + why;
+        return false;
+    }
+    client_actions = std::move(layout.actions);
+    input_size = layout.input_size;
+    consumed_size = layout.consumed_size;
+    KilnHookOrder order{};
+    order.size = sizeof order;
+    order.label = str("items/StorageClientGuard");
+    KilnHandle handle = 0;
+    const KilnResult rc = hooks->raw_detour(items_owner(), at, &order, reinterpret_cast<void*>(&client_guard),
+                                            &transfer_next, &handle);
+    if (rc != KILN_OK) {
+        detail = "gameplay/DeliverEvents: kiln.hooks raw_detour returned " + std::to_string(rc) + " (" +
+                 result_name(rc) + ")";
+        if (kiln::hooks_targets_full(hooks))
+            detail += "; every hook target slot is in use";
+        return false;
+    }
+    return true;
+}
 }
 void storage_ready() {
     world_api = static_cast<const KilnWorldApi*>(api->service(str(KILN_WORLD_SERVICE), 1));
@@ -1865,12 +1863,8 @@ void storage_ready() {
         off(KILN_CAP_REASON_SERVICE_MISSING, "items.storage: hooks.owner_cleanup unavailable");
         return;
     }
-    uintptr_t transfer_at = 0;
-    if (!api->feature(str("players.client_action_hold")) || !symbol("gameplay/DeliverEvents", &transfer_at) ||
-        !qualified(transfer_at) || !client_layout() ||
-        !transfer_hook.install(api, items_owner(), transfer_at, reinterpret_cast<void*>(&client_guard),
-                               "items/StorageClientGuard")) {
-        off(KILN_CAP_REASON_SYMBOL_MISSING, "items.storage: client inventory guard is unavailable");
+    if (!install_client_guard(hooks)) {
+        off(KILN_CAP_REASON_SYMBOL_MISSING, "items.storage: client inventory guard is unavailable: " + detail);
         return;
     }
     resolve_main_baseline();

@@ -48,6 +48,10 @@ MODS tab): a core an earlier hand installation left next to the game is the usua
 launcher names the same file before the start (engines.md, "Shroudlink client addon").
 As a backstop, both copies use shroudlink's per-process claim (`chestsort_server_<pid>`): whichever claims first runs
 and the other stays idle.
+shroudlink's own core hooks the event dispatcher (`gameplay/DeliverEvents`) outside Kiln's hook registry. When it does
+so before Kiln's services start, player storage does not run its client inventory guard on that code: `items.storage`
+is unavailable and its text names the module ([player storage](../services/player-storage.md)). kiln-shroudlink's own
+hook always comes after Kiln's services have started and chains onto Kiln's detour, so it does not stop storage.
 
 To move a server from shroudlink's proxy to Kiln: stop it, delete `steam_api64.dll` and rename `steam_api64_o.dll`
 back to `steam_api64.dll` (or verify the files in Steam), keep `shroudlink_mods/`, install Kiln.
