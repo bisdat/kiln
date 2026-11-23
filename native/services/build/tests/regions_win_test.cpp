@@ -5,6 +5,8 @@
 // Built explicitly (CMake target build-regions-win, into bin/tests/); never a game target or a bundle file.
 #include <windows.h>
 
+#include <intrin.h>
+
 #include <cstdio>
 #include <filesystem>
 #include <string>
@@ -38,6 +40,54 @@ bool grow_faults(kb::GameArray*, int64_t, uint8_t) {
     *reinterpret_cast<volatile uint8_t*>(g_noaccess) = 1;  // the game's grow faulting while Kiln appends
     return true;
 }
+
+// ---- placing a call by walking the real stack (kb::walk_from: RtlCaptureStackBackTrace, RtlPcToFileHeader). This exe
+// stands in for the game; msvcrt.dll's qsort, calling back into it, stands in for another mod's DLL between a "game"
+// caller and the hook. fake_hook plays Kiln's hook: its return address is `ret`.
+using QsortFn = void(__cdecl*)(void*, size_t, size_t, int(__cdecl*)(const void*, const void*));
+kb::CallSites g_probe_sites;
+std::vector<kb::Frame> g_probe_frames;
+kb::CallerVerdict g_probe;
+volatile int g_sink = 0;
+__declspec(noinline) void fake_hook() {
+    const uintptr_t ret = reinterpret_cast<uintptr_t>(_ReturnAddress());
+    g_probe_frames = kb::walk_from(ret);
+    g_probe = kb::judge_caller(ret, g_probe_frames, g_probe_sites);
+    g_sink = g_sink + 1;
+}
+int __cdecl compare_ints(const void* a, const void* b) {
+    fake_hook();
+    return *static_cast<const int*>(a) - *static_cast<const int*>(b);
+}
+__declspec(noinline) void fake_world_save(QsortFn sort) {
+    int v[2] = {2, 1};
+    sort(v, 2, sizeof(int), &compare_ints);
+    g_sink = g_sink + v[0];
+}
+__declspec(noinline) void fake_base_zones(QsortFn sort) {
+    int v[2] = {2, 1};
+    sort(v, 2, sizeof(int), &compare_ints);
+    g_sink = g_sink + v[1];
+}
+__declspec(noinline) int game_depth(int n) {
+    if (n == 0) {
+        fake_hook();
+        return g_sink;
+    }
+    const int r = game_depth(n - 1);
+    return r + g_sink;
+}
+// The return address among the walked frames that lies in `fn` (by its unwind data's function start): the call site
+// of the caller fn, as sigdb would resolve it for the game.
+uintptr_t site_in(const std::vector<kb::Frame>& frames, const void* fn) {
+    for (const auto& f : frames) {
+        DWORD64 base = 0;
+        const RUNTIME_FUNCTION* rf = RtlLookupFunctionEntry(f.at, &base, nullptr);
+        if (rf && base + rf->BeginAddress == reinterpret_cast<DWORD64>(fn)) return f.at;
+    }
+    return 0;
+}
+bool named(const kb::Frame& f, const char* module) { return _stricmp(f.module.c_str(), module) == 0; }
 }  // namespace
 
 int main() {
@@ -100,6 +150,50 @@ int main() {
         kb::after_save_regions(0x1000, ok, &l.a, sites);
         check(l.a.count == 3 && regions_test::every_chunk_saved(l.a, kept, true),
               "world save: boxes only for the two chunks the altar does not save");
+    }
+    {   // a foreign module between the world save's call and the hook: placed by the world save's site found deeper
+        HMODULE crt = LoadLibraryW(L"msvcrt.dll");
+        const auto sort = crt ? reinterpret_cast<QsortFn>(GetProcAddress(crt, "qsort")) : nullptr;
+        check(sort != nullptr, "msvcrt.dll's qsort is there to stand in for another module");
+        if (sort) {
+            g_probe_sites = kb::CallSites{0x10, 0, 0};  // the world save's site resolved, elsewhere
+            fake_world_save(sort);
+            const uintptr_t save_site = site_in(g_probe_frames, reinterpret_cast<const void*>(&fake_world_save));
+            bool crt_frame = false;
+            for (const auto& f : g_probe_frames) crt_frame = crt_frame || (f.place == kb::Place::Other && named(f, "msvcrt.dll"));
+            check(g_probe_frames.size() >= 3 && g_probe_frames[0].place == kb::Place::Game && crt_frame && save_site,
+                  "the walk goes from the hook's return address through msvcrt.dll's frames to the caller's call site");
+            check(g_probe.how == kb::Found::Foreign && g_probe.boxes && named(g_probe.via, "msvcrt.dll"),
+                  "no known site on the stack, another module on the way: Foreign, named, boxes");
+            g_probe_sites = kb::CallSites{save_site, 0x20, 0x30};
+            fake_world_save(sort);
+            check(g_probe.kind == kb::Caller::WorldSave && g_probe.how == kb::Found::Deeper && g_probe.boxes,
+                  "the world save's site found below another module's frames: the world save, boxes");
+            g_probe_sites = kb::CallSites{0x10, 0, 0};
+            fake_base_zones(sort);
+            const uintptr_t zones_site = site_in(g_probe_frames, reinterpret_cast<const void*>(&fake_base_zones));
+            g_probe_sites = kb::CallSites{save_site, zones_site, 0x30};
+            fake_base_zones(sort);
+            check(zones_site && g_probe.kind == kb::Caller::BaseZones && g_probe.how == kb::Found::Deeper && !g_probe.boxes,
+                  "the base-zone site found below another module's frames: the base zones, no boxes");
+        }
+        // the game's own frames only, deeper than kWalkFrames: a caller Kiln does not know, no boxes
+        g_probe_sites = kb::CallSites{0x10, 0x20, 0x30};
+        game_depth(12);
+        bool all_game = g_probe_frames.size() == kb::kWalkFrames;
+        for (const auto& f : g_probe_frames) all_game = all_game && f.place == kb::Place::Game;
+        check(all_game && g_probe.how == kb::Found::GameOnly && !g_probe.boxes,
+              "eight frames of the game's own code and no known site: GameOnly, no boxes");
+        // a return address the walk never reaches: nothing past it, the boxes
+        const auto lone = kb::walk_from(0x1234);
+        const auto v = kb::judge_caller(0x1234, lone, g_probe_sites);
+        check(lone.size() == 1 && lone[0].place == kb::Place::Other && v.boxes &&
+                  (v.how == kb::Found::Foreign || v.how == kb::Found::Unwalked),
+              "a return address that is not on the stack: only itself, the boxes");
+        const auto none = kb::walk_from(0);
+        check(none.empty() && kb::judge_caller(0, none, g_probe_sites).how == kb::Found::Unwalked &&
+                  kb::judge_caller(0, none, g_probe_sites).boxes,
+              "no return address at all: Unwalked, the boxes");
     }
     std::error_code ec;
     std::filesystem::remove_all(dir, ec);
