@@ -53,7 +53,7 @@ const void* KILN_CALL service(KilnStr name,uint32_t) {
  auto s=str(name); if(s=="kiln.world") return &world; if(s=="kiln.players") return &players; if(s=="kiln.hooks" && observer) return &hooks; return nullptr;
 }
 KilnResult KILN_CALL publish(KilnOwner o,KilnStr name,const void* t) { CHECK(o==service_owner && str(name)=="kiln.camera"); camera=static_cast<const KilnCameraApi*>(t); return KILN_OK; }
-bool KILN_CALL feature(KilnStr s) { return str(s)!="hooks.owner_cleanup" || observer; }
+bool KILN_CALL feature(KilnStr s) { const auto name=str(s); return name=="world.lifecycle" || (name=="hooks.owner_cleanup" && observer); }
 void KILN_CALL log(KilnOwner,int32_t,KilnStr) {}
 uint32_t KILN_CALL side() { return KILN_SIDE_SERVER; }
 bool KILN_CALL on_thread(uint32_t kind) { return server_thread && kind==KILN_WORLD_SERVER; }
