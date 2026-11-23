@@ -1374,7 +1374,7 @@ void recompose(const std::vector<RegistrySection>& sections) {
             r.reason = "a registry section added after the start needs a restart; this edit was not applied";
             g.refused.push_back(r);
         }
-    registry::Result next = registry::compose(*g.in->schema, g.in->base, g.in->old, mods);
+    registry::Result next = registry::compose(*g.in->schema, g.in->base, g.in->old, mods, g.in->result);
     // what the stage refused outside compose stays (but the data sections' own: they were read and checked again above)
     std::vector<registry::Refusal> kept;
     for (const registry::Refusal& r : g.in->pre_refused)

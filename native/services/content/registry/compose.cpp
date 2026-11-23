@@ -344,7 +344,10 @@ struct Ctx {
     // BaseModel::raw_cover with its keys as raw paths are keyed (cover_key)
     std::map<std::string, std::map<std::string, BaseModel::Cover>> cover;
     std::string failed_id;  // the entry an edit failed on, for its refusal's place (refuse() takes and clears it)
+    bool preserve_removals = false; // later field-only turns cannot invalidate established drop-group exclusions
+    std::set<std::string> protected_items;
 };
+std::map<EntryRef, std::string> unsafe_item_removals(const Ctx& c, const State& s, const std::string& table_id = {});
 
 // A "where" condition on one value: ">=1", "<=2", "!=x", "==x", ">1", "<1", or a plain value (equal; names ignore case).
 bool cond_ok(const Value& v, const json& c) {
@@ -613,6 +616,17 @@ bool apply_targets(Ctx& c, State& s, const Who& w, const Edit& e, const std::vec
                 return refuse_line(t, named.who, certainty_of(named.kind),
                                    "Conflict (exclusive): " + named.who + (e.exclusive ? " also writes " : " wrote ") + place_text(t) +
                                        (e.exclusive ? "; the later edit is refused" : " exclusively; the later edit is refused"));
+        }
+        if (c.preserve_removals && t.ref.registry == "drops" && t.ref.field == "entries") {
+            State candidate; candidate.parent = &s;
+            candidate.touch(t.ref).result = st.next;
+            const auto bad = unsafe_item_removals(c, candidate, t.ref.id);
+            if (!bad.empty()) {
+                c.failed_id = t.ref.id;
+                *why = "drops " + t.ref.id + ": this field target would invalidate a safe drop group alongside removal of " +
+                       bad.begin()->first.id + "; the field target was not applied and the established removal is retained";
+                return false;
+            }
         }
         if (prev && other(*prev)) {  // a line when this edit follows another writer's (not after the mod's own)
             if (absolute(t) || (t.elem() && t.list == ListOp::None && t.op().set)) {  // an element's value set is a value too (D1)
@@ -1076,8 +1090,8 @@ std::string bounded(const std::string& text, const std::string& root) {
 }
 
 // An item removal is indivisible: do not hide its loot/recipes while leaving unsafe drop groups behind.
-std::map<EntryRef, std::string> unsafe_item_removals(const Ctx& c, const State& s) {
-    std::set<std::string> hidden;
+std::map<EntryRef, std::string> unsafe_item_removals(const Ctx& c, const State& s, const std::string& table_id) {
+    std::set<std::string> hidden = c.protected_items;
     for (const auto& ref : c.out.removed) if (ref.registry == "items") hidden.insert(ref.id);
     std::map<EntryRef, std::string> bad;
     if (hidden.empty() || !c.schema.registry("drops")) return bad;
@@ -1086,6 +1100,7 @@ std::map<EntryRef, std::string> unsafe_item_removals(const Ctx& c, const State& 
         return bad;
     }
     for (const auto& table : c.base.registries.at("drops")) {
+        if (!table_id.empty() && table.id != table_id) continue;
         const Value value = s.current({"drops", table.id, "entries"});
         if (value.kind != Value::List) continue;
         auto hidden_id = [&](const Value& entry) -> std::string {
@@ -1438,9 +1453,14 @@ std::shared_ptr<const PreparedBase> prepare_base(const BaseModel& base, const Re
 }
 
 static Result compose_impl(const Schema& schema, const BaseModel& base, const std::vector<OldWrite>& old,
-                           const std::vector<ModInput>& mods, const Result* previous, const State* prepared = nullptr) {
+                           const std::vector<ModInput>& mods, const Result* previous, const State* prepared = nullptr,
+                           const Result* established = nullptr) {
     Result out = previous ? *previous : Result{};
     Ctx c{schema, out, base, {}, {}, {}, {}, {}};
+    const Result* protected_entries = previous ? previous : established;
+    if (protected_entries) for (const auto& ref : protected_entries->removed)
+        if (ref.registry == "items") c.protected_items.insert(ref.id);
+    c.preserve_removals = !c.protected_items.empty();
     for (const auto& [reg, covers] : base.raw_cover)
         for (const auto& [key, cover] : covers) {
             const std::string k = cover_key(key);
@@ -1570,7 +1590,10 @@ static Result compose_impl(const Schema& schema, const BaseModel& base, const st
         State scratch;
         scratch.parent = &s;
         Result ignored;
+        ignored.removed = out.removed;
         Ctx sc{schema, ignored, base, c.converted, {}, {}, c.cover, {}};
+        sc.preserve_removals = c.preserve_removals;
+        sc.protected_items = c.protected_items;
         auto take = [&](const Who& w, const Edit& e, const std::string& batch_mod) {
             if (batch_mod != m.id) return refuse(c, w, e, "a batch of mod " + batch_mod + " in " + m.id + "'s place");
             if (e.entry == EntryOp::Add) return refuse(c, w, e, "an entry is added in stage add");
@@ -1632,6 +1655,10 @@ static Result compose_impl(const Schema& schema, const BaseModel& base, const st
 
 Result compose(const Schema& schema, const BaseModel& base, const std::vector<OldWrite>& old, const std::vector<ModInput>& mods) {
     return compose_impl(schema, base, old, mods, nullptr);
+}
+Result compose(const Schema& schema, const BaseModel& base, const std::vector<OldWrite>& old,
+               const std::vector<ModInput>& mods, const Result& established) {
+    return compose_impl(schema, base, old, mods, nullptr, nullptr, &established);
 }
 Result compose_after(const Schema& schema, const BaseModel& base, const Result& previous, const std::vector<ModInput>& mods) {
     return compose_impl(schema, base, {}, mods, &previous);
