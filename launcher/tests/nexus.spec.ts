@@ -100,7 +100,7 @@ test.describe("Deck mode", () => {
 
 test("direct build: the update UI stays and the Nexus line is absent", async ({ page }) => {
   await open(page, "/about", "/");
-  await expect(page.getByText("Up to date ·")).toBeVisible();
+  await expect(page.getByTestId("update-line")).toHaveText(/^Kiln is up to date/);
   await expect(page.getByRole("button", { name: "Check now" })).toBeVisible();
   await expect(page.getByTestId("nexus-page")).toHaveCount(0);
   await open(page, "/settings/online", "/");

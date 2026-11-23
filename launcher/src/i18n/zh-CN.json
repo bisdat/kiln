@@ -3824,7 +3824,13 @@
     "checkNow": "立即检查",
     "testBuild": "当前为 {current} 的第 {beta} 个测试构建。",
     "switchBack": "切回正式版",
-    "followBeta": "已订阅测试频道，下一测试版将作为更新提供。"
+    "followBeta": "已订阅测试频道，下一测试版将作为更新提供。",
+    "checkingNow": "正在检查更新…",
+    "upToDateLine": "Kiln 已是最新版本（{version}）",
+    "availableLine": "有新版本 Kiln {version}",
+    "failedLine": "检查失败：{reason}",
+    "checkedAt": "检查于 {time}",
+    "noAnswer": "没有更新服务器响应"
   },
   "nav": {
     "play": "开始游戏",

@@ -80,7 +80,7 @@ test("Skip hides the version until a newer one; Settings can undo", async ({ pag
   await expect(card.getByRole("switch", { name: /Check automatically/ })).toBeChecked();
   await shot(page, "update-settings");
   await card.getByRole("button", { name: "Undo" }).click();
-  await expect(card.getByText("0.2.0-dev.43 available")).toBeVisible();
+  await expect(card.getByText("Kiln 0.2.0-dev.43 is available")).toBeVisible();
   await mock(page, "offer", "0.2.0-dev.44");
   await expect(page.getByRole("dialog", { name: "Kiln 0.2.0-dev.44" })).toBeVisible();
 });
@@ -129,9 +129,74 @@ test("a failed download is a short toast; while the game runs Update game waits,
   expect(await game(page, "installs")).toEqual(["0.2.0-dev+20261104.0f1ffa6"]);
 });
 
-test("About shows the state with Check now", async ({ page }) => {
+// what a check found, on the line itself (a player could not tell whether Check now had checked at all: the line read
+// "Up to date" before and after, and only a short toast said more)
+const UP_TO_DATE = /^Kiln is up to date \(0\.2\.0-dev\.42\) · checked \d{1,2}:\d{2}/;
+const FAILURES = [
+  { source: "frostdev.io", step: "manifest", message: "not reachable (timed out)" },
+  { source: "GitHub", step: "manifest", message: "not reachable (dns error: no such host)" },
+];
+const WHY = "frostdev.io: not reachable (timed out); GitHub: not reachable (dns error: no such host)";
+
+test("About: Check now on a current launcher says Kiln is up to date, its version and the time it checked", async ({ page }) => {
   await open(page, "/about");
-  await expect(page.getByText("Up to date ·")).toBeVisible();
+  const line = page.getByTestId("update-line");
+  await expect(line).toHaveText(UP_TO_DATE);
+  // the last check was days ago: this one's time replaces it
+  await mock(page, "set", { checked: "2026-11-20T12:00:00Z" });
+  await expect(line).toContainText("checked Nov 20");
+  await mock(page, "checkDelay", 3000);
   await page.getByRole("button", { name: "Check now" }).click();
-  await expect(page.locator(".k-toast", { hasText: "Up to date" })).toBeVisible();
+  await expect(line).toHaveText("Checking for updates…");
+  await expect(page.getByRole("button", { name: "Check now" })).toBeDisabled();
+  await expect(line).toHaveText(UP_TO_DATE, { timeout: 8000 });
+  await expect(line).not.toContainText("Nov 20");
+  await expect(page.locator(".k-toast", { hasText: "Kiln is up to date (0.2.0-dev.42)" })).toBeVisible();
+  await shot(page, "update-about-checked");
+});
+
+test("About: a failed check says why on the line, and in a toast", async ({ page }) => {
+  await open(page, "/about");
+  await mock(page, "failNextCheck", FAILURES);
+  await page.getByRole("button", { name: "Check now" }).click();
+  const line = page.getByTestId("update-line");
+  await expect(line.locator(".k-error-text")).toHaveText(new RegExp(`^Check failed: ${WHY.replace(/[().]/g, "\\$&")} · checked \\d{1,2}:\\d{2}`));
+  const toast = page.locator(".k-toast-err");
+  await expect(toast).toContainText("Check failed");
+  await expect(toast).toContainText(WHY);
+  await shot(page, "update-about-failed");
+  // the next check works again: the line says so
+  await page.getByRole("button", { name: "Check now" }).click();
+  await expect(line).toHaveText(UP_TO_DATE);
+  await expect(line.locator(".k-error-text")).toHaveCount(0);
+});
+
+test("Settings: Check now says the same on its row", async ({ page }) => {
+  await open(page, "/settings/online");
+  const card = page.locator(".k-card", { has: page.getByRole("heading", { name: "Updates" }) });
+  const line = card.getByTestId("update-line");
+  await expect(line).toHaveText(UP_TO_DATE);
+  await mock(page, "failNextCheck", FAILURES);
+  await card.getByRole("button", { name: "Check now" }).click();
+  await expect(line.locator(".k-error-text")).toContainText(`Check failed: ${WHY}`);
+  await expect(page.locator(".k-toast-err")).toContainText(WHY);
+  await card.getByRole("button", { name: "Check now" }).click();
+  await expect(line).toHaveText(UP_TO_DATE);
+  await expect(page.locator(".k-toast", { hasText: "Kiln is up to date (0.2.0-dev.42)" })).toBeVisible();
+});
+
+test("Deck: Check says when it checked, why a check failed, and toasts the answer", async ({ page }) => {
+  await page.goto("/?deck=steamdeck#/deck/settings");
+  const row = page.locator('[data-deck-id="set-update"]');
+  await expect(row).toContainText("Up to date");
+  await expect(row.locator(".deck-row-sub")).toHaveText(/^Kiln Launcher 0\.2\.0-dev\.42 · checked \d{1,2}:\d{2}/);
+  await mock(page, "failNextCheck", FAILURES);
+  await row.click();
+  await expect(row).toContainText("Check failed");
+  await expect(row.locator(".deck-row-sub")).toContainText(`Check failed: ${WHY}`);
+  await shot(page, "update-deck-failed");
+  await expect(page.locator(".deck-toasts, .deck-dialog, [role=dialog]").filter({ hasText: WHY }).first()).toBeVisible();
+  await row.click();
+  await expect(row.locator(".deck-row-sub")).toHaveText(/^Kiln Launcher 0\.2\.0-dev\.42 · checked \d{1,2}:\d{2}/);
+  await expect(page.locator(".deck-toasts", { hasText: "Kiln is up to date (0.2.0-dev.42)" })).toBeVisible();
 });
