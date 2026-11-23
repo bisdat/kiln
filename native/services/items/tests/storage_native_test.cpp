@@ -7,8 +7,8 @@
 #include <map>
 #include <new>
 #include <thread>
-// Freed memory is poisoned, so a container node used after another thread (or a callback) erased it faults at once
-// instead of reading stale but plausible links.
+// Freed memory is poisoned and never reused (the heap's free-list words would cover the poison), so a container node
+// used after another thread (or a callback) erased it faults at once instead of reading stale but plausible links.
 void* operator new(size_t n) {
     if (void* p = std::malloc(n ? n : 1))
         return p;
@@ -16,8 +16,7 @@ void* operator new(size_t n) {
 }
 void operator delete(void* p) noexcept {
     if (p) {
-        std::memset(p, 0xDD, _msize(p));
-        std::free(p);
+        std::memset(p, 0xDD, _msize(p)); // the test leaks every freed block on purpose
     }
 }
 void operator delete(void* p, size_t) noexcept { operator delete(p); }
