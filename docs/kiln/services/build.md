@@ -367,8 +367,10 @@ the base 780 m away, visible at once after the teleport, gone after undo). 4 and
   the game's base areas go wrong. Where only the base-zone or base-query call site is not found, the world save alone
   still gets them. Either way kiln.log has a warning when kiln.build starts, naming the missing names and what Kiln
   does instead, and so does the text of the kiln.caps row `build.persist_callers`: unavailable (`symbol-missing`)
-  when every caller gets the boxes, available otherwise. A call from anywhere else (another mod's hook in front of
-  Kiln's) gets no boxes while the world save's call site is known; kiln.log says so once when all three are known.
+  when every caller gets the boxes, available otherwise. Another mod's hook in front of Kiln's changes the return
+  address Kiln sees; Kiln then looks at up to 8 return addresses below it for a known call site. A call it still cannot
+  place gets the boxes, as it may be the world save, when another module's code is on the stack or the stack cannot be
+  walked (kiln.log names the module once); only a call whose frames are all the game's own gets none.
 - The game's voxel writer keeps at most 4,096 stored 16 m chunks per save record and skips the rest, scattered over
   the whole record ([RE notes](../../re/build.md) §12: the writer server `0x83d200` with its 4,096-key array set up at
   `0x83d2f8`, client `0x10b89b0` and `0x10b8aa8`). A base whose zone touches more than 4,096 chunk positions (a side

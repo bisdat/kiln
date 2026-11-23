@@ -502,8 +502,15 @@ even when the edits in it are all inside the base. An entry whose bounds touch m
 product of the chunks it touches per axis, edges included) counts as keeping none of its chunks, so the kept chunks
 inside it get boxes too; and no Kiln box covers more than 4,096 chunks (a box's bounds sit 0.05 m inside its chunks, so
 its chunks are its candidates): a larger one is cut into slabs across its longest axis (both since 0.2.0-dev.30.9).
-Base zones and base query: the list stays as the builder wrote it. Any other return address (another mod's hook in
-front of Kiln's): no boxes either; kiln.log says so once when all three sites resolved. The three return addresses are sigdb names
+Base zones and base query: the list stays as the builder wrote it. Another mod's detour in front of Kiln's (on the
+builder, or on a caller of it) changes the return address the hook sees. So while the world save's site is known, a
+return address that is no known site is placed by the stack below it: up to 8 return addresses from it down
+(RtlCaptureStackBackTrace, which unwinds through every frame with unwind data), the first known site among them decides
+(kiln.log notes the first such call once). Without one, the call gets the boxes, as it may be the world save, when a
+frame lies outside the game exe and Kiln's own modules (`kiln-core.dll`, `kiln-*.dll`): another module's code, or a
+relay in no module; kiln.log warns once, naming it. It gets them too when the stack cannot be walked past the return
+address (warned once). Only when all those frames are the game's own does it get none (warned once when all three
+sites resolved). The three return addresses are sigdb names
 (`build/RetSaveRegionsWorldSave`, `build/RetSaveRegionsBaseZones`, `build/RetSaveRegionsBaseQuery`). When the world
 save's does not resolve (a game update broke its pattern), Kiln cannot tell the save from the others and every caller
 gets the boxes, as up to 0.2.0-dev.30.8; when only the base-zone or base-query one does not, the world save alone still
