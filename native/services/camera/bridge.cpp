@@ -175,6 +175,11 @@ KilnResult RemoteBackend::transport_ended(KilnOwner owner, KilnCameraLease lease
     note.reason_code = reason_code;
     note.text.assign(reason.ptr ? reason.ptr : "", reason.len < 512 ? reason.len : 512);
     std::lock_guard<std::mutex> lock(m_);
+    KilnOwner author = 0;
+    uint32_t epoch = 0;
+    uint64_t seen_revision = 0;
+    // A late note for a forgotten lease is harmless, but must never reach another endpoint's lease in the core.
+    if (!known(lease, &author, &epoch, &seen_revision)) return KILN_OK;
     if (ended_.size() >= 4 * KILN_CAMERA_MAX_PENDING) return KILN_ERR_BUFFER_TOO_SMALL;
     ended_.push_back(std::move(note));
     return KILN_OK;

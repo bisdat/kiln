@@ -392,6 +392,44 @@ void the_client_ends_a_lease_by_itself() {
     std::printf("  transport_ended: bridge owner, end reason and revision checked; one ENDED, no duplicate\n");
 }
 
+// N3: transport notifications only concern leases that this REMOTE backend actually carried.
+void transport_ended_cannot_end_another_endpoint() {
+    struct OtherBackend : Backend {
+        uint64_t caps() const override { return ~0ull; }
+        KilnResult admit(Stored&, uint32_t* reason, const char**) override { *reason = 0; return KILN_OK; }
+        bool stage(const Staged&, uint32_t*, const char**) override { return true; }
+        void cancel_update(KilnCameraLease, uint64_t) override {}
+        bool release(KilnCameraLease, uint64_t) override { return true; }
+        void drop(KilnCameraLease) override {}
+        void world_stopped(uint32_t) override {}
+    } other;
+    for (const uint32_t endpoint : {KILN_CAMERA_SERVER_MODE, KILN_CAMERA_LOCAL_VISUAL}) {
+        Rig rig;
+        rig.core.set_backend(endpoint, &other);
+        rig.core.world_started(kClient, 3);
+        auto q = lens(kGuest);
+        q.endpoint = endpoint;
+        if (endpoint == KILN_CAMERA_SERVER_MODE) {
+            q.parts = KILN_CAMERA_MODE;
+            q.input_policy = KILN_CAMERA_STOCK_MODE;
+            q.camera_id = 1;
+            q.lens_source = KILN_CAMERA_LENS_NONE;
+            q.fov_y_degrees = 0;
+        }
+        KilnCameraLease lease = 0;
+        CHECK(rig.core.apply(kAuthorA, &q, &lease, &on_done, kA, kOnServer | kOnClient) == KILN_OK);
+        CHECK(rig.core.committed(lease, 1, 1));
+        rig.pre();
+        rig.core.pre(kClient);
+        g_log.clear();
+        CHECK(rig.remote.transport_ended(kBridge, lease, 1, KILN_CAMERA_END_EXPIRED, 0, KilnStr{"", 0}) == KILN_OK);
+        rig.pre();
+        rig.core.pre(kClient);
+        CHECK(rig.core.active_revision(lease) == 1 && g_log.empty());
+    }
+    std::printf("  transport_ended: cannot end SERVER_MODE or LOCAL_VISUAL leases\n");
+}
+
 // review S8 M1: an update the client never answered is refused TransportTimeout (MayHaveApplied) and the bridge ends the
 // active lease (transport_ended, TRANSPORT_TIMEOUT) in the same step, in either order of arrival: the author gets the
 // refusal first, then one ENDED; the slot is free again.
@@ -599,6 +637,7 @@ int main() {
     update_and_end_go_through_the_bridge();
     end_preempts_a_queued_update_and_apply();
     the_client_ends_a_lease_by_itself();
+    transport_ended_cannot_end_another_endpoint();
     a_timed_out_update_ends_its_lease();
     a_higher_priority_lease_supersedes();
     retired_authors_are_ended_and_told();
