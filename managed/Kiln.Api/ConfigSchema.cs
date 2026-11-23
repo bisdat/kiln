@@ -35,6 +35,8 @@ internal sealed class ConfigNode
     public string? Comment { get; init; }
     public double? Min { get; init; }
     public double? Max { get; init; }
+    /// <summary>The slider step of [Range(min, max, step)], only when it suits the entry (<see cref="ConfigSchema.SliderStep"/>).</summary>
+    public double? Step { get; init; }
     public bool RequiresRestart { get; init; }
     public bool Synced { get; init; }
     public string[] Options { get; init; } = [];
@@ -133,6 +135,7 @@ internal static class ConfigSchema
             {
                 Key = key, Path = path, ClrType = memberType, Kind = kind, ElementKind = elementKind, ElementType = elementType,
                 Comment = comment, Min = min, Max = max, Options = options, Synced = isSynced,
+                Step = SliderStep(KindName(kind), min, max, StepOf(m.GetCustomAttributes())),
                 RequiresRestart = m.GetCustomAttribute<RequiresRestartAttribute>() is not null,
                 Get = get, Set = set,
             };
@@ -156,6 +159,27 @@ internal static class ConfigSchema
                 return (cmin.ToDouble(CultureInfo.InvariantCulture), cmax.ToDouble(CultureInfo.InvariantCulture));
         }
         return (null, null);
+    }
+
+    /// <summary>The step given to Kiln's [Range(min, max, step)]; null for any other range attribute.</summary>
+    internal static double? StepOf(IEnumerable<Attribute> attributes)
+    {
+        foreach (var a in attributes)
+            if (a is RangeAttribute r) return r.Step;
+        return null;
+    }
+
+    /// <summary>A slider step that suits an entry, else null (the editor then moves as without one): an "int" or
+    /// "float" entry with both bounds, max above min, a positive finite step no larger than max - min that changes a
+    /// value at either end of the range, and for "int" a whole step and a whole min. One rule for the schema, the
+    /// in-game editor and (mirrored) the launcher.</summary>
+    internal static double? SliderStep(string type, double? min, double? max, double? step)
+    {
+        if (type is not ("int" or "float") || step is not { } s || min is not { } lo || max is not { } hi) return null;
+        if (!double.IsFinite(s) || !double.IsFinite(lo) || !double.IsFinite(hi) || s <= 0 || hi <= lo || s > hi - lo) return null;
+        if (lo + s == lo || hi - s == hi) return null;
+        if (type == "int" && (Math.Floor(s) != s || Math.Floor(lo) != lo)) return null;
+        return s;
     }
 
     public static string CamelCase(string name) =>

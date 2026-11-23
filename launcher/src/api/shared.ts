@@ -42,6 +42,8 @@ export interface SnapshotEntry {
   synced: boolean;
   min?: number;
   max?: number;
+  /** [Range(min, max, step)]: the slider moves from min in steps of this size (editor metadata only). */
+  step?: number;
   options?: string[];
 }
 export interface SchemaSnapshot {

@@ -56,6 +56,20 @@ export function getPath(values: Json, path: string): Json | undefined {
   return cur;
 }
 
+/** The entry's slider step ([Range(min, max, step)]) when it suits the entry, else undefined (the slider keeps its
+ * own increment). Mirrors Kiln.Api ConfigSchema.SliderStep: int/float with both bounds, a positive finite step no
+ * larger than max - min that changes a value at either end, whole step and min for int. The range input steps from
+ * min, so the slider gives min + n * step; the number box and checkValue never round to it. */
+export function sliderStep(e: SnapshotEntry): number | undefined {
+  const s: unknown = e.step;
+  const { min, max } = e;
+  if ((e.type !== "int" && e.type !== "float") || typeof s !== "number" || typeof min !== "number" || typeof max !== "number") return undefined;
+  if (!Number.isFinite(s) || !Number.isFinite(min) || !Number.isFinite(max) || s <= 0 || max <= min || s > max - min) return undefined;
+  if (min + s === min || max - s === max) return undefined;
+  if (e.type === "int" && (!Number.isInteger(s) || !Number.isInteger(min))) return undefined;
+  return s;
+}
+
 /** Client-side check mirroring Kiln.Api's rules (the backend validates again). */
 export function checkValue(e: SnapshotEntry, v: Json): string | null {
   const ty = e.type;
@@ -266,7 +280,7 @@ function Control({ id, entry: e, value, set, disabled, invalid }: { id: string; 
   if (ty === "int" || ty === "float") {
     const n = typeof value === "number" ? value : Number(value);
     if (e.min !== undefined && e.max !== undefined && e.max > e.min && e.max - e.min <= 100000)
-      return <Slider id={id} value={n} min={e.min} max={e.max} integer={ty === "int"} onCommit={set} disabled={disabled} aria-label={e.path} />;
+      return <Slider id={id} value={n} min={e.min} max={e.max} step={sliderStep(e)} integer={ty === "int"} onCommit={set} disabled={disabled} aria-label={e.path} />;
     return <NumberInput id={id} value={Number.isNaN(n) ? null : n} integer={ty === "int"} min={e.min} max={e.max} onCommit={set} disabled={disabled} invalid={invalid} />;
   }
   if (ty === "enum") {

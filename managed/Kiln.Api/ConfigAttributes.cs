@@ -28,10 +28,20 @@ public sealed class CommentAttribute(string text) : Attribute
 [AttributeUsage(AttributeTargets.Property | AttributeTargets.Field | AttributeTargets.Parameter)]
 public sealed class RangeAttribute(double min, double max) : Attribute
 {
+    /// <summary>A range whose config slider moves in steps of <paramref name="step"/> from <paramref name="min"/>
+    /// (<c>min</c>, <c>min + step</c>, <c>min + 2 * step</c>, ... up to <c>max</c>). The step is editor metadata only:
+    /// typed values, values in the file, server values and command arguments keep the plain bounds check, and a saved
+    /// value off the grid is never rounded. A step that is not a positive finite number, is larger than
+    /// <c>max - min</c>, or is not whole for a whole-number entry is ignored (the slider moves as without one).</summary>
+    public RangeAttribute(double min, double max, double step) : this(min, max) => Step = step;
+
     /// <summary>The lowest allowed value (for a <see cref="TimeSpan"/>, in seconds).</summary>
     public double Min { get; } = min;
     /// <summary>The highest allowed value (for a <see cref="TimeSpan"/>, in seconds).</summary>
     public double Max { get; } = max;
+    /// <summary>The slider step given to the three-argument constructor, as given; null for <c>[Range(min, max)]</c>.
+    /// Config entries carry it on as <see cref="ConfigEntry.Step"/> only when it suits the entry.</summary>
+    public double? Step { get; }
 }
 
 /// <summary>A change of this entry only applies after the mod reloads (or the server restarts): a live edit is
