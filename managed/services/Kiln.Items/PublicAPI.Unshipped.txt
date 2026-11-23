@@ -1,1 +1,3 @@
 #nullable enable
+Kiln.InventoryKinds.PlayerStorage = 16 -> Kiln.InventoryKinds
+Kiln.ItemsStatus.Filtered = 10 -> Kiln.ItemsStatus
