@@ -231,6 +231,31 @@ public sealed unsafe class ItemsStorageFakeTests : IDisposable
     }
 
     [Fact]
+    public void RegistrationChargesWholeEightSlotPagesAcrossMods()
+    {
+        // Sixteen 9-slot storages use 32 pages, although they expose only 144 logical slots.
+        for (var i = 0; i < 8; i++) Register(ModA, $"a:bag{i}", 9);
+        for (var i = 0; i < 8; i++) Register(ModB, $"b:bag{i}", 9);
+        Assert.Equal(StorageNative.Unavailable, RegisterRc(ModB + 1, "c:bag", 9));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ExtraMainPagesIsAScriptedWitnessSignalForThisJoin(bool extraMainPages)
+    {
+        Bind();
+        Assert.Equal(0x10u, StorageNative.WitnessExtraMainPages);
+        _fake.JoinRead(3, Account, Character, 0xABCDEF, extraMainPages: extraMainPages);
+        var flags = StorageNative.WitnessRead | (extraMainPages ? StorageNative.WitnessExtraMainPages : 0);
+        Assert.Equal(flags, Witness(3).Flags);
+        _fake.JoinApply(3, 4);
+        Assert.Equal(flags | StorageNative.WitnessApplied, Witness(3).Flags);
+        _fake.JoinRead(3, Account, Character, 0x1234);  // a later join does not inherit the signal
+        Assert.Equal(StorageNative.WitnessRead, Witness(3).Flags);
+    }
+
+    [Fact]
     public void AJoinGivesTheWitnessAndTheIdentity()
     {
         Bind();
@@ -244,6 +269,31 @@ public sealed unsafe class ItemsStorageFakeTests : IDisposable
         StorageNative.Witness none = default;
         none.Size = (uint)sizeof(StorageNative.Witness);
         Assert.Equal(StorageNative.NotFound, _t->WitnessOf(Saves, 9, &none));
+    }
+
+    [Fact]
+    public void ReturnedOutsideKilnReasonSurvivesRestoreEventsAndFreeze()
+    {
+        const uint returned = 19;
+        Assert.Equal(returned, StorageNative.ParkReturned);
+        Assert.Equal(returned, (uint)PlayerStorageParkReason.ReturnedOutsideKiln);
+        Bind();
+        var join = _fake.JoinRead(0, Account, Character, 7);
+        Assert.Equal(StorageNative.InvalidArgument, Restore(0, join, 0, StorageNative.SourceServer, 4, Account, Character,
+            Parked("gone:bag", 8, 20, (0, 0x77, 10))));
+        Assert.Equal(StorageNative.Ok, Restore(0, join, 0, StorageNative.SourceServer, 4, Account, Character,
+            Parked("gone:bag", 8, returned, (0, 0x77, 10))));
+        _fake.JoinApply(0, 1);
+        Assert.Contains(Events(), e => e.Kind == StorageNative.EventParked && e.Reason == returned);
+        Register(ModA, "gone:bag", 8);  // registration must not automatically release this held copy
+        _fake.Step();
+        var contents = _fake.Contents(0, "gone:bag");
+        Assert.Empty(contents.Live);
+        Assert.Equal((returned, 10), (Assert.Single(contents.Parked).Reason, contents.Parked[0].Record.Count));
+        _fake.CaptureOf(0, 7);
+        var frozen = Take(_fake.CapturesDone());
+        var parked = Assert.Single(frozen.Entries.Where(e => e.Entry.Kind == StorageNative.EntryParked));
+        Assert.Equal(("gone:bag", returned, 10u), (parked.Key, parked.Entry.Reason, Assert.Single(parked.Records).Count));
     }
 
     [Fact]
