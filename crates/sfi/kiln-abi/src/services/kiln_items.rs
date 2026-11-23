@@ -69,6 +69,8 @@ pub const KILN_ITEMS_GEAR_UNAVAILABLE: i32 = 6;
 pub const KILN_ITEMS_GEAR_UNLOCKED: i32 = 2;
 pub const KILN_ITEMS_GEM_SLOT: i32 = 512;
 pub const KILN_ITEMS_GEM_SLOT_ANY: i32 = 1024;
+pub const KILN_ITEMS_GIVE_EQUIP_DRY_RUN: u32 = 2;
+pub const KILN_ITEMS_GIVE_EQUIP_TAKE: u32 = 4;
 pub const KILN_ITEMS_INSTANCES_EXHAUSTED: i32 = 2;
 pub const KILN_ITEMS_INSTANCES_ON: i32 = 1;
 pub const KILN_ITEMS_INSTANCE_DURABILITY: i32 = 32;
@@ -556,6 +558,18 @@ pub struct KilnItemsEquipResult {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
+pub struct KilnItemsGiveEquipRequest {
+    pub size: u32,
+    pub player: u32,
+    pub item: u32,
+    pub count: u32,
+    pub flags: u32,
+    pub equipment_slot: u8,
+    pub reserved: [u8; 3],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
 pub struct KilnItemsEquipStatus {
     pub size: u32,
     pub available: u8,
@@ -945,4 +959,5 @@ pub struct KilnItemsApi {
     pub scale_status: Option<unsafe extern "C" fn(*mut KilnItemsScaleStatus) -> KilnResult>,
     pub container_rename: Option<unsafe extern "C" fn(KilnOwner, *const KilnItemsRenameRequest, KilnItemsRenameDoneFn, *mut core::ffi::c_void, *mut u64, *mut KilnItemsRenameResult) -> KilnResult>,
     pub rename_status: Option<unsafe extern "C" fn(*mut KilnItemsRenameStatus) -> KilnResult>,
+    pub give_equip: Option<unsafe extern "C" fn(KilnOwner, *const KilnItemsGiveEquipRequest, KilnItemsEquipDoneFn, *mut core::ffi::c_void, *mut u64) -> KilnResult>,
 }

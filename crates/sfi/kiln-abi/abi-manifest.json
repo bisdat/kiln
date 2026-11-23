@@ -3181,6 +3181,7 @@
             "gear_upgrade": 336,
             "gear_write": 296,
             "give": 8,
+            "give_equip": 384,
             "header": 0,
             "instances_status": 216,
             "item_at": 64,
@@ -3210,7 +3211,7 @@
             "transfer_report": 168,
             "transfer_rule": 152
           },
-          "size": 384
+          "size": 392
         },
         "KilnItemsChange": {
           "align": 8,
@@ -3409,6 +3410,19 @@
             "writes": 16
           },
           "size": 192
+        },
+        "KilnItemsGiveEquipRequest": {
+          "align": 4,
+          "fields": {
+            "count": 12,
+            "equipment_slot": 20,
+            "flags": 16,
+            "item": 8,
+            "player": 4,
+            "reserved": 21,
+            "size": 0
+          },
+          "size": 24
         },
         "KilnItemsInstance": {
           "align": 8,
@@ -3938,7 +3952,7 @@
           "size": 40
         }
       },
-      "sha256": "c4e919679e9a659e3edb19ea224ec07c2dcf224f9bffec5679c2e0438ba7f599"
+      "sha256": "95dc56ec73156d04329d5309cf499acbc78c9c2980175a58a2be2eb03dffe117"
     },
     "native/core/abi/services/kiln_launch.h": {
       "function_macros": [
@@ -8605,7 +8619,7 @@
   },
   "outputs": {
     "src/bindings.rs": "134028a6a9914076cab3f71f98d356141d4fe36c4d7f51bac6a11819501ed935",
-    "src/layout.rs": "81e51427a8ba7669ad9629ee149809aaf6446b62428d84366aefbafc7de8ff48",
+    "src/layout.rs": "d6669e43e56e8fcd4e593d8f4e3cc31b940c20aec01f80cd88dac7f9d75782de",
     "src/services/kiln_abilities.rs": "06a43042e5c96d6261a17b02eab35463b07a8ad83f63b2bb168bca5ff34e582e",
     "src/services/kiln_assets.rs": "e7fe4eb1c4d53ad31eeaf05be06f41c551a49362ad5bd4174465ec18a03effe0",
     "src/services/kiln_assets_vfx.rs": "90ed8ce5ad512bbf4f002db3277bc3b439d648ca437a58d4477eac4ce46c3b81",
@@ -8632,7 +8646,7 @@
     "src/services/kiln_gameplay.rs": "697b6e9a231122dd29e33b1b96bc050afd822950077bc1ca2d5d1caabf70fe43",
     "src/services/kiln_gemcraft.rs": "07cb3321ad95f3ec8b694f78a02d561a14002338c8ee536b2df6fe17c8f1a4e6",
     "src/services/kiln_hooks.rs": "d3ff34a15e0da4580df5ffcdd09dafd5d31d949e3cafcfc3924bf9d2c729c1b6",
-    "src/services/kiln_items.rs": "aa910afb12948a34f118f62ca7979704f9f9487e38bd0e76ba6fb8dfba8ef707",
+    "src/services/kiln_items.rs": "997cdc279dc7704128c8d47efff8cd395652e0b93679a9c34848d6c54b6d5519",
     "src/services/kiln_launch.rs": "6ffbec313079a115faf49075248fc663d858f91a38d4a804f09c1deeae4dc61b",
     "src/services/kiln_log.rs": "86b18decab13965acd7a5e9d0c3166a80ac5441359f928717b8f4a02cd395df1",
     "src/services/kiln_net.rs": "a80d9ff754549a78c03fdc6423f97a582bacbcc11a114ce68a75ecefd873b9ca",

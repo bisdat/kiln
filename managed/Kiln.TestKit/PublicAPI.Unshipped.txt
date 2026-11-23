@@ -1,4 +1,5 @@
 #nullable enable
+Kiln.TestKit.HarnessItems.SetEquipmentSlotType(Kiln.ItemId item, Kiln.EquipmentSlot slot) -> void
 Kiln.TestKit.HarnessAmmoList
 Kiln.TestKit.HarnessAmmoList.Hold(Kiln.AmmoListKind kind, Kiln.ItemId weapon, params Kiln.AmmoListRow[]! gameRows) -> void
 Kiln.TestKit.HarnessAmmoList.KnownItems(Kiln.AmmoListKind kind, params Kiln.ItemId[]! items) -> void

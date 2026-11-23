@@ -13,6 +13,48 @@ entity, and the change is replicated and saved like a vanilla one. Evidence and 
 | Managed | `managed/services/Kiln.Items/` → `kiln/host/Kiln.Items.dll` (namespace `Kiln`, class `Items`) |
 | Test | `mods/tests/items-test/` (PASS / FAIL lines in kiln.log; v3: `MovesTest.cs`; v5: `EquipTest.cs`); `mods/tests/equipment-sets-test/` (v6); `managed/tests/Kiln.Items.Tests` (offline); `mods/tests/craftmatch-test/` (rarity, level, perks of made items); `mods/tests/fuel-test/` (water, three boots); `native/services/items/tests/run.sh` (host tests under Wine); `mods/tests/instances-test/` (entity refs, item instances, following items) |
 
+## Give straight into equipment (since 0.2.0-dev.30.6)
+
+`Items.GiveEquip(player, item, count, EquipmentSlot slot, GiveEquipOptions? options = null)` returns
+`Task<EquipResult>`. It creates **one stack** directly in equipment and equips it in **one game inventory
+transaction**. An empty target needs no free backpack slot. Gear uses the game's default level and rarity and is
+created with its item entity and normal instance data in its final equipped cell, never in an intermediate backpack
+slot. The item's `EquipmentSlotType` must fit, just as for `Items.Equip`.
+
+```csharp
+var result = await Items.GiveEquip(player, ringId, 1, EquipmentSlot.Ring1,
+    new GiveEquipOptions { Replaced = Replaced.Take });
+if (!result.Ok) Log.Info(result.Reason);
+else Log.Info($"replaced {result.ReplacedCount} x {result.ReplacedItem}");
+```
+
+- `Replaced.Backpack` (default) preserves the old stack and its instance in an empty Generic backpack slot.
+  An occupied target with a full backpack returns `NoRoom` **before mutation**. An empty target still works.
+- `Replaced.Take` removes the old stack and reports `ReplacedItem` (an alias of `Replaced`), `ReplacedCount`, and
+  the old instance identity. It works with a full backpack. `ReplacedTo` is None for a taken stack.
+- `DryRun = true` runs and rolls back the whole transaction. No inventory/selection changes, new item entity or
+  `EquipChangedEvent` survives. The result reports the old stack and the predicted destination, but no new instance.
+- Always all-or-nothing: no partial give, no duplicated or missing item on an ordinary refusal. Count is 1..65535,
+  must fit one item stack, and must be **1 for gear**. `From` is None. Ordinary `Equip`/`Unequip` keep
+  `ReplacedCount = 0`. A successful committed GiveEquip posts one `EquipChangedEvent` on the tick thread.
+  A fault inside the game's commit is different from an ordinary refusal: the result is `Unavailable`, equipment
+  calls are disabled until restart, and the reason warns that items may have changed. Kiln never attempts an unsafe
+  second rollback after item-instance creation has begun.
+- **Limitation:** giving a backpack item into `EquipmentSlot.Backpack` is refused with
+  "backpack items can't be given straight into the bag slot yet". Its nested inventory is only created at commit;
+  this operation does not guess how to transfer backpack contents. Other equipment slots, including vanity, are supported.
+- `items.give_equip` / `Items.GiveEquipAvailable`: server-authoritative only (dedicated server or the hosting
+  player's server world). Unavailable on a joined remote client, without a live server session, on an older runtime,
+  or without the resolved selection helper, transaction guards, move/equip functions and scoped creation hook.
+  `Capabilities.Why("items.give_equip")` explains the refusal. Player-session, death, FIFO, timeout and cancellation
+  checks are shared with `Equip`; the shared queue holds at most 1024 requests.
+- TestKit models this operation's logical equipment, replacement, dry-run and event behaviour. Set an item's type
+  with `kiln.Items.SetEquipmentSlotType(item, EquipmentSlot.Ring0)` (both ring slots fit the same type). It does not
+  reproduce the game's physical equipment-page layout, derived stats, visual updates or persistence.
+
+Changelog: added atomic give-and-equip into empty or occupied equipment slots, with replacement policies and dry-run;
+thanks to **Fuzen777** for [#126](https://github.com/frostdev-ops/kiln/issues/126).
+
 ## C#
 
 Reference the assembly like any Kiln service (never ship it):
