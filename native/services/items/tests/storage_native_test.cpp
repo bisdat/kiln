@@ -738,6 +738,16 @@ void review_tests() {
     CHECK(kitems::state(51, life_two, 4, &state) == KILN_OK && state.status == KIS_STATE_READY);
     CHECK(!kitems::model.players.at(3).holders.count("life:one") && kitems::model.players.at(3).holders.count("life:three"));
 
+    // 7. A character read at a join that does not parse: storage goes off (a layout mismatch, with a caps reason) and
+    //    the slot's previous character keeps nothing a new occupant of the slot could use or pair.
+    std::vector<uint8_t> character(0x5500);
+    character[S.layout.main_pages] = 17;
+    const auto old_holder = kitems::model.players.at(1).holders.at("mod:pack").entity;
+    kitems::after_read(1, character.data());
+    CHECK(!kitems::enabled && (kitems::model.players.at(1).witness.flags & KIS_WITNESS_LEFT) &&
+          kitems::model.players.at(1).holders.empty() && kitems::garbage_contains(old_holder) &&
+          kitems::detail.find("characters/struct") != std::string::npos);
+
     kitems::enabled = true;
     kitems::world_api = nullptr;
     kitems::storage_reset();
