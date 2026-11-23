@@ -507,6 +507,7 @@ internal static class PlayerStorageMirror
         var now = Clock();
         if (_lastPass != long.MinValue && now - _lastPass < PassMs) return;
         _lastPass = now;
+        PruneRates(now);
         try
         {
             if (!Capabilities.Is(PlayerStorage.Capability) && Views.Count == 0) return;  // no storage here and nobody was sent rows
@@ -653,7 +654,7 @@ internal static class PlayerStorageMirror
         var item = new ItemId(m.Item);
         if (KindOf(item) != kind)
         {
-            Refuse(player, m, $"item {item} is no {kind} ammunition");
+            Refuse(player, m, "an item that is no ammunition of the picked kind", $"item {item} is no {kind} ammunition");
             return;
         }
         var contents = storage.Read(player);
@@ -674,7 +675,7 @@ internal static class PlayerStorageMirror
         }
         if (found is null)
         {
-            Refuse(player, m, $"item {item} is not in the storage");
+            Refuse(player, m, "an item that is not in the storage", $"item {item} is not in the storage");
             return;
         }
         lock (acceptor.Pending)
@@ -699,7 +700,7 @@ internal static class PlayerStorageMirror
             catch (Exception e) when (e is KilnUnavailableException or InvalidOperationException or ArgumentException)
             {
                 lock (acceptor.Pending) acceptor.Pending.Remove((player.Value, m.Item));
-                Refuse(player, m, e.Message);
+                Refuse(player, m, "the equip could not start", e.Message);
                 return;
             }
             _ = Finish(task, acceptor, storage, player, m, index);
@@ -733,15 +734,27 @@ internal static class PlayerStorageMirror
             (acceptor.Activate ? " (activate)" : "") + $": {line}");
     }
 
+    // when each reason was last logged: a fixed set of reasons, never what a game made up (an item id, a key)
     private static readonly Dictionary<string, long> RefusalLogged = new(StringComparer.Ordinal);
 
-    private static void Refuse(EntityId player, StorageAmmoPick m, string why)
+    private static void Refuse(EntityId player, StorageAmmoPick m, string reason, string? detail = null)
     {
         Interlocked.Increment(ref _picksRefused);
         var now = Clock();
-        if (RefusalLogged.TryGetValue(why, out var at) && now - at < 60_000) return;
-        RefusalLogged[why] = now;
-        Backend.Current.Log(0, LogLevel.Info, $"player-storage: a pick of {m.Key} by {player} was not taken: {why}");
+        if (RefusalLogged.TryGetValue(reason, out var at) && now - at < 60_000) return;
+        RefusalLogged[reason] = now;
+        Backend.Current.Log(0, LogLevel.Info, $"player-storage: a pick of {m.Key} by {player} was not taken: {detail ?? reason}");
+    }
+
+    // A rate whose bucket is full again is the rate of a player who never picked: it is not kept (players come and go, and
+    // a rejoin is a new entity).
+    private static void PruneRates(long now)
+    {
+        List<uint>? idle = null;
+        foreach (var (player, state) in PickStates)
+            if (state.Tokens + Math.Max(0, now - state.TokensMs) * PicksPerSecond / 1000.0 >= PickBurst) (idle ??= []).Add(player);
+        if (idle is not null)
+            foreach (var player in idle) PickStates.Remove(player);
     }
 
     // ---- acceptors (ProvideAmmo's server half) ----
