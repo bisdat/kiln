@@ -110,8 +110,11 @@ KilnResult KILN_CALL body_assets(KilnOwner owner, const char* dir, size_t dir_le
     }
     return reply("resources 1", report, capacity, written);
 }
+int t_cooked_verdict = 0;  // kiln.assets' cooked-file verdict on the body cache (0 load, 1 warn, 2 refuse)
+int KILN_CALL cooked_verdict(const void*, size_t) { return t_cooked_verdict; }
 void* find_body_proc(const char* name) {
     if (std::string(name) == "ka_boot_body_v1") return t_body_bridge ? reinterpret_cast<void*>(&body_assets) : nullptr;
+    if (std::string(name) == "ka_cooked_verdict_v1") return t_body_bridge ? reinterpret_cast<void*>(&cooked_verdict) : nullptr;
     return find_proc(name);
 }
 const void* KILN_CALL body_services(KilnStr name, uint32_t version) {
@@ -160,7 +163,7 @@ void body_reset(const char* name) {
     reset(name);
     t_api.service = &body_services;
     kiln_test_proc = &find_body_proc;
-    t_body_bridge = true, t_body_fail = false;
+    t_body_bridge = true, t_body_fail = false, t_cooked_verdict = 0;
     t_body_dirs.clear(), t_body_owners.clear(), t_body_docs.clear();
     t_pathwalker_size = 92;
     build_fake_types();
@@ -318,6 +321,7 @@ void test_refusals_leave_the_neighbour() {
                                                        R"("bodies":{"golem":{"model":"models/rig.gltf","template":"Enemy_Vukah_Melee","size":{"radius":0.75,"height":2}}}})"); },
          "uses the Fisher/Villager chassis only"},
         {"no body registration in kiln.assets", [] { t_body_bridge = false; }, "authored roster-body lowering is not installed"},
+        {"the body cache was not made by this game's cook (cooked: local)", [] { t_cooked_verdict = 2; }, "not made by this game's cook, so it is not loaded"},
         {"no network clearance in this build", [] { g_body_network_clearance = false; }, "need the network clearance"},
     };
     for (const auto& c : cases) {

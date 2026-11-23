@@ -316,6 +316,8 @@ when a cook fails. The two cook tools merge their own contributions. Output hash
 `sourceHash` is derived from authored specs and sources for cross-machine agreement. A server marks renderer rows
 `skippedOnServer` with no borrowed output hash. An unfinished or renderer-skipped body remains incomplete.
 A shared cache receipt tracks the final two-tool result. None of this is a Ready status or evidence of body publication.
+At start the cache counts as a cooked file like any other ([cooking.md](cooking.md)): under kiln.json `"cooked": "local"` a
+cache this game's cook did not make (no receipt) refuses the body's mod, under `"warn"` (the default) it is read and `kiln.log` says so.
 External glTF buffer/image URIs are percent-decoded and resolved relative to the glTF; `../shared/...` is allowed only
 while it stays inside this mod. Escapes, nested links, and a `link/..` walk are refused before source hashing.
 A legacy NPC model block missing its animation or motion part stays on the ordinary eager asset-cook path, with a

@@ -14,4 +14,9 @@ namespace ka::bootpack {
 inline constexpr const char* kExport = "ka_boot_body_v1";
 using Call = KilnResult(KILN_CALL*)(KilnOwner owner, const char* mod_dir, size_t dir_length, const char* json, size_t length,
                                     char* report, size_t capacity, size_t* written);
+// kiln.assets' verdict on bytes of a mod's assets/cooked that another service reads itself (the NPC body cache,
+// assets/cooked/npc-bodies.v1.json): cooktrust.h's cooked_verdict over this game's cook receipts and kiln.json "cooked".
+// 0 load, 1 load although this game's cook did not make them ("warn"), 2 refuse ("local", or the receipts could not be read).
+inline constexpr const char* kVerdictExport = "ka_cooked_verdict_v1";
+using Verdict = int(KILN_CALL*)(const void* data, size_t length);
 }  // namespace ka::bootpack

@@ -43,6 +43,17 @@ bool load_cache(const Env& env, Cache* cache, std::string* why) {
     std::string reason;
     if (!env.read || !env.read(kCache, kMaxCache, &raw, &reason))
         return fail("this machine has no readable cook of the mod's authored bodies (" + reason + "); cook the mod");
+    // a cooked file like any other: kiln.assets' verdict from this game's cook receipts and kiln.json "cooked" (review3 S4)
+    if (!env.cooked) return fail("kiln.assets cannot check whether this game's cook made it; no body is built from it");
+    switch (env.cooked(raw)) {
+    case 0:
+        break;
+    case 1:
+        if (env.warn) env.warn(std::string(kCache) + " was not made by this game's cook: loaded (kiln.json \"cooked\": \"warn\"); cook the mod here");
+        break;
+    default:
+        return fail("not made by this game's cook, so it is not loaded (kiln.json \"cooked\": \"local\"); cook the mod here");
+    }
     cache->doc = ojson::parse(raw.begin(), raw.end(), nullptr, false);
     const ojson& doc = cache->doc;
     if (doc.is_discarded() || !doc.is_object() || member(doc, "format") != 1 || !hex64(member(doc, "sourceHash")) ||

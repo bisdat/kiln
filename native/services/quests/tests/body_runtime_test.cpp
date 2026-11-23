@@ -283,6 +283,8 @@ struct Mod {
     bool client = true;
     ojson cache, spec;
     std::string closure = std::string(64, 'c');
+    int verdict = 0;  // kiln.assets' cooked-file verdict on the cache's bytes
+    std::vector<std::string> warnings;
     Mod() {
         files["models/rig.gltf"] = "authored glTF";
         files["blocks/skin.json"] = R"({"materials":{"skin":{}}})";
@@ -336,6 +338,8 @@ struct Mod {
         };
         e.layout = [](std::string*) { return true; };
         e.materials.server = !client;
+        e.cooked = [this](const Bytes& bytes) { return std::string(bytes.begin(), bytes.end()) == files[bodyadmit::kCache] ? verdict : -1; };
+        e.warn = [this](const std::string& line) { warnings.push_back(line); };
         return e;
     }
     ModInput input() const {
@@ -436,6 +440,29 @@ void admission_of_the_local_cache() {
             CHECK(why.find("defined in C#") != std::string::npos && why.find("blocks/*.json") != std::string::npos);
         }
         CHECK(!asked);
+    }
+    {
+        // review3 S4: the body cache is a cooked file like any other: kiln.assets' verdict (this game's cook receipts) applies to it
+        std::printf("-- 16f review3 S4: the body cache goes through kiln.assets' cooked-file verdict\n");
+        Mod m;
+        m.verdict = 2;
+        ModInput in = m.input(); ojson assets; std::string why;
+        CHECK(!admit(m, &in, &assets, &why));
+        if (why.find("not made by this game's cook") == std::string::npos) std::printf("admission said: %s\n", why.c_str());
+        CHECK(why.find("npcs.tobin: assets/cooked/npc-bodies.v1.json") == 0 && why.find("not made by this game's cook") != std::string::npos);
+        m.verdict = 1;
+        in = m.input();
+        CHECK(admit(m, &in, &assets, &why));
+        CHECK(m.warnings.size() == 1 && m.warnings[0].find("not made by this game's cook") != std::string::npos);
+        m.verdict = 0;
+        m.warnings.clear();
+        in = m.input();
+        CHECK(admit(m, &in, &assets, &why) && m.warnings.empty());
+        auto env = m.env();
+        env.cooked = nullptr;  // fail closed when kiln.assets cannot be asked
+        in = m.input();
+        CHECK(!bodyadmit::admit(&in, env, &assets, &why));
+        CHECK(why.find("cannot check") != std::string::npos);
     }
     {
         std::printf("-- 16f S3 admission: the type registry refusal names the chassis\n");

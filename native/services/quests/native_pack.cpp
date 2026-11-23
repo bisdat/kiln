@@ -663,6 +663,10 @@ ka::bootpack::Call assets_body_bridge() {
     const HMODULE module = GetModuleHandleW(L"kiln-assets.dll");
     return module ? reinterpret_cast<ka::bootpack::Call>(GetProcAddress(module, ka::bootpack::kExport)) : nullptr;
 }
+ka::bootpack::Verdict assets_cooked_verdict() {
+    const HMODULE module = GetModuleHandleW(L"kiln-assets.dll");
+    return module ? reinterpret_cast<ka::bootpack::Verdict>(GetProcAddress(module, ka::bootpack::kVerdictExport)) : nullptr;
+}
 
 // One mod-relative file of the mod's folder (bodyadmit.h contained()), no link on the way, at most `max` bytes.
 bool read_mod_file(const std::string& dir, const std::string& file, size_t max, qb::Bytes* out, std::string* why) {
@@ -810,6 +814,9 @@ qb::bootpack::Backend pack_backend(const qb::GameData& game, kc::bootpack::Call 
                 return read_mod_file(dir, file, max, out, reason);
             };
             env.layout = &body_layout_ok;
+            if (const auto verdict = assets_cooked_verdict())
+                env.cooked = [verdict](const qb::Bytes& bytes) { return verdict(bytes.data(), bytes.size()); };
+            env.warn = [id = mod->id](const std::string& line) { KW("native: %s: %s", id.c_str(), line.c_str()); };
             if (client) env.materials = material_context(mod->dir);
             return qb::bodyadmit::admit(mod, env, assets, why);
         };

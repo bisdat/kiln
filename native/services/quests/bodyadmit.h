@@ -40,6 +40,11 @@ struct Env {
     std::function<bool(std::string* why)> layout;
     // Clients: kiln.vfx's material build report and kiln.assets' served resources (bodypack.h check_body_materials).
     BodyMaterialContext materials;
+    // kiln.assets' verdict on bytes of the mod's assets/cooked (its cook receipts and kiln.json "cooked", as for every cooked file):
+    // 0 load, 1 load although this game's cook did not make them ("warn"), 2 refuse ("local"). The body cache is one such file.
+    std::function<int(const Bytes& bytes)> cooked;
+    // A line for the log (a cache loaded under "warn").
+    std::function<void(const std::string& line)> warn;
 };
 
 // A mod-relative path the cooker may name: forward slashes, no empty, "." or ".." part, no drive or root.

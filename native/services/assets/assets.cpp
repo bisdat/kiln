@@ -1011,6 +1011,22 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL ka_boot_body_v1(KilnOwner owner, con
 
 static_assert(std::is_same_v<decltype(&ka_boot_body_v1), ka::bootpack::Call>, "bootpack_internal.h and the export agree");
 
+// 16f review3 S4: the NPC body cache is a cooked file: the same verdict as every file of a mod's assets/cooked.
+extern "C" KILN_EXPORT int KILN_CALL ka_cooked_verdict_v1(const void* data, size_t length) {
+    try {
+        if (!data && length) return 2;
+        switch (cooked_verdict(read_cook_trust(), data, length)) {
+        case CookedVerdict::Load: return 0;
+        case CookedVerdict::LoadUnmade: return 1;
+        default: return 2;
+        }
+    } catch (...) {
+        return 2;
+    }
+}
+
+static_assert(std::is_same_v<decltype(&ka_cooked_verdict_v1), ka::bootpack::Verdict>, "bootpack_internal.h and the export agree");
+
 extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api, KilnOwner owner, KilnPluginInfo* info) {
     if (api->abi_version != KILN_ABI_VERSION || api->size < sizeof(KilnApi)) return KILN_ERR_UNAVAILABLE;
     g_api = api;
