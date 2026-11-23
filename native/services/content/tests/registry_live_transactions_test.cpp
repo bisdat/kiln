@@ -154,6 +154,24 @@ void pass_read_excludes_own_layers() {
     mem<uint32_t>(WOOD_AT, 777); apply_registry_files(files); // another writer took the slot
     check(read("a") == 777, "a slot another writer took reads that writer's bytes");
 }
+// review2 S2: a worldLoad field written into a running world by a later point is applied and named: the save was read.
+void world_load_field_mid_world_is_named() {
+    fresh_live(); RegistryLiveReply reply;
+    const auto h = change(71, "a", "[{" + wood + R"("op":50}])", 4);
+    registry_live_commit(71, h, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Applied && at<uint32_t>(WOOD_AT) == 50, "the worldLoad field is still written");
+    check(reply.reason.find("items.maxStack applies at world load") != std::string::npos && reply.reason.find("next world load") != std::string::npos,
+          "the result says it takes full effect at the next world load");
+    registry_live_revert(71, h, &reply);
+    const auto now = change(72, "b", R"([{"registry":"items","select":"game:sword_t2","field":"manaCost","op":12}])", 4);
+    registry_live_commit(72, now, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Applied && reply.reason.empty(), "a field that applies now is not flagged");
+    registry_live_revert(72, now, &reply);
+    const auto w = change(73, "c", "[{" + wood + R"("op":60}])", 2);
+    registry_live_commit(73, w, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Applied && reply.reason.empty(), "the WorldLoad point's own world-load field is not flagged");
+    registry_live_revert(73, w, &reply);
+}
 // review4 NM1: two retained changes, one slot each, the write of one of them fails at a reapplication: only that one is charged.
 void multi_change_write_failure_is_attributed_per_change() {
     fresh_live(); RegistryLiveReply reply;
@@ -864,6 +882,7 @@ int main() {
         {"rejected_process_change_returns_next_world", rejected_process_change_returns_next_world},
         {"foreign_slot_keeps_the_rest_of_a_retained_change", foreign_slot_keeps_the_rest_of_a_retained_change},
         {"pass_read_excludes_own_layers", pass_read_excludes_own_layers},
+        {"world_load_field_mid_world_is_named", world_load_field_mid_world_is_named},
         {"entry_point_inexact_cost_drops_only_that_entry", entry_point_inexact_cost_drops_only_that_entry},
         {"entry_point_selector_refuses_per_entry", entry_point_selector_refuses_per_entry},
         {"selector_conflict_refuses_one_entry_at_entry_points", selector_conflict_refuses_one_entry_at_entry_points}};

@@ -1538,6 +1538,26 @@ uint32_t foreign_slots(const std::vector<uintptr_t>& slots) {
 }
 }
 
+namespace {
+// review2 S2: the worldLoad fields a change writes ("items.maxStack"), at most three, then a count.
+std::string world_load_fields(const LiveState::Change& change) {
+    std::set<std::string> names;
+    for (const auto& batch : change.batches)
+        for (const auto& edit : batch.edits) {
+            const auto* reg = g.in->schema->registry(edit.registry);
+            const auto* field = reg ? reg->field(edit.element.on ? edit.element.list : edit.field) : nullptr;
+            if (field && field->applies == registry::Applies::WorldLoad) names.insert(edit.registry + "." + field->name);
+        }
+    std::string out;
+    size_t n = 0;
+    for (const auto& name : names) {
+        if (n == 3) return out + " and " + std::to_string(names.size() - 3) + " more";
+        out += (n++ ? ", " : "") + name;
+    }
+    return out;
+}
+}  // namespace
+
 KilnResult registry_live_commit(KilnOwner owner, uint64_t handle, RegistryLiveReply* out) {
     if (g_transaction_active) return KILN_ERR_UNAVAILABLE;
     TransactionScope transaction;
@@ -1654,6 +1674,15 @@ KilnResult registry_live_commit(KilnOwner owner, uint64_t handle, RegistryLiveRe
                     queue_change_report();
                 } else {
                     reply.outcome = g.pending_tables.empty() ? RegistryLiveOutcome::Applied : RegistryLiveOutcome::PendingResource;
+                    // review2 S2: a worldLoad field is in place before a world's save is read. Written into a running world by
+                    // any point but WORLD_LOAD, it is applied now and named: its full effect starts at the next world load.
+                    if (change->point != KILN_REGISTRY_LIVE_WORLD_LOAD)
+                        if (const std::string late = world_load_fields(*change); !late.empty()) {
+                            const std::string note = late + " applies at world load: written now, in full effect from the next world load "
+                                                            "(this world's save was already read)";
+                            if (reply.reason.empty()) reply.reason = note;
+                            LOGI("registry (live): %s: live change %llu: %s", change->mod.c_str(), static_cast<unsigned long long>(handle), note.c_str());
+                        }
                 }
             }
         }

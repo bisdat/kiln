@@ -9,7 +9,9 @@
  * Entry points are declared by the caller: MOD_LOAD (process inputs, may wait for a world), WORLD_LOAD (world settings),
  * HOT_RELOAD (reloaded mod/config; world-scoped when a world exists), MANUAL (explicit runtime transaction).
  * GAME_START uses kiln.registry's existing add/alter/final stage, not this table. Later entry points never write restart
- * fields: they report RESTART_REQUIRED. WORLD_LOAD and MANUAL need a world. A world-bound draft cannot cross worlds.
+ * fields: they report RESTART_REQUIRED. A worldLoad field committed into a running world by any point but WORLD_LOAD is
+ * APPLIED and written, with a reason naming it: its full effect starts at the next world load (the save was already read).
+ * WORLD_LOAD and MANUAL need a world. A world-bound draft cannot cross worlds.
  * MOD_LOAD changes persist across worlds; other world-bound changes expire when that world stops. Settings-dependent
  * inputs belong only to WORLD_LOAD, HOT_RELOAD with a world, or MANUAL. Callers include settings/world/point identity
  * in their batch source. The managed context integration supplies that identity; there is no live-plan cache in v1.
