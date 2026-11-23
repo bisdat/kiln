@@ -323,8 +323,8 @@ internal static class PlayerStorageMirror
         public StorageMirrorEntry[] Built = [];
     }
 
-    // a player's pick rate (a token bucket), by player entity, kept apart from the views so that a view started over never
-    // refills the bucket
+    // a player's pick rate (a token bucket), by player entity (a slot + 1: bounded), kept apart from the views so that a
+    // view started over never refills the bucket
     private sealed class PickState(long now)
     {
         public double Tokens = PickBurst;
@@ -747,8 +747,8 @@ internal static class PlayerStorageMirror
         Backend.Current.Log(0, LogLevel.Info, $"player-storage: a pick of {m.Key} by {player} was not taken: {detail ?? reason}");
     }
 
-    // A rate whose bucket is full again is the rate of a player who never picked: it is not kept (players come and go, and
-    // a rejoin is a new entity).
+    // A rate whose bucket is full again is the rate of a player who never picked: it is not kept (players come and go; the
+    // next player in a slot, the same entity id, starts with a full bucket either way).
     private static void PruneRates(long now)
     {
         List<uint>? idle = null;
