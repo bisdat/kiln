@@ -27,12 +27,14 @@ pass in Python) and the descriptor is checked against the new code as the core w
 now reads other argument positions, or a descriptor the core would refuse, is listed in the report as
 "sig needs review: <symbol>: was [...], is [...]" (kilnctl copies the list into NEXT.txt). A review does not make the
 port incomplete: the symbol resolves, only its typed hooks and calls stay off (sig/<symbol>) until the descriptor is fixed.
-Must-port names (tools/sigport/must_port.json, must_port.py): a listed name the input definitions declare must resolve
-on the new exe at --min-confidence or better, also when the old exe did not resolve it; otherwise the port is
-incomplete. report.json has summary.must_port ({checked, not_declared, failed}), report.txt and stderr (also with
---quiet) a "must-port" line per failure, and the candidate record's sigport section the failures.
+Must-port names (tools/sigport/must_port.json, must_port.py): a fail-level name the input definitions declare must
+resolve on the new exe at --min-confidence or better, also when the old exe did not resolve it; otherwise the port is
+incomplete. A warn-level name that does not is a warning only: the port stays complete. report.json has
+summary.must_port ({checked, not_declared, failed, warned}), report.txt and stderr (also with --quiet) a "must-port"
+line per failure and a "warning: must-port" line per warning, and the candidate record's sigport section both
+(must_port, must_port_warn).
 Exit status: 0 every symbol and constant that resolved on the old exe is ported with confidence >= --min-confidence
-and every must-port name the definitions declare is ported; 1 some are missing or below it (see the report); 2 bad
+and every fail-level must-port name the definitions declare is ported; 1 some are missing or below it (see the report); 2 bad
 input (a malformed must-port list too).
 """
 import argparse
@@ -1115,7 +1117,8 @@ def main(argv=None):
                    + ("" if summary["defs_unchanged"] else f"; needs symbols.patch ({len(changed)} strategies)"))
     rec["sigport"] = {"from": old.sha, "report": str((out / "report.json").resolve()),
                       "defs_unchanged": summary["defs_unchanged"], "complete": summary["complete"],
-                      "low_confidence": low + clow, "lost": lost + clost, "must_port": must["failed"]}
+                      "low_confidence": low + clow, "lost": lost + clost, "must_port": must["failed"],
+                      "must_port_warn": must["warned"]}
     rec["features"] = {k: bool(v) for k, v in sorted(feats.items())}
     rec["symbols"] = {k: hex(v["rva"]) for k, v in sorted(syms.items()) if not k.startswith("@") and v.get("ok")}
     rec["constants"] = {k: hex(v["value"]) for k, v in sorted(consts.items()) if v.get("ok")}
@@ -1137,6 +1140,8 @@ def main(argv=None):
         log(f"WARNING: the written tree resolves differently for {mism}")
     for line in must["failed"]:
         print(f"sigport: {line}", file=sys.stderr)  # with --quiet too: this port must not be taken as complete
+    for line in must["warned"]:
+        print(f"sigport: warning: {line}", file=sys.stderr)  # with --quiet too; the port can still be complete
     print(out)
     return 0 if summary["complete"] else 1
 
@@ -1213,10 +1218,12 @@ def render_text(r):
     L.append(f"features  lost: {', '.join(s['features']['lost']) or '-'}")
     mp = s.get("must_port")
     if mp:
-        L.append(f"must-port {len(mp['checked']) - len(mp['failed'])}/{len(mp['checked'])} ported"
+        L.append(f"must-port {len(mp['checked']) - len(mp['failed']) - len(mp.get('warned', []))}/{len(mp['checked'])} ported"
                  + (f"; not in these definitions: {', '.join(mp['not_declared'])}" if mp["not_declared"] else ""))
         for line in mp["failed"]:
             L.append(f"          {line}")
+        for line in mp.get("warned", []):
+            L.append(f"          warning: {line}")
     L.append(f"patterns  {len(s['strategies_changed'])} strategies changed"
              + ("" if s["defs_unchanged"] else " (symbols.patch)") + f"; matcher {s['matcher']}")
     if s["fixed_constants_changed"]:

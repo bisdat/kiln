@@ -173,7 +173,8 @@ The process then exits with a code that says so; restarting gives the same stop,
 Since 0.2.0-dev.30.9 an admin tool (Kiln Web Admin, through Kiln.Admin's `server_restart`) can restart the server: a
 countdown in chat, a save, then the same stop as Ctrl-C. Whether the server comes back depends on what runs it:
 - **kilnctl's systemd unit** (`kiln@.service`): yes. `kilnctl run` exits 75 after such a stop, and the unit restarts the
-  server 15 s later. A unit of your own needs `Restart=on-failure` (or `always`) for that.
+  server 15 s later. A unit of your own needs `RestartForceExitStatus=75` for that, and `SuccessExitStatus=75` so it is
+  not counted as a failure (`Restart=on-failure` alone also restarts on 75, but marks each one failed).
 - **Anything else** (the Kiln Launcher, a hosting panel, a script): the server stops and exits 0, as after Ctrl-C. The
   admin tool says "restart: unknown" there and offers a stop instead. Start the server again from your host.
 

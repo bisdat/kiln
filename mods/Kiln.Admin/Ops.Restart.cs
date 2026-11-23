@@ -2,9 +2,9 @@
 // server_restart / server_restart_cancel (docs/kiln/launcher/admin-protocol.md section 8, "Restart"): a countdown in chat,
 // the world save, then the server's own stop, the one Ctrl-C starts (mods unload, the game saves and exits 0). Before
 // the stop Kiln.Admin writes kiln/data/kiln-admin/restart.json; `kilnctl run` reads it when the server has exited and
-// then exits 75 itself, which kiln@.service (Restart=on-failure) restarts. Elsewhere the server just stops:
-// restart.supported says "unknown" there. Never a hard kill: when the stop cannot be raised, the server keeps running
-// (saved) and the op's state says why.
+// then exits 75 itself, which kiln@.service restarts (RestartForceExitStatus=75; SuccessExitStatus=75 keeps it a clean
+// exit). Elsewhere the server just stops: restart.supported says "unknown" there. Never a hard kill: when the stop
+// cannot be raised, the server keeps running (saved) and the op's state says why.
 using System.Runtime.InteropServices;
 using System.Text.Json.Nodes;
 
@@ -14,8 +14,8 @@ namespace Kiln.Admin;
 /// <c>KILN_RESTART=kilnctl</c> when it is a systemd unit's main process (kiln@.service restarts on its exit code 75).</summary>
 internal sealed record RestartSupport(bool Supported, string? Via, string? RunId)
 {
-    /// <summary>What `kilnctl run` exits with after a requested restart (EX_TEMPFAIL; not one of kiln@.service's
-    /// RestartPreventExitStatus 1 2 3).</summary>
+    /// <summary>What `kilnctl run` exits with after a requested restart (EX_TEMPFAIL; kiln@.service's
+    /// SuccessExitStatus=75 and RestartForceExitStatus=75).</summary>
     public const int KilnctlExitCode = 75;
 
     public static RestartSupport Detect(Func<string, string?> env)

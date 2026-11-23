@@ -347,9 +347,9 @@ comes back depends on what runs it:
   when it is the unit's main process, `KILN_RESTART=kilnctl`. Kiln.Admin then reports `restart.supported:
   "supported"`, `via: "kilnctl"`, `code: 75`. After the server has exited, `kilnctl run` reads
   `kiln/data/kiln-admin/restart.json`, deletes it, and exits **75** (EX_TEMPFAIL) when the marker is this run's (same
-  `runId`, written after the run started) and the server exited 0. The unit's `Restart=on-failure` starts it again
-  after `RestartSec` (15 s); 75 is not in `RestartPreventExitStatus=1 2 3`. Restarts count toward the unit's start
-  limit (5 in 10 minutes).
+  `runId`, written after the run started) and the server exited 0. The unit counts 75 as a clean exit
+  (`SuccessExitStatus=75`: no failed state) and starts the server again after `RestartSec` (15 s) anyway
+  (`RestartForceExitStatus=75`). Restarts count toward the unit's start limit (5 in 10 minutes).
 - **Everything else** (the Kiln Launcher's own starts, `kilnctl start` without systemd, hosting panels, a plain
   Windows server): `supported: "unknown"`. The op then stops the server and nothing known brings it back; a panel
   should offer "Stop" with a hint instead of "Restart". The game process itself exits 0, as after any Ctrl-C.

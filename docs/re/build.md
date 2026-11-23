@@ -519,7 +519,9 @@ save's does not resolve (a game update broke its pattern), Kiln cannot tell the 
 gets the boxes, as up to 0.2.0-dev.30.8; when only the base-zone or base-query one does not, the world save alone still
 gets them. kiln.build's start then logs a warning naming the missing names, and its kiln.caps row
 `build.persist_callers` names them too (unavailable, `symbol-missing`, when every caller gets the boxes). The three
-names are on sigport's must-port list (`tools/sigport/must_port.json`). Entries that cannot be read, bounds that are
+names are on sigport's must-port list (`tools/sigport/must_port.json`): a re-port or check that loses
+`build/RetSaveRegionsWorldSave` fails, one that loses the base-zone or base-query name only warns (the build can
+still be verified). Entries that cannot be read, bounds that are
 not finite or have min > max, or a list with more than 256 entries or count > capacity: boxes for every kept chunk.
 The chunk JSON is never filtered. Up to 0.2.0-dev.30.8 every caller got a box for every kept chunk: Kiln's boxes were ECS base zones (stations,
 storage and beds grouped by them, clients sent them) and Flame Altars in the world list.

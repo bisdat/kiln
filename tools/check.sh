@@ -8,7 +8,8 @@
 #           in <Assembly>)" line (a type moved, recorded by <Assembly>), and no merge conflict marker in a PublicAPI file
 #   records tools/sigport/build_record.py check: the newest build record of each side lists every name sigdb declares,
 #           once, with a level (sigdb/builds/README.md), and resolves every must-port name (tools/sigport/must_port.json);
-#           a sigdb name added without a refresh, or a must-port name dropped or unresolved, fails here
+#           a sigdb name added without a refresh, or a fail-level must-port name dropped or unresolved, fails here (a
+#           warn-level one only prints a warning)
 #   drift   tools/docs-site/drift.py: the skill and docs/kiln against the code, no build needed (a second or two): every
 #           `Type.Member` they name is public API (inherited and C# 14 extension members count; tools/docs-site/drift-allow.txt
 #           lists the false positives, a reason each), no "since 0.2.0-dev.N" claim is earlier than managed/api-history.tsv's

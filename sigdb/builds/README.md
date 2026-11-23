@@ -106,7 +106,7 @@ python3 tools/sigport/must_port.py check [server] [client]                      
   (an `unresolved` name with its reason). It names every missing, extra or misplaced name and exits 1. Every name on
   sigport's must-port list (`tools/sigport/must_port.json`, [sigport.md](../../docs/kiln/sigport.md#must-port-names))
   must also still be declared and resolve on that record: a dropped or `unresolved` one is a `must-port` line and
-  exit 1, also when the record was refreshed to match. Older records are reported as superseded and not checked. `tools/sigport/tests/test_build_record.py` runs it on the repository,
+  exit 1, also when the record was refreshed to match (a `warn`-level name only gets a `warning: must-port` line). Older records are reported as superseded and not checked. `tools/sigport/tests/test_build_record.py` runs it on the repository,
   so a sigdb name added without a refresh fails the tests.
 
 ### How a level moves from `static` to `lab`

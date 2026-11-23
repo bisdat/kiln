@@ -118,29 +118,33 @@ patched in place, with and without a verified build record.
 
 ## Must-port names
 Some names Kiln can lose only at a cost players see: without them a service falls back to something worse rather than
-switching a feature off. `tools/sigport/must_port.json` lists them, and the re-port and check flow fails on one that
-is dropped or does not resolve, instead of carrying on. The first three are kiln.build's save-region callers
-(`build/RetSaveRegionsWorldSave`, `build/RetSaveRegionsBaseZones`, `build/RetSaveRegionsBaseQuery`; without the
-first, every caller gets Kiln's save boxes, [build.md](services/build.md#limits)).
+switching a feature off. `tools/sigport/must_port.json` lists them, each with a level. A `fail` name (the default)
+that is dropped or does not resolve stops the re-port and check flow instead of carrying on. A `warn` name only gets
+a clear warning line (`warning: must-port ... (warning only)`): the check passes and the port stays complete, so the
+build can still be verified. The first three are kiln.build's save-region callers: `build/RetSaveRegionsWorldSave`
+(fail: without it every caller gets Kiln's save boxes, [build.md](services/build.md#limits)), and
+`build/RetSaveRegionsBaseZones` and `build/RetSaveRegionsBaseQuery` (warn: without them kiln.build warns at every
+start, and the world save alone still gets the boxes; since 0.2.0-dev.30.9).
 
-| Where | What fails |
-|---|---|
-| `port.py` | a listed name the input definitions declare that does not resolve on the new exe, or only below `--min-confidence` (also when the old exe did not resolve it): the port is incomplete (exit 1, so `kilnctl update` does not mark the build). `report.json` has `summary.must_port` (`checked`, `not_declared`, `failed`), `report.txt` a `must-port` line, the candidate record `sigport.must_port`, and stderr each failure, also with `--quiet`. A listed name the input definitions do not declare (an older Kiln's) is only listed under `not_declared` |
-| `build_record.py check` | sigdb no longer declares a listed name of the side, or the side's newest build record does not resolve it (its level is `unresolved`, or it is not in the record): a `must-port` line with the reason and exit 1. A refresh that drops the name from sigdb and the record together still fails here |
-| `must_port.py check [server] [client]` | the same check for the listed names alone |
-| `sigdb_check.py` | a listed name the definitions declare that the exe does not resolve gets a `FAIL  must-port` line (the check fails, exit 1, as for any unresolved name; a listed feature that is off fails it too). A mod's own fragment declares none of Kiln's names and is not affected |
+| Where | What fails (a `fail` name) | A `warn` name |
+|---|---|---|
+| `port.py` | a listed name the input definitions declare that does not resolve on the new exe, or only below `--min-confidence` (also when the old exe did not resolve it): the port is incomplete (exit 1, so `kilnctl update` does not mark the build). `report.json` has `summary.must_port` (`checked`, `not_declared`, `failed`, `warned`), `report.txt` a `must-port` line, the candidate record `sigport.must_port`, and stderr each failure, also with `--quiet`. A listed name the input definitions do not declare (an older Kiln's) is only listed under `not_declared` | under `warned`, a `warning: must-port` line in `report.txt` and on stderr (also with `--quiet`), the candidate record's `sigport.must_port_warn`; the port stays complete. kilnctl prints it and puts it in `NEXT.txt`, and can still mark the build |
+| `build_record.py check` | sigdb no longer declares a listed name of the side, or the side's newest build record does not resolve it (its level is `unresolved`, or it is not in the record): a `must-port` line with the reason and exit 1. A refresh that drops the name from sigdb and the record together still fails here | a `warning: must-port` line under the side's `ok` line, exit 0 |
+| `must_port.py check [server] [client]` | the same check for the listed names alone | the same |
+| `sigdb_check.py` | a listed name the definitions declare that the exe does not resolve gets a `FAIL  must-port` line (the check fails, exit 1, as for any unresolved name; a listed feature that is off fails it too). A mod's own fragment declares none of Kiln's names and is not affected | a `WARN  must-port` line; nothing more fails (an unresolved symbol still fails `sigdb_check.py`, as every unresolved name does) |
 
 Each line names the name and what Kiln falls back to without it. Add a name with an entry at the end of `names`:
 
 ```json
-{ "name": "build/RetSaveRegionsWorldSave", "section": "symbols", "sides": ["server", "client"],
+{ "name": "build/RetSaveRegionsWorldSave", "section": "symbols", "sides": ["server", "client"], "level": "fail",
   "why": "kiln.build: ... what Kiln falls back to without it" }
 ```
 
-`section` is `symbols` (the default), `constants` or `features`; `sides` defaults to both. `load()` refuses an
-entry without `why`, with an unknown section or side, or listed twice (exit 2 in each tool). Tests:
+`section` is `symbols` (the default), `constants` or `features`; `sides` defaults to both; `level` is `fail` (the
+default) or `warn`. `load()` refuses an entry without `why`, with an unknown section, side or level, or listed twice
+(exit 2 in each tool). Tests:
 `tools/sigport/tests/test_must_port.py` (a fixture sigdb with a listed name dropped, one that does not resolve, ports
-that lose one, and the repository's own records).
+that lose one, warn-level names in each tool, and the repository's own records).
 
 ## How it works
 ### 1. Function features (`exeinfo.py`, cached per exe sha in `~/.cache/kiln/sigport/`)
