@@ -223,3 +223,8 @@ Kiln.TestKit.HarnessUiNativeTints
 Kiln.TestKit.HarnessUiNativeTints.HarnessUiNativeTints(Kiln.TestKit.KilnHarness! harness) -> void
 Kiln.TestKit.HarnessUiNativeTints.TintOf(Kiln.TestKit.FakeInventorySlot slot, Kiln.Color background) -> Kiln.Color
 Kiln.TestKit.KilnHarness.UiNativeTints.get -> Kiln.TestKit.HarnessUiNativeTints!
+Kiln.TestKit.HarnessUiChest
+Kiln.TestKit.HarnessUiChest.HarnessUiChest(Kiln.TestKit.KilnHarness! harness) -> void
+Kiln.TestKit.HarnessUiChest.Buttons.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Kiln.TestKit.HarnessUiChest.Press(int index) -> bool
+Kiln.TestKit.KilnHarness.UiChest.get -> Kiln.TestKit.HarnessUiChest!

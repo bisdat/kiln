@@ -34,6 +34,7 @@
 #include "services/kiln_ui_item_detail.h"
 #include "services/kiln_ui_slots.h"
 #include "services/kiln_ui_tints.h"
+#include "services/kiln_ui_chest.h"
 #include "services/kiln_ui_values.h"
 
 namespace kiln::uivalues {
@@ -53,7 +54,7 @@ inline constexpr double kNewStringsPerSecond = 64;  // per mod
 inline constexpr double kNewStringsBurst = 128;
 
 // Registration lists: the value kinds (KilnUiValueKind), then these.
-enum : uint32_t { kListLines = kValueKinds, kListSlots, kListChanges, kListGemForge, kListValues, kListClicks, kListTints, kLists };
+enum : uint32_t { kListLines = kValueKinds, kListSlots, kListChanges, kListGemForge, kListValues, kListClicks, kListTints, kListChest, kLists };
 
 // The capability row of a list ("ui.values.hud" for the three HUD kinds).
 const char* row_of(uint32_t list);
@@ -64,6 +65,7 @@ struct ClientNow {
     uint64_t session = 0;       // client worlds since boot
     uint64_t step = 0;          // client-world steps since boot
 };
+namespace text { struct GameText; }
 struct Env {
     std::string (*owner_name)(KilnOwner) = nullptr;  // the stable mod id ("mod:<id>", "native:<id>")
     bool (*owner_alive)(KilnOwner) = nullptr;
@@ -123,8 +125,11 @@ struct Env {
     // completed UI frame; 0 = none, an older kiln.ui, the constant not resolved).
     uint32_t (*screen_target)() = nullptr;
     bool (*call_tint)(KilnUiTintFn, const KilnUiItemView*, uint32_t*, void*, KilnResult*) = nullptr;
+    bool (*draw_chest)(uintptr_t, const text::GameText*, bool*) = nullptr;
+    bool (*call_chest)(KilnUiChestFn, const KilnUiChestPress*, void*, KilnResult*) = nullptr;
 };
 const KilnUiTintsApi* tints_table();
+const KilnUiChestApi* chest_table();
 Env& env();
 void logf(int level, const char* fmt, ...);
 
@@ -138,6 +143,7 @@ struct Provider {
     uint32_t flags = 0;  // lines: KilnUiNativeLinesFlags (tooltip_lines_native)
     void* fn = nullptr;
     void* user = nullptr;
+    KilnUiTextId label = 0; // permanent native chest caption, set before publication
     uint64_t seq = 0;  // accepted registration order
     std::atomic<bool> live{true};
     std::atomic<uint32_t> faults{0};   // consecutive
@@ -148,7 +154,7 @@ using ProviderList = std::vector<std::shared_ptr<Provider>>;
 // Adds a registration after the caller checked the arguments. KILN_OK with out->ok = 0 and KUI_REGISTRATION_BUDGET
 // when the mod holds 128; KILN_ERR_REVOKED for a retired owner.
 KilnResult add(KilnOwner owner, uint32_t list, uint32_t item, void* fn, void* user, KilnUiRegistration* out,
-               uint32_t flags = 0);
+               uint32_t flags = 0, std::string_view caption = {});
 KilnResult remove(KilnHandle h);
 // The live providers of a list in registration order, as one immutable snapshot (changes made while a dispatch holds
 // it apply to the next one). Never null.

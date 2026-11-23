@@ -28,7 +28,7 @@ internal static unsafe class UiCaps
     [
         "ui.values.detail", "ui.values.slot", "ui.values.held", "ui.values.hud", "ui.values.tooltip_lines",
         "ui.slots.inspect", "ui.gemforge.inspect", "ui.gemforge.sources", "ui.tooltip.lines", "ui.tooltip.values", "ui.slots.click",
-        "ui.inventory.panels", "ui.slots.tint",
+        "ui.inventory.panels", "ui.slots.tint", "ui.chest.buttons",
     ];
 
     internal static readonly ServiceCapRows Rows = new(Service, Report);
@@ -57,6 +57,8 @@ internal static unsafe class UiCaps
                 "kiln.ui.inventory has no screen_view (v2: an older kiln-core)");
         if (UiItemDetailNative.T == null)
             ServiceCaps.LowerOff(Ui.Values.ItemDetailCapability, CapabilityReason.ServiceOlder, "kiln.ui.item_detail is not available");
+        if (UiNativeChest.T == null)
+            ServiceCaps.LowerOff(Ui.Inventory.ChestButtonCapability, CapabilityReason.ServiceOlder, "kiln.ui.chest is not available");
         if (UiNativeTints.T == null)
             ServiceCaps.LowerOff(Ui.Inventory.TintCapability, CapabilityReason.ServiceOlder, "kiln.ui.tints is not available");
         // Collected lines have one production consumer: the overlay's Item details window.

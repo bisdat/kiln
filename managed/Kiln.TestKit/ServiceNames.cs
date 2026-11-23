@@ -77,6 +77,7 @@ internal static class ServiceNames
         "kiln.types",
         "kiln.ui",
         "kiln.ui.blocks",
+        "kiln.ui.chest",
         "kiln.ui.inventory",
         "kiln.ui.item_detail",
         "kiln.ui.slots",

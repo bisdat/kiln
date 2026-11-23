@@ -1593,3 +1593,22 @@ using var tint = Ui.Inventory.TintWhen(slot =>
 Five consecutive exceptions remove a rule; registration shares the 128-per-mod ui.values budget.
 An unmeasured game layout, missing signature or hook failure throws `KilnUnavailableException`;
 a full registration budget throws `InvalidOperationException`, as the existing slot subscriptions do.
+
+## Native chest-row buttons (since 0.2.17)
+`Ui.Inventory.AddChestButton(caption, handler)` puts a game-drawn entry in a storage chest's own action
+row. It is not an overlay panel, and does not borrow or simulate any vanilla input action. The game's
+entry renderer handles its drawing, input and focus. Registration/disposal work on any thread; the callback
+runs on the game UI thread after the chest builder returns. The `InventoryScreen.Container` is read from
+the current chest, not a cached screen from a previous frame. Send it to a server half which validates
+permissions and distance before acting: a client button is a wish, never authority.
+```csharp
+using var button = Ui.Inventory.AddChestButton("Count chest", screen =>
+    channel.SendToServer(new CountChestRequest(screen.Container.Value)));
+```
+Capability `ui.chest.buttons`, independent native table `kiln.ui.chest` v1. There are four active buttons
+total; captions must be unique among them and contain 1..128 UTF-8 bytes without NUL. They are literal text:
+dispose/re-register to change the caption or localize it. Registrations also share ui.values' 128/mod limit,
+and captions use its bounded permanent text store. A budget/duplicate refusal throws `InvalidOperationException`;
+missing capability/layout/hooks throw `KilnUnavailableException`. Unload or five consecutive callback faults
+removes a button. Commerce and factory screens, an unknown chest target, or a missing client session draw no
+mod button. Actual row sizing, visual placement and controller navigation remain unverified in-game.

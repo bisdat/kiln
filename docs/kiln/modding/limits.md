@@ -180,3 +180,10 @@ From real-client test records. "Now" says what the tree does today.
 ui.values' 128 registrations per mod, run in registration order on the game UI thread and stop after five
 consecutive faults. No overlay or gameplay/network write; rarity, focus, icon and colour strength stay vanilla.
 Nested slot rendering passes through unchanged. Disposal/retirement stops future calls; an in-flight call may finish.
+
+### Native chest buttons (since 0.2.17)
+`ui.chest.buttons`: four active buttons total, captions unique among them, 1..128 UTF-8 bytes without NUL.
+Registrations share ui.values' 128/mod budget; captions share its permanent text-store budgets. Storage-chest
+screen only (not commerce/factory), known target and active client session required. Callbacks run after the
+chest builder on the UI thread; five consecutive faults remove a button. No vanilla input action or gameplay
+state is written. Placement and native focus/navigation have not been observed in-game.

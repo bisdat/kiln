@@ -93,6 +93,20 @@ public sealed class SlotMarksMod : Mod
         }
         try
         {
+            // Since 0.2.17: a game-drawn button in the chest's own row. The server still validates the wish.
+            _subs.Add(Ui.Inventory.AddChestButton("Count chest", screen =>
+            {
+                _chestLine = "asking the server...";
+                if (_ch is null || !_ch.SendToServer(new ChestCountRequest(screen.Container.Value)))
+                    _chestLine = "not connected to a server with slotmarks";
+            }));
+        }
+        catch (Exception e) when (e is KilnUnavailableException or InvalidOperationException)
+        {
+            Log.Info($"slotmarks: no native chest button here: {e.Message}");
+        }
+        try
+        {
             _subs.Add(Ui.Inventory.AddPanel(UiText.Of(("en", "Slot marks"), ("de", "Slot-Markierungen")), DrawChestPanel,
                 new InventoryPanelOptions { Screens = InventoryScreens.Chest, Width = 240 }));
             Ui.Inventory.ScreenChanged += OnScreenChanged;  // removed with the mod

@@ -30,6 +30,7 @@
 #include "../src/services/ui_values_inventory.cpp"
 #include "../src/services/ui_item_detail.cpp"
 #include "../src/services/ui_native_tints.cpp"
+#include "../src/services/ui_native_chest.cpp"
 
 using namespace kiln::uivalues;
 
@@ -3000,6 +3001,7 @@ void write_layout_validation() {
 #include "ui_values_tooltip_test.inc"
 #include "ui_item_detail_test.inc"
 #include "ui_native_tints_test.inc"
+#include "ui_native_chest_test.inc"
 #include "ui_slot_subscription_compat_test.inc"
 }  // namespace
 
@@ -3056,6 +3058,7 @@ int main() {
     tooltip_tests();
     item_detail_tests();
     native_tints_tests();
+    native_chest_tests();
     slot_subscription_compat_tests();
     std::printf(g_fail ? "%d FAILED\n" : "all passed\n", g_fail);
     return g_fail ? 1 : 0;

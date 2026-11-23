@@ -160,6 +160,24 @@ bool call_slots(KilnUiSlotsFn fn, const KilnUiSlotsFrame* f, const KilnUiVisible
         return false;
     }
 }
+bool draw_chest(uintptr_t entry, const text::GameText* caption, bool* pressed) {
+    crash::Capture cap{}; unsigned long code = 0;
+    __try {
+        using Fn = bool (*)(const text::GameText*, uint8_t, uint8_t);
+        *pressed = reinterpret_cast<Fn>(entry)(caption, 1, 0);
+        return true;
+    } __except (crash::filter(GetExceptionInformation(), &cap, &code)) {
+        crash::report(cap, "native chest entry renderer", reinterpret_cast<const void*>(entry)); return false;
+    }
+}
+bool call_chest(KilnUiChestFn fn, const KilnUiChestPress* press, void* user, KilnResult* rc) {
+    crash::Capture cap{}; unsigned long code = 0;
+    __try { *rc = fn(press, user); return true; }
+    __except (crash::filter(GetExceptionInformation(), &cap, &code)) {
+        crash::report(cap, "native chest button callback", reinterpret_cast<const void*>(fn)); return false;
+    }
+}
+
 bool call_tint(KilnUiTintFn fn, const KilnUiItemView* v, uint32_t* rgba, void* user, KilnResult* rc) {
     crash::Capture cap{};
     unsigned long code = 0;
@@ -413,6 +431,8 @@ void wire() {
     e.call_slots = &call_slots;
     e.call_slots_v2 = &call_slots_v2;
     e.call_tint = &call_tint;
+    e.draw_chest = &draw_chest;
+    e.call_chest = &call_chest;
     e.call_lines = &call_lines;
     e.call_gemforge = &call_gemforge;
     e.gemforge_abi = &gemforge_contract;
@@ -459,7 +479,7 @@ bool init() {
                                             "ui.values.hud",    "ui.values.tooltip_lines", "ui.slots.inspect",
                                             "ui.gemforge.inspect", "gems.sockets", "ui.gemforge.sources",
                                             "ui.tooltip.lines", "ui.tooltip.values", "ui.slots.click",
-                                            "ui.inventory.panels", "ui.slots.tint"};
+                                            "ui.inventory.panels", "ui.slots.tint", "ui.chest.buttons"};
     if (!env().layout_supported())
         for (uint32_t k = 0; k < kLists; ++k)
             if (row_of(k)) disable_kind(k, "private UI layout is not measured for this client image");
@@ -497,3 +517,5 @@ KILN_SERVICE(ui_item_detail, KILN_UI_ITEM_DETAIL_SERVICE, KILN_UI_ITEM_DETAIL_VE
 KILN_SERVICE(ui_slots, KILN_UI_SLOTS_SERVICE, KILN_UI_SLOTS_VERSION, kiln::uivalues::slots_table(), &inventory_init);
 
 KILN_SERVICE(ui_tints, KILN_UI_TINTS_SERVICE, KILN_UI_TINTS_VERSION, kiln::uivalues::tints_table(), &inventory_init);
+
+KILN_SERVICE(ui_chest, KILN_UI_CHEST_SERVICE, KILN_UI_CHEST_VERSION, kiln::uivalues::chest_table(), &inventory_init);
