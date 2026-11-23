@@ -13,7 +13,9 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
+#include <cmath>
 #include <cstdlib>
 #include <mutex>
 #include <vector>
@@ -38,6 +40,74 @@ struct Box {
     int32_t lo[3], hi[3];  // chunk coordinates, inclusive
 };
 
+// Diagnostic geometry, deliberately separate from the serializer. The game saves complete 16 m
+// store chunks that touch a region, not just the terrain cells inside its AABB.
+struct RegionBounds {
+    float lo[3], hi[3];
+};
+struct RegionCoverage {
+    size_t overlaps_base = 0;
+    size_t outside_bases = 0;
+};
+bool valid_region(const RegionBounds& b) {
+    for (int axis = 0; axis < 3; ++axis)
+        if (!std::isfinite(b.lo[axis]) || !std::isfinite(b.hi[axis]) || b.lo[axis] > b.hi[axis])
+            return false;
+    return true;
+}
+bool chunk_touches_region(const std::array<int32_t, 3>& chunk, const RegionBounds& region) {
+    if (!valid_region(region)) return false;
+    constexpr double metres_per_chunk = 0.5 * kChunk;
+    for (int axis = 0; axis < 3; ++axis) {
+        const double lo = static_cast<double>(chunk[axis]) * metres_per_chunk;
+        const double hi = lo + metres_per_chunk;
+        if (hi < region.lo[axis] || lo > region.hi[axis]) return false;
+    }
+    return true;
+}
+// Only exclude chunks already included in the game's native save coverage. Do NOT remove
+// them from g_chunks/regions JSON: an altar can be moved, shrunk, or removed later.
+using ChunkSet = std::set<std::array<int32_t, 3>>;
+ChunkSet chunks_outside_regions(const ChunkSet& chunks, const std::vector<RegionBounds>& native) {
+    ChunkSet outside;
+    for (const auto& chunk : chunks) {
+        if (!std::any_of(native.begin(), native.end(),
+                         [&](const RegionBounds& b) { return chunk_touches_region(chunk, b); }))
+            outside.insert(chunk);
+    }
+    return outside;
+}
+RegionCoverage classify_chunks(const ChunkSet& chunks, const std::vector<RegionBounds>& native) {
+    const auto outside = chunks_outside_regions(chunks, native);
+    return {chunks.size() - outside.size(), outside.size()};
+}
+
+// The game presents 40 m altar save bounds briefly before restoring the actual 120 m
+// zone on world load. In the opt-in test mode ONLY, wait for stable original bounds
+// before augmenting the serializer; otherwise the startup snapshot can create extras.
+struct NativeRegionStability {
+    std::vector<RegionBounds> previous;
+    std::chrono::steady_clock::time_point since{};
+    size_t observations = 0;
+    void reset() { previous.clear(); since = {}; observations = 0; }
+    bool observe(const std::vector<RegionBounds>& current, std::chrono::steady_clock::time_point now,
+                 std::chrono::milliseconds settle = std::chrono::milliseconds(1500)) {
+        bool same = observations && previous.size() == current.size();
+        if (same) for (size_t i = 0; i < current.size(); ++i)
+            for (int a = 0; a < 3; ++a)
+                if (previous[i].lo[a] != current[i].lo[a] || previous[i].hi[a] != current[i].hi[a])
+                    same = false;
+        if (!same) {
+            previous = current;
+            since = now;
+            observations = 1;
+            return false;
+        }
+        ++observations;
+        return observations >= 2 && now - since >= settle;
+    }
+}
+
 #ifndef KILN_REGIONS_HOST_TEST
 kiln::RawHook g_hook;
 #endif
@@ -50,6 +120,9 @@ std::filesystem::path g_dir;                 // kiln/data/kiln.build/regions
 std::vector<Box> g_boxes;   // boxes over g_chunks, recomputed when the set changes
 bool g_boxes_stale = true;
 size_t g_last_logged = ~size_t{0};
+std::string g_last_probe_signature;
+std::string g_last_filter_signature;
+NativeRegionStability g_native_stability;
 std::filesystem::path g_file;
 #ifndef KILN_REGIONS_HOST_TEST
 const KilnSavesApi* g_saves = nullptr;
@@ -137,6 +210,9 @@ void close_locked() {
     g_boxes.clear();
     g_boxes_stale = true;
     g_last_logged = ~size_t{0};
+    g_last_probe_signature.clear();
+    g_last_filter_signature.clear();
+    g_native_stability.reset();
 }
 
 void KILN_CALL on_world(const KilnWorldEvent* ev, void*) {
@@ -170,13 +246,16 @@ void load_locked() {
     g_dirty = g_chunks.size() != loaded;
     g_boxes_stale = true;
     g_last_logged = ~size_t{0};
+    g_last_probe_signature.clear();
+    g_last_filter_signature.clear();
+    g_native_stability.reset();
     KB_I("save regions: %zu chunk(s) kept for world %s (%s)", loaded, w.c_str(), reinterpret_cast<const char*>(g_file.u8string().c_str()));
 }
 
 // Greedy boxes over the chunk set: runs along x, merged across z when equal, then across y.
-std::vector<Box> boxes_locked() {
+std::vector<Box> boxes_for_chunks(const ChunkSet& chunks) {
     std::map<std::pair<int32_t, int32_t>, std::vector<int32_t>> rows;  // (y, z) -> sorted x
-    for (const auto& c : g_chunks) rows[{c[1], c[2]}].push_back(c[0]);
+    for (const auto& c : chunks) rows[{c[1], c[2]}].push_back(c[0]);
     std::vector<Box> runs;
     for (auto& [yz, xs] : rows) {
         std::sort(xs.begin(), xs.end());
@@ -229,6 +308,7 @@ std::vector<Box> boxes_locked() {
     }
     return runs;
 }
+std::vector<Box> boxes_locked() { return boxes_for_chunks(g_chunks); }
 
 #ifndef KILN_REGIONS_HOST_TEST
 struct GameArray {
@@ -237,6 +317,35 @@ struct GameArray {
     uint64_t capacity;
     bool (*grow)(GameArray*, int64_t, uint8_t);
 };
+
+// Opt-in read-only probe: create kiln/data/kiln.build/regions/diagnose-regions.
+// No save-region decisions change when this probe is enabled.
+bool region_probe_enabled() {
+    std::error_code ec;
+    return !g_dir.empty() && std::filesystem::exists(g_dir / "diagnose-regions", ec);
+}
+// Fail closed for EVERY world except the explicit disposable-world GUID in the
+// marker contents. No marker => byte-for-byte legacy append behaviour.
+bool region_filter_enabled(const std::string& world) {
+    if (g_dir.empty() || world.empty()) return false;
+    std::ifstream f(g_dir / "overlap-filter-world");
+    std::string permitted;
+    return f && static_cast<bool>(std::getline(f, permitted)) && permitted == world;
+}
+bool capture_original_regions(const GameArray* a, std::vector<RegionBounds>& out) {
+    // Never dereference an arbitrary or implausibly sized game array.
+    if (!a || a->count > 256 || a->count > a->capacity || (a->count && !a->data)) return false;
+    out.reserve(static_cast<size_t>(a->count));
+    for (uint64_t i = 0; i < a->count; ++i) {
+        const uint8_t* entry = a->data + i * 0x30;
+        RegionBounds b{};
+        if (!seh_copy(b.lo, entry + 0x10, sizeof b.lo) ||
+            !seh_copy(b.hi, entry + 0x20, sizeof b.hi) ||
+            !valid_region(b)) return false;
+        out.push_back(b);
+    }
+    return true;
+}
 
 // Appends one region; false when the array cannot grow.
 bool append(GameArray* a, const Box& b, uint32_t index) {
@@ -283,32 +392,68 @@ bool seh_append(HookCtx* c) {
 uint8_t* __fastcall hk_save_regions(uint8_t* result, GameArray* list, uintptr_t zones) {
     uint8_t* r = g_hook.call<uint8_t*>(result, list, zones);
     g_saves_seen.fetch_add(1, std::memory_order_relaxed);
-    // the voxel serializer runs next, from this list; transient cells are on disk already (journaled before their
-    // commit): this only compacts the journal
     try {
         transient_before_save();
     } catch (...) {
     }
     if (!regions_lifecycle_safe() || !F.persist) return r;
-    if (!r || r[0] != 0 || !list) return r;  // the game failed itself: leave it alone
+    if (!r || r[0] != 0 || !list) return r;
+
+    const uint64_t before = list->count;
+    const bool diagnose = region_probe_enabled();
+    bool filter = false;
+    size_t kept = 0;
+    std::string world;
+    ChunkSet retained;
     std::vector<Box> boxes;
     try {
         std::lock_guard lock(g_mu);
         load_locked();
         if (g_world.empty() || g_chunks.empty()) return r;
+        world = g_world;
+        kept = g_chunks.size();
+        filter = region_filter_enabled(world);
         if (g_boxes_stale) {
             g_boxes = boxes_locked();
             g_boxes_stale = false;
         }
         boxes = g_boxes;
+        if (filter || diagnose) retained = g_chunks;
         if (g_dirty) save_locked();
     } catch (...) {
-        return r;  // nothing may escape into the game's save
+        return r;
     }
+
+    std::vector<RegionBounds> native;
+    const bool native_read = (filter || diagnose) && capture_original_regions(list, native);
+    RegionCoverage coverage{};
+    if (native_read) coverage = classify_chunks(retained, native);
+
+    const char* filter_state = "off";
+    if (filter) {
+        if (!native_read) {
+            filter_state = "fallback";  // never drop extra coverage on a failed native read
+        } else {
+            bool stable = false;
+            {
+                std::lock_guard lock(g_mu);
+                // World-stop/host switching can interleave; never use another world's state.
+                if (g_world != world) return r;
+                stable = g_native_stability.observe(native, std::chrono::steady_clock::now());
+            }
+            if (!stable) {
+                filter_state = "settling";
+                boxes.clear();  // during world startup: no synthetic "altar" save entries
+            } else {
+                filter_state = "active";
+                boxes = boxes_for_chunks(chunks_outside_regions(retained, native));
+            }
+        }
+    }
+
     HookCtx c{list, &boxes, 0};
-    const uint64_t before = list->count;
-    if (!seh_append(&c)) {
-        list->count = before;  // never hand the game a half-written entry
+    if (!boxes.empty() && !seh_append(&c)) {
+        list->count = before;
         KB_E("save regions: appending faulted; this save keeps only the game's own regions");
         return r;
     }
@@ -316,11 +461,61 @@ uint8_t* __fastcall hk_save_regions(uint8_t* result, GameArray* list, uintptr_t 
     if (c.added != g_last_logged) {
         g_last_logged = c.added;
         KB_I("save regions: the game's save now writes %u Kiln box(es) (%zu chunk(s)) after its %llu base region(s)",
-             c.added, g_chunks.size(), static_cast<unsigned long long>(before));
+             c.added, kept, static_cast<unsigned long long>(before));
+    }
+
+    if (filter) {
+        const std::string signature = world + "/" + filter_state + "/" + std::to_string(before) +
+            "/" + std::to_string(kept) + "/" + std::to_string(coverage.overlaps_base) +
+            "/" + std::to_string(coverage.outside_bases) + "/" + std::to_string(c.added);
+        bool report = false;
+        {
+            std::lock_guard lock(g_mu);
+            if (signature != g_last_filter_signature) {
+                g_last_filter_signature = signature;
+                report = true;
+            }
+        }
+        if (report)
+            KB_I("save regions FILTER: world=%s state=%s genuine=%llu retained=%zu covered=%zu outside=%zu injected=%u",
+                 world.c_str(), filter_state, static_cast<unsigned long long>(before), kept,
+                 coverage.overlaps_base, coverage.outside_bases, c.added);
+    }
+
+    if (diagnose) {
+        size_t live_base_count = 0;
+        const bool live_bases_read = tick_thread() &&
+            bases_list(nullptr, 0, &live_base_count) == KILN_OK;
+        const std::string signature = world + "/" + std::to_string(before) + "/" + std::to_string(kept) +
+            "/" + std::to_string(c.added) + "/" + std::to_string(coverage.overlaps_base) +
+            "/" + std::to_string(coverage.outside_bases) + "/" + std::to_string(native_read) +
+            "/" + (live_bases_read ? std::to_string(live_base_count) : "?");
+        bool report = false;
+        {
+            std::lock_guard lock(g_mu);
+            if (signature != g_last_probe_signature) {
+                g_last_probe_signature = signature;
+                report = true;
+            }
+        }
+        if (report) {
+            if (native_read)
+                KB_I("save regions PROBE: world=%s native_regions=%llu live_build_zones=%lld kept_chunks=%zu touching_native_regions=%zu outside_native_regions=%zu injected_boxes=%u",
+                     world.c_str(), static_cast<unsigned long long>(before),
+                     live_bases_read ? static_cast<long long>(live_base_count) : -1LL,
+                     kept, coverage.overlaps_base, coverage.outside_bases, c.added);
+            else
+                KB_W("save regions PROBE: world=%s native region bounds unavailable; native_regions=%llu kept_chunks=%zu injected_boxes=%u",
+                     world.c_str(), static_cast<unsigned long long>(before), kept, c.added);
+            for (size_t i = 0; native_read && i < native.size() && i < 4; ++i) {
+                const auto& b = native[i];
+                KB_I("save regions PROBE native[%zu]: (%.2f %.2f %.2f) to (%.2f %.2f %.2f)",
+                     i, b.lo[0], b.lo[1], b.lo[2], b.hi[0], b.hi[1], b.hi[2]);
+            }
+        }
     }
     return r;
 }
-
 #endif
 
 }  // namespace
