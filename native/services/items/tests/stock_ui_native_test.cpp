@@ -122,8 +122,29 @@ int main() {
     CHECK(at(LIST, 7, 5, 3) == 5 && g_avail_faults.load() == faults + 1);
     fixture::fixed_fault = false;
     CHECK(at(LIST, 7, 5, 3) == 17);
-    // the snapshot cleared (the menu closed): the game's counts everywhere
-    CHECK(t_set_craft_stock(nullptr, 0) == KILN_OK);
+    // a production station's screen (#132): its rows count only what their transfer buttons move, so the client names
+    // every item with none there. The snapshot stays on (the "+1" / "+10" answers count only while it is), and no row of
+    // any site is raised
+    KilnStationFillAnswer answer{};
+    answer.key.station = 1032;
+    answer.key.recipe = 0x55;
+    answer.crafts = 2;
+    CHECK(t_set_fill_answers(&answer, 1) == KILN_OK);
+    const KilnStationStack none[2] = {{7, 0}, {9, 0}};
+    CHECK(t_set_craft_stock(none, 2) == KILN_OK && g_craft_on.load());
+    {
+        std::lock_guard lock(g_fill_mu);
+        CHECK(g_fill_answers.size() == 1);
+    }
+    CHECK(at(ROW1, 7, 0, 0) == 0 && at(ROW2, 7, 4, 0) == 4 && at(OPTION, 7, 5, 3) == 5);
+    CHECK(at(LIST, 7, 5, 3) == 5 && fixture::fixed_calls == 0);
+    CHECK(t_set_craft_stock(rows, 1) == KILN_OK && at(ROW1, 7, 5, 3) == 20);  // a snapshot with counts raises again
+    // the snapshot cleared (the menu closed): the game's counts everywhere, the answers gone
+    CHECK(t_set_craft_stock(nullptr, 0) == KILN_OK && !g_craft_on.load());
     CHECK(at(LIST, 7, 5, 3) == 5 && at(OPTION, 7, 5, 3) == 5 && at(ROW1, 7, 5, 3) == 5);
+    {
+        std::lock_guard lock(g_fill_mu);
+        CHECK(g_fill_answers.empty());
+    }
     std::printf("stock ui: %d checks, %d failed\n",checks,failed);return failed?1:0;
 }

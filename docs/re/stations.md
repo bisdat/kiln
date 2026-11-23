@@ -724,7 +724,11 @@ are built on the client, from a cache of the base's Magic chests:
 demand (the same trigger as the fill query). Only for a call from the station screen's row (`stations/client.AvailableRowRet1`
 / `Ret2`, the game's return address as kiln.hooks reports it) or, since 0.2.0-dev.30.8, from the crafting menu's list
 (`stations/client.AvailableListRet`) and its row's options (`stations/client.AvailableOptionRet`), and only for an item the
-server's snapshot names, it returns the greater of the game's count and the snapshot's (§10.5). The list adds the fixed
+snapshot kiln-items holds names, it returns the greater of the game's count and the snapshot's (§10.5). Since
+0.2.0-dev.30.8 Kiln.Blocks hands kiln-items, while a production station's screen is open (HUD FactoryCrafting), every
+item of the server's snapshot with count 0 (`set_craft_stock` keeps such a row: the snapshot stays on for the fill query
+above, and no count is raised): that screen's rows, the list's style-4 rows included, keep the game's counts, since their
+transfer control moves only what the bag and list A hold (§10.7). The list adds the fixed
 slots after the call, and the snapshot already holds those stacks (the server reads every link of the player, equipment
 included), so at the list Kiln first calls `stations/client.UiFixedSlotsCount` with the same item and view (only when the
 snapshot is above the game's count; a fault there leaves the game's count) and answers `max(game, snapshot - fixed)`: the
@@ -828,13 +832,14 @@ returns to `RecipePaid` like any other, and the adapter above pays it from regis
 out (`exclude`). `craft_payment_test.cpp` covers a station's craft context. What a station's menu lacked was the client's
 ingredient counts (§10.3).
 
-**A production station's screen** leaves registered sources out of its counts: the server's snapshot names per item the
-part only registered sources hold (`kiln:craftstock` message 1, a trailing section an older client does not read), and a
-Kiln client leaves it out while the HUD screen is FactoryCrafting (0.2.0-dev.30.8). Its fill (§3.1, §8, §9) and the row
+**A production station's screen** counts in its rows only what the row transfer moves (0.2.0-dev.30.8): the row
 transfer (UI command `0x39`; on the server most likely `AutoTransferAction`'s item branch, `AutoTransferItem` from the
-player and base list A [inf]) never take from them. Opted-in outputs stay in those counts (§10.3, the fill takes them),
-but the row transfer is an item fill, which Kiln.Blocks leaves to the game (`SourceFill` passes `item != 0`): a row can
-offer a transfer amount only outputs hold, and the press moves what the bag and list A have.
+player and base list A [inf]) is an item fill, which Kiln.Blocks leaves to the game (`SourceFill` passes `item != 0`), so
+it takes neither registered sources nor opted-in outputs. A Kiln client names every item with none there (§10.3) and the
+rows keep the game's counts, with a server of any version; the fill (§3.1, §8, §9) and its "+1" / "+10" still take
+opted-in outputs through the fill query's answers, which do not read the rows. From 0.2.0-dev.29.19 through
+0.2.0-dev.30.7 those rows counted opted-in outputs, and from 0.2.0-dev.30.6 registered sources too: the transfer control
+then offered amounts whose press moved nothing of them (GitHub #132).
 
 `source_stock(player, flags, ...)` runs on the server tick thread: flags0 returns filtered extra counts excluding
 current base stock and opted-in outputs already counted by `kiln:craftstock`; `KILN_CRAFT_SOURCE_STOCK_ALL` returns

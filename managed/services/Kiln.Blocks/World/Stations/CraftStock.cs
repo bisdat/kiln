@@ -16,57 +16,34 @@
 //    about those (station, recipe, choices), the server answers how many more crafts its own fill with station outputs
 //    covers (StationsCore.FillCrafts, the rules the press itself runs with), and the client's query says "can fill" for
 //    up to that many. The press is the game's own; StationsCore.OnSourceFill runs it as Kiln's fill. docs/re/stations.md §10.3.
+//  - A production station's screen (0.2.0-dev.30.8, GitHub #132): its ingredient rows count only what their transfer
+//    buttons move (the game's item transfer: the bag and the Magic chests), so the client names every item with none
+//    there (View): the rows keep the game's counts and the snapshot stays on for the fill buttons above.
 // docs/kiln/services/stations.md, "What each client shows".
 using System.Collections.Concurrent;
 using System.Text;
 
 namespace Kiln;
 
-/// <summary>Server to client: one snapshot, per item the bag, the base's Magic chests, the opted-in outputs and the player's
-/// linked crafting sources together (<see cref="Rows"/>). Empty: the game's own counts again. <see cref="Linked"/> (GitHub
-/// #132) names, per item, the part of its count only linked sources hold: a production station's fill and its transfer
-/// buttons take nothing from them, so its screen leaves that part out. It rides after the rows, where a client from before
-/// it stops reading; a snapshot from an older server has none.</summary>
-internal sealed record CraftStockRows(CraftStockRow[] Rows, CraftStockRow[] Linked)
+/// <summary>Server to client: one snapshot, per item the bag, the base's Magic chests and the opted-in outputs together.
+/// Empty: the game's own counts again.</summary>
+internal sealed record CraftStockRows(CraftStockRow[] Rows)
 {
     public const ushort Id = 1;
-
-    public CraftStockRows(CraftStockRow[] rows) : this(rows, []) { }
 
     public static void Encode(CraftStockRows m, NetWriter w)
     {
         var n = Math.Min(m.Rows.Length, CraftStock.MaxRows);
         w.UInt16((ushort)n);
         for (var i = 0; i < n; i++) w.UInt32(m.Rows[i].Item).UInt32(m.Rows[i].Count);
-        var l = Math.Min(m.Linked.Length, CraftStock.MaxRows);
-        w.UInt16((ushort)l);
-        for (var i = 0; i < l; i++) w.UInt32(m.Linked[i].Item).UInt32(m.Linked[i].Count);
     }
 
     public static CraftStockRows Decode(ref NetReader r)
     {
-        var sent = (int)r.UInt16();
-        var n = Math.Min(sent, CraftStock.MaxRows);
+        var n = Math.Min((int)r.UInt16(), CraftStock.MaxRows);
         var rows = new CraftStockRow[n];
         for (var i = 0; i < n; i++) rows[i] = new CraftStockRow(r.UInt32(), r.UInt32());
-        // The linked part follows every row the message holds: rows past this client's cap are stepped over, never read
-        // as the linked part. None (an older server), or one cut short: the rows alone, as an older client reads them.
-        var past = (sent - n) * 8;
-        if (r.Remaining < past + 2) return new CraftStockRows(rows);
-        r.Raw(past);
-        var m = Math.Min((int)r.UInt16(), CraftStock.MaxRows);
-        if (r.Remaining < m * 8) return new CraftStockRows(rows);
-        var counts = new Dictionary<uint, uint>();
-        foreach (var row in rows) counts.TryAdd(row.Item, row.Count);
-        var linked = new List<CraftStockRow>();
-        for (var i = 0; i < m; i++)
-        {
-            var (item, count) = (r.UInt32(), r.UInt32());
-            // only for an item the snapshot counts, once, never more than its count
-            if (count == 0 || !counts.Remove(item, out var total)) continue;
-            linked.Add(new CraftStockRow(item, Math.Min(count, total)));
-        }
-        return new CraftStockRows(rows, [.. linked]);
+        return new CraftStockRows(rows);
     }
 }
 
@@ -524,17 +501,12 @@ internal static class CraftStock
                     foreach (var slot in info.Outputs)
                         if (slot.Item.Value != 0 && slot.Count > 0) lent[slot.Item.Value] = lent.GetValueOrDefault(slot.Item.Value) + slot.Count;
         var registered = false;
-        var linked = new Dictionary<uint, long>();  // what only the player's linked sources hold (no base stock, no output)
         if (linkedOn)
         {
             var extra = CraftingCore.ExtraStock(player);
             if (extra.Rc != StationsNative.Ok) return null; // never publish a cut or unvalidated linked snapshot
             registered = extra.Rows.Length != 0;
-            foreach (var row in extra.Rows)
-            {
-                lent[row.Item] = lent.GetValueOrDefault(row.Item) + row.Count;
-                linked[row.Item] = linked.GetValueOrDefault(row.Item) + row.Count;
-            }
+            foreach (var row in extra.Rows) lent[row.Item] = lent.GetValueOrDefault(row.Item) + row.Count;
         }
         var rows = From(mayAccess, home is not null, lent, StationsCore.Backend.CraftItems, () =>
         {
@@ -550,7 +522,7 @@ internal static class CraftStock
             var chests = new Dictionary<uint, long>();
             foreach (var (item, count) in stock) chests[item.Value] = count;
             return chests;
-        }, out var tooMany, registered, linked);
+        }, out var tooMany, registered);
         if (tooMany && Interlocked.Exchange(ref _warned, 1) == 0)
             ModLog.Warn($"kiln.stations: player {player}'s crafting stock names more than {MaxRows} items: its crafting menus show the game's counts");
         return rows;
@@ -561,65 +533,47 @@ internal static class CraftStock
     /// opted-in station there holds outputs; then the items craft_items names, counted.</summary>
     internal static CraftStockRows? From(bool? mayAccess, bool inBase, IReadOnlyDictionary<uint, long> lent,
         Func<uint[], (int Rc, uint[] Items)> craftItems, Func<IReadOnlyDictionary<uint, long>> bag,
-        Func<IReadOnlyDictionary<uint, long>> chests, out bool tooMany, bool registered = false,
-        IReadOnlyDictionary<uint, long>? linked = null)
+        Func<IReadOnlyDictionary<uint, long>> chests, out bool tooMany, bool registered = false)
     {
         tooMany = false;
         if (lent.Count == 0 || (!registered && (mayAccess is not true || !inBase))) return null;
         var (rc, items) = craftItems([.. lent.Keys.Order()]);
         if (rc != StationsNative.Ok) return null;
-        var rows = Compose(items, lent, bag(), chests(), linked);
+        var rows = Compose(items, lent, bag(), chests());
         tooMany = rows is null;
         return rows;
     }
 
-    /// <summary>One snapshot: per item of <paramref name="items"/> the bag, the chests and the lent outputs and linked
-    /// sources together, sorted, without empty rows, and the part of each count only <paramref name="linked"/> sources
-    /// hold (included in <paramref name="lent"/>). Null when that is more than <see cref="MaxRows"/> rows (never a cut
-    /// snapshot: a missing item would count as none).</summary>
+    /// <summary>One snapshot: per item of <paramref name="items"/> the bag, the chests and the lent outputs together,
+    /// sorted, without empty rows. Null when that is more than <see cref="MaxRows"/> rows (never a cut snapshot: a
+    /// missing item would count as none).</summary>
     internal static CraftStockRows? Compose(IReadOnlyCollection<uint> items, IReadOnlyDictionary<uint, long> lent,
-        IReadOnlyDictionary<uint, long> bag, IReadOnlyDictionary<uint, long> chests, IReadOnlyDictionary<uint, long>? linked = null)
+        IReadOnlyDictionary<uint, long> bag, IReadOnlyDictionary<uint, long> chests)
     {
         var rows = new List<CraftStockRow>();
-        var only = new List<CraftStockRow>();
         foreach (var item in items.Distinct().Order())
         {
             if (item == 0) continue;
             var n = lent.GetValueOrDefault(item) + bag.GetValueOrDefault(item) + chests.GetValueOrDefault(item);
-            if (n <= 0) continue;
-            var count = (uint)Math.Min(n, uint.MaxValue);
-            rows.Add(new CraftStockRow(item, count));
-            var l = Math.Min(linked?.GetValueOrDefault(item) ?? 0, count);
-            if (l > 0) only.Add(new CraftStockRow(item, (uint)l));
+            if (n > 0) rows.Add(new CraftStockRow(item, (uint)Math.Min(n, uint.MaxValue)));
         }
-        return rows.Count > MaxRows ? null : new CraftStockRows([.. rows], [.. only]);
+        return rows.Count > MaxRows ? null : new CraftStockRows([.. rows]);
     }
 
     internal static string Key(CraftStockRows rows)
     {
         var b = new StringBuilder();
         foreach (var r in rows.Rows) b.Append(r.Item).Append('=').Append(r.Count).Append(';');
-        b.Append('|');
-        foreach (var r in rows.Linked) b.Append(r.Item).Append('=').Append(r.Count).Append(';');
         return b.ToString();
     }
 
-    /// <summary>What a screen counts of a snapshot (GitHub #132). A production station's screen (its ingredient rows and
-    /// their transfer buttons) leaves out what only linked sources hold: its fill and its transfers never take from them.
-    /// Every crafting menu counts the whole snapshot: its craft's payment takes from them.</summary>
-    internal static CraftStockRows View(CraftStockRows rows, bool factory)
-    {
-        if (!factory || rows.Linked.Length == 0) return rows;
-        var linked = new Dictionary<uint, uint>();
-        foreach (var l in rows.Linked) linked.TryAdd(l.Item, l.Count);
-        var kept = new List<CraftStockRow>();
-        foreach (var r in rows.Rows)
-        {
-            var n = r.Count - Math.Min(r.Count, linked.GetValueOrDefault(r.Item));
-            if (n > 0) kept.Add(new CraftStockRow(r.Item, n));
-        }
-        return new CraftStockRows([.. kept]);
-    }
+    /// <summary>What a screen counts of a snapshot (GitHub #132). A crafting menu counts all of it: its craft's payment
+    /// takes from the opted-in outputs and the linked sources too. A production station's screen counts only what its
+    /// rows' transfer buttons move, the game's own item transfer from the bag and the Magic chests, which is the game's
+    /// own count: there every item is named with none, so no row is raised and the snapshot stays on for the "+1" / "+10"
+    /// answers (the fill takes the outputs; those buttons do not read the rows).</summary>
+    internal static CraftStockRows View(CraftStockRows rows, bool factory) =>
+        factory ? new CraftStockRows([.. rows.Rows.Select(r => r with { Count = 0 })]) : rows;
 
     /// <summary>A production station's screen (keen::HudScreenType FactoryCrafting).</summary>
     internal static bool IsFactory(GameScreen s) => s.Hud == HudScreen.FactoryCrafting || s.Crafting is { IsFactory: true };

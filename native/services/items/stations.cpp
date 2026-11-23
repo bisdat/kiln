@@ -3149,7 +3149,9 @@ KilnResult KILN_CALL t_collect(KilnOwner owner, const KilnStationCollect* c, Kil
     return KILN_OK;
 }
 
-// The client's snapshot of what it may count. Any thread. Not consulted by the server's payment.
+// The client's snapshot of what it may count. Any thread. Not consulted by the server's payment. A row with count 0 names
+// its item with none (since 0.2.0-dev.30.8): a production station's screen names every item so (GitHub #132), which raises
+// no count there and keeps the snapshot on for the fill buttons' answers.
 KilnResult KILN_CALL t_set_craft_stock(const KilnStationStack* rows, uint32_t count) {
     if (count > KILN_STATIONS_MAX_CRAFT_STOCK || (count && !rows)) return KILN_ERR_INVALID_ARGUMENT;
     size_t kept = 0;
@@ -3159,7 +3161,7 @@ KilnResult KILN_CALL t_set_craft_stock(const KilnStationStack* rows, uint32_t co
         was = g_craft_on.load(std::memory_order_relaxed);
         g_craft_have.clear();
         for (uint32_t i = 0; i < count; ++i)
-            if (rows[i].item && rows[i].count) g_craft_have[rows[i].item] = rows[i].count;
+            if (rows[i].item) g_craft_have[rows[i].item] = rows[i].count;
         kept = g_craft_have.size();
         g_craft_on.store(kept != 0, std::memory_order_release);
     }
