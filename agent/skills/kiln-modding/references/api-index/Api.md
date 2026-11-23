@@ -994,6 +994,8 @@ enum: Pass, Set, Refuse
 - `this[string path] { get; set; } -> object?` — A scalar field by path: bool, long, ulong or double; a nested struct as a `ReflectedValue` copy.
 - `Type { get; } -> GameType` — The type of the value.
 
+## RegistryThreadOnlyAttribute `0.2.16` — Use only on the owning registry callback's thread.
+
 ## RenderThreadAttribute — Call this on the game's render thread only (client).
 
 ## RequiresCapabilityAttribute — Marks a member that needs a capability.

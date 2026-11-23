@@ -189,8 +189,8 @@ KILN_OUT=/path/to/build native/core/tests/test-build-stamp.sh      # the build m
 - The contract ([../modding/contract.md](../modding/contract.md)), as `Kiln.Example` and `Kiln.Spawn` show it: rows
   for what can be off beyond the table itself (`ServiceCapRows` with `ServiceCaps.Static` / `Session`, reported at the
   service's start when the service has rows of its own: a startup type in `ServiceTick.AutoStart` whose static
-  constructor calls `Rows.Ensure()`, like `GameplayStartup`; a row says "available" exactly when the call works, so a
-  hook that can be off is part of it),
+  constructor calls its rows' `ServiceCapRows.Ensure()`, like `GameplayStartup`; a row says "available" exactly when the
+  call works, so a hook that can be off is part of it),
   `[RequiresCapability]` on the members that throw for one, `[ServerOnly]` / `[ClientOnly]` and
   `[TickThreadOnly]` / `[AnyThread]` on every member that has a side or a thread, the game's refusal as a result
   record that implements `IKilnResult`, a bus event for every write that changed something (posted through
