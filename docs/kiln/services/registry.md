@@ -74,5 +74,5 @@ are never reused in a process. `begin`, `submit` and `status` accept any thread;
 the active world's thread. Without a world they operate only on copied data.
 
 The TestKit currently marks this native table unavailable rather than pretending to simulate game byte ownership.
-The native host suites exercise it over the real store, mapped readers and synthetic game memory. Real client and
-multiplayer behavior belongs to the owner's guided checks; a successful DLL build alone does not prove it.
+The native host suites exercise it over the real store, mapped readers and synthetic game memory. Real-client and
+multiplayer behavior is not verified by those suites or a dedicated-server lab; a successful DLL build alone does not prove it.

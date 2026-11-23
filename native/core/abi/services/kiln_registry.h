@@ -3,10 +3,10 @@
  * loot, drops and balance in the first release), changed by mods in one data stage per start and reported in one place
  * (<game>/kiln/state/registry.json, schema/state-registry.schema.json). Mods name only Kiln ids ("game:<stable name>",
  * "<mod id>:<name>") and Kiln fields ("maxStack", "damage.fire"); Kiln maps them onto this game build and refuses, per
- * edit, what it cannot map there. This table's layout and the meaning of its members are kept from now on (check
- * header.size). Registry P2's live-change API belongs to a separate kiln.registry.live table, not this table's tail; the registry
- * schemas themselves (registries, fields, ids) are experimental until API 1.0.0 (C#: KILNX031) and change only with an id
- * migration.
+ * edit, what it cannot map there. This table is append-only: its existing layout and member meanings are kept from now
+ * on (check header.size). Registry P2's live-change API belongs to a separate kiln.registry.live table, never this table's
+ * tail. The registry schemas (registries, fields, ids) are experimental until API 1.0.0 (C#: KILNX031) and change only
+ * with an id migration.
  *
  * Mods: Kiln binds each owner to one mod id, the one it was made for (a Kiln mod's owner from Kiln.Host: its manifest id; a
  * native mod's: its native.json id; a plugin's: the id it was loaded under), the owner's id without its kind prefix, folded
@@ -56,9 +56,9 @@
  *    KILN_ERR_INVALID_ARGUMENT. Revoking an owner drops its queued batches (including parse refusals) and subscriptions.
  *    The stage takes the surviving queue when it starts; already-taken edits stay until the next start. An in-flight
  *    stage callback may finish, but its uncommitted turn's edits are dropped and reported if its owner was revoked.
- *  - Callbacks: the record pointer is valid only during the call. fn and user stay valid until unsubscribe returned,
- *    except a dispatch already in flight on another thread (unsubscribe and revoke never wait for it). A native fault
- *    inside a stage callback is caught (kiln.log), the subscription is removed, and that turn's edits are dropped and
+ *  - Callbacks: the record pointer is valid only during the call. fn and user must stay valid until unsubscribe has
+ *    returned AND any call already running on another thread has finished. Unsubscribe and revoke never wait for it.
+ *    A native fault inside a stage callback is caught (kiln.log), the subscription is removed, and that turn's edits are dropped and
  *    reported; a fault inside a ready callback is caught and logged and that subscription is removed too.
  *  - Results: KILN_OK; KILN_ERR_INVALID_ARGUMENT (a NULL required pointer, a bad size, owner 0, a malformed document,
  *    an unknown registry, field or view); KILN_ERR_NOT_FOUND (no such entry or handle); KILN_ERR_UNAVAILABLE (not now:
