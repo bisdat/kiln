@@ -43,7 +43,8 @@ static KilnResult KILN_CALL cap(KilnStr name, KilnCapRow* out) {
 }
 static KilnResult query_rc = KILN_OK, break_rc = KILN_OK;
 static uint32_t break_refusal = 0, break_result_flags = KILN_BUILD_BREAK_R_VERIFIED;
-static unsigned query_calls = 0, break_calls = 0, fail_after_calls = 0;
+static unsigned query_calls = 0, break_calls = 0, fail_after_calls = 0, fail_on_call = 0;
+static bool enforce_grid_bounds = false;
 static bool stop_on_break = false, change_session_on_break = false;
 static KilnBuildBlockInfo block{};
 static KilnVec3 captured_point{}, captured_from{}, captured_to{};
@@ -67,16 +68,24 @@ static KilnResult KILN_CALL find_wall(KilnVec3 from, KilnVec3 to, uint32_t flags
 }
 static KilnResult KILN_CALL grid(KilnBuildGrid* out) {
     out->origin = {-10, 0, -20}; out->cell_size = 0.5;
+    out->cells_max[0] = out->cells_max[2] = 128; out->cells_max[1] = 8192;
     return KILN_OK;
 }
 static KilnResult KILN_CALL break_box(const KilnBuildBreak* r, KilnBuildBreakResult* out) {
     CHECK(tick_thread);
     ++break_calls;
+    if (enforce_grid_bounds) for (int a = 0; a < 3; ++a) {
+        const int maximum = a == 1 ? 8192 : 128;
+        CHECK(r->origin[a] >= 0 && int64_t(r->origin[a]) + r->dims[a] <= maximum);
+        if (r->origin[a] < 0 || int64_t(r->origin[a]) + r->dims[a] > maximum) {
+            out->refusal = KILN_BUILD_BLOCK_INVALID; return KILN_ERR_INVALID_ARGUMENT;
+        }
+    }
     requests.push_back(*r);
     masks.emplace_back(r->selection, r->selection + r->dims[0] * r->dims[1] * r->dims[2]);
     origin.assign(r->origin_mod.ptr, r->origin_mod.len);
     out->damaged = 3; out->removed = 2; out->dropped = r->flags & KILN_BUILD_BREAK_DROPS ? 1 : 0;
-    const bool fails = !fail_after_calls || break_calls > fail_after_calls;
+    const bool fails = fail_on_call ? break_calls == fail_on_call : !fail_after_calls || break_calls > fail_after_calls;
     out->refusal = fails ? break_refusal : 0;
     out->flags = fails ? break_result_flags : uint32_t(KILN_BUILD_BREAK_R_VERIFIED);
     if (out->refusal == KILN_BUILD_BLOCK_DAMAGE_MAP_FULL && !(out->flags & KILN_BUILD_BREAK_R_MAY_HAVE_CHANGED))
@@ -258,7 +267,7 @@ int main() {
     CHECK(answers.size() == 1 && answers.back().id == id && answers.back().user == &token && answers.back().world == w);
     CHECK(answers.back().result.status == EMF_BREAK_DONE && answers.back().result.damaged == 3 && answers.back().result.removed == 2 && answers.back().result.dropped == 1);
     terrain_after_step(w, EMF_WORLD_SERVER); CHECK(answers.size() == 1);
-    r = request(); r.radius = 3.5f;
+    r = request(); r.radius = 3.5f; r.y = 8.25f;
     CHECK(t.break_blocks(w, &r, nullptr, nullptr));
     terrain_server_pre(); terrain_after_step(w, EMF_WORLD_SERVER);
     CHECK(requests.back().dims[0] == 15 && requests.back().dims[1] == 15 && requests.back().dims[2] == 15 && masks.back().size() == 3375);
@@ -360,13 +369,42 @@ int main() {
     fail_after_calls = 0; break_rc = KILN_OK; break_refusal = 0; break_result_flags = KILN_BUILD_BREAK_R_VERIFIED;
     CHECK(t.break_blocks(w, &r, &callback, nullptr)); terrain_server_pre(); terrain_after_step(w, EMF_WORLD_SERVER);
     CHECK(answers.back().result.status == EMF_BREAK_DONE);
-    // Failure after admission: no retries; later requests in the batch fail without running.
-    r = request(); auto failed = t.break_blocks(w, &r, &callback, nullptr); auto skipped = t.break_blocks(w, &r, &callback, nullptr);
-    break_rc = KILN_ERR_UNAVAILABLE; break_refusal = KILN_BUILD_BLOCK_SYMBOL_MISSING; before = break_calls;
+    // A non-fault refusal affects only its own request, not the remainder of this step's batch.
+    r = request(); auto failed = t.break_blocks(w, &r, &callback, nullptr); auto later_ok = t.break_blocks(w, &r, &callback, nullptr);
+    break_rc = KILN_ERR_UNAVAILABLE; break_refusal = KILN_BUILD_BLOCK_SYMBOL_MISSING; break_result_flags = 0;
+    before = break_calls; fail_on_call = before + 1;
     terrain_server_pre(); terrain_after_step(w, EMF_WORLD_SERVER);
-    CHECK(break_calls == before + 1 && answers[answers.size()-2].id == failed && answers.back().id == skipped && answers.back().result.status == EMF_BREAK_FAILED);
-    break_rc = KILN_OK; break_refusal = 0;
+    CHECK(break_calls == before + 2 && answers[answers.size()-2].id == failed && answers[answers.size()-2].result.status == EMF_BREAK_FAILED);
+    CHECK(answers.back().id == later_ok && answers.back().result.status == EMF_BREAK_DONE);
+    fail_on_call = 0; break_rc = KILN_OK; break_refusal = 0; break_result_flags = KILN_BUILD_BREAK_R_VERIFIED;
+    // Every grid face clips only outside cells, retaining the sphere geometry for the in-grid portion.
+    enforce_grid_bounds = true;
+    for (int axis = 0; axis < 3; ++axis) for (bool high : {false,true}) {
+        r = request();
+        float* c = axis == 0 ? &r.x : axis == 1 ? &r.y : &r.z;
+        const float o = axis == 0 ? -10.f : axis == 1 ? 0.f : -20.f;
+        const int maximum = axis == 1 ? 8192 : 128;
+        *c = o + (high ? maximum*.5f - .25f : .25f);
+        CHECK(t.break_blocks(w, &r, &callback, nullptr));
+        before = break_calls; terrain_server_pre(); terrain_after_step(w, EMF_WORLD_SERVER);
+        CHECK(break_calls == before + 1 && answers.back().result.status == EMF_BREAK_DONE);
+        CHECK(requests.back().origin[axis] == (high ? maximum-3 : 0) && requests.back().dims[axis] == 3);
+    }
+    // A wholly outside sphere is a no-op; a later request in this batch still runs.
+    r = request(); r.x = -12;
+    auto outside = t.break_blocks(w, &r, &callback, nullptr); r = request();
+    later_ok = t.break_blocks(w, &r, &callback, nullptr); before = break_calls;
+    terrain_server_pre(); terrain_after_step(w, EMF_WORLD_SERVER);
+    CHECK(break_calls == before + 1 && answers[answers.size()-2].id == outside && answers[answers.size()-2].result.status == EMF_BREAK_DONE);
+    CHECK(answers[answers.size()-2].result.damaged == 0 && answers.back().id == later_ok && answers.back().result.status == EMF_BREAK_DONE);
+    // A bottom sphere outside the grid must not suppress an in-grid upper sphere in the same column.
+    r = request(); r.y = -1.5f; r.height = 2;
+    CHECK(t.break_blocks(w, &r, &callback, nullptr)); before = break_calls;
+    terrain_server_pre(); terrain_after_step(w, EMF_WORLD_SERVER);
+    CHECK(break_calls == before + 2 && answers.back().result.status == EMF_BREAK_DONE && answers.back().result.removed == 4);
+    enforce_grid_bounds = false;
     // A mod callback fault cannot suppress other callbacks.
+    r = request();
     CHECK(t.break_blocks(w, &r, [](EmfWorld*, uint32_t, const EmfBreakResult*, void*) { throw 1; }, nullptr));
     CHECK(t.break_blocks(w, &r, &callback, nullptr));
     count = answers.size(); terrain_server_pre(); terrain_after_step(w, EMF_WORLD_SERVER); CHECK(answers.size() == count + 1);

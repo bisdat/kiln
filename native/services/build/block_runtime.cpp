@@ -101,6 +101,7 @@ KilnResult prepare(blocks::Source& src,Context& c,uint32_t& why) {
     const auto* v=vox();if(!v){why=KILN_BUILD_BLOCK_NO_SESSION;return KILN_ERR_UNAVAILABLE;}
     src.context=&c;src.cell_size=v->cell;std::memcpy(src.origin,v->origin,sizeof src.origin);
     c.maximum={static_cast<uint64_t>(v->tile[0])*v->tiles[0],8192,static_cast<uint64_t>(v->tile[1])*v->tiles[1]};
+    std::copy(c.maximum.begin(),c.maximum.end(),src.maximum);
     src.read=&read;src.write=F.write?&write:nullptr;
     if(metadata_on) {
         c.registry=g_api->singleton(server_world(),kstr("TerraformingEfficiencyRegistry"));
