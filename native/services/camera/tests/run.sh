@@ -15,3 +15,8 @@ g++ -std=c++20 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -pthrea
     -I"$abi" "$here/mode_test.cpp" "$here/../mode.cpp" "$here/../state.cpp" -o "$out/mode-test"
 "$out/mode-test"
 "$out/state-test"
+g++ -std=c++20 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -pthread \
+    -I"$abi" "$here/service_test.cpp" "$here/../camera.cpp" "$here/../mode.cpp" "$here/../state.cpp" -o "$out/service-test"
+"$out/service-test"
+"$out/service-test" no-observer
+"$out/service-test" old-world

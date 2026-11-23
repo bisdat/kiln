@@ -3,6 +3,7 @@
 #include "mode.h"
 
 #include <cstring>
+#include <limits>
 
 namespace kcam {
 
@@ -74,7 +75,10 @@ bool ModeBackend::stage(const Staged& st, uint32_t* reason, const char** text) {
     } else {
         r.start_ms = now;
     }
-    r.deadline_ms = r.start_ms + q.duration_ms;
+    r.duration_ms = q.duration_ms;
+    r.alive = st.alive;
+    r.start_on_commit = !st.update || st.timing == KILN_CAMERA_RESTART_TIMELINE;
+    r.deadline_ms = r.start_on_commit ? std::numeric_limits<uint64_t>::max() : r.start_ms + q.duration_ms;
     if (r.deadline_ms <= now) {
         free_if_idle(*s);
         *text = "the lease's clock goes on (Preserve) and the new duration is already over";
@@ -186,10 +190,11 @@ bool KILN_CALL ModeBackend::on_change(KilnEntity, void* data, uint32_t size, voi
     const Slot& s = self->slots_[t->slot];
     if (!data || size != kNccSize || s.cur_lease.load(std::memory_order_acquire) != t->lease ||
         s.cur_revision.load(std::memory_order_acquire) != t->revision || self->live_epoch_.load(std::memory_order_acquire) != t->epoch ||
-        self->now_ms_.load(std::memory_order_acquire) >= t->deadline_ms) {
+        (t->alive && !t->alive->load(std::memory_order_acquire)) || self->world_->now_ms() >= t->deadline_ms) {
         self->refusals_.fetch_add(1, std::memory_order_relaxed);
         return false;  // ended, replaced, expired or another world: the component stays as the game left it
     }
+    t->wrote_ms = self->world_->now_ms();
     std::memcpy(data, t->bytes, kNccSize);
     self->writes_.fetch_add(1, std::memory_order_relaxed);
     return true;
@@ -212,6 +217,10 @@ void ModeBackend::result(Ticket* t, const KilnWorldWriteResult& r) {
             return;
         }
         s.ticket = nullptr;
+        if (t->alive && !t->alive->load(std::memory_order_acquire)) {
+            delete t;  // retirement already invalidated it; Core::pre owns cancellation and its reason
+            return;
+        }
         const uint64_t now = world_->now_ms();
         now_ms_.store(now, std::memory_order_release);
         const bool staged = s.staged.lease == t->lease && s.staged.revision == t->revision;
@@ -226,6 +235,11 @@ void ModeBackend::result(Ticket* t, const KilnWorldWriteResult& r) {
             if (staged) {
                 // the first write of this revision is in the server state: Applied/Updated (an old holder ends first)
                 reports.push_back({Report::Committed, s.staged.lease, s.staged.revision, 0, 0, frame, ""});
+                if (s.staged.start_on_commit) {
+                    s.staged.start_ms = t->wrote_ms;
+                    s.staged.deadline_ms = t->wrote_ms + s.staged.duration_ms;
+                    s.staged.start_on_commit = false;
+                }
                 s.active = s.staged;
                 s.staged = Rev{};
             }
@@ -308,6 +322,7 @@ void ModeBackend::submit(Slot& s) {
     t->revision = r->revision;
     t->epoch = r->epoch;
     t->deadline_ms = r->deadline_ms;
+    t->alive = r->alive;
     t->bytes[0] = 1;
     t->bytes[1] = r->camera_id;
     t->bytes[2] = r->transition;

@@ -51,7 +51,7 @@ public:
     virtual KilnResult cancel(uint64_t ticket) = 0;
     // A player of the running server world, and who they are now. False: no such player in game. Tick thread.
     virtual bool player(KilnEntity entity, Incarnation* out) = 0;
-    // The server clock in milliseconds (expiry), and the server step (the frame of a commit). Tick thread.
+    // The monotonic server clock in milliseconds (any thread, no game calls), and the server step (tick thread).
     virtual uint64_t now_ms() = 0;
     virtual uint64_t step() = 0;
     virtual void log(int32_t level, const std::string& text) = 0;
@@ -106,6 +106,9 @@ private:
         uint32_t epoch = 0;
         uint8_t camera_id = 0, transition = 0;
         uint64_t start_ms = 0, deadline_ms = 0;
+        uint32_t duration_ms = 0;
+        bool start_on_commit = false;
+        std::shared_ptr<std::atomic<bool>> alive;
     };
     struct Ticket {
         ModeBackend* self = nullptr;
@@ -114,7 +117,8 @@ private:
         KilnCameraLease lease = 0;
         uint64_t revision = 0;
         uint32_t epoch = 0;
-        uint64_t deadline_ms = 0;
+        uint64_t deadline_ms = 0, wrote_ms = 0;
+        std::shared_ptr<std::atomic<bool>> alive;
         uint8_t bytes[kNccSize] = {};
         uint64_t id = 0;
     };

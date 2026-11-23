@@ -68,6 +68,7 @@ struct Staged {
     bool update = false;          // false: the lease's first revision
     uint32_t timing = 0;          // update: KILN_CAMERA_PRESERVE_TIMELINE / RESTART_TIMELINE
     KilnCameraLease replaces = 0; // apply: the holder this lease supersedes when it commits (0: the slot is free)
+    std::shared_ptr<std::atomic<bool>> alive;  // invalidated before owner/world/lease cleanup, retained by queued jobs
     const Stored* request = nullptr;  // valid for the call; copy what is kept
 };
 
@@ -155,6 +156,7 @@ private:
     struct Lease {
         enum State { Staged, Active, Ending };
         KilnCameraLease id = 0;
+        std::shared_ptr<std::atomic<bool>> alive = std::make_shared<std::atomic<bool>>(true);
         KilnOwner owner = 0;
         uint32_t endpoint = 0, player = 0, epoch = 0;
         int32_t priority = 0;

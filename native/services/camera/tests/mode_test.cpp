@@ -467,9 +467,52 @@ void test_failures() {
     }
 }
 
+void test_retire_before_next_pre() {
+    Rig r;
+    r.apply(kMod, A, 34, 2);
+    r.pre();
+    r.core.owner_retiring(kMod);  // any thread: no next Pre is needed to invalidate a queued write
+    r.world.sim();
+    CHECK(r.at(A) == r.world.stock[A]);
+    r.pre();
+    CHECK(r.world.logs.empty());
+}
+
+void test_expiry_inside_write() {
+    Rig r;
+    r.apply(kMod, A, 34, 2, 0, 1000);
+    r.tick(3);
+    r.pre();
+    r.world.now += 1001;  // the server stalls after Pre, before its tracked write runs
+    r.world.sim();
+    CHECK(r.at(A) == r.world.stock[A]);
+}
+
+void test_timeline_begins_at_write() {
+    Rig r;
+    r.apply(kMod, A, 34, 2, 0, 1000);
+    r.pre();
+    r.world.now += 500;  // queue/step latency must not consume the first revision's lifetime
+    r.world.sim();
+    r.tick();
+    r.world.now += 600;
+    r.tick();
+    CHECK(r.at(A) == kHeld);
+    CHECK(count("ended") == 0);
+}
+
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    if (argc > 1) {
+        if (std::strcmp(argv[1], "retire") == 0) test_retire_before_next_pre();
+        if (std::strcmp(argv[1], "expiry") == 0) test_expiry_inside_write();
+        if (std::strcmp(argv[1], "timeline") == 0) test_timeline_begins_at_write();
+        return 0;
+    }
+    test_retire_before_next_pre();
+    test_expiry_inside_write();
+    test_timeline_begins_at_write();
     test_maintained_and_isolated();
     test_update_and_supersede();
     test_end_cancels_queued_and_no_late_revision();

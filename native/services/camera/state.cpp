@@ -279,6 +279,7 @@ void Core::discard(std::unique_ptr<Op>& op) {
 }
 
 void Core::tombstone(const Lease& lease) {
+    lease.alive->store(false, std::memory_order_release);
     tombs_.push_back(Tomb{lease.id, lease.owner, lease.endpoint});
     while (tombs_.size() > kMaxTombstones) tombs_.pop_front();
 }
@@ -366,6 +367,8 @@ void Core::owner_retiring(KilnOwner owner) {
     if (!owner) return;
     std::lock_guard<std::mutex> lock(m_);
     dead_.emplace(owner, Dead{});  // from here no callback into it starts; each world drops its leases at its next Pre
+    for (auto& [id, lease] : leases_)
+        if (lease.owner == owner) lease.alive->store(false, std::memory_order_release);
 }
 
 void Core::cleanup_owner(KilnOwner owner, World w) {
@@ -515,6 +518,7 @@ KilnResult Core::apply(KilnOwner owner, const KilnCameraRequest* request, KilnCa
         st.owner = owner;
         st.epoch = lease.epoch;
         st.replaces = replaces;
+        st.alive = lease.alive;
         st.request = stored.get();
         if (!b->stage(st, &reason, &text) && !reason) reason = KILN_CAMERA_REASON_BUSY;
     }
@@ -591,6 +595,7 @@ KilnResult Core::update(KilnOwner owner, KilnCameraLease id, uint32_t timing, co
             st.epoch = lease->epoch;
             st.update = true;
             st.timing = timing;
+            st.alive = lease->alive;
             st.request = stored.get();
             if (!b->stage(st, &reason, &text) && !reason) reason = KILN_CAMERA_REASON_BUSY;
         }

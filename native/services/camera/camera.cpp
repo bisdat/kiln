@@ -10,7 +10,7 @@
 // camera.local_pose, camera.local_fov, camera.local_profile, camera.local_shake, camera.rendered_snapshot,
 // camera.remote, camera.resource_profile (reserved). Every write row needs kiln.hooks' owner-retiring observer
 // (hooks.owner_cleanup): without it a lease could call into a mod that is gone, so nothing is admitted.
-#include <windows.h>
+#include <chrono>
 
 #include <cstdarg>
 #include <cstddef>
@@ -22,10 +22,13 @@
 #include "services/kiln_camera.h"
 #include "services/kiln_caps.h"
 #include "services/kiln_hooks.h"
+#include "services/kiln_players.h"
+#include "services/kiln_world.h"
 
 #include "abi_asserts.h"
 #include "seh.h"
 #include "state.h"
+#include "mode.h"
 
 namespace {
 
@@ -53,6 +56,33 @@ struct ServiceEnv : kcam::Env {
 
 ServiceEnv g_env;
 kcam::Core g_core(&g_env);
+
+// Only the service owns tracked writes. Mods pass Kiln player ids; the connection snapshot supplies incarnation.
+struct ServiceModeWorld : kcam::ModeWorld {
+    const KilnWorldApi* world = nullptr;
+    const KilnPlayersApi* players = nullptr;
+    uint64_t server_step = 0;
+    KilnResult submit(const KilnWorldWriteRequest& q, uint64_t* ticket) override { return world->write_submit(g_owner, &q, ticket); }
+    KilnResult cancel(uint64_t ticket) override { return world->write_cancel(ticket); }
+    bool player(KilnEntity entity, kcam::Incarnation* out) override {
+        KilnPlayer p{};
+        p.size = sizeof p;
+        if (players->get(entity, &p) != KILN_OK || p.entity != entity || p.state != KILN_PLAYER_IN_GAME) return false;
+        *out = {p.joined_step, p.handle};
+        return true;
+    }
+    uint64_t now_ms() override {
+        // MSVC's steady_clock is QueryPerformanceCounter, independent of simulation time and pause.
+        return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
+    }
+    uint64_t step() override { return server_step; }
+    void log(int32_t level, const std::string& text) override { g_env.log(level, text); }
+};
+ServiceModeWorld g_mode_world;
+kcam::ModeBackend g_mode(&g_core, &g_mode_world, 0xd2c927b5u, "kiln.camera");
+uint64_t g_reported_mode = 0;
+void report_rows();
+
 
 // Which worlds this thread steps. A dedicated server has no client world.
 uint32_t threads() {
@@ -114,7 +144,13 @@ void KILN_CALL on_world(const KilnWorldEvent* e, void*) {
     else if (e->event == KILN_WORLD_STOPPING) g_core.world_stopping(w, e->session);
 }
 
-void KILN_CALL on_server_pre(const KilnTickInfo*, void*) { g_core.pre(kcam::kServer); }
+void KILN_CALL on_server_pre(const KilnTickInfo* tick, void*) {
+    if (tick) g_mode_world.server_step = tick->step;
+    g_mode.step();
+    g_core.pre(kcam::kServer);
+    const uint64_t mode = g_mode.caps();
+    if (mode != g_reported_mode) { g_reported_mode = mode; report_rows(); }
+}
 void KILN_CALL on_client_pre(const KilnTickInfo*, void*) { g_core.pre(kcam::kClient); }
 
 // Any thread (the one that revoked the owner). Marks only: each world drops the owner's leases at its next Pre.
@@ -169,6 +205,20 @@ void KILN_CALL on_ready(void*) {
     const bool observer = hooks && hooks->header.size >= kObserverEnd && hooks->subscribe_owner_retiring && g_api->feature(KC_STR("hooks.owner_cleanup")) &&
                           hooks->subscribe_owner_retiring(g_owner, &on_owner_retiring, nullptr, &h) == KILN_OK;
     g_core.set_writes(observer);
+    g_mode_world.world = static_cast<const KilnWorldApi*>(g_api->service(KC_STR(KILN_WORLD_SERVICE), KILN_WORLD_VERSION));
+    g_mode_world.players = static_cast<const KilnPlayersApi*>(g_api->service(KC_STR(KILN_PLAYERS_SERVICE), KILN_PLAYERS_VERSION));
+    const auto* world = g_mode_world.world;
+    const auto* players = g_mode_world.players;
+    const bool mode_dependencies = world && world->header.size >= offsetof(KilnWorldApi, write_declare) + sizeof(world->write_declare) &&
+        world->write_declare && world->write_submit && world->write_cancel && players &&
+        players->header.size >= offsetof(KilnPlayersApi, get) + sizeof(players->get) && players->get &&
+        g_api->feature(KC_STR("world.tracked_writes"));
+    const KilnStr ncc = KC_STR("NetworkCameraControl");
+    const bool declared = mode_dependencies && world->write_declare(g_owner, KC_STR(KILN_CAMERA_SERVICE), &ncc, 1) == KILN_OK;
+    g_mode.set_ready(declared);
+    g_core.set_backend(KILN_CAMERA_SERVER_MODE, &g_mode);
+    if (!declared) logf(KILN_LOG_WARN, "camera: maintained Mode unavailable (tracked writes, player records, or NCC declaration missing)");
+
     if (!observer) logf(KILN_LOG_WARN, "camera: kiln.hooks has no owner-retiring observer (hooks.owner_cleanup): no camera write is admitted");
     report_rows();
     uint64_t mode = 0, local = 0;
