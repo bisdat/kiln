@@ -6,6 +6,7 @@
 #endif
 #include "impact_binding.h"
 #include "impact_args.h"
+#include "action_trace.h"
 #include "internal.h"
 #include "qualified_entry.h"
 #include <atomic>
@@ -15,6 +16,8 @@
 #include <unordered_map>
 
 namespace {
+using kiln::tools::ActionExit;
+using kiln::tools::ActionDetail;
 struct Binding {
     mutable std::atomic<bool> live{true};
     KilnOwner owner{};
@@ -29,6 +32,13 @@ std::mutex binding_gate;
 const KilnHooksApi* hooks=nullptr;
 KilnToolAreaCheck area_check=nullptr;
 int64_t area_offset=-1;
+// The impact iterator's qword 0 is the engine's ProgramContext, not the world. Its job (+0) names the ECS storage of the
+// world that runs the program at job + world/job.storage (world/JobStorage), and the server world's storage lies at
+// world + world.storage (world: the address KilnApi.server_world returns): the identity kiln.items' tool wear and power
+// scaling check too. docs/re/build.md section 7, corrected in 0.2.0-dev.30.8 (kiln#133).
+int64_t job_storage=-1,world_storage=-1;
+kiln::tools::ActionTrace action_trace;
+std::atomic<uint32_t> bound_programs{};
 std::atomic<uintptr_t> server_world{};
 std::atomic<bool> installed{}, accepting{}, continuation_faulted{};
 std::atomic<uint32_t> inflight{};
@@ -37,6 +47,7 @@ std::condition_variable drained;
 KilnHandle impact_handle=0, owner_watch=0;
 void KILN_CALL owner_retired(KilnOwner owner,void*) {kiln_tools_unbind_programs(owner,0);}
 std::atomic<uint64_t> dispatched{}, refused{};
+constexpr ActionExit admitted=ActionExit::Count; // prepare(): every check passed
 struct Admission {
     bool admitted=false;
     Admission() {
@@ -48,8 +59,9 @@ struct Admission {
     ~Admission(){if(admitted){inflight.fetch_sub(1,std::memory_order_acq_rel);drained.notify_all();}}
 };
 
-uintptr_t refuse(KilnHookCall2* call) {
+uintptr_t refuse(KilnHookCall2* call,ActionExit exit,const ActionDetail& detail={}) {
     refused.fetch_add(1,std::memory_order_relaxed);
+    action_trace.record(exit,detail);
     auto* out=reinterpret_cast<uint8_t*>(call->args[0]);
     if (out) { out[0]=0x18; std::memset(out+4,0,4); out[8]=0; }
     return reinterpret_cast<uintptr_t>(out);
@@ -64,18 +76,52 @@ bool read_context(const void* source,kab::NativeCtx* out) {
     } __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
 #endif
 }
-bool prepare(const kab::NativeCtx* ctx,const kab::ArgSlice* args,uint32_t mode,kt::ImpactCopy* copy,
-             uintptr_t* zones,uintptr_t* world) {
+ActionExit copy_exit(kt::CopyExit exit) {
+    switch(exit) {
+    case kt::CopyExit::Ok: return admitted;
+    case kt::CopyExit::Marker: return ActionExit::Marker;
+    case kt::CopyExit::NoActor: return ActionExit::NoActor;
+    case kt::CopyExit::NoUsedItem: return ActionExit::NoUsedItem;
+    case kt::CopyExit::Radius: return ActionExit::RadiusRange;
+    case kt::CopyExit::Position: return ActionExit::Position;
+    case kt::CopyExit::Aliased: return ActionExit::Aliased;
+    default: return ActionExit::Layout;
+    }
+}
+// The world check comes first: an impact another world runs is "not the server world", whatever its arguments say.
+ActionExit prepare_reads(const kab::NativeCtx* ctx,const kab::ArgSlice* args,uint32_t mode,kt::ImpactCopy* copy,
+                         uintptr_t* zones,uintptr_t authority) {
+    if (!ctx || !args || !ctx->iter_ctx || area_offset<0 || job_storage<0 || world_storage<0) return ActionExit::NoAccess;
+    const uintptr_t program_context=*reinterpret_cast<const uintptr_t*>(ctx->iter_ctx);
+    *zones=*reinterpret_cast<const uintptr_t*>(ctx->iter_ctx+static_cast<uintptr_t>(area_offset));
+    if (!program_context || !*zones) return ActionExit::NoAccess;
+    const uintptr_t job=*reinterpret_cast<const uintptr_t*>(program_context);
+    if (!job) return ActionExit::NoAccess;
+    const uintptr_t storage=*reinterpret_cast<const uintptr_t*>(job+static_cast<uintptr_t>(job_storage));
+    if (!authority || !storage || storage!=authority+static_cast<uintptr_t>(world_storage)) return ActionExit::NotServerWorld;
+    return copy_exit(kt::copy_tool_impact_checked(*ctx,*args,mode,*copy));
+}
+ActionExit prepare(const kab::NativeCtx* ctx,const kab::ArgSlice* args,uint32_t mode,kt::ImpactCopy* copy,
+                   uintptr_t* zones,uintptr_t authority) {
 #ifdef _WIN32
     __try {
 #endif
-        if (!ctx || !args || !ctx->iter_ctx || area_offset<0) return false;
-        *world=*reinterpret_cast<const uintptr_t*>(ctx->iter_ctx);
-        *zones=*reinterpret_cast<const uintptr_t*>(ctx->iter_ctx+static_cast<uintptr_t>(area_offset));
-        return *world && *zones && kt::copy_tool_impact(*ctx,*args,mode,*copy);
+        return prepare_reads(ctx,args,mode,copy,zones,authority);
 #ifdef _WIN32
-    } __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
+    } __except(EXCEPTION_EXECUTE_HANDLER) { return ActionExit::ReadFault; }
 #endif
+}
+// The game's own result code of the impact it ran (0 success, 6 cancelled, 0x11 internal, 0x18 missing argument).
+uint8_t result_code(uintptr_t result) {
+    uint8_t code=0xff;
+#ifdef _WIN32
+    __try {
+#endif
+        if (result) code=*reinterpret_cast<const uint8_t*>(result);
+#ifdef _WIN32
+    } __except(EXCEPTION_EXECUTE_HANDLER) { code=0xff; }
+#endif
+    return code;
 }
 bool continue_guarded(KilnHookCall2* call,uintptr_t* result) {
 #ifdef _WIN32
@@ -126,6 +172,7 @@ bool kiln_tools_bind_programs(KilnOwner owner,const KilnToolFamilyDef& family) n
                     brush.radius<0.25 || brush.radius>8) return false;
             next->emplace(source.program,std::move(b));
         }
+        bound_programs.store(static_cast<uint32_t>(next->size()),std::memory_order_relaxed);
         bindings.store(std::move(next),std::memory_order_release);
         return true;
     } catch (...) {return false;}
@@ -141,6 +188,7 @@ void kiln_tools_unbind_programs(KilnOwner owner,uint32_t tool) noexcept {
                 i=next->erase(i);
             } else ++i;
         }
+        bound_programs.store(static_cast<uint32_t>(next->size()),std::memory_order_relaxed);
         bindings.store(std::move(next),std::memory_order_release);
     } catch (...) {
         // Fail closed if retirement cannot allocate its replacement map. Existing native snapshots are safe to pin,
@@ -171,11 +219,14 @@ void kiln_tools_impact_uninstall() noexcept {
     if(hooks && owner_watch && hooks->unsubscribe_owner_retiring)hooks->unsubscribe_owner_retiring(owner_watch);
     impact_handle=owner_watch=0;
     bindings.store({},std::memory_order_release);
+    bound_programs.store(0,std::memory_order_relaxed);
     server_world.store(0,std::memory_order_release);
     // Continuations and module code remain resident. Do not null hooks while an unrelated vanilla entry can run.
 }
 uint64_t kiln_tools_actions_dispatched() noexcept {return dispatched.load(std::memory_order_relaxed);}
 uint64_t kiln_tools_actions_refused() noexcept {return refused.load(std::memory_order_relaxed);}
+kiln::tools::ActionTrace& kiln_tools_action_trace() noexcept {return action_trace;}
+uint32_t kiln_tools_bound_programs() noexcept {return bound_programs.load(std::memory_order_relaxed);}
 
 uintptr_t KILN_CALL kiln_tools_impact_detour(KilnHookCall2* call,void*) {
     // A nested unrelated impact must not inherit this tool's policy. Restore the enclosing policy afterwards.
@@ -184,43 +235,62 @@ uintptr_t KILN_CALL kiln_tools_impact_detour(KilnHookCall2* call,void*) {
     if(!call || !hooks)return 0;
     auto map=bindings.load(std::memory_order_acquire);
     // No tool family bound (no tool mod, or every one removed): every impact is the game's own. It passes through
-    // untouched, without its context even being read, so a player without a tool mod keeps vanilla terraforming.
+    // untouched, without its context even being read or counted, so a player without a tool mod keeps vanilla terraforming.
     if(!map || map->empty())return hooks->call_original2(call);
-    if(!read_context(reinterpret_cast<void*>(call->args[2]),&context))return refuse(call);
+    if(!read_context(reinterpret_cast<void*>(call->args[2]),&context))return refuse(call,ActionExit::Unreadable);
     auto found=map->find(context.program_id);
-    if(found==map->end())return hooks->call_original2(call);
+    if(found==map->end()) {action_trace.other();return hooks->call_original2(call);}
     auto binding=found->second;
+    ActionDetail detail;detail.program=binding->program;
     try {
+        // A fault latch also closes admission: name the latch, the more specific reason, first.
+        if(kiln_tools_actions_faulted())return refuse(call,ActionExit::Faulted,detail);
         Admission admission;
-        if(!admission.admitted || !binding->live.load(std::memory_order_acquire) ||
-           !kiln_tools_actions_ready(binding->policy.mode))return refuse(call);
+        if(!admission.admitted)return refuse(call,ActionExit::Closed,detail);
+        if(!binding->live.load(std::memory_order_acquire))return refuse(call,ActionExit::Retired,detail);
+        if(!kiln_tools_actions_ready(binding->policy.mode))return refuse(call,ActionExit::NotReady,detail);
         kt::ImpactCopy copy;
-        uintptr_t zones=0,world=0;
-        if(!prepare(&context,reinterpret_cast<const kab::ArgSlice*>(call->args[1]),binding->policy.mode,&copy,&zones,&world) ||
-           world!=server_world.load(std::memory_order_acquire))return refuse(call);
-        bool brush_ok=false;
+        uintptr_t zones=0;
+        const auto prepared=prepare(&context,reinterpret_cast<const kab::ArgSlice*>(call->args[1]),binding->policy.mode,&copy,&zones,
+            server_world.load(std::memory_order_acquire));
+        if(prepared!=admitted)return refuse(call,prepared,detail);
+        detail.item=copy.used_item;detail.radius=static_cast<float>(copy.radius);
+        bool family_item=false,brush_ok=false;
         for(const auto& brush:binding->brushes)
-            if((brush.item==copy.used_item || binding->tool==copy.used_item) &&
-               static_cast<double>(static_cast<float>(brush.radius))==copy.radius)brush_ok=true;
-        if(!brush_ok || !area_check(zones,copy.actor,copy.hit,copy.radius) ||
-           !binding->live.load(std::memory_order_acquire) || kiln_tools_actions_faulted())return refuse(call);
+            if(brush.item==copy.used_item || binding->tool==copy.used_item) {
+                family_item=true;
+                if(static_cast<double>(static_cast<float>(brush.radius))==copy.radius)brush_ok=true;
+            }
+        if(!family_item)return refuse(call,ActionExit::NotFamilyItem,detail);
+        if(!brush_ok)return refuse(call,ActionExit::RadiusMismatch,detail);
+        if(!area_check(zones,copy.actor,copy.hit,copy.radius))return refuse(call,ActionExit::OutsideBase,detail);
+        if(!binding->live.load(std::memory_order_acquire))return refuse(call,ActionExit::Retired,detail);
+        if(kiln_tools_actions_faulted())return refuse(call,ActionExit::Faulted,detail);
         kt::ToolPolicyScope scope(binding->policy);
-        if(!kiln_tools_active_policy())return refuse(call); // allocation failed: never unscoped generic terraform
+        if(!kiln_tools_active_policy())return refuse(call,ActionExit::NoMemory,detail); // never unscoped generic terraform
         RestoreArgs restore{call,call->args[1],call->args[2]};
         call->args[1]=reinterpret_cast<uintptr_t>(&copy.arguments);
         call->args[2]=reinterpret_cast<uintptr_t>(&copy.context);
         uintptr_t result=0;
-        // Catch native faults before returning through RAII. Never replay the continuation after a partial edit.
-        if(!continue_guarded(call,&result)) {
+        kiln::tools::StrokeTally tally; // what the terrain kernel sees during this stroke, on this thread
+        bool ran=false;
+        {
+            kiln::tools::StrokeScope stroke(&tally);
+            // Catch native faults before returning through RAII. Never replay the continuation after a partial edit.
+            ran=continue_guarded(call,&result);
+        }
+        if(!ran) {
             // The engine may have committed part of this stroke. Keep undo/history resident, but never admit another
             // tool action in this process, including held repeats or a later family/impact reinstallation.
             continuation_faulted.store(true,std::memory_order_release);
             accepting.store(false,std::memory_order_release);
-            return refuse(call);
+            return refuse(call,ActionExit::ContinuationFault,detail);
         }
         dispatched.fetch_add(1,std::memory_order_relaxed);
+        detail.game=result_code(result);
+        action_trace.record(kiln::tools::stroke_outcome(binding->policy.mode,tally,detail.game),detail);
         return result;
-    } catch (...) {return refuse(call);}
+    } catch (...) {return refuse(call,ActionExit::NoMemory,detail);}
 }
 bool kiln_tools_impact_install(const KilnApi* api,KilnOwner owner,KilnToolAreaCheck check) noexcept {
     if(!api || !owner || !check || kiln_tools_actions_faulted())return false;
@@ -230,11 +300,15 @@ bool kiln_tools_impact_install(const KilnApi* api,KilnOwner owner,KilnToolAreaCh
        !h->detour2 || !h->call_original2 || !h->subscribe_owner_retiring || !h->unsubscribe_owner_retiring ||
        api->symbol({"gameplay/TerraformImpact",24},&address)!=KILN_OK ||
        api->constant({"tools/area.access_zones",23},&offset)!=KILN_OK || offset<0 || offset>0x1000)return false;
+    // Without the world layout an impact's world cannot be told from the authoritative one: refuse installation.
+    int64_t jobs=-1,worlds=-1;
+    if(api->constant({"world/job.storage",17},&jobs)!=KILN_OK || jobs<8 || jobs>0x1000 || (jobs&7) ||
+       api->constant({"world.storage",13},&worlds)!=KILN_OK || worlds<=0 || worlds>0x10000000 || (worlds&7))return false;
     // Common fixed prefix on the qualified client/server entries; never inspect the registry-patched live bytes.
     constexpr uint8_t entry[]={0x4c,0x89,0x44,0x24,0x18,0x48,0x89,0x4c,0x24,0x08,
         0x55,0x53,0x56,0x41,0x55,0x41,0x56,0x41,0x57};
     if(!kt::qualified_entry(h,address,entry))return false;
-    hooks=h;area_check=check;area_offset=offset;
+    hooks=h;area_check=check;area_offset=offset;job_storage=jobs;world_storage=worlds;
     if(h->subscribe_owner_retiring(owner,&owner_retired,nullptr,&owner_watch)!=KILN_OK)return false;
     // Run outside gameplay/rules: both see the copied generic arguments and retain their normal protections.
     KilnHookOrder order{sizeof(order),100,{"tools/TerrainAction",19},{"kiln.gameplay,kiln.rules",24},{},0};

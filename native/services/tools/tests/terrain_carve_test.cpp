@@ -98,5 +98,34 @@ int main() {
         CHECK(std::memcmp(result.bytes.data(), before.bytes.data(), coefficient_offset) == 0);
         CHECK(std::memcmp(result.bytes.data() + 0x80, before.bytes.data() + 0x80, 0x10) == 0);
     }
+    // The action trace's view of a kernel call (kiln#133): whether an allowed cell kept a positive coefficient (the only
+    // kind the kernel carves), and the kernel's own removal report total, read before and after it.
+    {
+        std::array<float, 256> table{};
+        uint8_t allow[32]{};
+        set(allow, 8); set(allow, 14);
+        bool removable = true;
+        auto d = descriptor(table.data(), table.size());
+        CHECK(filter_brush(d.bytes.data(), allow, result, filtered, copy_memory, &removable) && !removable); // all zero
+        table[8] = -1; table[14] = 0; table[9] = 5; // unmineable allowed cells and a minable cell that is not allowed
+        CHECK(filter_brush(d.bytes.data(), allow, result, filtered, copy_memory, &removable) && !removable);
+        table[14] = 0.25f;
+        CHECK(filter_brush(d.bytes.data(), allow, result, filtered, copy_memory, &removable) && removable);
+        auto short_table = descriptor(table.data(), 10); // cell 14 lies beyond the span: not minable
+        CHECK(filter_brush(short_table.bytes.data(), allow, result, filtered, copy_memory, &removable) && !removable);
+        removable = true;
+        CHECK(!filter_brush(d.bytes.data(), allow, result, filtered, unreadable, &removable) && !removable);
+        // The report: the descriptor's pointer at +0x80, the float total at +0x18.
+        struct Report { float* data; uint64_t capacity; uint8_t material, pad[7]; float total, tail; } report{nullptr, 256, 0, {}, 2.5f, 0};
+        static_assert(offsetof(Report, total) == report_total_offset);
+        float total = 0;
+        const void* none = nullptr;
+        std::memcpy(result.bytes.data() + report_offset, &none, sizeof none);
+        CHECK(!report_total(result, copy_memory, total)); // no report named
+        const auto* named = &report;
+        std::memcpy(result.bytes.data() + report_offset, &named, sizeof named);
+        CHECK(report_total(result, copy_memory, total) && total == 2.5f);
+        CHECK(!report_total(result, unreadable, total));
+    }
     std::printf("terrain carve: %d checks passed\n", checks);
 }

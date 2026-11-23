@@ -57,9 +57,16 @@ bool vanilla_kernel(void* brush, void* data, void* unknown, const int32_t* origi
 #endif
     // Fake kernel: coefficient zero must preserve *every* fill value, including material-bearing air.
     // Its deliberately distinct partial boundary behaviour must be passed through, not reconstructed by Kiln.
+    bool carved = false;
     for (auto& cell : static_cast<Cells*>(data)->cells)
-        if (cell.material > 0 && cell.material < 128 && cell.material < count && coefficients[cell.material] > 0)
+        if (cell.material > 0 && cell.material < 128 && cell.material < count && coefficients[cell.material] > 0) {
+            carved = carved || cell.fill;
             cell.fill = cell.fill > 31 ? uint8_t(cell.fill - 31) : 0;
+        }
+    // Like the game's kernel, add what it carved to the report the descriptor names (+0x80, total at +0x18).
+    uintptr_t report = 0;
+    std::memcpy(&report, static_cast<uint8_t*>(brush) + report_offset, sizeof report);
+    if (carved && report) *reinterpret_cast<float*>(report + report_total_offset) += 1.5f;
     return false; // The wrapper must preserve the game's return, not turn it into unconditional success.
 }
 bool vanilla_dispatch(void*, void*, void* data, const int32_t* origin, const uint32_t* dims,
@@ -388,6 +395,30 @@ int main(int argc, char** argv) {
     for (auto& worker : workers) worker.join();
     concurrent_kernel = nullptr;
     CHECK(active == &policy);
+    // The stroke's trace (kiln#133): inside a stroke the filtered kernel notes whether an allowed cell is minable and
+    // whether the game's own report grew; outside one it notes nothing. The report stays the game's to write.
+    {
+        struct Report { float* data; uint64_t capacity; uint8_t material, pad[7]; float total, tail; } report{nullptr, 256, 0, {}, 0, 0};
+        BrushCopy reporting = brush;
+        const auto* named = &report;
+        std::memcpy(reporting.bytes.data() + report_offset, &named, sizeof named);
+        expected_brush = reporting.bytes.data();
+        Cells rubble{{{8,255}}}, ground{{{9,255}}};
+        CHECK(!installed_kernel(reporting.bytes.data(), &rubble, &props, origin, dims)); // no stroke: nothing noted
+        CHECK(report.total == 1.5f && kiln::tools::stroke_tally == nullptr);
+        kiln::tools::StrokeTally removed, unmatched, unmeasured;
+        {kiln::tools::StrokeScope stroke(&removed);rubble.cells = {{8,255}};
+         CHECK(!installed_kernel(reporting.bytes.data(), &rubble, &props, origin, dims));}
+        CHECK(removed.kernels == 1 && removed.removable && removed.removed && removed.measured && report.total == 3.0f);
+        {kiln::tools::StrokeScope stroke(&unmatched);
+         CHECK(!installed_kernel(reporting.bytes.data(), &ground, &props, origin, dims));}
+        CHECK(unmatched.kernels == 1 && unmatched.removable && !unmatched.removed && unmatched.measured && ground.cells[0].fill == 255);
+        expected_brush = brush.bytes.data();
+        {kiln::tools::StrokeScope stroke(&unmeasured);rubble.cells = {{8,255}};
+         CHECK(!installed_kernel(brush.bytes.data(), &rubble, &props, origin, dims));}
+        CHECK(unmeasured.kernels == 1 && unmeasured.removable && !unmeasured.measured && !unmeasured.removed);
+        CHECK(kiln::tools::stroke_tally == nullptr);
+    }
 #ifdef _WIN32
     // The production SEH copy refuses bad descriptors/tables without reaching any continuation.
     const int calls_before_fault = kernel_calls;

@@ -10,8 +10,12 @@
 #include "hooks/terrain_carve.h"
 #include "hooks/terrain_payment.h"
 #include "history.h"
+#include "action_trace.h"
 #include <atomic>
+#include <chrono>
 #include <cstring>
+#include <mutex>
+#include <string>
 
 // Hook packages disable only their own links, after the service has closed admission and drained policy scopes.
 void kiln_tools_carve_uninstall();
@@ -50,6 +54,44 @@ KilnStr text(const char* s) {return {s,std::strlen(s)};}
 void report(const char* name,uint32_t state,uint32_t reason,const char* message) {
     if(caps)caps->report(service_owner,text(name),state,reason,text(message));
 }
+// The action trace (action_trace.h, kiln#133): the Pre publisher's last summary, shown on the tools.actions rows.
+std::mutex trace_gate;
+std::string trace_text;
+std::chrono::steady_clock::time_point trace_published{};
+// "<why>; tool programs bound here: N; action attempts: ...": whether this process published a family, and its strokes.
+void report_actions(const char* name,const kt::ActionAvailability& a) {
+    if(!caps)return;
+    try {
+        std::string message(a.why?a.why:"");
+        if(!message.empty())message+="; ";
+        message+="tool programs bound here: "+std::to_string(kiln_tools_bound_programs());
+        {std::lock_guard lock(trace_gate);if(!trace_text.empty())message+="; "+trace_text;}
+        caps->report(service_owner,text(name),a.state,a.reason,{message.data(),message.size()});
+    } catch(...) {report(name,a.state,a.reason,a.why);}
+}
+// Server Pre: a change of the stroke trace's state becomes one kiln.log line and the tools.actions text, at most once a
+// second. The line names the state now, the last stroke's facts and how many changes it stands for, then every counter.
+void publish_action_trace() {
+    auto& trace=kiln_tools_action_trace();
+    if(!trace.pending()||!api)return;
+    const auto now=std::chrono::steady_clock::now();
+    if(trace_published.time_since_epoch().count()&&now-trace_published<std::chrono::seconds(1))return;
+    kiln::tools::ActionExit state{};uint64_t covered=0;
+    if(!trace.take(&state,&covered))return;
+    trace_published=now;
+    try {
+        const std::string summary=trace.summary();
+        std::string line=std::string("tools: action attempts: ")+kiln::tools::action_exit_name(state)+" ("+
+            kiln::tools::action_exit_meaning(state)+")"+trace.detail_text();
+        if(covered>1)line+="; "+std::to_string(covered)+" state changes since the last line";
+        line+="; strokes: "+summary;
+        const bool fault=state==kiln::tools::ActionExit::ContinuationFault||state==kiln::tools::ActionExit::ReadFault||
+            state==kiln::tools::ActionExit::Faulted;
+        if(api->log)api->log(service_owner,fault?KILN_LOG_WARN:KILN_LOG_INFO,{line.data(),line.size()});
+        std::lock_guard lock(trace_gate);
+        trace_text="action attempts: "+summary+"; last: "+kiln::tools::action_exit_name(state);
+    } catch(...) {}
+}
 uint32_t session_state() {
     KilnSessionInfo s{};s.size=sizeof(s);
     return api && api->session && api->session(&s)==KILN_OK ? s.state : KILN_SESSION_NONE;
@@ -60,11 +102,11 @@ kt::ActionAvailability availability(uint32_t mode) {
 }
 void report_caps() {
     const auto remove=availability(KILN_TOOL_POLICY_REMOVE),add=availability(KILN_TOOL_POLICY_ADD);
-    report("tools.actions.remove",remove.state,remove.reason,remove.why);
-    report("tools.actions.add",add.state,add.reason,add.why);
+    report_actions("tools.actions.remove",remove);
+    report_actions("tools.actions.add",add);
     const auto any=remove.state==KILN_CAP_AVAILABLE ? remove : add.state==KILN_CAP_AVAILABLE ? add :
         remove.state==KILN_CAP_PENDING ? remove : add.state==KILN_CAP_PENDING ? add : remove;
-    report("tools.actions",any.state,any.reason,any.why);
+    report_actions("tools.actions",any);
     report("tools.callbacks",KILN_CAP_UNAVAILABLE,KILN_CAP_REASON_POLICY,"declarative tool actions only in this release");
     // tools.build_area is also a static sigdb feature; do not mark that static name pending for a missing session.
     const bool area=impact_ready.load() && kiln_tools_hook_installed(KILN_TOOL_HOOK_EDGE_CHECK);
@@ -111,7 +153,7 @@ const kt::ToolPackage packages[]={
 };
 void KILN_CALL pre(const KilnTickInfo*,void*) {
     const auto w=lifecycle.load() && api->server_world ? api->server_world() : 0;
-    world.store(w);kiln_tools_impact_world(w);report_caps();
+    world.store(w);kiln_tools_impact_world(w);publish_action_trace();report_caps();
 }
 void KILN_CALL changed(const KilnWorldEvent* event,void*) {
     if(event && event->kind==KILN_WORLD_SERVER) {

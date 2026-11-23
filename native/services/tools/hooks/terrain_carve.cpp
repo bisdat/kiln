@@ -6,6 +6,7 @@
 #endif
 #include "terrain_carve.h"
 #include "../include/kiln_tools_policy.h"
+#include "../action_trace.h"
 #include "kiln_hook.hpp"
 #include "services/kiln_caps.h"
 
@@ -42,8 +43,18 @@ bool filtered_kernel(void* brush, void* cells, void* unknown, const int32_t* ori
     if (policy->size < offsetof(KilnToolPolicyView, remove_cells) + sizeof policy->remove_cells) return false;
     BrushCopy owned;
     std::array<float, 256> coefficients;
-    if (!filter_brush(brush, policy->remove_cells, owned, coefficients, &copy_memory)) return false;
-    return kernel_hook.original<Kernel>()(owned.bytes.data(), cells, unknown, origin, dims);
+    bool removable = false;
+    if (!filter_brush(brush, policy->remove_cells, owned, coefficients, &copy_memory, &removable)) {
+        kiln::tools::note_brush_fault();
+        return false;
+    }
+    // The stroke's trace (action_trace.h): whether an allowed cell is minable, and whether the kernel's own removal
+    // report grew. Two guarded 4-byte reads; the report and the cells stay the game's.
+    float before = 0, after = 0;
+    const bool measured = report_total(owned, &copy_memory, before);
+    const bool result = kernel_hook.original<Kernel>()(owned.bytes.data(), cells, unknown, origin, dims);
+    kiln::tools::note_kernel(removable, measured && report_total(owned, &copy_memory, after) ? (after > before ? 1 : 0) : -1);
+    return result;
 }
 
 bool filtered_dispatch(void* terrain, void* box, void* buffers, const int32_t* begin, const uint32_t* end,
