@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// kiln-emf.dll: a Kiln plugin (<game>/kiln/plugins/) that loads unmodified EMF mods (EMF 0.3.3 to 0.6.0, EmfApi v27) on Kiln's
+// kiln-emf.dll: a Kiln plugin (<game>/kiln/plugins/) that loads unmodified EMF mods (EMF 0.3.3 to 0.6.20, EmfApi v48) on Kiln's
 // services. In on_ready, after every service is up and before the game's entry point:
 //   1. step aside when the real EMF runs in this process (emf_core.dll, or EMF's loader chained by Kiln's proxy);
 //   2. find the mods (the active profile's "emf" entries through kiln.profile, and <game>/emf/mods);

@@ -28,12 +28,12 @@ void tick(EmfWorld *world, void *) {
     check(api->net_peer(world, 7, "emf/mods") == 0, "emf/mods: no peer before a game said hello");
     check(!api->net_to_player(world, 7, "emf/mods", "x", 1) && api->net_to_players(world, "emf/mods", "x", 1) == 0,
           "emf/mods: nothing goes out on the core's channel with nobody connected");
-    api->log("emf_net_probe", "EMF v47 lab probe done: %d PASS, %d FAIL", pass, fail);
+    api->log("emf_net_probe", "EMF v48 lab probe done: %d PASS, %d FAIL", pass, fail);
 }
 } // namespace
 extern "C" __declspec(dllexport) bool emf_mod_load(const EmfApi *table) {
     api = table;
-    check(api && api->version == 47 && api->size == sizeof(EmfApi) && sizeof(EmfApi) == 1160, "official v47 table (1160 bytes)");
+    check(api && api->version == 48 && api->size == sizeof(EmfApi) && sizeof(EmfApi) == 1160, "official v48 table (1160 bytes)");
     check(api->net_channel && api->net_to_server && api->net_to_player && api->net_to_players && api->net_peer,
           "five callable net slots");
     EmfNetChannel c{};

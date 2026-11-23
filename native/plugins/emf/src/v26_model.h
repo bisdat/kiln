@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// kiln-emf: the parts of EmfApi v22-v26 (and the table sizes up to v47) that need no game and no Windows, so host tests (tests/run.sh) run them with
+// kiln-emf: the parts of EmfApi v22-v26 (and the table sizes up to v48) that need no game and no Windows, so host tests (tests/run.sh) run them with
 // fakes: the table layout per version, mod windows (v24/v26 definitions as EMF copies them), the component policy and
 // the change queue (v23), E-prompt offers (v25) and picture paths (v26). The glue onto Kiln's services is in
 // api_level.cpp, api_components.cpp and api_windows.cpp.
@@ -67,12 +67,20 @@ constexpr uint32_t kApiV45Size = kApiV44Size;
 constexpr uint32_t kApiV46Size = KEMF_FIELD_END(EmfApi, villager_moving);
 // v47 (EMF 0.6.19): find_wall_ex and spawn_facing; marker bar reuses pad2, no struct grows.
 constexpr uint32_t kApiV47Size = KEMF_FIELD_END(EmfApi, spawn_facing);
+// v48 (EMF 0.6.20, its api_sizes.h): the version only; EmfPathQuery.as_entity and EmfPathResult's used values (moves,
+// jump_up, jump_down, width, height) are appended to their structs.
+constexpr uint32_t kApiV48Size = kApiV47Size;
 // The smallest `size` each v36-v40 request struct may carry (the end of its last field in the version that added it).
 constexpr uint32_t kRemoveBuildingV36Size = KEMF_FIELD_END(EmfRemoveBuilding, why);
 constexpr uint32_t kPathQueryV37Size = KEMF_FIELD_END(EmfPathQuery, max_nodes);
 constexpr uint32_t kEnemyOrderV39Size = KEMF_FIELD_END(EmfEnemyOrder, why);
 constexpr uint32_t kMoveOrderV40Size = KEMF_FIELD_END(EmfMoveOrder, why);
 constexpr uint32_t kPathResultV37Size = KEMF_FIELD_END(EmfPathResult, length);  // before v42's doors
+constexpr uint32_t kPathResultV42Size = KEMF_FIELD_END(EmfPathResult, doors);   // before v48's used values
+// v48's ends: a v47 mod's 52-byte query has no as_entity, its 32-byte result no used values (read only when `size`
+// covers them: 44 bytes, the end of height; sizeof is 48 with the padding after it)
+constexpr uint32_t kPathQueryV48Size = KEMF_FIELD_END(EmfPathQuery, as_entity);
+constexpr uint32_t kPathResultV48Size = KEMF_FIELD_END(EmfPathResult, height);
 // v44's structs: the request (refused untouched below this), its result, and a block's facts before v45's `world`
 constexpr uint32_t kBreakBlocksV44Size = KEMF_FIELD_END(EmfBreakBlocks, why);
 constexpr uint32_t kBreakResultV44Size = KEMF_FIELD_END(EmfBreakResult, dropped);
@@ -106,8 +114,10 @@ static_assert(kApiV45Size == 1120 && offsetof(EmfApi, villager_move) == kApiV45S
                   kApiV46Size == 1144,
               "EmfApi v45 (the version only) and v46 (villager_move, villager_move_cancel, villager_moving)");
 static_assert(offsetof(EmfApi, find_wall_ex) == kApiV46Size && offsetof(EmfApi, spawn_facing) == 1152 &&
-                  kApiV47Size == 1160 && sizeof(EmfApi) == kApiV47Size && EMF_API_VERSION == 47,
+                  kApiV47Size == 1160,
               "EmfApi v47 appends find_wall_ex and spawn_facing");
+static_assert(kApiV48Size == 1160 && sizeof(EmfApi) == kApiV48Size && EMF_API_VERSION == 48,
+              "EmfApi v48: the version only (EmfPathQuery.as_entity, EmfPathResult's used values)");
 static_assert(offsetof(EmfApi, chat_tell_ex) == 760 && offsetof(EmfApi, hit_rule_add) == 792 &&
                   offsetof(EmfApi, buff_apply) == 840 && offsetof(EmfApi, world_to_screen) == 896,
               "EmfApi v30-v33 slots");
@@ -127,10 +137,16 @@ static_assert(sizeof(EmfPlayerView) == 48 && offsetof(EmfPlayerView, heading_deg
 static_assert(kRemoveBuildingV36Size == 144 && sizeof(EmfRemoveBuilding) == 144 && offsetof(EmfRemoveBuilding, refunded) == 20 &&
                   offsetof(EmfRemoveBuilding, why) == 24,
               "EmfRemoveBuilding layout (v36)");
-static_assert(kPathQueryV37Size == 52 && sizeof(EmfPathQuery) == 52 && offsetof(EmfPathQuery, max_nodes) == 48 &&
-                  sizeof(EmfPathPoint) == 16 && kPathResultV37Size == 20 && offsetof(EmfPathResult, count) == 12 &&
-                  offsetof(EmfPathResult, doors) == 24 && sizeof(EmfPathResult) == 32,
-              "EmfPathQuery / EmfPathPoint / EmfPathResult layouts (v37; v42 doors)");
+static_assert(kPathQueryV37Size == 52 && offsetof(EmfPathQuery, moves) == 32 && offsetof(EmfPathQuery, width) == 36 &&
+                  offsetof(EmfPathQuery, max_nodes) == 48 && offsetof(EmfPathQuery, as_entity) == 52 &&
+                  kPathQueryV48Size == 56 && sizeof(EmfPathQuery) == 56,
+              "EmfPathQuery layout (v37; v48 as_entity)");
+static_assert(sizeof(EmfPathPoint) == 16 && kPathResultV37Size == 20 && offsetof(EmfPathResult, count) == 12 &&
+                  offsetof(EmfPathResult, doors) == 24 && kPathResultV42Size == 32 && offsetof(EmfPathResult, moves) == 32 &&
+                  offsetof(EmfPathResult, jump_up) == 34 && offsetof(EmfPathResult, jump_down) == 35 &&
+                  offsetof(EmfPathResult, width) == 36 && offsetof(EmfPathResult, height) == 40 &&
+                  kPathResultV48Size == 44 && sizeof(EmfPathResult) == 48,
+              "EmfPathPoint / EmfPathResult layouts (v37; v42 doors; v48 the used values)");
 static_assert(kEnemyOrderV39Size == 120 && sizeof(EmfEnemyOrder) == 120 && offsetof(EmfEnemyOrder, why) == 24,
               "EmfEnemyOrder layout (v39)");
 static_assert(kMoveOrderV40Size == 128 && sizeof(EmfMoveOrder) == 136 && offsetof(EmfMoveOrder, stuck_seconds) == 128 &&

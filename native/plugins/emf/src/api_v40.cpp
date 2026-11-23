@@ -1,16 +1,18 @@
 // SPDX-License-Identifier: MIT
-// The EmfApi table, v28 to v47 (EMF 0.6.3 to 0.6.19): the 54 functions EMF appended after net_peer.
+// The EmfApi table, v28 to v48 (EMF 0.6.3 to 0.6.20): the 54 functions EMF appended after net_peer.
 //
-// kiln-emf serves the whole table (1160 bytes) so that a mod built against any EMF header up to 0.6.19 starts:
+// kiln-emf serves the whole table (1160 bytes) so that a mod built against any EMF header up to 0.6.20 starts:
 // emf::init in EMF's SDK refuses a host whose table is smaller than the mod's own, whatever the mod then calls (since
 // 0.6.10 a mod may pass a lower min_version and check has_vNN(), but the default is the header's whole table: EMF's
-// own lua 1.40 and raids of 0.6.19 keep it).
+// own lua 1.41 and raids of 0.6.20 keep it).
 // v41 (0.6.10) and v42 (0.6.11) added no function, only fields at the end of two structs: EmfMoveOrder.stuck_seconds
 // (and the flag EMF_MOVE_PEACEFUL_ALL) and EmfPathResult.doors. kiln-emf's version (42 since 0.2.0-dev.28) lets a mod
 // whose mod.json says "emf": 41 or 42 load; enemy_move and path_find, the functions those fields belong to, are not carried yet
 // (below): a move order of either size is refused with its `why`, and no path result is ever handed to a mod.
 // v43-v46 permissions and villager moves remain unavailable. The v44/v45/v47 block family is filled by
 // api_terrain.cpp through kiln.build; spawn_facing by api_spawn.cpp through kiln.spawn. Marker bars stay unavailable.
+// v48 (0.6.20) added no function: EmfPathQuery.as_entity (plan as a given creature) and EmfPathResult's used values
+// belong to path_find, which is not carried: a query of either size is answered 0 unread, and no result is written.
 //
 // Carried: chat_tell_ex and chat_broadcast_ex (api_game.cpp: kiln.chat's server lines are already lines without a
 // speaker), world_to_screen (kiln.render's camera, below) and on_hit (api_hits.cpp, fill_hits; since 0.2.0-dev.30.3).
@@ -249,6 +251,8 @@ bool api_remove_building(EmfWorld*, EmfRemoveBuilding* req) {
 }
 
 // ---------------------------------------------------------------------------------------------- v37 -------------
+// EMF's answer while its path service is off on a game build: 0 before the query is read (so a v47 mod's 52-byte
+// query and a v48 mod's 56-byte one with as_entity are treated alike), no callback, so no EmfPathResult of either size.
 uint32_t api_path_find(EmfWorld*, const EmfPathQuery*, EmfPathCallback, void*) {
     KEMF_NOT_YET("path_find");
     return 0;  // refused: no callback comes

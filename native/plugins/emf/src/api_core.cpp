@@ -540,7 +540,7 @@ const EmfApi* api_table() {
         fill_components(&g_table);  // v23, v25
         fill_windows(&g_table);     // v24, v26
         fill_net(&g_table);         // v27
-        fill_v40(&g_table);         // v28-v47 (spawn_facing is filled by fill_game)
+        fill_v40(&g_table);         // v28-v48 (spawn_facing is filled by fill_game)
         fill_hits(&g_table);        // v31 on_hit (api_hits.cpp)
         // every slot must be filled: a NULL would crash a mod that checks only api->size
         const auto* slots = reinterpret_cast<void* const*>(reinterpret_cast<const uint8_t*>(&g_table) + 8);

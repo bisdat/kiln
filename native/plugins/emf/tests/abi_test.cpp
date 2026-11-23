@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
-// Frozen x64 slot map reviewed against EMF 0.6.19 sdk/include/emf/emf_api.h and src/core/api_sizes.h (v27: 728 bytes;
-// v40 to v42: 1088; v43: 1096; v44 and v45: 1120; v46: 1144; v47: 1160).
+// Frozen x64 slot map reviewed against EMF 0.6.20 sdk/include/emf/emf_api.h and src/core/api_sizes.h (v27: 728 bytes;
+// v40 to v42: 1088; v43: 1096; v44 and v45: 1120; v46: 1144; v47 and v48: 1160).
 #include "emf/emf_api.h"
 #include <cstddef>
 #define SLOT(name, offset) static_assert(offsetof(EmfApi, name) == offset)
-static_assert(sizeof(EmfApi)==1160 && alignof(EmfApi)==8 && EMF_API_VERSION==47);
+static_assert(sizeof(EmfApi)==1160 && alignof(EmfApi)==8 && EMF_API_VERSION==48);
 static_assert(offsetof(EmfApi,version)==0 && offsetof(EmfApi,size)==4);
 SLOT(log, 8);
 SLOT(server_world, 16);
@@ -167,11 +167,17 @@ static_assert(sizeof(EmfPlayerEvent) == 96 && sizeof(EmfHit) == 80 && sizeof(Emf
 // v41 appended EmfMoveOrder.stuck_seconds and pad2 (128 -> 136), v42 EmfPathResult.doors (20 -> 32): fields at the end
 static_assert(sizeof(EmfRemoveBuilding) == 144 && sizeof(EmfEnemyOrder) == 120 && sizeof(EmfMoveOrder) == 136 &&
               offsetof(EmfMoveOrder, stuck_seconds) == 128);
-static_assert(sizeof(EmfPathResult) == 32 && offsetof(EmfPathResult, length) == 16 && offsetof(EmfPathResult, doors) == 24);
-static_assert(sizeof(EmfPathQuery) == 52 && sizeof(EmfMarker) == 80 && sizeof(EmfCanvas) == 24 && sizeof(EmfCanvasCmd) == 64);
+static_assert(offsetof(EmfPathResult, length) == 16 && offsetof(EmfPathResult, doors) == 24);
+static_assert(offsetof(EmfPathQuery, max_nodes) == 48 && sizeof(EmfMarker) == 80 && sizeof(EmfCanvas) == 24 && sizeof(EmfCanvasCmd) == 64);
+// v48 (0.6.20) is the version only for the table (still 1160 bytes); two structs grow at their end: EmfPathQuery.as_entity
+// (52 -> 56) and the result's used values (32 -> 48). A v47 mod's 52-byte query and 32-byte result keep their offsets.
+static_assert(offsetof(EmfPathQuery, as_entity) == 52 && sizeof(EmfPathQuery) == 56);
+static_assert(offsetof(EmfPathResult, moves) == 32 && offsetof(EmfPathResult, jump_up) == 34 &&
+              offsetof(EmfPathResult, jump_down) == 35 && offsetof(EmfPathResult, width) == 36 &&
+              offsetof(EmfPathResult, height) == 40 && sizeof(EmfPathResult) == 48);
 // v46 put EmfMoveOrder.hold_seconds where pad2 was (the struct stays 136 bytes)
 static_assert(offsetof(EmfMoveOrder, hold_seconds) == 132 && sizeof(EmfMoveOrder) == 136);
-// v44's structs (EMF's api_sizes.h at 0.6.19); v45 appended EmfBlockInfo.world (40 -> 44)
+// v44's structs (EMF's api_sizes.h at 0.6.20); v45 appended EmfBlockInfo.world (40 -> 44)
 static_assert(sizeof(EmfBreakBlocks) == 160 && offsetof(EmfBreakBlocks, radius) == 20 && offsetof(EmfBreakBlocks, damage) == 28 &&
               offsetof(EmfBreakBlocks, material_count) == 48 && offsetof(EmfBreakBlocks, materials) == 56 &&
               offsetof(EmfBreakBlocks, why) == 64);
@@ -179,4 +185,4 @@ static_assert(sizeof(EmfBreakResult) == 20 && offsetof(EmfBreakResult, dropped) 
 static_assert(sizeof(EmfBlockInfo) == 44 && offsetof(EmfBlockInfo, damage) == 24 && offsetof(EmfBlockInfo, x) == 28 &&
               offsetof(EmfBlockInfo, z) + sizeof(float) == 40 && offsetof(EmfBlockInfo, world) == 40);
 static_assert(EMF_MOVE_HOLD == 0x8u && EMF_BREAK_WORLD == 0x4u && EMF_PERM_KICK_BAN == 0x01u && EMF_PERM_RECEIVE_EXP == 0x20u);
-int main() { return EMF_API_VERSION == 47 ? 0 : 1; }
+int main() { return EMF_API_VERSION == 48 ? 0 : 1; }

@@ -91,8 +91,8 @@ public sealed partial class ClientPassMod
     [ClientCheck("emf.current-mods", "A current EMF mod runs with no EMF installed", Area = "Other frameworks", Since = Dev27,
         Order = 314)]
     public Task EmfCurrentMods(CheckContext c) => Outside(c,
-        "Put EMF 0.6.19's lua mod and its kill_counter in emf/mods (switched on in kiln/config/emf/<id>.ini), start through " +
-        "Kiln with no EMF installed, and kill a creature. kiln.log then has a line \"[emf:lua] lua 1.40.0 ... loaded\" and " +
+        "Put EMF 0.6.20's lua mod and its kill_counter in emf/mods (switched on in kiln/config/emf/<id>.ini), start through " +
+        "Kiln with no EMF installed, and kill a creature. kiln.log then has a line \"[emf:lua] lua 1.41.0 ... loaded\" and " +
         "no line with \"built for EMF API\". Did the kill counter's line show on screen, with kiln.log as described?");
 
     [ClientCheck("foreign.autodoors-find", "Auto Doors and Find next to Kiln, installed by hand", Area = "Other frameworks",
