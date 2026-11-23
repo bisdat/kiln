@@ -15,7 +15,8 @@ public enum RegistryEntryPoint
     ModLoad = 2,
     /// <summary>Each new world, including an id-less one. Settings stay unavailable until adoption reauthors the point with a bound id.</summary>
     WorldLoad = 4,
-    /// <summary>After the old runtime instance retires and its replacement loads.</summary>
+    /// <summary>After the old runtime instance retires and its replacement loads. Replacing a declared ModLoad, it keeps
+    /// ModLoad's process lifetime unless it reads per-world settings (then it is replayed at the next bound world).</summary>
     HotReload = 8,
     /// <summary>An explicit live transaction, not an automatically invoked class declaration.</summary>
     Manual = 16,
@@ -141,6 +142,8 @@ public sealed class RegistryContext
     internal Func<ulong>? CurrentWorldToken { get; init; }
     internal Func<string?>? Capture;
     internal Dictionary<string, ConfigFile> InputConfigs { get; private set; }
+    /// <summary>A per-world setting was read in this frame (it survives Close: the host decides the change's lifetime after).</summary>
+    internal bool ReadWorldSettings { get; private set; }
     internal ModContext Owner => _owner.TryGetTarget(out var mod) ? mod : throw Error(RegistryContextError.Unloaded, "the mod retired");
     internal void Ensure()
     {
@@ -175,6 +178,7 @@ public sealed class RegistryContext
             frame.EnsureWorldSettings();
             if (frame.World?.Id is not { } id || file.WorldId != id)
                 throw Error(RegistryContextError.WorldSettingsUnavailable, "this world's settings have not been bound");
+            frame.ReadWorldSettings = true;
         }
         if (frame._observedSettings.Contains(file.Id)) return;
         _observing = true;

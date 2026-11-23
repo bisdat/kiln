@@ -339,6 +339,55 @@ public sealed class RegistryDispatchTests : ModsFixture
         manager.PrepareRegistry(100); Assert.Equal(1, native.Subscriptions);
         manager.Dispose(); Assert.Equal(0, native.Subscriptions); Assert.Null(RegistryRuntime.Manual);
     }
+    // review4 NS3: a HotReload pass that replaces a ModLoad|HotReload author's ModLoad layer keeps its process lifetime.
+    [Fact(Timeout = 30_000)]
+    public async Task HotReloadReplacementKeepsModLoadLifetimeAcrossWorlds()
+    {
+        await Task.Yield();
+        using var native = new FakeRegistry(); using var manager = NewManager(native.Host);
+        using var dispatch = new RegistryDispatch(manager); dispatch.Prepare(100);
+        var old = Owner(native, "review4");
+        dispatch.Loaded(new Author(c => { if (c.Phase == RegistryPhase.Alter) Edit(c, 50); }), old, Root, false);
+        dispatch.FlushLoads(); Assert.Equal(50, native.Value);
+        native.ChangeWorld(2); dispatch.FlushLoads();
+        Assert.Equal(50, native.Value); // before the reload: the ModLoad layer follows the process into world 2
+        old.Retire();
+        var replacement = Owner(native, "review4"); var points = new List<RegistryEntryPoint>();
+        dispatch.Loaded(new Author(c => { points.Add(c.EntryPoint); if (c.Phase == RegistryPhase.Alter) Edit(c, 50); }), replacement, Root, true);
+        dispatch.FlushLoads(); Assert.Equal(50, native.Value);
+        Assert.All(points, p => Assert.Equal(RegistryEntryPoint.HotReload, p));
+        native.ChangeWorld(3); dispatch.FlushLoads();
+        Assert.Equal(50, native.Value); // the replacement's edits persist like the ModLoad layer they replaced
+        replacement.Retire(); Assert.Equal(10, native.Value);
+    }
+    // review4 NS3: a replacing HotReload pass that read per-world settings is world-scoped and runs again at the next world.
+    [Fact(Timeout = 30_000)]
+    public async Task HotReloadReplacementThatReadWorldSettingsRunsAgainAtTheNextWorld()
+    {
+        await Task.Yield();
+        WorldConfigs.Reset();
+        try
+        {
+            using var native = new FakeRegistry(); using var manager = NewManager(native.Host);
+            using var dispatch = new RegistryDispatch(manager); dispatch.Prepare(100);
+            WorldConfigs.Announce(Path.Combine(DataDir, "world-a"));
+            var old = Owner(native, "reload-settings");
+            dispatch.Loaded(new Author(c => { if (c.Phase == RegistryPhase.Alter) Edit(c, 50); }), old, Root, false);
+            dispatch.FlushLoads(); Assert.Equal(50, native.Value);
+            old.Retire(); Assert.Equal(10, native.Value);
+            var replacement = Owner(native, "reload-settings"); var worlds = new List<string?>();
+            dispatch.Loaded(new Author(c =>
+            {
+                if (c.Phase != RegistryPhase.Alter) return;
+                worlds.Add(c.World?.Id); Edit(c, 60 + Config.RegisterWorld<WorldInput>().Value.Count);
+            }), replacement, Root, true);
+            dispatch.FlushLoads(); Assert.Equal(63, native.Value);
+            native.ChangeWorld(2); WorldConfigs.Announce(Path.Combine(DataDir, "world-b")); dispatch.FlushLoads();
+            Assert.Equal(new string?[] { "world-a", "world-b" }, worlds); Assert.Equal(63, native.Value);
+            replacement.Retire(); Assert.Equal(10, native.Value);
+        }
+        finally { WorldConfigs.Reset(); }
+    }
     [Fact]
     public unsafe void MissingStageFunctionsMakeTheTransportUnavailable()
     {

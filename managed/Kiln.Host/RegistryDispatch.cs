@@ -40,6 +40,11 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
         internal readonly bool Reload = reload;
         internal bool Pending = true, Faulted;
         internal ulong World;
+        // A replacing HotReload pass that read per-world settings is world-scoped; it runs again once the next world is
+        // bound (review4 NS3). 0: nothing to replay.
+        internal ulong ReplayWorld;
+        // This hot-reloaded record's HotReload pass stands in for its ModLoad point.
+        internal bool ReplacesModLoad => Reload && (Points & RegistryEntryPoint.ModLoad) != 0 && (Points & RegistryEntryPoint.HotReload) != 0;
         internal string? WorldId;
         internal readonly HashSet<ulong> WorldChanges = [];
     }
@@ -207,6 +212,14 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
             if (candidate is null) return;
             var bound = _worldBinding.Bind(candidate);
             var world = bound ? candidate.Value : candidate.Value with { Id = null };
+            if (bound)
+            {
+                // A replacing HotReload pass that read the previous world's settings expired with that world: author it again
+                // with this world's settings, as its ModLoad point would have persisted (review4 NS3).
+                var replays = _runtime.Where(r => !r.Pending && r.Context.Alive && r.ReplayWorld != 0 && r.ReplayWorld != world.Token).ToArray();
+                foreach (var record in replays) record.ReplayWorld = 0;
+                Apply(replays, RegistryEntryPoint.HotReload, static _ => true);
+            }
             var records = _runtime.Where(r => !r.Pending && r.Context.Alive && (r.Points & RegistryEntryPoint.WorldLoad) != 0 &&
                 (r.World != world.Token || (bound && r.WorldId is null && world.Id is not null))).ToArray();
             foreach (var record in records)
@@ -233,15 +246,21 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
         var inputs = ordered.ToDictionary(r => r, _ => new Dictionary<string, ConfigFile>(StringComparer.Ordinal));
         var committed = ordered.ToDictionary(r => r, _ => new List<ulong>());
         foreach (var record in ordered) record.Faulted = false; // a fault closes this point, not every future world/point
-        void Remember(Runtime record, RegistryCompletion result)
+        void Remember(Runtime record, RegistryEntryPoint native, RegistryCompletion result)
         {
-            Applied(record.Context, result, point != RegistryEntryPoint.ModLoad);
+            Applied(record.Context, result, native != RegistryEntryPoint.ModLoad);
             if (Retained(result))
             {
                 committed[record].Add(result.Handle);
                 if (point == RegistryEntryPoint.WorldLoad) record.WorldChanges.Add(result.Handle);
+                if (point == RegistryEntryPoint.HotReload && native == RegistryEntryPoint.HotReload && record.ReplacesModLoad && result.World != 0)
+                    record.ReplayWorld = result.World;
             }
         }
+        // review4 NS3: a HotReload pass that replaces ModLoad keeps the process lifetime of the layer it replaces, unless it
+        // read per-world settings (then it is world-scoped and replayed at the next bound world).
+        static RegistryEntryPoint NativePoint(Runtime record, RegistryEntryPoint point, bool worldSettings) =>
+            point == RegistryEntryPoint.HotReload && record.ReplacesModLoad && !worldSettings ? RegistryEntryPoint.ModLoad : point;
         void Fault(Runtime record, Exception error)
         {
             record.Faulted = true;
@@ -257,7 +276,7 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
         }
         foreach (var phase in new[] { RegistryPhase.Add, RegistryPhase.Alter, RegistryPhase.Final })
         {
-            var finals = new List<(Runtime Record, ulong Handle)>();
+            var finals = new List<(Runtime Record, RegistryEntryPoint Native, ulong Handle)>();
             foreach (var record in ordered)
             {
                 if (!record.Context.Alive || record.Faulted) continue;
@@ -268,20 +287,20 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
                     context = Context(record.Context, point, phase, World(), record.Code, false, inputs[record]);
                     using var scope = context.Enter();
                     record.Instance.OnRegistry(context);
-                    var ir = context.CaptureIr(); context.Close();
+                    var ir = context.CaptureIr(); var native = NativePoint(record, point, context.ReadWorldSettings); context.Close();
                     if (ir is null) continue;
-                    handle = _native.Begin(record.Context.Owner, point);
+                    handle = _native.Begin(record.Context.Owner, native);
                     _native.Submit(record.Context.Owner, handle, ir);
-                    if (phase == RegistryPhase.Final) finals.Add((record, handle));
-                    else Remember(record, _native.Commit(record.Context.Owner, handle));
+                    if (phase == RegistryPhase.Final) finals.Add((record, native, handle));
+                    else Remember(record, native, _native.Commit(record.Context.Owner, handle));
                     handle = 0;
                 }
                 catch (Exception e) { Fault(record, e); }
                 finally { context?.Close(); if (handle != 0) try { _native.Revert(record.Context.Owner, handle); } catch { } }
             }
             // Every final handler read the add+alter view, never another mod's final commit.
-            foreach (var (record, handle) in finals)
-                try { Remember(record, _native.Commit(record.Context.Owner, handle)); }
+            foreach (var (record, native, handle) in finals)
+                try { Remember(record, native, _native.Commit(record.Context.Owner, handle)); }
                 catch (Exception e) { try { _native.Revert(record.Context.Owner, handle); } catch { } Fault(record, e); }
         }
     }

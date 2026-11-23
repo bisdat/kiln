@@ -62,7 +62,7 @@ The class attribute is constant metadata; Kiln reads it without running the mod.
 | `GameStart` | A retained author instance, once per Add/Alter/Final pass at resources-ready. Global settings only. It is not the transient `OnBoot` instance. |
 | `ModLoad` | Runtime instance after `OnLoad`, once the base registry exists. Global settings only, even when a world already exists. |
 | `WorldLoad` | Runtime instance for each native world token, including a new world with no save id yet. Per-world settings remain unavailable until bound. Adoption reauthors this point with the bound id, replacing its earlier id-less layers. |
-| `HotReload` | Replacement runtime instance, after the old owner's live changes are removed. When declared, it replaces `ModLoad` on reload; the two points never both run for the same replacement. |
+| `HotReload` | Replacement runtime instance, after the old owner's live changes are removed. When declared, it replaces `ModLoad` on reload; the two points never both run for the same replacement. A pass that replaces `ModLoad` keeps ModLoad's process lifetime (its layers follow the process into later worlds); if it read per-world settings, its layers belong to that world and the pass runs again once the next world's settings are bound. A `HotReload` pass of a mod without `ModLoad` is world-bound when a world exists. |
 | `Manual` | Explicit `Registry.Change`, not an automatic class flag. Requires an active world. |
 
 GameStart authors get the registry context, **not cross-mod runtime exports**. Declared dependencies still order the edits:
