@@ -366,6 +366,30 @@ internal static class NpcCompiler
         return (Guid.Parse(j["guid"]!.GetValue<string>()), Guid.Parse(j["skeleton"]?.GetValue<string>() ?? Guid.Empty.ToString()), j["boundingBox"]);
     }
 
+    /// <summary>On a dedicated server whose cook skipped the renderer (no <c>&lt;stem&gt;.model.json</c>): the model's GUID from the body
+    /// manifest assets/cooked/npc-bodies.v1.json, its <c>keen::RenderModel</c> row for <c>&lt;stem&gt;.bin</c> marked
+    /// <c>skippedOnServer</c>. Null on a game client, with the sidecar there, or without such a row (then the sidecar is missing).</summary>
+    private static Guid? ServerModel(BlockContext ctx, string mod, string model)
+    {
+        if (NpcServerSide.IsClient()) return null;
+        var stem = model.Replace('/', '_');
+        var dir = Cooked(ctx, mod);
+        if (File.Exists(Path.Combine(dir, $"{stem}.model.json"))) return null;
+        if (ReadJson(Path.Combine(dir, "npc-bodies.v1.json"))?["entries"] is not JsonArray entries) return null;
+        foreach (var e in entries)
+        {
+            try
+            {
+                if (e is JsonObject row && (string?)row["type"] == "keen::RenderModel" && (bool?)row["skippedOnServer"] == true &&
+                    ((string?)row["file"])?.Replace('\\', '/').EndsWith($"/{stem}.bin", StringComparison.Ordinal) == true &&
+                    Guid.TryParse((string?)row["guid"], out var guid) && guid != Guid.Empty)
+                    return guid;
+            }
+            catch (Exception x) when (x is InvalidOperationException or FormatException) { }  // a field of another type: not this row
+        }
+        return null;
+    }
+
     private static string ModelName(string file) => file.Contains('.') ? file[..file.LastIndexOf('.')].Replace('\\', '/') : file;
     private static string Stem(string file) => Path.GetFileNameWithoutExtension(file);
 
@@ -923,10 +947,21 @@ internal static class NpcCompiler
                 throw new BlockError(ctx.Block, "animation", "an authored roster body needs this mod's cooked animation");
             NpcBodyRig.SkeletonNames(ctx, body.Block.Skeleton ?? Stem(body.Block.Model!), animation.Block.Skeleton ?? Stem(animation.Block.Clips));
             var graph = CookedGraph(ctx, mod, $"{animation.Name}.{body.Name}", "animation", "blocks/*.json");
-            var (model, skeleton, box) = CookedModel(ctx, mod, ModelName(body.Block.Model!), "body.model", "blocks/*.json", body.Block);
-            NpcBodyRig.Cooked(ctx, body.Block, graph, skeleton);
-            if (box == null) throw new BlockError(ctx.Block, "body.size", "the cooked model has no bounds; cook again");
-            NpcBodyRig.Geometry(ctx, body.Block, box);
+            // A dedicated server's cook makes no renderer output (no <stem>.model.json): its model GUID is in the body manifest, and
+            // the bounds are the client's to check (a game client always has the sidecar its cook made)
+            Guid model, skeleton;
+            if (ServerModel(ctx, mod, ModelName(body.Block.Model!)) is { } serverModel)
+            {
+                model = serverModel;
+                skeleton = graph.Skeleton;
+            }
+            else
+            {
+                (model, skeleton, var box) = CookedModel(ctx, mod, ModelName(body.Block.Model!), "body.model", "blocks/*.json", body.Block);
+                NpcBodyRig.Cooked(ctx, body.Block, graph, skeleton);
+                if (box == null) throw new BlockError(ctx.Block, "body.size", "the cooked model has no bounds; cook again");
+                NpcBodyRig.Geometry(ctx, body.Block, box);
+            }
             ownBody = new JsonObject
             {
                 ["model"] = model.ToString(), ["graph"] = graph.Guid.ToString(), ["skeleton"] = skeleton.ToString(),
@@ -1011,6 +1046,9 @@ internal static class NpcCompiler
             // one of a data file the game's start-up build reads from the mod's folder itself (native_pack.cpp): only one from code is written for the next start
             if (!fromData) NpcFiles.Put(mod, key, file);
             else NpcFiles.Forget(mod, key);
+            // a body of its own from code is built at the next start: PendingRestart until then (NpcBodies.Status)
+            if (ownBody == null || fromData) NpcBodies.FromData(mod, name);
+            else NpcBodies.StagedFromCode(mod, name, key, cloneGuid, Guid.Parse((string)ownBody["model"]!), Guid.Parse((string)ownBody["graph"]!));
         });
         return new BlockHandle<NpcBlock>(mod, name, cloneGuid, cloneName, n);
     }

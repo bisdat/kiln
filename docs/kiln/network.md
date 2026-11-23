@@ -129,6 +129,33 @@ and the server compares.
   operator or modpack) and restart the game. The boot content is made at the start, so a config sync or a reload of the
   mod cannot change it.
 
+## NPC bodies at the join
+Since 0.2.0-dev.31. An NPC block with a body of its own ([modding/npc-blocks.md](modding/npc-blocks.md)) is built by each
+side's game at its start: model, skeleton, graph and motion sequences. A player whose game built it differently, or not at
+all, would see another body or none, so the server compares what each side's start made **Ready**, not the mod list.
+
+| Property (HELLO and WELCOME) | Value |
+|---|---|
+| `kiln.npcbodies` | SHA-256, lower-case hex, over the sorted lines `<mod>:<npc block>:<closure hash>` of this side's Ready bodies, joined with `\n`; empty when there are none |
+| `kiln.npcbodies.count` | how many Ready bodies |
+| `kiln.npcbodies.list` | the lines themselves (at most 64), comma-separated, so a refusal can name the first body that differs |
+| `kiln.npcbodies.pending` | only from a game with a body defined in C# after its start (`PendingRestart`): those `mod:block` keys |
+
+The closure hash is the boot build's per-body hash (the canonical body and motion spec, the owned files' hashes, the
+chassis layout); the rows come from kiln.knowledge's `native_manifest` (`"bodies"`). A peer that sends no
+`kiln.npcbodies` (an older Kiln) counts as having no bodies: it joins a server without any and is refused by one with
+them. The decision, server side, after the player-animation check:
+
+- the same hash: nothing to say;
+- another hash: refused with "This server's NPC bodies don't match your game's: the server has the NPC body
+  `<mod>:<npc>` and your game doesn't" (or "your game has ... and this server doesn't", or "... is built differently on
+  your game"), then "Join with the same mods, and restart if you just changed them.";
+- a `kiln.npcbodies.pending` key: refused with a restart-required reason, whatever the hash;
+- `modSync: off`: joins, and the server's log says `joins with other NPC bodies (modSync off)`.
+
+Not verified in a real game yet: the refusal reaching a real player's screen, and two real starts producing the same
+hash for the same mod files. The decision is covered offline by `Kiln.Network.Tests` (`NpcBodyGateTests`).
+
 ## Clients without Kiln
 A vanilla client crashes on the first entity of a template it doesn't have, about 2 s into its loading screen, so a
 refusal that waits for a timer never arrives. Kiln therefore decides before the game sends it any world data.

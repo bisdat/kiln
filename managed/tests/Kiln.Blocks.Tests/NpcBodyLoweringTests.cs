@@ -69,8 +69,50 @@ public sealed class NpcBodyLoweringTests
         Assert.Equal(field, Assert.Throws<BlockError>(() => fixture.Lower()).Field);
     }
 
+    // A dedicated server's cook makes no renderer output: no <stem>.model.json. The model's GUID is the RenderModel row of the body
+    // manifest (assets/cooked/npc-bodies.v1.json, skippedOnServer); the bounds are the client's to check.
+    private static readonly Guid ServerModel = new("0d0e0a0d-beef-4c0d-8e00-000000000001");
+
+    private static JsonNode Manifest(bool skipped = true) => JsonNode.Parse($$"""
+        {"format":1,"sourceHash":"{{new string('c', 64)}}","sources":[],"bodies":{},"entries":[
+          {"kind":"blob","file":"assets/cooked/models_rig.blob","producer":"modelcook","sourceHash":"{{new string('c', 64)}}","skippedOnServer":true,"sha256":null},
+          {"kind":"resource","guid":"{{Guid.NewGuid()}}","type":"keen::RenderModel","part":0,"mode":"new","file":"assets/cooked/other_rig.bin","producer":"modelcook","sourceHash":"{{new string('c', 64)}}","skippedOnServer":true,"sha256":null},
+          {"kind":"resource","guid":"{{ServerModel}}","type":"keen::RenderModel","part":0,"mode":"new","file":"assets/cooked/models_rig.bin","producer":"modelcook","sourceHash":"{{new string('c', 64)}}"{{(skipped ? ",\"skippedOnServer\":true,\"sha256\":null" : ",\"sha256\":\"" + new string('d', 64) + "\"")}}}
+        ]}
+        """)!;
+
+    [Fact]
+    public void A_dedicated_server_takes_the_model_from_the_body_manifest_when_the_cook_made_no_sidecar()
+    {
+        using var fixture = new CookedBody { Client = false };
+        fixture.Vector["model"]!["boundingBox"]!["min"]!["y"] = -5;  // a bad box is the client's to find: the server has none
+        fixture.Write();
+        File.Delete(fixture.PathOf("model"));
+        File.WriteAllText(fixture.PathOf("manifest"), Manifest().ToJsonString());
+        var body = fixture.Lower()["body"]!;
+        Assert.Equal(ServerModel.ToString(), (string?)body["model"]);
+        Assert.Equal((string?)fixture.Vector["graph"]!["guid"], (string?)body["graph"]);
+        Assert.Equal((string?)fixture.Vector["graph"]!["skeleton"], (string?)body["skeleton"]);
+        Assert.True(JsonNode.DeepEquals(fixture.Vector["expected"], body["bindings"]), body.ToJsonString());
+    }
+
+    [Theory]
+    [InlineData(true, true)]    // a game client always has the sidecar its renderer cooked
+    [InlineData(false, false)]  // a server row that is not renderer-skipped: the sidecar is missing, not skipped
+    public void Without_the_sidecar_a_client_or_an_unskipped_row_still_says_not_cooked(bool client, bool skipped)
+    {
+        using var fixture = new CookedBody { Client = client };
+        File.Delete(fixture.PathOf("model"));
+        File.WriteAllText(fixture.PathOf("manifest"), Manifest(skipped).ToJsonString());
+        var e = Assert.Throws<BlockError>(() => fixture.Lower());
+        Assert.Equal("body.model", e.Field);
+        Assert.Contains("is not cooked", e.Problem, StringComparison.Ordinal);
+    }
+
     private sealed class CookedBody : IDisposable
     {
+        private readonly Func<bool> client = NpcServerSide.IsClient;
+        internal bool Client { set => NpcServerSide.IsClient = () => value; }
         internal readonly JsonNode Vector = NpcBodyLoweringTests.Vector();
         private readonly string root = Path.Combine(Path.GetTempPath(), "kiln-npc-body-" + Guid.NewGuid().ToString("N"));
         private readonly Func<BlockCapabilities.Row>? previous = BlockCapabilities.NpcBodyForTests;
@@ -85,7 +127,8 @@ public sealed class NpcBodyLoweringTests
         internal string PathOf(string kind) => kind == "source" ? Path.Combine(root, "models", "rig.gltf") :
             Path.Combine(root, "assets", "cooked", kind switch
             {
-                "graph" => "tobin.animation.tobin.body.graph.json", "model" => "models_rig.model.json", _ => "clips.json",
+                "graph" => "tobin.animation.tobin.body.graph.json", "model" => "models_rig.model.json", "manifest" => "npc-bodies.v1.json",
+                _ => "clips.json",
             });
         internal void Write()
         {
@@ -104,6 +147,7 @@ public sealed class NpcBodyLoweringTests
         }
         public void Dispose()
         {
+            NpcServerSide.IsClient = client;
             BlockCapabilities.NpcBodyForTests = previous;
             Directory.Delete(root, true);
         }

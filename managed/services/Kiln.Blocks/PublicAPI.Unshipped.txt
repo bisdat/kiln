@@ -1355,3 +1355,45 @@ Kiln.UiStatImportRegistration.Ok.get -> bool
 static Kiln.Blocks.ImportStat(Kiln.ModValueKey key) -> Kiln.UiStatImportRegistration!
 Kiln.UiAction.ToggleWindow.get -> Kiln.WindowRef?
 Kiln.UiAction.ToggleWindow.init -> void
+Kiln.NpcBodyBuildState
+Kiln.NpcBodyBuildState.PendingRestart = 0 -> Kiln.NpcBodyBuildState
+Kiln.NpcBodyBuildState.Ready = 1 -> Kiln.NpcBodyBuildState
+Kiln.NpcBodyBuildState.Failed = 2 -> Kiln.NpcBodyBuildState
+Kiln.NpcBodyBuildState.RemovalPendingRestart = 3 -> Kiln.NpcBodyBuildState
+Kiln.NpcBodyBuildState.Removed = 4 -> Kiln.NpcBodyBuildState
+Kiln.NpcBodyBuildResult
+Kiln.NpcBodyBuildResult.<Clone>$() -> Kiln.NpcBodyBuildResult!
+Kiln.NpcBodyBuildResult.Equals(Kiln.NpcBodyBuildResult? other) -> bool
+override Kiln.NpcBodyBuildResult.Equals(object? obj) -> bool
+override Kiln.NpcBodyBuildResult.GetHashCode() -> int
+override Kiln.NpcBodyBuildResult.ToString() -> string!
+static Kiln.NpcBodyBuildResult.operator !=(Kiln.NpcBodyBuildResult? left, Kiln.NpcBodyBuildResult? right) -> bool
+static Kiln.NpcBodyBuildResult.operator ==(Kiln.NpcBodyBuildResult? left, Kiln.NpcBodyBuildResult? right) -> bool
+Kiln.NpcBodyBuildResult.NpcBodyBuildResult(bool Ok, string? Reason, Kiln.NpcBodyBuildState State, string! ModId, string! BlockKey, System.Guid Template, System.Guid Model, System.Guid Graph, ulong Generation) -> void
+Kiln.NpcBodyBuildResult.Deconstruct(out bool Ok, out string? Reason, out Kiln.NpcBodyBuildState State, out string! ModId, out string! BlockKey, out System.Guid Template, out System.Guid Model, out System.Guid Graph, out ulong Generation) -> void
+Kiln.NpcBodyBuildResult.Ok.get -> bool
+Kiln.NpcBodyBuildResult.Ok.init -> void
+Kiln.NpcBodyBuildResult.Reason.get -> string?
+Kiln.NpcBodyBuildResult.Reason.init -> void
+Kiln.NpcBodyBuildResult.State.get -> Kiln.NpcBodyBuildState
+Kiln.NpcBodyBuildResult.State.init -> void
+Kiln.NpcBodyBuildResult.ModId.get -> string!
+Kiln.NpcBodyBuildResult.ModId.init -> void
+Kiln.NpcBodyBuildResult.BlockKey.get -> string!
+Kiln.NpcBodyBuildResult.BlockKey.init -> void
+Kiln.NpcBodyBuildResult.Template.get -> System.Guid
+Kiln.NpcBodyBuildResult.Template.init -> void
+Kiln.NpcBodyBuildResult.Model.get -> System.Guid
+Kiln.NpcBodyBuildResult.Model.init -> void
+Kiln.NpcBodyBuildResult.Graph.get -> System.Guid
+Kiln.NpcBodyBuildResult.Graph.init -> void
+Kiln.NpcBodyBuildResult.Generation.get -> ulong
+Kiln.NpcBodyBuildResult.Generation.init -> void
+Kiln.NpcBodies
+static Kiln.NpcBodies.Status(Kiln.BlockHandle<Kiln.NpcBlock!>! npc) -> Kiln.NpcBodyBuildResult!
+static Kiln.NpcBodies.Status(string! qualifiedBlockKey) -> Kiln.NpcBodyBuildResult!
+Kiln.NpcBodyBuildChangedEvent
+Kiln.NpcBodyBuildChangedEvent.Before.get -> Kiln.NpcBodyBuildResult!
+Kiln.NpcBodyBuildChangedEvent.After.get -> Kiln.NpcBodyBuildResult!
+Kiln.NpcBodyBuildChangedEvent.ClientSide.get -> bool
+override Kiln.NpcBodyBuildChangedEvent.ToString() -> string!
