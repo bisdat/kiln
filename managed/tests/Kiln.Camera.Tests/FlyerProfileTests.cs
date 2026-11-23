@@ -193,6 +193,65 @@ public sealed class FlyerProfileTests
         Assert.Empty(kiln.Camera.Leases);
     }
 
+    // review S8 S2 (its F3, inverted): a refused renewal keeps the lease (that is the API's rule), so the view renews the same
+    // lease again instead of a Set over it (AlreadyOwned); an uncertain one (TransportTimeout) ends it and sets anew; a second
+    // refusal in a row stops the view and ends its lease, never leaving it on screen unrenewed.
+    [Fact]
+    public void A_refused_renewal_renews_the_same_lease_and_never_sets_over_it()
+    {
+        using var kiln = new KilnHarness();
+        var mod = kiln.Load<FlyerProfileProbe>(new ModManifest("flyer-probe-renewal"));
+        kiln.Step(2);
+        var rider = new EntityId(5);
+        kiln.Camera.KilnClient(rider);
+        var now = TimeSpan.Zero;
+        var view = kiln.As(mod, () => MountView.Start(rider, new EntityId(77), new MountBounds(Vector3.Zero, 4 / 0.3f, 0.3f), now, out _))!;
+        kiln.Step();
+        kiln.As(mod, () => view.Tick(now));
+        var lease = view.Lease;
+        Assert.NotEqual(0ul, lease.Value);
+        void Renew(int seconds, uint? refuse)
+        {
+            if (refuse is { } r) kiln.Camera.RefuseNext(r);
+            now = TimeSpan.FromSeconds(seconds);
+            kiln.As(mod, () => view.Tick(now));   // the renewal
+            kiln.Step();
+            kiln.As(mod, () => view.Tick(now));   // its answer (a refusal: the same lease renewed again)
+            kiln.Step();
+            kiln.As(mod, () => view.Tick(now));
+        }
+        // a transient refusal (RateLimit): the same lease is renewed again and holds
+        Renew(30, 22);
+        Assert.Null(view.Failed);
+        Assert.Equal(lease.Value, view.Lease.Value);
+        Assert.Contains(lease.Value, kiln.Camera.Leases);
+        Assert.DoesNotContain(kiln.Camera.Calls, c => c.Kind == FakeCameraCallKind.Apply && c.Refusal != 0);
+        Assert.Equal([22u, 0u], kiln.Camera.Calls.Where(c => c.Kind == FakeCameraCallKind.Update).Select(c => c.Refusal).ToArray());
+        // a renewal that held earns the next trouble its own retry
+        Renew(60, 22);
+        Assert.Null(view.Failed);
+        Assert.Equal(lease.Value, view.Lease.Value);
+        // an uncertain refusal (TransportTimeout: the client may show anything): the lease is ended, then set anew
+        Renew(90, 15);
+        kiln.Step();
+        kiln.As(mod, () => view.Tick(now));
+        Assert.Null(view.Failed);
+        Assert.NotEqual(lease.Value, view.Lease.Value);
+        Assert.DoesNotContain(lease.Value, kiln.Camera.Leases);
+        Assert.Contains(view.Lease.Value, kiln.Camera.Leases);
+        Assert.DoesNotContain(kiln.Camera.Calls, c => c.Kind == FakeCameraCallKind.Apply && c.Refusal != 0);
+        // two refusals in a row: the view stops and ends its lease
+        Renew(120, null);  // a renewal that holds after the recovery
+        var last = view.Lease;
+        kiln.Camera.RefuseNext(22);
+        kiln.Camera.RefuseNext(22);
+        Renew(150, null);
+        kiln.Step();
+        Assert.NotNull(view.Failed);
+        Assert.DoesNotContain(last.Value, kiln.Camera.Leases);
+        Assert.Empty(kiln.Camera.Leases);
+    }
+
     private static MountView? Fail(string? why)
     {
         Assert.False(string.IsNullOrEmpty(why));

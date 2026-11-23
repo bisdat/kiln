@@ -93,17 +93,25 @@ public static class MountFollow
 /// <summary>
 /// One rider's view on the server (call every member on the tick thread). Mount: <see cref="Start"/>. Every step:
 /// <see cref="Tick"/> renews the lease every 30 s with Restart. A size change: <see cref="Resize"/>. Before a controlled
-/// teleport and on dismount: <see cref="Stop"/> (End). If the view ends by itself while seated (the client's sample went
-/// stale, the player's client left: feed <see cref="Ended"/> from <c>Camera.Changed</c>) or is refused, it is asked once
-/// more; a second end or refusal during the ride stops it and <see cref="Failed"/> says why, for the riding code to react
-/// (end a Required ride, show a message).
+/// teleport and on dismount: <see cref="Stop"/> (End). Feed <see cref="Ended"/> from <c>Camera.Changed</c>.
 /// </summary>
+/// <remarks>
+/// Trouble gets one retry; a renewal that holds earns the next trouble its own. A refused renewal keeps the lease (that is
+/// the API's rule), so the same lease is renewed again, never set over (a Set would be refused AlreadyOwned). An uncertain
+/// one (MayHaveApplied, TransportTimeout: the rider's client may show anything) ends the lease and sets a new one. A lease
+/// that ended by itself while seated (stale samples, the client left) is set anew. A second failure in a row stops the
+/// view, ends its lease, and <see cref="Failed"/> says why, for the riding code to react (end a Required ride, show a
+/// message).
+/// </remarks>
 public sealed class MountView
 {
+    private enum Asked { None, Set, Update, End }
+
     private readonly EntityId _rider, _mount;
     private FlyerProfile _profile;
     private CameraLease _lease;
     private Task<CameraResult>? _pending;
+    private Asked _asked;
     private TimeSpan _renewed;
     private bool _retried, _riding;
 
@@ -150,13 +158,9 @@ public sealed class MountView
             return null;
         }
         var view = new MountView(rider, mount, profile) { _riding = true, _renewed = now };
-        try
+        if (!view.Ask(Asked.Set))
         {
-            view._pending = Camera.Set(rider, MountFollow.Request(mount, profile));
-        }
-        catch (KilnUnavailableException e)
-        {
-            why = e.Message;  // camera.remote went off: the stock camera stays
+            why = view.Failed;
             return null;
         }
         return view;
@@ -168,53 +172,79 @@ public sealed class MountView
         if (!_riding) return;
         if (_pending is { IsCompleted: true } done)
         {
+            var asked = _asked;
             _pending = null;
+            _asked = Asked.None;
             var r = done.Result;
-            if (r.Ok) _lease = r.Lease;
-            else if (!Retry(now, $"{r.ReasonCode}: {r.Reason}")) return;
+            var why = $"{r.ReasonCode}: {r.Reason}";
+            switch (asked)
+            {
+                case Asked.Set when r.Ok:
+                    _lease = r.Lease;
+                    break;
+                case Asked.Set:
+                    // a Set that may have shown something comes back with its lease: end that first
+                    if (r.MayHaveApplied && r.Lease.Value != 0) _lease = r.Lease;
+                    if (!Retry(now, why, _lease.Value != 0 ? Asked.End : Asked.Set)) return;
+                    break;
+                case Asked.Update when r.Ok:
+                    _retried = false;  // the renewal held: the next trouble gets its own retry
+                    break;
+                case Asked.Update when r.MayHaveApplied || r.ReasonCode == CameraReason.TransportTimeout:
+                    if (!Retry(now, why, Asked.End)) return;  // uncertain: end it, then set a new one
+                    break;
+                case Asked.Update:
+                    if (!Retry(now, why, Asked.Update)) return;  // refused: the lease holds, renew it again
+                    break;
+                case Asked.End:
+                    // the uncertain lease is gone (or was already): a new one
+                    _lease = default;
+                    if (!Ask(Asked.Set)) return;
+                    break;
+            }
         }
         if (_pending is null && _lease.Value != 0 && now - _renewed >= MountFollow.RenewEvery)
         {
             _renewed = now;
-            try
-            {
-                _pending = Camera.Update(_lease, MountFollow.Request(_mount, _profile), CameraUpdateTiming.Restart);
-            }
-            catch (KilnUnavailableException e)
-            {
-                Stopped(e.Message);
-            }
+            Ask(Asked.Update);
         }
     }
 
-    private void Stopped(string why)
-    {
-        _riding = false;
-        _pending = null;
-        Failed = why;
-    }
-
-    /// <summary>The view's lease ended by itself (Camera.Changed, Ended, while still riding): ask once more.</summary>
+    /// <summary>The view's lease ended by itself (Camera.Changed, Ended, while still riding): a new one, once.</summary>
     public void Ended(CameraChange change, TimeSpan now)
     {
-        if (!_riding || change.Kind != CameraChangeKind.Ended || change.Lease.Value != _lease.Value) return;
+        if (!_riding || change.Kind != CameraChangeKind.Ended || change.Lease.Value != _lease.Value || _lease.Value == 0) return;
         _lease = default;
+        if (_asked == Asked.End) return;  // ending it anyway: its answer brings the new Set
         _pending = null;
-        Retry(now, $"ended {change.EndReason}");
+        _asked = Asked.None;
+        Retry(now, $"ended {change.EndReason}", Asked.Set);
     }
 
-    private bool Retry(TimeSpan now, string why)
+    // The one retry of this trouble; a second failure in a row stops the view (and ends its lease).
+    private bool Retry(TimeSpan now, string why, Asked next)
     {
         if (_retried)
         {
-            Stopped("the riding view ended twice (" + why + ")");
+            Stopped("the riding view failed twice in a row (" + why + ")");
             return false;
         }
         _retried = true;
         _renewed = now;
+        return Ask(next);
+    }
+
+    private bool Ask(Asked what)
+    {
         try
         {
-            _pending = Camera.Set(_rider, MountFollow.Request(_mount, _profile));
+            _pending = what switch
+            {
+                Asked.Set => Camera.Set(_rider, MountFollow.Request(_mount, _profile)),
+                Asked.Update => Camera.Update(_lease, MountFollow.Request(_mount, _profile), CameraUpdateTiming.Restart),
+                _ => Camera.End(_lease),
+            };
+            _asked = what;
             return true;
         }
         catch (KilnUnavailableException e)
@@ -224,6 +254,24 @@ public sealed class MountView
         }
     }
 
+    private void Stopped(string why)
+    {
+        _riding = false;
+        _pending = null;
+        _asked = Asked.None;
+        Failed = why;
+        if (_lease.Value == 0) return;
+        try
+        {
+            _ = Camera.End(_lease);  // never leave the view on screen unrenewed; its answer is not needed
+        }
+        catch (KilnUnavailableException)
+        {
+            // no kiln.camera: nothing holds a camera
+        }
+        _lease = default;
+    }
+
     /// <summary>The mount changed size: new numbers, the lease restarted with them.</summary>
     /// <exception cref="ArgumentException">The new size does not fit v1: the caller stops the view.</exception>
     public void Resize(in MountBounds bounds, TimeSpan now)
@@ -231,14 +279,7 @@ public sealed class MountView
         _profile = MountFollow.BuildFlyerProfile(bounds);
         if (_lease.Value == 0 || _pending is not null) return;  // the request in flight is replaced at the next renewal
         _renewed = now;
-        try
-        {
-            _pending = Camera.Update(_lease, MountFollow.Request(_mount, _profile), CameraUpdateTiming.Restart);
-        }
-        catch (KilnUnavailableException e)
-        {
-            Stopped(e.Message);
-        }
+        Ask(Asked.Update);
     }
 
     /// <summary>Dismount, or before a controlled teleport: the view ends (after its 0.3 s blend out).</summary>
@@ -247,6 +288,7 @@ public sealed class MountView
         _riding = false;
         Failed = null;
         _pending = null;
+        _asked = Asked.None;
         if (_lease.Value == 0) return null;
         try
         {
