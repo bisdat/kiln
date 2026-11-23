@@ -518,6 +518,10 @@ Ui.AmmoList.Provide(AmmoListKind.Arrow | AmmoListKind.Spell, ctx => MyRows(ctx.K
   not measured, an older kiln-tools); subscribing to `Picked` throws it when `ui.ammo.pick` is off. `Ui.AmmoList.Available`
   and `PicksAvailable` ask first, `Capabilities.Why(Ui.AmmoList.ListCapability)` says why. Disposing the last provider of
   a list, or unloading the mod, shows the game's own list again.
+- **A quiver from player storage.** Since 0.2.0-dev.30.7, a mod whose arrows or spells live in a Kiln player storage
+  needs none of the above: `PlayerStorage.Client.ProvideAmmo(fullKey, AmmoKinds.Arrow | AmmoKinds.Spell)` provides the
+  storage's rows from Kiln's client copy and its server half checks and equips a pick
+  ([player storage](../services/player-storage.md#the-client-copy-and-the-huds-ammunition-lists)).
 - **Unit tests.** The test kit's `KilnHarness.AmmoList` plays the game's side (`Hold` a bow or staff with the game's
   rows, `SetGameRows`, `NewSession`, `KnownItems`), shows what the HUD would (`Shown`, `Provided`, `ModeOf`, `Selected`)
   and picks a row (`Pick`, raised at the next `Step`).

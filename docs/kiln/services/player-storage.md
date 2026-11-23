@@ -17,6 +17,7 @@ Start with the [modding guide](../modding/player-storage.md). Ordinary inventory
 | Managed | `managed/services/Kiln.Items/PlayerStorage.cs`, namespace `Kiln` |
 | Native | `native/core/abi/services/kiln_items_storage.h`, service `kiln.items.storage` v1, served by kiln-items.dll |
 | Persistence | Kiln.Saves; world generation store and the existing character sidecar/channel |
+| Client copy | channel `kiln:storage` v1 (`managed/services/Kiln.Items/PlayerStorageMirror.cs`); HUD rows through Kiln.Ui's `Ui.AmmoList` (`PlayerStorageAmmoUi.cs`) |
 | Offline tests | `managed/tests/Kiln.Items.Tests`, TestKit's scripted player storage fake |
 
 ## Register and use
@@ -171,8 +172,22 @@ spawn an extra tombstone for storage; without a usable grave it keeps the items.
 
 Native reference selections cover ranged weapon, arrow, spell, and bait cells. The public storage object does not
 expose a `SetRef` method in this API. Parked records are preserved, but restoring a registration must not silently
-retarget a saved selection to a different cell: selection needs explicit re-establishment through the applicable
-selection/provider API. Automatic external-cell firing, debit, and cycling behavior still need real-game verification.
+retarget a saved selection to a different cell: selection needs explicit re-establishment through `Items.Equip` with a
+storage slot, `PlayerStorage.Activate`, or `PlayerStorage.Client.ProvideAmmo` (below). Automatic external-cell firing,
+debit, and cycling behavior still need real-game verification.
+
+`Items.Equip(player, storage.Slot(player, i), EquipmentSlot.Arrow)` equips from the storage cell itself: native
+kiln.items accepts a storage slot only of the acting player's own storage, and checks the storage filter against what
+the equip puts back. `PlayerStorage.Activate(player, index)` is the fallback for a game that does not fire from a cell
+outside the backpack: it moves the arrow or spell stack into the backpack (`Items.Move`), equips it there, and moves the
+stack it activated before for that slot back into the storage (one step each; tick thread; `items.move` and
+`items.equip`). One runs at a time per player and slot (another is `Refused` while it does). When the equip fails after
+the move, what the move put into the backpack goes back into the storage, no more than moved (a stack it topped up keeps
+the player's own items). A stack that cannot go back (storage full, filter) stays in the backpack, logged. The result is
+the equip's; `NoInventory` (not ready), `SlotChanged` (empty slot), `Refused` (not an arrow or spell, or one under way) or
+a failed move's status otherwise. Kiln remembers the activated cell per player and slot for the player's session only (it
+forgets it when the player leaves or the world stops), and checks it still holds that item before moving it back. Each step runs on the tick thread as the storage's mod, also when the
+call came from Kiln itself (a HUD pick): a mod that unloads meanwhile drops the rest.
 
 ## Capability and client boundaries
 
@@ -180,10 +195,56 @@ Check `PlayerStorage.Available` or `Capabilities.Why(PlayerStorage.Capability)`.
 wrong side, missing service, or a fault refuse storage instead of guessing engine state. See [caps.md](caps.md).
 The native `items.storage.persist` rows are exclusively for Kiln.Saves, not mod persistence APIs.
 
-The `PlayerStorage.Client`/`PlayerStorageRow`/`PlayerStorageClientChangedEvent` shape is reserved for the owner's
-read-only client mirror. In this implementation `items.storage.client` is unavailable: `PlayerStorage.Client.Available`
-is false, `PlayerStorage.Client.Rows` throws `KilnUnavailableException`, and the event does not fire. Server storage
-availability does not imply a joined client can read it. Do not depend on automatic replication of the holder.
+Server storage availability does not imply a joined client can read it: the client copy below is a separate row.
+
+## The client copy and the HUD's ammunition lists
+
+The owner's game holds a read-only copy of that player's storages: `PlayerStorage.Client.Rows(fullKey)` (one
+`PlayerStorageRow` per slot that holds something: key, index, item, count, level, and flags: the item's `AmmoKinds` by
+the server's item catalog, 1 arrows, 2 a spell, 0 anything else; a game that joined another's world has no catalog of its
+own, `Items.Get` answers null there) and `PlayerStorageClientChangedEvent` (one per storage whose rows changed, also when
+it went or the game left the world; tick thread: the main thread of a joined game, the server thread of a hosting one). Capability `items.storage.client`:
+available where Kiln's channel is open (both sides), unavailable (`service-missing`) without kiln.net. It does not
+depend on `items.storage`: a game that joined another's world has no storage of its own but gets its copy.
+
+Channel `kiln:storage` v1, opened by Kiln on both sides, not required (a game without it, or without Kiln, joins as
+before and is sent nothing):
+
+| Message | Direction | Fields |
+|---|---|---|
+| 1 Update | server → client | view (random per player session, nonzero), seq, then per storage: full key, slots, rows (slot, item, count, level, flags: the item's `AmmoKinds` by the server's catalog) |
+| 2 Ack | client → server | view, seq of the update the game applied |
+| 3 Pick | client → server | full key, kind (1 arrow, 2 spell), item |
+
+- **Owner only, whole set, on change.** About four times a second the server builds each player's rows from their
+  ready storages (any mod's, `Items.PlayerStorages.Of` + `Items.Read`) and sends that player the whole set when it
+  differs from the last one sent. A game without the channel is skipped before anything is read. A hosting game's own
+  player gets the rows straight into its copy; when its world stops (`ServerStoppingEvent`) that copy empties, and the
+  views, the picks its HUD queued and the pick rates go with the world.
+- **Delivery.** An update not acknowledged after 5 s is sent again, each wait doubling up to 60 s. The game drops an
+  update of its view whose seq is not newer than the one it applied, and starts over when the view changes.
+- **Limits, checked on the game before anything is applied** (a broken update is dropped whole): at most 32 storages,
+  1-64 slots each, 256 rows in all, keys of the `<mod id>:<name>` form (128 bytes at most), rows in slot order inside
+  the slots, no item 0, no count 0, nothing after the message but kiln.net's padding. An update is at most 8,185 bytes.
+- **Server-authoritative.** No message from a game changes a storage. An Ack only stops resends. A Pick is a wish: it
+  is read only for a storage whose own mod called `ProvideAmmo` on the server, at most 4 a second per player (8 at
+  once), and only when the item is in the sender's own storage and is ammunition of the picked kind; anything else is
+  dropped and logged (at most once a minute per reason, whatever item or key the game sent). A repeat of a pick that is
+  under way is ignored; a pick's outcome is logged on the tick thread.
+
+`PlayerStorage.Client.ProvideAmmo(fullKey, kinds, options)` returns a `PlayerStorageAmmoProvider` and does both halves
+of a quiver or spellbook, made in `OnLoad` on both sides:
+
+- **Game client:** the storage's items the server marked as arrows or spells (its catalog's equipment slot type 6 or 7)
+  become rows of `Ui.AmmoList` (`ui.ammo.list`), one per item with the counts of its slots added up, in slot order,
+  Append unless `PlayerStorageAmmoOptions.Replace`. They are asked for again when the copy changes. A pick (`ui.ammo.pick`) of an
+  item of that storage goes to the server; a hosting game queues it for its own server tick. Without the HUD lists only
+  the server half runs; `Shown` and `WhyNotShown` say so.
+- **Server:** after the checks above, the first slot holding the item is equipped with `Items.Equip` as the storage's
+  mod, or swapped in with `PlayerStorage.Activate` when `PlayerStorageAmmoOptions.Activate` is set. The outcome is
+  logged (`player-storage: <key> pick by <player>: ...`).
+- A mod provides only its own storages (`<its id>:...`), one provider per storage at a time. Disposing ends both
+  halves; unloading the mod does too.
 
 ## Internal list contract and offline evidence
 
@@ -200,5 +261,9 @@ real item entities, the full record codec, actual character hooks, or the client
 cover the public enumeration boundary; Saves' separate fake tests cover live/temporary metadata bands. These are not
 proof of the engine's transaction or restart behavior.
 
+The client copy's tests (`PlayerStorageMirrorTests`) put a loopback in place of kiln.net: the real encoder, decoder,
+copy, server passes and pick checks, and the HUD half on the kit's fake `kiln.ui.ammo`. The kit itself has no network.
+
 Real-game unverified: holder exclusion from world snapshots/restarts; exact capture/rebuild and travel pairing; live
-parked-return metadata tracking/cleanup; death transfers; external-cell ammunition debit and cycling; client replication.
+parked-return metadata tracking/cleanup; death transfers; external-cell ammunition debit and cycling; the client copy
+over a real connection; HUD rows from storage and their picks; `Activate` in a running game.
