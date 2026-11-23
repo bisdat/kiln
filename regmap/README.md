@@ -130,7 +130,7 @@ every entry exported through the schema from the base); `mods/tests/registry-pro
 `roundtrip-<side>-live.json` at the world's first content ready (each mapped live field of one entry that reads:
 kiln.registry.live begin/submit/commit/read/revert, raw reads by the game's member paths, the resource bytes hashed before
 the write and after the revert; a structured value's raw view is its resource's digest). A field it finds no probe for
-gets no sample and stays unproven. Without the request file neither does anything (kiln.content looks the file up once
+gets no sample and stays unproven (kiln.log says why: "registry-proof-test: no sample of <field>"). Without the request file neither does anything (kiln.content looks the file up once
 per start). The test mod is never shipped (`tools/package/stage.sh` builds no `mods/tests`).
 
 `regmapDigest` ties a lab file to the mapping the run used: sha256 (lower-case hex) over `<file name>\n<sha256 of its
