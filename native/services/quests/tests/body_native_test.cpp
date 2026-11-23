@@ -315,8 +315,57 @@ void test_an_incomplete_model_body_leaves_only_its_npc_out() {
     CHECK(t_stops.empty());
     CHECK(g_names.count("a-legacy:k1") == 1);
     CHECK(owns_layers("a-legacy"));
-    CHECK(kiln::qb::ojson::parse(g_manifest)["bodies"].empty());
+    const auto bodies = kiln::qb::ojson::parse(native_pack_manifest())["bodies"];
+    CHECK(bodies.is_array() && bodies.size() == 1);
+    if (bodies.is_array() && bodies.size() == 1) {
+        CHECK(bodies[0]["mod"] == "a-legacy" && bodies[0]["npc"] == "nobody" && bodies[0]["state"] == "failed");
+        CHECK(bodies[0]["reason"].get<std::string>().find("no animation") != std::string::npos);
+        CHECK(bodies[0]["closure"] == "" && bodies[0]["template"] == "");
+    }
     CHECK(logged("a-legacy: npcs.nobody"));
+}
+
+void test_incomplete_body_status_survives_a_ready_sibling_and_a_rename() {
+    body_reset("polish R2: an incomplete renamed NPC beside a ready authored body");
+    body_mod("a-body");
+    write(t_root / "mods/a-body/blocks/skipped.json",
+          R"({"npcs":{"nobody":{"name":"Nobody","was":"old-nobody","body":{"model":"models/stone.glb"},"animation":{"clips":"models/rig.gltf"}}}})");
+    boot_and_resource_init();
+    const auto bodies = kiln::qb::ojson::parse(native_pack_manifest())["bodies"];
+    CHECK(bodies.size() == 2);
+    if (bodies.size() == 2) {
+        CHECK(bodies[0]["npc"] == "nobody" && bodies[0]["key"] == "old-nobody" && bodies[0]["state"] == "failed");
+        CHECK(bodies[0]["reason"].get<std::string>().find("no motions") != std::string::npos);
+        CHECK(bodies[1]["npc"] == "tobin" && bodies[1]["state"] == "ready");
+    }
+    CHECK(owns_layers("a-body") && t_stops.empty());
+
+    body_reset("polish R2: the incomplete model is the mod's only content");
+    mod("a-alone", kGood);
+    fs::remove_all(t_root / "mods/a-alone/quests");
+    write(t_root / "mods/a-alone/blocks/npc.json",
+          R"({"npcs":{"nobody":{"name":"Nobody","body":{"model":"models/stone.glb"}}}})");
+    boot_and_resource_init();
+    const auto alone = kiln::qb::ojson::parse(native_pack_manifest())["bodies"];
+    CHECK(alone.size() == 1 && alone[0]["npc"] == "nobody" && alone[0]["state"] == "failed");
+    CHECK(t_stops.empty());
+}
+
+// R1: a pre-build read must not freeze the body list, but every completed build (even empty or legacy) is cacheable.
+void test_completed_manifests_always_have_a_body_list() {
+    for (const bool legacy : {false, true}) {
+        body_reset(legacy ? "polish R1: legacy completed manifest" : "polish R1: empty completed manifest");
+        CHECK(!kiln::qb::ojson::parse(native_pack_manifest()).contains("bodies"));
+        if (legacy) {
+            kiln_test_module = nullptr;  // no content bridge: the legacy publisher
+            mod("a-ordinary", kGood);
+        }
+        boot_and_resource_init();
+        const auto manifest = kiln::qb::ojson::parse(native_pack_manifest());
+        CHECK(manifest.contains("bodies") && manifest["bodies"].is_array() && manifest["bodies"].empty());
+        CHECK(native_pack_manifest() == manifest.dump());
+        if (legacy) CHECK(g_names.count("a-ordinary:k1") == 1);
+    }
 }
 
 void test_refusals_leave_the_neighbour() {
@@ -376,6 +425,8 @@ int main(int argc, char** argv) {
     test_a_damaged_ledger_is_named_and_written_anew();
     test_removed_when_no_native_mod_is_left();
     test_an_incomplete_model_body_leaves_only_its_npc_out();
+    test_completed_manifests_always_have_a_body_list();
+    test_incomplete_body_status_survives_a_ready_sibling_and_a_rename();
     std::error_code ec;
     fs::remove_all(t_root, ec);
     std::printf("body native: %d checks, %d failed\n", g_checks, g_failures);

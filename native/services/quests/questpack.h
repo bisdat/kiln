@@ -29,6 +29,8 @@ struct ModInput {
     std::string dir;                 // the mod's folder (UTF-8): authored-body admission reads its cooked body cache there
     std::string body_refusal;        // set at collection: this mod's authored bodies cannot be admitted (the whole mod is refused)
     std::vector<std::string> refused_bodies;  // NPC blocks collection left out for body_refusal (another chassis): failed rows still
+    struct SkippedBody { std::string npc, key, reason; };
+    std::vector<SkippedBody> skipped_bodies;  // incomplete legacy models: only that NPC is left out, with a failed status row
 };
 // The one verified roster-body chassis (chapter 16f section 5.1): Bodies.Fisher and Bodies.Villager both lower to it.
 constexpr const char* kBodyChassis = "NPC_Workshop_Fisher_Trader";

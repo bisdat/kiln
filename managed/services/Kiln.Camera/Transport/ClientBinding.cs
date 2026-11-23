@@ -164,7 +164,7 @@ internal sealed class ClientBinding
 
     private void OnWelcome(WelcomeMessage w)
     {
-        if (w.ClientNonce != _o.ClientNonce || w.ClientEpoch != _o.ClientEpoch) return;  // for another client world
+        if (w.ClientNonce != _o.ClientNonce || w.ClientEpoch != _o.ClientEpoch || w.Player != _o.LocalEntity) return;  // another world or player
         if (_state == ClientBindingState.Bound && w.Token == _binding.Token) return;    // a repeated Welcome
         // a new token: the old binding's remote owners go before the new one is accepted, and its caches reset
         ClearRemote(CameraEndReasons.PeerDisconnected);

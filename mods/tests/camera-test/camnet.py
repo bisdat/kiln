@@ -35,6 +35,8 @@ PART_NEEDS = ((2, POSE), (4, PROFILE), (8, SHAKE), (16, FOV))  # request part ->
 HEADER = 84
 CLIENT_CAPABILITY = 25
 EXPIRED = 2
+# camera-test's LabPlayers (CameraTest.cs): the server binds a Hello only for the player its connection stands for
+LAB_PLAYERS = {"camtest-A": 910001, "camtest-N": 910002, "camtest-V": 910003, "camtest-S": 910004}
 
 
 class Peer(nt.Client):
@@ -70,7 +72,10 @@ class Peer(nt.Client):
     def tick(self):
         if self.say_hello and self.cam_id is not None and self.welcome is not None and self.binding is None and time.time() - self.last_hello >= 1.0:
             self.last_hello = time.time()
-            self.data(self.cam_id, HELLO, struct.pack("<HQIIQHI", 1, self.nonce, 1, 1, self.caps, 256, 16384))
+            self.data(self.cam_id, HELLO, self.hello_body())
+
+    def hello_body(self):
+        return struct.pack("<HQIIQHI", 1, self.nonce, 1, LAB_PLAYERS[self.name], self.caps, 256, 16384)
 
     def cam(self, mid, body):
         self.data(self.cam_id, mid, body)

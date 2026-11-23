@@ -309,6 +309,8 @@ internal sealed class ServerBinding
 
     private void OnHello(HelloMessage hello)
     {
+        // The connection supplies the player identity. A claim about another player must not bind or tear down this one.
+        if (hello.LocalEntity != _o.Player) return;
         var now = _o.Clock();
         // the same peer, world and incarnation: the same Welcome (idempotent), never a new binding; at most once a second
         if (_state == ServerBindingState.Bound && _hello is { } known && known.ClientNonce == hello.ClientNonce &&

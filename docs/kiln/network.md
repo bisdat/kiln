@@ -151,7 +151,9 @@ them. The decision, server side, after the player-animation check:
   `<mod>:<npc>` and your game doesn't" (or "your game has ... and this server doesn't", or "... is built differently on
   your game"), then "Join with the same mods, and restart if you just changed them.";
 - a `kiln.npcbodies.pending` key: refused with a restart-required reason, whatever the hash;
-- `modSync: off`: joins, and the server's log says `joins with other NPC bodies (modSync off)`;
+- `modSync: off`: joins, and the server's log says `joins with other NPC bodies (modSync off)`. Such a player's game
+  may crash on the first NPC whose body it lacks: the server sends that NPC's clone entity, and the game crashes on an
+  entity of a template it doesn't have, as [Clients without Kiln](#clients-without-kiln) says for a vanilla client;
 - a mod's `NetClientHandshakeEvent` handler cannot let such a client in: only `modSync: off` waives this check.
 
 Not verified in a real game yet: the refusal reaching a real player's screen, and two real starts producing the same
