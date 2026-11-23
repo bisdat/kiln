@@ -199,15 +199,26 @@ public static unsafe class Client
     [AnyThread]
     public static NextTickAwaitable NextTick() => default;
 
+    /// <summary>What <see cref="NextTick"/> returns: await it to continue on the main thread at the next client-world
+    /// step.</summary>
     public readonly struct NextTickAwaitable
     {
+        /// <summary>The awaiter that posts the continuation to the next client-world step.</summary>
         public Awaiter GetAwaiter() => default;
 
+        /// <summary>The awaiter of <see cref="NextTickAwaitable"/>. It never completes at once, so the continuation
+        /// always runs at the next client-world step.</summary>
         public readonly struct Awaiter : ICriticalNotifyCompletion
         {
+            /// <summary>Always false: the continuation never runs inline.</summary>
             public bool IsCompleted => false;
+            /// <summary>Queues <paramref name="continuation"/> to run on the main thread at the next client-world
+            /// step.</summary>
             public void OnCompleted(Action continuation) => Post(continuation);
+            /// <summary>The same as <see cref="OnCompleted(Action)"/>: queues <paramref name="continuation"/> for the next
+            /// client-world step.</summary>
             public void UnsafeOnCompleted(Action continuation) => Post(continuation);
+            /// <summary>Nothing to return: awaiting only waits for the next step.</summary>
             public void GetResult() { }
         }
     }
