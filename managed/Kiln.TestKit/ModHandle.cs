@@ -16,6 +16,8 @@ public sealed class ModHandle
         Folder = folder;
     }
 
+    internal bool BelongsTo(KilnHarness harness) => ReferenceEquals(_harness, harness);
+
     /// <summary>The mod id.</summary>
     public string Id { get; }
 

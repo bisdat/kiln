@@ -4,6 +4,7 @@
 // Quests.Start/Advance/Complete and Knowledge. Usage: docs/kiln/services/world-progress.md "Quests".
 namespace Kiln;
 
+/// <summary>Whose engine a quest belongs to.</summary>
 public enum QuestKind : byte
 {
     /// <summary>A quest of the game's journal (JournalRegistryResource), driven by knowledge.</summary>
@@ -19,11 +20,20 @@ public enum QuestKind : byte
 /// <param name="Status">Vanilla quests are Locked (not started), Active or Done; the game has no failed state.</param>
 /// <param name="Step">The current step (0-based; the last step when done); -1 when not started.</param>
 /// <param name="NameTag">Vanilla: the loca tag of the quest's title (the catalog's text).</param>
+/// <param name="Kind">Whether this is a quest of the game's journal or one a mod defined.</param>
+/// <param name="Steps">The number of steps the quest has.</param>
+/// <param name="StepId">The current step's id: a Kiln quest's step id, or <c>step&lt;n&gt;</c> (1-based) for a vanilla
+/// quest; null when it has none.</param>
+/// <param name="Journal">The game's journal data for a vanilla quest; null for a Kiln quest.</param>
+/// <param name="Definition">The definition of a Kiln quest; null for a vanilla quest.</param>
 public sealed record QuestEntry(string Id, string? Name, QuestKind Kind, QuestStatus Status, int Step, int Steps, string? StepId,
     uint NameTag, JournalQuest? Journal, QuestDefinition? Definition)
 {
+    /// <summary>True when the quest is <see cref="QuestStatus.Active"/>.</summary>
     public bool Active => Status == QuestStatus.Active;
+    /// <summary>True when the quest is <see cref="QuestStatus.Done"/>.</summary>
     public bool Done => Status == QuestStatus.Done;
+    /// <summary>The quest's name, its status and the current step as "step n/m".</summary>
     public override string ToString() => $"{Name ?? Id}: {Status}{(Step >= 0 ? $" step {Step + 1}/{Steps}" : "")}";
 }
 
@@ -36,11 +46,17 @@ public sealed class QuestLog
         All = all;
     }
 
+    /// <summary>The player entity this list was made for.</summary>
     public EntityId Player { get; }
+    /// <summary>Every quest: the game's journal quests, then Kiln quests.</summary>
     public IReadOnlyList<QuestEntry> All { get; }
+    /// <summary>The quests that are active.</summary>
     public IEnumerable<QuestEntry> Active => All.Where(q => q.Status == QuestStatus.Active);
+    /// <summary>The quests that are done.</summary>
     public IEnumerable<QuestEntry> Completed => All.Where(q => q.Status == QuestStatus.Done);
+    /// <summary>The game's own journal quests.</summary>
     public IEnumerable<QuestEntry> Vanilla => All.Where(q => q.Kind == QuestKind.Vanilla);
+    /// <summary>The quests mods defined.</summary>
     public IEnumerable<QuestEntry> Kiln => All.Where(q => q.Kind == QuestKind.Kiln);
 
     /// <summary>By id (<c>quest:0x8755c335</c>, <c>0x8755c335</c>, <c>mymod:tobin</c>, or a Kiln quest's id within its mod) or
@@ -55,6 +71,8 @@ public sealed class QuestLog
                ?? All.FirstOrDefault(q => q.Kind == QuestKind.Kiln && q.Definition is { } d && string.Equals(d.Id, s, StringComparison.OrdinalIgnoreCase));
     }
 
+    /// <summary>The status of the quest <paramref name="idOrName"/> (as for <see cref="Find"/>);
+    /// <see cref="QuestStatus.Locked"/> when there is no such quest.</summary>
     public QuestStatus StatusOf(string idOrName) => Find(idOrName)?.Status ?? QuestStatus.Locked;
 }
 
@@ -73,6 +91,7 @@ public static partial class Quests
         return new QuestLog(player, list);
     }
 
+    /// <summary>A player's quests, vanilla and Kiln, as <see cref="Of(EntityId)"/> (tick thread).</summary>
     [TickThreadOnly]
     public static QuestLog Of(Player player) => Of(player.Entity);
 

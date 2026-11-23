@@ -3,7 +3,6 @@
 // "Compare-exchange writes", native/services/world/ecs_writes.cpp) for Kiln tasks, and ComponentExchangedEvent from its
 // committed-write events. Outcomes are the native KILN_ECS_* statuses; an ordinary refusal never throws.
 using System.Collections.Concurrent;
-using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -12,7 +11,6 @@ namespace Kiln;
 
 /// <summary>The outcome of a <see cref="WorldConcurrent"/> compare-exchange, and the status of a
 /// <see cref="ComponentWritePolicy"/>. The values are kiln.world's own statuses.</summary>
-[Experimental("KILNX003", UrlFormat = WorldConcurrent.WritesUrl)]
 public enum ExchangeStatus
 {
     /// <summary>Written and read back (<see cref="ExchangeFlags.Written"/>), or nothing to change
@@ -54,7 +52,6 @@ public enum ExchangeStatus
 }
 
 /// <summary>What else a compare-exchange reports (kiln.world's KILN_MUTATION_* flags).</summary>
-[Experimental("KILNX003", UrlFormat = WorldConcurrent.WritesUrl)]
 [Flags]
 public enum ExchangeFlags
 {
@@ -76,7 +73,6 @@ public enum ExchangeFlags
 }
 
 /// <summary>The first rule that decided a compare-exchange or a policy (kiln.world's KILN_ECS_WRITE_WHY_* codes).</summary>
-[Experimental("KILNX003", UrlFormat = WorldConcurrent.WritesUrl)]
 public enum WriteReason
 {
     /// <summary>Nothing refused.</summary>
@@ -126,7 +122,6 @@ public enum WriteReason
 }
 
 /// <summary>The outcome of <see cref="WorldConcurrent.TryCompareExchange{T}"/>.</summary>
-[Experimental("KILNX003", UrlFormat = WorldConcurrent.WritesUrl)]
 public readonly struct ExchangeResult<T> where T : unmanaged
 {
     internal ExchangeResult(ExchangeStatus status, ExchangeFlags flags, WriteReason reason, T current, TimeSpan hold)
@@ -166,7 +161,6 @@ public readonly struct ExchangeResult<T> where T : unmanaged
 }
 
 /// <summary>The outcome of <see cref="WorldConcurrent.TryCompareExchangeBytes"/>.</summary>
-[Experimental("KILNX003", UrlFormat = WorldConcurrent.WritesUrl)]
 public readonly struct ExchangeBytesResult
 {
     internal ExchangeBytesResult(ExchangeStatus status, ExchangeFlags flags, WriteReason reason, TimeSpan hold)
@@ -201,7 +195,6 @@ public readonly struct ExchangeBytesResult
 }
 
 /// <summary>Whether a task may write a component, and why not (<see cref="WorldConcurrent.WritePolicy"/>).</summary>
-[Experimental("KILNX003", UrlFormat = WorldConcurrent.WritesUrl)]
 public readonly struct ComponentWritePolicy
 {
     internal ComponentWritePolicy(string component, ExchangeStatus status, WriteReason reason, uint flags, int size, int budget, string text)
@@ -255,7 +248,6 @@ public readonly struct ComponentWritePolicy
 /// <summary>A task changed a component by compare-exchange (<see cref="WorldConcurrent.TryCompareExchange{T}"/>, or a
 /// native service's). Posted on the server tick after the write's gate was released, once per committed write, in the
 /// order of the writes. The bytes are not in the event: read the component if you need them.</summary>
-[Experimental("KILNX003", UrlFormat = WorldConcurrent.WritesUrl)]
 [ServerOnly, TickThreadOnly]
 public sealed class ComponentExchangedEvent : KilnEvent, IEntityEvent
 {
@@ -302,8 +294,6 @@ public sealed class ComponentExchangedEvent : KilnEvent, IEntityEvent
 
 public static unsafe partial class WorldConcurrent
 {
-    internal const string WritesUrl = "https://github.com/frostdev-ops/kiln/blob/main/docs/kiln/services/world.md#world-writes-from-task-threads";
-
     /// <summary>The capability row kiln.world reports for the writes; its text says why they are off.</summary>
     public const string WriteCapability = "world.ecs_write";
 
@@ -440,7 +430,6 @@ public static unsafe partial class WorldConcurrent
     }
 }
 
-#pragma warning disable KILNX003  // the producer of the experimental event, itself experimental with it
 /// <summary>kiln.world's committed-write events as <see cref="ComponentExchangedEvent"/>: one native subscription per
 /// process, made when the event type is first used; the native callback (the server tick, kiln.world's Pre) only queues
 /// a copy, and a service tick posts the events.</summary>
@@ -594,4 +583,3 @@ internal static unsafe class WorldExchanges
         }
     }
 }
-#pragma warning restore KILNX003

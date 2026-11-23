@@ -105,10 +105,10 @@ KILN_TEST_SIG(subscribe_ready, KilnResult(KILN_CALL*)(KilnOwner, KilnRegistryRea
 KILN_TEST_SIG(unsubscribe, KilnResult(KILN_CALL*)(KilnHandle));
 
 #ifdef KILN_TEST_REGISTRY_HOST
-KILN_TEST_ASSERT(KILN_REGISTRY_HOST_VERSION == 1u, "kiln.internal.registry v1");
-KILN_TEST_ASSERT(sizeof(KilnRegistryHostApi) == 24 && offsetof(KilnRegistryHostApi, set_order) == 8 &&
-                     offsetof(KilnRegistryHostApi, set_mode) == 16,
-                 "kiln.internal.registry v1 layout");
+KILN_TEST_ASSERT(KILN_REGISTRY_HOST_VERSION == 2u, "kiln.internal.registry v2");
+KILN_TEST_ASSERT(sizeof(KilnRegistryHostApi) == 32 && offsetof(KilnRegistryHostApi, set_order) == 8 &&
+                     offsetof(KilnRegistryHostApi, set_mode) == 16 && offsetof(KilnRegistryHostApi, read_pass) == 24,
+                 "kiln.internal.registry v2 layout (read_pass, review4 NS5)");
 KILN_TEST_ASSERT(KILN_REGISTRY_MODE_RESOURCES_READY == 0 && KILN_REGISTRY_MODE_ONBOOT == 1, "stage modes");
 #endif
 

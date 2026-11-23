@@ -10,8 +10,12 @@ using System.Text.Json;
 namespace Kiln;
 
 /// <summary>What <see cref="Creatures.ApplyJson"/> did.</summary>
+/// <param name="Applied">How many variants, arsenals and spawn rules the section added.</param>
+/// <param name="Errors">What the section could not add, one message per entry (or one for a section that is not valid JSON).</param>
+/// <param name="Warnings">Things the section had that were ignored, such as an unknown key.</param>
 public sealed record CreaturesPackReport(int Applied, IReadOnlyList<string> Errors, IReadOnlyList<string> Warnings)
 {
+    /// <summary>The section applied without errors (<see cref="Errors"/> is empty). Warnings do not count.</summary>
     public bool Ok => Errors.Count == 0;
 }
 

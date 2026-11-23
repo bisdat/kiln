@@ -11,6 +11,7 @@ Kiln builds on the work of the Enshrouded modding community.
 | [safetyhook](https://github.com/cursey/safetyhook) | cursey, BSL-1.0; Zydis/Zycore, MIT | Detours and mid-function hooks (`native/third_party/safetyhook`). |
 | [Dear ImGui](https://github.com/ocornut/imgui) | Omar Cornut, MIT | In-game overlay. |
 | [nlohmann/json](https://github.com/nlohmann/json) | Niels Lohmann, MIT | JSON in the native core. |
+| [xxHash](https://github.com/Cyan4973/xxHash) 0.8.3 | Yann Collet, BSD-2-Clause ([licence](native/third_party/xxhash/LICENSE)) | Player storage's canonical inventory witness. |
 | [Lua](https://www.lua.org) 5.4.8 | Lua.org, PUC-Rio, MIT ([licence](native/third_party/lua/LICENSE)) | The Lua runtime of the Shrouded Engine Tweaks compatibility plugin (`native/third_party/lua`). |
 | [Shrouded Engine Tweaks](https://github.com/Cacaida/Shrouded-Engine-Tweaks) 0.2.0 | Cacaida, MIT ([licence](licenses/ShroudedEngineTweaks-LICENSE.txt)) | Its Lua mod API, rule engine and rule catalog are adapted in `native/plugins/set` so its mods run on Kiln; its type-table, system and event-stream findings informed `kiln.types`. |
 | [Greeneye Loader](https://github.com/Greeneye0/greeneye-loader-enshrouded) 1.2.2 | Greeneye0, MIT ([licence](licenses/GreeneyeLoader-LICENSE.txt)) | Its mod API header and hook owner (hooks, leases, hot reload) are used in `native/plugins/greeneye` so its mods run on Kiln; its "code before hooks" find and `keep` inspired `Kiln.Hooks` `OriginalCode` and `Keep`. |

@@ -11,9 +11,13 @@ Microsoft.CodeAnalysis.PublicApiAnalyzers, see managed/Directory.Build.props) an
   apigate.py [--repo DIR] pending [REV|--worktree]          the Unshipped.txt files that hold lines, with counts
   apigate.py [--repo DIR] version-rule OLD [NEW|--worktree] exit 1 when new API is pending and the API version is
                                                             still the one at OLD
-  apigate.py [--repo DIR] promote [--if-same-as REV]        moves Unshipped.txt lines into Shipped.txt (working tree)
+  apigate.py [--repo DIR] promote [--if-same-as REV] [--release NAME]
+                                                            moves Unshipped.txt lines into Shipped.txt (working tree)
+                                                            and their rows into managed/api-history.tsv
   apigate.py [--repo DIR] api-version [REV|--worktree]      prints the API version in Mods.cs
   apigate.py [--repo DIR] bump-api [VERSION] [--major]      raises the API version in its three places (working tree)
+  apigate.py [--repo DIR] history --seed|--check|--append [--release NAME] [--mod-api X.Y.Z]
+                                                            the API history ledger managed/api-history.tsv (apihistory.py)
 
 REV/OLD/NEW are git revisions (default NEW and REV: HEAD); --worktree reads the working tree instead (tracked and
 untracked files that git does not ignore, as release.sh --worktree exports them). --repo defaults to the repository
@@ -50,6 +54,16 @@ sorts; `#nullable enable` stays first), `*REMOVED*<line>` deletes <line> from Sh
 forwarded pair leaves the forwarded line in Shipped.txt in place of the old one: that is the record the analyzer
 wants for a forwarded type. Nothing is written unless every project passes; a second run changes nothing.
 --if-same-as REV: only when every PublicAPI.*.txt of the working tree is the one at REV (else exit 3, nothing written).
+The API history ledger (managed/api-history.tsv, when the repository has one) gets a row for each line promote moves and
+for each native table row (native/core/abi headers at REV, else the working tree) it has none for: the first release and
+mod API version of every public entry, see apihistory.py. The release is --release NAME (release.sh gives it), else the
+release tag on REV (HEAD without --if-same-as); no name is a refusal, nothing written. The mod API version is the one in
+Mods.cs at REV (the working tree without it).
+
+`history`: --seed writes the ledger from the release tags (rows of a release that has no tag yet stay); --check exits 1
+when the ledger does not match the tags and the working tree's record (every difference named); --append adds the rows of
+--release NAME for the Shipped.txt lines and native rows that have none (what promote does; a repair), with --mod-api
+(default: the one in Mods.cs of the working tree).
 
 `bump-api`: VERSION (X.Y.Z) default the next minor; it must be higher than the current one and keep the major unless
 --major is given. It writes managed/Kiln.Api/Mods.cs (the const's text), managed/Kiln.Sdk/Sdk/Kiln.Version.props
@@ -65,6 +79,9 @@ import os
 import re
 import subprocess
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import apihistory  # noqa: E402  (the ledger of every entry's first release; no import of this file)
 
 SHIPPED = "PublicAPI.Shipped.txt"
 UNSHIPPED = "PublicAPI.Unshipped.txt"
@@ -462,7 +479,7 @@ def cmd_promote(a):
                 print(f"  {p}")
             print("  When the working tree holds the released API files, run: tools/release/api-gate.sh promote")
             return 3
-    plans, problems = [], []
+    plans, problems, promoted = [], [], []
     records = Records(wt)
     for u in api_files(wt, UNSHIPPED):
         proj = project(u)
@@ -499,20 +516,100 @@ def cmd_promote(a):
         body = sorted((has | set(adds)) - drop, key=ordinal)
         head = [NULLABLE] if (s_nullable or u_nullable) else []
         plans.append((proj, s_path, nl.join(head + body) + nl, u, NULLABLE + nl, len(set(adds) - has), len(drop)))
+        promoted.extend((proj.rsplit("/", 1)[-1], l) for l in set(adds) - has)
+    led = ledger_plan(a, wt, promoted, problems)
     if problems:
         print("api-gate: promote refused, nothing written:", file=sys.stderr)
         for p in problems:
             print(f"  {p}", file=sys.stderr)
         return 1
-    if not plans:
+    if not plans and not led:
         print("api-gate: promote: nothing pending")
         return 0
     for proj, s_path, s_new, u, u_new, n_add, n_drop in plans:
         write(os.path.join(a.repo, s_path), s_new)
         write(os.path.join(a.repo, u), u_new)
         print(f"api-gate: promote: {proj}: {n_add} added, {n_drop} removed")
+    if led:
+        text, n_managed, n_native, release, api = led
+        write(os.path.join(a.repo, apihistory.LEDGER), text)
+        print(f"api-gate: promote: {apihistory.LEDGER}: {n_managed} managed and {n_native} native rows for {release} "
+              f"(mod API {api})")
     print("api-gate: promote: commit the moved lines (git add managed; git commit)")
     return 0
+
+
+def ledger_plan(a, wt, promoted, problems):
+    """promote's rows for the API history ledger: (new text, managed rows, native rows, release, mod API), or None when
+    the repository has no ledger or has nothing to add. Why it cannot is added to problems. The lines are the ones
+    promote moves (project name, line); the native rows and the mod API version are the ones of the released commit
+    (--if-same-as REV), else of the working tree."""
+    text = wt.read(apihistory.LEDGER)
+    if text is None:
+        print(f"api-gate: promote: no {apihistory.LEDGER} in this repository: the API history ledger is not updated")
+        return None
+    src = tree(a.repo, a.if_same_as, False) if a.if_same_as else wt
+    try:
+        _, bad = apihistory.parse(text)
+        if bad:
+            problems.append(f"{apihistory.LEDGER} is not sound ({bad[0]}): tools/release/api-gate.sh history --check")
+            return None
+        managed, native = apihistory.fresh(text, promoted, apihistory.native_rows(src))
+        if not managed and not native:
+            return None
+        release = apihistory.release_name(a.release) if a.release else apihistory.release_at(a.repo, a.if_same_as or "HEAD")
+        api = api_version(src)
+        if release is None:
+            problems.append(f"{apihistory.LEDGER}: the release's name is needed for {len(managed) + len(native)} new rows, "
+                            f"and no release tag points at {a.if_same_as or 'HEAD'}: give --release NAME")
+        elif api is None:
+            problems.append(f"{apihistory.LEDGER}: no ApiVersion = \"...\" in {MODS_CS} at {src.label}")
+        else:
+            return (*apihistory.appended(text, release, api, managed, native), release, api)
+    except apihistory.HistoryError as e:
+        problems.append(f"{apihistory.LEDGER}: {e}")
+    return None
+
+
+def cmd_history(a):
+    wt = WorkTree(a.repo)
+    path = os.path.join(a.repo, apihistory.LEDGER)
+    try:
+        if a.seed:
+            text, c = apihistory.seed(a.repo, wt)
+            write(path, text)
+            print(f"api-gate: history: {apihistory.LEDGER}: {c['managed']} managed and {c['native']} native rows from "
+                  f"{c['tags']} release tags" + (f", {c['kept']} rows of a release without a tag kept" if c["kept"] else ""))
+            return 0
+        if a.check:
+            problems, notes, c = apihistory.check(a.repo, wt)
+            for n in notes:
+                print(f"api-gate: history: {n}")
+            if problems:
+                print(f"api-gate: history: {apihistory.LEDGER} does not match the release tags and the API record "
+                      f"({len(problems)} problems; tools/release/api-gate.sh history --seed rewrites it from the tags):",
+                      file=sys.stderr)
+                for p in apihistory.describe(problems):
+                    print(f"  {p}", file=sys.stderr)
+                return 1
+            print(f"api-gate: history: {apihistory.LEDGER} is sound ({c['managed']} managed and {c['native']} native rows, "
+                  f"{c['tags']} release tags, every Shipped.txt line has its row)")
+            return 0
+        if not a.release:
+            print("api-gate: history --append needs --release NAME", file=sys.stderr)
+            return 2
+        api = a.mod_api or api_version(wt)
+        managed, native = apihistory.missing_rows(wt)
+        if not managed and not native:
+            print(f"api-gate: history: nothing to append: every Shipped.txt line and native row has its row")
+            return 0
+        text, n_managed, n_native = apihistory.appended(wt.read(apihistory.LEDGER), a.release, api, managed, native)
+        write(path, text)
+        print(f"api-gate: history: {apihistory.LEDGER}: {n_managed} managed and {n_native} native rows appended for "
+              f"{apihistory.release_name(a.release)} (mod API {api})")
+        return 0
+    except apihistory.HistoryError as e:
+        raise Fail(str(e))
 
 
 def doc_lines(repo, old):
@@ -596,6 +693,9 @@ def cmd_bump_api(a):
         write(p, texts[k])
     print(f"api-gate: API version {old} -> {text}: {MODS_CS}, {VERSION_PROPS} (KilnModApiVersion {props_form(new)}), "
           f"{PROFILE_RS}")
+    print(f"api-gate: then regenerate the agent API index (python3 -I tools/docs-site/api_index.py: its titles and the "
+          f"Unshipped lines carry the mod API) and give agent/skills/kiln-modding/references/versions.md a row for {text}; "
+          f"until both are committed tools/check.sh fails (stages index, drift) and release.sh stops at its index step")
     docs = doc_lines(a.repo, old)
     if docs:
         print(f"api-gate: lines that may name the old API version ({old}); fix the ones about Kiln's API by hand:")
@@ -630,6 +730,8 @@ def main(argv=None):
     s.set_defaults(fn=cmd_version_rule)
     s = sub.add_parser("promote", help="move Unshipped.txt lines into Shipped.txt in the working tree")
     s.add_argument("--if-same-as", metavar="REV")
+    s.add_argument("--release", metavar="NAME", help="the release's name for the history ledger (default: the release tag "
+                                                     "on REV, or on HEAD)")
     s.set_defaults(fn=cmd_promote)
     s = sub.add_parser("api-version", help="the API version in Mods.cs")
     side(s, "rev", "default HEAD")
@@ -638,6 +740,14 @@ def main(argv=None):
     s.add_argument("version", nargs="?")
     s.add_argument("--major", action="store_true", help="allow a new major")
     s.set_defaults(fn=cmd_bump_api)
+    s = sub.add_parser("history", help="the API history ledger managed/api-history.tsv")
+    g = s.add_mutually_exclusive_group(required=True)
+    g.add_argument("--seed", action="store_true", help="write it from the release tags")
+    g.add_argument("--check", action="store_true", help="exit 1 when it does not match the tags and the API record")
+    g.add_argument("--append", action="store_true", help="add the rows of --release for entries that have none")
+    s.add_argument("--release", metavar="NAME", help="--append: the release's name (0.2.0-dev.30.6)")
+    s.add_argument("--mod-api", metavar="X.Y.Z", help="--append: the release's mod API version (default: Mods.cs)")
+    s.set_defaults(fn=cmd_history)
     a = p.parse_args(argv)
     for name in ("new", "rev"):
         if getattr(a, "worktree", False) and getattr(a, name, None):

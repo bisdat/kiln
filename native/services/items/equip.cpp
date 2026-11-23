@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "engine.h"
+#include "storage_guard.h"
 #include "gems_logic.h"
 #include "equip_logic.h"
 #include "instances.h"
@@ -330,7 +331,17 @@ void fail(KilnItemsEquipResult* res, int32_t status, const char* fmt, uint32_t x
     std::snprintf(res->message, sizeof res->message, fmt, x, y);
 }
 
+bool append_storage_pages(const Access& a, uint32_t root, PageSet* pages) {
+    PageSet extra{}; bool initialized = false;
+    if (!root || !read_pages(a, root, &extra, &initialized) || !initialized ||
+        extra.n > KILN_ITEMS_MAX_INVENTORIES - pages->n) return false;
+    for (uint32_t i = 0; i < extra.n; ++i) { pages->p[pages->n] = extra.p[i]; pages->cat[pages->n++] = extra.cat[i]; }
+    return true;
+}
+
 void equip_impl(const Access& a, KilnEntity p, const KilnItemsEquipRequest& r, uint8_t* tx, KilnItemsEquipResult* res) {
+    if (!storage_mutable(KILN_SLOT_INVENTORY(r.slot)))
+        return fail(res, KILN_ITEMS_UNAVAILABLE, "player storage persistence is unavailable");
     std::vector<PageSet> v(2);
     bool init = false;
     if (!read_pages(a, p, &v[0], &init) || !init)
@@ -342,6 +353,7 @@ void equip_impl(const Access& a, KilnEntity p, const KilnItemsEquipRequest& r, u
     const uint8_t gslot = r.equipment_slot;
     const int idx = gslot == KILN_ITEMS_EQUIP_ANY ? -1 : selection_index(gslot);
     Stack src{};
+    uint32_t storage_source = 0;
     uint64_t from = 0;
     if (unequip) {
         from = before.eq[idx];
@@ -350,7 +362,13 @@ void equip_impl(const Access& a, KilnEntity p, const KilnItemsEquipRequest& r, u
         src = *s;
     } else {
         from = r.slot;
+        if (!storage_actor(KILN_SLOT_INVENTORY(from), p))
+            return fail(res, KILN_ITEMS_REFUSED, "the storage belongs to another player");
         const Stack* s = stack_in(v[0], from);
+        if (!s) {
+            storage_source = storage_root(KILN_SLOT_INVENTORY(from));
+            if (storage_source && append_storage_pages(a, storage_source, &v[0])) s = stack_in(v[0], from);
+        }
         if (!s) return fail(res, KILN_ITEMS_SLOT_CHANGED, "the slot (inventory %u) is not one of player %u's", KILN_SLOT_INVENTORY(from), p);
         if (is_empty(*s)) return fail(res, KILN_ITEMS_SLOT_CHANGED, "the slot holds nothing");
         if (r.pide && pide_of(*s) != r.pide)
@@ -378,6 +396,7 @@ void equip_impl(const Access& a, KilnEntity p, const KilnItemsEquipRequest& r, u
     int got = idx;
     if (err == 0) {
         read_pages(a, p, &v[1], nullptr);
+        if (storage_source) append_storage_pages(a, storage_source, &v[1]);
         res->to = where_now(v[0].p, v[0].n, v[1].p, v[1].n, src.item, res->pide, from);
         Selection mid{};
         if (!unequip && read_selection(a, p, &mid)) {
@@ -388,9 +407,19 @@ void equip_impl(const Access& a, KilnEntity p, const KilnItemsEquipRequest& r, u
     } else if (unequip) {
         room = has_free_generic(a, p);
     }
-    if (err == 0 && !dry) E.commit(tx);
+    bool filtered = false;
+    if (storage_source && err == 0) for (uint32_t i = 0; i < v[1].n; ++i) {
+        if (!storage_contains(v[1].p[i].entity)) continue;
+        for (const Stack& after : v[1].p[i].s) {
+            const Stack* before_stack = stack_in(v[0], after.slot);
+            if (!is_empty(after) && (!before_stack || before_stack->item != after.item || before_stack->count < after.count) &&
+                !storage_accepts(storage_source, after.item, pide_of(after) != 0, after.slot)) filtered = true;
+        }
+    }
+    if (err == 0 && !dry && !filtered) E.commit(tx);
     else E.rollback(tx);
     E.free_arrays(tx);
+    if (filtered) return fail(res, KILN_ITEMS_FILTERED, "the replaced item fails the player storage filter");
     if (err == 0 && !unequip) {
         // the item chose its slot: the committed selection names it (a dry run cannot know it: 0xFF)
         Selection after{};

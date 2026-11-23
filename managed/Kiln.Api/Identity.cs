@@ -92,10 +92,14 @@ public readonly record struct ItemInstanceRef(EntityRef Entity, ItemId Item)
 
 /// <summary>An item type: FNV-1a-32 of the item's 16 GUID bytes, as the game computes it (and the dashboard catalog
 /// uses). 0 = none.</summary>
+/// <param name="Value">The id; 0 is none.</param>
 public readonly record struct ItemId(uint Value)
 {
+    /// <summary>No item (0).</summary>
     public static readonly ItemId None = default;
+    /// <summary>True for <see cref="None"/>.</summary>
     public bool IsNone => Value == 0;
+    /// <summary>The id as <c>0x&lt;8 hex digits&gt;</c>.</summary>
     public override string ToString() => $"0x{Value:x8}";
 
     /// <summary>The id the game gives the item with these GUID bytes (as stored in the game's data).</summary>

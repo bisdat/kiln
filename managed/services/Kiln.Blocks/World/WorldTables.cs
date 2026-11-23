@@ -67,6 +67,8 @@ public static partial class WorldTables
 /// <param name="Id">The game's <c>CraftingPropId</c>: FNV-1a of the GUID.</param>
 /// <param name="Index">Its place in the mask of props, 51..63 (the game's own props have 0..50).</param>
 /// <param name="ItemId">The item that places it.</param>
+/// <param name="Mod">The mod that defined it.</param>
+/// <param name="Block">The name of its prop block in that mod.</param>
 public sealed record WorldCraftingProp(Guid Guid, uint Id, int Index, uint ItemId, string Mod, string Block);
 
 internal static unsafe partial class WorldTablesNative

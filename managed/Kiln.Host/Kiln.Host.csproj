@@ -2,6 +2,7 @@
   <!-- Started by kiln-core.dll through hostfxr; lives in the default load context next to Kiln.Api. -->
   <PropertyGroup>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <NoWarn>$(NoWarn);KILNX031</NoWarn>
     <EnableDynamicLoading>true</EnableDynamicLoading>
     <!-- Workstation, concurrent GC: short pauses on the tick thread matter more than throughput. -->
     <ServerGarbageCollector>false</ServerGarbageCollector>

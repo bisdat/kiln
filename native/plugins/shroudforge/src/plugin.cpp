@@ -973,7 +973,8 @@ void KILN_CALL on_ready(void*) {
         return finish("failed", "EML writer is already active or incompatible; refusing a second KFC writer");
     }
     g_tail.start();
-    start_helper_processes(g_game, g_server);
+    // the installed ShroudForge's version.json (read above) is its app's version too: one install writes both
+    start_helper_processes(g_game, g_server, chosen->version, installed.version);
     set_status("menu", helper_menu());
     set_status("menuKey", helper_menu_key(g_game));
     const auto t0 = std::chrono::steady_clock::now();

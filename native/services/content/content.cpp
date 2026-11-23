@@ -315,7 +315,7 @@ void try_ready(uint64_t step, uint32_t kind, uintptr_t world) {
                  mbi.Type == MEM_PRIVATE ? "MEM_PRIVATE" : mbi.Type == MEM_IMAGE ? "MEM_IMAGE" : "MEM_MAPPED", mbi.BaseAddress,
                  mbi.RegionSize / 1048576.0, mbi.AllocationBase);
     }
-    registry_live_world_begin();
+    registry_live_world_begin(kind);
     apply_packs(false);
     g_ready.store(true);
     set_detail("ready");
@@ -378,15 +378,22 @@ std::unordered_set<uintptr_t> g_seen;
 // Takes every layer off (revert: writes the originals back; only while the world is intact) and forgets the snapshot,
 // so the next world (a new hosted session, a join) is read and patched from scratch. Ready subscribers run again then.
 void world_reset(bool revert, const char* why) {
-    nc_world_stopping(g_world.load());
+    uintptr_t w;
+    bool was_ready;
+    {
+        std::lock_guard lock(store_mutex());
+        // Fence live accesses before clearing the core world. An off-thread caller can never observe
+        // core "no world" while the backend still admits writes to that world's slots.
+        registry_live_world_stop();
+        w = g_world.exchange(0);
+        was_ready = g_ready.exchange(false);
+    }
+    nc_world_stopping(w);
     refs_reset();
-    const uintptr_t w = g_world.exchange(0);
-    const bool was_ready = g_ready.exchange(false);
     uint32_t n = 0;
     std::string err;
     {
         std::lock_guard lock(store_mutex());
-        registry_live_world_stop();
         n = store_reset(revert, &err);
         drops_clear_rules();
         Registry& D = reg(KILN_CONTENT_DROPS);

@@ -153,6 +153,8 @@ Kiln.CharacterSettings.MaxKeys.get -> int
 Kiln.CharacterSettings.MaxKeys.init -> void
 Kiln.CharacterSettings.MaxValueBytes.get -> int
 Kiln.CharacterSettings.MaxValueBytes.init -> void
+Kiln.CharacterSettings.Storage.get -> Kiln.PlayerStorageSettings!
+Kiln.CharacterSettings.Storage.init -> void
 Kiln.CharacterSyncStatus
 Kiln.CharacterSyncStatus.<Clone>$() -> Kiln.CharacterSyncStatus!
 Kiln.CharacterSyncStatus.ChannelOpen.get -> bool
@@ -287,6 +289,10 @@ Kiln.Persist.Carried = 1 -> Kiln.Persist
 Kiln.Persist.Session = 2 -> Kiln.Persist
 Kiln.Persist.World = 0 -> Kiln.Persist
 Kiln.PlayerData
+Kiln.PlayerStorageSettings
+Kiln.PlayerStorageSettings.PlayerStorageSettings() -> void
+Kiln.PlayerStorageSettings.TrustClient.get -> bool
+Kiln.PlayerStorageSettings.TrustClient.init -> void
 Kiln.SaveReason
 Kiln.SaveReason.Autosave = 1 -> Kiln.SaveReason
 Kiln.SaveReason.Backup = 5 -> Kiln.SaveReason
@@ -533,6 +539,7 @@ static Kiln.Saves.Backups.get -> System.Collections.Generic.IReadOnlyList<Kiln.B
 static Kiln.Saves.CancelRestore() -> bool
 static Kiln.Saves.DataDirectory.get -> string?
 static Kiln.Saves.PendingRestore.get -> string?
+static Kiln.Saves.PlayerStoragePersistenceFailure.get -> string?
 static Kiln.Saves.Request() -> System.Threading.Tasks.Task<Kiln.SaveResult!>!
 static Kiln.Saves.RestoreOnNextStart(string! name) -> Kiln.BackupInfo!
 static Kiln.Saves.SaveDirectory.get -> string?

@@ -14,8 +14,11 @@
 #include <cstdio>
 
 #include "emf_internal.h"
+#include "mod_cost.h"
 #include "nlohmann/json.hpp"
 #include "slow_parts.h"
+
+#include <map>
 
 #include <psapi.h>
 
@@ -45,6 +48,33 @@ KilnHandle g_aside_tick = 0;
 uint64_t g_aside_steps = 0;
 uint64_t g_last_status = 0;
 uint64_t g_steps = 0;
+uint64_t g_last_cost = 0;
+std::mutex g_cost_mutex;                      // g_costs: the tick thread updates, write_status reads (any thread)
+std::map<const Mod*, CostReporter> g_costs;  // mod_cost.h: each loaded mod's cost over the last minute
+
+CostSample cost_sample(const Mod& m) {
+    CostSample s;
+    s.steps = g_steps;
+    s.tick_ns = m.tick_ns.load(std::memory_order_relaxed);
+    s.reads = m.api_reads.load(std::memory_order_relaxed);
+    s.scans = m.api_scans.load(std::memory_order_relaxed);
+    s.scan_entities = m.api_scan_entities.load(std::memory_order_relaxed);
+    s.scan_ns = m.api_scan_ns.load(std::memory_order_relaxed);
+    return s;
+}
+
+// Once a minute on the server world's Pre: each loaded mod's cost per step; a line for a mod over 2 ms (mod_cost.h).
+void mod_costs_minute(uint64_t now) {
+    for (const auto& m : g_mods) {
+        if (m->status != EMF_MOD_LOADED) continue;
+        std::optional<CostLine> line;
+        {
+            std::lock_guard lock(g_cost_mutex);
+            line = g_costs[m.get()].minute(m->id, cost_sample(*m), now);
+        }
+        if (line) logf(line->warn ? KILN_LOG_WARN : KILN_LOG_INFO, "%s", line->text.c_str());
+    }
+}
 
 std::filesystem::path api_path(int32_t kind) {
     char buf[1024];
@@ -304,6 +334,10 @@ void dispatch_server_pre() {
     commands_server_pre();
     g_pre_parts.part("commands", qpc_ns());
     const uint64_t now = now_ms();
+    if (g_any_loaded && now - g_last_cost >= 60000) {
+        g_last_cost = now;
+        mod_costs_minute(now);
+    }
     if ((g_dirty.load() && now - g_last_status > 5000) || (g_any_loaded && now - g_last_status > 60000)) {
         g_last_status = now;
         write_status();
@@ -338,6 +372,24 @@ void write_status() {
                   {"tickMsTotal", static_cast<double>(m->tick_ns.load()) / 1e6},
                   {"tickMsPerStep", g_steps ? static_cast<double>(m->tick_ns.load()) / 1e6 / static_cast<double>(g_steps) : 0.0},
                   {"tickMsMax", static_cast<double>(m->tick_max_ns.load()) / 1e6}};
+        if (m->status == EMF_MOD_LOADED) {
+            // mod_cost.h: what the mod asked kiln-emf for, and the last minute per server step
+            CostWindow w;
+            {
+                std::lock_guard lock(g_cost_mutex);
+                if (auto it = g_costs.find(m.get()); it != g_costs.end()) w = it->second.last();
+            }
+            j["cost"] = {{"componentReads", m->api_reads.load()},
+                         {"entityScans", m->api_scans.load()},
+                         {"entityScanEntities", m->api_scan_entities.load()},
+                         {"entityScanMs", static_cast<double>(m->api_scan_ns.load()) / 1e6},
+                         {"lastMinute", {{"steps", w.steps},
+                                         {"msPerStep", w.ms_per_step},
+                                         {"componentReadsPerStep", w.reads_per_step},
+                                         {"entityScansPerStep", w.scans_per_step},
+                                         {"entitiesPerScan", w.entities_per_scan},
+                                         {"entityScanMsPerStep", w.scan_ms_per_step}}}};
+        }
         if (!m->dll.empty()) j["dll"] = path_utf8(m->dll);
         if (!m->main.empty()) j["main"] = m->main;
         if (!m->profile_id.empty()) j["profileId"] = m->profile_id;

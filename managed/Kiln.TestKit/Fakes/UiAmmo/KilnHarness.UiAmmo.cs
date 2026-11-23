@@ -19,12 +19,12 @@ public sealed partial class KilnHarness
 /// rows), <see cref="SetGameRows"/> (the backpack changed), <see cref="Unhold"/>, <see cref="NewSession"/>, and the
 /// client's items of each kind (<see cref="KnownItems"/>: other items are refused as the game refuses them). Each
 /// <c>Step</c> is a UI frame: Kiln.Ui asks the providers of a list whose context changed and publishes its snapshot,
-/// which the native rules check (one owner per list, the context's serial and session, at most 64 rows, no item 0 and no
-/// duplicate). <see cref="Shown"/> is the list as the HUD composes it, <see cref="Provided"/> the snapshot's rows,
+/// which the native rules check (one owner per list, the context's serial and session, at most 64 rows, no item 0 and
+/// no duplicate). <see cref="Shown"/> is the list as the HUD composes it, <see cref="Provided"/> the snapshot's rows,
 /// <see cref="ModeOf"/> its mode. The selection stays on its item when the rows change (<see cref="Select"/>,
-/// <see cref="Selected"/>). <see cref="Pick"/> of a mod row whose item the game does not list queues a pick, which
-/// Ui.AmmoList.Picked raises at the next step for the mod that provided the row; the game equips a row it lists
-/// itself.</para>
+/// <see cref="Selected"/>). <see cref="Pick"/> of a mod row whose item the game does not list with stock (a row it kept
+/// at count 0 is none) queues a pick, which Ui.AmmoList.Picked raises at the next step for the mod that provided the
+/// row; the game equips a row it lists itself with stock.</para>
 /// <para><b>Not modelled.</b> The game's hook and drawing, its equip request, the server half (a pick does nothing to any
 /// inventory), the pick queue's thread.</para>
 /// </remarks>
@@ -190,9 +190,10 @@ public sealed class HarnessAmmoList
         }
     }
 
-    /// <summary>The player picks the row of <paramref name="item"/>. True: a mod's row whose item the game does not list
-    /// (not in the backpack), so the game does nothing and the pick is queued for Ui.AmmoList.Picked at the next step.
-    /// False: the game equips it itself (its own row, or a mod row of an item it lists), or no row of it is shown.</summary>
+    /// <summary>The player picks the row of <paramref name="item"/>. True: a mod's row whose item the game does not
+    /// list with stock (not in the backpack; a game row at count 0 is none), so the game does nothing and the pick is
+    /// queued for Ui.AmmoList.Picked at the next step. False: the game equips it itself (its own row, or a mod row of
+    /// an item it lists with stock), or no row of it is shown.</summary>
     public bool Pick(AmmoListKind kind, ItemId item)
     {
         var st = State;
@@ -203,12 +204,14 @@ public sealed class HarnessAmmoList
             var i = Array.FindIndex(shown, s => s.Item == item.Value);
             if (i < 0) return false;
             list.Selected = item.Value;
-            if (!shown[i].Mod || list.Game.Any(g => g.Item == item.Value)) return false;
-            var key = (uint)Array.FindIndex(list.Rows, r => r.Item == item.Value);
+            // As native: a mod row is the game's own when the game lists its item with stock (the game's rows are the
+            // backpack here); a row the game kept at count 0 for a used-up stack is not stock (GitHub issue 131).
+            var key = list.Owner == 0 || list.Mode == UiAmmoNative.ModeGame ? -1 : Array.FindIndex(list.Rows, r => r.Item == item.Value);
+            if (key < 0 || list.Game.Any(g => g.Item == item.Value && g.Count != 0)) return false;
             if (st.Picks.Count == UiAmmoNative.Capacity) st.Picks.Dequeue();  // the oldest wish goes
             st.Picks.Enqueue((list.Owner, new UiAmmoNative.Pick
             {
-                Size = 32, Kind = Native(kind), Item = item.Value, Count = shown[i].Count, Key = list.Rows[key].Key, Session = st.Session,
+                Size = 32, Kind = Native(kind), Item = item.Value, Count = list.Rows[key].Count, Key = list.Rows[key].Key, Session = st.Session,
                 Step = st.Step,
             }));
             return true;

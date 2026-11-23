@@ -21,6 +21,7 @@
 #include "../registry_live.h"
 #include "../store.cpp"
 #include "../registry_live.cpp"
+#include "../registry/pristine.h"
 
 namespace kc {
 const KilnApi* g_api = nullptr;
@@ -600,6 +601,50 @@ void pack_write_lost_on_detection() {
 }
 }  // namespace
 
+// review4 NS1: a lazy base decode reads the game's resident resource bytes; Kiln's own store writes in them (packs, Content
+// code, registry layers) are taken back out, so the base, VIEW_BASE and the cache digest are the game's.
+struct ResidentView final : kiln::boot_view::BaseView {
+    uintptr_t at = 0; size_t len = 0; bool released = false;
+    const char* source() const override { return "live"; }
+    bool ready(std::string*) override { return true; }
+    std::string digest() override { return "inner"; }
+    KilnResult tree(std::string_view, size_t, size_t, uint64_t, std::string*, size_t*, size_t*, std::string* why) override {
+        return *why = "bytes only", KILN_ERR_UNAVAILABLE;
+    }
+    KilnResult bytes(const KilnAssetKey&, size_t, std::string* out, std::string*) override {
+        out->assign(reinterpret_cast<const char*>(at), len);  // resource_read: a copy of the resident bytes
+        return KILN_OK;
+    }
+    void release() override { released = true; }
+};
+void lazy_decode_reads_pristine_bytes() {
+    world();
+    ResidentView inner; inner.at = A(0x10000); inner.len = 0x40;
+    auto resident = [&](const KilnAssetKey&, uintptr_t* at, size_t* len) { *at = inner.at, *len = inner.len; return true; };
+    auto restore = [](uintptr_t at, size_t len, uint8_t* bytes) { store_pristine(at, len, bytes); };
+    const KilnAssetKey key{};
+    std::string before, why;
+    registry::PristineView fresh(inner, resident, restore);
+    check(fresh.bytes(key, 1 << 20, &before, &why) == KILN_OK && before.size() == 0x40, "the fresh view reads the resource");
+    const std::string pristine_digest = fresh.digest();
+    const uint32_t v = 777;
+    store_put(11, (1ull << 44) | 1, KILN_CONTENT_ITEMS, 0x111, 0, -1, A(0x10000), 4, reinterpret_cast<const uint8_t*>(&v), "pack");
+    store_put(11, (1ull << 44) | 1, KILN_CONTENT_ITEMS, 0x111, -1, -1, A(0x10010), 4, reinterpret_cast<const uint8_t*>(&v), "pack");
+    std::string error; store_flush(&error);
+    check(std::memcmp(g_arena + 0x10000, &v, 4) == 0, "Kiln's pack write is in the resident bytes");
+    registry::PristineView later(inner, resident, restore);
+    std::string after;
+    check(later.bytes(key, 1 << 20, &after, &why) == KILN_OK && after == before,
+          "the lazy view takes Kiln's own writes back out of the resident bytes");
+    check(later.digest() == pristine_digest, "so its digest matches the base decoded before the writes (the cache stays valid)");
+    std::string raw; inner.bytes(key, 0, &raw, &why);
+    check(raw != before, "the inner view alone would have served Kiln's bytes");
+    store_reset(true, &error);
+    check(std::memcmp(g_arena + 0x10000, before.data(), 4) == 0, "the store's reset restores memory");
+    std::string again; registry::PristineView reset(inner, resident, restore);
+    check(reset.bytes(key, 1 << 20, &again, &why) == KILN_OK && again == before, "no stale original outlives the store's slots");
+}
+
 int main() {
     g_pack_root = std::filesystem::path(std::getenv("KILN_OUT")) / "content-tests/registry-live-review-packs";
     std::vector<std::string> errs;
@@ -615,7 +660,8 @@ int main() {
                                                          {"L2b reload_keeps_boot_outcomes_and_checks_sections", &reload_keeps_boot_outcomes_and_checks_sections},
                                                          {"L3 pack_write_lost_on_detection", &pack_write_lost_on_detection},
                                                          {"L4 report_written_outside_the_store_lock", &report_written_outside_the_store_lock},
-                                                         {"L4 pack_read_outside_the_store_lock", &pack_read_outside_the_store_lock}};
+                                                         {"L4 pack_read_outside_the_store_lock", &pack_read_outside_the_store_lock},
+                                                         {"NS1 lazy_decode_reads_pristine_bytes", &lazy_decode_reads_pristine_bytes}};
     for (const auto& [name, fn] : groups) {
         try {
             fn();

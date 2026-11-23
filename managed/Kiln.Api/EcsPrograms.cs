@@ -550,6 +550,7 @@ public readonly unsafe ref struct EcsProgramContext
     private readonly ulong* _iterator;
     internal EcsProgramContext(EcsPrograms.Binding binding, void* context, ulong* iterator, uint entity)
     { _binding = binding; _context = context; _iterator = iterator; Entity = new EntityId(entity); }
+    /// <summary>The entity the callback runs for; none for a system program.</summary>
     public EntityId Entity { get; }
     /// <summary>The world this call runs in: <see cref="WorldKind.Server"/>, or for a client binding
     /// <see cref="WorldKind.Client"/> / <see cref="WorldKind.Prediction"/>. Since 0.2.0-dev.29.</summary>

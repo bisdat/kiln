@@ -15,6 +15,7 @@ namespace Kiln;
 [Flags]
 public enum PacingSites
 {
+    /// <summary>None of them: this build has no wait a mod can pace.</summary>
     None = 0,
     /// <summary>The event loop's wait on its handles (server and client): <see cref="Pacing.OnLoopWait"/>.</summary>
     LoopWait = 1,
@@ -91,6 +92,7 @@ public sealed class PacingHandler : IDisposable
     /// <summary>The handler threw too often and was removed (see <see cref="Pacing"/>).</summary>
     public bool Faulted { get; internal set; }
 
+    /// <summary>Removes the handler.</summary>
     public void Dispose() => Pacing.Remove(this);
 }
 

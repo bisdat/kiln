@@ -41,6 +41,18 @@ public enum UiThemeRole : uint
 
 /// <summary>The colours of a look by role (<see cref="UiDraw.Palette"/>): draw your own shapes and text in the look in use.
 /// <see cref="WindowBackground"/>'s alpha is the windows' opacity.</summary>
+/// <param name="Text">Text (<see cref="UiThemeRole.Text"/>).</param>
+/// <param name="TextMuted">Disabled and secondary text (<see cref="UiThemeRole.TextMuted"/>).</param>
+/// <param name="WindowBackground">Windows, title bars and pop-ups (<see cref="UiThemeRole.WindowBackground"/>).</param>
+/// <param name="PanelBackground">Child regions and tiles, the chosen tab, table headers (<see cref="UiThemeRole.PanelBackground"/>).</param>
+/// <param name="FrameBackground">Text fields, check boxes, slider tracks, idle tabs (<see cref="UiThemeRole.FrameBackground"/>).</param>
+/// <param name="Border">Outlines, separators, table lines (<see cref="UiThemeRole.Border"/>).</param>
+/// <param name="Accent">Check marks, slider grabs, the chosen tab's line, the focus outline, a held button (<see cref="UiThemeRole.Accent"/>).</param>
+/// <param name="Button">Buttons (<see cref="UiThemeRole.Button"/>).</param>
+/// <param name="Header">Chosen and hovered rows, collapsing headers (<see cref="UiThemeRole.Header"/>).</param>
+/// <param name="Attention">A status colour for your own drawing (<see cref="UiThemeRole.Attention"/>).</param>
+/// <param name="Warning">A status colour: a problem (<see cref="UiThemeRole.Warning"/>).</param>
+/// <param name="Ok">A status colour: fine (<see cref="UiThemeRole.Ok"/>).</param>
 public readonly record struct UiPalette(Color Text, Color TextMuted, Color WindowBackground, Color PanelBackground,
     Color FrameBackground, Color Border, Color Accent, Color Button, Color Header, Color Attention, Color Warning, Color Ok)
 {
@@ -195,6 +207,7 @@ public sealed class UiFontFile : IDisposable
     /// <summary>The size of its file in bytes.</summary>
     public int Bytes { get; internal init; }
 
+    /// <summary>Frees the font. Does nothing when it was freed already.</summary>
     public unsafe void Dispose()
     {
         var h = Interlocked.Exchange(ref Handle, 0);

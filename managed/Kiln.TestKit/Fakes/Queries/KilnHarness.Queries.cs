@@ -10,6 +10,9 @@ public sealed partial class KilnHarness
 }
 
 /// <summary>A voxel ray a mod asked for (<c>Queries.RaycastVoxels</c>, <c>GroundBelow</c>, <c>VoxelLineOfSight</c>, a brain's sight).</summary>
+/// <param name="From">Where the ray starts.</param>
+/// <param name="To">Where the ray ends.</param>
+/// <param name="Realm">The realm the ray was cast in (0: the overworld).</param>
 public readonly record struct FakeVoxelRay(WorldPosition From, WorldPosition To, byte Realm);
 
 /// <summary>What the fake answers a voxel ray: <see cref="Clear"/>, <see cref="Hit"/>, or <see cref="Refused"/> with one of
@@ -37,6 +40,13 @@ public readonly record struct FakeVoxelAnswer
 }
 
 /// <summary>A path request a mod made (<c>Queries.RequestPath</c>, <c>FindPath</c>, <c>CanReach</c>).</summary>
+/// <param name="Anchor">The entity the game's path query was made for.</param>
+/// <param name="From">Where the route starts.</param>
+/// <param name="To">Where the route should end.</param>
+/// <param name="HorizontalSpace">The free space the route needs sideways, in metres.</param>
+/// <param name="VerticalSpace">The free space the route needs upwards, in metres.</param>
+/// <param name="MaxIterations">The search's iteration limit.</param>
+/// <param name="ClosestFallback">Whether the closest node may be used when the target has none.</param>
 public sealed record FakePathRequest(EntityId Anchor, WorldPosition From, WorldPosition To, double HorizontalSpace, double VerticalSpace, uint MaxIterations, bool ClosestFallback);
 
 /// <summary>What the fake's path search answers: <see cref="Route(WorldPosition[])"/> (found when its last point is at the

@@ -155,6 +155,7 @@ internal sealed unsafe class SaveWriter
         public JsonObject? Manifest;
         public string? Content, Key;
         public bool Written;
+        public Action<bool>? Finished;
         public string? Head, DiskText;  // the log line's parts (null: the write failed and was logged)
         public double QueuedMs, WorkMs;
 
@@ -698,6 +699,7 @@ internal sealed unsafe class SaveWriter
             Monitor.PulseAll(_lock);
         }
         if (job is not StageJob st) return;
+        st.Finished?.Invoke(st.Written);
         if (st.Barrier != null) st.Barrier(0, st.Ticket);  // the world write of its save may go now
         if (st.Head != null)
         {

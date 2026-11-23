@@ -252,6 +252,10 @@
           "field": {
             "type": "string",
             "description": "The Kiln field (or element path, or raw path) it named."
+          },
+          "raw": {
+            "const": true,
+            "description": "Present for an Advanced-tier raw-path refusal, even when its place is unavailable. Readers that do not show raw paths hide field and reason details for these rows only; a field name that is not raw (a misspelled or newer Kiln field) keeps its reason."
           }
         },
         "additionalProperties": false
@@ -697,6 +701,10 @@
         "text": {
           "type": "string",
           "description": "One English sentence, as kiln.log has it."
+        },
+        "raw": {
+          "const": true,
+          "description": "Present when the line's place is a raw path (the Advanced tier) rather than a Kiln field."
         }
       },
       "additionalProperties": false

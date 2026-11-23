@@ -9,33 +9,51 @@ namespace Kiln;
 /// <summary>Where experience came from (the game's ExperienceSourceType; the client's "+XP" line may show it).</summary>
 public enum ExperienceSource : byte
 {
+    /// <summary>No source given.</summary>
     None = 0,
+    /// <summary>Exploring the world.</summary>
     Exploration = 1,
+    /// <summary>Finding lore.</summary>
     Lore = 2,
+    /// <summary>A quest.</summary>
     Quest = 3,
+    /// <summary>Combat.</summary>
     Combat = 4,
+    /// <summary>Mining.</summary>
     Mining = 5,
+    /// <summary>Completing an item set.</summary>
     ItemSetCompleted = 6,
 }
 
 /// <summary>The game's skill node types.</summary>
 public enum SkillNodeType : byte
 {
+    /// <summary>A root of the tree.</summary>
     Root = 0,
+    /// <summary>A node that raises an attribute.</summary>
     Attribute = 1,
+    /// <summary>A node that unlocks an active skill (<c>ActiveSkillItem</c> names its ability item).</summary>
     ActiveSkill = 2,
+    /// <summary>A node that gives a passive skill.</summary>
     PassiveSkill = 3,
 }
 
 /// <summary>What a progression request does.</summary>
 public enum ProgressionOp
 {
+    /// <summary>Set the level (1 to the cap); experience into the level goes to 0.</summary>
     SetLevel = 1,
+    /// <summary>Grant experience; the game counts it in its next step and levels the player up.</summary>
     AddExperience = 2,
+    /// <summary>Set the experience into the current level (the game levels up when it reaches what the level needs).</summary>
     SetExperience = 3,
+    /// <summary>Give unspent skill points, as the game's +1 skill-point knowledge.</summary>
     GiveSkillPoints = 4,
+    /// <summary>Unlock a skill node, or one more level of a node with levels.</summary>
     Unlock = 5,
+    /// <summary>Lock a skill node, or take one level off a node with levels.</summary>
     Lock = 6,
+    /// <summary>Lock every node and give the spent points back (free).</summary>
     Respec = 7,
 }
 
@@ -49,12 +67,28 @@ public enum ProgressionOp
 /// <param name="SkillPointsFromKnowledge">From the player's skill-point knowledge (wells, "additional skill point"
 /// rewards).</param>
 /// <param name="GivableSkillPoints">What <see cref="PlayerProgression.GiveSkillPoints"/> can still add.</param>
+/// <param name="Entity">The player's entity.</param>
+/// <param name="Level">The player's level.</param>
+/// <param name="LevelCap">The game's player level cap.</param>
+/// <param name="SkillPointsTotal">The skill points the player has in all: <paramref name="SkillPointsFromLevel"/> + <paramref name="SkillPointsFromKnowledge"/>.</param>
+/// <param name="SkillPointsSpent">The points the unlocked nodes cost.</param>
+/// <param name="SkillPointsPerLevel">The skill points each level above 1 gives.</param>
+/// <param name="UnlockedNodes">How many nodes the player has unlocked (a node with levels counts once).</param>
+/// <param name="HasLevel">The level and experience values are valid.</param>
+/// <param name="HasSkills">The spent points and the node count are valid.</param>
+/// <param name="HasPoints">The skill point totals are valid.</param>
+/// <param name="HasKnowledge">The givable skill points are valid.</param>
+/// <param name="AtLevelCap">The player is at the level cap: the game discards new experience.</param>
+/// <param name="OverBudget">The unlocked nodes cost more than the player has (<paramref name="SkillPointsSpent"/> is above <paramref name="SkillPointsTotal"/>): the game resets the tree at the player's next login.</param>
+/// <param name="IsSnapshot">The values come from the last snapshot (read from another thread than the tick thread), not live. <paramref name="Step"/> says when.</param>
+/// <param name="Step">The server-world step of the read.</param>
 public sealed record ProgressionSnapshot(
     EntityId Entity, int Level, int LevelCap, uint Experience, uint ExperienceNeeded, uint ExperiencePending,
     int SkillPoints, int SkillPointsTotal, int SkillPointsSpent, int SkillPointsFromLevel, int SkillPointsFromKnowledge,
     int SkillPointsPerLevel, int UnlockedNodes, int GivableSkillPoints, bool HasLevel, bool HasSkills, bool HasPoints,
     bool HasKnowledge, bool AtLevelCap, bool OverBudget, bool IsSnapshot, ulong Step)
 {
+    /// <summary>The level, experience and skill points on one line, for a log.</summary>
     public override string ToString() =>
         $"level {Level}/{LevelCap}, experience {Experience}/{ExperienceNeeded}{(ExperiencePending != 0 ? $" (+{ExperiencePending})" : "")}, " +
         $"skill points {SkillPoints} of {SkillPointsTotal} ({UnlockedNodes} nodes)";
@@ -64,21 +98,44 @@ public sealed record ProgressionSnapshot(
 /// <param name="Cost">Skill points (per level for nodes with levels).</param>
 /// <param name="MaxLevel">0: one unlock; else levels 1..MaxLevel.</param>
 /// <param name="ActiveSkillItem">ItemId of the ability item the node unlocks (0: none).</param>
+/// <param name="Id">The node's id (the game's SkillNodeId, an FNV-1a hash of its editor GUID).</param>
+/// <param name="Type">What kind of node it is.</param>
+/// <param name="LevelIndex">The node's level index in the game's skill tree data.</param>
+/// <param name="ClassAlignment">The class the node belongs to, as the game's ClassType: 0 Warrior, 1 Mage, 2 Ranger, 3 Neutral.</param>
+/// <param name="Incoming">How many links lead into the node.</param>
+/// <param name="Outgoing">How many links lead out of the node.</param>
+/// <param name="Index">The node's position in the skill tree resource.</param>
+/// <param name="UiX">The node's x position in the game's skill tree screen.</param>
+/// <param name="UiY">The node's y position in the game's skill tree screen.</param>
 public readonly record struct SkillNode(
     uint Id, SkillNodeType Type, int Cost, int MaxLevel, int LevelIndex, int ClassAlignment, uint ActiveSkillItem,
     int Incoming, int Outgoing, int Index, float UiX, float UiY)
 {
+    /// <summary>The node's id, type and cost on one line.</summary>
     public override string ToString() => $"0x{Id:x8} {Type} cost {Cost}{(MaxLevel > 0 ? $" x{MaxLevel}" : "")}";
 }
 
 /// <summary>A node a player has unlocked. <see cref="Cost"/>: what it costs now (level x cost for nodes with
 /// levels).</summary>
+/// <param name="Id">The node's id (see <see cref="SkillNode.Id"/>).</param>
+/// <param name="Level">The node's level: 1 for a plain node, up to <paramref name="MaxLevel"/> for a node with levels.</param>
+/// <param name="MaxLevel">The node's highest level (0: a node with one unlock).</param>
+/// <param name="Cost">What the node costs now, in skill points.</param>
 public readonly record struct UnlockedSkillNode(uint Id, int Level, int MaxLevel, int Cost);
 
 /// <summary>What a progression request did. <see cref="After"/> is read two steps after the change (the game's
 /// player_level and player_skilltree ran by then; a grant over several levels levels up one level per step).</summary>
 /// <param name="Applied">SetLevel: the level set. AddExperience: experience granted. SetExperience: the value.
 /// GiveSkillPoints: points given. Unlock/Lock: 1. Respec: nodes reset.</param>
+/// <param name="Request">The request's id; 0 when the request was refused before it was queued.</param>
+/// <param name="Op">What the request did.</param>
+/// <param name="Entity">The player's entity.</param>
+/// <param name="Ok">The request did what it asked. When false, <paramref name="Reason"/> says why.</param>
+/// <param name="Status">A short code for the outcome: <c>ok</c>, <c>invalid</c>, <c>not_found</c>, <c>unavailable</c>, <c>wrong_thread</c>, <c>busy</c> or <c>internal</c>.</param>
+/// <param name="Steps">How many server-world steps passed from the request to its result.</param>
+/// <param name="Before">The player's progression before the change; null when the game gave none (a request refused before it ran).</param>
+/// <param name="After">The player's progression after the change; null when the game gave none (a request refused before it ran).</param>
+/// <param name="Reason">Why the request failed, in words. Usually empty on success, where it can hold a note.</param>
 public sealed record ProgressionResult(
     ulong Request, ProgressionOp Op, EntityId Entity, bool Ok, string Status, int Applied, int Steps,
     ProgressionSnapshot? Before, ProgressionSnapshot? After, string Reason) : IKilnResult
@@ -86,10 +143,28 @@ public sealed record ProgressionResult(
     // IKilnResult's reason is null when the change was made; this record's own Reason keeps its text.
     string? IKilnResult.Reason => Ok ? null : Reason;
 
+    /// <summary>The operation and its outcome on one line, for a log.</summary>
     public override string ToString() => Ok ? $"{Op} ok ({Applied}){(Reason.Length > 0 ? ": " + Reason : "")}" : $"{Op} failed: {Reason}";
 }
 
 /// <summary>What kiln.progression can do on this build.</summary>
+/// <param name="Levels">Levels and experience work.</param>
+/// <param name="Skills">The skill tree works.</param>
+/// <param name="SkillKnowledge">Skill-point knowledge works (what <see cref="Progression.GiveSkillPoints"/> uses).</param>
+/// <param name="ExperienceEvents">The game's experience-gained event is sent for <see cref="Progression.AddExperience"/>.</param>
+/// <param name="Program">Kiln's progression program runs.</param>
+/// <param name="World">The server world's singletons were found.</param>
+/// <param name="TreeNodes">How many nodes the skill tree has.</param>
+/// <param name="KnowledgeEntries">How many skill-point knowledge entries the game has (+1 and +3).</param>
+/// <param name="KnowledgePlusOne">Of those, how many give +1 (what <see cref="Progression.GiveSkillPoints"/> uses).</param>
+/// <param name="LevelCap">The game's player level cap.</param>
+/// <param name="SkillPointsPerLevel">The skill points each level gives.</param>
+/// <param name="Pending">Requests not applied yet.</param>
+/// <param name="Submitted">Requests submitted so far.</param>
+/// <param name="Applied">Requests applied so far.</param>
+/// <param name="Failed">Requests that failed so far.</param>
+/// <param name="ProgramUpdates">How many times the program ran.</param>
+/// <param name="Reason">Why something is off, in words. Empty when everything works.</param>
 public sealed record ProgressionStatus(
     bool Levels, bool Skills, bool SkillKnowledge, bool ExperienceEvents, bool Program, bool World, int TreeNodes,
     int KnowledgeEntries, int KnowledgePlusOne, int LevelCap, int SkillPointsPerLevel, int Pending, ulong Submitted,
@@ -104,16 +179,23 @@ public sealed class PlayerProgression
 {
     internal PlayerProgression(EntityId entity) => Entity = entity;
 
+    /// <summary>The player's entity.</summary>
     public EntityId Entity { get; }
 
     /// <summary>The progression now, or null when the entity is not a player in game.</summary>
     public ProgressionSnapshot? Read() => Progression.Get(Entity);
 
+    /// <summary>The player's level; 0 when the entity is not a player in game.</summary>
     public int Level => Read()?.Level ?? 0;
+
+    /// <summary>Experience into the current level; 0 when the entity is not a player in game.</summary>
     public uint Experience => Read()?.Experience ?? 0;
+
+    /// <summary>What the current level needs for the next one; 0 when the game has not set it yet or the entity is not a player in game.</summary>
     public uint ExperienceNeeded => Read()?.ExperienceNeeded ?? 0;
     /// <summary>Unspent skill points.</summary>
     public int SkillPoints => Read()?.SkillPoints ?? 0;
+    /// <summary>The nodes the player has unlocked (<see cref="Progression.UnlockedNodes(EntityId)"/>). Tick thread.</summary>
     [TickThreadOnly]
     public IReadOnlyList<UnlockedSkillNode> UnlockedNodes => Progression.UnlockedNodes(Entity);
 
@@ -122,6 +204,7 @@ public sealed class PlayerProgression
     /// <summary>Grants experience like a quest reward: the game levels the player up (one level per step).</summary>
     public Task<ProgressionResult> AddExperience(uint amount, ExperienceSource source = ExperienceSource.None) =>
         Progression.AddExperience(Entity, amount, source);
+    /// <summary>Sets the experience into the current level. Reaching what the level needs makes the game level the player up.</summary>
     public Task<ProgressionResult> SetExperience(uint experience) => Progression.SetExperience(Entity, experience);
     /// <summary>Gives unspent skill points as the game's +1 skill-point knowledge (at most
     /// <see cref="ProgressionSnapshot.GivableSkillPoints"/>; for more, raise the level).</summary>
@@ -134,6 +217,7 @@ public sealed class PlayerProgression
     /// <summary>Gives every spent point back (free, like the game's own reset).</summary>
     public Task<ProgressionResult> Respec() => Progression.Respec(Entity);
 
+    /// <summary>The progression on one line, or a note that the entity has none.</summary>
     public override string ToString() => Read()?.ToString() ?? $"entity {Entity}: no progression";
 }
 
@@ -397,31 +481,63 @@ public static unsafe class Progression
         return uint.TryParse(s, Hex, null, out var h) ? FindNode(h) : null;
     }
 
+    /// <summary>Sets a player's level (1 to the cap), like the game's admin command: experience into the level goes to 0.
+    /// The task completes on the tick thread two steps later (see <see cref="PlayerProgression"/>).</summary>
+    /// <param name="entity">The player's entity.</param>
+    /// <param name="level">The level to set.</param>
     [RequiresCapability(PlayersCaps.Progression)]
     public static Task<ProgressionResult> SetLevel(EntityId entity, int level) =>
         Submit(ProgressionOp.SetLevel, entity, level < 1 ? 0u : (uint)level, 0, 0, 0);
 
+    /// <summary>Grants experience like a quest reward: the game counts it in its next step and levels the player up, one level
+    /// per step. The task completes on the tick thread two steps later.</summary>
+    /// <param name="entity">The player's entity.</param>
+    /// <param name="amount">The experience to grant.</param>
+    /// <param name="source">What the experience is for (the client's "+XP" line may show it).</param>
+    /// <param name="sendEvent">False: the game's experience-gained event is not sent.</param>
     [RequiresCapability(PlayersCaps.Progression)]
     public static Task<ProgressionResult> AddExperience(EntityId entity, uint amount, ExperienceSource source = ExperienceSource.None,
         bool sendEvent = true) =>
         Submit(ProgressionOp.AddExperience, entity, amount, 0, sendEvent ? 0 : FlagNoEvent, (uint)source);
 
+    /// <summary>Sets a player's experience into the current level. Reaching what the level needs makes the game level the
+    /// player up. The task completes on the tick thread two steps later.</summary>
+    /// <param name="entity">The player's entity.</param>
+    /// <param name="experience">The experience to set.</param>
     [RequiresCapability(PlayersCaps.Progression)]
     public static Task<ProgressionResult> SetExperience(EntityId entity, uint experience) =>
         Submit(ProgressionOp.SetExperience, entity, experience, 0, 0, 0);
 
+    /// <summary>Gives unspent skill points as the game's +1 skill-point knowledge, at most
+    /// <see cref="ProgressionSnapshot.GivableSkillPoints"/>. The task completes on the tick thread two steps later.</summary>
+    /// <param name="entity">The player's entity.</param>
+    /// <param name="points">How many points to give.</param>
     [RequiresCapability(PlayersCaps.Progression)]
     public static Task<ProgressionResult> GiveSkillPoints(EntityId entity, int points) =>
         Submit(ProgressionOp.GiveSkillPoints, entity, points < 1 ? 0u : (uint)points, 0, 0, 0);
 
+    /// <summary>Unlocks a node for a player (one more level for a node with levels). Without <paramref name="force"/> it must be
+    /// linked to an unlocked node and affordable, as in the game's skill tree. The task completes on the tick thread two steps
+    /// later.</summary>
+    /// <param name="entity">The player's entity.</param>
+    /// <param name="node">The node's id (<see cref="SkillNode.Id"/>).</param>
+    /// <param name="force">Skip the link and the cost check.</param>
     [RequiresCapability(PlayersCaps.Progression)]
     public static Task<ProgressionResult> Unlock(EntityId entity, uint node, bool force = false) =>
         Submit(ProgressionOp.Unlock, entity, 0, node, force ? FlagForce : 0, 0);
 
+    /// <summary>Locks a node for a player (one level less for a node with levels). Without <paramref name="force"/> the rest must
+    /// stay connected. The task completes on the tick thread two steps later.</summary>
+    /// <param name="entity">The player's entity.</param>
+    /// <param name="node">The node's id (<see cref="SkillNode.Id"/>).</param>
+    /// <param name="force">Skip the check that the rest of the tree stays connected.</param>
     [RequiresCapability(PlayersCaps.Progression)]
     public static Task<ProgressionResult> Lock(EntityId entity, uint node, bool force = false) =>
         Submit(ProgressionOp.Lock, entity, 0, node, force ? FlagForce : 0, 0);
 
+    /// <summary>Locks every node and gives the spent points back, free, like the game's own reset. The task completes on the
+    /// tick thread two steps later.</summary>
+    /// <param name="entity">The player's entity.</param>
     [RequiresCapability(PlayersCaps.Progression)]
     public static Task<ProgressionResult> Respec(EntityId entity) => Submit(ProgressionOp.Respec, entity, 0, 0, 0, 0);
 
@@ -542,6 +658,9 @@ public static unsafe class Progression
 
         /// <summary>What <see cref="ProbeAttributes"/> found: the root id, the storage after the write, and the storage slot
         /// of level / experience / granted / needed (-1: not in this component).</summary>
+        /// <param name="Root">The component's attribute root id.</param>
+        /// <param name="Storage">The component's values after the write and the game's formulas re-ran (3 for an Experience component, 2 for a Level one).</param>
+        /// <param name="Slots">The storage slot of level, experience, granted and needed, in that order; -1 where the component has none.</param>
         public readonly record struct AttrProbe(uint Root, uint[] Storage, int[] Slots);
 
         /// <summary>The game's attribute lookup and formula re-run on a scratch Experience (<paramref name="level"/> false,

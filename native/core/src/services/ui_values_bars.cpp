@@ -223,6 +223,13 @@ void load_charge_layout() {
     load_charges(&g_bars.charges);
 }
 
+void complete_slot_view(KilnUiItemView* v) {
+    v->size = sizeof *v;
+    v->units_per_charge = units_per_charge_in_frame();
+    ChainStamp stamp;
+    stamp_now(v, &stamp);
+}
+
 void fill_view(const uint8_t* raw, const ViewLayout& vl, uint32_t base_flags, KilnUiItemView* v) {
     auto u32 = [&](int64_t at) {
         uint32_t x;

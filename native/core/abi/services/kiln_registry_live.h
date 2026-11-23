@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: MIT
- * kiln.registry.live v1 (since mod API 0.2.16): explicit owner-scoped live registry changes. Kiln ids/fields only;
+ * kiln.registry.live v1 (since mod API 0.2.17): explicit owner-scoped live registry changes. Kiln ids/fields only;
  * kiln.registry v1 is unchanged. Layers are above packs/start-time registry edits and below Content.* code.
  * begin/submit draft copied IR; commit retains the change until revert, owner revoke or its world's end.
  * Later commits win and are reported. Revert recomposes the remaining layers, not an old memory snapshot.
@@ -9,23 +9,47 @@
  * Entry points are declared by the caller: MOD_LOAD (process inputs, may wait for a world), WORLD_LOAD (world settings),
  * HOT_RELOAD (reloaded mod/config; world-scoped when a world exists), MANUAL (explicit runtime transaction).
  * GAME_START uses kiln.registry's existing add/alter/final stage, not this table. Later entry points never write restart
- * fields: they report RESTART_REQUIRED. WORLD_LOAD and MANUAL need a world. A world-bound draft cannot cross worlds.
+ * fields: they report RESTART_REQUIRED. A worldLoad field committed into a running world by any point but WORLD_LOAD is
+ * APPLIED and written, with a reason naming it: its full effect starts at the next world load (the save was already read).
+ * WORLD_LOAD and MANUAL need a world. A world-bound draft cannot cross worlds.
  * MOD_LOAD changes persist across worlds; other world-bound changes expire when that world stops. Settings-dependent
  * inputs belong only to WORLD_LOAD, HOT_RELOAD with a world, or MANUAL. Callers include settings/world/point identity
  * in their batch source. The managed context integration supplies that identity; there is no live-plan cache in v1.
  *
  * Threads: begin/submit/status any thread. commit/revert/read on the active world's thread while a world exists;
- * without a world they touch only copied data. Drafts and committed handles are owner-bound; owner 0 is invalid;
- * revoked owners return REVOKED. Unknown/stale handles return NOT_FOUND, another owner's handle INVALID_ARGUMENT.
- * Limits: 64 open drafts, 1024 retained changes, 4096 edits per change, 64 MiB copied IR total. Revert releases the handle.
+ * without a world they touch only owned archive/copied data, never world slots. Kiln.Host names the mods whose code uses
+ * the registry API, and the stage then prepares the stable base at resources-ready. Otherwise (a native plugin alone) the
+ * first begin/read prepares it, outside kiln.content's store lock, from the game's bytes with Kiln's own writes taken back
+ * out (another loader's writes stay); status/schema alone do not force archive decoding.
+ * Drafts and committed handles are owner-bound; owner 0 is invalid;
+ * revoked owners return REVOKED. Unknown/stale handles return NOT_FOUND, another owner's handle INVALID_ARGUMENT, and an
+ * IR whose "mod" is not the caller's bound mod INVALID_ARGUMENT (this table's form of PERMISSION). Submit or commit on a handle
+ * already committed returns UNAVAILABLE. A commit that accepts nothing (REFUSED, RESTART_REQUIRED) consumes the handle, as
+ * revert does; a WORLD_REQUIRED commit leaves the draft for the caller to revert.
+ * Limits: 64 open drafts and 1024 retained changes in the process, 16 open drafts and 256 retained changes per owner (begin
+ * returns UNAVAILABLE at any of them; kiln.log names the cap), 4096 edits per change, 64 MiB copied IR total. Revert releases
+ * the handle.
  * Entry add/remove and raw game paths are refused by this stable API (the existing Advanced APIs are unchanged).
  *
  * IR/schema/buffer rules are kiln_registry.h's. Reading text uses BUFFER_TOO_SMALL and the whole required length;
  * submit's optional report never changes its result to BUFFER_TOO_SMALL. Result out is optional; when supplied, size
- * must cover v1, larger records are accepted and size is set to v1. Refused edits are reported per edit. Runtime binding
- * or write failure rolls the candidate back; UNVERIFIED means rollback could not be proved, never success.
- * read returns actual live bytes through Kiln's field mappings; restart fields and pre-world reads use the kept stage
- * view. Select ids/schema/report/ready events through kiln.registry; live applications update its report/generation.
+ * must cover v1, larger records are accepted and size is set to v1. Refused edits are reported per edit. MOD_LOAD,
+ * WORLD_LOAD and HOT_RELOAD changes refuse per entry, like the stage: a selected entry that cannot take an edit (an exclusive
+ * conflict, an entry missing in this world, a config it lacks, an inexact whole-number value with reason "not_exact: ") is
+ * refused alone, counted in refused, and the rest applies (APPLIED, reason = the first refusal); an entry refused at binding
+ * is left out for that world only. A MANUAL transaction is all-or-nothing: a binding or evaluation refusal of any entry
+ * refuses the whole commit. A candidate's own failed write rolls it back; UNVERIFIED means rollback could not be proved,
+ * never success.
+ * A retained change that cannot apply at a later application (a binding or evaluation failure, or a failed write of one of
+ * its own slots) is inactive for that world only: its handle stays valid, a MOD_LOAD change is tried again in the next world,
+ * and registry.json names its mod. A failed write is charged to the change owning that slot, never to another change. A slot
+ * another writer took after Kiln's layer stays with that writer for the world; the change's other fields stay applied.
+ * read returns actual live bytes through Kiln's field mappings; restart fields use the kept start-time composition,
+ * and pre-world reads include composed pending process changes. Select ids/schema/report/ready events through kiln.registry. Transactions queue a report/generation update for
+ * the next registry pump (a world tick of kiln.content; a change committed before any world is published once a world is
+ * ready); multiple updates may coalesce. They never send WORLDLOAD or dispatch ready callbacks from
+ * commit/revert. Only real world/pack applications send WORLDLOAD. Result.generation is the last published snapshot.
+ * A nested commit/revert while another transaction is in flight returns UNAVAILABLE.
  */
 #ifndef KILN_REGISTRY_LIVE_H
 #define KILN_REGISTRY_LIVE_H
@@ -35,6 +59,9 @@ extern "C" {
 #endif
 #define KILN_REGISTRY_LIVE_SERVICE "kiln.registry.live"
 #define KILN_REGISTRY_LIVE_VERSION 1u
+/* Stable reason token: REFUSED + reason beginning "not_exact: " means a valid numeric value cannot be represented
+ * by this entry's whole-number cost storage. Float-config entries retain floats. Never infer this from human text. */
+#define KILN_REGISTRY_LIVE_REASON_NOT_EXACT "not_exact"
 
 enum { KILN_REGISTRY_LIVE_MOD_LOAD = 1, KILN_REGISTRY_LIVE_WORLD_LOAD = 2,
        KILN_REGISTRY_LIVE_HOT_RELOAD = 3, KILN_REGISTRY_LIVE_MANUAL = 4 };

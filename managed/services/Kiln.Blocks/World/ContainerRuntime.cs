@@ -26,12 +26,16 @@ public sealed class FilledContainers : IJsonOnSerializing
     internal Action? BeforeSnapshot;
     void IJsonOnSerializing.OnSerializing() => BeforeSnapshot?.Invoke();
 
+    /// <summary>A fill in progress for one container: the stacks a loot table rolled and how far giving them has got.</summary>
     public sealed class FillProgress
     {
+        /// <summary>The stacks the loot table rolled for this container.</summary>
         public List<LootStack> Stacks { get; set; } = new();
         /// <summary>Canonical item identities captured before a grant or save. Labels stay readable; a block's Was rename keeps the GUID.</summary>
         public Dictionary<string, Guid> ItemGuids { get; set; } = new(StringComparer.Ordinal);
+        /// <summary>The index in <see cref="Stacks"/> of the next stack to give. Those before it are done.</summary>
         public int Next { get; set; }
+        /// <summary>How many items did not fit in the container.</summary>
         public int Lost { get; set; }
     }
 }

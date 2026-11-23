@@ -14,7 +14,9 @@ namespace Kiln;
 /// <summary>A mouse button on a slot.</summary>
 public enum SlotButton
 {
+    /// <summary>The left mouse button.</summary>
     Left = 1,
+    /// <summary>The right mouse button.</summary>
     Right = 3,
     /// <summary>A game controller's button on the selected slot (<see cref="SlotClickOptions.Pad"/>, <see cref="SlotClick.Pad"/>).
     /// Since 0.2.0-dev.30.5.</summary>
@@ -25,9 +27,13 @@ public enum SlotButton
 [Flags]
 public enum SlotModifiers
 {
+    /// <summary>No modifier held.</summary>
     None = 0,
+    /// <summary>Control held.</summary>
     Ctrl = 1,
+    /// <summary>Shift held.</summary>
     Shift = 2,
+    /// <summary>Alt held.</summary>
     Alt = 4,
 }
 
@@ -43,11 +49,15 @@ public enum SlotMarkStyle
 }
 
 /// <summary>A mark on a slot: drawn over the game's slot, in this player's game only.</summary>
+/// <param name="Color">The mark's colour (use alpha for <see cref="SlotMarkStyle.Fill"/>).</param>
+/// <param name="Style">How the mark is drawn. Default <see cref="SlotMarkStyle.Border"/>.</param>
+/// <param name="Thickness">The line width of a border, and the gap of a corner square, in pixels at UI scale 1 (at least 1 pixel is drawn). Default 3.</param>
 public readonly record struct SlotMark(Color Color, SlotMarkStyle Style = SlotMarkStyle.Border, float Thickness = 3);
 
 /// <summary>Which clicks a handler gets (<see cref="Ui.Inventory.OnClick"/>).</summary>
 public sealed record SlotClickOptions
 {
+    /// <summary>The mouse button. Default left.</summary>
     public SlotButton Button { get; init; } = SlotButton.Left;
     /// <summary>Held exactly (None: a plain click).</summary>
     public SlotModifiers Modifiers { get; init; }
@@ -69,8 +79,14 @@ public sealed record SlotClickOptions
 /// <summary>A click on a slot the game drew. <see cref="ItemEntity"/> is the item's entity in this game's world: for an
 /// item the server sent (every item in a player's or a chest's inventory), that is the server's id of it. Send it to your
 /// server half, which checks it (holder, slot, type) before acting: a click is a wish, never authority.</summary>
+/// <param name="Button">The button that was pressed.</param>
+/// <param name="Modifiers">The modifier keys held with it.</param>
+/// <param name="Slot">The slot that was clicked, as the game drew it.</param>
+/// <param name="Screen">The game screen the click was on.</param>
+/// <param name="Taken">True when Kiln kept the press from the game (<see cref="SlotClickOptions.Take"/>).</param>
 public sealed record SlotClick(SlotButton Button, SlotModifiers Modifiers, VisibleSlot Slot, GameScreen Screen, bool Taken)
 {
+    /// <summary>The item in the slot (<see cref="VisibleSlot.Item"/>); 0 for an empty slot.</summary>
     public ItemId Item => Slot.Item;
     /// <summary>The item entity (weapons, tools, armour, cans). EntityId 0 for an empty slot and for a plain stack
     /// (materials, consumables), which the game keeps without an item entity: name it by Holder, slot and Item.</summary>
@@ -112,6 +128,7 @@ public static partial class Ui
         [ClientOnly, AnyThread, RequiresCapability(MarkCapability)]
         public static void Mark(EntityId item, SlotMark mark) => UiInventoryBridge.Mark(item, mark);
 
+        /// <summary>Removes your mod's mark from the item's slots (see <see cref="Mark"/>).</summary>
         [ClientOnly, AnyThread]
         public static void Unmark(EntityId item) => UiInventoryBridge.Unmark(item);
 

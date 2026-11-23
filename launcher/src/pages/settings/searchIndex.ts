@@ -1,7 +1,7 @@
 // The search index of Settings: every row, kiln.json entry and card the page shows, with its section, group, name, one
 // line of help, More text and keywords, in the launcher's language. The rows read their words from here too
 // (parts.tsx SettingRow), so a row and its search hit always say the same.
-import type { AppInfo, DesktopInfo, RenderInfo, SandboxInfo, SchemaSnapshot, SnapshotEntry, X11Info } from "../../api/commands";
+import type { AppInfo, DesktopInfo, ForceInfo, RenderInfo, SandboxInfo, SchemaSnapshot, SnapshotEntry, X11Info } from "../../api/commands";
 import { getPath } from "../../ui";
 import { t } from "../../i18n";
 import { graphicsLabels, isGraphicsPath, UPSCALER_PATHS } from "../../components/GraphicsSettings";
@@ -85,6 +85,22 @@ export function x11Hint(x: X11Info): string {
     : x.why === "software" ? t("settings.render.x11Software")
     : t("settings.render.x11Wayland");
   return `${t("settings.render.x11Intro")} ${now}`;
+}
+
+/** What "Force GPU drawing on NVIDIA" says: what it does and that it is off by default, why the launcher turned it off by
+ *  itself (a forced start failed), and what this start does. */
+export function forceHint(f: ForceInfo): string {
+  const now = f.why === "yours" ? t("settings.render.forceYours")
+    : f.why === "on" ? t("settings.render.forceOn")
+    : f.why === "failed" ? t("settings.render.forceFailed")
+    : f.why === "recovery" ? t("settings.render.forceRecovery")
+    : f.why === "recovered" ? t("settings.render.forceRecovered")
+    : f.why === "unguarded" ? t("settings.render.forceUnguarded")
+    : f.why === "unused" ? t("settings.render.forceUnused")
+    : f.blocked ? t("settings.render.forceBlocked")
+    : t("settings.render.forceOff");
+  // failedWhy: the backend's sentence, as it is (only while the switch is still off)
+  return `${t("settings.render.forceIntro")} ${now}${f.failedWhy && !f.on ? ` ${f.failedWhy}.` : ""}`;
 }
 
 /** What the sandbox switch says: what off means and when it applies, what WebKit does in this start and why, who turned
@@ -180,6 +196,8 @@ export function buildIndex(c: SettingsCtx): SearchItem[] {
   if (info?.render) {
     add("advanced", "drawing", "noGpu", t("settings.appearance.noGpu"), t("settings.rows.noGpu"), renderHint(info.render), ["GPU", "software", "black"]);
     if (info.render.x11) add("advanced", "drawing", "x11", t("settings.render.x11"), t("settings.rows.x11"), x11Hint(info.render.x11), ["X11", "Wayland", "XWayland", "HiDPI"]);
+    if (info.render.force) add("advanced", "drawing", "forceDmabuf", t("settings.render.force"), t("settings.rows.forceDmabuf"), forceHint(info.render.force),
+      ["NVIDIA", "GPU", "DMA-BUF", "WebKit", "Ubuntu", "WEBKIT_FORCE_DMABUF_RENDERER"]);
   }
   if (info?.sandbox) add("advanced", "protection", "sandbox", t("settings.sandbox.label"), t("settings.rows.sandbox"), sandboxHint(info.sandbox), ["WebKit", "sandbox", "security"]);
   add("advanced", "protection", "httpModpacks", t("settings.launcher.httpModpacks"), t("settings.launcher.httpModpacksHint"), undefined, ["http", "https", "modpack"]);

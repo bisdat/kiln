@@ -4,6 +4,8 @@
 #include "registry_live_test.cpp"
 #undef main
 #include "services/kiln_registry_live.h"
+#include <chrono>
+#include "../registry/stage.h"
 
 namespace {
 std::string doc(const std::string& mod, const std::string& edits) {
@@ -16,7 +18,247 @@ uint64_t change(KilnOwner owner, const std::string& mod, const std::string& edit
     return h;
 }
 const std::string wood = R"("registry":"items","select":"game:material_t1_wood_logs","field":"maxStack",)";
+const std::string stone = R"("registry":"items","select":"game:material_stone","field":"maxStack",)";
+const std::string sword = R"("registry":"items","select":"game:sword_t2","field":"maxStack",)";
 void fresh_live() { world(); g_files.clear(); stage({}); registry_live_world_begin(); apply_registry_files({}); }
+bool report_names(const std::string& mod, const std::string& needle) {
+    return std::any_of(g_last_report.refused.begin(), g_last_report.refused.end(), [&](const registry::Refusal& r) {
+        return r.mod == mod && r.reason.find(needle) != std::string::npos;
+    });
+}
+
+// review4 NM1 (R1): the committing candidate's own write fails; other owners' retained changes stay applied and retained.
+void candidate_write_failure_keeps_other_owners() {
+    fresh_live(); RegistryLiveReply reply;
+    const auto a = change(71, "a", "[{" + wood + R"("op":50}])");
+    registry_live_commit(71, a, &reply);
+    const auto b = change(72, "b", "[{" + stone + R"("op":70}])");
+    registry_live_commit(72, b, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Applied && at<uint32_t>(WOOD_AT) == 50 && at<uint32_t>(STONE_AT) == 70, "a and b applied");
+    const auto c = change(73, "c", "[{" + sword + R"("op":9}])");
+    g_write_limits = {0}; // only c's slot is dirty in this flush, and its write fails
+    registry_live_commit(73, c, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Refused && reply.accepted == 0, "the candidate's own failed write refuses only the candidate");
+    check(reply.reason.find("0x") == std::string::npos && reply.reason.find("items[game:sword_t2].maxStack") != std::string::npos,
+          "the candidate's reason names the Kiln place, never a process address");
+    check(registry_live_status().active == 2 && at<uint32_t>(WOOD_AT) == 50 && at<uint32_t>(STONE_AT) == 70 && at<uint32_t>(SWORD_AT) == 0,
+          "other owners' retained changes survive the candidate's own failed write");
+    registry_live_publish();
+    check(!report_names("a", "not applied") && !report_names("b", "not applied") && report_names("c", "not committed"),
+          "only the candidate is reported refused");
+    check(registry_live_revert(71, a, &reply) == KILN_OK && registry_live_revert(72, b, &reply) == KILN_OK,
+          "the retained handles stay valid");
+}
+// review4 NM1 (R2): a pack reapplication's unrelated stage-edit write fails; a live change on another field survives.
+void unrelated_application_write_failure_keeps_live() {
+    world();
+    g_files = {{"p/content/p.json", R"({"registry":{"alter":[{"registry":"items","select":"game:material_stone","field":"maxStack","op":70}]}})"}};
+    const auto files = files_of({{"p", "p/content/p.json"}});
+    stage(files); registry_live_world_begin(); apply_registry_files(files);
+    check(at<uint32_t>(STONE_AT) == 70, "pack applied");
+    RegistryLiveReply reply;
+    const auto a = change(71, "a", "[{" + wood + R"("op":50}])", 1);
+    registry_live_commit(71, a, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Applied && at<uint32_t>(WOOD_AT) == 50, "live a applied");
+    g_files["p/content/p.json"] = R"({"registry":{"alter":[{"registry":"items","select":"game:material_stone","field":"maxStack","op":80}]}})";
+    g_write_limits = {0}; // the pack's stone slot is the only write of this flush, and it fails
+    apply_registry_files(files);
+    check(registry_live_status().active == 1 && at<uint32_t>(WOOD_AT) == 50,
+          "an unrelated pack slot's failed write does not remove another mod's live change");
+    check(!report_names("a", "not applied") && report_names("p", "items[game:material_stone].maxStack: the game memory write failed"),
+          "the failed write is reported for the pack edit that owns the slot, not for the live change");
+}
+// review4 NM1: rows of retained changes rejected during a commit survive the commit's own rollback pass.
+void rejected_rows_survive_the_rollback_pass() {
+    fresh_live(); RegistryLiveReply reply;
+    const auto a = change(71, "a", R"([{"registry":"items","select":"game:sword_t2","field":"manaCost","op":20}])");
+    registry_live_commit(71, a, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Applied, "a applied");
+    reg(KILN_CONTENT_ITEMS).by_id.erase(SWORD); // a no longer binds in this world
+    const auto c = change(73, "c", "[{" + stone + R"("op":70}])");
+    g_write_limits = {0}; // c's write fails
+    registry_live_commit(73, c, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Refused && at<uint32_t>(STONE_AT) == 50, "the candidate is refused and rolled back");
+    registry_live_publish();
+    check(report_names("a", "the entry is not in this world") && report_names("c", "not committed"),
+          "the rejected retained change's row reaches registry.json together with the candidate's");
+}
+// review4 NS2 (R3): a process (MOD_LOAD) change rejected "in this world" is tried again in every later world.
+void rejected_process_change_returns_next_world() {
+    fresh_live(); RegistryLiveReply reply;
+    const auto h = change(71, "a", "[{" + wood + R"("op":75},{"registry":"items","select":"game:sword_t2","field":"manaCost","op":20}])", 1);
+    registry_live_commit(71, h, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Applied && at<uint32_t>(WOOD_AT) == 75, "world 1 applies the process change");
+    registry_live_world_stop(); std::string error; store_reset(true, &error); world();
+    g_write_limits = {0}; // world 2 cannot write the change's slots
+    registry_live_world_begin(); apply_registry_files({});
+    check(at<uint32_t>(WOOD_AT) == 10 && registry_live_status().active == 0, "world 2 rejects it whole");
+    check(reported("not applied in this world"), "world 2 reports the rejection by change");
+    registry_live_world_stop(); store_reset(true, &error); world(); // world 3 writes normally
+    registry_live_world_begin(); apply_registry_files({});
+    check(registry_live_status().active == 1 && at<uint32_t>(WOOD_AT) == 75,
+          "a process change refused only 'in this world' applies again in a later world");
+    check(registry_live_revert(71, h, &reply) == KILN_OK && at<uint32_t>(WOOD_AT) == 10, "and its handle still reverts it");
+}
+// review4 NS2 (R4): another writer changes ONE slot of a retained two-field change; an unrelated owner's commit keeps the
+// change's untouched field (ruling 2026-11-22 5:22 PM: only the drifted slot stays with that writer for the world).
+void foreign_slot_keeps_the_rest_of_a_retained_change() {
+    fresh_live(); RegistryLiveReply reply;
+    const auto a = change(71, "a", "[{" + wood + R"("op":50},{)" + stone + R"("op":70}])", 1);
+    registry_live_commit(71, a, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Applied && at<uint32_t>(WOOD_AT) == 50 && at<uint32_t>(STONE_AT) == 70, "a applied");
+    mem<uint32_t>(WOOD_AT, 33); // another writer takes the wood slot
+    const auto b = change(72, "b", "[{" + sword + R"("op":9}])");
+    registry_live_commit(72, b, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Applied, "the unrelated commit applies");
+    check(at<uint32_t>(WOOD_AT) == 33, "the foreign wood bytes are preserved");
+    check(at<uint32_t>(STONE_AT) == 70 && registry_live_status().active == 2,
+          "a's untouched stone edit stays; only the drifted slot is left to the other writer");
+    apply_registry_files({}); // a later application in the same world (a pack reload) keeps it too
+    check(at<uint32_t>(WOOD_AT) == 33 && at<uint32_t>(STONE_AT) == 70 && registry_live_status().active == 2,
+          "a later application in the same world keeps the change's other field");
+    check(reported("was written by another writer") && !reported("not applied in this world"),
+          "the drifted slot is reported, the change is not rejected");
+    registry_live_world_stop(); std::string error; store_reset(true, &error); world();
+    registry_live_world_begin(); apply_registry_files({});
+    check(at<uint32_t>(WOOD_AT) == 50 && at<uint32_t>(STONE_AT) == 70, "the next world applies the whole process change again");
+}
+// review4 NS5: a runtime pass reads the live value without the reading mod's own registry rows (stage edits and live
+// changes); layers below (packs) and above (code) stay, and a slot another writer took reads that writer's bytes.
+void pass_read_excludes_own_layers() {
+    world();
+    g_files = {{"a/content/a.json", R"({"registry":{"alter":[{"registry":"items","select":"game:material_t1_wood_logs","field":"maxStack","op":{"add":1}}]}})"}};
+    const auto files = files_of({{"a", "a/content/a.json"}});
+    stage(files); registry_live_world_begin(); apply_registry_files(files);
+    put_pack(WOOD_AT, 20); std::string err; store_flush(&err);
+    RegistryLiveReply reply;
+    const auto a = change(71, "a", "[{" + wood + R"("op":{"mul":2}}])", 1); registry_live_commit(71, a, &reply);
+    const auto b = change(72, "b", "[{" + wood + R"("op":{"add":5}}])", 1); registry_live_commit(72, b, &reply);
+    check(at<uint32_t>(WOOD_AT) == 47, "pack 20, a's stage +1, a's x2, b's +5");
+    std::string value;
+    auto read = [&](const std::string& mod) {
+        check(registry_live_read("items", "game:material_t1_wood_logs", "maxStack", &value, mod) == KILN_OK, "pass read " + mod);
+        return std::stoi(value);
+    };
+    check(read("") == 47 && read("c") == 47, "a plain read and another mod's pass read see the live value");
+    check(read("a") == 25, "a's pass read leaves out a's stage edit and a's live change, not the pack or b's change");
+    check(read("b") == 42, "b's pass read leaves out only b's change");
+    check(at<uint32_t>(WOOD_AT) == 47, "a pass read writes nothing");
+    uint8_t bytes[4]; uint32_t code = 333; std::memcpy(bytes, &code, 4);
+    store_put(CODE, next_code_seq(), KILN_CONTENT_ITEMS, WOOD, 0, -1, A(WOOD_AT), 4, bytes, "code"); store_flush(&err);
+    check(read("a") == 333, "code above the registry still wins in a pass read");
+    store_drop_owner(CODE); store_flush(&err);
+    registry_live_world_stop();
+    check(read("a") == 15 && read("b") == 22, "before a world, the composed value is read without the mod's rows (base 10)");
+    registry_live_world_begin(); apply_registry_files(files);
+    mem<uint32_t>(WOOD_AT, 777); apply_registry_files(files); // another writer took the slot
+    check(read("a") == 777, "a slot another writer took reads that writer's bytes");
+}
+// review2 S2: a worldLoad field written into a running world by a later point is applied and named: the save was read.
+void world_load_field_mid_world_is_named() {
+    fresh_live(); RegistryLiveReply reply;
+    const auto h = change(71, "a", "[{" + wood + R"("op":50}])", 4);
+    registry_live_commit(71, h, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Applied && at<uint32_t>(WOOD_AT) == 50, "the worldLoad field is still written");
+    check(reply.reason.find("items.maxStack applies at world load") != std::string::npos && reply.reason.find("next world load") != std::string::npos,
+          "the result says it takes full effect at the next world load");
+    registry_live_revert(71, h, &reply);
+    const auto now = change(72, "b", R"([{"registry":"items","select":"game:sword_t2","field":"manaCost","op":12}])", 4);
+    registry_live_commit(72, now, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Applied && reply.reason.empty(), "a field that applies now is not flagged");
+    registry_live_revert(72, now, &reply);
+    const auto w = change(73, "c", "[{" + wood + R"("op":60}])", 2);
+    registry_live_commit(73, w, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Applied && reply.reason.empty(), "the WorldLoad point's own world-load field is not flagged");
+    registry_live_revert(73, w, &reply);
+}
+// review2 S5: a drop-table change before the world has loaded the table is PendingResource, then applies on the table.
+void drop_table_change_is_pending_resource() {
+    fresh_live(); RegistryLiveReply reply;
+    const auto h = change(71, "a", R"([{"registry":"drops","select":"game:dt_wolf","field":"entries[*].count.max","op":{"mul":2}}])");
+    check(registry_live_commit(71, h, &reply) == KILN_OK && reply.outcome == RegistryLiveOutcome::PendingResource && reply.accepted == 1,
+          "a change to a drop table the world has not loaded waits for it");
+    check(at<uint32_t>(0x31018) == 3, "nothing is written before the table loads");
+    add_drop_table();
+    registry_live_table(g_regs[KILN_CONTENT_DROPS].entries[0]);
+    std::string err; store_flush(&err);
+    check(at<uint32_t>(0x31018) == 6 && at<uint32_t>(0x31058) == 6, "the table's stacks take the change once it loads");
+    check(registry_live_revert(71, h, &reply) == KILN_OK && reply.outcome == RegistryLiveOutcome::Reverted && at<uint32_t>(0x31018) == 3,
+          "revert restores the stacks");
+}
+// review2 S5: a formula transaction (power) writes its input, and its revert leaves another writer's bytes alone.
+void formula_transaction_with_foreign_write() {
+    fresh_live(); RegistryLiveReply reply;
+    const float before = at<float>(SWORD_AT + 8);
+    const auto h = change(71, "a", R"([{"registry":"items","select":"game:sword_t2","field":"power","op":{"mul":2}}])");
+    registry_live_commit(71, h, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Applied && at<float>(SWORD_AT + 8) != before, "power x2 writes damageSetup.dmgMod through the formula");
+    std::string value;
+    check(registry_live_read("items", "game:sword_t2", "power", &value) == KILN_OK, "the formula reads back");
+    mem<float>(SWORD_AT + 8, 7.0f); // another writer
+    registry_live_revert(71, h, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Skipped && at<float>(SWORD_AT + 8) == 7.0f, "the formula's revert preserves the foreign bytes");
+}
+// review2 S5: a world-bound draft begun in one world cannot be committed into the next; a MOD_LOAD draft is no world's
+// (review4 nit: begin no longer binds it to the world it was begun in).
+void draft_cannot_cross_worlds() {
+    fresh_live(); RegistryLiveReply reply;
+    const auto h = change(71, "a", "[{" + wood + R"("op":50}])", 4);
+    const auto process = change(72, "b", "[{" + wood + R"("op":60}])", 1);
+    registry_live_world_stop();
+    check(registry_live_commit(71, h, &reply) == KILN_ERR_NOT_FOUND, "the ended world's manual draft expired with it");
+    check(registry_live_commit(72, process, &reply) == KILN_OK && reply.outcome == RegistryLiveOutcome::PendingWorld,
+          "a MOD_LOAD draft begun in a world commits after it ended and waits for the next world");
+    std::string error; store_reset(true, &error); world(); registry_live_world_begin(); apply_registry_files({});
+    check(at<uint32_t>(WOOD_AT) == 60, "the next world applies it");
+    registry_live_revert(72, process, &reply);
+}
+// review2 S5: a MOD_LOAD change reverted before any world is removed from the composition only.
+void process_change_reverts_without_a_world() {
+    world(); g_files.clear(); stage({}); RegistryLiveReply reply;
+    const auto h = change(71, "a", "[{" + wood + R"("op":50}])", 1);
+    check(registry_live_commit(71, h, &reply) == KILN_OK && reply.outcome == RegistryLiveOutcome::PendingWorld, "pending before a world");
+    std::string value;
+    check(registry_live_read("items", "game:material_t1_wood_logs", "maxStack", &value) == KILN_OK && value == "50", "the pre-world read includes it");
+    check(registry_live_revert(71, h, &reply) == KILN_OK && reply.outcome == RegistryLiveOutcome::Reverted, "revert without a world");
+    check(registry_live_read("items", "game:material_t1_wood_logs", "maxStack", &value) == KILN_OK && value == "10", "the composition drops it");
+    registry_live_world_begin(); apply_registry_files({});
+    check(at<uint32_t>(WOOD_AT) == 10 && registry_live_status().active == 0, "the next world never applies it");
+}
+// review2 N4: a world's end drops its live rows from registry.json at the next pump.
+void world_stop_reports_without_its_live_rows() {
+    fresh_live(); RegistryLiveReply reply;
+    const auto h = change(71, "a", "[{" + wood + R"("op":70}])", 2);
+    registry_live_commit(71, h, &reply); registry_live_publish();
+    auto has_live = [] { return registry::report_json(registry_schema(), g_last_report, {}).dump().find("live:") != std::string::npos; };
+    check(has_live(), "the world's change is in registry.json");
+    registry_live_world_stop(); registry_live_publish();
+    check(!has_live(), "after the world ends, registry.json no longer shows its live rows");
+}
+// review2 N6: a live read of an id the world does not have is NOT_FOUND, as before a world.
+void live_read_of_a_missing_entry_is_not_found() {
+    fresh_live(); std::string value;
+    check(registry_live_read("items", "game:nothing_here", "maxStack", &value) == KILN_ERR_NOT_FOUND, "an unknown id is NOT_FOUND");
+    reg(KILN_CONTENT_ITEMS).by_id.erase(SWORD);
+    check(registry_live_read("items", "game:sword_t2", "maxStack", &value) == KILN_ERR_NOT_FOUND, "an entry missing in this world is NOT_FOUND");
+    registry_live_world_stop();
+    check(registry_live_read("items", "game:nothing_here", "maxStack", &value) == KILN_ERR_NOT_FOUND, "as before a world");
+}
+// review4 NM1: two retained changes, one slot each, the write of one of them fails at a reapplication: only that one is charged.
+void multi_change_write_failure_is_attributed_per_change() {
+    fresh_live(); RegistryLiveReply reply;
+    const auto a = change(71, "a", "[{" + wood + R"("op":{"mul":3}}])", 1);
+    registry_live_commit(71, a, &reply);
+    const auto b = change(72, "b", "[{" + stone + R"("op":70}])", 1);
+    registry_live_commit(72, b, &reply);
+    check(at<uint32_t>(WOOD_AT) == 30 && at<uint32_t>(STONE_AT) == 70, "both applied");
+    put_pack(WOOD_AT, 20); // a relative change over a new pack value: only a's slot is written again
+    g_write_limits = {0};
+    apply_registry_files({});
+    check(at<uint32_t>(STONE_AT) == 70, "b's slot is untouched");
+    check(!report_names("b", "not applied") && report_names("a", "the game memory write of items[game:material_t1_wood_logs].maxStack failed"),
+          "the failed write is charged to the change that owns the slot only");
+}
 
 void packs_code_and_out_of_order_revert() {
     fresh_live(); put_pack(WOOD_AT, 20); std::string err; store_flush(&err);
@@ -35,6 +277,542 @@ void packs_code_and_out_of_order_revert() {
     check(at<uint32_t>(WOOD_AT) == 333, "revert never rolls back another code owner");
     store_drop_owner(CODE); store_flush(&err);
     check(at<uint32_t>(WOOD_AT) == 20, "old pack remains under every reverted transaction");
+}
+void unrelated_pack_binding_failure_isolated() {
+    world();
+    g_files = {{"p/content/p.json", R"({"registry":{"alter":[{"registry":"items","select":"game:material_t1_wood_logs","field":"manaCost","op":2}]}})"}};
+    const auto files = files_of({{"p", "p/content/p.json"}});
+    stage(files); registry_live_world_begin(); apply_registry_files(files);
+    RegistryLiveReply reply;
+    const auto h = change(71, "a", "[{" + wood + R"("op":{"mul":3}}])");
+    check(registry_live_commit(71, h, &reply) == KILN_OK, "independent commit call succeeds");
+    check(reply.outcome == RegistryLiveOutcome::Applied && reply.accepted == 1 && at<uint32_t>(WOOD_AT) == 30,
+          "an unrelated pack's unbindable edit does not refuse this live change");
+    check(reported("the item has no such configuration"), "the unrelated binding refusal remains visible in the report");
+}
+void unrelated_live_binding_failure_isolated() {
+    fresh_live(); RegistryLiveReply reply;
+    const auto a = change(71, "a", R"([{"registry":"items","select":"game:sword_t2","field":"manaCost","op":20}])");
+    registry_live_commit(71, a, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Applied, "first live change initially binds");
+    reg(KILN_CONTENT_ITEMS).by_id.erase(SWORD); // the earlier change's entry no longer binds in this world
+    const auto b = change(72, "b", "[{" + wood + R"("op":{"mul":3}}])");
+    check(registry_live_commit(72, b, &reply) == KILN_OK, "second independent commit call succeeds");
+    check(reply.outcome == RegistryLiveOutcome::Applied && reply.accepted == 1 && at<uint32_t>(WOOD_AT) == 30,
+          "an earlier live change's unbindable edit does not refuse another owner");
+    registry_live_publish();
+    check(reported("the entry is not in this world"), "the earlier change's binding refusal remains visible");
+}
+// review4 NS6 (ruling Nov 23): an entry-point change refuses per entry, like GameStart: the unbindable entry alone.
+void pending_binding_failure_drops_only_that_entry() {
+    world(); g_files.clear(); stage({});
+    RegistryLiveReply reply;
+    const auto h = change(71, "a", "[{" + wood + R"("op":75},{"registry":"items","select":"game:material_t1_wood_logs","field":"manaCost","op":2}])", 1);
+    check(registry_live_commit(71, h, &reply) == KILN_OK && reply.outcome == RegistryLiveOutcome::PendingWorld && reply.accepted == 2,
+          "the complete pre-world change waits for live binding");
+    registry_live_world_begin(); apply_registry_files({});
+    check(at<uint32_t>(WOOD_AT) == 75 && registry_live_status().active == 1, "the bindable entry applies");
+    check(reported("items[game:material_t1_wood_logs].manaCost: the item has no such configuration") && !reported("not applied in this world"),
+          "only the unbindable entry is refused, named");
+    apply_registry_files({});
+    check(at<uint32_t>(WOOD_AT) == 75 && reported("the item has no such configuration"), "a later application in the world keeps both");
+    check(registry_live_revert(71, h, &reply) == KILN_OK && reply.outcome == RegistryLiveOutcome::Reverted && at<uint32_t>(WOOD_AT) == 10,
+          "the handle reverts what applied");
+}
+void carried_binding_failure_drops_only_that_entry() {
+    fresh_live(); RegistryLiveReply reply;
+    const auto h = change(71, "a", "[{" + wood + R"("op":75},{"registry":"items","select":"game:sword_t2","field":"manaCost","op":20}])", 1);
+    registry_live_commit(71, h, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Applied && at<uint32_t>(WOOD_AT) == 75, "the process change binds in its first world");
+    registry_live_world_stop(); std::string error; store_reset(true, &error); world();
+    reg(KILN_CONTENT_ITEMS).by_id.erase(SWORD);
+    registry_live_world_begin(); apply_registry_files({});
+    check(at<uint32_t>(WOOD_AT) == 75 && registry_live_status().active == 1, "the next world applies the entries it has");
+    check(reported("items[game:sword_t2].manaCost: the entry is not in this world"), "the missing entry is refused, named");
+    registry_live_world_stop(); store_reset(true, &error); world();
+    registry_live_world_begin(); apply_registry_files({});
+    check(at<uint32_t>(WOOD_AT) == 75 && at<float>(SWORD_AT + 0x40) == 20.0f, "a world that has the entry again applies it again");
+}
+void reapplied_binding_failure_is_atomic() {
+    fresh_live(); RegistryLiveReply reply;
+    const auto h = change(71, "a", "[{" + wood + R"("op":75},{"registry":"items","select":"game:sword_t2","field":"manaCost","op":20}])", 4);
+    registry_live_commit(71, h, &reply);
+    check(at<uint32_t>(WOOD_AT) == 75, "the manual transaction is initially fully applied");
+    reg(KILN_CONTENT_ITEMS).by_id.erase(SWORD);
+    apply_registry_files({});
+    check(at<uint32_t>(WOOD_AT) == 10 && registry_live_status().active == 0,
+          "a pack application cannot leave half a now-unbindable retained change");
+    check(reported("not applied in this world"), "the reapplication refusal remains visible");
+}
+void pending_evaluation_failure_is_atomic() {
+    world(); g_files.clear(); stage({}); RegistryLiveReply reply;
+    const auto h = change(71, "a", "[{" + wood + R"("op":75},{"registry":"items","select":"game:sword_t2","field":"manaCost","op":{"mul":1000}}])", 1);
+    registry_live_commit(71, h, &reply);
+    check(reply.outcome == RegistryLiveOutcome::PendingWorld && reply.accepted == 2, "archive values admit the pending relative change");
+    mem<float>(SWORD_AT + 0x40, 200.0f); mem<int32_t>(SWORD_AT + 0x44, 200);
+    registry_live_world_begin(); apply_registry_files({});
+    check(at<uint32_t>(WOOD_AT) == 75 && at<float>(SWORD_AT + 0x40) == 200.0f,
+          "a runtime evaluation failure refuses that entry before any write; the rest of the entry-point change applies");
+    check(registry_live_status().active == 1 && reported("items[game:sword_t2].manaCost: the result") && !reported("not applied in this world"),
+          "the failed evaluation is reported for its entry only");
+}
+void pending_write_failure_is_rolled_back() {
+    world(); g_files.clear(); stage({}); RegistryLiveReply reply;
+    const auto h = change(71, "a", "[{" + wood + R"("op":75},{"registry":"items","select":"game:sword_t2","field":"maxStack","op":9}])", 1);
+    registry_live_commit(71, h, &reply);
+    check(reply.outcome == RegistryLiveOutcome::PendingWorld, "the two-field change waits for a world");
+    g_write_limits = {1}; // one field really writes, then the second write fails; rollback is allowed to write normally
+    registry_live_world_begin(); apply_registry_files({});
+    check(at<uint32_t>(WOOD_AT) == 10 && at<uint32_t>(SWORD_AT) == 0,
+          "a partial pending write failure restores the fields that already wrote");
+    check(registry_live_status().active == 0 && reported("not applied in this world"), "a failed pending write is deactivated and reported");
+}
+void commit_does_not_reenter_ready() {
+    fresh_live();
+    struct Probe { int depth = 0, max_depth = 0, reports = 0, applications = 0; bool reverting = false; uint64_t previous = 0; };
+    auto probe = std::make_shared<Probe>();
+    g.in->report = [probe](const registry::Result& result, bool application) {
+        g_last_report = result; ++probe->reports;
+        if (!application) return;
+        ++probe->applications;
+        if (probe->reverting || probe->depth >= 3) return; // bounded linear reproduction, never a recursive tree
+        ++probe->depth; probe->max_depth = std::max(probe->max_depth, probe->depth);
+        RegistryLiveReply reply;
+        if (probe->previous) {
+            probe->reverting = true; registry_live_revert(81, probe->previous, &reply); probe->reverting = false;
+        }
+        probe->previous = change(81, "reapply", "[{" + wood + R"("op":{"add":1}}])");
+        registry_live_commit(81, probe->previous, &reply);
+        --probe->depth;
+    };
+    RegistryLiveReply reply;
+    probe->previous = change(81, "reapply", "[{" + wood + R"("op":{"add":1}}])");
+    registry_live_commit(81, probe->previous, &reply);
+    check(probe->reports == 0 && probe->max_depth == 0, "commit returns before publishing, with no ready-callback recursion");
+    registry_live_publish();
+    check(probe->reports == 1 && probe->applications == 0, "the next pump publishes a transaction snapshot, not WORLDLOAD");
+}
+void revert_defers_its_snapshot() {
+    fresh_live(); RegistryLiveReply reply;
+    const auto h = change(71, "a", "[{" + wood + R"("op":50}])");
+    registry_live_commit(71, h, &reply); registry_live_publish();
+    auto reports = std::make_shared<int>(0);
+    g.in->report = [reports](const registry::Result& result, bool application) { g_last_report = result; if (!application) ++*reports; else *reports += 100; };
+    registry_live_revert(71, h, &reply);
+    check(*reports == 0 && at<uint32_t>(WOOD_AT) == 10, "revert writes its result but never dispatches a report callback inline");
+    registry_live_publish();
+    check(*reports == 1, "revert's next-pump snapshot is not a world-load notification");
+}
+void nested_transactions_are_refused() {
+    fresh_live(); RegistryLiveReply reply;
+    const auto outer = change(71, "a", "[{" + wood + R"("op":50}])");
+    const auto nested = change(72, "b", "[{" + wood + R"("op":80}])");
+    KilnResult commit_rc = KILN_OK, revert_rc = KILN_OK;
+    g_before_write = [&] {
+        RegistryLiveReply inner;
+        commit_rc = registry_live_commit(72, nested, &inner);
+        revert_rc = registry_live_revert(71, outer, &inner);
+    };
+    registry_live_commit(71, outer, &reply);
+    check(commit_rc == KILN_ERR_UNAVAILABLE && revert_rc == KILN_ERR_UNAVAILABLE,
+          "a write callback cannot reenter commit or revert while another transaction is in flight");
+    check(reply.outcome == RegistryLiveOutcome::Applied && at<uint32_t>(WOOD_AT) == 50,
+          "refusing nested transactions preserves the outer write and its handle");
+    registry_live_revert(72, nested, &reply); registry_live_revert(71, outer, &reply);
+}
+void wrong_world_thread_is_refused_under_lock() {
+    fresh_live(); RegistryLiveReply reply;
+    const auto active = change(71, "a", "[{" + wood + R"("op":50}])");
+    registry_live_commit(71, active, &reply); registry_live_publish();
+    const auto draft = change(72, "b", "[{" + wood + R"("op":80}])");
+    auto thread = std::make_shared<bool>(false);
+    g.in->on_world_thread = [thread](uint32_t kind) { return kind == KILN_WORLD_SERVER && *thread; };
+    const auto generation = store_generation();
+    const auto commit_rc = registry_live_commit(72, draft, &reply);
+    const auto revert_rc = registry_live_revert(71, active, &reply);
+    std::string value;
+    const auto read_rc = registry_live_read("items", "game:material_t1_wood_logs", "maxStack", &value);
+    check(commit_rc == KILN_ERR_WRONG_THREAD && revert_rc == KILN_ERR_WRONG_THREAD && read_rc == KILN_ERR_WRONG_THREAD,
+          "the backend checks the active world's thread under its store lock for commit, revert and read");
+    check(store_generation() == generation && at<uint32_t>(WOOD_AT) == 50 && registry_live_status().active == 1,
+          "off-thread requests neither write nor consume handles");
+    registry_live_owner_gone(71);
+    registry_live_publish();
+    check(store_generation() == generation && at<uint32_t>(WOOD_AT) == 50 && registry_live_status().active == 1,
+          "an off-thread pump leaves owner cleanup queued for the world thread");
+    *thread = true;
+    registry_live_publish();
+    check(at<uint32_t>(WOOD_AT) == 10 && registry_live_status().active == 0,
+          "the next world-thread pump removes the retired owner's complete change");
+    check(registry_live_status().world_kind == KILN_WORLD_SERVER, "status copies the kind paired with its world token");
+    registry_live_revert(72, draft, &reply);
+}
+void stopped_world_uses_only_copied_data() {
+    fresh_live(); RegistryLiveReply reply;
+    const auto process = change(71, "a", "[{" + wood + R"("op":50}])", 1);
+    registry_live_commit(71, process, &reply);
+    registry_live_world_stop();
+    g.in->on_world_thread = [](uint32_t) { return false; };
+    const auto generation = store_generation();
+    const auto pending = change(72, "b", "[{" + wood + R"("op":80}])", 1);
+    check(registry_live_commit(72, pending, &reply) == KILN_OK && reply.outcome == RegistryLiveOutcome::PendingWorld,
+          "after the stop fence a caller may commit copied process inputs without touching the old world");
+    check(store_generation() == generation && at<uint32_t>(WOOD_AT) == 50,
+          "a stopped-world process commit does not write the old world's bytes");
+    check(registry_live_status().world == 0 && registry_live_status().world_kind == KILN_WORLD_KINDS,
+          "the stopped token and kind are cleared together");
+}
+void final_then_later_alter_obeys_commit_order() {
+    fresh_live(); RegistryLiveReply reply;
+    uint64_t a = 0;
+    registry_live_begin(71, "a", 4, &a);
+    std::string final = doc("a", "[{" + wood + R"("op":70}])");
+    final.replace(final.find("alter"), 5, "final");
+    registry_live_submit(71, a, final, &reply, nullptr);
+    registry_live_commit(71, a, &reply);
+    const auto b = change(72, "b", "[{" + wood + R"("op":80}])");
+    registry_live_commit(72, b, &reply);
+    check(at<uint32_t>(WOOD_AT) == 80, "commit order wins even when an earlier transaction was Final and the later one Alter");
+    registry_live_revert(72, b, &reply);
+    check(at<uint32_t>(WOOD_AT) == 70, "reverting the later Alter restores the earlier Final");
+}
+void prepared_turn_still_checks_references() {
+    fresh_live(); RegistryLiveReply reply;
+    const auto invalid = change(71, "a", R"([{"registry":"recipes","select":"game:plank_recipe","field":"inputs","list":{"replace":[{"item":"missing:ingredient","count":3}]}}])");
+    check(registry_live_commit(71, invalid, &reply) == KILN_OK && reply.outcome == RegistryLiveOutcome::Refused && reply.accepted == 0 && reply.reason.find("missing:ingredient") != std::string::npos,
+          "a field-only continuation still refuses a new missing reference");
+    const auto valid = change(72, "b", R"([{"registry":"recipes","select":"game:plank_recipe","field":"inputs","list":{"replace":[{"item":"game:material_t1_wood_logs","count":3}]}}])");
+    check(registry_live_commit(72, valid, &reply) == KILN_OK && reply.outcome == RegistryLiveOutcome::Applied,
+          "a valid reference-list transaction remains writable");
+    std::string value;
+    check(registry_live_read("recipes", "game:plank_recipe", "inputs", &value) == KILN_OK && registry::json::parse(value)[0]["count"] == 3,
+          "the reference-list transaction is visible through the mapped reader");
+    registry_live_revert(72, valid, &reply);
+    check(registry_live_read("recipes", "game:plank_recipe", "inputs", &value) == KILN_OK && registry::json::parse(value)[0]["count"] == 2,
+          "reverting the reference-list transaction restores the original list");
+}
+void retained_changes_have_bounded_commit_cost() {
+    fresh_live();
+    RegistryLive installed = *g.in;
+    for (size_t i = 0; i < 20000; ++i) {
+        registry::BaseModel::Entry entry;
+        entry.id = "game:cost_" + std::to_string(i);
+        entry.fields = {{"maxStack", registry::Value::integer(10)}, {"manaCost", registry::Value::number(10)},
+            {"staminaCost", registry::Value::number(10)}, {"power", registry::Value::integer(10)},
+            {"rarity", registry::Value::text("common")}, {"perks", registry::Value::of_list({})}};
+        installed.base.registries["items"].push_back(std::move(entry));
+    }
+    registry_live_install(std::move(installed)); registry_live_world_begin(); apply_registry_files({});
+    // Seed admitted copied changes directly, without charging or waiting for 63 earlier commits in this bounded-cost test.
+    // The final public commit still recomposes and binds all 64 retained transactions through the real backend/store.
+    for (unsigned i = 0; i < 63; ++i) {
+        const auto h = change(1000 + i, "cost-" + std::to_string(i), "[{" + wood + R"("op":{"add":1}}])");
+        g.changes.at(h).order = ++g.next_order;
+    }
+    const auto h = change(2000, "last", "[{" + wood + R"("op":{"add":1}}])");
+    RegistryLiveReply reply;
+    const auto start = std::chrono::steady_clock::now();
+    const auto rc = registry_live_commit(2000, h, &reply);
+    const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+    std::printf("64 retained changes / 20000 extra entries: %.2f ms commit\n", ms);
+    check(rc == KILN_OK && reply.outcome == RegistryLiveOutcome::Applied && at<uint32_t>(WOOD_AT) == 74,
+          "the bounded-cost commit preserves all 64 ordered relative edits");
+    check(ms < 1000, "64 retained scalar changes over 20000 entries commit within the 1000 ms sanitizer-host budget");
+}
+registry::stage::LiveData lazy_alias_data() {
+    registry::stage::LiveData data;
+    auto entry = base().registries.at("items").front(); entry.id = "game:wood_alias";
+    data.base.registries["items"].push_back(std::move(entry));
+    data.ids = {{"items|game:wood_alias", guid_text(G1)}};
+    data.nums = {{"items|game:wood_alias", WOOD}};
+    data.decoded = {"items.maxStack"};
+    return data;
+}
+void begin_prepares_copied_base_once() {
+    fresh_live(); auto calls = std::make_shared<int>(0), locked = std::make_shared<int>(0);
+    // review4 NS1: the first-use decode reads the archive for seconds; it never holds the store lock the world thread needs
+    g.in->prepare = [calls, locked](registry::stage::LiveData* out, std::string*) {
+        ++*calls; *locked += tl_depth != 0; *out = lazy_alias_data(); return true;
+    };
+    registry_live_status();
+    check(*calls == 0, "status does not decode an unused registry");
+    const auto h = change(71, "a", R"([{"registry":"items","select":"game:wood_alias","field":"maxStack","op":{"mul":3}}])");
+    check(*calls == 1, "the first native begin prepares the copied stable base once");
+    RegistryLiveReply reply;
+    registry_live_commit(71, h, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Applied && at<uint32_t>(WOOD_AT) == 30,
+          "lazy preparation refreshes composition lookup and mapped id indexes before a commit");
+    std::string value;
+    check(registry_live_read("items", "game:wood_alias", "maxStack", &value) == KILN_OK && value == "30" && *calls == 1,
+          "reads reuse the first prepared model without another decode");
+    check(*locked == 0, "the first-use preparation ran outside the store lock");
+}
+void read_can_be_first_registry_use() {
+    fresh_live(); auto calls = std::make_shared<int>(0);
+    g.in->prepare = [calls](registry::stage::LiveData* out, std::string*) {
+        check(tl_depth == 0, "a read's first-use preparation runs outside the store lock");
+        ++*calls; *out = lazy_alias_data(); return true;
+    };
+    const auto generation = store_generation(); std::string value;
+    check(registry_live_read("items", "game:wood_alias", "maxStack", &value) == KILN_OK && value == "10" && *calls == 1,
+          "a mapped read can prepare the copied model without beginning a transaction");
+    check(store_generation() == generation && registry_live_status().drafts == 0,
+          "read-first preparation creates no store writes or transaction handles");
+}
+void unavailable_preparation_remains_retryable() {
+    fresh_live(); auto ready = std::make_shared<bool>(false);
+    g.in->prepare = [ready](registry::stage::LiveData* out, std::string* why) {
+        if (!*ready) { *why = "synthetic archive not ready"; return false; }
+        *out = lazy_alias_data(); return true;
+    };
+    uint64_t h = 0;
+    check(registry_live_begin(71, "a", 1, &h) == KILN_ERR_UNAVAILABLE && h == 0 && registry_live_status().drafts == 0,
+          "failed lazy preparation admits no draft and reports unavailable");
+    *ready = true;
+    check(registry_live_begin(71, "a", 1, &h) == KILN_OK && h != 0 && !g.in->prepare,
+          "a later preparation can succeed and release its loader closure");
+    RegistryLiveReply reply; registry_live_revert(71, h, &reply);
+}
+size_t impact_at(const std::string& field) { return SWORD_AT + (field == "manaCost" ? 0x40 : 0x48); }
+void use_integer_impact(const std::string& field) {
+    g_integer_impacts.insert(field);
+    mem<int32_t>(impact_at(field), 10); mem<int32_t>(impact_at(field) + 4, 10);
+}
+std::string cost_edit(const std::string& field, const std::string& value) {
+    return "{\"registry\":\"items\",\"select\":\"game:sword_t2\",\"field\":\"" + field + "\",\"op\":" + value + "}";
+}
+void fractional_integer_cost_is_refused(const std::string& field) {
+    for (const std::string value : {"67.5", "2.5"}) {
+        fresh_live(); use_integer_impact(field); RegistryLiveReply reply;
+        const auto h = change(71, "a", "[{" + wood + "\"op\":75}," + cost_edit(field, value) + "]");
+        registry_live_commit(71, h, &reply);
+        check(reply.outcome == RegistryLiveOutcome::Refused && reply.accepted == 0 && reply.reason.rfind("not_exact: ", 0) == 0,
+              field + ": fractional integer-storage refusal has the stable not_exact token, never Applied");
+        check(reply.reason.find("items." + field + " of game:sword_t2 is a whole number on this build; " + value + " was not written") != std::string::npos,
+              "the refusal names the stable field, item and unrounded value");
+        check(at<int32_t>(impact_at(field)) == 10 && at<uint32_t>(WOOD_AT) == 10,
+              "neither the fractional integer value nor another field in its transaction is written");
+    }
+}
+void whole_and_float_costs_still_work() {
+    for (const std::string field : {"manaCost", "staminaCost"}) {
+        fresh_live(); use_integer_impact(field); RegistryLiveReply reply;
+        auto h = change(71, "a", "[" + cost_edit(field, "67") + "]"); registry_live_commit(71, h, &reply);
+        check(reply.outcome == RegistryLiveOutcome::Applied && at<int32_t>(impact_at(field)) == 67, "whole cost values remain writable to integer storage");
+        registry_live_revert(71, h, &reply);
+        check(at<int32_t>(impact_at(field)) == 10, "whole integer cost values revert exactly");
+        for (const std::string value : {"67.5", "2.5"}) {
+            fresh_live();
+            h = change(71, "a", "[" + cost_edit(field, value) + "]"); registry_live_commit(71, h, &reply);
+            check(reply.outcome == RegistryLiveOutcome::Applied && at<float>(impact_at(field)) == std::stof(value),
+                  "float-config entries keep fractional values");
+            registry_live_revert(71, h, &reply);
+            check(at<float>(impact_at(field)) == 10.0f, "float-config fractions revert exactly");
+        }
+    }
+}
+void staged_fractional_integer_cost_is_refused() {
+    for (const std::string field : {"manaCost", "staminaCost"}) {
+        world(); g_files.clear(); use_integer_impact(field);
+        g_files["a/content/cost.json"] = "{\"registry\":{\"alter\":[" + cost_edit(field, "2.5") + "]}}";
+        const auto files = files_of({{"a", "a/content/cost.json"}});
+        stage(files); registry_live_world_begin(); apply_registry_files(files);
+        check(at<int32_t>(impact_at(field)) == 10, "a start-time edit cannot round a fractional cost at world-load binding");
+        bool exact = false;
+        for (const auto& refusal : g_last_report.refused) exact |= refusal.reason.rfind("not_exact: ", 0) == 0;
+        check(exact, "the start-time/world-load refusal also carries the stable reason token");
+    }
+}
+void pending_fractional_integer_cost_is_refused() {
+    world(); g_files.clear(); use_integer_impact("manaCost"); stage({}); RegistryLiveReply reply;
+    const auto h = change(71, "a", "[" + cost_edit("manaCost", "67.5") + "]", 1);
+    registry_live_commit(71, h, &reply);
+    check(reply.outcome == RegistryLiveOutcome::PendingWorld, "a copied cost waits for its actual per-entry storage type");
+    registry_live_world_begin(); apply_registry_files({});
+    check(at<int32_t>(impact_at("manaCost")) == 10, "world-load binding refuses the inexact entry; nothing is rounded");
+    bool exact = false;
+    for (const auto& refusal : g_last_report.refused) exact |= refusal.reason.rfind("not_exact: ", 0) == 0;
+    check(exact, "a pending change's rejection preserves the stable reason token");
+}
+// review4 NS6: an inexact whole-number cost at an entry point refuses that entry only, with the not_exact token.
+void entry_point_inexact_cost_drops_only_that_entry() {
+    for (uint32_t point = 1; point <= 3; ++point) {
+        fresh_live(); use_integer_impact("manaCost"); RegistryLiveReply reply;
+        const auto h = change(71, "a", "[{" + wood + "\"op\":75}," + cost_edit("manaCost", "2.5") + "]", point);
+        check(registry_live_commit(71, h, &reply) == KILN_OK && reply.outcome == RegistryLiveOutcome::Applied, "the pass applies");
+        check(reply.accepted == 2 && reply.refused == 1 && reply.reason.rfind("not_exact: ", 0) == 0,
+              "refused > 0 with the stable not_exact token for that entry");
+        check(at<uint32_t>(WOOD_AT) == 75 && at<int32_t>(impact_at("manaCost")) == 10, "the other entry applies, the cost is never rounded");
+        registry_live_publish();
+        bool exact = false;
+        for (const auto& r : g_last_report.refused) exact |= r.reason.rfind("not_exact: ", 0) == 0 && r.id == "game:sword_t2";
+        check(exact, "registry.json names the refused entry with the token");
+        registry_live_revert(71, h, &reply);
+        check(at<uint32_t>(WOOD_AT) == 10, "revert removes what applied");
+    }
+}
+// review4 NS6: a selector over every item at an entry point refuses the entries that cannot take the edit, one by one;
+// a MANUAL transaction with the same edit is refused whole.
+void entry_point_selector_refuses_per_entry() {
+    fresh_live(); use_integer_impact("manaCost"); RegistryLiveReply reply;
+    const std::string all = R"([{"registry":"items","select":"*","field":"manaCost","op":{"mul":1.5}}])";
+    const auto manual = change(70, "m", all, 4);
+    registry_live_commit(70, manual, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Refused && reply.accepted == 0 && at<int32_t>(impact_at("manaCost")) == 10,
+          "a manual transaction stays all-or-nothing");
+    const auto h = change(71, "a", all, 2);
+    check(registry_live_commit(71, h, &reply) == KILN_OK && reply.outcome == RegistryLiveOutcome::Applied && reply.accepted == 1 && reply.refused == 2,
+          "an entry point applies the entries that can take it and counts each refused entry");
+    check(at<int32_t>(impact_at("manaCost")) == 15, "the sword's whole-number cost 10 x 1.5 = 15 applies");
+    registry_live_revert(71, h, &reply);
+}
+// review2 S3: an exclusive conflict on one selected entry refuses that entry at an entry point; MANUAL refuses the edit.
+void selector_conflict_refuses_one_entry_at_entry_points() {
+    for (uint32_t point : {2u, 4u}) {
+        fresh_live(); RegistryLiveReply reply;
+        const auto a = change(70, "a", "[{" + wood + R"("op":50,"exclusive":true}])");
+        registry_live_commit(70, a, &reply);
+        const auto b = change(72, "b", R"([{"registry":"items","select":"game:material_*","field":"maxStack","op":70}])", point);
+        registry_live_commit(72, b, &reply);
+        if (point == 4) {
+            check(reply.outcome == RegistryLiveOutcome::Refused && reply.accepted == 0 && reply.refused == 1,
+                  "a manual wildcard edit with one exclusive conflict is refused as one edit");
+            check(at<uint32_t>(WOOD_AT) == 50 && at<uint32_t>(STONE_AT) == 50, "nothing of it applies");
+        } else {
+            check(reply.outcome == RegistryLiveOutcome::Applied && reply.accepted == 1 && reply.refused == 1 &&
+                  reply.reason.find("Conflict (exclusive)") != std::string::npos,
+                  "an entry point refuses the conflicting entry alone, with its reason");
+            check(at<uint32_t>(WOOD_AT) == 50 && at<uint32_t>(STONE_AT) == 70, "the other selected entry applies");
+        }
+        registry_live_revert(70, a, &reply);
+        check(at<uint32_t>(WOOD_AT) == 10 && at<uint32_t>(STONE_AT) == (point == 4 ? 50u : 70u),
+              "a refused entry never activates later when its conflicting owner leaves");
+    }
+}
+void flattened_socket_read_write_revert() {
+    fresh_live(); RegistryLiveReply reply; std::string value;
+    mem<uint8_t>(WOOD_AT + 0x97, 0x5a); mem<uint8_t>(WOOD_AT + 0x99, 0xa5);
+    check(registry_live_read("items", "game:material_t1_wood_logs", "socket", &value) == KILN_OK && value == "false",
+          "socket reads the scalar that reflection exposes for its single-field struct");
+    const auto h = change(71, "a", R"([{"registry":"items","select":"game:material_t1_wood_logs","field":"socket","op":true}])");
+    registry_live_commit(71, h, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Applied && at<uint8_t>(WOOD_AT + 0x98) == 1,
+          "socket writes the flattened Boolean, not a missing nested member");
+    check(at<uint8_t>(WOOD_AT + 0x97) == 0x5a && at<uint8_t>(WOOD_AT + 0x99) == 0xa5,
+          "socket writes only its one-byte slot");
+    check(registry_live_read("items", "game:material_t1_wood_logs", "socket", &value) == KILN_OK && value == "true", "the mapped socket read observes the write");
+    registry_live_revert(71, h, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Reverted && at<uint8_t>(WOOD_AT + 0x98) == 0, "socket reverts its own Boolean layer");
+}
+void staged_flattened_socket_binds() {
+    world(); g_files = {{"a/content/socket.json", R"({"registry":{"alter":[{"registry":"items","select":"game:material_t1_wood_logs","field":"socket","op":true}]}})"}};
+    const auto files = files_of({{"a", "a/content/socket.json"}});
+    stage(files); registry_live_world_begin(); apply_registry_files(files);
+    check(at<uint8_t>(WOOD_AT + 0x98) == 1, "start-time socket edits bind the flattened field at world load too");
+}
+void flattened_socket_foreign_revert_is_skipped() {
+    fresh_live(); RegistryLiveReply reply;
+    const auto h = change(71, "a", R"([{"registry":"items","select":"game:material_t1_wood_logs","field":"socket","op":true}])");
+    registry_live_commit(71, h, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Applied, "the socket change applies before outside drift");
+    mem<uint8_t>(WOOD_AT + 0x98, 2);
+    registry_live_revert(71, h, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Skipped && at<uint8_t>(WOOD_AT + 0x98) == 2,
+          "a socket revert preserves another writer's bytes");
+}
+void unlock_read_has_no_write_side_effect() {
+    fresh_live(); std::string value;
+    const auto generation = store_generation(); const auto owners = store_owners();
+    check(registry_live_read("recipes", "game:plank_recipe", "unlock", &value) == KILN_OK && registry::json::parse(value) == "game",
+          "unlock reads the existing nonzero knowledge requirement through the live table");
+    check(store_generation() == generation && store_owners() == owners,
+          "unlock reads create neither store layers nor writes");
+    mem<uint32_t>(PLANK_AT + 0x50, 0);
+    check(registry_live_read("recipes", "game:plank_recipe", "unlock", &value) == KILN_OK && registry::json::parse(value) == "game",
+          "unlock checks the whole query, not only its first word");
+    mem<uint32_t>(PLANK_AT + 0x58, 0);
+    check(registry_live_read("recipes", "game:plank_recipe", "unlock", &value) == KILN_OK && registry::json::parse(value) == "always",
+          "an entirely empty query reads as always");
+}
+void unlock_write_read_revert() {
+    fresh_live(); RegistryLiveReply reply; std::string value;
+    const auto h = change(71, "a", R"([{"registry":"recipes","select":"game:plank_recipe","field":"unlock","op":"always"}])");
+    registry_live_commit(71, h, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Applied && at<uint32_t>(PLANK_AT + 0x50) == 0, "unlock writes already work");
+    check(registry_live_read("recipes", "game:plank_recipe", "unlock", &value) == KILN_OK && registry::json::parse(value) == "always",
+          "unlock reads observe the cleared knowledge requirement");
+    registry_live_revert(71, h, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Reverted && at<uint32_t>(PLANK_AT + 0x50) == 0x12345678 && at<uint32_t>(PLANK_AT + 0x58) == 7,
+          "unlock revert restores the original query bytes");
+    check(registry_live_read("recipes", "game:plank_recipe", "unlock", &value) == KILN_OK && registry::json::parse(value) == "game",
+          "unlock reads observe the restored query");
+}
+void unlock_foreign_revert_is_skipped() {
+    fresh_live(); RegistryLiveReply reply; std::string value;
+    const auto h = change(71, "a", R"([{"registry":"recipes","select":"game:plank_recipe","field":"unlock","op":"always"}])");
+    registry_live_commit(71, h, &reply);
+    mem<uint32_t>(PLANK_AT + 0x50, 123);
+    check(registry_live_read("recipes", "game:plank_recipe", "unlock", &value) == KILN_OK && registry::json::parse(value) == "game",
+          "unlock reads actual outside bytes, not its cached intended value");
+    registry_live_revert(71, h, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Skipped && at<uint32_t>(PLANK_AT + 0x50) == 123,
+          "unlock revert preserves another writer's whole query slot");
+}
+void live_raw_refusals_keep_place_metadata() {
+    fresh_live();
+    // The stage already checked Advanced raw edits. Exercise their world binder, not a public live-submit bypass.
+    auto outcome = [](const std::string& path) {
+        registry::FieldOutcome fo;
+        fo.raw = path;
+        fo.raw_spec = std::make_shared<registry::FieldSpec>(*registry_schema().registry("items")->field("maxStack"));
+        registry::ChainRow row;
+        row.mod = row.who = "advanced-mod"; row.source = "content/raw.json"; row.n = 9; row.raw = path;
+        row.op.set = true; row.op.value = registry::Value::integer(20);
+        fo.chain.push_back(row);
+        return fo;
+    };
+    bind({"items", "game:material_t1_wood_logs", "raw:Missing.Member"}, outcome("Missing.Member"));
+    reg(KILN_CONTENT_ITEMS).schema.fields[0].writable = false;
+    bind({"items", "game:material_t1_wood_logs", "raw:maxStackSize"}, outcome("maxStackSize"));
+    check(g.refused.size() == 2, "both missing and nonwritable raw members produce live refusals");
+    for (const auto& refusal : g.refused) {
+        check(refusal.registry == "items" && refusal.id == "game:material_t1_wood_logs" && !refusal.field.empty() && refusal.raw,
+              "live raw binding refusals retain their place and explicit Advanced-tier marker");
+        check(refusal.mod == "advanced-mod" && refusal.source == "content/raw.json" && refusal.n == 9,
+              "raw refusal retains its author and source edit");
+    }
+    registry::Result result; result.refused = g.refused;
+    const auto report = registry::report_json(registry_schema(), result, {});
+    for (const auto& row : report.at("refused"))
+        check(row.value("raw", false) && row.at("registry") == "items" && row.at("id") == "game:material_t1_wood_logs",
+              "the serialized live refusal lets a launcher hide all raw member details");
+}
+void raw_refusal_marker_does_not_depend_on_place_text() {
+    registry::Result result; registry::Refusal refusal;
+    refusal.mod = "advanced-mod"; refusal.raw = true;
+    refusal.reason = "the member Missing.Member is not writable";
+    result.refused.push_back(refusal);
+    const auto report = registry::report_json(registry_schema(), result, {});
+    check(report.at("refused").at(0).value("raw", false),
+          "an explicit raw refusal stays raw even when its place is unavailable");
+}
+void raw_evaluation_refusal_is_marked_but_unknown_kiln_field_is_not() {
+    fresh_live();
+    registry::FieldOutcome fo;
+    fo.raw = "maxStackSize";
+    auto spec = std::make_shared<registry::FieldSpec>(*registry_schema().registry("items")->field("maxStack"));
+    spec->max = 15; fo.raw_spec = spec;
+    registry::ChainRow row; row.mod = row.who = "advanced-mod";
+    row.source = "content/raw.json"; row.op.set = true; row.op.value = registry::Value::integer(20);
+    fo.chain.push_back(row);
+    bind({"items", "game:material_t1_wood_logs", "raw:maxStackSize"}, fo);
+    uint8_t bytes[4] = {};
+    check(store_effective(A(WOOD_AT), 4, bytes) && bytes[0] == 10, "an out-of-range raw edit leaves the value below it during evaluation");
+    check(!g.refused.empty() && g.refused.back().raw && g.refused.back().field == "maxStackSize",
+          "evaluation refusals also carry raw place metadata");
+    bind({"items", "game:material_t1_wood_logs", "maxStak"}, fo);
+    check(!g.refused.back().raw && g.refused.back().field == "maxStak" && g.refused.back().reason.find("not a field of the schema") != std::string::npos,
+          "an unknown Kiln field keeps its ordinary diagnostic rather than becoming Advanced");
 }
 void claims_and_binding_failure() {
     fresh_live(); RegistryLiveReply reply;
@@ -115,12 +893,29 @@ void restart_is_per_edit_and_begin_is_bounded() {
     auto h = change(71, "a", "[{" + wood + R"("op":75},{"registry":"balance","select":"game:balance","field":"levelCap","op":60}])", 3);
     registry_live_commit(71, h, &reply);
     check(reply.outcome == RegistryLiveOutcome::Applied && reply.refused == 1 && at<uint32_t>(WOOD_AT) == 75, "restart-only refusal does not silently write or discard mapped live edits");
+    registry_live_publish();
     check(reported("RestartRequired"), "restart requirement is in registry.json");
     registry_live_revert(71, h, &reply);
-    std::vector<uint64_t> drafts;
-    for (int i = 0; i < 64; ++i) { uint64_t n = 0; check(registry_live_begin(71, "a", 4, &n) == KILN_OK, "draft slot"); drafts.push_back(n); }
-    check(registry_live_begin(71, "a", 4, &h) == KILN_ERR_UNAVAILABLE, "draft bound is enforced");
-    for (auto n : drafts) registry_live_revert(71, n, &reply);
+    // review2 S4: per-owner caps below the process-wide ones, so one mod cannot starve the others
+    std::vector<std::pair<KilnOwner, uint64_t>> drafts;
+    for (int i = 0; i < 16; ++i) { uint64_t n = 0; check(registry_live_begin(71, "a", 4, &n) == KILN_OK, "draft slot"); drafts.push_back({71, n}); }
+    check(registry_live_begin(71, "a", 4, &h) == KILN_ERR_UNAVAILABLE, "one owner's 16-draft cap is enforced");
+    for (KilnOwner owner = 72; owner < 75; ++owner)
+        for (int i = 0; i < 16; ++i) { uint64_t n = 0; check(registry_live_begin(owner, "b", 4, &n) == KILN_OK, "another owner still has draft slots"); drafts.push_back({owner, n}); }
+    check(registry_live_begin(75, "c", 4, &h) == KILN_ERR_UNAVAILABLE, "the process-wide 64-draft bound is enforced");
+    for (auto [owner, n] : drafts) registry_live_revert(owner, n, &reply);
+}
+// review2 S4: one owner's retained changes are capped (256) below the process-wide 1,024.
+void retained_changes_are_capped_per_owner() {
+    fresh_live(); RegistryLiveReply reply;
+    for (unsigned i = 0; i < 256; ++i) {
+        const auto h = change(71, "a", "[{" + wood + R"("op":{"add":1}}])");
+        g.changes.at(h).order = ++g.next_order; // admitted without a world write each: the cap, not the store, is under test
+    }
+    uint64_t h = 0;
+    check(registry_live_begin(71, "a", 4, &h) == KILN_ERR_UNAVAILABLE, "an owner with 256 retained changes gets no new draft");
+    check(registry_live_begin(72, "b", 4, &h) == KILN_OK, "another owner is not starved");
+    registry_live_revert(72, h, &reply);
 }
 }
 int main() {
@@ -129,13 +924,66 @@ int main() {
     int failed = 0;
     const std::pair<const char*, void(*)()> tests[] = {
         {"packs_code_and_out_of_order_revert", packs_code_and_out_of_order_revert},
+        {"unrelated_pack_binding_failure_isolated", unrelated_pack_binding_failure_isolated},
+        {"unrelated_live_binding_failure_isolated", unrelated_live_binding_failure_isolated},
+        {"pending_binding_failure_drops_only_that_entry", pending_binding_failure_drops_only_that_entry},
+        {"carried_binding_failure_drops_only_that_entry", carried_binding_failure_drops_only_that_entry},
+        {"reapplied_binding_failure_is_atomic", reapplied_binding_failure_is_atomic},
+        {"pending_evaluation_failure_is_atomic", pending_evaluation_failure_is_atomic},
+        {"pending_write_failure_is_rolled_back", pending_write_failure_is_rolled_back},
+        {"commit_does_not_reenter_ready", commit_does_not_reenter_ready},
+        {"revert_defers_its_snapshot", revert_defers_its_snapshot},
+        {"nested_transactions_are_refused", nested_transactions_are_refused},
+        {"wrong_world_thread_is_refused_under_lock", wrong_world_thread_is_refused_under_lock},
+        {"stopped_world_uses_only_copied_data", stopped_world_uses_only_copied_data},
+        {"final_then_later_alter_obeys_commit_order", final_then_later_alter_obeys_commit_order},
+        {"prepared_turn_still_checks_references", prepared_turn_still_checks_references},
+        {"retained_changes_have_bounded_commit_cost", retained_changes_have_bounded_commit_cost},
+        {"begin_prepares_copied_base_once", begin_prepares_copied_base_once},
+        {"read_can_be_first_registry_use", read_can_be_first_registry_use},
+        {"unavailable_preparation_remains_retryable", unavailable_preparation_remains_retryable},
+        {"fractional_integer_mana_refused", [] { fractional_integer_cost_is_refused("manaCost"); }},
+        {"fractional_integer_stamina_refused", [] { fractional_integer_cost_is_refused("staminaCost"); }},
+        {"whole_and_float_costs_still_work", whole_and_float_costs_still_work},
+        {"staged_fractional_integer_cost_is_refused", staged_fractional_integer_cost_is_refused},
+        {"pending_fractional_integer_cost_is_refused", pending_fractional_integer_cost_is_refused},
+        {"flattened_socket_read_write_revert", flattened_socket_read_write_revert},
+        {"staged_flattened_socket_binds", staged_flattened_socket_binds},
+        {"flattened_socket_foreign_revert_is_skipped", flattened_socket_foreign_revert_is_skipped},
+        {"unlock_read_has_no_write_side_effect", unlock_read_has_no_write_side_effect},
+        {"unlock_write_read_revert", unlock_write_read_revert},
+        {"unlock_foreign_revert_is_skipped", unlock_foreign_revert_is_skipped},
+        {"live_raw_refusals_keep_place_metadata", live_raw_refusals_keep_place_metadata},
+        {"raw_refusal_marker_does_not_depend_on_place_text", raw_refusal_marker_does_not_depend_on_place_text},
+        {"raw_evaluation_refusal_is_marked_but_unknown_kiln_field_is_not", raw_evaluation_refusal_is_marked_but_unknown_kiln_field_is_not},
         {"claims_and_binding_failure", claims_and_binding_failure},
         {"mapped_reads_have_no_write_side_effect", mapped_reads_have_no_write_side_effect},
         {"world_scope_and_admission", world_scope_and_admission},
         {"repeated_submit_numbers_are_distinct", repeated_submit_numbers_are_distinct},
         {"restart_is_refused_at_every_live_point", restart_is_refused_at_every_live_point},
         {"refused_edits_share_change_budget", refused_edits_share_change_budget},
-        {"restart_is_per_edit_and_begin_is_bounded", restart_is_per_edit_and_begin_is_bounded}};
+        {"restart_is_per_edit_and_begin_is_bounded", restart_is_per_edit_and_begin_is_bounded},
+        {"candidate_write_failure_keeps_other_owners", candidate_write_failure_keeps_other_owners},
+        {"unrelated_application_write_failure_keeps_live", unrelated_application_write_failure_keeps_live},
+        {"rejected_rows_survive_the_rollback_pass", rejected_rows_survive_the_rollback_pass},
+        {"multi_change_write_failure_is_attributed_per_change", multi_change_write_failure_is_attributed_per_change},
+        {"rejected_process_change_returns_next_world", rejected_process_change_returns_next_world},
+        {"foreign_slot_keeps_the_rest_of_a_retained_change", foreign_slot_keeps_the_rest_of_a_retained_change},
+        {"pass_read_excludes_own_layers", pass_read_excludes_own_layers},
+
+        {"live_read_of_a_missing_entry_is_not_found", live_read_of_a_missing_entry_is_not_found},
+        {"world_stop_reports_without_its_live_rows", world_stop_reports_without_its_live_rows},
+
+        {"drop_table_change_is_pending_resource", drop_table_change_is_pending_resource},
+        {"formula_transaction_with_foreign_write", formula_transaction_with_foreign_write},
+        {"draft_cannot_cross_worlds", draft_cannot_cross_worlds},
+        {"process_change_reverts_without_a_world", process_change_reverts_without_a_world},
+        {"retained_changes_are_capped_per_owner", retained_changes_are_capped_per_owner},
+
+        {"world_load_field_mid_world_is_named", world_load_field_mid_world_is_named},
+        {"entry_point_inexact_cost_drops_only_that_entry", entry_point_inexact_cost_drops_only_that_entry},
+        {"entry_point_selector_refuses_per_entry", entry_point_selector_refuses_per_entry},
+        {"selector_conflict_refuses_one_entry_at_entry_points", selector_conflict_refuses_one_entry_at_entry_points}};
     for (auto [name, fn] : tests) try { fn(); std::printf("ok %s\n", name); } catch (const std::exception& e) { ++failed; std::printf("FAIL %s: %s\n", name, e.what()); }
     std::printf("registry live transactions: %d checks, %d failed groups\n", checks, failed);
     return failed ? 1 : 0;

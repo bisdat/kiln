@@ -8,16 +8,29 @@ namespace Kiln;
 /// <summary>A constructed game text line, in display order. Value is the computed stat number, when this is the first
 /// text row of a stat draw; it is metadata, not an extra number to append to Text. A number-only draw has empty Text.
 /// Since 0.2.0-dev.30.5.</summary>
+/// <param name="Text">The line's text, in the language at capture time.</param>
+/// <param name="Value">The computed stat number of a stat's first text row; null otherwise.</param>
 public sealed record UiItemDetailLine(string Text, float? Value);
 
 /// <summary>An owned copy of the last completed panel for this item/variant. Text uses the language at capture time.
 /// Reinspect after changing language or item state. These presentation values are not gameplay authority.
 /// Since 0.2.0-dev.30.5.</summary>
+/// <param name="Item">The item's id.</param>
+/// <param name="Entity">The client entity of the item the panel was captured for.</param>
+/// <param name="Level">The item's level.</param>
+/// <param name="Rarity">The item's rarity, when known.</param>
+/// <param name="Session">The client session of the capture.</param>
+/// <param name="Frame">The game UI frame of the capture.</param>
+/// <param name="CaptureMs">When it was captured, on the <c>Environment.TickCount64</c> clock.</param>
+/// <param name="Lines">The panel's text lines in display order.</param>
 public sealed record UiItemDetailSnapshot(ItemId Item, EntityId Entity, int Level, ItemRarity? Rarity,
     ulong Session, ulong Frame, ulong CaptureMs, IReadOnlyList<UiItemDetailLine> Lines);
 
 /// <summary>Ok when a game panel was captured. Otherwise Snapshot is null and Reason explains the miss.
 /// No panel or computed fallback is supplied; a mod can show a name/id and this reason. Since 0.2.0-dev.30.5.</summary>
+/// <param name="Ok">True when a panel was captured.</param>
+/// <param name="Reason">Why not; null when <see cref="Ok"/>.</param>
+/// <param name="Snapshot">The captured panel; null when not <see cref="Ok"/>.</param>
 public sealed record UiItemDetailResult(bool Ok, string? Reason, UiItemDetailSnapshot? Snapshot) : IKilnResult;
 
 public static partial class Ui

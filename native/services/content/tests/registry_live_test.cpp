@@ -32,6 +32,9 @@ alignas(16) uint8_t g_arena[1 << 20];  // the made-up game memory (real addresse
 size_t g_near = 1 << 19;
 Registry g_regs[5];
 std::map<std::string, std::string> g_files;  // pack file rel -> its text
+std::vector<size_t> g_write_limits; // test-only: successful writes allowed in each next batch (empty: no injected failure)
+std::function<void()> g_before_write; // test-only: one callback just before a real batch writes
+std::set<std::string> g_integer_impacts; // made-up per-entry Sint32 vs Float cost storage
 }  // namespace
 uintptr_t A(size_t off) { return reinterpret_cast<uintptr_t>(g_arena) + off; }
 void logf(int, const char* fmt, ...) {
@@ -46,8 +49,15 @@ bool rd(uintptr_t address, void* out, size_t n) {
     std::memcpy(out, reinterpret_cast<const void*>(address), n);
     return true;
 }
-size_t write_batch(std::vector<Write>& writes, uintptr_t*) {
-    for (const Write& w : writes) std::memcpy(reinterpret_cast<void*>(w.addr), w.bytes, w.n);
+size_t write_batch(std::vector<Write>& writes, uintptr_t* failed) {
+    if (g_before_write) { auto callback = std::move(g_before_write); g_before_write = {}; callback(); }
+    size_t limit = writes.size();
+    if (!g_write_limits.empty()) { limit = g_write_limits.front(); g_write_limits.erase(g_write_limits.begin()); }
+    for (size_t i = 0; i < writes.size(); ++i) {
+        const Write& w = writes[i];
+        if (i >= limit) { if (failed) *failed = w.addr; return i; }
+        std::memcpy(reinterpret_cast<void*>(w.addr), w.bytes, w.n);
+    }
     return writes.size();
 }
 void* near_alloc(uintptr_t, size_t n) {
@@ -98,12 +108,16 @@ uint32_t fnv1a(const void* data, size_t n) {
     for (size_t i = 0; i < n; ++i) h = (h ^ static_cast<const uint8_t*>(data)[i]) * 16777619u;
     return h;
 }
-// kiln.gamedata's item configs: the sword has a ManaCost config (float at +0x40) with a tooltip row (+0x44, Normal format)
+// The made-up sword has mana/stamina configs and tooltip rows; each can use actual integer or float storage.
 bool gd_item_config_slot(const Entry& e, const std::string& path, GdValueSlot* out, std::string* why) {
-    if (e.id != 0x222 || path != "impactValues.0xaf236ece") return *why = "the item has no such configuration (Kiln's live back-end does not add one)", false;
-    out->addr = e.addr + 0x40, out->kind = 1000, out->id = e.id, out->field = 7;
-    out->f.path = "impactValues.0xaf236ece.value", out->f.offset = 0, out->f.bytes = 4, out->f.vt = KILN_CV_FLOAT, out->f.writable = true;
-    out->tip = e.addr + 0x44, out->tip_format = 0;
+    const bool mana = path == "impactValues.0xaf236ece", stamina = path == "impactValues.0x727d7f78";
+    if (e.id != 0x222 || (!mana && !stamina)) return *why = "the item has no such configuration (Kiln's live back-end does not add one)", false;
+    const size_t offset = mana ? 0x40 : 0x48;
+    const bool integer = g_integer_impacts.count(mana ? "manaCost" : "staminaCost") != 0;
+    out->addr = e.addr + offset, out->kind = 1000, out->id = e.id, out->field = mana ? 7 : 8;
+    out->f.path = path + ".value", out->f.offset = 0, out->f.bytes = 4;
+    out->f.vt = integer ? KILN_CV_INT : KILN_CV_FLOAT, out->f.is_signed = integer, out->f.writable = true;
+    out->tip = e.addr + offset + 4, out->tip_format = 0;
     return true;
 }
 bool gd_ui_scale(uint8_t, double v, int64_t* out) { return *out = std::llround(v), true; }
@@ -186,6 +200,8 @@ registry::Result g_last_report;
 int g_reports = 0;
 
 void world() {
+    g_write_limits.clear(); g_before_write = {}; g_integer_impacts.clear();
+    g_registry_type_size = [](const char* q) -> uint32_t { return std::string(q) == "keen::KnowledgeQueryData" ? 12u : 0u; };
     std::string e;
     store_reset(false, &e);
     std::memset(g_arena, 0, sizeof g_arena);
@@ -202,6 +218,8 @@ void world() {
     add_field(I.schema, fld("damageSetup.dmgMod", 0x08, 4, KILN_CV_FLOAT));
     add_field(I.schema, fld("damageSetup.speedMod", 0x0C, 4, KILN_CV_FLOAT));
     add_field(I.schema, fld("armorSetup.distribution.physical", 0x90, 4, KILN_CV_FLOAT));
+    Field socket = fld("gemSlotOverride", 0x98, 1, KILN_CV_BOOL); socket.type_name = "keen::GemSlotOverride";
+    add_field(I.schema, socket); // refl.cpp single_scalar flattens {isSet} to the parent path
     add_field(I.schema, fld("itemLevelRange.minLevel", 0x10, 4, KILN_CV_INT));
     add_field(I.schema, fld("itemLevelRange.maxLevel", 0x14, 4, KILN_CV_INT));
     for (int i = 0; i < 5; ++i) {
@@ -216,6 +234,7 @@ void world() {
     mem<uint32_t>(WOOD_AT, 10);
     std::memcpy(g_arena + WOOD_AT + 0x30, P1, 16), mem<uint32_t>(WOOD_AT + 0x80, 0x901);  // perk slot 0: perk_a
     mem<float>(SWORD_AT + 0x40, 10.0f), mem<int32_t>(SWORD_AT + 0x44, 10);            // ManaCost 10, its tooltip 10
+    mem<float>(SWORD_AT + 0x48, 10.0f), mem<int32_t>(SWORD_AT + 0x4C, 10);            // StaminaCost 10, its tooltip 10
     Registry& L = g_regs[KILN_CONTENT_LOOT];
     L.kind = KILN_CONTENT_LOOT, L.label = "loot", L.available = true;
     add_field(L.schema, fld("stackSizeMin", 0x00, 4, KILN_CV_INT));
@@ -257,6 +276,7 @@ registry::BaseModel base() {
     registry::BaseModel::Entry w;
     w.id = "game:material_t1_wood_logs";
     w.fields["maxStack"] = registry::Value::integer(10);
+    w.fields["socket"] = registry::Value::boolean(false);
     w.fields["rarity"] = registry::Value::text("common");
     w.fields["perks"] = registry::Value::of_list({registry::Value::text("game:perk_a")});
     items.push_back(w);
@@ -269,6 +289,7 @@ registry::BaseModel base() {
         registry::formulas::armor_read(1, 10, registry::formulas::constants_of({})));
     s.fields["maxStack"] = registry::Value::integer(1);
     s.fields["manaCost"] = registry::Value::number(10);
+    s.fields["staminaCost"] = registry::Value::number(10);
     items.push_back(s);
     registry::BaseModel::Entry st;
     st.id = "game:material_stone";
@@ -332,6 +353,7 @@ void stage(const std::vector<PackFile>& files, const std::vector<registry::Batch
     }
     RegistryLive in;
     in.schema = std::make_shared<const registry::Schema>(sc);
+    in.on_world_thread = [](uint32_t) { return true; };
     in.regmap = g_regmap;
     in.base = base();
     in.mods = mods;
@@ -342,7 +364,7 @@ void stage(const std::vector<PackFile>& files, const std::vector<registry::Batch
     in.nums = {{"items|game:material_t1_wood_logs", WOOD}, {"items|game:sword_t2", SWORD}, {"items|game:material_stone", STONE},
                {"recipes|game:plank_recipe", PLANK}, {"drops|game:dt_wolf", 0x444},
                {"loot|game:material_t1_wood_logs", WOOD}, {"perks|game:perk_a", 0x901}, {"perks|game:perk_b", 0x902}};
-    in.decoded = {"items.perks", "items.manaCost", "items.staminaCost", "recipes.unlock", "loot.stack.max", "items.maxStack", "items.rarity", "items.power", "recipes.duration", "recipes.inputs", "recipes.outputs", "drops.entries"};
+    in.decoded = {"items.socket", "items.perks", "items.manaCost", "items.staminaCost", "recipes.unlock", "loot.stack.max", "items.maxStack", "items.rarity", "items.power", "recipes.duration", "recipes.inputs", "recipes.outputs", "drops.entries"};
     in.report = [](const registry::Result& r, bool) {
         g_last_report = r;
         ++g_reports;
@@ -593,7 +615,6 @@ void every_live_kind() {
 // knowledge requirement, "game" keeps it), loot stack sizes
 void perks_costs_unlock_loot() {
     world();
-    g_registry_type_size = [](const char* q) -> uint32_t { return std::string(q) == "keen::KnowledgeQueryData" ? 12u : 0u; };
     g_files = {{"m/content/a.json", R"({"registry": {"alter": [
         {"registry": "items", "select": {"id": "game:material_t1_wood_logs"}, "field": "perks", "list": {"append": ["game:perk_b"]}},
         {"registry": "items", "select": {"id": "game:sword_t2"}, "field": "manaCost", "op": {"mul": 1.5}},
@@ -708,6 +729,7 @@ void live_transactions() {
     check(registry_live_submit(77, h, ir, &reply, nullptr) == KILN_OK, "submit Kiln fields");
     check(registry_live_commit(77, h, &reply) == KILN_OK && reply.outcome == RegistryLiveOutcome::Applied, "commit the live transaction");
     check(at<uint32_t>(WOOD_AT) == 30, "the live change writes through the real store");
+    registry_live_publish();
     check(registry::report_json(registry_schema(), g_last_report, {}).dump().find("live:") != std::string::npos, "the live owner and transaction are in the report");
     check(registry_live_revert(78, h, &reply) == KILN_ERR_INVALID_ARGUMENT, "another owner cannot revert it");
     check(registry_live_revert(77, h, &reply) == KILN_OK && at<uint32_t>(WOOD_AT) == 10, "revert restores the layer below");

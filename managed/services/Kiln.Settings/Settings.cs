@@ -27,6 +27,7 @@ public enum SettingKind
 [Flags]
 public enum SettingFlags
 {
+    /// <summary>No flag is set.</summary>
     None = 0,
     /// <summary>The server uses a new value without a restart.</summary>
     Live = 0x01,
@@ -46,6 +47,22 @@ public enum SettingFlags
 
 /// <summary>One game setting with its current value. Values are JSON-friendly: <see cref="bool"/>, <see cref="double"/>,
 /// <see cref="long"/> (whole numbers and nanosecond durations) or <see cref="string"/> (option names).</summary>
+/// <param name="Index">The setting's index in <see cref="Settings.All"/>; stable for the life of the process.</param>
+/// <param name="Name">The <c>enshrouded_server.json</c> key, like <c>"enemyDamageFactor"</c>.</param>
+/// <param name="Group">The group it belongs to (Player, Survival, World, Time, Rates, Enemies or Other).</param>
+/// <param name="Kind">How the value is stored, and so the .NET type of <paramref name="Value"/>.</param>
+/// <param name="Flags">What Kiln knows about when a change takes effect.</param>
+/// <param name="Effect">When a change takes effect, in words.</param>
+/// <param name="Value">The current value, as <see cref="Settings.Get"/> returns it.</param>
+/// <param name="Initial">The world's own value: what the settings held when Kiln first read them.
+/// <see cref="Settings.Reset"/> goes back to it.</param>
+/// <param name="Default">The game's "Default" preset value (from the server readme); null when it is not known.</param>
+/// <param name="Min">The lowest value <see cref="Settings.Set"/> accepts without <c>anyValue</c>. For a duration,
+/// nanoseconds; for an enum, the lowest option value.</param>
+/// <param name="Max">The highest value <see cref="Settings.Set"/> accepts without <c>anyValue</c>. For a duration,
+/// nanoseconds; for an enum, the highest option value.</param>
+/// <param name="Options">The option names of an enum setting, in the game's order; empty for the other kinds.</param>
+/// <param name="Offset">The setting's byte offset in the game's settings block (for diagnostics).</param>
 public sealed record SettingInfo(
     int Index,
     string Name,
@@ -61,15 +78,42 @@ public sealed record SettingInfo(
     IReadOnlyList<string> Options,
     int Offset)
 {
+    /// <summary>True when the server uses a new value without a restart (<see cref="SettingFlags.Live"/>).</summary>
     public bool Live => (Flags & SettingFlags.Live) != 0;
+    /// <summary>True when players' games read it too (<see cref="SettingFlags.PlayersRead"/>).</summary>
     public bool PlayersRead => (Flags & SettingFlags.PlayersRead) != 0;
+    /// <summary>True when the value differs from the world's own value (<see cref="SettingFlags.Changed"/>).</summary>
     public bool Changed => (Flags & SettingFlags.Changed) != 0;
 }
 
 /// <summary>The result of <see cref="Settings.Set"/>: the value before and after (after = what the game holds now).</summary>
+/// <param name="Name">The setting (<c>enshrouded_server.json</c> key).</param>
+/// <param name="Before">The value before the change, as <see cref="Settings.Get"/> returns it.</param>
+/// <param name="After">The value the game holds now, as <see cref="Settings.Get"/> returns it.</param>
+/// <param name="Changed">False when the setting already had that value, so nothing changed.</param>
 public sealed record SettingChange(string Name, object Before, object After, bool Changed);
 
 /// <summary>State of kiln.settings and of the game's day/night clock.</summary>
+/// <param name="Ready">True once the live settings were found (capability <c>settings.ready</c>).</param>
+/// <param name="ResendsToPlayers">True when changes are sent to the connected players (the game's send flag is known
+/// on this build).</param>
+/// <param name="VerifiedSingleton">True when the settings block is the world's registered <c>ecs::GameSettings</c>
+/// singleton.</param>
+/// <param name="Count">How many settings there are; 0 until <paramref name="Ready"/>.</param>
+/// <param name="Revision">Goes up by one for every change kiln.settings sees, its own or the game's admin menu
+/// (<see cref="Settings.Revision"/>).</param>
+/// <param name="Sets">How many values were changed through kiln.settings.</param>
+/// <param name="ResendsRequested">How many times kiln.settings asked the game to send the settings to the
+/// players.</param>
+/// <param name="ResendsSent">How many times the game sent the settings to the players.</param>
+/// <param name="Preset">The <c>gameSettingsPreset</c> the server started with (Default, Relaxed, Hard, Survival or
+/// Custom); null when unknown.</param>
+/// <param name="DayDuration">The length of the day the game's day/night clock uses now; null when the clock is not
+/// readable.</param>
+/// <param name="NightDuration">The length of the night the clock uses now; null when the clock is not readable.</param>
+/// <param name="TimeOfDay">The clock's time of day, 0 to 24 hours; null when the clock is not readable.</param>
+/// <param name="DaytimeChanges">Goes up by one each time the clock took new durations (or a time skip).</param>
+/// <param name="ConfigPath">The <c>enshrouded_server.json</c> that <see cref="Settings.Save"/> writes.</param>
 public sealed record SettingsStatus(
     bool Ready,
     bool ResendsToPlayers,

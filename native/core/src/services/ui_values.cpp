@@ -34,9 +34,9 @@ constexpr KilnHandle kHandleMask = (1ull << 48) - 1;
 const char* const kRows[kLists] = {"ui.values.detail",        "ui.values.slot",   "ui.values.held",
                                    "ui.values.hud",           "ui.values.hud",    "ui.values.hud",
                                    "ui.values.tooltip_lines", "ui.slots.inspect", nullptr, "ui.gemforge.inspect",
-                                   "ui.tooltip.values", "ui.slots.click"};
+                                   "ui.tooltip.values", "ui.slots.click", "ui.slots.tint", "ui.chest.buttons"};
 const char* const kListNames[kLists] = {"detail", "slot",  "held",  "health", "stamina",
-                                        "mana",   "lines", "slots", "changes", "gemforge", "values", "clicks"};
+                                        "mana",   "lines", "slots", "changes", "gemforge", "values", "clicks", "tints", "chest"};
 
 // Edit masks per value kind (chapter 05a §5.1).
 constexpr uint32_t kMask[kValueKinds] = {
@@ -363,7 +363,7 @@ const char* row_of(uint32_t list) { return list < kLists ? kRows[list] : nullptr
 
 // ---- registry ----
 KilnResult add(KilnOwner owner, uint32_t list, uint32_t item, void* fn, void* user, KilnUiRegistration* out,
-               uint32_t flags) {
+               uint32_t flags, std::string_view caption) {
     prune_if_moved();
     if (list >= kLists || !fn || !out) return KILN_ERR_INVALID_ARGUMENT;
     if (!env().owner_alive(owner)) return KILN_ERR_REVOKED;
@@ -377,7 +377,20 @@ KilnResult add(KilnOwner owner, uint32_t list, uint32_t item, void* fn, void* us
         out->handle = 0;
         return KILN_OK;
     }
+    // Native chest text is permanent: reject registration/row/duplicate constraints before charging it.
+    // Registry -> text store is the lock order; the text store never calls the provider registry while locked.
+    KilnUiTextId label = 0;
+    if (list == kListChest) {
+        if (g_reg->all[list].size() >= 4) { out->reason = KUI_REGISTRATION_BUDGET; return KILN_OK; }
+        for (const auto& existing : g_reg->all[list]) {
+            std::string_view prior;
+            if (text::bytes(existing->label, &prior) && prior == caption) { out->reason = KUI_REJECTED; return KILN_OK; }
+        }
+    }
     auto p = std::make_shared<Provider>();
+    if (list == kListChest && text::intern(mod, caption, &label) != KILN_OK) {
+        out->reason = KUI_TEXT_BUDGET; return KILN_OK;
+    }
     p->seq = g_reg->next_seq++;
     p->handle = kHandleTag | (p->seq & kHandleMask);
     p->owner = owner;
@@ -385,6 +398,7 @@ KilnResult add(KilnOwner owner, uint32_t list, uint32_t item, void* fn, void* us
     p->list = list;
     p->item = item;
     p->flags = flags;
+    p->label = label;
     p->fn = fn;
     p->user = user;
     g_reg->all[list].push_back(p);

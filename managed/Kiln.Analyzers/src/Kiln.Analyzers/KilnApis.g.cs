@@ -445,6 +445,8 @@ internal static partial class KilnApis
         "M:Kiln.Items.Move(Kiln.EntityId,Kiln.SlotId,Kiln.EntityId,System.Int32,Kiln.MoveOptions,System.Nullable{Kiln.SlotId})", // Items.Move(EntityId, SlotId, EntityId, int, MoveOptions, SlotId?): via Items.SubmitMove(ItemsNative.MoveRequest, string, bool)
         "M:Kiln.Items.MoveAll(Kiln.EntityId,Kiln.EntityId,Kiln.MoveOptions)", // Items.MoveAll(EntityId, EntityId, MoveOptions): via Items.SubmitMove(ItemsNative.MoveRequest, string, bool)
         "M:Kiln.Items.PlanSet(Kiln.EntityId,Kiln.EquipmentSet)", // Items.PlanSet(EntityId, EquipmentSet): Services.RequireTickThread
+        "M:Kiln.Items.PlayerStorages.Of(Kiln.EntityId)", // Items.PlayerStorages.Of(EntityId): via PlayerStorageRuntime.Of(EntityId)
+        "M:Kiln.Items.PlayerStorages.ReturnOrphans(Kiln.EntityId,System.String,Kiln.OrphanTarget)", // Items.PlayerStorages.ReturnOrphans(EntityId, string, OrphanTarget): via PlayerStorageRuntime.ReturnOrphans(EntityId, string, OrphanTarget)
         "M:Kiln.Items.QuickStack(Kiln.EntityId,Kiln.EntityId,Kiln.MoveOptions)", // Items.QuickStack(EntityId, EntityId, MoveOptions): via Items.SubmitMove(ItemsNative.MoveRequest, string, bool)
         "M:Kiln.Items.RarityOf(Kiln.ItemInstanceRef)", // Items.RarityOf(ItemInstanceRef): via Items.GearOf(ItemInstanceRef)
         "M:Kiln.Items.Read(Kiln.EntityId)", // Items.Read(EntityId): via Items.Require(string)
@@ -556,6 +558,12 @@ internal static partial class KilnApis
         "M:Kiln.PlayerRef.Resolve", // PlayerRef.Resolve(): Game.AssertTickThread
         "M:Kiln.PlayerRef.get_IsOnline", // PlayerRef.IsOnline.get: via EntityRef.IsAlive.get
         "M:Kiln.PlayerStates.AimOf(Kiln.EntityId)", // PlayerStates.AimOf(EntityId): Game.AssertTickThread
+        "M:Kiln.PlayerStorage.Activate(Kiln.EntityId,System.Int32)", // PlayerStorage.Activate(EntityId, int): via PlayerStorage.Slot(EntityId, int)
+        "M:Kiln.PlayerStorage.EntityOf(Kiln.EntityId)", // PlayerStorage.EntityOf(EntityId): via PlayerStorageRuntime.HolderOf(PlayerStorage, EntityId, string)
+        "M:Kiln.PlayerStorage.Read(Kiln.EntityId)", // PlayerStorage.Read(EntityId): via PlayerStorage.EntityOf(EntityId)
+        "M:Kiln.PlayerStorage.Retrieve(Kiln.EntityId,System.Int32,System.Int32,Kiln.EntityId)", // PlayerStorage.Retrieve(EntityId, int, int, EntityId): via PlayerStorage.Slot(EntityId, int)
+        "M:Kiln.PlayerStorage.Slot(Kiln.EntityId,System.Int32)", // PlayerStorage.Slot(EntityId, int): via PlayerStorage.Read(EntityId)
+        "M:Kiln.PlayerStorage.Store(Kiln.EntityId,Kiln.SlotId,System.Int32)", // PlayerStorage.Store(EntityId, SlotId, int): via PlayerStorage.EntityOf(EntityId)
         "M:Kiln.Players.Diagnostics.ProbePosition(Kiln.EntityId)", // Players.Diagnostics.ProbePosition(EntityId): Services.RequireTickThread
         "M:Kiln.Players.Diagnostics.RawSlot(System.Int32)", // Players.Diagnostics.RawSlot(int): Services.RequireTickThread
         "M:Kiln.Players.Kick(Kiln.PlayerRef,System.String)", // Players.Kick(PlayerRef, string): Game.AssertTickThread
@@ -629,6 +637,7 @@ internal static partial class KilnApis
         "M:Kiln.ReflectedValue.get_Bytes", // ReflectedValue.Bytes.get: via ReflectedValue.Span()
         "M:Kiln.ReflectedValue.get_Item(System.String)", // ReflectedValue.this[string].get: via ReflectedValue.Span()
         "M:Kiln.ReflectedValue.set_Item(System.String,System.Object)", // ReflectedValue.this[string].set: via ReflectedValue.Span()
+        "M:Kiln.Registry.RegistryChange.Revert", // RegistryChange.Revert(): Game.AssertTickThread
         "M:Kiln.Replication.Filter``1(Kiln.PeerSelector,Kiln.ComponentFilter{``0},Kiln.FilterOptions)", // Replication.Filter<TComponent>(PeerSelector, ComponentFilter<TComponent>, FilterOptions?): Services.RequireTickThread
         "M:Kiln.Replication.Inject(Kiln.NetPeer,Kiln.GameChannel,System.ReadOnlySpan{System.Byte})", // Replication.Inject(NetPeer, GameChannel, ReadOnlySpan<byte>): Services.RequireTickThread
         "M:Kiln.Replication.RemapItems(Kiln.PeerSelector)", // Replication.RemapItems(PeerSelector): Services.RequireTickThread
@@ -931,6 +940,8 @@ internal static partial class KilnApis
         "P:Kiln.PlayerAnimStates.Available=kiln.playeranim", // T != null: Services.Get("kiln.playeranim")
         "P:Kiln.PlayerCharacters.Available=kiln.characters", // T != null: Services.Get("kiln.characters")
         "P:Kiln.PlayerStates.Available=kiln.playerstate", // returns false first when the table of kiln.playerstate is null
+        "P:Kiln.PlayerStorage.Available=items.storage", // Is("items.storage")
+        "P:Kiln.PlayerStorage.Client.Available=items.storage.client", // Is("items.storage.client")
         "P:Kiln.Players.Available=kiln.players", // T != null: Services.Get("kiln.players")
         "P:Kiln.Progression.Available=kiln.progression", // T != null: Services.Get("kiln.progression")
         "P:Kiln.ReflectedResources.Available=assets.resources,kiln.assets,kiln.types", // via Kiln.GameTypes.Available; via Kiln.ResourceStore.Available

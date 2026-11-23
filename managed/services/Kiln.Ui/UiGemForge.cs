@@ -6,16 +6,32 @@ namespace Kiln;
 
 /// <summary>One returned GEMS row. SourceRow is the selection identity; DisplayedGem names the actual gem source slot.
 /// WeaponCarrier is present for a gem already socketed in a weapon. Client identities never authorize server actions.</summary>
+/// <param name="Index">The row's index in the list the game returned.</param>
+/// <param name="SourceRow">The row as the selection key sees it.</param>
+/// <param name="DisplayedGem">The gem the row displays (for a socketed gem, the socket's gem).</param>
+/// <param name="WeaponCarrier">The weapon the gem is socketed in; null for a gem that is not socketed.</param>
 public sealed record GemForgeCandidate(uint Index, UiItemView SourceRow, UiItemView DisplayedGem, UiItemView? WeaponCarrier);
 
 /// <summary>The game's returned GEMS list for the local player's inventories, including offscreen rows. Selection is
 /// the context at grid entry. Mode is the game's byte (0..4). Generation changes when the list or context changes.
 /// CaptureMs uses Environment.TickCount64's clock. Eligibility and native disabled state are unknown.</summary>
+/// <param name="Session">The client session of the capture.</param>
+/// <param name="Frame">The game UI frame of the capture.</param>
+/// <param name="CaptureMs">When it was captured, on the <c>Environment.TickCount64</c> clock.</param>
+/// <param name="Generation">Changes when the list or its context changes.</param>
+/// <param name="LocalPlayer">The local player's entity.</param>
+/// <param name="Mode">The game's mode byte (0 to 4).</param>
+/// <param name="SelectedRow">The slot of the selected row; null when none is selected.</param>
+/// <param name="SelectedWeapon">The selected weapon; null when none is selected.</param>
+/// <param name="Candidates">The rows of the GEMS list, including offscreen ones.</param>
 public sealed record GemForgeCandidatesSnapshot(ulong Session, ulong Frame, ulong CaptureMs, ulong Generation,
     EntityId LocalPlayer, byte Mode, SlotId? SelectedRow, UiItemView? SelectedWeapon, IReadOnlyList<GemForgeCandidate> Candidates);
 
 /// <summary>Unavailable when the GEMS grid did not draw, changed during capture, expired, or could not be copied.
 /// No partial list is returned. This observes the game's returned list, not an authoritative inventory enumeration.</summary>
+/// <param name="Ok">True when a list was captured.</param>
+/// <param name="Reason">Why not; null when <see cref="Ok"/>.</param>
+/// <param name="Snapshot">The captured list; null when not <see cref="Ok"/>.</param>
 public sealed record GemForgeCandidatesResult(bool Ok, string? Reason, GemForgeCandidatesSnapshot? Snapshot) : IKilnResult;
 
 public static partial class Ui

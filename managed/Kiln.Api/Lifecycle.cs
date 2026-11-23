@@ -25,6 +25,7 @@ public static class Lifecycle
 {
     private static volatile int _phase;
 
+    /// <summary>Where the server is in its life now.</summary>
     public static ServerPhase Phase
     {
         get => (ServerPhase)_phase;
@@ -92,6 +93,7 @@ public sealed class ServerStartedEvent : KilnEvent
         Source = source;
     }
 
+    /// <summary>The server-world step it fired on.</summary>
     public ulong Step { get; }
 
     /// <summary>How Kiln knew: <c>game-log</c> (the Run switch was seen), <c>first-step</c> (no log mirror),
@@ -114,6 +116,7 @@ public sealed class ServerStoppingEvent : KilnEvent
         Reason = reason;
     }
 
+    /// <summary>The server-world step it fired on.</summary>
     public ulong Step { get; }
 
     /// <summary>What triggered it: <c>SIGINT</c> (console Ctrl-C), <c>SIGTERM</c>, <c>SIGHUP</c>, <c>SIGQUIT</c>,
@@ -134,6 +137,7 @@ public sealed class ModReloadedEvent : KilnEvent
         Cascade = cascade;
     }
 
+    /// <summary>The reloaded mod's id.</summary>
     public string Id { get; }
 
     /// <summary>The version now on disk (it may have changed).</summary>
@@ -158,7 +162,9 @@ public sealed class ModDisabledEvent : KilnEvent
         CrashReport = crashReport;
     }
 
+    /// <summary>The disabled mod's id.</summary>
     public string Id { get; }
+    /// <summary>The exceptions the mod threw since it was loaded.</summary>
     public int Faults { get; }
 
     /// <summary>The last exception's message.</summary>

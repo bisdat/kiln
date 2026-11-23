@@ -392,3 +392,17 @@ Unsubscribe through the existing kiln.ui.values handle registry. Capability: `ui
 No existing table grows. Size-aware `copy_slots` still supports both strides through the first
 output row's size. `Ui.Values.SubscribeSlots` prefers the negotiated table and expands frozen
 112-byte callbacks when running on an older core. TestKit models both callback layouts.
+
+### Native slot backgrounds (since 0.2.17)
+| Capability | API | Side / thread | Native table |
+|---|---|---|---|
+| `ui.slots.tint` | `Ui.Inventory.TintWhen` | Client; register/dispose any thread, rule game UI thread | `kiln.ui.tints` v1 (24 B) |
+Native background colours only; no overlay, gameplay mutation or network message. Rules receive owned item
+view values, never game addresses. See [UI](../ui.md#native-inventory-background-colours-since-0217).
+
+### Native storage-chest row (since 0.2.17)
+| Capability | API | Side / thread | Native table |
+|---|---|---|---|
+| `ui.chest.buttons` | `Ui.Inventory.AddChestButton` | Client; register/dispose any thread, activation game UI thread after the chest builder | `kiln.ui.chest` v1 (24 B) |
+A native entry inside the game's action row; four total, unique captions, current container identity. No
+vanilla action id is reused, no gameplay write, and no overlay is required. Validate client requests on the server.

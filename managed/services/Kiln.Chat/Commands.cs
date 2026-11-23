@@ -19,6 +19,7 @@ public enum CommandPermission
     Console = 2,
 }
 
+/// <summary>What kind of source runs a command.</summary>
 public enum CommandSourceKind
 {
     /// <summary>Server-side code or the operator (always admin).</summary>
@@ -46,13 +47,16 @@ public sealed class CommandSource
 
     private ulong _steamId;
 
+    /// <summary>What runs the command: the console, a player or a remote tool.</summary>
     public CommandSourceKind Kind { get; }
 
     /// <summary>The player (for <see cref="CommandSourceKind.Player"/>), else none.</summary>
     public EntityId Player { get; }
 
+    /// <summary>The source's name: <c>console</c>, the player's name, or the remote tool's name.</summary>
     public string Name { get; }
 
+    /// <summary>True when a player typed the command (<see cref="CommandSourceKind.Player"/>).</summary>
     public bool IsPlayer => Kind == CommandSourceKind.Player;
 
     /// <summary>The console of a game that hosts its own world, acting as that game's local player: <see cref="Player"/>
@@ -123,11 +127,13 @@ public sealed class CommandSource
         },
     };
 
+    /// <summary>Converts a source to its <see cref="Subject"/> for Kiln.Permissions calls.</summary>
     public static implicit operator PermissionSubject(CommandSource source) => source.Subject;
 
     /// <summary>Whether the source has a permission node (<see cref="Permissions.Has(PermissionSubject, string)"/>).</summary>
     public bool Has(string node) => Permissions.Has(Subject, node);
 
+    /// <summary>A short description for logs: kind and name, with the entity or Steam id for a player.</summary>
     public override string ToString() => Kind == CommandSourceKind.Player
         ? IsHostConsole ? $"console as {Name} (entity {Player})" : SteamOnly ? $"{Name} (steam {_steamId})" : $"{Name} (entity {Player})"
         : $"{Kind.ToString().ToLowerInvariant()} {Name}";
@@ -148,12 +154,15 @@ public sealed class CommandInfo
         PermissionNode = $"{owner}.command.{name}";
     }
 
+    /// <summary>The command's name, without the prefix.</summary>
     public string Name { get; }
+    /// <summary>Other names that run the command.</summary>
     public IReadOnlyList<string> Aliases { get; }
 
     /// <summary>Arguments, e.g. "&lt;hours&gt; [mode]" (typed commands: of the first usage line).</summary>
     public string Usage { get; }
 
+    /// <summary>One line of help.</summary>
     public string Description { get; }
 
     /// <summary>The default level of <see cref="PermissionNode"/>.</summary>
@@ -171,6 +180,7 @@ public sealed class CommandInfo
     /// <summary>Every way to run it, without the prefix ("heal &lt;target&gt; [amount]").</summary>
     public IReadOnlyList<string> UsageLines { get; internal init; } = [];
 
+    /// <summary>True when the command was registered as a tree of nodes (<see cref="Tree"/> is not null).</summary>
     public bool IsTyped => Tree is not null;
 
     /// <summary>"/name usage".</summary>
@@ -195,6 +205,7 @@ public sealed class CommandInfo
         return o;
     }
 
+    /// <summary>The command's <see cref="Syntax"/>.</summary>
     public override string ToString() => Syntax;
 }
 
@@ -202,6 +213,8 @@ public sealed class CommandInfo
 /// source.</summary>
 public sealed class CommandException(string message) : Exception(message);
 
+/// <summary>Runs a command. Throw a <see cref="CommandException"/> (or call <see cref="CommandContext.Fail"/>) to end with an error message for the source.</summary>
+/// <param name="context">The run: who ran it, its arguments and how to reply.</param>
 public delegate void CommandHandler(CommandContext context);
 
 /// <summary>One run of a command.</summary>
@@ -223,7 +236,9 @@ public sealed class CommandContext
         Args = tokens.Skip(1).Select(t => t.Text).ToArray();
     }
 
+    /// <summary>Who runs the command.</summary>
     public CommandSource Source { get; }
+    /// <summary>The command that runs.</summary>
     public CommandInfo Command { get; }
 
     /// <summary>The name as typed (may be an alias).</summary>
@@ -232,6 +247,7 @@ public sealed class CommandContext
     /// <summary>Arguments after the name, unquoted.</summary>
     public IReadOnlyList<string> Args { get; }
 
+    /// <summary>How many arguments were given.</summary>
     public int Count => Args.Count;
 
     /// <summary>Everything after the name, as typed.</summary>
@@ -264,6 +280,8 @@ public sealed class CommandContext
     public T Get<T>(string name) =>
         TryGet<T>(name, out var v) ? v : throw new CommandException($"missing <{name}>; usage: {Commands.Prefix}{string.Join($" | {Commands.Prefix}", Command.UsageLines.Take(3))}");
 
+    /// <summary>Typed commands: reads the value of argument <paramref name="name"/> as <typeparamref name="T"/> (see <see cref="Get{T}"/>).</summary>
+    /// <returns>True when the argument was given and converts to <typeparamref name="T"/>; otherwise false and <paramref name="value"/> is the default.</returns>
     public bool TryGet<T>(string name, out T value)
     {
         if (_values.TryGetValue(name, out var raw) && Convert(raw, typeof(T)) is T t)
@@ -275,6 +293,7 @@ public sealed class CommandContext
         return false;
     }
 
+    /// <summary>Typed commands: the value of argument <paramref name="name"/>, or <paramref name="fallback"/> when it was not given or does not convert to <typeparamref name="T"/>.</summary>
     public T GetOrDefault<T>(string name, T fallback) => TryGet<T>(name, out var v) ? v : fallback;
 
     internal static object? Convert(object? value, Type to)
@@ -302,14 +321,19 @@ public sealed class CommandContext
     /// <summary>Argument <paramref name="index"/>; a usage error when missing.</summary>
     public string Arg(int index) => index < Args.Count ? Args[index] : throw Usage($"missing argument {index + 1}");
 
+    /// <summary>Argument <paramref name="index"/> (0-based, unquoted), or <paramref name="fallback"/> when it was not given.</summary>
     public string? ArgOrDefault(int index, string? fallback = null) => index < Args.Count ? Args[index] : fallback;
 
+    /// <summary>Argument <paramref name="index"/> as a whole number.</summary>
+    /// <exception cref="CommandException">The argument is missing or not a whole number (a usage error).</exception>
     public int Int(int index)
     {
         var s = Arg(index);
         return int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var v) ? v : throw Usage($"'{s}' is not a whole number");
     }
 
+    /// <summary>Argument <paramref name="index"/> as a number (invariant culture, <c>1.5</c>).</summary>
+    /// <exception cref="CommandException">The argument is missing or not a finite number (a usage error).</exception>
     public double Double(int index)
     {
         var s = Arg(index);
@@ -318,6 +342,8 @@ public sealed class CommandContext
             : throw Usage($"'{s}' is not a number");
     }
 
+    /// <summary>Argument <paramref name="index"/> as on or off: <c>1</c>, <c>true</c>, <c>on</c>, <c>yes</c> or <c>0</c>, <c>false</c>, <c>off</c>, <c>no</c>.</summary>
+    /// <exception cref="CommandException">The argument is missing or none of those words (a usage error).</exception>
     public bool Bool(int index)
     {
         var s = Arg(index).ToLowerInvariant();
@@ -422,12 +448,14 @@ public sealed class CommandResult : IKilnResult
     /// <summary>The line did not match the command's arguments (typed commands).</summary>
     public bool ParseError { get; internal init; }
 
+    /// <summary>Why the command failed, or null when it ran without error.</summary>
     public string? Error { get; }
 
     /// <summary>Why the command did not run to its end (<see cref="Error"/>: unknown, denied, canceled, a bad
     /// argument, or the handler's own failure); null when <see cref="Ok"/>. Since 0.2.0-dev.27.</summary>
     public string? Reason => Ok ? null : Error;
 
+    /// <summary>The lines the command sent back.</summary>
     public IReadOnlyList<string> Output { get; }
     internal bool KeepLine { get; }
 
@@ -438,6 +466,7 @@ public sealed class CommandResult : IKilnResult
     /// <summary>Output lines, then the error, one per line.</summary>
     public string Text => string.Join("\n", Error is null ? Output : Output.Append(Error));
 
+    /// <summary>A short description for logs: <c>ok</c> or <c>failed</c>, then the output and error.</summary>
     public override string ToString() => $"{(Ok ? "ok" : "failed")}: {Text}";
 }
 
@@ -453,8 +482,10 @@ public sealed class CommandRegistration : IDisposable
         _release = release;
     }
 
+    /// <summary>The command this registration made.</summary>
     public CommandInfo Info { get; }
 
+    /// <summary>Unregisters the command; for a shared command it lets go of it instead.</summary>
     public void Dispose()
     {
         if (_release is not null) _release();
@@ -789,6 +820,7 @@ public static class Commands
         }
     }
 
+    /// <summary>The command registered under <paramref name="name"/> or one of its aliases (case-insensitive); null when there is none.</summary>
     public static CommandInfo? Find(string name)
     {
         lock (Lock) return ByName.TryGetValue(name, out var e) ? e.Info : null;

@@ -57,6 +57,10 @@ public sealed record GuardOptions
 }
 
 /// <summary>One guard order Kiln keeps (<see cref="Creatures.GuardOrders"/>).</summary>
+/// <param name="Guard">The creature that guards.</param>
+/// <param name="Target">The entity it guards.</param>
+/// <param name="Options">The options the order was given with.</param>
+/// <param name="Owner">The owner of the order: the id of the mod that gave it, or "kiln.creatures" when no mod did.</param>
 public sealed record GuardOrder(EntityId Guard, EntityId Target, GuardOptions Options, string Owner)
 {
     /// <summary>Times the order was sent again because the game had dropped it.</summary>

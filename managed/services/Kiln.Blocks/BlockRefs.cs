@@ -30,6 +30,7 @@ public abstract class BlockHandle
     /// <summary>The block's type, for what names a block of the wrong kind.</summary>
     internal abstract Type BlockType { get; }
 
+    /// <summary>The block as <c>mod:name</c>: the form a name takes to reach another mod's block.</summary>
     public override string ToString() => $"{Mod}:{Name}";
 }
 
@@ -49,10 +50,15 @@ public class BlockHandle<T> : BlockHandle where T : class, IBlock
 public sealed class EffectRef : IBlockRef<EffectBlock>
 {
     internal EffectRef(EffectBlock? inline, string? name) { Inline = inline; Name = name; }
+    /// <summary>The effect itself, when the reference was made from a block or a handle. Null when it is a name only.</summary>
     public EffectBlock? Inline { get; }
+    /// <summary>The effect's name: <c>mod:name</c> when made from a handle. Null when it was written in place.</summary>
     public string? Name { get; }
+    /// <summary>An effect written in place.</summary>
     public static implicit operator EffectRef(EffectBlock block) => new(block, null);
+    /// <summary>The effect that <see cref="Blocks.Define{T}"/> returned: the reference keeps the block and its <c>mod:name</c>.</summary>
     public static implicit operator EffectRef(BlockHandle<EffectBlock> handle) => new(handle.Block, handle.ToString());
+    /// <summary>An effect by name: a block of this mod, or <c>"other-mod:name"</c> for another mod's.</summary>
     public static implicit operator EffectRef(string name) => new(null, name);
     static IBlockRef<EffectBlock> IBlockRef<EffectBlock>.Make(EffectBlock? inline, string? name) => new EffectRef(inline, name);
 }
@@ -62,27 +68,40 @@ public sealed class EffectRef : IBlockRef<EffectBlock>
 public sealed class StatusRef : IBlockRef<StatusBlock>
 {
     internal StatusRef(StatusBlock? inline, string? name) { Inline = inline; Name = name; }
+    /// <summary>The status itself, when the reference was made from a block or a handle. Null when it is a name only.</summary>
     public StatusBlock? Inline { get; }
+    /// <summary>The status's name: <c>mod:name</c> when made from a handle. Null when it was written in place.</summary>
     public string? Name { get; }
+    /// <summary>A status written in place.</summary>
     public static implicit operator StatusRef(StatusBlock block) => new(block, null);
+    /// <summary>The status that <see cref="Blocks.Define{T}"/> returned: the reference keeps the block and its <c>mod:name</c>.</summary>
     public static implicit operator StatusRef(BlockHandle<StatusBlock> handle) => new(handle.Block, handle.ToString());
+    /// <summary>A status by name: a block of this mod, or <c>"other-mod:name"</c> for another mod's. A <c>GameBuffs</c> constant is also a name.</summary>
     public static implicit operator StatusRef(string name) => new(null, name);
     static IBlockRef<StatusBlock> IBlockRef<StatusBlock>.Make(StatusBlock? inline, string? name) => new StatusRef(inline, name);
 }
 
 /// <summary>An item a recipe needs: a <c>GameItems</c> constant, or an item this mod defines (a handle or its block name).</summary>
+/// <param name="Value">The item as written: a <c>GameItems</c> constant, an item of this mod by its block name, or (made from a handle) the item's debug name in the game.</param>
 [JsonConverter(typeof(ItemRefConverter))]
 public readonly record struct ItemRef(string Value)
 {
+    /// <summary>An item by name: a <c>GameItems</c> constant, or the block name of an item this mod defines.</summary>
     public static implicit operator ItemRef(string value) => new(value);
+    /// <summary>The item that <see cref="Blocks.Define{T}"/> returned, as the game's debug name (<see cref="BlockHandle.GameName"/>).</summary>
     public static implicit operator ItemRef(BlockHandle handle) => new(handle.GameName);
+    /// <summary>The item as written, the same as <see cref="Value"/>.</summary>
     public override string ToString() => Value;
 }
 
+/// <summary>A reference to a block of type <typeparamref name="T"/>: the block written in place, a handle, or a name (in JSON, a string).</summary>
 public interface IBlockRef<T> where T : class
 {
+    /// <summary>The block itself, when the reference holds one. Null when it is a name only.</summary>
     T? Inline { get; }
+    /// <summary>The block's name, when the reference has one. Null when it was written in place.</summary>
     string? Name { get; }
+    /// <summary>Makes a reference from what was read: an inline block, or a name.</summary>
     static abstract IBlockRef<T> Make(T? inline, string? name);
 }
 
@@ -154,17 +173,21 @@ internal sealed class PremadeConverter<T> : JsonConverter<T> where T : class, IP
 
 /// <summary>A reference a block kind's record makes to another block, by name: <c>name</c> (the consumer mod's) or
 /// <c>mod:name</c>. <see cref="BlockCompileContext.Resolve{T}"/> gives what it stands for.</summary>
+/// <param name="Value">The name: the consumer mod's block <c>name</c>, or <c>mod:name</c> for another mod's.</param>
 public readonly record struct BlockRef<T>(string Value) where T : class, IBlock;
 
 /// <summary>What a <see cref="BlockRef{T}"/> stands for: the identity of the block, copied. Not the block.</summary>
 public sealed record ResolvedBlock<T> where T : class, IBlock
 {
+    /// <summary>The id of the mod that defined the block.</summary>
     public required string ModId { get; init; }
+    /// <summary>The block's name in that mod.</summary>
     public required string Name { get; init; }
     /// <summary>The GUID of what the block became in the game.</summary>
     public required Guid Guid { get; init; }
     /// <summary>The game's id of it (FNV-1a of the GUID).</summary>
     public required uint Id { get; init; }
+    /// <summary>The debug name the block has in the game: what <c>Content.Items.Get</c>, <c>Items.Give</c> and data packs take.</summary>
     public required string GameName { get; init; }
     /// <summary>The block's kind: <c>kiln:item</c> for a built-in, <c>provider-mod:kind</c> for an external one.</summary>
     public required string KindId { get; init; }

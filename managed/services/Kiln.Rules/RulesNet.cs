@@ -243,10 +243,11 @@ internal static class RulesStartup
         {
             Creative.RegisterCommand();
             NoClip.RegisterCommand();
+            UnlimitedFlight.RegisterCommand();
         }
         catch (Exception e) when (e is FileNotFoundException or FileLoadException or TypeLoadException or InvalidOperationException)
         {
-            RulesRuntime.Log(LogLevel.Warn, $"/creative and /noclip are not available: {e.Message}");
+            RulesRuntime.Log(LogLevel.Warn, $"/creative, /noclip and /unlimitedflight are not available: {e.Message}");
         }
     }
 }
