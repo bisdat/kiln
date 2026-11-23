@@ -32,9 +32,14 @@ Later commits win, relative operations compose, and `exclusive`/`yield` retain t
 points. Pass names do not reorder separate transactions: A commits a Final set to 70, then B commits an Alter set to 80;
 the result is 80, and reverting B restores 70. The copied base is prepared once and later turns use touched-entry overlays,
 not a full-base reconstruction for each retained handle. Registry layers remain above old packs and below `Content.*` code. `read` returns actual live values through
-the mapping, including lists and formulas, without creating a layer; pre-world/restart reads use the kept stage view.
-The stage reads all stable fields once for these later entry points. An unmapped or unproven field is refused, never
-inferred from a similar game field.
+the mapping, including lists and formulas, without creating a layer. Restart reads use the kept start-time composition;
+pre-world reads include composed pending process changes. A warm start with no registry user does not decode the archive
+(the per-build id ledger is still written when missing). The first registry begin/read/selector prepares the full stable
+model once; ready/status/schema inspection alone does not. Full models are cached and validated against resource bytes,
+type listings, decoder/Kiln versions and the regmap. Legacy boot writers' affected resource bytes are frozen before their
+writes, and their copied documents are evaluated once during deferred preparation, preserving both relative values and
+writer attribution. First-use decoding/preparation can cost more than a later commit; use ModLoad when that work should
+happen before a world. An unmapped or unproven field is refused, never inferred from a similar game field.
 
 ### Entry points and worlds
 

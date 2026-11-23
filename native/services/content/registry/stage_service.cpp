@@ -132,6 +132,7 @@ Env make_env() {
     e.writer = writer_of();
     e.source = [](std::string* why) -> std::unique_ptr<model::Source> {
         kiln::boot_view::LiveView& v = live_view();
+        v.restart(); // each owned source is a new read generation; the prior stage/ledger source may be released
         if (!v.ready(why)) return nullptr;
         return model::live_source(v, [](uint32_t type, std::vector<KilnAssetKey>* out) {
             const KilnAssetsApi* a = assets();
@@ -429,7 +430,15 @@ void bind_service() {
         return;  // never retain callbacks into mods without their owner's cleanup
     }
     static const boothook::Hooks hooks{
-        [](const std::vector<boothook::OldDoc>& docs) { return runner().run([&docs](model::Model& m) { return boothook::old_writes(docs, m); }); },
+        [](const std::vector<boothook::OldDoc>& docs) {
+            std::vector<std::pair<KilnAssetKey, std::string>> freeze;
+            for (const auto& doc : docs) freeze.emplace_back(doc.res, doc.type);
+            // An unused registry defers decoding, but old writers must still compose over their pre-write bytes.
+            // Retain owned documents, never the callback's stack reference.
+            Runner::OldWritesFn old;
+            if (!docs.empty()) old = [docs](model::Model& model) { return boothook::old_writes(docs, model); };
+            return runner().run(old, freeze);
+        },
         &boothook::write, [](const std::vector<BootOutcome>& o) { runner().finish(o); }};
     boothook::set(&hooks);
     // the live back-end (registry_live.cpp, S9): now and worldLoad fields as store layers at each world load
@@ -450,6 +459,7 @@ void bind_service() {
         in.check = h.check;
         in.report = h.report;
         in.changed = h.changed;
+        in.prepare = h.prepare;
         in.on_world_thread = [](uint32_t kind) { return g_api && g_api->on_world_thread && g_api->on_world_thread(kind); };
         registry_live_install(std::move(in));
     });

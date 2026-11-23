@@ -260,6 +260,109 @@ void worldload_ready_event(const std::string& dir) {
     check(r.read(2, "items", "game:plank", "maxStack", &value) == KILN_OK && value == "42", "a late refresh updates the resolved view");
     check(r.generation() == generation && seen.size() == 2, "a late refresh keeps the generation and sends no ready event");
 }
+Files warm_id_table(const std::string& dir) {
+    TreeView view = world(); Files files;
+    stage::Runner runner(env_of(&view, &files, dir, &no_sections));
+    runner.run({}); runner.finish({});
+    return files;
+}
+void unused_live_base_is_lazy(const std::string& dir) {
+    TreeView view = world(); Files files = warm_id_table(dir);
+    auto env = env_of(&view, &files, dir, &no_sections);
+    env.prepare_live = true;
+    auto source = env.source; int opens = 0;
+    env.source = [&](std::string* why) { ++opens; return source(why); };
+    stage::Runner runner(std::move(env)); stage::LiveHandoff live;
+    runner.set_live([&](const stage::LiveHandoff& handoff) { live = handoff; });
+    runner.run({}); runner.finish({});
+    check(opens == 0 && live.base->registries.empty() && live.decoded->empty(),
+          "without registry users and with the build's id table, startup neither opens nor fully decodes the archive");
+    check(bool(live.prepare), "an unused registry still supports explicit first-use preparation");
+    stage::LiveData a, b; std::string whyA, whyB; bool okA = false, okB = false;
+    std::thread one([&] { okA = live.prepare(&a, &whyA); });
+    std::thread two([&] { okB = live.prepare(&b, &whyB); });
+    one.join(); two.join();
+    check(okA && okB && opens == 1 && !a.ids.empty() && a.ids == b.ids,
+          "concurrent first-use requests share one serialized archive preparation");
+    check(a.decoded.count("items.maxStack") && a.base.registries.at("items").size() == 2,
+          "the lazy copied model includes stable fields and ids for native/manual users");
+    check(!a.base.raw, "the detached stable live snapshot retains no raw resolver into a destroyed model");
+}
+void full_live_base_uses_cache(const std::string& dir) {
+    TreeView view = world(); Files files;
+    auto env = env_of(&view, &files, dir, &items_only); env.prepare_live = true;
+    { stage::Runner runner(std::move(env)); runner.run({}); runner.finish({}); }
+    bool cached = false;
+    for (const auto& [path, text] : files.data) cached |= path.rfind("cache/", 0) == 0;
+    check(cached, "a full stable-field model is cached, not decoded on every registry start");
+    TreeView again = world(); Files second; second.data = files.data;
+    auto next = env_of(&again, &second, dir, &items_only); next.prepare_live = true;
+    { stage::Runner runner(std::move(next)); runner.run({}); runner.finish({}); }
+    bool hit = false;
+    for (const auto& line : second.log) hit |= line.find("the cache holds") != std::string::npos;
+    check(hit, "a second full decode with matching resources/listings uses the cache");
+    TreeView changed = world(); changed.values[g(1)]["maxStackSize"] = 41;
+    Files third; third.data = files.data;
+    auto last = env_of(&changed, &third, dir, &items_only); last.prepare_live = true;
+    stage::Runner runner(std::move(last)); runner.run({}); runner.finish({});
+    std::string value;
+    check(runner.read(0, "items", "game:material_t1_wood_logs", "maxStack", &value) == KILN_OK && value == "41",
+          "changed resource bytes invalidate the full-model cache");
+}
+void lazy_base_waits_for_live_handoff(const std::string& dir) {
+    TreeView view = world(); Files files = warm_id_table(dir);
+    auto env = env_of(&view, &files, dir, &no_sections); env.prepare_live = true;
+    stage::Runner runner(std::move(env)); KilnResult during = KILN_OK;
+    runner.set_live([&](const stage::LiveHandoff& handoff) {
+        std::string value;
+        std::thread reader([&] { during = runner.read(0, "items", "game:material_t1_wood_logs", "maxStack", &value); });
+        reader.join();
+        check(during == KILN_ERR_UNAVAILABLE && handoff.base->registries.empty(),
+              "a polling reader cannot mutate the base while the live installer copies its handoff");
+    });
+    runner.run({}); runner.finish({});
+    std::string value;
+    check(runner.read(0, "items", "game:material_t1_wood_logs", "maxStack", &value) == KILN_OK && value == "10",
+          "a reader can prepare the base after installation completes");
+}
+void full_live_cache_keeps_boot_targets(const std::string& dir) {
+    TreeView first = world(); Files files;
+    auto env = env_of(&first, &files, dir, &sections); env.prepare_live = true;
+    { stage::Runner runner(std::move(env)); auto boot = runner.run({});
+      check(!boot.empty(), "a fresh full decode locates the restart-field resource"); runner.finish({}); }
+    TreeView second = world(); Files again; again.data = files.data;
+    auto next = env_of(&second, &again, dir, &sections); next.prepare_live = true;
+    stage::Runner runner(std::move(next)); auto boot = runner.run({});
+    check(!boot.empty() && !boot[0].fields.empty() && boot[0].fields[0].field.registry == "balance",
+          "a full-model cache hit still locates restart-field resources for the boot writer");
+    runner.finish({});
+}
+void lazy_base_keeps_pre_patch_resource_bytes(const std::string& dir) {
+    TreeView view = world(); Files files = warm_id_table(dir);
+    auto env = env_of(&view, &files, dir, &no_sections); env.prepare_live = true;
+    env.write_data = {}; // this fixture mutates the view's backing after the frozen copy; do not persist its synthetic digest
+    stage::Runner runner(std::move(env)); stage::LiveHandoff live;
+    runner.set_live([&](const stage::LiveHandoff& handoff) { live = handoff; });
+    auto calls = std::make_shared<int>(0);
+    stage::Runner::OldWritesFn old = [calls](model::Model&) {
+        ++*calls;
+        OldWrite write; write.kind = WriterKind::OldPatch; write.mod = "old"; write.who = "old/stack";
+        write.field = {"items", "game:material_t1_wood_logs", "maxStack"}; write.op.mul = 2;
+        return std::vector<OldWrite>{write};
+    };
+    runner.run(old, {{key_of(g(1), "keen::ItemInfo"), "keen::ItemInfo"}}); runner.finish({});
+    check(*calls == 0 && live.base->registries.empty(), "unused startup freezes only old writers' resources without a full model decode");
+    view.values[g(1)]["maxStackSize"] = 20; // the legacy boot writer now patches its resource
+    stage::LiveData data; std::string why;
+    check(live.prepare && live.prepare(&data, &why), "a first use can prepare the kept pre-patch source");
+    check(*calls == 1 && data.result.fields.at({"items", "game:material_t1_wood_logs", "maxStack"}).result == Value::integer(20),
+          "the legacy multiplier is composed and attributed once, not twice over its already-patched resource");
+    std::string value;
+    check(runner.read(0, "items", "game:material_t1_wood_logs", "maxStack", &value) == KILN_OK && value == "10",
+          "the lazy base still holds the pre-patch value");
+    check(runner.read(2, "items", "game:material_t1_wood_logs", "maxStack", &value) == KILN_OK && value == "20",
+          "the resolved lazy view includes the named legacy writer");
+}
 void transaction_snapshot_is_not_worldload(const std::string& dir) {
     TreeView view = world();
     Files files;
@@ -648,6 +751,11 @@ int main(int argc, char** argv) {
         {"R3 submit_unbound_owner", [&] { submit_unbound_owner(dir); }},
         {"R4 worldload_ready_event", [&] { worldload_ready_event(dir); }},
         {"P2 transaction_snapshot_is_not_worldload", [&] { transaction_snapshot_is_not_worldload(dir); }},
+        {"P2 unused_live_base_is_lazy", [&] { unused_live_base_is_lazy(dir); }},
+        {"P2 full_live_base_uses_cache", [&] { full_live_base_uses_cache(dir); }},
+        {"P2 full_live_cache_keeps_boot_targets", [&] { full_live_cache_keeps_boot_targets(dir); }},
+        {"P2 lazy_base_waits_for_live_handoff", [&] { lazy_base_waits_for_live_handoff(dir); }},
+        {"P2 lazy_base_keeps_pre_patch_resource_bytes", [&] { lazy_base_keeps_pre_patch_resource_bytes(dir); }},
         {"R6 handoff_keeps_outside_refusals", [&] { handoff_keeps_outside_refusals(dir); }},
         {"R5 cache_misses_added_resource", [&] { cache_misses_added_resource(dir); }},
         {"P2 revoked_queue", [&] { revoked_queue(dir); }},

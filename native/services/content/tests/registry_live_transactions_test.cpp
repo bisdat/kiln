@@ -5,6 +5,7 @@
 #undef main
 #include "services/kiln_registry_live.h"
 #include <chrono>
+#include "../registry/stage.h"
 
 namespace {
 std::string doc(const std::string& mod, const std::string& edits) {
@@ -271,6 +272,53 @@ void retained_changes_have_bounded_commit_cost() {
           "the bounded-cost commit preserves all 64 ordered relative edits");
     check(ms < 1000, "64 retained scalar changes over 20000 entries commit within the 1000 ms sanitizer-host budget");
 }
+registry::stage::LiveData lazy_alias_data() {
+    registry::stage::LiveData data;
+    auto entry = base().registries.at("items").front(); entry.id = "game:wood_alias";
+    data.base.registries["items"].push_back(std::move(entry));
+    data.ids = {{"items|game:wood_alias", guid_text(G1)}};
+    data.nums = {{"items|game:wood_alias", WOOD}};
+    data.decoded = {"items.maxStack"};
+    return data;
+}
+void begin_prepares_copied_base_once() {
+    fresh_live(); auto calls = std::make_shared<int>(0);
+    g.in->prepare = [calls](registry::stage::LiveData* out, std::string*) { ++*calls; *out = lazy_alias_data(); return true; };
+    registry_live_status();
+    check(*calls == 0, "status does not decode an unused registry");
+    const auto h = change(71, "a", R"([{"registry":"items","select":"game:wood_alias","field":"maxStack","op":{"mul":3}}])");
+    check(*calls == 1, "the first native begin prepares the copied stable base once");
+    RegistryLiveReply reply;
+    registry_live_commit(71, h, &reply);
+    check(reply.outcome == RegistryLiveOutcome::Applied && at<uint32_t>(WOOD_AT) == 30,
+          "lazy preparation refreshes composition lookup and mapped id indexes before a commit");
+    std::string value;
+    check(registry_live_read("items", "game:wood_alias", "maxStack", &value) == KILN_OK && value == "30" && *calls == 1,
+          "reads reuse the first prepared model without another decode");
+}
+void read_can_be_first_registry_use() {
+    fresh_live(); auto calls = std::make_shared<int>(0);
+    g.in->prepare = [calls](registry::stage::LiveData* out, std::string*) { ++*calls; *out = lazy_alias_data(); return true; };
+    const auto generation = store_generation(); std::string value;
+    check(registry_live_read("items", "game:wood_alias", "maxStack", &value) == KILN_OK && value == "10" && *calls == 1,
+          "a mapped read can prepare the copied model without beginning a transaction");
+    check(store_generation() == generation && registry_live_status().drafts == 0,
+          "read-first preparation creates no store writes or transaction handles");
+}
+void unavailable_preparation_remains_retryable() {
+    fresh_live(); auto ready = std::make_shared<bool>(false);
+    g.in->prepare = [ready](registry::stage::LiveData* out, std::string* why) {
+        if (!*ready) { *why = "synthetic archive not ready"; return false; }
+        *out = lazy_alias_data(); return true;
+    };
+    uint64_t h = 0;
+    check(registry_live_begin(71, "a", 1, &h) == KILN_ERR_UNAVAILABLE && h == 0 && registry_live_status().drafts == 0,
+          "failed lazy preparation admits no draft and reports unavailable");
+    *ready = true;
+    check(registry_live_begin(71, "a", 1, &h) == KILN_OK && h != 0 && !g.in->prepare,
+          "a later preparation can succeed and release its loader closure");
+    RegistryLiveReply reply; registry_live_revert(71, h, &reply);
+}
 void claims_and_binding_failure() {
     fresh_live(); RegistryLiveReply reply;
     auto a = change(71, "a", "[{" + wood + R"("op":50,"exclusive":true}])"); registry_live_commit(71, a, &reply);
@@ -380,6 +428,9 @@ int main() {
         {"final_then_later_alter_obeys_commit_order", final_then_later_alter_obeys_commit_order},
         {"prepared_turn_still_checks_references", prepared_turn_still_checks_references},
         {"retained_changes_have_bounded_commit_cost", retained_changes_have_bounded_commit_cost},
+        {"begin_prepares_copied_base_once", begin_prepares_copied_base_once},
+        {"read_can_be_first_registry_use", read_can_be_first_registry_use},
+        {"unavailable_preparation_remains_retryable", unavailable_preparation_remains_retryable},
         {"claims_and_binding_failure", claims_and_binding_failure},
         {"mapped_reads_have_no_write_side_effect", mapped_reads_have_no_write_side_effect},
         {"world_scope_and_admission", world_scope_and_admission},

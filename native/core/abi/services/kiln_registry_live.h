@@ -15,7 +15,9 @@
  * in their batch source. The managed context integration supplies that identity; there is no live-plan cache in v1.
  *
  * Threads: begin/submit/status any thread. commit/revert/read on the active world's thread while a world exists;
- * without a world they touch only copied data. Drafts and committed handles are owner-bound; owner 0 is invalid;
+ * without a world they touch only owned archive/copied data, never world slots. The first begin/read may prepare the
+ * cached stable base if no registry user needed it at startup; status/schema alone do not force archive decoding.
+ * Drafts and committed handles are owner-bound; owner 0 is invalid;
  * revoked owners return REVOKED. Unknown/stale handles return NOT_FOUND, another owner's handle INVALID_ARGUMENT.
  * Limits: 64 open drafts, 1024 retained changes, 4096 edits per change, 64 MiB copied IR total. Revert releases the handle.
  * Entry add/remove and raw game paths are refused by this stable API (the existing Advanced APIs are unchanged).
@@ -24,8 +26,8 @@
  * submit's optional report never changes its result to BUFFER_TOO_SMALL. Result out is optional; when supplied, size
  * must cover v1, larger records are accepted and size is set to v1. Refused edits are reported per edit. Runtime binding
  * or write failure rolls the candidate back; UNVERIFIED means rollback could not be proved, never success.
- * read returns actual live bytes through Kiln's field mappings; restart fields and pre-world reads use the kept stage
- * view. Select ids/schema/report/ready events through kiln.registry. Transactions queue a report/generation update for
+ * read returns actual live bytes through Kiln's field mappings; restart fields use the kept start-time composition,
+ * and pre-world reads include composed pending process changes. Select ids/schema/report/ready events through kiln.registry. Transactions queue a report/generation update for
  * the next registry pump; multiple updates may coalesce. They never send WORLDLOAD or dispatch ready callbacks from
  * commit/revert. Only real world/pack applications send WORLDLOAD. Result.generation is the last published snapshot.
  * A nested commit/revert while another transaction is in flight returns UNAVAILABLE.
