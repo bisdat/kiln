@@ -822,6 +822,22 @@ def body_manifest(recipe_path, entries, update, selected=None, producer="modelco
         raise BlocksError(f"npc-bodies.v1: {e}") from e
 
 
+def body_rows_stale(recipe_path, producer):
+    """Whether `producer`'s rows of the NPC body cache belong to another source set than the cache's: a later tool of the same cook wrote
+    a body source (modelcook makes a glTF's material blocks after animcook's steps on a mod's first cook). False without a cache."""
+    from . import cookpaths as CP
+    try:
+        path = CP.npc_manifest(recipe_path)
+        if not path.is_file():
+            return False
+        doc = json.loads(path.read_text())
+    except (CP.Refused, OSError, ValueError):
+        return False  # the next cook says what is wrong with it
+    if not isinstance(doc, dict) or not isinstance(doc.get("entries"), list):
+        return False
+    return any(isinstance(e, dict) and e.get("producer") == producer and e.get("sourceHash") != doc.get("sourceHash") for e in doc["entries"])
+
+
 def manifest_diagnostics(manifest, producer):
     """Name the eager manifest or local body cache, and never tell one tool to bless another tool's bytes."""
     entries = manifest["missing"] + manifest["mismatched"]

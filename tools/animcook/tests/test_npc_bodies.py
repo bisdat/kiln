@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: MIT
 """An authored NPC's assets are staged, never independently loaded by kiln.assets."""
+import contextlib
+import io
 import json
 import sys
 import tempfile
@@ -245,6 +247,35 @@ class NpcBodies(unittest.TestCase):
         before = (self.mod / "assets/cooked/npc-bodies.v1.json").read_bytes()
         B.body_manifest(self.recipe, entries, True)
         self.assertEqual(before, (self.mod / "assets/cooked/npc-bodies.v1.json").read_bytes())
+
+    def test_a_first_cook_whose_renderer_writes_material_blocks_ends_with_one_source_set(self):
+        # Found by the 16f S6 lab: on a mod's first cook modelcook (dispatched after animcook's own steps) writes the glTF's material
+        # blocks, a body source animcook had not hashed, so animcook's rows belonged to an older source set and the body had no bindings.
+        import animcook
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from cook.steps import model_entries
+        material = self.mod / "blocks/models_golem.materials.json"
+        calls = []
+
+        def renderer(a, doc, extra):  # what modelcook does on a dedicated server: the material blocks first, then its rows of the cache
+            calls.append(extra)
+            material.write_text(json.dumps({"format": 1, "materials": {"models_golem.skin": {"roughness": 1}}}))
+            entries = model_entries("8bb42bf4-b129-511d-b210-f91bff63d45a", "new", "cooked/models_golem.model.bin", "cooked/models_golem.render.blob")
+            B.body_manifest(self.recipe, entries, True, server=True)
+            return 0
+
+        args = SimpleNamespace(recipe=str(self.recipe), no_dispatch=False, check=False, update_manifest=True, no_game=True, game=".", exe=None)
+        with patch.object(animcook, "_dispatch", side_effect=renderer), patch.object(animcook.recipe, "other_tools", return_value=["modelcook"]), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(0, animcook.cmd_recipe(args))
+        self.assertEqual(1, len(calls), "the renderer's cook runs once")
+        bundle = json.loads((self.mod / "assets/cooked/npc-bodies.v1.json").read_text())
+        self.assertIn("blocks/models_golem.materials.json", {s["file"] for s in bundle["sources"]})
+        self.assertEqual({bundle["sourceHash"]}, {e["sourceHash"] for e in bundle["entries"]}, "both tools' rows belong to the same sources")
+        self.assertEqual({"animcook", "modelcook"}, {e["producer"] for e in bundle["entries"]})
+        self.assertEqual(27, len(bundle["bodies"]["tobin"]["bindings"]))
+        self.assertEqual(bundle["sourceHash"], bundle["bodies"]["tobin"]["sourceHash"])
 
     def test_missing_renderer_outputs_cannot_reuse_an_authors_complete_body(self):
         R.Run(self.recipe, TYPES).run(update_manifest=True)

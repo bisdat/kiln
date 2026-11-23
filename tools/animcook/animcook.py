@@ -175,6 +175,20 @@ def cmd_recipe(a):
         return _recipe_player_states(a, doc) or rc
     t, k, tinfo = _types(a)
     r = recipe.Run(a.recipe, t, k).run(update_manifest=a.update_manifest, game_info={"version": k.version} if k else None, types_info=tinfo)
+    _say_run(r)
+    rc = _dispatch(a, doc, ["--update-manifest"] if a.update_manifest else []) if others else 0
+    # An NPC body's sources include its model's material blocks, which modelcook (dispatched above) makes from the glTF on a mod's first
+    # cook: this tool's rows of the body cache then belong to an older source set and the body has no motion bindings. Once more, now that
+    # every source is there (the outputs are the same bytes; only the cache's rows follow the sources).
+    if r["ok"] and not rc and a.update_manifest and others and B.body_rows_stale(a.recipe, recipe.TOOL):
+        print("animcook: the NPC body cache's sources changed during this cook (material blocks made from the glTF): its rows again")
+        r = recipe.Run(a.recipe, t, k).run(update_manifest=True, game_info={"version": k.version} if k else None, types_info=tinfo)
+        _say_run(r)
+    rc = _recipe_player_states(a, doc) or rc
+    return 0 if r["ok"] and not rc else 1
+
+
+def _say_run(r):
     for s in r["steps"]:
         if s["op"] == "clips":
             for c in s["clips"]:
@@ -192,10 +206,7 @@ def cmd_recipe(a):
             print(message)
         for e in r["manifest"]["missing"] + r["manifest"]["mismatched"]:
             print("  " + json.dumps(e))
-    print(f"{'ok' if r['ok'] else 'FAILED'}: {len(r['outputs'])} file(s)")
-    rc = _dispatch(a, doc, ["--update-manifest"] if a.update_manifest else []) if others else 0
-    rc = _recipe_player_states(a, doc) or rc
-    return 0 if r["ok"] and not rc else 1
+    print(f"{'ok' if r['ok'] else 'FAILED'}: {len(r['outputs'])} file(s)", flush=True)  # before a dispatched tool's own lines
 
 
 def _in_git_tree(p):
