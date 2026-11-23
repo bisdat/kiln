@@ -270,7 +270,12 @@
     "world.slice_record": true,
     "world.systems": true,
     "world.teleport": true,
-    "world.write": true
+    "world.write": true,
+    "camera.local_fov": true,
+    "camera.local_pose": true,
+    "camera.local_profile": true,
+    "camera.local_shake": true,
+    "camera.rendered_snapshot": true
   },
   "symbols": {
     "AddLogListener": "0x885e90",
@@ -875,7 +880,10 @@
     "world/ResolveSingletons": "0x98a660",
     "world/RunInitPrograms": "0x9acf40",
     "world/SliceTaskFn": "0x9eebb0",
-    "world/StepPrograms": "0x9ade50"
+    "world/StepPrograms": "0x9ade50",
+    "camera/RenderFovSelected": "0x87b9fd",
+    "camera/RenderPoseGetter": "0x3aaaf0",
+    "camera/VisualFrameReady": "0x86098f"
   },
   "constants": {
     "abilities/actor.trigger_context": "0x8",
@@ -1893,7 +1901,21 @@
     "world/teleport.applied": "0x48",
     "world/teleport.find_ground": "0x49",
     "world/teleport.target_entity": "0x38",
-    "world/world.may_finalize": "0xe17958"
+    "world/world.may_finalize": "0xe17958",
+    "camera/render.client_pose": "0x5d0",
+    "camera/render.client_world": "0x1d0",
+    "camera/render.far": "0x4672e4",
+    "camera/render.mode_fov": "0x46734c",
+    "camera/render.near": "0x4672e0",
+    "camera/render.pose_block1": "0x4672b8",
+    "camera/render.pose_block2": "0x4672c8",
+    "camera/render.pose_start": "0x4672a8",
+    "camera/render.pose_tail": "0x4672d8",
+    "camera/render.proj_aspect": "0x4693b8",
+    "camera/render.proj_far": "0x4693c0",
+    "camera/render.proj_fov": "0x4693c4",
+    "camera/render.proj_near": "0x4693bc",
+    "camera/render.selected_fov": "0x4672e8"
   },
   "services": {
     "core": {
@@ -2604,10 +2626,38 @@
       "level": "static",
       "date": "2026-11-13",
       "evidence": "resolved offline (tools/sigport/build_record.py)",
-      "symbols": {},
-      "constants": {},
+      "symbols": {
+        "@camera/ModeFovRenderSource": "static",
+        "@camera/RenderPoseGetter.fields": "static",
+        "@camera/RendererWorld": "static",
+        "@camera/SelectedPoseFields": "static",
+        "camera/RenderFovSelected": "static",
+        "camera/RenderPoseGetter": "static",
+        "camera/VisualFrameReady": "static"
+      },
+      "constants": {
+        "camera/render.client_pose": "static",
+        "camera/render.client_world": "static",
+        "camera/render.far": "static",
+        "camera/render.mode_fov": "static",
+        "camera/render.near": "static",
+        "camera/render.pose_block1": "static",
+        "camera/render.pose_block2": "static",
+        "camera/render.pose_start": "static",
+        "camera/render.pose_tail": "static",
+        "camera/render.proj_aspect": "static",
+        "camera/render.proj_far": "static",
+        "camera/render.proj_fov": "static",
+        "camera/render.proj_near": "static",
+        "camera/render.selected_fov": "static"
+      },
       "features": {
-        "hooks.owner_cleanup": "static"
+        "hooks.owner_cleanup": "static",
+        "camera.local_fov": "static",
+        "camera.local_pose": "static",
+        "camera.local_profile": "static",
+        "camera.local_shake": "static",
+        "camera.rendered_snapshot": "static"
       }
     },
     "dev28-04-markers": {

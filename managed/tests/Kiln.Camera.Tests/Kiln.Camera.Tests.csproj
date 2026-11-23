@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Unit tests of Kiln.Camera with no game: its own code on the test kit's fake of kiln.camera, the request checks, and the layout of its native mirror. -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>CameraTests</RootNamespace>
+    <IsTestProject>true</IsTestProject>
+    <OutputType>Exe</OutputType>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit.v3" Version="3.1.0" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../services/Kiln.Camera/Kiln.Camera.csproj" />
+    <ProjectReference Include="../../services/Kiln.World/Kiln.World.csproj" />
+    <ProjectReference Include="../../Kiln.TestKit/Kiln.TestKit.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- AbiTests reads native/core/abi/services/kiln_camera.h of the tree the tests were built from: the managed enums
+         are the header's numbers. -->
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>KilnRepository</_Parameter1>
+      <_Parameter2>$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)', '..', '..', '..'))</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+</Project>

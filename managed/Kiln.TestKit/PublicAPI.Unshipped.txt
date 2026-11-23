@@ -132,3 +132,40 @@ Kiln.TestKit.HarnessRoutines.Queued.get -> int
 Kiln.TestKit.HarnessRoutines.SetClock(int hour, int minute = 0) -> void
 Kiln.TestKit.HarnessRoutines.SetSleepAllowed(uint npcId, bool allowed) -> void
 Kiln.TestKit.KilnHarness.Routines.get -> Kiln.TestKit.HarnessRoutines!
+Kiln.TestKit.FakeCameraCall
+Kiln.TestKit.FakeCameraCall.Deconstruct(out ulong Step, out Kiln.TestKit.FakeCameraCallKind Kind, out ulong Lease, out uint Endpoint, out Kiln.EntityId Player, out uint Parts, out uint DurationMs, out int Priority, out uint Refusal) -> void
+Kiln.TestKit.FakeCameraCall.DurationMs.get -> uint
+Kiln.TestKit.FakeCameraCall.DurationMs.init -> void
+Kiln.TestKit.FakeCameraCall.Endpoint.get -> uint
+Kiln.TestKit.FakeCameraCall.Endpoint.init -> void
+Kiln.TestKit.FakeCameraCall.Equals(Kiln.TestKit.FakeCameraCall other) -> bool
+Kiln.TestKit.FakeCameraCall.FakeCameraCall() -> void
+Kiln.TestKit.FakeCameraCall.FakeCameraCall(ulong Step, Kiln.TestKit.FakeCameraCallKind Kind, ulong Lease, uint Endpoint, Kiln.EntityId Player, uint Parts, uint DurationMs, int Priority, uint Refusal) -> void
+Kiln.TestKit.FakeCameraCall.Kind.get -> Kiln.TestKit.FakeCameraCallKind
+Kiln.TestKit.FakeCameraCall.Kind.init -> void
+Kiln.TestKit.FakeCameraCall.Lease.get -> ulong
+Kiln.TestKit.FakeCameraCall.Lease.init -> void
+Kiln.TestKit.FakeCameraCall.Parts.get -> uint
+Kiln.TestKit.FakeCameraCall.Parts.init -> void
+Kiln.TestKit.FakeCameraCall.Player.get -> Kiln.EntityId
+Kiln.TestKit.FakeCameraCall.Player.init -> void
+Kiln.TestKit.FakeCameraCall.Priority.get -> int
+Kiln.TestKit.FakeCameraCall.Priority.init -> void
+Kiln.TestKit.FakeCameraCall.Refusal.get -> uint
+Kiln.TestKit.FakeCameraCall.Refusal.init -> void
+Kiln.TestKit.FakeCameraCall.Step.get -> ulong
+Kiln.TestKit.FakeCameraCall.Step.init -> void
+Kiln.TestKit.FakeCameraCallKind
+Kiln.TestKit.FakeCameraCallKind.Apply = 0 -> Kiln.TestKit.FakeCameraCallKind
+Kiln.TestKit.FakeCameraCallKind.End = 2 -> Kiln.TestKit.FakeCameraCallKind
+Kiln.TestKit.FakeCameraCallKind.Update = 1 -> Kiln.TestKit.FakeCameraCallKind
+Kiln.TestKit.HarnessCamera
+Kiln.TestKit.HarnessCamera.Calls.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.FakeCameraCall>!
+Kiln.TestKit.HarnessCamera.Expire(ulong lease) -> bool
+Kiln.TestKit.HarnessCamera.Leases.get -> System.Collections.Generic.IReadOnlyList<ulong>!
+Kiln.TestKit.KilnHarness.Camera.get -> Kiln.TestKit.HarnessCamera!
+override Kiln.TestKit.FakeCameraCall.GetHashCode() -> int
+static Kiln.TestKit.FakeCameraCall.operator !=(Kiln.TestKit.FakeCameraCall left, Kiln.TestKit.FakeCameraCall right) -> bool
+static Kiln.TestKit.FakeCameraCall.operator ==(Kiln.TestKit.FakeCameraCall left, Kiln.TestKit.FakeCameraCall right) -> bool
+~override Kiln.TestKit.FakeCameraCall.Equals(object obj) -> bool
+~override Kiln.TestKit.FakeCameraCall.ToString() -> string

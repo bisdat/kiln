@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Kiln.Camera: camera overrides for mods. A server locks a player's stock camera mode; a client (and a server, for
+       players whose client runs Kiln) sets a render-only camera: a path, a follow profile, a lens, a shake. Wrapper for
+       the native kiln.camera service. Deployed to kiln/host/ and shared by every mod. -->
+  <PropertyGroup>
+    <RootNamespace>Kiln</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../Kiln.Api/Kiln.Api.csproj" Private="false" />
+    <InternalsVisibleTo Include="Kiln.Camera.Tests" />
+    <InternalsVisibleTo Include="Kiln.Contract.Tests" />
+  </ItemGroup>
+</Project>

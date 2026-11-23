@@ -7,6 +7,7 @@ pub mod kiln_audio;
 pub mod kiln_base_rules;
 pub mod kiln_boot;
 pub mod kiln_build;
+pub mod kiln_camera;
 pub mod kiln_capacity;
 pub mod kiln_caps;
 pub mod kiln_chat;

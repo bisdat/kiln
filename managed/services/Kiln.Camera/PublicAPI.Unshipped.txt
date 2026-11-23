@@ -1,0 +1,427 @@
+#nullable enable
+Kiln.Camera
+Kiln.CameraBlend
+Kiln.CameraBlend.<Clone>$() -> Kiln.CameraBlend!
+Kiln.CameraBlend.CameraBlend(System.TimeSpan In, System.TimeSpan Out) -> void
+Kiln.CameraBlend.Deconstruct(out System.TimeSpan In, out System.TimeSpan Out) -> void
+Kiln.CameraBlend.Equals(Kiln.CameraBlend? other) -> bool
+Kiln.CameraBlend.In.get -> System.TimeSpan
+Kiln.CameraBlend.In.init -> void
+Kiln.CameraBlend.Out.get -> System.TimeSpan
+Kiln.CameraBlend.Out.init -> void
+Kiln.CameraCapability
+Kiln.CameraCapability.LocalFov = 4 -> Kiln.CameraCapability
+Kiln.CameraCapability.LocalPose = 2 -> Kiln.CameraCapability
+Kiln.CameraCapability.LocalProfile = 8 -> Kiln.CameraCapability
+Kiln.CameraCapability.LocalShake = 16 -> Kiln.CameraCapability
+Kiln.CameraCapability.None = 0 -> Kiln.CameraCapability
+Kiln.CameraCapability.Remote = 64 -> Kiln.CameraCapability
+Kiln.CameraCapability.RenderedSnapshot = 32 -> Kiln.CameraCapability
+Kiln.CameraCapability.ResourceProfile = 128 -> Kiln.CameraCapability
+Kiln.CameraCapability.ServerMode = 1 -> Kiln.CameraCapability
+Kiln.CameraChange
+Kiln.CameraChange.<Clone>$() -> Kiln.CameraChange!
+Kiln.CameraChange.CameraChange(Kiln.CameraLease Lease, ulong Revision, Kiln.CameraChangeKind Kind, Kiln.CameraEndReason EndReason, Kiln.CameraReason ReasonCode, string? Reason, ulong Frame) -> void
+Kiln.CameraChange.Deconstruct(out Kiln.CameraLease Lease, out ulong Revision, out Kiln.CameraChangeKind Kind, out Kiln.CameraEndReason EndReason, out Kiln.CameraReason ReasonCode, out string? Reason, out ulong Frame) -> void
+Kiln.CameraChange.EndReason.get -> Kiln.CameraEndReason
+Kiln.CameraChange.EndReason.init -> void
+Kiln.CameraChange.Equals(Kiln.CameraChange? other) -> bool
+Kiln.CameraChange.Frame.get -> ulong
+Kiln.CameraChange.Frame.init -> void
+Kiln.CameraChange.Kind.get -> Kiln.CameraChangeKind
+Kiln.CameraChange.Kind.init -> void
+Kiln.CameraChange.Lease.get -> Kiln.CameraLease
+Kiln.CameraChange.Lease.init -> void
+Kiln.CameraChange.Reason.get -> string?
+Kiln.CameraChange.Reason.init -> void
+Kiln.CameraChange.ReasonCode.get -> Kiln.CameraReason
+Kiln.CameraChange.ReasonCode.init -> void
+Kiln.CameraChange.Revision.get -> ulong
+Kiln.CameraChange.Revision.init -> void
+Kiln.CameraChangeKind
+Kiln.CameraChangeKind.Applied = 1 -> Kiln.CameraChangeKind
+Kiln.CameraChangeKind.Ended = 3 -> Kiln.CameraChangeKind
+Kiln.CameraChangeKind.Updated = 2 -> Kiln.CameraChangeKind
+Kiln.CameraCollisionPolicy
+Kiln.CameraCollisionPolicy.None = 0 -> Kiln.CameraCollisionPolicy
+Kiln.CameraCommitScope
+Kiln.CameraCommitScope.ClientFrame = 2 -> Kiln.CameraCommitScope
+Kiln.CameraCommitScope.None = 0 -> Kiln.CameraCommitScope
+Kiln.CameraCommitScope.ServerState = 1 -> Kiln.CameraCommitScope
+Kiln.CameraEndpoint
+Kiln.CameraEndpoint.Local = 2 -> Kiln.CameraEndpoint
+Kiln.CameraEndpoint.Remote = 3 -> Kiln.CameraEndpoint
+Kiln.CameraEndpoint.ServerMode = 1 -> Kiln.CameraEndpoint
+Kiln.CameraEndReason
+Kiln.CameraEndReason.AuthorityTimeout = 10 -> Kiln.CameraEndReason
+Kiln.CameraEndReason.CancelledBeforeApply = 13 -> Kiln.CameraEndReason
+Kiln.CameraEndReason.CapabilityLost = 7 -> Kiln.CameraEndReason
+Kiln.CameraEndReason.Expired = 2 -> Kiln.CameraEndReason
+Kiln.CameraEndReason.None = 0 -> Kiln.CameraEndReason
+Kiln.CameraEndReason.OwnerRetired = 8 -> Kiln.CameraEndReason
+Kiln.CameraEndReason.PeerDisconnected = 9 -> Kiln.CameraEndReason
+Kiln.CameraEndReason.PlayerLeft = 4 -> Kiln.CameraEndReason
+Kiln.CameraEndReason.Released = 1 -> Kiln.CameraEndReason
+Kiln.CameraEndReason.SafetyRejected = 11 -> Kiln.CameraEndReason
+Kiln.CameraEndReason.Superseded = 6 -> Kiln.CameraEndReason
+Kiln.CameraEndReason.TargetLost = 3 -> Kiln.CameraEndReason
+Kiln.CameraEndReason.TransportTimeout = 12 -> Kiln.CameraEndReason
+Kiln.CameraEndReason.WorldStopped = 5 -> Kiln.CameraEndReason
+Kiln.CameraInputPolicy
+Kiln.CameraInputPolicy.AimToo = 2 -> Kiln.CameraInputPolicy
+Kiln.CameraInputPolicy.StockMode = 1 -> Kiln.CameraInputPolicy
+Kiln.CameraInputPolicy.VisualOnly = 0 -> Kiln.CameraInputPolicy
+Kiln.CameraKey
+Kiln.CameraKey.<Clone>$() -> Kiln.CameraKey!
+Kiln.CameraKey.At.get -> System.TimeSpan
+Kiln.CameraKey.At.init -> void
+Kiln.CameraKey.CameraKey(System.TimeSpan At, Kiln.CameraPose! Pose, float? FieldOfViewDegrees = null) -> void
+Kiln.CameraKey.Deconstruct(out System.TimeSpan At, out Kiln.CameraPose! Pose, out float? FieldOfViewDegrees) -> void
+Kiln.CameraKey.Equals(Kiln.CameraKey? other) -> bool
+Kiln.CameraKey.FieldOfViewDegrees.get -> float?
+Kiln.CameraKey.FieldOfViewDegrees.init -> void
+Kiln.CameraKey.Pose.get -> Kiln.CameraPose!
+Kiln.CameraKey.Pose.init -> void
+Kiln.CameraLease
+Kiln.CameraLease.CameraLease() -> void
+Kiln.CameraLease.CameraLease(ulong Value, Kiln.CameraEndpoint Endpoint, Kiln.EntityId Player, uint SessionGeneration) -> void
+Kiln.CameraLease.Deconstruct(out ulong Value, out Kiln.CameraEndpoint Endpoint, out Kiln.EntityId Player, out uint SessionGeneration) -> void
+Kiln.CameraLease.Endpoint.get -> Kiln.CameraEndpoint
+Kiln.CameraLease.Endpoint.init -> void
+Kiln.CameraLease.Equals(Kiln.CameraLease other) -> bool
+Kiln.CameraLease.Player.get -> Kiln.EntityId
+Kiln.CameraLease.Player.init -> void
+Kiln.CameraLease.SessionGeneration.get -> uint
+Kiln.CameraLease.SessionGeneration.init -> void
+Kiln.CameraLease.Value.get -> ulong
+Kiln.CameraLease.Value.init -> void
+Kiln.CameraLens
+Kiln.CameraLens.<Clone>$() -> Kiln.CameraLens!
+Kiln.CameraLens.CameraLens(float FieldOfViewDegrees) -> void
+Kiln.CameraLens.Deconstruct(out float FieldOfViewDegrees) -> void
+Kiln.CameraLens.Equals(Kiln.CameraLens? other) -> bool
+Kiln.CameraLens.FieldOfViewDegrees.get -> float
+Kiln.CameraLens.FieldOfViewDegrees.init -> void
+Kiln.CameraMode
+Kiln.CameraMode.EntityCamera = 0 -> Kiln.CameraMode
+Kiln.CameraMode.PlayerCameraAltar = 28 -> Kiln.CameraMode
+Kiln.CameraMode.PlayerCameraBuildingAltar = 32 -> Kiln.CameraMode
+Kiln.CameraMode.PlayerCameraBuildingAreaDepositProp = 33 -> Kiln.CameraMode
+Kiln.CameraMode.PlayerCameraBuildingFirstPerson = 34 -> Kiln.CameraMode
+Kiln.CameraMode.PlayerCameraBuildingFirstPersonSneak = 35 -> Kiln.CameraMode
+Kiln.CameraMode.PlayerCameraBuildingFlySparkMode = 37 -> Kiln.CameraMode
+Kiln.CameraMode.PlayerCameraBuildingFlySparkModeSprinting = 38 -> Kiln.CameraMode
+Kiln.CameraMode.PlayerCameraBuildingThirdPerson = 36 -> Kiln.CameraMode
+Kiln.CameraMode.PlayerCameraClimbing = 20 -> Kiln.CameraMode
+Kiln.CameraMode.PlayerCameraCooking = 19 -> Kiln.CameraMode
+Kiln.CameraMode.PlayerCameraDefault = 4 -> Kiln.CameraMode
+Kiln.CameraMode.PlayerCameraDefaultTarget = 5 -> Kiln.CameraMode
+Kiln.CameraMode.PlayerCameraDialogue = 27 -> Kiln.CameraMode
+Kiln.CameraMode.PlayerCameraDiving = 24 -> Kiln.CameraMode
+Kiln.CameraMode.PlayerCameraExecute = 15 -> Kiln.CameraMode
+Kiln.CameraMode.PlayerCameraFishing = 39 -> Kiln.CameraMode
+Kiln.CameraMode.PlayerCameraFishingHardFocusFloat = 40 -> Kiln.CameraMode
+Kiln.CameraMode.PlayerCameraFishingSoftFocusFloat = 41 -> Kiln.CameraMode
+Kiln.CameraMode.PlayerCameraFishingVictory = 42 -> Kiln.CameraMode
+Kiln.CameraMode.PlayerCameraFreeAimWandDefault = 43 -> Kiln.CameraMode
+Kiln.CameraMode.PlayerCameraFreeAimWandSneaking = 45 -> Kiln.CameraMode
+Kiln.CameraMode.PlayerCameraFreeAimWandSprinting = 44 -> Kiln.CameraMode
+Kiln.CameraMode.PlayerCameraGlider = 22 -> Kiln.CameraMode
+Kiln.CameraMode.PlayerCameraHeadDivingDefault = 26 -> Kiln.CameraMode
+Kiln.CameraMode.PlayerCameraHeadDivingStart = 25 -> Kiln.CameraMode
+Kiln.CameraMode.PlayerCameraHipfire = 12 -> Kiln.CameraMode
+Kiln.CameraMode.PlayerCameraHipfireStaffChanneling = 13 -> Kiln.CameraMode
+Kiln.CameraMode.PlayerCameraHipfireStaffChannelingTarget = 14 -> Kiln.CameraMode
+Kiln.CameraMode.PlayerCameraHookShot = 21 -> Kiln.CameraMode
+Kiln.CameraMode.PlayerCameraIdle = 16 -> Kiln.CameraMode
+Kiln.CameraMode.PlayerCameraMotherFlame = 29 -> Kiln.CameraMode
+Kiln.CameraMode.PlayerCameraObelisk = 30 -> Kiln.CameraMode
+Kiln.CameraMode.PlayerCameraRangedBowDefault = 8 -> Kiln.CameraMode
+Kiln.CameraMode.PlayerCameraRangedBowSneaking = 9 -> Kiln.CameraMode
+Kiln.CameraMode.PlayerCameraRangedStaffDefault = 10 -> Kiln.CameraMode
+Kiln.CameraMode.PlayerCameraRangedStaffSneaking = 11 -> Kiln.CameraMode
+Kiln.CameraMode.PlayerCameraRespawning = 3 -> Kiln.CameraMode
+Kiln.CameraMode.PlayerCameraShroudForge = 31 -> Kiln.CameraMode
+Kiln.CameraMode.PlayerCameraSitting = 18 -> Kiln.CameraMode
+Kiln.CameraMode.PlayerCameraSneaking = 17 -> Kiln.CameraMode
+Kiln.CameraMode.PlayerCameraSpawning = 1 -> Kiln.CameraMode
+Kiln.CameraMode.PlayerCameraSpawningDolly = 2 -> Kiln.CameraMode
+Kiln.CameraMode.PlayerCameraSprinting = 7 -> Kiln.CameraMode
+Kiln.CameraMode.PlayerCameraSprintingTarget = 6 -> Kiln.CameraMode
+Kiln.CameraMode.PlayerCameraSwimming = 23 -> Kiln.CameraMode
+Kiln.CameraModeRequest
+Kiln.CameraModeRequest.<Clone>$() -> Kiln.CameraModeRequest!
+Kiln.CameraModeRequest.CameraModeRequest(Kiln.CameraMode Mode, Kiln.CameraTransitionOverride Transition = Kiln.CameraTransitionOverride.None) -> void
+Kiln.CameraModeRequest.Deconstruct(out Kiln.CameraMode Mode, out Kiln.CameraTransitionOverride Transition) -> void
+Kiln.CameraModeRequest.Equals(Kiln.CameraModeRequest? other) -> bool
+Kiln.CameraModeRequest.Mode.get -> Kiln.CameraMode
+Kiln.CameraModeRequest.Mode.init -> void
+Kiln.CameraModeRequest.Transition.get -> Kiln.CameraTransitionOverride
+Kiln.CameraModeRequest.Transition.init -> void
+Kiln.CameraOverride
+Kiln.CameraOverride.<Clone>$() -> Kiln.CameraOverride!
+Kiln.CameraOverride.Blend.get -> Kiln.CameraBlend?
+Kiln.CameraOverride.Blend.init -> void
+Kiln.CameraOverride.CameraOverride(Kiln.CameraModeRequest? Mode = null, Kiln.CameraProfile? Profile = null, Kiln.CameraPath? Path = null, Kiln.CameraLens? Lens = null, Kiln.CameraShake? Shake = null, System.TimeSpan Duration = default(System.TimeSpan), int Priority = 0, Kiln.CameraBlend? Blend = null, Kiln.CameraInputPolicy InputPolicy = Kiln.CameraInputPolicy.VisualOnly) -> void
+Kiln.CameraOverride.Deconstruct(out Kiln.CameraModeRequest? Mode, out Kiln.CameraProfile? Profile, out Kiln.CameraPath? Path, out Kiln.CameraLens? Lens, out Kiln.CameraShake? Shake, out System.TimeSpan Duration, out int Priority, out Kiln.CameraBlend? Blend, out Kiln.CameraInputPolicy InputPolicy) -> void
+Kiln.CameraOverride.Duration.get -> System.TimeSpan
+Kiln.CameraOverride.Duration.init -> void
+Kiln.CameraOverride.Equals(Kiln.CameraOverride? other) -> bool
+Kiln.CameraOverride.InputPolicy.get -> Kiln.CameraInputPolicy
+Kiln.CameraOverride.InputPolicy.init -> void
+Kiln.CameraOverride.Lens.get -> Kiln.CameraLens?
+Kiln.CameraOverride.Lens.init -> void
+Kiln.CameraOverride.Mode.get -> Kiln.CameraModeRequest?
+Kiln.CameraOverride.Mode.init -> void
+Kiln.CameraOverride.Path.get -> Kiln.CameraPath?
+Kiln.CameraOverride.Path.init -> void
+Kiln.CameraOverride.Priority.get -> int
+Kiln.CameraOverride.Priority.init -> void
+Kiln.CameraOverride.Profile.get -> Kiln.CameraProfile?
+Kiln.CameraOverride.Profile.init -> void
+Kiln.CameraOverride.Shake.get -> Kiln.CameraShake?
+Kiln.CameraOverride.Shake.init -> void
+Kiln.CameraPath
+Kiln.CameraPath.<Clone>$() -> Kiln.CameraPath!
+Kiln.CameraPath.CameraPath(System.Collections.Generic.IReadOnlyList<Kiln.CameraKey!>! Keys) -> void
+Kiln.CameraPath.Deconstruct(out System.Collections.Generic.IReadOnlyList<Kiln.CameraKey!>! Keys) -> void
+Kiln.CameraPath.Equals(Kiln.CameraPath? other) -> bool
+Kiln.CameraPath.Keys.get -> System.Collections.Generic.IReadOnlyList<Kiln.CameraKey!>!
+Kiln.CameraPath.Keys.init -> void
+Kiln.CameraPose
+Kiln.CameraPose.<Clone>$() -> Kiln.CameraPose!
+Kiln.CameraPose.CameraPose(Kiln.WorldPosition Position, System.Numerics.Quaternion Rotation) -> void
+Kiln.CameraPose.Deconstruct(out Kiln.WorldPosition Position, out System.Numerics.Quaternion Rotation) -> void
+Kiln.CameraPose.Equals(Kiln.CameraPose? other) -> bool
+Kiln.CameraPose.Position.get -> Kiln.WorldPosition
+Kiln.CameraPose.Position.init -> void
+Kiln.CameraPose.Rotation.get -> System.Numerics.Quaternion
+Kiln.CameraPose.Rotation.init -> void
+Kiln.CameraProfile
+Kiln.CameraProfile.<Clone>$() -> Kiln.CameraProfile!
+Kiln.CameraProfile.CameraProfile(Kiln.EntityId Follow, float Distance, System.Numerics.Vector3 OffsetLocal, float OffsetWorldY = 0, Kiln.CameraRotationMode RotationMode = Kiln.CameraRotationMode.FreeOrbit, System.Numerics.Quaternion? Rotation = null, Kiln.CameraCollisionPolicy Collision = Kiln.CameraCollisionPolicy.None) -> void
+Kiln.CameraProfile.Collision.get -> Kiln.CameraCollisionPolicy
+Kiln.CameraProfile.Collision.init -> void
+Kiln.CameraProfile.Deconstruct(out Kiln.EntityId Follow, out float Distance, out System.Numerics.Vector3 OffsetLocal, out float OffsetWorldY, out Kiln.CameraRotationMode RotationMode, out System.Numerics.Quaternion? Rotation, out Kiln.CameraCollisionPolicy Collision) -> void
+Kiln.CameraProfile.Distance.get -> float
+Kiln.CameraProfile.Distance.init -> void
+Kiln.CameraProfile.Equals(Kiln.CameraProfile? other) -> bool
+Kiln.CameraProfile.Follow.get -> Kiln.EntityId
+Kiln.CameraProfile.Follow.init -> void
+Kiln.CameraProfile.LockRotation.get -> bool
+Kiln.CameraProfile.OffsetLocal.get -> System.Numerics.Vector3
+Kiln.CameraProfile.OffsetLocal.init -> void
+Kiln.CameraProfile.OffsetWorldY.get -> float
+Kiln.CameraProfile.OffsetWorldY.init -> void
+Kiln.CameraProfile.Rotation.get -> System.Numerics.Quaternion?
+Kiln.CameraProfile.Rotation.init -> void
+Kiln.CameraProfile.RotationMode.get -> Kiln.CameraRotationMode
+Kiln.CameraProfile.RotationMode.init -> void
+Kiln.CameraProjection
+Kiln.CameraProjection.<Clone>$() -> Kiln.CameraProjection!
+Kiln.CameraProjection.CameraProjection(bool WithinDepth, bool OnScreen, System.Numerics.Vector2? Pixel, float DepthMetres, ulong Frame) -> void
+Kiln.CameraProjection.Deconstruct(out bool WithinDepth, out bool OnScreen, out System.Numerics.Vector2? Pixel, out float DepthMetres, out ulong Frame) -> void
+Kiln.CameraProjection.DepthMetres.get -> float
+Kiln.CameraProjection.DepthMetres.init -> void
+Kiln.CameraProjection.Equals(Kiln.CameraProjection? other) -> bool
+Kiln.CameraProjection.Frame.get -> ulong
+Kiln.CameraProjection.Frame.init -> void
+Kiln.CameraProjection.OnScreen.get -> bool
+Kiln.CameraProjection.OnScreen.init -> void
+Kiln.CameraProjection.Pixel.get -> System.Numerics.Vector2?
+Kiln.CameraProjection.Pixel.init -> void
+Kiln.CameraProjection.WithinDepth.get -> bool
+Kiln.CameraProjection.WithinDepth.init -> void
+Kiln.CameraReason
+Kiln.CameraReason.AlreadyOwned = 2 -> Kiln.CameraReason
+Kiln.CameraReason.BodyTooLarge = 27 -> Kiln.CameraReason
+Kiln.CameraReason.Bounds = 21 -> Kiln.CameraReason
+Kiln.CameraReason.Busy = 1 -> Kiln.CameraReason
+Kiln.CameraReason.Cancelled = 24 -> Kiln.CameraReason
+Kiln.CameraReason.ClientCapability = 25 -> Kiln.CameraReason
+Kiln.CameraReason.Collision = 14 -> Kiln.CameraReason
+Kiln.CameraReason.ExpiredUpdate = 13 -> Kiln.CameraReason
+Kiln.CameraReason.ForeignOwner = 4 -> Kiln.CameraReason
+Kiln.CameraReason.FrameFault = 18 -> Kiln.CameraReason
+Kiln.CameraReason.InputPolicyUnsupported = 6 -> Kiln.CameraReason
+Kiln.CameraReason.InsufficientLifetime = 26 -> Kiln.CameraReason
+Kiln.CameraReason.LeaseKind = 23 -> Kiln.CameraReason
+Kiln.CameraReason.MalformedRemote = 16 -> Kiln.CameraReason
+Kiln.CameraReason.Negotiation = 9 -> Kiln.CameraReason
+Kiln.CameraReason.NoCameraFrame = 11 -> Kiln.CameraReason
+Kiln.CameraReason.None = 0 -> Kiln.CameraReason
+Kiln.CameraReason.PeerUnavailable = 8 -> Kiln.CameraReason
+Kiln.CameraReason.RateLimit = 22 -> Kiln.CameraReason
+Kiln.CameraReason.RequiresKilnClient = 7 -> Kiln.CameraReason
+Kiln.CameraReason.ResourceBusy = 17 -> Kiln.CameraReason
+Kiln.CameraReason.SnapshotBusy = 19 -> Kiln.CameraReason
+Kiln.CameraReason.SnapshotStale = 20 -> Kiln.CameraReason
+Kiln.CameraReason.StaleWorld = 12 -> Kiln.CameraReason
+Kiln.CameraReason.TargetUnavailable = 10 -> Kiln.CameraReason
+Kiln.CameraReason.TransportTimeout = 15 -> Kiln.CameraReason
+Kiln.CameraReason.UnknownLease = 3 -> Kiln.CameraReason
+Kiln.CameraReason.WrongEndpoint = 5 -> Kiln.CameraReason
+Kiln.CameraResult
+Kiln.CameraResult.<Clone>$() -> Kiln.CameraResult!
+Kiln.CameraResult.AlreadyEnded.get -> bool
+Kiln.CameraResult.AlreadyEnded.init -> void
+Kiln.CameraResult.CameraResult(bool Ok, string? Reason, Kiln.CameraReason ReasonCode, Kiln.CameraLease Lease, ulong Revision, Kiln.CameraCommitScope CommitScope, bool MayHaveApplied = false, bool AlreadyEnded = false) -> void
+Kiln.CameraResult.CommitScope.get -> Kiln.CameraCommitScope
+Kiln.CameraResult.CommitScope.init -> void
+Kiln.CameraResult.Deconstruct(out bool Ok, out string? Reason, out Kiln.CameraReason ReasonCode, out Kiln.CameraLease Lease, out ulong Revision, out Kiln.CameraCommitScope CommitScope, out bool MayHaveApplied, out bool AlreadyEnded) -> void
+Kiln.CameraResult.Equals(Kiln.CameraResult? other) -> bool
+Kiln.CameraResult.Lease.get -> Kiln.CameraLease
+Kiln.CameraResult.Lease.init -> void
+Kiln.CameraResult.MayHaveApplied.get -> bool
+Kiln.CameraResult.MayHaveApplied.init -> void
+Kiln.CameraResult.Ok.get -> bool
+Kiln.CameraResult.Ok.init -> void
+Kiln.CameraResult.Reason.get -> string?
+Kiln.CameraResult.Reason.init -> void
+Kiln.CameraResult.ReasonCode.get -> Kiln.CameraReason
+Kiln.CameraResult.ReasonCode.init -> void
+Kiln.CameraResult.Revision.get -> ulong
+Kiln.CameraResult.Revision.init -> void
+Kiln.CameraRotationMode
+Kiln.CameraRotationMode.FixedWorld = 2 -> Kiln.CameraRotationMode
+Kiln.CameraRotationMode.FollowHeading = 1 -> Kiln.CameraRotationMode
+Kiln.CameraRotationMode.FreeOrbit = 0 -> Kiln.CameraRotationMode
+Kiln.CameraShake
+Kiln.CameraShake.<Clone>$() -> Kiln.CameraShake!
+Kiln.CameraShake.AmplitudeMetres.get -> float
+Kiln.CameraShake.AmplitudeMetres.init -> void
+Kiln.CameraShake.CameraShake(float AmplitudeMetres, float FrequencyHz, System.TimeSpan Falloff, uint Seed = 0) -> void
+Kiln.CameraShake.Deconstruct(out float AmplitudeMetres, out float FrequencyHz, out System.TimeSpan Falloff, out uint Seed) -> void
+Kiln.CameraShake.Equals(Kiln.CameraShake? other) -> bool
+Kiln.CameraShake.Falloff.get -> System.TimeSpan
+Kiln.CameraShake.Falloff.init -> void
+Kiln.CameraShake.FrequencyHz.get -> float
+Kiln.CameraShake.FrequencyHz.init -> void
+Kiln.CameraShake.Seed.get -> uint
+Kiln.CameraShake.Seed.init -> void
+Kiln.CameraTransitionOverride
+Kiln.CameraTransitionOverride.BlinkLerpSpeed = 1 -> Kiln.CameraTransitionOverride
+Kiln.CameraTransitionOverride.CameraTransitionLerpSpeed = 2 -> Kiln.CameraTransitionOverride
+Kiln.CameraTransitionOverride.None = 0 -> Kiln.CameraTransitionOverride
+Kiln.CameraUpdateTiming
+Kiln.CameraUpdateTiming.Preserve = 0 -> Kiln.CameraUpdateTiming
+Kiln.CameraUpdateTiming.Restart = 1 -> Kiln.CameraUpdateTiming
+Kiln.CameraVisualResult
+Kiln.CameraVisualResult.<Clone>$() -> Kiln.CameraVisualResult!
+Kiln.CameraVisualResult.CameraVisualResult(bool Ok, string? Reason, Kiln.CameraReason ReasonCode, Kiln.CameraVisualSnapshot? Snapshot) -> void
+Kiln.CameraVisualResult.Deconstruct(out bool Ok, out string? Reason, out Kiln.CameraReason ReasonCode, out Kiln.CameraVisualSnapshot? Snapshot) -> void
+Kiln.CameraVisualResult.Equals(Kiln.CameraVisualResult? other) -> bool
+Kiln.CameraVisualResult.Ok.get -> bool
+Kiln.CameraVisualResult.Ok.init -> void
+Kiln.CameraVisualResult.Reason.get -> string?
+Kiln.CameraVisualResult.Reason.init -> void
+Kiln.CameraVisualResult.ReasonCode.get -> Kiln.CameraReason
+Kiln.CameraVisualResult.ReasonCode.init -> void
+Kiln.CameraVisualResult.Snapshot.get -> Kiln.CameraVisualSnapshot?
+Kiln.CameraVisualResult.Snapshot.init -> void
+Kiln.CameraVisualSnapshot
+Kiln.CameraVisualSnapshot.<Clone>$() -> Kiln.CameraVisualSnapshot!
+Kiln.CameraVisualSnapshot.Age.get -> System.TimeSpan
+Kiln.CameraVisualSnapshot.Age.init -> void
+Kiln.CameraVisualSnapshot.AspectRatio.get -> float
+Kiln.CameraVisualSnapshot.AspectRatio.init -> void
+Kiln.CameraVisualSnapshot.CameraVisualSnapshot(Kiln.CameraPose! Pose, float FieldOfViewDegrees, float AspectRatio, float NearPlane, float FarPlane, ulong Frame, ulong TargetSampleStep, uint SessionGeneration, System.TimeSpan Age) -> void
+Kiln.CameraVisualSnapshot.Deconstruct(out Kiln.CameraPose! Pose, out float FieldOfViewDegrees, out float AspectRatio, out float NearPlane, out float FarPlane, out ulong Frame, out ulong TargetSampleStep, out uint SessionGeneration, out System.TimeSpan Age) -> void
+Kiln.CameraVisualSnapshot.Equals(Kiln.CameraVisualSnapshot? other) -> bool
+Kiln.CameraVisualSnapshot.FarPlane.get -> float
+Kiln.CameraVisualSnapshot.FarPlane.init -> void
+Kiln.CameraVisualSnapshot.FieldOfViewDegrees.get -> float
+Kiln.CameraVisualSnapshot.FieldOfViewDegrees.init -> void
+Kiln.CameraVisualSnapshot.Frame.get -> ulong
+Kiln.CameraVisualSnapshot.Frame.init -> void
+Kiln.CameraVisualSnapshot.NearPlane.get -> float
+Kiln.CameraVisualSnapshot.NearPlane.init -> void
+Kiln.CameraVisualSnapshot.Pose.get -> Kiln.CameraPose!
+Kiln.CameraVisualSnapshot.Pose.init -> void
+Kiln.CameraVisualSnapshot.SessionGeneration.get -> uint
+Kiln.CameraVisualSnapshot.SessionGeneration.init -> void
+Kiln.CameraVisualSnapshot.TargetSampleStep.get -> ulong
+Kiln.CameraVisualSnapshot.TargetSampleStep.init -> void
+override Kiln.CameraBlend.Equals(object? obj) -> bool
+override Kiln.CameraBlend.GetHashCode() -> int
+override Kiln.CameraBlend.ToString() -> string!
+override Kiln.CameraChange.Equals(object? obj) -> bool
+override Kiln.CameraChange.GetHashCode() -> int
+override Kiln.CameraChange.ToString() -> string!
+override Kiln.CameraKey.Equals(object? obj) -> bool
+override Kiln.CameraKey.GetHashCode() -> int
+override Kiln.CameraKey.ToString() -> string!
+override Kiln.CameraLease.GetHashCode() -> int
+override Kiln.CameraLens.Equals(object? obj) -> bool
+override Kiln.CameraLens.GetHashCode() -> int
+override Kiln.CameraLens.ToString() -> string!
+override Kiln.CameraModeRequest.Equals(object? obj) -> bool
+override Kiln.CameraModeRequest.GetHashCode() -> int
+override Kiln.CameraModeRequest.ToString() -> string!
+override Kiln.CameraOverride.Equals(object? obj) -> bool
+override Kiln.CameraOverride.GetHashCode() -> int
+override Kiln.CameraOverride.ToString() -> string!
+override Kiln.CameraPath.Equals(object? obj) -> bool
+override Kiln.CameraPath.GetHashCode() -> int
+override Kiln.CameraPath.ToString() -> string!
+override Kiln.CameraPose.Equals(object? obj) -> bool
+override Kiln.CameraPose.GetHashCode() -> int
+override Kiln.CameraPose.ToString() -> string!
+override Kiln.CameraProfile.Equals(object? obj) -> bool
+override Kiln.CameraProfile.GetHashCode() -> int
+override Kiln.CameraProfile.ToString() -> string!
+override Kiln.CameraProjection.Equals(object? obj) -> bool
+override Kiln.CameraProjection.GetHashCode() -> int
+override Kiln.CameraProjection.ToString() -> string!
+override Kiln.CameraResult.Equals(object? obj) -> bool
+override Kiln.CameraResult.GetHashCode() -> int
+override Kiln.CameraResult.ToString() -> string!
+override Kiln.CameraShake.Equals(object? obj) -> bool
+override Kiln.CameraShake.GetHashCode() -> int
+override Kiln.CameraShake.ToString() -> string!
+override Kiln.CameraVisualResult.Equals(object? obj) -> bool
+override Kiln.CameraVisualResult.GetHashCode() -> int
+override Kiln.CameraVisualResult.ToString() -> string!
+override Kiln.CameraVisualSnapshot.Equals(object? obj) -> bool
+override Kiln.CameraVisualSnapshot.GetHashCode() -> int
+override Kiln.CameraVisualSnapshot.ToString() -> string!
+static Kiln.Camera.Changed -> System.Action<Kiln.CameraChange!>?
+static Kiln.Camera.End(Kiln.CameraLease lease) -> System.Threading.Tasks.Task<Kiln.CameraResult!>!
+static Kiln.Camera.GetCapabilities(Kiln.CameraEndpoint endpoint, Kiln.EntityId player = default(Kiln.EntityId)) -> Kiln.CameraCapability
+static Kiln.Camera.GetVisual() -> Kiln.CameraVisualResult!
+static Kiln.Camera.Set(Kiln.EntityId player, Kiln.CameraOverride! request) -> System.Threading.Tasks.Task<Kiln.CameraResult!>!
+static Kiln.Camera.SetLocal(Kiln.CameraOverride! request) -> System.Threading.Tasks.Task<Kiln.CameraResult!>!
+static Kiln.Camera.SetMode(Kiln.EntityId player, Kiln.CameraMode mode, System.TimeSpan duration, Kiln.CameraTransitionOverride transition = Kiln.CameraTransitionOverride.None, int priority = 0) -> System.Threading.Tasks.Task<Kiln.CameraResult!>!
+static Kiln.Camera.Update(Kiln.CameraLease lease, Kiln.CameraOverride! replacement, Kiln.CameraUpdateTiming timing = Kiln.CameraUpdateTiming.Preserve) -> System.Threading.Tasks.Task<Kiln.CameraResult!>!
+static Kiln.CameraBlend.operator !=(Kiln.CameraBlend? left, Kiln.CameraBlend? right) -> bool
+static Kiln.CameraBlend.operator ==(Kiln.CameraBlend? left, Kiln.CameraBlend? right) -> bool
+static Kiln.CameraChange.operator !=(Kiln.CameraChange? left, Kiln.CameraChange? right) -> bool
+static Kiln.CameraChange.operator ==(Kiln.CameraChange? left, Kiln.CameraChange? right) -> bool
+static Kiln.CameraKey.operator !=(Kiln.CameraKey? left, Kiln.CameraKey? right) -> bool
+static Kiln.CameraKey.operator ==(Kiln.CameraKey? left, Kiln.CameraKey? right) -> bool
+static Kiln.CameraLease.operator !=(Kiln.CameraLease left, Kiln.CameraLease right) -> bool
+static Kiln.CameraLease.operator ==(Kiln.CameraLease left, Kiln.CameraLease right) -> bool
+static Kiln.CameraLens.operator !=(Kiln.CameraLens? left, Kiln.CameraLens? right) -> bool
+static Kiln.CameraLens.operator ==(Kiln.CameraLens? left, Kiln.CameraLens? right) -> bool
+static Kiln.CameraModeRequest.operator !=(Kiln.CameraModeRequest? left, Kiln.CameraModeRequest? right) -> bool
+static Kiln.CameraModeRequest.operator ==(Kiln.CameraModeRequest? left, Kiln.CameraModeRequest? right) -> bool
+static Kiln.CameraOverride.operator !=(Kiln.CameraOverride? left, Kiln.CameraOverride? right) -> bool
+static Kiln.CameraOverride.operator ==(Kiln.CameraOverride? left, Kiln.CameraOverride? right) -> bool
+static Kiln.CameraPath.operator !=(Kiln.CameraPath? left, Kiln.CameraPath? right) -> bool
+static Kiln.CameraPath.operator ==(Kiln.CameraPath? left, Kiln.CameraPath? right) -> bool
+static Kiln.CameraPose.operator !=(Kiln.CameraPose? left, Kiln.CameraPose? right) -> bool
+static Kiln.CameraPose.operator ==(Kiln.CameraPose? left, Kiln.CameraPose? right) -> bool
+static Kiln.CameraProfile.operator !=(Kiln.CameraProfile? left, Kiln.CameraProfile? right) -> bool
+static Kiln.CameraProfile.operator ==(Kiln.CameraProfile? left, Kiln.CameraProfile? right) -> bool
+static Kiln.CameraProjection.operator !=(Kiln.CameraProjection? left, Kiln.CameraProjection? right) -> bool
+static Kiln.CameraProjection.operator ==(Kiln.CameraProjection? left, Kiln.CameraProjection? right) -> bool
+static Kiln.CameraResult.operator !=(Kiln.CameraResult? left, Kiln.CameraResult? right) -> bool
+static Kiln.CameraResult.operator ==(Kiln.CameraResult? left, Kiln.CameraResult? right) -> bool
+static Kiln.CameraShake.operator !=(Kiln.CameraShake? left, Kiln.CameraShake? right) -> bool
+static Kiln.CameraShake.operator ==(Kiln.CameraShake? left, Kiln.CameraShake? right) -> bool
+static Kiln.CameraVisualResult.operator !=(Kiln.CameraVisualResult? left, Kiln.CameraVisualResult? right) -> bool
+static Kiln.CameraVisualResult.operator ==(Kiln.CameraVisualResult? left, Kiln.CameraVisualResult? right) -> bool
+static Kiln.CameraVisualSnapshot.operator !=(Kiln.CameraVisualSnapshot? left, Kiln.CameraVisualSnapshot? right) -> bool
+static Kiln.CameraVisualSnapshot.operator ==(Kiln.CameraVisualSnapshot? left, Kiln.CameraVisualSnapshot? right) -> bool
+~override Kiln.CameraLease.Equals(object obj) -> bool
+~override Kiln.CameraLease.ToString() -> string
