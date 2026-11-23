@@ -696,7 +696,7 @@ typedef struct KilnItemsEquipResult {
  * transaction. The old stack goes to an empty Generic slot (default), or is taken and reported (TAKE). Every refusal
  * and DRY_RUN rolls back everything. Count must fit one stack; gear count must be 1. Backpack equipment slot 23 is
  * refused: its inventory does not exist until commit. flags in the result use these bits; reserved[0] at +80 reports
- * replaced_count (0 for an ordinary equip). from is 0: the new item never occupied a backpack slot. */
+ * replaced_count (0 for an ordinary equip). from is 0: there was no intermediate inventory placement. */
 #define KILN_ITEMS_GIVE_EQUIP_DRY_RUN 0x02u
 #define KILN_ITEMS_GIVE_EQUIP_TAKE 0x04u
 typedef struct KilnItemsGiveEquipRequest {
