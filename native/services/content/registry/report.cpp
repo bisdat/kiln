@@ -128,6 +128,7 @@ json report_json(const Schema& schema, const Result& r, const ReportMeta& meta, 
         row["loser"] = l.loser.empty() ? json(nullptr) : json(l.loser);
         row["certainty"] = certainty_name(l.certainty);
         row["text"] = l.text;
+        if (is_raw_field(l.field.field)) row["raw"] = true;
         conflicts.push_back(std::move(row));
     }
     doc["conflicts"] = std::move(conflicts);
@@ -139,6 +140,7 @@ json report_json(const Schema& schema, const Result& r, const ReportMeta& meta, 
         if (!x.registry.empty()) row["registry"] = x.registry;
         if (!x.id.empty()) row["id"] = x.id;
         if (!x.field.empty()) row["field"] = x.field;
+        if (x.raw && !x.field.empty()) row["raw"] = true;
         refused.push_back(std::move(row));
     }
     doc["refused"] = std::move(refused);

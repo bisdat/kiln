@@ -198,6 +198,7 @@ struct Refusal {
     std::string reason;
     std::string entry;  // a refused add: the "<registry>|<id>" it would have made (a reference to it names this refusal as its cause)
     std::string registry, id, field;  // where it was refused, when known: the registry, the entry, the Kiln field or raw path
+    bool raw = false;                  // field is a raw path (the Advanced tier), not a Kiln field: readers hide it
 };
 
 // One IR document. false: the document itself is unusable (*err: why; nothing of it is taken): not JSON, nested deeper than

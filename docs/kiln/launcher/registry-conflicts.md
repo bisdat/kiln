@@ -29,6 +29,7 @@ omissions are disclosed. Sections paginate at 25 rows; the field filter searches
 are shown in evaluation order. This is intentionally not an export of the full history.
 
 All report text is rendered as React text, never HTML. Mapping records, hashes, raw member paths, game addresses and
-function metadata are not presented. Field names are checked against Kiln's published registry identifier lock;
-Advanced or newer unrecognized fields keep their outcome but hide mapping details until the launcher knows their
-Kiln names. No game client is launched by this page.
+function metadata are not presented. Rows the runtime marks `raw` (Advanced-tier raw paths: field rows, conflict lines
+and refused edits) keep their outcome but hide the path. Other field names are checked against Kiln's published
+registry identifier lock: a name it does not know (a misspelled field, or a field of a newer Kiln) is shown as written,
+marked "Field unknown to this launcher", and a refusal keeps its native reason, which is what the mod author can act on. No game client is launched by this page.

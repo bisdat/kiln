@@ -87,10 +87,34 @@ describe("untrusted registry report", () => {
   test("raw conflict/refusal paths stay hidden even without a retained field row", () => {
     const r = registryFixture();
     const out = parse({ ...r, fields: [],
-      conflicts: [{ ...r.conflicts[0], field: "items[game:fixture_stack].SecretSetup.Offset", text: "SecretSetup.Offset changed" }],
-      refused: [{ ...r.refused[0], registry: "items", field: "SecretSetup.Offset", reason: "Unproven: SecretSetup.Offset (mapping missing)" }],
+      conflicts: [{ ...r.conflicts[0], field: "items[game:fixture_stack].SecretSetup.Offset", raw: true, text: "SecretSetup.Offset changed" }],
+      refused: [{ ...r.refused[0], registry: "items", field: "SecretSetup.Offset", raw: true, reason: "Unproven: SecretSetup.Offset (mapping missing)" }],
     });
     expect(JSON.stringify(out)).not.toContain("SecretSetup");
+  });
+  test("a refusal of a misspelled Kiln field keeps its native reason and is not called Advanced", () => {
+    const r = registryFixture();
+    const out = parse({ ...r, refused: [{ mod: "typo", source: "content/a.json", stage: "alter", n: 0, registry: "items", id: "game:fixture_stack",
+      field: "maxStak", reason: "items has no field \"maxStak\"" }] });
+    expect(out.refused[0].reason).toBe("items has no field \"maxStak\"");
+    expect(out.refused[0].field).toContain("maxStak");
+    expect(out.refused[0].field).toContain("Field unknown to this launcher");
+    expect(JSON.stringify(out.refused)).not.toContain("Advanced");
+  });
+  test("a field or conflict a newer Kiln names is labelled unknown to this launcher, not Advanced", () => {
+    const r = registryFixture();
+    const out = parse({ ...r, fields: [{ ...r.fields[0], field: "futureField" }],
+      conflicts: [{ ...r.conflicts[0], field: "items[game:fixture_stack].futureField", text: "stacker composes on earlier" }] });
+    expect(out.fields[0].field).toBe("futureField (Field unknown to this launcher)");
+    expect(out.conflicts[0].field).toBe("items[game:fixture_stack].futureField (Field unknown to this launcher)");
+    expect(out.conflicts[0].text).toBe("stacker composes on earlier");
+  });
+  test("a refusal the runtime marks raw stays hidden", () => {
+    const r = registryFixture();
+    const out = parse({ ...r, refused: [{ mod: "adv", source: "", stage: "alter", n: 0, registry: "items", field: "SecretSetup.Member", raw: true,
+      reason: "game:x: no entry" }] });
+    expect(JSON.stringify(out.refused)).not.toContain("SecretSetup");
+    expect(out.refused[0].field).toBe("Advanced field (details hidden)");
   });
   test("HTML is kept as plain text, never interpreted", () => {
     const r = registryFixture(); r.refused[0].reason = '<img src=x onerror="alert(1)">';

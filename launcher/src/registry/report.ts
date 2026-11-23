@@ -111,9 +111,9 @@ export function parseRegistryReport(input: string): RegistryReport {
   const fieldRows = fields.slice(0, REPORT_LIMITS.rows).map(x => {
     const f = object(x), b = object(f.base), chain = array(f.writers);
     const skip = Math.max(0, chain.length - REPORT_LIMITS.writers);
-    const raw = f.raw === true || !isKilnField(text(f.registry), text(f.field));
+    const raw = f.raw === true, unknown = !raw && !isKilnField(text(f.registry), text(f.field));
     return {
-      registry: text(f.registry), id: text(f.id), field: raw ? "Advanced field (details hidden)" : text(f.field), applies: text(f.applies),
+      registry: text(f.registry), id: text(f.id), field: raw ? "Advanced field (details hidden)" : unknown ? `${text(f.field)} (Field unknown to this launcher)` : text(f.field), applies: text(f.applies),
       baseOrigin: text(b.origin), base: value(b.value, b.entriesLeftOut), result: value(f.result, f.resultEntriesLeftOut), winner: owner(f.winner),
       formulaInputs: f.formulaInputs === undefined ? "" : value(f.formulaInputs),
       writersOmitted: omitted(f.writersLeftOut) + skip,
@@ -131,15 +131,19 @@ export function parseRegistryReport(input: string): RegistryReport {
     conflicts: conflicts.slice(0, REPORT_LIMITS.rows).map(x => {
       const c = object(x), field = text(c.field);
       const registry = text(c.registry), prefix = `${registry}[${text(c.id)}].`;
-      const raw = !field.startsWith(prefix) || !isKilnField(registry, field.slice(prefix.length));
-      return { field: raw ? "Advanced field (details hidden)" : field, kind: text(c.kind), winner: owner(c.winner), loser: c.loser === null ? "None" : text(c.loser),
+      const raw = c.raw === true || !field.startsWith(prefix), unknown = !raw && !isKilnField(registry, field.slice(prefix.length));
+      return { field: raw ? "Advanced field (details hidden)" : unknown ? `${field} (Field unknown to this launcher)` : field, kind: text(c.kind), winner: owner(c.winner), loser: c.loser === null ? "None" : text(c.loser),
         certainty: certainty(c.certainty), text: raw ? "Advanced field conflict; mapping details hidden." : text(c.text) };
     }),
     refused: refused.slice(0, REPORT_LIMITS.rows).map(x => {
-      const f = object(x), field = optional(f.field), registry = optional(f.registry);
-      const raw = !!field && !isKilnField(registry, field);
-      return { owner: text(f.mod), field: raw ? "Advanced field (details hidden)" : [optional(f.registry), optional(f.id), optional(f.field)].filter(Boolean).join(" · "),
-        stage: text(f.stage), reason: raw ? `${text(f.reason).startsWith("RestartRequired:") ? "RestartRequired: " : text(f.reason).startsWith("Unproven:") ? "Unproven: " : ""}Advanced field (mapping details hidden).` : text(f.reason) };
+      // Only a refusal the runtime marks raw (an Advanced-tier raw path, report.cpp) is redacted. A name the lock does not
+      // know (a typo, or a field of a newer Kiln) is what the author wrote, and the reason is the one thing they can act on.
+      const f = object(x), field = optional(f.field), registry = optional(f.registry), reason = text(f.reason);
+      const raw = f.raw === true;
+      const unknown = !raw && !!field && !isKilnField(registry, field);
+      const place = [registry, optional(f.id), field].filter(Boolean).join(" · ");
+      return { owner: text(f.mod), field: raw ? "Advanced field (details hidden)" : unknown ? `${place} (Field unknown to this launcher)` : place,
+        stage: text(f.stage), reason: raw ? `${reason.startsWith("RestartRequired:") ? "RestartRequired: " : reason.startsWith("Unproven:") ? "Unproven: " : ""}Advanced field (mapping details hidden).` : reason };
     }),
     entries: [added, removed].flatMap((rows, index) => rows.slice(0, REPORT_LIMITS.rows).map(x => {
       const e = object(x); return { kind: index === 0 ? "Added" : "Removed", registry: text(e.registry), id: text(e.id) };
