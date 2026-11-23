@@ -441,7 +441,7 @@ def npc_bodies(mod_dir):
         sk = body.get("skeleton") or stem(body["model"])
         if sk != (animation.get("skeleton") or stem(animation["clips"])):
             raise BlocksError(f"npcs.{name}.animation: body and animation must use the same skeleton")
-        out[name] = {"key": npc.get("was") or name, "body": body, "animation": animation, "motions": motions,
+        out[name] = {"key": npc["was"] if npc.get("was") is not None else name, "body": body, "animation": animation, "motions": motions,
                      "skeletonName": sk, "animationName": an, "bodyName": bn, "graphName": f"{an}.{bn}" if body.get("slots") else an,
                      "modelName": model_name(body["model"])}
     if not out:
@@ -487,7 +487,8 @@ def npc_bodies(mod_dir):
 
 def _body_geometry(body, where, box=None):
     import math
-    if body.get("scale", 1) != 1:
+    scale = body.get("scale")
+    if scale is not None and (type(scale) not in (int, float) or scale != 1):
         raise BlocksError(f"{where}.scale: an authored roster body keeps scale 1")
     if body.get("colliders"):
         raise BlocksError(f"{where}.colliders: use Size, not custom roster colliders")
@@ -791,6 +792,18 @@ def body_manifest(recipe_path, entries, update, selected=None, producer="modelco
         return normal, missing, mismatch + foreign_mismatched
     except (CP.Refused, OSError, ValueError) as e:
         raise BlocksError(f"npc-bodies.v1: {e}") from e
+
+
+def manifest_diagnostics(manifest, producer):
+    """Name the eager manifest or local body cache, and never tell one tool to bless another tool's bytes."""
+    entries = manifest["missing"] + manifest["mismatched"]
+    for file, rows in (("assets.json", [e for e in entries if "producer" not in e]),
+                       ("assets/cooked/npc-bodies.v1.json", [e for e in entries if "producer" in e])):
+        if not rows:
+            continue
+        foreign = sorted({e["producer"] for e in rows if e.get("producer", producer) != producer})
+        remedy = "rerun " + " and ".join(foreign) + " with --update-manifest to rebuild its outputs" if foreign else "run with --update-manifest"
+        yield f"{file} does not match the cooked files ({remedy}):"
 
 
 def body_receipt(recipe_path, game):

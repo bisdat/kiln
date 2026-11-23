@@ -57,11 +57,12 @@ internal static class NpcBodyRig
 
     internal static void Shape(BlockContext ctx, NpcMotionsBlock motions, string path)
     {
-        if (motions.Bindings == null) throw new BlockError(ctx.Block, $"{path}.bindings", "a binding list, not null");
+        var bindings = string.IsNullOrEmpty(path) ? "bindings" : $"{path}.bindings";
+        if (motions.Bindings == null) throw new BlockError(ctx.Block, bindings, "a binding list, not null");
         var seen = new HashSet<(NpcMotionRole, int)>();
         foreach (var (b, i) in motions.Bindings.Select((b, i) => (b, i)))
         {
-            var at = $"{path}.bindings[{i}]";
+            var at = $"{bindings}[{i}]";
             if (b == null) throw new BlockError(ctx.Block, at, "a motion binding, not null");
             if (!Enum.IsDefined(b.Role)) throw new BlockError(ctx.Block, $"{at}.role", "a known NPC motion role");
             if (b.Variant < 0 || b.Variant >= Variants(b.Role)) throw new BlockError(ctx.Block, $"{at}.variant", $"{b.Role} uses variants 0..{Variants(b.Role) - 1}");
@@ -73,7 +74,7 @@ internal static class NpcBodyRig
         foreach (var role in Enum.GetValues<NpcMotionRole>())
             for (var v = 0; v < Variants(role); v++)
                 if (!seen.Contains((role, v)) && (Required(role) || motions.OptionalFallback == null))
-                    throw new BlockError(ctx.Block, $"{path}.bindings", $"missing {role} variant {v}" + (Required(role) ? "; required motions cannot fall back" : "; bind it or supply optionalFallback explicitly"));
+                    throw new BlockError(ctx.Block, bindings, $"missing {role} variant {v}" + (Required(role) ? "; required motions cannot fall back" : "; bind it or supply optionalFallback explicitly"));
     }
 
     /// <summary>Canonical 27-binding vector, with effective cooked clip durations. No sequence edits or game calls.</summary>

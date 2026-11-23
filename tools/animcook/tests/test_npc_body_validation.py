@@ -250,6 +250,16 @@ class NpcBodyValidation(unittest.TestCase):
                     B._body_bindings(spec, graph, clips, "motions")
                 self.assertIn("motions.sit[0].state", str(error.exception))
 
+    def test_nullable_numeric_scale_has_the_same_shape_as_managed_JSON(self):
+        body = {"size": {"radius": .75, "height": 2}, "slots": {"Root": "root", "Head": "head", "HandR": "hand"}}
+        for scale in (None, 1, 1.0):
+            with self.subTest(valid=scale):
+                B._body_geometry(dict(body, scale=scale), "body")
+        for scale in (True, False, "1"):
+            with self.subTest(invalid=scale):
+                with self.assertRaisesRegex(B.BlocksError, "body.scale"):
+                    B._body_geometry(dict(body, scale=scale), "body")
+
     def test_body_size_ranges_scale_colliders_and_slots_are_checked(self):
         body = {"size": {"radius": .75, "height": 2}, "slots": {"Root": "root", "Head": "head", "HandR": "hand"}}
         B._body_geometry(body, "body")

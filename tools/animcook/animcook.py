@@ -35,7 +35,7 @@ from kfc import anim  # noqa: E402
 from kfc.archive import Kfc  # noqa: E402
 from kfc.refl import TypeDb  # noqa: E402
 
-from anicook import clips as C, graphgen as G, playergraph as PG, playerstates as PS, recipe, skeleton as K  # noqa: E402
+from anicook import blocks as B, clips as C, graphgen as G, playergraph as PG, playerstates as PS, recipe, skeleton as K  # noqa: E402
 from anicook.gltfdoc import Doc  # noqa: E402
 
 DEFAULT_GAME = Path.home() / ".local/share/Steam/steamapps/common/Enshrouded"
@@ -188,7 +188,8 @@ def cmd_recipe(a):
             for w in s.get("warnings", []):
                 print(f"  warning: {w}")
     if r["manifest"]["missing"] or r["manifest"]["mismatched"]:
-        print("assets.json does not match the cooked files (run with --update-manifest):")
+        for message in B.manifest_diagnostics(r["manifest"], recipe.TOOL):
+            print(message)
         for e in r["manifest"]["missing"] + r["manifest"]["mismatched"]:
             print("  " + json.dumps(e))
     print(f"{'ok' if r['ok'] else 'FAILED'}: {len(r['outputs'])} file(s)")

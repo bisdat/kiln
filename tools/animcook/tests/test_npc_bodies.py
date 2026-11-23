@@ -41,6 +41,13 @@ class NpcBodies(unittest.TestCase):
     def write(self):
         (self.mod / "blocks/npc.json").write_text(json.dumps(self.doc))
 
+    def test_was_uses_null_coalescing_like_managed_and_native_NPC_identity(self):
+        for was, expected in ((None, "tobin"), ("", ""), ("old-tobin", "old-tobin")):
+            with self.subTest(was=was):
+                self.doc["npcs"]["tobin"]["was"] = was
+                self.write()
+                self.assertEqual(expected, B.npc_bodies(self.mod)["tobin"]["key"])
+
     def test_animation_assets_are_only_in_the_body_manifest(self):
         rep = R.Run(self.recipe, TYPES).run(update_manifest=True)
         self.assertTrue(rep["ok"], rep)

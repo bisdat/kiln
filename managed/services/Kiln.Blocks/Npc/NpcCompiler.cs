@@ -42,7 +42,7 @@ internal static class NpcCompiler
                 low.Json["body"] = name;
                 return new BlockHandle<BodyBlock>(mod, name, BlockIds.Derive(mod, "body", name), $"{mod}.{name}", body);
             case NpcMotionsBlock motions:
-                NpcBodyRig.Shape(ctx, motions, "motions");
+                NpcBodyRig.Shape(ctx, motions, "");
                 low.Json["npcMotions"] = name;
                 return new BlockHandle<NpcMotionsBlock>(mod, name, BlockIds.Derive(mod, "npcmotions", name), $"{mod}.{name}", motions);
             case AnimationBlock anim:

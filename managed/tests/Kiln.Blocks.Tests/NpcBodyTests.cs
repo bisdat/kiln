@@ -200,6 +200,19 @@ public sealed class NpcBodyTests
         }
     }
 
+    [Theory]
+    [InlineData("variant", "bindings[0].variant")]
+    [InlineData("duplicate", "bindings[1]")]
+    [InlineData("missing", "bindings")]
+    [InlineData("null", "bindings")]
+    public void Standalone_motion_errors_name_the_blocks_own_fields(string change, string field)
+    {
+        var binding = new NpcMotionBinding(NpcMotionRole.Sit, change == "variant" ? 3 : 0, "pose");
+        var motions = new NpcMotionsBlock { Bindings = change switch { "null" => null!, "duplicate" => [binding, binding], _ => [binding] } };
+        var mod = new ModBlocks("motion-fields", 1);
+        Assert.Equal(field, Assert.Throws<BlockError>(() => Compiler.Lower(mod, "motions", motions)).Field);
+    }
+
     [Fact]
     public void Motions_are_a_strict_reusable_block_and_an_inline_NPC_part()
     {
