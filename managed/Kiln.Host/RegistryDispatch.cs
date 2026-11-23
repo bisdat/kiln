@@ -156,7 +156,11 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
         if (status.World == 0) return null;
         var directory = WorldConfigs.Current();
         var world = new RegistryWorld(status.World, (WorldKind)status.Kind, directory is null ? null : Path.GetFileName(directory));
-        return !bound || _worldBinding.Matches(world) ? world : world with { Id = null };
+        if (!bound) return world;
+        // review4 recheck RM2: bind here too, not only in TryWorld's polling, so a mod that only uses Registry.Change or
+        // Registry.Read (no runtime author, so FlushLoads skips polling) still gets the bound world id and its settings.
+        lock (_signals) { if (_worldChanged) { _worldBinding.Signal(_worldDirectory); _worldChanged = false; } }
+        return _worldBinding.Matches(world) || _worldBinding.Bind(world) ? world : world with { Id = null };
     }
     private RegistryContext Context(ModContext owner, RegistryEntryPoint point, RegistryPhase phase, RegistryWorld? world,
         string code, bool stage, Dictionary<string, ConfigFile> inputs, bool readOnly = false, bool pass = false)

@@ -524,6 +524,29 @@ public sealed class RegistryDispatchTests : ModsFixture
         Assert.Equal(1, calls);
         owner.Retire();
     }
+    // review4 recheck RM2: a mod that only uses Registry.Change, with no runtime author, still sees the bound world.
+    [Fact(Timeout = 30_000)]
+    public void Review4R_ManualOnlyModSeesTheBoundWorldId()
+    {
+        WorldConfigs.Reset();
+        try
+        {
+            using var native = new FakeRegistry(); using var manager = NewManager(native.Host);
+            using var dispatch = new RegistryDispatch(manager); dispatch.Prepare(100);
+            WorldConfigs.Announce(Path.Combine(DataDir, "world-a"));
+            dispatch.FlushLoads(); dispatch.FlushLoads();
+            var owner = Owner(native, "manual-only"); RegistryWorld? seen = null; RegistryContextError? error = null;
+            var result = RegistryRuntime.Manual!(owner, c => {
+                seen = c.World;
+                try { _ = Config.RegisterWorld<WorldInput>().Value.Count; } catch (RegistryContextException e) { error = e.Code; }
+                Edit(c, 40);
+            });
+            Assert.Null(error);
+            Assert.Equal("world-a", seen?.Id);
+            owner.Retire();
+        }
+        finally { WorldConfigs.Reset(); }
+    }
     [Fact]
     public unsafe void MissingStageFunctionsMakeTheTransportUnavailable()
     {
