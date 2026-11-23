@@ -732,6 +732,30 @@ public sealed class UiRichBlockTests : IDisposable
     }
 
     [Fact]
+    public void A_draft_typed_before_a_world_change_is_not_written_into_the_new_world()
+    {
+        // review nit: the world changes while the field has the keyboard; ImGui keeps the old text in the field, and its
+        // Enter must not commit that into the new world's state. The next edit commits as usual.
+        Define("w", Json<WindowBlock>(RichJson));
+        var w = Open();
+        var typing = new Canvas();
+        typing.Typing["Note###in"] = ("old world", UiItemState.Active, false);
+        Frame(w, typing);
+        _game.WorldSession++;
+        UiRuntime.Pump();
+        var enter = new Canvas();
+        enter.Typing["Note###in"] = ("old world", UiItemState.Deactivated | UiItemState.DeactivatedAfterEdit, true);
+        Frame(w, enter);
+        UiRuntime.Pump();
+        Assert.Equal(new UiStateValue.String(""), w.State.Snapshot.Values["note"]);
+        var next = new Canvas();
+        next.Typing["Note###in"] = ("new", UiItemState.Active | UiItemState.Deactivated, true);
+        Frame(w, next);
+        UiRuntime.Pump();
+        Assert.Equal(new UiStateValue.String("new"), w.State.Snapshot.Values["note"]);
+    }
+
+    [Fact]
     public void Escape_restores_the_text_and_writes_nothing()
     {
         Define("w", Json<WindowBlock>(RichJson) with { Rows = [new InputRow { Id = "note", Label = "Note", Bind = "state.note", MaxBytes = 64 }] });

@@ -206,6 +206,9 @@ internal sealed class WindowRuntime : IDisposable
         public string Draft = "";
         public bool Active;
         public ulong Session;
+        /// <summary>The world changed while the field had the keyboard: ImGui still shows the old world's text, and nothing
+        /// it commits is written until the field lets go of the keyboard.</summary>
+        public bool Stale;
         public string? Shown;          // the tab ImGui showed last frame
         public string? Forcing;        // a tab being selected from the state, until it shows
         public int ForceFrames;
@@ -476,6 +479,7 @@ internal sealed class WindowRuntime : IDisposable
         var w = WidgetOf(scope);
         if (!w.Active || w.Session != v.Session)
         {
+            if (w.Active) w.Stale = true;  // a new world under an active field: its text is the old world's
             w.Draft = v.Committed;
             w.Session = v.Session;
         }
@@ -483,6 +487,16 @@ internal sealed class WindowRuntime : IDisposable
         var enter = c.TextField(v.Label + "###in", ref text, p.MaxBytes, enterCommits: !p.Multiline, p.Multiline, out var st);
         w.Draft = text;
         w.Active = (st & UiItemState.Active) != 0;
+        if (w.Stale)
+        {
+            // never the old world's text into the new world: wait until the field lets go, then it starts from the new value
+            if (!w.Active)
+            {
+                w.Stale = false;
+                w.Draft = v.Committed;
+            }
+            return;
+        }
         var commit = (enter && !p.Multiline) || (p.Commit == UiInputCommit.Blur && (st & UiItemState.DeactivatedAfterEdit) != 0);
         if (!commit) return;
         text = Utf8Cut(text, p.MaxBytes);
