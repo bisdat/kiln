@@ -9,11 +9,20 @@ namespace Kiln;
 
 /// <summary>What a placed thing sits on. More than one: <c>Surface.Floor | Surface.Wall</c>; in JSON <c>"floor, wall"</c>. The first is what the cursor tries first.</summary>
 [Flags]
-public enum Surface { Floor = 1, Wall = 2, Ceiling = 4 }
+public enum Surface
+{
+    /// <summary>The floor.</summary>
+    Floor = 1,
+    /// <summary>A wall.</summary>
+    Wall = 2,
+    /// <summary>A ceiling.</summary>
+    Ceiling = 4,
+}
 
 /// <summary>Where and how a player can place something. A field left out: what its starter does.</summary>
 public sealed record PlacementBlock : IBlock
 {
+    /// <summary>The surfaces it can be placed on: floor, wall, ceiling, or several. Null: what its starter does.</summary>
     public Surface? On { get; init; }
     /// <summary>Only inside a base, as the game's furniture.</summary>
     public bool? InBase { get; init; }
@@ -39,11 +48,15 @@ public sealed record BoxCollider
 }
 
 /// <summary>A prop that <see cref="PropBlock.Provides"/> a crafting prop, by handle or name: a block of this mod, or <c>"other-mod:name"</c>.</summary>
+/// <param name="Value">The prop's name: a block of this mod, or <c>"other-mod:name"</c>.</param>
 [JsonConverter(typeof(PropRefConverter))]
 public readonly record struct PropRef(string Value)
 {
+    /// <summary>A prop by its name in this mod, or <c>"other-mod:name"</c>.</summary>
     public static implicit operator PropRef(string value) => new(value);
+    /// <summary>A prop by its handle.</summary>
     public static implicit operator PropRef(BlockHandle handle) => new(handle.ToString());
+    /// <summary>The prop's name.</summary>
     public override string ToString() => Value;
 }
 
@@ -56,6 +69,7 @@ internal sealed class PropRefConverter : JsonConverter<PropRef>
 /// <summary>What the game's comfort counts, for whoever rests within range. The tooltip's Comfort row follows.</summary>
 public sealed record ComfortBlock : IBlock
 {
+    /// <summary>How much comfort it counts, a whole number. Required.</summary>
     public required int Amount { get; init; }
     /// <summary>Only the best of a category counts near a player, as the game's rule goes.</summary>
     public ComfortCategory Category { get; init; } = ComfortCategory.Hearth;
@@ -66,16 +80,57 @@ public sealed record ComfortBlock : IBlock
 }
 
 /// <summary>The game's comfort categories.</summary>
-public enum ComfortCategory { Hearth, Bed, Chair, Table, Bench, Throne, Bathtub, Sink, Toilet, Shower, Carpet, Illumination, Flame, Trophy, Stool, Kitchen, Wellness }
+public enum ComfortCategory
+{
+    /// <summary>The game's hearth category. The default.</summary>
+    Hearth,
+    /// <summary>The game's bed category.</summary>
+    Bed,
+    /// <summary>The game's chair category.</summary>
+    Chair,
+    /// <summary>The game's table category.</summary>
+    Table,
+    /// <summary>The game's bench category.</summary>
+    Bench,
+    /// <summary>The game's throne category.</summary>
+    Throne,
+    /// <summary>The game's bathtub category.</summary>
+    Bathtub,
+    /// <summary>The game's sink category.</summary>
+    Sink,
+    /// <summary>The game's toilet category.</summary>
+    Toilet,
+    /// <summary>The game's shower category.</summary>
+    Shower,
+    /// <summary>The game's carpet category.</summary>
+    Carpet,
+    /// <summary>The game's illumination category.</summary>
+    Illumination,
+    /// <summary>The game's flame category.</summary>
+    Flame,
+    /// <summary>The game's trophy category.</summary>
+    Trophy,
+    /// <summary>The game's stool category.</summary>
+    Stool,
+    /// <summary>The game's kitchen category.</summary>
+    Kitchen,
+    /// <summary>The game's wellness category.</summary>
+    Wellness,
+}
 
 /// <summary>Something placed that stands there: furniture, a banner, a lamp. It needs a look: a game item that places something (<see cref="VisualBlock.Like"/>: its
 /// model, its collision and how it places, all of it), or a cooked model (<see cref="VisualBlock.Model"/>: the rest then comes from what it sits on).</summary>
 public record PropBlock : IBlock, ITweakable
 {
+    /// <summary>The name of the item that places it, as players read it. Required.</summary>
     public required string Name { get; init; }
+    /// <summary>The description of the item that places it.</summary>
     public string? Description { get; init; }
+    /// <summary>What it looks like, as a block or the name of one defined once.</summary>
     public PartRef<VisualBlock>? Visual { get; init; }
+    /// <summary>Where and how a player can place it, as a block or the name of one defined once.</summary>
     public PartRef<PlacementBlock>? Placement { get; init; }
+    /// <summary>The comfort it gives to whoever rests within range, as a block or the name of one defined once.</summary>
     public PartRef<ComfortBlock>? Comfort { get; init; }
     /// <summary>What a player bumps into and what hits stop at: one box. Null: with a cooked model of yours, the box around that model; with a game item's look, that item's
     /// collision. Only a prop with a <see cref="VisualBlock.Model"/> of its own takes one: a game item's look, a station or furniture keeps the collision it starts from.
@@ -94,6 +149,7 @@ public record PropBlock : IBlock, ITweakable
     public VfxRef? Light { get; init; }
     /// <summary>How the item that places it is made.</summary>
     public RecipeBlock? Recipe { get; init; }
+    /// <summary>Where else the item that places it is found: chests, world pickups and drop tables.</summary>
     public LootBlock? Loot { get; init; }
     /// <inheritdoc cref="WeaponBlock.Was"/>
     public string? Was { get; init; }
@@ -154,23 +210,41 @@ public sealed record MenuBlock : IBlock
 }
 
 /// <summary>A workshop of the game, with the item that places it. Premade instances: the build a station starts from, and the menu it opens.</summary>
+/// <param name="Key">The name JSON uses for it, such as <c>"drying-rack"</c>.</param>
+/// <param name="Item">The game item that places it.</param>
+/// <param name="Template">The game's template of the placed station.</param>
+/// <param name="Workshop">The game's workshop, <c>0x…</c>: what decides the recipes it runs.</param>
 /// <param name="Timed">The game's station works on its own, over time. False: a player crafts at it at once.</param>
 [JsonConverter(typeof(PremadeConverter<StationKind>))]
 public sealed record StationKind(string Key, string Item, string Template, string Workshop, bool Timed = false) : IPremade
 {
+    /// <summary>The game's workbench.</summary>
     public static readonly StationKind Workbench = new("workbench", "Craftingstation_Workbench", "Craftingstation_Workbench", "0x4da88f73");
+    /// <summary>The game's carpenter's workbench.</summary>
     public static readonly StationKind Carpenter = new("carpenter", "Craftingstation_Carpenter_Workbench", "Craftingstation_Carpenter_Workbench", "0x8996a8c4");
+    /// <summary>The game's farmer's kitchen.</summary>
     public static readonly StationKind Kitchen = new("kitchen", "Craftingstation_Farmer_Kitchen", "Craftingstation_Farmer_Kitchen", "0x07ce61f0");
+    /// <summary>The game's forge.</summary>
     public static readonly StationKind Forge = new("forge", "Prop_Production_T1_Forge", "T1_Forge_Factory", "0x8dca2c49", true);
+    /// <summary>The game's oven.</summary>
     public static readonly StationKind Oven = new("oven", "Prop_Production_T3_Oven", "T3_Oven_Factory", "0x1ee9f0bf", true);
+    /// <summary>The game's alchemy station.</summary>
     public static readonly StationKind Alchemy = new("alchemy", "Prop_Production_T3_Alchemy_Station", "T3_Alchemy_Station_Factory", "0xd08b9300", true);
+    /// <summary>The game's drying rack.</summary>
     public static readonly StationKind DryingRack = new("drying-rack", "Prop_Production_T1_Drying_Rack", "T1_Drying_Rack_Factory", "0x6b95dc33", true);
+    /// <summary>The game's charcoal kiln.</summary>
     public static readonly StationKind CharcoalKiln = new("charcoal-kiln", "Prop_Production_T1_Charcoal_Kiln", "T1_Charcoal_Kiln_Factory", "0x2546ae49", true);
+    /// <summary>The game's kiln.</summary>
     public static readonly StationKind Kiln = new("kiln", "Prop_Production_T2_Kiln", "T2_Kiln_Factory", "0x847eab53", true);
+    /// <summary>The game's smelter.</summary>
     public static readonly StationKind Smelter = new("smelter", "Prop_Production_T2_Smelter", "T2_Smelter_Factory", "0xf5aab50a", true);
+    /// <summary>The game's fireplace, its cooking station.</summary>
     public static readonly StationKind Fireplace = new("fireplace", "Prop_production_T2_Cooking_Station", "T2_Fireplace_Factory", "0x39fbd98f", true);
+    /// <summary>The game's hand grinder.</summary>
     public static readonly StationKind Grinder = new("grinder", "Prop_Production_T1_HandGrinder", "T1_HandGrinder_Factory", "0x056d94f8", true);
+    /// <summary>The game's tanning station.</summary>
     public static readonly StationKind Tannery = new("tannery", "Prop_Production_T3_Tanning_Station", "T3_Tanning_Station_Factory", "0xa4b9eaa5", true);
+    /// <summary>The game's table saw.</summary>
     public static readonly StationKind TableSaw = new("table-saw", "Prop_Production_T2_Table_Saw", "T2_Table_Saw_Factory", "0x1abf8143", true);
     internal static readonly StationKind[] All = [Workbench, Carpenter, Kitchen, Forge, Oven, Alchemy, DryingRack, CharcoalKiln, Kiln, Smelter, Fireplace, Grinder, Tannery, TableSaw];
 }

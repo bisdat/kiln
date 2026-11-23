@@ -3,10 +3,34 @@
 namespace Kiln;
 
 /// <summary>How hard a material is: which column of a tool's or an explosion's damage applies to it. <see cref="Unbreakable"/> takes no damage from anything, and can't be dismantled.</summary>
-public enum Hardness { Soft, SlightlyHard, ModeratelyHard, Hard, VeryHard, Unbreakable }
+public enum Hardness
+{
+    /// <summary>The game's softest damage column.</summary>
+    Soft,
+    /// <summary>The game's slightly hard damage column.</summary>
+    SlightlyHard,
+    /// <summary>The game's moderately hard damage column.</summary>
+    ModeratelyHard,
+    /// <summary>The game's hard damage column.</summary>
+    Hard,
+    /// <summary>The game's very hard damage column.</summary>
+    VeryHard,
+    /// <summary>Takes no damage from anything, and can't be dismantled.</summary>
+    Unbreakable,
+}
 
 /// <summary>Which of a tool's class modifiers applies when it digs a material. <see cref="None"/>: 1.0, whatever the tool.</summary>
-public enum Breaks { None, Wood, Stone, Metal }
+public enum Breaks
+{
+    /// <summary>No class modifier: 1.0, whatever the tool.</summary>
+    None,
+    /// <summary>The tool's modifier for wood.</summary>
+    Wood,
+    /// <summary>The tool's modifier for stone.</summary>
+    Stone,
+    /// <summary>The tool's modifier for metal.</summary>
+    Metal,
+}
 
 /// <summary>What it takes to dig a material, and what comes out. Cost per block = <see cref="Health"/> / (the tool's damage for <see cref="Hardness"/> x the server's mining factor x the class modifier).
 /// A field left out stays what it was: the game material's own, or for a new material the game's plainest of that <see cref="Breaks"/>.</summary>
@@ -57,6 +81,7 @@ public sealed record BuildingMaterialBlock : IBlock
     /// <summary>The block item's name, as players read it.</summary>
     public required string Name { get; init; }
 
+    /// <summary>The block item's description.</summary>
     public string? Description { get; init; }
 
     /// <summary>What it takes to dig it. Unset fields come from the game's plainest material of that <see cref="StrengthBlock.Breaks"/>; stone when that is unset too.</summary>

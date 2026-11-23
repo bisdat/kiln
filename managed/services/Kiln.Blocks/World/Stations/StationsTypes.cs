@@ -59,10 +59,14 @@ public sealed record BaseInfo(BaseId Id, int Index, IReadOnlyList<BaseAltar> Alt
 
 /// <summary>One flame altar of a base: its entity (this session) and its own id (the GUID the game keeps in the save with
 /// the altar; it never changes). Since 0.2.0-dev.29.14.</summary>
+/// <param name="Entity">The altar's entity this session.</param>
+/// <param name="Id">The altar's own id: the GUID the game keeps in the save. It never changes.</param>
 public readonly record struct BaseAltar(EntityId Entity, BaseId Id);
 
 /// <summary>A base whose id changed when the game rebuilt its bases: an overlapping altar came or went
 /// (<see cref="BasesChangedEvent.Changed"/>). Old and new share at least one altar.</summary>
+/// <param name="Old">The base's id before the rebuild.</param>
+/// <param name="New">The base's id after the rebuild.</param>
 public readonly record struct BaseIdChange(BaseId Old, BaseId New);
 
 /// <summary>For a recipe input "any item of category X", the option chosen (the game's
@@ -73,19 +77,30 @@ public readonly record struct CategoryChoice(uint Category, int Index);
 
 /// <summary>One option of an ingredient category: an item, and how many of it count as one (the game's scaling: a craft
 /// needs <c>ceil(count x Scaling)</c> of it).</summary>
+/// <param name="Item">The item.</param>
+/// <param name="Scaling">How many of it count as one: a craft needs <c>ceil(count x Scaling)</c> of it.</param>
 public readonly record struct IngredientOption(ItemId Item, float Scaling);
 
 /// <summary>An ingredient category of the game's recipes ("any wood"): its options in the game's order.</summary>
+/// <param name="Id">The category's id, as <see cref="CategoryChoice.Category"/> names it.</param>
+/// <param name="Options">Its options, in the game's order.</param>
 public sealed record IngredientCategory(uint Id, IReadOnlyList<IngredientOption> Options);
 
 /// <summary>An amount of one item.</summary>
+/// <param name="Item">The item.</param>
+/// <param name="Count">How many of it.</param>
 public readonly record struct StationStack(ItemId Item, int Count)
 {
+    /// <summary>The stack as <c>count x item</c>.</summary>
     public override string ToString() => $"{Count} x {Item}";
 }
 
 /// <summary>A recipe input as the data has it: an item (<see cref="Item"/>), or any item of a category
 /// (<see cref="Category"/>, <see cref="CategoryCount"/>).</summary>
+/// <param name="Item">The item, for an input that names one.</param>
+/// <param name="Count">How many of the item.</param>
+/// <param name="Category">The ingredient category's id; 0 for an input that names an item.</param>
+/// <param name="CategoryCount">How many items of the category.</param>
 public readonly record struct StationInput(ItemId Item, int Count, uint Category, int CategoryCount)
 {
     /// <summary>True for "any item of a category".</summary>
@@ -233,6 +248,10 @@ public enum FillLimit
 
 /// <summary>One input of a fill plan: what one craft needs, what the station holds, what the base's stock can give (the
 /// Magic chests after the reserves, and the named player's bag).</summary>
+/// <param name="Item">The item.</param>
+/// <param name="PerCraft">How many one craft needs.</param>
+/// <param name="Have">How many the station holds.</param>
+/// <param name="Stock">How many the base's stock can give: the Magic chests after the reserves, and the named player's bag.</param>
 public readonly record struct FillInput(ItemId Item, int PerCraft, int Have, long Stock)
 {
     /// <summary>What the named ordinary chests hold of it, taken after <see cref="Stock"/> and before
@@ -272,7 +291,9 @@ public sealed record FillPlan(StationActionStatus Status, EntityId Station, uint
     /// the one a fill loads, so <see cref="CraftsLoaded"/> can drop faster than the plan says.</summary>
     public bool UseAllOptions { get; init; }
 
+    /// <summary>True when something went in: <see cref="Status"/> is Done or Partial.</summary>
     public bool Ok => Status is StationActionStatus.Done or StationActionStatus.Partial;
+    /// <summary>Why nothing (or less than asked) would go in: the message, else the status; null when <see cref="Ok"/>.</summary>
     public string? Reason => Ok ? null : Message.Length > 0 ? Message : Status.ToString();
 }
 
@@ -341,10 +362,15 @@ public enum CollectWhat
 /// <summary>Which station action.</summary>
 public enum StationAction
 {
+    /// <summary>Fill the station from the base's stock: <see cref="Stations.Fill"/>.</summary>
     Fill = 1,
+    /// <summary>Stop the station: <see cref="Stations.Stop"/>.</summary>
     Stop = 2,
+    /// <summary>Let a stopped station run again: <see cref="Stations.Resume"/>.</summary>
     Resume = 3,
+    /// <summary>Choose the recipe the station repeats: <see cref="Stations.Select"/>.</summary>
     Select = 4,
+    /// <summary>Move the station's finished items to a chest: <see cref="Stations.Collect"/>.</summary>
     Collect = 5,
 }
 
@@ -370,7 +396,9 @@ public sealed record StationResult(StationActionStatus Status, StationAction Act
     int CraftsBefore, int CraftsAfter, int CraftsAdded, int GameError, IReadOnlyList<MoveChange> Changes, StationState? StateBefore,
     StationState? StateAfter, bool DryRun, string Message) : IKilnResult
 {
+    /// <summary>True when it happened: <see cref="Status"/> is Done, Partial or Unchanged.</summary>
     public bool Ok => Status is StationActionStatus.Done or StationActionStatus.Partial or StationActionStatus.Unchanged;
+    /// <summary>Why it did not happen: the message, else the status; null when <see cref="Ok"/>.</summary>
     public string? Reason => Ok ? null : Message.Length > 0 ? Message : Status.ToString();
 
     /// <summary>Fill (not Done): what kept it below what was asked.</summary>

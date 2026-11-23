@@ -38,20 +38,31 @@ public sealed class AnimState : IEquatable<AnimState>
     /// <summary>What it was given as: a name, an engine state's name, a GUID or an id.</summary>
     public string Name { get; }
 
+    /// <summary>The engine's idle state: standing still.</summary>
     public static AnimState Idle { get; } = new("Idle");
+    /// <summary>The engine's walk state.</summary>
     public static AnimState Walk { get; } = new("Walk");
+    /// <summary>The engine's run state.</summary>
     public static AnimState Run { get; } = new("Run");
+    /// <summary>The engine's sprint state.</summary>
     public static AnimState Sprint { get; } = new("Sprint");
+    /// <summary>The engine's idle state in combat.</summary>
     public static AnimState IdleCombat { get; } = new("IdleCombat");
+    /// <summary>The engine's fall state.</summary>
     public static AnimState Fall { get; } = new("Fall");
+    /// <summary>The engine's idle state while sneaking.</summary>
     public static AnimState IdleSneak { get; } = new("IdleSneak");
+    /// <summary>The engine's sneak state.</summary>
     public static AnimState Sneak { get; } = new("Sneak");
+    /// <summary>The engine's dead state.</summary>
     public static AnimState Dead { get; } = new("Dead");
+    /// <summary>The engine's stun state.</summary>
     public static AnimState Stun { get; } = new("Stun");
 
     /// <summary>A state of one of the game's graphs, by the GUID its sequences name.</summary>
     public static AnimState Game(Guid id) => new(id.ToString());
 
+    /// <summary>A state by its name: the same as <c>new AnimState(name)</c>. Throws for a null or blank name.</summary>
     public static implicit operator AnimState(string name) => new(name);
 
     /// <summary>The engine state this is, or null.</summary>
@@ -77,9 +88,13 @@ public sealed class AnimState : IEquatable<AnimState>
         return BlockIds.Derive(mod, "state", Name);
     }
 
+    /// <summary>True when both are the same state. An engine state matches the engine state of the same name (any case); every other state matches by its name, compared exactly.</summary>
     public bool Equals(AnimState? other) => other is not null && (EngineName is { } e ? e == other.EngineName : string.Equals(Name, other.Name, StringComparison.Ordinal));
+    /// <summary>True when <paramref name="obj"/> is an <see cref="AnimState"/> that <see cref="Equals(AnimState?)"/> accepts.</summary>
     public override bool Equals(object? obj) => obj is AnimState s && Equals(s);
+    /// <summary>A hash that agrees with <see cref="Equals(AnimState?)"/>.</summary>
     public override int GetHashCode() => (EngineName ?? Name).GetHashCode(StringComparison.Ordinal);
+    /// <summary>The engine state's name, or the name the state was given.</summary>
     public override string ToString() => EngineName ?? Name;
 }
 
@@ -90,6 +105,7 @@ public sealed class AnimState : IEquatable<AnimState>
 [JsonConverter(typeof(ClipConverter))]
 public sealed record Clip
 {
+    /// <summary>An empty clip: set <see cref="Name"/> or <see cref="Blend"/>.</summary>
     public Clip() { }
 
     /// <summary>The glTF animation by its name.</summary>
@@ -115,8 +131,10 @@ public sealed record Clip
     /// <summary>On <see cref="AnimationBlock.Hit"/>: only these joints.</summary>
     public IReadOnlyList<string>? Bones { get; init; }
 
+    /// <summary>The glTF animation by its name: the same as <c>new Clip(name)</c>.</summary>
     public static implicit operator Clip(string name) => new(name);
 
+    /// <summary>The glTF animation's name, or <c>blend</c> for a blend.</summary>
     public override string ToString() => Name ?? "blend";
 }
 
@@ -153,20 +171,26 @@ public static class Blends
 /// <summary>An animation played over the states: always, or each time an overlay fires (the engine fires <c>hit</c> on a hit reaction).</summary>
 public sealed record LayerBlock
 {
+    /// <summary>A name for the layer.</summary>
     public string? Name { get; init; }
     /// <summary><c>hit</c>, or a name of your own a sequence fires. Null: it always plays.</summary>
     public string? Overlay { get; init; }
     /// <summary>The glTF animation.</summary>
     [JsonPropertyName("clip")]
     public string? Clip { get; init; }
+    /// <summary>Several animations mixed by an input, in place of <see cref="Clip"/>.</summary>
     public BlendSpace? Blend { get; init; }
+    /// <summary>Plays faster (above 1) or slower.</summary>
     public double? Speed { get; init; }
     /// <summary>The animation whose pose it is relative to: then it adds to what plays. Without one it replaces it.</summary>
     public string? Reference { get; init; }
     /// <summary>Only these joints.</summary>
     public IReadOnlyList<string>? Bones { get; init; }
+    /// <summary>How strongly the layer applies.</summary>
     public double? Weight { get; init; }
+    /// <summary>Seconds it fades in over.</summary>
     public double? FadeIn { get; init; }
+    /// <summary>Seconds it fades out over.</summary>
     public double? FadeOut { get; init; }
 }
 
@@ -197,16 +221,25 @@ public sealed record AnimationBlock : INpcBlock, IPremade
     /// <summary>A game creature whose graph this is (the premades).</summary>
     public string? Template { get; init; }
 
+    /// <summary>The clip the engine's Idle state plays. Needed on an animation of your own.</summary>
     public Clip? Idle { get; init; }
+    /// <summary>The clip the engine's Walk state plays.</summary>
     public Clip? Walk { get; init; }
+    /// <summary>The clip the engine's Run state plays.</summary>
     public Clip? Run { get; init; }
+    /// <summary>The clip the engine's Sprint state plays.</summary>
     public Clip? Sprint { get; init; }
+    /// <summary>The clip the engine's IdleCombat state plays. Stands as in <see cref="Idle"/> when left out.</summary>
     public Clip? IdleCombat { get; init; }
+    /// <summary>The clip the engine's Fall state plays. Stands as in <see cref="Idle"/> when left out.</summary>
     public Clip? Fall { get; init; }
+    /// <summary>The clip the engine's IdleSneak state plays.</summary>
     public Clip? IdleSneak { get; init; }
+    /// <summary>The clip the engine's Sneak state plays.</summary>
     public Clip? Sneak { get; init; }
     /// <summary>Plays when it dies, and holds its last frame.</summary>
     public Clip? Dead { get; init; }
+    /// <summary>The clip the engine's Stun state plays. Defaults to <see cref="Stagger"/>.</summary>
     public Clip? Stun { get; init; }
     /// <summary>Plays over everything when it is hit (the engine's hit overlay).</summary>
     public Clip? Hit { get; init; }
@@ -226,8 +259,11 @@ public sealed record AnimationBlock : INpcBlock, IPremade
 /// <summary>The game's graphs, as animations to give a creature of that body.</summary>
 public static class Animations
 {
+    /// <summary>The game's Vukah animation graph (the Vukah melee creature's).</summary>
     public static readonly AnimationBlock Vukah = new() { Key = "vukah", Template = "Enemy_Vukah_Melee" };
+    /// <summary>The game's scavenger animation graph (the scavenger melee creature's).</summary>
     public static readonly AnimationBlock Scavenger = new() { Key = "scavenger", Template = "Enemy_Scavenger_Melee01" };
+    /// <summary>The game's fisher trader animation graph.</summary>
     public static readonly AnimationBlock Fisher = new() { Key = "fisher", Template = "NPC_Workshop_Fisher_Trader" };
     /// <summary>A villager's graph: the fisher trader's.</summary>
     public static readonly AnimationBlock Villager = Fisher with { Key = "villager" };
@@ -241,6 +277,7 @@ public sealed record ColliderBlock
 {
     /// <summary><c>capsule</c> or <c>sphere</c>.</summary>
     public string Shape { get; init; } = "capsule";
+    /// <summary>The radius in metres.</summary>
     public double Radius { get; init; } = 0.5;
     /// <summary>A capsule's full height, its caps included.</summary>
     public double Height { get; init; } = 2;
@@ -249,12 +286,14 @@ public sealed record ColliderBlock
 /// <summary>A capsule standing on the ground.</summary>
 public static class Capsule
 {
+    /// <summary>A capsule collider of this radius and height in metres.</summary>
     public static ColliderBlock Of(double radius, double height) => new() { Shape = "capsule", Radius = radius, Height = height };
 }
 
 /// <summary>A sphere.</summary>
 public static class Sphere
 {
+    /// <summary>A sphere collider of this radius in metres.</summary>
     public static ColliderBlock Of(double radius) => new() { Shape = "sphere", Radius = radius, Height = radius * 2 };
 }
 
@@ -266,7 +305,9 @@ public static class Sphere
 [BlockClients(ClientsLevel.None)]
 public sealed record BodyBlock : INpcBlock, IPremade
 {
+    /// <summary>How JSON names a premade.</summary>
     public string Key { get; init; } = "";
+    /// <summary>In JSON, the premade this one starts from.</summary>
     public string? Like { get; init; }
     /// <summary>A game creature whose body this is (the premades).</summary>
     public string? Template { get; init; }
@@ -293,12 +334,16 @@ public sealed record BodyBlock : INpcBlock, IPremade
 }
 
 /// <summary>How much room a body needs: what paths are searched with.</summary>
+/// <param name="Radius">Half its width in metres, 0 or more. It is the path walker's horizontal radius and the movement collider's half width.</param>
+/// <param name="Height">Its height in metres, above 0.</param>
 public sealed record BodySize(double Radius, double Height);
 
 /// <summary>The game's bodies.</summary>
 public static class Bodies
 {
+    /// <summary>The Vukah's body.</summary>
     public static readonly BodyBlock Vukah = new() { Key = "vukah", Template = "Enemy_Vukah_Melee" };
+    /// <summary>The scavenger's body.</summary>
     public static readonly BodyBlock Scavenger = new() { Key = "scavenger", Template = "Enemy_Scavenger_Melee01" };
     /// <summary>The fisher trader. Vendors on it sell at his workshop, which he keeps too.</summary>
     public static readonly BodyBlock Fisher = new() { Key = "fisher", Template = "NPC_Workshop_Fisher_Trader", Workshop = "0xc4acc104", Tool = "NPC_Townsfolk_Male_Villager_08_fisher_Trader" };
@@ -317,7 +362,9 @@ public static class Bodies
 [BlockClients(ClientsLevel.None)]
 public sealed partial record AIBlock : INpcBlock, IPremade
 {
+    /// <summary>How JSON names a premade.</summary>
     public string Key { get; init; } = "";
+    /// <summary>In JSON, the premade this one starts from.</summary>
     public string? Like { get; init; }
     /// <summary>The game creature whose AI this starts from.</summary>
     public string? Template { get; init; }
@@ -344,6 +391,7 @@ public sealed partial record AIBlock : INpcBlock, IPremade
     /// <summary>In JSON: a target picker registered by name with <c>Blocks.Target</c>.</summary>
     [JsonPropertyName("pickTarget")]
     public string? PickTargetName { get; init; }
+    /// <summary>Seconds between the decisions of <see cref="PickTarget"/>, and of the behaviour's attack picker when <see cref="BehaviourBlock.PickEvery"/> is not set. Default 0.25.</summary>
     public double? PickEvery { get; init; }
     /// <summary>Any other AI field, by its path in the game's AI (<c>Enemy01BehaviorState</c> unless it names another component): <c>["combatSetup.circlingSetup.minRadius"] = "4"</c>.</summary>
     public IDictionary<string, string>? Tune { get; init; }
@@ -369,7 +417,27 @@ public static class AIs
 // ---------------------------------------------------------------------------------------------------- behaviour -----
 
 /// <summary>When the game considers an attack (<c>keen::enemy01::AttackStyle</c>).</summary>
-public enum AttackStyle { Normal, Retaliate, CounterAttack, StunBreak, Special, Initiate, InitiateFollowUp, IgnoreThreat, Flanking }
+public enum AttackStyle
+{
+    /// <summary>The game's Normal style, the default of an attack.</summary>
+    Normal,
+    /// <summary>The game's Retaliate style.</summary>
+    Retaliate,
+    /// <summary>The game's CounterAttack style.</summary>
+    CounterAttack,
+    /// <summary>The game's StunBreak style.</summary>
+    StunBreak,
+    /// <summary>The game's Special style.</summary>
+    Special,
+    /// <summary>The game's Initiate style.</summary>
+    Initiate,
+    /// <summary>The game's InitiateFollowUp style.</summary>
+    InitiateFollowUp,
+    /// <summary>The game's IgnoreThreat style.</summary>
+    IgnoreThreat,
+    /// <summary>The game's Flanking style.</summary>
+    Flanking,
+}
 
 /// <summary>
 /// One attack: the state it plays, how near it has to be, how often, and what its hit does. Kiln makes the sequence that plays it and the hit:
@@ -414,9 +482,11 @@ public sealed record AttackBlock : INpcBlock
 [BlockClients(ClientsLevel.None)]
 public sealed record RuleBlock : INpcBlock
 {
+    /// <summary>What the rule is called. Default: the creature's name, <c>.rule</c> and the rule's place in the list (<c>tobin.rule0</c>).</summary>
     public string? Name { get; init; }
     /// <summary>When it is looked at: every <see cref="Every"/> seconds by default, or on entering a phase, starting an attack, ...</summary>
     public RuleMode On { get; init; } = RuleMode.OnUpdate;
+    /// <summary>Seconds between looks at the conditions, more than 0 and at most 3600. Default 1.</summary>
     public double Every { get; init; } = 1;
     /// <summary>Seconds before it can fire again.</summary>
     public double Cooldown { get; init; }
@@ -425,6 +495,7 @@ public sealed record RuleBlock : INpcBlock
     /// <summary>All of these hold.</summary>
     [JsonConverter(typeof(RuleConditionsConverter))]
     public IReadOnlyList<RuleCondition> When { get; init; } = [];
+    /// <summary>What it does when it fires, in order: kiln.creatures' <see cref="Act"/> actions. At least one.</summary>
     [JsonConverter(typeof(RuleActionsConverter))]
     public IReadOnlyList<RuleAction> Do { get; init; } = [];
 }
@@ -436,24 +507,31 @@ public sealed record RuleBlock : INpcBlock
 [BlockClients(ClientsLevel.None)]
 public sealed record BehaviourBlock : INpcBlock, IPremade
 {
+    /// <summary>How JSON names a premade.</summary>
     public string Key { get; init; } = "";
+    /// <summary>In JSON, the premade this one starts from.</summary>
     public string? Like { get; init; }
     /// <summary>Keeps this game creature's attacks and rules; the block's come after them. Its sequences play that creature's states, so this needs its animation.</summary>
     public string? Template { get; init; }
+    /// <summary>The attacks, each a block or the name of one defined once. At most 32, and no two with the same name.</summary>
     public IReadOnlyList<PartRef<AttackBlock>>? Attacks { get; init; }
+    /// <summary>The rules, each a block or the name of one defined once. At most 32.</summary>
     public IReadOnlyList<PartRef<RuleBlock>>? Rules { get; init; }
     /// <summary>The phases its rules name. With a list, a rule naming another is refused.</summary>
     public IReadOnlyList<string>? Phases { get; init; }
     /// <summary>Decides the attack each time it would choose, on the tick thread: an attack's name, or null for the game's choice.</summary>
     [JsonIgnore]
     public Func<NpcView, string?>? PickAttack { get; init; }
+    /// <summary>In JSON: an attack picker registered by name with <c>Blocks.AttackPicker</c>. In place of <see cref="PickAttack"/>.</summary>
     [JsonPropertyName("pickAttack")]
     public string? PickAttackName { get; init; }
+    /// <summary>Seconds between the decisions of <see cref="PickAttack"/> and of the AI's target picker, more than 0 and at most 60. Default: <see cref="AIBlock.PickEvery"/>, else 0.25.</summary>
     public double? PickEvery { get; init; }
     /// <summary>Your code drives it instead of the game's AI: a new <see cref="NpcBrain"/> for each creature. The game's decisions and its perception
     /// stop for it; <see cref="NpcControl"/> sees for it. In JSON a name: <c>Blocks.Brain("name", () =&gt; new MyBrain())</c>.</summary>
     [JsonIgnore]
     public Func<NpcBrain>? Brain { get; init; }
+    /// <summary>In JSON: a brain registered by name with <c>Blocks.Brain</c>. Not together with <see cref="Brain"/>.</summary>
     [JsonPropertyName("brain")]
     public string? BrainName { get; init; }
     /// <summary>How the brain sees: distance and faction (the default), or also voxel line of sight. Only with a
@@ -499,7 +577,9 @@ public sealed record SpawnBlock
     public required string Replaces { get; init; }
     /// <summary>0..1 of them.</summary>
     public double Chance { get; init; } = 1;
+    /// <summary>Only at night. Not together with <see cref="DayOnly"/>.</summary>
     public bool NightOnly { get; init; }
+    /// <summary>Only by day. Not together with <see cref="NightOnly"/>.</summary>
     public bool DayOnly { get; init; }
 }
 
@@ -515,6 +595,7 @@ public sealed record CreatureBlock : INpcBlock
     public string? Name { get; init; }
     /// <summary>The name before a rename: ids come from the oldest name.</summary>
     public string? Was { get; init; }
+    /// <summary>The body: a premade (<see cref="Bodies"/>) or one of your own, as a block or the name of one defined once.</summary>
     public required PartRef<BodyBlock> Body { get; init; }
     /// <summary>Default: the body's own, for a game body.</summary>
     public PartRef<AnimationBlock>? Animation { get; init; }
@@ -522,7 +603,9 @@ public sealed record CreatureBlock : INpcBlock
     public PartRef<AIBlock>? AI { get; init; }
     /// <summary>Default: the body's, for a game body; none for one of your own.</summary>
     public PartRef<BehaviourBlock>? Behaviour { get; init; }
+    /// <summary>What it is worth in a fight: its level, its damage and experience factors, and the damage it takes of each kind.</summary>
     public CreatureStats? Stats { get; init; }
+    /// <summary>Where it turns up by itself, in place of the game's creatures. Without any, it appears only where you spawn it.</summary>
     public IReadOnlyList<SpawnBlock>? Spawns { get; init; }
     /// <summary>What it drops when it dies, besides what the game gives it: a <see cref="LootTableBlock"/> of this mod (<c>"other-mod:name"</c> for another's), or one written here.
     /// Kiln rolls it on the server where the creature dies, and drops the stacks as loose pickups. The game's own drops come from its death sequence, which runs only near a player;
@@ -533,14 +616,18 @@ public sealed record CreatureBlock : INpcBlock
 // --------------------------------------------------------------------------------------------------------- NPCs -----
 
 /// <summary>A price: so many of an item.</summary>
+/// <param name="Item">The item asked for.</param>
+/// <param name="Count">How many of it.</param>
 public sealed record Price(ItemRef Item, int Count)
 {
+    /// <summary>A price of <paramref name="count"/> of <paramref name="item"/>. The count is 1 when left out.</summary>
     public static Price Of(ItemRef item, int count = 1) => new(item, count);
 }
 
 /// <summary>What an NPC sells: item -> its price. A recipe at its workshop each, which every NPC of that workshop shows.</summary>
 public sealed record VendorBlock
 {
+    /// <summary>The wares: each item to its price, which becomes a recipe at the workshop. At least one; a price counts 1 or more.</summary>
     public IDictionary<ItemRef, Price> Sells { get; init; } = new Dictionary<ItemRef, Price>();
     /// <summary>How many one trade gives, per item; 1 when left out.</summary>
     public IDictionary<ItemRef, int>? Gives { get; init; }
@@ -565,6 +652,7 @@ public sealed record RosterBlock
 /// <summary>Where an NPC is put: next to the first player, or at a spot.</summary>
 public sealed record NpcPlace
 {
+    /// <summary>The spot, as x, y and z. Without it the NPC is put near the first player, <see cref="Distance"/> metres away.</summary>
     public double[]? At { get; init; }
     /// <summary>Metres from the first player, between these two.</summary>
     public double[]? Distance { get; init; }
@@ -586,11 +674,17 @@ public sealed record NpcPlace
 [BlockClients(ClientsLevel.Mod)]
 public sealed record NpcBlock : INpcBlock
 {
+    /// <summary>The name players read, in English; <see cref="Names"/> adds the other languages.</summary>
     public required string Name { get; init; }
+    /// <summary>The name before a rename: ids come from the oldest name.</summary>
     public string? Was { get; init; }
+    /// <summary>The body, as a block or the name of one defined once. It has to be a game NPC's (<see cref="Bodies.Villager"/>, <see cref="Bodies.Fisher"/>); a model of your own is refused.</summary>
     public required PartRef<BodyBlock> Body { get; init; }
+    /// <summary>Not supported: setting it is refused, as an NPC moves like the game's villagers. A friendly fighter is a <see cref="CreatureBlock"/>.</summary>
     public PartRef<AnimationBlock>? Animation { get; init; }
+    /// <summary>Not supported: setting it is refused. A friendly fighter is a <see cref="CreatureBlock"/> with a player-ally faction.</summary>
     public PartRef<AIBlock>? AI { get; init; }
+    /// <summary>Not supported: setting it is refused. A friendly fighter is a <see cref="CreatureBlock"/>.</summary>
     public PartRef<BehaviourBlock>? Behaviour { get; init; }
     /// <summary>What it says: a dialogue (<c>Dialogues.Define</c>), or the handle of a <see cref="DialogueBlock"/>: <c>Talk = Blocks.Define("tobin-talk", new DialogueBlock { ... })</c>.</summary>
     [JsonIgnore]
@@ -599,8 +693,11 @@ public sealed record NpcBlock : INpcBlock
     /// <c>quests/*.json</c> by its id. Another mod's dialogue is not supported by the startup build.</summary>
     [JsonPropertyName("talk")]
     public string? TalkName { get; init; }
+    /// <summary>What it sells, at its workshop.</summary>
     public VendorBlock? Vendor { get; init; }
+    /// <summary>Its place in the game's roster of NPCs.</summary>
     public RosterBlock? Roster { get; init; }
+    /// <summary>Where it is put in the world.</summary>
     public NpcPlace? Place { get; init; }
     /// <summary>Its names in other languages: <c>{ ["de"] = "Tobin der Wanderer" }</c>.</summary>
     public IDictionary<string, string>? Names { get; init; }
