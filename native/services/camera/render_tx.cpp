@@ -119,7 +119,9 @@ bool LocalBackend::release(KilnCameraLease lease, uint64_t) {
     std::lock_guard<std::mutex> lock(m_);
     if (!active_ || active_->lease != lease) return true;
     const uint32_t out = active_->request.req.blend_out_ms;
-    if (!out || !active_->first_ns.load(std::memory_order_acquire) || write_fault_.load(std::memory_order_acquire)) {
+    // nothing to blend out: no blend, never drawn, writes off, or the render path has ended it already
+    if (!out || !active_->first_ns.load(std::memory_order_acquire) || write_fault_.load(std::memory_order_acquire) ||
+        active_->end_reason.load(std::memory_order_acquire) || active_->refusal.load(std::memory_order_acquire)) {
         active_->stop.store(true, std::memory_order_release);  // the next frame is the game's own
         retire(active_);
         publish_mail();
@@ -490,8 +492,16 @@ void LocalBackend::on_select(const Renderer& r, uint64_t selection, float* fov) 
         if (usable(r_staged_)) {
             switch (evaluate(*r_staged_, run_staged_, natural, last_overridden_, r_samples_, now, &out, &code, &end)) {
             case Eval::Write: shown = r_staged_.get(); break;
-            case Eval::Refused: r_staged_->refusal.store(code, std::memory_order_release); break;
-            case Eval::Ended: r_staged_->refusal.store(code ? code : static_cast<uint32_t>(KILN_CAMERA_REASON_NO_CAMERA_FRAME), std::memory_order_release); break;
+            case Eval::Refused:
+            case Eval::Ended:
+                if (r_staged_->first_ns.load(std::memory_order_acquire)) {
+                    // it was drawn, and a frame may have confirmed it already: should the client Pre commit it, it ends at
+                    // once with this reason (it must not hold the camera on without being drawn)
+                    r_staged_->end_code.store(code, std::memory_order_release);
+                    r_staged_->end_reason.store(end ? end : static_cast<uint32_t>(KILN_CAMERA_END_SAFETY_REJECTED), std::memory_order_release);
+                }
+                r_staged_->refusal.store(code ? code : static_cast<uint32_t>(KILN_CAMERA_REASON_NO_CAMERA_FRAME), std::memory_order_release);
+                break;
             case Eval::Nothing: break;
             }
         }
@@ -499,11 +509,11 @@ void LocalBackend::on_select(const Renderer& r, uint64_t selection, float* fov) 
             code = end = 0;
             switch (evaluate(*r_active_, run_active_, natural, last_overridden_, r_samples_, now, &out, &code, &end)) {
             case Eval::Write: shown = r_active_.get(); break;
+            case Eval::Refused:  // (a heading camera without a heading: not reached while its memory is kept)
             case Eval::Ended:
                 r_active_->end_code.store(code, std::memory_order_release);
-                r_active_->end_reason.store(end, std::memory_order_release);
+                r_active_->end_reason.store(end ? end : static_cast<uint32_t>(KILN_CAMERA_END_SAFETY_REJECTED), std::memory_order_release);
                 break;
-            case Eval::Refused:
             case Eval::Nothing: break;
             }
         }

@@ -912,9 +912,96 @@ void test_shake_through_the_transaction() {
     for (size_t i = 0; i < seen[0].size(); ++i) CHECK(seen[0][i].x == seen[1][i].x && seen[0][i].y == seen[1][i].y && seen[0][i].z == seen[1][i].z);
 }
 
+// ---- review fixes ---------------------------------------------------------------------------------------------------------
+
+// M1: a drawn staged request that the render path ends before the next Pre (stale sample, more than 250 m, target
+// gone) is committed (a frame did show it) and ends at once with the right reason; it never holds the camera on.
+void test_drawn_then_ended_before_pre() {
+    for (int variant = 0; variant < 3; ++variant) {
+        Rig g(kAllLocal);
+        g.source.put(5, 10, 0, 0, yaw_q(kPi / 2));
+        std::vector<KilnCameraKey> keys = {key(0, 0, 10, 0)};
+        KilnCameraRequest q = variant == 2 ? follow_request(g, profile_of(5, 4, KILN_CAMERA_FIXED_WORLD)) : g.path(keys, 10000);
+        q.blend_out_ms = 500;
+        Result r;
+        const KilnCameraLease lease = g.apply(30, q, &r);
+        g.pre();
+        g.frame(0);  // drawn; the capture confirms it
+        CHECK(!g.pose_is_stock());
+        if (variant == 0) {
+            g.frame(300);  // no Pre for 300 ms (a simulation hitch while the renderer draws on): the sample is stale
+        } else if (variant == 1) {
+            g.source.put(1, 1000, 0, 0);  // the player teleports: the copy reaches the board before the backend's step
+            g.sampler.sample(g.frames.epoch(), ++g.step, 1, nullptr, 0);
+            g.frame(0);
+        } else {
+            g.source.at.erase(5);  // the target goes
+            const uint32_t t[] = {5};
+            g.sampler.sample(g.frames.epoch(), ++g.step, 1, t, 1);
+            g.frame(0);
+        }
+        CHECK(g.pose_is_stock());
+        g.pre();
+        CHECK(r.seen && r.r.ok);  // a frame showed it
+        CHECK(g.core.live_leases() == 0);
+        const size_t n = g.env.lines.size();
+        CHECK(n == 2 && g.env.lines[0].rfind("applied lease=" + std::to_string(lease), 0) == 0);
+        const char* want = variant == 0 ? "end=11 code=0" : variant == 1 ? "end=11 code=21" : "end=3 code=10";
+        CHECK(g.env.lines[1].rfind("ended lease=" + std::to_string(lease), 0) == 0 && g.env.lines[1].find(want) != std::string::npos);
+        // End after it: already ended, at once (no blend out to wait for)
+        Result e;
+        CHECK(g.core.end(30, lease, &on_done, &e, kOnClient) == KILN_OK);
+        g.pre();
+        CHECK(e.seen && e.r.ok && (e.r.flags & KILN_CAMERA_ALREADY_ENDED));
+        // the camera is free for the next request
+        Result r2;
+        g.apply(31, g.lens(40), &r2);
+        g.pre();
+        g.frame(0);
+        g.pre();
+        CHECK(r2.seen && r2.r.ok);
+    }
+    // End with a blend out that cannot finish (the sample goes stale during it): it ends, it does not hang
+    Rig g(kAllLocal);
+    std::vector<KilnCameraKey> keys = {key(0, 0, 10, 0)};
+    KilnCameraRequest q = g.path(keys, 10000);
+    q.blend_out_ms = 500;
+    Result r, e;
+    const KilnCameraLease lease = g.apply(30, q, &r);
+    g.pre();
+    g.frame(0);
+    g.pre();
+    CHECK(r.r.ok);
+    CHECK(g.core.end(30, lease, &on_done, &e, kOnClient) == KILN_OK);
+    g.frame(0);
+    g.frame(300);
+    g.pre();
+    CHECK(e.seen && e.r.ok && g.core.live_leases() == 0);
+}
+
+
+
+
+
+
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    // with a name: only that test (the red-first runs)
+    const struct {
+        const char* name;
+        void (*fn)();
+    } named[] = {{"drawn_then_ended", test_drawn_then_ended_before_pre}};
+    if (argc > 1) {
+        for (const auto& t : named)
+            if (std::strcmp(argv[1], t.name) == 0) {
+                t.fn();
+                std::printf("camera render %s: PASS (%d checks)\n", t.name, checks);
+                return 0;
+            }
+        std::fprintf(stderr, "no test %s\n", argv[1]);
+        return 2;
+    }
     test_math();
     test_timeline();
     test_lens_only();
@@ -932,5 +1019,6 @@ int main() {
     test_follow_camera();
     test_follow_refusals();
     test_shake_through_the_transaction();
+    for (const auto& t : named) t.fn();
     std::printf("camera render: PASS (%d checks)\n", checks);
 }
