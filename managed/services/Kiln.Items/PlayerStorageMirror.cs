@@ -314,12 +314,19 @@ internal static class PlayerStorageMirror
         public bool Local, Acked = true;
         public long SentMs, WaitMs = FirstWaitMs;
         public StorageMirrorEntry[] Built = [];
+    }
+
+    // a player's picks: the rate (a token bucket) and the picks under way; by player entity (a slot + 1: bounded), kept
+    // apart from the views so that a view started over never refills the bucket
+    private sealed class PickState(long now)
+    {
         public double Tokens = PickBurst;
-        public long TokensMs;
+        public long TokensMs = now;
         public readonly HashSet<(string Key, uint Item)> Pending = [];
     }
 
     private static readonly Dictionary<uint, View> Views = new();
+    private static readonly Dictionary<uint, PickState> PickStates = new();
     private static readonly Dictionary<string, StorageAmmoAcceptor> Acceptors = new(StringComparer.Ordinal);
     private static readonly ConcurrentQueue<(EntityId Player, StorageAmmoPick Pick)> LocalPicks = new();
 
@@ -503,7 +510,7 @@ internal static class PlayerStorageMirror
             if (!Views.TryGetValue(v.Player.Value, out var view) || view.Account != v.Account || view.Local != v.Local)
             {
                 if (view is { Local: true } && !v.Local) Changed(Store.Clear());
-                Views[v.Player.Value] = view = new View { Id = NewViewId(), Account = v.Account, Local = v.Local, TokensMs = now };
+                Views[v.Player.Value] = view = new View { Id = NewViewId(), Account = v.Account, Local = v.Local };
             }
             if (!v.Local && !link.CanSend(v.Player))
             {
@@ -602,19 +609,15 @@ internal static class PlayerStorageMirror
     {
         if (player.IsNone) return;
         var now = Clock();
-        if (!Views.TryGetValue(player.Value, out var view))
-        {
-            // a pick before the first pass that saw the player: a view of its own, so the rate limit holds from the start
-            Views[player.Value] = view = new View { Id = NewViewId(), TokensMs = now, Account = ulong.MaxValue };
-        }
-        view.Tokens = Math.Min(PickBurst, view.Tokens + (now - view.TokensMs) * PicksPerSecond / 1000.0);
-        view.TokensMs = now;
-        if (view.Tokens < 1)
+        if (!PickStates.TryGetValue(player.Value, out var state)) PickStates[player.Value] = state = new PickState(now);
+        state.Tokens = Math.Min(PickBurst, state.Tokens + Math.Max(0, now - state.TokensMs) * PicksPerSecond / 1000.0);
+        state.TokensMs = now;
+        if (state.Tokens < 1)
         {
             Refuse(player, m, "more than 4 picks a second");
             return;
         }
-        view.Tokens -= 1;
+        state.Tokens -= 1;
         StorageAmmoAcceptor? acceptor;
         lock (Gate) Acceptors.TryGetValue(m.Key, out acceptor);
         var kind = (AmmoKinds)m.Kind;
@@ -656,7 +659,7 @@ internal static class PlayerStorageMirror
             Refuse(player, m, $"item {item} is not in the storage");
             return;
         }
-        if (!view.Pending.Add((m.Key, m.Item))) return;  // the same pick is under way: a repeat
+        if (!state.Pending.Add((m.Key, m.Item))) return;  // the same pick is under way: a repeat
         var outer = ModContext.CurrentMod;
         ModContext.CurrentMod = acceptor.Mod;  // the work is the storage's mod's (its unload drops the task)
         Task<EquipResult> task;
@@ -669,7 +672,7 @@ internal static class PlayerStorageMirror
         }
         catch (Exception e) when (e is KilnUnavailableException or InvalidOperationException or ArgumentException)
         {
-            view.Pending.Remove((m.Key, m.Item));
+            state.Pending.Remove((m.Key, m.Item));
             Refuse(player, m, e.Message);
             return;
         }
@@ -677,7 +680,7 @@ internal static class PlayerStorageMirror
         {
             ModContext.CurrentMod = outer;
         }
-        var pending = view.Pending;
+        var pending = state.Pending;
         task.ContinueWith(t =>
         {
             pending.Remove((m.Key, m.Item));
@@ -740,6 +743,7 @@ internal static class PlayerStorageMirror
             _link = _channel is null ? null : new NetStorageMirrorLink(_channel);
             Acceptors.Clear();
             Views.Clear();
+            PickStates.Clear();
             RefusalLogged.Clear();
             _lastPass = long.MinValue;
             _sent = _picksRefused = 0;
