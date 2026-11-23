@@ -483,6 +483,7 @@ rows in one place: [gems.md](gems.md), "Capability rows".
 ## Rows added in 0.2.0-dev.30.3
 | Row | Kind | Reported by | What it says |
 |---|---|---|---|
+| `items.inventory_kinds` | managed, static | Kiln.Items at its start | - | `Items.FindInventoryOwners` and `Bases.Chests` (since 0.2.0-dev.31): available where kiln-items.dll serves the `kiln.items.inventory_kinds` table and kiln.items is loaded; unavailable (`service-missing`) with an older kiln-items.dll or without kiln.items. Its kinds need no sigdb row of their own: `BaseStorage` needs `stations.read` (else those containers read `Unknown`) |
 | `items.rename` | sigdb feature | core; Kiln.Items lowers it at its start when its table is older than v9 (`service-older`) or kiln.items turned renames off (its reason, or `items.names`' when that is off) | renaming a container through the game's own rename (`Items.SetContainerName`; [items.md](items.md#renaming-a-container-v9-since-020-dev303)). The session is not in the row: `Items.ContainerRenameAvailable` is also false where no server world runs (a joined game client), where `SetContainerName` throws `InvalidOperationException` |
 
 ## Rows of the task pool and the engine profiles

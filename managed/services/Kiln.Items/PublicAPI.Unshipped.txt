@@ -1,1 +1,24 @@
 #nullable enable
+Kiln.InventoryOwnerInfo
+Kiln.InventoryOwnerInfo.Deconstruct(out Kiln.EntityId Entity, out Kiln.InventoryOwnerKind Kind) -> void
+Kiln.InventoryOwnerInfo.Entity.get -> Kiln.EntityId
+Kiln.InventoryOwnerInfo.Entity.init -> void
+Kiln.InventoryOwnerInfo.Equals(Kiln.InventoryOwnerInfo other) -> bool
+Kiln.InventoryOwnerInfo.InventoryOwnerInfo() -> void
+Kiln.InventoryOwnerInfo.InventoryOwnerInfo(Kiln.EntityId Entity, Kiln.InventoryOwnerKind Kind) -> void
+Kiln.InventoryOwnerInfo.Kind.get -> Kiln.InventoryOwnerKind
+Kiln.InventoryOwnerInfo.Kind.init -> void
+Kiln.InventoryOwnerKind
+Kiln.InventoryOwnerKind.BaseStorage = 5 -> Kiln.InventoryOwnerKind
+Kiln.InventoryOwnerKind.Npc = 2 -> Kiln.InventoryOwnerKind
+Kiln.InventoryOwnerKind.Player = 1 -> Kiln.InventoryOwnerKind
+Kiln.InventoryOwnerKind.PlayerStorage = 3 -> Kiln.InventoryOwnerKind
+Kiln.InventoryOwnerKind.ProductionStation = 4 -> Kiln.InventoryOwnerKind
+Kiln.InventoryOwnerKind.Unknown = 0 -> Kiln.InventoryOwnerKind
+const Kiln.Items.InventoryKindsCapability = "items.inventory_kinds" -> string!
+~override Kiln.InventoryOwnerInfo.Equals(object obj) -> bool
+override Kiln.InventoryOwnerInfo.GetHashCode() -> int
+~override Kiln.InventoryOwnerInfo.ToString() -> string
+static Kiln.InventoryOwnerInfo.operator !=(Kiln.InventoryOwnerInfo left, Kiln.InventoryOwnerInfo right) -> bool
+static Kiln.InventoryOwnerInfo.operator ==(Kiln.InventoryOwnerInfo left, Kiln.InventoryOwnerInfo right) -> bool
+static Kiln.Items.FindInventoryOwners(Kiln.InventoryKinds kinds = Kiln.InventoryKinds.Containers) -> System.Collections.Generic.IReadOnlyList<Kiln.InventoryOwnerInfo>!

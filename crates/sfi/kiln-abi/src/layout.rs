@@ -2972,6 +2972,14 @@ const _: () = {
     assert!(core::mem::offset_of!(crate::services::kiln_items::KilnItemsApi, container_rename) == 368);
     assert!(core::mem::offset_of!(crate::services::kiln_items::KilnItemsApi, rename_status) == 376);
     assert!(core::mem::offset_of!(crate::services::kiln_items::KilnItemsApi, give_equip) == 384);
+    assert!(core::mem::size_of::<crate::services::kiln_items_inventory_kinds::KilnInventoryKindRow>() == 8);
+    assert!(core::mem::align_of::<crate::services::kiln_items_inventory_kinds::KilnInventoryKindRow>() == 4);
+    assert!(core::mem::offset_of!(crate::services::kiln_items_inventory_kinds::KilnInventoryKindRow, entity) == 0);
+    assert!(core::mem::offset_of!(crate::services::kiln_items_inventory_kinds::KilnInventoryKindRow, kind) == 4);
+    assert!(core::mem::size_of::<crate::services::kiln_items_inventory_kinds::KilnItemsInventoryKindsApi>() == 16);
+    assert!(core::mem::align_of::<crate::services::kiln_items_inventory_kinds::KilnItemsInventoryKindsApi>() == 8);
+    assert!(core::mem::offset_of!(crate::services::kiln_items_inventory_kinds::KilnItemsInventoryKindsApi, header) == 0);
+    assert!(core::mem::offset_of!(crate::services::kiln_items_inventory_kinds::KilnItemsInventoryKindsApi, find) == 8);
     assert!(core::mem::size_of::<crate::services::kiln_items_storage::KilnStorageFilter>() == 24);
     assert!(core::mem::align_of::<crate::services::kiln_items_storage::KilnStorageFilter>() == 8);
     assert!(core::mem::offset_of!(crate::services::kiln_items_storage::KilnStorageFilter, size) == 0);

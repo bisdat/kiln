@@ -4124,6 +4124,29 @@
       },
       "sha256": "95dc56ec73156d04329d5309cf499acbc78c9c2980175a58a2be2eb03dffe117"
     },
+    "native/core/abi/services/kiln_items_inventory_kinds.h": {
+      "function_macros": [],
+      "inline_helpers": [],
+      "layouts": {
+        "KilnInventoryKindRow": {
+          "align": 4,
+          "fields": {
+            "entity": 0,
+            "kind": 4
+          },
+          "size": 8
+        },
+        "KilnItemsInventoryKindsApi": {
+          "align": 8,
+          "fields": {
+            "find": 8,
+            "header": 0
+          },
+          "size": 16
+        }
+      },
+      "sha256": "6aaff90b02e8a22929fc7cad067e380daf69c39c9112f73bfc6445ced31c4df0"
+    },
     "native/core/abi/services/kiln_items_storage.h": {
       "function_macros": [],
       "inline_helpers": [],
@@ -10021,7 +10044,7 @@
   },
   "outputs": {
     "src/bindings.rs": "134028a6a9914076cab3f71f98d356141d4fe36c4d7f51bac6a11819501ed935",
-    "src/layout.rs": "c1ac29c9d11eede1dee9089f3515f26eff65047ee2c932efab1e167a11990dbc",
+    "src/layout.rs": "5ba216bee7e3e22795239b22ecc1648836b44e38e3ee8a4af6cef6052bd3a10e",
     "src/services/kiln_abilities.rs": "06a43042e5c96d6261a17b02eab35463b07a8ad83f63b2bb168bca5ff34e582e",
     "src/services/kiln_assets.rs": "e7fe4eb1c4d53ad31eeaf05be06f41c551a49362ad5bd4174465ec18a03effe0",
     "src/services/kiln_assets_vfx.rs": "90ed8ce5ad512bbf4f002db3277bc3b439d648ca437a58d4477eac4ce46c3b81",
@@ -10051,6 +10074,7 @@
     "src/services/kiln_gemcraft.rs": "07cb3321ad95f3ec8b694f78a02d561a14002338c8ee536b2df6fe17c8f1a4e6",
     "src/services/kiln_hooks.rs": "d3ff34a15e0da4580df5ffcdd09dafd5d31d949e3cafcfc3924bf9d2c729c1b6",
     "src/services/kiln_items.rs": "997cdc279dc7704128c8d47efff8cd395652e0b93679a9c34848d6c54b6d5519",
+    "src/services/kiln_items_inventory_kinds.rs": "8527dd431495bac7067076e59756f8ca82c3113c07e79603247356dee89c3fe2",
     "src/services/kiln_items_storage.rs": "391c254d91450e0f3c935d59c3d4917ce6aafe49fd7b645d1de00ee38f6d1c07",
     "src/services/kiln_launch.rs": "6ffbec313079a115faf49075248fc663d858f91a38d4a804f09c1deeae4dc61b",
     "src/services/kiln_log.rs": "86b18decab13965acd7a5e9d0c3166a80ac5441359f928717b8f4a02cd395df1",
@@ -10101,7 +10125,7 @@
     "src/services/kiln_world.rs": "3cb0272179db9c198f154ce6c008837e4bb95245a2ec62993be78879c4b330b8",
     "src/services/kiln_world_budget.rs": "b196426492d0525df1317c08e4927f3f3ff35817990bed8f2b58c02d174bab98",
     "src/services/kiln_worldtables.rs": "3d423bb8cfd5235f82230a1942bbc334d86b55d343e5e5880c671a57d1469fce",
-    "src/services/mod.rs": "1c529e1e609d97502bc273b15e97d7ae49232e10872a664c646c9459e2bbf4fa"
+    "src/services/mod.rs": "faf70c692377d7bd36ae08a7ab1eb90d0089077ec0352ed5a9867442fe453e6b"
   },
   "schema": 1,
   "target": "x86_64-pc-windows-msvc"

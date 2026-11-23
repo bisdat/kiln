@@ -104,7 +104,35 @@ await Items.TakeSlot(chest, inv.Slots[3]);                         // exactly wh
 
 // Containers in the world (one pass over the entities; tick thread)
 IReadOnlyList<EntityId> chests = Items.FindInventories(InventoryKinds.Containers | InventoryKinds.NonEmpty);
+
+// ... with what each one is, as far as Kiln can prove it (since 0.2.0-dev.31)
+foreach (var (entity, kind) in Items.FindInventoryOwners(InventoryKinds.Containers))
+    if (kind == InventoryOwnerKind.ProductionStation) Log.Info($"station {entity}");
 ```
+
+### Inventory owners and their kinds (since 0.2.0-dev.31)
+`Items.FindInventoryOwners(InventoryKinds kinds = InventoryKinds.Containers)` → `IReadOnlyList<InventoryOwnerInfo>`: the
+entities `FindInventories(kinds)` finds (the same flags and order; player storage holders only with
+`InventoryKinds.PlayerStorage`), each as `InventoryOwnerInfo(EntityId Entity, InventoryOwnerKind Kind)`. Server world, tick
+thread; capability `items.inventory_kinds` (`Items.InventoryKindsCapability`). `FindInventories` and `Bases.Storage` are
+unchanged. Thanks to Fuzen777 for the request (#138).
+
+`InventoryOwnerKind` is only what a component of the game or Kiln's own registry proves; Kiln never guesses from a
+template's name. The codes are stable and only ever added to (an unknown code reads as `Unknown`):
+
+| Code | Kind | Proven by |
+|---|---|---|
+| 0 | `Unknown` | nothing: ordinary storage chests are here (no component tells a chest from another plain container), and a base's storage while the game's bases cannot be read (`stations.read` off) |
+| 1 | `Player` | the game's `InventorySetup.inventoryFlags` IsPlayer |
+| 2 | `Npc` | `InventorySetup.inventoryFlags` IsNpc (a villager) |
+| 3 | `PlayerStorage` | a holder of `Items.RegisterPlayerStorage` (kiln.items.storage's registry) |
+| 4 | `ProductionStation` | the entity carries the game's `FactoryStation` (what `Stations` reads) |
+| 5 | `BaseStorage` | in a base's crafting stock as the game's `PlayerBasesSystemServer` lists it this frame (`Bases.Storage`): a Magic storage chest, or a player-planted refilling fruit tree or palm (the game marks both alike) |
+
+The first that holds, in this order. The base's chests, ordinary and Magic: `Bases.Chests(BaseId)`
+([stations.md](stations.md)). Native: `kiln.items.inventory_kinds` v1 (`kiln_items_inventory_kinds.h`): `find(flags, rows,
+capacity, &count)` with rows of 8 bytes `{u32 entity, u32 kind}`, `find_inventories`' flags and guards, `*count` = all that
+match, `KILN_ERR_BUFFER_TOO_SMALL` past `capacity` (the first `capacity` rows written), capacity 0 asks for the count.
 
 - `Give(target, ItemId|string, count = 1, Gear? = null, GiveOptions = None, SlotId? slot = null)` →
   `Task<ItemsResult>`. Options: `Notify` (player popup + PickupEvent), `AllOrNothing`, `NoMerge`, `DryRun` (run and

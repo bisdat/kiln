@@ -48,7 +48,9 @@
 #include "kiln_api.h"
 #include "kiln_hook.hpp"
 #include "services/kiln_items.h"
+#include "services/kiln_items_inventory_kinds.h"
 #include "services/kiln_world.h"
+#include "inventory_kinds_logic.h"
 #include "xfer.h"
 
 using namespace kitems;
@@ -1544,6 +1546,33 @@ KilnResult KILN_CALL t_find(uint32_t flags, KilnEntity* out, uint32_t capacity, 
     return total > capacity ? KILN_ERR_BUFFER_TOO_SMALL : KILN_OK;
 }
 
+// kiln.items.inventory_kinds v1 (GitHub issue #138): find_inventories' matches with their proven kinds. Its guards are
+// find_inventories' own (t_find runs first); the kinds are read on the same tick, so the world does not step between.
+KilnResult KILN_CALL t_kinds_find(uint32_t flags, KilnInventoryKindRow* out, uint32_t capacity, uint32_t* out_count) {
+    if (out_count) *out_count = 0;
+    if (!kinds::args_ok(flags, out, capacity)) return KILN_ERR_INVALID_ARGUMENT;
+    std::vector<KilnEntity> ids(capacity ? capacity : 256);
+    uint32_t n = 0;
+    KilnResult rc = t_find(flags, ids.data(), static_cast<uint32_t>(ids.size()), &n);
+    if (rc == KILN_ERR_BUFFER_TOO_SMALL) {
+        ids.resize(n);
+        rc = t_find(flags, ids.data(), static_cast<uint32_t>(ids.size()), &n);
+    }
+    if (rc != KILN_OK) return rc;
+    ids.resize(n);
+    const uintptr_t world = g_world.load();
+    std::vector<KilnEntity> stock;
+    const bool bases = stations_base_stock(&stock);  // false: the bases cannot be read here (no BASE_STORAGE, Unknown)
+    return kinds::fill(ids.data(), n, [&](KilnEntity e) {
+        kinds::Facts f;
+        f.holder = storage_holder(e);
+        f.setup = inventory_setup_flags(world, e, &f.setup_flags);
+        f.factory = stations_is_factory(e);
+        f.base_stock = bases && std::binary_search(stock.begin(), stock.end(), e);
+        return kinds::classify(f);
+    }, out, capacity, out_count);
+}
+
 uint32_t KILN_CALL t_item_count() {
     return g_catalog.load(std::memory_order_acquire) ? static_cast<uint32_t>(g_items.size()) : 0;
 }
@@ -1740,6 +1769,11 @@ KilnResult KILN_CALL t_rename_status(KilnItemsRenameStatus* out) { return rename
 
 KilnResult KILN_CALL t_give_equip(KilnOwner owner, const KilnItemsGiveEquipRequest* r, KilnItemsEquipDoneFn done,
                                 void* user, uint64_t* ticket) { return give_equip_submit(owner,r,done,user,ticket); }
+
+const KilnItemsInventoryKindsApi kKindsTable = {
+    {sizeof(KilnItemsInventoryKindsApi), KILN_ITEMS_INVENTORY_KINDS_VERSION},
+    &t_kinds_find,
+};
 
 const KilnItemsApi kTable = {
     {sizeof(KilnItemsApi), KILN_ITEMS_VERSION},
@@ -2311,5 +2345,7 @@ extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api,
     toolwear::publish(api, owner);  // kiln.toolwear: published also where its hooks are off (status says why)
     gems_publish(api, owner);       // kiln.gemcraft: published also where gems.craft is off (status says why)
     stations_publish(api, owner);   // kiln.stations: published also where its features are off (status says why)
+    // kiln.items.inventory_kinds (0.2.0-dev.31): its find answers as find_inventories does where reads are off
+    api->register_service(owner, KilnStr{KILN_ITEMS_INVENTORY_KINDS_SERVICE, std::strlen(KILN_ITEMS_INVENTORY_KINDS_SERVICE)}, &kKindsTable);
     return api->register_service(owner, KilnStr{KILN_ITEMS_SERVICE, std::strlen(KILN_ITEMS_SERVICE)}, &kTable);
 }

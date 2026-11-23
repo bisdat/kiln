@@ -47,9 +47,13 @@ public sealed unsafe class StationsTests : IDisposable
             return index < BaseRows.Count ? 0 : StationsNative.NotFound;
         }
 
+        /// <summary>The base the game's position lookup puts an entity that is no station in (Bases.Of; -1: none).</summary>
+        public readonly Dictionary<uint, int> EntityBase = new();
+
         public int BaseOf(uint entity, out StationsNative.Base b)
         {
             b = default;
+            if (EntityBase.TryGetValue(entity, out var index)) return index < 0 ? StationsNative.NotFound : BaseAt((uint)index, out b);
             if (!StationRows.TryGetValue(entity, out var s) || s.BaseIndex < 0) return StationsNative.NotFound;
             return BaseAt((uint)s.BaseIndex, out b);
         }
@@ -393,6 +397,41 @@ public sealed unsafe class StationsTests : IDisposable
         Assert.Null(kiln.Run(() => Bases.At(new WorldPosition(100, 0, 1))));
         Assert.Null(kiln.Run(() => Bases.Get(new BaseId(Guid.NewGuid()))));
         Assert.Empty(kiln.Run(() => Bases.Storage(new BaseId(Guid.NewGuid()))));  // since 0.2.0-dev.29.15: no base, nothing in it
+    }
+
+    [Fact]
+    public void BasesChestsAreItsStorageAndThePlainContainersTheGamePutsInIt()
+    {
+        // GitHub issue #138 (0.2.0-dev.31): the base's Magic chests (its crafting stock) and its ordinary chests (containers
+        // of no proven kind the game's lookup puts in the base); never a station, a player, another base's storage
+        using var kiln = Kiln();
+        EntityId Container(double x, InventoryOwnerKind kind, int? baseIndex)
+        {
+            var e = kiln.Entities.Create(new WorldPosition(x, 0, 1));
+            kiln.Items.AddContainer(e).Kind = kind;
+            if (baseIndex is { } i) _fake.EntityBase[e.Value] = i;
+            return e;
+        }
+        var magic = Container(1, InventoryOwnerKind.BaseStorage, null);
+        var chest = Container(2, InventoryOwnerKind.Unknown, 0);
+        var away = Container(50, InventoryOwnerKind.Unknown, -1);              // in no base
+        var forge = Container(3, InventoryOwnerKind.ProductionStation, 0);     // a station in the base: not a chest
+        var otherMagic = Container(4, InventoryOwnerKind.BaseStorage, 0);      // storage the game lists for no base here
+        var player = kiln.Players.Join("Ada", 76561198000000001, position: new WorldPosition(1, 0, 1));
+        kiln.Step();
+        _fake.EntityBase[player.Entity.Value] = 0;
+        _fake.Storage[0] = [magic.Value];
+        var id = new BaseId(AltarGuid);
+        var chests = kiln.Run(() => Bases.Chests(id));
+        Assert.Equal(new[] { magic, chest }.OrderBy(e => e.Value), chests.OrderBy(e => e.Value));
+        Assert.DoesNotContain(away, chests);
+        Assert.DoesNotContain(forge, chests);
+        Assert.DoesNotContain(otherMagic, chests);
+        Assert.DoesNotContain(player.Entity, chests);
+        Assert.Empty(kiln.Run(() => Bases.Chests(new BaseId(Guid.NewGuid()))));  // no base has this id: empty
+        // Bases.Storage keeps its contract: the crafting stock only
+        Assert.Equal([magic], kiln.Run(() => Bases.Storage(id)));
+        Assert.Throws<InvalidOperationException>(() => Bases.Chests(id));  // the tick thread only
     }
 
     [Fact]

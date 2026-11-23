@@ -37,6 +37,7 @@ internal static class ServiceNames
         "kiln.gemcraft",
         "kiln.hooks",
         "kiln.items",
+        "kiln.items.inventory_kinds",
         "kiln.items.storage",
         "kiln.knowledge",
         "kiln.log",

@@ -22,6 +22,10 @@ for run in "items-storage-native-test.exe" "items-move-test.exe storage" "items-
   # shellcheck disable=SC2086
   wine "$bin/"$run || fail=1
 done
+# kiln.items.inventory_kinds' pure part (inventory_kinds_logic.h, GitHub issue #138) on the host (no Wine, no game)
+echo "== inventory_kinds_test (host)"
+g++ -std=c++20 -Wall -Wextra -I"$here/../../../core/abi" "$here/inventory_kinds_test.cpp" -o "$KILN_OUT/inventory_kinds_test" &&
+  "$KILN_OUT/inventory_kinds_test" || fail=1
 # the approved builds of kiln.toolwear against the program catalog (no Wine, no game)
 echo "== wear_catalog_test.py"
 python3 "$here/wear_catalog_test.py" || fail=1

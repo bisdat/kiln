@@ -96,6 +96,42 @@ public static class Bases
         return deposit ? all.Where(StationsCore.TakesDeposits).ToArray() : all;
     }
 
+    /// <summary>
+    /// The base's chests (since 0.2.0-dev.31, GitHub issue #138): its ordinary storage containers and its Magic chests, each
+    /// checked to be in this base now by the game's own lookups. From <see cref="Items.FindInventoryOwners"/>' containers:
+    /// those of kind <see cref="InventoryOwnerKind.BaseStorage"/> that are in this base's crafting stock (<see cref="Storage"/>),
+    /// and those of kind <see cref="InventoryOwnerKind.Unknown"/> the game's position lookup (<see cref="Of"/>) puts in this
+    /// base. Never a player, an NPC, a player's storage or a production station. Empty when no base has this id now.
+    /// </summary>
+    /// <remarks>
+    /// <para>No component of the game tells a chest from another plain container, and Kiln does not guess from template
+    /// names: a container the game gives an inventory that is not a chest (none is known) would be listed too, and so are the
+    /// refilling fruit trees and palms of the base's crafting stock, which the game marks as it marks a Magic chest.</para>
+    /// <para>Being listed grants nothing: a mod that takes from or deposits into these for a player checks that player's
+    /// permission itself (the game's chest permissions are not read here). Reads every container of the world and looks up the
+    /// base of each: poll it every few seconds, not every step.</para>
+    /// </remarks>
+    /// <exception cref="KilnUnavailableException">stations.read or <see cref="Items.InventoryKindsCapability"/> is off.</exception>
+    [ServerOnly, TickThreadOnly, RequiresCapability(Stations.ReadCapability), RequiresCapability(Items.InventoryKindsCapability)]
+    public static IReadOnlyList<EntityId> Chests(BaseId id)
+    {
+        StationsCore.CheckRead("Bases.Chests");
+        if (Get(id) is null) return [];  // no base has this id now
+        var stock = new HashSet<EntityId>(Storage(id));
+        var chests = new List<EntityId>();
+        foreach (var o in Items.FindInventoryOwners(InventoryKinds.Containers))
+        {
+            var mine = o.Kind switch
+            {
+                InventoryOwnerKind.BaseStorage => stock.Contains(o.Entity),
+                InventoryOwnerKind.Unknown => Of(o.Entity) is { } b && b.Id == id,
+                _ => false,
+            };
+            if (mine) chests.Add(o.Entity);
+        }
+        return chests;
+    }
+
     /// <summary>The base's water sources that hold water (wells, water barrels), in the game's order; empty when no base has
     /// this id now (as <see cref="Storage"/>).</summary>
     [ServerOnly, TickThreadOnly, RequiresCapability(Stations.ReadCapability)]

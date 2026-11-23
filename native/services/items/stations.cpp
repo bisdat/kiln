@@ -423,6 +423,21 @@ bool base_list(const RawBases& rb, uint32_t i, bool water, std::vector<KilnEntit
     return true;
 }
 
+// kiln.items.inventory_kinds (GitHub issue #138): the game's own lists, no template names
+bool base_stock_all(std::vector<KilnEntity>* out) {
+    out->clear();
+    RawBases rb{};
+    if (!read_bases(&rb)) return false;
+    std::vector<KilnEntity> one;
+    for (uint32_t i = 0; i < rb.count; ++i) {
+        if (!base_list(rb, i, false, &one)) return false;
+        out->insert(out->end(), one.begin(), one.end());
+    }
+    std::sort(out->begin(), out->end());
+    out->erase(std::unique(out->begin(), out->end()), out->end());
+    return true;
+}
+
 // ================================================================================ recipes (tick thread) ====
 
 void* recipes_registry() { return singleton("g38_items::RecipeRegistry"); }
@@ -553,6 +568,10 @@ bool factory_of(KilnEntity e, FsBytes* out) {
     if (!p || size < static_cast<uint32_t>(G.fs_size)) return false;
     std::memcpy(out->b, p, sizeof out->b);
     return true;
+}
+bool is_factory(KilnEntity e) {
+    FsBytes fs{};
+    return H_FACTORY != 0 && factory_of(e, &fs);
 }
 uint32_t workshop_of(KilnEntity e) {
     uint32_t size = 0;
@@ -3549,6 +3568,9 @@ void KILN_CALL client_world(const KilnWorldEvent* ev, void*) {
 }
 
 }  // namespace
+
+bool stations_base_stock(std::vector<KilnEntity>* out) { return base_stock_all(out); }
+bool stations_is_factory(KilnEntity e) { return is_factory(e); }
 
 void stations_resolve() {
     g_api = items_api();

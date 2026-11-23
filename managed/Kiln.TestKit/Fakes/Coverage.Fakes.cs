@@ -64,6 +64,12 @@ public static partial class Coverage
             "hooks, item instances, equip, recipe results, unlocked upgrades and gem slots at creation, the game's player inventory layout, max " +
             "durability computed again after a gear change",
             [ItemsAbi.Service, .. ItemsFake.Features, "items.gear.read", "items.gear.write", "items.gear.durability", "items.gear.upgrade", .. ItemsFake.OfflineRows]);
+        Row("Inventory owner kinds", CoverageKind.RecordingFake,
+            "Kiln.Items' FindInventoryOwners (and Kiln.Blocks' Bases.Chests on top of it) on the kit's kiln.items.inventory_kinds: the " +
+            "owners FindInventories finds, with kiln.items' flags, guards and bounded buffer; players are Player, player storage holders " +
+            "PlayerStorage, a container what the test sets (FakeInventory.Kind; Unknown by default, as an ordinary chest). Offline: the " +
+            "game's components (FactoryStation, the bases' crafting stock) are not read",
+            [InventoryKindsNative.Service, Items.InventoryKindsCapability]);
         Row("Combat", CoverageKind.RecordingFake,
             "Kiln.Combat's own code on the kit's kiln.combat (the v1 table): health is what the test gives an entity of the fake world " +
             "or a fake player (KilnHarness.Combat.SetHealth); a mod's Damage or Kill and the game's hit (KilnHarness.Combat.Hit) apply " +

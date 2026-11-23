@@ -1242,6 +1242,21 @@ bool inventory_matches(uintptr_t world, KilnEntity e, uint32_t flags, bool* matc
     }
 }
 
+static bool setup_flags_of_impl(uintptr_t world, KilnEntity e, uint8_t* flags) {
+    const auto* setup = static_cast<const uint8_t*>(component(world, kHashInventorySetup, e, kSetupSize));
+    if (!setup) return false;
+    *flags = setup[kSetupFlags];
+    return true;
+}
+
+bool inventory_setup_flags(uintptr_t world, KilnEntity e, uint8_t* flags) {
+    __try {
+        return setup_flags_of_impl(world, e, flags);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
 bool registry_count(void* registry, uint32_t* count, unsigned long* code) {
     __try {
         const uint8_t* map;
