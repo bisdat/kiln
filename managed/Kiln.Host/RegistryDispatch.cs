@@ -11,6 +11,8 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
     private readonly List<Author> _authors = [];
     private readonly List<Runtime> _runtime = [];
     private readonly Dictionary<ulong, HashSet<ulong>> _changes = [];
+    private readonly Dictionary<ulong, (ulong Owner, ulong World)> _scopedChanges = [];
+    private ulong _cleanupWorld = ulong.MaxValue;
     private readonly Dictionary<ModContext, Action> _retirements = [];
     private volatile bool _closed;
     private readonly object _signals = new();
@@ -46,7 +48,10 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
         RegistryRuntime.Host = this;
         RegistryRuntime.Available = () => _native.LiveAvailable;
         RegistryRuntime.Manual = Manual;
-        RegistryRuntime.Revert = (mod, handle) => _native.Revert(mod.Owner, handle);
+        RegistryRuntime.Revert = (mod, handle) =>
+        {
+            var result = _native.Revert(mod.Owner, handle); ForgetChange(mod, handle); return result;
+        };
         RegistryRuntime.Read = Read;
         RegistryRuntime.WorldChanged = directory =>
         {
@@ -198,6 +203,7 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
         try
         {
             var candidate = World(bound: false);
+            PruneWorldChanges(candidate?.Token ?? 0);
             if (candidate is null) return;
             var bound = _worldBinding.Bind(candidate);
             var world = bound ? candidate.Value : candidate.Value with { Id = null };
@@ -229,7 +235,7 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
         foreach (var record in ordered) record.Faulted = false; // a fault closes this point, not every future world/point
         void Remember(Runtime record, RegistryCompletion result)
         {
-            Applied(record.Context, result);
+            Applied(record.Context, result, point != RegistryEntryPoint.ModLoad);
             if (Retained(result))
             {
                 committed[record].Add(result.Handle);
@@ -280,7 +286,7 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
         }
     }
     private static bool Retained(RegistryCompletion result) => result.Outcome is 0 or 1 or 8 && result.Accepted != 0 && result.Handle != 0;
-    private RegistryCompletion Applied(ModContext owner, RegistryCompletion result)
+    private RegistryCompletion Applied(ModContext owner, RegistryCompletion result, bool worldScoped = false)
     {
         if (result.Outcome == 4 && result.Handle != 0)
         {
@@ -291,6 +297,7 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
         {
             if (!_changes.TryGetValue(owner.Owner, out var handles)) _changes[owner.Owner] = handles = [];
             handles.Add(result.Handle);
+            if (worldScoped) _scopedChanges[result.Handle] = (owner.Owner, result.World);
         }
         if (result.Refused != 0 || result.Outcome is 2 or 3 or 4 or 6 or 7)
             mods.Host.Log(LogLevel.Warn, $"registry: {owner.Info.Id}: outcome {result.Outcome}, {result.Accepted} accepted, {result.Refused} refused: {result.Reason}");
@@ -309,7 +316,7 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
             action(context); var ir = context.CaptureIr(); context.Close();
             if (ir is null) return new(2, 0, 0, 0, world.Value.Token, 0, 0, "the transaction has no edits");
             handle = _native.Begin(owner.Owner, RegistryEntryPoint.Manual); _native.Submit(owner.Owner, handle, ir);
-            var result = Applied(owner, _native.Commit(owner.Owner, handle)); handle = 0; return result;
+            var result = Applied(owner, _native.Commit(owner.Owner, handle), worldScoped: true); handle = 0; return result;
         }
         finally { context.Close(); if (handle != 0) try { _native.Revert(owner.Owner, handle); } catch { } }
     }
@@ -321,11 +328,21 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
         using var scope = context.Enter();
         try { action(context); } finally { context.Close(); }
     }
-    private void ForgetChange(ModContext owner, ulong handle)
+    private void PruneWorldChanges(ulong world)
     {
-        if (!_changes.TryGetValue(owner.Owner, out var handles)) return;
+        if (_cleanupWorld == world) return;
+        _cleanupWorld = world;
+        foreach (var (handle, scope) in _scopedChanges.Where(x => x.Value.World != world).ToArray())
+            ForgetChange(scope.Owner, handle); // native already expired these handles; never replay an old snapshot
+    }
+    private void ForgetChange(ModContext owner, ulong handle) => ForgetChange(owner.Owner, handle);
+    private void ForgetChange(ulong owner, ulong handle)
+    {
+        _scopedChanges.Remove(handle);
+        foreach (var record in _runtime.Where(r => r.Context.Owner == owner)) record.WorldChanges.Remove(handle);
+        if (!_changes.TryGetValue(owner, out var handles)) return;
         handles.Remove(handle);
-        if (handles.Count == 0) _changes.Remove(owner.Owner);
+        if (handles.Count == 0) _changes.Remove(owner);
     }
     private void RemoveChanges(ModContext owner)
     {
@@ -333,6 +350,7 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
         foreach (var handle in handles)
             try { _native.Revert(owner.Owner, handle); }
             catch (Exception e) { Log(owner.Info.Id + " cleanup (core retirement will retry)", e); }
+            finally { _scopedChanges.Remove(handle); }
     }
     public void Dispose()
     {
@@ -344,7 +362,7 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
             owner.Retiring -= retirement;
             RemoveChanges(owner);
         }
-        _retirements.Clear(); _runtime.Clear(); _changes.Clear();
+        _retirements.Clear(); _runtime.Clear(); _changes.Clear(); _scopedChanges.Clear();
         if (ReferenceEquals(RegistryRuntime.Host, this))
         {
             RegistryRuntime.Host = null; RegistryRuntime.Available = null; RegistryRuntime.Manual = null;

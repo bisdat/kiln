@@ -305,6 +305,33 @@ public sealed class RegistryDispatchTests : ModsFixture
         dispatch.FlushLoads(); Assert.Equal(3, calls);
         owner.Retire();
     }
+    private static int TrackedChanges(RegistryDispatch dispatch) =>
+        ((Dictionary<ulong, HashSet<ulong>>)typeof(RegistryDispatch).GetField("_changes",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(dispatch)!).Values.Sum(x => x.Count);
+    [Fact]
+    public void ManualRevertReleasesHostBookkeeping()
+    {
+        using var native = new FakeRegistry(); using var manager = NewManager(native.Host);
+        using var dispatch = new RegistryDispatch(manager); dispatch.Prepare(100);
+        var owner = Owner(native, "reverted");
+        dispatch.Loaded(new Author(_ => { }), owner, Root, false); dispatch.FlushLoads();
+        var change = RegistryRuntime.Manual!(owner, c => Edit(c, 90)); Assert.Equal(1, TrackedChanges(dispatch));
+        RegistryRuntime.Revert!(owner, change.Handle);
+        Assert.Equal(0, TrackedChanges(dispatch)); Assert.Equal(10, native.Value); owner.Retire();
+    }
+    [Fact]
+    public void ExpiredWorldHandlesArePrunedWhileProcessChangesRemainTracked()
+    {
+        using var native = new FakeRegistry(); using var manager = NewManager(native.Host);
+        using var dispatch = new RegistryDispatch(manager); dispatch.Prepare(100);
+        var owner = Owner(native, "world-expiry");
+        dispatch.Loaded(new Author(c => { if (c.Phase == RegistryPhase.Alter) Edit(c, 20); }), owner, Root, false);
+        dispatch.FlushLoads(); Assert.Equal(1, TrackedChanges(dispatch));
+        RegistryRuntime.Manual!(owner, c => Edit(c, 90)); Assert.Equal(2, TrackedChanges(dispatch));
+        native.ChangeWorld(2); dispatch.FlushLoads();
+        Assert.Equal(1, TrackedChanges(dispatch)); Assert.Equal(20, native.Value); Assert.Equal(1, native.LayerCount);
+        owner.Retire(); Assert.Equal(0, TrackedChanges(dispatch)); Assert.Equal(10, native.Value);
+    }
     [Fact]
     public void DisposingTheManagerReleasesTheReadySubscriptionAndRuntimeBridge()
     {
