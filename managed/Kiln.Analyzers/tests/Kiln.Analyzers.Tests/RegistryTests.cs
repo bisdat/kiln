@@ -31,6 +31,28 @@ public sealed class RegistryTests
             """), "KILN123");
     }
     [Fact]
+    public async Task AnAbstractDeclarationCanBeImplementedByTheConcreteMod()
+    {
+        Ids(await Run(Analyzer, """
+            #pragma warning disable KILNX031
+            [RegistryEntryPoints(RegistryEntryPoint.WorldLoad)]
+            public abstract class Base : Mod { }
+            public class M : Base { public override void OnRegistry(RegistryContext context) { } }
+            """));
+    }
+    [Fact]
+    public async Task AConcreteModWithoutAnOverrideIsCheckedAgainstItsInheritedDeclaration()
+    {
+        var diagnostics = await Run(Analyzer, """
+            #pragma warning disable KILNX031
+            [RegistryEntryPoints(RegistryEntryPoint.WorldLoad)]
+            public abstract class Base : Mod { }
+            public class ConcreteAuthor : Base { }
+            """);
+        Ids(diagnostics, "KILN122");
+        Assert.Contains("ConcreteAuthor", Assert.Single(diagnostics).GetMessage());
+    }
+    [Fact]
     public async Task DefaultAndInheritedOverridesAndValidCombinationsAreFine()
     {
         Ids(await Run(Analyzer, """

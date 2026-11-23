@@ -26,11 +26,14 @@ public sealed class RegistryAnalyzer : DiagnosticAnalyzer
             start.RegisterSymbolAction(ctx =>
             {
                 var type = (INamedTypeSymbol)ctx.Symbol;
-                var declaration = type.GetAttributes().FirstOrDefault(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, attribute));
-                if (declaration is null) return;
+                if (type.IsAbstract) return; // only concrete mod entry types must supply the inherited author contract
                 var bases = Ancestors(type).ToArray();
                 if (!bases.Any(t => SymbolEqualityComparer.Default.Equals(t, mod))) return;
-                var location = declaration.ApplicationSyntaxReference?.GetSyntax(ctx.CancellationToken).GetLocation()
+                var own = type.GetAttributes().FirstOrDefault(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, attribute));
+                var declaration = own ?? bases.Skip(1).SelectMany(t => t.GetAttributes()).FirstOrDefault(a =>
+                    SymbolEqualityComparer.Default.Equals(a.AttributeClass, attribute));
+                if (declaration is null) return;
+                var location = own?.ApplicationSyntaxReference?.GetSyntax(ctx.CancellationToken).GetLocation()
                     ?? type.Locations.FirstOrDefault(l => l.IsInSource);
                 if (location is null) return;
                 var overridden = bases.SelectMany(t => t.GetMembers("OnRegistry").OfType<IMethodSymbol>()).Any(method =>
