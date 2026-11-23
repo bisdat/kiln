@@ -56,6 +56,8 @@ internal static unsafe class StorageNative
     public const uint EventJoined = 1, EventCaptured = 2, EventRestored = 3, EventParked = 4, EventQuarantined = 5,
         EventDeath = 6, EventLeft = 7, EventReturned = 8, EventBatch = 9;
     public const uint EventPaired = 1, EventLive = 2;
+    // KIS_STAGE_*: StageFn-only hints, never raw event kinds (those remain EventParked/EventRestored).
+    public const uint StageParked = 0x100, StageRestored = 0x101;
     // the two kiln.items values the header defines
     public const uint FindPlayerStorage = 0x10;
     public const uint ItemsFiltered = 10;

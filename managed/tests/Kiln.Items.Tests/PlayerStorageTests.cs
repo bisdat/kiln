@@ -211,6 +211,58 @@ public sealed class PlayerStorageTests
         return StorageNative.Ok;
     }
 
+    private static uint _housekeepingKind, _ordinaryHandle, _ordinaryTarget, _housekeepingPlayer;
+
+    [Theory]
+    [InlineData(StorageNative.EventRestored, 1u, 901u)]
+    [InlineData(StorageNative.EventParked, 0u, 0u)]
+    [InlineData(StorageNative.EventParked, 1u, 901u)]
+    public unsafe void TemporaryHousekeepingEventsStayRawWithoutReachingThePublicBus(uint kind, uint handle, uint target)
+    {
+        using var r = new Run();
+        r.Register("visible", 8);
+        r.Kiln.Step();
+        r.Seen.Clear();
+        _housekeepingKind = kind;
+        _ordinaryHandle = handle;
+        _ordinaryTarget = target;
+        _housekeepingPlayer = r.Ada.Entity.Value;
+        var table = *StorageNative.T;
+        table.NextEvent = &TemporaryAndOrdinaryEvents;
+        StorageNative.UseForTests(&table);
+        try
+        {
+            StorageNative.Event raw = default;
+            raw.Size = (uint)sizeof(StorageNative.Event);
+            Assert.Equal(StorageNative.Ok, StorageNative.T->NextEvent(0, &raw));
+            Assert.Equal((kind, 0u, 900u), (raw.Kind, raw.Handle, raw.Target));
+            r.Kiln.Step();
+            var seen = Assert.Single(r.Seen);
+            if (kind == StorageNative.EventRestored) Assert.IsType<PlayerStorageRestoredEvent>(seen);
+            else Assert.IsType<PlayerStorageParkedEvent>(seen);
+            // Filtering the public bus must not consume or rewrite the persistence owner's raw event.
+            Assert.Equal(StorageNative.Ok, StorageNative.T->NextEvent(0, &raw));
+            Assert.Equal((1UL, 0u, 900u), (raw.Seq, raw.Handle, raw.Target));
+        }
+        finally { StorageNative.ResetForTests(); }
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static unsafe int TemporaryAndOrdinaryEvents(ulong after, StorageNative.Event* e)
+    {
+        if (after >= 2) return StorageNative.NotFound;
+        *e = default;
+        e->Size = (uint)sizeof(StorageNative.Event);
+        e->Seq = after + 1;
+        e->Kind = _housekeepingKind;
+        e->Player = _housekeepingPlayer;
+        e->Handle = after == 0 ? 0 : _ordinaryHandle;
+        e->Target = after == 0 ? 900 : _ordinaryTarget;
+        e->Reason = StorageNative.ParkRequested;
+        StorageNative.SetText(e->Key, StorageNative.KeyMax, "quivers:visible");
+        return StorageNative.Ok;
+    }
+
     [Fact]
     public void ARegistrationWhileThePlayerIsOnRestoresItsParkedItemsLive()
     {
