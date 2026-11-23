@@ -57,6 +57,7 @@ public sealed class AdminMod : Mod
         _tcp = null;
         Ops.Tcp = null;
         _bridge.Abandon();
+        _bridge.Dispose();  // the file bridge's I/O thread writes what it has and ends
     }
 
     private void OnPre(in TickInfo tick)

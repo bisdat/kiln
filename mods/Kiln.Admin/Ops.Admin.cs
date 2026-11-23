@@ -28,9 +28,10 @@ internal static partial class Ops
             log.Info("dashboard reloaded network.json");
             return NetStatusJson();
         }));
-        bridge.Register("native_status", _ => NativeStatus());
+        // These two only read files: on the thread pool, so a busy disk never holds up a server step.
+        bridge.RegisterAsync("native_status", _ => Task.Run<JsonNode?>(NativeStatus));
         // {file?: "kiln" | "game" | <name under kiln/logs>, lines?: 1..5000}
-        bridge.Register("log_tail", LogTail);
+        bridge.RegisterAsync("log_tail", req => Task.Run<JsonNode?>(() => LogTail(req)));
         bridge.Register("admin_token_rotate", _ =>
         {
             if (Tcp is { } tcp) tcp.RotateToken(tcp.CurrentCaller);
