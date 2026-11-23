@@ -263,13 +263,15 @@ fn proof_candidate(source: &Path, copy: &Path) -> Result<()> {
     std::fs::write(root.join("regmap_check.log"), [&output.stdout[..], &output.stderr[..]].concat())?;
     if !matches!(output.status.code(), Some(0 | 1)) { bail!("regmap_check.py failed ({})", output.status); }
     let candidate = root.join("regmap/server").join(format!("{sha}.json"));
-    let record: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&candidate)?)?;
+    let mut record: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&candidate)?)?;
     if record["verified"] != true || record["side"] != "server" || record["exeSha256"] != sha {
         bail!("regmap_check.py produced no verified candidate for the gate copy's exe");
     }
+    // bound to the copy's deployed regmap/common, or kiln.content enables none of its rows (a record of another mapping)
+    record["regmapDigest"] = serde_json::Value::String(crate::regproof::regmap::digest(&kiln)?);
     let dst = kiln.join("regmap/server");
     std::fs::create_dir_all(&dst)?;
-    std::fs::copy(candidate, dst.join(format!("{sha}.json")))?;
+    std::fs::write(dst.join(format!("{sha}.json")), serde_json::to_string_pretty(&record)? + "\n")?;
     Ok(())
 }
 
@@ -564,6 +566,9 @@ d.mkdir(parents=True)
         std::fs::write(&request, "{}").unwrap();
         proof_candidate(&source, &copy).unwrap();
         assert!(target.is_file());
+        let written: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&target).unwrap()).unwrap();
+        assert_eq!(written["regmapDigest"], crate::regproof::regmap::digest(&copy.join("kiln")).unwrap(),
+                   "the candidate is bound to the copy's mapping, or kiln.content would enable none of its rows");
         assert!(!source.join("regmap/server").exists(), "no candidate in the source tree or instance");
         std::fs::remove_dir_all(&copy).unwrap();
         assert!(!target.exists(), "candidate expires with the gate copy");
