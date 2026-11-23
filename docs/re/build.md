@@ -488,7 +488,7 @@ game's entries, boxes for the kept chunks whose 64 blocks the entries of that sa
 serializer's rule above, so the decision is the save's own, whatever the bounds are at that instant: no time window).
 Kiln knows only which 16 m chunks its edits touched, so a kept chunk on a base's edge that reaches outside it gets a box
 even when the edits in it are all inside the base. Base zones and base query: the list stays as the builder wrote it. Any other return address (unresolved sites, another mod's hook in front of Kiln's):
-boxes as for the world save, so no edit goes unsaved. Entries that cannot be read, or a list with more than 256 entries
-or count > capacity: boxes for every kept chunk. The chunk JSON is never filtered. Up to 0.2.0-dev.30.8 every caller got
-a box for every kept chunk: Kiln's boxes were ECS base zones (stations, storage and beds grouped by them, clients sent
-them) and Flame Altars in the world list.
+boxes as for the world save, so no edit goes unsaved. Entries that cannot be read, bounds that are not finite or have
+min > max, or a list with more than 256 entries or count > capacity: boxes for every kept chunk. The chunk JSON is never
+filtered. Up to 0.2.0-dev.30.8 every caller got a box for every kept chunk: Kiln's boxes were ECS base zones (stations,
+storage and beds grouped by them, clients sent them) and Flame Altars in the world list.

@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <string>
 #include <unistd.h>
 #define KILN_REGIONS_SUPPORT_STUBS
@@ -302,6 +303,90 @@ int main() {
         kb::g_chunks = kept;
         kb::g_boxes_stale = true;
     }
+    {
+        // Whatever the bases and the kept chunks, the world save's list keeps every 4 m block of every kept chunk (the
+        // game's float rule, regions_test_support.h), and Kiln's exact boxes never touch a chunk the bases save whole.
+        // Bases on and off the 4 m and 16 m grids, negative coordinates, rounds scattered enough for the coarse boxes.
+        uint64_t seed = 0x9e3779b97f4a7c15ull;
+        auto rnd = [&seed] {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            return seed;
+        };
+        bool saved = true, exact_no_redundant = true, appended = true;
+        int coarse = 0, filtered = 0;
+        for (int round = 0; round < 400; ++round) {
+            const int32_t ox = static_cast<int32_t>(rnd() % 600) - 300, oz = static_cast<int32_t>(rnd() % 600) - 300;
+            std::set<std::array<int32_t, 3>> chunks;
+            const int n = 1 + static_cast<int>(rnd() % (round % 4 == 0 ? 600 : 40));
+            for (int i = 0; i < n; ++i)
+                chunks.insert({ox + static_cast<int32_t>(rnd() % 40) - 20, static_cast<int32_t>(rnd() % 8) - 2,
+                               oz + static_cast<int32_t>(rnd() % 40) - 20});
+            std::vector<uint8_t> store;
+            FakeList l = regions_test::make_list(store);
+            std::vector<kb::RegionBounds> native;
+            const int bases = static_cast<int>(rnd() % 4);
+            for (int b = 0; b < bases; ++b) {
+                float lo[3], hi[3];
+                for (int k = 0; k < 3; ++k) {
+                    const float centre = (k == 0 ? ox * 16.f : k == 2 ? oz * 16.f : 32.f) +
+                                         static_cast<float>(static_cast<int>(rnd() % 1280) - 640) * 0.25f;
+                    const float half = 4.f + static_cast<float>(rnd() % 320) * 0.25f;
+                    lo[k] = centre - half;
+                    hi[k] = centre + half;
+                }
+                regions_test::add_entry(l, base_id, lo, hi);
+                native.push_back(kb::RegionBounds{{lo[0], lo[1], lo[2]}, {hi[0], hi[1], hi[2]}});
+            }
+            const auto outside = kb::chunks_outside_regions(chunks, native);
+            const auto boxes = kb::boxes_for_chunks(outside);
+            uint64_t volume = 0;
+            for (const auto& b : boxes)
+                volume += uint64_t(b.hi[0] - b.lo[0] + 1) * uint64_t(b.hi[1] - b.lo[1] + 1) * uint64_t(b.hi[2] - b.lo[2] + 1);
+            const bool exact = volume == outside.size();  // the greedy boxes cover exactly the chunks; coarse ones more
+            coarse += !exact;
+            filtered += outside.size() < chunks.size();
+            kb::g_chunks = chunks;
+            kb::g_boxes_stale = true;
+            kb::after_save_regions(0x1000, ok, &l.a, sites);
+            saved = saved && regions_test::every_chunk_saved(l.a, chunks, false);
+            if (exact) exact_no_redundant = exact_no_redundant && regions_test::every_chunk_saved(l.a, chunks, true);
+            appended = appended && regions_test::kiln_entries(l.a) == boxes.size() &&
+                       l.a.count == static_cast<uint64_t>(bases) + boxes.size();
+        }
+        check(saved, "any bases, any kept chunks: every 4 m block of every kept chunk is in some entry's blob");
+        check(exact_no_redundant, "any bases: Kiln's exact boxes never repeat a chunk the bases save whole");
+        check(appended, "any bases: the list holds the game's entries and every box Kiln planned");
+        check(coarse > 0 && filtered > 0, "the rounds include coarse boxes and chunks the bases save whole");
+
+        // bounds that are not numbers: the entries are not trusted, every kept chunk gets a box
+        kb::g_chunks = kept;
+        kb::g_boxes_stale = true;
+        std::vector<uint8_t> store;
+        const float nan = std::numeric_limits<float>::quiet_NaN();
+        const float nlo[3] = {0.f, nan, 0.f};
+        FakeList l = run(0x1000, store, nlo, ahi);
+        check(regions_test::kiln_entries(l.a) == kb::boxes_for_chunks(kept).size(),
+              "a base whose bounds are not numbers: Kiln boxes for every kept chunk");
+
+        // call sites that resolved only in part, or to one address: the world save is never taken for a base-zone caller
+        const kb::CallSites no_save{0, 0x2000, 0x3000}, same{0x1000, 0x1000, 0x1000};
+        std::vector<uint8_t> s1, s2, s3;
+        FakeList a1 = regions_test::make_list(s1), a2 = regions_test::make_list(s2), a3 = regions_test::make_list(s3);
+        regions_test::add_entry(a1, base_id, alo, ahi);
+        regions_test::add_entry(a2, base_id, alo, ahi);
+        regions_test::add_entry(a3, base_id, alo, ahi);
+        kb::after_save_regions(0x1000, ok, &a1.a, no_save);
+        kb::after_save_regions(0x2000, ok, &a2.a, no_save);
+        kb::after_save_regions(0x1000, ok, &a3.a, same);
+        check(regions_test::kiln_entries(a1.a) == 4 && regions_test::kiln_entries(a2.a) == 0,
+              "world save site unresolved: the save's call is unknown and gets the boxes, the base zones still do not");
+        check(kb::classify_caller(0x1000, same) == kb::Caller::WorldSave && regions_test::kiln_entries(a3.a) == 4,
+              "three names on one address: the world save wins, so the save keeps its boxes");
+    }
+    kb::g_chunks = kept;
+    kb::g_boxes_stale = true;
     kb::regions_flush();
     check(bytes("SAVE") == json_before, "the saves above leave the kept-chunk JSON byte for byte as it was");
     std::filesystem::remove_all(dir);

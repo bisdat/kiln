@@ -355,9 +355,13 @@ the base 780 m away, visible at once after the teleport, gone after undo). 4 and
 - An edit outside every base shows as an extra Flame Altar in the world list (one per box) as long as Kiln keeps it;
   `Build.Release(box)` drops it. Edits inside bases add none, except in the 16 m chunks along a base's edge that reach
   outside it.
-- If the game's region list cannot take Kiln's boxes in a save (its growth fails, or appending faults), that save
-  keeps only the game's own regions and logs it: edits outside bases are back in the next save that succeeds, but a
-  restart right after such a save loses them. Failing the save instead could stop the world from saving at all.
+- If the game's region list cannot take all of Kiln's boxes in a save, that save keeps the game's own regions and
+  only the boxes that fit (when its growth fails), or none of Kiln's (when appending faults), and Kiln logs it: the edits
+  left out are back in the next save that succeeds, but a restart right after such a save loses them. Failing the save
+  instead could stop the world from saving at all.
+- On a game build whose region builder's base-zone callers Kiln cannot find (it logs this when it starts), Kiln's boxes
+  also go into the base zones the game's systems and clients use, as up to 0.2.0-dev.30.8, so that no edit goes
+  unsaved.
 - Hosted worlds on a game client: the definitions resolve offline on client build 26404966 (one region file per world
   GUID); not run in a hosted world yet.
 - Building blocks are written as cells; the game's own blueprint path (item shape + inventory) is not called.
