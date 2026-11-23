@@ -8,12 +8,26 @@ using System.Numerics;
 namespace Kiln;
 
 /// <summary>One recorded edit.</summary>
+/// <param name="Id">The entry's id (<see cref="Build.UndoEntry(long, TimeSpan?)"/>).</param>
+/// <param name="Owner">The owner: the mod id, or <c>player:&lt;entity&gt;</c> for an edit made for a player.</param>
+/// <param name="Label">The label of the edit.</param>
+/// <param name="Kind">What kind of edit it was.</param>
+/// <param name="At">When the entry was started.</param>
+/// <param name="Cells">How many cells it recorded.</param>
+/// <param name="PropsPlaced">How many props it placed.</param>
+/// <param name="PropsRemoved">How many props it removed.</param>
 public sealed record JournalInfo(long Id, string Owner, string Label, BuildEditKind Kind, DateTimeOffset At, long Cells,
     int PropsPlaced, int PropsRemoved);
 
 /// <summary>What an undo did.</summary>
+/// <param name="Id">The id of the journal entry that was reverted.</param>
+/// <param name="Label">The label of that entry.</param>
 /// <param name="CellsRestored">Cells set back to their old value.</param>
 /// <param name="CellsKept">Cells that changed again after the edit (left alone).</param>
+/// <param name="PropsRemoved">Props the edit had placed that the undo removed.</param>
+/// <param name="PropsRestored">Props the edit had removed that the undo put back.</param>
+/// <param name="Complete">True when every restored write read back as written, every removed prop was put back and no
+/// cell was left alone (<paramref name="CellsKept"/> is 0).</param>
 public sealed record UndoResult(long Id, string Label, long CellsRestored, long CellsKept, int PropsRemoved, int PropsRestored,
     bool Complete);
 

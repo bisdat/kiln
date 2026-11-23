@@ -5,24 +5,53 @@
 // boot places it again; never one without the other.
 namespace Kiln;
 
-/// <summary>A PlaceOnce record (one per key, per mod, per world).</summary>
+/// <summary>A PlaceOnce record (one per key, per mod, per world). Only <see cref="Key"/>, <see cref="PlacedAt"/> and
+/// <see cref="KilnVersion"/> are filled for a record made by the edit overload
+/// (<see cref="Build.PlaceOnce(string, Func{Task{bool}})"/>).</summary>
 public sealed class PlaceOnceRecord
 {
+    /// <summary>The key the mod gave to <c>PlaceOnce</c>.</summary>
     public string Key { get; set; } = "";
+
+    /// <summary>When it was placed (UTC).</summary>
     public DateTimeOffset PlacedAt { get; set; }
+
+    /// <summary>The position it was pasted at: <c>[x, y, z]</c> in world metres. Empty for the edit overload.</summary>
     public double[] At { get; set; } = [];
+
+    /// <summary>The quarter turns the paste used (<see cref="PasteOptions.Rotation"/>).</summary>
     public int Rotation { get; set; }
+
+    /// <summary>The name of the schematic (<see cref="Kiln.Schematic.Name"/>).</summary>
     public string Schematic { get; set; } = "";
+
+    /// <summary>The hash of the schematic (<see cref="Kiln.Schematic.Hash"/>).</summary>
     public string Hash { get; set; } = "";
+
+    /// <summary>The cells the paste covered: <c>[x, y, z, sizeX, sizeY, sizeZ]</c> in cells. Empty for the edit
+    /// overload.</summary>
     public int[] Box { get; set; } = [];
+
+    /// <summary>How many cells the paste changed.</summary>
     public long Cells { get; set; }
+
+    /// <summary>How many props the paste placed.</summary>
     public int Props { get; set; }
+
+    /// <summary>The Kiln version that placed it.</summary>
     public string KilnVersion { get; set; } = "";
 }
 
 /// <summary>What <see cref="Build.PlaceOnce(string, Schematic, WorldPosition, PasteOptions?)"/> did.</summary>
 /// <param name="Placed">True when it placed now; false when the world already had it (<see cref="Record"/>) or the
 /// edit failed (<see cref="Error"/>).</param>
+/// <param name="AlreadyPlaced">True when the calling mod had already placed this key in this world, so nothing was placed
+/// now.</param>
+/// <param name="Record">The record: the new one when <paramref name="Placed"/>, the earlier one when
+/// <paramref name="AlreadyPlaced"/>, otherwise null.</param>
+/// <param name="Paste">The paste's result; null when it did not paste (already placed, the world never started, or the edit
+/// overload was used).</param>
+/// <param name="Error">Why it failed, in words; null when it did not fail.</param>
 public sealed record PlaceOnceResult(bool Placed, bool AlreadyPlaced, PlaceOnceRecord? Record, PasteResult? Paste, string? Error = null)
     : IKilnResult
 {
