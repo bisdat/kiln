@@ -19,7 +19,7 @@ with tempfile.TemporaryDirectory(prefix='kiln-sf-fixtures-', dir=build.parent) a
     env.pop('DISPLAY', None)
     MISSING = object()  # menu_key: no toggleKey in ShroudForge's config (None writes a JSON null)
     only = os.environ.get('KILN_SF_ONLY', '')  # run only the cases whose name starts with this
-    def case(name, installed='good', bundled='good', early=False, fault=False, linked_layout=False, linked_game=False, busy=False, reservation=None, extra_env=None, verify=None, helper=False, menu_off=False, self_hosted=False, menu_key=MISSING, runtime='runtime'):
+    def case(name, installed='good', bundled='good', early=False, fault=False, linked_layout=False, linked_game=False, busy=False, reservation=None, extra_env=None, verify=None, helper=False, menu_off=False, self_hosted=False, menu_key=MISSING, runtime='runtime', versions=None, use_installed=None):
         if only and not name.startswith(only):
             return
         game = root / name
@@ -35,14 +35,21 @@ with tempfile.TemporaryDirectory(prefix='kiln-sf-fixtures-', dir=build.parent) a
         for kind, mode in [('shroudforge', installed), ('kiln/plugins/shroudforge', bundled)]:
             dest = game / kind
             dest.mkdir(parents=True)
-            (dest / 'version.json').write_text(json.dumps({'version': '1.7.9'}))
+            # versions: {kind: '1.8.1' (version.json says so) | None (no version.json) | bytes (the file as given)}
+            version = (versions or {}).get(kind, '1.7.9')
+            if isinstance(version, bytes):
+                (dest / 'version.json').write_bytes(version)
+            elif version is not None:
+                (dest / 'version.json').write_text(json.dumps({'version': version}))
             (dest / 'profiles').mkdir()
             shutil.copyfile(build / ({'bad-abi': 'bad_kfc.dll', 'old': 'old_kfc.dll'}.get(mode, 'good_kfc.dll')), dest / 'kfc-runtime.dll')
             if mode == 'corrupt':
                 (dest / 'shroudforge-runtime.dll').write_bytes(b'not a DLL')
             else:
                 shutil.copyfile(build / (runtime + '.dll'), dest / 'shroudforge-runtime.dll')
-        (game / 'kiln/kiln.json').write_text(json.dumps({'shroudforge': {'useInstalled': name != 'bundled-corrupt'}}))
+        if use_installed is None:
+            use_installed = name != 'bundled-corrupt'
+        (game / 'kiln/kiln.json').write_text(json.dumps({'shroudforge': {'useInstalled': use_installed}}))
         if early:
             shutil.copyfile(build / 'eml.dll', game / 'kiln/plugins/kiln-eml.dll')
         if helper:
@@ -99,7 +106,7 @@ with tempfile.TemporaryDirectory(prefix='kiln-sf-fixtures-', dir=build.parent) a
             assert status['mode'] == 'failed' and 'startupPrepared' not in status, (name, status)
             print('PASS', name)
             return
-        assert status['source'] == ('installed' if installed == 'good' or name == 'bundled-corrupt' else 'bundled'), (name, status)
+        assert status['source'] == ('installed' if (installed == 'good' and use_installed) or name == 'bundled-corrupt' else 'bundled'), (name, status)
         # ShroudForge's startup preparation succeeded in this process: Kiln's menu takes ShroudForge's record of its
         # startup pass as this start's on that word (the record itself keeps the time of the pass that wrote it)
         assert status.get('startupPrepared') is True, (name, status)
@@ -248,6 +255,44 @@ with tempfile.TemporaryDirectory(prefix='kiln-sf-fixtures-', dir=build.parent) a
     case('menu-helper-exited', extra_env=dict(client, KILN_SF_HELPER_EXIT='1'), helper=True, verify=menu_is('kiln'))
     case('menu-disabled', extra_env=dict(client, KILN_SF_MENU_OFF='1'), menu_off=True, verify=menu_is('off'))
     case('menu-self-hosted', extra_env=dict(client, KILN_SF_SELF_HOSTED='1'), self_hosted=True)
+
+    # ---- dev.30.7: ShroudForge's own app older than the runtime Kiln runs opens no window (src/helper_version.h) ----
+    # An older shroudforge.exe checks the settings the newer runtime writes against its own older schema and refuses
+    # them (a player's 1.7.9 app beside the bundled 1.8.1: "Additional properties are not allowed ('uiTargets' was
+    # unexpected)"). Kiln's default, the bundled runtime, here 1.8.1; the app's version is its install's version.json.
+    tail = " than the ShroudForge Kiln runs (1.8.1): update ShroudForge to use its Modloader and World Editor windows. Mods still load."
+    def app_windows(started, version=None):
+        def verify(status, calls, out):
+            menu_is('helper' if started else 'kiln')(status, calls, out)
+            assert status['version'] == '1.8.1', status
+            lines = [l for l in out.splitlines() if "ShroudForge's own app (version " in l]
+            if started:
+                assert not lines, out
+                assert 'Modloader window started' in out and 'World Editor window started' in out, out
+            else:
+                said = "ShroudForge's own app (version unknown) may be older" if version is None else \
+                    f"ShroudForge's own app (version {version}) is older"
+                assert len(lines) == 1 and lines[0].endswith(said + tail), out
+                assert 'window started' not in out and 'could not be started' not in out, out
+        return verify
+    refused = dict(client, KILN_SF_NO_HELPER='1')  # host.cpp: shroudforge.exe is there, but no helper may run
+    bundled_181 = {'kiln/plugins/shroudforge': '1.8.1'}
+    case('app-older', extra_env=refused, helper=True, use_installed=False,
+         versions=dict(bundled_181, shroudforge='1.7.9'), verify=app_windows(False, '1.7.9'))
+    case('app-unreadable-missing', extra_env=refused, helper=True, use_installed=False,
+         versions=dict(bundled_181, shroudforge=None), verify=app_windows(False))
+    case('app-unreadable-broken', extra_env=refused, helper=True, use_installed=False,
+         versions=dict(bundled_181, shroudforge=b'{"version": "1.8.1"'), verify=app_windows(False))
+    # a version that would not be one plain line in kiln.log is none
+    case('app-unreadable-line-break', extra_env=refused, helper=True, use_installed=False,
+         versions=dict(bundled_181, shroudforge='1.8.1\nbeta'), verify=app_windows(False))
+    case('app-equal', extra_env=client, helper=True, use_installed=False,
+         versions=dict(bundled_181, shroudforge='1.8.1'), verify=app_windows(True))
+    case('app-newer', extra_env=client, helper=True, use_installed=False,
+         versions=dict(bundled_181, shroudforge='1.8.2'), verify=app_windows(True))
+    # the player's own runtime chosen ("Use my installed ShroudForge"): app and runtime are one install, as before
+    case('app-installed-runtime', extra_env=client, helper=True,
+         versions={'shroudforge': '1.8.1', 'kiln/plugins/shroudforge': '1.8.1'}, verify=app_windows(True))
 
     # ---- dev.24: mod shortcuts from Kiln's host key feed (the fork's kiln/abi/input_host.h, kiln.ui v5) ----
     # host.cpp's fake kiln.ui plays play_script(): window keys before the first raw keyboard record, raw keys with their

@@ -3,10 +3,12 @@
 // modules/entrypoints/windows-bootstrap/module_processes.cpp (MIT, Copyright (c) bonsaibauer and ShroudForge
 // contributors; licenses/ShroudForge-LICENSE.txt). Each helper is `shroudforge.exe --<mode> --root <game> --game-pid
 // <pid> --stop-event <name>`; it closes when the named event is set. Skipped on dedicated servers and when the module
-// is switched off in ShroudForge's settings, as in ShroudForge.
+// is switched off in ShroudForge's settings, as in ShroudForge, and when the installed app is older than the runtime Kiln
+// runs (src/helper_version.h).
 #include <fstream>
 #include <vector>
 
+#include "helper_version.h"
 #include "nlohmann/json.hpp"
 #include "sf_internal.h"
 
@@ -102,7 +104,8 @@ std::string helper_menu_key(const std::filesystem::path& root) {
     } catch (...) { return "SDL:66"; }
 }
 
-void start_helper_processes(const std::filesystem::path& root, bool server) {
+void start_helper_processes(const std::filesystem::path& root, bool server, const std::string& runtime_version,
+                            const std::string& app_version) {
     g_server = server;
     g_menu_enabled = !server && sf_module_enabled(root, "modloaderUi");
     if (server) return;  // ShroudForge shows no windows in the dedicated server process
@@ -114,9 +117,18 @@ void start_helper_processes(const std::filesystem::path& root, bool server) {
         return;
     }
     const DWORD pid = GetCurrentProcessId();
+    // An app older than the runtime refuses the settings that runtime writes, so its windows would fail: none starts,
+    // said once; Kiln's ShroudForge page takes the shortcut (helper_menu) and the mods load as they do.
+    const std::string refusal = helper_windows_refusal(app_version, runtime_version);
+    bool refused = false;
     for (auto& h : g_helpers) {
         if (!sf_module_enabled(root, h.module)) {
             logf(KILN_LOG_INFO, "%s: switched off in ShroudForge's settings", h.what);
+            continue;
+        }
+        if (!refusal.empty()) {
+            if (!refused) logf(KILN_LOG_WARN, "%s", refusal.c_str());
+            refused = true;
             continue;
         }
         const std::wstring event_name = std::wstring(h.event_prefix) + std::to_wstring(pid);

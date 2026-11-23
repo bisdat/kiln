@@ -259,10 +259,15 @@ waits on that auto-reset event. This is SF's real `shroudforge.ui.toggle_modload
 with the installed helper for events. The fallback key is remappable in Kiln's Keys tab; unsupported/mouse-only/Meta
 or empty configured bindings do not silently become F9, nor does a `toggleKey` that is not text (null, a number:
 ShroudForge refuses those too), which reports `menuKey` "" and a warning in kiln.log. Helper exit hands ownership to Kiln; stopped runtime removes
-the fallback binding. SF module-off and self-hosted behavior stay intact.
+the fallback binding. SF module-off and self-hosted behavior stay intact. An installed `shroudforge.exe` older than the
+runtime Kiln runs (by its install's `<game>/shroudforge/version.json`; the exe has no version resource), or of a
+version that cannot be read, opens neither window, since it refuses the newer settings that runtime writes (a 1.7.9 app
+beside the bundled 1.8.1: `Additional properties are not allowed ('uiTargets' was unexpected)`): kiln.log says so in one
+warning, Kiln's page takes the shortcut and mods load as before (0.2.0-dev.30.7, `src/helper_version.h`).
 
-Windowless native Wine tests exercise absent/installed/exited/disabled/self-hosted helpers and repeated auto-reset
-signals. Managed tests exercise settings, writer coalescing/failure recovery, state freshness and shortcut ownership.
+Windowless native Wine tests exercise absent/installed/exited/disabled/self-hosted helpers, an app older, equal,
+newer or of unreadable version (`run.py` `app-*`; the comparison itself: `tests/test-helper-version.sh`) and repeated
+auto-reset signals. Managed tests exercise settings, writer coalescing/failure recovery, state freshness and shortcut ownership.
 A headless software preview renders the shared-fixture SF panel at 1280×800 and its main-menu page at 1920×1080.
 In an isolated server lab, the actual managed UI writer queue changed `sf-probe` live: setting on confirmed a guarded
 write, setting off restored the baseline, and the enabled switch deactivated/reactivated its runtime without errors.
