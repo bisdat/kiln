@@ -100,11 +100,13 @@ internal sealed unsafe class WorldStore
     /// <summary>Data that stays with one item (InstanceData): bundles "instances/&lt;mod&gt;" and
     /// "character-instances/&lt;character&gt;/&lt;mod&gt;" of the same generation.</summary>
     internal readonly InstanceStore Instances;
+    internal readonly PlayerStorageStore Storage;
 
     public WorldStore()
     {
         Entities = new EntityTable();
         Instances = new InstanceStore(this);
+        Storage = new PlayerStorageStore(this);
     }
 
     public string? WorldId { get; private set; }
@@ -229,6 +231,7 @@ internal sealed unsafe class WorldStore
         _bundles.Clear();
         Entities.Clear();
         Instances.Clear();
+        Storage.Clear();
         ServiceEntityData.RaiseWorldChanged();  // services drop what they keep per entity id (Kiln.World's waiting scales)
     }
 
@@ -517,6 +520,7 @@ internal sealed unsafe class WorldStore
             return;
         }
         var t0 = System.Diagnostics.Stopwatch.GetTimestamp();
+        Storage.Stage(gen);
         var bundles = new List<(string Scope, byte[] Data)>();
         foreach (var b in _bundles.Values)
         {
@@ -619,6 +623,7 @@ internal sealed unsafe class WorldStore
         if (unix != 0) _loadedUnix = unix;
         job.TickMs = System.Diagnostics.Stopwatch.GetElapsedTime(t0).TotalMilliseconds;
         Writer.Commit(job);
+        Storage.Committed(rev);
         if (reason == SaveReason.Shutdown)
         {
             Writer.Drain("the shutdown save");

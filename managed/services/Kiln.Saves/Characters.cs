@@ -229,6 +229,9 @@ public sealed record CharacterSettings
     /// clients' copies are neither read nor changed.</summary>
     public bool ImportProgress { get; init; } = true;
 
+    /// <summary>Player storage trust, independent of imported progress.</summary>
+    public PlayerStorageSettings Storage { get; init; } = new();
+
     /// <summary>The largest offer, in bytes of JSON values.</summary>
     public int MaxImportBytes { get; init; } = 200 * 1024;
 
@@ -257,9 +260,17 @@ public sealed record CharacterSettings
         catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException)
         {
             SavesRuntime.Log(LogLevel.Warn, $"Kiln.Saves: {path}: {e.Message}; imports stay refused until it is fixed");
-            return new CharacterSettings { ImportProgress = false };
+            return new CharacterSettings { ImportProgress = false, Storage = new PlayerStorageSettings { TrustClient = false } };
         }
     }
+}
+
+/// <summary>Per-server player storage settings in <c>characters.json</c>.</summary>
+public sealed class PlayerStorageSettings
+{
+    /// <summary>Accept the character's carried storage copy and send committed storage back. Defaults to true:
+    /// storage is editable like the character file. False keeps this server's own copy and leaves the client's alone.</summary>
+    public bool TrustClient { get; init; } = true;
 }
 
 /// <summary>The store's side of <see cref="CharacterData"/>: scopes "character/&lt;key&gt;/&lt;mod&gt;" and

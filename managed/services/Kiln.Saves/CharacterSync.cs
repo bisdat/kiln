@@ -55,6 +55,9 @@ internal static class CharacterSync
         public readonly string Name = name;
         public NetPeer? Peer;
         public bool Local, HelloSent, Speaks, Offered;
+        public bool ProgressAllowed = true, StorageTrusted = true, StorageJoined;
+        public readonly StorageOfferWindow StorageWindow = new(_ticks);
+        public string? StorageOffer;
 
         /// <summary>What the client has (per its last ack), what went out last.</summary>
         public Dictionary<(string Mod, string Key), string> Acked = new();
@@ -114,8 +117,9 @@ internal static class CharacterSync
             if (key.IsNone) continue;
             CharacterStore.RememberLast(key, CharacterStore.LegacyIds(p));
             if (key.IsAccountOnly) continue;  // no character id on this build: nothing can travel
-            s = Sessions[p.Entity.Value] = new Session(key, p.Entity, p.Name);
             _settings = CharacterSettings.Load();
+            s = Sessions[p.Entity.Value] = new Session(key, p.Entity, p.Name)
+            { ProgressAllowed = _settings.ImportProgress, StorageTrusted = _settings.Storage?.TrustClient ?? false };
             s.Local = Client.Available && Client.IsHosting && (p.Slot == 0 || Client.LocalPlayer == p.Entity);
             SavesRuntime.Log(LogLevel.Info, $"characters: {s} in game{(s.Local ? " (this machine's player)" : "")}; imports {(_settings.ImportProgress ? "allowed" : "refused here")}");
             if (s.Local) OfferSidecar(s);
@@ -127,10 +131,19 @@ internal static class CharacterSync
         }
         foreach (var s in Sessions.Values)
         {
-            if (s.Local || s.HelloSent || _channel is null) continue;
-            if (Network.PeerOf(s.Entity) is not { State: NetPeerState.Ready } peer || !peer.HasChannel(ChannelName)) continue;
-            s.Peer = peer;
-            SendHello(s);
+            if (!s.Local)
+            {
+                var peer = Network.PeerOf(s.Entity);
+                var vanilla = peer is { State: NetPeerState.Ready } && !peer.HasChannel(ChannelName);
+                if (s.StorageWindow.Poll(_ticks, vanilla) && s.StorageWindow.TimedOut)
+                    SavesRuntime.Log(LogLevel.Warn, $"player-storage: {s}: client offer late (15 second timeout); using server candidates, late storage offers ignored this session");
+                if (!s.HelloSent && _channel is not null && peer is { State: NetPeerState.Ready } && !vanilla)
+                {
+                    s.Peer = peer;
+                    SendHello(s);
+                }
+            }
+            RestoreStorage(s);
         }
     }
 
@@ -145,7 +158,8 @@ internal static class CharacterSync
     private static void SendHello(Session s)
     {
         s.HelloSent = true;
-        _channel!.SendTo(s.Peer!, new CharHello(s.Key.Id, SavesRuntime.WorldId, _settings.ImportProgress, _settings.MaxImportBytes, CharacterStore.RevisionOf(s.Key)));
+        // Even an untrusted copy may withhold stale server storage, but can never add records here.
+        _channel!.SendTo(s.Peer!, new CharHello(s.Key.Id, SavesRuntime.WorldId, s.ProgressAllowed || SavesRuntime.Store.Storage.Native is not null, _settings.MaxImportBytes, CharacterStore.RevisionOf(s.Key)));
     }
 
     private static void Close(Session s)
@@ -216,14 +230,28 @@ internal static class CharacterSync
     private static CharResult Answer(Session s, bool accepted, string reason, List<string>? applied = null, List<string>? kept = null, List<string>? dropped = null) =>
         new(s.Key.Id, accepted, reason, CharacterStore.RevisionOf(s.Key), applied ?? [], kept ?? [], dropped ?? []);
 
+    private static void RestoreStorage(Session s)
+    {
+        if (s.StorageJoined || !s.StorageWindow.Decided || SavesRuntime.Store.Storage.Native is not { } native) return;
+        if (native.WitnessOf(s.Entity) is not { } witness) return;
+        SavesRuntime.Store.Storage.Join(s.Key, s.Entity, witness, s.StorageOffer, s.StorageTrusted, s.Local);
+        s.StorageJoined = true;
+    }
+
     /// <summary>Handles what a client (or this machine's sidecar) offers.</summary>
     private static CharResult Decide(Session s, long revision, Dictionary<string, Dictionary<string, string>> offered)
     {
-        if (!_settings.ImportProgress)
+        if (s.StorageWindow.Offer())
+        {
+            s.StorageOffer = offered.GetValueOrDefault(PlayerStorageStore.Mod)?.GetValueOrDefault(PlayerStorageStore.Key);
+            RestoreStorage(s);
+        }
+        if (!s.ProgressAllowed)
         {
             _refused++;
-            s.Speaks = false;
-            return Answer(s, false, "this server keeps its own copy (characters.json importProgress false): nothing is taken from or sent to your copy");
+            s.Speaks = s.StorageTrusted;
+            s.Acked = Canon(Flat(offered));
+            return Answer(s, false, "this server keeps its own progress (characters.json importProgress false); storage uses its independent trust setting");
         }
         var serverRevision = CharacterStore.RevisionOf(s.Key);
         if (revision <= serverRevision)
@@ -257,6 +285,12 @@ internal static class CharacterSync
         var loaded = Mods.All.Where(m => m.IsLoaded).Select(m => m.Id).ToHashSet(StringComparer.Ordinal);
         var applied = clean.Keys.Where(m => loaded.Contains(m) || m.StartsWith("kiln-", StringComparison.Ordinal)).ToList();
         var kept = clean.Keys.Except(applied).ToList();
+        // Storage has its own witness/revision decision, never the progress import rule.
+        if (clean.TryGetValue(PlayerStorageStore.Mod, out var itemData))
+        {
+            itemData.Remove(PlayerStorageStore.Key);
+            if (itemData.Count == 0) clean.Remove(PlayerStorageStore.Mod);
+        }
         CharacterStore.Replace(s.Key, clean);
         CharacterStore.SetRevision(s.Key, revision);
         s.Speaks = true;
@@ -327,7 +361,12 @@ internal static class CharacterSync
     private static void Push(Session s, bool final)
     {
         if (!s.Speaks || s.Key.Id == Guid.Empty) return;
-        var snap = Canon(Flat(CharacterStore.Snapshot(s.Key)));
+        var snap = s.ProgressAllowed ? Canon(Flat(CharacterStore.Snapshot(s.Key))) : new Dictionary<(string Mod, string Key), string>();
+        var storageAt = (Mod: PlayerStorageStore.Mod, Key: PlayerStorageStore.Key);
+        snap.Remove(storageAt);
+        var storage = s.StorageTrusted ? SavesRuntime.Store.Storage.Carried(s.Key) : null;
+        if (storage is not null) snap[storageAt] = storage;
+        bool MayDelete((string Mod, string Key) at) => at == storageAt ? storage is not null : s.ProgressAllowed;
         var changes = new Dictionary<string, Dictionary<string, JsonElement?>>(StringComparer.Ordinal);
         long bytes = 0;
         void Add((string Mod, string Key) at, JsonElement? v)
@@ -342,7 +381,7 @@ internal static class CharacterSync
             Add(at, Parse(json));
         }
         foreach (var at in s.Acked.Keys)
-            if (!snap.ContainsKey(at)) Add(at, null);
+            if (!snap.ContainsKey(at) && MayDelete(at)) Add(at, null);
         if (changes.Count == 0) return;
         if (bytes > _settings.MaxImportBytes)
         {
@@ -421,7 +460,8 @@ internal static class CharacterSync
         var key = new CharacterKey(m.Account, m.Character);
         if (LabSessions.TryGetValue(ctx.Sender.Id, out var old)) Close(old);
         _settings = CharacterSettings.Load();
-        var s = LabSessions[ctx.Sender.Id] = new Session(key, EntityId.None, "lab:" + ctx.Sender.Name) { Peer = ctx.Sender, Local = m.Local };
+        var s = LabSessions[ctx.Sender.Id] = new Session(key, EntityId.None, "lab:" + ctx.Sender.Name)
+        { Peer = ctx.Sender, Local = m.Local, ProgressAllowed = _settings.ImportProgress, StorageTrusted = _settings.Storage?.TrustClient ?? false };
         SavesRuntime.Log(LogLevel.Info, $"characters: {s} in game (lab peer{(m.Local ? ", as a hosted game's local player" : "")}); imports {(_settings.ImportProgress ? "allowed" : "refused here")}");
         if (m.Local) OfferSidecar(s);
         else SendHello(s);
@@ -521,17 +561,26 @@ internal static class CharacterSidecar
         }
     }
 
+    private static bool FutureStorage(string json)
+    {
+        try { return JsonNode.Parse(json)?["v"]?.GetValue<int>() > 1; }
+        catch (Exception e) when (e is JsonException or InvalidOperationException or FormatException) { return false; }
+    }
+
     /// <summary>Merges changes (keys of mods this update doesn't name stay) and writes the file atomically.</summary>
     public static void Apply(Guid id, long revision, Dictionary<string, Dictionary<string, JsonElement?>> changes, string? world)
     {
         var path = PathOf(id);
         var now = Load(id);
+        var storageReadOnly = now.Mods.TryGetValue(PlayerStorageStore.Mod, out var itemKeys) && itemKeys.TryGetValue(PlayerStorageStore.Key, out var storageJson)
+            && FutureStorage(storageJson);
         foreach (var (mod, keys) in changes)
         {
             if (!CharacterSync.ValidModId(mod)) continue;
             if (!now.Mods.TryGetValue(mod, out var d)) now.Mods[mod] = d = new Dictionary<string, string>(StringComparer.Ordinal);
             foreach (var (k, v) in keys)
             {
+                if (storageReadOnly && mod == PlayerStorageStore.Mod && k == PlayerStorageStore.Key) continue;
                 if (v is { ValueKind: not JsonValueKind.Null } e) d[k] = e.GetRawText();
                 else d.Remove(k);
             }
@@ -555,6 +604,12 @@ internal static class CharacterSidecar
         doc["mods"] = mods;
         Directory.CreateDirectory(Dir);
         if (Readable(path)) File.Copy(path, path + ".prev", overwrite: true);  // never a broken file over the good older copy
+        else if (File.Exists(path))
+        {
+            // If preservation fails, abort the replacement: the only copy of the damaged bytes must not disappear.
+            var archive = path + ".corrupt-" + DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() + "-" + Guid.NewGuid().ToString("N");
+            WorldStore.WriteAtomic(archive, File.ReadAllBytes(path));
+        }
         WorldStore.WriteAtomic(path, System.Text.Encoding.UTF8.GetBytes(doc.ToJsonString()));
     }
 }

@@ -117,7 +117,8 @@ internal static unsafe class SavesRuntime
     {
         try
         {
-            Store.Instances.World ??= new InstanceGame();
+            Store.Instances.World ??= new StorageInstanceWorld(new InstanceGame(), Store.Storage.NormalizeInstance,
+                Store.Storage.InstanceParts, Store.Storage.InstancesReady);
         }
         catch (Exception e) when (e is FileNotFoundException or FileLoadException or TypeLoadException or MissingMethodException)
         {
@@ -432,6 +433,7 @@ internal static unsafe class SavesRuntime
                 _worldFile = null;
                 if (id != null) Store.AdoptWorld(id);
                 Store.Commit(ev.Revision, ev.WorldUnix, reason);
+                CharacterSync.OnWorldSaving(reason);  // storage is published only by the matching world-written event
                 var dur = TimeSpan.FromMilliseconds(ev.DurationMs);
                 CompleteRequests(ev, true, null);
                 if (Events.HasSubscribers<WorldSavedEvent>())

@@ -124,7 +124,8 @@ A client's copy is treated as the game treats a character: client-side and edita
 
 | Check | Effect |
 |---|---|
-| Setting `importProgress: false` | nothing taken, nothing sent; the client's file stays as it is; this server keeps its own copy per character |
+| Setting `importProgress: false` | no carried progress is taken or sent; this server keeps its own progress per character. Player storage has its own setting below |
+| Setting `storage.trustClient: false` | no client storage is instantiated or sent back. This server uses its own paired storage; an unpaired copy is parked if the client reports a newer revision, because storage changed elsewhere |
 | Over `maxImportBytes`, `maxKeys`, or `maxCharactersPerAccount` new characters | the whole offer is refused; nothing changes on either side |
 | A value over `maxValueBytes`, a broken key, a mod id with other characters than letters, digits, `.`, `_`, `-`, `:` | that entry is dropped from what the server takes |
 | A mod not loaded here | its data is **kept, not applied**: stored, passed on, read by nobody |
@@ -135,13 +136,28 @@ A client's copy is treated as the game treats a character: client-side and edita
 `kiln/config/characters.json` (server, read at each join; a file that doesn't parse refuses imports until it is fixed):
 ```json
 {
-  "importProgress": true,            // false: refuse imported progress, and leave clients' copies alone
+  "importProgress": true,            // false: refuse imported progress
+  "storage": { "trustClient": true }, // false: keep server storage; clients may withhold, never add
   "maxImportBytes": 204800,
   "maxValueBytes": 65536,
   "maxKeys": 256,
   "maxCharactersPerAccount": 32
 }
 ```
+
+Missing settings default to true. An unreadable `characters.json` disables both imported progress and trusted client storage until it is fixed. The settings are independent: `importProgress: false` with `storage.trustClient: true` refuses progress but still lets storage travel.
+
+### Player storage copies (since 0.2.0-dev.30.7)
+
+Kiln-owned storage uses mod `kiln-items`, key `storage`, over the same `kiln:character` v1 offer/update channel. The server copy is the generation scope `player-storage/<character key>`. It is frozen with the game's character capture, durably staged before the world write, and sent back only after world-written; a failed write keeps the pending copy.
+
+Storage does not use the progress newest-revision rule. A copy paired with the arriving character inventory wins, with the highest revision among matching pairs; only if none matches does the newest unpaired copy win, with a warning. History keeps 8 carried and 32 server pairs. Equal consecutive contents share records through optional `pairs` witness aliases. Unknown storage keys and overflow after a slot-count reduction stay parked. Unsupported future document versions stay read-only, whole. Malformed entries go to quarantine with their bytes and reason. An unparseable sidecar is preserved as `.corrupt-<stamp>` before replacement; atomic writes retain `.prev`.
+
+A Kiln peer has 15 seconds to offer storage before the server chooses its own candidates (`client offer late` in the log). A later offer cannot replace live storage that session. Hosted local players use their sidecar directly; vanilla clients use server candidates without waiting. Saving or leaving before restoration never replaces existing records with an empty pair.
+
+With `storage.trustClient: false`, client records are never instantiated. A newer client document can still **withhold** an unpaired server copy: it is parked with the reason "changed elsewhere since this server's copy", rather than duplicating items moved into the backpack on another world or by offline return. A forged revision can hold only that character's storage, not add items. Parked storage can be explicitly returned through the orphan-return tools.
+
+**Vanilla-client limit:** a vanilla client sends no sidecar. After an offline return, a Kiln server retaining an older copy can give that storage back server-side; the client cannot warn it that the items were already returned. Avoid revisiting such a server with a vanilla client after returning storage offline, or ask its owner to clear the obsolete copy.
 
 ## The move from account-keyed data
 Kiln.Quests and Kiln.Skills kept `book`, `gameShadow` and `talents:<tree>` per Steam id, else account id, else host key 1.
