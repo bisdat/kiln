@@ -114,6 +114,7 @@ public static unsafe partial class Items
     // The rows that are fixed once the service has started. A sigdb row is only lowered, never raised.
     private static void ReportCapabilities()
     {
+        PlayerStorageRuntime.ReportCapabilities();  // kiln.items.storage is a table of its own: its rows do not follow kiln.items'
         RefreshGiveEquip();
         var t = T;  // Services.Get puts the reason on kiln.items when the table is missing or older
         if (t == null)
