@@ -11,9 +11,72 @@ namespace Kiln;
 /// <summary>The game's primitive kinds (kiln_types.h KILN_TYPE_*).</summary>
 public enum GameTypeKind : byte
 {
-    None = 0, Bool = 1, U8, S8, U16, S16, U32, S32, U64, S64, F32, F64, Enum, Bitmask8, Bitmask16, Bitmask32, Bitmask64,
-    Typedef, Struct, StaticArray, DsArray, DsString, DsOptional, DsVariant, BlobArray, BlobString, BlobOptional, BlobVariant,
-    ObjectReference, Guid,
+    /// <summary>No kind: the zero value.</summary>
+    None = 0,
+    /// <summary>A boolean in one byte (0 is false).</summary>
+    Bool = 1,
+    /// <summary>An unsigned 8-bit integer.</summary>
+    U8,
+    /// <summary>A signed 8-bit integer.</summary>
+    S8,
+    /// <summary>An unsigned 16-bit integer.</summary>
+    U16,
+    /// <summary>A signed 16-bit integer.</summary>
+    S16,
+    /// <summary>An unsigned 32-bit integer.</summary>
+    U32,
+    /// <summary>A signed 32-bit integer.</summary>
+    S32,
+    /// <summary>An unsigned 64-bit integer.</summary>
+    U64,
+    /// <summary>A signed 64-bit integer.</summary>
+    S64,
+    /// <summary>A 32-bit float.</summary>
+    F32,
+    /// <summary>A 64-bit float.</summary>
+    F64,
+    /// <summary>An enumeration: a whole number of 1, 2, 4 or 8 bytes with named values
+    /// (<see cref="GameType.EnumValues"/>).</summary>
+    Enum,
+    /// <summary>A bit mask of named flags in 1 byte (<see cref="GameType.EnumValues"/>).</summary>
+    Bitmask8,
+    /// <summary>A bit mask of named flags in 2 bytes (<see cref="GameType.EnumValues"/>).</summary>
+    Bitmask16,
+    /// <summary>A bit mask of named flags in 4 bytes (<see cref="GameType.EnumValues"/>).</summary>
+    Bitmask32,
+    /// <summary>A bit mask of named flags in 8 bytes (<see cref="GameType.EnumValues"/>).</summary>
+    Bitmask64,
+    /// <summary>An alias of another type: <see cref="GameType.Inner"/> is its target and
+    /// <see cref="GameType.Resolved"/> follows the chain.</summary>
+    Typedef,
+    /// <summary>A struct with named fields (<see cref="GameType.Fields"/>) and an optional base class
+    /// (<see cref="GameType.Base"/>).</summary>
+    Struct,
+    /// <summary>A fixed-size array of <see cref="GameType.Inner"/> elements (<see cref="GameType.ArrayLength"/> of
+    /// them).</summary>
+    StaticArray,
+    /// <summary>A dynamic array in game-owned memory. Not a scalar: <see cref="GameValueCodec"/> does not read or write
+    /// it.</summary>
+    DsArray,
+    /// <summary>A dynamic string in game-owned memory. Not a scalar.</summary>
+    DsString,
+    /// <summary>An optional value in game-owned memory. Not a scalar.</summary>
+    DsOptional,
+    /// <summary>A variant in game-owned memory: one of several types. Not a scalar.</summary>
+    DsVariant,
+    /// <summary>An array stored inside a resource's data (a blob array: an offset and a count) of
+    /// <see cref="GameType.Inner"/> elements.</summary>
+    BlobArray,
+    /// <summary>A string stored inside a resource's data.</summary>
+    BlobString,
+    /// <summary>An optional value stored inside a resource's data.</summary>
+    BlobOptional,
+    /// <summary>A variant stored inside a resource's data: one of several types.</summary>
+    BlobVariant,
+    /// <summary>A reference to another game object, stored as a 16-byte GUID.</summary>
+    ObjectReference,
+    /// <summary>A GUID in 16 bytes.</summary>
+    Guid,
 }
 
 /// <summary>Reads and writes one scalar value with the game's layout and Kiln's checks.</summary>

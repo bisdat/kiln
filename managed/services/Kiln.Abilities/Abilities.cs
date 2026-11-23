@@ -7,6 +7,39 @@ using System.Text;
 namespace Kiln;
 
 /// <summary>Counters of kiln.abilities (diagnostics).</summary>
+/// <param name="Natives">The native registry was captured and Kiln's natives and wrappers are registered.</param>
+/// <param name="Programs">The game's ImpactRegistry is reachable: program lookup and registration work.</param>
+/// <param name="Instances">The hooks on instance creation and first run are on: observing, config overrides and holds
+/// work.</param>
+/// <param name="Attributes">Attribute reads and writes work (<see cref="Abilities.Attributes"/>).</param>
+/// <param name="VanillaNatives">Natives the game registered (107 on svn 1285601).</param>
+/// <param name="NativeCapacity">The native registry's capacity (256).</param>
+/// <param name="KilnNatives">Live Kiln natives: the built-in and the managed ones.</param>
+/// <param name="ProgramsTotal">Programs in the ImpactRegistry.</param>
+/// <param name="ProgramsKiln">Programs Kiln inserted.</param>
+/// <param name="HeldNow">Instances held for event handlers right now (<see cref="ImpactStartingEvent"/>).</param>
+/// <param name="Interest">The event kinds the listener asks for now, as a bit mask: one bit per kind, and bit 31 asks
+/// to hold new instances.</param>
+/// <param name="InstancesCreated">Impact instances created.</param>
+/// <param name="InstancesHeld">Instances held for the listener, counted since start.</param>
+/// <param name="OverridesApplied">Config overrides written into a variable.</param>
+/// <param name="OverridesMismatched">Config overrides that wrote nothing: no variable matched, or the size did not
+/// fit.</param>
+/// <param name="Runs">Calls of the game's run-impact function that Kiln saw.</param>
+/// <param name="NativeCalls">Calls of the vanilla natives Kiln wraps.</param>
+/// <param name="NativeCallsObserved">Native calls reported to the listener as events
+/// (<see cref="ImpactNativeEvent"/>).</param>
+/// <param name="Signals"><c>kiln.Signal</c> calls.</param>
+/// <param name="ManagedCalls">Calls of managed Kiln natives handed to the listener.</param>
+/// <param name="ManagedSuspends">Times a program's call of a managed native suspended again while its answer was still
+/// pending.</param>
+/// <param name="EventsDelivered">Events delivered to the listener.</param>
+/// <param name="EventsDropped">Events lost because the event queue was full or its lock could not be taken in
+/// time.</param>
+/// <param name="WrapCalls">Calls handed to <see cref="Abilities.Natives.Wrap"/> handlers.</param>
+/// <param name="ProgramsRefused">Program registrations refused: the verifier said no, or the GUID belongs to a game
+/// program or to another Kiln program.</param>
+/// <param name="Step">The server world's step when the status was read.</param>
 public sealed record AbilitiesStatus(bool Natives, bool Programs, bool Instances, bool Attributes, int VanillaNatives,
     int NativeCapacity, int KilnNatives, int ProgramsTotal, int ProgramsKiln, int HeldNow, uint Interest,
     ulong InstancesCreated, ulong InstancesHeld, ulong OverridesApplied, ulong OverridesMismatched, ulong Runs,
@@ -26,14 +59,30 @@ public sealed record AbilitiesStatus(bool Natives, bool Programs, bool Instances
 }
 
 /// <summary>A program in the game's ImpactRegistry.</summary>
+/// <param name="Id">The program's id: FNV-1a of its GUID's bytes (<see cref="Abilities.Programs.IdOf(Guid)"/>).</param>
+/// <param name="Guid">The program's GUID.</param>
+/// <param name="CodeWords">Words of code in the program.</param>
+/// <param name="ShutdownWords">Words of shutdown code.</param>
+/// <param name="Variables">The number of variables.</param>
+/// <param name="DataBytes">Bytes of variable data one instance holds.</param>
+/// <param name="StackSize">The program's stack size.</param>
+/// <param name="Streams">The streams the program uses, as bits: OnCollision 1, OnHit 2, OnParry 4, EntityInRange
+/// 8.</param>
+/// <param name="FromKiln">True when Kiln inserted the program (a mod's), false for a game program.</param>
 public sealed record ImpactProgramInfo(uint Id, Guid Guid, int CodeWords, int ShutdownWords, int Variables, int DataBytes,
     int StackSize, int Streams, bool FromKiln);
 
 /// <summary>A native in the game's registry.</summary>
+/// <param name="Hash">FNV-1a-32 of the native's name: what a program's call names.</param>
+/// <param name="Name">The native's display name.</param>
+/// <param name="Argc">The number of arguments.</param>
+/// <param name="Kind">Who registered it.</param>
 public sealed record ImpactNativeInfo(uint Hash, string Name, int Argc, ImpactNativeKind Kind);
 
+/// <summary>Who registered a native in the game's registry (<see cref="ImpactNativeInfo.Kind"/>).</summary>
 public enum ImpactNativeKind
 {
+    /// <summary>Registered by the game and untouched.</summary>
     Vanilla = 0,
     /// <summary>A vanilla native Kiln observes or wraps (the game's function still runs).</summary>
     Wrapped = 1,
@@ -49,8 +98,11 @@ public enum ImpactNativeKind
 /// <summary>A resource attribute an ability can cost or change.</summary>
 public enum AbilityResource
 {
+    /// <summary>The health attribute.</summary>
     Health,
+    /// <summary>The mana attribute.</summary>
     Mana,
+    /// <summary>The stamina attribute.</summary>
     Stamina,
     /// <summary>The special-ability charge (the bar that fills in combat).</summary>
     SpecialAbility,
@@ -70,6 +122,7 @@ public sealed class ImpactOptions
     /// <summary>Config values for the instance (see <see cref="ImpactConfigs"/>).</summary>
     public ImpactConfigs? Configs { get; init; }
 
+    /// <summary>The spawned entity's yaw in degrees about the up axis. Default 0.</summary>
     public float YawDegrees { get; init; }
 
     /// <summary>Record the entity in kiln.spawn's per-world list (default: no; impacts are short-lived and never
@@ -79,6 +132,8 @@ public sealed class ImpactOptions
     /// <summary>More spawn components (kiln.spawn's <see cref="SpawnOptions.Components"/>).</summary>
     public IReadOnlyList<SpawnComponent>? Components { get; init; }
 
+    /// <summary>The tag kiln.spawn stores for the spawned entity (<see cref="SpawnOptions.Tag"/>). Default
+    /// <c>"abilities"</c>.</summary>
     public string? Tag { get; init; }
 }
 
@@ -402,10 +457,15 @@ public static unsafe partial class Abilities
     /// Kiln at world start; see docs/kiln/services/abilities.md for the contract.</summary>
     public static class Programs
     {
+        /// <summary>The number of programs in the game's ImpactRegistry; 0 when kiln.abilities is not loaded. Tick
+        /// thread.</summary>
         public static int Count => AbilitiesNative.T is var t && t != null ? (int)t->ProgramCount() : 0;
 
+        /// <summary>The id of a program: FNV-1a of its GUID's bytes.</summary>
         public static uint IdOf(Guid program) => AbilitiesNative.Fnv(program.ToByteArray());
 
+        /// <summary>A program's description; null when kiln.abilities is not loaded or no program has this id. Tick
+        /// thread.</summary>
         public static ImpactProgramInfo? Info(uint id)
         {
             var t = AbilitiesNative.T;
@@ -419,6 +479,8 @@ public static unsafe partial class Abilities
                 (int)p.DataBytes, p.StackSize, p.Streams, p.Kiln != 0);
         }
 
+        /// <summary>The variables of a program; empty when there are none or no program has this id. Tick
+        /// thread.</summary>
         public static IReadOnlyList<ImpactVariable> Variables(uint id) => ReadVars(id, isProgram: true);
 
         /// <summary>Verifies and inserts a program blob (copied). Returns its id. Throws <see cref="ArgumentException"/>
