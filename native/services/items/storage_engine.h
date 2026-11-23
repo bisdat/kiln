@@ -62,8 +62,28 @@ bool record_from_memory(const uint8_t*, Record*);
 bool memory_from_record(const Record&, uint8_t out[56]);
 bool inventory_from_character(const void*, Inventory*);
 bool character_witness(const void*, uint64_t*, uint32_t baseline = 5, uint32_t* flags = nullptr);
-bool create_holder(const Access&, uint32_t player, uint32_t slots, Holder*);
-bool destroy_holder(const Access&, const Holder*);
+// Internal diagnostics only, never exposed in the service ABI. A reported destroy success is NOT rollback proof:
+// lookup faults can look like missing components, and a failed create may have allocated an unknown entity.
+struct NativeCall {
+    uint32_t value = 0, error = 0;
+    bool called = false;
+};
+struct HolderCleanup {
+    bool attempted = false, reported_ok = false;
+    uint32_t calls = 0, succeeded = 0, failed_entity = 0;
+    NativeCall last{}, first_failed{};
+};
+enum class HolderStage { None, Preconditions, Gate, RootCreate, PageCreate, SetupLookup, SetupCopy };
+struct HolderBuild {
+    HolderStage stage = HolderStage::None;
+    uint32_t page = UINT32_MAX, root = 0, pages = 0, error = 0;
+    uint64_t setup_size = 0;
+    NativeCall native{};
+    HolderCleanup cleanup{};
+    bool retryable() const { return stage == HolderStage::Gate && !native.called; }
+};
+bool create_holder(const Access&, uint32_t player, uint32_t slots, Holder*, HolderBuild* = nullptr);
+bool destroy_holder(const Access&, const Holder*, HolderCleanup* = nullptr);
 bool insert_record(const Access&, const Holder&, const KilnStorageRecord&, uint32_t* reason);
 bool freeze_holder(const Holder&, void* attributes, void* bindings, EntityRef*, Entry*);
 bool clear_holder_references(uintptr_t world, uint32_t player, const Holder&);
