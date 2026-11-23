@@ -100,8 +100,10 @@ public sealed class ExperimentalIdTests
             foreach (var m in type.GetMembers(All))
                 Assert.True(Id(m) == null, $"{name}.{m.Name} is still [Experimental(\"{Id(m)}\")]");
         }
-        // and nothing anywhere in Kiln.World still names KILNX003
-        Assert.Empty(world.GetExportedTypes().SelectMany(t => t.GetMembers(All).Append<MemberInfo>(t)).Where(m => Id(m) == Reads)
-            .Select(m => m.Name));
+        // what stays experimental in Kiln.World: the KILNX001 lab members only (hidden from completion, named Lab*); nothing
+        // anywhere in it still names KILNX003
+        var marked = world.GetExportedTypes().SelectMany(t => t.GetMembers(All).Append<MemberInfo>(t)).Where(m => Id(m) != null)
+            .Select(m => $"{Id(m)} {(m is Type t ? t.FullName : $"{m.DeclaringType!.Name}.{m.Name}")}").Order().ToList();
+        Assert.Equal([$"{Lab} ComponentChanges.LabCounters", $"{Lab} ComponentChanges.LabHoldDelivery"], marked);
     }
 }
