@@ -13,6 +13,9 @@ Read by kiln.content (`native/services/content/registry/regmap.{h,cpp}`); checke
 `tools/registrygen/regmap_check.py` (against the committed type dumps under `sigdb/types/`, or against a game
 executable's own reflection with `--exe`, the file read as data and never run).
 
+Adding a registry (schema, mapping, back-ends, proof, tests, and the pitfalls the first registries hit):
+[docs/kiln/adding-a-registry.md](../docs/kiln/adding-a-registry.md).
+
 ## common/<registry>.json
 
 ```jsonc
