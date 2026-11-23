@@ -121,6 +121,12 @@ public:
     };
     Counters counters() const;
     uint32_t plans_held() const;  // plans the client side still keeps (live, staged, waiting to be freed)
+    // Tests: called on the render path after the plan to draw was picked, right before the world and owner are checked
+    // again and the renderer is written (another thread ending them in between).
+    void set_before_commit_for_test(void (*fn)(void*), void* user) {
+        before_commit_ = fn;
+        before_commit_user_ = user;
+    }
 
 private:
     // the render path's own state for one plan
@@ -192,6 +198,8 @@ private:
     bool last_overridden_ = false;  // last frame's view was ours
     SampleSet r_samples_{};
     std::atomic<uint64_t> c_frames_{0}, c_pose_{0}, c_fov_{0}, c_faults_{0};
+    void (*before_commit_)(void*) = nullptr;
+    void* before_commit_user_ = nullptr;
 };
 
 }  // namespace kcam

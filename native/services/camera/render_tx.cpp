@@ -524,6 +524,19 @@ void LocalBackend::on_select(const Renderer& r, uint64_t selection, float* fov) 
         last_overridden_ = false;
         return;
     }
+    if (before_commit_) before_commit_(before_commit_user_);
+    // 4.2: the epoch (and the owner) again immediately before a write: a world stop or a retirement on another thread
+    // since the plan was picked writes nothing of the dead world or the retired owner
+    const auto still_live = [&] {
+        return frames_->epoch() == shown->epoch && !shown->stop.load(std::memory_order_acquire) &&
+               (!shown->alive || shown->alive->load(std::memory_order_acquire));
+    };
+    if (!still_live()) {
+        frames_->expect(selection, none);
+        last_out_ = natural;
+        last_overridden_ = false;
+        return;
+    }
 
     Frames::Expected ex;
     ex.gen = shown->gen;
@@ -551,7 +564,7 @@ void LocalBackend::on_select(const Renderer& r, uint64_t selection, float* fov) 
         for (int i = 0; i < 3; ++i) ex.position[i] = w.position[i];
         for (int i = 0; i < 4; ++i) ex.rotation[i] = w.rotation[i];
     }
-    if (out.fov) {
+    if (out.fov && (ex.wrote || still_live())) {  // after a pose write the frame is committed to: the lens goes with it
         *fov = static_cast<float>(out.view.fov);  // the original instruction stores it
         c_fov_.fetch_add(1, std::memory_order_relaxed);
         ex.wrote |= Frames::kWroteFov;

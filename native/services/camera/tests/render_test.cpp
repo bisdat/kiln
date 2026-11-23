@@ -979,7 +979,34 @@ void test_drawn_then_ended_before_pre() {
     CHECK(e.seen && e.r.ok && g.core.live_leases() == 0);
 }
 
+void retire_owner_30(void* rig) { static_cast<Rig*>(rig)->core.owner_retiring(30); }
+void stop_world_1(void* rig) {
+    auto* g = static_cast<Rig*>(rig);
+    g->core.world_stopping(kClient, 1);
+}
 
+// Should-fix 1: the world and the owner are checked again right before the write (another thread may have ended them
+// since the plan was picked).
+void test_recheck_before_write() {
+    for (int variant = 0; variant < 2; ++variant) {
+        Rig g(kAllLocal);
+        std::vector<KilnCameraKey> keys = {key(0, 0, 10, 0)};
+        KilnCameraRequest q = g.path(keys, 10000);
+        q.parts |= KILN_CAMERA_LENS;
+        q.lens_source = KILN_CAMERA_LENS_CONSTANT;
+        q.fov_y_degrees = 40;
+        Result r;
+        g.apply(30, q, &r);
+        g.pre();
+        g.frame(0);
+        g.pre();
+        CHECK(r.r.ok && !g.pose_is_stock());
+        g.backend.set_before_commit_for_test(variant == 0 ? &retire_owner_30 : &stop_world_1, &g);
+        g.frame(0);
+        CHECK(g.pose_is_stock() && g.fov_reg == kNaturalFov);
+        g.backend.set_before_commit_for_test(nullptr, nullptr);
+    }
+}
 
 
 
@@ -991,7 +1018,8 @@ int main(int argc, char** argv) {
     const struct {
         const char* name;
         void (*fn)();
-    } named[] = {{"drawn_then_ended", test_drawn_then_ended_before_pre}};
+    } named[] = {{"drawn_then_ended", test_drawn_then_ended_before_pre},
+                 {"recheck_before_write", test_recheck_before_write}};
     if (argc > 1) {
         for (const auto& t : named)
             if (std::strcmp(argv[1], t.name) == 0) {
