@@ -40,6 +40,7 @@ public abstract class ArgumentType
 
     internal virtual JsonObject ToJson() => new() { ["type"] = Name, ["describe"] = Describe() };
 
+    /// <summary>The type's short name.</summary>
     public override string ToString() => Name;
 
     internal static IEnumerable<string> StartingWith(IEnumerable<string> options, string prefix) =>
@@ -70,6 +71,9 @@ public static class Arg
     /// <summary>A name of <typeparamref name="T"/> (any case).</summary>
     public static ArgumentType Enum<T>() where T : struct, System.Enum => new EnumArg(typeof(T));
 
+    /// <summary>A name of the enum <paramref name="enumType"/> (any case).</summary>
+    /// <param name="enumType">An enum type.</param>
+    /// <exception cref="ArgumentException"><paramref name="enumType"/> is not an enum.</exception>
     public static ArgumentType Enum(Type enumType) =>
         enumType.IsEnum ? new EnumArg(enumType) : throw new ArgumentException($"{enumType} is not an enum");
 
