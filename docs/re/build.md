@@ -169,6 +169,11 @@ and the offline resolver, not the third-party mod implementation [dis] [cap `too
   the server-world test kiln.items' tool wear and power scaling already make (`JobStorage(job) == world + world.storage`).
   TerraformImpact passes the same qword to its component reads (S `0x179e60` loads `[ctx]` and calls `0x65ba10`) and
   to `world/CurrentEntityId` (S `0x65b870`). [dis]
+- Its result is the caller's `NativeResult` (`args[0]`): a code at `+0` and, with code 0, a value at `+8` that is the
+  success flag it also hands `BuildFinish` (S `0x22a5f0`). A stroke whose building cursor flags are not clear ends at S
+  `0x18ea6d` with code 0 **and value 0**; the finished operations write value 1 when their own call returned 0 (S
+  `0x18f4e5`). Other codes: 6 cancelled (S `0x18ebb1`), 0x11 (S `0x18eb2b`), 0x18 a missing argument (S `0x18f792`).
+  So code 0 alone does not mean the stroke did anything; Kiln's action trace (0.2.0-dev.30.8) reads both. [dis]
 - S `0x18e870` / C `0x3ed5d0` loads `BuildZoneSystem*` from that Access `+0x88`, immediately before calling the
   game's base-area intersection helper, S `0x94af20` / C `0xea3cd0`, with the brush's float AABB.
 - That helper reads base data `+0x10`, count `+0x18`, skips entry `+0x46` (abandoned), and dispatches shape `+0x44`

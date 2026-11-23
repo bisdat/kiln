@@ -164,10 +164,13 @@ u32)`: `0x9e850` (the main checks), then bit 0 (invalid transform) from the acto
   query; the builder copies the held item's `equipment.cursorConfig.checkRequiredMaterialsOnPrimaryAction` (ItemInfo
   `+0x1a4`) into the primary query `+0x47` and `...OnSecondaryAction` (`+0x1a8`) into the secondary one. Only with
   that byte set does `0x99750` run: an item with `voxelObject` (`+0x458`) or `terrainVoxelObject` (`+0x468`) takes the
-  voxel-object branch (a blueprint registry lookup by item id, then blocks needed against stock); otherwise an
-  `IsTerraformer` item needs the query's material (`[query+0x68]`, the builder's fourth argument; none sets the bit)
-  and its stock. `Building_Overgrowth_Shape_Small` checks on primary (its Add) and not on secondary (its Remove). A
-  Kiln tool brush turns the check off on an input bound to a Remove.
+  voxel-object branch (a blueprint registry lookup by item id: no entry passes; with one, no material in the query sets
+  the bit, else the blocks needed are compared with stock); otherwise an `IsTerraformer` item needs the query's material
+  (`[query+0x68]`, the builder's fourth argument; none sets the bit) and its stock. `Building_Overgrowth_Shape_Small`
+  checks on primary (its Add) and not on secondary (its Remove). A Kiln tool brush carries a `terrainVoxelObject` and a
+  blueprint registry entry, so a Remove asking on its input has no material and always sets the bit; it turns the
+  check off on an input bound to a Remove. The two bytes gate nothing else: the server cursor's only other read of them
+  (S `0x9daa8`) computes the float CursorFlags hands `0x99750` alone (its seventh argument, `[rbp+0x90]`).
 
 | Bit | `CursorFlag` | Kiln rule that clears it |
 |---|---|---|
