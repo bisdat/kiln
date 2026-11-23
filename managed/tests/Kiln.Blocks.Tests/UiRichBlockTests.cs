@@ -741,8 +741,9 @@ public sealed class UiRichBlockTests : IDisposable
         var typing = new Canvas();
         typing.Typing["Note###in"] = ("old world", UiItemState.Active, false);
         Frame(w, typing);
+        UiRuntime.Pump();  // the Pump has seen this world
         _game.WorldSession++;
-        UiRuntime.Pump();
+        UiRuntime.Pump();  // a new one: the state resets under the active field
         var enter = new Canvas();
         enter.Typing["Note###in"] = ("old world", UiItemState.Deactivated | UiItemState.DeactivatedAfterEdit, true);
         Frame(w, enter);
