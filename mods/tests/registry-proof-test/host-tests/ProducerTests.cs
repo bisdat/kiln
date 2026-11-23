@@ -48,6 +48,18 @@ public class ProducerTests
         Assert.Equal(expected, (bool)method.Invoke(null, new object[] { reason })!);
     }
 
+    // review3 N1/N2: the producer's unsampled reasons become the record's, shown inside kiln.content's parentheses: no
+    // nested parentheses, and an all-empty field says so (not "no lab round trip").
+    [Theory]
+    [InlineData("NoDropTables")]
+    [InlineData("NoValue")]
+    public void Unsampled_reasons_read_inside_parentheses(string name)
+    {
+        var text = (string)typeof(RegistryProofTestMod).GetField(name, BindingFlags.Static | BindingFlags.NonPublic)!.GetValue(null)!;
+        Assert.DoesNotContain("(", text);
+        Assert.DoesNotContain("no lab round trip", text);
+    }
+
     // review2 N5: an impact config is compared raw; a raw read that fails stays null, never the resource digest
     [Fact]
     public void Impact_configs_are_compared_raw()

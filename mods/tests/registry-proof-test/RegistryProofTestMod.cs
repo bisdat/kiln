@@ -42,6 +42,12 @@ public sealed unsafe class RegistryProofTestMod : Mod
     private bool _ran;
     private string _kiln = "";
 
+    // Why a field has no sample, in Kiln words: kilnctl makes it the record's unproven reason, which kiln.content shows inside
+    // parentheses ("... is not proven for game build <b> (<reason>)"), so no parentheses of their own (review3 N2).
+    private const string NoDropTables = "no drop table was loaded in the lab's world; the game loads them as players need them";
+    // every entry the lab read holds no value of the field (recipes.station on f0d824be): nothing to round-trip (review3 N1)
+    private const string NoValue = "no entry the lab read has a value of it on this build, so there was nothing to round-trip";
+
     private void Check(bool ok, string text)
     {
         if (ok) ++_pass; else ++_fail;
@@ -389,7 +395,7 @@ public sealed unsafe class RegistryProofTestMod : Mod
                 if (readable == 0)
                     foreach (var (field, rowNode) in map["rows"]!.AsObject())
                         if ((string?)rowNode?["state"] != "unmapped")
-                            unsampled[$"{registry}.{field}"] = "no drop table was loaded in the lab's world (the game loads them as players need them)";
+                            unsampled[$"{registry}.{field}"] = NoDropTables;
             }
             foreach (var (field, rowNode) in map["rows"]!.AsObject())
             {
@@ -402,7 +408,7 @@ public sealed unsafe class RegistryProofTestMod : Mod
                 // Never infer the config's representation from whether its current value is whole.
                 foreach (var mode in (string?)row["conv"] == "impactConfig" ? new[] { "sint32", "sint32-refusal", "float" } : new[] { "" })
                 {
-                    var sample = SampleOf(registry, field, row, paths, backend, entries, map["rows"]!.AsObject(), ids, mode);
+                    var sample = SampleOf(registry, field, row, paths, backend, entries, map["rows"]!.AsObject(), ids, mode, unsampled);
                     if (sample != null) samples.Add(sample);
                 }
             }
@@ -473,7 +479,8 @@ public sealed unsafe class RegistryProofTestMod : Mod
 
     /// <summary>One sample of a field: the first entry that reads (and, for a writable field, takes a probe).</summary>
     private JsonObject? SampleOf(string registry, string field, JsonObject row, List<string> paths, string backend,
-                                 List<(ContentEntry E, string Id)> entries, JsonObject rows, JsonObject idTables, string mode = "")
+                                 List<(ContentEntry E, string Id)> entries, JsonObject rows, JsonObject idTables, string mode = "",
+                                 JsonObject? unsampled = null)
     {
         var q = $"{registry}.{field}";
         var element = field.Contains("[].");
@@ -589,6 +596,7 @@ public sealed unsafe class RegistryProofTestMod : Mod
         }
         Log.Info($"registry-proof-test: no sample of {q} ({entries.Count} entries): " + (why.Count == 0 ? "no entry" : string.Join(", ", why.Select(p => $"{p.Key} x{p.Value}")))
                      + (backend == "live" && why.Count == 1 && why.Keys.First().StartsWith("read rc=", StringComparison.Ordinal) ? WriteWhy(registry, entries[0].Id, field, conv) : ""));
+        if (unsampled != null && why.Count == 1 && why.ContainsKey("null or empty") && unsampled[q] is null) unsampled[q] = NoValue;
         return null; // no entry took a probe: unproven, not a disproof
     }
 
