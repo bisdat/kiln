@@ -219,6 +219,33 @@ public sealed class RegistryDispatchTests : ModsFixture
         }
         finally { WorldConfigs.Reset(); }
     }
+    [Theory]
+    [InlineData(RegistryPhase.Alter)]
+    [InlineData(RegistryPhase.Final)]
+    public void AutomaticWorldRequiredOutcomesReleaseTheirUncommittedDraft(RegistryPhase phase)
+    {
+        using var native = new FakeRegistry(); using var manager = NewManager(native.Host);
+        using var dispatch = new RegistryDispatch(manager); dispatch.Prepare(100);
+        var owner = Owner(native, "world-race");
+        dispatch.Loaded(new WorldAuthor(c => {
+            if (c.EntryPoint == RegistryEntryPoint.WorldLoad && c.Phase == phase) Edit(c, 90);
+        }), owner, Root, false);
+        native.WorldRequiredCommits = 1; dispatch.FlushLoads();
+        Assert.Equal(0, native.DraftCount); Assert.Equal(10, native.Value);
+        owner.Retire();
+    }
+    [Fact]
+    public void ManualWorldRequiredOutcomeReleasesItsDraftAndReturnsNoRetainedHandle()
+    {
+        using var native = new FakeRegistry(); using var manager = NewManager(native.Host);
+        using var dispatch = new RegistryDispatch(manager); dispatch.Prepare(100);
+        var owner = Owner(native, "manual-race");
+        native.WorldRequiredCommits = 1;
+        var result = RegistryRuntime.Manual!(owner, c => Edit(c, 90));
+        Assert.Equal(4u, result.Outcome); Assert.Equal(0, native.DraftCount);
+        Assert.Equal(0ul, result.Handle); Assert.Equal(10, native.Value);
+        owner.Retire();
+    }
     [Fact]
     public void AContextConstructionFailureDoesNotStarveOtherPendingAuthors()
     {

@@ -282,6 +282,11 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
     private static bool Retained(RegistryCompletion result) => result.Outcome is 0 or 1 or 8 && result.Accepted != 0 && result.Handle != 0;
     private RegistryCompletion Applied(ModContext owner, RegistryCompletion result)
     {
+        if (result.Outcome == 4 && result.Handle != 0)
+        {
+            _native.Revert(owner.Owner, result.Handle); // a world race leaves an unordered native draft, not a retained change
+            result = result with { Handle = 0 };
+        }
         if (Retained(result))
         {
             if (!_changes.TryGetValue(owner.Owner, out var handles)) _changes[owner.Owner] = handles = [];

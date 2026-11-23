@@ -17,12 +17,13 @@ internal sealed unsafe class FakeRegistry : IDisposable
     internal readonly RegistryLiveTable* Live;
     internal uint Phase = 4;
     internal ulong World = 1, Generation;
-    internal int Submits, StageError, ReadyError, StatusFailures;
+    internal int Submits, StageError, ReadyError, StatusFailures, WorldRequiredCommits;
     internal int Value => _layers.Count == 0 ? 10 : _layers.Last().Value.Value;
     private ulong _next;
     private readonly Dictionary<ulong, (ulong Owner, uint Point, int? Value, bool Restart)> _drafts = [];
     private readonly Dictionary<ulong, (ulong Owner, int Value, ulong World)> _layers = [];
     internal int LayerCount => _layers.Count;
+    internal int DraftCount => _drafts.Count;
     internal void ChangeWorld(ulong world)
     {
         World = world;
@@ -105,6 +106,7 @@ internal sealed unsafe class FakeRegistry : IDisposable
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int Commit(ulong owner, ulong handle, RegistryLiveReply* result)
     {
+        if (Current.WorldRequiredCommits > 0) { --Current.WorldRequiredCommits; result->Outcome = 4; result->World = Current.World; return 0; }
         var draft = Current._drafts[handle]; Current._drafts.Remove(handle);
         result->Outcome = draft.Restart ? 3u : 0u; result->Refused = draft.Restart ? 1u : 0u;
         result->Accepted = draft.Restart ? 0u : 1u; result->World = Current.World;
