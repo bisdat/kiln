@@ -32,7 +32,8 @@ evidence is separate from the older observations below; neither is a client rend
 profiles are unchanged. The merge's six conflicts and what each kept: the fork's `kiln/UPSTREAM-PATCHES.md`. The adapter
 accepts 1.8.0 and 1.8.1 beside 1.7.8 and 1.7.9, bundled and installed (`src/contract.h`). See section 11 for what 1.8.1
 adds next to Kiln. 0.2.0-dev.30.7 pins fork branch `kiln-30.7-fixes` on top of `5bb133f0`: a working baseline that is not
-whole or not the source of the game files is never restored (section 5.0).
+whole or not the source of the game files is never restored, and EML manifests may leave optional metadata null
+(section 5.0).
 
 ## 1. How ShroudForge loads (source facts)
 
@@ -158,6 +159,16 @@ the end of the resource file). Nothing tied the companion to its header either. 
   the recovery after the failed pass refuses the same pair and changes no file.
 Tests (Wine, `cargo xwin test`): `verify_working_baseline` (5), `baseline_record` (3) and two whole startup passes in
 `kiln_baseline_tests.rs` (red before the fix). Not run against a real game update or a real client.
+
+**EML manifests with null optional metadata** (fork branch `kiln-30.7-fixes`, 0.2.0-dev.30.7). EML reads its manifest
+into a type whose `description`, `license`, `icon` and `dependencies[].optional` are optional, so `null` there means
+"not given". SF's manifest schema allowed null only for `license` and `icon`: a player's EML package with
+`"description": null` was refused with "mod: null is not of type string". The schema
+(`modules/modloader/manifest/manifest.schema.json`) now takes null for `description` and `dependencies[].optional` too,
+and a schema error names the field after the document (`modules/loader-config/validate_document.rs`), so the launcher
+and SF's log say, for example, `JSON error in <package>/mod.json: mod: /description: false is not of type "string"`.
+Errors of the whole document (a missing required field) read as before; `authors`, `capabilities` and `dependencies`
+stay non-null, as in EML. Tests (Wine): `kiln_manifest_tests.rs` (2, red before).
 
 **Writes into values a mod created** (fork `63b8862`, branch `kiln-sf-eml`, on top of `112d939`). In the pregame pass a
 value a mod builds (a plain table put into game data, such as a recipe inserted into the recipe registry, or a whole
