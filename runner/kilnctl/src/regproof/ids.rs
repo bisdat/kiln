@@ -96,10 +96,25 @@ impl Store {
         let p = self.path(side, exe_sha256);
         p.is_file().then(|| read_table(&p, side, exe_sha256))
     }
-    pub fn put(&self, t: &IdTable) -> Result<PathBuf> {
+    /// Keeps a proven table; None when the store already holds one of this build (never overwritten).
+    pub fn put(&self, t: &IdTable) -> Result<Option<PathBuf>> {
         let p = self.path(&t.side, &t.exe_sha256);
+        if p.exists() {
+            return Ok(None);
+        }
         write_whole(&p, &t.to_json())?;
-        Ok(p)
+        Ok(Some(p))
+    }
+    /// Where a table harvested from a data folder is kept (apart from the proven ones).
+    pub fn harvested_path(&self, side: &str, exe_sha256: &str) -> PathBuf {
+        self.dir.join(side).join("harvested").join(file_name(side, exe_sha256))
+    }
+    /// The proven table of a build, else the harvested one.
+    pub fn get_any(&self, side: &str, exe_sha256: &str) -> Option<Result<IdTable>> {
+        self.get(side, exe_sha256).or_else(|| {
+            let p = self.harvested_path(side, exe_sha256);
+            p.is_file().then(|| read_table(&p, side, exe_sha256))
+        })
     }
 }
 
@@ -149,9 +164,9 @@ pub fn harvest(data_dir: &Path, store: &Store) -> Result<Vec<Harvested>> {
     for n in names {
         let Some((side, sha)) = n.strip_prefix("ids-").and_then(|x| x.strip_suffix(".json")).and_then(|x| x.split_once('-')) else { continue };
         let t = read_table(&dir.join(&n), side, sha)?;
-        let (stored, differs) = match store.get(side, sha) {
+        let (stored, differs) = match store.get_any(side, sha) {
             None => {
-                store.put(&t)?;
+                write_whole(&store.harvested_path(side, sha), &t.to_json())?;
                 (true, false)
             }
             Some(Ok(have)) => (false, have.registries != t.registries),
@@ -405,7 +420,9 @@ pub(crate) mod tests {
         let t = table(NEW, &[("g1", "game:a")]);
         assert!(store.get("server", NEW).is_none());
         let p = store.put(&t).unwrap();
-        assert_eq!(p, root.join(format!("store/server/ids-server-{NEW}.json")));
+        assert_eq!(p, Some(root.join(format!("store/server/ids-server-{NEW}.json"))));
+        assert_eq!(store.get("server", NEW).unwrap().unwrap(), t);
+        assert_eq!(store.put(&table(NEW, &[("g1", "game:z")])).unwrap(), None, "a kept table is never overwritten");
         assert_eq!(store.get("server", NEW).unwrap().unwrap(), t);
         // into a game's data folder, in kiln.content's form
         let data = root.join("game/kiln/data");
@@ -423,7 +440,9 @@ pub(crate) mod tests {
             Harvested { side: "server".into(), exe_sha256: NEW.into(), stored: false, differs: true },
             Harvested { side: "server".into(), exe_sha256: OLD.into(), stored: true, differs: false },
         ]);
-        assert_eq!(store.get("server", OLD).unwrap().unwrap(), old);
+        assert!(store.get("server", OLD).is_none(), "harvested tables are kept apart from proven ones");
+        assert!(store.harvested_path("server", OLD).is_file());
+        assert_eq!(store.get_any("server", OLD).unwrap().unwrap(), old);
         assert_eq!(store.get("server", NEW).unwrap().unwrap(), t, "the store's table is kept");
         assert!(harvest(&root.join("nowhere"), &store).unwrap().is_empty());
         let _ = std::fs::remove_dir_all(&root);

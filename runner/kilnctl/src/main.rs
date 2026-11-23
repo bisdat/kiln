@@ -286,6 +286,9 @@ enum Cmd {
         /// Write the verified record into the instance's kiln/regmap/<side>/ (only when every step is green)
         #[arg(long, requires = "name")]
         mark: bool,
+        /// With --mark: replace a verified record of the same build (the old one stays as .json.bak)
+        #[arg(long, requires = "mark")]
+        replace: bool,
     },
     /// Back up the savegame folder to a timestamped tar.gz in the backup dir
     Backup { name: String },
@@ -561,11 +564,11 @@ fn dispatch(cmd: Cmd) -> anyhow::Result<i32> {
         Cmd::Gate { name, baseline, gate } => return ops::gate_cmd(&load(&name)?, &gate.opts(), baseline),
         Cmd::Regproof {
             name, side, tree, new_exe, old_exe, new_refl, old_refl, record, ids, prev_ids, evidence, game_build, steam_build, out,
-            first_build, accept, mark,
+            first_build, accept, mark, replace,
         } => {
             return regproof::cli(regproof::CliArgs {
                 name, side, tree, new_exe, old_exe, new_refl, old_refl, record, ids, prev_ids, evidence, game_build, steam_build, out,
-                first_build, accept, mark,
+                first_build, accept, mark, replace,
             });
         }
         Cmd::Backup { name } => {

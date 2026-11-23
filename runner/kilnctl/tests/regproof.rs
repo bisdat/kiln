@@ -138,7 +138,8 @@ fn a_complete_proof_writes_a_verified_record_outside_the_tree() {
     assert!(std::fs::read_to_string(out.join("NEXT.txt")).unwrap().starts_with("nothing left to do"));
     // the new build's table and values are kept for the next update; the lab's tables were harvested
     assert!(t.join(format!("store/server/ids-server-{NEW}.json")).is_file());
-    assert!(t.join(format!("store/server/ids-server-{OLD}.json")).is_file());
+    assert!(t.join(format!("store/server/harvested/ids-server-{OLD}.json")).is_file(), "harvested tables are kept apart from proven ones");
+    assert!(!t.join(format!("store/server/ids-server-{OLD}.json")).exists());
     assert!(t.join(format!("store/server/values-server-{NEW}.json")).is_file());
     // nothing was written into the Kiln tree
     let mut files: Vec<String> = Vec::new();

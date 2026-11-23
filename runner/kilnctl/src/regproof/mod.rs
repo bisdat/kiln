@@ -458,21 +458,33 @@ pub fn write_outputs(p: &Proof, record: Option<&Value>, out: &Path) -> Result<()
 }
 
 /// Writes a verified record into a Kiln folder (`<kiln>/regmap/<side>/<exe sha256>.json`, what kiln.content reads) and a
-/// copy for the repository into `out`. Refuses an unverified proof and never replaces a verified record.
-pub fn mark(kiln_dir: &Path, p: &Proof, record: &Value, out: &Path) -> Result<PathBuf> {
+/// copy for the repository into `out`. Refuses an unverified proof. A verified record already there is kept unless
+/// `replace` (a fuller proof of the same build); the replaced one stays beside it as `.json.bak`.
+/// What [`mark`] did.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Marked {
+    Written(PathBuf),
+    /// a verified record of the build was there and `replace` was not given: left as it is
+    Kept(PathBuf),
+}
+
+pub fn mark(kiln_dir: &Path, p: &Proof, record: &Value, out: &Path, replace: bool) -> Result<Marked> {
     if !p.verified || record.get("verified").and_then(Value::as_bool) != Some(true) {
         bail!("the proof is not verified: nothing is marked ({})", p.blockers.first().map(String::as_str).unwrap_or("?"));
     }
     let dst = kiln_dir.join("regmap").join(&p.side).join(format!("{}.json", p.exe_sha256));
     if let Ok(text) = std::fs::read_to_string(&dst) {
         if serde_json::from_str::<Value>(&text).ok().and_then(|v| v.get("verified")?.as_bool()) == Some(true) {
-            bail!("{} is already verified; not replaced", dst.display());
+            if !replace {
+                return Ok(Marked::Kept(dst));
+            }
+            std::fs::rename(&dst, dst.with_extension("json.bak")).with_context(|| format!("keeping {} as .bak", dst.display()))?;
         }
     }
     let text = serde_json::to_string_pretty(record)? + "\n";
     ids::write_whole(&dst, &text)?;
     ids::write_whole(&out.join(format!("verified-regmap-{}-{}.json", p.side, p.exe_sha256)), &text)?;
-    Ok(dst)
+    Ok(Marked::Written(dst))
 }
 
 // ---- making and finding the inputs ---------------------------------------------------------------------------------
@@ -811,31 +823,44 @@ impl ids::Store {
         let p = self.values_path(side, exe_sha256);
         p.is_file().then(|| std::fs::read_to_string(&p).map_err(anyhow::Error::from).and_then(|t| values::parse(&t)))
     }
-    pub fn put_values(&self, e: &values::Export, text: &str) -> Result<PathBuf> {
+    /// Keeps a proven build's export; None when the store already holds one (never overwritten).
+    pub fn put_values(&self, e: &values::Export, text: &str) -> Result<Option<PathBuf>> {
         let p = self.values_path(&e.side, &e.exe_sha256);
+        if p.exists() {
+            return Ok(None);
+        }
         ids::write_whole(&p, text)?;
-        Ok(p)
+        Ok(Some(p))
     }
 }
 
-/// After a proof: the new build's id table and values export into the store (the next update's previous build), the id
-/// table into a game's Kiln data folder when that game runs this build and the alias check passed.
-pub fn keep(p: &Proof, inp: &Inputs, store: &ids::Store, data_dir: Option<&Path>) -> Result<Vec<String>> {
+/// After a verified proof: the new build's id table and values export into the store (the next update's previous build;
+/// never overwritten), the id table into a game's Kiln data folder when that game runs this build. An unverified proof
+/// or a dry run keeps and deploys nothing.
+pub fn keep(p: &Proof, inp: &Inputs, store: &ids::Store, data_dir: Option<&Path>, dry: bool) -> Result<Vec<String>> {
+    if dry {
+        return Ok(vec!["ids       nothing kept (dry run)".into()]);
+    }
+    if !p.verified {
+        return Ok(vec!["ids       nothing kept: the proof is not verified".into()]);
+    }
     let mut lines = Vec::new();
-    if let Some(t) = p.table.as_ref().or(inp.new_ids.as_ref()) {
-        lines.push(format!("ids       kept {}", store.put(t)?.display()));
-        if let (Some(d), Some(a)) = (data_dir, &p.aliases) {
-            if a.ok {
-                lines.push(format!("ids       deployed {}", ids::deploy(t, d)?.display()));
-            }
+    if let Some(t) = &p.table {
+        lines.push(match store.put(t)? {
+            Some(path) => format!("ids       kept {}", path.display()),
+            None => format!("ids       the store already holds this build's table ({}); kept as it is", store.path(&t.side, &t.exe_sha256).display()),
+        });
+        if let Some(d) = data_dir {
+            lines.push(format!("ids       deployed {}", ids::deploy(t, d)?.display()));
         }
     }
     if let Some(e) = &inp.values_new {
-        if p.values.as_ref().is_none_or(|d| d.ok) {
-            let text = serde_json::to_string(&serde_json::json!({"format": 1, "kind": values::KIND, "side": e.side, "exeSha256": e.exe_sha256,
-                "gameBuild": e.game_build, "base": e.base, "registries": e.registries}))?;
-            lines.push(format!("values    kept {}", store.put_values(e, &text)?.display()));
-        }
+        let text = serde_json::to_string(&serde_json::json!({"format": 1, "kind": values::KIND, "side": e.side, "exeSha256": e.exe_sha256,
+            "gameBuild": e.game_build, "regmapDigest": e.regmap_digest, "base": e.base, "registries": e.registries}))?;
+        lines.push(match store.put_values(e, &text)? {
+            Some(path) => format!("values    kept {}", path.display()),
+            None => "values    the store already holds this build's export; kept as it is".into(),
+        });
     }
     Ok(lines)
 }
@@ -886,6 +911,7 @@ pub struct CliArgs {
     pub first_build: bool,
     pub accept: Vec<String>,
     pub mark: bool,
+    pub replace: bool,
 }
 
 /// A server instance's Kiln data folder and its gate copy's (where a lab boot of the new exe wrote its outputs).
@@ -899,7 +925,7 @@ fn default_out(name: &str, exe: Option<&Path>) -> PathBuf {
 }
 
 /// Gathers, proves, writes the outputs, keeps the tables, marks when asked and verified. Returns the proof and the record.
-fn run(g: &Gather, inst: Option<&crate::config::Instance>, mark_it: bool) -> Result<(Proof, Option<Value>, Vec<String>)> {
+fn run(g: &Gather, inst: Option<&crate::config::Instance>, mark_it: bool, replace: bool, dry: bool) -> Result<(Proof, Option<Value>, Vec<String>)> {
     let inp = gather(g)?;
     let p = prove(&inp, &crate::util::fmt_utc(std::time::SystemTime::now()));
     let rec = inp.candidate.as_ref().map(|c| record(&p, c));
@@ -907,10 +933,13 @@ fn run(g: &Gather, inst: Option<&crate::config::Instance>, mark_it: bool) -> Res
     let mut lines = vec![p.summary()];
     let store = g.store.clone().unwrap_or_else(|| ids::Store { dir: ids::Store::default_dir() });
     let runs_it = inst.filter(|i| crate::util::sha256(&i.exe()).is_ok_and(|s| s == p.exe_sha256));
-    lines.extend(keep(&p, &inp, &store, runs_it.map(|i| i.dir.join("kiln/data")).as_deref())?);
-    if mark_it {
+    lines.extend(keep(&p, &inp, &store, runs_it.map(|i| i.dir.join("kiln/data")).as_deref(), dry)?);
+    if mark_it && !dry {
         match (inst, &rec) {
-            (Some(i), Some(r)) if p.verified => lines.push(format!("regmap    marked verified: {}", mark(&crate::kiln::kiln_dir(i), &p, r, &g.out)?.display())),
+            (Some(i), Some(r)) if p.verified => lines.push(match mark(&crate::kiln::kiln_dir(i), &p, r, &g.out, replace)? {
+                Marked::Written(d) => format!("regmap    marked verified: {}", d.display()),
+                Marked::Kept(d) => format!("regmap    {} is already verified and was kept (--replace replaces it)", d.display()),
+            }),
             _ => lines.push(format!("regmap    not marked: {}", p.blockers.first().map(String::as_str).unwrap_or("no candidate record"))),
         }
     }
@@ -972,7 +1001,7 @@ pub fn cli(a: CliArgs) -> Result<i32> {
         Some(o) => o,
         None => default_out(a.name.as_deref().unwrap_or(&g.side), g.new_exe.as_deref()),
     };
-    let (p, _, lines) = run(&g, inst.as_ref(), a.mark)?;
+    let (p, _, lines) = run(&g, inst.as_ref(), a.mark, a.replace, false)?;
     for l in lines {
         println!("{l}");
     }
@@ -985,12 +1014,16 @@ pub fn cli(a: CliArgs) -> Result<i32> {
 /// The registry proof inside `kilnctl update` / `kilnctl port`, right after the lab gate (whose copy holds the lab's
 /// outputs): (summary, lines for NEXT.txt). Marks only when `mark` (the sigdb port was complete and the gate green) and
 /// the proof is verified. A Kiln tree without regmap/common is skipped.
-pub fn flow(inst: &crate::config::Instance, new: &Path, mark_it: bool) -> (String, Vec<String>) {
+pub fn flow(inst: &crate::config::Instance, new: &Path, mark_it: bool, dry: bool) -> (String, Vec<String>) {
     if !inst.kiln.source.join("regmap/common").is_dir() {
         return ("no regmap in the Kiln tree; skipped".into(), Vec::new());
     }
-    // the build the regmap was last proven on (not sigport's baseline, which may never have had a regmap record)
     let new_sha = crate::util::sha256(new).unwrap_or_default();
+    if record_verified(&crate::kiln::kiln_dir(inst), "server", &new_sha) {
+        return (format!("the instance already has a verified regmap record of {}; skipped (kilnctl regproof --mark --replace re-proves it)",
+                        short(&new_sha)), Vec::new());
+    }
+    // the build the regmap was last proven on (not sigport's baseline, which may never have had a regmap record)
     let old = regmap_baseline(&crate::sigport::cache_dir(), &crate::kiln::kiln_dir(inst), &inst.kiln.source, "server", &new_sha).map(|(p, _)| p);
     let g = Gather {
         side: "server".into(), tree: inst.kiln.source.clone(), deployed: Some(crate::kiln::kiln_dir(inst)),
@@ -998,7 +1031,7 @@ pub fn flow(inst: &crate::config::Instance, new: &Path, mark_it: bool) -> (Strin
         old_exe: old, evidence: instance_evidence(inst), steam_build: crate::steam::buildid(&inst.dir),
         ..Default::default()
     };
-    match run(&g, Some(inst), mark_it) {
+    match run(&g, Some(inst), mark_it, false, dry) {
         Ok((p, _, lines)) => {
             for l in &lines[1..] {
                 println!("{l}");
@@ -1324,17 +1357,24 @@ mod tests {
             assert!(out.join(f).is_file(), "{f}");
         }
         assert!(out.join(format!("regmap-server-{SHA}.json")).is_file());
-        let dst = mark(&kiln, &p, &rec, &out).unwrap();
-        assert_eq!(dst, kiln.join(format!("regmap/server/{SHA}.json")));
+        let dst = kiln.join(format!("regmap/server/{SHA}.json"));
+        assert_eq!(mark(&kiln, &p, &rec, &out, false).unwrap(), Marked::Written(dst.clone()));
         assert_eq!(read_json(&dst).unwrap()["verified"], true);
         assert!(out.join(format!("verified-regmap-server-{SHA}.json")).is_file());
-        assert!(mark(&kiln, &p, &rec, &out).is_err(), "a verified record is never replaced");
+        // a verified record is kept unless the caller replaces it (a fuller proof of the same build); kept is no error
+        let mut newer = rec.clone();
+        newer["proof"] = json!("a later proof");
+        assert_eq!(mark(&kiln, &p, &newer, &out, false).unwrap(), Marked::Kept(dst.clone()));
+        assert_ne!(read_json(&dst).unwrap()["proof"], "a later proof");
+        assert_eq!(mark(&kiln, &p, &newer, &out, true).unwrap(), Marked::Written(dst.clone()));
+        assert_eq!(read_json(&dst).unwrap()["proof"], "a later proof");
+        assert_eq!(read_json(&dst.with_extension("json.bak")).unwrap()["verified"], true, "the replaced record is kept as .bak");
         // an unverified proof marks nothing
         let mut bad = inp.clone();
         bad.native_ids = None;
         let pb = prove(&bad, "T");
         let kiln2 = root.join("game2/kiln");
-        assert!(mark(&kiln2, &pb, &record(&pb, &candidate()), &out).is_err());
+        assert!(mark(&kiln2, &pb, &record(&pb, &candidate()), &out, true).is_err());
         assert!(!kiln2.exists());
         assert!(report_text(&pb).contains("NOT verified"));
         let _ = std::fs::remove_dir_all(&root);
@@ -1347,7 +1387,7 @@ mod tests {
         let inp = with_power_samples(inputs());
         let p = prove(&inp, "T");
         let data = root.join("game/kiln/data");
-        let lines = keep(&p, &inp, &store, Some(&data)).unwrap();
+        let lines = keep(&p, &inp, &store, Some(&data), false).unwrap();
         assert_eq!(lines.len(), 3, "{lines:?}");
         assert_eq!(store.get("server", SHA).unwrap().unwrap(), inp.new_ids.clone().unwrap());
         assert!(ids::data_path(&data, "server", SHA).is_file());
@@ -1359,8 +1399,36 @@ mod tests {
         bad.native_ids = Some(table(SHA, &[("g1", "game:a")]));
         let pb = prove(&bad, "T");
         let data2 = root.join("game2/kiln/data");
-        keep(&pb, &bad, &store, Some(&data2)).unwrap();
+        keep(&pb, &bad, &store, Some(&data2), false).unwrap();
         assert!(!data2.exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn keep_keeps_only_verified_proofs_never_overwrites_and_skips_dry_runs() {
+        let root = scratch("keep2");
+        let store = ids::Store { dir: root.join("store") };
+        let data = root.join("game/kiln/data");
+        // an unverified proof keeps nothing: its table would be the next update's "previous build"
+        let mut unverified = with_power_samples(inputs());
+        unverified.native_ids = None;
+        let pu = prove(&unverified, "T");
+        assert!(!pu.verified);
+        keep(&pu, &unverified, &store, Some(&data), false).unwrap();
+        assert!(store.get("server", SHA).is_none() && store.get_values("server", SHA).is_none() && !data.exists());
+        // a dry run keeps and deploys nothing either
+        let inp = with_power_samples(inputs());
+        let p = prove(&inp, "T");
+        keep(&p, &inp, &store, Some(&data), true).unwrap();
+        assert!(store.get("server", SHA).is_none() && !data.exists());
+        // kept once, never overwritten
+        keep(&p, &inp, &store, Some(&data), false).unwrap();
+        let first = std::fs::read_to_string(store.path("server", SHA)).unwrap();
+        let mut other = p.clone();
+        other.table.as_mut().unwrap().registries.get_mut("gadgets").unwrap().insert("g3".into(), "game:c".into());
+        let lines = keep(&other, &inp, &store, None, false).unwrap();
+        assert_eq!(std::fs::read_to_string(store.path("server", SHA)).unwrap(), first);
+        assert!(lines.iter().any(|l| l.contains("already")), "{lines:?}");
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -1463,7 +1531,7 @@ mod tests {
         assert!(inp.values_new.is_some() && inp.values_old.is_some(), "the old export from the store");
         assert_eq!(inp.native_ids.as_ref().unwrap().exe_sha256, SHA);
         assert_eq!(inp.prev_ids.as_ref().unwrap().exe_sha256, OLD);
-        assert!(store.get("server", OLD).is_some(), "the data folder's tables were harvested into the store");
+        assert!(store.get_any("server", OLD).is_some(), "the data folder's tables were harvested into the store");
         assert!(inp.problems.is_empty(), "{:?}", inp.problems);
         // the game runs another regmap/common than the tree's: the proof would judge a mapping no lab ran
         let kiln = root.join("game/kiln");

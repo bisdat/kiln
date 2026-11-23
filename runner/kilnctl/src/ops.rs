@@ -757,12 +757,6 @@ pub fn port_flow(inst: &Instance, old: Option<PathBuf>, new: &Path, f: &FlowArgs
         }
     }
     let ok = green && rep.complete && rep.defs_unchanged;
-    // the registry proof (registry P2): the regmap record of the new build, from the lab the gate just ran; marked under
-    // the same conditions as the build record, and only when every step of it is green (otherwise every registry field
-    // stays refused on the new build)
-    let (reg, reg_next) = regproof::flow(inst, new, ok && f.mark && !dry);
-    println!("registry  {reg}");
-    next.extend(reg_next);
     let mut marked = None;
     let summary;
     if ok && f.mark && !dry {
@@ -789,6 +783,17 @@ pub fn port_flow(inst: &Instance, old: Option<PathBuf>, new: &Path, f: &FlowArgs
         for n in &next {
             println!("          - {n}");
         }
+    }
+    // the registry proof (registry P2) after the build record: its evidence is the lab the gate just ran, so it needs a
+    // green gate; its regmap record is marked only when the build record was, and only when every step of it is green
+    // (otherwise every registry field stays refused on the new build)
+    if green {
+        let (reg, reg_next) = regproof::flow(inst, new, marked.is_some(), dry);
+        println!("registry  {reg}");
+        next.extend(reg_next);
+    } else {
+        println!("registry  skipped: no green lab gate on this build (the gate's lab run is the registry proof's evidence)");
+        next.push("registry proof skipped (no green gate): every registry field stays refused on this build".into());
     }
     let text = format!("kilnctl port flow for {} ({})\nold {}\nnew {} ({new_sha})\ndefs {}\nresult: {summary}\n\n{}\n",
         inst.name, util::fmt_utc(SystemTime::now()), old.display(), new.display(), defs.display(),
