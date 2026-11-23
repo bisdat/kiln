@@ -77,6 +77,14 @@ describe("untrusted registry report", () => {
     expect(out.fields[0].result).toContain("6 omitted");
     expect(out.fields[0].base).toContain("3 omitted");
   });
+  test("writer chains cut by native or by this view are counted for the report banner", () => {
+    const r = registryFixture();
+    const out = parse({ ...r, truncated: { ...r.truncated, writers: 7 } });
+    expect(out.omitted).toBe(0);
+    expect(out.writersOmitted).toBe(7);
+    const many = { ...r.fields[0], writers: Array.from({ length: 70 }, (_, n) => ({ ...r.fields[0].writers[0], mod: `w${n}` })) };
+    expect(parse({ ...r, fields: [many], truncated: { ...r.truncated, writers: 7 } }).writersOmitted).toBe(13);
+  });
   test("raw paths and native offsets never enter the view model", () => {
     const r = registryFixture();
     const field = { ...r.fields[0], raw: true, field: "SecretSetup.Offset" };

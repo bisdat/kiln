@@ -36,7 +36,10 @@ function RegistryFor({ gameId }: { gameId: string }) {
           {!r.verified && <Banner tone="warn" title="Mapping unverified">Field edits may be refused as Unproven. Read each refusal for its reason.</Banner>}
           <p className="registry-hint">Certain = Kiln observed the writer. Named from journal = archive-writer attribution. Best-effort drift is not proof of who wrote it or that no other writer exists.</p>
         </Card>
-        {r.omitted > 0 && <Banner tone="warn" title="Partial report">{r.omitted} rows were omitted by the native report or this view's safety limits. Text and list values are also bounded; this is not the full history.</Banner>}
+        {(r.omitted > 0 || r.writersOmitted > 0) && <Banner tone="warn" title="Partial report">
+          {r.omitted > 0 && `${r.omitted} rows were omitted by the native report or this view's safety limits. `}
+          {r.writersOmitted > 0 && `${r.writersOmitted} earlier writers were left out of the writer chains. `}
+          Text and list values are also bounded; this is not the full history.</Banner>}
         {r.empty ? <EmptyState title="No registry edits in this snapshot" hint="The report is present and valid, but contains no fields, conflicts, refusals or entry changes." /> : <>
           <Card title="Refused edits" sub="These edits were not applied. RestartRequired needs a game restart; Unproven needs a proven mapping in Kiln.">
             <Rows rows={r.refused} empty="No refused edits in the displayed report." render={(x, i) => <article key={i} className="registry-line">
@@ -75,7 +78,7 @@ function Rows<T>({ rows, render, empty }: { rows: T[]; render: (row: T, index: n
 function FieldChain({ field: f }: { field: RegistryField }) {
   const [open, setOpen] = useState(false);
   return <details className="registry-field" onToggle={e => setOpen(e.currentTarget.open)}>
-    <summary><strong>{f.registry} · {f.id} · {f.field}</strong><span>Winner: {f.winner} · Result: {f.result}</span></summary>
+    <summary><strong>{f.registry} · {f.id} · {f.field}</strong><span>Winner: {f.winner} · Result: {f.result}{f.writersOmitted > 0 && ` · ${f.writersOmitted} earlier writers omitted`}</span></summary>
     {open && <div className="registry-chain">
       <p>Applies: {f.applies} · Base origin: {f.baseOrigin}</p><p className="k-mono">Base value: {f.base}</p>
       {f.writersOmitted > 0 && <p className="k-tone-warn">{f.writersOmitted} earlier writers omitted. Only the retained end of the chain is shown.</p>}

@@ -20,6 +20,8 @@ export interface RegistryReport {
   written: string; generation: number; phase: string; baseOrigin: string; baseWriter: string; verified: boolean;
   fields: RegistryField[]; conflicts: RegistryConflict[]; refused: RegistryRefusal[];
   entries: { kind: string; registry: string; id: string }[]; omitted: number; empty: boolean;
+  /** Earlier writers left out of field chains: native's truncated.writers plus this view's own 64-writer cut. */
+  writersOmitted: number;
 }
 function object(x: unknown): ObjectRow {
   if (x === null || typeof x !== "object" || Array.isArray(x)) throw new Error("Invalid registry report object.");
@@ -121,9 +123,11 @@ export function parseRegistryReport(input: string): RegistryReport {
     total += Math.max(count(totals[key]), rows.length);
     left += count(truncated[key]) + Math.max(0, rows.length - REPORT_LIMITS.rows);
   }
+  let launcherWriterCut = 0;
   const fieldRows = fields.slice(0, REPORT_LIMITS.rows).map(x => {
     const f = object(x), b = object(f.base), chain = array(f.writers);
     const skip = Math.max(0, chain.length - REPORT_LIMITS.writers);
+    launcherWriterCut += skip;
     const raw = f.raw === true, unknown = !raw && !isKilnField(text(f.registry), text(f.field));
     return {
       registry: text(f.registry), id: text(f.id), field: raw ? "Advanced field (details hidden)" : unknown ? `${text(f.field)} (Field unknown to this launcher)` : text(f.field), applies: text(f.applies),
@@ -140,7 +144,7 @@ export function parseRegistryReport(input: string): RegistryReport {
   });
   return {
     written, generation: count(r.generation), phase: text(r.phase), baseOrigin: text(base.origin), baseWriter: text(base.writer), verified: regmap.verified,
-    fields: fieldRows,
+    fields: fieldRows, writersOmitted: omitted(truncated.writers) + launcherWriterCut,
     conflicts: conflicts.slice(0, REPORT_LIMITS.rows).map(x => {
       const c = object(x), field = text(c.field);
       const registry = text(c.registry), prefix = `${registry}[${text(c.id)}].`;

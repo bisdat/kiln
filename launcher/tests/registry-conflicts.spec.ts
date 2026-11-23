@@ -79,6 +79,14 @@ test("huge report is rejected without hanging navigation", async ({ page }) => {
   await expect(page).toHaveURL(/#\/$/);
 });
 
+test("writer-only truncation still marks the report partial", async ({ page }) => {
+  const r = registryFixture();
+  await report(page, { ...r, fields: [{ ...r.fields[0], writersLeftOut: 3 }], truncated: { ...r.truncated, writers: 3 } });
+  await expect(page.getByText("Partial report", { exact: true })).toBeVisible();
+  await expect(page.getByText(/3 earlier writers were left out of the writer chains/)).toBeVisible();
+  await expect(page.locator(".registry-field summary")).toContainText("3 earlier writers omitted");
+});
+
 test("long field lists paginate, filter and disclose native omissions", async ({ page }) => {
   const r = registryFixture();
   await report(page, { ...r, fields: Array.from({ length: 30 }, (_, i) => ({ ...r.fields[0], id: `game:fixture_${i}` })), truncated: { ...r.truncated, fields: 20 } });
