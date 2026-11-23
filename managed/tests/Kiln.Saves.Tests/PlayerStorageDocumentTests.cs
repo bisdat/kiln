@@ -204,12 +204,28 @@ public sealed class PlayerStorageDocumentTests
             bags["mod:bag"]!["opaque"] = new string((char)('a' + i), 21000);
             doc.Capture("w" + i, (uint)i, bags, new());
         }
+        doc.Data["returns"] = new JsonArray(new JsonObject { ["revision"] = doc.Revision, ["fromWitness"] = "w5", ["toWitness"] = "w6" });
         var json = doc.Write(8);
         Assert.True(System.Text.Encoding.UTF8.GetByteCount(json) <= PlayerStorageDocument.MaxBytes);
         var read = PlayerStorageDocument.Read(json, Character);
         Assert.True(PlayerStorageDocument.Choose("w5", read, null)!.Paired);
         Assert.False(PlayerStorageDocument.Choose("w0", read, null)!.Paired);
         Assert.NotEmpty(read.Data["history"]!.AsArray());
+        Assert.Equal("w6", Assert.Single(read.Data["returns"]!.AsArray())!["toWitness"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public void Return_markers_are_bounded_newest_first_and_bad_entries_are_quarantined()
+    {
+        var doc = Doc("current", 100);
+        var markers = new JsonArray();
+        for (var i = 1; i <= 12; i++) markers.Add(new JsonObject { ["revision"] = (long)i, ["fromWitness"] = "from-" + i, ["toWitness"] = "to-" + i });
+        markers.Add(new JsonObject { ["revision"] = 0L, ["fromWitness"] = "same", ["toWitness"] = "same" });
+        doc.Data["returns"] = markers;
+        var read = PlayerStorageDocument.Read(doc.Data.ToJsonString(), Character);
+        Assert.Equal(8, read.Data["returns"]!.AsArray().Count);
+        Assert.Equal(12L, read.Data["returns"]![0]!["revision"]!.GetValue<long>());
+        Assert.Single(read.Data["quarantine"]!.AsArray());
     }
 
     [Fact]

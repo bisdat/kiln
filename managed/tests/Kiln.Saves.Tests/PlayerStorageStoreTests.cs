@@ -5,18 +5,21 @@ using Xunit;
 namespace Kiln;
 
 [Collection("instance data")]
-public sealed class PlayerStorageStoreTests
+public sealed partial class PlayerStorageStoreTests
 {
     private sealed class Persist : IPlayerStoragePersistence
     {
         public JsonObject? Restored, Parked;
+        public bool ExtraPages;
+        public string JoinWitness = "join";
+        public bool ExtraMainPages(EntityId player) => ExtraPages;
         public StorageFreeze? Frozen = new("saved", PlayerStorageDocumentTests.Storages(1));
         public Dictionary<string, int> Definitions = new() { ["mod:bag"] = 8 };
         public readonly List<StorageInstanceHolder> Parts = [];
         public IReadOnlyList<StorageInstanceHolder> InstanceHolders(EntityId player) => Parts;
         public IReadOnlyDictionary<string, int> Registrations => Definitions;
         public StorageFreeze? Freeze(CharacterKey character, EntityId player, uint generation) => Frozen;
-        public string? WitnessOf(EntityId player) => "join";
+        public string? WitnessOf(EntityId player) => JoinWitness;
         public void Restore(EntityId player, JsonObject storages, bool paired, string source, long revision) => Restored = (JsonObject)storages.DeepClone();
         public void Park(EntityId player, JsonObject parked) => Parked = (JsonObject)parked.DeepClone();
     }

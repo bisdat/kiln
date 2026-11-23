@@ -10,6 +10,7 @@ internal interface IPlayerStoragePersistence
     StorageFreeze? Freeze(CharacterKey character, EntityId player, uint generation);
     bool AutomaticRegistration => false;
     string? WitnessOf(EntityId player);
+    bool ExtraMainPages(EntityId player) => false;
     IReadOnlyDictionary<string, int> Registrations { get; }
     void Restore(EntityId player, JsonObject storages, bool paired, string source, long revision);
     void Park(EntityId player, JsonObject parked);
@@ -74,6 +75,7 @@ internal sealed class PlayerStorageStore(WorldStore owner)
         internal readonly EntityId Player = player;
         internal PlayerStorageDocument Document = document;
         internal bool Restored, Withheld, Local;
+        internal string HeldReason = "changed elsewhere since this server's copy";
         internal CharacterKey Character;
         internal Dictionary<string, int> Bands = new(StringComparer.Ordinal);
         internal string Registration = "";
@@ -166,16 +168,27 @@ internal sealed class PlayerStorageStore(WorldStore owner)
             SavesRuntime.Log(choice.Paired ? LogLevel.Info : LogLevel.Warn,
                 $"player-storage: {character}: {(choice.Paired ? "paired" : "unpaired: newest revision; character changed outside Kiln")}, {choice.Source}, revision {choice.Revision}");
         }
+        foreach (var copy in servers) document.MergeReturns(copy);
+        document.MergeReturns(client); // Evidence can withhold an untrusted copy, never add its item records or counter.
         foreach (var old in _visits.Where(v => v.Key != character && v.Value.Player == player).Select(v => v.Key).ToArray()) _visits.Remove(old);
         var visit = _visits[character] = new Visit(player, document) { Local = local, Character = character,
             Notice = choice is { Paired: false } ? "Storage restored without a matching character save (newest revision). See kiln.log for the source." : null };
-        if (!trustClient && choice is { Paired: false } && client is { ReadOnly: false } && client.Revision > choice.Revision)
+        var returned = choice is { Paired: false, Source: "server" }
+            && ((client is not null && client.LatestReturnRevision > 0 && !client.AcknowledgesAfterReturn(choice))
+                || (client is null && Native?.ExtraMainPages(player) == true));
+        if (returned)
         {
             visit.Withheld = true;
-            visit.Notice = "Storage changed elsewhere since this server's copy. This server's old copy is parked; ask an admin to review or return it.";
-            SavesRuntime.Log(LogLevel.Warn, $"player-storage: {character}: changed elsewhere since this server's copy; server storage parked, client cannot add storage here");
+            visit.HeldReason = "returned outside Kiln";
         }
+        else if (!trustClient && choice is { Paired: false } && client is { ReadOnly: false } && client.Revision > choice.Revision)
+            visit.Withheld = true;
+        if (visit.Withheld)
+            visit.Notice = $"Your stored items on this server are held because your character changed outside Kiln. An admin can review /playerstorage list {player.Value} and release them with /playerstorage release {player.Value} <key>.";
         Restore(visit, choice?.Paired ?? true, choice?.Source ?? "new");
+        if (visit.Withheld)
+            foreach (var (key, bag) in visit.Document.Data["current"]!["parked"]!.AsObject())
+                SavesRuntime.Log(LogLevel.Warn, $"player-storage: player {player.Value}, character {character}, key {key}: {bag!["records"]!.AsArray().Count} stacks held ({visit.HeldReason}); admin release: /playerstorage release {player.Value} {key}");
         return choice;
     }
 
@@ -187,7 +200,7 @@ internal sealed class PlayerStorageStore(WorldStore owner)
         var (active, parked) = PlayerStorageDocument.Partition(current["storages"]!.AsObject(), current["parked"]!.AsObject(),
             visit.Withheld ? new Dictionary<string, int>() : Native.Registrations);
         if (visit.Withheld)
-            foreach (var bag in parked.Select(x => x.Value).OfType<JsonObject>()) bag["parkReason"] = "changed elsewhere since this server's copy";
+            foreach (var bag in parked.Select(x => x.Value).OfType<JsonObject>()) bag["parkReason"] = visit.HeldReason;
         Native.Restore(visit.Player, active, paired, source, visit.Document.Revision);
         Native.Park(visit.Player, parked);
         current["storages"] = active;

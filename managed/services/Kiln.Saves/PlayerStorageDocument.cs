@@ -12,7 +12,7 @@ internal sealed record StorageChoice(JsonObject Pair, long Revision, bool Paired
 /// are isolated with their original JSON, and unsupported future documents are never rewritten.</summary>
 internal sealed class PlayerStorageDocument
 {
-    internal const int MaxBytes = 64 * 1024, ServerMaxBytes = 256 * 1024, MaxStorages = 32;
+    internal const int MaxBytes = 64 * 1024, ServerMaxBytes = 256 * 1024, MaxStorages = 32, MaxReturns = 8;
     internal JsonObject Data { get; }
     internal bool ReadOnly { get; }
     internal string? Original { get; }
@@ -43,6 +43,7 @@ internal sealed class PlayerStorageDocument
             data["v"] = 1;
             if (data["quarantine"] is not JsonArray) data["quarantine"] = new JsonArray();
             var doc = new PlayerStorageDocument(data);
+            doc.CleanReturns();
             if (data["current"] is not JsonObject current)
             {
                 doc.Quarantine("current", data["current"], "pair must be an object");
@@ -102,6 +103,48 @@ internal sealed class PlayerStorageDocument
         var raw = record?.ToJsonString() ?? "null";
         var bytes = record is JsonObject o && o["b64"] is JsonValue b && b.TryGetValue<string>(out var encoded) ? encoded : Convert.ToBase64String(Encoding.UTF8.GetBytes(raw));
         Data["quarantine"]!.AsArray().Add(new JsonObject { ["storage"] = storage, ["record"] = bytes, ["raw"] = raw, ["reason"] = reason });
+    }
+
+    private void CleanReturns()
+    {
+        var markers = new List<JsonObject>();
+        if (Data["returns"] is not null && Data["returns"] is not JsonArray)
+            Quarantine("returns", Data["returns"], "return markers must be an array");
+        if (Data["returns"] is JsonArray input)
+            foreach (var marker in input)
+            {
+                try
+                {
+                    if (marker is not JsonObject obj || Number(obj["revision"]) <= 0 || Text(obj["fromWitness"]).Length is 0 or > 64
+                        || Text(obj["toWitness"]).Length is 0 or > 64 || Text(obj["fromWitness"]) == Text(obj["toWitness"]))
+                        throw new InvalidDataException("invalid return marker");
+                    markers.Add((JsonObject)obj.DeepClone());
+                }
+                catch (Exception e) when (Malformed(e)) { Quarantine("returns", marker, e.Message); }
+            }
+        Data["returns"] = BoundedReturns(markers);
+    }
+
+    private static JsonArray BoundedReturns(IEnumerable<JsonObject> markers) => new(markers
+        .GroupBy(m => (Revision: Number(m["revision"]), From: Text(m["fromWitness"]), To: Text(m["toWitness"])))
+        .OrderByDescending(g => g.Key.Revision).ThenBy(g => g.Key.From, StringComparer.Ordinal).ThenBy(g => g.Key.To, StringComparer.Ordinal)
+        .Take(MaxReturns).Select(g => (JsonNode)g.First().DeepClone()).ToArray());
+
+    internal long LatestReturnRevision => (Data["returns"] as JsonArray ?? []).OfType<JsonObject>().Select(m => Number(m["revision"])).DefaultIfEmpty(0).Max();
+
+    internal void MergeReturns(PlayerStorageDocument? source)
+    {
+        if (ReadOnly || source is null || source.ReadOnly) return;
+        Data["returns"] = BoundedReturns((Data["returns"] as JsonArray ?? []).OfType<JsonObject>()
+            .Concat((source.Data["returns"] as JsonArray ?? []).OfType<JsonObject>()));
+    }
+
+    internal bool AcknowledgesAfterReturn(StorageChoice choice)
+    {
+        var after = LatestReturnRevision;
+        return Entries().Any(e => JsonNode.DeepEquals(e.Pair["storages"], choice.Pair["storages"])
+            && JsonNode.DeepEquals(e.Pair["parked"], choice.Pair["parked"])
+            && Pairs(e.Pair, e.Revision).Any(p => p.Revision >= after && p.Revision == choice.Revision && p.Witness == Text(choice.Pair["witness"])));
     }
 
     private void CleanPair(JsonObject pair, bool historical)
