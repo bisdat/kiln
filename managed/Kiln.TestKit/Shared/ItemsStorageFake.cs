@@ -9,7 +9,8 @@
 // registrations, parks, returns), Leave, Die, Revoke (an owner goes away).
 // Not modelled: the game's record converter and codec (records are written in the game's layout from the fields the fake
 // knows: slot, item, count, flags, level; other flagged fields are kept as given), threads (every call is the test's
-// thread), the game's tombstone (Die names it), item entities.
+// thread), the game's tombstone (Die names it), item entities, or native parked-return temporary holders and tracker
+// notices (Return delivers records directly; list has only ordinary rows).
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -1113,8 +1114,8 @@ internal sealed unsafe class ItemsStorageFake : IDisposable
             out_->Stacks = (uint)World.ReadHolder(live.Holder, live.Slots).Count;
             for (var i = 0; i < StorageNative.RefCount; i++) out_->Refs[i] = live.Refs[i];
         }
-        else if (reg is not null) out_->Status = StorageNative.StateWaiting;
-        else out_->Status = out_->Parked > 0 ? StorageNative.StateParked : StorageNative.StateNone;
+        else if (out_->Parked > 0) out_->Status = StorageNative.StateParked;
+        else out_->Status = reg is not null ? StorageNative.StateWaiting : StorageNative.StateNone;
     }
 
     private delegate void EventFill(ref StorageNative.Event e);

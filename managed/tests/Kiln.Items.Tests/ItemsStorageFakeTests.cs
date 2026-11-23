@@ -2,7 +2,7 @@
 // The shared fake kiln.items.storage (managed/Kiln.TestKit/Shared/ItemsStorageFake.cs, linked into this project as Kiln.Saves.Tests
 // links it) row by row through its unmanaged table, as Kiln.Saves calls the persist rows: the claim, the join's witness, a
 // restore and its checks, captures into batches and the captures-done stage, parking and unparking, an owner's revoke, a
-// locked document, a leave. These pin the contract of kiln_items_storage.h that the native lane implements.
+// locked document, a leave. These pin the native implementation contract of kiln_items_storage.h.
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -360,6 +360,10 @@ public sealed unsafe class ItemsStorageFakeTests : IDisposable
         uint holder;
         Assert.Equal(StorageNative.NotFound, _t->Holder(ModA, quiver, 1, &holder));
         Assert.Equal(StorageNative.ParkRequested, Assert.Single(_fake.Contents(0, "a:quiver").Parked).Reason);
+        StorageNative.State state = default;
+        state.Size = (uint)sizeof(StorageNative.State);
+        Assert.Equal(StorageNative.Ok, _t->GetState(ModA, quiver, 1, &state));
+        Assert.Equal(StorageNative.StateParked, state.Status);
         Unpark(1, "a:quiver");
         _fake.Step();
         Assert.Equal(StorageNative.Ok, _t->Holder(ModA, quiver, 1, &holder));
