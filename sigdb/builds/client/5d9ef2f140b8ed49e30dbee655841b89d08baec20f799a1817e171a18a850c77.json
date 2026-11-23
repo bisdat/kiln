@@ -9,9 +9,9 @@
   "verified": true,
   "note": "runtime-verified through Steam (GE-Proton11-11), policy any, core + every service + kiln-emf + probe + ui-test + menubuttons: side client, sigdb 306/306 symbols, 434/434 constants (client.d composed), SimStep + WorldDestroy hooked, boot complete, 0 errors; main menu entries Kiln / ui-test / Mods (the Kiln sample screen opened); hosted a LOCAL world offline (saves: world loaded: slot 0x0002 (world1.ksd)): server world 60 steps/s on the GameServer thread, client and prediction worlds on the main thread, local player 1; ui-test all checks PASS (screens MainMenu/Loading/InGame/PauseMenu/Map/Crafting, menu entries chosen, crafting state), Kiln crafting tabs and subcategories shown, Insert overlay; tick cost as on ce6fdba6 (server step p50 2.5 ms, Kiln Pre 0.037 ms; client 1.2 ms); back to the menu (worlds stopping, shutdown save), clean quit (Shutdown 'Steam'). Not covered: joining a remote server, service write paths on the client. Added in dev.22 from static analysis only (resolved offline with sigdb_check.py, not yet seen running): ui.menu_page, ui.menu_page_sound, ui.error_popup (ui/PreGameCredits, ui/PreGameCreditsRet, ui/UiPlaySound and their constants). Levels (record 2, refreshed offline on 2026-11-11, no client run): lab = the names the boot above resolved, as its record listed them (199 named symbols, 434 constants, 106 features), each resolving to the same value today; every service loaded in that boot, but only ui-test ran, so lab here means loaded with Kiln's checks passing, not that the service test mods ran on the client. static = everything else, resolved offline only: the 186 @ probes (the boot's record did not list probes), the dev.22 ui names above, and every name declared since (the services audio, characters, emf-net, npcai, pacing, progression, quests, render, rules, skills, types and vfx, and new names of combat, creatures, gamedata, items, net, players, time and ui): 158 symbols, 210 constants and 70 features. sigdb now declares 543 symbols (441 defined, 102 captured), 644 constants (595 defined, 49 captured) and 176 features; all of them resolve offline on this exe.",
   "declared": {
-    "symbols": 894,
-    "constants": 996,
-    "features": 258
+    "symbols": 913,
+    "constants": 1010,
+    "features": 262
   },
   "features": {
     "abilities.attributes": true,
@@ -65,6 +65,10 @@
     "content.reflection": true,
     "content.stack_guard": true,
     "content.ui_texture": true,
+    "crafting.dye_sources": true,
+    "crafting.dye_ui": true,
+    "crafting.source_ui": true,
+    "crafting.sources": true,
     "creatures.ai": true,
     "creatures.arsenal_writer": true,
     "creatures.arsenals": true,
@@ -416,6 +420,18 @@
     "creatures/TemplateComponentAt": "0x9b3b70",
     "creatures/TransitionTable": "0x1ff5e20",
     "creatures/TypeByHash": "0x8de860",
+    "dyes/ProgramEntity": "0x9bf9e0",
+    "dyes/SlotInfo": "0x3854f0",
+    "dyes/TintAction": "0x3fff50",
+    "dyes/TintCommitRet": "0x4001b0",
+    "dyes/TintPayRet": "0x400108",
+    "dyes/TintRollbackRet": "0x400175",
+    "dyes/WireRoot": "0x1fe13d8",
+    "dyes/client.DetailCount": "0xc0c302",
+    "dyes/client.PaletteBuild": "0xd14ce0",
+    "dyes/client.PaletteGrid": "0xc0b930",
+    "dyes/client.RowCount": "0xc0bf14",
+    "dyes/client.TintCommand": "0xb2ceb0",
     "emf/AttrAdd": "0x3ef570",
     "emf/CharacterSelected": "0xde9fc0",
     "emf/ChatClientSend": "0xeb1220",
@@ -1093,6 +1109,9 @@
     "content/ui.version_b": "0x301c",
     "content/uitex.key_part": "0x14",
     "content/uitex.key_type": "0x10",
+    "crafting/bases.players": "0x10",
+    "crafting/player.permissions": "0x9d",
+    "crafting/player.stride": "0xa0",
     "creatures/actor.ready_bit": "0x32",
     "creatures/actor.state": "0xbf8",
     "creatures/archetype.tpl_columns": "0x584",
@@ -1131,6 +1150,17 @@
     "creatures/type.kind": "0x4c",
     "creatures/type.qname": "0x20",
     "creatures/type.size": "0x40",
+    "dyes/action.secondary": "0x8",
+    "dyes/it.bases_server": "0xc8",
+    "dyes/it.empty": "0x158",
+    "dyes/it.inventory": "0x148",
+    "dyes/it.item_state": "0x168",
+    "dyes/it.owner": "0x178",
+    "dyes/it.selection": "0x190",
+    "dyes/it.setup": "0x160",
+    "dyes/item.palette_set": "0x748",
+    "dyes/ui.palette_count": "0x90b88",
+    "dyes/ui.palettes": "0x90b80",
     "events/storage.players_mask": "0x7ddc0a",
     "gamedata/buffreg.collection": "0x20",
     "gamedata/tarr.cap": "0x10",
@@ -2449,6 +2479,20 @@
         "content.ui_texture": "lab"
       }
     },
+    "crafting-sources": {
+      "level": "static",
+      "date": "2026-11-22",
+      "evidence": "resolved offline (tools/sigport/build_record.py)",
+      "symbols": {},
+      "constants": {
+        "crafting/bases.players": "static",
+        "crafting/player.permissions": "static",
+        "crafting/player.stride": "static"
+      },
+      "features": {
+        "crafting.sources": "static"
+      }
+    },
     "creatures": {
       "level": "lab",
       "date": "2026-11-05",
@@ -2947,6 +2991,50 @@
         "hooks.foreign_modules": "static"
       }
     },
+    "dye-sources": {
+      "level": "static",
+      "date": "2026-11-22",
+      "evidence": "resolved offline (tools/sigport/build_record.py)",
+      "symbols": {
+        "@dyes/TintActor": "static",
+        "@dyes/TintPaletteCheck": "static",
+        "@dyes/TintSetup": "static",
+        "@dyes/TintSlotReads": "static",
+        "@dyes/WireRoot": "static",
+        "@dyes/client.PaletteFields": "static",
+        "@dyes/client.TintCommandSlots": "static",
+        "dyes/ProgramEntity": "static",
+        "dyes/SlotInfo": "static",
+        "dyes/TintAction": "static",
+        "dyes/TintCommitRet": "static",
+        "dyes/TintPayRet": "static",
+        "dyes/TintRollbackRet": "static",
+        "dyes/WireRoot": "static",
+        "dyes/client.DetailCount": "static",
+        "dyes/client.PaletteBuild": "static",
+        "dyes/client.PaletteGrid": "static",
+        "dyes/client.RowCount": "static",
+        "dyes/client.TintCommand": "static",
+        "ui/UiApp": "static"
+      },
+      "constants": {
+        "dyes/action.secondary": "static",
+        "dyes/it.bases_server": "static",
+        "dyes/it.empty": "static",
+        "dyes/it.inventory": "static",
+        "dyes/it.item_state": "static",
+        "dyes/it.owner": "static",
+        "dyes/it.selection": "static",
+        "dyes/it.setup": "static",
+        "dyes/item.palette_set": "static",
+        "dyes/ui.palette_count": "static",
+        "dyes/ui.palettes": "static"
+      },
+      "features": {
+        "crafting.dye_sources": "static",
+        "crafting.dye_ui": "static"
+      }
+    },
     "emf": {
       "level": "lab",
       "date": "2026-11-05",
@@ -3169,8 +3257,7 @@
         "ui/GemForgeSlotRet": "static",
         "ui/GemForgeSourceRet": "static",
         "ui/GemForgeSwitch": "static",
-        "ui/GemForgeWeaponsCall": "static",
-        "ui/UiApp": "static"
+        "ui/GemForgeWeaponsCall": "static"
       },
       "constants": {
         "ui/gemforge.arrayCapacity": "static",
@@ -4191,6 +4278,7 @@
       "symbols": {},
       "constants": {},
       "features": {
+        "crafting.source_ui": "static",
         "stations.craft_ui": "static"
       }
     },

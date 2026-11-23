@@ -5465,6 +5465,19 @@
           },
           "size": 16
         },
+        "KilnCraftSourceRequest": {
+          "align": 8,
+          "fields": {
+            "container": 8,
+            "filter": 16,
+            "item_count": 20,
+            "items": 24,
+            "order": 12,
+            "player": 4,
+            "size": 0
+          },
+          "size": 32
+        },
         "KilnStation": {
           "align": 8,
           "fields": {
@@ -5702,6 +5715,7 @@
         "KilnStationsApi": {
           "align": 8,
           "fields": {
+            "add_source": 248,
             "base_at": 24,
             "base_at_position": 40,
             "base_count": 16,
@@ -5711,6 +5725,7 @@
             "base_storage": 48,
             "base_water": 56,
             "cancel": 144,
+            "cancel_sources": 264,
             "category": 104,
             "category_at": 112,
             "collect": 200,
@@ -5724,9 +5739,12 @@
             "plan": 128,
             "recipe": 88,
             "recipe_inputs": 96,
+            "remove_source": 256,
             "set_craft_stock": 216,
+            "set_dye_stock": 280,
             "set_fill_answers": 232,
             "set_output_source": 176,
+            "source_stock": 272,
             "station_read": 80,
             "stations": 72,
             "status": 8,
@@ -5734,7 +5752,7 @@
             "watch": 152,
             "workshop_recipes": 120
           },
-          "size": 248
+          "size": 288
         },
         "KilnStationsStatus": {
           "align": 4,
@@ -5757,7 +5775,7 @@
           "size": 188
         }
       },
-      "sha256": "18596c86ce02390230c90ba85449b18dbf562e2f5e9463f8c7117920e47344dd"
+      "sha256": "3859216917d9e9bad6744e4755a829b925dc7bf8162d46e1ca423f5799c85140"
     },
     "native/core/abi/services/kiln_steamguard.h": {
       "function_macros": [],
@@ -8517,7 +8535,7 @@
   },
   "outputs": {
     "src/bindings.rs": "134028a6a9914076cab3f71f98d356141d4fe36c4d7f51bac6a11819501ed935",
-    "src/layout.rs": "965470ff1cc7e5ea8cd60880ade63ff375042b08ca9eed25b8b81c7b7c3d121b",
+    "src/layout.rs": "0a1b3ef11c9712f50cad7b4e3e2eddbb3276b08b717497c3ad0545af8aca1335",
     "src/services/kiln_abilities.rs": "06a43042e5c96d6261a17b02eab35463b07a8ad83f63b2bb168bca5ff34e582e",
     "src/services/kiln_assets.rs": "e7fe4eb1c4d53ad31eeaf05be06f41c551a49362ad5bd4174465ec18a03effe0",
     "src/services/kiln_assets_vfx.rs": "90ed8ce5ad512bbf4f002db3277bc3b439d648ca437a58d4477eac4ce46c3b81",
@@ -8563,7 +8581,7 @@
     "src/services/kiln_screen.rs": "16e368975e8826d818a3647791e26b2d35443263f8044e3e482f3eb97a49299e",
     "src/services/kiln_settings.rs": "c88c9e2771d5f520cfe37a07feab6eaa0a9d6aa8b6abb8a7b0efcaf0eeee68c7",
     "src/services/kiln_spawn.rs": "b6ced999b7a1ecd93684a0a7c138081547ccec6f496aee7c69c0f807d1bb83dc",
-    "src/services/kiln_stations.rs": "852f4cf5ce119928eb4f954a21bfa496a3c60052e0ec3496be71ea272a6aba34",
+    "src/services/kiln_stations.rs": "a9d80849d6104e4b1858c99e2aaa2a680a23164ea3182d6737d4ad56af3e5827",
     "src/services/kiln_steamguard.rs": "f14ecec92f945c2b34f4682c216940187797b8db81a8de652fcba6ddb61f072c",
     "src/services/kiln_surfaces.rs": "d4d991aef0a14f4be7246227b95a0f34161ca23fe04561e9c94d6d2aba0db4a0",
     "src/services/kiln_tasks.rs": "da41943b4ac01aaa77cfb43091e8c209f0e55707c3a3105dd9070313750a6f79",

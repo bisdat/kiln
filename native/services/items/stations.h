@@ -4,11 +4,18 @@
 // in stations_logic.h (host test tests/stations_test.cpp).
 #pragma once
 #include <cstdint>
+#include "craft_sources.h"
 
 #include "kiln_api.h"
 #include "services/kiln_world.h"
 
 namespace kitems {
+
+// Registered linked storage, shared by crafting and dye payment. Caller verifies its transaction inventory view.
+std::vector<CraftSource> craft_sources_copy(uint32_t player);
+bool craft_source_access(void* server_bases, uint32_t player, uint32_t container);
+bool craft_source_access(uint32_t player, uint32_t container);
+void craft_sources_cancel_owner(KilnOwner owner);
 
 // resolve(): the features stations.* (symbols, constants), after the transaction symbols.
 void stations_resolve();

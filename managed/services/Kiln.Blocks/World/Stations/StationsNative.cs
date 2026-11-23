@@ -214,6 +214,18 @@ internal static unsafe class StationsNative
         // ---- the station screen's fill buttons for Kiln clients (GitHub #68, 0.2.0-dev.29.19). Header.Size tells. ----
         public delegate* unmanaged[Cdecl]<FillAnswer*, uint, int> SetFillAnswers;
         public delegate* unmanaged[Cdecl]<FillKey*, uint, uint*, int> FillAsks;
+        public delegate* unmanaged[Cdecl]<ulong, SourceRequest*, ulong*, int> AddSource;
+        public delegate* unmanaged[Cdecl]<ulong, ulong, int> RemoveSource;
+        public delegate* unmanaged[Cdecl]<ulong, void> CancelSources;
+        public delegate* unmanaged[Cdecl]<uint, uint, Stack*, uint, uint*, int> SourceStock;
+        public delegate* unmanaged[Cdecl]<uint, Stack*, uint, int> SetDyeStock;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct SourceRequest
+    {
+        public uint Size, Player, Container, Order, Filter, ItemCount;
+        public uint* Items;
     }
 
     /// <summary>KilnStationFillKey: a fill the station screen asks the game about (40 bytes).</summary>
