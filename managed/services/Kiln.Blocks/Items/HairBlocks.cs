@@ -11,8 +11,11 @@ namespace Kiln;
 /// raises under a hat or a hood. It is worn through <see cref="Barber.Wear(EntityId, BlockHandle)"/>.</summary>
 public sealed record HairBlock : IBlock, ITweakable
 {
+    /// <summary>The hair style's name, as players read it on its item. Required.</summary>
     public required string Name { get; init; }
+    /// <summary>What the item says about the style, as players read it. Null: none.</summary>
     public string? Description { get; init; }
+    /// <summary>The look worn on the head: a <see cref="WornLook"/> written in place, by handle or by block name.</summary>
     public required PartRef<WornLook> Look { get; init; }
     /// <inheritdoc cref="WeaponBlock.Was"/>
     public string? Was { get; init; }
@@ -25,8 +28,11 @@ public sealed record HairBlock : IBlock, ITweakable
 /// game's jaw shapes, which the character's head raises; <see cref="WornLook.Variants"/> take the same flags for whole models.</summary>
 public sealed record BeardBlock : IBlock, ITweakable
 {
+    /// <summary>The beard's name, as players read it on its item. Required.</summary>
     public required string Name { get; init; }
+    /// <summary>What the item says about the beard, as players read it. Null: none.</summary>
     public string? Description { get; init; }
+    /// <summary>The look worn on the jaw: a <see cref="WornLook"/> written in place, by handle or by block name.</summary>
     public required PartRef<WornLook> Look { get; init; }
     /// <inheritdoc cref="WeaponBlock.Was"/>
     public string? Was { get; init; }

@@ -33,7 +33,19 @@ public sealed record BlockKindDescriptor
 }
 
 /// <summary>The built-in blocks a kind may make.</summary>
-public enum BuiltInBlockProductKind { Item, Weapon, Spell, Status, Effect }
+public enum BuiltInBlockProductKind
+{
+    /// <summary>An <see cref="ItemBlock"/>.</summary>
+    Item,
+    /// <summary>A <see cref="WeaponBlock"/>.</summary>
+    Weapon,
+    /// <summary>A <see cref="SpellBlock"/>.</summary>
+    Spell,
+    /// <summary>A <see cref="StatusBlock"/>.</summary>
+    Status,
+    /// <summary>An <see cref="EffectBlock"/>.</summary>
+    Effect,
+}
 
 /// <summary>One frozen built-in block of a plan. Made by <see cref="BlockCompileContext"/>'s factories.</summary>
 public sealed class BlockProduct
@@ -51,6 +63,7 @@ public sealed class BlockProduct
     internal int Nodes { get; }
     /// <summary>The product's name inside its plan.</summary>
     public string Key { get; }
+    /// <summary>Which built-in block it is.</summary>
     public BuiltInBlockProductKind Kind { get; }
     /// <summary>The built-in block, as canonical JSON (the shape blocks/*.json takes, keys in ordinal order).</summary>
     public string CanonicalJson { get; }
@@ -91,10 +104,13 @@ public sealed class BlockPlan
     internal IBlock? Projection { get; set; }
     internal BlockProduct Primary => _products.First(p => p.Key == PrimaryKey);
 
+    /// <summary>The kind that compiled it: <c>provider-mod:kind</c>.</summary>
     public string KindId { get; }
+    /// <summary>The consumer mod: whose block this is.</summary>
     public string ConsumerModId { get; }
     /// <summary>The block's name in the consumer mod.</summary>
     public string Name { get; }
+    /// <summary>The <see cref="BlockProduct.Key"/> of the product that is the plan's primary block. Every other product is an effect.</summary>
     public string PrimaryKey { get; }
     /// <summary>SHA-256 (hex) of the canonical record, the descriptor, the frozen products and the selected primary.</summary>
     public string InputHash { get; }
@@ -109,6 +125,7 @@ public sealed class BlockKindRegistration : IDisposable
     private readonly KindEntry _entry;
     internal BlockKindRegistration(KindEntry entry) => _entry = entry;
 
+    /// <summary>The kind's id: <c>provider-mod:kind</c>.</summary>
     public string Id => _entry.Id;
 
     /// <summary>Takes the kind away. Only the mod instance that registered it may; again by it does nothing.</summary>
@@ -119,8 +136,11 @@ public sealed class BlockKindRegistration : IDisposable
 /// <summary>What <see cref="Blocks.RegisterKind{T}"/> answers.</summary>
 public sealed record BlockKindResult : IKilnResult
 {
+    /// <summary>True when the kind was registered.</summary>
     public bool Ok { get; init; }
+    /// <summary>Why it was not (<c>AlreadyRegistered</c>, <c>TooManyKinds</c>). Empty when <see cref="Ok"/>.</summary>
     public string Reason { get; init; } = "";
+    /// <summary>The registration: dispose it to take the kind away. Null when the kind was not registered.</summary>
     public BlockKindRegistration? Registration { get; init; }
 }
 
@@ -134,8 +154,11 @@ public sealed class BlockKindRegisteredEvent : KilnEvent
         Removed = removed;
     }
 
+    /// <summary>The kind that was registered or taken away: <c>provider-mod:kind</c>.</summary>
     public string KindId { get; }
+    /// <summary>The id of the mod that registered the kind.</summary>
     public string ProviderModId { get; }
+    /// <summary>True when the kind was taken away, false when it was registered.</summary>
     public bool Removed { get; }
 }
 
@@ -169,8 +192,11 @@ public enum BlockApplyState
 /// problem, kiln.log every one. <c>RelowerFailed</c>: in a later content generation the plan's frozen products no longer lower.</summary>
 public sealed record BlockApplyResult : IKilnResult
 {
+    /// <summary>True only when <see cref="State"/> is <see cref="BlockApplyState.Applied"/>.</summary>
     public bool Ok { get; init; }
+    /// <summary>Why the plan is not applied: one word for the cause, then the detail (the causes are listed on <see cref="BlockApplyResult"/>). Empty when <see cref="Ok"/>.</summary>
     public string Reason { get; init; } = "";
+    /// <summary>Where the plan stands.</summary>
     public BlockApplyState State { get; init; }
     /// <summary>The compile this answers for.</summary>
     public ulong RequestId { get; init; }
@@ -181,7 +207,9 @@ public sealed record BlockApplyResult : IKilnResult
     public ulong ContentGeneration { get; init; }
     /// <summary>The GUID, id and game name of the plan's primary block: known as soon as the plan is submitted.</summary>
     public Guid Guid { get; init; }
+    /// <summary>The game's id of the primary block (FNV-1a of <see cref="Guid"/>).</summary>
     public uint Id { get; init; }
+    /// <summary>The game's debug name of the primary block.</summary>
     public string GameName { get; init; } = "";
 }
 
@@ -197,8 +225,12 @@ public sealed class BlockApplicationChangedEvent : KilnEvent
         After = after;
     }
 
+    /// <summary>The id of the consumer mod: whose block it is.</summary>
     public string ModId { get; }
+    /// <summary>The block's name in that mod.</summary>
     public string Name { get; }
+    /// <summary>Where the plan stood before the change.</summary>
     public BlockApplyResult Before { get; }
+    /// <summary>Where the plan stands now.</summary>
     public BlockApplyResult After { get; }
 }
