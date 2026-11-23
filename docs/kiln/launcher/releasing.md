@@ -721,7 +721,7 @@ publishing status.
 | `launcher-windows` | main | Kiln Launcher (Windows) | the Nexus build's NSIS setup (`nexus/windows/`), `nexus/README.txt` |
 | `launcher-linux` | main | Kiln Launcher (Linux) | the Nexus build's AppImage (executable bit kept), `nexus/README.txt` |
 | `launcher-deb` | optional | Kiln Launcher (Linux .deb) | the Nexus build's .deb, `nexus/README.txt` (the page description offers it) |
-| `runtime` | optional | Kiln runtime (manual install) | `kiln-runtime-<v>.zip`, kilnctl, kilnctl.exe, INSTALL-RUNTIME.txt, the systemd units |
+| `runtime` | optional | Kiln runtime (manual install) | the runtime bundle unpacked in `kiln-runtime-<v>/` (never the zip, below), kilnctl, kilnctl.exe, the Nexus `INSTALL-RUNTIME.txt` (`tools/release/templates/INSTALL-RUNTIME-nexus.txt`, its commands on the folder), the systemd units |
 | `server` | optional | Kiln server pack | `runtime/kiln-server-<v>.zip` itself, not wrapped in another zip (it is the archive owners unzip into the server folder); skipped for a release folder without it, refused with `--only server` |
 | `sdk` | optional | Kiln SDK (mod authors) | the nupkgs, kiln, kiln.exe, the vsix, `nexus/README.txt` |
 
@@ -739,6 +739,20 @@ publishing status.
 
 - Nexus takes archives (the API speaks of "the archive being uploaded" and repacks archives), so every file goes up
   as a zip, `kiln-<kind>-<version>.zip` (the runtime: `kiln-runtime-standalone-<version>.zip`), made in `RELEASE_DIR.nexus/`.
+- **No archive inside an archive.** Nexus cannot scan one and holds the file in review: 0.2.0-dev.30.8's runtime file,
+  which carried `kiln-runtime-<v>.zip` inside, stayed in review while every other file was available. So the runtime
+  file holds the bundle unpacked: every entry of `runtime/kiln-runtime-<v>.zip` at the same name below
+  `kiln-runtime-<v>/`, each checked against its `kiln-runtime.json` while it is copied (listed, size, sha256, nothing
+  unlisted or missing, safe names, no links), modes by `bundle::executable` (the archive inspector 0755, the rest 0644;
+  a zip whose modes say otherwise is refused). kilnctl takes that folder wherever it takes the zip
+  ([bundle.md](bundle.md), "The unpacked folder"); the file's `INSTALL-RUNTIME.txt` is the Nexus template filled with
+  the version and the runtime's version (from the checkout nexus.py runs in, like the description), while GitHub and
+  frostdev.io keep the zip and `runtime/INSTALL-RUNTIME.txt`. A runtime folder needs the kilnctl of 0.2.0-dev.30.9 or
+  later beside it: an older kilnctl takes only the zip. Before any upload, and in the dry run, every zip is refused when
+  an entry is an archive itself (`.zip`, `.7z`, `.rar`, `.tar`, `.tar.<compression>`, `.tgz`, `.gz`; not
+  `System.Formats.Tar.dll`). `.nupkg` and `.vsix` are zips Nexus takes (the SDK file has always carried them and is
+  available), and the launcher's `.deb` is fine too, so none of them counts. The server pack is the archive itself
+  and goes up as it is (its entries are checked the same way).
 - Uploads up to 100 MiB go in one part with their MD5 (`md5` in `POST /uploads`, `Content-MD5` on the `PUT`); larger
   ones use `POST /uploads/multipart` (S3 parts, their ETags, `CompleteMultipartUpload`). Then `finalise`, and the
   upload is polled until it is `available`.
@@ -758,7 +772,9 @@ publishing status.
 - `--only launcher-linux,runtime` limits the files. Tests: `python3 -I tools/release/test_nexus.py` (a local mock of the
   API and storage: single part, multipart, polling, new file and new version, a file found by name, the description,
   the dry run, a missing key; the launchers taken from nexus/ with its README, `archive_existing_file` on the
-  launchers' new versions only, a folder without nexus/ refused, the server pack uploaded as it is).
+  launchers' new versions only, a folder without nexus/ refused, the server pack uploaded as it is; the runtime file
+  with the bundle as a folder that matches its manifest, no nested archive, a runtime zip that breaks its manifest
+  refused, a zip with an archive inside never uploaded).
   `python3 -I tools/release/test_serverpack.py`: the server pack builder (only the server components, manifest paths
   and bytes, deterministic, safe names, tampered or unlisted files refused), also against the published dev.17 runtime
   zip when it is there (`KILN_SERVERPACK_RUNTIME`).

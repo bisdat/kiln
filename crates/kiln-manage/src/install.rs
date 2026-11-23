@@ -737,7 +737,8 @@ fn install_report_adding(dirs: &DataDirs, install: &GameInstall, bundle: &Path, 
     let _lock = InstallLock::take(game_dir)?;
     progress.report(Some(0.0), "verifying the bundle");
     let manifest = crate::bundle::verify(bundle, progress)?;
-    let bundle_sha = crate::hash::sha256_file(bundle)?.0;
+    // the zip's sha256 for the receipt; none for an unpacked bundle folder (bundle::zip_sha256)
+    let bundle_sha = crate::bundle::zip_sha256(bundle)?;
     let old = read_receipt(game_dir)?;
     if let Some(r) = &old {
         for p in receipt_paths(r) { refuse_symlinks(game_dir, p)?; }
@@ -774,7 +775,7 @@ fn install_report_adding(dirs: &DataDirs, install: &GameInstall, bundle: &Path, 
     std::fs::create_dir_all(&kiln).map_err(io_at(&kiln, "creating"))?;
     clean_stale_staging(&kiln);
     let staging = kiln.join(format!(".staging-{}", rand_suffix()?));
-    let result = install_staged(dirs, install, bundle, &bundle_sha, &manifest, &choice, &files, old, options, &staging, progress);
+    let result = install_staged(dirs, install, bundle, bundle_sha.as_deref(), &manifest, &choice, &files, old, options, &staging, progress);
     if result.is_ok() || !has_previous(&staging) { let _ = std::fs::remove_dir_all(&staging); }
     result.map_err(|e| started_meanwhile(install, e))
 }
@@ -791,7 +792,7 @@ fn started_meanwhile(install: &GameInstall, e: Error) -> Error {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn install_staged(dirs: &DataDirs, install: &GameInstall, bundle: &Path, bundle_sha: &str, manifest: &RuntimeManifest,
+fn install_staged(dirs: &DataDirs, install: &GameInstall, bundle: &Path, bundle_sha: Option<&str>, manifest: &RuntimeManifest,
                   choice: &ComponentChoice, files: &[RuntimeFile], old: Option<InstallReceipt>, options: &InstallOptions,
                   staging: &Path, progress: &mut dyn Progress) -> Result<(InstallReceipt, InstallReport)> {
     let game_dir = install.path.as_path();
@@ -1142,7 +1143,7 @@ fn install_staged(dirs: &DataDirs, install: &GameInstall, bundle: &Path, bundle_
             installer: Some(options.installer.clone().unwrap_or_else(|| format!("kiln-manage {}", crate::VERSION))),
             runtime: ReceiptRuntime {
                 version: manifest.version.clone(),
-                sha256: Some(bundle_sha.to_string()),
+                sha256: bundle_sha.map(str::to_string),
                 components: choice.components.clone(),
                 deselected: Some(choice.deselected.clone()),
             },

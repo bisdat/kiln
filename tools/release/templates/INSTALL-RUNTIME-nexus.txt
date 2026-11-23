@@ -1,0 +1,66 @@
+Installing the Kiln runtime by hand (Nexus Mods)
+================================================
+
+kiln-runtime-@VERSION@/ is Kiln's runtime (internal version @RUNTIME_VERSION@): the dinput8.dll proxy, kiln-core,
+the services, Kiln.Host and Kiln.Api, a private .NET runtime, the symbol definitions for the game client and the
+dedicated server, Kiln.Admin, the parts that run other loaders' mods (EMF, EML, ShroudForge, Enshwick; installed by
+default), and the samples (optional). The Kiln Launcher installs it for you (Play > Install, or Runtime); use these
+steps for a dedicated server or when you do not use the launcher.
+
+This download holds the runtime as a folder, not as a zip inside the zip (Nexus Mods cannot check an archive inside an
+archive). kilnctl takes the folder just as it takes the runtime zip of the GitHub and frostdev.io downloads. Unzip
+this download and run the commands below in the folder you unzipped it to, where kilnctl and kiln-runtime-@VERSION@
+are side by side. Leave kiln-runtime-@VERSION@ as it is: kilnctl checks every file in it against its
+kiln-runtime.json and refuses a missing, changed or extra file (also one a file manager adds, such as .DS_Store or
+Thumbs.db).
+
+kilnctl (Linux: kilnctl, Windows: kilnctl.exe) installs it, keeps a receipt, backs up what it replaces, and can
+uninstall it byte for byte. Check the folder first:
+
+  kilnctl bundle verify kiln-runtime-@VERSION@
+
+Close the game or stop the server before installing.
+
+
+Game client
+-----------
+  Linux (Proton):  ./kilnctl bundle install kiln-runtime-@VERSION@ --dir "<Steam library>/steamapps/common/Enshrouded" --real
+  Windows:         kilnctl.exe bundle install kiln-runtime-@VERSION@ --dir "C:\Program Files (x86)\Steam\steamapps\common\Enshrouded" --real
+
+  --real confirms a folder inside a Steam library. The client parts are installed by default (core, sigdb-client, emf, eml,
+  shroudforge, enshwick).
+  On Linux, Proton may need the launch option  WINEDLLOVERRIDES="dinput8=n,b" %command%  (Steam > Enshrouded >
+  Properties > Launch options) so the game loads Kiln's dinput8.dll.
+  Remove it again:  kilnctl bundle uninstall --dir "<the same folder>" --real
+
+
+Dedicated server
+----------------
+  Only FTP or a file manager (a rented server), or no kilnctl: the Kiln server pack (kiln-server-@VERSION@.zip, its
+  own file on the Kiln page) holds just the server parts. Unzip it into the folder with enshrouded_server.exe;
+  KILN-SERVER-README.txt inside has the steps.
+
+  A kilnctl server on Linux (Wine):   ./kilnctl deploy <name> --bundle kiln-runtime-@VERSION@
+  Any server folder (Linux or Windows):
+    kilnctl bundle install kiln-runtime-@VERSION@ --dir "<server folder>"
+
+  The server parts, installed by default: core, sigdb-server, admin (Kiln.Admin, for the launcher's server pages), and
+  emf, eml, shroudforge, enshwick (EMF, EML, ShroudForge and Enshwick mods). Add samples for the hello sample
+  (--components with the full list). A folder inside a Steam library also needs --real.
+  To keep a kilnctl server running and start it at boot: the systemd user units next to kilnctl (kiln@.service,
+  kiln-backup@.service, kiln-backup@.timer; see docs/kiln/kilnctl.md, "systemd").
+
+
+By hand, without kilnctl
+------------------------
+kiln-runtime-@VERSION@ holds the files at their place in the game folder (dinput8.dll, kiln/...) plus
+kiln-runtime.json, which lists every file with its sha256 and component. Copying what is in it into the game or server
+folder works, but nothing is backed up and an existing dinput8.dll (another mod loader) is overwritten instead of
+chained. Prefer kilnctl. Copied raw, the folder also puts every optional and client part into the game folder; for a
+server, use the Kiln server pack instead.
+
+
+Where to read more
+------------------
+https://frostdev.io/kiln/wiki and docs/kiln/ in the source (dedicated-servers.md, kilnctl.md, launcher/bundle.md,
+linux-server.md).

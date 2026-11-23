@@ -127,8 +127,9 @@ enum Cmd {
         /// Let deploy-server.sh build Kiln first (default: deploy the existing build)
         #[arg(long)]
         build: bool,
-        /// Install this runtime bundle (kiln-runtime-*.zip) instead of running deploy-server.sh
-        #[arg(long, value_name = "ZIP", conflicts_with_all = ["from", "build"])]
+        /// Install this runtime bundle instead of running deploy-server.sh: its zip (kiln-runtime-*.zip) or the folder it
+        /// was unpacked to (kiln-runtime.json at its root)
+        #[arg(long, value_name = "BUNDLE", conflicts_with_all = ["from", "build"])]
         bundle: Option<PathBuf>,
     },
     /// Check that the instance can start (exit 1 on failure)
@@ -387,11 +388,15 @@ enum BundleCmd {
         #[arg(long)]
         epoch: Option<i64>,
     },
-    /// Check every file's size and sha256 against kiln-runtime.json (and the zip's entries)
-    Verify { zip: PathBuf },
+    /// Check every file's size and sha256 against kiln-runtime.json, and that the zip or folder holds nothing else
+    Verify {
+        /// The bundle: its zip, or the folder it was unpacked to (kiln-runtime.json at its root)
+        bundle: PathBuf,
+    },
     /// Install or upgrade a bundle into a game folder (client or server, by its exe); writes kiln/.install.json
     Install {
-        zip: PathBuf,
+        /// The bundle: its zip, or the folder it was unpacked to (kiln-runtime.json at its root)
+        bundle: PathBuf,
         /// The game folder (the one with enshrouded.exe or enshrouded_server.exe)
         #[arg(long)]
         dir: PathBuf,
@@ -427,7 +432,8 @@ enum ClientCmd {
     },
     /// Install or upgrade a runtime bundle into the client folder
     Install {
-        zip: PathBuf,
+        /// The bundle: its zip, or the folder it was unpacked to (kiln-runtime.json at its root)
+        bundle: PathBuf,
         #[arg(long)]
         dir: Option<PathBuf>,
         /// Components, comma separated: an explicit choice, as for `bundle install` [default: the defaults; an
@@ -482,7 +488,7 @@ fn dispatch(cmd: Cmd) -> anyhow::Result<i32> {
         Cmd::Install { name, reflink_from } => ops::install(&load(&name)?, reflink_from.as_deref())?,
         Cmd::Prefix { name } => ops::prefix(&load(&name)?)?,
         Cmd::Deploy { name, from, samples, build, bundle } => match bundle {
-            Some(zip) => ops::deploy_bundle(&load(&name)?, &zip, samples)?,
+            Some(bundle) => ops::deploy_bundle(&load(&name)?, &bundle, samples)?,
             None => ops::deploy(&load(&name)?, from.as_deref(), samples, build)?,
         },
         Cmd::Preflight { name } => return ops::preflight_cmd(&load(&name)?),
@@ -510,9 +516,9 @@ fn dispatch(cmd: Cmd) -> anyhow::Result<i32> {
         Cmd::Bundle { cmd } => {
             return match cmd {
                 BundleCmd::Create { stage, out, git, epoch } => bundle::create(&stage, &out, git, epoch),
-                BundleCmd::Verify { zip } => bundle::verify(&zip),
-                BundleCmd::Install { zip, dir, components, switch_from_shroudforge, real } => {
-                    bundle::install_cmd(bundle::InstallArgs { zip, dir, components, switch_from_shroudforge, real })
+                BundleCmd::Verify { bundle } => bundle::verify(&bundle),
+                BundleCmd::Install { bundle, dir, components, switch_from_shroudforge, real } => {
+                    bundle::install_cmd(bundle::InstallArgs { bundle, dir, components, switch_from_shroudforge, real })
                 }
                 BundleCmd::Uninstall { dir, real } => bundle::uninstall_cmd(&dir, real),
             };
@@ -537,8 +543,8 @@ fn dispatch(cmd: Cmd) -> anyhow::Result<i32> {
         Cmd::Client { cmd } => {
             return match cmd {
                 ClientCmd::Status { dir } => client::status(dir),
-                ClientCmd::Install { zip, dir, components, switch_from_shroudforge, real } => {
-                    client::install(&zip, dir, components, switch_from_shroudforge, real)
+                ClientCmd::Install { bundle, dir, components, switch_from_shroudforge, real } => {
+                    client::install(&bundle, dir, components, switch_from_shroudforge, real)
                 }
                 ClientCmd::Uninstall { dir, real } => client::uninstall(dir, real),
                 ClientCmd::Activate { profile, deactivate, dir, real } => client::activate(profile, deactivate, dir, real),
@@ -628,6 +634,8 @@ mod data_use_tests {
         for args in [
             &["profile", "create", "p"][..], &["profile", "show", "p"], &["library", "list"], &["library", "import", "x.zip"], &["library", "take-over", "eml:x"],
             &["client", "status"], &["deploy", "s", "--bundle", "k.zip"], &["bundle", "install", "k.zip", "--dir", "/g"],
+            &["deploy", "s", "--bundle", "kiln-runtime-0.2.0"], &["bundle", "install", "kiln-runtime-0.2.0", "--dir", "/g"],
+            &["client", "install", "kiln-runtime-0.2.0", "--dir", "/g"],
             &["bundle", "uninstall", "--dir", "/g"], &["backup", "s"], &["report"],
             &["pack", "install", "p.kilnpack", "--yes"], &["pack", "update", "p", "p.kilnpack"], &["pack", "build", "p", "--version", "1.0.0"], &["pack", "list"],
             // Pack Studio's pack source commands (they read and write the source's profile)
@@ -640,6 +648,7 @@ mod data_use_tests {
         for args in [
             &["run", "s"][..], &["start", "s"], &["stop", "s"], &["logs", "s", "--follow"], &["port", "s"], &["gate", "s"],
             &["install", "s"], &["prefix", "s"], &["status", "s"], &["list"], &["deploy", "s"], &["bundle", "verify", "k.zip"],
+            &["bundle", "verify", "kiln-runtime-0.2.0"],
             &["cmd", "s", "help"], &["tick-compare", "a.jsonl", "b.jsonl"], &["pack", "verify", "p.kilnpack"],
             &["pack", "check", "p.kilnpack"], &["pack", "check", "--index", "i.json", "--files", "f"],
         ] {

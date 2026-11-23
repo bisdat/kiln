@@ -780,7 +780,8 @@ A parity test checks the bundle's tree against `tools/deploy-server.sh`'s output
 
 ### 5.7 `.install.json` (receipt) and the install rules
 Fields: `format`, `installId` (uuid, stable across upgrades), `installed`, `updated`, `installer`,
-`runtime{version, sha256, components, deselected}` (`deselected`: the defaults the player turned off; updates keep
+`runtime{version, sha256, components, deselected}` (`sha256`: of the bundle zip, absent for an install from the bundle
+unpacked into a folder, which has no zip; `deselected`: the defaults the player turned off; updates keep
 them off unless required and add every other default for the side; automatic requirements preserve
 opt-outs, and explicit choices preserve unselected earlier opt-outs even if now optional or absent;
 absent in older receipts = nothing turned off), `side`, `platform` (`proton|wine|windows`), `game{exe, sha256, steamBuild}`,

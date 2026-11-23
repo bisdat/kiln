@@ -4,7 +4,9 @@
 single-part and multipart uploads, finalise and polling, the first release (new files) and the next (new versions),
 a file found on the page by name, the description sync, the dry run (GET only) and a missing key. The launchers are
 the Nexus build (nexus/ of the release folder, never linux/ or windows/, which update themselves) with nexus/README.txt,
-their new versions archive the previous one (archive_existing_file), and a folder without nexus/ is refused.
+their new versions archive the previous one (archive_existing_file), and a folder without nexus/ is refused. The
+runtime file holds the runtime bundle unpacked in a kiln-runtime-<v>/ folder (Nexus cannot scan an archive inside an
+archive), and no Nexus zip with an archive inside goes up (.nupkg and .vsix excepted).
 
   python3 -I tools/release/test_nexus.py
 """
@@ -39,6 +41,40 @@ def launcher_fixture(dist, size):
     with zipfile.ZipFile(data, "w") as z:
         z.writestr("usr/bin/kiln-launcher", b"\x7fELF" + bytes(60) +
                    f"KILN-LAUNCHER-DISTRIBUTION:{dist}:self-update={int(dist == 'direct')}".encode() + os.urandom(size))
+    return data.getvalue()
+
+
+HELPER = "kiln/tools/eml-inspect/linux-x86_64/kiln-eml-inspect"  # bundle::EXECUTABLE_HELPER, packed 0755
+
+
+def runtime_zip(version, listed=None, unlisted=None, changed=None):
+    """A runtime bundle as `kilnctl bundle create` makes it: kiln-runtime.json listing every file (size, sha256,
+    component), entries sorted, Unix modes 0644 except the archive inspector's 0755. `listed` adds files to it and its
+    manifest, `unlisted` adds entries the manifest does not list, `changed` gives entries other bytes."""
+    files = {
+        "dinput8.dll": b"MZ proxy",
+        "kiln/kiln-core.dll": b"core",
+        "kiln/kiln.json": b"{}\n",
+        # a DLL whose name has .Tar. in it: no archive (the real runtime ships it)
+        "kiln/dotnet/shared/Microsoft.NETCore.App/10.0.14/System.Formats.Tar.dll": b"a DLL, not an archive",
+        HELPER: b"\x7fELF helper",
+        **(listed or {}),
+    }
+    manifest = {"format": 1, "version": f"{version}+20261123.0123abc", "kiln": version, "abi": 2,
+                "components": {"core": {"sides": ["server", "client"]}, "eml": {"sides": ["server", "client"]}},
+                "files": [{"path": p, "size": len(d), "sha256": hashlib.sha256(d).hexdigest(),
+                           "component": "eml" if p == HELPER else "core", "config": p == "kiln/kiln.json"}
+                          for p, d in sorted(files.items(), key=lambda kv: kv[0].encode())]}
+    entries = {"kiln-runtime.json": json.dumps(manifest, indent=2).encode() + b"\n", **files, **(unlisted or {}),
+               **(changed or {})}
+    data = io.BytesIO()
+    with zipfile.ZipFile(data, "w", zipfile.ZIP_DEFLATED) as z:
+        for name in sorted(entries, key=str.encode):
+            info = zipfile.ZipInfo(name, date_time=(2026, 11, 23, 0, 0, 0))
+            info.create_system = 3
+            info.external_attr = ((0o755 if name == HELPER else 0o644) | 0o100000) << 16
+            info.compress_type = zipfile.ZIP_DEFLATED
+            z.writestr(info, entries[name])
     return data.getvalue()
 
 
@@ -306,7 +342,7 @@ class NexusTests(unittest.TestCase):
             f"linux/kiln-launcher_{version}_amd64.deb": launcher_fixture("direct", 3000),
             f"windows/kiln-launcher_{version}_x64-setup.exe": launcher_fixture("direct", 1200),
             f"windows/kiln-launcher_{version}_x64-setup.exe.sig": b"sig",
-            f"runtime/kiln-runtime-{version}.zip": os.urandom(900),
+            f"runtime/kiln-runtime-{version}.zip": runtime_zip(version),
             "runtime/INSTALL-RUNTIME.txt": b"install\n",
             "runtime/kilnctl": os.urandom(400),
             "runtime/kilnctl.exe": os.urandom(400),
@@ -522,6 +558,94 @@ class NexusTests(unittest.TestCase):
         self.assertEqual(code, 0, out + err)
         self.assertEqual([fid for fid, _ in self.mock.versions], [server_id])
         self.assertEqual(len(self.mock.files), 6)
+
+    def test_the_runtime_file_holds_the_bundle_as_a_folder_not_a_zip(self):
+        version = "0.2.0-dev.9"
+        rel = self.release(version, server=True)
+        z = nexus.make_zip(rel, "runtime", version, self.tmp)
+        self.assertEqual(os.path.basename(z), f"kiln-runtime-standalone-{version}.zip")
+        self.assertEqual(nexus.nested_archives(z), [])
+        folder = f"kiln-runtime-{version}/"
+        with zipfile.ZipFile(z) as out, zipfile.ZipFile(os.path.join(rel, "runtime", f"kiln-runtime-{version}.zip")) as inner:
+            names = out.namelist()
+            self.assertFalse([n for n in names if n.lower().endswith(".zip")], names)
+            manifest = json.loads(inner.read("kiln-runtime.json"))
+            # the folder is the bundle: its manifest as it is, every file it lists with its size and sha256, nothing else
+            flat = sorted(n[len(folder):] for n in names if n.startswith(folder))
+            self.assertEqual(flat, sorted(["kiln-runtime.json"] + [f["path"] for f in manifest["files"]]))
+            self.assertEqual(out.read(folder + "kiln-runtime.json"), inner.read("kiln-runtime.json"))
+            for f in manifest["files"]:
+                data = out.read(folder + f["path"])
+                self.assertEqual((len(data), hashlib.sha256(data).hexdigest()), (f["size"], f["sha256"]), f["path"])
+            # modes as bundle.executable gives them: the archive inspector 0755, every other file 0644
+            modes = {n[len(folder):]: (out.getinfo(n).external_attr >> 16) & 0o777 for n in names if n.startswith(folder)}
+            self.assertEqual(modes.pop(HELPER), 0o755)
+            self.assertEqual(set(modes.values()), {0o644})
+            # kilnctl, kilnctl.exe, the install text and the systemd units stay at the top
+            top = sorted(n for n in names if not n.startswith(folder))
+            self.assertEqual(top, sorted(["INSTALL-RUNTIME.txt", "kilnctl", "kilnctl.exe", "kiln@.service",
+                                          "kiln-backup@.service", "kiln-backup@.timer"]))
+            self.assertEqual((out.getinfo("kilnctl").external_attr >> 16) & 0o777, 0o755)
+            text = out.read("INSTALL-RUNTIME.txt").decode()
+        # the Nexus install text: its commands take the folder; the GitHub and frostdev.io text keeps the zip
+        self.assertIn(f"kilnctl bundle verify kiln-runtime-{version}\n", text)
+        self.assertIn(f"bundle install kiln-runtime-{version} --dir", text)
+        self.assertIn(f"deploy <name> --bundle kiln-runtime-{version}\n", text)
+        self.assertNotIn(f"kiln-runtime-{version}.zip", text)
+        self.assertIn(manifest["version"], text)
+        self.assertIsNone(re.search(r"@[A-Z_]+@", text), text)
+        with open(os.path.join(rel, "runtime", "INSTALL-RUNTIME.txt"), "rb") as f:
+            self.assertEqual(f.read(), b"install\n", "the release folder's own text is left alone")
+
+    def test_a_runtime_zip_that_breaks_its_manifest_is_not_flattened(self):
+        version = "0.2.0-dev.9"
+        for case, data in [("unlisted", runtime_zip(version, unlisted={"kiln/extra.dll": b"x"})),
+                           ("changed", runtime_zip(version, changed={"kiln/kiln-core.dll": b"CORE"})),
+                           ("unsafe", runtime_zip(version, unlisted={"../evil.dll": b"x"})),
+                           ("missing", runtime_zip(version, changed={"kiln-runtime.json": json.dumps({"files": [
+                               {"path": "gone.dll", "size": 1, "sha256": "0" * 64, "component": "core"}]}).encode()}))]:
+            rel = self.release(version)
+            with open(os.path.join(rel, "runtime", f"kiln-runtime-{version}.zip"), "wb") as f:
+                f.write(data)
+            with self.assertRaises(nexus.Fail, msg=case):
+                nexus.make_zip(rel, "runtime", version, self.tmp)
+
+    def test_nested_archives_are_named(self):
+        bad = os.path.join(self.tmp, "bad.zip")
+        flagged = ["a/inner.zip", "b.7z", "c.RAR", "d.tar", "e.tar.gz", "f.tgz", "g.gz", "h.tar.xz", "i.tar.zst", "j.tar.bz2"]
+        fine = ["ok/Kiln.Sdk.0.2.0.nupkg", "ok/kiln-vscode-0.1.0.vsix", "ok/System.Formats.Tar.dll", "ok/kiln-launcher.deb",
+                "ok/tar.txt", "ok/zip.dll", "ok/a.zip/", "kilnctl.exe"]
+        with zipfile.ZipFile(bad, "w") as z:
+            for n in flagged + fine:
+                z.writestr(n, b"x")
+        self.assertEqual(nexus.nested_archives(bad), flagged)
+        with self.assertRaises(nexus.Fail) as e:
+            nexus.refuse_nested_archives(bad)
+        self.assertIn("a/inner.zip", str(e.exception))
+        good = os.path.join(self.tmp, "good.zip")
+        with zipfile.ZipFile(good, "w") as z:
+            for n in fine:
+                z.writestr(n, b"x")
+        nexus.refuse_nested_archives(good)
+
+    def test_a_nexus_zip_with_an_archive_inside_is_never_uploaded(self):
+        # the SDK zip with a zip among sdk/'s files
+        rel = self.release("0.2.0-dev.9")
+        with open(os.path.join(rel, "sdk", "extra-samples.zip"), "wb") as f:
+            f.write(zip_bytes({"a.txt": b"a"}))
+        for extra in ((), ("--publish",)):
+            code, out, err = self.run_nexus(rel, "--only", "sdk", *extra)
+            self.assertEqual(code, 2, out + err)
+            self.assertIn("extra-samples.zip", err)
+        # the runtime with an archive among the bundle's own files: the flattened folder would carry it
+        rel = self.release("0.2.0-dev.10")
+        with open(os.path.join(rel, "runtime", "kiln-runtime-0.2.0-dev.10.zip"), "wb") as f:
+            f.write(runtime_zip("0.2.0-dev.10", listed={"kiln/data/pack.7z": b"7z"}))
+        code, out, err = self.run_nexus(rel, "--only", "runtime", "--publish")
+        self.assertEqual(code, 2, out + err)
+        self.assertIn("kiln-runtime-0.2.0-dev.10/kiln/data/pack.7z", err)
+        self.assertEqual(self.mock.uploads, {})
+        self.assertTrue(all(m == "GET" for m, _, _ in self.mock.requests))
 
     def test_sync_description_publish(self):
         code, out, err = self.run_nexus(self.release("0.2.0-dev.9"), "--publish", "--sync-description", "--only", "sdk")
