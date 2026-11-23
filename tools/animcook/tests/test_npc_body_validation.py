@@ -27,6 +27,11 @@ def fixture():
 
 
 class NpcBodyValidation(unittest.TestCase):
+    def test_bindings_match_the_shared_managed_vector(self):
+        vector = json.loads((ROOT.parent.parent / "mods/tests/npc-motion-contract/vector.json").read_text())
+        actual = B._body_bindings(vector, vector["graph"], vector["clips"], "motions")
+        self.assertEqual(vector["expected"], actual)
+
     def test_ordinary_body_redefinitions_keep_the_existing_cook_path(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

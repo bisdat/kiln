@@ -148,7 +148,7 @@ internal static class NpcCompiler
         if (Path.IsPathRooted(file) || file.Contains("..", StringComparison.Ordinal)) throw new BlockError(ctx.Block, path, $"\"{file}\": a path in the mod's folder");
         if (!file.EndsWith(".glb", StringComparison.OrdinalIgnoreCase) && !file.EndsWith(".gltf", StringComparison.OrdinalIgnoreCase))
             throw new BlockError(ctx.Block, path, $"\"{file}\" is not a glTF file (.glb or .gltf)");
-        var dir = BlocksBridge.ModDirectory(ctx.Mod.Id);
+        var dir = ctx.Mod.DirectoryOf(ctx.Mod.Id);
         if (dir.Length > 0 && !File.Exists(Path.Combine(dir, file))) throw new BlockError(ctx.Block, path, $"no file {file} in the mod's folder");
     }
 
@@ -256,7 +256,7 @@ internal static class NpcCompiler
     /// <summary>What the cook made of an animation for one body: the graph's GUID, skeleton and states (name -> state input value and GUID).</summary>
     internal sealed record Graph(string Name, Guid Guid, Guid Skeleton, Dictionary<string, (uint Hash, Guid? Guid, string? Engine)> States, Dictionary<string, int> Slots, bool Game);
 
-    private static string Cooked(string mod) => Path.Combine(BlocksBridge.ModDirectory(mod), "assets", "cooked");
+    private static string Cooked(BlockContext ctx, string mod) => Path.Combine(ctx.Mod.DirectoryOf(mod), "assets", "cooked");
 
     private static JsonNode? ReadJson(string file)
     {
@@ -266,7 +266,7 @@ internal static class NpcCompiler
 
     private static Graph CookedGraph(BlockContext ctx, string mod, string graph, string path, string file)
     {
-        var j = ReadJson(Path.Combine(Cooked(mod), $"{graph}.graph.json"))
+        var j = ReadJson(Path.Combine(Cooked(ctx, mod), $"{graph}.graph.json"))
                 ?? throw new BlockError(ctx.Block, path, $"its graph {graph} is not cooked: an animation with clips is cooked from {file} when the mod builds (kiln build, or kiln cook in the mod's folder). An animation written in C# is not seen by the cook: put it in blocks/*.json and name it");
         var states = new Dictionary<string, (uint, Guid?, string?)>(StringComparer.Ordinal);
         foreach (var (k, v) in j["states"]?.AsObject() ?? [])
@@ -307,7 +307,7 @@ internal static class NpcCompiler
     private static (Guid Guid, Guid Skeleton, JsonNode? Box) CookedModel(BlockContext ctx, string mod, string model, string path, string file, BodyBlock? body = null)
     {
         var stem = model.Replace('/', '_');
-        var j = ReadJson(Path.Combine(Cooked(mod), $"{stem}.model.json"))
+        var j = ReadJson(Path.Combine(Cooked(ctx, mod), $"{stem}.model.json"))
                 ?? throw new BlockError(ctx.Block, path, $"its model {model} is not cooked: a body with a model is cooked from {file} when the mod builds (kiln build, or kiln cook in the mod's folder). A body written in C# is not seen by the cook: put it in blocks/*.json and name it");
         if (body != null) NpcPhysics.CheckCooked(ctx, body, j, model, "body");
         return (Guid.Parse(j["guid"]!.GetValue<string>()), Guid.Parse(j["skeleton"]?.GetValue<string>() ?? Guid.Empty.ToString()), j["boundingBox"]);
@@ -317,12 +317,12 @@ internal static class NpcCompiler
     private static string Stem(string file) => Path.GetFileNameWithoutExtension(file);
 
     /// <summary>A clip's length in seconds, as the cook made it (clips.json), or null.</summary>
-    private static double? ClipLength(string mod, string skeleton, Clip c, bool loopDefault)
+    private static double? ClipLength(BlockContext ctx, string mod, string skeleton, Clip c, bool loopDefault)
     {
         if (c.Name == null) return null;
         var key = $"{skeleton}.{c.Name}" + ((c.Loop ?? loopDefault) ? "" : ".once");
         if (c.RootMotion == true) key += ".rm";
-        var d = ReadJson(Path.Combine(Cooked(mod), "clips.json"))?["clips"]?[key]?["duration"]?.GetValue<double>();
+        var d = ReadJson(Path.Combine(Cooked(ctx, mod), "clips.json"))?["clips"]?[key]?["duration"]?.GetValue<double>();
         return d / (c.Speed ?? 1);
     }
 
@@ -793,7 +793,7 @@ internal static class NpcCompiler
         var state = a.Plays!.Guid(stateMod)!.Value;
         var length = a.Length;
         if (length == null && own && anim.Block.States.TryGetValue(a.Plays!, out var clip))
-            length = ClipLength(anim.Mod, anim.Block.Skeleton ?? Stem(anim.Block.Clips!), clip, false);
+            length = ClipLength(ctx, anim.Mod, anim.Block.Skeleton ?? Stem(anim.Block.Clips!), clip, false);
         length ??= Math.Max(a.HitAt + 0.5, 1.2);
         if (a.HitAt >= length) throw new BlockError(ctx.Block, $"{path}.hitAt", $"{a.HitAt} is not inside the attack's {length:0.###} seconds (its clip's length)");
         var delivery = a.Delivery ?? new ConeBlock { Range = (float)a.Range, Angle = (float)Math.Min(a.Angle, 179), Effects = a.OnHit! };
@@ -882,7 +882,7 @@ internal static class NpcCompiler
                 ["model"] = model.ToString(), ["graph"] = graph.Guid.ToString(), ["skeleton"] = skeleton.ToString(),
                 ["size"] = new JsonObject { ["radius"] = body.Block.Size!.Radius, ["height"] = body.Block.Size.Height },
                 ["bindings"] = NpcBodyRig.Bindings(ctx, motions.Block, mod, animation.Block, graph,
-                    (clip, loop) => ClipLength(mod, animation.Block.Skeleton ?? Stem(animation.Block.Clips), clip, loop)),
+                    (clip, loop) => ClipLength(ctx, mod, animation.Block.Skeleton ?? Stem(animation.Block.Clips), clip, loop)),
             };
         }
         else
