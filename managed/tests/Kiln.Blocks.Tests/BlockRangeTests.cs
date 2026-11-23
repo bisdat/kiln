@@ -144,6 +144,24 @@ public sealed class BlockRangeTests
     }
 
     [Fact]
+    public void A_game_sequence_attack_loads_its_unused_length_and_hit_time_as_30_6_did()
+    {
+        // 0.2.0-dev.30.6 returned for a game sequence before it checked length and hitAt (a sequence plays as it is and uses
+        // neither): such an attack still loads, with the block's one warning naming them
+        var mod = new ModBlocks("compat-sequence", 1) { ManifestClients = "mod" };
+        static AttackBlock Attack(string json) => JsonNode.Parse(json)!.Deserialize<AttackBlock>(BlockJson.SharedOptions)!;
+        const string seq = "\"sequence\": \"00000000-0000-0000-0000-000000000001\"";
+        var low = Compiler.Lower(mod, "seq", Attack($"{{{seq}, \"length\": 0.3}}")).Low;
+        Assert.Equal("hitAt", Assert.Single(low.Tolerated).Field);
+        low = Compiler.Lower(mod, "seq", Attack($"{{{seq}, \"length\": 0, \"hitAt\": -1}}")).Low;
+        Assert.Equal(["length", "hitAt"], low.Tolerated.Select(t => t.Field));
+        Assert.Empty(Compiler.Lower(mod, "seq", Attack($"{{{seq}}}")).Low.Tolerated);
+        // an attack of the mod's own still refuses them: its hit happens at hitAt within length
+        Assert.Equal("hitAt", Assert.Throws<BlockError>(() =>
+            Compiler.Lower(mod, "own", Attack("{\"plays\": \"Idle\", \"onHit\": [{\"heal\": 1}], \"length\": 0.3}"))).Field);
+    }
+
+    [Fact]
     public void Stagger_on_the_games_graph_is_ignored_as_30_6_did()
     {
         var mod = new ModBlocks("compat-stagger", 1) { ManifestClients = "mod" };
