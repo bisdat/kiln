@@ -14728,6 +14728,9 @@ managed	Kiln.Hooks	~override Kiln.SigArg.Equals(object obj) -> bool	0.2.0-dev.29
 managed	Kiln.Hooks	~override Kiln.SigArg.ToString() -> string	0.2.0-dev.29	0.2.4
 managed	Kiln.Hooks	~override Kiln.SigSummary.Equals(object obj) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Hooks	~override Kiln.SigSummary.ToString() -> string	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Items	Kiln.AmmoKinds	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.AmmoKinds.Arrow = 1 -> Kiln.AmmoKinds	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.AmmoKinds.Spell = 2 -> Kiln.AmmoKinds	0.2.0-dev.30.7	0.2.16
 managed	Kiln.Items	Kiln.ClientTransfer	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	Kiln.ClientTransfer.Amount.get -> Kiln.ClientTransferAmount	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	Kiln.ClientTransfer.Amount.init -> void	<=0.2.0-dev.26	<=0.2.1
@@ -15352,6 +15355,7 @@ managed	Kiln.Items	Kiln.InventoryKinds.All = Kiln.InventoryKinds.Containers | Ki
 managed	Kiln.Items	Kiln.InventoryKinds.Containers = 1 -> Kiln.InventoryKinds	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	Kiln.InventoryKinds.NonEmpty = 8 -> Kiln.InventoryKinds	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	Kiln.InventoryKinds.Npcs = 4 -> Kiln.InventoryKinds	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Items	Kiln.InventoryKinds.PlayerStorage = 16 -> Kiln.InventoryKinds	0.2.0-dev.30.7	0.2.16
 managed	Kiln.Items	Kiln.InventoryKinds.Players = 2 -> Kiln.InventoryKinds	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	Kiln.InventorySlot	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	Kiln.InventorySlot.<Clone>$() -> Kiln.InventorySlot!	<=0.2.0-dev.26	<=0.2.1
@@ -15511,6 +15515,7 @@ managed	Kiln.Items	Kiln.ItemRarity.Rare = 2 -> Kiln.ItemRarity	<=0.2.0-dev.26	<=
 managed	Kiln.Items	Kiln.ItemRarity.Uncommon = 1 -> Kiln.ItemRarity	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	Kiln.Items	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	Kiln.Items.Fuel	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Items	Kiln.Items.PlayerStorages	0.2.0-dev.30.7	0.2.16
 managed	Kiln.Items	Kiln.Items.Transfers	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	Kiln.ItemsGivenEvent	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	Kiln.ItemsResult	<=0.2.0-dev.26	<=0.2.1
@@ -15567,6 +15572,7 @@ managed	Kiln.Items	Kiln.ItemsServiceStatus.Transactions.init -> void	<=0.2.0-dev
 managed	Kiln.Items	Kiln.ItemsStatus	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	Kiln.ItemsStatus.Done = 0 -> Kiln.ItemsStatus	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	Kiln.ItemsStatus.Dropped = 9 -> Kiln.ItemsStatus	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Items	Kiln.ItemsStatus.Filtered = 10 -> Kiln.ItemsStatus	0.2.0-dev.30.7	0.2.16
 managed	Kiln.Items	Kiln.ItemsStatus.Invalid = 100 -> Kiln.ItemsStatus	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	Kiln.ItemsStatus.NoInventory = 4 -> Kiln.ItemsStatus	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	Kiln.ItemsStatus.NoRoom = 2 -> Kiln.ItemsStatus	<=0.2.0-dev.26	<=0.2.1
@@ -15672,6 +15678,11 @@ managed	Kiln.Items	Kiln.MoveResult.Steps.init -> void	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	Kiln.MoveResult.Succeeded.get -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	Kiln.MoveResult.To.get -> Kiln.EntityId	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	Kiln.MoveResult.To.init -> void	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Items	Kiln.OrphanTarget	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.OrphanTarget.Container.get -> Kiln.EntityId	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.OrphanTarget.Equals(Kiln.OrphanTarget other) -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.OrphanTarget.IsBackpack.get -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.OrphanTarget.OrphanTarget() -> void	0.2.0-dev.30.7	0.2.16
 managed	Kiln.Items	Kiln.PerkSlot	0.2.0-dev.30	0.2.12
 managed	Kiln.Items	Kiln.PerkSlot.<Clone>$() -> Kiln.PerkSlot!	0.2.0-dev.30	0.2.12
 managed	Kiln.Items	Kiln.PerkSlot.Available.get -> bool	0.2.0-dev.30	0.2.12
@@ -15694,6 +15705,133 @@ managed	Kiln.Items	Kiln.PlayerEquippingEvent.PlayerEquippingEvent(Kiln.DecisionI
 managed	Kiln.Items	Kiln.PlayerEquippingEvent.PlayerKey.get -> Kiln.EventEntityKey	0.2.0-dev.29	0.2.4
 managed	Kiln.Items	Kiln.PlayerEquippingEvent.PriorCanceled.get -> bool	0.2.0-dev.29	0.2.4
 managed	Kiln.Items	Kiln.PlayerEquippingEvent.PriorCanceledBy.get -> string?	0.2.0-dev.29	0.2.4
+managed	Kiln.Items	Kiln.PlayerStorage	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorage.Activate(Kiln.EntityId player, int index) -> System.Threading.Tasks.Task<Kiln.EquipResult!>!	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorage.Client	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorage.Death.get -> Kiln.StorageDeath	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorage.EntityOf(Kiln.EntityId player) -> Kiln.EntityId	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorage.Filter.get -> Kiln.StorageFilter	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorage.FullKey.get -> string!	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorage.IsReady(Kiln.EntityId player) -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorage.Key.get -> string!	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorage.Read(Kiln.EntityId player) -> Kiln.InventoryContents?	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorage.Retrieve(Kiln.EntityId player, int index, int count = 0, Kiln.EntityId to = default(Kiln.EntityId)) -> System.Threading.Tasks.Task<Kiln.MoveResult!>!	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorage.Slot(Kiln.EntityId player, int index) -> Kiln.SlotId	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorage.Slots.get -> int	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorage.Status(Kiln.EntityId player) -> Kiln.PlayerStorageStatus!	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorage.Store(Kiln.EntityId player, Kiln.SlotId from, int count = 0) -> System.Threading.Tasks.Task<Kiln.MoveResult!>!	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageAmmoOptions	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageAmmoOptions.<Clone>$() -> Kiln.PlayerStorageAmmoOptions!	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageAmmoOptions.Activate.get -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageAmmoOptions.Activate.init -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageAmmoOptions.Equals(Kiln.PlayerStorageAmmoOptions? other) -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageAmmoOptions.PlayerStorageAmmoOptions() -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageAmmoOptions.Replace.get -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageAmmoOptions.Replace.init -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageAmmoProvider	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageAmmoProvider.Active.get -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageAmmoProvider.Dispose() -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageAmmoProvider.FullKey.get -> string!	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageAmmoProvider.Kinds.get -> Kiln.AmmoKinds	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageAmmoProvider.Options.get -> Kiln.PlayerStorageAmmoOptions!	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageAmmoProvider.Shown.get -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageAmmoProvider.WhyNotShown.get -> string?	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageClientChangedEvent	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageClientChangedEvent.Key.get -> string!	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageClientChangedEvent.Rows.get -> System.Collections.Generic.IReadOnlyList<Kiln.PlayerStorageRow>!	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageDeathEvent	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageDeathEvent.Items.get -> int	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageDeathEvent.Key.get -> string!	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageDeathEvent.Moved.get -> int	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageDeathEvent.Player.get -> Kiln.EntityId	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageDeathEvent.Rule.get -> Kiln.StorageDeath	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageDeathEvent.To.get -> Kiln.EntityId	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageInfo	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageInfo.<Clone>$() -> Kiln.PlayerStorageInfo!	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageInfo.Deconstruct(out string! FullKey, out bool Registered, out int Slots, out Kiln.EntityId Holder, out Kiln.PlayerStorageStatus! Status) -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageInfo.Equals(Kiln.PlayerStorageInfo? other) -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageInfo.FullKey.get -> string!	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageInfo.FullKey.init -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageInfo.Holder.get -> Kiln.EntityId	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageInfo.Holder.init -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageInfo.PlayerStorageInfo(string! FullKey, bool Registered, int Slots, Kiln.EntityId Holder, Kiln.PlayerStorageStatus! Status) -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageInfo.Registered.get -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageInfo.Registered.init -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageInfo.Slots.get -> int	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageInfo.Slots.init -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageInfo.Status.get -> Kiln.PlayerStorageStatus!	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageInfo.Status.init -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageParkReason	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageParkReason.Filter = 3 -> Kiln.PlayerStorageParkReason	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageParkReason.Locked = 18 -> Kiln.PlayerStorageParkReason	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageParkReason.Overflow = 2 -> Kiln.PlayerStorageParkReason	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageParkReason.Requested = 16 -> Kiln.PlayerStorageParkReason	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageParkReason.ReturnedOutsideKiln = 19 -> Kiln.PlayerStorageParkReason	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageParkReason.Stale = 17 -> Kiln.PlayerStorageParkReason	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageParkReason.Unregistered = 1 -> Kiln.PlayerStorageParkReason	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageParkedEvent	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageParkedEvent.Character.get -> System.Guid	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageParkedEvent.Key.get -> string!	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageParkedEvent.Player.get -> Kiln.EntityId	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageParkedEvent.Reason.get -> Kiln.PlayerStorageParkReason	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageParkedEvent.Stacks.get -> int	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageRestoredEvent	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageRestoredEvent.Character.get -> System.Guid	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageRestoredEvent.Key.get -> string!	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageRestoredEvent.Live.get -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageRestoredEvent.Paired.get -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageRestoredEvent.Player.get -> Kiln.EntityId	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageRestoredEvent.Revision.get -> long	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageRestoredEvent.Source.get -> Kiln.PlayerStorageSource	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageRestoredEvent.Stacks.get -> int	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageRow	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageRow.Count.get -> int	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageRow.Count.init -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageRow.Deconstruct(out string! Key, out int Index, out Kiln.ItemId Item, out int Count, out int Level, out uint Flags) -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageRow.Equals(Kiln.PlayerStorageRow other) -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageRow.Flags.get -> uint	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageRow.Flags.init -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageRow.Index.get -> int	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageRow.Index.init -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageRow.Item.get -> Kiln.ItemId	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageRow.Item.init -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageRow.Key.get -> string!	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageRow.Key.init -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageRow.Level.get -> int	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageRow.Level.init -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageRow.PlayerStorageRow() -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageRow.PlayerStorageRow(string! Key, int Index, Kiln.ItemId Item, int Count, int Level, uint Flags) -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageSource	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageSource.Client = 3 -> Kiln.PlayerStorageSource	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageSource.New = 1 -> Kiln.PlayerStorageSource	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageSource.None = 0 -> Kiln.PlayerStorageSource	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageSource.Server = 2 -> Kiln.PlayerStorageSource	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageState	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageState.Locked = 4 -> Kiln.PlayerStorageState	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageState.None = 0 -> Kiln.PlayerStorageState	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageState.Parked = 3 -> Kiln.PlayerStorageState	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageState.Ready = 2 -> Kiln.PlayerStorageState	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageState.Waiting = 1 -> Kiln.PlayerStorageState	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageStatus	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageStatus.<Clone>$() -> Kiln.PlayerStorageStatus!	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageStatus.Deconstruct(out Kiln.PlayerStorageState State, out bool Paired, out Kiln.PlayerStorageSource Source, out int Stacks, out int Parked, out int Quarantined, out long Revision) -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageStatus.Equals(Kiln.PlayerStorageStatus? other) -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageStatus.Paired.get -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageStatus.Paired.init -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageStatus.Parked.get -> int	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageStatus.Parked.init -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageStatus.PlayerStorageStatus(Kiln.PlayerStorageState State, bool Paired, Kiln.PlayerStorageSource Source, int Stacks, int Parked, int Quarantined, long Revision) -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageStatus.Quarantined.get -> int	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageStatus.Quarantined.init -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageStatus.Restored.get -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageStatus.Revision.get -> long	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageStatus.Revision.init -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageStatus.Source.get -> Kiln.PlayerStorageSource	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageStatus.Source.init -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageStatus.Stacks.get -> int	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageStatus.Stacks.init -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageStatus.State.get -> Kiln.PlayerStorageState	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.PlayerStorageStatus.State.init -> void	0.2.0-dev.30.7	0.2.16
 managed	Kiln.Items	Kiln.RarityUpgradeRule	0.2.0-dev.30	0.2.12
 managed	Kiln.Items	Kiln.RarityUpgradeRule.<Clone>$() -> Kiln.RarityUpgradeRule!	0.2.0-dev.30	0.2.12
 managed	Kiln.Items	Kiln.RarityUpgradeRule.AllowEmptySlot.get -> bool	0.2.0-dev.30	0.2.12
@@ -15758,6 +15896,15 @@ managed	Kiln.Items	Kiln.StackEquipment.Item.init -> void	0.2.0-dev.29	0.2.4
 managed	Kiln.Items	Kiln.StackEquipment.Source.get -> Kiln.SlotId	0.2.0-dev.29	0.2.4
 managed	Kiln.Items	Kiln.StackEquipment.Source.init -> void	0.2.0-dev.29	0.2.4
 managed	Kiln.Items	Kiln.StackEquipment.StackEquipment(Kiln.ItemId Item, Kiln.SlotId Source, int ExpectedCount) -> void	0.2.0-dev.29	0.2.4
+managed	Kiln.Items	Kiln.StorageDeath	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.StorageDeath.FollowGame = 2 -> Kiln.StorageDeath	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.StorageDeath.Grave = 1 -> Kiln.StorageDeath	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.StorageDeath.Keep = 0 -> Kiln.StorageDeath	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.StorageFilter	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.StorageFilter.And(Kiln.StorageFilter other) -> Kiln.StorageFilter	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.StorageFilter.Equals(Kiln.StorageFilter other) -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.StorageFilter.NoItemEntities() -> Kiln.StorageFilter	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	Kiln.StorageFilter.StorageFilter() -> void	0.2.0-dev.30.7	0.2.16
 managed	Kiln.Items	Kiln.ToolDurabilityChangedEvent	0.2.0-dev.28	0.2.3
 managed	Kiln.Items	Kiln.ToolDurabilityChangedEvent.Actor.get -> Kiln.EntityId	0.2.0-dev.28	0.2.3
 managed	Kiln.Items	Kiln.ToolDurabilityChangedEvent.After.get -> int	0.2.0-dev.28	0.2.3
@@ -15926,6 +16073,8 @@ managed	Kiln.Items	const Kiln.Items.ContainerNameMaxChars = 48 -> int	0.2.0-dev.
 managed	Kiln.Items	const Kiln.Items.Fuel.UnitsPerCharge = 64 -> int	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	const Kiln.Items.MaxScale = 100 -> double	0.2.0-dev.30	0.2.12
 managed	Kiln.Items	const Kiln.Items.MinScale = 0.01 -> double	0.2.0-dev.30	0.2.12
+managed	Kiln.Items	const Kiln.PlayerStorage.Capability = "items.storage" -> string!	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	const Kiln.PlayerStorage.Client.Capability = "items.storage.client" -> string!	0.2.0-dev.30.7	0.2.16
 managed	Kiln.Items	const Kiln.UpgradeStep.DefaultChance = 1 -> double	0.2.0-dev.30	0.2.12
 managed	Kiln.Items	const Kiln.UpgradeStep.DefaultOnFail = Kiln.UpgradeFail.KeepItemLoseCost -> Kiln.UpgradeFail	0.2.0-dev.30	0.2.12
 managed	Kiln.Items	override Kiln.ClientTransfer.GetHashCode() -> int	<=0.2.0-dev.26	<=0.2.1
@@ -16049,9 +16198,26 @@ managed	Kiln.Items	override Kiln.MoveChange.GetHashCode() -> int	<=0.2.0-dev.26	
 managed	Kiln.Items	override Kiln.MoveResult.Equals(object? obj) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	override Kiln.MoveResult.GetHashCode() -> int	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	override Kiln.MoveResult.ToString() -> string!	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Items	override Kiln.OrphanTarget.GetHashCode() -> int	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	override Kiln.OrphanTarget.ToString() -> string!	0.2.0-dev.30.7	0.2.16
 managed	Kiln.Items	override Kiln.PerkSlot.Equals(object? obj) -> bool	0.2.0-dev.30	0.2.12
 managed	Kiln.Items	override Kiln.PerkSlot.GetHashCode() -> int	0.2.0-dev.30	0.2.12
 managed	Kiln.Items	override Kiln.PerkSlot.ToString() -> string!	0.2.0-dev.30	0.2.12
+managed	Kiln.Items	override Kiln.PlayerStorage.ToString() -> string!	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	override Kiln.PlayerStorageAmmoOptions.Equals(object? obj) -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	override Kiln.PlayerStorageAmmoOptions.GetHashCode() -> int	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	override Kiln.PlayerStorageAmmoOptions.ToString() -> string!	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	override Kiln.PlayerStorageAmmoProvider.ToString() -> string!	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	override Kiln.PlayerStorageDeathEvent.ToString() -> string!	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	override Kiln.PlayerStorageInfo.Equals(object? obj) -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	override Kiln.PlayerStorageInfo.GetHashCode() -> int	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	override Kiln.PlayerStorageInfo.ToString() -> string!	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	override Kiln.PlayerStorageParkedEvent.ToString() -> string!	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	override Kiln.PlayerStorageRestoredEvent.ToString() -> string!	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	override Kiln.PlayerStorageRow.GetHashCode() -> int	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	override Kiln.PlayerStorageStatus.Equals(object? obj) -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	override Kiln.PlayerStorageStatus.GetHashCode() -> int	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	override Kiln.PlayerStorageStatus.ToString() -> string!	0.2.0-dev.30.7	0.2.16
 managed	Kiln.Items	override Kiln.RarityUpgradeRule.Equals(object? obj) -> bool	0.2.0-dev.30	0.2.12
 managed	Kiln.Items	override Kiln.RarityUpgradeRule.GetHashCode() -> int	0.2.0-dev.30	0.2.12
 managed	Kiln.Items	override Kiln.RarityUpgradeRule.ToString() -> string!	0.2.0-dev.30	0.2.12
@@ -16069,6 +16235,8 @@ managed	Kiln.Items	override Kiln.StackEquipment.<Clone>$() -> Kiln.StackEquipmen
 managed	Kiln.Items	override Kiln.StackEquipment.Equals(object? obj) -> bool	0.2.0-dev.29	0.2.4
 managed	Kiln.Items	override Kiln.StackEquipment.GetHashCode() -> int	0.2.0-dev.29	0.2.4
 managed	Kiln.Items	override Kiln.StackEquipment.ToString() -> string!	0.2.0-dev.29	0.2.4
+managed	Kiln.Items	override Kiln.StorageFilter.GetHashCode() -> int	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	override Kiln.StorageFilter.ToString() -> string!	0.2.0-dev.30.7	0.2.16
 managed	Kiln.Items	override Kiln.ToolWearResult.Equals(object? obj) -> bool	0.2.0-dev.28	0.2.3
 managed	Kiln.Items	override Kiln.ToolWearResult.GetHashCode() -> int	0.2.0-dev.28	0.2.3
 managed	Kiln.Items	override Kiln.ToolWearResult.ToString() -> string!	0.2.0-dev.28	0.2.3
@@ -16211,10 +16379,13 @@ managed	Kiln.Items	static Kiln.Items.Move(Kiln.EntityId from, Kiln.SlotId slot, 
 managed	Kiln.Items	static Kiln.Items.MoveAll(Kiln.EntityId from, Kiln.EntityId to, Kiln.MoveOptions options = Kiln.MoveOptions.None) -> System.Threading.Tasks.Task<Kiln.MoveResult!>!	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	static Kiln.Items.MovesAvailable.get -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	static Kiln.Items.PlanSet(Kiln.EntityId player, Kiln.EquipmentSet! set) -> Kiln.EquipmentSetPlanResult!	0.2.0-dev.29	0.2.4
+managed	Kiln.Items	static Kiln.Items.PlayerStorages.Of(Kiln.EntityId player) -> System.Collections.Generic.IReadOnlyList<Kiln.PlayerStorageInfo!>!	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	static Kiln.Items.PlayerStorages.ReturnOrphans(Kiln.EntityId player, string! fullKey, Kiln.OrphanTarget target) -> System.Threading.Tasks.Task<Kiln.MoveResult!>!	0.2.0-dev.30.7	0.2.16
 managed	Kiln.Items	static Kiln.Items.PowerAvailable.get -> bool	0.2.0-dev.30	0.2.12
 managed	Kiln.Items	static Kiln.Items.QuickStack(Kiln.EntityId from, Kiln.EntityId to, Kiln.MoveOptions options = Kiln.MoveOptions.None) -> System.Threading.Tasks.Task<Kiln.MoveResult!>!	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	static Kiln.Items.RarityOf(Kiln.ItemInstanceRef item) -> Kiln.ItemRarity?	0.2.0-dev.30	0.2.12
 managed	Kiln.Items	static Kiln.Items.Read(Kiln.EntityId entity) -> Kiln.InventoryContents?	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Items	static Kiln.Items.RegisterPlayerStorage(string! key, int slots, Kiln.StorageFilter filter, Kiln.StorageDeath death = Kiln.StorageDeath.Keep) -> Kiln.PlayerStorage!	0.2.0-dev.30.7	0.2.16
 managed	Kiln.Items	static Kiln.Items.ResultPeekAvailable.get -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	static Kiln.Items.Search(string! text, int max = 25) -> System.Collections.Generic.IReadOnlyList<Kiln.ItemInfo!>!	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	static Kiln.Items.SetArmor(Kiln.ItemInstanceRef item, double scale) -> Kiln.GearValuesResult!	0.2.0-dev.30	0.2.12
@@ -16252,8 +16423,24 @@ managed	Kiln.Items	static Kiln.MoveChange.operator !=(Kiln.MoveChange left, Kiln
 managed	Kiln.Items	static Kiln.MoveChange.operator ==(Kiln.MoveChange left, Kiln.MoveChange right) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	static Kiln.MoveResult.operator !=(Kiln.MoveResult? left, Kiln.MoveResult? right) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	static Kiln.MoveResult.operator ==(Kiln.MoveResult? left, Kiln.MoveResult? right) -> bool	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Items	static Kiln.OrphanTarget.Backpack.get -> Kiln.OrphanTarget	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	static Kiln.OrphanTarget.Into(Kiln.EntityId container) -> Kiln.OrphanTarget	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	static Kiln.OrphanTarget.operator !=(Kiln.OrphanTarget left, Kiln.OrphanTarget right) -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	static Kiln.OrphanTarget.operator ==(Kiln.OrphanTarget left, Kiln.OrphanTarget right) -> bool	0.2.0-dev.30.7	0.2.16
 managed	Kiln.Items	static Kiln.PerkSlot.operator !=(Kiln.PerkSlot? left, Kiln.PerkSlot? right) -> bool	0.2.0-dev.30	0.2.12
 managed	Kiln.Items	static Kiln.PerkSlot.operator ==(Kiln.PerkSlot? left, Kiln.PerkSlot? right) -> bool	0.2.0-dev.30	0.2.12
+managed	Kiln.Items	static Kiln.PlayerStorage.Available.get -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	static Kiln.PlayerStorage.Client.Available.get -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	static Kiln.PlayerStorage.Client.ProvideAmmo(string! fullKey, Kiln.AmmoKinds kinds, Kiln.PlayerStorageAmmoOptions? options = null) -> Kiln.PlayerStorageAmmoProvider!	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	static Kiln.PlayerStorage.Client.Rows(string! fullKey) -> System.Collections.Generic.IReadOnlyList<Kiln.PlayerStorageRow>!	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	static Kiln.PlayerStorageAmmoOptions.operator !=(Kiln.PlayerStorageAmmoOptions? left, Kiln.PlayerStorageAmmoOptions? right) -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	static Kiln.PlayerStorageAmmoOptions.operator ==(Kiln.PlayerStorageAmmoOptions? left, Kiln.PlayerStorageAmmoOptions? right) -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	static Kiln.PlayerStorageInfo.operator !=(Kiln.PlayerStorageInfo? left, Kiln.PlayerStorageInfo? right) -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	static Kiln.PlayerStorageInfo.operator ==(Kiln.PlayerStorageInfo? left, Kiln.PlayerStorageInfo? right) -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	static Kiln.PlayerStorageRow.operator !=(Kiln.PlayerStorageRow left, Kiln.PlayerStorageRow right) -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	static Kiln.PlayerStorageRow.operator ==(Kiln.PlayerStorageRow left, Kiln.PlayerStorageRow right) -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	static Kiln.PlayerStorageStatus.operator !=(Kiln.PlayerStorageStatus? left, Kiln.PlayerStorageStatus? right) -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	static Kiln.PlayerStorageStatus.operator ==(Kiln.PlayerStorageStatus? left, Kiln.PlayerStorageStatus? right) -> bool	0.2.0-dev.30.7	0.2.16
 managed	Kiln.Items	static Kiln.RarityUpgradeRule.operator !=(Kiln.RarityUpgradeRule? left, Kiln.RarityUpgradeRule? right) -> bool	0.2.0-dev.30	0.2.12
 managed	Kiln.Items	static Kiln.RarityUpgradeRule.operator ==(Kiln.RarityUpgradeRule? left, Kiln.RarityUpgradeRule? right) -> bool	0.2.0-dev.30	0.2.12
 managed	Kiln.Items	static Kiln.SetEquipmentChange.operator !=(Kiln.SetEquipmentChange? left, Kiln.SetEquipmentChange? right) -> bool	0.2.0-dev.29	0.2.4
@@ -16265,6 +16452,13 @@ managed	Kiln.Items	static Kiln.SlotId.operator !=(Kiln.SlotId left, Kiln.SlotId 
 managed	Kiln.Items	static Kiln.SlotId.operator ==(Kiln.SlotId left, Kiln.SlotId right) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	static Kiln.StackEquipment.operator !=(Kiln.StackEquipment? left, Kiln.StackEquipment? right) -> bool	0.2.0-dev.29	0.2.4
 managed	Kiln.Items	static Kiln.StackEquipment.operator ==(Kiln.StackEquipment? left, Kiln.StackEquipment? right) -> bool	0.2.0-dev.29	0.2.4
+managed	Kiln.Items	static Kiln.StorageFilter.Ammunition(Kiln.AmmoKinds kinds) -> Kiln.StorageFilter	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	static Kiln.StorageFilter.Any.get -> Kiln.StorageFilter	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	static Kiln.StorageFilter.Categories(params Kiln.ItemCategory[]! categories) -> Kiln.StorageFilter	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	static Kiln.StorageFilter.Items(params Kiln.ItemId[]! items) -> Kiln.StorageFilter	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	static Kiln.StorageFilter.Where(System.Func<Kiln.ItemInfo!, bool>! pick) -> Kiln.StorageFilter	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	static Kiln.StorageFilter.operator !=(Kiln.StorageFilter left, Kiln.StorageFilter right) -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	static Kiln.StorageFilter.operator ==(Kiln.StorageFilter left, Kiln.StorageFilter right) -> bool	0.2.0-dev.30.7	0.2.16
 managed	Kiln.Items	static Kiln.ToolWearResult.operator !=(Kiln.ToolWearResult? left, Kiln.ToolWearResult? right) -> bool	0.2.0-dev.28	0.2.3
 managed	Kiln.Items	static Kiln.ToolWearResult.operator ==(Kiln.ToolWearResult? left, Kiln.ToolWearResult? right) -> bool	0.2.0-dev.28	0.2.3
 managed	Kiln.Items	static Kiln.ToolWearState.operator !=(Kiln.ToolWearState? left, Kiln.ToolWearState? right) -> bool	0.2.0-dev.28	0.2.3
@@ -16298,7 +16492,11 @@ managed	Kiln.Items	~override Kiln.ItemId.Equals(object obj) -> bool (forwarded, 
 managed	Kiln.Items	~override Kiln.ItemLocation.Equals(object obj) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	~override Kiln.MoveChange.Equals(object obj) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Items	~override Kiln.MoveChange.ToString() -> string	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Items	~override Kiln.OrphanTarget.Equals(object obj) -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	~override Kiln.PlayerStorageRow.Equals(object obj) -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Items	~override Kiln.PlayerStorageRow.ToString() -> string	0.2.0-dev.30.7	0.2.16
 managed	Kiln.Items	~override Kiln.SlotId.Equals(object obj) -> bool	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Items	~override Kiln.StorageFilter.Equals(object obj) -> bool	0.2.0-dev.30.7	0.2.16
 managed	Kiln.Network	Kiln.ConfigSync	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Network	Kiln.ConfigSyncedEvent	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Network	Kiln.ConfigSyncedEvent.Changed.get -> System.Collections.Generic.IReadOnlyList<string!>!	<=0.2.0-dev.26	<=0.2.1
@@ -21374,6 +21572,8 @@ managed	Kiln.Saves	Kiln.CharacterSettings.MaxKeys.get -> int	<=0.2.0-dev.26	<=0.
 managed	Kiln.Saves	Kiln.CharacterSettings.MaxKeys.init -> void	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Saves	Kiln.CharacterSettings.MaxValueBytes.get -> int	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Saves	Kiln.CharacterSettings.MaxValueBytes.init -> void	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Saves	Kiln.CharacterSettings.Storage.get -> Kiln.PlayerStorageSettings!	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Saves	Kiln.CharacterSettings.Storage.init -> void	0.2.0-dev.30.7	0.2.16
 managed	Kiln.Saves	Kiln.CharacterSyncStatus	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Saves	Kiln.CharacterSyncStatus.<Clone>$() -> Kiln.CharacterSyncStatus!	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Saves	Kiln.CharacterSyncStatus.ChannelOpen.get -> bool	<=0.2.0-dev.26	<=0.2.1
@@ -21508,6 +21708,10 @@ managed	Kiln.Saves	Kiln.Persist.Carried = 1 -> Kiln.Persist	<=0.2.0-dev.26	<=0.2
 managed	Kiln.Saves	Kiln.Persist.Session = 2 -> Kiln.Persist	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Saves	Kiln.Persist.World = 0 -> Kiln.Persist	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Saves	Kiln.PlayerData	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Saves	Kiln.PlayerStorageSettings	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Saves	Kiln.PlayerStorageSettings.PlayerStorageSettings() -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Saves	Kiln.PlayerStorageSettings.TrustClient.get -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.Saves	Kiln.PlayerStorageSettings.TrustClient.init -> void	0.2.0-dev.30.7	0.2.16
 managed	Kiln.Saves	Kiln.SaveReason	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Saves	Kiln.SaveReason.Autosave = 1 -> Kiln.SaveReason	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Saves	Kiln.SaveReason.Backup = 5 -> Kiln.SaveReason	<=0.2.0-dev.26	<=0.2.1
@@ -21754,6 +21958,7 @@ managed	Kiln.Saves	static Kiln.Saves.Backups.get -> System.Collections.Generic.I
 managed	Kiln.Saves	static Kiln.Saves.CancelRestore() -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Saves	static Kiln.Saves.DataDirectory.get -> string?	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Saves	static Kiln.Saves.PendingRestore.get -> string?	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.Saves	static Kiln.Saves.PlayerStoragePersistenceFailure.get -> string?	0.2.0-dev.30.7	0.2.16
 managed	Kiln.Saves	static Kiln.Saves.Request() -> System.Threading.Tasks.Task<Kiln.SaveResult!>!	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Saves	static Kiln.Saves.RestoreOnNextStart(string! name) -> Kiln.BackupInfo!	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Saves	static Kiln.Saves.SaveDirectory.get -> string?	<=0.2.0-dev.26	<=0.2.1
@@ -23868,6 +24073,10 @@ managed	Kiln.TestKit	Kiln.TestKit.FakeVoxelRay.To.get -> Kiln.WorldPosition	0.2.
 managed	Kiln.TestKit	Kiln.TestKit.FakeVoxelRay.To.init -> void	0.2.0-dev.28	0.2.3
 managed	Kiln.TestKit	Kiln.TestKit.FakeWorld	0.2.0-dev.27	0.2.2
 managed	Kiln.TestKit	Kiln.TestKit.FakeWorld.All.get -> System.Collections.Generic.IReadOnlyList<Kiln.EntityId>!	0.2.0-dev.27	0.2.2
+managed	Kiln.TestKit	Kiln.TestKit.FakeWorld.BusyReads.get -> int	0.2.0-dev.30.7	0.2.16
+managed	Kiln.TestKit	Kiln.TestKit.FakeWorld.BusyReads.set -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.TestKit	Kiln.TestKit.FakeWorld.BusyWrites.get -> int	0.2.0-dev.30.7	0.2.16
+managed	Kiln.TestKit	Kiln.TestKit.FakeWorld.BusyWrites.set -> void	0.2.0-dev.30.7	0.2.16
 managed	Kiln.TestKit	Kiln.TestKit.FakeWorld.Create() -> Kiln.EntityId	0.2.0-dev.27	0.2.2
 managed	Kiln.TestKit	Kiln.TestKit.FakeWorld.Create(Kiln.WorldPosition position) -> Kiln.EntityId	0.2.0-dev.27	0.2.2
 managed	Kiln.TestKit	Kiln.TestKit.FakeWorld.Destroy(Kiln.EntityId entity) -> bool	0.2.0-dev.27	0.2.2
@@ -23996,6 +24205,17 @@ managed	Kiln.TestKit	Kiln.TestKit.HarnessOutlines.SetState(Kiln.WorldOutline! ou
 managed	Kiln.TestKit	Kiln.TestKit.HarnessOutlines.Setting.get -> Kiln.TestKit.FakeOutlineSetting	0.2.0-dev.30.3	0.2.13
 managed	Kiln.TestKit	Kiln.TestKit.HarnessOutlines.Setting.set -> void	0.2.0-dev.30.3	0.2.13
 managed	Kiln.TestKit	Kiln.TestKit.HarnessOutlines.Showing(Kiln.EntityId entity) -> Kiln.TestKit.FakeOutline?	0.2.0-dev.30.3	0.2.13
+managed	Kiln.TestKit	Kiln.TestKit.HarnessPlayerStorage	0.2.0-dev.30.7	0.2.16
+managed	Kiln.TestKit	Kiln.TestKit.HarnessPlayerStorage.Apply(Kiln.TestKit.FakePlayer! player) -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.TestKit	Kiln.TestKit.HarnessPlayerStorage.Capture(Kiln.TestKit.FakePlayer! player, ulong witness) -> ulong	0.2.0-dev.30.7	0.2.16
+managed	Kiln.TestKit	Kiln.TestKit.HarnessPlayerStorage.CapturesDone() -> ulong	0.2.0-dev.30.7	0.2.16
+managed	Kiln.TestKit	Kiln.TestKit.HarnessPlayerStorage.Die(Kiln.TestKit.FakePlayer! player, Kiln.EntityId tombstone, Kiln.TestKit.HarnessTombstoneMode mode = Kiln.TestKit.HarnessTombstoneMode.AddBackpackMaterials) -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.TestKit	Kiln.TestKit.HarnessPlayerStorage.Join(Kiln.TestKit.FakePlayer! player, ulong witness = 1) -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.TestKit	Kiln.TestKit.HarnessPlayerStorage.JoinAndRestore(Kiln.TestKit.FakePlayer! player, params Kiln.TestKit.HarnessStorageCopy![]! storages) -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.TestKit	Kiln.TestKit.HarnessPlayerStorage.Leave(Kiln.TestKit.FakePlayer! player) -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.TestKit	Kiln.TestKit.HarnessPlayerStorage.Parked(Kiln.TestKit.FakePlayer! player, string! fullKey) -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.HarnessStorageRecord>!	0.2.0-dev.30.7	0.2.16
+managed	Kiln.TestKit	Kiln.TestKit.HarnessPlayerStorage.Quarantined(Kiln.TestKit.FakePlayer! player, string! fullKey) -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.HarnessStorageRecord>!	0.2.0-dev.30.7	0.2.16
+managed	Kiln.TestKit	Kiln.TestKit.HarnessPlayerStorage.Restore(Kiln.TestKit.FakePlayer! player, Kiln.PlayerStorageSource source = Kiln.PlayerStorageSource.New, bool paired = false, long revision = 0, params Kiln.TestKit.HarnessStorageCopy![]! storages) -> void	0.2.0-dev.30.7	0.2.16
 managed	Kiln.TestKit	Kiln.TestKit.HarnessPlayers	0.2.0-dev.26	0.2.1
 managed	Kiln.TestKit	Kiln.TestKit.HarnessPlayers.All.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.FakePlayer!>!	0.2.0-dev.26	0.2.1
 managed	Kiln.TestKit	Kiln.TestKit.HarnessPlayers.Join(string! name, ulong steamId = 0, Kiln.PlayerPermissions rights = Kiln.PlayerPermissions.None, bool isAdmin = false, Kiln.WorldPosition? position = null, uint userGroupId = 0) -> Kiln.TestKit.FakePlayer!	0.2.0-dev.26	0.2.1
@@ -24036,6 +24256,32 @@ managed	Kiln.TestKit	Kiln.TestKit.HarnessState.Running = 2 -> Kiln.TestKit.Harne
 managed	Kiln.TestKit	Kiln.TestKit.HarnessState.Starting = 1 -> Kiln.TestKit.HarnessState	0.2.0-dev.26	0.2.1
 managed	Kiln.TestKit	Kiln.TestKit.HarnessState.Stopped = 3 -> Kiln.TestKit.HarnessState	0.2.0-dev.26	0.2.1
 managed	Kiln.TestKit	Kiln.TestKit.HarnessStoppedException	0.2.0-dev.26	0.2.1
+managed	Kiln.TestKit	Kiln.TestKit.HarnessStorageCopy	0.2.0-dev.30.7	0.2.16
+managed	Kiln.TestKit	Kiln.TestKit.HarnessStorageCopy.<Clone>$() -> Kiln.TestKit.HarnessStorageCopy!	0.2.0-dev.30.7	0.2.16
+managed	Kiln.TestKit	Kiln.TestKit.HarnessStorageCopy.Deconstruct(out string! FullKey, out int Slots, out System.Collections.Generic.IReadOnlyList<Kiln.TestKit.HarnessStorageRecord>! Records, out bool Parked) -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.TestKit	Kiln.TestKit.HarnessStorageCopy.Equals(Kiln.TestKit.HarnessStorageCopy? other) -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.TestKit	Kiln.TestKit.HarnessStorageCopy.FullKey.get -> string!	0.2.0-dev.30.7	0.2.16
+managed	Kiln.TestKit	Kiln.TestKit.HarnessStorageCopy.FullKey.init -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.TestKit	Kiln.TestKit.HarnessStorageCopy.HarnessStorageCopy(string! FullKey, int Slots, System.Collections.Generic.IReadOnlyList<Kiln.TestKit.HarnessStorageRecord>! Records, bool Parked = false) -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.TestKit	Kiln.TestKit.HarnessStorageCopy.Parked.get -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.TestKit	Kiln.TestKit.HarnessStorageCopy.Parked.init -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.TestKit	Kiln.TestKit.HarnessStorageCopy.Records.get -> System.Collections.Generic.IReadOnlyList<Kiln.TestKit.HarnessStorageRecord>!	0.2.0-dev.30.7	0.2.16
+managed	Kiln.TestKit	Kiln.TestKit.HarnessStorageCopy.Records.init -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.TestKit	Kiln.TestKit.HarnessStorageCopy.Slots.get -> int	0.2.0-dev.30.7	0.2.16
+managed	Kiln.TestKit	Kiln.TestKit.HarnessStorageCopy.Slots.init -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.TestKit	Kiln.TestKit.HarnessStorageRecord	0.2.0-dev.30.7	0.2.16
+managed	Kiln.TestKit	Kiln.TestKit.HarnessStorageRecord.Count.get -> int	0.2.0-dev.30.7	0.2.16
+managed	Kiln.TestKit	Kiln.TestKit.HarnessStorageRecord.Count.init -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.TestKit	Kiln.TestKit.HarnessStorageRecord.Deconstruct(out int Slot, out Kiln.ItemId Item, out int Count, out int Level) -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.TestKit	Kiln.TestKit.HarnessStorageRecord.Equals(Kiln.TestKit.HarnessStorageRecord other) -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.TestKit	Kiln.TestKit.HarnessStorageRecord.HarnessStorageRecord() -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.TestKit	Kiln.TestKit.HarnessStorageRecord.HarnessStorageRecord(int Slot, Kiln.ItemId Item, int Count, int Level = 0) -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.TestKit	Kiln.TestKit.HarnessStorageRecord.Item.get -> Kiln.ItemId	0.2.0-dev.30.7	0.2.16
+managed	Kiln.TestKit	Kiln.TestKit.HarnessStorageRecord.Item.init -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.TestKit	Kiln.TestKit.HarnessStorageRecord.Level.get -> int	0.2.0-dev.30.7	0.2.16
+managed	Kiln.TestKit	Kiln.TestKit.HarnessStorageRecord.Level.init -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.TestKit	Kiln.TestKit.HarnessStorageRecord.Slot.get -> int	0.2.0-dev.30.7	0.2.16
+managed	Kiln.TestKit	Kiln.TestKit.HarnessStorageRecord.Slot.init -> void	0.2.0-dev.30.7	0.2.16
 managed	Kiln.TestKit	Kiln.TestKit.HarnessTasks	0.2.0-dev.29.18	0.2.10
 managed	Kiln.TestKit	Kiln.TestKit.HarnessTasks.Live.get -> int	0.2.0-dev.29.18	0.2.10
 managed	Kiln.TestKit	Kiln.TestKit.HarnessTasks.Settle(int maxSteps = 1000, System.TimeSpan? timeout = null) -> int	0.2.0-dev.29.18	0.2.10
@@ -24067,6 +24313,10 @@ managed	Kiln.TestKit	Kiln.TestKit.HarnessTime.NightLength.get -> System.TimeSpan
 managed	Kiln.TestKit	Kiln.TestKit.HarnessTime.NightLength.set -> void	0.2.0-dev.27	0.2.2
 managed	Kiln.TestKit	Kiln.TestKit.HarnessTime.Set(double hours) -> void	0.2.0-dev.27	0.2.2
 managed	Kiln.TestKit	Kiln.TestKit.HarnessTime.Speed.get -> double	0.2.0-dev.27	0.2.2
+managed	Kiln.TestKit	Kiln.TestKit.HarnessTombstoneMode	0.2.0-dev.30.7	0.2.16
+managed	Kiln.TestKit	Kiln.TestKit.HarnessTombstoneMode.AddBackpackMaterials = 0 -> Kiln.TestKit.HarnessTombstoneMode	0.2.0-dev.30.7	0.2.16
+managed	Kiln.TestKit	Kiln.TestKit.HarnessTombstoneMode.Everything = 1 -> Kiln.TestKit.HarnessTombstoneMode	0.2.0-dev.30.7	0.2.16
+managed	Kiln.TestKit	Kiln.TestKit.HarnessTombstoneMode.NoTombstone = 2 -> Kiln.TestKit.HarnessTombstoneMode	0.2.0-dev.30.7	0.2.16
 managed	Kiln.TestKit	Kiln.TestKit.HarnessUiInventory	0.2.0-dev.30	0.2.12
 managed	Kiln.TestKit	Kiln.TestKit.HarnessUiInventory.Click(int index, Kiln.SlotButton button = Kiln.SlotButton.Left, Kiln.SlotModifiers modifiers = Kiln.SlotModifiers.None) -> Kiln.TestKit.FakeSlotClickResult	0.2.0-dev.30	0.2.12
 managed	Kiln.TestKit	Kiln.TestKit.HarnessUiInventory.ClickSubscriptions.get -> int	0.2.0-dev.30	0.2.12
@@ -24154,6 +24404,7 @@ managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.Mod(string! id) -> Kiln.TestKit.Mo
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.ModsDirectory.get -> string!	0.2.0-dev.26	0.2.1
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.OnMainThread(System.Action! work) -> void	0.2.0-dev.29.18	0.2.10
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.Outlines.get -> Kiln.TestKit.HarnessOutlines!	0.2.0-dev.30.3	0.2.13
+managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.PlayerStorage.get -> Kiln.TestKit.HarnessPlayerStorage!	0.2.0-dev.30.7	0.2.16
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.Players.get -> Kiln.TestKit.HarnessPlayers!	0.2.0-dev.26	0.2.1
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.Programs.get -> Kiln.TestKit.HarnessPrograms!	0.2.0-dev.29	0.2.4
 managed	Kiln.TestKit	Kiln.TestKit.KilnHarness.Queries.get -> Kiln.TestKit.HarnessQueries!	0.2.0-dev.28	0.2.3
@@ -24383,6 +24634,10 @@ managed	Kiln.TestKit	override Kiln.TestKit.FakeVoxelRay.GetHashCode() -> int	0.2
 managed	Kiln.TestKit	override Kiln.TestKit.FakeWorldWrite.Equals(object? obj) -> bool	0.2.0-dev.27	0.2.2
 managed	Kiln.TestKit	override Kiln.TestKit.FakeWorldWrite.GetHashCode() -> int	0.2.0-dev.27	0.2.2
 managed	Kiln.TestKit	override Kiln.TestKit.FakeWorldWrite.ToString() -> string!	0.2.0-dev.27	0.2.2
+managed	Kiln.TestKit	override Kiln.TestKit.HarnessStorageCopy.Equals(object? obj) -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.TestKit	override Kiln.TestKit.HarnessStorageCopy.GetHashCode() -> int	0.2.0-dev.30.7	0.2.16
+managed	Kiln.TestKit	override Kiln.TestKit.HarnessStorageCopy.ToString() -> string!	0.2.0-dev.30.7	0.2.16
+managed	Kiln.TestKit	override Kiln.TestKit.HarnessStorageRecord.GetHashCode() -> int	0.2.0-dev.30.7	0.2.16
 managed	Kiln.TestKit	override Kiln.TestKit.KilnTestResult.Equals(object? obj) -> bool	0.2.0-dev.26	0.2.1
 managed	Kiln.TestKit	override Kiln.TestKit.KilnTestResult.GetHashCode() -> int	0.2.0-dev.26	0.2.1
 managed	Kiln.TestKit	override Kiln.TestKit.KilnTestResult.ToString() -> string!	0.2.0-dev.26	0.2.1
@@ -24459,6 +24714,10 @@ managed	Kiln.TestKit	static Kiln.TestKit.FakeVoxelRay.operator !=(Kiln.TestKit.F
 managed	Kiln.TestKit	static Kiln.TestKit.FakeVoxelRay.operator ==(Kiln.TestKit.FakeVoxelRay left, Kiln.TestKit.FakeVoxelRay right) -> bool	0.2.0-dev.28	0.2.3
 managed	Kiln.TestKit	static Kiln.TestKit.FakeWorldWrite.operator !=(Kiln.TestKit.FakeWorldWrite? left, Kiln.TestKit.FakeWorldWrite? right) -> bool	0.2.0-dev.27	0.2.2
 managed	Kiln.TestKit	static Kiln.TestKit.FakeWorldWrite.operator ==(Kiln.TestKit.FakeWorldWrite? left, Kiln.TestKit.FakeWorldWrite? right) -> bool	0.2.0-dev.27	0.2.2
+managed	Kiln.TestKit	static Kiln.TestKit.HarnessStorageCopy.operator !=(Kiln.TestKit.HarnessStorageCopy? left, Kiln.TestKit.HarnessStorageCopy? right) -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.TestKit	static Kiln.TestKit.HarnessStorageCopy.operator ==(Kiln.TestKit.HarnessStorageCopy? left, Kiln.TestKit.HarnessStorageCopy? right) -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.TestKit	static Kiln.TestKit.HarnessStorageRecord.operator !=(Kiln.TestKit.HarnessStorageRecord left, Kiln.TestKit.HarnessStorageRecord right) -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.TestKit	static Kiln.TestKit.HarnessStorageRecord.operator ==(Kiln.TestKit.HarnessStorageRecord left, Kiln.TestKit.HarnessStorageRecord right) -> bool	0.2.0-dev.30.7	0.2.16
 managed	Kiln.TestKit	static Kiln.TestKit.KilnHarness.ListTests(System.Reflection.Assembly! assembly) -> System.Collections.Generic.IReadOnlyList<string!>!	0.2.0-dev.26	0.2.1
 managed	Kiln.TestKit	static Kiln.TestKit.KilnTestOptions.Default.get -> Kiln.TestKit.KilnTestOptions!	0.2.0-dev.26	0.2.1
 managed	Kiln.TestKit	static Kiln.TestKit.KilnTestResult.operator !=(Kiln.TestKit.KilnTestResult? left, Kiln.TestKit.KilnTestResult? right) -> bool	0.2.0-dev.26	0.2.1
@@ -24497,6 +24756,8 @@ managed	Kiln.TestKit	~override Kiln.TestKit.FakeVoxelAnswer.Equals(object obj) -
 managed	Kiln.TestKit	~override Kiln.TestKit.FakeVoxelAnswer.ToString() -> string	0.2.0-dev.28	0.2.3
 managed	Kiln.TestKit	~override Kiln.TestKit.FakeVoxelRay.Equals(object obj) -> bool	0.2.0-dev.28	0.2.3
 managed	Kiln.TestKit	~override Kiln.TestKit.FakeVoxelRay.ToString() -> string	0.2.0-dev.28	0.2.3
+managed	Kiln.TestKit	~override Kiln.TestKit.HarnessStorageRecord.Equals(object obj) -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.TestKit	~override Kiln.TestKit.HarnessStorageRecord.ToString() -> string	0.2.0-dev.30.7	0.2.16
 managed	Kiln.Testing	Kiln.Testing.Assert	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Testing	Kiln.Testing.AssertionException	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.Testing	Kiln.Testing.AssertionException.AssertionException(string! message) -> void	<=0.2.0-dev.26	<=0.2.1
@@ -27212,6 +27473,21 @@ managed	Kiln.World	Kiln.ClientComponentWrittenEvent.Involves(Kiln.EntityId entit
 managed	Kiln.World	Kiln.ClientComponentWrittenEvent.World.get -> Kiln.WorldKind	0.2.0-dev.29	0.2.4
 managed	Kiln.World	Kiln.ClientComponentWrittenEvent.Writer.get -> string!	0.2.0-dev.29	0.2.4
 managed	Kiln.World	Kiln.ComponentChanges	0.2.0-dev.29	0.2.4
+managed	Kiln.World	Kiln.ComponentExchangedEvent	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ComponentExchangedEvent.ComponentExchangedEvent(Kiln.EntityId entity, uint generation, uint componentHash, ulong session, ulong step, string? mod) -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ComponentExchangedEvent.ComponentHash.get -> uint	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ComponentExchangedEvent.Entity.get -> Kiln.EntityId	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ComponentExchangedEvent.Generation.get -> uint	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ComponentExchangedEvent.Involves(Kiln.EntityId entity) -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ComponentExchangedEvent.Is(string! component) -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ComponentExchangedEvent.Mod.get -> string?	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ComponentExchangedEvent.Session.get -> ulong	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ComponentExchangedEvent.Step.get -> ulong	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ComponentExchangedEvent.World.get -> Kiln.WorldKind	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ComponentSet	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ComponentSet.ComponentSet(params string![]! components) -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ComponentSet.Count.get -> int	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ComponentSet.this[int index].get -> string!	0.2.0-dev.30.7	0.2.16
 managed	Kiln.World	Kiln.ComponentValueChangedEvent	0.2.0-dev.29	0.2.4
 managed	Kiln.World	Kiln.ComponentValueChangedEvent.After.get -> System.ReadOnlyMemory<byte>	0.2.0-dev.29	0.2.4
 managed	Kiln.World	Kiln.ComponentValueChangedEvent.Before.get -> System.ReadOnlyMemory<byte>	0.2.0-dev.29	0.2.4
@@ -27281,6 +27557,18 @@ managed	Kiln.World	Kiln.ComponentWatchStateChangedEvent.LastCompleteStep.get -> 
 managed	Kiln.World	Kiln.ComponentWatchStateChangedEvent.Reason.get -> string?	0.2.0-dev.29	0.2.4
 managed	Kiln.World	Kiln.ComponentWatchStateChangedEvent.State.get -> Kiln.ComponentWatchState	0.2.0-dev.29	0.2.4
 managed	Kiln.World	Kiln.ComponentWatchStateChangedEvent.WatchId.get -> ulong	0.2.0-dev.29	0.2.4
+managed	Kiln.World	Kiln.ComponentWritePolicy	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ComponentWritePolicy.Budget.get -> int	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ComponentWritePolicy.Component.get -> string!	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ComponentWritePolicy.ComponentWritePolicy() -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ComponentWritePolicy.IsPlain.get -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ComponentWritePolicy.IsTracked.get -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ComponentWritePolicy.IsWritable.get -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ComponentWritePolicy.Reason.get -> Kiln.WriteReason	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ComponentWritePolicy.Size.get -> int	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ComponentWritePolicy.Status.get -> Kiln.ExchangeStatus	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ComponentWritePolicy.Text.get -> string!	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ComponentWritePolicy.TrackingKnown.get -> bool	0.2.0-dev.30.7	0.2.16
 managed	Kiln.World	Kiln.ComponentWrittenEvent	0.2.0-dev.27	0.2.2
 managed	Kiln.World	Kiln.ComponentWrittenEvent.Component.get -> string!	0.2.0-dev.27	0.2.2
 managed	Kiln.World	Kiln.ComponentWrittenEvent.Entity.get -> Kiln.EntityId	0.2.0-dev.27	0.2.2
@@ -27289,6 +27577,46 @@ managed	Kiln.World	Kiln.ComponentWrittenEvent.ModId.get -> string?	0.2.0-dev.27	
 managed	Kiln.World	Kiln.ComponentWrittenEvent.Result.get -> Kiln.WorldWriteResult!	0.2.0-dev.27	0.2.2
 managed	Kiln.World	Kiln.ComponentWrittenEvent.Writer.get -> string?	0.2.0-dev.29	0.2.4
 managed	Kiln.World	Kiln.ComponentWrittenEvent.Writers.get -> System.Collections.Generic.IReadOnlyList<string!>!	0.2.0-dev.29	0.2.4
+managed	Kiln.World	Kiln.ConcurrentCopy	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ConcurrentCopy.ConcurrentCopy() -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ConcurrentCopy.Required.get -> int	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ConcurrentCopy.Status.get -> Kiln.ReadStatus	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ConcurrentCopy.Written.get -> int	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ConcurrentEntity	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ConcurrentEntity.ConcurrentEntity() -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ConcurrentEntity.Equals(Kiln.ConcurrentEntity other) -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ConcurrentEntity.Generation.get -> uint	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ConcurrentEntity.Id.get -> Kiln.EntityId	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ConcurrentEntity.IsNone.get -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ConcurrentEntity.Session.get -> ulong	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ConcurrentEntity.World.get -> Kiln.WorldKind	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ConcurrentQueryResult	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ConcurrentQueryResult.ConcurrentQueryResult() -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ConcurrentQueryResult.Count.get -> int	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ConcurrentQueryResult.Required.get -> int	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ConcurrentQueryResult.Status.get -> Kiln.ReadStatus	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ConcurrentRead<T>	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ConcurrentRead<T>.ConcurrentRead() -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ConcurrentRead<T>.IsOk.get -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ConcurrentRead<T>.Status.get -> Kiln.ReadStatus	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ConcurrentRead<T>.Value.get -> T	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ConcurrentSnapshot	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ConcurrentSnapshot.Bytes(int index) -> System.ReadOnlySpan<byte>	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ConcurrentSnapshot.Count.get -> int	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ConcurrentSnapshot.Status.get -> Kiln.ReadStatus	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ConcurrentSnapshot.StatusOf(int index) -> Kiln.ReadStatus	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ConcurrentSnapshot.TryGet<T>(int index, out T value) -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.EntityQuery	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.EntityQuery.Center.get -> Kiln.WorldPosition?	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.EntityQuery.Center.init -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.EntityQuery.Components.get -> System.Collections.Generic.IReadOnlyList<string!>!	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.EntityQuery.EntityQuery() -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.EntityQuery.EntityQuery(Kiln.WorldKind world, params string![]! components) -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.EntityQuery.Mode.get -> Kiln.ReadMode	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.EntityQuery.Mode.init -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.EntityQuery.Radius.get -> double	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.EntityQuery.Radius.init -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.EntityQuery.World.get -> Kiln.WorldKind	0.2.0-dev.30.7	0.2.16
 managed	Kiln.World	Kiln.EntityScaleChangedEvent	0.2.0-dev.28	0.2.3
 managed	Kiln.World	Kiln.EntityScaleChangedEvent.Before.get -> Kiln.Scale3	0.2.0-dev.28	0.2.3
 managed	Kiln.World	Kiln.EntityScaleChangedEvent.Entity.get -> Kiln.EntityId	0.2.0-dev.28	0.2.3
@@ -27343,6 +27671,41 @@ managed	Kiln.World	Kiln.EntityTransform.Rotation.init -> void	<=0.2.0-dev.26	<=0
 managed	Kiln.World	Kiln.EntityTransform.Scale.get -> System.Numerics.Vector3	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.World	Kiln.EntityTransform.Scale.init -> void	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.World	Kiln.EntityTransform.YawDegrees.get -> double	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.World	Kiln.ExchangeBytesResult	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ExchangeBytesResult.ExchangeBytesResult() -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ExchangeBytesResult.Flags.get -> Kiln.ExchangeFlags	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ExchangeBytesResult.HoldTime.get -> System.TimeSpan	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ExchangeBytesResult.IsOk.get -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ExchangeBytesResult.Reason.get -> Kiln.WriteReason	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ExchangeBytesResult.Status.get -> Kiln.ExchangeStatus	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ExchangeBytesResult.Written.get -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ExchangeFlags	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ExchangeFlags.Confirmed = 4 -> Kiln.ExchangeFlags	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ExchangeFlags.EventQueued = 32 -> Kiln.ExchangeFlags	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ExchangeFlags.NoOp = 2 -> Kiln.ExchangeFlags	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ExchangeFlags.None = 0 -> Kiln.ExchangeFlags	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ExchangeFlags.RolledBack = 8 -> Kiln.ExchangeFlags	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ExchangeFlags.TargetLatched = 16 -> Kiln.ExchangeFlags	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ExchangeFlags.Written = 1 -> Kiln.ExchangeFlags	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ExchangeResult<T>	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ExchangeResult<T>.Current.get -> T	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ExchangeResult<T>.ExchangeResult() -> void	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ExchangeResult<T>.Flags.get -> Kiln.ExchangeFlags	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ExchangeResult<T>.HoldTime.get -> System.TimeSpan	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ExchangeResult<T>.IsOk.get -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ExchangeResult<T>.Reason.get -> Kiln.WriteReason	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ExchangeResult<T>.Status.get -> Kiln.ExchangeStatus	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ExchangeResult<T>.Written.get -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ExchangeStatus	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ExchangeStatus.Absent = 1 -> Kiln.ExchangeStatus	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ExchangeStatus.Busy = 5 -> Kiln.ExchangeStatus	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ExchangeStatus.Conflict = 7 -> Kiln.ExchangeStatus	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ExchangeStatus.NotWritable = 8 -> Kiln.ExchangeStatus	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ExchangeStatus.Ok = 0 -> Kiln.ExchangeStatus	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ExchangeStatus.Stale = 2 -> Kiln.ExchangeStatus	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ExchangeStatus.Unavailable = 4 -> Kiln.ExchangeStatus	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ExchangeStatus.Uncertain = 9 -> Kiln.ExchangeStatus	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ExchangeStatus.Unreadable = 3 -> Kiln.ExchangeStatus	0.2.0-dev.30.7	0.2.16
 managed	Kiln.World	Kiln.Nearby	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.World	Kiln.ObservedAttribute	0.2.0-dev.29	0.2.4
 managed	Kiln.World	Kiln.ObservedAttribute.Fuel = 4 -> Kiln.ObservedAttribute	0.2.0-dev.29	0.2.4
@@ -27398,6 +27761,20 @@ managed	Kiln.World	Kiln.ProgramBudgetResult.Reason.get -> string?	0.2.0-dev.29	0
 managed	Kiln.World	Kiln.ProgramBudgetResult.Reason.init -> void	0.2.0-dev.29	0.2.4
 managed	Kiln.World	Kiln.ProgramBudgetResult.World.get -> Kiln.CapacityWorldToken?	0.2.0-dev.29	0.2.4
 managed	Kiln.World	Kiln.ProgramBudgetResult.World.init -> void	0.2.0-dev.29	0.2.4
+managed	Kiln.World	Kiln.ReadMode	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ReadMode.FrameQuiet = 1 -> Kiln.ReadMode	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ReadMode.Stable = 0 -> Kiln.ReadMode	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ReadStatus	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ReadStatus.Absent = 1 -> Kiln.ReadStatus	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ReadStatus.Busy = 5 -> Kiln.ReadStatus	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ReadStatus.Changed = 7 -> Kiln.ReadStatus	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ReadStatus.Ok = 0 -> Kiln.ReadStatus	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ReadStatus.SizeMismatch = 9 -> Kiln.ReadStatus	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ReadStatus.Stale = 2 -> Kiln.ReadStatus	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ReadStatus.TooSmall = 8 -> Kiln.ReadStatus	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ReadStatus.Unavailable = 4 -> Kiln.ReadStatus	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ReadStatus.Unreadable = 3 -> Kiln.ReadStatus	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.ReadStatus.Unsupported = 6 -> Kiln.ReadStatus	0.2.0-dev.30.7	0.2.16
 managed	Kiln.World	Kiln.Scale3	0.2.0-dev.28	0.2.3
 managed	Kiln.World	Kiln.Scale3.Deconstruct(out float X, out float Y, out float Z) -> void	0.2.0-dev.28	0.2.3
 managed	Kiln.World	Kiln.Scale3.Equals(Kiln.Scale3 other) -> bool	0.2.0-dev.28	0.2.3
@@ -27469,6 +27846,7 @@ managed	Kiln.World	Kiln.WaitingTransformScale.Template.init -> void	0.2.0-dev.29
 managed	Kiln.World	Kiln.WaitingTransformScale.WaitingTransformScale(string! Mod, System.Guid? Template, Kiln.WorldPosition Position, Kiln.Scale3 Scale, string! Reason) -> void	0.2.0-dev.29	0.2.4
 managed	Kiln.World	Kiln.World	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.World	Kiln.WorldChange<T>	0.2.0-dev.27	0.2.2
+managed	Kiln.World	Kiln.WorldConcurrent	0.2.0-dev.30.7	0.2.16
 managed	Kiln.World	Kiln.WorldStatus	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.World	Kiln.WorldStatus.Deconstruct(out bool Programs, out bool WorldLive, out bool Teleport, out bool Find, out int KilnPrograms, out int EnginePrograms, out int EngineMax, out int TeleportsPending, out ulong WorldSteps) -> void	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.World	Kiln.WorldStatus.EngineMax.get -> int	<=0.2.0-dev.26	<=0.2.1
@@ -27560,6 +27938,28 @@ managed	Kiln.World	Kiln.WorldWriteStatus.OutOfRange = 3 -> Kiln.WorldWriteStatus
 managed	Kiln.World	Kiln.WorldWriteStatus.Refused = 5 -> Kiln.WorldWriteStatus	0.2.0-dev.27	0.2.2
 managed	Kiln.World	Kiln.WorldWriteStatus.Unchanged = 1 -> Kiln.WorldWriteStatus	0.2.0-dev.27	0.2.2
 managed	Kiln.World	Kiln.WorldWriteStatus.Written = 0 -> Kiln.WorldWriteStatus	0.2.0-dev.27	0.2.2
+managed	Kiln.World	Kiln.WriteReason	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.WriteReason.Compare = 16 -> Kiln.WriteReason	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.WriteReason.EventsFull = 12 -> Kiln.WriteReason	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.WriteReason.Fault = 17 -> Kiln.WriteReason	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.WriteReason.Gate = 11 -> Kiln.WriteReason	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.WriteReason.InFrame = 10 -> Kiln.WriteReason	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.WriteReason.NoProfile = 2 -> Kiln.WriteReason	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.WriteReason.NoWorld = 3 -> Kiln.WriteReason	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.WriteReason.None = 0 -> Kiln.WriteReason	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.WriteReason.NotOwnersRef = 19 -> Kiln.WriteReason	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.WriteReason.NotPlain = 7 -> Kiln.WriteReason	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.WriteReason.NotServerWorld = 1 -> Kiln.WriteReason	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.WriteReason.OverBudget = 9 -> Kiln.WriteReason	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.WriteReason.OwnerRetired = 14 -> Kiln.WriteReason	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.WriteReason.Readback = 18 -> Kiln.WriteReason	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.WriteReason.Ref = 15 -> Kiln.WriteReason	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.WriteReason.RetireRace = 20 -> Kiln.WriteReason	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.WriteReason.Size = 8 -> Kiln.WriteReason	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.WriteReason.TargetLatched = 13 -> Kiln.WriteReason	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.WriteReason.Tracked = 5 -> Kiln.WriteReason	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.WriteReason.TrackingUnknown = 6 -> Kiln.WriteReason	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	Kiln.WriteReason.Unregistered = 4 -> Kiln.WriteReason	0.2.0-dev.30.7	0.2.16
 managed	Kiln.World	[KILNX001]static Kiln.ComponentChanges.LabCounters() -> string?	0.2.0-dev.29	0.2.4
 managed	Kiln.World	[KILNX001]static Kiln.ComponentChanges.LabHoldDelivery(int steps) -> bool	0.2.0-dev.29	0.2.4
 managed	Kiln.World	[KILNX003]Kiln.ComponentExchangedEvent	0.2.0-dev.29.18	0.2.10
@@ -27730,17 +28130,26 @@ managed	Kiln.World	const Kiln.ComponentChanges.Capability = "events.component_ne
 managed	Kiln.World	const Kiln.EntitySet.Capability = "world.find" -> string!	0.2.0-dev.27	0.2.2
 managed	Kiln.World	const Kiln.World.TrackedWritesCapability = "world.tracked_writes" -> string!	0.2.0-dev.27	0.2.2
 managed	Kiln.World	const Kiln.World.TransformScaleCapability = "world.transform_scale" -> string!	0.2.0-dev.28	0.2.3
+managed	Kiln.World	const Kiln.WorldConcurrent.Capability = "world.ecs_read" -> string!	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	const Kiln.WorldConcurrent.WriteCapability = "world.ecs_write" -> string!	0.2.0-dev.30.7	0.2.16
 managed	Kiln.World	override Kiln.ComponentWatchRequest.Equals(object? obj) -> bool	0.2.0-dev.29	0.2.4
 managed	Kiln.World	override Kiln.ComponentWatchRequest.GetHashCode() -> int	0.2.0-dev.29	0.2.4
 managed	Kiln.World	override Kiln.ComponentWatchRequest.ToString() -> string!	0.2.0-dev.29	0.2.4
 managed	Kiln.World	override Kiln.ComponentWatchResult.Equals(object? obj) -> bool	0.2.0-dev.29	0.2.4
 managed	Kiln.World	override Kiln.ComponentWatchResult.GetHashCode() -> int	0.2.0-dev.29	0.2.4
 managed	Kiln.World	override Kiln.ComponentWatchResult.ToString() -> string!	0.2.0-dev.29	0.2.4
+managed	Kiln.World	override Kiln.ComponentWritePolicy.ToString() -> string!	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	override Kiln.ConcurrentEntity.Equals(object? obj) -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	override Kiln.ConcurrentEntity.GetHashCode() -> int	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	override Kiln.ConcurrentEntity.ToString() -> string!	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	override Kiln.ConcurrentRead<T>.ToString() -> string!	0.2.0-dev.30.7	0.2.16
 managed	Kiln.World	override Kiln.EntityScaleChangedEvent.ToString() -> string!	0.2.0-dev.28	0.2.3
 managed	Kiln.World	override Kiln.EntityScaleResult.Equals(object? obj) -> bool	0.2.0-dev.28	0.2.3
 managed	Kiln.World	override Kiln.EntityScaleResult.GetHashCode() -> int	0.2.0-dev.28	0.2.3
 managed	Kiln.World	override Kiln.EntityScaleResult.ToString() -> string!	0.2.0-dev.28	0.2.3
 managed	Kiln.World	override Kiln.EntityTransform.GetHashCode() -> int	<=0.2.0-dev.26	<=0.2.1
+managed	Kiln.World	override Kiln.ExchangeBytesResult.ToString() -> string!	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	override Kiln.ExchangeResult<T>.ToString() -> string!	0.2.0-dev.30.7	0.2.16
 managed	Kiln.World	override Kiln.ProgramAccessLimits.Equals(object? obj) -> bool	0.2.0-dev.29	0.2.4
 managed	Kiln.World	override Kiln.ProgramAccessLimits.GetHashCode() -> int	0.2.0-dev.29	0.2.4
 managed	Kiln.World	override Kiln.ProgramAccessLimits.ToString() -> string!	0.2.0-dev.29	0.2.4
@@ -27771,6 +28180,8 @@ managed	Kiln.World	static Kiln.ComponentWatchRequest.operator !=(Kiln.ComponentW
 managed	Kiln.World	static Kiln.ComponentWatchRequest.operator ==(Kiln.ComponentWatchRequest? left, Kiln.ComponentWatchRequest? right) -> bool	0.2.0-dev.29	0.2.4
 managed	Kiln.World	static Kiln.ComponentWatchResult.operator !=(Kiln.ComponentWatchResult? left, Kiln.ComponentWatchResult? right) -> bool	0.2.0-dev.29	0.2.4
 managed	Kiln.World	static Kiln.ComponentWatchResult.operator ==(Kiln.ComponentWatchResult? left, Kiln.ComponentWatchResult? right) -> bool	0.2.0-dev.29	0.2.4
+managed	Kiln.World	static Kiln.ConcurrentEntity.operator !=(Kiln.ConcurrentEntity left, Kiln.ConcurrentEntity right) -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	static Kiln.ConcurrentEntity.operator ==(Kiln.ConcurrentEntity left, Kiln.ConcurrentEntity right) -> bool	0.2.0-dev.30.7	0.2.16
 managed	Kiln.World	static Kiln.EntityScaleResult.operator !=(Kiln.EntityScaleResult? left, Kiln.EntityScaleResult? right) -> bool	0.2.0-dev.28	0.2.3
 managed	Kiln.World	static Kiln.EntityScaleResult.operator ==(Kiln.EntityScaleResult? left, Kiln.EntityScaleResult? right) -> bool	0.2.0-dev.28	0.2.3
 managed	Kiln.World	static Kiln.EntityTransform.operator !=(Kiln.EntityTransform left, Kiln.EntityTransform right) -> bool	<=0.2.0-dev.26	<=0.2.1
@@ -27826,6 +28237,20 @@ managed	Kiln.World	static Kiln.World.WriteField(Kiln.EntityId entity, string! co
 managed	Kiln.World	static Kiln.World.WriteInfo(string! component) -> Kiln.WorldWriteInfo!	0.2.0-dev.27	0.2.2
 managed	Kiln.World	static Kiln.World.WriteInfo<T>() -> Kiln.WorldWriteInfo!	0.2.0-dev.27	0.2.2
 managed	Kiln.World	static Kiln.World.WriteRaw<T>(Kiln.EntityId entity, string! component, int offset, T value) -> bool	0.2.0-dev.27	0.2.2
+managed	Kiln.World	static Kiln.WorldConcurrent.CanWrite.get -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	static Kiln.WorldConcurrent.IsAvailable.get -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	static Kiln.WorldConcurrent.IsPresent(Kiln.WorldKind world) -> bool	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	static Kiln.WorldConcurrent.Open(Kiln.EntityId id, Kiln.WorldKind world = Kiln.WorldKind.Server) -> Kiln.ConcurrentRead<Kiln.ConcurrentEntity>	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	static Kiln.WorldConcurrent.OrOnTick<T>(Kiln.KilnTaskContext! ctx, System.Func<T>! offTick, System.Func<T>! onTick) -> System.Threading.Tasks.Task<T>!	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	static Kiln.WorldConcurrent.Query(in Kiln.EntityQuery query, System.Span<Kiln.ConcurrentEntity> into) -> Kiln.ConcurrentQueryResult	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	static Kiln.WorldConcurrent.Read<T>(Kiln.ConcurrentEntity entity, string! component, Kiln.ReadMode mode = Kiln.ReadMode.Stable) -> Kiln.ConcurrentRead<T>	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	static Kiln.WorldConcurrent.ReadBytes(Kiln.ConcurrentEntity entity, string! component, System.Span<byte> into, Kiln.ReadMode mode = Kiln.ReadMode.Stable) -> Kiln.ConcurrentCopy	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	static Kiln.WorldConcurrent.ReadMany(Kiln.ConcurrentEntity entity, Kiln.ComponentSet! components, Kiln.ReadMode mode = Kiln.ReadMode.Stable) -> Kiln.ConcurrentSnapshot!	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	static Kiln.WorldConcurrent.Template(Kiln.ConcurrentEntity entity) -> Kiln.ConcurrentRead<System.Guid>	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	static Kiln.WorldConcurrent.TryCompareExchange<T>(Kiln.ConcurrentEntity entity, string! component, in T expected, in T desired) -> Kiln.ExchangeResult<T>	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	static Kiln.WorldConcurrent.TryCompareExchangeBytes(Kiln.ConcurrentEntity entity, string! component, System.ReadOnlySpan<byte> expected, System.ReadOnlySpan<byte> desired, System.ReadOnlySpan<byte> mask = default(System.ReadOnlySpan<byte>), System.Span<byte> current = default(System.Span<byte>)) -> Kiln.ExchangeBytesResult	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	static Kiln.WorldConcurrent.Validate(Kiln.ConcurrentEntity entity) -> Kiln.ReadStatus	0.2.0-dev.30.7	0.2.16
+managed	Kiln.World	static Kiln.WorldConcurrent.WritePolicy(string! component, Kiln.WorldKind world = Kiln.WorldKind.Server) -> Kiln.ComponentWritePolicy	0.2.0-dev.30.7	0.2.16
 managed	Kiln.World	static Kiln.WorldStatus.operator !=(Kiln.WorldStatus left, Kiln.WorldStatus right) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.World	static Kiln.WorldStatus.operator ==(Kiln.WorldStatus left, Kiln.WorldStatus right) -> bool	<=0.2.0-dev.26	<=0.2.1
 managed	Kiln.World	static Kiln.WorldWriteInfo.operator !=(Kiln.WorldWriteInfo? left, Kiln.WorldWriteInfo? right) -> bool	0.2.0-dev.27	0.2.2
@@ -28335,6 +28760,21 @@ native	services/kiln_items.h	services/kiln_items.h:KilnItemsApi:transfer_end	0.2
 native	services/kiln_items.h	services/kiln_items.h:KilnItemsApi:transfer_listen	0.2.0-dev.20	0.2.0
 native	services/kiln_items.h	services/kiln_items.h:KilnItemsApi:transfer_report	0.2.0-dev.20	0.2.0
 native	services/kiln_items.h	services/kiln_items.h:KilnItemsApi:transfer_rule	0.2.0-dev.20	0.2.0
+native	services/kiln_items_storage.h	services/kiln_items_storage.h:KilnItemsStorageApi:holder	0.2.0-dev.30.7	0.2.16
+native	services/kiln_items_storage.h	services/kiln_items_storage.h:KilnItemsStorageApi:list	0.2.0-dev.30.7	0.2.16
+native	services/kiln_items_storage.h	services/kiln_items_storage.h:KilnItemsStorageApi:next_event	0.2.0-dev.30.7	0.2.16
+native	services/kiln_items_storage.h	services/kiln_items_storage.h:KilnItemsStorageApi:park	0.2.0-dev.30.7	0.2.16
+native	services/kiln_items_storage.h	services/kiln_items_storage.h:KilnItemsStorageApi:persist_bind	0.2.0-dev.30.7	0.2.16
+native	services/kiln_items_storage.h	services/kiln_items_storage.h:KilnItemsStorageApi:register_storage	0.2.0-dev.30.7	0.2.16
+native	services/kiln_items_storage.h	services/kiln_items_storage.h:KilnItemsStorageApi:release_frozen	0.2.0-dev.30.7	0.2.16
+native	services/kiln_items_storage.h	services/kiln_items_storage.h:KilnItemsStorageApi:restore	0.2.0-dev.30.7	0.2.16
+native	services/kiln_items_storage.h	services/kiln_items_storage.h:KilnItemsStorageApi:return_parked	0.2.0-dev.30.7	0.2.16
+native	services/kiln_items_storage.h	services/kiln_items_storage.h:KilnItemsStorageApi:set_ref	0.2.0-dev.30.7	0.2.16
+native	services/kiln_items_storage.h	services/kiln_items_storage.h:KilnItemsStorageApi:state	0.2.0-dev.30.7	0.2.16
+native	services/kiln_items_storage.h	services/kiln_items_storage.h:KilnItemsStorageApi:status	0.2.0-dev.30.7	0.2.16
+native	services/kiln_items_storage.h	services/kiln_items_storage.h:KilnItemsStorageApi:take_frozen	0.2.0-dev.30.7	0.2.16
+native	services/kiln_items_storage.h	services/kiln_items_storage.h:KilnItemsStorageApi:unpark	0.2.0-dev.30.7	0.2.16
+native	services/kiln_items_storage.h	services/kiln_items_storage.h:KilnItemsStorageApi:witness_of	0.2.0-dev.30.7	0.2.16
 native	services/kiln_launch.h	services/kiln_launch.h:KilnLaunchApi:notice_copy	0.2.0-dev.30.2	0.2.12
 native	services/kiln_launch.h	services/kiln_launch.h:KilnLaunchApi:status	0.2.0-dev.30.2	0.2.12
 native	services/kiln_log.h	services/kiln_log.h:KilnLogApi:line_time	0.2.0-dev.29.3	0.2.4
