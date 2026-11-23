@@ -15,6 +15,7 @@
 
 #include "registry/formulas.h"
 #include "registry/stage.h"
+#include "registry/unmapped.h"
 #include "services/kiln_registry_live.h"
 
 namespace kc {
@@ -1514,12 +1515,7 @@ KilnResult registry_live_submit(KilnOwner owner, uint64_t handle, const std::str
     });
     for (auto& edit : batch.edits) edit.per_entry = per_entry(*change);  // review4 NS6: entry points refuse per entry
     if (g.in->check) g.in->check(&batch, &refused);
-    else std::erase_if(batch.edits, [&](const registry::Edit& edit) {
-        std::string reason;
-        const std::string field = edit.element.on ? edit.element.list : edit.field;
-        if (g.in->regmap->mapping(edit.registry, field, &reason) == rmap::Mapping::Mapped) return false;
-        refused.push_back({change->mod, batch.source, batch.stage, edit.n, reason, ""}); return true;
-    });
+    else registry::refuse_unmapped_edits(*g.in->regmap, *g.in->schema, &batch, &refused);  // review2 N7: production's guard
     if (out) { *out = {}; out->accepted = static_cast<uint32_t>(batch.edits.size()); out->refused = static_cast<uint32_t>(refused.size()); out->world = g.world; }
     if (report_text) {
         registry::json rows = registry::json::array();
