@@ -366,6 +366,7 @@ void test_disappeared_helper_teardown() {
 }
 }  // namespace
 
+#ifndef KILN_BOOTPACK_NATIVE_NO_MAIN  // body_native_test.cpp reuses these fakes with its own main
 int main(int argc, char** argv) {
     if (argc != 2) return 2;
     t_root = fs::path(argv[1]) / "bootpack-native-world";
@@ -387,3 +388,4 @@ int main(int argc, char** argv) {
     std::printf("bootpack native: %d checks, %d failed\n", g_checks, g_failures);
     return g_failures ? 1 : 0;
 }
+#endif

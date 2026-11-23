@@ -112,6 +112,32 @@ std::span<const BodyLayoutType> body_layout() {
     return types;
 }
 
+bool check_body_layout(const BodyTypeLookup& lookup, std::string* why) {
+    const auto fail = [&](const std::string& detail) { if (why) *why = "body.chassis: " + detail + "; this game build is not the verified Fisher layout"; return false; };
+    if (!lookup) return fail("the game's type registry is not available");
+    try {
+        for (const auto& type : body_layout()) {
+            BodyTypeFacts facts;
+            if (!lookup(type.name, &facts)) return fail(std::string(type.name) + " is missing");
+            if (facts.size != type.size)
+                return fail(std::string(type.name) + " is " + std::to_string(facts.size) + " bytes, not " + std::to_string(type.size));
+            if (type.inner && facts.inner != type.inner) return fail(std::string(type.name) + " no longer derives from or wraps " + type.inner);
+            for (const auto& field : type.fields)
+                if (std::none_of(facts.fields.begin(), facts.fields.end(), [&](const BodyTypeFacts::Field& actual) {
+                        return actual.name == field.name && actual.type == field.type && actual.offset == field.offset;
+                    }))
+                    return fail(std::string(type.name) + "." + field.name + " moved or changed type");
+            for (const auto& value : type.values)
+                if (std::none_of(facts.values.begin(), facts.values.end(), [&](const auto& actual) {
+                        return actual.first == value.name && actual.second == value.value;
+                    }))
+                    return fail(std::string(type.name) + "::" + value.name + " changed");
+        }
+    } catch (const std::exception& error) { return fail(std::string("the layout check failed: ") + error.what()); }
+    if (why) why->clear();
+    return true;
+}
+
 bool lower_body(const uint8_t* res, size_t len, const BodySpec& spec, Bytes* out, std::string* err) {
     const auto fail = [&](const std::string& why) { if (err) *err = why; return false; };
     if (!out) return fail("body: no output buffer");

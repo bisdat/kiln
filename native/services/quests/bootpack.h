@@ -34,6 +34,12 @@ struct Backend {
     std::function<bool(Owner, const TextOut&, std::string*)> text;
     std::function<bool(Owner, std::string*)> finish;
     std::function<bool(Owner, std::string*)> rollback;
+    // 16f authored roster bodies (both or neither; neither: a body-dependent mod is refused whole). admit_body runs before
+    // the mod compiles: it checks the mod's local body cache and rewrites its NPC bodies to admitted cooked ids, and
+    // returns the kiln.assets entries the body needs. put_body publishes those under this mod's owner inside the same
+    // transaction, so the ordinary rollback (revert_owner of bootpack:<mod>) takes them back with everything else.
+    std::function<bool(ModInput*, ojson* assets, std::string*)> admit_body;
+    std::function<bool(Owner, const ModInput&, const ojson& assets, std::string*)> put_body;
 };
 struct Applied {
     std::string mod;

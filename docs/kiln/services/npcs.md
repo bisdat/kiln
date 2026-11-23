@@ -62,14 +62,15 @@ KL210 as an error otherwise.
 `NpcBlock.Motions` names an `NpcMotionsBlock`: Kiln-owned motion roles bound to states of the body's cooked graph.
 The [authoring contract](../modding/npc-blocks.md#authored-roster-bodies-and-motions) covers the complete 27-binding
 Fisher vector, shared skeleton/slot checks, explicit size, and the deferred `assets/cooked/npc-bodies.v1.json` bundle.
-The authoring and boot-rollback slices do **not** supply native body lowering or atomic cross-service publication.
+Native body lowering and admission are built (below); the NPC motion closure (the Fisher's sequences cloned onto the
+authored graph and retimed) is not installed yet, so every authored body is still refused with that reason.
 An unavailable dependency is a refusal, not a rendered fallback and not a release hold.
 
 | Capability | Needs | Current contract |
 |---|---|---|
 | `blocks.npc_body` | `kiln.knowledge`, `quests.boot_pack`, `quests.npc_body`, `quests.npc`, `assets.resources`, `assets.content` | Managed row; refuses authored-body definition with the missing dependency's reason. Ordinary game-body NPCs do not need it |
 | `quests.boot_pack` | Private native content rollback helper and the resource initialization hook | Per-mod compile/preflight and owner-isolated rollback through the existing boot path; no public bootpack or epoch API |
-| `quests.npc_body` | Native authored-body lowering | Unavailable: the native body lowerer is not installed yet; a working rollback backend alone cannot enable authored bodies |
+| `quests.npc_body` | Native authored-body admission and lowering, kiln.assets' private body registration, the NPC motion closure | Unavailable while the motion closure is not installed (the row names it); a body mod is then refused whole. A game update that changes the verified Fisher layout makes the row unavailable (`symbol-missing`) with the changed type named |
 
 Native packs compile separately in dependency order against the surviving effective resources. A refused pack withdraws
 only its `bootpack:<mod>` owner, restores its text-tag before-images without overwriting unrelated writers, and leaves
@@ -90,6 +91,28 @@ Without the private helper, ordinary legacy packs retain their old path and whol
 This is rollback behind the existing startup barrier, **not** an unpublished snapshot or an epoch: an independently
 started native-plugin worker reading GameKnowledge during publication could see it before the pack's item definitions.
 No such production reader has been measured; that hypothetical worker remains an open concurrency risk.
+
+### Admission and lowering at the native boot build
+
+An authored body is admitted once per mod, before the mod compiles, against **this machine's** cook
+(`assets/cooked/npc-bodies.v1.json`, never shipped as identity). Admission refuses the whole mod, naming the NPC, when:
+the cache is missing, malformed or from an older cook; an authored source (model, clips, glTF buffers and images, material
+blocks and their textures) or a cooked output no longer hashes as recorded; the NPC's resolved body, animation or motions
+blocks differ from what was cooked; the cook has no complete 27-row motion vector, no graph of its own or not exactly one
+RenderModel row for the body; a game client finds a dedicated server's cook (skipped renderer output) or an incomplete
+cook; a game client's material blocks are not built and served by kiln.vfx/kiln.assets (G2); or kiln.types no longer has
+the verified Fisher layout. A dedicated server takes the model id from the cook's RenderModel row and publishes no
+renderer output. Only NPC blocks (and NPCs Kiln.Blocks wrote for code at an earlier start) may carry a body; a mod's own
+`quests/*.json` naming one refuses that mod.
+
+The admitted pack compiles with the body lowered first: the Fisher template is copied into an owned buffer, its five
+appearance producers removed, model, graph, cloth collider, slots, path/movement size, interaction box, steering sphere
+and UI offsets set from the cooked ids and the authored Size, and then the ordinary quest edit (name, NpcId, loca,
+dialogue) runs on those bytes. The vanilla Fisher key is never written; an authored body on a non-clone or another
+chassis refuses the mod. The body's cooked resources and blobs are registered by kiln.assets' private body export for
+the same `bootpack:<mod>` owner inside that mod's transaction (new keys only, checked absent first and absent again
+after a rollback; never pinned), so a refusal or withdrawal takes them away with the rest of the pack and leaves earlier
+and independent mods as they were.
 
 Generated material-block/texture hashes describe dependencies only; they must not be mistaken for prepared material
 resource bytes. No Ready status, hot body replacement, or safe missing-model fallback is promised by a cooked manifest.

@@ -19,6 +19,7 @@
 //  - every step with a place (a marker, site, spawn, reach or kill place, an NPC of the mod) a new TemplateResource (a copy of
 //    a search-area marker) with its own name tag, visible while the step is active; Kiln.Quests/Native puts it at the place.
 #include "questpack.h"
+#include "bodypack.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -140,6 +141,8 @@ struct Ctx {
     struct Tpl {
         Guid base, guid;
         TemplateEdit edit;
+        bool has_body = false;  // 16f: an authored roster body, lowered before the edit
+        BodySpec body;
     };
     std::vector<Tpl> templates;
     std::map<std::string, const ojson*> dialogues;  // of this mod
@@ -714,6 +717,11 @@ void compile_npc(Ctx& c, const std::string& nid, const ojson& n) {
         return;
     }
     const bool clone = n.contains("clone") && !(n["clone"].is_boolean() && !n["clone"].get<bool>());
+    const bool authored_body = n.contains("body") && n["body"].is_object();  // only Kiln's admission writes an object here
+    if (authored_body && (!clone || base_name != kBodyChassis)) {  // 16f: never a vanilla key, never another chassis
+        c.err(where + ": body: an authored body is a new roster clone of the Fisher chassis");
+        return;
+    }
     const ojson* dialogue = nullptr;
     if (!dlg.empty()) {
         auto it = c.dialogues.find(dlg);
@@ -748,6 +756,22 @@ void compile_npc(Ctx& c, const std::string& nid, const ojson& n) {
         tp = &c.templates.back();
     }
     TemplateEdit& e = tp->edit;
+    if (authored_body) {
+        // 16f: only Kiln's admission writes this (native_pack.cpp, bodyadmit.cpp): cooked ids and the authored size
+        const ojson& b = n["body"];
+        const ojson size = b.is_object() ? b.value("size", ojson()) : ojson();
+        BodySpec spec;
+        if (!b.is_object() || !parse_guid(str(b, "model"), &spec.model) || !parse_guid(str(b, "graph"), &spec.graph) ||
+                 !size.is_object() || !size.contains("radius") || !size["radius"].is_number() || !size.contains("height") ||
+                 !size["height"].is_number())
+            c.err(where + ": body: an admitted body needs model, graph and size {radius, height}");
+        else {
+            spec.radius = size["radius"].get<double>();
+            spec.height = size["height"].get<double>();
+            tp->has_body = true;
+            tp->body = spec;
+        }
+    }
     uint32_t name_tag = 0;
     if (n.contains("names")) {
         const Guid loca = derive_guid(c.mod->id, "npcname", nid);
@@ -1077,6 +1101,15 @@ PackOut compile_pack(const std::vector<ModInput>& mods, const GameData& game) {
         o.guid = t.guid;
         o.is_new = !t.edit.new_name.empty();
         o.name = o.is_new ? t.edit.new_name : template_name(p, n);
+        Bytes lowered;
+        if (t.has_body) {
+            // The verified layout first, then the owned-buffer body rewrite, then the ordinary quest edit on its bytes.
+            if (!game.body_layout) return fail(o.name + ": body.chassis: the game's type registry cannot be checked here");
+            if (!game.body_layout(&err)) return fail(o.name + ": " + err);
+            if (!lower_body(p, n, t.body, &lowered, &err)) return fail(o.name + ": " + err);
+            p = lowered.data();
+            n = lowered.size();
+        }
         if (!edit_template(p, n, t.edit, &o.data, &err)) return fail(o.name + ": " + err);
         out.templates.push_back(std::move(o));
     }

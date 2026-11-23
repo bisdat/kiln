@@ -26,7 +26,11 @@ struct ModInput {
     std::string guid_namespace;      // assets/cook.json's guidNamespace ("" when none)
     std::vector<std::string> required_mods;  // native dependencies: a refused dependency contributes no shared tables
     bool authored_body = false;      // do not fall back to publishing the ordinary part of a body-dependent mod
+    std::string dir;                 // the mod's folder (UTF-8): authored-body admission reads its cooked body cache there
+    std::string body_refusal;        // set at collection: this mod's authored bodies cannot be admitted (the whole mod is refused)
 };
+// The one verified roster-body chassis (chapter 16f section 5.1): Bodies.Fisher and Bodies.Villager both lower to it.
+constexpr const char* kBodyChassis = "NPC_Workshop_Fisher_Trader";
 
 // Read access to the game's resources.
 struct GameData {
@@ -37,6 +41,9 @@ struct GameData {
     // entries together are more than kMaxNpcs, with that total. Returns kMaxNpcs or kMaxNpcsPaged; `why` says why it is
     // kMaxNpcs (the build's refusal carries it). Not set: kMaxNpcs.
     std::function<uint32_t(uint32_t needed, std::string* why)> roster_max;
+    // 16f: the running game's type registry still has the verified body layout (bodypack.h check_body_layout). Not set:
+    // an NPC with an admitted "body" refuses its mod. Asked only when such an NPC is built.
+    std::function<bool(std::string* why)> body_layout;
 };
 
 struct TemplateOut {

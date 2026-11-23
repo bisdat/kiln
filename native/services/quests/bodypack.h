@@ -27,6 +27,19 @@ struct BodyLayoutType {
     std::span<const BodyLayoutValue> values = {};
 };
 std::span<const BodyLayoutType> body_layout();
+// What the running game's type registry says about one type (kiln.types on the game side, a fake on the host):
+// size, the qualified name of its inner/base record ("" when none), own fields and enum/bitmask values.
+struct BodyTypeFacts {
+    struct Field { std::string name, type; uint64_t offset = 0; };
+    uint32_t size = 0;
+    std::string inner;
+    std::vector<Field> fields;
+    std::vector<std::pair<std::string, int64_t>> values;
+};
+using BodyTypeLookup = std::function<bool(const std::string& qualified_name, BodyTypeFacts* out)>;
+// Every interpreted type, field (name, type, offset) and value of body_layout() must exist exactly in the running
+// registry; the first difference refuses with the type's name. Uninterpreted fields are not compared.
+bool check_body_layout(const BodyTypeLookup& lookup, std::string* why);
 struct BodySpec {
     Guid model, graph;
     double radius = 0, height = 0;

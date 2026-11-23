@@ -52,6 +52,19 @@ std::vector<Resource> resources(const PackOut& pack) {
     return out;
 }
 
+// The new resources an admitted body publishes (kiln.assets entries, types by name or 0x hash).
+bool body_keys(const ojson& assets, std::vector<Key>* out, std::string* why) {
+    for (const auto& entry : assets.value("entries", ojson::array())) {
+        if (!entry.is_object() || entry.value("kind", "") != "resource") continue;
+        Key key;
+        const std::string type = entry.value("type", "");
+        if (!parse_guid(entry.value("guid", ""), &key.guid) || type.empty()) { *why = "an admitted body resource has no key"; return false; }
+        key.type = type.rfind("0x", 0) == 0 ? static_cast<uint32_t>(std::stoul(type, nullptr, 16)) : fnv1a(type.data(), type.size());
+        out->push_back(key);
+    }
+    return true;
+}
+
 void unique_ids(std::vector<uint32_t>* ids) {
     std::sort(ids->begin(), ids->end());
     ids->erase(std::unique(ids->begin(), ids->end()), ids->end());
@@ -128,7 +141,25 @@ Result build(const std::vector<ModInput>& mods, const Backend& backend) {
             for (const auto& dependency : mod.required_mods)
                 if (failed.count(dependency)) { dependency_failure = dependency; break; }
             if (!dependency_failure.empty()) { refuse(mod.id, "required dependency " + dependency_failure + " did not commit"); continue; }
-            if (mod.authored_body) { refuse(mod.id, "authored roster-body lowering is not installed; no part of this native pack was published"); continue; }
+            // An authored body is admitted once, before compilation, against this machine's cook of the mod; a refusal
+            // publishes nothing of the mod. The admitted copy (cooked ids in its NPC bodies) is what compiles.
+            ModInput admitted;
+            ojson body_assets;
+            const ModInput* input = &mod;
+            if (mod.authored_body && (!backend.admit_body || !backend.put_body)) {
+                refuse(mod.id, "authored roster-body lowering is not installed; no part of this native pack was published");
+                continue;
+            }
+            if (!mod.body_refusal.empty()) { refuse(mod.id, mod.body_refusal); continue; }
+            if (mod.authored_body) {
+                admitted = mod;
+                std::string why;
+                bool ok = false;
+                try { ok = backend.admit_body(&admitted, &body_assets, &why); }
+                catch (const std::exception& error) { why = std::string("body admission failed: ") + error.what(); }
+                if (!ok) { refuse(mod.id, why.empty() ? "authored body admission refused the mod" : why); continue; }
+                input = &admitted;
+            }
 
             for (int attempt = 0; attempt != 2; ++attempt) {
                 std::map<Key, Captured> reads;
@@ -152,7 +183,7 @@ Result build(const std::vector<ModInput>& mods, const Backend& backend) {
                     return captured.present;
                 };
                 PackOut pack;
-                try { pack = compile_pack({mod}, snapshot); }
+                try { pack = compile_pack({*input}, snapshot); }
                 catch (const std::exception& error) { stop(mod.id, std::string("native compilation failed: ") + error.what()); break; }
                 out.warnings.insert(out.warnings.end(), pack.warnings.begin(), pack.warnings.end());
                 if (pack.roster_refused) { stop(mod.id, pack.roster_refusal, true); break; }
@@ -182,6 +213,16 @@ Result build(const std::vector<ModInput>& mods, const Backend& backend) {
                         }
                     }
                     wanted = resources(pack);
+                    // An admitted body's resources are new keys: present now means another writer has them. Reading
+                    // them through the snapshot also records them as absent before-images, so a rollback is checked
+                    // to take them away again (withdraw).
+                    std::vector<Key> keys;
+                    if (mod.authored_body && !body_keys(body_assets, &keys, &refusal)) keys.clear();
+                    for (const auto& key : keys) {
+                        const uint8_t* bytes = nullptr;
+                        size_t count = 0;
+                        if (snapshot.read(key.guid, key.type, &bytes, &count)) { refusal = "body resource " + guid_text(key.guid) + ": new key already exists"; break; }
+                    }
                     // Capture every overwritten key, not only the keys the compiler happened to read. New keys must be absent.
                     for (const auto& resource : wanted) {
                         const uint8_t* bytes = nullptr;
@@ -210,7 +251,9 @@ Result build(const std::vector<ModInput>& mods, const Backend& backend) {
                 try {
                     began = backend.begin(applied.owner, mod.id, &refusal);
                     if (began) {
-                        for (const auto& resource : wanted)
+                        if (mod.authored_body && !backend.put_body(applied.owner, *input, body_assets, &refusal) && refusal.empty())
+                            refusal = "the authored body's cooked resources were refused";
+                        if (refusal.empty()) for (const auto& resource : wanted)
                             if (!backend.put(applied.owner, resource, &refusal)) { if (refusal.empty()) refusal = resource.name + ": resource refused"; break; }
                         if (refusal.empty()) for (const auto& item : pack.content_items)
                             if (!backend.define(applied.owner, true, item, &refusal)) { if (refusal.empty()) refusal = "item definition refused"; break; }
