@@ -497,8 +497,20 @@ internal sealed class PlayerStorageDocument
             var usable = (JsonObject)merged.DeepClone();
             var excess = (JsonObject)merged.DeepClone();
             usable["slots"] = slots;
-            usable["records"] = new JsonArray(merged["records"]!.AsArray().Where(r => Number(r!["s"]) < slots).Select(r => r!.DeepClone()).ToArray());
-            excess["records"] = new JsonArray(merged["records"]!.AsArray().Where(r => Number(r!["s"]) >= slots).Select(r => r!.DeepClone()).ToArray());
+            // Live records keep their slots. A parked record goes into the live entry only on a slot no live record holds:
+            // native rebuilds a LIVE record into its own slot or quarantines it, but finds a free slot for a PARKED one.
+            var taken = new HashSet<long>();
+            var fits = new List<JsonNode>();
+            var rest = new List<JsonNode>();
+            var liveCount = storages[key] is JsonObject liveBag ? liveBag["records"]!.AsArray().Count : 0;
+            foreach (var (record, index) in merged["records"]!.AsArray().Select((r, i) => (r!, i)))
+            {
+                var slot = Number(record["s"]);
+                if (slot < slots && (index < liveCount ? taken.Add(slot) : !taken.Contains(slot) && taken.Add(slot))) fits.Add(record.DeepClone());
+                else rest.Add(record.DeepClone());
+            }
+            usable["records"] = new JsonArray(fits.ToArray());
+            excess["records"] = new JsonArray(rest.ToArray());
             if (merged["refs"] is JsonObject savedRefs)
             {
                 usable["refs"] = new JsonObject();
