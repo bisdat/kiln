@@ -155,7 +155,8 @@ internal readonly record struct StatusMessage(WireBinding Binding, ulong Sequenc
 
 /// <summary>Encoding and decoding of the nine messages. Decode methods return false for any body that is not exactly a
 /// valid message: too long, truncated, trailing bytes, an unknown enum value, a non-finite float, a part the request does
-/// not announce. Nothing is allocated for a body before its length and counts were checked.</summary>
+/// not announce; a refused body leaves the out value default (null for a mutation), never a partly read message. Nothing
+/// is allocated for a body before its length and counts were checked.</summary>
 internal static class CameraWire
 {
     // ---- the request blob ----
@@ -378,8 +379,10 @@ internal static class CameraWire
         m = default;
         if (s.Length != 32) return false;
         var at = 0;
-        m = new HelloMessage(RU16(s, ref at), RU64(s, ref at), RU32(s, ref at), RU32(s, ref at), RU64(s, ref at), RU16(s, ref at), RU32(s, ref at));
-        return m.Protocol == CameraWireAbi.Protocol && m.ClientNonce != 0 && m.ClientEpoch != 0 && m.LocalEntity != 0 && m.MaxKeys >= 1 && m.MaxBody >= 1;
+        var h = new HelloMessage(RU16(s, ref at), RU64(s, ref at), RU32(s, ref at), RU32(s, ref at), RU64(s, ref at), RU16(s, ref at), RU32(s, ref at));
+        if (h.Protocol != CameraWireAbi.Protocol || h.ClientNonce == 0 || h.ClientEpoch == 0 || h.LocalEntity == 0 || h.MaxKeys < 1 || h.MaxBody < 1) return false;
+        m = h;
+        return true;
     }
 
     public static byte[] Welcome(in WelcomeMessage m)
@@ -404,10 +407,12 @@ internal static class CameraWire
         m = default;
         if (s.Length != 58) return false;
         var at = 0;
-        m = new WelcomeMessage(RU64(s, ref at), RU32(s, ref at), RU64(s, ref at), RU32(s, ref at), RU32(s, ref at), RU64(s, ref at),
+        var w = new WelcomeMessage(RU64(s, ref at), RU32(s, ref at), RU64(s, ref at), RU32(s, ref at), RU32(s, ref at), RU64(s, ref at),
             RU64(s, ref at), RU64(s, ref at), RU32(s, ref at), RU16(s, ref at));
-        return m.Token != 0 && m.ServerNonce != 0 && m.ServerEpoch != 0 && m.Player != 0 && (m.AllowedCaps & ~CameraWireAbi.RemoteParts) == 0 &&
-               m.MaxBody is >= 1 and <= CameraWireAbi.MaxBody && m.MaxKeys is >= 1 and <= CameraWireAbi.MaxKeys;
+        if (!(w.Token != 0 && w.ServerNonce != 0 && w.ServerEpoch != 0 && w.Player != 0 && (w.AllowedCaps & ~CameraWireAbi.RemoteParts) == 0 &&
+              w.MaxBody is >= 1 and <= CameraWireAbi.MaxBody && w.MaxKeys is >= 1 and <= CameraWireAbi.MaxKeys)) return false;
+        m = w;
+        return true;
     }
 
     /// <summary>Apply/Update/End. Null when the body would be longer than <paramref name="maxBody"/> (BodyTooLarge,
@@ -536,8 +541,10 @@ internal static class CameraWire
         m = default;
         if (s.Length != CameraWireAbi.CommonHeaderBytes + 11) return false;
         var at = 0;
-        m = new EndedMessage(ReadHeader(s, ref at), RU8(s, ref at), RU16(s, ref at), RU64(s, ref at));
-        return m.EndReason is > CameraEndReasons.None and <= CameraWireAbi.MaxEndReason && m.Reason <= CameraWireAbi.MaxReason;
+        var e = new EndedMessage(ReadHeader(s, ref at), RU8(s, ref at), RU16(s, ref at), RU64(s, ref at));
+        if (e.EndReason is CameraEndReasons.None or > CameraWireAbi.MaxEndReason || e.Reason > CameraWireAbi.MaxReason) return false;
+        m = e;
+        return true;
     }
 
     public static byte[] Heartbeat(in HeartbeatMessage m)
@@ -557,8 +564,10 @@ internal static class CameraWire
         m = default;
         if (s.Length != CameraWireAbi.BindingBytes + 32) return false;
         var at = 0;
-        m = new HeartbeatMessage(ReadBinding(s, ref at), RU64(s, ref at), RU64(s, ref at), RU64(s, ref at), RU64(s, ref at));
-        return (m.Lease == 0) == (m.Revision == 0);
+        var hb = new HeartbeatMessage(ReadBinding(s, ref at), RU64(s, ref at), RU64(s, ref at), RU64(s, ref at), RU64(s, ref at));
+        if ((hb.Lease == 0) != (hb.Revision == 0)) return false;
+        m = hb;
+        return true;
     }
 
     public static byte[] Status(in StatusMessage m)
@@ -579,8 +588,10 @@ internal static class CameraWire
         m = default;
         if (s.Length != CameraWireAbi.BindingBytes + 32) return false;
         var at = 0;
-        m = new StatusMessage(ReadBinding(s, ref at), RU64(s, ref at), RU64(s, ref at), RU64(s, ref at), RU32(s, ref at), RU32(s, ref at));
-        return (m.Lease == 0) == (m.Revision == 0);
+        var st = new StatusMessage(ReadBinding(s, ref at), RU64(s, ref at), RU64(s, ref at), RU64(s, ref at), RU32(s, ref at), RU32(s, ref at));
+        if ((st.Lease == 0) != (st.Revision == 0)) return false;
+        m = st;
+        return true;
     }
 
     /// <summary>A diagnostic text cut to 256 UTF-8 bytes at a character boundary.</summary>

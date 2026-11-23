@@ -540,4 +540,110 @@ public sealed class ProtocolTests
         Assert.Throws<ArgumentOutOfRangeException>(() => rig.Server.Submit((TransportOp)9, 5, 1000, 1, Requests.Lens(), _ => { }));
         Assert.Equal(0, rig.Count(CameraMessage.Apply));
     }
+
+    [Fact]
+    public void An_Ack_cannot_stretch_a_lease_past_its_duration_and_an_ok_visual_answer_is_ClientFrame()
+    {
+        var rig = Bound(r => r.Endpoint.Auto = false);
+        rig.Submit(TransportOp.Apply, lease: 1000, request: Requests.Lens(durationMs: 2000));
+        rig.Pump();
+        Assert.True(CameraWire.TryHeaderOnly(rig.SentToClient.Last(m => m.Id == CameraMessage.Apply).Body, CameraWireAbi.MaxBody, out var h));
+        // a hostile client answers by itself: ServerState scope and the largest elapsed and remaining times the wire holds
+        rig.DropToServer = (_, _) => true;
+        rig.DropToClient = (_, _) => true;
+        rig.Server.Receive(CameraMessage.Ack, CameraWire.Ack(new AckMessage(h, true, CameraReasons.None, CameraWireAbi.CommitServerState,
+            0, 9, uint.MaxValue, uint.MaxValue, "")));
+        rig.Server.Tick();
+        var r = Last(rig);
+        Assert.True(r.Ok);
+        Assert.Equal(CameraWireAbi.CommitClientFrame, r.Scope);       // a remote visual success is ClientFrame, whatever the client wrote
+        Assert.Equal((2000u, 2000u), (r.ElapsedMs, r.RemainingMs));   // never more than the request's Duration
+        // the bookkeeping lets the silent lease go after its Duration plus the 3 s grace, not after ~49 days
+        rig.Advance(4900, 100);
+        Assert.Empty(rig.Ended);
+        rig.Advance(100, 100);
+        var e = Assert.Single(rig.Ended);
+        Assert.Equal((1000ul, CameraEndReasons.Expired), (e.Lease, e.EndReason));
+        rig.Advance(1000);
+        Assert.True(CameraWire.TryHeartbeat(rig.SentToClient.Last(m => m.Id == CameraMessage.Heartbeat).Body, out var hb));
+        Assert.Equal(0ul, hb.Lease);                                  // and the heartbeat no longer authorizes it
+    }
+
+    [Fact]
+    public void A_Status_cannot_keep_a_lease_past_its_own_duration()
+    {
+        var rig = Bound();
+        rig.Submit(TransportOp.Apply, lease: 1000, request: Requests.Lens(durationMs: 2000));
+        rig.Tick();   // the ACK arrives now
+        Assert.True(Last(rig).Ok);
+        rig.DropToServer = (_, _) => true;   // the honest client is cut off; a hostile one keeps saying its lease has time left
+        rig.DropToClient = (_, _) => true;
+        var binding = rig.Server.Binding;
+        byte[] Status(ulong seq, uint remaining) => CameraWire.Status(new StatusMessage(binding, seq, 1000, 1, 0, remaining));
+        for (var t = 0; t < 4900; t += 100)
+        {
+            rig.Server.Receive(CameraMessage.Status, Status((ulong)t + 1, t % 200 == 0 ? uint.MaxValue : 2000u));
+            rig.Advance(100, 100);
+        }
+        Assert.Empty(rig.Ended);             // Duration 2000 + grace 3000 after the ACK: not yet
+        rig.Server.Receive(CameraMessage.Status, Status(5000, 2000));
+        rig.Advance(100, 100);
+        Assert.Equal(CameraEndReasons.Expired, Assert.Single(rig.Ended).EndReason);
+    }
+
+    private static byte[] HelloFrom(ulong nonce) =>
+        CameraWire.Hello(new HelloMessage(CameraWireAbi.Protocol, nonce, 3, 1001, CameraWireAbi.RemoteParts, CameraWireAbi.MaxKeys, CameraWireAbi.MaxBody));
+
+    [Fact]
+    public void A_new_client_world_rebinds_at_most_once_a_second_and_the_rest_change_nothing()
+    {
+        var rig = Bound();
+        rig.Client = rig.NewClient(0xBEEF, 4);   // a new client world: its rebind is taken at once
+        rig.Client.Start();
+        rig.Pump();
+        Assert.Equal(0xBEEFul, rig.Server.Binding.ClientNonce);
+        Assert.Equal(rig.Server.Binding, rig.Client.Binding);
+        rig.Submit(TransportOp.Apply, lease: 1000, request: Requests.Lens(durationMs: 60000));
+        rig.Tick();
+        Assert.True(Last(rig).Ok);
+        var binding = rig.Server.Binding;
+        var welcomes = rig.Count(CameraMessage.Welcome);
+        // a client churning Hellos with new nonces in the same second: no Welcome, no new token, the lease stays
+        for (ulong n = 1; n <= 50; n++) rig.Server.Receive(CameraMessage.Hello, HelloFrom(0xD000 + n));
+        Assert.Equal(binding, rig.Server.Binding);
+        Assert.Equal(welcomes, rig.Count(CameraMessage.Welcome));
+        Assert.Empty(rig.Ended);
+        rig.Now += 999;
+        rig.Server.Receive(CameraMessage.Hello, HelloFrom(0xE001));
+        Assert.Equal(binding, rig.Server.Binding);
+        Assert.Equal(welcomes, rig.Count(CameraMessage.Welcome));
+        rig.Now += 1;   // a second after the last rebind: the next one is taken
+        rig.Server.Receive(CameraMessage.Hello, HelloFrom(0xE002));
+        Assert.Equal(0xE002ul, rig.Server.Binding.ClientNonce);
+        Assert.NotEqual(binding.Token, rig.Server.Binding.Token);
+        Assert.Equal(welcomes + 1, rig.Count(CameraMessage.Welcome));
+        Assert.Contains(rig.Ended, e => e.Lease == 1000 && e.EndReason == CameraEndReasons.PeerDisconnected);
+        rig.Server.Receive(CameraMessage.Hello, HelloFrom(0xE003));
+        Assert.Equal(0xE002ul, rig.Server.Binding.ClientNonce);
+    }
+
+    [Fact]
+    public void A_repeated_Hello_gets_the_same_Welcome_at_most_once_a_second()
+    {
+        var rig = Bound();
+        var hello = rig.SentToServer.First(m => m.Id == CameraMessage.Hello).Body;
+        var welcome = rig.SentToClient.First(m => m.Id == CameraMessage.Welcome).Body;
+        var binding = rig.Server.Binding;
+        // the Welcome of the bind went out this millisecond: replays of the same Hello are not an amplifier
+        for (var i = 0; i < 50; i++) rig.Server.Receive(CameraMessage.Hello, hello);
+        Assert.Equal(1, rig.Count(CameraMessage.Welcome));
+        rig.Now += 999;
+        rig.Server.Receive(CameraMessage.Hello, hello);
+        Assert.Equal(1, rig.Count(CameraMessage.Welcome));
+        rig.Now += 1;
+        for (var i = 0; i < 50; i++) rig.Server.Receive(CameraMessage.Hello, hello);
+        Assert.Equal(2, rig.Count(CameraMessage.Welcome));
+        Assert.Equal(welcome, rig.SentToClient.Last(m => m.Id == CameraMessage.Welcome).Body);   // still idempotent: the same Welcome
+        Assert.Equal(binding, rig.Server.Binding);
+    }
 }

@@ -74,6 +74,10 @@ internal sealed class ServerBinding
     // §4.6 timings
     internal const long NegotiationTimeoutMs = 2000, AckDeadlineMs = 3000, RetryIntervalMs = 1000, HeartbeatIntervalMs = 1000,
         CleanupGraceMs = 3000;
+    // Hello's own budget (it is per peer, so per binding): a Hello with a new nonce replaces the binding at most once a
+    // second, and a replayed Hello resends the same Welcome at most once a second; the rest are ignored (no Welcome, no
+    // state change). The client says Hello again every second until a Welcome comes, so an ignored one is retried.
+    internal const long HelloRebindIntervalMs = 1000, WelcomeResendIntervalMs = 1000;
     internal const int MaxRetries = 2, RateBurst = 16, RatePerSecond = 10;
 
     private sealed class Pending
@@ -96,15 +100,19 @@ internal sealed class ServerBinding
     private HelloMessage? _hello;
     private WireBinding _binding;
     private byte[]? _welcome;
+    private long _welcomeSentAt;
+    private long? _helloRebindAt;   // the last time a Hello replaced a binding (null: never)
     private ulong _clientCaps;
     private int _maxBody = CameraWireAbi.MaxBody, _maxKeys = CameraWireAbi.MaxKeys;
     private ulong _serial, _requestId, _heartbeats;
     private long _lastHeartbeat;
     private Pending? _pending;
     private readonly List<(Action<TransportResult> Done, TransportResult Result)> _results = [];
-    // the lease the client holds as far as the server knows: what heartbeats authorize
-    private (ulong Lease, ulong Revision, ulong Owner)? _active;
-    private long _activeHeard;
+    // the lease the client holds as far as the server knows: what heartbeats authorize. DurationMs is its request's, and
+    // _activeSince the server's clock at the ACK that started its timeline (Apply or a Restart update): the client's
+    // reported times are clamped to the Duration, and the bookkeeping never outlives _activeSince + Duration (+ grace)
+    private (ulong Lease, ulong Revision, ulong Owner, uint DurationMs)? _active;
+    private long _activeHeard, _activeSince;
     private uint _activeRemaining;
     private readonly HashSet<ulong> _excluded = [];   // leases a timeout took out of the heartbeat
     // rate limit: a token bucket of RateBurst refilled at RatePerSecond (Apply and Update; End is never refused)
@@ -288,8 +296,9 @@ internal sealed class ServerBinding
             case CameraMessage.Status when _state == ServerBindingState.Bound && CameraWire.TryStatus(body, out var status) && status.Binding == _binding:
                 if (_active is { } a && status.Lease == a.Lease && status.Revision == a.Revision)
                 {
+                    // a client's number, so never more than the lease's own Duration (Tick also caps it at _activeSince + Duration)
                     _activeHeard = _o.Clock();
-                    _activeRemaining = status.RemainingMs;
+                    _activeRemaining = Math.Min(status.RemainingMs, a.DurationMs);
                 }
                 break;
         }
@@ -297,14 +306,23 @@ internal sealed class ServerBinding
 
     private void OnHello(HelloMessage hello)
     {
-        // the same peer, world and incarnation: the same Welcome (idempotent), never a new binding
+        var now = _o.Clock();
+        // the same peer, world and incarnation: the same Welcome (idempotent), never a new binding; at most once a second
         if (_state == ServerBindingState.Bound && _hello is { } known && known.ClientNonce == hello.ClientNonce &&
             known.ClientEpoch == hello.ClientEpoch && known.LocalEntity == hello.LocalEntity)
         {
+            if (now - _welcomeSentAt < WelcomeResendIntervalMs) return;
+            _welcomeSentAt = now;
             _o.Send(CameraMessage.Welcome, _welcome!);
             return;
         }
-        if (_state == ServerBindingState.Bound) DropBinding(CameraEndReasons.PeerDisconnected);  // a new client world
+        if (_state == ServerBindingState.Bound)
+        {
+            // a new client world replaces the binding, at most once a second: a client churning nonces is ignored
+            if (_helloRebindAt is { } last && now - last < HelloRebindIntervalMs) return;
+            _helloRebindAt = now;
+            DropBinding(CameraEndReasons.PeerDisconnected);
+        }
         Bind(hello);
     }
 
@@ -321,6 +339,7 @@ internal sealed class ServerBinding
             _incarnation, token, _clientCaps, (uint)_maxBody, (ushort)_maxKeys));
         _state = ServerBindingState.Bound;
         var now = _o.Clock();
+        _welcomeSentAt = now;
         _o.Send(CameraMessage.Welcome, _welcome);
         _lastHeartbeat = now;  // the first heartbeat a second after Welcome
         if (_pending is { Bytes: null } parked) SendPending(parked, now);
@@ -333,6 +352,14 @@ internal sealed class ServerBinding
             return;  // late, duplicate (a replayed ACK), or for something already given up
         _pending = null;
         var now = _o.Clock();
+        // The client's numbers are not trusted: its times are clamped to the Duration it was sent (an ok Apply/Update), else
+        // to the protocol's longest lease; the flags to the defined result flags (the decoder refuses others too)
+        var visual = ack.Ok && p.Op != TransportOp.End;
+        var bound = visual ? p.Request!.DurationMs : CameraWireAbi.MaxDurationMs;
+        var elapsed = Math.Min(ack.ElapsedMs, bound);
+        var remaining = Math.Min(ack.RemainingMs, bound);
+        var scope = ack.Scope;
+        var flags = ack.Flags & (CameraWireAbi.FlagMayHaveApplied | CameraWireAbi.FlagAlreadyEnded);
         if (ack.Ok)
         {
             if (p.Op == TransportOp.End)
@@ -341,12 +368,15 @@ internal sealed class ServerBinding
             }
             else
             {
-                _active = (p.Lease, p.Revision, p.Owner);
+                // a Preserve update keeps the lease's timeline (and so its start); Apply and Restart begin a new one
+                if (p.Op != TransportOp.UpdatePreserve || _active is not { } cur || cur.Lease != p.Lease) _activeSince = now;
+                _active = (p.Lease, p.Revision, p.Owner, bound);
                 _activeHeard = now;
-                _activeRemaining = ack.RemainingMs;
+                _activeRemaining = remaining;
+                scope = CameraWireAbi.CommitClientFrame;  // a successful remote visual result is ClientFrame committed (§4.6)
             }
         }
-        Queue(p, new TransportResult(ack.Ok, ack.Reason, ack.Scope, ack.Flags, ack.Frame, ack.ElapsedMs, ack.RemainingMs,
+        Queue(p, new TransportResult(ack.Ok, ack.Reason, scope, flags, ack.Frame, elapsed, remaining,
             ack.Diagnostic.Length == 0 ? null : ack.Diagnostic, p.Lease, p.Revision));
     }
 
@@ -393,9 +423,10 @@ internal sealed class ServerBinding
             var (lease, revision) = Authorized();
             _o.Send(CameraMessage.Heartbeat, CameraWire.Heartbeat(new HeartbeatMessage(_binding, ++_heartbeats, _serial, lease, revision)));
         }
-        if (_active is { } a && now - _activeHeard >= _activeRemaining + CleanupGraceMs)
+        if (_active is { } a && now - Math.Min(_activeHeard + _activeRemaining, _activeSince + a.DurationMs) >= CleanupGraceMs)
         {
-            // bookkeeping only: the client expires by itself; no word from it for its remaining time plus the grace
+            // bookkeeping only: the client expires by itself; no word from it for its remaining time plus the grace, and
+            // never later than the lease's Duration after its timeline started plus the grace, whatever Status says
             _active = null;
             _o.OnEnded?.Invoke(new RemoteEnded(a.Lease, a.Revision, CameraEndReasons.Expired, CameraReasons.None, 0));
         }
