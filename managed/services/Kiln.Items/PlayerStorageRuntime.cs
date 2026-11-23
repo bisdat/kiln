@@ -331,6 +331,9 @@ internal static unsafe class PlayerStorageRuntime
 
     private static void Post(StorageNative.Event* e)
     {
+        // Temporary or retired holders without a public registration post housekeeping for Kiln.Saves. Keep those
+        // events in the raw queue, not on the public bus (ordinary orphan PARKED without a holder has target 0).
+        if (e->Handle == 0 && e->Target != 0 && e->Kind is StorageNative.EventRestored or StorageNative.EventParked) return;
         var player = new EntityId(e->Player);
         switch (e->Kind)
         {
