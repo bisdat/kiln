@@ -1,0 +1,113 @@
+{{!Kiln's API reference in frostdev.io's Kiln look (tools/docs-site/template, MIT). Replaces the modern template's layout: no
+Bootstrap, no highlight.js, no lunr worker. The header and footer are frostdev.io's (src/layouts/MarketingLayout.astro on a
+/kiln page). static/kiln-docs.js draws the navigation from static/nav.json (theme.py; one cached file for every page), opens
+the group of the page's assembly from api/toc/<assembly>.json (services.py), and loads search/*.json (search_index.py) the
+first time the search box is used. Only this layout's include brings static files: DocFX's modern public/ stays out.}}
+{{!include(/^static/.*/)}}
+{{!include(fraunces-OFL.txt)}}
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    {{#redirect_url}}
+    <meta http-equiv="refresh" content="0;URL='{{redirect_url}}'">
+    {{/redirect_url}}
+    {{^redirect_url}}
+    <title>{{#title}}{{title}}{{/title}}{{^title}}{{>partials/title}}{{/title}} | Kiln API reference</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#0f0d0c">
+    {{#_description}}<meta name="description" content="{{_description}}">{{/_description}}
+    {{#description}}<meta name="description" content="{{description}}">{{/description}}
+    <link rel="icon" href="{{_rel}}{{_kilnAssets.favicon}}" type="image/png">
+    <link rel="preload" href="{{_rel}}{{_kilnAssets.font}}" as="font" type="font/woff2" crossorigin>
+    <link rel="stylesheet" href="{{_rel}}{{_kilnAssets.css}}">
+    <link rel="preload" href="{{_rel}}{{_kilnAssets.nav}}" as="fetch" crossorigin>
+    {{#kilnAsm}}<link rel="preload" href="{{_rel}}api/toc/{{kilnAsm}}.json" as="fetch" crossorigin>{{/kilnAsm}}
+    {{^kilnAsm}}{{#assemblies.0}}<link rel="preload" href="{{_rel}}api/toc/{{.}}.json" as="fetch" crossorigin>{{/assemblies.0}}{{/kilnAsm}}
+    <meta name="kiln:rel" content="{{_rel}}">
+    <meta name="kiln:asm" content="{{kilnAsm}}{{^kilnAsm}}{{assemblies.0}}{{/kilnAsm}}">
+    <meta name="kiln:release" content="{{_kilnRelease}}">
+    <meta name="kiln:nav" content="{{_rel}}{{_kilnAssets.nav}}">
+    <!-- data-cfasync: Cloudflare's Rocket Loader (on for frostdev.io) would hold the script until the page's load event -->
+    <script defer data-cfasync="false" src="{{_rel}}{{_kilnAssets.js}}"></script>
+    {{/redirect_url}}
+  </head>
+  {{^redirect_url}}
+  <body class="kd" data-yaml-mime="{{yamlmime}}" data-layout="{{_layout}}{{layout}}">
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="marketing-nav">
+      <a href="https://frostdev.io/" aria-label="Frostdev home">
+        <img src="{{_rel}}{{_kilnAssets.icon}}" width="96" height="96" alt="Frostdev">
+      </a>
+      <nav aria-label="Main navigation">
+        <a href="https://frostdev.io/#projects">Projects</a>
+        <a href="https://frostdev.io/guides">Guides</a>
+        <a href="https://frostdev.io/kiln/crucible">Crucible</a>
+        <a href="https://frostdev.io/kiln/download">Download</a>
+        <a href="https://frostdev.io/kiln/wiki">Wiki</a>
+        <a href="https://frostdev.io/kiln/api/" aria-current="page">API reference</a>
+        <a href="https://frostdev.io/kiln/roadmap">Roadmap</a>
+        <a href="https://frostdev.io/kiln/agents">Agent skill</a>
+        <a href="https://frostdev.io/login">Sign in <span aria-hidden="true">↗</span></a>
+      </nav>
+    </header>
+
+    <div class="kd-wrap">
+      <aside class="kd-side" aria-label="Kiln API reference">
+        <a class="kd-home" href="{{_rel}}index.html"><img src="{{_rel}}{{_kilnAssets.mark}}" width="64" height="64" alt="">API reference</a>
+        <p class="kd-release">{{#_kilnRelease}}Kiln {{_kilnRelease}}{{/_kilnRelease}}{{^_kilnRelease}}Kiln, next release{{/_kilnRelease}}</p>
+        <form class="kd-search" role="search" id="search" action="{{_rel}}api/index.html">
+          <label class="sr-only" for="search-query">Search the reference</label>
+          <input id="search-query" name="q" type="search" placeholder="Search types, members, guides" autocomplete="off" spellcheck="false"
+            aria-controls="search-results" aria-expanded="false" aria-autocomplete="list" role="combobox">
+          <kbd aria-hidden="true">/</kbd>
+          <div class="kd-results" id="search-results" role="listbox" aria-label="Search results" hidden></div>
+        </form>
+        <details class="kd-navbox" open data-kd-nav>
+          <summary>Pages <span aria-hidden="true">↕</span></summary>
+          <nav id="toc" aria-label="Reference pages"></nav>
+          <ul class="kd-list kd-fallback">
+            <li><a href="{{_rel}}api/index.html">API reference</a></li>
+            <li><a href="{{_rel}}modding/README.html">Guide</a></li>
+          </ul>
+          <nav aria-label="Kiln">
+            <h2>Kiln</h2>
+            <ul class="kd-list">
+              <li><a href="https://frostdev.io/kiln">Kiln home</a></li>
+              <li><a href="https://frostdev.io/kiln/wiki/first-mod">Your first mod</a></li>
+              <li><a href="https://frostdev.io/kiln/agents">Agent skill</a></li>
+              <li><a href="https://frostdev.io/kiln/discord">Discord</a></li>
+              <li><a href="https://github.com/frostdev-ops/kiln">GitHub</a></li>
+            </ul>
+          </nav>
+        </details>
+      </aside>
+
+      <main id="main" class="kd-doc">
+        <p class="kiln-crumbs">
+          <a href="https://frostdev.io/kiln">Kiln</a><span aria-hidden="true">/</span><a href="{{_rel}}api/index.html">API reference</a>
+          {{#kilnGuide}}<span aria-hidden="true">/</span><a href="{{_rel}}modding/README.html">Guide</a>{{/kilnGuide}}
+          {{^kilnAsm}}{{#assemblies.0}}<span aria-hidden="true">/</span><a href="{{_rel}}api/services/{{.}}.html">{{.}}</a>{{/assemblies.0}}{{/kilnAsm}}
+        </p>
+        <p class="kd-pinned" id="kd-pinned" hidden></p>
+        <article class="kiln-prose" data-uid="{{uid}}">
+          {{!body}}
+        </article>
+      </main>
+
+      <aside class="kd-toc" aria-label="On this page"><nav id="affix"></nav></aside>
+    </div>
+
+    <footer class="marketing-footer">
+      <span>© {{_kilnYear}} Frostdev</span>
+      <nav aria-label="Footer navigation">
+        <a href="https://frostdev.io/kiln/download">Download Kiln</a>
+        <a href="https://github.com/frostdev-ops">GitHub</a>
+        <a href="https://frostdev.io/privacy">Privacy</a>
+        <a href="mailto:admin@frostdev.io">Contact</a>
+      </nav>
+    </footer>
+    <p class="kiln-trademark">Enshrouded is a trademark of Keen Games GmbH. Kiln is unofficial.</p>
+  </body>
+  {{/redirect_url}}
+</html>

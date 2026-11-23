@@ -4,6 +4,7 @@
 
   python3 -I tools/docs-site/test_build.py
 """
+import json
 import os
 from pathlib import Path
 import shutil
@@ -23,8 +24,9 @@ class Build(unittest.TestCase):
         self.here.mkdir(parents=True)
         for name in ("build.sh", "docfx.json", "index.md", "toc.yml", "filterConfig.yml", "annotate.py", "apiids.py", "docxml.py",
                      "samples.py", "services.json", "services.py", "since.py", "undocumented.py", "undocumented-baseline.txt",
-                     "stage-guide.py", "check-links.py"):
+                     "stage-guide.py", "check-links.py", "theme.py", "search_index.py", "wiki.json"):
             shutil.copy2(HERE / name, self.here / name)
+        shutil.copytree(HERE / "template", self.here / "template")
         # since.py reads the release tooling's ordering of releases; the ledger and Mods.cs are what annotate.py --repo reads
         (self.root / "repo/tools/release/lib").mkdir(parents=True)
         shutil.copy2(HERE.parent / "release/lib/apihistory.py", self.root / "repo/tools/release/lib/apihistory.py")
@@ -85,10 +87,16 @@ elif sys.argv[1] == "exec":
                 text += "  summary: A summary.\\n"
             (dest / "Kiln.Mock.yml").write_text(text)
     elif action == "build":
+        import re
         site = pathlib.Path(sys.argv[sys.argv.index("--output") + 1])
         site.mkdir(parents=True)
         (site / "index.html").write_text("built")
         (site / "xrefmap.yml").touch()
+        (site / "index.json").write_text("{}")
+        (site / "api").mkdir()
+        for page in [] if os.environ.get("MOCK_NO_PAGES") else pathlib.Path("api").glob("*.yml"):
+            ids = [re.sub(r"[^A-Za-z0-9_]", "_", u.strip()) for u in re.findall(r"^- uid: (.+)$", page.read_text(), re.M)]
+            (site / "api" / (page.stem + ".html")).write_text("".join(f'<h1 id="{i}"></h1>' for i in ids))
     else:
         sys.exit("unexpected docfx action")
 else:
@@ -119,6 +127,37 @@ else:
         self.assertIn("# Kiln API reference", (api / "index.md").read_text())
         # the pages and the table of contents are part of what docfx builds
         self.assertIn("api/services/*.md", (self.out / "docs-work/docfx.json").read_text())
+        self.assertIn("api/toc/*.json", (self.out / "docs-work/docfx.json").read_text())
+
+    def test_the_site_has_the_template_the_navigation_and_its_own_search(self):
+        (self.out / "mdk-stage/Kiln.Api.xml").write_text(
+            "<doc><assembly><name>Kiln.Api</name></assembly><members><member name='T:Kiln.Mock'><summary>A mock.</summary></member></members></doc>")
+        result = self.build("typed", KILN_DOCS_RELEASE="0.2.0-dev.31")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        config = json.loads((self.out / "docs-work/docfx.json").read_text())["build"]
+        self.assertEqual(config["template"], ["default", "modern", "template"])
+        meta = config["globalMetadata"]
+        self.assertEqual(meta["_kilnRelease"], "0.2.0-dev.31")
+        self.assertRegex(meta["_kilnAssets"]["css"], r"^static/kiln-docs\.[0-9a-f]{10}\.css$")
+        self.assertTrue((self.out / "docs-work/template" / meta["_kilnAssets"]["js"]).is_file())
+        self.assertTrue((self.out / "docs-work/template/layout/_master.tmpl").is_file())
+        nav = json.loads((self.out / "docs-work/template" / meta["_kilnAssets"]["nav"]).read_text())
+        self.assertEqual(nav, {"v": 1, "groups": [["Kiln.Api", "api/services/Kiln.Api.html", 1]],
+                               "guides": [["README", "modding/README.html"], ["Local", "modding/local.html"]],
+                               "schemas": [["Example", "modding/schemas/example.html"]]})
+        self.assertIn("theme: 7 static files", result.stdout)
+        site = self.out / "docs-site"
+        self.assertFalse((site / "index.json").exists())           # DocFX's 10 MB index of every page's text
+        pages = json.loads((site / "search/pages.json").read_text())
+        self.assertEqual(pages["t"], [["Mock", "Kiln.Mock.html", "c", 0, "A mock.", 0]])
+        self.assertIn("search: 1 types, 0 members", result.stdout)
+
+    def test_a_search_entry_without_its_page_stops_the_build(self):
+        (self.out / "mdk-stage/Kiln.Api.xml").write_text(
+            "<doc><assembly><name>Kiln.Api</name></assembly><members><member name='T:Kiln.Mock'><summary>A mock.</summary></member></members></doc>")
+        result = self.build("typed", MOCK_NO_PAGES="1")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("search: 1 entries point at no page or anchor of the site", result.stderr)
 
     def test_a_typed_member_gets_its_since_line_and_a_service_page(self):
         (self.out / "mdk-stage/Kiln.Api.xml").write_text(
@@ -133,7 +172,8 @@ else:
         self.assertNotIn("Since mod API", (self.out / "mdk-stage/Kiln.Api.xml").read_text())
         api = self.out / "docs-work/api"
         self.assertIn("- [Mock](../Kiln.Mock.yml) (class): A mock.", (api / "services/Kiln.Api.md").read_text())
-        self.assertIn('- name: "Kiln.Api"\n  href: services/Kiln.Api.md\n  items:\n  - uid: "Kiln.Mock"', (api / "toc.yml").read_text())
+        self.assertIn('- name: "Kiln.Api"\n  href: services/Kiln.Api.md\n', (api / "toc.yml").read_text())
+        self.assertEqual(json.loads((api / "toc/Kiln.Api.json").read_text())["types"], [["Mock", "Kiln.Mock.html", "c"]])
 
     def test_a_build_without_the_api_history_ledger_fails_instead_of_leaving_the_since_lines_out(self):
         (self.root / "repo/managed/api-history.tsv").unlink()

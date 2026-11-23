@@ -5,13 +5,19 @@
   tools/docs-site/services.py [--services <services.json>] <api folder> <stage folder>
 
 Run after the second `docfx metadata`: <api folder> holds the ManagedReference YAML (one file per type), <stage folder> the
-annotated Kiln.*.xml docs. DocFX writes toc.yml as one namespace (`Kiln`) holding every type, 4,000 of them in one flat list;
-this replaces it with one group per assembly, a service of Kiln or Kiln.Api itself, from each item's `assemblies:` field.
+annotated Kiln.*.xml docs. DocFX writes toc.yml as one namespace (`Kiln`) holding every type, 4,000 of them in one flat list,
+which its template drew in full on every page (a 740 KB toc.json, 20,000 DOM nodes); this replaces it with one group per
+assembly, a service of Kiln or Kiln.Api itself, from each item's `assemblies:` field, and the types of each group in a file of
+their own that the site's template (template/public/kiln-docs.js) loads when the group is opened.
   api/toc.yml                       Overview, then Kiln.Api, Kiln.Game, Kiln.Testing, Kiln.TestKit, the services (A-Z), the namespaces
+  api/toc/index.json                the same groups for the template: name, page, KilnServices name, summary, number of types
+  api/toc/<assembly>.json           the group's types: [name, page, kind letter] sorted like the list on the service page
   api/index.md                      the overview: every assembly with its KilnServices name, summary and guide
-  api/services/<assembly>.md        the service's page: facts, guide, capabilities, samples and every type with its first sentence
+  api/services/<assembly>.md        the service's page: facts, guide, wiki pages, capabilities, samples and every type with its
+                                    first sentence
 The facts of a service come from services.json (gen-services.py writes it from the repository); an assembly it does not know
-still gets its group and a page of its types. Standard library only.
+still gets its group and a page of its types. The wiki pages on frostdev.io that explain an assembly come from wiki.json.
+Standard library only.
 """
 import argparse
 import importlib.util
@@ -81,12 +87,24 @@ def quote(text):
     return json.dumps(text, ensure_ascii=False)
 
 
+KINDS = {"Class": "c", "Struct": "s", "Enum": "e", "Interface": "i", "Delegate": "d"}
+
+
+def sorted_types(asm, types):
+    return sorted(types, key=lambda x: (display(x[0], asm).lower(), display(x[0], asm)))
+
+
+def page(file):
+    """The page DocFX builds from a YAML file of the metadata."""
+    return file[:-len(".yml")] + ".html" if file.endswith(".yml") else file
+
+
 def toc(items, by_assembly):
+    """api/toc.yml: the groups only. Their types are in api/toc/<assembly>.json (nav_files), which the template loads when a
+    group is opened; DocFX gets no list of 4,000 types to draw on every page."""
     lines = ["### YamlMime:TableOfContent", "- name: Overview", "  href: index.md"]
     for asm in order(by_assembly):
-        lines += [f"- name: {quote(asm)}", f"  href: services/{asm}.md", "  items:"]
-        for item, _ in sorted(by_assembly[asm], key=lambda x: (display(x[0], asm).lower(), display(x[0], asm))):
-            lines += [f"  - uid: {quote(item['uid'])}", f"    name: {quote(display(item, asm))}", f"    type: {item['type']}"]
+        lines += [f"- name: {quote(asm)}", f"  href: services/{asm}.md"]
     spaces = sorted((i for i, _ in items if i.get("type") == "Namespace"), key=lambda i: i["uid"])
     if spaces:
         lines += ["- name: Namespaces", "  items:"]
@@ -105,14 +123,21 @@ def guide_link(path, up="../../"):
 
 
 def esc(text):
-    """Text for a Markdown table cell or list line: `<T>` is no tag, a pipe no cell break."""
-    return text.replace("<", "&lt;").replace(">", "&gt;").replace("|", "\\|").replace("\n", " ")
+    """Text for a Markdown table cell or list line: `<T>` is no tag, a pipe no cell break, `Kiln.Ecs.*` no emphasis."""
+    return text.replace("<", "&lt;").replace(">", "&gt;").replace("|", "\\|").replace("*", "\\*").replace("\n", " ")
 
 
-def landing(asm, info, types, summaries):
+def wiki_links(wiki, asm):
+    """Markdown links to the frostdev.io wiki pages wiki.json names for an assembly."""
+    base = (wiki or {}).get("base", "")
+    return ", ".join(f"[{esc(title)}]({base}{slug})" for slug, title in (wiki or {}).get("assemblies", {}).get(asm, []))
+
+
+def landing(asm, info, types, summaries, wiki=None):
     info = info or {}
     name = info.get("name")
-    out = ["---", f"title: {quote(asm)}", "---", f"# {asm}", ""]
+    # kilnAsm: the template opens this assembly's group in the navigation
+    out = ["---", f"title: {quote(asm)}", f"kilnAsm: {quote(asm)}", "---", f"# {asm}", ""]
     if info.get("summary"):
         out += [esc(info["summary"]).rstrip(".") + ".", ""]
     rows = [("Assembly", f"`{asm}.dll`")]
@@ -124,6 +149,8 @@ def landing(asm, info, types, summaries):
         rows.append(("KilnServices name", "none: every mod has it"))
     if info.get("guides"):
         rows.append(("Guide", ", ".join("[{}]({})".format(*guide_link(g)) for g in info["guides"])))
+    if wiki_links(wiki, asm):
+        rows.append(("Wiki", wiki_links(wiki, asm)))
     rows.append(("Types", str(len(types))))
     out += [f"- **{k}:** {v}" for k, v in rows] + [""]
     if name:
@@ -141,7 +168,7 @@ def landing(asm, info, types, summaries):
     # a list, not a table: DocFX's Markdown parser stops at "elements too deeply nested" on a table of a few hundred rows
     out += ["## Types", ""]
     listed = [(i, f) for i, f in types if not i["uid"].startswith(GENERATED_ROOT)]
-    for item, file in sorted(listed, key=lambda x: (display(x[0], asm).lower(), display(x[0], asm))):
+    for item, file in sorted_types(asm, listed):
         label = esc(display(item, asm))
         summary = esc(summaries.get(item.get("commentId"), "")).replace("\\|", "|")
         out.append(f"- [{label}](../{file}) ({item['type'].lower()})" + (f": {summary}" if summary else ""))
@@ -165,30 +192,51 @@ def overview(by_assembly, known):
     return "\n".join(out)
 
 
-def build(api, stage, services_json):
+def build(api, stage, services_json, wiki_json=None):
     api = Path(api)
     items = read_items(api)
     by_assembly = group(items)
     known = {s["assembly"]: s for s in json.loads(Path(services_json).read_text(encoding="utf-8"))["services"]} \
         if services_json and Path(services_json).is_file() else {}
+    wiki = json.loads(Path(wiki_json).read_text(encoding="utf-8")) if wiki_json and Path(wiki_json).is_file() else None
     summaries = read_summaries(stage)
     (api / "services").mkdir(exist_ok=True)
     for asm, types in by_assembly.items():
-        (api / "services" / f"{asm}.md").write_text(landing(asm, known.get(asm), types, summaries), encoding="utf-8")
+        (api / "services" / f"{asm}.md").write_text(landing(asm, known.get(asm), types, summaries, wiki), encoding="utf-8")
     (api / "index.md").write_text(overview(by_assembly, known), encoding="utf-8")
     (api / "toc.yml").write_text(toc(items, by_assembly), encoding="utf-8")
+    (api / "toc").mkdir(exist_ok=True)
+    for name, doc in nav_files(by_assembly, known).items():
+        (api / "toc" / name).write_text(json.dumps(doc, ensure_ascii=False, separators=(",", ":")) + "\n", encoding="utf-8")
     return by_assembly
+
+
+def nav_files(by_assembly, known):
+    """{file name: document} of api/toc/: index.json (the groups) and one file of types per assembly. Pages are relative to
+    api/. Compact JSON: Kiln.Game alone has 2,000 types."""
+    groups = []
+    out = {}
+    for asm in order(by_assembly):
+        info = known.get(asm) or {}
+        types = sorted_types(asm, by_assembly[asm])
+        groups.append({"name": asm, "href": f"services/{asm}.html", "service": info.get("name"),
+                       "summary": (info.get("summary") or "").rstrip("."), "types": len(types)})
+        out[f"{asm}.json"] = {"v": 1, "assembly": asm,
+                              "types": [[display(i, asm), page(f), KINDS.get(i["type"], "c")] for i, f in types]}
+    out["index.json"] = {"v": 1, "groups": groups}
+    return out
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--services", default=str(HERE / "services.json"))
+    ap.add_argument("--wiki", default=str(HERE / "wiki.json"))
     ap.add_argument("api")
     ap.add_argument("stage")
     a = ap.parse_args()
     if not Path(a.api).is_dir():
         sys.exit(f"no api folder {a.api}")
-    by_assembly = build(a.api, a.stage, a.services)
+    by_assembly = build(a.api, a.stage, a.services, a.wiki)
     print(f"services: {len(by_assembly)} assemblies, {sum(len(v) for v in by_assembly.values())} types in the table of contents")
 
 
