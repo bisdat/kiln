@@ -134,4 +134,7 @@ in `kiln/data/<id>` and `kiln/config`, which this does not touch.
 Tests: `native/core/tests/test-staged.sh` (host, ASan+UBSan: every crash point of five scenarios in forked children,
 a second crash while putting back, refusals, rollbacks, `kiln/data` byte for byte), `test-staged-wine.sh` (the same
 on the Win32 code path under Wine; the same binary runs natively on Windows, where 8.3 short names are checked
-against a real NTFS volume), `managed/tests/Kiln.Host.Tests` `StagedProbationTests` and `StagingTests`.
+against a real NTFS volume), `native/proxy/tests/test-staged-gate.sh` (the real `dinput8.dll` under Wine, or
+`staged_gate/gate_test.py` natively on Windows: a stand-in server exe whose loader maps the proxy, which renames the
+running `dinput8.dll` and the folder that then holds it), `managed/tests/Kiln.Host.Tests` `StagedProbationTests` and
+`StagingTests`.
