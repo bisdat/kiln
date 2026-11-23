@@ -93,12 +93,13 @@ public abstract class ConfigFile
         ModId = owner?.Info.Id ?? "kiln";
         Kind = kind;
         Type = type;
-        ValueObject = value;
+        _value = value;
         PerWorld = perWorld;
         FilePath = perWorld ? "" : System.IO.Path.Combine(KilnPaths.Config, id + ".json");
         var defaults = Activator.CreateInstance(type)!;
         _nodes = ConfigSchema.Build(type, defaults);
         Collect(_nodes, []);
+        _initialized = true;
     }
 
     private void Collect(List<ConfigNode> nodes, ConfigNode[] chain)
@@ -141,7 +142,10 @@ public abstract class ConfigFile
     internal string? WorldDirectory { get; private set; }
 
     /// <summary>The live config object (the mod's <c>Value</c>).</summary>
-    internal object ValueObject { get; }
+    private readonly object _value;
+    private readonly bool _initialized;
+    internal bool RegistryInputOnly;
+    internal object ValueObject { get { if (_initialized) RegistryContext.Observe(this); return _value; } }
 
     /// <summary>When the file was last read (UTC); null before.</summary>
     public DateTime? LoadedAt { get; private set; }
@@ -169,6 +173,7 @@ public abstract class ConfigFile
         add
         {
             if (value is null) return;
+            if (RegistryInputOnly) throw new RegistryContextException(RegistryContextError.ReadOnly, "registry input snapshots are read-only; register live settings in OnLoad");
             if (Game.InBoot) throw new InvalidOperationException(Game.NotInBoot("ConfigFile.Changed"));
             var mod = ModContext.CurrentMod;
             lock (_handlers) _handlers.Add((value, mod));
@@ -217,6 +222,7 @@ public abstract class ConfigFile
     /// <see cref="TrySet"/> where the caller must know the value was saved.</summary>
     public void Set(string path, object? value)
     {
+        if (RegistryInputOnly) throw new RegistryContextException(RegistryContextError.ReadOnly, "registry input snapshots are read-only; register live settings in OnLoad");
         if (Game.InBoot) throw new InvalidOperationException(Game.NotInBoot("ConfigFile.Set"));
         Game.AssertTickThread();
         if (!TrySetCore(path, value, strict: false, out var error)) throw new ArgumentException(error, nameof(value));
@@ -231,6 +237,7 @@ public abstract class ConfigFile
     /// value, and <see cref="Changed"/> is not raised. Tick thread; not in <see cref="Mod.OnBoot"/>.</summary>
     public bool TrySet(string path, object? value, out string error)
     {
+        if (RegistryInputOnly) throw new RegistryContextException(RegistryContextError.ReadOnly, "registry input snapshots are read-only; register live settings in OnLoad");
         if (Game.InBoot) throw new InvalidOperationException(Game.NotInBoot("ConfigFile.Set"));
         Game.AssertTickThread();
         return TrySetCore(path, value, strict: true, out error);
@@ -296,6 +303,7 @@ public abstract class ConfigFile
     /// stay and a later <c>Save</c> writes them. Tick thread; not in <see cref="Mod.OnBoot"/>.</summary>
     public void Save()
     {
+        if (RegistryInputOnly) throw new RegistryContextException(RegistryContextError.ReadOnly, "registry input snapshots are read-only; register live settings in OnLoad");
         if (Game.InBoot) throw new InvalidOperationException(Game.NotInBoot("ConfigFile.Save"));
         Game.AssertTickThread();
         foreach (var (node, chain) in _values)
@@ -312,6 +320,7 @@ public abstract class ConfigFile
     /// <see cref="Mod.OnBoot"/>.</summary>
     public void Reload()
     {
+        if (RegistryInputOnly) throw new RegistryContextException(RegistryContextError.ReadOnly, "registry input snapshots are read-only; register live settings in OnLoad");
         if (Game.InBoot) throw new InvalidOperationException(Game.NotInBoot("ConfigFile.Reload"));
         Game.AssertTickThread();
         _lastText = null;
@@ -760,6 +769,17 @@ public abstract class ConfigFile
     /// folder of this config's file. Leaving a world puts the defaults back first, so nothing of the old world is kept;
     /// a new world without a file gets one written from the defaults. Raises <see cref="Changed"/> with
     /// <see cref="ConfigChangeSource.World"/> for every entry whose value differs afterwards. Tick thread.</summary>
+    internal void LoadRegistryInput(string? worldDirectory)
+    {
+        RegistryInputOnly = true;
+        if (PerWorld)
+        {
+            WorldDirectory = worldDirectory;
+            FilePath = worldDirectory is null ? "" : System.IO.Path.Combine(worldDirectory, "config", Id + ".json");
+        }
+        LoadForBoot(); // validated/clamped input values, without registering or writing anything
+    }
+
     internal void BindWorld(string? worldDirectory)
     {
         if (!PerWorld || string.Equals(worldDirectory, WorldDirectory, StringComparison.Ordinal)) return;
@@ -992,6 +1012,7 @@ public static partial class Config
     /// <param name="name">For a second config of the same kind: becomes part of the file name.</param>
     public static ModConfig<T> Register<T>(ConfigKind kind = ConfigKind.Common, string? name = null) where T : class, new()
     {
+        if (RegistryContext.Current is { } registry) return RegistryInput<T>(registry, kind, name);
         if (Game.InBoot) return RegisterInBoot<T>(kind, name);
         Game.AssertTickThread();
         var mod = ModContext.CurrentMod;

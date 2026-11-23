@@ -24,6 +24,8 @@ come with code fixes.
 | [KILN109](#kiln109) | warning | client-world `EcsPrograms.TryBind` called off the game's main thread (since 0.2.0-dev.29) | services/world.md |
 | [KILN120](#kiln120) | warning | a Kiln result (`IKilnResult`) thrown away | contract.md, "The error rule" |
 | [KILN121](#kiln121) | warning | a `[RequiresCapability]` member used with nothing that asks for its row | contract.md; the attributes and the guard table (generated) |
+| [KILN122](#kiln122) | warning | registry points declared without a real OnRegistry override (API 0.2.17) | registries/README.md |
+| [KILN123](#kiln123) | warning | zero, Manual or unknown automatic registry flags (API 0.2.17) | registries/README.md |
 | [KILN199](#kiln199) | **error** | the value type of `Replication.Extension<T>` outside the rule (since 0.2.0-dev.31) | services/replication.md "Sidecars" |
 | [KILN194](#kiln194) | **error** | a path string the game doesn't have | the local catalog |
 | [KILN195](#kiln195) | warning | a config name no program of the game declares | the local catalog |
@@ -47,6 +49,18 @@ Other KILN codes:
   natives.json cannot be read or written, KILN037 when a hand-written entry of the same name is replaced.
 - **KILN180** to **KILN182** are the typed-hook generator's warnings (Kiln.Sigs, [../services/hooks.md](../services/hooks.md#typed-hooks-and-calls-detour_typed-kilnsigs-since-020-dev29)): a descriptor of the mod's sigdb fragment it cannot use (KILN180, with the reason: an unknown type, a struct return over 8 bytes without `sret`, more than 20 positions, two descriptions of one symbol that differ, two symbols with one class name), descriptors in a project without Kiln.Hooks (KILN181), a sigdb file that is not JSON (KILN182). A descriptor it reports is not generated.
 - **KL** codes are the data-file linter's (`kiln lint`).
+
+## KILN122
+
+`[RegistryEntryPoints(...)]` needs a real `Mod.OnRegistry(RegistryContext)` override (an inherited override counts).
+A hidden `new` method does not count. Kiln reads this constant metadata without executing mod code and refuses a declaration
+without an author. Remove the attribute or implement the override. Since API 0.2.17.
+
+## KILN123
+
+Automatic registry points are a nonzero combination of GameStart, ModLoad, WorldLoad and HotReload. Zero, unknown bits and
+Manual are invalid; use explicit `Registry.Change` for Manual transactions. Without the attribute an override defaults to
+GameStart. The Host repeats this validation when loading a mod. Since API 0.2.17.
 
 ## How it ships
 - **Package mode:** `Kiln.Sdk` carries the analyzers in `analyzers/dotnet/cs/`:

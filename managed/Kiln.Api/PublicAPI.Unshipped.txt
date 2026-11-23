@@ -1,1 +1,52 @@
 #nullable enable
+Kiln.RegistryThreadOnlyAttribute
+Kiln.RegistryThreadOnlyAttribute.RegistryThreadOnlyAttribute() -> void
+[KILNX031]Kiln.RegistryContext
+[KILNX031]Kiln.RegistryContext.EntryPoint.get -> Kiln.RegistryEntryPoint
+[KILNX031]Kiln.RegistryContext.Identity.get -> string!
+[KILNX031]Kiln.RegistryContext.ModId.get -> string!
+[KILNX031]Kiln.RegistryContext.Phase.get -> Kiln.RegistryPhase
+[KILNX031]Kiln.RegistryContext.World.get -> Kiln.RegistryWorld?
+[KILNX031]Kiln.RegistryContextError
+[KILNX031]Kiln.RegistryContextError.Closed = 0 -> Kiln.RegistryContextError
+[KILNX031]Kiln.RegistryContextError.ReadOnly = 5 -> Kiln.RegistryContextError
+[KILNX031]Kiln.RegistryContextError.RuntimeExportUnavailable = 6 -> Kiln.RegistryContextError
+[KILNX031]Kiln.RegistryContextError.Unloaded = 1 -> Kiln.RegistryContextError
+[KILNX031]Kiln.RegistryContextError.WorldChanged = 4 -> Kiln.RegistryContextError
+[KILNX031]Kiln.RegistryContextError.WorldSettingsUnavailable = 3 -> Kiln.RegistryContextError
+[KILNX031]Kiln.RegistryContextError.WrongThread = 2 -> Kiln.RegistryContextError
+[KILNX031]Kiln.RegistryContextException
+[KILNX031]Kiln.RegistryContextException.Code.get -> Kiln.RegistryContextError
+[KILNX031]Kiln.RegistryContextException.RegistryContextException(Kiln.RegistryContextError code, string! message) -> void
+[KILNX031]Kiln.RegistryEntryPoint
+[KILNX031]Kiln.RegistryEntryPoint.GameStart = 1 -> Kiln.RegistryEntryPoint
+[KILNX031]Kiln.RegistryEntryPoint.HotReload = 8 -> Kiln.RegistryEntryPoint
+[KILNX031]Kiln.RegistryEntryPoint.Manual = 16 -> Kiln.RegistryEntryPoint
+[KILNX031]Kiln.RegistryEntryPoint.ModLoad = 2 -> Kiln.RegistryEntryPoint
+[KILNX031]Kiln.RegistryEntryPoint.WorldLoad = 4 -> Kiln.RegistryEntryPoint
+[KILNX031]Kiln.RegistryEntryPointsAttribute
+[KILNX031]Kiln.RegistryEntryPointsAttribute.Points.get -> Kiln.RegistryEntryPoint
+[KILNX031]Kiln.RegistryEntryPointsAttribute.RegistryEntryPointsAttribute(Kiln.RegistryEntryPoint points) -> void
+[KILNX031]Kiln.RegistryPhase
+[KILNX031]Kiln.RegistryPhase.Add = 1 -> Kiln.RegistryPhase
+[KILNX031]Kiln.RegistryPhase.Alter = 2 -> Kiln.RegistryPhase
+[KILNX031]Kiln.RegistryPhase.Final = 3 -> Kiln.RegistryPhase
+[KILNX031]Kiln.RegistryWorld
+[KILNX031]Kiln.RegistryWorld.Deconstruct(out ulong Token, out Kiln.WorldKind Kind, out string? Id) -> void
+[KILNX031]Kiln.RegistryWorld.Equals(Kiln.RegistryWorld other) -> bool
+[KILNX031]Kiln.RegistryWorld.Id.get -> string?
+[KILNX031]Kiln.RegistryWorld.Id.init -> void
+[KILNX031]Kiln.RegistryWorld.Kind.get -> Kiln.WorldKind
+[KILNX031]Kiln.RegistryWorld.Kind.init -> void
+[KILNX031]Kiln.RegistryWorld.RegistryWorld() -> void
+[KILNX031]Kiln.RegistryWorld.RegistryWorld(ulong Token, Kiln.WorldKind Kind, string? Id) -> void
+[KILNX031]Kiln.RegistryWorld.Token.get -> ulong
+[KILNX031]Kiln.RegistryWorld.Token.init -> void
+[KILNX031]override Kiln.RegistryWorld.GetHashCode() -> int
+[KILNX031]static Kiln.RegistryWorld.operator !=(Kiln.RegistryWorld left, Kiln.RegistryWorld right) -> bool
+[KILNX031]static Kiln.RegistryWorld.operator ==(Kiln.RegistryWorld left, Kiln.RegistryWorld right) -> bool
+[KILNX031]virtual Kiln.Mod.OnRegistry(Kiln.RegistryContext! context) -> void
+~[KILNX031]override Kiln.RegistryWorld.Equals(object obj) -> bool
+~[KILNX031]override Kiln.RegistryWorld.ToString() -> string
+[KILNX031]Kiln.RegistryPhase.Start = 4 -> Kiln.RegistryPhase
+[KILNX031]Kiln.RegistryPhase.WorldLoad = 5 -> Kiln.RegistryPhase

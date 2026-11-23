@@ -39,6 +39,7 @@ public abstract class Mod
     [TickThreadOnly]
     protected WorldConfig<T> WorldConfig<T>(string? name = null) where T : class, new()
     {
+        if (RegistryContext.Current is not null) return Config.RegisterWorld<T>(name);
         Game.AssertTickThread();
         if (!Context.Alive) throw new InvalidOperationException("the mod is unloading");
         _worldConfigs ??= new();
@@ -65,6 +66,12 @@ public abstract class Mod
     /// <c>BootDefinitions.For(boot)</c>. No tick, world, player or live registry exists here; later instances get <see cref="OnLoad"/> only.</summary>
     [BootThreadOnly, RequiresCapability("mods.boot")]
     public virtual void OnBoot(BootContext boot) { }
+
+    /// <summary>Authors registry edits at the declared points (default: GameStart). Called once per add/alter/final pass;
+    /// use Kiln.Registry.Registry.For(context). GameStart uses a retained author instance, not the transient OnBoot owner.
+    /// Only world-load or later frames may read per-world settings. The context expires when this call returns.</summary>
+    [RegistryThreadOnly, System.Diagnostics.CodeAnalysis.Experimental("KILNX031")]
+    public virtual void OnRegistry(RegistryContext context) { }
 
     /// <summary>Called once before the mod is unloaded (server shutdown, reload, unload of a dependency, or disable).</summary>
     public virtual void OnUnload() { }

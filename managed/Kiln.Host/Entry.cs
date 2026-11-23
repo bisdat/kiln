@@ -320,6 +320,7 @@ internal sealed unsafe class HostRuntime : IHostServices, IKilnBackend
         host._mods.PrepareGameplayHooks();
         // the registry stage's order: Kiln.Host's runtime load order, handed to kiln.registry before the boot phase (RegistryHost.cs)
         RegistryHost.Run(host.Service, host._mods, RegistryHost.ModeOf(Path.Combine(KilnPaths.Root, "kiln.json")), host.Log);
+        host._mods.PrepareRegistry(host._owner);
         var onBoot = BootPhase.Run(host.Service, host._owner, host._mods, host.Log);
         RegistryHost.CompareWithOnBoot(host._mods, onBoot, host.Log);
         // the files the first mod load and the first service tick read on the game's thread, read now on another one (a

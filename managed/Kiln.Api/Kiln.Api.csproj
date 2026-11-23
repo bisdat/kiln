@@ -4,7 +4,7 @@
     <RootNamespace>Kiln</RootNamespace>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <NoWarn>$(NoWarn);CS1591;KILNX028</NoWarn>  <!-- defines KILNX028 (17b's groundwork): its own helpers use those types -->
+    <NoWarn>$(NoWarn);CS1591;KILNX028;KILNX031</NoWarn>  <!-- defines KILNX028 (17b's groundwork): its own helpers use those types -->
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Kiln.Host" />
@@ -16,6 +16,8 @@
     <InternalsVisibleTo Include="Kiln.Items.Tests" />
     <InternalsVisibleTo Include="Kiln.Abilities.Tests" />
     <InternalsVisibleTo Include="Kiln.TestKit" />
+    <InternalsVisibleTo Include="Kiln.Registry" />
+    <InternalsVisibleTo Include="Kiln.Registry.Tests" />
     <!-- Kiln's own service assemblies (managed/services/*) use the native service access in Services/. -->
     <InternalsVisibleTo Include="Kiln.World" />
     <InternalsVisibleTo Include="Kiln.Players" />

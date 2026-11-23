@@ -132,3 +132,7 @@ Kiln.TestKit.HarnessRoutines.Queued.get -> int
 Kiln.TestKit.HarnessRoutines.SetClock(int hour, int minute = 0) -> void
 Kiln.TestKit.HarnessRoutines.SetSleepAllowed(uint npcId, bool allowed) -> void
 Kiln.TestKit.KilnHarness.Routines.get -> Kiln.TestKit.HarnessRoutines!
+[KILNX031]Kiln.TestKit.HarnessRegistry
+[KILNX031]Kiln.TestKit.HarnessRegistry.Author(Kiln.TestKit.ModHandle! mod, Kiln.RegistryEntryPoint point = Kiln.RegistryEntryPoint.GameStart, Kiln.RegistryPhase phase = Kiln.RegistryPhase.Alter, Kiln.RegistryWorld? world = null) -> string?
+[KILNX031]Kiln.TestKit.HarnessRegistry.Seed(string! registry, string! id, string! field, string! valueJson) -> void
+[KILNX031]Kiln.TestKit.KilnHarness.Registry.get -> Kiln.TestKit.HarnessRegistry!
