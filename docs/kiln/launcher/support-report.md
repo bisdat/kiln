@@ -133,7 +133,8 @@ version helper accepts a `v`/`V` prefix and fills missing minor or patch parts w
 requires three numeric parts without a prefix and accepts at most one prerelease or build suffix. Those refused forms,
 non-semver versions, and numeric parts beyond the helper's signed 32-bit bound produce no version finding.
 
-Only the two fixed folders above are checked, not a configured mods path elsewhere. Directory links, junctions and
+Only the two fixed folders above are checked, not a configured mods path elsewhere. Folder lookup follows Windows'
+case-insensitive spelling under Proton too; manifest ids remain case-sensitive. Directory links, junctions and
 manifest links are not followed. Identification uses manifests and Lua entry-point names, never INI or DLL contents;
 a native-only package with no explicit ShroudForge manifest metadata is ambiguous and is left out.
 

@@ -607,6 +607,19 @@ fn sf_mod_bundled_newer_recognizes_legacy_lua_and_schema_metadata() {
     }
 }
 
+#[cfg(not(windows))]
+#[test]
+fn sf_mod_bundled_newer_uses_windows_folder_case_under_proton() {
+    let f = Fx::healthy("sf-bundled-proton-case");
+    sf_report_mod(&f, "MoDs/My-Flight-Copy", "sf-unlimited-flight", "1.2.0");
+    sf_report_mod(&f, "kiln/PlUgInS/ShRoUdFoRgE/MoDs/Bundled-Flight", "sf-unlimited-flight", "1.3.0");
+    let mut input = f.input();
+    input.install.as_mut().unwrap().platform = Platform::Proton;
+    let r = build(&input);
+    assert_eq!(finding(&r, "sf-mod-bundled-newer").text, "sf-unlimited-flight 1.2.0 is older than the 1.3.0 Kiln brings.");
+    assert!(r.errors.is_empty(), "{:?}", r.errors);
+}
+
 #[cfg(windows)]
 #[test]
 fn sf_mod_bundled_newer_handles_windows_verbatim_paths_and_folder_case() {

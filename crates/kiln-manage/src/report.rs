@@ -2473,7 +2473,7 @@ fn sf_report_is_mod(folder: &Path) -> std::result::Result<bool, String> {
 fn sf_report_versions(cx: &mut Ctx, game: &Path, root: &str) -> Vec<(crate::shroudforge::SfMod, crate::semver::SemVersion)> {
     let mut dir = game.to_path_buf();
     for part in root.split('/') {
-        dir.push(part);
+        dir = crate::sf_paths::ci_child(&dir, part);
         match std::fs::symlink_metadata(&dir) {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
             Err(e) => { cx.err(root, e); return Vec::new(); }
