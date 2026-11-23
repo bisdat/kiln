@@ -52,7 +52,11 @@ fn sidecar_path(install: &GameInstall, id: &str) -> Result<PathBuf> {
 fn local_target(install: &GameInstall, path: &Path) -> bool {
     if install.kind != GameKind::Client || !path.file_name().and_then(|s| s.to_str()).is_some_and(editor::is_character_file) { return false; }
     super::local_settings_dirs(install).iter().any(|root| {
-        std::fs::canonicalize(root.join("0")).is_ok_and(|local| path.parent() == Some(local.as_path()))
+        let local = root.join("0");
+        // Canonicalizing first would bless a LOCAL folder redirected into Steam Cloud.
+        // Saved Games itself may be a platform-managed alias; the game's save folders may not.
+        root.parent().is_some_and(|base| crate::engine_mods::refuse_symlink_path(base, &local).is_ok())
+            && std::fs::canonicalize(local).is_ok_and(|local| path.parent() == Some(local.as_path()))
     })
 }
 
@@ -127,6 +131,8 @@ enum Step { BeforeSidecar, AfterSidecar, AfterCharacter }
 thread_local! {
     static FAULT: std::cell::Cell<Option<Step>> = const { std::cell::Cell::new(None) };
     static RUNNING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static PROCESS_NAMES: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+    static AFTER_SIDECAR: std::cell::RefCell<Option<(PathBuf, Vec<u8>)>> = const { std::cell::RefCell::new(None) };
 }
 fn check_running() -> Result<()> {
     #[cfg(test)]
@@ -134,9 +140,25 @@ fn check_running() -> Result<()> {
     #[cfg(not(test))]
     let running = false;
     if running || editor::game_running()? { return Err(Error::new(ErrorCode::GameRunning, "quit Enshrouded before returning storage")); }
+    #[cfg(test)]
+    let names = PROCESS_NAMES.with(|v| v.borrow().clone());
+    #[cfg(not(test))]
+    let names: Vec<String> = crate::proc::list()?.into_iter().flat_map(|p| {
+        let image = p.exe.as_deref().and_then(|e| e.file_name()).map(|n| n.to_string_lossy().into_owned());
+        [Some(p.name), image].into_iter().flatten()
+    }).collect();
+    if names.iter().any(|name| name.eq_ignore_ascii_case("steam") || name.eq_ignore_ascii_case("steam.exe")) {
+        return Err(Error::new(ErrorCode::GameRunning, "quit Steam before returning storage"));
+    }
     Ok(())
 }
 fn boundary(step: Step) -> Result<()> {
+    #[cfg(test)]
+    if step == Step::AfterSidecar {
+        AFTER_SIDECAR.with(|v| {
+            if let Some((path, bytes)) = v.borrow_mut().take() { std::fs::write(path, bytes).unwrap(); }
+        });
+    }
     #[cfg(test)]
     if FAULT.with(|v| v.get() == Some(step)) { return Err(Error::new(ErrorCode::Io, format!("injected {step:?} interruption"))); }
     let _ = step;
@@ -172,6 +194,11 @@ pub fn return_for_install(install: &GameInstall, r: &ReturnRequest) -> Result<Re
     crate::durable::replace(&side, r.sidecar.as_bytes())?;
     boundary(Step::AfterSidecar)?;
     check_running()?;
+    // Another writer may have changed either file while the sidecar was being flushed.
+    // Leave its bytes alone; our historical full pair still covers the original character.
+    if std::fs::read(&p)? != actual || std::fs::read(&side)? != r.sidecar.as_bytes() {
+        return Err(Error::new(ErrorCode::Refused, "character or storage changed during return; read it again"));
+    }
     // The sidecar's historical full pair is already durable before the character can contain returned stacks.
     editor::replace_save(&p, &r.data, None)?;
     boundary(Step::AfterCharacter)?;
@@ -217,6 +244,48 @@ mod tests {
             Self { root, install, target, request }
         }
         fn sidecar(&self) -> Vec<u8> { std::fs::read(sidecar_path(&self.install, &character_id(&self.request.data).unwrap()).unwrap()).unwrap() }
+    }
+
+    #[test]
+    fn storage_return_refuses_steam_even_without_the_game() {
+        for name in ["steam", "Steam.exe", "steam.exe"] {
+            let f = Fixture::new();
+            PROCESS_NAMES.with(|v| *v.borrow_mut() = vec![name.into()]);
+            let result = return_for_install(&f.install, &f.request);
+            PROCESS_NAMES.with(|v| v.borrow_mut().clear());
+            assert!(result.is_err(), "must refuse while {name} is running");
+            assert_eq!(std::fs::read(&f.target).unwrap(), f.request.expected_save);
+            assert_eq!(f.sidecar(), f.request.expected_sidecar.as_bytes());
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn storage_return_refuses_local_root_redirected_to_cloud() {
+        let mut f = Fixture::new();
+        let local = f.target.parent().unwrap().to_path_buf();
+        let cloud = f.root.join("userdata/1/1203620/remote");
+        std::fs::create_dir_all(cloud.parent().unwrap()).unwrap();
+        std::fs::rename(&local, &cloud).unwrap();
+        std::os::unix::fs::symlink(&cloud, &local).unwrap();
+        f.target = cloud.join("character0.ksd");
+        f.request.path = f.target.display().to_string();
+        assert!(!read_for_install(&f.install, &f.request.path).unwrap().local);
+        assert!(return_for_install(&f.install, &f.request).is_err());
+        assert_eq!(std::fs::read(&f.target).unwrap(), f.request.expected_save);
+    }
+
+    #[test]
+    fn storage_return_rechecks_both_files_after_sidecar_publication() {
+        for change_sidecar in [false, true] {
+            let f = Fixture::new();
+            let path = if change_sidecar { sidecar_path(&f.install, &character_id(&f.request.data).unwrap()).unwrap() } else { f.target.clone() };
+            let changed = if change_sidecar { b"new storage from another writer".to_vec() } else { let mut b = f.request.expected_save.clone(); b[48] = 9; b };
+            AFTER_SIDECAR.with(|v| *v.borrow_mut() = Some((path.clone(), changed.clone())));
+            assert!(return_for_install(&f.install, &f.request).is_err(), "must refuse a concurrent change after the first write");
+            assert_eq!(std::fs::read(path).unwrap(), changed);
+            assert_eq!(std::fs::read(&f.target).unwrap(), if change_sidecar { f.request.expected_save.clone() } else { changed });
+        }
     }
 
     #[test]
