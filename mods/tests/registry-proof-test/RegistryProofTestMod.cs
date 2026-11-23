@@ -381,7 +381,17 @@ public sealed unsafe class RegistryProofTestMod : Mod
         var tries = 0;
         var why = new SortedDictionary<string, int>(StringComparer.Ordinal); // why the entries tried gave no sample (the log, when none did)
         void Skip(string reason) => why[reason] = why.GetValueOrDefault(reason) + 1;
-        var candidates = entries.Take(400);
+        // a cost config is on few items (about 150 of 4,213): every entry is looked at for one of each kind
+        var candidates = mode.Length > 0 ? entries : entries.Take(400);
+        // a reference table the id table does not list (perks, input categories: their ids are written only when a model
+        // decodes references): other ids of the same table as this field reads them on other entries (Kiln's own ids)
+        if (table.Length > 0 && ids.Count == 0 && !element)
+            ids = candidates.Select(x => Read(registry, x.Id, field)).Where(t => t != null).SelectMany(t => JsonNode.Parse(t!) switch
+                {
+                    JsonArray a => a.Select(n => n is JsonValue v && v.TryGetValue<string>(out var r) ? r : null),
+                    JsonValue v when v.TryGetValue<string>(out var r) => new[] { r },
+                    _ => Array.Empty<string?>(),
+                }).Where(r => r != null).Cast<string>().Distinct().Take(64).ToList();
         if (backend != "live" && conv == "bool") candidates = candidates.OrderByDescending(x => Read(registry, x.Id, element ? list : field) == "true");
         foreach (var (e, id) in candidates)
         {
