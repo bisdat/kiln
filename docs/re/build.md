@@ -123,7 +123,8 @@ column (3800, 1430) = a player's house:       column (3024, 1552) = an empty pla
   `save regions: the game's save now writes 1 Kiln box(es) (4 chunk(s)) after its 1 base region(s)` and the plateau
   pillar survived the restart (`column (3024, 1552)` identical before and after).
 - The builder is called twice per tick for some seconds after boot and at each save (245 calls in the first minute)
-  **[rt]**: the hook caches its boxes.
+  **[rt]**. Those are three different callers, and only one of them is the save: §12. Since kiln#136 Kiln's boxes go
+  into the world save's list only, and only for kept chunks the base entries of that list do not save whole.
 
 ## 6. Props: the building helper
 
@@ -274,6 +275,9 @@ bounded decoder stay in dossier chapter 19f, not a supported terrain encoder.
 | `build/VoxelWrite` | `0x83fa70` / `0x10bb030` | `void(VoxelWorld*, Span<const u16>*, const u32 dims[3], const i32 origin[3])`; whole 8³ blocks, level 6 |
 | `build/StoreCommit` | `0x83f6e0` / `0x10baca0` | `void(Store*, const Int3*, u32 level, const SpanU16*, u8 layer)`; 512 cells |
 | `build/SaveRegions` | `0x932a30` / `0xe8b8f0` | `KeenResult*(out, GameArray<Region>*, BuildZoneSystem*)` |
+| `build/RetSaveRegionsWorldSave` | `0x7c3d99` / `0xe67709` | return address of the world save's call (§12); compared, never called |
+| `build/RetSaveRegionsBaseZones` | `0x7bc7d5` / `0xe6031d` | return address of the ECS base-zone publish step's call (§12) |
+| `build/RetSaveRegionsBaseQuery` | `0x7b4546` / `0xe58696` | return address of the ECS base query callback's call (§12) |
 | VoxelWorld factory | `0x834510` / `0x10afdc0` | apparent `VoxelWorld*(opaque Config*)`; lifetime/config ABI not qualified |
 | acquire column | `0x82f840` / `0x10ab270` | `ColumnCursor*(out, VoxelWorld*, u32 level, packed{u32 blockX,blockZ})`; borrowed locks/resources |
 | touch tile span | `0x8450e0` / `0x10c06a0` | `Span<const u8>*(out, streamingResources*, u32 generationHandle)`; borrowed, locked |
@@ -414,3 +418,77 @@ directly replicated. UpgradeRange has flags `0x0`, while client zone builder has
 therefore **has a replication path to vanilla clients [inferred]**, but arrival/presentation (C18.3) was not tested;
 metadata is not client evidence. >16 bases, per-base sizes and native UI remain unqualified. Full service/preservation/
 synchronization designs stay in dossier chapter 18, not these engine contracts.
+
+## 12. Save regions: three callers, what they feed, and the Flame Altar count (kiln#136; server 26430253 / client 26430625)
+
+S `f0d824be…`, C `5d9ef2f1…`, svn 1287369. Ghidra headless decompiles of the read-only copies, capstone, the game's
+reflection records. [static] unless tagged. Trigger: kiln#136 (thanks bisdat): a world with one 120 m altar showed 21
+Flame Altars after a mod's 39,831 persistent removals inside it (113 kept chunks, 20 Kiln boxes); 41 for 2 on his
+original world, with build-zone and storage behaviour changed; 2 with Kiln off.
+
+**The builder.** `build/SaveRegions` (S `0x932a30` / C `0xe8b8f0`) clears the list, then writes one 0x30-byte entry
+per BuildZoneSystem list-0 zone with `+0x46 == 0` (not abandoned): BaseId from zone `+0x30`, min/max from the zone's
+six fixed-point coordinates (`+0x00..+0x28`) **[dec]**. Its neighbour `0x941d30` writes the same entries for every zone,
+abandoned ones included; `0x93ea20` and `0x93fea0` write the no-build and playable-area lists.
+
+**Its three callers** (sigdb names the return addresses, `sigdb/symbols/server.d/build.json`):
+
+| Caller (S / C) | Returns to (S / C) | What the list becomes |
+|---|---|---|
+| world save `0x7c3aa0` / `0xe67410` | `0x7c3d99` / `0xe67709` | one base record per entry: BaseId, bounds, voxel blob (`0x83d200`), water blob (C `0x11631a0`); both log "Failed to save 'ServerSaveGame', while getting base zones" when it fails |
+| step `0x7bbeb0` / `0xe5fa70`, when `0x94a850(bzs)` reports a change | `0x7bc7d5` / `0xe6031d` | the ECS **base-zone list**: `0x68eca0` / `0x9f2b00` ("[ecs] Build zones changed") |
+| ECS callback `0x7b44c0` / `0xe58610` (registered with the ECS world by `0x7af7c0` / `0xe53a10`) | `0x7b4546` / `0xe58696` | bounds (0x20 each) for a per-entity "inside a base" answer (`0x729e70`) |
+
+The same step publishes its other lists right before and after (`0x69ca70` no-build `ecs+0x15f5a40`, `0x68fc10`
+build zones `ecs+0x15f8a68` from `0x941d30`, `0x69ce20` playable area `ecs+0x15fba88`).
+
+**The ECS base-zone list** (`ecs+0x15fa278`, inline capacity 255, FNV hash of all bounds `+0x15f5a38`, version
+`+0x15fd29c`) **[dec]**:
+- every changed bound (added or gone) goes to `0x67a2c0`, which walks the ECS spatial grid cells (`ecs+0xe17bd0`,
+  `+0xe17cb0`) under it (what it does per cell was not traced);
+- `0x61a780` sends the three zone lists to each peer, each count as one byte; `0x6776e0` reads them on the client;
+- accessor `0x657e30` / C `0x9bbfa0` feeds the base grouping `0x206510` / C `0x46dda0` (callers `0x20bd70`,
+  `0x20be40` / C `0x473470`, `0x473540`): overlapping zones become one base area. Its users: per-area counts of
+  entities by kind and flags (`0x20be40`, [inferred] the journal's `basesInfo*` beds and animals) and C `0x3bf7f0`,
+  which assigns each factory to the base area containing it ("[factory_info] couldn't find base for factory", "found
+  outside base, but list is full"; lookup `0x46fd00`). The grouping has 16 area slots of 0x130 bytes
+  (`+0x30`..`+0x1330`, the zone span right after them), merges only zones with index < 16, seeds a new area with
+  `0x2072e0` without a bound check, and builds its mask as `(1 << (n & 31)) - 1`. The game never has more than 16
+  bases; with more zones the areas are wrong, and a 17th area would be written over the zone span.
+
+**The serializer's rule** (S `0x83d200` via `0x83db00`, C `0x10b89b0` via `0x10b92b0`, the same code) **[dec, dis]**:
+for each level-6 key of the store map (x/y/z i16 cells, multiples of 32) the chunk box is `key * 0.5` m to `+ 16` m, and
+the chunk goes into the record's blob when `chunkMin <= max && min <= chunkMax` on every axis (touching counts). Not
+whole: for its 64 blocks of 8 cells a side (4 m; index x + 4y + 16z, box `key * 0.5 + 4 * i` m to `+ 4` m, the 4.0 at
+S `0xbd84b0`) the same test runs again (S `0x83d792..0x83d7e7`, `comiss`/`jb`), and a block whose box does not touch the
+record's bounds is written as byte 0, its cells dropped (`0x83d962`). The loader (S `0x830e30`, C `0x10ac730`, called
+for each record with no bounds) skips a 0 block (C `0x10acaf1`): those cells stay as the world generates them, and a
+block another record saved keeps that record's cells. So a 16 m chunk only partly inside every record is saved only in
+part, and blocks two records save between them are saved. There is no other terrain list in the save: a block outside
+every record regrows.
+
+**Load (C `0xe63fb0`).** Case 5 reads the records (BaseId + bounds) into a list and hands their bounds to water
+(`0x1165ef0`); case 6 applies each record's voxel and water blobs, and after the last one hands the list to `0x9f3a70`,
+the build-zone publisher: until BuildZoneSystem's own step publishes again, every saved record, Kiln's included, is a
+build zone. Water per record: a record outside the water simulation area is skipped with a debug line; an allocation
+failure fails the whole save ("[server] Serialization of 'Water' failed", result 0x11).
+
+**Flame Altars in the world list.** The world-selection / base-sharing loca record has `flameAltars` (`+0x40`) and
+`noFlameAltarSavegameHeader`; the count shown follows the save's records (kiln#136: 1 altar + 20 Kiln boxes showed 21;
+2 + 39 showed 41) [player]. The code that counts them was not traced; no record kind or flag that saves terrain without
+being a record was found (the save writes records only from this list).
+
+**Startup bounds.** An altar's TriggerShape is not saved (§11): after a load its zone starts at the template's size and
+grows when `upgrade_building_range` applies the saved Level. kiln#136 measured the 120 m altar's entry at 40 m and 48 ms
+later at 120 m [player probe]. Every altar above the first size does this at every load; a world save in those steps
+writes the smaller bounds.
+
+**Kiln (since kiln#136).** The hook reads its caller's return address before the original runs. World save: after the
+game's entries, boxes for the kept chunks whose 64 blocks the entries of that same list do not all keep (the
+serializer's rule above, so the decision is the save's own, whatever the bounds are at that instant: no time window).
+Kiln knows only which 16 m chunks its edits touched, so a kept chunk on a base's edge that reaches outside it gets a box
+even when the edits in it are all inside the base. Base zones and base query: the list stays as the builder wrote it. Any other return address (unresolved sites, another mod's hook in front of Kiln's):
+boxes as for the world save, so no edit goes unsaved. Entries that cannot be read, or a list with more than 256 entries
+or count > capacity: boxes for every kept chunk. The chunk JSON is never filtered. Up to 0.2.0-dev.30.8 every caller got
+a box for every kept chunk: Kiln's boxes were ECS base zones (stations, storage and beds grouped by them, clients sent
+them) and Flame Altars in the world list.
