@@ -93,7 +93,7 @@ std::string regmap_digest(std::vector<std::pair<std::string, std::string>> files
 std::optional<Value> probe_for(const FieldSpec& spec, const Value& v) {
     auto moved = [&](double x, bool whole) -> std::optional<Value> {
         const double up = whole ? x + 1 : (x == 0 ? 1.0 : x * 1.25), down = whole ? x - 1 : x * 0.75;
-        auto fits = [&](double y) { return std::isfinite(y) && y != x && (!spec.min || y >= *spec.min) && (!spec.max || y <= *spec.max); };
+        auto fits = [&](double y) { return std::isfinite(y) && (!whole || (y >= -0x1p63 && y < 0x1p63 && std::trunc(y) == y)) && y != x && (!spec.min || y >= *spec.min) && (!spec.max || y <= *spec.max); };
         const double y = fits(up) ? up : fits(down) ? down : NAN;
         if (std::isnan(y)) return std::nullopt;
         return whole ? Value::integer(static_cast<int64_t>(y)) : Value::number(y);
@@ -135,19 +135,16 @@ std::optional<Value> probe_for(const FieldSpec& spec, const Value& v) {
 json boot_sample(const map::RegistryMap& reg, const RegistrySpec& rs, const std::string& field, const std::string& id, const KilnAssetKey& key,
                  const std::string& type, const std::vector<uint8_t>& base) {
     json s = {{"field", reg.registry + "." + field}, {"entry", id}, {"element", nullptr}};
-    auto fail = [&](const std::string& why) {
-        s["error"] = why;
-        return s;
-    };
+    auto missing = [&](const std::string&) -> json { return nullptr; };
     const auto rit = reg.rows.find(field);
-    if (rit == reg.rows.end() || !mapped(rit->second)) return fail("the field has no mapped row");
+    if (rit == reg.rows.end() || !mapped(rit->second)) return missing("the field has no mapped row");
     const map::Row& row = rit->second;
     const auto [list, leaf] = element_of(field);
     const std::string written = list.empty() ? field : list;  // the field the boot back-end writes (a list for its elements)
     const auto wit = reg.rows.find(written);
     const FieldSpec* wspec = rs.field(written);
     const FieldSpec* spec = rs.field(field);
-    if (wit == reg.rows.end() || !wspec || !spec) return fail("the schema or the regmap has no " + written);
+    if (wit == reg.rows.end() || wit->second.paths.empty() || !wspec || !spec) return missing("the schema or the regmap has no " + written);
     const map::Row& wrow = wit->second;
     if (!list.empty()) s["element"] = 0;
     auto whole = [&](const std::vector<uint8_t>& b, std::string* why) {
@@ -174,14 +171,14 @@ json boot_sample(const map::RegistryMap& reg, const RegistrySpec& rs, const std:
     std::string why;
     const std::optional<Value> wbefore = whole(base, &why);
     const std::optional<Value> before = value(wbefore, &why);
-    if (!before) return fail("read through the schema: " + why);
+    if (!before) return missing("read through the schema: " + why);
     s["read"] = before->to_json();
     s["rawBefore"] = raw(base);
     s["bytesBefore"] = sha_of(base);
     if (row.backend != map::Backend::Boot || spec->read_only) return s;  // a read-only field: read, never written
     // the probe, as the whole written field (a list keeps its other elements)
     std::optional<Value> probe = probe_for(*spec, *before);
-    if (!probe) return fail("no probe value for this kind of field");
+    if (!probe) return missing("no probe value for this kind of field");
     Value wprobe = *probe;
     if (!list.empty()) {
         wprobe = *wbefore;
@@ -203,11 +200,16 @@ json boot_sample(const map::RegistryMap& reg, const RegistrySpec& rs, const std:
     std::vector<stage::BootOutcome> out;
     std::vector<std::string> notes;
     boothook::write(key, type, &copy, rb, &out, &notes);
-    if (out.size() != 1 || !out[0].ok) return fail("the boot back-end did not write the probe: " + (out.empty() ? std::string("no outcome") : out[0].why));
+    if (out.size() != 1 || !out[0].ok) {
+        if (copy == base) return missing("the boot back-end refused this entry's probe");
+        s["error"] = "the boot back-end changed bytes but did not finish the probe";
+        return s;
+    }
     const std::optional<Value> after = value(whole(copy, &why), &why);
     s["readBack"] = after ? after->to_json() : json(nullptr);
     s["rawAfter"] = raw(copy);
-    // the generation composed again without the probe: the base's bytes
+    // A fresh generation composed without the probe: a no-op on untouched base bytes, NOT a live revert.
+    // This only demonstrates that composing no rows preserves the base; the successful write/read above is the proof.
     std::vector<uint8_t> again = base;
     rb.fields[0].rows.clear();
     out.clear();
@@ -262,11 +264,15 @@ std::vector<std::string> run(const Env& e) {
         else if (reg.entries.kind == map::EntryKind::Array) err = "boot fields of array entries are not sampled";
         else if (!e.bytes || !e.bytes((*es)[0].place.key, &base, &why)) err = "the entry's resource cannot be read (" + why + ")";
         if (!err.empty()) {
-            each([&](const std::string& f) { samples.push_back({{"field", name + "." + f}, {"error", err}}); });
+            log(1, name + ": unproven (" + err + ")");
             continue;
         }
         const model::Entry& en = (*es)[0];
-        each([&](const std::string& f) { samples.push_back(boot_sample(reg, *rs, f, en.id, en.place.key, en.place.type, base)); });
+        each([&](const std::string& f) {
+            json sample = boot_sample(reg, *rs, f, en.id, en.place.key, en.place.type, base);
+            if (sample.is_null()) log(1, name + "." + f + ": unproven (no readable value or representable probe for this entry)");
+            else samples.push_back(std::move(sample));
+        });
     }
     put("proof/roundtrip-" + e.side + "-boot.json", roundtrip_doc(e, "boot", digest, std::move(samples)));
     // every entry of every registry through the schema, from the base

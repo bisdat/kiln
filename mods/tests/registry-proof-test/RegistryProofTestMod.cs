@@ -339,7 +339,6 @@ public sealed unsafe class RegistryProofTestMod : Mod
         JsonArray RawOf(ContentEntry e, AssetKey? key) =>
             new(rawPaths.Select((p, i) => Raw(e, conv == "impactConfig" ? configPath : p) ?? (registry == "recipes" && element && Compared.Contains(conv) ? StackRaw(e, listPath, paths[i]) : null)
                 ?? (Compared.Contains(conv) ? null : JsonValue.Create("resource:" + BytesSha(key)))).ToArray());
-        JsonObject? refused = null;
         var tries = 0;
         var why = new SortedDictionary<string, int>(StringComparer.Ordinal); // why the entries tried gave no sample (the log, when none did)
         void Skip(string reason) => why[reason] = why.GetValueOrDefault(reason) + 1;
@@ -396,9 +395,9 @@ public sealed unsafe class RegistryProofTestMod : Mod
             }
             if (!ok)
             {
-                // this entry refused it (an item without damage for power, ...): try another, keep the last refusal
-                s["error"] = "the probe was not applied: " + refusal;
-                refused = s;
+                // An entry without this config, an unmapped row or an out-of-range probe supplies no evidence.
+                // Expected Sint32 refusals above are different: their exactness contract is explicitly tested.
+                Skip("probe refused: " + refusal);
                 if (++tries >= 20) break;
                 continue;
             }
@@ -412,10 +411,9 @@ public sealed unsafe class RegistryProofTestMod : Mod
             s["bytesAfter"] = BytesSha(key);
             return s;
         }
-        if (refused is null)
-            Log.Info($"registry-proof-test: no sample of {q} ({entries.Count} entries): " + (why.Count == 0 ? "no entry" : string.Join(", ", why.Select(p => $"{p.Key} x{p.Value}")))
+        Log.Info($"registry-proof-test: no sample of {q} ({entries.Count} entries): " + (why.Count == 0 ? "no entry" : string.Join(", ", why.Select(p => $"{p.Key} x{p.Value}")))
                      + (backend == "live" && why.Count == 1 && why.Keys.First().StartsWith("read rc=", StringComparison.Ordinal) ? WriteWhy(registry, entries[0].Id, field, conv) : ""));
-        return refused; // every entry tried refused the probe (an error sample), or none read or took one (no sample: unproven)
+        return null; // no entry took a probe: unproven, not a disproof
     }
 
     /// <summary>Why kiln.registry.live refuses a live field it reads for no entry: one write of a value the field takes (a bool's

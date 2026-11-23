@@ -20,6 +20,7 @@ namespace kc {
 bool guid_parse(const std::string& s, uint8_t out[16]);
 namespace rbtest {
 void balance_type();  // keen::BalancingTable {playerLevelCap u32 +0, skillPointsPerLevel u32 +4}, 8 bytes
+void byte_blob_type(uintptr_t unreadable);
 void byte_table_type();  // keen::ByteTable {altarsPerFlameLevel u8[21] +0, playerLevelCap u32 +24}, 28 bytes
 }
 }  // namespace kc
@@ -166,7 +167,7 @@ void boot_sample_on_bytes() {
     const json ro = proof::boot_sample(reg, *schema.registry("balance"), "skillPointsPerLevel", "game:balance", key, "keen::BalancingTable", base);
     check(ro["read"] == 4 && ro["rawBefore"] == json::array({4}) && !ro.contains("probe") && !ro.contains("error"), "a read-only field is read only: " + ro.dump());
     const json none = proof::boot_sample(reg, *schema.registry("balance"), "nothing", "game:balance", key, "keen::BalancingTable", base);
-    check(none.contains("error"), "a field without a row is an error sample");
+    check(none.is_null(), "a field without a mapped row gives no sample");
 }
 
 // The balance table's per-flame-level altar and water-source counts are arrays of 21 bytes: the registry reads and writes
@@ -194,6 +195,18 @@ void byte_array_lists() {
     check(!s.contains("error"), "the list round-trips in the boot generation: " + s.dump());
     check(s["read"].size() == 21 && s["read"][0] == 1 && s["probe"][0] == 2 && s["readBack"] == s["probe"], "read, probe, read back: " + s.dump());
     check(s["rawAfter"][0][0] == 2 && s["rawBefore"][0][0] == 1 && s["bytesBefore"] == s["bytesAfter"], "raw before and after, bytes back");
+}
+
+void empty_boot_list_is_missing_evidence() {
+    kc::rbtest::byte_blob_type(0);
+    const Schema schema = generated_schema();
+    std::vector<std::string> errors;
+    map::RegistryMap reg;
+    map::load_common(json::parse(R"({"regmap": 1, "registry": "balance",
+        "entries": {"kind": "single", "resourceType": "test::ByteBlob", "resourceGuid": "82706b40-61b1-4b8f-8b23-dcec6971bda1", "unnamed": "balance"},
+        "rows": {"altarsPerFlameLevel": {"paths": ["values"], "conv": "list", "read": "restart", "backend": "boot"}}})"), &reg, &errors);
+    const json s = proof::boot_sample(reg, *schema.registry("balance"), "altarsPerFlameLevel", "game:balance", {}, "test::ByteBlob", std::vector<uint8_t>(8));
+    check(s.is_null(), "an empty boot list is no evidence, not a changed/error sample: " + s.dump());
 }
 
 void with_the_request() {
@@ -254,6 +267,19 @@ void with_the_request() {
           "every item through the schema: " + v["registries"]["items"].dump());
     check(!v["registries"]["items"]["game:plank"].contains("comfort"), "an unmapped field is not exported");
     check(v["registries"]["balance"].begin().value()["levelCap"] == 55, "the balance entry: " + v["registries"]["balance"].dump());
+    // A mapped boot row whose entries are an array is outside this producer's coverage, not a disproof.
+    view.values[kBalance] = {{"entries", json::array({{{"playerLevelCap", 55}, {"skillPointsPerLevel", 4}}})}};
+    e.regmap = [](map::RegMap* out, std::vector<std::string>*) {
+        *out = regmap();
+        out->registries["balance"].entries.kind = map::EntryKind::Array;
+        out->registries["balance"].entries.array = "entries";
+        return true;
+    };
+    proof::run(e);
+    const json array_suite = json::parse(files.at("proof/roundtrip-server-boot.json"));
+    for (const json& sample : array_suite["samples"])
+        check(sample["field"].get<std::string>().rfind("balance.", 0) != 0, "unsupported array-entry boot fields get no error sample: " + sample.dump());
+
 }
 
 }  // namespace
@@ -265,6 +291,7 @@ int main() {
                                                        {"probes", probes},
                                                        {"boot_sample_on_bytes", boot_sample_on_bytes},
                                                        {"byte_array_lists", byte_array_lists},
+                                                       {"empty_boot_list_is_missing_evidence", empty_boot_list_is_missing_evidence},
                                                        {"with_the_request", with_the_request}};
     for (const auto& [name, fn] : groups) {
         try {

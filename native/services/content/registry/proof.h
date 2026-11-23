@@ -60,7 +60,7 @@ std::string regmap_digest(std::vector<std::pair<std::string, std::string>> files
 // member, a list with its first number moved); nullopt when the kind has no probe here.
 std::optional<Value> probe_for(const FieldSpec& spec, const Value& v);
 // One boot-generation sample of field (a registry's field, or "<list>[].<leaf>" on element 0) of entry id, whose resource
-// (key, root type) has the base bytes given: a registry-roundtrip sample object.
+// (key, root type) has the base bytes given: a registry-roundtrip sample object, or null when the producer lacks evidence.
 json boot_sample(const map::RegistryMap& reg, const RegistrySpec& rs, const std::string& field, const std::string& id, const KilnAssetKey& key,
                  const std::string& type, const std::vector<uint8_t>& base);
 
