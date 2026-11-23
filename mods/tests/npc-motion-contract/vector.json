@@ -1,0 +1,475 @@
+{
+  "animation": {
+    "clips": "models/rig.gltf",
+    "idle": {
+      "clip": "Pose",
+      "speed": 2
+    },
+    "states": {
+      "motion-door-0": {
+        "clip": "Pose",
+        "loop": false,
+        "speed": 2
+      },
+      "motion-door-1": {
+        "clip": "Pose",
+        "loop": false,
+        "speed": 2
+      },
+      "motion-door-2": {
+        "clip": "Pose",
+        "loop": false,
+        "speed": 2
+      },
+      "motion-inspect-0": {
+        "clip": "Pose",
+        "loop": false,
+        "speed": 2
+      },
+      "motion-interaction-0": {
+        "clip": "Pose",
+        "loop": false,
+        "speed": 2
+      },
+      "motion-jump-0": {
+        "clip": "Pose",
+        "loop": false,
+        "speed": 2
+      },
+      "motion-sit-0": {
+        "clip": "Pose",
+        "loop": false,
+        "speed": 2
+      },
+      "motion-sit-1": {
+        "clip": "Pose",
+        "loop": true,
+        "speed": 2
+      },
+      "motion-sit-2": {
+        "clip": "Pose",
+        "loop": false,
+        "speed": 2
+      },
+      "motion-sleep-0": {
+        "clip": "Pose",
+        "loop": false,
+        "speed": 2
+      },
+      "motion-sleep-1": {
+        "clip": "Pose",
+        "loop": true,
+        "speed": 2
+      },
+      "motion-sleep-2": {
+        "clip": "Pose",
+        "loop": false,
+        "speed": 2
+      }
+    }
+  },
+  "body": {
+    "model": "models/rig.gltf",
+    "size": {
+      "height": 2,
+      "radius": 0.75
+    },
+    "slots": {
+      "HandR": "hand",
+      "Head": "head",
+      "Root": "root"
+    }
+  },
+  "clips": {
+    "clips": {
+      "rig.Pose": {
+        "duration": 3,
+        "skeleton": "e67f0760-d62a-54aa-ac36-84952772322d"
+      },
+      "rig.Pose.once": {
+        "duration": 3,
+        "skeleton": "e67f0760-d62a-54aa-ac36-84952772322d"
+      }
+    }
+  },
+  "expected": [
+    {
+      "clamp": false,
+      "durationNs": 1500000000,
+      "loop": false,
+      "role": "sit",
+      "state": "a718d5fe-7e64-5b96-a3a7-edcefdfbf68c",
+      "variant": 0
+    },
+    {
+      "clamp": false,
+      "durationNs": 1500000000,
+      "loop": true,
+      "role": "sit",
+      "state": "6d5ff81e-0625-5e99-90ea-08121d4360bb",
+      "variant": 1
+    },
+    {
+      "clamp": false,
+      "durationNs": 1500000000,
+      "loop": false,
+      "role": "sit",
+      "state": "ca134875-58de-5a45-98dd-e6cd5c9514a2",
+      "variant": 2
+    },
+    {
+      "clamp": false,
+      "durationNs": 1500000000,
+      "loop": false,
+      "role": "sleep",
+      "state": "97a62d2a-b8c8-5a56-b6f0-cc0555bb72b2",
+      "variant": 0
+    },
+    {
+      "clamp": false,
+      "durationNs": 1500000000,
+      "loop": true,
+      "role": "sleep",
+      "state": "25b82f58-33fc-5cb0-85f0-b850d2939efb",
+      "variant": 1
+    },
+    {
+      "clamp": false,
+      "durationNs": 1500000000,
+      "loop": false,
+      "role": "sleep",
+      "state": "2b471eff-4bc3-54cc-a770-2cb9d5dd658d",
+      "variant": 2
+    },
+    {
+      "clamp": false,
+      "durationNs": 1500000000,
+      "loop": false,
+      "role": "inspect",
+      "state": "bc25ce46-64e9-5a93-b895-0871ecec2769",
+      "variant": 0
+    },
+    {
+      "clamp": true,
+      "durationNs": 1500000000,
+      "loop": false,
+      "role": "greet",
+      "state": "2e701760-3fb1-4e08-b14a-4e012cac15d0",
+      "variant": 0
+    },
+    {
+      "clamp": true,
+      "durationNs": 1500000000,
+      "loop": false,
+      "role": "talk",
+      "state": "2e701760-3fb1-4e08-b14a-4e012cac15d0",
+      "variant": 0
+    },
+    {
+      "clamp": true,
+      "durationNs": 1500000000,
+      "loop": false,
+      "role": "reaction0",
+      "state": "2e701760-3fb1-4e08-b14a-4e012cac15d0",
+      "variant": 0
+    },
+    {
+      "clamp": true,
+      "durationNs": 1500000000,
+      "loop": false,
+      "role": "reaction1",
+      "state": "2e701760-3fb1-4e08-b14a-4e012cac15d0",
+      "variant": 0
+    },
+    {
+      "clamp": true,
+      "durationNs": 1500000000,
+      "loop": false,
+      "role": "refuse",
+      "state": "2e701760-3fb1-4e08-b14a-4e012cac15d0",
+      "variant": 0
+    },
+    {
+      "clamp": true,
+      "durationNs": 1500000000,
+      "loop": false,
+      "role": "idleGesture0",
+      "state": "2e701760-3fb1-4e08-b14a-4e012cac15d0",
+      "variant": 0
+    },
+    {
+      "clamp": true,
+      "durationNs": 1500000000,
+      "loop": false,
+      "role": "idleGesture1",
+      "state": "2e701760-3fb1-4e08-b14a-4e012cac15d0",
+      "variant": 0
+    },
+    {
+      "clamp": false,
+      "durationNs": 1500000000,
+      "interactionKey": "81ed77f9-4c72-4730-8b05-a5ddee9c7164",
+      "loop": false,
+      "role": "interaction",
+      "state": "65ed9996-372a-567a-8c58-c7ce12f6c885",
+      "variant": 0
+    },
+    {
+      "clamp": true,
+      "durationNs": 1500000000,
+      "loop": false,
+      "role": "greetingExtra",
+      "state": "2e701760-3fb1-4e08-b14a-4e012cac15d0",
+      "variant": 0
+    },
+    {
+      "clamp": true,
+      "durationNs": 1500000000,
+      "loop": false,
+      "role": "farewell",
+      "state": "2e701760-3fb1-4e08-b14a-4e012cac15d0",
+      "variant": 0
+    },
+    {
+      "clamp": true,
+      "durationNs": 1500000000,
+      "loop": false,
+      "role": "dialogOption",
+      "state": "2e701760-3fb1-4e08-b14a-4e012cac15d0",
+      "variant": 0
+    },
+    {
+      "clamp": true,
+      "durationNs": 1500000000,
+      "loop": false,
+      "role": "attentionGreeting",
+      "state": "2e701760-3fb1-4e08-b14a-4e012cac15d0",
+      "variant": 0
+    },
+    {
+      "clamp": true,
+      "durationNs": 1500000000,
+      "loop": false,
+      "role": "turnLeftSmall",
+      "state": "2e701760-3fb1-4e08-b14a-4e012cac15d0",
+      "variant": 0
+    },
+    {
+      "clamp": true,
+      "durationNs": 1500000000,
+      "loop": false,
+      "role": "turnLeftBig",
+      "state": "2e701760-3fb1-4e08-b14a-4e012cac15d0",
+      "variant": 0
+    },
+    {
+      "clamp": true,
+      "durationNs": 1500000000,
+      "loop": false,
+      "role": "turnRightSmall",
+      "state": "2e701760-3fb1-4e08-b14a-4e012cac15d0",
+      "variant": 0
+    },
+    {
+      "clamp": true,
+      "durationNs": 1500000000,
+      "loop": false,
+      "role": "turnRightBig",
+      "state": "2e701760-3fb1-4e08-b14a-4e012cac15d0",
+      "variant": 0
+    },
+    {
+      "clamp": false,
+      "durationNs": 1500000000,
+      "loop": false,
+      "role": "jump",
+      "state": "08e6ed40-fd36-591f-8605-59eb017faa9d",
+      "variant": 0
+    },
+    {
+      "clamp": false,
+      "durationNs": 1500000000,
+      "loop": false,
+      "role": "door",
+      "state": "e2fdabb4-04e9-505c-84ce-e6cf6160cd08",
+      "variant": 0
+    },
+    {
+      "clamp": false,
+      "durationNs": 1500000000,
+      "loop": false,
+      "role": "door",
+      "state": "1458d625-e19c-5068-8838-13e92e852bb0",
+      "variant": 1
+    },
+    {
+      "clamp": false,
+      "durationNs": 1500000000,
+      "loop": false,
+      "role": "door",
+      "state": "ee9e61b7-42f6-5e25-a382-c52cec6c9b7e",
+      "variant": 2
+    }
+  ],
+  "graph": {
+    "guid": "9f9be65b-608e-514e-ba25-715243ca44c3",
+    "mod": "npc-motion-contract",
+    "name": "tobin.animation.tobin.body",
+    "skeleton": "e67f0760-d62a-54aa-ac36-84952772322d",
+    "slots": {
+      "HandR": 2,
+      "Head": 1,
+      "Root": 0
+    },
+    "states": {
+      "Idle": {
+        "engine": "Idle",
+        "guid": "2e701760-3fb1-4e08-b14a-4e012cac15d0",
+        "id": "0x1490bed7"
+      },
+      "motion-door-0": {
+        "engine": null,
+        "guid": "e2fdabb4-04e9-505c-84ce-e6cf6160cd08",
+        "id": "0x340472a3"
+      },
+      "motion-door-1": {
+        "engine": null,
+        "guid": "1458d625-e19c-5068-8838-13e92e852bb0",
+        "id": "0xdf474333"
+      },
+      "motion-door-2": {
+        "engine": null,
+        "guid": "ee9e61b7-42f6-5e25-a382-c52cec6c9b7e",
+        "id": "0xc3f009eb"
+      },
+      "motion-inspect-0": {
+        "engine": null,
+        "guid": "bc25ce46-64e9-5a93-b895-0871ecec2769",
+        "id": "0x0f2e4bc4"
+      },
+      "motion-interaction-0": {
+        "engine": null,
+        "guid": "65ed9996-372a-567a-8c58-c7ce12f6c885",
+        "id": "0xb2cefb9b"
+      },
+      "motion-jump-0": {
+        "engine": null,
+        "guid": "08e6ed40-fd36-591f-8605-59eb017faa9d",
+        "id": "0x9e3b2ab9"
+      },
+      "motion-sit-0": {
+        "engine": null,
+        "guid": "a718d5fe-7e64-5b96-a3a7-edcefdfbf68c",
+        "id": "0x0b2a3273"
+      },
+      "motion-sit-1": {
+        "engine": null,
+        "guid": "6d5ff81e-0625-5e99-90ea-08121d4360bb",
+        "id": "0x0fe4eeae"
+      },
+      "motion-sit-2": {
+        "engine": null,
+        "guid": "ca134875-58de-5a45-98dd-e6cd5c9514a2",
+        "id": "0x6e507ec7"
+      },
+      "motion-sleep-0": {
+        "engine": null,
+        "guid": "97a62d2a-b8c8-5a56-b6f0-cc0555bb72b2",
+        "id": "0xec351766"
+      },
+      "motion-sleep-1": {
+        "engine": null,
+        "guid": "25b82f58-33fc-5cb0-85f0-b850d2939efb",
+        "id": "0xd4e35897"
+      },
+      "motion-sleep-2": {
+        "engine": null,
+        "guid": "2b471eff-4bc3-54cc-a770-2cb9d5dd658d",
+        "id": "0x9c4e4dcc"
+      }
+    }
+  },
+  "mod": "npc-motion-contract",
+  "model": {
+    "boundingBox": {
+      "max": {
+        "x": 0.5,
+        "y": 2,
+        "z": 0.5
+      },
+      "min": {
+        "x": -0.5,
+        "y": 0,
+        "z": -0.5
+      }
+    },
+    "guid": "65aed384-6bf2-5aa7-9dd8-c5a2f4dd08a6",
+    "skeleton": "e67f0760-d62a-54aa-ac36-84952772322d"
+  },
+  "motions": {
+    "bindings": [
+      {
+        "role": "sit",
+        "state": "motion-sit-0",
+        "variant": 0
+      },
+      {
+        "role": "sit",
+        "state": "motion-sit-1",
+        "variant": 1
+      },
+      {
+        "role": "sit",
+        "state": "motion-sit-2",
+        "variant": 2
+      },
+      {
+        "role": "sleep",
+        "state": "motion-sleep-0",
+        "variant": 0
+      },
+      {
+        "role": "sleep",
+        "state": "motion-sleep-1",
+        "variant": 1
+      },
+      {
+        "role": "sleep",
+        "state": "motion-sleep-2",
+        "variant": 2
+      },
+      {
+        "role": "inspect",
+        "state": "motion-inspect-0",
+        "variant": 0
+      },
+      {
+        "role": "jump",
+        "state": "motion-jump-0",
+        "variant": 0
+      },
+      {
+        "role": "door",
+        "state": "motion-door-0",
+        "variant": 0
+      },
+      {
+        "role": "door",
+        "state": "motion-door-1",
+        "variant": 1
+      },
+      {
+        "role": "door",
+        "state": "motion-door-2",
+        "variant": 2
+      },
+      {
+        "role": "interaction",
+        "state": "motion-interaction-0",
+        "variant": 0
+      }
+    ],
+    "optionalFallback": "Idle"
+  },
+  "skeletonName": "rig"
+}

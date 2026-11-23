@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstring>
 #include <map>
+#include <tuple>
 
 namespace kiln::qb {
 
@@ -338,6 +339,37 @@ bool rebuild_knowledge(const uint8_t* res, size_t len, const std::vector<Knowled
     }
     out->assign(res, res + len);
     return rebuild_map(*out, kMapWorld, kWorldObj, world, err) && rebuild_map(*out, kMapPlayer, kPlayerObj, player, err);
+}
+
+bool compact_knowledge(Bytes* resource, size_t prefix, std::string* err) {
+    Bytes& b = *resource;
+    if (prefix < 72 || prefix > b.size()) {
+        *err = "knowledge compaction prefix is outside the resource";
+        return false;
+    }
+    struct Part { size_t field; uint32_t count; Bytes bytes; };
+    std::vector<Part> parts;
+    for (const auto& [base, stride] : {std::pair{kMapWorld, kWorldObj}, std::pair{kMapPlayer, kPlayerObj}}) {
+        MapView m;
+        if (!map_view(b.data(), b.size(), base, stride, &m)) {
+            *err = "a knowledge map does not read for compaction";
+            return false;
+        }
+        for (const auto& [field, at, count, width] : {
+                 std::tuple{base, m.buckets, m.nb, size_t{8}},
+                 std::tuple{base + 8, m.keys, m.nk, size_t{4}},
+                 std::tuple{base + 16, m.values, m.nv, stride}})
+            parts.push_back({field, count, Bytes(b.begin() + at, b.begin() + at + static_cast<size_t>(count) * width)});
+    }
+    // Other root fields and their out-of-line targets stay at their original positions in the retained prefix.
+    // Stage all six arrays before trimming: neither map may still refer into a discarded previous generation.
+    b.resize(prefix);
+    for (const auto& part : parts) {
+        const size_t at = reserve(b, part.bytes.size(), 4);
+        if (!part.bytes.empty()) std::memcpy(b.data() + at, part.bytes.data(), part.bytes.size());
+        set_arr(b, part.field, at, part.count);
+    }
+    return true;
 }
 
 // ---- journal -------------------------------------------------------------------------------------------------------

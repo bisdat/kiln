@@ -1,0 +1,19 @@
+<Project>
+  <!-- Sample: a roster NPC with a body of its own (docs/kiln/modding/npc-blocks.md, "Authored roster bodies and motions"). The body, its
+       animation and its 27 motion bindings are in blocks/npc-body.json, where the game's start-up build reads them; make-body.py writes the
+       figure's glTF and cooks it. The code only asks whether the body was built (NpcBodies.Status) and logs each change. No GUIDs, no game
+       data. Every player needs the mod (an NPC and a body of its own). -->
+  <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.props" />
+  <PropertyGroup>
+    <KilnModId>npc-body</KilnModId>
+    <KilnModName>Authored NPC body (sample)</KilnModName>
+    <Version>0.1.0</Version>
+    <Description>A villager with a body of its own: a synthetic figure, its clips and the 27 motions a roster NPC plays (sit, sleep, talk, doors...).</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <KilnServices>Blocks</KilnServices>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="models/**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.targets" />
+</Project>

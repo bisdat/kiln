@@ -41,6 +41,10 @@ internal static class NpcCompiler
                 NpcPhysics.WarnHeld(ctx, low, body);
                 low.Json["body"] = name;
                 return new BlockHandle<BodyBlock>(mod, name, BlockIds.Derive(mod, "body", name), $"{mod}.{name}", body);
+            case NpcMotionsBlock motions:
+                NpcBodyRig.Shape(ctx, motions, "");
+                low.Json["npcMotions"] = name;
+                return new BlockHandle<NpcMotionsBlock>(mod, name, BlockIds.Derive(mod, "npcmotions", name), $"{mod}.{name}", motions);
             case AnimationBlock anim:
                 CheckAnimation(ctx, Liked(ctx, anim, null), "");
                 low.Json["animation"] = name;
@@ -149,7 +153,7 @@ internal static class NpcCompiler
         if (rooted || file.Contains("..", StringComparison.Ordinal)) throw new BlockError(ctx.Block, path, $"\"{file}\": a path in the mod's folder");
         if (!file.EndsWith(".glb", StringComparison.OrdinalIgnoreCase) && !file.EndsWith(".gltf", StringComparison.OrdinalIgnoreCase))
             throw new BlockError(ctx.Block, path, $"\"{file}\" is not a glTF file (.glb or .gltf)");
-        var dir = BlocksBridge.ModDirectory(ctx.Mod.Id);
+        var dir = ctx.Mod.DirectoryOf(ctx.Mod.Id);
         if (dir.Length > 0 && !File.Exists(Path.Combine(dir, file))) throw new BlockError(ctx.Block, path, $"no file {file} in the mod's folder");
     }
 
@@ -305,7 +309,7 @@ internal static class NpcCompiler
     /// <summary>What the cook made of an animation for one body: the graph's GUID, skeleton and states (name -> state input value and GUID).</summary>
     internal sealed record Graph(string Name, Guid Guid, Guid Skeleton, Dictionary<string, (uint Hash, Guid? Guid, string? Engine)> States, Dictionary<string, int> Slots, bool Game);
 
-    private static string Cooked(string mod) => Path.Combine(BlocksBridge.ModDirectory(mod), "assets", "cooked");
+    private static string Cooked(BlockContext ctx, string mod) => Path.Combine(ctx.Mod.DirectoryOf(mod), "assets", "cooked");
 
     private static JsonNode? ReadJson(string file)
     {
@@ -315,7 +319,7 @@ internal static class NpcCompiler
 
     private static Graph CookedGraph(BlockContext ctx, string mod, string graph, string path, string file)
     {
-        var j = ReadJson(Path.Combine(Cooked(mod), $"{graph}.graph.json"))
+        var j = ReadJson(Path.Combine(Cooked(ctx, mod), $"{graph}.graph.json"))
                 ?? throw new BlockError(ctx.Block, path, $"its graph {graph} is not cooked: an animation with clips is cooked from {file} when the mod builds (kiln build, or kiln cook in the mod's folder). An animation written in C# is not seen by the cook: put it in blocks/*.json and name it");
         var states = new Dictionary<string, (uint, Guid?, string?)>(StringComparer.Ordinal);
         foreach (var (k, v) in j["states"]?.AsObject() ?? [])
@@ -356,22 +360,46 @@ internal static class NpcCompiler
     private static (Guid Guid, Guid Skeleton, JsonNode? Box) CookedModel(BlockContext ctx, string mod, string model, string path, string file, BodyBlock? body = null)
     {
         var stem = model.Replace('/', '_');
-        var j = ReadJson(Path.Combine(Cooked(mod), $"{stem}.model.json"))
+        var j = ReadJson(Path.Combine(Cooked(ctx, mod), $"{stem}.model.json"))
                 ?? throw new BlockError(ctx.Block, path, $"its model {model} is not cooked: a body with a model is cooked from {file} when the mod builds (kiln build, or kiln cook in the mod's folder). A body written in C# is not seen by the cook: put it in blocks/*.json and name it");
         if (body != null) NpcPhysics.CheckCooked(ctx, body, j, model, "body");
         return (Guid.Parse(j["guid"]!.GetValue<string>()), Guid.Parse(j["skeleton"]?.GetValue<string>() ?? Guid.Empty.ToString()), j["boundingBox"]);
+    }
+
+    /// <summary>On a dedicated server whose cook skipped the renderer (no <c>&lt;stem&gt;.model.json</c>): the model's GUID from the body
+    /// manifest assets/cooked/npc-bodies.v1.json, its <c>keen::RenderModel</c> row for <c>&lt;stem&gt;.bin</c> marked
+    /// <c>skippedOnServer</c>. Null on a game client, with the sidecar there, or without such a row (then the sidecar is missing).</summary>
+    private static Guid? ServerModel(BlockContext ctx, string mod, string model)
+    {
+        if (NpcServerSide.IsClient()) return null;
+        var stem = model.Replace('/', '_');
+        var dir = Cooked(ctx, mod);
+        if (File.Exists(Path.Combine(dir, $"{stem}.model.json"))) return null;
+        if (ReadJson(Path.Combine(dir, "npc-bodies.v1.json"))?["entries"] is not JsonArray entries) return null;
+        foreach (var e in entries)
+        {
+            try
+            {
+                if (e is JsonObject row && (string?)row["type"] == "keen::RenderModel" && (bool?)row["skippedOnServer"] == true &&
+                    ((string?)row["file"])?.Replace('\\', '/').EndsWith($"/{stem}.bin", StringComparison.Ordinal) == true &&
+                    Guid.TryParse((string?)row["guid"], out var guid) && guid != Guid.Empty)
+                    return guid;
+            }
+            catch (Exception x) when (x is InvalidOperationException or FormatException) { }  // a field of another type: not this row
+        }
+        return null;
     }
 
     private static string ModelName(string file) => file.Contains('.') ? file[..file.LastIndexOf('.')].Replace('\\', '/') : file;
     private static string Stem(string file) => Path.GetFileNameWithoutExtension(file);
 
     /// <summary>A clip's length in seconds, as the cook made it (clips.json), or null.</summary>
-    private static double? ClipLength(string mod, string skeleton, Clip c, bool loopDefault)
+    private static double? ClipLength(BlockContext ctx, string mod, string skeleton, Clip c, bool loopDefault)
     {
         if (c.Name == null) return null;
         var key = $"{skeleton}.{c.Name}" + ((c.Loop ?? loopDefault) ? "" : ".once");
         if (c.RootMotion == true) key += ".rm";
-        var d = ReadJson(Path.Combine(Cooked(mod), "clips.json"))?["clips"]?[key]?["duration"]?.GetValue<double>();
+        var d = ReadJson(Path.Combine(Cooked(ctx, mod), "clips.json"))?["clips"]?[key]?["duration"]?.GetValue<double>();
         return d / (c.Speed ?? 1);
     }
 
@@ -418,16 +446,11 @@ internal static class NpcCompiler
             if (p.Anim.Name == null || p.Body.Name == null) throw new BlockError(ctx.Block, "animation", "a body and an animation of your own are blocks of this mod");
             var skeleton = anim.Skeleton ?? Stem(anim.Clips!);
             var bodySkeleton = body.Skeleton ?? Stem(body.Model!);
-            if (skeleton != bodySkeleton)
-                throw new BlockError(ctx.Block, "animation", $"the body's skeleton is {bodySkeleton} and the animation's {skeleton}: the game poses a model only by the skeleton its graph names, so they must be one (the same glTF, or the same \"skeleton\")");
+            NpcBodyRig.SkeletonNames(ctx, bodySkeleton, skeleton);
             var graphName = body.Slots is { Count: > 0 } ? $"{p.Anim.Name}.{p.Body.Name}" : p.Anim.Name;
             graph = CookedGraph(ctx, p.Anim.Mod, graphName, "animation", "blocks/*.json");
             (model, var modelSkeleton, box) = CookedModel(ctx, p.Body.Mod, ModelName(body.Model!), "body.model", "blocks/*.json", body);
-            if (modelSkeleton != graph.Skeleton)
-                throw new BlockError(ctx.Block, "body.model", $"the model is cooked on skeleton {modelSkeleton} and the graph on {graph.Skeleton}: the client would draw it unposed. Cook both from the same skeleton");
-            foreach (var (slot, joint) in body.Slots ?? new Dictionary<Slot, string>())
-                if (!graph.Slots.ContainsKey(slot.ToString()))
-                    throw new BlockError(ctx.Block, $"body.slots[{slot}]", $"the cooked graph {graphName} has no slot {slot} (joint {joint}): cook again");
+            NpcBodyRig.Cooked(ctx, body, graph, modelSkeleton);
         }
         else
         {
@@ -844,7 +867,7 @@ internal static class NpcCompiler
         var state = a.Plays!.Guid(stateMod)!.Value;
         var length = a.Length;
         if (length == null && own && anim.Block.States.TryGetValue(a.Plays!, out var clip))
-            length = ClipLength(anim.Mod, anim.Block.Skeleton ?? Stem(anim.Block.Clips!), clip, false);
+            length = ClipLength(ctx, anim.Mod, anim.Block.Skeleton ?? Stem(anim.Block.Clips!), clip, false);
         length ??= Math.Max(a.HitAt + 0.5, 1.2);
         if (a.HitAt >= length) throw new BlockError(ctx.Block, $"{path}.hitAt", $"{a.HitAt} is not inside the attack's {length:0.###} seconds (its clip's length)");
         var delivery = a.Delivery ?? new ConeBlock { Range = (float)a.Range, Angle = (float)a.Angle, Effects = a.OnHit! };
@@ -904,11 +927,58 @@ internal static class NpcCompiler
         var key = n.Was ?? name;
         if (string.IsNullOrWhiteSpace(n.Name)) throw new BlockError(ctx.Block, "name", "an NPC needs a name players can read");
         var body = PartOf<BodyBlock>(ctx, n.Body, null, name, "body");
-        CheckBody(ctx, body.Block, "body", body.Name);
-        if (body.Block.Template == null)
-            throw new BlockError(ctx.Block, "body.model", "an NPC's body is a game NPC's for now (Bodies.Villager, Bodies.Fisher, ...): the game builds NPCs at start from a template, and a custom body there needs that build to set its graph and model. A body of your own fights as a creature block");
-        if (n.Animation != null || n.AI != null || n.Behaviour != null)
-            throw new BlockError(ctx.Block, n.Animation != null ? "animation" : n.AI != null ? "ai" : "behaviour", "a villager moves, decides and talks as the game's villagers do; a friendly fighter is a creature block with ai.faction = PlayerAlly");
+        JsonObject? ownBody = null;
+        var authored = body.Block.Model != null;
+        NpcBodyCapRows.Rows.Ensure();  // an NPC block is a first use of Kiln.Blocks: blocks.npc_body from here
+        if (authored)
+        {
+            // The chassis is Kiln's choice, never an author-facing reflection/template recipe.
+            var row = BlockCapabilities.CurrentNpcBodyRow();
+            if (row.State != CapabilityState.Available)
+                throw new BlockError(ctx.Block, "body.model", "an NPC's body is a game NPC's for now (Bodies.Villager, Bodies.Fisher, ...): the game builds NPCs at start from a template, and a custom body there needs that build to set its graph and model. A body of your own fights as a creature block. " + BlockCapabilities.NpcBody + ": " + row.Text);
+            NpcBodyRig.Geometry(ctx, body.Block);
+            body = body with { Block = body.Block with { Template = null, Workshop = body.Block.Workshop ?? Bodies.Fisher.Workshop, Tool = body.Block.Tool ?? Bodies.Fisher.Tool } };
+            CheckBody(ctx, body.Block, "body", body.Name);
+            var animation = PartOf<AnimationBlock>(ctx, n.Animation, null, name, "animation");
+            CheckAnimation(ctx, animation.Block, "animation");
+            var motions = PartOf<NpcMotionsBlock>(ctx, n.Motions, null, name, "motions");
+            if (body.Mod != mod || animation.Mod != mod || motions.Mod != mod)
+                throw new BlockError(ctx.Block, "body.model", "a roster body's model, animation and motions must belong to this mod; cross-mod body dependencies are not supported");
+            if (animation.Block.Clips == null || animation.Name == null || body.Name == null)
+                throw new BlockError(ctx.Block, "animation", "an authored roster body needs this mod's cooked animation");
+            NpcBodyRig.SkeletonNames(ctx, body.Block.Skeleton ?? Stem(body.Block.Model!), animation.Block.Skeleton ?? Stem(animation.Block.Clips));
+            var graph = CookedGraph(ctx, mod, $"{animation.Name}.{body.Name}", "animation", "blocks/*.json");
+            // A dedicated server's cook makes no renderer output (no <stem>.model.json): its model GUID is in the body manifest, and
+            // the bounds are the client's to check (a game client always has the sidecar its cook made)
+            Guid model, skeleton;
+            if (ServerModel(ctx, mod, ModelName(body.Block.Model!)) is { } serverModel)
+            {
+                model = serverModel;
+                skeleton = graph.Skeleton;
+            }
+            else
+            {
+                (model, skeleton, var box) = CookedModel(ctx, mod, ModelName(body.Block.Model!), "body.model", "blocks/*.json", body.Block);
+                NpcBodyRig.Cooked(ctx, body.Block, graph, skeleton);
+                if (box == null) throw new BlockError(ctx.Block, "body.size", "the cooked model has no bounds; cook again");
+                NpcBodyRig.Geometry(ctx, body.Block, box);
+            }
+            ownBody = new JsonObject
+            {
+                ["model"] = model.ToString(), ["graph"] = graph.Guid.ToString(), ["skeleton"] = skeleton.ToString(),
+                ["size"] = new JsonObject { ["radius"] = body.Block.Size!.Radius, ["height"] = body.Block.Size.Height },
+                ["bindings"] = NpcBodyRig.Bindings(ctx, motions.Block, mod, animation.Block, graph,
+                    (clip, loop) => ClipLength(ctx, mod, animation.Block.Skeleton ?? Stem(animation.Block.Clips), clip, loop)),
+            };
+        }
+        else
+        {
+            CheckBody(ctx, body.Block, "body", body.Name);
+            if (n.Animation != null || n.Motions != null)
+                throw new BlockError(ctx.Block, n.Animation != null ? "animation" : "motions", "a game NPC body uses its own graph and motions; authored motions need a body.model of this mod");
+        }
+        if (n.AI != null || n.Behaviour != null)
+            throw new BlockError(ctx.Block, n.AI != null ? "ai" : "behaviour", "a villager moves, decides and talks as the game's villagers do; a friendly fighter is a creature block with ai.faction = PlayerAlly");
         if (n.Talk != null && n.TalkName != null) throw new BlockError(ctx.Block, "talk", "a dialogue from code or by name, not both");
         ctx.Need(ClientsLevel.Mod, null, "an NPC, its lines and its place in the roster are built by every player's game at start, from the mod");
 
@@ -957,11 +1027,12 @@ internal static class NpcCompiler
         } : null;
         var def = new QuestNpcDefinition
         {
-            Id = key, Template = body.Block.Template, Clone = true, CloneGuid = cloneGuid, CloneName = cloneName, Dialogue = dialogue,
+            Id = key, Template = authored ? Bodies.Fisher.Template! : body.Block.Template!, Clone = true, CloneGuid = cloneGuid, CloneName = cloneName, Dialogue = dialogue,
             Name = new UiText(names), Place = place,
         };
         RoutineNpc.ForNpc(ctx, low, name, key, n.Routine, cloneGuid);
         var file = NpcFile(ctx, key, n, body.Block, cloneGuid, cloneName, names, dialogue);
+        if (ownBody != null) file["body"] = ownBody;
         low.Json["npc"] = file.DeepClone();
         low.AfterCommit(() =>
         {
@@ -973,9 +1044,16 @@ internal static class NpcCompiler
             }
             def.ModId = mod;
             Quests.DefineNpc(def);
-            // one of a data file the game's start-up build reads from the mod's folder itself (native_pack.cpp): only one from code is written for the next start
-            if (!fromData) NpcFiles.Put(mod, key, file);
+            // one of a data file the game's start-up build reads from the mod's folder itself (native_pack.cpp): only one from code is written for
+            // the next start, and never one with a body of its own: this version builds those from blocks/*.json only (NpcBodies.CodeReason, its status)
+            if (!fromData && ownBody == null) NpcFiles.Put(mod, key, file);
             else NpcFiles.Forget(mod, key);
+            if (ownBody == null || fromData) NpcBodies.FromData(mod, name);
+            else
+            {
+                NpcBodies.DefinedFromCode(mod, name);
+                BlocksBridge.Log(LogLevel.Warn, $"blocks: {mod}: npc {name}: {NpcBodies.CodeReason}");
+            }
         });
         return new BlockHandle<NpcBlock>(mod, name, cloneGuid, cloneName, n);
     }
@@ -985,7 +1063,7 @@ internal static class NpcCompiler
     {
         var o = new JsonObject
         {
-            ["template"] = body.Template,
+            ["template"] = body.Model != null ? Bodies.Fisher.Template : body.Template,
             ["clone"] = new JsonObject { ["guid"] = cloneGuid.ToString(), ["name"] = cloneName },
             ["names"] = new JsonObject(names.OrderBy(x => x.Key, StringComparer.Ordinal).Select(x => KeyValuePair.Create(x.Key, (JsonNode?)x.Value))),
         };

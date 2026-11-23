@@ -23,5 +23,6 @@
     <!-- AffixTests: affixes are item data, so they run on Kiln.Saves' real instance store over its tests' fake game. -->
     <Compile Include="../Kiln.Saves.Tests/InstanceHarness.cs" Link="Saves/InstanceHarness.cs" />
     <Compile Include="../Kiln.Saves.Tests/FakeInstanceWorld.cs" Link="Saves/FakeInstanceWorld.cs" />
+    <None Include="../../../mods/tests/npc-motion-contract/vector.json" Link="Fixtures/npc-motion-vector.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

@@ -40,8 +40,9 @@ MODS = [ROOT / "mods/tests/quest-native-test", ROOT / "mods/samples/NpcSample", 
 def compile_cli():
     OUT.mkdir(parents=True, exist_ok=True)
     exe = OUT / "questbuild_cli"
-    src = [HERE / "questbuild_cli.cpp", ROOT / "native/services/quests/questpack.cpp", ROOT / "native/services/quests/questbuild.cpp"]
-    headers = [ROOT / "native/services/quests/questpack.h", ROOT / "native/services/quests/questbuild.h"]
+    quests = ROOT / "native/services/quests"
+    src = [HERE / "questbuild_cli.cpp", *(quests / f for f in ("questpack.cpp", "questbuild.cpp", "bodypack.cpp", "motionclose.cpp", "motionpack.cpp"))]
+    headers = [quests / f for f in ("questpack.h", "questbuild.h", "bodypack.h", "motionclose.h", "motionpack.h")]
     if not exe.exists() or any(s.stat().st_mtime > exe.stat().st_mtime for s in src + headers):
         subprocess.run(["c++", "-std=c++20", "-O1", f"-I{ROOT}/native/third_party", f"-I{ROOT}/native/services/quests",
                         *map(str, src), "-o", str(exe)], check=True)

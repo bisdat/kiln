@@ -1,0 +1,11 @@
+{
+  "id": "npc-body-test",
+  "name": "Authored NPC body lab test (16f)",
+  "version": "0.1.0",
+  "apiVersion": "0.2",
+  "entryAssembly": "NpcBodyTest.dll",
+  "side": "both",
+  "clients": "mod",
+  "advanced": true,
+  "description": "Lab test of authored roster bodies on a dedicated server: the golem's body built by the boot pack (clone template, model, graph, 21 motion clones, geometry), a game-body NPC in the same pack, a broken neighbour mod refused alone, the same ids after a restart. PASS and FAIL lines in kiln.log. Run mods/tests/npc-body-test/lab.sh."
+}

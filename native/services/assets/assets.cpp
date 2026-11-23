@@ -2,10 +2,13 @@
 // kiln.assets: the service entry, the kiln.assets v1 table, the assets.json manifest loader, PNG texture overrides,
 // and the dump / status / console surface. Resource and content RE: docs/re/resources.md. Guide:
 // docs/kiln/services/assets.md.
+#include <algorithm>
 #include <filesystem>
 #include <optional>
+#include <type_traits>
 
 #include "assets.h"
+#include "bootpack_internal.h"
 #include "contained.h"
 #include "kiln_boot_collector.hpp"
 #include "cooktrust.h"
@@ -969,6 +972,60 @@ void KILN_CALL on_ready(void*) {
 }  // namespace ka
 
 using namespace ka;
+
+// 16f: an admitted authored body's cooked resources for its mod's boot-pack owner (bootpack_internal.h).
+extern "C" KILN_EXPORT KilnResult KILN_CALL ka_boot_body_v1(KilnOwner owner, const char* mod_dir, size_t dir_length, const char* text,
+                                                           size_t length, char* report, size_t capacity, size_t* written) {
+    const auto reply = [&](KilnResult result, const std::string& message) {
+        if (written) *written = message.size();
+        if (report && capacity) {
+            const size_t n = std::min(capacity - 1, message.size());
+            std::memcpy(report, message.data(), n);
+            report[n] = 0;
+        }
+        return result;
+    };
+    try {
+        if (!owner || !mod_dir || !dir_length || !text) return reply(KILN_ERR_INVALID_ARGUMENT, "owner, mod folder and entries are required");
+        const json doc = json::parse(text, text + length, nullptr, false);
+        if (doc.is_discarded() || !doc.is_object() || !doc.contains("entries") || !doc["entries"].is_array())
+            return reply(KILN_ERR_INVALID_ARGUMENT, "the body entries are not {\"entries\": [...]}");
+        for (const json& e : doc["entries"]) {
+            const std::string kind = e.is_object() ? e.value("kind", "") : std::string();
+            if ((kind != "resource" && kind != "blob") || e.contains("data") || e.contains("hash") ||
+                (kind == "resource" && e.value("mode", "") != "new"))
+                return reply(KILN_ERR_INVALID_ARGUMENT, "a body entry must be a new resource or a blob of the mod's own files");
+        }
+        std::string rep;
+        std::vector<std::string> errors;
+        const KilnResult rc = ka::load_manifest(owner, std::string(mod_dir, dir_length), &rep, nullptr, nullptr, &doc, &errors);
+        if (rc != KILN_OK) return reply(rc, rep);
+        if (!errors.empty()) return reply(KILN_ERR_INVALID_ARGUMENT, errors.front());
+        return reply(KILN_OK, rep);
+    } catch (const std::exception& error) {
+        return reply(KILN_ERR_INTERNAL, std::string("body entries failed: ") + error.what());
+    } catch (...) {
+        return reply(KILN_ERR_INTERNAL, "body entries failed with an unknown error");
+    }
+}
+
+static_assert(std::is_same_v<decltype(&ka_boot_body_v1), ka::bootpack::Call>, "bootpack_internal.h and the export agree");
+
+// 16f review3 S4: the NPC body cache is a cooked file: the same verdict as every file of a mod's assets/cooked.
+extern "C" KILN_EXPORT int KILN_CALL ka_cooked_verdict_v1(const void* data, size_t length) {
+    try {
+        if (!data && length) return 2;
+        switch (cooked_verdict(read_cook_trust(), data, length)) {
+        case CookedVerdict::Load: return 0;
+        case CookedVerdict::LoadUnmade: return 1;
+        default: return 2;
+        }
+    } catch (...) {
+        return 2;
+    }
+}
+
+static_assert(std::is_same_v<decltype(&ka_cooked_verdict_v1), ka::bootpack::Verdict>, "bootpack_internal.h and the export agree");
 
 extern "C" KILN_EXPORT KilnResult KILN_CALL kiln_plugin_main(const KilnApi* api, KilnOwner owner, KilnPluginInfo* info) {
     if (api->abi_version != KILN_ABI_VERSION || api->size < sizeof(KilnApi)) return KILN_ERR_UNAVAILABLE;

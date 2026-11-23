@@ -6,7 +6,9 @@ namespace Kiln;
 /// </summary>
 /// <remarks>
 /// <see cref="Refuse"/> starts as the policy's decision (<c>modSync: refuse</c> and something required is missing).
-/// Handlers may change it either way and set <see cref="Reason"/>. <see cref="CancelableEvent.Canceled"/> also refuses.
+/// Handlers may change it either way and set <see cref="Reason"/>. <see cref="CancelableEvent.Canceled"/> also refuses. Two refusals
+/// stand whatever a handler says: a missing mandatory protocol, and authored NPC bodies that differ from the server's (only the
+/// operator's <c>modSync: off</c> waives those).
 /// A refused client gets Kiln's REJECT (its overlay shows the reason) and then the game's login failure.
 /// </remarks>
 public sealed class NetClientHandshakeEvent : CancelableEvent

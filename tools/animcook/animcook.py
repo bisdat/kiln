@@ -35,7 +35,7 @@ from kfc import anim  # noqa: E402
 from kfc.archive import Kfc  # noqa: E402
 from kfc.refl import TypeDb  # noqa: E402
 
-from anicook import clips as C, graphgen as G, playergraph as PG, playerstates as PS, recipe, skeleton as K  # noqa: E402
+from anicook import blocks as B, clips as C, graphgen as G, playergraph as PG, playerstates as PS, recipe, skeleton as K  # noqa: E402
 from anicook.gltfdoc import Doc  # noqa: E402
 
 DEFAULT_GAME = Path.home() / ".local/share/Steam/steamapps/common/Enshrouded"
@@ -175,6 +175,20 @@ def cmd_recipe(a):
         return _recipe_player_states(a, doc) or rc
     t, k, tinfo = _types(a)
     r = recipe.Run(a.recipe, t, k).run(update_manifest=a.update_manifest, game_info={"version": k.version} if k else None, types_info=tinfo)
+    _say_run(r)
+    rc = _dispatch(a, doc, ["--update-manifest"] if a.update_manifest else []) if others else 0
+    # An NPC body's sources include its model's material blocks, which modelcook (dispatched above) makes from the glTF on a mod's first
+    # cook: this tool's rows of the body cache then belong to an older source set and the body has no motion bindings. Once more, now that
+    # every source is there (the outputs are the same bytes; only the cache's rows follow the sources).
+    if r["ok"] and not rc and a.update_manifest and others and B.body_rows_stale(a.recipe, recipe.TOOL):
+        print("animcook: the NPC body cache's sources changed during this cook (material blocks made from the glTF): its rows again")
+        r = recipe.Run(a.recipe, t, k).run(update_manifest=True, game_info={"version": k.version} if k else None, types_info=tinfo)
+        _say_run(r)
+    rc = _recipe_player_states(a, doc) or rc
+    return 0 if r["ok"] and not rc else 1
+
+
+def _say_run(r):
     for s in r["steps"]:
         if s["op"] == "clips":
             for c in s["clips"]:
@@ -188,13 +202,11 @@ def cmd_recipe(a):
             for w in s.get("warnings", []):
                 print(f"  warning: {w}")
     if r["manifest"]["missing"] or r["manifest"]["mismatched"]:
-        print("assets.json does not match the cooked files (run with --update-manifest):")
+        for message in B.manifest_diagnostics(r["manifest"], recipe.TOOL):
+            print(message)
         for e in r["manifest"]["missing"] + r["manifest"]["mismatched"]:
             print("  " + json.dumps(e))
-    print(f"{'ok' if r['ok'] else 'FAILED'}: {len(r['outputs'])} file(s)")
-    rc = _dispatch(a, doc, ["--update-manifest"] if a.update_manifest else []) if others else 0
-    rc = _recipe_player_states(a, doc) or rc
-    return 0 if r["ok"] and not rc else 1
+    print(f"{'ok' if r['ok'] else 'FAILED'}: {len(r['outputs'])} file(s)", flush=True)  # before a dispatched tool's own lines
 
 
 def _in_git_tree(p):

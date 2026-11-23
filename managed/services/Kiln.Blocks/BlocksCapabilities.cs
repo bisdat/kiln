@@ -21,6 +21,8 @@ internal static class BlocksRows
         // BootDefinitions needs mods.boot, the core's row (sigdb and kiln.boot): with no core it has none, so it is reported here
         if (!ServiceCaps.Probe("kiln.boot"))
             ServiceCaps.Report("mods.boot", CapabilityState.Unavailable, CapabilityReason.Offline, "kiln.boot is not here (no Kiln core): no boot phase in this process");
+        var body = BlockCapabilities.CurrentNpcBodyRow();
+        ServiceCaps.Report(BlockCapabilities.NpcBody, body.State, body.Reason, body.Text);
         BlockCapabilities.Ensure();
         UiBlocksCaps.Report();
         KindCapabilities.Ensure();
@@ -30,4 +32,15 @@ internal static class BlocksRows
         VfxCaps.ReportBudgetRows();
         WorldTablesNative.ReportBudgetRows();
     }
+}
+
+/// <summary>blocks.npc_body from Kiln.Blocks' first NPC use (an NPC block's definition, <see cref="NpcBodies"/>), so that
+/// <c>Capabilities.Get</c> finds the row a mod asks for (BlocksRows reports it too, with the other rows, from their first use).</summary>
+internal static class NpcBodyCapRows
+{
+    internal static readonly ServiceCapRows Rows = new("kiln.blocks npc bodies", () =>
+    {
+        var body = BlockCapabilities.CurrentNpcBodyRow();
+        ServiceCaps.Report(BlockCapabilities.NpcBody, body.State, body.Reason, body.Text);
+    });
 }

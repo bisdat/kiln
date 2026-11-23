@@ -1,0 +1,290 @@
+{
+ "format": 1,
+ "comment": "An NPC with a body of its own (docs/kiln/modding/npc-blocks.md, 'Authored roster bodies and motions'). make-body.py writes models/figure.glb and cooks it. The 27 bindings name the figure's synthetic clips: Sit and Sleep are enter, loop, exit; only the middle variant loops.",
+ "bodies": {
+  "demo-body": {
+   "model": "models/figure.glb",
+   "size": {
+    "radius": 0.75,
+    "height": 2
+   },
+   "slots": {
+    "Root": "root",
+    "Head": "head",
+    "HandR": "hand_r",
+    "Chest": "chest"
+   }
+  }
+ },
+ "animations": {
+  "demo-moves": {
+   "clips": "models/figure.glb",
+   "idle": "Idle",
+   "walk": "Walk",
+   "run": "Run",
+   "states": {
+    "demo-sit-0": {
+     "clip": "Bend",
+     "loop": false
+    },
+    "demo-sit-1": {
+     "clip": "Hold",
+     "loop": true
+    },
+    "demo-sit-2": {
+     "clip": "Bend",
+     "loop": false
+    },
+    "demo-sleep-0": {
+     "clip": "Dead",
+     "loop": false
+    },
+    "demo-sleep-1": {
+     "clip": "Hold",
+     "loop": true
+    },
+    "demo-sleep-2": {
+     "clip": "Bend",
+     "loop": false
+    },
+    "demo-inspect-0": {
+     "clip": "Bend",
+     "loop": false
+    },
+    "demo-greet-0": {
+     "clip": "Flinch",
+     "loop": false
+    },
+    "demo-talk-0": {
+     "clip": "Idle",
+     "loop": false
+    },
+    "demo-reaction0-0": {
+     "clip": "Flinch",
+     "loop": false
+    },
+    "demo-reaction1-0": {
+     "clip": "Attack",
+     "loop": false
+    },
+    "demo-refuse-0": {
+     "clip": "Flinch",
+     "loop": false
+    },
+    "demo-idlegesture0-0": {
+     "clip": "Idle",
+     "loop": false
+    },
+    "demo-idlegesture1-0": {
+     "clip": "Bend",
+     "loop": false
+    },
+    "demo-interaction-0": {
+     "clip": "Attack",
+     "loop": false
+    },
+    "demo-greetingextra-0": {
+     "clip": "Idle",
+     "loop": false
+    },
+    "demo-farewell-0": {
+     "clip": "Flinch",
+     "loop": false
+    },
+    "demo-dialogoption-0": {
+     "clip": "Idle",
+     "loop": false
+    },
+    "demo-attentiongreeting-0": {
+     "clip": "Flinch",
+     "loop": false
+    },
+    "demo-turnleftsmall-0": {
+     "clip": "Walk",
+     "loop": false
+    },
+    "demo-turnleftbig-0": {
+     "clip": "Walk",
+     "loop": false
+    },
+    "demo-turnrightsmall-0": {
+     "clip": "Walk",
+     "loop": false
+    },
+    "demo-turnrightbig-0": {
+     "clip": "Walk",
+     "loop": false
+    },
+    "demo-jump-0": {
+     "clip": "Bend",
+     "loop": false
+    },
+    "demo-door-0": {
+     "clip": "Attack",
+     "loop": false
+    },
+    "demo-door-1": {
+     "clip": "Attack",
+     "loop": false
+    },
+    "demo-door-2": {
+     "clip": "Attack",
+     "loop": false
+    }
+   }
+  }
+ },
+ "npcMotions": {
+  "demo-motions": {
+   "bindings": [
+    {
+     "role": "sit",
+     "variant": 0,
+     "state": "demo-sit-0"
+    },
+    {
+     "role": "sit",
+     "variant": 1,
+     "state": "demo-sit-1"
+    },
+    {
+     "role": "sit",
+     "variant": 2,
+     "state": "demo-sit-2"
+    },
+    {
+     "role": "sleep",
+     "variant": 0,
+     "state": "demo-sleep-0"
+    },
+    {
+     "role": "sleep",
+     "variant": 1,
+     "state": "demo-sleep-1"
+    },
+    {
+     "role": "sleep",
+     "variant": 2,
+     "state": "demo-sleep-2"
+    },
+    {
+     "role": "inspect",
+     "variant": 0,
+     "state": "demo-inspect-0"
+    },
+    {
+     "role": "greet",
+     "variant": 0,
+     "state": "demo-greet-0"
+    },
+    {
+     "role": "talk",
+     "variant": 0,
+     "state": "demo-talk-0"
+    },
+    {
+     "role": "reaction0",
+     "variant": 0,
+     "state": "demo-reaction0-0"
+    },
+    {
+     "role": "reaction1",
+     "variant": 0,
+     "state": "demo-reaction1-0"
+    },
+    {
+     "role": "refuse",
+     "variant": 0,
+     "state": "demo-refuse-0"
+    },
+    {
+     "role": "idleGesture0",
+     "variant": 0,
+     "state": "demo-idlegesture0-0"
+    },
+    {
+     "role": "idleGesture1",
+     "variant": 0,
+     "state": "demo-idlegesture1-0"
+    },
+    {
+     "role": "interaction",
+     "variant": 0,
+     "state": "demo-interaction-0"
+    },
+    {
+     "role": "greetingExtra",
+     "variant": 0,
+     "state": "demo-greetingextra-0"
+    },
+    {
+     "role": "farewell",
+     "variant": 0,
+     "state": "demo-farewell-0"
+    },
+    {
+     "role": "dialogOption",
+     "variant": 0,
+     "state": "demo-dialogoption-0"
+    },
+    {
+     "role": "attentionGreeting",
+     "variant": 0,
+     "state": "demo-attentiongreeting-0"
+    },
+    {
+     "role": "turnLeftSmall",
+     "variant": 0,
+     "state": "demo-turnleftsmall-0"
+    },
+    {
+     "role": "turnLeftBig",
+     "variant": 0,
+     "state": "demo-turnleftbig-0"
+    },
+    {
+     "role": "turnRightSmall",
+     "variant": 0,
+     "state": "demo-turnrightsmall-0"
+    },
+    {
+     "role": "turnRightBig",
+     "variant": 0,
+     "state": "demo-turnrightbig-0"
+    },
+    {
+     "role": "jump",
+     "variant": 0,
+     "state": "demo-jump-0"
+    },
+    {
+     "role": "door",
+     "variant": 0,
+     "state": "demo-door-0"
+    },
+    {
+     "role": "door",
+     "variant": 1,
+     "state": "demo-door-1"
+    },
+    {
+     "role": "door",
+     "variant": 2,
+     "state": "demo-door-2"
+    }
+   ]
+  }
+ },
+ "npcs": {
+  "demo": {
+   "name": "Authored body demo",
+   "body": "demo-body",
+   "animation": "demo-moves",
+   "motions": "demo-motions",
+   "roster": {
+    "summonTool": "Demo Token",
+    "description": "A villager with a body of its own."
+   }
+  }
+ }
+}

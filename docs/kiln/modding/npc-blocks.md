@@ -121,7 +121,9 @@ new BodyBlock
   release hold the cook features again, the cook writes them only with `"experimental": ["modelcook.cloth"]` (and `"modelcook.chains2"`) in
   `assets/cook.json`, and a mod with such a body logs one warning (`Blocks.Warnings`) while the game reports the row held.
 - **Chains need the body's own skeleton**, and no clip of it may animate a swinging joint; a cloth vertex may not be weighted to one.
-- An NPC's body is a game NPC's for now, so `Cloth` and `Chains` are refused there ("a game body has its own").
+- A game NPC body keeps its own physics (`Cloth` and `Chains` are refused there: "a game body has its own").
+  Authored roster bodies have a separate [boot-publication contract](#authored-roster-bodies-and-motions); authoring
+  cloth or chains is not evidence that the roster body can yet be built or rendered.
 
 ## What Kiln checks, and why
 The game checks none of this; a mistake shows as a creature frozen in a pose, or a blow that never lands. So `Define` refuses, naming block and field:
@@ -275,8 +277,115 @@ villagers do (the body's own when not set).
 
 A `quests/*.json` of the mod's own that names the same NPC wins over both. Players need the mod.
 
-An NPC's body is a game NPC's for now (`Bodies.Villager`, `Bodies.Fisher`): the start-up build would also have to set a custom body's graph and model, and
-its portrait in the roster is unseen.
+### Authored roster bodies and motions
+
+New authoring types in **mod API 0.2.17** (dev.31).
+
+The authoring contract accepts a `BodyBlock.Model`, an `AnimationBlock` and `NpcBlock.Motions` (a reusable
+`npcMotions` block or an inline `NpcMotionsBlock`). The chassis is Kiln's Fisher/Villager chassis; authors name
+Kiln slots and graph states, not game component paths. The game's start builds the body natively from the mod's
+`blocks/*.json` and its local cook (below), once per start, before any world. Where a dependency is missing,
+`Define` refuses `body.model` with the `blocks.npc_body` dependency reason and the boot build refuses the body's mod
+whole. There is no public bootpack or epoch API. Ordinary `Bodies.Villager` / `Bodies.Fisher` NPCs retain their authoring format.
+
+For an authored roster body:
+
+- Give it a private model/rig. Sharing that file or skeleton with an eager creature, look, unrelated body/animation,
+  or recipe graph/model is refused with both users named; the cook never removes the other user's assets.json entries.
+- Set `Size` explicitly: radius **0.05–4 m**, height **0.1–8 m**, both finite. The cooked model's floor must be
+  within **0.05 m of Y0**, and its bounds must fit the radius-height box. Keep `Scale` unset or **1**, and
+  `Colliders` unset or empty. Creature blocks retain their existing scale and collider support.
+- Map `Root`, `Head` and `HandR` to joints. Model and graph must use the same cooked skeleton; the graph must
+  contain every binding target and each target must have a GUID. Hash-only states such as `Run` cannot be used
+  by a sequence binding.
+- Each `NpcMotionBinding(Role, Variant, State)` is unique. Sit and Sleep variants **0/1/2** are
+  enter/loop/exit: only the middle variant loops. Door variants **0/1/2** are guarded alternatives, not phases.
+  Other roles have variant **0**. For Interaction, omit `InteractionKey` or leave it null: Kiln fills the chassis
+  key internally. An explicit compatibility key is still accepted only when it matches the supported chassis;
+  other roles leave the key null. No game GUID is needed for normal motion authoring.
+- Required bindings are **Sit 0–2, Sleep 0–2, Inspect 0, Jump 0, Door 0–2**. Every other missing role needs an
+  explicit `OptionalFallback`, which is clamped rather than allowed to run a vanilla motion on an authored graph.
+  There is no implicit fallback for a required motion. A complete Fisher vector has **27 bindings**.
+- Clip duration, speed and loop information come from the cook, not guesses based on a state GUID. A motion
+  target needs a single cooked clip, with finite positive effective duration; blends are refused for these bindings.
+
+The cook writes this group's resource/blob keys, file hashes, canonical bindings and effective durations to
+`assets/cooked/npc-bodies.v1.json`, described by `schema/npc-bodies.schema.json`. It removes those entries from the eager
+`assets/assets.json` group. This is a machine-local cache, excluded from mod identity and restored with the cooked tree
+when a cook fails. The two cook tools merge their own contributions. Output hashes prove this machine's bytes only;
+`sourceHash` is derived from authored specs and sources for cross-machine agreement. A server marks renderer rows
+`skippedOnServer` with no borrowed output hash. An unfinished or renderer-skipped body remains incomplete.
+A shared cache receipt tracks the final two-tool result. None of this is a Ready status or evidence of body publication.
+At start the cache counts as a cooked file like any other ([cooking.md](cooking.md)): under kiln.json `"cooked": "local"` a
+cache this game's cook did not make (no receipt) refuses the body's mod, under `"warn"` (the default) it is read and `kiln.log` says so.
+External glTF buffer/image URIs are percent-decoded and resolved relative to the glTF; `../shared/...` is allowed only
+while it stays inside this mod. Escapes, nested links, and a `link/..` walk are refused before source hashing.
+A legacy NPC model block missing its animation or motion part stays on the ordinary eager asset-cook path, with a
+warning naming that NPC's field. This preserves its other assets; it does not make the incomplete NPC definition valid.
+
+Material-block and texture hashes are included as dependencies, but generated material JSON is not material-resource
+publication. The prepared material bridge is still required before that closure can be committed. No hot body or
+graph replacement is supported; body resources belong to the process's boot generation. `clients: mod` and
+`side: both` are required. Never override a vanilla template GUID to bypass content admission.
+
+On a dedicated server the cook makes no renderer output, so there is no `<model>.model.json` next to the graph. There
+the NPC block takes the model's GUID from the `keen::RenderModel` row of `assets/cooked/npc-bodies.v1.json` that is
+marked `skippedOnServer` (its file is `assets/cooked/<model path with / as _>.bin`), and it skips the bounds check:
+each player's game checks the bounds against its own cooked model. A game client always reads the sidecar.
+
+#### Is the body there? `NpcBodies.Status`
+
+New in **mod API 0.2.17** (dev.31). A handle from `Blocks.Define` never means the body was built: the game builds
+roster bodies once, at start. Ask:
+
+```csharp
+var status = NpcBodies.Status(tobinHandle);           // or NpcBodies.Status("my-mod:tobin") for a block without a handle
+if (!status.Ok) Log.Warn($"{status.BlockKey}: {status.State}: {status.Reason}");
+Events.On<NpcBodyBuildChangedEvent>(e => Log.Info($"{e.After.BlockKey}: {e.Before.State} -> {e.After.State}"));
+```
+
+| `State` | `Ok` | Meaning |
+|---|---|---|
+| `Ready` | true | this start's boot build published the body; `Template`, `Model`, `Graph` and `Generation` say what it built |
+| `Failed` | false | the boot build refused it, and `Reason` is the refusal (layout, dependency, ownership, roster, network clearance), or it was defined in C# (below). A well-formed key with no build record at all is `Failed` with the reason `NoDefinition` |
+| `PendingRestart` | false | not reported in this version (a body defined in C# is `Failed`, below) |
+| `RemovalPendingRestart` | false | the mod was unloaded while the body was Ready. What the game built stays until the process ends; nothing live is taken away |
+| `Removed` | false | Ready at the previous start (the native ledger `kiln-quests/native/npc-bodies.ledger.json`) and gone now |
+
+`Status` runs on any thread. A key that is not `mod:block` and a handle that is not an NPC block's throw
+`ArgumentException`; with `blocks.npc_body` off it throws `KilnUnavailableException` naming `blocks.npc_body`. A bad
+block is still the compiler's `BlockError` when you define it: a native refusal is a status, never an exception.
+
+`NpcBodyBuildChangedEvent` comes **once per change of state or generation**, Failed and RemovalPendingRestart
+included. What the start built comes as a change from "no record" (`Before` is `Failed`/`NoDefinition`). On a
+dedicated server it is posted on the tick thread at the first service tick after the change; on a game client
+(`ClientSide` true) on the main thread before the client world's next step, so a handler there must not assume the
+server's tick. Observe only.
+
+#### A body defined in C#
+
+An NPC block with a body of its own defined in C# (`Blocks.Define` in `OnLoad`) is not built in this version. Its
+definition is checked as any block's (a bad one is still a `BlockError`), but Kiln writes no file for the next start, the
+status is `Failed` with the reason *an authored roster body defined in C# is not built in this version (...): define the
+NPC block in blocks/\*.json*, and `kiln.log` says the same. Such a body would have no cooked source identity for the join
+check and skip the client's material check. Put authored bodies in `blocks/*.json`: they are built at the first start.
+
+#### The join check
+
+Players need the same bodies as the server, built the same way: having the mod installed is not enough. HELLO and
+WELCOME carry `kiln.npcbodies`, a hash of each Ready body's per-body closure hash ([network.md](../network.md#npc-bodies-at-the-join)),
+and the server refuses a player whose bodies differ, naming the first body that does. A player whose game says a body
+waits for its restart (the handshake's `pending` key; this version sends none) is refused with a restart-required reason.
+`modSync: off` waives this check, as it waives the player animation graph's: such a player joins and the server only logs
+a warning. That player may lack a body the server spawns; keep `modSync` on for servers with authored bodies. A mod's
+`NetClientHandshakeEvent` handler cannot waive this check (it may refuse a player for reasons of its own).
+
+Not verified in a real game yet: anything on a player's game (its admission of the body with kiln.vfx's materials, the
+same closure hash as the server's, the body drawn and its motions played), the event on a player's main thread, and a
+refusal shown on a player's screen. A dedicated server's build, its rows and the join decision were checked in a lab
+(`mods/tests/npc-body-test`, below). The tests cover them
+offline (`Kiln.Blocks.Tests`, `Kiln.Network.Tests`); the test kit scripts the start's rows with `KilnHarness.NpcBodies`
+([unit-tests.md](unit-tests.md)).
 
 ## Ids
 From the mod id and the block's name: the template, variant (`<mod>:<name>`), arsenal, attacks (`<mod>:attack:<name>`), sequences, phases and states
@@ -296,3 +405,8 @@ with slots. `Was` keeps the ids through a rename.
 ## Test
 `mods/tests/blocks-npc-test`: run `build-assets.py` (it writes the creature's glTF and cooks it), then start a lab twice with the force-ready switch
 (`kiln/data/kiln.creatures/force-ready`). It logs `blocks-npc-test: PASS` and `FAIL` lines, and `blocks-npc-test done: N PASS, M FAIL`.
+
+`mods/tests/npc-body-test` (authored roster bodies): `lab.sh bodies` lays Kiln out in a dedicated-server lab, cooks the mod with the
+server's files, adds a broken neighbour (the same body whose glTF changed after its cook) and starts three times: the build, a restart
+(with `handshake.py`'s fake clients at the join check), and one without the mod. It checks the native `NPC body` lines, the body ledger
+and the mod's `npc-body-test: PASS` lines. The sample `mods/samples/NpcBody` is the same kind of body for authors: run `make-body.py`.

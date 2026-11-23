@@ -12,7 +12,8 @@ every folder and file a cook is about to write is checked here before the first 
   send the files elsewhere. Links above the mod's folder are the system's and the player's (a Steam library reached through one).
 
 Outside assets/cooked a cook writes two files of the mod, and only by their exact place: assets/assets.json (the manifest) and
-blocks/<name>.materials.json (the material blocks made from a glTF).
+blocks/<name>.materials.json (the material blocks made from a glTF). The machine-local NPC body manifest is
+assets/cooked/npc-bodies.v1.json, so identity excludes it and a failed cook restores it with the cooked tree.
 
 A path is judged as it is written: a ".." right after a link would climb out of wherever the link leads, so it is refused before the
 path is normalised. A cook writes to the path a check returned (normalised, every component checked), never to the one it was given,
@@ -133,6 +134,28 @@ def manifest(recipe_path, target):
     if parts is None or tuple(_spelled(mod, parts)) != MANIFEST:
         raise Refused(f"the manifest is {full}: a cook writes its entries into the mod's assets/assets.json only ({Path(mod).joinpath(*MANIFEST)}), the file kiln.assets reads")
     return Path(mod).joinpath(*MANIFEST)
+
+
+def source(recipe_path, relative):
+    """A read-only dependency under this mod, without links or parent traversal; never an output permission."""
+    mod = mod_root(recipe_path)
+    if not isinstance(relative, str) or Path(relative).is_absolute() or ".." in relative.replace("\\", "/").split("/"):
+        raise Refused(f"{relative!r}: an NPC dependency must be a mod-relative path without parent traversal")
+    parts, full = _under(mod, Path(mod) / relative)
+    if parts is None:
+        raise Refused(f"{full}: an NPC dependency must belong to this mod")
+    return Path(mod).joinpath(*_spelled(mod, parts))
+
+
+def npc_manifest(recipe_path):
+    """The machine-local body manifest, excluded from identity and restored with the cooked tree; no links."""
+    mod = mod_root(recipe_path)
+    target = Path(mod) / "assets" / "cooked" / "npc-bodies.v1.json"
+    parts, full = _under(mod, target)
+    expected = ("assets", "cooked", "npc-bodies.v1.json")
+    if parts is None or tuple(_spelled(mod, parts)) != expected:
+        raise Refused(f"the NPC body manifest is {full}: it must be the mod's own assets/cooked/npc-bodies.v1.json, without links")
+    return Path(mod).joinpath(*expected)
 
 
 def blocks_file(recipe_path, target):

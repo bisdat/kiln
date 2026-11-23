@@ -51,6 +51,7 @@ A mod's blocks: spells, weapons, wands, armor, items, stations, statuses, effect
 | `materialTweaks` | object |  | Changes to game materials: what it takes to dig them. Read at boot by kiln.worldtables; a strength change asks nothing of players' games. |
 | `materials` | `kiln-vfx.schema.json materialSection` |  | Surfaces for models, on the game's own shaders. No base to name, no game data. Built by the game client at start. |
 | `menus` | object |  | Parts: the crafting menu a station opens. |
+| `npcMotions` | object |  | Reusable Kiln-owned motion-role bindings for an authored Fisher/Villager roster body. |
 | `npcs` | object |  | Friendly NPCs: talk, wares, a place in the roster. |
 | `onHits` | object |  | Parts: what an item does to what its wearer hits. |
 | `perks` | object |  | Enhancements for an item's perks: the game's rule applies, so one runs once a player has unlocked its slot. |
@@ -1113,9 +1114,10 @@ A friendly NPC on a game NPC's body: talk, wares, a place in the roster.
 | Key | Type | Required | Notes |
 |---|---|---|---|
 | `ai` | [ref](#ref) or [ai](#ai) |  |  |
-| `animation` | [ref](#ref) or [animation](#animation) |  |  |
+| `animation` | [ref](#ref) or [animation](#animation) |  | Only with an authored roster body (body.model of this mod): its cooked clips and graph. A game NPC body refuses it. |
 | `behaviour` | [ref](#ref) or [behaviour](#behaviour) |  |  |
 | `body` | [ref](#ref) or [body](#body) | yes |  |
+| `motions` | [ref](#ref) or [npcMotions](#npcmotions) |  | Motion-role bindings for an authored Fisher/Villager body: this mod's npcMotions block by name, or inline bindings. |
 | `name` | string | yes | min length 1 |
 | `names` | object |  |  |
 | `place` | object |  |  |
@@ -1124,6 +1126,15 @@ A friendly NPC on a game NPC's body: talk, wares, a place in the roster.
 | `talk` | string |  | A dialogue block or quests/*.json dialogue of this mod. Another mod's dialogue is not supported by the startup build. |
 | `vendor` | object |  |  |
 | `was` | string |  |  |
+
+## npcMotions
+
+The v1 roster motion vector: bind required roles to cooked graph states, and bind optional roles or provide optionalFallback. Interaction uses Kiln's chassis key when omitted or null; no game GUID is needed. This part alone requests no client content.
+
+| Key | Type | Required | Notes |
+|---|---|---|---|
+| `bindings` | array of object |  | Unique role/variant pairs. Sit, sleep, inspect, jump and door are required; omitted optional roles need optionalFallback. |
+| `optionalFallback` | string |  | Explicit GUID-bearing graph state for omitted optional motions. Fallbacks are clamped and non-looping; required roles never fall back. min length 1 |
 
 ## onHit
 

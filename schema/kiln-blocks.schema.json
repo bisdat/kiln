@@ -155,6 +155,7 @@
       "additionalProperties": { "$ref": "#/$defs/creature" }
     },
     "npcs": { "type": "object", "description": "Friendly NPCs: talk, wares, a place in the roster.", "propertyNames": { "$ref": "#/$defs/name" }, "additionalProperties": { "$ref": "#/$defs/npc" } },
+    "npcMotions": { "type": "object", "description": "Reusable Kiln-owned motion-role bindings for an authored Fisher/Villager roster body.", "propertyNames": { "$ref": "#/$defs/name" }, "additionalProperties": { "$ref": "#/$defs/npcMotions" } },
     "bodies": { "type": "object", "description": "Bodies, for creatures and NPCs to name.", "propertyNames": { "$ref": "#/$defs/name" }, "additionalProperties": { "$ref": "#/$defs/body" } },
     "animations": {
       "type": "object",
@@ -1947,16 +1948,130 @@
         "drops": { "oneOf": [ { "$ref": "#/$defs/ref" }, { "$ref": "#/$defs/lootTable" } ], "description": "What it drops when it dies, besides what the game gives it: a lootTables block by name, or a table written here. Kiln rolls it where the death is reported." }
       }
     },
+    "npcMotions": {
+      "type": "object",
+      "description": "The v1 roster motion vector: bind required roles to cooked graph states, and bind optional roles or provide optionalFallback. Interaction uses Kiln's chassis key when omitted or null; no game GUID is needed. This part alone requests no client content.",
+      "additionalProperties": false,
+      "properties": {
+        "bindings": {
+          "type": "array",
+          "description": "Unique role/variant pairs. Sit, sleep, inspect, jump and door are required; omitted optional roles need optionalFallback.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "role",
+              "variant",
+              "state"
+            ],
+            "properties": {
+              "role": {
+                "description": "A Kiln-owned roster motion role, not a game function or reflection name.",
+                "enum": [
+                  "sit",
+                  "sleep",
+                  "inspect",
+                  "greet",
+                  "talk",
+                  "reaction0",
+                  "reaction1",
+                  "refuse",
+                  "idleGesture0",
+                  "idleGesture1",
+                  "interaction",
+                  "greetingExtra",
+                  "farewell",
+                  "dialogOption",
+                  "attentionGreeting",
+                  "turnLeftSmall",
+                  "turnLeftBig",
+                  "turnRightSmall",
+                  "turnRightBig",
+                  "jump",
+                  "door"
+                ]
+              },
+              "variant": {
+                "type": "integer",
+                "description": "Zero for single-variant roles; 0/1/2 for sit, sleep and door. Sit/sleep use enter/loop/exit.",
+                "minimum": 0,
+                "maximum": 2
+              },
+              "state": {
+                "type": "string",
+                "description": "A GUID-bearing state in this body's cooked graph. A hash-only engine state cannot be a sequence target.",
+                "minLength": 1
+              },
+              "interactionKey": {
+                "type": ["string", "null"],
+                "description": "Optional advanced compatibility key. Interaction uses the chassis key when omitted or null; an explicit key must match it. Other roles leave it null.",
+                "format": "uuid"
+              }
+            },
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "role": {
+                      "enum": [
+                        "sit",
+                        "sleep",
+                        "door"
+                      ]
+                    }
+                  }
+                },
+                "else": {
+                  "properties": {
+                    "variant": {
+                      "const": 0
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "role": {
+                      "const": "interaction"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "interactionKey": {
+                      "enum": [null, "81ed77f9-4c72-4730-8b05-a5ddee9c7164"]
+                    }
+                  }
+                },
+                "else": {
+                  "properties": {
+                    "interactionKey": { "type": "null" }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "optionalFallback": {
+          "type": "string",
+          "description": "Explicit GUID-bearing graph state for omitted optional motions. Fallbacks are clamped and non-looping; required roles never fall back.",
+          "minLength": 1
+        }
+      }
+    },
     "npc": {
       "type": "object",
       "additionalProperties": false,
       "required": ["name", "body"],
+      "allOf": [{"if": {"anyOf": [{"required": ["animation"]}, {"required": ["motions"]}]}, "then": {"properties": {"body": {"not": {"type": "string", "enum": ["fisher", "villager", "vukah", "scavenger"]}}}}}],
       "description": "A friendly NPC on a game NPC's body: talk, wares, a place in the roster.",
       "properties": {
         "name": { "type": "string", "minLength": 1 },
         "was": { "type": "string" },
         "body": { "oneOf": [ { "$ref": "#/$defs/ref" }, { "$ref": "#/$defs/body" } ] },
-        "animation": { "oneOf": [ { "$ref": "#/$defs/ref" }, { "$ref": "#/$defs/animation" } ], "not": {} },
+        "animation": { "oneOf": [ { "$ref": "#/$defs/ref" }, { "$ref": "#/$defs/animation" } ], "description": "Only with an authored roster body (body.model of this mod): its cooked clips and graph. A game NPC body refuses it." },
+        "motions": { "oneOf": [ { "$ref": "#/$defs/ref" }, { "$ref": "#/$defs/npcMotions" } ], "description": "Motion-role bindings for an authored Fisher/Villager body: this mod's npcMotions block by name, or inline bindings." },
         "ai": { "oneOf": [ { "$ref": "#/$defs/ref" }, { "$ref": "#/$defs/ai" } ], "not": {} },
         "behaviour": { "oneOf": [ { "$ref": "#/$defs/ref" }, { "$ref": "#/$defs/behaviour" } ], "not": {} },
         "talk": { "type": "string", "description": "A dialogue block or quests/*.json dialogue of this mod. Another mod's dialogue is not supported by the startup build." },

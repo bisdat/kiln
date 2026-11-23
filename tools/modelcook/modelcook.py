@@ -34,7 +34,9 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent / "kfc"))
+sys.path.insert(0, str(HERE.parent / "animcook"))
 
+from anicook import blocks as B  # noqa: E402
 from cook import gltf, recipe, skin, steps  # noqa: E402
 from cook.validate import validate  # noqa: E402
 from kfc.archive import Kfc  # noqa: E402
@@ -131,7 +133,8 @@ def cmd_recipe(a):
     _say_warnings(r)
     _say_steps(r)
     if r["manifest"]["missing"] or r["manifest"]["mismatched"]:
-        print("assets.json does not match the cooked files (run with --update-manifest):")
+        for message in B.manifest_diagnostics(r["manifest"], recipe.TOOL):
+            print(message)
         for e in r["manifest"]["missing"] + r["manifest"]["mismatched"]:
             print("  " + json.dumps(e))
     _say_marks(r)
@@ -194,7 +197,8 @@ def cmd_looks(a):
     _say_warnings(r)
     _say_steps(r)
     if r["manifest"]["missing"] or r["manifest"]["mismatched"]:
-        print("assets.json does not match the cooked files (run with --update-manifest)")
+        for message in B.manifest_diagnostics(r["manifest"], recipe.TOOL):
+            print(message)
     _say_marks(r)
     print(f"{'ok' if r['ok'] else 'FAILED'}: {len(r['outputs'])} file(s), report {path.parent / doc['out'] / recipe.LOOKS_REPORT}")
     return 0 if r["ok"] else 1

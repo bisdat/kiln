@@ -386,14 +386,17 @@ internal static class BlocksStartup
         // An unloaded mod's data files compile again when it is loaded again (a reload clears it through ModReloadedEvent), and its material
         // replacements go (Vfx/Reskins.cs).
         foreach (var m in Mods.All)
-            if (!m.IsLoaded && m.State != ModState.Pending)
+            if (m.IsLoaded) NpcBodies.ModLoaded(m.Id);
+            else if (m.State != ModState.Pending)
             {
+                NpcBodies.ModUnloaded(m.Id);  // a Ready body stays until the process ends: RemovalPendingRestart
                 Done.Remove(m.Id);
                 Reskins.Unloaded(m.Id);
                 var old = Blocks.AllMods.FirstOrDefault(b => b.Id == m.Id);
                 if (old != null && (old.DataLoaded || old.Data != null || old.OwnedByMod)) BlockJson.Unloaded(old);
             }
         CompileLoaded();
+        NpcBodies.Kick();  // the boot build's body rows, and what changed since: NpcBodyBuildChangedEvent
     }
 
     /// <summary>A mod's data files are still to compile (the next data pass): its routine plans may not be defined yet.</summary>

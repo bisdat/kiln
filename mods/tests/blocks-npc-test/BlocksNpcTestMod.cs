@@ -158,7 +158,9 @@ public sealed class BlocksNpcTestMod : Mod
         Named("bad-spawn", "spawns[0].replaces", "Enemy_No_Such_Creature");
         Named("bad-level", "stats.level", "99");
         Named("no-idle", "idle");
-        Named("bad-npc-body", "body.model");
+        // the stoneling's body on an NPC: with authored roster bodies on (16f) it is refused for what such a body may not have (scale
+        // 1 only); where they are off, for its model
+        Named("bad-npc-body", Capabilities.Is("blocks.npc_body") ? "body.scale" : "body.model");
         string[] wrong = ["bad-plays", "bad-mixed", "bad-moves", "bad-keeps", "bad-skeleton", "bad-uncooked", "bad-phase", "bad-empty-attack", "bad-spawn", "bad-level", "no-idle", "bad-npc-body"];
         var made = wrong.Where(blocks.Contains).ToList();
         Check(made.Count == 0, $"none of the {wrong.Length} wrong blocks became anything: {string.Join(", ", made)}");

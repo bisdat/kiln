@@ -31,5 +31,7 @@
     <InternalsVisibleTo Include="AdmissionHoldTest" />
     <!-- the contract tests: the rows' names -->
     <InternalsVisibleTo Include="Kiln.Contract.Tests" />
+    <!-- NpcBodies' tests script the boot build's body rows (NpcBodyRows) -->
+    <InternalsVisibleTo Include="Kiln.Blocks.Tests" />
   </ItemGroup>
 </Project>

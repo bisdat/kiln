@@ -15,6 +15,17 @@ public sealed class BlocksContractTests : ContractTest
             Assert.NotEqual(CapabilityReason.Unknown, Capabilities.Get(row).Reason);
     }
 
+    // Found by the 16f lab: blocks.npc_body was reported only when Factions ran, so a mod asking Capabilities for it read "no capability
+    // of this name" although NpcBodies.Status worked. An NPC body status asks for the rows as an NPC block's definition does.
+    [Fact]
+    public void Asking_an_NPC_body_status_reports_the_blocks_rows()
+    {
+        Assert.Equal(CapabilityReason.Unknown, Capabilities.Get("blocks.npc_body").Reason);
+        try { NpcBodies.Status("some-mod:tobin"); }
+        catch (KilnUnavailableException) { }  // no game here: its dependencies are off
+        Assert.NotEqual(CapabilityReason.Unknown, Capabilities.Get("blocks.npc_body").Reason);
+    }
+
     [Fact]
     public void Factions_without_kiln_npcai_throw_unavailable_naming_it()
     {

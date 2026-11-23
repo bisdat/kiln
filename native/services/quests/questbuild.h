@@ -9,7 +9,8 @@
 //
 // A resource is one struct followed by its out-of-line data; every offset in it is self-relative, so a copy is valid
 // anywhere, and growing an array needs no re-encoding: the new array goes behind the old data and the BlobArray field
-// is pointed at it. The old array stays as unused bytes.
+// is pointed at it. The old array stays as unused bytes. The private boot publisher can compact its own known
+// knowledge-map tails between packs, retaining the original prefix and all unrelated data.
 #pragma once
 #include <cstddef>
 #include <cstdint>
@@ -77,6 +78,9 @@ struct KnowledgeDef {
 // A copy of `res` with `defs` added to the world and player static maps (bucket count kept, or doubled when the map
 // would hold more than the bucket count). An id the game already has in that map is an error: nothing is built.
 bool rebuild_knowledge(const uint8_t* res, size_t len, const std::vector<KnowledgeDef>& defs, Bytes* out, std::string* err);
+// Keep the original input prefix and only the latest two maps. The caller must prove everything after the prefix
+// consists of this publisher's appended maps: a foreign writer's resource starts a new prefix instead.
+bool compact_knowledge(Bytes* resource, size_t prefix, std::string* err);
 // The objects in the two static maps. The game reserves its run-time maps and change lists for 6,050 world and 11,000 player
 // entries (0x99ead0).
 constexpr uint32_t kReservedWorld = 6050, kReservedPlayer = 11000;

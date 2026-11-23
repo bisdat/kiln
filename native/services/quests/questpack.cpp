@@ -19,6 +19,8 @@
 //  - every step with a place (a marker, site, spawn, reach or kill place, an NPC of the mod) a new TemplateResource (a copy of
 //    a search-area marker) with its own name tag, visible while the step is active; Kiln.Quests/Native puts it at the place.
 #include "questpack.h"
+#include "bodypack.h"
+#include "motionclose.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -140,6 +142,10 @@ struct Ctx {
     struct Tpl {
         Guid base, guid;
         TemplateEdit edit;
+        bool has_body = false;  // 16f: an authored roster body, lowered before the edit
+        BodySpec body;
+        std::string mod, npc;   // 16f S4: whose motion closure (clone ids follow the mod, NPC and binding vector)
+        ojson motions;          // the admitted 27-row binding vector
     };
     std::vector<Tpl> templates;
     std::map<std::string, const ojson*> dialogues;  // of this mod
@@ -714,6 +720,11 @@ void compile_npc(Ctx& c, const std::string& nid, const ojson& n) {
         return;
     }
     const bool clone = n.contains("clone") && !(n["clone"].is_boolean() && !n["clone"].get<bool>());
+    const bool authored_body = n.contains("body") && n["body"].is_object();  // only Kiln's admission writes an object here
+    if (authored_body && (!clone || base_name != kBodyChassis)) {  // 16f: never a vanilla key, never another chassis
+        c.err(where + ": body: an authored body is a new roster clone of the Fisher chassis");
+        return;
+    }
     const ojson* dialogue = nullptr;
     if (!dlg.empty()) {
         auto it = c.dialogues.find(dlg);
@@ -748,6 +759,25 @@ void compile_npc(Ctx& c, const std::string& nid, const ojson& n) {
         tp = &c.templates.back();
     }
     TemplateEdit& e = tp->edit;
+    if (authored_body) {
+        // 16f: only Kiln's admission writes this (native_pack.cpp, bodyadmit.cpp): cooked ids and the authored size
+        const ojson& b = n["body"];
+        const ojson size = b.is_object() ? b.value("size", ojson()) : ojson();
+        BodySpec spec;
+        if (!b.is_object() || !parse_guid(str(b, "model"), &spec.model) || !parse_guid(str(b, "graph"), &spec.graph) ||
+                 !size.is_object() || !size.contains("radius") || !size["radius"].is_number() || !size.contains("height") ||
+                 !size["height"].is_number())
+            c.err(where + ": body: an admitted body needs model, graph and size {radius, height}");
+        else {
+            spec.radius = size["radius"].get<double>();
+            spec.height = size["height"].get<double>();
+            tp->has_body = true;
+            tp->body = spec;
+            tp->mod = c.mod->id;
+            tp->npc = nid;
+            tp->motions = b.value("bindings", ojson());
+        }
+    }
     uint32_t name_tag = 0;
     if (n.contains("names")) {
         const Guid loca = derive_guid(c.mod->id, "npcname", nid);
@@ -899,8 +929,8 @@ PackOut compile_pack(const std::vector<ModInput>& mods, const GameData& game) {
     const auto game_knowledge = [&]() {
         if (!game_read) {
             game_read = true;
-            std::string ignored;  // a missing resource fails the whole build below, as it always did
-            if (!read_required(game, kGuidKnowledge, kTypeKnowledge, &game_res.first, &game_res.second, &ignored)) game_res = {nullptr, 0};
+            if (!read_required(game, kGuidKnowledge, kTypeKnowledge, &game_res.first, &game_res.second, &out.shared_failure))
+                game_res = {nullptr, 0};
         }
         return game_res;
     };
@@ -1006,7 +1036,8 @@ PackOut compile_pack(const std::vector<ModInput>& mods, const GameData& game) {
     std::string err;
     const uint8_t* p = nullptr;
     size_t n = 0;
-    auto fail = [&](const std::string& why) {
+    auto fail = [&](const std::string& why, bool shared = false) {
+        if (shared) out.shared_failure = why;
         out.errors.push_back(why);
         out.ok = false;
         out.any = false;
@@ -1014,18 +1045,19 @@ PackOut compile_pack(const std::vector<ModInput>& mods, const GameData& game) {
         out.manifest["failed"] = why;  // nothing of any mod is built (a boot generation's required mods are left out by it)
         return out;
     };
-    if (!read_required(game, kGuidKnowledge, kTypeKnowledge, &p, &n, &err)) return fail(err);
+    if (!read_required(game, kGuidKnowledge, kTypeKnowledge, &p, &n, &err)) return fail(err, true);
+    out.knowledge_source_size = n;
     if (!rebuild_knowledge(p, n, out.knowledge, &out.res_knowledge, &err)) return fail(err);
     uint32_t cw = 0, cp = 0;
     if (knowledge_counts(out.res_knowledge.data(), out.res_knowledge.size(), &cw, &cp) && (cw > kReservedWorld || cp > kReservedPlayer))
         out.warnings.push_back("the game reserves its knowledge maps for " + std::to_string(kReservedWorld) + " world and " + std::to_string(kReservedPlayer) +
                                " player entries; there are now " + std::to_string(cw) + " and " + std::to_string(cp) + " objects (untested beyond that)");
     if (!out.quests.empty()) {
-        if (!read_required(game, kGuidJournal, kTypeJournal, &p, &n, &err)) return fail(err);
+        if (!read_required(game, kGuidJournal, kTypeJournal, &p, &n, &err)) return fail(err, true);
         if (!rebuild_journal(p, n, out.quests, &out.res_journal, &err)) return fail(err);
     }
     if (!out.npcs.empty()) {
-        if (!read_required(game, kGuidNpcs, kTypeNpcs, &p, &n, &err)) return fail(err);
+        if (!read_required(game, kGuidNpcs, kTypeNpcs, &p, &n, &err)) return fail(err, true);
         // the roster's maximum: 64, or 128 where kiln.knowledge can keep a second unlock page (asked only when needed,
         // so nothing is hooked for a roster that fits in 64)
         const uint64_t need = uint64_t{npc_count(p, n)} + out.npcs.size();
@@ -1075,7 +1107,45 @@ PackOut compile_pack(const std::vector<ModInput>& mods, const GameData& game) {
         o.guid = t.guid;
         o.is_new = !t.edit.new_name.empty();
         o.name = o.is_new ? t.edit.new_name : template_name(p, n);
+        Bytes lowered;
+        if (t.has_body) {
+            // The verified layout first, then the owned-buffer body rewrite, then the ordinary quest edit on its bytes.
+            if (!game.body_layout) return fail(o.name + ": body.chassis: the game's type registry cannot be checked here");
+            if (!game.body_layout(&err)) return fail(o.name + ": " + err);
+            if (!lower_body(p, n, t.body, &lowered, &err)) return fail(o.name + ": " + err);
+            p = lowered.data();
+            n = lowered.size();
+        }
         if (!edit_template(p, n, t.edit, &o.data, &err)) return fail(o.name + ": " + err);
+        if (t.has_body) {
+            // 16f S4: the motion closure. Each of the Fisher's 21 sequences is cloned under the mod's ids with its
+            // animation events bound to the authored states and retimed; every template reference follows the clone.
+            motionclose::Bindings bound;
+            if (!motionclose::parse_bindings(t.motions, &bound, &err)) return fail(o.name + ": " + err);
+            const std::string vector_hash = sha256_hex(t.motions.dump());
+            const uint32_t sequence_type = fnv1a(motionclose::kSequenceType, std::strlen(motionclose::kSequenceType));
+            const auto id = [&](const std::string& source) { return derive_guid(t.mod, "npcmotion", t.npc + ":" + source + ":" + vector_hash); };
+            std::map<std::string, Guid> clones;
+            for (const auto& source : motionclose::fisher_closure()) {
+                Guid g;
+                parse_guid(source.guid, &g);
+                const uint8_t* sp = nullptr;
+                size_t sn = 0;
+                if (!game.read(g, sequence_type, &sp, &sn) || !sp)
+                    return fail(o.name + ": motions." + source.role + ": the Fisher's sequence " + source.guid + " is not in the game's data");
+                ResourceOut r;
+                r.guid = id(source.guid);
+                r.type = sequence_type;
+                r.name = o.name + ".motion." + source.role;
+                if (!motionclose::clone_sequence(sp, sn, r.guid, source, bound[source.role],
+                                                 [&](const Guid& old) { return id(guid_text(old)); }, &r.data, &err))
+                    return fail(o.name + ": " + err);
+                clones[source.guid] = r.guid;
+                out.resources.push_back(std::move(r));
+            }
+            size_t replaced = 0;
+            if (!motionclose::remap_template(&o.data, clones, &replaced, &err)) return fail(o.name + ": " + err);
+        }
         out.templates.push_back(std::move(o));
     }
     out.ok = out.errors.empty();
