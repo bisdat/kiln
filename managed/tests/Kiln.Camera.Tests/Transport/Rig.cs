@@ -71,7 +71,7 @@ internal sealed class Rig
         Endpoint = Endpoint,
         ClientNonce = nonce,
         ClientEpoch = epoch,
-        LocalEntity = 1001,
+        LocalEntity = 42,
         Caps = caps,
         ChannelMaxBody = maxBody,
     });

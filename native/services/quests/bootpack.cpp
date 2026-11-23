@@ -328,6 +328,9 @@ Result build(const std::vector<ModInput>& mods, const Backend& backend) {
     unique_ids(&out.roster_kiln_ids);
     // 16f S5: the status of every authored body this build saw, for NpcBodies.Status and the join handshake
     for (const auto& mod : mods) {
+        for (const auto& skipped : mod.skipped_bodies)
+            out.bodies.push_back({{"mod", mod.id}, {"npc", skipped.npc}, {"key", skipped.key}, {"state", "failed"}, {"reason", skipped.reason},
+                                  {"template", ""}, {"model", ""}, {"graph", ""}, {"closure", ""}, {"generation", out.generation}});
         if (!mod.authored_body) continue;
         if (const auto found = admitted_inputs.find(mod.id); found != admitted_inputs.end()) {
             each_body(found->second, [&](const std::string& id, const ojson& npc) {

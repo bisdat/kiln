@@ -147,7 +147,8 @@ std::string read_block_file(const fs::path& path) {
 // NpcCompiler.NpcFile writes for an NPC block, the same ids (UUIDv5 of <mod>:npc:<name>, <mod>:item:<name>.tool) and the same body premades.
 // An NPC block written in code is not visible here: Kiln.Blocks writes it to the data folder, and the game builds it from the next start.
 qb::ojson npcs_from_blocks(const std::string& mod, const std::vector<qb::ojson>& docs, bool* authored_body = nullptr,
-                           std::string* body_refusal = nullptr, std::vector<std::string>* refused_bodies = nullptr) {
+                           std::string* body_refusal = nullptr, std::vector<std::string>* refused_bodies = nullptr,
+                           std::vector<qb::ModInput::SkippedBody>* skipped_bodies = nullptr) {
     struct Premade {
         const char *key, *tmpl, *workshop, *tool;
     };
@@ -221,8 +222,10 @@ qb::ojson npcs_from_blocks(const std::string& mod, const std::vector<qb::ojson>&
             if (b.own && resolved) {
                 const qb::ojson spec = qb::bodyadmit::resolve_spec(mod, n, body_blocks, animation_blocks, motion_blocks);
                 if (!spec.is_null() && (!spec["animation"].is_object() || !spec["motions"].is_object())) {
-                    KW("native: %s: npcs.%s: its body names a model but no %s: not an authored roster body, so this NPC is not built "
-                       "(Kiln.Blocks says what is wrong)", mod.c_str(), name.c_str(), spec["animation"].is_object() ? "motions" : "animation");
+                    const std::string reason = "npcs." + name + ": its body names a model but no " +
+                        (spec["animation"].is_object() ? "motions" : "animation") + ": not an authored roster body, so this NPC is not built";
+                    KW("native: %s: %s (Kiln.Blocks says what is wrong)", mod.c_str(), reason.c_str());
+                    if (skipped_bodies) skipped_bodies->push_back({name, n.contains("was") && n["was"].is_string() ? n["was"].get<std::string>() : name, reason});
                     continue;
                 }
             }
@@ -423,16 +426,17 @@ void collect_mods(std::vector<qb::ModInput>* mods, bool client, const kiln::boot
         bool authored_body = false;
         std::string body_refusal;
         std::vector<std::string> refused_bodies;
+        std::vector<qb::ModInput::SkippedBody> skipped_bodies;
         const qb::ojson block_npcs = block_docs.empty() ? qb::ojson::object()
                                                         : npcs_from_blocks(mf["id"].get<std::string>(), block_docs, &authored_body, &body_refusal,
-                                                                           &refused_bodies);
+                                                                           &refused_bodies, &skipped_bodies);
         const fs::path body_manifest = base / L"assets" / L"cooked" / L"npc-bodies.v1.json";
         if (fs::exists(body_manifest, ec)) {
             const auto bundle = qb::parse_blocks_json(read_block_file(body_manifest));
             authored_body = authored_body || !bundle.is_object() || !bundle.contains("bodies") || !bundle["bodies"].is_object() || !bundle["bodies"].empty();
         }
-        if (!authored_body && !fs::is_directory(qdir, ec) && !fs::exists(code, ec) && !fs::exists(npc_blocks, ec) && block_npcs.empty() && block_quests.empty() &&
-            boot_docs.empty())
+        if (!authored_body && skipped_bodies.empty() && !fs::is_directory(qdir, ec) && !fs::exists(code, ec) && !fs::exists(npc_blocks, ec) &&
+            block_npcs.empty() && block_quests.empty() && boot_docs.empty())
             return;
         const std::string side = mf.value("side", "both");
         if ((side == "server" && client) || (side == "client" && !client)) return;
@@ -442,6 +446,7 @@ void collect_mods(std::vector<qb::ModInput>* mods, bool client, const kiln::boot
         m.dir = dir;
         m.body_refusal = body_refusal;
         m.refused_bodies = refused_bodies;
+        m.skipped_bodies = std::move(skipped_bodies);
         if (mf.contains("dependencies")) {
             const auto& dependencies = mf["dependencies"];
             if (dependencies.is_object()) {
@@ -1424,6 +1429,15 @@ void native_pack_ready() {
 
 std::string native_pack_manifest() {
     std::lock_guard lock(g_mu);
+    // A missing bodies key means "not built yet" to managed readers. Complete even the empty and legacy paths so they
+    // can cache the final manifest, without freezing an early read (the build and this read both hold g_mu).
+    if (g_built) {
+        auto manifest = qb::ojson::parse(g_manifest, nullptr, false);
+        if (manifest.is_object() && !manifest.contains("bodies")) {
+            manifest["bodies"] = qb::ojson::array();
+            g_manifest = manifest.dump();
+        }
+    }
     return g_manifest;
 }
 
