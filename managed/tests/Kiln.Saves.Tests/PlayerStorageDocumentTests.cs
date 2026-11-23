@@ -279,4 +279,22 @@ public sealed class PlayerStorageDocumentTests
         Assert.Equal("returned outside Kiln", held["mod:bag"]!["parkReason"]!.GetValue<string>());
     }
 
+
+    [Fact]
+    public void A_parked_record_whose_slot_is_taken_stays_parked_instead_of_colliding_with_a_live_record()
+    {
+        // Native rebuilds a LIVE record only into its own slot (an occupied one quarantines it) but finds a free slot for
+        // a PARKED one. A record parked by the filter or the slot count must therefore not join the live entry on a
+        // slot a live record holds.
+        var live = new JsonObject { ["mod:bag"] = Bag(0) };
+        var other = new JsonObject { ["s"] = 0, ["b64"] = Convert.ToBase64String([0, 2, 0, 0, 0, 1, 0, 0]), ["item"] = 2, ["n"] = 1 };
+        var free = new JsonObject { ["s"] = 3, ["b64"] = Convert.ToBase64String([3, 4, 0, 0, 0, 1, 0, 0]), ["item"] = 4, ["n"] = 1 };
+        var parked = new JsonObject { ["mod:bag"] = new JsonObject { ["slots"] = 8, ["records"] = new JsonArray(other, free), ["nativeParkReason"] = 3 } };
+        var (active, waiting) = PlayerStorageDocument.Partition(live, parked, new Dictionary<string, int> { ["mod:bag"] = 8 }, new JsonArray());
+        var usable = active["mod:bag"]!["records"]!.AsArray().Select(r => r!["s"]!.GetValue<int>()).ToArray();
+        Assert.Equal(usable.Distinct().Count(), usable.Length);
+        Assert.Equal([0, 3], usable.Order().ToArray());
+        var kept = Assert.Single(waiting["mod:bag"]!["records"]!.AsArray());
+        Assert.Equal(2, kept!["item"]!.GetValue<int>());
+    }
 }
