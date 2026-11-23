@@ -474,6 +474,13 @@ the server dropped the event before crafting). It needs kiln.gameplay's craft ho
 a link or an opt-in exists. On a hosting client the client world's own dry runs (one per recipe the crafting menu
 counts) have their own few lines and no longer use up the ones above.
 
+Since 0.2.0-dev.31 (GitHub #132, beta 1 report), the paid, covered, short and rolled-back lines also say what the
+game's own sources did: `(the bag and the base's Magic chests: counted X, paid Y; the payer's bag: held Z, paid W; the
+game refused N take(s), last error 0xEE)` (`paid` only once something was taken; the refusals only when there were
+any). Linked sources and outputs pay at most the shortfall counted before the first take: when the bag or a Magic chest
+then pays less than it was counted to hold, the craft rolls back (`the bag and the Magic chests paid less than they were
+counted to hold`) instead of taking the difference from linked sources.
+
 Tested: `stations_test.cpp` (the order, the lenders, all or nothing, a fault or a remainder after a take) and the lab
 test `mods/tests/station-craft-test` on a dedicated server (33 PASS: [docs/re/stations.md §10.6](../../re/stations.md#106-lab-dev29-sc2)).
 A lab has no logged-in player, so it starts the server with `KILN_STATIONS_CRAFT_LAB=1`: then a spawned player character

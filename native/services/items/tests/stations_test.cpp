@@ -865,15 +865,27 @@ int main() {
         lines = {{COAL, 10, 0, 0}};
         CHECK(craft_pay(&lines, order, lent, count, pay, &from, &why) == kCraftRollback && why == kCraftWhyFault);
         fault_at = 0;
-        // the counts did not hold (the bag pays nothing, the kiln holds less than counted): the outputs pay what they
-        // hold and the line stays short -> 4, never a partial craft
+        // the counts did not hold (the kiln holds less than counted): the outputs pay what they hold and the line stays
+        // short -> 4, never a partial craft
+        reset();
+        log.clear();
+        inv[K1][COAL] = 1;
+        lines = {{COAL, 10, 0, 0}};
+        CHECK(craft_pay(&lines, order, lent, count, pay, &from, &why) == kCraftRollback && why == kCraftWhyRemainder);
+        // GitHub #132: the bag pays less than it was counted to hold (3 counted, nothing taken): the kiln must not pay
+        // more than the counted shortfall (3) though it holds 8 -> 4 before any lender is asked
         reset();
         log.clear();
         empty_pay[P] = true;
-        inv[K1][COAL] = 3;
         lines = {{COAL, 10, 0, 0}};
-        CHECK(craft_pay(&lines, order, lent, count, pay, &from, &why) == kCraftRollback && why == kCraftWhyRemainder);
+        CHECK(craft_pay(&lines, order, lent, count, pay, &from, &why) == kCraftRollback && why == kCraftWhyGamePaidLess);
+        CHECK(from == 0 && inv[K1][COAL] == 8 && std::none_of(log.begin(), log.end(), [&](const Take& t) { return t.e == K1; }));
         empty_pay.clear();
+        // and with every count holding, the lender pays exactly the shortfall, not what it holds
+        reset();
+        log.clear();
+        lines = {{COAL, 9, 0, 0}};
+        CHECK(craft_pay(&lines, order, lent, count, pay, &from, &why) == kCraftPaid && from == 2 && inv[K1][COAL] == 6);
         // mode 1: the chests before the owner
         reset();
         log.clear();
@@ -1035,6 +1047,25 @@ int main() {
         t.stage = kTraceCovered;
         t.why = nullptr;
         CHECK(craft_trace_text(t, 1, 0x77, 3000, 0).find("covered") != std::string::npos);
+        // GitHub #132: what the game's own sources were counted to hold and what they paid, and the game's refusals
+        t = CraftTrace{};
+        t.stage = kTracePaid;
+        t.from = 5;
+        t.counted = true;
+        t.game_counted = 3, t.game_paid = 0, t.payer_held = 3, t.payer_paid = 0, t.pay_refusals = 1, t.last_refusal = 0x0b;
+        s = craft_trace_text(t, 1, 0x3ef55875, 4417, 0);
+        CHECK(s.find("paid 5 item(s) from linked sources or opted-in station outputs (the bag and the base's Magic chests: counted 3, "
+                     "paid 0; the payer's bag: held 3, paid 0; the game refused 1 take(s), last error 0x0b); made") != std::string::npos);
+        t.stage = kTraceCovered;
+        t.pay_refusals = 0;
+        CHECK(craft_trace_text(t, 1, 0x77, 3000, 0).find("own payment (the bag and the base's Magic chests: counted 3; the payer's bag: held 3)") !=
+              std::string::npos);
+        t.stage = kTraceRollback;
+        t.why = "the bag and the Magic chests paid less than they were counted to hold";
+        CHECK(craft_trace_text(t, 1, 0x77, 3000, 4).find("paid less than they were counted to hold: the craft was rolled back") != std::string::npos);
+        t = CraftTrace{};
+        t.stage = kTraceCovered;
+        CHECK(craft_trace_text(t, 1, 0x77, 3000, 0).find("(the bag") == std::string::npos);  // not counted: nothing added
         t.stage = 200;  // never a stage: still one bounded line
         CHECK(!craft_trace_text(t, 1, 0x77, 3000, 0).empty());
     }

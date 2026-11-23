@@ -846,6 +846,15 @@ current base stock and opted-in outputs already counted by `kiln:craftstock`; `K
 all filtered registered counts for consumers whose normal inventory view does not include that stock. Unknown flags
 refuse. Counts recheck the live player login, permission and container setup; they never authorize a payment.
 
+**Bag first (GitHub #132, dev.31 beta 1).** A hosting player reported both crafts paid in full from linked sources
+("a craft paid 5 from additional crafting sources") while the bag held all five. The adapter asks `PayMaterial` for the
+payer and every Magic chest before any lender, and `from` counts only lender takes, so a full-cost `from` means the
+game's own `PayMaterial` took nothing from the bag in that transaction; and with the bag counted at the full cost the
+craft is `covered` and never paid by Kiln at all (craft_payment_test, both bases words). What the transaction's view of
+the bag held, and whether `PayMaterial` answered the bag with an error byte (treated, as `InventoryPay` does, as "next
+source"), was not logged; the lines now say both. Lenders now pay at most the counted shortfall: a bag or chest that
+pays less than counted rolls the craft back instead of the lenders paying the difference.
+
 **Where a crafting-menu craft stops (GitHub #132 follow-up, 0.2.0-dev.31).** A 30.9 report from a hosting client: a
 decoration table's menu counted linked stock (an ingredient 0 -> 770, the recipe 0 -> 10), but Craft made nothing and kiln.log
 had no payment line. Static facts that bound it: the craft action handler queues the craft only for an enabled action
