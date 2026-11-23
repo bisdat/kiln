@@ -180,6 +180,13 @@ std::span<const BodyLayoutType> body_layout() {
     return types;
 }
 
+std::string sha256_hex(std::string_view bytes) {
+    const auto digest = kiln::capacity::sha256(bytes);
+    std::string out;
+    kiln::capacity::detail::hex(out, digest.data(), digest.size());
+    return out;
+}
+
 bool check_body_layout(const BodyTypeLookup& lookup, std::string* why) {
     const auto fail = [&](const std::string& detail) { if (why) *why = "body.chassis: " + detail + "; this game build is not the verified Fisher layout"; return false; };
     if (!lookup) return fail("the game's type registry is not available");

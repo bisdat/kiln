@@ -2064,6 +2064,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["name", "body"],
+      "allOf": [{"if": {"anyOf": [{"required": ["animation"]}, {"required": ["motions"]}]}, "then": {"properties": {"body": {"not": {"type": "string", "enum": ["fisher", "villager", "vukah", "scavenger"]}}}}}],
       "description": "A friendly NPC on a game NPC's body: talk, wares, a place in the roster.",
       "properties": {
         "name": { "type": "string", "minLength": 1 },

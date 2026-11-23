@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "bootpack.h"
-#include "../../core/abi/services/kiln_capacity_util.hpp"
+#include "bodypack.h"
 
 #include <algorithm>
 #include <cstring>
@@ -67,12 +67,6 @@ bool body_keys(const ojson& assets, std::vector<Key>* out, std::string* why) {
     return true;
 }
 
-std::string sha256_hex(const std::string& text) {
-    const auto digest = kiln::capacity::sha256(text);
-    std::string out;
-    kiln::capacity::detail::hex(out, digest.data(), digest.size());
-    return out;
-}
 // Each NPC of the mod's documents with a body object: (document NPC id, the body).
 template <class F> void each_body(const ModInput& mod, F f) {
     for (const auto& document : mod.documents) {

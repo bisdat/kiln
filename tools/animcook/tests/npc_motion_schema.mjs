@@ -32,6 +32,15 @@ for (const key of ["", false, "00000000-0000-0000-0000-000000000000", "12345678-
 const wrongRole = structuredClone(fixture.npcMotions["explicit-key"]);
 wrongRole.bindings[0].interactionKey = wrongRole.bindings.find(row => row.role === "interaction").interactionKey;
 check(wrongRole, false, "a non-interaction role cannot take a key");
+// An NPC's animation and motions belong to an authored body: a game body (a premade key) refuses them.
+const authored = { name: "Tobin", body: { model: "models/rig.gltf", size: { radius: 0.75, height: 2 } },
+    animation: { clips: "models/rig.gltf", idle: "Pose" }, motions: fixture.npcMotions.implicit };
+for (const [npc, expected, name] of [[authored, true, "an authored body takes animation and motions"],
+                                     [{ ...authored, body: "fisher" }, false, "a game body refuses animation and motions"],
+                                     [{ name: "Tobin", body: "fisher", motions: "poses" }, false, "a game body refuses motions alone"]]) {
+    assert.equal(validate({ format: 1, npcs: { tobin: npc } }), expected, `${name}: ${JSON.stringify(validate.errors)}`);
+    count++;
+}
 console.log(`NPC motion schema: ${count} cases passed`);
 
 // The local cache records per-block material identity and source hashes, not an assertion of runtime Ready.
