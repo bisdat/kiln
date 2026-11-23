@@ -254,7 +254,7 @@ How a body moves: a glTF of the mod with its clips (cooked when the mod builds),
 
 | Key | Type | Required | Notes |
 |---|---|---|---|
-| `clips` | string |  | The glTF file, its path in the mod's folder. Pattern `^(?!/)(?!.*\.\.).*\.([gG][lL][bB]\|[gG][lL][tT][fF])$`. |
+| `clips` | string |  | The glTF file, its path in the mod's folder. Pattern `^(?![/\\])(?![A-Za-z]:)(?!.*\.\.).*\.([gG][lL][bB]\|[gG][lL][tT][fF])$`. |
 | `dead` | [animClip](#animclip) |  |  |
 | `fall` | [animClip](#animclip) |  |  |
 | `hit` | [animClip](#animclip) |  |  |
@@ -430,7 +430,7 @@ What a creature is: a skinned glTF of the mod, or a game creature's body ("like"
 |---|---|---|---|
 | `colliders` | array of [collider](#collider) |  | max items 2 |
 | `like` | `"vukah"` \| `"scavenger"` \| `"fisher"` \| `"villager"` |  |  |
-| `model` | string |  | Pattern `^(?!/)(?!.*\.\.).*\.([gG][lL][bB]\|[gG][lL][tT][fF])$`. |
+| `model` | string |  | Pattern `^(?![/\\])(?![A-Za-z]:)(?!.*\.\.).*\.([gG][lL][bB]\|[gG][lL][tT][fF])$`. |
 | `scale` | number |  | 1 as modelled. max 20 |
 | `size` | object |  |  |
 | `skeleton` | string |  |  |

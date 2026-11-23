@@ -140,7 +140,9 @@ internal static class NpcCompiler
 
     private static void CheckFile(BlockContext ctx, string file, string path)
     {
-        if (Path.IsPathRooted(file) || file.Contains("..", StringComparison.Ordinal)) throw new BlockError(ctx.Block, path, $"\"{file}\": a path in the mod's folder");
+        // rooted as the game's Windows runtime sees it, whatever this process runs on: /, \ or a drive (C:)
+        var rooted = file.StartsWith('/') || file.StartsWith('\\') || (file.Length >= 2 && file[1] == ':' && char.IsAsciiLetter(file[0])) || Path.IsPathRooted(file);
+        if (rooted || file.Contains("..", StringComparison.Ordinal)) throw new BlockError(ctx.Block, path, $"\"{file}\": a path in the mod's folder");
         if (!file.EndsWith(".glb", StringComparison.OrdinalIgnoreCase) && !file.EndsWith(".gltf", StringComparison.OrdinalIgnoreCase))
             throw new BlockError(ctx.Block, path, $"\"{file}\" is not a glTF file (.glb or .gltf)");
         var dir = BlocksBridge.ModDirectory(ctx.Mod.Id);
