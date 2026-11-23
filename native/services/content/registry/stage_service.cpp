@@ -210,6 +210,10 @@ Env make_env() {
 void lab_proof() {
     proof::Env e;
     e.read_data = [](const std::string& rel) { return read_whole(data_root() / u8(rel)); };
+    e.exists = [](const std::string& rel) {
+        std::error_code ec;
+        return fs::is_regular_file(data_root() / u8(rel), ec);
+    };
     if (!proof::requested(e)) return;
     Env s = make_env();
     e.write_data = s.write_data;

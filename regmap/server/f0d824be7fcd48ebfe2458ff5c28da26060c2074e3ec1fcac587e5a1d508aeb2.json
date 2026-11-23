@@ -5,7 +5,8 @@
   "gameBuild": "1287369",
   "steamBuild": "26430253",
   "verified": true,
-  "proof": "kilnctl regproof (2026-11-23 12:29:11Z): first build (no reflection diff); formulas 10/10; round trip 84/100 fields; ids 0 kept, 23713 added, 0 removed, 0 GUID changes; rows ok 83/100 (17 unproven)",
+  "proof": "kilnctl regproof (2026-11-23 14:50:39Z): first build (no reflection diff); formulas 10/10; round trip 87/100 fields; ids 0 kept, 24100 added, 0 removed, 0 GUID changes; rows ok 86/100 (14 unproven)",
+  "regmapDigest": "6ca881009d8440898bd69fa03fda6a0a8d3635659d6bf7bbfaa84b138a2fc07e",
   "layouts": {
     "keen::BalancingTable": "0xe9f12710",
     "keen::ItemInfo": "0x07009d37",
@@ -91,7 +92,7 @@
     "items.hasDamage": "ok",
     "items.levels.max": "ok",
     "items.levels.min": "ok",
-    "items.manaCost": "unproven",
+    "items.manaCost": "ok",
     "items.maxStack": "ok",
     "items.perks": "ok",
     "items.power": "ok",
@@ -99,7 +100,7 @@
     "items.rolled": "ok",
     "items.socket": "ok",
     "items.speed": "ok",
-    "items.staminaCost": "unproven",
+    "items.staminaCost": "ok",
     "loot.fixedRarity": "unproven",
     "loot.rarities": "unproven",
     "loot.stack.max": "ok",
@@ -108,7 +109,7 @@
     "loot.stack.scalable": "unproven",
     "recipes.duration": "ok",
     "recipes.inputs": "ok",
-    "recipes.inputs[].category": "unproven",
+    "recipes.inputs[].category": "ok",
     "recipes.inputs[].count": "ok",
     "recipes.inputs[].item": "ok",
     "recipes.outputs": "ok",
@@ -530,22 +531,29 @@
     ]
   },
   "reasons": {
-    "drops.entries": "no lab round trip of it on this build yet",
-    "drops.entries[].chance": "no lab round trip of it on this build yet",
-    "drops.entries[].count.max": "no lab round trip of it on this build yet",
-    "drops.entries[].count.min": "no lab round trip of it on this build yet",
+    "drops.entries": "no drop table was loaded in the lab's world (the game loads them as players need them)",
+    "drops.entries[].chance": "no drop table was loaded in the lab's world (the game loads them as players need them)",
+    "drops.entries[].count.max": "no drop table was loaded in the lab's world (the game loads them as players need them)",
+    "drops.entries[].count.min": "no drop table was loaded in the lab's world (the game loads them as players need them)",
     "drops.entries[].item": "its list field drops.entries is not proven on this build",
-    "drops.entries[].weight": "no lab round trip of it on this build yet",
+    "drops.entries[].weight": "no drop table was loaded in the lab's world (the game loads them as players need them)",
     "items.block": "when the game reads the block value is not traced yet",
     "items.comfort": "when the game reads the comfort value is not traced yet",
     "items.fuel.burnTime": "when the game reads the fuel burn time is not traced yet",
-    "items.manaCost": "no lab round trip of it on this build yet",
-    "items.staminaCost": "no lab round trip of it on this build yet",
     "loot.fixedRarity": "not yet seen in a lab roll",
     "loot.rarities": "whether a roll reads the rarities live is not settled (two notes disagree): a lab roll settles it",
     "loot.stack.maxScaled": "the roll reads it in the decompiled code; not yet seen in a lab roll",
     "loot.stack.scalable": "the roll reads it in the decompiled code; not yet seen in a lab roll",
-    "recipes.inputs[].category": "no lab round trip of it on this build yet",
     "recipes.station": "no lab round trip of it on this build yet"
+  },
+  "kinds": {
+    "items.manaCost": {
+      "float": "none on this build",
+      "sint32": "proven (138 entries on this build)"
+    },
+    "items.staminaCost": {
+      "float": "none on this build",
+      "sint32": "proven (48 entries on this build)"
+    }
   }
 }

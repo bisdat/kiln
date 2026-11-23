@@ -76,6 +76,9 @@ struct Aliases {
 
 struct BuildRecord {
     std::string side, exe_sha256, game_build, steam_build, proof;
+    // the regmap/common the record was proven on (kilnctl regproof: sha256 over "<file name>\n<sha256 of its bytes>\n" per
+    // common file in name order); a record whose digest is not the deployed common's enables no row (review2 S1)
+    std::string regmap_digest;
     bool verified = false;
     std::map<std::string, BuildRow> rows;      // "<registry>.<field>"
     std::map<std::string, std::string> reasons; // "<registry>.<field>" -> why an unproven row is not proven (Kiln words)
@@ -88,6 +91,7 @@ struct RegMap {
     BuildRecord build;
     bool has_build = false;
     std::string side, exe_sha256;  // the running game's (load_dir), named when there is no record for it
+    std::string common_digest;     // the deployed regmap/common's digest (load_dir), as the record's regmapDigest is made
     // The state of a field on this build and, unless Mapped, the reason an edit of it is refused (BRIEF 6.2: it names the field
 // and the game build and ends "; this edit was not applied"). Without a verified record for the running exe every field is
 // Unproven: Kiln never writes a field it has not proven on that exact build.

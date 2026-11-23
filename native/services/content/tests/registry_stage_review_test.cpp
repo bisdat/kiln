@@ -224,6 +224,32 @@ void id_table_overwritten(const std::string& dir) {
     check(second["registries"].contains("recipes"), "a later start keeps the full id table (registries now: " + regs + ")");
 }
 
+// The per-build id table is complete whatever starts first (ruling 2026-11-21 19:11: written once per build when missing,
+// also without registry content): since the lazy start (5abb8783) the unused-start table left out the reference tables
+// that only a decode of references listed (perks, input categories), and so did a start whose content needs no reference.
+void id_table_lists_reference_tables(const std::string& dir) {
+    auto with_refs = [] {
+        TreeView v = world();
+        v.add("keen::Perk", g(900), {{"debugName", "Perk_Strong"}});
+        json& reg = v.values[g(100)];
+        reg["inputCategories"] = json::array({{{"debugName", "Wood"}, {"inputCategoryId", 77}}});
+        return v;
+    };
+    const std::string rel = "ids-server-" + kExe + ".json";
+    for (auto data : {&no_sections, &items_only}) {
+        TreeView view = with_refs();
+        Files files;
+        { stage::Runner r(env_of(&view, &files, dir, data)); r.run({}); r.finish({}); }
+        const json t = json::parse(files.data.at(rel));
+        const std::string what = data == &no_sections ? "an unused start" : "a start whose content needs no reference";
+        check(t["registries"].contains("perks") && t["registries"]["perks"].contains(g(900)),
+              what + " lists the perks in the build's id table: " + t["registries"].dump().substr(0, 300));
+        check(t["registries"].contains("inputCategories") && t["registries"]["inputCategories"].size() == 1,
+              what + " lists the input categories in the build's id table: " + t["registries"].dump().substr(0, 300));
+        check(t["registries"].contains("items") && t["registries"].contains("drops"), what + " keeps every schema registry");
+    }
+}
+
 // R3: a submit whose owner Kiln cannot bind (t_submit passes bound_mod(owner) == "" for a revoked or unknown owner, or an
 // owner whose id is no mod id) is accepted under whatever mod the batch names.
 void submit_unbound_owner(const std::string& dir) {
@@ -768,6 +794,7 @@ int main(int argc, char** argv) {
         {"R1b other_side_mod_skipped", [&] { other_side_mod_skipped(dir); }},
         {"R1c hosting_client_keeps_ordered_server_mods", [&] { hosting_client_keeps_ordered_server_mods(dir); }},
         {"R2 id_table_overwritten", [&] { id_table_overwritten(dir); }},
+        {"R2b id_table_lists_reference_tables", [&] { id_table_lists_reference_tables(dir); }},
         {"R3 submit_unbound_owner", [&] { submit_unbound_owner(dir); }},
         {"R4 worldload_ready_event", [&] { worldload_ready_event(dir); }},
         {"P2 transaction_snapshot_is_not_worldload", [&] { transaction_snapshot_is_not_worldload(dir); }},

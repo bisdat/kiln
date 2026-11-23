@@ -265,6 +265,7 @@ public static partial class Blocks
     /// <summary>Declares that this mod's UI blocks show another mod's stat as <c>stats.&lt;mod&gt;/&lt;id&gt;</c> (since 0.2.0-dev.31;
     /// in a block file: <c>"statImports": ["other:id"]</c>). Call it before the blocks are defined. It is a declaration, not
     /// a permission: the stat's own read policy decides whether this game sees its value (until then it shows as unavailable).</summary>
+    /// <exception cref="ArgumentException"><paramref name="key"/> has no mod or no id.</exception>
     /// <exception cref="InvalidOperationException">Called outside a mod's code.</exception>
     [AnyThread]
     public static UiStatImportRegistration ImportStat(ModValueKey key)
