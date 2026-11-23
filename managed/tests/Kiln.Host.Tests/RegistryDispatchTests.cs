@@ -490,6 +490,23 @@ public sealed class RegistryDispatchTests : ModsFixture
         Assert.True(native.Host.ServiceLookups - before < 6, $"tables are cached ({native.Host.ServiceLookups - before} lookups in two ticks)");
         owner.Retire();
     }
+    // review4 nit: START and WORLDLOAD arriving before one tick are both published, in order.
+    [Fact(Timeout = 30_000)]
+    public async Task ReadyEventsBetweenTicksAreAllPublishedInOrder()
+    {
+        await Task.Yield();
+        using var native = new FakeRegistry(); using var manager = NewManager(native.Host);
+        using var dispatch = new RegistryDispatch(manager); dispatch.Prepare(100);
+        var seen = new List<RegistryReadyPhase>(); var previous = RegistryRuntime.Ready;
+        RegistryRuntime.Ready = (phase, _, _) => seen.Add(phase);
+        try
+        {
+            native.Phase = 4; native.FireReady(); native.Phase = 5; native.FireReady();
+            dispatch.FlushLoads();
+            Assert.Equal(new[] { RegistryReadyPhase.Start, RegistryReadyPhase.WorldLoad }, seen);
+        }
+        finally { RegistryRuntime.Ready = previous; }
+    }
     [Fact]
     public unsafe void MissingStageFunctionsMakeTheTransportUnavailable()
     {

@@ -16,7 +16,7 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
     private readonly Dictionary<ModContext, Action> _retirements = [];
     private volatile bool _closed;
     private readonly object _signals = new();
-    private (RegistryReadyPhase Phase, ulong Generation)? _pendingReady;
+    private readonly List<(RegistryReadyPhase Phase, ulong Generation)> _pendingReady = []; // in arrival order (review4 nit)
     private bool _worldChanged;
     private string? _worldDirectory;
     private IDisposable? _ready;
@@ -192,23 +192,31 @@ internal sealed class RegistryDispatch(ModManager mods) : IDisposable
     private void Ready(RegistryReadyPhase phase, ulong generation)
     {
         // Native readiness can arrive on a resource thread. Only the tick owns runtime records and author retirement.
-        lock (_signals) { if (!_closed) _pendingReady = (phase, generation); }
+        lock (_signals)
+        {
+            if (_closed) return;
+            if (_pendingReady.Count == 16) _pendingReady.RemoveAt(1); // bounded; the first (START) and the newest survive
+            _pendingReady.Add((phase, generation));
+        }
     }
     private void DrainSignals()
     {
-        (RegistryReadyPhase Phase, ulong Generation)? ready;
+        (RegistryReadyPhase Phase, ulong Generation)[] ready;
         lock (_signals)
         {
-            ready = _pendingReady; _pendingReady = null;
+            ready = [.. _pendingReady]; _pendingReady.Clear();
             if (_worldChanged) { _worldBinding.Signal(_worldDirectory); _worldChanged = false; }
         }
-        if (ready is not { } snapshot) return;
-        if (_starting && (uint)snapshot.Phase >= 4)
+        // Every event since the last tick, in order: a Registry.Ready subscriber sees START even when WORLDLOAD followed it.
+        foreach (var snapshot in ready)
         {
-            _starting = false;
-            foreach (var author in _authors.ToArray().Reverse()) Retire(author);
+            if (_starting && (uint)snapshot.Phase >= 4)
+            {
+                _starting = false;
+                foreach (var author in _authors.ToArray().Reverse()) Retire(author);
+            }
+            RegistryRuntime.PublishReady(snapshot.Phase, snapshot.Generation, _native.LiveAvailable ? World() : null);
         }
-        RegistryRuntime.PublishReady(snapshot.Phase, snapshot.Generation, _native.LiveAvailable ? World() : null);
     }
     private void TryWorld()
     {
