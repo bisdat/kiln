@@ -951,6 +951,33 @@ bool vfx_reference_kept(const uint8_t g[16]) {
     return false;
 }
 
+// An item tag (ItemTagReference, ItemInfo.tags[i].tag) is no resource: the game data cooks none. The tags the game knows
+// are the item registry's list, ItemRegistryResource.itemTags {tagGuid, labelId} (210 on client 26430625, every tag an
+// item carries among them); readers compare GUIDs (docs/re/building.md 1.2.2). Read through the reflection, no offsets.
+bool item_tag_known(const uint8_t g[16]) {
+    const TType* reg = type_named("keen::ItemRegistryResource");
+    const TField* tags = reg ? reg->field("itemTags") : nullptr;
+    const TType* list = tags ? tags->type() : nullptr;
+    list = list ? list->resolved() : nullptr;
+    const TType* info = list && list->inner() ? list->inner()->resolved() : nullptr;
+    const TField* guid = info ? info->field("tagGuid") : nullptr;
+    if (!guid || !info->size || guid->offset + 16 > info->size) return false;
+    std::vector<std::array<uint8_t, 16>> keys;
+    if (!res_list(reg->hash, &keys)) return false;
+    for (const auto& k : keys) {
+        uint64_t size = 0;
+        const uintptr_t base = res_data(k.data(), reg->hash, &size);
+        uintptr_t data = 0;
+        uint32_t count = 0;
+        if (!base || size < tags->offset + 8 || !blob_array(base + tags->offset, &data, &count)) continue;
+        for (uint32_t i = 0; i < count; ++i) {
+            uint8_t t[16];
+            if (rd(data + uintptr_t(i) * info->size + guid->offset, t, 16) && std::memcmp(t, g, 16) == 0) return true;
+        }
+    }
+    return false;
+}
+
 // The resource type a reference field points at: "keen::ObjectReference<keen::X>" somewhere in its typedef chain.
 uint32_t ref_target(const std::string& type_name) {
     const TType* t = type_named(type_name);
@@ -964,6 +991,8 @@ uint32_t ref_target(const std::string& type_name) {
             if (target == "keen::ecs::Template") target = "keen::ecs::TemplateResource";  // a template reference: a loaded template or a clone
             if (target == "keen::Model") target = "keen::RenderModel";  // cooked under the editor type's GUID, as a sound below
             if (target == "keen::SoundContainer") target = "keen::SoundContainerResource";
+            // shape and terrain-shape models: both editor types are cooked as keen::VoxelModelResource under the same GUID
+            if (target == "keen::VoxelObjectDefinition" || target == "keen::TerrainVoxelObjectDefinition") target = "keen::VoxelModelResource";
             return fnv1a(target);
         }
         if (t->kind != K_TYPEDEF) break;
@@ -1074,11 +1103,17 @@ bool parse_leaf(const Field& f, const gjson& j, const uint8_t* original, uint8_t
                                   kGraph = fnv1a(std::string("keen::anim_graph::runtime_graph::AnimationGraphResource2_0"));
             // A loca tag is only hashed to its id, and the UI shows an empty string for a tag no table has (client LocaRecord): any GUID is safe, and a
             // clone's own texts answer theirs.
+            static const uint32_t kItemTag = fnv1a(std::string("keen::ItemTag"));
             const bool ok = f.type_name == "keen::ObjectReference<keen::animationgraph::StateId>" || f.type_name == "keen::ObjectReference<keen::animationgraph::OverlayId>" || f.type_name == "keen::ObjectReference<keen::LocaTag>" ||
+                            (target == kItemTag && item_tag_known(g)) ||
                             (server && (f.type_name == "keen::ObjectReference<keen::UiImage>" || target == kSound || target == kModel)) ||
                             res_data(g, target) != 0 ||
                             (target == kToolGraph && res_data(g, kGraph) != 0) ||
                             (target == fnv1a(std::string("keen::ecs::TemplateResource")) && greg(KILN_GD_TEMPLATES).get(fnv1a(g, 16)));
+            if (!ok && target == kItemTag) {
+                *err = guid_text(g) + " is not an item tag the game knows (ItemRegistryResource.itemTags lists none of that GUID)";
+                return false;
+            }
             if (!ok) {
                 *err = guid_text(g) + " is not a loaded " + f.type_name;
                 return false;
