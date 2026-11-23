@@ -592,7 +592,8 @@ class Model {
     }
     void capture(uint32_t slot, uint64_t w, const std::vector<Entry>& entries, bool refused, uint32_t reason) {
         auto i = players.find(slot);
-        if (i == players.end() || !active_)
+        // A character that left has no holders any more: its entries alone would pair a storage without them.
+        if (i == players.end() || !active_ || (i->second.witness.flags & KIS_WITNESS_LEFT))
             return;
         auto& p = i->second;
         auto& f = batches_.at(active_);

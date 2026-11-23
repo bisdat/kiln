@@ -421,8 +421,8 @@ Result8* __fastcall capture(Result8* out, void* character, void* opaque3, void* 
         return ret;
     uint32_t slot = entity.id - 1;
     auto p = model.players.find(slot);
-    if (p == model.players.end())
-        return ret;
+    if (p == model.players.end() || (p->second.witness.flags & KIS_WITNESS_LEFT))
+        return ret; // left (or never read by this Kiln): no new pair for this slot
     uint64_t w = 0;
     std::vector<Entry> entries;
     bool ok = character_witness(character, &w) &&
