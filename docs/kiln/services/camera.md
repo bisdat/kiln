@@ -9,6 +9,8 @@ On the server world's tick thread, call `Camera.SetMode(player, mode, duration, 
 `Camera.Set(player, new CameraOverride(Mode: ..., InputPolicy: CameraInputPolicy.StockMode))`.
 `camera.server_mode` requires world lifecycle, owner cleanup, the connected-player snapshot, and tracked writes.
 Kiln declares its own write access; a calling mod needs no low-level `writes` manifest entry.
+If the declaration is refused or the tracked-write program is not running, `camera.server_mode` reports unavailable
+with a `faulted` reason instead of accepting a request that cannot complete.
 
 One tracked three-byte camera-control write runs per held player per server step, after the game's conflicting
 writer. The player's connection handle and join step distinguish a new incarnation. The first successful write,
@@ -30,9 +32,14 @@ maintenance. Queued callbacks retain their own lifetime token and reject invalid
 ## Results, events, and limits
 
 The task completes after acceptance, not inline with the call. Mode success is **ServerState**, not a visual ACK or
-a claim that the client drew it. Ordinary completions and `Camera.Changed` run on SERVER Pre, completion before the
-operation's change event. Terminal `WorldStopped` may arrive on the destroying thread and must not access the game.
+a claim that the client drew it. Ordinary Mode completions and `Camera.Changed` run on SERVER Pre (local visual
+completions on CLIENT Pre), completion before the operation's change event. Terminal `WorldStopped` may arrive on the destroying thread and must not access the game.
 A retiring author receives no new callbacks; live observers can still receive its terminal change event.
+Camera writes must come from mod code: native owner 0 and managed calls outside a mod are refused.
+The owner-retiring observer closes that owner's callback gate before cleanup; off-thread retirement waits outside
+locks for in-flight callbacks (bounded to 2 seconds, logged and retained rather than freed on timeout). Self-retirement
+does not wait on its own callback. This camera-specific barrier deliberately differs from the generic observer's
+non-waiting guidance. No author callback runs in a render hook.
 
 Bad arguments throw `ArgumentException`; the wrong world's thread throws `InvalidOperationException`; missing
 capabilities throw `KilnUnavailableException` naming the required row. Valid current-state refusals return
@@ -68,7 +75,8 @@ own player: a keyed `Path` (`camera.local_pose`) or a follow `Profile` (`camera.
 `Lens` (`camera.local_fov`) and/or a `Shake` (`camera.local_shake`); a lens alone needs only `camera.local_fov`. Kiln writes it in one place, the renderer's camera selection: the selected pose's position and
 rotation (its scale stays the game's) and/or the field of view the game is about to store. The player's input camera,
 aim, the game's camera object and every component stay as they are, so movement, aim and `Render.Camera` do not
-change. A request is `Ok` (`ClientFrame`) only after a frame showed it; the result names that frame. When something
+change. A request is `Ok` (`ClientFrame`) only after a frame showed it; the native completion names that frame,
+and the managed result identifies its lease and confirmed revision. When something
 after Kiln changes the frame (another camera writer), the request ends with `FrameFault` and `MayHaveApplied`; with
 no confirming frame within 1 s it is `NoCameraFrame` (`MayHaveApplied` when one may have been drawn). There is no
 collision: an authored camera can clip terrain and buildings.
@@ -109,6 +117,58 @@ switch. No arbitrary pose, lens, follow profile, or shake is sent to a vanilla p
 The input camera and aim are not a visual-control API. The reserved resource-profile bit is unavailable in v1.
 `camera.service` means the table exists; `camera.server` and `camera.local` are managed aggregates, not substitutes
 for checking every requested part. See [capability rows](caps.md).
+
+## Entry points and capability rows
+
+All members below are since mod API 0.2.17. SERVER and CLIENT refer to worlds, not the executable: a hosting client
+has both. `Update` and `End` follow the lease's stored world, even if both worlds happen to use one OS thread.
+
+| Entry | World / thread | Required row |
+|---|---|---|
+| `SetMode`, `Set` with Mode | SERVER Pre / tick thread | `camera.server_mode` |
+| `Set` with visuals | SERVER Pre / tick thread | `camera.remote` (bridge not implemented yet) |
+| `SetLocal` | CLIENT Pre / client-world thread | Each requested `camera.local_*` part; Mode refuses `WrongEndpoint` |
+| `Update` | Stored owning world / tick thread | `camera.service` and the replacement's part rows |
+| `End` | Stored owning world / tick thread | `camera.service`; cleanup is allowed after a part turns off |
+| `GetCapabilities` | Any thread | `camera.service`; bits mean feature availability, not a live frame/player |
+| `GetVisual` | Client / any thread, try-lock once | `camera.rendered_snapshot` |
+| `Changed` | Owning Pre; terminal `WorldStopped` may use the destroying thread | Event carries values only; no game access at terminal world stop |
+
+### Numeric limits and authored data
+
+All authored numbers are finite. Positions are within ±1,000,000 m on each axis and visual positions within 250 m of
+the sampled local player. Authored quaternion norm squared must be within 0.001 of 1 (then normalized). Profiles use
+absolute distance 0.25–200 m, local-offset vector length at most 100 m and world-Y offset ±100 m, with combined pivot
+and output checked again. Lens degrees are 5–160; shake amplitude is at most 0.5 m and frequency 0.1–30 Hz.
+A path has 1–256 keys, first at 0, strictly increasing whole-millisecond times no later than its duration. Every key
+has a lens or none does; keyed lenses cannot combine with a standalone lens. Blends are nonnegative whole
+milliseconds with In + Out ≤ Duration. Collision is explicitly `None` in v1; rotational shake, splines, looping and
+`AimToo` are not implemented (`AimToo` refuses `InputPolicyUnsupported`).
+
+`request.ToJson()` / `CameraOverride.FromJson(...)` use camelCase properties, exact enum names, integer milliseconds, `[x,y,z]`
+positions/vectors and `[x,y,z,w]` rotations. The same authored shape is described by
+`schema/camera-override.schema.json`; no engine names, functions or offsets enter the request.
+
+## Sample and offline fake
+
+[CameraSample](../../../mods/samples/CameraSample/) is an SDK mod (since 0.2.17). Its admin command
+`camera-mode` requests five seconds of stock first-person for the caller; `camera-mode-off` explicitly ends that
+mod's lease. On a hosting game client, its local console commands `camera-lens`, `camera-path` and
+`camera-local-off` post to `Client.Post` before touching the local camera. These local examples are not a remote
+camera request from a dedicated server. The path starts from a copied final visual pose and moves two metres in
+world X over two seconds. It has no collision. Every asynchronous result is checked and logged, including a lease
+returned with `MayHaveApplied`, which the sample retains so it can be ended.
+
+A lens-only request is `new CameraOverride(Lens: new CameraLens(40))`; it asks for no pose capability. The sample's
+two-key path uses explicit poses/rotations and `CameraBlend` for the whole request, not per-part blending. End the
+sample's current local lease before starting another; owner retirement also cancels all its work on unload.
+The mount-follow sample is separate work, not included here.
+
+`KilnHarness.Camera` records accepted calls and models lease ownership, priorities, updates, End and change ordering.
+`Expire`, `End`, `StopWorld` and `RefuseNext` script expiry, target/peer/capability losses, world stop and game
+refusals; unloading a mod ends its leases with `OwnerRetired`. It does not draw frames, advance camera clocks,
+blend, capture a snapshot or model remote transport. The sample tests use its real command for Mode and invoke the
+loaded mod's local handlers on the harness world thread (the kit does not model `Client.Post`).
 
 ## Verification
 

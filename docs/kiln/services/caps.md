@@ -564,8 +564,14 @@ Richer UI blocks ([../modding/ui-blocks.md](../modding/ui-blocks.md#richer-windo
 |---|---|---|---|---|
 | `ui.world_outline.through_walls` | managed, static (since 0.2.0-dev.30.5) | Kiln.Ui, at its start and first use | Client check: toggle through-walls outlines, the off setting and competing requests | `OutlineOptions.ThroughWalls`' silhouette ([../render.md](../render.md#outlineoptions)): needs `ui.world_outline`, kiln.render v3 (the entity's position; `service-older` with a v2 kiln-ui.dll), `render.camera` and kiln.ui (`service-missing`; `faulted` when overlay drawing is explicitly off). Off: a new ThroughWalls request throws `KilnUnavailableException` with the row's reason; existing requests draw no silhouette |
 
+### Camera control (since mod API 0.2.17)
+
+Product rendering and hosted Mode have not run in a real game. The dedicated Mode fixture and native/managed host suites pass; a row being available is not a claim of real-game verification. See [camera.md](camera.md).
+
+| Row | Kind | Reported by | Unconfirmed | What it says |
+|---|---|---|---|---|
 | `camera.service` | service row | kiln.camera | - | kiln.camera's table is here (`Camera.Update`, `Camera.End`, `Camera.GetCapabilities`). Each camera request also needs the row of each of its parts, below |
-| `camera.server_mode` | service row | kiln.camera | - | the server can lock a player's stock camera mode (`Camera.SetMode`); reaches vanilla clients. Needs `hooks.owner_cleanup`. Since mod API 0.2.17: maintained after the game writer through tracked writes |
+| `camera.server_mode` | service row | kiln.camera | - | the server can lock a player's stock camera mode (`Camera.SetMode`); reaches vanilla clients. Needs world lifecycle, `hooks.owner_cleanup`, connected-player records and a declared, running tracked-write program; `faulted` if declaration or the program is refused. Since mod API 0.2.17: maintained after the game writer through tracked writes |
 | `camera.local_fov` | sigdb feature (client) | sigdb; kiln.camera lowers it (no `hooks.owner_cleanup`, no backend, a fault); on a dedicated server kiln.camera reports it `wrong-side` | - | a render-only field of view for this client's own player (`Camera.SetLocal` with a `Lens`); needs no pose row |
 | `camera.local_pose` | sigdb feature (client) | as `camera.local_fov` | - | a render-only keyed camera path (`Camera.SetLocal` with a `Path`) |
 | `camera.local_profile` | sigdb feature (client) | as `camera.local_fov` | - | a render-only follow camera (`Camera.SetLocal` with a `Profile`) |

@@ -91,6 +91,7 @@ row above and grows its own page.
 
 | Page | What |
 |---|---|
+| [camera.md](camera.md) | kiln.camera / `Kiln.Camera`: maintained stock-mode locks, render-only paths, follow profiles, lens and shake, final visual snapshots and projection helpers (since mod API 0.2.17) |
 | [mod-values.md](mod-values.md) | `Kiln.ModValues` / kiln.mod-values: mods' own per-character counters, currencies and experience with levels; server ledger saved with the character, the owner's synced copy, carried progress |
 | [routines.md](routines.md) | kiln.routines / `Routines`, `RoutineBlock` (Kiln.Blocks): villager day plans (windows of the game day with the game's own idle, roam, sit, inspect and sleep tasks), keep-awake, manual commands that suspend a plan until `Resume`, assignments saved with the world |
 

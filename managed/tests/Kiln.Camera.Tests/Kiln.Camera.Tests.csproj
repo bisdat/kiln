@@ -17,6 +17,9 @@
   <ItemGroup>
     <ProjectReference Include="../../services/Kiln.Camera/Kiln.Camera.csproj" />
     <ProjectReference Include="../../services/Kiln.World/Kiln.World.csproj" />
+    <ProjectReference Include="../../services/Kiln.Client/Kiln.Client.csproj" />
+    <ProjectReference Include="../../services/Kiln.Chat/Kiln.Chat.csproj" />
+    <ProjectReference Include="../../../mods/samples/CameraSample/CameraSample.csproj" />
     <ProjectReference Include="../../Kiln.TestKit/Kiln.TestKit.csproj" />
   </ItemGroup>
   <ItemGroup>
