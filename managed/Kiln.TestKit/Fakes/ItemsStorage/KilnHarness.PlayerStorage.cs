@@ -40,7 +40,8 @@ public enum HarnessTombstoneMode
 /// code on it. Since 0.2.0-dev.30.7 (mod API 0.2.16).
 /// </summary>
 /// <remarks>
-/// <para><b>Modelled.</b> kiln.items.storage's rules for registrations (keys, 8 per mod, 256 slots in all, filters) and the
+/// <para><b>Modelled.</b> kiln.items.storage's rules for registrations (keys, 8 per mod, 256 slots of page-rounded capacity
+/// in all: each registration counts its slots rounded up to 8, filters) and the
 /// game's side, which the test scripts: <see cref="Join"/> (the game read the character), <see cref="Restore"/> (the copy
 /// Kiln.Saves chose), <see cref="Apply"/> (the join made the player's pages: holders are built), <see cref="JoinAndRestore"/>
 /// for all three, <see cref="Capture"/> and <see cref="CapturesDone"/> (a world save), <see cref="Leave"/> and

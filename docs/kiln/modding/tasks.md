@@ -19,9 +19,8 @@ A mod that runs tasks says so in its project file (`dotnet new kiln-mod` has the
 <PropertyGroup>
   <!-- Kiln's task pool: Kiln does not load the mod where it is off -->
   <KilnFeatures>tasks.pool</KilnFeatures>
-  <!-- the task-thread world reads and writes (WorldConcurrent) are in Kiln.World, and experimental -->
+  <!-- the task-thread world reads and writes (WorldConcurrent) are in Kiln.World -->
   <KilnServices>World;Items;Chat</KilnServices>
-  <NoWarn>$(NoWarn);KILNX003</NoWarn>
 </PropertyGroup>
 ```
 
@@ -31,17 +30,10 @@ A mod that runs tasks says so in its project file (`dotnet new kiln-mod` has the
   tasks too asks `Capabilities.Is("tasks.pool")` before it starts one instead.
 - **`<KilnServices>`** lists `World` among the mod's services when its tasks read the world (FetchNearby's list is
   `World;Items;Chat`).
-- **`KILNX003`** is the opt-in for `WorldConcurrent`, which is experimental ([KILNX003](analyzers.md#kilnx003)). A
-  mod without world reads or writes leaves it out. `KILNX001` is a different id (lab and test members) and does not opt
-  in to `WorldConcurrent`.
-
-**The test project** (`dotnet new kiln-unit-test`, [unit-tests.md](unit-tests.md)) needs the same opt-in when its
-tests call `WorldConcurrent`, as the example's do (`WorldConcurrent.IsAvailable`). Without it they don't compile
-(`error KILNX003`). The template has the line as a comment:
-
-```xml
-<NoWarn>$(NoWarn);KILNX003</NoWarn>
-```
+- **No experimental opt-in.** Since 0.2.0-dev.30.7, mod API 0.2.16 (no longer experimental).
+  The task-thread world reads and writes (`WorldConcurrent` and its types) first shipped in 0.2.0-dev.29.18 under `KILNX003`.
+  Neither the mod nor its test project needs that suppression now. Existing `KILNX003` entries in `NoWarn` are
+  harmless and can be removed; keep opt-ins for unrelated experimental APIs ([analyzers](analyzers.md#kilnx003)).
 
 ## When to use a task
 
@@ -371,10 +363,7 @@ checks the entity again around the copy, so it returns a whole value or says why
 - `TooSmall` and `Changed`: see the buffer rules below.
 - `Busy` and `Unsupported`: see the read modes below.
 
-An ordinary miss never throws. The reads are experimental (`KILNX003`): opt in with
-`<NoWarn>$(NoWarn);KILNX003</NoWarn>` in the mod's project, and in its test project when the tests call them
-([Project setup](#project-setup)). The full reference is
-[world.md](../services/world.md#from-c-worldconcurrent-experimental).
+An ordinary miss never throws. The full reference is [world.md](../services/world.md#from-c-worldconcurrent).
 
 **Where they work.**
 - **Only on the game builds Kiln has an exact engine profile for.** `WorldConcurrent.IsAvailable` says whether this is
@@ -452,10 +441,9 @@ while ((where = WorldConcurrent.Read<Position>(entity, "CurrentTransform", ReadM
 - Refs taken before your mod reloads come back `Stale` after the reload: open the entities again.
 
 **Tasks change the world on the tick.** Change it there (`World.Write`, `Items.Give`, ...), with `ToTick`, `OnTick`
-or `PostToTick`, or in the mod's own tick code once the task has handed over its result. The one exception is
-experimental: a whole component that the game neither saves nor replicates, of plain values, can be changed from the
-task by compare-exchange (`WorldConcurrent.TryCompareExchange`,
-[world.md](../services/world.md#from-c-compare-exchange-experimental)). Anything else stays on the tick.
+or `PostToTick`, or in the mod's own tick code once the task has handed over its result. The one exception: a
+whole component that the game neither saves nor replicates, of plain values, can be changed from the task by compare-exchange (`WorldConcurrent.TryCompareExchange`,
+[world.md](../services/world.md#from-c-compare-exchange)). Anything else stays on the tick.
 
 ## Lifecycle: unload, reload, exit
 
@@ -533,8 +521,7 @@ The [TestKit](unit-tests.md) runs a mod's tasks under `dotnet test`:
   `kiln.EnterWorld()` ends the menu session, so a test can check that its waiting menu hops end `Cancelled`.
 
 The example's tests are in `managed/tests/Kiln.TestKit.Tests/FetchNearbyTests.cs`, with their helpers (`Start`,
-`Finish`, `Said`, `Wood`, `ChatOf`). The first one, without its last check (its `WorldConcurrent` line is why the
-test project opts in to `KILNX003`):
+`Finish`, `Said`, `Wood`, `ChatOf`). The first one, without its last check:
 
 ```csharp
 [Theory]

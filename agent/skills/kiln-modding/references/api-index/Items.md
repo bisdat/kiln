@@ -730,7 +730,7 @@ enum: None, DryRun, Equipped, ActionBar, Silent
 - `Stacks { get; } -> int` — Stacks parked.
 
 ## PlayerStorageParkReason `0.2.16` — Why a storage's items wait parked.
-enum: Unregistered, Overflow, Filter, Requested, Stale, Locked
+enum: Unregistered, Overflow, Filter, Requested, Stale, Locked, ReturnedOutsideKiln
 
 ## PlayerStorageRestoredEvent `0.2.16` — Kiln restored a player's storage of one key at the join (or when a mod registered it while the player was on): it is ready now.
 - `Character { get; } -> Guid` — The game's CharacterId of the character.

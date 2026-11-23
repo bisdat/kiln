@@ -155,7 +155,7 @@ internal sealed unsafe class ItemsStorageFake : IDisposable
         public required Guid Character;
         public required ulong Step;
         public uint Player;
-        public bool Applied, Restored, Built, Left, Locked, Paired;
+        public bool Applied, Restored, Built, Left, Locked, Paired, ExtraMainPages;
         public uint Source;
         public ulong Revision, DocWitness, Changes, LastHash;
         public bool HashSeen;
@@ -230,17 +230,54 @@ internal sealed unsafe class ItemsStorageFake : IDisposable
 
     // ---- the game's side ----
 
-    /// <summary>The game read a joining character for <paramref name="slot"/>: a new join with W_g. Returns its serial.</summary>
-    public ulong JoinRead(uint slot, ulong account, Guid character, ulong witness)
+    /// <summary>The game read a joining character for <paramref name="slot"/>: a new join with W_g. Returns its serial.
+    /// <paramref name="extraMainPages"/> scripts the native witness signal for this join; the fake does not infer a
+    /// page-count baseline.</summary>
+    public ulong JoinRead(uint slot, ulong account, Guid character, ulong witness, bool extraMainPages = false)
     {
         lock (_lock)
         {
             if (_joins.TryGetValue(slot, out var old) && !old.Left) DropHolders(old);
-            var j = new Join { Slot = slot, Serial = _nextJoin++, WitnessG = witness, Account = account, Character = character, Step = StepNow };
+            var j = new Join { Slot = slot, Serial = _nextJoin++, WitnessG = witness, Account = account, Character = character, Step = StepNow,
+                ExtraMainPages = extraMainPages };
             _joins[slot] = j;
             Post(StorageNative.EventJoined, j, 0, "", (ref StorageNative.Event e) => e.Join = j.Serial);
             return j.Serial;
         }
+    }
+
+    /// <summary>Scripts a KIS_STAGE_* hint: first queue its ordinary PARKED/RESTORED raw event, with the readable old/new
+    /// holder in Target, then synchronously pump the persistence owner. These stage values are not event kinds. The fake
+    /// models the lifecycle point on its single scripted thread, not native jobs or lock scheduling.</summary>
+    public void EmitHousekeeping(uint kind, uint slot, string key, uint target, uint handle, int stacks = 0, uint reason = 0, bool live = true)
+    {
+        var eventKind = kind switch
+        {
+            StorageNative.StageParked => StorageNative.EventParked,
+            StorageNative.StageRestored => StorageNative.EventRestored,
+            _ => throw new ArgumentOutOfRangeException(nameof(kind)),
+        };
+        delegate* unmanaged[Cdecl]<uint, void*, void> stage;
+        void* user;
+        lock (_lock)
+        {
+            var j = Need(slot);
+            Post(eventKind, j, handle, key, (ref StorageNative.Event e) =>
+            {
+                e.Target = target;
+                e.Stacks = (uint)stacks;
+                e.Reason = reason;
+                if (eventKind == StorageNative.EventRestored)
+                {
+                    e.Source = j.Source;
+                    e.Revision = j.Revision;
+                    e.Flags = (live ? StorageNative.EventLive : 0) | (j.Paired ? StorageNative.EventPaired : 0);
+                }
+            });
+            stage = StagePoint && _persistBound ? _stage : null;
+            user = _stageUser;
+        }
+        if (stage != null) stage(kind, user);
     }
 
     /// <summary>The game's join apply made the player's pages: holders are built now when a restore was accepted.</summary>
@@ -460,7 +497,8 @@ internal sealed unsafe class ItemsStorageFake : IDisposable
         {
             if (_registrations.Any(r => r.Key == key)) return StorageNative.InvalidArgument;
             if (_registrations.Count(r => r.Owner == owner) >= StorageNative.MaxPerMod) return StorageNative.Unavailable;
-            if (_registrations.Sum(r => r.Slots) + (int)def->Slots > StorageNative.MaxSlotsPlayer) return StorageNative.Unavailable;
+            if (_registrations.Sum(r => (r.Slots + 7) / 8 * 8) + ((int)def->Slots + 7) / 8 * 8 > StorageNative.MaxSlotsPlayer)
+                return StorageNative.Unavailable;
             var reg = new Registration
             {
                 Handle = _nextHandle++, Owner = owner, Key = key, Slots = (int)def->Slots, Death = def->Death,
@@ -710,7 +748,8 @@ internal sealed unsafe class ItemsStorageFake : IDisposable
             *out_ = default;
             out_->Size = size;
             out_->Flags = StorageNative.WitnessRead | (j.Applied ? StorageNative.WitnessApplied : 0) |
-                          (j.Restored ? StorageNative.WitnessRestored : 0) | (j.Left ? StorageNative.WitnessLeft : 0);
+                          (j.Restored ? StorageNative.WitnessRestored : 0) | (j.Left ? StorageNative.WitnessLeft : 0) |
+                          (j.ExtraMainPages ? StorageNative.WitnessExtraMainPages : 0);
             out_->Join = j.Serial;
             out_->Value = j.WitnessG;
             out_->Step = j.Step;
@@ -752,7 +791,7 @@ internal sealed unsafe class ItemsStorageFake : IDisposable
             if (e.Size < (uint)sizeof(StorageNative.Entry) || !KeyRule.IsMatch(key) || e.Kind is not (StorageNative.EntryLive or StorageNative.EntryParked) ||
                 (ulong)e.First + e.Count > doc->RecordCount || e.Slots > StorageNative.MaxSlots ||
                 (e.Kind == StorageNative.EntryLive && !liveKeys.Add(key)) ||
-                (e.Kind == StorageNative.EntryParked && e.Reason is not (>= 1 and <= 3) and not (>= StorageNative.ParkHeld and <= StorageNative.ParkLocked)))
+                (e.Kind == StorageNative.EntryParked && e.Reason is not (>= 1 and <= 3) and not (>= StorageNative.ParkHeld and <= StorageNative.ParkReturned)))
                 return StorageNative.InvalidArgument;
             keys.Add(key);
             var recs = new List<StorageFakeRecord>();
@@ -805,10 +844,12 @@ internal sealed unsafe class ItemsStorageFake : IDisposable
             {
                 lock (_lock)
                 {
-                    if (!j.Live.TryGetValue(key, out var live)) live = BuildLive(j, reg, live: true, autoUnpark: false);
+                    var rebuilt = !j.Live.TryGetValue(key, out var existing);
+                    var live = existing ?? BuildLive(j, reg, live: false, autoUnpark: false);
                     var records = j.Parked.Where(p => p.Key == key).SelectMany(p => p.Records).ToList();
                     j.Parked.RemoveAll(p => p.Key == key);
-                    Place(j, live, reg, records, ownSlotOnly: false);
+                    var placed = Place(j, live, reg, records, ownSlotOnly: false);
+                    if (rebuilt) EmitHousekeeping(StorageNative.StageRestored, j.Slot, key, live.Holder, reg.Handle, placed);
                 }
             }));
             return StorageNative.Ok;
@@ -940,13 +981,7 @@ internal sealed unsafe class ItemsStorageFake : IDisposable
             var live = NewLive(j, reg);
             if (liveRefs.TryGetValue(reg.Key, out var refs)) live.Refs = refs;
             var placed = Place(j, live, reg, byKey.GetValueOrDefault(reg.Key) ?? [], ownSlotOnly: true, post: false);
-            Post(StorageNative.EventRestored, j, reg.Handle, reg.Key, (ref StorageNative.Event e) =>
-            {
-                e.Stacks = (uint)placed;
-                e.Source = j.Source;
-                e.Revision = j.Revision;
-                e.Flags = j.Paired ? StorageNative.EventPaired : 0;
-            });
+            EmitHousekeeping(StorageNative.StageRestored, j.Slot, reg.Key, live.Holder, reg.Handle, placed, live: false);
         }
         foreach (var p in j.Parked.GroupBy(p => (p.Key, p.Reason)))
             Post(StorageNative.EventParked, j, 0, p.Key.Key, (ref StorageNative.Event e) => { e.Stacks = (uint)p.Sum(x => x.Records.Count); e.Reason = p.Key.Reason; });
@@ -986,14 +1021,7 @@ internal sealed unsafe class ItemsStorageFake : IDisposable
             }
         }
         var placed = Place(j, l, reg, records, ownSlotOnly: false, post: true);
-        if (live)
-            Post(StorageNative.EventRestored, j, reg.Handle, reg.Key, (ref StorageNative.Event e) =>
-            {
-                e.Stacks = (uint)placed;
-                e.Source = j.Source;
-                e.Revision = j.Revision;
-                e.Flags = StorageNative.EventLive | (j.Paired ? StorageNative.EventPaired : 0);
-            });
+        if (live) EmitHousekeeping(StorageNative.StageRestored, j.Slot, reg.Key, l.Holder, reg.Handle, placed);
         return l;
     }
 
@@ -1070,9 +1098,10 @@ internal sealed unsafe class ItemsStorageFake : IDisposable
     private void ParkLive(Join j, Live live, uint reason)
     {
         var records = World.ReadHolder(live.Holder, live.Slots).ToList();
-        World.DestroyHolder(live.Holder);
         AddParked(j, live.Key, reason, live.Slots, records);
-        Post(StorageNative.EventParked, j, live.Handle, live.Key, (ref StorageNative.Event e) => { e.Stacks = (uint)records.Count; e.Reason = reason; });
+        var handle = _registrations.Any(r => r.Handle == live.Handle) ? live.Handle : 0;
+        EmitHousekeeping(StorageNative.StageParked, j.Slot, live.Key, live.Holder, handle, records.Count, reason);
+        World.DestroyHolder(live.Holder);
     }
 
     private void DropHolders(Join j)

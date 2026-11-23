@@ -9,9 +9,8 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <IsPackable>false</IsPackable>
-    <!-- its capacity fake uses 17b's groundwork types ([Experimental("KILNX028")]); its kiln.world fakes the task-thread
-         world reads and writes and names their types (KILNX003) -->
-    <NoWarn>$(NoWarn);KILNX028;KILNX003</NoWarn>
+    <!-- its capacity fake uses 17b's groundwork types ([Experimental("KILNX028")]) -->
+    <NoWarn>$(NoWarn);KILNX028</NoWarn>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Kiln.Api/Kiln.Api.csproj" />

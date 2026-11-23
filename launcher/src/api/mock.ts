@@ -83,6 +83,7 @@ const commandPlans: Record<string, CommandPlan[]> = typeof window === "undefined
 const commandCalls: string[] = [];
 /** report_save's `exclude` each time ("What's in this report"; tests: `__kilnMock.reportSaves()`). */
 const reportSaves: string[][] = [];
+const openedPaths: string[] = [];
 /** "Remove its settings too": each mod whose settings went ("<kind>/<id>"; tests: `__kilnMock.settingsRemoved()`). */
 const settingsRemoved: string[] = [];
 /** library_remove's `settings` / library_remove_settings (kiln_manage::mod_settings::remove): refused while the Library
@@ -1128,6 +1129,14 @@ let render: RenderInfo = RENDER_Q === "software" ? { mode: "software", why: "res
 const X11_Q = typeof location !== "undefined" ? new URLSearchParams(location.search).get("x11") : null;
 if (X11_Q) render = { ...render, x11: { on: X11_Q === "restart" || X11_Q === "marker", why: X11_Q as NonNullable<RenderInfo["x11"]>["why"], auto: X11_Q !== "off",
   ...(X11_Q === "yours" ? { yours: "wayland" } : {}) } };
+// `?nvidia=blocked|on|failed`: Ubuntu WebKit's NVIDIA block found (switch off), the switch on, or the launcher turned
+// it off after a forced start died
+const NVIDIA_Q = typeof location !== "undefined" ? new URLSearchParams(location.search).get("nvidia") : null;
+const TURNED_OFF = "The launcher turned this off by itself: its start at 2026-11-22T21:04:10Z (Kiln Launcher 0.2.0-dev) with GPU drawing forced on NVIDIA ended before its page had started (2026-11-22T21:04:30Z)";
+render = { ...render, force: NVIDIA_Q === "recovery" ? { on: true, step: "shm", why: "recovery", blocked: false } : NVIDIA_Q === "blocked" ? { on: false, step: "off", why: "off", blocked: true }
+  : NVIDIA_Q === "on" ? { on: true, step: "shm", why: "on", blocked: false }
+  : NVIDIA_Q === "failed" ? { on: false, step: "off", why: "off", blocked: true, failedWhy: TURNED_OFF }
+  : { on: false, step: "off", why: "off", blocked: false } };
 // WebKit's sandbox (sandbox.rs): a default start does not use it; `?sandbox=off` as after a message's "off" on a
 // system where bwrap cannot start
 const SANDBOX_UNUSED = "WebKitGTK's GTK 3 API, which the launcher uses, runs it only when WEBKIT_FORCE_SANDBOX=1 is set";
@@ -1255,6 +1264,7 @@ const handlers: Record<string, Handler> = {
     noWebgl: render.mode === "software", distribution: MOCK_DISTRIBUTION, nexusEnabled: NEXUS_MOCK_ENABLED, render: { ...render }, desktop: { ...desktop }, sandbox: { ...sandbox },
     ...(MOCK_PREVIEW.length ? { preview: [...MOCK_PREVIEW] } : {}), ...(OWN_FILES.length ? { ownFilesMissing: [...OWN_FILES] } : {}) }),
   app_started: () => null,
+  app_render_frame: (a) => a.painted && a.visible && NVIDIA_Q === "recovery" ? "The previous normal NVIDIA startup never confirmed a visible frame. Kiln is trying shared-memory GPU drawing." : null,
   app_render_report: () => null,
   app_render_set: (a) => {
     render = { ...render, marker: !!a.software, markerWhy: a.software ? `Turned on in Settings (${new Date().toISOString()})` : undefined };
@@ -1262,6 +1272,10 @@ const handlers: Record<string, Handler> = {
   },
   app_render_x11_set: (a) => {
     if (render.x11) render = { ...render, x11: { ...render.x11, auto: !!a.on } };
+    return { ...render };
+  },
+  app_render_force_set: (a) => {
+    if (render.force) render = { ...render, force: { ...render.force, on: !!a.on, failedWhy: undefined } };
     return { ...render };
   },
   app_sandbox_set: (a) => {
@@ -1275,7 +1289,7 @@ const handlers: Record<string, Handler> = {
   app_locales: () => ({ dir: `${mockDataDir()}/locales`, files: [], errors: [] }),
   app_settings_get: () => settings,
   app_settings_set: (a) => (settings = { ...(a.settings as LauncherSettings) }),
-  app_open_path: () => null,
+  app_open_path: (a) => { openedPaths.push(S(a.path)); return null; },
   app_open_url: (a) => { if (!S(a.url).startsWith("https://")) reject("refused", "Only https links open."); openedUrls.push(S(a.url)); return null; },
   // the Discord app is "installed" with ?discordapp=1 (kiln_manage::community::open: the app link, else the web link)
   app_open_discord: (a) => {
@@ -1837,7 +1851,9 @@ const handlers: Record<string, Handler> = {
   report_save: (a) => {
     if (!S(a.path).trim()) reject("invalid_argument", "Choose where to save the report.");
     reportSaves.push(Array.isArray(a.exclude) ? a.exclude.map(String) : []);
-    const path = /\.zip$/i.test(S(a.path)) ? S(a.path) : `${S(a.path)}.zip`;
+    const name = /\.zip$/i.test(S(a.path)) ? S(a.path) : `${S(a.path)}.zip`;
+    const path = a.destination === "downloads" ? `/home/player/Downloads/${name.split(/[\\/]/).pop()}`
+      : a.destination === "automatic" ? `/home/player/.local/state/kiln/${name.split(/[\\/]/).pop()}` : name;
     return { path, size: 48_213, findings: mockReportFindings, errors: [] } satisfies ReportSaved;
   },
   report_preview: (a) => mockReportContents(a.exclude),
@@ -2410,6 +2426,7 @@ if (typeof window !== "undefined") (window as unknown as { __kilnMock?: unknown 
   gameRunning: (gameId = "client-steam") => !!live(gameId),
   /** Each report_save's `exclude`, in order. */
   reportSaves: () => reportSaves.map((x) => [...x]),
+  openedPaths: () => [...openedPaths],
   settingsRemoved: () => [...settingsRemoved],
   planCommand: (cmd: string, plan: CommandPlan) => { (commandPlans[cmd] ??= []).push(plan); },
   openGate: (name: string) => { const g = gateOf(name); g.open = true; g.waiters.splice(0).forEach((w) => w()); },

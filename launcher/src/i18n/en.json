@@ -3092,7 +3092,21 @@
       "x11Software": "Not used while the launcher draws without the GPU.",
       "x11Yours": "Your GDK_BACKEND={value} decides.",
       "x11NextOn": "The launcher may switch to X11 by itself",
-      "x11NextOff": "The next start stays on Wayland"
+      "x11NextOff": "The next start stays on Wayland",
+      "force": "Force GPU drawing on NVIDIA",
+      "forceIntro": "The Linux launcher bundles Ubuntu's WebKit, which draws without the GPU on every NVIDIA card. This switch lifts that block (WEBKIT_FORCE_DMABUF_RENDERER=1 with shared memory, WEBKIT_DMABUF_RENDERER_FORCE_SHM=1). It is off on clean starts: some NVIDIA drivers crash or show a black window with it. If a normal NVIDIA start fails to paint, the next start may try shared memory once and remember it if it works. Turning this switch off explicitly disables that recovery too. If a shared-memory start fails, the launcher turns it off by itself. Applies at the next start.",
+      "forceOff": "This start leaves the block as it is.",
+      "forceBlocked": "This start draws without the GPU because of that block: turn this on to try the GPU.",
+      "forceOn": "This start draws past the block.",
+      "forceFailed": "The start before with it failed, so this start forces nothing and the switch goes off.",
+      "recoveryTitle": "Launcher drawing recovered",
+      "forceRecovery": "The previous normal NVIDIA startup never confirmed a visible frame. This start is trying shared-memory GPU drawing once; a successful visible start is remembered for this installation and display backend.",
+      "forceRecovered": "Shared memory is the last working automatic renderer for this installation and display backend. Turning this switch off disables automatic recovery too.",
+      "forceUnguarded": "The startup crash guard could not be written, so this start forces nothing and the switch goes off.",
+      "forceUnused": "Not used without NVIDIA, while drawing without the GPU, or without WebKit's DMA-BUF renderer.",
+      "forceYours": "Your own WEBKIT_FORCE_DMABUF_RENDERER or WEBKIT_DMABUF_RENDERER_FORCE_SHM decides.",
+      "forceNextOn": "The next start draws past Ubuntu WebKit's NVIDIA block",
+      "forceNextOff": "The next start leaves Ubuntu WebKit's NVIDIA block alone"
     },
     "dev": {
       "mock": "Developer: mock data fallback",
@@ -3419,6 +3433,7 @@
       "updateState": "This launcher",
       "noGpu": "For a window that stays black.",
       "x11": "Much faster on a HiDPI screen, less sharp.",
+      "forceDmabuf": "For NVIDIA cards. Off by default.",
       "sandbox": "Keep it on unless the window will not open."
     },
     "tag": {
@@ -3870,6 +3885,8 @@
     "dialogTitle": "Save a support report",
     "saved": "Report saved",
     "savedFile": "{file}, {size}.",
+    "savedPath": "Saved to {path} ({size}).",
+    "saveDownloads": "Save to Downloads",
     "problems": {
       "one": "It found {count} problem.",
       "other": "It found {count} problems."

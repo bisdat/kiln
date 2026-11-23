@@ -17,7 +17,6 @@
     <KilnFeatures>tasks.pool</KilnFeatures>
     <KilnGameIds>None</KilnGameIds>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <NoWarn>$(NoWarn);KILNX003</NoWarn>
   </PropertyGroup>
   <Import Project="../../../managed/Kiln.Sdk/Sdk/Sdk.targets" />
   <Target Name="_TasksLabSharedOut" AfterTargets="_KilnModFiles">

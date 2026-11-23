@@ -130,6 +130,27 @@ kilnctl cmd <instance> --json time set 7                                        
 Exit codes: 0 ok, 1 a line failed, 2 no answer within `--timeout` (default 15 s; the service tick needs one loaded mod).
 
 ## Kiln's own commands
+### `/unlimitedflight on|off|status` (Kiln.Rules)
+**Unlimited Flight** is Kiln's optional glider-only feature, independent of Creative. It starts **off** and needs no
+separate mod. Host/admin only by default, node `kiln.command.unlimitedflight` (level Admin); the existing command
+permission rules apply. It always acts on **your own character**: there is no player argument or bare toggle.
+- `/unlimitedflight on` requests gliding without stamina drain and S/W glider steering: **S** pitches up, letting go
+  holds the pitch, **W** dives. You still need an equipped, open glider. Gravity, glide speed and sprint boost are
+  unchanged; a climb can cost speed. Hits, landing, water and closing the glider still end a glide normally.
+- `/unlimitedflight status` reports whether this command is off, on, partially working or inactive, and the **current
+  combined** glide rules. It names denials in the server's `rules.json`, missing hooks, or steering waiting for your
+  game's hook confirmation. A joining game is asked to try again; a game without Kiln's rules channel is refused.
+- `/unlimitedflight off` removes **only this command's own rule set**. Creative and other mods' rules remain, so
+  another rule set may still give you unlimited gliding or steering. Repeating on/off is safe. Leaving or closing the
+  world clears the command's state; it is not saved.
+- The host's game and a Kiln client with the rules channel use the existing supported rules path. Offline, use the
+  [hosting game's console folder](#console-folder-and-kilnctl-cmd): `unlimitedflight on`, `unlimitedflight off` or
+  `unlimitedflight status` acts as the host. A dedicated console has no character; a joined game's local console must
+  use server chat instead.
+- This is **not** free-character flight and grants no building permissions, free crafting, invulnerability, general
+  stamina refill or other Creative rules. It never changes the server's limits, and it is not the ShroudForge-format
+  mod SF Unlimited Flight. See [Rules](services/rules.md#unlimited-flight).
+
 ### `/creative [on|off] [player]`, `/creative status` (Kiln.Rules)
 Creative mode for one player: the `creative` rules preset (Kiln.Rules: Kiln's own, or the server's
 `<configDir>/rules/creative.json`) applied for the session. Node `kiln.command.creative`, level Admin. The command is
