@@ -29,7 +29,9 @@ enum class Read : uint8_t { Now, WorldLoad, Restart, Unknown };
 enum class Backend : uint8_t { Live, Boot, None };
 enum class RowState : uint8_t { Mapped, Unproven, Unmapped };
 enum class EntryKind : uint8_t { Resource, Array, Single };
-enum class BuildRow : uint8_t { Ok, Changed, Unmapped };
+// Unproven (kilnctl regproof): nothing is wrong that the proof can see, but the lab gave no evidence for the row on this build
+// (the record's "reasons" says what is missing); kept off like Changed, with that reason instead of "a Kiln update is needed".
+enum class BuildRow : uint8_t { Ok, Changed, Unmapped, Unproven };
 enum class Mapping : uint8_t { Mapped = 0, Unmapped = 1, Unproven = 2, Removed = 3 };  // KILN_REGISTRY_MAPPED ... REMOVED
 
 // The conversions between a Kiln value and the game's (regmap/README.md).
@@ -76,6 +78,7 @@ struct BuildRecord {
     std::string side, exe_sha256, game_build, steam_build, proof;
     bool verified = false;
     std::map<std::string, BuildRow> rows;      // "<registry>.<field>"
+    std::map<std::string, std::string> reasons; // "<registry>.<field>" -> why an unproven row is not proven (Kiln words)
     std::map<std::string, uint32_t> layouts;   // root type -> the reflection's layout hash on this build
     Aliases aliases;
 };

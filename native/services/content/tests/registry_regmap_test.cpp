@@ -104,6 +104,19 @@ int main(int argc, char** argv) {
         map::BuildRecord bad;
         map::load_record(map::json::parse(R"({"regmap": 1, "side": "moon", "exeSha256": "xyz", "verified": "yes", "rows": {"items.maxStack": "fine"}})"), &bad, &errs);
         CHECK(has(errs, "side") && has(errs, "exeSha256") && has(errs, "verified") && has(errs, "items.maxStack"));
+        // kilnctl regproof: a row that only lacks lab evidence is "unproven", with its reason (kept off; not "changed")
+        std::vector<std::string> e2;
+        map::BuildRecord u;
+        CHECK(map::load_record(map::json::parse(R"({"regmap": 1, "side": "server", "exeSha256": "f0d824be7fcd48ebfe2458ff5c28da26060c2074e3ec1fcac587e5a1d508aeb2",
+            "verified": true, "rows": {"items.maxStack": "ok", "items.comfort": "unproven"},
+            "reasons": {"items.comfort": "no lab round trip of it on this build yet"}})"), &u, &e2));
+        CHECK(e2.empty() && u.rows.at("items.comfort") == map::BuildRow::Unproven &&
+              u.reasons.at("items.comfort") == "no lab round trip of it on this build yet");
+        std::vector<std::string> e3;
+        map::BuildRecord r3;
+        map::load_record(map::json::parse(R"({"regmap": 1, "side": "server", "exeSha256": "f0d824be7fcd48ebfe2458ff5c28da26060c2074e3ec1fcac587e5a1d508aeb2",
+            "verified": true, "rows": {}, "reasons": {"items.comfort": 3}})"), &r3, &e3);
+        CHECK(has(e3, "reasons.items.comfort"));
     }
     // ---- the mapping state an edit gets on this build
     {
@@ -133,6 +146,14 @@ int main(int argc, char** argv) {
         CHECK(rm.mapping("items", "power", &why) == Mapping::Unmapped);        // no row at all
         CHECK(rm.mapping("items", "levels.min", &why) == Mapping::Unmapped);
         CHECK(rm.mapping("nowhere", "x", &why) == Mapping::Unmapped);
+        // unproven on this build (kilnctl regproof): kept off with the record's reason, never "a Kiln update is needed"
+        rm.build.rows["items.maxStack"] = map::BuildRow::Unproven;
+        rm.build.reasons["items.maxStack"] = "no lab round trip of it on this build yet";
+        CHECK(rm.mapping("items", "maxStack", &why) == Mapping::Unproven &&
+              why == "Unproven: items.maxStack is not proven for game build 1287369 (no lab round trip of it on this build yet); this edit was not applied");
+        rm.build.reasons.clear();
+        CHECK(rm.mapping("items", "maxStack", &why) == Mapping::Unproven && why.find("(no lab evidence on this build)") != std::string::npos);
+        rm.build.rows["items.maxStack"] = map::BuildRow::Ok;
         rm.build.verified = false;
         CHECK(rm.mapping("items", "maxStack", &why) == Mapping::Unproven);
     }
