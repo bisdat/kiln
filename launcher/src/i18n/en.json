@@ -4857,7 +4857,22 @@
       "sessionClosed": "The admin session closed ({reason}).",
       "sessionClosedReconnecting": "The admin session closed ({reason}); reconnecting…",
       "notConnected": "Not connected to the server's Kiln.Admin.",
-      "needsNewer": "This needs a newer Kiln.Admin on the server (it has no '{op}' op yet)."
+      "needsNewer": "This needs a newer Kiln.Admin on the server (it has no '{op}' op yet).",
+      "noTransport": "This app has no connection to Kiln.Admin set up."
+    },
+    "adminWs": {
+      "unreachable": "The admin panel's connection to the server could not open ({reason}).",
+      "handshake": "The server did not finish opening the admin connection within {seconds} s.",
+      "closedEarly": "The server closed the admin connection before it was ready ({reason}).",
+      "reconnecting": "Reconnecting to the server…",
+      "noSession": "No admin session {session}.",
+      "connectionClosed": "The admin connection closed.",
+      "timeout": "No answer within {seconds} s.",
+      "tooLarge": "The request is too large for the server ({bytes} bytes, at most {max}).",
+      "noTopic": "The server offers no '{topic}' topic.",
+      "silent": "the server was silent for {seconds} s",
+      "closedBy": "the connection closed ({code})",
+      "opFailed": "The op failed."
     }
   },
   "logs": {

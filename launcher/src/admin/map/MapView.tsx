@@ -5,8 +5,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import { callAdmin, useAdminCall, useAdminQuery, useAdminState, useHasOp, type AdminPlayer, type AdminPos } from "../../api/admin";
-import { useAssetsStatus } from "../../components/GameArt";
+import { adminHost, callAdmin, useAdminCall, useAdminQuery, useAdminState, useHasOp, type AdminPlayer, type AdminPos } from "../../api/admin";
 import { formatLocale, rich, t as tr, useT } from "../../i18n";
 import { assetsRoot, prettyTemplate } from "../catalog";
 import { playerName, useServerId } from "../common";
@@ -17,7 +16,8 @@ import { ACTIONS, actionLabel, DEFAULT_DENY, useMapFocus, useZoneDraft, zoneArgs
 import { Height, KIND_COLOR, MapEngine, markerSetKey, posTxt, withLevel, type FindData, type Finder, type FinderKind, type Look, type MarkerData, type MenuTarget, type Route, type Spot } from "./engine";
 import "./map.css";
 
-export const MAP_ROOT = `${assetsRoot()}map/`;
+/** The map art's base URL (read when used: the host may set it after this module loaded). */
+export const mapRoot = () => `${assetsRoot()}map/`;
 const STORE = "kiln.admin.map.v1";
 
 interface MapUi {
@@ -146,8 +146,9 @@ export function MapView({ height }: { height: number }) {
   const box = useRef<HTMLDivElement>(null);
   const eng = useRef<MapEngine | null>(null);
   const [assets, setAssets] = useState<boolean | null>(null);
-  // the launcher makes the map art from the game on its own (components/GameArt.tsx): probe again when it has
-  const artStatus = useAssetsStatus().data?.admin;
+  // the launcher makes the map art from the game on its own (components/GameArt.tsx, the host's useArtStatus): probe
+  // again when it has
+  const artStatus = adminHost().useArtStatus();
   const probe = `${artStatus?.extracted ?? ""}|${artStatus?.map ?? ""}`;
   const [D, setD] = useState<MarkerData | null>(null);
   const [F, setF] = useState<FindData | null>(null);
@@ -176,7 +177,7 @@ export function MapView({ height }: { height: number }) {
   // ---------------------------------------------------------------- engine
   useEffect(() => {
     let alive = true;
-    fetch(`${MAP_ROOT}gpu/d/0_0.webp`, { method: "HEAD" })
+    fetch(`${mapRoot()}gpu/d/0_0.webp`, { method: "HEAD" })
       .then((r) => alive && setAssets(r.ok && (r.headers.get("content-type") ?? "").startsWith("image")))
       .catch(() => alive && setAssets(false));
     return () => { alive = false; };
@@ -184,7 +185,7 @@ export function MapView({ height }: { height: number }) {
   const menuRef = useRef<(mt: MenuTarget, p: { x: number; y: number }) => void>(() => undefined);
   useEffect(() => {
     if (assets === null || !box.current) return;
-    const e = new MapEngine(box.current, MAP_ROOT, {
+    const e = new MapEngine(box.current, mapRoot(), {
       menu: (mt, p) => menuRef.current(mt, p),
       closeMenu: () => setMenu(null),
       coords: setCoords,
@@ -444,7 +445,7 @@ export function MapView({ height }: { height: number }) {
                   <h4>{r.sec}</h4>
                   {r.items.map((it, i) => (
                     <button key={i} type="button" className={it.on ? "on" : ""} onClick={() => { it.act(); setResultsOpen(false); }}>
-                      {it.img ? <img src={`${MAP_ROOT}i/${it.img}`} alt="" /> : <i className="ka-dot" style={{ background: it.color ?? "#d8c9a6" }} />}
+                      {it.img ? <img src={`${mapRoot()}i/${it.img}`} alt="" /> : <i className="ka-dot" style={{ background: it.color ?? "#d8c9a6" }} />}
                       <b>{it.t}</b><small>{it.s}</small>
                     </button>
                   ))}
@@ -590,7 +591,7 @@ function LayersPanel({ D, ui, setUi, assets, lang, onLang }: { D: MarkerData | n
               <div className="ka-map-cats">
                 {g.cats.map((c) => (
                   <button key={c.id} type="button" className={"ka-map-cat" + (vis[c.id] ? "" : " off")} title={c.label} onClick={() => setUi({ vis: { ...vis, [c.id]: !vis[c.id] } })}>
-                    <img src={`${MAP_ROOT}i/${c.icon}`} alt="" /><span>{c.label}</span><small>{fmtN(c.count)}</small>
+                    <img src={`${mapRoot()}i/${c.icon}`} alt="" /><span>{c.label}</span><small>{fmtN(c.count)}</small>
                   </button>
                 ))}
               </div>
@@ -652,7 +653,7 @@ function FindPanel({ F, missing, ui, findQ, setFindQ, toggle, addAll, dropsBy, c
         <h3><span>{t("admin.map.myFilter")}</span>{mine.length ? <Button size="s" variant="ghost" onClick={clear} style={{ marginLeft: "auto" }}>{t("admin.map.clear")}</Button> : null}</h3>
         {mine.length ? mine.map((e) => (
           <div key={`${e.kind}:${e.slug}`} className="ka-map-mrow">
-            <span>{e.img ? <img src={`${MAP_ROOT}i/${e.img}`} alt="" /> : <i className="ka-dot" style={{ background: e.color ?? KIND_COLOR[e.kind] }} />}{e.n}</span>
+            <span>{e.img ? <img src={`${mapRoot()}i/${e.img}`} alt="" /> : <i className="ka-dot" style={{ background: e.color ?? KIND_COLOR[e.kind] }} />}{e.n}</span>
             <small>{kindCount(e.kind, e.c)}</small><button className="ka-map-x" title={t("common.remove")} onClick={() => toggle(e.kind, e.slug)}>✕</button>
           </div>
         )) : <p className="ka-map-muted">{t("admin.map.filterEmpty")}</p>}
@@ -663,7 +664,7 @@ function FindPanel({ F, missing, ui, findQ, setFindQ, toggle, addAll, dropsBy, c
         const onN = g.list.filter((e) => isOn(e.kind, e.slug)).length;
         return (
           <section key={g.id} className="ka-map-group">
-            <h3><span onClick={() => setUi({ open: { ...ui.open, [`f:${g.id}`]: !ui.open[`f:${g.id}`] } })}>{g.img ? <img src={`${MAP_ROOT}i/${g.img}`} alt="" style={{ width: 20, height: 20 }} /> : null}{g.label}</span>
+            <h3><span onClick={() => setUi({ open: { ...ui.open, [`f:${g.id}`]: !ui.open[`f:${g.id}`] } })}>{g.img ? <img src={`${mapRoot()}i/${g.img}`} alt="" style={{ width: 20, height: 20 }} /> : null}{g.label}</span>
               {g.all ? <Button size="s" variant="ghost" onClick={() => addAll(g.list.map((x) => [x.kind, x.slug]))}>{t("admin.map.showAll")}</Button> : null}
               <small onClick={() => setUi({ open: { ...ui.open, [`f:${g.id}`]: !ui.open[`f:${g.id}`] } })}>{onN ? t("admin.map.nOn", { n: onN }) : ""}{fmtN(g.list.length)} {isOpenG ? "▾" : "▸"}</small></h3>
             {isOpenG ? (
@@ -673,7 +674,7 @@ function FindPanel({ F, missing, ui, findQ, setFindQ, toggle, addAll, dropsBy, c
                   {g.list.map((e) => (
                     <button key={`${e.kind}:${e.slug}`} type="button" className={"ka-map-cat" + (isOn(e.kind, e.slug) ? "" : " off")} onClick={() => toggle(e.kind, e.slug)}
                       title={e.kind === "spawns" && dropsBy[e.slug] ? `${e.n}\n${t("admin.map.drops", { list: dropsBy[e.slug].join(", ") })}` : e.n}>
-                      {e.img ? <img src={`${MAP_ROOT}i/${e.img}`} alt="" loading="lazy" /> : <i className="ka-dot" style={{ background: e.color ?? KIND_COLOR[e.kind] }} />}
+                      {e.img ? <img src={`${mapRoot()}i/${e.img}`} alt="" loading="lazy" /> : <i className="ka-dot" style={{ background: e.color ?? KIND_COLOR[e.kind] }} />}
                       <span>{e.n}</span><small>{fmtN(e.c)}</small>
                     </button>
                   ))}
@@ -718,7 +719,7 @@ function LivePanel({ players, connected, reason, waypoints, graves, zones, ui, s
       <section className="ka-map-group">
         <h3><span>{t("admin.map.waypoints")}</span><small>{waypoints.length}</small></h3>
         {waypoints.length ? waypoints.map((w) => (
-          <div key={w.name} className="ka-map-lrow"><img src={`${MAP_ROOT}i/g-mapmarker_waypoint.webp`} alt="" /><b>{w.name}</b><small className="k-mono">{Math.round(w.pos.x)}, {Math.round(w.pos.z)}</small>
+          <div key={w.name} className="ka-map-lrow"><img src={`${mapRoot()}i/g-mapmarker_waypoint.webp`} alt="" /><b>{w.name}</b><small className="k-mono">{Math.round(w.pos.x)}, {Math.round(w.pos.z)}</small>
             <span className="ka-map-btns"><Button size="s" variant="ghost" onClick={() => go(w.pos.x, w.pos.z)}>{t("common.show")}</Button></span></div>
         )) : <p className="ka-map-muted">{t("admin.map.waypointsEmpty")}</p>}
       </section>
