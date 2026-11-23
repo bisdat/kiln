@@ -322,6 +322,7 @@ External glTF buffer/image URIs are percent-decoded and resolved relative to the
 while it stays inside this mod. Escapes, nested links, and a `link/..` walk are refused before source hashing.
 A legacy NPC model block missing its animation or motion part stays on the ordinary eager asset-cook path, with a
 warning naming that NPC's field. This preserves its other assets; it does not make the incomplete NPC definition valid.
+The boot build leaves only that NPC out and reports its missing animation or motions in a `Failed` body status row.
 
 Material-block and texture hashes are included as dependencies, but generated material JSON is not material-resource
 publication. The prepared material bridge is still required before that closure can be committed. No hot body or
@@ -387,7 +388,9 @@ same closure hash as the server's, the body drawn and its motions played), the e
 refusal shown on a player's screen. A dedicated server's build, its rows and the join decision were checked in a lab
 (`mods/tests/npc-body-test`, below). The tests cover them
 offline (`Kiln.Blocks.Tests`, `Kiln.Network.Tests`); the test kit scripts the start's rows with `KilnHarness.NpcBodies`
-([unit-tests.md](unit-tests.md)).
+([unit-tests.md](unit-tests.md)). The existing `quest-native-test` and `blocks-npc-test` lab runs had the same pass/fail
+counts with authored bodies switched off and on on the body branch: **unchanged by the switch**, not a comparison with
+the integration base tree. Those runs still had failures; matching counts do not mean the suites passed.
 
 ## Ids
 From the mod id and the block's name: the template, variant (`<mod>:<name>`), arsenal, attacks (`<mod>:attack:<name>`), sequences, phases and states

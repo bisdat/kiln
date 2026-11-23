@@ -34,7 +34,7 @@ def props(lines, pending=None):
     p = {"nettest.client": "npc-body-handshake", "kiln.npcbodies": hashlib.sha256("\n".join(lines).encode()).hexdigest() if lines else "",
          "kiln.npcbodies.count": str(len(lines))}
     if lines:
-        p["kiln.npcbodies.list"] = "\n".join(lines)
+        p["kiln.npcbodies.list"] = ",".join(lines)
     if pending:
         p["kiln.npcbodies.pending"] = pending
     return p
