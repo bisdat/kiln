@@ -127,6 +127,9 @@ in `kiln/data/<id>` and `kiln/config`, which this does not touch.
 - The automatic rollback of a Kiln update runs in the new `dinput8.dll`. A new proxy that cannot start at all rolls
   nothing back: copy `kiln/staged/previous/kiln/files/dinput8.dll` over `dinput8.dll` (copy, don't move), and the next
   start rolls the rest back.
+- `update_*` work on a dedicated server only: on a game client (one that hosts a session may run Kiln.Admin),
+  `update_stage` and `update_rollback` are refused. Kiln.Admin finds `kiln/` next to the server's exe, as the start
+  does, wherever a profile keeps the mods' data.
 
 Tests: `native/core/tests/test-staged.sh` (host, ASan+UBSan: every crash point of five scenarios in forked children,
 a second crash while putting back, refusals, rollbacks, `kiln/data` byte for byte), `test-staged-wine.sh` (the same

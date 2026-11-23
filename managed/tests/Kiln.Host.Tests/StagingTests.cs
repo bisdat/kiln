@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
@@ -385,6 +386,113 @@ public sealed class StagingTests : IDisposable
         Put(Path.Combine(_game, "dinput8.dll"), "MZ another loader");
         Assert.Contains("dinput8.dll is not the one Kiln installed",
             Assert.Throws<StagingError>(() => Staging.StageKiln(Kiln, "pack", null, null, null, "t")).Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_Kiln_rollback_is_refused_once_kilnctl_or_the_launcher_changed_Kiln()
+    {
+        // the kept version holds only the files its change changed: over another install it would make a mix
+        Installed(Old(), version: "0.2.0-dev.30.11");
+        var receipt = File.ReadAllBytes(Path.Combine(Kiln, ".install.json"));
+        void Kept(string? receiptSha) => Put(Path.Combine(Staged, "previous", "kiln", "kept.json"),
+            $$"""{"format":1,"unit":"kiln","version":"0.2.0-dev.30.9","replacedBy":"0.2.0-dev.30.10","kept":"2026-11-23T10:00:00.000Z","reason":"update","entries":[{"path":"kiln/kiln-core.dll","before":"present"}]{{(receiptSha is null ? "" : $",\"receipt\":\"{receiptSha}\"")}}}""");
+        Kept(Sha("{\"the receipt\": \"the staged change left\"}"));
+        Assert.Contains("Kiln changed since", Assert.Throws<StagingError>(() => Staging.Rollback(Kiln, "kiln", "t")).Message, StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Combine(Staged, "rollback", "kiln.json")));
+        Kept(Convert.ToHexStringLower(SHA256.HashData(receipt)));  // the receipt is still the one the change left
+        Assert.Equal("0.2.0-dev.30.9", Staging.Rollback(Kiln, "kiln", "t")["to"]!.GetValue<string>());
+    }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetShortPathNameW")]
+    private static extern uint GetShortPathName(string longPath, [Out] char[] shortPath, uint length);
+
+    /// <summary>The Windows 8.3 short name of an existing folder, or null (not Windows, or the volume makes none).</summary>
+    private static string? ShortName(string dir)
+    {
+        if (!OperatingSystem.IsWindows()) return null;
+        var buf = new char[4096];
+        var n = GetShortPathName(dir, buf, (uint)buf.Length);
+        if (n == 0 || n >= buf.Length) return null;
+        var name = Path.GetFileName(new string(buf, 0, (int)n));
+        return string.Equals(name, Path.GetFileName(dir), StringComparison.OrdinalIgnoreCase) ? null : name;
+    }
+
+    [Fact]
+    public void A_mod_folder_is_named_by_its_own_name_not_a_short_name()
+    {
+        // kiln/mods/KILN-A~1 is kiln/mods/kiln-admin-console on a volume with 8.3 names: a unit by that name would replace
+        // another folder (and pass the receipt's "updated with Kiln" rule)
+        foreach (var (rel, text) in ModFiles("kiln-admin", "1.0.0")) Put(Path.Combine(Kiln, "mods", "kiln-admin-console", rel), text);
+        if (ShortName(Path.Combine(Kiln, "mods", "kiln-admin-console")) is not { } alias) return;  // no other names here
+        Source("adm", ModFiles("kiln-admin", "2.0.0"));
+        Assert.Contains("own name", Assert.Throws<StagingError>(() => Staging.StageMod(Kiln, "adm", null, alias, null, null, "t")).Message,
+            StringComparison.Ordinal);
+        Assert.False(Directory.Exists(Path.Combine(Staged, "mods")) && Directory.EnumerateDirectories(Path.Combine(Staged, "mods")).Any());
+        Assert.Equal("unit", Staging.StageMod(Kiln, "adm", null, "kiln-admin-console", null, null, "t").First().Key);
+    }
+
+    [Fact]
+    public void The_files_list_holds_for_the_very_bytes_that_are_staged()
+    {
+        // kiln/staged/incoming changes while it is staged: the manifest read first, the files copied last must both be
+        // the ones the caller's list (from the archive whose signature it checked) names
+        Installed(Old());
+        var src = Bundle("kiln-30.10", New());
+        var expect = Directory.EnumerateFiles(src, "*", SearchOption.AllDirectories)
+            .ToDictionary(f => Path.GetRelativePath(src, f).Replace('\\', '/'), f => Staging.Sha256Of(f)!, StringComparer.Ordinal);
+        var good = File.ReadAllText(Path.Combine(src, "kiln-runtime.json"));
+        var evil = (JsonObject)JsonNode.Parse(good)!;
+        foreach (var f in (JsonArray)evil["files"]!)
+            if (f!["path"]!.GetValue<string>() == "kiln/kiln-core.dll") { f["sha256"] = Sha("evil core"); f["size"] = 9; }
+        File.WriteAllText(Path.Combine(src, "kiln-runtime.json"), evil.ToJsonString());
+        File.WriteAllText(Path.Combine(src, "kiln", "kiln-core.dll"), "evil core");
+        try
+        {
+            Staging.TestStep = step =>
+            {
+                if (step == "manifest")  // read: the listed bytes are back for the check of the list
+                {
+                    File.WriteAllText(Path.Combine(src, "kiln-runtime.json"), good);
+                    File.WriteAllText(Path.Combine(src, "kiln", "kiln-core.dll"), "core 2");
+                }
+                if (step == "copy") File.WriteAllText(Path.Combine(src, "kiln", "kiln-core.dll"), "evil core");  // and gone again
+            };
+            Assert.Throws<StagingError>(() => Staging.StageKiln(Kiln, "kiln-30.10", expect, null, null, "t"));
+        }
+        finally
+        {
+            Staging.TestStep = null;
+        }
+        Assert.False(Directory.Exists(Path.Combine(Staged, "kiln")));
+        // a file changed between the check of the list and its copy alone is refused too
+        File.WriteAllText(Path.Combine(src, "kiln", "kiln-core.dll"), "core 2");
+        try
+        {
+            Staging.TestStep = step => { if (step == "copy") File.WriteAllText(Path.Combine(src, "kiln", "host", "Kiln.New.dll"), "new X"); };
+            Assert.Throws<StagingError>(() => Staging.StageKiln(Kiln, "kiln-30.10", expect, null, null, "t"));
+        }
+        finally
+        {
+            Staging.TestStep = null;
+        }
+        Assert.False(Directory.Exists(Path.Combine(Staged, "kiln")));
+    }
+
+    [Fact]
+    public void Staged_updates_are_for_dedicated_servers_only()
+    {
+        Assert.Contains("dedicated server", Assert.Throws<StagingError>(() => Staging.ServerOnly(false)).Message, StringComparison.Ordinal);
+        Staging.ServerOnly(true);
+    }
+
+    [Fact]
+    public void The_kiln_folder_is_the_servers_wherever_the_data_directory_is()
+    {
+        // a profile with its own data directory (kiln/profiles/<id>/data, or the launcher's library) must not move kiln/staged
+        var game = Path.Combine(Path.GetTempPath(), "srv");
+        Assert.Equal(Path.Combine(game, "kiln"),
+            Staging.KilnFolderOf(Path.Combine(game, "enshrouded_server.exe"), Path.Combine(game, "kiln", "profiles", "p1", "data", "kiln-admin")));
+        Assert.Equal(Path.Combine(game, "kiln"), Staging.KilnFolderOf(null, Path.Combine(game, "kiln", "data", "kiln-admin")));
     }
 
     [Fact]

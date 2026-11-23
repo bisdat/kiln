@@ -20,6 +20,10 @@ internal static class Staging
     public const int Format = 1, MaxFiles = 20000, MaxRelPath = 240, ResultsListed = 20;
     private static readonly object Gate = new();  // one change of kiln/staged at a time
 
+    /// <summary>Tests only: called at named points of a staging ("manifest": kiln-runtime.json was read; "copy": the files are
+    /// about to be copied), so a test can change the source in between. Null in Kiln.</summary>
+    internal static Action<string>? TestStep { get; set; }
+
     /// <summary>The gate for an op on the tick thread (cancel, rollback): taken at once or refused, never waited for, so
     /// a staging copy in progress on a pool thread can't stall the server's step.</summary>
     private readonly struct Turn : IDisposable
@@ -59,6 +63,22 @@ internal static class Staging
         public string AttemptsFile(string unit) => Path.Combine(Staged, "attempts", unit);
         private static string Folder(string unit) => unit["mod.".Length..];
     }
+
+    /// <summary>Staging and rollback requests on a dedicated server only: a game client never applies kiln/staged (Kiln.Admin
+    /// may run on a client that hosts a session).</summary>
+    public static void ServerOnly(bool dedicatedServer)
+    {
+        if (!dedicatedServer)
+            throw new StagingError("staged updates are for a dedicated server: a game client never applies kiln/staged");
+    }
+
+    /// <summary>The kiln folder next to the server's exe: where the proxy and kiln-core apply kiln/staged. Kiln.Admin's data
+    /// directory does not say where that is (a profile may keep the mods' data in kiln/profiles/&lt;id&gt;/data or the
+    /// launcher's library); its grandparent only when the process path is unknown.</summary>
+    public static string KilnFolderOf(string? processPath, string dataDirectory) =>
+        !string.IsNullOrEmpty(processPath) && Path.GetDirectoryName(Path.GetFullPath(processPath)) is { Length: > 0 } exeDir
+            ? Path.Combine(exeDir, "kiln")
+            : Path.GetFullPath(Path.Combine(dataDirectory, "..", ".."));
 
     // ---- path rules (native/core/src/staged.cpp rel_path_ok, kiln_path_ok, mod_folder_ok) ----
     public static bool RelPathOk(string rel, out string why)
@@ -270,6 +290,21 @@ internal static class Staging
         }
     }
 
+    /// <summary>kiln-runtime.json, parsed from the bytes it was hashed from.</summary>
+    private static (JsonObject Manifest, string Sha256) ReadManifest(string file)
+    {
+        try
+        {
+            var bytes = File.ReadAllBytes(file);
+            using var reader = new StreamReader(new MemoryStream(bytes), Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+            if (JsonNode.Parse(reader.ReadToEnd()) is JsonObject o) return (o, Hex(SHA256.HashData(bytes)));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException)
+        {
+        }
+        throw new StagingError("the source has no readable kiln-runtime.json");
+    }
+
     private static string? Text(JsonNode? o, string key) => o is JsonObject j && j[key] is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
 
     private static string Now() => DateTime.UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'");
@@ -330,6 +365,8 @@ internal static class Staging
             folder ??= FolderOf(p, mid) ?? mid;
             if (!ModFolderOk(folder)) throw new StagingError($"{JsonSerializer.Serialize(folder)} cannot be a folder under kiln/mods (pass folder)");
             var unit = "mod." + folder;
+            if (OtherName(p.Mods, folder))
+                throw new StagingError($"kiln/mods/{folder} is another folder there by its Windows short name: pass the folder's own name");
             if (KilnOwns(p, $"kiln/mods/{folder}/"))
                 throw new StagingError($"kiln/mods/{folder} is part of Kiln (its install receipt lists it); it is updated with Kiln");
             RefuseBusy(p, unit, $"mod folder {folder}");
@@ -371,6 +408,16 @@ internal static class Staging
         };
     }
 
+    /// <summary>Windows reaches an existing file or folder by its 8.3 short name too (KILN-A~1 for kiln-admin-console): true
+    /// when <paramref name="name"/> exists in <paramref name="dir"/> but no entry there has that name (letter case aside).
+    /// The native side refuses such a path at the start as well (staged.cpp own_name).</summary>
+    internal static bool OtherName(string dir, string name)
+    {
+        var path = Path.Combine(dir, name);
+        if (!Directory.Exists(path) && !File.Exists(path)) return false;
+        return !Directory.EnumerateFileSystemEntries(dir).Any(e => string.Equals(Path.GetFileName(e), name, StringComparison.OrdinalIgnoreCase));
+    }
+
     private static bool KilnOwns(Layout p, string prefix)
     {
         if (ReadObject(p.Receipt)?["files"] is not JsonArray files) return false;
@@ -394,7 +441,12 @@ internal static class Staging
             var p = new Layout(kiln);
             var src = Source(p, source);
             RefuseBusy(p, "kiln", "Kiln");
-            var manifest = ReadObject(Path.Combine(src, "kiln-runtime.json")) ?? throw new StagingError("the source has no readable kiln-runtime.json");
+            // read once: the bytes the list is checked on are the bytes the plan is made from
+            var (manifest, manifestSha) = ReadManifest(Path.Combine(src, "kiln-runtime.json"));
+            TestStep?.Invoke("manifest");
+            if (expect is not null && (!expect.TryGetValue("kiln-runtime.json", out var listedManifest) ||
+                                       !string.Equals(listedManifest, manifestSha, StringComparison.OrdinalIgnoreCase)))
+                throw new StagingError("files: kiln-runtime.json is not the one the list names");
             var version = Text(manifest, "version");
             if (string.IsNullOrEmpty(version)) throw new StagingError("kiln-runtime.json has no version");
             // no receipt: a server pack install (unzipped by hand); it gets one with this update
@@ -435,6 +487,7 @@ internal static class Staging
             string? ReceiptSha(string path) => receiptFiles.Where(r => Lower(Text(r, "path") ?? "") == Lower(path)).Select(r => Text(r, "sha256")).FirstOrDefault();
 
             var stage = NewStageDir(p);
+            TestStep?.Invoke("copy");
             try
             {
                 var writes = new List<FileEntry>();
@@ -453,6 +506,9 @@ internal static class Staging
                     var info = new FileInfo(from);
                     if (!info.Exists || IsLink(info)) throw new StagingError($"the bundle has no file {path}");
                     var copied = Copy(from, Path.Combine(stage, "files", path), path, ct);
+                    // the bytes copied, not only the ones hashed for the list a moment ago
+                    if (expect is not null && (!expect.TryGetValue(path, out var listed) || !string.Equals(copied.Sha256, listed, StringComparison.OrdinalIgnoreCase)))
+                        throw new StagingError($"files: {path} changed while it was staged (the copy is {copied.Sha256})");
                     if (!string.Equals(copied.Sha256, want, StringComparison.OrdinalIgnoreCase))
                         throw new StagingError($"the bundle's {path} is not what kiln-runtime.json says (sha256 {copied.Sha256}, listed {want})");
                     writes.Add(copied);
@@ -608,6 +664,12 @@ internal static class Staging
             var kept = ReadObject(Path.Combine(p.PreviousDir(unit), "kept.json"))
                        ?? throw new StagingError($"no earlier version of {unit} is kept (only a change made by a staged update can be rolled back)");
             RefuseBusy(p, unit, unit);
+            // the kept version holds only the files its change changed: over a Kiln that kilnctl or the launcher installed
+            // since (another receipt), it would make a mix of two versions (the start refuses it too: staged.cpp plan_rollback)
+            if (unit == "kiln" && Text(kept, "receipt") is { } keptReceipt &&
+                !string.Equals(File.Exists(p.Receipt) ? Sha256Of(p.Receipt) ?? "" : "", keptReceipt, StringComparison.OrdinalIgnoreCase))
+                throw new StagingError($"Kiln changed since this version was kept (kiln/.install.json is not the one the change to {Text(kept, "replacedBy")} " +
+                                       "left; kilnctl or the launcher installed Kiln since): a rollback would mix two versions");
             WriteAtomic(p.RollbackFile(unit), new JsonObject { ["format"] = Format, ["unit"] = unit, ["requested"] = Now(), ["by"] = by }.ToJsonString());
             return new JsonObject
             {

@@ -8,8 +8,12 @@ namespace Kiln.Admin;
 /// Kiln, kiln-core for mods). Server only.</summary>
 internal static partial class Ops
 {
-    /// <summary>The kiln folder (kiln/data/kiln-admin is Kiln.Admin's data directory on a server).</summary>
-    private static string KilnFolder => Path.GetFullPath(Path.Combine(DataDirectory, "..", ".."));
+    /// <summary>The kiln folder next to the server's exe, where the next start applies kiln/staged (not the data directory's
+    /// grandparent: a profile may keep the mods' data elsewhere).</summary>
+    private static string KilnFolder => Staging.KilnFolderOf(Environment.ProcessPath, DataDirectory);
+
+    /// <summary>A game client (one that hosts a session runs server mods) never applies kiln/staged.</summary>
+    private static bool DedicatedServer => global::Kiln.Mods.Side == ModSide.Server;
 
     /// <summary>Canceled when Kiln.Admin unloads: a staging copy in progress stops and its .stage-* folder goes.</summary>
     internal static CancellationTokenSource UpdatesCancel { get; set; } = new();
@@ -21,6 +25,11 @@ internal static partial class Ops
         //  sha256? (a Kiln bundle's zip, for the receipt), by?}: copied and hashed off the tick thread
         bridge.RegisterAsync("update_stage", async req =>
         {
+            Guard(() =>
+            {
+                Staging.ServerOnly(DedicatedServer);
+                return 0;
+            });
             var kind = req["kind"]?.GetValue<string>();
             var source = req["source"]?.GetValue<string>();
             var label = req["label"]?.GetValue<string>();
@@ -48,7 +57,11 @@ internal static partial class Ops
         bridge.Register("update_rollback", req =>
         {
             var by = By(req);
-            var r = Guard(() => Staging.Rollback(KilnFolder, req["unit"]?.GetValue<string>(), by));
+            var r = Guard(() =>
+            {
+                Staging.ServerOnly(DedicatedServer);
+                return Staging.Rollback(KilnFolder, req["unit"]?.GetValue<string>(), by);
+            });
             log.Info($"rollback requested for the next start: {r["unit"]} to {r["to"]} ({by})");
             return r;
         });
