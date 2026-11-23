@@ -139,6 +139,26 @@ internal sealed class PlayerStorageDocument
             .Concat((source.Data["returns"] as JsonArray ?? []).OfType<JsonObject>()));
     }
 
+    /// <summary>Another copy's pairs as the oldest history (recovery data, never live): pairs this document already has are
+    /// skipped. Count and byte trimming drop them first. Returns how many entries were added.</summary>
+    internal int KeepAsHistory(PlayerStorageDocument other)
+    {
+        if (ReadOnly || other.ReadOnly) return 0;
+        var known = Entries().SelectMany(e => Pairs(e.Pair, e.Revision)).Select(p => (p.Witness, p.Revision)).ToHashSet();
+        var added = 0;
+        foreach (var (pair, revision) in other.Entries().ToArray())
+        {
+            if (Pairs(pair, revision).All(p => p.Witness.Length == 0 || known.Contains((p.Witness, p.Revision)))) continue;
+            var copy = (JsonObject)pair.DeepClone();
+            copy["revision"] = revision;
+            Data["history"]!.AsArray().Add(copy);
+            foreach (var p in Pairs(pair, revision)) known.Add((p.Witness, p.Revision));
+            added++;
+        }
+        MergeReturns(other);
+        return added;
+    }
+
     internal bool AcknowledgesAfterReturn(StorageChoice choice)
     {
         var after = LatestReturnRevision;

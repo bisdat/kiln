@@ -345,6 +345,16 @@ internal static class CharacterSync
             s.StorageOffer = offered.GetValueOrDefault(PlayerStorageStore.Mod)?.GetValueOrDefault(PlayerStorageStore.Key);
             RestoreStorage(s);
         }
+        else if (s.StorageWindow.TimedOut && s.StorageTrusted
+                 && offered.GetValueOrDefault(PlayerStorageStore.Mod)?.GetValueOrDefault(PlayerStorageStore.Key) is { } late)
+        {
+            // Too late to restore from; this server's updates will replace that copy on the player's side, so keep its pairs.
+            try { SavesRuntime.Store.Storage.KeepLate(s.Key, late); }
+            catch (Exception e) when (e is InvalidOperationException or FormatException or OverflowException or JsonException)
+            {
+                SavesRuntime.Log(LogLevel.Warn, $"player-storage: {s}: late client copy not kept: {e.Message}");
+            }
+        }
         if (!s.ProgressAllowed)
         {
             _refused++;

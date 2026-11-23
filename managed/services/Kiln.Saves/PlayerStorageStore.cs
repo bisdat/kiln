@@ -253,6 +253,22 @@ internal sealed class PlayerStorageStore(WorldStore owner)
         return choice;
     }
 
+    /// <summary>A trusted player's copy that came after the join decided without it: never swapped in, but its pairs ride
+    /// on as the oldest history, since this server's carried updates replace the player's sidecar value from now on.</summary>
+    internal void KeepLate(CharacterKey character, string clientJson)
+    {
+        if (!_visits.TryGetValue(character, out var visit) || visit.Document.ReadOnly) return;
+        PlayerStorageDocument late;
+        try { late = PlayerStorageDocument.Read(clientJson, character.Id); }
+        catch (InvalidDataException e)
+        {
+            SavesRuntime.Log(LogLevel.Warn, $"player-storage: {character}: late client copy unusable, the player keeps it: {e.Message}");
+            return;
+        }
+        var added = visit.Document.KeepAsHistory(late);
+        SavesRuntime.Log(LogLevel.Warn, $"player-storage: {character}: client copy came after the join timeout; not restored, {added} pair(s) kept as history");
+    }
+
     private void Restore(Visit visit, bool paired, string source)
     {
         if (Native is null || visit.Document.ReadOnly) return;
